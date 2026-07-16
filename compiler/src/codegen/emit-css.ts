@@ -2,7 +2,7 @@ import { collectCssBlocks } from "./collect.ts";
 import { replaceCssVarRefs } from "./utils.ts";
 import { resolveApplyToken } from "../tailwind-classes.js";
 import { CGError } from "./errors.ts";
-import { emitThemeCss, emitResetLayer, lowerTokenRefsInValue, wrapSelectorWhere } from "./emit-theme-reset.ts";
+import { emitThemeCss, emitResetLayer, lowerCssValueRefs, wrapSelectorWhere, collectThemeContext } from "./emit-theme-reset.ts";
 
 /** A source span (the fire site for a diagnostic). */
 interface CSSSpan {
@@ -139,27 +139,39 @@ function dedupeLastWins(decls: Array<{ prop: string; value: string }>): Array<{ 
 }
 
 /**
- * Render a single declaration's reactive value (CSS custom-property rewrite for
- * `@var` refs), shared by the flat and grouped paths.
- *
- * `tokenNames` (§65.3.2) — when a use-site value references a declared `<theme>`
- * token (`color: ink`), the bare identifier is lowered to `var(--ink)`. A value
- * with `@var` reactive refs takes the existing §25 rewrite path unchanged; a
- * plain literal value additionally gets the token-lowering pass.
+ * The token-lowering context threaded through the render path: the declared
+ * `<theme>` token names (§65.3.2), the declared reactive/derived cell names (for
+ * the §25 reactive-CSS-var bridge + the decidable E-THEME-TOKEN-UNKNOWN check),
+ * and the diagnostic sink.
  */
-function renderDeclValue(decl: CSSDeclaration, tokenNames?: Set<string>): string {
-  let value = decl.value ?? "";
-  if (decl.reactiveRefs && decl.reactiveRefs.length > 0) {
-    if (decl.isExpression) {
-      const exprPropName = `scrml-expr-${decl.reactiveRefs.map(r => r.name).join("-")}`;
-      value = `var(--${exprPropName})`;
-    } else {
-      value = replaceCssVarRefs(value);
-    }
-  } else if (tokenNames && tokenNames.size > 0) {
-    value = lowerTokenRefsInValue(value, tokenNames);
+interface LowerCtx {
+  themeTokens: Set<string>;
+  cellNames: Set<string>;
+  errors?: CGError[];
+}
+
+const EMPTY_SET: Set<string> = new Set();
+
+/**
+ * Render a single declaration's value. `@name` references (§65.3.2 `@`-sigil model)
+ * are lowered by `lowerCssValueRefs`: a theme token → `var(--name)`, a reactive
+ * cell → `var(--scrml-name)`, an unknown → E-THEME-TOKEN-UNKNOWN. A computed
+ * reactive EXPRESSION (`@x * 2` over a non-theme cell) keeps the §25
+ * `var(--scrml-expr-…)` bridge. A BARE identifier is a literal CSS value — never
+ * lowered.
+ */
+function renderDeclValue(decl: CSSDeclaration, ctx?: LowerCtx): string {
+  const value = decl.value ?? "";
+  const themeTokens = ctx?.themeTokens ?? EMPTY_SET;
+  const cellNames = ctx?.cellNames ?? EMPTY_SET;
+  const refs = decl.reactiveRefs;
+  // A computed reactive expression whose refs are NOT all theme tokens keeps the
+  // §25 derived-var bridge (a JS-computed value). If every ref is a theme token,
+  // it is a plain substitution (`calc(@space-4 * 2)`) → the `@`-lowering path.
+  if (refs && refs.length > 0 && decl.isExpression && !refs.every(r => themeTokens.has(r.name))) {
+    return `var(--scrml-expr-${refs.map(r => r.name).join("-")})`;
   }
-  return value;
+  return lowerCssValueRefs(value, themeTokens, cellNames, ctx?.errors, decl.span);
 }
 
 /**
@@ -171,7 +183,7 @@ function renderDeclValue(decl: CSSDeclaration, tokenNames?: Set<string>): string
  * declarations are collected, a property-level last-wins dedup collapses the
  * duplicate composing-family shorthands into one.
  */
-function renderApplyGroupedDeclarations(declarations: CSSDeclaration[], errors?: CGError[], tokenNames?: Set<string>): string {
+function renderApplyGroupedDeclarations(declarations: CSSDeclaration[], errors?: CGError[], ctx?: LowerCtx): string {
   const ordered: Array<{ prop: string; value: string }> = [];
   for (const decl of declarations) {
     if (Array.isArray(decl.apply)) {
@@ -202,7 +214,7 @@ function renderApplyGroupedDeclarations(declarations: CSSDeclaration[], errors?:
         }
       }
     } else if (decl.prop && decl.value !== undefined) {
-      ordered.push({ prop: decl.prop, value: renderDeclValue(decl, tokenNames) });
+      ordered.push({ prop: decl.prop, value: renderDeclValue(decl, ctx) });
     }
   }
   return dedupeLastWins(ordered).map(d => `${d.prop}: ${d.value};`).join(" ");
@@ -217,7 +229,7 @@ function renderApplyGroupedDeclarations(declarations: CSSDeclaration[], errors?:
  * tests) may omit it — expansion still happens, the diagnostics are simply not
  * collected.
  */
-function renderCssBlock(block: CSSBlock, errors?: CGError[], tokenNames?: Set<string>, flatWrap = false): string {
+function renderCssBlock(block: CSSBlock, errors?: CGError[], ctx?: LowerCtx, flatWrap = false): string {
   if (block.rules && Array.isArray(block.rules)) {
     const ruleParts: string[] = [];
     for (const rule of block.rules) {
@@ -238,31 +250,22 @@ function renderCssBlock(block: CSSBlock, errors?: CGError[], tokenNames?: Set<st
         // Fast path: no `@apply` node — render declarations verbatim (unchanged).
         const hasApply = rule.declarations.some(d => Array.isArray(d.apply));
         if (hasApply) {
-          const declStr = renderApplyGroupedDeclarations(rule.declarations, errors, tokenNames);
+          const declStr = renderApplyGroupedDeclarations(rule.declarations, errors, ctx);
           ruleParts.push(`${sel} { ${declStr} }`);
           continue;
         }
         const declParts: string[] = [];
         for (const decl of rule.declarations) {
-          declParts.push(`${decl.prop}: ${renderDeclValue(decl, tokenNames)};`);
+          declParts.push(`${decl.prop}: ${renderDeclValue(decl, ctx)};`);
         }
         ruleParts.push(`${sel} { ${declParts.join(" ")} }`);
       } else if (rule.selector) {
         // Flat selector (no braces — legacy / unusual)
         ruleParts.push(rule.selector);
       } else if (rule.prop && rule.value !== undefined) {
-        let value = rule.value;
-        if (rule.reactiveRefs && rule.reactiveRefs.length > 0) {
-          if (rule.isExpression) {
-            const exprPropName = `scrml-expr-${rule.reactiveRefs.map(r => r.name).join("-")}`;
-            value = `var(--${exprPropName})`;
-          } else {
-            value = replaceCssVarRefs(value);
-          }
-        } else if (tokenNames && tokenNames.size > 0) {
-          value = lowerTokenRefsInValue(value, tokenNames);
-        }
-        ruleParts.push(`${rule.prop}: ${value};`);
+        // A flat `prop: value` rule (bare declaration block). Reuse renderDeclValue
+        // so the `@`-sigil / expression / theme-token lowering is identical.
+        ruleParts.push(`${rule.prop}: ${renderDeclValue(rule as CSSDeclaration, ctx)};`);
       }
     }
     return ruleParts.join(" ");
@@ -305,17 +308,30 @@ export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[
 
   const parts: string[] = [];
 
+  // Gather theme decls + <program> + declared cell names in ONE AST walk (shared
+  // by the theme-CSS, reset, and use-site `@`-lowering paths).
+  const themeContext = collectThemeContext(nodes);
+
+  // --- §65.3.4 built-in reset — emitted FIRST so the `reset` @layer is the
+  //     LOWEST layer: an author `@layer` declared later always wins, and an
+  //     unlayered author rule always beats it (§65.3.4 / §65.8). Opt-out via
+  //     `<program reset="none">`. ---
+  const resetCss = emitResetLayer(nodes, themeContext);
+  if (resetCss) parts.push(resetCss);
+
   // --- §65.3.2 / §65.6 <theme> token lowering ---
-  // Emitted FIRST (the `:root` custom-property definitions + reactive variant
-  // selectors + `@media` auto-binds). `tokenNames` drives use-site `color: ink`
-  // → `color: var(--ink)` lowering across every author rule below.
-  const { css: themeCss, tokenNames } = emitThemeCss(nodes, errors);
+  // The `:root` custom-property definitions + reactive variant selectors +
+  // `@media` auto-binds. `tokenNames` (+ cell names) drive use-site `@ink` →
+  // `var(--ink)` lowering across every author rule below.
+  const { css: themeCss, tokenNames } = emitThemeCss(nodes, errors, themeContext);
   if (themeCss) parts.push(themeCss);
+
+  const lowerCtx: LowerCtx = { themeTokens: tokenNames, cellNames: themeContext.cellNames, errors };
 
   // --- Program-level CSS (no @scope wrapping, no :where()-flat — the global
   //     escape hatch keeps the weaker guarantee, §65.2.4 R3 / OQ-8) ---
   for (const block of programInlineBlocks) {
-    const css = renderCssBlock(block, errors, tokenNames, false);
+    const css = renderCssBlock(block, errors, lowerCtx, false);
     if (css) parts.push(css);
   }
   for (const block of programStyleBlocks) {
@@ -337,7 +353,7 @@ export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[
     // §65.2.5 — component-scope author selectors are `:where()`-flat (specificity
     // (0,0,0)) so the §65.2 conflict-checker's flat-specificity assumption holds
     // at runtime.
-    const css = renderCssBlock(block, errors, tokenNames, true);
+    const css = renderCssBlock(block, errors, lowerCtx, true);
     if (!css) continue;
     if (!componentCssMap.has(name)) componentCssMap.set(name, []);
     componentCssMap.get(name)!.push(css);
@@ -361,12 +377,6 @@ export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[
     ].join("\n");
     parts.push(scopeBlock);
   }
-
-  // --- §65.3.4 built-in reset (bottom `@layer reset`, opt-out via
-  //     `<program reset="none">`) — emitted LAST for readability; as a named
-  //     layer it sits below every unlayered author rule regardless of position. ---
-  const resetCss = emitResetLayer(nodes);
-  if (resetCss) parts.push(resetCss);
 
   return parts.join("\n");
 }

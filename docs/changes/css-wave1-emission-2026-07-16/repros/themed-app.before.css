@@ -1,6 +1,9 @@
-/* BEFORE (base 9c27ce9a) — themed-app.scrml emitted CSS.
-   Tokens NEVER lowered (`color: ink` is literal INVALID CSS), no :root,
-   no reset layer, no :where()-flat. This is the confirmed broken emission. */
+/* BEFORE (base 9c27ce9a) — themed-app.scrml (`@`-form) emitted CSS.
+   The base compiler has NO theme lowering: `@ink` falls into the §25 reactive-var
+   bridge and ships a DANGLING `var(--scrml-ink)` (the theme defines `--ink`, not
+   `--scrml-ink`, and no `ink` cell exists). No :root token block, no reset layer,
+   no :where()-flat. This is the confirmed broken emission the Wave-1 EMISSION
+   half + the `@`-sigil fold repair. */
 @scope ([data-scrml="Card"]) to ([data-scrml]) {
-.card { padding: 16px; color: ink; background: bg; }
+.card { padding: 16px; color: var(--scrml-ink); background: var(--scrml-bg); }
 }

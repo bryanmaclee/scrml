@@ -1,0 +1,7 @@
+<program>
+  const Card = <div props={}>
+      #{ .a, .b::before { color: red; } }
+      <div class="a">hi</div>
+  </>
+  <Card/>
+</program>

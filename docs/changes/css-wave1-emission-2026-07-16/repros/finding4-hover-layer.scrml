@@ -1,0 +1,11 @@
+<program>
+  const Btn = <button props={}>
+      #{
+          .btn { color: green; }
+          .btn:hover { color: blue; }
+          .btn[disabled] { color: gray; }
+      }
+      <button class="btn">go</button>
+  </>
+  <Btn/>
+</program>

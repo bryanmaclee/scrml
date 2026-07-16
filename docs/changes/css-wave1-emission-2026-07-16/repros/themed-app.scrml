@@ -13,11 +13,12 @@
 
   const Card = <div props={}>
       #{
-          .card { padding: 16px; color: ink; background: bg; }
+          .card { padding: 16px; color: @ink; background: @bg; }
       }
       <div class="card">hi</div>
   </>
 
   <Card/>
+  <button onclick=(@mode = .Dark)>toggle</button>
 
 </program>

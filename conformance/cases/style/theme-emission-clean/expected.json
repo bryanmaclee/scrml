@@ -1,6 +1,6 @@
 {
   "id": "style-theme-emission-clean",
-  "description": "§65.3.2 / §65.6 / §65.2.5 / §65.3.4 — a full themed app: base tokens + a `.Dark` variant (a valid base subset) + a component-scope `#{}` that references tokens (`color: ink`, `background: bg`) + a `@mode` toggle. The whole emission path (token → `:root`/`var(--token)` lowering, the `.Dark` reactive selector, `:where()`-flat wrapping, the built-in reset layer) runs with NO error. Proves the emission-half compiles a valid themed app clean end-to-end (the CSS-content shape is asserted in the source unit test).",
+  "description": "§65.3.2 / §65.6 / §65.2.5 / §65.3.4 — a full themed app: base tokens + a `.Dark` variant (a valid base subset) + a component-scope `#{}` that references tokens via the `@` sigil (`color: @ink`, `background: @bg`) + a `@mode` toggle. The whole emission path (`@token` → `var(--token)` lowering, the `.Dark` reactive selector, `:where()`-flat wrapping, the built-in reset layer) runs with NO error. Proves the emission-half compiles a valid themed app clean end-to-end (the CSS-content shape is asserted in the source unit test).",
   "language-version": "1.0",
   "spec": "§65.3.2, §65.6, §65.2.5, §65.3.4",
   "source-test": "compiler/tests/unit/css-wave1-emission.test.js",

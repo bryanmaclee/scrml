@@ -1,21 +1,13 @@
 <program>
-
   <mode> = .Light
-
   <theme for=@mode>
       ink = #0f172a;
-      .Dark {
-          ink   = #f8fafc;
-          ghost = #000000;
-      }
+      .Dark { ink = #f8fafc; ghost = #000000; }
   </theme>
-
   const Card = <div props={}>
       #{ .card { color: @ink; } }
       <div class="card">hi</div>
   </>
-
   <Card/>
-  <button onclick=(@mode = .Dark)>toggle</button>
-
+  <button onclick=(@mode = .Dark)>x</button>
 </program>

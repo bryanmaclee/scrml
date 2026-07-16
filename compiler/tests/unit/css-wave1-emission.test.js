@@ -2,21 +2,22 @@
  * CSS Wave-1 EMISSION — SPEC §65.3.2 / §65.3.4 / §65.6 / §65.2.5 / §25.7
  *
  * The emission half of CSS Wave-1 (the §65.2 conflict-CHECKER is tested
- * separately in conf-STYLE-CONFLICT + conformance/cases/style/*). Covers:
+ * separately in conf-STYLE-CONFLICT + conformance/cases/style/*). Covers the
+ * ratified `@`-SIGIL token model + the S239 cascade-correctness fixes:
  *
- *   1. <theme> token lowering (§65.3.2 / §65.6 / §25.7)
- *        base tokens        → `:root { --name: value }`
- *        use-site `color: ink` → `color: var(--ink)` (a non-token literal is
- *                                left untouched)
- *        `.Variant { … }`   → `:root[data-scrml-theme-<cell>="Variant"] { … }`
- *        `@media (…) { … }`  → `@media (…) { :root { … } }`
- *        E-THEME-TOKEN-UNKNOWN on a variant-only token (no base)
- *   2. Built-in reset (§65.3.4) — `@layer reset` present by default,
- *        opt-out via `<program reset="none">`
- *   3. `:where()`-flat wrapping (§65.2.5) of component-scope author selectors
- *
- * Emission is inspected end-to-end through the real pipeline (compileScrml →
- * result.outputs.get(file).css) so CE / theme-parse / codegen all execute.
+ *   1. <theme> token lowering (§65.3.2 / §65.6 / §25.7) — the `@` sigil.
+ *        `@ink` → var(--ink); a BARE identifier (`red`, `bold`) is literal CSS,
+ *        NEVER lowered (a token can't shadow a keyword). A non-theme `@cell` keeps
+ *        the §25 reactive bridge (`var(--scrml-cell)`). `.Variant` → a reactive
+ *        `:root[data-scrml-theme-<cell>="Variant"]` selector; `@media` → auto-bind.
+ *        E-THEME-TOKEN-UNKNOWN is the decidable use-site check (an `@name` that is
+ *        neither a theme token nor a declared cell) + the variant-rebind check
+ *        against the GLOBAL base set.
+ *   2. Built-in reset (§65.3.4) — `@layer reset` emitted FIRST (lowest layer);
+ *        opt-out via `<program reset="none">`.
+ *   3. `:where()`-flat wrapping (§65.2.5) — ONLY unconditional base arms are
+ *        flattened; conditional (`:hover`/`[attr]`/`::before`) arms stay unwrapped
+ *        (deterministic layers, §65.2.2); a comma-list wraps each arm individually.
  */
 
 import { describe, test, expect } from "bun:test";
@@ -25,7 +26,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 import {
-  lowerTokenRefsInValue,
+  lowerCssValueRefs,
   wrapSelectorWhere,
   emitResetLayer,
   RESET_LAYER_CSS,
@@ -35,7 +36,6 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Compile a source string through the full pipeline; return { css, errors, warnings }. */
 function compileCss(source) {
   const dir = mkdtempSync(join(tmpdir(), "scrml-css-emit-"));
   try {
@@ -52,7 +52,7 @@ function compileCss(source) {
 
 const hasCode = (diags, code) => diags.some((d) => d.code === code);
 
-/** A themed program with a component-scoped `#{}` that references tokens. */
+/** A themed program with a component-scoped `#{}` that references tokens via `@`. */
 const THEMED = `<program>
   <mode> = .Light
   <theme for=@mode>
@@ -65,18 +65,19 @@ const THEMED = `<program>
   </theme>
   const Card = <div props={}>
       #{
-          .card { padding: 16px; color: ink; background: bg; }
+          .card { padding: 16px; color: @ink; background: @bg; }
       }
       <div class="card">hi</div>
   </>
   <Card/>
+  <button onclick=(@mode = .Dark)>toggle</button>
 </program>`;
 
 // ---------------------------------------------------------------------------
-// 1. <theme> token lowering (§65.3.2 / §65.6 / §25.7)
+// 1. <theme> token lowering — the `@` sigil (§65.3.2 / §65.6 / §25.7)
 // ---------------------------------------------------------------------------
 
-describe("§65.3.2 / §65.6 — <theme> token lowering", () => {
+describe("§65.3.2 / §65.6 — <theme> token lowering (`@` sigil)", () => {
   test("base tokens lower to a :root custom-property block", () => {
     const { css } = compileCss(THEMED);
     expect(css).toContain(":root { --ink: #0f172a; --bg: #ffffff; }");
@@ -87,14 +88,28 @@ describe("§65.3.2 / §65.6 — <theme> token lowering", () => {
     expect(css).toContain(`:root[data-scrml-theme-mode="Dark"] { --ink: #f8fafc; --bg: #0f172a; }`);
   });
 
-  test("a use-site token reference lowers to var(--token), a literal is untouched", () => {
+  test("`@ink` lowers to var(--ink); a BARE identifier is literal CSS (never lowered)", () => {
     const { css } = compileCss(THEMED);
     expect(css).toContain("color: var(--ink)");
     expect(css).toContain("background: var(--bg)");
-    // The literal `16px` padding is NOT a token — passes through unchanged.
     expect(css).toContain("padding: 16px");
+    // No accidental lowering of the bare form.
     expect(css).not.toContain("color: ink;");
-    expect(css).not.toContain("background: bg;");
+    expect(css).not.toContain("color: @ink");
+  });
+
+  test("finding [5]: a token named `bold` never shadows `font-weight: bold`", () => {
+    const { css, errors } = compileCss(`<program>
+  <theme> bold = #ff0000; </theme>
+  const Card = <div props={}>
+      #{ .card { font-weight: bold; color: @bold; } }
+      <div class="card">hi</div>
+  </>
+  <Card/>
+</program>`);
+    expect(css).toContain("font-weight: bold;");        // literal keyword, untouched
+    expect(css).toContain("color: var(--bold)");        // @bold → the token
+    expect(hasCode(errors, "E-THEME-TOKEN-UNKNOWN")).toBe(false);
   });
 
   test("@media auto-bind lowers to @media { :root { … } }", () => {
@@ -102,12 +117,10 @@ describe("§65.3.2 / §65.6 — <theme> token lowering", () => {
   <mode> = .Light
   <theme for=@mode>
       ink = #0f172a;
-      @media (prefers-color-scheme: dark) {
-          ink = #f8fafc;
-      }
+      @media (prefers-color-scheme: dark) { ink = #f8fafc; }
   </theme>
   const Card = <div props={}>
-      #{ .card { color: ink; } }
+      #{ .card { color: @ink; } }
       <div class="card">hi</div>
   </>
   <Card/>
@@ -128,22 +141,14 @@ describe("§65.3.2 / §65.6 — <theme> token lowering", () => {
 });
 
 // ---------------------------------------------------------------------------
-// E-THEME-TOKEN-UNKNOWN (§65.10) — the decidable variant-rebind case
+// E-THEME-TOKEN-UNKNOWN — decidable use-site + variant-rebind (§65.10)
 // ---------------------------------------------------------------------------
 
 describe("§65.10 — E-THEME-TOKEN-UNKNOWN", () => {
-  test("fires when a variant re-binds a token with no base declaration", () => {
+  test("use-site: `@name` matching no theme token / no cell fires (decidable)", () => {
     const { errors } = compileCss(`<program>
-  <mode> = .Light
-  <theme for=@mode>
-      ink = #0f172a;
-      .Dark {
-          ink = #f8fafc;
-          ghost = #000000;
-      }
-  </theme>
   const Card = <div props={}>
-      #{ .card { color: ink; } }
+      #{ .card { color: @nope; background: red; } }
       <div class="card">hi</div>
   </>
   <Card/>
@@ -151,22 +156,56 @@ describe("§65.10 — E-THEME-TOKEN-UNKNOWN", () => {
     expect(hasCode(errors, "E-THEME-TOKEN-UNKNOWN")).toBe(true);
   });
 
-  test("does NOT fire when every variant token is a base subset", () => {
+  test("finding [7]: a variant re-binds a token with no base declaration", () => {
+    const { errors } = compileCss(`<program>
+  <mode> = .Light
+  <theme for=@mode>
+      ink = #0f172a;
+      .Dark { ink = #f8fafc; ghost = #000000; }
+  </theme>
+  const Card = <div props={}>
+      #{ .card { color: @ink; } }
+      <div class="card">hi</div>
+  </>
+  <Card/>
+  <button onclick=(@mode = .Dark)>x</button>
+</program>`);
+    expect(hasCode(errors, "E-THEME-TOKEN-UNKNOWN")).toBe(true);
+  });
+
+  test("finding [6]: base + variant SPLIT across two <theme> blocks is NOT falsely rejected", () => {
+    const { css, errors } = compileCss(`<program>
+  <mode> = .Light
+  <theme for=@mode> ink = #0f172a; </theme>
+  <theme for=@mode> .Dark { ink = #f8fafc; } </theme>
+  const Card = <div props={}>
+      #{ .card { color: @ink; } }
+      <div class="card">hi</div>
+  </>
+  <Card/>
+  <button onclick=(@mode = .Dark)>x</button>
+</program>`);
+    expect(hasCode(errors, "E-THEME-TOKEN-UNKNOWN")).toBe(false);
+    expect(css).toContain(`:root[data-scrml-theme-mode="Dark"] { --ink: #f8fafc; }`);
+  });
+
+  test("does NOT fire when every variant token is a base subset + refs resolve", () => {
     const { errors } = compileCss(THEMED);
     expect(hasCode(errors, "E-THEME-TOKEN-UNKNOWN")).toBe(false);
   });
 });
 
 // ---------------------------------------------------------------------------
-// 2. Built-in reset layer (§65.3.4)
+// 2. Built-in reset layer (§65.3.4) — finding [1] order
 // ---------------------------------------------------------------------------
 
 describe("§65.3.4 — built-in reset layer", () => {
-  test("a program emits the reset in a bottom @layer reset by default", () => {
+  test("finding [1]: the reset @layer is emitted FIRST (lowest layer)", () => {
     const { css } = compileCss(THEMED);
     expect(css).toContain("@layer reset {");
     expect(css).toContain("box-sizing: border-box;");
-    expect(css).toContain("min-height: 100vh;");
+    // The reset layer precedes the :root token block (declared first = lowest layer).
+    expect(css.indexOf("@layer reset")).toBeLessThan(css.indexOf(":root"));
   });
 
   test("<program reset=\"none\"> drops the whole reset layer", () => {
@@ -181,12 +220,9 @@ describe("§65.3.4 — built-in reset layer", () => {
     expect(css).not.toContain("box-sizing: border-box");
   });
 
-  test("emitResetLayer returns the frozen reset for a plain <program>", () => {
-    const nodes = [{ kind: "markup", tag: "program", attrs: [], children: [] }];
-    expect(emitResetLayer(nodes)).toBe(RESET_LAYER_CSS);
-  });
-
-  test("emitResetLayer returns '' when reset=none, and '' when no <program>", () => {
+  test("emitResetLayer returns the frozen reset for a plain <program>, '' when opted out / no program", () => {
+    const program = [{ kind: "markup", tag: "program", attrs: [], children: [] }];
+    expect(emitResetLayer(program)).toBe(RESET_LAYER_CSS);
     const optOut = [{ kind: "markup", tag: "program", attrs: [{ name: "reset", value: { value: "none" } }], children: [] }];
     expect(emitResetLayer(optOut)).toBe("");
     expect(emitResetLayer([{ kind: "markup", tag: "div", children: [] }])).toBe("");
@@ -194,73 +230,88 @@ describe("§65.3.4 — built-in reset layer", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. :where()-flat wrapping (§65.2.5)
+// 3. :where()-flat wrapping (§65.2.5) — findings [0] + [4]
 // ---------------------------------------------------------------------------
 
 describe("§65.2.5 — :where()-flat wrapping", () => {
-  test("component-scope author selectors are :where()-wrapped", () => {
+  test("unconditional base selectors (class + tag) are :where()-wrapped", () => {
     const { css } = compileCss(`<program>
   const Card = <div props={}>
-      #{
-          .card { color: red; }
-          .card:hover { color: blue; }
-      }
-      <div class="card">hi</div>
+      #{ .card { color: red; } .title { font-weight: 600; } }
+      <div class="card"><span class="title">hi</span></div>
   </>
   <Card/>
 </program>`);
     expect(css).toContain(":where(.card) {");
-    expect(css).toContain(":where(.card:hover) {");
+    expect(css).toContain(":where(.title) {");
   });
 
-  test("wrapSelectorWhere never emits :is(); a pseudo-element stays unwrapped", () => {
+  test("finding [4]: conditional / state selectors stay UNWRAPPED (deterministic layers)", () => {
+    const { css } = compileCss(`<program>
+  const Btn = <button props={}>
+      #{ .btn { color: green; } .btn:hover { color: blue; } .btn[disabled] { color: gray; } }
+      <button class="btn">go</button>
+  </>
+  <Btn/>
+</program>`);
+    expect(css).toContain(":where(.btn) {");     // base flattened
+    expect(css).toContain(".btn:hover {");        // hover NOT flattened (keeps specificity)
+    expect(css).not.toContain(":where(.btn:hover)");
+    expect(css).toContain(".btn[disabled] {");    // attribute NOT flattened
+    expect(css).not.toContain(":where(.btn[disabled])");
+  });
+
+  test("finding [0]: a comma-list wraps each arm individually", () => {
+    const { css } = compileCss(`<program>
+  const Card = <div props={}>
+      #{ .a, .b::before { color: red; } }
+      <div class="a">hi</div>
+  </>
+  <Card/>
+</program>`);
+    // `.a` flattened, `.b::before` (pseudo-element) stays unwrapped — per arm.
+    expect(css).toContain(":where(.a), .b::before {");
+  });
+
+  test("wrapSelectorWhere: unit — never :is(); per-arm pseudo/attr/pseudo-element rules stay unwrapped", () => {
     expect(wrapSelectorWhere(".card")).toBe(":where(.card)");
     expect(wrapSelectorWhere(".a > .b")).toBe(":where(.a > .b)");
-    expect(wrapSelectorWhere(".card:hover")).toBe(":where(.card:hover)");
-    // Pseudo-element rules are emitted UNWRAPPED (:where(::before) matches nothing).
+    expect(wrapSelectorWhere(".card:hover")).toBe(".card:hover");
+    expect(wrapSelectorWhere(".card[busy]")).toBe(".card[busy]");
     expect(wrapSelectorWhere(".card::before")).toBe(".card::before");
-    expect(wrapSelectorWhere("::before")).toBe("::before");
-    // NEVER :is().
+    expect(wrapSelectorWhere(".a, .b::before")).toBe(":where(.a), .b::before");
     expect(wrapSelectorWhere(".card")).not.toContain(":is(");
   });
 });
 
 // ---------------------------------------------------------------------------
-// lowerTokenRefsInValue — the conservative whole-identifier rewriter
+// lowerCssValueRefs — the `@`-sigil rewriter (unit)
 // ---------------------------------------------------------------------------
 
-describe("§25.7 — lowerTokenRefsInValue", () => {
-  const toks = new Set(["ink", "bg", "line", "space-4"]);
+describe("§25.7 — lowerCssValueRefs", () => {
+  const theme = new Set(["ink", "bg", "space-4"]);
+  const cells = new Set(["accent"]);
 
-  test("rewrites a whole-identifier token, leaves non-tokens alone", () => {
-    expect(lowerTokenRefsInValue("ink", toks)).toBe("var(--ink)");
-    expect(lowerTokenRefsInValue("red", toks)).toBe("red");
+  test("`@token` → var(--token); bare identifiers untouched", () => {
+    expect(lowerCssValueRefs("@ink", theme, cells)).toBe("var(--ink)");
+    expect(lowerCssValueRefs("red", theme, cells)).toBe("red");
+    expect(lowerCssValueRefs("bold", theme, cells)).toBe("bold");
+    expect(lowerCssValueRefs("1px solid @ink", theme, cells)).toBe("1px solid var(--ink)");
+    expect(lowerCssValueRefs("@space-4", theme, cells)).toBe("var(--space-4)");
   });
 
-  test("rewrites a token embedded mid-value, keeps the rest", () => {
-    expect(lowerTokenRefsInValue("1px solid line", toks)).toBe("1px solid var(--line)");
-    expect(lowerTokenRefsInValue("space-4", toks)).toBe("var(--space-4)");
+  test("a non-theme `@cell` keeps the §25 reactive bridge (var(--scrml-cell))", () => {
+    expect(lowerCssValueRefs("@accent", theme, cells)).toBe("var(--scrml-accent)");
   });
 
-  test("never touches a hex color, an existing custom property, or a longer ident", () => {
-    expect(lowerTokenRefsInValue("#0f172a", toks)).toBe("#0f172a");
-    expect(lowerTokenRefsInValue("var(--ink)", toks)).toBe("var(--ink)");
-    // `line-height` is a longer maximal ident — NOT the `line` token.
-    expect(lowerTokenRefsInValue("line-height", toks)).toBe("line-height");
+  test("an unknown `@name` (no theme / no cell) fires E-THEME-TOKEN-UNKNOWN", () => {
+    const errors = [];
+    lowerCssValueRefs("@nope", theme, cells, errors);
+    expect(errors.some((e) => e.code === "E-THEME-TOKEN-UNKNOWN")).toBe(true);
   });
 
-  test("does not rewrite a function name, but does rewrite a token argument", () => {
-    // `rgb` is a function name (followed by `(`) — untouched.
-    expect(lowerTokenRefsInValue("rgb(0, 0, 0)", toks)).toBe("rgb(0, 0, 0)");
-    // A token inside calc() IS rewritten.
-    expect(lowerTokenRefsInValue("calc(space-4 * 2)", toks)).toBe("calc(var(--space-4) * 2)");
-  });
-
-  test("copies url() contents verbatim", () => {
-    expect(lowerTokenRefsInValue("url(ink/bg.png)", toks)).toBe("url(ink/bg.png)");
-  });
-
-  test("no-op when the token set is empty", () => {
-    expect(lowerTokenRefsInValue("ink", new Set())).toBe("ink");
+  test("no `@` → the value is returned verbatim (no scan)", () => {
+    expect(lowerCssValueRefs("16px", theme, cells)).toBe("16px");
+    expect(lowerCssValueRefs("#0f172a", theme, cells)).toBe("#0f172a");
   });
 });
