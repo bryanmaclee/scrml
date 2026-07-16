@@ -134,8 +134,25 @@ Gap 2 (browser/client transitive) — CONFIRMED coloring-alone insufficient (nee
 - Browser 587/12 — all 12 fails PRE-EXISTING (identical on origin/main 9c27ce9a; worktree
   gitignored-dist / known-gaps, NOT regressions; pre-commit gate excludes browser).
 
+### DONE — comprehensive test file [WIP commit]
+- compiler/tests/unit/colorless-async-seam-a.test.js — 7 tests: §1 direct library (both modes),
+  §2 transitive library, §3 cross-module, §4 browser transitive, §5 ss1 mixed ?{}+safeCallAsync,
+  §6 negative (pure fn not over-colored). All green.
+
+### PRE-EXISTING LIMITATION SURFACED (not a regression; orthogonal to Seam-A coloring)
+- A stdlib-async call inside a SYNC lambda callback in a const-decl init (e.g.
+  `items.some(x => safeCallAsync(...))`) is emitted BARE + un-awaited WITHOUT firing
+  E-ASYNC-STDLIB-IN-SYNC-CALLBACK, in BOTH the generateLibraryJs path AND the ss1
+  emitLibraryFnMember path. Verified pre-existing: the ss1 path (which used emitLibraryFnMember
+  before this dispatch) leaks the same shape. Root cause: emitLibraryFnMember's const-decl init
+  emission doesn't route the lambda body through the structured emitCall that populates the
+  classifier's syncCallSink (the drain I wired IS correct — it fires for the positions the sink
+  captures; the sink just isn't populated through this lambda-in-init path). The awaitable-position
+  coloring + await (the GITI-037 surface) is fully correct. DEFERRED: emitLibraryFnMember lambda-
+  in-init sink population — a separate emit-completeness item.
+
 ### NEXT
-- Comprehensive test file for the 4 repro shapes; final full-gate commit.
+- Final full-gate + conformance verification; report.
 
 ## (superseded) prior next (pending PA ruling)
 - Re-scoped brief specifying: which emit path owns colorless-async for the library shape, and
