@@ -298,40 +298,64 @@ describe("F-COMPILE-001 §4: collision detection emits E-CG-015", () => {
 // ---------------------------------------------------------------------------
 
 describe("F-COMPILE-001 §5: computeOutputBaseDir helper", () => {
+  // computeOutputBaseDir runs each input through path.resolve(), which is
+  // OS-dependent: on POSIX "/a/b/c.scrml" resolves to itself, but on Windows it
+  // becomes drive-rooted with `\` separators (e.g. "C:\a\b\c.scrml"). The
+  // POSIX-shaped literals below express the LOGICAL tree shape; this helper
+  // maps a returned base back to that logical form so the assertions test the
+  // segment-alignment algorithm rather than the host's drive/separator syntax:
+  //   - `\` → `/`            (Windows separators → POSIX)
+  //   - strip a leading drive (`C:`) — on Windows the drive IS the root, the
+  //     Windows analogue of POSIX `/`
+  //   - an empty result means the drive root itself → logical "/"
+  // On POSIX every step is a no-op (no `\`, no drive, "/" stays "/"), so the
+  // expected literals are asserted verbatim.
+  const asLogical = (p) => {
+    if (p === null) return null;
+    const s = p.replace(/\\/g, "/").replace(/^[A-Za-z]:/, "");
+    return s === "" ? "/" : s;
+  };
+
   test("empty array returns null", () => {
     expect(computeOutputBaseDir([])).toBe(null);
   });
 
   test("single file returns its dirname", () => {
-    expect(computeOutputBaseDir(["/a/b/c.scrml"])).toBe("/a/b");
+    expect(asLogical(computeOutputBaseDir(["/a/b/c.scrml"]))).toBe("/a/b");
   });
 
   test("two files with shared parent returns the parent", () => {
-    expect(computeOutputBaseDir(["/a/b/c.scrml", "/a/b/d.scrml"])).toBe("/a/b");
+    expect(
+      asLogical(computeOutputBaseDir(["/a/b/c.scrml", "/a/b/d.scrml"]))
+    ).toBe("/a/b");
   });
 
   test("nested mix returns deepest common directory", () => {
     expect(
-      computeOutputBaseDir(["/a/b/c.scrml", "/a/b/sub/d.scrml"])
+      asLogical(computeOutputBaseDir(["/a/b/c.scrml", "/a/b/sub/d.scrml"]))
     ).toBe("/a/b");
   });
 
   test("siblings under a common ancestor return that ancestor", () => {
     expect(
-      computeOutputBaseDir(["/a/b/x/c.scrml", "/a/b/y/d.scrml"])
+      asLogical(computeOutputBaseDir(["/a/b/x/c.scrml", "/a/b/y/d.scrml"]))
     ).toBe("/a/b");
   });
 
   test("character-wise prefix is NOT a directory match — '/a/b' is not a prefix of '/a/bc'", () => {
     // Segment alignment is critical — character-wise prefix would falsely
-    // group these under /a/b, breaking output paths.
+    // group these under /a/b, breaking output paths. asLogical only rewrites
+    // the drive/separator syntax, so this still genuinely asserts "/a" (segment
+    // stop at b≠bc) rather than "/a/b".
     expect(
-      computeOutputBaseDir(["/a/b/c.scrml", "/a/bc/d.scrml"])
+      asLogical(computeOutputBaseDir(["/a/b/c.scrml", "/a/bc/d.scrml"]))
     ).toBe("/a");
   });
 
   test("disjoint trees return root", () => {
-    expect(computeOutputBaseDir(["/p/x.scrml", "/q/y.scrml"])).toBe("/");
+    expect(
+      asLogical(computeOutputBaseDir(["/p/x.scrml", "/q/y.scrml"]))
+    ).toBe("/");
   });
 });
 
@@ -363,9 +387,14 @@ describe("F-COMPILE-001 §6: findOutputFiles helper", () => {
       "top.server.js",
     ]);
 
-    // Each entry's absPath must exist and end with its relPath.
+    // Each entry's absPath must exist and end with its relPath. absPath is a
+    // raw native path (Windows: `\`-separated) while relPath is intentionally a
+    // POSIX-`/` import specifier (see api.js toPosixSpecifier / GitHub #18), so
+    // the endsWith is done on the POSIX-normalized absPath. The no-op on POSIX
+    // preserves the intent: every entry's absolute path terminates with its
+    // relative path.
     for (const { absPath, relPath } of found) {
-      expect(absPath.endsWith(relPath)).toBe(true);
+      expect(absPath.replace(/\\/g, "/").endsWith(relPath)).toBe(true);
       expect(existsSync(absPath)).toBe(true);
     }
   });

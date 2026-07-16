@@ -183,7 +183,10 @@ describe("§B — native cross-file export EMITTED-OUTPUT regression", () => {
   function outFor(result, suffix) {
     if (!result.outputs) return undefined;
     for (const [filePath, out] of result.outputs) {
-      if (filePath.endsWith(suffix)) return out;
+      // outputs keys are NATIVE-separator absolute paths; normalize to POSIX
+      // separators so the forward-slash suffix ("b1/app.scrml") matches on
+      // Windows as well. No-op on POSIX.
+      if (filePath.replace(/\\/g, "/").endsWith(suffix)) return out;
     }
     return undefined;
   }
