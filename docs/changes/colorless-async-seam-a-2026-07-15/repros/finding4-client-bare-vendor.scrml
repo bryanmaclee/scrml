@@ -1,0 +1,15 @@
+<program>
+${
+  import { safeCallAsync } from "scrml:host"
+  function doIt(obj) {
+    // BARE stdlib-async call in a CLIENT fn (no `!{}` handler). safeCallAsync
+    // returns a Promise; without `await`, `r.ok` is `undefined`. The compiler must
+    // await it (the fn is colored async by the stdlib seed) — or diagnose it.
+    const r = safeCallAsync(() => obj.doThing())
+    @done = r.ok
+  }
+  <done> = false
+}
+<button onclick=doIt(window)>Go</button>
+<span>${@done}</span>
+</program>

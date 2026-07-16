@@ -227,8 +227,8 @@ export function collectAsyncFnNamesFromFile(
   // fn calling `safeCallAsync` (or a `scrml:auth`/`http` async export) is
   // recognized async in the cross-module fixpoint too (else the importing file's
   // seed never learns this file's export is async). `.ast.imports` hoist per MOD.
-  const _astForImports: any = ((fileAST as any)?.ast?.imports) ? (fileAST as any).ast : fileAST;
-  const calleeMap = exportRegistry ? buildCalleeImportMap(_astForImports) : null;
+  // Cleanup 8 — buildCalleeImportMap folds the `.ast.imports` hoist internally.
+  const calleeMap = exportRegistry ? buildCalleeImportMap(fileAST as any) : null;
   return computeAsyncFnNames(fns, sourceText, seedAsync, calleeMap, exportRegistry ?? null);
 }
 

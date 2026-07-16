@@ -10,7 +10,7 @@ import type { CompileContext } from "./context.ts";
 // Seam-A colorless-async (GITI-037) — the structured async-fn emitter + its
 // transitive coloring fixpoint (shared with emit-server ss1 / emit-tool), the
 // per-file callee resolver, and the SERVER-mode stdlib auto-await classifier.
-import { computeAsyncFnNames, emitLibraryFnMember } from "./emit-library-shared.ts";
+import { computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, asyncStdlibSyncCallbackError, aliasedAsyncCallError } from "./emit-library-shared.ts";
 import { buildCalleeImportMap } from "./scheduling.ts";
 import { setServerAsyncClassifier } from "./emit-expr.ts";
 
@@ -388,6 +388,7 @@ function emitAsyncLibraryFns(
   calleeMap: Map<string, string> | null,
   exportRegistry: LibExportRegistry | null,
   crossImportSeed: Set<string> | undefined,
+  filePath: string,
   errors: CGError[],
 ): { removals: Array<{ start: number; end: number }>; lines: string[] } {
   const none = { removals: [] as Array<{ start: number; end: number }>, lines: [] as string[] };
@@ -448,19 +449,32 @@ function emitAsyncLibraryFns(
   }
   // E-FOREIGN-006 crossing-shadow diagnostics from lowering an async fn body.
   for (const e of foreignCrossingErrors) if (e) errors.push(e as CGError);
-  // Fail-closed — a stdlib-async call the compiler could not auto-await.
-  for (const sac of syncCallSink) {
-    errors.push(
-      new CGError(
-        "E-ASYNC-STDLIB-IN-SYNC-CALLBACK",
-        `E-ASYNC-STDLIB-IN-SYNC-CALLBACK: the async stdlib call \`${sac.name}(…)\` cannot be ` +
-          `auto-awaited here — it sits in a synchronous position (a \`.some\`/\`.find\`/\`.map\` ` +
-          `callback body or a parameter default) where \`await\` is not valid. Its Promise would ` +
-          `leak un-awaited. Hoist the call to an awaitable statement (e.g. \`const r = ` +
-          `safeCallAsync(() => …)\`) and use the resolved value.`,
-        (sac.span as object) ?? { file: "", start: 0, end: 0, line: 1, col: 1 },
-      ),
-    );
+  // No-silent-leak backstop (S239) — for EACH async fn, structurally detect every
+  // async call (stdlib-primitive OR transitively-async peer) in a NON-awaitable
+  // position (a sync lambda/callback body, a param default, or a raw escape-hatch
+  // body) and FAIL CLOSED via the shared E-ASYNC-STDLIB-IN-SYNC-CALLBACK. The
+  // structural detector (not the emit-populated sink, which the library const-decl
+  // init path does not reliably reach for a nested lambda) guarantees the axis-i
+  // invariant: a fn colored async ⟹ every async call in it is awaited OR diagnosed.
+  const pushDeduped = (err: CGError): void => {
+    const es = err.span as { start?: number };
+    // Dedup against the SHARED error stream (code+span): a library-with-server
+    // build runs the detectors in BOTH generateLibraryJs and the ss1 path over the
+    // same fn body — report each site once regardless of which runs first.
+    const dup = errors.some((x) => x.code === err.code && (x.span as { start?: number })?.start === es?.start);
+    if (!dup) errors.push(err);
+  };
+  for (const fn of toEmit) {
+    for (const site of collectNonAwaitableAsyncCalls(fn.body, calleeMap, exportRegistry, asyncFnNames)) {
+      pushDeduped(asyncStdlibSyncCallbackError(site.name, site.span, filePath));
+    }
+  }
+  // finding 6 — indirect async calls via a local alias run over ALL fns (the
+  // aliasing fn is NOT colored async — that IS the leak).
+  for (const fn of fns) {
+    for (const a of collectAliasedAsyncCalls(fn.body, calleeMap, exportRegistry, asyncFnNames)) {
+      pushDeduped(aliasedAsyncCallError(a.alias, a.resolved, a.span, filePath));
+    }
   }
   return { removals, lines: outLines };
 }
@@ -622,8 +636,8 @@ export function generateLibraryJs(
   // resolver feeding computeAsyncFnNames's Gap-1 stdlib-Promise seed. The
   // TABResult wrapper hoists imports to `.ast.imports`, so prefer `.ast` when
   // present (mirrors emit-server.ts:1096 / emit-functions.ts).
-  const _libAstForImports: any = ((fileAST as any)?.ast?.imports) ? (fileAST as any).ast : fileAST;
-  const libCalleeMap = buildCalleeImportMap(_libAstForImports);
+  // Cleanup 8 — buildCalleeImportMap folds the `.ast.imports` hoist internally.
+  const libCalleeMap = buildCalleeImportMap(fileAST as any);
   const lines: string[] = [];
 
   lines.push("// Generated library module — scrml compiler output");
@@ -708,6 +722,7 @@ export function generateLibraryJs(
           libCalleeMap,
           exportRegistry,
           (fileAST as any)?._asyncImportedLocals as Set<string> | undefined,
+          filePath,
           errors,
         );
         blockText = pruneServerFnsAndLowerGuarded(

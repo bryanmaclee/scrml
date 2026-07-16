@@ -418,6 +418,15 @@ export interface EmitExprContext {
    */
   clientAsyncFnNames?: Set<string> | null;
   /**
+   * Seam-A finding-4 (S239) — set ONLY inside an ASYNC client fn body. Gates the
+   * CLIENT-mode stdlib auto-await: a stdlib-async call is `await`ed only where the
+   * enclosing context is a real async fn (`await` is valid). A markup-embedded
+   * logic context (a `${ for … }` render loop, an effect) is NOT a fn — awaiting a
+   * (possibly fail-closed-async) stdlib call there would inject `await` in a
+   * non-async context. NULL/false → client stdlib await OFF (bare emit).
+   */
+  clientAsyncBody?: boolean;
+  /**
    * Issue #1 (parent scrmlTS) — is the CURRENT position one where `await <peer>()`
    * is syntactically valid? `true`/undefined at the top of a server-fn handler
    * body or an async lambda body; `false` inside a synchronous callback body or
@@ -1375,6 +1384,28 @@ function isAwaitedStdlibAsyncCall(node: ExprNode, ctx: EmitExprContext): boolean
   );
 }
 
+/**
+ * Seam-A Gap 2 (GITI-037) — mirror of `isAwaitedPeerCall` for the CLIENT
+ * transitively-async peer surface: a `await middle(...)` used as a receiver
+ * (`middle(cfg).count`) must be paren-wrapped `(await middle(...)).count` for the
+ * same await-vs-member precedence reason (unwrapped `await f(x).field` awaits the
+ * wrong thing → `await undefined`).
+ */
+function isAwaitedClientAsyncCall(node: ExprNode, ctx: EmitExprContext): boolean {
+  if (node.kind !== "call") return false;
+  const call = node as CallExpr;
+  return (
+    ctx.mode === "client" &&
+    !call.optional &&
+    call.callee.kind === "ident" &&
+    typeof (call.callee as { name?: unknown }).name === "string" &&
+    ctx.clientAsyncFnNames != null &&
+    ctx.clientAsyncFnNames.has((call.callee as { name: string }).name) &&
+    !(ctx.declaredNames != null && ctx.declaredNames.has((call.callee as { name: string }).name)) &&
+    ctx.peerAwaitable !== false
+  );
+}
+
 function emitReceiver(node: ExprNode, ctx: EmitExprContext): string {
   const s = emitExpr(node, ctx);
   // An awaited peer call (`await peer(...)`) is an await-expression (unary
@@ -1382,8 +1413,9 @@ function emitReceiver(node: ExprNode, ctx: EmitExprContext): string {
   // be wrapped: `(await peer(...)).field`. receiverNeedsParens treats a plain
   // call as a primary (correct pre-await), so this case needs its own guard.
   // Issue #26 — the awaited stdlib-async call (`await verifyPassword(...)`)
-  // needs the identical wrap for the same precedence reason.
-  if (isAwaitedPeerCall(node, ctx) || isAwaitedStdlibAsyncCall(node, ctx)) return `(${s})`;
+  // needs the identical wrap for the same precedence reason. Seam-A Gap 2 — the
+  // CLIENT transitively-async peer form (`await middle(...)`) needs it too.
+  if (isAwaitedPeerCall(node, ctx) || isAwaitedStdlibAsyncCall(node, ctx) || isAwaitedClientAsyncCall(node, ctx)) return `(${s})`;
   return receiverNeedsParens(node) ? `(${s})` : s;
 }
 
@@ -2555,8 +2587,16 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   // `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`) instead of leaking. The bare emission is
   // still returned so the artifact is well-formed for the diagnostic pass; the
   // recorded ERROR is fatal, so that output never ships.
+  // Seam-A Gap 2/finding-4 — the auto-await now fires in CLIENT mode too: a client
+  // fn calling a Promise-returning stdlib primitive BARE (`const r =
+  // safeCallAsync(...)`, no `!{}`) is colored async by the stdlib seed, so its call
+  // must be awaited or `r.ok` is `undefined`. Gated on `clientAsyncBody` — set ONLY
+  // inside a real async client fn body, NOT a markup `${ for … }` render loop (a
+  // fail-closed-async sync stdlib helper like `sortBy` must stay bare there, else
+  // `await` lands in a non-async context). The `!{}` guarded-expr case is awaited
+  // separately by emit-logic's `_autoAwait` (idempotency-guarded).
   if (
-    ctx.mode === "server" &&
+    (ctx.mode === "server" || (ctx.mode === "client" && ctx.clientAsyncBody === true)) &&
     !node.optional &&
     node.callee.kind === "ident" &&
     typeof node.callee.name === "string" &&
@@ -2564,11 +2604,15 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     isStdlibAsyncCallee(node.callee.name, ctx)
   ) {
     if (ctx.peerAwaitable === false) {
-      // The sink is always present when detection can fire: emit-server installs
-      // the classifier (carrying a fresh sink) whenever an export registry exists,
-      // and `isStdlibAsyncCallee` returns false without a registry. The optional
-      // chain is belt-and-suspenders (never null in production server emission).
-      _serverAsyncClassifier?.syncCallSink?.push({ name: node.callee.name, span: node.span });
+      // The SERVER sink is drained by emit-server → E-ASYNC-STDLIB-IN-SYNC-CALLBACK;
+      // the CLIENT non-awaitable case is caught by emit-functions's structural
+      // detector (the client path installs no module-level classifier, so pushing
+      // to a stale `_serverAsyncClassifier.syncCallSink` would mis-report against
+      // the next server file). Emit bare either way (well-formed artifact; the
+      // diagnostic is fatal so the leak never ships).
+      if (ctx.mode === "server") {
+        _serverAsyncClassifier?.syncCallSink?.push({ name: node.callee.name, span: node.span });
+      }
       return `${callee}(${args})`;
     }
     return `await ${callee}(${args})`;

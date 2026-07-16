@@ -154,6 +154,42 @@ Gap 2 (browser/client transitive) — CONFIRMED coloring-alone insufficient (nee
 ### NEXT
 - Final full-gate + conformance verification; report.
 
+## 2026-07-16 — S239 adversarial-review fix round (6 correctness + 3 cleanups)
+
+ROOT CAUSE: coloring was extended but await-emission + fail-closed drain were not, so
+positions colored-async-but-neither-awaited-nor-diagnosed leaked. Restored the invariant
+"a fn colored async ⟹ every async call is awaited OR fires E-ASYNC-STDLIB-IN-SYNC-CALLBACK"
+via a SHARED structural detector (coloring + drain from the same traversal shape).
+
+- SHARED helpers (emit-library-shared.ts): `collectNonAwaitableAsyncCalls` (structural —
+  stdlib/peer async call inside a lambda / param-default / raw escape-hatch, robust vs the
+  emit-populated sink), `collectAliasedAsyncCalls` (single-level `const g = middle; g()`),
+  `asyncStdlibSyncCallbackError` + `aliasedAsyncCallError` (ONE wording — cleanup 7).
+- Finding 1 (SECURITY, ss1 drain-after-emit): emit-server ss1 now runs the detector on each
+  value-export fn (the `_syncStdlibAsyncCalls` drain runs BEFORE ss1 emit). `_diagAsyncStdlibSyncCb`
+  delegates to the shared builder (cleanup 7). VERIFIED: `hs.some(h => verifyPassword(pw,h))` fails closed.
+- Finding 1b/3: generateLibraryJs (emitAsyncLibraryFns) + client (emit-functions) run the
+  detector too. Raw-body callback (`x => { … safeCallAsync … }`) fails closed.
+- Finding 2: emit-expr `emitReceiver` now paren-wraps the CLIENT awaited-peer form
+  (`(await middle(cfg)).count`) via `isAwaitedClientAsyncCall`.
+- Finding 4: emit-expr stdlib auto-await extended to CLIENT mode, GATED on a new
+  `clientAsyncBody` flag (set only in an async client fn body — NOT a markup `${ for }` loop,
+  else a fail-closed-async SYNC helper like `sortBy` would be awaited in a non-async context —
+  the Bug-18 regression I caught + fixed). Idempotency guard in emit-logic guarded-expr prevents
+  `await await`. bare `const r = safeCallAsync(...)` in a client fn now awaited.
+- Finding 5: a nameless top-level fn-decl is NOT cleanly producible (E-CODEGEN-INVALID-LOGIC);
+  defensively colored async so a body `await` never lands in a sync `function`.
+- Finding 6: `const g = middle; g()` fails closed (bounded single-level alias; full alias
+  resolution is a follow-on).
+- Cleanup 8: `.ast.imports` hoist folded into buildCalleeImportMap (4 call sites simplified;
+  pre-existing auth-sensitive :1135 left untouched).
+- Cleanup 9: the client server-direct seed derives from computeAsyncFnNames's SINGLE structural
+  walk (new `serverFnNames` seed param) — removed the second non-transitive hasServerCallees scan.
+
+VERIFICATION: 6 finding repros (finding1/2/3/4/6 + Bug-18-style markup guard) + the 4 original
+shapes all green. Unit 16210/0, integration 3071/0, conformance 642/642, browser 587/12 (same 12
+pre-existing). Comprehensive test file expanded to 13 tests.
+
 ## (superseded) prior next (pending PA ruling)
 - Re-scoped brief specifying: which emit path owns colorless-async for the library shape, and
   whether to (1) route async library fns through emitLibraryFnMember with the auto-await

@@ -212,3 +212,102 @@ describe("§6: pure library fn stays plain `function` (no over-coloring)", () =>
     expect(js).not.toMatch(/\bawait\b/);
   });
 });
+
+// ===========================================================================
+// S239 adversarial-review findings — the no-silent-leak invariant (a fn colored
+// async ⟹ every async call in it is `await`ed OR fires E-ASYNC-STDLIB-IN-SYNC-CALLBACK)
+// ===========================================================================
+
+const hasAsyncSyncCbErr = (errors) => errors.some((e) => e.code === "E-ASYNC-STDLIB-IN-SYNC-CALLBACK");
+
+// §7 (finding 1/1b/3) — a stdlib-async call in a NON-awaitable position fails closed.
+describe("§7 (finding 1/3): stdlib-async in a sync callback / raw body fails closed", () => {
+  test("a `.some(h => verifyPassword(pw,h))` value-export fn fires E-ASYNC-STDLIB-IN-SYNC-CALLBACK", () => {
+    const p = fix("f1-authbypass.scrml", `\${
+  import { verifyPassword } from "scrml:auth"
+  export function anyValid(pw, hs) { const ok = hs.some(h => verifyPassword(pw, h)); return ok }
+}
+`);
+    const { errors } = compile([p], { mode: "library", wantFile: "f1-authbypass", field: "libraryJs" });
+    expect(hasAsyncSyncCbErr(errors)).toBe(true);
+  });
+
+  test("a BLOCK-body callback `xs.some(x => { return safeCallAsync(...).ok })` (raw) fails closed", () => {
+    const p = fix("f3-raw.scrml", `\${
+  import { safeCallAsync } from "scrml:host"
+  export function anyBad(xs) { const any = xs.some(x => { return safeCallAsync(() => x.go()).ok }); return any }
+}
+`);
+    const { errors } = compile([p], { mode: "library", wantFile: "f3-raw", field: "libraryJs" });
+    expect(hasAsyncSyncCbErr(errors)).toBe(true);
+  });
+});
+
+// §8 (finding 2) — an awaited CLIENT async-peer call used as a receiver is paren-wrapped.
+describe("§8 (finding 2): client awaited-peer receiver is paren-wrapped", () => {
+  test("`middle(cfg).count` lowers to `(await middle(cfg)).count`, not `await middle(cfg).count`", () => {
+    const p = fix("f2-receiver.scrml", `<program>
+\${
+  import { safeCallAsync } from "scrml:host"
+  function middle(cfg) { const r = safeCallAsync(() => cfg.load()) !{ | ::Thrown(m) -> ({ count: 0 }) }; return r }
+  function outer(cfg) { const n = middle(cfg).count; @total = n }
+  <total> = 0
+}
+<button onclick=outer(window)>Go</button>
+<span>\${@total}</span>
+</program>
+`);
+    const { js } = compile([p], { wantFile: "f2-receiver", field: "clientJs" });
+    expect(js).toMatch(/\(await _scrml_middle_\d+\(cfg\)\)\.count/);
+    expect(js).not.toMatch(/await _scrml_middle_\d+\(cfg\)\.count/);
+  });
+});
+
+// §9 (finding 4) — a BARE client stdlib-async call (no `!{}`) in an async fn is awaited.
+describe("§9 (finding 4): bare client stdlib-async call is awaited", () => {
+  test("`const r = safeCallAsync(...)` (no handler) in a client fn emits `await safeCallAsync`", () => {
+    const p = fix("f4-clientbare.scrml", `<program>
+\${
+  import { safeCallAsync } from "scrml:host"
+  function doIt(obj) { const r = safeCallAsync(() => obj.doThing()); @done = r.ok }
+  <done> = false
+}
+<button onclick=doIt(window)>Go</button>
+<span>\${@done}</span>
+</program>
+`);
+    const { js } = compile([p], { wantFile: "f4-clientbare", field: "clientJs" });
+    expect(js).toMatch(/async function _scrml_doIt_\d+/);
+    expect(js).toMatch(/const r = await safeCallAsync\(/);
+    expect(js).not.toMatch(/\bawait\s+await\b/);
+  });
+
+  test("a fail-closed-async SYNC stdlib helper (`sortBy`) in a markup for-loop is NOT awaited", () => {
+    // sortBy is a re-export scrml:data seeds fail-closed-async; it is actually sync
+    // and runs in a `${ for … }` render loop (NOT an async fn) — awaiting it would
+    // inject `await` in a non-async context. The clientAsyncBody gate keeps it bare.
+    const p = fix("f4-markup-noawait.scrml", `<program>
+\${ import { sortBy } from 'scrml:data' }
+<items> = [{ n: "b", o: 2 }, { n: "a", o: 1 }]
+<ul>\${ for (let it of sortBy(@items, "o")) { lift <li>\${it.n}</li> } }</ul>
+</program>
+`);
+    const { js, errors } = compile([p], { wantFile: "f4-markup-noawait", field: "clientJs" });
+    expect(errors.filter((e) => e.severity !== "warning" && e.severity !== "info")).toEqual([]);
+    expect(js).not.toMatch(/await\s+sortBy\b/);
+  });
+});
+
+// §10 (finding 6) — an indirect async call via a local alias fails closed.
+describe("§10 (finding 6): indirect async call via a local alias fails closed", () => {
+  test("`const g = middle; g(obj)` (middle async) fires E-ASYNC-STDLIB-IN-SYNC-CALLBACK", () => {
+    const p = fix("f6-alias.scrml", `\${
+  import { safeCallAsync } from "scrml:host"
+  export function middle(obj) { const r = safeCallAsync(() => obj.doThing()) !{ | ::Thrown(m) :> ({ ok: false }) }; return r.ok }
+  export function outer(obj) { const g = middle; const ok = g(obj); return ok }
+}
+`);
+    const { errors } = compile([p], { mode: "library", wantFile: "f6-alias", field: "libraryJs" });
+    expect(hasAsyncSyncCbErr(errors)).toBe(true);
+  });
+});

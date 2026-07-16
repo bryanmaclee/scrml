@@ -1,0 +1,11 @@
+${
+  import { safeCallAsync } from "scrml:host"
+  // A BLOCK-body callback `x => { ... }` parses as an escape-hatch emitted VERBATIM
+  // — the compiler never structurally sees the inner safeCallAsync to await it. The
+  // coloring recovers safeCallAsync from the raw text (colors anyBad async), but the
+  // call ships BARE + un-awaited → wrong boolean. MUST fire E-ASYNC-STDLIB-IN-SYNC-CALLBACK.
+  export function anyBad(xs) {
+    const any = xs.some(x => { return safeCallAsync(() => x.go()).ok })
+    return any
+  }
+}

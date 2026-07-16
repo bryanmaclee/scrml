@@ -46,9 +46,15 @@ export type CalleeImportMap = Map<string, string>;
 export function buildCalleeImportMap(fileAST: ASTNode | null | undefined): CalleeImportMap {
   const out: CalleeImportMap = new Map();
   if (!fileAST) return out;
-  const imports = (fileAST as { imports?: unknown[] }).imports;
+  // Cleanup 8 (S239) — the `.imports` normalization folded in here (was hand-rolled
+  // at 5 call sites): the TABResult wrapper hoists imports to `.ast.imports`, so
+  // prefer `.ast` when it carries them; else the FileAST's own `.imports`.
+  const astImports = ((fileAST as { ast?: { imports?: unknown[] } }).ast)?.imports;
+  const src = Array.isArray(astImports) ? (fileAST as { ast: ASTNode }).ast : fileAST;
+  const imports = (src as { imports?: unknown[] }).imports;
   if (!Array.isArray(imports)) return out;
-  const importerFilePath = ((fileAST as { filePath?: string }).filePath) ?? "";
+  const importerFilePath = ((src as { filePath?: string }).filePath)
+    ?? ((fileAST as { filePath?: string }).filePath) ?? "";
   for (const imp of imports) {
     if (!imp || typeof imp !== "object") continue;
     const node = imp as { source?: string | null; names?: string[]; specifiers?: Array<{ local?: string; imported?: string }> };
@@ -375,7 +381,7 @@ function collectReassignedNames(body: ASTNode[] | undefined, sink: Set<string>):
  * @param {CGError[]} [errors]
  * @returns {string[]}
  */
-export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: RouteMap, depGraph: DepGraph, filePath: string, errors: CGError[] = [], machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null, engineBindings?: Map<string, { varName: string; forType: string; tableName: string }> | null, engineVarNames?: Set<string> | null, enginesWithHooks?: Set<string> | null, returnTypeAnnotation?: string | null, enclosingFnName?: string | null, enginesWithOnTimeout?: Set<string> | null, enginesWithIdleWatchdog?: Set<string> | null, enginesWithInternalRules?: Set<string> | null, enginesWithHistory?: Set<string> | null, enginesWithMessageArms?: Set<string> | null, engineMessageVariants?: Map<string, Set<string>> | null, calleeMap?: CalleeImportMap | null, exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>> | null, mapVarNames?: Set<string> | null, orderedMapVarNames?: Set<string> | null, setVarNames?: Set<string> | null, localMapVarNames?: Set<string> | null, localSetVarNames?: Set<string> | null, localOrderedMapVarNames?: Set<string> | null, clientAsyncFnNames?: Set<string> | null, syncPeerCalls?: Array<{ name: string; span: unknown }> | null): string[] {
+export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: RouteMap, depGraph: DepGraph, filePath: string, errors: CGError[] = [], machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null, engineBindings?: Map<string, { varName: string; forType: string; tableName: string }> | null, engineVarNames?: Set<string> | null, enginesWithHooks?: Set<string> | null, returnTypeAnnotation?: string | null, enclosingFnName?: string | null, enginesWithOnTimeout?: Set<string> | null, enginesWithIdleWatchdog?: Set<string> | null, enginesWithInternalRules?: Set<string> | null, enginesWithHistory?: Set<string> | null, enginesWithMessageArms?: Set<string> | null, engineMessageVariants?: Map<string, Set<string>> | null, calleeMap?: CalleeImportMap | null, exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>> | null, mapVarNames?: Set<string> | null, orderedMapVarNames?: Set<string> | null, setVarNames?: Set<string> | null, localMapVarNames?: Set<string> | null, localSetVarNames?: Set<string> | null, localOrderedMapVarNames?: Set<string> | null, clientAsyncFnNames?: Set<string> | null, syncPeerCalls?: Array<{ name: string; span: unknown }> | null, clientAsyncBody?: boolean): string[] {
   const lines: string[] = [];
   // Track declared names so tilde-decl can detect reassignment vs first declaration
   const declaredNames = new Set<string>();
@@ -437,6 +443,8 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     ...(clientAsyncFnNames && clientAsyncFnNames.size > 0
         ? { clientAsyncFnNames, syncPeerCalls: syncPeerCalls ?? null }
         : {}),
+    // Seam-A finding-4 — gate the client-mode stdlib await on an async fn body.
+    ...(clientAsyncBody ? { clientAsyncBody: true } : {}),
     // §32 — a function body is its own tilde scope (SPEC §32.4). Pre-scan
     // for `~` references and set up a per-body tildeContext so bare-expr /
     // value-lift statements capture into the generated tilde var and consume

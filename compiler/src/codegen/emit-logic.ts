@@ -177,6 +177,11 @@ export interface EmitLogicOpts {
    */
   clientAsyncFnNames?: Set<string> | null;
   /**
+   * Seam-A finding-4 (S239): true inside an ASYNC client fn body — gates the
+   * client-mode stdlib auto-await (a markup logic context is not an async fn).
+   */
+  clientAsyncBody?: boolean;
+  /**
    * Issue #1 (parent scrmlTS): accumulator for sibling server-fn calls emitted
    * BARE in a non-awaitable position (sync callback body / parameter default).
    * Forwarded to `EmitExprContext.syncPeerCalls` so emit-server can raise
@@ -808,6 +813,8 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
     // Seam-A Gap 2 — forward the client async-peer set so emit-expr awaits a
     // client-mode call to a transitively-async local peer.
     clientAsyncFnNames: opts.clientAsyncFnNames ?? null,
+    // Seam-A finding-4 — forward the async-client-fn-body gate for the stdlib await.
+    clientAsyncBody: opts.clientAsyncBody ?? false,
     // Issue #1 — forward the bare-peer-call accumulator so emit-expr can record
     // sync-callback sites for the E-SERVER-FN-IN-SYNC-CALLBACK diagnostic.
     syncPeerCalls: opts.syncPeerCalls ?? null,
@@ -3316,7 +3323,13 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
 
       if (initExpr == null) return "";
 
-      lines.push(`let ${resultVar} = ${_autoAwait ? "await " : ""}${initExpr};`);
+      // Idempotency (Q2 / Seam-A finding-4) — the CLIENT-mode `emitCall` now also
+      // auto-awaits a stdlib-async init, so a `!{}` guarded-expr whose init already
+      // starts with `await` must NOT re-prefix (`await await …`). The statement-
+      // level `_autoAwait` remains the source of truth for the peer-call form (init
+      // has no `await`), so only skip when the emitted init already carries it.
+      const _initHasAwait = /^\s*await\b/.test(initExpr);
+      lines.push(`let ${resultVar} = ${_autoAwait && !_initHasAwait ? "await " : ""}${initExpr};`);
       lines.push(`if (${resultVar} && ${resultVar}.__scrml_error) {`);
 
       // R24-BUG-2 (S136 / known-gaps Bug 29) — split a joined arm body on
