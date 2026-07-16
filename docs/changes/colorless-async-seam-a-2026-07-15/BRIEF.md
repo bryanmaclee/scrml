@@ -125,3 +125,6 @@ WITH the impl (Rule 4). Prefer reusing an existing code where the shape matches.
 ## CRASH-RECOVERY
 Commit after each gap closes (WIP commits fine); update `progress.md` each step. If you die mid-task, the branch
 + progress.md are the recovery anchor. Report your final branch SHA + files-touched + the R26 emit evidence.
+
+<!-- thread-board: run `bun scripts/threads.ts` — DONE-PROBE asserts this arc's completion against landed artifacts -->
+DONE-PROBE: git grep -qE '_scrml_(some|map|every|find|filter|forEach|reduce|flatMap)Async' -- compiler/src/codegen

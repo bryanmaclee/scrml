@@ -51,6 +51,10 @@ jobs:
       - name: Stage 1 — regenerate @generated state rollup (deterministic, no AI cost)
         run: bun scripts/state.ts --write
 
+      - name: Stage 1b — thread-board probe-health (non-blocking; catches rotted DONE-PROBE fields + prints the board)
+        continue-on-error: true
+        run: bun scripts/threads.ts --check && bun scripts/threads.ts
+
       - name: Stage 2 — regenerate nav-maps via the project-mapper agent
         uses: anthropics/claude-code-action@v1
         with:
