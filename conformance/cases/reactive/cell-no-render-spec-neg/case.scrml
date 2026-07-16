@@ -1,0 +1,8 @@
+${
+    <userName> = <input type="text"/>
+    <count>    = 0
+}
+<form>
+    <userName/>
+</>
+<p id="c">Count: ${@count}</>

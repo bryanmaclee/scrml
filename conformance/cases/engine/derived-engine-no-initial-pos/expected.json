@@ -1,0 +1,12 @@
+{
+  "id": "engine-derived-engine-no-initial-pos",
+  "description": "§51.0.J / §51.0.E E-DERIVED-ENGINE-NO-INITIAL — `initial=` declared on a derived engine. `<engine for=Health initial=.Healthy derived=match @marioState {...}>` carries both the derivation source AND a static initial variant; the two are mutually exclusive because a derived engine's initial value is computed from `derived=expr` at engine-init time. Asserts the code AS error. W-ENGINE-INITIAL-MISSING is in notCodes — that lint is the NON-derived counterpart (§51.0.E) and must not co-fire.",
+  "language-version": "1.0",
+  "spec": "§51.0.J",
+  "rationale": "§51.0.J rules table: '`initial=` on the engine | REJECTED — `E-DERIVED-ENGINE-NO-INITIAL` (§34). Initial value computed from `derived=expr` at engine-init time.' §51.0.E: 'On a DERIVED engine (§51.0.J), `initial=` is FORBIDDEN. Derived engines compute their initial value from the source expression at engine-init time. Setting `initial=` emits `E-DERIVED-ENGINE-NO-INITIAL` (§34).' §34 catalog: 'Initial value computed from `derived=expr` at engine-init time; remove `initial=`.'",
+  "expect": {
+    "codes": ["E-DERIVED-ENGINE-NO-INITIAL"],
+    "notCodes": ["W-ENGINE-INITIAL-MISSING", "E-ENGINE-INITIAL-BOTH-FORMS"],
+    "severity": { "E-DERIVED-ENGINE-NO-INITIAL": "error" }
+  }
+}

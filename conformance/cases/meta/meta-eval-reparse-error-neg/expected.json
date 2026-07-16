@@ -1,0 +1,11 @@
+{
+  "id": "meta-eval-reparse-error-neg",
+  "description": "§22 E-META-EVAL-002 — a `^{}` block whose compile-time eval SUCCEEDS (`emit(\"<div\")` runs without throwing) but the emitted string is an unclosed markup tag that fails to re-parse. meta-eval.ts feeds the emitted output back through the native parser (reparseEmitted); the unclosed `<div` tag fails re-parsing, so it fires E-META-EVAL-002 (re-parsing emitted meta code failed) and NOT E-META-EVAL-001 (the eval itself did not throw).",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22",
+  "expect": {
+    "codes": ["E-META-EVAL-002"],
+    "notCodes": ["E-META-EVAL-001"],
+    "severity": { "E-META-EVAL-002": "error" }
+  }
+}

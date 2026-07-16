@@ -1,0 +1,7 @@
+<foreign lang="python" />
+${
+  export fn compute() {
+    const out = _={ 1 + 1 }=
+    return out
+  }
+}

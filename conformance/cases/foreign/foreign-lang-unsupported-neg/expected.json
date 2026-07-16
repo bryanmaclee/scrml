@@ -1,0 +1,11 @@
+{
+  "id": "foreign-lang-unsupported-neg",
+  "description": "§23.2.4a E-FOREIGN-005 — a library `<foreign lang=\"python\" />` declaration resolves the file's foreign-language context to `python`, which is outside the inline value-returning form's supported set (`ts`/`js`). The admitted `_={ 1 + 1 }=` block resolves a lang, so E-FOREIGN-003 does not fire, but the resolved lang is unsupported for inline value-flow, so it fires E-FOREIGN-005 (type-system.ts checkForeignBlocks) per §23.2.4a.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §23.2.4a",
+  "expect": {
+    "codes": ["E-FOREIGN-005"],
+    "notCodes": ["E-FOREIGN-003"],
+    "severity": { "E-FOREIGN-005": "error" }
+  }
+}

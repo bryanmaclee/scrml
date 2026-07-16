@@ -1,0 +1,8 @@
+<items> = []
+const <activeItems> = @items.filter(i => i.active)
+${
+    function tryAdd(item) {
+        @activeItems.push(item)
+    }
+}
+<p>x</>

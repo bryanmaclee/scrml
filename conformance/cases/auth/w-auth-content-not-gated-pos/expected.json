@@ -1,0 +1,12 @@
+{
+  "id": "auth-w-auth-content-not-gated-pos",
+  "description": "§40.9.5 — an `<auth role=\"X\">` content block fires W-AUTH-CONTENT-NOT-GATED (warning). `<auth role>` gates only JS mount/behaviour (and only under --emit-per-route), NOT served HTML content: the gated markup is emitted verbatim into the payload and is visible to ALL viewers regardless of role.",
+  "language-version": "1.0",
+  "spec": "§40.9.5",
+  "source-test": "compiler/src/auth-graph.ts (flagContentNotGated fire site)",
+  "rationale": "§40.9.5: emit-html emits the `<auth>` element as a passthrough literal and renders its children as static markup; the reachability solver's per-role verdict is consumed only by the JS route-splitter, never by HTML emission. So a role-naming content gate leaks its markup — the lint fires one warning per site. SEVERITY ESCALATION (ss60 W2): fires only a WARNING — PA/user to rule whether a content-secrecy footgun should be a freeze-blocking ERROR.",
+  "expect": {
+    "codes": ["W-AUTH-CONTENT-NOT-GATED"],
+    "severity": { "W-AUTH-CONTENT-NOT-GATED": "warning" }
+  }
+}

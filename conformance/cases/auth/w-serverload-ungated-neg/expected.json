@@ -1,0 +1,12 @@
+{
+  "id": "auth-w-serverload-ungated-neg",
+  "description": "§52.15 — a server-authority read route that GATES via default-inherit (the cell has no auth= opt-out, so it inherits the enclosing <program auth=\"required\">) fires no W-SERVERLOAD-UNGATED. The clean control: the route is gated, so it is not anonymously reachable.",
+  "language-version": "1.0",
+  "spec": "§52.15",
+  "source-test": "compiler/tests/integration/server-load-authority.test.js",
+  "rationale": "§52.15: with no per-var auth opt-out the serverLoad route default-inherits auth=\"required\", so the route is gated and W-SERVERLOAD-UNGATED does not fire. (Row-scoped by ${@currentUser.id} → W-SSR-PRERENDER-UNSCOPED also stays silent.)",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-SERVERLOAD-UNGATED"]
+  }
+}

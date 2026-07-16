@@ -1,0 +1,12 @@
+{
+  "id": "auth-w-serverload-ungated-pos",
+  "description": "§52.15 — a server-authority read route (`/__serverLoad/products`) that opts OUT of the gate (per-var auth=\"none\") under an app that declares auth elsewhere (<program auth=\"required\">) fires W-SERVERLOAD-UNGATED (warning). The <page>/<program> auth redirect does NOT cover the data route — every data endpoint is its own gate, so the opted-out route is reachable by anonymous requests.",
+  "language-version": "1.0",
+  "spec": "§52.15",
+  "source-test": "compiler/tests/integration/server-load-authority.test.js",
+  "rationale": "§52.15: the serverLoad data route default-inherits the enclosing auth requirement; opting out with auth=\"none\" makes it anonymously reachable while the app is otherwise auth-aware. The nudge surfaces the Fork-4 footgun. SEVERITY ESCALATION (ss60 W2): this security-floor code fires only a WARNING and is unpinned — PA/user to rule whether an ungated server-authority read route should be a freeze-blocking ERROR.",
+  "expect": {
+    "codes": ["W-SERVERLOAD-UNGATED"],
+    "severity": { "W-SERVERLOAD-UNGATED": "warning" }
+  }
+}

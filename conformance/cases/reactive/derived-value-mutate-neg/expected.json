@@ -1,0 +1,12 @@
+{
+  "id": "reactive-derived-value-mutate-neg",
+  "description": "§6.6.18 negative — the SAME `const <activeItems> = @items.filter(...)` derived cell as derived-value-mutate-pos, exercised ONLY through the forms §6.6.18 explicitly lists as legal: a LOCAL COPY that is then mutated (`let local = [...@activeItems]; local.push(item)` — note the literal `.push(...)` that must NOT fire, since the receiver is a plain non-reactive `let`, not the derived cell), a write to the UPSTREAM cell (`@items = [...@items, item]` — the SPEC's own recommended fix), and a non-mutating method read (`@activeItems.join(\",\")`). E-DERIVED-VALUE-MUTATE stays silent. This is the mutate-vs-legal contrast.",
+  "language-version": "1.0",
+  "spec": "§6.6.18",
+  "rationale": "§6.6.18 'Forms NOT covered (legal)': 'Non-mutating array methods (`filter`, `map`, `slice`, `concat`, `find`, `some`, `every`, `reduce`, etc.) on a derived array — they return new values without writing back'; 'Method calls that don't mutate (`@derivedArr.join(\",\")`, `@derivedObj.toString()`)'; 'Local copies are mutable: `${ let local = [...@filteredItems]; local.push(x) }` is fine; `local` is a plain non-reactive `let`.' The rule is receiver-scoped — it fires only where the receiver chain begins at a `const <name>` cell reference — so a `.push` on a local copy and a write to the upstream mutable cell are both legal.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-DERIVED-VALUE-MUTATE", "E-DERIVED-WRITE"],
+    "notCodePrefixes": ["E-DERIVED-"]
+  }
+}

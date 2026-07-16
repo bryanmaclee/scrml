@@ -1,0 +1,11 @@
+{
+  "id": "channel-name-missing",
+  "description": "§38.9 — a `<channel>` inside `<program>` with no `name=` attribute fires E-CHANNEL-001. The `name` is the required channel identity; it sets the WebSocket URL path `/_scrml_ws/<name>` (§38.3), so a nameless channel has no addressable route.",
+  "language-version": "1.0",
+  "spec": "§38.9, §38.3",
+  "rationale": "§38.3: `name` is a REQUIRED string attribute — the unique channel identifier that sets the WS URL. §38.9 catalogs the absence as E-CHANNEL-001. A `<channel>` with no `name=` SHALL emit E-CHANNEL-001.",
+  "expect": {
+    "codes": ["E-CHANNEL-001"],
+    "severity": { "E-CHANNEL-001": "error" }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "auth-w-auth-login-missing-pos",
+  "description": "§40.1.1 — an app whose auth gate declares a redirect target (default `/login` from <program auth=\"required\">) but with no page in the compilation unit matching that path fires W-AUTH-LOGIN-MISSING (warning): the runtime auth-check would 302 to a 404. (The per-gate I-AUTH-REDIRECT-UNRESOLVED info co-fires.)",
+  "language-version": "1.0",
+  "spec": "§40.1.1",
+  "source-test": "compiler/src/auth-graph.ts (W-AUTH-LOGIN-MISSING tier-2 structural-gap site)",
+  "rationale": "§40.1.1: <program auth=\"required\"> yields a default loginRedirect of `/login`; when no gate's redirect resolves to an authored page (unresolvedTargets non-empty, anyResolved false) the structural-gap warning fires so the missing login page is surfaced loudly.",
+  "expect": {
+    "codes": ["W-AUTH-LOGIN-MISSING"],
+    "severity": { "W-AUTH-LOGIN-MISSING": "warning" }
+  }
+}

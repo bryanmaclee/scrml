@@ -1,0 +1,11 @@
+{
+  "id": "channel-server-cell-read",
+  "description": "§38.4/§38.6.1 (RULING A) — a channel `function tally()` escalated to the SERVER by its `broadcast()` call READS the client-held channel cell `@count`. Channel cells are client-held (no server-side value), so the read resolves to `undefined` at request time. Fires E-CHANNEL-SERVER-CELL-READ (RI).",
+  "language-version": "1.0",
+  "spec": "§38.4, §38.6.1",
+  "rationale": "§38.4/§38.6.1 (change-id channel-cell-write-client-side-A, RULING A): a server-context channel function (escalated via broadcast()/disconnect(), an onserver:* handler, or another §12.2 trigger) SHALL NOT read a channel-declared cell — it SHALL emit E-CHANNEL-SERVER-CELL-READ. Operate on the message payload / function arguments instead.",
+  "expect": {
+    "codes": ["E-CHANNEL-SERVER-CELL-READ"],
+    "severity": { "E-CHANNEL-SERVER-CELL-READ": "error" }
+  }
+}
