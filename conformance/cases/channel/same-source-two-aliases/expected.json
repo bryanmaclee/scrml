@@ -1,0 +1,12 @@
+{
+  "id": "channel-same-source-two-aliases",
+  "description": "§38.12.8 clean neg — a consumer imports the SAME channel `chat` twice from ONE source file (`chat` and `chat as alsoChat` from `./channels.scrml`). Both aliases reference the same wire-identity, so there is NO route collision and E-CHANNEL-008 stays silent. The delta from `channel/dup-name-cross-file` is single-source vs two-source.",
+  "language-version": "1.0",
+  "spec": "§38.12.8, §38.12",
+  "rationale": "§38.12.8: the collision is per DISTINCT source file — two aliases of the same imported channel share one wire-name from one file, which is not a conflict. E-CHANNEL-008 fires only when the same `name=` arrives from two different sources.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-008"],
+    "notCodePrefixes": ["E-CHANNEL-"]
+  }
+}

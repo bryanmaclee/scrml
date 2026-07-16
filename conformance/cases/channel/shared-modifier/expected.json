@@ -1,0 +1,11 @@
+{
+  "id": "channel-shared-modifier",
+  "description": "§38.4 — a channel body declares a synced cell with the removed `@shared` modifier (`${ @shared count = 0 }`). The `@shared` marker was retired in v0.next (M19): cells inside a channel body auto-sync by virtue of placement, no marker required. Any `@shared` occurrence fires E-CHANNEL-SHARED-MODIFIER.",
+  "language-version": "1.0",
+  "spec": "§38.4",
+  "rationale": "§38.4: the `@shared` modifier SHALL NOT appear in any v0.next/v0.3 source; auto-sync is BUILT-IN to the channel body. Any `@shared` occurrence SHALL emit E-CHANNEL-SHARED-MODIFIER (retiring E-CHANNEL-002). Use the V5-strict structural form `<name> = init`.",
+  "expect": {
+    "codes": ["E-CHANNEL-SHARED-MODIFIER"],
+    "severity": { "E-CHANNEL-SHARED-MODIFIER": "error" }
+  }
+}

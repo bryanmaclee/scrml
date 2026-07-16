@@ -1,0 +1,9 @@
+<program auth="required" db="sqlite:./app.db">
+<db src="sqlite:./app.db" protect="ssn" tables="orders">
+  ${
+    ?{`CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY, user_id TEXT, item TEXT, ssn TEXT)`}.run()
+    <orders server> = ?{`SELECT * FROM orders WHERE user_id = ${@currentUser.id}`}.all()
+  }
+  <main><ul><each in=@orders key=@.id><li : @.item></each></ul></main>
+</db>
+</program>

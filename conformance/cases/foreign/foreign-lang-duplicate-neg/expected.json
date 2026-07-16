@@ -1,0 +1,11 @@
+{
+  "id": "foreign-lang-duplicate-neg",
+  "description": "§23.6 E-FOREIGN-LANG-DUPLICATE — a library file declares TWO top-level `<foreign lang=…>` blocks (`lang=\"ts\"` then `lang=\"js\"`). A file has ONE foreign-language context (like ONE `<db src>`, §44.7.1); the checker fires on each block past the first, so the second `<foreign lang=\"js\" />` fires E-FOREIGN-LANG-DUPLICATE (type-system.ts checkForeignLangLibraryDecl).",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §23.6",
+  "expect": {
+    "codes": ["E-FOREIGN-LANG-DUPLICATE"],
+    "notCodes": [],
+    "severity": { "E-FOREIGN-LANG-DUPLICATE": "error" }
+  }
+}

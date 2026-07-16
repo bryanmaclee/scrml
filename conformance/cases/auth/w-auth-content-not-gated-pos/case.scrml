@@ -1,0 +1,7 @@
+<program>
+  <main>
+    <auth role="admin">
+      <p>secret admin panel</p>
+    </auth>
+  </main>
+</program>

@@ -1,0 +1,8 @@
+<ul>
+${
+  server function badParam(cb: fn()) -> string {
+    return "ok"
+  }
+}
+<li>x</li>
+</ul>

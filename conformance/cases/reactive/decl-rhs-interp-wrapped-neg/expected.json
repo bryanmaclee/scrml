@@ -1,0 +1,18 @@
+{
+  "id": "reactive-decl-rhs-interp-wrapped-neg",
+  "description": "§6.2 decl-RHS canonical form negative — the SAME three decls as decl-rhs-interp-wrapped-pos with the `${ }` wrapper REMOVED, i.e. the canonical bare-expression RHS. E-DECL-RHS-INTERP-WRAPPED stays silent and the cells compute normally. This is the wrapped-vs-bare contrast; the runtime half proves the bare form is the one that actually evaluates.",
+  "language-version": "1.0",
+  "spec": "§6.2",
+  "rationale": "§6.2 (SPEC.md:2217): \"All three RHS shapes take a bare expression as the right-hand side.\" The bare-expression RHS IS the one canonical form for plain (Shape 1), derived (Shape 3), and typed decls, so no diagnostic fires. Per §6.2 Shape 3 the derived cells recompute from their dependencies: @count=2 → doubled=4, tripled=6; @names has 2 elements → total=2.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-DECL-RHS-INTERP-WRAPPED"],
+    "input": [],
+    "state": { "count": 2, "total": 2, "doubled": 4, "tripled": 6 },
+    "domAnchored": [
+      { "selector": "#t", "text": "Total: 2" },
+      { "selector": "#d", "text": "Doubled: 4" },
+      { "selector": "#r", "text": "Tripled: 6" }
+    ]
+  }
+}

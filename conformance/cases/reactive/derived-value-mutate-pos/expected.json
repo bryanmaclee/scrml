@@ -1,0 +1,12 @@
+{
+  "id": "reactive-derived-value-mutate-pos",
+  "description": "§6.6.18 E-DERIVED-VALUE-MUTATE — in-place VALUE-mutation of a `const <name>` derived cell via an array mutating method. `@activeItems.push(item)` where `const <activeItems> = @items.filter(...)` is rejected. This is the SPEC's own worked example (§6.6.18 'Worked example — invalid (array mutating method)') authored verbatim. E-DERIVED-WRITE is in notCodes: this is the MUTATION form, not the REASSIGNMENT form (`@activeItems = newval`) — the two are distinct sibling codes per §6.6.18 'Distinction from sibling errors'. Incidental W-PROGRAM-001 / W-DEAD-FUNCTION / E-DG-002 ignored by superset.",
+  "language-version": "1.0",
+  "spec": "§6.6.18",
+  "rationale": "§6.6.18: 'The compiler SHALL reject any call of the form `@derivedName.method(...)` where `derivedName` resolves to a `const <name>` declaration and `method` is one of the array mutating methods listed in §6.5.1 (`push`, `pop`, `shift`, `unshift`, `splice`, `reverse`, `sort`, `fill`, `copyWithin`).' A `const <name>` declaration is reference-immutable AND value-immutable; the implicit `_scrml_reactive_set` the mutation lowers to is the same write §6.6.8 already forbids explicitly, and it would be 'silently clobbered the next time the upstream dependencies of the derivation fire'. The error code SHALL be `E-DERIVED-VALUE-MUTATE`.",
+  "expect": {
+    "codes": ["E-DERIVED-VALUE-MUTATE"],
+    "notCodes": ["E-DERIVED-WRITE", "E-SYNTHESIZED-WRITE"],
+    "severity": { "E-DERIVED-VALUE-MUTATE": "error" }
+  }
+}

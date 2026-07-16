@@ -1,0 +1,7 @@
+<program db="postgres://localhost/app">
+  <p>Dashboard</p>
+</program>
+
+<channel name="orphan-feed">
+  <messages> = []
+</channel>

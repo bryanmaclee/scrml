@@ -1,0 +1,12 @@
+{
+  "id": "channel-module-file-top-level",
+  "description": "§38.1 module-file dispensation (S87 Insight 30) — a `<channel>` at file top level in a PURE-CHANNEL-FILE (a file containing NO `<program>` element anywhere) is canonical placement and does NOT fire E-CHANNEL-OUTSIDE-PROGRAM. This proves the `fileHasProgram` guard is load-bearing: file-top is a violation ONLY when a `<program>` sibling exists (contrast `channel/outside-program`).",
+  "language-version": "1.0",
+  "spec": "§38.1, §38.12.6",
+  "rationale": "§38.1 dispensation: a `<channel>` at file top in a file with no `<program>` element is the PURE-CHANNEL-FILE shape (§38.12.6), canonical per the engine-parity precedent (§21.8/B14) and SILENT on E-CHANNEL-OUTSIDE-PROGRAM.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-OUTSIDE-PROGRAM"],
+    "notCodePrefixes": ["E-CHANNEL-"]
+  }
+}

@@ -1,0 +1,8 @@
+<ul>
+${
+  server function badReturn() -> snippet {
+    return 1
+  }
+}
+<li>x</li>
+</ul>

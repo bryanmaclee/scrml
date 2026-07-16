@@ -1,0 +1,10 @@
+{
+  "id": "foreign-lang-single-pos",
+  "description": "§23.6 positive — a library file with exactly ONE top-level `<foreign lang=\"ts\" />` declaration. Since the file declares one (not zero, not two-plus) foreign-language context and no `<program>`, neither the duplicate check nor the in-program check has anything to fire on: E-FOREIGN-LANG-DUPLICATE and E-FOREIGN-LANG-IN-PROGRAM both stay silent (type-system.ts checkForeignLangLibraryDecl).",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §23.6",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-FOREIGN-LANG-DUPLICATE", "E-FOREIGN-LANG-IN-PROGRAM"]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "id": "channel-name-interpolated",
+  "description": "§38.11 — a `<channel name=\"chat-${@room}\">` whose `name=` string-literal carries a `${...}` marker fires E-CHANNEL-007. `name=` is a static-literal-only attribute (§38.3): the `${...}` survives codegen as a literal substring of the WS URL, silently collapsing every intended per-room channel onto one topic (F-CHANNEL-001).",
+  "language-version": "1.0",
+  "spec": "§38.11, §38.3",
+  "rationale": "§38.11 / §38.3: the `name=` (and `topic=`) attribute value SHALL be a static string literal — no `${...}` interpolation. A `name=` literal containing `${` SHALL emit E-CHANNEL-007 (VP-3). For per-instance scoping, use a static name + payload-side filtering.",
+  "expect": {
+    "codes": ["E-CHANNEL-007"],
+    "severity": { "E-CHANNEL-007": "error" }
+  }
+}

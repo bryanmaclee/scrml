@@ -1,0 +1,11 @@
+{
+  "id": "foreign-lang-in-program-neg",
+  "description": "§23.6.1 E-FOREIGN-LANG-IN-PROGRAM — a file declares a top-level `<foreign lang=\"ts\" />` block AND a top-level `<program lang=\"ts\">`. `<foreign lang>` is the library-file surface (a file with `export` fns and NO `<program>`); the two do NOT stack (§23.6.1) — a program file carries `lang=` on `<program lang=>` (§23.2.1) instead. Fires E-FOREIGN-LANG-IN-PROGRAM (type-system.ts checkForeignLangLibraryDecl) and does NOT also fire the library-only DUPLICATE check.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §23.6.1",
+  "expect": {
+    "codes": ["E-FOREIGN-LANG-IN-PROGRAM"],
+    "notCodes": ["E-FOREIGN-LANG-DUPLICATE"],
+    "severity": { "E-FOREIGN-LANG-IN-PROGRAM": "error" }
+  }
+}

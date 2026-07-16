@@ -1,0 +1,3 @@
+export <channel name="chat">
+  ${ <messages> = [] }
+</>

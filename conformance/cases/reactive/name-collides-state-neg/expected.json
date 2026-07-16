@@ -1,0 +1,14 @@
+{
+  "id": "reactive-name-collides-state-neg",
+  "description": "§6.1.3 V5-strict bare-name negative — the same shape as name-collides-state-pos but the local is named `tally` (no registered cell by that name) and the cell is read through the canonical `@count` form. E-NAME-COLLIDES-STATE stays silent. This is the SPEC's `let x = @count // CORRECT` line (SPEC.md:2061) as a runnable case: the runtime half proves the non-colliding local and the canonical read compose — clicking #b reads @count into a local, writes back tally+5, and the cell lands on 5.",
+  "language-version": "1.0",
+  "spec": "§6.1.3",
+  "rationale": "§6.1.3 (SPEC.md:2061): `let x = @count` is the CORRECT form — \"canonical form reads the cell\". The collision rule (SPEC.md:2065) is scoped to a local declaration REUSING a registered state name; a local whose name matches no registered cell does not shadow anything, so nothing fires. §6.1.2 (SPEC.md:2035-2036): `@varname = newValue` sets the cell's value and triggers reactive updates — @count = tally + 5 with tally=0 → 5.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-NAME-COLLIDES-STATE"],
+    "input": [{ "click": "#b" }],
+    "state": { "count": 5 },
+    "domAnchored": [{ "selector": "#c", "text": "Count: 5" }]
+  }
+}

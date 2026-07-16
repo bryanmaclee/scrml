@@ -38,6 +38,14 @@
 
 ---
 
+## §S259 — gaps filed / updated S259 (2026-07-16)
+
+### g-colorless-async-seam-a-boundaries — colorless-async auto-await across JS-host boundaries: the collection-callback TRANSFORM (`_scrml_*Async` combinators for some/every/find/filter/map/forEach/reduce/flatMap) + bucket-(b) coverage (multi-hop alias · cross-lib import await · operands) are unbuilt; interim fail-closed is sound (no silent leak) but 0-frequency. Ruled 3-bucket via DD `../scrml-support/docs/deep-dives/colorless-async-boundaries-2026-07-16.md` (0 async calls in host-constrained positions in the 1125-file corpus). Held on `feat/colorless-async-seam-a` @ `211ab331`; agent's transform design in `docs/changes/colorless-async-seam-a-2026-07-15/progress.md`. — `NEW S259; MED (foundational); in-impl / held-mid-build`
+### g-css-wave1-emission-round3 — CSS Wave-1 emission round-3 bugs (S239 2nd cluster): [86] flat inline-style path (`renderFlatDeclarationAsInlineStyle`) not theme-aware → `@token` in a flat `#{}` → §65.4 no-ops · [399] `@import`/`@charset` trapped in `@layer global {}` → INVALID CSS, imported sheets DROPPED (REGRESSION vs 9c27ce9a) · [144] `@name` token-vs-cell silent shadow (theme-first, no diagnostic) · [356]/[399] Tailwind-precedence inversion (component/global lose to unlayered utilities; §65.8 utilities-LOW). Held on `feat/css-wave1-emission` @ `5f7cf235`. — `NEW S259; MED; in-impl / held round-3`
+### g-css-wave1-runtime-theme-switch — `<theme for=@mode>` reactive selector emits, but nothing reflects `@mode`→`<html data-scrml-theme-mode>` at runtime (emit-client.ts) → themes don't switch LIVE. The Wave-1 runtime half. — `NEW S259; MED; deferred`
+### g-stdlib-export-seed-isolated-parse-fragility — `api.js _parseStdlibExports` isolated mini-parse (`splitBlocks`+`buildAST`) throws E-CTX-003 on `stdlib/data/transform.scrml` IN ISOLATION (the full MOD pipeline parses it fine) → `sortBy`/`groupBy`/`unique` can't resolve terminal `isAsync=false` → fail-close to async. Fix: the seed should consult the already-built MOD exportRegistry, not re-parse. — `NEW S259 (root of colorless-async review [5]); MED (parser/seed); open`
+### g-css-component-descendant-space-collapse — a component `#{ .card .title { } }` tokenizes to `.card.title` — the descendant SPACE is lost → a descendant selector silently becomes a COMPOUND selector (matches an element with both classes). Program-level `#{}` preserves the space; only the component path collapses it. Pre-existing on 9c27ce9a. — `NEW S259 (surfaced by CSS agent); MED; open`
+
 ## §S244 — gaps filed S244 (2026-07-07)
 
 ### G-ECG001-PROTECTED-FIELD-REGEX-DIVISION-EVASION — the `E-CG-001` protected-field client-egress guard is EVADABLE: a division into a protected field after a keyword-spelled variable (`const of = 2; of / user.ssn`) is mis-scanned as a regex literal → the field access drops out of the scanned view → a protected DB column ships to the client bundle with NO error — `NEW S244 (S239 adversarial re-review of the string-blind-scanners dispatch); HIGH; open`
@@ -2904,3 +2912,19 @@ Surfaced by flogence dogfood. A top-level `let` in a serve= tool's `${}`, refere
 
 ### G-FN-STATE-DIAGNOSTICS-SOURCE-UNREACHABLE — E-FN-007 + E-STATE-COMPLETE fire only on synthetic AST; no scrml SOURCE reaches them — `NEW S256; LOW (audit-refinement); open`
 Surfaced by sPA ss70 (fn-purity conformance authoring). E-FN-007 (§48.4.1, divergent-branch `<state>` return without explicit union type) and E-STATE-COMPLETE (§54.6.1) have correct walkers but no scrml **source** produces the `state-instantiation`/`state-init` nodes they require — inline state-literal field-assignment (`let p = <T> f = v </>`) parses as logic-level assignment, not a state field initializer. Gated on the Phase-3+ inline-state-literal parser (same gate as the `.skip`ped `s48-fn.test.js` CONF-S32-005/006/007). **Audit consequence:** these 2 tier-1 codes are parser-gated, NOT authorable conformance-holes — reclassify in the freeze tier-split. Not an impl-vs-SPEC contradiction (walker + rule are sound; the source→AST path just doesn't reach them). <!-- @gap id=g-fn-state-diagnostics-source-unreachable sev=LOW status=open -->
+
+---
+
+## g-interprocedural-async-colorless — plain functions can't await a Promise-returning host call (colorless async across fn boundaries)
+
+**Severity:** MED (silent Promise-leak, Bug-51 class — a plain `export function` calling `safeCallAsync`/a stdlib-Promise primitive compiles clean but leaks the Promise; `r.ok === undefined`). **Status:** `scoping` → RATIFIED design, Phase-1 ready (S258). **Surfaced:** giti GITI-037.
+
+**Ruling (bryan S258): do it right — complete the "no colored functions" promise across function boundaries.** async-ness is compiler-INFERRED + typed-and-surfaced (read, never written) + derives across higher-order calls from the fn-arg's effect type. Design + research + the two-seam analysis: `../scrml-support/docs/deep-dives/interprocedural-cps-colorless-async-2026-07-15.md` (status: current, RATIFIED).
+
+**Key finding — cheaper than feared:** the ~200-400h "Links territory" estimate was for **Seam B** (from-scratch cross-function body-split CPS) which the corpus does NOT need. The real work is **Seam A** (colorless await-propagation) which is **~80% already built** — the JS host supplies `async`/`await`, and the compiler already emits it + runs transitive async-coloring fixpoints in 4 places.
+
+**Phase 1 (the fix, bounded but foundational — careful dispatch + S239):** unify the 4 async classifiers onto the `computeAsyncFnNames` nucleus (`compiler/src/codegen/emit-library-shared.ts:89-123`) + close 3 seed-holes:
+- Gap 1 — seed on stdlib-Promise calls (`bodyHasForeignOrSql` at `emit-library-shared.ts:102` recognizes only `?{}`/`<foreign>`; reuse `isPromiseReturningStdlibFn`, `module-resolver.js:846`).
+- Gap 2 — make the plain-client-fn classifier transitive (`hasServerCallees`, `scheduling.ts:153-171` is non-transitive).
+- Gap 3 — include `scrml:` vendor imports in the cross-module seed (`codegen/index.ts:494` skips non-`.scrml`).
+GITI-037 = Gaps 1∩3. Owes: the interprocedural S4/S5 soundness extension + the effect-notation design (the surfaced `⟨async⟩` glyph is a placeholder).
