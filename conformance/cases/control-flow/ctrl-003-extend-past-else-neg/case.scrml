@@ -1,0 +1,9 @@
+<program>
+  <session { isAdmin: bool }
+
+  <div class="nav">
+    <span if=@isAdmin>Admin panel</>
+    <span else>User view</>
+    <span>Always shown</>
+  </>
+</program>

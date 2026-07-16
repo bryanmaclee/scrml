@@ -1,0 +1,12 @@
+{
+  "id": "lin-001-never-consumed-neg",
+  "description": "§35.9 — the flagship LEGAL `lin` shape: declared once, consumed EXACTLY once in straight-line code, so no linear diagnostic fires. This is the SPEC's own worked example (§35.9 'Valid — basic single use', repeated at §35.4.1 'Sequential code'). The neg twin of lin-001-never-consumed-pos: it pins that the linear pass stays SILENT on the shape the `lin` contract exists to permit, guarding against an over-eager checker that rejects the single-consumption base case. W-PROGRAM-001 co-fires incidentally (no `<program>` shell). No `severity` assertion: run.ts treats a severity entry for a code that did not fire as a mismatch, so severity is asserted on pos twins only.",
+  "language-version": "1.0",
+  "spec": "§35.9, §35.4.1, §35.3",
+  "source-test": "compiler/src/type-system.ts",
+  "rationale": "§35.4.1: 'A `lin` variable declared and consumed once in straight-line code is trivially valid.' §35.3: passing a `lin` identifier as a function argument is exactly one consumption event. `token` has exactly one consumption on the single execution path from declaration to scope exit, satisfying the exactly-once rule — so E-LIN-001 (zero uses), E-LIN-002 (more than one use) and E-LIN-003 (branch asymmetry) all stay silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-LIN-001", "E-LIN-002", "E-LIN-003"]
+  }
+}

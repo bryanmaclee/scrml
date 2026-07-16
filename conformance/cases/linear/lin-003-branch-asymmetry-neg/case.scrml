@@ -1,0 +1,13 @@
+${
+    function fetchToken() { return "t" }
+    function useAdminToken(t) { return t }
+    function useToken(t) { return t }
+    let admin = true
+    lin token = fetchToken()
+    if (admin) {
+        useAdminToken(token)
+    } else {
+        useToken(token)
+    }
+}
+<p>x</>

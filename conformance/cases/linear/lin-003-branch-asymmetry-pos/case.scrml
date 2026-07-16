@@ -1,0 +1,10 @@
+${
+    function fetchToken() { return "t" }
+    function authenticate(t) { return t }
+    let needsAuth = true
+    lin token = fetchToken()
+    if (needsAuth) {
+        authenticate(token)
+    }
+}
+<p>x</>

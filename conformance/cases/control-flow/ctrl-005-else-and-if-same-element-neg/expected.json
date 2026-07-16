@@ -1,0 +1,12 @@
+{
+  "id": "ctrl-005-else-and-if-same-element-neg",
+  "description": "§17.1.1 — `else` on a SIBLING element (the legal chain) does NOT fire E-CTRL-005, and `if=` coexisting with `show=` on one element is explicitly legal per §17.1.1's Interaction Notes. Twinned with ctrl-005-else-and-if-same-element-pos: identical structure, the ONLY difference is that `else` sits on a sibling rather than on the `if=` element itself. Doubles as the guard that the E-CTRL-005 check does not over-fire on the legal same-element `if=`+`show=` composition. W-PROGRAM-SPA-INFERRED co-fires incidentally at severity info; not asserted.",
+  "language-version": "1.0",
+  "spec": "§17.1.1",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§17.1.1: E-CTRL-005 rejects ONLY the co-occurrence of `else`/`else-if=` with `if=` on a single element. Two distinct rules keep this case silent: (1) `else` on a sibling is the canonical chain form; (2) '`if=`, `else-if=`, and `else` MAY coexist on the same element with `show=`. ... The two attributes compose without conflict.' So a same-element `if=`+`show=` SHALL NOT be rejected.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CTRL-005", "E-CTRL-001", "E-CTRL-002", "E-CTRL-003"]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "ctrl-001-orphan-else-neg",
+  "description": "§17 Worked Example 1 (valid) verbatim — `<span else>` immediately following `<span if=@loggedIn>` at the same parent level is a well-formed two-branch chain and does NOT fire E-CTRL-001. W-PROGRAM-SPA-INFERRED co-fires incidentally at severity info; not asserted.",
+  "language-version": "1.0",
+  "spec": "§17.1.1",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§17.1.1: an `if=` chain is the maximal contiguous sequence of sibling elements beginning with `if=` followed by zero or more `else-if=` and optionally one final `else`. An `else` properly preceded by an `if=` sibling satisfies the E-CTRL-001 precondition, so the code SHALL stay silent. This is the SPEC's own flagship valid example (§17 Worked Examples, Example 1).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CTRL-001"]
+  }
+}

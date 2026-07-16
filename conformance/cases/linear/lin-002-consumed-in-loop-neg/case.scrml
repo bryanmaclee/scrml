@@ -1,0 +1,12 @@
+${
+    function mintToken() { return "t" }
+    function submitOne(t) { return t }
+    function touch(v) { return v }
+    let items = [1, 2]
+    lin token = mintToken()
+    submitOne(token)
+    for (const item of items) {
+        touch(item)
+    }
+}
+<p>x</>

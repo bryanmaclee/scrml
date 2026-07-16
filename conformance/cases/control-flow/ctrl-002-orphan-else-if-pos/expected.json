@@ -1,0 +1,13 @@
+{
+  "id": "ctrl-002-orphan-else-if-pos",
+  "description": "§17.1.1 — an element carrying `else-if=` with NO preceding `if=`/`else-if=` element at the same parent level fires E-CTRL-002. The operator condition is parenthesized per §5.2 (a bare unquoted `else-if=` condition is atomic-only), so E-ATTR-UNQUOTED-OPERATOR stays out of the picture. W-PROGRAM-001 co-fires incidentally (no `<program>` shell); not asserted.",
+  "language-version": "1.0",
+  "spec": "§17.1.1",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§17.1.1 Normative Rules: an element carrying `else-if=` SHALL be immediately preceded at the same parent level by an element carrying `if=` or `else-if=`. The compiler SHALL reject any `else-if=` attribute that does not satisfy this condition (E-CTRL-002). §17 Error Code Summary + §34 both register E-CTRL-002 at severity Error.",
+  "expect": {
+    "codes": ["E-CTRL-002"],
+    "notCodes": ["E-CTRL-001", "E-CTRL-005", "E-ATTR-UNQUOTED-OPERATOR"],
+    "severity": { "E-CTRL-002": "error" }
+  }
+}

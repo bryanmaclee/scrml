@@ -1,0 +1,11 @@
+<program>
+${
+  lin token = "secret"
+  @userId = 1
+  function authenticate(x) { return x }
+}
+<request id="profile">
+  ${ @userId = authenticate(token) }
+</>
+<p>${@userId}</>
+</program>

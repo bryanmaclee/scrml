@@ -1,0 +1,9 @@
+<program>
+  <session { loggedIn: bool }
+  <profile { name: string }
+
+  <div class="auth-area">
+    <span if=@loggedIn>Welcome back</>
+    <span else>Please log in</>
+  </>
+</program>

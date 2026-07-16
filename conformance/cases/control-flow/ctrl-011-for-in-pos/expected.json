@@ -1,0 +1,13 @@
+{
+  "id": "ctrl-011-for-in-pos",
+  "description": "§17.4 — the JS-reflex `for (x in @items)` form fires E-CTRL-011. scrml iterates VALUES via `of`; `in` (which iterates object keys in JavaScript) is not in scrml's vocabulary. TWO FIRE SITES: this case exercises the logic-block `for`-head parser (ast-builder.js:8084); a second, structurally identical site exists at ast-builder.js:12313 (the parallel for-head path) and is NOT covered by this case. NOTE: the §34 registry row for E-CTRL-011 cites stale emit lines (`ast-builder.js:4087-4093, 6517-6519`); the live sites are 8084 and 12313. W-PROGRAM-001 co-fires incidentally (no `<program>` shell); not asserted.",
+  "language-version": "1.0",
+  "spec": "§17.4",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§34 E-CTRL-011: `for (... in ...)` is not a valid scrml loop form. scrml iterates values via `of`: `for (item of @items)`. The `in` keyword iterates object keys in JavaScript and does not appear in scrml's vocabulary. §34 registers E-CTRL-011 at severity Error.",
+  "expect": {
+    "codes": ["E-CTRL-011"],
+    "notCodes": [],
+    "severity": { "E-CTRL-011": "error" }
+  }
+}

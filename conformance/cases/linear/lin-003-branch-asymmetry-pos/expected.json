@@ -1,0 +1,13 @@
+{
+  "id": "lin-003-branch-asymmetry-pos",
+  "description": "§35.5 — a `lin` variable consumed on some execution paths but not others fires E-LIN-003. This is the SPEC's own worked example (§35.5 E-LIN-003 block, repeated at §35.9 'Invalid — E-LIN-003: branch asymmetry'). The subtlety this pins: an `if` with NO `else` is still asymmetric — §35.4.2 states the implicit fall-through IS an execution path, and it does not consume `token`. So the absence of an `else` is not the absence of a branch. E-LIN-001 must NOT cascade: the asymmetric variable is force-consumed after E-LIN-003 is emitted, keeping the branch violation the single primary diagnostic. W-PROGRAM-001 co-fires incidentally (no `<program>` shell).",
+  "language-version": "1.0",
+  "spec": "§35.5, §35.4.2",
+  "source-test": "compiler/src/type-system.ts",
+  "rationale": "§35.5: 'The compiler SHALL emit E-LIN-003 when a `lin` variable is consumed on some execution paths but not others.' §35.4.2: 'An `if` without an `else` that consumes the `lin` variable in the `if` body is E-LIN-003, because the implicit else path (fall-through) does not consume the variable.' `token` is consumed on the true path only; the false path reaches scope exit with the binding unconsumed, so exactly-once (§35.1) fails to hold on every path.",
+  "expect": {
+    "codes": ["E-LIN-003"],
+    "notCodes": ["E-LIN-001", "E-LIN-002"],
+    "severity": { "E-LIN-003": "error" }
+  }
+}

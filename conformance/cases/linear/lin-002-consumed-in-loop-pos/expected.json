@@ -1,0 +1,13 @@
+{
+  "id": "lin-002-consumed-in-loop-pos",
+  "description": "§35.4.4 — an OUTER-scope `lin` variable consumed inside a loop body fires E-LIN-002. This is the SPEC's own worked example (§35.4.4 'Invalid — outer lin consumed inside loop'). The loop trigger is the static-count form of the double-use rule: the compiler cannot bound the iteration count, so the single textual reference consumes `token` zero times (loop never runs) or N times (N iterations) — never provably exactly once. E-LIN-001 must NOT cascade: the loop reference force-consumes the binding for scope-exit accounting, so the developer sees the loop violation as the single primary diagnostic instead of a confusing follow-on 'never consumed'. W-PROGRAM-001 co-fires incidentally (no `<program>` shell).",
+  "language-version": "1.0",
+  "spec": "§35.4.4, §35.5",
+  "source-test": "compiler/src/type-system.ts",
+  "rationale": "§35.4.4: 'A `lin` variable from an outer scope consumed inside any loop body (`for`, `while`, `do...while`) SHALL be a compile error (E-LIN-002).' The prose: 'A `lin` variable consumed inside a loop body is potentially consumed zero times (if the loop does not execute) or many times (if it does). Either case is an error.' `token` is declared outside the `for...of` and consumed inside it, so the exactly-once guarantee (§35.1) is unprovable.",
+  "expect": {
+    "codes": ["E-LIN-002"],
+    "notCodes": ["E-LIN-001", "E-LIN-003"],
+    "severity": { "E-LIN-002": "error" }
+  }
+}

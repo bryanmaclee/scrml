@@ -1,0 +1,12 @@
+{
+  "id": "lin-002-consumed-in-loop-neg",
+  "description": "§35.4.4 — the legal counterpart of lin-002-consumed-in-loop-pos: the `lin` variable is consumed ONCE BEFORE the loop, and the loop body never references it. This is the SPEC's own prescribed fix — 'To use a `lin` value from an outer scope in an iteration context, the developer must consume it once outside the loop or before the loop begins.' It pins that the mere PRESENCE of a loop in the same scope does not taint an outer `lin`: only a consumption INSIDE the loop body is E-LIN-002. Guards against an over-broad checker that rejects any `lin` co-existing with a loop. W-PROGRAM-001 co-fires incidentally (no `<program>` shell). No `severity` assertion: severity is asserted on pos twins only (run.ts fails a severity entry for a non-firing code).",
+  "language-version": "1.0",
+  "spec": "§35.4.4, §35.4.1",
+  "source-test": "compiler/src/type-system.ts",
+  "rationale": "§35.4.4 normatively scopes E-LIN-002's loop form to a `lin` 'consumed inside any loop body'. Here `token` is consumed exactly once on straight-line code before the `for...of` begins, which §35.4.4 names as the correct remedy; the loop body consumes only the non-linear iteration variable. The exactly-once obligation (§35.1) is discharged on the single execution path before the loop, so no linear diagnostic fires.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-LIN-001", "E-LIN-002", "E-LIN-003"]
+  }
+}

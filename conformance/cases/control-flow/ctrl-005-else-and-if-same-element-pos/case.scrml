@@ -1,0 +1,7 @@
+<program>
+  <session { loggedIn: bool }
+
+  <div class="auth-area">
+    <span if=@loggedIn else>Welcome back</>
+  </>
+</program>

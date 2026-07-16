@@ -1,0 +1,13 @@
+{
+  "id": "ctrl-012-bare-control-flow-in-markup-pos",
+  "description": "§17.4 / §7 (S203 bare-control-flow-in-markup-diagnostic) — a bare `for (...) { ... }` control-flow STATEMENT directly in a markup body (`<ul>` children), not wrapped in a `${ ... }` logic block, fires E-CONTROL-FLOW-IN-MARKUP. Pre-fix this construct was classified as inert `[text]` and SHIPPED RAW into the DOM (a silent-accept). FIRE COUNT verified: the code fires ONCE per offending construct and then RECOVERS by dropping the raw-text emission — a two-construct source produces two fires (one per construct), NOT a single global one-shot. E-DG-002 co-fires as a consequence of that recovery (dropping the text block removes the only `@items` reader); W-PROGRAM-001 co-fires incidentally (no `<program>` shell). Neither is asserted.",
+  "language-version": "1.0",
+  "spec": "§17.4, §7",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§34 E-CONTROL-FLOW-IN-MARKUP: a bare control-flow STATEMENT — `for (...) { ... }`, `if (...) { ... }`, or `while (...) { ... }` — appearing directly in a markup body without a `${ ... }` wrapper SHALL be rejected. Per §17.4 (Tier-0 iteration is `${ for/lift }`) and §7 (control flow lives in a logic context), control flow in a markup body MUST be inside a `${ ... }` logic block. Reject + recover (user ruling (a), S203): the construct ships NEITHER `for(){}` NOR `${...}` into the DOM. §34 registers the code at severity Error and partitions it into result.errors.",
+  "expect": {
+    "codes": ["E-CONTROL-FLOW-IN-MARKUP"],
+    "notCodes": ["E-CTRL-011"],
+    "severity": { "E-CONTROL-FLOW-IN-MARKUP": "error" }
+  }
+}

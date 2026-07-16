@@ -1,0 +1,12 @@
+{
+  "id": "lin-006-deferred-ctx-neg",
+  "description": "§35.5 — the SPEC's own prescribed remedy for E-LIN-006: declare the `lin` variable INSIDE the same deferred `<request>` body that consumes it. Each scheduled execution of the body then mints and consumes its own fresh linear binding, so dominance is provable within the body and the exactly-once guarantee holds per-execution. The neg twin of lin-006-deferred-ctx-pos: it pins that E-LIN-006 keys on the DECL-vs-CONSUME boundary relationship (the markup-ctx depth at declaration vs at consumption), NOT on the mere presence of a `lin` inside a deferred body — a checker that blanket-rejected `lin` in `<request>` bodies would wrongly fail this. W-PROGRAM-REDUNDANT-LOGIC / W-PROGRAM-SPA-INFERRED co-fire incidentally. No `severity` assertion: severity is asserted on pos twins only (run.ts fails a severity entry for a non-firing code).",
+  "language-version": "1.0",
+  "spec": "§35.5, §6.7.7",
+  "source-test": "compiler/tests/unit/gauntlet-s25/lin-006-deferred-ctx.test.js",
+  "rationale": "§35.5 scopes E-LIN-006 to a `lin` 'consumed inside a `<request>` or `<poll>` markup body' that 'was declared outside that body', and names the fix: 'Either declare `token` inside the `<request>` body, or pass a consumed (non-lin) value into the body.' Here declaration and consumption are both inside the `<request>` body at the same markup-ctx depth, so no boundary is crossed; `token` is consumed exactly once (§35.3 rule 2) on the single path through the body and no linear diagnostic fires.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-LIN-001", "E-LIN-002", "E-LIN-006"]
+  }
+}

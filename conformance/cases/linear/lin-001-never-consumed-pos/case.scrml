@@ -1,0 +1,7 @@
+${
+    function fetchToken() { return "t" }
+    function doWork() { return 1 }
+    lin token = fetchToken()
+    let result = doWork()
+}
+<p>x</>
