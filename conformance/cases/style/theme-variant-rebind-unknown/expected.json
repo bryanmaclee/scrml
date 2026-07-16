@@ -1,0 +1,13 @@
+{
+  "id": "style-theme-variant-rebind-unknown",
+  "description": "§65.3.2 / §65.6 / §65.10 — a `<theme>` variant (`.Dark`) re-binds `ghost`, but no base token `ghost` is declared. Per §65.6 a variant re-binds a SUBSET of the base tokens (the base holds the default-state value); a variant-only token has no value in the default state, so `color: ghost` would resolve to nothing there. The token lowering (emit-css.ts / emit-theme-reset.ts `emitThemeCss`) fires E-THEME-TOKEN-UNKNOWN — the DECIDABLE core of §65.3.2's use-site rule.",
+  "language-version": "1.0",
+  "spec": "§65.3.2, §65.6, §65.10",
+  "source-test": "compiler/tests/unit/css-wave1-emission.test.js",
+  "rationale": "§65.10: E-THEME-TOKEN-UNKNOWN — a token reference that resolves to no in-scope base `<theme>`. The decidable, false-positive-free firing is a variant / `@media` auto-bind sub-block re-binding a name absent from the base token set (`ghost` here). This proves the emission-half validates the theme token structure end-to-end. Partitions into result.errors (E- prefix).",
+  "expect": {
+    "codes": ["E-THEME-TOKEN-UNKNOWN"],
+    "notCodes": ["E-VARIANT-AMBIGUOUS"],
+    "severity": { "E-THEME-TOKEN-UNKNOWN": "error" }
+  }
+}
