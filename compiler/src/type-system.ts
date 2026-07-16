@@ -18750,6 +18750,11 @@ function checkLoopControl(
               "If this is intentional, wrap in double parens to suppress: `((x = next()))`. " +
               "If you meant equality, use `==` or `is`.",
               mkSpan(node),
+              // §34: W-ASSIGN-001 is a Warning. Without this 4th arg the TSError
+              // severity defaults to "error" (constructor default), which would
+              // emit this W- code at severity ERROR. Mirrors the sibling site
+              // (type-system.ts checkWhileIfCondition) which also passes "warning".
+              "warning",
             ));
           }
         }

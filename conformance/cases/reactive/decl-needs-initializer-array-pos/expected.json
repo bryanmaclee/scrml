@@ -1,0 +1,12 @@
+{
+  "id": "reactive-decl-needs-initializer-array-pos",
+  "description": "§6.2 Shape-4 const-derived carve-out (ARRAY form): a DERIVED cell with an ARRAY type annotation and no RHS (`const <items>: string[]`) is a derived-with-no-expression error — E-DECL-NEEDS-INITIALIZER — exactly like the scalar form. The §6.2 closing parenthetical (SPEC.md:2213) is UNCONDITIONAL over `T`: there is NO array carve-out. Shape 4's no-RHS canonical-empty default (`T[]`→`[]`) applies to PLAIN reactive cells only; a derived (`const`) cell's value IS its expression, so omitting the RHS leaves nothing to derive `[]` from. Companion to the scalar `reactive/decl-needs-initializer-pos`; pins the S260 impl fix that removed the former array exemption (was `isConst && !isArrayType`, ast-builder.js — `const`-typed arrays used to silently synthesize `[]`). Incidental W-PROGRAM-001 / E-DG-002 / E-SCOPE-001 ignored by superset matching.",
+  "language-version": "1.0",
+  "spec": "§6.2",
+  "rationale": "§6.2 Shape 4, closing parenthetical (SPEC.md:2213): \"A `const`-derived cell still requires an expression — `const <x>: T` with no RHS is a derived-with-no-expression error, NOT covered by this shape.\" `T` is unqualified — `const <items>: string[]` is a `const`-derived cell with no expression and therefore an error. The Shape-4 table (int→0, string→\"\", bool→false, `T[]`→[]) governs plain reactive cells; a derived cell's value IS its expression, so omitting the RHS leaves nothing to recompute from.",
+  "expect": {
+    "codes": ["E-DECL-NEEDS-INITIALIZER"],
+    "notCodes": [],
+    "severity": { "E-DECL-NEEDS-INITIALIZER": "error" }
+  }
+}
