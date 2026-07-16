@@ -17551,6 +17551,28 @@ function collapseIfChains(nodes, errors, filePath) {
       }
     }
 
+    // E-CTRL-004 (§17.1.1): `else`/`else-if=` SHALL NOT appear on a state object
+    // opener, in ANY position — standalone or chain-adjacent ("SHALL reject any
+    // such usage", regardless of chain context). state / state-constructor-def
+    // nodes carry these attrs in their `attrs` array but are NOT `kind === "markup"`,
+    // so none of the markup-gated E-CTRL-001/002/005 checks above catch them. Read
+    // `attrs` directly (kind-agnostic, mirrors the native parser's hasNodeAttr).
+    // This single node-level site covers BOTH the orphan case (no preceding `if=`)
+    // AND the in-chain case: a state-opener-with-else following an `if=` is never
+    // consumed by the chain scan below — it breaks the chain at the non-markup guard
+    // and re-enters this loop as its own node here — so E-CTRL-004 fires exactly once.
+    if ((node.kind === "state" || node.kind === "state-constructor-def") &&
+        (node.attrs ?? []).some(a => a.name === "else" || a.name === "else-if")) {
+      errors.push(new TABError(
+        "E-CTRL-004",
+        `E-CTRL-004: \`else\` or \`else-if=\` cannot appear on a state object opener.`,
+        node.span ?? { line: 0, col: 0 },
+      ));
+      result.push(node);
+      i++;
+      continue;
+    }
+
     // Not an if= element — pass through
     if (node.kind !== "markup" || !hasAttr(node, "if")) {
       result.push(node);
@@ -17572,18 +17594,12 @@ function collapseIfChains(nodes, errors, filePath) {
       }
 
       const sibling = nodes[j];
-      if (sibling.kind !== "markup") break;
 
-      // E-CTRL-004: else/else-if on state opener
-      if ((sibling.kind === "state" || sibling.kind === "state-constructor-def") &&
-          (hasAttr(sibling, "else") || hasAttr(sibling, "else-if"))) {
-        errors.push(new TABError(
-          "E-CTRL-004",
-          `E-CTRL-004: \`else\` or \`else-if=\` cannot appear on a state object opener.`,
-          sibling.span ?? { line: 0, col: 0 },
-        ));
-        break;
-      }
+      // A state / state-constructor-def sibling (never `kind === "markup"`) breaks
+      // the chain here. If it carries `else`/`else-if=`, the node-level E-CTRL-004
+      // check at the top of this scan catches it when it re-enters as its own node
+      // (see that check's note); we do NOT also fire here, to avoid a double-emit.
+      if (sibling.kind !== "markup") break;
 
       if (hasAttr(sibling, "else-if")) {
         if (elseBranch) {

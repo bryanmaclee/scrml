@@ -18664,12 +18664,19 @@ function checkLoopControl(
         const initExpr = (node as { initExpr?: { kind?: string; raw?: string } }).initExpr;
         const raw = initExpr?.raw ?? ((node as { init?: string }).init ?? "");
         const declName = (node as { name?: string }).name;
-        // Only fire when the body uses `lift` — the only reason a user would
-        // write `let x = while(...) { ... }` is to extract a value via lift.
-        // The ast-builder sometimes absorbs an unrelated while-stmt into a
-        // preceding let-decl's init; that misparse doesn't use lift.
+        // §49.4.4: a `while` in expression position (its whole value bound as a
+        // decl's init, e.g. `let x = while (...) { ... }`) SHALL fire E-LOOP-007,
+        // WITH OR WITHOUT `lift` in its body — §49.9's own example `let x = while
+        // (true) { 5 }` has no lift and IS an Error. The valid §49.6.1 accumulator
+        // pattern is a STATEMENT `while` + a following `let result = ~`; there the
+        // decl's init is `~` (an ident), never an escape-hatch `while(...){...}`,
+        // so it does not match here. (Earlier this required a `\blift\b` token in
+        // the body to dodge an ast-builder misparse that folded a following
+        // while-stmt into a preceding decl's init; that misparse no longer
+        // reproduces — a while-stmt after a complete let/const decl now parses as a
+        // separate statement — so the narrowing is dropped per §49.4.4.)
         const rawStr = String(raw).trim();
-        const looksLikeWhileAsExpr = /^while\s*\([\s\S]*?\)\s*\{[\s\S]*?\blift\b[\s\S]*\}\s*$/.test(rawStr);
+        const looksLikeWhileAsExpr = /^while\s*\([\s\S]*\)\s*\{[\s\S]*\}\s*$/.test(rawStr);
         if (declName && initExpr?.kind === "escape-hatch" && looksLikeWhileAsExpr) {
           errors.push(new TSError(
             "E-LOOP-007",

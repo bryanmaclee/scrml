@@ -1,0 +1,12 @@
+{
+  "id": "loop-007-separate-while-after-decl-neg",
+  "description": "§49.4.4 invariant guard — a COMPLETE `let`/`const` decl (`let x = 5`) immediately followed by a SEPARATE statement-`while` on the next line does NOT fire E-LOOP-007. The `while` is its own statement, NOT the decl's init value, so §49.4.4 does not apply. This locks in the parser invariant that the un-narrowed checkWhileAsExpr (E-LOOP-007 fires on ANY escape-hatch `let x = while(...)`) depends on: if a future ast-builder regression re-introduced the old misparse that folds a following while-stmt into `x`'s init, `x` would gain an escape-hatch `while(...){...}` init and E-LOOP-007 would false-fire here — this case catches that. W-PROGRAM-001 co-fires incidentally (no `<program>` shell); not asserted.",
+  "language-version": "1.0",
+  "spec": "§49.4.4, §49.6.1",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§49.4.4 rejects a `while` used in EXPRESSION position (its whole value bound as a decl's init). Here `let x = 5` is a complete decl whose init is the literal `5`; the `while (@n < 3) { @n = @n + 1 }` on the following line is a separate statement in the same `${}` logic block, occupying STATEMENT position. A statement `while` produces no value (§49.5.2) and is entirely legal — E-LOOP-007 SHALL stay silent. This is distinct from the §49.6.1 accumulator pattern (which additionally consumes lifted values via a following `let result = ~`); here the `while` neither lifts nor is consumed. RATIONALE (S239 review): the un-narrowing that closed the §49.4.4 no-lift under-fire (dropping the `\\blift\\b` requirement from checkWhileAsExpr) is only sound because the ast-builder parses a while-stmt after a complete let/const decl as a SEPARATE statement (empirically verified across every init shape) — it never folds the while into the preceding decl's init. Nothing in the code pins that parser invariant; this conformance neg case does, so a regression is caught by the suite rather than by a silent false-positive on valid loops.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-LOOP-007", "E-LOOP-001", "E-LOOP-002"]
+  }
+}
