@@ -1,0 +1,6 @@
+<foreign lang="ts" />
+${
+  export fn f() {
+    _={ console.log(1) }=
+  }
+}
