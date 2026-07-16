@@ -2,6 +2,7 @@ import { collectCssBlocks } from "./collect.ts";
 import { replaceCssVarRefs } from "./utils.ts";
 import { resolveApplyToken } from "../tailwind-classes.js";
 import { CGError } from "./errors.ts";
+import { emitThemeCss, emitResetLayer, lowerTokenRefsInValue, wrapSelectorWhere } from "./emit-theme-reset.ts";
 
 /** A source span (the fire site for a diagnostic). */
 interface CSSSpan {
@@ -140,8 +141,13 @@ function dedupeLastWins(decls: Array<{ prop: string; value: string }>): Array<{ 
 /**
  * Render a single declaration's reactive value (CSS custom-property rewrite for
  * `@var` refs), shared by the flat and grouped paths.
+ *
+ * `tokenNames` (§65.3.2) — when a use-site value references a declared `<theme>`
+ * token (`color: ink`), the bare identifier is lowered to `var(--ink)`. A value
+ * with `@var` reactive refs takes the existing §25 rewrite path unchanged; a
+ * plain literal value additionally gets the token-lowering pass.
  */
-function renderDeclValue(decl: CSSDeclaration): string {
+function renderDeclValue(decl: CSSDeclaration, tokenNames?: Set<string>): string {
   let value = decl.value ?? "";
   if (decl.reactiveRefs && decl.reactiveRefs.length > 0) {
     if (decl.isExpression) {
@@ -150,6 +156,8 @@ function renderDeclValue(decl: CSSDeclaration): string {
     } else {
       value = replaceCssVarRefs(value);
     }
+  } else if (tokenNames && tokenNames.size > 0) {
+    value = lowerTokenRefsInValue(value, tokenNames);
   }
   return value;
 }
@@ -163,7 +171,7 @@ function renderDeclValue(decl: CSSDeclaration): string {
  * declarations are collected, a property-level last-wins dedup collapses the
  * duplicate composing-family shorthands into one.
  */
-function renderApplyGroupedDeclarations(declarations: CSSDeclaration[], errors?: CGError[]): string {
+function renderApplyGroupedDeclarations(declarations: CSSDeclaration[], errors?: CGError[], tokenNames?: Set<string>): string {
   const ordered: Array<{ prop: string; value: string }> = [];
   for (const decl of declarations) {
     if (Array.isArray(decl.apply)) {
@@ -194,7 +202,7 @@ function renderApplyGroupedDeclarations(declarations: CSSDeclaration[], errors?:
         }
       }
     } else if (decl.prop && decl.value !== undefined) {
-      ordered.push({ prop: decl.prop, value: renderDeclValue(decl) });
+      ordered.push({ prop: decl.prop, value: renderDeclValue(decl, tokenNames) });
     }
   }
   return dedupeLastWins(ordered).map(d => `${d.prop}: ${d.value};`).join(" ");
@@ -209,7 +217,7 @@ function renderApplyGroupedDeclarations(declarations: CSSDeclaration[], errors?:
  * tests) may omit it — expansion still happens, the diagnostics are simply not
  * collected.
  */
-function renderCssBlock(block: CSSBlock, errors?: CGError[]): string {
+function renderCssBlock(block: CSSBlock, errors?: CGError[], tokenNames?: Set<string>, flatWrap = false): string {
   if (block.rules && Array.isArray(block.rules)) {
     const ruleParts: string[] = [];
     for (const rule of block.rules) {
@@ -225,18 +233,20 @@ function renderCssBlock(block: CSSBlock, errors?: CGError[]): string {
       }
       if (rule.selector && rule.declarations) {
         // Grouped rule: selector { declarations }
+        // §65.2.5 — component-scope author selectors are `:where()`-flat.
+        const sel = flatWrap ? wrapSelectorWhere(rule.selector) : rule.selector;
         // Fast path: no `@apply` node — render declarations verbatim (unchanged).
         const hasApply = rule.declarations.some(d => Array.isArray(d.apply));
         if (hasApply) {
-          const declStr = renderApplyGroupedDeclarations(rule.declarations, errors);
-          ruleParts.push(`${rule.selector} { ${declStr} }`);
+          const declStr = renderApplyGroupedDeclarations(rule.declarations, errors, tokenNames);
+          ruleParts.push(`${sel} { ${declStr} }`);
           continue;
         }
         const declParts: string[] = [];
         for (const decl of rule.declarations) {
-          declParts.push(`${decl.prop}: ${renderDeclValue(decl)};`);
+          declParts.push(`${decl.prop}: ${renderDeclValue(decl, tokenNames)};`);
         }
-        ruleParts.push(`${rule.selector} { ${declParts.join(" ")} }`);
+        ruleParts.push(`${sel} { ${declParts.join(" ")} }`);
       } else if (rule.selector) {
         // Flat selector (no braces — legacy / unusual)
         ruleParts.push(rule.selector);
@@ -249,6 +259,8 @@ function renderCssBlock(block: CSSBlock, errors?: CGError[]): string {
           } else {
             value = replaceCssVarRefs(value);
           }
+        } else if (tokenNames && tokenNames.size > 0) {
+          value = lowerTokenRefsInValue(value, tokenNames);
         }
         ruleParts.push(`${rule.prop}: ${value};`);
       }
@@ -293,9 +305,17 @@ export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[
 
   const parts: string[] = [];
 
-  // --- Program-level CSS (no @scope wrapping) ---
+  // --- §65.3.2 / §65.6 <theme> token lowering ---
+  // Emitted FIRST (the `:root` custom-property definitions + reactive variant
+  // selectors + `@media` auto-binds). `tokenNames` drives use-site `color: ink`
+  // → `color: var(--ink)` lowering across every author rule below.
+  const { css: themeCss, tokenNames } = emitThemeCss(nodes, errors);
+  if (themeCss) parts.push(themeCss);
+
+  // --- Program-level CSS (no @scope wrapping, no :where()-flat — the global
+  //     escape hatch keeps the weaker guarantee, §65.2.4 R3 / OQ-8) ---
   for (const block of programInlineBlocks) {
-    const css = renderCssBlock(block, errors);
+    const css = renderCssBlock(block, errors, tokenNames, false);
     if (css) parts.push(css);
   }
   for (const block of programStyleBlocks) {
@@ -314,7 +334,10 @@ export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[
     if (isFlatDeclarationBlock(block)) continue;
 
     const name = block._componentScope!;
-    const css = renderCssBlock(block, errors);
+    // §65.2.5 — component-scope author selectors are `:where()`-flat (specificity
+    // (0,0,0)) so the §65.2 conflict-checker's flat-specificity assumption holds
+    // at runtime.
+    const css = renderCssBlock(block, errors, tokenNames, true);
     if (!css) continue;
     if (!componentCssMap.has(name)) componentCssMap.set(name, []);
     componentCssMap.get(name)!.push(css);
@@ -338,6 +361,12 @@ export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[
     ].join("\n");
     parts.push(scopeBlock);
   }
+
+  // --- §65.3.4 built-in reset (bottom `@layer reset`, opt-out via
+  //     `<program reset="none">`) — emitted LAST for readability; as a named
+  //     layer it sits below every unlayered author rule regardless of position. ---
+  const resetCss = emitResetLayer(nodes);
+  if (resetCss) parts.push(resetCss);
 
   return parts.join("\n");
 }

@@ -78,11 +78,13 @@ function norm(s) {
     .replace(/_scrml_[a-z_]+_\d+/g, "_scrml_GEN")
     .replace(/scrml-[a-z]+="[^"]*"/g, "scrml-GEN")
     // Per-fixture noise that is NOT part of the body lowering: the page
-    // <title> (from the distinct `title=` we set so two fixtures don't collide)
-    // and the per-file client-js <script src> name. Normalize both out so the
+    // <title> (from the distinct `title=` we set so two fixtures don't collide),
+    // the per-file client-js <script src> name, and (since the §65.3.4 universal
+    // reset) the per-file stylesheet <link href>. Normalize all out so the
     // comparison is byte-identity of the BODY, not of incidental fixture names.
     .replace(/<title>[^<]*<\/title>/g, "<title>T</title>")
-    .replace(/<script src="[^"]*\.client\.js"><\/script>/g, '<script src="GEN.client.js"></script>');
+    .replace(/<script src="[^"]*\.client\.js"><\/script>/g, '<script src="GEN.client.js"></script>')
+    .replace(/<link rel="stylesheet" href="[^"]*\.css">/g, '<link rel="stylesheet" href="GEN.css">');
 }
 
 // ---------------------------------------------------------------------------
