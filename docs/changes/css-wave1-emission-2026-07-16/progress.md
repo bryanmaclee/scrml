@@ -67,3 +67,38 @@ theme token lowering, reset layer, :where()-flat.
 - --explain-style DX (§65.2.6): OPTIONAL / non-trivial — deferred per brief.
 - Flat-declaration inline `#{}` token lowering (emit-html path) + at-rule inner-body token lowering /
   :where wrapping: not covered (selector-path only). Low-frequency; noted.
+
+### 2026-07-16 — S239 FIX ROUND (@-sigil fold + cascade fixes) — commit 2a1aedaa + SPEC
+Coordinator dispatched a bundled fix round: the ratified `@` token sigil (supersedes bare refs)
++ 5 confirmed cascade bugs + 2 theme defects + cleanups. NOTE: this ROUND revises the earlier
+"E-THEME-TOKEN-UNKNOWN use-site undecidable" deferral above — the `@` sigil MAKES it decidable.
+- A. `@`-sigil fold: reference `color: @ink` → var(--ink); BARE identifier NEVER lowered (fixes
+  [5] token-shadows-keyword by construction). E-THEME-TOKEN-UNKNOWN = decidable use-site check
+  (`@name` ∉ theme tokens ∉ declared cells). Critical discovery: the `@` sigil COLLIDES with the
+  §25 reactive-CSS-var bridge (`@cell`→var(--scrml-cell)); resolved by membership (theme token
+  first, else the reactive bridge) — css-variable-bridge.test.js stays green.
+- [0] wrapSelectorWhere: split comma-list, wrap each arm; [4] don't flatten conditional/state
+  selectors (keep layer specificity); [1] reset `@layer` emitted FIRST (lowest); [6] variant-rebind
+  check uses GLOBAL base set; [7] variant-only token fires (via global-base check).
+- D cleanups: dead IDENT_RE removed; 3 AST walks → 1 (collectThemeContext); flat path reuses render.
+- SPEC: §65.3.2 amended (@ sigil + decidable use-site); §25.7, §65.10 table, §34 row, and the §65
+  worked examples (§65.3.3/§65.4/§65.6/§65.13) updated to the `@` form.
+- Repro per finding under repros/.
+
+### NEW finding surfaced (out of scope — for the coordinator)
+- **Component-scope descendant-combinator SPACE collapse (PRE-EXISTING silent-miscompile):** a
+  component `#{ .card .title { } }` tokenizes to selector `.card.title` (SPACE LOST) — a descendant
+  selector silently becomes a COMPOUND selector (matches an element with BOTH classes, not a
+  descendant). Present on base 9c27ce9a (old code emitted `rule.selector` verbatim); NOT introduced
+  by this work and NOT in the S239 findings list. Program-level `#{}` preserves the space; only the
+  component path collapses it. Confirmed via debug: `wrapSelectorWhere` receives `.card.title`.
+
+### ESCALATED (finding [2]) — component-scope vs program-global precedence
+- Component `:where(.link)` (0,0,0) now LOSES to a program-global unwrapped element rule (`a`, 0,0,1)
+  — the :where flattening is what exposes it (CSS cascade checks specificity BEFORE @scope proximity).
+  §65.5 ranks `component-scope #{}` high and program-global is the §65.9/OQ-8 "escape hatch" OUTSIDE
+  the §65.1 resolution algorithm, but NEITHER §65.5 NOR §65.8 CRISPLY places a program-global `#{}`
+  rule's LAYER relative to component-scope. Per the coordinator's instruction ("if the spec does not
+  clearly rank, STOP and ESCALATE — do not guess a cascade semantic"), NOT implemented. Lean: place
+  program-global `#{}` in a layer BELOW the component `author` layer (so component wins), pending a
+  ruling.
