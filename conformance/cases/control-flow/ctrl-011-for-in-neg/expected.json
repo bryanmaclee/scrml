@@ -1,0 +1,12 @@
+{
+  "id": "ctrl-011-for-in-neg",
+  "description": "§17.4 — the canonical `for (x of @items)` value-iteration form does NOT fire E-CTRL-011. Twinned with ctrl-011-for-in-pos: identical source apart from the single `in` -> `of` keyword swap, which isolates the trigger to exactly that token. W-PROGRAM-001 co-fires incidentally (no `<program>` shell); not asserted.",
+  "language-version": "1.0",
+  "spec": "§17.4",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§34 E-CTRL-011 / §17.4: `of` is scrml's canonical iteration keyword — `for (item of @items)` iterates values and is the Tier-0 loop form. E-CTRL-011 rejects only the `in` variant, so the `of` form SHALL stay silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CTRL-011"]
+  }
+}

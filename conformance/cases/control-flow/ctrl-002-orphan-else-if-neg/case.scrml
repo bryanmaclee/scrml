@@ -1,0 +1,9 @@
+<program>
+  <wizard { step: int }
+
+  <div class="wizard">
+    <span if=@step.eq(1)>Step one</>
+    <span else-if=@step.eq(2)>Step two</>
+    <span else>All steps complete</>
+  </>
+</program>

@@ -1,0 +1,12 @@
+{
+  "id": "ctrl-003-extend-past-else-neg",
+  "description": "§17.1.1 — a chain that terminates AT `else`, followed by a plain sibling carrying none of `if=`/`else-if=`/`else`, does NOT fire E-CTRL-003. This pins the chain-boundary rule directly: the trailing `<span>Always shown</>` ENDS the chain rather than extending it, so it is a legal sibling and not a violation. W-PROGRAM-SPA-INFERRED co-fires incidentally at severity info; not asserted.",
+  "language-version": "1.0",
+  "spec": "§17.1.1",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§17.1.1: an `if=` chain is the maximal contiguous sequence of sibling elements beginning with `if=`; 'The sequence ends at the first element that carries none of `if=`, `else-if=`, or `else`.' E-CTRL-003 rejects only an element that would EXTEND a chain past its terminal `else`. A plain element after `else` terminates the chain normally and SHALL NOT be rejected.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CTRL-003", "E-CTRL-001", "E-CTRL-002"]
+  }
+}

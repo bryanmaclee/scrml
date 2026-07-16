@@ -1,0 +1,13 @@
+{
+  "id": "lin-006-deferred-ctx-pos",
+  "description": "§35.5 — a `lin` variable declared OUTSIDE a `<request>` body and consumed INSIDE it fires E-LIN-006. This is the SPEC's own worked example (§35.5 E-LIN-006 block). `<request>` (§6.7.7) and `<poll>` (§6.7.6) schedule their bodies for DEFERRED execution — after mount, on reactive-dep change, on interval — so the compiler cannot prove dominance across the scheduling boundary: the body may run zero times or many. E-LIN-006 exists as a distinct code from E-LIN-002 so the developer sees the BOUNDARY violation rather than a confusing double-use. The pos asserts the §35.5 non-cascade contract via notCodes: the offending reference is force-consumed for scope-exit accounting, so E-LIN-001 SHALL NOT also fire. W-PROGRAM-REDUNDANT-LOGIC / W-PROGRAM-SPA-INFERRED co-fire incidentally. `@userId` is rendered in markup so the case pins the linear pass rather than E-DG-002 (reactive var declared but never consumed).",
+  "language-version": "1.0",
+  "spec": "§35.5, §6.7.7",
+  "source-test": "compiler/tests/unit/gauntlet-s25/lin-006-deferred-ctx.test.js",
+  "rationale": "§35.5: 'The compiler SHALL emit E-LIN-006 when a `lin` variable is consumed inside a `<request>` or `<poll>` markup body and the `lin` variable was declared outside that body. The scoping check is based on the markup-ctx stack at consumption time.' And: 'When E-LIN-006 fires on a reference, that reference SHALL be treated as having consumed the `lin` variable for scope-exit accounting; E-LIN-001 SHALL NOT cascade on the same variable.' `token` is declared in the outer `${}` block and consumed inside the deferred `<request>` body, so the exactly-once guarantee (§35.1) is unprovable across the scheduling boundary.",
+  "expect": {
+    "codes": ["E-LIN-006"],
+    "notCodes": ["E-LIN-001", "E-LIN-002"],
+    "severity": { "E-LIN-006": "error" }
+  }
+}

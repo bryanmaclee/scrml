@@ -1,0 +1,13 @@
+{
+  "id": "ctrl-001-orphan-else-pos",
+  "description": "§17.1.1 — an element carrying `else` with NO preceding `if=`/`else-if=` element at the same parent level fires E-CTRL-001. Mirrors the SPEC's own §17 Worked Example 2 (`<span else>Fallback</>` after a plain `<p>`). W-PROGRAM-001 co-fires incidentally (no `<program>` shell around the bare markup); E-DG-002 co-fires incidentally (the `<loggedIn>` cell has no surviving reader) — neither is asserted.",
+  "language-version": "1.0",
+  "spec": "§17.1.1",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§17.1.1 Normative Rules: an element carrying `else` SHALL be immediately preceded at the same parent level by an element carrying `if=` or `else-if=`. The compiler SHALL reject any `else` attribute that does not satisfy this condition (E-CTRL-001). §17 Error Code Summary + §34 both register E-CTRL-001 at severity Error.",
+  "expect": {
+    "codes": ["E-CTRL-001"],
+    "notCodes": ["E-CTRL-002", "E-CTRL-005"],
+    "severity": { "E-CTRL-001": "error" }
+  }
+}

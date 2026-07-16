@@ -1,0 +1,6 @@
+${
+    <items> = ["a", "b"]
+}
+<ul>
+    for (x of @items) { lift <li>${x}</> }
+</>

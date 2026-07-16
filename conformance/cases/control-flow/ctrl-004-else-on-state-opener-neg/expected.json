@@ -1,0 +1,12 @@
+{
+  "id": "ctrl-004-else-on-state-opener-neg",
+  "description": "§17.1.1 — state object openers that carry NEITHER `else` NOR `else-if=`, declared adjacent to a well-formed if/else chain, do NOT fire E-CTRL-004. Pins the clean half of the E-CTRL-004 rule: state-object openers are declaration sites and coexist with chains without triggering the code. W-PROGRAM-SPA-INFERRED co-fires incidentally at severity info; not asserted. POS TWIN DEFERRED — see NOTE below.",
+  "language-version": "1.0",
+  "spec": "§17.1.1",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§17.1.1 Normative Rules: '`else` and `else-if=` SHALL NOT appear on a state object opener. The compiler SHALL reject any such usage (E-CTRL-004).' The rule is conditioned on the PRESENCE of `else`/`else-if=` on the opener; an opener carrying neither is a plain declaration site and SHALL NOT be rejected. NOTE (ss75, 2026-07-16): the reject-path (pos) twin is NOT authored — the sole E-CTRL-004 fire site (ast-builder.js:17569) is provably unreachable: the chain scan breaks at `if (sibling.kind !== \"markup\") break;` (ast-builder.js:17566) BEFORE the `sibling.kind === \"state\" || sibling.kind === \"state-constructor-def\"` test, so the guarded condition is always false. Authoring a pos asserting silence would enshrine impl#1 against normative §17.1.1 / §17 Error Code Summary / §34, all of which mandate Error. Escalated to the sPA for a source fix; this neg lands the reachable half now.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CTRL-004", "E-CTRL-001", "E-CTRL-002"]
+  }
+}
