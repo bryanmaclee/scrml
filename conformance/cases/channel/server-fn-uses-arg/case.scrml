@@ -1,0 +1,14 @@
+<program db="postgres://localhost/app">
+
+  <channel name="chat">
+    <count> = 0
+
+    function tally(delta) {
+      broadcast({ total: delta })
+    }
+  </channel>
+
+  <p>${@count}</p>
+  <button onclick=tally(1)>Tally</button>
+
+</program>

@@ -1,0 +1,9 @@
+<program db="postgres://localhost/app">
+
+  <channel name="chat">
+    <count> = 0
+  </channel>
+
+  <p>${@count}</p>
+
+</program>
