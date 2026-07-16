@@ -140,6 +140,12 @@ const ALLOWED = {
   // NEVER on `.isComponent`.
   "codegen/emit-expr.ts": 3,       // type-signature mentions only (async classifier)
   "codegen/emit-server.ts": 1,     // type-signature mention only (exportRegistryLegacy param)
+  // Seam-A colorless-async (GITI-037) — computeAsyncFnNames's Gap-1 stdlib-Promise
+  // seed threads the exportRegistry value shape `{kind, category, isComponent,
+  // isAsync?}`. The `isComponent` field appears in the local `ExportRegistry` TYPE
+  // ALIAS only; the routing read is on `kind ∈ {function, fn}` and `isAsync === true`
+  // (isPromiseReturningStdlibFn), NEVER on `.isComponent`.
+  "codegen/emit-library-shared.ts": 1, // type-alias mention only (ExportRegistry)
   // (state-type-routing.ts deleted by P3-FOLLOW.)
 };
 

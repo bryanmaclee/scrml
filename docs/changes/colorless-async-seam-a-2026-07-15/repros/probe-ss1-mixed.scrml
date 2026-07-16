@@ -1,8 +1,8 @@
 ${
   import { safeCallAsync } from "scrml:host"
-  <db src="./data.db">
+  <db src="./data.db" tables="items">
   export function loadRows() {
-    const rows = ?{`SELECT * FROM items`}.all()
+    const rows = ?{`SELECT id FROM items`}.all()
     return rows
   }
   export function callHost(obj) {

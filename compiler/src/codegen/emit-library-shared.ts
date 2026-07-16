@@ -17,9 +17,18 @@ import { emitFnShortcutBody } from "./emit-logic.js";
 import { paramSignature } from "./utils.ts";
 import { bodyContains } from "./collect.ts";
 import { extractCalleeNames } from "./scheduling.ts";
+import { isPromiseReturningStdlibFn } from "../module-resolver.js";
 
 /** A loosely-typed AST node. */
 type ASTNode = Record<string, unknown>;
+
+/** A per-file `localName → sourceModuleAbsPath` map (buildCalleeImportMap). */
+type CalleeImportMap = Map<string, string>;
+/** MOD per-module by-name export metadata (the `isAsync` source of truth). */
+type ExportRegistry = Map<
+  string,
+  Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>
+>;
 
 /**
  * True iff the fn body carries a directly-async signal: a `?{}` SQL node
@@ -76,30 +85,59 @@ function collectCalleeIdents(node: unknown, out: Set<string>): void {
 /**
  * Compute the set of library fn names that must be emitted `async` (and whose
  * call sites must be awaited). Seed = fns that directly do `?{}` / `_{}` / carry
- * `isAsync`, UNION `seedAsync` (the CROSS-IMPORT async names — a lib fn calling
- * an async fn imported from ANOTHER lib awaits it too). Then fixpoint-propagate
- * over the call graph: a fn calling any async fn is itself async.
+ * `isAsync`, OR (Seam-A Gap 1, GITI-037) that STRUCTURALLY call a Promise-
+ * returning stdlib/vendor primitive (`safeCallAsync`, a `scrml:auth`/`scrml:http`/
+ * `scrml:redis` async export), UNION `seedAsync` (the CROSS-IMPORT async names —
+ * a lib fn calling an async fn imported from ANOTHER lib awaits it too). Then
+ * fixpoint-propagate over the call graph: a fn calling any async fn is itself
+ * async.
  *
  * Call detection is STRUCTURAL (the fn body's `call` nodes), NOT a source-text
  * regex. The prior `\bname\s*\(` text scan over-matched a call-shaped token in a
  * comment or string literal → it mis-colored a sync web-app server export as
  * `async` (S239 regression). `_sourceText` is retained for call-site
  * compatibility but is no longer consulted.
+ *
+ * The Gap-1 stdlib-Promise seed is OPT-IN: it fires only when BOTH `calleeMap`
+ * (the per-file `localName → absSource` resolver, `buildCalleeImportMap`) and
+ * `exportRegistry` (the MOD `isAsync` source of truth) are threaded. Absent
+ * either (test harness / no imports), behavior is byte-identical to the pre-Gap-1
+ * `?{}`/foreign/isAsync seed — the same backward-compatible pattern
+ * `hasServerCallees` uses.
  */
 export function computeAsyncFnNames(
   fns: ASTNode[],
   _sourceText?: string | null,
   seedAsync?: Set<string>,
+  calleeMap?: CalleeImportMap | null,
+  exportRegistry?: ExportRegistry | null,
 ): Set<string> {
   const async = new Set<string>(seedAsync ?? []);
   const calleesByName = new Map<string, Set<string>>();
+  const hasStdlibClassifier = !!(
+    calleeMap && exportRegistry && calleeMap.size > 0 && exportRegistry.size > 0
+  );
+  // Seam-A Gap 1 — does `callees` reach a Promise-returning stdlib/vendor export?
+  // Reuses `isPromiseReturningStdlibFn` (keyed on exportRegistry `isAsync` + the
+  // Q5 `<repo>/stdlib/` carve-out), fed by the SAME structural `callees` set the
+  // fixpoint uses — never a `\bname\s*\(` text scan (the S239 over-match).
+  const callsStdlibPromise = (callees: Set<string>): boolean => {
+    if (!hasStdlibClassifier) return false;
+    for (const callee of callees) {
+      const src = calleeMap!.get(callee);
+      if (src && isPromiseReturningStdlibFn(callee, src, exportRegistry!)) return true;
+    }
+    return false;
+  };
   for (const fn of fns) {
     const name = fn.name as string | undefined;
     if (!name) continue;
     const callees = new Set<string>();
     collectCalleeIdents(fn.body, callees);
     calleesByName.set(name, callees);
-    if (fn.isAsync === true || bodyHasForeignOrSql(fn.body)) async.add(name);
+    if (fn.isAsync === true || bodyHasForeignOrSql(fn.body) || callsStdlibPromise(callees)) {
+      async.add(name);
+    }
   }
   // Fixpoint — a fn that STRUCTURALLY calls any async fn becomes async.
   let changed = true;

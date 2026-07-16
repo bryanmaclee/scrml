@@ -66,7 +66,31 @@ on a wrong premise (pa.md Rule 3/4; memory: cookbook-vs-empirical, don't-soft-cl
 R26-empirical-verify, don't-preclassify-surgical). No source changes made. Repros + this
 progress.md committed as the recovery anchor.
 
-## next (pending PA ruling)
+## 2026-07-16 — bryan ruled Option A. Executing full Seam-A unification.
+
+### DONE — Gap 1 (seed) + ss1 wiring [WIP commit]
+- emit-library-shared.ts computeAsyncFnNames: added optional `calleeMap`+`exportRegistry`
+  params; a fn whose body STRUCTURALLY calls a Promise-returning stdlib/vendor primitive
+  (isPromiseReturningStdlibFn) now seeds async. Opt-in (byte-identical when absent).
+- emit-server.ts emitModuleValueExportLines: threaded `exportRegistry` param + build
+  calleeMap (buildCalleeImportMap w/ .ast.imports hoist); pass both to computeAsyncFnNames.
+  Threaded `_asyncExportRegistry` from the generateServerJs ss1 call site (:3722).
+- VERIFIED: probe-ss1-mixed .server.js now emits `export async function callHost` +
+  `const r = await safeCallAsync(...)`. The await comes from the module-level
+  _serverAsyncClassifier already installed by generateServerJs (:1119) — coloring async
+  routes callHost to the server boundary where emit-expr auto-awaits the stdlib call.
+- Targeted tests green: auto-await-promise-stdlib, safe-call-async, stdlib-auth,
+  emit-library, compiler-managed-async, issue-26-finding2, serve-target-tool, async-reject.
+- NOTE: probe-ss1-mixed still has pre-existing library-mode `<db>` errors (E-MU-001 on
+  src/tables, E-CODEGEN-INVALID-LOGIC) — orthogonal to async; a bare `${}` `?{}` library
+  has these on unmodified code. The async EMIT is correct regardless.
+
+### NEXT
+- generateLibraryJs (the PRIMARY repro path): compute async set + install classifier
+  + route async fns through emitLibraryFnMember + prune spans + drain sink → diagnostic.
+- Gap 3 (asyncExportNamesOf scrml: vendor), Gap 2 (emit-functions transitive), emit-tool.
+
+## (superseded) prior next (pending PA ruling)
 - Re-scoped brief specifying: which emit path owns colorless-async for the library shape, and
   whether to (1) route async library fns through emitLibraryFnMember with the auto-await
   classifier threaded, or (2) extend generateLibraryJs's text-splice, or (3) unify both on a

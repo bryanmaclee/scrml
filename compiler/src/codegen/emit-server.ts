@@ -585,6 +585,7 @@ function emitModuleValueExportLines(
   filePath: string,
   assembledBody: string,
   errors?: CGError[],
+  exportRegistry?: ServerExportRegistry | null,
 ): string[] {
   // Collect logic blocks (the `${ ... }` bodies). Mirrors emit-library's
   // collectLogicBlocks — exported value decls live in the file's logic body.
@@ -662,10 +663,19 @@ function emitModuleValueExportLines(
   // server-exported fn that only transitively calls a cross-lib async import via
   // its imported local is emitted sync → the callee's Promise leaks un-awaited.
   const asyncImportedSeed = ((fileAST as any)?._asyncImportedLocals as Set<string> | undefined);
+  // Seam-A Gap 1 (GITI-037) — the per-file stdlib-Promise classifier inputs so a
+  // value-exported fn calling `safeCallAsync` (or a `scrml:auth`/`http`/`redis`
+  // async export) is seeded async + its call awaited. `buildCalleeImportMap` reads
+  // `.imports` off the FileAST; the TABResult wrapper hoists imports to
+  // `.ast.imports`, so fall back to `.ast` when present (mirrors :1096).
+  const _veFileAstForImports: any = (fileAST?.ast?.imports) ? fileAST.ast : fileAST;
+  const _veCalleeMap = buildCalleeImportMap(_veFileAstForImports);
   const asyncFnNames = computeAsyncFnNames(
     Array.from(fnDeclByName.values()) as any[],
     _sourceText,
     asyncImportedSeed,
+    _veCalleeMap,
+    exportRegistry ?? null,
   );
   // W5b (S239) — E-FOREIGN-006 crossing-shadow diagnostics from lowering an
   // async ss1 fn body surface via this sink (parity with the tool path — the
@@ -3719,7 +3729,7 @@ export function generateServerJs(
   // restored so no OTHER file's `_scrml_*_<N>` suffix shifts.
   {
     const _veSnapshot = getVarCounter();
-    const _veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"), errors);
+    const _veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"), errors, _asyncExportRegistry);
     setVarCounter(_veSnapshot);
     for (const _l of _veLines) lines.push(_l);
   }
