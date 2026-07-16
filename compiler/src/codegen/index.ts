@@ -1160,6 +1160,10 @@ export function runCG(input: CgInput): CgOutput {
         synthCellKeys: collectSynthCellKeys(fileAST),
         analysis: analysis ?? null,
         reachabilityRecord: reachabilityRecordInput,
+        // Seam-A colorless-async (GITI-037) — thread MOD's exportRegistry so
+        // generateLibraryJs can seed + auto-await a library fn calling a
+        // Promise-returning stdlib primitive (safeCallAsync / scrml:auth …).
+        exportRegistry: exportRegistryInput,
       };
       const libraryJs: string | null = codegenStage("emit-library", () =>
         generateLibraryJs(libCtx)

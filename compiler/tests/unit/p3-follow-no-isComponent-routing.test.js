@@ -146,6 +146,11 @@ const ALLOWED = {
   // ALIAS only; the routing read is on `kind ∈ {function, fn}` and `isAsync === true`
   // (isPromiseReturningStdlibFn), NEVER on `.isComponent`.
   "codegen/emit-library-shared.ts": 1, // type-alias mention only (ExportRegistry)
+  // Seam-A colorless-async (GITI-037) — generateLibraryJs threads MOD's
+  // exportRegistry to seed + auto-await a library fn calling a Promise-returning
+  // stdlib primitive. The `isComponent` field appears in the local
+  // `LibExportRegistry` TYPE ALIAS only; routing reads kind/isAsync, never it.
+  "codegen/emit-library.ts": 1,    // type-alias mention only (LibExportRegistry)
   // (state-type-routing.ts deleted by P3-FOLLOW.)
 };
 

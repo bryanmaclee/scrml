@@ -85,10 +85,28 @@ progress.md committed as the recovery anchor.
   src/tables, E-CODEGEN-INVALID-LOGIC) — orthogonal to async; a bare `${}` `?{}` library
   has these on unmodified code. The async EMIT is correct regardless.
 
+### DONE — generateLibraryJs structured async emit (PRIMARY repro fix) [WIP commit]
+- emit-library.ts: new emitAsyncLibraryFns — computes async set (computeAsyncFnNames +
+  Gap-1 seed), routes each NON-SQL async fn through emitLibraryFnMember (structured,
+  colors async + awaits stdlib call + transitive peers), prunes their spans from the
+  verbatim block (merged into pruneServerFnsAndLowerGuarded's removals), appends the
+  structured JS. Installs setServerAsyncClassifier (+ syncCallSink) around emission;
+  drains the sink → fatal E-ASYNC-STDLIB-IN-SYNC-CALLBACK (no-silent-leak, axis-i).
+- codegen/index.ts: threaded exportRegistryInput into the library libCtx.
+- p3-follow allowlist: +emit-library.ts budget 1 (LibExportRegistry type alias).
+- VERIFIED emit:
+  - repro-giti037 (library): `export async function callHost` + `await safeCallAsync(...)`.
+  - repro-transitive (library): leaf/middle/top ALL async; middle awaits leaf, top awaits
+    middle (transitive coloring + peer-await via serverFnNames=asyncFnNames). CLEAN.
+  - repro-crossmodule: helper.js wrapAsync async+awaited; main.js orchestrate NOT yet
+    colored → Gap-3 cross-module seed still needed (next).
+- Full unit suite 16203 pass / 0 fail; integration 3071 pass / 0 fail.
+
 ### NEXT
-- generateLibraryJs (the PRIMARY repro path): compute async set + install classifier
-  + route async fns through emitLibraryFnMember + prune spans + drain sink → diagnostic.
-- Gap 3 (asyncExportNamesOf scrml: vendor), Gap 2 (emit-functions transitive), emit-tool.
+- Gap 3 (cross-module): thread exportRegistry into asyncExportNamesOf/collectAsyncFnNamesFromFile
+  (so a cross-lib fn calling safeCallAsync is recognized async) + include scrml: vendor async
+  exports in asyncImportedLocalsOf + thread `_asyncImportedLocals` seed into emitAsyncLibraryFns.
+- Gap 2 (emit-functions browser transitive) + emit-tool wiring + comprehensive test file.
 
 ## (superseded) prior next (pending PA ruling)
 - Re-scoped brief specifying: which emit path owns colorless-async for the library shape, and
