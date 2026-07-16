@@ -24,9 +24,10 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname, join } from "path";
-import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
+import { writeFileSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
+import { patchAndImport, closeOpenedDbHandles, safeRmSync } from "../helpers/self-host-server-import.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 const TMP_ROOT = resolve(testDir, "_tmp_sql_runtime");
@@ -37,8 +38,12 @@ beforeAll(() => {
   if (!existsSync(TMP_ROOT)) mkdirSync(TMP_ROOT, { recursive: true });
 });
 
-afterAll(() => {
-  if (existsSync(TMP_ROOT)) rmSync(TMP_ROOT, { recursive: true, force: true });
+afterAll(async () => {
+  // Close every imported server module's Bun.SQL handle BEFORE removing the
+  // temp dir — on Windows an open DB handle would EBUSY the rmSync. See
+  // helpers/self-host-server-import.js for the full rationale.
+  await closeOpenedDbHandles();
+  safeRmSync(TMP_ROOT);
 });
 
 /**
@@ -89,13 +94,6 @@ function compileToFiles(scrmlSource, testName, seedFiles = {}) {
     tmpDir,
     tag,
   };
-}
-
-async function importServerModule(serverJsPath) {
-  // Use a cache-busting query string so each test gets a fresh module
-  // (and a fresh in-memory SQLite DB).
-  const url = `file://${serverJsPath}?v=${Date.now()}-${Math.random()}`;
-  return await import(url);
 }
 
 /**
@@ -212,14 +210,9 @@ describe("Bug 3a §1 — basic <db src=> server-fn round-trip with real SQLite",
     // SQLite file so the runtime queries hit the right DB (independent of
     // the test process's CWD).
     const absDbPath = resolve(tmpDir, "items.db");
-    const patched = serverJsText.replace(
-      'const _scrml_sql = new SQL("sqlite:./items.db");',
-      `const _scrml_sql = new SQL(${JSON.stringify("sqlite:" + absDbPath)});`,
-    );
-    writeFileSync(serverJsPath, patched);
-
-    // Import + invoke
-    const mod = await importServerModule(serverJsPath);
+    // Patch the connection string to the absolute seeded-DB path, import, and
+    // register the module so its Bun.SQL handle is closed at teardown.
+    const mod = await patchAndImport(serverJsPath, absDbPath);
 
     // Find the route handlers exported from the module. The route name is
     // mangled (e.g. _scrml_route_setupItems_1); we look for any export with
