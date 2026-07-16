@@ -1,0 +1,11 @@
+{
+  "id": "style-001-style-block-pos",
+  "description": "A `<style>` block fires E-STYLE-001 — scrml does not admit the element at all; CSS lives in `#{...}` (§4.17).",
+  "language-version": "1.0",
+  "spec": "§4.17",
+  "rationale": "§4.17 (Raw-content elements), companion considerations: \"`<script>` and `<style>` are NOT raw-content in scrml because scrml does not admit those elements at all — `<style>` triggers `E-STYLE-001` at the block-splitter level (CSS lives in `#{...}`)\". The rejection is unconditional on the ELEMENT, not on its body: `.btn { color: red; }` is well-formed CSS, and it is the `<style>` element itself that is not scrml. Presence only — the message text, the auto-convert hint, and the skip-to-`</style>` recovery are impl freedom. Paired with style-001-scoped-css-neg, which expresses this exact styling intent in the idiomatic `#{}` form and stays silent.",
+  "expect": {
+    "codes": ["E-STYLE-001"],
+    "notCodes": []
+  }
+}

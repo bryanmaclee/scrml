@@ -1,0 +1,12 @@
+{
+  "id": "multi-stmt-handler-attr-pos",
+  "description": "§5.2.3's own invalid worked example verbatim — a bare-form `onclick=` handler whose value is two semicolon-separated expressions fires E-MULTI-STATEMENT-HANDLER. W-DEAD-FUNCTION / W-PROGRAM-001 co-fire incidentally; not asserted.",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§5.2.3 (L19 normative): \"A bare-form event handler SHALL contain exactly one scrml expression\" and \"Multi-statement intent (two or more semicolon-separated expressions, or a block) SHALL force a named function. The compiler emits E-MULTI-STATEMENT-HANDLER when a bare-form handler attribute value contains a `;` outside of expression-internal contexts.\" The source is §5.2.3's own \"Worked example — invalid (multi-statement inline)\" shape: `<button onclick=startGame(); track(\"start\")>Begin</>`. The `;` sits at top level of the opener's attribute region (not inside a string, paren, brace, bracket, template interpolation, or comment), and its owning attribute `onclick` is in the event-handler family, so the code SHALL fire.",
+  "expect": {
+    "codes": ["E-MULTI-STATEMENT-HANDLER"],
+    "notCodes": []
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "write-not-in-logic-context-pos",
+  "description": "A bare `@count = 5` WRITE at the immediate body-top of the §40.8 default-logic body fires E-WRITE-NOT-IN-LOGIC-CONTEXT. The cell IS declared (`<count> = 0` above it) — the wrong is the write's SHAPE at that locus, not name resolution.",
+  "language-version": "1.0",
+  "spec": "§40.8",
+  "source-test": "compiler/src/symbol-table.ts",
+  "rationale": "§40.8 S123 amendment (the S122 user-voice Option-2 ratification): \"default-logic mode auto-lifts DECLARATIONS only — the structural state-decl form `<name> = expr` … The bare V5-strict reactive WRITE form `@name = expr` is NOT a declaration — it is a write to a pre-declared cell, and writes ARE logic; logic goes in `${...}`. Bare `@name = expr` at the IMMEDIATE body-top of `<program>` / `<page>` / `<channel>` (the §40.8 default-logic-body surface) SHALL fire `E-WRITE-NOT-IN-LOGIC-CONTEXT`.\" The §34 row confirms the diagnostic is a SHAPE error, deliberately independent of whether the target cell resolves — so this case declares `<count>` first (V5-strict structural form) to isolate the shape rule from E-STATE-UNDECLARED. §34 also fixes the two legal repairs: (a) wrap in `${ @count = 5 }` (see the NEG mirror), or (b) convert to a structural declaration.",
+  "expect": {
+    "codes": ["E-WRITE-NOT-IN-LOGIC-CONTEXT"],
+    "notCodes": []
+  }
+}

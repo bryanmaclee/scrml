@@ -1,0 +1,8 @@
+${
+    <contacts> = [{ id: 1, name: "Ada", email: "ada@example.com" }]
+}
+<ul id="contacts">
+    <each in=@contacts key=@.id>
+        <li class="row"><a href=@.email>${@.name}</a></li>
+    </each>
+</ul>

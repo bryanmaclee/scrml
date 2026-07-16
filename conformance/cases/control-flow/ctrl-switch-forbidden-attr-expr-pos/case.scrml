@@ -1,0 +1,5 @@
+type Phase:enum = { Idle, Busy }
+
+<phase>:Phase = .Idle
+
+<p if=${switch (@phase) { case .Idle: true }}>Idle</>

@@ -1,0 +1,15 @@
+type Phase:enum = { Idle, Busy }
+
+<phase>:Phase = .Idle
+
+${
+  function toggle() {
+    @phase = match @phase {
+      .Idle :> .Busy
+      .Busy :> .Idle
+    }
+  }
+}
+
+<button onclick=toggle()>Toggle</>
+<p>Phase: ${@phase}</>

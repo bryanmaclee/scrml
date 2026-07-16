@@ -1,0 +1,8 @@
+<count> = 0
+<last> = ""
+
+${ function startGame() { @count = @count + 1 } }
+${ function track(name) { @last = name } }
+
+<button onclick=startGame(); track("start")>Begin</>
+<p>Count: ${@count} / Last: ${@last}</>

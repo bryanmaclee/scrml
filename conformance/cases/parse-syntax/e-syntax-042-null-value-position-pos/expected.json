@@ -1,0 +1,11 @@
+{
+  "id": "e-syntax-042-null-value-position-pos",
+  "description": "A bare `null` token in value position (a declaration initializer) fires E-SYNTAX-042 (§42.7 category 2).",
+  "language-version": "1.0",
+  "spec": "§42.7",
+  "rationale": "§42.7 normative: `null` and `undefined` SHALL NOT be valid scrml source tokens in value position, and the rejection SHALL apply uniformly across every scrml source position. Category (2) 'bare value-position literal' enumerates `Variable declaration initializers: @x = null, let x = null, const x = undefined` as a rejected shape. `not` is the single canonical absence sentinel (§42.1).",
+  "expect": {
+    "codes": ["E-SYNTAX-042"],
+    "notCodes": []
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "id": "e-syntax-064-at-dot-outside-each-pos",
+  "description": "The `@.` contextual sigil in an attribute value OUTSIDE any `<each>` body scope fires E-SYNTAX-064 (§17.7.3).",
+  "language-version": "1.0",
+  "spec": "§17.7.3",
+  "rationale": "§17.7.3 normative: `@.` SHALL resolve to the current iteration value of the most-locally-enclosing `<each>` body scope, and `@.` outside any `<each>` body scope SHALL be E-SYNTAX-064 ('the `@.` contextual sigil is only legal inside an `<each>` body scope', wired S157 Bug 70). Here `<a href=@.email>` sits in plain markup with no enclosing `<each>`, so the sigil has no referent.",
+  "expect": {
+    "codes": ["E-SYNTAX-064"],
+    "notCodes": []
+  }
+}

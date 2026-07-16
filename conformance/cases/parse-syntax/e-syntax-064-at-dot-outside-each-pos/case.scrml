@@ -1,0 +1,6 @@
+${
+    <contacts> = [{ id: 1, name: "Ada", email: "ada@example.com" }]
+}
+<ul id="contacts">
+    <li class="row"><a href=@.email>Contact</a></li>
+</ul>
