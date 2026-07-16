@@ -375,7 +375,7 @@ function collectReassignedNames(body: ASTNode[] | undefined, sink: Set<string>):
  * @param {CGError[]} [errors]
  * @returns {string[]}
  */
-export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: RouteMap, depGraph: DepGraph, filePath: string, errors: CGError[] = [], machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null, engineBindings?: Map<string, { varName: string; forType: string; tableName: string }> | null, engineVarNames?: Set<string> | null, enginesWithHooks?: Set<string> | null, returnTypeAnnotation?: string | null, enclosingFnName?: string | null, enginesWithOnTimeout?: Set<string> | null, enginesWithIdleWatchdog?: Set<string> | null, enginesWithInternalRules?: Set<string> | null, enginesWithHistory?: Set<string> | null, enginesWithMessageArms?: Set<string> | null, engineMessageVariants?: Map<string, Set<string>> | null, calleeMap?: CalleeImportMap | null, exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>> | null, mapVarNames?: Set<string> | null, orderedMapVarNames?: Set<string> | null, setVarNames?: Set<string> | null, localMapVarNames?: Set<string> | null, localSetVarNames?: Set<string> | null, localOrderedMapVarNames?: Set<string> | null): string[] {
+export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: RouteMap, depGraph: DepGraph, filePath: string, errors: CGError[] = [], machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null, engineBindings?: Map<string, { varName: string; forType: string; tableName: string }> | null, engineVarNames?: Set<string> | null, enginesWithHooks?: Set<string> | null, returnTypeAnnotation?: string | null, enclosingFnName?: string | null, enginesWithOnTimeout?: Set<string> | null, enginesWithIdleWatchdog?: Set<string> | null, enginesWithInternalRules?: Set<string> | null, enginesWithHistory?: Set<string> | null, enginesWithMessageArms?: Set<string> | null, engineMessageVariants?: Map<string, Set<string>> | null, calleeMap?: CalleeImportMap | null, exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>> | null, mapVarNames?: Set<string> | null, orderedMapVarNames?: Set<string> | null, setVarNames?: Set<string> | null, localMapVarNames?: Set<string> | null, localSetVarNames?: Set<string> | null, localOrderedMapVarNames?: Set<string> | null, clientAsyncFnNames?: Set<string> | null, syncPeerCalls?: Array<{ name: string; span: unknown }> | null): string[] {
   const lines: string[] = [];
   // Track declared names so tilde-decl can detect reassignment vs first declaration
   const declaredNames = new Set<string>();
@@ -431,6 +431,12 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     ...(calleeMap ? { asyncCalleeMap: calleeMap } : {}),
     ...(exportRegistry ? { asyncExportRegistry: exportRegistry } : {}),
     asyncFilePath: filePath,
+    // Seam-A colorless-async Gap 2 (GITI-037) — the transitive client async-peer
+    // set + the fail-closed sink, so emit-expr awaits a client-mode call to a
+    // local async peer (and records a non-awaitable position for the drain).
+    ...(clientAsyncFnNames && clientAsyncFnNames.size > 0
+        ? { clientAsyncFnNames, syncPeerCalls: syncPeerCalls ?? null }
+        : {}),
     // §32 — a function body is its own tilde scope (SPEC §32.4). Pre-scan
     // for `~` references and set up a per-body tildeContext so bare-expr /
     // value-lift statements capture into the generated tilde var and consume

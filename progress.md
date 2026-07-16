@@ -102,11 +102,40 @@ progress.md committed as the recovery anchor.
     colored → Gap-3 cross-module seed still needed (next).
 - Full unit suite 16203 pass / 0 fail; integration 3071 pass / 0 fail.
 
+### DONE — Gap 3 (cross-module) + Gap 2 (browser transitive) [WIP commit]
+Gap 3 (cross-module seed):
+- emit-tool.ts collectAsyncFnNamesFromFile: +exportRegistry param + build calleeMap → Gap-1
+  seed reaches the cross-module fixpoint (a cross-lib fn calling safeCallAsync recognized async).
+- codegen/index.ts: threaded exportRegistry through computeToolAsyncImportedLocals →
+  asyncImportedLocalsOf → asyncExportNamesOf; ADDED scrml: vendor branch to asyncImportedLocalsOf
+  (a `scrml:host`/`scrml:auth` async primitive local binding seeds cross-module via
+  isPromiseReturningStdlibFn). +import resolveModulePath/isPromiseReturningStdlibFn.
+- emit-library.ts emitAsyncLibraryFns: threaded `_asyncImportedLocals` as the crossImportSeed.
+- VERIFIED: repro-crossmodule main.js `orchestrate` now `export async function` + `await wrapAsync(obj)`.
+
+Gap 2 (browser/client transitive) — CONFIRMED coloring-alone insufficient (needs peer-await too):
+- emit-expr.ts: +clientAsyncFnNames field + a CLIENT-mode peer-await branch (mirrors the server
+  serverFnNames branch; peerAwaitable fail-closed → syncPeerCalls).
+- emit-logic.ts: +clientAsyncFnNames opt + _makeExprCtx passthrough.
+- scheduling.ts: scheduleStatements +clientAsyncFnNames/syncPeerCalls params → emitOpts.
+- emit-functions.ts: compute the TRANSITIVE client-async set (computeAsyncFnNames over client fns,
+  seed = server-callee fns ∪ cross-import; Gap-1 stdlib seed inside), drive asyncPrefix off it,
+  thread the LOCAL-restricted peer-await set (excludes imported names — else double-await a
+  `safeCallAsync !{}`), drain the fail-closed sink → E-ASYNC-STDLIB-IN-SYNC-CALLBACK. Excludes
+  user `async function` (hard error, not compiler-managed).
+- VERIFIED: repro-browser-transitive leaf/middle/top all async; middle awaits leaf, top awaits
+  middle; NO double-await.
+- Test updates: §8 L3-tripwire flipped to RESOLVED (asserts outerCaller async + awaits peer);
+  auto-await §4 preserved (user-async exclusion keeps classifier stdlib-only); p3-follow allowlist
+  +index.ts(3)/+emit-tool.ts(1).
+
+### VERIFICATION (all four repro shapes green)
+- Unit 16203/0, integration 3071/0, conformance 642/642.
+- Browser 587/12 — all 12 fails PRE-EXISTING (identical on origin/main 9c27ce9a; worktree
+  gitignored-dist / known-gaps, NOT regressions; pre-commit gate excludes browser).
+
 ### NEXT
-- Gap 3 (cross-module): thread exportRegistry into asyncExportNamesOf/collectAsyncFnNamesFromFile
-  (so a cross-lib fn calling safeCallAsync is recognized async) + include scrml: vendor async
-  exports in asyncImportedLocalsOf + thread `_asyncImportedLocals` seed into emitAsyncLibraryFns.
-- Gap 2 (emit-functions browser transitive) + emit-tool wiring + comprehensive test file.
+- Comprehensive test file for the 4 repro shapes; final full-gate commit.
 
 ## (superseded) prior next (pending PA ruling)
 - Re-scoped brief specifying: which emit path owns colorless-async for the library shape, and

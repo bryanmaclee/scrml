@@ -387,6 +387,7 @@ function emitAsyncLibraryFns(
   sourceText: string,
   calleeMap: Map<string, string> | null,
   exportRegistry: LibExportRegistry | null,
+  crossImportSeed: Set<string> | undefined,
   errors: CGError[],
 ): { removals: Array<{ start: number; end: number }>; lines: string[] } {
   const none = { removals: [] as Array<{ start: number; end: number }>, lines: [] as string[] };
@@ -401,9 +402,11 @@ function emitAsyncLibraryFns(
     if (node && node.kind === "function-decl" && typeof node.name === "string") fns.push(node);
   }
   if (fns.length === 0) return none;
-  // Coloring: `?{}`/foreign/isAsync/cross-import seed UNION the Gap-1 stdlib-
-  // Promise seed, then the call-graph fixpoint.
-  const asyncFnNames = computeAsyncFnNames(fns, sourceText, undefined, calleeMap, exportRegistry);
+  // Coloring: `?{}`/foreign/isAsync seed UNION `crossImportSeed` (Seam-A Gap 3 —
+  // the LOCAL names binding an async fn imported from another lib / a `scrml:`
+  // vendor primitive, so a fn calling one is colored + its call awaited) UNION the
+  // Gap-1 stdlib-Promise seed, then the call-graph fixpoint.
+  const asyncFnNames = computeAsyncFnNames(fns, sourceText, crossImportSeed, calleeMap, exportRegistry);
   if (asyncFnNames.size === 0) return none;
   // Route only NON-SQL async fns — a `?{}`/transaction body is pruned to
   // `.server.js` by collectSqlFnRemovalRanges (a client-facing raw `?{}` is
@@ -704,6 +707,7 @@ export function generateLibraryJs(
           sourceText,
           libCalleeMap,
           exportRegistry,
+          (fileAST as any)?._asyncImportedLocals as Set<string> | undefined,
           errors,
         );
         blockText = pruneServerFnsAndLowerGuarded(

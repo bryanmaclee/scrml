@@ -1,0 +1,18 @@
+<program>
+${
+  import { safeCallAsync } from "scrml:host"
+  function leaf(obj) {
+    const r = safeCallAsync(() => obj.doThing()) !{ | ::Thrown(msg, name) -> ({ ok: false }) }
+    return r.ok
+  }
+  function middle(obj) {
+    const ok = leaf(obj)
+    return ok
+  }
+  function top(obj) {
+    const ok = middle(obj)
+    return ok
+  }
+}
+<button onclick=top(window)>Go</button>
+</program>

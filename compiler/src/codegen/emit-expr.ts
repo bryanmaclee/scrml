@@ -408,6 +408,16 @@ export interface EmitExprContext {
    */
   serverFnNames?: Set<string> | null;
   /**
+   * Seam-A colorless-async Gap 2 (GITI-037) — names of LOCAL CLIENT peer fns that
+   * are async (transitively reach a stdlib-async / server call). In `mode ===
+   * "client"`, `emitCall` lowers a plain-ident call to one of these to
+   * `await <name>(...)` — else the async peer's Promise leaks un-awaited (a client
+   * `middle()` calling an async `leaf()` gets `undefined`, not the resolved value).
+   * The client analogue of `serverFnNames` (which fires only in server mode);
+   * threaded from `EmitLogicOpts.clientAsyncFnNames`. NULL/empty → no peer-await.
+   */
+  clientAsyncFnNames?: Set<string> | null;
+  /**
    * Issue #1 (parent scrmlTS) — is the CURRENT position one where `await <peer>()`
    * is syntactically valid? `true`/undefined at the top of a server-fn handler
    * body or an async lambda body; `false` inside a synchronous callback body or
@@ -2477,6 +2487,31 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     // BOTH the lowering and the diagnostic (no second classifier to drift).
     // (`isAwaitedPeerCall` mirrors this exact condition + `peerAwaitable !==
     // false` so emitReceiver can wrap an await form used as a receiver.)
+    if (ctx.peerAwaitable === false) {
+      if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name, span: node.span });
+      return `${callee}(${args})`;
+    }
+    return `await ${callee}(${args})`;
+  }
+
+  // Seam-A colorless-async Gap 2 (GITI-037) — the CLIENT analogue of the server
+  // peer branch above: a client fn calling a LOCAL CLIENT peer that is
+  // transitively async (`clientAsyncFnNames`) must `await` it, else the peer's
+  // Promise leaks (`const ok = middle(obj)` where `middle` awaits an async
+  // `leaf` yields `undefined`). A server-fn call from the client goes through
+  // the emit-functions fetch stub (already awaited), never here — the two sets
+  // are disjoint by construction (server fns are excluded from clientAsyncFnNames).
+  // A local of the same name shadows the peer. peerAwaitable === false (sync
+  // callback / param default) records the site for the fail-closed drain.
+  if (
+    ctx.mode === "client" &&
+    !node.optional &&
+    node.callee.kind === "ident" &&
+    typeof node.callee.name === "string" &&
+    ctx.clientAsyncFnNames != null &&
+    ctx.clientAsyncFnNames.has(node.callee.name) &&
+    !(ctx.declaredNames != null && ctx.declaredNames.has(node.callee.name))
+  ) {
     if (ctx.peerAwaitable === false) {
       if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name, span: node.span });
       return `${callee}(${args})`;

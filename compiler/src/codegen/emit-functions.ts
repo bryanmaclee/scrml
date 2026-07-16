@@ -4,6 +4,8 @@ import { emitLogicNode, emitLogicBody, emitFnShortcutBody } from "./emit-logic.j
 import { CGError } from "./errors.ts";
 import { isServerOnlyNode, collectFunctions } from "./collect.ts";
 import { hasServerCallees, scheduleStatements, buildCalleeImportMap } from "./scheduling.js";
+// Seam-A colorless-async Gap 2 (GITI-037) — the transitive async-coloring fixpoint.
+import { computeAsyncFnNames } from "./emit-library-shared.ts";
 import { buildMachineBindingsMap } from "./emit-reactive-wiring.js";
 // A1c C16 — §53.9.1/§53.4.3 client-side function-param boundary check (Locus 3).
 import { parsePredicateAnnotation, emitRuntimeCheck } from "./emit-predicates.ts";
@@ -1143,6 +1145,58 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // -------------------------------------------------------------------------
   // Step 3: Generate client-side function bodies for client-boundary functions
   // -------------------------------------------------------------------------
+
+  // Seam-A colorless-async Gap 2 (GITI-037) — the TRANSITIVE async-coloring set
+  // for the CLIENT-boundary fns. The old flat `hasServerCallees` walk (below,
+  // per-fn) colors a fn calling a server / stdlib-Promise fn DIRECTLY, but NOT a
+  // fn reaching one only through a LOCAL client peer (`top → middle → leaf →
+  // safeCallAsync`): middle/top stayed sync + their peer calls un-awaited, so the
+  // Promise leaked. Compute the fixpoint once over the client fns: seed = fns that
+  // directly call a server fn (async via the awaited fetch stub) UNION the
+  // cross-import async locals, THEN computeAsyncFnNames adds the Gap-1 stdlib-
+  // Promise seed + propagates over local peer calls. The result drives BOTH the
+  // `async` prefix AND the client peer-await (threaded as `clientAsyncFnNames`).
+  const _clientFns = fnNodes.filter((fn) => {
+    const id = `${filePath}::${(fn.span as ASTNode)?.start}`;
+    const r = routeMap.functions.get(id);
+    if (r && r.boundary === "server") return false;
+    // A user-source `async function` is FORBIDDEN (§19.9.8, E-ASYNC-NOT-IN-SCRML)
+    // — a hard error, not compiler-managed async. Excluded so it neither colors
+    // nor peer-awaits: compiler-managed async is INFERRED (stdlib/server/CPS),
+    // never user-written `async`. (The auto-await classifier stays stdlib-only.)
+    if ((fn as { isAsync?: boolean }).isAsync === true) return false;
+    return true;
+  });
+  const _clientAsyncSeed = new Set<string>();
+  for (const fn of _clientFns) {
+    const nm = fn.name as string | undefined;
+    if (nm && hasServerCallees(fn, routeMap, filePath, null, null)) _clientAsyncSeed.add(nm);
+  }
+  const _crossImportSeed = (ctx.fileAST as any)?._asyncImportedLocals as Set<string> | undefined;
+  if (_crossImportSeed) for (const n of _crossImportSeed) _clientAsyncSeed.add(n);
+  const _clientAsyncFnNames = computeAsyncFnNames(
+    _clientFns,
+    null,
+    _clientAsyncSeed,
+    _calleeMap,
+    _exportRegistry,
+  );
+  // The PEER-AWAIT set is the async set restricted to LOCAL client fn names. The
+  // coloring set (`_clientAsyncFnNames`) also carries the seed's IMPORTED names
+  // (a `safeCallAsync` / cross-lib async import) so a fn calling one is colored —
+  // but those imports are awaited by the stdlib auto-await classifier (or the
+  // guarded-expr `!{}` auto-await), NOT the client-peer branch. Including them
+  // here would double-await a `safeCallAsync(...) !{}` (`await await …`).
+  const _localFnNames = new Set<string>(
+    _clientFns.map((f) => f.name as string).filter((n): n is string => typeof n === "string"),
+  );
+  const _clientPeerAwaitNames = new Set<string>(
+    [..._clientAsyncFnNames].filter((n) => _localFnNames.has(n)),
+  );
+  // Fail-closed (axis-i) — a client async-peer call the compiler emits BARE in a
+  // non-awaitable position (sync callback / param default). Drained after the loop.
+  const _clientSyncPeerCalls: Array<{ name: string; span: unknown }> = [];
+
   for (const fnNode of fnNodes) {
     const fnNodeId = `${filePath}::${(fnNode.span as ASTNode)?.start}`;
     const route = routeMap.functions.get(fnNodeId);
@@ -1167,12 +1221,13 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // destructuring bindings via emit-destructure-pattern.ts).
     const paramSigs = params.map((p: Param, i: number) => paramSignature(p, i));
 
-    // Check if this function has any server-call callees that need async.
-    // S89 §13.2 Sub-Phase B Step 3 — also classifies stdlib Promise<T>
-    // callees as async-boundary so the function emits `async function` prefix
-    // when it contains a `safeCallAsync(...)` (or similar) initializer.
-    const hasServerCalls = hasServerCallees(fnNode, routeMap, filePath, _calleeMap, _exportRegistry);
-    const asyncPrefix = hasServerCalls ? "async " : "";
+    // Seam-A colorless-async Gap 2 (GITI-037) — the `async` prefix now reads the
+    // TRANSITIVE fixpoint (`_clientAsyncFnNames`) rather than the flat per-fn
+    // `hasServerCallees` walk, so a fn reaching a server / stdlib-Promise call
+    // ONLY through a local client peer is also colored async (and its peer calls
+    // are awaited via the threaded `clientAsyncFnNames`). Direct-call coloring is
+    // subsumed: the fixpoint's seed includes hasServerCallees + the Gap-1 seed.
+    const asyncPrefix = _clientAsyncFnNames.has(name) ? "async " : "";
 
     const generatedName = genVar(name);
     fnNameMap.set(name, generatedName);
@@ -1212,6 +1267,8 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         boundary: "client" as const,
         declaredNames: new Set<string>(),
         insideFunctionBody: true,
+        // Seam-A Gap 2 — await a call to a transitively-async local client peer.
+        ...(_clientPeerAwaitNames.size > 0 ? { clientAsyncFnNames: _clientPeerAwaitNames, syncPeerCalls: _clientSyncPeerCalls } : {}),
         ...(machineBindings ? { machineBindings } : {}),
         ...(engineBindings ? { engineBindings } : {}),
         ...(mapVarNames.size > 0 ? { mapVarNames } : {}),
@@ -1281,7 +1338,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       // S89 §13.2 Sub-Phase B Step 3 — thread calleeMap + exportRegistry so
       // the auto-await classifier inside scheduleStatements covers stdlib
       // Promise<T> callees alongside server functions.
-      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings, engineBindings, engineVarNames, enginesWithHooks, _returnTypeAnnotation, name, enginesWithOnTimeout, enginesWithIdleWatchdog, enginesWithInternalRules, enginesWithHistory, enginesWithMessageArms, engineMessageVariants, _calleeMap, _exportRegistry, mapVarNames, orderedMapVarNames, setVarNames, _localMap, _localSet, _localOrdered);
+      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings, engineBindings, engineVarNames, enginesWithHooks, _returnTypeAnnotation, name, enginesWithOnTimeout, enginesWithIdleWatchdog, enginesWithInternalRules, enginesWithHistory, enginesWithMessageArms, engineMessageVariants, _calleeMap, _exportRegistry, mapVarNames, orderedMapVarNames, setVarNames, _localMap, _localSet, _localOrdered, _clientPeerAwaitNames, _clientSyncPeerCalls);
       for (const line of scheduled) {
         lines.push(`  ${line}`);
       }
@@ -1289,6 +1346,24 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
 
     lines.push(`}`);
     lines.push("");
+  }
+
+  // Seam-A colorless-async Gap 2 (GITI-037) — fail-closed drain (axis-i
+  // completeness). A transitively-async client peer called in a NON-awaitable
+  // position (a sync `.some`/`.find`/`.map` callback body or a parameter default)
+  // was emitted BARE — its Promise leaks. Raise the (existing) shape-matching
+  // E-ASYNC-STDLIB-IN-SYNC-CALLBACK: the peer ultimately reaches a stdlib-async /
+  // server call, so the async boundary IS the stdlib/server one, just one hop up.
+  for (const _sp of _clientSyncPeerCalls) {
+    errors.push(new CGError(
+      "E-ASYNC-STDLIB-IN-SYNC-CALLBACK",
+      `E-ASYNC-STDLIB-IN-SYNC-CALLBACK: the async call \`${_sp.name}(…)\` cannot be auto-awaited ` +
+      `here — it sits in a synchronous position (a \`.some\`/\`.find\`/\`.map\` callback body or a ` +
+      `parameter default) where \`await\` is not valid. \`${_sp.name}\` is async (it reaches a ` +
+      `Promise-returning host/stdlib call), so its Promise would leak un-awaited. Hoist the call ` +
+      `to an awaitable statement (e.g. \`const r = ${_sp.name}(…)\`) and use the resolved value.`,
+      (_sp.span as object) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+    ));
   }
 
   return { lines, fnNameMap };

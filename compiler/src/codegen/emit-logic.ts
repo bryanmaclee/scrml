@@ -171,6 +171,12 @@ export interface EmitLogicOpts {
    */
   serverFnNames?: Set<string> | null;
   /**
+   * Seam-A colorless-async Gap 2 (GITI-037): names of LOCAL CLIENT peer fns that
+   * are transitively async. Forwarded to `EmitExprContext.clientAsyncFnNames` so
+   * `emit-expr.ts:emitCall` awaits a plain-ident call to one in `mode:"client"`.
+   */
+  clientAsyncFnNames?: Set<string> | null;
+  /**
    * Issue #1 (parent scrmlTS): accumulator for sibling server-fn calls emitted
    * BARE in a non-awaitable position (sync callback body / parameter default).
    * Forwarded to `EmitExprContext.syncPeerCalls` so emit-server can raise
@@ -799,6 +805,9 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
     // Issue #1 (parent scrmlTS) — sibling server-fn names so emit-expr lowers an
     // in-process server-fn → server-fn call to `await <name>(...)`.
     serverFnNames: opts.serverFnNames ?? null,
+    // Seam-A Gap 2 — forward the client async-peer set so emit-expr awaits a
+    // client-mode call to a transitively-async local peer.
+    clientAsyncFnNames: opts.clientAsyncFnNames ?? null,
     // Issue #1 — forward the bare-peer-call accumulator so emit-expr can record
     // sync-callback sites for the E-SERVER-FN-IN-SYNC-CALLBACK diagnostic.
     syncPeerCalls: opts.syncPeerCalls ?? null,

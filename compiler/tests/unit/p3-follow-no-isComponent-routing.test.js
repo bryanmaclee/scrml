@@ -107,7 +107,14 @@ const ALLOWED = {
   // `isComponent` field appears in the TYPE ANNOTATION only; codegen
   // routing reads `category` (e.g. `=== "engine"`) — never `.isComponent`.
   "codegen/context.ts": 2,         // type-signature mention only (CompileContext.exportRegistry shape)
-  "codegen/index.ts": 2,           // type-signature mention only (CgInput.exportRegistry shape)
+  "codegen/index.ts": 3,           // type-signature mention only (CgInput.exportRegistry shape
+                                   // + Seam-A CrossModuleExportRegistry type alias, threaded
+                                   // through the async cross-module fixpoint; routing reads
+                                   // kind/isAsync, never isComponent)
+  // Seam-A colorless-async (GITI-037) — collectAsyncFnNamesFromFile's exportRegistry
+  // param carries the {kind,category,isComponent,isAsync?} shape as a TYPE
+  // ANNOTATION only; routing reads kind/isAsync via isPromiseReturningStdlibFn.
+  "codegen/emit-tool.ts": 1,       // type-signature mention only (exportRegistry param)
   "codegen/emit-engine.ts": 3,     // type-signature mentions + lookupSourceMap path-shape comment
   // Task #17 (S85) — cross-file channel-import emit suppression carries the
   // same exportRegistry value shape `{kind, category, isComponent}` as
