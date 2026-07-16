@@ -1,0 +1,12 @@
+{
+  "id": "protect-e-pa-002-no-shadow-schema-pos",
+  "description": "§14.8.7 — a `<db>` block whose `src=` file does not exist AND which has no CREATE TABLE for a scoped table fires E-PA-002: the analyzer can neither open the real DB nor build an in-memory shadow DB, so it cannot validate the schema and fails closed.",
+  "language-version": "1.0",
+  "spec": "§14.8.7",
+  "source-test": "compiler/src/protect-analyzer.ts (E-PA-002 fire site: resolveDb missing-file + no CREATE TABLE)",
+  "rationale": "protect-analyzer resolveDb(): with the `src=` file absent and no `?{}` CREATE TABLE statement for `users`, there is no shadow-DB source, so schema-backed protect analysis is impossible and E-PA-002 fires (returns null).",
+  "expect": {
+    "codes": ["E-PA-002"],
+    "notCodes": ["E-PA-005", "E-PA-006"]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "reactive-dg-001-cyclic-neg",
+  "description": "§31 E-DG-001 NEGATIVE — the ACYCLIC equivalent of dg-001-cyclic-pos. Byte-identical source except `loadPet` does NOT call back to `loadOwner`, so the two db-escalated (§12.2 T1) server functions form a straight-line `awaits` chain `loadOwner -> loadPet` with a valid sequencing order. E-DG-001 stays silent. This is the cyclic-vs-acyclic contrast: server→server COMPOSITION is explicitly legal (§13.4) — only a CYCLE is rejected, so the whole E-DG- family must stay quiet here. Incidental W-PROGRAM-SPA-INFERRED / W-SQL-ROW-UNTYPED ignored by superset.",
+  "language-version": "1.0",
+  "spec": "§13.4, §31.2",
+  "rationale": "§13.4: 'A server-escalated function MAY call another server-escalated function. Both execute in the same server handler context.' — a server→server awaits edge is legal by construction. §13.2 requires the compiler to 'Sequence dependent operations using `await`'; an acyclic awaits subgraph has a valid topological order, so the E-DG-001 rejection condition (§34: 'circular dependency in reactive graph') is not met and the compiler SHALL NOT reject the program.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-DG-001"],
+    "notCodePrefixes": ["E-DG-"]
+  }
+}

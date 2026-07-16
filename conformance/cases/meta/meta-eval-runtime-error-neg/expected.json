@@ -1,0 +1,11 @@
+{
+  "id": "meta-eval-runtime-error-neg",
+  "description": "§22 E-META-EVAL-001 — a `^{}` block containing the `emit(...)` compile-time API pattern (which classifies the block as compile-time meta, §22.4) whose body THROWS when evaluated: `JSON.parse(\"{\")` is malformed JSON and raises a SyntaxError before `emit` is invoked. The `new Function(\"emit\",\"reflect\",body)` call throws, so meta-eval.ts catches it and fires E-META-EVAL-001 (compile-time meta evaluation failed).",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22",
+  "expect": {
+    "codes": ["E-META-EVAL-001"],
+    "notCodes": [],
+    "severity": { "E-META-EVAL-001": "error" }
+  }
+}

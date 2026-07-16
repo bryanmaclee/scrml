@@ -1,0 +1,13 @@
+{
+  "id": "protect-e-pa-005-missing-tables-neg",
+  "description": "§14.8.7 — the same `<db>` block WITH `tables=\"users\"` present scopes the table set for the shadow DB and fires no E-PA-005. The clean control for the missing-tables reject.",
+  "language-version": "1.0",
+  "spec": "§14.8.7",
+  "source-test": "compiler/src/protect-analyzer.ts (E-PA-005 fire site, step 3: tables= presence)",
+  "rationale": "protect-analyzer §step3: with a non-empty `tables=` the analyzer parses at least one table name, scopes it, and proceeds to build the shadow DB, so E-PA-005 never fires.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-PA-005"],
+    "notCodePrefixes": ["E-PA-"]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "auth-i-auth-redirect-unresolved-neg",
+  "description": "§40.1.1 — an app with no auth gate names no redirect target, so the per-gate redirect-resolution loop has nothing to check and I-AUTH-REDIRECT-UNRESOLVED does not fire. The clean control.",
+  "language-version": "1.0",
+  "spec": "§40.1.1",
+  "source-test": "compiler/src/auth-graph.ts (I-AUTH-REDIRECT-UNRESOLVED per-gate site)",
+  "rationale": "§40.1.1: with no auth gate declaring a redirect, the resolution loop's `if (redirect == null) continue` short-circuits every iteration, so I-AUTH-REDIRECT-UNRESOLVED stays silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["I-AUTH-REDIRECT-UNRESOLVED"]
+  }
+}

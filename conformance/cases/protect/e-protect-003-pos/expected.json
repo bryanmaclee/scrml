@@ -1,0 +1,12 @@
+{
+  "id": "protect-e-protect-003-batch-hoist-overlap-pos",
+  "description": "§8.10.7/§14.8.9 — a Tier-2 loop-hoist candidate whose pre-loop SELECT would cache a protected column (`email`) in client-reachable scope fires E-PROTECT-003. The batch planner refuses the hoist (falls back to the unrewritten N+1 loop) rather than leak the protected field through the batched prefetch.",
+  "language-version": "1.0",
+  "spec": "§8.10.7",
+  "source-test": "compiler/tests/unit/sql-batch-5b-guards.test.js",
+  "rationale": "§8.10.7: the Tier-2 loop-hoist optimization pre-caches the per-iteration SELECT's columns; when those columns overlap the target table's protected fields the cache would expose a protected column to client-reachable scope, so the planner emits E-PROTECT-003 and preserves N+1 semantics instead of leaking.",
+  "expect": {
+    "codes": ["E-PROTECT-003"],
+    "notCodes": []
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "protect-e-protect-003-batch-hoist-overlap-neg",
+  "description": "§8.10.7/§14.8.9 — the same loop-hoist candidate with the SELECT narrowed to non-protected columns (`id, name`) fires no E-PROTECT-003: the pre-loop cache carries no protected field, so the hoist is allowed to proceed. The clean control for the overlap reject.",
+  "language-version": "1.0",
+  "spec": "§8.10.7",
+  "source-test": "compiler/tests/unit/sql-batch-5b-guards.test.js",
+  "rationale": "§8.10.7: with the SELECT column list narrowed to non-protected columns there is no overlap with the target table's protected fields, so the batch planner records the hoist and E-PROTECT-003 stays silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-PROTECT-003"]
+  }
+}

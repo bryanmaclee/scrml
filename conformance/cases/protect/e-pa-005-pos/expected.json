@@ -1,0 +1,12 @@
+{
+  "id": "protect-e-pa-005-missing-tables-pos",
+  "description": "§14.8.7 — a `<db>` state block with no `tables=` attribute fires E-PA-005. The analyzer must know which tables to bring into scope for the shadow DB + protect analysis; with none specified it fails closed.",
+  "language-version": "1.0",
+  "spec": "§14.8.7",
+  "source-test": "compiler/src/protect-analyzer.ts (E-PA-005 fire site, step 3: tables= presence)",
+  "rationale": "protect-analyzer §step3: a `<db>` block missing the required `tables=` attribute (or whose parsed list is empty) has no table set to scope, so protect-column resolution is impossible and E-PA-005 fires (skip-and-return).",
+  "expect": {
+    "codes": ["E-PA-005"],
+    "notCodes": ["E-PA-002", "E-PA-006"]
+  }
+}

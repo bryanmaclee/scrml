@@ -1,0 +1,11 @@
+{
+  "id": "meta-eval-clean-pos",
+  "description": "§22 positive — a compile-time `^{ emit(\"<p>ok</p>\") }` block whose eval succeeds (no throw) AND whose emitted markup re-parses cleanly (a well-formed `<p>` element). Neither meta-eval failure mode applies, so the whole E-META-EVAL-* family stays silent.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §22",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-META-EVAL-"]
+  }
+}

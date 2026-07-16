@@ -1,0 +1,12 @@
+{
+  "id": "engine-derived-engine-no-rules-pos",
+  "description": "§51.0.J E-DERIVED-ENGINE-NO-RULES — `rule=` declared on a state-child of a derived engine. `<Healthy rule=.AtRisk/>` / `<AtRisk rule=.Healthy/>` inside `<engine for=Health derived=match @marioState {...}>` authors transitions the derivation source already determines. Asserts the code AS error. E-ENGINE-RULE-INVALID-VARIANT is in notCodes: `.AtRisk` / `.Healthy` ARE legal `for=Health` variants, so the rejection is about the engine's DERIVED-ness, not a malformed rule target. W-MATCH-RULE-INERT is in notCodes: in a `<match>` block a `rule=` is legal-but-inert (a §18.0.2 warning) — on a derived engine it is a hard error, and this is an engine, not a match.",
+  "language-version": "1.0",
+  "spec": "§51.0.J",
+  "rationale": "§51.0.J rules table: '`rule=` on state-children | REJECTED — `E-DERIVED-ENGINE-NO-RULES` (§34). Transitions are determined by the source, not authored.' §34 catalog: '`rule=` declared on a state-child of a derived engine (`<engine derived=...>`). Transitions are determined by the source expression, not authored. Remove `rule=`.' A derived engine's state is a FUNCTION of an upstream source (§51.0.J: 'its state is FUNCTION of an upstream source rather than authored'), so an authored transition contract has no edge to govern.",
+  "expect": {
+    "codes": ["E-DERIVED-ENGINE-NO-RULES"],
+    "notCodes": ["E-ENGINE-RULE-INVALID-VARIANT", "W-MATCH-RULE-INERT"],
+    "severity": { "E-DERIVED-ENGINE-NO-RULES": "error" }
+  }
+}

@@ -1,67 +1,47 @@
-> ## ⚠️ CROSS-MACHINE — Peter/Windows S254 also wrapped (2026-07-15), AFTER this S255 hand-off
-> A concurrent Windows-seat session (Peter, `pjoliver11`) landed **two PRs to main after S255 wrapped**:
-> **PR #37** (`95a912c` — 150-file `.pathname`→`fileURLToPath` codemod + reset-gap) and **PR #43**
-> (`a4192be` — cross-OS hardening partial, reviewed 16-agent high: `isStdlibFile`→single #26 gate ·
-> posix `deriveWatchFiles` · `os.tmpdir()` test portability · `docs/cross-os-invariants.md`). Windows
-> `unit+conformance` **59→37 fails, 0 regressions; POSIX no-op**. Absorb delta-log **[513]-[516]**.
-> **Top Windows arc for next boot:** the **path-model canonicalization refactor** — the 37 remaining are
-> ONE root cause (inconsistent native/posix path KEYS); design + rejected-approaches (474-fail
-> entry-norm) in `scrml-support/docs/deep-dives/windows-path-model-canonicalization-2026-07-14.md`.
-> It's security-adjacent (#26) + defines the cross-OS path *contract* → **Bryan-adjacent, own reviewed arc.**
-> Housekeeping: stale remote branch `s254-windows-pathname-fix` (delete needs naming). scrml-support @ `86d5c71`.
-> _(Peter/S256 is LIVE-concurrent this session — Windows path-model lane, disjoint from bryan/S256's freeze/security lane. Board: active-sessions/S256.md.)_
+# scrml — Session 259 (bryan) — WRAP · ⭐ 3 freeze reintegrations landed + 2 design rulings + 2 foundational arcs de-risked (held mid-build)
 
-# scrml — Session 256 (bryan) — ⭐ V1 coverage audit → tiered freeze plan → campaign fired · SSR security leak caught+hardening · confidentiality architecture ratified
-
-**Date:** 2026-07-15. **Profile:** A (`/boot`). Concurrent with **S256(Peter/Windows)** — disjoint surface. A very large deliberation+execution session. **WRAP is HELD on the SSR fix's round 3** (bryan: "when agent comes back, hold and wrap; pick up next session") — the SSR round-3 outcome is captured on its return, NOT landed this session.
+**Date:** 2026-07-15/16. **Profile:** A (`/boot`). Successor to the wrapped S258. A very large session: cleared the S258 reintegration backlog (ss60/73/74 → main), then took the two foundational arcs (colorless-async Phase 1, CSS Wave-1) through the adversarial gate — which caught bug cluster after bug cluster, drove a design re-examination + a corpus-priced DD, and landed 2 language-design rulings. Both arcs are HELD mid-build on pushed branches with fully-scoped continuations. **Mechanical state + per-thread detail: `../scrml-support/handOffs/active-sessions/S259-bryan.md` (the running board — read it).**
 
 ## ⚠️ READ FIRST — state as of close
-- **main = `85efaf77`** (S256 landings: cloud-maps #40/42/45/46, maps-refresh #41, campaign #47). Both repos synced.
-- **The freeze question flipped from "author cases" to "audit whether 445 pin everything" — and it's quantified.** Audit: `scrml-support/docs/audits/v1-conformance-coverage-2026-07-15/` (SCOPE · FINDINGS · TIER-SPLIT · DIRECTION-B-runtime).
-- **Conformance: 445 → 459** (ss70 fn-purity re-integrated, **PR #49 OPEN** — bryan to merge).
-- **SSR security fix is HELD at round 3.** Do NOT land without re-review (see IN-FLIGHT).
+- **main = `9c27ce9a`**, gate GREEN. 3 reintegration PRs merged this session (#64 ss73, #67 ss60, #68 ss74). Conformance **593 → 642**.
+- **Two foundational arcs HELD mid-build (branches PUSHED to origin, NOT landed):**
+  - **`feat/colorless-async-seam-a` @ `211ab331`** (green) — colorless-async. GITI-037 fix works; safe pieces landed; the flagship combinator transform + bucket-(b) coverage REMAIN (fully scoped).
+  - **`feat/css-wave1-emission` @ `5f7cf235`** (green suite, but round-3 bugs open) — CSS Wave-1 emission. Sigil + cascade + [2] done; 2nd review cluster open (theme-flat-path, @import-in-@layer, sigil-shadow, Tailwind-precedence).
+- **The adversarial S239 gate was the story of the session** — it caught an accept-all-auth bug (Phase 1) + a cluster of CSS regressions that all passed the full suite green. Both would have shipped under a green suite. This is the measured proof-of-value for the hardened contract (the meta-thread bryan raised).
 
-## 🎯 THE V1 FREEZE — where we actually are (the session's core finding)
-Audit: the suite is 445/445 green but asserts only **155 of 605 fireable codes**. Of the 450-code gap → **247 real V1-holes** (the rest correctly-not-holes: 75 lint-advisory / 97 off-path+codegen-invariants / 17 Nominal / 10 uncertain / 2 reserved / 2 indirectly-covered). Direction-B runtime-half is small (endpoint/auth/print/channel-feed owed + 1 harness-limit freeze-decision = channel multi-client).
-- **Freeze-bar RULED tiered, HIGH bar (bryan S256 "looks like a good bar"):** T1 = every code verifying a SOUNDNESS/SECURITY/PILLAR-CONTRACT guarantee; T2 = config/shape/ergonomic (v1.0.x coverage-growth). When-in-doubt→T1. **~200 tier-1 + ~45 tier-2.** The high bar keeps freeze a real ~200-case campaign; it defers only the cosmetic long-tail.
-- **~200 tier-1 LOADED into the sPA campaign:** `spa-lists/CAMPAIGN-tier1-freeze.md` + ss68–77 new lists + Wave-2 extensions (PR #47 MERGED). Fire-order: Wave A security+soundness → B pillar-contract → C feature/boundary.
-- **Campaign LIVE + fireable:** `/spa ss70` fired → landed (PR #49). Next disjoint: `/spa ss69/ss71/ss68/ss72`. **HOLD `/spa ss60`** (overlaps the live SSR fix).
-- **Audit REFINEMENT (from ss70):** E-FN-007 + E-STATE-COMPLETE are **source-unreachable** (fire only on synthetic AST; blocked on the inline-state-literal parser) → NOT authorable-holes. Known-gap `g-fn-state-diagnostics-source-unreachable` (file at wrap).
+## ✅ LANDED THIS SESSION (all via PR-flow, on main)
+1. **ss73** channel-core §38 — +15 cases (#64, `e57a0bc4`).
+2. **ss60** SSR/protect-floor security — +22 cases (#67, `664dfa07`). Severity pinned to LIVE `warning`; the security-trio W→error elevation rides the (owed) auth-content build.
+3. **ss74** foreign §23.2 + meta-eval — +12 cases (#68, `9c27ce9a`). 2 divergences PA-verified SPEC-sound (list-desc nits, not bugs).
+Conformance **642** on main. Tier-1 freeze campaign: **~10 of 20 lists drained (~108/200 codes)**; biggest remaining = ss56 engine §51 (22).
 
-## 🔴 IN-FLIGHT — SSR auth-scoped prerender leak fix (HELD at round 3)
-CONFIRMED cross-user leak: the SSR compose route seeded auth-scoped cells' rows to anonymous viewers (idiomatic code; worse than the gated client-fetch it accelerates). Fix = auto-omit auth-scoped cells from the SSR seed (mirror §14.8.9 protect-floor) + `W-SSR-PRERENDER-UNSCOPED`→`I-SSR-AUTH-SCOPED-CLIENT-HYDRATED` (info).
-- **THREE rounds — the adversarial gate caught real defects each time.** R1 self-green→review found 3 residual leaks. R2 closed those but INTRODUCED 4 NEW defects (cross-role priv-escalation via mixed-role callable-gate collapse; public-content regression; 2 SQL-comment-strip bugs). **R3 COMPLETE + looks strong** — agent `aa297740dff01ce07`, worktree branch tip **`bfed8ecf`** (KEEP the worktree). All 4 closed via the structural fix requested: NEW `compiler/src/codegen/sql-lex.ts` `liveSqlInterpolations()` = ONE SQL-lexer source of truth used by BOTH the classifier (collect.ts) AND `extractSqlParams` (rewrite.ts) — they provably can't diverge; `stripSqlComments` deleted. Per-cell role gating in `/__mountHydrate` (no collapse); public/gated per-cell partition. **Bonus:** surfaced+fixed a LATENT pre-existing dangling-loader bug (callable-cell-init callee emitted route-handler-only → runtime ReferenceError; now registered as a called-peer). Gate 20200/0, conformance 450/450 (on its pre-#47 base). +14 tests, no test weakened.
-- **NEXT SESSION (HELD — do NOT skip the re-review; R1+R2 both looked clean and weren't):** re-review R3 (`Workflow code-review high` on the branch vs origin/main) → if clean, file-delta via **merge-base `3b2b5f53`** (pre-#47/#49; EXCLUDE base-drift — `origin/main..agent` shows the whole campaign as spurious deletions; use `merge-base..agent`) → PR → land. If the re-review finds more → round 4 or **go PA-direct**. On land it becomes the `cell` axis's first Coverage record.
-- On land, the SSR fix becomes the **`cell` axis's first Coverage record** in the confidentiality coverage-type.
+## ⭐ DESIGN RULINGS (banked — user-voice S259 + DD)
+1. **`@` theme-token sigil** (ratified) — declare bare in `<theme>`, reference `@token` in `#{}` (the V5-strict decl/access pattern). Makes E-THEME-TOKEN-UNKNOWN decidable + kills keyword-shadowing. UNIFIES with the §25 reactive-CSS-var bridge (`@cell`). SPEC §65.3.2 amended (on the CSS branch, not yet landed).
+2. **Colorless-async boundary model** (ratified via DD `../scrml-support/docs/deep-dives/colorless-async-boundaries-2026-07-16.md`) — **KEY: 0 async calls sit in host-constrained positions in the real 1125-file corpus; the crisis was over an adversarial-synthetic shape.** 3-bucket model: (a) TRANSFORM the collection-callback case (build the async combinators — ruled FORK 1, per S66 corpus-is-artifact) · (b) COMPLETE-COVERAGE the operands/alias/cross-lib (await works there) · (c) FAIL-CLOSED only param-default / raw-body / `.sort`.
+3. **CSS finding [2]** — component-scope beats program-global via `@layer` (SPEC §65.5, on the CSS branch).
 
-## 🏛️ RATIFIED — auth-scoped confidentiality architecture (the auth-content arc)
-DD `scrml-support/docs/deep-dives/auth-content-confidentiality-2026-07-15.md` (PARTIALLY-SUPERSEDED) + **RULING** `…-RULING.md` (live decision) + the fork-1 debate (SIBLINGS 8.3/UNIFY 4.4).
-- **Premise corrected mid-debate (verified from git):** the SSR leak was NOT a forgotten sink — the protect-floor DID cover the SSR seed; it was a **missing AXIS at a covered SINK**. A sink-registry is useless; a **sink × axis** obligation is the answer.
-- **RATIFIED (bryan "ratify, I like it"):** (1) THREE colocated mechanisms (column-redact / cell-omit / content-elide) — NO god-object floor. (2) ONE compile-time **`EgressSink × ConfidentialityAxis` coverage TYPE** (exhaustive `switch(sink)` + `never` tail; adding a sink or axis forces coverage = complete-mediation without the merged path). Forks 2/3/4 ratified (auto-omit+hydrate content · static-CDN §58 hard-error · capability-URL per-fetch re-auth). "Content-addressed chunk as confidentiality" KILLED.
-- **Build scoped + KICKED then STOPPED.** Unit 1 = coverage-type spine (retrofit column+cell) — dispatched off the SSR branch, then STOPPED (fired before the SSR re-review verdict; must base on the CLEAN SSR fix). **NEXT SESSION: re-fire Unit 1 off the landed SSR fix; then Unit 2 = content-elide (3rd axis + forks 2/3).**
+## 📋 OPEN THREADS / OWED (next session) — see the board for full detail
+1. **Colorless-async — finish the build** on `feat/colorless-async-seam-a` (@ `211ab331`): build the 9 `_scrml_*Async` combinators (agent's design is in `docs/changes/colorless-async-seam-a-2026-07-15/progress.md`) + bucket-(b) multi-hop-alias/cross-lib/operand coverage + [3] foreign `_={}=` keep-on-§23.6-path. Then S239 re-review → land. **Interim fail-closed is sound (no silent leak) but 0-frequency, so nothing breaks meanwhile.**
+2. **CSS Wave-1 — round 3** on `feat/css-wave1-emission` (@ `5f7cf235`): fix [86] flat-inline theme path (not theme-aware → §65.4 no-ops), [399-@import] `@import`/`@charset` trapped in `@layer global` (REGRESSION — imported sheets vanish), [144] `@name` token-vs-cell silent shadow, [356]/[399-tw] Tailwind-precedence (component/global now lose to unlayered utilities — decide: fix now vs Wave-3-defer, but current change REGRESSED it). Then S239 re-review → land. Then the runtime theme-switch (client `@mode`→`<html data-scrml-theme-mode>` reflection — emit-client.ts) before "CSS Wave-1 done."
+3. **NEW inbox (arrived mid-session):** `ss59-REINTEGRATE` (reactivity §6 Wave-2, 13 codes — a ready reintegration like ss60/73/74) + `flogence-6b-CONVERGED` (merge-review-cosign). Both in `handOffs/incoming/`.
+4. **`thread-board-build`** (bryan-ruled, queued) — executable done-probes per thread, auto-DISCOVERED from `docs/changes/*/BRIEF.md` `done-probe:` fields + auto-INVOKED at boot/CI (NOT a script the PA remembers). The session's meta-lesson: prose state drifts; only executable/auto-registered survives. Build after the arcs.
+5. **New bug threads (banked on the board):** `css-stdlib-export-seed-isolated-parse-fragility` (root of async review [5]: `_parseStdlibExports` isolated parse throws E-CTX-003 on `stdlib/data/transform.scrml` → sortBy/etc mis-marked async) · `css-component-descendant-space-collapse` (`#{ .a .b }` → `.a.b`, pre-existing) · `phase1-async-lambda-in-init-leak` (pre-existing).
+6. **From S258, still owed:** auth-content build (elevates the ss60 security-trio W→error) · SSR-prerender fix land (`fix/ssr-auth-scoped-prerender-leak`, held) · worktree sweep (24+ stale, dry-run first) · maps refresh (compiler code landed since f079d0a9).
 
-## 📋 OPEN THREADS
-1. **SSR fix R3** → re-review → land (wrap gate; held).
-2. **Auth-content build** → re-fire Unit 1 (coverage-type) off the landed SSR fix → Unit 2 (content-elide).
-3. **Freeze campaign — RUNNING HOT.** ss70 fn-purity re-integrated (#49). **PENDING RE-INTEGRATION next session** (branches + REINTEGRATE messages in `handOffs/incoming/`): **`spa/ss62`** (equality §45) + **`spa/ss71`** (match §18) LANDED; **`spa/ss66`** (sql-schema) in-flight/pending (branch present, no message yet — check). Re-integration is mechanical per ss70's pattern: for each, file-delta `conformance/cases/<X>/` from `spa/ssN` onto a `chore/reintegrate-ssN` branch → `bun conformance/run.ts` verify → PR → retire the branch. **DO NOT retire spa/ss62/ss66/ss71** (un-re-integrated). Fire more disjoint lists freely (ss68/ss69/ss72…); HOLD ss60 (SSR overlap). Keep the main checkout on `main` when firing `/spa`.
-4. **flogence — 3 messages** (`handOffs/incoming/read/` ×2 replied + 1 UNREAD `…oracle6b…`): (a) 3 serve=-tool dogfood bugs CONFIRMED+replied (`g-inferred-async-call-value-position-no-autoawait` [silent-miscompile, V1] + 2 serve= codegen gaps → file at wrap); (b) `<endpoint>` `decode=` JSON-RPC ask AGREED (A), fast-follow/post-V1, replied; (c) **`--emit-semantic-diff` feasibility ask HELD for bryan's timing read** (his S30 collaboration-layer / semantic-review-wedge direction; v-next no-clock; lean = ledger it, the compiler-only gap [sound cosmetic-vs-behavioral classification] is real+native, weigh post-V1, co-sign giti). **bryan: "discuss timing next session."**
-5. **cloud-maps push one-liner** owed (explicit-token push); daily cron red-fails until landed. Non-blocking.
-6. **Peter/S256 concurrent** — Windows path-model (disjoint). Boards: active-sessions/S256.md + S256-bryan.md.
-
-## 🔬 ANOMALIES / LESSONS
-- **`/spa` reads the list file from the WORKING TREE** → firing while the main checkout is on a fix branch predating the campaign merge = "no sessions to fire." I broke this by parking main on the SSR branch to base Unit 1. **LESSON: keep the main checkout on `main`; do branch work in worktrees** so `/spa` always sees the lists (the auth-content build must NOT park main on a branch).
-- **Base-drift at SSR re-integration** — file-delta via `merge-base..agent`, not `origin/main..agent`. [[feedback_file_delta_vs_cherry_pick]]
-- **Adversarial gate is load-bearing on security codegen** — caught real leaks R1 AND real NEW defects R2 (green-self-reported both). No exceptions. [[feedback_adversarial_verify_not_confirmatory]]
-- **Commit-hook 5-min wrapper timeouts** always finalized (verify git STATE not exit code); `${}` messages need `-F`. [[feedback_commit_hook_timeout_and_F_flag]]
+## 🔬 IRREDUCIBLE NARRATIVES (what to watch)
+- **The S239 gate is load-bearing — 2/2 this session.** Both foundational arcs self-reported full-suite-green and BOTH had serious bugs (async: accept-all-auth via un-awaited `verifyPassword` in `.some`; CSS: `@import` dropped, silent theme no-op, Tailwind inversion). Confirmatory-green ≠ landable. Never skip the adversarial pass on a codegen dispatch.
+- **Fix rounds introduce new bugs (both arcs, 2 rounds each).** Foundational codegen touches broad surfaces; convergence is multi-round. The DD's classify-first approach (corpus-priced buckets) is what turned the async whack-a-mole into a bounded work-list — do that BEFORE grinding fix rounds on a deep surface.
+- **The DD dissolved a false crisis.** The async "restructure-into-a-function" fail-closed felt wrong (bryan: perpetuates the hated wrapper ceremony); the corpus-priced DD found the offending shape is 0-frequency + the fix is small. Lesson: when a fix feels like it violates the thesis, corpus-price it before committing.
+- **Auto-`isolation:"worktree"` still BROKEN (S258→S259)** — all dispatches used PRE-MADE manual worktrees (`../scrml-phase1-async`, `../scrml-css-wave1`). Keep doing that until diagnosed.
 
 ## 🚦 STATE @ CLOSE
-- main `85efaf77`, both repos 0/0. Conformance **459/459** (post-#49, independently verified).
-- **Open PRs:** #49 (ss70 fn conformance — bryan to merge). SSR fix on `fix/ssr-auth-scoped-prerender-leak` (HELD, not PR'd).
-- **Worktree sweep OWED** (broad + this session's spent) — **DO NOT remove the active SSR round-3 worktree `agent-aa297740dff01ce07`**. Retire `spa/ss70`.
-- Mechanical: delta-log + changelog S256; audit/DD/RULING pushed to scrml-support.
+- git: main `9c27ce9a`, gate GREEN. Held branches pushed: `feat/colorless-async-seam-a` `211ab331`, `feat/css-wave1-emission` `5f7cf235`. Wrap on `wrap/s259` (docs).
+- Mechanical: board `S259-bryan.md` (full per-thread) · delta-log S259 · changelog S259 · known-gaps (threads) · user-voice S259 (3 rulings verbatim) · DD `colorless-async-boundaries-2026-07-16.md`.
+- Worktrees RETAINED (in-flight, do NOT clean): `../scrml-phase1-async`, `../scrml-css-wave1`. Spent worktree sweep still owed.
+- Maps: UNCHANGED (compiler code landed on held branches, not main; refresh owed when they land).
 
 ## pa.md directives in force
-R1-R5 · PR-flow · S239 mandatory adversarial review (caught SSR leaks across 3 rounds) · tiered-HIGH freeze bar (S256) · confidentiality = 3 colocated + 1 coverage-type (S256) · keep-main-checkout-on-main-for-/spa · orchestrate-don't-grind · Peter concurrent (disjoint).
+R1-R5 · PR-flow · S239 mandatory adversarial review (caught 2/2 this session) · R26 empirical · manual-worktree provisioning · DD-before-grind on deep surfaces · corpus-is-artifact (S66) · orchestrate-don't-grind.
 
 ## Tags
-#session-256 #v1-freeze-coverage-audit #tiered-high-bar #campaign-fired-ss70-landed #ssr-prerender-leak-HELD-round3 #confidentiality-architecture-ratified #egresssink-x-axis-coverage-type #auth-content-build-scoped #flogence-dogfood-x3 #semantic-diff-ask-held #concurrent-peter-s256 #wrap-held-on-ssr
+#session-259 #ss60-ss73-ss74-LANDED #conformance-642 #at-sigil-RULED #colorless-async-boundaries-DD-RULED #css-wave1-held-round3 #colorless-async-held-transform-build #s239-caught-2of2-auth-and-css #thread-board-queued

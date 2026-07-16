@@ -1,0 +1,9 @@
+<program db="postgres://localhost/app">
+
+  <channel>
+    <count> = 0
+  </channel>
+
+  <p>Live count: ${@count}</p>
+
+</program>

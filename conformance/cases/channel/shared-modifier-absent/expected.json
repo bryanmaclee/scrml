@@ -1,0 +1,12 @@
+{
+  "id": "channel-shared-modifier-absent",
+  "description": "§38.4 clean neg — the same channel synced cell declared in the canonical V5-strict structural form `<count> = 0` (no `@shared`) auto-syncs from body placement and fires NO E-CHANNEL-* diagnostic. The delta from `channel/shared-modifier` is dropping the removed `@shared` marker.",
+  "language-version": "1.0",
+  "spec": "§38.4",
+  "rationale": "§38.4: a reactive cell declared inside a channel body with the structural form `<name> = init` auto-syncs by virtue of placement — no modifier is required, so E-CHANNEL-SHARED-MODIFIER does not fire.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-SHARED-MODIFIER"],
+    "notCodePrefixes": ["E-CHANNEL-"]
+  }
+}

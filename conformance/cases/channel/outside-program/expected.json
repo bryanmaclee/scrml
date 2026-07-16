@@ -1,0 +1,11 @@
+{
+  "id": "channel-outside-program",
+  "description": "§38.1 — a `<channel>` at file top level (programDepth 0) in a file that ALSO contains a `<program>` sibling fires E-CHANNEL-OUTSIDE-PROGRAM. Under v0.3, channels are app-scope shared-state vehicles that live INSIDE `<program>`; the `<program>`-but-channel-not-inside-it shape is the canonical violation (direction REVERSED from pre-v0.3 E-CHANNEL-INSIDE-PROGRAM).",
+  "language-version": "1.0",
+  "spec": "§38.1, §38.2",
+  "rationale": "§38.1: a `<channel>` positioned outside `<program>` in a file that ALSO contains a `<program>` element SHALL emit E-CHANNEL-OUTSIDE-PROGRAM. The fire is gated on `fileHasProgram === true`; move the channel to be a child of `<program>`.",
+  "expect": {
+    "codes": ["E-CHANNEL-OUTSIDE-PROGRAM"],
+    "severity": { "E-CHANNEL-OUTSIDE-PROGRAM": "error" }
+  }
+}

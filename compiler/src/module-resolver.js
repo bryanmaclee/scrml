@@ -23,9 +23,10 @@
  * relative paths only.
  */
 
-import { resolve, dirname, join } from "path";
+import { resolve, dirname, join, posix } from "path";
 import { existsSync } from "fs";
 import { fileURLToPath } from "url";
+import { toPosix, PathKeyedMap, PathKeyedSet } from "./path-canonical.js";
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -176,13 +177,15 @@ function exportedLocalNames(exp) {
  * @returns {{ graph: Map<string, object>, errors: ModuleError[] }}
  */
 export function buildImportGraph(fileASTs) {
-  const graph = new Map();
+  // PathKeyedMap/Set: internal keys canonicalize to posix at the boundary, so
+  // producers/consumers can never desync native vs posix (the #-fix invariant).
+  const graph = new PathKeyedMap();
   const errors = [];
 
   // Collect the set of files being compiled so we can distinguish "this import
   // points to a file that's in the compile set" (present by definition) from
   // "this import points to a file that must exist on disk but doesn't" (E-IMPORT-006).
-  const compileSet = new Set();
+  const compileSet = new PathKeyedSet();
   for (const file of fileASTs) {
     const fp = file.filePath || file.ast?.filePath;
     if (fp) compileSet.add(fp);
@@ -506,7 +509,7 @@ export function topologicalSort(graph) {
  * @returns {Map<string, Map<string, {kind: string, category: string, isComponent: boolean, isAsync?: boolean}>>}
  */
 export function buildExportRegistry(graph) {
-  const registry = new Map();
+  const registry = new PathKeyedMap();
 
   // ---- Pass 1 — build initial registry from direct + engine + per-name entries.
   // Re-exports land with `kind: "re-export"` and carry `_reExportSource` +
@@ -723,8 +726,42 @@ const STDLIB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../stdl
  * @returns {string} — absolute path of the target module
  */
 export function resolveModulePath(source, importerPath) {
+  // Canonicalize the resolved path to posix for use as an internal key /
+  // comparison operand. `resolveModulePathNative` uses the NATIVE `path` API
+  // (preserving Windows drive letters + `..` collapse — `path.posix` would drop
+  // the drive); `toPosix` folds only the separator. This is THE producer of
+  // `absSource` — every graph/registry key + `imp.absSource` comparison derives
+  // from here, so canonicalizing once keeps them consistent cross-OS.
+  return toPosix(resolveModulePathNative(source, importerPath));
+}
+
+// Exported for the api.js auto-gather pass, which needs the NATIVE resolved
+// path (not the posix key `resolveModulePath` returns): a gathered file becomes
+// an `inputFile` and thus an AST `filePath`, and `filePath` is kept uniformly
+// native across the compiler (the public `outputs`-key contract + the reason
+// entry-normalization to posix caused 474 fails). The internal graph/registry
+// keys are still posix via `PathKeyedMap`; only the value stays native here.
+export function resolveModulePathNative(source, importerPath) {
+  // Hybrid resolve (deep-dive: "drive-less-vs-C:\ cases"). A drive-less,
+  // non-UNC importer is a POSIX-style path — a real POSIX path AND the synthetic
+  // `/app/...` fixtures unit tests use. Native `resolve`/`dirname`/`join` would
+  // drive-PREPEND such a path on Windows (`/app` → `C:\app`), desyncing it from
+  // the posix-keyed graph. So we pick posix path semantics for drive-less
+  // importers and native (drive + `..` preserving) for real Windows paths;
+  // `toPosix` (applied by the exported wrapper) folds the separator either way.
+  // Drive-shape is a structural query, NOT a `process.platform` behavior branch.
+  // Three native shapes: `C:\`/`C:/` drive-rooted, `\\server` backslash-UNC, and
+  // `//server` forward-slash-UNC. The last matters because an auto-GATHERED UNC
+  // importer reaches here already posix-folded (`\\server` → `//server` via
+  // `toPosix`); without the `^//` arm it would fall to `path.posix.resolve`,
+  // which mishandles the UNC double-slash root and desyncs the resolved key from
+  // the graph. On POSIX `//foo` is a legal path and native `resolve` === posix,
+  // so the arm is a no-op there.
+  const nativeImporter = /^[A-Za-z]:[\\/]|^\\\\|^\/\//.test(importerPath);
+  const P = nativeImporter ? { resolve, dirname, join } : posix;
+
   if (source.startsWith("./") || source.startsWith("../")) {
-    const resolved = resolve(dirname(importerPath), source);
+    const resolved = P.resolve(P.dirname(importerPath), source);
     // Exact path exists — return it (covers explicit `.scrml`, `.js`, etc.).
     if (existsSync(resolved)) return resolved;
     // Extension-less fallback: `./foo` → `./foo.scrml`, then `./foo/index.scrml`.
@@ -733,14 +770,14 @@ export function resolveModulePath(source, importerPath) {
     if (!resolved.endsWith(".scrml") && !resolved.endsWith(".js")) {
       const withExt = resolved + ".scrml";
       if (existsSync(withExt)) return withExt;
-      const asDir = join(resolved, "index.scrml");
+      const asDir = P.join(resolved, "index.scrml");
       if (existsSync(asDir)) return asDir;
     }
     return resolved;
   }
   if (source.startsWith("scrml:")) {
     const moduleName = source.slice("scrml:".length);
-    // Try <stdlib>/<name>/index.scrml first, then <stdlib>/<name>.scrml
+    // STDLIB_ROOT is a real on-disk path (fileURLToPath) — always native.
     const dirPath = join(STDLIB_ROOT, moduleName, "index.scrml");
     const filePath = join(STDLIB_ROOT, `${moduleName}.scrml`);
     // Prefer directory form (allows multi-file modules)
@@ -750,9 +787,9 @@ export function resolveModulePath(source, importerPath) {
   if (source.startsWith("vendor:")) {
     // §40.4: vendor: resolves to <project>/vendor/<path>/index.scrml or .scrml
     const vendorName = source.slice("vendor:".length);
-    const projectRoot = resolve(dirname(importerPath), "..");
-    const vendorDirPath = join(projectRoot, "vendor", vendorName, "index.scrml");
-    const vendorFilePath = join(projectRoot, "vendor", `${vendorName}.scrml`);
+    const projectRoot = P.resolve(P.dirname(importerPath), "..");
+    const vendorDirPath = P.join(projectRoot, "vendor", vendorName, "index.scrml");
+    const vendorFilePath = P.join(projectRoot, "vendor", `${vendorName}.scrml`);
     if (existsSync(vendorDirPath)) return vendorDirPath;
     return vendorFilePath;
   }
@@ -769,22 +806,13 @@ export function isStdlibImport(source) {
   return source.startsWith("scrml:");
 }
 
-/**
- * Normalize OS path separators to POSIX forward-slash form.
- *
- * `resolve`/`join` from `node:path` emit NATIVE separators — `\` on Windows,
- * `/` on POSIX. Any path comparison that hardcodes `/` (e.g. the stdlib
- * carve-out prefix below) silently fails on Windows: `C:\repo\stdlib\auth`
- * does not `startsWith` `C:\repo\stdlib/`. Normalizing both operands before
- * comparison makes the check separator-agnostic. Mirrors the
- * `.replace(/\\/g, "/")` idiom already used in emit-server.ts (~L3908).
- *
- * @param {string} p
- * @returns {string}
- */
-function normalizeSep(p) {
-  return typeof p === "string" ? p.replace(/\\/g, "/") : p;
-}
+// Path-separator normalization for the stdlib carve-out comparison below uses
+// the shared `sep`-aware `toPosix` (path-canonical.js). The prior local
+// `normalizeSep` hardcoded `\`→`/` unconditionally, which WIDENS the match on
+// POSIX (where `\` is a legal filename char): a file `stdlib\evil.scrml` folded
+// to `stdlib/evil.scrml` and falsely entered the carve-out — bypassing the
+// async-lint AND the #26 auth-await classifier gate. `toPosix` folds only when
+// `\` is the host separator, closing that widening on both surfaces at once.
 
 /**
  * Check if an absolute file path resolves under the stdlib root.
@@ -809,8 +837,8 @@ function normalizeSep(p) {
  */
 export function isStdlibFilePath(absPath) {
   if (typeof absPath !== "string" || absPath.length === 0) return false;
-  const normPath = normalizeSep(absPath);
-  const normRoot = normalizeSep(STDLIB_ROOT);
+  const normPath = toPosix(absPath);
+  const normRoot = toPosix(STDLIB_ROOT);
   if (normPath === normRoot) return true;
   const prefix = normRoot.endsWith("/") ? normRoot : normRoot + "/";
   return normPath.startsWith(prefix);
