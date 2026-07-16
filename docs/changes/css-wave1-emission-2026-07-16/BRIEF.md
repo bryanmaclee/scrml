@@ -48,3 +48,6 @@ style-as-value (`const x = #{}`, `style=<value>`, `style=[a,b]`, `style:name=`),
 
 ## CRASH-RECOVERY
 Commit per gap closed; update progress.md. Report: final SHA, files-touched (FLAG any index.ts touch), before/after emitted CSS for the probe, §34 codes added, full-suite + conformance deltas. Do NOT open a PR/merge — PA lands via file-delta + review.
+
+<!-- thread-board: run `bun scripts/threads.ts` — DONE-PROBE asserts this arc's completion against landed artifacts -->
+DONE-PROBE: git grep -q 'data-scrml-theme-mode' -- compiler/src/codegen/emit-client.ts

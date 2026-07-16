@@ -39,3 +39,6 @@ NOT the built-in reset, NOT `<theme>`→`:root` lowering, NOT `:where()`-flat em
 - iso:worktree. Commit incrementally (+ `progress.md`). Do NOT land to main — the PA reviews (S239 adversarial /code-review is OWED on this codegen build) then lands.
 - A concurrent session (S247) is live on disjoint threads (build.js/dev.js, parser/default-logic, realtime) — stay in your CSS-pipeline footprint.
 - Final message: the pass's integration point + the §34 rows added + the banner flipped + the test results + the post-impl dry-run corpus numbers (confirm 0 hard FP) + any spec-ambiguity Phase-0 stop.
+
+<!-- thread-board: run `bun scripts/threads.ts` — DONE-PROBE asserts this arc's completion against landed artifacts -->
+DONE-PROBE: git grep -q 'E-STYLE-CONFLICT' -- compiler/src
