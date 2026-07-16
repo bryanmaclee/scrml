@@ -1397,6 +1397,14 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       _pushClientLeak(aliasedAsyncCallError(a.alias, a.resolved, a.span, filePath));
     }
   }
+  // Belt-and-suspenders — emit-expr records a client async-peer call emitted BARE
+  // in a non-awaitable position (`peerAwaitable === false`) into `_clientSyncPeerCalls`.
+  // This covers a fn-SIGNATURE param default (`function f(x = middle())`) — which
+  // lives in `fn.params`, NOT `fn.body`, so the structural body scan above does not
+  // reach it. Deduped against the detector's diagnostics by (code, span).
+  for (const _sp of _clientSyncPeerCalls) {
+    _pushClientLeak(asyncStdlibSyncCallbackError(_sp.name, _sp.span, filePath));
+  }
 
   return { lines, fnNameMap };
 }
