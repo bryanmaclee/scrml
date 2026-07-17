@@ -16,8 +16,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 1 |
-| MED | 26 |
-| LOW | 19 |
+| MED | 28 |
+| LOW | 20 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -35,6 +35,22 @@
 > carries an inline `@gap` token in its final cell. This basis reproduced the canonical S170 hand-count
 > HIGH 0 · MED 9 · LOW 18 · Nominal 9 exactly (the S170 baseline) — the LIVE count is the generated table
 > above, which moves as gaps are filed/closed (S174 filed 4 → MED 11 · LOW 20).
+
+---
+
+## §S264 — gaps filed S264 (2026-07-17, bryan)
+
+### g-sqlref-direct-call-arg-unresolved — a `?{}` used directly as a call ARGUMENT (`f(?{…}.all())`, `push(?{…}.all())`, `[?{…}.all()]`) hits a pre-existing "sql-ref unresolved: nodeId=-1" path that bypasses `ast-builder` `buildBlock` entirely → emits `null /* sql-ref unresolved … */.all()` for a VALID query (and E-SQL-003/E-SQL-004 also can't fire there). PRE-EXISTING (a valid query in that position fails identically on base) — surfaced by the E-SQL-003 S239 review, orthogonal to it. Fix = route call-argument-position `?{}` through the SQLNode construction site. — `NEW S264 (E-SQL-003 review); MED; open`
+<!-- @gap id=g-sqlref-direct-call-arg-unresolved sev=MED status=open -->
+
+### g-esql003-brace-scan-string-unaware — E-SQL-003's `sqlBodyIsRuntimeExpr` brace-depth scan is string-literal-unaware: a `}` inside a string literal within an interpolation (`?{`${g("}")}`}`) prematurely closes the interpolation, so a genuinely all-runtime body reads as having "literal" trailing chars → under-fires. Exotic (contrived), false-negative only (safe direction). Fix = make the interpolation scan string-aware. — `NEW S264 (E-SQL-003 review); LOW; open`
+<!-- @gap id=g-esql003-brace-scan-string-unaware sev=LOW status=open -->
+
+### g-ishtmlelement-registry-incomplete — `isHtmlElement` (`compiler/src/html-elements.js`) is missing many standard/modern HTML elements (`dialog`/`details`/`summary`/`template`/`slot`/`picture`/`output`/`data`/`meter`/`pre`/`code`/`em`/`strong`/`thead`/`tbody`/…) + most SVG + all MathML. The E-MARKUP-001 gate is UNAFFECTED (it routes through the complete new `isKnownElementName`), but the render/void/attr registry that consumes `isHtmlElement` may mis-handle those elements (void-element detection, attribute validation, emit). Separate pre-existing gap; a registry-completion pass is the fix. Surfaced by the E-MARKUP-001 dispatch. — `NEW S264 (E-MARKUP-001); MED; open`
+<!-- @gap id=g-ishtmlelement-registry-incomplete sev=MED status=open -->
+
+### g-semdiff-markup-whitespace-p1 — #6b semdiff reads a markup-whitespace-only reindent as BEHAVIORAL (the emitted HTML preserves source markup whitespace, folded raw into the whole-output compare). False-behavioral (conservative/SAFE direction), a documented P0 limitation — markup-whitespace insensitivity is deferred to P1. Non-blocking for consumers (giti/flogence use same-basename refs; the direction is "over-report behavioral", never a false-cosmetic). — `NEW S264 (#6b P0 land); LOW; deferred-P1`
+<!-- @gap id=g-semdiff-markup-whitespace-p1 sev=LOW status=deferred -->
 
 ---
 
