@@ -1,0 +1,13 @@
+{
+  "id": "ctrl-010-else-on-for-in-if-chain-pos",
+  "description": "§17.4a — E-CTRL-010 regression guard (S239 review BUG 2). A no-lift `for … else` nested inside a markup if/else chain SHALL fire E-CTRL-010. The `<div if=@flag>` opener + `<div else>` form an if-chain that collapseIfChains folds into an `if-chain` node whose branch content lives under `branches`/`elseBranch`. The earlier recursion used a fixed key list that omitted `branches`/`elseBranch`, so the nested `for … else` was never visited and E-CTRL-010 was silently missed. The lift-less `for` body (only `@total = @total + 1`) carrying an `else { lift … }` must be rejected wherever it is nested. W-PROGRAM-SPA-INFERRED (info) and E-DG-002 unused-reactive warnings co-fire incidentally; neither asserted.",
+  "language-version": "1.0",
+  "spec": "§17.4a",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§17.4a: 'A `for` loop without `lift` SHALL NOT accept an `else` block (E-CTRL-010).' The prohibition is position-independent — it holds no matter what container the `for … else` is nested in. The detector's recursion must reach every sibling array in the tree, including an `if-chain` node's `branches`/`elseBranch` (collapseIfChains runs immediately before this pass and produces those). The fix replaces the hand-rolled key list with a generic every-array/every-object descent (with a `seen` cycle guard), so a no-lift `for … else` nested in an if-chain — or any other container — is caught. This case is the regression guard for that missed-fire.",
+  "expect": {
+    "codes": ["E-CTRL-010"],
+    "notCodes": ["E-CTRL-001", "E-CTRL-002", "E-CTRL-005"],
+    "severity": { "E-CTRL-010": "error" }
+  }
+}

@@ -17061,15 +17061,31 @@ type LinState = "unconsumed" | "consumed";
 type TildeState = "uninitialized" | "initialized";
 type MustUseState = "unused" | "used";
 
+/**
+ * A markup body whose runtime scheduling boundary crosses the current
+ * synchronous scope. `request`/`poll` are DEFERRED contexts (E-LIN-006 —
+ * dominance cannot be proven across the scheduling boundary). `timer`/`timeout`
+ * are RECURRING contexts (E-LIN-004 — the body may execute more than once, so a
+ * single `lin` reference is consumed N times; the recurring-context form of
+ * E-LIN-002). Both share the same "declared-outside, consumed-inside" tracker;
+ * only the emitted code + message differ (§35.5).
+ */
+type DeferredCtxKind = "request" | "poll" | "timer" | "timeout";
+
+/** §35.5: request/poll -> E-LIN-006 (deferred dominance); timer/timeout -> E-LIN-004 (recurring). */
+function deferredCtxErrorCode(ctx: DeferredCtxKind): "E-LIN-004" | "E-LIN-006" {
+  return ctx === "request" || ctx === "poll" ? "E-LIN-006" : "E-LIN-004";
+}
+
 interface LinErrorDescriptor {
-  code: "E-LIN-001" | "E-LIN-002" | "E-LIN-003" | "E-LIN-006";
+  code: "E-LIN-001" | "E-LIN-002" | "E-LIN-003" | "E-LIN-004" | "E-LIN-006";
   varName: string;
   span: Span;
   secondUseSpan?: Span;
   /** Span of the `lift` expression that first consumed this lin variable (Lin-A1). */
   liftSite?: Span;
-  /** §35.5 E-LIN-006: the markup ctx kind where consumption occurred. */
-  deferredCtx?: "request" | "poll";
+  /** §35.5 E-LIN-006 / E-LIN-004: the deferred/recurring ctx kind where consumption occurred. */
+  deferredCtx?: DeferredCtxKind;
 }
 
 interface TildeErrorDescriptor {
@@ -17106,16 +17122,17 @@ class LinTracker {
     this._declDeferredDepth.set(name, deferredDepth);
   }
 
-  consume(name: string, span: Span, currentDeferredDepth: number = 0, currentDeferredCtx: "request" | "poll" | null = null): LinErrorDescriptor | null {
+  consume(name: string, span: Span, currentDeferredDepth: number = 0, currentDeferredCtx: DeferredCtxKind | null = null): LinErrorDescriptor | null {
     if (!this._vars.has(name)) return null;
 
-    // §35.5 E-LIN-006: a lin declared outside a `<request>` / `<poll>`
-    // body cannot be consumed inside one. Fire BEFORE the state check so
-    // the user sees the boundary violation instead of a confusing E-LIN-002.
+    // §35.5: a lin declared outside a deferred/recurring markup body cannot be
+    // consumed inside one. Fire BEFORE the state check so the user sees the
+    // boundary violation instead of a confusing E-LIN-002. `request`/`poll` are
+    // deferred (E-LIN-006); `timer`/`timeout` are recurring (E-LIN-004).
     const declDepth = this._declDeferredDepth.get(name) ?? 0;
     if (currentDeferredDepth > declDepth && currentDeferredCtx) {
       return {
-        code: "E-LIN-006",
+        code: deferredCtxErrorCode(currentDeferredCtx),
         varName: name,
         span,
         deferredCtx: currentDeferredCtx,
@@ -17459,13 +17476,14 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
   // bare lin-ref nodes) are consumed before outer lt is checked.
   let currentLoopLocalLin: LinTracker | null = null;
 
-  // §35.5 E-LIN-006 — deferred-ctx stack for `<request>` / `<poll>` bodies.
-  // Incremented on entering a markup-ctx whose runtime scheduling boundary
-  // crosses the current synchronous scope. A `lin` consumption whose
-  // declaration depth is lower than the consumer depth is E-LIN-006.
-  // Closures are NOT counted — they're handled by §35.6 (capture = consume).
+  // §35.5 — deferred/recurring-ctx stack for `<request>`/`<poll>` (E-LIN-006)
+  // and `<timer>`/`<timeout>` (E-LIN-004) bodies. Incremented on entering a
+  // markup-ctx whose runtime scheduling boundary crosses the current
+  // synchronous scope. A `lin` consumption whose declaration depth is lower than
+  // the consumer depth fires the ctx's code (E-LIN-006 deferred / E-LIN-004
+  // recurring). Closures are NOT counted — §35.6 governs them (capture = consume).
   let currentDeferredDepth = 0;
-  let currentDeferredCtx: "request" | "poll" | null = null;
+  let currentDeferredCtx: DeferredCtxKind | null = null;
 
   function mkSpan(): Span {
     return { file, start: 0, end: 0, line: 1, col: 1 };
@@ -17501,7 +17519,7 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
       const err = currentLoopLocalLin.consume(name, resolvedSpan, currentDeferredDepth, currentDeferredCtx);
       if (err) {
         emitLinError(err, resolvedSpan);
-        if (err.code === "E-LIN-006") currentLoopLocalLin.forceConsume(name, resolvedSpan);
+        if (err.code === "E-LIN-006" || err.code === "E-LIN-004") currentLoopLocalLin.forceConsume(name, resolvedSpan);
       }
       return;
     }
@@ -17520,7 +17538,7 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
       const err = tracker.consume(name, resolvedSpan, currentDeferredDepth, currentDeferredCtx);
       if (err) {
         emitLinError(err, resolvedSpan);
-        if (err.code === "E-LIN-006") tracker.forceConsume(name, resolvedSpan);
+        if (err.code === "E-LIN-006" || err.code === "E-LIN-004") tracker.forceConsume(name, resolvedSpan);
       }
     }
   }
@@ -17557,6 +17575,17 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
         `Every branch of the if/match must either consume or explicitly discard it.`,
         s,
       ));
+    } else if (desc.code === "E-LIN-004") {
+      const ctxTag = desc.deferredCtx === "timeout" ? "<timeout>" : "<timer>";
+      errors.push(new TSError(
+        "E-LIN-004",
+        `E-LIN-004: Linear variable \`${desc.varName}\` is consumed inside a ${ctxTag} body — ` +
+        `a recurring execution context that may run more than once. A \`lin\` variable must be ` +
+        `consumed exactly once, but a single reference here is consumed on every run (the ` +
+        `recurring-context form of E-LIN-002). Declare \`${desc.varName}\` inside the ${ctxTag} ` +
+        `body, or pass a consumed (non-\`lin\`) value into it.`,
+        s,
+      ));
     } else if (desc.code === "E-LIN-006") {
       const ctxTag = desc.deferredCtx === "poll" ? "<poll>" : "<request>";
       errors.push(new TSError(
@@ -17574,7 +17603,7 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
   function emitTildeError(desc: TildeErrorDescriptor, contextSpan?: Span): void {
     const s = desc.span ?? contextSpan ?? mkSpan();
     if (desc.code === "E-TILDE-001") {
-      errors.push(new TSError("E-TILDE-001", `E-TILDE-001: The pipeline accumulator \`~\` was read before being initialized. Add \`~ = <value>\` before this line to give it an initial value. See §32 in the spec.`, s));
+      errors.push(new TSError("E-TILDE-001", `E-TILDE-001: The pipeline accumulator \`~\` was read before being initialized in the current logic context. \`~\` is set by an unassigned expression statement (e.g. \`fetchUser(id)\` with no binding) or by a \`lift\`; add one before referencing \`~\`, or capture the value with \`let\`. See §32 in the spec.`, s));
     } else if (desc.code === "E-TILDE-002") {
       errors.push(new TSError("E-TILDE-002", `E-TILDE-002: The pipeline accumulator \`~\` was set to a value but never used before it was overwritten or the block ended. Use \`lift ~\` or read \`~\` before setting it again. See §32 in the spec.`, s));
     }
@@ -17632,10 +17661,10 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
             const err = tracker.consume(name, refSpan, currentDeferredDepth, currentDeferredCtx);
             if (err) {
               emitLinError(err, node.span as Span | undefined);
-              // Suppress cascading E-LIN-001 after E-LIN-006 — the boundary
-              // violation is the primary diagnostic; the unconsumed follow-up
-              // would be noise.
-              if (err.code === "E-LIN-006") tracker.forceConsume(name, refSpan);
+              // Suppress cascading E-LIN-001 after E-LIN-006/E-LIN-004 — the
+              // boundary violation is the primary diagnostic; the unconsumed
+              // follow-up would be noise.
+              if (err.code === "E-LIN-006" || err.code === "E-LIN-004") tracker.forceConsume(name, refSpan);
             }
           }
         }
@@ -18016,20 +18045,23 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
         break;
       }
 
-      // §35.5 E-LIN-006 — `<request>` and `<poll>` markup bodies form a
-      // deferred-execution boundary. A lin declared outside the body cannot
-      // be consumed inside it. Increment the deferred-ctx depth around the
-      // children walk, then restore. AST shape: markup nodes carry their
-      // element name on `tag` (or `name`); children holds nested logic/markup.
+      // §35.5 — `<request>`/`<poll>` (deferred, E-LIN-006) and `<timer>`/
+      // `<timeout>` (recurring, E-LIN-004) markup bodies each cross a runtime
+      // scheduling boundary. A lin declared outside the body cannot be consumed
+      // inside it. Increment the deferred-ctx depth around the children walk,
+      // then restore. AST shape: markup nodes carry their element name on `tag`
+      // (or `name`); children holds nested logic/markup.
       case "markup": {
         const markupAny = node as ASTNodeLike & { tag?: string };
         const markupName = (markupAny.tag as string | undefined) ?? (node.name as string | undefined);
-        const isDeferred = markupName === "request" || markupName === "poll";
+        const isDeferred =
+          markupName === "request" || markupName === "poll" ||
+          markupName === "timer" || markupName === "timeout";
         const prevDepth = currentDeferredDepth;
         const prevCtx = currentDeferredCtx;
         if (isDeferred) {
           currentDeferredDepth = prevDepth + 1;
-          currentDeferredCtx = markupName as "request" | "poll";
+          currentDeferredCtx = markupName as DeferredCtxKind;
         }
         const mupBody = node.body as ASTNodeLike[] | undefined;
         if (Array.isArray(mupBody)) {
@@ -18159,7 +18191,7 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
         const err = currentLoopLocalLin.consume(name, resolvedSpan, currentDeferredDepth, currentDeferredCtx);
         if (err) {
           emitLinError(err, resolvedSpan);
-          if (err.code === "E-LIN-006") currentLoopLocalLin.forceConsume(name, resolvedSpan);
+          if (err.code === "E-LIN-006" || err.code === "E-LIN-004") currentLoopLocalLin.forceConsume(name, resolvedSpan);
         }
         return;
       }
@@ -18182,7 +18214,7 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
         const err = tracker.consume(name, resolvedSpan, currentDeferredDepth, currentDeferredCtx);
         if (err) {
           emitLinError(err, resolvedSpan);
-          if (err.code === "E-LIN-006") tracker.forceConsume(name, resolvedSpan);
+          if (err.code === "E-LIN-006" || err.code === "E-LIN-004") tracker.forceConsume(name, resolvedSpan);
         }
       }
     }

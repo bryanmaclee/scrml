@@ -1,0 +1,4 @@
+<program>
+  <items>: string[] = []
+  <ul>${ for (let item of @items) { match item.kind { "a" => { lift <li>A</> } _ => { lift <li>${item}</> } } } else { lift <li>No items.</> } }</ul>
+</program>

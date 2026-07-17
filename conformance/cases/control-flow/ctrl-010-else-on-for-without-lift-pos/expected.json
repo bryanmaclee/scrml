@@ -1,0 +1,13 @@
+{
+  "id": "ctrl-010-else-on-for-without-lift-pos",
+  "description": "§17.4a / §17.2 — an `else` empty-state block attached to a `for` loop whose body does NOT `lift` SHALL fire E-CTRL-010. The `else` empty-state (§17.4a) is defined only for `for/lift` (it renders when the iterable is empty); on a plain `for` the `else` has no defined semantics. Here the loop body only writes `@total` (no `lift`) yet carries an `else { lift ... }`, so E-CTRL-010 fires. Twins with ctrl-010-else-on-for-without-lift-neg (same loop, `else` removed → silent), isolating the trigger to the `else`-on-a-no-lift-`for`. W-PROGRAM-SPA-INFERRED co-fires incidentally at severity info; not asserted.",
+  "language-version": "1.0",
+  "spec": "§17.4a, §17.2",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§17.4a Normative statement: 'The `else` body is valid only on a `for/lift` loop. A `for` loop without `lift` SHALL NOT accept an `else` block (E-CTRL-010).' §34 (E-CTRL-010 row) elaborates: '`else` on a `for/lift` loop fires when the source iterable is empty; on a plain `for` loop the else has no defined semantics. Resolution: convert to `for/lift`, or replace `else` with a post-loop conditional.' The Tier-0 `for (...) { ... } else { ... }` form parses the trailing `else { ... }` as a bare-expr sibling of the for-stmt; the compiler detects a for-stmt whose body contains no lift-expr immediately followed by an `else` bare-expr and rejects it. FIX NOTE (ss75->batch2, 2026-07-16): E-CTRL-010 had ZERO fire sites before this landing; the check was added at the ast-builder post-parse pass (checkForElseWithoutLift), giving a precise diagnostic in place of the vague E-CODEGEN-INVALID-LOGIC the unhandled else-block would otherwise surface.",
+  "expect": {
+    "codes": ["E-CTRL-010"],
+    "notCodes": ["E-CTRL-001", "E-CTRL-002", "E-CTRL-005"],
+    "severity": { "E-CTRL-010": "error" }
+  }
+}

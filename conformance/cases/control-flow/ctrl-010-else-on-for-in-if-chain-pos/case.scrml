@@ -1,0 +1,7 @@
+<program>
+  <items>: string[] = []
+  <total>: int = 0
+  <flag>: bool = true
+  <div if=@flag>${ for (let item of @items) { @total = @total + 1 } else { lift <li>none</> } }</div>
+  <div else>x</div>
+</program>

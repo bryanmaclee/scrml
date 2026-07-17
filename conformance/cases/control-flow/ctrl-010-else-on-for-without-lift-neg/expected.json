@@ -1,0 +1,12 @@
+{
+  "id": "ctrl-010-else-on-for-without-lift-neg",
+  "description": "§17.4a / §17.2 — a plain `for` loop with no `lift` and NO `else` block does NOT fire E-CTRL-010. E-CTRL-010 is conditioned on the PRESENCE of an `else` empty-state block on a no-lift `for`; a bare `for` that never carries an `else` is an ordinary iteration statement and SHALL NOT be rejected. Twins with ctrl-010-else-on-for-without-lift-pos (same loop, `else { lift ... }` appended → fires), isolating the trigger to the `else`. W-PROGRAM-SPA-INFERRED co-fires incidentally at severity info; not asserted.",
+  "language-version": "1.0",
+  "spec": "§17.4a, §17.2",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§17.4a: 'The `else` body is valid only on a `for/lift` loop. A `for` loop without `lift` SHALL NOT accept an `else` block (E-CTRL-010).' The prohibition targets the `else` block specifically — a plain `for` loop without any `else` is fully valid (§17.4/§49). The detector fires only when an `else` bare-expr immediately follows a no-lift for-stmt; with no `else` present the condition is unmet and E-CTRL-010 SHALL stay silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CTRL-010"]
+  }
+}
