@@ -428,6 +428,14 @@ function emitArmWireFunction(
     if (b.isVisibilityToggle) return false;
     if (b.isMountToggle) return false;
     if (b.isReactiveBoolAttr) return false;
+    // i81 — a reactive VALUE attr carries its own `data-scrml-bind-attr-<name>`
+    // placeholder and is wired by emit-event-wiring's global pass (which accepts
+    // it via the symmetric `if (b.isReactiveValueAttr) return true;` gate).
+    // Without this exclusion it falls through to the default reactive-text
+    // branch below, which emits `_root.querySelector('[data-scrml-logic="…"]')`
+    // — a selector that can never match a value-attr placeholder, i.e. a dead
+    // wire. Keep symmetric with the bool-attr line above.
+    if (b.isReactiveValueAttr) return false;
     return typeof b.placeholderId === "string" && typeof b.expr === "string";
   });
   // In-scope event bindings: only non-delegable events.

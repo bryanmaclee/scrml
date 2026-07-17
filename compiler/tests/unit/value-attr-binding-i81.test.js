@@ -359,7 +359,51 @@ describe("§i81.5 — no regressions on the paths that already worked", () => {
   });
 });
 
-describe("§i81.6 — the binding is region-tracked (teardown contract)", () => {
+describe("§i81.6 — <match> arm interaction (blast radius)", () => {
+  // Found by the blast-radius pass, NOT by the brief (which listed 3
+  // touchpoints; this is a 4th). emit-variant-guard.ts's `wireableLogic` filter
+  // excludes isConditionalDisplay/isVisibilityToggle/isMountToggle/
+  // isReactiveBoolAttr from the per-arm reactive-TEXT emission. A value-attr
+  // binding has kind === undefined, so without a symmetric exclusion it fell
+  // through to that branch and emitted
+  // `_root.querySelector('[data-scrml-logic="_scrml_attr_class_1"]')` — a
+  // selector that can NEVER match a `data-scrml-bind-attr-class` placeholder.
+  // A dead wire. The bool path is excluded and emits only the global wire; this
+  // asserts the value path now behaves identically.
+  const armSrc = `<program>
+    <div>
+      \${
+        type Mode:enum = { A, B }
+        <m>: Mode = .A
+        <cls> = "hot"
+      }
+      <match for=Mode on=@m>
+        <A><div class=(@cls)>arm-a</div></A>
+        <B><span title=(@cls)>arm-b</span></B>
+      </match>
+    </div>
+  </program>`;
+
+  test("a value attr in a match arm does NOT emit a dead data-scrml-logic wire", () => {
+    const r = compile(armSrc);
+    expect(r.errors).toEqual([]);
+    const client = emittedClient(r);
+    const placeholder = emittedHtml(r).match(/data-scrml-bind-attr-class="([^"]+)"/)?.[1]
+      ?? client.match(/data-scrml-bind-attr-class="([^"]+)"/)?.[1];
+    expect(placeholder).toBeTruthy();
+    // The exact regression: the arm wire must not look for this placeholder id
+    // under the reactive-text `data-scrml-logic` selector.
+    expect(client).not.toContain(`data-scrml-logic="${placeholder}"`);
+  });
+
+  test("a value attr in a match arm still gets its global attr wire (bool parity)", () => {
+    const client = emittedClient(compile(armSrc));
+    expect(client).toMatch(/querySelector\('\[data-scrml-bind-attr-class="[^"]+"\]'\)/);
+    expect(client).toContain('setAttribute("class", String(');
+  });
+});
+
+describe("§i81.7 — the binding is region-tracked (teardown contract)", () => {
   test("the value-attr effect is registered for region teardown like the bool path", () => {
     const src = `<program>
       <m> = "a"

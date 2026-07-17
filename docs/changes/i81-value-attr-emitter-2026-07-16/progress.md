@@ -88,3 +88,31 @@ Repro POST-FIX: class/style/title/data-mode all now emit `data-scrml-bind-attr-*
 unchanged. Generated `_scrml_v` is block-scoped per binding (no collision), region-tracked for teardown.
 
 Next: regression test matrix + full suite + R26 + blast radius.
+
+## 2026-07-16 — BLAST RADIUS: a 4th touchpoint the brief did not list
+
+The brief specified 3 touchpoints. Probing `<match>` arms found a **4th, and it was a real defect in my
+own first cut** — caught by the blast-radius pass, not by the tests I had written at that point.
+
+`emit-variant-guard.ts:425-432` (`wireableLogic`) selects arm-context logic bindings for PER-ARM emission
+as reactive TEXT, excluding `isConditionalDisplay` / `isVisibilityToggle` / `isMountToggle` /
+`isReactiveBoolAttr` — its own comment states the rule: "see `emit-event-wiring.ts` filter for the
+SYMMETRIC rule." A value-attr binding has `kind === undefined`, so with no symmetric exclusion it fell
+through to the reactive-text branch and emitted
+`_root.querySelector('[data-scrml-logic="_scrml_attr_class_1"]')` — a selector that can NEVER match a
+`data-scrml-bind-attr-class` placeholder. A DEAD WIRE. Verified empirically by compiling the same shape
+with a bool attr: bool emits ONLY the global wire; mine emitted global + a dead arm wire.
+
+FIX: `if (b.isReactiveValueAttr) return false;` at emit-variant-guard.ts:430, restoring symmetry.
+VERIFIED: dead-wire count 0, global-wire count 1 — exact parity with bool. Locked by 2 new tests (§i81.6).
+
+Harmless at runtime (the dead querySelector is `if (el)`-guarded) but it was emitted junk and broke a
+documented invariant. Reported because it shows the brief's 3-touchpoint decomposition was INCOMPLETE.
+
+**DONE-PROBE IS BROKEN (brief defect, not a test failure).** The brief's probe
+`bun test <file> 2>/dev/null | grep -q "0 fail"` can NEVER pass: `bun test` writes its summary to STDERR,
+which `2>/dev/null` discards. Proven with a control — the pre-existing, passing
+`reactive-bool-attrs.test.js` fails the same probe. Correct probe: `2>&1 | grep -q "0 fail"`, which PASSES
+on my file (24 pass / 0 fail) and on the control. The PA must fix the probe or it will read a green file as red.
+
+Next: full-suite baseline attribution (post-fix run shows 1045 fails — must determine pre-existing vs mine).
