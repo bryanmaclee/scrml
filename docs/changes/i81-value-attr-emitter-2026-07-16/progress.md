@@ -116,3 +116,33 @@ which `2>/dev/null` discards. Proven with a control — the pre-existing, passin
 on my file (24 pass / 0 fail) and on the control. The PA must fix the probe or it will read a green file as red.
 
 Next: full-suite baseline attribution (post-fix run shows 1045 fails — must determine pre-existing vs mine).
+
+## 2026-07-16 — BLAST RADIUS: colon-bearing attr names would CRASH the page (my regression)
+
+Probed odd attribute names (`b3-oddnames.scrml`): `<use xlink:href=(@h)/>`, `<svg viewBox=(@vb)>`,
+`<div aria-label=(@h)>`. The catch-all interpolates the attr name RAW into BOTH an HTML attribute key and a
+CSS attribute selector:
+
+    querySelector('[data-scrml-bind-attr-xlink:href="_scrml_attr_xlink_href_2"]')
+
+An unescaped `:` in a CSS attribute selector is INVALID (colon = pseudo-class). Verified EMPIRICALLY against
+happy-dom (the repo's own DOM, node_modules/happy-dom), not asserted from memory:
+- unescaped `[data-scrml-bind-attr-xlink:href="p1"]`  -> **THROWS DOMException**
+- escaped   `[data-scrml-bind-attr-xlink\:href="p1"]` -> **ALSO THROWS in happy-dom** (its CSS parser has
+  no escape support; real browsers accept it) — so escaping is NOT a viable fix here.
+- `[data-scrml-bind-attr-viewBox="p2"]` -> MATCHes (CSS attr-name matching is case-insensitive in HTML), so
+  the uppercase/SVG case is fine; `setAttribute` still receives the original-case name, which SVG needs.
+
+**Severity: this is a REGRESSION I introduced.** That `querySelector` runs at module-init top level,
+UNGUARDED. An uncaught DOMException halts the whole client bundle init — killing EVERY binding on the page,
+not just this one. Pre-fix, `xlink:href=(expr)` was silently DROPPED: bad, but inert. Trading a silent drop
+for a total-page crash is strictly worse. A catch-all `else` must not assume the attr name is CSS-safe.
+
+FIX: keep the ORIGINAL name for `setAttribute` (SVG/`xlink:` correctness), but derive a CSS-SAFE key for the
+placeholder + selector: `name.replace(/[^A-Za-z0-9_-]/g, "_")` -> `data-scrml-bind-attr-xlink_href`.
+Carried as a new `valueAttrKey` binding field computed ONCE in emit-html (single source of truth) rather
+than recomputing the regex in emit-event-wiring (which would risk the two drifting apart).
+Residual (accepted, documented): two DIFFERENT dynamic attrs on ONE element whose names sanitize to the same
+key (e.g. `x:y` and `x_y`) would collide on the duplicate HTML attribute key; the HTML parser keeps the
+first, so the second silently does not wire — i.e. it degrades to the pre-fix behavior for a pathological
+shape, rather than crashing. Not worth more machinery.
