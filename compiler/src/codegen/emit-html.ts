@@ -72,7 +72,7 @@ const STYLE_OWNING_DIRECTIVES = ["if", "show"];
  * value-attr emitter, and only the first is a DOM attribute:
  *   a. real HTML attrs           `<div class=(@m)>`
  *   b. scrml DIRECTIVE attrs     `<tableFor pick=[...]>`  (a compiler construct)
- *   c. component call-site props `<List row={...}/>`      (see isComponentPropAttr)
+ *   c. component call-site props `<List row={...}/>`      (see isDeclaredPropAttr)
  *
  * `resolvedKind` is the NR-authoritative routing signal (NR stamps it at Stage
  * 3.05; downstream stages read it — the legacy component boolean is a derived
@@ -136,7 +136,7 @@ function valueAttrElementIsLowerable(node: any, tag: string): boolean {
  * expansion paths): refuse, keeping the pre-i81 drop rather than risking a
  * miscompile.
  */
-function isComponentPropAttr(node: any, name: string): boolean {
+function isDeclaredPropAttr(node: any, name: string): boolean {
   if (node?._expandedFrom == null) return false;
   const declared = node._componentPropNames;
   if (!Array.isArray(declared)) return true;
@@ -2640,7 +2640,7 @@ export function generateHtml(
             }
           } else if (
             !valueAttrElementIsLowerable(node, tag) ||
-            isComponentPropAttr(node, name) ||
+            isDeclaredPropAttr(node, name) ||
             isUserComponentMarkup(node) ||
             HTML_BOOLEAN_ATTRS.has(name) ||
             !valueAttrIsLowerable(val, name, attrs, tag, attr, node, errors)
