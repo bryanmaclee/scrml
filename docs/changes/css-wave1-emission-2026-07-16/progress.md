@@ -257,3 +257,35 @@ a CSS `@layer` below the component author scope).
     space-preservation fix against a re-introduced error).
   - program-import-hoist-clean (POS) — program-global `@import` → clean compile (guards the §65.8 hoist).
 - `bun conformance/run.ts`: **738/738 pass** (baseline 734 → 738, +4).
+
+### 2026-07-17 — R26 EMPIRICAL (symptom-gone, not "tests pass")
+Final baseline: HEAD 86519ad0 (+ this repro/progress commit). NEW comprehensive repro
+`repros/themed-app-r26.scrml` exercises all three round-4 CSS behaviors in one file
+(runtime theme-switch + flat-inline `@token` + program `@import` + component descendant selector).
+
+1. themed-app repro `repros/themed-app.scrml` → `/tmp/css-r26`:
+   - (a) CLIENT reflection PRESENT + effect-wrapped:
+     `_scrml_effect(function() { document.documentElement.setAttribute("data-scrml-theme-mode", _scrml_reactive_get("mode")); });`
+2. comprehensive repro `repros/themed-app-r26.scrml` → `/tmp/css-r26b`:
+   - (a) client reflection `setAttribute("data-scrml-theme-mode", _scrml_reactive_get("mode"))` PRESENT.
+   - (b) flat-inline `#{ background: @bg; padding: 16px; }` → `style="background: var(--bg); padding: 16px;"`
+     (flat-inline `@token` LOWERS; bare `padding: 16px` untouched). Selector `.card .title` →
+     `:where(.card .title) { color: var(--ink); }` (descendant SPACE kept + token lowered).
+   - (c) NO `@import`/`@charset` trapped in `@layer`: emitted order is `@layer reset, global;` →
+     `@import url("vendor.css");` (TOP-LEVEL) → `@layer reset {…}` → `:root {…}` →
+     `:root[data-scrml-theme-mode="Dark"] {…}` → `@layer global { a { color: var(--brand); } }`
+     (the `@import` is HOISTED OUT of `@layer global`; awk trap-check → "OK top-level").
+3. Adopter no-regression (base 07a1a694 vs HEAD, 5 changed source files swapped): 8 known-good
+   compilation-test fixtures with `#{}` (component-scoped-css, css-001..005, css-scope-01, css-004-layout,
+   edge-010-css-in-markup) → **CSS BYTE-IDENTICAL** on all 8; HTML + client.js BYTE-IDENTICAL on the
+   4 spot-checked. Confirms round-4 is ADDITIVE (output changes ONLY when a new feature is exercised).
+   (Note: samples/card.scrml etc. fail E-COMPONENT-021 on BOTH base + HEAD — a PRE-EXISTING `${...}`
+   Phase-1 re-parse limit, unrelated to this arc.)
+4. Full gate `bun test unit+integration+conformance`: **20662 pass / 68 skip / 1 todo / 0 fail**
+   (baseline 20641 → +21: Task1 +4, Task2 +4, Task3 +4, Task4 +5 unit, +4 conformance). Conformance
+   738/738. ZERO new failures.
+
+## ROUND-4 STATUS: COMPLETE — all 4 tasks + SPEC + tests + conformance + R26 green.
+DEFERRED (documented, brief-sanctioned): §65.6 SSR no-flash prestamp on the static `<html>` (client
+reflection is the normative mechanism; flash only when initial variant ≠ base :root; doc-shell blast
+radius + per-session-theme subtleties). NO new §34 diagnostic codes.
