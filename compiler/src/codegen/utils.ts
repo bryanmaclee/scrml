@@ -75,65 +75,6 @@ export const VOID_ELEMENTS = new Set<string>([
 ]);
 
 /**
- * i81 — HTML elements onto which a reactive VALUE attribute may be lowered.
- *
- * The reactive value-attr emitter (emit-html.ts, `val.kind === "expr"`) fires
- * ONLY for tags in this set. It is an ALLOWLIST — deliberately fail-CLOSED —
- * because the markup attribute namespace is shared by three different things
- * that all reach the same emitter:
- *
- *   1. real HTML attributes      `<div class=(@m)>`        -> lower to the DOM
- *   2. scrml DIRECTIVE attrs     `<tableFor pick=[...]>`   -> NOT DOM attrs
- *   3. component call-site props `<List row={...}/>`       -> NOT DOM attrs
- *
- * (2) and (3) are compiler constructs. Lowering them emits junk attributes at
- * best and malformed JS at worst — `<List row={ (item) => <span>…</span> }/>`
- * produced `const _scrml_v = ((item) => <span>…` (E-CODEGEN-INVALID-LOGIC), and
- * `<tableFor pick=["title","priority"]>` emitted a bogus `pick` DOM binding.
- * Both were caught by recompiling a real corpus (R26), NOT by the test suite.
- *
- * A denylist of scrml directive tags would fail OPEN: every new directive
- * element added later would silently start emitting junk DOM attributes. An
- * allowlist fails CLOSED — an unknown tag simply keeps the pre-i81 behavior
- * (attribute dropped), which is never worse than today.
- *
- * SVG/MathML container tags are included where a dynamic `class=`/`style=` is
- * idiomatic. Elements are lowercase; the emitter compares against the tag
- * verbatim (HTML tags are lowercase in scrml source; components are
- * capitalised and excluded separately).
- */
-export const HTML_ELEMENTS = new Set<string>([
-  // document / sections
-  "html", "head", "body", "title", "base", "link", "meta", "style", "script", "noscript",
-  "address", "article", "aside", "footer", "header", "h1", "h2", "h3", "h4", "h5", "h6",
-  "hgroup", "main", "nav", "section", "search",
-  // grouping
-  "blockquote", "dd", "div", "dl", "dt", "figcaption", "figure", "hr", "li", "menu",
-  "ol", "p", "pre", "ul",
-  // text-level
-  "a", "abbr", "b", "bdi", "bdo", "br", "cite", "code", "data", "dfn", "em", "i", "kbd",
-  "mark", "q", "rp", "rt", "ruby", "s", "samp", "small", "span", "strong", "sub", "sup",
-  "time", "u", "var", "wbr",
-  // edits
-  "del", "ins",
-  // embedded
-  "area", "audio", "canvas", "embed", "iframe", "img", "map", "object", "param",
-  "picture", "portal", "source", "track", "video",
-  // tables
-  "caption", "col", "colgroup", "table", "tbody", "td", "tfoot", "th", "thead", "tr",
-  // forms
-  "button", "datalist", "fieldset", "form", "input", "label", "legend", "meter",
-  "optgroup", "option", "output", "progress", "select", "textarea",
-  // interactive / scripting
-  "details", "dialog", "summary", "slot", "template",
-  // SVG / MathML containers where class=/style= is idiomatic
-  "svg", "g", "path", "circle", "ellipse", "line", "polygon", "polyline", "rect",
-  "text", "tspan", "use", "defs", "symbol", "marker", "mask", "pattern",
-  "linearGradient", "radialGradient", "stop", "clipPath", "foreignObject",
-  "math", "mrow", "mi", "mn", "mo", "msup", "msub", "mfrac", "msqrt",
-]);
-
-/**
  * i81 — HTML BOOLEAN attributes, excluded from the reactive VALUE-attr emitter.
  *
  * A boolean attribute's semantics are carried by its PRESENCE, not its value:

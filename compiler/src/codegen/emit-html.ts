@@ -2,7 +2,8 @@ import { genVar } from "./var-counter.ts";
 import { emitStringFromTree, exprNodeContainsMemberAccess } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
-import { escapeHtmlAttr, VOID_ELEMENTS, HTML_ELEMENTS, HTML_BOOLEAN_ATTRS } from "./utils.ts";
+import { escapeHtmlAttr, VOID_ELEMENTS, HTML_BOOLEAN_ATTRS } from "./utils.ts";
+import { isUserComponentMarkup } from "../component-expander.ts";
 import { extractReactiveDeps, collectReactiveVarNames, extractReactiveDepsTransitive, buildFunctionBodyRegistry, collectRequestIds } from "./reactive-deps.ts";
 import { hasTemplateInterpolation } from "./rewrite.js";
 import { isRcdataElement } from "../html-elements.js";
@@ -2438,48 +2439,65 @@ export function generateHtml(
               });
             }
           } else if (
-            node.isComponent === true ||
+            !(node.resolvedKind === "html-builtin" || node.resolvedKind == null) ||
             node._expandedFrom != null ||
-            !HTML_ELEMENTS.has(tag) ||
+            isUserComponentMarkup(node) ||
             HTML_BOOLEAN_ATTRS.has(name)
           ) {
             // i81 — NOT a lowerable value attribute. Emit NOTHING, preserving
-            // the exact pre-i81 behavior (silent drop) for these shapes. Each
-            // clause below was forced by a REAL regression found by recompiling
-            // the corpus (R26) — the unit suite was 100% green through all of
-            // them.
+            // the exact pre-i81 behavior (silent drop). EVERY clause here was
+            // forced by a REAL regression found by recompiling the corpus (R26);
+            // the unit suite was 100% green through all of them.
             //
-            // 1. `node.isComponent` / `node._expandedFrom` — a COMPONENT
-            //    call-site prop. Component expansion runs BEFORE codegen and
-            //    merges call-site props onto the component's ROOT element, so
-            //    the TAG is useless as a discriminator (emit-html sees `div`,
-            //    not `List`); the expander's own stamp is the reliable marker.
-            //    snippet-002-parametric.scrml:
-            //      <List row={ (item) => <span>${item.id}</span> }/>
-            //    lowered to `const _scrml_v = ((item) => <span>…` — markup
-            //    spliced into JS ⇒ E-CODEGEN-INVALID-LOGIC.
+            // The markup attribute namespace is shared by three different things
+            // that all reach this emitter, and only the first is a DOM attribute:
+            //   a. real HTML attrs           `<div class=(@m)>`
+            //   b. scrml DIRECTIVE attrs     `<tableFor pick=[...]>`  (NOT DOM)
+            //   c. component call-site props `<List row={...}/>`      (NOT DOM)
             //
-            // 2. `!HTML_ELEMENTS.has(tag)` — a scrml DIRECTIVE element, whose
-            //    attributes are compiler constructs, not DOM attributes.
-            //    dev-1-react.scrml: `<tableFor pick=["title","priority"]>` and
-            //    `<formFor pick=[...]>` began emitting a bogus `pick` binding.
-            //    An ALLOWLIST (not a denylist of known directives) so this fails
-            //    CLOSED: a directive element added later inherits the safe
-            //    pre-i81 drop instead of silently emitting junk.
+            // 1. resolvedKind must be "html-builtin" (a real element) or null.
+            //    `resolvedKind` is the NR-authoritative routing signal: NR
+            //    (Stage 3.05) stamps it, downstream stages READ it, and the
+            //    legacy `isComponent` boolean survives only as a derived
+            //    backcompat field — routing on it directly is asserted against by
+            //    p3-follow-no-isComponent-routing.test.js, which caught an
+            //    earlier cut of this guard. Measured: `<button class=(...)>` is
+            //    "html-builtin"; `<tableFor>`/`<formFor>` are "unknown" (they are
+            //    scrml directives — dev-1-react.scrml emitted a bogus `pick` DOM
+            //    binding before this clause).
             //
-            // 3. `HTML_BOOLEAN_ATTRS.has(name)` — a boolean attribute carries
-            //    meaning by PRESENCE, so `setAttribute("checked", "false")`
-            //    still renders CHECKED. 27-type-derived-table.scrml:
-            //    `<input checked=(@selectedIds.length > 0 && …)>` began emitting
-            //    exactly that. These stay dropped rather than newly-WRONG;
-            //    REACTIVE_BOOL_ATTRS is deliberately NOT widened here (bool vs
-            //    value are different lowerings — a separate decision). Follow-up.
+            //    `null` is admitted because a <match> ARM body is not NR-stamped,
+            //    and a dynamic `class=` inside an arm is idiomatic. That makes
+            //    null ambiguous on its own, hence clause 2.
+            //
+            // 2. `_expandedFrom` — the component-expander's stamp on an EXPANDED
+            //    component root. Expansion runs BEFORE codegen and merges
+            //    call-site props onto that root, so the TAG is useless as a
+            //    discriminator (emit-html sees `div`, not `List`) and its
+            //    resolvedKind is null — indistinguishable from an arm body
+            //    WITHOUT this stamp. snippet-002-parametric.scrml lowered a
+            //    parametric-snippet lambda to `const _scrml_v = ((item) =>
+            //    <span>...` — markup spliced into JS => E-CODEGEN-INVALID-LOGIC.
+            //
+            // 3. `isUserComponentMarkup` — the sanctioned NR-prefer-with-fallback
+            //    component predicate (covers the resolvedKind == null && legacy
+            //    isComponent === true backcompat case that clause 1 would admit).
+            //
+            // 4. `HTML_BOOLEAN_ATTRS` — a boolean attribute carries meaning by
+            //    PRESENCE, so `setAttribute("checked", "false")` still renders
+            //    CHECKED. 27-type-derived-table.scrml: `<input checked=(@a && @b)>`
+            //    began emitting exactly that — a permanently-checked checkbox.
+            //    These stay dropped rather than newly-WRONG. REACTIVE_BOOL_ATTRS
+            //    is deliberately NOT widened to cover them: bool and value are
+            //    different lowerings, and that promotion is a separate decision.
             //
             // Conservative by construction: every clause preserves the pre-i81
-            // drop, so none of them can regress a shape that works today. The
-            // known cost: a dynamic value attr on a component call site
-            // (`<Card class=(@x)/>`) stays unfixed — it was already dropped
-            // before i81. Recorded as follow-up, not silently widened.
+            // drop, so none can regress a shape that works today. Known costs,
+            // all pre-existing and recorded as follow-ups rather than silently
+            // widened: an SVG child (`<use xlink:href=(@h)/>`, resolvedKind
+            // "unknown"), a value attr on a component call site
+            // (`<Card class=(@x)/>`), and boolean attrs beyond the
+            // REACTIVE_BOOL_ATTRS trio all remain dropped.
           } else {
             // i81 — reactive VALUE attribute (`class=`, `style=`, `title=`,
             // `data-*`, `id=`, `alt=`, …). THE MISSING FINAL `else`.

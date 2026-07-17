@@ -453,10 +453,15 @@ describe("§i81.7 — CSS-safe placeholder keys (crash regression)", () => {
   // was silently dropped (inert); a crash would have been strictly worse.
   // Escaping is not viable (happy-dom rejects escaped selectors too), so the
   // KEY is sanitized while the NAME stays intact for setAttribute.
+  // `xml:lang` on a plain <div>: an html-builtin element (so it IS lowered)
+  // carrying a colon in the attribute name (so the selector guard matters).
+  // NOTE: <use xlink:href> is NOT usable here — an SVG child resolves to
+  // resolvedKind "unknown" and is not lowered at all (see §i81.9).
   const svgSrc = `<program>
-    <h> = "#icon"
+    <l> = "en"
     <vb> = "0 0 16 16"
-    <svg viewBox=(@vb)><use xlink:href=(@h)/></svg>
+    <div xml:lang=(@l)>x</div>
+    <svg viewBox=(@vb)></svg>
   </program>`;
 
   test("a colon-bearing attr name yields a CSS-SAFE selector (no raw colon)", () => {
@@ -465,15 +470,15 @@ describe("§i81.7 — CSS-safe placeholder keys (crash regression)", () => {
     const client = emittedClient(r);
     // The crash shape: '[data-scrml-bind-attr-xlink:href="…"]'
     expect(client).not.toMatch(/\[data-scrml-bind-attr-[A-Za-z0-9_-]*:/);
-    expect(client).toContain("data-scrml-bind-attr-xlink_href");
-    expect(emittedHtml(r)).toContain("data-scrml-bind-attr-xlink_href");
+    expect(client).toContain("data-scrml-bind-attr-xml_lang");
+    expect(emittedHtml(r)).toContain("data-scrml-bind-attr-xml_lang");
   });
 
   test("the ORIGINAL attr name still reaches setAttribute (SVG correctness)", () => {
     const client = emittedClient(compile(svgSrc));
     // Sanitization must NOT leak into the DOM write: xlink:href, not xlink_href.
-    expect(client).toContain('setAttribute("xlink:href", String(');
-    expect(client).not.toContain('setAttribute("xlink_href"');
+    expect(client).toContain('setAttribute("xml:lang", String(');
+    expect(client).not.toContain('setAttribute("xml_lang"');
     // Case must survive too — SVG attribute names are case-sensitive.
     expect(client).toContain('setAttribute("viewBox", String(');
   });
