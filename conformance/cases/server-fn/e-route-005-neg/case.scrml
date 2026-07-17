@@ -1,0 +1,16 @@
+${
+    // The FIX for the unplaceable shape, and the negative control: the two
+    // concerns are SPLIT. `persist` keeps the server-only ?{} work; `flash`
+    // does the DOM access; the client `flash` calls the server `persist`
+    // (client -> server is the allowed direction, §12.3). Neither function is
+    // unplaceable, so E-ROUTE-005 stays silent (and no E-ROUTE-002 either — the
+    // only cross-boundary call goes client -> server).
+    function flash(name: string) {
+        document.title = name
+        persist(name)
+    }
+    function persist(name: string) {
+        ?{`INSERT INTO audit (who) VALUES (${name})`}.run()
+    }
+}
+<button id="go" onclick=flash("hi")>Go</button>

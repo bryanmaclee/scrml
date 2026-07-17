@@ -7188,18 +7188,18 @@ function generateDbTypes(
 //   { kind: "destructure-array",  elements: [{kind: "name"|"nested"|"hole", ...}], rest? }
 //   { kind: "destructure-object", properties: [{kind: "name"|"nested", ...}], rest? }
 
-interface DestructureArrayElementShape {
+export interface DestructureArrayElementShape {
   kind: "name" | "nested" | "hole";
   name?: string;
   pattern?: DestructurePatternShape;
 }
-interface DestructureObjectPropertyShape {
+export interface DestructureObjectPropertyShape {
   kind: "name" | "nested";
   fieldName?: string;
   bindName?: string;
   pattern?: DestructurePatternShape;
 }
-type DestructurePatternShape =
+export type DestructurePatternShape =
   | {
       kind: "destructure-array";
       elements: DestructureArrayElementShape[];
@@ -7211,13 +7211,17 @@ type DestructurePatternShape =
       rest?: string;
     };
 
-function isDestructurePattern(v: unknown): v is DestructurePatternShape {
+// Exported for reuse by route-inference.ts (§12.4 client-pin shadow collection,
+// S263 review): a destructured param / local binds names that must land in the
+// DOM-global shadow set. Both helpers are small + self-contained (no other
+// type-system dependency), so the import is cycle-safe.
+export function isDestructurePattern(v: unknown): v is DestructurePatternShape {
   if (!v || typeof v !== "object") return false;
   const k = (v as { kind?: unknown }).kind;
   return k === "destructure-array" || k === "destructure-object";
 }
 
-function* iterDestructuredNames(p: DestructurePatternShape): Iterable<string> {
+export function* iterDestructuredNames(p: DestructurePatternShape): Iterable<string> {
   if (p.kind === "destructure-array") {
     for (const el of p.elements) {
       if (el.kind === "name" && typeof el.name === "string" && el.name.length > 0) {

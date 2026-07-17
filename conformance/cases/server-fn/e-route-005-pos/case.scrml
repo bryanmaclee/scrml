@@ -1,0 +1,14 @@
+${
+    // UNPLACEABLE: this single function's body accesses BOTH a server-only
+    // resource (the ?{} SQL context, §12.2 Trigger 1) AND a client-only DOM
+    // global (`document.title`). Route analysis can place it on NEITHER side —
+    // a server context has no `document`, and a client context cannot run the
+    // ?{} query. This is DISTINCT from E-ROUTE-002 (a server fn CALLING a
+    // separate client-only fn): the contradiction is inside one body →
+    // E-ROUTE-005.
+    function saveAndPaint(name: string) {
+        ?{`INSERT INTO audit (who) VALUES (${name})`}.run()
+        document.title = name
+    }
+}
+<button id="go" onclick=saveAndPaint("hi")>Go</button>

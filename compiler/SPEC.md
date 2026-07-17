@@ -7132,6 +7132,31 @@ For each server-escalated function, the compiler SHALL generate:
   message SHALL suggest one of the following resolutions: extract the shared logic into a
   pure function (§33) with no client or server classification; duplicate the logic inside
   the server function; or re-evaluate whether the callee is genuinely client-only.
+- **Unplaceable single function (E-ROUTE-005).** A *single* function whose own body accesses
+  BOTH a server-only resource (a §12.2 escalation trigger — e.g. a `?{}` SQL context, a
+  protected field, a server-only import) AND a client-only global (a DOM global with no
+  server-side referent) is *unplaceable*: route analysis can assign it to neither side — the
+  server context has no client-only global, and the client context cannot reach the
+  server-only resource. This is DISTINCT from E-ROUTE-002 (a server function *calling* a
+  separate client-only function): here the contradiction lives inside one function body. The
+  compiler SHALL emit E-ROUTE-005, and the message SHALL identify the function by name, the
+  server-only trigger, and the client-only access. The suggested resolution is to split the
+  function — keep the server-only work in a server function, move the client-only access into
+  a separate client function, and have the client function call the server one (client → server
+  is the permitted direction, §12.3). The DOM globals recognized as client-only for both
+  E-ROUTE-002 and E-ROUTE-005 are deliberately limited to the browser roots with no server
+  referent under any host (`document`, `window`); an access rooted at a name bound by an
+  in-scope local, parameter, or import is a domain object, not the global, and does not count.
+- **Enforcement scope (V1 limitations, documented residuals).** E-ROUTE-002 / E-ROUTE-005
+  detection is deliberately conservative — never rejecting valid code takes priority over
+  catching every leak — so two narrow cases are recognized but NOT enforced in V1: (a) a
+  **cross-file** server→client-only call whose callee is reached by a name with no same-file
+  binding is not caught, because firing on a globally-ambiguous cross-file name would reject
+  valid code (a coincidental same-name function in another file); precise cross-file
+  enforcement awaits an import-aware callee resolver. (b) A DOM access inside a **block-body**
+  callback/IIFE is attributed to the callback's own placement, not the enclosing function;
+  only an *expr-body* immediately-invoked lambda (`(() => document.x)()`) is scanned into the
+  enclosing function. Both are narrow misses accepted in favor of zero false positives.
 - A function that has no client or server classification — a pure function per §32 — MAY be
   called from both server-escalated and client-only functions without restriction.
 - Route inference SHALL be per-function. The compiler SHALL classify each function based
@@ -18443,9 +18468,10 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-CG-012 | §47.6 | A user-authored scrml identifier (or vanilla JS identifier in a `_{}` foreign block) matches the compiler-reserved encoded-name pattern (`_` + kind char + 8 base36 chars). The `_` prefix is reserved for compiler-generated names. Resolution: rename the identifier. (Catalog addition S84 Wave 2 #5; full prose at §47.6 line 18301.) | Error |
 | E-CG-013 | §47.6 | The codegen type-encoding function received a `ResolvedType` with `kind: "unknown"`. PIPELINE.md §Stage 6 and §Stage 8 preconditions exclude this case; reaching the encoder with kind:"unknown" indicates an internal invariant violation. (Catalog addition S84 Wave 2 #5; full prose at §47.6 line 18323.) | Error |
 | E-CG-016 | §47 | A page-local `type X:enum` is referenced inside a server-boundary function body (so it needs a runtime `const X = Object.freeze({...})` in the server bundle, per §14.4 / Bug-51), but the chosen name `X` collides with another top-level binding the compiler injects into the server bundle — most commonly the `import { SQL } from "bun"` runtime handle (and its `_scrml_sql*` DB handles) emitted for a page that uses a `<db>` / `<program db=>` scope and a `?{}` query. The generated server bundle cannot declare `X` twice; without this guard the duplicate declaration surfaces downstream as a cryptic `E-CODEGEN-INVALID-LOGIC` (`Identifier 'X' has already been declared`) on otherwise-valid scrml. Resolution: rename the enum to a name that does not clash with a compiler-reserved server binding (e.g. `SQL` is reserved when the page uses a `<db>` / `?{}` query). The sibling of E-CG-012 (author identifier vs the compiler-reserved `_`-prefix pattern), in the server-bundle-injected-binding direction. (Catalog addition giti-bug51-server-bundle-enum-emission-2026-06-23; emitted by codegen at `compiler/src/codegen/emit-server.ts:generateServerJs`.) | Error |
-| E-ROUTE-002 | §12.4 | A server-classified function body contains a call to a client-only API (DOM, browser-only `scrml:*` module, `animationFrame`, etc.) OR references a client-only import. The compiler error message identifies the specific violation. (Catalog addition S84 Wave 2 #5; full prose at §12.4 lines 6415-6418.) | Error |
+| E-ROUTE-002 | §12.4 | A server-classified function's static call graph contains a direct or transitive call to a client-only function — one route analysis places exclusively on the client because it accesses a DOM-only global (`document` / `window`). The message identifies the server fn, the client-only callee, and the call chain. ENFORCED S263 (was SPEC-only; wired in route-inference as the mirror of the §12.2 server-escalation triggers — a client-pin classification + call-graph reject). Detection is deliberately conservative: DOM roots `document`/`window` only (not `navigator`/`localStorage`/`sessionStorage`, which a host may provide), ExprNode-only (string-literal-safe), scope-aware (a local/param/import of the name is a domain object, not the global). (Catalog addition S84 Wave 2 #5; full prose at §12.4.) | Error |
 | E-ROUTE-003 | §12.5 | A server function's return type is not JSON-serializable (functions, markup / DOM nodes, snippets, engines, state objects). Server-function return values cross the network boundary; only JSON-shaped values can be transmitted. ENFORCED S179 (was SPEC-only; now wired in the type pass). (Catalog addition S84 Wave 2 #5; full prose at §12.5.3.) | Error |
 | E-ROUTE-004 | §12.5 | A server function's PARAMETER type is not JSON-serializable (a function, markup / `html-element`, snippet, engine / machine, or live state object — possibly nested in a struct field, array element, union member, or map value). Arguments to a server function cross the client→server network boundary and are serialized as JSON (§12.3); a non-serializable value cannot be transmitted. The companion of E-ROUTE-003 in the parameter direction. (Catalog addition S179; full prose at §12.5.3.) | Error |
+| E-ROUTE-005 | §12.4 | A SINGLE function's own body accesses BOTH a server-only resource (a §12.2 escalation trigger — `?{}` SQL, a protected field, a server-only import) AND a client-only DOM global (`document` / `window`), making it *unplaceable*: route analysis can assign it to neither side (a server context has no DOM global; a client context cannot reach the server-only resource). Distinct from E-ROUTE-002 (a server fn *calling* a separate client-only fn) — the contradiction is inside one function body. The message identifies the fn, the server trigger, and the client access, and suggests splitting it (server-only work in a server fn; DOM access in a client fn that calls the server one). Without this the DOM code silently shipped server-side (runtime `ReferenceError`). (Catalog addition S263; full prose at §12.4.) | Error |
 | E-USE-003 | §41.5 | A `use` declaration names an export that does not exist in the target module. (Catalog addition S84 Wave 2 #5; full prose at §41.5 line 17413.) | Error |
 | E-USE-004 | §41.5 | A `vendor:` (or `scrml:`) specifier in a `use` declaration does not resolve to any module on disk. (Catalog addition S84 Wave 2 #5; full prose at §41.5 lines 17422, 17548.) | Error |
 | E-USE-006 | §41.5 | A `use` declaration brings a name into scope that collides with a built-in HTML element name (e.g., `use scrml:ui { button }`). User-defined names that shadow HTML elements are never valid. Distinct from `E-NAME-001` (component-decl form). (Catalog addition S84 Wave 2 #5; full prose at §41.5 line 17510.) | Error |
