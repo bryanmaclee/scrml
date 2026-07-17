@@ -1,0 +1,12 @@
+{
+  "id": "server-fn-e-route-005-split-clean-neg",
+  "description": "§12.4 — the SPLIT form (the resolution E-ROUTE-005 suggests) is clean: a client fn does the DOM access and calls a separate server fn for the ?{} work (client -> server, §12.3). No single function accesses both sides, so E-ROUTE-005 does not fire; and the only cross-boundary call is client -> server, so E-ROUTE-002 does not fire either. Negative control guarding the false-positive direction.",
+  "language-version": "1.0",
+  "spec": "§12.4",
+  "source-test": "compiler/tests/unit/route-inference-e-route-002.test.js",
+  "rationale": "§12.4 constrains only unplaceable single functions and server -> client-only calls. Splitting the concerns (server-only work in a server fn, DOM in a client fn that calls it) is a valid, placeable program — neither E-ROUTE-005 nor E-ROUTE-002 fires.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ROUTE-005", "E-ROUTE-002"]
+  }
+}
