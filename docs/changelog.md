@@ -2,6 +2,19 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S264 — 2026-07-17 (bryan) — ⭐ freeze-drain FIX bucket DRAINED — 4 lands through the S239 gate (E-SQL-004 · #6b P0 semdiff · E-SQL-003 · E-MARKUP-001)
+
+Successor to the wrapped S263. Landed both S263 held branches + 2 fresh freeze-drain FIXes, each through the full S239 adversarial gate — which caught **5 real defects a green suite missed** (3 false-cosmetics in #6b, a comment-cloak in E-SQL-003, the `<defaults>` false-positive in E-MARKUP-001). Conformance 725→731. #6b unblocks giti (hard-blocked) + flogence. CSS Wave-1 ruled the next arc.
+
+- **#90 — E-SQL-004** (`a1401ada`): §44.7 `?{}`-without-`db=` now fires (was a silent `new SQL(":memory:")` data-loss hole). S239 clean across 12 adjacent shapes. **Option-B corpus** (bryan): the 2 shipped `examples/` (`05-multi-step-form`, `29-engine-vs-flags`) migrated with `db=` + `<schema>` (the signup INSERT now persists); the 9 samples tracked in the `esql004-corpus-nodb-bugs` thread.
+- **#91 — #6b P0 semdiff** (`780e4342`): the semantic-diff primitive — `scrml semdiff <base> <head> [--json]`, a cosmetic-vs-behavioral classifier (top-level `verdict`, 0/1/2 exit; axes opaque/use-site/source/context). **2 adversarial fix rounds** closed 3 false-cosmetics (D1 exported-rename, N1 basename-canon over-neutralization, N2 zero-entity verdict-floor). giti + flogence notified with the CLI contract.
+- **#92 — E-SQL-003** (`01160fb8`): §8.1.1 runtime-expression `?{}` SQL body (`?{`${q}`}`, no literal SQL) now fires (injection vector / unbindable). S239 clean across 33 shapes; a comment-cloak bypass caught + hardened (strip SQL comments before the literal test).
+- **#93 — E-MARKUP-001** (`0a79d838`): §4.1 unknown element name → fire, ruled **FIX over retire** (element universe closable). New `isKnownElementName` (HTML∪SVG∪MathML∪custom-hyphen); `isHtmlElement` untouched. S239 re-swept 1020 corpus files (0 false-positives) + caught the `<defaults>` FP → fixed class-level (exclusion **derived** from the structural registries + a drift-guard test). Landed via a 3-way on `ast-builder.js` (E-SQL-003 preserved).
+
+**Test state at close:** conformance 731/731; cloud `gate` GREEN at `0a79d838`; coherence 0/0 (both repos).
+
+**Owed / tracked:** the 2 migrated examples want a human re-verify (`examples/VERIFIED.md`); E-SQL-003's 2 under-fires + `isHtmlElement`'s modern-element incompleteness + #6b's markup-whitespace P1 → known-gaps; the flogence digest is fixed upstream (`12fe035`) — re-verify + drop the overlay boot-step-0 "BROKEN" note. **Next arc: CSS Wave-1** (held `feat/css-wave1-emission`@`5f7cf235`; resume tractable — code file-deltas clean, only SPEC.md 3-way + the @-sigil fold).
+
 ## S263 — 2026-07-17 (bryan) — ⭐ #6b design ruled + P0 built · anti-rot thread audit (5 forgotten-half rulings) · E-ROUTE-002/005 landed · pa-base v2.1 · freeze drain
 
 **Landed (main):** the recovery of S261's 2 unpushed audit reports; **#83** E-MARKUP/E-STATE §34 retire (5 codes + `<poll>` E-LIN fix + §4.4.1→E-CTX-001); **#85** §34 bookkeeping (6 retired + 10 reserved + E-CTX-002 repointed — bryan's slash-closer catch); **#88 ⭐ E-ROUTE-002 wired + E-ROUTE-005 new** — the #1 freeze soundness hole (server fn calling a client-only DOM fn shipped `document.*` into the server bundle). Three S239 adversarial rounds caught **12 real defects** (7+5) that a green 20k-suite + a 1001-file R26 sweep both missed. Conformance **721→725**. Base contract → **pa-base v2.1** (+identifier-ergonomics comms rule, bryan-directed into the contract) + the #6b design DD.
