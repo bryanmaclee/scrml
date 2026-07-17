@@ -239,7 +239,12 @@ function looksLikeNestedMarkupValueExpr(expr) {
  * element name with the canonical-placement story cited in the diagnostic
  * message. The §-references mirror SPEC §4.15 Cross-references.
  */
-const STRUCTURAL_ELEMENT_PLACEMENT = {
+// Exported so the E-MARKUP-001 gate (name-resolver.ts) can DERIVE its
+// scrml-structural exclusion set from this authoritative registry rather than
+// hand-maintaining a parallel list that drifts (S264 review — `<defaults>` was
+// omitted and false-fired E-MARKUP-001). Every key here is a registered scrml
+// structural element name (NOT an HTML element per §4.15 / §24.4).
+export const STRUCTURAL_ELEMENT_PLACEMENT = {
   schema:       "a `<schema>` element belongs as an immediate child of `<program>` (§39.2 / §39.12)",
   engine:       "an `<engine>` element belongs at file top-level or as a typed-state-cell init (§51.0 / §51)",
   channel:      "a `<channel>` element belongs inside `<program>` as a sibling of `<page>` (§38.1 / §38.3)",
@@ -282,7 +287,7 @@ const STRUCTURAL_ELEMENT_PLACEMENT = {
 // A NON-markup plain const/state-cell named `theme` (`const theme = 5`,
 // `<theme> = "dark"`) is NOT a collision — it is migration backlog per §65.9
 // (the corpus proto-theme cells migrate, §65.14), not a component/type.
-const RESERVED_CSS_ELEMENT_IDENTIFIERS = new Set(["theme", "defaults"]);
+export const RESERVED_CSS_ELEMENT_IDENTIFIERS = new Set(["theme", "defaults"]);
 
 // §51.0.M / §51.0.R — the engine-child-only, SELF-CLOSING structural elements.
 // These are grammatical ONLY inside an `<engine>` body (where the block-splitter

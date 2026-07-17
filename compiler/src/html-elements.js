@@ -921,3 +921,161 @@ export function isRcdataElement(tagName) {
   const shape = REGISTRY.get(tagName.toLowerCase());
   return shape != null && shape.rcdata === true;
 }
+
+// ---------------------------------------------------------------------------
+// Complete valid-element registry for the E-MARKUP-001 gate (SPEC §4.1)
+//
+// The REGISTRY above is a CURATED subset — it carries per-element attribute
+// shapes / void-status / DOM-render flags for the ~57 elements codegen and
+// attribute-validation actively reason about. It is deliberately NOT a
+// complete list of every valid HTML/SVG/MathML tag name (it omits e.g.
+// `pre`, `code`, `em`, `strong`, `dialog`, `details`, `summary`, `template`,
+// `slot`, `picture`, `output`, `thead`, `tbody`, and the bulk of SVG/MathML).
+//
+// `isKnownElementName()` below is the SEPARATE, complete union consulted ONLY
+// by the E-MARKUP-001 "unknown HTML element" gate in name-resolver.ts. Keeping
+// it separate from `isHtmlElement()` avoids blast radius: `isHtmlElement` keeps
+// its HTML-only, render-to-DOM semantics for its existing consumers (void
+// handling, attribute validation, emit) while the gate consults the wider set.
+//
+// A MISSING entry here would produce an E-MARKUP-001 FALSE POSITIVE (a valid
+// tag rejected as an unknown element) — the exact failure mode that retired the
+// sibling E-MARKUP-002 (205 corpus false-positives). The sets below are the
+// authoritative WHATWG (HTML) / MDN (SVG, MathML) element name lists, including
+// legacy/deprecated names, erring toward completeness.
+// ---------------------------------------------------------------------------
+
+/**
+ * Complete standard HTML element names (WHATWG HTML Living Standard + legacy).
+ * All names are lowercase (HTML element names are ASCII-case-insensitive).
+ */
+const STANDARD_HTML_ELEMENTS = new Set([
+  // Document / metadata / scripting
+  "html", "head", "body", "base", "link", "meta", "style", "title",
+  "script", "noscript", "template", "slot", "canvas",
+  // Sectioning
+  "address", "article", "aside", "footer", "header",
+  "h1", "h2", "h3", "h4", "h5", "h6", "hgroup", "main", "nav", "section", "search",
+  // Grouping / text content
+  "blockquote", "dd", "div", "dl", "dt", "figcaption", "figure", "hr",
+  "li", "menu", "ol", "p", "pre", "ul",
+  // Inline text semantics
+  "a", "abbr", "b", "bdi", "bdo", "br", "cite", "code", "data", "dfn", "em",
+  "i", "kbd", "mark", "q", "rp", "rt", "ruby", "s", "samp", "small", "span",
+  "strong", "sub", "sup", "time", "u", "var", "wbr",
+  // Image / multimedia / embedded
+  "area", "audio", "img", "map", "track", "video", "picture", "source",
+  "embed", "iframe", "object", "param", "portal", "fencedframe",
+  // Demarcating edits
+  "del", "ins",
+  // Table content
+  "caption", "col", "colgroup", "table", "tbody", "td", "tfoot", "th",
+  "thead", "tr",
+  // Forms
+  "button", "datalist", "fieldset", "form", "input", "label", "legend",
+  "meter", "optgroup", "option", "output", "progress", "select", "textarea",
+  // Interactive
+  "details", "dialog", "summary",
+  // Roots of the foreign-content namespaces (children are covered by the
+  // SVG / MathML sets below)
+  "svg", "math",
+  // Legacy / deprecated / obsolete — still parse as valid element names, so
+  // excluded from E-MARKUP-001 to avoid false positives on old markup.
+  "acronym", "applet", "basefont", "bgsound", "big", "blink", "center",
+  "content", "dir", "font", "frame", "frameset", "image", "isindex", "keygen",
+  "listing", "marquee", "menuitem", "multicol", "nextid", "nobr", "noembed",
+  "noframes", "plaintext", "rb", "rtc", "shadow", "spacer", "strike", "tt",
+  "xmp",
+]);
+
+/**
+ * Complete SVG element names (MDN SVG element reference + legacy). Canonical
+ * casing is preserved (SVG uses camelCase names such as `feGaussianBlur`,
+ * `linearGradient`, `clipPath`, `foreignObject`). Matching is case-insensitive
+ * (see the lowercased mirror below) to err toward zero false positives.
+ */
+const SVG_ELEMENTS = new Set([
+  "a", "animate", "animateMotion", "animateTransform", "circle", "clipPath",
+  "defs", "desc", "ellipse",
+  "feBlend", "feColorMatrix", "feComponentTransfer", "feComposite",
+  "feConvolveMatrix", "feDiffuseLighting", "feDisplacementMap", "feDistantLight",
+  "feDropShadow", "feFlood", "feFuncA", "feFuncB", "feFuncG", "feFuncR",
+  "feGaussianBlur", "feImage", "feMerge", "feMergeNode", "feMorphology",
+  "feOffset", "fePointLight", "feSpecularLighting", "feSpotLight", "feTile",
+  "feTurbulence",
+  "filter", "foreignObject", "g", "image", "line", "linearGradient", "marker",
+  "mask", "metadata", "mpath", "path", "pattern", "polygon", "polyline",
+  "radialGradient", "rect", "set", "stop", "svg", "switch", "symbol", "text",
+  "textPath", "tspan", "use", "view",
+  // Legacy / deprecated SVG
+  "altGlyph", "altGlyphDef", "altGlyphItem", "animateColor", "color-profile",
+  "cursor", "discard", "font", "font-face", "font-face-format",
+  "font-face-name", "font-face-src", "font-face-uri", "glyph", "glyphRef",
+  "hatch", "hatchpath", "hkern", "mesh", "meshgradient", "meshpatch",
+  "meshrow", "missing-glyph", "solidcolor", "tref", "unknown", "vkern",
+  "script", "style", "title",
+]);
+
+/**
+ * Complete MathML element names (MDN MathML element reference + legacy).
+ * All lowercase.
+ */
+const MATHML_ELEMENTS = new Set([
+  "math", "annotation", "annotation-xml", "maction", "menclose", "merror",
+  "mfenced", "mfrac", "mi", "mmultiscripts", "mn", "mo", "mover", "mpadded",
+  "mphantom", "mprescripts", "mroot", "mrow", "ms", "mspace", "msqrt",
+  "mstyle", "msub", "msubsup", "msup", "mtable", "mtd", "mtext", "mtr",
+  "munder", "munderover", "none", "semantics",
+  // Legacy / deprecated MathML
+  "maligngroup", "malignmark", "mglyph", "mlabeledtr", "mlongdiv",
+  "mscarries", "mscarry", "msgroup", "msline", "msrow", "mstack",
+]);
+
+// Case-insensitive mirrors — the E-MARKUP-001 gate only fires on all-lowercase
+// tags, but `isKnownElementName` is a general predicate, so match either the
+// canonical camelCase form or a lowercased spelling.
+const SVG_ELEMENTS_LC = new Set([...SVG_ELEMENTS].map((n) => n.toLowerCase()));
+const MATHML_ELEMENTS_LC = new Set([...MATHML_ELEMENTS].map((n) => n.toLowerCase()));
+
+/**
+ * A valid custom-element name per the HTML spec: a lowercase-initial name that
+ * contains at least one hyphen. Any hyphenated lowercase tag is a legitimate
+ * autonomous custom element (`<my-widget>`, `<x-foo>`, `<ui-date-picker>`) and
+ * SHALL NEVER be reported as an unknown HTML element.
+ *
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function isCustomElementName(name) {
+  return typeof name === "string" && /^[a-z][a-z0-9._]*-[a-z0-9._-]*$/.test(name);
+}
+
+/**
+ * Complete valid-element predicate for the E-MARKUP-001 gate (SPEC §4.1):
+ * the UNION of standard HTML, SVG, MathML, the curated REGISTRY, and the
+ * custom-element (hyphen) grammar. Returns true for any name that is a valid
+ * renderable element name in any of the three namespaces or a custom element.
+ *
+ * Consulted ONLY by name-resolver.ts's E-MARKUP-001 emit gate. Does NOT carry
+ * DOM-render / void / attribute semantics — use `isHtmlElement()` /
+ * `getElementShape()` for those.
+ *
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function isKnownElementName(name) {
+  if (typeof name !== "string" || name.length === 0) return false;
+  // Custom elements: any hyphenated lowercase name.
+  if (isCustomElementName(name)) return true;
+  const lower = name.toLowerCase();
+  // Curated registry (HTML render elements + a few scrml structural forms it
+  // registers, e.g. `program`/`errors`/`each`); harmless to accept here.
+  if (REGISTRY.has(lower)) return true;
+  // Complete standard HTML.
+  if (STANDARD_HTML_ELEMENTS.has(lower)) return true;
+  // SVG (canonical camelCase or lowercased).
+  if (SVG_ELEMENTS.has(name) || SVG_ELEMENTS_LC.has(lower)) return true;
+  // MathML.
+  if (MATHML_ELEMENTS.has(name) || MATHML_ELEMENTS_LC.has(lower)) return true;
+  return false;
+}
