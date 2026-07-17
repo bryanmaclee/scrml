@@ -268,7 +268,7 @@ The following closer rules SHALL apply:
 - A `?{ }` SQL context closes with `}` and returns to the logic context that opened it.
 - A `#{ }` CSS inline context closes with `}` and returns to the markup or state context that opened it.
 - Markup tags and state blocks close with a closer form (see Section 4.4) and return to the enclosing markup, state, or top-level context.
-- A `</>` inferred closer or `</tagname>` explicit closer inside a `${ }` logic context SHALL be a compile error (E-CTX-002). Markup/state closers cannot cross context boundaries.
+- A `</>` inferred closer or `</tagname>` explicit closer inside a `${ }` logic context SHALL be a compile error (E-CTX-003). Markup/state closers cannot cross context boundaries.
 - An unclosed context at end of file SHALL be a compile error (E-CTX-003).
 - An unclosed context encountered before an outer closer SHALL be a compile error (E-CTX-003).
 
@@ -419,7 +419,7 @@ explicit-close ::= '</' identifier '>'
 - The explicit closer `</name>` SHALL match the innermost open tag whose name is `name`.
 - If the innermost open tag's name does not match, this SHALL be a compile error (E-CTX-001). (S263 — was E-MARKUP-002, now retired; closer-name-mismatch aligns to impl#1's live E-CTX-001 [§3.2]. impl#2/native additionally surfaces the mismatch, honoring this rule.)
 - An explicit closer for a state block uses `</statename>` where `statename` is the identifier used in the state opener.
-- An explicit closer `</name>` SHALL NOT be used inside a `${ }` logic context (E-CTX-002). Markup/state closers cannot cross context boundaries.
+- An explicit closer `</name>` SHALL NOT be used inside a `${ }` logic context (E-CTX-003). Markup/state closers cannot cross context boundaries.
 
 **Worked example — valid:**
 ```scrml
@@ -446,7 +446,7 @@ inferred-close ::= '</>'
 **Normative statements:**
 
 - `</>` SHALL close the innermost open markup tag or state block at the current position in the context stack.
-- `</>` SHALL NOT be used inside a `${ }` logic context (E-CTX-002). Markup/state closers cannot cross context boundaries.
+- `</>` SHALL NOT be used inside a `${ }` logic context (E-CTX-003). Markup/state closers cannot cross context boundaries.
 - The compiler SHALL know, at the point of `</>`, which block is being closed. This information SHALL be available in diagnostic output.
 - When the `verbose closers` setting is enabled (see Section 28), all `</>` forms SHALL be normalized to `</tagname>` form in compiler diagnostic output, error messages, and formatted source output. This normalization is for developer-facing output only and SHALL NOT affect compiled output.
 
@@ -476,7 +476,7 @@ ${ if (condition) {
     </>
 } }
 ```
-`</>` is inside a `${ }` logic context. This SHALL be a compile error (E-CTX-002): cannot use a markup/state closer inside a logic context.
+`</>` is inside a `${ }` logic context. This SHALL be a compile error (E-CTX-003): cannot use a markup/state closer inside a logic context.
 
 ### 4.5 The `verbose closers` Compiler Setting
 
@@ -883,7 +883,7 @@ mechanism depends on the execution context type:
 
 | Code | Trigger | Severity |
 |------|---------|---------|
-| E-PROGRAM-001 | Circular `<program>` nesting (a `<program>` is a descendant of itself) | Error |
+| E-PROGRAM-001 | Circular `<program>` nesting (a `<program>` is a descendant of itself) **(Reserved / spec-ahead, S263 — no fire site: circular `<program>` nesting is unconstructable-by-construction — a lexical tree cannot contain itself and there is no include/inline mechanism; defensive guard, condition unreachable. Excluded from the freeze fireable set.)** | Error |
 | W-PROGRAM-001 | Nested `<program>` has no `name=` attribute | Warning |
 | W-PROGRAM-TITLE-NESTED | Documentary attribute (`title=`, `description=`, `version=`, `author=`, `license=`) appears on a nested `<program>` (see §40.7) | Warning |
 | E-STORY-UNKNOWN | `story="<name>"` references a build story not declared in the `scrml.toml` `[story]` table (see §58) | Error |
@@ -6425,8 +6425,8 @@ read/write distinction.
 
 | Code | Trigger | Severity |
 |---|---|---|
-| E-SQL-001 | Compiler emits string interpolation into a SQL string (compiler defect, not user error) | Error |
-| E-SQL-002 | SQL template string (after `?N` substitution) is syntactically invalid SQL | Error |
+| E-SQL-001 | Compiler emits string interpolation into a SQL string (compiler defect, not user error) **(Reserved / spec-ahead, S263 — no fire site: a compiler-DEFECT self-check, not a user-reachable error — the developer cannot write this in scrml source; defensive invariant guard. Excluded from the freeze fireable set.)** | Error |
+| E-SQL-002 | SQL template string (after `?N` substitution) is syntactically invalid SQL **(Reserved / spec-ahead, S263 — no fire site: no compile-time SQL parser exists — Bun.SQL validates at runtime, so the "validated at compile time" claim is aspirational/spec-ahead infra. Excluded from the freeze fireable set.)** | Error |
 | E-SQL-003 | SQL template content is a runtime expression, not a literal string template | Error |
 | E-SQL-004 | `?{}` block has no `db=` declaration in any ancestor `<program>` | Error |
 | E-SQL-005 | Unrecognized database connection string prefix in `db=` attribute | Error |
@@ -6770,10 +6770,10 @@ Error E-SYNTAX-002: `lift` is not valid inside a bare `function` body. A `functi
     for (item of items) {
         lift <li>${item.name}</>;
     }
-</>   // Error E-CTX-002: '</>' in logic context
+</>   // Error E-CTX-003: '</>' in logic context
 }
 ```
-Error E-CTX-002: Cannot use a markup/state closer (`</>` or `</tagname>`) inside a `${ }` logic context. Close the logic context with `}` first.
+Error E-CTX-003: Cannot use a markup/state closer (`</>` or `</tagname>`) inside a `${ }` logic context. Close the logic context with `}` first.
 
 ### 10.5 `lift` Ordering and Async Parallelism
 
@@ -14560,8 +14560,8 @@ is reachable only from a server-escalated function — give `getUser` a server r
 | Code | Trigger | Severity |
 |---|---|---|
 | E-SCOPE-010 | Developer declares a variable with a reserved binding name (`route`, `session`) | Error |
-| E-SCOPE-011 | Access to an undeclared route parameter name | Error |
-| E-SCOPE-012 | `session` accessed inside a non-server-escalated function | Error |
+| E-SCOPE-011 | Access to an undeclared route parameter name **(Reserved / spec-ahead, S263 — no fire site: the undeclared-route-param check is spec-ahead — `route.params` is not typer-supported for pages and no param-name allow-list exists. Excluded from the freeze fireable set.)** | Error |
+| E-SCOPE-012 | `session` accessed inside a non-server-escalated function **(Reserved / spec-ahead, S263 — no fire site: the §20.5 server-`session` builtin is unbuilt — bare `session` is never injected into any scope; the implemented `@session` is a different client projection. Excluded from the freeze fireable set.)** | Error |
 
 ---
 
@@ -17811,13 +17811,13 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | Code | Section | Trigger | Severity |
 |---|---|---|---|
 | E-CTX-001 | §3.2 | Wrong closer for context type | Error |
-| E-CTX-002 | §3.2, §4.4 | `</>` or `</tagname>` closer used inside a `${ }` logic context | Error |
+| ~~E-CTX-002~~ | §3.2, §4.4 | **Retired 2026-07-16 (S263).** The impl's E-CTX-002 slot documented the bare-`/` closer syntax removed 2026-04-09 (§4.8) — dead. The closer-in-logic well-formedness rule (a `</>`/`</tagname>` closer inside `${ }`) is not fired as a dedicated code; on the default pipeline it surfaces as **E-CTX-003** (the logic context fails to close) or is recovered. Triage: `scrml-support/docs/audits/s34-catalog-vs-impl-2026-07-16.md`. | — |
 | E-CTX-003 | §3.2 | Unclosed context at end of file or before outer closer. **Scoping note (S111 — quoted-text model):** `:`-shorthand-vs-full-body shape confusion in a code-default body (engine state-child / match arm) surfaces as this code — a `:`-shorthand body wrongly scanned as a full body hunts a non-existent closer and reaches EOF / an outer closer. Under §4.18 / §4.14 the `:`-shorthand body is a within-body construct bounded by `:` and the opener's `>` (no closer); correct `:`-shorthand recognition prevents this misfire. The code's fire condition is otherwise unchanged. | Error |
 | E-TYPE-001 | §14.3, §18.4 | Type mismatch (lifecycle field, match arm type conflict) | Error |
 | E-TYPE-006 | §18.8.2 | Non-exhaustive match over union type | Error |
-| E-TYPE-010 | §3.3, §10.2 | `${ }` result not coercible to markup in markup parent | Error |
-| E-TYPE-011 | §3.3, §10.2 | `${ }` result not coercible to CSS class in style parent | Error |
-| E-TYPE-012 | §10.4 | Heterogeneous `lift` values not mutually coercible | Error |
+| E-TYPE-010 | §3.3, §10.2 | `${ }` result not coercible to markup in markup parent **(Reserved / spec-ahead, S263 — no fire site: no static lift→markup-parent coercion type-check exists — a designed-but-unbuilt subsystem, v-next per the S263 ruling. Excluded from the freeze fireable set.)** | Error |
+| E-TYPE-011 | §3.3, §10.2 | `${ }` result not coercible to CSS class in style parent **(Reserved / spec-ahead, S263 — no fire site: the same unbuilt lift→parent coercion type-check subsystem as E-TYPE-010, style-parent branch. Excluded from the freeze fireable set.)** | Error |
+| E-TYPE-012 | §10.4 | Heterogeneous `lift` values not mutually coercible **(Reserved / spec-ahead, S263 — no fire site: no lift-value type-unification check is built — the same unbuilt coercion-check subsystem as E-TYPE-010/011. Excluded from the freeze fireable set.)** | Error |
 | E-TYPE-020 | §14.6, §18.8.1 | Non-exhaustive match over enum type | Error |
 | E-TYPE-021 | §18.7 | Payload arity mismatch in positional destructuring | Error |
 | E-TYPE-022 | §18.7 | Named binding references nonexistent payload field | Error |
@@ -17854,7 +17854,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-TOOL-SERVE-AUTH-UNSUPPORTED | §64.9 | A `serve=` tool carries cookie-session auth at ANY locus — the program `auth="required"`/`auth="optional"` (§52.13) OR a per-channel `<channel auth="required"/"optional">` (§38.5). The headless serve-target has NO cookie session, so the routes / the §38 WS upgrade would emit with NO auth guard — FAIL-CLOSED (§49 no-silent-bad-output) rather than a silent unguarded server. Fires per offending locus. Bearer-token auth on a headless serve-target is a later unit. (S255 — server-program-shape Fork 1A, §64.9.) | Error |
 | E-TOOL-SERVE-MAIN-EXITS | §64.9 | A `serve=` tool's `function main` declares a return type. The §64.3 exit-harness (`process.exit(code)`) would kill the live serve-harness the moment `main` returns; a composing `main` MUST be no-return setup that runs BEFORE the serve-harness holds the process. Drop `main`'s return type. (S255 — server-program-shape Fork 1A, §64.9.) | Error |
 | E-TOOL-ROUTE-NEEDS-SERVE | §64.1 | An `<endpoint>` (§61) or SSE `server function* route=` (§37) appears in a `kind="tool"` program with NO `serve=` listener to host it. A non-serve tool emits no `Bun.serve`, so the route would be silently un-hosted (the tool appears to define an API but serves nothing) — FAIL-CLOSED (§49 no-silent-bad-output). Add `serve=PORT` (§64.9), or remove the route. (S255 — server-program-shape Fork 1A.) | Error |
-| E-PROGRAM-001 | §4.12 | Circular `<program>` nesting detected | Error |
+| E-PROGRAM-001 | §4.12 | Circular `<program>` nesting detected **(Reserved / spec-ahead, S263 — no fire site: circular `<program>` nesting is unconstructable-by-construction — a lexical tree cannot contain itself and there is no include/inline mechanism; defensive guard, condition unreachable. Excluded from the freeze fireable set.)** | Error |
 | W-PROGRAM-TITLE-NESTED | §40.7 | A documentary attribute (`title=`, `description=`, `version=`, `author=`, `license=`) appears on a nested `<program>`. Documentary attributes are meaningful only at the top level (HTML `<head>` semantics); workers have no DOM `<head>`. Move the attribute to the top-level `<program>` or remove it. (Phase A1a) | Warning |
 | E-STORY-UNKNOWN | §58.9 | A `story="<name>"` attribute on a nested `<program>` references a `<name>` with no corresponding `[story.<name>]` entry in the project manifest (`scrml.toml`). Declare the build story in the manifest's `[story]` table, or correct the name. (S118 — Build Story, §58) | Error |
 | W-STORY-ON-TOP-LEVEL | §58.8 | A `story=` attribute appears on the top-level `<program>` (§40.8). The attribute is ignored — the top-level build story is owned exclusively by `[story] default` in `scrml.toml`. Remove the attribute, or set the project default in the manifest. (S118 — Build Story, §58) | Warning |
@@ -17895,19 +17895,19 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-DEPRECATED-SERVER-MODIFIER | §12.2, §52.10 | The `server` modifier on a function declaration is removed. Use a plain `function` declaration; route inference (§12.2) will classify the function based on its body content and call graph. Deprecation cycle endpoint: this code activates after the W-DEPRECATED-SERVER-MODIFIER deprecation window, when the parser stops accepting `server function` syntax. Mirrors the `<machine>` → `<engine>` deprecation cycle (W-DEPRECATED-001 → E-DEPRECATED-001). | Error |
 | W-DEAD-FUNCTION | §12.2 | A function is declared but called from neither a server-classified context nor a client-classified context, is not exported, is not server-annotated, and is not referenced from markup. The function will be tree-shaken from the output. Remove the declaration if intended dead, or wire it up to a caller. RI does not yet track all markup reference patterns; if the diagnostic is a false positive, exporting the function or adding an explicit caller suppresses it. **Fires:** emitted by RI (`compiler/src/route-inference.ts` Step 5d, D4) at the function's declaration site. Added 2026-05-08 (Insight 26 Batch 1) as the in-vacuum complement to caller-context propagation (Trigger 5). | Warning |
 | W-SERVER-IMPORT-UNEMITTED | §21, §12.2 | A compiled server bundle imports `from "./X.server.js"` but the import would fail at runtime: either (a) `X.scrml` has no server content so no `.server.js` is emitted (runtime `Cannot find module`), or (b) `X.server.js` IS emitted but does not export an imported name — e.g. a server-CALLED pure helper that route-infers into a handler (`auth.server.js` emits `export const __ri_route_rolePath`, not `export const rolePath`) → runtime missing-export. Non-fatal — green compile / `node --check` pass; the import only fails when the server bundle is RUN (the "compiled-green ≠ works" class). Companion to the emit-server tree-shake (`g-pure-module-server-emit` Fix A) which prunes the client-only-used import; this cross-file invariant catches the residual server-USED shapes emit-server cannot see (it has no sibling-emission knowledge). **Fires:** post-emit cross-file scan over `cgResult.outputs` in `compiler/src/api.js` (S208, Fix B). | Warning |
-| E-TYPE-030 | §14.7, §15.2 | `asIs` value used past resolution requirement | Error |
+| E-TYPE-030 | §14.7, §15.2 | `asIs` value used past resolution requirement **(Reserved / spec-ahead, S263 — no fire site: the `asIs` resolution-obligation tracker, analogous to the built `lin`/`~` tracker, is unbuilt. Excluded from the freeze fireable set.)** | Error |
 | E-TYPE-031 | §15.3, §15.10 | Prop value fails declared type constraint | Error |
 | E-TYPE-ANY-FORBIDDEN | §14.1.1 | The literal type-token `any` appears in a type-annotation position (struct / error / enum-variant-payload / tuple field, type-alias RHS, state-cell annotation, `fn`/`function` parameter or return type, and the recursive leaf positions). `any` is not a scrml type — there is no `any` (S174 hard line; TypeScript's type-checking opt-out has no scrml equivalent). Use a concrete type, or `asIs` for a deliberate, named untyped escape hatch. Symmetric with `E-TYPE-UNKNOWN-NAME` (§14.1.2) — an undefined type NAME is rejected at the identical loci via the same locus traversal. (Catalog addition S174; loci broadened S174 follow-on; emitted at `compiler/src/type-system.ts` `checkAnyTypeForbidden`.) | Error |
 | E-TYPE-UNKNOWN-NAME | §14.1.2 | An unrecognized (typo'd or undefined) type NAME appears in a type-annotation position — the SAME loci as `E-TYPE-ANY-FORBIDDEN` (struct / error / enum-variant-payload / tuple field, type-alias RHS, state-cell annotation, `fn`/`function` param + return, and recursive leaf positions: inline-struct field, array element, map VALUE, union member, snippet param, lifecycle post-type). The name resolves against the file's `typeRegistry` per §53.14.5 (forward-reference-safe placeholder pass); cross-file imports resolve via §21.8 / the §21.3 imported-types seed, and an imported specifier name is exempt even in single-file mode. `asIs` is the never-fires escape hatch. Carve-outs: a map KEY is owned by `E-MAP-KEY-NOT-COMPARABLE` (§59.4, no double-fire); a machine name (§51.3) and `<db>`-block-scoped annotations are exempt. Before this rule the name collapsed SILENTLY to `asIs` (the broader leak §14.1.1 deferred). Emitted at the decl-binding sites (NOT `resolveTypeExpr`, which is span-free) by `compiler/src/type-system.ts` `checkUnknownTypeNames` (run AFTER the imported-types seed). (Catalog addition S174 follow-on.) | Error |
-| E-TYPE-040 | §16.4 | Slot fill type incompatible with declared slot shape | Error |
+| ~~E-TYPE-040~~ | §16.4 | **Retired 2026-07-16 (S263).** Vestige of the pre-S39 whitespace-slot syntax (retired 2026-04-03 when §16 was rewritten); superseded by the snippet-prop codes **E-TYPE-070..073** / **E-COMPONENT-023**. Triage: `scrml-support/docs/audits/s34-catalog-vs-impl-2026-07-16.md`. | — |
 | E-TYPE-050 | §14.8.5 | Two tables produce the same generated type name | Error |
 | E-TYPE-051 | §14.8.5 | SQLite column type unmappable; typed `asIs` | Warning |
 | E-MARKUP-001 | §4.1 | Unknown HTML element name | Error |
 | ~~E-MARKUP-002~~ | §4.4.1 | **Retired 2026-07-16 (S263).** Closer name-mismatch is now **E-CTX-001** (§4.4.1 amended to impl#1's live code). The attribute-type-mismatch meaning was a dead impl squatter (`validateMarkupAttributes`, `type-system.ts` — never invoked: the caller-guard reads `n.name`, always `undefined` for a markup node whose name is `n.tag`) that would false-fire on all valid numeric/boolean HTML; HTML attribute-type validation is aspirational **E-HTML-003** (§24.2). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
-| ~~E-MARKUP-003~~ | §4.4.1 | **Retired 2026-07-16 (S263).** A `</tagname>` explicit closer inside a `${ }` logic context is **E-CTX-002** (§3.2 / §4.4.1 normative); this row was a phantom duplicate (no emitter). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
-| ~~E-MARKUP-004~~ | §4.4.2 | **Retired 2026-07-16 (S263).** A `</>` inferred closer inside a `${ }` logic context is **E-CTX-002** (§3.2 / §4.4.2 normative); this row was a phantom duplicate (no emitter — the `</>` twin of the retired E-MARKUP-003 closer-in-logic row). Consistency follow-through on the S261 E-MARKUP retire (the audit enumerated only E-MARKUP-003). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
-| E-STATE-001 | §4.2 | Unrecognized state identifier | Error |
-| E-SYNTAX-001 | §10.4 | `lift` outside any `${ }` logic context | Error |
+| ~~E-MARKUP-003~~ | §4.4.1 | **Retired 2026-07-16 (S263).** A `</tagname>` explicit closer inside a `${ }` logic context surfaces as **E-CTX-003** (unclosed logic context) on the default pipeline; the SPEC's dedicated E-CTX-002 closer-in-logic code is itself retired S263; this row was a phantom duplicate (no emitter). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
+| ~~E-MARKUP-004~~ | §4.4.2 | **Retired 2026-07-16 (S263).** A `</>` inferred closer inside a `${ }` logic context surfaces as **E-CTX-003** (unclosed logic context) on the default pipeline; the SPEC's dedicated E-CTX-002 closer-in-logic code is itself retired S263; this row was a phantom duplicate (no emitter — the `</>` twin of the retired E-MARKUP-003 closer-in-logic row). Consistency follow-through on the S261 E-MARKUP retire (the audit enumerated only E-MARKUP-003). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
+| ~~E-STATE-001~~ | §4.2 | **Retired 2026-07-16 (S263).** Duplicate/vestige — under state-as-primary resolution (§4.3), "unrecognized state identifier" and "unknown element" are one failure: a PascalCase name surfaces as **E-COMPONENT-035**, a lowercase-HTML name as **E-MARKUP-001** (a separately-tracked hole). No distinct E-STATE-001 niche remains. Triage: `scrml-support/docs/audits/s34-catalog-vs-impl-2026-07-16.md`. | — |
+| E-SYNTAX-001 | §10.4 | `lift` outside any `${ }` logic context **(Reserved / spec-ahead, S263 — no fire site: `lift` is lexed as a keyword ONLY inside logic contexts; elsewhere it is plain text, so the condition is unreachable-by-construction. The reachable misuse — `lift` in a bare `function` — is owned by the live E-SYNTAX-002. Excluded from the freeze fireable set.)** | Error |
 | E-SYNTAX-002 | §10.4 | `lift` inside a function body | Error |
 | E-SYNTAX-003 | §4.11.1 | `extract` in `lift` keyword position | Error |
 | E-SYNTAX-010 | §18.6 | `else` default arm is not the last arm | Error |
@@ -17921,9 +17921,9 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-ATTR-UNQUOTED-OPERATOR | §5.1, §17.1 | An unquoted attribute CONDITION (`if=`/`show=`/`else-if=`) contains a bare binary/ternary operator (`>= > < <= == != && \|\| + - * /` or ternary `?:`). An unquoted condition admits only the atomic forms (`@var` / `obj.prop` / `fn()` / prefix `!`); operator conditions SHALL be parenthesized `if=(expr)` or quoted `if="expr"`. Fires ONCE per offending attribute (cluster-A, S188 "reject + parens"). | Error |
 | E-SCOPE-001 | §5.2 | Unquoted identifier not resolvable in scope | Error |
 | E-SCOPE-010 | §20.4 | Developer declares variable with reserved binding name (`route`, `session`) | Error |
-| E-SCOPE-011 | §20.4 | Access to undeclared route parameter name | Error |
-| E-SCOPE-012 | §20.5 | `session` accessed in non-server-escalated function | Error |
-| E-REACTIVE-001 | §6.2 | `@variable` used before declaration | Error |
+| E-SCOPE-011 | §20.4 | Access to undeclared route parameter name **(Reserved / spec-ahead, S263 — no fire site: the undeclared-route-param check is spec-ahead — `route.params` is not typer-supported for pages and no param-name allow-list exists. Excluded from the freeze fireable set.)** | Error |
+| E-SCOPE-012 | §20.5 | `session` accessed in non-server-escalated function **(Reserved / spec-ahead, S263 — no fire site: the §20.5 server-`session` builtin is unbuilt — bare `session` is never injected into any scope; the implemented `@session` is a different client projection. Excluded from the freeze fireable set.)** | Error |
+| ~~E-REACTIVE-001~~ | §6.2 | **Retired 2026-07-16 (S263).** Reactive cells are declaration-order-independent (hoisted), so `@variable` use-before-declaration is LEGAL, not an error. The reachable "undeclared cell" case is owned by **E-STATE-UNDECLARED**. Triage: `scrml-support/docs/audits/s34-catalog-vs-impl-2026-07-16.md`. | — |
 | E-REACTIVE-002 | §6.6.8 | Assignment to a `const <name>` derived reactive value | Error |
 | E-REACTIVE-003 | §6.6.9 | A WHOLLY server-escalated function reads a free client cell — a mutable `@var`, a `const <name>` derived, OR a §52 `<... server>` cell (all client-held). The server-mode rewrite lowers `@cell` to `_scrml_body["cell"]`, but a non-CPS server-fn client stub sends only declared params, so the value is NOT transported and resolves to `undefined` server-side. Read-side sibling of E-RI-002 (server fn *writes* a `@reactive` cell). Fires once per distinct cell. GATED on `cpsSplit === null` — a CPS-split fn MARSHALS its server-batch reads into the client stub (`emit-functions.ts`), so it is exempt (see W-SERVER-DERIVED-MARSHAL). Excludes: declared params (already marshalled), ambient `@session`/`@currentUser` (server-resolved singletons, §20.5 — never client-supplied), and channel cells (E-CHANNEL-SERVER-CELL-READ owns them). Fix: pass the cell as an explicit argument, or restructure so the server computes the value inside the `?{}`. Broadened S250 from the derived-only, never-fired SPEC-only draft (a fail-open); §52 correction (client-held, not server-resolved) per RULING THE SPLIT. Emitted by RI (`compiler/src/route-inference.ts`, `detectServerFreeClientCellReads`). | Error |
 | W-SERVER-DERIVED-MARSHAL | §6.6.9 | A CPS-split server round-trip (§19.9.9) MARSHALS a `const <name>` DERIVED read into the request body — the server receives the CLIENT-computed snapshot (`_scrml_body["<name>"]`), not a value it recomputed. This works (the value crosses the wire), but a client-computed aggregate is worth a trust nudge: validate it server-side before acting on it. Fires once per distinct derived cell. A marshalled raw `@var` form field is ordinary form data and marshals SILENTLY (no warning); a wholly-server derived read is the harder E-REACTIVE-003 (not transported at all). Emitted by codegen at the CPS stub `_scrml_body` builder (`compiler/src/codegen/emit-functions.ts`). Partitions into `result.warnings`. | Warning |
@@ -17971,8 +17971,8 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-META-004 | §22.11 | *Reserved* — number unallocated; preserved for search-hit stability. Do not reuse. | — |
 | E-META-009 | §22.11 | Nested `^{}` inside a compile-time `^{}` block | Error |
 | E-META-010 | §22.4, §22.11 | Reference to the reserved `compiler.*` namespace in a `^{}` block | Error |
-| E-PURE-001 | §33.4 | `pure` function contains a purity violation | Error |
-| E-PURE-002 | §33.4 | `pure` function calls a non-`pure` function | Error |
+| ~~E-PURE-001~~ | §33.4 | **Retired 2026-07-16 (S263).** Superseded by the **E-FN-001..009** family (§33.6 defines them as specialized subcategories of E-PURE-001); the `pure` modifier is deprecated language-wide (use `fn` — W-PURE-DEPRECATED). Triage: `scrml-support/docs/audits/s34-catalog-vs-impl-2026-07-16.md`. | — |
+| ~~E-PURE-002~~ | §33.4 | **Retired 2026-07-16 (S263).** Superseded by the **E-FN-001..009** family (§33.6); the `pure` modifier is deprecated language-wide (use `fn` — W-PURE-DEPRECATED). Triage: `scrml-support/docs/audits/s34-catalog-vs-impl-2026-07-16.md`. | — |
 | E-HTML-001 | §23.2 | Invalid attribute on known HTML element | Error |
 | E-HTML-002 | §24.2 | Content model violation (only in `strict` mode) | Error |
 | E-HTML-003 | §24.2 | Wrong type for HTML attribute | Error |
@@ -18468,8 +18468,8 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-ENGINE-011 | §51.5 | A type-level effect block references a reactive variable outside the governed enum type's file scope. Type-level transitions cannot reach across files for the side effect. Resolution: hoist the effect to a `<machine>`/`<engine>` declaration that owns the reactive variable, or restructure the cross-file dependency through a server function. (Catalog addition S84 Wave 2 #5; full prose at §51.5 line 21901.) | Error |
 | E-ENGINE-012 | §51.5 | Machine binding declared on a struct field (e.g., `@form.status`). Not yet supported in v1 — bind the enclosing `@var` instead and project field-level state through the machine variable. (Catalog addition S84 Wave 2 #5; full prose at §51.5 lines 22602, 23014.) | Error |
 | E-ENGINE-001-RT | §51.5.1 | Runtime: a runtime-thrown illegal-transition error from `E-ENGINE-001` — the statically-unknowable from-state was illegal under the machine's rules. Carries the labeled-guard failure detail in the message. (Catalog addition S84 Wave 2 #5; full prose at §51.5 lines 21916, 22175, 22195.) | Runtime |
-| E-SQL-001 | §8.1 | The compiler-emitted output contains `${...}` string interpolation inside a SQL template string. This is a compiler defect, not user error — the developer cannot write this in scrml source; all `${}` interpolations in a `?{}` block are rewritten to bound parameters. Surfaced if a compiler pass produces non-conformant output. (Catalog addition S84 Wave 2 #5; full prose at §8.1 lines 5376, 5521.) | Error |
-| E-SQL-002 | §8.1.1 | A SQL template string (after `?N` placeholder substitution) is syntactically invalid SQL. Validated at compile time against the driver's parser. (Catalog addition S84 Wave 2 #5; full prose at §8.1.1 line 5597.) | Error |
+| E-SQL-001 | §8.1 | The compiler-emitted output contains `${...}` string interpolation inside a SQL template string. This is a compiler defect, not user error — the developer cannot write this in scrml source; all `${}` interpolations in a `?{}` block are rewritten to bound parameters. Surfaced if a compiler pass produces non-conformant output. (Catalog addition S84 Wave 2 #5; full prose at §8.1 lines 5376, 5521.) **(Reserved / spec-ahead, S263 — no fire site: a compiler-DEFECT self-check, not a user-reachable error — the developer cannot write this in scrml source; defensive invariant guard. Excluded from the freeze fireable set.)** | Error |
+| E-SQL-002 | §8.1.1 | A SQL template string (after `?N` placeholder substitution) is syntactically invalid SQL. Validated at compile time against the driver's parser. (Catalog addition S84 Wave 2 #5; full prose at §8.1.1 line 5597.) **(Reserved / spec-ahead, S263 — no fire site: no compile-time SQL parser exists — Bun.SQL validates at runtime, so the "validated at compile time" claim is aspirational/spec-ahead infra. Excluded from the freeze fireable set.)** | Error |
 | E-SQL-003 | §8.1.1 | The `?{}` template body is a runtime expression (e.g., `?{`${sqlString}`}`) rather than a literal string template. SQL template bodies must remain literal at compile time so the compiler can validate and bind parameters; fragment reuse goes through the call graph, not runtime template assembly. (Catalog addition S84 Wave 2 #5; full prose at §8.1.1 lines 5619, 5643.) | Error |
 | E-SQL-007 | §44.4 | A `?{}` SQL block appears in a non-async context (e.g., inside a `fn` body, top-level synchronous markup attribute value). SQL queries return promises; they require an async-capable surrounding context. (Catalog addition S84 Wave 2 #5; full prose at §44.4; row at §8.7 line 5747 + §44.7 line 18131.) | Error |
 | E-SQL-009 | §44.7, §21.5.1 | An `export server function` containing `?{}` is declared in a file with no top-level `<db src=>` block (F-AUTH-002). The exported function would have no database connection in its compiled form. Resolution: add a `<db src=...>` block, or move the function to a file that has one. (Catalog addition S84 Wave 2 #5; full prose at §44.7 line 18133-18154, also §38.12.6 line 16649 for channel interaction.) | Error |
