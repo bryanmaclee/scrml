@@ -1,0 +1,8 @@
+<program>
+  ${
+    fn added(y: int) {
+      return y + 2
+    }
+  }
+  <p>hello</p>
+</program>

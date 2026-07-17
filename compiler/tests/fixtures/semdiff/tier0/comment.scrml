@@ -1,0 +1,10 @@
+${
+  fn helper(x: int) {
+    // increment the argument by one
+    return x + 1
+  }
+  export fn main(n: int) {
+    // sum two independent helper calls
+    return helper(n) + helper(n)
+  }
+}

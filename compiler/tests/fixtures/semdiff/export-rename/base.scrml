@@ -1,0 +1,5 @@
+${
+  export fn getUser(id: int) {
+    return id + 1
+  }
+}
