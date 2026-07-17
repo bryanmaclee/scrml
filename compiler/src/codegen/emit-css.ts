@@ -153,6 +153,74 @@ interface LowerCtx {
 const EMPTY_SET: Set<string> = new Set();
 
 /**
+ * §65.8 / CSS ordering law — hoist the TOP-LEVEL `@charset` / `@import`
+ * statements out of a program-global CSS body. Both are INVALID inside a
+ * `@layer {}` block (the browser drops them), so before the program-global CSS
+ * is wrapped in `@layer global { … }` its `@charset` / `@import` statements MUST
+ * be lifted to their legal stylesheet position: `@charset` is the very first
+ * thing in the sheet (byte 0); `@import` comes after `@charset` + any
+ * `@layer name;` statement but before any style rule or `@layer {}` block.
+ *
+ * ONLY depth-0 (not nested inside another at-rule block) statements are hoisted;
+ * source order among the hoisted statements is preserved. `rest` is the input
+ * with the hoisted statements removed (safe to wrap in `@layer global {}`).
+ */
+export function hoistCharsetAndImports(css: string): { charset: string[]; imports: string[]; rest: string } {
+  const charset: string[] = [];
+  const imports: string[] = [];
+  let rest = "";
+  let i = 0;
+  const n = css.length;
+  let brace = 0, paren = 0;
+  let str: string | null = null;
+  while (i < n) {
+    const c = css[i];
+    if (str !== null) {
+      rest += c;
+      if (c === "\\" && i + 1 < n) { rest += css[i + 1]; i += 2; continue; }
+      if (c === str) str = null;
+      i++;
+      continue;
+    }
+    if (c === '"' || c === "'") { str = c; rest += c; i++; continue; }
+    if (c === "{") { brace++; rest += c; i++; continue; }
+    if (c === "}") { brace = brace > 0 ? brace - 1 : 0; rest += c; i++; continue; }
+    if (c === "(") { paren++; rest += c; i++; continue; }
+    if (c === ")") { paren = paren > 0 ? paren - 1 : 0; rest += c; i++; continue; }
+    // A depth-0 `@charset` / `@import` statement (both are `;`-terminated, no block).
+    if (c === "@" && brace === 0 && paren === 0 && /^@(charset|import)\b/i.test(css.slice(i, i + 8))) {
+      let j = i;
+      let jParen = 0;
+      let jStr: string | null = null;
+      while (j < n) {
+        const cj = css[j];
+        if (jStr !== null) {
+          if (cj === "\\") { j += 2; continue; }
+          if (cj === jStr) jStr = null;
+          j++;
+          continue;
+        }
+        if (cj === '"' || cj === "'") { jStr = cj; j++; continue; }
+        if (cj === "(") { jParen++; j++; continue; }
+        if (cj === ")") { jParen = jParen > 0 ? jParen - 1 : 0; j++; continue; }
+        if (cj === ";" && jParen === 0) { j++; break; }
+        if (cj === "{" && jParen === 0) break; // defensive — these at-rules carry no block
+        j++;
+      }
+      const stmt = css.slice(i, j).trim();
+      if (/^@charset/i.test(stmt)) charset.push(stmt);
+      else imports.push(stmt);
+      i = j;
+      while (i < n && /\s/.test(css[i])) i++; // swallow trailing whitespace so no blank line is left
+      continue;
+    }
+    rest += c;
+    i++;
+  }
+  return { charset, imports, rest: rest.trim() };
+}
+
+/**
  * Render a single declaration's value. `@name` references (§65.3.2 `@`-sigil model)
  * are lowered by `lowerCssValueRefs`: a theme token → `var(--name)`, a reactive
  * cell → `var(--scrml-name)`, an unknown → E-THEME-TOKEN-UNKNOWN. A computed
@@ -389,14 +457,31 @@ export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[
   // VALUES; `var()` resolves across layers) and compete for nothing.
   // ---------------------------------------------------------------------------
   const parts: string[] = [];
+
+  // §65.8 / CSS ordering law — `@charset` / `@import` inside the program-global
+  // `#{}` cannot be trapped in the `@layer global {}` wrapper (the browser drops
+  // them). Hoist them: `@charset` to byte 0, `@import` after the `@layer name;`
+  // order declaration but before any block. `programGlobalRest` is the remaining
+  // program-global CSS (safe to wrap).
+  const { charset, imports, rest: programGlobalRest } = programGlobalCss
+    ? hoistCharsetAndImports(programGlobalCss)
+    : { charset: [] as string[], imports: [] as string[], rest: "" };
+
+  // @charset — MUST be the very first thing in the stylesheet (byte 0).
+  for (const cs of charset) parts.push(cs);
+
   const layerOrder: string[] = [];
   if (resetCss) layerOrder.push("reset");
-  if (programGlobalCss) layerOrder.push("global");
+  if (programGlobalRest) layerOrder.push("global");
   if (layerOrder.length >= 2) parts.push(`@layer ${layerOrder.join(", ")};`);
+
+  // @import — after @charset + the `@layer name;` statement, BEFORE any style
+  // rule or `@layer {}` block (reset / theme / global / component).
+  for (const imp of imports) parts.push(imp);
 
   if (resetCss) parts.push(resetCss);                                  // @layer reset — lowest
   if (themeCss) parts.push(themeCss);                                  // :root tokens — unlayered
-  if (programGlobalCss) parts.push(`@layer global {\n${programGlobalCss}\n}`);  // below component
+  if (programGlobalRest) parts.push(`@layer global {\n${programGlobalRest}\n}`);  // below component
   for (const scopeBlock of componentScopeBlocks) parts.push(scopeBlock);        // unlayered — highest
 
   return parts.join("\n");

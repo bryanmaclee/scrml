@@ -124,3 +124,32 @@ a CSS `@layer` below the component author scope).
   specificity-war with Tailwind before). Consistent with "escape hatch = weakest," but a behavior
   change for any corpus program-global rule that previously beat a utility by specificity. Full
   suite green.
+
+---
+
+## S265 round-4 (land-prep build) — scrml-js-codegen-engineer
+
+### 2026-07-17 — startup
+- F4 verified: worktree agent-a35c5b88558286e32; `git reset --hard feat/css-wave1-emission`
+  (07a1a694 "[2] component-scope beats program-global via @layer"); `HEAD..origin/main` = 0.
+  `bun install` + `bun run pretest` OK. Baseline `bun test unit+integration+conformance`:
+  **20641 pass / 0 fail** (confirmed green before any change).
+- Map primary.map.md (stamp 0a79d838) load-bearing: pipeline `compileScrml()` in api.js
+  (block-split → AST-build → type-check → codegen); §65 CSS is a compiler feature (style.map.md
+  ABSENT — tracked in domain.map.md + error.map.md); codegen at compiler/src/codegen/. Confirmed
+  against source.
+- Read SPEC §65 IN FULL (35231-35651) + §25.7 (16972) + §34 E-THEME-TOKEN-UNKNOWN row.
+
+### 2026-07-17 — TASK 1 [399] @import/@charset hoist (commit: this)
+- ROOT CAUSE confirmed: program-global `#{}` wrapped in `@layer global { … }` (emit-css.ts ~399)
+  traps top-level `@charset`/`@import` → browser drops them (invalid inside `@layer {}`).
+- FIX: NEW `hoistCharsetAndImports(css)` in emit-css.ts — a depth-0 scanner (brace/paren/string
+  aware) that lifts top-level `@charset`/`@import` statements out of the program-global body,
+  preserving source order; nested (`@media { @import }`) are left. generateCss reassembles in CSS
+  ordering law: `@charset` (byte 0) → `@layer reset, global;` (order decl) → `@import`s →
+  `@layer reset {…}` → theme `:root` → `@layer global { <rest> }` → unlayered component/theme.
+  `layerOrder` "global" now gated on the POST-hoist rest (an import-only block emits no empty layer).
+- Empirical: `#{ @charset "utf-8"; @import url("x.css"); a{…} }` → charset byte-0, import above the
+  `@layer global {}` block, `a{}` still inside the layer, no `@import` trapped. VERIFIED.
+- TEST: +4 tests in css-wave1-emission.test.js (2 pipeline pos, 2 `hoistCharsetAndImports` unit incl.
+  the `@media`-nested negative + a `url()`-not-mistaken-for-import guard). 26 pass / 0 fail.

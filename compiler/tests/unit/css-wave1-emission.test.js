@@ -31,6 +31,7 @@ import {
   emitResetLayer,
   RESET_LAYER_CSS,
 } from "../../src/codegen/emit-theme-reset.ts";
+import { hoistCharsetAndImports } from "../../src/codegen/emit-css.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -332,5 +333,75 @@ describe("§25.7 — lowerCssValueRefs", () => {
   test("no `@` → the value is returned verbatim (no scan)", () => {
     expect(lowerCssValueRefs("16px", theme, cells)).toBe("16px");
     expect(lowerCssValueRefs("#0f172a", theme, cells)).toBe("#0f172a");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TASK 1 [399] — @import / @charset must not be trapped in @layer global {}
+// (§65.8 / CSS ordering law)
+// ---------------------------------------------------------------------------
+
+describe("§65.8 — @charset / @import hoist out of @layer global {}", () => {
+  test("a program-global @import is emitted at top level, NOT inside @layer global", () => {
+    const { css } = compileCss(`<program>
+  #{ @import url("x.css"); a { color: red; } }
+  const Card = <div props={}>
+      #{ .card { color: green; } }
+      <div class="card">hi</div>
+  </>
+  <Card/>
+</program>`);
+    // The @import is hoisted above the @layer global {} block.
+    expect(css).toContain(`@import url("x.css");`);
+    // The rest of the program-global rules stay in @layer global.
+    expect(css).toContain("@layer global {");
+    expect(css).toContain("a { color: red; }");
+    // The @import is NOT trapped inside @layer global {} — it precedes it.
+    expect(css.indexOf(`@import url("x.css");`)).toBeLessThan(css.indexOf("@layer global {"));
+    // And the @layer global block body no longer carries the @import.
+    const layerBody = css.slice(css.indexOf("@layer global {"));
+    expect(layerBody).not.toContain("@import");
+  });
+
+  test("@charset is byte 0; @import follows the @layer name; order decl; both precede any block", () => {
+    const { css } = compileCss(`<program>
+  #{ @charset "utf-8"; @import url("a.css"); @import url("b.css"); a { color: red; } }
+  const Card = <div props={}>
+      #{ .card { color: green; } }
+      <div class="card">hi</div>
+  </>
+  <Card/>
+</program>`);
+    // @charset is the very first thing in the stylesheet.
+    expect(css.startsWith(`@charset "utf-8";`)).toBe(true);
+    // Order: @charset < @layer reset, global; < @import < any @layer {} block.
+    const iCharset = css.indexOf("@charset");
+    const iOrderDecl = css.indexOf("@layer reset, global;");
+    const iImportA = css.indexOf(`@import url("a.css");`);
+    const iImportB = css.indexOf(`@import url("b.css");`);
+    const iResetBlock = css.indexOf("@layer reset {");
+    expect(iCharset).toBeLessThan(iOrderDecl);
+    expect(iOrderDecl).toBeLessThan(iImportA);
+    // Source order among the imports is preserved.
+    expect(iImportA).toBeLessThan(iImportB);
+    // Both imports precede any @layer {} block.
+    expect(iImportB).toBeLessThan(iResetBlock);
+  });
+
+  test("hoistCharsetAndImports — unit: extracts depth-0 statements, leaves nested + rules", () => {
+    const r = hoistCharsetAndImports(`@charset "utf-8"; @import url("x.css"); a { color: red; } .b { background: url("y.png"); }`);
+    expect(r.charset).toEqual([`@charset "utf-8";`]);
+    expect(r.imports).toEqual([`@import url("x.css");`]);
+    // The remaining rules keep their `url()` values (not mistaken for @import).
+    expect(r.rest).toContain("a { color: red; }");
+    expect(r.rest).toContain(`.b { background: url("y.png"); }`);
+    expect(r.rest).not.toContain("@import");
+    expect(r.rest).not.toContain("@charset");
+  });
+
+  test("hoistCharsetAndImports — unit: an @import nested in @media is NOT hoisted", () => {
+    const r = hoistCharsetAndImports(`@media screen { @import url("nested.css"); } a { color: red; }`);
+    expect(r.imports).toEqual([]);
+    expect(r.rest).toContain(`@media screen { @import url("nested.css"); }`);
   });
 });
