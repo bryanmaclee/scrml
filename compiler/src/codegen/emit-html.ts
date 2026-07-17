@@ -2458,10 +2458,10 @@ export function generateHtml(
             // 1. resolvedKind must be "html-builtin" (a real element) or null.
             //    `resolvedKind` is the NR-authoritative routing signal: NR
             //    (Stage 3.05) stamps it, downstream stages READ it, and the
-            //    legacy `isComponent` boolean survives only as a derived
-            //    backcompat field — routing on it directly is asserted against by
-            //    p3-follow-no-isComponent-routing.test.js, which caught an
-            //    earlier cut of this guard. Measured: `<button class=(...)>` is
+            //    legacy component boolean survives only as a derived backcompat
+            //    field — routing on it directly is asserted against by the
+            //    P3-FOLLOW migration-invariant test, which caught an earlier cut
+            //    of this guard. Measured: `<button class=(...)>` is
             //    "html-builtin"; `<tableFor>`/`<formFor>` are "unknown" (they are
             //    scrml directives — dev-1-react.scrml emitted a bogus `pick` DOM
             //    binding before this clause).
@@ -2480,8 +2480,8 @@ export function generateHtml(
             //    <span>...` — markup spliced into JS => E-CODEGEN-INVALID-LOGIC.
             //
             // 3. `isUserComponentMarkup` — the sanctioned NR-prefer-with-fallback
-            //    component predicate (covers the resolvedKind == null && legacy
-            //    isComponent === true backcompat case that clause 1 would admit).
+            //    component predicate (covers the resolvedKind == null + legacy
+            //    component-boolean backcompat case that clause 1 would admit).
             //
             // 4. `HTML_BOOLEAN_ATTRS` — a boolean attribute carries meaning by
             //    PRESENCE, so `setAttribute("checked", "false")` still renders
