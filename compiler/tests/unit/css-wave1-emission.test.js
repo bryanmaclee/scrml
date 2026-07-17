@@ -431,6 +431,22 @@ function compileHtml(source) {
   }
 }
 
+/** Compile a source and return the emitted CLIENT bundle (+ css + diagnostics). */
+function compileClient(source) {
+  const dir = mkdtempSync(join(tmpdir(), "scrml-css-client-"));
+  try {
+    const file = join(dir, "app.scrml");
+    writeFileSync(file, source);
+    const r = compileScrml({ inputFiles: [file], write: false, outputDir: join(dir, "out") });
+    const outputs = [...(r.outputs?.values() ?? [])];
+    const client = outputs.map((o) => o.clientJs ?? o.client ?? "").filter(Boolean).join("\n");
+    const css = outputs.map((o) => o.css ?? "").filter(Boolean).join("\n");
+    return { client, css, errors: r.errors ?? [], warnings: r.warnings ?? [] };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 describe("§65.3.2 / §65.4 — flat-inline #{} token lowering (inline style)", () => {
   test("a flat-inline `@brand` lowers to var(--brand); a bare value is untouched", () => {
     const { html, errors } = compileHtml(`<program>
@@ -536,5 +552,89 @@ describe("§65.2.5 — component-scope descendant combinator preservation", () =
   <Card/>
 </program>`);
     expect(css).toContain(":where(.card .title) { color: var(--brand); }");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TASK 4 — runtime theme-switch (§65.6 client half) — themes ACTUALLY switch
+// ---------------------------------------------------------------------------
+
+/** A `<theme for=@mode>` app: a reactive cell + a .Dark variant + a toggle. */
+const THEME_SWITCH_APP = `<program>
+  <mode> = .Light
+  <theme for=@mode>
+      ink = #0f172a;
+      paper = #ffffff;
+      .Dark {
+          ink = #e2e8f0;
+          paper = #0f172a;
+      }
+  </theme>
+  const Card = <div props={}>
+      #{ .card { color: @ink; background: @paper; } }
+      <div class="card">hi</div>
+  </>
+  <Card/>
+  <button onclick=(@mode = .Dark)>dark</button>
+</program>`;
+
+describe("§65.6 — runtime theme-switch reflection (client half)", () => {
+  test("the client bundle reflects @mode onto <html> as data-scrml-theme-mode, wired to the subscription", () => {
+    const { client } = compileClient(THEME_SWITCH_APP);
+    // The reflection sets the SAME attribute the variant selector keys off, from
+    // the reactive cell's value (mount + on-change via _scrml_effect).
+    expect(client).toContain(`document.documentElement.setAttribute("data-scrml-theme-mode", _scrml_reactive_get("mode"))`);
+    // Wrapped in _scrml_effect → runs at registration (mount) AND on every @mode change.
+    expect(client).toContain("_scrml_effect(function()");
+  });
+
+  test("the client reflection attribute EXACTLY matches the emitted CSS variant selector attribute", () => {
+    const { client, css } = compileClient(THEME_SWITCH_APP);
+    // CSS variant selector: :root[data-scrml-theme-mode="Dark"]
+    expect(css).toContain(`:root[data-scrml-theme-mode="Dark"]`);
+    // Client sets the identical attribute name.
+    expect(client).toContain(`setAttribute("data-scrml-theme-mode"`);
+  });
+
+  test("the reflection reads the cell via _scrml_reactive_get (mount-value + change subscription)", () => {
+    // The runtime (`_scrml_effect` / `_scrml_reactive_get`) is externalized to
+    // the shared scrml-runtime.*.js chunk (the `deep_reactive` chunk is marked
+    // used by the theme detection) — the R26 CLI pass verifies that file DEFINES
+    // `_scrml_effect`. Here we assert the client WIRES the reflection through it.
+    const { client } = compileClient(THEME_SWITCH_APP);
+    expect(client).toContain(`_scrml_reactive_get("mode")`);
+    // The reflection is inside the effect body (mount + on-change), not a bare call.
+    const effectIdx = client.indexOf("_scrml_effect(function()");
+    const reflectIdx = client.indexOf(`setAttribute("data-scrml-theme-mode"`);
+    expect(effectIdx).toBeGreaterThanOrEqual(0);
+    expect(reflectIdx).toBeGreaterThan(effectIdx);
+  });
+
+  test("a <theme> with NO for=@cell emits NO reflection (nothing to switch)", () => {
+    const { client } = compileClient(`<program>
+  <theme> brand = #2563eb; </theme>
+  const Card = <div props={}>
+      #{ .card { color: @brand; } }
+      <div class="card">hi</div>
+  </>
+  <Card/>
+</program>`);
+    expect(client).not.toContain("data-scrml-theme");
+  });
+
+  test("the base+variant SPLIT across two <theme for=@mode> blocks emits ONE reflection", () => {
+    const { client } = compileClient(`<program>
+  <mode> = .Light
+  <theme for=@mode> ink = #0f172a; </theme>
+  <theme for=@mode> .Dark { ink = #e2e8f0; } </theme>
+  const Card = <div props={}>
+      #{ .card { color: @ink; } }
+      <div class="card">hi</div>
+  </>
+  <Card/>
+  <button onclick=(@mode = .Dark)>x</button>
+</program>`);
+    const matches = client.match(/setAttribute\("data-scrml-theme-mode"/g) ?? [];
+    expect(matches.length).toBe(1);
   });
 });

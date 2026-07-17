@@ -197,3 +197,34 @@ a CSS `@layer` below the component author scope).
   `var(--brand)`) AND keeps the space.
 - TEST: +4 regression tests (descendant / compound-unchanged / child-combinator / descendant+token).
   FULL suite unit+integration+conformance: **20653 pass / 0 fail**. No component-expansion regression.
+
+### 2026-07-17 — TASK 4 runtime theme-switch (§65.6 client half) (commit: this)
+- HEADLINE: `<theme for=@cell>` emitted the `:root[data-scrml-theme-<cell>="Dark"]` variant selectors
+  but NOTHING reflected the cell's active variant onto <html> → the theme never SWITCHED. Wired the
+  client half.
+- FIX: NEW `emitThemeSwitchReflection(nodes)` in emit-client.ts — for each `<theme for=@cell>` emits
+  `_scrml_effect(function(){ document.documentElement.setAttribute("data-scrml-theme-<cell>",
+  _scrml_reactive_get("<cell>")); });`. `_scrml_effect` runs the body at REGISTRATION (mount → initial
+  variant, matching first paint) AND on every @cell change (the `_scrml_reactive_get` read establishes
+  the subscription) → one `:root` attr write flips the whole page, zero re-render. The attr
+  (`themeVariantAttr(cell)` = `data-scrml-theme-<cell>`) is the SAME helper the variant selector uses,
+  so client attr == CSS selector attr EXACTLY. The enum-variant cell is stored as its plain tag STRING
+  at runtime (`@mode = .Dark` → `_scrml_reactive_set("mode","Dark")`), so `_scrml_reactive_get` IS the
+  tag name (no variant→string reinvention). Emitted AFTER cell inits + event wiring. One reflection per
+  bound cell (base+variant SPLIT across two `<theme for=@mode>` shares one cell). No `for=@cell` → none.
+- CHUNK: `detectRuntimeChunks` now adds `deep_reactive` (`_scrml_effect`) when a `<theme for=@cell>`
+  exists (`_scrml_reactive_get` is always-on core). Verified the runtime file DEFINES `_scrml_effect`.
+- `@media (prefers-color-scheme)` auto-bind is CSS-native (no runtime reflection); composes on top.
+- Empirical: client bundle has `setAttribute("data-scrml-theme-mode", _scrml_reactive_get("mode"))`
+  inside `_scrml_effect`; CSS has `:root[data-scrml-theme-mode="Dark"]` — attrs match.
+- TEST: +5 tests (reflection-present / attr-matches-selector / reads-via-reactive-get / no-cell-no-
+  reflection / split-shares-one-cell). FULL suite unit+integration+conformance: **20658 pass / 0 fail**.
+- DEFERRED (per brief — SSR is best-effort): SSR no-flash injection of the INITIAL
+  `data-scrml-theme-<cell>` onto the prerendered static `<html lang="en">` (index.ts doc shell).
+  Rationale: (a) the client reflection already sets the attr at first JS execution, correct in ALL
+  cases; (b) a flash occurs ONLY when the initial variant ≠ base `:root` (uncommon — most apps
+  initial=light=base → no flash); (c) baking a theme attr into the SHARED static HTML has
+  per-session-theme correctness subtleties + a doc-shell blast radius needing broad HTML-output
+  regression coverage; (d) deriving the initial variant string in the shell path needs the state-decl
+  → tag-string lowering (non-trivial). FOLLOW-ON. NO new §34 code (reused existing cell/variant + the
+  existing E-THEME-TOKEN-UNKNOWN).

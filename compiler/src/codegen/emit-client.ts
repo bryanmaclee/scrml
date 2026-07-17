@@ -19,6 +19,10 @@ import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEn
 import { setVariantFieldsForFile } from "./emit-control-flow.ts";
 import { setVariantFieldsForRewriter } from "./rewrite.js";
 import { EncodingContext, emitDecodeTable, emitRuntimeReflect } from "./type-encoding.ts";
+// §65.6 (css-wave1 round-4) — the runtime theme-switch reflection. `collectThemeContext`
+// finds every `<theme for=@cell>`; `themeVariantAttr` yields the `data-scrml-theme-<cell>`
+// attribute the variant SELECTOR keys off (both sides MUST use the same helper).
+import { collectThemeContext, themeVariantAttr } from "./emit-theme-reset.ts";
 import type { CompileContext } from "./context.ts";
 export type { EncodingContext } from "./type-encoding.ts";
 export type { CompileContext } from "./context.ts";
@@ -1235,6 +1239,14 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
     chunks.add("deep_reactive"); // _scrml_effect for CSS variable bridge
   }
 
+  // §65.6 (css-wave1 round-4) — a `<theme for=@cell>` emits a runtime reflection
+  // effect (`_scrml_effect` → `document.documentElement.setAttribute(...)`) so
+  // switching @cell flips the theme. `_scrml_effect` lives in deep_reactive;
+  // `_scrml_reactive_get` is in the always-on core chunk.
+  if (collectThemeContext(allNodes).themeDecls.some((t) => t.forCell)) {
+    chunks.add("deep_reactive"); // _scrml_effect for the §65.6 theme-switch reflection
+  }
+
   // Bind-props wiring — uses _scrml_effect
   function hasBindProps(nodes: any[]): boolean {
     for (const node of nodes) {
@@ -1294,6 +1306,39 @@ function clientStage<T>(ctx: CompileContext, name: string, fn: () => T): T {
 /**
  * Generate client-side JS for a file.
  */
+/**
+ * §65.6 (css-wave1 round-4) — the runtime theme-switch reflection (the client
+ * half). For each `<theme for=@cell>`, emit a reactive effect that reflects the
+ * bound cell's active enum-variant tag onto `<html>` as the
+ * `data-scrml-theme-<cell>` attribute — the SAME attribute the emitted variant
+ * SELECTOR keys off (`:root[data-scrml-theme-<cell>="Dark"]`, via
+ * `themeVariantAttr`). `_scrml_effect` runs the body once at REGISTRATION
+ * (mount → sets the cell's initial variant, matching first paint) and re-runs on
+ * EVERY `@cell` change (the `_scrml_reactive_get` read establishes the reactive
+ * subscription) — so switching the cell flips the whole page with one `:root`
+ * attribute write, zero re-render. The enum-variant cell is stored as its plain
+ * tag STRING at runtime (`@mode = .Dark` → `_scrml_reactive_set("mode", "Dark")`),
+ * so `_scrml_reactive_get(cell)` IS the active tag name (no variant→string
+ * reinvention). A `<theme>` with no `for=@cell` binds no cell → no reflection.
+ * The `@media (prefers-color-scheme)` auto-bind variant is CSS-native and needs
+ * no runtime reflection; it composes on top of whatever the data-attr selects.
+ */
+function emitThemeSwitchReflection(nodes: any[]): string[] {
+  const { themeDecls } = collectThemeContext(nodes);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const theme of themeDecls) {
+    const cell = theme.forCell;
+    if (!cell || seen.has(cell)) continue; // one reflection per bound cell (a base+variant SPLIT across two <theme for=@cell> blocks shares one cell)
+    seen.add(cell);
+    const attr = themeVariantAttr(cell); // data-scrml-theme-<cell> — MUST match the variant selector
+    out.push(`_scrml_effect(function() {`);
+    out.push(`  document.documentElement.setAttribute(${JSON.stringify(attr)}, _scrml_reactive_get(${JSON.stringify(cell)}));`);
+    out.push(`});`);
+  }
+  return out;
+}
+
 export function generateClientJs(ctx: CompileContext): string {
   const { fileAST, protectedFields, errors, encodingCtx, workerNames } = ctx;
   const authMiddlewareEntry = ctx.authMiddleware;
@@ -1903,6 +1948,17 @@ export function generateClientJs(ctx: CompileContext): string {
   // Emit event handler wiring and reactive display wiring
   const eventLines = clientStage(ctx, "emit-event-wiring", () => emitEventWiring(ctx, fnNameMap));
   for (const line of eventLines) lines.push(line);
+
+  // §65.6 (css-wave1 round-4) — the runtime theme-switch reflection. Emitted
+  // AFTER the reactive cell inits (top of the bundle) so `_scrml_effect`'s
+  // registration read sees the cell's initial value → the first-paint variant.
+  const themeSwitchNodes: any[] = (fileAST as any)?.ast?.nodes ?? (fileAST as any)?.nodes ?? [];
+  const themeReflectLines = clientStage(ctx, "emit-theme-switch", () => emitThemeSwitchReflection(themeSwitchNodes));
+  if (themeReflectLines.length > 0) {
+    lines.push("");
+    lines.push("// --- §65.6 theme-switch reflection (compiler-generated) ---");
+    for (const line of themeReflectLines) lines.push(line);
+  }
 
   // Emit type decode table + runtime reflect when encoding is enabled
   // and runtime meta blocks exist (§47.2, tree-shaking per §47.2.3)
