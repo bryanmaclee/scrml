@@ -35,7 +35,11 @@
  * Performance budget:  <= 5 ms per file (pure AST traversal).
  */
 
-import { isHtmlElement } from "./html-elements.js";
+import { isHtmlElement, isKnownElementName } from "./html-elements.js";
+import {
+  STRUCTURAL_ELEMENT_PLACEMENT,
+  RESERVED_CSS_ELEMENT_IDENTIFIERS,
+} from "./ast-builder.js";
 import type { ASTNode, FileAST, Span } from "./types/ast.ts";
 
 // ---------------------------------------------------------------------------
@@ -65,10 +69,10 @@ export type ResolvedCategory =
   | "unknown";
 
 export interface NRError {
-  code: "W-CASE-001" | "W-WHITESPACE-001";
+  code: "W-CASE-001" | "W-WHITESPACE-001" | "E-MARKUP-001";
   message: string;
   span: Span;
-  severity: "warning";
+  severity: "warning" | "error";
 }
 
 export interface NRResult {
@@ -101,6 +105,83 @@ const LIFECYCLE_CATEGORY: Record<string, ResolvedCategory> = {
 
 function isLifecycleKeyword(name: string): boolean {
   return Object.prototype.hasOwnProperty.call(LIFECYCLE_CATEGORY, name);
+}
+
+// ---------------------------------------------------------------------------
+// E-MARKUP-001 gate exclusions (SPEC §4.1)
+// ---------------------------------------------------------------------------
+//
+// A markup opener whose tag resolves to `unknown` is a candidate for
+// E-MARKUP-001 ("unknown HTML element name"). Beyond the HTML ∪ SVG ∪ MathML ∪
+// custom-element union (owned by `isKnownElementName` in html-elements.js),
+// several scrml-specific tag names legitimately reach the walker as
+// `kind:"markup" resolvedKind:"unknown"` and MUST NOT fire:
+//
+//  - scrml structural / directive tags that are NOT parsed away upstream and
+//    are NOT lifecycle keywords (which already resolve to `scrml-lifecycle`).
+//    Empirically (corpus recon), `page`, `outlet`, `errors`, and the deprecated
+//    non-canonical control-flow tag forms leak here. The lifecycle keywords are
+//    included defensively (they resolve to a known kind, so never reach the
+//    gate, but listing them documents the full scrml-tag surface).
+//  - §36 input-state tags (`<keyboard/>`, `<mouse/>`, `<gamepad/>`), which are
+//    handled at codegen (emit-html.ts INPUT_STATE_TAGS) and survive as markup.
+//
+// Compared lowercase. Kept here (NR owns scrml-keyword knowledge) rather than in
+// html-elements.js (which owns element knowledge) — separation of concerns.
+// The scrml-structural tags that are NOT captured by the authoritative registry
+// imported below (STRUCTURAL_ELEMENT_PLACEMENT covers the locus-restricted
+// structural elements; RESERVED_CSS_ELEMENT_IDENTIFIERS covers §65 theme/
+// defaults). This hand-list carries the remaining scrml tag names that can
+// surface as raw markup openers: document roots, definition blocks, top-level
+// structural declarations that are not in the placement table (they are not
+// locus-restricted), directive sugar, and the lifecycle keywords.
+const SCRML_NON_ELEMENT_TAGS_EXTRA: readonly string[] = [
+  // Structural document roots (`<program>` canonical; `<markup>` legacy root,
+  // still accepted + widely used in fixtures; `<page>`).
+  "program", "markup", "page",
+  // Definition blocks (§15 component, §16 snippet/partial, §23.6 foreign code,
+  // §61 endpoint) — surface as raw markup openers in some shapes.
+  "component", "snippet", "partial", "foreign", "endpoint",
+  // Top-level structural declarations / directive sugar not in the placement
+  // table (§18.0.1 match, §17.7 each/empty, §19.15 render, §20.8 outlet, …).
+  "outlet", "match", "each", "empty", "render", "column",
+  "formfor", "tablefor", "if", "else", "else-if",
+  // Lifecycle keywords (already resolve to scrml-lifecycle; defensive).
+  "machine", "timer", "poll", "db", "request", "errorboundary",
+];
+
+// The E-MARKUP-001 gate's scrml-structural exclusion. DERIVED (not hand-copied)
+// from the compiler's authoritative structural-element registries so it cannot
+// drift out of sync: every key of ast-builder's STRUCTURAL_ELEMENT_PLACEMENT
+// (§4.15 locus-restricted structural elements) and every
+// RESERVED_CSS_ELEMENT_IDENTIFIERS entry (§65 theme/defaults) is auto-included.
+// Adding a new registered structural element to that table automatically
+// excludes it here — no parallel edit required (S264 review: `<defaults>` was
+// the one placement key omitted from the earlier hand-list, and false-fired).
+// All names are lowercased (the gate only fires on all-lowercase tags, and the
+// registry's camelCase forms — onTransition/onTimeout/onIdle — map to their
+// lowercase mirrors, e.g. `onidle`).
+export const SCRML_NON_ELEMENT_TAGS: Set<string> = new Set<string>(
+  [
+    ...SCRML_NON_ELEMENT_TAGS_EXTRA,
+    ...Object.keys(STRUCTURAL_ELEMENT_PLACEMENT),
+    ...RESERVED_CSS_ELEMENT_IDENTIFIERS,
+  ].map((n) => n.toLowerCase()),
+);
+
+// §36 input-state tags (mirror of emit-html.ts INPUT_STATE_TAGS). These render
+// via a dedicated codegen branch and are never HTML elements.
+const INPUT_STATE_TAGS = new Set<string>(["keyboard", "mouse", "gamepad"]);
+
+// A tag that is a plausible standard-HTML element name: all-lowercase ASCII
+// alphanumeric (e.g. `div`, `h1`, `blorptag`). HTML element names are lowercase,
+// so a name containing an uppercase letter, hyphen, dot, or underscore is NOT a
+// plausible unknown-HTML-element typo — it is a user identifier (camelCase state
+// / channel cell), a custom element (hyphen), or a namespaced form. Restricting
+// E-MARKUP-001 to this shape keeps false positives at zero on the real corpus
+// (camelCase cells such as `<customerEvents/>` never fire).
+function isPlausibleHtmlElementName(name: string): boolean {
+  return /^[a-z][a-z0-9]*$/.test(name);
 }
 
 // ---------------------------------------------------------------------------
@@ -151,6 +232,68 @@ function buildSameFileRegistry(ast: FileAST): Map<string, LocalDecl> {
   collect(ast.nodes ?? []);
 
   return reg;
+}
+
+/**
+ * Build the set of all names DECLARED anywhere in the file, for the E-MARKUP-001
+ * gate ONLY. A markup opener whose tag matches a locally-declared name is a
+ * reference to that declaration (a state cell, compound state, compound field,
+ * state block, component, or type) — never an unknown-HTML-element typo — so it
+ * MUST NOT fire E-MARKUP-001.
+ *
+ * This is a SEPARATE, gate-only set: it is deliberately NOT merged into the
+ * resolution registry (buildSameFileRegistry), so it does not change any
+ * `resolvedKind` / `resolvedCategory` stamp that downstream stages consume. It
+ * only suppresses a false-positive diagnostic.
+ *
+ * Covers the corpus patterns that reach the walker as `markup`/`unknown`:
+ *   - `state-decl` nodes (V5-strict `<cell> = value`), recursing into `children`
+ *     for §55 compound-state fields (`<signup>` → `<name>`/`<email>`/…).
+ *   - `state` blocks (the `< name>` whitespace-form declaration, e.g. modern-005
+ *     `< sidebar>` used later as `<sidebar>`).
+ *   - `state-constructor-def` state types, components, and type declarations
+ *     (already resolved by buildSameFileRegistry, included for completeness).
+ */
+function buildLocalDeclaredNames(ast: FileAST): Set<string> {
+  const names = new Set<string>();
+  const add = (n: unknown) => {
+    if (typeof n === "string" && n.length > 0) names.add(n);
+  };
+
+  for (const c of ast.components ?? []) add((c as any)?.name);
+  for (const t of ast.typeDecls ?? []) add((t as any)?.name);
+
+  function walkDecls(nodes: ASTNode[]): void {
+    if (!Array.isArray(nodes)) return;
+    for (const n of nodes) {
+      if (!n || typeof n !== "object") continue;
+      const anyN = n as any;
+      switch (anyN.kind) {
+        case "state-decl":
+          add(anyN.name);
+          break;
+        case "state-constructor-def":
+          add(anyN.stateType);
+          break;
+        case "state":
+          // `< name>` whitespace-form state block — the stateType names the
+          // declared block (e.g. `< sidebar>`).
+          add(anyN.stateType);
+          break;
+      }
+      // Recurse through every array-valued child slot so nested compound-field
+      // state-decls, engine/component bodies, and logic-block bodies are all
+      // covered.
+      for (const key of Object.keys(anyN)) {
+        const v = anyN[key];
+        if (Array.isArray(v)) walkDecls(v as ASTNode[]);
+        else if (v && typeof v === "object" && (v as any).kind) walkDecls([v as ASTNode]);
+      }
+    }
+  }
+  walkDecls(ast.nodes ?? []);
+
+  return names;
 }
 
 /**
@@ -236,9 +379,13 @@ interface WalkAccumulator {
   errors: NRError[];
   kindCounts: Record<ResolvedKind, number>;
   // Track which (name, line, col) combinations have already emitted W-CASE-001
-  // / W-WHITESPACE-001 so we never spam (one diagnostic per source position).
+  // / W-WHITESPACE-001 / E-MARKUP-001 so we never spam (one diagnostic per
+  // source position).
   caseEmitted: Set<string>;
   whitespaceEmitted: Set<string>;
+  markupUnknownEmitted: Set<string>;
+  // Names declared anywhere in the file (gate-only; see buildLocalDeclaredNames).
+  localDeclaredNames: Set<string>;
 }
 
 function spanKey(name: string, span: Span | null | undefined): string {
@@ -274,6 +421,56 @@ function maybeEmitCase(
       `Recommended: rename to PascalCase (e.g., \`${name[0].toUpperCase() + name.slice(1)}\`).`,
     span,
     severity: "warning",
+  });
+}
+
+/**
+ * E-MARKUP-001 (SPEC §4.1): a markup opener whose element name is neither a
+ * known HTML element, SVG element, MathML element, custom element, defined
+ * component, scrml structural/lifecycle tag, §36 input-state tag, nor a
+ * locally-declared name (state cell / compound / compound field / state block)
+ * — i.e. a genuine unknown-element typo (`<blorptag>`, `<dvi>`, `<spam>`).
+ *
+ * Fires ONLY on `kind:"markup"` nodes resolved to `unknown` (PascalCase-unknown
+ * component references are owned by E-COMPONENT-035 / VP-2). The predicate stack
+ * is ordered cheapest-first and is calibrated for ZERO false positives on the
+ * real corpus (see buildLocalDeclaredNames + SCRML_NON_ELEMENT_TAGS +
+ * INPUT_STATE_TAGS + isKnownElementName + isPlausibleHtmlElementName).
+ */
+function maybeEmitMarkupUnknown(
+  name: string,
+  span: Span,
+  resolution: Resolution,
+  acc: WalkAccumulator,
+): void {
+  if (resolution.resolvedKind !== "unknown") return;
+  if (typeof name !== "string" || name.length === 0) return;
+  // Only all-lowercase ASCII-alphanumeric names look like an HTML-element typo.
+  // (Excludes camelCase cells, custom-element hyphen forms, dotted/namespaced.)
+  if (!isPlausibleHtmlElementName(name)) return;
+  // A valid element in any namespace (HTML ∪ SVG ∪ MathML ∪ custom / registry).
+  if (isKnownElementName(name)) return;
+  // scrml structural / lifecycle / directive tags.
+  if (SCRML_NON_ELEMENT_TAGS.has(name)) return;
+  // §36 input-state tags.
+  if (INPUT_STATE_TAGS.has(name)) return;
+  // A reference to something declared in this file (state cell / compound /
+  // compound field / state block / component / type).
+  if (acc.localDeclaredNames.has(name)) return;
+
+  const key = spanKey(name, span);
+  if (acc.markupUnknownEmitted.has(key)) return;
+  acc.markupUnknownEmitted.add(key);
+  acc.errors.push({
+    code: "E-MARKUP-001",
+    message:
+      `E-MARKUP-001: \`<${name}>\` is not a known HTML element and not a defined component. ` +
+      `A markup opener (\`<\` immediately followed by an identifier, SPEC §4.1) must name a built-in ` +
+      `HTML/SVG/MathML element, a custom element (a hyphenated name like \`<my-widget>\`), a defined ` +
+      `component (PascalCase, imported or declared), or a declared state/compound cell. ` +
+      `Likely a typo of an element name — check the spelling.`,
+    span,
+    severity: "error",
   });
 }
 
@@ -313,6 +510,7 @@ function walk(nodes: ASTNode[], ctx: ResolutionContext, acc: WalkAccumulator): v
       acc.kindCounts[res.resolvedKind]++;
       if (anyN.span) {
         maybeEmitCase(anyN.tag, anyN.span, res, acc);
+        maybeEmitMarkupUnknown(anyN.tag, anyN.span, res, acc);
         maybeEmitWhitespace(
           anyN.tag,
           anyN.span,
@@ -474,6 +672,8 @@ export function runNR(input: NRInput): NRResult {
     },
     caseEmitted: new Set(),
     whitespaceEmitted: new Set(),
+    markupUnknownEmitted: new Set(),
+    localDeclaredNames: buildLocalDeclaredNames(ast),
   };
 
   // Emit W-CASE-001 on declaration sites first (per SPEC §15.15.4 — fires

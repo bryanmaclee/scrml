@@ -1574,9 +1574,12 @@ export function compileScrml(options = {}) {
     moduleResult.importGraph,
   ));
   for (const nr of nrResults) {
-    // Errors from NR are warnings (W-CASE-001, W-WHITESPACE-001) and surface in
-    // the standard warnings channel. Severity is preserved through the existing
-    // collector.
+    // NR emits both warnings (W-CASE-001, W-WHITESPACE-001 — non-fatal, surface
+    // in the warnings channel) and the fatal E-MARKUP-001 (SPEC §4.1 — unknown
+    // HTML element name). Each diagnostic carries its own `severity`, which
+    // collectErrors preserves; the final result partition routes E-MARKUP-001
+    // (E- prefix / severity:"error") into result.errors and the W-* into
+    // result.warnings.
     collectErrors("NR", nr.errors);
   }
   if (verbose) {
