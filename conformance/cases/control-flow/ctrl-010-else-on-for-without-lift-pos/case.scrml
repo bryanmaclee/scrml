@@ -1,0 +1,10 @@
+<program>
+  <items>: string[] = []
+  <total>: int = 0
+
+  <ul>${ for (let item of @items) {
+      @total = @total + 1
+  } else {
+      lift <li>No items yet.</>
+  } }</ul>
+</program>

@@ -1,0 +1,13 @@
+<program>
+${
+  @userId = 1
+  function authenticate(x) { return x }
+}
+<timer interval=1000>
+  ${
+    lin token = "secret"
+    @userId = authenticate(token)
+  }
+</>
+<p>${@userId}</>
+</program>

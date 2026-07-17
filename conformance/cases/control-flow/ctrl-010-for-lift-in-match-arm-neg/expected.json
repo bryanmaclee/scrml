@@ -1,0 +1,12 @@
+{
+  "id": "ctrl-010-for-lift-in-match-arm-neg",
+  "description": "§17.4a — E-CTRL-010 regression guard (S239 review BUG 1). A `for` loop whose body DOES `lift`, but where every `lift` is nested inside a `match` ARM body, followed by an `else` empty-state block, SHALL NOT fire E-CTRL-010. The loop is a valid `for/lift`; the `else` is legitimate. The earlier lift-detector only recursed a fixed key list and looked solely for `lift-expr` nodes, so a match-arm `lift` (captured as raw text, not a `lift-expr` node) was missed and E-CTRL-010 wrongly told the adopter to add a `lift` that already exists. CAVEAT: the §17.4a Tier-0 for/else empty-state codegen is a SEPARATE, pre-existing unwired gap, so this valid shape still fires E-CODEGEN-INVALID-LOGIC — that is NOT E-CTRL-010's concern. We therefore assert only `notCodes:[\"E-CTRL-010\"]`, NOT a fully-clean compile. W-PROGRAM-SPA-INFERRED co-fires (info); E-CODEGEN-INVALID-LOGIC co-fires (the empty-state gap); neither asserted.",
+  "language-version": "1.0",
+  "spec": "§17.4a",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§17.4a: the `else` empty-state is valid on a `for/lift` loop; E-CTRL-010 fires ONLY when the `for` has no `lift`. A `lift` inside a `match` arm body is still a `lift` in the loop body — the loop is a `for/lift`. The lift-detector (forBodyLifts) must recognize a `lift` in EVERY body shape: both a structured `lift-expr` node AND a `lift` keyword token in raw/expr text (match-arm and bare-block bodies store their `lift` as raw text). Missing the match-arm `lift` produced a false-fire — the serious failure mode, since it tells an adopter to add a `lift` that is already present. This case is the regression guard for that false-fire.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CTRL-010"]
+  }
+}

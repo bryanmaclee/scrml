@@ -17660,6 +17660,111 @@ function collapseIfChains(nodes, errors, filePath) {
 }
 
 /**
+ * `for` body `lift` detection for E-CTRL-010. Returns true iff the subtree
+ * rooted at `root` contains a `lift`.
+ *
+ * A `lift` shows up in TWO shapes and BOTH must be recognized — mis-detecting a
+ * real lift as absent is the serious failure mode (it makes E-CTRL-010
+ * FALSE-FIRE, telling an adopter to add a `lift` that already exists):
+ *   1. a structured `lift-expr` node — top-level `lift <li/>` in the for body;
+ *   2. a `lift` KEYWORD token inside a raw/expr string — a `lift` nested in a
+ *      MATCH ARM body or a bare `{ }` block is captured as raw text (an
+ *      `escape-hatch` / `bare-expr`), never a `lift-expr` node.
+ * `LIFT_KW_RE` excludes a `.lift` member access (`obj.lift()` is NOT a lift
+ * statement) but errs toward detecting a lift (suppressing E-CTRL-010) on the
+ * rare ambiguous raw — the safe bias, since a missed-fire is far less harmful
+ * than a false-fire on valid adopter code.
+ *
+ * The traversal is fully generic (every array-valued and object-valued child,
+ * with a `seen` cycle guard) rather than a hand-rolled key list — the previous
+ * fixed list `[body, children, consequent, alternate, thenBody, elseBody]`
+ * missed match-arm and if-chain-branch subtrees.
+ */
+const LIFT_KW_RE = /(?<![.\w])lift\b/;
+function forBodyLifts(root) {
+  const seen = new Set();
+  const visit = (v) => {
+    if (v == null || typeof v !== "object" || seen.has(v)) return false;
+    seen.add(v);
+    if (v.kind === "lift-expr") return true;
+    for (const rk of ["raw", "expr", "result", "bodyRaw"]) {
+      if (typeof v[rk] === "string" && LIFT_KW_RE.test(v[rk])) return true;
+    }
+    for (const val of Object.values(v)) {
+      if (Array.isArray(val)) {
+        for (const item of val) if (visit(item)) return true;
+      } else if (val && typeof val === "object") {
+        if (visit(val)) return true;
+      }
+    }
+    return false;
+  };
+  return visit(root);
+}
+
+/**
+ * E-CTRL-010 (§17.4a / §17.2): an `else` empty-state block is valid ONLY on a
+ * `for/lift` loop. A bare `for` whose body has no `lift` SHALL NOT carry an
+ * `else` block — on a `for/lift` the `else` fires when the source iterable is
+ * empty; on a plain `for` the `else` has no defined semantics.
+ *
+ * The Tier-0 `for (...) { ... } else { ... }` form (§17.4a) parses the trailing
+ * `else { ... }` as a `bare-expr` sibling immediately after the `for-stmt` — the
+ * live pipeline does NOT fold it into `for-stmt.elseBody` (only the §41.16
+ * table-for codegen path materializes an `elseBody`). So we detect the shape
+ * structurally: a `for-stmt` whose body does not lift, immediately followed by a
+ * `bare-expr` whose text begins with `else`. A `bare-expr` opening with `else`
+ * only arises from a for/else split (if/else is consumed by parseOneIfStmt;
+ * `while` has no `else`), so the association is unambiguous.
+ *
+ * The recursion visits EVERY array-valued and object-valued child of every node
+ * (with a `seen` cycle guard), so the for/else is found no matter what container
+ * it is nested in — including an `if-chain` node's `branches`/`elseBranch`
+ * (produced by collapseIfChains, which runs immediately before this pass) and
+ * match-arm bodies. Every array is treated as a candidate sibling list; the
+ * for-stmt + `else`-bare-expr adjacency test is specific enough that non-sibling
+ * arrays never produce a spurious hit.
+ */
+function checkForElseWithoutLift(nodes, errors) {
+  const isElseBareExpr = (n) =>
+    n && typeof n === "object" && n.kind === "bare-expr" && /^\s*else\b/.test(String(n.expr ?? ""));
+  const scanSiblingArray = (arr) => {
+    for (let i = 0; i < arr.length; i++) {
+      const node = arr[i];
+      if (!node || typeof node !== "object" || node.kind !== "for-stmt") continue;
+      let j = i + 1;
+      while (j < arr.length && isWhitespaceText(arr[j])) j++;
+      if (j < arr.length && isElseBareExpr(arr[j]) && !forBodyLifts(node.body)) {
+        errors.push(new TABError(
+          "E-CTRL-010",
+          "E-CTRL-010: an `else` block is valid only on a `for/lift` loop (§17.4a). " +
+          "This `for` loop has no `lift` in its body, so its `else` empty-state block " +
+          "has no defined semantics. Add a `lift` to the loop body, or replace the " +
+          "`else` with a post-loop conditional.",
+          arr[j].span ?? node.span ?? { line: 0, col: 0 },
+        ));
+      }
+    }
+  };
+  const seen = new Set();
+  const visit = (v) => {
+    if (v == null || typeof v !== "object" || seen.has(v)) return;
+    seen.add(v);
+    for (const val of Object.values(v)) {
+      if (Array.isArray(val)) {
+        scanSiblingArray(val);
+        for (const item of val) visit(item);
+      } else if (val && typeof val === "object") {
+        visit(val);
+      }
+    }
+  };
+  if (!Array.isArray(nodes)) return;
+  scanSiblingArray(nodes);
+  for (const n of nodes) visit(n);
+}
+
+/**
  * Walk every node reachable from `nodes` and fire E-SWITCH-FORBIDDEN for any
  * `switch-stmt` AST node whose span has NOT already received an
  * E-SWITCH-FORBIDDEN error from one of the inline TAB parser fire sites
@@ -17842,6 +17947,10 @@ export function buildAST(bsOutput, tokenizerOverrides) {
 
   // §17.1.1: Collapse if=/else-if=/else sibling chains into IfChainExpr nodes
   nodes = collapseIfChains(nodes, errors, filePath);
+
+  // §17.4a / §17.2: reject an `else` empty-state block on a `for` loop that has
+  // no `lift` in its body (E-CTRL-010).
+  checkForElseWithoutLift(nodes, errors);
 
   // §17 / §34: Post-parse forbidden-keyword sweep — fire E-SWITCH-FORBIDDEN
   // for any `switch-stmt` AST node that did not receive an error at one of

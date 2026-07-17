@@ -1,0 +1,13 @@
+{
+  "id": "lin-004-recurring-ctx-timer-pos",
+  "description": "§35.5 / §6.7.12 — a `lin` variable declared OUTSIDE a recurring execution context (`<timer>`) but consumed INSIDE it fires E-LIN-004. A `<timer>` body may execute more than once per scope lifetime, so a single textual `lin` reference is consumed on every run — the recurring-context form of E-LIN-002 (multi-consumption). Here `lin token` is declared in the outer `${}` and consumed by `authenticate(token)` inside the `<timer>` body. `<timeout>` behaves identically. Twins with lin-004-recurring-ctx-timer-neg (lin declared INSIDE the timer body → each run is a fresh binding → silent). W-PROGRAM-SPA-INFERRED (info) and W-PROGRAM-REDUNDANT-LOGIC (warning) co-fire incidentally; neither asserted.",
+  "language-version": "1.0",
+  "spec": "§35.5, §6.7.12",
+  "source-test": "compiler/src/type-system.ts",
+  "rationale": "§6.7.12 / §35: 'A `lin` variable SHALL NOT be consumed inside a `when` body, a `<timer>` body, a `<poll>` body, or an `animationFrame` callback. These contexts may execute more than once per scope lifetime, and a `lin` variable must be consumed exactly once. The compiler SHALL emit E-LIN-004 if a `lin` variable is read inside any of these recurring execution contexts. E-LIN-004 is the recurring-context form of E-LIN-002 (multi-consumption).' §35.5 gives the `<timeout>` form the same rule. IMPL (S261 batch 2 task B): E-LIN-004 had ZERO fire sites; it is now wired by EXTENDING the shared deferred-ctx tracker that already fires E-LIN-006 on `<request>`/`<poll>` (type-system.ts LinTracker.consume + the walkNode `case \"markup\"` deferred-ctx stack) to also push a recurring-ctx for `<timer>`/`<timeout>` and emit E-LIN-004 (vs E-LIN-006) for those kinds. SCOPED: the `when` (raw-expr when-effect body) and `animationFrame` (callback, §35.6 capture=consume) contexts use different mechanisms and are DEFERRED to a follow-up — see NOTES in the dispatch report.",
+  "expect": {
+    "codes": ["E-LIN-004"],
+    "notCodes": ["E-LIN-001", "E-LIN-002", "E-LIN-006"],
+    "severity": { "E-LIN-004": "error" }
+  }
+}

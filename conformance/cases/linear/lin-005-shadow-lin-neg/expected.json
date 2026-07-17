@@ -1,0 +1,12 @@
+{
+  "id": "lin-005-shadow-lin-neg",
+  "description": "§35 — a nested `let` declaration that shadows an in-scope NON-`lin` variable of the same name does NOT fire E-LIN-005. Structurally identical to lin-005-shadow-lin-pos (an outer `token` binding consumed once, then a nested `if` body redeclaring `let token = 5`), but the outer `token` is a plain `let`, not `lin`. E-LIN-005 is conditioned on the shadowed binding being LINEAR; shadowing an ordinary binding is legal lexical scoping and SHALL NOT be rejected. Isolates the trigger to lin-ness. W-PROGRAM-001 co-fires incidentally (no `<program>` shell); not asserted.",
+  "language-version": "1.0",
+  "spec": "§35",
+  "source-test": "compiler/src/type-system.ts",
+  "rationale": "§35 registry (E-LIN-005) is the lin-shadowing rule: the reject applies specifically to shadowing an in-scope `lin` variable. type-system.ts checkLinShadowing (:7737) returns early unless `scopeChain.lookup(name).isLin` is true — a non-`lin` outer binding never matches. Ordinary lexical shadowing (`let` over `let`) is permitted; only the linear-binding shadow is unsound (it defeats exactly-once consumption attribution). Here the outer `token` is a plain `let`, so E-LIN-005 SHALL stay silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-LIN-005"]
+  }
+}
