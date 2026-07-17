@@ -31,6 +31,13 @@ GATE:   tests-as-gate (stable infra) + runtime-verify (codegen) + types (always-
     (cloud `gate` on the PR is authority); release-tag/forced pushes still run FULL `bun run test`. NEVER --no-verify without authz.
   - CLOUD `gate` (PR-flow, S254): the required GitHub CI check (`unit+conformance+gauntlet`) — GREEN gates the PR merge.
     Boot pulls status: `gh run list --branch main --limit 3` + `gh pr list`. This REPLACES the retired commit-lock main-authority check.
+  - ADOPTER-ISSUE channel (S262, MANDATORY at boot 0.6, both profiles): `gh issue list --repo bryanmaclee/scrml --state open`.
+    GitHub issues = the adopter->compiler bug route (pjoliver11/assetManagement, the real-world shakedown app, files
+    version-stamped reproducers here). NOT the handOffs/incoming/ inbox — a SECOND inbound channel. Un-named by the contract
+    until S262 => 4 adopter issues sat unabsorbed up to 5 days (#27/#29/#81/#82), absent from known-gaps AND the delta-log;
+    the S262 PA reported "no bug reached me" off an EMPTY INBOX while the report sat in `gh issue list` (the absence-of-
+    evidence trap). Triage -> docs/known-gaps.md; on landing, CLOSE the issue with the SHA. LANE: adopter bugs = Peter's
+    standing footprint (pa-profile-pjoliver11.md "Peter's LANE"); bryan holds tier-1/freeze. Disjoint by construction.
   - conformance: `bun conformance/run.ts` (69->~220 cases; DATA-not-TS; the language-1.0 gate).
   - R26 EMPIRICAL (S138): HIGH codegen fixes re-compile real adopter .scrml on the post-fix baseline
     before claim-closed (regression-tests-pass != empirical-pass). Reverse-direction: verify-before-dispatch.
