@@ -209,6 +209,37 @@ export interface LogicBinding {
   valueAttrName?: string;
 
   /**
+   * i81 — the CSS-SAFE placeholder key for a reactive value attribute.
+   *
+   * `valueAttrName` is the ORIGINAL author-written name and is what reaches
+   * `setAttribute` (SVG needs the original: `viewBox`, `xlink:href`).
+   * `valueAttrKey` is that name with every character outside `[A-Za-z0-9_-]`
+   * replaced by `_`, and is what appears in the emitted
+   * `data-scrml-bind-attr-<key>` placeholder AND in the `querySelector`
+   * attribute selector that consumes it.
+   *
+   * WHY: the consumer interpolates the key into `[data-scrml-bind-attr-<key>=…]`.
+   * An unescaped `:` there is INVALID CSS (a colon starts a pseudo-class), so
+   * `<use xlink:href=(@h)/>` would emit a selector that THROWS a DOMException.
+   * That querySelector runs at module-init top level, unguarded, so the throw
+   * would abort the whole client-bundle init — killing EVERY binding on the
+   * page, not just this one. (Escaping to `\:` is not viable: happy-dom, which
+   * backs this repo's DOM tests, rejects escaped selectors too.) Sanitizing the
+   * KEY while keeping the NAME intact keeps the selector valid and the DOM
+   * write correct.
+   *
+   * Computed ONCE, at the emit-html registration site, so emit-html and
+   * emit-event-wiring cannot drift by recomputing the regex independently.
+   *
+   * Residual (accepted): two DIFFERENT dynamic attrs on ONE element whose names
+   * sanitize to the same key (e.g. `x:y` and `x_y`) collide on a duplicate HTML
+   * attribute key; the parser keeps the first, so the second silently does not
+   * wire — i.e. it degrades to the pre-i81 behavior for a pathological shape
+   * rather than crashing.
+   */
+  valueAttrKey?: string;
+
+  /**
    * Phase 2c: when set, the `if=` binding uses mount/unmount semantics
    * (template-clone on true, scope-destroy + DOM-remove on false) instead of
    * display-toggle. The compile-time emitter populates `templateId` and

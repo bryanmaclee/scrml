@@ -1428,8 +1428,15 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       // === undefined` — matching BOTH, per §42.9, because foreign code (`^{}`,
       // `?{}` SQL, server fns) may produce either.
       if (binding.isReactiveValueAttr && binding.valueAttrName) {
+        // `attrName` is the ORIGINAL name and is what the DOM write uses (SVG
+        // needs `viewBox`/`xlink:href` verbatim). The SELECTOR must use the
+        // CSS-safe `valueAttrKey` instead — an unescaped `:` in an attribute
+        // selector is invalid CSS and throws at module init, taking every
+        // binding on the page down with it. Fall back to the name only for
+        // bindings that predate valueAttrKey (names with no unsafe chars).
         const attrName = binding.valueAttrName;
-        const dataAttr = `data-scrml-bind-attr-${attrName}`;
+        const attrKey = binding.valueAttrKey ?? attrName.replace(/[^A-Za-z0-9_-]/g, "_");
+        const dataAttr = `data-scrml-bind-attr-${attrKey}`;
         if (binding.condExpr) {
           // synthCellKeys/derivedNames threaded exactly as the bool path does, so
           // `class=(@form.isValid ? "ok" : "bad")` routes dotted reads to the

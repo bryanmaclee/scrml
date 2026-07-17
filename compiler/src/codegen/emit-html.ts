@@ -2461,13 +2461,21 @@ export function generateHtml(
             // peeled off with `continue` well before this dispatch, so only
             // plain HTML attributes reach here.
             const placeholderId = genVar(`attr_${name}`);
-            parts.push(` data-scrml-bind-attr-${name}="${placeholderId}"`);
+            // CSS-safe placeholder key. The name reaches the DOM verbatim via
+            // `setAttribute` (SVG needs `viewBox`/`xlink:href` intact), but the
+            // KEY is also interpolated into a `querySelector` attribute
+            // selector, where an unescaped `:` is invalid CSS and THROWS —
+            // aborting module init and every binding on the page. Sanitize the
+            // key, keep the name. See LogicBinding.valueAttrKey.
+            const attrKey = name.replace(/[^A-Za-z0-9_-]/g, "_");
+            parts.push(` data-scrml-bind-attr-${attrKey}="${placeholderId}"`);
             if (registry) {
               registry.addLogicBinding({
                 placeholderId,
                 expr: val.raw,
                 isReactiveValueAttr: true,
                 valueAttrName: name,
+                valueAttrKey: attrKey,
                 condExpr: val.raw,
                 condExprNode: val.exprNode,
                 refs: val.refs,

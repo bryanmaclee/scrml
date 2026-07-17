@@ -403,7 +403,70 @@ describe("§i81.6 — <match> arm interaction (blast radius)", () => {
   });
 });
 
-describe("§i81.7 — the binding is region-tracked (teardown contract)", () => {
+describe("§i81.7 — CSS-safe placeholder keys (crash regression)", () => {
+  // Found by the blast-radius pass. The catch-all interpolates the attr name
+  // into BOTH an HTML attribute and a querySelector attribute SELECTOR. An
+  // unescaped `:` in a CSS attribute selector is invalid (colon = pseudo-class)
+  // and throws a DOMException — verified against happy-dom. That selector runs
+  // at module-init top level UNGUARDED, so the throw would abort the whole
+  // client bundle and kill every binding on the page. Pre-i81, `xlink:href=(…)`
+  // was silently dropped (inert); a crash would have been strictly worse.
+  // Escaping is not viable (happy-dom rejects escaped selectors too), so the
+  // KEY is sanitized while the NAME stays intact for setAttribute.
+  const svgSrc = `<program>
+    <h> = "#icon"
+    <vb> = "0 0 16 16"
+    <svg viewBox=(@vb)><use xlink:href=(@h)/></svg>
+  </program>`;
+
+  test("a colon-bearing attr name yields a CSS-SAFE selector (no raw colon)", () => {
+    const r = compile(svgSrc);
+    expect(r.errors).toEqual([]);
+    const client = emittedClient(r);
+    // The crash shape: '[data-scrml-bind-attr-xlink:href="…"]'
+    expect(client).not.toMatch(/\[data-scrml-bind-attr-[A-Za-z0-9_-]*:/);
+    expect(client).toContain("data-scrml-bind-attr-xlink_href");
+    expect(emittedHtml(r)).toContain("data-scrml-bind-attr-xlink_href");
+  });
+
+  test("the ORIGINAL attr name still reaches setAttribute (SVG correctness)", () => {
+    const client = emittedClient(compile(svgSrc));
+    // Sanitization must NOT leak into the DOM write: xlink:href, not xlink_href.
+    expect(client).toContain('setAttribute("xlink:href", String(');
+    expect(client).not.toContain('setAttribute("xlink_href"');
+    // Case must survive too — SVG attribute names are case-sensitive.
+    expect(client).toContain('setAttribute("viewBox", String(');
+  });
+
+  test("every emitted value-attr selector uses only CSS-identifier-safe chars", () => {
+    // Static guard rather than a live querySelector: proving invalidity needs
+    // happy-dom's GlobalRegistrator, which mutates globalThis, and this repo
+    // confines that to compiler/tests/browser/ — a unit test in the CI gate must
+    // not install DOM globals for every other file in the process.
+    //
+    // The runtime behaviour WAS verified empirically under GlobalRegistrator:
+    //   [data-scrml-bind-attr-xlink:href="p"] -> THROWS (invalid CSS)
+    //   [data-scrml-bind-attr-xlink_href="p"] -> valid
+    //   [data-scrml-bind-attr-viewBox="p"]    -> valid + MATCHes
+    // This asserts the emitter never produces the throwing shape.
+    const client = emittedClient(compile(svgSrc));
+    const keys = [...client.matchAll(/\[data-scrml-bind-attr-([^=\]]+)=/g)].map((m) => m[1]);
+    expect(keys.length).toBeGreaterThan(0);
+    for (const k of keys) expect(k).toMatch(/^[A-Za-z0-9_-]+$/);
+  });
+
+  test("hyphenated names are left alone (data-* / aria-* unaffected)", () => {
+    const src = `<program>
+      <h> = "x"
+      <div aria-label=(@h) data-mode=(@h)>a</div>
+    </program>`;
+    const html = emittedHtml(compile(src));
+    expect(html).toContain("data-scrml-bind-attr-aria-label");
+    expect(html).toContain("data-scrml-bind-attr-data-mode");
+  });
+});
+
+describe("§i81.8 — the binding is region-tracked (teardown contract)", () => {
   test("the value-attr effect is registered for region teardown like the bool path", () => {
     const src = `<program>
       <m> = "a"

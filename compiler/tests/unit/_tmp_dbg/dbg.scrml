@@ -1,0 +1,5 @@
+<program>
+    <h> = "#icon"
+    <vb> = "0 0 16 16"
+    <svg viewBox=(@vb)><use xlink:href=(@h)/></svg>
+  </program>

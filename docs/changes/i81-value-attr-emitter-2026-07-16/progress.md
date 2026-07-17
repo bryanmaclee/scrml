@@ -146,3 +146,45 @@ Residual (accepted, documented): two DIFFERENT dynamic attrs on ONE element whos
 key (e.g. `x:y` and `x_y`) would collide on the duplicate HTML attribute key; the HTML parser keeps the
 first, so the second silently does not wire — i.e. it degrades to the pre-fix behavior for a pathological
 shape, rather than crashing. Not worth more machinery.
+
+## 2026-07-16 — colon-crash FIXED + full-suite ATTRIBUTION (pre vs post baseline)
+
+**Colon crash fixed.** New `valueAttrKey` binding field: `name.replace(/[^A-Za-z0-9_-]/g, "_")`, computed
+ONCE at the emit-html registration site (so emit-html and emit-event-wiring cannot drift). The placeholder
++ selector use the SAFE KEY; `setAttribute` keeps the ORIGINAL name. Verified:
+  <use xlink:href=(@h)/>  -> placeholder data-scrml-bind-attr-xlink_href
+                          -> querySelector('[data-scrml-bind-attr-xlink_href="..."]')   (CSS-valid)
+                          -> setAttribute("xlink:href", String(v))                       (DOM-correct)
+  <svg viewBox=(@vb)>     -> setAttribute("viewBox", ...) — SVG case preserved.
+Proven under happy-dom + GlobalRegistrator (the repo's own bootstrap):
+  [data-scrml-bind-attr-xlink:href="p"] -> THROWS   (the pre-fix crash shape)
+  [data-scrml-bind-attr-xlink_href="p"] -> valid
+  [data-scrml-bind-attr-viewBox="p"]    -> valid + MATCHes
+Encoded as a STATIC assertion (emitted keys match /^[A-Za-z0-9_-]+$/) rather than a live querySelector:
+GlobalRegistrator mutates globalThis and this repo confines that to compiler/tests/browser/; a CI-gate unit
+test must not install DOM globals for every other file in the process. Honest limitation: the unit test
+guards the emitted SHAPE, and the runtime-throw behaviour was verified by hand (above), not in CI.
+NOTE: `new Window()` (without GlobalRegistrator) is UNUSABLE under `bun test` here — happy-dom's
+querySelector throws for EVERY selector, even `div`. My first cut of this test used it and produced a
+false failure. Anyone adding DOM assertions to a unit test will hit this.
+
+**FULL-SUITE ATTRIBUTION — the brief's "0 failures is the contract" is NOT achievable.**
+Ran the FULL suite on BOTH baselines (revert 4 codegen files to caf50487, run, restore — tree verified
+clean after):
+  pre-fix  (caf50487): 26961 pass / 1061 fail / 213 skip   (28236 tests, 1213 files)
+  post-fix (this work): 26979 pass / 1043 fail / 213 skip
+  set-diff NEW failures introduced: **0**
+  set-diff failures resolved: 18 — ALL of them my own i81 tests (the other 10 are controls that pass on
+  both baselines).
+So the 1043 remaining are 100% PRE-EXISTING at the stated base commit. Dominant class: 1012x
+"M7.3.b.N — within-node parity per-fixture gate" (native-parser parity), plus self-host (needs a locally
+built dist — primary.map.md flags exactly this), LSP, browser. The contract that IS met: **0 regressions**.
+
+**CI GATE (the actual merge-blocker per .github/workflows/ci.yml: `bun test compiler/tests/unit
+compiler/tests/conformance`)**, also baselined both ways:
+  pre-fix  gate: 17425 pass / 1 fail / 47 skip
+  post-fix gate: 17449 pass / 1 fail / 47 skip   (+24 = my tests; +4 more since, now 28)
+  The 1 fail is `E-TYPE-ANY-FORBIDDEN — positive > struct field ': any' fires` — IDENTICAL on the pre-fix
+  baseline with my code fully absent => PRE-EXISTING, not mine. It also PASSES in the full suite and passes
+  6/6 in isolation (twice); it fails only in the unit+conformance subset at ~8s. Set-dependent, likely a
+  timeout under that composition. Reported, not fixed (out of scope).
