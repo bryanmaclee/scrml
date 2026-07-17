@@ -1,0 +1,12 @@
+{
+  "id": "multi-stmt-handler-attr-neg",
+  "description": "§5.2.3's own valid worked example — the same two-statement intent lifted to a named function and wired by name (`onclick=startGame()`) does NOT fire E-MULTI-STATEMENT-HANDLER. The `;` separators live inside the function body, an expression-internal context.",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§5.2.3 (L19 normative): \"Compound logic for an event handler MUST be lifted to a named `function name() { ... }` declaration in a logic block, then wired by name: `onclick=startOver()`. This is the canonical multi-statement form.\" The handler value is exactly one expression — the bare-call shape §5.2.3's table admits — so the code SHALL stay silent. This is the NEG mirror of `multi-stmt-handler-attr-pos`: same author intent, canonical form. It also pins the scanner's \"outside of expression-internal contexts\" qualifier: the two `;` in the function body must NOT count as top-level hits.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MULTI-STATEMENT-HANDLER"]
+  }
+}

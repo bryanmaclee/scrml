@@ -1,0 +1,12 @@
+{
+  "id": "multi-stmt-handler-colon-shorthand-pos",
+  "description": "§4.14's own invalid example verbatim — an engine state-child `:`-shorthand body holding two semicolon-separated expressions (`<Idle : startGame(); track(\"start\")>`) fires E-MULTI-STATEMENT-HANDLER. This pins the SECOND fire site (the `:`-shorthand body validator), distinct from the event-handler-attribute site pinned by `multi-stmt-handler-attr-pos`.",
+  "language-version": "1.0",
+  "spec": "§4.14",
+  "source-test": "compiler/src/symbol-table.ts",
+  "rationale": "§4.14 (\"What is NOT legal under `:`-shorthand\"): \"Multi-statement: `<Idle : startGame(); track()>` — `E-MULTI-STATEMENT-HANDLER`. Use bare-body.\" §5.2.3 states the shared discipline: \"The same single-expression discipline that governs `:`-shorthand bodies (§4.14) governs bare-form event handlers.\" The §34 row for the code names BOTH loci (\"§5.2.3, §4.14 — a bare-form event-handler attribute value (or a `:`-shorthand body) contains multiple statements\"). The post-`:` body here carries a top-level `;`, so the code SHALL fire.",
+  "expect": {
+    "codes": ["E-MULTI-STATEMENT-HANDLER"],
+    "notCodes": []
+  }
+}

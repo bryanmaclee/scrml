@@ -1,0 +1,4 @@
+${
+    let label: string | not = null
+}
+<program><p id="p">ok</></>

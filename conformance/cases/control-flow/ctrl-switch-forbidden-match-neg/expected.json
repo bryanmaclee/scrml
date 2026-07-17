@@ -1,0 +1,12 @@
+{
+  "id": "ctrl-switch-forbidden-match-neg",
+  "description": "The byte-for-byte same toggle intent as `ctrl-switch-forbidden-fn-body-pos`, written with the sanctioned JS-style `match expr { .Variant :> ... }` value-return form — does NOT fire E-SWITCH-FORBIDDEN. The `switch`→`match` swap is the only delta, so the pair brackets exactly what the ban costs the author: a keyword, not a capability.",
+  "language-version": "1.0",
+  "spec": "§17",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§34's E-SWITCH-FORBIDDEN row does not merely forbid — it names the replacements: \"JS-style `match expr { … }` for value-return branching\" is the sanctioned form for exactly this shape, and §17.0 fixes it on the tier ladder (Tier 1, §18). Using a sanctioned form SHALL be silent. Canonical arm separator is `:>` per §18.2 (`->` / `=>` still parse but draw W-MATCH-ARROW-LEGACY during the deprecation window; this case uses the canonical form so no legacy lint co-fires).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SWITCH-FORBIDDEN"]
+  }
+}

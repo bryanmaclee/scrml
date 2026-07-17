@@ -1,0 +1,9 @@
+<program>
+
+  <style>
+      .btn { color: red; }
+  </style>
+
+  <button class="btn">Go</button>
+
+</program>

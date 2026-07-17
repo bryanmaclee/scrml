@@ -1,0 +1,12 @@
+{
+  "id": "ctrl-switch-forbidden-attr-expr-pos",
+  "description": "A `switch` in EXPRESSION position — inside an `if=${...}` attribute expression — fires E-SWITCH-FORBIDDEN. Pins the third and structurally distinct fire site: expression position needs its own raw-text guard because a JS expression parser rejects `switch` as not-an-expression, so no switch node ever reaches the statement-loop guards the other two POS cases hit.",
+  "language-version": "1.0",
+  "spec": "§17",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§34 (E-SWITCH-FORBIDDEN, cross-ref §17) bans the keyword with no position carve-out — statement or expression. This case is the anti-regression pin for the SILENT-DROP failure mode: without a dedicated expression-position guard, `switch` in an attribute expression is swallowed by the expression parser's escape hatch and the author gets NO diagnostic at all — the exact soundness hole §34's row forbids. Asserting the code here fixes that the diagnostic reaches the author regardless of syntactic position.",
+  "expect": {
+    "codes": ["E-SWITCH-FORBIDDEN"],
+    "notCodes": []
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "id": "block-ctx-001-closed-raw-content-neg",
+  "description": "The same `<pre>` raw-content element WITH its matching `</pre>` close tag does NOT fire E-CTX-001 (§4.17).",
+  "language-version": "1.0",
+  "spec": "§4.17",
+  "rationale": "§4.17 scopes the E-CTX-001 Closer-recovery diagnostic to the case where EOF is reached BEFORE the matching close tag. Here recognition resumes at the matching `</pre>`, so the opener is terminated and no closer recovery is performed — E-CTX-001 SHALL stay silent. This is the negative twin of block-ctx-001-unterminated-raw-content-pos: identical source but for the close tag, isolating the closer as the sole trigger. It also pins that the raw-content body (`const x = 1;`) is inert text per §4.17 and does not itself provoke a context diagnostic.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CTX-001"]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "id": "e-syntax-064-at-dot-inside-each-neg",
+  "description": "The same `@.` attribute-value sigil INSIDE an `<each>` body scope is silent — no E-SYNTAX-064 (§17.7.3).",
+  "language-version": "1.0",
+  "spec": "§17.7.3",
+  "rationale": "§17.7.3 normative: `@.` SHALL resolve to the current iteration value of the most-locally-enclosing `<each>` body scope; `@.field` resolves to the field of the current item and chained/member access is legal (the section's own worked example is `<a href=@.email>${@.email}</a>` inside `<each in=@contacts>`). This case is the exact mirror of the -pos case with the identical `<a href=@.email>` markup wrapped in an `<each>` body, so it pins the SCOPE BOUNDARY: E-SYNTAX-064 keys on the absence of an enclosing `<each>` body scope, not on the `@.` token itself. `key=@.id` and the `${@.name}` interpolation additionally pin the opener-attribute and interpolation positions as legal inside the body.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SYNTAX-064"]
+  }
+}
