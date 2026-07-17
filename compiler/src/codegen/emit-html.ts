@@ -2437,6 +2437,42 @@ export function generateHtml(
                 refs: val.refs,
               });
             }
+          } else {
+            // i81 — reactive VALUE attribute (`class=`, `style=`, `title=`,
+            // `data-*`, `id=`, `alt=`, …). THE MISSING FINAL `else`.
+            //
+            // Before this branch existed the chain above ended here, so a
+            // dynamic value attribute outside `<each>` matched NO branch:
+            // nothing was pushed to `parts` and the attribute vanished from the
+            // emitted HTML — silently, on a clean compile with 0 diagnostics
+            // (the CSS written against those classes then read as dead code).
+            // Inside `<each>` it always worked, because emit-each.ts builds
+            // elements imperatively and calls setAttribute directly.
+            //
+            // Mirrors the REACTIVE_BOOL_ATTRS block above (placeholder +
+            // addLogicBinding, carrying expr/condExpr/condExprNode/refs
+            // identically); the consumer is in emit-event-wiring.ts. This is a
+            // DIFFERENT lowering from the bool path, not a widening of it: a
+            // bool attr toggles presence on truthiness, a value attr sets a
+            // string and is removed only on ABSENCE (SPEC §42.1.1 / §42.9).
+            //
+            // Safe as a catch-all: every special attribute family (`bind:`,
+            // `class:`, `transition:`/`in:`/`out:`, `ref`, developer attrs) is
+            // peeled off with `continue` well before this dispatch, so only
+            // plain HTML attributes reach here.
+            const placeholderId = genVar(`attr_${name}`);
+            parts.push(` data-scrml-bind-attr-${name}="${placeholderId}"`);
+            if (registry) {
+              registry.addLogicBinding({
+                placeholderId,
+                expr: val.raw,
+                isReactiveValueAttr: true,
+                valueAttrName: name,
+                condExpr: val.raw,
+                condExprNode: val.exprNode,
+                refs: val.refs,
+              });
+            }
           }
         } else if (val.kind === "call-ref") {
           if (name === "if" || name === "show") {

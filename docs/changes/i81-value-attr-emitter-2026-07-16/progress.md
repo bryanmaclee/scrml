@@ -41,3 +41,50 @@ to the `expr` chain's missing final `else`). Recorded for the PA as a candidate 
 here.
 
 Next: implement the value-attr emitter across the 3 touchpoints, mirroring the bool path.
+
+## 2026-07-16 — implementation (3 touchpoints) + semantics decision
+
+Implemented, mirroring the bool-attr path end-to-end:
+- `binding-registry.ts` — `isReactiveValueAttr?: boolean` / `valueAttrName?: string` beside the bool fields.
+- `emit-html.ts` — THE MISSING FINAL `else` on the `val.kind === "expr"` chain. Emits
+  `data-scrml-bind-attr-<name>="<placeholderId>"` + `addLogicBinding({isReactiveValueAttr, valueAttrName,
+  expr, condExpr, condExprNode, refs})`.
+- `emit-event-wiring.ts` — type fields + emission gate (`if (b.isReactiveValueAttr) return true;`) +
+  the `_scrml_effect` consumer, via the same `pushRebindableSel`/`regionEffectLines` contract as bool.
+
+**Catch-all safety (verified at source, not assumed).** The final `else` is unbounded, so I checked what can
+reach it: every special attr family is `continue`d BEFORE the val.kind dispatch — `transition:`/`in:`/`out:`
+(2227), `skipDeveloperAttrs` (2233), `bind:` (2235), `class:` (2274), `ref` (2303). Only plain HTML attrs
+reach the chain. `if`/`show`/`on*`/bool are peeled by the preceding branches. Catch-all is safe.
+
+**SEMANTIC DECISION — absence-driven, NOT truthiness. Justification:**
+Chosen lowering: `{ const v = (expr); if (v === null || v === undefined) removeAttribute(name);
+else setAttribute(name, String(v)); }`
+- `not` → JS `null` → attribute REMOVED. SPEC §42.9 is explicit: "The `not` literal SHALL compile to the
+  JavaScript value `null`". Absence ⇒ no attribute.
+- `""` → `setAttribute(name, "")` — an EMPTY attribute, NOT removal.
+- `0` → `"0"`, `false` → `"false"`, `[]` → `""`. All SET.
+**Why not mirror the bool path's truthiness test** (the "obvious" mirror): SPEC §42.1.1 states `""`, `0`,
+`false`, `[]`, `{}` are DEFINED values and that migrating them to `not` "SHALL be considered a SEMANTIC
+ERROR". A truthiness test would therefore be spec-VIOLATING — it would silently drop `class=""`,
+`data-count=(0)`, `data-open=(false)`. Bool and value are different lowerings precisely here: bool toggles
+PRESENCE on truthiness; value sets a STRING and is removed only on ABSENCE. The absence test is the SPEC's
+own `is not` lowering, `(x === null || x === undefined)` (§42.9), which matches BOTH null and undefined
+because foreign code (`^{}`, `?{}` SQL, server fns) may produce either. This is SPEC-exact, not invented.
+
+**KNOWN DIVERGENCE, reported not hidden.** The two OTHER value-attr paths coerce absence into visible text
+rather than removing it — `emit-each.ts:1476-1516` does `setAttribute(name, String(expr))` unconditionally
+(`not` → the literal string `"null"`), and the attr-template path `emit-bindings.ts:888-916` interpolates
+into a template literal (same). So `class=(not)` will REMOVE the attr outside `<each>` but SET
+`class="null"` inside one. My path is the SPEC-correct one; the other two are pre-existing defects. Both are
+explicitly OUT OF SCOPE per the brief (do NOT touch emit-each.ts). Flagged as follow-up candidates — I did
+NOT paper over the inconsistency by copying their wrong behavior.
+
+Self-inflicted bug found+fixed during impl: `data-*/…` inside a `/** */` block comment terminated the
+comment early (`*/`), crashing the compiler parse. Reworded.
+
+Repro POST-FIX: class/style/title/data-mode all now emit `data-scrml-bind-attr-*` + a wired
+`_scrml_effect`; `class=`+`onclick=` COEXIST on one element; `disabled=` still bool; `class="static"`
+unchanged. Generated `_scrml_v` is block-scoped per binding (no collision), region-tracked for teardown.
+
+Next: regression test matrix + full suite + R26 + blast radius.

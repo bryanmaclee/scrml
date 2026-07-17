@@ -183,6 +183,32 @@ export interface LogicBinding {
   boolAttrName?: string;
 
   /**
+   * i81 — reactive VALUE attribute binding (`class=`, `style=`, `title=`,
+   * `data-*`, `id=`, `alt=`, …).
+   *
+   * The counterpart to `isReactiveBoolAttr`, and a DIFFERENT lowering — do not
+   * conflate the two. A BOOLEAN attr toggles *presence* (truthiness →
+   * `setAttribute(name, "")` / `removeAttribute(name)`). A VALUE attr sets a
+   * *string* (`setAttribute(name, String(v))`), and its removal is driven by
+   * ABSENCE, not falsiness. `valueAttrName` carries the attribute name.
+   *
+   * Semantics (SPEC §42.1.1 + §42.9 — NOT truthiness):
+   *   `not` (→ JS `null`) / `undefined`  → `removeAttribute(name)`
+   *   `""` / `0` / `false` / `[]`        → `setAttribute(name, String(v))`
+   * `""`, `0`, `false`, `[]` are DEFINED values in scrml, not absence; §42.1.1
+   * declares treating them as absence a SEMANTIC ERROR. The absence test is the
+   * SPEC's own `is not` lowering, `(v === null || v === undefined)` (§42.9 —
+   * both, because foreign code may produce either).
+   *
+   * Closes issue #81: before this, the `val.kind === "expr"` dispatch chain in
+   * emit-html.ts ended after the bool-attr branch with no final `else`, so a
+   * dynamic value attribute outside `<each>` matched nothing and was SILENTLY
+   * dropped from the emitted HTML (clean compile, 0 diagnostics).
+   */
+  isReactiveValueAttr?: boolean;
+  valueAttrName?: string;
+
+  /**
    * Phase 2c: when set, the `if=` binding uses mount/unmount semantics
    * (template-clone on true, scope-destroy + DOM-remove on false) instead of
    * display-toggle. The compile-time emitter populates `templateId` and

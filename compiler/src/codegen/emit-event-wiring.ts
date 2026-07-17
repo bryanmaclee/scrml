@@ -76,6 +76,9 @@ interface LogicBinding {
   /** S105 B1 — reactive HTML Boolean attr (disabled/readonly/required). */
   isReactiveBoolAttr?: boolean;
   boolAttrName?: string;
+  /** i81 — reactive HTML VALUE attr (class, style, title, data-… ). See binding-registry.ts. */
+  isReactiveValueAttr?: boolean;
+  valueAttrName?: string;
   /** Phase 2 if/show split: mount/unmount semantics. See binding-registry.ts. */
   isMountToggle?: boolean;
   templateId?: string;
@@ -370,6 +373,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     if (b.isConditionalDisplay) return true;
     if (b.isVisibilityToggle) return true;
     if (b.isReactiveBoolAttr) return true;
+    if (b.isReactiveValueAttr) return true;
     if (b.isMountToggle) return true;
     return false;
   });
@@ -1402,6 +1406,45 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           pushRebindableSel(`[${dataAttr}="${placeholderId}"]`, [
             toggle,
             ...regionEffectLines(toggle),
+          ]);
+        }
+        continue;
+      }
+
+      // i81 — reactive VALUE attribute (class, style, title, data-…, id, alt).
+      // Wire an `_scrml_effect` that SETS the attribute to the stringified value.
+      // Counterpart to the bool-attr block above, deliberately a DIFFERENT
+      // lowering: bool toggles presence on TRUTHINESS, value sets a string and
+      // is removed only on ABSENCE.
+      //
+      // Semantics per SPEC §42.1.1 + §42.9 (NOT truthiness — this distinction is
+      // the whole point):
+      //   `not` → JS `null` (§42.9) → removeAttribute
+      //   `""` / `0` / `false` / `[]` → DEFINED values (§42.1.1) → setAttribute
+      // §42.1.1 states that treating `""`/`0`/`false`/`[]` as absence is a
+      // SEMANTIC ERROR, so a truthiness test here would be spec-violating: it
+      // would drop `class=""`, `data-count=(0)` and `data-open=(false)`.
+      // The absence test is the SPEC's own `is not` lowering — `=== null ||
+      // === undefined` — matching BOTH, per §42.9, because foreign code (`^{}`,
+      // `?{}` SQL, server fns) may produce either.
+      if (binding.isReactiveValueAttr && binding.valueAttrName) {
+        const attrName = binding.valueAttrName;
+        const dataAttr = `data-scrml-bind-attr-${attrName}`;
+        if (binding.condExpr) {
+          // synthCellKeys/derivedNames threaded exactly as the bool path does, so
+          // `class=(@form.isValid ? "ok" : "bad")` routes dotted reads to the
+          // synth cell rather than member-accessing the compound value.
+          const compiled = emitExprField(binding.condExprNode, binding.condExpr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys });
+          const valueVar = `_scrml_v`;
+          const apply =
+            `{ const ${valueVar} = (${compiled}); ` +
+            `if (${valueVar} === null || ${valueVar} === undefined) { el.removeAttribute(${JSON.stringify(attrName)}); } ` +
+            `else { el.setAttribute(${JSON.stringify(attrName)}, String(${valueVar})); } }`;
+          // Rebindable — re-binds the attr effect scoped to a swapped region and
+          // is region-tracked for teardown (same contract as the bool path).
+          pushRebindableSel(`[${dataAttr}="${placeholderId}"]`, [
+            apply,
+            ...regionEffectLines(apply),
           ]);
         }
         continue;
