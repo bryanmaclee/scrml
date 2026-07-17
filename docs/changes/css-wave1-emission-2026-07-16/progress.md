@@ -176,3 +176,24 @@ a CSS `@layer` below the component author scope).
 - TEST: +4 tests (pos lower / neg unknown / reactive-cell bridge / bare-untouched). FULL suite
   unit+integration+conformance: **20649 pass / 0 fail** (baseline 20641 + 8 new from Task 1+2). NO
   corpus regression from the always-build change.
+
+### 2026-07-17 — TASK 3 descendant-combinator space collapse (commit: this)
+- ROOT CAUSE (traced empirically, not assumed): the component body `raw` (a logic-token-joined
+  string) preserves `#{}` CSS content VERBATIM, but `normalizeTokenizedRaw` (component-expander.ts)
+  runs markup-focused collapse passes over the WHOLE body — the S200 member-access collapse
+  `([A-Za-z0-9_$\)\]])\s*\.\s*([A-Za-z_$])` → `$1.$2` turns `.card .title` → `.card.title` (a
+  DESCENDANT selector silently becomes a COMPOUND one), and the strip-space-before-`>` pass turns
+  `.a > .b` → `.a> .b`. tokenizeCSS / the native CSS parser both PRESERVE the space (verified) — the
+  damage is ONLY in normalizeTokenizedRaw. (parseCSSTokens/tokenizeCSS are NOT called for a component
+  `#{}`; the body reparses via `reparseSynthesizedFile` → nativeParseFile after normalization.)
+- FIX (surgical, provably safe): NEW `maskCssBlocks`/`restoreCssBlocks` — mask every `#{ … }` block
+  with an inert `\x00<idx>\x00` placeholder (NUL is matched by NO collapse-step char class) BEFORE the
+  passes, restore VERBATIM after. The `#{}` content is already clean source, so masking is strictly an
+  improvement; the re-parse tokenizes the restored block itself. Brace matching is depth-counted +
+  string-aware (`content: "}"`).
+- Empirical: `.card .title` → `:where(.card .title)` (descendant, space kept); `.a > .b` →
+  `:where(.a > .b)` (child, kept); compound `.card.title` (no space) STAYS `:where(.card.title)`;
+  `.btn:hover` stays unwrapped; theme token in a descendant rule lowers (`color: @brand` →
+  `var(--brand)`) AND keeps the space.
+- TEST: +4 regression tests (descendant / compound-unchanged / child-combinator / descendant+token).
+  FULL suite unit+integration+conformance: **20653 pass / 0 fail**. No component-expansion regression.

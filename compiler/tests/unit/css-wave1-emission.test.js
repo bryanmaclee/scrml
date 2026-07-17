@@ -482,3 +482,59 @@ describe("§65.3.2 / §65.4 — flat-inline #{} token lowering (inline style)", 
     expect(hasCode(errors, "E-THEME-TOKEN-UNKNOWN")).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// TASK 3 — descendant-combinator SPACE collapse in component-scope selectors
+// (pre-existing silent MISCOMPILE — normalizeTokenizedRaw collapsed the space)
+// ---------------------------------------------------------------------------
+
+describe("§65.2.5 — component-scope descendant combinator preservation", () => {
+  test("a component `.card .title` stays a DESCENDANT selector (space preserved), :where()-wrapped", () => {
+    const { css } = compileCss(`<program>
+  const Card = <div props={}>
+      #{ .card .title { color: red; } }
+      <div class="card"><span class="title">hi</span></div>
+  </>
+  <Card/>
+</program>`);
+    // Descendant space survives → :where(.card .title), NOT the compound :where(.card.title).
+    expect(css).toContain(":where(.card .title) {");
+    expect(css).not.toContain(":where(.card.title)");
+  });
+
+  test("a component compound `.card.title` (no space) stays COMPOUND (surgical — not touched)", () => {
+    const { css } = compileCss(`<program>
+  const Card = <div props={}>
+      #{ .card.title { color: red; } }
+      <div class="card title">hi</div>
+  </>
+  <Card/>
+</program>`);
+    // No space in source → stays compound.
+    expect(css).toContain(":where(.card.title) {");
+    expect(css).not.toContain(":where(.card .title)");
+  });
+
+  test("a component child combinator `.a > .b` keeps its combinator (not collapsed)", () => {
+    const { css } = compileCss(`<program>
+  const Card = <div props={}>
+      #{ .a > .b { color: red; } }
+      <div class="a"><span class="b">hi</span></div>
+  </>
+  <Card/>
+</program>`);
+    expect(css).toContain(":where(.a > .b) {");
+  });
+
+  test("a component #{} with a theme token in a descendant rule lowers AND keeps the space", () => {
+    const { css } = compileCss(`<program>
+  <theme> brand = #2563eb; </theme>
+  const Card = <div props={}>
+      #{ .card .title { color: @brand; } }
+      <div class="card"><span class="title">hi</span></div>
+  </>
+  <Card/>
+</program>`);
+    expect(css).toContain(":where(.card .title) { color: var(--brand); }");
+  });
+});

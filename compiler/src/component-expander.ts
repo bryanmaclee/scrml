@@ -530,8 +530,65 @@ function findMaxId(nodes: ASTNode[]): number {
  *   `<tagname attr1="val1" attr2/>`  (self-closing)
  *   `<tagname attr1="val1" attr2>`   (block-form)
  */
+/**
+ * Task 3 (css-wave1 round-4) — mask every `#{ … }` CSS block in a component-body
+ * raw string with an inert `\x00<idx>\x00` placeholder, returning the masked
+ * string + the extracted verbatim blocks. The `#{}` content in the raw is already
+ * clean source (the logic tokenizer preserves it verbatim); the markup-focused
+ * collapse passes in `normalizeTokenizedRaw` (member-access `X . Y` → `X.Y`;
+ * strip-space-before-`>`) would otherwise MISCOMPILE a CSS descendant combinator
+ * (`.card .title` → `.card.title`, a compound selector) or a child combinator
+ * (`.a > .b` → `.a> .b`). Masking protects CSS from ALL collapse steps; the
+ * native / live re-parse tokenizes the restored block itself.
+ *
+ * The `\x00` (NUL) delimiter is matched by NO collapse-step char class (`\w`,
+ * `\s`, `< > = . - : ? ( ) " '` …), so the placeholder is inert through every
+ * step. Brace matching is depth-counted with string awareness (`content: "}"`).
+ */
+function maskCssBlocks(s: string): { masked: string; blocks: string[] } {
+  const blocks: string[] = [];
+  let out = "";
+  let i = 0;
+  const n = s.length;
+  while (i < n) {
+    if (s[i] === "#" && s[i + 1] === "{") {
+      let j = i + 2;
+      let depth = 1;
+      let str: string | null = null;
+      while (j < n && depth > 0) {
+        const c = s[j];
+        if (str !== null) {
+          if (c === "\\") { j += 2; continue; }
+          if (c === str) str = null;
+          j++;
+          continue;
+        }
+        if (c === '"' || c === "'" || c === "`") { str = c; j++; continue; }
+        if (c === "{") { depth++; j++; continue; }
+        if (c === "}") { depth--; j++; continue; }
+        j++;
+      }
+      out += `\x00${blocks.length}\x00`;
+      blocks.push(s.slice(i, j));
+      i = j;
+      continue;
+    }
+    out += s[i];
+    i++;
+  }
+  return { masked: out, blocks };
+}
+
+/** Restore the `#{ … }` blocks masked by `maskCssBlocks` (verbatim). */
+function restoreCssBlocks(s: string, blocks: string[]): string {
+  return s.replace(/\x00(\d+)\x00/g, (_m, idx) => blocks[Number(idx)] ?? "");
+}
+
 function normalizeTokenizedRaw(raw: string): string {
-  let s = raw.trim();
+  // Task 3 — protect `#{}` CSS blocks from the markup-focused collapse passes so
+  // a CSS descendant / child combinator's whitespace is not miscompiled.
+  const { masked, blocks } = maskCssBlocks(raw.trim());
+  let s = masked;
 
   // Step 0 (Bug-batch S93 — Bug 4): Normalize tokenized HTML comments.
   //   The logic tokenizer splits `<!-- ... -->` into the token stream
@@ -745,7 +802,9 @@ function normalizeTokenizedRaw(raw: string): string {
   //   ref collapses its member tail here and its sigil above.
   s = s.replace(/([A-Za-z0-9_$\)\]])\s*\.\s*([A-Za-z_$])/g, "$1.$2");
 
-  return s;
+  // Task 3 — restore the masked `#{}` CSS blocks (verbatim) so their descendant /
+  // child combinators survive the markup collapse passes intact.
+  return restoreCssBlocks(s, blocks);
 }
 
 // ---------------------------------------------------------------------------
