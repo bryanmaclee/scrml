@@ -200,6 +200,17 @@ export interface LogicBinding {
    * SPEC's own `is not` lowering, `(v === null || v === undefined)` (§42.9 —
    * both, because foreign code may produce either).
    *
+   * The expression is carried in the standard `expr` / `exprNode` pair (NOT the
+   * bool path's `condExpr` / `condExprNode`: a value attr has an EXPRESSION, not
+   * a condition — S239 finding 10).
+   *
+   * Emitted GLOBALLY only when `engineArm == null`. An arm-tagged value attr is
+   * emitted PER-ARM by emit-variant-guard, where the arm's payload bindings are
+   * wire-fn parameters and therefore in scope; emitting it at module scope threw
+   * a ReferenceError out of the wiring handler and killed ALL page wiring
+   * (S239 findings 1/4). Both paths share `emitValueAttrApply` so they cannot
+   * drift.
+   *
    * Closes issue #81: before this, the `val.kind === "expr"` dispatch chain in
    * emit-html.ts ended after the bool-attr branch with no final `else`, so a
    * dynamic value attribute outside `<each>` matched nothing and was SILENTLY
@@ -207,6 +218,20 @@ export interface LogicBinding {
    */
   isReactiveValueAttr?: boolean;
   valueAttrName?: string;
+
+  /**
+   * i81 (S239 finding 5) — `value` on a form control (input/textarea/select).
+   *
+   * The `value` ATTRIBUTE is only the control's DEFAULT value: once the control
+   * is dirty (the user has typed) the browser stops reflecting the attribute, so
+   * a reactive `value=` lowered via `setAttribute` silently stops applying. The
+   * consumers write the live `.value` PROPERTY instead (guarded by an inequality
+   * test so re-assigning an identical string cannot reset the caret).
+   *
+   * Stamped by emit-html because that is the only stage that knows the element's
+   * TAG — the wiring emitters see the binding, not the element.
+   */
+  valueAttrIsFormValue?: boolean;
 
   /**
    * i81 — the CSS-SAFE placeholder key for a reactive value attribute.

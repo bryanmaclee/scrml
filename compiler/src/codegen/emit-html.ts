@@ -4,6 +4,8 @@ import { emitStringFromTree, exprNodeContainsMemberAccess } from "../expression-
 import { isMetaKind } from "../types/ast.ts";
 import { escapeHtmlAttr, VOID_ELEMENTS, HTML_BOOLEAN_ATTRS } from "./utils.ts";
 import { isUserComponentMarkup } from "../component-expander.ts";
+import { validateEmittedArtifact } from "./validate-emit.ts";
+import { emitExprField } from "./emit-expr.ts";
 import { extractReactiveDeps, collectReactiveVarNames, extractReactiveDepsTransitive, buildFunctionBodyRegistry, collectRequestIds } from "./reactive-deps.ts";
 import { hasTemplateInterpolation } from "./rewrite.js";
 import { isRcdataElement } from "../html-elements.js";
@@ -49,6 +51,125 @@ const SUPPORTED_TRANSITIONS = new Set(["fade", "slide", "fly"]);
 // have `bind:checked` / `bind:selected` paths; reactive-expr admission
 // would require dispatch-precedence design).
 const REACTIVE_BOOL_ATTRS = new Set(["disabled", "readonly", "required"]);
+
+// i81 — form controls whose live state lives in the `value` PROPERTY, not the
+// `value` attribute. `setAttribute("value", …)` writes the DEFAULT value, which
+// the browser ignores once the control is dirty (the user has typed), so a
+// reactive `value=` would silently stop applying. See emitValueAttrApply.
+const FORM_VALUE_ELEMENTS = new Set(["input", "textarea", "select"]);
+
+// i81 — directives that own an element's inline `style`. `if=`/`show=` write
+// `el.style.display`; `transition:`/`in:`/`out:` animate `opacity`. A reactive
+// `style=` on the SAME element does `setAttribute("style", …)`, which replaces
+// the WHOLE attribute and destroys whatever they wrote.
+const STYLE_OWNING_DIRECTIVES = ["if", "show"];
+
+/**
+ * i81 (S239 finding 2/3) — may this reactive VALUE attribute be lowered to
+ * CORRECT output? Returns false (with a diagnostic) for shapes we cannot lower
+ * faithfully, so the attribute keeps its pre-i81 behavior (dropped) instead of
+ * becoming a MISCOMPILE. A dropped attribute is a bug; invalid JS or a clobbered
+ * directive is worse than the bug — it takes the whole page down.
+ *
+ * This is the single decision point: refusing HERE means no placeholder and no
+ * binding are produced at all, so the emitted HTML stays byte-identical to
+ * pre-i81 and the wiring emitters can never disagree with the markup.
+ */
+function valueAttrIsLowerable(
+  val: any,
+  name: string,
+  attrs: any[],
+  tag: string,
+  attr: any,
+  node: any,
+  errors: any[] | null | undefined,
+): boolean {
+  // --- (2) the expression must lower to VALID JavaScript -------------------
+  // `emitExprField` emits a template literal verbatim (the expression parser
+  // classifies it as a `lit`), so `class=(`btn ${@variant}`)` lowers with a RAW
+  // `@` — invalid JS. Pre-i81 the attr was dropped and the bundle stayed valid;
+  // with the emitter live, the whole COMPILE now aborts on
+  // E-CODEGEN-INVALID-LOGIC ("compiler defect, please report it") for an
+  // IDIOMATIC shape. So this is not merely "don't emit bad JS" — without this
+  // check the diff breaks adopter builds that compiled clean before.
+  //
+  // Checked with the repo's own acorn helper (`isSingleJsExpression`), the exact
+  // parser the S141 emitted-JS gate uses, so the two cannot disagree. Rewriting
+  // `@` inside template literals belongs in `emitExprField`/`rewriteExpr` and
+  // would change every lowering path in the compiler — a separate arc.
+  const lowered = emitExprField(val.exprNode, val.raw, { mode: "client" });
+  // Validate the EXACT statement shape the wiring emitters produce, with the
+  // very parser + options the S141 emitted-JS gate uses, so this check and that
+  // gate can never disagree. (Note: `isSingleJsExpression` is NOT usable here —
+  // acorn's `parseExpressionAt("(cls)")` returns the INNER node, whose `end`
+  // stops before the closing paren, so it reports every parenthesized
+  // expression as invalid. `val.raw` is always parenthesized.)
+  const _probe = validateEmittedArtifact({
+    sourceFile: "",
+    artifact: "value-attr-probe.js",
+    contents: `const _scrml_v = (${lowered});`,
+  });
+  if (_probe !== null) {
+    if (errors) {
+      errors.push(new CGError(
+        "W-CG-VALUE-ATTR-UNLOWERABLE",
+        `W-CG-VALUE-ATTR-UNLOWERABLE: the reactive value attribute \`${name}=\` on ` +
+        `<${tag}> could not be lowered to valid JavaScript, so it is NOT emitted and ` +
+        `the attribute will be absent at runtime.\n` +
+        `  Expression: ${String(val.raw ?? "").slice(0, 80)}\n\n` +
+        `  The usual cause is a template literal that interpolates a reactive cell — ` +
+        `\`${name}=(\`… \${@cell} …\`)\`. The expression parser treats a template literal ` +
+        `as an opaque literal, so the \`@cell\` reference is not rewritten.\n` +
+        `  Workaround: use string concatenation instead — ` +
+        `\`${name}=("…" + @cell + "…")\` — which lowers correctly.`,
+        attr?.span ?? node?.span ?? { file: "", start: 0, end: 0, line: 0, col: 0 },
+        "warning",
+      ));
+    }
+    return false;
+  }
+
+  // --- (3) `style=` must not clobber a directive that owns inline style ----
+  // `if=`/`show=` set `el.style.display`; `transition:`/`in:`/`out:` animate
+  // `opacity`. `setAttribute("style", …)` REPLACES the whole attribute, so
+  // `<div show=(@isOpen) style=(@theme)>` re-shows a hidden panel — the effect
+  // wipes `display:none` and the element becomes permanently visible while
+  // `@isOpen` is still false. Merging (writing individual properties while
+  // preserving `display`) is the real fix but needs a CSS-text parser and a
+  // defined precedence against the toggles; not this arc. Refusing keeps the
+  // toggle CORRECT and the style attribute merely absent — the pre-i81 state.
+  if (name === "style") {
+    const conflicting = attrs
+      .filter((a: any) => a && typeof a.name === "string")
+      .map((a: any) => a.name as string)
+      .filter(
+        (n: string) =>
+          STYLE_OWNING_DIRECTIVES.includes(n) ||
+          n.startsWith("transition:") || n.startsWith("in:") || n.startsWith("out:"),
+      );
+    if (conflicting.length > 0) {
+      if (errors) {
+        errors.push(new CGError(
+          "W-CG-VALUE-ATTR-STYLE-CONFLICT",
+          `W-CG-VALUE-ATTR-STYLE-CONFLICT: \`style=\` on <${tag}> co-occurs with ` +
+          `\`${conflicting.join("=`, `")}=\`, so it is NOT emitted and the style ` +
+          `attribute will be absent at runtime.\n\n` +
+          `  A reactive \`style=\` sets the whole style attribute, which would erase the ` +
+          `\`display\`/\`opacity\` that \`${conflicting[0]}=\` writes — the element would be ` +
+          `stuck visible (or stuck mid-transition) regardless of the condition. The ` +
+          `directive is kept correct instead.\n` +
+          `  Workaround: move the dynamic styling to \`class=\` (which composes with the ` +
+          `toggle), or drop a \`#{}\` CSS block and toggle a class.`,
+          attr?.span ?? node?.span ?? { file: "", start: 0, end: 0, line: 0, col: 0 },
+          "warning",
+        ));
+      }
+      return false;
+    }
+  }
+
+  return true;
+}
 
 // Element-type restrictions per SPEC §5.4
 const BIND_VALID_TAGS: Record<string, Set<string>> = {
@@ -2442,7 +2563,8 @@ export function generateHtml(
             !(node.resolvedKind === "html-builtin" || node.resolvedKind == null) ||
             node._expandedFrom != null ||
             isUserComponentMarkup(node) ||
-            HTML_BOOLEAN_ATTRS.has(name)
+            HTML_BOOLEAN_ATTRS.has(name) ||
+            !valueAttrIsLowerable(val, name, attrs, tag, attr, node, errors)
           ) {
             // i81 — NOT a lowerable value attribute. Emit NOTHING, preserving
             // the exact pre-i81 behavior (silent drop). EVERY clause here was
@@ -2534,12 +2656,25 @@ export function generateHtml(
             if (registry) {
               registry.addLogicBinding({
                 placeholderId,
+                // S239 finding 10 — a value attr carries an EXPRESSION, not a
+                // condition, so it uses the standard `expr`/`exprNode` pair every
+                // LogicBinding has. The first cut set `expr` AND `condExpr` to the
+                // same `val.raw` and `condExprNode` to the same node (copy-paste
+                // from the bool block, where `cond*` is apt because it really is a
+                // predicate) — redundant derivable state with two names for one
+                // value, and two chances to drift.
                 expr: val.raw,
+                exprNode: val.exprNode,
                 isReactiveValueAttr: true,
                 valueAttrName: name,
                 valueAttrKey: attrKey,
-                condExpr: val.raw,
-                condExprNode: val.exprNode,
+                // S239 finding 5 — `value` on a form control must be written via
+                // the `.value` PROPERTY, not `setAttribute`. Decided HERE because
+                // this is the only place the TAG is known; the wiring emitters see
+                // the binding, not the element.
+                ...(name === "value" && FORM_VALUE_ELEMENTS.has(tag)
+                  ? { valueAttrIsFormValue: true }
+                  : {}),
                 refs: val.refs,
               });
             }

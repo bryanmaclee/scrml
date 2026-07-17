@@ -276,3 +276,71 @@ list with a budget, which would have masked a future REAL routing read in that f
     strictly better than the pre-fix drop, and consistent with emit-each's setAttribute behavior.
   - emit-each.ts / attr-template coerce absence into visible text (`not` -> "null"), diverging from my
     SPEC-correct removal. Out of scope (brief forbids touching emit-each).
+
+## 2026-07-16 — S239 FIX ROUND (10 findings). The reviewers' thesis is correct.
+
+"Several are newly-wrong output rather than preserved drops ... the new unit suite asserts only that
+wires are emitted, so it is green throughout." That is exactly what happened. **A silent drop is a bug;
+a page-killer is worse than the bug.** Governing rule for this round: any shape I cannot lower CORRECTLY
+must keep the pre-i81 drop AND say so with a diagnostic — never emit hopeful JS.
+
+### ROOT CAUSE of my green-through-8-bugs suite (found, and it is structural)
+`compiler/src/api.js:2576` is `if (write && outputDir) {`, and the S141 emitted-JS acorn parse gate
+(api.js:2634, `validateEmit && !hasPriorFatalError && cgResult.outputs`) is NESTED INSIDE IT. Every
+codegen unit test uses `compileScrml({ write: false })` — so **the parse gate never runs in unit tests**.
+`expect(r.errors).toEqual([])` is therefore structurally blind to codegen validity: it was `[]` while the
+emitted bundle was a SyntaxError. This is pre-existing repo test-infrastructure (affects every codegen
+unit test, not just mine), but it is what let 8 real bugs through a green suite. REPORTED to the PA.
+
+### F1 + F4 (one root cause) — FIXED
+A value attr in a `<match>` arm was KEPT in global emission and EXCLUDED per-arm — the exact inverse of
+correct. Reproduced: `<Ok(cls)><div class=(cls)>` emitted `const _scrml_v = ((cls));` inside
+`_scrml_nav_rewire` ⇒ ReferenceError at DOMContentLoaded. The throw escapes the whole handler, so EVERY
+listener and EVERY effect on the page never wires — a DEAD PAGE, where pre-i81 the attr was merely
+missing and the page worked. My §i81.6 tests literally ASSERTED this bug ("still gets its global attr
+wire (bool parity)"): the emit-only assertion encoded the defect as intent.
+FIX: `emit-event-wiring.ts` → `if (b.isReactiveValueAttr) return b.engineArm == null;` (global only
+OUTSIDE an arm — precisely the rule line ~358 already applies to `render-element`: "the held ident is
+undefined at module scope"). `emit-variant-guard.ts` → new `wireableValueAttrs` list + a per-arm emission
+loop mirroring the class:/attr-tpl `_root.querySelector` + `_disposers.push(_scrml_effect(…))` contract
+(so a variant swap disposes it). `engineArm` is auto-stamped by `addLogicBinding` (binding-registry:550),
+so the discriminator already existed. Also added `wireableValueAttrs.length` to the no-op-shell early
+return — without it an arm whose ONLY binding is a value attr returned an empty wire fn.
+VERIFIED: `nav_rewire` cls refs 0; `function _scrml_match_match_8_wire_Ok(_root, cls)` wires via `_root`.
+
+### F2 (template-literal `@`) — FIXED by fail-closed + diagnostic
+`emitExprField` emits a template literal VERBATIM (the expression parser classifies it `lit`), so
+``style=(`color: ${@c}`)`` lowered with a raw `@` ⇒ invalid JS. **My diff had made this WORSE than the
+review knew:** via the CLI it aborted the WHOLE COMPILE with E-CODEGEN-INVALID-LOGIC ("compiler defect,
+please report it") — pre-i81 that file compiled clean (attr dropped, page fine). So the diff broke
+adopter BUILDS on an idiomatic shape. Fixing `@`-in-template-literal inside `emitExprField`/`rewriteExpr`
+would change every lowering path in the compiler — a separate arc.
+FIX: at the single decision point (emit-html registration) lower the expr and validate the EXACT emitted
+statement (`const _scrml_v = (<lowered>);`) with `validateEmittedArtifact` — the S141 gate's own acorn +
+PARSE_OPTIONS, so my check and the gate cannot disagree. On failure: no placeholder, no binding (byte-
+identical to pre-i81) + `W-CG-VALUE-ATTR-UNLOWERABLE` naming the cause and the working
+string-concat workaround. Build succeeds again; author is told instead of silently dropped.
+NOTE: `isSingleJsExpression` is NOT usable — `acorn.parseExpressionAt("(cls)")` returns the INNER node
+whose `end` precedes the closing paren, so it reports EVERY parenthesized expression invalid, and
+`val.raw` is always parenthesized. My first cut used it and false-positived `class=(cls)` into a drop.
+
+### F6 (server-fn Promise) — FIXED
+`class=(loadThing())` stringified a Promise to "[object Promise]". Handled with a RUNTIME thenable check
+inside the shared apply helper, NOT the reactive-text path's compile-time `exprUsesServerFn` name match,
+because (a) `fnNameMap` is not in scope in emit-variant-guard (line 879 says so) so a compile-time check
+could not cover the per-arm path at all, and (b) the thenable test catches EVERY promise-returning
+expression, not just known server-fn names. The expr is still evaluated SYNCHRONOUSLY inside the effect,
+so reactive dep-tracking is unaffected; only the DOM write defers. Rejections swallowed (an unhandled
+rejection inside an effect would escape the wiring handler).
+
+### F9 + F10 — FIXED (cleanup)
+F9: declared `valueAttrKey` + `valueAttrIsFormValue` on emit-event-wiring's local `LogicBinding`, and
+DELETED the `??` fallback that re-derived the sanitize regex (a second copy could diverge from the key
+baked into the markup and then never match — which the registry doc explicitly forbids). Confirmed the
+reviewers' point: no tsconfig covers `compiler/`, so that interface is unchecked documentation.
+F10: a value attr carries an EXPRESSION, not a condition — moved to the standard `expr`/`exprNode` pair
+and dropped the duplicated `condExpr`/`condExprNode` (two names for one value = two chances to drift).
+
+### The two emitters now SHARE `emitValueAttrApply` (exported from emit-event-wiring)
+Findings 1/4 were a drift between the global and per-arm paths, so the DOM write is now defined exactly
+once and both paths call it.
