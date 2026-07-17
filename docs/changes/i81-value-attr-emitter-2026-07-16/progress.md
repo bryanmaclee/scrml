@@ -188,3 +188,91 @@ compiler/tests/conformance`)**, also baselined both ways:
   baseline with my code fully absent => PRE-EXISTING, not mine. It also PASSES in the full suite and passes
   6/6 in isolation (twice); it fails only in the unit+conformance subset at ~8s. Set-dependent, likely a
   timeout under that composition. Reported, not fixed (out of scope).
+
+## 2026-07-16 — R26 EMPIRICAL: three MORE regressions the green suite missed
+
+R26 (recompile 363 REAL .scrml: 4 gauntlet-r25 dev-* + 32 examples + 30 samples + 297
+compilation-tests, PRE-fix vs POST-fix, diff emitted output) earned its keep. At the point I had a
+100%-green suite + clean self-review, R26 found THREE real regressions:
+
+1. **snippet-002-parametric.scrml: clean compile -> E-CODEGEN-INVALID-LOGIC.**
+   `<List items=@items row={ (item) => <span>${item.id}</span> }/>` — `row=` is a §14.9
+   parametric-snippet prop whose value is a lambda returning MARKUP. The catch-all lowered it to
+   `const _scrml_v = ((item) => <span>...` — markup spliced into JS. Component expansion runs BEFORE
+   codegen and merges call-site props onto the component ROOT, so emit-html sees `tag=div`, not `List`:
+   **the tag is useless as a discriminator** (my first guard, `/^[A-Z]/.test(tag)`, did nothing).
+2. **dev-1-react/2-elixir/3-svelte: bogus `pick` DOM binding.** `<tableFor pick=[...]>` /
+   `<formFor pick=[...]>` are scrml DIRECTIVE elements (§4.13); their attrs are compiler constructs.
+3. **27-type-derived-table.scrml: `<input checked=(@a && @b)>` -> `setAttribute("checked","false")`.**
+   A boolean attr carries meaning by PRESENCE — that renders PERMANENTLY CHECKED. Strictly worse than
+   the pre-i81 drop.
+
+**The brief's core premise is empirically FALSE** and I proved it three ways: "Safe as a catch-all ...
+only plain HTML attributes reach here" is wrong. The markup attribute namespace is shared by (a) real
+HTML attrs, (b) scrml directive attrs, (c) component call-site props — all reaching the same emitter.
+
+**Final guard (positive / fail-CLOSED):** lower only when
+  (resolvedKind === "html-builtin" || resolvedKind == null)
+  && _expandedFrom == null && !isUserComponentMarkup(node) && !HTML_BOOLEAN_ATTRS.has(name)
+
+Measured, never assumed: `<button class=(..)>` = "html-builtin"; `<tableFor>`/`<formFor>`/`<use>` =
+"unknown"; a `<match>` ARM body = null (so null MUST be admitted — dynamic `class=` in an arm is
+idiomatic); an EXPANDED component root is ALSO null and is separable from an arm body ONLY by the
+expander's `_expandedFrom` stamp. Fails closed: anything NR did not positively resolve keeps the
+pre-i81 drop.
+
+**The CI gate caught an architectural violation of mine.** My first working guard used
+`node.isComponent === true` — `p3-follow-no-isComponent-routing.test.js` failed it: `isComponent` is a
+DEPRECATED derived backcompat field; NR (Stage 3.05) stamps `resolvedKind`/`resolvedCategory` and
+downstream stages must READ those. Reworked onto `resolvedKind` + the sanctioned
+`isUserComponentMarkup()` helper. This ALSO deleted a ~50-line hand-rolled `HTML_ELEMENTS` allowlist I
+had invented — the NR signal subsumes it. Then the test flagged emit-html.ts again because it greps
+TEXT and my COMMENTS said "isComponent" 3x; reworded the prose rather than add the file to the ALLOWED
+list with a budget, which would have masked a future REAL routing read in that file.
+
+### R26 RESULT — PASS
+  compile parity : 314 ok / 49 failed, failure set IDENTICAL to the pre-fix baseline (0 new)
+  output parity  : 313 of 314 emitted outputs BYTE-IDENTICAL
+  the 1 delta    : samples/rust-dev-debate-dashboard.scrml — a REAL adopter file where
+                   `value=${@newOrderItem}` was SILENTLY DROPPED pre-fix and now binds:
+    PRE : <input type="text" placeholder="Item name" data-scrml-bind-oninput="_scrml_attr_oninput_7"
+                 data-scrml-bind-bool-disabled="_scrml_attr_disabled_8" />        <-- value= GONE
+    POST: <input type="text" placeholder="Item name" data-scrml-bind-oninput="_scrml_attr_oninput_7"
+                 data-scrml-bind-attr-value="_scrml_attr_value_8"
+                 data-scrml-bind-bool-disabled="_scrml_attr_disabled_9" />        <-- value= BINDS
+  static attrs   : byte-identical (type=, placeholder=, class= counts all unchanged)
+  removed        : 0 pre-existing bindings lost (bool-disabled 6 pre / 6 post; oninput/onclick/if/show
+                   all unchanged). The only other diff is placeholder RENUMBERING
+                   (`_scrml_attr_disabled_8` -> `_9`) because new value bindings consume genVar ids —
+                   internal ids, matched between HTML and JS, consistently renumbered.
+
+### FINAL NUMBERS (all baselined BOTH ways: revert 4 codegen files to caf50487, run, restore)
+  CI GATE (the real merge-blocker, `bun test compiler/tests/unit compiler/tests/conformance`):
+    pre-fix : 17425 pass / 1 fail / 47 skip
+    post-fix: 17454 pass / 1 fail / 47 skip     => +29 pass (my tests), 0 new failures
+    The 1 fail is `E-TYPE-ANY-FORBIDDEN — struct field ': any' fires`, IDENTICAL on the pre-fix
+    baseline with my code absent => PRE-EXISTING. Passes in the full suite and 6/6 in isolation
+    (twice); fails only in the unit+conformance subset at ~8s. Set-dependent, likely a timeout.
+    Reported, not fixed (out of scope).
+  FULL SUITE (`bun run test`):
+    pre-fix : 26961 pass / 1061 fail / 213 skip   (28236 tests)
+    post-fix: 26984 pass / 1043 fail / 213 skip   (28241 tests)
+    set-diff: **0 NEW failures**, 18 resolved — ALL 18 are my own i81 tests; 0 non-i81.
+    The brief's "0 failures is the contract" is NOT achievable: caf50487 already fails 1061. Dominant
+    class 1012x "M7.3.b.N within-node parity per-fixture gate" (native-parser), plus self-host (needs
+    a locally built dist — primary.map.md flags exactly this), LSP, browser. Contract MET: 0 regressions.
+
+### Deferred / NOT fixed (all pre-existing drops — none are regressions; none silently widened)
+  - `title=@label` / `data-mode=@mode` BARE-@ref form (`val.kind === "variable-ref"`) emits the LITERAL
+    identifier text (`title="label"`), non-reactive — emit-html.ts:2381-2386 "General attribute"
+    fallback. A DIFFERENT path from the `expr` chain, out of scope per the brief. Arguably worse than a
+    drop (looks plausible in the HTML). Strongest follow-up candidate.
+  - SVG children (`<use xlink:href=(@h)/>`, resolvedKind "unknown") stay dropped.
+  - Value attrs on component call sites (`<Card class=(@x)/>`) stay dropped.
+  - Boolean attrs beyond disabled/readonly/required (checked/selected/open/...) stay dropped; they want
+    the BOOL path, and widening REACTIVE_BOOL_ATTRS is explicitly forbidden by the brief.
+  - `value=(expr)` lowers via setAttribute, which sets the DEFAULT value: after a user types, the DOM
+    property diverges and further updates won't show. `bind:value` is the canonical two-way path. Still
+    strictly better than the pre-fix drop, and consistent with emit-each's setAttribute behavior.
+  - emit-each.ts / attr-template coerce absence into visible text (`not` -> "null"), diverging from my
+    SPEC-correct removal. Out of scope (brief forbids touching emit-each).
