@@ -357,6 +357,46 @@ describe("§i81.5 — no regressions on the paths that already worked", () => {
     expect(client).toContain('setAttribute("class"');
     expect(emittedHtml(r)).not.toContain("data-scrml-bind-attr-class");
   });
+
+  test("a parametric-snippet prop on a component call site still compiles", () => {
+    // R26 regression (samples/compilation-tests/snippet-002-parametric.scrml).
+    // Component expansion merges call-site props onto the component's ROOT
+    // element, so by codegen the tag is `div`, not `List` — the props arrive
+    // looking like ordinary attributes. `row=` is a §14.9 parametric-snippet
+    // argument whose value is a lambda returning MARKUP; routing it through the
+    // value-attr emitter spliced markup into JS (`const _scrml_v = ((item) =>
+    // <span>…`) and produced E-CODEGEN-INVALID-LOGIC. The whole test suite was
+    // green when this broke — only recompiling the real corpus caught it.
+    const src = `<program>
+      \${
+        type Item:struct = {
+          id:    number,
+          label: string,
+        }
+      }
+      \${
+        const List = <div class="list" props={
+            items:  Item[],
+            row:    snippet(item: Item),
+        }>
+            \${ for (i of items) { lift <div class="list__row">\${ row(i) }</div> } }
+        </div>
+      }
+      \${
+        @items = [{ id: 1, label: "First" }]
+      }
+      <List
+          items=@items
+          row={ (item) => <span>\${item.id}. \${item.label}</span> }
+      />
+    </program>`;
+    const r = compile(src);
+    // The exact regression: a codegen crash, not a wrong attribute.
+    expect(r.errors.map((e) => e.code ?? "")).not.toContain("E-CODEGEN-INVALID-LOGIC");
+    // The prop must NOT be lowered as a DOM attribute.
+    expect(emittedHtml(r)).not.toContain("data-scrml-bind-attr-row");
+    expect(emittedClient(r)).not.toContain('setAttribute("row"');
+  });
 });
 
 describe("§i81.6 — <match> arm interaction (blast radius)", () => {

@@ -2437,6 +2437,37 @@ export function generateHtml(
                 refs: val.refs,
               });
             }
+          } else if (node.isComponent === true || node._expandedFrom != null) {
+            // i81 — COMPONENT call-site PROP, not an HTML attribute. Emit
+            // NOTHING, preserving the exact pre-i81 behavior for this shape.
+            //
+            // A component's attributes are PROPS consumed by component
+            // expansion / the §14.9 snippet machinery — not DOM attributes — and
+            // some prop values cannot be lowered to a string at all. The
+            // component-expander stamps the expanded root with `isComponent` +
+            // `_expandedFrom`; that stamp is the discriminator. The TAG is NOT:
+            // expansion runs BEFORE codegen and merges call-site props onto the
+            // expanded root, so by the time emit-html sees it the tag is the
+            // component's root element (`div`), not `List`.
+            //
+            // Caught by R26 against a real corpus file, NOT by the test suite
+            // (which was 100% green): samples/compilation-tests/
+            // snippet-002-parametric.scrml regressed from a clean compile to
+            // E-CODEGEN-INVALID-LOGIC on
+            //
+            //   <List items=@items row={ (item) => <span>${item.id}</span> }/>
+            //
+            // `row=` is a parametric-snippet argument whose value is a lambda
+            // returning MARKUP. Routing it through the value-attr emitter
+            // produced `const _scrml_v = ((item) => <span>...` — markup spliced
+            // into JS, i.e. malformed output. The pre-i81 missing `else` dropped
+            // these silently, which is exactly why the snippet path worked.
+            //
+            // Conservative by construction: this preserves the pre-i81 drop for
+            // EVERY component-root attribute, so it cannot regress a shape that
+            // works today. A dynamic value attr on a component call site
+            // (`<Card class=(@x)/>`) therefore stays unfixed — it was already
+            // dropped before i81. Recorded as follow-up, not silently widened.
           } else {
             // i81 — reactive VALUE attribute (`class=`, `style=`, `title=`,
             // `data-*`, `id=`, `alt=`, …). THE MISSING FINAL `else`.
@@ -2456,10 +2487,11 @@ export function generateHtml(
             // bool attr toggles presence on truthiness, a value attr sets a
             // string and is removed only on ABSENCE (SPEC §42.1.1 / §42.9).
             //
-            // Safe as a catch-all: every special attribute family (`bind:`,
-            // `class:`, `transition:`/`in:`/`out:`, `ref`, developer attrs) is
-            // peeled off with `continue` well before this dispatch, so only
-            // plain HTML attributes reach here.
+            // Reaching here means: an HTML element (component tags are handled
+            // by the branch above) carrying a plain attribute — every special
+            // family (`bind:`, `class:`, `transition:`/`in:`/`out:`, `ref`,
+            // developer attrs) is peeled off with `continue` well before this
+            // dispatch, and `if`/`show`/`on*`/bool by the branches above.
             const placeholderId = genVar(`attr_${name}`);
             // CSS-safe placeholder key. The name reaches the DOM verbatim via
             // `setAttribute` (SVG needs `viewBox`/`xlink:href` intact), but the
