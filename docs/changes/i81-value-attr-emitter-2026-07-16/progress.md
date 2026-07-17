@@ -420,3 +420,68 @@ EXPANDS to real markup before codegen and never reaches this emitter, so the fix
 "2 pick bindings" I first saw came from a BROKEN-import fixture, where the compile already errors.)
 Replaced with `<myWidget config=(@x)>`, which is mutation-proven: 0 bindings with the fix, 2 with the hole.
 Lesson repeated: I only trust a test I have watched fail.
+
+## 2026-07-16 — S239 FIX ROUND: verification
+
+### R26 EMPIRICAL (363 real files, pre caf50487 vs post) — PASS
+  compile parity : 314 ok / 49 failed — failure set IDENTICAL to baseline (0 new)
+  output parity  : 313 of 314 emitted outputs BYTE-IDENTICAL
+  the 1 delta    : samples/rust-dev-debate-dashboard.scrml — the adopter's
+                   `value=${@newOrderItem}`, silently DROPPED pre-i81, now binds — and after F5 it binds
+                   via the live PROPERTY, which is what that controlled input actually needs:
+      const _scrml_w = function(_scrml_x) { const _scrml_s = (_scrml_x === null || _scrml_x === undefined)
+        ? "" : String(_scrml_x); if (el.value !== _scrml_s) { el.value = _scrml_s; } }
+                   `setAttribute("value")` count: 0. Bundle `node --check`: OK.
+  preserved      : type=/placeholder= static attrs 1/1; bool-disabled 6/6; oninput 4/4 — 0 lost.
+  **0 `W-CG-VALUE-ATTR-*` diagnostics fired across all 363 corpus files** — the new fail-closed guards do
+  not misfire on real code; they fire only on the shapes they name.
+
+### FULL SUITE — 0 REGRESSIONS (the contract; NOT "0 failures" — caf50487 already fails 1061)
+  pre-fix (caf50487): 26961 pass / 1061 fail
+  fix round, run 1  : 26998 pass / 1044 fail  → set-diff NEW: 1
+  fix round, run 2  : 26998 pass / 1044 fail  → set-diff NEW: 1  — a DIFFERENT test
+  Run 1's "new" was `errorBoundary §19.6 (happy-dom)`; run 2's was `high-deepset-write-loss (happy-dom)`.
+  Each passes in ISOLATION (errorBoundary 5/5 x3; deepset 4/4). Settled by a both-ways BROWSER-dir
+  baseline: **pre-fix 12 fails, post-fix 12 fails, set-diff 0 NEW — identical**. So the full suite carries
+  ONE ROTATING happy-dom flake under load; it is not a regression. Reported, not hidden.
+
+### CI GATE — 1 rotating flake, pre-existing, also under load
+  post-fix: 17469 pass / 1 fail. The failing test ROTATES between runs — `E-TYPE-ANY-FORBIDDEN` (proven
+  IDENTICAL on the caf50487 baseline with my code absent), and two tests in
+  `6nz-f4-textarea-rcdata-interp.test.js` — every one ~8-10s and every one 15/15 in isolation. Same class.
+  NOTE: one rotating candidate is "§3: mixed static + interp → concatenated into el.value", which mentions
+  `el.value` and so could plausibly have been MY F5 change. Checked rather than assumed: the whole file
+  passes 15/15 in isolation, and the failure rotates across unrelated files. Not mine.
+
+### P3-FOLLOW caught me a SECOND time (and was right both times)
+  First: my guard READ the deprecated `isComponent`. Reworked onto `resolvedKind`.
+  Second: my helper NAME `isComponentPropAttr` literally contains the substring `isComponent`, and the test
+  greps file TEXT. Renamed to `isDeclaredPropAttr` rather than adding emit-html.ts to the ALLOWED list with
+  a budget — a budget would mask a future REAL routing read in this file. emit-html.ts now contains the
+  token 0 times.
+
+### Per-finding disposition
+  F1 arm payload → module scope    FIXED (global only when engineArm == null; per-arm emission added)
+  F2 template-literal `@`          FAIL-CLOSED + W-CG-VALUE-ATTR-UNLOWERABLE (build succeeds again)
+  F3 style= clobbers show=/if=     FAIL-CLOSED + W-CG-VALUE-ATTR-STYLE-CONFLICT (toggle kept correct)
+  F4 arm value attrs go dead       FIXED (same root cause as F1)
+  F5 value= breaks once dirty      FIXED via the .value PROPERTY + caret guard (not dropped)
+  F6 server-fn Promise             FIXED via a runtime thenable check in the shared apply
+  F7 component's OWN root          FIXED (expander stamps `_componentPropNames`; only PROPS refused)
+  F8 wrong `null` rationale        RE-DERIVED (post-NR re-parse); real hole found + closed via isHtmlElement
+  F9 undeclared iface fields       FIXED (declared; divergent `??` key fallback deleted)
+  F10 expr/condExpr duplication    FIXED (standard expr/exprNode pair)
+
+### Still NOT fixed (all pre-existing drops; none are regressions; none silently widened)
+  - `title=@label` BARE-@ref form emits the LITERAL identifier text (`title="label"`), non-reactive —
+    emit-html.ts "General attribute" fallback, a DIFFERENT path. Strongest follow-up.
+  - `class=(expr)` on a COMPONENT ROOT never reaches the emitter: the expander's class-merge rebuilds
+    `class` from string-literals only (`newAttrs` re-adds class solely when `mergedClass !== null`), so an
+    expr-valued class is dropped BEFORE codegen. Verified on a clean compile; identical pre-diff.
+  - SVG children (`<use xlink:href=(@h)/>`) — `isHtmlElement("use")` is false (not in the registry).
+  - Boolean attrs beyond disabled/readonly/required — they want the BOOL path; widening is forbidden.
+  - `@` inside template literals generally — belongs in emitExprField/rewriteExpr; changes every lowering
+    path in the compiler.
+  - **REPO TEST-INFRA GAP (pre-existing, affects EVERY codegen unit test):** `write:false` skips the S141
+    emitted-JS acorn gate (api.js:2576 nests it in `if (write && outputDir)`), so `r.errors` cannot see
+    codegen validity. My suite now parse-checks locally, but the repo-wide gap remains. PA should decide.
