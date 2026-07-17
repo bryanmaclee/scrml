@@ -1,0 +1,13 @@
+{
+  "id": "sql-commented-query-no-e-sql-003",
+  "description": "§8.1.1 comment-strip over-fire guard (S264 adversarial-review item 1) — a valid parameterized query carrying a leading block comment (`?{`/* fetch active */ SELECT id, text FROM tasks WHERE user_id = ${uid}`}`) MUST stay clean. Comment-stripping in `sqlBodyIsRuntimeExpr` cannot cause a false positive: the non-comment SQL keywords (`SELECT id, text FROM tasks WHERE user_id = `) survive stripping and mark the body as real literal SQL. E-SQL-003 fires only when NOTHING but comments/whitespace/interpolation remains.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/sql-runtime-expr-body-e-sql-003.test.js",
+  "spec": "§8.1.1",
+  "rationale": "§8.1.1 permits `${expr}` interpolations inside a literal `?{}` template (each binds as a positional parameter, §44.5) and SQL comments are ordinary literal content passed to the driver (§8.8/§26). A well-formed query with a comment is validatable literal SQL and SHALL NOT fire E-SQL-003 nor any other E-SQL-* code. Asserted via family-glob absence so any future spurious E-SQL member fails this over-fire guard.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SQL-003"],
+    "notCodePrefixes": ["E-SQL-"]
+  }
+}
