@@ -228,3 +228,21 @@ a CSS `@layer` below the component author scope).
   regression coverage; (d) deriving the initial variant string in the shell path needs the state-decl
   → tag-string lowering (non-trivial). FOLLOW-ON. NO new §34 code (reused existing cell/variant + the
   existing E-THEME-TOKEN-UNKNOWN).
+
+### 2026-07-17 — SPEC amendments (Rule 4 — land WITH the impl) (commit: this)
+- §65 top banner (35233): rewrote the status — Wave-1 emission is LANDED (lists every implemented
+  piece incl. flat-inline lowering + runtime theme-switch + @charset/@import hoist); Waves 2–3 stay
+  Nominal with the genuinely-deferred items named.
+- §65.6: NEW normative paragraph "The runtime reflection (Wave-1 — Implemented)" — the compiler-emitted
+  client-side reactive binding (mount + on-change) reflects `@cell` onto `<html data-scrml-theme-<cell>>`
+  (same attr the variant selector keys off), realizes "switch the cell → the whole page flips"; @media
+  auto-bind needs no reflection; SSR no-flash prestamp noted as a follow-on refinement.
+- §65.4.1: NEW paragraph — the flat-declaration `#{}`→`style=""` path runs the IDENTICAL §65.3.2
+  `@`-sigil lowering as the selector path (theme token / reactive cell / E-THEME-TOKEN-UNKNOWN / bare
+  untouched) — tokens work in the dominant `#{}` pattern.
+- §65.8: NEW bullet — `@charset`/`@import` hoisted out of `@layer global {}` (CSS ordering law:
+  @charset byte-0, @import after the @layer name; decl before any block; nested not hoisted).
+- §65.15: Wave-1 bullet marked LANDED with the full implemented list.
+- NO new §34 diagnostic rows (Task 4 reused existing cell/variant + E-THEME-TOKEN-UNKNOWN). Ran
+  `bun run scripts/regen-spec-index.ts` → SPEC-INDEX.md refreshed (32 rows, missing 0) for the shifted
+  line numbers.
