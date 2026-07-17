@@ -405,3 +405,80 @@ describe("§65.8 — @charset / @import hoist out of @layer global {}", () => {
     expect(r.rest).toContain(`@media screen { @import url("nested.css"); }`);
   });
 });
+
+// ---------------------------------------------------------------------------
+// TASK 2 [86] — flat-inline #{} token lowering (the dominant #{} pattern)
+// (§65.3.2 / §65.4 — a flat #{} child of a component root → inline style="")
+// ---------------------------------------------------------------------------
+
+/**
+ * The dominant corpus pattern: a flat-declaration `#{}` (bare prop:value, no
+ * selectors) as a direct child of a component root element compiles to an
+ * inline `style=""` attribute (DQ-7). Wave-1 must run the `@`-sigil token
+ * lowering there too, not only on the selector path.
+ */
+function compileHtml(source) {
+  const dir = mkdtempSync(join(tmpdir(), "scrml-css-html-"));
+  try {
+    const file = join(dir, "app.scrml");
+    writeFileSync(file, source);
+    const r = compileScrml({ inputFiles: [file], write: false, outputDir: join(dir, "out") });
+    const outputs = [...(r.outputs?.values() ?? [])];
+    const html = outputs.map((o) => o.html ?? "").filter(Boolean).join("\n");
+    return { html, errors: r.errors ?? [], warnings: r.warnings ?? [] };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+describe("§65.3.2 / §65.4 — flat-inline #{} token lowering (inline style)", () => {
+  test("a flat-inline `@brand` lowers to var(--brand); a bare value is untouched", () => {
+    const { html, errors } = compileHtml(`<program>
+  <theme> brand = #2563eb; </theme>
+  const Card = <div props={}>
+      #{ color: @brand; padding: 16px; }
+      hi
+  </>
+  <Card/>
+</program>`);
+    expect(html).toContain(`style="color: var(--brand); padding: 16px;"`);
+    expect(hasCode(errors, "E-THEME-TOKEN-UNKNOWN")).toBe(false);
+  });
+
+  test("a flat-inline unknown `@nope` fires E-THEME-TOKEN-UNKNOWN (same as the selector path)", () => {
+    const { errors } = compileHtml(`<program>
+  <theme> brand = #2563eb; </theme>
+  const Card = <div props={}>
+      #{ color: @nope; }
+      hi
+  </>
+  <Card/>
+</program>`);
+    expect(hasCode(errors, "E-THEME-TOKEN-UNKNOWN")).toBe(true);
+  });
+
+  test("a flat-inline non-theme `@cell` keeps the §25 reactive bridge (var(--scrml-cell))", () => {
+    const { html, errors } = compileHtml(`<program>
+  <accent> = "#ff0000"
+  const Card = <div props={}>
+      #{ color: @accent; }
+      hi
+  </>
+  <Card/>
+</program>`);
+    expect(html).toContain("var(--scrml-accent)");
+    expect(hasCode(errors, "E-THEME-TOKEN-UNKNOWN")).toBe(false);
+  });
+
+  test("a flat-inline with only bare values (no `@`) is byte-identical (untouched)", () => {
+    const { html, errors } = compileHtml(`<program>
+  const Card = <div props={}>
+      #{ color: red; padding: 16px; }
+      hi
+  </>
+  <Card/>
+</program>`);
+    expect(html).toContain(`style="color: red; padding: 16px;"`);
+    expect(hasCode(errors, "E-THEME-TOKEN-UNKNOWN")).toBe(false);
+  });
+});

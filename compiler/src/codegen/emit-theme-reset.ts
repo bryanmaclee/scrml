@@ -155,6 +155,23 @@ export function lowerCssValueRefs(
   });
 }
 
+/**
+ * Every DECLARED `<theme>` token name (base + variant + media re-binds, across
+ * ALL `<theme>` blocks). This is the membership set the use-site `@token` →
+ * `var(--token)` lowering keys off (a variant-only token still lowers, since a
+ * use site may reference it). Shared by `emitThemeCss` (the selector path) and
+ * the flat-inline `#{}` path (emit-html) so both use the IDENTICAL token set.
+ */
+export function collectThemeTokenNames(ctx: ThemeContext): Set<string> {
+  const tokenNames = new Set<string>();
+  for (const theme of ctx.themeDecls) {
+    for (const t of theme.baseTokens ?? []) tokenNames.add(t.name);
+    for (const v of theme.variants ?? []) for (const t of v.tokens) tokenNames.add(t.name);
+    for (const m of theme.mediaBinds ?? []) for (const t of m.tokens) tokenNames.add(t.name);
+  }
+  return tokenNames;
+}
+
 /** Render a `:root { --a: v; --b: w }`-style custom-property block. */
 function renderRootBlock(
   selector: string,
@@ -199,14 +216,12 @@ export function emitThemeCss(
   const context = ctx ?? collectThemeContext(nodes);
   const themes = context.themeDecls;
   const cellNames = context.cellNames;
-  const tokenNames = new Set<string>();
   // Every declared token name (base + variant + media, across ALL themes) — so a
   // use-site reference to a variant-only token still lowers to `var(--token)`.
+  const tokenNames = collectThemeTokenNames(context);
   const globalBase = new Set<string>();
   for (const theme of themes) {
-    for (const t of theme.baseTokens ?? []) { tokenNames.add(t.name); globalBase.add(t.name); }
-    for (const v of theme.variants ?? []) for (const t of v.tokens) tokenNames.add(t.name);
-    for (const m of theme.mediaBinds ?? []) for (const t of m.tokens) tokenNames.add(t.name);
+    for (const t of theme.baseTokens ?? []) globalBase.add(t.name);
   }
   if (themes.length === 0) return { css: "", tokenNames };
 

@@ -1,5 +1,4 @@
 import { collectCssBlocks } from "./collect.ts";
-import { replaceCssVarRefs } from "./utils.ts";
 import { resolveApplyToken } from "../tailwind-classes.js";
 import { CGError } from "./errors.ts";
 import { emitThemeCss, emitResetLayer, lowerCssValueRefs, wrapSelectorWhere, collectThemeContext } from "./emit-theme-reset.ts";
@@ -70,23 +69,22 @@ export function isFlatDeclarationBlock(block: { rules?: unknown; body?: string; 
  * Render a flat-declaration css-inline block as an inline CSS `style=""` value.
  * Returns the raw "prop: value; prop: value;" string (no surrounding quotes).
  * Used by emit-html.ts to inject `style="..."` attributes.
+ *
+ * §65.3.2 / §65.4 (Task 2 [86]) — the OPTIONAL `ctx` threads the `<theme>` token
+ * names + declared cell names so a flat-inline `#{ color: @brand }` on a
+ * component element runs the SAME `@`-sigil lowering the selector path uses
+ * (`@brand` → `var(--brand)` theme token / `var(--scrml-name)` reactive cell /
+ * `E-THEME-TOKEN-UNKNOWN` for neither) — via `renderDeclValue`, NOT a forked
+ * copy. When `ctx` is omitted (legacy callers / unit tests) the behavior is
+ * unchanged: a `@name` keeps the §25 reactive-CSS-var bridge (`var(--scrml-name)`).
  */
-export function renderFlatDeclarationAsInlineStyle(block: { rules?: unknown }): string {
+export function renderFlatDeclarationAsInlineStyle(block: { rules?: unknown }, ctx?: LowerCtx): string {
   const rules = (block as CSSBlock).rules;
   if (!rules || !Array.isArray(rules)) return "";
   const parts: string[] = [];
   for (const rule of rules) {
     if (rule.prop && rule.value !== undefined) {
-      let value = rule.value;
-      if (rule.reactiveRefs && rule.reactiveRefs.length > 0) {
-        if (rule.isExpression) {
-          const exprPropName = `scrml-expr-${rule.reactiveRefs.map((r: { name: string }) => r.name).join("-")}`;
-          value = `var(--${exprPropName})`;
-        } else {
-          value = replaceCssVarRefs(value);
-        }
-      }
-      parts.push(`${rule.prop}: ${value};`);
+      parts.push(`${rule.prop}: ${renderDeclValue(rule as CSSDeclaration, ctx)};`);
     }
   }
   return parts.join(" ");
@@ -144,7 +142,7 @@ function dedupeLastWins(decls: Array<{ prop: string; value: string }>): Array<{ 
  * the §25 reactive-CSS-var bridge + the decidable E-THEME-TOKEN-UNKNOWN check),
  * and the diagnostic sink.
  */
-interface LowerCtx {
+export interface LowerCtx {
   themeTokens: Set<string>;
   cellNames: Set<string>;
   errors?: CGError[];

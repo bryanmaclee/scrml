@@ -153,3 +153,26 @@ a CSS `@layer` below the component author scope).
   `@layer global {}` block, `a{}` still inside the layer, no `@import` trapped. VERIFIED.
 - TEST: +4 tests in css-wave1-emission.test.js (2 pipeline pos, 2 `hoistCharsetAndImports` unit incl.
   the `@media`-nested negative + a `url()`-not-mistaken-for-import guard). 26 pass / 0 fail.
+
+### 2026-07-17 — TASK 2 [86] flat-inline #{} token lowering (commit: this)
+- ROOT CAUSE: `renderFlatDeclarationAsInlineStyle` (emit-css.ts) — the flat `#{}`→`style=""` path
+  (emit-html.ts, a flat `#{}` child of a component root, DQ-7) used `replaceCssVarRefs`
+  (unconditional `@x`→`var(--scrml-x)`), so `@brand` never resolved a theme token + no
+  E-THEME-TOKEN-UNKNOWN. This is the DOMINANT `#{}` corpus shape.
+- FIX (no forked logic): `renderFlatDeclarationAsInlineStyle(block, ctx?)` now REUSES
+  `renderDeclValue` → `lowerCssValueRefs` (identical membership + error semantics to the selector
+  path). NEW exported `collectThemeTokenNames(ctx)` in emit-theme-reset.ts (single source of the
+  token-name set; `emitThemeCss` refactored to reuse it). emit-html.ts builds ONE `flatInlineLowerCtx`
+  from the FULL `fileAST` (shared across the top-level + every nested arm-body generateHtml call, so
+  a flat `@brand` inside a match/engine arm still sees program-scope `<theme>` tokens) and threads it
+  to the flat call site. `LowerCtx` exported from emit-css.ts.
+- Built UNCONDITIONALLY (mirrors generateCss which always builds its LowerCtx) so a themeless-file
+  `@nope` fires E-THEME-TOKEN-UNKNOWN exactly like the selector path; `lowerCssValueRefs` no-ops on
+  non-`@` values → byte-identical for the common case. Removed the now-dead `replaceCssVarRefs` import.
+- Empirical: `#{ color: @brand; padding: 16px; }` → `style="color: var(--brand); padding: 16px;"`;
+  `@nope` → E-THEME-TOKEN-UNKNOWN; `@accent` (state cell) → `var(--scrml-accent)`; bare `red` untouched.
+- No double-fire: generateCss SKIPS flat-declaration blocks; only emit-html lowers them (component
+  scope), only generateCss lowers program-level flat + selector blocks — disjoint.
+- TEST: +4 tests (pos lower / neg unknown / reactive-cell bridge / bare-untouched). FULL suite
+  unit+integration+conformance: **20649 pass / 0 fail** (baseline 20641 + 8 new from Task 1+2). NO
+  corpus regression from the always-build change.
