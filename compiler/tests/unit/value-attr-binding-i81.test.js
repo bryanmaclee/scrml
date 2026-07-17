@@ -731,6 +731,62 @@ describe("§i81.10 — component roots (S239 finding 7)", () => {
   });
 });
 
+describe("§i81.11 — the post-NR `null` population (S239 finding 8)", () => {
+  // The first cut admitted `resolvedKind == null` on a FALSE rationale ("a match
+  // arm body is not NR-stamped"). name-resolver.ts:365-369 DOES recurse into
+  // `anyN.arms`. The measurement was right but the explanation was wrong, and an
+  // unexplained fail-open is a latent hole.
+  //
+  // Real source: emit-match.ts (~545) RE-PARSES each arm's bodyRaw through BS+TAB
+  // as a synthetic fragment AT CODEGEN TIME — long after NR (Stage 3.05) — so
+  // those nodes carry no stamp. `null` therefore means "synthesized after NR".
+  //
+  // The hole was REAL: a DIRECTIVE element inside an arm is also null.
+  test("a NON-HTML element inside a <match> arm emits no DOM binding", () => {
+    const src = `<program>
+      <div>
+        \${
+          type Mode:enum = { A, B }
+          <m>: Mode = .A
+          <x> = "v"
+        }
+        <match for=Mode on=@m>
+          <A><myWidget config=(@x)>w</myWidget></A>
+          <B><span>b</span></B>
+        </match>
+      </div>
+    </program>`;
+    const client = emittedClient(compile(src));
+    // `myWidget` is not an HTML element, so `config=` is not a DOM attribute.
+    // Under the fail-open cut this emitted 2 bogus data-scrml-bind-attr-config
+    // wires. (An imported `<tableFor>` is NOT a usable probe here — it expands to
+    // real markup before codegen, so it never reaches this emitter at all; a
+    // fixture built on it passes whether or not the hole exists.)
+    expect(client).not.toContain("data-scrml-bind-attr-config");
+  });
+
+  test("a real HTML element inside a <match> arm still binds (null must not be blanket-refused)", () => {
+    const src = `<program>
+      <div>
+        \${
+          type Mode:enum = { A, B }
+          <m>: Mode = .A
+          <cls> = "hot"
+        }
+        <match for=Mode on=@m>
+          <A><div class=(@cls)>a</div></A>
+          <B><span>b</span></B>
+        </match>
+      </div>
+    </program>`;
+    const client = emittedClient(compile(src));
+    // Dynamic class= inside an arm is idiomatic — the fail-closed fallback must
+    // discriminate, not blanket-refuse the whole post-NR population.
+    expect(client).toContain("data-scrml-bind-attr-class");
+    expectParses(client);
+  });
+});
+
 describe("§i81.7 — CSS-safe placeholder keys (crash regression)", () => {
   // Found by the blast-radius pass. The catch-all interpolates the attr name
   // into BOTH an HTML attribute and a querySelector attribute SELECTOR. An

@@ -8,7 +8,7 @@ import { validateEmittedArtifact } from "./validate-emit.ts";
 import { emitExprField } from "./emit-expr.ts";
 import { extractReactiveDeps, collectReactiveVarNames, extractReactiveDepsTransitive, buildFunctionBodyRegistry, collectRequestIds } from "./reactive-deps.ts";
 import { hasTemplateInterpolation } from "./rewrite.js";
-import { isRcdataElement } from "../html-elements.js";
+import { isRcdataElement, isHtmlElement } from "../html-elements.js";
 import { CGError } from "./errors.ts";
 import type { BindingRegistry } from "./binding-registry.ts";
 import type { CompileContext } from "./context.ts";
@@ -63,6 +63,52 @@ const FORM_VALUE_ELEMENTS = new Set(["input", "textarea", "select"]);
 // `style=` on the SAME element does `setAttribute("style", …)`, which replaces
 // the WHOLE attribute and destroys whatever they wrote.
 const STYLE_OWNING_DIRECTIVES = ["if", "show"];
+
+/**
+ * i81 (S239 finding 8) — is this ELEMENT one whose attributes are real DOM
+ * attributes? Fail-CLOSED: only a positively-identified HTML element qualifies.
+ *
+ * The markup attribute namespace is shared by three things that all reach the
+ * value-attr emitter, and only the first is a DOM attribute:
+ *   a. real HTML attrs           `<div class=(@m)>`
+ *   b. scrml DIRECTIVE attrs     `<tableFor pick=[...]>`  (a compiler construct)
+ *   c. component call-site props `<List row={...}/>`      (see isComponentPropAttr)
+ *
+ * `resolvedKind` is the NR-authoritative routing signal (NR stamps it at Stage
+ * 3.05; downstream stages read it — the legacy component boolean is a derived
+ * backcompat field and routing on it is asserted against by the P3-FOLLOW test).
+ * So an NR-stamped node is answered by NR: "html-builtin" and nothing else.
+ *
+ * WHY `null` NEEDS A SEPARATE ANSWER — and why the first cut's rationale was
+ * WRONG. That cut admitted `resolvedKind == null` on the claim that "a <match>
+ * arm body is not NR-stamped". FALSE: name-resolver.ts:365-369 explicitly
+ * recurses into `anyN.arms` and walks `arm.body`. The measurement (arm-body
+ * nodes arrive here with resolvedKind === undefined) was nonetheless correct —
+ * the EXPLANATION was wrong, and an unexplained fail-open is a latent hole.
+ *
+ * The real source: emit-match.ts (~545) RE-PARSES each arm's `bodyRaw` through
+ * the BS+TAB pipeline as a synthetic fragment AT CODEGEN TIME. NR ran long
+ * before (Stage 3.05), so those fresh nodes were never stamped. The `null`
+ * population is therefore "markup synthesized AFTER name resolution" — arm
+ * bodies today, and anything a future stage synthesizes.
+ *
+ * That hole was REAL, not theoretical: `<tableFor pick=[...]>` inside a match arm
+ * arrives with resolvedKind === undefined and emitted 2 bogus
+ * `data-scrml-bind-attr-pick` DOM bindings under the first cut.
+ *
+ * So for the post-NR population we fall back to the SYNTACTIC question NR would
+ * have answered — `isHtmlElement`, the compiler's own element registry
+ * (`rendersToDom`). It answers true for div/span/button/svg/g/path and false for
+ * tableFor/formFor/each/match. A dynamic `class=` inside a `<match>` arm is
+ * idiomatic and keeps working; a directive element inside one is refused.
+ */
+function valueAttrElementIsLowerable(node: any, tag: string): boolean {
+  if (node?.resolvedKind === "html-builtin") return true;
+  // Post-NR synthesized markup (re-parsed <match> arm bodies): NR never saw it,
+  // so ask the element registry directly. Fails closed on an unknown tag.
+  if (node?.resolvedKind == null) return isHtmlElement(tag);
+  return false;
+}
 
 /**
  * i81 (S239 finding 7) — is `name` a COMPONENT CALL-SITE PROP on this node?
@@ -2593,7 +2639,7 @@ export function generateHtml(
               });
             }
           } else if (
-            !(node.resolvedKind === "html-builtin" || node.resolvedKind == null) ||
+            !valueAttrElementIsLowerable(node, tag) ||
             isComponentPropAttr(node, name) ||
             isUserComponentMarkup(node) ||
             HTML_BOOLEAN_ATTRS.has(name) ||

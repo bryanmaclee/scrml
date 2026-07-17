@@ -393,3 +393,30 @@ The reviewers are right that the comment was wrong, and the correction MATTERS. 
     remove the F3 style-conflict gate→ 1 test red
 - §i81.6 REWRITTEN: its old assertion "still gets its global attr wire (bool parity)" ENCODED FINDING 1
   AS INTENT. That is the clearest evidence for the reviewers' thesis in the whole diff.
+
+### F8 — RE-DERIVED from the REAL `null` source (the reviewers were right, and it mattered)
+My clause-1 comment claimed "a `<match>` arm body is not NR-stamped". **FALSE** — verified at source:
+`name-resolver.ts:365-369` explicitly recurses into `anyN.arms` and walks `arm.body`. My MEASUREMENT
+(arm-body nodes arrive at emit-html with `resolvedKind === undefined`) was nonetheless correct, so both
+statements are true and I had to find what reconciles them.
+
+**The real source: `emit-match.ts` (~545) RE-PARSES each arm's `bodyRaw` through the BS+TAB pipeline as a
+synthetic fragment AT CODEGEN TIME.** NR ran at Stage 3.05, long before. So the nodes emit-html actually
+sees for arm bodies are post-NR REPLACEMENTS that NR never touched. The `null` population is therefore
+"markup synthesized AFTER name resolution" — arm bodies today, plus whatever a future stage synthesizes.
+
+**The hole was REAL, not theoretical.** Admitting `null` blindly admitted every post-NR node:
+`<myWidget config=(@x)>` inside a match arm emitted **2 bogus `data-scrml-bind-attr-config` DOM wires** on
+a non-HTML element. Now: `resolvedKind === "html-builtin"` → trust NR; `resolvedKind == null` → fall back
+to the SYNTACTIC question NR would have answered, via the compiler's OWN registry `isHtmlElement`
+(`compiler/src/html-elements.js`, `rendersToDom`) — true for div/span/button/svg/g/path, false for
+tableFor/formFor/each/match. Fails closed on an unknown tag. Nothing invented: the registry already
+existed (emit-html already imports `isRcdataElement` from it), which also retro-justifies deleting my
+hand-rolled HTML_ELEMENTS allowlist earlier.
+
+**A vacuous test caught in the act — the same failure mode as the whole round.** My first F8 test used
+`<tableFor pick=[...]>` in an arm. It passed WITH the hole reintroduced: a properly imported `<tableFor>`
+EXPANDS to real markup before codegen and never reaches this emitter, so the fixture could not fail. (The
+"2 pick bindings" I first saw came from a BROKEN-import fixture, where the compile already errors.)
+Replaced with `<myWidget config=(@x)>`, which is mutation-proven: 0 bindings with the fix, 2 with the hole.
+Lesson repeated: I only trust a test I have watched fail.
