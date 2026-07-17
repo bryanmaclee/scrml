@@ -344,3 +344,52 @@ and dropped the duplicated `condExpr`/`condExprNode` (two names for one value = 
 ### The two emitters now SHARE `emitValueAttrApply` (exported from emit-event-wiring)
 Findings 1/4 were a drift between the global and per-arm paths, so the DOM write is now defined exactly
 once and both paths call it.
+
+### F3 (`style=` clobbers show=/if=/transitions) — FAIL-CLOSED + diagnostic
+`setAttribute("style", …)` REPLACES the whole attribute, erasing the `el.style.display` the toggle
+writes and the `opacity` transitions animate — `<div show=(@isOpen) style=(@theme)>` leaves a hidden
+panel PERMANENTLY VISIBLE while `@isOpen` is false. Merging (write individual properties, preserve
+`display`) needs a CSS-text parser AND a defined precedence against the toggles — a real design, not this
+arc. CHOSE: refuse when `style=` co-occurs with `if=`/`show=`/`transition:`/`in:`/`out:`, with
+`W-CG-VALUE-ATTR-STYLE-CONFLICT` steering to `class=` (which composes with the toggle). Keeps the toggle
+CORRECT and the style merely absent = pre-i81. `style=` WITHOUT a display directive still binds normally.
+
+### F5 (`value=` breaks once dirty) — FIXED with the property (not dropped)
+The `value` ATTRIBUTE is only the control's DEFAULT value; the browser ignores it once the control is
+dirty. My R26 "win" was literally this shape (`<input value=${@newOrderItem} oninput=…>`) — a controlled
+input that would silently stop updating after the first keystroke. Reviewers offered property-or-drop; I
+took the PROPERTY: `el.value` is the correct DOM lowering and actually fixes the adopter's shape rather
+than reverting my only real-world improvement. Guarded with `if (el.value !== _scrml_s)` so re-assigning
+an identical string cannot reset the caret mid-typing. Absence clears to `""` (a form control always HAS
+a value; `el.value = null` would render the literal "null"). Non-form elements keep setAttribute.
+
+### F7 (component's OWN root) — FIXED (not scoped out)
+`_expandedFrom != null` refused EVERY attribute of every expanded root, so #81 survived for the whole
+user-component class — a hole in the fix's own premise. The expander knows the answer: it now stamps
+`_componentPropNames` (`def.propsDecl`) on the expanded root, and emit-html refuses ONLY DECLARED PROPS.
+A component's own `title=(@theme)`/`style=(…)`/`data-*` on its root now binds; `<List row={…}/>` is still
+refused (snippet-002 still compiles). Fails CLOSED when the stamp is absent (secondary/older expansion
+paths). Touching component-expander.ts is a 2-line additive stamp with no behavior change of its own.
+KNOWN, VERIFIED, PRE-EXISTING: `class=(expr)` on a component ROOT never reaches the emitter at all — the
+expander's class-merge rebuilds `class` from string-literals only (`newAttrs` re-adds class solely when
+`mergedClass !== null`), so an expr-valued class is dropped BEFORE codegen. Confirmed on a clean compile.
+Unrelated to i81 and identical pre-diff; reported as an expander bug, not fixed here.
+
+### F8 (PLAUSIBLE — my rationale was factually wrong) — RE-DERIVED
+The reviewers are right that the comment was wrong, and the correction MATTERS. See the next section.
+
+### THE TEST SUITE NOW ASSERTS EVALUATION, NOT EMISSION
+- `expectParses(client)` on every fixture — catches the raw-`@` SyntaxError that `r.errors` cannot see.
+- `expectNoModuleScopeRef(client, ident)` — an ACORN SCOPE-WALK, not a regex: an unbound reference is a
+  scoping property, and no regex can tell `((cls))` at module scope from `((cls))` inside
+  `function wire_Ok(_root, cls)` — that distinction IS the bug. (First cut false-positived on
+  `{ cls: "hot" }` property KEYS; now skips non-reference Identifier positions.)
+- Harness fix: `compileScrml` returns `errors` and `warnings` SEPARATELY, so a severity:"warning" CGError
+  never appears in `r.errors` — my first disposition tests asserted against the wrong array.
+- **MUTATION-TESTED — every new guard is proven to FAIL when its fix is removed** (a test that cannot
+  fail is exactly what got me here):
+    revert F1 (arm→global)          → 2 tests red
+    remove the F2 parse guard        → 2 tests red
+    remove the F3 style-conflict gate→ 1 test red
+- §i81.6 REWRITTEN: its old assertion "still gets its global attr wire (bool parity)" ENCODED FINDING 1
+  AS INTENT. That is the clearest evidence for the reviewers' thesis in the whole diff.

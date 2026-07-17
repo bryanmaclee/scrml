@@ -65,6 +65,39 @@ const FORM_VALUE_ELEMENTS = new Set(["input", "textarea", "select"]);
 const STYLE_OWNING_DIRECTIVES = ["if", "show"];
 
 /**
+ * i81 (S239 finding 7) — is `name` a COMPONENT CALL-SITE PROP on this node?
+ *
+ * Component expansion runs BEFORE codegen and merges the call site's props onto
+ * the component's ROOT element, so by the time emit-html sees the node its tag is
+ * the definition's root element (`div`), not `List`, and its `attrs` are a MERGE
+ * of the definition's own attributes and the caller's props. The two must be
+ * treated oppositely:
+ *
+ *   <List row={ (item) => <span>…</span> }/>   ← a §14.9 parametric-snippet PROP.
+ *       A compiler construct, consumed by the snippet machinery. Lowering it
+ *       produced `const _scrml_v = ((item) => <span>…` — markup spliced into JS
+ *       ⇒ E-CODEGEN-INVALID-LOGIC.
+ *   const Card = <div class=(@theme)>…        ← the component's OWN root attr.
+ *       An ordinary reactive value attribute that SHOULD lower.
+ *
+ * The first cut refused on `_expandedFrom != null`, i.e. EVERY attribute of every
+ * expanded root — which left issue #81 unfixed for the whole class of user
+ * components (S239 finding 7). The expander now stamps `_componentPropNames`
+ * (its `def.propsDecl`), which is the precise discriminator: a DECLARED prop is a
+ * construct; anything else on the root is markup.
+ *
+ * Fails CLOSED when the stamp is absent on an expanded root (older/secondary
+ * expansion paths): refuse, keeping the pre-i81 drop rather than risking a
+ * miscompile.
+ */
+function isComponentPropAttr(node: any, name: string): boolean {
+  if (node?._expandedFrom == null) return false;
+  const declared = node._componentPropNames;
+  if (!Array.isArray(declared)) return true;
+  return declared.includes(name);
+}
+
+/**
  * i81 (S239 finding 2/3) — may this reactive VALUE attribute be lowered to
  * CORRECT output? Returns false (with a diagnostic) for shapes we cannot lower
  * faithfully, so the attribute keeps its pre-i81 behavior (dropped) instead of
@@ -2561,7 +2594,7 @@ export function generateHtml(
             }
           } else if (
             !(node.resolvedKind === "html-builtin" || node.resolvedKind == null) ||
-            node._expandedFrom != null ||
+            isComponentPropAttr(node, name) ||
             isUserComponentMarkup(node) ||
             HTML_BOOLEAN_ATTRS.has(name) ||
             !valueAttrIsLowerable(val, name, attrs, tag, attr, node, errors)

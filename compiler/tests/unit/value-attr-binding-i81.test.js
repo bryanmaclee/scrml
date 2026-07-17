@@ -29,6 +29,7 @@ import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import * as acorn from "acorn";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
@@ -54,7 +55,7 @@ function compile(scrmlSource, testName) {
         clientJs = output.clientJs ?? null;
       }
     }
-    return { errors: result.errors ?? [], html, clientJs };
+    return { errors: result.errors ?? [], warnings: result.warnings ?? [], html, clientJs };
   } finally {
     if (existsSync(tmpInput)) rmSync(tmpInput);
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
@@ -63,6 +64,95 @@ function compile(scrmlSource, testName) {
 
 const emittedHtml = (r) => r.html ?? "";
 const emittedClient = (r) => r.clientJs ?? "";
+// compileScrml returns errors and warnings SEPARATELY — a severity:"warning"
+// CGError lands in `warnings`, never in `errors`.
+const diagCodes = (r) => [...r.errors, ...r.warnings].map((e) => e.code ?? "");
+
+// ---------------------------------------------------------------------------
+// S239 — the EVALUATION bar.
+//
+// The first cut of this suite asserted only that wires were EMITTED, and stayed
+// 100% green through 8 real correctness bugs: a ReferenceError that killed all
+// page wiring, a client bundle that was a SyntaxError, a Promise stringified into
+// the DOM. Emission proves nothing about evaluation.
+//
+// It is worse than it looks: `compileScrml({ write: false })` — which every
+// codegen unit test uses — SKIPS the S141 emitted-JS acorn gate, because
+// api.js:2576 nests it inside `if (write && outputDir)`. So `r.errors` is
+// STRUCTURALLY BLIND to codegen validity: it is `[]` while the bundle is a
+// SyntaxError. `expect(r.errors).toEqual([])` is NOT a validity assertion.
+// These helpers close that hole locally.
+// ---------------------------------------------------------------------------
+
+/** Parse-check the emitted bundle. Catches the raw-`@` template-literal leak. */
+function expectParses(client) {
+  expect(client.length).toBeGreaterThan(0);
+  try {
+    // Parses without executing — the same failure `node --check` reports.
+    new Function(client);
+  } catch (e) {
+    throw new Error(
+      `emitted client bundle is not valid JavaScript: ${e.message}
+` +
+      `This is what \`r.errors === []\` cannot see (write:false skips the emit gate).`,
+    );
+  }
+}
+
+/**
+ * Assert `ident` is not referenced at MODULE scope — i.e. outside every
+ * `function …(…, ident, …)` that binds it as a parameter. An arm PAYLOAD ident
+ * only exists as a wire-fn parameter; emitting it globally throws a
+ * ReferenceError out of the DOMContentLoaded handler and kills ALL page wiring.
+ */
+function expectNoModuleScopeRef(client, ident) {
+  // Acorn scope-walk rather than a regex: an unbound reference is a SCOPING
+  // property, and regexes cannot tell `((cls))` at module scope from `((cls))`
+  // inside `function wire_Ok(_root, cls)`. That distinction IS the bug.
+  const ast = acorn.parse(client, { ecmaVersion: 2022 });
+  const unbound = [];
+  let boundSomewhere = false;
+
+  const walk = (node, bound) => {
+    if (!node || typeof node.type !== "string") return;
+    let scope = bound;
+    if (
+      node.type === "FunctionDeclaration" ||
+      node.type === "FunctionExpression" ||
+      node.type === "ArrowFunctionExpression"
+    ) {
+      const names = (node.params ?? [])
+        .filter((p) => p && p.type === "Identifier")
+        .map((p) => p.name);
+      if (names.includes(ident)) boundSomewhere = true;
+      if (names.length > 0) scope = new Set([...bound, ...names]);
+    }
+    if (node.type === "Identifier" && node.name === ident && !scope.has(ident)) {
+      unbound.push(node.start);
+    }
+    for (const key of Object.keys(node)) {
+      if (key === "type" || key === "start" || key === "end" || key === "loc") continue;
+      // An Identifier in these positions is a NAME, not a reference to a
+      // binding: `{ cls: "hot" }` (property key) and `o.cls` (member property)
+      // are not reads of `cls`. Counting them produced false positives on
+      // `_scrml_reactive_set("r", { variant: "Ok", data: { cls: "hot" } })`.
+      if (key === "key" && node.type === "Property" && !node.computed) continue;
+      if (key === "property" && node.type === "MemberExpression" && !node.computed) continue;
+      const v = node[key];
+      if (Array.isArray(v)) {
+        for (const c of v) if (c && typeof c.type === "string") walk(c, scope);
+      } else if (v && typeof v.type === "string") {
+        walk(v, scope);
+      }
+    }
+  };
+  walk(ast, new Set());
+
+  // The payload MUST be bound as a wire-fn parameter somewhere, or the attr is
+  // simply not wired at all and this assertion would pass vacuously.
+  expect(boundSomewhere).toBe(true);
+  expect(unbound).toEqual([]);
+}
 
 describe("§i81.1 — the issue's own reproducer: class= is no longer dropped", () => {
   test("ternary class= emits a data-scrml-bind-attr-class placeholder", () => {
@@ -392,54 +482,252 @@ describe("§i81.5 — no regressions on the paths that already worked", () => {
     </program>`;
     const r = compile(src);
     // The exact regression: a codegen crash, not a wrong attribute.
-    expect(r.errors.map((e) => e.code ?? "")).not.toContain("E-CODEGEN-INVALID-LOGIC");
+    expect(diagCodes(r)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     // The prop must NOT be lowered as a DOM attribute.
     expect(emittedHtml(r)).not.toContain("data-scrml-bind-attr-row");
     expect(emittedClient(r)).not.toContain('setAttribute("row"');
   });
 });
 
-describe("§i81.6 — <match> arm interaction (blast radius)", () => {
-  // Found by the blast-radius pass, NOT by the brief (which listed 3
-  // touchpoints; this is a 4th). emit-variant-guard.ts's `wireableLogic` filter
-  // excludes isConditionalDisplay/isVisibilityToggle/isMountToggle/
-  // isReactiveBoolAttr from the per-arm reactive-TEXT emission. A value-attr
-  // binding has kind === undefined, so without a symmetric exclusion it fell
-  // through to that branch and emitted
-  // `_root.querySelector('[data-scrml-logic="_scrml_attr_class_1"]')` — a
-  // selector that can NEVER match a `data-scrml-bind-attr-class` placeholder.
-  // A dead wire. The bool path is excluded and emits only the global wire; this
-  // asserts the value path now behaves identically.
-  const armSrc = `<program>
+describe("§i81.6 — <match> arm scoping (S239 findings 1 + 4)", () => {
+  // THE test this suite got wrong. Its first cut asserted the arm value attr
+  // "still gets its global attr wire (bool parity)" — which IS the bug: a value
+  // attr in an arm was kept in GLOBAL emission and excluded per-arm, the exact
+  // inverse of correct. An emit-only assertion encoded the defect as intent.
+  //
+  // Emitting globally is catastrophic, not cosmetic: the expr commonly reads the
+  // arm's PAYLOAD binding, which exists only as a wire-fn parameter, so module
+  // scope gets `const _scrml_v = ((cls));` → ReferenceError at DOMContentLoaded.
+  // The throw escapes the whole wiring handler, so EVERY listener and EVERY
+  // effect on the page never wires. Pre-i81 the attr was merely dropped and the
+  // page worked — a dead page is worse than the bug being fixed.
+  const payloadSrc = `<program>
     <div>
       \${
-        type Mode:enum = { A, B }
-        <m>: Mode = .A
-        <cls> = "hot"
+        type Res:enum = {
+          Ok(cls: string)
+          Err
+        }
+        <r>: Res = .Ok("hot")
       }
-      <match for=Mode on=@m>
-        <A><div class=(@cls)>arm-a</div></A>
-        <B><span title=(@cls)>arm-b</span></B>
+      <match for=Res on=@r>
+        <Ok(cls)><div class=(cls)>ok</div></Ok>
+        <Err><span>err</span></Err>
       </match>
     </div>
   </program>`;
 
-  test("a value attr in a match arm does NOT emit a dead data-scrml-logic wire", () => {
-    const r = compile(armSrc);
+  test("an arm PAYLOAD ident is never referenced at module scope (ReferenceError guard)", () => {
+    const r = compile(payloadSrc);
     expect(r.errors).toEqual([]);
     const client = emittedClient(r);
-    const placeholder = emittedHtml(r).match(/data-scrml-bind-attr-class="([^"]+)"/)?.[1]
-      ?? client.match(/data-scrml-bind-attr-class="([^"]+)"/)?.[1];
-    expect(placeholder).toBeTruthy();
-    // The exact regression: the arm wire must not look for this placeholder id
-    // under the reactive-text `data-scrml-logic` selector.
-    expect(client).not.toContain(`data-scrml-logic="${placeholder}"`);
+    expectParses(client);
+    // The regression: `((cls))` inside _scrml_nav_rewire.
+    expectNoModuleScopeRef(client, "cls");
   });
 
-  test("a value attr in a match arm still gets its global attr wire (bool parity)", () => {
-    const client = emittedClient(compile(armSrc));
-    expect(client).toMatch(/querySelector\('\[data-scrml-bind-attr-class="[^"]+"\]'\)/);
-    expect(client).toContain('setAttribute("class", String(');
+  test("the arm payload value attr is wired INSIDE the arm wire fn, via _root", () => {
+    const client = emittedClient(compile(payloadSrc));
+    // The wire fn must bind the payload as a parameter AND wire the attr there.
+    expect(client).toMatch(/function\s+_scrml_[A-Za-z0-9_]*wire_Ok\(_root, cls\)/);
+    expect(client).toMatch(/_root\.querySelector\(.*data-scrml-bind-attr-class/);
+    expect(client).toContain('setAttribute("class"');
+  });
+
+  test("an arm whose ONLY binding is a value attr does not get a no-op wire fn", () => {
+    // Regression on the early-return shell: `wireableValueAttrs` had to be added
+    // to the "nothing to wire" test or the arm fn returned `function() {}`.
+    const client = emittedClient(compile(payloadSrc));
+    expect(client).not.toMatch(/function\s+_scrml_[A-Za-z0-9_]*wire_Ok\(_root, cls\)\s*\{\s*return function\(\)\s*\{\};\s*\}/);
+  });
+
+  test("the per-arm wire is disposed on variant swap (no leak onto a detached node)", () => {
+    const client = emittedClient(compile(payloadSrc));
+    // Same contract the class:/attr-tpl per-arm loop uses.
+    expect(client).toMatch(/_disposers\.push\(_scrml_effect\(function\(\) \{ \{ const _scrml_w/);
+  });
+
+  test("a reactive-cell value attr in an arm also wires per-arm, not globally", () => {
+    const src = `<program>
+      <div>
+        \${
+          type Mode:enum = { A, B }
+          <m>: Mode = .A
+          <cls> = "hot"
+        }
+        <match for=Mode on=@m>
+          <A><div class=(@cls)>a</div></A>
+          <B><span title=(@cls)>b</span></B>
+        </match>
+      </div>
+    </program>`;
+    const r = compile(src);
+    expect(r.errors).toEqual([]);
+    const client = emittedClient(r);
+    expectParses(client);
+    expect(client).toMatch(/_root\.querySelector\(.*data-scrml-bind-attr-class/);
+    // Must NOT also be wired from the global pass (double-wiring a node that the
+    // arm swap replaces).
+    expect(client).not.toMatch(/\(root \|\| document\)\.querySelector\('\[data-scrml-bind-attr-class/);
+  });
+
+  test("a value attr in a match arm emits no dead data-scrml-logic wire", () => {
+    const client = emittedClient(compile(payloadSrc));
+    // The arm body is emitted as a JS STRING inside client.js, so the quotes
+    // around the placeholder are backslash-escaped in the source text.
+    const ph = client.match(/data-scrml-bind-attr-class=\\"([^"\\]+)/)?.[1];
+    expect(ph).toBeTruthy();
+    // A value-attr placeholder can never match a reactive-TEXT selector.
+    expect(client).not.toContain(`data-scrml-logic="${ph}"`);
+  });
+});
+
+describe("§i81.9 — fail-closed dispositions (S239 findings 2, 3, 5, 6)", () => {
+  // The rule this round established: a shape that cannot be lowered CORRECTLY
+  // keeps its pre-i81 drop AND says so. Never emit hopeful JS. A silent drop is
+  // a bug; a page that loads dead is worse than the bug.
+
+  test("F2: a template literal reading @cell drops with a diagnostic, and the bundle still parses", () => {
+    const src = `<program>
+      <c> = "red"
+      <div style=(\`color: \${@c}\`)>a</div>
+    </program>`;
+    const r = compile(src);
+    // `emitExprField` emits a template literal verbatim, so the `@c` survives
+    // into the JS. Pre-i81 the attr was dropped and the bundle stayed valid; the
+    // first cut emitted `(\`color: \${@c}\`)` — a SyntaxError — and via the CLI
+    // aborted the WHOLE compile with E-CODEGEN-INVALID-LOGIC on an idiomatic shape.
+    const codes = diagCodes(r);
+    expect(codes).toContain("W-CG-VALUE-ATTR-UNLOWERABLE");
+    expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
+    // The attribute is NOT emitted (pre-i81 parity) …
+    expect(emittedHtml(r)).not.toContain("data-scrml-bind-attr-style");
+    // … and the bundle is valid JS. THIS is the assertion `r.errors` cannot make.
+    expectParses(emittedClient(r));
+  });
+
+  test("F2: the diagnostic is a WARNING — the build still succeeds", () => {
+    const src = `<program>
+      <c> = "red"
+      <div style=(\`color: \${@c}\`)>a</div>
+    </program>`;
+    const r = compile(src);
+    const w = r.warnings.find((e) => (e.code ?? "") === "W-CG-VALUE-ATTR-UNLOWERABLE");
+    expect(w).toBeTruthy();
+    // Pre-i81 this file compiled clean. Failing the BUILD would be its own
+    // regression, so the disposition must be warn-and-drop, not error.
+    expect(w.severity).toBe("warning");
+  });
+
+  test("F3: style= co-occurring with show= drops style and keeps the toggle correct", () => {
+    const src = `<program>
+      <isOpen> = false
+      <theme> = "color: red"
+      <div show=@isOpen style=(@theme)>panel</div>
+    </program>`;
+    const r = compile(src);
+    const html = emittedHtml(r);
+    expect(diagCodes(r)).toContain("W-CG-VALUE-ATTR-STYLE-CONFLICT");
+    // setAttribute("style", …) replaces the WHOLE attribute, erasing the
+    // el.style.display the toggle writes → a hidden panel becomes permanently
+    // visible while @isOpen is still false.
+    expect(html).not.toContain("data-scrml-bind-attr-style");
+    expect(html).toMatch(/data-scrml-bind-show="[^"]+"/);
+  });
+
+  test("F3: style= WITHOUT a display directive still binds normally", () => {
+    const src = `<program>
+      <theme> = "color: blue"
+      <div style=(@theme)>plain</div>
+    </program>`;
+    const r = compile(src);
+    expect(diagCodes(r)).not.toContain("W-CG-VALUE-ATTR-STYLE-CONFLICT");
+    expect(emittedHtml(r)).toMatch(/data-scrml-bind-attr-style="[^"]+"/);
+  });
+
+  test("F5: value= on a form control writes the .value PROPERTY, not the attribute", () => {
+    const src = `<program>
+      <name> = "x"
+      <input type="text" value=(@name)/>
+    </program>`;
+    const client = emittedClient(compile(src));
+    // The value ATTRIBUTE is only the DEFAULT value: the browser stops
+    // reflecting it once the control is dirty, so a reactive value= lowered via
+    // setAttribute silently stops applying after the user types.
+    expect(client).toContain("el.value = _scrml_s");
+    expect(client).not.toContain('setAttribute("value"');
+    // Guarded so re-assigning an identical string cannot reset the caret.
+    expect(client).toContain("if (el.value !== _scrml_s)");
+  });
+
+  test("F5: value= on a NON-form element still uses setAttribute", () => {
+    const src = `<program>
+      <lbl> = "L"
+      <div value=(@lbl)>x</div>
+    </program>`;
+    const client = emittedClient(compile(src));
+    expect(client).toContain('setAttribute("value", String(_scrml_x))');
+  });
+
+  test("F6: a promise-returning expr is awaited, not stringified to [object Promise]", () => {
+    const src = `<program>
+      <mode> = "a"
+      <div class=(@mode)>x</div>
+    </program>`;
+    const client = emittedClient(compile(src));
+    // Runtime thenable check rather than a compile-time server-fn name match:
+    // fnNameMap is not in scope in emit-variant-guard, so a compile-time test
+    // could not cover the per-arm path at all.
+    expect(client).toContain('typeof _scrml_v.then === "function"');
+    expect(client).toContain("_scrml_v.then(_scrml_w)");
+  });
+});
+
+describe("§i81.10 — component roots (S239 finding 7)", () => {
+  test("a component's OWN root value attr binds; a declared PROP never does", () => {
+    const src = `<program>
+      \${ @theme = "hot" }
+      \${
+        const Card = <div title=(@theme) props={ label: string }>
+          <span>\${label}</span>
+        </div>
+      }
+      <Card label="hello"/>
+    </program>`;
+    const r = compile(src);
+    const html = emittedHtml(r);
+    // Finding 7: refusing on `_expandedFrom != null` refused EVERY attribute of
+    // every expanded root, leaving #81 unfixed for the whole user-component
+    // class. The expander now stamps `_componentPropNames`, so only DECLARED
+    // props are refused.
+    expect(html).toMatch(/data-scrml-bind-attr-title="[^"]+"/);
+    expect(html).not.toContain("data-scrml-bind-attr-label");
+    expectParses(emittedClient(r));
+  });
+
+  test("a parametric-snippet prop is still refused (no markup spliced into JS)", () => {
+    const src = `<program>
+      \${
+        type Item:struct = {
+          id:    number,
+          label: string,
+        }
+      }
+      \${
+        const List = <div class="list" props={
+            items:  Item[],
+            row:    snippet(item: Item),
+        }>
+            \${ for (i of items) { lift <div class="list__row">\${ row(i) }</div> } }
+        </div>
+      }
+      \${ @items = [{ id: 1, label: "First" }] }
+      <List items=@items row={ (item) => <span>\${item.id}</span> }/>
+    </program>`;
+    const r = compile(src);
+    expect(diagCodes(r)).not.toContain("E-CODEGEN-INVALID-LOGIC");
+    expect(emittedHtml(r)).not.toContain("data-scrml-bind-attr-row");
+    expectParses(emittedClient(r));
   });
 });
 
