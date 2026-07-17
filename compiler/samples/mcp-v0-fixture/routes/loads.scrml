@@ -12,7 +12,7 @@
 // routes/index.scrml; the page does not gate on a role, so the chunk emits
 // for all roles including Anonymous + Driver + Admin).
 
-<program title="Loads" auth="required">
+<program title="Loads" auth="required" db="./app.db">
 
 type LoadPhase:enum = {
   Idle

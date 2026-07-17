@@ -52,7 +52,8 @@ function compile(src, baseName) {
 }
 
 // A body-form <request> calling a server fn (escalates to a route via ?{}).
-const REQ_SRC = `\${
+const REQ_SRC = `<program db="./app.db">
+\${
     type User:struct = { id: number, name: string }
     <userData> : User | not = not
     function loadUser() : User | not {
@@ -68,6 +69,7 @@ const REQ_SRC = `\${
     <div id="err" if=\${<#userReq>.error}>failed</>
     <p id="who" if=\${<#userReq>.data}>\${@userData?.name}</>
 </page>
+</program>
 `;
 
 // ---------------------------------------------------------------------------
@@ -131,7 +133,8 @@ describe("§A: the per-route stub surfaces a non-2xx (non-envelope) as a rejecti
 });
 
 describe("§A: deps drive a reactive re-fetch effect (§6.7.7 re-execution)", () => {
-  const DEPS_SRC = `\${
+  const DEPS_SRC = `<program db="./app.db">
+\${
     type User:struct = { id: number, name: string }
     <userId> = 1
     <userData> : User | not = not
@@ -146,6 +149,7 @@ describe("§A: deps drive a reactive re-fetch effect (§6.7.7 re-execution)", ()
     </>
     <p>\${<#userReq>.loading}</>
 </page>
+</program>
 `;
 
   test("an inferred `@userId` dep wraps the fetch in a reactive effect", () => {

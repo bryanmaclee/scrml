@@ -26,7 +26,22 @@
 // markup section (S86 styling rule: split per section, never one centralised
 // block). Steps: Info → Preferences → Confirm.
 
-<program>
+<program db="./signups.db">
+
+  // The signup persists to a real SQLite table. `<schema>` (§39) declares the
+  // shape `scrml migrate` creates; `db=` on `<program>` gives the `?{}` INSERT
+  // its connection (§44.7) — without it the write has no database and the row
+  // is silently dropped (E-SQL-004).
+  <schema>
+    signups {
+      id:          integer primary key
+      first_name:  text not null
+      last_name:   text not null
+      email:       text not null
+      theme:       text not null
+      newsletter:  boolean default(0)
+    }
+  </>
 
   type Step:enum = { Info, Preferences, Confirm }
 

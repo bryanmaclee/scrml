@@ -1,3 +1,4 @@
+<program db="./app.db">
 ${
     <top> = []
     function topTwo() {
@@ -9,3 +10,4 @@ ${
 }
 <button id="load" onclick=onLoad()>Top two</>
 <p if=@top id="p">top</>
+</program>

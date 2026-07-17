@@ -1,7 +1,7 @@
 import { CGError } from "./errors.ts";
 import { genVar, getVarCounter, setVarCounter } from "./var-counter.ts";
 import { routePath, paramSignature, paramName, stripPagesPrefix } from "./utils.ts";
-import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, serverVarDeclLoadKind, isServerOnlyNode, containsSqlOrTransaction } from "./collect.ts";
+import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, serverVarDeclLoadKind, isServerOnlyNode, containsSqlOrTransaction, containsSql } from "./collect.ts";
 import { emitLogicNode, emitFnShortcutBody } from "./emit-logic.ts";
 import { computeAsyncFnNames, emitLibraryFnMember } from "./emit-library-shared.ts";
 import { getNodes } from "./collect.ts";
@@ -13,6 +13,7 @@ import { emitExpr, emitExprField, setServerAsyncClassifier, type EmitExprContext
 import type { CompileContext } from "./context.ts";
 import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
 import { resolveDbDriver } from "./db-driver.ts";
+import { isLibraryShapedFile } from "../tool-program.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
 import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRelative, basename as _pathBasename } from "node:path";
@@ -3932,6 +3933,15 @@ export function generateServerJs(
   }
   if (usedIdents.size > 0) {
     const dbScopes = collectDbScopes(fileAST);
+    // §8.1.1 / §44.7 E-SQL-004 gate — fire ONLY for a genuine `?{}` SQL block
+    // (`containsSql`, AST-level: `sql` / `sql-ref` node) with no resolvable db,
+    // and ONLY for a NON-library file (the §44.7.1 module-with-db-context carve-out
+    // is E-SQL-009). A `_scrml_sql` reference can ALSO originate from the §19.9.6
+    // idempotency-key shadow table (no `?{}` in source) — that missing-db case has
+    // its OWN diagnostic (E-CPS-NONIDEM-NO-STORAGE), so gating on `containsSql`
+    // avoids mislabeling it E-SQL-004. Computed once; the error is file-level.
+    const eSqlFireEligible = containsSql(fileAST) && !isLibraryShapedFile(fileAST);
+    let eSql004Fired = false;
     const declLines: string[] = [];
     declLines.push("");
     declLines.push("// --- Bug 3a (§44.2): Bun.SQL handle declarations (compiler-generated) ---");
@@ -3950,15 +3960,47 @@ export function generateServerJs(
     for (const ident of sortedIdents) {
       const scope = dbScopes.get(ident);
       if (!scope) {
-        // No matching scope was found in the file AST. This indicates an
-        // upstream invariant violation — the body referenced a SQL handle
-        // but no `<program db=>` / `<db src=>` declared one. Emit a
-        // defensive fallback to `:memory:` and a comment so the resulting
-        // file at least parses; the actual pipeline failure (E-SQL-004 —
-        // `?{}` with no `db=` ancestor) should have fired upstream.
+        // No matching scope was found in the file AST — the body references a
+        // `_scrml_sql` handle but no `<program db=>` / `<db src=>` declared one.
+        // §8.1.1 / §44.7: a `?{}` block with no `db=` in any ancestor `<program>`
+        // (and the file is NOT a module-with-db-context, §44.7.1) SHALL be
+        // E-SQL-004 — the fail-CLOSED gate. Historically this path shipped a
+        // silent `new SQL(":memory:")` stub (ephemeral store → runtime data loss:
+        // every query hits an empty in-memory db and returns nothing). We now fire
+        // the SHALL-error instead of papering over the missing config.
+        //
+        // Boundary (conservative — a false positive HARD-ERRORS valid code):
+        //   - Gated on `eSqlFireEligible` (a real `?{}` block + non-library file):
+        //     a library-shaped file (§21.5 module-with-db-context) resolves to
+        //     E-SQL-009 (emit-tool.ts:generateToolLibraryJs) NOT E-SQL-004; and a
+        //     `_scrml_sql` reference from the §19.9.6 idempotency shadow table (no
+        //     `?{}`) resolves to E-CPS-NONIDEM-NO-STORAGE. In `--mode library`
+        //     `generateServerJs` still runs (output discarded) over the SHARED
+        //     `errors` array, so the library guard is load-bearing here.
+        //   - A configured db whose FILE is merely absent at compile time still
+        //     produces a scope (this branch is `!scope`), so the in-memory
+        //     compile-time VALIDATION path is unaffected — E-SQL-004 is about
+        //     MISSING `db=` CONFIG, not an absent file.
+        //   - File-level: fire at most once even if multiple handles are unscoped.
+        if (eSqlFireEligible && !eSql004Fired) {
+          eSql004Fired = true;
+          errors.push(new CGError(
+            "E-SQL-004",
+            "E-SQL-004: a `?{}` SQL block has no `db=` declaration in any ancestor `<program>`. " +
+            "Add a `db=` attribute to the enclosing `<program>` element, e.g. " +
+            "`<program db=\"./app.db\">` for SQLite or `<program db=\"postgres://...\">` for Postgres. " +
+            "Without it the query has no database connection.",
+            { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+            "error",
+          ));
+        }
+        // Defensive stub so the emitted file still parses (the E-SQL-004 above is a
+        // FATAL error; the build fails before this artifact is trusted). When the
+        // fire is NOT eligible (idempotency shadow-table / library) the stub is the
+        // unchanged prior behavior — the sibling diagnostic owns that case.
         declLines.push(
-          `// WARNING: ${ident} referenced but no matching <program db=> / <db src=> found; ` +
-          `falling back to :memory: (likely an upstream E-SQL-004 invariant violation).`,
+          `// WARNING: ${ident} referenced but no matching <program db=> / <db src=> found ` +
+          `(E-SQL-004 fired above); defensive :memory: stub follows.`,
         );
         declLines.push(`const ${ident} = new SQL(":memory:");`);
         continue;

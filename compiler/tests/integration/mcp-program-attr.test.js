@@ -57,7 +57,7 @@ const FIXTURE_BODY = `type LoadPhase:enum = { Idle, Loading, Loaded(rows: int) }
 `;
 
 function fixtureWithProgramAttr(programAttr) {
-  return `<program ${programAttr}>\n${FIXTURE_BODY}</program>\n`;
+  return `<program ${programAttr} db="./app.db">\n${FIXTURE_BODY}</program>\n`;
 }
 
 // ---------------------------------------------------------------------------

@@ -9,7 +9,18 @@
 // The domain is deliberately trivial — load a short list of items — so the
 // LESSON is the whole point, not the domain.
 
-<program>
+<program db="./items.db">
+
+    // The item list is loaded from a real SQLite table. `<schema>` (§39) declares
+    // it; `db=` on `<program>` scopes the `?{}` SELECT (§44.7) — without it the
+    // query has no database (E-SQL-004). The domain stays deliberately trivial:
+    // the LESSON is the engine, not the table.
+    <schema>
+      items {
+        id:    integer primary key
+        name:  text not null
+      }
+    </>
 
     // ─────────────────────────────────────────────────────────────────────
     // (a) THE SMELL — three booleans. DO NOT WRITE THIS. (Kept in a comment

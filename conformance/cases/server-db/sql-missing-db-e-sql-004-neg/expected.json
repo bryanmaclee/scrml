@@ -1,0 +1,13 @@
+{
+  "id": "sql-missing-db-e-sql-004-neg",
+  "description": "§8.1.1 / §44.7 — a `?{}` SQL block whose server function has NO `db=` in any ancestor `<program>` (and the file is not a §44.7.1 module-with-db-context) fires E-SQL-004. Before the fix, codegen silently emitted `new SQL(\":memory:\")` (an ephemeral empty store → runtime data loss); the SHALL-error was cataloged but never fired.",
+  "language-version": "1.0",
+  "spec": "§8.1.1, §44.2, §44.7",
+  "source-test": "compiler/src/codegen/emit-server.ts (generateServerJs db-handle decl)",
+  "rationale": "§44.2 driver resolution step 4: `If no db= found, emit E-SQL-004`. `getUsers` escalates to the server boundary by its `?{}` body; with no `<program db=>` / `<db src=>` scope its `_scrml_sql` handle has no connection, so E-SQL-004 fires (fail-closed) instead of the silent :memory: fallback.",
+  "expect": {
+    "codes": ["E-SQL-004"],
+    "notCodes": ["E-SQL-009"],
+    "severity": { "E-SQL-004": "error" }
+  }
+}
