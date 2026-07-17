@@ -2,7 +2,7 @@ import { genVar } from "./var-counter.ts";
 import { emitStringFromTree, exprNodeContainsMemberAccess } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
-import { escapeHtmlAttr, VOID_ELEMENTS } from "./utils.ts";
+import { escapeHtmlAttr, VOID_ELEMENTS, HTML_ELEMENTS, HTML_BOOLEAN_ATTRS } from "./utils.ts";
 import { extractReactiveDeps, collectReactiveVarNames, extractReactiveDepsTransitive, buildFunctionBodyRegistry, collectRequestIds } from "./reactive-deps.ts";
 import { hasTemplateInterpolation } from "./rewrite.js";
 import { isRcdataElement } from "../html-elements.js";
@@ -2437,37 +2437,49 @@ export function generateHtml(
                 refs: val.refs,
               });
             }
-          } else if (node.isComponent === true || node._expandedFrom != null) {
-            // i81 — COMPONENT call-site PROP, not an HTML attribute. Emit
-            // NOTHING, preserving the exact pre-i81 behavior for this shape.
+          } else if (
+            node.isComponent === true ||
+            node._expandedFrom != null ||
+            !HTML_ELEMENTS.has(tag) ||
+            HTML_BOOLEAN_ATTRS.has(name)
+          ) {
+            // i81 — NOT a lowerable value attribute. Emit NOTHING, preserving
+            // the exact pre-i81 behavior (silent drop) for these shapes. Each
+            // clause below was forced by a REAL regression found by recompiling
+            // the corpus (R26) — the unit suite was 100% green through all of
+            // them.
             //
-            // A component's attributes are PROPS consumed by component
-            // expansion / the §14.9 snippet machinery — not DOM attributes — and
-            // some prop values cannot be lowered to a string at all. The
-            // component-expander stamps the expanded root with `isComponent` +
-            // `_expandedFrom`; that stamp is the discriminator. The TAG is NOT:
-            // expansion runs BEFORE codegen and merges call-site props onto the
-            // expanded root, so by the time emit-html sees it the tag is the
-            // component's root element (`div`), not `List`.
+            // 1. `node.isComponent` / `node._expandedFrom` — a COMPONENT
+            //    call-site prop. Component expansion runs BEFORE codegen and
+            //    merges call-site props onto the component's ROOT element, so
+            //    the TAG is useless as a discriminator (emit-html sees `div`,
+            //    not `List`); the expander's own stamp is the reliable marker.
+            //    snippet-002-parametric.scrml:
+            //      <List row={ (item) => <span>${item.id}</span> }/>
+            //    lowered to `const _scrml_v = ((item) => <span>…` — markup
+            //    spliced into JS ⇒ E-CODEGEN-INVALID-LOGIC.
             //
-            // Caught by R26 against a real corpus file, NOT by the test suite
-            // (which was 100% green): samples/compilation-tests/
-            // snippet-002-parametric.scrml regressed from a clean compile to
-            // E-CODEGEN-INVALID-LOGIC on
+            // 2. `!HTML_ELEMENTS.has(tag)` — a scrml DIRECTIVE element, whose
+            //    attributes are compiler constructs, not DOM attributes.
+            //    dev-1-react.scrml: `<tableFor pick=["title","priority"]>` and
+            //    `<formFor pick=[...]>` began emitting a bogus `pick` binding.
+            //    An ALLOWLIST (not a denylist of known directives) so this fails
+            //    CLOSED: a directive element added later inherits the safe
+            //    pre-i81 drop instead of silently emitting junk.
             //
-            //   <List items=@items row={ (item) => <span>${item.id}</span> }/>
+            // 3. `HTML_BOOLEAN_ATTRS.has(name)` — a boolean attribute carries
+            //    meaning by PRESENCE, so `setAttribute("checked", "false")`
+            //    still renders CHECKED. 27-type-derived-table.scrml:
+            //    `<input checked=(@selectedIds.length > 0 && …)>` began emitting
+            //    exactly that. These stay dropped rather than newly-WRONG;
+            //    REACTIVE_BOOL_ATTRS is deliberately NOT widened here (bool vs
+            //    value are different lowerings — a separate decision). Follow-up.
             //
-            // `row=` is a parametric-snippet argument whose value is a lambda
-            // returning MARKUP. Routing it through the value-attr emitter
-            // produced `const _scrml_v = ((item) => <span>...` — markup spliced
-            // into JS, i.e. malformed output. The pre-i81 missing `else` dropped
-            // these silently, which is exactly why the snippet path worked.
-            //
-            // Conservative by construction: this preserves the pre-i81 drop for
-            // EVERY component-root attribute, so it cannot regress a shape that
-            // works today. A dynamic value attr on a component call site
-            // (`<Card class=(@x)/>`) therefore stays unfixed — it was already
-            // dropped before i81. Recorded as follow-up, not silently widened.
+            // Conservative by construction: every clause preserves the pre-i81
+            // drop, so none of them can regress a shape that works today. The
+            // known cost: a dynamic value attr on a component call site
+            // (`<Card class=(@x)/>`) stays unfixed — it was already dropped
+            // before i81. Recorded as follow-up, not silently widened.
           } else {
             // i81 — reactive VALUE attribute (`class=`, `style=`, `title=`,
             // `data-*`, `id=`, `alt=`, …). THE MISSING FINAL `else`.
