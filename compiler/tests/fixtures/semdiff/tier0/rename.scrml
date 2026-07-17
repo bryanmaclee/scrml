@@ -1,0 +1,8 @@
+${
+  fn incr(x: int) {
+    return x + 1
+  }
+  export fn main(n: int) {
+    return incr(n) + incr(n)
+  }
+}

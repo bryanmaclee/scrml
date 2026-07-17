@@ -1,0 +1,13 @@
+<program db="app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT, password_hash TEXT)`}
+  </schema>
+  <db src="app.db" protect="email, password_hash" tables="users">
+    ${
+      fn noop() {
+        return 1
+      }
+    }
+  </db>
+  <div><p>hi</p></div>
+</program>
