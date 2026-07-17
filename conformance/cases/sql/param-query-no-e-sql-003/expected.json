@@ -1,0 +1,13 @@
+{
+  "id": "sql-param-query-no-e-sql-003",
+  "description": "§8.1.1 boundary control — a normal parameterized query `?{`SELECT id, text FROM tasks WHERE user_id = ${uid}`}` has literal SQL text around a single `${...}` interpolation, so it is the canonical literal-template form, NOT a runtime expression. E-SQL-003 fires ONLY when the body is composed solely of interpolation(s) with no literal SQL; the presence of any literal SQL text (here `SELECT id, text FROM tasks WHERE user_id = `) marks a normal bound-parameter query. This pins the strict boundary so E-SQL-003 never false-positives on valid parameterized SQL (the E-ATTR-012 lesson — a diagnostic that hard-errors valid code is worse than one that doesn't fire).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/sql-runtime-expr-body-e-sql-003.test.js",
+  "spec": "§8.1.1",
+  "rationale": "§8.1.1 permits (and §44.5 mandates) `${expr}` interpolations inside a literal `?{}` template — each binds as a positional parameter. E-SQL-003 targets ONLY the degenerate case where the ENTIRE body is interpolation with no literal SQL. A query with literal SQL plus one or more bound params is well-formed and SHALL NOT fire E-SQL-003 (nor any other E-SQL-*/E- code here). Asserted via family-glob absence so any future spurious member of the E-SQL- family fails this case.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SQL-003"],
+    "notCodePrefixes": ["E-SQL-"]
+  }
+}

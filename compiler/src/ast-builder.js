@@ -13280,6 +13280,84 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
  * @param {string} filePath
  * @returns {{ query: string, chainedCalls: ChainCall[] }}
  */
+/**
+ * §8.1.1 / E-SQL-003 — determine whether a `?{}` SQL template body is a pure
+ * RUNTIME EXPRESSION (no literal SQL text).
+ *
+ * A `?{}` body SHALL remain a literal string at compile time so the compiler can
+ * validate the query and bind each `${expr}` interpolation as a positional
+ * parameter (§44.5). A body composed SOLELY of `${...}` interpolation(s) — with
+ * no literal SQL between or around them — is a runtime-assembled SQL string: an
+ * injection vector that Bun.SQL cannot bind (`sql`${q}`` would bind the entire
+ * query text as a single parameter). Fragment reuse goes through the call graph
+ * (§8.4.1), never runtime template assembly.
+ *
+ * Returns true iff the body contains at least one `${...}` interpolation AND
+ * every character OUTSIDE the interpolations is whitespace (no literal SQL):
+ *
+ *   `${q}`               → true  (single runtime interpolation, no literal SQL)
+ *   `${prefix}${suffix}` → true  (multiple interpolations, still no literal SQL)
+ *   `SELECT id = ${id}`  → false (literal SQL + one bound param — canonical form)
+ *   `SELECT 1`           → false (pure literal, no interpolation)
+ *
+ * The scan is brace-depth-matched (same semantics as extractSqlParams in
+ * codegen/rewrite.ts): a `${` opens an interpolation consumed to its matching
+ * `}` by nesting depth, so a nested-brace payload (`${fn({a:1})}`) is skipped
+ * whole. SQL comments OUTSIDE interpolations — `--` to end-of-line and
+ * (slash-star)…(star-slash) block comments — are stripped BEFORE the literal
+ * test, so a comment cannot masquerade as literal SQL and cloak a runtime body:
+ * a `--` line-comment prefix and a slash-star block-comment prefix both fire —
+ * the emit is still the runtime-assembled `_scrml_sql`-- note\n${q}`` injection
+ * vector. A comment does not make the body validatable or param-bindable, so a
+ * comment-prefixed all-interpolation body IS a runtime expression.
+ *
+ * The boundary is strict — a single literal (non-whitespace, non-comment) SQL
+ * char flips hasLiteral and suppresses the error — because a false positive here
+ * hard-errors valid parameterized queries (the E-ATTR-012 lesson). Stripping
+ * comments cannot cause an over-fire: a valid query always carries non-comment
+ * SQL keywords (SELECT / INSERT / ...) that survive comment-stripping.
+ *
+ * @param {string} query — the raw SQL body text (`${...}` preserved verbatim)
+ * @returns {boolean}
+ */
+function sqlBodyIsRuntimeExpr(query) {
+  if (!query || typeof query !== "string") return false;
+  let interpolations = 0;
+  let hasLiteral = false;
+  let i = 0;
+  const n = query.length;
+  while (i < n) {
+    // `${...}` interpolation — consumed whole by brace-depth nesting.
+    if (query[i] === "$" && query[i + 1] === "{") {
+      interpolations++;
+      let depth = 1;
+      i += 2;
+      while (i < n && depth > 0) {
+        if (query[i] === "{") depth++;
+        else if (query[i] === "}") depth--;
+        i++;
+      }
+      continue;
+    }
+    // SQL line comment `-- ... <EOL>` — not literal SQL; skip to the newline.
+    if (query[i] === "-" && query[i + 1] === "-") {
+      i += 2;
+      while (i < n && query[i] !== "\n") i++;
+      continue;
+    }
+    // SQL block comment (slash-star ... star-slash) — not literal SQL; skip to close.
+    if (query[i] === "/" && query[i + 1] === "*") {
+      i += 2;
+      while (i < n && !(query[i] === "*" && query[i + 1] === "/")) i++;
+      i += 2; // consume the closing star-slash
+      continue;
+    }
+    if (!/\s/.test(query[i])) hasLiteral = true;
+    i++;
+  }
+  return interpolations >= 1 && !hasLiteral;
+}
+
 function parseSQLTokens(tokens, filePath) {
   let query = "";
   const chainedCalls = [];
@@ -17253,6 +17331,35 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
 
       const tokens = tokenizeSQL(bodyRaw, bodyOffset, bodyLine, bodyCol);
       const { query, chainedCalls } = parseSQLTokens(tokens, filePath);
+
+      // §8.1.1 / E-SQL-003 — a `?{}` body that is a pure runtime expression (no
+      // literal SQL text, only `${...}` interpolation) is a hard compile error.
+      // SQL bodies SHALL remain literal so the compiler can validate them and
+      // bind each `${expr}` as a positional parameter (§44.5); fragment reuse
+      // goes through the call graph (§8.4.1), never runtime template assembly.
+      // A runtime-assembled SQL string (`?{`${sqlString}`}`) is an injection
+      // vector Bun.SQL cannot bind. The boundary is strict: any literal SQL text
+      // (even one non-whitespace char) marks a normal parameterized query and
+      // does NOT fire (see sqlBodyIsRuntimeExpr). This is the common construction
+      // point for the parse-reachable `?{}` shapes — top-level, expression-
+      // position (`return ?{}.all()`), and let/const/state/return initializers all
+      // reach this builder. (A `?{}` used directly as a call ARGUMENT hits a
+      // separate pre-existing sql-ref-unresolved path that bypasses buildBlock —
+      // orthogonal to E-SQL-003, tracked separately.)
+      if (errors && sqlBodyIsRuntimeExpr(query)) {
+        errors.push(new TABError(
+          "E-SQL-003",
+          "E-SQL-003: the `?{}` SQL template body is a runtime expression, not a " +
+          "literal string template. A `?{}` body composed solely of `${...}` " +
+          "interpolation(s) with no literal SQL text is a runtime-assembled query " +
+          "— an injection vector the compiler cannot validate or parameter-bind. " +
+          "Write the SQL literally inside the backticks and bind values via " +
+          "`${...}` (e.g. `?{`SELECT * FROM users WHERE id = ${id}`}`); reuse SQL " +
+          "patterns by extracting a function, not by assembling the template at " +
+          "runtime (§8.1.1, §8.4.1).",
+          span,
+        ));
+      }
 
       // §8.9.5: `.nobatch()` is a compile-time marker. Strip it from the
       // chain and flag the node so the Batch Planner excludes it from

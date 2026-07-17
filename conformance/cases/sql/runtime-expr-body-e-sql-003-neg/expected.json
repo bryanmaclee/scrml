@@ -1,0 +1,12 @@
+{
+  "id": "sql-runtime-expr-body-e-sql-003-neg",
+  "description": "§8.1.1 compile-time rejection — the `?{}` SQL template body `?{`${q}`}` is a pure runtime expression: its only content is a single `${...}` interpolation with no literal SQL text. Per §8.1.1 a `?{}` body SHALL remain a literal string at compile time so the compiler can validate the query and bind each interpolation as a positional parameter (§44.5); a runtime-assembled SQL string is an injection vector Bun.SQL cannot bind (`_scrml_sql`${q}`` would bind the whole query as one parameter). The ast-builder fires E-SQL-003 at the SQLNode construction point. Fragment reuse goes through the call graph (§8.4.1), never runtime template assembly.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/sql-runtime-expr-body-e-sql-003.test.js",
+  "spec": "§8.1.1",
+  "rationale": "§8.1.1 normative: `Developers SHALL NOT construct SQL strings dynamically in JavaScript and pass them to ?{}` and `The ?{} template body SHALL remain a literal string at compile time (E-SQL-003)`. A body composed solely of `${...}` interpolation(s) with no literal SQL text is exactly the forbidden runtime-expression form. Resolution: write the SQL literally inside the backticks and bind values via `${...}` (e.g. `?{`SELECT id FROM tasks WHERE id = ${id}`}`); to reuse a SQL pattern, extract a function (§8.4.1) rather than assembling the template at runtime.",
+  "expect": {
+    "codes": ["E-SQL-003"],
+    "notCodes": []
+  }
+}

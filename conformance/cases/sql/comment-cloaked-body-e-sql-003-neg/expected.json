@@ -1,0 +1,12 @@
+{
+  "id": "sql-comment-cloaked-body-e-sql-003-neg",
+  "description": "§8.1.1 soundness-bypass close (S264 adversarial-review item 1) — a `?{}` body whose only literal content is a SQL comment (`?{`/* dynamic */${q}`}`) is STILL a runtime expression: the comment is not validatable or param-bindable SQL, and the emit is the runtime-assembled `_scrml_sql`/* dynamic */${q}`` injection vector. `sqlBodyIsRuntimeExpr` strips SQL comments (`--` to end-of-line and slash-star block comments) from the outside-of-interpolation text BEFORE the no-literal-SQL test, so a leading/trailing comment cannot cloak an all-interpolation body. Fires E-SQL-003.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/sql-runtime-expr-body-e-sql-003.test.js",
+  "spec": "§8.1.1",
+  "rationale": "§8.1.1: `The ?{} template body SHALL remain a literal string at compile time (E-SQL-003)`. A SQL comment is not literal SQL — it carries no query the compiler can validate or bind. A body that is comment(s) + whitespace + `${...}` interpolation(s), with no real SQL keyword, is exactly the forbidden runtime-expression form; a comment prefix must not defeat the check. Resolution: write literal SQL inside the backticks and bind values via `${...}`, or extract a function for reuse (§8.4.1).",
+  "expect": {
+    "codes": ["E-SQL-003"],
+    "notCodes": []
+  }
+}
