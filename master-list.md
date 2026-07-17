@@ -94,6 +94,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `dceb8f32` — wrap(S261): hand-off + delta-log [546]-[556] + changelog S261 + master-list §0 + rotate hand-off-260 (#79) — **pushed**
 - `8d537c3f` — wrap(S260): hand-off + delta-log [539]-[545] + changelog + master-list §0 + known-gaps regen (#74) — **pushed**
 - `b21269f6` — wrap(S259): hand-off + delta-log [533]-[538] + changelog + known-gaps — 3 freeze reintegrations + 2 design rulings + 2 arcs held (#69) — **pushed**
 - `19e46a1c` — wrap(S258): hand-off + delta-log [524]-[532] + changelog + bank Phase-1 colorless-async gap (#62) — **pushed**
@@ -101,7 +102,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `f079d0a9` — chore(s255): WRAP — Track A Units 1+2 + PA-contract PR-flow migration + advisory review + Windows CI (#39) — **pushed**
 - `e96ae498` — chore(s254): WRAP — PR-flow cutover banked + real-DB & E-SCHEMA-004 changelog + 2 SQL gaps + state regen — **pushed**
 - `7bb9e587` — chore(s253): WRAP — hand-off + changelog + known-gaps(regen) + delta-log; E-TYPE-082 BRIEF archived — **pushed**
-- `ea1d1067` — chore(s252): WRAP — hand-off + changelog + known-gaps currency + user-voice; PA-contract dedup = next arc — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
