@@ -417,7 +417,7 @@ explicit-close ::= '</' identifier '>'
 **Normative statements:**
 
 - The explicit closer `</name>` SHALL match the innermost open tag whose name is `name`.
-- If the innermost open tag's name does not match, this SHALL be a compile error (E-MARKUP-002).
+- If the innermost open tag's name does not match, this SHALL be a compile error (E-CTX-001). (S263 — was E-MARKUP-002, now retired; closer-name-mismatch aligns to impl#1's live E-CTX-001 [§3.2]. impl#2/native additionally surfaces the mismatch, honoring this rule.)
 - An explicit closer for a state block uses `</statename>` where `statename` is the identifier used in the state opener.
 - An explicit closer `</name>` SHALL NOT be used inside a `${ }` logic context (E-CTX-002). Markup/state closers cannot cross context boundaries.
 
@@ -4844,7 +4844,7 @@ reads inside an `animationFrame` callback body.
 | W-LIFECYCLE-009 | `cleanup()` inside a `for` loop body (N registrations will be created) | Warning |
 | W-LIFECYCLE-010 | `when` block has an empty body | Warning |
 | H-LIFECYCLE-001 | `@variable` read inside `when` body is not in the `dep-list` (off by default; suppressed by `reads @var` annotation) | Hint |
-| E-LIN-004 | `lin` variable referenced inside a recurring execution context (`when`, `<timer>`, `<poll>`, or `animationFrame` callback) | Error |
+| E-LIN-004 | `lin` variable referenced inside a recurring execution context (`when`, `<timer>`, `<timeout>`, or `animationFrame` callback) — `<poll>` is DEFERRED (E-LIN-006), corrected S263 | Error |
 
 | E-LIFECYCLE-018 | `<request>` has no `id` attribute | Error |
 | E-LIFECYCLE-019 | `<request>` is self-closing (no body) | Error |
@@ -17903,9 +17903,9 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-TYPE-050 | §14.8.5 | Two tables produce the same generated type name | Error |
 | E-TYPE-051 | §14.8.5 | SQLite column type unmappable; typed `asIs` | Warning |
 | E-MARKUP-001 | §4.1 | Unknown HTML element name | Error |
-| E-MARKUP-002 | §4.4.1 | Explicit closer does not match open tag name (spec); attribute type mismatch on HTML element (implementation — collision, see H-03 audit note) | Error |
-| E-MARKUP-003 | §4.4.1 | `</tagname>` closer used inside a `${ }` logic context | Error |
-| E-MARKUP-004 | §4.4.2 | `</>` closer used inside a `${ }` logic context | Error |
+| ~~E-MARKUP-002~~ | §4.4.1 | **Retired 2026-07-16 (S263).** Closer name-mismatch is now **E-CTX-001** (§4.4.1 amended to impl#1's live code). The attribute-type-mismatch meaning was a dead impl squatter (`validateMarkupAttributes`, `type-system.ts` — never invoked: the caller-guard reads `n.name`, always `undefined` for a markup node whose name is `n.tag`) that would false-fire on all valid numeric/boolean HTML; HTML attribute-type validation is aspirational **E-HTML-003** (§24.2). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
+| ~~E-MARKUP-003~~ | §4.4.1 | **Retired 2026-07-16 (S263).** A `</tagname>` explicit closer inside a `${ }` logic context is **E-CTX-002** (§3.2 / §4.4.1 normative); this row was a phantom duplicate (no emitter). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
+| ~~E-MARKUP-004~~ | §4.4.2 | **Retired 2026-07-16 (S263).** A `</>` inferred closer inside a `${ }` logic context is **E-CTX-002** (§3.2 / §4.4.2 normative); this row was a phantom duplicate (no emitter — the `</>` twin of the retired E-MARKUP-003 closer-in-logic row). Consistency follow-through on the S261 E-MARKUP retire (the audit enumerated only E-MARKUP-003). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
 | E-STATE-001 | §4.2 | Unrecognized state identifier | Error |
 | E-SYNTAX-001 | §10.4 | `lift` outside any `${ }` logic context | Error |
 | E-SYNTAX-002 | §10.4 | `lift` inside a function body | Error |
@@ -18096,12 +18096,12 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-COMPONENT-035 | §15.14 | Post-CE invariant: residual `isComponent: true` markup node survived component expansion | Error |
 | E-DG-001 | §31 | Dependency graph: circular dependency in reactive graph | Error |
 | E-ERROR-008 | §19.2 | Error type variant uses reserved field name | Error |
-| E-MARKUP-003 | §24.1 | Unknown attribute on known HTML element | Error |
+| ~~E-MARKUP-003~~ | §24.1 | **Retired 2026-07-16 (S263).** Unknown-attribute-on-known-HTML-element is owned by **E-HTML-001** (§24.2, aspirational — VP-1 deliberately passes plain-HTML attributes through). The dead impl squatter (`validateMarkupAttributes`, `type-system.ts:7835/7842`) that carried this code would false-fire on scrml's own `if`/`else`/`each` directives (176 corpus files). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
 | E-MU-001 | §35 | Must-use: return value of `!` function not captured | Error |
 | E-PA-002 | §11.3 | Protect analyzer: invalid `protect=` syntax | Error |
 | E-PARSE-001 | §4 | Parse error: unexpected token in block structure | Error |
 | E-PARSE-002 | §4 | Parse error: unterminated block | Error |
-| E-STATE-004 | §6 | Unknown attribute on a user-defined state type — a `<myState foo=…>` use naming an attribute the state type does not declare. (S260 §34-vs-impl audit: the pre-fold row described dead V4 state-OBJECT field semantics and cited the folded §11.1 [Fold Log: §11.1 → §6]; rewritten to the shipping state-as-primary trigger. Emitted at `compiler/src/type-system.ts`.) | Error |
+| ~~E-STATE-004~~ | §6 | **Retired 2026-07-16 (S263).** Unknown-attr-on-user-state-type never fired (dead `validateMarkupAttributes` — the caller-guard reads `n.name`, always `undefined`) and un-gating would false-fire on valid scrml-special attributes (`capabilities=`, `log=`, `cors=`) by consulting the html-elements registry instead of the authoritative VP-1 surface — reddening a valid-clean conformance case. Not viable 1.0 surface as written (bryan-ruled retire, S261). Whether V1 validates state-type attribute names at all — and if so under which code (folding into the VP-1 / E-ATTR family) — is deferred to v1.next. Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
 | E-STATE-005 | §6 | State type name collides with a built-in HTML element name — choose a different name for the state type. (S260 §34-vs-impl audit: pre-fold row = dead V4 field semantics citing folded §11.1 [→ §6]; rewritten to the shipping trigger. Emitted at `compiler/src/type-system.ts`.) | Error |
 | E-STATE-006 | §6 | Duplicate state type definition — a state type with this name is already defined. (S260 §34-vs-impl audit: pre-fold row = dead V4 field semantics citing folded §11.1 [→ §6]; rewritten to the shipping trigger. Emitted at `compiler/src/type-system.ts`.) | Error |
 | E-STYLE-001 | §9 | CSS: syntax error in `#{}` style block | Error |
@@ -18421,7 +18421,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | W-USE-001 | §41.5 | Two `use` declarations bring the same name into markup scope. The later declaration wins; the warning surfaces the silent shadowing so the developer can confirm intent or rename. (Catalog addition S84 Wave 2 #5; full prose at §41.5 lines 17371, 17466.) | Warning |
 | W-IMPORT-001 | §21.3 | Two `import` statements import the same name into logic scope in the same file. The later import wins; the warning surfaces the silent shadowing. Resolution: rename one of the imports, or remove the duplicate. (Catalog addition S84 Wave 2 #5; full prose at §41.5 line 17468.) | Warning |
 | ~~E-EXHAUST-001~~ | §18 | **Retired 2026-03-27 (§18 TS-C-gate review).** The PIPELINE.md Stage 6 alias for the non-exhaustive-match-over-union case is now `E-TYPE-020`. All references replaced. (Catalog addition S84 Wave 2 #5; retirement note at §18 line 10023.) | — |
-| E-LIN-004 | §6.7.12, §35.5 | A `lin` variable is referenced inside a recurring or deferred execution context (`when` body, `<timer>` body, `<poll>` body, `animationFrame` callback, `<timeout>` body). The recurring-context form of E-LIN-002: a single textual reference in a callback that fires N times consumes the binding N times. (Catalog addition S84 Wave 2 #5; full prose at §6.7.12 line 4332 + §35.5 lines 4689-4690.) | Error |
+| E-LIN-004 | §6.7.12, §35.5 | A `lin` variable is referenced inside a recurring execution context (`when` body, `<timer>` body, `<timeout>` body, `animationFrame` callback). The recurring-context form of E-LIN-002: a single textual reference in a callback that fires N times consumes the binding N times. (`<poll>` and `<request>` are DEFERRED contexts → **E-LIN-006**, not recurring — corrected S263 to match impl `type-system.ts:17077` + §35.5 + the E-LIN-006 row @18321.) (Catalog addition S84 Wave 2 #5; full prose at §6.7.12 line 4332 + §35.5 lines 4689-4690.) | Error |
 | E-PROG-001 | §40 | A `<program>` element has an ambiguous attribute combination — the compiler cannot decide the execution context (e.g., a worker-shaped attribute combined with a route-shaped attribute). (Catalog addition S84 Wave 2 #5; full prose at §40 line 18036.) | Error |
 | E-PROG-002 | §40 | A `<program>` element is missing a required attribute for its detected execution context (e.g., a route-context program with no `name=`, a worker-context program with no entry point). (Catalog addition S84 Wave 2 #5; full prose at §40 line 18037.) | Error |
 | E-PROG-003 | §40.4 | A reference inside a nested `<program>` reaches a parent-scope binding. Nested programs are fully isolated — no bindings, types, `use`, or `import` declarations propagate across the `<program>` boundary. Resolution: declare the binding inside the nested program, or import it via a `use foreign:` declaration. (Catalog addition S84 Wave 2 #5; full prose at §40 line 17980.) | Error |
@@ -18607,7 +18607,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 
 | Code | Section | Trigger | Severity |
 |---|---|---|---|
-| E-MARKUP-VALUE-UNCLOSED | §10.2 | A markup-as-value expression never closes: no matching `/>` or `</...>` was found. Distinct from `E-CTX-003` (an unclosed logic-context on the block-tier tag-context stack) and `E-MARKUP-002` (a closer-name mismatch) — this fires in `parse-expr.js` on a markup-valued *expression*, with a different recovery and blame span. | Error |
+| ~~E-MARKUP-VALUE-UNCLOSED~~ | §10.2 | **Retired 2026-07-16 (S263).** Native-parser-only (`parse-expr.js`), harness-unreachable (the conformance adapter never passes `parser`), and dead even natively (error recovery always yields a spanned node, so the unclosed fall-through is unreachable). The §10.2 cite was orphaned (§10.2 is `lift` context-coercion, no markup-close text). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
 
 #### FileAST-assembler codes (`I-NATIVE-BLOCK-*`)
 
