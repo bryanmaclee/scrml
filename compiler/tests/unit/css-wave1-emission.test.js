@@ -553,6 +553,20 @@ describe("§65.2.5 — component-scope descendant combinator preservation", () =
 </program>`);
     expect(css).toContain(":where(.card .title) { color: var(--brand); }");
   });
+
+  test("a literal `#{` inside an attribute string is NOT mistaken for a CSS block (mask is string-aware)", () => {
+    const source = `<program>
+  const Card = <div props={}>
+      #{ .card .title { color: red; } }
+      <div class="card" title="a#{b}c"><span class="title">hi</span></div>
+  </>
+  <Card/>
+</program>`;
+    // The real CSS block still masks/preserves its descendant space.
+    expect(compileCss(source).css).toContain(":where(.card .title) {");
+    // The literal `#{` in the attribute value survives untouched.
+    expect(compileHtml(source).html).toContain(`title="a#{b}c"`);
+  });
 });
 
 // ---------------------------------------------------------------------------

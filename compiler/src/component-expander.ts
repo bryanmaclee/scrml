@@ -550,8 +550,20 @@ function maskCssBlocks(s: string): { masked: string; blocks: string[] } {
   let out = "";
   let i = 0;
   const n = s.length;
+  let outerStr: string | null = null;
   while (i < n) {
-    if (s[i] === "#" && s[i + 1] === "{") {
+    const ci = s[i];
+    // Skip TOP-LEVEL string/attribute-value literals so a literal `#{` inside a
+    // string (`title="a#{b}"`) is NOT mistaken for a CSS block opener.
+    if (outerStr !== null) {
+      out += ci;
+      if (ci === "\\" && i + 1 < n) { out += s[i + 1]; i += 2; continue; }
+      if (ci === outerStr) outerStr = null;
+      i++;
+      continue;
+    }
+    if (ci === '"' || ci === "'" || ci === "`") { outerStr = ci; out += ci; i++; continue; }
+    if (ci === "#" && s[i + 1] === "{") {
       let j = i + 2;
       let depth = 1;
       let str: string | null = null;
@@ -573,7 +585,7 @@ function maskCssBlocks(s: string): { masked: string; blocks: string[] } {
       i = j;
       continue;
     }
-    out += s[i];
+    out += ci;
     i++;
   }
   return { masked: out, blocks };

@@ -289,3 +289,10 @@ Final baseline: HEAD 86519ad0 (+ this repro/progress commit). NEW comprehensive 
 DEFERRED (documented, brief-sanctioned): §65.6 SSR no-flash prestamp on the static `<html>` (client
 reflection is the normative mechanism; flash only when initial variant ≠ base :root; doc-shell blast
 radius + per-session-theme subtleties). NO new §34 diagnostic codes.
+
+### 2026-07-17 — TASK 3 hardening (adversarial self-review) (commit: this)
+- Self-review found a robustness gap: `maskCssBlocks` scanned for `#{` WITHOUT top-level string
+  awareness, so a LITERAL `#{` inside a component-body attribute string (`title="a#{b}c"`) would be
+  wrongly masked + corrupted. Added top-level string/attribute-value skipping (the inner `#{}`
+  brace-matcher was already string-aware). Verified: descendant `.card .title` still preserved AND
+  `title="a#{b}c"` survives untouched. +1 regression test. Full gate: 20663 pass / 0 fail.
