@@ -1,3 +1,4 @@
+<program db="./app.db">
 ${
     type User:struct = { id: number, name: string }
     type Post:struct = { id: number, title: string }
@@ -14,3 +15,4 @@ ${
 <button id="lp" onclick=@posts = loadPosts()>LoadPosts</>
 <p id="uc">${@users.length}</>
 <p id="pc">${@posts.length}</>
+</program>

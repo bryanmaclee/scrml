@@ -1,3 +1,4 @@
+<program db="./app.db">
 ${
     <totals> = []
     function regionTotals() {
@@ -9,3 +10,4 @@ ${
 }
 <button id="load" onclick=onLoad()>Region totals</>
 <p if=@totals id="g">grouped</>
+</program>

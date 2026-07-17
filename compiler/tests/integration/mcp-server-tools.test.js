@@ -49,7 +49,7 @@ import {
 // canonical fixture shapes from the MCP-V0.A descriptor tests.
 // ---------------------------------------------------------------------------
 
-const FIXTURE = `<program title="MCP Demo">
+const FIXTURE = `<program title="MCP Demo" db="./app.db">
 
 type LoadPhase:enum = { Idle, Loading, Loaded(rows: int), Failed(message: string) }
 type Health:enum = { Healthy, Critical }

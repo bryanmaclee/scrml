@@ -71,6 +71,19 @@ function makeSqlNode(query, s = span(10)) {
   return { kind: "sql", query, span: s };
 }
 
+// A synthetic `<db src=...>` state node (§44.7.1 form) — gives `collectDbScopes`
+// a `_scrml_sql` scope so a server-boundary `?{}` does NOT trip E-SQL-004 (a
+// `?{}` with no db= in any ancestor is §8.1.1 fail-closed). These are CODEGEN
+// unit tests (runCG only, PA-stage skipped) so no `tables=` / E-PA-005 applies.
+function makeDbStateNode(src = "./app.db", s = span(1)) {
+  return {
+    kind: "state",
+    stateType: "db",
+    attrs: [{ name: "src", value: { kind: "string-literal", value: src } }],
+    span: s,
+  };
+}
+
 function makeTransactionBlock(body = [], s = span(10)) {
   return { kind: "transaction-block", body, span: s };
 }
@@ -254,7 +267,7 @@ describe("§2: SQL node in server-boundary function body → present in serverJs
     }]);
 
     const result = runCGForFile(
-      [makeLogicBlock([fnNode], span(90))],
+      [makeDbStateNode(), makeLogicBlock([fnNode], span(90))],
       routeMap,
     );
 

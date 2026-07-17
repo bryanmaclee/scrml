@@ -63,7 +63,7 @@ function makeMockRuntime(initial) {
 const MULTI_FIXTURE = `type LoadPhase:enum = { Idle, Loading, Loaded(rows: int), Failed(message: string) }
 type Health:enum = { Healthy, AtRisk, Critical }
 
-<program title="MultiSurface">
+<program title="MultiSurface" db="./app.db">
 
 <channel name="chat" topic="lobby">
   \${

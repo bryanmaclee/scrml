@@ -29,7 +29,7 @@ const compile = (src) => compileAndReadSidecars(src, TMP);
 // Fixture — three server functions of varied arity / typing.
 // ---------------------------------------------------------------------------
 
-const SERVERFN_FIXTURE = `<program title="ServerFns">
+const SERVERFN_FIXTURE = `<program title="ServerFns" db="./app.db">
 
 \${
   server function loadRows(limit: int) {
@@ -81,7 +81,7 @@ describe("MCP-V0.A serverfns.json extractor", () => {
   });
 
   test("a non-server (client) function is NOT surfaced (isServer gate)", () => {
-    const src = `<program title="Mixed">
+    const src = `<program title="Mixed" db="./app.db">
 
 \${
   <count> = 0

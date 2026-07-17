@@ -1,0 +1,8 @@
+<program>
+${
+    function getUsers() {
+        return ?{`SELECT id, name FROM users`}.all()
+    }
+}
+<button id="load" onclick=getUsers()>Load users</>
+</program>
