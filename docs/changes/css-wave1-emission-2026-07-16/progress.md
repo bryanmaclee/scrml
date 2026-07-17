@@ -246,3 +246,14 @@ a CSS `@layer` below the component author scope).
 - NO new §34 diagnostic rows (Task 4 reused existing cell/variant + E-THEME-TOKEN-UNKNOWN). Ran
   `bun run scripts/regen-spec-index.ts` → SPEC-INDEX.md refreshed (32 rows, missing 0) for the shifted
   line numbers.
+
+### 2026-07-17 — CONFORMANCE cases (commit: this)
+- +4 cases under conformance/cases/style/ (all PASS; runner is codes-focused — emitted-CSS/JS shape
+  is asserted in the source unit test, cross-referenced in each rationale):
+  - flat-inline-token-unknown (NEG) — flat `#{ color: @nope }` → E-THEME-TOKEN-UNKNOWN (the strongest:
+    a real code assertion proving the flat-inline path shares the decidable use-site check).
+  - flat-inline-token-lowering-clean (POS) — flat `#{ color: @brand }` → clean, no E-THEME-*/E-STYLE-*.
+  - descendant-combinator-preserved (POS) — component `.card .title` → clean compile (guards the
+    space-preservation fix against a re-introduced error).
+  - program-import-hoist-clean (POS) — program-global `@import` → clean compile (guards the §65.8 hoist).
+- `bun conformance/run.ts`: **738/738 pass** (baseline 734 → 738, +4).

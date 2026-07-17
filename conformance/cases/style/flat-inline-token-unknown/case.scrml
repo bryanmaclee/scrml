@@ -1,0 +1,14 @@
+<program>
+
+  <theme>
+      brand = #2563eb;
+  </theme>
+
+  const Card = <div props={}>
+      #{ color: @nope; }
+      hi
+  </>
+
+  <Card/>
+
+</program>

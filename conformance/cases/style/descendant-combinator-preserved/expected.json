@@ -1,0 +1,13 @@
+{
+  "id": "style-descendant-combinator-preserved",
+  "description": "§65.2.5 — a component-scope `#{}` with a DESCENDANT selector (`.card .title`, a space between the two classes) compiles clean. Pre-fix, the component-body re-parse (component-expander.ts `normalizeTokenizedRaw`) collapsed the descendant space (`.card .title` → `.card.title`), silently turning a descendant selector into a COMPOUND one (matches an element with BOTH classes, not a descendant). The fix masks `#{}` CSS blocks from the markup collapse passes, so the space survives → `:where(.card .title)`. The emitted-selector shape (space preserved + `:where()`-wrapped) is asserted in the source unit test; here we prove the descendant rule compiles clean.",
+  "language-version": "1.0",
+  "spec": "§65.2.5",
+  "source-test": "compiler/tests/unit/css-wave1-emission.test.js",
+  "rationale": "§65.2.5: a valid component-scope descendant rule is well-formed CSS; it must compile with NO E-STYLE-* / E-THEME-* diagnostic. This guards the descendant-combinator path (the space-preservation regression) against re-introducing a compile error, complementing the unit test that asserts the emitted `:where(.card .title)` shape.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-STRUCTURAL-ELEMENT-MISPLACED"],
+    "notCodePrefixes": ["E-THEME-", "E-STYLE-"]
+  }
+}

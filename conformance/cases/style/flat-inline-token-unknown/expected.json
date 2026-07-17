@@ -1,0 +1,13 @@
+{
+  "id": "style-flat-inline-token-unknown",
+  "description": "§65.3.2 / §65.4.1 / §65.10 — a flat-declaration `#{}` (a component-root child) references `@nope`, which matches neither an in-scope `<theme>` token nor a declared reactive cell. The flat-inline `#{}`→`style=\"\"` path runs the IDENTICAL decidable use-site check as the scoped-selector path and fires E-THEME-TOKEN-UNKNOWN — so the theme feature's error semantics hold in the dominant `#{}` pattern, not only inside a selector block.",
+  "language-version": "1.0",
+  "spec": "§65.3.2, §65.4.1, §65.10",
+  "source-test": "compiler/tests/unit/css-wave1-emission.test.js",
+  "rationale": "§65.10: E-THEME-TOKEN-UNKNOWN is the decidable `@`-sigil use-site check; a bare identifier is literal CSS and never fires. The flat-inline path reuses lowerCssValueRefs, so the same membership + error semantics apply — this proves the neg case fires in the flat `#{}`→style= emission path. Partitions into result.errors (E- prefix).",
+  "expect": {
+    "codes": ["E-THEME-TOKEN-UNKNOWN"],
+    "notCodes": ["E-VARIANT-AMBIGUOUS"],
+    "severity": { "E-THEME-TOKEN-UNKNOWN": "error" }
+  }
+}
