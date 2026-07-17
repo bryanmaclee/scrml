@@ -1,0 +1,3 @@
+# BRIEF — E-ERROR-010: land the forgotten SPEC half (mirror of E-ATTR-012)
+S249 PA ruling minted a DEDICATED code E-ERROR-010 for the `?`-propagation incompatible-error-variant check (was overloaded on E-TYPE-001). CODE half landed (`type-system.ts:9792` emits it; conformance ASSERTS it — `conformance/cases/error/propagate-incompat-variants/expected.json`). SPEC half FORGOTTEN: `grep -c E-ERROR-010 compiler/SPEC.md` = 0; §19.5.3/.4 (SPEC.md:13158/13172) still name the OLD E-TYPE-001; no §34 row. Found by BOTH the user-voice + gaps sweeps (S263). Same forgotten S249 batch as E-ATTR-012. OWED: add the §34 E-ERROR-010 row + repoint §19.5.3/.4 → E-ERROR-010. SPEC-text.
+DONE-PROBE: grep -q 'E-ERROR-010' compiler/SPEC.md

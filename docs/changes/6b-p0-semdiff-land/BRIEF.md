@@ -1,0 +1,3 @@
+# BRIEF — #6b P0 semdiff: adversarial-review + land (built, held on branch)
+P0 of the #6b semantic-diff primitive is BUILT + gated-green on branch `feat/s263-6b-p0-semdiff` @ 80b72a43 (new `scrml semdiff` subcommand: opaque-forced-Tier-2 + Tier-0 AST-structural emit-identity + use-site diagnostic-diff; resolves both consumer walls; 20554/0 gated, conformance 725/725; 27 tests). HELD (not landed) pending the S239 adversarial review of the CLASSIFICATION SOUNDNESS (a false "cosmetic" is the exact harm #6b prevents) — deserves proper context, deferred from the S263 wrap. Additive (api.js/codegen unchanged) so landing is low-risk to existing behavior; review-then-land next session BEFORE any consumer relies on it.
+DONE-PROBE: test -f compiler/src/semdiff.ts

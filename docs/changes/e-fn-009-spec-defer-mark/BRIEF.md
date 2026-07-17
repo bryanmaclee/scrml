@@ -1,0 +1,3 @@
+# BRIEF — E-FN-009: reconcile SPEC (asserts it fires) vs code (deliberately deferred)
+S31 "Fate of fn" RATIFIED retaining E-FN-009 (`design-insights.md:720`), but the compiler DELIBERATELY DEFERS it (documented `type-system.ts:23415` — reactive-subscription-capture needs call-graph analysis) — ZERO fire site. SPEC asserts it fires at 4 sites, NONE Nominal-marked: §34 row (SPEC.md:18078) + §48.5.4 (:24470-24486) + :24654 + :24668. SPEC is otherwise diligent marking deferrals Nominal, so this is an oversight. Found by the SPEC-vs-code sweep (S263). OWED: mark the §48.5.4/§34 deferral Nominal/spec-ahead, OR wire the check.
+DONE-PROBE: grep -rq '"E-FN-009"' compiler/src || grep -iqE 'E-FN-009.{0,120}(defer|nominal|spec-ahead)' compiler/SPEC.md
