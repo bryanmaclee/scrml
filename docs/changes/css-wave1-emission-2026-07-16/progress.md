@@ -335,3 +335,28 @@ radius + per-session-theme subtleties). NO new §34 diagnostic codes.
   state-decl set for direct `generateCss(nodes)` unit callers (no theme surface).
 - TEST: +2 unit (derived-cell clean, engine-cell clean-no-false-fire) + conformance
   style/reactive-cell-lowering-clean. FULL gate: 20668 pass / 0 fail; conformance 740/740.
+
+### 2026-07-17 — FIX 3 (HIGH) theme-switch was DOA — theme tokens wrongly bridged (commit: this)
+- META-LESSON applied: EXECUTED the bundle in happy-dom (did NOT grep). CONFIRMED the bug by running
+  themed-app-r26's emitted client: `LOAD_ERROR: ReferenceError: _scrml_el is not defined`;
+  `data-scrml-theme-mode at mount: null` — the reflection NEVER registered → theme DOA.
+- ROOT CAUSE: `collectCssVariableBridges` (collect.ts) collected a `<theme>` TOKEN `@bg` (a flat
+  `#{ background: @bg }`) as a §25 reactive-CSS-var bridge, emitting a spurious
+  `_scrml_el.style.setProperty("--scrml-bg", _scrml_reactive_get("bg"))` at MODULE scope. `_scrml_el`
+  is undefined there (the scoped-bridge target is a pre-existing unbuilt stub) → the bundle throws on
+  load → every later statement (incl. the theme-switch reflection) never runs.
+- FIX: exclude `<theme>` tokens from `collectCssVariableBridges` — a `@name` resolving to an in-scope
+  theme token is a STATIC `var(--name)` (§65.3.2), not a JS bridge. Skip a simple-ref theme token; skip
+  an expression bridge only when EVERY ref is a theme token (mirrors emit-css renderDeclValue). Did NOT
+  touch the deeper `_scrml_el` scoped-bridge stub (genuine reactive CELLS in a component `#{}` — the
+  pre-existing gap the PA is filing separately).
+- EXECUTE-VERIFY (happy-dom, the emitted bundle — actual observed values):
+  - LOAD_ERROR: NONE (spurious `_scrml_el` bridge GONE — grep count 0, and it EXECUTES clean).
+  - `<html data-scrml-theme-mode>` at MOUNT = **"Light"** (the initial variant, first-paint match).
+  - after `@mode = .Dark` → **"Dark"**; after `@mode = .Light` → **"Light"** (live subscription, the
+    theme demonstrably SWITCHES both directions).
+- Genuine reactive-cell bridge SURVIVES: a flat `#{ color: @accent }` (accent = a `<accent>` cell) still
+  emits `document.documentElement.style.setProperty("--scrml-accent", …)`; only theme tokens excluded.
+- TEST: NEW compiler/tests/browser/browser-theme-switch.test.js (3 tests — EXECUTES the bundle: no
+  ReferenceError / mount=Light / switch→Dark→Light). css-variable-bridge.test.js 13 pass (no bridge
+  regression). FULL gate: 20668 pass / 0 fail.
