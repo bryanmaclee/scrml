@@ -404,6 +404,15 @@ describe("§65.8 — @charset / @import hoist out of @layer global {}", () => {
     expect(r.imports).toEqual([]);
     expect(r.rest).toContain(`@media screen { @import url("nested.css"); }`);
   });
+
+  test("hoistCharsetAndImports — unit (FIX5): a MALFORMED @import (no `;`, `{` first) is NOT hoisted (selector not eaten)", () => {
+    const r = hoistCharsetAndImports(`@import "a.css" a { color: red; } .b { color: blue; }`);
+    // The malformed @import is left in `rest` verbatim — its trailing `a { … }`
+    // rule is preserved (not swallowed into the hoisted statement).
+    expect(r.imports).toEqual([]);
+    expect(r.rest).toContain(`@import "a.css" a { color: red; }`);
+    expect(r.rest).toContain(`.b { color: blue; }`);
+  });
 });
 
 // ---------------------------------------------------------------------------

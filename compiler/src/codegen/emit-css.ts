@@ -191,6 +191,7 @@ export function hoistCharsetAndImports(css: string): { charset: string[]; import
       let j = i;
       let jParen = 0;
       let jStr: string | null = null;
+      let terminated = false;
       while (j < n) {
         const cj = css[j];
         if (jStr !== null) {
@@ -202,16 +203,24 @@ export function hoistCharsetAndImports(css: string): { charset: string[]; import
         if (cj === '"' || cj === "'") { jStr = cj; j++; continue; }
         if (cj === "(") { jParen++; j++; continue; }
         if (cj === ")") { jParen = jParen > 0 ? jParen - 1 : 0; j++; continue; }
-        if (cj === ";" && jParen === 0) { j++; break; }
-        if (cj === "{" && jParen === 0) break; // defensive — these at-rules carry no block
+        if (cj === ";" && jParen === 0) { j++; terminated = true; break; }
+        // FIX5 (S265 review) — a `{` before the terminating `;` means the
+        // `@import`/`@charset` is MALFORMED (a missing `;` would otherwise make
+        // the hoist swallow the following selector). Do NOT hoist it: fall through
+        // to the verbatim copy below so the malformed statement + its trailing
+        // rule stay intact in `rest` (unhoisted), for the browser to reject.
+        if (cj === "{" && jParen === 0) break;
         j++;
       }
-      const stmt = css.slice(i, j).trim();
-      if (/^@charset/i.test(stmt)) charset.push(stmt);
-      else imports.push(stmt);
-      i = j;
-      while (i < n && /\s/.test(css[i])) i++; // swallow trailing whitespace so no blank line is left
-      continue;
+      if (terminated) {
+        const stmt = css.slice(i, j).trim();
+        if (/^@charset/i.test(stmt)) charset.push(stmt);
+        else imports.push(stmt);
+        i = j;
+        while (i < n && /\s/.test(css[i])) i++; // swallow trailing whitespace so no blank line is left
+        continue;
+      }
+      // Malformed (no `;` before EOF or a `{` block) — pass through unhoisted.
     }
     rest += c;
     i++;

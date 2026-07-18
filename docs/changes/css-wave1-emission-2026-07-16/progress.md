@@ -360,3 +360,17 @@ radius + per-session-theme subtleties). NO new §34 diagnostic codes.
 - TEST: NEW compiler/tests/browser/browser-theme-switch.test.js (3 tests — EXECUTES the bundle: no
   ReferenceError / mount=Light / switch→Dark→Light). css-variable-bridge.test.js 13 pass (no bridge
   regression). FULL gate: 20668 pass / 0 fail.
+
+### 2026-07-17 — FIX 4 (MED) + FIX 5 (LOW) (commit: this)
+- FIX4: SPEC-INDEX.md §65 row prose was stale ("Nominal / spec-ahead … NONE at this landing" +
+  codes "land with impl waves"), contradicting the SPEC.md §65 "Wave-1 emission LANDED" banner + the
+  shipped E-THEME-TOKEN-UNKNOWN. `regen-spec-index.ts` only refreshes line ranges, not prose. Rewrote
+  the row: Wave-1 emission LANDED (checker, :where()-flat, @layer order + reset + @charset/@import
+  hoist, token→:root lowering + E-THEME-TOKEN-UNKNOWN §34 code on selector AND flat-inline paths,
+  runtime theme-switch); Waves 2–3 follow-on (Nominal) with the deferred codes named.
+- FIX5: `hoistCharsetAndImports` on a MALFORMED `@import "a.css" a { … }` (missing `;`, `{` before `;`)
+  ATE the following `a` selector (the scan captured up to the `{` and hoisted it). Fixed: a `{` before
+  the terminating `;` marks the statement malformed → NOT hoisted; it passes through verbatim in `rest`
+  (unhoisted, browser rejects it) — the trailing rule is preserved. Well-formed `@import`/`@charset`
+  still hoist. +1 unit test.
+- FULL gate: 20669 pass / 0 fail; conformance 740/740.
