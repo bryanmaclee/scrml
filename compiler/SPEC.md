@@ -24125,11 +24125,13 @@ This behavior is gated: `scrml build` (the deploy path) enables it; `scrml compi
 
 **Cache-header contract.** Both serve paths — `scrml dev` and the generated production `_server.js` — SHALL attach cache headers to static responses:
 
-- A content-addressed asset (name matches `.<hash>.js` / `.<hash>.css`, including the runtime and per-route chunks) → `Cache-Control: public, max-age=31536000, immutable`.
+- A **content-addressed** asset → `Cache-Control: public, max-age=31536000, immutable`. Immutability SHALL be decided **precisely**, never by a filename-shape heuristic (a shape guess would wrongly freeze a dotted-but-unhashed asset such as `app.settings.js` — the exact silent-stale-asset failure this section exists to kill):
+  - The production `_server.js` decides by **exact membership** in the set of content-addressed artifacts the build produced (`compileScrml` returns `hashedAssets` — dist-relative POSIX paths of the runtime + per-route chunks + page bundles + CSS; `generateServerEntry` bakes it in as `_SCRML_IMMUTABLE`). A candidate is immutable iff its dist-relative path is in the set.
+  - `scrml dev` (which content-hashes ONLY the shared runtime and, opt-in, per-route chunks — never page bundles/CSS) decides by matching EXACTLY those two known forms (`scrml-runtime.<hash>.js`; `<seg>/<role>.<tier>.<hash>.js`, `tier ∈ {initial, tier1, tier2, tierN<n>}`).
 - The HTML entry document → `Cache-Control: no-cache` (always revalidate, so a redeploy is observed immediately).
-- Any other (non-hash-immutable) static asset → `Cache-Control: no-cache` plus a weak validator (`ETag` = size+mtime, and `Last-Modified`); a conditional request carrying a matching `If-None-Match` / `If-Modified-Since` SHALL receive `304 Not Modified`.
+- Any other (non-immutable) static asset → `Cache-Control: no-cache` plus a **weak validator** — a weak `ETag` (`W/"<size>-<mtime>"`; size+mtime is not byte-identity, hence weak) and `Last-Modified`. A conditional request SHALL receive `304 Not Modified` when it validates; `If-None-Match`, when present, is authoritative (a mismatch means changed → `If-Modified-Since` SHALL NOT be consulted; per RFC 7232 §6). Both serve paths honor this identically.
 
-Implementation: `pathFor` + the content-hash pre-pass in `compiler/src/api.js` (naming + HTML rewrite, gated on `contentHashAssets`); `devCacheHeaders` in `compiler/src/commands/dev.js` and `_scrml_cache_headers` emitted into `_server.js` by `generateServerEntry` in `compiler/src/commands/build.js` (headers). The deploy adapters (fly / docker / railway / render) inherit the generated `_server.js`, so all targets are covered.
+Implementation: `pathFor` + the content-hash pre-pass in `compiler/src/api.js` (naming + HTML rewrite + the `hashedAssets` set, gated on `contentHashAssets`); `devCacheHeaders` in `compiler/src/commands/dev.js` and `_scrml_cache_headers` + `_SCRML_IMMUTABLE` emitted into `_server.js` by `generateServerEntry` in `compiler/src/commands/build.js` (headers). The deploy adapters (fly / docker / railway / render) inherit the generated `_server.js`, so all targets are covered.
 
 ### 47.10 Relative Import Path Rewrites
 

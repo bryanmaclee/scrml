@@ -2588,6 +2588,10 @@ export function compileScrml(options = {}) {
   // ---------------------------------------------------------------------------
 
   let fileCount = 0;
+  // adopter-#82 FIX 1 — exact content-addressed (immutable-safe) artifact set,
+  // dist-relative POSIX paths. Function-scoped so it reaches the return value;
+  // populated in the write phase below. Empty for `write:false` / library mode.
+  const hashedAssets = new Set();
 
   if (write && outputDir) {
     mkdirSync(outputDir, { recursive: true });
@@ -2717,6 +2721,22 @@ export function compileScrml(options = {}) {
 
     // (W-SERVER-IMPORT-UNEMITTED — the cross-file server-import invariant — runs
     // BEFORE this write gate, so it fires in any write mode; see checkServerImportInvariant.)
+
+    // adopter-#82 FIX 1 — the EXACT set of content-addressed (immutable-safe)
+    // artifacts this build produced, as dist-relative POSIX paths. Returned to
+    // the caller so the generated production server serves `immutable` by SET
+    // MEMBERSHIP — never by a filename SHAPE guess (which would wrongly mark a
+    // dotted-but-unhashed `app.settings.js` immutable). The runtime + per-route
+    // chunks are content-addressed independent of `contentHashAssets`; the page
+    // bundles + CSS are added below only when the flag is on.
+    if (mode !== 'library' && cgResult.runtimeJs && cgResult.runtimeFilename) {
+      hashedAssets.add(cgResult.runtimeFilename);
+    }
+    if (cgResult.chunks) {
+      for (const chunk of cgResult.chunks.values()) {
+        if (chunk && chunk.filename) hashedAssets.add(chunk.filename);
+      }
+    }
 
     // In browser mode, write the shared runtime file (not needed in library mode)
     if (!emitGateFailed && mode !== 'library' && cgResult.runtimeJs && cgResult.runtimeFilename) {
@@ -2858,14 +2878,18 @@ export function compileScrml(options = {}) {
             const hash = fnv1aHash(c);
             finalClientByFile.set(filePath, { contents: c, hash });
             const relUn = toPosixRel(fullPath);
-            assetHashMap.set(relUn, insertHashBeforeExt(relUn, hash));
+            const relHashed = insertHashBeforeExt(relUn, hash);
+            assetHashMap.set(relUn, relHashed);
+            hashedAssets.add(relHashed); // FIX 1 — exact immutable-set membership
           }
           if (output.css) {
             const { fullPath } = pathFor(filePath, ".css");
             const hash = fnv1aHash(output.css);
             cssHashByFile.set(filePath, hash);
             const relUn = toPosixRel(fullPath);
-            assetHashMap.set(relUn, insertHashBeforeExt(relUn, hash));
+            const relHashed = insertHashBeforeExt(relUn, hash);
+            assetHashMap.set(relUn, relHashed);
+            hashedAssets.add(relHashed); // FIX 1 — exact immutable-set membership
           }
         }
       }
@@ -3214,6 +3238,11 @@ export function compileScrml(options = {}) {
     // exercised (e.g. fatal upstream errors); callers fall back to the
     // legacy literal `RUNTIME_FILENAME` when needed.
     runtimeFilename: cgResult.runtimeFilename,
+    // adopter-#82 FIX 1 — dist-relative POSIX paths of every content-addressed
+    // (immutable-safe) artifact written this build (runtime + per-route chunks +,
+    // on the build path, page bundles + CSS). The generated `_server.js` serves
+    // `immutable` by membership in this set — never by a filename shape guess.
+    hashedAssets: [...hashedAssets],
     // W2 §21.7: the full gathered .scrml file set (after auto-gather pre-pass).
     // Equal to options.inputFiles when gather is disabled. Includes all
     // transitively-reachable .scrml files when gather is enabled.

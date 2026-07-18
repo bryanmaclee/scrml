@@ -143,29 +143,152 @@ describe("adopter-#82 — content-addressed asset names (build path)", () => {
   });
 });
 
-describe("adopter-#82 — cache-header contract", () => {
-  test("generated production _server.js carries the cache-header policy", () => {
-    const server = generateServerEntry([]);
-    expect(server).toContain("_scrml_cache_headers");
+describe("adopter-#82 — hashed refs resolve under a nested pages/ layout (FIX 5d)", () => {
+  test("nested page's own hashed client.js + css refs point at real emitted files", () => {
+    const root = join(TMP, "nested");
+    mkdirSync(join(root, "pages", "a"), { recursive: true });
+    mkdirSync(join(root, "pages", "b"), { recursive: true });
+    // Two standalone <page>s in distinct nested dirs → dist/a/, dist/b/ (pages/ stripped).
+    const pageSrc = (label) =>
+      `<page>\n  <h1 class="t">${label}</h1>\n</page>\n#{\n  .t { color: blue; }\n}\n`;
+    const a = join(root, "pages", "a", "home.scrml");
+    const b = join(root, "pages", "b", "home.scrml");
+    writeFileSync(a, pageSrc("A"));
+    writeFileSync(b, pageSrc("B"));
+    const outDir = join(root, "dist");
+    const result = compileScrml({
+      inputFiles: [a, b],
+      outputDir: outDir,
+      write: true,
+      contentHashAssets: true,
+      log: () => {},
+    });
+    expect(result.errors).toEqual([]);
+
+    // Nested dist dirs exist (pages/ stripped).
+    expect(existsSync(join(outDir, "a", "home.html"))).toBe(true);
+    const html = readFileSync(join(outDir, "a", "home.html"), "utf8");
+    // Own refs are hashed AND same-dir; each must resolve to a real emitted file.
+    const clientRef = html.match(/src="(home\.client\.[0-9a-z]{8}\.js)"/);
+    const cssRef = html.match(/href="(home\.[0-9a-z]{8}\.css)"/);
+    expect(clientRef).toBeTruthy();
+    expect(cssRef).toBeTruthy();
+    expect(existsSync(join(outDir, "a", clientRef[1]))).toBe(true);
+    expect(existsSync(join(outDir, "a", cssRef[1]))).toBe(true);
+  });
+});
+
+describe("adopter-#82 — dev cache predicate (precise, no shape guess)", () => {
+  const st = { size: 42, mtimeMs: 1_700_000_000_000 };
+
+  test("runtime + per-route chunks are immutable (the only forms dev hashes)", () => {
+    for (const p of [
+      "scrml-runtime.00q16rig.js",
+      "dist/scrml-runtime.00q16rig.js",
+      "dashboard/anon.tier1.abcd1234.js",
+      "load/driver.initial.00000abc.js",
+      "x/y.tierN0.zzzz9999.js",
+    ]) {
+      expect(devCacheHeaders(p, st)["Cache-Control"]).toBe("public, max-age=31536000, immutable");
+    }
+  });
+
+  test("FIX 1 — a dotted-but-UNHASHED name is NOT frozen (revalidates)", () => {
+    // These match the OLD `.<8>.(js|css)` shape guess but are NOT things dev
+    // content-hashes → they MUST revalidate, not go immutable.
+    for (const p of ["app.settings.js", "blog.defaults.css", "app.client.00q16rig.js", "home.00q16rig.css"]) {
+      const h = devCacheHeaders(p, st);
+      expect(h["Cache-Control"]).toBe("no-cache");
+      expect(h.ETag).toBe('W/"' + st.size.toString(16) + "-" + Math.floor(st.mtimeMs).toString(16) + '"');
+      expect(h["Last-Modified"]).toBe(new Date(st.mtimeMs).toUTCString());
+    }
+  });
+
+  test("FIX 4 — validator is a WEAK ETag", () => {
+    expect(devCacheHeaders("plain.js", st).ETag.startsWith('W/"')).toBe(true);
+  });
+});
+
+describe("adopter-#82 — prod immutable by exact set membership (FIX 1)", () => {
+  test("compileScrml.hashedAssets is the exact content-addressed set; a same-shaped unhashed name is excluded", () => {
+    const app = writeApp("prod-set");
+    const outDir = join(app.root, "dist");
+    const result = compileScrml({
+      inputFiles: [app.home, app.about],
+      outputDir: outDir,
+      write: true,
+      contentHashAssets: true,
+      log: () => {},
+    });
+    expect(result.errors).toEqual([]);
+    const set = new Set(result.hashedAssets);
+    const homeClient = findOne(outDir, new RegExp(`^home\\.client\\.${HASH}\\.js$`));
+    const homeCss = findOne(outDir, new RegExp(`^home\\.${HASH}\\.css$`));
+    // Genuinely-hashed artifacts ARE in the set (dist-relative POSIX form)…
+    expect(set.has(homeClient)).toBe(true);
+    expect(set.has(homeCss)).toBe(true);
+    expect(result.hashedAssets.some((p) => /^scrml-runtime\.[0-9a-z]{8}\.js$/.test(p))).toBe(true);
+    // …a dotted-but-UNHASHED name is NOT (shape ≠ membership).
+    expect(set.has("app.settings.js")).toBe(false);
+    // The emitted server bakes the SAME set into `_SCRML_IMMUTABLE`.
+    const server = generateServerEntry([], null, 120, result.hashedAssets);
+    expect(server).toContain(`_SCRML_IMMUTABLE = new Set(`);
+    expect(server).toContain(JSON.stringify(homeClient));
+    expect(server).not.toContain('"app.settings.js"');
+  });
+
+  test("generated _server.js honors INM + IMS symmetrically (FIX 2/3) with a weak validator (FIX 4)", () => {
+    const server = generateServerEntry([], null, 120, ["app.abcd1234.js"]);
+    expect(server).toContain("_SCRML_IMMUTABLE");
     expect(server).toContain("public, max-age=31536000, immutable");
     expect(server).toContain('"no-cache"');
-    // Content-hashed pattern gate + conditional 304 handling.
-    expect(server).toContain("[0-9a-z]{8}");
+    expect(server).toContain('W/"'); // weak ETag
+    expect(server).toContain("Last-Modified");
     expect(server).toContain("if-none-match");
+    expect(server).toContain("if-modified-since");
     expect(server).toContain("status: 304");
+    // No filename-shape immutability guess remains.
+    expect(server).not.toContain("[0-9a-z]{8}");
+  });
+});
+
+describe("adopter-#82 — prod _scrml_cache_headers decisions (FIX 1/2/4, evaluated in-process)", () => {
+  // Evaluate the ACTUAL emitted policy (the `_SCRML_IMMUTABLE` set + the two
+  // helper fns) directly — deterministic, no subprocess. The live 304
+  // round-trip (INM + IMS) is covered by the string-branch assertions above and
+  // exercised empirically against a spawned `_server.js`.
+  function loadPolicy(hashedAssets) {
+    const src = generateServerEntry([], null, 120, hashedAssets);
+    const start = src.indexOf("const _SCRML_IMMUTABLE");
+    const end = src.indexOf("// Production server", start);
+    const snippet = src.slice(start, end);
+    return new Function(
+      `${snippet}\nreturn { _scrml_cache_headers, _scrml_etag, _SCRML_IMMUTABLE };`,
+    )();
+  }
+
+  const st = { size: 22, mtimeMs: 1_700_000_000_000 };
+
+  test("immutable IFF the dist-relative path is in the set", () => {
+    const pol = loadPolicy(["app.abcd1234.js", "customer/loads.client.deadbeef.js"]);
+    expect(pol._scrml_cache_headers("app.abcd1234.js", st)["Cache-Control"]).toBe(
+      "public, max-age=31536000, immutable",
+    );
+    expect(pol._scrml_cache_headers("customer/loads.client.deadbeef.js", st)["Cache-Control"]).toBe(
+      "public, max-age=31536000, immutable",
+    );
+    // Same 8-char-dotted SHAPE but NOT in the set → revalidate, not frozen.
+    const dotted = pol._scrml_cache_headers("app.settings.js", st);
+    expect(dotted["Cache-Control"]).toBe("no-cache");
+    expect(dotted.ETag).toBe('W/"' + st.size.toString(16) + "-" + Math.floor(st.mtimeMs).toString(16) + '"');
+    expect(dotted["Last-Modified"]).toBe(new Date(st.mtimeMs).toUTCString());
+    // A shape-matching name absent from the set is NOT immutable either.
+    expect(pol._scrml_cache_headers("vendor.12345678.js", st)["Cache-Control"]).toBe("no-cache");
   });
 
-  test("devCacheHeaders — hashed asset is immutable (no validator)", () => {
-    const h = devCacheHeaders("app.client.00q16rig.js", { size: 42, mtimeMs: 1_700_000_000_000 });
-    expect(h["Cache-Control"]).toBe("public, max-age=31536000, immutable");
-    expect(h.ETag).toBeUndefined();
-  });
-
-  test("devCacheHeaders — non-hashed static asset revalidates (no-cache + ETag + Last-Modified)", () => {
-    const size = 42, mtimeMs = 1_700_000_000_000;
-    const h = devCacheHeaders("app.client.js", { size, mtimeMs });
-    expect(h["Cache-Control"]).toBe("no-cache");
-    expect(h.ETag).toBe('"' + size.toString(16) + "-" + Math.floor(mtimeMs).toString(16) + '"');
-    expect(h["Last-Modified"]).toBe(new Date(mtimeMs).toUTCString());
+  test("HTML entry → no-cache; validator is a WEAK ETag", () => {
+    const pol = loadPolicy([]);
+    expect(pol._scrml_cache_headers("index.html", st)["Cache-Control"]).toBe("no-cache");
+    expect(pol._scrml_etag(st).startsWith('W/"')).toBe(true);
   });
 });
