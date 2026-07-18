@@ -1763,7 +1763,11 @@ export function generateServerJs(
     lines.push("    sessionId,");
     lines.push("    isAuth: !!_rec && _rec.userId != null,");
     lines.push("    userId: _rec ? (_rec.userId ?? null) : null,");
-    lines.push("    role: _rec ? (_rec.role ?? null) : null,");
+    // B3 (S266) — gate `role` on a real authenticated identity (a userId). A
+    // `session.set("role", …)` with NO userId mints an authless-but-role-bearing
+    // record; reading `role` independent of `isAuth` violates the invariant
+    // `role ⇒ authenticated`. Unified with the write-ctx `get role()` getter.
+    lines.push("    role: (_rec && _rec.userId != null) ? (_rec.role ?? null) : null,");
     if (_csrfAuto) {
       lines.push("    csrfToken: _rec ? (_rec.csrfToken ?? null) : null,");
     }
@@ -1834,7 +1838,10 @@ export function generateServerJs(
       // NOT inherit ANY field of the destroyed principal (role-bleed defense).
       lines.push("    _reset: false,");
       lines.push("    get userId() { return this._rec.userId ?? null; },");
-      lines.push("    get role() { return this._rec.role ?? null; },");
+      // B3 (S266) — gate `role` on a real authenticated identity (a userId), so a
+      // `session.set("role", …)` without a userId does not read a role independent
+      // of `isAuth` (invariant `role ⇒ authenticated`). Mirrors the read-middleware.
+      lines.push("    get role() { return this._rec.userId != null ? (this._rec.role ?? null) : null; },");
       // S239 FIX 2 (unify) — same rule as the middleware: a record with a userId.
       lines.push("    get isAuth() { return this._rec.userId != null && !this._destroy; },");
       // S239 FIX 7 — `set` clears `_destroy` so a `destroy(); set()` sequence
