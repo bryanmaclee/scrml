@@ -294,6 +294,11 @@ export interface AuthMiddleware {
   loginRedirect: string;
   csrf: string;
   sessionExpiry: string;
+  // §20.5.1 (S266, i29e B4b) — session-cookie Secure mode. `true` (default) →
+  // `__Host-scrml_sid` + always-Secure; `false` (`session-secure="false"`) →
+  // plain `scrml_sid`, no Secure. Optional so pre-existing test constructions
+  // that omit it default to the safe secure mode (emit-server reads `!== false`).
+  sessionSecure?: boolean;
   autoEscalated?: boolean;
 }
 
@@ -3577,6 +3582,7 @@ function getExplicitAuthDeclaration(fileAST: FileAST): {
   loginRedirect: string | null;
   csrf: string | null;
   sessionExpiry: string | null;
+  sessionSecure: string | null;
 } | null {
   // 1. Program-level: <program auth=...> via computeProgramConfig. CE wraps the
   //    FileAST in `.ast`; bare-FileAST inputs (unit tests) keep authConfig at
@@ -3589,6 +3595,8 @@ function getExplicitAuthDeclaration(fileAST: FileAST): {
       loginRedirect: authConfig.loginRedirect ?? null,
       csrf: authConfig.csrf ?? null,
       sessionExpiry: authConfig.sessionExpiry ?? null,
+      // §20.5.1 (i29e B4b) — session-cookie Secure mode ("true" | "false").
+      sessionSecure: authConfig.sessionSecure ?? null,
     };
   }
 
@@ -3608,6 +3616,7 @@ function getExplicitAuthDeclaration(fileAST: FileAST): {
     loginRedirect: string | null;
     csrf: string | null;
     sessionExpiry: string | null;
+    sessionSecure: string | null;
   } | null = null;
 
   const walk = (ns: any[] | undefined): void => {
@@ -3623,6 +3632,9 @@ function getExplicitAuthDeclaration(fileAST: FileAST): {
             loginRedirect: readStringAttr(node.attrs, "loginRedirect"),
             csrf: readStringAttr(node.attrs, "csrf"),
             sessionExpiry: null, // <page> carries no sessionExpiry= attribute.
+            // §20.5.1 (i29e B4b) — page-level session-secure= (registered on the
+            // <page> surface); null falls back to the secure default downstream.
+            sessionSecure: readStringAttr(node.attrs, "session-secure"),
           };
           return;
         }
@@ -5095,6 +5107,9 @@ export function runRI(input: RIInput): RIOutput {
       loginRedirect: authConfig.loginRedirect ?? "/login",
       csrf: authConfig.csrf ?? "off",
       sessionExpiry: authConfig.sessionExpiry ?? "1h",
+      // §20.5.1 (i29e B4b) — "false" opts out of Secure; any other value
+      // (incl. the "true" default) → secure mode.
+      sessionSecure: (authConfig.sessionSecure ?? "true") !== "false",
     });
   }
 
@@ -5161,6 +5176,8 @@ export function runRI(input: RIInput): RIOutput {
           loginRedirect: explicit.loginRedirect ?? "/login",
           csrf: explicit.csrf ?? "auto",
           sessionExpiry: explicit.sessionExpiry ?? "1h",
+          // §20.5.1 (i29e B4b) — honor an explicit session-secure="false".
+          sessionSecure: (explicit.sessionSecure ?? "true") !== "false",
         });
         continue;
       }
@@ -5172,6 +5189,8 @@ export function runRI(input: RIInput): RIOutput {
         loginRedirect: "/login",
         csrf: "auto",
         sessionExpiry: "1h",
+        // §20.5.1 (i29e B4b) — auto-escalated auth defaults to the secure mode.
+        sessionSecure: true,
         autoEscalated: true,
       });
       errors.push({

@@ -114,19 +114,17 @@ export function computeProgramConfig(nodes: any[]): ProgramConfig {
       return null;
     };
 
-    // §20.5.1 (S266, i29e B4b) — the session-cookie Secure mode. Parsed
-    // UNCONDITIONALLY (a session app / login page carries no `auth=` yet still
-    // sets a session cookie, so its Secure mode must be readable independent of
-    // auth). Default "true" → `__Host-scrml_sid` + always-Secure. Annotated onto
-    // the program node so emit-server can read it when there is no auth middleware.
-    const sessionSecure = getAttrValue("session-secure") ?? "true";
-    programNode.sessionSecure = sessionSecure;
-
     const authVal = getAttrValue("auth");
     if (authVal) {
       const loginRedirect = getAttrValue("loginRedirect") ?? "/login";
       const csrf = getAttrValue("csrf") ?? "off";
       const sessionExpiry = getAttrValue("sessionExpiry") ?? "1h";
+      // §20.5.1 (S266, i29e B4b) — the session-cookie Secure mode ("true" default
+      // → `__Host-scrml_sid` + always-Secure; "false" → plain `scrml_sid`, no
+      // Secure). Threaded into authMiddlewareEntry by route-inference exactly like
+      // sessionExpiry. A NO-auth session app reads the raw attribute directly in
+      // emit-server (there is no authConfig to hang it on).
+      const sessionSecure = getAttrValue("session-secure") ?? "true";
 
       authConfig = {
         auth: authVal,
@@ -141,6 +139,7 @@ export function computeProgramConfig(nodes: any[]): ProgramConfig {
       programNode.loginRedirect = loginRedirect;
       programNode.csrf = csrf;
       programNode.sessionExpiry = sessionExpiry;
+      programNode.sessionSecure = sessionSecure;
     }
   }
 

@@ -6,7 +6,9 @@
  * the durable store:
  *
  *   1. login → server fn calls `session.set("userId", …)`/`session.set("role", …)`;
- *      the response carries `Set-Cookie: scrml_sid=…; HttpOnly; SameSite=Lax`.
+ *      the response carries `Set-Cookie: __Host-scrml_sid=…; HttpOnly; SameSite=Lax;
+ *      Secure` (B4a secure mode is the default; the read side also accepts plain
+ *      `scrml_sid` on the opt-out path).
  *   2. a follow-up request carrying that cookie resolves `session.userId` /
  *      `session.isAuth` (via the same middleware store) → authed.
  *   3. no cookie → anon.
@@ -164,9 +166,13 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
       expect(sidCookie.raw).toContain("HttpOnly");
       expect(sidCookie.raw).toContain("SameSite=Lax");
       expect(sidCookie.raw).toContain("Max-Age=");
-      // dev (http localhost) → NO Secure so the cookie round-trips locally...
-      expect(sidCookie.raw).not.toContain("Secure");
-      // ...but an https request (x-forwarded-proto) → Secure IS emitted (FIX 3).
+      // B4a (S266): a no-auth session app is SECURE mode (the default) → the cookie
+      // is named `__Host-scrml_sid` and is ALWAYS `Secure` (the `__Host-` prefix
+      // requires Secure). It still round-trips over http://localhost — localhost is
+      // a secure context — which the `__Host-` cookie re-send below proves.
+      expect(sidCookie.raw).toContain("__Host-scrml_sid=");
+      expect(sidCookie.raw).toContain("Secure");
+      // an https request also carries Secure (always-on in secure mode).
       const rHttps = await post(
         loginR,
         { ...authed, "x-forwarded-proto": "https" },
@@ -181,6 +187,14 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
       expect(who.isAuth).toBe(true);
       expect(who.userId).toBe("u-42");
       expect(who.role).toBe("admin");
+
+      // B4a (S266): the SECURE-mode cookie name `__Host-scrml_sid` also round-trips
+      // over http://localhost (the read side resolves either name) → authed.
+      const withHostSid = { ...authed, Cookie: `scrml_csrf=${csrf}; __Host-scrml_sid=${sid}` };
+      const rHostWho = await post(whoR, withHostSid, {});
+      const hostWho = rHostWho instanceof Response ? await rHostWho.json() : rHostWho;
+      expect(hostWho.isAuth).toBe(true);
+      expect(hostWho.userId).toBe("u-42");
 
       // --- isAuth BYPASS (S239 FIX 2): a BOGUS sid with no record → anon ---
       const rBogus = await post(whoR, { ...authed, Cookie: `scrml_csrf=${csrf}; scrml_sid=totally-bogus-nonexistent` }, {});
