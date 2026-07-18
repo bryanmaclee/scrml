@@ -32,4 +32,4 @@ Per physical DOM surface (`className`, `style`/`display`, `.value`, each boolean
 - Do NOT push to main / do NOT open the PR — return to PA for the S239 adversarial gate. PA lands on bryan's authz.
 - Archive this brief to `docs/changes/i81-writer-ownership/BRIEF.md` on your branch + a `DONE-PROBE:` line + a `progress.md`.
 - Return: a summary of the surface-partition impl, the new error code name, the spec deltas, the R26 result (portal shapes compile / mix errors), and the test delta.
-DONE-PROBE: bun test compiler/tests/unit/value-attr-binding-i81.test.js 2>&1 | grep -q '0 fail' && bun test compiler/tests/conformance/attr-writer-conflict-i81.test.js 2>&1 | grep -q '0 fail'
+DONE-PROBE: bun test compiler/tests/unit/value-attr-binding-i81.test.js 2>&1 | grep -q '0 fail' && bun test compiler/tests/conformance/conf-ATTR-WRITER-CONFLICT.test.js 2>&1 | grep -q '0 fail'

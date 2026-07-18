@@ -58,3 +58,69 @@ convention. Names BOTH sites in the message.
 3. Replace F3 with the ① writer-conflict analysis + E-ATTR-WRITER-CONFLICT. Remove W-CG-VALUE-ATTR-STYLE-CONFLICT.
 4. SPEC reconciliation: §5.5.4 out of Planned; §5.5.3 correction; §34 row.
 5. Tests: rewrite value-attr-binding-i81.test.js to the ① model; add conformance case; R26 empirical (Acorn module parse).
+
+## 2026-07-18 — BUILT + VERIFIED (S268 dispatch complete)
+
+**Commits (on worktree branch):**
+- `cadd7ff2` docs — brief archive + progress anchor.
+- `930ed961` port — branch bcf85c29 sound fixes 3-way-merged onto main 510cef8d (baseline).
+- `2cc77445` feat — Axiom ① analyzeWriterConflict + E-ATTR-WRITER-CONFLICT (replaces F3 refusal).
+- `363754a0` spec — §5.5.4 out of Planned; §5.5.3 correction; §34 row.
+- `6652b00a` test — conformance case (codes + runtime halves).
+
+**Surface-partition impl (emit-html.ts `analyzeWriterConflict`):** the value emitter owns
+STRING surfaces (className via `class=(expr)`, style via `style=(expr)`, `.value` via
+`value=(expr)` on a form control, and generic string attrs). For a wholesale value attr about
+to emit, it classifies the surface and scans the element's sibling `attrs` for competing
+writers — `class:*`/transitions on className, `if=`/`show=`/transitions on style, `bind:value`
+on `.value`. Generic attrs (title/id/alt/data-*) have no composer form → always sole. Sole →
+EMIT (the #81 fix); wholesale + any other writer → E-ATTR-WRITER-CONFLICT (severity error)
+naming both sites + pick-one remedy, and emit NOTHING (byte-identical to pre-#81, so an ignored
+error degrades to the old behavior). Wired into the value-attr `else if`/`else` branch.
+
+**Guard mapping (the DD/brief lumped F3+D5+F2 as "refusal guards"; the correct model distinguishes):**
+- **F3 (style clobber)** → PROMOTED to the ① writer conflict (E-ATTR-WRITER-CONFLICT). This is a
+  genuine same-surface writer conflict. W-CG-VALUE-ATTR-STYLE-CONFLICT retired.
+- **D5 (HTML_BOOLEAN_ATTRS drop)** → KEPT as a SURFACE-DECLINE, not a conflict. The value emitter
+  does not own boolean-attr surfaces (presence, not string); `checked=(expr)` needs the bool
+  presence-toggle lowering, which is out of scope (REACTIVE_BOOL_ATTRS widening = separate arc,
+  brief-forbidden). Reframing it as a writer conflict would be wrong modeling — it is a
+  lowering-capability gap, and promoting it to a hard error would REGRESS build success on real
+  corpus (27-type-derived-table.scrml `<input checked=(@a && @b)>`).
+- **F2 (W-CG-VALUE-ATTR-UNLOWERABLE)** → KEPT as an orthogonal codegen-capability gate (can the
+  `@`-in-template-literal expression be lowered at all), independent of writer ownership.
+  [Both surfaced in the report for PA/bryan ratification.]
+
+**Error code chosen: `E-ATTR-WRITER-CONFLICT`.** Family fit — E-ATTR-010..012 are DOM-attribute
+conflicts on one element (§5.4/§5.5, codegen locus); E-REACTIVITY-* is the §6.13
+reactivity-system/type-system family (wrong locus). Descriptive over numbered (matches the newer
+named-code convention E-REACTIVITY-ATTR-CONFLICT). "WRITER" names the axiom's core noun.
+
+**Template-literal owner (§5.5.3) — SCOPED OUT of enforcement, surfaced.** ① says a reactive
+template-literal `class` is a wholesale writer that conflicts with `class:`. But the corpus fixture
+`phase4-dynamic-class-template-076.scrml` (titled "template-literal attr + class: combined") is a
+DELIBERATE golden referenced by `e2e-render-map-baseline.json` + `parser-conformance-within-node-allowlist.json`,
+demonstrating the legacy §5.5.3 coexistence. The DD (S265) did not account for this. Enforcing the
+template-lit-owner conflict now would break deliberate baselines. Decision: correct the §5.5.3 TEXT
+(remove the false "SHALL NOT treat as a conflict"; state the ① direction) + mark template-lit-owner
+ENFORCEMENT as a tracked follow-up requiring baseline migration. The `class=(expr)`/`style=(expr)`/
+`value=(expr)` wholesale-owner enforcement (the R26 gate) is complete.
+
+**Tests:** value-attr-binding-i81.test.js 51 pass (§i81.12 ① matrix added; F3 test rewritten to the
+error; expectParses → Acorn sourceType:module). conf-ATTR-WRITER-CONFLICT.test.js 5 pass.
+Pre-commit gate (unit+integration+conformance --bail): 20812 pass / 0 fail (baseline was 20800; +12
+new). 0 regressions.
+
+**R26 empirical (876 files, examples + samples/compilation-tests; pre-#81 510cef8d vs post-① HEAD;
+Acorn sourceType:module):**
+- NEW fatal: 0 · NEW module-parse-fail: 0 · LOST value-attr emits: 0 (141 fatal / 35 parse-fail are
+  IDENTICAL pre-existing on both baselines).
+- NEW value-attr emits (#81 wins): 2 — phase4-attr-braces-ghost-020.scrml, phase4-className-ghost-040.scrml.
+- Corpus writer-conflicts: 0 (the ① error fires on no real corpus file — a compile-time safety net
+  for a shape adopters don't currently write; matches the branch's "0 diagnostics" finding).
+- PROBE 1 (Peter's portal shape — 7 sole-writer class=/style=/title= bindings): compiles clean, 7
+  bindings emitted, client bundle Acorn sourceType:module parse OK. UNBLOCKS #81.
+- PROBE 2 (ambiguous class=(expr) + class:active= mix): E-ATTR-WRITER-CONFLICT fires (severity
+  error), names both sites, class= binding NOT emitted.
+
+DONE.
