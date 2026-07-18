@@ -64,6 +64,10 @@ const APP = `<program>
       session.destroy()
       return "bye"
     }
+    server function setRoleOnly(r) {
+      session.set("role", r)
+      return "role-only"
+    }
   }
   <main>
     <button onclick=login("a","b")>Login</button>
@@ -72,6 +76,7 @@ const APP = `<program>
     <button onclick=switchUser("x")>Sw</button>
     <button onclick=setPref("x")>P</button>
     <button onclick=leakSeq()>Q</button>
+    <button onclick=setRoleOnly("admin")>R</button>
   </main>
 </program>`;
 
@@ -276,6 +281,122 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
       expect(stillAuthed.userId).toBe("u-42");
       expect(stillAuthed.role).toBe("admin");  // preference update preserved identity
       expect(stillAuthed.pref).toBe("dark");
+    } finally {
+      try { rmSync(dir, { recursive: true }); } catch { /* best effort */ }
+    }
+  });
+
+  // B1 (S266) — cookie-name-boundary: an un-anchored `/scrml_sid=([^;]+)/` matched
+  // the FIRST substring, so a PREFIXED cookie (`Xscrml_sid=<attackerSid>`) or a
+  // crafted cookie VALUE containing `scrml_sid=` (RFC 6265 permits `=` in a value,
+  // e.g. `foo=scrml_sid=<atk>`) was read as the session id → session fixation: the
+  // victim authenticates as the attacker. The anchored `/(?:^|;\s*)scrml_sid=…/`
+  // resolves ANON for both. Driven against the REAL emitted whoami handler with a
+  // GENUINE authed attacker sid (so a hit would truly authenticate).
+  test("B1: prefixed / value-embedded scrml_sid never authenticates (session-fixation)", async () => {
+    if (typeof globalThis.document !== "undefined") return;
+
+    const { dir, outDir, errors } = compileApp();
+    try {
+      expect(errors).toEqual([]);
+      const serverJsPath = join(outDir, "app.server.js");
+      const mod = await import(`file://${serverJsPath}?v=${Date.now()}-${Math.random()}`);
+      const routes = mod.routes || Object.values(mod).filter((v) => v && v.path && v.handler);
+      const routeFor = (frag) => routes.find((r) => r.path.includes(frag));
+      const loginR = routeFor("login"), whoR = routeFor("whoami");
+
+      const post = (route, headers, body) =>
+        route.handler(new Request(`http://localhost${route.path}`, {
+          method: "POST", headers, body: JSON.stringify(body ?? {}),
+        }));
+      const jsonOf = async (r) => (r instanceof Response ? await r.json() : r);
+
+      // CSRF handshake + a REAL attacker login → a genuine authed sid + record.
+      const r0 = await post(loginR, { "Content-Type": "application/json" }, {});
+      const csrf = cookieVal(r0, "scrml_csrf").value;
+      const base = { "Content-Type": "application/json", Cookie: `scrml_csrf=${csrf}`, "X-CSRF-Token": csrf };
+      const attackerSid = cookieVal(await post(loginR, base, { email: "admin@x.com", password: "secret" }), "scrml_sid").value;
+      expect(attackerSid.length).toBeGreaterThan(0);
+
+      // control: the properly-named cookie DOES authenticate (the attack vector's sid is live).
+      const control = await jsonOf(await post(whoR, { ...base, Cookie: `scrml_csrf=${csrf}; scrml_sid=${attackerSid}` }, {}));
+      expect(control.isAuth).toBe(true);
+      expect(control.userId).toBe("u-42");
+
+      // ATTACK 1 — prefixed name `Xscrml_sid=<real attacker sid>` → ANON.
+      const atk1 = await jsonOf(await post(whoR, { ...base, Cookie: `scrml_csrf=${csrf}; Xscrml_sid=${attackerSid}` }, {}));
+      expect(atk1.isAuth).toBe(false);
+      expect(atk1.userId).toBe(null);
+
+      // ATTACK 2 — prefixed name masks the real (bogus) cookie → the LEGIT (bogus) one wins → ANON.
+      const atk2 = await jsonOf(await post(whoR, { ...base, Cookie: `scrml_csrf=${csrf}; evilscrml_sid=${attackerSid}; scrml_sid=bogus-none` }, {}));
+      expect(atk2.isAuth).toBe(false);
+      expect(atk2.userId).toBe(null);
+
+      // ATTACK 3 — crafted cookie VALUE contains `scrml_sid=` (name NOT attacker-controlled) → ANON.
+      const atk3 = await jsonOf(await post(whoR, { ...base, Cookie: `foo=scrml_sid=${attackerSid}; scrml_csrf=${csrf}; scrml_sid=bogus-none` }, {}));
+      expect(atk3.isAuth).toBe(false);
+      expect(atk3.userId).toBe(null);
+
+      // and the genuine cookie in a middle position (unrelated cookies around it) still resolves.
+      const legit = await jsonOf(await post(whoR, { ...base, Cookie: `theme=dark; scrml_csrf=${csrf}; scrml_sid=${attackerSid}; x=1` }, {}));
+      expect(legit.isAuth).toBe(true);
+      expect(legit.userId).toBe("u-42");
+    } finally {
+      try { rmSync(dir, { recursive: true }); } catch { /* best effort */ }
+    }
+  });
+
+  // B3 (S266) — role decoupled from auth: `session.set("role", x)` with NO userId
+  // minted a record `{role}` with no userId, and `role` read independent of `isAuth`
+  // (invariant `role ⇒ authenticated` violated). Gated on `userId != null` in BOTH
+  // the read-middleware and the write-ctx getter.
+  test("B3: a role set without a userId reads role=null + isAuth=false (role ⇒ authenticated)", async () => {
+    if (typeof globalThis.document !== "undefined") return;
+
+    const { dir, outDir, errors } = compileApp();
+    try {
+      expect(errors).toEqual([]);
+      const serverJsPath = join(outDir, "app.server.js");
+      const mod = await import(`file://${serverJsPath}?v=${Date.now()}-${Math.random()}`);
+      const routes = mod.routes || Object.values(mod).filter((v) => v && v.path && v.handler);
+      const routeFor = (frag) => routes.find((r) => r.path.includes(frag));
+      const loginR = routeFor("login"), whoR = routeFor("whoami"),
+        roleOnlyR = routeFor("setRoleOnly");
+
+      const post = (route, headers, body) =>
+        route.handler(new Request(`http://localhost${route.path}`, {
+          method: "POST", headers, body: JSON.stringify(body ?? {}),
+        }));
+      const jsonOf = async (r) => (r instanceof Response ? await r.json() : r);
+
+      const r0 = await post(loginR, { "Content-Type": "application/json" }, {});
+      const csrf = cookieVal(r0, "scrml_csrf").value;
+      const base = { "Content-Type": "application/json", Cookie: `scrml_csrf=${csrf}`, "X-CSRF-Token": csrf };
+
+      // Anonymous request → setRoleOnly("admin") mints a record with {role} but NO userId.
+      const rRole = await post(roleOnlyR, base, { r: "admin" });
+      const sid = cookieVal(rRole, "scrml_sid").value; // a sid IS minted (a preference write)
+      const withSid = { ...base, Cookie: `scrml_csrf=${csrf}; scrml_sid=${sid}` };
+
+      // The durable record does carry {role:"admin"} but no userId...
+      const dbPath = join(outDir, ".scrml-sessions.db");
+      const fresh = new Database(dbPath, { readonly: true });
+      const row = fresh.query("SELECT value FROM kv_store WHERE namespace = ? AND key = ?").get("session", sid);
+      fresh.close();
+      const rec = JSON.parse(row.value);
+      expect(rec.role).toBe("admin");
+      expect(rec.userId == null).toBe(true);
+
+      // ...yet the role READ gates on a userId: session.role (the write-ctx getter)
+      // reads null and isAuth is false. (The read-middleware `role:` line — the
+      // identical userId gate consumed by @currentUser / the projection / serverLoad
+      // auth — is pinned by the unit test session-context-gate-b2b3 + the
+      // server-load-authority impl-gap-#2 assertion.)
+      const who = await jsonOf(await post(whoR, withSid, {}));
+      expect(who.isAuth).toBe(false);      // write-ctx session.isAuth
+      expect(who.userId).toBe(null);
+      expect(who.role).toBe(null);         // <-- session.role (write-ctx getter) — no read without userId
     } finally {
       try { rmSync(dir, { recursive: true }); } catch { /* best effort */ }
     }
