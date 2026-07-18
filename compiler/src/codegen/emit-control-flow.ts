@@ -360,12 +360,13 @@ function detectHistoryFormFromString(rhs: string): { isHistoryForm: boolean; str
 /**
  * Build the async auto-await opts to spread into a control-flow STATEMENT
  * body's `emitLogicBody` call (if/else/for/while/do-while). When the enclosing
- * scheduled function threaded the §13.2 classifier inputs (asyncRouteMap +
- * asyncFilePath, plus the optional stdlib calleeMap/exportRegistry), this
- * enables `emitLogicBody`'s per-statement `injectPromiseAwait` so a
- * `const x = serverFn()` / `res = serverFn()` one block deep gets its `await`
- * exactly as a top-level statement does (i87). Returns `{}` (no auto-await)
- * when the inputs are absent — the pre-i87 emission is byte-identical.
+ * scheduled function threaded `asyncRouteMap` (the sole gate — asyncFilePath /
+ * calleeMap / exportRegistry are optional §13.2.1 classifier inputs, NOT
+ * preconditions), this enables `emitLogicBody`'s per-statement
+ * `injectPromiseAwait` so a `const x = serverFn()` / `res = serverFn()` one
+ * block deep gets its `await` exactly as a top-level statement does (i87).
+ * Returns `{}` (no auto-await) when asyncRouteMap is absent — the pre-i87
+ * emission is byte-identical.
  *
  * Deliberately NOT applied to the match-arm body path: the client match
  * lowering is a SYNC IIFE (`(function(){…})()`) where `await` is illegal.
