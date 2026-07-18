@@ -2,6 +2,15 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S265 — 2026-07-18 (bryan) — ⭐ CSS Wave-1 emission (§65) LANDED + the §25 component-reactive-CSS bug it exposed, FIXED
+
+Concurrent with the Peter (adopter-lane) S265 below. Resumed + completed the held CSS Wave-1 emission arc: rebased onto main, built the round-4 remainder, ran a **3-agent S239 adversarial gate** (caught **3 HIGH past a fully-green suite**, incl. the headline feature *silently DOA*), fixed + re-verified by EXECUTION, landed it (#95). Then scoped + fixed the pre-existing §25 bug that review exposed (#98). Conformance 731→**740**.
+
+- **#95 — CSS Wave-1 emission (§65)** (`3b62839a`): `<theme>`→`:root` token lowering · `.Variant`/`@media` variant selectors · the §65.3.4 reset (opt-out `<program reset="none">`) · `:where()`-flat emission · the `@`-sigil token model · **component-scope beats program-global** via `@layer` · a **runtime theme-switch that actually flips the page** (§65.6, execute-verified). Round-4 fixes: `@import`/`@charset` hoisted out of `@layer global{}` · flat-inline `#{}` `@token` lowering · descendant-combinator space preservation.
+- **The S239 gate caught 3 HIGH a green suite shipped:** apostrophe-in-text defeated the descendant-mask · flat-inline lowering rejected valid derived/engine cells · ⭐ **the theme-switch was silently DOA** (a `<theme>` token wrongly collected as a §25 reactive bridge → unbuilt `_scrml_el` → threw at bundle load). **Both R26 checks grep'd the emitted text and missed it; a reviewer who EXECUTED the bundle caught it** — the session's lesson (*"emitted" ≠ "runs"*).
+- **#98 — §25 component reactive-CSS-var bridge fix** (`bf316828`): (c) exposed that **component-scoped reactive CSS was broken on `main` generally** (`_scrml_el` unbuilt stub → ReferenceError at load). Components are compile-time inlined → the custom prop belongs on `document.documentElement` (inherits into the component's inline `var(--scrml-name)`, §65.3.1). One-line fix + dead-code cleanup + a browser test that **executes the bundle**.
+- **Filed:** `g-css-selector-nested-reactive-ref-no-bridge` · `g-css-inline-string-at-ident-miscompile` · `g-css-value-string-brace-mangle`. Currency: the flogence digest is verified working (S262 "broken" note dropped).
+
 ## S265 — 2026-07-18 (peter) — adopter-bug sweep: 3 lands + 1 security primitive & 1 design fork routed to bryan
 
 Peter's adopter-bug lane. Cleared most of the adopter queue (#56, #29, #27): three lands through the S239 gate, plus the two items whose right owner is bryan (a security-critical auth primitive → his sign-off; a reactivity-contract axiom → his ruling). Premise-verify paid off twice — #29's C/F and all of #27's core were already built upstream, saving wasted work. The S239 discipline caught real defects on every single land, including two CRITICAL auth-bypasses on the session primitive. Conformance 731→740, coherence 0/0.
