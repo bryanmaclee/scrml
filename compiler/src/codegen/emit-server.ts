@@ -1707,7 +1707,12 @@ export function generateServerJs(
     lines.push("");
     lines.push("function _scrml_session_middleware(req) {");
     lines.push("  const cookieHeader = req.headers.get('Cookie') || '';");
-    lines.push("  const sessionId = cookieHeader.match(/scrml_sid=([^;]+)/)?.[1] || null;");
+    // B1 (S266) — anchor the cookie-name parse to a name boundary (`^` or `; `).
+    // An un-anchored `/scrml_sid=…/` matches the FIRST substring, so a prefixed
+    // cookie (`Xscrml_sid=…`) or a crafted cookie VALUE containing `scrml_sid=`
+    // (RFC 6265 permits `=` in a value) is read as the session id → session
+    // fixation. `(?:^|;\s*)` forces the match to start at a real cookie name.
+    lines.push("  const sessionId = cookieHeader.match(/(?:^|;\\s*)scrml_sid=([^;]+)/)?.[1] || null;");
     lines.push("  const _rec = sessionId ? (_scrml_session_store.get(sessionId) || null) : null;");
     if (_csrfAuto) {
       // §40.2 session-bound synchronizer token. Per §39.2.3 the compiler emits a
@@ -1795,7 +1800,8 @@ export function generateServerJs(
       // FIX 4 — preserving server-owned fields like a csrf token minted mid-body).
       lines.push("function _scrml_session_begin(req) {");
       lines.push("  const cookieHeader = req.headers.get('Cookie') || '';");
-      lines.push("  const sid = cookieHeader.match(/scrml_sid=([^;]+)/)?.[1] || null;");
+      // B1 (S266) — name-anchored parse; see _scrml_session_middleware note.
+      lines.push("  const sid = cookieHeader.match(/(?:^|;\\s*)scrml_sid=([^;]+)/)?.[1] || null;");
       lines.push("  const rec = sid ? (_scrml_session_store.get(sid) || null) : null;");
       lines.push("  return {");
       lines.push("    sid,");
@@ -1924,7 +1930,8 @@ export function generateServerJs(
     lines.push("  handler: async function(_scrml_req) {");
     // S239 FIX 1 (logout half) — DELETE the server-side record, not just the
     // cookie, so a planted/leaked sid is not resurrectable after logout.
-    lines.push("    const _dsid = (_scrml_req.headers.get('Cookie') || '').match(/scrml_sid=([^;]+)/)?.[1] || null;");
+    // B1 (S266) — name-anchored parse; see _scrml_session_middleware note.
+    lines.push("    const _dsid = (_scrml_req.headers.get('Cookie') || '').match(/(?:^|;\\s*)scrml_sid=([^;]+)/)?.[1] || null;");
     lines.push("    if (_dsid) _scrml_session_store.delete(_dsid);");
     // S239 FIX 5 (SameSite consistency → Lax) + FIX 3 (dev-gated Secure).
     lines.push("    const _dsec = _scrml_is_secure_req(_scrml_req) ? '; Secure' : '';");
@@ -1989,13 +1996,15 @@ export function generateServerJs(
     lines.push("// --- Baseline CSRF protection (compiler-generated, double-submit cookie) ---");
     lines.push("function _scrml_ensure_csrf_cookie(req) {");
     lines.push("  const cookieHeader = req.headers.get('Cookie') || '';");
-    lines.push("  const existing = cookieHeader.match(/scrml_csrf=([^;]+)/)?.[1] || null;");
+    // B1 (S266) — name-anchored parse; see _scrml_session_middleware note.
+    lines.push("  const existing = cookieHeader.match(/(?:^|;\\s*)scrml_csrf=([^;]+)/)?.[1] || null;");
     lines.push("  return existing || crypto.randomUUID();");
     lines.push("}");
     lines.push("");
     lines.push("function _scrml_validate_csrf(req) {");
     lines.push("  const cookieHeader = req.headers.get('Cookie') || '';");
-    lines.push("  const cookieToken = cookieHeader.match(/scrml_csrf=([^;]+)/)?.[1] || '';");
+    // B1 (S266) — name-anchored parse; see _scrml_session_middleware note.
+    lines.push("  const cookieToken = cookieHeader.match(/(?:^|;\\s*)scrml_csrf=([^;]+)/)?.[1] || '';");
     lines.push("  const headerToken = req.headers.get('X-CSRF-Token') || '';");
     lines.push("  return cookieToken.length > 0 && cookieToken === headerToken;");
     lines.push("}");
