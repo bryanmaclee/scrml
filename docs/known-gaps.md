@@ -38,6 +38,12 @@
 
 ---
 
+## §S265 — gaps filed S265 (2026-07-18, Peter)
+
+### g-nested-flatpage-runtime-bare-ref — a NON-shell nested flat `<page>` (e.g. `pages/customer/loads.scrml` → `dist/customer/loads.html`) emits its `scrml-runtime.<hash>.js` `<script>` as a BARE ref with no `../` prefix → resolves to `dist/customer/scrml-runtime.<hash>.js` (nonexistent) → 404, page runtime never loads. The MPA shell-composition path DOES apply `upToRoot` to the runtime ref (`index.ts:~1971`); the flat-page path does not. PRE-EXISTING (reproduces with content-hashing OFF) — surfaced by the #82 S239 review, orthogonal to it. NOT currently biting `pjoliver11/assetManagement` (its `pages/*.scrml` are single-segment → land at dist root after the `pages/` strip, so the bare ref resolves). Bites any adopter with genuinely nested (multi-segment) flat routes. Fix = apply the `upToRoot` prefix to the runtime `<script>` on the flat-page emit path too. — `NEW S265 (#82 review); MED; open`
+
+### g-crossfile-dep-ref-pages-unstripped — `computeDependencyClientScripts` (`index.ts:~314-381`) computes cross-file dependency `<script src>` refs in the UN-stripped `pages/` coordinate space, while the actual artifacts land in the STRIPPED space (S100 `pages/`-prefix strip). When a page under `pages/` imports a `.scrml` dep across the strip boundary, the emitted ref carries an extra `../` and points above dist root → 404. PRE-EXISTING (reproduces with content-hashing OFF); the #82 hash-rewrite correctly leaves the already-non-resolving ref untouched (no regression). NOT biting assetManagement (same single-segment-pages reason as the sibling gap). Fix = compute dep refs in the same stripped space `pathFor` uses. — `NEW S265 (#82 review); MED; open`
+
 ## §S264 — gaps filed S264 (2026-07-17, bryan)
 
 ### g-sqlref-direct-call-arg-unresolved — a `?{}` used directly as a call ARGUMENT (`f(?{…}.all())`, `push(?{…}.all())`, `[?{…}.all()]`) hits a pre-existing "sql-ref unresolved: nodeId=-1" path that bypasses `ast-builder` `buildBlock` entirely → emits `null /* sql-ref unresolved … */.all()` for a VALID query (and E-SQL-003/E-SQL-004 also can't fire there). PRE-EXISTING (a valid query in that position fails identically on base) — surfaced by the E-SQL-003 S239 review, orthogonal to it. Fix = route call-argument-position `?{}` through the SQLNode construction site. — `NEW S264 (E-SQL-003 review); MED; open`

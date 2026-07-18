@@ -1,6 +1,6 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-07-18T00:13:05-06:00  commit: bf316828
+# updated: 2026-07-18T03:27:22-06:00  commit: c779e606
 
 ## Runtime Dependencies — root package.json (v0.7.1)
 @modelcontextprotocol/sdk@1.29.0 — MCP server SDK for the scrml MCP integration
@@ -31,11 +31,13 @@ actions/checkout@v4/v6, oven-sh/setup-bun@v2, anthropics/claude-code-action@v1 �
 ## Runtime Engine
 bun>=1.3.13 — required; no Node support (Bun-specific APIs used throughout: Bun.serve, bun:sqlite, Bun.$, Bun.SQL).
 
+No dependency-manifest change this window (S265) — package.json/compiler/package.json untouched.
+
 ## Internal Module Graph — compiler pipeline (compiler/src/api.js is the spine)
 
 | Stage | Module(s) | Feeds |
 |---|---|---|
-| CLI dispatch | cli.js | commands/{compile,dev,build,serve,migrate,promote,generate,init,introspect}.js |
+| CLI dispatch | cli.js | commands/{compile,dev,build,serve,migrate,promote,generate,init,introspect,semdiff}.js |
 | Split | block-splitter.js | ast-builder.js, native-parser/parse-file.js |
 | Parse (live) | ast-builder.js, expression-parser.ts | type-system.ts, symbol-table.ts, codegen |
 | Parse (native, canary) | native-parser/*.js (paired w/ *.scrml) | native-walker/*, native-parser-canary/within-node-classifier.ts, lsp/handlers.js |
@@ -44,9 +46,11 @@ bun>=1.3.13 — required; no Node support (Bun-specific APIs used throughout: Bu
 | Type check | type-system.ts, meta-checker.ts | dependency-graph.ts, auth-graph.ts |
 | Reachability / batch | reachability-solver.ts, batch-planner.ts, cps-batch-planner.ts | codegen |
 | Name/symbol resolve | name-resolver.ts, symbol-table.ts | codegen |
-| Codegen dispatch | code-generator.js (= codegen/index.ts) | codegen/emit-*.ts (client, server, html, css, each, match, engine, ssr, channel, worker, functions, validators, library, table-for, form-for, tool, test, theme-reset) |
-| Tool serve-harness | tool-program.ts, codegen/emit-tool.ts, codegen/emit-server.ts | §64.9 `serve=` listener-owning headless target (Fork 1A, Unit 1+2, landed this window) |
+| Codegen dispatch | code-generator.js (= codegen/index.ts) | codegen/emit-*.ts (client, server, html, css, each, match, engine, ssr, channel, worker, functions, validators, library, table-for, form-for, tool, test, theme-reset [NEW S265]) |
+| Tool serve-harness | tool-program.ts, codegen/emit-tool.ts, codegen/emit-server.ts | §64.9 `serve=` listener-owning headless target |
+| CSS emission | codegen/emit-css.ts, codegen/emit-theme-reset.ts (NEW S265) | run inside `runCG`/`generateCss` (codegen/index.ts); §65 Wave-1: reset layer, `:where()`-flat, `<theme>` token lowering, runtime theme-switch reflection wiring |
 | CSS conflict check | codegen/css-conflict-check.ts | run post-CE at api.js Stage 3.4 over `collectCssBlocks`; emits E-STYLE-CONFLICT / W-STYLE-CONFLICT-POSSIBLE |
+| Content-hash asset naming (NEW S265) | api.js pre-pass (`fnv1aHash`, gated on `contentHashAssets`) | build.js's `generateServerEntry` (cache-header policy); see build.map.md |
 | Validate emit | codegen/validate-emit.ts | final artifact sanity (single-JS-expression checks etc.) |
 | Meta-eval | meta-eval.ts | `^{}` meta-block execution |
 
@@ -55,25 +59,25 @@ bun>=1.3.13 — required; no Node support (Bun-specific APIs used throughout: Bu
 | Module | Role |
 |---|---|
 | codegen/reactive-deps.ts | cross-cutting reactive-cell/request/set/map dependency collectors, consumed by most emit-*.ts |
-| codegen/collect.ts | FileAST-shape collectors (server var decls, load-kind classification) |
+| codegen/collect.ts | FileAST-shape collectors (server var decls, load-kind classification, CSS-variable-bridge collection — now theme-token-aware, excludes `<theme>` refs from the §25 JS bridge, S265) |
+| codegen/emit-theme-reset.ts (NEW S265) | §65 `<theme>` token → `:root` custom-property lowering + `@`-sigil use-site disambiguation (`E-THEME-TOKEN-UNKNOWN`), the built-in `reset` `@layer` (`<program reset="none">` opt-out), and `themeVariantAttr` (the `data-scrml-theme-<cell>` name shared by emit-css.ts's variant selector and emit-client.ts's runtime reflection effect). Imported by emit-html.ts, emit-client.ts, and codegen/collect.ts. |
 | codegen/binding-registry.ts | pure data registry for event/logic bindings, no imports |
 | codegen/log-loc.ts | source-location resolver, standalone |
 | codegen/route-splitter.ts | per-route chunk manifest serialization (`serializeChunksManifest`) |
 | codegen/mcp-descriptors.ts | MCP tool descriptor synthesis (`buildMcpDescriptors`) |
 | engine-statechild-grammar.ts | pure constants shared by type-system.ts + codegen (no cycle) |
 | channel-watches.ts | shared §38.13 `watches=` schema/RowChange derivation, consumed by symbol-table.ts (SYM validation) + type-system.ts (typer synthesis) |
-| theme-body-parser.ts | §65 `<theme>`/`<defaults>` body-form parser |
-| codegen/emit-theme-reset.ts | §65 CSS Wave-1 EMISSION (NEW S265) — `<theme>` `@`-sigil token lowering (§25.7) + built-in `@layer reset` (§65.3.4) + `:where()`-flat specificity wrapping (§65.2.5); delegated to by codegen/emit-css.ts's `generateCss`, fires E-THEME-TOKEN-UNKNOWN |
+| theme-body-parser.ts | §65 `<theme>`/`<defaults>` BODY-FORM parser (declaration side); emit-theme-reset.ts owns EMISSION (see above) — the two are a parse/emit pair, not overlapping. |
 | module-resolver.js | resolves `scrml:*` stdlib imports + relative imports; STDLIB_ROOT via `fileURLToPath` |
 
 ## Defense-in-depth: stdlib async classification (api.js STDLIB-EXPORT-SEED)
-A server-only `scrml:*` re-export whose {kind, isAsync} cannot be resolved now FAILS CLOSED (defaults to async) instead of fail-open to sync — hardened after the 2026-07-11 jwt-auth-bypass regression (an unresolved `verifyJwt` export was misclassified sync, emitted unawaited, and its always-truthy Promise defeated the `if (!result.valid)` guard). Root cause was two parser bugs (block-splitter.js JSDoc comment-scan leak + tokenizer.ts regex-vs-divide misclassification on a leading `=`), both fixed; this seed is the standing backstop for the whole `scrml:*` re-export surface, not just auth.
+A server-only `scrml:*` re-export whose {kind, isAsync} cannot be resolved now FAILS CLOSED (defaults to async) instead of fail-open to sync — hardened after the 2026-07-11 jwt-auth-bypass regression. Root cause was two parser bugs (block-splitter.js JSDoc comment-scan leak + tokenizer.ts regex-vs-divide misclassification on a leading `=`), both fixed; this seed is the standing backstop for the whole `scrml:*` re-export surface, not just auth. Unchanged this window.
 
 ## stdlib module pairing (compiler/runtime/stdlib/*.js <-> stdlib/*/index.scrml)
-21 modules: auth, compiler, cron, crypto, data, format, fs, host, http, math, mcp, oauth (+5 provider sub-modules: discord/github/google/microsoft/pkce), path, process, random, redis, regex, router, store, test, time. Each ships BOTH a canonical `.scrml` source (stdlib/<mod>/) and a JS host shim (compiler/runtime/stdlib/<mod>.js) that the emitted client/server bundles import at `scrml:<mod>`.
+21 modules: auth, compiler, cron, crypto, data, format, fs, host, http, math, mcp, oauth (+5 provider sub-modules: discord/github/google/microsoft/pkce), path, process, random, redis, regex, router, store, test, time. Each ships BOTH a canonical `.scrml` source (stdlib/<mod>/) and a JS host shim (compiler/runtime/stdlib/<mod>.js) that the emitted client/server bundles import at `scrml:<mod>`. Unchanged this window.
 
 ## Tags
-#scrml #map #dependencies #module-graph #stdlib #css-conflict-check #pipeline #bun #acorn #server-shape #tool-serve
+#scrml #map #dependencies #module-graph #stdlib #css-conflict-check #pipeline #bun #acorn #server-shape #tool-serve #theme-reset #content-hash
 
 ## Links
 - [primary.map.md](./primary.map.md)
