@@ -2591,7 +2591,10 @@ function _scrml_link_click_handler(e) {
   if (!a) return;
 
   // \`hard\` opt-out (§20.8.3) — the markup sibling of navigate(…, .Hard). The
-  // bare boolean attribute survives to the DOM, so read it directly.
+  // bare boolean attribute survives to the DOM, so read it directly. Opt-out is
+  // PRESENCE-based (HTML boolean-attribute semantics): ANY value opts out —
+  // \`hard\`, \`hard=""\`, and even \`hard="false"\` all hard-navigate. Use the
+  // attribute's ABSENCE (omit it) to keep a link boosted.
   if (a.hasAttribute("hard")) return;
 
   // target=_blank / any non-_self named target → native (new browsing context).
@@ -2617,11 +2620,16 @@ function _scrml_link_click_handler(e) {
   if (typeof window === "undefined" || !window.location) return;
   if (a.origin !== window.location.origin) return;
 
-  // Pure hash / same-page anchor (#… to the current path) → native hash scroll.
+  // Pure hash link (#…) → native hash scroll (never a route change).
   var rawHref = a.getAttribute("href");
   if (rawHref != null && rawHref.charAt(0) === "#") return;
+  // Same-location target → native. Covers BOTH (a) a same-page #hash anchor
+  // (native scroll) AND (b) an exact self-link with no hash (S239 LOW: soft-nav
+  // would re-fetch + re-swap the outlet, wiping the current route's form / scroll
+  // / if= state for no navigation). Any resolved pathname+search equal to the
+  // current one is not a cross-page navigation, so let the browser handle it.
   if (a.pathname === window.location.pathname &&
-      a.search === window.location.search && a.hash) return;
+      a.search === window.location.search) return;
 
   // All guards passed — an internal same-origin cross-page link. Intercept and
   // soft-navigate the resolved same-origin path (pathname+search+hash keeps the

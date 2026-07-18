@@ -1960,6 +1960,33 @@ export function generateClientJs(ctx: CompileContext): string {
   const eventLines = clientStage(ctx, "emit-event-wiring", () => emitEventWiring(ctx, fnNameMap));
   for (const line of eventLines) lines.push(line);
 
+  // §20.8.3 link-boost (i27) — wire the delegated document-level click listener
+  // that intercepts internal <a href> clicks into the §20.8.2 soft-nav engine.
+  // Gated on this file being a <program> shell with an <outlet> (the SAME
+  // structural signal soft-nav keys on); the runtime fn lives in the 'utilities'
+  // chunk (detectRuntimeChunks pulls it on the same gate). The listener is
+  // delegated on `document`, so it survives every <outlet> swap without re-wiring.
+  //
+  // S239 HIGH — emitted HERE (after `eventLines`, in its OWN DOMContentLoaded
+  // handler), NOT up in reactiveLines. The author's delegated onclick handlers
+  // register inside emitEventWiring's DOMContentLoaded block (registered at eval
+  // time, above this line); registering the link-boost DOMContentLoaded handler
+  // AFTER it means, when DOMContentLoaded fires, the author's click delegation is
+  // added FIRST and link-boost's SECOND. Both are document bubble-phase
+  // listeners firing in registration order, so an author `event.preventDefault()`
+  // has already run by the time link-boost's `if (e.defaultPrevented) return;`
+  // top-guard checks — confirm-before-nav / validate-then-nav / client-intercept
+  // links now win. (A plain DOMContentLoaded wrapper, mirroring the author path,
+  // is deliberate: a readyState fast-path would re-run link-boost immediately in
+  // the after-ready case and re-introduce the ordering bug.)
+  if (fileHasOutlet(fileAST)) {
+    lines.push("");
+    lines.push("// --- §20.8.3 link-boost: delegated <a href> soft-nav click interception (i27) ---");
+    lines.push("// Registered LAST (after the author onclick delegation) so an author");
+    lines.push("// event.preventDefault() is visible to link-boost's defaultPrevented guard.");
+    lines.push("document.addEventListener('DOMContentLoaded', function() { _scrml_link_ensure_click(); });");
+  }
+
   // §65.6 (css-wave1 round-4) — the runtime theme-switch reflection. Emitted
   // AFTER the reactive cell inits (top of the bundle) so `_scrml_effect`'s
   // registration read sees the cell's initial value → the first-paint variant.

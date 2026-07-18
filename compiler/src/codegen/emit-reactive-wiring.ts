@@ -924,21 +924,14 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     }
   }
 
-  // Step 8: §20.8.3 link-boost (i27) — wire the delegated document-level click
-  // listener that intercepts internal <a href> clicks and runs them through the
-  // §20.8.2 soft-nav engine. Gated on this file being a <program> shell with an
-  // <outlet> (the SAME structural signal soft-nav itself keys on): an app with
-  // no swap region has nothing to soft-navigate, so the handler is not emitted
-  // (byte-identical to before for non-shell apps). The runtime function lives in
-  // the 'utilities' chunk (beside _scrml_navigate_soft); detectRuntimeChunks
-  // pulls that chunk in on the same fileHasOutlet gate. The listener is delegated
-  // on `document`, so it survives every <outlet> subtree swap without re-wiring.
-  if (fileHasOutlet(fileAST)) {
-    lines.push("");
-    lines.push("// --- §20.8.3 link-boost: delegated <a href> soft-nav click interception (i27) ---");
-    lines.push("_scrml_link_ensure_click();");
-  }
-
+  // §20.8.3 link-boost (i27) NOTE: the delegated `_scrml_link_ensure_click()`
+  // boot call is NOT emitted here. It MUST register its document-level click
+  // listener AFTER the author's delegated onclick handlers so an author
+  // `event.preventDefault()` is visible to link-boost's `if (e.defaultPrevented)`
+  // top-guard (S239 HIGH — reactiveLines land at client-body top level, BEFORE
+  // the author delegation which registers inside DOMContentLoaded). The boot
+  // call is emitted by generateClientJs AFTER `eventLines`, wrapped in its own
+  // DOMContentLoaded handler, so its registration follows the author's.
   return lines;
 }
 
