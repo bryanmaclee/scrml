@@ -1003,3 +1003,60 @@ describe("§i81.12 — Axiom ① writer-ownership conflict (E-ATTR-WRITER-CONFLI
     expect(e.message).toContain("class:b1=");
   });
 });
+
+// ---------------------------------------------------------------------------
+// §i81.13 — component-root string-prop crash, FAIL CLOSED (S268 fix-round finding 1)
+//
+// A STRING prop referenced in a value-attr expression on a component ROOT is
+// substituted by the expander as a BARE token (`title=(label)` → `((hi))`), a
+// free identifier that throws ReferenceError at DOMContentLoaded inside the
+// shared wiring handler → dead page. The lowerability gate now scope-walks the
+// lowered expression on `_expandedFrom` roots and drops it (W-CG-VALUE-ATTR-COMPONENT-PROP),
+// restoring the pre-#81 no-crash behavior. (Execution proof is in
+// compiler/tests/browser/browser-i81-component-root-crash.test.js.)
+// ---------------------------------------------------------------------------
+describe("§i81.13 — component-root string-prop value-attr fails closed (no page crash)", () => {
+  test("string prop in a root value-attr expr is dropped with a warning, not emitted as a free ident", () => {
+    const src = `<program>
+      \${ const Badge = <span title=(label) props={ label: string }>badge</> }
+      <Badge label="hi"/>
+    </program>`;
+    const r = compile(src);
+    // Non-fatal warning, not a compile error.
+    expect(r.errors).toEqual([]);
+    expect(diagCodes(r)).toContain("W-CG-VALUE-ATTR-COMPONENT-PROP");
+    // The crashing free-identifier binding is NOT emitted (pre-#81 no-crash parity).
+    expect(emittedHtml(r)).not.toContain("data-scrml-bind-attr-title");
+    expect(emittedClient(r)).not.toContain("((hi))");
+    // And the emitted bundle is a valid ES module (no free-ident SyntaxError-adjacent leak).
+    expectParses(emittedClient(r));
+  });
+
+  test("an UNRELATED reactive binding on another element still wires (no dead-page blast radius)", () => {
+    const src = `<program>
+      \${ const Badge = <span title=(label) props={ label: string }>badge</> }
+      <count> = 0
+      <Badge label="hi"/>
+      <p data-n=(@count)>n</p>
+    </program>`;
+    const r = compile(src);
+    // The title site drops; the data-n site is untouched and wires reactively.
+    expect(emittedHtml(r)).not.toContain("data-scrml-bind-attr-title");
+    expect(emittedHtml(r)).toMatch(/data-scrml-bind-attr-data-n="[^"]+"/);
+    expect(emittedClient(r)).toContain('_scrml_reactive_get("count")');
+  });
+
+  test("a REACTIVE value-attr on a component root is NOT over-refused (only free idents drop)", () => {
+    const src = `<program>
+      \${ const Panel = <div title=(@heading) props={ heading: string }>p</> }
+      <heading> = "Live"
+      <Panel heading="ignored"/>
+    </program>`;
+    const r = compile(src);
+    // `title=(@heading)` lowers to _scrml_reactive_get("heading") — no free
+    // identifier — so it MUST still emit (the fix is scoped to free-ident refs,
+    // not "any value-attr on a root").
+    expect(diagCodes(r)).not.toContain("W-CG-VALUE-ATTR-COMPONENT-PROP");
+    expect(emittedHtml(r)).toMatch(/data-scrml-bind-attr-title="[^"]+"/);
+  });
+});

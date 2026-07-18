@@ -10,6 +10,7 @@ import { extractReactiveDeps, collectReactiveVarNames, extractReactiveDepsTransi
 import { hasTemplateInterpolation } from "./rewrite.js";
 import { isRcdataElement, isHtmlElement } from "../html-elements.js";
 import { CGError } from "./errors.ts";
+import * as acorn from "acorn";
 import type { BindingRegistry } from "./binding-registry.ts";
 import type { CompileContext } from "./context.ts";
 import { isFlatDeclarationBlock, renderFlatDeclarationAsInlineStyle } from "./emit-css.ts";
@@ -180,6 +181,101 @@ function isDeclaredPropAttr(node: any, name: string): boolean {
   return declared.includes(name);
 }
 
+// i81 (S268 fix-round finding 1) — JS globals that legitimately appear as free
+// identifiers in a LOWERED value-attr expression. A reactive `@`-ref lowers to
+// `_scrml_reactive_get("x")` (its only free identifier is the `_scrml_`-prefixed
+// runtime helper), so a lowered expression whose free identifiers are all either
+// `_scrml_`-prefixed or in this set is self-contained. Anything else is a token
+// that will be UNDEFINED at runtime — see loweredExprHasFreeIdentifier.
+const VALUE_ATTR_SAFE_GLOBALS = new Set<string>([
+  "String", "Number", "Boolean", "Array", "Object", "JSON", "Math", "Date",
+  "RegExp", "Map", "Set", "WeakMap", "WeakSet", "Promise", "Symbol", "BigInt",
+  "parseInt", "parseFloat", "isNaN", "isFinite", "NaN", "Infinity", "undefined",
+  "globalThis", "window", "document", "console", "Error",
+  "encodeURIComponent", "decodeURIComponent",
+]);
+
+/**
+ * i81 (S268 fix-round finding 1) — does a LOWERED value-attr expression reference
+ * a FREE identifier that will be undefined at runtime?
+ *
+ * THE CRASH: a STRING prop on a component root (`const Badge = <span
+ * title=(label) props={label:string}>`, `<Badge label="hi"/>`) is substituted by
+ * the expander into the root's own value-attr expression as a BARE token — the
+ * value `hi`, not the string literal `"hi"`. `title=(label)` lowers to
+ * `const _scrml_v = ((hi));`, where `hi` is a free, undeclared identifier. That
+ * throws `ReferenceError` at DOMContentLoaded INSIDE the shared wiring handler,
+ * so every UNRELATED binding after it on the page never wires — a whole-page
+ * crash, strictly worse than the pre-#81 silent drop. It slips both the Acorn
+ * PARSE gate (F2) and R26, because `((hi))` is syntactically valid — only
+ * EXECUTION (or a scope walk) catches the free reference.
+ *
+ * This is an Acorn SCOPE WALK, not a regex (a free reference is a scoping
+ * property). A reactive `@`-ref lowers to `_scrml_reactive_get("x")` whose only
+ * free identifier is `_scrml_`-prefixed; a self-contained expression's free
+ * identifiers are therefore all `_scrml_`-prefixed or JS globals. Any OTHER free
+ * identifier is a substituted-prop token (or similar) that crashes at runtime.
+ *
+ * Gated by the caller to `_expandedFrom` component roots (the only place the
+ * expander substitutes props into a root's own attributes), so it never
+ * false-refuses a top-level value-attr whose bare identifier is a server-fn name
+ * awaiting the whole-buffer post-mangle pass.
+ */
+function loweredExprHasFreeIdentifier(lowered: string): boolean {
+  let ast: acorn.Node;
+  try {
+    ast = acorn.parse(`const _scrml_probe = (${lowered});`, { ecmaVersion: 2022, sourceType: "module" });
+  } catch {
+    // Unparseable is the F2 probe's concern (it runs first); not ours.
+    return false;
+  }
+  let found = false;
+  const walk = (node: any, bound: Set<string>): void => {
+    if (found || !node || typeof node.type !== "string") return;
+    let scope = bound;
+    if (
+      node.type === "FunctionDeclaration" ||
+      node.type === "FunctionExpression" ||
+      node.type === "ArrowFunctionExpression"
+    ) {
+      const names: string[] = [];
+      const collect = (p: any) => {
+        if (!p) return;
+        if (p.type === "Identifier") names.push(p.name);
+        else if (p.type === "AssignmentPattern") collect(p.left);
+        else if (p.type === "RestElement") collect(p.argument);
+        else if (p.type === "ArrayPattern") (p.elements ?? []).forEach(collect);
+        else if (p.type === "ObjectPattern") (p.properties ?? []).forEach((pr: any) => collect(pr.value ?? pr.argument));
+      };
+      (node.params ?? []).forEach(collect);
+      if (node.id?.name) names.push(node.id.name);
+      scope = new Set([...bound, ...names]);
+    }
+    if (node.type === "VariableDeclarator" && node.id?.type === "Identifier") {
+      bound.add(node.id.name);
+    }
+    if (node.type === "Identifier") {
+      const n = node.name;
+      if (!scope.has(n) && !n.startsWith("_scrml_") && !VALUE_ATTR_SAFE_GLOBALS.has(n)) {
+        found = true;
+        return;
+      }
+    }
+    for (const key of Object.keys(node)) {
+      if (key === "type" || key === "start" || key === "end" || key === "loc") continue;
+      // Non-reference identifier positions: an object-property KEY and a
+      // non-computed member `.property` are NAMES, not reads of a binding.
+      if (key === "key" && node.type === "Property" && !node.computed) continue;
+      if (key === "property" && node.type === "MemberExpression" && !node.computed) continue;
+      const child = (node as any)[key];
+      if (Array.isArray(child)) for (const c of child) walk(c, scope);
+      else if (child && typeof child.type === "string") walk(child, scope);
+    }
+  };
+  walk(ast, new Set<string>());
+  return found;
+}
+
 /**
  * i81 (S239 finding 2) — CODEGEN-CAPABILITY gate. Can this reactive VALUE
  * attribute's expression be lowered to VALID JavaScript? Returns false (with a
@@ -257,6 +353,39 @@ function valueAttrIsLowerable(
   // `E-ATTR-WRITER-CONFLICT` compile error naming both sites). `attrs`/`tag`
   // remain in the signature for parity with the surface-scan call site.
 
+  // --- (4) component-root prop-substitution crash (S268 fix-round finding 1) ---
+  // On an `_expandedFrom` component root, the expander substitutes a STRING prop
+  // into the root's own value-attr expression as a BARE token: `title=(label)` on
+  // `<Badge label="hi"/>` lowers to `((hi))` — a FREE identifier that throws a
+  // ReferenceError at DOMContentLoaded INSIDE the shared wiring handler, killing
+  // EVERY unrelated binding on the page. Pre-#81 the attr was silently dropped
+  // (no crash); emitting it turned a missing attribute into a dead page. FAIL
+  // CLOSED: if the lowered expression on such a root references a free identifier
+  // (not `_scrml_`-prefixed, not a JS global — i.e. not a self-contained reactive
+  // lowering), drop the attribute, restoring the pre-#81 no-crash behavior. Gated
+  // to `_expandedFrom` roots so a top-level value-attr whose bare identifier is a
+  // server-fn name awaiting the post-mangle pass is never false-refused.
+  if (node?._expandedFrom != null && loweredExprHasFreeIdentifier(lowered)) {
+    if (errors) {
+      errors.push(new CGError(
+        "W-CG-VALUE-ATTR-COMPONENT-PROP",
+        `W-CG-VALUE-ATTR-COMPONENT-PROP: the reactive value attribute \`${name}=\` on ` +
+        `the root of component <${node._expandedFrom}> references a value that is not a ` +
+        `reactive cell, so it cannot be lowered safely and is NOT emitted (the ` +
+        `attribute is absent at runtime).\n` +
+        `  Expression: ${String(val.raw ?? "").slice(0, 80)}\n\n` +
+        `  The usual cause is a STRING prop used in an expression on the component's ` +
+        `root element (\`<${node._expandedFrom} ${name}=(<prop>) …>\`): the prop is ` +
+        `substituted by value as a bare token, which is undefined at runtime. Reference ` +
+        `a reactive cell (\`@cell\`) instead, or move the attribute onto a child element ` +
+        `of the component body.`,
+        attr?.span ?? node?.span ?? { file: "", start: 0, end: 0, line: 0, col: 0 },
+        "warning",
+      ));
+    }
+    return false;
+  }
+
   return true;
 }
 
@@ -290,8 +419,14 @@ const TRANSITION_ATTR_PREFIXES = ["transition:", "in:", "out:"];
  *
  * Self-exclusion is automatic: the scan matches only COMPOSER names, never the
  * wholesale owner's own name, so the emitted attribute never matches itself.
- * Two wholesale owners of one surface (e.g. two `class=` attributes) cannot
- * co-occur — that is a duplicate attribute, caught upstream.
+ *
+ * Two wholesale owners of one surface (e.g. `<div class=(@a) class=(@b)>`) are
+ * NOT flagged: they emit two independent reactive `class` bindings with no error
+ * — benign at runtime (the HTML parser keeps the first `class` attribute; the
+ * second binding's querySelector finds nothing and its effect is a null-guarded
+ * no-op), so it is a latent author mistake rather than a crash. Detecting it
+ * would require counting same-named wholesale attrs across the per-attr emit
+ * loop and risks a double-fire; left as a known gap (docs/known-gaps.md).
  */
 function analyzeWriterConflict(
   attrs: any[],
