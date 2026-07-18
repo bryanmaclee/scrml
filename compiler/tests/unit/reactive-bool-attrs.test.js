@@ -219,6 +219,71 @@ describe("§B1.6 — bool-attr binding composes with other reactivity (no cross-
   });
 });
 
+describe("§B1.8 — bare `@var` bool-attr form (i29-D adopter bug)", () => {
+  // i29-D: a BARE `disabled=@saving` (boolean attr assigned a bare `@var`, no
+  // `${...}` and no `!`) previously fell through the variable-ref branch to the
+  // general static-attr `else`, emitting a STATIC `disabled="saving"`
+  // (always-disabled, no reactivity) instead of the reactive bool-binding. The
+  // EXPRESSION form (`disabled=!@x` / `disabled=${@x}`) already worked. This
+  // block pins the bare form onto the SAME reactive bool-binding for all three
+  // REACTIVE_BOOL_ATTRS, plus the contrast/regression guards.
+
+  for (const attr of ["disabled", "readonly", "required"]) {
+    test(`bare ${attr}=@saving emits data-scrml-bind-bool-${attr} placeholder (NOT static ${attr}="saving")`, () => {
+      const src = `<program>
+        <saving> = false
+        <input type="text" ${attr}=@saving/>
+      </program>`;
+      const r = compile(src);
+      expect(r.errors).toEqual([]);
+      const html = emittedHtml(r);
+      // Reactive bool-binding placeholder present…
+      expect(html).toMatch(new RegExp(`data-scrml-bind-bool-${attr}="[^"]+"`));
+      // …and the always-on STATIC attribute is GONE (the bug's signature).
+      expect(html).not.toContain(`${attr}="saving"`);
+    });
+
+    test(`bare ${attr}=@saving wires the runtime _scrml_effect toggle`, () => {
+      const src = `<program>
+        <saving> = false
+        <input type="text" ${attr}=@saving/>
+      </program>`;
+      const r = compile(src);
+      const client = emittedClient(r);
+      expect(client).toContain(`setAttribute("${attr}", "")`);
+      expect(client).toContain(`removeAttribute("${attr}")`);
+      expect(client).toContain("_scrml_effect");
+      // The bare @var is the reactive source — the toggle reads the `saving` cell.
+      expect(client).toContain('_scrml_reactive_get("saving")');
+    });
+  }
+
+  test("contrast: expression form disabled=!@saving still wires (no regression)", () => {
+    const src = `<program>
+      <saving> = false
+      <button disabled=!@saving>Save</button>
+    </program>`;
+    const r = compile(src);
+    expect(r.errors).toEqual([]);
+    const html = emittedHtml(r);
+    expect(html).toMatch(/data-scrml-bind-bool-disabled="[^"]+"/);
+    expect(html).not.toContain('disabled="saving"');
+  });
+
+  test("boundary (#81): a NON-bool bare attr `title=@x` stays STATIC (still #81 territory, unchanged)", () => {
+    const src = `<program>
+      <x> = "hi"
+      <div title=@x>Content</div>
+    </program>`;
+    const r = compile(src);
+    const html = emittedHtml(r);
+    // No reactive bool-binding for a non-REACTIVE_BOOL_ATTRS name…
+    expect(html).not.toMatch(/data-scrml-bind-bool-title=/);
+    // …and the existing static @-stripping behavior is preserved.
+    expect(html).toContain('title="x"');
+  });
+});
+
 describe("§B1.7 — placeholder ID uniqueness per attr per element", () => {
   test("two buttons with disabled=!@busy get distinct placeholder IDs", () => {
     const src = `<program>
