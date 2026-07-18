@@ -38,3 +38,18 @@ worktree: .claude/worktrees/agent-ab1f6943233cae2f9  branch off main @ 1e63bbb1
   a `.some` callback — both top-level AND nested inside an `if` body (my recursion path). My change
   never touches server-mode emission (asyncRouteMap is set only by scheduleStatements = client-only),
   so the guards are structurally unaffected.
+
+## 2026-07-18 — scope boundary / residuals (deliberate, documented)
+- MATCH-ARM bodies: NOT descended into. The client match lowering emits a SYNC IIFE
+  (`(function(){…})()`, emit-control-flow.ts:2135) where `await` is illegal; injecting there would
+  produce invalid JS. A server call in a client match arm needs the IIFE made async+awaited — a
+  larger transform, out of scope. hasServerCallees also skips match arms to stay consistent (no
+  false async-prefix). Residual: nested-in-match server call stays un-awaited (== pre-fix).
+- TILDE-accumulator / reactive-for `createItem` paths (`_emitIfStmtWithOpts`,
+  `_emitForStmtWithTilde`, `_emitWhileStmtWithTilde` in emit-logic.ts, reached only when
+  `opts.tildeContext`/`continueBehavior` active) do NOT get the injection — these are separate
+  async-coloring contexts (the createItem fn's own asyncness) where blind injection could be unsafe.
+  Residual: missing await (not invalid JS), == pre-fix. The common no-`~` path is fully covered.
+- TRY/CATCH bodies: not threaded (brief scope is if/else/for/while/do-while + match). Consistent —
+  hasServerCallees doesn't recurse into try either, so no async/await mismatch.
+- COMPOUND-ASSIGN (`x += fn()`): injectPromiseAwait preserves the operator → `x += await fn()`.

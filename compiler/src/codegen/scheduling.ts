@@ -378,6 +378,20 @@ export function injectPromiseAwait(
   if (!code) return code;
   if (!isPromiseReturningCallExpr(stmt, routeMap, filePath, calleeMap, exportRegistry)) return code;
 
+  // i87 fail-safe — do NOT touch a statement whose emitted code is a REACTIVE /
+  // DERIVED / ENGINE runtime sink (or an already-async IIFE). A reactive-cell
+  // server-call write (`@cell = serverFn()` → `_scrml_reactive_set("cell",
+  // serverFn())`) is owned by the emit-client auto-await pass (emit-client.ts),
+  // which rewrites it to a self-contained `(async () => _scrml_reactive_set(
+  // "cell", await serverFn()))().catch(…)` — awaiting the fetch INSIDE its own
+  // async IIFE (so the enclosing handler stays sync). Prepending our `await`
+  // here both duplicates that and lands an illegal `await` in the sync handler.
+  // The classifier fires on these (the server callee sits as a nested arg), so
+  // this guard — not the classifier — is what fences them out.
+  if (/^\s*(?:await\s+)?(?:\(async\b|_scrml_reactive_set\b|_scrml_derived_\w*|_scrml_default_set\b|_scrml_init_set\b|_scrml_engine_\w*)/.test(code)) {
+    return code;
+  }
+
   const kind = (stmt as ASTNode).kind;
   // let-decl / const-decl: reconstruct `const NAME = await <init>;` from the
   // AST. Mirrors the pre-i87 top-level decl branch (which always emitted
