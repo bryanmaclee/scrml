@@ -1,0 +1,18 @@
+WIP(i29e-pass2): start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a5f449cdf392ab7d5
+
+[B4b] session-secure attribute: registered on <program>+<page> (attribute-registry.js, html-elements.js); parsed in compute-program-config.ts (unconditional annotate + authConfig). Default "true".
+
+[B4b thread] route-inference.ts: AuthMiddleware.sessionSecure (boolean, optional); getExplicitAuthDeclaration returns sessionSecure; 3 authMiddleware.set sites thread it ("false"->false, default true).
+[B4a codegen] emit-server.ts: _secureCookieMode + _sessionCookieName (authMiddlewareEntry.sessionSecure OR <program> node annotation; default true). __Host-scrml_sid + always-Secure in secure mode; plain scrml_sid + dev-gated Secure in opt-out. Shared _scrml_read_session_id helper tries BOTH names (both modes). 4 Set-Cookie sites + 3 read sites updated.
+[B4b warn] emit-server.ts: _scrml_warn_insecure_cookie (secure mode only) once-per-process console.warn when Secure cookie set over bare http non-local; called in cookie_wrap.
+[B5 runtime] emit-server.ts: _scrml_session_begin set() refuses key==="csrfToken" (no-op) — closes the mass-assign CSRF-bypass (dynamic-key-safe).
+[B5 compile] emit-expr.ts: literal session.set("csrfToken",...) -> E-SESSION-RESERVED-KEY (new code, drained via the session sink).
+Probe verified: secure mode name+Secure; opt-out plain+dev-gated; bad value W-ATTR-002 + safe secure default; B5 literal fires; B5 runtime guard emitted.
+
+[restructure] compute-program-config.ts session-secure parse moved INSIDE if(authVal) (mirror sessionExpiry). emit-server _secureCookieMode reads authMiddlewareEntry.sessionSecure (auth) OR raw session-secure attr from <program>/<page> node (non-auth fallback, incl auth="optional" page). Fixes page-level opt-out threading.
+[tests] session-establishment.test.js U4/U6/U7b updated for secure-mode default (__Host-scrml_sid, always Secure, B5 guard in set()). session-establishment-roundtrip.test.js: secure-mode cookie assertions + __Host- re-send round-trip. NEW unit session-secure-b4b5.test.js (9). NEW integration session-secure-b4b5-roundtrip.test.js (2 execute: B5 runtime guard holds; B4a opt-out authenticates over http://localhost).
+[SPEC] §20.5.1 documents session-secure=/__Host-/always-Secure/reserved-key guard; §34 adds E-SESSION-RESERVED-KEY row.
+Session suite: 109 pass across 8 files; adjacent auth/route: 188 pass across 11 files.
+
+[SECFIX B4a — coordinator adversarial finding] _scrml_read_session_id UNCONDITIONAL scrml_sid fallback re-opened cookie-tossing: a sibling subdomain sets plain scrml_sid (no __Host- protection) → a fresh visitor (no __Host- cookie) force-authed into attacker session. FIX: mode-gate the reader to the mode-appropriate name ONLY (secure→__Host-scrml_sid, opt-out→scrml_sid); drop cross-name fallback (a session-secure= flip renames+invalidates anyway). emit-server.ts reader now emits `/(?:^|;\s*)${_sessionCookieName}=([^;]+)/` only. SPEC §20.5.1 corrected (was wrongly "accepts EITHER name regardless of mode").
+[SECFIX tests] EMPIRICAL: secure+plain scrml_sid→isAuth false; secure+__Host-→true; opt-out+plain→true; opt-out+__Host-→false. Updated all secure-mode re-send sites to __Host-scrml_sid: b2b3 (re-send+emit-shape+local-parse), roundtrip (planted/withSid/bogus/switchUser/B3 + adversarial anchoring block rewritten around __Host- + new ATTACK 0 plain-name→anon), synchronizer + csrf-canonical (seeded cookie), b4b5 unit (read-side mode-gated assertions) + b4b5-roundtrip (B5 seeded cookie + NEW dedicated fixation execute test). Full gate: 20756 pass / 68 skip / 0 fail (1122 files).

@@ -121,13 +121,16 @@ export function setSessionShadowedInFile(on: boolean): void {
   _sessionShadowedInFile = !!on;
 }
 
-// §20.5 (B2.4, S266) — narrow module-level sink for E-SESSION-VALUE diagnostics
-// raised during SERVER-mode expression emission. A bare `session` VALUE-use
-// (`return session`, `let s = session`, `log(session)`, `session` as a call arg /
-// assignment RHS) is not a valid member/index/call of the builtin — it would emit
-// a bare `session` reference (ReferenceError at request time). `emitIdent` records
-// the site here (it has the precise `mode` + shadow context); `generateServerJs`
-// drains it into the live `errors` array after emission (reset at the same start
+// §20.5 (B2.4, S266) — narrow module-level sink for session-builtin codegen
+// diagnostics raised during SERVER-mode expression emission. Carries two codes:
+//   • E-SESSION-VALUE — a bare `session` VALUE-use (`return session`, `let s =
+//     session`, `log(session)`, `session` as a call arg / assignment RHS): not a
+//     valid member/index/call of the builtin, would emit a bare `session` ref
+//     (ReferenceError at request time). Recorded by `emitIdent`.
+//   • E-SESSION-RESERVED-KEY (B5, S266) — a literal `session.set("csrfToken", …)`
+//     mass-assignment on the compiler-owned CSRF token. Recorded by `emitCall`.
+// Both have the precise `mode` + shadow context at the emission site; `generateServerJs`
+// drains them into the live `errors` array after emission (reset at the same start
 // seam), mirroring emit-server's `_foreignCrossingErrors` narrow-sink precedent.
 // Bounded to the server-emit window: reset-at-start + drain-at-end in emit-server.
 let _sessionValueUseErrors: CGError[] = [];
@@ -2613,6 +2616,31 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
       (node.callee as MemberExpr).property === "destroy") &&
     !(_sessionShadowedInFile || (ctx.declaredNames && ctx.declaredNames.has("session")))
   ) {
+    // B5 (S266) — reserved-key guard, compile-time half. A LITERAL
+    // `session.set("csrfToken", …)` is the obvious mass-assignment attempt on the
+    // compiler-owned §40.2 synchronizer token; surface it as a clean build error
+    // rather than a silent runtime no-op. The RUNTIME guard (emit-server's
+    // `set()`) is the load-bearing defense — it also catches a DYNAMIC key
+    // (`session.set(userKey, v)`) this literal check cannot see. Recorded on the
+    // same session-diagnostic sink E-SESSION-VALUE uses (drained post server-emit).
+    if (
+      (node.callee as MemberExpr).property === "set" &&
+      node.args.length >= 1 &&
+      node.args[0].kind === "lit" &&
+      (node.args[0] as LitExpr).litType === "string" &&
+      (node.args[0] as LitExpr).value === "csrfToken"
+    ) {
+      _sessionValueUseErrors.push(new CGError(
+        "E-SESSION-RESERVED-KEY",
+        "E-SESSION-RESERVED-KEY: `csrfToken` is a compiler-owned session key (the " +
+        "§40.2 server-authoritative CSRF synchronizer token) and cannot be set via " +
+        "`session.set(\"csrfToken\", …)`. Writing it would let a caller pin the CSRF " +
+        "token to a known value, defeating the double-submit check. Remove the write; " +
+        "the compiler mints + persists the token. (`userId` / `role` remain writable.)",
+        node.span ?? { start: 0, end: 0 },
+        "error",
+      ));
+    }
     // Lowered unconditionally in server mode; emit-server's post-emission scan
     // (S239 FIX 6) fires E-SESSION-CONTEXT if this `_scrml_req._scrml_sess` ref
     // lands OUTSIDE a cookie-wrapped web-app route handler (SSE / `<endpoint>` /

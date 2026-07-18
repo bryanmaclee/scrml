@@ -213,7 +213,8 @@ describe("end-to-end — first POST with the delivered token PASSES (no 403); fa
     const store = globalThis.__scrml_session_store;
     const SID = `sid-${Math.random().toString(36).slice(2)}`;
     store.set(SID, { userId: 7, role: "user" });
-    const cookie = `scrml_sid=${SID}`;
+    // B4a (S266): an auth app is secure mode → the session cookie is __Host-scrml_sid.
+    const cookie = `__Host-scrml_sid=${SID}`;
 
     const routes = mod.routes;
     const sessionRoute = routes.find((r) => r.path === "/_scrml/session");

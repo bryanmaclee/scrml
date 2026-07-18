@@ -9,7 +9,8 @@
  *   U3  the durable SQLite store is emitted (bun:sqlite Database, .scrml-sessions.db);
  *       the in-memory `new Map()` store is NOT used
  *   U4  the commit emits the establishment cookie
- *       `Set-Cookie: scrml_sid=…; HttpOnly; SameSite=Lax; Max-Age=<expiry>`
+ *       `Set-Cookie: __Host-scrml_sid=…; HttpOnly; SameSite=Lax; Max-Age=<expiry>; Secure`
+ *       (B4a secure-mode default; plain `scrml_sid` under `session-secure="false"`)
  *   U5  multiple `session.set` calls coalesce to ONE store write + ONE cookie
  *   U6  `session.destroy()` lowers + commit deletes the record + clears the cookie
  *   U7  `session.userId` / `.role` / `.isAuth` reads lower to the per-request ctx
@@ -95,11 +96,14 @@ describe("§20.5 session.set — lowering + write infra", () => {
     const res = compile(LOGIN);
     expect(res.serverJs).toContain("function _scrml_session_commit(sess, secure)");
     // S239 FIX 1 — the cookie carries a FRESH rotated sid (`_newSid`), never the
-    // incoming one; S239 FIX 3 — Secure appended (dev-gated via `_sec`).
+    // incoming one. B4a (S266) — LOGIN is a no-auth session app → secure mode
+    // (default): the cookie is `__Host-scrml_sid` and ALWAYS `Secure` (a `__Host-`
+    // cookie is browser-rejected without Secure; it still round-trips over
+    // http://localhost since localhost is a secure context).
     expect(res.serverJs).toContain(
-      "return `scrml_sid=${_newSid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${_scrml_session_max_age}` + _sec",
+      "return `__Host-scrml_sid=${_newSid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${_scrml_session_max_age}` + _sec",
     );
-    expect(res.serverJs).toContain("const _sec = secure ? '; Secure' : '';");
+    expect(res.serverJs).toContain("const _sec = '; Secure';");
     // default expiry is 1h (3600s) when no sessionExpiry= is present
     expect(res.serverJs).toContain("const _scrml_session_max_age = 3600;");
     // the wrapper appends the cookie (a second Set-Cookie, never a clobber)
@@ -146,8 +150,10 @@ describe("§20.5 session.set — lowering + write infra", () => {
 
   test("U7b destroy() then set() establishes (set clears _destroy)", () => {
     const res = compile(LOGIN);
+    // B5 (S266) — the reserved-key guard prefixes the setter (a `csrfToken` write
+    // is refused); `userId`/`role`/preferences still establish + clear _destroy.
     expect(res.serverJs).toContain(
-      "set(key, value) { this._rec[key] = value; this._changes[key] = value; this._dirty = true; this._destroy = false; }",
+      "set(key, value) { if (key === \"csrfToken\") return; this._rec[key] = value; this._changes[key] = value; this._dirty = true; this._destroy = false; }",
     );
   });
 
@@ -164,8 +170,11 @@ describe("§20.5 session.set — lowering + write infra", () => {
     expect(nonWarn(res.errors)).toEqual([]);
     expect(res.serverJs).toContain("_scrml_req._scrml_sess.destroy()");
     expect(res.serverJs).toContain("_scrml_session_store.delete(sess.sid)");
+    // B4a (S266) — secure mode (no-auth default): the clearing cookie is
+    // `__Host-scrml_sid` (same name as the establishment cookie, or the browser
+    // won't clear it).
     expect(res.serverJs).toContain(
-      "return 'scrml_sid=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax'",
+      "return '__Host-scrml_sid=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax'",
     );
   });
 

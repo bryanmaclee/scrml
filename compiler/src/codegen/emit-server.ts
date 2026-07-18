@@ -1533,6 +1533,47 @@ export function generateServerJs(
   const _anySessionWrite = astUsesSessionWrite(fileAST);
   const _needsSessionInfra = !!authMiddlewareEntry || _anyServerLoadGates || _anyCurrentUserQuery || _anySessionBuiltin;
 
+  // §20.5.1 (S266, i29e B4a) — secure-cookie mode. DEFAULT TRUE → the session
+  // cookie is named `__Host-scrml_sid` and is ALWAYS emitted `Secure`. The
+  // `__Host-` prefix is a browser-enforced hardening: it forbids a Domain
+  // attribute (we set none), REQUIRES Path=/ (we set it) and REQUIRES Secure —
+  // so a network attacker cannot plant / overwrite the session cookie from a
+  // sibling subdomain or over http. A Secure cookie still round-trips over
+  // `http://localhost` (localhost is a secure context), so dev is unaffected.
+  // `session-secure="false"` opts out (a conscious TLS-less deploy): plain
+  // `scrml_sid`, no Secure. The value comes from the auth-middleware entry (auth
+  // apps, threaded like sessionExpiry) OR — when there is no auth middleware (a
+  // standalone login page / `auth="optional"` / session-only app) — the raw
+  // `session-secure=` attribute on the `<program>` (preferred) or a `<page>` node.
+  // `!== false` and `!== "false"` both default a missing / typo'd value to the
+  // safe secure mode.
+  const _readRawSessionSecure = (): string | undefined => {
+    let progVal: string | undefined;
+    let pageVal: string | undefined;
+    const visit = (ns: any[]): void => {
+      if (!Array.isArray(ns)) return;
+      for (const n of ns) {
+        if (!n || n.kind !== "markup") continue;
+        if (n.tag === "program" || n.tag === "page") {
+          const a = (n.attrs ?? []).find((x: any) => x && x.name === "session-secure");
+          if (a && a.value && a.value.kind === "string-literal") {
+            if (n.tag === "program") progVal = a.value.value;
+            else if (pageVal === undefined) pageVal = a.value.value;
+          }
+        }
+        if (Array.isArray(n.children)) visit(n.children);
+      }
+    };
+    visit(getNodes(fileAST));
+    return progVal ?? pageVal; // program-level wins over page-level
+  };
+  const _sessionSecureSetting =
+    (authMiddlewareEntry && authMiddlewareEntry.sessionSecure !== undefined)
+      ? authMiddlewareEntry.sessionSecure
+      : _readRawSessionSecure();
+  const _secureCookieMode = _sessionSecureSetting !== false && _sessionSecureSetting !== "false";
+  const _sessionCookieName = _secureCookieMode ? "__Host-scrml_sid" : "scrml_sid";
+
   // §61.6 — an `<endpoint>` emits a server route-handler directly (bypassing the
   // function-route path), so the emission gate must fire on a file that has an
   // `<endpoint>` even when it has NO developer-authored server fns (mirror of the
@@ -1706,13 +1747,12 @@ export function generateServerJs(
     lines.push(`const _scrml_session_max_age = ${_sessionMaxAgeSec};`);
     lines.push("");
     // S239 FIX 3 — is this request already secure (https) or plain-http localhost
-    // dev? Drives the `Secure` cookie attribute on ALL session (`scrml_sid`)
-    // cookies: on by DEFAULT (never ship a session credential as cleartext by
-    // default), carved out ONLY for http on loopback so `http://localhost` dev
-    // still round-trips. A TLS-less NON-local deployment (e.g. a bare-http Pi mesh)
-    // must front with TLS or use a future `session-secure=` opt-out — insecure is
-    // NOT the template default. Emitted whenever session infra exists (both the
-    // establishment cookie AND the `_scrml_session_destroy` logout route use it).
+    // dev? In OPT-OUT mode (`session-secure="false"`) this drives the `Secure`
+    // cookie attribute: on for https / non-local, carved out for http-on-loopback
+    // so `http://localhost` dev round-trips. In SECURE mode (the default, B4a) the
+    // session cookie is ALWAYS `Secure` (a `__Host-` cookie requires it), so this
+    // helper does NOT gate the session cookie's Secure — it remains emitted for the
+    // opt-out path and (in secure mode) as the shape the B4b non-https warn reuses.
     lines.push("function _scrml_is_secure_req(req) {");
     lines.push("  try {");
     lines.push("    const _u = new URL(req.url);");
@@ -1724,14 +1764,49 @@ export function generateServerJs(
     lines.push("  } catch { return true; }");
     lines.push("}");
     lines.push("");
+    // §20.5.1 (S266, i29e B4a) — resolve the session id from the MODE-APPROPRIATE
+    // cookie name ONLY (compile-time known via `_secureCookieMode`). Reading the
+    // OTHER name is a security hole, NOT a convenience: in secure mode the server
+    // sets `__Host-scrml_sid` (a sibling subdomain cannot set a `__Host-` cookie),
+    // but ALSO accepting a plain `scrml_sid` would let a subdomain-tossed
+    // `scrml_sid=<attacker's authed sid>` force-authenticate a fresh visitor (no
+    // `__Host-` cookie yet) into the ATTACKER's session — the exact cookie-tossing /
+    // fixation vector `__Host-` exists to close. A `session-secure=` flip is a
+    // deliberate config change that renames (and thus invalidates) the cookie
+    // anyway, so cross-name read tolerance buys nothing. Boundary-anchored (B1
+    // fixation defense: a prefixed / value-embedded `…<name>=` cannot masquerade).
+    lines.push("function _scrml_read_session_id(cookieHeader) {");
+    lines.push(`  return cookieHeader.match(/(?:^|;\\s*)${_sessionCookieName}=([^;]+)/)?.[1] || null;`);
+    lines.push("}");
+    lines.push("");
+    if (_secureCookieMode) {
+      // §20.5.1 (S266, i29e B4b) — the compiler cannot know the deploy host, so
+      // the "Secure cookie over bare http will be rejected" case is a RUNTIME
+      // warning (once per process). It fires only when the request is non-https
+      // AND non-local — exactly the config where the browser silently drops the
+      // `__Host-`/Secure session cookie and login appears to fail. Front with TLS
+      // or set `session-secure="false"` to run without Secure (insecure).
+      lines.push("let _scrml_insecure_cookie_warned = false;");
+      lines.push("function _scrml_warn_insecure_cookie(req) {");
+      lines.push("  if (_scrml_insecure_cookie_warned) return;");
+      lines.push("  try {");
+      lines.push("    const _u = new URL(req.url);");
+      lines.push("    const _proto = (req.headers.get('x-forwarded-proto') || _u.protocol.replace(':','')).toLowerCase();");
+      lines.push("    const _host = _u.hostname;");
+      lines.push("    const _isLocal = _host === 'localhost' || _host === '127.0.0.1' || _host === '::1' || _host === '';");
+      lines.push("    if (_proto !== 'https' && !_isLocal) {");
+      lines.push("      _scrml_insecure_cookie_warned = true;");
+      lines.push("      console.warn(\"scrml: session cookie set Secure over http on a non-local host — the browser will reject it. Front with TLS, or set `session-secure=false` to run without Secure (insecure).\");");
+      lines.push("    }");
+      lines.push("  } catch {}");
+      lines.push("}");
+      lines.push("");
+    }
     lines.push("function _scrml_session_middleware(req) {");
     lines.push("  const cookieHeader = req.headers.get('Cookie') || '';");
-    // B1 (S266) — anchor the cookie-name parse to a name boundary (`^` or `; `).
-    // An un-anchored `/scrml_sid=…/` matches the FIRST substring, so a prefixed
-    // cookie (`Xscrml_sid=…`) or a crafted cookie VALUE containing `scrml_sid=`
-    // (RFC 6265 permits `=` in a value) is read as the session id → session
-    // fixation. `(?:^|;\s*)` forces the match to start at a real cookie name.
-    lines.push("  const sessionId = cookieHeader.match(/(?:^|;\\s*)scrml_sid=([^;]+)/)?.[1] || null;");
+    // B1 (S266) — name-anchored parse; B4a (S266) — resolve either cookie name
+    // (`__Host-scrml_sid` secure-mode / `scrml_sid` opt-out) via the shared reader.
+    lines.push("  const sessionId = _scrml_read_session_id(cookieHeader);");
     lines.push("  const _rec = sessionId ? (_scrml_session_store.get(sessionId) || null) : null;");
     if (_csrfAuto) {
       // §40.2 session-bound synchronizer token. Per §39.2.3 the compiler emits a
@@ -1823,8 +1898,9 @@ export function generateServerJs(
       // FIX 4 — preserving server-owned fields like a csrf token minted mid-body).
       lines.push("function _scrml_session_begin(req) {");
       lines.push("  const cookieHeader = req.headers.get('Cookie') || '';");
-      // B1 (S266) — name-anchored parse; see _scrml_session_middleware note.
-      lines.push("  const sid = cookieHeader.match(/(?:^|;\\s*)scrml_sid=([^;]+)/)?.[1] || null;");
+      // B1 (S266) — name-anchored parse; B4a (S266) — resolve either cookie name
+      // (`__Host-scrml_sid` / `scrml_sid`) via the shared reader.
+      lines.push("  const sid = _scrml_read_session_id(cookieHeader);");
       lines.push("  const rec = sid ? (_scrml_session_store.get(sid) || null) : null;");
       lines.push("  return {");
       lines.push("    sid,");
@@ -1846,7 +1922,16 @@ export function generateServerJs(
       lines.push("    get isAuth() { return this._rec.userId != null && !this._destroy; },");
       // S239 FIX 7 — `set` clears `_destroy` so a `destroy(); set()` sequence
       // establishes (last write by call order wins).
-      lines.push("    set(key, value) { this._rec[key] = value; this._changes[key] = value; this._dirty = true; this._destroy = false; },");
+      // B5 (S266) — reserved-key guard: `csrfToken` is a COMPILER-OWNED session
+      // field (the §40.2 server-authoritative synchronizer token the middleware
+      // mints + persists). A `session.set("csrfToken", <attacker-known>)` — the
+      // classic mass-assignment vector — would let a caller pin the CSRF token to
+      // a value it already knows, defeating the double-submit / synchronizer check.
+      // Refuse the write (no-op) so the middleware-minted token is the only one that
+      // ever gates. Load-bearing because the mass-assign key can be DYNAMIC
+      // (`session.set(userKey, v)`), which the compile-time literal check misses.
+      // `userId`/`role` stay writable — they ARE the login primitive.
+      lines.push("    set(key, value) { if (key === \"csrfToken\") return; this._rec[key] = value; this._changes[key] = value; this._dirty = true; this._destroy = false; },");
       lines.push("    get(key) { return this._rec[key] ?? null; },");
       // S239-2 FIX A — a REAL in-request clear: wipe the working record AND the
       // pending changes so a subsequent `set()` builds a CLEAN session inheriting
@@ -1856,10 +1941,14 @@ export function generateServerJs(
       lines.push("}");
       lines.push("");
       lines.push("function _scrml_session_commit(sess, secure) {");
-      lines.push("  const _sec = secure ? '; Secure' : '';");
+      // B4a (S266) — in secure mode the `__Host-` cookie is ALWAYS `Secure` (the
+      // prefix requires it); in opt-out mode Secure follows `_scrml_is_secure_req`.
+      lines.push(_secureCookieMode
+        ? "  const _sec = '; Secure';"
+        : "  const _sec = secure ? '; Secure' : '';");
       lines.push("  if (sess._destroy) {");
       lines.push("    if (sess.sid) _scrml_session_store.delete(sess.sid);");
-      lines.push("    return 'scrml_sid=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax' + _sec;");
+      lines.push(`    return '${_sessionCookieName}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax' + _sec;`);
       lines.push("  }");
       lines.push("  if (sess._dirty) {");
       // S239-2 FIX B — rotate the sid + delete the old record ONLY on an
@@ -1878,7 +1967,7 @@ export function generateServerJs(
       lines.push("      const _newSid = crypto.randomUUID();");
       lines.push("      _scrml_session_store.set(_newSid, { ...sess._changes }, _scrml_session_max_age);");
       lines.push("      if (sess.sid && sess.sid !== _newSid) _scrml_session_store.delete(sess.sid);");
-      lines.push("      return `scrml_sid=${_newSid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${_scrml_session_max_age}` + _sec;");
+      lines.push(`      return \`${_sessionCookieName}=\${_newSid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=\${_scrml_session_max_age}\` + _sec;`);
       lines.push("    }");
       // Same-identity, preference-only update — in place under the SAME sid (mint
       // only if there is no live record under the incoming sid; never write under an
@@ -1889,7 +1978,7 @@ export function generateServerJs(
       lines.push("    const _sid = _existing ? sess.sid : crypto.randomUUID();");
       lines.push("    const _merged = { ...(_existing || {}), ...sess._changes };");
       lines.push("    _scrml_session_store.set(_sid, _merged, _scrml_session_max_age);");
-      lines.push("    return `scrml_sid=${_sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${_scrml_session_max_age}` + _sec;");
+      lines.push(`    return \`${_sessionCookieName}=\${_sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=\${_scrml_session_max_age}\` + _sec;`);
       lines.push("  }");
       lines.push("  return null;");
       lines.push("}");
@@ -1900,6 +1989,11 @@ export function generateServerJs(
       lines.push("    const _resp = await inner(_scrml_req);");
       lines.push("    const _ck = _scrml_session_commit(_sess, _scrml_is_secure_req(_scrml_req));");
       lines.push("    if (_ck && _resp && _resp.headers && typeof _resp.headers.append === 'function') {");
+      if (_secureCookieMode) {
+        // B4b (S266) — a Secure session cookie set over bare http on a non-local
+        // host will be silently rejected; warn once so the deploy is diagnosable.
+        lines.push("      _scrml_warn_insecure_cookie(_scrml_req);");
+      }
       lines.push("      _resp.headers.append('Set-Cookie', _ck);");
       lines.push("    }");
       lines.push("    return _resp;");
@@ -1956,15 +2050,19 @@ export function generateServerJs(
     lines.push("  handler: async function(_scrml_req) {");
     // S239 FIX 1 (logout half) — DELETE the server-side record, not just the
     // cookie, so a planted/leaked sid is not resurrectable after logout.
-    // B1 (S266) — name-anchored parse; see _scrml_session_middleware note.
-    lines.push("    const _dsid = (_scrml_req.headers.get('Cookie') || '').match(/(?:^|;\\s*)scrml_sid=([^;]+)/)?.[1] || null;");
+    // B1 (S266) — name-anchored parse; B4a (S266) — resolve either cookie name.
+    lines.push("    const _dsid = _scrml_read_session_id(_scrml_req.headers.get('Cookie') || '');");
     lines.push("    if (_dsid) _scrml_session_store.delete(_dsid);");
-    // S239 FIX 5 (SameSite consistency → Lax) + FIX 3 (dev-gated Secure).
-    lines.push("    const _dsec = _scrml_is_secure_req(_scrml_req) ? '; Secure' : '';");
+    // S239 FIX 5 (SameSite → Lax) + FIX 3 (Secure). B4a (S266) — the clearing
+    // cookie must carry the SAME name + Secure as the establishment cookie, or a
+    // `__Host-` deletion cookie is rejected and the session is not cleared.
+    lines.push(_secureCookieMode
+      ? "    const _dsec = '; Secure';"
+      : "    const _dsec = _scrml_is_secure_req(_scrml_req) ? '; Secure' : '';");
     lines.push("    return new Response(JSON.stringify({ ok: true }), {");
     lines.push("      status: 200,");
     lines.push("      headers: {");
-    lines.push(`        'Set-Cookie': 'scrml_sid=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax' + _dsec,`);
+    lines.push(`        'Set-Cookie': '${_sessionCookieName}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax' + _dsec,`);
     lines.push("        'Content-Type': 'application/json',");
     lines.push("      },");
     lines.push("    });");

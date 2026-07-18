@@ -173,7 +173,8 @@ describe("B2 — emit + EXECUTE: the index + optional lowered reads RUN (not jus
       const csrf = cookieVal(r0, "scrml_csrf");
       const base = { "Content-Type": "application/json", Cookie: `scrml_csrf=${csrf}`, "X-CSRF-Token": csrf };
       const sid = cookieVal(await post(loginR, base, { email: "admin@x.com", password: "secret" }), "scrml_sid");
-      const withSid = { ...base, Cookie: `scrml_csrf=${csrf}; scrml_sid=${sid}` };
+      // B4a (S266): no-auth session app is secure mode → the cookie is __Host-scrml_sid.
+      const withSid = { ...base, Cookie: `scrml_csrf=${csrf}; __Host-scrml_sid=${sid}` };
 
       // These reads exercise session["userId"] (index), session?.role + session?.["isAuth"]
       // (optional member/index) and session?.get("pref") (optional call) — all lowered.
@@ -211,20 +212,22 @@ describe("B1 — all five emitted cookie-name parses are name-anchored", () => {
   test("no un-anchored /scrml_sid=([^;]+)/ or /scrml_csrf=([^;]+)/ survives", () => {
     const { serverJs, errorCodes } = compile(B1_APP);
     expect(errorCodes).toEqual([]);
-    // the anchored form is present...
-    expect(serverJs).toMatch(/match\(\/\(\?:\^\|;\\s\*\)scrml_sid=\(\[\^;\]\+\)\//);
-    // ...and the un-anchored form is GONE at every site.
+    // B4a (S266): secure mode reads the __Host-scrml_sid name, boundary-anchored...
+    expect(serverJs).toMatch(/match\(\/\(\?:\^\|;\\s\*\)__Host-scrml_sid=\(\[\^;\]\+\)\//);
+    // ...and the un-anchored form is GONE at every site (B1 + B4a: no plain
+    // scrml_sid read survives in secure mode — the fixation / cookie-tossing defense).
     expect(serverJs).not.toMatch(/match\(\/scrml_sid=\(\[\^;\]\+\)\//);
+    expect(serverJs).not.toMatch(/match\(\/\(\?:\^\|;\\s\*\)scrml_sid=\(\[\^;\]\+\)\//);
     expect(serverJs).not.toMatch(/match\(\/scrml_csrf=\(\[\^;\]\+\)\//);
   });
 
   test("the emitted anchored regex resolves the genuine sid past a prefix / crafted value", () => {
-    // Reproduce the EMITTED parse behavior (the regex is emitted verbatim).
-    const parse = (h) => h.match(/(?:^|;\s*)scrml_sid=([^;]+)/)?.[1] || null;
-    expect(parse("foo=scrml_sid=ATK; scrml_sid=LEGIT")).toBe("LEGIT");
-    expect(parse("Xscrml_sid=ATK; scrml_sid=LEGIT")).toBe("LEGIT");
-    expect(parse("scrml_sid=LEGIT")).toBe("LEGIT");
-    expect(parse("Xscrml_sid=ATK")).toBe(null);
+    // Reproduce the EMITTED secure-mode parse behavior (the regex is emitted verbatim).
+    const parse = (h) => h.match(/(?:^|;\s*)__Host-scrml_sid=([^;]+)/)?.[1] || null;
+    expect(parse("foo=__Host-scrml_sid=ATK; __Host-scrml_sid=LEGIT")).toBe("LEGIT");
+    expect(parse("X__Host-scrml_sid=ATK; __Host-scrml_sid=LEGIT")).toBe("LEGIT");
+    expect(parse("__Host-scrml_sid=LEGIT")).toBe("LEGIT");
+    expect(parse("X__Host-scrml_sid=ATK")).toBe(null);
   });
 });
 

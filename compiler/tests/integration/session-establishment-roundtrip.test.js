@@ -6,7 +6,9 @@
  * the durable store:
  *
  *   1. login → server fn calls `session.set("userId", …)`/`session.set("role", …)`;
- *      the response carries `Set-Cookie: scrml_sid=…; HttpOnly; SameSite=Lax`.
+ *      the response carries `Set-Cookie: __Host-scrml_sid=…; HttpOnly; SameSite=Lax;
+ *      Secure` (B4a secure mode is the default; the read side also accepts plain
+ *      `scrml_sid` on the opt-out path).
  *   2. a follow-up request carrying that cookie resolves `session.userId` /
  *      `session.isAuth` (via the same middleware store) → authed.
  *   3. no cookie → anon.
@@ -139,16 +141,17 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
 
       // --- SESSION FIXATION (S239 FIX 1): login carrying a PLANTED sid must get a
       // DIFFERENT fresh sid, and the planted value must NOT become authenticated ---
+      // (secure mode → the name the server reads is __Host-scrml_sid.)
       const PLANTED = "planted-attacker-sid-000";
       const rFix = await post(
         loginR,
-        { ...authed, Cookie: `scrml_csrf=${csrf}; scrml_sid=${PLANTED}` },
+        { ...authed, Cookie: `scrml_csrf=${csrf}; __Host-scrml_sid=${PLANTED}` },
         { email: "admin@x.com", password: "secret" },
       );
       const fixSid = cookieVal(rFix, "scrml_sid").value;
       expect(fixSid).not.toBe(PLANTED); // rotated, never reflected
       // the planted sid resolves anon (no record was ever written under it)
-      const rPlanted = await post(whoR, { ...authed, Cookie: `scrml_csrf=${csrf}; scrml_sid=${PLANTED}` }, {});
+      const rPlanted = await post(whoR, { ...authed, Cookie: `scrml_csrf=${csrf}; __Host-scrml_sid=${PLANTED}` }, {});
       const planted = rPlanted instanceof Response ? await rPlanted.json() : rPlanted;
       expect(planted.isAuth).toBe(false);
       expect(planted.userId).toBe(null);
@@ -164,9 +167,13 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
       expect(sidCookie.raw).toContain("HttpOnly");
       expect(sidCookie.raw).toContain("SameSite=Lax");
       expect(sidCookie.raw).toContain("Max-Age=");
-      // dev (http localhost) → NO Secure so the cookie round-trips locally...
-      expect(sidCookie.raw).not.toContain("Secure");
-      // ...but an https request (x-forwarded-proto) → Secure IS emitted (FIX 3).
+      // B4a (S266): a no-auth session app is SECURE mode (the default) → the cookie
+      // is named `__Host-scrml_sid` and is ALWAYS `Secure` (the `__Host-` prefix
+      // requires Secure). It still round-trips over http://localhost — localhost is
+      // a secure context — which the `__Host-` cookie re-send below proves.
+      expect(sidCookie.raw).toContain("__Host-scrml_sid=");
+      expect(sidCookie.raw).toContain("Secure");
+      // an https request also carries Secure (always-on in secure mode).
       const rHttps = await post(
         loginR,
         { ...authed, "x-forwarded-proto": "https" },
@@ -174,16 +181,25 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
       );
       expect(cookieVal(rHttps, "scrml_sid").raw).toContain("Secure");
 
-      // --- whoami WITH the cookie → authed, userId/role resolved via the middleware ---
-      const withSid = { ...authed, Cookie: `scrml_csrf=${csrf}; scrml_sid=${sid}` };
+      // --- whoami WITH the __Host- cookie → authed (round-trips over http://localhost,
+      // proving the Secure/__Host- cookie works locally). ---
+      const withSid = { ...authed, Cookie: `scrml_csrf=${csrf}; __Host-scrml_sid=${sid}` };
       const rWho = await post(whoR, withSid, {});
       const who = rWho instanceof Response ? await rWho.json() : rWho;
       expect(who.isAuth).toBe(true);
       expect(who.userId).toBe("u-42");
       expect(who.role).toBe("admin");
 
+      // B4a fixation defense: the SAME sid re-sent under the PLAIN `scrml_sid` name
+      // (which a sibling subdomain CAN set) must NOT authenticate — secure mode
+      // reads the __Host- name ONLY.
+      const rPlainName = await post(whoR, { ...authed, Cookie: `scrml_csrf=${csrf}; scrml_sid=${sid}` }, {});
+      const plainName = rPlainName instanceof Response ? await rPlainName.json() : rPlainName;
+      expect(plainName.isAuth).toBe(false);
+      expect(plainName.userId).toBe(null);
+
       // --- isAuth BYPASS (S239 FIX 2): a BOGUS sid with no record → anon ---
-      const rBogus = await post(whoR, { ...authed, Cookie: `scrml_csrf=${csrf}; scrml_sid=totally-bogus-nonexistent` }, {});
+      const rBogus = await post(whoR, { ...authed, Cookie: `scrml_csrf=${csrf}; __Host-scrml_sid=totally-bogus-nonexistent` }, {});
       const bogus = rBogus instanceof Response ? await rBogus.json() : rBogus;
       expect(bogus.isAuth).toBe(false);
       expect(bogus.userId).toBe(null);
@@ -240,7 +256,8 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
       const r0 = await post(loginR, { "Content-Type": "application/json" }, {});
       const csrf = cookieVal(r0, "scrml_csrf").value;
       const base = { "Content-Type": "application/json", Cookie: `scrml_csrf=${csrf}`, "X-CSRF-Token": csrf };
-      const withSid = (sid) => ({ ...base, Cookie: `scrml_csrf=${csrf}; scrml_sid=${sid}` });
+      // B4a (S266): secure mode → the session cookie is __Host-scrml_sid.
+      const withSid = (sid) => ({ ...base, Cookie: `scrml_csrf=${csrf}; __Host-scrml_sid=${sid}` });
       const jsonOf = async (r) => (r instanceof Response ? await r.json() : r);
 
       // login as admin (role=admin)
@@ -318,28 +335,34 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
       const attackerSid = cookieVal(await post(loginR, base, { email: "admin@x.com", password: "secret" }), "scrml_sid").value;
       expect(attackerSid.length).toBeGreaterThan(0);
 
-      // control: the properly-named cookie DOES authenticate (the attack vector's sid is live).
-      const control = await jsonOf(await post(whoR, { ...base, Cookie: `scrml_csrf=${csrf}; scrml_sid=${attackerSid}` }, {}));
+      // control: the properly-named (secure-mode) cookie DOES authenticate.
+      const control = await jsonOf(await post(whoR, { ...base, Cookie: `scrml_csrf=${csrf}; __Host-scrml_sid=${attackerSid}` }, {}));
       expect(control.isAuth).toBe(true);
       expect(control.userId).toBe("u-42");
 
-      // ATTACK 1 — prefixed name `Xscrml_sid=<real attacker sid>` → ANON.
-      const atk1 = await jsonOf(await post(whoR, { ...base, Cookie: `scrml_csrf=${csrf}; Xscrml_sid=${attackerSid}` }, {}));
+      // ATTACK 0 (B4a cookie-tossing) — the SAME live sid under the PLAIN `scrml_sid`
+      // name (which a sibling subdomain CAN set — no `__Host-` protection) → ANON.
+      const atk0 = await jsonOf(await post(whoR, { ...base, Cookie: `scrml_csrf=${csrf}; scrml_sid=${attackerSid}` }, {}));
+      expect(atk0.isAuth).toBe(false);
+      expect(atk0.userId).toBe(null);
+
+      // ATTACK 1 — prefixed name `X__Host-scrml_sid=<real sid>` → ANON (anchoring).
+      const atk1 = await jsonOf(await post(whoR, { ...base, Cookie: `scrml_csrf=${csrf}; X__Host-scrml_sid=${attackerSid}` }, {}));
       expect(atk1.isAuth).toBe(false);
       expect(atk1.userId).toBe(null);
 
       // ATTACK 2 — prefixed name masks the real (bogus) cookie → the LEGIT (bogus) one wins → ANON.
-      const atk2 = await jsonOf(await post(whoR, { ...base, Cookie: `scrml_csrf=${csrf}; evilscrml_sid=${attackerSid}; scrml_sid=bogus-none` }, {}));
+      const atk2 = await jsonOf(await post(whoR, { ...base, Cookie: `scrml_csrf=${csrf}; evil__Host-scrml_sid=${attackerSid}; __Host-scrml_sid=bogus-none` }, {}));
       expect(atk2.isAuth).toBe(false);
       expect(atk2.userId).toBe(null);
 
-      // ATTACK 3 — crafted cookie VALUE contains `scrml_sid=` (name NOT attacker-controlled) → ANON.
-      const atk3 = await jsonOf(await post(whoR, { ...base, Cookie: `foo=scrml_sid=${attackerSid}; scrml_csrf=${csrf}; scrml_sid=bogus-none` }, {}));
+      // ATTACK 3 — crafted cookie VALUE contains `__Host-scrml_sid=` (name NOT attacker-controlled) → ANON.
+      const atk3 = await jsonOf(await post(whoR, { ...base, Cookie: `foo=__Host-scrml_sid=${attackerSid}; scrml_csrf=${csrf}; __Host-scrml_sid=bogus-none` }, {}));
       expect(atk3.isAuth).toBe(false);
       expect(atk3.userId).toBe(null);
 
       // and the genuine cookie in a middle position (unrelated cookies around it) still resolves.
-      const legit = await jsonOf(await post(whoR, { ...base, Cookie: `theme=dark; scrml_csrf=${csrf}; scrml_sid=${attackerSid}; x=1` }, {}));
+      const legit = await jsonOf(await post(whoR, { ...base, Cookie: `theme=dark; scrml_csrf=${csrf}; __Host-scrml_sid=${attackerSid}; x=1` }, {}));
       expect(legit.isAuth).toBe(true);
       expect(legit.userId).toBe("u-42");
     } finally {
@@ -377,7 +400,7 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
       // Anonymous request → setRoleOnly("admin") mints a record with {role} but NO userId.
       const rRole = await post(roleOnlyR, base, { r: "admin" });
       const sid = cookieVal(rRole, "scrml_sid").value; // a sid IS minted (a preference write)
-      const withSid = { ...base, Cookie: `scrml_csrf=${csrf}; scrml_sid=${sid}` };
+      const withSid = { ...base, Cookie: `scrml_csrf=${csrf}; __Host-scrml_sid=${sid}` };
 
       // The durable record does carry {role:"admin"} but no userId...
       const dbPath = join(outDir, ".scrml-sessions.db");

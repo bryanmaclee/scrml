@@ -14602,13 +14602,14 @@ request/response:
    store (below); on `session.destroy` it deletes the record. Multiple `session.set`
    calls within one function invocation SHALL coalesce to a SINGLE record write.
 3. **Attach the session cookie** — the compiler-owned Response SHALL carry, at the
-   return seam, a single `Set-Cookie: scrml_sid=<sid>; Path=/; HttpOnly;
-   SameSite=Lax; Max-Age=<sessionExpiry>` (or, on `session.destroy`, the
-   expiry-in-the-past clear form). This is a compiler-owned response effect,
-   co-emitted alongside the `scrml_csrf` cookie — the developer SHALL NOT set
-   session cookies from scrml source (an `HttpOnly` cookie is unreachable from
-   client `document.cookie` by construction). Multiple `session.set` calls SHALL
-   produce ONE cookie.
+   return seam, a single `Set-Cookie: __Host-scrml_sid=<sid>; Path=/; HttpOnly;
+   SameSite=Lax; Max-Age=<sessionExpiry>; Secure` (the default secure mode; the
+   plain `scrml_sid` name with request-gated `Secure` under `session-secure="false"`
+   — see "Session cookie" below), or, on `session.destroy`, the expiry-in-the-past
+   clear form. This is a compiler-owned response effect, co-emitted alongside the
+   `scrml_csrf` cookie — the developer SHALL NOT set session cookies from scrml
+   source (an `HttpOnly` cookie is unreachable from client `document.cookie` by
+   construction). Multiple `session.set` calls SHALL produce ONE cookie.
 
 **Durable store (RULED durable).** The server-side session store SHALL be durable
 (SQLite-backed KV, namespace `session`, JSON values, `expires_at` TTL), so a session
@@ -14648,16 +14649,47 @@ record IN PLACE under the same id — no rotation, no delete — so a concurrent
 request holding that id is not silently logged out. `session.destroy()` performs a
 real clear: after it, the session carries zero prior fields.
 
-**Session cookie (S239 FIXes 1/3/5).** The compiler-owned `scrml_sid` cookie is
-`HttpOnly`, `SameSite=Lax` (uniform across the establishment cookie, the
-`session.destroy()` clear, and the `/_scrml/session/destroy` logout route), and
-`Secure` by default (dev carve-out: omitted only for plain-http `localhost`, so
-`http://localhost` dev round-trips; a TLS-less non-local deployment must front with
-TLS). On every identity-establishing write the compiler ROTATES the session id to a
-fresh `crypto.randomUUID()` and deletes the incoming record — the incoming
-(attacker-suppliable) `scrml_sid` is never trusted or reflected (session-fixation
-defense). `session.isAuth` / `@currentUser.isAuth` require a real store record WITH
-a `userId` — a bare cookie value is never authentication.
+**Session cookie (S239 FIXes 1/3/5; S266 i29e B4).** The compiler-owned session
+cookie is `HttpOnly` and `SameSite=Lax` (uniform across the establishment cookie,
+the `session.destroy()` clear, and the `/_scrml/session/destroy` logout route). By
+default the cookie is named **`__Host-scrml_sid`** and is **always `Secure`**: the
+`__Host-` prefix is a browser-enforced hardening — it forbids a `Domain` attribute
+(the compiler sets none), REQUIRES `Path=/` (set), and REQUIRES `Secure` — so a
+network or sibling-subdomain attacker cannot plant or overwrite the session cookie,
+and it cannot be set over plain http off-host. A `Secure` cookie still round-trips
+over `http://localhost` (localhost is a secure context), so dev is unaffected.
+
+**`session-secure=` opt-out (B4b).** `<program session-secure="false">` (also valid
+on `<page>`) opts out of the hardening for a conscious TLS-less deployment (e.g. a
+bare-http Pi mesh): the cookie is the plain `scrml_sid` with `Secure` gated on the
+request (on for https / non-local, omitted for `http://localhost`). The default is
+`session-secure="true"` (`__Host-` + always-Secure). The READ side is MODE-GATED: it
+accepts ONLY the mode's own cookie name (secure mode reads `__Host-scrml_sid` ONLY;
+opt-out reads `scrml_sid` ONLY), each boundary-anchored. Reading the OTHER name would
+be a security hole — a sibling subdomain CAN set a plain `scrml_sid` (a `__Host-`
+cookie it cannot), so a secure-mode reader that ALSO accepted `scrml_sid` would let a
+subdomain-tossed cookie force-authenticate a fresh visitor into an attacker's session
+(the exact cookie-tossing / fixation vector `__Host-` closes). A `session-secure=`
+flip renames (and thus invalidates) the cookie anyway, so cross-name read tolerance
+buys nothing. When the default (secure) mode runs over bare http on a NON-local host —
+where the browser will silently reject the `Secure` cookie and login appears to fail —
+the server logs a one-time runtime warning naming the fix (front with TLS, or
+`session-secure="false"`).
+
+On every identity-establishing write the compiler ROTATES the session id to a fresh
+`crypto.randomUUID()` and deletes the incoming record — the incoming
+(attacker-suppliable) id is never trusted or reflected (session-fixation defense).
+`session.isAuth` / `@currentUser.isAuth` require a real store record WITH a `userId`
+— a bare cookie value is never authentication.
+
+**Reserved session keys (B5).** `csrfToken` is a compiler-owned session field (the
+§40.2 server-authoritative CSRF synchronizer token, minted + persisted by the
+middleware). `session.set("csrfToken", …)` is REFUSED — a literal write is a compile
+error (E-SESSION-RESERVED-KEY) and a dynamic write (`session.set(k, v)` with a
+runtime `k === "csrfToken"`) is a runtime no-op — so a caller cannot pin the CSRF
+token to a value it already knows and defeat the double-submit / synchronizer check
+(mass-assignment defense). `userId` / `role` and adopter preference keys remain
+writable (they are the login primitive).
 
 **Worked example — login (establishes a session):**
 
@@ -18065,6 +18097,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-SCOPE-012 | §20.5 | `session` accessed outside a server-escalated function body **(LIVE, S265 (i29e) — the §20.5 server `session` establishment builtin is built; bare `session` is bound into server-escalated scopes and auto-escalates its enclosing function, so a `session` reference that is NOT server-escalated (e.g. top-level `${ }` logic) fires this. Distinct from the `@session` client projection.)** | Error |
 | E-SESSION-CONTEXT | §20.5.1 | `session.*` used outside a web-app server route handler — an SSE `server function*`, an `<endpoint>` arm, a `<machine>` method, a serverLoad cell, an in-process server-fn helper called by another server function, or a headless `kind="tool"` program. Those contexts have no cookie-session request/response context. **(LIVE, S265/S239 i29e.)** | Error |
 | E-SESSION-VALUE | §20.5 | Bare `session` VALUE-use in a server-escalated body — `session` returned, assigned, passed as an argument, or otherwise read as a first-class value rather than as the object of a member (`session.userId`), index (`session["userId"]`), or call (`session.get`/`.set`/`.destroy`). `session` is a request-scoped accessor, not a value; a bare reference would emit a dangling `session` identifier (ReferenceError at request time). Fix: access a field or call an accessor. **(LIVE, S266 i29e — codegen emit-expr.ts:emitIdent, drained by emit-server.ts:generateServerJs.)** | Error |
+| E-SESSION-RESERVED-KEY | §20.5.1 | A LITERAL `session.set("csrfToken", …)` — `csrfToken` is a compiler-owned session key (the §40.2 server-authoritative CSRF synchronizer token). Writing it would let a caller pin the token to a known value and defeat the double-submit check (mass-assignment). Fix: remove the write; the compiler mints + persists the token (`userId`/`role` and preference keys remain writable). A DYNAMIC-key write with a runtime `csrfToken` key is refused at runtime (a no-op) by the emitted setter guard. **(LIVE, S266 i29e B5 — codegen emit-expr.ts:emitCall, drained by emit-server.ts:generateServerJs; runtime guard in emit-server.ts `_scrml_session_begin`.)** | Error |
 | ~~E-REACTIVE-001~~ | §6.2 | **Retired 2026-07-16 (S263).** Reactive cells are declaration-order-independent (hoisted), so `@variable` use-before-declaration is LEGAL, not an error. The reachable "undeclared cell" case is owned by **E-STATE-UNDECLARED**. Triage: `scrml-support/docs/audits/s34-catalog-vs-impl-2026-07-16.md`. | — |
 | E-REACTIVE-002 | §6.6.8 | Assignment to a `const <name>` derived reactive value | Error |
 | E-REACTIVE-003 | §6.6.9 | A WHOLLY server-escalated function reads a free client cell — a mutable `@var`, a `const <name>` derived, OR a §52 `<... server>` cell (all client-held). The server-mode rewrite lowers `@cell` to `_scrml_body["cell"]`, but a non-CPS server-fn client stub sends only declared params, so the value is NOT transported and resolves to `undefined` server-side. Read-side sibling of E-RI-002 (server fn *writes* a `@reactive` cell). Fires once per distinct cell. GATED on `cpsSplit === null` — a CPS-split fn MARSHALS its server-batch reads into the client stub (`emit-functions.ts`), so it is exempt (see W-SERVER-DERIVED-MARSHAL). Excludes: declared params (already marshalled), ambient `@session`/`@currentUser` (server-resolved singletons, §20.5 — never client-supplied), and channel cells (E-CHANNEL-SERVER-CELL-READ owns them). Fix: pass the cell as an explicit argument, or restructure so the server computes the value inside the `?{}`. Broadened S250 from the derived-only, never-fired SPEC-only draft (a fail-open); §52 correction (client-held, not server-resolved) per RULING THE SPLIT. Emitted by RI (`compiler/src/route-inference.ts`, `detectServerFreeClientCellReads`). | Error |

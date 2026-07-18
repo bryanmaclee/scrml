@@ -112,6 +112,16 @@ ELEMENT_ATTR_REGISTRY.set("program", {
       allowedValues: ["auto", "off"],
     })],
     ["sessionExpiry", attrSpec({ supportsInterpolation: false })],
+    // §20.5.1 (S266, i29e B4b) — session-cookie Secure opt-out. Default true →
+    // the session cookie is named `__Host-scrml_sid` and is ALWAYS `Secure`
+    // (a `__Host-` cookie is browser-rejected without Secure). `"false"` →
+    // plain `scrml_sid` with no Secure, for a conscious TLS-less deployment
+    // (a bare-http Pi mesh). Closed value set; a bad value surfaces W-ATTR-002
+    // and re-defaults to the safe secure mode.
+    ["session-secure", attrSpec({
+      supportsInterpolation: false,
+      allowedValues: ["true", "false"],
+    })],
     // §40.7 — documentary attributes (HTML head metadata, Phase A1a 2026-05-05)
     ["title",         attrSpec({ supportsInterpolation: false })],
     ["description",   attrSpec({ supportsInterpolation: false })],
@@ -213,6 +223,13 @@ ELEMENT_ATTR_REGISTRY.set("page", {
     ["csrf",          attrSpec({
       supportsInterpolation: false,
       allowedValues: ["auto", "off"],
+    })],
+    // §20.5.1 (S266, i29e B4b) — session-cookie Secure opt-out (see the <program>
+    // registration above). Registered on the page surface too so a page-level
+    // `session-secure=` is recognized (no incidental W-ATTR-001).
+    ["session-secure", attrSpec({
+      supportsInterpolation: false,
+      allowedValues: ["true", "false"],
     })],
     ["title",         attrSpec({ supportsInterpolation: true })],
     ["class",         attrSpec({ supportsInterpolation: true })],
