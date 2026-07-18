@@ -550,20 +550,16 @@ function maskCssBlocks(s: string): { masked: string; blocks: string[] } {
   let out = "";
   let i = 0;
   const n = s.length;
-  let outerStr: string | null = null;
   while (i < n) {
-    const ci = s[i];
-    // Skip TOP-LEVEL string/attribute-value literals so a literal `#{` inside a
-    // string (`title="a#{b}"`) is NOT mistaken for a CSS block opener.
-    if (outerStr !== null) {
-      out += ci;
-      if (ci === "\\" && i + 1 < n) { out += s[i + 1]; i += 2; continue; }
-      if (ci === outerStr) outerStr = null;
-      i++;
-      continue;
-    }
-    if (ci === '"' || ci === "'" || ci === "`") { outerStr = ci; out += ci; i++; continue; }
-    if (ci === "#" && s[i + 1] === "{") {
+    // Mask EVERY `#{ … }` block by matched-brace span, unconditionally. We do NOT
+    // do top-level string tracking here: the component-body `raw` is a LOGIC-token
+    // re-emission in which an apostrophe in UI text (`<p>don't panic</p>`) becomes
+    // a SPURIOUS, unbalanced `"` that would swallow a following `#{}` as "string
+    // content" and defeat the masking (the descendant space then collapses). A
+    // literal `#{` inside a real attribute string is harmless regardless — the
+    // masked block is stored + `restoreCssBlocks` puts it back VERBATIM, so the
+    // attribute round-trips unchanged whether or not it was masked.
+    if (s[i] === "#" && s[i + 1] === "{") {
       let j = i + 2;
       let depth = 1;
       let str: string | null = null;
@@ -585,7 +581,7 @@ function maskCssBlocks(s: string): { masked: string; blocks: string[] } {
       i = j;
       continue;
     }
-    out += ci;
+    out += s[i];
     i++;
   }
   return { masked: out, blocks };

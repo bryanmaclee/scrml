@@ -554,7 +554,7 @@ describe("§65.2.5 — component-scope descendant combinator preservation", () =
     expect(css).toContain(":where(.card .title) { color: var(--brand); }");
   });
 
-  test("a literal `#{` inside an attribute string is NOT mistaken for a CSS block (mask is string-aware)", () => {
+  test("a literal `#{` inside an attribute string round-trips (masked block restored VERBATIM)", () => {
     const source = `<program>
   const Card = <div props={}>
       #{ .card .title { color: red; } }
@@ -564,8 +564,24 @@ describe("§65.2.5 — component-scope descendant combinator preservation", () =
 </program>`;
     // The real CSS block still masks/preserves its descendant space.
     expect(compileCss(source).css).toContain(":where(.card .title) {");
-    // The literal `#{` in the attribute value survives untouched.
+    // The literal `#{` in the attribute value survives untouched (verbatim restore).
     expect(compileHtml(source).html).toContain(`title="a#{b}c"`);
+  });
+
+  test("a CONTRACTION (apostrophe) in component text before a descendant `#{}` keeps the space", () => {
+    // Regression: an apostrophe in UI text tokenizes to a spurious unbalanced `\"`
+    // in the component-body raw; masking must still protect the following `#{}`
+    // (mask every `#{}` unconditionally — no fragile top-level string tracking).
+    const { css } = compileCss(`<program>
+  const Card = <div props={}>
+      <p>don't panic</p>
+      #{ .card .title { color: red; } }
+      <div class="card"><span class="title">hi</span></div>
+  </>
+  <Card/>
+</program>`);
+    expect(css).toContain(":where(.card .title) {");
+    expect(css).not.toContain(":where(.card.title)");
   });
 });
 

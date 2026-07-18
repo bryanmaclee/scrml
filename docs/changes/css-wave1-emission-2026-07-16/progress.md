@@ -296,3 +296,23 @@ radius + per-session-theme subtleties). NO new §34 diagnostic codes.
   wrongly masked + corrupted. Added top-level string/attribute-value skipping (the inner `#{}`
   brace-matcher was already string-aware). Verified: descendant `.card .title` still preserved AND
   `title="a#{b}c"` survives untouched. +1 regression test. Full gate: 20663 pass / 0 fail.
+
+---
+
+## S239 ADVERSARIAL REVIEW — round-4 fixes (S265)
+
+### 2026-07-17 — FIX 1 (HIGH) apostrophe/quote bug in maskCssBlocks (commit: this)
+- My earlier "harden" (47573f0c) added top-level string tracking to maskCssBlocks — REGRESSION.
+- ROOT CAUSE (debugged, not assumed): an apostrophe in component UI text (`<p>don't panic</p>`) is
+  converted UPSTREAM by the logic tokenizer to a SPURIOUS unbalanced `"` in the component-body raw
+  (`don "t panic…`), which then swallows a following `#{}` as "string content" → the block escapes
+  masking → the collapse regex eats the descendant space (`.card .title` → `:where(.card.title)`,
+  MISCOMPILED). The reviewer's proposed `"`-only restriction does NOT fix it (the swallowing char IS
+  a `"`). CORRECT fix: REMOVE outer string tracking entirely — mask EVERY `#{}` unconditionally. A
+  literal `#{` inside a real attribute string round-trips regardless, because the masked block is
+  restored VERBATIM (`title="a#{b}c"` → masked → restored unchanged). The outer tracking was both
+  unnecessary AND the regression source.
+- Empirical (all 3): `don't` → `:where(.card .title)` (space kept); `title="a#{b}c"` → descendant kept
+  + attr preserved; `stay calm` → `:where(.card .title)`.
+- TEST: refocused the round-trip test + NEW contraction regression test; NEW conformance case
+  style/descendant-combinator-contraction-text. css-wave1 41 pass; conformance 739/739.
