@@ -291,6 +291,67 @@ function parseCorsMaxAge(raw: string | null | undefined): number | null {
 }
 
 /**
+ * §20.5 (S265, i29e) — parse a `sessionExpiry=` duration string into SECONDS for
+ * the session cookie `Max-Age` + the durable-store TTL. Accepts `Ns` / `Nm` /
+ * `Nh` / `Nd` / `Nw` (seconds/minutes/hours/days/weeks) or a bare integer
+ * (seconds). Falls back to 3600 (1h) on anything unrecognized — the same default
+ * the route-inference layer stamps when no `sessionExpiry=` attribute is present.
+ * A login page carries no `sessionExpiry=` (a `session-store=` / login-page
+ * expiry attribute is out of scope for this build; see SPEC §20.5), so the 1h
+ * default governs there.
+ */
+function parseSessionExpirySeconds(raw: string | null | undefined): number {
+  const DEFAULT = 3600;
+  if (typeof raw !== "string") return DEFAULT;
+  const trimmed = raw.trim().toLowerCase();
+  if (trimmed.length === 0) return DEFAULT;
+  const m = trimmed.match(/^(\d+)\s*([smhdw]?)$/);
+  if (!m) return DEFAULT;
+  const n = parseInt(m[1], 10);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT;
+  const unit = m[2];
+  const mult = unit === "m" ? 60 : unit === "h" ? 3600 : unit === "d" ? 86400 : unit === "w" ? 604800 : 1;
+  return n * mult;
+}
+
+/**
+ * §20.5 (S265, i29e) — does ANY expression in the file AST reference the bare
+ * `session` server builtin (a `session.userId` / `session.isAuth` / `session.role`
+ * member read, or a `session.set(…)` / `session.get(…)` / `session.destroy()`
+ * call)? A positive verdict forces the durable session infra ON (so the store +
+ * middleware + write helpers emit even for a login page that carries no `auth=`),
+ * exactly as `@currentUser` server-authority queries do.
+ *
+ * The match keys on a `member` node whose object is the BARE ident `session`
+ * (name === "session"). The reactive `@session` client projection is an ident
+ * named "@session" (the sigil is part of the name), so it is NOT matched here —
+ * only the server builtin. Pure structural walk over the AST; `span`/`loc`
+ * bookkeeping keys are skipped for speed.
+ */
+function astUsesSessionBuiltin(node: unknown): boolean {
+  if (!node || typeof node !== "object") return false;
+  if (Array.isArray(node)) {
+    for (const child of node) if (astUsesSessionBuiltin(child)) return true;
+    return false;
+  }
+  const n = node as Record<string, unknown>;
+  if (
+    n.kind === "member" &&
+    n.object && typeof n.object === "object" &&
+    (n.object as Record<string, unknown>).kind === "ident" &&
+    (n.object as Record<string, unknown>).name === "session"
+  ) {
+    return true;
+  }
+  for (const key in n) {
+    if (key === "span" || key === "loc") continue;
+    const v = n[key];
+    if (v && typeof v === "object" && astUsesSessionBuiltin(v)) return true;
+  }
+  return false;
+}
+
+/**
  * Ext 1 M1.4 — per-batch idempotency-key gating.
  *
  * Returns true iff the CPS stub for this route must emit the Ext 5
@@ -1413,7 +1474,14 @@ export function generateServerJs(
   // middleware userId/role + the @currentUser resolver + the 401 serverload-auth
   // gate) whenever the app declares auth, OR a serverLoad route gates, OR a Fork-3
   // query reads @currentUser. A non-auth / non-server-authority page emits none.
-  const _needsSessionInfra = !!authMiddlewareEntry || _anyServerLoadGates || _anyCurrentUserQuery;
+  // §20.5 (S265, i29e) — the WRITE half. If any server-escalated fn calls the
+  // `session` builtin (`session.set` / `session.destroy` / `session.get` / a
+  // `session.userId|isAuth|role` read), the durable session store + read
+  // middleware + write helpers MUST be present even when the page carries no
+  // `auth=` (a login page mints a session before any guard exists). This forces
+  // `_needsSessionInfra` exactly as an `@currentUser` server-authority query does.
+  const _anySessionBuiltin = astUsesSessionBuiltin(fileAST);
+  const _needsSessionInfra = !!authMiddlewareEntry || _anyServerLoadGates || _anyCurrentUserQuery || _anySessionBuiltin;
 
   // §61.6 — an `<endpoint>` emits a server route-handler directly (bypassing the
   // function-route path), so the emission gate must fire on a file that has an
@@ -1533,8 +1601,45 @@ export function generateServerJs(
     // When csrf is auto the middleware mints + surfaces it (see below); otherwise
     // the middleware is byte-identical to a non-CSRF session-infra app.
     const _csrfAuto = authMiddlewareEntry?.csrf === "auto";
-    lines.push("// --- §52 Session store + request-context middleware (compiler-generated) ---");
-    lines.push("const _scrml_session_store = (globalThis.__scrml_session_store ??= new Map());");
+    // §20.5 (S265, i29e) — session cookie Max-Age + durable-store TTL, in seconds.
+    const _sessionMaxAgeSec = parseSessionExpirySeconds(authMiddlewareEntry?.sessionExpiry ?? null);
+    lines.push("// --- §52 / §20.5 Session store + request-context middleware (compiler-generated) ---");
+    // §20.5 (S265, i29e) — the RULED-durable session store. Backs both the READ
+    // side (this middleware) and the WRITE side (`_scrml_session_begin/commit`
+    // below) with a SQLite-backed KV keyed by `scrml_sid`, so a login on one
+    // request is visible to `@currentUser` on the next — AND survives a process
+    // restart (Peter's always-on Pi: an in-memory Map logged everyone out on every
+    // restart). Mirrors `stdlib/store.js:createSessionStore` (namespace "session",
+    // JSON values, `expires_at` TTL) but INLINED into the server bundle — the same
+    // self-contained pattern the §19.9.6 idempotency shadow-table + the other
+    // `_scrml_*` server runtime helpers use, because a compiler-INJECTED import is
+    // not seen by the stdlib bundler (which only scans user imports). `bun:sqlite`
+    // is SYNCHRONOUS, so the middleware stays sync (no ripple into its call sites).
+    // Store path is a fixed `.scrml-sessions.db` beside the runtime CWD; a
+    // `session-store=` attribute to relocate it is out of scope (SPEC §20.5).
+    lines.push('import { Database as _ScrmlSessionDatabase } from "bun:sqlite";');
+    lines.push("const _scrml_session_store = (globalThis.__scrml_session_store ??= (() => {");
+    lines.push('  const _db = new _ScrmlSessionDatabase(".scrml-sessions.db");');
+    lines.push('  _db.run("CREATE TABLE IF NOT EXISTS kv_store (namespace TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, expires_at INTEGER, PRIMARY KEY (namespace, key))");');
+    lines.push('  const _ns = "session";');
+    lines.push('  const _stmtGet = _db.prepare("SELECT value, expires_at FROM kv_store WHERE namespace = ? AND key = ?");');
+    lines.push('  const _stmtSet = _db.prepare("INSERT OR REPLACE INTO kv_store (namespace, key, value, expires_at) VALUES (?, ?, ?, ?)");');
+    lines.push('  const _stmtDel = _db.prepare("DELETE FROM kv_store WHERE namespace = ? AND key = ?");');
+    lines.push("  return {");
+    lines.push("    get(key) {");
+    lines.push("      const row = _stmtGet.get(_ns, key);");
+    lines.push("      if (!row) return null;");
+    lines.push("      if (row.expires_at !== null && row.expires_at <= Date.now()) { _stmtDel.run(_ns, key); return null; }");
+    lines.push("      try { return JSON.parse(row.value); } catch { return row.value; }");
+    lines.push("    },");
+    lines.push("    set(key, value, ttl) {");
+    lines.push("      const expiresAt = ttl ? Date.now() + ttl * 1000 : null;");
+    lines.push("      _stmtSet.run(_ns, key, JSON.stringify(value), expiresAt);");
+    lines.push("    },");
+    lines.push("    delete(key) { _stmtDel.run(_ns, key); },");
+    lines.push("  };");
+    lines.push("})());");
+    lines.push(`const _scrml_session_max_age = ${_sessionMaxAgeSec};`);
     lines.push("");
     lines.push("function _scrml_session_middleware(req) {");
     lines.push("  const cookieHeader = req.headers.get('Cookie') || '';");
@@ -1548,8 +1653,15 @@ export function generateServerJs(
       // session-bound value to compare the client's `X-CSRF-Token` against.
       // Anonymous requests (no `_rec`) carry no token and never reach the CSRF
       // gate (the `_scrml_auth_check` 302 short-circuits mutating routes first).
+      // §20.5 (i29e) — durable store: `.get` returns a FRESH parsed object each
+      // call, so a mutation must be written BACK to persist (unlike the old
+      // in-memory Map, whose `.get` returned a live reference). Re-set with the
+      // session TTL so the record's expiry is refreshed, keeping the synchronizer
+      // token stable across requests (the client fetches it via the projection
+      // then echoes it as `X-CSRF-Token`).
       lines.push("  if (_rec && !_rec.csrfToken) {");
       lines.push("    _rec.csrfToken = _scrml_generate_csrf();");
+      lines.push("    _scrml_session_store.set(sessionId, _rec, _scrml_session_max_age);");
       lines.push("  }");
     }
     // userId / role resolve from the session store keyed by sessionId. Absence is
@@ -1592,6 +1704,64 @@ export function generateServerJs(
     lines.push("    });");
     lines.push("  }");
     lines.push("  return null;");
+    lines.push("}");
+    lines.push("");
+
+    // §20.5 (S265, i29e) — the session WRITE half: per-request context + commit +
+    // cookie wrapper. `_scrml_session_begin(req)` loads the incoming session
+    // record from the durable store (keyed by the request's `scrml_sid`) into a
+    // mutable per-request context bound on the Request as `_scrml_req._scrml_sess`
+    // by `_scrml_session_cookie_wrap`. A server-fn body's `session.set(k,v)` /
+    // `session.destroy()` mutate that context (coalescing to ONE record + ONE
+    // cookie); session-field reads resolve from it. AFTER the handler
+    // returns its Response, `_scrml_session_commit` performs the single durable
+    // write (or delete on destroy) and returns the `Set-Cookie` string, which the
+    // wrapper APPENDS to the compiler-owned Response — a second `Set-Cookie`
+    // header alongside any `scrml_csrf` cookie (a Headers.append, never a
+    // clobbering object-literal key). Mirrors the logout-clear cookie
+    // (`_scrml_session_destroy`) + the csrf co-emission at the return seam.
+    lines.push("// --- §20.5 session WRITE context: begin + commit + cookie wrapper (compiler-generated) ---");
+    lines.push("function _scrml_session_begin(req) {");
+    lines.push("  const cookieHeader = req.headers.get('Cookie') || '';");
+    lines.push("  const sid = cookieHeader.match(/scrml_sid=([^;]+)/)?.[1] || null;");
+    lines.push("  const rec = sid ? (_scrml_session_store.get(sid) || null) : null;");
+    lines.push("  return {");
+    lines.push("    sid,");
+    lines.push("    _rec: rec ? { ...rec } : {},");
+    lines.push("    _dirty: false,");
+    lines.push("    _destroy: false,");
+    lines.push("    get userId() { return this._rec.userId ?? null; },");
+    lines.push("    get role() { return this._rec.role ?? null; },");
+    lines.push("    get isAuth() { return !!this.sid && !this._destroy && (this._rec.userId != null); },");
+    lines.push("    set(key, value) { this._rec[key] = value; this._dirty = true; },");
+    lines.push("    get(key) { return this._rec[key] ?? null; },");
+    lines.push("    destroy() { this._destroy = true; this._dirty = false; },");
+    lines.push("  };");
+    lines.push("}");
+    lines.push("");
+    lines.push("function _scrml_session_commit(sess) {");
+    lines.push("  if (sess._destroy) {");
+    lines.push("    if (sess.sid) _scrml_session_store.delete(sess.sid);");
+    lines.push("    return 'scrml_sid=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax';");
+    lines.push("  }");
+    lines.push("  if (sess._dirty) {");
+    lines.push("    const sid = sess.sid || crypto.randomUUID();");
+    lines.push("    _scrml_session_store.set(sid, sess._rec, _scrml_session_max_age);");
+    lines.push("    return `scrml_sid=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${_scrml_session_max_age}`;");
+    lines.push("  }");
+    lines.push("  return null;");
+    lines.push("}");
+    lines.push("");
+    lines.push("function _scrml_session_cookie_wrap(inner) {");
+    lines.push("  return async function (_scrml_req) {");
+    lines.push("    const _sess = (_scrml_req._scrml_sess = _scrml_session_begin(_scrml_req));");
+    lines.push("    const _resp = await inner(_scrml_req);");
+    lines.push("    const _ck = _scrml_session_commit(_sess);");
+    lines.push("    if (_ck && _resp && _resp.headers && typeof _resp.headers.append === 'function') {");
+    lines.push("      _resp.headers.append('Set-Cookie', _ck);");
+    lines.push("    }");
+    lines.push("    return _resp;");
+    lines.push("  };");
     lines.push("}");
     lines.push("");
   }
@@ -2384,6 +2554,12 @@ export function generateServerJs(
             : _cpsSplit);
 
     const handlerName = genVar(`handler_${name}`);
+    // §20.5 (S265, i29e) — mark where this handler's body begins so the
+    // route-export site below can detect whether the body lowered any
+    // `session.*` builtin (to `_scrml_req._scrml_sess`) and, if so, wrap the
+    // handler with the cookie-session write wrapper. Per-batch (handlerName is a
+    // fresh genVar), so a multi-batch route wraps each batch independently.
+    const _sessHandlerStartIdx = lines.length;
     lines.push(`async function ${handlerName}(_scrml_req) {`);
 
     lines.push(`  // route.query injection (SPEC §20.3)`);
@@ -2894,10 +3070,27 @@ export function generateServerJs(
     // single-handler case `_curRouteName`/`_curPath` are the route's own name
     // + path; for a multi-batch route each batch exports under
     // `<routeName>__batch_<i>` at `<path>__batch_<i>`.
+    // §20.5 (S265, i29e) — if this handler's body used the `session` builtin
+    // (lowered to `_scrml_req._scrml_sess`), wrap it with the cookie-session
+    // write wrapper so the incoming session is loaded before the body runs and
+    // the store write + `Set-Cookie: scrml_sid=…` is committed onto the Response
+    // after it returns. Web-app-only (`_webAppShape`); headless keeps bearer auth
+    // and emits no session infra, so the wrapper does not exist there. Placed
+    // OUTERMOST (around any `_scrml_mw_wrap`) so the cookie survives on the final
+    // Response and the session context is established before middleware runs.
+    const _sessHandlerUsesSession =
+      _webAppShape &&
+      lines.slice(_sessHandlerStartIdx).some((l) => l.includes("_scrml_req._scrml_sess"));
+    let _sessRegHandler = (_scrml_hasMW || _scrml_handleNode != null)
+      ? `_scrml_mw_wrap(${handlerName})`
+      : handlerName;
+    if (_sessHandlerUsesSession) {
+      _sessRegHandler = `_scrml_session_cookie_wrap(${_sessRegHandler})`;
+    }
     lines.push(`export const ${_curRouteName} = {`);
     lines.push(`  path: ${JSON.stringify(_curPath)},`);
     lines.push(`  method: ${JSON.stringify(httpMethod)},`);
-    lines.push(`  handler: ${(_scrml_hasMW || _scrml_handleNode != null) ? `_scrml_mw_wrap(${handlerName})` : handlerName},`);
+    lines.push(`  handler: ${_sessRegHandler},`);
     lines.push(`};`);
     lines.push("");
     } // end per-batch emit loop (Ext 1 M1.5)

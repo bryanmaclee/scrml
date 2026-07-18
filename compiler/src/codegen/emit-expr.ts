@@ -1906,6 +1906,25 @@ function emitMember(node: MemberExpr, ctx: EmitExprContext): string {
     return `_scrml_map_size(${emitExpr(node.object, ctx)})`;
   }
 
+  // §20.5 (S265, i29e) — `session` server-builtin member reads. Inside a
+  // server-escalated fn body `session.userId` / `session.isAuth` / `session.role`
+  // resolve from the per-request session context bound on the Request by the
+  // compiler-emitted cookie-session wrapper (`_scrml_req._scrml_sess`, whose
+  // fields are loaded from the durable session store keyed by the incoming
+  // `scrml_sid`). SERVER mode only; a client-side `session` read is E-SCOPE-012
+  // (type-system.ts). `declaredNames` guards against a user local shadowing the
+  // reserved `session` name (E-SCOPE-010).
+  if (
+    ctx.mode === "server" &&
+    !node.optional &&
+    node.object.kind === "ident" &&
+    (node.object as IdentExpr).name === "session" &&
+    (node.property === "userId" || node.property === "isAuth" || node.property === "role") &&
+    !(ctx.declaredNames && ctx.declaredNames.has("session"))
+  ) {
+    return `_scrml_req._scrml_sess.${node.property}`;
+  }
+
   const obj = emitReceiver(node.object, ctx);
   const dot = node.optional ? "?." : ".";
   return `${obj}${dot}${node.property}`;
@@ -2446,6 +2465,33 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
 
   const callee = emitReceiver(node.callee, ctx);
   const args = node.args.map(a => emitExpr(a, ctx)).join(", ");
+
+  // §20.5 (S265, i29e) — `session` server-builtin method calls. Inside a
+  // server-escalated fn body `session.set(key, value)` / `session.get(key)` /
+  // `session.destroy()` lower to the per-request session context the compiler
+  // binds on the Request (`_scrml_req._scrml_sess`) via the cookie-session
+  // wrapper (`_scrml_session_cookie_wrap`, emit-server). The WRITE half — store
+  // update + `Set-Cookie: scrml_sid=…` — is committed by that wrapper at the
+  // response seam AFTER the body runs, so multiple `session.set` calls coalesce
+  // to ONE store record + ONE cookie. Here we only emit the accessor call; the
+  // request param is always named `_scrml_req` in the route handler that hosts
+  // the body. SERVER mode only — a client-side `session.*` reference is
+  // E-SCOPE-012 (type-system.ts), never reaching codegen. A user local named
+  // `session` is a reserved-binding error (E-SCOPE-010); `declaredNames` guards
+  // against shadowing it here regardless.
+  if (
+    ctx.mode === "server" &&
+    node.callee.kind === "member" &&
+    !(node.callee as MemberExpr).optional &&
+    (node.callee as MemberExpr).object.kind === "ident" &&
+    ((node.callee as MemberExpr).object as IdentExpr).name === "session" &&
+    ((node.callee as MemberExpr).property === "set" ||
+      (node.callee as MemberExpr).property === "get" ||
+      (node.callee as MemberExpr).property === "destroy") &&
+    !(ctx.declaredNames && ctx.declaredNames.has("session"))
+  ) {
+    return `_scrml_req._scrml_sess.${(node.callee as MemberExpr).property}(${args})`;
+  }
 
   // Issue #1 (parent scrmlTS) — server-fn → sibling server-fn in-process call.
   // The per-fn route handler (`_scrml_handler_*`) is a Request->Response wrapper,
