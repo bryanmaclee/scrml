@@ -176,6 +176,58 @@ export function fileDeclaresRender(fileAST: unknown): boolean {
   return fileDeclaresFn(fileAST, "render");
 }
 
+// §20.5 (B2.5, S266) — decl kinds that create a FILE-SCOPE binding capable of
+// shadowing a reserved builtin: a `let`/`const`/`var` decl, a reactive
+// `state-decl`, or a `function`/`fn` decl. (A `<engine>` also declares a cell, but
+// its computed §51.0.C name is never a reserved builtin, so it is irrelevant here.)
+const _FILE_SCOPE_BINDING_KINDS = new Set([
+  "let-decl", "const-decl", "var-decl", "state-decl", "function-decl", "fn-decl", "function", "fn",
+]);
+// Nodes whose BODY / PARAMS introduce a NESTED (non-file) scope — a binding
+// declared inside one of these is handler-local, NOT file-scope, and is handled
+// scope-precisely by the emitter's `declaredNames` set, so the walk MUST NOT
+// descend into their bodies (else a handler-local `let session` would wrongly set
+// the whole-file shadow flag and disable the builtin in a SIBLING handler).
+const _NESTED_SCOPE_KINDS = new Set(["function-decl", "fn-decl", "function", "fn", "lambda"]);
+const _NESTED_SCOPE_BODY_KEYS = new Set(["body", "params"]);
+
+/**
+ * §20.5 (B2.5, S266) — True when the file declares a FILE-SCOPE binding named
+ * `name` (a `let`/`const`/`var`/`state`/`function`/`fn` decl at file scope — NOT
+ * inside a function/fn/lambda body). Used to detect a file-scope `let session`
+ * that shadows the reserved server `session` establishment builtin (SPEC §20.5:
+ * such a decl "binds cleanly today and shadows the builtin silently"). The walk
+ * DOES record a top-level `function <name>` decl node itself, but does NOT descend
+ * into ANY function/fn/lambda body (those bindings are handler-local — the
+ * emitter's per-handler `declaredNames` set owns them).
+ */
+export function fileDeclaresFileScopeBinding(fileAST: unknown, name: string): boolean {
+  const seen = new WeakSet<object>();
+  let found = false;
+  function walk(node: unknown): void {
+    if (found || !node || typeof node !== "object") return;
+    if (seen.has(node as object)) return;
+    seen.add(node as object);
+    const n = node as Record<string, unknown>;
+    if (_FILE_SCOPE_BINDING_KINDS.has(n.kind as string) && n.name === name) { found = true; return; }
+    const isNestedScope = _NESTED_SCOPE_KINDS.has(n.kind as string);
+    for (const key in n) {
+      if (key === "span" || key === "loc") continue;
+      // Do not descend into a function/fn/lambda BODY or PARAMS — those bind
+      // handler-local names, not file-scope ones.
+      if (isNestedScope && _NESTED_SCOPE_BODY_KEYS.has(key)) continue;
+      const v = n[key];
+      if (Array.isArray(v)) { for (const c of v) walk(c); }
+      else if (v && typeof v === "object") walk(v);
+      if (found) return;
+    }
+  }
+  const root = (fileAST as any)?.ast ?? fileAST;
+  const nodes = (root as any)?.nodes ?? (fileAST as any)?.nodes ?? [];
+  for (const n of nodes) { walk(n); if (found) break; }
+  return found;
+}
+
 // ---------------------------------------------------------------------------
 // §20.6 — server-inlined log() runtime.
 //

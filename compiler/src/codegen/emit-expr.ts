@@ -43,6 +43,7 @@ import { rewriteExpr, rewriteServerExpr, rewriteExprArrowBody, rewriteServerExpr
 import { emitParseVariantCall, isParseVariantCall } from "./emit-parse-variant.ts";
 import { emitMatchExpr as emitStructuredMatchExpr } from "./emit-control-flow.ts";
 import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
+import { CGError } from "./errors.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
 import { parseExprToNode, splitTopLevelCommas } from "../expression-parser.ts";
 import { resolveLogLoc } from "./log-loc.ts";
@@ -98,6 +99,49 @@ let _renderShadowedInFile = false;
 /** Set the per-file render() shadowing flag (a file-level `function render`). */
 export function setRenderShadowedInFile(on: boolean): void {
   _renderShadowedInFile = !!on;
+}
+
+// §20.5 (B2.5, S266) — PER-FILE flag: does the current file declare a FILE-SCOPE
+// binding named `session` (a `let session` / `const session` / `function session`
+// / `fn session` / a `<session>` reactive cell)? Such a binding is in scope across
+// the whole file and SHADOWS the reserved server `session` establishment builtin
+// (SPEC §20.5: a `let session = …` "binds cleanly today and shadows the builtin
+// silently"). Set per-file by runCG (via fileDeclaresFileScopeBinding + the
+// reactive-cell census). Without this, the member / call / index session-lowering
+// guards consulted ONLY the per-handler `declaredNames` set — which is seeded from
+// PARAMS + handler-local `let`/`const`, but does NOT carry FILE-SCOPE decls — so a
+// file-scope `let session = { userId: … }` was silently HIJACKED (its reads lowered
+// to `_scrml_req._scrml_sess`, corrupting the user's value). Mirrors the
+// `_renderShadowedInFile` per-file module-flag lifecycle (set + reset by runCG). A
+// handler-LOCAL `let session` is still handled scope-precisely by `declaredNames`.
+let _sessionShadowedInFile = false;
+
+/** Set the per-file `session` file-scope-shadow flag (a file-level `let session`). */
+export function setSessionShadowedInFile(on: boolean): void {
+  _sessionShadowedInFile = !!on;
+}
+
+// §20.5 (B2.4, S266) — narrow module-level sink for E-SESSION-VALUE diagnostics
+// raised during SERVER-mode expression emission. A bare `session` VALUE-use
+// (`return session`, `let s = session`, `log(session)`, `session` as a call arg /
+// assignment RHS) is not a valid member/index/call of the builtin — it would emit
+// a bare `session` reference (ReferenceError at request time). `emitIdent` records
+// the site here (it has the precise `mode` + shadow context); `generateServerJs`
+// drains it into the live `errors` array after emission (reset at the same start
+// seam), mirroring emit-server's `_foreignCrossingErrors` narrow-sink precedent.
+// Bounded to the server-emit window: reset-at-start + drain-at-end in emit-server.
+let _sessionValueUseErrors: CGError[] = [];
+
+/** Reset the E-SESSION-VALUE sink (called at the start of server emission). */
+export function resetSessionValueUseErrors(): void {
+  _sessionValueUseErrors = [];
+}
+
+/** Drain + clear the accumulated E-SESSION-VALUE diagnostics (post server emit). */
+export function drainSessionValueUseErrors(): CGError[] {
+  const out = _sessionValueUseErrors;
+  _sessionValueUseErrors = [];
+  return out;
 }
 
 // §20.7 (shadowing) — PER-FILE set: which of the `print` / `println` builtins
@@ -758,6 +802,37 @@ function emitIdent(node: IdentExpr, ctx: EmitExprContext): string {
       }
       return `_scrml_input_state_registry.get(${JSON.stringify(m[1])})`;
     }
+  }
+
+  // §20.5 (B2.4, S266) — a bare `session` VALUE-use in a server-escalated body.
+  // `session` is the reserved request-scoped establishment builtin, not a first-
+  // class value. Reaching emitIdent with `session` means it is NOT the object of a
+  // member / index / call (those session cases lower + return BEFORE recursing into
+  // the `session` ident), so this is a bare value-use — `return session`,
+  // `let s = session`, `log(session)`, a call argument, an assignment RHS — which
+  // would emit a bare `session` reference → ReferenceError at request time. Restore
+  // the "no bare `session` ever reaches emitted JS" invariant: record E-SESSION-VALUE
+  // (drained into the live `errors` by generateServerJs) and emit a harmless
+  // placeholder (the build fails on the error, so it never ships). The shadow guard
+  // (`_sessionShadowedInFile` file-scope OR `declaredNames` per-handler) means a
+  // user-declared `session` binding is honored as an ordinary value, not flagged.
+  if (
+    ctx.mode === "server" &&
+    name === "session" &&
+    !(_sessionShadowedInFile || (ctx.declaredNames && ctx.declaredNames.has("session")))
+  ) {
+    _sessionValueUseErrors.push(new CGError(
+      "E-SESSION-VALUE",
+      "E-SESSION-VALUE: `session` is not a value — it is the request-scoped session " +
+      "establishment builtin. Access a field (`session.userId` / `session.role` / " +
+      "`session.isAuth`) or call `session.get(key)` / `session.set(key, value)` / " +
+      "`session.destroy()`. `session` cannot be returned, assigned, passed as an " +
+      "argument, or otherwise used as a first-class value. (If you meant a local " +
+      "variable, declare it under a different name — `session` is reserved.)",
+      node.span ?? { start: 0, end: 0 },
+      "error",
+    ));
+    return "undefined /* E-SESSION-VALUE: `session` is not a value */";
   }
 
   // Plain identifier — pass through
@@ -1913,13 +1988,18 @@ function emitMember(node: MemberExpr, ctx: EmitExprContext): string {
   // by the incoming `scrml_sid`); any OTHER member (a custom key) routes through
   // `.get("key")` — never a dangling `session.foo` ref (S239 FIX 6). SERVER mode
   // only; a client-side `session` read is E-SCOPE-012 (type-system.ts).
-  // `declaredNames` guards a user local shadowing the reserved `session` name.
+  // The shadow guard (`_sessionShadowedInFile` file-scope OR `declaredNames`
+  // per-handler) steps the builtin aside for a user-declared `session` binding.
+  // B2.2 (S266): lowered REGARDLESS of `node.optional` — the `_scrml_req._scrml_sess`
+  // receiver is ALWAYS defined server-side, so a `session?.userId` receiver-`?.` is
+  // moot; without this, `session?.userId` emitted a bare `session?.userId`
+  // (ReferenceError). B2.5 (S266): the `_sessionShadowedInFile` disjunct closes the
+  // file-scope-`let session` hijack the per-handler `declaredNames` set alone missed.
   if (
     ctx.mode === "server" &&
-    !node.optional &&
     node.object.kind === "ident" &&
     (node.object as IdentExpr).name === "session" &&
-    !(ctx.declaredNames && ctx.declaredNames.has("session"))
+    !(_sessionShadowedInFile || (ctx.declaredNames && ctx.declaredNames.has("session")))
   ) {
     // Lowered unconditionally in server mode; emit-server's post-emission scan
     // (S239 FIX 6) fires E-SESSION-CONTEXT if this ref lands outside a
@@ -2040,6 +2120,36 @@ function emitIndex(node: IndexExpr, ctx: EmitExprContext): string {
     const receiver = emitExpr(node.object, ctx);
     const key = emitExpr(node.index, ctx);
     return `_scrml_map_get(${receiver}, ${key})`;
+  }
+
+  // §20.5 (B2.1, S266) — `session` server-builtin INDEX reads. `session["userId"]`
+  // is the natural bracket spelling of `session.get("userId")`; without this case
+  // it emitted a bare `session["userId"]` (ReferenceError at request time). Mirrors
+  // the `emitMember` session block: a literal canonical key (`"userId"`/`"isAuth"`/
+  // `"role"`) lowers to the typed accessor `_scrml_req._scrml_sess.<key>`; every
+  // other key (a custom string OR a computed `session[k]`) routes through the typed
+  // `.get(<keyExpr>)` — never a dangling `session[...]` ref. Lowered REGARDLESS of
+  // `node.optional` (the `_scrml_req._scrml_sess` receiver is always defined). The
+  // shadow guard mirrors emitMember (file-scope + per-handler). The post-emission
+  // context scan (emit-server) fires E-SESSION-CONTEXT if this lands outside a
+  // cookie-wrapped route handler.
+  if (
+    ctx.mode === "server" &&
+    node.object.kind === "ident" &&
+    (node.object as IdentExpr).name === "session" &&
+    !(_sessionShadowedInFile || (ctx.declaredNames && ctx.declaredNames.has("session")))
+  ) {
+    const key = node.index;
+    if (
+      key.kind === "lit" &&
+      (key as LitExpr).litType === "string" &&
+      ((key as LitExpr).value === "userId" ||
+        (key as LitExpr).value === "isAuth" ||
+        (key as LitExpr).value === "role")
+    ) {
+      return `_scrml_req._scrml_sess.${(key as LitExpr).value}`;
+    }
+    return `_scrml_req._scrml_sess.get(${emitExpr(node.index, ctx)})`;
   }
 
   const obj = emitReceiver(node.object, ctx);
@@ -2486,16 +2596,22 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   // user local `let session = …` binds cleanly today (the reserved-binding
   // E-SCOPE-010 is spec-ahead, not fired — see SPEC §20.5); the `declaredNames`
   // guard is what actually steps the builtin aside so the user's local is honored.
+  // B2.3 (S266): lowered REGARDLESS of the callee-member `optional` — the
+  // `_scrml_req._scrml_sess` receiver is ALWAYS defined server-side, so a
+  // `session?.set(…)` / `session?.destroy?.()` callee-`?.` is moot; without this,
+  // `astUsesSessionWrite` still emitted the durable store but the WRITE lowered to a
+  // bare `session?.set(…)` that never ran (the establishment silently no-op'd).
+  // B2.5 (S266): the `_sessionShadowedInFile` disjunct closes the file-scope
+  // `let session` hijack the per-handler `declaredNames` set alone missed.
   if (
     ctx.mode === "server" &&
     node.callee.kind === "member" &&
-    !(node.callee as MemberExpr).optional &&
     (node.callee as MemberExpr).object.kind === "ident" &&
     ((node.callee as MemberExpr).object as IdentExpr).name === "session" &&
     ((node.callee as MemberExpr).property === "set" ||
       (node.callee as MemberExpr).property === "get" ||
       (node.callee as MemberExpr).property === "destroy") &&
-    !(ctx.declaredNames && ctx.declaredNames.has("session"))
+    !(_sessionShadowedInFile || (ctx.declaredNames && ctx.declaredNames.has("session")))
   ) {
     // Lowered unconditionally in server mode; emit-server's post-emission scan
     // (S239 FIX 6) fires E-SESSION-CONTEXT if this `_scrml_req._scrml_sess` ref

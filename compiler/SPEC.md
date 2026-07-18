@@ -14566,6 +14566,19 @@ session.destroy()   // void — end the session (delete the record + clear the c
 - The compiler SHALL generate the session infrastructure (session middleware,
   cookie management, server-side session store) automatically. The developer SHALL
   NOT write session middleware in scrml source.
+- `session` is a request-scoped ACCESSOR, not a first-class value. In a
+  server-escalated body it SHALL appear ONLY as the object of a member access
+  (`session.userId` / `session.role` / `session.isAuth`), an index access
+  (`session["userId"]` — the bracket spelling of `.get`), or a method call
+  (`session.get(k)` / `session.set(k, v)` / `session.destroy()`). Any OTHER use — a
+  bare `session` returned, assigned, passed as an argument, or read as a value —
+  SHALL be a compile error (E-SESSION-VALUE). This holds for BOTH the `.dot` and the
+  `["…"]` / `?.` / `?.[…]` optional forms (the compiler-owned `_scrml_req._scrml_sess`
+  receiver is always defined server-side, so a receiver-`?.` on `session` is moot
+  and lowers identically to the non-optional form). Restores the invariant that no
+  bare `session` identifier ever reaches emitted JS: it is EITHER a valid
+  member/index/call (correctly lowered) OR a clean compile error. **(LIVE, S266
+  i29e.)**
 - A top-level `let session = ...` declaration SHALL be a compile error (E-SCOPE-010).
   **(Spec-ahead, S265 — FIX 11: not fired. A `let session = …` binds cleanly today
   and shadows the builtin silently, mirroring the reserved-`route` binding, which is
@@ -18051,6 +18064,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-SCOPE-011 | §20.4 | Access to undeclared route parameter name **(Reserved / spec-ahead, S263 — no fire site: the undeclared-route-param check is spec-ahead — `route.params` is not typer-supported for pages and no param-name allow-list exists. Excluded from the freeze fireable set.)** | Error |
 | E-SCOPE-012 | §20.5 | `session` accessed outside a server-escalated function body **(LIVE, S265 (i29e) — the §20.5 server `session` establishment builtin is built; bare `session` is bound into server-escalated scopes and auto-escalates its enclosing function, so a `session` reference that is NOT server-escalated (e.g. top-level `${ }` logic) fires this. Distinct from the `@session` client projection.)** | Error |
 | E-SESSION-CONTEXT | §20.5.1 | `session.*` used outside a web-app server route handler — an SSE `server function*`, an `<endpoint>` arm, a `<machine>` method, a serverLoad cell, an in-process server-fn helper called by another server function, or a headless `kind="tool"` program. Those contexts have no cookie-session request/response context. **(LIVE, S265/S239 i29e.)** | Error |
+| E-SESSION-VALUE | §20.5 | Bare `session` VALUE-use in a server-escalated body — `session` returned, assigned, passed as an argument, or otherwise read as a first-class value rather than as the object of a member (`session.userId`), index (`session["userId"]`), or call (`session.get`/`.set`/`.destroy`). `session` is a request-scoped accessor, not a value; a bare reference would emit a dangling `session` identifier (ReferenceError at request time). Fix: access a field or call an accessor. **(LIVE, S266 i29e — codegen emit-expr.ts:emitIdent, drained by emit-server.ts:generateServerJs.)** | Error |
 | ~~E-REACTIVE-001~~ | §6.2 | **Retired 2026-07-16 (S263).** Reactive cells are declaration-order-independent (hoisted), so `@variable` use-before-declaration is LEGAL, not an error. The reachable "undeclared cell" case is owned by **E-STATE-UNDECLARED**. Triage: `scrml-support/docs/audits/s34-catalog-vs-impl-2026-07-16.md`. | — |
 | E-REACTIVE-002 | §6.6.8 | Assignment to a `const <name>` derived reactive value | Error |
 | E-REACTIVE-003 | §6.6.9 | A WHOLLY server-escalated function reads a free client cell — a mutable `@var`, a `const <name>` derived, OR a §52 `<... server>` cell (all client-held). The server-mode rewrite lowers `@cell` to `_scrml_body["cell"]`, but a non-CPS server-fn client stub sends only declared params, so the value is NOT transported and resolves to `undefined` server-side. Read-side sibling of E-RI-002 (server fn *writes* a `@reactive` cell). Fires once per distinct cell. GATED on `cpsSplit === null` — a CPS-split fn MARSHALS its server-batch reads into the client stub (`emit-functions.ts`), so it is exempt (see W-SERVER-DERIVED-MARSHAL). Excludes: declared params (already marshalled), ambient `@session`/`@currentUser` (server-resolved singletons, §20.5 — never client-supplied), and channel cells (E-CHANNEL-SERVER-CELL-READ owns them). Fix: pass the cell as an explicit argument, or restructure so the server computes the value inside the `?{}`. Broadened S250 from the derived-only, never-fired SPEC-only draft (a fail-open); §52 correction (client-held, not server-resolved) per RULING THE SPLIT. Emitted by RI (`compiler/src/route-inference.ts`, `detectServerFreeClientCellReads`). | Error |

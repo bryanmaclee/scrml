@@ -9,7 +9,7 @@ import { collectReactiveVarNames } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitChannelWatchesServerBoot, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
 import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter } from "./rewrite.js";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
-import { emitExpr, emitExprField, setServerAsyncClassifier, type EmitExprContext } from "./emit-expr.ts";
+import { emitExpr, emitExprField, setServerAsyncClassifier, resetSessionValueUseErrors, drainSessionValueUseErrors, type EmitExprContext } from "./emit-expr.ts";
 import type { CompileContext } from "./context.ts";
 import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
 import { resolveDbDriver } from "./db-driver.ts";
@@ -357,6 +357,21 @@ function astSessionMemberMatch(node: unknown, props: string[] | null): boolean {
     (n.object as Record<string, unknown>).kind === "ident" &&
     (n.object as Record<string, unknown>).name === "session" &&
     (props === null || (typeof n.property === "string" && props.includes(n.property)))
+  ) {
+    return true;
+  }
+  // B2.1 (S266) — INDEX access `session["userId"]` / `session[k]` is the bracket
+  // spelling of a session read (lowered to `_scrml_req._scrml_sess.*` / `.get()` by
+  // emitIndex). Detect it here so `_anySessionBuiltin` emits the session infra AND
+  // the post-emission context scan runs for the index form too. `props` (the
+  // WRITE-only gate `["set","destroy"]`) never matches an index — a bracket read is
+  // never an establishment write — so `astUsesSessionWrite` is unaffected.
+  if (
+    props === null &&
+    n.kind === "index" &&
+    n.object && typeof n.object === "object" &&
+    (n.object as Record<string, unknown>).kind === "ident" &&
+    (n.object as Record<string, unknown>).name === "session"
   ) {
     return true;
   }
@@ -1158,6 +1173,10 @@ export function generateServerJs(
     middlewareConfig = middlewareConfigLegacy ?? null;
   }
   const filePath: string = fileAST.filePath;
+  // §20.5 (B2.4, S266) — reset the emit-expr E-SESSION-VALUE sink at the START of
+  // this file's server emission so a bare `session` value-use recorded during body
+  // emission is scoped to THIS file; drained into `errors` after emission below.
+  resetSessionValueUseErrors();
   const fnNodes: any[] = ctxForCache?.analysis?.fnNodes ?? collectFunctions(fileAST);
 
   // Issue #26 (P0 auth-bypass) — per-file stdlib async classifier inputs,
@@ -4667,6 +4686,22 @@ export function generateServerJs(
         "error",
       ));
     }
+  }
+
+  // §20.5 (B2.4, S266) — drain any E-SESSION-VALUE diagnostics emit-expr recorded
+  // during this file's server-body emission (a bare `session` VALUE-use — a bare
+  // ident that is NOT the object of a member/index/call). Stamps each with the
+  // file path so it reports against the right source, then clears the sink for the
+  // next file. Build-blocking (severity "error"), restoring the invariant that no
+  // bare `session` identifier ever reaches emitted JS.
+  for (const _svErr of drainSessionValueUseErrors()) {
+    const _span = (_svErr.span && typeof _svErr.span === "object") ? _svErr.span as Record<string, unknown> : {};
+    errors.push(new CGError(
+      _svErr.code,
+      _svErr.message,
+      { file: filePath, start: (_span.start as number) ?? 0, end: (_span.end as number) ?? 0, line: (_span.line as number) ?? 1, col: (_span.col as number) ?? 1 },
+      "error",
+    ));
   }
 
   return finalEmitted;
