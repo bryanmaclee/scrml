@@ -1,0 +1,10 @@
+<program>
+
+  const Card = <div props={}>
+      #{ .card .title { color: red; } }
+      <div class="card"><span class="title">hi</span></div>
+  </>
+
+  <Card/>
+
+</program>

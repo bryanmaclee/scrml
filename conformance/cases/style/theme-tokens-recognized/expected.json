@@ -4,7 +4,7 @@
   "language-version": "1.0",
   "spec": "§65.3.2, §65.9",
   "source-test": "compiler/tests/unit/theme-tokens.test.js",
-  "rationale": "§65.9: `<theme>` is a scrml-defined structural element (sibling of `<program>`/`<page>`), valid at program scope. §65.3.2: it declares named token values. A well-formed program-scope `<theme>` block fires none of E-STRUCTURAL-ELEMENT-MISPLACED / E-CTX-001 / E-CTX-003 / E-SYNTAX-002, and no E-THEME-* code (the token block is valid). NOTE (Nominal): use-site token lowering (`color: brand` → `var(--brand)`) + E-THEME-TOKEN-UNKNOWN are Phase-B codegen (not yet emitted); this case asserts only the Phase-A recognition contract.",
+  "rationale": "§65.9: `<theme>` is a scrml-defined structural element (sibling of `<program>`/`<page>`), valid at program scope. §65.3.2: it declares named token values. A well-formed program-scope `<theme>` block fires none of E-STRUCTURAL-ELEMENT-MISPLACED / E-CTX-001 / E-CTX-003 / E-SYNTAX-002, and no E-THEME-* code (the token block is valid). NOTE: use-site token lowering (`color: brand` → `var(--brand)`) + E-THEME-TOKEN-UNKNOWN are now LANDED (Wave-1 emission, css-wave1-emission-2026-07-16); this base-only theme declares valid tokens with no bad variant re-bind, so no E-THEME-* fires — the case still asserts the Phase-A recognition contract plus the emission being additive on valid input.",
   "expect": {
     "codes": [],
     "notCodes": ["E-STRUCTURAL-ELEMENT-MISPLACED", "E-CTX-001", "E-CTX-003", "E-SYNTAX-002"],

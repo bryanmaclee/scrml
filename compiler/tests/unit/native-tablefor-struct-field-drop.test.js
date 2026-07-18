@@ -69,14 +69,16 @@ function compileWith(source, parser, suffix) {
 
 const countTh = (html) => (html.match(/<th[\s>]/g) || []).length;
 
-// The emitted html embeds the per-compile basename in <title> + the client.js
-// <script src>. Those differ ONLY because each compileWith() call uses a unique
-// temp basename (parser-independent) — NOT a real native-vs-default drift. Strip
-// both so the byte-identical comparison sees only the structural markup.
+// The emitted html embeds the per-compile basename in <title>, the client.js
+// <script src>, and (since the §65.3.4 universal reset) the stylesheet <link>.
+// Those differ ONLY because each compileWith() call uses a unique temp basename
+// (parser-independent) — NOT a real native-vs-default drift. Strip all three so
+// the byte-identical comparison sees only the structural markup.
 const normHtml = (html) =>
   html
     .replace(/<title>[^<]*<\/title>/g, "<title>X</title>")
-    .replace(/<script src="[^"]*\.client\.js"><\/script>/g, '<script src="X.client.js"></script>');
+    .replace(/<script src="[^"]*\.client\.js"><\/script>/g, '<script src="X.client.js"></script>')
+    .replace(/<link rel="stylesheet" href="[^"]*\.css">/g, '<link rel="stylesheet" href="X.css">');
 
 // A 5-field NEWLINE-separated struct rendered through <tableFor> — the exact
 // shape that triggered the drop (no trailing commas; newline IS the separator).

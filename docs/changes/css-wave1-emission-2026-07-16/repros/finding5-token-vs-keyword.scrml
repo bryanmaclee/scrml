@@ -1,0 +1,10 @@
+<program>
+  <theme>
+      bold = #ff0000;
+  </theme>
+  const Card = <div props={}>
+      #{ .card { font-weight: bold; color: @bold; } }
+      <div class="card">hi</div>
+  </>
+  <Card/>
+</program>

@@ -1,0 +1,13 @@
+{
+  "id": "style-program-import-hoist-clean",
+  "description": "§65.8 — a program-global `#{}` carrying a top-level `@import` compiles clean. Program-global `#{}` is wrapped in `@layer global { … }`, but `@charset`/`@import` are INVALID inside a `@layer {}` block (the browser drops them). Wave-1 emission (emit-css.ts `hoistCharsetAndImports`) lifts the `@import` out of the wrapper to its legal stylesheet position (after the `@layer name;` order declaration, before any block) while the remaining program-global rules stay inside `@layer global`. The emitted ordering shape is asserted in the source unit test; here we prove the `@import`-bearing program-global block compiles clean.",
+  "language-version": "1.0",
+  "spec": "§65.8",
+  "source-test": "compiler/tests/unit/css-wave1-emission.test.js",
+  "rationale": "§65.8: a program-global `#{}` with an `@import` is valid input; the hoist is additive emission and must fire NO diagnostic. This guards the CSS-ordering-law hoist against re-introducing a compile error, complementing the unit test that asserts the emitted `@import`-above-`@layer global {}` shape.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-STRUCTURAL-ELEMENT-MISPLACED"],
+    "notCodePrefixes": ["E-THEME-", "E-STYLE-"]
+  }
+}

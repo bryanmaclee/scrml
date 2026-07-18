@@ -1,0 +1,13 @@
+{
+  "id": "style-flat-inline-token-lowering-clean",
+  "description": "§65.3.2 / §65.4.1 — a flat-declaration `#{}` (a direct child of a component root, the DOMINANT `#{}` corpus pattern) that references a `<theme>` token via the `@` sigil (`color: @brand`) compiles clean. The flat-inline `#{}`→`style=\"\"` emission path (emit-html.ts → renderFlatDeclarationAsInlineStyle → renderDeclValue → lowerCssValueRefs) runs the SAME `@`-sigil lowering as the scoped-selector path: `@brand` lowers to `var(--brand)` and a bare value (`padding: 16px`) is untouched, with NO error. The emitted `style=\"color: var(--brand); padding: 16px;\"` shape is asserted in the source unit test.",
+  "language-version": "1.0",
+  "spec": "§65.3.2, §65.4.1, §25.7",
+  "source-test": "compiler/tests/unit/css-wave1-emission.test.js",
+  "rationale": "§65.4.1: the flat-inline `#{}` is the dominant corpus pattern; Wave-1 lowers `@`-tokens there too, not only in a component-scope selector block. A valid flat-inline theme reference fires none of the E-THEME-* / E-STYLE-* family. The codes-half proof that flat-inline token lowering is additive (new emission, no new diagnostics on valid input).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-VARIANT-AMBIGUOUS", "E-STRUCTURAL-ELEMENT-MISPLACED"],
+    "notCodePrefixes": ["E-THEME-", "E-STYLE-"]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "style-reset-opt-out-clean",
+  "description": "§65.3.4 — `<program reset=\"none\">` opts out of the built-in reset. The `reset` attribute is a recognized scrml-specific `<program>` directive (attribute-registry.js), so it fires NO W-ATTR-001 unknown-attribute warning and is NOT forwarded to the rendered HTML as a plain attribute; emit-css.ts drops the whole `@layer reset` block (asserted in the source unit test).",
+  "language-version": "1.0",
+  "spec": "§65.3.4",
+  "source-test": "compiler/tests/unit/css-wave1-emission.test.js",
+  "rationale": "§65.3.4: the reset ships DEFAULT-ON; `reset=\"none\"` is the sole opt-out value. Registering `reset` on `<program>` (closed vocab `[\"none\"]`) suppresses the incidental W-ATTR-001 and marks it a compile-time directive. A clean opt-out compile fires no reset/style diagnostics.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-ATTR-001"],
+    "notCodePrefixes": ["E-STYLE-", "E-THEME-"]
+  }
+}

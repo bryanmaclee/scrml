@@ -179,6 +179,17 @@ ELEMENT_ATTR_REGISTRY.set("program", {
     // supportsInterpolation:false — the token list is a compile-time declaration,
     // not a runtime-interpolated value.
     ["capabilities",  attrSpec({ supportsInterpolation: false })],
+    // §65.3.4 (CSS Wave-1 EMISSION) — the built-in reset opt-out. The reset
+    // ships DEFAULT-ON in a bottom `@layer reset`; `<program reset="none">`
+    // drops the whole layer. `"none"` is the only recognized value (the sole
+    // opt-out; anything else keeps the default-on reset). A compile-time
+    // directive consumed by emit-css.ts (`emitResetLayer`) — registering here
+    // suppresses the incidental W-ATTR-001 and marks it scrml-specific (not
+    // forwarded to the rendered HTML as a plain attribute).
+    ["reset",         attrSpec({
+      supportsInterpolation: false,
+      allowedValues: ["none"],
+    })],
   ]),
 });
 

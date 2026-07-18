@@ -10,6 +10,10 @@ import { CGError } from "./errors.ts";
 import type { BindingRegistry } from "./binding-registry.ts";
 import type { CompileContext } from "./context.ts";
 import { isFlatDeclarationBlock, renderFlatDeclarationAsInlineStyle } from "./emit-css.ts";
+import type { LowerCtx } from "./emit-css.ts";
+// §65.3.2 / §65.4 (Task 2 [86]) — the `<theme>` token names + declared cell
+// names for the flat-inline `#{}` `@`-sigil lowering (`@brand` → `var(--brand)`).
+import { collectThemeContext, collectThemeTokenNames } from "./emit-theme-reset.ts";
 // SPEC §6.4 / §5.4.1 / L17 — A1c C3 render-by-tag expansion. lookupStateCell resolves
 // `<userName/>` to its decl record; getCellKind surfaces B5's `_cellKind` annotation
 // (`"bindable"` for Shape 2 with bindable RHS — the only legal use kind that survives
@@ -677,6 +681,33 @@ export function generateHtml(
   }
 
   const reactiveVarNames: Set<string> | null = fileAST ? collectReactiveVarNames(fileAST) : null;
+
+  // §65.3.2 / §65.4 (Task 2 [86]) — the flat-inline `#{}` token-lowering context.
+  // Collected from the FULL file AST (`fileAST` is shared across the top-level
+  // call AND every nested arm-body call in emit-variant-guard), so a flat-inline
+  // `@brand` inside a match/engine arm still resolves the program-scope `<theme>`
+  // tokens. `nodes` alone would miss them (it is the arm subtree in nested calls).
+  // Built UNCONDITIONALLY (mirrors the selector path in generateCss, which always
+  // builds its LowerCtx): a `@name` matching no token / no cell fires
+  // E-THEME-TOKEN-UNKNOWN even in a themeless file — identical membership + error
+  // semantics to the selector path. `lowerCssValueRefs` no-ops on values without
+  // an `@`, so the flat-inline render stays byte-identical for non-`@` values.
+  // FIX2 (S265 review) — `cellNames` MUST be the COMPLETE reactive-var set
+  // (`collectReactiveVarNames`: state + DERIVED (`const d = @a*2`) + tilde + engine
+  // / machine-projected vars), NOT `collectThemeContext().cellNames` (state-decl
+  // only). A `#{ width: @doubled }` referencing a derived cell keeps the §25
+  // bridge (`var(--scrml-doubled)`), NOT a false E-THEME-TOKEN-UNKNOWN.
+  const flatInlineLowerCtx: LowerCtx | null = (() => {
+    const topNodes = (fileAST as any)?.ast?.nodes ?? (fileAST as any)?.nodes ?? nodes;
+    if (!Array.isArray(topNodes)) return null;
+    const themeContext = collectThemeContext(topNodes);
+    return {
+      themeTokens: collectThemeTokenNames(themeContext),
+      cellNames: reactiveVarNames ?? themeContext.cellNames,
+      errors,
+    };
+  })();
+
   // §6.7.7 / §60.4 — `<request>` id set. A `${<#id>.data}` / `if=<#id>.loading`
   // interpolation reads a REACTIVE `_scrml_request_<id>` object (deep-reactive
   // Proxy) but carries NO `@var` ref, so `extractReactiveDeps` returns empty and
@@ -1899,7 +1930,9 @@ export function generateHtml(
         const flatParts: string[] = [];
         for (const child of children) {
           if (child && child.kind === "css-inline" && isFlatDeclarationBlock(child)) {
-            const inline = renderFlatDeclarationAsInlineStyle(child);
+            // §65.3.2 / §65.4 (Task 2 [86]) — thread the theme context so a
+            // flat-inline `#{ color: @brand }` lowers `@brand` → var(--brand).
+            const inline = renderFlatDeclarationAsInlineStyle(child, flatInlineLowerCtx ?? undefined);
             if (inline) flatParts.push(inline);
           }
         }

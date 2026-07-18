@@ -1,0 +1,15 @@
+<program>
+  <mode> = .Light
+  <theme for=@mode>
+      ink = #0f172a;
+  </theme>
+  <theme for=@mode>
+      .Dark { ink = #f8fafc; }
+  </theme>
+  const Card = <div props={}>
+      #{ .card { color: @ink; } }
+      <div class="card">hi</div>
+  </>
+  <Card/>
+  <button onclick=(@mode = .Dark)>x</button>
+</program>

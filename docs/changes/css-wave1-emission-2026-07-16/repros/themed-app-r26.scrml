@@ -1,0 +1,28 @@
+<program>
+
+  <mode> = .Light
+
+  <theme for=@mode>
+      brand = #2563eb;
+      ink   = #0f172a;
+      bg    = #ffffff;
+      .Dark {
+          ink = #f8fafc;
+          bg  = #0f172a;
+      }
+  </theme>
+
+  #{ @import url("vendor.css"); a { color: @brand; } }
+
+  const Card = <div props={}>
+      #{
+          .card .title { color: @ink; }
+      }
+      #{ background: @bg; padding: 16px; }
+      <div class="card"><span class="title">hi</span></div>
+  </>
+
+  <Card/>
+  <button onclick=(@mode = .Dark)>toggle</button>
+
+</program>
