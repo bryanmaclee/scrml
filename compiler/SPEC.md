@@ -24013,6 +24013,8 @@ artifactOutputPath = join(outputDir, dirname(relative(outputBase, srcFile)), bas
 
 where `outputDir` is the user-specified `--output-dir` (or its default), and `suffix` is the per-artifact extension (e.g. `.html`, `.client.js`).
 
+**Content-addressed asset names on the build path (§47.9.8).** On the deploy path (`scrml build`), the per-page client bundle and per-page CSS suffixes carry an 8-char content hash before the extension — `.client.<hash>.js` and `.<hash>.css` — computed exactly as the shared runtime name is (§47.1.3 FNV-1a). The emitted HTML `<script src>` / `<link href>` references are rewritten to the hashed names. See §47.9.8 for the full contract. The dev/inspection path (`scrml compile`, `scrml dev`) keeps the un-hashed `.client.js` / `.css` suffixes shown throughout §47.9.5–§47.9.6.
+
 - If `dirname(relative(outputBase, srcFile))` is `"."` (i.e. the source file resides at the output base directory itself), the artifact is written directly into `outputDir` (flat output).
 - Otherwise, the artifact is written into `join(outputDir, relativeDir)`, with intermediate directories created as needed.
 
@@ -24072,6 +24074,8 @@ dist/driver/home.server.js
 
 No collision occurs. `customer/home.html` and `driver/home.html` are distinct dist paths.
 
+On the `scrml build` path (§47.9.8) the client-bundle and CSS names carry a content hash — e.g. `dist/customer/home.client.<hash>.js` and `dist/customer/home.<hash>.css` — and the emitted `home.html` references those hashed names; the `.html` / `.server.js` names are unchanged. `scrml compile` / `scrml dev` emit the un-hashed names exactly as shown above.
+
 **Leading `pages/` segment strip (S100, MPA shell composition, 2026-05-17).** When the dist-relative directory of a source file begins with `pages/` as a segment-aligned prefix (matching the v0.3 canonical MPA convention per §40.8.1 + §47.9.2 filesystem-inferred routes), the `pages/` segment is stripped from the dist directory so that route URLs and dist paths coincide. `pages/customer/home.scrml` produces `dist/customer/home.html` (NOT `dist/pages/customer/home.html`); the URL `/customer/home` then resolves to the dist path without an inverse-rewrite step in the dev server. The strip is segment-aligned — a file literally named `pages.scrml` keeps its dist name; only a leading `pages/` directory segment matches. Legacy `routes/` prefix is preserved (un-stripped) to avoid URL shifts for existing applications on that convention. Implementation: `pathFor` in `compiler/src/api.js`.
 
 #### 47.9.6 Worked example — single-file flat invocation
@@ -24090,7 +24094,7 @@ dist/home.client.js
 dist/home.server.js
 ```
 
-The legacy flat layout is preserved for single-file invocations.
+The legacy flat layout is preserved for single-file invocations. On the `scrml build` path (§47.9.8) the client bundle and CSS carry a content hash (`dist/home.client.<hash>.js`, `dist/home.<hash>.css`); `dist/home.html` is unchanged apart from its rewritten asset references.
 
 #### 47.9.7 Worked example — collision (E-CG-015)
 
@@ -24102,6 +24106,32 @@ E-CG-015: conflicting output paths — `proj/pages/a/home.scrml` and `proj/pages
 ```
 
 The first write succeeds; the second is refused.
+
+#### 47.9.8 Content-addressed asset names + cache-header contract (build path)
+
+**Added:** 2026-07-17 (adopter-#82). Resolves the stale-bundle-after-deploy report: the shared runtime was already content-hashed (`scrml-runtime.<hash>.js`, §47.1.3 / SPA tree-shake Phase B 3.3), but per-page client bundles (`<base>.client.js`) and per-page CSS (`<base>.css`) were emitted un-hashed and referenced un-hashed, and neither `scrml dev` nor the generated production server sent any cache headers — so after a redeploy a browser could silently run a cached stale bundle against a new server.
+
+**Naming.** On the `scrml build` path the compiler content-addresses the page bundle and CSS the same way the runtime is named — the FNV-1a 32-bit hash (§47.1.3; 8-char base36) of the artifact's final on-disk bytes is spliced in **before the final extension**, mirroring `scrml-runtime.js` → `scrml-runtime.<hash>.js`:
+
+| Artifact | Un-hashed (dev) | Content-addressed (build) |
+|---|---|---|
+| page bundle | `<base>.client.js` | `<base>.client.<hash>.js` |
+| page CSS | `<base>.css` | `<base>.<hash>.css` |
+| source-map sibling | `<base>.client.js.map` | `<base>.client.<hash>.js.map` |
+
+The hash SHALL cover the exact bytes written to disk (post `scrml:`-specifier rewrite for client bundles). The emitted HTML `<script src>` and `<link href>` references SHALL be rewritten to the hashed names; a dependency bundle referenced from multiple page HTMLs SHALL resolve to the **same** hashed name in every referrer (the hash is a property of the target artifact's bytes, never of the referrer). The `_scrml_modules` cross-file registry key (§21.3) is the logical dist-relative `.scrml`→`.client.js` id and is UNCHANGED — only the `<script src>` URL carries the hash. The shared-runtime name and per-route chunk names (§40.9.7, already content-addressed via `computeChunkHash`) are unaffected. `E-CG-015` (§47.9.3) is computed on the un-hashed `(dir, basename)` pair and is likewise unchanged.
+
+This behavior is gated: `scrml build` (the deploy path) enables it; `scrml compile` / `scrml dev` keep the un-hashed names so the dev/inspection output and the existing per-artifact-name test surface are byte-unchanged.
+
+**Cache-header contract.** Both serve paths — `scrml dev` and the generated production `_server.js` — SHALL attach cache headers to static responses:
+
+- A **content-addressed** asset → `Cache-Control: public, max-age=31536000, immutable`. Immutability SHALL be decided **precisely**, never by a filename-shape heuristic (a shape guess would wrongly freeze a dotted-but-unhashed asset such as `app.settings.js` — the exact silent-stale-asset failure this section exists to kill):
+  - The production `_server.js` decides by **exact membership** in the set of content-addressed artifacts the build produced (`compileScrml` returns `hashedAssets` — dist-relative POSIX paths of the runtime + per-route chunks + page bundles + CSS; `generateServerEntry` bakes it in as `_SCRML_IMMUTABLE`). A candidate is immutable iff its dist-relative path is in the set.
+  - `scrml dev` (which content-hashes ONLY the shared runtime and, opt-in, per-route chunks — never page bundles/CSS) decides by matching EXACTLY those two known forms (`scrml-runtime.<hash>.js`; `<seg>/<role>.<tier>.<hash>.js`, `tier ∈ {initial, tier1, tier2, tierN<n>}`).
+- The HTML entry document → `Cache-Control: no-cache` (always revalidate, so a redeploy is observed immediately).
+- Any other (non-immutable) static asset → `Cache-Control: no-cache` plus a **weak validator** — a weak `ETag` (`W/"<size>-<mtime>"`; size+mtime is not byte-identity, hence weak) and `Last-Modified`. A conditional request SHALL receive `304 Not Modified` when it validates; `If-None-Match`, when present, is authoritative (a mismatch means changed → `If-Modified-Since` SHALL NOT be consulted; per RFC 7232 §6). Both serve paths honor this identically.
+
+Implementation: `pathFor` + the content-hash pre-pass in `compiler/src/api.js` (naming + HTML rewrite + the `hashedAssets` set, gated on `contentHashAssets`); `devCacheHeaders` in `compiler/src/commands/dev.js` and `_scrml_cache_headers` + `_SCRML_IMMUTABLE` emitted into `_server.js` by `generateServerEntry` in `compiler/src/commands/build.js` (headers). The deploy adapters (fly / docker / railway / render) inherit the generated `_server.js`, so all targets are covered.
 
 ### 47.10 Relative Import Path Rewrites
 

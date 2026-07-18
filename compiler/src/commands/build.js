@@ -226,7 +226,7 @@ export function discoverServerRoutes(outputDir) {
  *   build's `--idle-timeout` flag is not set.
  * @returns {string}
  */
-export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout = 120) {
+export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout = 120, hashedAssets = []) {
   const lines = [];
 
   // Determine if any module exports _scrml_ws_handlers (WebSocket channels present)
@@ -237,7 +237,7 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
   lines.push("// DO NOT EDIT. Regenerate with: scrml build");
   lines.push("");
   lines.push('import { statSync } from "fs";');
-  lines.push('import { join } from "path";');
+  lines.push('import { join, relative } from "path";');
   // MCP V0 Sub-unit D — add scrml:mcp boot import when <program mcp> opted in.
   const mcpActivated = mcpOpts && mcpOpts.activated === true;
   const mcpMode = mcpActivated ? (mcpOpts.mode || "dev-only") : null;
@@ -349,6 +349,33 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
     lines.push("");
   }
 
+  // adopter-#82 — static-asset cache policy helpers.
+  //
+  // FIX 1 — immutability is decided by EXACT membership in the content-addressed
+  // artifact set the compiler produced (`_SCRML_IMMUTABLE`, dist-relative POSIX
+  // paths), NOT by a filename shape guess. A dotted-but-unhashed asset such as
+  // `app.settings.js` is therefore correctly revalidated, not frozen — the exact
+  // silent-stale-asset failure #82 exists to kill. Content-addressed assets
+  // (runtime `scrml-runtime.<hash>.js`, page bundles `<base>.client.<hash>.js`,
+  // CSS `<base>.<hash>.css`, per-route chunks) are `immutable`; the HTML entry is
+  // `no-cache`; every other static asset revalidates via a WEAK validator (ETag =
+  // size+mtime, `Last-Modified`) that a conditional request can 304 against.
+  lines.push("// adopter-#82 — static-asset cache-header policy (immutable by exact set membership)");
+  lines.push(`const _SCRML_IMMUTABLE = new Set(${JSON.stringify([...hashedAssets])});`);
+  lines.push("function _scrml_etag(st) {");
+  lines.push('  return \'W/"\' + st.size.toString(16) + "-" + Math.floor(st.mtimeMs).toString(16) + \'"\';');
+  lines.push("}");
+  lines.push("function _scrml_cache_headers(relPath, st) {");
+  lines.push("  if (_SCRML_IMMUTABLE.has(relPath)) {");
+  lines.push('    return { "Cache-Control": "public, max-age=31536000, immutable" };');
+  lines.push("  }");
+  lines.push('  if (relPath.endsWith(".html")) {');
+  lines.push('    return { "Cache-Control": "no-cache" };');
+  lines.push("  }");
+  lines.push('  return { "Cache-Control": "no-cache", "ETag": _scrml_etag(st), "Last-Modified": new Date(st.mtimeMs).toUTCString() };');
+  lines.push("}");
+  lines.push("");
+
   // Server
   lines.push("// Production server");
   lines.push('const PORT = parseInt(process.env.PORT ?? "3000", 10);');
@@ -393,8 +420,26 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
   lines.push("");
   lines.push("    for (const candidate of candidates) {");
   lines.push("      try {");
-  lines.push("        if (statSync(candidate).isFile()) {");
-  lines.push("          return new Response(Bun.file(candidate));");
+  lines.push("        const st = statSync(candidate);");
+  lines.push("        if (st.isFile()) {");
+  lines.push("          // adopter-#82 — cache policy: content-hashed artifacts (by exact");
+  lines.push("          // set membership) are immutable; the HTML entry is no-cache; other");
+  lines.push("          // static assets revalidate via ETag / Last-Modified → 304.");
+  lines.push('          const rel = relative(SERVE_DIR, candidate).split(/[\\\\/]/).join("/");');
+  lines.push("          const headers = _scrml_cache_headers(rel, st);");
+  lines.push('          const inm = req.headers.get("if-none-match");');
+  lines.push("          if (headers.ETag && inm) {");
+  lines.push("            // INM present ⇒ authoritative; a mismatch means CHANGED — do NOT");
+  lines.push("            // consult If-Modified-Since (RFC 7232 §6 precedence).");
+  lines.push("            if (inm === headers.ETag) return new Response(null, { status: 304, headers });");
+  lines.push("          } else if (headers.ETag) {");
+  lines.push('            const ims = req.headers.get("if-modified-since");');
+  lines.push("            const since = ims ? Date.parse(ims) : NaN;");
+  lines.push("            if (!Number.isNaN(since) && Math.floor(st.mtimeMs / 1000) * 1000 <= since) {");
+  lines.push("              return new Response(null, { status: 304, headers });");
+  lines.push("            }");
+  lines.push("          }");
+  lines.push("          return new Response(Bun.file(candidate), { headers });");
   lines.push("        }");
   lines.push("      } catch {}");
   lines.push("    }");
@@ -643,6 +688,11 @@ export async function runBuild(args) {
     verbose: opts.verbose,
     embedRuntime: opts.embedRuntime,
     write: true,
+    // adopter-#82 — the deploy path content-addresses page bundles + CSS
+    // (`<base>.client.<hash>.js` / `<base>.<hash>.css`) so a redeploy that
+    // changes bundle bytes changes the URL; the generated `_server.js` serves
+    // those hashed assets `immutable` and the HTML entry `no-cache`.
+    contentHashAssets: true,
     log: console.log,
     // S142 — `--validate-emit` / `--no-validate-emit`. undefined = compileScrml
     // default; the emitted-JS parse gate (E-CODEGEN-INVALID-LOGIC) is especially
@@ -706,7 +756,9 @@ export async function runBuild(args) {
   const mcpOpts = result.mcpAutoActivated
     ? { activated: true, mode: result.mcpMode || "dev-only" }
     : null;
-  const serverEntry = generateServerEntry(serverModules, mcpOpts, opts.idleTimeout);
+  // adopter-#82 FIX 1 — thread the exact content-addressed artifact set so the
+  // emitted server serves `immutable` by membership, not by filename shape.
+  const serverEntry = generateServerEntry(serverModules, mcpOpts, opts.idleTimeout, result.hashedAssets || []);
   const serverEntryPath = join(resolvedOutputDir, "_server.js");
   writeFileSync(serverEntryPath, serverEntry);
   if (mcpOpts) {

@@ -353,6 +353,40 @@ export function createSseResponse() {
   });
 }
 
+// adopter-#82 FIX 1 — `scrml dev` content-hashes ONLY the shared runtime
+// (`scrml-runtime.<hash>.js`) and, opt-in, per-route chunks
+// (`<seg>/<role>.<tier>.<hash>.js`, tier ∈ initial|tier1|tier2|tierN<n>); it
+// never hashes page bundles/CSS. So the dev immutable predicate matches EXACTLY
+// those two known forms — no generic `.<hash>.(js|css)` shape guess, which would
+// wrongly freeze a dotted-but-unhashed asset like `app.settings.js` (the exact
+// silent-stale-asset failure #82 exists to kill).
+const _SCRML_DEV_RUNTIME_RE = /(?:^|[\\/])scrml-runtime\.[0-9a-z]{8}\.js$/;
+const _SCRML_DEV_CHUNK_RE = /\.(?:initial|tier1|tier2|tierN\d+)\.[0-9a-z]{8}\.js$/;
+
+/**
+ * adopter-#82 — cache-header policy for `scrml dev` static responses.
+ *
+ * The shared runtime + per-route chunks are content-addressed → `immutable`.
+ * Every OTHER static asset revalidates via a WEAK validator (ETag = size+mtime,
+ * `Last-Modified`) so a conditional request can 304. The HTML entry is handled
+ * separately (always `no-cache`). Fixes the #82 report that `scrml dev` sent NO
+ * cache headers at all.
+ * @param {string} path
+ * @param {import("fs").Stats} st
+ * @returns {Record<string,string>}
+ */
+export function devCacheHeaders(path, st) {
+  if (_SCRML_DEV_RUNTIME_RE.test(path) || _SCRML_DEV_CHUNK_RE.test(path)) {
+    return { "Cache-Control": "public, max-age=31536000, immutable" };
+  }
+  const etag = 'W/"' + st.size.toString(16) + "-" + Math.floor(st.mtimeMs).toString(16) + '"';
+  return {
+    "Cache-Control": "no-cache",
+    "ETag": etag,
+    "Last-Modified": new Date(st.mtimeMs).toUTCString(),
+  };
+}
+
 /**
  * Send a "reload" SSE event to all connected clients.
  */
@@ -572,15 +606,32 @@ function buildServeConfig(opts, serveDir) {
         const file = Bun.file(candidate);
         // Bun.file() is lazy — check existence via statSync
         try {
-          if (statSync(candidate).isFile()) {
+          const st = statSync(candidate);
+          if (st.isFile()) {
             // Inject hot-reload script into HTML responses
             if (candidate.endsWith(".html")) {
               const html = await file.text();
               return new Response(injectHotReloadScript(html), {
-                headers: { "Content-Type": "text/html; charset=utf-8" },
+                headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
               });
             }
-            return new Response(file);
+            // adopter-#82 — attach cache headers to static assets + honor
+            // conditional requests. FIX 3 (RFC 7232 §6): If-None-Match, when
+            // present, is authoritative — a mismatch means CHANGED, so we do NOT
+            // fall through to If-Modified-Since (which could 304 a same-second
+            // stale edit). Evaluate IMS only when INM is absent.
+            const headers = devCacheHeaders(candidate, st);
+            const inm = req.headers.get("if-none-match");
+            if (headers.ETag && inm) {
+              if (inm === headers.ETag) return new Response(null, { status: 304, headers });
+            } else if (headers.ETag) {
+              const ims = req.headers.get("if-modified-since");
+              const since = ims ? Date.parse(ims) : NaN;
+              if (!Number.isNaN(since) && Math.floor(st.mtimeMs / 1000) * 1000 <= since) {
+                return new Response(null, { status: 304, headers });
+              }
+            }
+            return new Response(file, { headers });
           }
         } catch { /* not found */ }
       }
@@ -602,7 +653,7 @@ function buildServeConfig(opts, serveDir) {
               const file = Bun.file(entryCandidate);
               const html = await file.text();
               return new Response(injectHotReloadScript(html), {
-                headers: { "Content-Type": "text/html; charset=utf-8" },
+                headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
               });
             }
           } catch { /* entry not emitted yet — fall through to scan */ }
@@ -619,7 +670,7 @@ function buildServeConfig(opts, serveDir) {
             const file = Bun.file(fallbackPath);
             const html = await file.text();
             return new Response(injectHotReloadScript(html), {
-              headers: { "Content-Type": "text/html; charset=utf-8" },
+              headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
             });
           }
         } catch { /* no serve dir yet */ }
