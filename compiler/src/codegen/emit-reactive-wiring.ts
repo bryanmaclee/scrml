@@ -924,6 +924,21 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     }
   }
 
+  // Step 8: §20.8.3 link-boost (i27) — wire the delegated document-level click
+  // listener that intercepts internal <a href> clicks and runs them through the
+  // §20.8.2 soft-nav engine. Gated on this file being a <program> shell with an
+  // <outlet> (the SAME structural signal soft-nav itself keys on): an app with
+  // no swap region has nothing to soft-navigate, so the handler is not emitted
+  // (byte-identical to before for non-shell apps). The runtime function lives in
+  // the 'utilities' chunk (beside _scrml_navigate_soft); detectRuntimeChunks
+  // pulls that chunk in on the same fileHasOutlet gate. The listener is delegated
+  // on `document`, so it survives every <outlet> subtree swap without re-wiring.
+  if (fileHasOutlet(fileAST)) {
+    lines.push("");
+    lines.push("// --- §20.8.3 link-boost: delegated <a href> soft-nav click interception (i27) ---");
+    lines.push("_scrml_link_ensure_click();");
+  }
+
   return lines;
 }
 
@@ -983,7 +998,7 @@ function collectShellCellNames(fileAST: any): Set<string> {
  * the `_scrml_shell_cells` skip) is only applicable to a `<program>` shell with a
  * swap region, so `_scrml_shell_cells` is emitted only when an outlet is present.
  */
-function fileHasOutlet(fileAST: any): boolean {
+export function fileHasOutlet(fileAST: any): boolean {
   let found = false;
   function visit(nodeList: any[]): void {
     if (found || !Array.isArray(nodeList)) return;

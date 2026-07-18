@@ -12,7 +12,7 @@ import { rewriteCodeSegments } from "./code-segments.ts";
 import { scanClientEgress } from "./egress-field-scan.ts";
 import { emitFunctions } from "./emit-functions.ts";
 import { emitBindings } from "./emit-bindings.ts";
-import { emitReactiveWiring } from "./emit-reactive-wiring.ts";
+import { emitReactiveWiring, fileHasOutlet } from "./emit-reactive-wiring.ts";
 import { filterChannelImportSpecifiers } from "./emit-channel.ts";
 import { emitEventWiring } from "./emit-event-wiring.ts";
 import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile, emitEngineInitialArmsForFile, emitEngineCellHydrationInitsForFile, emitEngineServerSourceHydrationsForFile, emitEngineOpenerEffectsForFile, emitEngineBodyRenderForFile, emitDerivedEngineBodyRenderForFile } from "./emit-engine.ts";
@@ -548,6 +548,17 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
   // range; see `runtime-chunks.ts:CHUNK_MARKERS.prefetch`.
   if (ctx.hasPrefetchableLinks) {
     chunks.add("prefetch");
+  }
+
+  // §20.8.3 link-boost (i27) — a <program> shell with an <outlet> emits the
+  // delegated `_scrml_link_ensure_click()` boot call (emit-reactive-wiring
+  // Step 8), which references the click-handler + `_scrml_navigate_soft` engine
+  // in the 'utilities' chunk. Pull that chunk in on the SAME fileHasOutlet gate
+  // so link-boost ships even when the shell has no explicit `navigate()` call
+  // (the links themselves are the nav trigger — an outlet-only shell would
+  // otherwise ReferenceError on `_scrml_link_ensure_click`).
+  if (fileHasOutlet(fileAST)) {
+    chunks.add("utilities");
   }
 
   // Stdlib registry chunks (Bug 18 fix, S95) — light up `stdlib-<name>`
