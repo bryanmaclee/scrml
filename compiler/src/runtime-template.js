@@ -2547,6 +2547,98 @@ function _scrml_teardown_region(root) {
 }
 
 // ---------------------------------------------------------------------------
+// §20.8.3 — Link-boost: <a href> default soft-nav + the \`hard\` opt-out (i27).
+//
+// One delegated document-level click listener (wired ONCE per app that has a
+// <program>-shell <outlet>, via _scrml_link_ensure_click emitted at boot by
+// emit-reactive-wiring's fileHasOutlet gate) intercepts internal same-origin
+// cross-page <a> clicks and runs them through the §20.8.2 soft-nav engine
+// instead of a full document reload. It calls _scrml_navigate_soft(href); the
+// engine handles same-chunk-vs-cross-route + hard-falls-back on its own.
+//
+// Progressive enhancement (§20.8.5(6)): the <a href> stays a real link. EVERY
+// guard below falls through to a NATIVE navigation (no preventDefault), so
+// with JS off — and for external / new-tab / download / hash / modified-click
+// / hard-opt-out links — the browser's own behavior is preserved. Link
+// classification is RUNTIME same-origin (a.origin === location.origin), NOT the
+// compile-time data-scrml-prefetch marker: that marker is a strict subset (only
+// static hrefs resolving to a known RouteMap route carry it), so reusing it
+// would miss legitimate internal links (reactive hrefs, unresolved routes).
+// ---------------------------------------------------------------------------
+var _scrml_link_click_wired = false;
+
+// Wire the delegated click listener once (idempotent — the popstate-wiring
+// pattern's twin). Browser-only; a no-op without a document.
+function _scrml_link_ensure_click() {
+  if (_scrml_link_click_wired || typeof document === "undefined") return;
+  _scrml_link_click_wired = true;
+  document.addEventListener("click", _scrml_link_click_handler);
+}
+
+function _scrml_link_click_handler(e) {
+  // Already handled by another listener, or a modified / non-primary click →
+  // leave it to the browser (cmd/ctrl = new tab, shift = new window, alt =
+  // download, middle-click = new tab). A real 'click' fires with button 0;
+  // middle-click fires 'auxclick', but guard e.button defensively anyway.
+  if (e.defaultPrevented) return;
+  if (typeof e.button === "number" && e.button !== 0) return;
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+
+  // Nearest ancestor <a href> of the click target (handles a click on a child
+  // element inside the link, e.g. an icon <span>).
+  var t = e.target;
+  var a = (t && typeof t.closest === "function") ? t.closest("a[href]") : null;
+  if (!a) return;
+
+  // \`hard\` opt-out (§20.8.3) — the markup sibling of navigate(…, .Hard). The
+  // bare boolean attribute survives to the DOM, so read it directly. Opt-out is
+  // PRESENCE-based (HTML boolean-attribute semantics): ANY value opts out —
+  // \`hard\`, \`hard=""\`, and even \`hard="false"\` all hard-navigate. Use the
+  // attribute's ABSENCE (omit it) to keep a link boosted.
+  if (a.hasAttribute("hard")) return;
+
+  // target=_blank / any non-_self named target → native (new browsing context).
+  var target = a.getAttribute("target");
+  if (target && target !== "_self") return;
+
+  // download → native (the browser saves the resource; there is no navigation).
+  if (a.hasAttribute("download")) return;
+
+  // rel="external" / rel="noopener external" / … → author opt-out to native.
+  var rel = a.getAttribute("rel");
+  if (rel && (" " + rel.toLowerCase() + " ").indexOf(" external ") >= 0) return;
+
+  // Non-http(s) scheme (mailto:/tel:/…) → native. a.protocol is the resolved
+  // scheme of the fully-qualified href (via the URL-interface mixin on <a>);
+  // an SVGAElement / anchor without these props reads undefined → native.
+  var proto = a.protocol;
+  if (proto !== "http:" && proto !== "https:") return;
+
+  // Cross-origin → native full navigation. The router owns only same-app routes;
+  // classify at runtime by resolved origin (see the header note on why not the
+  // compile-time prefetch marker).
+  if (typeof window === "undefined" || !window.location) return;
+  if (a.origin !== window.location.origin) return;
+
+  // Pure hash link (#…) → native hash scroll (never a route change).
+  var rawHref = a.getAttribute("href");
+  if (rawHref != null && rawHref.charAt(0) === "#") return;
+  // Same-location target → native. Covers BOTH (a) a same-page #hash anchor
+  // (native scroll) AND (b) an exact self-link with no hash (S239 LOW: soft-nav
+  // would re-fetch + re-swap the outlet, wiping the current route's form / scroll
+  // / if= state for no navigation). Any resolved pathname+search equal to the
+  // current one is not a cross-page navigation, so let the browser handle it.
+  if (a.pathname === window.location.pathname &&
+      a.search === window.location.search) return;
+
+  // All guards passed — an internal same-origin cross-page link. Intercept and
+  // soft-navigate the resolved same-origin path (pathname+search+hash keeps the
+  // engine's #hash short-circuit working; a full URL would defeat it).
+  e.preventDefault();
+  _scrml_navigate_soft(a.pathname + a.search + a.hash);
+}
+
+// ---------------------------------------------------------------------------
 // §40.9.7 tier-1 idle prefetch runtime (chunk: 'prefetch')
 // ---------------------------------------------------------------------------
 //
