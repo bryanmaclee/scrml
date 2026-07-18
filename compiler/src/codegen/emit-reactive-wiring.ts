@@ -871,9 +871,15 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     lines.push("// --- CSS variable bridge (compiler-generated) ---");
 
     for (const bridge of cssBridges) {
-      const target = bridge.scoped
-        ? `_scrml_el`
-        : `document.documentElement`;
+      // A reactive CSS custom property is ALWAYS set on `document.documentElement`
+      // (`:root`). Components are compile-time INLINED — there is no per-instance
+      // runtime element, and every cell reaching this path is a global reactive
+      // cell. The custom property set on :root inherits into the component's inline
+      // `style="… var(--scrml-name)"` (§65.3.1 @scope bounds matching not
+      // inheritance; §25.5 custom-prop inheritance). A prior `bridge.scoped`
+      // ternary targeted an undefined `_scrml_el` stub for a per-instance runtime
+      // that does not exist → `ReferenceError: _scrml_el is not defined` on load.
+      const target = `document.documentElement`;
 
       if (bridge.isExpression) {
         const exprJs: string = bridge.expr.replace(

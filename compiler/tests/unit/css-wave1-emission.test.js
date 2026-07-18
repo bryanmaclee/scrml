@@ -718,3 +718,65 @@ describe("§65.6 — runtime theme-switch reflection (client half)", () => {
     expect(matches.length).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// TASK 5 — component-scoped reactive CSS var bridge targets document.documentElement
+// (§25.5 / §65.3.1 — NOT an undefined per-instance `_scrml_el`)
+// ---------------------------------------------------------------------------
+
+/**
+ * A component-scoped reactive CSS custom property — a `#{ prop: @cell }` (flat
+ * declaration) inside a `const Card = <div…>` where `@cell` is a reactive cell —
+ * must emit its §25 bridge against `document.documentElement` (:root). Components
+ * are compile-time INLINED: there is NO per-instance runtime element, and every
+ * cell reaching this path is a GLOBAL reactive cell. A prior `bridge.scoped`
+ * ternary targeted an undefined `_scrml_el` stub → `ReferenceError: _scrml_el is
+ * not defined` at bundle load, which halted the whole client. The :root custom
+ * property inherits into the component's inline `style="… var(--scrml-cell)"`.
+ */
+describe("§25.5 / §65.3.1 — component-scoped reactive CSS var bridge (no _scrml_el)", () => {
+  const CARD_ACCENT = `<program>
+  <accent> = "#f00"
+  const Card = <div props={}>
+      #{ color: @accent; }
+      <div>hi</div>
+  </>
+  <Card/>
+</program>`;
+
+  test("the bridge targets document.documentElement — NOT an undefined _scrml_el", () => {
+    const { client, errors } = compileClient(CARD_ACCENT);
+    expect(hasCode(errors, "E-THEME-TOKEN-UNKNOWN")).toBe(false);
+    // The setProperty (mount) + effect (subscription) both target :root.
+    expect(client).toContain(
+      `document.documentElement.style.setProperty("--scrml-accent", _scrml_reactive_get("accent"))`,
+    );
+    expect(client).toContain(
+      `_scrml_effect(() => document.documentElement.style.setProperty("--scrml-accent", _scrml_reactive_get("accent")))`,
+    );
+    // Regression guard: the undefined per-instance stub must NEVER appear.
+    expect(client).not.toContain("_scrml_el");
+  });
+
+  test("the component's inline style consumes the :root custom property (var(--scrml-accent))", () => {
+    const { html } = compileHtml(CARD_ACCENT);
+    // The :root property set by the bridge inherits into this inline style.
+    expect(html).toContain("var(--scrml-accent)");
+  });
+
+  test("a SELECTOR-form component-scoped reactive var ALSO targets document.documentElement (no _scrml_el)", () => {
+    // The same invariant holds when the component `#{}` uses a selector rule
+    // whose bridge IS collected (a program-level cell reached via the rule).
+    const { client } = compileClient(`<program>
+  <accent> = "#f00"
+  const Card = <div props={}>
+      #{ color: @accent; }
+      #{ padding: @accent; }
+      <div>hi</div>
+  </>
+  <Card/>
+</program>`);
+    expect(client).not.toContain("_scrml_el");
+    expect(client).toContain("document.documentElement.style.setProperty");
+  });
+});

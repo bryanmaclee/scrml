@@ -227,8 +227,13 @@ describe("CSS Variable Bridge", () => {
     expect(output.css).toContain("padding: var(--scrml-spacing) px;");
   });
 
-  // T8: Scoped @var in constructor targets element
-  test("T8: scoped @var in constructor targets element, not :root", () => {
+  // T8: A reactive CSS var ALWAYS targets document.documentElement (:root).
+  // Components are compile-time INLINED — there is no per-instance runtime
+  // element, so the reactive cell (always a GLOBAL cell) sets the custom
+  // property on :root, which inherits into the component's inline style.
+  // Regression guard for the `_scrml_el is not defined` load-time crash: a
+  // "scoped" `#{}` MUST NOT emit an undefined `_scrml_el` target.
+  test("T8: a reactive @var (scoped or not) targets document.documentElement, never _scrml_el", () => {
     const output = compileWithCss([
       makeMarkupNode("div", [], [makeTextNode("content")]),
       makeCssInlineWithRules([
@@ -239,10 +244,13 @@ describe("CSS Variable Bridge", () => {
       ]),
     ]);
 
-    // With scoped=false (default), targets document.documentElement
+    // Program-level (non-scoped): targets document.documentElement.
     expect(output.clientJs).toContain("document.documentElement.style.setProperty");
 
-    // Now test scoped
+    // A component/constructor-scoped block targets the SAME :root — NOT a
+    // per-instance `_scrml_el` (which is never defined → a ReferenceError at
+    // bundle load that halts the whole client). The custom property on :root
+    // inherits into the component's inline `style="… var(--scrml-brandColor)"`.
     const scopedNodes = [
       makeMarkupNode("div", [], [makeTextNode("content")]),
       {
@@ -252,14 +260,15 @@ describe("CSS Variable Bridge", () => {
             reactiveRefs: [{ name: "brandColor", expr: null }],
             isExpression: false },
         ],
-        _constructorScoped: true,
+        _componentScope: "Card",
         span: span(0),
       },
     ];
     const scopedOutput = compileWithCss(scopedNodes);
 
     expect(scopedOutput.clientJs).toBeTruthy();
-    expect(scopedOutput.clientJs).toContain("_scrml_el.style.setProperty");
+    expect(scopedOutput.clientJs).toContain("document.documentElement.style.setProperty");
+    expect(scopedOutput.clientJs).not.toContain("_scrml_el");
   });
 
   // T9: CSS without @var remains unchanged (regression guard)
