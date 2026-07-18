@@ -58,9 +58,9 @@ PROFILE-A read-set (FULL boot — design/deliberation/multi-arc/DD; the DEFAULT)
   0. flogence digest (STATE only):  bun --cwd=../flogence run digest scrml --fresh   (~1k tok; drill delta-log on demand)
        S262 FIX: the old `bun ../flogence/scripts/digest.ts` names a DELETED script (retired at flogence af1d40a,
        Track-A cutover → the scrml tool src/ports/digest-tool.scrml). `--cwd=` needs the `=` (the tool binds <db> to CWD).
-       ⚠ CURRENTLY BROKEN upstream (unensured §52 schema: no such table projects/project_vcs/fsp_task; reported to the
-       flogence inbox S262) → boot FALLS BACK to the delta-log tail, which the contract sanctions (digest = optimization,
-       never a dependency). Re-test after flogence lands the fix; drop this note when it renders.
+       ✅ VERIFIED WORKING (S265, 2026-07-18): the S262 hard-crash is fixed upstream (flogence 12fe035 + #6b integration
+       bb349f3); re-ran at S265 boot — exit 0, full STATE output. (Emits a few cosmetic W-LINT-007 on its own source; harmless.)
+       Still FALLS BACK to the delta-log tail if a future clone's flogence.db is unseeded (digest = optimization, never a dependency).
   0.5. active-sessions board (UNCONDITIONAL, both profiles): read ../scrml-support/handOffs/active-sessions/S*.md + claims.md;
        LIVE sibling => you are a SUCCESSOR (partition by write-footprint · dispatches CLAIMED-not-lost · defer only the WRAP);
        REGISTER your own S<N>.md even when SOLO (else a pre-wrap successor boots blind — the S243 miss). See CONCURRENT-SESSIONS below.

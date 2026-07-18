@@ -159,6 +159,13 @@ const ELEMENT_DEFS = [
       ["type",     attr("string")],
       ["referrerpolicy", attr("string")],
       ["ping",     attr("string")],
+      // SPEC §20.8.3 (Client Router link-boost, i27) — the boolean `hard`
+      // opt-out. An `<a href hard>` always HARD-navigates (native full reload),
+      // the markup sibling of `navigate(…, .Hard)`. Registered as a known
+      // boolean attribute so it is a first-class recognized `<a>` attribute (not
+      // an unknown-attr passthrough); the bare attribute survives to the DOM and
+      // the delegated link-boost click handler reads `a.hasAttribute("hard")`.
+      ["hard",     attr("boolean")],
     ],
   },
   {
