@@ -7536,11 +7536,12 @@ function checkLogicExprIdents(
     if (base === "session") {
       errors.push(new TSError(
         "E-SCOPE-012",
-        `E-SCOPE-012: \`session\` is not available in client-side functions. \`session\` ` +
-        `is reachable only from a server-escalated function — give the enclosing function a ` +
-        `server reason (a \`?{}\` query, a server-only stdlib import, or call it only from ` +
-        `server contexts so §12.2 inference classifies it server-side). For client-side ` +
-        `session display use the \`@session\` projection instead.`,
+        `E-SCOPE-012: \`session\` is available only inside a web-app server ROUTE-HANDLER ` +
+        `function body. It is not reachable from a client-side function, bare top-level ` +
+        `\`\${ }\` logic, or an \`<endpoint>\` arm. Give the enclosing function a server reason ` +
+        `(a \`?{}\` query, a server-only stdlib import, or call it only from server contexts so ` +
+        `§12.2 inference classifies it server-side). For client-side session display use the ` +
+        `\`@session\` projection instead.`,
         span,
       ));
       return;
