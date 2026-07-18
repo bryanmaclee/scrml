@@ -1934,6 +1934,14 @@ class-expr ::= 'class=' ( '(' js-expression ')' | '{' js-expression '}' )
   `E-ATTR-WRITER-CONFLICT` (§34) naming both sites; the wholesale write would otherwise
   silently erase the per-class writer's work on its next evaluation. A SOLE
   `class=(expression)` SHALL emit its reactive binding.
+  > Note (enforcement scope): `E-ATTR-WRITER-CONFLICT` is currently emitted from the
+  > STATIC-HTML emission context (the top-level element walk in `generateHtml`). The
+  > LOOP-context emitters — `<each>` (§20) and `for…lift` — build their elements through
+  > a separate imperative path that does not yet run the writer-ownership analysis, so a
+  > `class=(expression)` + `class:` mix ONE loop-nesting away compiles without the
+  > diagnostic today. Loop-context enforcement is a tracked follow-up (it must first
+  > reconcile with the `for…lift` one-shot / non-reactive quirk); the axiom above is the
+  > normative rule, and the loop gap is disclosed in `docs/known-gaps.md`.
 - This mirrors the other wholesale value writers, each the exclusive owner of its physical
   DOM surface: `style=(expression)` (the whole `style` attribute; conflicts with `if=`/
   `show=`/transitions), `value=(expression)` on a form control (the `.value` property;

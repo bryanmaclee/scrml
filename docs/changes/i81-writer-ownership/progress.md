@@ -124,3 +124,49 @@ Acorn sourceType:module):**
   error), names both sites, class= binding NOT emitted.
 
 DONE.
+
+## 2026-07-18 — S239 ADVERSARIAL GATE FIX ROUND (PA-held → resolved)
+
+The PA S239 gate found issues on the ① build. Addressed:
+
+**BLOCKER (finding 1) — component-root string-prop crash → FIXED, execute-verified.**
+`const Badge = <span title=(label) props={label:string}>` + `<Badge label="hi"/>` — the
+expander substitutes the STRING prop `label` into the root's own `title=(label)` as a BARE
+token, lowering to `((hi))` (a free identifier). At DOMContentLoaded it throws ReferenceError
+INSIDE the shared wiring handler, so every UNRELATED binding after it never wires → dead page.
+Slips the Acorn parse gate + R26 (`((hi))` is syntactically valid); only EXECUTION catches it.
+FIX: `loweredExprHasFreeIdentifier` (Acorn scope-walk of the lowered expression, gated to
+`_expandedFrom` roots) — a self-contained reactive lowering's free identifiers are all
+`_scrml_`-prefixed or JS globals; any OTHER free identifier is a substituted-prop token that
+crashes at runtime → drop it (`W-CG-VALUE-ATTR-COMPONENT-PROP`), restoring pre-#81 no-crash.
+Gated to component roots so a top-level server-fn-name value-attr (mangled post-emit) is never
+over-refused. EXECUTION PROOF (happy-dom mount + DOMContentLoaded,
+`compiler/tests/browser/browser-i81-component-root-crash.test.js`): repro does not crash the
+handler and the unrelated `data-n=(@count)` binding wires (data-n="0", reactive to "7").
+MUTATION-VERIFIED: with the fix reverted, `data-n` is null (dead-page symptom reproduced) — so
+the test is non-vacuous. (happy-dom's dispatchEvent SWALLOWS the listener throw, so the
+data-n-wiring assertion is the load-bearing proof, not `threw`.)
+
+**MUST-RESOLVE (loop-path spec over-claim) — RESOLVED by scoping the SPEC.**
+`analyzeWriterConflict` is called only from `generateHtml` (grep-verified: `emit-each.ts` has 0
+references), so a `class=(expr)`+`class:` mix inside `<each>`/`for…lift` compiles silently while
+§5.5.4's SHALL is unconditional. Added a §5.5.4 enforcement-scope Note (mirroring the §5.5.3
+template-lit Note) disclosing the static-HTML-context enforcement + loop-context as a tracked
+follow-up. Did NOT extend the analysis into the loop emitters (the `for…lift` one-shot quirk is a
+separate arc). Filed g-attr-writer-conflict-loop-context.
+
+**SHOULD-FIX (false comment) — FIXED.** `analyzeWriterConflict`'s doc claimed two wholesale owners
+"cannot co-occur — caught upstream." Empirically false: `<div class=(@a) class=(@b)>` emits two
+independent benign bindings. Comment corrected + filed g-attr-writer-conflict-duplicate-wholesale.
+
+**Tracked follow-ups filed (docs/known-gaps.md §S268):** loop-context enforcement · reactive
+bool-attr silent drop (checked/selected/open/… — witnessed by 23-trucking-dispatch
+assignment-picker `<option selected=(…)>`) · component-root class/style consumed by the expander
+(Finding-7 unmet for class/style) · template-lit owner enforcement · duplicate wholesale.
+Marked the original g-value-attr-dropped-outside-each RESOLVED.
+
+**Re-verify:** value-attr unit 54 pass · conformance 5 pass · browser 2 pass · full gate
+(unit+integration+conformance --bail) 20815 pass / 0 fail. PROBE 1 (7 sole-writers compile) +
+PROBE 2 (mix errors) still hold.
+
+DONE (fix round).
