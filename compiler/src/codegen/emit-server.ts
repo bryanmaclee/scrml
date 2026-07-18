@@ -1803,15 +1803,23 @@ export function generateServerJs(
       lines.push("    _changes: {},");
       lines.push("    _dirty: false,");
       lines.push("    _destroy: false,");
+      // S239-2 FIX A — sticky in-request "was destroyed" flag. `set()` clears the
+      // final-state `_destroy` (last-write-wins for the destroy-vs-establish
+      // verdict) but NOT `_reset` — so the commit knows a destroy happened and must
+      // NOT inherit ANY field of the destroyed principal (role-bleed defense).
+      lines.push("    _reset: false,");
       lines.push("    get userId() { return this._rec.userId ?? null; },");
       lines.push("    get role() { return this._rec.role ?? null; },");
       // S239 FIX 2 (unify) — same rule as the middleware: a record with a userId.
       lines.push("    get isAuth() { return this._rec.userId != null && !this._destroy; },");
       // S239 FIX 7 — `set` clears `_destroy` so a `destroy(); set()` sequence
-      // establishes (last write by call order wins); `destroy` clears `_dirty`.
+      // establishes (last write by call order wins).
       lines.push("    set(key, value) { this._rec[key] = value; this._changes[key] = value; this._dirty = true; this._destroy = false; },");
       lines.push("    get(key) { return this._rec[key] ?? null; },");
-      lines.push("    destroy() { this._destroy = true; this._dirty = false; },");
+      // S239-2 FIX A — a REAL in-request clear: wipe the working record AND the
+      // pending changes so a subsequent `set()` builds a CLEAN session inheriting
+      // none of the prior principal's fields. `_reset` stays sticky.
+      lines.push("    destroy() { this._destroy = true; this._dirty = false; this._rec = {}; this._changes = {}; this._reset = true; },");
       lines.push("  };");
       lines.push("}");
       lines.push("");
@@ -1822,19 +1830,34 @@ export function generateServerJs(
       lines.push("    return 'scrml_sid=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax' + _sec;");
       lines.push("  }");
       lines.push("  if (sess._dirty) {");
-      // S239 FIX 4 — MERGE onto the current stored record (preserve server-owned
-      // fields such as a mid-body-minted csrfToken), never blind-overwrite a stale
-      // begin-snapshot.
-      lines.push("    const _current = sess.sid ? (_scrml_session_store.get(sess.sid) || {}) : {};");
-      lines.push("    const _merged = { ..._current, ...sess._changes };");
-      // S239 FIX 1 — SESSION FIXATION: ALWAYS mint a FRESH sid on an
-      // identity-establishing write; never reuse/reflect the incoming
-      // (attacker-suppliable) `scrml_sid`. Delete the old record so a planted sid
-      // is not resurrectable.
-      lines.push("    const _newSid = crypto.randomUUID();");
-      lines.push("    _scrml_session_store.set(_newSid, _merged, _scrml_session_max_age);");
-      lines.push("    if (sess.sid && sess.sid !== _newSid) _scrml_session_store.delete(sess.sid);");
-      lines.push("    return `scrml_sid=${_newSid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${_scrml_session_max_age}` + _sec;");
+      // S239-2 FIX B — rotate the sid + delete the old record ONLY on an
+      // IDENTITY-establishing write (SPEC §20.5: rotate "on every identity-
+      // establishing write"). Identity = a `userId` in this request's changes, OR a
+      // `destroy()` happened this request (a re-established session). A same-identity
+      // preference-only `session.set` updates IN PLACE under the SAME sid, so a
+      // concurrent/in-flight request holding that sid is NOT silently logged out.
+      lines.push("    const _identityWrite = Object.prototype.hasOwnProperty.call(sess._changes, 'userId') || sess._reset;");
+      lines.push("    if (_identityWrite) {");
+      // S239 FIX 1 (fixation) + S239-2 FIX A (role-bleed): the new record is built
+      // from THIS request's `session.set` changes ALONE — NEVER merged with the old
+      // (or destroyed) principal's stored record, so a switch-user / re-login
+      // inherits none of the prior identity's fields (role especially). Fresh sid;
+      // the old record is deleted so a planted/leaked sid is not resurrectable.
+      lines.push("      const _newSid = crypto.randomUUID();");
+      lines.push("      _scrml_session_store.set(_newSid, { ...sess._changes }, _scrml_session_max_age);");
+      lines.push("      if (sess.sid && sess.sid !== _newSid) _scrml_session_store.delete(sess.sid);");
+      lines.push("      return `scrml_sid=${_newSid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${_scrml_session_max_age}` + _sec;");
+      lines.push("    }");
+      // Same-identity, preference-only update — in place under the SAME sid (mint
+      // only if there is no live record under the incoming sid; never write under an
+      // attacker-suppliable sid with no record). S239 FIX 4 — merge onto the current
+      // stored record so server-owned fields (a mid-body-minted csrf token) + the
+      // existing userId/role survive.
+      lines.push("    const _existing = sess.sid ? _scrml_session_store.get(sess.sid) : null;");
+      lines.push("    const _sid = _existing ? sess.sid : crypto.randomUUID();");
+      lines.push("    const _merged = { ...(_existing || {}), ...sess._changes };");
+      lines.push("    _scrml_session_store.set(_sid, _merged, _scrml_session_max_age);");
+      lines.push("    return `scrml_sid=${_sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${_scrml_session_max_age}` + _sec;");
       lines.push("  }");
       lines.push("  return null;");
       lines.push("}");
@@ -4601,7 +4624,16 @@ export function generateServerJs(
   // — has no session context and would 500/ReferenceError at runtime, so it is a
   // build-blocking E-SESSION-CONTEXT. Scans the `lines` array (pre-assembly, so the
   // indices match the recorded ranges; the later prepends carry no session refs).
-  {
+  //
+  // S239-2 FIX C (soundness) — gated on `_anySessionBuiltin`: an app that never
+  // uses the `session` builtin cannot have a real session-context violation, so a
+  // session-free fn that merely RETURNS the literal string
+  // `"_scrml_req._scrml_sess.userId"` no longer false-fires. A residual (LOW,
+  // fail-safe) false-positive remains only if an app that DOES use `session`
+  // elsewhere also embeds that exact internal-identifier literal in a string/comment
+  // — a near-impossible contrivance; it would over-block (never ship a hole). A
+  // fully-sound fix (recording lowering sites, not string-scanning) is a follow-up.
+  if (_anySessionBuiltin) {
     const _inAllowed = (idx: number) =>
       _allowedSessionRanges.some((r) => idx >= r.start && idx < r.end);
     let _sessionCtxFired = false;

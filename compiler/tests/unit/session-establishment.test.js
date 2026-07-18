@@ -123,19 +123,17 @@ describe("§20.5 session.set — lowering + write infra", () => {
     expect((wrap.match(/headers\.append\('Set-Cookie'/g) || []).length).toBe(1);
   });
 
-  test("U3b session fixation — commit mints a FRESH sid and deletes the incoming one", () => {
+  test("U3b session fixation — an identity commit mints a FRESH sid and deletes the incoming one", () => {
     const res = compile(LOGIN);
     const commit = res.serverJs.slice(
       res.serverJs.indexOf("function _scrml_session_commit(sess, secure)"),
       res.serverJs.indexOf("function _scrml_session_cookie_wrap"),
     );
-    // ALWAYS a fresh uuid on a dirty commit; NEVER reuse `sess.sid`.
+    // an identity write mints a fresh uuid; NEVER reuse the incoming `sess.sid`.
     expect(commit).toContain("const _newSid = crypto.randomUUID();");
     expect(commit).not.toContain("sess.sid || crypto.randomUUID()");
     // the old (incoming) record is deleted so a planted sid is not resurrectable.
     expect(commit).toContain("if (sess.sid && sess.sid !== _newSid) _scrml_session_store.delete(sess.sid)");
-    // FIX 4 — merge onto the current stored record (preserve server-owned fields).
-    expect(commit).toContain("const _merged = { ..._current, ...sess._changes };");
   });
 
   test("U4b isAuth requires a real record WITH a userId (no cookie-only bypass)", () => {
@@ -301,5 +299,42 @@ describe("§20.5 session — read/write store unification", () => {
     expect(mw).toContain("_scrml_session_store.get(sessionId)");
     const begin = res.serverJs.slice(res.serverJs.indexOf("function _scrml_session_begin(req)"));
     expect(begin).toContain("_scrml_session_store.get(sid)");
+  });
+});
+
+describe("§20.5 session — S239-2 destroy-clear + identity-vs-preference commit", () => {
+  const commitOf = (res) =>
+    res.serverJs.slice(
+      res.serverJs.indexOf("function _scrml_session_commit(sess, secure)"),
+      res.serverJs.indexOf("function _scrml_session_cookie_wrap"),
+    );
+
+  test("A1 destroy() performs a REAL clear (wipes _rec + _changes, sets sticky _reset)", () => {
+    const res = compile(LOGIN);
+    expect(res.serverJs).toContain(
+      "destroy() { this._destroy = true; this._dirty = false; this._rec = {}; this._changes = {}; this._reset = true; }",
+    );
+  });
+
+  test("A2 an identity-establishing commit builds the record from changes ALONE (no old-record merge)", () => {
+    const commit = commitOf(compile(LOGIN));
+    // identity write = userId in changes OR a destroy happened (_reset)
+    expect(commit).toContain("Object.prototype.hasOwnProperty.call(sess._changes, 'userId') || sess._reset");
+    // the rotated record is `{ ...sess._changes }` — NOT merged with the prior/destroyed principal
+    expect(commit).toContain("_scrml_session_store.set(_newSid, { ...sess._changes }, _scrml_session_max_age)");
+    expect(commit).toContain("if (sess.sid && sess.sid !== _newSid) _scrml_session_store.delete(sess.sid)");
+  });
+
+  test("B1 a preference-only (non-identity) commit updates IN PLACE under the same sid (no rotation/delete)", () => {
+    const commit = commitOf(compile(LOGIN));
+    // reuse the incoming sid only when a live record exists (never write under a
+    // recordless attacker-suppliable sid); merge preserves userId/role/csrf.
+    expect(commit).toContain("const _existing = sess.sid ? _scrml_session_store.get(sess.sid) : null;");
+    expect(commit).toContain("const _sid = _existing ? sess.sid : crypto.randomUUID();");
+    expect(commit).toContain("const _merged = { ...(_existing || {}), ...sess._changes };");
+    expect(commit).toContain("_scrml_session_store.set(_sid, _merged, _scrml_session_max_age)");
+    // the preference path returns the SAME sid — it must NOT delete the old record
+    const prefPath = commit.slice(commit.indexOf("const _existing ="));
+    expect(prefPath).not.toContain("_scrml_session_store.delete");
   });
 });

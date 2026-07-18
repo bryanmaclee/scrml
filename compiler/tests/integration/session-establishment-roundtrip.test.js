@@ -43,7 +43,22 @@ const APP = `<program>
       return "bad"
     }
     server function whoami() {
-      return { userId: session.userId, role: session.role, isAuth: session.isAuth }
+      return { userId: session.userId, role: session.role, isAuth: session.isAuth, pref: session.get("pref"), pref2: session.get("pref2") }
+    }
+    server function switchUser(newId) {
+      session.destroy()
+      session.set("userId", newId)
+      return "switched"
+    }
+    server function setPref(v) {
+      session.set("pref", v)
+      return "pref-set"
+    }
+    server function leakSeq() {
+      session.set("pref", "a")
+      session.destroy()
+      session.set("pref2", "b")
+      return "seq"
     }
     server function logout() {
       session.destroy()
@@ -54,6 +69,9 @@ const APP = `<program>
     <button onclick=login("a","b")>Login</button>
     <button onclick=whoami()>Who</button>
     <button onclick=logout()>Logout</button>
+    <button onclick=switchUser("x")>Sw</button>
+    <button onclick=setPref("x")>P</button>
+    <button onclick=leakSeq()>Q</button>
   </main>
 </program>`;
 
@@ -191,6 +209,73 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
       const after = rAfter instanceof Response ? await rAfter.json() : rAfter;
       expect(after.isAuth).toBe(false);
       expect(after.userId).toBe(null);
+    } finally {
+      try { rmSync(dir, { recursive: true }); } catch { /* best effort */ }
+    }
+  });
+
+  // S239-2 FIX A (role bleed) + FIX B (identity-vs-preference rotation).
+  test("destroy;set drops the prior role; preference-set keeps the sid + old session authed", async () => {
+    if (typeof globalThis.document !== "undefined") return;
+
+    const { dir, outDir, errors } = compileApp();
+    try {
+      expect(errors).toEqual([]);
+      const serverJsPath = join(outDir, "app.server.js");
+      const mod = await import(`file://${serverJsPath}?v=${Date.now()}-${Math.random()}`);
+      const routes = mod.routes || Object.values(mod).filter((v) => v && v.path && v.handler);
+      const routeFor = (frag) => routes.find((r) => r.path.includes(frag));
+      const loginR = routeFor("login"), whoR = routeFor("whoami"),
+        switchR = routeFor("switchUser"), prefR = routeFor("setPref"), leakR = routeFor("leakSeq");
+
+      const post = (route, headers, body) =>
+        route.handler(new Request(`http://localhost${route.path}`, {
+          method: "POST", headers, body: JSON.stringify(body ?? {}),
+        }));
+      const r0 = await post(loginR, { "Content-Type": "application/json" }, {});
+      const csrf = cookieVal(r0, "scrml_csrf").value;
+      const base = { "Content-Type": "application/json", Cookie: `scrml_csrf=${csrf}`, "X-CSRF-Token": csrf };
+      const withSid = (sid) => ({ ...base, Cookie: `scrml_csrf=${csrf}; scrml_sid=${sid}` });
+      const jsonOf = async (r) => (r instanceof Response ? await r.json() : r);
+
+      // login as admin (role=admin)
+      const sidAdmin = cookieVal(await post(loginR, base, { email: "admin@x.com", password: "secret" }), "scrml_sid").value;
+      const admin = await jsonOf(await post(whoR, withSid(sidAdmin), {}));
+      expect(admin.userId).toBe("u-42");
+      expect(admin.role).toBe("admin");
+
+      // --- FIX A: switchUser (destroy(); set("userId","u-lowpriv")) → NO role bleed ---
+      const rSwitch = await post(switchR, withSid(sidAdmin), { newId: "u-lowpriv" });
+      const sidLow = cookieVal(rSwitch, "scrml_sid").value;
+      expect(sidLow).not.toBe(sidAdmin); // rotated
+      const low = await jsonOf(await post(whoR, withSid(sidLow), {}));
+      expect(low.userId).toBe("u-lowpriv");
+      expect(low.role).toBe(null);        // <-- admin role did NOT bleed through
+      expect(low.role).not.toBe("admin");
+      // old admin sid is gone (deleted on the identity rotation)
+      const goneAdmin = await jsonOf(await post(whoR, withSid(sidAdmin), {}));
+      expect(goneAdmin.isAuth).toBe(false);
+
+      // --- FIX A: set("a"); destroy(); set("b") → only b, no leak of a or prior role ---
+      const sidAdmin2 = cookieVal(await post(loginR, base, { email: "admin@x.com", password: "secret" }), "scrml_sid").value;
+      const rLeak = await post(leakR, withSid(sidAdmin2), {});
+      const sidLeak = cookieVal(rLeak, "scrml_sid").value;
+      const leaked = await jsonOf(await post(whoR, withSid(sidLeak), {}));
+      expect(leaked.pref2).toBe("b");
+      expect(leaked.pref).toBe(null);     // "a" was cleared by destroy
+      expect(leaked.userId).toBe(null);   // no prior identity
+      expect(leaked.role).toBe(null);     // no prior role
+
+      // --- FIX B: preference-only set → SAME sid (no rotation), old sid stays authed ---
+      const sidPref = cookieVal(await post(loginR, base, { email: "admin@x.com", password: "secret" }), "scrml_sid").value;
+      const rPref = await post(prefR, withSid(sidPref), { v: "dark" });
+      const prefSid = cookieVal(rPref, "scrml_sid").value;
+      expect(prefSid).toBe(sidPref);      // <-- NOT rotated (concurrent-safe)
+      const stillAuthed = await jsonOf(await post(whoR, withSid(sidPref), {}));
+      expect(stillAuthed.isAuth).toBe(true);   // old sid still valid
+      expect(stillAuthed.userId).toBe("u-42");
+      expect(stillAuthed.role).toBe("admin");  // preference update preserved identity
+      expect(stillAuthed.pref).toBe("dark");
     } finally {
       try { rmSync(dir, { recursive: true }); } catch { /* best effort */ }
     }

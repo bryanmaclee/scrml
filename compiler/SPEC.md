@@ -14619,7 +14619,21 @@ handler and call `session.set` there.
 
 **Security invariant (S239 FIX 5).** `session.set("userId", …)` MINTS an
 authenticated session and performs NO credential check itself — adopters SHALL
-call it ONLY after verifying credentials.
+call it ONLY after verifying credentials. The `userId` SHOULD be a NON-EMPTY,
+non-zero identity: `isAuth` is true whenever `userId != null` (so an integer id
+`0` stays authed), but an empty-string / `0` userId reads `isAuth:true` while a
+downstream truthy check (`if (session.userId) …`) is falsy — a mismatch that is an
+adopter error, not a framework guarantee (S239-2 FIX D).
+
+**Identity vs. preference writes (S239-2 FIX B).** A write that sets `userId` (or a
+`session.set` following a `session.destroy()` in the same request) is
+IDENTITY-establishing: the compiler rotates the session id to a fresh value, builds
+the record from THIS request's changes alone (inheriting no field of the prior or
+destroyed principal — role-bleed defense), and deletes the old record. A write that
+does NOT touch `userId` (a preference-only `session.set`) updates the existing
+record IN PLACE under the same id — no rotation, no delete — so a concurrent/in-flight
+request holding that id is not silently logged out. `session.destroy()` performs a
+real clear: after it, the session carries zero prior fields.
 
 **Session cookie (S239 FIXes 1/3/5).** The compiler-owned `scrml_sid` cookie is
 `HttpOnly`, `SameSite=Lax` (uniform across the establishment cookie, the

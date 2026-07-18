@@ -395,6 +395,10 @@ export function generateToolJs(
   // `_scrml_req._scrml_sess.*` by emit-expr) has no wrapper and would crash at
   // runtime. Fire a build-blocking E-SESSION-CONTEXT rather than ship the broken
   // ref (mirrors the generateServerJs post-emission scan for the web-app path).
+  // S239-2 FIX C (residual, LOW): this is a string-scan, so a tool that merely
+  // embeds the literal `_scrml_req._scrml_sess.` in a user string/comment would
+  // over-block (fail-safe — never ships a hole). A near-impossible contrivance for
+  // an internal-identifier literal; a fully-sound site-recording fix is a follow-up.
   if (errors && body.includes("_scrml_req._scrml_sess.")) {
     errors.push(new CGError(
       "E-SESSION-CONTEXT",
