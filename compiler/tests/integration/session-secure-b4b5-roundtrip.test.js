@@ -96,7 +96,7 @@ describe("B5 runtime guard — a dynamic session.set(csrfToken) cannot pin the t
     // Attacker attempts to PIN csrfToken to a value they know, using the valid
     // real token to pass the gate. The runtime guard must no-op the write.
     const rPin = await call(
-      { "Content-Type": "application/json", Cookie: `scrml_sid=${SID}`, "X-CSRF-Token": REAL },
+      { "Content-Type": "application/json", Cookie: `__Host-scrml_sid=${SID}`, "X-CSRF-Token": REAL },
       { k: "csrfToken", v: "attacker-known-token" },
     );
     // the mutation itself is admitted (valid session + valid token) and returns.
@@ -109,13 +109,13 @@ describe("B5 runtime guard — a dynamic session.set(csrfToken) cannot pin the t
     // integrity: a mutating request bearing the ATTACKER's chosen token is 403'd
     // (the real token was never replaced), while the real token still passes.
     const rAttacker = await call(
-      { "Content-Type": "application/json", Cookie: `scrml_sid=${SID}`, "X-CSRF-Token": "attacker-known-token" },
+      { "Content-Type": "application/json", Cookie: `__Host-scrml_sid=${SID}`, "X-CSRF-Token": "attacker-known-token" },
       { k: "x", v: "y" },
     );
     expect(statusOf(rAttacker)).toBe(403);
 
     const rReal = await call(
-      { "Content-Type": "application/json", Cookie: `scrml_sid=${SID}`, "X-CSRF-Token": REAL },
+      { "Content-Type": "application/json", Cookie: `__Host-scrml_sid=${SID}`, "X-CSRF-Token": REAL },
       { k: "x", v: "y" },
     );
     expect(rReal instanceof Response ? await rReal.json() : rReal).toBe("pinned");
@@ -181,5 +181,82 @@ describe("B4a opt-out — a session-secure=\"false\" app authenticates over http
     const who = rWho instanceof Response ? await rWho.json() : rWho;
     expect(who.isAuth).toBe(true);
     expect(who.userId).toBe("u-9");
+
+    // opt-out mode reads the plain name ONLY — a `__Host-scrml_sid` cookie is
+    // irrelevant here (never set, never read) → anon.
+    const rHost = await post(whoR, { ...authed, Cookie: `scrml_csrf=${csrf}; __Host-scrml_sid=${sid}` }, {});
+    const host = rHost instanceof Response ? await rHost.json() : rHost;
+    expect(host.isAuth).toBe(false);
+  });
+});
+
+describe("B4a fixation — secure mode reads ONLY __Host-scrml_sid (cookie-tossing defense)", () => {
+  // A no-auth session app (secure mode is the default). The server sets
+  // `__Host-scrml_sid`; the reader must accept ONLY that name. A plain `scrml_sid`
+  // (which a sibling subdomain CAN set — no `__Host-` protection) must resolve
+  // ANON, or a fresh visitor could be force-authenticated into a tossed session.
+  const APP = `<program>
+  \${
+    server function login(email, password) {
+      if (email == "admin@x.com" && password == "secret") {
+        session.set("userId", "u-secure")
+        return "ok"
+      }
+      return "bad"
+    }
+    server function whoami() {
+      return { userId: session.userId, isAuth: session.isAuth }
+    }
+  }
+  <button onclick=login("a","b")>L</button>
+  <button onclick=whoami()>W</button>
+</program>`;
+
+  test("a plain scrml_sid=<real authed sid> resolves ANON; __Host-scrml_sid authenticates", async () => {
+    if (typeof globalThis.document !== "undefined") return; // native Request only
+
+    const { serverJsPath, errors } = compile(APP, "b4a-fixation");
+    expect(nonWarn(errors)).toEqual([]);
+
+    const mod = await import(`file://${serverJsPath}?v=${Date.now()}-${Math.random()}`);
+    const routes = mod.routes || Object.values(mod).filter((v) => v && v.path && v.handler);
+    const routeFor = (frag) => routes.find((r) => r.path.includes(frag));
+    const loginR = routeFor("login");
+    const whoR = routeFor("whoami");
+
+    const post = (route, headers, body) =>
+      route.handler(new Request(`http://localhost${route.path}`, {
+        method: "POST", headers, body: JSON.stringify(body ?? {}),
+      }));
+    const cookieVal = (resp, name) => {
+      const all = typeof resp.headers.getSetCookie === "function"
+        ? resp.headers.getSetCookie() : [resp.headers.get("Set-Cookie") ?? ""];
+      for (const c of all) { const m = c.match(new RegExp(`${name}=([^;]*)`)); if (m) return m[1]; }
+      return null;
+    };
+    const r0 = await post(loginR, { "Content-Type": "application/json" }, { email: "admin@x.com", password: "secret" });
+    const csrf = cookieVal(r0, "scrml_csrf");
+    const authed = { "Content-Type": "application/json", Cookie: `scrml_csrf=${csrf}`, "X-CSRF-Token": csrf };
+    const rLogin = await post(loginR, authed, { email: "admin@x.com", password: "secret" });
+    // the server set the __Host- cookie (extracted by substring on the raw header).
+    const sid = cookieVal(rLogin, "scrml_sid"); // matches __Host-scrml_sid=<sid> substring
+
+    // whoami is a CSRF-gated POST → send the valid double-submit token; only the
+    // SESSION cookie name varies between the two probes below.
+    const whoWith = async (sessionCookie) => {
+      const r = await post(whoR, { "Content-Type": "application/json", Cookie: `scrml_csrf=${csrf}; ${sessionCookie}`, "X-CSRF-Token": csrf }, {});
+      return r instanceof Response ? await r.json() : r;
+    };
+
+    // THE FIXATION DEFENSE: a plain scrml_sid=<real authed sid> (subdomain-tossable)
+    // must NOT authenticate — the reader is mode-gated to __Host-scrml_sid.
+    const plain = await whoWith(`scrml_sid=${sid}`);
+    expect(plain.isAuth).toBe(false);
+    expect(plain.userId).toBe(null);
+
+    // the canonical __Host-scrml_sid cookie authenticates.
+    const host = await whoWith(`__Host-scrml_sid=${sid}`);
+    expect(host.isAuth).toBe(true);
+    expect(host.userId).toBe("u-secure");
   });
 });

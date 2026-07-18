@@ -14663,12 +14663,18 @@ over `http://localhost` (localhost is a secure context), so dev is unaffected.
 on `<page>`) opts out of the hardening for a conscious TLS-less deployment (e.g. a
 bare-http Pi mesh): the cookie is the plain `scrml_sid` with `Secure` gated on the
 request (on for https / non-local, omitted for `http://localhost`). The default is
-`session-secure="true"` (`__Host-` + always-Secure). The READ side accepts EITHER
-name (both boundary-anchored, `__Host-` first) regardless of mode, so flipping the
-attribute or a mid-rollout client holding the other name resolves cleanly. When the
-default (secure) mode runs over bare http on a NON-local host — where the browser
-will silently reject the `Secure` cookie and login appears to fail — the server logs
-a one-time runtime warning naming the fix (front with TLS, or `session-secure="false"`).
+`session-secure="true"` (`__Host-` + always-Secure). The READ side is MODE-GATED: it
+accepts ONLY the mode's own cookie name (secure mode reads `__Host-scrml_sid` ONLY;
+opt-out reads `scrml_sid` ONLY), each boundary-anchored. Reading the OTHER name would
+be a security hole — a sibling subdomain CAN set a plain `scrml_sid` (a `__Host-`
+cookie it cannot), so a secure-mode reader that ALSO accepted `scrml_sid` would let a
+subdomain-tossed cookie force-authenticate a fresh visitor into an attacker's session
+(the exact cookie-tossing / fixation vector `__Host-` closes). A `session-secure=`
+flip renames (and thus invalidates) the cookie anyway, so cross-name read tolerance
+buys nothing. When the default (secure) mode runs over bare http on a NON-local host —
+where the browser will silently reject the `Secure` cookie and login appears to fail —
+the server logs a one-time runtime warning naming the fix (front with TLS, or
+`session-secure="false"`).
 
 On every identity-establishing write the compiler ROTATES the session id to a fresh
 `crypto.randomUUID()` and deletes the incoming record — the incoming

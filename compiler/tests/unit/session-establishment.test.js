@@ -9,7 +9,8 @@
  *   U3  the durable SQLite store is emitted (bun:sqlite Database, .scrml-sessions.db);
  *       the in-memory `new Map()` store is NOT used
  *   U4  the commit emits the establishment cookie
- *       `Set-Cookie: scrml_sid=…; HttpOnly; SameSite=Lax; Max-Age=<expiry>`
+ *       `Set-Cookie: __Host-scrml_sid=…; HttpOnly; SameSite=Lax; Max-Age=<expiry>; Secure`
+ *       (B4a secure-mode default; plain `scrml_sid` under `session-secure="false"`)
  *   U5  multiple `session.set` calls coalesce to ONE store write + ONE cookie
  *   U6  `session.destroy()` lowers + commit deletes the record + clears the cookie
  *   U7  `session.userId` / `.role` / `.isAuth` reads lower to the per-request ctx

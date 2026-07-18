@@ -1764,17 +1764,19 @@ export function generateServerJs(
     lines.push("  } catch { return true; }");
     lines.push("}");
     lines.push("");
-    // §20.5.1 (S266, i29e B4a) — resolve the session id from EITHER cookie name.
-    // The secure-mode cookie is `__Host-scrml_sid`; the opt-out cookie is plain
-    // `scrml_sid`. Reading BOTH (each boundary-anchored, `__Host-` first) means a
-    // deploy that flips `session-secure=` — or a client that still holds the other
-    // name mid-rollout — resolves cleanly, at no cost. The anchoring is the B1
-    // session-fixation defense (a prefixed / value-embedded `…scrml_sid=` cannot
-    // masquerade as the real cookie name).
+    // §20.5.1 (S266, i29e B4a) — resolve the session id from the MODE-APPROPRIATE
+    // cookie name ONLY (compile-time known via `_secureCookieMode`). Reading the
+    // OTHER name is a security hole, NOT a convenience: in secure mode the server
+    // sets `__Host-scrml_sid` (a sibling subdomain cannot set a `__Host-` cookie),
+    // but ALSO accepting a plain `scrml_sid` would let a subdomain-tossed
+    // `scrml_sid=<attacker's authed sid>` force-authenticate a fresh visitor (no
+    // `__Host-` cookie yet) into the ATTACKER's session — the exact cookie-tossing /
+    // fixation vector `__Host-` exists to close. A `session-secure=` flip is a
+    // deliberate config change that renames (and thus invalidates) the cookie
+    // anyway, so cross-name read tolerance buys nothing. Boundary-anchored (B1
+    // fixation defense: a prefixed / value-embedded `…<name>=` cannot masquerade).
     lines.push("function _scrml_read_session_id(cookieHeader) {");
-    lines.push("  return cookieHeader.match(/(?:^|;\\s*)__Host-scrml_sid=([^;]+)/)?.[1]");
-    lines.push("      || cookieHeader.match(/(?:^|;\\s*)scrml_sid=([^;]+)/)?.[1]");
-    lines.push("      || null;");
+    lines.push(`  return cookieHeader.match(/(?:^|;\\s*)${_sessionCookieName}=([^;]+)/)?.[1] || null;`);
     lines.push("}");
     lines.push("");
     if (_secureCookieMode) {

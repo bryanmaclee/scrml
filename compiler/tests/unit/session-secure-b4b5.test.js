@@ -85,16 +85,19 @@ describe("B4a — __Host-scrml_sid + always-Secure is the default (secure mode)"
     expect(res.serverJs).not.toContain("`scrml_sid=${_newSid}");
   });
 
-  test("the read side resolves EITHER cookie name, both boundary-anchored", () => {
+  test("the read side reads ONLY __Host-scrml_sid (mode-gated fixation defense)", () => {
     const res = compile(SESSION_APP);
     expect(res.serverJs).toContain("function _scrml_read_session_id(cookieHeader)");
-    // __Host- first, then plain, both anchored (B1 fixation defense preserved).
-    expect(res.serverJs).toContain("cookieHeader.match(/(?:^|;\\s*)__Host-scrml_sid=([^;]+)/)?.[1]");
-    expect(res.serverJs).toContain("cookieHeader.match(/(?:^|;\\s*)scrml_sid=([^;]+)/)?.[1]");
-    // every read site routes through the shared reader (no inline unanchored parse).
+    // secure mode reads the __Host- name ONLY, boundary-anchored.
+    expect(res.serverJs).toContain("cookieHeader.match(/(?:^|;\\s*)__Host-scrml_sid=([^;]+)/)?.[1] || null;");
+    // it does NOT ALSO accept a plain `scrml_sid` — a sibling subdomain can set a
+    // plain cookie (no `__Host-` protection), so reading it would re-open the
+    // cookie-tossing / fixation vector. No plain scrml_sid read survives.
+    expect(res.serverJs).not.toMatch(/match\(\/\(\?:\^\|;\\s\*\)scrml_sid=\(\[\^;\]\+\)\//);
+    expect(res.serverJs).not.toMatch(/match\(\/scrml_sid=\(\[\^;\]\+\)\//);
+    // every read site routes through the shared reader.
     expect(res.serverJs).toContain("const sessionId = _scrml_read_session_id(cookieHeader);");
     expect(res.serverJs).toContain("const sid = _scrml_read_session_id(cookieHeader);");
-    expect(res.serverJs).not.toMatch(/match\(\/scrml_sid=\(\[\^;\]\+\)\//);
   });
 });
 
@@ -111,9 +114,11 @@ describe("B4b — session-secure=\"false\" opts out (plain scrml_sid, dev-gated 
     expect(res.serverJs).not.toContain("'__Host-scrml_sid=;");
     // the bare-http warn helper is secure-mode-only — absent on the opt-out path.
     expect(res.serverJs).not.toContain("_scrml_warn_insecure_cookie");
-    // the read side STILL resolves both names (mode-independent).
+    // the read side is mode-gated to the plain name ONLY — the __Host- name is
+    // never read here (it is set/read only in secure mode).
     expect(res.serverJs).toContain("function _scrml_read_session_id(cookieHeader)");
-    expect(res.serverJs).toContain("cookieHeader.match(/(?:^|;\\s*)__Host-scrml_sid=([^;]+)/)?.[1]");
+    expect(res.serverJs).toContain("cookieHeader.match(/(?:^|;\\s*)scrml_sid=([^;]+)/)?.[1] || null;");
+    expect(res.serverJs).not.toContain("__Host-scrml_sid=([^;]+)");
   });
 
   test("session-secure=\"false\" on <page> threads the same opt-out", () => {
