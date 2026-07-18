@@ -1,6 +1,6 @@
 # structure.map.md
 # project: scrml
-# updated: 2026-07-17T14:48:56-06:00  commit: 0a79d838
+# updated: 2026-07-18T00:13:05-06:00  commit: bf316828
 
 ## Entry Points
 compiler/bin/scrml.js — CLI shim; resolves to compiler/src/cli.js.
@@ -12,7 +12,7 @@ docs/build.ts — static-site generator for the docs website (`bun run docs:buil
 ## Directory Ownership
 
 compiler/src/  — the compiler core: block-splitter, tokenizer, ast-builder, type-system, symbol-table, route-inference, name-resolver, html-elements (the HTML/SVG element-shape registry + the S264 `isKnownElementName` E-MARKUP-001 union), and ~20 top-level analysis modules (67 files at this level; see dependencies.map.md for the module graph). New at this level since the S255 watermark: semdiff.ts (§#6b P0 semantic-diff / behavioral classifier, S264) and path-canonical.js (cross-OS posix-key path model, S256-S263).
-compiler/src/codegen/  — code emission: one emit-*.ts per output concern (html, css, client, server, each, match, engine, ssr, channel, worker, tool...) plus shared collect/rewrite/reactive-deps/errors infra (74 files). emit-server.ts + emit-tool.ts gained the §44.7 E-SQL-004 `?{}`-without-`db=` fail-closed gate (S264).
+compiler/src/codegen/  — code emission: one emit-*.ts per output concern (html, css, client, server, each, match, engine, ssr, channel, worker, tool...) plus shared collect/rewrite/reactive-deps/errors infra (75 files). NEW this window (S265, PR #95): emit-theme-reset.ts — the §65 CSS Wave-1 EMISSION half (`<theme>` `@`-sigil token lowering / built-in `@layer reset` / `:where()`-flat specificity wrapping), delegated to by emit-css.ts's `generateCss` and firing E-THEME-TOKEN-UNKNOWN; the §25 reactive-CSS-var bridge in emit-reactive-wiring.ts now always targets `document.documentElement` (PR #98). emit-server.ts + emit-tool.ts gained the §44.7 E-SQL-004 `?{}`-without-`db=` fail-closed gate (S264).
 compiler/src/commands/  — the 10 CLI subcommands (build, compile, dev, generate, init, introspect, migrate, promote, semdiff, serve). `semdiff.js` (S264) is the `scrml semdiff <base> <head>` I/O shell over the pure classifier in ../semdiff.ts.
 compiler/src/types/  — shared TS type declarations: ast.ts (the FileAST/ASTNode catalog), auth-graph.ts, reachability.ts.
 compiler/src/validators/  — standalone AST-walk validators (attribute allowlist/interpolation, async-user-source lint, try-catch lint, post-CE invariant checks) — 6 files.

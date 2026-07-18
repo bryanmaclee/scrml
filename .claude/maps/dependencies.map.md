@@ -1,6 +1,6 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-07-14T18:58:34-06:00  commit: f079d0a9
+# updated: 2026-07-18T00:13:05-06:00  commit: bf316828
 
 ## Runtime Dependencies — root package.json (v0.7.1)
 @modelcontextprotocol/sdk@1.29.0 — MCP server SDK for the scrml MCP integration
@@ -44,7 +44,7 @@ bun>=1.3.13 — required; no Node support (Bun-specific APIs used throughout: Bu
 | Type check | type-system.ts, meta-checker.ts | dependency-graph.ts, auth-graph.ts |
 | Reachability / batch | reachability-solver.ts, batch-planner.ts, cps-batch-planner.ts | codegen |
 | Name/symbol resolve | name-resolver.ts, symbol-table.ts | codegen |
-| Codegen dispatch | code-generator.js (= codegen/index.ts) | codegen/emit-*.ts (client, server, html, css, each, match, engine, ssr, channel, worker, functions, validators, library, table-for, form-for, tool, test) |
+| Codegen dispatch | code-generator.js (= codegen/index.ts) | codegen/emit-*.ts (client, server, html, css, each, match, engine, ssr, channel, worker, functions, validators, library, table-for, form-for, tool, test, theme-reset) |
 | Tool serve-harness | tool-program.ts, codegen/emit-tool.ts, codegen/emit-server.ts | §64.9 `serve=` listener-owning headless target (Fork 1A, Unit 1+2, landed this window) |
 | CSS conflict check | codegen/css-conflict-check.ts | run post-CE at api.js Stage 3.4 over `collectCssBlocks`; emits E-STYLE-CONFLICT / W-STYLE-CONFLICT-POSSIBLE |
 | Validate emit | codegen/validate-emit.ts | final artifact sanity (single-JS-expression checks etc.) |
@@ -63,6 +63,7 @@ bun>=1.3.13 — required; no Node support (Bun-specific APIs used throughout: Bu
 | engine-statechild-grammar.ts | pure constants shared by type-system.ts + codegen (no cycle) |
 | channel-watches.ts | shared §38.13 `watches=` schema/RowChange derivation, consumed by symbol-table.ts (SYM validation) + type-system.ts (typer synthesis) |
 | theme-body-parser.ts | §65 `<theme>`/`<defaults>` body-form parser |
+| codegen/emit-theme-reset.ts | §65 CSS Wave-1 EMISSION (NEW S265) — `<theme>` `@`-sigil token lowering (§25.7) + built-in `@layer reset` (§65.3.4) + `:where()`-flat specificity wrapping (§65.2.5); delegated to by codegen/emit-css.ts's `generateCss`, fires E-THEME-TOKEN-UNKNOWN |
 | module-resolver.js | resolves `scrml:*` stdlib imports + relative imports; STDLIB_ROOT via `fileURLToPath` |
 
 ## Defense-in-depth: stdlib async classification (api.js STDLIB-EXPORT-SEED)

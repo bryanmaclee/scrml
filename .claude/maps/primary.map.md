@@ -1,6 +1,7 @@
 # primary.map.md
 # project: scrml
-# updated: 2026-07-17T14:48:56-06:00  commit: 0a79d838
+# updated: 2026-07-18T00:13:05-06:00  commit: bf316828
+# S265: CSS Wave-1 §65 LANDED (emit-theme-reset.ts = the NEW theme/reset/token-lowering emitter; the §25 reactive-CSS-var bridge in emit-reactive-wiring.ts now always targets document.documentElement). Structural routing otherwise unchanged (content-only codegen edits; no file moves) — stamp-only refresh.
 # For per-session history, see docs/changelog.md (NOT this file — maps are current-truth navigation, not an archive).
 
 ## Project Fingerprint
@@ -14,12 +15,14 @@ Monorepo:   yes — `workspaces: ["compiler"]`; compiler/ is the sole npm worksp
 CI:         GitHub Actions — `.github/workflows/ci.yml` (gate/tracking/windows) + `advisory-review.yml` (advisory AI /code-review).
 
 ## Watermark note
-This is an INCREMENTAL_UPDATE stamped to the S264 HEAD (0a79d838). The PRIOR watermark was f079d0a9
-(S255) — NOT S263. This pass mapped only the four S264 compiler-source PRs (semdiff #6b, E-SQL-004,
-E-SQL-003, E-MARKUP-001) + recomputed the diagnostic count and file counts to true-current. The latent
-S256-S263 source delta (§12.4 E-ROUTE-002/E-ROUTE-005 in route-inference.ts, cross-OS path-canonical.js,
-block-splitter/type-system churn, the §34 catalog cleanup) is reflected in the counts but was NOT
-individually re-mapped — a full or NON_COMPLIANCE_ONLY refresh is advisable at the next wrap.
+This is an INCREMENTAL_UPDATE stamped to the S265 HEAD (bf316828, branch wrap/s265). The prior watermark
+was S264 (0a79d838). This pass mapped only the S265 codegen delta — §65 CSS Wave-1 EMISSION (the NEW
+codegen/emit-theme-reset.ts + emit-css/emit-html/emit-client/collect wiring, PR #95, which mints+fires
+E-THEME-TOKEN-UNKNOWN) and the §25 reactive-CSS-var bridge fix (emit-reactive-wiring.ts now always targets
+`document.documentElement`, PR #98), plus Peter's concurrent #96/#97 (api.js / commands build+dev /
+emit-html / conformance normalize — content edits, no structural change). The latent S256-S263 source delta
+noted at the prior watermark remains only count-reflected, not individually re-mapped — a full or
+NON_COMPLIANCE_ONLY refresh is still advisable at a future wrap.
 
 ## Map Index
 
@@ -30,7 +33,7 @@ individually re-mapped — a full or NON_COMPLIANCE_ONLY refresh is advisable at
 | schema.map.md        | present | ~114 AST types/interfaces in types/ast.ts, grouped by concern |
 | config.map.md        | present | 6 env vars, 3 config files (no .env.example in repo) |
 | build.map.md         | present | 13 npm scripts, 10 CLI subcommands + flags (semdiff NEW S264), 2 CI workflows + git-hooks |
-| error.map.md         | present | 775 diagnostic codes (641 Error / 127 Warning / 7 Info); S264 wired E-SQL-003/E-SQL-004/E-MARKUP-001 to firing |
+| error.map.md         | present | 776 diagnostic codes (642 Error / 127 Warning / 7 Info); S264 wired E-SQL-003/E-SQL-004/E-MARKUP-001, S265 minted+fired E-THEME-TOKEN-UNKNOWN (§65 CSS Wave-1) |
 | test.map.md          | present | bun:test, 1194+ test files across 9 categories |
 | domain.map.md        | present | scrml language primitives (§1-§65+ SPEC navigation), business invariants |
 | auth.map.md          | present | scrml:auth/scrml:oauth stdlib + §14.8.9 protect-floor + CSRF + §64.9 headless carve-out |
@@ -61,6 +64,7 @@ non-compliant / stale docs                  -> non-compliance.report.md
 - Entry point: `compiler/bin/scrml.js` -> `compiler/src/cli.js` dispatches to `commands/*.js` (10 subcommands, `semdiff` added S264); the actual pipeline is `compileScrml()` in `compiler/src/api.js` (block-split -> AST-build -> type-check -> codegen, ~35 imported pipeline-stage modules).
 - NEW S264 surface: `scrml semdiff <base> <head> [--json]` — the #6b P0 semantic-diff primitive. `compiler/src/semdiff.ts` (pure, unit-tested) classifies a base-vs-head change by AXIS (opaque/source/use-site/context) + soundness TIER (0 proven-cosmetic / 2 behavioral), never a boolean "safe"; opaque regions (foreign `_{}`, unresolved import, dynamic dispatch) are forced Tier-2. Exit 0=cosmetic · 1=behavioral · 2=failed-to-compile (fail-closed). Consumers: giti MERGE, flogence REVIEW. Design DD in scrml-support/docs/deep-dives/.
 - S264 also moved three NAMED diagnostics to FIRING (no new catalog rows): E-MARKUP-001 (§4.1, name-resolver.ts gate + the new `isKnownElementName` HTML∪SVG∪MathML∪custom union in html-elements.js), E-SQL-003 (§8.1.1, ast-builder.js runtime-expr `?{}` body), E-SQL-004 (§44.7, emit-server.ts/emit-tool.ts `?{}`-without-`db=` fail-closed gate). ast-builder.js gained two exports — `STRUCTURAL_ELEMENT_PLACEMENT` + `RESERVED_CSS_ELEMENT_IDENTIFIERS` — that name-resolver DERIVES its `SCRML_NON_ELEMENT_TAGS` exclusion from.
+- NEW S265 surface: §65 CSS Wave-1 EMISSION landed (was Nominal/spec-ahead). The NEW `compiler/src/codegen/emit-theme-reset.ts` owns three emission concerns emit-css.ts's `generateCss` delegates to — `<theme>` `@`-sigil token lowering (§65.3.2/§25.7: a `#{}` value `@ink`→`var(--ink)`; a bare identifier stays literal CSS, so a token can never shadow a keyword), the built-in `@layer reset` (§65.3.4, opt out `<program reset="none">`), and `:where()`-flat specificity wrapping of unconditional base selectors (§65.2.5) — and mints+fires E-THEME-TOKEN-UNKNOWN (the §34 catalog's only +1 this window). Separately (§25, PR #98) a reactive `#{}` CSS custom property now ALWAYS bridges onto `document.documentElement` (emit-reactive-wiring.ts). The conflict-CHECKER (§65.2, css-conflict-check.ts) is unchanged.
 - The compiler ships TWO parsers side by side: the live pipeline (block-splitter.js + ast-builder.js) and a from-scratch native parser (compiler/native-parser/, 37 paired .js/.scrml files, activated via `--parser=scrml-native`) that also feeds `lsp/handlers.js`'s semantic-tokens provider directly.
 - SPEC.md (~35k lines, §1-§65+) is the sole normative source; PIPELINE.md documents the stage-by-stage internals. Any doc contradicting SPEC.md is non-compliant per pa.md Rule 4.
 - Server/client execution boundary is fully INFERRED from usage (no author annotation); a fail-closed acorn-exact scan (E-CG-001, codegen/egress-field-scan.ts) backstops the §14.8.9 protect-floor against protected-column leaks to the client bundle. §12.4 E-ROUTE-002/E-ROUTE-005 (route-inference.ts, S263) close two client/server boundary soundness holes.
