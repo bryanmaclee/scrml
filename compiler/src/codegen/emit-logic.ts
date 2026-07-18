@@ -4418,7 +4418,7 @@ export function emitLogicBody(nodes: any[], opts: EmitLogicOpts = {}): string[] 
   // is a no-op for statement-shape / non-Promise nodes, so a nested `if`/`for`
   // wrapper passes through untouched while its own body is descended separately.
   const _injectAwait =
-    opts.awaitNestedPromises && opts.asyncRouteMap && opts.asyncFilePath
+    opts.awaitNestedPromises && opts.asyncRouteMap
       ? (node: any, code: string): string => {
           if (!code) return code;
           try {
@@ -4427,7 +4427,7 @@ export function emitLogicBody(nodes: any[], opts: EmitLogicOpts = {}): string[] 
               code,
               node,
               opts.asyncRouteMap,
-              opts.asyncFilePath,
+              opts.asyncFilePath ?? "",
               opts.asyncCalleeMap ?? null,
               opts.asyncExportRegistry ?? null,
             );

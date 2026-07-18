@@ -369,10 +369,17 @@ function detectHistoryFormFromString(rhs: string): { isHistoryForm: boolean; str
 function _asyncAwaitBodyOpts(opts: any): {
   asyncRouteMap?: any; asyncCalleeMap?: any; asyncExportRegistry?: any; asyncFilePath?: any; awaitNestedPromises?: boolean;
 } {
-  if (!opts || !opts.asyncRouteMap || !opts.asyncFilePath) return {};
+  // Gate on `asyncRouteMap` ALONE. asyncFilePath / asyncCalleeMap /
+  // asyncExportRegistry are CLASSIFIER INPUTS (stdlib-Promise resolution), NOT
+  // preconditions for nested-await: server-fn detection (isServerCallExpr)
+  // needs only routeMap. Gating on asyncFilePath made nested-await entry-point-
+  // dependent — a caller that threads routeMap but leaves filePath falsy (empty
+  // string) would silently suppress the await. asyncFilePath flows through as a
+  // pure passthrough (defaulted to "" so isPromiseReturningCallExpr is happy).
+  if (!opts || !opts.asyncRouteMap) return {};
   return {
     asyncRouteMap: opts.asyncRouteMap,
-    asyncFilePath: opts.asyncFilePath,
+    asyncFilePath: opts.asyncFilePath ?? "",
     asyncCalleeMap: opts.asyncCalleeMap ?? null,
     asyncExportRegistry: opts.asyncExportRegistry ?? null,
     awaitNestedPromises: true,
