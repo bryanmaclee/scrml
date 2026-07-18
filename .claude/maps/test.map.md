@@ -1,6 +1,6 @@
 # test.map.md
 # project: scrml
-# updated: 2026-07-18T03:27:22-06:00  commit: c779e606
+# updated: 2026-07-18T08:36:53-06:00  commit: 99ae45ca
 
 ## Test Framework
 Runner: `bun:test` (Bun's built-in test runner, no separate package dep)

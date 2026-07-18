@@ -1,6 +1,6 @@
 # build.map.md
 # project: scrml
-# updated: 2026-07-18T03:27:22-06:00  commit: c779e606
+# updated: 2026-07-18T08:36:53-06:00  commit: 99ae45ca
 
 ## Development Commands (root package.json scripts)
 compile — `bun run compiler/src/cli.js compile`
@@ -104,7 +104,7 @@ Triggers: `pull_request` (opened/synchronize/ready_for_review/reopened), paths-f
 Runs `anthropics/claude-code-action@v1` with the packaged `/code-review` skill against the PR diff (`claude-sonnet-4-6`, max 15 turns). Needs the `ANTHROPIC_API_KEY` repo secret — unset today, so a run currently errors at the auth step (harmless; not a required check). Public-repo caveat: fork PRs from external contributors get no secrets, so this only runs on same-repo branches (bryan + Peter).
 
 ## Pending / not-yet-merged CI (informational — NOT current truth at HEAD)
-`.github/workflows/cloud-maps.yml` exists on branch `feat/cloud-maps-beachhead` but is NOT merged into `main` as of this HEAD (c779e606) — a scheduled + dispatch nav-map regen workflow (mints a scrml-maps-bot App token, runs `bun scripts/state.ts --write` + this project-mapper agent, opens an auto-merge `maps/regen-*` PR). Needs the `scrml-maps-bot` GitHub App + `MAPS_APP_ID`/`MAPS_APP_PRIVATE_KEY` secrets before it can go green. Not reflected in the CI section above because it is not part of the checked-out tree. (Status re-verify on a full refresh — this note is carried from the S255 watermark.)
+`.github/workflows/cloud-maps.yml` exists on branch `feat/cloud-maps-beachhead` but is NOT merged into `main` as of this HEAD (99ae45ca) — a scheduled + dispatch nav-map regen workflow (mints a scrml-maps-bot App token, runs `bun scripts/state.ts --write` + this project-mapper agent, opens an auto-merge `maps/regen-*` PR). Needs the `scrml-maps-bot` GitHub App + `MAPS_APP_ID`/`MAPS_APP_PRIVATE_KEY` secrets before it can go green. Not reflected in the CI section above because it is not part of the checked-out tree. (Status re-verify on a full refresh — this note is carried from the S255 watermark.)
 
 ## Git Hooks (source-controlled, `.git/hooks/pre-commit` + `pre-push`; install via `scripts/git-hooks/install.sh`)
 pre-commit — runs `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail` (~2min, excludes browser/e2e/self-host); warns (non-blocking) on direct commits to `main`.

@@ -1,6 +1,6 @@
 # structure.map.md
 # project: scrml
-# updated: 2026-07-18T03:27:22-06:00  commit: c779e606
+# updated: 2026-07-18T08:36:53-06:00  commit: 99ae45ca
 
 ## Entry Points
 compiler/bin/scrml.js — CLI shim; resolves to compiler/src/cli.js.
