@@ -54,3 +54,7 @@ docs/articles/index.html
 .scratch-p42/
 scratch/
 docs/graph/
+
+# §20.5 (i29e) durable session store (created at app runtime CWD)
+.scrml-sessions.db
+.scrml-sessions.db-*

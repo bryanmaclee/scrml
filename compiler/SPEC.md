@@ -14533,10 +14533,19 @@ server-escalated function bodies.
 
 ```
 session.userId      // string | not — authenticated user ID, not if not logged in
-session.isAuth      // boolean �� true if the user is authenticated
+session.isAuth      // boolean — true if the user is authenticated
+session.role        // string | not — the authenticated user's role, not if unset
 session.get(key)    // any — retrieve a custom session value by key
-session.set(key, v) // void — store a custom session value
+session.set(key, v) // void — store a custom session value (see §20.5.1)
+session.destroy()   // void — end the session (delete the record + clear the cookie)
 ```
+
+> **Implementation note (S265, i29e — FIX 10):** the field TYPES above are the
+> intended contract. The current build binds `session` into server scope as `asIs`
+> (no per-member type refinement), so `session.userId` / `session.isAuth` /
+> `session.role` are `asIs` at the type level today (the developer must narrow
+> before use, and `session.isAuth.foo` does not yet type-error). Binding the typed
+> record shape is a spec-ahead follow-up.
 
 **Normative statements:**
 
@@ -14551,10 +14560,116 @@ session.set(key, v) // void — store a custom session value
 - `session.get(key)` and `session.set(key, v)` are built-in methods for arbitrary
   session storage. `get` returns `asIs`; the developer must narrow the type before
   use.
+- `session.destroy()` SHALL end the current session (delete the server-side record
+  and clear the session cookie). It is the imperative sibling of the client
+  `@session`-projection logout path.
 - The compiler SHALL generate the session infrastructure (session middleware,
   cookie management, server-side session store) automatically. The developer SHALL
   NOT write session middleware in scrml source.
+- `session` is a request-scoped ACCESSOR, not a first-class value. In a
+  server-escalated body it SHALL appear ONLY as the object of a member access
+  (`session.userId` / `session.role` / `session.isAuth`), an index access
+  (`session["userId"]` — the bracket spelling of `.get`), or a method call
+  (`session.get(k)` / `session.set(k, v)` / `session.destroy()`). Any OTHER use — a
+  bare `session` returned, assigned, passed as an argument, or read as a value —
+  SHALL be a compile error (E-SESSION-VALUE). This holds for BOTH the `.dot` and the
+  `["…"]` / `?.` / `?.[…]` optional forms (the compiler-owned `_scrml_req._scrml_sess`
+  receiver is always defined server-side, so a receiver-`?.` on `session` is moot
+  and lowers identically to the non-optional form). Restores the invariant that no
+  bare `session` identifier ever reaches emitted JS: it is EITHER a valid
+  member/index/call (correctly lowered) OR a clean compile error. **(LIVE, S266
+  i29e.)**
 - A top-level `let session = ...` declaration SHALL be a compile error (E-SCOPE-010).
+  **(Spec-ahead, S265 — FIX 11: not fired. A `let session = …` binds cleanly today
+  and shadows the builtin silently, mirroring the reserved-`route` binding, which is
+  also unenforced. The compiler's `declaredNames` shadow-guard prevents mis-lowering
+  when a user local `session` exists, but the reserved-name diagnostic is not yet
+  wired. E-SCOPE-010 currently fires only for a DUPLICATE file-scope `let`/`const`.)**
+
+#### 20.5.1 Session establishment (`session.set` / `session.destroy`) — the write half
+
+**Built S265 (i29e).** Prior to S265 the compiler generated only the session READ
+apparatus (S233: the `scrml_sid` cookie → session store → middleware →
+`@currentUser` / the `auth=` guards); the establishment (WRITE) API named here was
+reserved-but-unbuilt. S265 activates it. When a server-escalated function calls
+`session.set(...)` or `session.destroy()`, the compiler SHALL, for that
+request/response:
+
+1. **Ensure a session id** — reuse the incoming `scrml_sid` if the request carried
+   one, else mint a fresh `crypto.randomUUID()`.
+2. **Write the session record** — on `session.set` the compiler updates the
+   server-side record `{userId, role, …}` keyed by the session id in the durable
+   store (below); on `session.destroy` it deletes the record. Multiple `session.set`
+   calls within one function invocation SHALL coalesce to a SINGLE record write.
+3. **Attach the session cookie** — the compiler-owned Response SHALL carry, at the
+   return seam, a single `Set-Cookie: scrml_sid=<sid>; Path=/; HttpOnly;
+   SameSite=Lax; Max-Age=<sessionExpiry>` (or, on `session.destroy`, the
+   expiry-in-the-past clear form). This is a compiler-owned response effect,
+   co-emitted alongside the `scrml_csrf` cookie — the developer SHALL NOT set
+   session cookies from scrml source (an `HttpOnly` cookie is unreachable from
+   client `document.cookie` by construction). Multiple `session.set` calls SHALL
+   produce ONE cookie.
+
+**Durable store (RULED durable).** The server-side session store SHALL be durable
+(SQLite-backed KV, namespace `session`, JSON values, `expires_at` TTL), so a session
+established on one request is visible to `@currentUser` / `session.userId` on the
+next AND survives a process restart. The READ middleware and the WRITE path SHALL
+consult the SAME durable store (a login that mints a cookie the middleware cannot
+resolve is a defect). The default store location is `.scrml-sessions.db` beside the
+runtime working directory; a `session-store=` attribute to relocate or select the
+backend is a FUTURE extension (out of scope for S265) — as is a login-page
+`sessionExpiry=` (a login page carries no `auth=`, so the 1h default governs there).
+
+**Context gate (E-SESSION-CONTEXT).** The `session` builtin is available ONLY
+inside a web-app **server route handler** — the request/response context the
+compiler wraps with the session cookie. Using `session.*` in an SSE
+`server function*`, an `<endpoint>` arm, a `<machine>` method, a serverLoad cell,
+an in-process server-fn helper called by another server function, or a headless
+`kind="tool"` program (bearer auth) SHALL be a compile error (E-SESSION-CONTEXT):
+those contexts have no session cookie context. A login helper called in-process is
+the ordinary extract-a-helper refactor — return the value to the request-entry
+handler and call `session.set` there.
+
+**Security invariant (S239 FIX 5).** `session.set("userId", …)` MINTS an
+authenticated session and performs NO credential check itself — adopters SHALL
+call it ONLY after verifying credentials. The `userId` SHOULD be a NON-EMPTY,
+non-zero identity: `isAuth` is true whenever `userId != null` (so an integer id
+`0` stays authed), but an empty-string / `0` userId reads `isAuth:true` while a
+downstream truthy check (`if (session.userId) …`) is falsy — a mismatch that is an
+adopter error, not a framework guarantee (S239-2 FIX D).
+
+**Identity vs. preference writes (S239-2 FIX B).** A write that sets `userId` (or a
+`session.set` following a `session.destroy()` in the same request) is
+IDENTITY-establishing: the compiler rotates the session id to a fresh value, builds
+the record from THIS request's changes alone (inheriting no field of the prior or
+destroyed principal — role-bleed defense), and deletes the old record. A write that
+does NOT touch `userId` (a preference-only `session.set`) updates the existing
+record IN PLACE under the same id — no rotation, no delete — so a concurrent/in-flight
+request holding that id is not silently logged out. `session.destroy()` performs a
+real clear: after it, the session carries zero prior fields.
+
+**Session cookie (S239 FIXes 1/3/5).** The compiler-owned `scrml_sid` cookie is
+`HttpOnly`, `SameSite=Lax` (uniform across the establishment cookie, the
+`session.destroy()` clear, and the `/_scrml/session/destroy` logout route), and
+`Secure` by default (dev carve-out: omitted only for plain-http `localhost`, so
+`http://localhost` dev round-trips; a TLS-less non-local deployment must front with
+TLS). On every identity-establishing write the compiler ROTATES the session id to a
+fresh `crypto.randomUUID()` and deletes the incoming record — the incoming
+(attacker-suppliable) `scrml_sid` is never trusted or reflected (session-fixation
+defense). `session.isAuth` / `@currentUser.isAuth` require a real store record WITH
+a `userId` — a bare cookie value is never authentication.
+
+**Worked example — login (establishes a session):**
+
+```scrml
+${ server function authenticate(email, password) {
+    let user = ?{`SELECT id, role FROM users WHERE email = ${email}`}.get()
+    if (!user || !verifyPassword(password, user.password_hash))
+        fail AuthError::InvalidCredentials
+    session.set("userId", user.id)   // mints scrml_sid + writes the record +
+    session.set("role", user.role)   // one Set-Cookie: scrml_sid=…; HttpOnly
+} }
+```
 
 **Worked example — valid:**
 
@@ -14584,9 +14699,9 @@ is reachable only from a server-escalated function — give `getUser` a server r
 
 | Code | Trigger | Severity |
 |---|---|---|
-| E-SCOPE-010 | Developer declares a variable with a reserved binding name (`route`, `session`) | Error |
+| E-SCOPE-010 | Developer declares a variable with a reserved binding name (`route`, `session`) **(the reserved-binding trigger is spec-ahead, S265 — not fired for `route`/`session`; E-SCOPE-010 currently fires only for a DUPLICATE file-scope `let`/`const`)** | Error |
 | E-SCOPE-011 | Access to an undeclared route parameter name **(Reserved / spec-ahead, S263 — no fire site: the undeclared-route-param check is spec-ahead — `route.params` is not typer-supported for pages and no param-name allow-list exists. Excluded from the freeze fireable set.)** | Error |
-| E-SCOPE-012 | `session` accessed inside a non-server-escalated function **(Reserved / spec-ahead, S263 — no fire site: the §20.5 server-`session` builtin is unbuilt — bare `session` is never injected into any scope; the implemented `@session` is a different client projection. Excluded from the freeze fireable set.)** | Error |
+| E-SCOPE-012 | `session` accessed outside a server-escalated function body **(LIVE, S265 (i29e) — the §20.5 server `session` builtin is built; bare `session` is bound into server-escalated scopes (and auto-escalates its enclosing function), so a `session` reference that is NOT server-escalated — e.g. top-level `${ }` logic — fires this. Distinct from the `@session` client projection.)** | Error |
 
 ---
 
@@ -17945,9 +18060,11 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-ATTR-012 | §5.4 | `bind:` and explicit event handler conflict on same element | Error |
 | E-ATTR-UNQUOTED-OPERATOR | §5.1, §17.1 | An unquoted attribute CONDITION (`if=`/`show=`/`else-if=`) contains a bare binary/ternary operator (`>= > < <= == != && \|\| + - * /` or ternary `?:`). An unquoted condition admits only the atomic forms (`@var` / `obj.prop` / `fn()` / prefix `!`); operator conditions SHALL be parenthesized `if=(expr)` or quoted `if="expr"`. Fires ONCE per offending attribute (cluster-A, S188 "reject + parens"). | Error |
 | E-SCOPE-001 | §5.2 | Unquoted identifier not resolvable in scope | Error |
-| E-SCOPE-010 | §20.4 | Developer declares variable with reserved binding name (`route`, `session`) | Error |
+| E-SCOPE-010 | §20.4 | Developer declares variable with reserved binding name (`route`, `session`) **(reserved-binding trigger spec-ahead, S265 — not fired; E-SCOPE-010 currently fires only for a DUPLICATE file-scope `let`/`const`)** | Error |
 | E-SCOPE-011 | §20.4 | Access to undeclared route parameter name **(Reserved / spec-ahead, S263 — no fire site: the undeclared-route-param check is spec-ahead — `route.params` is not typer-supported for pages and no param-name allow-list exists. Excluded from the freeze fireable set.)** | Error |
-| E-SCOPE-012 | §20.5 | `session` accessed in non-server-escalated function **(Reserved / spec-ahead, S263 — no fire site: the §20.5 server-`session` builtin is unbuilt — bare `session` is never injected into any scope; the implemented `@session` is a different client projection. Excluded from the freeze fireable set.)** | Error |
+| E-SCOPE-012 | §20.5 | `session` accessed outside a server-escalated function body **(LIVE, S265 (i29e) — the §20.5 server `session` establishment builtin is built; bare `session` is bound into server-escalated scopes and auto-escalates its enclosing function, so a `session` reference that is NOT server-escalated (e.g. top-level `${ }` logic) fires this. Distinct from the `@session` client projection.)** | Error |
+| E-SESSION-CONTEXT | §20.5.1 | `session.*` used outside a web-app server route handler — an SSE `server function*`, an `<endpoint>` arm, a `<machine>` method, a serverLoad cell, an in-process server-fn helper called by another server function, or a headless `kind="tool"` program. Those contexts have no cookie-session request/response context. **(LIVE, S265/S239 i29e.)** | Error |
+| E-SESSION-VALUE | §20.5 | Bare `session` VALUE-use in a server-escalated body — `session` returned, assigned, passed as an argument, or otherwise read as a first-class value rather than as the object of a member (`session.userId`), index (`session["userId"]`), or call (`session.get`/`.set`/`.destroy`). `session` is a request-scoped accessor, not a value; a bare reference would emit a dangling `session` identifier (ReferenceError at request time). Fix: access a field or call an accessor. **(LIVE, S266 i29e — codegen emit-expr.ts:emitIdent, drained by emit-server.ts:generateServerJs.)** | Error |
 | ~~E-REACTIVE-001~~ | §6.2 | **Retired 2026-07-16 (S263).** Reactive cells are declaration-order-independent (hoisted), so `@variable` use-before-declaration is LEGAL, not an error. The reachable "undeclared cell" case is owned by **E-STATE-UNDECLARED**. Triage: `scrml-support/docs/audits/s34-catalog-vs-impl-2026-07-16.md`. | — |
 | E-REACTIVE-002 | §6.6.8 | Assignment to a `const <name>` derived reactive value | Error |
 | E-REACTIVE-003 | §6.6.9 | A WHOLLY server-escalated function reads a free client cell — a mutable `@var`, a `const <name>` derived, OR a §52 `<... server>` cell (all client-held). The server-mode rewrite lowers `@cell` to `_scrml_body["cell"]`, but a non-CPS server-fn client stub sends only declared params, so the value is NOT transported and resolves to `undefined` server-side. Read-side sibling of E-RI-002 (server fn *writes* a `@reactive` cell). Fires once per distinct cell. GATED on `cpsSplit === null` — a CPS-split fn MARSHALS its server-batch reads into the client stub (`emit-functions.ts`), so it is exempt (see W-SERVER-DERIVED-MARSHAL). Excludes: declared params (already marshalled), ambient `@session`/`@currentUser` (server-resolved singletons, §20.5 — never client-supplied), and channel cells (E-CHANNEL-SERVER-CELL-READ owns them). Fix: pass the cell as an explicit argument, or restructure so the server computes the value inside the `?{}`. Broadened S250 from the derived-only, never-fired SPEC-only draft (a fail-open); §52 correction (client-held, not server-resolved) per RULING THE SPLIT. Emitted by RI (`compiler/src/route-inference.ts`, `detectServerFreeClientCellReads`). | Error |

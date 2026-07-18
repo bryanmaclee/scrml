@@ -69,8 +69,8 @@ import { generateMachineTestJs } from "./emit-machine-property-tests.ts";
 import { generateWorkerJs } from "./emit-worker.ts";
 import { appendSourceMappingUrl } from "./source-map.ts";
 import { buildSourceMap } from "./build-source-map.ts";
-import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender, filePrintBuiltinsShadowed } from "./log-loc.ts";
-import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setCurrentUserAmbientActive } from "./emit-expr.ts";
+import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender, filePrintBuiltinsShadowed, fileDeclaresFileScopeBinding } from "./log-loc.ts";
+import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setSessionShadowedInFile, setCurrentUserAmbientActive } from "./emit-expr.ts";
 import { EncodingContext } from "./type-encoding.ts";
 import { collectDerivedVarNames, collectReactiveVarNames, collectSynthCellKeys, stampCompoundDeepSetTargets } from "./reactive-deps.ts";
 import { collectTopLevelLogicStatements, containsSql, getNodes } from "./collect.ts";
@@ -740,6 +740,12 @@ export function runCG(input: CgInput): CgOutput {
     // flag OFF; worker bundles carry no auth session projection. Re-set per-file
     // in the main emit loop once auth middleware is resolved.
     setSessionProjectionActive(false);
+    // §20.5 (B2.5, S266) — per-file `session` file-scope-shadow flag: TRUE when the
+    // file declares a file-scope binding named `session` (a `let session` / a
+    // `<session>` reactive cell) that shadows the reserved server establishment
+    // builtin, so its member / index / call lowerings step aside (honor the user's
+    // value). Mirrors the render/log shadow flags — set per-file by runCG.
+    setSessionShadowedInFile(fileDeclaresFileScopeBinding(fileAST, "session") || collectReactiveVarNames(fileAST).has("session"));
     // §52 (S233) — default the `@currentUser` ambient OFF in worker bundles
     // (re-set per-file in the main emit loop). A worker carries no session.
     setCurrentUserAmbientActive(false);
@@ -1002,6 +1008,10 @@ export function runCG(input: CgInput): CgOutput {
     // g-markup-session-read-undeclared — default OFF; re-set after auth-MW
     // resolution below (needs `authMW`, resolved later in this iteration).
     setSessionProjectionActive(false);
+    // §20.5 (B2.5, S266) — per-file `session` file-scope-shadow flag (see the
+    // worker-loop note above). A file-scope `let session` / `<session>` cell shadows
+    // the reserved server establishment builtin file-wide.
+    setSessionShadowedInFile(fileDeclaresFileScopeBinding(fileAST, "session") || collectReactiveVarNames(fileAST).has("session"));
     // §52 (S233) — default the `@currentUser` ambient OFF; re-set per-file below.
     setCurrentUserAmbientActive(false);
     const analysis = fileAnalyses.get(filePath);

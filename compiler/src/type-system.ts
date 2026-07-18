@@ -7525,6 +7525,27 @@ function checkLogicExprIdents(
       ));
       return;
     }
+    // §20.5 (S265, i29e) — the reserved `session` server builtin. In a
+    // server-escalated fn body `session` is bound into the scope chain (see the
+    // function-decl visitor), so control only reaches here for a `session`
+    // reference in a NON-server context (a client-side function body, or bare
+    // top-level logic). That is exactly the E-SCOPE-012 condition: `session` is
+    // reachable only from a server-escalated function. Emit the tailored code so
+    // the adopter is guided to give the function a server reason rather than
+    // seeing a generic "undeclared identifier".
+    if (base === "session") {
+      errors.push(new TSError(
+        "E-SCOPE-012",
+        `E-SCOPE-012: \`session\` is available only inside a web-app server ROUTE-HANDLER ` +
+        `function body. It is not reachable from a client-side function, bare top-level ` +
+        `\`\${ }\` logic, or an \`<endpoint>\` arm. Give the enclosing function a server reason ` +
+        `(a \`?{}\` query, a server-only stdlib import, or call it only from server contexts so ` +
+        `§12.2 inference classifies it server-side). For client-side session display use the ` +
+        `\`@session\` projection instead.`,
+        span,
+      ));
+      return;
+    }
     errors.push(new TSError(
       "E-SCOPE-001",
       `E-SCOPE-001: Undeclared identifier \`${base}\` in logic expression. ` +
@@ -9553,6 +9574,22 @@ function annotateNodes(
         const _isSSEGenerator = boundary === "server" && (n as { isGenerator?: boolean }).isGenerator === true;
         if (_isSSEGenerator) {
           scopeChain.bind("route", { kind: "variable", resolvedType: tAsIs() });
+        }
+
+        // §20.5 (S265, i29e) — the `session` server builtin. A server-escalated
+        // fn body may reference `session.userId` / `session.isAuth` /
+        // `session.role` / `session.get(k)` / `session.set(k,v)` /
+        // `session.destroy()`; codegen (emit-expr.ts) lowers these to the
+        // per-request session context (`_scrml_req._scrml_sess`). Bind `session`
+        // as a plain server-scope local so the ident-walker
+        // (checkLogicExprIdents) does NOT false-fire E-SCOPE-001 on the base
+        // `session` ident. Mirrors the SSE `route` auto-injection above and the
+        // §38.6 channel-builtin injection. SERVER boundary ONLY — a client-side
+        // `session` reference stays unbound and is upgraded to E-SCOPE-012 by the
+        // ident-walker (§20.5: `session` is reachable only from a
+        // server-escalated function body).
+        if (boundary === "server") {
+          scopeChain.bind("session", { kind: "variable", resolvedType: tAsIs() });
         }
 
         // Walk the body.

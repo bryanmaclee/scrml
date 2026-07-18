@@ -389,6 +389,28 @@ export function generateToolJs(
 
   const body = bodyLines.join("\n");
 
+  // §20.5 (i29e, S239 FIX 6) — the `session` cookie-establishment builtin is
+  // WEB-APP ONLY. A headless `kind="tool"` program is bearer-auth territory: it
+  // has no cookie-session request/response context, so `session.*` (lowered to
+  // `_scrml_req._scrml_sess.*` by emit-expr) has no wrapper and would crash at
+  // runtime. Fire a build-blocking E-SESSION-CONTEXT rather than ship the broken
+  // ref (mirrors the generateServerJs post-emission scan for the web-app path).
+  // S239-2 FIX C (residual, LOW): this is a string-scan, so a tool that merely
+  // embeds the literal `_scrml_req._scrml_sess.` in a user string/comment would
+  // over-block (fail-safe — never ships a hole). A near-impossible contrivance for
+  // an internal-identifier literal; a fully-sound site-recording fix is a follow-up.
+  if (errors && body.includes("_scrml_req._scrml_sess.")) {
+    errors.push(new CGError(
+      "E-SESSION-CONTEXT",
+      "E-SESSION-CONTEXT: the `session` cookie-establishment builtin is not available in " +
+      "a headless `kind=\"tool\"` program — that shape uses bearer auth and has no " +
+      "cookie-session request/response context. Remove the `session.*` call, or make this " +
+      "a web-app `<program>` (drop `kind=\"tool\"`).",
+      { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+      "error",
+    ));
+  }
+
   // ---- main() harness (§64.3) — the return-type discriminator. --------------
   const harness: string[] = [];
   harness.push("");
