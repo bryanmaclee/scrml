@@ -84,16 +84,22 @@ const diagCodes = (r) => [...r.errors, ...r.warnings].map((e) => e.code ?? "");
 // These helpers close that hole locally.
 // ---------------------------------------------------------------------------
 
-/** Parse-check the emitted bundle. Catches the raw-`@` template-literal leak. */
+/**
+ * Parse-check the emitted bundle. Catches the raw-`@` template-literal leak.
+ *
+ * S267 lesson — parse with Acorn `sourceType: "module"`, NOT `new Function()`.
+ * `new Function()` parses in SLOPPY mode and false-PASSES module-only constructs
+ * and strict-mode violations; the emitted client bundle is an ES module, so it
+ * must parse as one. This is the exact gate `r.errors === []` cannot make
+ * (write:false skips the S141 emitted-JS gate).
+ */
 function expectParses(client) {
   expect(client.length).toBeGreaterThan(0);
   try {
-    // Parses without executing — the same failure `node --check` reports.
-    new Function(client);
+    acorn.parse(client, { ecmaVersion: 2022, sourceType: "module" });
   } catch (e) {
     throw new Error(
-      `emitted client bundle is not valid JavaScript: ${e.message}
-` +
+      `emitted client bundle is not valid JavaScript (Acorn sourceType:module): ${e.message}\n` +
       `This is what \`r.errors === []\` cannot see (write:false skips the emit gate).`,
     );
   }
@@ -619,7 +625,7 @@ describe("§i81.9 — fail-closed dispositions (S239 findings 2, 3, 5, 6)", () =
     expect(w.severity).toBe("warning");
   });
 
-  test("F3: style= co-occurring with show= drops style and keeps the toggle correct", () => {
+  test("F3→①: style= co-occurring with show= is a WRITER CONFLICT (compile error), not a warn-drop", () => {
     const src = `<program>
       <isOpen> = false
       <theme> = "color: red"
@@ -627,20 +633,31 @@ describe("§i81.9 — fail-closed dispositions (S239 findings 2, 3, 5, 6)", () =
     </program>`;
     const r = compile(src);
     const html = emittedHtml(r);
-    expect(diagCodes(r)).toContain("W-CG-VALUE-ATTR-STYLE-CONFLICT");
-    // setAttribute("style", …) replaces the WHOLE attribute, erasing the
-    // el.style.display the toggle writes → a hidden panel becomes permanently
-    // visible while @isOpen is still false.
+    // Axiom ① — a wholesale `style=` writer cannot share the style surface with
+    // `show=` (which writes el.style.display). setAttribute("style", …) would
+    // erase the display the toggle writes. Under the S268 ruling this is a HARD
+    // compile ERROR naming both sites, NOT the old W-CG-VALUE-ATTR-STYLE-CONFLICT
+    // warn-drop.
+    expect(diagCodes(r)).toContain("E-ATTR-WRITER-CONFLICT");
+    expect(diagCodes(r)).not.toContain("W-CG-VALUE-ATTR-STYLE-CONFLICT");
+    const e = r.errors.find((x) => (x.code ?? "") === "E-ATTR-WRITER-CONFLICT");
+    expect(e.severity).toBe("error");
+    // Names BOTH sites: the `style=` owner AND the `show=` competitor.
+    expect(e.message).toContain("style=");
+    expect(e.message).toContain("show=");
+    // Emit NOTHING for the conflicting attr → byte-identical to pre-i81, so the
+    // toggle stays correct and a program that ignores the error is not broken.
     expect(html).not.toContain("data-scrml-bind-attr-style");
     expect(html).toMatch(/data-scrml-bind-show="[^"]+"/);
   });
 
-  test("F3: style= WITHOUT a display directive still binds normally", () => {
+  test("①: sole style= WITHOUT a competing directive binds normally (no conflict)", () => {
     const src = `<program>
       <theme> = "color: blue"
       <div style=(@theme)>plain</div>
     </program>`;
     const r = compile(src);
+    expect(diagCodes(r)).not.toContain("E-ATTR-WRITER-CONFLICT");
     expect(diagCodes(r)).not.toContain("W-CG-VALUE-ATTR-STYLE-CONFLICT");
     expect(emittedHtml(r)).toMatch(/data-scrml-bind-attr-style="[^"]+"/);
   });
@@ -865,5 +882,124 @@ describe("§i81.8 — the binding is region-tracked (teardown contract)", () => 
     // Mirrors the bool/if-show contract: effect handle tracked so a region swap
     // disposes it instead of leaking an effect onto a detached node.
     expect(client).toContain("_scrml_region_track");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §i81.12 — Axiom ① : exclusive wholesale-owner per DOM surface (#81 ruling,
+// bryan S268). A wholesale value writer (`class=(expr)`/`style=(expr)`/
+// `value=(expr)`) may be the SOLE writer of its physical surface. A second
+// writer on that surface (a `class:` composer, a transition, a `show=`/`if=`
+// per-property writer, `bind:value`) is a COMPILE ERROR — E-ATTR-WRITER-CONFLICT
+// — naming both sites; the author picks one owner. Different surfaces do NOT
+// conflict (className vs style vs an event are independent).
+// ---------------------------------------------------------------------------
+describe("§i81.12 — Axiom ① writer-ownership conflict (E-ATTR-WRITER-CONFLICT)", () => {
+  const hasWriterConflict = (r) =>
+    r.errors.find((e) => (e.code ?? "") === "E-ATTR-WRITER-CONFLICT");
+
+  test("className: class=(expr) + class:name= is a conflict naming both sites", () => {
+    const src = `<program>
+      <mode> = "a"
+      <active> = false
+      <button class=(@mode == "a" ? "tab on" : "tab") class:active=@active>A</button>
+    </program>`;
+    const r = compile(src);
+    const e = hasWriterConflict(r);
+    expect(e).toBeTruthy();
+    // Fatal: an E- code with severity error lands in result.errors.
+    expect(e.severity).toBe("error");
+    expect(r.errors).toContain(e);
+    // Names BOTH sites and the surface.
+    expect(e.message).toContain("class=");
+    expect(e.message).toContain("class:active=");
+    expect(e.message).toContain("Axiom ①");
+    // The wholesale class= is NOT emitted (byte-identical to pre-i81) …
+    expect(emittedHtml(r)).not.toContain("data-scrml-bind-attr-class");
+    // … and the emitted bundle is still valid JS (Acorn module parse).
+    expectParses(emittedClient(r));
+  });
+
+  test("className: class=(expr) + transition:fade is a conflict", () => {
+    const src = `<program>
+      <mode> = "a"
+      <div class=(@mode) transition:fade>x</div>
+    </program>`;
+    const r = compile(src);
+    const e = hasWriterConflict(r);
+    expect(e).toBeTruthy();
+    expect(e.message).toContain("class=");
+    expect(emittedHtml(r)).not.toContain("data-scrml-bind-attr-class");
+  });
+
+  test("style: style=(expr) + if= is a conflict (subsumes the old F3)", () => {
+    const src = `<program>
+      <open> = false
+      <theme> = "color: red"
+      <div if=@open style=(@theme)>panel</div>
+    </program>`;
+    const r = compile(src);
+    const e = hasWriterConflict(r);
+    expect(e).toBeTruthy();
+    expect(e.message).toContain("style=");
+    expect(e.message).toContain("if=");
+    expect(emittedHtml(r)).not.toContain("data-scrml-bind-attr-style");
+  });
+
+  test(".value: value=(expr) + bind:value= is a conflict on a form control", () => {
+    const src = `<program>
+      <name> = "x"
+      <disp> = "y"
+      <input type="text" bind:value=@name value=(@disp)/>
+    </program>`;
+    const r = compile(src);
+    const e = hasWriterConflict(r);
+    expect(e).toBeTruthy();
+    expect(e.message).toContain("value=");
+    expect(e.message).toContain("bind:value=");
+    expect(emittedHtml(r)).not.toContain("data-scrml-bind-attr-value");
+  });
+
+  test("DIFFERENT surfaces do NOT conflict: class=(expr) + show= both emit", () => {
+    // show= writes el.style.display (the style surface); class=(expr) writes
+    // className. Independent surfaces → no conflict, both bind.
+    const src = `<program>
+      <shown> = true
+      <mode> = "a"
+      <div show=@shown class=(@mode == "a" ? "on" : "off")>x</div>
+    </program>`;
+    const r = compile(src);
+    expect(hasWriterConflict(r)).toBeFalsy();
+    const html = emittedHtml(r);
+    expect(html).toMatch(/data-scrml-bind-show="[^"]+"/);
+    expect(html).toMatch(/data-scrml-bind-attr-class="[^"]+"/);
+  });
+
+  test("SOLE wholesale owner compiles — the #81 fix (portal shape)", () => {
+    // Peter's assetManagement/portal.scrml shape: a sole-writer ternary class=.
+    // No competing writer on className → EMIT (unblocks #81).
+    const src = `<program>
+      <tab> = "assets"
+      <button class=(@tab == "assets" ? "nav active" : "nav")>Assets</button>
+    </program>`;
+    const r = compile(src);
+    expect(r.errors).toEqual([]);
+    expect(emittedHtml(r)).toMatch(/data-scrml-bind-attr-class="[^"]+"/);
+    expect(emittedClient(r)).toContain('setAttribute("class", String(');
+    expectParses(emittedClient(r));
+  });
+
+  test("class=(expr) alone with MULTIPLE class: is still one conflict listing them", () => {
+    const src = `<program>
+      <mode> = "a"
+      <a1> = false
+      <b1> = false
+      <div class=(@mode) class:a1=@a1 class:b1=@b1>x</div>
+    </program>`;
+    const r = compile(src);
+    const e = hasWriterConflict(r);
+    expect(e).toBeTruthy();
+    expect(e.message).toContain("class:a1=");
+    expect(e.message).toContain("class:b1=");
   });
 });

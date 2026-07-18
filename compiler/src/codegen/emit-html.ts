@@ -181,15 +181,20 @@ function isDeclaredPropAttr(node: any, name: string): boolean {
 }
 
 /**
- * i81 (S239 finding 2/3) — may this reactive VALUE attribute be lowered to
- * CORRECT output? Returns false (with a diagnostic) for shapes we cannot lower
- * faithfully, so the attribute keeps its pre-i81 behavior (dropped) instead of
- * becoming a MISCOMPILE. A dropped attribute is a bug; invalid JS or a clobbered
- * directive is worse than the bug — it takes the whole page down.
+ * i81 (S239 finding 2) — CODEGEN-CAPABILITY gate. Can this reactive VALUE
+ * attribute's expression be lowered to VALID JavaScript? Returns false (with a
+ * diagnostic) for shapes we cannot lower faithfully, so the attribute keeps its
+ * pre-i81 behavior (dropped) instead of becoming a MISCOMPILE. A dropped
+ * attribute is a bug; invalid JS is worse — it takes the whole page down.
  *
- * This is the single decision point: refusing HERE means no placeholder and no
- * binding are produced at all, so the emitted HTML stays byte-identical to
- * pre-i81 and the wiring emitters can never disagree with the markup.
+ * This is ORTHOGONAL to Axiom ① writer-ownership (`analyzeWriterConflict`): this
+ * asks "can the compiler lower it at all", the ① analysis asks "is it the sole
+ * writer of its DOM surface". The lowerability gate runs FIRST — an expression
+ * that cannot be lowered is dropped regardless of any surface conflict.
+ *
+ * Refusing HERE means no placeholder and no binding are produced at all, so the
+ * emitted HTML stays byte-identical to pre-i81 and the wiring emitters can never
+ * disagree with the markup.
  */
 function valueAttrIsLowerable(
   val: any,
@@ -245,46 +250,87 @@ function valueAttrIsLowerable(
     return false;
   }
 
-  // --- (3) `style=` must not clobber a directive that owns inline style ----
-  // `if=`/`show=` set `el.style.display`; `transition:`/`in:`/`out:` animate
-  // `opacity`. `setAttribute("style", …)` REPLACES the whole attribute, so
-  // `<div show=(@isOpen) style=(@theme)>` re-shows a hidden panel — the effect
-  // wipes `display:none` and the element becomes permanently visible while
-  // `@isOpen` is still false. Merging (writing individual properties while
-  // preserving `display`) is the real fix but needs a CSS-text parser and a
-  // defined precedence against the toggles; not this arc. Refusing keeps the
-  // toggle CORRECT and the style attribute merely absent — the pre-i81 state.
-  if (name === "style") {
-    const conflicting = attrs
-      .filter((a: any) => a && typeof a.name === "string")
-      .map((a: any) => a.name as string)
-      .filter(
-        (n: string) =>
-          STYLE_OWNING_DIRECTIVES.includes(n) ||
-          n.startsWith("transition:") || n.startsWith("in:") || n.startsWith("out:"),
-      );
-    if (conflicting.length > 0) {
-      if (errors) {
-        errors.push(new CGError(
-          "W-CG-VALUE-ATTR-STYLE-CONFLICT",
-          `W-CG-VALUE-ATTR-STYLE-CONFLICT: \`style=\` on <${tag}> co-occurs with ` +
-          `\`${conflicting.join("=`, `")}=\`, so it is NOT emitted and the style ` +
-          `attribute will be absent at runtime.\n\n` +
-          `  A reactive \`style=\` sets the whole style attribute, which would erase the ` +
-          `\`display\`/\`opacity\` that \`${conflicting[0]}=\` writes — the element would be ` +
-          `stuck visible (or stuck mid-transition) regardless of the condition. The ` +
-          `directive is kept correct instead.\n` +
-          `  Workaround: move the dynamic styling to \`class=\` (which composes with the ` +
-          `toggle), or drop a \`#{}\` CSS block and toggle a class.`,
-          attr?.span ?? node?.span ?? { file: "", start: 0, end: 0, line: 0, col: 0 },
-          "warning",
-        ));
-      }
-      return false;
-    }
-  }
+  // NOTE — the `style=` vs `if=`/`show=`/`transition:` clobber (S239 finding 3,
+  // formerly a `W-CG-VALUE-ATTR-STYLE-CONFLICT` warn+drop here) is NO LONGER a
+  // lowerability concern. Under Axiom ① it is a DOM-surface WRITER conflict,
+  // handled uniformly by `analyzeWriterConflict` (which promotes it to the
+  // `E-ATTR-WRITER-CONFLICT` compile error naming both sites). `attrs`/`tag`
+  // remain in the signature for parity with the surface-scan call site.
 
   return true;
+}
+
+// i81 Axiom ① — attribute-name prefixes for the per-token / per-property
+// COMPOSERS that RMW a single slice of a shared surface. A wholesale value
+// writer cannot coexist with any of these on the same physical surface.
+const TRANSITION_ATTR_PREFIXES = ["transition:", "in:", "out:"];
+
+/**
+ * i81 Axiom ① — DOM-surface writer-ownership conflict analysis.
+ *
+ * A reactive value attribute (`class=(expr)`, `style=(expr)`, `value=(expr)`,
+ * `title=`, `data-*`, …) is a WHOLESALE writer of its physical DOM surface: it
+ * replaces the ENTIRE className / the ENTIRE style attribute / the `.value`
+ * property / the whole attribute on every reactive update. Per Axiom ①
+ * (exclusive wholesale-owner — bryan's #81 ruling, SPEC §5.5.3/§5.5.4) a
+ * wholesale writer must be the SOLE writer of its surface. A second writer on
+ * the same surface would have its work silently erased on the next wholesale
+ * write:
+ *   - className ← `class:name=` (classList.toggle, per-token composer),
+ *                 `transition:`/`in:`/`out:` (transition classes)
+ *   - style     ← `if=`/`show=` (`el.style.display`, per-property composer),
+ *                 `transition:`/`in:`/`out:` (`opacity`)
+ *   - `.value`  ← `bind:value` (property + writeback, on a form control)
+ * A generic string attribute (`title`, `id`, `alt`, `data-*`) has no composer
+ * form, so it is always a sole writer of its own surface.
+ *
+ * Returns null when this attribute is the sole writer of its surface (→ EMIT the
+ * binding, the #81 fix), or a descriptor naming the competing writer(s) when it
+ * is not (→ `E-ATTR-WRITER-CONFLICT`, the author picks one owner).
+ *
+ * Self-exclusion is automatic: the scan matches only COMPOSER names, never the
+ * wholesale owner's own name, so the emitted attribute never matches itself.
+ * Two wholesale owners of one surface (e.g. two `class=` attributes) cannot
+ * co-occur — that is a duplicate attribute, caught upstream.
+ */
+function analyzeWriterConflict(
+  attrs: any[],
+  name: string,
+  tag: string,
+): { surface: string; competitors: string[] } | null {
+  const otherNames = (attrs || [])
+    .filter((a: any) => a && typeof a.name === "string")
+    .map((a: any) => a.name as string);
+  const isTransition = (n: string) =>
+    TRANSITION_ATTR_PREFIXES.some((p) => n.startsWith(p));
+
+  let surface: string | null = null;
+  let competitors: string[] = [];
+
+  if (name === "class") {
+    surface = "class";
+    competitors = otherNames.filter(
+      (n) => n.startsWith("class:") || isTransition(n),
+    );
+  } else if (name === "style") {
+    surface = "style";
+    competitors = otherNames.filter(
+      (n) => STYLE_OWNING_DIRECTIVES.includes(n) || isTransition(n),
+    );
+  } else if (name === "value" && FORM_VALUE_ELEMENTS.has(tag)) {
+    surface = "value";
+    competitors = otherNames.filter((n) => n === "bind:value");
+  } else {
+    // Generic string attribute (title/id/alt/data-*/…): its own surface, no
+    // composer form → always a sole writer.
+    return null;
+  }
+
+  // Dedupe while preserving order (a surface may carry several composers).
+  const seen = new Set<string>();
+  competitors = competitors.filter((n) => (seen.has(n) ? false : (seen.add(n), true)));
+  if (competitors.length === 0) return null;
+  return { surface, competitors };
 }
 
 // Element-type restrictions per SPEC §5.4
@@ -2781,9 +2827,60 @@ export function generateHtml(
             // "unknown"), a value attr on a component call site
             // (`<Card class=(@x)/>`), and boolean attrs beyond the
             // REACTIVE_BOOL_ATTRS trio all remain dropped.
+          } else if (analyzeWriterConflict(attrs, name, tag)) {
+            // i81 Axiom ① — this reactive value attribute is a WHOLESALE writer
+            // of a DOM surface that ANOTHER writer also targets on the same
+            // element (bryan's #81 ruling: exclusive wholesale-owner per
+            // surface). Emitting it would silently erase the composer's work on
+            // the next reactive update (`class=(expr)` erases a `class:` toggle;
+            // `style=(expr)` wipes the `display` a `show=` writes). So this is a
+            // COMPILE ERROR (`E-ATTR-WRITER-CONFLICT`) naming both sites — the
+            // author picks one owner. Emit NOTHING so the artifact stays
+            // byte-identical to pre-i81: a program that ignores the error keeps
+            // the old (dropped) behavior, not a broken one.
+            //
+            // Re-fetch the descriptor (the `else if` proved it non-null): the
+            // analysis is a pure scan over a handful of sibling attrs, so a
+            // second call is cheap and keeps the emit body below un-nested.
+            const _conflict = analyzeWriterConflict(attrs, name, tag)!;
+            if (errors) {
+              const _competitors = _conflict.competitors
+                .map((c) => `\`${c}=\``)
+                .join(", ");
+              const _plural = _conflict.competitors.length !== 1;
+              const _surfaceLabel =
+                _conflict.surface === "value"
+                  ? "the `value` property"
+                  : "the whole `" + _conflict.surface + "` attribute";
+              const _pick =
+                name === "class"
+                  ? `    - keep \`class=(…)\` and fold the toggles into the expression ` +
+                    `(e.g. \`class=(@active ? "tab active" : "tab")\`), or\n` +
+                    `    - drop \`class=(…)\` and use \`class:\`/transitions for every class.`
+                  : name === "style"
+                  ? `    - keep \`style=(…)\` and drive visibility from inside it, or\n` +
+                    `    - drop \`style=(…)\` and move the dynamic styling to \`class=\`/\`class:\` ` +
+                    `(which composes with \`if=\`/\`show=\`/transitions).`
+                  : `    - use \`value=(…)\` alone, or \`bind:value\` alone — not both.`;
+              errors.push(new CGError(
+                "E-ATTR-WRITER-CONFLICT",
+                `E-ATTR-WRITER-CONFLICT: \`${name}=\` on <${tag}> is a WHOLESALE writer of ` +
+                `${_surfaceLabel} — it replaces the whole surface on every reactive update. ` +
+                `But ${_competitors} on the same element also ${_plural ? "write" : "writes"} ` +
+                `\`${_conflict.surface}\`, and the next \`${name}=\` update would silently erase ` +
+                `${_plural ? "their" : "its"} work.\n\n` +
+                `  Axiom ①: each physical DOM surface (className / style / value / each attribute) ` +
+                `has at most one WHOLESALE owner. Pick one:\n${_pick}\n` +
+                `  (SPEC §5.5.3, §5.5.4, §34.)`,
+                attr?.span ?? node?.span ?? { file: "", start: 0, end: 0, line: 0, col: 0 },
+                "error",
+              ));
+            }
           } else {
             // i81 — reactive VALUE attribute (`class=`, `style=`, `title=`,
-            // `data-*`, `id=`, `alt=`, …). THE MISSING FINAL `else`.
+            // `data-*`, `id=`, `alt=`, …). THE MISSING FINAL `else`, and the
+            // SOLE wholesale owner of its surface (Axiom ①: the conflict branch
+            // above already diverted any surface with a competing writer).
             //
             // Before this branch existed the chain above ended here, so a
             // dynamic value attribute outside `<each>` matched NO branch:
