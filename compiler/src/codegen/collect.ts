@@ -24,8 +24,6 @@ interface Node {
   _expandedFrom?: string;
   /** Set by collect.ts for CSS-in-component scoping. */
   _componentScope?: string | null;
-  /** Set by collect.ts for constructor-scoped CSS. */
-  _constructorScoped?: boolean;
   rules?: CSSRule[];
   expr?: string;
   init?: string | unknown;
@@ -50,7 +48,6 @@ export interface CSSVariableBridge {
   customProp: string;
   isExpression: boolean;
   expr: string | null;
-  scoped: boolean;
   refs: CSSReactiveRef[];
 }
 
@@ -285,12 +282,18 @@ export function collectProtectedFields(protectAnalysis: ProtectAnalysis | null |
 
 /**
  * Collect all CSS variable bridge entries from CSS inline blocks.
- * Returns an array of { varName, customProp, isExpression, expr, scoped } descriptors.
+ * Returns an array of { varName, customProp, isExpression, expr, refs } descriptors.
+ *
+ * Every reactive CSS custom property is wired against `document.documentElement`
+ * (:root) regardless of whether its `#{}` is program-level or component-scoped —
+ * components are compile-time INLINED, so there is no per-instance runtime element
+ * to target, and the :root custom property inherits into the component's inline
+ * `style="… var(--scrml-name)"` (§65.3.1 / §25.5). A prior per-instance `scoped`
+ * distinction (targeting an undefined `_scrml_el`) has been removed.
  *
  * @param nodes — top-level AST nodes
- * @param isScoped — true when inside a constructor (scoped to element)
  */
-export function collectCssVariableBridges(nodes: Node[], isScoped = false): CSSVariableBridge[] {
+export function collectCssVariableBridges(nodes: Node[]): CSSVariableBridge[] {
   const { inlineBlocks } = collectCssBlocks(nodes);
   const bridges: CSSVariableBridge[] = [];
   const seen = new Set<string>();
@@ -300,7 +303,6 @@ export function collectCssVariableBridges(nodes: Node[], isScoped = false): CSSV
   const themeTokens = collectThemeTokenNames(collectThemeContext(nodes));
 
   for (const block of inlineBlocks) {
-    const scoped = isScoped || (block._constructorScoped === true) || (block._componentScope != null);
     if (!block.rules || !Array.isArray(block.rules)) continue;
 
     for (const rule of block.rules as CSSRule[]) {
@@ -321,7 +323,6 @@ export function collectCssVariableBridges(nodes: Node[], isScoped = false): CSSV
             customProp: exprPropName,
             isExpression: true,
             expr: rule.reactiveRefs[0].expr ?? null,
-            scoped,
             refs: rule.reactiveRefs,
           });
         }
@@ -339,7 +340,6 @@ export function collectCssVariableBridges(nodes: Node[], isScoped = false): CSSV
               customProp,
               isExpression: false,
               expr: null,
-              scoped,
               refs: [ref],
             });
           }
