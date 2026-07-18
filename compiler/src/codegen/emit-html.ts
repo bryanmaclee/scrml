@@ -53,6 +53,39 @@ const SUPPORTED_TRANSITIONS = new Set(["fade", "slide", "fly"]);
 // would require dispatch-precedence design).
 const REACTIVE_BOOL_ATTRS = new Set(["disabled", "readonly", "required"]);
 
+// S105 B1 / i29-D — shared emission for a reactive Boolean HTML attribute
+// (`disabled` / `readonly` / `required`). BOTH value forms route here so they
+// emit an IDENTICAL `data-scrml-bind-bool-<name>` placeholder + logic binding
+// (which emit-event-wiring wires to an `_scrml_effect` toggling attribute
+// presence via setAttribute("")/removeAttribute):
+//   - the `expr` form   — `disabled=!@x`, `disabled=(expr)`  (source: exprNode)
+//   - the bare-ref form — `disabled=@saving`                 (source: raw string)
+// i29-D: the bare-`@var` form previously fell through to the general
+// variable-ref `else`, emitting a STATIC `disabled="saving"` (always-on, no
+// reactivity). Factoring keeps the two call sites in lockstep so they cannot
+// drift. `exprNode` is optional: when absent, emit-event-wiring's
+// `emitExprField` lowers `rawExpr` (e.g. `@saving`) via rewriteExprWithDerived.
+function emitReactiveBoolAttr(
+  name: string,
+  parts: string[],
+  registry: BindingRegistry | null | undefined,
+  source: { rawExpr: string; exprNode?: unknown; refs?: string[] },
+): void {
+  const placeholderId = genVar(`attr_${name}`);
+  parts.push(` data-scrml-bind-bool-${name}="${placeholderId}"`);
+  if (registry) {
+    registry.addLogicBinding({
+      placeholderId,
+      expr: source.rawExpr,
+      isReactiveBoolAttr: true,
+      boolAttrName: name,
+      condExpr: source.rawExpr,
+      condExprNode: source.exprNode,
+      refs: source.refs,
+    });
+  }
+}
+
 // Element-type restrictions per SPEC §5.4
 const BIND_VALID_TAGS: Record<string, Set<string>> = {
   "bind:value":          new Set(["input", "textarea", "select"]),
@@ -2411,6 +2444,30 @@ export function generateHtml(
                 bareRefHandler: true,
               });
             }
+          } else if (varName.startsWith("@") && REACTIVE_BOOL_ATTRS.has(name)) {
+            // i29-D — bare `disabled=@saving` (a reactive Boolean attribute
+            // assigned a bare `@var`). WITHOUT this clause it fell through to
+            // the general `else` below and emitted a STATIC `disabled="saving"`
+            // (always-on, no reactivity). Route it into the SAME reactive
+            // bool-binding the `val.kind === "expr"` branch uses (`disabled=!@x`)
+            // — identical `data-scrml-bind-bool-<name>` placeholder + effect.
+            // The bare `@var` is the reactive source: pass its raw `@`-prefixed
+            // text as the condition (no exprNode); emit-event-wiring's
+            // emitExprField lowers it via rewriteExprWithDerived. `refs` carries
+            // the base cell name (dotted paths subscribe on their root cell).
+            //
+            // SCOPE (held-#81 boundary): this clause is REACTIVE_BOOL_ATTRS-only
+            // (disabled/readonly/required — existing single-writer machinery, no
+            // ownership question). Bare `value=@var` / class / style / title /
+            // data-* still fall to the static `else` below — that is #81's
+            // value-attribute territory, blocked on the writer-ownership ruling.
+            // Do not widen this to a general "bind any bare @var attr" fix.
+            const boolVarName = varName.replace(/^@/, "");
+            const boolBaseVar = boolVarName.split(/[.[(]/)[0];
+            emitReactiveBoolAttr(name, parts, registry, {
+              rawExpr: `@${boolVarName}`,
+              refs: boolBaseVar ? [boolBaseVar] : [],
+            });
           } else {
             // General attribute: strip optional @ prefix so show=@count
             // resolves identically to show=count (allow-atvar-in-attrs).
@@ -2457,19 +2514,11 @@ export function generateHtml(
             // The runtime path wires an `_scrml_effect` that toggles attribute
             // presence (`setAttribute(name, "")` on truthy / `removeAttribute(name)`
             // on falsy) — mirrors the if/show display-toggle structure.
-            const placeholderId = genVar(`attr_${name}`);
-            parts.push(` data-scrml-bind-bool-${name}="${placeholderId}"`);
-            if (registry) {
-              registry.addLogicBinding({
-                placeholderId,
-                expr: val.raw,
-                isReactiveBoolAttr: true,
-                boolAttrName: name,
-                condExpr: val.raw,
-                condExprNode: val.exprNode,
-                refs: val.refs,
-              });
-            }
+            emitReactiveBoolAttr(name, parts, registry, {
+              rawExpr: val.raw,
+              exprNode: val.exprNode,
+              refs: val.refs,
+            });
           }
         } else if (val.kind === "call-ref") {
           if (name === "if" || name === "show") {
