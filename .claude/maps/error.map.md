@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrml
-# updated: 2026-07-18T03:27:22-06:00  commit: c779e606
+# updated: 2026-07-18T08:36:53-06:00  commit: 99ae45ca
 
 ## Diagnostic Catalog (SPEC §34, `compiler/SPEC.md:17832-18650`)
 776 distinct diagnostic codes cataloged (was 775 at the 0a79d838/S264 watermark; +1 this pass, NOT
@@ -59,7 +59,7 @@ of this map's own methodology is advisable at the next FULL_COLD_START or NON_CO
 | CSS (§65 native model) | E-STYLE-* / W-STYLE-* / E-THEME-* / E-DEFAULTS-* | 4 live (E-STYLE-001, E-STYLE-CONFLICT, W-STYLE-CONFLICT-POSSIBLE, **E-THEME-TOKEN-UNKNOWN NEW S265**) | codegen/css-conflict-check.ts, api.js Stage 3.4 (§65.2); codegen/emit-theme-reset.ts (§65.3.2/§65.6, NEW S265) |
 | Enum case | E-ENUM-VARIANT-CASE / E-ENUM-TYPE-CASE | 2 | type-system.ts (§14.4) |
 
-## New fire sites this window (S265, 0a79d838 -> c779e606)
+## New fire sites this window (S265, 0a79d838 -> 99ae45ca)
 - **E-THEME-TOKEN-UNKNOWN** (§65.3.2 / §65.6 / §65.10, PR #95 "CSS Wave-1 emission") — NEW catalog
   row, now FIRES. Two decidable arms, both in `compiler/src/codegen/emit-theme-reset.ts`
   (`lowerCssValueRefs` / `emitThemeCss`, run inside `generateCss`): **(a) use-site** — a `@`-sigil

@@ -1,6 +1,6 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-07-18T03:27:22-06:00  commit: c779e606
+# updated: 2026-07-18T08:36:53-06:00  commit: 99ae45ca
 
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
 
