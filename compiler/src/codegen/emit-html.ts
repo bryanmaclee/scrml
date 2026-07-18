@@ -2,11 +2,15 @@ import { genVar } from "./var-counter.ts";
 import { emitStringFromTree, exprNodeContainsMemberAccess } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
-import { escapeHtmlAttr, VOID_ELEMENTS } from "./utils.ts";
+import { escapeHtmlAttr, VOID_ELEMENTS, HTML_BOOLEAN_ATTRS } from "./utils.ts";
+import { isUserComponentMarkup } from "../component-expander.ts";
+import { validateEmittedArtifact } from "./validate-emit.ts";
+import { emitExprField } from "./emit-expr.ts";
 import { extractReactiveDeps, collectReactiveVarNames, extractReactiveDepsTransitive, buildFunctionBodyRegistry, collectRequestIds } from "./reactive-deps.ts";
 import { hasTemplateInterpolation } from "./rewrite.js";
-import { isRcdataElement } from "../html-elements.js";
+import { isRcdataElement, isHtmlElement } from "../html-elements.js";
 import { CGError } from "./errors.ts";
+import * as acorn from "acorn";
 import type { BindingRegistry } from "./binding-registry.ts";
 import type { CompileContext } from "./context.ts";
 import { isFlatDeclarationBlock, renderFlatDeclarationAsInlineStyle } from "./emit-css.ts";
@@ -84,6 +88,384 @@ function emitReactiveBoolAttr(
       refs: source.refs,
     });
   }
+}
+
+// i81 — form controls whose live state lives in the `value` PROPERTY, not the
+// `value` attribute. `setAttribute("value", …)` writes the DEFAULT value, which
+// the browser ignores once the control is dirty (the user has typed), so a
+// reactive `value=` would silently stop applying. See emitValueAttrApply.
+const FORM_VALUE_ELEMENTS = new Set(["input", "textarea", "select"]);
+
+// i81 — directives that own an element's inline `style`. `if=`/`show=` write
+// `el.style.display`; `transition:`/`in:`/`out:` animate `opacity`. A reactive
+// `style=` on the SAME element does `setAttribute("style", …)`, which replaces
+// the WHOLE attribute and destroys whatever they wrote.
+const STYLE_OWNING_DIRECTIVES = ["if", "show"];
+
+/**
+ * i81 (S239 finding 8) — is this ELEMENT one whose attributes are real DOM
+ * attributes? Fail-CLOSED: only a positively-identified HTML element qualifies.
+ *
+ * The markup attribute namespace is shared by three things that all reach the
+ * value-attr emitter, and only the first is a DOM attribute:
+ *   a. real HTML attrs           `<div class=(@m)>`
+ *   b. scrml DIRECTIVE attrs     `<tableFor pick=[...]>`  (a compiler construct)
+ *   c. component call-site props `<List row={...}/>`      (see isDeclaredPropAttr)
+ *
+ * `resolvedKind` is the NR-authoritative routing signal (NR stamps it at Stage
+ * 3.05; downstream stages read it — the legacy component boolean is a derived
+ * backcompat field and routing on it is asserted against by the P3-FOLLOW test).
+ * So an NR-stamped node is answered by NR: "html-builtin" and nothing else.
+ *
+ * WHY `null` NEEDS A SEPARATE ANSWER — and why the first cut's rationale was
+ * WRONG. That cut admitted `resolvedKind == null` on the claim that "a <match>
+ * arm body is not NR-stamped". FALSE: name-resolver.ts:365-369 explicitly
+ * recurses into `anyN.arms` and walks `arm.body`. The measurement (arm-body
+ * nodes arrive here with resolvedKind === undefined) was nonetheless correct —
+ * the EXPLANATION was wrong, and an unexplained fail-open is a latent hole.
+ *
+ * The real source: emit-match.ts (~545) RE-PARSES each arm's `bodyRaw` through
+ * the BS+TAB pipeline as a synthetic fragment AT CODEGEN TIME. NR ran long
+ * before (Stage 3.05), so those fresh nodes were never stamped. The `null`
+ * population is therefore "markup synthesized AFTER name resolution" — arm
+ * bodies today, and anything a future stage synthesizes.
+ *
+ * That hole was REAL, not theoretical: `<tableFor pick=[...]>` inside a match arm
+ * arrives with resolvedKind === undefined and emitted 2 bogus
+ * `data-scrml-bind-attr-pick` DOM bindings under the first cut.
+ *
+ * So for the post-NR population we fall back to the SYNTACTIC question NR would
+ * have answered — `isHtmlElement`, the compiler's own element registry
+ * (`rendersToDom`). It answers true for div/span/button/svg/g/path and false for
+ * tableFor/formFor/each/match. A dynamic `class=` inside a `<match>` arm is
+ * idiomatic and keeps working; a directive element inside one is refused.
+ */
+function valueAttrElementIsLowerable(node: any, tag: string): boolean {
+  if (node?.resolvedKind === "html-builtin") return true;
+  // Post-NR synthesized markup (re-parsed <match> arm bodies): NR never saw it,
+  // so ask the element registry directly. Fails closed on an unknown tag.
+  if (node?.resolvedKind == null) return isHtmlElement(tag);
+  return false;
+}
+
+/**
+ * i81 (S239 finding 7) — is `name` a COMPONENT CALL-SITE PROP on this node?
+ *
+ * Component expansion runs BEFORE codegen and merges the call site's props onto
+ * the component's ROOT element, so by the time emit-html sees the node its tag is
+ * the definition's root element (`div`), not `List`, and its `attrs` are a MERGE
+ * of the definition's own attributes and the caller's props. The two must be
+ * treated oppositely:
+ *
+ *   <List row={ (item) => <span>…</span> }/>   ← a §14.9 parametric-snippet PROP.
+ *       A compiler construct, consumed by the snippet machinery. Lowering it
+ *       produced `const _scrml_v = ((item) => <span>…` — markup spliced into JS
+ *       ⇒ E-CODEGEN-INVALID-LOGIC.
+ *   const Card = <div class=(@theme)>…        ← the component's OWN root attr.
+ *       An ordinary reactive value attribute that SHOULD lower.
+ *
+ * The first cut refused on `_expandedFrom != null`, i.e. EVERY attribute of every
+ * expanded root — which left issue #81 unfixed for the whole class of user
+ * components (S239 finding 7). The expander now stamps `_componentPropNames`
+ * (its `def.propsDecl`), which is the precise discriminator: a DECLARED prop is a
+ * construct; anything else on the root is markup.
+ *
+ * Fails CLOSED when the stamp is absent on an expanded root (older/secondary
+ * expansion paths): refuse, keeping the pre-i81 drop rather than risking a
+ * miscompile.
+ */
+function isDeclaredPropAttr(node: any, name: string): boolean {
+  if (node?._expandedFrom == null) return false;
+  const declared = node._componentPropNames;
+  if (!Array.isArray(declared)) return true;
+  return declared.includes(name);
+}
+
+// i81 (S268 fix-round finding 1) — JS globals that legitimately appear as free
+// identifiers in a LOWERED value-attr expression. A reactive `@`-ref lowers to
+// `_scrml_reactive_get("x")` (its only free identifier is the `_scrml_`-prefixed
+// runtime helper), so a lowered expression whose free identifiers are all either
+// `_scrml_`-prefixed or in this set is self-contained. Anything else is a token
+// that will be UNDEFINED at runtime — see loweredExprHasFreeIdentifier.
+const VALUE_ATTR_SAFE_GLOBALS = new Set<string>([
+  "String", "Number", "Boolean", "Array", "Object", "JSON", "Math", "Date",
+  "RegExp", "Map", "Set", "WeakMap", "WeakSet", "Promise", "Symbol", "BigInt",
+  "parseInt", "parseFloat", "isNaN", "isFinite", "NaN", "Infinity", "undefined",
+  "globalThis", "window", "document", "console", "Error",
+  "encodeURIComponent", "decodeURIComponent",
+]);
+
+/**
+ * i81 (S268 fix-round finding 1) — does a LOWERED value-attr expression reference
+ * a FREE identifier that will be undefined at runtime?
+ *
+ * THE CRASH: a STRING prop on a component root (`const Badge = <span
+ * title=(label) props={label:string}>`, `<Badge label="hi"/>`) is substituted by
+ * the expander into the root's own value-attr expression as a BARE token — the
+ * value `hi`, not the string literal `"hi"`. `title=(label)` lowers to
+ * `const _scrml_v = ((hi));`, where `hi` is a free, undeclared identifier. That
+ * throws `ReferenceError` at DOMContentLoaded INSIDE the shared wiring handler,
+ * so every UNRELATED binding after it on the page never wires — a whole-page
+ * crash, strictly worse than the pre-#81 silent drop. It slips both the Acorn
+ * PARSE gate (F2) and R26, because `((hi))` is syntactically valid — only
+ * EXECUTION (or a scope walk) catches the free reference.
+ *
+ * This is an Acorn SCOPE WALK, not a regex (a free reference is a scoping
+ * property). A reactive `@`-ref lowers to `_scrml_reactive_get("x")` whose only
+ * free identifier is `_scrml_`-prefixed; a self-contained expression's free
+ * identifiers are therefore all `_scrml_`-prefixed or JS globals. Any OTHER free
+ * identifier is a substituted-prop token (or similar) that crashes at runtime.
+ *
+ * Gated by the caller to `_expandedFrom` component roots (the only place the
+ * expander substitutes props into a root's own attributes), so it never
+ * false-refuses a top-level value-attr whose bare identifier is a server-fn name
+ * awaiting the whole-buffer post-mangle pass.
+ */
+function loweredExprHasFreeIdentifier(lowered: string): boolean {
+  let ast: acorn.Node;
+  try {
+    ast = acorn.parse(`const _scrml_probe = (${lowered});`, { ecmaVersion: 2022, sourceType: "module" });
+  } catch {
+    // Unparseable is the F2 probe's concern (it runs first); not ours.
+    return false;
+  }
+  let found = false;
+  const walk = (node: any, bound: Set<string>): void => {
+    if (found || !node || typeof node.type !== "string") return;
+    let scope = bound;
+    if (
+      node.type === "FunctionDeclaration" ||
+      node.type === "FunctionExpression" ||
+      node.type === "ArrowFunctionExpression"
+    ) {
+      const names: string[] = [];
+      const collect = (p: any) => {
+        if (!p) return;
+        if (p.type === "Identifier") names.push(p.name);
+        else if (p.type === "AssignmentPattern") collect(p.left);
+        else if (p.type === "RestElement") collect(p.argument);
+        else if (p.type === "ArrayPattern") (p.elements ?? []).forEach(collect);
+        else if (p.type === "ObjectPattern") (p.properties ?? []).forEach((pr: any) => collect(pr.value ?? pr.argument));
+      };
+      (node.params ?? []).forEach(collect);
+      if (node.id?.name) names.push(node.id.name);
+      scope = new Set([...bound, ...names]);
+    }
+    if (node.type === "VariableDeclarator" && node.id?.type === "Identifier") {
+      bound.add(node.id.name);
+    }
+    if (node.type === "Identifier") {
+      const n = node.name;
+      if (!scope.has(n) && !n.startsWith("_scrml_") && !VALUE_ATTR_SAFE_GLOBALS.has(n)) {
+        found = true;
+        return;
+      }
+    }
+    for (const key of Object.keys(node)) {
+      if (key === "type" || key === "start" || key === "end" || key === "loc") continue;
+      // Non-reference identifier positions: an object-property KEY and a
+      // non-computed member `.property` are NAMES, not reads of a binding.
+      if (key === "key" && node.type === "Property" && !node.computed) continue;
+      if (key === "property" && node.type === "MemberExpression" && !node.computed) continue;
+      const child = (node as any)[key];
+      if (Array.isArray(child)) for (const c of child) walk(c, scope);
+      else if (child && typeof child.type === "string") walk(child, scope);
+    }
+  };
+  walk(ast, new Set<string>());
+  return found;
+}
+
+/**
+ * i81 (S239 finding 2) — CODEGEN-CAPABILITY gate. Can this reactive VALUE
+ * attribute's expression be lowered to VALID JavaScript? Returns false (with a
+ * diagnostic) for shapes we cannot lower faithfully, so the attribute keeps its
+ * pre-i81 behavior (dropped) instead of becoming a MISCOMPILE. A dropped
+ * attribute is a bug; invalid JS is worse — it takes the whole page down.
+ *
+ * This is ORTHOGONAL to Axiom ① writer-ownership (`analyzeWriterConflict`): this
+ * asks "can the compiler lower it at all", the ① analysis asks "is it the sole
+ * writer of its DOM surface". The lowerability gate runs FIRST — an expression
+ * that cannot be lowered is dropped regardless of any surface conflict.
+ *
+ * Refusing HERE means no placeholder and no binding are produced at all, so the
+ * emitted HTML stays byte-identical to pre-i81 and the wiring emitters can never
+ * disagree with the markup.
+ */
+function valueAttrIsLowerable(
+  val: any,
+  name: string,
+  attrs: any[],
+  tag: string,
+  attr: any,
+  node: any,
+  errors: any[] | null | undefined,
+): boolean {
+  // --- (2) the expression must lower to VALID JavaScript -------------------
+  // `emitExprField` emits a template literal verbatim (the expression parser
+  // classifies it as a `lit`), so `class=(`btn ${@variant}`)` lowers with a RAW
+  // `@` — invalid JS. Pre-i81 the attr was dropped and the bundle stayed valid;
+  // with the emitter live, the whole COMPILE now aborts on
+  // E-CODEGEN-INVALID-LOGIC ("compiler defect, please report it") for an
+  // IDIOMATIC shape. So this is not merely "don't emit bad JS" — without this
+  // check the diff breaks adopter builds that compiled clean before.
+  //
+  // Checked with the repo's own acorn helper (`isSingleJsExpression`), the exact
+  // parser the S141 emitted-JS gate uses, so the two cannot disagree. Rewriting
+  // `@` inside template literals belongs in `emitExprField`/`rewriteExpr` and
+  // would change every lowering path in the compiler — a separate arc.
+  const lowered = emitExprField(val.exprNode, val.raw, { mode: "client" });
+  // Validate the EXACT statement shape the wiring emitters produce, with the
+  // very parser + options the S141 emitted-JS gate uses, so this check and that
+  // gate can never disagree. (Note: `isSingleJsExpression` is NOT usable here —
+  // acorn's `parseExpressionAt("(cls)")` returns the INNER node, whose `end`
+  // stops before the closing paren, so it reports every parenthesized
+  // expression as invalid. `val.raw` is always parenthesized.)
+  const _probe = validateEmittedArtifact({
+    sourceFile: "",
+    artifact: "value-attr-probe.js",
+    contents: `const _scrml_v = (${lowered});`,
+  });
+  if (_probe !== null) {
+    if (errors) {
+      errors.push(new CGError(
+        "W-CG-VALUE-ATTR-UNLOWERABLE",
+        `W-CG-VALUE-ATTR-UNLOWERABLE: the reactive value attribute \`${name}=\` on ` +
+        `<${tag}> could not be lowered to valid JavaScript, so it is NOT emitted and ` +
+        `the attribute will be absent at runtime.\n` +
+        `  Expression: ${String(val.raw ?? "").slice(0, 80)}\n\n` +
+        `  The usual cause is a template literal that interpolates a reactive cell — ` +
+        `\`${name}=(\`… \${@cell} …\`)\`. The expression parser treats a template literal ` +
+        `as an opaque literal, so the \`@cell\` reference is not rewritten.\n` +
+        `  Workaround: use string concatenation instead — ` +
+        `\`${name}=("…" + @cell + "…")\` — which lowers correctly.`,
+        attr?.span ?? node?.span ?? { file: "", start: 0, end: 0, line: 0, col: 0 },
+        "warning",
+      ));
+    }
+    return false;
+  }
+
+  // NOTE — the `style=` vs `if=`/`show=`/`transition:` clobber (S239 finding 3,
+  // formerly a `W-CG-VALUE-ATTR-STYLE-CONFLICT` warn+drop here) is NO LONGER a
+  // lowerability concern. Under Axiom ① it is a DOM-surface WRITER conflict,
+  // handled uniformly by `analyzeWriterConflict` (which promotes it to the
+  // `E-ATTR-WRITER-CONFLICT` compile error naming both sites). `attrs`/`tag`
+  // remain in the signature for parity with the surface-scan call site.
+
+  // --- (4) component-root prop-substitution crash (S268 fix-round finding 1) ---
+  // On an `_expandedFrom` component root, the expander substitutes a STRING prop
+  // into the root's own value-attr expression as a BARE token: `title=(label)` on
+  // `<Badge label="hi"/>` lowers to `((hi))` — a FREE identifier that throws a
+  // ReferenceError at DOMContentLoaded INSIDE the shared wiring handler, killing
+  // EVERY unrelated binding on the page. Pre-#81 the attr was silently dropped
+  // (no crash); emitting it turned a missing attribute into a dead page. FAIL
+  // CLOSED: if the lowered expression on such a root references a free identifier
+  // (not `_scrml_`-prefixed, not a JS global — i.e. not a self-contained reactive
+  // lowering), drop the attribute, restoring the pre-#81 no-crash behavior. Gated
+  // to `_expandedFrom` roots so a top-level value-attr whose bare identifier is a
+  // server-fn name awaiting the post-mangle pass is never false-refused.
+  if (node?._expandedFrom != null && loweredExprHasFreeIdentifier(lowered)) {
+    if (errors) {
+      errors.push(new CGError(
+        "W-CG-VALUE-ATTR-COMPONENT-PROP",
+        `W-CG-VALUE-ATTR-COMPONENT-PROP: the reactive value attribute \`${name}=\` on ` +
+        `the root of component <${node._expandedFrom}> references a value that is not a ` +
+        `reactive cell, so it cannot be lowered safely and is NOT emitted (the ` +
+        `attribute is absent at runtime).\n` +
+        `  Expression: ${String(val.raw ?? "").slice(0, 80)}\n\n` +
+        `  The usual cause is a STRING prop used in an expression on the component's ` +
+        `root element (\`<${node._expandedFrom} ${name}=(<prop>) …>\`): the prop is ` +
+        `substituted by value as a bare token, which is undefined at runtime. Reference ` +
+        `a reactive cell (\`@cell\`) instead, or move the attribute onto a child element ` +
+        `of the component body.`,
+        attr?.span ?? node?.span ?? { file: "", start: 0, end: 0, line: 0, col: 0 },
+        "warning",
+      ));
+    }
+    return false;
+  }
+
+  return true;
+}
+
+// i81 Axiom ① — attribute-name prefixes for the per-token / per-property
+// COMPOSERS that RMW a single slice of a shared surface. A wholesale value
+// writer cannot coexist with any of these on the same physical surface.
+const TRANSITION_ATTR_PREFIXES = ["transition:", "in:", "out:"];
+
+/**
+ * i81 Axiom ① — DOM-surface writer-ownership conflict analysis.
+ *
+ * A reactive value attribute (`class=(expr)`, `style=(expr)`, `value=(expr)`,
+ * `title=`, `data-*`, …) is a WHOLESALE writer of its physical DOM surface: it
+ * replaces the ENTIRE className / the ENTIRE style attribute / the `.value`
+ * property / the whole attribute on every reactive update. Per Axiom ①
+ * (exclusive wholesale-owner — bryan's #81 ruling, SPEC §5.5.3/§5.5.4) a
+ * wholesale writer must be the SOLE writer of its surface. A second writer on
+ * the same surface would have its work silently erased on the next wholesale
+ * write:
+ *   - className ← `class:name=` (classList.toggle, per-token composer),
+ *                 `transition:`/`in:`/`out:` (transition classes)
+ *   - style     ← `if=`/`show=` (`el.style.display`, per-property composer),
+ *                 `transition:`/`in:`/`out:` (`opacity`)
+ *   - `.value`  ← `bind:value` (property + writeback, on a form control)
+ * A generic string attribute (`title`, `id`, `alt`, `data-*`) has no composer
+ * form, so it is always a sole writer of its own surface.
+ *
+ * Returns null when this attribute is the sole writer of its surface (→ EMIT the
+ * binding, the #81 fix), or a descriptor naming the competing writer(s) when it
+ * is not (→ `E-ATTR-WRITER-CONFLICT`, the author picks one owner).
+ *
+ * Self-exclusion is automatic: the scan matches only COMPOSER names, never the
+ * wholesale owner's own name, so the emitted attribute never matches itself.
+ *
+ * Two wholesale owners of one surface (e.g. `<div class=(@a) class=(@b)>`) are
+ * NOT flagged: they emit two independent reactive `class` bindings with no error
+ * — benign at runtime (the HTML parser keeps the first `class` attribute; the
+ * second binding's querySelector finds nothing and its effect is a null-guarded
+ * no-op), so it is a latent author mistake rather than a crash. Detecting it
+ * would require counting same-named wholesale attrs across the per-attr emit
+ * loop and risks a double-fire; left as a known gap (docs/known-gaps.md).
+ */
+function analyzeWriterConflict(
+  attrs: any[],
+  name: string,
+  tag: string,
+): { surface: string; competitors: string[] } | null {
+  const otherNames = (attrs || [])
+    .filter((a: any) => a && typeof a.name === "string")
+    .map((a: any) => a.name as string);
+  const isTransition = (n: string) =>
+    TRANSITION_ATTR_PREFIXES.some((p) => n.startsWith(p));
+
+  let surface: string | null = null;
+  let competitors: string[] = [];
+
+  if (name === "class") {
+    surface = "class";
+    competitors = otherNames.filter(
+      (n) => n.startsWith("class:") || isTransition(n),
+    );
+  } else if (name === "style") {
+    surface = "style";
+    competitors = otherNames.filter(
+      (n) => STYLE_OWNING_DIRECTIVES.includes(n) || isTransition(n),
+    );
+  } else if (name === "value" && FORM_VALUE_ELEMENTS.has(tag)) {
+    surface = "value";
+    competitors = otherNames.filter((n) => n === "bind:value");
+  } else {
+    // Generic string attribute (title/id/alt/data-*/…): its own surface, no
+    // composer form → always a sole writer.
+    return null;
+  }
+
+  // Dedupe while preserving order (a surface may carry several composers).
+  const seen = new Set<string>();
+  competitors = competitors.filter((n) => (seen.has(n) ? false : (seen.add(n), true)));
+  if (competitors.length === 0) return null;
+  return { surface, competitors };
 }
 
 // Element-type restrictions per SPEC §5.4
@@ -2519,6 +2901,176 @@ export function generateHtml(
               exprNode: val.exprNode,
               refs: val.refs,
             });
+          } else if (
+            !valueAttrElementIsLowerable(node, tag) ||
+            isDeclaredPropAttr(node, name) ||
+            isUserComponentMarkup(node) ||
+            HTML_BOOLEAN_ATTRS.has(name) ||
+            !valueAttrIsLowerable(val, name, attrs, tag, attr, node, errors)
+          ) {
+            // i81 — NOT a lowerable value attribute. Emit NOTHING, preserving
+            // the exact pre-i81 behavior (silent drop). EVERY clause here was
+            // forced by a REAL regression found by recompiling the corpus (R26);
+            // the unit suite was 100% green through all of them.
+            //
+            // The markup attribute namespace is shared by three different things
+            // that all reach this emitter, and only the first is a DOM attribute:
+            //   a. real HTML attrs           `<div class=(@m)>`
+            //   b. scrml DIRECTIVE attrs     `<tableFor pick=[...]>`  (NOT DOM)
+            //   c. component call-site props `<List row={...}/>`      (NOT DOM)
+            //
+            // 1. resolvedKind must be "html-builtin" (a real element) or null.
+            //    `resolvedKind` is the NR-authoritative routing signal: NR
+            //    (Stage 3.05) stamps it, downstream stages READ it, and the
+            //    legacy component boolean survives only as a derived backcompat
+            //    field — routing on it directly is asserted against by the
+            //    P3-FOLLOW migration-invariant test, which caught an earlier cut
+            //    of this guard. Measured: `<button class=(...)>` is
+            //    "html-builtin"; `<tableFor>`/`<formFor>` are "unknown" (they are
+            //    scrml directives — dev-1-react.scrml emitted a bogus `pick` DOM
+            //    binding before this clause).
+            //
+            //    `null` is admitted because a <match> ARM body is not NR-stamped,
+            //    and a dynamic `class=` inside an arm is idiomatic. That makes
+            //    null ambiguous on its own, hence clause 2.
+            //
+            // 2. `_expandedFrom` — the component-expander's stamp on an EXPANDED
+            //    component root. Expansion runs BEFORE codegen and merges
+            //    call-site props onto that root, so the TAG is useless as a
+            //    discriminator (emit-html sees `div`, not `List`) and its
+            //    resolvedKind is null — indistinguishable from an arm body
+            //    WITHOUT this stamp. snippet-002-parametric.scrml lowered a
+            //    parametric-snippet lambda to `const _scrml_v = ((item) =>
+            //    <span>...` — markup spliced into JS => E-CODEGEN-INVALID-LOGIC.
+            //
+            // 3. `isUserComponentMarkup` — the sanctioned NR-prefer-with-fallback
+            //    component predicate (covers the resolvedKind == null + legacy
+            //    component-boolean backcompat case that clause 1 would admit).
+            //
+            // 4. `HTML_BOOLEAN_ATTRS` — a boolean attribute carries meaning by
+            //    PRESENCE, so `setAttribute("checked", "false")` still renders
+            //    CHECKED. 27-type-derived-table.scrml: `<input checked=(@a && @b)>`
+            //    began emitting exactly that — a permanently-checked checkbox.
+            //    These stay dropped rather than newly-WRONG. REACTIVE_BOOL_ATTRS
+            //    is deliberately NOT widened to cover them: bool and value are
+            //    different lowerings, and that promotion is a separate decision.
+            //
+            // Conservative by construction: every clause preserves the pre-i81
+            // drop, so none can regress a shape that works today. Known costs,
+            // all pre-existing and recorded as follow-ups rather than silently
+            // widened: an SVG child (`<use xlink:href=(@h)/>`, resolvedKind
+            // "unknown"), a value attr on a component call site
+            // (`<Card class=(@x)/>`), and boolean attrs beyond the
+            // REACTIVE_BOOL_ATTRS trio all remain dropped.
+          } else if (analyzeWriterConflict(attrs, name, tag)) {
+            // i81 Axiom ① — this reactive value attribute is a WHOLESALE writer
+            // of a DOM surface that ANOTHER writer also targets on the same
+            // element (bryan's #81 ruling: exclusive wholesale-owner per
+            // surface). Emitting it would silently erase the composer's work on
+            // the next reactive update (`class=(expr)` erases a `class:` toggle;
+            // `style=(expr)` wipes the `display` a `show=` writes). So this is a
+            // COMPILE ERROR (`E-ATTR-WRITER-CONFLICT`) naming both sites — the
+            // author picks one owner. Emit NOTHING so the artifact stays
+            // byte-identical to pre-i81: a program that ignores the error keeps
+            // the old (dropped) behavior, not a broken one.
+            //
+            // Re-fetch the descriptor (the `else if` proved it non-null): the
+            // analysis is a pure scan over a handful of sibling attrs, so a
+            // second call is cheap and keeps the emit body below un-nested.
+            const _conflict = analyzeWriterConflict(attrs, name, tag)!;
+            if (errors) {
+              const _competitors = _conflict.competitors
+                .map((c) => `\`${c}=\``)
+                .join(", ");
+              const _plural = _conflict.competitors.length !== 1;
+              const _surfaceLabel =
+                _conflict.surface === "value"
+                  ? "the `value` property"
+                  : "the whole `" + _conflict.surface + "` attribute";
+              const _pick =
+                name === "class"
+                  ? `    - keep \`class=(…)\` and fold the toggles into the expression ` +
+                    `(e.g. \`class=(@active ? "tab active" : "tab")\`), or\n` +
+                    `    - drop \`class=(…)\` and use \`class:\`/transitions for every class.`
+                  : name === "style"
+                  ? `    - keep \`style=(…)\` and drive visibility from inside it, or\n` +
+                    `    - drop \`style=(…)\` and move the dynamic styling to \`class=\`/\`class:\` ` +
+                    `(which composes with \`if=\`/\`show=\`/transitions).`
+                  : `    - use \`value=(…)\` alone, or \`bind:value\` alone — not both.`;
+              errors.push(new CGError(
+                "E-ATTR-WRITER-CONFLICT",
+                `E-ATTR-WRITER-CONFLICT: \`${name}=\` on <${tag}> is a WHOLESALE writer of ` +
+                `${_surfaceLabel} — it replaces the whole surface on every reactive update. ` +
+                `But ${_competitors} on the same element also ${_plural ? "write" : "writes"} ` +
+                `\`${_conflict.surface}\`, and the next \`${name}=\` update would silently erase ` +
+                `${_plural ? "their" : "its"} work.\n\n` +
+                `  Axiom ①: each physical DOM surface (className / style / value / each attribute) ` +
+                `has at most one WHOLESALE owner. Pick one:\n${_pick}\n` +
+                `  (SPEC §5.5.3, §5.5.4, §34.)`,
+                attr?.span ?? node?.span ?? { file: "", start: 0, end: 0, line: 0, col: 0 },
+                "error",
+              ));
+            }
+          } else {
+            // i81 — reactive VALUE attribute (`class=`, `style=`, `title=`,
+            // `data-*`, `id=`, `alt=`, …). THE MISSING FINAL `else`, and the
+            // SOLE wholesale owner of its surface (Axiom ①: the conflict branch
+            // above already diverted any surface with a competing writer).
+            //
+            // Before this branch existed the chain above ended here, so a
+            // dynamic value attribute outside `<each>` matched NO branch:
+            // nothing was pushed to `parts` and the attribute vanished from the
+            // emitted HTML — silently, on a clean compile with 0 diagnostics
+            // (the CSS written against those classes then read as dead code).
+            // Inside `<each>` it always worked, because emit-each.ts builds
+            // elements imperatively and calls setAttribute directly.
+            //
+            // Mirrors the REACTIVE_BOOL_ATTRS block above (placeholder +
+            // addLogicBinding, carrying expr/condExpr/condExprNode/refs
+            // identically); the consumer is in emit-event-wiring.ts. This is a
+            // DIFFERENT lowering from the bool path, not a widening of it: a
+            // bool attr toggles presence on truthiness, a value attr sets a
+            // string and is removed only on ABSENCE (SPEC §42.1.1 / §42.9).
+            //
+            // Reaching here means: an HTML element (component tags are handled
+            // by the branch above) carrying a plain attribute — every special
+            // family (`bind:`, `class:`, `transition:`/`in:`/`out:`, `ref`,
+            // developer attrs) is peeled off with `continue` well before this
+            // dispatch, and `if`/`show`/`on*`/bool by the branches above.
+            const placeholderId = genVar(`attr_${name}`);
+            // CSS-safe placeholder key. The name reaches the DOM verbatim via
+            // `setAttribute` (SVG needs `viewBox`/`xlink:href` intact), but the
+            // KEY is also interpolated into a `querySelector` attribute
+            // selector, where an unescaped `:` is invalid CSS and THROWS —
+            // aborting module init and every binding on the page. Sanitize the
+            // key, keep the name. See LogicBinding.valueAttrKey.
+            const attrKey = name.replace(/[^A-Za-z0-9_-]/g, "_");
+            parts.push(` data-scrml-bind-attr-${attrKey}="${placeholderId}"`);
+            if (registry) {
+              registry.addLogicBinding({
+                placeholderId,
+                // S239 finding 10 — a value attr carries an EXPRESSION, not a
+                // condition, so it uses the standard `expr`/`exprNode` pair every
+                // LogicBinding has. The first cut set `expr` AND `condExpr` to the
+                // same `val.raw` and `condExprNode` to the same node (copy-paste
+                // from the bool block, where `cond*` is apt because it really is a
+                // predicate) — redundant derivable state with two names for one
+                // value, and two chances to drift.
+                expr: val.raw,
+                exprNode: val.exprNode,
+                isReactiveValueAttr: true,
+                valueAttrName: name,
+                valueAttrKey: attrKey,
+                // S239 finding 5 — `value` on a form control must be written via
+                // the `.value` PROPERTY, not `setAttribute`. Decided HERE because
+                // this is the only place the TAG is known; the wiring emitters see
+                // the binding, not the element.
+                ...(name === "value" && FORM_VALUE_ELEMENTS.has(tag)
+                  ? { valueAttrIsFormValue: true }
+                  : {}),
+                refs: val.refs,
+              });
+            }
           }
         } else if (val.kind === "call-ref") {
           if (name === "if" || name === "show") {

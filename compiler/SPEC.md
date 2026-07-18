@@ -1863,9 +1863,20 @@ called.
   SHALL be evaluated once at mount time and do NOT subscribe to changes.
 - Multiple `${...}` interpolations in a single `class` attribute are supported. Each
   reactive variable in any interpolation produces an independent reactive subscription.
-- Template literal class interpolation and `class:` directives MAY coexist on the same
-  element. The two mechanisms are independent. The template literal controls the full class
-  string; the `class:` directives toggle individual classes.
+- A reactive template-literal `class` is a WHOLESALE writer of the element's `class`
+  surface: when any interpolated `@variable` changes it calls `setAttribute("class", …)`,
+  replacing the ENTIRE class string. Under Axiom ① (§5.5.4) a wholesale writer is the
+  exclusive owner of its surface, so a reactive `class="…${@…}…"` and a `class:name=`
+  directive (or a transition directive) on the SAME element CONTEND: the template's next
+  write erases the classes the `class:` toggles maintain. The two are therefore NOT
+  independent — this is the writer conflict Axiom ① describes.
+  > Note (enforcement scope): the `E-ATTR-WRITER-CONFLICT` diagnostic (§34) is currently
+  > emitted for the `class=(expression)` / `style=(expression)` / `value=(expression)`
+  > wholesale owners (§5.5.4). Promoting the *template-literal* wholesale owner to the same
+  > error is a tracked follow-up: the current code generator still emits both writers for a
+  > reactive template-literal `class` + `class:` mix (legacy §5.5.3 behavior), and existing
+  > render baselines exercise that shape. The normative direction is the conflict above; the
+  > template-literal-owner enforcement lands with that baseline migration.
 
 **Worked example — prefix and reactive suffix:**
 
@@ -1887,40 +1898,60 @@ Renders `class="card card-dark"` initially. Changing `@theme` to `"light"` updat
 
 Any change to `@size` or `@variant` updates the full class string.
 
-#### 5.5.4 Dynamic Class Expression — `class={expression}` (Planned)
+#### 5.5.4 Dynamic Class Expression — `class=(expression)` / `class={expression}`
 
-A braced expression as the `class` attribute value computes the entire class string from
-an arbitrary JavaScript expression.
+A parenthesized or braced expression as the `class` attribute value computes the ENTIRE
+class string from an arbitrary JavaScript expression, and rewrites the whole `class`
+attribute reactively when any reactive cell the expression reads changes.
 
 **Syntax:**
 
 ```
-class-expr ::= 'class=' '{' js-expression '}'
+class-expr ::= 'class=' ( '(' js-expression ')' | '{' js-expression '}' )
 ```
 
 **Example:**
 
 ```scrml
-<isActive> = false
-<hasError> = false
-<div class=${isActive ? "active" : ""} ${hasError ? "error" : ""}>content</>
+<mode> = "a"
+<button class=(@mode == "a" ? "tab active" : "tab")>A</button>
 ```
 
-**Status:** This form is parsed at the block-splitter level but is NOT yet fully implemented
-in the code generator. Gauntlet developers should use `class:name=@condition` (§5.5.2) or
-template literal interpolation (§5.5.3) until this form is specified and implemented.
+**Normative statements:**
 
-**Planned behavior (non-normative):**
+- `class=(expression)` (and the equivalent braced `class={expression}`) SHALL compute the
+  full class string by evaluating `expression`, and SHALL re-evaluate it and rewrite the
+  whole `class` attribute whenever any `@variable` the expression reads changes.
+- The result SHALL be coerced with `String()`. A `not` result (JS `null`) — or `undefined`
+  from foreign code — SHALL REMOVE the attribute (an empty className), per §42.9. The
+  DEFINED values `""`, `0`, `false`, `[]` SHALL be written as their `String()` form and
+  SHALL NOT be treated as absence (§42.1.1).
+- **Exclusive wholesale ownership (Axiom ①).** `class=(expression)` is a WHOLESALE writer of
+  the element's `class` surface: it replaces the entire className on every reactive update.
+  It SHALL be the SOLE writer of that surface on its element. If a `class:name=` directive
+  (§5.5.2) or a transition directive (`transition:`/`in:`/`out:`) — either of which writes
+  individual classes — also targets `class` on the SAME element, the compiler SHALL emit
+  `E-ATTR-WRITER-CONFLICT` (§34) naming both sites; the wholesale write would otherwise
+  silently erase the per-class writer's work on its next evaluation. A SOLE
+  `class=(expression)` SHALL emit its reactive binding.
+  > Note (enforcement scope): `E-ATTR-WRITER-CONFLICT` is currently emitted from the
+  > STATIC-HTML emission context (the top-level element walk in `generateHtml`). The
+  > LOOP-context emitters — `<each>` (§20) and `for…lift` — build their elements through
+  > a separate imperative path that does not yet run the writer-ownership analysis, so a
+  > `class=(expression)` + `class:` mix ONE loop-nesting away compiles without the
+  > diagnostic today. Loop-context enforcement is a tracked follow-up (it must first
+  > reconcile with the `for…lift` one-shot / non-reactive quirk); the axiom above is the
+  > normative rule, and the loop gap is disclosed in `docs/known-gaps.md`.
+- This mirrors the other wholesale value writers, each the exclusive owner of its physical
+  DOM surface: `style=(expression)` (the whole `style` attribute; conflicts with `if=`/
+  `show=`/transitions), `value=(expression)` on a form control (the `.value` property;
+  conflicts with `bind:value`), and dynamic generic attributes (`title=`, `id=`, `alt=`,
+  `data-*` — each its own surface, no per-token composer form, so always a sole writer).
 
-- `class={expression}` will compute the full class string by evaluating `expression` as a
-  JavaScript expression.
-- If the expression references `@variables`, the class will update reactively when those
-  variables change.
-- The expression result SHALL be coerced to a string. An array result SHALL be joined with
-  spaces (e.g., `["a", "b"]` → `"a b"`). A null or undefined result SHALL produce an empty
-  class string.
-
-This form will be fully specified and normalized in a future spec revision. SPEC-ISSUE-013 tracks it.
+**Coercion refinement (non-normative).** Array/object results currently coerce through JS
+`String()` (`["a", "b"]` → `"a,b"`). A future revision MAY join arrays with spaces
+(`["a", "b"]` → `"a b"`); SPEC-ISSUE-013 tracks that refinement. It does not affect the
+scalar cases above, which are normative.
 
 #### 5.5.5 Class Binding on Components
 
@@ -1982,7 +2013,7 @@ Component-scoped CSS (§24.6) interacts with class binding as follows:
 | `class="foo bar"` | No | Static at compile time | Implemented |
 | `class:name=@cond` | Yes | Single class toggled by reactive boolean | Implemented |
 | `class="prefix-${@var}"` | Yes | Full class string via template literal | Implemented |
-| `class={expression}` | Conditional | Full class string from JS expression | Planned (SPEC-ISSUE-013) |
+| `class=(expression)` / `class={expression}` | Yes | Full class string from a JS expression; exclusive wholesale owner of `class` (§5.5.4, Axiom ①) | Implemented |
 
 ---
 
@@ -18090,6 +18121,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-ATTR-010 | §5.4 | `bind:` target is not an `@` reactive variable | Error |
 | E-ATTR-011 | §5.4 | `bind:` used on an unsupported attribute name | Error |
 | E-ATTR-012 | §5.4 | `bind:` and explicit event handler conflict on same element | Error |
+| E-ATTR-WRITER-CONFLICT | §5.5.3, §5.5.4 | A WHOLESALE reactive value writer — `class=(expr)` / `style=(expr)` (the whole attribute) or `value=(expr)` on a form control (the `.value` property) — shares a physical DOM surface with ANOTHER writer on the SAME element, so the wholesale write would silently erase the other's work on its next reactive evaluation. Detected pairs: `class=(expr)` with `class:name=` or transition classes (`className` surface); `style=(expr)` with `if=`/`show=` or transitions (`style`/`display` surface); `value=(expr)` with `bind:value` (`.value` surface). Axiom ① (bryan's #81 ruling): each physical DOM surface has at most one wholesale owner — the diagnostic names BOTH sites and the author picks one. The conflicting attribute is NOT emitted (byte-identical to pre-#81), so an ignored error degrades to the old behavior rather than a broken one. Generic string attributes (`title=`, `id=`, `alt=`, `data-*`) have no per-token composer form and are always sole writers. (Catalog addition S268 — #81 writer-ownership Axiom ①; emitted at `compiler/src/codegen/emit-html.ts` `analyzeWriterConflict`.) | Error |
 | E-ATTR-UNQUOTED-OPERATOR | §5.1, §17.1 | An unquoted attribute CONDITION (`if=`/`show=`/`else-if=`) contains a bare binary/ternary operator (`>= > < <= == != && \|\| + - * /` or ternary `?:`). An unquoted condition admits only the atomic forms (`@var` / `obj.prop` / `fn()` / prefix `!`); operator conditions SHALL be parenthesized `if=(expr)` or quoted `if="expr"`. Fires ONCE per offending attribute (cluster-A, S188 "reject + parens"). | Error |
 | E-SCOPE-001 | §5.2 | Unquoted identifier not resolvable in scope | Error |
 | E-SCOPE-010 | §20.4 | Developer declares variable with reserved binding name (`route`, `session`) **(reserved-binding trigger spec-ahead, S265 — not fired; E-SCOPE-010 currently fires only for a DUPLICATE file-scope `let`/`const`)** | Error |

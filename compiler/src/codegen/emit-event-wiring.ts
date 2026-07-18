@@ -76,6 +76,21 @@ interface LogicBinding {
   /** S105 B1 — reactive HTML Boolean attr (disabled/readonly/required). */
   isReactiveBoolAttr?: boolean;
   boolAttrName?: string;
+  /**
+   * i81 — reactive HTML VALUE attr (class, style, title, data-… ).
+   * See binding-registry.ts for the full contract.
+   *
+   * S239 finding 9 — `valueAttrKey` and `valueAttrIsFormValue` were READ here
+   * while only the first two were declared. Nothing caught it: no tsconfig
+   * covers `compiler/`, so this interface is unchecked documentation. Keep it
+   * complete by hand — it is the only description of the shape this file reads.
+   */
+  isReactiveValueAttr?: boolean;
+  valueAttrName?: string;
+  /** CSS-safe placeholder key; ALWAYS stamped by emit-html (single derivation). */
+  valueAttrKey?: string;
+  /** `value` on input/textarea/select → write the live `.value` PROPERTY. */
+  valueAttrIsFormValue?: boolean;
   /** Phase 2 if/show split: mount/unmount semantics. See binding-registry.ts. */
   isMountToggle?: boolean;
   templateId?: string;
@@ -308,6 +323,60 @@ function buildServerFnNames(fnNameMap: Map<string, string>): Set<string> {
  * names are post-mangling rewritten in expressions, but this check runs on
  * the pre-rewrite scrml string (which contains the original names).
  */
+/**
+ * i81 — the ONE lowering for a reactive VALUE attribute's DOM write. Exported and
+ * shared by the global emitter here AND the per-arm emitter in
+ * emit-variant-guard, so in-arm and out-of-arm semantics CANNOT drift (S239
+ * findings 1/4 were exactly a drift between those two paths).
+ *
+ * Absence-driven, NOT truthiness (SPEC §42.1.1 + §42.9):
+ *   `not` → JS `null` / `undefined` → remove the attribute
+ *   `""` / `0` / `false` / `[]`     → DEFINED values → write them
+ * §42.1.1 declares treating `""`/`0`/`false`/`[]` as absence a SEMANTIC ERROR, so
+ * a truthiness test here would be spec-violating (it would drop `class=""`,
+ * `data-count=(0)`, `data-open=(false)`).
+ *
+ * S239 finding 6 — a server fn returns a PROMISE, and `String(promise)` writes
+ * "[object Promise]" into the DOM. Handled by a RUNTIME thenable check rather
+ * than the reactive-text path's compile-time `exprUsesServerFn` name match,
+ * because (a) `fnNameMap` is not in scope in emit-variant-guard, so a
+ * compile-time check could not cover the per-arm path at all, and (b) the
+ * thenable test catches EVERY promise-returning expression, not just calls whose
+ * name is a known server fn. The expression is still evaluated SYNCHRONOUSLY
+ * inside the effect, so reactive dependency tracking is unaffected; only the DOM
+ * write is deferred. A rejected promise is swallowed — an unhandled rejection
+ * inside an effect would escape the wiring handler.
+ *
+ * @param compiled    the already-lowered JS expression
+ * @param attrName    the ORIGINAL attribute name (SVG needs `viewBox` verbatim)
+ * @param isFormValue S239 finding 5 — `value` on input/textarea/select. The
+ *   `value` ATTRIBUTE is only the DEFAULT value: once the control is dirty (the
+ *   user has typed) the browser stops reflecting it, so a reactive `value=`
+ *   lowered via setAttribute silently stops applying — the exact shape in the
+ *   adopter file this fix was written for. Write the live `.value` PROPERTY
+ *   instead, guarded by an inequality test so re-assigning an identical string
+ *   cannot reset the caret mid-typing. Absence clears to `""` rather than
+ *   removing: a form control always HAS a value, and `el.value = null` would
+ *   stringify to the literal "null".
+ */
+export function emitValueAttrApply(
+  compiled: string,
+  attrName: string,
+  isFormValue: boolean,
+): string {
+  const write = isFormValue
+    ? `const _scrml_s = (_scrml_x === null || _scrml_x === undefined) ? "" : String(_scrml_x); ` +
+      `if (el.value !== _scrml_s) { el.value = _scrml_s; }`
+    : `if (_scrml_x === null || _scrml_x === undefined) { el.removeAttribute(${JSON.stringify(attrName)}); } ` +
+      `else { el.setAttribute(${JSON.stringify(attrName)}, String(_scrml_x)); }`;
+  return (
+    `{ const _scrml_w = function(_scrml_x) { ${write} }; ` +
+    `const _scrml_v = (${compiled}); ` +
+    `if (_scrml_v && typeof _scrml_v.then === "function") { _scrml_v.then(_scrml_w).catch(function() {}); } ` +
+    `else { _scrml_w(_scrml_v); } }`
+  );
+}
+
 function exprUsesServerFn(expr: string, serverFnNames: Set<string>): boolean {
   if (!expr || serverFnNames.size === 0) return false;
   for (const name of serverFnNames) {
@@ -370,6 +439,25 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     if (b.isConditionalDisplay) return true;
     if (b.isVisibilityToggle) return true;
     if (b.isReactiveBoolAttr) return true;
+    // i81 (S239 findings 1+4) — a reactive VALUE attr is global ONLY outside an
+    // arm. An arm-tagged one is re-emitted PER-ARM by
+    // emit-variant-guard.ts:emitArmWireFunction, where the arm's payload
+    // bindings are wire-fn PARAMETERS and therefore in scope.
+    //
+    // Emitting it globally was catastrophic, not merely wrong:
+    //   <match for=Res on=@r> <Ok(cls)><div class=(cls)>ok</div></Ok>
+    // put `const _scrml_v = ((cls));` at module scope inside
+    // `_scrml_nav_rewire`, where the arm payload ident `cls` does not exist ⇒
+    // ReferenceError at DOMContentLoaded. The throw escapes the whole wiring
+    // handler, so EVERY event listener and EVERY reactive effect on the page
+    // silently fails to wire. Pre-i81 the attribute was merely dropped and the
+    // page worked — this turned a missing attribute into a DEAD PAGE.
+    //
+    // This is exactly why line ~358 excludes `render-element` ("the held ident
+    // is undefined at module scope"). Same hazard, same rule. The arm body is
+    // also replaced wholesale on each variant swap, so a boot-time
+    // `document.querySelector` would cache a detached node regardless.
+    if (b.isReactiveValueAttr) return b.engineArm == null;
     if (b.isMountToggle) return true;
     return false;
   });
@@ -1402,6 +1490,59 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           pushRebindableSel(`[${dataAttr}="${placeholderId}"]`, [
             toggle,
             ...regionEffectLines(toggle),
+          ]);
+        }
+        continue;
+      }
+
+      // i81 — reactive VALUE attribute (class, style, title, data-…, id, alt).
+      // Wire an `_scrml_effect` that SETS the attribute to the stringified value.
+      // Counterpart to the bool-attr block above, deliberately a DIFFERENT
+      // lowering: bool toggles presence on TRUTHINESS, value sets a string and
+      // is removed only on ABSENCE.
+      //
+      // Semantics per SPEC §42.1.1 + §42.9 (NOT truthiness — this distinction is
+      // the whole point):
+      //   `not` → JS `null` (§42.9) → removeAttribute
+      //   `""` / `0` / `false` / `[]` → DEFINED values (§42.1.1) → setAttribute
+      // §42.1.1 states that treating `""`/`0`/`false`/`[]` as absence is a
+      // SEMANTIC ERROR, so a truthiness test here would be spec-violating: it
+      // would drop `class=""`, `data-count=(0)` and `data-open=(false)`.
+      // The absence test is the SPEC's own `is not` lowering — `=== null ||
+      // === undefined` — matching BOTH, per §42.9, because foreign code (`^{}`,
+      // `?{}` SQL, server fns) may produce either.
+      if (binding.isReactiveValueAttr && binding.valueAttrName) {
+        // `attrName` is the ORIGINAL name and is what the DOM write uses (SVG
+        // needs `viewBox`/`xlink:href` verbatim). The SELECTOR must use the
+        // CSS-safe `valueAttrKey` instead — an unescaped `:` in an attribute
+        // selector is invalid CSS and throws at module init, taking every
+        // binding on the page down with it. Fall back to the name only for
+        // bindings that predate valueAttrKey (names with no unsafe chars).
+        // `attrName` is the ORIGINAL name and is what the DOM write uses (SVG
+        // needs `viewBox`/`xml:lang` verbatim). The SELECTOR must use the
+        // CSS-safe `valueAttrKey` — an unescaped `:` in an attribute selector is
+        // invalid CSS and throws at module init, taking every binding on the page
+        // down with it. S239 finding 9: `valueAttrKey` is ALWAYS stamped by
+        // emit-html (the single derivation point), so there is no `??` fallback
+        // re-deriving the regex here — a second copy could silently diverge from
+        // the key baked into the markup and never match.
+        const attrName = binding.valueAttrName;
+        const dataAttr = `data-scrml-bind-attr-${binding.valueAttrKey}`;
+        if (binding.expr) {
+          // synthCellKeys/derivedNames threaded exactly as the bool path does, so
+          // `class=(@form.isValid ? "ok" : "bad")` routes dotted reads to the
+          // synth cell rather than member-accessing the compound value.
+          const compiled = emitExprField(binding.exprNode, binding.expr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys });
+          const apply = emitValueAttrApply(
+            compiled,
+            attrName,
+            binding.valueAttrIsFormValue === true,
+          );
+          // Rebindable — re-binds the attr effect scoped to a swapped region and
+          // is region-tracked for teardown (same contract as the bool path).
+          pushRebindableSel(`[${dataAttr}="${placeholderId}"]`, [
+            apply,
+            ...regionEffectLines(apply),
           ]);
         }
         continue;

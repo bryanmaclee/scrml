@@ -2887,6 +2887,22 @@ function expandComponentNode(
     // Mark as expanded — no longer a component reference
     isComponent: false,
     _expandedFrom: componentName,
+    // i81 (S239 finding 7) — the DECLARED prop names of the component this root
+    // came from. After expansion the root's `attrs` are a MERGE of the
+    // definition's own attributes and the call site's props, and downstream
+    // codegen cannot tell them apart: the tag is the definition's root element
+    // (`div`), not `List`. emit-html's reactive value-attr emitter needs exactly
+    // this distinction — a call-site PROP is a compiler construct and must never
+    // be lowered to a DOM attribute (a §14.9 parametric-snippet prop is a lambda
+    // returning MARKUP, which lowered to markup spliced into JS), whereas the
+    // component's OWN `class=(…)`/`style=(…)` on its root is an ordinary
+    // reactive attribute that SHOULD lower. Keying off `_expandedFrom` alone
+    // conflated the two and left #81 unfixed for every component root.
+    // Name-based, not identity-based, because `substituteProps` rebuilds the
+    // attr nodes.
+    ...(def.propsDecl && def.propsDecl.length > 0
+      ? { _componentPropNames: def.propsDecl.map((p: PropDecl) => p.name) }
+      : {}),
     ...(_bindProps.length > 0 ? { _bindProps } : {}),
     ...(__propContractChecks.length > 0 ? { __propContractChecks } : {}),
   } as MarkupNode;
