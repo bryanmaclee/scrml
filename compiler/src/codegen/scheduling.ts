@@ -400,12 +400,13 @@ export function injectPromiseAwait(
   const returnMatch = code.match(/^(\s*return\s+)(.+?)(;?)$/s);
   if (returnMatch) return `${returnMatch[1]}${_awaitTail(returnMatch[2])}${returnMatch[3]}`;
 
-  // (3) bare assignment (reassign / tilde-decl / lin-decl / bare-expr assign;
-  // i87 case C): `LHS = RHS;` → `LHS = await RHS;`. LHS is an lvalue
-  // (ident with optional `.member` / `[index]` tails). The `(?![=<>])` guard
-  // after `=` avoids matching `==` / `=>` / `>=` etc. (never a statement head
-  // here, but defensive).
-  const assignMatch = code.match(/^(\s*[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\[[^\]]*\])*\s*=\s*)(?![=<>])(.+?)(;?)$/s);
+  // (3) assignment (reassign / tilde-decl / lin-decl / bare-expr assign; i87
+  // case C): `LHS = RHS;` → `LHS = await RHS;` (await on the RHS, never a
+  // whole-statement prefix). LHS is an lvalue (ident with optional `.member` /
+  // `[index]` tails); the optional compound operator (`+=`, `*=`, `??=`, …) is
+  // preserved so `x += fn()` → `x += await fn()`. The trailing `(?![=<>])`
+  // guard rejects the comparison / arrow forms (`==`, `=>`, `>=`).
+  const assignMatch = code.match(/^(\s*[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\[[^\]]*\])*\s*(?:\*\*|<<|>>>?|&&|\|\||\?\?|[-+*/%&|^])?=\s*)(?![=<>])(.+?)(;?)$/s);
   if (assignMatch) return `${assignMatch[1]}${_awaitTail(assignMatch[2])}${assignMatch[3]}`;
 
   // (4) fallback — a bare call statement.
