@@ -497,6 +497,47 @@ describe("§65.3.2 / §65.4 — flat-inline #{} token lowering (inline style)", 
     expect(html).toContain(`style="color: red; padding: 16px;"`);
     expect(hasCode(errors, "E-THEME-TOKEN-UNKNOWN")).toBe(false);
   });
+
+  // FIX2 (S265 review) — cell membership from the COMPLETE reactive collector.
+  test("a DERIVED cell (`const <d> = @a*2`) referenced in a `#{}` lowers, no false E-THEME-TOKEN-UNKNOWN", () => {
+    const src = `<program>
+  <count> = 0
+  const <doubled> = @count * 2
+  const Card = <div props={}>
+      #{ .x { width: @doubled; } }
+      <div class="x">hi</div>
+  </>
+  <Card/>
+  <button onclick=(@count = @count + 1)>inc</button>
+</program>`;
+    const { css, errors } = compileCss(src);
+    expect(css).toContain("width: var(--scrml-doubled)");
+    expect(hasCode(errors, "E-THEME-TOKEN-UNKNOWN")).toBe(false);
+  });
+
+  test("an ENGINE cell (`<engine for=T>` → its projected cell) referenced in a `#{}` does NOT false-fire", () => {
+    // collectThemeContext (state-decl only) MISSES the engine-projected cell;
+    // collectReactiveVarNames (the complete collector, FIX2) recognizes it — so
+    // `@loadPhase` keeps the §25 bridge instead of a spurious E-THEME-TOKEN-UNKNOWN.
+    const src = `<program>
+\${
+    type LoadPhase:enum = { Idle, Loading, Done }
+}
+<engine for=LoadPhase initial=.Idle>
+    <Idle rule=.Loading></>
+    <Loading rule=.Done></>
+    <Done rule=.Idle></>
+</>
+const Card = <div props={}>
+    #{ .x { color: @loadPhase; } }
+    <div class="x">hi</div>
+</>
+<Card/>
+</program>`;
+    const { css, errors } = compileCss(src);
+    expect(css).toContain("color: var(--scrml-loadPhase)");
+    expect(hasCode(errors, "E-THEME-TOKEN-UNKNOWN")).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

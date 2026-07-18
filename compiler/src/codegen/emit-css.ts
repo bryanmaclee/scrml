@@ -1,4 +1,5 @@
 import { collectCssBlocks } from "./collect.ts";
+import { collectReactiveVarNames } from "./reactive-deps.ts";
 import { resolveApplyToken } from "../tailwind-classes.js";
 import { CGError } from "./errors.ts";
 import { emitThemeCss, emitResetLayer, lowerCssValueRefs, wrapSelectorWhere, collectThemeContext } from "./emit-theme-reset.ts";
@@ -362,8 +363,14 @@ function renderCssBlock(block: CSSBlock, errors?: CGError[], ctx?: LowerCtx, fla
  * Program-level CSS (not inside any component) is emitted without wrapping.
  *
  * @param nodes  — top-level AST nodes
+ * @param fileAST — the full file AST (optional). When present, the use-site
+ *   `@name` lowering resolves reactive-cell membership from the COMPLETE
+ *   `collectReactiveVarNames` set (state + DERIVED + tilde + engine/machine-
+ *   projected vars) rather than the state-decl-only fallback — so a derived cell
+ *   (`const d = @a*2`) referenced in a `#{}` keeps the §25 bridge instead of a
+ *   false E-THEME-TOKEN-UNKNOWN (FIX2, S265 review).
  */
-export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[]; styleBlocks: object[] }, errors?: CGError[]): string {
+export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[]; styleBlocks: object[] }, errors?: CGError[], fileAST?: Record<string, unknown>): string {
   const { inlineBlocks, styleBlocks } = cssBlocks ?? collectCssBlocks(nodes);
 
   // Separate program-level blocks from component-scoped blocks.
@@ -386,7 +393,12 @@ export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[
   // `var(--ink)` lowering across every author rule below.
   const { css: themeCss, tokenNames } = emitThemeCss(nodes, errors, themeContext);
 
-  const lowerCtx: LowerCtx = { themeTokens: tokenNames, cellNames: themeContext.cellNames, errors };
+  // FIX2 (S265 review) — cell membership from the COMPLETE reactive-var collector
+  // when the fileAST is available (state + derived + tilde + engine/machine); the
+  // state-decl-only `themeContext.cellNames` is the fallback for direct
+  // `generateCss(nodes)` unit callers (which don't exercise theme tokens).
+  const cellNames = fileAST ? collectReactiveVarNames(fileAST) : themeContext.cellNames;
+  const lowerCtx: LowerCtx = { themeTokens: tokenNames, cellNames, errors };
 
   // --- Program-level CSS (no @scope wrapping, no :where()-flat — the global
   //     escape hatch keeps the weaker guarantee, §65.2.4 R3 / OQ-8). §65.5 (bryan

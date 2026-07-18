@@ -316,3 +316,22 @@ radius + per-session-theme subtleties). NO new §34 diagnostic codes.
   + attr preserved; `stay calm` → `:where(.card .title)`.
 - TEST: refocused the round-trip test + NEW contraction regression test; NEW conformance case
   style/descendant-combinator-contraction-text. css-wave1 41 pass; conformance 739/739.
+
+### 2026-07-17 — FIX 2 (HIGH) lowering rejects valid reactive cells (commit: this)
+- ROOT CAUSE: Task-2/base built `cellNames` for the E-THEME-TOKEN-UNKNOWN membership from
+  `collectThemeContext()` (state-decl ONLY). The reactive-style wiring uses `collectReactiveVarNames`
+  (the COMPLETE collector: state + derived-state + tilde + engine/machine-projected vars). So a `@name`
+  referencing an ENGINE/machine-projected cell (NOT a state-decl) false-fired E-THEME-TOKEN-UNKNOWN.
+- EMPIRICAL (executed, both directions): `<engine for=LoadPhase>` projects cell `loadPhase`;
+  `#{ .x { color: @loadPhase } }` → WITHOUT fix: FALSE E-THEME-TOKEN-UNKNOWN; WITH fix: clean
+  (`var(--scrml-loadPhase)`). (NOTE: a canonical DERIVED `const <doubled>` is a state-decl(shape:derived)
+  and was ALREADY handled by collectThemeContext — the reviewer's `const d=@a*2` example; the genuine
+  gap is engine/machine/tilde, which FIX2 closes. A plain `const d=@a*2` WITHOUT `<>` is NOT a reactive
+  cell — a plain JS const — and correctly still errors.)
+- FIX: build `cellNames` from `collectReactiveVarNames(fileAST)` for BOTH the flat-inline (emit-html,
+  reusing the already-computed `reactiveVarNames`) AND the selector (emit-css `generateCss`, new
+  optional `fileAST` param threaded from index.ts) LowerCtx. A strict SUPERSET of the old set → only
+  REDUCES false positives, never adds them; a genuine unknown `@nope` still errors. Fallback to the
+  state-decl set for direct `generateCss(nodes)` unit callers (no theme surface).
+- TEST: +2 unit (derived-cell clean, engine-cell clean-no-false-fire) + conformance
+  style/reactive-cell-lowering-clean. FULL gate: 20668 pass / 0 fail; conformance 740/740.

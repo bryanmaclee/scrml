@@ -692,13 +692,18 @@ export function generateHtml(
   // E-THEME-TOKEN-UNKNOWN even in a themeless file — identical membership + error
   // semantics to the selector path. `lowerCssValueRefs` no-ops on values without
   // an `@`, so the flat-inline render stays byte-identical for non-`@` values.
+  // FIX2 (S265 review) — `cellNames` MUST be the COMPLETE reactive-var set
+  // (`collectReactiveVarNames`: state + DERIVED (`const d = @a*2`) + tilde + engine
+  // / machine-projected vars), NOT `collectThemeContext().cellNames` (state-decl
+  // only). A `#{ width: @doubled }` referencing a derived cell keeps the §25
+  // bridge (`var(--scrml-doubled)`), NOT a false E-THEME-TOKEN-UNKNOWN.
   const flatInlineLowerCtx: LowerCtx | null = (() => {
     const topNodes = (fileAST as any)?.ast?.nodes ?? (fileAST as any)?.nodes ?? nodes;
     if (!Array.isArray(topNodes)) return null;
     const themeContext = collectThemeContext(topNodes);
     return {
       themeTokens: collectThemeTokenNames(themeContext),
-      cellNames: themeContext.cellNames,
+      cellNames: reactiveVarNames ?? themeContext.cellNames,
       errors,
     };
   })();
