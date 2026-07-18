@@ -63,7 +63,9 @@ function isRuntimeScriptSrc(src: string): boolean {
   // The runtime/client bundle scripts impl#1 injects into <body>. An inline
   // runtime script (no src) is also impl-private. Author <script> is out of
   // v1.0 scope, so for now every <body> <script> is dropped.
-  return src === "" || /scrml-runtime|\.client\.js/.test(src);
+  // `\.client\.` (not `\.client\.js`) also matches the adopter-#82
+  // content-addressed bundle name `<base>.client.<hash>.js`.
+  return src === "" || /scrml-runtime|\.client\./.test(src);
 }
 
 // ---- normalized intermediate tree (built from the live DOM, never mutated) ---

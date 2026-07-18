@@ -349,6 +349,30 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
     lines.push("");
   }
 
+  // adopter-#82 — static-asset cache policy helpers.
+  //
+  // Content-addressed assets (`scrml-runtime.<hash>.js`, `<base>.client.<hash>.js`,
+  // `<base>.<hash>.css`, per-route chunks) carry an 8-char base36 hash before the
+  // extension → the URL changes whenever the bytes change, so they are safe to
+  // cache forever (`immutable`). The HTML entry is `no-cache` (always revalidate,
+  // so a redeploy is picked up at once). Any other static asset gets a weak ETag
+  // (size + mtime) so a conditional request can 304 — defense-in-depth for assets
+  // that are NOT hash-immutable.
+  lines.push("// adopter-#82 — static-asset cache-header policy");
+  lines.push("function _scrml_etag(st) {");
+  lines.push('  return \'"\' + st.size.toString(16) + "-" + Math.floor(st.mtimeMs).toString(16) + \'"\';');
+  lines.push("}");
+  lines.push("function _scrml_cache_headers(path, st) {");
+  lines.push("  if (/\\.[0-9a-z]{8}\\.(?:js|css)$/.test(path)) {");
+  lines.push('    return { "Cache-Control": "public, max-age=31536000, immutable" };');
+  lines.push("  }");
+  lines.push('  if (path.endsWith(".html")) {');
+  lines.push('    return { "Cache-Control": "no-cache" };');
+  lines.push("  }");
+  lines.push('  return { "Cache-Control": "no-cache", "ETag": _scrml_etag(st) };');
+  lines.push("}");
+  lines.push("");
+
   // Server
   lines.push("// Production server");
   lines.push('const PORT = parseInt(process.env.PORT ?? "3000", 10);');
@@ -393,8 +417,17 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
   lines.push("");
   lines.push("    for (const candidate of candidates) {");
   lines.push("      try {");
-  lines.push("        if (statSync(candidate).isFile()) {");
-  lines.push("          return new Response(Bun.file(candidate));");
+  lines.push("        const st = statSync(candidate);");
+  lines.push("        if (st.isFile()) {");
+  lines.push("          // adopter-#82 — cache policy: content-hashed bundles are");
+  lines.push("          // immutable; the HTML entry is no-cache; other static assets");
+  lines.push("          // revalidate via ETag / 304.");
+  lines.push("          const headers = _scrml_cache_headers(candidate, st);");
+  lines.push('          const inm = req.headers.get("if-none-match");');
+  lines.push("          if (headers.ETag && inm && inm === headers.ETag) {");
+  lines.push("            return new Response(null, { status: 304, headers });");
+  lines.push("          }");
+  lines.push("          return new Response(Bun.file(candidate), { headers });");
   lines.push("        }");
   lines.push("      } catch {}");
   lines.push("    }");
@@ -643,6 +676,11 @@ export async function runBuild(args) {
     verbose: opts.verbose,
     embedRuntime: opts.embedRuntime,
     write: true,
+    // adopter-#82 — the deploy path content-addresses page bundles + CSS
+    // (`<base>.client.<hash>.js` / `<base>.<hash>.css`) so a redeploy that
+    // changes bundle bytes changes the URL; the generated `_server.js` serves
+    // those hashed assets `immutable` and the HTML entry `no-cache`.
+    contentHashAssets: true,
     log: console.log,
     // S142 — `--validate-emit` / `--no-validate-emit`. undefined = compileScrml
     // default; the emitted-JS parse gate (E-CODEGEN-INVALID-LOGIC) is especially

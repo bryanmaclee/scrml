@@ -354,6 +354,31 @@ export function createSseResponse() {
 }
 
 /**
+ * adopter-#82 — cache-header policy for `scrml dev` static responses.
+ *
+ * Mirrors the generated production server: content-addressed assets (an 8-char
+ * base36 hash before the extension — the shared runtime is hashed even in dev)
+ * are `immutable`; every other static asset revalidates via a weak ETag (size +
+ * mtime) + `Last-Modified` so a conditional request can 304. The HTML entry is
+ * handled separately (always `no-cache`). Fixes the #82 report that `scrml dev`
+ * sent NO cache headers at all.
+ * @param {string} path
+ * @param {import("fs").Stats} st
+ * @returns {Record<string,string>}
+ */
+export function devCacheHeaders(path, st) {
+  if (/\.[0-9a-z]{8}\.(?:js|css)$/.test(path)) {
+    return { "Cache-Control": "public, max-age=31536000, immutable" };
+  }
+  const etag = '"' + st.size.toString(16) + "-" + Math.floor(st.mtimeMs).toString(16) + '"';
+  return {
+    "Cache-Control": "no-cache",
+    "ETag": etag,
+    "Last-Modified": new Date(st.mtimeMs).toUTCString(),
+  };
+}
+
+/**
  * Send a "reload" SSE event to all connected clients.
  */
 export function broadcastReload() {
@@ -572,15 +597,30 @@ function buildServeConfig(opts, serveDir) {
         const file = Bun.file(candidate);
         // Bun.file() is lazy — check existence via statSync
         try {
-          if (statSync(candidate).isFile()) {
+          const st = statSync(candidate);
+          if (st.isFile()) {
             // Inject hot-reload script into HTML responses
             if (candidate.endsWith(".html")) {
               const html = await file.text();
               return new Response(injectHotReloadScript(html), {
-                headers: { "Content-Type": "text/html; charset=utf-8" },
+                headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
               });
             }
-            return new Response(file);
+            // adopter-#82 — attach cache headers to static assets + honor
+            // conditional requests (If-None-Match / If-Modified-Since → 304).
+            const headers = devCacheHeaders(candidate, st);
+            const inm = req.headers.get("if-none-match");
+            if (headers.ETag && inm && inm === headers.ETag) {
+              return new Response(null, { status: 304, headers });
+            }
+            const ims = req.headers.get("if-modified-since");
+            if (headers["Last-Modified"] && ims) {
+              const since = Date.parse(ims);
+              if (!Number.isNaN(since) && Math.floor(st.mtimeMs / 1000) * 1000 <= since) {
+                return new Response(null, { status: 304, headers });
+              }
+            }
+            return new Response(file, { headers });
           }
         } catch { /* not found */ }
       }
@@ -602,7 +642,7 @@ function buildServeConfig(opts, serveDir) {
               const file = Bun.file(entryCandidate);
               const html = await file.text();
               return new Response(injectHotReloadScript(html), {
-                headers: { "Content-Type": "text/html; charset=utf-8" },
+                headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
               });
             }
           } catch { /* entry not emitted yet — fall through to scan */ }
@@ -619,7 +659,7 @@ function buildServeConfig(opts, serveDir) {
             const file = Bun.file(fallbackPath);
             const html = await file.text();
             return new Response(injectHotReloadScript(html), {
-              headers: { "Content-Type": "text/html; charset=utf-8" },
+              headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
             });
           }
         } catch { /* no serve dir yet */ }
