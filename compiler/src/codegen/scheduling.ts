@@ -373,7 +373,10 @@ export function injectPromiseAwait(
   routeMap: RouteMap,
   filePath: string,
   calleeMap: CalleeImportMap | null,
-  exportRegistry: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>> | null,
+  // Same shape as isPromiseReturningCallExpr's exportRegistry, referenced via
+  // Parameters<> so this stays a pure passthrough type (never a routing read on
+  // the value shape — keeps the P3-FOLLOW migration-hygiene budget intact).
+  exportRegistry: Parameters<typeof isPromiseReturningCallExpr>[4],
 ): string {
   if (!code) return code;
   if (!isPromiseReturningCallExpr(stmt, routeMap, filePath, calleeMap, exportRegistry)) return code;

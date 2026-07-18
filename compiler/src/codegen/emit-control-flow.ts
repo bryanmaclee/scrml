@@ -232,7 +232,11 @@ interface IfOpts {
    */
   asyncRouteMap?: { functions: Map<string, { boundary?: string; functionName?: string; [k: string]: unknown }> } | null;
   asyncCalleeMap?: Map<string, string> | null;
-  asyncExportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>> | null;
+  // Opaque §13.2.1 classifier passthrough (threaded into emitLogicBody's
+  // injection, never destructured here) — the value shape's routing fields are
+  // read downstream by kind/isAsync only, so this annotation carries just those
+  // (keeps the P3-FOLLOW migration-hygiene budget clean).
+  asyncExportRegistry?: Map<string, Map<string, { kind: string; category: string; isAsync?: boolean }>> | null;
   asyncFilePath?: string | null;
   /**
    * §59 (ss52) — NON-REACTIVE LOCAL map/set/ordered names, threaded through the
