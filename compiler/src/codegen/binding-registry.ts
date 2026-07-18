@@ -183,6 +183,88 @@ export interface LogicBinding {
   boolAttrName?: string;
 
   /**
+   * i81 — reactive VALUE attribute binding (`class=`, `style=`, `title=`,
+   * `data-*`, `id=`, `alt=`, …).
+   *
+   * The counterpart to `isReactiveBoolAttr`, and a DIFFERENT lowering — do not
+   * conflate the two. A BOOLEAN attr toggles *presence* (truthiness →
+   * `setAttribute(name, "")` / `removeAttribute(name)`). A VALUE attr sets a
+   * *string* (`setAttribute(name, String(v))`), and its removal is driven by
+   * ABSENCE, not falsiness. `valueAttrName` carries the attribute name.
+   *
+   * Semantics (SPEC §42.1.1 + §42.9 — NOT truthiness):
+   *   `not` (→ JS `null`) / `undefined`  → `removeAttribute(name)`
+   *   `""` / `0` / `false` / `[]`        → `setAttribute(name, String(v))`
+   * `""`, `0`, `false`, `[]` are DEFINED values in scrml, not absence; §42.1.1
+   * declares treating them as absence a SEMANTIC ERROR. The absence test is the
+   * SPEC's own `is not` lowering, `(v === null || v === undefined)` (§42.9 —
+   * both, because foreign code may produce either).
+   *
+   * The expression is carried in the standard `expr` / `exprNode` pair (NOT the
+   * bool path's `condExpr` / `condExprNode`: a value attr has an EXPRESSION, not
+   * a condition — S239 finding 10).
+   *
+   * Emitted GLOBALLY only when `engineArm == null`. An arm-tagged value attr is
+   * emitted PER-ARM by emit-variant-guard, where the arm's payload bindings are
+   * wire-fn parameters and therefore in scope; emitting it at module scope threw
+   * a ReferenceError out of the wiring handler and killed ALL page wiring
+   * (S239 findings 1/4). Both paths share `emitValueAttrApply` so they cannot
+   * drift.
+   *
+   * Closes issue #81: before this, the `val.kind === "expr"` dispatch chain in
+   * emit-html.ts ended after the bool-attr branch with no final `else`, so a
+   * dynamic value attribute outside `<each>` matched nothing and was SILENTLY
+   * dropped from the emitted HTML (clean compile, 0 diagnostics).
+   */
+  isReactiveValueAttr?: boolean;
+  valueAttrName?: string;
+
+  /**
+   * i81 (S239 finding 5) — `value` on a form control (input/textarea/select).
+   *
+   * The `value` ATTRIBUTE is only the control's DEFAULT value: once the control
+   * is dirty (the user has typed) the browser stops reflecting the attribute, so
+   * a reactive `value=` lowered via `setAttribute` silently stops applying. The
+   * consumers write the live `.value` PROPERTY instead (guarded by an inequality
+   * test so re-assigning an identical string cannot reset the caret).
+   *
+   * Stamped by emit-html because that is the only stage that knows the element's
+   * TAG — the wiring emitters see the binding, not the element.
+   */
+  valueAttrIsFormValue?: boolean;
+
+  /**
+   * i81 — the CSS-SAFE placeholder key for a reactive value attribute.
+   *
+   * `valueAttrName` is the ORIGINAL author-written name and is what reaches
+   * `setAttribute` (SVG needs the original: `viewBox`, `xlink:href`).
+   * `valueAttrKey` is that name with every character outside `[A-Za-z0-9_-]`
+   * replaced by `_`, and is what appears in the emitted
+   * `data-scrml-bind-attr-<key>` placeholder AND in the `querySelector`
+   * attribute selector that consumes it.
+   *
+   * WHY: the consumer interpolates the key into `[data-scrml-bind-attr-<key>=…]`.
+   * An unescaped `:` there is INVALID CSS (a colon starts a pseudo-class), so
+   * `<use xlink:href=(@h)/>` would emit a selector that THROWS a DOMException.
+   * That querySelector runs at module-init top level, unguarded, so the throw
+   * would abort the whole client-bundle init — killing EVERY binding on the
+   * page, not just this one. (Escaping to `\:` is not viable: happy-dom, which
+   * backs this repo's DOM tests, rejects escaped selectors too.) Sanitizing the
+   * KEY while keeping the NAME intact keeps the selector valid and the DOM
+   * write correct.
+   *
+   * Computed ONCE, at the emit-html registration site, so emit-html and
+   * emit-event-wiring cannot drift by recomputing the regex independently.
+   *
+   * Residual (accepted): two DIFFERENT dynamic attrs on ONE element whose names
+   * sanitize to the same key (e.g. `x:y` and `x_y`) collide on a duplicate HTML
+   * attribute key; the parser keeps the first, so the second silently does not
+   * wire — i.e. it degrades to the pre-i81 behavior for a pathological shape
+   * rather than crashing.
+   */
+  valueAttrKey?: string;
+
+  /**
    * Phase 2c: when set, the `if=` binding uses mount/unmount semantics
    * (template-clone on true, scope-destroy + DOM-remove on false) instead of
    * display-toggle. The compile-time emitter populates `templateId` and

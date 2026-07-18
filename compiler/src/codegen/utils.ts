@@ -75,6 +75,31 @@ export const VOID_ELEMENTS = new Set<string>([
 ]);
 
 /**
+ * i81 — HTML BOOLEAN attributes, excluded from the reactive VALUE-attr emitter.
+ *
+ * A boolean attribute's semantics are carried by its PRESENCE, not its value:
+ * `checked="false"` is still checked. Lowering one through the value path
+ * (`setAttribute(name, String(v))`) is therefore actively WRONG — it would
+ * render a `checked=(@isSelected)` checkbox permanently checked. Caught by R26
+ * on examples/27-type-derived-table.scrml, where `<input checked=(@a && @b)>`
+ * began emitting `setAttribute("checked", "false")`.
+ *
+ * These are NOT routed to the bool path either: `REACTIVE_BOOL_ATTRS`
+ * (emit-html.ts) is a deliberate 3-element allowlist (disabled/readonly/
+ * required) and widening it is a separate, out-of-scope decision — bool and
+ * value are different lowerings. Excluding them here preserves the pre-i81
+ * behavior (attribute dropped) rather than introducing a NEW wrong one.
+ * Promoting the rest of this set onto the bool path is a follow-up.
+ */
+export const HTML_BOOLEAN_ATTRS = new Set<string>([
+  "allowfullscreen", "async", "autofocus", "autoplay", "checked", "controls",
+  "default", "defer", "disabled", "formnovalidate", "hidden", "inert", "ismap",
+  "itemscope", "loop", "multiple", "muted", "nomodule", "novalidate", "open",
+  "playsinline", "readonly", "required", "reversed", "selected", "shadowrootclonable",
+  "shadowrootdelegatesfocus", "shadowrootserializable",
+]);
+
+/**
  * A scrml function parameter — either a bare string (legacy "name:Type" form)
  * or a structured object produced by `parseParamList` in `ast-builder.js`.
  *

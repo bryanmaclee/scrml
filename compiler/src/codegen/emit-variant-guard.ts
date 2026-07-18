@@ -89,6 +89,7 @@
 
 import type { CompileContext } from "./context.ts";
 import { ENGINE_STATE_CHILD_RESERVED_ATTRS, STATE_CHILD_STRUCTURAL_TAGS } from "../engine-statechild-grammar.ts";
+import { emitValueAttrApply } from "./emit-event-wiring.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -428,8 +429,27 @@ function emitArmWireFunction(
     if (b.isVisibilityToggle) return false;
     if (b.isMountToggle) return false;
     if (b.isReactiveBoolAttr) return false;
+    // i81 — a reactive VALUE attr carries its own `data-scrml-bind-attr-<key>`
+    // placeholder, NOT a `data-scrml-logic` one, so it must not take the
+    // reactive-TEXT branch below (that selector could never match it — a dead
+    // wire). It is emitted by the dedicated `wireableValueAttrs` loop instead.
+    if (b.isReactiveValueAttr) return false;
     return typeof b.placeholderId === "string" && typeof b.expr === "string";
   });
+  // i81 (S239 findings 1+4) — reactive VALUE attrs tagged with THIS arm.
+  // They MUST be wired here rather than globally: the expression commonly reads
+  // the arm's own PAYLOAD binding (`<Ok(cls)><div class=(cls)>`), which is a
+  // parameter of this wire fn and exists nowhere else — emitting it at module
+  // scope produced a ReferenceError that killed ALL page wiring. The arm body is
+  // also replaced wholesale on each variant swap, so a boot-time global wire
+  // would additionally cache a detached node and go dead after the first swap.
+  const wireableValueAttrs = logicBindings.filter(
+    (b) =>
+      b.isReactiveValueAttr === true &&
+      typeof b.placeholderId === "string" &&
+      typeof b.valueAttrName === "string" &&
+      typeof b.expr === "string",
+  );
   // In-scope event bindings: only non-delegable events.
   const wireableEvents = eventBindings.filter((b) => {
     const domEvent = (b.eventName || "").replace(/^on/, "");
@@ -494,7 +514,7 @@ function emitArmWireFunction(
   if (
     wireableLogic.length === 0 && wireableEvents.length === 0 &&
     wireableRenders.length === 0 && wireableDirectives.length === 0 &&
-    wireableBinds.length === 0
+    wireableBinds.length === 0 && wireableValueAttrs.length === 0
   ) {
     return `function ${wireFnName}(${wireParams}) { return function() {}; }`;
   }
@@ -612,6 +632,66 @@ function emitArmWireFunction(
         lines.push(`      _disposers.push(_scrml_effect(function() { el.setAttribute(${JSON.stringify(attrName)}, ${jsExpr}); }));`);
       }
     }
+    lines.push(`    }`);
+    lines.push(`  }`);
+  }
+
+  // ---- i81 reactive VALUE attrs: querySelector + setAttribute + effect ----
+  // (S239 findings 1+4.) Mirrors the class:/attr-tpl loop above — same
+  // `_root.querySelector` acquire and the same `_disposers.push(_scrml_effect(…))`
+  // teardown contract, so a variant swap disposes the subscription instead of
+  // leaking an effect onto a detached node.
+  //
+  // Wired HERE, not globally, for two independent reasons:
+  //   1. the expr commonly reads this arm's PAYLOAD binding (`<Ok(cls)>` →
+  //      `class=(cls)`), which is a parameter of this wire fn and undefined at
+  //      module scope — a global emit threw a ReferenceError out of the
+  //      DOMContentLoaded handler and killed ALL wiring on the page;
+  //   2. the arm body is re-created on every variant swap, so a boot-time global
+  //      wire would go dead after the first swap.
+  //
+  // The lowering is IDENTICAL to emit-event-wiring's global value-attr block
+  // (absence-driven per SPEC §42.1.1/§42.9 — `not`/undefined removes, `""`/`0`/
+  // `false` set), so in-arm and out-of-arm semantics cannot drift. Payload idents
+  // are left alone by `emitExprField` (it rewrites `@`-refs only), which is
+  // exactly right: here they resolve to the wire-fn parameters.
+  for (const binding of wireableValueAttrs) {
+    const placeholderId = binding.placeholderId as string;
+    const attrName = binding.valueAttrName as string;
+    const selector = `[data-scrml-bind-attr-${binding.valueAttrKey}=${JSON.stringify(placeholderId)}]`;
+    let compiled = emitExprField(binding.exprNode, binding.expr as string, {
+      mode: "client",
+      derivedNames: ctx.derivedNames,
+      synthCellKeys: ctx.synthCellKeys,
+    });
+    // Apply encoded cell names when encoding is active — same pattern as the
+    // reactive-text loop above.
+    if (encodingCtx && encodingCtx.enabled) {
+      const refs = new Set<string>();
+      const re = /@([A-Za-z_$][A-Za-z0-9_$]*)/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(binding.expr as string)) !== null) refs.add(m[1]);
+      for (const ref of refs) {
+        const encoded = encodingCtx.encode(ref);
+        if (encoded !== ref) {
+          compiled = compiled
+            .split(`_scrml_reactive_get("${ref}")`)
+            .join(`_scrml_reactive_get(${JSON.stringify(encoded)})`);
+        }
+      }
+    }
+    // SHARED lowering with the global emitter — findings 1/4 were a drift between
+    // these two paths, so the DOM write is defined exactly once.
+    const apply = emitValueAttrApply(
+      compiled,
+      attrName,
+      binding.valueAttrIsFormValue === true,
+    );
+    lines.push(`  {`);
+    lines.push(`    const el = _root.querySelector(${JSON.stringify(selector)});`);
+    lines.push(`    if (el) {`);
+    lines.push(`      ${apply}`);
+    lines.push(`      _disposers.push(_scrml_effect(function() { ${apply} }));`);
     lines.push(`    }`);
     lines.push(`  }`);
   }
