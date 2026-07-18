@@ -114,6 +114,22 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
 
       const authed = { "Content-Type": "application/json", Cookie: `scrml_csrf=${csrf}`, "X-CSRF-Token": csrf };
 
+      // --- SESSION FIXATION (S239 FIX 1): login carrying a PLANTED sid must get a
+      // DIFFERENT fresh sid, and the planted value must NOT become authenticated ---
+      const PLANTED = "planted-attacker-sid-000";
+      const rFix = await post(
+        loginR,
+        { ...authed, Cookie: `scrml_csrf=${csrf}; scrml_sid=${PLANTED}` },
+        { email: "admin@x.com", password: "secret" },
+      );
+      const fixSid = cookieVal(rFix, "scrml_sid").value;
+      expect(fixSid).not.toBe(PLANTED); // rotated, never reflected
+      // the planted sid resolves anon (no record was ever written under it)
+      const rPlanted = await post(whoR, { ...authed, Cookie: `scrml_csrf=${csrf}; scrml_sid=${PLANTED}` }, {});
+      const planted = rPlanted instanceof Response ? await rPlanted.json() : rPlanted;
+      expect(planted.isAuth).toBe(false);
+      expect(planted.userId).toBe(null);
+
       // --- login (good creds) → 200 "ok" + Set-Cookie scrml_sid HttpOnly SameSite=Lax ---
       const rLogin = await post(loginR, authed, { email: "admin@x.com", password: "secret" });
       expect(rLogin instanceof Response).toBe(true);
@@ -125,6 +141,15 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
       expect(sidCookie.raw).toContain("HttpOnly");
       expect(sidCookie.raw).toContain("SameSite=Lax");
       expect(sidCookie.raw).toContain("Max-Age=");
+      // dev (http localhost) → NO Secure so the cookie round-trips locally...
+      expect(sidCookie.raw).not.toContain("Secure");
+      // ...but an https request (x-forwarded-proto) → Secure IS emitted (FIX 3).
+      const rHttps = await post(
+        loginR,
+        { ...authed, "x-forwarded-proto": "https" },
+        { email: "admin@x.com", password: "secret" },
+      );
+      expect(cookieVal(rHttps, "scrml_sid").raw).toContain("Secure");
 
       // --- whoami WITH the cookie → authed, userId/role resolved via the middleware ---
       const withSid = { ...authed, Cookie: `scrml_csrf=${csrf}; scrml_sid=${sid}` };
@@ -134,15 +159,21 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
       expect(who.userId).toBe("u-42");
       expect(who.role).toBe("admin");
 
+      // --- isAuth BYPASS (S239 FIX 2): a BOGUS sid with no record → anon ---
+      const rBogus = await post(whoR, { ...authed, Cookie: `scrml_csrf=${csrf}; scrml_sid=totally-bogus-nonexistent` }, {});
+      const bogus = rBogus instanceof Response ? await rBogus.json() : rBogus;
+      expect(bogus.isAuth).toBe(false);
+      expect(bogus.userId).toBe(null);
+
       // --- whoami WITHOUT the cookie → anon ---
       const rAnon = await post(whoR, authed, {});
       const anon = rAnon instanceof Response ? await rAnon.json() : rAnon;
       expect(anon.isAuth).toBe(false);
       expect(anon.userId).toBe(null);
 
-      // --- durability: the record is on disk, resolvable by a FRESH handle ---
-      // The store lives at `.scrml-sessions.db` relative to the process CWD.
-      const dbPath = resolve(process.cwd(), ".scrml-sessions.db");
+      // --- durability (S239 FIX 9): the record is on disk beside the bundle,
+      // resolvable by a FRESH bun:sqlite handle (survives a store-handle restart) ---
+      const dbPath = join(outDir, ".scrml-sessions.db");
       const fresh = new Database(dbPath, { readonly: true });
       const row = fresh.query("SELECT value FROM kv_store WHERE namespace = ? AND key = ?").get("session", sid);
       fresh.close();

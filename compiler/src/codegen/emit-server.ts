@@ -329,9 +329,25 @@ function parseSessionExpirySeconds(raw: string | null | undefined): number {
  * bookkeeping keys are skipped for speed.
  */
 function astUsesSessionBuiltin(node: unknown): boolean {
+  return astSessionMemberMatch(node, null);
+}
+
+/**
+ * §20.5 (S265, i29e) — does ANY expression reference the bare `session` builtin
+ * with one of `props` as its member (a `session.set`/`session.destroy` WRITE, when
+ * `props = ["set", "destroy"]`)? `props = null` matches any member. Used to gate
+ * the RULED-durable store on ACTUAL establishment use (`session.set`/`.destroy`) —
+ * a read-only-auth / `@currentUser` / serverLoad app that never establishes a
+ * session keeps the prior in-memory behavior (no unrequested on-disk SQLite).
+ */
+function astUsesSessionWrite(node: unknown): boolean {
+  return astSessionMemberMatch(node, ["set", "destroy"]);
+}
+
+function astSessionMemberMatch(node: unknown, props: string[] | null): boolean {
   if (!node || typeof node !== "object") return false;
   if (Array.isArray(node)) {
-    for (const child of node) if (astUsesSessionBuiltin(child)) return true;
+    for (const child of node) if (astSessionMemberMatch(child, props)) return true;
     return false;
   }
   const n = node as Record<string, unknown>;
@@ -339,14 +355,15 @@ function astUsesSessionBuiltin(node: unknown): boolean {
     n.kind === "member" &&
     n.object && typeof n.object === "object" &&
     (n.object as Record<string, unknown>).kind === "ident" &&
-    (n.object as Record<string, unknown>).name === "session"
+    (n.object as Record<string, unknown>).name === "session" &&
+    (props === null || (typeof n.property === "string" && props.includes(n.property)))
   ) {
     return true;
   }
   for (const key in n) {
     if (key === "span" || key === "loc") continue;
     const v = n[key];
-    if (v && typeof v === "object" && astUsesSessionBuiltin(v)) return true;
+    if (v && typeof v === "object" && astSessionMemberMatch(v, props)) return true;
   }
   return false;
 }
@@ -1184,6 +1201,15 @@ export function generateServerJs(
       : null,
   );
 
+  // §20.5 (i29e, S239 FIX 6) — line ranges (in the `lines` array index space) of
+  // the cookie-wrapped web-app route handlers that legitimately reference
+  // `_scrml_req._scrml_sess`. After all emission, any occurrence of that ref
+  // OUTSIDE these ranges (an SSE / `<endpoint>` / peer / serverLoad / `<machine>`
+  // body, or an unwrapped headless route) fires a fatal E-SESSION-CONTEXT — the
+  // session builtin has no request/response context there. Default-deny by
+  // construction: a ref is allowed ONLY inside a recorded wrapped-handler range.
+  const _allowedSessionRanges: Array<{ start: number; end: number }> = [];
+
   // §14.8.9 — protected-column egress redaction context. Built from the PA
   // stage's ProtectAnalysis (threaded via the new ctx field or the trailing
   // positional). `_protectActive` is the master gate: when the app declares NO
@@ -1481,6 +1507,11 @@ export function generateServerJs(
   // `auth=` (a login page mints a session before any guard exists). This forces
   // `_needsSessionInfra` exactly as an `@currentUser` server-authority query does.
   const _anySessionBuiltin = astUsesSessionBuiltin(fileAST);
+  // §20.5 (i29e, S239 FIX 8) — only an app that actually ESTABLISHES a session
+  // (`session.set` / `session.destroy`) gets the RULED-durable on-disk store; a
+  // read-only-auth / `@currentUser` / serverLoad app that never writes keeps the
+  // prior in-memory Map (no unrequested file / startup I/O / durability change).
+  const _anySessionWrite = astUsesSessionWrite(fileAST);
   const _needsSessionInfra = !!authMiddlewareEntry || _anyServerLoadGates || _anyCurrentUserQuery || _anySessionBuiltin;
 
   // §61.6 — an `<endpoint>` emits a server route-handler directly (bypassing the
@@ -1604,42 +1635,75 @@ export function generateServerJs(
     // §20.5 (S265, i29e) — session cookie Max-Age + durable-store TTL, in seconds.
     const _sessionMaxAgeSec = parseSessionExpirySeconds(authMiddlewareEntry?.sessionExpiry ?? null);
     lines.push("// --- §52 / §20.5 Session store + request-context middleware (compiler-generated) ---");
-    // §20.5 (S265, i29e) — the RULED-durable session store. Backs both the READ
-    // side (this middleware) and the WRITE side (`_scrml_session_begin/commit`
-    // below) with a SQLite-backed KV keyed by `scrml_sid`, so a login on one
-    // request is visible to `@currentUser` on the next — AND survives a process
-    // restart (Peter's always-on Pi: an in-memory Map logged everyone out on every
-    // restart). Mirrors `stdlib/store.js:createSessionStore` (namespace "session",
-    // JSON values, `expires_at` TTL) but INLINED into the server bundle — the same
-    // self-contained pattern the §19.9.6 idempotency shadow-table + the other
-    // `_scrml_*` server runtime helpers use, because a compiler-INJECTED import is
-    // not seen by the stdlib bundler (which only scans user imports). `bun:sqlite`
-    // is SYNCHRONOUS, so the middleware stays sync (no ripple into its call sites).
-    // Store path is a fixed `.scrml-sessions.db` beside the runtime CWD; a
-    // `session-store=` attribute to relocate it is out of scope (SPEC §20.5).
-    lines.push('import { Database as _ScrmlSessionDatabase } from "bun:sqlite";');
-    lines.push("const _scrml_session_store = (globalThis.__scrml_session_store ??= (() => {");
-    lines.push('  const _db = new _ScrmlSessionDatabase(".scrml-sessions.db");');
-    lines.push('  _db.run("CREATE TABLE IF NOT EXISTS kv_store (namespace TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, expires_at INTEGER, PRIMARY KEY (namespace, key))");');
-    lines.push('  const _ns = "session";');
-    lines.push('  const _stmtGet = _db.prepare("SELECT value, expires_at FROM kv_store WHERE namespace = ? AND key = ?");');
-    lines.push('  const _stmtSet = _db.prepare("INSERT OR REPLACE INTO kv_store (namespace, key, value, expires_at) VALUES (?, ?, ?, ?)");');
-    lines.push('  const _stmtDel = _db.prepare("DELETE FROM kv_store WHERE namespace = ? AND key = ?");');
-    lines.push("  return {");
-    lines.push("    get(key) {");
-    lines.push("      const row = _stmtGet.get(_ns, key);");
-    lines.push("      if (!row) return null;");
-    lines.push("      if (row.expires_at !== null && row.expires_at <= Date.now()) { _stmtDel.run(_ns, key); return null; }");
-    lines.push("      try { return JSON.parse(row.value); } catch { return row.value; }");
-    lines.push("    },");
-    lines.push("    set(key, value, ttl) {");
-    lines.push("      const expiresAt = ttl ? Date.now() + ttl * 1000 : null;");
-    lines.push("      _stmtSet.run(_ns, key, JSON.stringify(value), expiresAt);");
-    lines.push("    },");
-    lines.push("    delete(key) { _stmtDel.run(_ns, key); },");
-    lines.push("  };");
-    lines.push("})());");
+    if (_anySessionWrite) {
+      // §20.5 (S265, i29e) — the RULED-durable session store (emitted ONLY for an
+      // app that establishes a session — S239 FIX 8). Backs both the READ side
+      // (this middleware) and the WRITE side (`_scrml_session_begin/commit`) with a
+      // SQLite-backed KV keyed by `scrml_sid`, so a login on one request is visible
+      // to `@currentUser` on the next — AND survives a process restart (Peter's
+      // always-on Pi: an in-memory Map logged everyone out on every restart).
+      // Mirrors `stdlib/store.js:createSessionStore` (namespace "session", JSON
+      // values, `expires_at` TTL) but INLINED — the self-contained pattern the
+      // §19.9.6 idempotency shadow-table + the other `_scrml_*` runtime helpers use
+      // (a compiler-INJECTED import is not seen by the stdlib bundler). `bun:sqlite`
+      // is SYNCHRONOUS, so the middleware stays sync.
+      //
+      // S239 FIX 9 — the store path is resolved DETERMINISTICALLY beside the
+      // emitted server bundle (`import.meta.dir`), NOT the launch CWD (which
+      // "vanishes"/collides). Cached per-PATH on `globalThis.__scrml_session_stores`
+      // so two distinct apps in one process (e.g. the test runner) never bleed
+      // sessions through a single shared handle. NOTE: the store sits beside the
+      // build output — a REBUILD re-creates it (a deploy logs users out); a
+      // RESTART reuses it (the durability that matters). A `session-store=`
+      // attribute to point it at a data dir is a follow-up (SPEC §20.5).
+      lines.push('import { Database as _ScrmlSessionDatabase } from "bun:sqlite";');
+      lines.push('const _scrml_session_db_path = ((import.meta && import.meta.dir) ? import.meta.dir : ".") + "/.scrml-sessions.db";');
+      lines.push("const _scrml_session_store = (((globalThis.__scrml_session_stores ??= {}))[_scrml_session_db_path] ??= (() => {");
+      lines.push("  const _db = new _ScrmlSessionDatabase(_scrml_session_db_path);");
+      lines.push('  _db.run("CREATE TABLE IF NOT EXISTS kv_store (namespace TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, expires_at INTEGER, PRIMARY KEY (namespace, key))");');
+      lines.push('  const _ns = "session";');
+      lines.push('  const _stmtGet = _db.prepare("SELECT value, expires_at FROM kv_store WHERE namespace = ? AND key = ?");');
+      lines.push('  const _stmtSet = _db.prepare("INSERT OR REPLACE INTO kv_store (namespace, key, value, expires_at) VALUES (?, ?, ?, ?)");');
+      lines.push('  const _stmtDel = _db.prepare("DELETE FROM kv_store WHERE namespace = ? AND key = ?");');
+      lines.push("  return {");
+      lines.push("    get(key) {");
+      lines.push("      const row = _stmtGet.get(_ns, key);");
+      lines.push("      if (!row) return null;");
+      lines.push("      if (row.expires_at !== null && row.expires_at <= Date.now()) { _stmtDel.run(_ns, key); return null; }");
+      lines.push("      try { return JSON.parse(row.value); } catch { return row.value; }");
+      lines.push("    },");
+      lines.push("    set(key, value, ttl) {");
+      lines.push("      const expiresAt = ttl ? Date.now() + ttl * 1000 : null;");
+      lines.push("      _stmtSet.run(_ns, key, JSON.stringify(value), expiresAt);");
+      lines.push("    },");
+      lines.push("    delete(key) { _stmtDel.run(_ns, key); },");
+      lines.push("  };");
+      lines.push("})());");
+    } else {
+      // S239 FIX 8 — no `session.set`/`.destroy` in this app: keep the prior
+      // in-memory read-only store (byte-identical to the pre-i29e read-side infra).
+      lines.push("const _scrml_session_store = (globalThis.__scrml_session_store ??= new Map());");
+    }
     lines.push(`const _scrml_session_max_age = ${_sessionMaxAgeSec};`);
+    lines.push("");
+    // S239 FIX 3 — is this request already secure (https) or plain-http localhost
+    // dev? Drives the `Secure` cookie attribute on ALL session (`scrml_sid`)
+    // cookies: on by DEFAULT (never ship a session credential as cleartext by
+    // default), carved out ONLY for http on loopback so `http://localhost` dev
+    // still round-trips. A TLS-less NON-local deployment (e.g. a bare-http Pi mesh)
+    // must front with TLS or use a future `session-secure=` opt-out — insecure is
+    // NOT the template default. Emitted whenever session infra exists (both the
+    // establishment cookie AND the `_scrml_session_destroy` logout route use it).
+    lines.push("function _scrml_is_secure_req(req) {");
+    lines.push("  try {");
+    lines.push("    const _u = new URL(req.url);");
+    lines.push("    const _proto = (req.headers.get('x-forwarded-proto') || _u.protocol.replace(':','')).toLowerCase();");
+    lines.push("    const _host = _u.hostname;");
+    lines.push("    const _isLocal = _host === 'localhost' || _host === '127.0.0.1' || _host === '::1' || _host === '';");
+    lines.push("    if (_proto === 'https') return true;");
+    lines.push("    return !_isLocal;");
+    lines.push("  } catch { return true; }");
+    lines.push("}");
     lines.push("");
     lines.push("function _scrml_session_middleware(req) {");
     lines.push("  const cookieHeader = req.headers.get('Cookie') || '';");
@@ -1666,9 +1730,14 @@ export function generateServerJs(
     }
     // userId / role resolve from the session store keyed by sessionId. Absence is
     // `null` (scrml `not`) — anon → null → SQL NULL → row-scope fails closed.
+    // S239 FIX 2 — `isAuth` requires a REAL store record WITH a userId, NOT merely
+    // a `scrml_sid` cookie. `!!sessionId` was an auth bypass: any attacker-chosen
+    // cookie value (no record) read authed → sailed past `_scrml_auth_check` (302),
+    // `_scrml_serverload_auth` (401), and every `@currentUser.isAuth` check.
+    // Unified with the write-ctx `session.isAuth` getter (same rule).
     lines.push("  return {");
     lines.push("    sessionId,");
-    lines.push("    isAuth: !!sessionId,");
+    lines.push("    isAuth: !!_rec && _rec.userId != null,");
     lines.push("    userId: _rec ? (_rec.userId ?? null) : null,");
     lines.push("    role: _rec ? (_rec.role ?? null) : null,");
     if (_csrfAuto) {
@@ -1708,62 +1777,81 @@ export function generateServerJs(
     lines.push("");
 
     // §20.5 (S265, i29e) — the session WRITE half: per-request context + commit +
-    // cookie wrapper. `_scrml_session_begin(req)` loads the incoming session
-    // record from the durable store (keyed by the request's `scrml_sid`) into a
-    // mutable per-request context bound on the Request as `_scrml_req._scrml_sess`
-    // by `_scrml_session_cookie_wrap`. A server-fn body's `session.set(k,v)` /
-    // `session.destroy()` mutate that context (coalescing to ONE record + ONE
-    // cookie); session-field reads resolve from it. AFTER the handler
-    // returns its Response, `_scrml_session_commit` performs the single durable
-    // write (or delete on destroy) and returns the `Set-Cookie` string, which the
-    // wrapper APPENDS to the compiler-owned Response — a second `Set-Cookie`
-    // header alongside any `scrml_csrf` cookie (a Headers.append, never a
-    // clobbering object-literal key). Mirrors the logout-clear cookie
-    // (`_scrml_session_destroy`) + the csrf co-emission at the return seam.
-    lines.push("// --- §20.5 session WRITE context: begin + commit + cookie wrapper (compiler-generated) ---");
-    lines.push("function _scrml_session_begin(req) {");
-    lines.push("  const cookieHeader = req.headers.get('Cookie') || '';");
-    lines.push("  const sid = cookieHeader.match(/scrml_sid=([^;]+)/)?.[1] || null;");
-    lines.push("  const rec = sid ? (_scrml_session_store.get(sid) || null) : null;");
-    lines.push("  return {");
-    lines.push("    sid,");
-    lines.push("    _rec: rec ? { ...rec } : {},");
-    lines.push("    _dirty: false,");
-    lines.push("    _destroy: false,");
-    lines.push("    get userId() { return this._rec.userId ?? null; },");
-    lines.push("    get role() { return this._rec.role ?? null; },");
-    lines.push("    get isAuth() { return !!this.sid && !this._destroy && (this._rec.userId != null); },");
-    lines.push("    set(key, value) { this._rec[key] = value; this._dirty = true; },");
-    lines.push("    get(key) { return this._rec[key] ?? null; },");
-    lines.push("    destroy() { this._destroy = true; this._dirty = false; },");
-    lines.push("  };");
-    lines.push("}");
-    lines.push("");
-    lines.push("function _scrml_session_commit(sess) {");
-    lines.push("  if (sess._destroy) {");
-    lines.push("    if (sess.sid) _scrml_session_store.delete(sess.sid);");
-    lines.push("    return 'scrml_sid=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax';");
-    lines.push("  }");
-    lines.push("  if (sess._dirty) {");
-    lines.push("    const sid = sess.sid || crypto.randomUUID();");
-    lines.push("    _scrml_session_store.set(sid, sess._rec, _scrml_session_max_age);");
-    lines.push("    return `scrml_sid=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${_scrml_session_max_age}`;");
-    lines.push("  }");
-    lines.push("  return null;");
-    lines.push("}");
-    lines.push("");
-    lines.push("function _scrml_session_cookie_wrap(inner) {");
-    lines.push("  return async function (_scrml_req) {");
-    lines.push("    const _sess = (_scrml_req._scrml_sess = _scrml_session_begin(_scrml_req));");
-    lines.push("    const _resp = await inner(_scrml_req);");
-    lines.push("    const _ck = _scrml_session_commit(_sess);");
-    lines.push("    if (_ck && _resp && _resp.headers && typeof _resp.headers.append === 'function') {");
-    lines.push("      _resp.headers.append('Set-Cookie', _ck);");
-    lines.push("    }");
-    lines.push("    return _resp;");
-    lines.push("  };");
-    lines.push("}");
-    lines.push("");
+    // cookie wrapper. Emitted only when the app uses the `session` builtin.
+    //
+    // ⚠ SECURITY INVARIANT (S239 FIX 5): `session.set("userId", …)` MINTS an
+    // AUTHENTICATED session — it performs NO credential check itself. Adopters
+    // SHALL call it ONLY after verifying credentials (a password check, an OAuth
+    // callback, …). A `session.set("userId", …)` on an unverified request is an
+    // authentication bypass in the ADOPTER's code. (SPEC §20.5.1.)
+    if (_anySessionBuiltin) {
+      lines.push("// --- §20.5 session WRITE context: begin + commit + cookie wrapper (compiler-generated) ---");
+      // `_scrml_session_begin(req)` loads the incoming session record into a mutable
+      // per-request context bound on the Request as `_scrml_req._scrml_sess` by
+      // `_scrml_session_cookie_wrap`. A server-fn body's `session.set` / `.destroy`
+      // mutate it (coalescing to ONE record + ONE cookie); reads resolve from it.
+      // `_changes` tracks ONLY the session.set writes (kept separate from the begin
+      // snapshot) so commit can MERGE them onto the CURRENT stored record (S239
+      // FIX 4 — preserving server-owned fields like a csrf token minted mid-body).
+      lines.push("function _scrml_session_begin(req) {");
+      lines.push("  const cookieHeader = req.headers.get('Cookie') || '';");
+      lines.push("  const sid = cookieHeader.match(/scrml_sid=([^;]+)/)?.[1] || null;");
+      lines.push("  const rec = sid ? (_scrml_session_store.get(sid) || null) : null;");
+      lines.push("  return {");
+      lines.push("    sid,");
+      lines.push("    _rec: rec ? { ...rec } : {},");
+      lines.push("    _changes: {},");
+      lines.push("    _dirty: false,");
+      lines.push("    _destroy: false,");
+      lines.push("    get userId() { return this._rec.userId ?? null; },");
+      lines.push("    get role() { return this._rec.role ?? null; },");
+      // S239 FIX 2 (unify) — same rule as the middleware: a record with a userId.
+      lines.push("    get isAuth() { return this._rec.userId != null && !this._destroy; },");
+      // S239 FIX 7 — `set` clears `_destroy` so a `destroy(); set()` sequence
+      // establishes (last write by call order wins); `destroy` clears `_dirty`.
+      lines.push("    set(key, value) { this._rec[key] = value; this._changes[key] = value; this._dirty = true; this._destroy = false; },");
+      lines.push("    get(key) { return this._rec[key] ?? null; },");
+      lines.push("    destroy() { this._destroy = true; this._dirty = false; },");
+      lines.push("  };");
+      lines.push("}");
+      lines.push("");
+      lines.push("function _scrml_session_commit(sess, secure) {");
+      lines.push("  const _sec = secure ? '; Secure' : '';");
+      lines.push("  if (sess._destroy) {");
+      lines.push("    if (sess.sid) _scrml_session_store.delete(sess.sid);");
+      lines.push("    return 'scrml_sid=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax' + _sec;");
+      lines.push("  }");
+      lines.push("  if (sess._dirty) {");
+      // S239 FIX 4 — MERGE onto the current stored record (preserve server-owned
+      // fields such as a mid-body-minted csrfToken), never blind-overwrite a stale
+      // begin-snapshot.
+      lines.push("    const _current = sess.sid ? (_scrml_session_store.get(sess.sid) || {}) : {};");
+      lines.push("    const _merged = { ..._current, ...sess._changes };");
+      // S239 FIX 1 — SESSION FIXATION: ALWAYS mint a FRESH sid on an
+      // identity-establishing write; never reuse/reflect the incoming
+      // (attacker-suppliable) `scrml_sid`. Delete the old record so a planted sid
+      // is not resurrectable.
+      lines.push("    const _newSid = crypto.randomUUID();");
+      lines.push("    _scrml_session_store.set(_newSid, _merged, _scrml_session_max_age);");
+      lines.push("    if (sess.sid && sess.sid !== _newSid) _scrml_session_store.delete(sess.sid);");
+      lines.push("    return `scrml_sid=${_newSid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${_scrml_session_max_age}` + _sec;");
+      lines.push("  }");
+      lines.push("  return null;");
+      lines.push("}");
+      lines.push("");
+      lines.push("function _scrml_session_cookie_wrap(inner) {");
+      lines.push("  return async function (_scrml_req) {");
+      lines.push("    const _sess = (_scrml_req._scrml_sess = _scrml_session_begin(_scrml_req));");
+      lines.push("    const _resp = await inner(_scrml_req);");
+      lines.push("    const _ck = _scrml_session_commit(_sess, _scrml_is_secure_req(_scrml_req));");
+      lines.push("    if (_ck && _resp && _resp.headers && typeof _resp.headers.append === 'function') {");
+      lines.push("      _resp.headers.append('Set-Cookie', _ck);");
+      lines.push("    }");
+      lines.push("    return _resp;");
+      lines.push("  };");
+      lines.push("}");
+      lines.push("");
+    }
   }
 
   // Session/auth middleware (Option C hybrid) — the page-navigation 302 gate, CSRF
@@ -1811,10 +1899,16 @@ export function generateServerJs(
     lines.push(`  path: "/_scrml/session/destroy",`);
     lines.push(`  method: "POST",`);
     lines.push("  handler: async function(_scrml_req) {");
+    // S239 FIX 1 (logout half) — DELETE the server-side record, not just the
+    // cookie, so a planted/leaked sid is not resurrectable after logout.
+    lines.push("    const _dsid = (_scrml_req.headers.get('Cookie') || '').match(/scrml_sid=([^;]+)/)?.[1] || null;");
+    lines.push("    if (_dsid) _scrml_session_store.delete(_dsid);");
+    // S239 FIX 5 (SameSite consistency → Lax) + FIX 3 (dev-gated Secure).
+    lines.push("    const _dsec = _scrml_is_secure_req(_scrml_req) ? '; Secure' : '';");
     lines.push("    return new Response(JSON.stringify({ ok: true }), {");
     lines.push("      status: 200,");
     lines.push("      headers: {");
-    lines.push(`        'Set-Cookie': 'scrml_sid=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Strict',`);
+    lines.push(`        'Set-Cookie': 'scrml_sid=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax' + _dsec,`);
     lines.push("        'Content-Type': 'application/json',");
     lines.push("      },");
     lines.push("    });");
@@ -3078,14 +3172,19 @@ export function generateServerJs(
     // and emits no session infra, so the wrapper does not exist there. Placed
     // OUTERMOST (around any `_scrml_mw_wrap`) so the cookie survives on the final
     // Response and the session context is established before middleware runs.
-    const _sessHandlerUsesSession =
-      _webAppShape &&
-      lines.slice(_sessHandlerStartIdx).some((l) => l.includes("_scrml_req._scrml_sess"));
+    const _sessHandlerRefsSession =
+      lines.slice(_sessHandlerStartIdx).some((l) => l.includes("_scrml_req._scrml_sess."));
+    const _sessHandlerUsesSession = _webAppShape && _sessHandlerRefsSession;
     let _sessRegHandler = (_scrml_hasMW || _scrml_handleNode != null)
       ? `_scrml_mw_wrap(${handlerName})`
       : handlerName;
     if (_sessHandlerUsesSession) {
       _sessRegHandler = `_scrml_session_cookie_wrap(${_sessRegHandler})`;
+      // §20.5 (i29e, S239 FIX 6) — record this wrapped handler's line range as an
+      // ALLOWED session-context region for the post-emission scan. (A headless
+      // main-route handler that refs session is NOT wrapped and NOT recorded → the
+      // scan flags it E-SESSION-CONTEXT: session establishment is web-app-only.)
+      _allowedSessionRanges.push({ start: _sessHandlerStartIdx, end: lines.length });
     }
     lines.push(`export const ${_curRouteName} = {`);
     lines.push(`  path: ${JSON.stringify(_curPath)},`);
@@ -4490,6 +4589,42 @@ export function generateServerJs(
       } else {
         finalEmitted = finalEmitted.slice(0, headerEndIdx) + enumBlock + finalEmitted.slice(headerEndIdx);
       }
+    }
+  }
+
+  // §20.5 (i29e, S239 FIX 6) — post-emission session-context scan (default-deny).
+  // `session.*` lowers to `_scrml_req._scrml_sess.*` unconditionally in server
+  // mode; that ref is only DEFINED inside a cookie-wrapped web-app route handler
+  // (the `_allowedSessionRanges` recorded above). Any occurrence OUTSIDE those
+  // ranges — an SSE `server function*`, an `<endpoint>` arm, a `<machine>` method,
+  // a serverLoad cell, an in-process peer callable, or an unwrapped headless route
+  // — has no session context and would 500/ReferenceError at runtime, so it is a
+  // build-blocking E-SESSION-CONTEXT. Scans the `lines` array (pre-assembly, so the
+  // indices match the recorded ranges; the later prepends carry no session refs).
+  {
+    const _inAllowed = (idx: number) =>
+      _allowedSessionRanges.some((r) => idx >= r.start && idx < r.end);
+    let _sessionCtxFired = false;
+    for (let _i = 0; _i < lines.length && !_sessionCtxFired; _i++) {
+      // Match the ACCESS form `_scrml_req._scrml_sess.<member>` (a session USE);
+      // the `_scrml_session_cookie_wrap` helper's own ASSIGNMENT
+      // (`_scrml_req._scrml_sess = …`, no trailing dot) is not a use and is skipped.
+      if (!lines[_i].includes("_scrml_req._scrml_sess.")) continue;
+      if (_inAllowed(_i)) continue;
+      _sessionCtxFired = true; // file-level: one error is enough to block the build
+      errors.push(new CGError(
+        "E-SESSION-CONTEXT",
+        "E-SESSION-CONTEXT: the `session` builtin (`session.set` / `session.get` / " +
+        "`session.destroy` / a `session.<field>` read) is available ONLY inside a web-app " +
+        "server route handler — the request/response context the compiler wraps with the " +
+        "session cookie. It is NOT available in an SSE `server function*`, an `<endpoint>` " +
+        "arm, a `<machine>` method, a serverLoad cell, an in-process server-fn helper called " +
+        "by another server function, or a headless `kind=\"tool\"` program (bearer auth). " +
+        "Move the `session.*` call into the server function that is the request entry point, " +
+        "or return the value to that handler and call `session.set` there.",
+        { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+        "error",
+      ));
     }
   }
 

@@ -80,21 +80,26 @@ describe("§20.5 session.set — lowering + write infra", () => {
     expect(res.serverJs).toMatch(/handler:\s*_scrml_session_cookie_wrap\(/);
   });
 
-  test("U3 durable SQLite store is emitted; the in-memory Map is not", () => {
+  test("U3 durable SQLite store is emitted (keyed by a deterministic path); the Map is not", () => {
     const res = compile(LOGIN);
     expect(res.serverJs).toContain('import { Database as _ScrmlSessionDatabase } from "bun:sqlite"');
-    expect(res.serverJs).toContain('new _ScrmlSessionDatabase(".scrml-sessions.db")');
-    expect(res.serverJs).toContain("const _scrml_session_store = (globalThis.__scrml_session_store");
-    // the write path must NOT fall back to the read-only in-memory Map
+    expect(res.serverJs).toContain("new _ScrmlSessionDatabase(_scrml_session_db_path)");
+    // S239 FIX 9 — deterministic path beside the bundle, keyed cache (no bleed).
+    expect(res.serverJs).toContain("import.meta.dir");
+    expect(res.serverJs).toContain("globalThis.__scrml_session_stores");
+    // a session-WRITE app must NOT use the read-only in-memory Map
     expect(res.serverJs).not.toContain("globalThis.__scrml_session_store ??= new Map()");
   });
 
-  test("U4 commit emits the establishment cookie with HttpOnly; SameSite=Lax; Max-Age", () => {
+  test("U4 commit emits the establishment cookie with HttpOnly; SameSite=Lax; Max-Age; Secure", () => {
     const res = compile(LOGIN);
-    expect(res.serverJs).toContain("function _scrml_session_commit(sess)");
+    expect(res.serverJs).toContain("function _scrml_session_commit(sess, secure)");
+    // S239 FIX 1 — the cookie carries a FRESH rotated sid (`_newSid`), never the
+    // incoming one; S239 FIX 3 — Secure appended (dev-gated via `_sec`).
     expect(res.serverJs).toContain(
-      "return `scrml_sid=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${_scrml_session_max_age}`",
+      "return `scrml_sid=${_newSid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${_scrml_session_max_age}` + _sec",
     );
+    expect(res.serverJs).toContain("const _sec = secure ? '; Secure' : '';");
     // default expiry is 1h (3600s) when no sessionExpiry= is present
     expect(res.serverJs).toContain("const _scrml_session_max_age = 3600;");
     // the wrapper appends the cookie (a second Set-Cookie, never a clobber)
@@ -106,16 +111,46 @@ describe("§20.5 session.set — lowering + write infra", () => {
     // commit does exactly one durable write and returns exactly one cookie —
     // regardless of how many session.set calls ran in the body.
     const commit = res.serverJs.slice(
-      res.serverJs.indexOf("function _scrml_session_commit(sess)"),
+      res.serverJs.indexOf("function _scrml_session_commit(sess, secure)"),
       res.serverJs.indexOf("function _scrml_session_cookie_wrap"),
     );
-    const setCalls = (commit.match(/_scrml_session_store\.set\(sid,/g) || []).length;
-    const cookieReturns = (commit.match(/scrml_sid=\$\{sid\}/g) || []).length;
+    const setCalls = (commit.match(/_scrml_session_store\.set\(_newSid,/g) || []).length;
+    const cookieReturns = (commit.match(/scrml_sid=\$\{_newSid\}/g) || []).length;
     expect(setCalls).toBe(1);
     expect(cookieReturns).toBe(1);
     // the wrapper appends the cookie exactly once
     const wrap = res.serverJs.slice(res.serverJs.indexOf("function _scrml_session_cookie_wrap"));
     expect((wrap.match(/headers\.append\('Set-Cookie'/g) || []).length).toBe(1);
+  });
+
+  test("U3b session fixation — commit mints a FRESH sid and deletes the incoming one", () => {
+    const res = compile(LOGIN);
+    const commit = res.serverJs.slice(
+      res.serverJs.indexOf("function _scrml_session_commit(sess, secure)"),
+      res.serverJs.indexOf("function _scrml_session_cookie_wrap"),
+    );
+    // ALWAYS a fresh uuid on a dirty commit; NEVER reuse `sess.sid`.
+    expect(commit).toContain("const _newSid = crypto.randomUUID();");
+    expect(commit).not.toContain("sess.sid || crypto.randomUUID()");
+    // the old (incoming) record is deleted so a planted sid is not resurrectable.
+    expect(commit).toContain("if (sess.sid && sess.sid !== _newSid) _scrml_session_store.delete(sess.sid)");
+    // FIX 4 — merge onto the current stored record (preserve server-owned fields).
+    expect(commit).toContain("const _merged = { ..._current, ...sess._changes };");
+  });
+
+  test("U4b isAuth requires a real record WITH a userId (no cookie-only bypass)", () => {
+    const res = compile(LOGIN);
+    // middleware + write-ctx unified on the same rule.
+    expect(res.serverJs).toContain("isAuth: !!_rec && _rec.userId != null,");
+    expect(res.serverJs).not.toContain("isAuth: !!sessionId,");
+    expect(res.serverJs).toContain("get isAuth() { return this._rec.userId != null && !this._destroy; }");
+  });
+
+  test("U7b destroy() then set() establishes (set clears _destroy)", () => {
+    const res = compile(LOGIN);
+    expect(res.serverJs).toContain(
+      "set(key, value) { this._rec[key] = value; this._changes[key] = value; this._dirty = true; this._destroy = false; }",
+    );
   });
 
   test("U6 session.destroy lowers + commit deletes the record + clears the cookie", () => {
@@ -180,8 +215,8 @@ describe("§20.5 session — scope classification (E-SCOPE-012)", () => {
   });
 });
 
-describe("§20.5 session — webAppShape gate + no-regression", () => {
-  test("U9 a headless kind=\"tool\" program emits NO cookie-session write infra", () => {
+describe("§20.5 session — context gate (FIX 6, default-deny) + no-regression", () => {
+  test("U9 a headless kind=\"tool\" session.set is a COMPILE ERROR (E-SESSION-CONTEXT)", () => {
     const res = compile(`<program kind="tool">
       \${
         server function stash() {
@@ -191,12 +226,30 @@ describe("§20.5 session — webAppShape gate + no-regression", () => {
         fn main() -> int { 0 }
       }
     </program>`);
-    // Headless is bearer-auth territory — the cookie-session store/write helpers
-    // are UNIFORMLY absent (the same `_webAppShape` gate the S233 read infra uses).
-    expect(res.serverJs).not.toContain("_scrml_session_begin");
-    expect(res.serverJs).not.toContain("_scrml_session_cookie_wrap");
+    // Headless is bearer-auth territory — session.* has no cookie context there,
+    // so it must fire a COMPILE ERROR, not silently emit a crashing ref.
+    expect(hasCode(res, "E-SESSION-CONTEXT")).toBe(true);
+    // and no cookie-session write infra leaks into the headless bundle
     expect(res.serverJs).not.toContain(".scrml-sessions.db");
-    expect(res.serverJs).not.toContain("_scrml_session_commit");
+  });
+
+  test("U9b session.set in a peer-called in-process server fn is E-SESSION-CONTEXT", () => {
+    // `helper` is called in-process by `route` → it is peer-emitted (no request
+    // context). session.set in it must compile-error, not ReferenceError at runtime.
+    const res = compile(`<program>
+      \${
+        server function helper() {
+          session.set("userId", "u-1")
+          return "ok"
+        }
+        server function route() {
+          let r = helper()
+          return r
+        }
+      }
+      <button onclick=route()>go</button>
+    </program>`);
+    expect(hasCode(res, "E-SESSION-CONTEXT")).toBe(true);
   });
 
   test("U10 an app that never touches session emits no WRITE infra", () => {
@@ -208,6 +261,29 @@ describe("§20.5 session — webAppShape gate + no-regression", () => {
     expect(res.serverJs).not.toContain("_scrml_session_begin");
     expect(res.serverJs).not.toContain("_scrml_session_cookie_wrap");
     expect(res.serverJs).not.toContain(".scrml-sessions.db");
+  });
+
+  test("U10b FIX 8 — a read-only-auth app (no session.set) does NOT get durable SQLite", () => {
+    // auth="required" + a server fn that never calls session.set → the read infra
+    // still emits, but the store stays the in-memory Map (no unrequested on-disk db).
+    const res = compile(`<program auth="required">
+      <db src="./app.db" tables="notes">
+        \${
+          export server function addNote(t) {
+            ?{\`INSERT INTO notes (t) VALUES (\${t})\`}.run()
+            return "ok"
+          }
+        }
+        <button onclick=addNote("x")>add</button>
+      </>
+    </program>`);
+    expect(res.serverJs).toContain("_scrml_session_middleware");
+    // FIX 8 — Map store, NOT the durable bun:sqlite one.
+    expect(res.serverJs).toContain("globalThis.__scrml_session_store ??= new Map()");
+    expect(res.serverJs).not.toContain(".scrml-sessions.db");
+    expect(res.serverJs).not.toContain('from "bun:sqlite"');
+    // and no write helpers (no session builtin used)
+    expect(res.serverJs).not.toContain("_scrml_session_begin");
   });
 });
 

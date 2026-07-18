@@ -1907,22 +1907,28 @@ function emitMember(node: MemberExpr, ctx: EmitExprContext): string {
   }
 
   // §20.5 (S265, i29e) — `session` server-builtin member reads. Inside a
-  // server-escalated fn body `session.userId` / `session.isAuth` / `session.role`
-  // resolve from the per-request session context bound on the Request by the
-  // compiler-emitted cookie-session wrapper (`_scrml_req._scrml_sess`, whose
-  // fields are loaded from the durable session store keyed by the incoming
-  // `scrml_sid`). SERVER mode only; a client-side `session` read is E-SCOPE-012
-  // (type-system.ts). `declaredNames` guards against a user local shadowing the
-  // reserved `session` name (E-SCOPE-010).
+  // cookie-wrapped web-app route handler `session.userId` / `session.isAuth` /
+  // `session.role` resolve from the per-request session context bound on the
+  // Request (`_scrml_req._scrml_sess`, loaded from the durable session store keyed
+  // by the incoming `scrml_sid`); any OTHER member (a custom key) routes through
+  // `.get("key")` — never a dangling `session.foo` ref (S239 FIX 6). SERVER mode
+  // only; a client-side `session` read is E-SCOPE-012 (type-system.ts).
+  // `declaredNames` guards a user local shadowing the reserved `session` name.
   if (
     ctx.mode === "server" &&
     !node.optional &&
     node.object.kind === "ident" &&
     (node.object as IdentExpr).name === "session" &&
-    (node.property === "userId" || node.property === "isAuth" || node.property === "role") &&
     !(ctx.declaredNames && ctx.declaredNames.has("session"))
   ) {
-    return `_scrml_req._scrml_sess.${node.property}`;
+    // Lowered unconditionally in server mode; emit-server's post-emission scan
+    // (S239 FIX 6) fires E-SESSION-CONTEXT if this ref lands outside a
+    // cookie-wrapped web-app route handler. A custom session key routes through
+    // the typed `.get()` accessor — never a dangling `session.foo` ref.
+    if (node.property === "userId" || node.property === "isAuth" || node.property === "role") {
+      return `_scrml_req._scrml_sess.${node.property}`;
+    }
+    return `_scrml_req._scrml_sess.get(${JSON.stringify(node.property)})`;
   }
 
   const obj = emitReceiver(node.object, ctx);
@@ -2476,9 +2482,10 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   // to ONE store record + ONE cookie. Here we only emit the accessor call; the
   // request param is always named `_scrml_req` in the route handler that hosts
   // the body. SERVER mode only — a client-side `session.*` reference is
-  // E-SCOPE-012 (type-system.ts), never reaching codegen. A user local named
-  // `session` is a reserved-binding error (E-SCOPE-010); `declaredNames` guards
-  // against shadowing it here regardless.
+  // E-SCOPE-012 (type-system.ts), never reaching codegen. NOTE (S239 FIX 11): a
+  // user local `let session = …` binds cleanly today (the reserved-binding
+  // E-SCOPE-010 is spec-ahead, not fired — see SPEC §20.5); the `declaredNames`
+  // guard is what actually steps the builtin aside so the user's local is honored.
   if (
     ctx.mode === "server" &&
     node.callee.kind === "member" &&
@@ -2490,6 +2497,10 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
       (node.callee as MemberExpr).property === "destroy") &&
     !(ctx.declaredNames && ctx.declaredNames.has("session"))
   ) {
+    // Lowered unconditionally in server mode; emit-server's post-emission scan
+    // (S239 FIX 6) fires E-SESSION-CONTEXT if this `_scrml_req._scrml_sess` ref
+    // lands OUTSIDE a cookie-wrapped web-app route handler (SSE / `<endpoint>` /
+    // peer / serverLoad / `<machine>` / headless) — where the context is absent.
     return `_scrml_req._scrml_sess.${(node.callee as MemberExpr).property}(${args})`;
   }
 
