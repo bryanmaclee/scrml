@@ -7,6 +7,10 @@
 - **The mechanical record is honest again.** S266's 3 lands + the #81 arc are now in `handOffs/delta-log.md` `[607]`–`[617]`, `docs/changelog.md` (S268 + S266 blocks), `master-list.md` §0, `docs/known-gaps.md` §S268. The S266 board is closed (wrapped-by-recovery).
 - **#81 is CLOSED** (Axiom ① landed). **② is HELD (bryan)** — do NOT build it unprompted.
 
+## 🔀 CONCURRENT S267-peter (adopter lane — full detail on the board `S267-peter.md`, delta-log [618]-[624])
+- **#87 nested server-call auto-await → merge-ready PR #106** (`fix/i87-nested-server-autoawait`) — `gate`+`windows` GREEN, 11/11 #87 tests. §13.2 conformance fix (auto-await descends into nested control-flow statement bodies). **HELD for Peter's merge word.** 3 pre-existing auto-await known-gaps filed (§S267).
+- **⚠️ FOR BRYAN — a HIGH finding in YOUR lane:** a **pre-existing client-side auth-bypass** (reproduces on main) — a CLIENT fn calling a server fn inside a client `.some()`/`.map()`/lambda compiles CLEAN → accept-all (`@ok=@hashes.some(fn(h)=>verifyPw(@pw,h))` → every input passes). The fail-closed `E-*-SYNC-CALLBACK` guards cover SERVER-side emission ONLY; the client side is unguarded. Peter did NOT file it publicly (unpatched auth-bypass = your disclosure/fix call). Repro + notes on `S267-peter.md`.
+
 ## 🎬 WHAT LANDED / WAS RECOVERED
 ### This session (S268)
 1. **#81 writer-ownership Axiom ①** (`8931fd59`, PR #105) — exclusive wholesale-owner per DOM surface + `E-ATTR-WRITER-CONFLICT`. A **sole** reactive value attr (`class=/style=/value=(expr)`, `title=`/`data-*`) dropped outside `<each>` now emits (**fixes #81**; `g-value-attr-dropped-outside-each` RESOLVED); a wholesale-vs-other contention errors instead of silently clobbering. §5.5.3/§5.5.4/§34 reconciled with **honest enforcement-scope Notes** (template-lit + loop-context enforcement disclosed as follow-ups, not unenforced SHALLs).
