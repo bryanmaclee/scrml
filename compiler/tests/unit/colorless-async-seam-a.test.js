@@ -325,3 +325,125 @@ describe("§11 (bucket c): `.sort` with an async comparator fails closed", () =>
     expect(hasAsyncSyncCbErr(errors)).toBe(true);
   });
 });
+
+// §12 (finding 1, S239 fix-round) — an async call in a fn SIGNATURE param default is
+// eagerly evaluated OUTSIDE the async body (`await` is a JS SyntaxError in a default
+// even in an async fn — DD colorless-async-boundaries position-2 fail-close anchor).
+// `paramSignature` splices `p.defaultValue` as raw text, so the body walk never
+// reaches it; pre-fix it compiled clean and leaked a bare Promise (`x.ok === undefined`).
+describe("§12 (finding 1): async call in a PARAM DEFAULT fails closed", () => {
+  test("client `function f(x = safeCallAsync(...))` fires E-ASYNC-STDLIB-IN-SYNC-CALLBACK", () => {
+    const p = fix("f1-param-stdlib.scrml", `<program>
+\${
+  import { safeCallAsync } from "scrml:host"
+  function f(x = safeCallAsync(() => window.g())) { @done = x.ok }
+  <done> = false
+}
+<button onclick=f()>Go</button>
+<span>\${@done}</span>
+</program>
+`);
+    const { js, errors } = compile([p], { wantFile: "f1-param-stdlib", field: "clientJs" });
+    expect(hasAsyncSyncCbErr(errors)).toBe(true);
+    // The client fn is NOT emitted as an awaited/async-resolved param default — the
+    // leak shape (`= safeCallAsync(...)` with a bare `.ok`) is diagnosed, not silently
+    // shipped. `x.ok` on a Promise would be `undefined` (the leak this closes).
+    expect(js).not.toMatch(/=\s*await\s+safeCallAsync/);
+  });
+
+  test("client async-PEER default `function outer(x = middle(window))` fails closed", () => {
+    const p = fix("f1-param-peer.scrml", `<program>
+\${
+  import { safeCallAsync } from "scrml:host"
+  function middle(o) { const r = safeCallAsync(() => o.load()) !{ | ::Thrown(m) -> ({ ok: false }) }; return r.ok }
+  function outer(x = middle(window)) { @done = x }
+  <done> = false
+}
+<button onclick=outer()>Go</button>
+<span>\${@done}</span>
+</program>
+`);
+    const { errors } = compile([p], { wantFile: "f1-param-peer", field: "clientJs" });
+    expect(hasAsyncSyncCbErr(errors)).toBe(true);
+  });
+
+  test("library `export function h(x = callHost(obj))` (async peer) fails closed", () => {
+    const p = fix("f1-param-lib.scrml", `\${
+  import { safeCallAsync } from "scrml:host"
+  export function callHost(obj) { const r = safeCallAsync(() => obj.doThing()) !{ | ::Thrown(m) :> ({ ok: false }) }; return r.ok }
+  export function h(obj, x = callHost(obj)) { return x }
+}
+`);
+    const { errors } = compile([p], { mode: "library", wantFile: "f1-param-lib", field: "libraryJs" });
+    expect(hasAsyncSyncCbErr(errors)).toBe(true);
+  });
+
+  test("a PLAIN param default (no async) does NOT fire — no over-diagnosis", () => {
+    const p = fix("f1-param-plain.scrml", `\${
+  export function add(a, b) { return a + b }
+  export function h(a, b = 0) { const s = add(a, b); return s }
+}
+`);
+    const { js, errors } = compile([p], { mode: "library", wantFile: "f1-param-plain", field: "libraryJs" });
+    expect(hasAsyncSyncCbErr(errors)).toBe(false);
+    expect(js).not.toMatch(/\bawait\b/);
+  });
+});
+
+// §13 (finding 2, S239 fix-round) — a MULTI-HOP alias chain (`const g = middle;
+// const h = g; h()`). The pre-fix single-level collector recorded `X = <rhs>` only
+// when `rhs` was DIRECTLY async, so a re-alias was missed and the indirect call
+// shipped bare-unawaited on a plain sync fn. The collector now chain-follows to the
+// async terminal (cycle-safe).
+describe("§13 (finding 2): multi-hop alias chain fails closed / no false-positive", () => {
+  test("`const g = middle; const h = g; h(o)` (middle async) fires E-ASYNC-STDLIB-IN-SYNC-CALLBACK", () => {
+    const p = fix("f2-multihop.scrml", `\${
+  import { safeCallAsync } from "scrml:host"
+  export function middle(o) { const r = safeCallAsync(() => o.doThing()) !{ | ::Thrown(m) :> ({ ok: false }) }; return r.ok }
+  export function outer(o) { const g = middle; const h = g; const ok = h(o); return ok }
+}
+`);
+    const { errors } = compile([p], { mode: "library", wantFile: "f2-multihop", field: "libraryJs" });
+    expect(hasAsyncSyncCbErr(errors)).toBe(true);
+    // The resolved async terminal (`middle`) is named in the diagnostic, proving the
+    // chain was followed transitively past the intermediate alias `g`.
+    expect(errors.some((e) => e.code === "E-ASYNC-STDLIB-IN-SYNC-CALLBACK" && /alias of the async function `middle`/.test(e.message))).toBe(true);
+  });
+
+  test("a 3-hop chain `g -> h -> k; k(o)` also fails closed", () => {
+    const p = fix("f2-threehop.scrml", `\${
+  import { safeCallAsync } from "scrml:host"
+  export function middle(o) { const r = safeCallAsync(() => o.doThing()) !{ | ::Thrown(m) :> ({ ok: false }) }; return r.ok }
+  export function outer(o) { const g = middle; const h = g; const k = h; const ok = k(o); return ok }
+}
+`);
+    const { errors } = compile([p], { mode: "library", wantFile: "f2-threehop", field: "libraryJs" });
+    expect(hasAsyncSyncCbErr(errors)).toBe(true);
+  });
+
+  test("a multi-hop chain to a SYNC terminal is NOT flagged (no over-coloring)", () => {
+    const p = fix("f2-syncterminal.scrml", `\${
+  export function add(a, b) { return a + b }
+  export function outer(o) { const g = add; const h = g; const s = h(o, o); return s }
+}
+`);
+    const { js, errors } = compile([p], { mode: "library", wantFile: "f2-syncterminal", field: "libraryJs" });
+    expect(hasAsyncSyncCbErr(errors)).toBe(false);
+    expect(js).not.toMatch(/async function outer\s*\(/);
+    expect(js).not.toMatch(/\bawait\b/);
+  });
+
+  test("a mutual-alias forward-ref cycle TERMINATES (no infinite loop) and does not false-fire", () => {
+    // `const a = b; const b = a` is a decl cycle in the alias graph. The chain-follow
+    // must terminate (the `visited` guard) rather than hang; no async in the file, so
+    // no E-ASYNC-STDLIB-IN-SYNC-CALLBACK. (The forward-ref itself is an orthogonal
+    // scope diagnostic — not asserted here; the point is: the compile RETURNS.)
+    const p = fix("f2-cycle.scrml", `\${
+  export function add(a, b) { return a + b }
+  export function outer(o) { const a = b; const b = a; const s = add(o, o); return s }
+}
+`);
+    const { errors } = compile([p], { mode: "library", wantFile: "f2-cycle", field: "libraryJs" });
+    expect(hasAsyncSyncCbErr(errors)).toBe(false);
+  });
+});
