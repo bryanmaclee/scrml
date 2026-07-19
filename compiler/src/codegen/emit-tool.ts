@@ -36,6 +36,7 @@ import { collectDbScopes, SERVER_STRUCTURAL_EQ_HELPER, generateHeadlessServerJs 
 import { getToolServeConfig, isLibraryShapedFile } from "../tool-program.ts";
 import type { ToolServeConfig } from "../tool-program.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
+import { asyncCombinatorHelperBlock, ASYNC_COMBINATOR_METHOD_ORDER } from "./async-combinators.ts";
 import { emitExprField } from "./emit-expr.ts";
 import { parseExprToNode } from "../expression-parser.ts";
 import { CGError } from "./errors.ts";
@@ -165,6 +166,16 @@ function buildRuntimeHelperHeader(body: string, filePath: string, errors?: unkno
     if (body.includes(sig)) {
       parts.push(src);
       inlinedNames.add(sig.slice(0, -1)); // strip trailing "("
+    }
+  }
+  // Phase-2 colorless-async — inline any collection-combinator helper the tool
+  // body lowered an async callback to (`_scrml_<method>Async(`). Register each used
+  // name so the fail-closed scan below does NOT flag it as an un-inlined dependency.
+  const combBlock = asyncCombinatorHelperBlock(body);
+  if (combBlock) {
+    parts.push(combBlock);
+    for (const method of ASYNC_COMBINATOR_METHOD_ORDER) {
+      if (body.includes(`_scrml_${method}Async(`)) inlinedNames.add(`_scrml_${method}Async`);
     }
   }
   // Fail-closed: any `_scrml_<name>(` call reference NOT inlined, NOT a

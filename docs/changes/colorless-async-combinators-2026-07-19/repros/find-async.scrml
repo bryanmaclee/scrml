@@ -1,0 +1,6 @@
+${
+  import { verifyPassword } from "scrml:auth"
+  export function firstMatch(pw, hs) {
+    return hs.find(h => verifyPassword(pw, h))
+  }
+}

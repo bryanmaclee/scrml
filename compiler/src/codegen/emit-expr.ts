@@ -54,6 +54,10 @@ import { isPromiseReturningStdlibFn } from "../module-resolver.js";
 // markup-value-in-expression-2026-06-17 (a)+(b) — DOM-node lowering for
 // markup-as-value in expression position (shared with form (c) `return <markup>`).
 import { emitMarkupValueExpr } from "./emit-lift.js";
+// Phase-2 colorless-async — the async-callback collection-method combinator
+// transform (DD colorless-async-boundaries §2 position 1, FORK 1). Dependency-
+// neutral, so no import cycle.
+import { ASYNC_COMBINATOR_METHODS, callbackReachesAsync } from "./async-combinators.ts";
 
 // ---------------------------------------------------------------------------
 // §20.6 (F4=A) — production strip toggle for the log() builtin.
@@ -1440,6 +1444,23 @@ export function isStdlibAsyncCallee(name: string, ctx: EmitExprContext): boolean
 }
 
 /**
+ * Phase-2 colorless-async — is the bare callee `name` async in THIS context? True
+ * for a Promise-returning stdlib import (`isStdlibAsyncCallee`), a SERVER-mode
+ * sibling server-fn peer (`serverFnNames`), or a CLIENT-mode transitively-async
+ * local peer (`clientAsyncFnNames`) — the exact three async surfaces the
+ * expression auto-await already awaits. A name shadowed by an enclosing local is
+ * NOT async (it is the local, not the async fn). Fed to `callbackReachesAsync` so
+ * the combinator lowering only fires on a genuinely-async callback.
+ */
+function combinatorIsAsyncName(name: string, ctx: EmitExprContext): boolean {
+  if (ctx.declaredNames != null && ctx.declaredNames.has(name)) return false;
+  if (isStdlibAsyncCallee(name, ctx)) return true;
+  if (ctx.mode === "server" && ctx.serverFnNames != null && ctx.serverFnNames.has(name)) return true;
+  if (ctx.mode === "client" && ctx.clientAsyncFnNames != null && ctx.clientAsyncFnNames.has(name)) return true;
+  return false;
+}
+
+/**
  * Issue #26 — does this call node lower to an `await <stdlibAsync>(...)` form?
  * Mirror of `isAwaitedPeerCall` for the stdlib-import surface: SERVER-mode +
  * an awaitable position (`peerAwaitable !== false`) + an unshadowed ident whose
@@ -2622,6 +2643,74 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     // Malformed replay call (args not both @-refs) — fall through to the
     // generic emit path. Slice 2 validation will surface this as a compile
     // error.
+  }
+
+  // Phase-2 colorless-async — async-callback collection-method combinator
+  // lowering (DD colorless-async-boundaries §2 position 1, FORK 1, ratified S259).
+  // A CLEAN-FAMILY method (some/every/find/findIndex/filter/map/forEach/reduce/
+  // flatMap) called with an ASYNC callback (its body transitively reaches a
+  // Promise-returning primitive, detected via the SAME async classifier the
+  // auto-await uses) has no place for `await` inside the SYNC callback body a
+  // native `.method` demands — a bare `hs.some(h => verifyPassword(pw,h))` ships a
+  // truthy Promise (accept-all bug). Lower to `await _scrml_<method>Async(coll,
+  // asyncCb)` — a sequential for-await combinator (iteration order + early-exit
+  // preserved, NOT Promise.all) injected on-use. The callback is RE-EMITTED async
+  // so its inner async call auto-awaits. `.sort` is deliberately NOT in the clean
+  // family (async merge-sort is O(n log n) async compares, no native reuse — DD
+  // FORK 2) and falls through to the existing E-ASYNC-STDLIB-IN-SYNC-CALLBACK
+  // fail-closed backstop. A SYNC callback fails `callbackReachesAsync` and stays
+  // the native `.method` — the overwhelming common case is byte-unchanged.
+  if (
+    node.callee.kind === "member" &&
+    !node.callee.optional &&
+    typeof node.callee.property === "string" &&
+    ASYNC_COMBINATOR_METHODS.has(node.callee.property) &&
+    node.args.length >= 1
+  ) {
+    // A value-native map/set cell receiver is not an array — its clean-family-named
+    // methods (none exist today) are never array combinators. Guard against a
+    // future collision (client-mode only — server has no reactive map/set cells).
+    const isMapSetReceiver =
+      ctx.mode === "client" &&
+      (mapCellBareName(node.callee.object, ctx) !== null ||
+        setCellBareName(node.callee.object, ctx) !== null);
+    if (
+      !isMapSetReceiver &&
+      callbackReachesAsync(node.args[0], (nm) => combinatorIsAsyncName(nm, ctx))
+    ) {
+      const method = node.callee.property;
+      const receiverExpr = emitExpr(node.callee.object, ctx);
+      // Re-emit the callback ASYNC. A lambda body becomes an async fn body (its
+      // inner async call is awaited via emitLambda's peerAwaitable=isAsync). A bare
+      // async-fn ident is already awaitable inside the combinator's `await cb(...)`.
+      // clientAsyncBody:true so the CLIENT stdlib auto-await fires in the callback.
+      const cbNode = node.args[0] as ExprNode;
+      const cbCtx: EmitExprContext =
+        ctx.mode === "client" ? { ...ctx, clientAsyncBody: true } : ctx;
+      const cbEmit =
+        cbNode.kind === "lambda"
+          ? emitExpr({ ...(cbNode as LambdaExpr), isAsync: true }, cbCtx)
+          : emitExpr(cbNode, cbCtx);
+      // Forward any trailing args (reduce's initial value; a rare thisArg is
+      // harmlessly ignored by the non-reduce combinator signatures).
+      const restArgs = node.args.slice(1).map((a) => emitExpr(a as ExprNode, ctx));
+      const combinatorCall = `_scrml_${method}Async(${[receiverExpr, cbEmit, ...restArgs].join(", ")})`;
+      // The combinator call is itself an awaitable position (it returns a Promise).
+      // If the ENCLOSING position is non-awaitable (a raw escape-hatch / param
+      // default) fail closed — record + emit bare — mirroring the peer/stdlib
+      // branches. (A nested async callback resolves recursively: the outer callback
+      // is itself detected async and re-emitted async, so its body IS awaitable.)
+      if (ctx.peerAwaitable === false) {
+        if (ctx.mode === "server") {
+          _serverAsyncClassifier?.syncCallSink?.push({
+            name: `${method}(…) async-callback combinator`,
+            span: node.span,
+          });
+        }
+        return combinatorCall;
+      }
+      return `await ${combinatorCall}`;
+    }
   }
 
   const callee = emitReceiver(node.callee, ctx);

@@ -16,6 +16,7 @@ import { resolveDbDriver } from "./db-driver.ts";
 import { isLibraryShapedFile } from "../tool-program.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
+import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRelative, basename as _pathBasename } from "node:path";
 import { parseExprToNode } from "../expression-parser.ts";
 import { extractCalleeNames, buildCalleeImportMap } from "./scheduling.ts";
@@ -4368,6 +4369,17 @@ export function generateServerJs(
     } else {
       finalEmitted = finalEmitted.slice(0, headerEndIdx) + SERVER_PRINT_HELPER + finalEmitted.slice(headerEndIdx);
     }
+  }
+
+  // Phase-2 colorless-async — inject any collection-combinator helper
+  // (`_scrml_someAsync` … `_scrml_flatMapAsync`) whose call survived in the server
+  // output (a server-mode async-callback method lowering). On-use + per-method:
+  // a bundle carries ONLY the combinators it calls (mirrors the structural-eq /
+  // log / print inlining above). Hoisted at the post-header boundary above every
+  // route/value-export fn that references it.
+  {
+    const _combBlock = asyncCombinatorHelperBlock(finalEmitted);
+    if (_combBlock) finalEmitted = injectAfterHeader(finalEmitted, _combBlock);
   }
 
   // Bug 3a (S87 follow-on, 2026-05-12) — `_scrml_sql` declaration emission.

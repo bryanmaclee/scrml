@@ -1,0 +1,6 @@
+${
+  import { hashPassword } from "scrml:auth"
+  export function hashEach(pws) {
+    pws.forEach(p => hashPassword(p))
+  }
+}

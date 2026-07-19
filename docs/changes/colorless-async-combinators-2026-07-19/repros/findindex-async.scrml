@@ -1,0 +1,6 @@
+${
+  import { verifyPassword } from "scrml:auth"
+  export function firstIdx(pw, hs) {
+    return hs.findIndex(h => verifyPassword(pw, h))
+  }
+}

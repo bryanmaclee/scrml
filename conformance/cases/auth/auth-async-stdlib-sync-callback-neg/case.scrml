@@ -5,9 +5,8 @@
 
       function loginServer(emailArg, passwordArg) {
         const rows = ?{`SELECT password_hash FROM users WHERE email = ${emailArg}`}.all()
-        const any = rows.some(h => verifyPassword(passwordArg, h.password_hash))
-        if (!any) { return { error: "bad" } }
-        return { ok: true }
+        const ranked = rows.sort((a, b) => verifyPassword(passwordArg, a.password_hash) ? -1 : 1)
+        return { ranked }
       }
 
       function noop() { return }

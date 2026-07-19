@@ -220,16 +220,28 @@ describe("§6: pure library fn stays plain `function` (no over-coloring)", () =>
 
 const hasAsyncSyncCbErr = (errors) => errors.some((e) => e.code === "E-ASYNC-STDLIB-IN-SYNC-CALLBACK");
 
-// §7 (finding 1/1b/3) — a stdlib-async call in a NON-awaitable position fails closed.
-describe("§7 (finding 1/3): stdlib-async in a sync callback / raw body fails closed", () => {
-  test("a `.some(h => verifyPassword(pw,h))` value-export fn fires E-ASYNC-STDLIB-IN-SYNC-CALLBACK", () => {
+// §7 (finding 1/1b/3) — a stdlib-async call in a NON-awaitable position.
+// PHASE-2 UPDATE (DD colorless-async-boundaries FORK 1, ratified S259 — bryan
+// "build the async collection"): a CLEAN-FAMILY collection method
+// (some/every/find/findIndex/filter/map/forEach/reduce/flatMap) with an async
+// callback is no longer a non-awaitable leak — it LOWERS to the async combinator
+// `await _scrml_<method>Async(coll, asyncCb)`. So the flagship `.some` value-export
+// that Phase-1 fail-closed now transforms. A RAW block-body callback (position 3)
+// still fails closed (raw = verbatim, the compiler never descends to inject await).
+describe("§7 (finding 1/3): clean-family async callback lowers to a combinator; raw body still fails closed", () => {
+  test("a `.some(h => verifyPassword(pw,h))` value-export fn lowers to `await _scrml_someAsync(...)` (Phase-2 FORK 1)", () => {
     const p = fix("f1-authbypass.scrml", `\${
   import { verifyPassword } from "scrml:auth"
   export function anyValid(pw, hs) { const ok = hs.some(h => verifyPassword(pw, h)); return ok }
 }
 `);
-    const { errors } = compile([p], { mode: "library", wantFile: "f1-authbypass", field: "libraryJs" });
-    expect(hasAsyncSyncCbErr(errors)).toBe(true);
+    const { js, errors } = compile([p], { mode: "library", wantFile: "f1-authbypass", field: "libraryJs" });
+    // No longer a fail-closed leak — the transform makes it Just Work.
+    expect(hasAsyncSyncCbErr(errors)).toBe(false);
+    expect(js).toMatch(/export async function anyValid\s*\(/);
+    expect(js).toMatch(/await\s+_scrml_someAsync\(hs,\s*async\s*\(h\)\s*=>\s*await\s+verifyPassword\(pw,\s*h\)\)/);
+    // The sequential-for-await combinator is injected on-use.
+    expect(js).toMatch(/async function _scrml_someAsync\(coll, cb\)/);
   });
 
   test("a BLOCK-body callback `xs.some(x => { return safeCallAsync(...).ok })` (raw) fails closed", () => {

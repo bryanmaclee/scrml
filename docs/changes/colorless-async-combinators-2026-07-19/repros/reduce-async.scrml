@@ -1,0 +1,9 @@
+${
+  import { hashPassword } from "scrml:auth"
+  export function chain(items, seed) {
+    return items.reduce((acc, x) => hashPassword(x), seed)
+  }
+  export function chainNoInit(items) {
+    return items.reduce((acc, x) => hashPassword(x))
+  }
+}
