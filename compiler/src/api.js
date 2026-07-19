@@ -42,10 +42,12 @@ import { runCG } from "./code-generator.js";
 import { generateValueOnlyServerJs } from "./codegen/emit-server.ts";
 import { validateEmittedArtifacts } from "./codegen/validate-emit.ts";
 import { detectSqlInConciseArrowBody } from "./codegen/detect-sql-in-arrow.ts";
+import { fnv1aHash } from "./codegen/fnv1a-hash.ts";
 import { checkCssConflicts } from "./codegen/css-conflict-check.ts";
 import { stripPagesPrefix } from "./codegen/utils.ts";
 import { runMetaEval } from "./meta-eval.ts";
-import { resolveModules, resolveModulePath } from "./module-resolver.js";
+import { resolveModules, resolveModulePath, resolveModulePathNative } from "./module-resolver.js";
+import { PathKeyedMap, PathKeyedSet } from "./path-canonical.js";
 import { runNRBatch } from "./name-resolver.ts";
 import { runSYMBatch } from "./symbol-table.ts";
 import { setBPPOverrides } from "./codegen/compat/parser-workarounds.js";
@@ -680,6 +682,18 @@ export function compileScrml(options = {}) {
     verbose = false,
     convertLegacyCss = false,
     embedRuntime = false,
+    /**
+     * adopter-#82 — content-address page bundles (`<base>.client.<hash>.js`) and
+     * per-page CSS (`<base>.<hash>.css`) the same way the shared runtime already
+     * is (`scrml-runtime.<hash>.js`), and rewrite the emitted HTML `<script>` /
+     * `<link>` refs to the hashed names. OFF by default so the dev/inspection
+     * compile path (and every existing test that reads `<base>.client.js` from
+     * disk) is byte-for-byte unchanged; `scrml build` (the deploy path #82 is
+     * about) turns it ON so shipped bundles are immutable-cacheable and a
+     * redeploy that changes bundle bytes changes the URL — no silent stale JS.
+     * Cache headers are emitted into BOTH serve paths regardless of this flag.
+     */
+    contentHashAssets = false,
     write = true,
     sourceMap = false,
     emitMachineTests = false,
@@ -852,8 +866,23 @@ export function compileScrml(options = {}) {
   const GATHER_LIMIT = options.gatherLimit ?? 5000;
   let resolvedInputFiles = inputFiles.map(f => resolve(f));
   if (gatherEnabled && resolvedInputFiles.length > 0) {
-    const seen = new Set(resolvedInputFiles);
-    const queue = [...resolvedInputFiles];
+    // Dedup KEY is separator-canonical (PathKeyedSet folds `\`↔`/`); the
+    // compiled VALUE stays uniformly NATIVE — both the explicit entry seed
+    // (`resolve(f)`) and each gathered file (`resolveModulePathNative`, NOT the
+    // posix-keyed `resolveModulePath`). `filePath` must stay native everywhere
+    // (public `outputs`-key contract; posix-folding it caused 474 fails), so
+    // gather must not inject posix filePaths. Before this fix `seen` was a plain
+    // native `Set` compared against the posix `resolveModulePath` result, so a
+    // Windows entry file a SIBLING also imports missed the dedup and compiled
+    // TWICE. Canonical membership + native values (via `queue`, not `[...seen]`)
+    // fixes it while keeping the graph the sole posix-keyed layer.
+    const seen = new PathKeyedSet();
+    const queue = [];
+    for (const f of resolvedInputFiles) {
+      if (seen.has(f)) continue;
+      seen.add(f);
+      queue.push(f);
+    }
     let i = 0;
     let limitExceeded = false;
     while (i < queue.length && !limitExceeded) {
@@ -881,7 +910,7 @@ export function compileScrml(options = {}) {
         // get pulled in by their own consumers; .js imports are not gathered.
         if (!spec.startsWith("./") && !spec.startsWith("../")) continue;
         if (spec.endsWith(".js")) continue;
-        const abs = resolveModulePath(spec, filePath);
+        const abs = resolveModulePathNative(spec, filePath);
         if (!abs.endsWith(".scrml")) continue;
         if (seen.has(abs)) continue;
         // Skip non-existent imports — MOD's existing E-IMPORT-006 check
@@ -904,7 +933,7 @@ export function compileScrml(options = {}) {
         }
       }
     }
-    resolvedInputFiles = [...seen];
+    resolvedInputFiles = queue;
   }
   // Reassign inputFiles so the existing pipeline iterates the gathered set.
   inputFiles = resolvedInputFiles;
@@ -1558,9 +1587,12 @@ export function compileScrml(options = {}) {
     moduleResult.importGraph,
   ));
   for (const nr of nrResults) {
-    // Errors from NR are warnings (W-CASE-001, W-WHITESPACE-001) and surface in
-    // the standard warnings channel. Severity is preserved through the existing
-    // collector.
+    // NR emits both warnings (W-CASE-001, W-WHITESPACE-001 — non-fatal, surface
+    // in the warnings channel) and the fatal E-MARKUP-001 (SPEC §4.1 — unknown
+    // HTML element name). Each diagnostic carries its own `severity`, which
+    // collectErrors preserves; the final result partition routes E-MARKUP-001
+    // (E- prefix / severity:"error") into result.errors and the W-* into
+    // result.warnings.
     collectErrors("NR", nr.errors);
   }
   if (verbose) {
@@ -1612,7 +1644,11 @@ export function compileScrml(options = {}) {
   //
   // Build fileASTMap from tabResults BEFORE the CE loop — CE consumes ast.components
   // so the cross-file lookup must use the pre-CE AST.
-  const fileASTMap = new Map();
+  // PathKeyedMap: SET with the native `tabResult.filePath`, GET inside CE
+  // (component-expander) with the posix `absSource` lookupKey — the boundary
+  // bridges the two so cross-file COMPONENT expansion resolves on Windows (else
+  // E-COMPONENT-035: the imported component's AST isn't found → survives CE).
+  const fileASTMap = new PathKeyedMap();
   for (const tabResult of tabResults) {
     if (tabResult.filePath) {
       fileASTMap.set(tabResult.filePath, tabResult);
@@ -1906,17 +1942,24 @@ export function compileScrml(options = {}) {
   //   4. Filter to only exported type names (from exportRegistry)
   //   5. Merge into the importing file's importedTypes map
   // This runs after CE so typeDecls are final (component-expander may hoist them).
-  const ceFileMap = new Map();
+  // PathKeyedMap: `ceFileMap` is SET with the native AST `f.filePath` but GET
+  // with the posix `imp.absSource` (getDepRegistry) — the boundary canonicalizes
+  // both so the cross-file type lookup can't desync (else E-ENGINE-004 /
+  // missing-E-TYPE-020 on Windows: the exact regression the graph-posix change
+  // otherwise reintroduces).
+  const ceFileMap = new PathKeyedMap();
   for (const f of ceResults) {
     if (f.filePath) ceFileMap.set(f.filePath, f);
   }
 
-  const importedTypesByFile = new Map();
+  // SET with the posix key from iterating the (PathKeyedMap) importGraph, GET
+  // with the native `fileAST.filePath` in type-system.ts — PathKeyedMap bridges.
+  const importedTypesByFile = new PathKeyedMap();
 
   // Memoize per-file typeRegistry builds — buildTypeRegistry is pure given
   // typeDecls, so caching by file path is safe and avoids repeated work when
   // many importers reach the same dep.
-  const depRegistryCache = new Map(); // absSource → Map<name, ResolvedType>
+  const depRegistryCache = new PathKeyedMap(); // absSource → Map<name, ResolvedType>
   function getDepRegistry(absSource) {
     if (depRegistryCache.has(absSource)) return depRegistryCache.get(absSource);
     const depFile = ceFileMap.get(absSource);
@@ -2545,6 +2588,10 @@ export function compileScrml(options = {}) {
   // ---------------------------------------------------------------------------
 
   let fileCount = 0;
+  // adopter-#82 FIX 1 — exact content-addressed (immutable-safe) artifact set,
+  // dist-relative POSIX paths. Function-scoped so it reaches the return value;
+  // populated in the write phase below. Empty for `write:false` / library mode.
+  const hashedAssets = new Set();
 
   if (write && outputDir) {
     mkdirSync(outputDir, { recursive: true });
@@ -2675,6 +2722,22 @@ export function compileScrml(options = {}) {
     // (W-SERVER-IMPORT-UNEMITTED — the cross-file server-import invariant — runs
     // BEFORE this write gate, so it fires in any write mode; see checkServerImportInvariant.)
 
+    // adopter-#82 FIX 1 — the EXACT set of content-addressed (immutable-safe)
+    // artifacts this build produced, as dist-relative POSIX paths. Returned to
+    // the caller so the generated production server serves `immutable` by SET
+    // MEMBERSHIP — never by a filename SHAPE guess (which would wrongly mark a
+    // dotted-but-unhashed `app.settings.js` immutable). The runtime + per-route
+    // chunks are content-addressed independent of `contentHashAssets`; the page
+    // bundles + CSS are added below only when the flag is on.
+    if (mode !== 'library' && cgResult.runtimeJs && cgResult.runtimeFilename) {
+      hashedAssets.add(cgResult.runtimeFilename);
+    }
+    if (cgResult.chunks) {
+      for (const chunk of cgResult.chunks.values()) {
+        if (chunk && chunk.filename) hashedAssets.add(chunk.filename);
+      }
+    }
+
     // In browser mode, write the shared runtime file (not needed in library mode)
     if (!emitGateFailed && mode !== 'library' && cgResult.runtimeJs && cgResult.runtimeFilename) {
       writeFileSync(join(outputDir, cgResult.runtimeFilename), cgResult.runtimeJs);
@@ -2761,6 +2824,101 @@ export function compileScrml(options = {}) {
       // §64 A2 — the set of `.scrml` sources THIS build compiled (their
       // `<base>.js` outputs mirror the tree; see rewriteRelativeImportPaths).
       const emittedScrmlSources = new Set(cgResult.outputs.keys());
+
+      // -------------------------------------------------------------------
+      // adopter-#82 — content-address page bundles + per-page CSS.
+      //
+      // Gated on `contentHashAssets` (build path only). The hash covers the
+      // EXACT bytes written to disk (CRITICAL #3): for client.js that is the
+      // post-`rewriteStdlibImports` string, so the pre-pass runs the rewrite
+      // ONCE and caches it for the write loop. Keys are dist-RELATIVE POSIX
+      // paths (the artifact's true on-disk location per `pathFor`, incl. the
+      // `pages/` strip), so a dependency shared across N page HTMLs resolves
+      // to the SAME hashed name in every referrer (CRITICAL #2) — the hash is
+      // a property of the target's content/location, never of the referrer.
+      //
+      // The `_scrml_modules` registry key is UNAFFECTED (CRITICAL #1): it is
+      // the logical dist-relative `.scrml`→`.client.js` id derived in
+      // emit-client.ts from absolute source paths, independent of the emitted
+      // filename. Only the `<script src>` URL carries the hash.
+      const hashAssets = contentHashAssets === true;
+      const assetHashMap = new Map();       // distRelPosix(unhashed) -> distRelPosix(hashed)
+      const finalClientByFile = new Map();  // filePath -> { contents, hash }
+      const cssHashByFile = new Map();       // filePath -> hash
+      const toPosixRel = (abs) => relative(outputDir, abs).split(/[\\/]/).join("/");
+      const insertHashBeforeExt = (nameWithExt, hash) => {
+        const i = nameWithExt.lastIndexOf(".");
+        return i === -1
+          ? `${nameWithExt}.${hash}`
+          : `${nameWithExt.slice(0, i)}.${hash}${nameWithExt.slice(i)}`;
+      };
+      const posixNormalize = (p) => {
+        const out = [];
+        for (const s of p.split("/")) {
+          if (s === "" || s === ".") continue;
+          if (s === "..") {
+            if (out.length && out[out.length - 1] !== "..") out.pop();
+            else out.push("..");
+          } else out.push(s);
+        }
+        return out.join("/");
+      };
+      const posixRelFrom = (fromDir, toPath) => {
+        const from = fromDir ? fromDir.split("/").filter(Boolean) : [];
+        const to = toPath.split("/").filter(Boolean);
+        let i = 0;
+        while (i < from.length && i < to.length && from[i] === to[i]) i++;
+        return [...from.slice(i).map(() => ".."), ...to.slice(i)].join("/");
+      };
+      if (hashAssets) {
+        for (const [filePath, output] of cgResult.outputs) {
+          if (output.clientJs) {
+            const { targetDir, fullPath } = pathFor(filePath, ".client.js");
+            const c = rewriteStdlibImports(output.clientJs, targetDir, outputDir, bundledStdlib);
+            const hash = fnv1aHash(c);
+            finalClientByFile.set(filePath, { contents: c, hash });
+            const relUn = toPosixRel(fullPath);
+            const relHashed = insertHashBeforeExt(relUn, hash);
+            assetHashMap.set(relUn, relHashed);
+            hashedAssets.add(relHashed); // FIX 1 — exact immutable-set membership
+          }
+          if (output.css) {
+            const { fullPath } = pathFor(filePath, ".css");
+            const hash = fnv1aHash(output.css);
+            cssHashByFile.set(filePath, hash);
+            const relUn = toPosixRel(fullPath);
+            const relHashed = insertHashBeforeExt(relUn, hash);
+            assetHashMap.set(relUn, relHashed);
+            hashedAssets.add(relHashed); // FIX 1 — exact immutable-set membership
+          }
+        }
+      }
+      // Rewrite `<script src>` / `<link href>` refs to `.client.js` / `.css`
+      // in an HTML body to their hashed names. Resolves each ref against the
+      // referring HTML's own dist dir, so nesting-relative forms (`../app.css`,
+      // `sub/dep.client.js`) map to the right target regardless of depth. Refs
+      // that resolve to no emitted artifact (external URLs, root-absolute, or
+      // an unresolved path) are left untouched. Runtime (`scrml-runtime.<h>.js`)
+      // and per-route chunk (`/<route>/<Role>.<tier>.<h>.js`, root-absolute)
+      // refs never match the `.client.js`/`.css` tail, so no double-hashing.
+      const rewriteHtmlAssetRefs = (html, htmlFilePath) => {
+        if (!hashAssets || !html) return html;
+        const { targetDir } = pathFor(htmlFilePath, ".html");
+        const htmlDir = toPosixRel(targetDir); // "" at dist root, "customer" nested
+        return html.replace(
+          /((?:src|href)=")([^"]+?\.(?:client\.js|css))(")/g,
+          (m, pre, ref, post) => {
+            if (/^[a-z][a-z0-9+.-]*:/i.test(ref) || ref.startsWith("//") || ref.startsWith("/")) {
+              return m; // scheme-qualified, protocol-relative, or root-absolute
+            }
+            const resolved = posixNormalize(htmlDir ? `${htmlDir}/${ref}` : ref);
+            const hashed = assetHashMap.get(resolved);
+            if (!hashed) return m;
+            return `${pre}${posixRelFrom(htmlDir, hashed)}${post}`;
+          },
+        );
+      };
+
       for (const [filePath, output] of cgResult.outputs) {
         // GITI-009 + OQ-2: post-codegen rewrites for emitted JS.
         //   - rewriteRelativeImportPaths: ./*.js relative imports point at
@@ -2802,20 +2960,45 @@ export function compileScrml(options = {}) {
           // it MUST get scrml:NAME rewrites — Bun fails to resolve any
           // unresolved scrml:* in browser-loaded JS just as in server JS.
           const { targetDir } = pathFor(filePath, ".client.js");
-          const c = rewriteStdlibImports(output.clientJs, targetDir, outputDir, bundledStdlib);
-          if (writeOutput(filePath, ".client.js", c)) fileCount++;
+          if (hashAssets) {
+            // #82 — write the content-addressed name; `finalClientByFile`
+            // already carries the post-`rewriteStdlibImports` bytes + hash.
+            const cached = finalClientByFile.get(filePath);
+            let c = cached.contents;
+            // CRITICAL #4 — keep the `.map` sibling name and the embedded
+            // `//# sourceMappingURL` in lockstep with the hashed js name.
+            if (output.clientJsMap) {
+              const b = basename(filePath, ".scrml");
+              c = c.replace(
+                `sourceMappingURL=${b}.client.js.map`,
+                `sourceMappingURL=${b}.client.${cached.hash}.js.map`,
+              );
+            }
+            if (writeOutput(filePath, `.client.${cached.hash}.js`, c)) fileCount++;
+          } else {
+            const c = rewriteStdlibImports(output.clientJs, targetDir, outputDir, bundledStdlib);
+            if (writeOutput(filePath, ".client.js", c)) fileCount++;
+          }
         }
         if (output.html) {
-          if (writeOutput(filePath, ".html", output.html)) fileCount++;
+          // #82 — rewrite `.client.js`/`.css` refs to their hashed names
+          // (no-op when hashAssets is off).
+          const htmlOut = rewriteHtmlAssetRefs(output.html, filePath);
+          if (writeOutput(filePath, ".html", htmlOut)) fileCount++;
         }
         if (output.css) {
-          if (writeOutput(filePath, ".css", output.css)) fileCount++;
+          const cssSuffix = hashAssets ? `.${cssHashByFile.get(filePath)}.css` : ".css";
+          if (writeOutput(filePath, cssSuffix, output.css)) fileCount++;
         }
         // Source map files (only written when sourceMap:true was passed to compileScrml)
         if (output.clientJsMap) {
-          if (writeOutput(filePath, ".client.js.map", output.clientJsMap)) {
-            const { base } = pathFor(filePath, ".client.js.map");
-            if (verbose) log(`  [CG] Wrote source map: ${base}.client.js.map`);
+          // #82 — the `.map` sibling name tracks the hashed js name.
+          const mapSuffix = hashAssets && finalClientByFile.has(filePath)
+            ? `.client.${finalClientByFile.get(filePath).hash}.js.map`
+            : ".client.js.map";
+          if (writeOutput(filePath, mapSuffix, output.clientJsMap)) {
+            const { base } = pathFor(filePath, mapSuffix);
+            if (verbose) log(`  [CG] Wrote source map: ${base}${mapSuffix}`);
           }
         }
         if (output.serverJsMap) {
@@ -3055,6 +3238,11 @@ export function compileScrml(options = {}) {
     // exercised (e.g. fatal upstream errors); callers fall back to the
     // legacy literal `RUNTIME_FILENAME` when needed.
     runtimeFilename: cgResult.runtimeFilename,
+    // adopter-#82 FIX 1 — dist-relative POSIX paths of every content-addressed
+    // (immutable-safe) artifact written this build (runtime + per-route chunks +,
+    // on the build path, page bundles + CSS). The generated `_server.js` serves
+    // `immutable` by membership in this set — never by a filename shape guess.
+    hashedAssets: [...hashedAssets],
     // W2 §21.7: the full gathered .scrml file set (after auto-gather pre-pass).
     // Equal to options.inputFiles when gather is disabled. Includes all
     // transitively-reachable .scrml files when gather is enabled.

@@ -84,6 +84,10 @@ import { buildBodyDG } from "./body-dg-builder.ts";
 import { planMultiBatchCPS } from "./cps-batch-planner.ts";
 import { isToolProgram, findToolMainFn } from "./tool-program.ts";
 import { filePrintBuiltinsShadowed } from "./codegen/log-loc.ts";
+// §12.4 client-pin shadow (S263 review) — reuse the tested destructuring
+// name-extractor rather than re-hand-rolling it. Cycle-safe: type-system's
+// direct deps do not import route-inference.
+import { isDestructurePattern, iterDestructuredNames } from "./type-system.ts";
 
 // ---------------------------------------------------------------------------
 // RI-internal types
@@ -290,6 +294,11 @@ export interface AuthMiddleware {
   loginRedirect: string;
   csrf: string;
   sessionExpiry: string;
+  // §20.5.1 (S266, i29e B4b) — session-cookie Secure mode. `true` (default) →
+  // `__Host-scrml_sid` + always-Secure; `false` (`session-secure="false"`) →
+  // plain `scrml_sid`, no Secure. Optional so pre-existing test constructions
+  // that omit it default to the safe secure mode (emit-server reads `!== false`).
+  sessionSecure?: boolean;
   autoEscalated?: boolean;
 }
 
@@ -331,6 +340,16 @@ interface AnalysisRecord {
   warnings: RouteWarning[];
   /** Names captured from outer scope (closure variables). */
   closureCaptures: Set<string>;
+  /**
+   * §12.4 E-ROUTE-002 — the client-pin signal: a direct browser/DOM-only global
+   * access in this function's own body (`document.title`, `window.location`,
+   * `localStorage.getItem`, …). Non-null pins the function to the client (it
+   * cannot execute server-side). Used to (a) veto server escalation of this fn
+   * via caller-context / capture taint, and (b) fire E-ROUTE-002 when a
+   * server-classified fn's call graph reaches it. `resource` is the
+   * `<root>.<member>` string for the diagnostic; `span` locates the access.
+   */
+  clientPin: { resource: string; span: Span | undefined } | null;
 }
 
 /** An entry in the global function index. */
@@ -695,6 +714,94 @@ function exprNodeCallsServerOnlyResource(node: unknown): string | null {
     }
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// §12.4 E-ROUTE-002 — CLIENT-ONLY (client-pinned) classification.
+//
+// The MIRROR of the §12.2 server-escalation triggers. A function that directly
+// accesses a browser/DOM-only global is PINNED to the client: route analysis
+// determines it "execute[s] exclusively on the client" (§12.4). Such a function
+// SHALL NOT be pulled server-side (a server context has no `document`/`window`),
+// and a server-classified function whose static call graph reaches it — direct
+// or transitive — is a compile error (E-ROUTE-002).
+//
+// CONSERVATIVE BY CONSTRUCTION (a false positive breaks a valid program, which
+// is worse than the hole this closes — see the brief's R26 gate):
+//   - Fires ONLY on a member access `<root>.<member>` whose receiver ROOT is one
+//     of the UNAMBIGUOUS DOM globals below, AND that root is NOT shadowed by an
+//     in-scope local / param / import (scope-aware — see `shadowedRoots`).
+//   - Resolved on the PARSED ExprNode (string/comment-safe — the contents of a
+//     "…document.title…" string literal is a `lit` node, never a `member` node),
+//     mirroring `exprNodeCallsServerOnlyResource`. There is NO raw-string
+//     fallback: unlike the server direction (where an over-fire only escalates
+//     placement and never leaks), an over-fire here is a spurious HARD ERROR, so
+//     an `exprNode`-less node is treated as NO client access (fail-open reject).
+//   - Does NOT fire on arbitrary-receiver method names (`el.addEventListener`,
+//     where `el` is a param, could be any EventTarget / plain data object).
+//   - `window.process` / `window.Bun` are EXCLUDED — those are the server-global
+//     aliases already recognized as SERVER signals (Trigger 1); the same member
+//     access must not also read as a client signal.
+// ---------------------------------------------------------------------------
+
+/**
+ * DOM-only GLOBAL identifiers whose member access pins the enclosing function to
+ * the client. DELIBERATELY MINIMAL — `document` and `window` ONLY. These two are
+ * the DOM roots with NO server-side referent under ANY host: Bun does not (and by
+ * design will not) provide a `document` or a top-level browser `window`.
+ *
+ * Everything wider was DROPPED after the S263 adversarial review verified false
+ * positives on this Bun: `typeof navigator === "object"` (Bun PROVIDES it — a
+ * server fn using `navigator.userAgent` is valid), and `localStorage` /
+ * `sessionStorage` are Web-API globals Bun MAY add in a future version. A
+ * false-positive HARD ERROR on valid server code is worse than the narrow miss
+ * of an author who reaches those globals in genuinely client-only code, so the
+ * set stays minimal on purpose. Widen it only for a global proven browser-only
+ * on every supported host.
+ */
+const CLIENT_ONLY_GLOBAL_ROOTS = new Set<string>([
+  "document",
+  "window",
+]);
+
+/**
+ * §12.4 — resolve whether an ExprNode `member` node is a DOM-only global access.
+ * Returns the `<root>.<property>` resource string (e.g. "document.title",
+ * "window.location") or null.
+ *
+ * Matches ONLY `{kind:"member", property, object:{kind:"ident", name:<root>}}`
+ * whose `object` is a BARE ident in CLIENT_ONLY_GLOBAL_ROOTS AND whose name is
+ * NOT in `shadowedRoots` — a local / param / import binding of that name (e.g.
+ * `formatDoc(document) { return document.title }`, where `document` is a domain
+ * object, not the DOM global). For `window`, a `window.process` / `window.Bun`
+ * member is EXCLUDED (server-global alias — a SERVER signal). A member on a user
+ * local (`foo.document`) is NOT a match (its object is a member/non-global
+ * ident). String/comment-safe by construction: a member node is a real access,
+ * never a string literal's text.
+ */
+function clientOnlyGlobalAccessOfNode(
+  node: unknown,
+  shadowedRoots: Set<string>,
+): string | null {
+  if (!node || typeof node !== "object") return null;
+  const n = node as Record<string, unknown>;
+  if (n.kind !== "member" || typeof n.property !== "string") return null;
+  const obj = n.object as Record<string, unknown> | undefined;
+  if (
+    !obj || typeof obj !== "object" ||
+    obj.kind !== "ident" || typeof obj.name !== "string" ||
+    !CLIENT_ONLY_GLOBAL_ROOTS.has(obj.name) ||
+    // Scope shadow: the root ident names an in-scope binding, not the DOM global.
+    shadowedRoots.has(obj.name)
+  ) {
+    return null;
+  }
+  // `window.process` / `window.Bun` denote the SERVER globals (Trigger 1) — not
+  // a client signal. Every other `window.<member>` is a browser access.
+  if (obj.name === "window" && SERVER_ONLY_NAMESPACE_ROOTS.has(n.property)) {
+    return null;
+  }
+  return `${obj.name}.${n.property}`;
 }
 
 /**
@@ -2190,6 +2297,326 @@ function detectServerFreeClientCellReads(
 }
 
 // ---------------------------------------------------------------------------
+// §12.4 E-ROUTE-002 — client-pin body scan.
+// ---------------------------------------------------------------------------
+
+/**
+ * Scan a function body for a DOM-only GLOBAL access (§12.4 client-pin). One hit
+ * is sufficient to pin the function to the client, so the FIRST is returned:
+ * `{ resource, span }` (e.g. `{ resource: "document.title", span }`) or null.
+ *
+ * Recurses the parsed-ExprNode surface of every statement (via full-node
+ * recursion, like `detectServerFreeClientCellReads`), STOPPING at EVERY
+ * function-boundary node — a nested `function-decl` AND a `lambda`
+ * (arrow / `fn` / inline `function` expression). A DOM access inside a callback
+ * (`register(() => { document.title = x })`) belongs to the CALLBACK's own
+ * placement, not the enclosing function, so it must not be misattributed here
+ * (S263 review #3). The ONE exception is an EXPR-body IIFE — a lambda invoked in
+ * place, `(() => document.title = x)()` — which DOES run where the enclosing fn
+ * runs, so it is scanned into (with the IIFE's params extending the shadow;
+ * S263 review #5). Detection is delegated to `clientOnlyGlobalAccessOfNode`,
+ * which matches ONLY a genuine `member` node rooted at an UN-shadowed DOM global
+ * — string/comment-safe, scope-aware, no raw-text fallback.
+ *
+ * `shadowedRoots` is the set of client-global root names bound by an in-scope
+ * local / param / import (see `computeFileClientPins`); a `member` rooted at a
+ * shadowed name is a domain object, not the DOM global, and does not pin.
+ */
+function detectClientOnlyGlobalAccess(
+  body: LogicStatement[],
+  shadowedRoots: Set<string>,
+): { resource: string; span: Span | undefined } | null {
+  if (!Array.isArray(body) || body.length === 0) return null;
+  const visited = new WeakSet<object>();
+  let found: { resource: string; span: Span | undefined } | null = null;
+
+  // `shadow` is threaded so an IIFE's own params can extend it for the in-place
+  // scan (S263 review #5) — a `(({window}) => window.title)(x)` must not fire.
+  const visit = (node: any, shadow: Set<string>, stmtSpan: Span | undefined): void => {
+    if (found !== null) return;
+    if (!node || typeof node !== "object" || visited.has(node)) return;
+    visited.add(node);
+    const sp: Span | undefined =
+      node.span && typeof node.span === "object" ? node.span : stmtSpan;
+
+    // IIFE (S263 review #5): an EXPR-body arrow lambda invoked IN PLACE —
+    // `(() => document.title = x)()` — runs where the enclosing fn runs, so its
+    // DOM access DOES pin the enclosing fn. Scan into the invoked lambda's expr
+    // body with the shadow extended by the lambda's own params; then fall
+    // through to scan the call's ARGS (which stop at their own lambdas — a
+    // passed callback is a separate placement). A NON-invoked lambda still stops
+    // below. (Block-body IIFEs are a documented residual — §12.4; the block-body
+    // arrow form is rejected as E-FN-ARROW-BODY, and `fn()`/`function()` IIFEs
+    // do not leak.)
+    if (
+      node.kind === "call" &&
+      node.callee && typeof node.callee === "object" &&
+      node.callee.kind === "lambda" &&
+      node.callee.body && node.callee.body.kind === "expr"
+    ) {
+      const iifeShadow = new Set(shadow);
+      addParamRoots(iifeShadow, node.callee.params);
+      visit(node.callee.body.value, iifeShadow, sp);
+      if (found !== null) return;
+      // Scan the call's args (and any other fields) with the ORIGINAL shadow,
+      // but skip the callee (already handled; the generic loop would stop at it).
+      for (const key of Object.keys(node)) {
+        if (key === "span" || key === "callee") continue;
+        const val = node[key];
+        if (Array.isArray(val)) {
+          for (const c of val) { visit(c, shadow, sp); if (found !== null) return; }
+        } else if (val && typeof val === "object") {
+          visit(val, shadow, sp);
+          if (found !== null) return;
+        }
+      }
+      return;
+    }
+
+    // Do NOT descend into a nested function boundary — own scope. A nested
+    // `function-decl` is analyzed as its own route node; a `lambda` callback's
+    // placement is its own (its DOM access is not the enclosing fn's).
+    if (node.kind === "function-decl" || node.kind === "lambda") return;
+
+    const hit = clientOnlyGlobalAccessOfNode(node, shadow);
+    if (hit !== null) {
+      found = { resource: hit, span: sp };
+      return;
+    }
+    for (const key of Object.keys(node)) {
+      if (key === "span") continue;
+      const val = node[key];
+      if (Array.isArray(val)) {
+        for (const c of val) {
+          visit(c, shadow, sp);
+          if (found !== null) return;
+        }
+      } else if (val && typeof val === "object") {
+        visit(val, shadow, sp);
+        if (found !== null) return;
+      }
+    }
+  };
+
+  for (const stmt of body) {
+    visit(stmt, shadowedRoots, stmt && typeof stmt === "object" ? (stmt as any).span : undefined);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// §12.4 E-ROUTE-002 — scope-aware client-pin computation (S263 review #2/#3).
+//
+// Client-pin detection is SCOPE-AWARE so a local / param / import named
+// `document` or `window` (a domain object) is not mistaken for the DOM global.
+// `computeFileClientPins` threads the lexical shadow set through every
+// function-decl boundary — file seed (imports + top-level bindings) → each fn's
+// own params + body locals → nested fns inherit the enclosing shadow — and
+// records each fn's clientPin under its `makeFunctionNodeId`, matching the
+// analysisMap keys Step 3 builds.
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract the leading binding identifier from a raw param / decl string and, if
+ * it names a client-global root, add it to `set`. Handles `name`, `name: T`,
+ * `name = default`, `lin name`, `...rest` — the leading ident is the binding.
+ */
+function addBindingRootIfClientGlobal(set: Set<string>, raw: unknown): void {
+  if (typeof raw !== "string") return;
+  const m = raw.match(/[A-Za-z_$][A-Za-z0-9_$]*/);
+  if (m && CLIENT_ONLY_GLOBAL_ROOTS.has(m[0])) set.add(m[0]);
+}
+
+/** Add every client-global root bound by a value that may be a bare name OR a
+ *  DestructurePattern (S263 review #1/#2). Reuses the tested `iterDestructuredNames`
+ *  extractor so array / object / nested / rest bindings are all covered. */
+function addBindingRootsMaybeDestructured(set: Set<string>, nameField: unknown): void {
+  if (isDestructurePattern(nameField)) {
+    for (const n of iterDestructuredNames(nameField)) {
+      if (CLIENT_ONLY_GLOBAL_ROOTS.has(n)) set.add(n);
+    }
+  } else {
+    addBindingRootIfClientGlobal(set, nameField); // bare / typed / defaulted / rest string
+  }
+}
+
+/**
+ * Add every client-global root bound by a function/lambda param list (S263
+ * review #1). Params arrive as raw strings (`"document"`, `"document: T"`,
+ * `"document = d"`, `"...document"` — all caught by the leading-ident extractor)
+ * OR as objects whose `.name` is a string or a DestructurePattern (`{ document }`
+ * / `[document]` — expanded via `iterDestructuredNames`).
+ */
+function addParamRoots(set: Set<string>, params: unknown): void {
+  if (!Array.isArray(params)) return;
+  for (const p of params) {
+    if (typeof p === "string") addBindingRootIfClientGlobal(set, p);
+    else if (p && typeof p === "object") addBindingRootsMaybeDestructured(set, (p as any).name);
+  }
+}
+
+/**
+ * Collect client-global roots bound by LOCAL declarations directly inside a
+ * function body, NOT crossing a nested function boundary (those locals belong to
+ * inner scopes). A local binding of a client-global name shadows the DOM global
+ * for the whole enclosing fn (conservative — favors NOT firing a hard error).
+ *
+ * S263 review #2: reuses the tested `collectLocalNames` for every BARE binding
+ * form it already handles (let/const/tilde/lin, state-decl, nested-fn NAME,
+ * for-stmt vars, `catch` binding) — so those forms cannot be missed — and layers
+ * a destructure-pattern pass on top (`collectLocalNames` records a destructured
+ * decl's `.name` as the pattern OBJECT, so its bound names are expanded here via
+ * `iterDestructuredNames`). A DestructurePattern only ever appears in a binding
+ * position, so scanning every field for one is safe.
+ */
+function addBodyLocalRoots(set: Set<string>, body: unknown): void {
+  // (a) bare-name locals via the existing tested collector.
+  if (Array.isArray(body)) {
+    for (const nm of collectLocalNames(body as LogicStatement[])) {
+      if (CLIENT_ONLY_GLOBAL_ROOTS.has(nm)) set.add(nm);
+    }
+  }
+  // (b) destructured bindings (decl / catch / for-var name fields carrying a
+  // DestructurePattern) — expand, stopping at inner function/lambda scopes.
+  const visit = (node: any): void => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) { for (const c of node) visit(c); return; }
+    if (node.kind === "function-decl" || node.kind === "lambda") return; // inner scope
+    for (const key of Object.keys(node)) {
+      if (key === "span") continue;
+      const v = node[key];
+      if (isDestructurePattern(v)) {
+        for (const n of iterDestructuredNames(v)) {
+          if (CLIENT_ONLY_GLOBAL_ROOTS.has(n)) set.add(n);
+        }
+      } else if (v && typeof v === "object") {
+        visit(v);
+      }
+    }
+  };
+  visit(body);
+}
+
+/**
+ * File-scope seed: client-global roots bound at FILE scope — imports + top-level
+ * declarations (const/let/tilde/function/component names) — visible to every
+ * function. Does NOT descend into a function-decl BODY (those are inner scopes),
+ * but DOES record a top-level `function document(){…}` name binding.
+ */
+function collectFileLevelBindingRoots(nodes: unknown): Set<string> {
+  const set = new Set<string>();
+  const visit = (node: any): void => {
+    if (set.size === CLIENT_ONLY_GLOBAL_ROOTS.size) return;
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) { for (const c of node) visit(c); return; }
+    const k = node.kind;
+    if (k === "import-decl") {
+      if (Array.isArray(node.names)) for (const nm of node.names) addBindingRootIfClientGlobal(set, nm);
+      if (typeof node.name === "string") addBindingRootIfClientGlobal(set, node.name);
+    }
+    if (k === "let-decl" || k === "const-decl" || k === "tilde-decl"
+        || k === "state-decl" || k === "component-def" || k === "function-decl") {
+      // `.name` is a bare string OR a DestructurePattern (top-level destructured
+      // decl) — both handled (S263 review #2).
+      addBindingRootsMaybeDestructured(set, node.name);
+    }
+    // Do NOT descend into a function-decl body (inner scope) — but keep its name.
+    if (k === "function-decl") return;
+    for (const key of Object.keys(node)) {
+      if (key === "span") continue;
+      const v = node[key];
+      if (v && typeof v === "object") visit(v);
+    }
+  };
+  visit(nodes);
+  return set;
+}
+
+/**
+ * Compute the clientPin for EVERY function-decl in a file, scope-aware. Returns
+ * a Map<fnNodeId, {resource, span}> keyed by `makeFunctionNodeId` (matching the
+ * analysisMap keys). Threads the lexical shadow set through function boundaries:
+ * a fn's shadow = enclosing shadow ∪ its own params ∪ its own body locals, and
+ * nested fn-decls inherit it — so a nested fn correctly sees an ancestor's
+ * `document` param as a shadow.
+ */
+function computeFileClientPins(
+  fileAST: FileAST,
+  filePath: string,
+): Map<string, { resource: string; span: Span | undefined }> {
+  const out = new Map<string, { resource: string; span: Span | undefined }>();
+  const nodes: any =
+    (fileAST as any).nodes ?? ((fileAST as any).ast ? (fileAST as any).ast.nodes : []) ?? [];
+  const fileSeed = collectFileLevelBindingRoots(nodes);
+
+  const walk = (node: any, shadow: Set<string>): void => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) { for (const c of node) walk(c, shadow); return; }
+    if (node.kind === "function-decl") {
+      const inner = new Set(shadow);
+      addParamRoots(inner, node.params);
+      const body = Array.isArray(node.body) ? node.body : [];
+      addBodyLocalRoots(inner, body);
+      const pin = detectClientOnlyGlobalAccess(body, inner);
+      if (pin) out.set(makeFunctionNodeId(filePath, node), pin);
+      // Recurse into the body so nested function-decls inherit `inner`.
+      walk(node.body, inner);
+      return;
+    }
+    if (node.kind === "lambda") {
+      // A lambda is its own scope; its params shadow within it. Recurse so any
+      // nested function-decl inside the lambda inherits the lambda's params.
+      const inner = new Set(shadow);
+      addParamRoots(inner, node.params);
+      walk(node.body, inner);
+      return;
+    }
+    for (const key of Object.keys(node)) {
+      if (key === "span") continue;
+      const v = node[key];
+      if (v && typeof v === "object") walk(v, shadow);
+    }
+  };
+  walk(nodes, fileSeed);
+  return out;
+}
+
+/**
+ * §12.4 E-ROUTE-005 — a short human phrase for the FIRST (most concrete) server
+ * trigger among a function's direct escalation reasons, for the unplaceable
+ * both-sides diagnostic. Prefers a body/resource reason over the bare `server`
+ * keyword.
+ */
+function describeServerTrigger(reasons: EscalationReason[]): string {
+  const ordered = [...reasons].sort(
+    (a, b) =>
+      (a.kind === "explicit-annotation" ? 1 : 0) -
+      (b.kind === "explicit-annotation" ? 1 : 0),
+  );
+  const first = ordered[0];
+  if (!first) return "a server-only resource";
+  switch (first.kind) {
+    case "server-only-resource":
+      return first.resourceType === "sql-query"
+        ? "a `?{}` SQL query"
+        : `the server-only resource \`${first.resourceType}\``;
+    case "protected-field-access":
+      return `the protected field \`${first.field}\``;
+    case "explicit-annotation":
+      return "the `server` keyword";
+    case "channel-broadcast":
+      return `a channel \`broadcast()\`/\`disconnect()\` (${first.detail})`;
+    case "middleware-handle":
+      return "the reserved middleware name `handle()`";
+    case "channel-ws-handler":
+      return "an `onserver:` channel handler";
+    default:
+      return "a server-only resource";
+  }
+}
+
+// ---------------------------------------------------------------------------
 // CPS transformation analysis
 // ---------------------------------------------------------------------------
 
@@ -3155,6 +3582,7 @@ function getExplicitAuthDeclaration(fileAST: FileAST): {
   loginRedirect: string | null;
   csrf: string | null;
   sessionExpiry: string | null;
+  sessionSecure: string | null;
 } | null {
   // 1. Program-level: <program auth=...> via computeProgramConfig. CE wraps the
   //    FileAST in `.ast`; bare-FileAST inputs (unit tests) keep authConfig at
@@ -3167,6 +3595,8 @@ function getExplicitAuthDeclaration(fileAST: FileAST): {
       loginRedirect: authConfig.loginRedirect ?? null,
       csrf: authConfig.csrf ?? null,
       sessionExpiry: authConfig.sessionExpiry ?? null,
+      // §20.5.1 (i29e B4b) — session-cookie Secure mode ("true" | "false").
+      sessionSecure: authConfig.sessionSecure ?? null,
     };
   }
 
@@ -3186,6 +3616,7 @@ function getExplicitAuthDeclaration(fileAST: FileAST): {
     loginRedirect: string | null;
     csrf: string | null;
     sessionExpiry: string | null;
+    sessionSecure: string | null;
   } | null = null;
 
   const walk = (ns: any[] | undefined): void => {
@@ -3201,6 +3632,9 @@ function getExplicitAuthDeclaration(fileAST: FileAST): {
             loginRedirect: readStringAttr(node.attrs, "loginRedirect"),
             csrf: readStringAttr(node.attrs, "csrf"),
             sessionExpiry: null, // <page> carries no sessionExpiry= attribute.
+            // §20.5.1 (i29e B4b) — page-level session-secure= (registered on the
+            // <page> surface); null falls back to the secure default downstream.
+            sessionSecure: readStringAttr(node.attrs, "session-secure"),
           };
           return;
         }
@@ -3338,6 +3772,11 @@ export function runRI(input: RIInput): RIOutput {
     const filePath = fileAST.filePath;
     const fnNodes = collectFileFunctions(fileAST);
 
+    // §12.4 E-ROUTE-002 — scope-aware client-pin map for this file (S263 review
+    // #2/#3): fnNodeId → the fn's DOM-global access (or absent). Computed once
+    // per file with lexical-shadow threading; looked up per fn below.
+    const fileClientPins = computeFileClientPins(fileAST, filePath);
+
     // Collect the span.start values of functions inside worker bodies
     // (<program name="...">) so we can suppress E-ROUTE-001 for them.
     const workerBodyFnIds = collectWorkerBodyFunctionIds(fileAST);
@@ -3447,6 +3886,15 @@ export function runRI(input: RIInput): RIOutput {
       // Build closure captures for this function.
       const closureCaptures = buildClosureCapturesForFunction(fnNode);
 
+      // §12.4 E-ROUTE-002 — client-pin: does this fn's own body directly touch a
+      // DOM-only global (`document`/`window`)? Scope-aware, ExprNode-only, stops
+      // at nested function boundaries (see computeFileClientPins). Computed for
+      // ALL functions including GENERATORS (S263 review #5): a CLIENT generator
+      // touching the DOM must stay pinned; a SERVER/SSE generator is filtered out
+      // downstream by the direct-server guard on clientPinnedFnIds (and, if it
+      // ALSO has a server trigger, surfaces as the unplaceable E-ROUTE-005).
+      const clientPin = fileClientPins.get(fnNodeId) ?? null;
+
       analysisMap.set(fnNodeId, {
         fnNodeId,
         filePath,
@@ -3456,6 +3904,7 @@ export function runRI(input: RIInput): RIOutput {
         callees,
         warnings,
         closureCaptures,
+        clientPin,
       });
     }
   }
@@ -3506,6 +3955,56 @@ export function runRI(input: RIInput): RIOutput {
   }
 
   // ------------------------------------------------------------------
+  // §12.4 E-ROUTE-002 / E-ROUTE-005 — CLIENT-PINNED set + the unplaceable
+  // both-sides reject (S263 review #6).
+  //
+  // A function that directly touches a DOM-only global (record.clientPin) splits
+  // into two cases on whether it ALSO has a direct SERVER trigger (Step 5):
+  //
+  //   - NO direct server trigger → CLIENT-PINNED. Route analysis places it
+  //     exclusively on the client. It is VETOED from the server-promotion
+  //     fixpoints below (5b capture-taint, 5c caller-context) — pulling it
+  //     server-side is exactly the soundness hole (its DOM code would land in the
+  //     server bundle). It stays `boundary: "client"`; the reject pass (post-5c)
+  //     fires E-ROUTE-002 for any server-classified caller reaching it.
+  //
+  //   - HAS a direct server trigger (`?{}` SQL, protected field, server-only
+  //     resource, `server` keyword, …) AND touches the DOM → UNPLACEABLE. It
+  //     cannot run on the server (no `document`/`window`) NOR on the client (the
+  //     server-only resource has no client referent). This is DISTINCT from
+  //     E-ROUTE-002 (a server fn CALLING a client-only fn) — it is a SINGLE
+  //     self-contradictory function — so it gets its own code, E-ROUTE-005, with
+  //     an accurate message, rather than silently shipping its DOM to the server.
+  //     (Pre-S263-review this case was silently excluded and left server-placed.)
+  // ------------------------------------------------------------------
+  const clientPinnedFnIds = new Set<string>();
+  for (const [fnNodeId, record] of analysisMap) {
+    if (record.clientPin === null) continue;
+    if (!resolvedServerFnIds.has(fnNodeId)) {
+      clientPinnedFnIds.add(fnNodeId);
+      continue;
+    }
+    // Both a direct server trigger AND a DOM access → unplaceable (E-ROUTE-005).
+    const _fnName = record.fnNode.name ?? "<anonymous>";
+    const _serverReason = describeServerTrigger(record.directTriggers);
+    const _clientRes = record.clientPin.resource;
+    const e005 = new RIError(
+      "E-ROUTE-005",
+      `E-ROUTE-005: Function \`${_fnName}\` accesses BOTH a server-only resource ` +
+      `(${_serverReason}) AND a client-only global (\`${_clientRes}\`); it cannot be ` +
+      `placed on either side. A server context has no \`document\`/\`window\`, and a ` +
+      `client context cannot reach the server-only resource — so route analysis (§12) ` +
+      `has no valid placement for this function. Split it: keep the server-only work ` +
+      `(the \`?{}\` query / resource access) in a server function, move the DOM access ` +
+      `into a separate client function, and have the client function call the server ` +
+      `one (client → server is the allowed direction; §12.3). See §12.4.`,
+      record.clientPin.span ?? record.fnNode.span,
+    );
+    e005.severity = "error";
+    errors.push(e005);
+  }
+
+  // ------------------------------------------------------------------
   // Step 5b: Capture-based taint propagation via fixed-point iteration.
   //
   // If function A captures variable V, and V is the name of a function
@@ -3552,6 +4051,13 @@ export function runRI(input: RIInput): RIOutput {
     for (const [fnNodeId, record] of analysisMap) {
       // Already server-tainted — nothing to propagate
       if (resolvedServerFnIds.has(fnNodeId)) continue;
+
+      // §12.4 E-ROUTE-002 — a client-pinned function (direct DOM access) is NEVER
+      // promoted server-side. Capturing a server-tainted symbol does not move a
+      // fn that touches `document`/`window` off the client; the conflict is
+      // surfaced as E-ROUTE-002 at the offending call site, not by silently
+      // shipping its DOM code to the server.
+      if (clientPinnedFnIds.has(fnNodeId)) continue;
 
       // Exclude callees from capture taint — calling a server function uses
       // a fetch stub (stays client). Only non-called captures trigger taint.
@@ -3655,6 +4161,13 @@ export function runRI(input: RIInput): RIOutput {
       // Already server-classified — no propagation needed.
       if (resolvedServerFnIds.has(fnNodeId)) continue;
 
+      // §12.4 E-ROUTE-002 — a client-pinned function (direct DOM access) is NEVER
+      // promoted server-side by caller-context inheritance. THIS is the soundness
+      // fix: previously a DOM helper called only from a server fn escalated here
+      // (Trigger 5) and its `document.*` code was emitted into the server bundle.
+      // It now stays client; the offending server caller fires E-ROUTE-002 below.
+      if (clientPinnedFnIds.has(fnNodeId)) continue;
+
       // §39.3: handle() escape hatch is middleware, not server. Skip.
       if ((record.fnNode as any).isHandleEscapeHatch === true) continue;
 
@@ -3702,6 +4215,119 @@ export function runRI(input: RIInput): RIOutput {
       }
 
       callerCtxChanged = true;
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Step 5c-bis: §12.4 E-ROUTE-002 — server→client-only call-graph reject.
+  //
+  // With every server classification settled (Steps 5 / 5b / 5c) and the
+  // client-pinned set fixed, walk each server-classified function's STATIC CALL
+  // GRAPH. If it reaches a client-pinned function — directly or transitively —
+  // that is the §12.4 violation: a server-executing function cannot call a
+  // function route analysis places exclusively on the client (a server context
+  // has no `document`/`window`). Emit E-ROUTE-002 naming (a) the server fn,
+  // (b) the client-only callee, (c) the call chain (§12.4).
+  //
+  // Reporting (S263 review #7): dedup per (SERVER-ROOT fn, client callee) — each
+  // BFS is one server root and reports each client-pinned callee it reaches ONCE
+  // (shortest chain). Two distinct server fns leaking to the SAME client fn each
+  // get their own E-ROUTE-002 (no cross-root global dedup that would hide one).
+  //
+  // Callee resolution (S263 review #3/#4): route-inference has NO precise
+  // import-aware callee resolver — `fnNameToNodeIds` is name-keyed and GLOBAL
+  // across files (as are the 5b/5c escalation passes). For a HARD ERROR we
+  // resolve a call ONLY to SAME-FILE function-decls (a bare call binds to the
+  // same-file declaration with certainty). We DELIBERATELY do NOT fall back to
+  // the global set: a coincidental same-name client-pinned fn in ANOTHER file is
+  // NOT the target of this call, and firing on it rejects valid code (#3). If a
+  // same-file name is itself ambiguous (a client-pinned candidate alongside a
+  // non-pinned one — e.g. a nested + top-level same-name), we do NOT fire and
+  // traverse the non-pinned candidates. We fire ONLY when the call UNAMBIGUOUSLY
+  // resolves, same-file, to client-pinned function(s).
+  //
+  // RESIDUAL (S263 review #4, DOCUMENTED — see §12.4): a genuine CROSS-FILE
+  // server -> client-only leak whose callee is reached by a name with no
+  // same-file binding is NOT caught. Catching it would require firing on a
+  // globally-ambiguous cross-file name, which reintroduces #3's false positive —
+  // and no-false-positives is the priority. This narrow miss awaits a precise
+  // import-aware resolver; a V1 limitation.
+  // ------------------------------------------------------------------
+  if (clientPinnedFnIds.size > 0) {
+    for (const [serverFnId, serverRecord] of analysisMap) {
+      if (!resolvedServerFnIds.has(serverFnId)) continue;
+      // handle() middleware is server-executing but is its own boundary; it
+      // still cannot call client-only code, so it participates as a server root.
+      const serverName = serverRecord.fnNode.name ?? "<anonymous>";
+
+      // BFS over the callee graph, tracking the name-path for the chain message.
+      const visited = new Set<string>([serverFnId]);
+      const reported = new Set<string>(); // client-pinned ids reported in THIS bfs
+      const queue: Array<{ id: string; path: string[] }> = [
+        { id: serverFnId, path: [serverName] },
+      ];
+      while (queue.length > 0) {
+        const { id, path } = queue.shift()!;
+        const rec = analysisMap.get(id);
+        if (!rec) continue;
+        const callerFile = rec.filePath;
+        for (const calleeName of rec.callees) {
+          const globalIds = fnNameToNodeIds.get(calleeName);
+          if (!globalIds || globalIds.length === 0) continue;
+          // SAME-FILE resolution ONLY — no global cross-file fallback (#3). A
+          // call with no same-file binding is import/undefined; treat as
+          // uncertain and skip (the #4 documented residual).
+          const resolved = globalIds.filter(
+            (cid) => analysisMap.get(cid)?.filePath === callerFile,
+          );
+          if (resolved.length === 0) continue;
+          const chain = [...path, calleeName];
+
+          // UNAMBIGUOUS client-pinned target: every resolved candidate is
+          // client-pinned. (A single same-file resolution is the common case.)
+          const allPinned =
+            resolved.length > 0 &&
+            resolved.every((cid) => clientPinnedFnIds.has(cid));
+
+          if (allPinned) {
+            const target = resolved.find((cid) => !reported.has(cid));
+            for (const cid of resolved) visited.add(cid); // client leaves
+            if (target === undefined) continue; // already reported in this bfs
+            reported.add(target);
+            const pin = analysisMap.get(target)?.clientPin;
+            const accessDesc = pin
+              ? `it accesses the client-only global \`${pin.resource}\``
+              : "it is client-only";
+            const chainStr = chain.join(" -> ");
+            const ro02 = new RIError(
+              "E-ROUTE-002",
+              `E-ROUTE-002: Server-escalated function \`${serverName}\` calls the ` +
+              `client-only function \`${calleeName}\` (${accessDesc}), which route ` +
+              `analysis places exclusively on the client. A server function runs in ` +
+              `the Bun process, where the client-only referent does not exist, so this ` +
+              `call cannot execute server-side. Call chain: ${chainStr}. ` +
+              `Fix by one of: extract the shared logic into a pure \`fn\` (§33) with no ` +
+              `client or server classification and call that from both sides; duplicate ` +
+              `the needed logic inside \`${serverName}\`; or re-evaluate whether ` +
+              `\`${calleeName}\` is genuinely client-only (§12.4).`,
+              serverRecord.fnNode.span,
+            );
+            ro02.severity = "error";
+            errors.push(ro02);
+            continue;
+          }
+
+          // Not unambiguous: traverse the NON-pinned candidates for transitivity
+          // (a client-pinned candidate is a client leaf; on ambiguity we do NOT
+          // fire — see the resolution note above).
+          for (const calleeId of resolved) {
+            if (clientPinnedFnIds.has(calleeId)) continue;
+            if (visited.has(calleeId)) continue;
+            visited.add(calleeId);
+            queue.push({ id: calleeId, path: chain });
+          }
+        }
+      }
     }
   }
 
@@ -4481,6 +5107,9 @@ export function runRI(input: RIInput): RIOutput {
       loginRedirect: authConfig.loginRedirect ?? "/login",
       csrf: authConfig.csrf ?? "off",
       sessionExpiry: authConfig.sessionExpiry ?? "1h",
+      // §20.5.1 (i29e B4b) — "false" opts out of Secure; any other value
+      // (incl. the "true" default) → secure mode.
+      sessionSecure: (authConfig.sessionSecure ?? "true") !== "false",
     });
   }
 
@@ -4547,6 +5176,8 @@ export function runRI(input: RIInput): RIOutput {
           loginRedirect: explicit.loginRedirect ?? "/login",
           csrf: explicit.csrf ?? "auto",
           sessionExpiry: explicit.sessionExpiry ?? "1h",
+          // §20.5.1 (i29e B4b) — honor an explicit session-secure="false".
+          sessionSecure: (explicit.sessionSecure ?? "true") !== "false",
         });
         continue;
       }
@@ -4558,6 +5189,8 @@ export function runRI(input: RIInput): RIOutput {
         loginRedirect: "/login",
         csrf: "auto",
         sessionExpiry: "1h",
+        // §20.5.1 (i29e B4b) — auto-escalated auth defaults to the secure mode.
+        sessionSecure: true,
         autoEscalated: true,
       });
       errors.push({

@@ -268,7 +268,7 @@ The following closer rules SHALL apply:
 - A `?{ }` SQL context closes with `}` and returns to the logic context that opened it.
 - A `#{ }` CSS inline context closes with `}` and returns to the markup or state context that opened it.
 - Markup tags and state blocks close with a closer form (see Section 4.4) and return to the enclosing markup, state, or top-level context.
-- A `</>` inferred closer or `</tagname>` explicit closer inside a `${ }` logic context SHALL be a compile error (E-CTX-002). Markup/state closers cannot cross context boundaries.
+- A `</>` inferred closer or `</tagname>` explicit closer inside a `${ }` logic context SHALL be a compile error (E-CTX-003). Markup/state closers cannot cross context boundaries.
 - An unclosed context at end of file SHALL be a compile error (E-CTX-003).
 - An unclosed context encountered before an outer closer SHALL be a compile error (E-CTX-003).
 
@@ -417,9 +417,9 @@ explicit-close ::= '</' identifier '>'
 **Normative statements:**
 
 - The explicit closer `</name>` SHALL match the innermost open tag whose name is `name`.
-- If the innermost open tag's name does not match, this SHALL be a compile error (E-MARKUP-002).
+- If the innermost open tag's name does not match, this SHALL be a compile error (E-CTX-001). (S263 — was E-MARKUP-002, now retired; closer-name-mismatch aligns to impl#1's live E-CTX-001 [§3.2]. impl#2/native additionally surfaces the mismatch, honoring this rule.)
 - An explicit closer for a state block uses `</statename>` where `statename` is the identifier used in the state opener.
-- An explicit closer `</name>` SHALL NOT be used inside a `${ }` logic context (E-CTX-002). Markup/state closers cannot cross context boundaries.
+- An explicit closer `</name>` SHALL NOT be used inside a `${ }` logic context (E-CTX-003). Markup/state closers cannot cross context boundaries.
 
 **Worked example — valid:**
 ```scrml
@@ -446,7 +446,7 @@ inferred-close ::= '</>'
 **Normative statements:**
 
 - `</>` SHALL close the innermost open markup tag or state block at the current position in the context stack.
-- `</>` SHALL NOT be used inside a `${ }` logic context (E-CTX-002). Markup/state closers cannot cross context boundaries.
+- `</>` SHALL NOT be used inside a `${ }` logic context (E-CTX-003). Markup/state closers cannot cross context boundaries.
 - The compiler SHALL know, at the point of `</>`, which block is being closed. This information SHALL be available in diagnostic output.
 - When the `verbose closers` setting is enabled (see Section 28), all `</>` forms SHALL be normalized to `</tagname>` form in compiler diagnostic output, error messages, and formatted source output. This normalization is for developer-facing output only and SHALL NOT affect compiled output.
 
@@ -476,7 +476,7 @@ ${ if (condition) {
     </>
 } }
 ```
-`</>` is inside a `${ }` logic context. This SHALL be a compile error (E-CTX-002): cannot use a markup/state closer inside a logic context.
+`</>` is inside a `${ }` logic context. This SHALL be a compile error (E-CTX-003): cannot use a markup/state closer inside a logic context.
 
 ### 4.5 The `verbose closers` Compiler Setting
 
@@ -883,7 +883,7 @@ mechanism depends on the execution context type:
 
 | Code | Trigger | Severity |
 |------|---------|---------|
-| E-PROGRAM-001 | Circular `<program>` nesting (a `<program>` is a descendant of itself) | Error |
+| E-PROGRAM-001 | Circular `<program>` nesting (a `<program>` is a descendant of itself) **(Reserved / spec-ahead, S263 — no fire site: circular `<program>` nesting is unconstructable-by-construction — a lexical tree cannot contain itself and there is no include/inline mechanism; defensive guard, condition unreachable. Excluded from the freeze fireable set.)** | Error |
 | W-PROGRAM-001 | Nested `<program>` has no `name=` attribute | Warning |
 | W-PROGRAM-TITLE-NESTED | Documentary attribute (`title=`, `description=`, `version=`, `author=`, `license=`) appears on a nested `<program>` (see §40.7) | Warning |
 | E-STORY-UNKNOWN | `story="<name>"` references a build story not declared in the `scrml.toml` `[story]` table (see §58) | Error |
@@ -1863,9 +1863,20 @@ called.
   SHALL be evaluated once at mount time and do NOT subscribe to changes.
 - Multiple `${...}` interpolations in a single `class` attribute are supported. Each
   reactive variable in any interpolation produces an independent reactive subscription.
-- Template literal class interpolation and `class:` directives MAY coexist on the same
-  element. The two mechanisms are independent. The template literal controls the full class
-  string; the `class:` directives toggle individual classes.
+- A reactive template-literal `class` is a WHOLESALE writer of the element's `class`
+  surface: when any interpolated `@variable` changes it calls `setAttribute("class", …)`,
+  replacing the ENTIRE class string. Under Axiom ① (§5.5.4) a wholesale writer is the
+  exclusive owner of its surface, so a reactive `class="…${@…}…"` and a `class:name=`
+  directive (or a transition directive) on the SAME element CONTEND: the template's next
+  write erases the classes the `class:` toggles maintain. The two are therefore NOT
+  independent — this is the writer conflict Axiom ① describes.
+  > Note (enforcement scope): the `E-ATTR-WRITER-CONFLICT` diagnostic (§34) is currently
+  > emitted for the `class=(expression)` / `style=(expression)` / `value=(expression)`
+  > wholesale owners (§5.5.4). Promoting the *template-literal* wholesale owner to the same
+  > error is a tracked follow-up: the current code generator still emits both writers for a
+  > reactive template-literal `class` + `class:` mix (legacy §5.5.3 behavior), and existing
+  > render baselines exercise that shape. The normative direction is the conflict above; the
+  > template-literal-owner enforcement lands with that baseline migration.
 
 **Worked example — prefix and reactive suffix:**
 
@@ -1887,40 +1898,60 @@ Renders `class="card card-dark"` initially. Changing `@theme` to `"light"` updat
 
 Any change to `@size` or `@variant` updates the full class string.
 
-#### 5.5.4 Dynamic Class Expression — `class={expression}` (Planned)
+#### 5.5.4 Dynamic Class Expression — `class=(expression)` / `class={expression}`
 
-A braced expression as the `class` attribute value computes the entire class string from
-an arbitrary JavaScript expression.
+A parenthesized or braced expression as the `class` attribute value computes the ENTIRE
+class string from an arbitrary JavaScript expression, and rewrites the whole `class`
+attribute reactively when any reactive cell the expression reads changes.
 
 **Syntax:**
 
 ```
-class-expr ::= 'class=' '{' js-expression '}'
+class-expr ::= 'class=' ( '(' js-expression ')' | '{' js-expression '}' )
 ```
 
 **Example:**
 
 ```scrml
-<isActive> = false
-<hasError> = false
-<div class=${isActive ? "active" : ""} ${hasError ? "error" : ""}>content</>
+<mode> = "a"
+<button class=(@mode == "a" ? "tab active" : "tab")>A</button>
 ```
 
-**Status:** This form is parsed at the block-splitter level but is NOT yet fully implemented
-in the code generator. Gauntlet developers should use `class:name=@condition` (§5.5.2) or
-template literal interpolation (§5.5.3) until this form is specified and implemented.
+**Normative statements:**
 
-**Planned behavior (non-normative):**
+- `class=(expression)` (and the equivalent braced `class={expression}`) SHALL compute the
+  full class string by evaluating `expression`, and SHALL re-evaluate it and rewrite the
+  whole `class` attribute whenever any `@variable` the expression reads changes.
+- The result SHALL be coerced with `String()`. A `not` result (JS `null`) — or `undefined`
+  from foreign code — SHALL REMOVE the attribute (an empty className), per §42.9. The
+  DEFINED values `""`, `0`, `false`, `[]` SHALL be written as their `String()` form and
+  SHALL NOT be treated as absence (§42.1.1).
+- **Exclusive wholesale ownership (Axiom ①).** `class=(expression)` is a WHOLESALE writer of
+  the element's `class` surface: it replaces the entire className on every reactive update.
+  It SHALL be the SOLE writer of that surface on its element. If a `class:name=` directive
+  (§5.5.2) or a transition directive (`transition:`/`in:`/`out:`) — either of which writes
+  individual classes — also targets `class` on the SAME element, the compiler SHALL emit
+  `E-ATTR-WRITER-CONFLICT` (§34) naming both sites; the wholesale write would otherwise
+  silently erase the per-class writer's work on its next evaluation. A SOLE
+  `class=(expression)` SHALL emit its reactive binding.
+  > Note (enforcement scope): `E-ATTR-WRITER-CONFLICT` is currently emitted from the
+  > STATIC-HTML emission context (the top-level element walk in `generateHtml`). The
+  > LOOP-context emitters — `<each>` (§20) and `for…lift` — build their elements through
+  > a separate imperative path that does not yet run the writer-ownership analysis, so a
+  > `class=(expression)` + `class:` mix ONE loop-nesting away compiles without the
+  > diagnostic today. Loop-context enforcement is a tracked follow-up (it must first
+  > reconcile with the `for…lift` one-shot / non-reactive quirk); the axiom above is the
+  > normative rule, and the loop gap is disclosed in `docs/known-gaps.md`.
+- This mirrors the other wholesale value writers, each the exclusive owner of its physical
+  DOM surface: `style=(expression)` (the whole `style` attribute; conflicts with `if=`/
+  `show=`/transitions), `value=(expression)` on a form control (the `.value` property;
+  conflicts with `bind:value`), and dynamic generic attributes (`title=`, `id=`, `alt=`,
+  `data-*` — each its own surface, no per-token composer form, so always a sole writer).
 
-- `class={expression}` will compute the full class string by evaluating `expression` as a
-  JavaScript expression.
-- If the expression references `@variables`, the class will update reactively when those
-  variables change.
-- The expression result SHALL be coerced to a string. An array result SHALL be joined with
-  spaces (e.g., `["a", "b"]` → `"a b"`). A null or undefined result SHALL produce an empty
-  class string.
-
-This form will be fully specified and normalized in a future spec revision. SPEC-ISSUE-013 tracks it.
+**Coercion refinement (non-normative).** Array/object results currently coerce through JS
+`String()` (`["a", "b"]` → `"a,b"`). A future revision MAY join arrays with spaces
+(`["a", "b"]` → `"a b"`); SPEC-ISSUE-013 tracks that refinement. It does not affect the
+scalar cases above, which are normative.
 
 #### 5.5.5 Class Binding on Components
 
@@ -1982,7 +2013,7 @@ Component-scoped CSS (§24.6) interacts with class binding as follows:
 | `class="foo bar"` | No | Static at compile time | Implemented |
 | `class:name=@cond` | Yes | Single class toggled by reactive boolean | Implemented |
 | `class="prefix-${@var}"` | Yes | Full class string via template literal | Implemented |
-| `class={expression}` | Conditional | Full class string from JS expression | Planned (SPEC-ISSUE-013) |
+| `class=(expression)` / `class={expression}` | Yes | Full class string from a JS expression; exclusive wholesale owner of `class` (§5.5.4, Axiom ①) | Implemented |
 
 ---
 
@@ -4844,7 +4875,7 @@ reads inside an `animationFrame` callback body.
 | W-LIFECYCLE-009 | `cleanup()` inside a `for` loop body (N registrations will be created) | Warning |
 | W-LIFECYCLE-010 | `when` block has an empty body | Warning |
 | H-LIFECYCLE-001 | `@variable` read inside `when` body is not in the `dep-list` (off by default; suppressed by `reads @var` annotation) | Hint |
-| E-LIN-004 | `lin` variable referenced inside a recurring execution context (`when`, `<timer>`, `<poll>`, or `animationFrame` callback) | Error |
+| E-LIN-004 | `lin` variable referenced inside a recurring execution context (`when`, `<timer>`, `<timeout>`, or `animationFrame` callback) — `<poll>` is DEFERRED (E-LIN-006), corrected S263 | Error |
 
 | E-LIFECYCLE-018 | `<request>` has no `id` attribute | Error |
 | E-LIFECYCLE-019 | `<request>` is self-closing (no body) | Error |
@@ -4865,7 +4896,7 @@ reads inside an `animationFrame` callback body.
 - E-LIFECYCLE-003 renamed to W-LIFECYCLE-009 (cleanup-in-for is a warning, not an error).
 - E-LIFECYCLE-008 renamed to W-LIFECYCLE-006 and severity changed to Warning; condition broadened.
 - W-LIFECYCLE-001 (unlisted @var in when body) replaced by H-LIFECYCLE-001 (hint, off by default).
-- E-LIN-005 from the first draft is superseded by E-LIN-004, which is defined in §6.7.12 and the §34 lin section. The code E-LIN-005 is not assigned; future §34 additions use E-LIN-004 onwards.
+- The FIRST-DRAFT meaning of E-LIN-005 (a §6.7-area recurring-context rule) was superseded by E-LIN-004, defined in §6.7.12 and the §34 lin section. The code E-LIN-005 was subsequently RE-ASSIGNED (S78 audit) to the `lin`-shadowing rule of §35 — a `let`/`const`/`lin` declaration that shadows an in-scope `lin` variable of the same name (emitted at `compiler/src/type-system.ts:7737`; see the §35.5 registry row and §34). E-LIN-005 IS assigned; only its first-draft meaning was retired.
 
 ---
 
@@ -6425,8 +6456,8 @@ read/write distinction.
 
 | Code | Trigger | Severity |
 |---|---|---|
-| E-SQL-001 | Compiler emits string interpolation into a SQL string (compiler defect, not user error) | Error |
-| E-SQL-002 | SQL template string (after `?N` substitution) is syntactically invalid SQL | Error |
+| E-SQL-001 | Compiler emits string interpolation into a SQL string (compiler defect, not user error) **(Reserved / spec-ahead, S263 — no fire site: a compiler-DEFECT self-check, not a user-reachable error — the developer cannot write this in scrml source; defensive invariant guard. Excluded from the freeze fireable set.)** | Error |
+| E-SQL-002 | SQL template string (after `?N` substitution) is syntactically invalid SQL **(Reserved / spec-ahead, S263 — no fire site: no compile-time SQL parser exists — Bun.SQL validates at runtime, so the "validated at compile time" claim is aspirational/spec-ahead infra. Excluded from the freeze fireable set.)** | Error |
 | E-SQL-003 | SQL template content is a runtime expression, not a literal string template | Error |
 | E-SQL-004 | `?{}` block has no `db=` declaration in any ancestor `<program>` | Error |
 | E-SQL-005 | Unrecognized database connection string prefix in `db=` attribute | Error |
@@ -6770,10 +6801,10 @@ Error E-SYNTAX-002: `lift` is not valid inside a bare `function` body. A `functi
     for (item of items) {
         lift <li>${item.name}</>;
     }
-</>   // Error E-CTX-002: '</>' in logic context
+</>   // Error E-CTX-003: '</>' in logic context
 }
 ```
-Error E-CTX-002: Cannot use a markup/state closer (`</>` or `</tagname>`) inside a `${ }` logic context. Close the logic context with `}` first.
+Error E-CTX-003: Cannot use a markup/state closer (`</>` or `</tagname>`) inside a `${ }` logic context. Close the logic context with `}` first.
 
 ### 10.5 `lift` Ordering and Async Parallelism
 
@@ -7132,6 +7163,31 @@ For each server-escalated function, the compiler SHALL generate:
   message SHALL suggest one of the following resolutions: extract the shared logic into a
   pure function (§33) with no client or server classification; duplicate the logic inside
   the server function; or re-evaluate whether the callee is genuinely client-only.
+- **Unplaceable single function (E-ROUTE-005).** A *single* function whose own body accesses
+  BOTH a server-only resource (a §12.2 escalation trigger — e.g. a `?{}` SQL context, a
+  protected field, a server-only import) AND a client-only global (a DOM global with no
+  server-side referent) is *unplaceable*: route analysis can assign it to neither side — the
+  server context has no client-only global, and the client context cannot reach the
+  server-only resource. This is DISTINCT from E-ROUTE-002 (a server function *calling* a
+  separate client-only function): here the contradiction lives inside one function body. The
+  compiler SHALL emit E-ROUTE-005, and the message SHALL identify the function by name, the
+  server-only trigger, and the client-only access. The suggested resolution is to split the
+  function — keep the server-only work in a server function, move the client-only access into
+  a separate client function, and have the client function call the server one (client → server
+  is the permitted direction, §12.3). The DOM globals recognized as client-only for both
+  E-ROUTE-002 and E-ROUTE-005 are deliberately limited to the browser roots with no server
+  referent under any host (`document`, `window`); an access rooted at a name bound by an
+  in-scope local, parameter, or import is a domain object, not the global, and does not count.
+- **Enforcement scope (V1 limitations, documented residuals).** E-ROUTE-002 / E-ROUTE-005
+  detection is deliberately conservative — never rejecting valid code takes priority over
+  catching every leak — so two narrow cases are recognized but NOT enforced in V1: (a) a
+  **cross-file** server→client-only call whose callee is reached by a name with no same-file
+  binding is not caught, because firing on a globally-ambiguous cross-file name would reject
+  valid code (a coincidental same-name function in another file); precise cross-file
+  enforcement awaits an import-aware callee resolver. (b) A DOM access inside a **block-body**
+  callback/IIFE is attributed to the callback's own placement, not the enclosing function;
+  only an *expr-body* immediately-invoked lambda (`(() => document.x)()`) is scanned into the
+  enclosing function. Both are narrow misses accepted in favor of zero false positives.
 - A function that has no client or server classification — a pure function per §32 — MAY be
   called from both server-escalated and client-only functions without restriction.
 - Route inference SHALL be per-function. The compiler SHALL classify each function based
@@ -14508,10 +14564,19 @@ server-escalated function bodies.
 
 ```
 session.userId      // string | not — authenticated user ID, not if not logged in
-session.isAuth      // boolean �� true if the user is authenticated
+session.isAuth      // boolean — true if the user is authenticated
+session.role        // string | not — the authenticated user's role, not if unset
 session.get(key)    // any — retrieve a custom session value by key
-session.set(key, v) // void — store a custom session value
+session.set(key, v) // void — store a custom session value (see §20.5.1)
+session.destroy()   // void — end the session (delete the record + clear the cookie)
 ```
+
+> **Implementation note (S265, i29e — FIX 10):** the field TYPES above are the
+> intended contract. The current build binds `session` into server scope as `asIs`
+> (no per-member type refinement), so `session.userId` / `session.isAuth` /
+> `session.role` are `asIs` at the type level today (the developer must narrow
+> before use, and `session.isAuth.foo` does not yet type-error). Binding the typed
+> record shape is a spec-ahead follow-up.
 
 **Normative statements:**
 
@@ -14526,10 +14591,148 @@ session.set(key, v) // void — store a custom session value
 - `session.get(key)` and `session.set(key, v)` are built-in methods for arbitrary
   session storage. `get` returns `asIs`; the developer must narrow the type before
   use.
+- `session.destroy()` SHALL end the current session (delete the server-side record
+  and clear the session cookie). It is the imperative sibling of the client
+  `@session`-projection logout path.
 - The compiler SHALL generate the session infrastructure (session middleware,
   cookie management, server-side session store) automatically. The developer SHALL
   NOT write session middleware in scrml source.
+- `session` is a request-scoped ACCESSOR, not a first-class value. In a
+  server-escalated body it SHALL appear ONLY as the object of a member access
+  (`session.userId` / `session.role` / `session.isAuth`), an index access
+  (`session["userId"]` — the bracket spelling of `.get`), or a method call
+  (`session.get(k)` / `session.set(k, v)` / `session.destroy()`). Any OTHER use — a
+  bare `session` returned, assigned, passed as an argument, or read as a value —
+  SHALL be a compile error (E-SESSION-VALUE). This holds for BOTH the `.dot` and the
+  `["…"]` / `?.` / `?.[…]` optional forms (the compiler-owned `_scrml_req._scrml_sess`
+  receiver is always defined server-side, so a receiver-`?.` on `session` is moot
+  and lowers identically to the non-optional form). Restores the invariant that no
+  bare `session` identifier ever reaches emitted JS: it is EITHER a valid
+  member/index/call (correctly lowered) OR a clean compile error. **(LIVE, S266
+  i29e.)**
 - A top-level `let session = ...` declaration SHALL be a compile error (E-SCOPE-010).
+  **(Spec-ahead, S265 — FIX 11: not fired. A `let session = …` binds cleanly today
+  and shadows the builtin silently, mirroring the reserved-`route` binding, which is
+  also unenforced. The compiler's `declaredNames` shadow-guard prevents mis-lowering
+  when a user local `session` exists, but the reserved-name diagnostic is not yet
+  wired. E-SCOPE-010 currently fires only for a DUPLICATE file-scope `let`/`const`.)**
+
+#### 20.5.1 Session establishment (`session.set` / `session.destroy`) — the write half
+
+**Built S265 (i29e).** Prior to S265 the compiler generated only the session READ
+apparatus (S233: the `scrml_sid` cookie → session store → middleware →
+`@currentUser` / the `auth=` guards); the establishment (WRITE) API named here was
+reserved-but-unbuilt. S265 activates it. When a server-escalated function calls
+`session.set(...)` or `session.destroy()`, the compiler SHALL, for that
+request/response:
+
+1. **Ensure a session id** — reuse the incoming `scrml_sid` if the request carried
+   one, else mint a fresh `crypto.randomUUID()`.
+2. **Write the session record** — on `session.set` the compiler updates the
+   server-side record `{userId, role, …}` keyed by the session id in the durable
+   store (below); on `session.destroy` it deletes the record. Multiple `session.set`
+   calls within one function invocation SHALL coalesce to a SINGLE record write.
+3. **Attach the session cookie** — the compiler-owned Response SHALL carry, at the
+   return seam, a single `Set-Cookie: __Host-scrml_sid=<sid>; Path=/; HttpOnly;
+   SameSite=Lax; Max-Age=<sessionExpiry>; Secure` (the default secure mode; the
+   plain `scrml_sid` name with request-gated `Secure` under `session-secure="false"`
+   — see "Session cookie" below), or, on `session.destroy`, the expiry-in-the-past
+   clear form. This is a compiler-owned response effect, co-emitted alongside the
+   `scrml_csrf` cookie — the developer SHALL NOT set session cookies from scrml
+   source (an `HttpOnly` cookie is unreachable from client `document.cookie` by
+   construction). Multiple `session.set` calls SHALL produce ONE cookie.
+
+**Durable store (RULED durable).** The server-side session store SHALL be durable
+(SQLite-backed KV, namespace `session`, JSON values, `expires_at` TTL), so a session
+established on one request is visible to `@currentUser` / `session.userId` on the
+next AND survives a process restart. The READ middleware and the WRITE path SHALL
+consult the SAME durable store (a login that mints a cookie the middleware cannot
+resolve is a defect). The default store location is `.scrml-sessions.db` beside the
+runtime working directory; a `session-store=` attribute to relocate or select the
+backend is a FUTURE extension (out of scope for S265) — as is a login-page
+`sessionExpiry=` (a login page carries no `auth=`, so the 1h default governs there).
+
+**Context gate (E-SESSION-CONTEXT).** The `session` builtin is available ONLY
+inside a web-app **server route handler** — the request/response context the
+compiler wraps with the session cookie. Using `session.*` in an SSE
+`server function*`, an `<endpoint>` arm, a `<machine>` method, a serverLoad cell,
+an in-process server-fn helper called by another server function, or a headless
+`kind="tool"` program (bearer auth) SHALL be a compile error (E-SESSION-CONTEXT):
+those contexts have no session cookie context. A login helper called in-process is
+the ordinary extract-a-helper refactor — return the value to the request-entry
+handler and call `session.set` there.
+
+**Security invariant (S239 FIX 5).** `session.set("userId", …)` MINTS an
+authenticated session and performs NO credential check itself — adopters SHALL
+call it ONLY after verifying credentials. The `userId` SHOULD be a NON-EMPTY,
+non-zero identity: `isAuth` is true whenever `userId != null` (so an integer id
+`0` stays authed), but an empty-string / `0` userId reads `isAuth:true` while a
+downstream truthy check (`if (session.userId) …`) is falsy — a mismatch that is an
+adopter error, not a framework guarantee (S239-2 FIX D).
+
+**Identity vs. preference writes (S239-2 FIX B).** A write that sets `userId` (or a
+`session.set` following a `session.destroy()` in the same request) is
+IDENTITY-establishing: the compiler rotates the session id to a fresh value, builds
+the record from THIS request's changes alone (inheriting no field of the prior or
+destroyed principal — role-bleed defense), and deletes the old record. A write that
+does NOT touch `userId` (a preference-only `session.set`) updates the existing
+record IN PLACE under the same id — no rotation, no delete — so a concurrent/in-flight
+request holding that id is not silently logged out. `session.destroy()` performs a
+real clear: after it, the session carries zero prior fields.
+
+**Session cookie (S239 FIXes 1/3/5; S266 i29e B4).** The compiler-owned session
+cookie is `HttpOnly` and `SameSite=Lax` (uniform across the establishment cookie,
+the `session.destroy()` clear, and the `/_scrml/session/destroy` logout route). By
+default the cookie is named **`__Host-scrml_sid`** and is **always `Secure`**: the
+`__Host-` prefix is a browser-enforced hardening — it forbids a `Domain` attribute
+(the compiler sets none), REQUIRES `Path=/` (set), and REQUIRES `Secure` — so a
+network or sibling-subdomain attacker cannot plant or overwrite the session cookie,
+and it cannot be set over plain http off-host. A `Secure` cookie still round-trips
+over `http://localhost` (localhost is a secure context), so dev is unaffected.
+
+**`session-secure=` opt-out (B4b).** `<program session-secure="false">` (also valid
+on `<page>`) opts out of the hardening for a conscious TLS-less deployment (e.g. a
+bare-http Pi mesh): the cookie is the plain `scrml_sid` with `Secure` gated on the
+request (on for https / non-local, omitted for `http://localhost`). The default is
+`session-secure="true"` (`__Host-` + always-Secure). The READ side is MODE-GATED: it
+accepts ONLY the mode's own cookie name (secure mode reads `__Host-scrml_sid` ONLY;
+opt-out reads `scrml_sid` ONLY), each boundary-anchored. Reading the OTHER name would
+be a security hole — a sibling subdomain CAN set a plain `scrml_sid` (a `__Host-`
+cookie it cannot), so a secure-mode reader that ALSO accepted `scrml_sid` would let a
+subdomain-tossed cookie force-authenticate a fresh visitor into an attacker's session
+(the exact cookie-tossing / fixation vector `__Host-` closes). A `session-secure=`
+flip renames (and thus invalidates) the cookie anyway, so cross-name read tolerance
+buys nothing. When the default (secure) mode runs over bare http on a NON-local host —
+where the browser will silently reject the `Secure` cookie and login appears to fail —
+the server logs a one-time runtime warning naming the fix (front with TLS, or
+`session-secure="false"`).
+
+On every identity-establishing write the compiler ROTATES the session id to a fresh
+`crypto.randomUUID()` and deletes the incoming record — the incoming
+(attacker-suppliable) id is never trusted or reflected (session-fixation defense).
+`session.isAuth` / `@currentUser.isAuth` require a real store record WITH a `userId`
+— a bare cookie value is never authentication.
+
+**Reserved session keys (B5).** `csrfToken` is a compiler-owned session field (the
+§40.2 server-authoritative CSRF synchronizer token, minted + persisted by the
+middleware). `session.set("csrfToken", …)` is REFUSED — a literal write is a compile
+error (E-SESSION-RESERVED-KEY) and a dynamic write (`session.set(k, v)` with a
+runtime `k === "csrfToken"`) is a runtime no-op — so a caller cannot pin the CSRF
+token to a value it already knows and defeat the double-submit / synchronizer check
+(mass-assignment defense). `userId` / `role` and adopter preference keys remain
+writable (they are the login primitive).
+
+**Worked example — login (establishes a session):**
+
+```scrml
+${ server function authenticate(email, password) {
+    let user = ?{`SELECT id, role FROM users WHERE email = ${email}`}.get()
+    if (!user || !verifyPassword(password, user.password_hash))
+        fail AuthError::InvalidCredentials
+    session.set("userId", user.id)   // mints scrml_sid + writes the record +
+    session.set("role", user.role)   // one Set-Cookie: scrml_sid=…; HttpOnly
+} }
+```
 
 **Worked example — valid:**
 
@@ -14559,9 +14762,9 @@ is reachable only from a server-escalated function — give `getUser` a server r
 
 | Code | Trigger | Severity |
 |---|---|---|
-| E-SCOPE-010 | Developer declares a variable with a reserved binding name (`route`, `session`) | Error |
-| E-SCOPE-011 | Access to an undeclared route parameter name | Error |
-| E-SCOPE-012 | `session` accessed inside a non-server-escalated function | Error |
+| E-SCOPE-010 | Developer declares a variable with a reserved binding name (`route`, `session`) **(the reserved-binding trigger is spec-ahead, S265 — not fired for `route`/`session`; E-SCOPE-010 currently fires only for a DUPLICATE file-scope `let`/`const`)** | Error |
+| E-SCOPE-011 | Access to an undeclared route parameter name **(Reserved / spec-ahead, S263 — no fire site: the undeclared-route-param check is spec-ahead — `route.params` is not typer-supported for pages and no param-name allow-list exists. Excluded from the freeze fireable set.)** | Error |
+| E-SCOPE-012 | `session` accessed outside a server-escalated function body **(LIVE, S265 (i29e) — the §20.5 server `session` builtin is built; bare `session` is bound into server-escalated scopes (and auto-escalates its enclosing function), so a `session` reference that is NOT server-escalated — e.g. top-level `${ }` logic — fires this. Distinct from the `@session` client projection.)** | Error |
 
 ---
 
@@ -16946,7 +17149,7 @@ Compiled CSS:
 
 ### 25.7 `<theme>` tokens lower to §25 custom properties (Nominal — §65.3.2)
 
-A §65 `<theme>` block of named values is the **blessed** named-value channel; it **lowers to §25 CSS custom properties** — a `<theme>` binding `brand = #2563eb` emits `:root { --brand: #2563eb; }` and a use-site reference `color: brand` emits `color: var(--brand)`, reusing exactly the §25.2/§25.3 machinery. This **unifies** token-flow with custom-property inheritance (one mechanism): the token *inherits* as a value (§25.5's normal custom-property cascade) but *applies* only where explicitly referenced (§65.3.2 — no action at a distance). §25.5's "custom-property scoping follows normal CSS cascade rules" remains the raw substrate; `<theme>` is the checked, named surface over it. A token reference resolving to no in-scope `<theme>` is `E-THEME-TOKEN-UNKNOWN`.
+A §65 `<theme>` block of named values is the **blessed** named-value channel; it **lowers to §25 CSS custom properties** — a `<theme>` binding `brand = #2563eb` emits `:root { --brand: #2563eb; }` and a `@`-sigil use-site reference `color: @brand` emits `color: var(--brand)`, reusing exactly the §25.2 machinery. This **unifies** token-flow with custom-property inheritance (one mechanism): the token *inherits* as a value (§25.5's normal custom-property cascade) but *applies* only where explicitly `@`-referenced (§65.3.2 — no action at a distance). §25.5's "custom-property scoping follows normal CSS cascade rules" remains the raw substrate; `<theme>` is the checked, named surface over it. The `@` sigil is shared with this section's reactive-CSS-var bridge (`@name` → `var(--scrml-name)` for a reactive cell): membership disambiguates — a `@name` matching a `<theme>` token lowers to `var(--name)`, otherwise the reactive-cell bridge. A `@name` reference resolving to neither a `<theme>` token nor a declared cell is `E-THEME-TOKEN-UNKNOWN` (§65.3.2 — the decidable use-site check).
 
 ---
 
@@ -17811,13 +18014,13 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | Code | Section | Trigger | Severity |
 |---|---|---|---|
 | E-CTX-001 | §3.2 | Wrong closer for context type | Error |
-| E-CTX-002 | §3.2, §4.4 | `</>` or `</tagname>` closer used inside a `${ }` logic context | Error |
+| ~~E-CTX-002~~ | §3.2, §4.4 | **Retired 2026-07-16 (S263).** The impl's E-CTX-002 slot documented the bare-`/` closer syntax removed 2026-04-09 (§4.8) — dead. The closer-in-logic well-formedness rule (a `</>`/`</tagname>` closer inside `${ }`) is not fired as a dedicated code; on the default pipeline it surfaces as **E-CTX-003** (the logic context fails to close) or is recovered. Triage: `scrml-support/docs/audits/s34-catalog-vs-impl-2026-07-16.md`. | — |
 | E-CTX-003 | §3.2 | Unclosed context at end of file or before outer closer. **Scoping note (S111 — quoted-text model):** `:`-shorthand-vs-full-body shape confusion in a code-default body (engine state-child / match arm) surfaces as this code — a `:`-shorthand body wrongly scanned as a full body hunts a non-existent closer and reaches EOF / an outer closer. Under §4.18 / §4.14 the `:`-shorthand body is a within-body construct bounded by `:` and the opener's `>` (no closer); correct `:`-shorthand recognition prevents this misfire. The code's fire condition is otherwise unchanged. | Error |
 | E-TYPE-001 | §14.3, §18.4 | Type mismatch (lifecycle field, match arm type conflict) | Error |
 | E-TYPE-006 | §18.8.2 | Non-exhaustive match over union type | Error |
-| E-TYPE-010 | §3.3, §10.2 | `${ }` result not coercible to markup in markup parent | Error |
-| E-TYPE-011 | §3.3, §10.2 | `${ }` result not coercible to CSS class in style parent | Error |
-| E-TYPE-012 | §10.4 | Heterogeneous `lift` values not mutually coercible | Error |
+| E-TYPE-010 | §3.3, §10.2 | `${ }` result not coercible to markup in markup parent **(Reserved / spec-ahead, S263 — no fire site: no static lift→markup-parent coercion type-check exists — a designed-but-unbuilt subsystem, v-next per the S263 ruling. Excluded from the freeze fireable set.)** | Error |
+| E-TYPE-011 | §3.3, §10.2 | `${ }` result not coercible to CSS class in style parent **(Reserved / spec-ahead, S263 — no fire site: the same unbuilt lift→parent coercion type-check subsystem as E-TYPE-010, style-parent branch. Excluded from the freeze fireable set.)** | Error |
+| E-TYPE-012 | §10.4 | Heterogeneous `lift` values not mutually coercible **(Reserved / spec-ahead, S263 — no fire site: no lift-value type-unification check is built — the same unbuilt coercion-check subsystem as E-TYPE-010/011. Excluded from the freeze fireable set.)** | Error |
 | E-TYPE-020 | §14.6, §18.8.1 | Non-exhaustive match over enum type | Error |
 | E-TYPE-021 | §18.7 | Payload arity mismatch in positional destructuring | Error |
 | E-TYPE-022 | §18.7 | Named binding references nonexistent payload field | Error |
@@ -17854,7 +18057,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-TOOL-SERVE-AUTH-UNSUPPORTED | §64.9 | A `serve=` tool carries cookie-session auth at ANY locus — the program `auth="required"`/`auth="optional"` (§52.13) OR a per-channel `<channel auth="required"/"optional">` (§38.5). The headless serve-target has NO cookie session, so the routes / the §38 WS upgrade would emit with NO auth guard — FAIL-CLOSED (§49 no-silent-bad-output) rather than a silent unguarded server. Fires per offending locus. Bearer-token auth on a headless serve-target is a later unit. (S255 — server-program-shape Fork 1A, §64.9.) | Error |
 | E-TOOL-SERVE-MAIN-EXITS | §64.9 | A `serve=` tool's `function main` declares a return type. The §64.3 exit-harness (`process.exit(code)`) would kill the live serve-harness the moment `main` returns; a composing `main` MUST be no-return setup that runs BEFORE the serve-harness holds the process. Drop `main`'s return type. (S255 — server-program-shape Fork 1A, §64.9.) | Error |
 | E-TOOL-ROUTE-NEEDS-SERVE | §64.1 | An `<endpoint>` (§61) or SSE `server function* route=` (§37) appears in a `kind="tool"` program with NO `serve=` listener to host it. A non-serve tool emits no `Bun.serve`, so the route would be silently un-hosted (the tool appears to define an API but serves nothing) — FAIL-CLOSED (§49 no-silent-bad-output). Add `serve=PORT` (§64.9), or remove the route. (S255 — server-program-shape Fork 1A.) | Error |
-| E-PROGRAM-001 | §4.12 | Circular `<program>` nesting detected | Error |
+| E-PROGRAM-001 | §4.12 | Circular `<program>` nesting detected **(Reserved / spec-ahead, S263 — no fire site: circular `<program>` nesting is unconstructable-by-construction — a lexical tree cannot contain itself and there is no include/inline mechanism; defensive guard, condition unreachable. Excluded from the freeze fireable set.)** | Error |
 | W-PROGRAM-TITLE-NESTED | §40.7 | A documentary attribute (`title=`, `description=`, `version=`, `author=`, `license=`) appears on a nested `<program>`. Documentary attributes are meaningful only at the top level (HTML `<head>` semantics); workers have no DOM `<head>`. Move the attribute to the top-level `<program>` or remove it. (Phase A1a) | Warning |
 | E-STORY-UNKNOWN | §58.9 | A `story="<name>"` attribute on a nested `<program>` references a `<name>` with no corresponding `[story.<name>]` entry in the project manifest (`scrml.toml`). Declare the build story in the manifest's `[story]` table, or correct the name. (S118 — Build Story, §58) | Error |
 | W-STORY-ON-TOP-LEVEL | §58.8 | A `story=` attribute appears on the top-level `<program>` (§40.8). The attribute is ignored — the top-level build story is owned exclusively by `[story] default` in `scrml.toml`. Remove the attribute, or set the project default in the manifest. (S118 — Build Story, §58) | Warning |
@@ -17870,7 +18073,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | W-LOG-SHADOWED | §20.6.7 | A user-declared in-scope binding named `log` (the canonical no-op debugging stub `function log(...)`, or any local/import named `log`) shadows the location-transparent `log()` builtin (§20.6). The builtin steps aside and the call is emitted as an ordinary call to the user's `log`; the side/`file:line` origin tag and dev unified-view forwarding are NOT applied. Surfaces so the author knows the builtin is inactive for that name. `log` is NOT a reserved identifier (declaring `function log` is legal — this lint, not `E-RESERVED-IDENTIFIER`). Partitions into `result.warnings` (non-fatal). Reserved for promotion to `E-LOG-SHADOWED` end-of-window once shadowing declarations migrate. (S174 — ratified S173, deep-dive `log-location-transparency-2026-06-07.md` Open-Q3.) | Info |
 | W-RENDER-SHADOWED | §20.3a | A user-declared `function render` / `fn render` (or any in-scope binding named `render`) shadows the `render()` client component-render call built-in. The built-in steps aside; `render(...)` resolves to the user function (the §47 name-encoding + `fnNameMap` post-pass rewrite the call site to the encoded user-fn name, so def and call agree). Without the yield the hijack emitted `_scrml_render` directly — a name the word-boundary post-pass cannot repair — causing a def/call mismatch + runtime ReferenceError. Surfaces so the author knows the built-in is inactive for that name. `render` is NOT a reserved identifier (the hard-reserved client identifier is `reset`); this lint, not `E-RESERVED-IDENTIFIER`. Partitions into `result.warnings` (non-fatal). Mirrors `W-LOG-SHADOWED`. (Catalog addition ss16 C3; emitted at `compiler/src/type-system.ts` `checkRenderShadowing`.) | Info |
 | W-PRINT-SHADOWED | §20.7.5 | A user-declared `function print` / `fn println` (or any in-scope binding named `print` / `println`) shadows the clean-stdout `print()` / `println()` builtin (§20.7). The builtin steps aside; `print(...)` / `println(...)` resolves to the user function (the §47 name-encoding + `fnNameMap` post-pass rewrite the call site to the encoded user-fn name, so def and call agree — as for `render()`) and does NOT write host stdout. Surfaces so the author knows the builtin is inactive for that name. Name-precise: a `function print` shadows only `print`, leaving the `println` builtin active. `print` / `println` are NOT reserved identifiers (declaring `function print` is legal — this lint, not `E-RESERVED-IDENTIFIER`). Partitions into `result.warnings` (non-fatal). Reserved for promotion to `E-PRINT-SHADOWED` end-of-window once shadowing declarations migrate. Mirrors `W-LOG-SHADOWED`. (S241 — SPEC §20.7; emitted at `compiler/src/type-system.ts` `checkPrintShadowing`.) | Info |
-| W-RCDATA-BIND-VALUE-CONTENT-CONFLICT | §24 | A `<textarea>` (an RCDATA-content element) declares BOTH `bind:value=@cell` (two-way binding) AND reactive `${...}` content. These are two competing writers to the element's value; `bind:value` wins (the canonical two-way form, §5.4/§6.2) and the reactive content interpolation is dropped (NOT double-bound; no `<span data-scrml-logic>` leak into the RCDATA content). Surfaces so the author knows the content interp is inactive. Background: a reactive `${...}` in a `<textarea>`'s RCDATA content compiles to a reactive `.value` bind (not a placeholder span, which would render as literal text — 6nz-F4); when `bind:value` is also present the content bind is redundant. (S241 — 6nz-F4 RCDATA `.value`-bind carve-out; emitted at `compiler/src/codegen/emit-html.ts`.) | Info |
+| W-RCDATA-BIND-VALUE-CONTENT-CONFLICT | §24 | A `<textarea>` (an RCDATA-content element) declares BOTH `bind:value=@cell` (two-way binding) AND reactive `${...}` content. These are two competing writers to the element's value; `bind:value` wins (the canonical two-way form, §5.4/§6.2) and the reactive content interpolation is dropped (NOT double-bound; no `<span data-scrml-logic>` leak into the RCDATA content). Surfaces so the author knows the content interp is inactive. Background: a reactive `${...}` in a `<textarea>`'s RCDATA content compiles to a reactive `.value` bind (not a placeholder span, which would render as literal text — 6nz-F4); when `bind:value` is also present the content bind is redundant. (S241 — 6nz-F4 RCDATA `.value`-bind carve-out; emitted at `compiler/src/codegen/emit-html.ts` as `CGError(…, "warning")`. S260 §34-vs-impl audit: severity corrected Info→Warning — the impl explicitly emits a warning, so no case could ever pin it as "info".) | Warning |
 | E-SQL-004 | §8.1.1 | `?{}` block has no `db=` declaration in any ancestor `<program>` | Error |
 | E-SQL-005 | §8.1.1 | Unrecognized database connection string prefix in `db=` attribute | Error |
 | E-ASYNC-STDLIB-IN-SYNC-CALLBACK | §13.2 | A Promise-returning stdlib call (`scrml:auth` `verifyPassword`/`hashPassword`, `scrml:crypto`, `scrml:redis`, `scrml:http`, …) appears in a **server** function in a position where the compiler CANNOT insert `await`: a synchronous `.some`/`.find`/`.filter`/`.map` callback body, a nested lambda, or a parameter default (`await` is illegal in all three — a sync callback yields values, not Promises, and a default is evaluated eagerly). scrml has no source `await` (§13.1), so the compiler auto-awaits Promise-returning stdlib calls in awaitable positions (§13.2) — but a **bare** emission here returns an unawaited Promise, which is **always truthy**: `hashes.some(h => verifyPassword(pw, h))` accepts EVERY password (an accept-all auth bypass). **FAIL-CLOSED** — a hard compile error rather than a silent security leak (§49 no-silent-bad-output). Resolution: restructure so the call runs in the server function's async body — e.g. hoist it into a `for` loop (`for (const x of xs) { const r = verifyPassword(…); … }`). The async-stdlib sibling of the peer-server-fn `E-SERVER-FN-IN-SYNC-CALLBACK`. (Issue #26 Finding-2 — S239 adversarial review of the auth-bypass auto-await fix; emitted at `compiler/src/codegen/emit-server.ts`.) | Error |
@@ -17895,19 +18098,19 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-DEPRECATED-SERVER-MODIFIER | §12.2, §52.10 | The `server` modifier on a function declaration is removed. Use a plain `function` declaration; route inference (§12.2) will classify the function based on its body content and call graph. Deprecation cycle endpoint: this code activates after the W-DEPRECATED-SERVER-MODIFIER deprecation window, when the parser stops accepting `server function` syntax. Mirrors the `<machine>` → `<engine>` deprecation cycle (W-DEPRECATED-001 → E-DEPRECATED-001). | Error |
 | W-DEAD-FUNCTION | §12.2 | A function is declared but called from neither a server-classified context nor a client-classified context, is not exported, is not server-annotated, and is not referenced from markup. The function will be tree-shaken from the output. Remove the declaration if intended dead, or wire it up to a caller. RI does not yet track all markup reference patterns; if the diagnostic is a false positive, exporting the function or adding an explicit caller suppresses it. **Fires:** emitted by RI (`compiler/src/route-inference.ts` Step 5d, D4) at the function's declaration site. Added 2026-05-08 (Insight 26 Batch 1) as the in-vacuum complement to caller-context propagation (Trigger 5). | Warning |
 | W-SERVER-IMPORT-UNEMITTED | §21, §12.2 | A compiled server bundle imports `from "./X.server.js"` but the import would fail at runtime: either (a) `X.scrml` has no server content so no `.server.js` is emitted (runtime `Cannot find module`), or (b) `X.server.js` IS emitted but does not export an imported name — e.g. a server-CALLED pure helper that route-infers into a handler (`auth.server.js` emits `export const __ri_route_rolePath`, not `export const rolePath`) → runtime missing-export. Non-fatal — green compile / `node --check` pass; the import only fails when the server bundle is RUN (the "compiled-green ≠ works" class). Companion to the emit-server tree-shake (`g-pure-module-server-emit` Fix A) which prunes the client-only-used import; this cross-file invariant catches the residual server-USED shapes emit-server cannot see (it has no sibling-emission knowledge). **Fires:** post-emit cross-file scan over `cgResult.outputs` in `compiler/src/api.js` (S208, Fix B). | Warning |
-| E-TYPE-030 | §14.7, §15.2 | `asIs` value used past resolution requirement | Error |
+| E-TYPE-030 | §14.7, §15.2 | `asIs` value used past resolution requirement **(Reserved / spec-ahead, S263 — no fire site: the `asIs` resolution-obligation tracker, analogous to the built `lin`/`~` tracker, is unbuilt. Excluded from the freeze fireable set.)** | Error |
 | E-TYPE-031 | §15.3, §15.10 | Prop value fails declared type constraint | Error |
 | E-TYPE-ANY-FORBIDDEN | §14.1.1 | The literal type-token `any` appears in a type-annotation position (struct / error / enum-variant-payload / tuple field, type-alias RHS, state-cell annotation, `fn`/`function` parameter or return type, and the recursive leaf positions). `any` is not a scrml type — there is no `any` (S174 hard line; TypeScript's type-checking opt-out has no scrml equivalent). Use a concrete type, or `asIs` for a deliberate, named untyped escape hatch. Symmetric with `E-TYPE-UNKNOWN-NAME` (§14.1.2) — an undefined type NAME is rejected at the identical loci via the same locus traversal. (Catalog addition S174; loci broadened S174 follow-on; emitted at `compiler/src/type-system.ts` `checkAnyTypeForbidden`.) | Error |
 | E-TYPE-UNKNOWN-NAME | §14.1.2 | An unrecognized (typo'd or undefined) type NAME appears in a type-annotation position — the SAME loci as `E-TYPE-ANY-FORBIDDEN` (struct / error / enum-variant-payload / tuple field, type-alias RHS, state-cell annotation, `fn`/`function` param + return, and recursive leaf positions: inline-struct field, array element, map VALUE, union member, snippet param, lifecycle post-type). The name resolves against the file's `typeRegistry` per §53.14.5 (forward-reference-safe placeholder pass); cross-file imports resolve via §21.8 / the §21.3 imported-types seed, and an imported specifier name is exempt even in single-file mode. `asIs` is the never-fires escape hatch. Carve-outs: a map KEY is owned by `E-MAP-KEY-NOT-COMPARABLE` (§59.4, no double-fire); a machine name (§51.3) and `<db>`-block-scoped annotations are exempt. Before this rule the name collapsed SILENTLY to `asIs` (the broader leak §14.1.1 deferred). Emitted at the decl-binding sites (NOT `resolveTypeExpr`, which is span-free) by `compiler/src/type-system.ts` `checkUnknownTypeNames` (run AFTER the imported-types seed). (Catalog addition S174 follow-on.) | Error |
-| E-TYPE-040 | §16.4 | Slot fill type incompatible with declared slot shape | Error |
+| ~~E-TYPE-040~~ | §16.4 | **Retired 2026-07-16 (S263).** Vestige of the pre-S39 whitespace-slot syntax (retired 2026-04-03 when §16 was rewritten); superseded by the snippet-prop codes **E-TYPE-070..073** / **E-COMPONENT-023**. Triage: `scrml-support/docs/audits/s34-catalog-vs-impl-2026-07-16.md`. | — |
 | E-TYPE-050 | §14.8.5 | Two tables produce the same generated type name | Error |
 | E-TYPE-051 | §14.8.5 | SQLite column type unmappable; typed `asIs` | Warning |
 | E-MARKUP-001 | §4.1 | Unknown HTML element name | Error |
-| E-MARKUP-002 | §4.4.1 | Explicit closer does not match open tag name (spec); attribute type mismatch on HTML element (implementation — collision, see H-03 audit note) | Error |
-| E-MARKUP-003 | §4.4.1 | `</tagname>` closer used inside a `${ }` logic context | Error |
-| E-MARKUP-004 | §4.4.2 | `</>` closer used inside a `${ }` logic context | Error |
-| E-STATE-001 | §4.2 | Unrecognized state identifier | Error |
-| E-SYNTAX-001 | §10.4 | `lift` outside any `${ }` logic context | Error |
+| ~~E-MARKUP-002~~ | §4.4.1 | **Retired 2026-07-16 (S263).** Closer name-mismatch is now **E-CTX-001** (§4.4.1 amended to impl#1's live code). The attribute-type-mismatch meaning was a dead impl squatter (`validateMarkupAttributes`, `type-system.ts` — never invoked: the caller-guard reads `n.name`, always `undefined` for a markup node whose name is `n.tag`) that would false-fire on all valid numeric/boolean HTML; HTML attribute-type validation is aspirational **E-HTML-003** (§24.2). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
+| ~~E-MARKUP-003~~ | §4.4.1 | **Retired 2026-07-16 (S263).** A `</tagname>` explicit closer inside a `${ }` logic context surfaces as **E-CTX-003** (unclosed logic context) on the default pipeline; the SPEC's dedicated E-CTX-002 closer-in-logic code is itself retired S263; this row was a phantom duplicate (no emitter). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
+| ~~E-MARKUP-004~~ | §4.4.2 | **Retired 2026-07-16 (S263).** A `</>` inferred closer inside a `${ }` logic context surfaces as **E-CTX-003** (unclosed logic context) on the default pipeline; the SPEC's dedicated E-CTX-002 closer-in-logic code is itself retired S263; this row was a phantom duplicate (no emitter — the `</>` twin of the retired E-MARKUP-003 closer-in-logic row). Consistency follow-through on the S261 E-MARKUP retire (the audit enumerated only E-MARKUP-003). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
+| ~~E-STATE-001~~ | §4.2 | **Retired 2026-07-16 (S263).** Duplicate/vestige — under state-as-primary resolution (§4.3), "unrecognized state identifier" and "unknown element" are one failure: a PascalCase name surfaces as **E-COMPONENT-035**, a lowercase-HTML name as **E-MARKUP-001** (a separately-tracked hole). No distinct E-STATE-001 niche remains. Triage: `scrml-support/docs/audits/s34-catalog-vs-impl-2026-07-16.md`. | — |
+| E-SYNTAX-001 | §10.4 | `lift` outside any `${ }` logic context **(Reserved / spec-ahead, S263 — no fire site: `lift` is lexed as a keyword ONLY inside logic contexts; elsewhere it is plain text, so the condition is unreachable-by-construction. The reachable misuse — `lift` in a bare `function` — is owned by the live E-SYNTAX-002. Excluded from the freeze fireable set.)** | Error |
 | E-SYNTAX-002 | §10.4 | `lift` inside a function body | Error |
 | E-SYNTAX-003 | §4.11.1 | `extract` in `lift` keyword position | Error |
 | E-SYNTAX-010 | §18.6 | `else` default arm is not the last arm | Error |
@@ -17918,18 +18121,22 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-ATTR-010 | §5.4 | `bind:` target is not an `@` reactive variable | Error |
 | E-ATTR-011 | §5.4 | `bind:` used on an unsupported attribute name | Error |
 | E-ATTR-012 | §5.4 | `bind:` and explicit event handler conflict on same element | Error |
+| E-ATTR-WRITER-CONFLICT | §5.5.3, §5.5.4 | A WHOLESALE reactive value writer — `class=(expr)` / `style=(expr)` (the whole attribute) or `value=(expr)` on a form control (the `.value` property) — shares a physical DOM surface with ANOTHER writer on the SAME element, so the wholesale write would silently erase the other's work on its next reactive evaluation. Detected pairs: `class=(expr)` with `class:name=` or transition classes (`className` surface); `style=(expr)` with `if=`/`show=` or transitions (`style`/`display` surface); `value=(expr)` with `bind:value` (`.value` surface). Axiom ① (bryan's #81 ruling): each physical DOM surface has at most one wholesale owner — the diagnostic names BOTH sites and the author picks one. The conflicting attribute is NOT emitted (byte-identical to pre-#81), so an ignored error degrades to the old behavior rather than a broken one. Generic string attributes (`title=`, `id=`, `alt=`, `data-*`) have no per-token composer form and are always sole writers. (Catalog addition S268 — #81 writer-ownership Axiom ①; emitted at `compiler/src/codegen/emit-html.ts` `analyzeWriterConflict`.) | Error |
 | E-ATTR-UNQUOTED-OPERATOR | §5.1, §17.1 | An unquoted attribute CONDITION (`if=`/`show=`/`else-if=`) contains a bare binary/ternary operator (`>= > < <= == != && \|\| + - * /` or ternary `?:`). An unquoted condition admits only the atomic forms (`@var` / `obj.prop` / `fn()` / prefix `!`); operator conditions SHALL be parenthesized `if=(expr)` or quoted `if="expr"`. Fires ONCE per offending attribute (cluster-A, S188 "reject + parens"). | Error |
 | E-SCOPE-001 | §5.2 | Unquoted identifier not resolvable in scope | Error |
-| E-SCOPE-010 | §20.4 | Developer declares variable with reserved binding name (`route`, `session`) | Error |
-| E-SCOPE-011 | §20.4 | Access to undeclared route parameter name | Error |
-| E-SCOPE-012 | §20.5 | `session` accessed in non-server-escalated function | Error |
-| E-REACTIVE-001 | §6.2 | `@variable` used before declaration | Error |
+| E-SCOPE-010 | §20.4 | Developer declares variable with reserved binding name (`route`, `session`) **(reserved-binding trigger spec-ahead, S265 — not fired; E-SCOPE-010 currently fires only for a DUPLICATE file-scope `let`/`const`)** | Error |
+| E-SCOPE-011 | §20.4 | Access to undeclared route parameter name **(Reserved / spec-ahead, S263 — no fire site: the undeclared-route-param check is spec-ahead — `route.params` is not typer-supported for pages and no param-name allow-list exists. Excluded from the freeze fireable set.)** | Error |
+| E-SCOPE-012 | §20.5 | `session` accessed outside a server-escalated function body **(LIVE, S265 (i29e) — the §20.5 server `session` establishment builtin is built; bare `session` is bound into server-escalated scopes and auto-escalates its enclosing function, so a `session` reference that is NOT server-escalated (e.g. top-level `${ }` logic) fires this. Distinct from the `@session` client projection.)** | Error |
+| E-SESSION-CONTEXT | §20.5.1 | `session.*` used outside a web-app server route handler — an SSE `server function*`, an `<endpoint>` arm, a `<machine>` method, a serverLoad cell, an in-process server-fn helper called by another server function, or a headless `kind="tool"` program. Those contexts have no cookie-session request/response context. **(LIVE, S265/S239 i29e.)** | Error |
+| E-SESSION-VALUE | §20.5 | Bare `session` VALUE-use in a server-escalated body — `session` returned, assigned, passed as an argument, or otherwise read as a first-class value rather than as the object of a member (`session.userId`), index (`session["userId"]`), or call (`session.get`/`.set`/`.destroy`). `session` is a request-scoped accessor, not a value; a bare reference would emit a dangling `session` identifier (ReferenceError at request time). Fix: access a field or call an accessor. **(LIVE, S266 i29e — codegen emit-expr.ts:emitIdent, drained by emit-server.ts:generateServerJs.)** | Error |
+| E-SESSION-RESERVED-KEY | §20.5.1 | A LITERAL `session.set("csrfToken", …)` — `csrfToken` is a compiler-owned session key (the §40.2 server-authoritative CSRF synchronizer token). Writing it would let a caller pin the token to a known value and defeat the double-submit check (mass-assignment). Fix: remove the write; the compiler mints + persists the token (`userId`/`role` and preference keys remain writable). A DYNAMIC-key write with a runtime `csrfToken` key is refused at runtime (a no-op) by the emitted setter guard. **(LIVE, S266 i29e B5 — codegen emit-expr.ts:emitCall, drained by emit-server.ts:generateServerJs; runtime guard in emit-server.ts `_scrml_session_begin`.)** | Error |
+| ~~E-REACTIVE-001~~ | §6.2 | **Retired 2026-07-16 (S263).** Reactive cells are declaration-order-independent (hoisted), so `@variable` use-before-declaration is LEGAL, not an error. The reachable "undeclared cell" case is owned by **E-STATE-UNDECLARED**. Triage: `scrml-support/docs/audits/s34-catalog-vs-impl-2026-07-16.md`. | — |
 | E-REACTIVE-002 | §6.6.8 | Assignment to a `const <name>` derived reactive value | Error |
 | E-REACTIVE-003 | §6.6.9 | A WHOLLY server-escalated function reads a free client cell — a mutable `@var`, a `const <name>` derived, OR a §52 `<... server>` cell (all client-held). The server-mode rewrite lowers `@cell` to `_scrml_body["cell"]`, but a non-CPS server-fn client stub sends only declared params, so the value is NOT transported and resolves to `undefined` server-side. Read-side sibling of E-RI-002 (server fn *writes* a `@reactive` cell). Fires once per distinct cell. GATED on `cpsSplit === null` — a CPS-split fn MARSHALS its server-batch reads into the client stub (`emit-functions.ts`), so it is exempt (see W-SERVER-DERIVED-MARSHAL). Excludes: declared params (already marshalled), ambient `@session`/`@currentUser` (server-resolved singletons, §20.5 — never client-supplied), and channel cells (E-CHANNEL-SERVER-CELL-READ owns them). Fix: pass the cell as an explicit argument, or restructure so the server computes the value inside the `?{}`. Broadened S250 from the derived-only, never-fired SPEC-only draft (a fail-open); §52 correction (client-held, not server-resolved) per RULING THE SPLIT. Emitted by RI (`compiler/src/route-inference.ts`, `detectServerFreeClientCellReads`). | Error |
 | W-SERVER-DERIVED-MARSHAL | §6.6.9 | A CPS-split server round-trip (§19.9.9) MARSHALS a `const <name>` DERIVED read into the request body — the server receives the CLIENT-computed snapshot (`_scrml_body["<name>"]`), not a value it recomputed. This works (the value crosses the wire), but a client-computed aggregate is worth a trust nudge: validate it server-side before acting on it. Fires once per distinct derived cell. A marshalled raw `@var` form field is ordinary form data and marshals SILENTLY (no warning); a wholly-server derived read is the harder E-REACTIVE-003 (not transported at all). Emitted by codegen at the CPS stub `_scrml_body` builder (`compiler/src/codegen/emit-functions.ts`). Partitions into `result.warnings`. | Warning |
 | E-REACTIVE-004 | §6.6.5 | `flush()` called inside a derived expression | Error |
 | E-REACTIVE-005 | §6.6.10 | Circular dependency in the derived reactive graph | Error |
-| E-REFINEMENT-NO-DEFAULT | §6.2, §53 | A refinement-typed state-cell declaration with no RHS (Shape 4, §6.2) whose base canonical-empty VIOLATES the refinement predicate — e.g. `<x>: number(>0)` (the canonical empty `0` fails `>0`). A refined type with no predicate-satisfying canonical empty cannot be auto-defaulted. Resolution: provide an explicit initializer (`<x>: number(>0) = 1`). Refinement types whose canonical empty SATISFIES the predicate (`number(>=0)` → `0`) get the canonical empty with no error. The check is compile-time (the §53 predicate is statically evaluated on the literal canonical-empty). (S160 — Shape 4 generalization. SUPERSEDES E-DECL-NEEDS-INITIALIZER, which is RETIRED: every other no-RHS typed decl now resolves to a canonical empty or `not` per §6.2 Shape 4.) | Error |
+| E-REFINEMENT-NO-DEFAULT | §6.2, §53 | A refinement-typed state-cell declaration with no RHS (Shape 4, §6.2) whose base canonical-empty VIOLATES the refinement predicate — e.g. `<x>: number(>0)` (the canonical empty `0` fails `>0`). A refined type with no predicate-satisfying canonical empty cannot be auto-defaulted. Resolution: provide an explicit initializer (`<x>: number(>0) = 1`). Refinement types whose canonical empty SATISFIES the predicate (`number(>=0)` → `0`) get the canonical empty with no error. The check is compile-time (the §53 predicate is statically evaluated on the literal canonical-empty). (S160 — Shape 4 generalization. SUPERSEDES E-DECL-NEEDS-INITIALIZER for the refinement case, but does NOT retire it: E-DECL-NEEDS-INITIALIZER still fires for the `const`-derived no-RHS sub-case [a derived cell needs an expression — §6.2 closing parenthetical; see its own §34 row]. Every OTHER no-RHS typed decl resolves to a canonical empty or `not` per §6.2 Shape 4. S260: the earlier flat "RETIRED" wording was inaccurate.) | Error |
 | E-LIFT-001 | §10.5.2 | Concurrent `lift` calls in same logic block | Error |
 | E-PA-001 | §11.5 | `src=` file does not exist | Error |
 | E-PA-003 | §11.5 | Bun SQLite schema introspection failed | Error |
@@ -17971,8 +18178,8 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-META-004 | §22.11 | *Reserved* — number unallocated; preserved for search-hit stability. Do not reuse. | — |
 | E-META-009 | §22.11 | Nested `^{}` inside a compile-time `^{}` block | Error |
 | E-META-010 | §22.4, §22.11 | Reference to the reserved `compiler.*` namespace in a `^{}` block | Error |
-| E-PURE-001 | §33.4 | `pure` function contains a purity violation | Error |
-| E-PURE-002 | §33.4 | `pure` function calls a non-`pure` function | Error |
+| ~~E-PURE-001~~ | §33.4 | **Retired 2026-07-16 (S263).** Superseded by the **E-FN-001..009** family (§33.6 defines them as specialized subcategories of E-PURE-001); the `pure` modifier is deprecated language-wide (use `fn` — W-PURE-DEPRECATED). Triage: `scrml-support/docs/audits/s34-catalog-vs-impl-2026-07-16.md`. | — |
+| ~~E-PURE-002~~ | §33.4 | **Retired 2026-07-16 (S263).** Superseded by the **E-FN-001..009** family (§33.6); the `pure` modifier is deprecated language-wide (use `fn` — W-PURE-DEPRECATED). Triage: `scrml-support/docs/audits/s34-catalog-vs-impl-2026-07-16.md`. | — |
 | E-HTML-001 | §23.2 | Invalid attribute on known HTML element | Error |
 | E-HTML-002 | §24.2 | Content model violation (only in `strict` mode) | Error |
 | E-HTML-003 | §24.2 | Wrong type for HTML attribute | Error |
@@ -18059,7 +18266,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-LOOP-004 | §49.9 | `continue label` — label not found or not a loop | Error |
 | E-LOOP-005 | §49.9 | `break`/`continue` crosses function scope boundary | Error |
 | E-LOOP-006 | §49.9 | Duplicate label identifier within function scope | Error |
-| E-LOOP-007 | §49.9 | `while` used as expression without `lift`/`~` | Error |
+| E-LOOP-007 | §49.9 | `while` bound as a value (`let x = while(...)`); the §49.6.1 statement-`while` + `let result = ~` accumulator is the sole exception | Error |
 | W-ASSIGN-001 | §50.4 | `=` in condition position without double parentheses | Warning |
 | E-ASSIGN-001 | §50.9 | Declaration form (`let`/`const`/`lin`) in expression position | Error |
 | E-ASSIGN-002 | §50.9 | Type mismatch in chained assignment | Error |
@@ -18096,14 +18303,14 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-COMPONENT-035 | §15.14 | Post-CE invariant: residual `isComponent: true` markup node survived component expansion | Error |
 | E-DG-001 | §31 | Dependency graph: circular dependency in reactive graph | Error |
 | E-ERROR-008 | §19.2 | Error type variant uses reserved field name | Error |
-| E-MARKUP-003 | §24.1 | Unknown attribute on known HTML element | Error |
+| ~~E-MARKUP-003~~ | §24.1 | **Retired 2026-07-16 (S263).** Unknown-attribute-on-known-HTML-element is owned by **E-HTML-001** (§24.2, aspirational — VP-1 deliberately passes plain-HTML attributes through). The dead impl squatter (`validateMarkupAttributes`, `type-system.ts:7835/7842`) that carried this code would false-fire on scrml's own `if`/`else`/`each` directives (176 corpus files). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
 | E-MU-001 | §35 | Must-use: return value of `!` function not captured | Error |
 | E-PA-002 | §11.3 | Protect analyzer: invalid `protect=` syntax | Error |
 | E-PARSE-001 | §4 | Parse error: unexpected token in block structure | Error |
 | E-PARSE-002 | §4 | Parse error: unterminated block | Error |
-| E-STATE-004 | §11.1 | State type: duplicate field name | Error |
-| E-STATE-005 | §11.1 | State type: field type references unknown type | Error |
-| E-STATE-006 | §11.1 | State type: invalid field default value | Error |
+| ~~E-STATE-004~~ | §6 | **Retired 2026-07-16 (S263).** Unknown-attr-on-user-state-type never fired (dead `validateMarkupAttributes` — the caller-guard reads `n.name`, always `undefined`) and un-gating would false-fire on valid scrml-special attributes (`capabilities=`, `log=`, `cors=`) by consulting the html-elements registry instead of the authoritative VP-1 surface — reddening a valid-clean conformance case. Not viable 1.0 surface as written (bryan-ruled retire, S261). Whether V1 validates state-type attribute names at all — and if so under which code (folding into the VP-1 / E-ATTR family) — is deferred to v1.next. Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
+| E-STATE-005 | §6 | State type name collides with a built-in HTML element name — choose a different name for the state type. (S260 §34-vs-impl audit: pre-fold row = dead V4 field semantics citing folded §11.1 [→ §6]; rewritten to the shipping trigger. Emitted at `compiler/src/type-system.ts`.) | Error |
+| E-STATE-006 | §6 | Duplicate state type definition — a state type with this name is already defined. (S260 §34-vs-impl audit: pre-fold row = dead V4 field semantics citing folded §11.1 [→ §6]; rewritten to the shipping trigger. Emitted at `compiler/src/type-system.ts`.) | Error |
 | E-STYLE-001 | §9 | CSS: syntax error in `#{}` style block | Error |
 | E-TEST-001 | §~ | `~{}` test block: assertion failed | Test |
 | E-TEST-002 | §~ | `~{}` test block: unexpected error during execution | Test |
@@ -18120,6 +18327,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-APPLY-NON-INLINABLE-UTILITY | §26.8.2, §26.8.3 | (ss40 W2 — wired by the `@apply` expansion, `bug-1-tailwind-apply-2026-06-26`.) A token in an `@apply` directive (SPEC §26.8) whose registry output is NOT a single flat `.<token> { … }` rule — the multi-rule `prose` family (§26.6), a `::before`/`::after` pseudo-element utility, a combinator-selector utility (`space-x-4` → `.space-x-4 > :not([hidden]) ~ …`), or a `@media`-wrapped rule. Per §26.8.2 only bare single-rule utilities inline flat; inlining a non-single-flat-rule utility would drop its selector structure and apply its declarations to the wrong element. Fires once per offending token, anchored at the `@apply` directive's span. Detected by `resolveApplyToken` in `compiler/src/tailwind-classes.js` (the resolved CSS is inlinable IFF its selector is exactly the escaped class token and its body is brace-free); emitted by `renderApplyGroupedDeclarations` in `compiler/src/codegen/emit-css.ts`. Resolution: use the utility directly in a `class=` attribute instead. Partitions into `result.errors`. | Error |
 | E-STYLE-CONFLICT | §65.2, §65.2.1, §65.2.4 | (CSS Wave-1 — wired by the flat-specificity conflict checker, `css-wave1-conflict-checker-impl-2026-07-08`.) An UNCONDITIONAL same-property overlap on a **provably-shared** element between two **component-scope `#{}`** selector rules at the **same precedence level** — the styling analog of an exhaustive `match` (§18): scrml deletes specificity (§65.2), so the compiler refuses to silently pick a winner. Fires when two rules in one component's `@scope`-donut-bounded `#{}` both set the same property (e.g. a broad `button { color: … }` and a specific `.btn { color: … }` on a `<button class="btn">` in the component's markup), with no distinguishing condition (`:hover` / `[attr]` / `@media` / `@container` are deterministic LAYERS, §65.2.2, and do NOT fire; a same-axis overlap — both rules carrying the SAME state pseudo on a shared element — DOES fire here, §65.2.3). The checker resolves selectors against the KNOWN, bounded element set of the scope's static markup (co-location, §65.2.4), not an abstract selector intersection. **Wave-1 calibration carve-outs (§65.2.4 R1–R3) that do NOT fire hard:** R1 — a universal `*` / bare-root `html`/`body` rule is a LOWER LAYER (author-reset floor, §65.5), so an overlap with a class/id/specific rule is layered, not a conflict; R2 — a `class × class` base+modifier overlap (`.btn` + `.btn-op`) is SOFT in Wave 1 (its fix, ordered `style=[a,b]` §65.4.4, is a Wave-2 primitive), promoting to hard in Wave 2; a **program-level** `#{}` (the global escape hatch, no donut) never fires hard — it is soft-only (R3). Fail-closed pairs (functional `:not()`/`:has()`/`:is()`/`:where()`, sibling `+`/`~`, dynamic `<each>`/conditional markup, reactive `class:NAME=@cond` toggles) surface the soft `W-STYLE-CONFLICT-POSSIBLE` instead, never hard. The checker is `checkCssConflicts` in `compiler/src/codegen/css-conflict-check.ts`, run post-CE in `compiler/src/api.js` (Stage 3.4) over `collectCssBlocks` output; the diagnostic names both loci with `file:line`. Resolution: merge the two rules, give one a distinguishing condition, or narrow one selector so only one matches. Partitions into `result.errors`. | Error |
 | W-STYLE-CONFLICT-POSSIBLE | §65.2.4 | (CSS Wave-1 — wired alongside `E-STYLE-CONFLICT`, `css-wave1-conflict-checker-impl-2026-07-08`.) The FAIL-CLOSED soft residue of the §65.2 conflict checker: a same-property rule pair the checker can neither prove-disjoint NOR prove-shared-unconditionally, surfaced (err toward flagging the risk) as a **non-blocking** diagnostic that names both loci and asks for disambiguation — NOT the hard block. Fires for: a functional `:not()`/`:has()`/`:is()`/`:where()` selector the checker cannot decide; a sibling combinator (`+`/`~`) over a possibly-dynamic sibling set; a match only via `<each>`/conditional (dynamic) markup or a reactive `class:NAME=@cond` toggle (conditionally present — §65.2.4 reactive-toggle carve-out); a `class × class` base+modifier overlap (§65.2.4 R2, Wave-1-soft); and any provable LOCAL overlap in a **program-level** `#{}` scope (§65.2.4 R3 — the program escape hatch is soft-only and FILE-BOUNDED: it fires ONLY on a provable same-file overlap, never the cross-file firehose the literal unbounded reading would produce). Same-axis conditional overlaps (§65.2.3) in program scope or under R2 also surface here. Emitted by `checkCssConflicts` in `compiler/src/codegen/css-conflict-check.ts`; the `W-` prefix + `severity:"info"` partition it into `result.warnings` (non-fatal; CLI exit unchanged). Resolution: if the two rules can co-apply, disambiguate (merge, condition, or narrow a selector); otherwise the warning is a documented no-op for legitimately-disjoint-but-unprovable pairs. Partitions into `result.warnings`. | Info |
+| E-THEME-TOKEN-UNKNOWN | §65.3.2, §65.6, §65.10 | (CSS Wave-1 EMISSION — wired by the `<theme>` token lowering, `css-wave1-emission-2026-07-16`; the `@`-sigil use-site check ratified 2026-07-16.) Two decidable fires. **(a) USE SITE:** a `@`-sigil token reference in a `#{}` value (`color: @brand`) whose name resolves to **neither** an in-scope `<theme>` token **NOR** a declared reactive/derived cell. The `@` sigil makes this decidable + false-positive-free: a BARE identifier (`color: red`, `font-weight: bold`) is a literal CSS value and NEVER fires — a token can never shadow a CSS keyword. A `@name` matching a declared theme token lowers to `var(--name)`; a `@name` matching a declared cell keeps the §25 reactive-CSS-var bridge `var(--scrml-name)`; a `@name` matching neither is the unknown. **(b) VARIANT RE-BIND:** a `<theme>` variant (`.Dark { … }`) or `@media` auto-bind that re-binds a token name **absent from the GLOBAL base token set** (the union across every `<theme>` block, so a base+variant split across two `<theme for=@cell>` blocks is not falsely rejected) — per §65.6 a variant re-binds a SUBSET of the base; a variant-only token has no default-state value. Emitted by `lowerCssValueRefs` / `emitThemeCss` in `compiler/src/codegen/emit-theme-reset.ts` (run inside `generateCss`); the `E-` prefix partitions it into `result.errors`. Resolution: declare / spell-fix the token, drop the `@` for a literal value, or remove the variant re-bind. Partitions into `result.errors`. | Error |
 | E-NAME-COLLIDES-STATE | §6.1 | Local identifier declaration uses the same name as a registered state cell in scope. Local names cannot shadow state names. Example: `<count> = 0; ... let count = 5`. | Error |
 | E-STATE-UNDECLARED | §6.1.1, §6.1.2, §6.1.3 | S123 V-kill — bare `@name = expr` write inside a `fn`/`function`/user-written `${...}` body without a structural `<name>` declaration in scope. The canonical form `@name = expr` is a WRITE to a pre-declared cell, not a declaration; the auto-synth path (silent phantom-cell creation from bare writes) was retired at S123 per the auto-state-cell-synthesis deep-dive (`scrml-support/docs/deep-dives/auto-state-cell-synthesis-investigation-2026-05-23.md`). Exempts default-logic body-top auto-lift at `<program>`/`<page>`/`<channel>` (§40.8) and meta `^{...}` bodies (BUG-META-6 dependency) — both deferred to follow-up units. Fix: add `<name> = <init>` declaration before the write, or remove the `@` prefix if a local identifier was intended. **Read-side fire WIRED S192 at TS (post-CE relocation).** A bare `@name` read that resolves to NEITHER a reactive cell, NOR an `<each>`/`<tableFor>` loop local, NOR an import binding is also `E-STATE-UNDECLARED` — the silent-bug class that produced the 7 flagship `@currentCustomerEvents`/`@currentDriverEvents` typos at S192. The fire lives at the type-system stage (`compiler/src/type-system.ts`, the logic-expr ident walker), which runs POST-CE and rebuilds a complete `@name` resolution table over the expanded AST. This is the relocation the SYM-stage prototype's failure pointed to: SYM is the WRONG LAYER (it over-fires on `@`-names materialised POST-SYM — `<each>`/`<tableFor>` `@row` loop locals absent from the SYM AST; engine boot-`effect=` cells; cross-FILE channel cells inlined by CE §38.12). TS resolves ALL of these directly: the cross-file channel cell flows through CE inlining into TS's scopeChain (the SYM-stage Class-B channel-body scan is RETIRED — TS reaches the inlined channel decl directly); the engine `<machine name=UI>` lowercased read `${@ui}` resolves via the §51.0.C-canonicalised machineRegistry pre-bind; and the engine boot-`effect=` implicit cell (`@tasks = …` written in the raw-text opener effect, §51.0.H Form 3) resolves via a dedicated openerEffect-write pre-bind. A component-def `${@Name}` read (PascalCase `const Name = <markup>`, instantiated via `<Name/>`) CORRECTLY fires — symmetric with the existing bare-path `E-SCOPE-001`. The §51.0.C engine var-name canonicalisation LANDED S192 (register/read/codegen agree on the one canonical var name); S192 stage-1 closed the same-file registration gaps (legacy `const @name`→`const <name>` + deprecation-lint; `ref=@name` bindings registered; state-block bare-writes migrated). | Error |
 | E-WRITE-NOT-IN-LOGIC-CONTEXT | §40.8, §6.1.1, §6.2 | S123 Unit CC — companion to V-kill (catalog row above). Bare `@name = expr` write at the IMMEDIATE body-top of `<program>` / `<page>` / `<channel>` (the §40.8 default-logic-mode surface). Default-logic mode auto-lifts DECLARATIONS only (structural `<name> = expr`, structural derived `const <name> = expr`, `function`/`fn`, `type`, `let`/`const` locals, `import`); the bare V5-strict WRITE form `@name = expr` is NOT a declaration — writes ARE logic; logic goes in `${...}`. Per the S122 user-voice Option-2 ratification, this shape is normatively rejected. Fix: either (a) wrap in explicit logic block `${ @name = ... }`, or (b) convert to a structural declaration `<name> = ...`. **Discrimination:** Unit CC fires at the IMMEDIATE body-top only; bare writes nested inside a function body (`function f() { @x = 5 }`) or inside an explicit user-written `${...}` block at body-top are governed by V-kill (E-STATE-UNDECLARED above). `<db>` / `<state>` STATE-block bodies are NOT default-logic-mode loci and are NOT affected by THIS (hard) code — a bare `@x = init` directly in a state-block body surfaces the INFO-level `W-STATE-BLOCK-BARE-WRITE-DECL` (catalog row below) instead. **Per-file exemption:** `compiler/src/unit-cc-exemption-list.json` provides path-based suppression for the pre-S123 corpus; each adopter source file removes its own entry as migration completes (sunset is per-file, manual — file deletion does not auto-sunset because the files are adopter source, not scheduled deletion targets like V-kill's `compiler/native-parser/*.scrml` exemption). Companion to `E-STATE-UNDECLARED`; emitted at `compiler/src/symbol-table.ts` PASS 3 (`walkResolveAtNames`) state-decl arm on `_isUnitCCWrite`-tagged nodes. | Error |
@@ -18130,6 +18338,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-CELL-NO-RENDER-SPEC | §6.4 | `<varname/>` used as render-by-tag in markup, but the cell has no render-spec (Shape 1 plain cell or Shape 3 non-markup derived). Use `${@varname}` interpolation to display the value. | Error |
 | E-CELL-RENDER-SPEC-NOT-BINDABLE | §6.2 | Shape 2 declaration (`<name req> = <markup>`) where the RHS markup element is not bindable (e.g., `<div>`, `<span>`). Shape 2 requires a bindable form element. Use `const <name>` (Shape 3) for display-only markup cells. | Error |
 | E-DECL-RHS-INTERP-WRAPPED | §6.2 | A derived/state-cell declaration RHS is wrapped in a `${ }` logic block — `const <bad> = ${ @x }` (Shape 3) / `<bad> = ${ @x }` (Shape 1) / `const <bad>: T = ${ @x }` (typed). The canonical RHS is a BARE expression (§6.2 — the three RHS shapes are all bare expressions); the `${ }` wrapper is non-canonical at decl-RHS position (there is ONE canonical form — `limit-the-primitive`, §14.1.1). Resolution: remove the wrapper — write `const <bad> = @x`. Pre-fix the wrapped RHS collapsed to a bare `$` identifier → a misleading `E-SCOPE-001: Undeclared identifier `$`` cascade; this code fires INSTEAD and recovers by unwrapping (no spurious E-SCOPE-001). Fires for derived (`const <x>`), plain (`<x> =`), and typed (`<x>: T =`) structural decls in logic-block / default-logic position. (Catalog addition S190 cluster-c dog-food; emitted at `compiler/src/ast-builder.js` `tryParseStructuralDecl`.) | Error |
+| E-DECL-NEEDS-INITIALIZER | §6.2 | A `const`-derived cell with a type annotation and no RHS — `const <doubled>: int` or `const <items>: string[]` — has no expression to derive from. Shape 4's no-RHS canonical-empty default (§6.2 — `int`→0, `string`→"", `T[]`→[]) applies to PLAIN reactive cells ONLY; a derived (`const`) cell REQUIRES an initializer expression (§6.2 closing parenthetical, SPEC.md `A `const`-derived cell still requires an expression`). Resolution: `const <doubled>: int = @x * 2`, or drop `const` for a plain Shape-4 cell. The rule is UNCONDITIONAL over the annotation type — BOTH scalar and array const-derived forms fire (S260 ruling: the prior impl array-form exemption was removed). NOT retired (supersedes the older "RETIRED" note in the E-REFINEMENT-NO-DEFAULT row). Emitted at `compiler/src/ast-builder.js`. (S260 — uncatalogued-code backfill from the §34-vs-impl audit + the const-array ruling.) | Error |
 | E-RESERVED-IDENTIFIER | §6.8 | Local identifier shadows a reserved language keyword. Specific case: `function reset() {...}` or `fn reset {...}` shadows the `reset` keyword. | Error |
 | E-SYNTHESIZED-WRITE | §6.11 | Assignment to an auto-synthesized property (e.g., `@signup.isValid = false`). Synthesized validity surface properties are read-only. See §55 for full validity surface specification. | Error |
 | E-RESET-NO-ARG | §6.8 | `reset()` called with no argument. The `reset` keyword requires an explicit cell argument: `reset(@cell)` or `reset(@compound.field)`. | Error |
@@ -18282,7 +18491,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | W-LINT-014 | §10, §17 | A Svelte block directive was found (`{#if}`, `{:else}`, `{/if}`, `{#each x as y}`, `{#await}`, `{#key}`, `{:then}`, `{:catch}`). scrml's equivalents are `<el if=@cond>`, `for @items / lift … /`, and `<match>` blocks. (Ghost-pattern lint.) | Warning |
 | W-LINT-015 | §5 | A Svelte `{@html expr}` raw-HTML directive was found. scrml does not have a dedicated raw-HTML form; use `${ rawHtml(expr) }` inside markup if raw-HTML emission is required (and validate the source — raw HTML is an XSS vector). (Ghost-pattern lint.) | Warning |
 | E-ATTR-013 | §5.5.2 | `class:` directive right-hand side is invalid: a bare identifier (no `@`, no dot), a string literal where a boolean expression is required, or has no value. The `class:` directive requires a boolean expression (typically a reactive `@var` or `${...}` expression). (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js:1323, 1333, 1341, 1357`.) | Error |
-| E-DG-002 | §31 | Dependency graph: a reactive `@variable` is read in a context whose dependency wiring cannot be safely established (e.g., dynamic computed-key dependency that would defeat fine-grained reactivity). See §31 for the dependency-graph rules. (Catalog addition S78 audit; emitted at `compiler/src/dependency-graph.ts:1912`.) | Error |
+| E-DG-002 | §31, §22.6 | Dependency graph: a reactive `@variable` is **declared but never consumed** — no reader edge in any render or logic context (`readers.size === 0`). Resolution: remove the unused cell, or prefix with `_` to suppress. §22.6 fixes the consumption-keyed sense — a read inside a `^{}` runtime meta block counts as consumed. (S260 §34-vs-impl audit: CORRECTED — the S78-backfill row was wrong on BOTH severity [was Error] and trigger [was "read in a context whose wiring can't be established"], and its self-cite had drifted; impl + §22.6 + the three other consumption-keyed spec sites are authoritative. Emitted at `compiler/src/dependency-graph.ts:3191`.) | Warning |
 | E-SQL-006 | §44.3, §8.1.1 | `.prepare()` called on a `?{}` SQL result. `.prepare()` is removed in scrml — Bun.SQL manages caching internally. Use the canonical `?{ ... }.get()` / `.all()` / `.run()` chain instead. (Catalog addition S78 audit; emitted at `compiler/src/codegen/rewrite.ts:257`.) | Error |
 | E-SQL-008 | §8.1.1, §44.8 | `?{` SQL block has no matching `}` — unterminated SQL template, unterminated backtick template literal, or unmatched `${` interpolation inside the SQL body. Parser-stage hard error (F-SQL-001) replacing the prior silent-data-loss behaviour. (Catalog addition S78 audit; emitted at `compiler/src/expression-parser.ts:286, 322`; surfaced via `compiler/src/ast-builder.js:178, 1809`.) | Error |
 | E-COMPONENT-013 | §15.10 | `bind:propName` at the call site where `propName` is not declared as a `bind` prop in the target component's `props` block. Resolution: declare the prop with `bind`, or remove the `bind:` prefix at the call site. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts:1637`.) | Error |
@@ -18316,7 +18525,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-LIFECYCLE-018 | §28.3 | `<request>` element has no `id` attribute. The `id` is required so the request can be addressed and cancelled. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts:763`.) | Error |
 | W-LIFECYCLE-002 | §28.1 | `<timer>` has no body (self-closing form). A bodyless timer has no observable effect; the warning surfaces probable dead code. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts:684`.) | Warning |
 | W-LIFECYCLE-007 | §28.1 | `running=false` literal boolean on `<timer>` or `<poll>`. The literal-false form is useless — the element can never become un-paused without a reactive variable. Use `running=@flag` or remove the attribute. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts:669`.) | Warning |
-| E-LIN-005 | §35.5 | `let` / `const` / `lin` declaration shadows an in-scope `lin` variable of the same name. Shadowing a `lin` variable prevents the compiler from determining which binding a consumption refers to. Resolution: rename the new binding, or consume the outer `lin` variable before this declaration. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts:3355`. Supersedes the retired pre-2026-04 E-LIN-005 noted in §6.7.12.) | Error |
+| E-LIN-005 | §35.5 | `let` / `const` / `lin` declaration shadows an in-scope `lin` variable of the same name. Shadowing a `lin` variable prevents the compiler from determining which binding a consumption refers to. Resolution: rename the new binding, or consume the outer `lin` variable before this declaration. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts:7737` (`checkLinShadowing`). Supersedes the retired pre-2026-04 E-LIN-005 noted in §6.7.12.) | Error |
 | E-LIN-006 | §35.5 | `lin` variable consumed inside a deferred-execution markup body (`<request>` / `<poll>`) when the variable was declared outside that body. The compiler cannot prove dominance across the scheduling boundary, so the consumption may happen zero or multiple times. Resolution: declare the `lin` variable inside the deferred body, or pass a consumed value into the body. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts:6579, 6967`.) | Error |
 | E-INPUT-001 | §36 | `<keyboard>` element is missing the required `id` attribute. Without an id the keyboard state cannot be addressed and the element has no observable effect. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts:718-719`.) | Error |
 | E-INPUT-002 | §36 | `<mouse>` element is missing the required `id` attribute. Without an id the mouse state cannot be addressed. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts:718-719`.) | Error |
@@ -18420,7 +18629,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | W-USE-001 | §41.5 | Two `use` declarations bring the same name into markup scope. The later declaration wins; the warning surfaces the silent shadowing so the developer can confirm intent or rename. (Catalog addition S84 Wave 2 #5; full prose at §41.5 lines 17371, 17466.) | Warning |
 | W-IMPORT-001 | §21.3 | Two `import` statements import the same name into logic scope in the same file. The later import wins; the warning surfaces the silent shadowing. Resolution: rename one of the imports, or remove the duplicate. (Catalog addition S84 Wave 2 #5; full prose at §41.5 line 17468.) | Warning |
 | ~~E-EXHAUST-001~~ | §18 | **Retired 2026-03-27 (§18 TS-C-gate review).** The PIPELINE.md Stage 6 alias for the non-exhaustive-match-over-union case is now `E-TYPE-020`. All references replaced. (Catalog addition S84 Wave 2 #5; retirement note at §18 line 10023.) | — |
-| E-LIN-004 | §6.7.12, §35.5 | A `lin` variable is referenced inside a recurring or deferred execution context (`when` body, `<timer>` body, `<poll>` body, `animationFrame` callback, `<timeout>` body). The recurring-context form of E-LIN-002: a single textual reference in a callback that fires N times consumes the binding N times. (Catalog addition S84 Wave 2 #5; full prose at §6.7.12 line 4332 + §35.5 lines 4689-4690.) | Error |
+| E-LIN-004 | §6.7.12, §35.5 | A `lin` variable is referenced inside a recurring execution context (`when` body, `<timer>` body, `<timeout>` body, `animationFrame` callback). The recurring-context form of E-LIN-002: a single textual reference in a callback that fires N times consumes the binding N times. (`<poll>` and `<request>` are DEFERRED contexts → **E-LIN-006**, not recurring — corrected S263 to match impl `type-system.ts:17077` + §35.5 + the E-LIN-006 row @18321.) (Catalog addition S84 Wave 2 #5; full prose at §6.7.12 line 4332 + §35.5 lines 4689-4690.) | Error |
 | E-PROG-001 | §40 | A `<program>` element has an ambiguous attribute combination — the compiler cannot decide the execution context (e.g., a worker-shaped attribute combined with a route-shaped attribute). (Catalog addition S84 Wave 2 #5; full prose at §40 line 18036.) | Error |
 | E-PROG-002 | §40 | A `<program>` element is missing a required attribute for its detected execution context (e.g., a route-context program with no `name=`, a worker-context program with no entry point). (Catalog addition S84 Wave 2 #5; full prose at §40 line 18037.) | Error |
 | E-PROG-003 | §40.4 | A reference inside a nested `<program>` reaches a parent-scope binding. Nested programs are fully isolated — no bindings, types, `use`, or `import` declarations propagate across the `<program>` boundary. Resolution: declare the binding inside the nested program, or import it via a `use foreign:` declaration. (Catalog addition S84 Wave 2 #5; full prose at §40 line 17980.) | Error |
@@ -18442,9 +18651,10 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-CG-012 | §47.6 | A user-authored scrml identifier (or vanilla JS identifier in a `_{}` foreign block) matches the compiler-reserved encoded-name pattern (`_` + kind char + 8 base36 chars). The `_` prefix is reserved for compiler-generated names. Resolution: rename the identifier. (Catalog addition S84 Wave 2 #5; full prose at §47.6 line 18301.) | Error |
 | E-CG-013 | §47.6 | The codegen type-encoding function received a `ResolvedType` with `kind: "unknown"`. PIPELINE.md §Stage 6 and §Stage 8 preconditions exclude this case; reaching the encoder with kind:"unknown" indicates an internal invariant violation. (Catalog addition S84 Wave 2 #5; full prose at §47.6 line 18323.) | Error |
 | E-CG-016 | §47 | A page-local `type X:enum` is referenced inside a server-boundary function body (so it needs a runtime `const X = Object.freeze({...})` in the server bundle, per §14.4 / Bug-51), but the chosen name `X` collides with another top-level binding the compiler injects into the server bundle — most commonly the `import { SQL } from "bun"` runtime handle (and its `_scrml_sql*` DB handles) emitted for a page that uses a `<db>` / `<program db=>` scope and a `?{}` query. The generated server bundle cannot declare `X` twice; without this guard the duplicate declaration surfaces downstream as a cryptic `E-CODEGEN-INVALID-LOGIC` (`Identifier 'X' has already been declared`) on otherwise-valid scrml. Resolution: rename the enum to a name that does not clash with a compiler-reserved server binding (e.g. `SQL` is reserved when the page uses a `<db>` / `?{}` query). The sibling of E-CG-012 (author identifier vs the compiler-reserved `_`-prefix pattern), in the server-bundle-injected-binding direction. (Catalog addition giti-bug51-server-bundle-enum-emission-2026-06-23; emitted by codegen at `compiler/src/codegen/emit-server.ts:generateServerJs`.) | Error |
-| E-ROUTE-002 | §12.4 | A server-classified function body contains a call to a client-only API (DOM, browser-only `scrml:*` module, `animationFrame`, etc.) OR references a client-only import. The compiler error message identifies the specific violation. (Catalog addition S84 Wave 2 #5; full prose at §12.4 lines 6415-6418.) | Error |
+| E-ROUTE-002 | §12.4 | A server-classified function's static call graph contains a direct or transitive call to a client-only function — one route analysis places exclusively on the client because it accesses a DOM-only global (`document` / `window`). The message identifies the server fn, the client-only callee, and the call chain. ENFORCED S263 (was SPEC-only; wired in route-inference as the mirror of the §12.2 server-escalation triggers — a client-pin classification + call-graph reject). Detection is deliberately conservative: DOM roots `document`/`window` only (not `navigator`/`localStorage`/`sessionStorage`, which a host may provide), ExprNode-only (string-literal-safe), scope-aware (a local/param/import of the name is a domain object, not the global). (Catalog addition S84 Wave 2 #5; full prose at §12.4.) | Error |
 | E-ROUTE-003 | §12.5 | A server function's return type is not JSON-serializable (functions, markup / DOM nodes, snippets, engines, state objects). Server-function return values cross the network boundary; only JSON-shaped values can be transmitted. ENFORCED S179 (was SPEC-only; now wired in the type pass). (Catalog addition S84 Wave 2 #5; full prose at §12.5.3.) | Error |
 | E-ROUTE-004 | §12.5 | A server function's PARAMETER type is not JSON-serializable (a function, markup / `html-element`, snippet, engine / machine, or live state object — possibly nested in a struct field, array element, union member, or map value). Arguments to a server function cross the client→server network boundary and are serialized as JSON (§12.3); a non-serializable value cannot be transmitted. The companion of E-ROUTE-003 in the parameter direction. (Catalog addition S179; full prose at §12.5.3.) | Error |
+| E-ROUTE-005 | §12.4 | A SINGLE function's own body accesses BOTH a server-only resource (a §12.2 escalation trigger — `?{}` SQL, a protected field, a server-only import) AND a client-only DOM global (`document` / `window`), making it *unplaceable*: route analysis can assign it to neither side (a server context has no DOM global; a client context cannot reach the server-only resource). Distinct from E-ROUTE-002 (a server fn *calling* a separate client-only fn) — the contradiction is inside one function body. The message identifies the fn, the server trigger, and the client access, and suggests splitting it (server-only work in a server fn; DOM access in a client fn that calls the server one). Without this the DOM code silently shipped server-side (runtime `ReferenceError`). (Catalog addition S263; full prose at §12.4.) | Error |
 | E-USE-003 | §41.5 | A `use` declaration names an export that does not exist in the target module. (Catalog addition S84 Wave 2 #5; full prose at §41.5 line 17413.) | Error |
 | E-USE-004 | §41.5 | A `vendor:` (or `scrml:`) specifier in a `use` declaration does not resolve to any module on disk. (Catalog addition S84 Wave 2 #5; full prose at §41.5 lines 17422, 17548.) | Error |
 | E-USE-006 | §41.5 | A `use` declaration brings a name into scope that collides with a built-in HTML element name (e.g., `use scrml:ui { button }`). User-defined names that shadow HTML elements are never valid. Distinct from `E-NAME-001` (component-decl form). (Catalog addition S84 Wave 2 #5; full prose at §41.5 line 17510.) | Error |
@@ -18467,8 +18677,8 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-ENGINE-011 | §51.5 | A type-level effect block references a reactive variable outside the governed enum type's file scope. Type-level transitions cannot reach across files for the side effect. Resolution: hoist the effect to a `<machine>`/`<engine>` declaration that owns the reactive variable, or restructure the cross-file dependency through a server function. (Catalog addition S84 Wave 2 #5; full prose at §51.5 line 21901.) | Error |
 | E-ENGINE-012 | §51.5 | Machine binding declared on a struct field (e.g., `@form.status`). Not yet supported in v1 — bind the enclosing `@var` instead and project field-level state through the machine variable. (Catalog addition S84 Wave 2 #5; full prose at §51.5 lines 22602, 23014.) | Error |
 | E-ENGINE-001-RT | §51.5.1 | Runtime: a runtime-thrown illegal-transition error from `E-ENGINE-001` — the statically-unknowable from-state was illegal under the machine's rules. Carries the labeled-guard failure detail in the message. (Catalog addition S84 Wave 2 #5; full prose at §51.5 lines 21916, 22175, 22195.) | Runtime |
-| E-SQL-001 | §8.1 | The compiler-emitted output contains `${...}` string interpolation inside a SQL template string. This is a compiler defect, not user error — the developer cannot write this in scrml source; all `${}` interpolations in a `?{}` block are rewritten to bound parameters. Surfaced if a compiler pass produces non-conformant output. (Catalog addition S84 Wave 2 #5; full prose at §8.1 lines 5376, 5521.) | Error |
-| E-SQL-002 | §8.1.1 | A SQL template string (after `?N` placeholder substitution) is syntactically invalid SQL. Validated at compile time against the driver's parser. (Catalog addition S84 Wave 2 #5; full prose at §8.1.1 line 5597.) | Error |
+| E-SQL-001 | §8.1 | The compiler-emitted output contains `${...}` string interpolation inside a SQL template string. This is a compiler defect, not user error — the developer cannot write this in scrml source; all `${}` interpolations in a `?{}` block are rewritten to bound parameters. Surfaced if a compiler pass produces non-conformant output. (Catalog addition S84 Wave 2 #5; full prose at §8.1 lines 5376, 5521.) **(Reserved / spec-ahead, S263 — no fire site: a compiler-DEFECT self-check, not a user-reachable error — the developer cannot write this in scrml source; defensive invariant guard. Excluded from the freeze fireable set.)** | Error |
+| E-SQL-002 | §8.1.1 | A SQL template string (after `?N` placeholder substitution) is syntactically invalid SQL. Validated at compile time against the driver's parser. (Catalog addition S84 Wave 2 #5; full prose at §8.1.1 line 5597.) **(Reserved / spec-ahead, S263 — no fire site: no compile-time SQL parser exists — Bun.SQL validates at runtime, so the "validated at compile time" claim is aspirational/spec-ahead infra. Excluded from the freeze fireable set.)** | Error |
 | E-SQL-003 | §8.1.1 | The `?{}` template body is a runtime expression (e.g., `?{`${sqlString}`}`) rather than a literal string template. SQL template bodies must remain literal at compile time so the compiler can validate and bind parameters; fragment reuse goes through the call graph, not runtime template assembly. (Catalog addition S84 Wave 2 #5; full prose at §8.1.1 lines 5619, 5643.) | Error |
 | E-SQL-007 | §44.4 | A `?{}` SQL block appears in a non-async context (e.g., inside a `fn` body, top-level synchronous markup attribute value). SQL queries return promises; they require an async-capable surrounding context. (Catalog addition S84 Wave 2 #5; full prose at §44.4; row at §8.7 line 5747 + §44.7 line 18131.) | Error |
 | E-SQL-009 | §44.7, §21.5.1 | An `export server function` containing `?{}` is declared in a file with no top-level `<db src=>` block (F-AUTH-002). The exported function would have no database connection in its compiled form. Resolution: add a `<db src=...>` block, or move the function to a file that has one. (Catalog addition S84 Wave 2 #5; full prose at §44.7 line 18133-18154, also §38.12.6 line 16649 for channel interaction.) | Error |
@@ -18606,7 +18816,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 
 | Code | Section | Trigger | Severity |
 |---|---|---|---|
-| E-MARKUP-VALUE-UNCLOSED | §10.2 | A markup-as-value expression never closes: no matching `/>` or `</...>` was found. Distinct from `E-CTX-003` (an unclosed logic-context on the block-tier tag-context stack) and `E-MARKUP-002` (a closer-name mismatch) — this fires in `parse-expr.js` on a markup-valued *expression*, with a different recovery and blame span. | Error |
+| ~~E-MARKUP-VALUE-UNCLOSED~~ | §10.2 | **Retired 2026-07-16 (S263).** Native-parser-only (`parse-expr.js`), harness-unreachable (the conformance adapter never passes `parser`), and dead even natively (error recovery always yields a spanned node, so the unclosed fall-through is unreachable). The §10.2 cite was orphaned (§10.2 is `lift` context-coercion, no markup-close text). Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
 
 #### FileAST-assembler codes (`I-NATIVE-BLOCK-*`)
 
@@ -23985,6 +24195,8 @@ artifactOutputPath = join(outputDir, dirname(relative(outputBase, srcFile)), bas
 
 where `outputDir` is the user-specified `--output-dir` (or its default), and `suffix` is the per-artifact extension (e.g. `.html`, `.client.js`).
 
+**Content-addressed asset names on the build path (§47.9.8).** On the deploy path (`scrml build`), the per-page client bundle and per-page CSS suffixes carry an 8-char content hash before the extension — `.client.<hash>.js` and `.<hash>.css` — computed exactly as the shared runtime name is (§47.1.3 FNV-1a). The emitted HTML `<script src>` / `<link href>` references are rewritten to the hashed names. See §47.9.8 for the full contract. The dev/inspection path (`scrml compile`, `scrml dev`) keeps the un-hashed `.client.js` / `.css` suffixes shown throughout §47.9.5–§47.9.6.
+
 - If `dirname(relative(outputBase, srcFile))` is `"."` (i.e. the source file resides at the output base directory itself), the artifact is written directly into `outputDir` (flat output).
 - Otherwise, the artifact is written into `join(outputDir, relativeDir)`, with intermediate directories created as needed.
 
@@ -24044,6 +24256,8 @@ dist/driver/home.server.js
 
 No collision occurs. `customer/home.html` and `driver/home.html` are distinct dist paths.
 
+On the `scrml build` path (§47.9.8) the client-bundle and CSS names carry a content hash — e.g. `dist/customer/home.client.<hash>.js` and `dist/customer/home.<hash>.css` — and the emitted `home.html` references those hashed names; the `.html` / `.server.js` names are unchanged. `scrml compile` / `scrml dev` emit the un-hashed names exactly as shown above.
+
 **Leading `pages/` segment strip (S100, MPA shell composition, 2026-05-17).** When the dist-relative directory of a source file begins with `pages/` as a segment-aligned prefix (matching the v0.3 canonical MPA convention per §40.8.1 + §47.9.2 filesystem-inferred routes), the `pages/` segment is stripped from the dist directory so that route URLs and dist paths coincide. `pages/customer/home.scrml` produces `dist/customer/home.html` (NOT `dist/pages/customer/home.html`); the URL `/customer/home` then resolves to the dist path without an inverse-rewrite step in the dev server. The strip is segment-aligned — a file literally named `pages.scrml` keeps its dist name; only a leading `pages/` directory segment matches. Legacy `routes/` prefix is preserved (un-stripped) to avoid URL shifts for existing applications on that convention. Implementation: `pathFor` in `compiler/src/api.js`.
 
 #### 47.9.6 Worked example — single-file flat invocation
@@ -24062,7 +24276,7 @@ dist/home.client.js
 dist/home.server.js
 ```
 
-The legacy flat layout is preserved for single-file invocations.
+The legacy flat layout is preserved for single-file invocations. On the `scrml build` path (§47.9.8) the client bundle and CSS carry a content hash (`dist/home.client.<hash>.js`, `dist/home.<hash>.css`); `dist/home.html` is unchanged apart from its rewritten asset references.
 
 #### 47.9.7 Worked example — collision (E-CG-015)
 
@@ -24074,6 +24288,32 @@ E-CG-015: conflicting output paths — `proj/pages/a/home.scrml` and `proj/pages
 ```
 
 The first write succeeds; the second is refused.
+
+#### 47.9.8 Content-addressed asset names + cache-header contract (build path)
+
+**Added:** 2026-07-17 (adopter-#82). Resolves the stale-bundle-after-deploy report: the shared runtime was already content-hashed (`scrml-runtime.<hash>.js`, §47.1.3 / SPA tree-shake Phase B 3.3), but per-page client bundles (`<base>.client.js`) and per-page CSS (`<base>.css`) were emitted un-hashed and referenced un-hashed, and neither `scrml dev` nor the generated production server sent any cache headers — so after a redeploy a browser could silently run a cached stale bundle against a new server.
+
+**Naming.** On the `scrml build` path the compiler content-addresses the page bundle and CSS the same way the runtime is named — the FNV-1a 32-bit hash (§47.1.3; 8-char base36) of the artifact's final on-disk bytes is spliced in **before the final extension**, mirroring `scrml-runtime.js` → `scrml-runtime.<hash>.js`:
+
+| Artifact | Un-hashed (dev) | Content-addressed (build) |
+|---|---|---|
+| page bundle | `<base>.client.js` | `<base>.client.<hash>.js` |
+| page CSS | `<base>.css` | `<base>.<hash>.css` |
+| source-map sibling | `<base>.client.js.map` | `<base>.client.<hash>.js.map` |
+
+The hash SHALL cover the exact bytes written to disk (post `scrml:`-specifier rewrite for client bundles). The emitted HTML `<script src>` and `<link href>` references SHALL be rewritten to the hashed names; a dependency bundle referenced from multiple page HTMLs SHALL resolve to the **same** hashed name in every referrer (the hash is a property of the target artifact's bytes, never of the referrer). The `_scrml_modules` cross-file registry key (§21.3) is the logical dist-relative `.scrml`→`.client.js` id and is UNCHANGED — only the `<script src>` URL carries the hash. The shared-runtime name and per-route chunk names (§40.9.7, already content-addressed via `computeChunkHash`) are unaffected. `E-CG-015` (§47.9.3) is computed on the un-hashed `(dir, basename)` pair and is likewise unchanged.
+
+This behavior is gated: `scrml build` (the deploy path) enables it; `scrml compile` / `scrml dev` keep the un-hashed names so the dev/inspection output and the existing per-artifact-name test surface are byte-unchanged.
+
+**Cache-header contract.** Both serve paths — `scrml dev` and the generated production `_server.js` — SHALL attach cache headers to static responses:
+
+- A **content-addressed** asset → `Cache-Control: public, max-age=31536000, immutable`. Immutability SHALL be decided **precisely**, never by a filename-shape heuristic (a shape guess would wrongly freeze a dotted-but-unhashed asset such as `app.settings.js` — the exact silent-stale-asset failure this section exists to kill):
+  - The production `_server.js` decides by **exact membership** in the set of content-addressed artifacts the build produced (`compileScrml` returns `hashedAssets` — dist-relative POSIX paths of the runtime + per-route chunks + page bundles + CSS; `generateServerEntry` bakes it in as `_SCRML_IMMUTABLE`). A candidate is immutable iff its dist-relative path is in the set.
+  - `scrml dev` (which content-hashes ONLY the shared runtime and, opt-in, per-route chunks — never page bundles/CSS) decides by matching EXACTLY those two known forms (`scrml-runtime.<hash>.js`; `<seg>/<role>.<tier>.<hash>.js`, `tier ∈ {initial, tier1, tier2, tierN<n>}`).
+- The HTML entry document → `Cache-Control: no-cache` (always revalidate, so a redeploy is observed immediately).
+- Any other (non-immutable) static asset → `Cache-Control: no-cache` plus a **weak validator** — a weak `ETag` (`W/"<size>-<mtime>"`; size+mtime is not byte-identity, hence weak) and `Last-Modified`. A conditional request SHALL receive `304 Not Modified` when it validates; `If-None-Match`, when present, is authoritative (a mismatch means changed → `If-Modified-Since` SHALL NOT be consulted; per RFC 7232 §6). Both serve paths honor this identically.
+
+Implementation: `pathFor` + the content-hash pre-pass in `compiler/src/api.js` (naming + HTML rewrite + the `hashedAssets` set, gated on `contentHashAssets`); `devCacheHeaders` in `compiler/src/commands/dev.js` and `_scrml_cache_headers` + `_SCRML_IMMUTABLE` emitted into `_server.js` by `generateServerEntry` in `compiler/src/commands/build.js` (headers). The deploy adapters (fly / docker / railway / render) inherit the generated `_server.js`, so all targets are covered.
 
 ### 47.10 Relative Import Path Rewrites
 
@@ -25315,10 +25555,13 @@ fn scan() {
 
 ---
 
-### E-LOOP-007: `while` Statement in Expression Position Without `lift`
+### E-LOOP-007: `while` Bound as a Value (Expression-Position `while`)
 
-A `while` statement is used as the right-hand side of an assignment or in another expression
-position without the `lift`/`~` pattern.
+A `while` is bound as a value — its whole loop occupies an expression position, e.g. the
+right-hand side of a decl (`let x = while (...) { ... }`). This fires with or without a
+`lift` in the loop body; the example below has none and is still an Error. The sole exception
+is the §49.6.1 accumulator pattern — a STATEMENT `while` whose lifted values are consumed by a
+following `let result = ~` — where the `while` is a statement, not the bound value.
 
 ```scrml
 let x = while (true) { 5 }   // Error E-LOOP-007
@@ -25340,7 +25583,7 @@ let x = while (true) { 5 }   // Error E-LOOP-007
 | E-LOOP-004 | `continue label` — label not found or not a loop | Error |
 | E-LOOP-005 | `break`/`continue` crosses a function scope boundary | Error |
 | E-LOOP-006 | Duplicate label identifier within the same function scope | Error |
-| E-LOOP-007 | `while` used as an expression without `lift`/`~` pattern | Error |
+| E-LOOP-007 | `while` bound as a value (`let x = while(...)`); the §49.6.1 statement-`while` + `let result = ~` accumulator is the sole exception | Error |
 
 All E-LOOP errors are reported at the TS stage (Stage 6), after AST construction and scope
 resolution, as part of the loop control flow validation pass.
@@ -35199,7 +35442,7 @@ shell).
 
 ## 65. The scrml-native CSS Model — predictable, cascade-free styling
 
-> **Nominal (spec-ahead-of-implementation), except §65.2 Axis 1 conflict-checker — LANDED (Wave 1).** This section is normative for the SURFACE (the styling model, the resolution algorithm, the `<theme>`/`<defaults>` structural elements, the `style=`-value application, and the named diagnostics). **The §65.2 flat-specificity conflict-checker pass — `E-STYLE-CONFLICT` (hard) + `W-STYLE-CONFLICT-POSSIBLE` (soft), with the ratified §65.2.4 R1–R3 calibration carve-outs — is IMPLEMENTED and wired** (`compiler/src/codegen/css-conflict-check.ts`, run post-CE in `compiler/src/api.js`; §34 rows landed). The remaining compiler wiring — `:where()`-flat emission on scoped `#{}`, the `@layer` order emission, the reset block, token → `:root` custom-property lowering, the `style`-value type + `style=` value-shape dispatch, and the `E-STYLE-VALUE-*` / `E-THEME-*` / `E-DEFAULTS-*` / `E-STYLE-IMPORTANT-*` / `E-STYLE-CONDITION-OVERLAP` diagnostics — remains the follow-on impl wave that flips this banner. Sequencing: §65.13.
+> **Wave-1 emission — LANDED. Waves 2–3 Nominal (spec-ahead-of-implementation).** This section is normative for the SURFACE (the styling model, the resolution algorithm, the `<theme>`/`<defaults>` structural elements, the `style=`-value application, and the named diagnostics). **The Wave-1 emission half is IMPLEMENTED and wired** (`compiler/src/codegen/emit-css.ts` + `emit-theme-reset.ts` + `emit-client.ts`, run in the codegen pipeline; §34 rows landed): the §65.2 flat-specificity conflict-checker (`E-STYLE-CONFLICT` hard + `W-STYLE-CONFLICT-POSSIBLE` soft, with the ratified §65.2.4 R1–R3 carve-outs; `css-conflict-check.ts`, post-CE in `api.js`); `:where()`-flat emission on scoped `#{}` (§65.2.5, unconditional arms only); the `@layer reset, global;` order emission + the built-in `reset` layer (§65.3.4, opt-out `<program reset="none">`); `<theme>` token → `:root` custom-property lowering (§65.3.2 / §25.7), the `@`-sigil use-site check (`E-THEME-TOKEN-UNKNOWN`) on BOTH the selector path AND the dominant flat-inline `#{}`→`style=""` path (§65.4.1); `@charset`/`@import` hoisting out of `@layer global {}` (§65.8 CSS ordering law); and the §65.6 **runtime theme-switch** reflection (the client half — `<theme for=@cell>` reflects the bound cell's active variant onto `<html data-scrml-theme-<cell>>` at mount + on every change, so switching the cell flips the whole page). The remaining compiler wiring — the `style`-value type + `style=` value-shape dispatch + `style=[a,b]` + `style:name=` + `<defaults>` (style-as-value, **Wave 2**); the full §65.8 `reset,thirdparty,base,tokens,utilities,author` chain + Tailwind-in-`utilities`-layer integration (**Wave 3**); `--explain-style` (§65.2.6); and the `E-STYLE-VALUE-*` / `E-DEFAULTS-*` / `E-STYLE-IMPORTANT-*` / `E-STYLE-CONDITION-OVERLAP` diagnostics — remains the follow-on impl waves. Sequencing: §65.13 / §65.15.
 
 ### 65.0 Thesis — predictability as a language guarantee
 
@@ -35315,9 +35558,9 @@ A **`<theme>`** structural element (§65.9, §D) declares named VALUES reference
 </theme>
 ```
 
-`color: brand` at a use site resolves `brand` from the in-scope `<theme>`. Token references are **opt-in → no action at a distance**: *defining* a token changes nothing; only an *explicit reference* applies it. `<theme>` tokens **lower to CSS custom properties** (`:root { --brand: #2563eb; }`; a `color: brand` reference → `color: var(--brand)`) — reusing the §25 custom-property machinery (§B). This **UNIFIES token-flow with custom-property inheritance** as one mechanism: the token is available (inherits) as a *value*, and is *applied* only where referenced.
+**A token DECLARATION is bare** (`brand = #2563eb`); a token **REFERENCE at a use site carries the `@` sigil** — `color: @brand` resolves `brand` from the in-scope `<theme>`. (Ratified 2026-07-16: the `@` sigil makes a reference syntactically UNAMBIGUOUS versus a literal CSS value, so a token name can never shadow a CSS keyword — `color: red` / `font-weight: bold` are literal values, never token references, even if a `red`/`bold` token exists.) Token references are **opt-in → no action at a distance**: *defining* a token changes nothing; only an *explicit `@`-reference* applies it. `<theme>` tokens **lower to CSS custom properties** (`:root { --brand: #2563eb; }`; a `color: @brand` reference → `color: var(--brand)`) — reusing the §25 custom-property machinery (§B). This **UNIFIES token-flow with custom-property inheritance** as one mechanism: the token is available (inherits) as a *value*, and is *applied* only where `@`-referenced. (The `@` sigil is shared with the §25 reactive-CSS-var bridge: `@name` where `name` is a declared `<theme>` token → `var(--name)`; otherwise → the reactive-cell bridge `var(--scrml-name)`; membership disambiguates.)
 
-A `color: brand` whose token is declared in no in-scope `<theme>` SHALL emit `E-THEME-TOKEN-UNKNOWN`.
+The `@`-sigil makes `E-THEME-TOKEN-UNKNOWN` a **DECIDABLE use-site check**: a `@name` reference matching **neither** an in-scope `<theme>` token **nor** a declared reactive/derived cell SHALL emit `E-THEME-TOKEN-UNKNOWN` (a bare identifier is a literal CSS value and never errors). A `<theme>` variant / `@media` auto-bind that re-binds a name absent from the **global base token set** (a variant re-binds a SUBSET of the base — §65.6) also SHALL emit it.
 
 > **Token-flow does NOT clash with custom-property inheritance** (DD §3.6 / §6 hole 6). Custom-property inheritance carries **value-availability**, not **style-application** — a token being *in scope* is not a style being *applied*; nothing is styled until a property *explicitly references* it. So token-flow's "no action at a distance" (about *styling*) is untouched by custom-property inheritance (about *value availability*). This is distinct from §65.3.1 DOM-inheritance of `color`/`font`, which *does* apply styling down the tree — the separate, blessed, bounded channel.
 
@@ -35327,7 +35570,7 @@ A **`<defaults>`** structural element (§65.9, §D — NOT `<base>`: that is a s
 
 ```scrml
 <defaults>
-    a     { color: brand; }        // app-wide default for every <a>, overridable
+    a     { color: @brand; }       // app-wide default for every <a>, overridable
     label { font-weight: 600; }    // bare-element only
 </defaults>
 ```
@@ -35355,10 +35598,12 @@ A `#{}` bound to a name is a first-class **style VALUE** — the styling analog 
 A `#{}` in **statement position** (bare in a component body / at program level) is a **stylesheet block** — the existing §9.1 behavior, unchanged (scoped inside a component; global at program level). A `#{}` in **expression position** (RHS of `=`, inside a `style=` attribute, inside a `[…]` list) is a **style value**:
 
 ```scrml
-const chrome = #{ padding: space-4; border: 1px solid line; }   // a named style VALUE
+const chrome = #{ padding: @space-4; border: 1px solid @line; }   // a named style VALUE
 ```
 
 This is the identical grammar lever that distinguishes `const x = <div/>` (a markup value) from a bare `<div/>` (rendered markup) — "expression position vs statement position." The existing §9.1 **flat-declaration `#{}`** (the dominant corpus pattern) is thereby **re-explained, not changed**: an inline flat `#{}` on an element is an **anonymous** style-value applied once; `const chrome = #{…}` is the same thing *named* for reuse. **Zero migration** — a conceptual unification (§65.14 migration).
+
+The flat-declaration `#{}`→`style=""` emission path runs the **identical §65.3.2 `@`-sigil token lowering** as the scoped-selector path (Wave-1 — Implemented): a flat-inline `#{ color: @brand }` lowers `@brand` → `var(--brand)` (theme token) / `var(--scrml-name)` (reactive cell) / `E-THEME-TOKEN-UNKNOWN` (neither), and a bare value (`color: red`) is untouched. So `<theme>` tokens work in the dominant `#{}` pattern, not only inside a component-scope selector block.
 
 #### 65.4.2 Applying a style-value — `style=` value-shape overloading
 
@@ -35379,11 +35624,11 @@ A style-value is **FLAT-single-element** (§Rulings row 1): it styles **its own 
 
 ```scrml
 const field = #{
-    display: block; width: 100%; padding: space-4; border: 1px solid line;
-    &:focus    { border-color: brand; }    // this element's own state — a layer
+    display: block; width: 100%; padding: @space-4; border: 1px solid @line;
+    &:focus    { border-color: @brand; }    // this element's own state — a layer
     &[busy]    { opacity: 0.6; }            // this element's own attr — a layer
     &::before  { content: ""; }             // this element's own pseudo-element
-    @media (min-width: 700px) { padding: space-6; }
+    @media (min-width: 700px) { padding: @space-6; }
 }
 ```
 
@@ -35410,13 +35655,14 @@ Conditional application reuses the **`class:`-family** (§5.5.2) sibling: **`sty
 One fixed chain, reasoned top-to-bottom, **no `(id,class,type)` arithmetic anywhere** (§Rulings row 5):
 
 ```
-applied style=  >  class / id / specific author rule (component-scope `#{}`)  >  universal `*` / bare-root (`html`, `body`) author rule  >  <defaults> / DOM-inherited  >  built-in reset  >  browser initial
+applied style=  >  class / id / specific author rule (component-scope `#{}`)  >  universal `*` / bare-root (`html`, `body`) author rule  >  program-global `#{}` (escape hatch — `@layer global`)  >  <defaults> / DOM-inherited  >  built-in reset (`@layer reset`)  >  browser initial
 ```
 
 - **Applied `style=` is the per-instance override** and WINS over the target's own scope selector rule (inline-beats-class intuition — `style=` IS the per-instance override). This **REVISES** the DD axis-2 provisional "local rule > applied style-value"; §Rulings row 5 is authoritative.
 - An explicit `style=[a, b]` list resolves internally by author order (last-in-list wins, §65.4.4) before competing as the single "applied `style=`" level.
 - Tailwind `utilities` (§26) sit **below** the component-scope author rules (utilities-LOW) but above `<defaults>` — see the `@layer` order in §65.8. A co-located scope rule beats a global utility (axiom-consistent).
 - **R1 (§65.2.4 calibration):** a universal `*` or bare-root (`html`/`body`) author rule is an author-reset floor — it resolves *below* class/id/specific author rules (above `<defaults>`), so a `*`/`html`/`body` rule overlapping a specific rule is a deterministic layer, not `E-STYLE-CONFLICT`.
+- **Component-scope beats the program-global escape hatch (NORMATIVE; ratified 2026-07-16).** A **component-scope `#{}`** rule WINS over a **program-global `#{}`** rule — a component's own scoped `.link` beats a program-global `a`, regardless of specificity. This is realized **deterministically by CSS cascade `@layer`**, not by specificity arithmetic (the §65 point — no specificity war): the emitted layer order, **lowest → highest**, is `@layer reset`  <  `@layer global` (the program-global `#{}` escape hatch)  <  **component author scope** (emitted UNLAYERED — an unlayered rule beats every layered rule). So a program-global `#{}` rule is the weakest author tier (the §65.9/OQ-8 escape hatch gets the weakest guarantee, consistent with its weaker conflict-check), and a co-located component rule always out-ranks it by layer. (The theme `:root` custom-property definitions are unlayered — they define `var()` VALUES, which resolve across layers, and compete for nothing.) Tailwind `utilities` layer placement (utilities-LOW, above) is the separate §65.8 concern.
 - Across levels the chain **orders** (never a conflict); *within* a level an unconditional same-property overlap is `E-STYLE-CONFLICT` (§65.2.1).
 
 ### 65.6 Reactive theming — the named-variant reactive selector
@@ -35437,7 +35683,9 @@ applied style=  >  class / id / specific author rule (component-scope `#{}`)  > 
 </theme>
 ```
 
-Switching the cell (`@mode = .Dark`) re-binds the active custom-property set with **one `:root` custom-property write**, natively propagated to every explicit use site, **zero re-render**. Because every use site *explicitly references* the token (`color: ink`), the whole page flips together — with **no** `[data-theme] .foo` global override selectors, no specificity war, no `!important`. The theme is a **value channel**, not a cascade.
+Switching the cell (`@mode = .Dark`) re-binds the active custom-property set with **one `:root` custom-property write**, natively propagated to every explicit use site, **zero re-render**. Because every use site *explicitly references* the token (`color: @ink`), the whole page flips together — with **no** `[data-theme] .foo` global override selectors, no specificity war, no `!important`. The theme is a **value channel**, not a cascade.
+
+**The runtime reflection (Wave-1 — Implemented).** The mechanism that realizes "switch the cell → the whole page flips" is a **compiler-emitted client-side reactive binding**. For each `<theme for=@cell>`, the compiler emits an effect that reflects the bound cell's active enum-variant tag onto `:root` as the **`data-scrml-theme-<cell>`** attribute — the SAME attribute the variant selector keys off (`:root[data-scrml-theme-<cell>="Dark"]`, §65.6). The binding runs at **MOUNT** (setting the attribute to the cell's initial variant, so the first paint matches the reactive cell's initial value) and on **EVERY `@cell` change** (re-setting the attribute). The bound cell holds its variant as its enum tag (`@mode = .Dark` → the tag `Dark`); the attribute value is that tag name. A single attribute write re-points the CSS variant selector, which re-binds the `:root` custom-property set — the "one `:root` write, zero re-render" flip above. A `<theme>` with no `for=@cell` binds no cell and emits no reflection. The `@media (prefers-color-scheme)` auto-bind variant is CSS-native (the media query selects the variant) and needs **no** runtime reflection; it composes on top of whatever the data-attribute selects. (An SSR/prerender path MAY additionally stamp the initial `data-scrml-theme-<cell>` on the served `<html>` to eliminate a first-paint flash when the initial variant differs from the base `:root`; that no-flash prestamp is a follow-on refinement — the client-side binding is the normative mechanism.)
 
 A `<theme>` MAY also bind the variant to a **media condition** — sugar for binding the cell to a media signal (a deterministic layer), instead of (or alongside) manual switching:
 
@@ -35473,6 +35721,8 @@ Tailwind stays as the **atomic escape hatch** — not replaced (its utility thes
 
 - **Utilities-LOW** (§Rulings row 2): the `utilities` layer sits **below** the `author` layer (scrml-native scoped `#{}` rules + style-values), so a **co-located scrml rule beats a global utility** — axiom-consistent with §65.5 local-authority. This **diverges** from the universal ecosystem convention (Panda / Tailwind v4 / vanilla-extract sprinkles all put utilities highest); the muscle-memory cost (`class="p-8"` silently loses to a component rule) is an **accepted** divergence, flagged. So `<button class="p-4" style=chrome>` (both padding) → `chrome` wins, `p-4` inert.
 - **`<defaults>` → `base` layer**; `<theme>` tokens → `tokens` layer (custom-property definitions); third-party CSS → `thirdparty` layer; the reset → the bottom `reset` layer (§65.3.4).
+- **Program-global `#{}` → a `global` layer BELOW the component `author` scope** (§65.5 ratified 2026-07-16): the program-global escape hatch is the weakest author tier, so a component's co-located scoped rule always out-ranks it (`.link` beats a program-global `a`) deterministically by layer. **Wave-1 emission** ships the ratified sub-order `@layer reset, global;` with the component author scope emitted **unlayered** (unlayered > every layer → component wins); the full §65.8 order integration (folding `global` + the Tailwind `utilities` layer into the one fixed `reset, thirdparty, base, tokens, utilities, author` chain) is the Wave-3 concern.
+- **`@charset` / `@import` in a program-global `#{}` are HOISTED out of the `@layer global {}` wrapper** (CSS ordering law): both at-rules are INVALID inside a `@layer {}` block (the browser drops them), so Wave-1 emission lifts any top-level `@charset`/`@import` to their legal stylesheet position — `@charset` becomes the very first thing in the sheet (byte 0), and `@import` follows the `@layer name;` order declaration but precedes any style rule or `@layer {}` block. Source order among the hoisted statements is preserved; an `@import` nested inside another at-rule block is not hoisted.
 - **Utility-vs-utility (`p-4 p-6`)** stays governed by Tailwind's own last-wins *inside* the `utilities` layer, **EXEMPT from `E-STYLE-CONFLICT`** at MVP. Because the whole order is fixed and each layer is `:where()`-flat, there is no specificity race and no `!important` anywhere — a single fixed precedence chain, not a reintroduced cascade.
 - **OQ-2b follow-on (bounded, off by default):** scrml has the full `class=` list statically, so `p-4 p-6` is *exactly* an "unconditional same-property overlap on a provably-shared element" — §65.2 *could* turn Tailwind's #1 footgun into a compile error. This is a bounded follow-on, **off by default at first**, and it MUST **exempt the §26.7 composing families** (ring-2 + shadow-lg intentionally both touch `box-shadow`; the checker must know the composing-family set, which scrml already models). See §65.12 (deferred detail: OQ-3 token unification).
 
@@ -35496,7 +35746,7 @@ Tailwind stays as the **atomic escape hatch** — not replaced (its utility thes
 | **`W-STYLE-CONFLICT-POSSIBLE`** | Warning (info) | The fail-closed soft diagnostic — selectors **not provably disjoint** over dynamic markup or the unbounded global `#{}` scope. Names both loci; asks for disambiguation; **non-blocking** (§65.2.4). |
 | **`E-STYLE-VALUE-DESCENDANT`** | Error | A `#{}`-**value** (style-value) contains a **descendant** selector (§65.4.3). Message routes to *make a component* / *use a content-treatment*. |
 | **`E-STYLE-VALUE-NOT-STYLE`** | Error | `style=<expr>` where `<expr>` is neither a quoted string literal nor a `style`-typed value/list (§65.4.2). |
-| **`E-THEME-TOKEN-UNKNOWN`** | Error | A token reference (`color: brand`) resolves to no in-scope `<theme>` (§65.3.2). |
+| **`E-THEME-TOKEN-UNKNOWN`** | Error | A `@`-sigil token reference (`color: @brand`) resolves to neither an in-scope `<theme>` token nor a declared reactive cell (the decidable use-site check); OR a variant / `@media` auto-bind re-binds a name absent from the global base token set (§65.3.2 / §65.6). A bare identifier is a literal CSS value and never fires. |
 | **`E-DEFAULTS-MISUSE`** | Error | A `<defaults>` block contains a non-bare-element selector (`.class`, `#id`, combinator/complex) — `<defaults>` is bare app-wide element defaults only (§65.3.3). |
 | **`W-STYLE-DEFAULTS-DEAD`** | Warning (info) | A `<defaults>` rule is *universally* overridden (every element of that tag has a local rule for the property) — a dead default (§65.3.3). |
 | **`E-STYLE-IMPORTANT-INTERNAL`** | Error | `!important` inside a scrml-author `#{}` / style-value — internal precedence is guaranteed, so internal `!important` is a bug (§65.7). The one interop-only escape is exempt. |
@@ -35547,22 +35797,22 @@ A themed form: `<theme>` tokens + `<defaults>` element-defaults + a component wi
   </theme>
 
   <defaults>                                  // §65.3.3 — bare-element app-wide defaults, overridable
-      body  { color: ink; background: paper; }
-      a     { color: brand; }
+      body  { color: @ink; background: @paper; }
+      a     { color: @brand; }
       label { font-weight: 600; }             // a `.class` here → E-DEFAULTS-MISUSE
   </defaults>
 
   const field = #{                            // §65.4 — a FLAT-single-element style VALUE
       display: block; width: 100%;
-      padding: space-4; border: 1px solid line; border-radius: 6px;
-      &:focus  { border-color: brand; }       // this input's OWN state — a deterministic layer (§65.2.2)
+      padding: @space-4; border: 1px solid @line; border-radius: 6px;
+      &:focus  { border-color: @brand; }       // this input's OWN state — a deterministic layer (§65.2.2)
       &[busy]  { opacity: 0.6; }
   }
 
   const SignupForm = <form props={ onsubmit: fn }>
       #{                                       // §9.1 component-scope stylesheet — @scope donut, :where()-flat
           .row  { margin-bottom: space-6; }
-          .hint { color: line; font-size: 0.85rem; }
+          .hint { color: @line; font-size: 0.85rem; }
       }
       <div class="row">
           <label>Email</label>
@@ -35582,7 +35832,7 @@ A themed form: `<theme>` tokens + `<defaults>` element-defaults + a component wi
 </program>
 ```
 
-You can look at `<input type="email" style=field …>` and **know** it is styled by `field` (self only), the two `<defaults>` bare-element rules, DOM-inherited `color`/`font` (§65.3.1), and the reset — a finite, visible list. Nothing three files away reaches in. Toggling `@mode` re-binds `ink`/`paper` at `:root` once; every explicit `color: ink` / `background: paper` flips together, zero re-render (§65.6).
+You can look at `<input type="email" style=field …>` and **know** it is styled by `field` (self only), the two `<defaults>` bare-element rules, DOM-inherited `color`/`font` (§65.3.1), and the reset — a finite, visible list. Nothing three files away reaches in. Toggling `@mode` re-binds `ink`/`paper` at `:root` once; every explicit `color: @ink` / `background: @paper` flips together, zero re-render (§65.6).
 
 ### 65.14 Migration + back-compat — additive layer, near-zero forced migration
 
@@ -35605,7 +35855,7 @@ SPEC-TEXT only at this landing. Sequencing (ship the guarantee on what exists fi
 
 **V1.0 scope: Wave 1 gates the 1.0 freeze; Waves 2–3 + Full are v1.next.** CSS is the third native leg (language identity), not a v1.next nicety — but the 1.0 bar is the *guarantee on what already ships* (Wave 1), not the new authoring surfaces (style-as-value, Tailwind integration), which come after.
 
-- **Wave 1 (V1.0 gate) — harden what already ships.** The axis-1 conflict-checker on the existing component `#{}` surface (`E-STYLE-CONFLICT` for the decidable core, §65.2.4) + `:where()`-flat emission (already proven for `prose`) + the built-in reset layer + `<theme>`/tokens (blessed named-value channel over §25) + `--explain-style`. **Gated on the §65.11 corpus dry-run.**
+- **Wave 1 (V1.0 gate) — harden what already ships. LANDED.** The axis-1 conflict-checker on the existing component `#{}` surface (`E-STYLE-CONFLICT` for the decidable core, §65.2.4) + `:where()`-flat emission (already proven for `prose`) + the built-in reset layer + the `@layer reset, global;` order + `@charset`/`@import` hoisting (§65.8) + `<theme>`/tokens (blessed named-value channel over §25) with the `@`-sigil use-site check (`E-THEME-TOKEN-UNKNOWN`) on BOTH the scoped-selector AND the dominant flat-inline `#{}`→`style=""` path (§65.4.1) + the §65.6 runtime theme-switch reflection (the client half). **Gated on the §65.11 corpus dry-run.** (`--explain-style` §65.2.6 remains a follow-on DX complement, NOT a Wave-1 gate.)
 - **Wave 2 (v1.next) — style-as-value.** `const chrome = #{}` + `style=<value>` + `style=[a,b]` + `style:name=` + the `<defaults>` layer + the §65.5 precedence order formalized + the `E-STYLE-VALUE-*` codes.
 - **Wave 3 (v1.next) — integration + edges.** Tailwind `@layer` integration (§65.8) + token unification (OQ-3) + `@keyframes` namespacing (OQ-5) + `@layer thirdparty` interop + the `!important` interop escape (§65.7) + optional same-property utility-collision detection (OQ-2b).
 - **Full (v1.next).** Conditional-axis conflict recursion (`@media`×`@container` → `E-STYLE-CONDITION-OVERLAP`), the fail-closed `W-STYLE-CONFLICT-POSSIBLE` over dynamic markup, the LSP resolved-style hover.

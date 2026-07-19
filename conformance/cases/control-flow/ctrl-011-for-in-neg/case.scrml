@@ -1,0 +1,7 @@
+${
+    <items> = ["a", "b"]
+    for (x of @items) {
+        let y = x
+    }
+}
+<p>x</>

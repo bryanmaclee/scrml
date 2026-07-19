@@ -1,0 +1,13 @@
+{
+  "id": "sql-configured-db-no-e-sql-004",
+  "description": "§8.1.1 / §44.7 NEG — the SAME `?{}` server function as sql-missing-db-e-sql-004-neg but with a configured `<program db=\"sqlite:./app.db\">`. The `?{}` resolves against the program's db scope, so E-SQL-004 does NOT fire. Guards against E-SQL-004 over-firing on validly-configured pages (a false positive would HARD-ERROR valid code).",
+  "language-version": "1.0",
+  "spec": "§8.1.1, §44.2, §44.7",
+  "source-test": "compiler/src/codegen/emit-server.ts (generateServerJs db-handle decl)",
+  "rationale": "§44.2: the closest ancestor `<program>` with `db=` (here `sqlite:./app.db`) supplies the driver + connection for the `?{}` block, so `collectDbScopes` yields a `_scrml_sql` scope and the fail-closed E-SQL-004 gate is not reached.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SQL-004", "E-SQL-009"],
+    "notCodePrefixes": ["E-"]
+  }
+}

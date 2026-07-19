@@ -1,0 +1,11 @@
+type Phase:enum = { Idle, Busy }
+
+<phase>:Phase = .Idle
+
+${
+  switch (@phase) {
+    case .Idle: @phase = .Busy
+  }
+}
+
+<p>Phase: ${@phase}</>

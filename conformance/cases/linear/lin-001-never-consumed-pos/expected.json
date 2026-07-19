@@ -1,0 +1,13 @@
+{
+  "id": "lin-001-never-consumed-pos",
+  "description": "§35.5 — a `lin` variable declared but with zero consumption sites before scope exit fires E-LIN-001. This is the SPEC's own worked example (§35.5 E-LIN-001 block, repeated at §35.9 'Invalid — E-LIN-001: zero uses'). The `lin` contract is exactly-once consumption: never-consumed is as unsound as twice-consumed, so the compiler rejects it rather than silently discarding the value. W-PROGRAM-001 co-fires incidentally (no `<program>` shell around the bare markup). The helper functions are declared in-block so the case pins the linear pass, not E-SCOPE-001 on undefined identifiers.",
+  "language-version": "1.0",
+  "spec": "§35.5, §35.3, §35.1",
+  "source-test": "compiler/src/type-system.ts",
+  "rationale": "§35.5 E-LIN-001: 'The compiler SHALL emit E-LIN-001 when a `lin` variable has zero consumption sites on any execution path from its declaration to its scope exit.' §35.1: a `lin` value 'must be consumed on every execution path' — it 'must not be silently discarded'. `token` is bound but never appears in a consuming position (§35.3), so the declaration-to-scope-exit path has zero uses.",
+  "expect": {
+    "codes": ["E-LIN-001"],
+    "notCodes": ["E-LIN-002", "E-LIN-003"],
+    "severity": { "E-LIN-001": "error" }
+  }
+}

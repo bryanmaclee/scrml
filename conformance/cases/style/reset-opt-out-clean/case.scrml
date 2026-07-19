@@ -1,0 +1,10 @@
+<program reset="none">
+
+  const Card = <div props={}>
+      #{ .card { color: red; } }
+      <div class="card">hi</div>
+  </>
+
+  <Card/>
+
+</program>

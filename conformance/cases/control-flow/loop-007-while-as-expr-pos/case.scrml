@@ -1,0 +1,5 @@
+${
+    <n> = 0
+    let x = while (@n < 3) { @n = @n + 1 lift @n }
+}
+<p>x</>

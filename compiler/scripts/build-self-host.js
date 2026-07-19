@@ -230,6 +230,36 @@ for (const dep of runtimeDeps) {
   }
 }
 
+// Step 2.4: Normalize sibling-dep import specifiers.
+//
+// compileScrml (write: true) runs rewriteRelativeImportPaths, which relocates a
+// module's relative imports from its SOURCE dir to outputDir. For self-host that
+// mis-fires on the runtime deps copied in above as dist SIBLINGS: e.g.
+// meta-checker's `./expression-parser.js` is rewritten to
+// `../../../stdlib/compiler/expression-parser.js` (a path that does not exist),
+// breaking the emitted module and self-compilation.test.js. Since every
+// runtimeDep is copied as a sibling of the compiled modules, any import of one
+// must resolve as `./<dep>`. Rewrite them back here.
+console.log("");
+console.log("Normalizing sibling-dep imports:");
+for (const mod of modules) {
+  const modPath = join(outputDir, `${mod.outputBase}.js`);
+  if (!existsSync(modPath)) continue;
+  let src = readFileSync(modPath, "utf8");
+  let changed = false;
+  for (const dep of runtimeDeps) {
+    const escaped = dep.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`(["'])(?:[^"']*\\/)?${escaped}\\1`, "g");
+    const next = src.replace(re, (_m, q) => `${q}./${dep.name}${q}`);
+    if (next !== src) { src = next; changed = true; }
+  }
+  if (changed) {
+    const { writeFileSync } = await import("fs");
+    writeFileSync(modPath, src);
+    console.log(`  FIX    ${mod.outputBase}.js — sibling-dep import → ./`);
+  }
+}
+
 // Step 2.5: Create aliases for cross-module imports
 console.log("");
 console.log("Creating module aliases:");

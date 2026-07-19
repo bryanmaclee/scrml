@@ -1,0 +1,13 @@
+{
+  "id": "lin-005-shadow-lin-pos",
+  "description": "§35 — a `let`/`const`/`lin` declaration whose name shadows an in-scope `lin` variable from a PARENT scope fires E-LIN-005. Here `lin token` is declared (and consumed once) in the outer `${}` context; the nested `if` body then declares `let token = 5`, shadowing the outer `lin token`. Shadowing a `lin` prevents the compiler from statically attributing each consumption to the right binding, so the declaration is rejected. Twins with lin-005-shadow-lin-neg (identical nesting but the outer binding is a plain `let`, not `lin` → silent), isolating the trigger to shadowing a LINEAR binding specifically. W-PROGRAM-001 co-fires incidentally (no `<program>` shell); not asserted. Helper functions are declared in-block so the case pins the linear pass, not E-SCOPE-001.",
+  "language-version": "1.0",
+  "spec": "§35",
+  "source-test": "compiler/src/type-system.ts",
+  "rationale": "§35 registry (E-LIN-005): a `let`/`const`/`lin` declaration that shadows an in-scope `lin` variable of the same name from a parent scope is an Error. The impl (type-system.ts checkLinShadowing, :7737) detects the shadow by resolving the name up the scope chain: it fires only when the lookup resolves to an `isLin` entry that is NOT in the current scope (a hierarchical shadow); same-scope rebinding is exempt. The message: shadowing a `lin` variable 'prevents the compiler from determining which binding a consumption refers to.' This case had NO conformance coverage before this landing (S261 batch 2 task D); it pins the live trigger.",
+  "expect": {
+    "codes": ["E-LIN-005"],
+    "notCodes": ["E-LIN-001", "E-LIN-004"],
+    "severity": { "E-LIN-005": "error" }
+  }
+}

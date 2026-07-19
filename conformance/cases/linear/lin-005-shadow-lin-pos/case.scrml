@@ -1,0 +1,12 @@
+${
+    function fetchToken() { return "t" }
+    function useToken(t) { return t }
+    let flag = true
+    lin token = fetchToken()
+    useToken(token)
+    if (flag) {
+        let token = 5
+        useToken(flag)
+    }
+}
+<p>x</>

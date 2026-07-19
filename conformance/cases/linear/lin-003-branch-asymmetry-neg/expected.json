@@ -1,0 +1,12 @@
+{
+  "id": "lin-003-branch-asymmetry-neg",
+  "description": "§35.4.2 — a `lin` variable consumed in BOTH the `if` and the `else` branch is consumed exactly once on every execution path and is legal. This is the SPEC's own worked example (§35.4.2 'Valid — consumed in both branches'). The neg twin of lin-003-branch-asymmetry-pos. Note the symmetric-consumption case is the ONLY silent one: per §35.4.2 a conditional where NEITHER branch consumes is not silent either — it falls through to E-LIN-001 at scope exit. So 'symmetry' means all-paths-consume, not merely all-paths-agree. W-PROGRAM-001 co-fires incidentally (no `<program>` shell). No `severity` assertion: severity is asserted on pos twins only (run.ts fails a severity entry for a non-firing code).",
+  "language-version": "1.0",
+  "spec": "§35.4.2, §35.3",
+  "source-test": "compiler/src/type-system.ts",
+  "rationale": "§35.4.2: 'A `lin` variable consumed in both the `if` and `else` blocks SHALL be valid.' Each of the two execution paths through the conditional consumes `token` exactly once (§35.3 rule 2, function argument), so the exactly-once-on-every-path obligation (§35.1) holds and E-LIN-003 must stay silent. E-LIN-002 must also stay silent: two consumptions on MUTUALLY EXCLUSIVE paths are not two consumptions on the same path.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-LIN-001", "E-LIN-002", "E-LIN-003"]
+  }
+}

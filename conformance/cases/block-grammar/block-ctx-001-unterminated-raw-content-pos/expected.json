@@ -1,0 +1,11 @@
+{
+  "id": "block-ctx-001-unterminated-raw-content-pos",
+  "description": "A `<pre>` raw-content element that reaches EOF before its matching `</pre>` fires E-CTX-001 against the unterminated opener (§4.17 Closer recovery).",
+  "language-version": "1.0",
+  "spec": "§4.17",
+  "rationale": "§4.17 (Raw-content elements — `<pre>` and `<code>`), Closer recovery: \"If EOF is reached before the matching close tag, the block splitter SHALL emit `E-CTX-001` against the unterminated opener and emit the markup block with `closerForm: \\\"inferred\\\"`.\" `<pre>` is a raw-content element, so its body is scanned as a single text run terminated only by the matching close tag; EOF arrives first, so the opener is unterminated and E-CTX-001 SHALL fire. Presence only — the blame span, message text, and the recovered `closerForm: \"inferred\"` block shape are impl freedom and are not asserted.",
+  "expect": {
+    "codes": ["E-CTX-001"],
+    "notCodes": []
+  }
+}

@@ -202,7 +202,8 @@ describe("round-trip — auth-path CSRF actually validates end-to-end", () => {
       (v) => v && typeof v === "object" && typeof v.path === "string" && v.path.includes("addItem"),
     );
     const base = `http://localhost${route.path}`;
-    const cookie = `scrml_sid=${SID}`;
+    // B4a (S266): an auth app is secure mode → the session cookie is __Host-scrml_sid.
+    const cookie = `__Host-scrml_sid=${SID}`;
     const reqWith = (headers) =>
       new Request(base, { method: "POST", headers, body: JSON.stringify({ name: "alpha" }) });
     const statusOf = (r) => (r instanceof Response ? r.status : null);

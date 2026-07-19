@@ -1,0 +1,11 @@
+{
+  "id": "e-syntax-042-not-value-position-neg",
+  "description": "The canonical `not` sentinel in the same value position does NOT fire E-SYNTAX-042 (§42.7).",
+  "language-version": "1.0",
+  "spec": "§42.7",
+  "rationale": "§42.7 normative: `not` SHALL be the only value representing absence in scrml source. This case is the exact mirror of the -pos case with the forbidden `null` token replaced by the canonical `not` sentinel; the value position is identical, so a fire here would mean the guard keys on the position rather than on the forbidden token. Pins that E-SYNTAX-042 rejects the TOKEN, not the value position.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SYNTAX-042"]
+  }
+}

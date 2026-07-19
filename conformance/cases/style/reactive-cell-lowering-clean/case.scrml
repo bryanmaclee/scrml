@@ -1,0 +1,14 @@
+<program>
+
+  <count> = 0
+  const <doubled> = @count * 2
+
+  const Card = <div props={}>
+      #{ width: @doubled; }
+      hi
+  </>
+
+  <Card/>
+  <button onclick=(@count = @count + 1)>inc</button>
+
+</program>

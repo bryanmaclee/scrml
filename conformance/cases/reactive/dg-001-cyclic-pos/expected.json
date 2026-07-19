@@ -1,0 +1,12 @@
+{
+  "id": "reactive-dg-001-cyclic-pos",
+  "description": "§31 E-DG-001 POSITIVE — a cycle in the dependency graph's `awaits` edges. `loadOwner` and `loadPet` each touch the db (`?{`…`}`), so each auto-escalates to server under the §12.2 T1 escalation trigger; a call to a server-escalated function is an `awaits` (sequencing) edge per §13.2. `loadOwner` calls `loadPet` and `loadPet` calls back to `loadOwner`, so the awaits subgraph contains a cycle and no valid await ordering exists — neither operation can start. E-DG-001 fires AS an error (§34: Severity Error), blocking codegen. This is the `awaits`-edge cycle specifically — distinct from the derived-CELL cycle (E-DERIVED-CIRCULAR-DEP, §6.6.10 / §31.5) and the derived-ENGINE cycle (E-DERIVED-ENGINE-CIRCULAR, §51.0.J). Incidental W-PROGRAM-SPA-INFERRED / W-SQL-ROW-UNTYPED ignored by superset. Paired with dg-001-cyclic-neg (byte-identical but for `loadPet`'s back-call).",
+  "language-version": "1.0",
+  "spec": "§31.2, §13.2, §34",
+  "rationale": "§31.1: the dependency graph is the shared source of truth for async scheduling — 'determines what can parallelize vs. what must sequence (Section 13)'. §31.2: 'The graph SHALL represent all data dependencies: every operation that consumes the output of another operation is a dependent edge.' §13.2: the compiler SHALL 'Sequence dependent operations using `await` in generated code' — so a server→server call is an awaits edge (§13.4: 'A server-escalated function MAY call another server-escalated function'). A cycle in that subgraph admits no sequencing: the §34 catalog row (E-DG-001 | §31 | 'Dependency graph: circular dependency in reactive graph') makes it an Error and the program is rejected.",
+  "expect": {
+    "codes": ["E-DG-001"],
+    "notCodes": [],
+    "severity": { "E-DG-001": "error" }
+  }
+}

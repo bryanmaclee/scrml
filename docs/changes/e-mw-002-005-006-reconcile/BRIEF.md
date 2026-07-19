@@ -1,0 +1,3 @@
+# BRIEF — E-MW-002/005/006: false PRECISE self-cites masking dead checks
+The handle() global-middleware primitive shipped (S219). Its validation diagnostics E-MW-002/005/006 were catalogued with PRECISE-BUT-FALSE `file:line` self-cites (SPEC.md:18354/18355/18356 → "ast-builder.js:10104/10148/10161") that now point at match/fail-PARSER code, not E-MW emits — ZERO fire sites. Live SHALL/MUST prose at SPEC.md:21179/21294/21295. A false precise self-cite is MORE misleading to a §34-verification sweep than a bare no-fire row. Found by the SPEC-vs-code sweep (S263). OWED: wire the checks (plausibly real V1 on a shipped feature) OR reserve+strike the false cites.
+DONE-PROBE: ! grep -q 'ast-builder.js:10148' compiler/SPEC.md

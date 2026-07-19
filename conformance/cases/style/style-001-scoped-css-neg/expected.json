@@ -1,0 +1,11 @@
+{
+  "id": "style-001-scoped-css-neg",
+  "description": "The same styling intent expressed as an idiomatic component-scope `#{}` block does NOT fire E-STYLE-001 (§4.17 / §9.1).",
+  "language-version": "1.0",
+  "spec": "§4.17, §9.1",
+  "rationale": "§4.17 rejects `<style>` with E-STYLE-001 precisely BECAUSE \"CSS lives in `#{...}`\" — so the code must stay silent on the sanctioned form it steers authors toward, or the diagnostic would contradict its own remedy. This case carries the identical rule (`.btn { color: red; }`) targeting the identical `<button class=\"btn\">` as style-001-style-block-pos, rewritten as a §9.1 component-scope `#{}` stylesheet: the positive twin's remedy, applied. Asserting absence over REAL idiomatic styling (rather than over a program with no styling at all) is what makes the pair load-bearing — it pins that E-STYLE-001 keys on the `<style>` element, not on the presence of CSS.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-STYLE-001"]
+  }
+}

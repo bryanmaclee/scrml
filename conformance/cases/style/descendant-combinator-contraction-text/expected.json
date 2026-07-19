@@ -1,0 +1,13 @@
+{
+  "id": "style-descendant-combinator-contraction-text",
+  "description": "§65.2.5 — a component-scope DESCENDANT selector (`.card .title`) is preserved even when the component body contains a CONTRACTION (`don't`) in UI text before the `#{}` block. An apostrophe in text tokenizes to a spurious unbalanced double-quote in the component-body raw; the `#{}` masking (component-expander.ts `maskCssBlocks`) masks every `#{}` unconditionally + restores verbatim, so the following block is protected from the markup collapse passes and the descendant space survives. Compiles clean; the emitted `:where(.card .title)` shape is asserted in the source unit test.",
+  "language-version": "1.0",
+  "spec": "§65.2.5",
+  "source-test": "compiler/tests/unit/css-wave1-emission.test.js",
+  "rationale": "§65.2.5: a valid component-scope descendant rule must compile with NO E-STYLE-* / E-THEME-* diagnostic, regardless of an apostrophe in sibling UI text. Guards the descendant-space-preservation fix against the contraction-in-text regression.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-STRUCTURAL-ELEMENT-MISPLACED"],
+    "notCodePrefixes": ["E-THEME-", "E-STYLE-"]
+  }
+}

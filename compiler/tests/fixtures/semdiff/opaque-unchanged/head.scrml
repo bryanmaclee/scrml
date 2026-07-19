@@ -1,0 +1,10 @@
+<program lang="ts" db="./flogence.db">
+  export function dispatchOne(prompt: string, path: string) {
+    const out = _={ in: { prompt, path }
+      await new Response(
+        Bun.spawn(["claude","-p",prompt,"--output-format","text"], { cwd: path }).stdout
+      ).text()
+    }=
+    return out
+  }
+</program>

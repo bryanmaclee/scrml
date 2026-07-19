@@ -1,0 +1,10 @@
+${
+  fn helper(x: int) {
+
+        return x + 1
+  }
+
+  export fn main(n: int) {
+    return helper(n) + helper(n)
+  }
+}

@@ -33,7 +33,7 @@ import { buildCalleeImportMap } from "./scheduling.ts";
 import { emitLogicNode } from "./emit-logic.js";
 import { emitEnumVariantObjects } from "./emit-client.js";
 import { collectDbScopes, SERVER_STRUCTURAL_EQ_HELPER, generateHeadlessServerJs } from "./emit-server.ts";
-import { getToolServeConfig } from "../tool-program.ts";
+import { getToolServeConfig, isLibraryShapedFile } from "../tool-program.ts";
 import type { ToolServeConfig } from "../tool-program.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
 import { emitExprField } from "./emit-expr.ts";
@@ -400,6 +400,28 @@ export function generateToolJs(
 
   const body = bodyLines.join("\n");
 
+  // §20.5 (i29e, S239 FIX 6) — the `session` cookie-establishment builtin is
+  // WEB-APP ONLY. A headless `kind="tool"` program is bearer-auth territory: it
+  // has no cookie-session request/response context, so `session.*` (lowered to
+  // `_scrml_req._scrml_sess.*` by emit-expr) has no wrapper and would crash at
+  // runtime. Fire a build-blocking E-SESSION-CONTEXT rather than ship the broken
+  // ref (mirrors the generateServerJs post-emission scan for the web-app path).
+  // S239-2 FIX C (residual, LOW): this is a string-scan, so a tool that merely
+  // embeds the literal `_scrml_req._scrml_sess.` in a user string/comment would
+  // over-block (fail-safe — never ships a hole). A near-impossible contrivance for
+  // an internal-identifier literal; a fully-sound site-recording fix is a follow-up.
+  if (errors && body.includes("_scrml_req._scrml_sess.")) {
+    errors.push(new CGError(
+      "E-SESSION-CONTEXT",
+      "E-SESSION-CONTEXT: the `session` cookie-establishment builtin is not available in " +
+      "a headless `kind=\"tool\"` program — that shape uses bearer auth and has no " +
+      "cookie-session request/response context. Remove the `session.*` call, or make this " +
+      "a web-app `<program>` (drop `kind=\"tool\"`).",
+      { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+      "error",
+    ));
+  }
+
   // ---- main() harness (§64.3) — the return-type discriminator. --------------
   const harness: string[] = [];
   harness.push("");
@@ -427,6 +449,28 @@ export function generateToolJs(
   // collected (the emit-logic `case "foreign"` writes them to this sink).
   if (errors && foreignCrossingErrors.length > 0) {
     for (const e of foreignCrossingErrors) errors.push(e);
+  }
+
+  // §8.1.1 / §44.7 E-SQL-004 — a `kind="tool"` PROGRAM with a `?{}` SQL block that
+  // resolves against no `<program db=>` / `<db src=>` scope. Mirrors the
+  // generateServerJs gate: fire the SHALL-error instead of the silent
+  // `new SQL(":memory:")` fallback (buildDbHandleHeader) which would give the tool
+  // an ephemeral empty db (runtime data loss). Gated on a genuine `?{}` block
+  // (`containsSql` — NOT an idempotency-shadow `_scrml_sql` ref, which is
+  // E-CPS-NONIDEM-NO-STORAGE) and a non-library file (a module-with-db-context is
+  // E-SQL-009, fired in generateToolLibraryJs). A tool program is never
+  // library-shaped, but the guard keeps the two paths explicitly disjoint.
+  if (errors && dbHandleMissingScope(fileAST as never, body)
+      && containsSql(fileAST as never) && !isLibraryShapedFile(fileAST)) {
+    errors.push(new CGError(
+      "E-SQL-004",
+      "E-SQL-004: a `?{}` SQL block has no `db=` declaration in any ancestor `<program>`. " +
+      "Add a `db=` attribute to the enclosing `<program>` element, e.g. " +
+      "`<program kind=\"tool\" db=\"./app.db\">` for SQLite or a `postgres://...` connection " +
+      "string. Without it the query has no database connection.",
+      { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+      "error",
+    ));
   }
 
   // Module headers (§21.3 imports · §44.2 Bun.SQL handle · inlined runtime

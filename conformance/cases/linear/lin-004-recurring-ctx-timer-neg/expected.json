@@ -1,0 +1,12 @@
+{
+  "id": "lin-004-recurring-ctx-timer-neg",
+  "description": "§35.5 / §6.7.12 — a `lin` variable declared INSIDE a `<timer>` body and consumed there does NOT fire E-LIN-004. E-LIN-004 targets a `lin` declared OUTSIDE a recurring context and consumed inside it (declared once, consumed N times across runs). When the `lin` is declared inside the recurring body, each execution creates a fresh binding consumed exactly once on that run — the exactly-once contract holds per run. Structurally identical to lin-004-recurring-ctx-timer-pos except the `lin token` declaration moves inside the `<timer>` body, isolating the trigger to the declared-outside/consumed-inside boundary crossing. W-PROGRAM-SPA-INFERRED (info) and W-PROGRAM-REDUNDANT-LOGIC (warning) co-fire incidentally; neither asserted.",
+  "language-version": "1.0",
+  "spec": "§35.5, §6.7.12",
+  "source-test": "compiler/src/type-system.ts",
+  "rationale": "E-LIN-004 is the recurring-context form of E-LIN-002 (a single reference in an N-times body consumes N times). The unsoundness only arises when the `lin` binding OUTLIVES a single execution of the recurring context — i.e. it was declared outside. A `lin` declared inside the `<timer>` body is scoped to one execution: it is a fresh binding on each run and is consumed exactly once within that run, so the linear contract is satisfied and E-LIN-004 SHALL stay silent. The tracker fires only when the consumer's deferred-ctx depth exceeds the declaration depth (type-system.ts LinTracker.consume); a same-depth in-body declaration does not cross the boundary.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-LIN-004", "E-LIN-006"]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "ctrl-switch-forbidden-logic-block-pos",
+  "description": "A `switch` statement at the top level of a `${ ... }` logic block fires E-SWITCH-FORBIDDEN. Pins the top-level logic-block statement-loop fire site — one of THREE distinct guards that emit this code.",
+  "language-version": "1.0",
+  "spec": "§17",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§34 (E-SWITCH-FORBIDDEN, cross-ref §17): \"The JavaScript `switch` keyword is not part of scrml's vocabulary. scrml provides Tier-0 if-else for prototyping, Tier-1 `<match for=Type [on=expr]>` block-form for structural-exhaustiveness UI rendering, JS-style `match expr { … }` for value-return branching, and Tier-2 `<engine for=Type>` for full state-machine semantics. Use one of these per the §1 tier ladder.\" §17.0 fixes that ladder as the complete set of structured case-analysis forms on state; `switch` is in none of them, so the keyword in statement position SHALL fire. Ratified S64 (debate-04 verdict A+ #1): switch-stmt stays a HARD ERROR, 3-of-3 unanimous.",
+  "expect": {
+    "codes": ["E-SWITCH-FORBIDDEN"],
+    "notCodes": []
+  }
+}

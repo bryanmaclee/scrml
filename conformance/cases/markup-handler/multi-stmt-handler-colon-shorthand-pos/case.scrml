@@ -1,0 +1,14 @@
+type Phase:enum = { Idle, Running, Done }
+
+<count> = 0
+
+${ function startGame() { @count = @count + 1 } }
+${ function track(name) { @count = @count + name.length } }
+
+<p>Count: ${@count}</>
+
+<engine for=Phase initial=.Idle>
+    <Idle : startGame(); track("start")>
+    <Running : "Running…">
+    <Done : "Finished.">
+</>

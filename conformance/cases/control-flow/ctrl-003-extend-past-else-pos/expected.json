@@ -1,0 +1,13 @@
+{
+  "id": "ctrl-003-extend-past-else-pos",
+  "description": "§17 Worked Example 5 (invalid) verbatim — a second `<span else>` tries to extend a chain that already terminated at `else`, firing E-CTRL-003. CASCADE NOTE: E-CTRL-001 co-fires by design — `collapseIfChains` breaks out of the chain scan at the E-CTRL-003 fire (ast-builder.js:17598-17603), so the outer loop re-visits the trailing `<span else>` as a now-orphaned `else` and additionally reports E-CTRL-001. Both are real diagnostics on the same element; `codes` is a superset check so only E-CTRL-003 is asserted here (E-CTRL-001 is pinned by its own case). W-PROGRAM-SPA-INFERRED co-fires incidentally at severity info.",
+  "language-version": "1.0",
+  "spec": "§17.1.1",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§17.1.1 Normative Rules: an `else` element SHALL be the terminal element of its chain. No element carrying `if=`, `else-if=`, or `else` SHALL appear immediately after an `else` element at the same parent level as part of the same chain. The compiler SHALL reject any element that would extend a chain past an `else` (E-CTRL-003). §17 Error Code Summary + §34 both register E-CTRL-003 at severity Error.",
+  "expect": {
+    "codes": ["E-CTRL-003"],
+    "notCodes": ["E-CTRL-005"],
+    "severity": { "E-CTRL-003": "error" }
+  }
+}

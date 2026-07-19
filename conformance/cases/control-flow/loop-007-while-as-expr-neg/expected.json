@@ -1,0 +1,12 @@
+{
+  "id": "loop-007-while-as-expr-neg",
+  "description": "§49.6.1 'While-as-Expression Pattern' worked example — the `while` stays a STATEMENT, `lift` accumulates into `~`, and a following `let result = ~` performs the single consumption. This is the SPEC's sole sanctioned way to extract a value from a `while`, and it does NOT fire E-LOOP-007. Twinned with loop-007-while-as-expr-pos: both bodies lift, so the pair isolates the trigger to WHERE the value is bound — direct assignment of the `while` (reject) vs. `~` consumption after a statement `while` (legal) — rather than to the presence of a `lift` token. W-PROGRAM-001 co-fires incidentally (no `<program>` shell); not asserted.",
+  "language-version": "1.0",
+  "spec": "§49.4.4, §49.6.1",
+  "source-test": "compiler/src/type-system.ts",
+  "rationale": "§49.4.4: 'A `while` statement in a `lift`-accumulating context (§49.6) is valid as an expression position assignment target via the `~` accumulator. This is the only exception.' §49.6.1 gives this exact shape as the canonical worked example and states: 'The assignment `let result = ~` is the single consumption of `~`.' The `while` here occupies statement position and the value is consumed via `~`, so E-LOOP-007 SHALL stay silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-LOOP-007"]
+  }
+}

@@ -1,0 +1,18 @@
+${
+    // Client-only handler: it touches the browser-only `document` global (so
+    // route analysis pins it to the client) AND calls a server fn. client -> server
+    // is the ALLOWED direction — the compiler lowers the call to a fetch stub
+    // (§12.3), so no boundary is crossed the wrong way and E-ROUTE-002 stays
+    // silent. This is the canonical safe shape (examples/23-trucking-dispatch
+    // refresh()); the negative control guards against a false positive.
+    function refresh(name: string) {
+        document.title = name
+        auditName(name)
+    }
+
+    // Server-classified via the ?{} SQL context. It calls no client-only fn.
+    function auditName(name: string) {
+        ?{`INSERT INTO audit (who) VALUES (${name})`}.run()
+    }
+}
+<button id="go" onclick=refresh("hi")>Go</button>

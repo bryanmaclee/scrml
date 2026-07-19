@@ -1,0 +1,12 @@
+{
+  "id": "multi-stmt-handler-colon-shorthand-neg",
+  "description": "The same multi-statement intent as `multi-stmt-handler-colon-shorthand-pos`, lifted to a named function so the `:`-shorthand body is one call expression (`<Idle : startGame()>`) — does NOT fire E-MULTI-STATEMENT-HANDLER. W-DEAD-FUNCTION / W-PROGRAM-001 co-fire incidentally; not asserted.",
+  "language-version": "1.0",
+  "spec": "§4.14",
+  "source-test": "compiler/src/symbol-table.ts",
+  "rationale": "§4.14 admits a single-expression `:`-shorthand body; the §34 row's fix for the multi-statement shape is to \"switch to bare-body form or lift to a named function\". `<Idle : startGame()>` is one call expression with no top-level `;`, so the code SHALL stay silent. This NEG also pins the validator's expression-internal-context rule at the `:`-shorthand locus: the two `;` inside the lifted `startGame()` body must NOT count as top-level hits in the state-child scan.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MULTI-STATEMENT-HANDLER"]
+  }
+}

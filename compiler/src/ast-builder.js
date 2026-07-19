@@ -239,7 +239,12 @@ function looksLikeNestedMarkupValueExpr(expr) {
  * element name with the canonical-placement story cited in the diagnostic
  * message. The §-references mirror SPEC §4.15 Cross-references.
  */
-const STRUCTURAL_ELEMENT_PLACEMENT = {
+// Exported so the E-MARKUP-001 gate (name-resolver.ts) can DERIVE its
+// scrml-structural exclusion set from this authoritative registry rather than
+// hand-maintaining a parallel list that drifts (S264 review — `<defaults>` was
+// omitted and false-fired E-MARKUP-001). Every key here is a registered scrml
+// structural element name (NOT an HTML element per §4.15 / §24.4).
+export const STRUCTURAL_ELEMENT_PLACEMENT = {
   schema:       "a `<schema>` element belongs as an immediate child of `<program>` (§39.2 / §39.12)",
   engine:       "an `<engine>` element belongs at file top-level or as a typed-state-cell init (§51.0 / §51)",
   channel:      "a `<channel>` element belongs inside `<program>` as a sibling of `<page>` (§38.1 / §38.3)",
@@ -282,7 +287,7 @@ const STRUCTURAL_ELEMENT_PLACEMENT = {
 // A NON-markup plain const/state-cell named `theme` (`const theme = 5`,
 // `<theme> = "dark"`) is NOT a collision — it is migration backlog per §65.9
 // (the corpus proto-theme cells migrate, §65.14), not a component/type.
-const RESERVED_CSS_ELEMENT_IDENTIFIERS = new Set(["theme", "defaults"]);
+export const RESERVED_CSS_ELEMENT_IDENTIFIERS = new Set(["theme", "defaults"]);
 
 // §51.0.M / §51.0.R — the engine-child-only, SELF-CLOSING structural elements.
 // These are grammatical ONLY inside an `<engine>` body (where the block-splitter
@@ -6376,9 +6381,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const isArrayType = /\[\s*\]\s*$/.test(typeAnnotation);
 
         // const-derived no-RHS is NOT Shape 4 (§6.2): a derived cell requires an
-        // expression. (The array form historically synthesizes `[]` even for
-        // const; that behavior is preserved unchanged below.)
-        if (isConst && !isArrayType) {
+        // expression. This is UNCONDITIONAL across scalar AND array forms
+        // (SPEC.md:2213 — "`const <x>: T` with no RHS is a derived-with-no-
+        // expression error, NOT covered by [Shape 4]"; no array carve-out). A
+        // const cell's value IS its expression, so `const <items>: string[]`
+        // with no RHS has nothing to derive `[]` FROM — it errors cleanly,
+        // exactly like the scalar `const <x>: int` case. The `return null` here
+        // exits BEFORE the array `[]`-synthesis branch below, so no `[]` value
+        // is fabricated for the erroring const array. (S260: array carve-out
+        // removed — was `isConst && !isArrayType`.) The plain reactive array
+        // form (`<items>: string[]`, no `const`) is UNAFFECTED and still
+        // synthesizes `[]` via the Shape-4 array branch below.
+        if (isConst) {
           errors.push(new TABError(
             "E-DECL-NEEDS-INITIALIZER",
             `Derived cell \`const <${name}>: ${typeAnnotation}\` has no expression. A derived (\`const\`) cell requires an initializer expression (e.g. \`const <${name}>: ${typeAnnotation} = ...\`); the no-RHS canonical-empty/\`not\` default (§6.2 Shape 4) applies to plain reactive cells only.`,
@@ -13271,6 +13285,84 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
  * @param {string} filePath
  * @returns {{ query: string, chainedCalls: ChainCall[] }}
  */
+/**
+ * §8.1.1 / E-SQL-003 — determine whether a `?{}` SQL template body is a pure
+ * RUNTIME EXPRESSION (no literal SQL text).
+ *
+ * A `?{}` body SHALL remain a literal string at compile time so the compiler can
+ * validate the query and bind each `${expr}` interpolation as a positional
+ * parameter (§44.5). A body composed SOLELY of `${...}` interpolation(s) — with
+ * no literal SQL between or around them — is a runtime-assembled SQL string: an
+ * injection vector that Bun.SQL cannot bind (`sql`${q}`` would bind the entire
+ * query text as a single parameter). Fragment reuse goes through the call graph
+ * (§8.4.1), never runtime template assembly.
+ *
+ * Returns true iff the body contains at least one `${...}` interpolation AND
+ * every character OUTSIDE the interpolations is whitespace (no literal SQL):
+ *
+ *   `${q}`               → true  (single runtime interpolation, no literal SQL)
+ *   `${prefix}${suffix}` → true  (multiple interpolations, still no literal SQL)
+ *   `SELECT id = ${id}`  → false (literal SQL + one bound param — canonical form)
+ *   `SELECT 1`           → false (pure literal, no interpolation)
+ *
+ * The scan is brace-depth-matched (same semantics as extractSqlParams in
+ * codegen/rewrite.ts): a `${` opens an interpolation consumed to its matching
+ * `}` by nesting depth, so a nested-brace payload (`${fn({a:1})}`) is skipped
+ * whole. SQL comments OUTSIDE interpolations — `--` to end-of-line and
+ * (slash-star)…(star-slash) block comments — are stripped BEFORE the literal
+ * test, so a comment cannot masquerade as literal SQL and cloak a runtime body:
+ * a `--` line-comment prefix and a slash-star block-comment prefix both fire —
+ * the emit is still the runtime-assembled `_scrml_sql`-- note\n${q}`` injection
+ * vector. A comment does not make the body validatable or param-bindable, so a
+ * comment-prefixed all-interpolation body IS a runtime expression.
+ *
+ * The boundary is strict — a single literal (non-whitespace, non-comment) SQL
+ * char flips hasLiteral and suppresses the error — because a false positive here
+ * hard-errors valid parameterized queries (the E-ATTR-012 lesson). Stripping
+ * comments cannot cause an over-fire: a valid query always carries non-comment
+ * SQL keywords (SELECT / INSERT / ...) that survive comment-stripping.
+ *
+ * @param {string} query — the raw SQL body text (`${...}` preserved verbatim)
+ * @returns {boolean}
+ */
+function sqlBodyIsRuntimeExpr(query) {
+  if (!query || typeof query !== "string") return false;
+  let interpolations = 0;
+  let hasLiteral = false;
+  let i = 0;
+  const n = query.length;
+  while (i < n) {
+    // `${...}` interpolation — consumed whole by brace-depth nesting.
+    if (query[i] === "$" && query[i + 1] === "{") {
+      interpolations++;
+      let depth = 1;
+      i += 2;
+      while (i < n && depth > 0) {
+        if (query[i] === "{") depth++;
+        else if (query[i] === "}") depth--;
+        i++;
+      }
+      continue;
+    }
+    // SQL line comment `-- ... <EOL>` — not literal SQL; skip to the newline.
+    if (query[i] === "-" && query[i + 1] === "-") {
+      i += 2;
+      while (i < n && query[i] !== "\n") i++;
+      continue;
+    }
+    // SQL block comment (slash-star ... star-slash) — not literal SQL; skip to close.
+    if (query[i] === "/" && query[i + 1] === "*") {
+      i += 2;
+      while (i < n && !(query[i] === "*" && query[i + 1] === "/")) i++;
+      i += 2; // consume the closing star-slash
+      continue;
+    }
+    if (!/\s/.test(query[i])) hasLiteral = true;
+    i++;
+  }
+  return interpolations >= 1 && !hasLiteral;
+}
+
 function parseSQLTokens(tokens, filePath) {
   let query = "";
   const chainedCalls = [];
@@ -17245,6 +17337,35 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       const tokens = tokenizeSQL(bodyRaw, bodyOffset, bodyLine, bodyCol);
       const { query, chainedCalls } = parseSQLTokens(tokens, filePath);
 
+      // §8.1.1 / E-SQL-003 — a `?{}` body that is a pure runtime expression (no
+      // literal SQL text, only `${...}` interpolation) is a hard compile error.
+      // SQL bodies SHALL remain literal so the compiler can validate them and
+      // bind each `${expr}` as a positional parameter (§44.5); fragment reuse
+      // goes through the call graph (§8.4.1), never runtime template assembly.
+      // A runtime-assembled SQL string (`?{`${sqlString}`}`) is an injection
+      // vector Bun.SQL cannot bind. The boundary is strict: any literal SQL text
+      // (even one non-whitespace char) marks a normal parameterized query and
+      // does NOT fire (see sqlBodyIsRuntimeExpr). This is the common construction
+      // point for the parse-reachable `?{}` shapes — top-level, expression-
+      // position (`return ?{}.all()`), and let/const/state/return initializers all
+      // reach this builder. (A `?{}` used directly as a call ARGUMENT hits a
+      // separate pre-existing sql-ref-unresolved path that bypasses buildBlock —
+      // orthogonal to E-SQL-003, tracked separately.)
+      if (errors && sqlBodyIsRuntimeExpr(query)) {
+        errors.push(new TABError(
+          "E-SQL-003",
+          "E-SQL-003: the `?{}` SQL template body is a runtime expression, not a " +
+          "literal string template. A `?{}` body composed solely of `${...}` " +
+          "interpolation(s) with no literal SQL text is a runtime-assembled query " +
+          "— an injection vector the compiler cannot validate or parameter-bind. " +
+          "Write the SQL literally inside the backticks and bind values via " +
+          "`${...}` (e.g. `?{`SELECT * FROM users WHERE id = ${id}`}`); reuse SQL " +
+          "patterns by extracting a function, not by assembling the template at " +
+          "runtime (§8.1.1, §8.4.1).",
+          span,
+        ));
+      }
+
       // §8.9.5: `.nobatch()` is a compile-time marker. Strip it from the
       // chain and flag the node so the Batch Planner excludes it from
       // coalescing candidate sets.
@@ -17542,6 +17663,28 @@ function collapseIfChains(nodes, errors, filePath) {
       }
     }
 
+    // E-CTRL-004 (§17.1.1): `else`/`else-if=` SHALL NOT appear on a state object
+    // opener, in ANY position — standalone or chain-adjacent ("SHALL reject any
+    // such usage", regardless of chain context). state / state-constructor-def
+    // nodes carry these attrs in their `attrs` array but are NOT `kind === "markup"`,
+    // so none of the markup-gated E-CTRL-001/002/005 checks above catch them. Read
+    // `attrs` directly (kind-agnostic, mirrors the native parser's hasNodeAttr).
+    // This single node-level site covers BOTH the orphan case (no preceding `if=`)
+    // AND the in-chain case: a state-opener-with-else following an `if=` is never
+    // consumed by the chain scan below — it breaks the chain at the non-markup guard
+    // and re-enters this loop as its own node here — so E-CTRL-004 fires exactly once.
+    if ((node.kind === "state" || node.kind === "state-constructor-def") &&
+        (node.attrs ?? []).some(a => a.name === "else" || a.name === "else-if")) {
+      errors.push(new TABError(
+        "E-CTRL-004",
+        `E-CTRL-004: \`else\` or \`else-if=\` cannot appear on a state object opener.`,
+        node.span ?? { line: 0, col: 0 },
+      ));
+      result.push(node);
+      i++;
+      continue;
+    }
+
     // Not an if= element — pass through
     if (node.kind !== "markup" || !hasAttr(node, "if")) {
       result.push(node);
@@ -17563,18 +17706,12 @@ function collapseIfChains(nodes, errors, filePath) {
       }
 
       const sibling = nodes[j];
-      if (sibling.kind !== "markup") break;
 
-      // E-CTRL-004: else/else-if on state opener
-      if ((sibling.kind === "state" || sibling.kind === "state-constructor-def") &&
-          (hasAttr(sibling, "else") || hasAttr(sibling, "else-if"))) {
-        errors.push(new TABError(
-          "E-CTRL-004",
-          `E-CTRL-004: \`else\` or \`else-if=\` cannot appear on a state object opener.`,
-          sibling.span ?? { line: 0, col: 0 },
-        ));
-        break;
-      }
+      // A state / state-constructor-def sibling (never `kind === "markup"`) breaks
+      // the chain here. If it carries `else`/`else-if=`, the node-level E-CTRL-004
+      // check at the top of this scan catches it when it re-enters as its own node
+      // (see that check's note); we do NOT also fire here, to avoid a double-emit.
+      if (sibling.kind !== "markup") break;
 
       if (hasAttr(sibling, "else-if")) {
         if (elseBranch) {
@@ -17632,6 +17769,111 @@ function collapseIfChains(nodes, errors, filePath) {
   }
 
   return result;
+}
+
+/**
+ * `for` body `lift` detection for E-CTRL-010. Returns true iff the subtree
+ * rooted at `root` contains a `lift`.
+ *
+ * A `lift` shows up in TWO shapes and BOTH must be recognized — mis-detecting a
+ * real lift as absent is the serious failure mode (it makes E-CTRL-010
+ * FALSE-FIRE, telling an adopter to add a `lift` that already exists):
+ *   1. a structured `lift-expr` node — top-level `lift <li/>` in the for body;
+ *   2. a `lift` KEYWORD token inside a raw/expr string — a `lift` nested in a
+ *      MATCH ARM body or a bare `{ }` block is captured as raw text (an
+ *      `escape-hatch` / `bare-expr`), never a `lift-expr` node.
+ * `LIFT_KW_RE` excludes a `.lift` member access (`obj.lift()` is NOT a lift
+ * statement) but errs toward detecting a lift (suppressing E-CTRL-010) on the
+ * rare ambiguous raw — the safe bias, since a missed-fire is far less harmful
+ * than a false-fire on valid adopter code.
+ *
+ * The traversal is fully generic (every array-valued and object-valued child,
+ * with a `seen` cycle guard) rather than a hand-rolled key list — the previous
+ * fixed list `[body, children, consequent, alternate, thenBody, elseBody]`
+ * missed match-arm and if-chain-branch subtrees.
+ */
+const LIFT_KW_RE = /(?<![.\w])lift\b/;
+function forBodyLifts(root) {
+  const seen = new Set();
+  const visit = (v) => {
+    if (v == null || typeof v !== "object" || seen.has(v)) return false;
+    seen.add(v);
+    if (v.kind === "lift-expr") return true;
+    for (const rk of ["raw", "expr", "result", "bodyRaw"]) {
+      if (typeof v[rk] === "string" && LIFT_KW_RE.test(v[rk])) return true;
+    }
+    for (const val of Object.values(v)) {
+      if (Array.isArray(val)) {
+        for (const item of val) if (visit(item)) return true;
+      } else if (val && typeof val === "object") {
+        if (visit(val)) return true;
+      }
+    }
+    return false;
+  };
+  return visit(root);
+}
+
+/**
+ * E-CTRL-010 (§17.4a / §17.2): an `else` empty-state block is valid ONLY on a
+ * `for/lift` loop. A bare `for` whose body has no `lift` SHALL NOT carry an
+ * `else` block — on a `for/lift` the `else` fires when the source iterable is
+ * empty; on a plain `for` the `else` has no defined semantics.
+ *
+ * The Tier-0 `for (...) { ... } else { ... }` form (§17.4a) parses the trailing
+ * `else { ... }` as a `bare-expr` sibling immediately after the `for-stmt` — the
+ * live pipeline does NOT fold it into `for-stmt.elseBody` (only the §41.16
+ * table-for codegen path materializes an `elseBody`). So we detect the shape
+ * structurally: a `for-stmt` whose body does not lift, immediately followed by a
+ * `bare-expr` whose text begins with `else`. A `bare-expr` opening with `else`
+ * only arises from a for/else split (if/else is consumed by parseOneIfStmt;
+ * `while` has no `else`), so the association is unambiguous.
+ *
+ * The recursion visits EVERY array-valued and object-valued child of every node
+ * (with a `seen` cycle guard), so the for/else is found no matter what container
+ * it is nested in — including an `if-chain` node's `branches`/`elseBranch`
+ * (produced by collapseIfChains, which runs immediately before this pass) and
+ * match-arm bodies. Every array is treated as a candidate sibling list; the
+ * for-stmt + `else`-bare-expr adjacency test is specific enough that non-sibling
+ * arrays never produce a spurious hit.
+ */
+function checkForElseWithoutLift(nodes, errors) {
+  const isElseBareExpr = (n) =>
+    n && typeof n === "object" && n.kind === "bare-expr" && /^\s*else\b/.test(String(n.expr ?? ""));
+  const scanSiblingArray = (arr) => {
+    for (let i = 0; i < arr.length; i++) {
+      const node = arr[i];
+      if (!node || typeof node !== "object" || node.kind !== "for-stmt") continue;
+      let j = i + 1;
+      while (j < arr.length && isWhitespaceText(arr[j])) j++;
+      if (j < arr.length && isElseBareExpr(arr[j]) && !forBodyLifts(node.body)) {
+        errors.push(new TABError(
+          "E-CTRL-010",
+          "E-CTRL-010: an `else` block is valid only on a `for/lift` loop (§17.4a). " +
+          "This `for` loop has no `lift` in its body, so its `else` empty-state block " +
+          "has no defined semantics. Add a `lift` to the loop body, or replace the " +
+          "`else` with a post-loop conditional.",
+          arr[j].span ?? node.span ?? { line: 0, col: 0 },
+        ));
+      }
+    }
+  };
+  const seen = new Set();
+  const visit = (v) => {
+    if (v == null || typeof v !== "object" || seen.has(v)) return;
+    seen.add(v);
+    for (const val of Object.values(v)) {
+      if (Array.isArray(val)) {
+        scanSiblingArray(val);
+        for (const item of val) visit(item);
+      } else if (val && typeof val === "object") {
+        visit(val);
+      }
+    }
+  };
+  if (!Array.isArray(nodes)) return;
+  scanSiblingArray(nodes);
+  for (const n of nodes) visit(n);
 }
 
 /**
@@ -17817,6 +18059,10 @@ export function buildAST(bsOutput, tokenizerOverrides) {
 
   // §17.1.1: Collapse if=/else-if=/else sibling chains into IfChainExpr nodes
   nodes = collapseIfChains(nodes, errors, filePath);
+
+  // §17.4a / §17.2: reject an `else` empty-state block on a `for` loop that has
+  // no `lift` in its body (E-CTRL-010).
+  checkForElseWithoutLift(nodes, errors);
 
   // §17 / §34: Post-parse forbidden-keyword sweep — fire E-SWITCH-FORBIDDEN
   // for any `switch-stmt` AST node that did not receive an error at one of

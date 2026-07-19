@@ -871,9 +871,15 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     lines.push("// --- CSS variable bridge (compiler-generated) ---");
 
     for (const bridge of cssBridges) {
-      const target = bridge.scoped
-        ? `_scrml_el`
-        : `document.documentElement`;
+      // A reactive CSS custom property is ALWAYS set on `document.documentElement`
+      // (`:root`). Components are compile-time INLINED — there is no per-instance
+      // runtime element, and every cell reaching this path is a global reactive
+      // cell. The custom property set on :root inherits into the component's inline
+      // `style="… var(--scrml-name)"` (§65.3.1 @scope bounds matching not
+      // inheritance; §25.5 custom-prop inheritance). A prior `bridge.scoped`
+      // ternary targeted an undefined `_scrml_el` stub for a per-instance runtime
+      // that does not exist → `ReferenceError: _scrml_el is not defined` on load.
+      const target = `document.documentElement`;
 
       if (bridge.isExpression) {
         const exprJs: string = bridge.expr.replace(
@@ -918,6 +924,14 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     }
   }
 
+  // §20.8.3 link-boost (i27) NOTE: the delegated `_scrml_link_ensure_click()`
+  // boot call is NOT emitted here. It MUST register its document-level click
+  // listener AFTER the author's delegated onclick handlers so an author
+  // `event.preventDefault()` is visible to link-boost's `if (e.defaultPrevented)`
+  // top-guard (S239 HIGH — reactiveLines land at client-body top level, BEFORE
+  // the author delegation which registers inside DOMContentLoaded). The boot
+  // call is emitted by generateClientJs AFTER `eventLines`, wrapped in its own
+  // DOMContentLoaded handler, so its registration follows the author's.
   return lines;
 }
 
@@ -977,7 +991,7 @@ function collectShellCellNames(fileAST: any): Set<string> {
  * the `_scrml_shell_cells` skip) is only applicable to a `<program>` shell with a
  * swap region, so `_scrml_shell_cells` is emitted only when an outlet is present.
  */
-function fileHasOutlet(fileAST: any): boolean {
+export function fileHasOutlet(fileAST: any): boolean {
   let found = false;
   function visit(nodeList: any[]): void {
     if (found || !Array.isArray(nodeList)) return;

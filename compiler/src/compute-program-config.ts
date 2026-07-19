@@ -30,6 +30,10 @@ export interface AuthConfig {
   loginRedirect: string;
   csrf: string;
   sessionExpiry: string;
+  // §20.5.1 (S266, i29e B4b) — the raw `session-secure=` value ("true" | "false").
+  // Default "true" → `__Host-scrml_sid` + always-Secure; "false" → plain
+  // `scrml_sid`, no Secure (a conscious TLS-less deployment).
+  sessionSecure: string;
 }
 
 export interface MiddlewareConfig {
@@ -115,12 +119,19 @@ export function computeProgramConfig(nodes: any[]): ProgramConfig {
       const loginRedirect = getAttrValue("loginRedirect") ?? "/login";
       const csrf = getAttrValue("csrf") ?? "off";
       const sessionExpiry = getAttrValue("sessionExpiry") ?? "1h";
+      // §20.5.1 (S266, i29e B4b) — the session-cookie Secure mode ("true" default
+      // → `__Host-scrml_sid` + always-Secure; "false" → plain `scrml_sid`, no
+      // Secure). Threaded into authMiddlewareEntry by route-inference exactly like
+      // sessionExpiry. A NO-auth session app reads the raw attribute directly in
+      // emit-server (there is no authConfig to hang it on).
+      const sessionSecure = getAttrValue("session-secure") ?? "true";
 
       authConfig = {
         auth: authVal,
         loginRedirect,
         csrf,
         sessionExpiry,
+        sessionSecure,
       };
 
       // Annotate the program node directly for downstream stages
@@ -128,6 +139,7 @@ export function computeProgramConfig(nodes: any[]): ProgramConfig {
       programNode.loginRedirect = loginRedirect;
       programNode.csrf = csrf;
       programNode.sessionExpiry = sessionExpiry;
+      programNode.sessionSecure = sessionSecure;
     }
   }
 

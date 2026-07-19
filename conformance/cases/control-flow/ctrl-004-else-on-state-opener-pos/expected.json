@@ -1,0 +1,13 @@
+{
+  "id": "ctrl-004-else-on-state-opener-pos",
+  "description": "§17.1.1 — a state object opener (a §35.2 state-constructor-def, `< profile name(string)>`) that carries `else`, declared as the immediate sibling following a well-formed `if=` element, SHALL fire E-CTRL-004. This is the reject-path twin of ctrl-004-else-on-state-opener-neg (which pins that a state opener carrying NEITHER `else` NOR `else-if=` stays silent). W-WHITESPACE-001 (deprecated whitespace-opener — the only current-impl form that yields a state-constructor-def AST node) and W-PROGRAM-SPA-INFERRED co-fire incidentally at severity warning/info; neither is asserted.",
+  "language-version": "1.0",
+  "spec": "§17.1.1",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§17.1.1 Normative Rules: '`else` and `else-if=` SHALL NOT appear on a state object opener. The compiler SHALL reject any such usage (E-CTRL-004).' The §17.1.1 Error Message elaborates: 'State object openers are not conditional render targets.' Here `< profile else name(string)>` is a state-constructor-def (kind=`state-constructor-def`) carrying `else`, sitting immediately after `<span if=@ready>` at the same parent level — precisely the rejected usage. FIX HISTORY (ss75->fix, 2026-07-16): the sole E-CTRL-004 fire site was doubly unreachable prior to this landing. Bug 1 (documented by the neg twin): the chain scan ran `if (sibling.kind !== \"markup\") break;` BEFORE the state test, so a state / state-constructor-def sibling broke the chain first. Bug 2 (found while authoring this pos): even after hoisting the test above the break, the guard used `hasAttr(sibling, \"else\")`, and `getAttr` returns null for any non-markup node (markup-only gate) — so the condition `hasAttr(sibling,\"else\")` was ALWAYS false for the exact state nodes it targets. The fix hoists the test AND reads `sibling.attrs` directly (kind-agnostic, mirroring the native parser's `hasNodeAttr`, compiler/native-parser/parse-file.js). Both were required for §17.1.1's mandated Error to fire.",
+  "expect": {
+    "codes": ["E-CTRL-004"],
+    "notCodes": ["E-CTRL-001", "E-CTRL-002", "E-CTRL-003", "E-CTRL-005"],
+    "severity": { "E-CTRL-004": "error" }
+  }
+}

@@ -1,0 +1,8 @@
+<program>
+  type Ref:enum = {
+    Digest(hash: string)
+    None
+  }
+  <ref>: Ref = .Sha("abc123")
+  <p>{@ref}</p>
+</program>

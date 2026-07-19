@@ -1,7 +1,8 @@
 import { collectCssBlocks } from "./collect.ts";
-import { replaceCssVarRefs } from "./utils.ts";
+import { collectReactiveVarNames } from "./reactive-deps.ts";
 import { resolveApplyToken } from "../tailwind-classes.js";
 import { CGError } from "./errors.ts";
+import { emitThemeCss, emitResetLayer, lowerCssValueRefs, wrapSelectorWhere, collectThemeContext } from "./emit-theme-reset.ts";
 
 /** A source span (the fire site for a diagnostic). */
 interface CSSSpan {
@@ -69,23 +70,22 @@ export function isFlatDeclarationBlock(block: { rules?: unknown; body?: string; 
  * Render a flat-declaration css-inline block as an inline CSS `style=""` value.
  * Returns the raw "prop: value; prop: value;" string (no surrounding quotes).
  * Used by emit-html.ts to inject `style="..."` attributes.
+ *
+ * §65.3.2 / §65.4 (Task 2 [86]) — the OPTIONAL `ctx` threads the `<theme>` token
+ * names + declared cell names so a flat-inline `#{ color: @brand }` on a
+ * component element runs the SAME `@`-sigil lowering the selector path uses
+ * (`@brand` → `var(--brand)` theme token / `var(--scrml-name)` reactive cell /
+ * `E-THEME-TOKEN-UNKNOWN` for neither) — via `renderDeclValue`, NOT a forked
+ * copy. When `ctx` is omitted (legacy callers / unit tests) the behavior is
+ * unchanged: a `@name` keeps the §25 reactive-CSS-var bridge (`var(--scrml-name)`).
  */
-export function renderFlatDeclarationAsInlineStyle(block: { rules?: unknown }): string {
+export function renderFlatDeclarationAsInlineStyle(block: { rules?: unknown }, ctx?: LowerCtx): string {
   const rules = (block as CSSBlock).rules;
   if (!rules || !Array.isArray(rules)) return "";
   const parts: string[] = [];
   for (const rule of rules) {
     if (rule.prop && rule.value !== undefined) {
-      let value = rule.value;
-      if (rule.reactiveRefs && rule.reactiveRefs.length > 0) {
-        if (rule.isExpression) {
-          const exprPropName = `scrml-expr-${rule.reactiveRefs.map((r: { name: string }) => r.name).join("-")}`;
-          value = `var(--${exprPropName})`;
-        } else {
-          value = replaceCssVarRefs(value);
-        }
-      }
-      parts.push(`${rule.prop}: ${value};`);
+      parts.push(`${rule.prop}: ${renderDeclValue(rule as CSSDeclaration, ctx)};`);
     }
   }
   return parts.join(" ");
@@ -138,20 +138,116 @@ function dedupeLastWins(decls: Array<{ prop: string; value: string }>): Array<{ 
 }
 
 /**
- * Render a single declaration's reactive value (CSS custom-property rewrite for
- * `@var` refs), shared by the flat and grouped paths.
+ * The token-lowering context threaded through the render path: the declared
+ * `<theme>` token names (§65.3.2), the declared reactive/derived cell names (for
+ * the §25 reactive-CSS-var bridge + the decidable E-THEME-TOKEN-UNKNOWN check),
+ * and the diagnostic sink.
  */
-function renderDeclValue(decl: CSSDeclaration): string {
-  let value = decl.value ?? "";
-  if (decl.reactiveRefs && decl.reactiveRefs.length > 0) {
-    if (decl.isExpression) {
-      const exprPropName = `scrml-expr-${decl.reactiveRefs.map(r => r.name).join("-")}`;
-      value = `var(--${exprPropName})`;
-    } else {
-      value = replaceCssVarRefs(value);
+export interface LowerCtx {
+  themeTokens: Set<string>;
+  cellNames: Set<string>;
+  errors?: CGError[];
+}
+
+const EMPTY_SET: Set<string> = new Set();
+
+/**
+ * §65.8 / CSS ordering law — hoist the TOP-LEVEL `@charset` / `@import`
+ * statements out of a program-global CSS body. Both are INVALID inside a
+ * `@layer {}` block (the browser drops them), so before the program-global CSS
+ * is wrapped in `@layer global { … }` its `@charset` / `@import` statements MUST
+ * be lifted to their legal stylesheet position: `@charset` is the very first
+ * thing in the sheet (byte 0); `@import` comes after `@charset` + any
+ * `@layer name;` statement but before any style rule or `@layer {}` block.
+ *
+ * ONLY depth-0 (not nested inside another at-rule block) statements are hoisted;
+ * source order among the hoisted statements is preserved. `rest` is the input
+ * with the hoisted statements removed (safe to wrap in `@layer global {}`).
+ */
+export function hoistCharsetAndImports(css: string): { charset: string[]; imports: string[]; rest: string } {
+  const charset: string[] = [];
+  const imports: string[] = [];
+  let rest = "";
+  let i = 0;
+  const n = css.length;
+  let brace = 0, paren = 0;
+  let str: string | null = null;
+  while (i < n) {
+    const c = css[i];
+    if (str !== null) {
+      rest += c;
+      if (c === "\\" && i + 1 < n) { rest += css[i + 1]; i += 2; continue; }
+      if (c === str) str = null;
+      i++;
+      continue;
     }
+    if (c === '"' || c === "'") { str = c; rest += c; i++; continue; }
+    if (c === "{") { brace++; rest += c; i++; continue; }
+    if (c === "}") { brace = brace > 0 ? brace - 1 : 0; rest += c; i++; continue; }
+    if (c === "(") { paren++; rest += c; i++; continue; }
+    if (c === ")") { paren = paren > 0 ? paren - 1 : 0; rest += c; i++; continue; }
+    // A depth-0 `@charset` / `@import` statement (both are `;`-terminated, no block).
+    if (c === "@" && brace === 0 && paren === 0 && /^@(charset|import)\b/i.test(css.slice(i, i + 8))) {
+      let j = i;
+      let jParen = 0;
+      let jStr: string | null = null;
+      let terminated = false;
+      while (j < n) {
+        const cj = css[j];
+        if (jStr !== null) {
+          if (cj === "\\") { j += 2; continue; }
+          if (cj === jStr) jStr = null;
+          j++;
+          continue;
+        }
+        if (cj === '"' || cj === "'") { jStr = cj; j++; continue; }
+        if (cj === "(") { jParen++; j++; continue; }
+        if (cj === ")") { jParen = jParen > 0 ? jParen - 1 : 0; j++; continue; }
+        if (cj === ";" && jParen === 0) { j++; terminated = true; break; }
+        // FIX5 (S265 review) — a `{` before the terminating `;` means the
+        // `@import`/`@charset` is MALFORMED (a missing `;` would otherwise make
+        // the hoist swallow the following selector). Do NOT hoist it: fall through
+        // to the verbatim copy below so the malformed statement + its trailing
+        // rule stay intact in `rest` (unhoisted), for the browser to reject.
+        if (cj === "{" && jParen === 0) break;
+        j++;
+      }
+      if (terminated) {
+        const stmt = css.slice(i, j).trim();
+        if (/^@charset/i.test(stmt)) charset.push(stmt);
+        else imports.push(stmt);
+        i = j;
+        while (i < n && /\s/.test(css[i])) i++; // swallow trailing whitespace so no blank line is left
+        continue;
+      }
+      // Malformed (no `;` before EOF or a `{` block) — pass through unhoisted.
+    }
+    rest += c;
+    i++;
   }
-  return value;
+  return { charset, imports, rest: rest.trim() };
+}
+
+/**
+ * Render a single declaration's value. `@name` references (§65.3.2 `@`-sigil model)
+ * are lowered by `lowerCssValueRefs`: a theme token → `var(--name)`, a reactive
+ * cell → `var(--scrml-name)`, an unknown → E-THEME-TOKEN-UNKNOWN. A computed
+ * reactive EXPRESSION (`@x * 2` over a non-theme cell) keeps the §25
+ * `var(--scrml-expr-…)` bridge. A BARE identifier is a literal CSS value — never
+ * lowered.
+ */
+function renderDeclValue(decl: CSSDeclaration, ctx?: LowerCtx): string {
+  const value = decl.value ?? "";
+  const themeTokens = ctx?.themeTokens ?? EMPTY_SET;
+  const cellNames = ctx?.cellNames ?? EMPTY_SET;
+  const refs = decl.reactiveRefs;
+  // A computed reactive expression whose refs are NOT all theme tokens keeps the
+  // §25 derived-var bridge (a JS-computed value). If every ref is a theme token,
+  // it is a plain substitution (`calc(@space-4 * 2)`) → the `@`-lowering path.
+  if (refs && refs.length > 0 && decl.isExpression && !refs.every(r => themeTokens.has(r.name))) {
+    return `var(--scrml-expr-${refs.map(r => r.name).join("-")})`;
+  }
+  return lowerCssValueRefs(value, themeTokens, cellNames, ctx?.errors, decl.span);
 }
 
 /**
@@ -163,7 +259,7 @@ function renderDeclValue(decl: CSSDeclaration): string {
  * declarations are collected, a property-level last-wins dedup collapses the
  * duplicate composing-family shorthands into one.
  */
-function renderApplyGroupedDeclarations(declarations: CSSDeclaration[], errors?: CGError[]): string {
+function renderApplyGroupedDeclarations(declarations: CSSDeclaration[], errors?: CGError[], ctx?: LowerCtx): string {
   const ordered: Array<{ prop: string; value: string }> = [];
   for (const decl of declarations) {
     if (Array.isArray(decl.apply)) {
@@ -194,7 +290,7 @@ function renderApplyGroupedDeclarations(declarations: CSSDeclaration[], errors?:
         }
       }
     } else if (decl.prop && decl.value !== undefined) {
-      ordered.push({ prop: decl.prop, value: renderDeclValue(decl) });
+      ordered.push({ prop: decl.prop, value: renderDeclValue(decl, ctx) });
     }
   }
   return dedupeLastWins(ordered).map(d => `${d.prop}: ${d.value};`).join(" ");
@@ -209,7 +305,7 @@ function renderApplyGroupedDeclarations(declarations: CSSDeclaration[], errors?:
  * tests) may omit it — expansion still happens, the diagnostics are simply not
  * collected.
  */
-function renderCssBlock(block: CSSBlock, errors?: CGError[]): string {
+function renderCssBlock(block: CSSBlock, errors?: CGError[], ctx?: LowerCtx, flatWrap = false): string {
   if (block.rules && Array.isArray(block.rules)) {
     const ruleParts: string[] = [];
     for (const rule of block.rules) {
@@ -225,32 +321,27 @@ function renderCssBlock(block: CSSBlock, errors?: CGError[]): string {
       }
       if (rule.selector && rule.declarations) {
         // Grouped rule: selector { declarations }
+        // §65.2.5 — component-scope author selectors are `:where()`-flat.
+        const sel = flatWrap ? wrapSelectorWhere(rule.selector) : rule.selector;
         // Fast path: no `@apply` node — render declarations verbatim (unchanged).
         const hasApply = rule.declarations.some(d => Array.isArray(d.apply));
         if (hasApply) {
-          const declStr = renderApplyGroupedDeclarations(rule.declarations, errors);
-          ruleParts.push(`${rule.selector} { ${declStr} }`);
+          const declStr = renderApplyGroupedDeclarations(rule.declarations, errors, ctx);
+          ruleParts.push(`${sel} { ${declStr} }`);
           continue;
         }
         const declParts: string[] = [];
         for (const decl of rule.declarations) {
-          declParts.push(`${decl.prop}: ${renderDeclValue(decl)};`);
+          declParts.push(`${decl.prop}: ${renderDeclValue(decl, ctx)};`);
         }
-        ruleParts.push(`${rule.selector} { ${declParts.join(" ")} }`);
+        ruleParts.push(`${sel} { ${declParts.join(" ")} }`);
       } else if (rule.selector) {
         // Flat selector (no braces — legacy / unusual)
         ruleParts.push(rule.selector);
       } else if (rule.prop && rule.value !== undefined) {
-        let value = rule.value;
-        if (rule.reactiveRefs && rule.reactiveRefs.length > 0) {
-          if (rule.isExpression) {
-            const exprPropName = `scrml-expr-${rule.reactiveRefs.map(r => r.name).join("-")}`;
-            value = `var(--${exprPropName})`;
-          } else {
-            value = replaceCssVarRefs(value);
-          }
-        }
-        ruleParts.push(`${rule.prop}: ${value};`);
+        // A flat `prop: value` rule (bare declaration block). Reuse renderDeclValue
+        // so the `@`-sigil / expression / theme-token lowering is identical.
+        ruleParts.push(`${rule.prop}: ${renderDeclValue(rule as CSSDeclaration, ctx)};`);
       }
     }
     return ruleParts.join(" ");
@@ -281,8 +372,14 @@ function renderCssBlock(block: CSSBlock, errors?: CGError[]): string {
  * Program-level CSS (not inside any component) is emitted without wrapping.
  *
  * @param nodes  — top-level AST nodes
+ * @param fileAST — the full file AST (optional). When present, the use-site
+ *   `@name` lowering resolves reactive-cell membership from the COMPLETE
+ *   `collectReactiveVarNames` set (state + DERIVED + tilde + engine/machine-
+ *   projected vars) rather than the state-decl-only fallback — so a derived cell
+ *   (`const d = @a*2`) referenced in a `#{}` keeps the §25 bridge instead of a
+ *   false E-THEME-TOKEN-UNKNOWN (FIX2, S265 review).
  */
-export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[]; styleBlocks: object[] }, errors?: CGError[]): string {
+export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[]; styleBlocks: object[] }, errors?: CGError[], fileAST?: Record<string, unknown>): string {
   const { inlineBlocks, styleBlocks } = cssBlocks ?? collectCssBlocks(nodes);
 
   // Separate program-level blocks from component-scoped blocks.
@@ -291,17 +388,43 @@ export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[
   const programStyleBlocks = (styleBlocks as CSSBlock[]).filter(b => b._componentScope == null);
   const componentStyleBlocks = (styleBlocks as CSSBlock[]).filter(b => b._componentScope != null);
 
-  const parts: string[] = [];
+  // Gather theme decls + <program> + declared cell names in ONE AST walk (shared
+  // by the theme-CSS, reset, and use-site `@`-lowering paths).
+  const themeContext = collectThemeContext(nodes);
 
-  // --- Program-level CSS (no @scope wrapping) ---
+  // --- §65.3.4 built-in reset (the `reset` @layer, lowest). Opt-out via
+  //     `<program reset="none">`. ---
+  const resetCss = emitResetLayer(nodes, themeContext);
+
+  // --- §65.3.2 / §65.6 <theme> token lowering ---
+  // The `:root` custom-property definitions + reactive variant selectors +
+  // `@media` auto-binds. `tokenNames` (+ cell names) drive use-site `@ink` →
+  // `var(--ink)` lowering across every author rule below.
+  const { css: themeCss, tokenNames } = emitThemeCss(nodes, errors, themeContext);
+
+  // FIX2 (S265 review) — cell membership from the COMPLETE reactive-var collector
+  // when the fileAST is available (state + derived + tilde + engine/machine); the
+  // state-decl-only `themeContext.cellNames` is the fallback for direct
+  // `generateCss(nodes)` unit callers (which don't exercise theme tokens).
+  const cellNames = fileAST ? collectReactiveVarNames(fileAST) : themeContext.cellNames;
+  const lowerCtx: LowerCtx = { themeTokens: tokenNames, cellNames, errors };
+
+  // --- Program-level CSS (no @scope wrapping, no :where()-flat — the global
+  //     escape hatch keeps the weaker guarantee, §65.2.4 R3 / OQ-8). §65.5 (bryan
+  //     ruling 2026-07-16): a program-global `#{}` rule goes in the `global`
+  //     @layer, BELOW the component author scope, so a component's own scoped rule
+  //     wins over the program-global escape hatch — deterministic by layer, no
+  //     specificity war (`.link` beats a program-global `a`). ---
+  const programGlobalParts: string[] = [];
   for (const block of programInlineBlocks) {
-    const css = renderCssBlock(block, errors);
-    if (css) parts.push(css);
+    const css = renderCssBlock(block, errors, lowerCtx, false);
+    if (css) programGlobalParts.push(css);
   }
   for (const block of programStyleBlocks) {
     const body = block.body ?? block.text ?? block.value ?? "";
-    if (body) parts.push(body);
+    if (body) programGlobalParts.push(body);
   }
+  const programGlobalCss = programGlobalParts.join("\n");
 
   // --- Component-scoped CSS (wrapped in @scope, DQ-7 native CSS @scope) ---
   // Flat-declaration #{} blocks (all bare prop:value, no selectors) are skipped —
@@ -314,7 +437,10 @@ export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[
     if (isFlatDeclarationBlock(block)) continue;
 
     const name = block._componentScope!;
-    const css = renderCssBlock(block, errors);
+    // §65.2.5 — component-scope author selectors are `:where()`-flat (specificity
+    // (0,0,0)) so the §65.2 conflict-checker's flat-specificity assumption holds
+    // at runtime.
+    const css = renderCssBlock(block, errors, lowerCtx, true);
     if (!css) continue;
     if (!componentCssMap.has(name)) componentCssMap.set(name, []);
     componentCssMap.get(name)!.push(css);
@@ -327,17 +453,55 @@ export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[
     componentCssMap.get(name)!.push(body);
   }
 
+  const componentScopeBlocks: string[] = [];
   for (const [name, cssParts] of componentCssMap) {
     // DQ-7: native CSS @scope with donut boundary.
     // data-scrml="Name" is the scope root. [data-scrml] (any value) is the donut limit —
     // rules do not bleed into nested constructor boundaries.
-    const scopeBlock = [
+    componentScopeBlocks.push([
       `@scope ([data-scrml="${name}"]) to ([data-scrml]) {`,
       cssParts.join("\n"),
       `}`,
-    ].join("\n");
-    parts.push(scopeBlock);
+    ].join("\n"));
   }
+
+  // ---------------------------------------------------------------------------
+  // Assemble in §65.5 CASCADE-LAYER ORDER (bryan ruling 2026-07-16), lowest →
+  // highest:  `@layer reset`  <  `@layer global` (program-global `#{}`)  <
+  // component author scope (emitted UNLAYERED — an unlayered rule beats every
+  // layered rule, so a component's own scoped rule wins over the program-global
+  // escape hatch, deterministic by LAYER, no specificity war). A leading
+  // `@layer …;` order declaration makes the precedence explicit + robust.
+  // The theme `:root` custom-property definitions are unlayered (they define var
+  // VALUES; `var()` resolves across layers) and compete for nothing.
+  // ---------------------------------------------------------------------------
+  const parts: string[] = [];
+
+  // §65.8 / CSS ordering law — `@charset` / `@import` inside the program-global
+  // `#{}` cannot be trapped in the `@layer global {}` wrapper (the browser drops
+  // them). Hoist them: `@charset` to byte 0, `@import` after the `@layer name;`
+  // order declaration but before any block. `programGlobalRest` is the remaining
+  // program-global CSS (safe to wrap).
+  const { charset, imports, rest: programGlobalRest } = programGlobalCss
+    ? hoistCharsetAndImports(programGlobalCss)
+    : { charset: [] as string[], imports: [] as string[], rest: "" };
+
+  // @charset — MUST be the very first thing in the stylesheet (byte 0).
+  for (const cs of charset) parts.push(cs);
+
+  const layerOrder: string[] = [];
+  if (resetCss) layerOrder.push("reset");
+  if (programGlobalRest) layerOrder.push("global");
+  if (layerOrder.length >= 2) parts.push(`@layer ${layerOrder.join(", ")};`);
+
+  // @import — after @charset + the `@layer name;` statement, BEFORE any style
+  // rule or `@layer {}` block (reset / theme / global / component).
+  for (const imp of imports) parts.push(imp);
+
+  if (resetCss) parts.push(resetCss);                                  // @layer reset — lowest
+  if (themeCss) parts.push(themeCss);                                  // :root tokens — unlayered
+  if (programGlobalRest) parts.push(`@layer global {\n${programGlobalRest}\n}`);  // below component
+  for (const scopeBlock of componentScopeBlocks) parts.push(scopeBlock);        // unlayered — highest
 
   return parts.join("\n");
 }

@@ -1,0 +1,11 @@
+${
+    function useToken(t) { return t }
+    let flag = true
+    let token = "t"
+    useToken(token)
+    if (flag) {
+        let token = 5
+        useToken(flag)
+    }
+}
+<p>x</>

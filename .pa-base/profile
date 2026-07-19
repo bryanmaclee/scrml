@@ -31,6 +31,13 @@ GATE:   tests-as-gate (stable infra) + runtime-verify (codegen) + types (always-
     (cloud `gate` on the PR is authority); release-tag/forced pushes still run FULL `bun run test`. NEVER --no-verify without authz.
   - CLOUD `gate` (PR-flow, S254): the required GitHub CI check (`unit+conformance+gauntlet`) — GREEN gates the PR merge.
     Boot pulls status: `gh run list --branch main --limit 3` + `gh pr list`. This REPLACES the retired commit-lock main-authority check.
+  - ADOPTER-ISSUE channel (S262, MANDATORY at boot 0.6, both profiles): `gh issue list --repo bryanmaclee/scrml --state open`.
+    GitHub issues = the adopter->compiler bug route (pjoliver11/assetManagement, the real-world shakedown app, files
+    version-stamped reproducers here). NOT the handOffs/incoming/ inbox — a SECOND inbound channel. Un-named by the contract
+    until S262 => 4 adopter issues sat unabsorbed up to 5 days (#27/#29/#81/#82), absent from known-gaps AND the delta-log;
+    the S262 PA reported "no bug reached me" off an EMPTY INBOX while the report sat in `gh issue list` (the absence-of-
+    evidence trap). Triage -> docs/known-gaps.md; on landing, CLOSE the issue with the SHA. LANE: adopter bugs = Peter's
+    standing footprint (pa-profile-pjoliver11.md "Peter's LANE"); bryan holds tier-1/freeze. Disjoint by construction.
   - conformance: `bun conformance/run.ts` (69->~220 cases; DATA-not-TS; the language-1.0 gate).
   - R26 EMPIRICAL (S138): HIGH codegen fixes re-compile real adopter .scrml on the post-fix baseline
     before claim-closed (regression-tests-pass != empirical-pass). Reverse-direction: verify-before-dispatch.
@@ -48,7 +55,12 @@ MODULES:
 
 PROFILE-A read-set (FULL boot — design/deliberation/multi-arc/DD; the DEFAULT):
   read IN FULL, in order (the pa-base §4 "Session-start checklist" + the overlay Profile-A read-set):
-  0. flogence digest (STATE only):  bun ../flogence/scripts/digest.ts scrml --fresh   (~1k tok; drill delta-log on demand)
+  0. flogence digest (STATE only):  bun --cwd=../flogence run digest scrml --fresh   (~1k tok; drill delta-log on demand)
+       S262 FIX: the old `bun ../flogence/scripts/digest.ts` names a DELETED script (retired at flogence af1d40a,
+       Track-A cutover → the scrml tool src/ports/digest-tool.scrml). `--cwd=` needs the `=` (the tool binds <db> to CWD).
+       ✅ VERIFIED WORKING (S265, 2026-07-18): the S262 hard-crash is fixed upstream (flogence 12fe035 + #6b integration
+       bb349f3); re-ran at S265 boot — exit 0, full STATE output. (Emits a few cosmetic W-LINT-007 on its own source; harmless.)
+       Still FALLS BACK to the delta-log tail if a future clone's flogence.db is unseeded (digest = optimization, never a dependency).
   0.5. active-sessions board (UNCONDITIONAL, both profiles): read ../scrml-support/handOffs/active-sessions/S*.md + claims.md;
        LIVE sibling => you are a SUCCESSOR (partition by write-footprint · dispatches CLAIMED-not-lost · defer only the WRAP);
        REGISTER your own S<N>.md even when SOLO (else a pre-wrap successor boots blind — the S243 miss). See CONCURRENT-SESSIONS below.
@@ -57,7 +69,10 @@ PROFILE-A read-set (FULL boot — design/deliberation/multi-arc/DD; the DEFAULT)
   2. docs/PA-SCRML-PRIMER.md              IN FULL   (the language-expert snapshot)
   3. compiler/SPEC-INDEX.md               IN FULL   (the spec navigation map; SPEC.md is too big to full-read)
   4. master-list.md §0                    IN FULL   (the live v0.next/V1 phase dashboard)
-  5. hand-off.md                          (current session state — PLAN + open threads)
+  5. hand-off.md                          (current session state — PLAN + open threads [prose])
+  5b. thread-board (EXECUTABLE open-threads, auto-discovered — the S260 anti-drift tool):  bun scripts/threads.ts --open
+      (probes ASSERT each arc's done-ness vs LANDED artifacts, so a thread can't read open-when-done or vice-versa;
+       any docs/changes/<id>/BRIEF.md declaring a `DONE-PROBE:` line is a tracked thread — contract in scripts/threads.ts header)
   6. ../scrml-support/user-voice-scrml.md (last ~10 CONTENTFUL entries; skip acks/"go"/"keep driving")
   7. ../scrml-support/pa-profile-<slug>.md (the per-user personal layer — register + voice ledger)
 PROFILE-B read-set (THIN/execution — ONE landed-spec arc whose hand-off+brief carry the sweep):

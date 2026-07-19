@@ -84,7 +84,8 @@ const fnNames = (serverFns) => serverFns.map((f) => f.name).sort();
 // ---------------------------------------------------------------------------
 
 // (A) keyless fn whose body escalates via a `?{}` SQL block (§12 inference).
-const KEYLESS_ESCALATING = `<count> = 0
+const KEYLESS_ESCALATING = `<program db="./app.db">
+<count> = 0
 
 \${
   function loadCount() {
@@ -93,10 +94,12 @@ const KEYLESS_ESCALATING = `<count> = 0
 }
 
 <button onclick={ @count = @count + 1 }>count is \${@count}</button>
+</program>
 `;
 
 // (B) the explicit `server function` form — same body. Behavior baseline.
-const KEYWORD_SERVER = `<count> = 0
+const KEYWORD_SERVER = `<program db="./app.db">
+<count> = 0
 
 \${
   server function loadCount() {
@@ -105,6 +108,7 @@ const KEYWORD_SERVER = `<count> = 0
 }
 
 <button onclick={ @count = @count + 1 }>count is \${@count}</button>
+</program>
 `;
 
 // (C) a pure CLIENT fn — no escalation, no keyword.
@@ -121,23 +125,27 @@ const PURE_CLIENT = `<count> = 0
 
 // lift-as-return §10.4 fixtures.
 // (D) keyless escalating fn that `lift`s — permitted (server boundary).
-const KEYLESS_ESCALATING_LIFT = `\${
+const KEYLESS_ESCALATING_LIFT = `<program db="./app.db">
+\${
   function buildRows() {
     \${ ?{\`SELECT id FROM items\`}.all() }
     lift <li>x</li>
   }
 }
 <ul>\${ buildRows() }</ul>
+</program>
 `;
 
 // (E) keyword server fn that `lift`s — permitted (baseline).
-const KEYWORD_SERVER_LIFT = `\${
+const KEYWORD_SERVER_LIFT = `<program db="./app.db">
+\${
   server function buildRows() {
     \${ ?{\`SELECT id FROM items\`}.all() }
     lift <li>x</li>
   }
 }
 <ul>\${ buildRows() }</ul>
+</program>
 `;
 
 // (F) pure client fn that `lift`s — E-SYNTAX-002 (no §10.4 permission).

@@ -147,7 +147,10 @@ describe("server-load-authority (a): Fork-4 route gate closes the anon /__server
     const { serverJs } = compileFull(ROW_SCOPED);
     expect(serverJs).toContain("const _scrml_session_store = (globalThis.__scrml_session_store");
     expect(serverJs).toContain("userId: _rec ? (_rec.userId ?? null) : null,");
-    expect(serverJs).toContain("role: _rec ? (_rec.role ?? null) : null,");
+    // B3 (S266) — `role` is gated on a real authenticated identity (`userId != null`)
+    // so an authless-but-role-bearing record cannot read a role (invariant
+    // `role => authenticated`). Unified with the `isAuth` gate.
+    expect(serverJs).toContain("role: (_rec && _rec.userId != null) ? (_rec.role ?? null) : null,");
     expect(serverJs).toContain("function _scrml_current_user(req)");
     expect(serverJs).toContain("return { id: _s.userId, role: _s.role, isAuth: _s.isAuth };");
   });

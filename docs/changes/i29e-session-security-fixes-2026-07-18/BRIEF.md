@@ -1,0 +1,51 @@
+# TASK — i29e session-primitive security fix round (S266, bryan-authorized)
+
+Fix the confirmed findings from the PA security sign-off of PR #99 (§20.5 `session` establishment primitive, Peter's `feat/i29e-session-establishment`). Findings came from a 3-lens adversarial review + PA empirical confirmation against the REAL emitted server. Scope = B1 + B2 + B3 (empirically-confirmed correctness/security holes). B4/B5 are held for a separate design ruling — DO NOT touch them.
+
+## STARTUP VERIFICATION + PATH DISCIPLINE (do first, hard gate)
+1. You are in an isolated worktree. `pwd` MUST start with `/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-`. `git rev-parse --show-toplevel` MUST equal that worktree. If not, STOP + report.
+2. Base your work on the PR branch tip, NOT main:
+   `git fetch origin && git checkout -B i29e-secfix-s266 origin/feat/i29e-session-establishment`
+   (tip should be `7f13812b`). Then `bun install` (worktrees don't inherit node_modules) + `bun run pretest`.
+3. Path discipline: every edit uses a worktree-absolute path; NEVER `cd` into the main checkout; use `git -C "$WORKTREE"` and `--cwd "$WORKTREE"`. Commit incrementally (commit after each finding) + keep an append-only `progress.md`. First commit: `WIP(i29e-secfix): start at <pwd>`.
+4. Commit this brief verbatim to `docs/changes/i29e-session-security-fixes-2026-07-18/BRIEF.md` as an early commit.
+
+## MAPS — REQUIRED FIRST READ
+Read `.claude/maps/primary.map.md` (updated commit `c779e606`) + follow its Task-Shape Routing for codegen/pipeline. NOTE: the §20.5 `session` code you're fixing is BRANCH-ONLY (on `feat/i29e-session-establishment`), absent from the map's `c779e606` snapshot — treat the map as a navigation hypothesis and VERIFY against the actual branch source. Report load-bearing findings.
+
+## THE FIXES
+
+### B1 — Anchor all cookie-name parses (HIGH, security: session fixation)
+Every `scrml_sid`/`scrml_csrf` cookie parse uses `/scrml_sid=([^;]+)/` with NO name-boundary. `String.match` returns the FIRST substring, so a prefixed cookie (`Xscrml_sid=…`) OR any cookie whose VALUE contains `scrml_sid=` (RFC 6265 permits `=` in a cookie value, e.g. `foo=scrml_sid=ATK`) both match and can appear before the real cookie → an attacker's session id is read → victim is authenticated as the attacker. CONFIRMED against the real emitted server.
+Fix — anchor ALL FIVE emitted sites in `compiler/src/codegen/emit-server.ts` to `/(?:^|;\s*)<name>=([^;]+)/`:
+- read-middleware `sessionId` (~line 1710), `_scrml_session_begin` `sid` (~1798), destroy route `_dsid` (~1927) → `/(?:^|;\s*)scrml_sid=([^;]+)/`
+- csrf `existing` (~1992), `cookieToken` (~1998) → `/(?:^|;\s*)scrml_csrf=([^;]+)/`
+Validate: `"foo=scrml_sid=ATK; scrml_sid=LEGIT"` and `"Xscrml_sid=ATK; scrml_sid=LEGIT"` must now yield `LEGIT`; `"scrml_sid=LEGIT"` still `LEGIT`.
+
+### B2 — Context-gate false-negatives (HIGH correctness: clean compile → runtime ReferenceError)
+The "session outside a route handler → compile error, never a runtime crash" guarantee holds ONLY for the `.dot` forms. These 5 shapes compile CLEAN and emit a bare/undefined `session` reference (→ `ReferenceError` at request time), or silently mislower. ALL 5 empirically confirmed. The invariant to restore: **no bare `session` identifier ever reaches emitted JS — it is EITHER a valid member/index/call (correctly lowered) OR a clean compile error.**
+1. **Index access `session["userId"]` / `session[k]`** (the natural spelling of `.get`): `emitIndex` (emit-expr.ts ~2026) has no session case → emits bare `session["…"]`. Fix: add a session case to `emitIndex` mirroring the `emitMember` session block (~1917) — for a literal-string key `"userId"|"isAuth"|"role"` → `_scrml_req._scrml_sess.<key>`; else → `_scrml_req._scrml_sess.get(<keyExpr>)`. ALSO update `astSessionMemberMatch` (emit-server.ts ~347) to match `kind === "index"` (whose object is bare ident `session`) so `_anySessionBuiltin` detects index access and emits the infra + runs the scan.
+2. **Optional member `session?.userId`**: emit-expr `emitMember` session block is guarded by `!node.optional` (~1919) so it isn't lowered. The `_scrml_req._scrml_sess` receiver is ALWAYS defined server-side, so the receiver `?.` is moot. Fix: lower the session form regardless of `node.optional` (emit the dot form `_scrml_req._scrml_sess.userId`). Same for `session?.["k"]` in emitIndex.
+3. **Optional call `session?.set(...)` / `session?.destroy?.()`**: `emitCall` session block is guarded by the callee-member `!optional` (~2489-2503) → bare `session?.set`. `astUsesSessionWrite` already matches (optional-agnostic) so the durable store IS emitted but the write never runs. Fix: lower regardless of the callee-member optional → `_scrml_req._scrml_sess.set(...)`.
+4. **Bare `session` value-use** (`return session`, `let s = session`, `log(session)`): `session` is bound in server scope (so no E-SCOPE-012) but is used as a bare VALUE, not a member/index/call object → emits bare `session` → ReferenceError. Fix: make a bare `session` value-use a CLEAN COMPILE ERROR. Preferred locus: the type-system — `session` in a server-escalated body may appear ONLY as the object of a member/index/call; any other use (bare ident, arg, return, assignment RHS) fires E-SESSION-CONTEXT (or a new named code) with a tailored message ("`session` is not a value — access `session.userId`/`.role`/`.isAuth` or call `session.get()`/`.set()`/`.destroy()`"). Codegen error-push is an acceptable fallback. Whatever the mechanism: never emit a bare `session`. If you add a new §34 code, add its catalog row WITH the impl (Rule 4).
+5. **File-scope shadow hijack `let session = {…}`**: the member (~1919-1922) + call (~2498) guards use only `ctx.declaredNames.has("session")`, a per-handler set seeded from PARAMS (emit-server ~905) that does NOT carry file-scope decls — so a file-scope `let session` is silently HIJACKED (lowered to `_scrml_req._scrml_sess`, corrupting the user's value). Fix: mirror the render/log precedent EXACTLY — add a module flag `_sessionShadowedInFile` + `setSessionShadowedInFile(on)` setter (emit-expr.ts ~79-100), set + reset it by `runCG` at the SAME site render/log are (find where `setRenderShadowedInFile`/`setLogShadowedInFile` are called on file-scope decls), and consume it in the member guard, the call guard, and the NEW index guard as `_sessionShadowedInFile || (ctx.declaredNames && ctx.declaredNames.has("session"))` (see emit-expr:2676/2702 for the render/log consumption pattern).
+
+## B3 — Role decoupled from auth (MED: authless-but-role-bearing record)
+`session.set("role", x)` with no userId mints a record `{role}` with no userId; `role` reads independent of `isAuth` (invariant `role ⇒ authenticated` violated). Fix — gate role on userId in BOTH:
+- `_scrml_session_begin` write-ctx getter: `get role() { return this._rec.userId != null ? (this._rec.role ?? null) : null; }`
+- read-middleware `role:` line: `role: (_rec && _rec.userId != null) ? (_rec.role ?? null) : null`
+
+## REGRESSION TESTS (mandatory — add to compiler/tests/)
+Turn these into proper tests (unit + integration). Every case must be pinned:
+- B1: the emitted parse must return the genuine sid for `"foo=scrml_sid=ATK; scrml_sid=LEGIT"`, `"Xscrml_sid=ATK; scrml_sid=LEGIT"` → `LEGIT`; and a full HTTP round-trip where a request with `Cookie: Xscrml_sid=<real-attacker-sid>` (a real authed record) now resolves ANON (not the attacker). Extend `session-establishment-roundtrip.test.js`.
+- B2: for EACH of the 5 shapes, a compile test asserting EITHER a clean lowering (index/optional forms → the emitted server.js contains `_scrml_req._scrml_sess.` and NO bare `session[`/`session?.`/bare-ident `session`) OR a clean compile error (bare-value use → the expected error code), and NEVER a clean-compile-with-bare-`session`. Trigger snippets (server fns): `let t = session["theme"]`; `let u = session?.userId`; `session?.set("userId","x")`; `return session`; file-scope `let session = { userId: "MINE" }` then `session.userId` must honor the user's local (emit must NOT contain `_scrml_req._scrml_sess.userId` for that read).
+- B3: a record with `{role:"admin"}` and no userId → `session.role`/`@currentUser.role`/middleware `role` all read `not`/null; `isAuth` false.
+
+## EMPIRICAL VERIFICATION (EXECUTE — do NOT grep-only; the S265 "emitted ≠ runs" lesson)
+Compile a minimal app for each B2 shape and either import + invoke the handler (confirm NO ReferenceError) or confirm the clean compile error fires. Drive the B1 cookie-injection against a real emitted server (compile → import the server module → call the whoami handler with the crafted Cookie headers → assert anon). Confirm NO emitted `*.server.js` bundle contains a bare undefined `session` reference. Reference probes (read for the exact vectors + app shape): `/tmp/claude-1000/-home-bryan-maclee-scrmlMaster-scrml/09b7ea31-8ccc-4f7a-a5a8-c485489f4da5/scratchpad/{cookie-probe.js,inject-test.mjs,ctx-probe.mjs}` and the existing `compiler/tests/integration/session-establishment-roundtrip.test.js`.
+
+## DO NOT TOUCH (verified SOUND — no scope creep)
+Fixation-on-login (rotate + delete-old), isAuth-requires-a-real-record (`!!_rec && _rec.userId != null`), role-bleed on the identity path (record built from `_changes` alone), identity-vs-preference rotation classification, the durable SQLite store (parameterized/per-path isolation/TTL), the context-gate default-deny for the DOT forms (SSE/endpoint/machine/serverLoad/peer/headless → E-SESSION-CONTEXT — keep working), TOCTOU/sync semantics, CSRF↔sid binding, cookie flags (HttpOnly/SameSite=Lax/Secure-default). DO NOT change the cookie NAME (no `__Host-` — held design ruling). DO NOT add a reserved-key/mass-assignment guard (held). DO NOT change the Secure-gating logic (held).
+
+## GATE + REPORT
+Run `bun run test` for a full baseline (chains pretest). Fix any regression you introduce. Report: final SHA on `i29e-secfix-s266`, files-touched, per-finding disposition (B1/B2.1-5/B3 each: fixed + how + the test that pins it), full-suite pass/fail, and the empirical results (each B2 shape: lowered-and-ran OR clean-error; the B1 injection: now anon). WIP commits expected; the branch + progress.md are your recovery anchor. Your final message IS your report to the PA (not shown to a human).

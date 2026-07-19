@@ -1,0 +1,10 @@
+<program>
+  ${
+    fn greet(who: string) {
+      return who
+    }
+  }
+  <count>: int = 0
+  <button (click)={ @count = @count + 1 }>inc</button>
+  <p>{@count}</p>
+</program>

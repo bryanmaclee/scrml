@@ -1,0 +1,12 @@
+{
+  "id": "server-fn-e-route-002-client-calls-server-neg",
+  "description": "§12.4 — a client-only handler (`refresh`, touches `document`) CALLING a server-classified fn (`auditName`, ?{} SQL) fires no E-ROUTE-002. client -> server is the allowed direction (the compiler emits a fetch stub, §12.3); the server fn itself calls no client-only function. The negative control for the E-ROUTE-002 pos case — asserts the reject does NOT over-fire on the canonical safe pattern (a false positive would break valid code).",
+  "language-version": "1.0",
+  "spec": "§12.4",
+  "source-test": "compiler/tests/unit/route-inference-e-route-002.test.js",
+  "rationale": "§12.4 constrains only the server -> client-only direction. A client-pinned function may freely call a server-escalated function (§12.3 fetch stub); the boundary is not crossed the wrong way, so E-ROUTE-002 stays silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ROUTE-002"]
+  }
+}

@@ -1,0 +1,8 @@
+${
+    function loadRows(q) {
+        return ?{`/* dynamic */${q}`}.all()
+    }
+}
+<program db="./app.db">
+    <button id="load" onclick=loadRows("SELECT id FROM tasks")>Load</>
+</program>

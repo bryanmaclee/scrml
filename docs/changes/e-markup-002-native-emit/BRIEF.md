@@ -1,0 +1,3 @@
+# BRIEF — E-MARKUP-002 native emit vs the S263 retirement (a #83 follow-through)
+S263 (#83) RETIRED E-MARKUP-002; closer-name-mismatch -> E-CTX-001; §4.4.1:420 amended to claim "impl#2/native ... honoring this rule". But the NATIVE parser STILL emits the retired E-MARKUP-002 for closer-name-mismatch: `native-parser/tag-frame.js:2335` (+ .scrml:2572 + dist/tag-frame.client.js:1135). So the #83 SPEC claim is FALSE. Found by the gaps sweep (S263) + PA-verified. impl#2 is opt-in/off-gate. OWED: migrate native tag-frame E-MARKUP-002 -> E-CTX-001 (the ruled code), OR correct the §4.4.1:420 SPEC claim to reflect the pending native migration.
+DONE-PROBE: ! grep -q '"E-MARKUP-002"' compiler/native-parser/tag-frame.js

@@ -1,0 +1,12 @@
+{
+  "id": "reactive-cell-ambiguous-member-render-neg",
+  "description": "§6.4 E-CELL-AMBIGUOUS-MEMBER-RENDER NEGATIVE — carries the SAME `uname`-in-two-compounds collision as the pos case, then proves BOTH silent arms of the :1698 rule. (1) DISAMBIGUATED: the colliding `uname` is rendered inside each compound's own block body (`<signup><uname/></>` / `<profile><uname/></>`) — the spec-advised remedy the diagnostic itself suggests — so the reference qualifies through its enclosing compound and no bare-match is attempted. (2) EXACTLY-ONE-MATCH: `<contact>`'s leaf `email` is unique across all in-scope compounds, so the bare `<email/>` render-by-tag legally resolves through it. Whole E-CELL-* family asserted silent.",
+  "language-version": "1.0",
+  "spec": "§6.4",
+  "rationale": "SPEC §5.4:1698 — 'A compound-member `<field/>` IS valid render-by-tag (§6.3) and resolves through any in-scope compound when EXACTLY one member matches; a >1-match is this error.' `email` is the exactly-one-match arm → resolves, silent. For the collided `uname`, :1698 names the remedy the diagnostic 'suggests': 'rendering inside the compound's block body or renaming' — realized here as `<signup><uname/></>`. §6.3.5:2296 ratifies that wrapping form: '`<formRes><name/></>` would be valid render-by-tag for `name` if `name` has a render-spec — this is the structural form at the nested level.' Each member here is Shape 2 (`<input .../>` render-spec), satisfying that condition, so the §6.4.1 YES row applies and no E-CELL-* code fires.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CELL-AMBIGUOUS-MEMBER-RENDER", "E-CELL-NO-RENDER-SPEC"],
+    "notCodePrefixes": ["E-CELL-"]
+  }
+}

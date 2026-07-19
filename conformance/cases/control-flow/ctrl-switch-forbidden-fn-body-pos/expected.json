@@ -1,0 +1,12 @@
+{
+  "id": "ctrl-switch-forbidden-fn-body-pos",
+  "description": "A `switch` statement NESTED inside a function body fires E-SWITCH-FORBIDDEN. Pins the nested-logic-body statement-loop fire site — a guard distinct from the top-level one (`ctrl-switch-forbidden-logic-block-pos`); the ban does not weaken with nesting depth.",
+  "language-version": "1.0",
+  "spec": "§17",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§34 (E-SWITCH-FORBIDDEN, cross-ref §17) states the ban on the KEYWORD unconditionally — \"the JavaScript `switch` keyword is not part of scrml's vocabulary\" — with no locus carve-out. A vocabulary exclusion is not depth-scoped: a `switch` inside a function body is as much not-scrml as one at logic-block top level, so the code SHALL fire here too. This case is the direct mirror of `ctrl-switch-forbidden-match-neg`, which writes the same toggle with the sanctioned `match` form.",
+  "expect": {
+    "codes": ["E-SWITCH-FORBIDDEN"],
+    "notCodes": []
+  }
+}

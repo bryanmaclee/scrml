@@ -1,0 +1,13 @@
+{
+  "id": "ctrl-005-else-and-if-same-element-pos",
+  "description": "§17.1.1 — `if=` and `else` on the SAME element fires E-CTRL-005. An element either opens a chain (`if=`) or continues one (`else-if=`/`else`), never both. CASCADE NOTE: E-SCOPE-001 co-fires as a recovery artifact — the E-CTRL-005 path pushes the element through UN-collapsed (ast-builder.js:17514) with both attributes still attached, and the bare valueless `else` attribute is then scope-resolved as an unquoted identifier (§5.2) and fails. Not asserted (`codes` is a superset check). W-PROGRAM-SPA-INFERRED co-fires incidentally at severity info. Twinned with ctrl-005-else-and-if-same-element-neg, which differs ONLY in moving `else` onto a sibling.",
+  "language-version": "1.0",
+  "spec": "§17.1.1",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§17.1.1 Normative Rules: '`else` and `else-if=` SHALL NOT appear on the same element as `if=`. A single element cannot simultaneously open and continue a chain. The compiler SHALL reject such usage (E-CTRL-005).' §17 Error Code Summary + §34 both register E-CTRL-005 at severity Error.",
+  "expect": {
+    "codes": ["E-CTRL-005"],
+    "notCodes": ["E-CTRL-001", "E-CTRL-002", "E-CTRL-003"],
+    "severity": { "E-CTRL-005": "error" }
+  }
+}

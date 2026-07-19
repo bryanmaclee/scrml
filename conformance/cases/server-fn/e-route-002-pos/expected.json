@@ -1,0 +1,13 @@
+{
+  "id": "server-fn-e-route-002-server-calls-client-only-pos",
+  "description": "§12.4 — a server-classified function (escalated by a ?{} SQL context) calls a client-only function (`flashTitle`, which touches the browser-only `document` global). Route analysis places `flashTitle` exclusively on the client, so the server fn cannot call it: E-ROUTE-002 fires as a hard error. Guards the soundness hole where the client-only callee was silently escalated to the server (Trigger 5) and its `document.*` code shipped into the SERVER bundle.",
+  "language-version": "1.0",
+  "spec": "§12.4",
+  "source-test": "compiler/tests/unit/route-inference-e-route-002.test.js",
+  "rationale": "§12.4: a server-escalated function's static call graph SHALL NOT contain a direct or transitive call to a client-only function; the compiler SHALL emit E-ROUTE-002. A server function runs in the Bun process where `document`/`window` do not exist, so the call cannot execute server-side.",
+  "expect": {
+    "codes": ["E-ROUTE-002"],
+    "notCodes": ["E-ROUTE-001"],
+    "severity": { "E-ROUTE-002": "error" }
+  }
+}

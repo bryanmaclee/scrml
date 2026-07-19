@@ -1,0 +1,13 @@
+{
+  "id": "server-fn-e-route-005-unplaceable-both-sides-pos",
+  "description": "§12.4 — a single function whose body accesses BOTH a server-only resource (a ?{} SQL context) AND a client-only DOM global (`document.title`) is unplaceable: route analysis can assign it to neither side. It fires E-ROUTE-005 (error) — DISTINCT from E-ROUTE-002 (a server fn calling a separate client-only fn). Guards the S263-review hole where this shape silently shipped the DOM code into the server bundle.",
+  "language-version": "1.0",
+  "spec": "§12.4",
+  "source-test": "compiler/tests/unit/route-inference-e-route-002.test.js",
+  "rationale": "§12.4: a single function accessing both a server-only resource and a client-only DOM global cannot be placed on either side (a server context has no `document`; a client context cannot reach the server-only resource). The compiler SHALL emit E-ROUTE-005 rather than silently place it server-side. It is NOT the E-ROUTE-002 cross-call shape, so E-ROUTE-002 does not fire.",
+  "expect": {
+    "codes": ["E-ROUTE-005"],
+    "notCodes": ["E-ROUTE-002"],
+    "severity": { "E-ROUTE-005": "error" }
+  }
+}

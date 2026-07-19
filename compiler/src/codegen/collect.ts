@@ -1,6 +1,13 @@
 import { emitStringFromTree } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
+// FIX3 (S265 review) — a `<theme>` token `@bg` in a `#{}` value is a STATIC
+// `var(--bg)` (§65), NOT a §25 reactive-CSS-var JS bridge. It must be EXCLUDED
+// from bridge collection (else a spurious `_scrml_el.style.setProperty("--scrml-bg",…)`
+// is emitted at module scope, throws `ReferenceError: _scrml_el is not defined`
+// on load, and the whole client bundle — including the §65.6 theme-switch
+// reflection — never runs → the theme is DOA).
+import { collectThemeContext, collectThemeTokenNames } from "./emit-theme-reset.ts";
 
 // ---------------------------------------------------------------------------
 // Local AST type — loosely typed to match the plain-object AST produced by
@@ -17,8 +24,6 @@ interface Node {
   _expandedFrom?: string;
   /** Set by collect.ts for CSS-in-component scoping. */
   _componentScope?: string | null;
-  /** Set by collect.ts for constructor-scoped CSS. */
-  _constructorScoped?: boolean;
   rules?: CSSRule[];
   expr?: string;
   init?: string | unknown;
@@ -43,7 +48,6 @@ export interface CSSVariableBridge {
   customProp: string;
   isExpression: boolean;
   expr: string | null;
-  scoped: boolean;
   refs: CSSReactiveRef[];
 }
 
@@ -278,24 +282,37 @@ export function collectProtectedFields(protectAnalysis: ProtectAnalysis | null |
 
 /**
  * Collect all CSS variable bridge entries from CSS inline blocks.
- * Returns an array of { varName, customProp, isExpression, expr, scoped } descriptors.
+ * Returns an array of { varName, customProp, isExpression, expr, refs } descriptors.
+ *
+ * Every reactive CSS custom property is wired against `document.documentElement`
+ * (:root) regardless of whether its `#{}` is program-level or component-scoped —
+ * components are compile-time INLINED, so there is no per-instance runtime element
+ * to target, and the :root custom property inherits into the component's inline
+ * `style="… var(--scrml-name)"` (§65.3.1 / §25.5). A prior per-instance `scoped`
+ * distinction (targeting an undefined `_scrml_el`) has been removed.
  *
  * @param nodes — top-level AST nodes
- * @param isScoped — true when inside a constructor (scoped to element)
  */
-export function collectCssVariableBridges(nodes: Node[], isScoped = false): CSSVariableBridge[] {
+export function collectCssVariableBridges(nodes: Node[]): CSSVariableBridge[] {
   const { inlineBlocks } = collectCssBlocks(nodes);
   const bridges: CSSVariableBridge[] = [];
   const seen = new Set<string>();
 
+  // FIX3 (S265 review) — the in-scope `<theme>` token names. A `@name` resolving
+  // to a theme token is a STATIC `var(--name)` (§65.3.2), NOT a §25 reactive bridge.
+  const themeTokens = collectThemeTokenNames(collectThemeContext(nodes));
+
   for (const block of inlineBlocks) {
-    const scoped = isScoped || (block._constructorScoped === true) || (block._componentScope != null);
     if (!block.rules || !Array.isArray(block.rules)) continue;
 
     for (const rule of block.rules as CSSRule[]) {
       if (!rule.reactiveRefs || rule.reactiveRefs.length === 0) continue;
 
       if (rule.isExpression) {
+        // A computed reactive expression. If EVERY ref is a theme token, it is a
+        // plain static `var(--…)` substitution (`calc(@space-4 * 2)`), NOT a §25
+        // JS bridge — skip it (mirrors emit-css renderDeclValue's membership test).
+        if (rule.reactiveRefs.every((r: CSSReactiveRef) => themeTokens.has(r.name))) continue;
         // Expression: one custom property for the whole expression
         const exprPropName = `--scrml-expr-${rule.reactiveRefs.map((r: CSSReactiveRef) => r.name).join("-")}`;
         const key = `expr:${exprPropName}`;
@@ -306,13 +323,14 @@ export function collectCssVariableBridges(nodes: Node[], isScoped = false): CSSV
             customProp: exprPropName,
             isExpression: true,
             expr: rule.reactiveRefs[0].expr ?? null,
-            scoped,
             refs: rule.reactiveRefs,
           });
         }
       } else {
-        // Simple @var reference(s)
+        // Simple @var reference(s). A theme-token ref is a static `var(--name)`
+        // (§65.3.2) → NOT a reactive bridge; skip it.
         for (const ref of rule.reactiveRefs) {
+          if (themeTokens.has(ref.name)) continue;
           const customProp = `--scrml-${ref.name}`;
           const key = `var:${ref.name}`;
           if (!seen.has(key)) {
@@ -322,7 +340,6 @@ export function collectCssVariableBridges(nodes: Node[], isScoped = false): CSSV
               customProp,
               isExpression: false,
               expr: null,
-              scoped,
               refs: [ref],
             });
           }

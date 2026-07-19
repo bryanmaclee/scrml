@@ -1,0 +1,13 @@
+{
+  "id": "loop-007-while-as-expr-no-lift-pos",
+  "description": "§49.4.4 — `let x = while (...) { ... }` with a body that does NOT lift puts a `while` in an expression position and SHALL fire E-LOOP-007. This is the §49.9 worked shape (`let x = while (true) { 5 }` // Error E-LOOP-007) generalized to a real counting loop. Twins with loop-007-while-as-expr-pos (which lifts): together they pin that E-LOOP-007 fires on ANY `while` bound as a decl's value, with or without a `lift` token in the body — the trigger is the expression-position binding, NOT the presence of `lift`. W-PROGRAM-001 co-fires incidentally (no `<program>` shell); not asserted.",
+  "language-version": "1.0",
+  "spec": "§49.4.4, §49.9",
+  "source-test": "compiler/src/type-system.ts",
+  "rationale": "§49.4.4: 'A bare `while` statement SHALL NOT be used as an expression. The compiler SHALL reject any attempt to use a `while` statement in an expression position (e.g., `let x = while (...) { ... }`) without the `lift` accumulator pattern (§49.6). The error is E-LOOP-007.' §49.9 gives the SPEC's own worked example `let x = while (true) { 5 }  // Error E-LOOP-007` — no `lift`, and it IS an Error. The sole exception (§49.4.4 second clause + §49.6.1) is a STATEMENT `while` whose lifted values are consumed by a following `let result = ~`; there the decl's init is `~`, not an escape-hatch `while(...){...}`. This case binds the `while` itself as `x`'s value with no `~` consumption, so it is an expression-position `while` and SHALL be rejected. FIX HISTORY (ss75->fix, 2026-07-16): checkWhileAsExpr previously required a `\\blift\\b` token in the body (a workaround for an ast-builder misparse that folded a following while-stmt into a preceding decl's init). That misparse no longer reproduces at HEAD — a `while` statement after a complete let/const decl parses as a separate statement across every init shape tested — so the narrowing was dropped and §49.9's own no-lift example now fires as §49.4.4 mandates.",
+  "expect": {
+    "codes": ["E-LOOP-007"],
+    "notCodes": ["E-LOOP-001", "E-LOOP-002"],
+    "severity": { "E-LOOP-007": "error" }
+  }
+}

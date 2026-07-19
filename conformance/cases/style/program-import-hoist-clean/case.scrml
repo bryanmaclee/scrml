@@ -1,0 +1,12 @@
+<program>
+
+  #{ @import url("theme.css"); a { color: red; } }
+
+  const Card = <div props={}>
+      #{ .card { color: green; } }
+      <div class="card">hi</div>
+  </>
+
+  <Card/>
+
+</program>

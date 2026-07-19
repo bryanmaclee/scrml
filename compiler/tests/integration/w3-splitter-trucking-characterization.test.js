@@ -102,7 +102,10 @@ describe("W3 splitter — trucking post-W2 baseline", () => {
     // Spot-check the dispatch board EP — the survey measured >30 admitted
     // components on it (the W2 `<db>`-descent yielded 21 non-empty closures).
     const board = initials.find((c) =>
-      String(c.entryPointId).includes("pages/dispatch/board.scrml")
+      // entryPointId embeds a NATIVE-separator file path; normalize to POSIX
+      // separators before the substring test so it matches on Windows
+      // (`pages\dispatch\board.scrml`) as well as POSIX. No-op on POSIX.
+      String(c.entryPointId).replace(/\\/g, "/").includes("pages/dispatch/board.scrml")
     );
     expect(board).toBeDefined();
     expect(board.componentNodeIds.size).toBeGreaterThan(30);

@@ -1,0 +1,12 @@
+{
+  "id": "ctrl-012-bare-control-flow-in-markup-neg",
+  "description": "§17.4 — the canonical Tier-0 iteration form `<ul>${ for (x of @items) { lift <li>${x}</> } }</>` does NOT fire E-CONTROL-FLOW-IN-MARKUP. This is the exact form the diagnostic's own message recommends. Twinned with ctrl-012-bare-control-flow-in-markup-pos: same loop, same body, the ONLY difference is the `${ ... }` logic-block wrapper — which isolates the trigger to the missing wrapper. Note the wrapped form is a `logic` block, never a markup `text` child, so the `parentType === \"markup\"` text-run gate never sees it. W-PROGRAM-001 co-fires incidentally (no `<program>` shell); not asserted.",
+  "language-version": "1.0",
+  "spec": "§17.4, §7",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§34 E-CONTROL-FLOW-IN-MARKUP 'Does NOT fire' list, first entry: the canonical `${ for (...) { lift ... } }` form (a `${ }` logic block, not a markup text run) SHALL NOT be rejected. §17.4 makes this the Tier-0 iteration form, so it must compile silently.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CONTROL-FLOW-IN-MARKUP", "E-CTRL-011"]
+  }
+}

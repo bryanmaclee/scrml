@@ -1,0 +1,13 @@
+{
+  "id": "style-reactive-cell-lowering-clean",
+  "description": "§65.3.2 / §25.7 — a DERIVED reactive cell (`const <doubled> = @count * 2`) referenced via the `@` sigil in a flat-inline `#{}` (`width: @doubled`) lowers to the §25 reactive-CSS-var bridge (`var(--scrml-doubled)`) with NO diagnostic. The use-site `@name` membership is resolved from the COMPLETE reactive-var collector (`collectReactiveVarNames`: state + derived + tilde + engine/machine-projected), NOT the state-decl-only set — so a valid reactive cell is never mistaken for an unknown theme token (FIX2, S265 review). The emitted `var(--scrml-doubled)` shape is asserted in the source unit test.",
+  "language-version": "1.0",
+  "spec": "§65.3.2, §25.7",
+  "source-test": "compiler/tests/unit/css-wave1-emission.test.js",
+  "rationale": "§65.3.2: E-THEME-TOKEN-UNKNOWN fires ONLY when a `@name` is neither a theme token NOR a reactive cell. A derived/engine/tilde reactive cell IS a valid reference; the use-site check must use the complete reactive membership so it never false-rejects a valid reactive program. Guards the unsound-hard-error regression.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-VARIANT-AMBIGUOUS"],
+    "notCodePrefixes": ["E-THEME-"]
+  }
+}

@@ -159,8 +159,14 @@ describe("g-markup-session-read-undeclared — @session ambient read (S228)", ()
 </program>`;
     const { serverJs } = compileSource("bare-session", src);
     // The §20.5 server-only `session` object is injected server-side and the
-    // function is escalated -> its handler lives in server.js reading `session`.
+    // function is escalated -> its handler lives in server.js. Since S265 (i29e)
+    // activated the `session` server builtin (§20.5), a bare `session.userId`
+    // read no longer emits a dangling `session.userId` reference — it LOWERS to
+    // the per-request session context bound by the cookie-session wrapper
+    // (`_scrml_req._scrml_sess.userId`), resolved from the durable store.
     expect(serverJs).toContain("_scrml_session_middleware");
-    expect(serverJs).toContain("session.userId");
+    expect(serverJs).toContain("_scrml_req._scrml_sess.userId");
+    // ...and the handler that reads it is wrapped so the session context exists.
+    expect(serverJs).toContain("_scrml_session_cookie_wrap(");
   });
 });

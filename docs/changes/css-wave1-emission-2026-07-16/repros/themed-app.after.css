@@ -1,0 +1,19 @@
+/* AFTER (feat/css-wave1-emission, `@`-sigil model + S239 cascade fixes) —
+   themed-app.scrml emitted CSS.
+   - reset `@layer reset` FIRST (lowest layer; finding [1]);
+   - :root base + `.Dark` reactive variant selector;
+   - `@ink` / `@bg` (sigil) → var(--ink) / var(--bg); a BARE identifier would stay
+     literal (finding [5]);
+   - component scope rule `:where()`-flat (unconditional base). */
+@layer reset {
+  *, ::before, ::after { box-sizing: border-box; }
+  body, h1, h2, h3, h4, h5, h6, p, ul, ol, figure, blockquote, hr, fieldset { margin: 0; }
+  body { min-height: 100vh; line-height: 1.5; }
+  img, picture, video, canvas, svg { display: block; max-width: 100%; }
+  input, button, textarea, select { font: inherit; }
+}
+:root { --ink: #0f172a; --bg: #ffffff; }
+:root[data-scrml-theme-mode="Dark"] { --ink: #f8fafc; --bg: #0f172a; }
+@scope ([data-scrml="Card"]) to ([data-scrml]) {
+:where(.card) { padding: 16px; color: var(--ink); background: var(--bg); }
+}

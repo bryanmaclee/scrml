@@ -1,0 +1,17 @@
+${
+    // Server-classified: the ?{} SQL context escalates this fn to the server
+    // (§12.2 Trigger 1). It then calls flashTitle() — a function route analysis
+    // pins to the client (it touches the browser-only `document` global). A
+    // server fn calling a client-only fn is the §12.4 violation: E-ROUTE-002.
+    function auditAndFlash(name: string) {
+        ?{`INSERT INTO audit (who) VALUES (${name})`}.run()
+        flashTitle(name)
+    }
+
+    // Client-only: `document.title` is a browser-only global with no server
+    // referent, so this function executes exclusively on the client (§12.4).
+    function flashTitle(name: string) {
+        document.title = name
+    }
+}
+<button id="go" onclick=auditAndFlash("hi")>Go</button>

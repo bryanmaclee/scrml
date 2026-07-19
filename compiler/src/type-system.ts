@@ -7188,18 +7188,18 @@ function generateDbTypes(
 //   { kind: "destructure-array",  elements: [{kind: "name"|"nested"|"hole", ...}], rest? }
 //   { kind: "destructure-object", properties: [{kind: "name"|"nested", ...}], rest? }
 
-interface DestructureArrayElementShape {
+export interface DestructureArrayElementShape {
   kind: "name" | "nested" | "hole";
   name?: string;
   pattern?: DestructurePatternShape;
 }
-interface DestructureObjectPropertyShape {
+export interface DestructureObjectPropertyShape {
   kind: "name" | "nested";
   fieldName?: string;
   bindName?: string;
   pattern?: DestructurePatternShape;
 }
-type DestructurePatternShape =
+export type DestructurePatternShape =
   | {
       kind: "destructure-array";
       elements: DestructureArrayElementShape[];
@@ -7211,13 +7211,17 @@ type DestructurePatternShape =
       rest?: string;
     };
 
-function isDestructurePattern(v: unknown): v is DestructurePatternShape {
+// Exported for reuse by route-inference.ts (§12.4 client-pin shadow collection,
+// S263 review): a destructured param / local binds names that must land in the
+// DOM-global shadow set. Both helpers are small + self-contained (no other
+// type-system dependency), so the import is cycle-safe.
+export function isDestructurePattern(v: unknown): v is DestructurePatternShape {
   if (!v || typeof v !== "object") return false;
   const k = (v as { kind?: unknown }).kind;
   return k === "destructure-array" || k === "destructure-object";
 }
 
-function* iterDestructuredNames(p: DestructurePatternShape): Iterable<string> {
+export function* iterDestructuredNames(p: DestructurePatternShape): Iterable<string> {
   if (p.kind === "destructure-array") {
     for (const el of p.elements) {
       if (el.kind === "name" && typeof el.name === "string" && el.name.length > 0) {
@@ -7517,6 +7521,27 @@ function checkLogicExprIdents(
         `E-SCOPE-001: Bare identifier \`${base}\` in logic expression references the reactive variable \`@${base}\` ` +
         `without its \`@\` sigil. Reactive reads must use \`@${base}\` so the compiler can wire reactivity — ` +
         `otherwise the emitted code references an undefined local. Write \`@${base}\`.`,
+        span,
+      ));
+      return;
+    }
+    // §20.5 (S265, i29e) — the reserved `session` server builtin. In a
+    // server-escalated fn body `session` is bound into the scope chain (see the
+    // function-decl visitor), so control only reaches here for a `session`
+    // reference in a NON-server context (a client-side function body, or bare
+    // top-level logic). That is exactly the E-SCOPE-012 condition: `session` is
+    // reachable only from a server-escalated function. Emit the tailored code so
+    // the adopter is guided to give the function a server reason rather than
+    // seeing a generic "undeclared identifier".
+    if (base === "session") {
+      errors.push(new TSError(
+        "E-SCOPE-012",
+        `E-SCOPE-012: \`session\` is available only inside a web-app server ROUTE-HANDLER ` +
+        `function body. It is not reachable from a client-side function, bare top-level ` +
+        `\`\${ }\` logic, or an \`<endpoint>\` arm. Give the enclosing function a server reason ` +
+        `(a \`?{}\` query, a server-only stdlib import, or call it only from server contexts so ` +
+        `§12.2 inference classifies it server-side). For client-side session display use the ` +
+        `\`@session\` projection instead.`,
         span,
       ));
       return;
@@ -9549,6 +9574,22 @@ function annotateNodes(
         const _isSSEGenerator = boundary === "server" && (n as { isGenerator?: boolean }).isGenerator === true;
         if (_isSSEGenerator) {
           scopeChain.bind("route", { kind: "variable", resolvedType: tAsIs() });
+        }
+
+        // §20.5 (S265, i29e) — the `session` server builtin. A server-escalated
+        // fn body may reference `session.userId` / `session.isAuth` /
+        // `session.role` / `session.get(k)` / `session.set(k,v)` /
+        // `session.destroy()`; codegen (emit-expr.ts) lowers these to the
+        // per-request session context (`_scrml_req._scrml_sess`). Bind `session`
+        // as a plain server-scope local so the ident-walker
+        // (checkLogicExprIdents) does NOT false-fire E-SCOPE-001 on the base
+        // `session` ident. Mirrors the SSE `route` auto-injection above and the
+        // §38.6 channel-builtin injection. SERVER boundary ONLY — a client-side
+        // `session` reference stays unbound and is upgraded to E-SCOPE-012 by the
+        // ident-walker (§20.5: `session` is reachable only from a
+        // server-escalated function body).
+        if (boundary === "server") {
+          scopeChain.bind("session", { kind: "variable", resolvedType: tAsIs() });
         }
 
         // Walk the body.
@@ -17061,15 +17102,31 @@ type LinState = "unconsumed" | "consumed";
 type TildeState = "uninitialized" | "initialized";
 type MustUseState = "unused" | "used";
 
+/**
+ * A markup body whose runtime scheduling boundary crosses the current
+ * synchronous scope. `request`/`poll` are DEFERRED contexts (E-LIN-006 —
+ * dominance cannot be proven across the scheduling boundary). `timer`/`timeout`
+ * are RECURRING contexts (E-LIN-004 — the body may execute more than once, so a
+ * single `lin` reference is consumed N times; the recurring-context form of
+ * E-LIN-002). Both share the same "declared-outside, consumed-inside" tracker;
+ * only the emitted code + message differ (§35.5).
+ */
+type DeferredCtxKind = "request" | "poll" | "timer" | "timeout";
+
+/** §35.5: request/poll -> E-LIN-006 (deferred dominance); timer/timeout -> E-LIN-004 (recurring). */
+function deferredCtxErrorCode(ctx: DeferredCtxKind): "E-LIN-004" | "E-LIN-006" {
+  return ctx === "request" || ctx === "poll" ? "E-LIN-006" : "E-LIN-004";
+}
+
 interface LinErrorDescriptor {
-  code: "E-LIN-001" | "E-LIN-002" | "E-LIN-003" | "E-LIN-006";
+  code: "E-LIN-001" | "E-LIN-002" | "E-LIN-003" | "E-LIN-004" | "E-LIN-006";
   varName: string;
   span: Span;
   secondUseSpan?: Span;
   /** Span of the `lift` expression that first consumed this lin variable (Lin-A1). */
   liftSite?: Span;
-  /** §35.5 E-LIN-006: the markup ctx kind where consumption occurred. */
-  deferredCtx?: "request" | "poll";
+  /** §35.5 E-LIN-006 / E-LIN-004: the deferred/recurring ctx kind where consumption occurred. */
+  deferredCtx?: DeferredCtxKind;
 }
 
 interface TildeErrorDescriptor {
@@ -17106,16 +17163,17 @@ class LinTracker {
     this._declDeferredDepth.set(name, deferredDepth);
   }
 
-  consume(name: string, span: Span, currentDeferredDepth: number = 0, currentDeferredCtx: "request" | "poll" | null = null): LinErrorDescriptor | null {
+  consume(name: string, span: Span, currentDeferredDepth: number = 0, currentDeferredCtx: DeferredCtxKind | null = null): LinErrorDescriptor | null {
     if (!this._vars.has(name)) return null;
 
-    // §35.5 E-LIN-006: a lin declared outside a `<request>` / `<poll>`
-    // body cannot be consumed inside one. Fire BEFORE the state check so
-    // the user sees the boundary violation instead of a confusing E-LIN-002.
+    // §35.5: a lin declared outside a deferred/recurring markup body cannot be
+    // consumed inside one. Fire BEFORE the state check so the user sees the
+    // boundary violation instead of a confusing E-LIN-002. `request`/`poll` are
+    // deferred (E-LIN-006); `timer`/`timeout` are recurring (E-LIN-004).
     const declDepth = this._declDeferredDepth.get(name) ?? 0;
     if (currentDeferredDepth > declDepth && currentDeferredCtx) {
       return {
-        code: "E-LIN-006",
+        code: deferredCtxErrorCode(currentDeferredCtx),
         varName: name,
         span,
         deferredCtx: currentDeferredCtx,
@@ -17459,13 +17517,14 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
   // bare lin-ref nodes) are consumed before outer lt is checked.
   let currentLoopLocalLin: LinTracker | null = null;
 
-  // §35.5 E-LIN-006 — deferred-ctx stack for `<request>` / `<poll>` bodies.
-  // Incremented on entering a markup-ctx whose runtime scheduling boundary
-  // crosses the current synchronous scope. A `lin` consumption whose
-  // declaration depth is lower than the consumer depth is E-LIN-006.
-  // Closures are NOT counted — they're handled by §35.6 (capture = consume).
+  // §35.5 — deferred/recurring-ctx stack for `<request>`/`<poll>` (E-LIN-006)
+  // and `<timer>`/`<timeout>` (E-LIN-004) bodies. Incremented on entering a
+  // markup-ctx whose runtime scheduling boundary crosses the current
+  // synchronous scope. A `lin` consumption whose declaration depth is lower than
+  // the consumer depth fires the ctx's code (E-LIN-006 deferred / E-LIN-004
+  // recurring). Closures are NOT counted — §35.6 governs them (capture = consume).
   let currentDeferredDepth = 0;
-  let currentDeferredCtx: "request" | "poll" | null = null;
+  let currentDeferredCtx: DeferredCtxKind | null = null;
 
   function mkSpan(): Span {
     return { file, start: 0, end: 0, line: 1, col: 1 };
@@ -17501,7 +17560,7 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
       const err = currentLoopLocalLin.consume(name, resolvedSpan, currentDeferredDepth, currentDeferredCtx);
       if (err) {
         emitLinError(err, resolvedSpan);
-        if (err.code === "E-LIN-006") currentLoopLocalLin.forceConsume(name, resolvedSpan);
+        if (err.code === "E-LIN-006" || err.code === "E-LIN-004") currentLoopLocalLin.forceConsume(name, resolvedSpan);
       }
       return;
     }
@@ -17520,7 +17579,7 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
       const err = tracker.consume(name, resolvedSpan, currentDeferredDepth, currentDeferredCtx);
       if (err) {
         emitLinError(err, resolvedSpan);
-        if (err.code === "E-LIN-006") tracker.forceConsume(name, resolvedSpan);
+        if (err.code === "E-LIN-006" || err.code === "E-LIN-004") tracker.forceConsume(name, resolvedSpan);
       }
     }
   }
@@ -17557,6 +17616,17 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
         `Every branch of the if/match must either consume or explicitly discard it.`,
         s,
       ));
+    } else if (desc.code === "E-LIN-004") {
+      const ctxTag = desc.deferredCtx === "timeout" ? "<timeout>" : "<timer>";
+      errors.push(new TSError(
+        "E-LIN-004",
+        `E-LIN-004: Linear variable \`${desc.varName}\` is consumed inside a ${ctxTag} body — ` +
+        `a recurring execution context that may run more than once. A \`lin\` variable must be ` +
+        `consumed exactly once, but a single reference here is consumed on every run (the ` +
+        `recurring-context form of E-LIN-002). Declare \`${desc.varName}\` inside the ${ctxTag} ` +
+        `body, or pass a consumed (non-\`lin\`) value into it.`,
+        s,
+      ));
     } else if (desc.code === "E-LIN-006") {
       const ctxTag = desc.deferredCtx === "poll" ? "<poll>" : "<request>";
       errors.push(new TSError(
@@ -17574,7 +17644,7 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
   function emitTildeError(desc: TildeErrorDescriptor, contextSpan?: Span): void {
     const s = desc.span ?? contextSpan ?? mkSpan();
     if (desc.code === "E-TILDE-001") {
-      errors.push(new TSError("E-TILDE-001", `E-TILDE-001: The pipeline accumulator \`~\` was read before being initialized. Add \`~ = <value>\` before this line to give it an initial value. See §32 in the spec.`, s));
+      errors.push(new TSError("E-TILDE-001", `E-TILDE-001: The pipeline accumulator \`~\` was read before being initialized in the current logic context. \`~\` is set by an unassigned expression statement (e.g. \`fetchUser(id)\` with no binding) or by a \`lift\`; add one before referencing \`~\`, or capture the value with \`let\`. See §32 in the spec.`, s));
     } else if (desc.code === "E-TILDE-002") {
       errors.push(new TSError("E-TILDE-002", `E-TILDE-002: The pipeline accumulator \`~\` was set to a value but never used before it was overwritten or the block ended. Use \`lift ~\` or read \`~\` before setting it again. See §32 in the spec.`, s));
     }
@@ -17632,10 +17702,10 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
             const err = tracker.consume(name, refSpan, currentDeferredDepth, currentDeferredCtx);
             if (err) {
               emitLinError(err, node.span as Span | undefined);
-              // Suppress cascading E-LIN-001 after E-LIN-006 — the boundary
-              // violation is the primary diagnostic; the unconsumed follow-up
-              // would be noise.
-              if (err.code === "E-LIN-006") tracker.forceConsume(name, refSpan);
+              // Suppress cascading E-LIN-001 after E-LIN-006/E-LIN-004 — the
+              // boundary violation is the primary diagnostic; the unconsumed
+              // follow-up would be noise.
+              if (err.code === "E-LIN-006" || err.code === "E-LIN-004") tracker.forceConsume(name, refSpan);
             }
           }
         }
@@ -18016,20 +18086,23 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
         break;
       }
 
-      // §35.5 E-LIN-006 — `<request>` and `<poll>` markup bodies form a
-      // deferred-execution boundary. A lin declared outside the body cannot
-      // be consumed inside it. Increment the deferred-ctx depth around the
-      // children walk, then restore. AST shape: markup nodes carry their
-      // element name on `tag` (or `name`); children holds nested logic/markup.
+      // §35.5 — `<request>`/`<poll>` (deferred, E-LIN-006) and `<timer>`/
+      // `<timeout>` (recurring, E-LIN-004) markup bodies each cross a runtime
+      // scheduling boundary. A lin declared outside the body cannot be consumed
+      // inside it. Increment the deferred-ctx depth around the children walk,
+      // then restore. AST shape: markup nodes carry their element name on `tag`
+      // (or `name`); children holds nested logic/markup.
       case "markup": {
         const markupAny = node as ASTNodeLike & { tag?: string };
         const markupName = (markupAny.tag as string | undefined) ?? (node.name as string | undefined);
-        const isDeferred = markupName === "request" || markupName === "poll";
+        const isDeferred =
+          markupName === "request" || markupName === "poll" ||
+          markupName === "timer" || markupName === "timeout";
         const prevDepth = currentDeferredDepth;
         const prevCtx = currentDeferredCtx;
         if (isDeferred) {
           currentDeferredDepth = prevDepth + 1;
-          currentDeferredCtx = markupName as "request" | "poll";
+          currentDeferredCtx = markupName as DeferredCtxKind;
         }
         const mupBody = node.body as ASTNodeLike[] | undefined;
         if (Array.isArray(mupBody)) {
@@ -18159,7 +18232,7 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
         const err = currentLoopLocalLin.consume(name, resolvedSpan, currentDeferredDepth, currentDeferredCtx);
         if (err) {
           emitLinError(err, resolvedSpan);
-          if (err.code === "E-LIN-006") currentLoopLocalLin.forceConsume(name, resolvedSpan);
+          if (err.code === "E-LIN-006" || err.code === "E-LIN-004") currentLoopLocalLin.forceConsume(name, resolvedSpan);
         }
         return;
       }
@@ -18182,7 +18255,7 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
         const err = tracker.consume(name, resolvedSpan, currentDeferredDepth, currentDeferredCtx);
         if (err) {
           emitLinError(err, resolvedSpan);
-          if (err.code === "E-LIN-006") tracker.forceConsume(name, resolvedSpan);
+          if (err.code === "E-LIN-006" || err.code === "E-LIN-004") tracker.forceConsume(name, resolvedSpan);
         }
       }
     }
@@ -18664,12 +18737,19 @@ function checkLoopControl(
         const initExpr = (node as { initExpr?: { kind?: string; raw?: string } }).initExpr;
         const raw = initExpr?.raw ?? ((node as { init?: string }).init ?? "");
         const declName = (node as { name?: string }).name;
-        // Only fire when the body uses `lift` — the only reason a user would
-        // write `let x = while(...) { ... }` is to extract a value via lift.
-        // The ast-builder sometimes absorbs an unrelated while-stmt into a
-        // preceding let-decl's init; that misparse doesn't use lift.
+        // §49.4.4: a `while` in expression position (its whole value bound as a
+        // decl's init, e.g. `let x = while (...) { ... }`) SHALL fire E-LOOP-007,
+        // WITH OR WITHOUT `lift` in its body — §49.9's own example `let x = while
+        // (true) { 5 }` has no lift and IS an Error. The valid §49.6.1 accumulator
+        // pattern is a STATEMENT `while` + a following `let result = ~`; there the
+        // decl's init is `~` (an ident), never an escape-hatch `while(...){...}`,
+        // so it does not match here. (Earlier this required a `\blift\b` token in
+        // the body to dodge an ast-builder misparse that folded a following
+        // while-stmt into a preceding decl's init; that misparse no longer
+        // reproduces — a while-stmt after a complete let/const decl now parses as a
+        // separate statement — so the narrowing is dropped per §49.4.4.)
         const rawStr = String(raw).trim();
-        const looksLikeWhileAsExpr = /^while\s*\([\s\S]*?\)\s*\{[\s\S]*?\blift\b[\s\S]*\}\s*$/.test(rawStr);
+        const looksLikeWhileAsExpr = /^while\s*\([\s\S]*\)\s*\{[\s\S]*\}\s*$/.test(rawStr);
         if (declName && initExpr?.kind === "escape-hatch" && looksLikeWhileAsExpr) {
           errors.push(new TSError(
             "E-LOOP-007",
@@ -18750,6 +18830,11 @@ function checkLoopControl(
               "If this is intentional, wrap in double parens to suppress: `((x = next()))`. " +
               "If you meant equality, use `==` or `is`.",
               mkSpan(node),
+              // §34: W-ASSIGN-001 is a Warning. Without this 4th arg the TSError
+              // severity defaults to "error" (constructor default), which would
+              // emit this W- code at severity ERROR. Mirrors the sibling site
+              // (type-system.ts checkWhileIfCondition) which also passes "warning".
+              "warning",
             ));
           }
         }

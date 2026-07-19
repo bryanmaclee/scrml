@@ -1,0 +1,9 @@
+${
+    <items> = []
+    function loadTasks(uid) {
+        return ?{`/* fetch active */ SELECT id, text FROM tasks WHERE user_id = ${uid}`}.all()
+    }
+}
+<program db="./app.db">
+    <button id="load" onclick=@items = loadTasks(1)>Load</>
+</program>

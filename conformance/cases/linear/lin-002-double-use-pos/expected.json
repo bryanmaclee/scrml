@@ -1,0 +1,13 @@
+{
+  "id": "lin-002-double-use-pos",
+  "description": "§35.5 — a `lin` variable consumed a SECOND time fires E-LIN-002. This pins the code's PRIMARY trigger, which the §34 registry states as the whole condition for E-LIN-002 ('`lin` variable consumed more than once'). Its sibling `lin-002-consumed-in-loop-pos` pins the code's OTHER trigger (§35.4.4 — consumption inside a loop, where the iteration count is unprovable); both paths emit the same code from different sites (double-use: type-system.ts:17126 descriptor; loop: type-system.ts:17512). This is the single most load-bearing case in the §35 family: 'a linear value used twice' is precisely the unsoundness `lin` exists to reject. The clean counterpart — exactly-one consumption — is pinned by `lin-001-never-consumed-neg`, so no separate neg twin is authored here (it would duplicate that shape). E-LIN-001 must NOT cascade: `token` IS consumed, so the never-consumed diagnostic is inapplicable. W-PROGRAM-001 co-fires incidentally (no `<program>` shell around the bare markup).",
+  "language-version": "1.0",
+  "spec": "§35.5, §35.2, §35.3",
+  "source-test": "compiler/src/type-system.ts",
+  "rationale": "§34 registry (SPEC.md:17968): 'E-LIN-002 | §35.5 | `lin` variable consumed more than once | Error'. §35.2 (SPEC.md:18648): 'Every appearance of a `lin` identifier in a position that is not a declaration SHALL count as a consumption event (§35.3). The compiler SHALL reject any second reference — read-only or otherwise — with E-LIN-002.' Here `token` is consumed by `authenticate(token)` and then referenced again by `refresh(token)`; the second reference is a consumption of an already-consumed binding, so the exactly-once guarantee (§35.1) is violated.",
+  "expect": {
+    "codes": ["E-LIN-002"],
+    "notCodes": ["E-LIN-001", "E-LIN-003"],
+    "severity": { "E-LIN-002": "error" }
+  }
+}

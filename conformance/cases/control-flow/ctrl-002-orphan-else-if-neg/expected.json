@@ -1,0 +1,12 @@
+{
+  "id": "ctrl-002-orphan-else-if-neg",
+  "description": "§17 Worked Example 3 shape (valid) — an `else-if=` properly anchored to a preceding `if=` sibling, chain terminating at `else`, does NOT fire E-CTRL-002. Conditions use the atomic `@step.eq(n)` call form, legal bare per §5.2. W-PROGRAM-SPA-INFERRED co-fires incidentally at severity info; not asserted.",
+  "language-version": "1.0",
+  "spec": "§17.1.1",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§17.1.1: `else-if=` SHALL be immediately preceded at the same parent level by an element carrying `if=` or `else-if=`. Here the `else-if=` directly follows the chain-opening `if=` element, satisfying the precondition, so E-CTRL-002 SHALL stay silent. Per §17.1.1 the chain opens with `if=`, continues with `else-if=`, and terminates with `else`.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CTRL-002", "E-CTRL-001", "E-CTRL-003"]
+  }
+}
