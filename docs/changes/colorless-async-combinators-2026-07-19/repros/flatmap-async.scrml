@@ -1,0 +1,6 @@
+${
+  import { verifyPassword } from "scrml:auth"
+  export function spread(pw, hs) {
+    return hs.flatMap(h => verifyPassword(pw, h))
+  }
+}

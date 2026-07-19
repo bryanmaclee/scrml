@@ -19,6 +19,10 @@ import { bodyContains } from "./collect.ts";
 import { extractCalleeNames } from "./scheduling.ts";
 import { isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { CGError } from "./errors.ts";
+// Phase-2 colorless-async — the clean-family combinator detector, shared with the
+// emit-expr lowering site so the fail-closed drain and the lowering agree on which
+// callbacks are transformed (and therefore must NOT fail closed).
+import { isAsyncCombinatorCall } from "./async-combinators.ts";
 
 /** A loosely-typed AST node. */
 type ASTNode = Record<string, unknown>;
@@ -388,6 +392,41 @@ export function collectNonAwaitableAsyncCalls(
     // VERBATIM, so any async call inside is un-awaitable regardless of nesting.
     if ((k === "escape-hatch" || (k === "lit" && n.litType === "template")) && typeof n.raw === "string") {
       for (const c of extractCalleeNames(n.raw)) if (isAsyncName(c)) record(c, n.span);
+    }
+    // Phase-2 colorless-async — a CLEAN-FAMILY collection-method call with an
+    // async first-arg callback is NOT a non-awaitable leak: emit-expr lowers it to
+    // `await _scrml_<method>Async(coll, asyncCb)` and RE-EMITS the callback async,
+    // so the async call inside becomes an awaited combinator-callback body. Walk
+    // the receiver + trailing args normally, and the callback lambda's body as
+    // AWAITABLE (insideCallback=false) — but still descend so a DOUBLY-nested SYNC
+    // lambda inside the callback is caught. `.sort` is NOT clean-family, so its
+    // async-comparator lambda stays a non-awaitable region and correctly fails
+    // closed (DD FORK 2).
+    if (k === "call" && isAsyncCombinatorCall(n, isAsyncName)) {
+      // F2 (S239 review) — the combinator CALL itself is awaitable (it returns a
+      // Promise), but if THIS call sits in a non-awaitable position (a sync-lambda
+      // param default / a raw region — `insideCallback`), emit-expr emits it BARE
+      // `_scrml_<m>Async(...)` (an unawaited Promise → accept-all leak). `await` is
+      // illegal there, so fail closed — mode-agnostically, since every drain
+      // (library / client / server value-export) runs this scan. The callback body
+      // is still walked AWAITABLE below (emit-expr re-emits it async even when the
+      // combinator itself is bare).
+      const propName = ((n.callee as ASTNode | undefined)?.property);
+      if (insideCallback && typeof propName === "string") {
+        record(`${propName}(…) async-callback combinator`, n.span);
+      }
+      const callee = n.callee as ASTNode | undefined;
+      if (callee) walk(callee, insideCallback);
+      const cbArgs = Array.isArray(n.args) ? (n.args as unknown[]) : [];
+      const cb = cbArgs[0] as ASTNode | undefined;
+      if (cb && cb.kind === "lambda") {
+        walk(cb.body, false);
+        for (const p of (Array.isArray(cb.params) ? (cb.params as unknown[]) : [])) walk(p, true);
+      } else if (cb) {
+        walk(cb, insideCallback);
+      }
+      for (let ai = 1; ai < cbArgs.length; ai++) walk(cbArgs[ai], insideCallback);
+      return;
     }
     // A structured call to an async name INSIDE a callback/param-default lambda.
     if (k === "call" && insideCallback) {

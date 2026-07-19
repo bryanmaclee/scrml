@@ -1,0 +1,6 @@
+${
+  import { verifyPassword } from "scrml:auth"
+  export function ordered(pw, hs) {
+    return hs.sort((a, b) => verifyPassword(pw, a))
+  }
+}

@@ -188,11 +188,15 @@ describe("Issue #1 — server fn calling another server fn", () => {
 // ---------------------------------------------------------------------------
 
 describe("Issue #1 — review hardening", () => {
-  // Finding 1: a peer call inside a SYNCHRONOUS callback can't be lowered to
-  // `await` (invalid JS in a non-async lambda) nor silently made async (would
-  // return Promises from .map). It must surface a clear diagnostic, NOT emit
-  // code the compiler's own validator rejects.
-  test("peer call inside a synchronous callback yields E-SERVER-FN-IN-SYNC-CALLBACK", () => {
+  // Finding 1 — PHASE-2 UPDATE (DD colorless-async-boundaries FORK 1, ratified
+  // S259 "build the async collection"): a peer server-fn is async (it does SQL), so
+  // `ids.map(x => lookup(x))` is a CLEAN-FAMILY collection method with an async
+  // callback — it now LOWERS to `await _scrml_mapAsync(ids, async (x) => await
+  // lookup(x))` (a sequential for-await combinator, order preserved) instead of the
+  // Phase-1 interim E-SERVER-FN-IN-SYNC-CALLBACK. The still-non-awaitable positions
+  // (a PARAM DEFAULT / a raw BLOCK body / a `.sort` comparator) still fail closed —
+  // see the round-2 defects B/C1 below.
+  test("peer call in a clean-family `.map` callback lowers to `await _scrml_mapAsync(...)`", () => {
     const src = `
 <program>
 <db src="./items.db" tables="items">
@@ -209,13 +213,15 @@ describe("Issue #1 — review hardening", () => {
   <button onclick=bumpAll([1,2])>Go</button>
 </>
 </program>`;
-    const { errors } = compileToFiles(src, "sync-callback", {
+    const { errors, serverJsPath } = compileToFiles(src, "sync-callback", {
       "items.db": ["CREATE TABLE items (id INTEGER PRIMARY KEY, n INTEGER)"],
     });
     const codes = errors.map((e) => e.code);
-    expect(codes).toContain("E-SERVER-FN-IN-SYNC-CALLBACK");
-    // It must NOT be the generic "compiler emitted invalid JS" defect framing.
+    expect(codes).not.toContain("E-SERVER-FN-IN-SYNC-CALLBACK");
     expect(codes).not.toContain("E-CODEGEN-INVALID-LOGIC");
+    const js = readFileSync(serverJsPath, "utf-8");
+    expect(js).toMatch(/await _scrml_mapAsync\(ids,\s*async\s*\(x\)\s*=>\s*await\s+lookup\(x\)\)/);
+    expect(js).toMatch(/async function _scrml_mapAsync\(coll, cb\)/);
   });
 
   // Finding 2: a peer call that becomes a CPS return-var initializer must be

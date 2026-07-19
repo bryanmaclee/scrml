@@ -1,0 +1,5 @@
+${
+  export function activeOnes(hs) {
+    return hs.filter(h => h.active)
+  }
+}

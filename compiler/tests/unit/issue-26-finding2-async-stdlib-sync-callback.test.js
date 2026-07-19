@@ -83,58 +83,79 @@ ${body}
 
 const CODE = "E-ASYNC-STDLIB-IN-SYNC-CALLBACK";
 
-describe("Finding-2 (a) FAIL-CLOSED — async stdlib in a sync callback ERRORS", () => {
-  test(".some expr-body verifyPassword → E-ASYNC-STDLIB-IN-SYNC-CALLBACK", () => {
-    const { codes } = compileServer("a-some", page(`
+// PHASE-2 UPDATE (DD colorless-async-boundaries FORK 1, ratified S259 — bryan
+// "build the async collection"): the Phase-1 interim backstop fail-closed a
+// CLEAN-FAMILY collection method (some/every/find/findIndex/filter/map/forEach/
+// reduce/flatMap) with an async callback. FORK 1 now BUILDS the transform: the
+// call lowers to `await _scrml_<method>Async(coll, asyncCb)` (a sequential
+// for-await combinator, order + early-exit preserved), so the flagship accept-all
+// shape Just Works instead of erroring. The still-non-awaitable positions — a raw
+// BLOCK-body callback (position 3) and a callback PARAM DEFAULT (position 2) — plus
+// `.sort` with an async comparator (FORK 2, no bounded transform) STILL fail closed.
+describe("Finding-2 (a) — clean-family async callback TRANSFORMS (Phase-2 FORK 1)", () => {
+  test(".some expr-body verifyPassword → lowers to `await _scrml_someAsync(...)`, no error", () => {
+    const { serverJs, codes } = compileServer("a-some", page(`
       function f(emailArg, pw) {
         const rows = ?{\`SELECT password_hash FROM users WHERE email = \${emailArg}\`}.all()
         const any = rows.some(h => verifyPassword(pw, h.password_hash))
         if (!any) { return { error: "bad" } }
         return { ok: true }
       }`));
-    expect(codes).toContain(CODE);
+    expect(codes).not.toContain(CODE);
+    expect(serverJs).toMatch(/await _scrml_someAsync\(rows,\s*async\s*\(h\)\s*=>\s*await\s+verifyPassword\(/);
+    expect(serverJs).toMatch(/async function _scrml_someAsync\(coll, cb\)/);
   });
 
-  test(".find expr-body verifyPassword → error", () => {
-    const { codes } = compileServer("a-find", page(`
+  test(".find expr-body verifyPassword → lowers to `_scrml_findAsync`, no error", () => {
+    const { serverJs, codes } = compileServer("a-find", page(`
       function f(emailArg, pw) {
         const rows = ?{\`SELECT password_hash FROM users WHERE email = \${emailArg}\`}.all()
         const m = rows.find(h => verifyPassword(pw, h.password_hash))
         return { ok: m is not }
       }`));
-    expect(codes).toContain(CODE);
+    expect(codes).not.toContain(CODE);
+    expect(serverJs).toMatch(/await _scrml_findAsync\(rows,\s*async\s*\(h\)/);
   });
 
-  test(".filter expr-body verifyPassword → error", () => {
-    const { codes } = compileServer("a-filter", page(`
+  test(".filter expr-body verifyPassword → lowers to `_scrml_filterAsync`, no error", () => {
+    const { serverJs, codes } = compileServer("a-filter", page(`
       function f(emailArg, pw) {
         const rows = ?{\`SELECT password_hash FROM users WHERE email = \${emailArg}\`}.all()
         const good = rows.filter(h => verifyPassword(pw, h.password_hash))
         return { n: good }
       }`));
-    expect(codes).toContain(CODE);
+    expect(codes).not.toContain(CODE);
+    expect(serverJs).toMatch(/await _scrml_filterAsync\(rows,\s*async\s*\(h\)/);
   });
 
-  test(".map expr-body hashPassword → error", () => {
-    const { codes } = compileServer("a-map", page(`
+  test(".map expr-body hashPassword → lowers to `_scrml_mapAsync`, no error", () => {
+    const { serverJs, codes } = compileServer("a-map", page(`
       function f(emailArg, pws) {
         const rows = ?{\`SELECT id FROM users WHERE email = \${emailArg}\`}.all()
         const hs = pws.map(p => hashPassword(p))
         return { hs }
       }`));
-    expect(codes).toContain(CODE);
+    expect(codes).not.toContain(CODE);
+    expect(serverJs).toMatch(/await _scrml_mapAsync\(pws,\s*async\s*\(p\)\s*=>\s*await\s+hashPassword\(/);
   });
 
-  test("nested lambda — async stdlib in an INNER sync callback → error", () => {
-    const { codes } = compileServer("a-nested", page(`
+  test("nested lambda — async stdlib in an INNER clean-family callback lowers recursively", () => {
+    const { serverJs, codes } = compileServer("a-nested", page(`
       function f(emailArg, pw) {
         const groups = ?{\`SELECT password_hash FROM users WHERE email = \${emailArg}\`}.all()
         const any = groups.some(g => [g].some(h => verifyPassword(pw, h.password_hash)))
         return { ok: any }
       }`));
-    expect(codes).toContain(CODE);
+    // Both `.some` are clean-family: the outer callback is itself async (its body
+    // reaches verifyPassword via the inner `.some`), so it re-emits async and the
+    // inner `.some` lands in an awaitable body — nesting resolves recursively.
+    expect(codes).not.toContain(CODE);
+    expect(serverJs).toMatch(/await _scrml_someAsync\(groups,\s*async\s*\(g\)/);
+    expect(serverJs).toMatch(/await _scrml_someAsync\(\[g\],\s*async\s*\(h\)/);
   });
+});
 
+describe("Finding-2 (a2) STILL FAIL-CLOSED — non-awaitable positions the transform does not reach", () => {
   test("parameter default — async stdlib in a callback param default → error", () => {
     const { codes } = compileServer("a-paramdefault", page(`
       function f(emailArg, pw) {
@@ -152,6 +173,16 @@ describe("Finding-2 (a) FAIL-CLOSED — async stdlib in a sync callback ERRORS",
         const any = rows.some(h => { return verifyPassword(pw, h.password_hash) })
         if (!any) { return { error: "bad" } }
         return { ok: true }
+      }`));
+    expect(codes).toContain(CODE);
+  });
+
+  test(".sort async comparator (FORK 2 — no bounded transform) → error", () => {
+    const { codes } = compileServer("a-sort", page(`
+      function f(emailArg, pw) {
+        const rows = ?{\`SELECT password_hash FROM users WHERE email = \${emailArg}\`}.all()
+        const ranked = rows.sort((a, b) => verifyPassword(pw, a.password_hash) ? -1 : 1)
+        return { ranked }
       }`));
     expect(codes).toContain(CODE);
   });

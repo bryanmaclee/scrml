@@ -5,6 +5,7 @@ import { exprNodeContainsCall } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
 import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies } from "./runtime-chunks.ts";
+import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, type RequestBodyCell } from "./reactive-deps.ts";
 import { CGError } from "./errors.ts";
 import { escapeRegex } from "./utils.ts";
@@ -2938,6 +2939,17 @@ export function generateClientJs(ctx: CompileContext): string {
       ));
     }
   }
+  });
+
+  // Phase-2 colorless-async — a client-side async-callback collection method
+  // (`nums.map(n => safeCallAsync(...))`) lowers to `await _scrml_<method>Async(...)`
+  // in the client body. Append the used combinator helpers as a module FOOTER (JS
+  // function declarations hoist, so they resolve from the client fns above). On-use
+  // + per-method — a bundle that lowers no async callback carries none. The SQL-leak
+  // scan above has already run; the combinators contain no server-only pattern.
+  clientStage(ctx, "async-combinator-inject", () => {
+    const block = asyncCombinatorHelperBlock(clientCode);
+    if (block) clientCode = clientCode + block;
   });
 
   // S22 §1a slice 2: release the per-file variant registry.

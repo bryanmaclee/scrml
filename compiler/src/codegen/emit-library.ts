@@ -13,9 +13,23 @@ import type { CompileContext } from "./context.ts";
 import { computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, asyncStdlibSyncCallbackError, aliasedAsyncCallError } from "./emit-library-shared.ts";
 import { buildCalleeImportMap } from "./scheduling.ts";
 import { setServerAsyncClassifier } from "./emit-expr.ts";
+import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 
 /** A loosely-typed AST node. */
 type ASTNode = Record<string, unknown>;
+
+/**
+ * Phase-2 colorless-async — append any used collection-combinator helper
+ * (`_scrml_someAsync` … `_scrml_flatMapAsync`) as a module FOOTER. JS function
+ * declarations hoist to the module scope, so the helper is callable from the
+ * user fns above it; the footer keeps user code first + the compiler runtime
+ * last (readable). On-use + per-method (a module that lowers no async callback
+ * carries none). Applied at every `generateLibraryJs` return.
+ */
+function withAsyncCombinators(moduleSrc: string): string {
+  const block = asyncCombinatorHelperBlock(moduleSrc);
+  return block ? moduleSrc + block : moduleSrc;
+}
 
 /** A span object with start/end offsets. */
 interface Span {
@@ -970,7 +984,7 @@ export function generateLibraryJs(
       }
     }
 
-    return lines.join("\n");
+    return withAsyncCombinators(lines.join("\n"));
   }
 
   // ---------------------------------------------------------------------------
@@ -1041,5 +1055,5 @@ export function generateLibraryJs(
     }
   }
 
-  return lines.join("\n");
+  return withAsyncCombinators(lines.join("\n"));
 }

@@ -1,0 +1,12 @@
+<program>
+  <h1>Login</h1>
+</program>
+
+${
+  import { verifyPassword } from "scrml:auth"
+
+  server function checkAny(pw, hashes) {
+    const anyValid = hashes.some(h => verifyPassword(pw, h))
+    return anyValid
+  }
+}

@@ -1,0 +1,6 @@
+${
+  import { verifyPassword } from "scrml:auth"
+  export function keepValid(pw, hs) {
+    return hs.filter(h => verifyPassword(pw, h))
+  }
+}

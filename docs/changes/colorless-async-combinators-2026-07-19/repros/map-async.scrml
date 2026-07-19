@@ -1,0 +1,6 @@
+${
+  import { hashPassword } from "scrml:auth"
+  export function hashAll(pws) {
+    return pws.map(p => hashPassword(p))
+  }
+}

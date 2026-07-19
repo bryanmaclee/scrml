@@ -46,10 +46,11 @@ function compileSource(scrmlSource, testName) {
       outputDir: resolve(tmpDir, "out"),
     });
     let clientJs = null;
+    let serverJs = null;
     for (const [fp, output] of result.outputs) {
-      if (fp.includes(tag)) clientJs = output.clientJs ?? null;
+      if (fp.includes(tag)) { clientJs = output.clientJs ?? null; serverJs = output.serverJs ?? null; }
     }
-    return { errors: result.errors ?? [], clientJs };
+    return { errors: result.errors ?? [], clientJs, serverJs };
   } finally {
     if (existsSync(tmpInput)) rmSync(tmpInput);
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true });
@@ -188,9 +189,12 @@ describe("§7: emitted client.js for the nested cases passes JS syntax check", (
   });
 });
 
-// §8 — fail-closed guard still fires for a nested sync-callback peer call
-describe("§8: fail-closed — peer server-fn in a sync `.some` callback nested in `if` still errors", () => {
-  test("E-SERVER-FN-IN-SYNC-CALLBACK fires (server mode) — recursion does not suppress it", () => {
+// §8 — PHASE-2 (DD colorless-async-boundaries FORK 1, ratified S259): a clean-family
+// collection method with an async callback — INCLUDING a peer-server-fn callback (a
+// peer is async: it does SQL) — lowers to the async combinator. The Phase-1 interim
+// E-SERVER-FN-IN-SYNC-CALLBACK for `.some(x => peer())` is superseded by the transform.
+describe("§8: peer server-fn in a `.some` callback nested in `if` lowers to the combinator", () => {
+  test("`.some(x => peer())` lowers to `await _scrml_someAsync(...)`, no E-SERVER-FN-IN-SYNC-CALLBACK", () => {
     const src = `<program>
 \${
     server function peer() {
@@ -208,9 +212,11 @@ describe("§8: fail-closed — peer server-fn in a sync `.some` callback nested 
 <span>\${outer(true)}</span>
 </>
 `;
-    const { errors } = compileSource(src, "failclosed-nested-some");
+    const { serverJs, errors } = compileSource(src, "combinator-nested-some");
     const codes = errors.map(e => e.code ?? "");
-    expect(codes).toContain("E-SERVER-FN-IN-SYNC-CALLBACK");
+    expect(codes).not.toContain("E-SERVER-FN-IN-SYNC-CALLBACK");
+    expect(serverJs).toMatch(/await _scrml_someAsync\(xs,\s*async\s*\(x\)\s*=>\s*await\s+peer\(\)\)/);
+    expect(serverJs).toMatch(/async function _scrml_someAsync\(coll, cb\)/);
   });
 });
 
