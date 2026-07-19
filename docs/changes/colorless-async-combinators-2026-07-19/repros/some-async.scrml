@@ -1,0 +1,7 @@
+${
+  import { verifyPassword } from "scrml:auth"
+  export function anyValid(pw, hs) {
+    const ok = hs.some(fn(h) => verifyPassword(pw, h))
+    return ok
+  }
+}
