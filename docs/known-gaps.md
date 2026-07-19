@@ -16,8 +16,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 1 |
-| MED | 28 |
-| LOW | 20 |
+| MED | 30 |
+| LOW | 22 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -53,6 +53,16 @@
 ### g-attr-writer-conflict-duplicate-wholesale — two wholesale owners of ONE surface on one element (`<div class=(@a) class=(@b)>`) are NOT flagged: they emit two independent reactive `class` bindings with no error. Benign at runtime (the HTML parser keeps the first `class` attribute; the second binding's querySelector finds nothing and its effect is a null-guarded no-op), so it is a latent author mistake rather than a crash. Detecting it requires counting same-named wholesale attrs across the per-attr emit loop (risks a double-fire). — `NEW S268 (#81 Axiom ① S239 gate); LOW; open`
 
 ### g-value-attr-component-root-browser-global-over-refused — the finding-1 fail-closed guard (`loweredExprHasFreeIdentifier`, gated to `_expandedFrom` component roots) OVER-refuses a legit value-attr expression that references a BROWSER global (`title=(location.pathname)`, `window.*`, `document.*`, `navigator.*`) on a component root: those idents are undefined in the node COMPILE-time global scope, so the scope-walk reads them as free (substituted-prop) identifiers and DROPS the attribute with `W-CG-VALUE-ATTR-COMPONENT-PROP` — even though they'd resolve fine at runtime in the browser. Fail-closed-SAFE (no crash; ≤ pre-#81 which dropped it too), but (a) it's an over-refusal of a valid pattern, and (b) the `…-COMPONENT-PROP` warning MIS-ATTRIBUTES the cause (it's an unrecognized global, not a prop). Found by PA independent re-verification of the finding-1 fix (the agent's report claimed "JS globals are allowed" — true for node globals like `Math`/`JSON`, false for browser globals). Fix: seed the scope-walk's global allowlist with the standard browser globals (`window`/`document`/`location`/`navigator`/…) so a real global reference emits, and/or split the warning message (global-vs-prop). — `NEW S268 (#81 Axiom ① PA re-verify); LOW; open`
+## §S267 — gaps filed S267 (2026-07-18, Peter; surfaced during the #87 nested-auto-await S239 review)
+
+### g-reactive-write-member-server-call-no-autoawait — a reactive write whose RHS is a MEMBER-ACCESS of a server call, `@cell = serverFn().field`, emits a BARE unawaited `_scrml_reactive_set("cell", _scrml_fetch_serverFn_N().field)` → `.field` on a Promise is `undefined` → the cell silently gets `undefined` (reviews as correct). Reproduces at BOTH top-level AND nested, ON MAIN (pre-existing; a DIFFERENT axis from #87, which fixes the POSITION axis for const-decl/assign). The emit-client (~:2534) fire-and-forget IIFE rewrite only matches the WHOLE-result form `_scrml_reactive_set(name, await stub())`, not a `stub().field` RHS. WORKAROUND (works today, #87-fixed): hoist to a const-decl — `const r = serverFn(); @cell = r.field`. Fix = extend the IIFE rewrite/await-injection to await the server call inside a member/expression RHS: `(async () => _scrml_reactive_set("cell", (await _scrml_fetch_serverFn_N()).field))().catch(...)`. — `NEW S267 (#87 review); MED; open`
+<!-- @gap id=g-reactive-write-member-server-call-no-autoawait sev=MED status=open -->
+
+### g-match-arm-server-call-no-autoawait — a server call inside a CLIENT `match` arm (`const label = match k { 1 :> getFlag().ok  _ :> false }`) emits a bare unawaited Promise; the enclosing client fn is not `async` → `label` holds a Promise. A client `match` lowers to a SYNCHRONOUS IIFE (value-return), where `await` is illegal, so #87's statement-level await-injection can't apply. §19.9.3 names match arms a CPS-eligible position → conformance gap. Fix = lower the arm's IIFE to an ASYNC IIFE and `await` it (mark the enclosing fn async), OR CPS-split. Distinct mechanism from #87. Sweep siblings when fixing: ternary arms, `!{}` guarded-expr handler bodies, `<each>`-in-logic lift bodies, `given` blocks. — `NEW S267 (#87 review); MED; open`
+<!-- @gap id=g-match-arm-server-call-no-autoawait sev=MED status=open -->
+
+### g-ternary-init-server-call-await-misbind — `const x = @flag ? serverFn() : []` emits `const x = await _scrml_reactive_get("flag") ? _scrml_fetch_serverFn_N() : []` — the `await` binds the CONDITION, not the server call; `serverFn()` is never awaited, so `x` holds a Promise. Silent wrong-value, pre-existing on main. `extractInitExpr` splices `await` before a ternary without parenthesizing. Fix = parenthesize non-trivial init exprs before prefixing `await`, or inject `await` at the actual server-call sub-expression. — `NEW S267 (#87 review); LOW; open`
+<!-- @gap id=g-ternary-init-server-call-await-misbind sev=LOW status=open -->
 
 ---
 

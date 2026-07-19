@@ -94,14 +94,14 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `109f33e9` — wrap(S268): recover S266 continuity + #81 ① writer-ownership landed (#107) — **pushed**
+- `99ae45ca` — wrap(S265): CSS Wave-1 (65) emission + 25 bridge fix landed — hand-off + delta-log [590]-[598] + changelog + master-list 0 + known-gaps + maps stamp + digest-currency (#102) — **pushed**
 - `c82550dd` — wrap(S264): hand-off + delta-log [580]-[589] + changelog S264 + master-list §0 + 4 known-gaps + maps refresh + inbox drain (#94) — **pushed**
 - `3608224e` — wrap(S263): hand-off + delta-log [568]-[579] + changelog + master-list §0 + 8 DONE-PROBE threads + rotate hand-off-261 (#89) — **pushed**
 - `888b4e93` — wrap(S262): delta-log [557]-[567] + changelog + 2 gaps filed + state regen (#86) — **pushed**
 - `dceb8f32` — wrap(S261): hand-off + delta-log [546]-[556] + changelog S261 + master-list §0 + rotate hand-off-260 (#79) — **pushed**
 - `8d537c3f` — wrap(S260): hand-off + delta-log [539]-[545] + changelog + master-list §0 + known-gaps regen (#74) — **pushed**
 - `b21269f6` — wrap(S259): hand-off + delta-log [533]-[538] + changelog + known-gaps — 3 freeze reintegrations + 2 design rulings + 2 arcs held (#69) — **pushed**
-- `19e46a1c` — wrap(S258): hand-off + delta-log [524]-[532] + changelog + bank Phase-1 colorless-async gap (#62) — **pushed**
-- `8cb00161` — chore(s256): WRAP — V1 coverage audit + tiered freeze campaign fired + confidentiality architecture ratified; SSR fix HELD (#50) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core

@@ -224,6 +224,21 @@ interface IfOpts {
   serverFnNames?: Set<string> | null;
   syncPeerCalls?: Array<{ name: string; span: unknown }> | null;
   /**
+   * i87 §13.2 — position-invariant auto-await classifier inputs. Threaded so a
+   * client->server-fn fetch call (`const x = fn()` / `res = fn()`) inside the
+   * if/else BODY gets its `await` via emitLogicBody's injectPromiseAwait (the
+   * client-boundary sibling of the ss19 #8 server->peer await). Consumed by
+   * `_asyncAwaitBodyOpts`. null/absent = pre-i87 emission unchanged.
+   */
+  asyncRouteMap?: { functions: Map<string, { boundary?: string; functionName?: string; [k: string]: unknown }> } | null;
+  asyncCalleeMap?: Map<string, string> | null;
+  // Opaque §13.2.1 classifier passthrough (threaded into emitLogicBody's
+  // injection, never destructured here) — the value shape's routing fields are
+  // read downstream by kind/isAsync only, so this annotation carries just those
+  // (keeps the P3-FOLLOW migration-hygiene budget clean).
+  asyncExportRegistry?: Map<string, Map<string, { kind: string; category: string; isAsync?: boolean }>> | null;
+  asyncFilePath?: string | null;
+  /**
    * §59 (ss52) — NON-REACTIVE LOCAL map/set/ordered names, threaded through the
    * if CONDITION ctx + if/else BODY opts so a block-scoped local
    * `m.insert(...)`/`m.size`/`s.has(k)` lowers.
@@ -339,6 +354,44 @@ function detectHistoryFormFromString(rhs: string): { isHistoryForm: boolean; str
 }
 
 // ---------------------------------------------------------------------------
+// i87 §13.2 — position-invariant auto-await body opts
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the async auto-await opts to spread into a control-flow STATEMENT
+ * body's `emitLogicBody` call (if/else/for/while/do-while). When the enclosing
+ * scheduled function threaded `asyncRouteMap` (the sole gate — asyncFilePath /
+ * calleeMap / exportRegistry are optional §13.2.1 classifier inputs, NOT
+ * preconditions), this enables `emitLogicBody`'s per-statement
+ * `injectPromiseAwait` so a `const x = serverFn()` / `res = serverFn()` one
+ * block deep gets its `await` exactly as a top-level statement does (i87).
+ * Returns `{}` (no auto-await) when asyncRouteMap is absent — the pre-i87
+ * emission is byte-identical.
+ *
+ * Deliberately NOT applied to the match-arm body path: the client match
+ * lowering is a SYNC IIFE (`(function(){…})()`) where `await` is illegal.
+ */
+function _asyncAwaitBodyOpts(opts: any): {
+  asyncRouteMap?: any; asyncCalleeMap?: any; asyncExportRegistry?: any; asyncFilePath?: any; awaitNestedPromises?: boolean;
+} {
+  // Gate on `asyncRouteMap` ALONE. asyncFilePath / asyncCalleeMap /
+  // asyncExportRegistry are CLASSIFIER INPUTS (stdlib-Promise resolution), NOT
+  // preconditions for nested-await: server-fn detection (isServerCallExpr)
+  // needs only routeMap. Gating on asyncFilePath made nested-await entry-point-
+  // dependent — a caller that threads routeMap but leaves filePath falsy (empty
+  // string) would silently suppress the await. asyncFilePath flows through as a
+  // pure passthrough (defaulted to "" so isPromiseReturningCallExpr is happy).
+  if (!opts || !opts.asyncRouteMap) return {};
+  return {
+    asyncRouteMap: opts.asyncRouteMap,
+    asyncFilePath: opts.asyncFilePath ?? "",
+    asyncCalleeMap: opts.asyncCalleeMap ?? null,
+    asyncExportRegistry: opts.asyncExportRegistry ?? null,
+    awaitNestedPromises: true,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // if / else
 // ---------------------------------------------------------------------------
 
@@ -411,6 +464,9 @@ function _emitIfStmtInner(node: any, opts: IfOpts = {}): string {
     // ss19 #8 — peer-call threading into the if/else body (see IfOpts).
     ...(opts.serverFnNames ? { serverFnNames: opts.serverFnNames } : {}),
     ...(opts.syncPeerCalls ? { syncPeerCalls: opts.syncPeerCalls } : {}),
+    // i87 §13.2 — enable position-invariant auto-await for a client->server-fn
+    // fetch call nested in the if/else body (client-boundary sibling of ss19 #8).
+    ..._asyncAwaitBodyOpts(opts),
     // ss52 — NON-REACTIVE LOCAL map/set names so a block-scoped local
     // `m.insert(...)`/`m.size`/`m[k]` inside the if/else body lowers.
     ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}),
@@ -695,7 +751,7 @@ function _emitForStmtInner(
       lines.push(`  ${liftCode}`);
     }
   } else {
-    for (const code of emitLogicBody(body, { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, syncPeerCalls: opts?.syncPeerCalls, ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+    for (const code of emitLogicBody(body, { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
       lines.push(`  ${code}`);
     }
   }
@@ -908,7 +964,7 @@ export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; i
   const condition = emitExprField(node.condExpr, node.condition ?? "true", _whileCtx);
   const label = node.label ? `${node.label}: ` : "";
   lines.push(`${label}while (${condition}) {`);
-  for (const code of emitLogicBody(node.body ?? [], { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, syncPeerCalls: opts?.syncPeerCalls, ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+  for (const code of emitLogicBody(node.body ?? [], { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
     lines.push(`  ${code}`);
   }
   lines.push(`}`);
@@ -930,7 +986,7 @@ export function emitDoWhileStmt(node: any, opts?: { declaredNames?: Set<string>;
   const condition = emitExprField(node.condExpr, node.condition ?? "true", _doWhileCtx);
   const label = node.label ? `${node.label}: ` : "";
   lines.push(`${label}do {`);
-  for (const code of emitLogicBody(node.body ?? [], { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, syncPeerCalls: opts?.syncPeerCalls, ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+  for (const code of emitLogicBody(node.body ?? [], { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
     lines.push(`  ${code}`);
   }
   lines.push(`} while (${condition});`);
