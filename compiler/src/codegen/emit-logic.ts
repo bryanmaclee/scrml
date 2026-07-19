@@ -407,6 +407,19 @@ export interface EmitLogicOpts {
   asyncCalleeMap?: Map<string, string> | null;
   asyncExportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>> | null;
   asyncFilePath?: string | null;
+  /**
+   * i87 §13.2 (position-invariant auto-await) — when set, `emitLogicBody`
+   * applies `injectPromiseAwait` to each nested statement it emits, so a
+   * server-fn / stdlib-async call one block deep inside an `if`/`else`/`for`/
+   * `while`/`do-while` body gets its `await` (and the enclosing fn its
+   * `async`) exactly as a top-level statement does. Set ONLY by the control-
+   * flow body-opts in emit-control-flow.ts (emitIfStmt/emitForStmt/emitWhile/
+   * emitDoWhile) alongside the four `async*` classifier inputs above; it is
+   * deliberately NOT set on the match-arm body path (the client match lowering
+   * is a sync IIFE where `await` is illegal) nor at the top level (which routes
+   * through scheduleStatements, not emitLogicBody).
+   */
+  awaitNestedPromises?: boolean;
 }
 
 /** An entry in the captured scope for a runtime ^{} meta block (from meta-checker.ts). */
@@ -2686,6 +2699,12 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // of a bare unawaited Promise (completes the b2bf9959 threading).
         serverFnNames: opts.serverFnNames,
         syncPeerCalls: opts.syncPeerCalls,
+        // i87 §13.2 — thread the auto-await classifier inputs so a CLIENT ->
+        // server-fn fetch call (`const x = fn()` / `res = fn()`) inside the
+        // if/else BODY gets its `await` (the client-boundary sibling of the
+        // ss19 #8 server->peer await above). emit-control-flow sets
+        // awaitNestedPromises from these.
+        ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}),
         derivedNames: opts.derivedNames,
         synthCellKeys: opts.synthCellKeys,
         declaredNames: opts.declaredNames,
@@ -2722,6 +2741,9 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // ss19 #8 — peer-call threading (see if-stmt dispatch above).
         serverFnNames: opts.serverFnNames,
         syncPeerCalls: opts.syncPeerCalls,
+        // i87 §13.2 — auto-await classifier inputs for a client->server-fn fetch
+        // call inside the loop body (see if-stmt dispatch above).
+        ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}),
         dbVar: opts.dbVar,
         declaredNames: opts.declaredNames,
         insideFunctionBody: opts.insideFunctionBody,
@@ -2749,12 +2771,12 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path
       // when the enclosing fn is server-bound.
-      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, syncPeerCalls: opts.syncPeerCalls, ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
+      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
 
     case "do-while-stmt":
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path.
-      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, syncPeerCalls: opts.syncPeerCalls, ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
+      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
 
     case "break-stmt":
       return emitBreakStmt(node);
@@ -4388,13 +4410,41 @@ export function emitLogicBody(nodes: any[], opts: EmitLogicOpts = {}): string[] 
   // Track declared names so tilde-decl can distinguish first declaration from reassignment.
   const declaredNames = opts.declaredNames ?? new Set<string>();
 
+  // i87 §13.2 (position-invariant auto-await) — inject `await` into a nested
+  // statement whose call is a statically-known Promise<T>-returning server-fn /
+  // stdlib-async callee. Gated on `awaitNestedPromises` (set only by the
+  // control-flow body-opts) + the classifier inputs, so it fires exactly in
+  // if/else/for/while/do-while bodies and nowhere else. `injectPromiseAwait`
+  // is a no-op for statement-shape / non-Promise nodes, so a nested `if`/`for`
+  // wrapper passes through untouched while its own body is descended separately.
+  const _injectAwait =
+    opts.awaitNestedPromises && opts.asyncRouteMap
+      ? (node: any, code: string): string => {
+          if (!code) return code;
+          try {
+            const sched = require("./scheduling.js");
+            return sched.injectPromiseAwait(
+              code,
+              node,
+              opts.asyncRouteMap,
+              opts.asyncFilePath ?? "",
+              opts.asyncCalleeMap ?? null,
+              opts.asyncExportRegistry ?? null,
+            );
+          } catch (_e) {
+            // Classifier failure is non-fatal — fall back to no-auto-await.
+            return code;
+          }
+        }
+      : (_node: any, code: string): string => code;
+
   // Pre-scan: does `~` appear in any expression in this sequence?
   const tildeUsed = nodeListContainsTildeRef(nodes);
 
   if (!tildeUsed) {
     // No tilde references — use plain emission (no overhead, no behavior change)
     return nodes
-      .map((n: any) => emitLogicNode(n, { ...opts, declaredNames }))
+      .map((n: any) => _injectAwait(n, emitLogicNode(n, { ...opts, declaredNames })))
       .filter((s: string) => s.trim() !== "");
   }
 
@@ -4404,7 +4454,7 @@ export function emitLogicBody(nodes: any[], opts: EmitLogicOpts = {}): string[] 
   const optsWithTilde: EmitLogicOpts = { ...opts, tildeContext: tildeCtx, declaredNames };
 
   return nodes
-    .map((n: any) => emitLogicNode(n, optsWithTilde))
+    .map((n: any) => _injectAwait(n, emitLogicNode(n, optsWithTilde)))
     .filter((s: string) => s.trim() !== "");
 }
 

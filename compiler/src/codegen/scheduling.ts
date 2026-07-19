@@ -150,24 +150,54 @@ export function hasServerCallees(
     return false;
   };
 
-  const body = (fnNode.body as ASTNode[]) ?? [];
-  for (const stmt of body) {
-    if (!stmt) continue;
+  // S89 §13.2 Sub-Phase B Step 3 — extract callees from bare-expr AND from
+  // let/const initializers AND from guarded-expr's inner guardedNode. Pre-
+  // S89 walked only bare-expr (server function calls there were the only
+  // way to introduce an async boundary). With stdlib auto-await, a
+  // `const x = safeCallAsync(thunk)` initializer or a
+  // `let x = safeCallAsync(thunk) !{ ... }` failable-handler must
+  // propagate "function has async boundaries" up so the outer function
+  // emits `async function` prefix.
+  //
+  // i87 — §13.2 is POSITION-INVARIANT: the walk must ALSO see a server/Promise
+  // call one block deep inside `if`/`else`/`for`/`while`/`do-while` bodies, and
+  // in the assign/reassign form `res = fn()` (a `tilde-decl` / `lin-decl`).
+  // Otherwise `hasServerCallees` returns false → no `async` prefix → the
+  // `await` injected into the nested body (emitLogicBody / injectPromiseAwait)
+  // is illegal in a sync function. The recursion descends into control-flow
+  // STATEMENT bodies ONLY. It deliberately does NOT descend into nested
+  // `function-decl` / lambda / sync-callback bodies (those stay fail-closed
+  // under E-SERVER-FN-IN-SYNC-CALLBACK) nor into `match`-arm bodies (the client
+  // match lowering uses a SYNC IIFE where `await` is illegal — a server call in
+  // a client match arm is a separate, out-of-scope concern).
+  const _stmtHasPromiseCallee = (stmt: ASTNode): boolean => {
+    if (!stmt) return false;
     const kind = (stmt as ASTNode).kind;
-    // S89 §13.2 Sub-Phase B Step 3 — extract callees from bare-expr AND from
-    // let/const initializers AND from guarded-expr's inner guardedNode. Pre-
-    // S89 walked only bare-expr (server function calls there were the only
-    // way to introduce an async boundary). With stdlib auto-await, a
-    // `const x = safeCallAsync(thunk)` initializer or a
-    // `let x = safeCallAsync(thunk) !{ ... }` failable-handler must
-    // propagate "function has async boundaries" up so the outer function
-    // emits `async function` prefix.
-    if (kind === "bare-expr" || kind === "let-decl" || kind === "const-decl") {
-      if (_matchesPromiseCallee(_extractCalleesFromStmt(stmt as ASTNode))) return true;
+    if (kind === "bare-expr" || kind === "let-decl" || kind === "const-decl" ||
+        kind === "tilde-decl" || kind === "lin-decl") {
+      if (_matchesPromiseCallee(_extractCalleesFromStmt(stmt))) return true;
     } else if (kind === "guarded-expr") {
       const guarded = (stmt as any).guardedNode;
       if (guarded && _matchesPromiseCallee(_extractCalleesFromStmt(guarded))) return true;
+    } else if (kind === "if-stmt") {
+      const consequent = (stmt as any).consequent;
+      if (Array.isArray(consequent) && consequent.some(_stmtHasPromiseCallee)) return true;
+      const alternate = (stmt as any).alternate;
+      if (Array.isArray(alternate)) {
+        if (alternate.some(_stmtHasPromiseCallee)) return true;
+      } else if (alternate && typeof alternate === "object" && _stmtHasPromiseCallee(alternate)) {
+        return true;
+      }
+    } else if (kind === "for-stmt" || kind === "while-stmt" || kind === "do-while-stmt") {
+      const nested = (stmt as any).body;
+      if (Array.isArray(nested) && nested.some(_stmtHasPromiseCallee)) return true;
     }
+    return false;
+  };
+
+  const body = (fnNode.body as ASTNode[]) ?? [];
+  for (const stmt of body) {
+    if (_stmtHasPromiseCallee(stmt as ASTNode)) return true;
   }
   return false;
 }
@@ -304,6 +334,100 @@ export function extractInitExpr(stmt: ASTNode): string {
   if ((stmt as any).initExpr || initStr) return emitExprField((stmt as any).initExpr, initStr || "null", _exprCtx);
   if ((stmt as any).exprNode || exprStr) return emitExprField((stmt as any).exprNode, exprStr || "null", _exprCtx);
   return "null";
+}
+
+/**
+ * i87 §13.2 — inject `await` into an already-emitted statement whose call
+ * expression is a statically-known `Promise<T>`-returning server-fn / stdlib-
+ * async callee. Single source of truth for the auto-await lowering, shared by
+ * `scheduleStatements` (top-level statement positions) AND `emitLogicBody`
+ * (nested control-flow statement positions — if/else/for/while/do-while bodies).
+ *
+ * §13.2 is POSITION-INVARIANT: a server call written `const x = fn()` at the
+ * top of a function body and the identical call one block deep inside an `if`
+ * MUST both emit `await` and force the enclosing fn `async`. Before i87 only
+ * the top-level const-decl form got it; nested + reassign forms silently
+ * emitted a bare unawaited Promise (every `if (res.error)` guard after → dead).
+ *
+ * The `await` is injected on the INITIALIZER / RHS, never as a whole-statement
+ * prefix — `await let x = …` / `await res = …` are both syntax errors. The
+ * accepted emitted-code shapes and where the `await` lands:
+ *   - `let/const NAME = RHS;`  → reconstructed as `const NAME = await <init>;`
+ *     from the AST (mirrors the pre-i87 top-level decl branch exactly).
+ *   - emitted code that is ITSELF a `let/const X = RHS;` (a §32 tilde single-
+ *     line lowered from a non-decl node) → `let/const X = await RHS;`.
+ *   - `return RHS;`            → `return await RHS;`.
+ *   - `LHS = RHS;` (reassign / tilde-decl / lin-decl / bare-expr assign; i87
+ *     case C) → `LHS = await RHS;`.
+ *   - anything else (a bare call statement) → `await <code>;`.
+ *
+ * A no-op when the statement is not a Promise-returning call (statement-shape
+ * nodes — if/for/while/match/guarded-expr — carry no direct callee on
+ * `exprNode`/`initExpr`, so the classifier returns false and the code is
+ * returned unchanged: this is what keeps nested `if`/`for` wrappers un-awaited
+ * while their leaf statements are descended into separately).
+ */
+export function injectPromiseAwait(
+  code: string,
+  stmt: ASTNode,
+  routeMap: RouteMap,
+  filePath: string,
+  calleeMap: CalleeImportMap | null,
+  // Same shape as isPromiseReturningCallExpr's exportRegistry, referenced via
+  // Parameters<> so this stays a pure passthrough type (never a routing read on
+  // the value shape — keeps the P3-FOLLOW migration-hygiene budget intact).
+  exportRegistry: Parameters<typeof isPromiseReturningCallExpr>[4],
+): string {
+  if (!code) return code;
+  if (!isPromiseReturningCallExpr(stmt, routeMap, filePath, calleeMap, exportRegistry)) return code;
+
+  // i87 fail-safe — do NOT touch a statement whose emitted code is a REACTIVE /
+  // DERIVED / ENGINE runtime sink (or an already-async IIFE). A reactive-cell
+  // server-call write (`@cell = serverFn()` → `_scrml_reactive_set("cell",
+  // serverFn())`) is owned by the emit-client auto-await pass (emit-client.ts),
+  // which rewrites it to a self-contained `(async () => _scrml_reactive_set(
+  // "cell", await serverFn()))().catch(…)` — awaiting the fetch INSIDE its own
+  // async IIFE (so the enclosing handler stays sync). Prepending our `await`
+  // here both duplicates that and lands an illegal `await` in the sync handler.
+  // The classifier fires on these (the server callee sits as a nested arg), so
+  // this guard — not the classifier — is what fences them out.
+  if (/^\s*(?:await\s+)?(?:\(async\b|_scrml_reactive_set\b|_scrml_derived_\w*|_scrml_default_set\b|_scrml_init_set\b|_scrml_engine_\w*)/.test(code)) {
+    return code;
+  }
+
+  const kind = (stmt as ASTNode).kind;
+  // let-decl / const-decl: reconstruct `const NAME = await <init>;` from the
+  // AST. Mirrors the pre-i87 top-level decl branch (which always emitted
+  // `const`, even for a `let-decl`); kept identical to avoid churning existing
+  // top-level output.
+  if (kind === "let-decl" || kind === "const-decl") {
+    const name = (stmt as ASTNode).name as string || genVar("tmp");
+    return `const ${name} = await ${extractInitExpr(stmt as ASTNode)};`;
+  }
+
+  // Non-decl / emitted-code forms — inject after the binding `=` / `return`.
+  const _awaitTail = (s: string): string => (s.startsWith("await ") ? s : `await ${s}`);
+
+  // (1) Emitted code that is itself a let/const declaration (§32 tilde single-
+  // line). The await belongs on the initializer, not the decl keyword.
+  const declMatch = code.match(/^(\s*(?:let|const)\s+[A-Za-z_$][\w$]*\s*=\s*)(.+?)(;?)$/s);
+  if (declMatch) return `${declMatch[1]}${_awaitTail(declMatch[2])}${declMatch[3]}`;
+
+  // (2) return-stmt: `return RHS;` → `return await RHS;`.
+  const returnMatch = code.match(/^(\s*return\s+)(.+?)(;?)$/s);
+  if (returnMatch) return `${returnMatch[1]}${_awaitTail(returnMatch[2])}${returnMatch[3]}`;
+
+  // (3) assignment (reassign / tilde-decl / lin-decl / bare-expr assign; i87
+  // case C): `LHS = RHS;` → `LHS = await RHS;` (await on the RHS, never a
+  // whole-statement prefix). LHS is an lvalue (ident with optional `.member` /
+  // `[index]` tails); the optional compound operator (`+=`, `*=`, `??=`, …) is
+  // preserved so `x += fn()` → `x += await fn()`. The trailing `(?![=<>])`
+  // guard rejects the comparison / arrow forms (`==`, `=>`, `>=`).
+  const assignMatch = code.match(/^(\s*[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\[[^\]]*\])*\s*(?:\*\*|<<|>>>?|&&|\|\||\?\?|[-+*/%&|^])?=\s*)(?![=<>])(.+?)(;?)$/s);
+  if (assignMatch) return `${assignMatch[1]}${_awaitTail(assignMatch[2])}${assignMatch[3]}`;
+
+  // (4) fallback — a bare call statement.
+  return `await ${code.replace(/;$/, "")};`;
 }
 
 /**
@@ -736,30 +860,10 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
       if (code) {
         // S89 §13.2 Sub-Phase B Step 3 — extended classifier covers both
         // server functions AND stdlib Promise<T> functions per Q1 BROAD.
-        if (isPromiseReturningCallExpr(stmt as ASTNode, routeMap, filePath, calleeMap ?? null, exportRegistry ?? null)) {
-          if ((stmt as ASTNode).kind === "let-decl" || (stmt as ASTNode).kind === "const-decl") {
-            const name = (stmt as ASTNode).name as string || genVar("tmp");
-            lines.push(`const ${name} = await ${extractInitExpr(stmt as ASTNode)};`);
-          } else {
-            // gate-found-invalid-js-fix-wave (S141): a non-decl AST node whose
-            // EMITTED code is itself a `let`/`const` declaration — e.g. a §32
-            // tilde-init bare-expr (`fetchContacts()`) that emit-logic lowered to
-            // `let _scrml_tilde_N = _scrml_fetch_*();` under an active tildeContext.
-            // Prepending `await` to the whole statement yields `await let X = ...`
-            // (invalid JS — the gate's E-CODEGEN-INVALID-LOGIC; example 16-remote-data
-            // shipped this). The await belongs on the INITIALIZER, not the decl, so
-            // inject it after the `=`.
-            const declAwaitMatch = code.match(/^(\s*(?:let|const)\s+[A-Za-z_$][\w$]*\s*=\s*)(.+?)(;?)$/s);
-            if (declAwaitMatch) {
-              const tail = declAwaitMatch[2].startsWith("await ") ? declAwaitMatch[2] : `await ${declAwaitMatch[2]}`;
-              lines.push(`${declAwaitMatch[1]}${tail}${declAwaitMatch[3]}`);
-            } else {
-              lines.push(`await ${code.replace(/;$/, "")};`);
-            }
-          }
-        } else {
-          lines.push(code);
-        }
+        // i87 — the await-injection (incl. the assign-form `res = await …`
+        // case C) is centralized in `injectPromiseAwait`, shared with the
+        // nested-body path in emitLogicBody so §13.2 is position-invariant.
+        lines.push(injectPromiseAwait(code, stmt as ASTNode, routeMap, filePath, calleeMap ?? null, exportRegistry ?? null));
       }
     }
 
