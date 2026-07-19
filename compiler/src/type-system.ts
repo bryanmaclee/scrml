@@ -11800,6 +11800,14 @@ function annotateNodes(
         if (retMatchExpr && typeof retMatchExpr === "object") {
           visitNode(retMatchExpr);
         }
+        // GITI-038 — a returned function expression (`return function name(){…}`)
+        // lives on `fnExprNode` (a `function-decl`). Visit it so its body gets the
+        // SAME scope/type analysis a nested function-decl statement receives (else a
+        // type error inside the returned closure is silently unchecked).
+        const retFnExpr = (n as { fnExprNode?: ASTNodeLike }).fnExprNode;
+        if (retFnExpr && typeof retFnExpr === "object") {
+          visitNode(retFnExpr);
+        }
         const retExprNode = (n as Record<string, unknown>).exprNode;
         if (retExprNode) {
           checkLogicExprIdents(retExprNode, retSpan, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);
@@ -18133,6 +18141,13 @@ function checkLinear(body: ASTNodeLike[], errors: TSError[], opts: CheckLinearOp
         const retMatch = (node as { matchExpr?: ASTNodeLike }).matchExpr;
         if (retMatch && typeof retMatch === "object") {
           walkNode(retMatch, lt, tt, loop);
+        }
+        // GITI-038 — a returned function expression (`return function name(){…}`)
+        // lives on `fnExprNode` (a `function-decl`). Walk it so the closure body gets
+        // the SAME lin / must-use analysis a nested function-decl statement receives.
+        const retFnExpr = (node as { fnExprNode?: ASTNodeLike }).fnExprNode;
+        if (retFnExpr && typeof retFnExpr === "object") {
+          walkNode(retFnExpr, lt, tt, loop);
         }
         break;
       }

@@ -1072,6 +1072,13 @@ export interface ReturnStmtNode extends BaseNode {
   kind: "return-stmt";
   /** Structured ExprNode form of the return expression. Populated by ast-builder. */
   exprNode?: ExprNode;
+  /**
+   * GITI-038 — a RETURNED function EXPRESSION (`return function name(){…}`). The
+   * ast-builder attaches the structural `function-decl` here (rather than emptying
+   * the return + hoisting an orphaned sibling). Every AST pass that analyzes a
+   * return body MUST route `fnExprNode` through its own `function-decl` handling.
+   */
+  fnExprNode?: FunctionDeclNode;
 }
 
 /** A throw statement: `throw ErrorType("message")`. */

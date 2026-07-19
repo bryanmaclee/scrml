@@ -8285,7 +8285,43 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           };
         }
       }
-      const RETURN_DECL_KW = new Set(["const", "let", "type", "function", "fn"]);
+      // GITI-038 — `return function name(){…}` / `return async function name(){…}`
+      // is a returned function EXPRESSION, NOT a declaration to strip. (Same line;
+      // a LATER-line `return\nfunction …` is already ASI'd to a bare return above.)
+      // The old RETURN_DECL_KW `function` strip emptied the return AND left the
+      // function to parse as an orphaned sibling `function-decl` (hoisted,
+      // unreachable → the GITI-038 miscompile). Parse it STRUCTURALLY (a recursive
+      // parseOneStatement routes the cursor — now at `function`/`async function` —
+      // to the nested `function` handler below) and attach it as `fnExprNode`;
+      // emit-logic's return-stmt handler emits `return [async] function name(){…}`
+      // inline and lowers the body (colorless-async: an async body picks up
+      // `async`+`await` from the emit-time classifier). `fn` STAYS in RETURN_DECL_KW
+      // — a `return fn …` function-expression form is unverified, and `return fn(1)`
+      // (a call through a param NAMED `fn`) is a separate pre-existing gap.
+      {
+        let isReturnedFn = false;
+        if (next && next.kind === "KEYWORD") {
+          if (next.text === "function") {
+            isReturnedFn = true;
+          } else if (next.text === "async") {
+            let la = lookAhead + 1;
+            while (peek(la).kind === "COMMENT") la++;
+            if (peek(la).kind === "KEYWORD" && peek(la).text === "function") isReturnedFn = true;
+          }
+        }
+        if (isReturnedFn) {
+          for (let k = 0; k < lookAhead; k++) consume(); // drop comments between `return` and the fn
+          const fnExprNode = parseOneStatement();
+          return {
+            id: ++counter.next,
+            kind: "return-stmt",
+            expr: "",
+            fnExprNode,
+            span: spanOf(startTok, peek()),
+          };
+        }
+      }
+      const RETURN_DECL_KW = new Set(["const", "let", "type", "fn"]);
       if (next && next.kind === "KEYWORD" && RETURN_DECL_KW.has(next.text)) {
         return {
           id: ++counter.next,

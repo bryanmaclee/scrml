@@ -208,3 +208,98 @@ describe("g-sql-in-nested-function-client-leak: nested-fn SQL escalates enclosin
     expect(clientJs).toMatch(/function helper\(x\)/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// GITI-038 — a RETURNED function EXPRESSION (`return function q(){ ?{…} }`) is
+// the sibling shape of the nested-fn-decl case above. The S239 follow-up moved
+// the returned closure onto `return-stmt.fnExprNode`; every analysis pass that
+// early-returns went blind to it, so the enclosing factory stopped escalating
+// server-side and the SQL LEAKED into the client bundle. These lock the
+// route-inference (walkBodyForTriggers + collectFunctionNodes) fnExprNode routing.
+// ---------------------------------------------------------------------------
+
+describe("GITI-038: a returned SQL closure escalates its factory server-side (no client leak)", () => {
+  test("`return function q(v){ ?{...} }` — factory escalates, SQL server-only, no client leak", () => {
+    const src = `<program db="./test.db">
+<schema>
+    table items {
+        id: integer primary key
+        name: string
+    }
+</>
+
+<db src="./test.db" tables="items">
+    \${
+        export function makeLoader() {
+            return function load(id) {
+                return ?{\`SELECT id, name FROM items WHERE id = \${id}\`}.get()
+            }
+        }
+    }
+</db>
+
+<page>
+    <main><h1>Hi</h1></main>
+</page>
+</program>`;
+
+    const { errors, clientJs, serverJs } = compileSource("giti038-returned-sql", src);
+
+    // No leak guard fired; emitted JS valid.
+    expect(errors.filter(e => e.code === "E-CG-006")).toEqual([]);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toEqual([]);
+
+    // The returned closure's SQL must NOT leak to the client bundle.
+    expect(clientJs).not.toMatch(/\b_scrml_sql(?:_\d+)?\s*[.`]/);
+    expect(clientJs).not.toContain("SELECT id, name FROM items");
+
+    // The factory escalated to a server route (client gets a fetch stub).
+    expect(clientJs).toMatch(/async function _scrml_fetch_makeLoader_\d+\(\)/);
+
+    // SQL runs server-side; the returned closure is emitted INLINE as an async
+    // function expression (`return async function load`), NOT a dropped return +
+    // orphaned hoisted decl (Defect 1) — this is stronger than baseline.
+    expect(serverJs).toContain("_scrml_sql`SELECT id, name FROM items WHERE id =");
+    expect(serverJs).toMatch(/return async function load\(id\)/);
+    expect(serverJs).not.toMatch(/^\s*return;\s*$/m);
+  });
+
+  test("a helper called ONLY inside a returned closure is NOT W-DEAD; neither is the closure", () => {
+    const src = `\${
+    function helper(v) { return v + 1 }
+    export function mk() {
+        return function calc(v) {
+            return helper(v)
+        }
+    }
+}
+`;
+    const filePath = join(TMP, "giti038-wdead.scrml");
+    writeFileSync(filePath, src);
+    const result = compileScrml({ inputFiles: [filePath], mode: "library", write: false, log: () => {} });
+    // W-DEAD-FUNCTION is a non-fatal WARNING (result.warnings stream, not errors).
+    const all = [...(result.errors || []), ...(result.warnings || [])];
+    const dead = all.filter(e => e.code === "W-DEAD-FUNCTION");
+    // Neither `helper` (used via the returned closure) nor `calc` (the returned
+    // value itself — inherently used) should be flagged dead.
+    expect(dead.map(e => e.message)).toEqual([]);
+  });
+
+  test("a type error INSIDE a returned closure still fires (analysis not blind)", () => {
+    const src = `\${
+    type Color: enum = { .Red | .Green | .Blue }
+    export function mk() {
+        return function inner(c: Color) {
+            return match c {
+                | .Red :> "r"
+                | .Green :> "g"
+            }
+        }
+    }
+}
+`;
+    const { errors } = compileSource("giti038-typeerr", src);
+    // Missing `.Blue` — exhaustiveness (E-TYPE-020) must fire in the closure body.
+    expect(errors.some(e => e.code === "E-TYPE-020")).toBe(true);
+  });
+});

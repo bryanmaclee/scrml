@@ -988,6 +988,21 @@ function collectFunctionNodes(body: LogicStatement[]): FunctionDeclNode[] {
         result.push(...collectFunctionNodes((node as FunctionDeclNode).body));
       }
     }
+    // GITI-038 — a returned function expression (`return function name(){…}`) is a
+    // function VALUE on `fnExprNode` (a `function-decl`), not a sibling statement.
+    // Collect it (+ its nested fns) as its OWN analysis entry — the SAME as the
+    // sibling function-decl it replaced — so its callees are tracked (a helper called
+    // ONLY inside the returned closure is not a W-DEAD-FUNCTION false positive) and
+    // its body is server-analyzed. Marked `_returnedInline` so the D4 dead-function
+    // pass skips it (a returned closure is inherently USED — it is the return value).
+    const rfn = (node as { kind?: string; fnExprNode?: unknown }).fnExprNode;
+    if ((node as { kind?: string }).kind === "return-stmt" && rfn && (rfn as { kind?: string }).kind === "function-decl") {
+      (rfn as { _returnedInline?: boolean })._returnedInline = true;
+      result.push(rfn as FunctionDeclNode);
+      if (Array.isArray((rfn as FunctionDeclNode).body)) {
+        result.push(...collectFunctionNodes((rfn as FunctionDeclNode).body));
+      }
+    }
   }
   return result;
 }
@@ -1709,6 +1724,12 @@ export function walkBodyForTriggers(
       }
       // Callees inside the return expression.
       callees.push(...extractCalleesFromNode(node, "expr"));
+      // GITI-038 — a RETURNED function expression (`return function name(){…}`)
+      // lives on `fnExprNode` (a `function-decl`), NOT a sibling statement. Route it
+      // back through `visitNode` so the `function-decl` branch above escalates a
+      // server-only resource (`?{}` SQL / server call) inside the closure to the
+      // enclosing route — else the SQL leaks to the client bundle (finding #1/#4).
+      if ((node as any).fnExprNode) visitNode((node as any).fnExprNode);
       return;
     }
 
@@ -4671,7 +4692,13 @@ export function runRI(input: RIInput): RIOutput {
     // in-source caller; never dead-warn it.
     const isToolMainEntry = toolMainFnNodes.has(record.fnNode);
 
-    if (!isHandleHatch && !hasCallers && !isExported && !isExplicitServer && !isMarkupReferenced && !isEndpointReferenced && !isGenerator && !isToolMainEntry) {
+    // GITI-038 — a returned function expression (`return function name(){…}`) is
+    // inherently USED: it is the enclosing factory's RETURN VALUE, referenced by
+    // position, not called by name. It has no named caller, so suppress the
+    // dead-function false-fire (collectFunctionNodes flags it `_returnedInline`).
+    const isReturnedInline = (record.fnNode as { _returnedInline?: boolean })._returnedInline === true;
+
+    if (!isHandleHatch && !hasCallers && !isExported && !isExplicitServer && !isMarkupReferenced && !isEndpointReferenced && !isGenerator && !isToolMainEntry && !isReturnedInline) {
       const warn = new RIError(
         "W-DEAD-FUNCTION",
         `W-DEAD-FUNCTION: Function \`${fnName}\` has no callers, is not exported, ` +

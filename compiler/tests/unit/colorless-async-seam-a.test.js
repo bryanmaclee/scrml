@@ -459,3 +459,174 @@ describe("§13 (finding 2): multi-hop alias chain fails closed / no false-positi
     expect(hasAsyncSyncCbErr(errors)).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §14 (GITI-038) — async color in a RETURNED NAMED function expression.
+//
+// A factory that `return function name(){…}` whose body awaits `safeCallAsync`
+// used to miscompile SILENTLY: the async color over-propagated onto the OUTER
+// factory (`export async function composeFail`), the parser emptied the return
+// (`return;`) + hoisted the closure to an orphaned unreachable decl. The fix
+// SPLITS the two questions — (Q1) does THIS fn's OWN body await? and (Q2) does it
+// hold a nested async closure that needs AST re-emission? — so the factory stays
+// NON-async but is still pulled off the verbatim path; the returned closure emits
+// `return async function name(){…}` inline. Arrow / const-bound-anon closures are
+// NOT structural function-decls and STAY fail-closed (E-ASYNC-STDLIB-IN-SYNC-CALLBACK).
+// ---------------------------------------------------------------------------
+
+const GITI038_SRC = `\${
+  import { safeCall, safeCallAsync } from "scrml:host"
+  export function composeFail(handlers) {
+    return function dispatch(req) {
+      const r = safeCallAsync(() => handlers[0](req)) !{ | ::Thrown(msg) :> ({ __err: msg }) }
+      return r
+    }
+  }
+  export function composeOkSync(handlers) {
+    return function dispatchSync(req) {
+      const r = safeCall(() => handlers[0](req)) !{ | ::Thrown(msg) :> ({ __err: msg }) }
+      return r
+    }
+  }
+  export function composeOkBare(handlers) {
+    return function dispatchBare(req) {
+      const r = handlers[0](req)
+      return r
+    }
+  }
+}
+`;
+
+describe("§14 (GITI-038): async color in a returned named function expression", () => {
+  test("the OUTER factory stays NON-async; the returned closure is `return async function dispatch` INLINE", () => {
+    const p = fix("giti038.scrml", GITI038_SRC);
+    const { js, errors } = compile([p], { mode: "library", wantFile: "giti038", field: "libraryJs" });
+    expect(errors.filter((e) => e.severity !== "warning" && e.severity !== "info")).toEqual([]);
+    // Q1 — the factory's OWN signature is NOT async (it only returns the closure).
+    expect(js).toMatch(/export function composeFail\s*\(/);
+    expect(js).not.toMatch(/export async function composeFail\s*\(/);
+    // Defect 1 — the return is PRESERVED as an inline async function expression,
+    // NOT emptied (`return;`) with an orphaned hoisted decl.
+    expect(js).toMatch(/return async function dispatch\s*\(req\)\s*\{/);
+    expect(js).not.toMatch(/^\s*return;\s*$/m);
+    expect(js).not.toMatch(/^\s*async function dispatch\s*\(/m); // no hoisted sibling decl
+    // The closure body auto-awaits the stdlib call.
+    expect(js).toMatch(/await\s+safeCallAsync\s*\(/);
+    expect(js).not.toMatch(/\bawait\s+await\b/);
+  });
+
+  test("controls: the SYNC (`safeCall`) + BARE factories are UNCHANGED (still correct, no async)", () => {
+    const p = fix("giti038-ctrl.scrml", GITI038_SRC);
+    const { js } = compile([p], { mode: "library", wantFile: "giti038-ctrl", field: "libraryJs" });
+    expect(js).toMatch(/function composeOkSync\s*\(/);
+    expect(js).not.toMatch(/async function composeOkSync\s*\(/);
+    expect(js).not.toMatch(/async function dispatchSync\s*\(/);
+    expect(js).toMatch(/function composeOkBare\s*\(/);
+    expect(js).not.toMatch(/async function composeOkBare\s*\(/);
+    // the sync `safeCall` control never picks up an `await`.
+    expect(js).not.toMatch(/await\s+safeCall\b/);
+  });
+
+  test("EXECUTED bundle: composeFail(handlers) returns a FUNCTION (not a Promise); await dispatch(req) resolves; error → {__err}", async () => {
+    const p = fix("giti038-exec.scrml", GITI038_SRC);
+    const { js } = compile([p], { mode: "library", wantFile: "giti038-exec", field: "libraryJs" });
+    // Rewrite the `scrml:host` import to a faithful local stub so the ES module is
+    // self-contained, then dynamic-import + execute (grep of emitted text is NOT a
+    // sufficient witness for a runtime-shape bug — R26 execute-don't-grep).
+    const stubPath = join(FIXTURE_DIR, "giti038-host-stub.js");
+    writeFileSync(stubPath, `
+      const sentinel = (e) => ({ __scrml_error: true, variant: "Thrown", data: String((e && e.message) || e) });
+      export function safeCall(thunk) { try { return thunk(); } catch (e) { return sentinel(e); } }
+      export async function safeCallAsync(thunk) { try { return await thunk(); } catch (e) { return sentinel(e); } }
+    `);
+    const modPath = join(FIXTURE_DIR, "giti038-exec.mjs");
+    // The in-memory libraryJs keeps the bare `scrml:host` specifier (the CLI writer
+    // rewrites it to `./_scrml/host.js` only on disk-write); match either form.
+    writeFileSync(modPath, js.replace(/from\s+(["'])[^"']*host(?:\.js)?\1/, `from "./giti038-host-stub.js"`));
+    const mod = await import(modPath + `?t=${Date.now()}`);
+
+    const dispatch = mod.composeFail([(req) => ({ echoed: req })]);
+    expect(typeof dispatch).toBe("function");        // NOT a Promise
+    expect(dispatch instanceof Promise).toBe(false);
+    const p1 = dispatch("hello");
+    expect(p1 instanceof Promise).toBe(true);         // dispatch is async
+    expect(await p1).toEqual({ echoed: "hello" });    // resolves the value, no Promise leak
+
+    const dispatchT = mod.composeFail([() => { throw new Error("boom"); }]);
+    const rt = await dispatchT("x");
+    expect(rt.__err).toBeDefined();                   // !{} Thrown arm → {__err}
+
+    // controls execute synchronously (no Promise leak).
+    const ds = mod.composeOkSync([(req) => ({ echoed: req })])("world");
+    expect(ds instanceof Promise).toBe(false);
+    expect(ds).toEqual({ echoed: "world" });
+    const db = mod.composeOkBare([(req) => ({ echoed: req })])("bare");
+    expect(db).toEqual({ echoed: "bare" });
+  });
+
+  test("Defect-1 independent half: a legitimately-async OUTER that ALSO returns a named fn-expr keeps BOTH", () => {
+    const p = fix("giti038-both.scrml", `\${
+  import { safeCallAsync } from "scrml:host"
+  export function outerAsyncPlusReturn(handlers) {
+    const pre = safeCallAsync(() => handlers[0]("pre")) !{ | ::Thrown(msg) :> ({ __err: msg }) }
+    return function inner(req) {
+      const r = safeCallAsync(() => handlers[1](req)) !{ | ::Thrown(msg) :> ({ __err: msg }) }
+      return r
+    }
+  }
+}
+`);
+    const { js, errors } = compile([p], { mode: "library", wantFile: "giti038-both", field: "libraryJs" });
+    expect(errors.filter((e) => e.severity !== "warning" && e.severity !== "info")).toEqual([]);
+    // outer awaits in its OWN body → async on the outer signature.
+    expect(js).toMatch(/export async function outerAsyncPlusReturn\s*\(/);
+    // AND the returned named fn-expr is preserved inline (async).
+    expect(js).toMatch(/return async function inner\s*\(req\)\s*\{/);
+    expect(js).not.toMatch(/^\s*return;\s*$/m);
+  });
+
+  test("combinator (#110) is NOT regressed: `xs.map(x => safeCallAsync(x))` still colors + transforms", () => {
+    const p = fix("giti038-combinator.scrml", `\${
+  import { safeCallAsync } from "scrml:host"
+  export function mapCombinator(xs) {
+    const results = xs.map(x => safeCallAsync(() => x()))
+    return results
+  }
+}
+`);
+    const { js } = compile([p], { mode: "library", wantFile: "giti038-combinator", field: "libraryJs" });
+    expect(js).toMatch(/export async function mapCombinator\s*\(/);
+    expect(js).toMatch(/await\s+_scrml_mapAsync\(xs,\s*async\s*\(x\)\s*=>\s*await\s+safeCallAsync/);
+  });
+
+  test("a RETURNED ARROW closure stays FAIL-CLOSED (E-ASYNC-STDLIB-IN-SYNC-CALLBACK)", () => {
+    const p = fix("giti038-arrow.scrml", `\${
+  import { safeCallAsync } from "scrml:host"
+  export function arrowClosure(handlers) {
+    return (req) => {
+      const r = safeCallAsync(() => handlers[0](req)) !{ | ::Thrown(msg) :> ({ __err: msg }) }
+      return r
+    }
+  }
+}
+`);
+    const { errors } = compile([p], { mode: "library", wantFile: "giti038-arrow", field: "libraryJs" });
+    expect(hasAsyncSyncCbErr(errors)).toBe(true);
+  });
+
+  test("a CONST-BOUND anonymous-fn closure stays FAIL-CLOSED (E-ASYNC-STDLIB-IN-SYNC-CALLBACK)", () => {
+    const p = fix("giti038-constbound.scrml", `\${
+  import { safeCallAsync } from "scrml:host"
+  export function constBoundClosure(handlers) {
+    const d = function(req) {
+      const r = safeCallAsync(() => handlers[0](req)) !{ | ::Thrown(msg) :> ({ __err: msg }) }
+      return r
+    }
+    return d
+  }
+}
+`);
+    const { errors } = compile([p], { mode: "library", wantFile: "giti038-constbound", field: "libraryJs" });
+    expect(hasAsyncSyncCbErr(errors)).toBe(true);
+  });
+});

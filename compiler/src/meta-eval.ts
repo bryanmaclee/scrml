@@ -320,6 +320,23 @@ function serializeNode(node: ASTNode, locals: Set<string> = new Set()): string {
     }
 
     case "return-stmt": {
+      // GITI-038 — `return function name(){…}` returns a function EXPRESSION carried
+      // on `fnExprNode` (a `function-decl`). Serialize it as a named function
+      // expression (else it falls through to the bare `return;` below → the returned
+      // closure is DROPPED at compile-time meta-evaluation).
+      const rfn = (n as Record<string, unknown>).fnExprNode as
+        | { name?: string; params?: unknown[]; body?: LogicStatement[] }
+        | undefined;
+      if (rfn && typeof rfn === "object") {
+        const params = Array.isArray(rfn.params)
+          ? rfn.params
+              .map((p) => (typeof p === "string" ? p.split(/[:=]/)[0].trim() : (p as { name?: string })?.name))
+              .filter((x): x is string => typeof x === "string" && x.length > 0)
+              .join(", ")
+          : "";
+        const fname = typeof rfn.name === "string" ? rfn.name : "";
+        return `return function ${fname}(${params}) {\n${serializeBody((rfn.body ?? []) as LogicStatement[], locals)}\n};`;
+      }
       // Phase 4d: ExprNode-first, string fallback
       const retStr = n.exprNode ? emitStringFromTree(n.exprNode as ExprNode) : (n.value ?? n.expr ?? null) as string | null;
       return retStr ? `return ${retStr};` : "return;";
