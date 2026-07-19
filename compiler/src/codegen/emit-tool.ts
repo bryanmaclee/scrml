@@ -29,6 +29,7 @@
 import type { CompileContext } from "./context.ts";
 import { getNodes, containsSql, containsSqlOrTransaction } from "./collect.ts";
 import { bodyHasForeignOrSql, computeAsyncFnNames, emitLibraryFnMember } from "./emit-library-shared.ts";
+import { buildCalleeImportMap } from "./scheduling.ts";
 import { emitLogicNode } from "./emit-logic.js";
 import { emitEnumVariantObjects } from "./emit-client.js";
 import { collectDbScopes, SERVER_STRUCTURAL_EQ_HELPER, generateHeadlessServerJs } from "./emit-server.ts";
@@ -207,6 +208,10 @@ function buildRuntimeHelperHeader(body: string, filePath: string, errors?: unkno
 export function collectAsyncFnNamesFromFile(
   ctxOrFileAST: CompileContext | ASTNode,
   seedAsync?: Set<string>,
+  exportRegistry?: Map<
+    string,
+    Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>
+  > | null,
 ): Set<string> {
   const { fileAST } = resolveFileAST(ctxOrFileAST);
   const sourceText = (fileAST._sourceText ?? null) as string | null;
@@ -218,7 +223,13 @@ export function collectAsyncFnNamesFromFile(
   // async fn imported from ANOTHER lib is async), so the transitive coloring is
   // cross-file-complete (the caller resolves it recursively + memoized).
   const fns = collectTopLevelStatements(fileAST).filter(isFunctionDecl);
-  return computeAsyncFnNames(fns, sourceText, seedAsync);
+  // Seam-A Gap 1 (GITI-037) — the per-file stdlib-Promise classifier inputs so a
+  // fn calling `safeCallAsync` (or a `scrml:auth`/`http` async export) is
+  // recognized async in the cross-module fixpoint too (else the importing file's
+  // seed never learns this file's export is async). `.ast.imports` hoist per MOD.
+  // Cleanup 8 — buildCalleeImportMap folds the `.ast.imports` hoist internally.
+  const calleeMap = exportRegistry ? buildCalleeImportMap(fileAST as any) : null;
+  return computeAsyncFnNames(fns, sourceText, seedAsync, calleeMap, exportRegistry ?? null);
 }
 
 /** True when `name` is a valid bare ECMAScript identifier (safe to emit

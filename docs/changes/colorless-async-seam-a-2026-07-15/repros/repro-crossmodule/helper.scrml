@@ -1,0 +1,7 @@
+${
+  import { safeCallAsync } from "scrml:host"
+  export function wrapAsync(obj) {
+    const r = safeCallAsync(() => obj.doThing()) !{ | ::Thrown(msg) :> ({ ok: false, error: msg }) }
+    return r.ok
+  }
+}

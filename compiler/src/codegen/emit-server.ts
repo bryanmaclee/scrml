@@ -3,7 +3,7 @@ import { genVar, getVarCounter, setVarCounter } from "./var-counter.ts";
 import { routePath, paramSignature, paramName, stripPagesPrefix } from "./utils.ts";
 import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, serverVarDeclLoadKind, isServerOnlyNode, containsSqlOrTransaction, containsSql } from "./collect.ts";
 import { emitLogicNode, emitFnShortcutBody } from "./emit-logic.ts";
-import { computeAsyncFnNames, emitLibraryFnMember } from "./emit-library-shared.ts";
+import { computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, asyncStdlibSyncCallbackError, aliasedAsyncCallError } from "./emit-library-shared.ts";
 import { getNodes } from "./collect.ts";
 import { collectReactiveVarNames } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitChannelWatchesServerBoot, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
@@ -679,6 +679,7 @@ function emitModuleValueExportLines(
   filePath: string,
   assembledBody: string,
   errors?: CGError[],
+  exportRegistry?: ServerExportRegistry | null,
 ): string[] {
   // Collect logic blocks (the `${ ... }` bodies). Mirrors emit-library's
   // collectLogicBlocks — exported value decls live in the file's logic body.
@@ -756,10 +757,19 @@ function emitModuleValueExportLines(
   // server-exported fn that only transitively calls a cross-lib async import via
   // its imported local is emitted sync → the callee's Promise leaks un-awaited.
   const asyncImportedSeed = ((fileAST as any)?._asyncImportedLocals as Set<string> | undefined);
+  // Seam-A Gap 1 (GITI-037) — the per-file stdlib-Promise classifier inputs so a
+  // value-exported fn calling `safeCallAsync` (or a `scrml:auth`/`http`/`redis`
+  // async export) is seeded async + its call awaited. `buildCalleeImportMap` reads
+  // `.imports` off the FileAST; the TABResult wrapper hoists imports to
+  // `.ast.imports`, so fall back to `.ast` when present (mirrors :1096).
+  // Cleanup 8 — buildCalleeImportMap folds the `.ast.imports` hoist internally.
+  const _veCalleeMap = buildCalleeImportMap(fileAST);
   const asyncFnNames = computeAsyncFnNames(
     Array.from(fnDeclByName.values()) as any[],
     _sourceText,
     asyncImportedSeed,
+    _veCalleeMap,
+    exportRegistry ?? null,
   );
   // W5b (S239) — E-FOREIGN-006 crossing-shadow diagnostics from lowering an
   // async ss1 fn body surface via this sink (parity with the tool path — the
@@ -849,6 +859,34 @@ function emitModuleValueExportLines(
           && (xs?.end ?? -1) === (es?.end ?? -1);
       });
       if (!dup) errors.push(ec);
+    }
+  }
+
+  // No-silent-leak backstop (S239 finding 1) — the route-handler `_syncStdlibAsyncCalls`
+  // drain runs BEFORE this ss1 value-export emit, so a stdlib-async call in a
+  // non-awaitable position inside a VALUE-exported fn was never diagnosed (a bare
+  // `hs.some(h => verifyPassword(pw,h))` shipped an accept-all auth bypass).
+  // Structurally re-scan each async value-export fn here (a pure value-export fn is
+  // not a route handler, so no double-report) and FAIL CLOSED. Deduped against
+  // existing errors by code+span.
+  if (errors) {
+    const _pushVeDeduped = (err: CGError): void => {
+      const es = err.span as { start?: number };
+      const dup = errors.some((x) => x.code === err.code && (x.span as { start?: number })?.start === es?.start);
+      if (!dup) errors.push(err);
+    };
+    // Run BOTH detectors over ALL value-export fns (not just the colored ones): a
+    // raw-verbatim-body async call no longer colors its fn ([4]) but is still an
+    // unawaitable boundary that must fail closed; an indirect alias call likewise.
+    for (const fnNode of fnDeclByName.values()) {
+      const nm = fnNode?.name as string | undefined;
+      if (!nm) continue;
+      for (const site of collectNonAwaitableAsyncCalls(fnNode.body, _veCalleeMap, exportRegistry ?? null, asyncFnNames, fnNode.params, fnNode.span)) {
+        _pushVeDeduped(asyncStdlibSyncCallbackError(site.name, site.span, filePath));
+      }
+      for (const a of collectAliasedAsyncCalls(fnNode.body, _veCalleeMap, exportRegistry ?? null, asyncFnNames)) {
+        _pushVeDeduped(aliasedAsyncCallError(a.alias, a.resolved, a.span, filePath));
+      }
     }
   }
 
@@ -2382,21 +2420,11 @@ export function generateServerJs(
   // `hashPassword` / crypto / redis / http …) in a synchronous callback cannot be
   // auto-awaited; a bare emission ships a truthy Promise (an accept-all auth
   // bypass). FAIL CLOSED with a hard error rather than leak silently.
+  // Cleanup 7 (S239) — delegate to the SHARED single-wording builder
+  // (emit-library-shared.asyncStdlibSyncCallbackError) so the route-handler,
+  // ss1, library, and client paths all emit one identical message.
   const _diagAsyncStdlibSyncCb = (calleeName: string, span: any): void => {
-    const _sp = (span ?? {}) as { file?: string; start?: number; end?: number; line?: number; col?: number };
-    errors.push(new CGError(
-      "E-ASYNC-STDLIB-IN-SYNC-CALLBACK",
-      `E-ASYNC-STDLIB-IN-SYNC-CALLBACK: the async stdlib call \`${calleeName}(…)\` cannot be ` +
-      `awaited inside a synchronous callback or a parameter default. scrml has no source ` +
-      `\`await\`, so the compiler auto-awaits Promise-returning stdlib calls — but only where ` +
-      `\`await\` is valid. Inside a \`.some\`/\`.find\`/\`.filter\`/\`.map\` callback (or a ` +
-      `parameter default) it is not, so a bare \`${calleeName}(…)\` would return an unawaited ` +
-      `Promise (always truthy → an accept-all bug). Restructure so the call runs in the ` +
-      `server function's async body — e.g. hoist it into a \`for\` loop: ` +
-      `\`for (const x of xs) { const r = ${calleeName}(…); … }\`.`,
-      { file: filePath ?? _sp.file ?? "", start: _sp.start ?? 0, end: _sp.end ?? 0, line: _sp.line ?? 1, col: _sp.col ?? 1 },
-      "error",
-    ));
+    errors.push(asyncStdlibSyncCallbackError(calleeName, span, filePath));
   };
   // Issue #26 Finding-2 — does a bare callee `name` resolve to a Promise-returning
   // stdlib export? Mirrors emit-expr's `isStdlibAsyncCallee` using the file's
@@ -4168,7 +4196,7 @@ export function generateServerJs(
   // restored so no OTHER file's `_scrml_*_<N>` suffix shifts.
   {
     const _veSnapshot = getVarCounter();
-    const _veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"), errors);
+    const _veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"), errors, _asyncExportRegistry);
     setVarCounter(_veSnapshot);
     for (const _l of _veLines) lines.push(_l);
   }

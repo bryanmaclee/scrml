@@ -1,0 +1,7 @@
+${
+  import { wrapAsync } from "./helper.scrml"
+  export function orchestrate(obj) {
+    const ok = wrapAsync(obj)
+    return ok
+  }
+}

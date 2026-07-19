@@ -7,6 +7,12 @@ import { emitEnumVariantObjects } from "./emit-client.js";
 import { isServerOnlyNode, containsSqlOrTransaction } from "./collect.ts";
 import { rewriteNotKeyword, rewriteIsOperator } from "./rewrite.ts";
 import type { CompileContext } from "./context.ts";
+// Seam-A colorless-async (GITI-037) — the structured async-fn emitter + its
+// transitive coloring fixpoint (shared with emit-server ss1 / emit-tool), the
+// per-file callee resolver, and the SERVER-mode stdlib auto-await classifier.
+import { computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, asyncStdlibSyncCallbackError, aliasedAsyncCallError } from "./emit-library-shared.ts";
+import { buildCalleeImportMap } from "./scheduling.ts";
+import { setServerAsyncClassifier } from "./emit-expr.ts";
 
 /** A loosely-typed AST node. */
 type ASTNode = Record<string, unknown>;
@@ -242,8 +248,14 @@ function pruneServerFnsAndLowerGuarded(
   logicBody: unknown,
   sourceText: string,
   errors: CGError[],
+  extraRemovals: Array<{ start: number; end: number }> = [],
 ): string {
-  const removals = collectSqlFnRemovalRanges(logicBody, sourceText);
+  // Seam-A colorless-async — `extraRemovals` are the NON-SQL async fns that
+  // route through the structured `emitLibraryFnMember` (appended by the caller).
+  // Merging them here BEFORE the guarded-expr lowering means a `!{}` inside an
+  // async fn is SKIPPED (its span falls inside a removal) — emitLibraryFnMember
+  // lowers it structurally instead, so it is not double-lowered here.
+  const removals = [...collectSqlFnRemovalRanges(logicBody, sourceText), ...extraRemovals];
 
   const guarded: ASTNode[] = [];
   collectGuardedExprs(logicBody, guarded);
@@ -339,6 +351,128 @@ function pruneServerFnsAndLowerGuarded(
     text = text.slice(0, relStart) + op.text + text.slice(relEnd);
   }
   return text;
+}
+
+/** MOD per-module by-name export metadata (the `isAsync` source of truth). */
+type LibExportRegistry = Map<
+  string,
+  Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>
+>;
+
+/**
+ * Seam-A colorless-async (GITI-037) — the library-mode STRUCTURED async emit.
+ *
+ * The whole-block text-splice path (below) emits a fn's body VERBATIM, so a fn
+ * calling a Promise-returning stdlib primitive (`safeCallAsync`, a `scrml:auth`/
+ * `scrml:http` async export) — directly OR transitively through a local peer —
+ * was left sync + un-awaited: the Promise leaked (`r.ok === undefined`). This
+ * routes every such NON-SQL async fn through the SAME structured
+ * `emitLibraryFnMember` the ss1 / tool paths use, which colors it `async` and
+ * awaits both the stdlib call AND its transitive async peers (the coloring +
+ * await machinery unified on `computeAsyncFnNames`).
+ *
+ * Returns the source SPANS to prune from the block text (the caller merges them
+ * into `pruneServerFnsAndLowerGuarded` so the verbatim copy is removed) plus the
+ * structured JS to append. A `?{}`/transaction async fn is NOT routed here — it
+ * is pruned to `.server.js` by `collectSqlFnRemovalRanges`; only pure/host-call
+ * async fns stay in the client-facing library `.js`.
+ *
+ * No-silent-leak guard (axis-i): a stdlib-async call in a NON-awaitable position
+ * (a sync `.some`/`.find`/`.map` callback body or a parameter default) cannot be
+ * auto-awaited — emit-expr records it into the classifier's `syncCallSink`, which
+ * we drain into a fatal `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` rather than leak.
+ */
+function emitAsyncLibraryFns(
+  logicBody: unknown,
+  sourceText: string,
+  calleeMap: Map<string, string> | null,
+  exportRegistry: LibExportRegistry | null,
+  crossImportSeed: Set<string> | undefined,
+  filePath: string,
+  errors: CGError[],
+): { removals: Array<{ start: number; end: number }>; lines: string[] } {
+  const none = { removals: [] as Array<{ start: number; end: number }>, lines: [] as string[] };
+  if (!Array.isArray(logicBody) || !calleeMap || !exportRegistry || exportRegistry.size === 0) {
+    return none;
+  }
+  // All function-decl nodes (exported via `fromExport` + local helpers) feed the
+  // transitive fixpoint — a plain exported fn may reach a stdlib-async call only
+  // through a local peer, so the peer must be in the coloring set too.
+  const fns: ASTNode[] = [];
+  for (const node of logicBody as ASTNode[]) {
+    if (node && node.kind === "function-decl" && typeof node.name === "string") fns.push(node);
+  }
+  if (fns.length === 0) return none;
+  // Coloring: `?{}`/foreign/isAsync seed UNION `crossImportSeed` (Seam-A Gap 3 —
+  // the LOCAL names binding an async fn imported from another lib / a `scrml:`
+  // vendor primitive, so a fn calling one is colored + its call awaited) UNION the
+  // Gap-1 stdlib-Promise seed, then the call-graph fixpoint.
+  const asyncFnNames = computeAsyncFnNames(fns, sourceText, crossImportSeed, calleeMap, exportRegistry);
+
+  // No-silent-leak backstop (bucket c) — run the structural detectors over ALL fns
+  // (NOT just the colored ones): after [4] a raw-verbatim-body async call no longer
+  // COLORS its fn, but it is still an unawaitable async boundary that must fail
+  // closed. A param-default / sync-callback / raw-body async call → fail closed; an
+  // indirect async call via a local alias (finding 6) → fail closed. Deduped
+  // against the shared error stream (both generateLibraryJs and the ss1 path scan
+  // the same fn body). Runs before the emit early-returns so a file whose ONLY
+  // async signal is unawaitable still reports.
+  const pushDeduped = (err: CGError): void => {
+    const es = err.span as { start?: number };
+    const dup = errors.some((x) => x.code === err.code && (x.span as { start?: number })?.start === es?.start);
+    if (!dup) errors.push(err);
+  };
+  for (const fn of fns) {
+    for (const site of collectNonAwaitableAsyncCalls(fn.body, calleeMap, exportRegistry, asyncFnNames, fn.params, fn.span)) {
+      pushDeduped(asyncStdlibSyncCallbackError(site.name, site.span, filePath));
+    }
+    for (const a of collectAliasedAsyncCalls(fn.body, calleeMap, exportRegistry, asyncFnNames)) {
+      pushDeduped(aliasedAsyncCallError(a.alias, a.resolved, a.span, filePath));
+    }
+  }
+
+  if (asyncFnNames.size === 0) return none;
+  // Route only NON-SQL async fns — a `?{}`/transaction body is pruned to
+  // `.server.js` by collectSqlFnRemovalRanges (a client-facing raw `?{}` is
+  // invalid JS, §2.2.1).
+  const toEmit = fns.filter(
+    (fn) => asyncFnNames.has(fn.name as string) && !containsSqlOrTransaction(fn),
+  );
+  if (toEmit.length === 0) return none;
+
+  // Install the SERVER-mode stdlib auto-await classifier (+ fail-closed sink) so
+  // emit-expr's `emitCall` auto-awaits the stdlib call inside the structured
+  // body. Restored in `finally` (re-entrancy hygiene — a nested compile must not
+  // inherit this file's map). Mirrors emit-server generateServerJs (:1119).
+  const syncCallSink: Array<{ name: string; span: unknown }> = [];
+  const prevClassifier = setServerAsyncClassifier({ calleeMap, exportRegistry, syncCallSink });
+  const foreignCrossingErrors: unknown[] = [];
+  const removals: Array<{ start: number; end: number }> = [];
+  const outLines: string[] = [];
+  try {
+    for (const fn of toEmit) {
+      const sp = fn.span as Span | undefined;
+      if (!sp || typeof sp.start !== "number" || typeof sp.end !== "number") continue;
+      // Swallow a leading `export`/`pure`/`server` modifier (§21.5.1) — the
+      // decl span starts at `function`/`fn` (mirrors collectSqlFnRemovalRanges).
+      const lookback = sourceText.slice(Math.max(0, sp.start - 40), sp.start);
+      const m = lookback.match(/((?:export\s+)?(?:pure\s+)?(?:server\s+)?)$/);
+      const prefixLen = m ? m[1].length : 0;
+      removals.push({ start: sp.start - prefixLen, end: sp.end });
+      outLines.push(
+        emitLibraryFnMember(fn, {
+          isExported: fn.fromExport === true,
+          asyncFnNames,
+          foreignCrossingErrors,
+        }),
+      );
+    }
+  } finally {
+    setServerAsyncClassifier(prevClassifier);
+  }
+  // E-FOREIGN-006 crossing-shadow diagnostics from lowering an async fn body.
+  for (const e of foreignCrossingErrors) if (e) errors.push(e as CGError);
+  return { removals, lines: outLines };
 }
 
 /**
@@ -479,11 +613,14 @@ export function generateLibraryJs(
   let fileAST: Record<string, unknown>;
   let routeMap: object;
   let errors: CGError[];
+  let exportRegistry: LibExportRegistry | null = null;
   if ("fileAST" in ctxOrFileAST) {
     const ctx = ctxOrFileAST as CompileContext;
     fileAST = ctx.fileAST;
     routeMap = ctx.routeMap;
     errors = ctx.errors;
+    // Seam-A colorless-async — MOD's exportRegistry (isAsync source of truth).
+    exportRegistry = (ctx.exportRegistry as LibExportRegistry | null | undefined) ?? null;
   } else {
     fileAST = ctxOrFileAST;
     routeMap = routeMapLegacy ?? {};
@@ -491,6 +628,12 @@ export function generateLibraryJs(
   }
   const filePath = fileAST.filePath as string;
   const sourceText = (fileAST._sourceText ?? null) as string | null;
+  // Seam-A colorless-async — the per-file `localName → sourceModuleAbsPath`
+  // resolver feeding computeAsyncFnNames's Gap-1 stdlib-Promise seed. The
+  // TABResult wrapper hoists imports to `.ast.imports`, so prefer `.ast` when
+  // present (mirrors emit-server.ts:1096 / emit-functions.ts).
+  // Cleanup 8 — buildCalleeImportMap folds the `.ast.imports` hoist internally.
+  const libCalleeMap = buildCalleeImportMap(fileAST as any);
   const lines: string[] = [];
 
   lines.push("// Generated library module — scrml compiler output");
@@ -564,12 +707,27 @@ export function generateLibraryJs(
         // in one reverse-ordered splice pass. A `?{}` SQL fn resolving against
         // the file's own `<db src>` (§44.7.1) would otherwise leak verbatim into
         // the library `.js` and trip the §2.2.1 E-CODEGEN-INVALID-LOGIC gate.
+        // Seam-A colorless-async (GITI-037) — route every NON-SQL async fn
+        // (safeCallAsync / transitive-async) through the structured
+        // emitLibraryFnMember so it emits `async` + awaits the stdlib call and
+        // its async peers. `asyncEmit.removals` are merged into the prune pass
+        // (their verbatim text is removed); `asyncEmit.lines` are appended below.
+        const asyncEmit = emitAsyncLibraryFns(
+          logic.body,
+          sourceText,
+          libCalleeMap,
+          exportRegistry,
+          (fileAST as any)?._asyncImportedLocals as Set<string> | undefined,
+          filePath,
+          errors,
+        );
         blockText = pruneServerFnsAndLowerGuarded(
           blockText,
           logicSpan.start,
           logic.body,
           sourceText,
           errors,
+          asyncEmit.removals,
         );
         // Strip the ${ prefix and } suffix
         if (blockText.startsWith("${")) blockText = blockText.slice(2);
@@ -617,6 +775,17 @@ export function generateLibraryJs(
           ).join("\n");
           if (blockText) {
             lines.push(blockText);
+            lines.push("");
+          }
+        }
+        // Seam-A colorless-async — append the structured async fns (pruned from
+        // the verbatim block above). Emitted OUTSIDE the `if (blockText)` guard:
+        // a library whose ONLY content is an async fn has empty block text after
+        // pruning, but the fn must still emit. Function declarations hoist, so
+        // trailing placement after the imports/sync content is resolution-safe.
+        if (asyncEmit.lines.length > 0) {
+          for (const fnBlock of asyncEmit.lines) {
+            lines.push(fnBlock);
             lines.push("");
           }
         }

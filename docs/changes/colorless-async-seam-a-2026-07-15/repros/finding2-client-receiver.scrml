@@ -1,0 +1,19 @@
+<program>
+${
+  import { safeCallAsync } from "scrml:host"
+  function middle(cfg) {
+    const r = safeCallAsync(() => cfg.load()) !{ | ::Thrown(m) -> ({ count: 0 }) }
+    return r
+  }
+  function outer(cfg) {
+    // `middle` is a transitively-async client peer. `middle(cfg).count` must lower
+    // to `(await middle(cfg)).count` — an unwrapped `await middle(cfg).count`
+    // parses as `await (middle(cfg).count)` → awaits `undefined`.
+    const n = middle(cfg).count
+    @total = n
+  }
+  <total> = 0
+}
+<button onclick=outer(window)>Go</button>
+<span>${@total}</span>
+</program>

@@ -1,0 +1,12 @@
+${
+  import { safeCallAsync } from "scrml:host"
+  <db src="./data.db" tables="items">
+  export function loadRows() {
+    const rows = ?{`SELECT id FROM items`}.all()
+    return rows
+  }
+  export function callHost(obj) {
+    const r = safeCallAsync(() => obj.doThing()) !{ | ::Thrown(msg) :> ({ ok: false, error: msg }) }
+    return r.ok
+  }
+}

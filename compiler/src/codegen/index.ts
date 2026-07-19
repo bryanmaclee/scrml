@@ -21,7 +21,6 @@ import { scanClassesFromHtml, getAllUsedCSS } from "../tailwind-classes.js";
 import { collectClassNamesFromAst } from "./collect-class-names.ts";
 import { basename, dirname, relative, resolve } from "path";
 import { toPosix } from "../path-canonical.js";
-import { resolveModulePath } from "../module-resolver.js";
 import { RUNTIME_FILENAME } from "../runtime-template.js";
 import { assembleRuntime } from "./runtime-chunks.ts";
 import { fnv1aHash } from "./fnv1a-hash.ts";
@@ -62,6 +61,7 @@ import { generateClientJs } from "./emit-client.js";
 import { generateLibraryJs } from "./emit-library.ts";
 import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
+import { resolveModulePath, isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { BindingRegistry } from "./binding-registry.ts";
 import { analyzeAll } from "./analyze.ts";
 import { generateTestJs } from "./emit-test.ts";
@@ -449,42 +449,58 @@ function wrapClientBodyInIife(clientJs: string): string {
 function computeToolAsyncImportedLocals(
   toolFileAST: unknown,
   files: unknown[],
+  exportRegistry?: CrossModuleExportRegistry | null,
 ): Set<string> {
-  return asyncImportedLocalsOf(toolFileAST, files, new Map<string, Set<string>>());
+  return asyncImportedLocalsOf(toolFileAST, files, new Map<string, Set<string>>(), exportRegistry ?? null);
 }
+
+/** MOD per-module by-name export metadata threaded through the cross-module
+ *  async fixpoint (the `isAsync` source of truth for the Gap-1/Gap-3 seeds). */
+type CrossModuleExportRegistry = Map<
+  string,
+  Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>
+>;
 
 /**
  * The EXPORTED fn names of `fileAST` that are async — memoized + cross-file
- * TRANSITIVE. A fn is async if it directly does `?{}` / `_{}`, transitively CALLS
- * such a local fn, OR calls an async fn IMPORTED from another lib. The import
- * graph is a DAG (cycles are E-IMPORT-002), and `memo` (keyed by filePath,
- * registered BEFORE recursing) makes it cycle-safe + linear.
+ * TRANSITIVE. A fn is async if it directly does `?{}` / `_{}`, calls a
+ * Promise-returning stdlib primitive (Seam-A Gap 1), transitively CALLS such a
+ * local fn, OR calls an async fn IMPORTED from another lib. The import graph is a
+ * DAG (cycles are E-IMPORT-002), and `memo` (keyed by filePath, registered
+ * BEFORE recursing) makes it cycle-safe + linear.
  */
 function asyncExportNamesOf(
   fileAST: unknown,
   files: unknown[],
   memo: Map<string, Set<string>>,
+  exportRegistry?: CrossModuleExportRegistry | null,
 ): Set<string> {
   const fp = (fileAST as any)?.filePath as string | undefined;
   if (fp && memo.has(fp)) return memo.get(fp)!;
   const result = new Set<string>();
   if (fp) memo.set(fp, result); // cycle guard: register the (mutable) set first
   // This file's OWN async imported locals seed its local async-coloring fixpoint.
-  const seed = asyncImportedLocalsOf(fileAST, files, memo);
-  for (const n of collectAsyncFnNamesFromFile(fileAST as never, seed)) result.add(n);
+  const seed = asyncImportedLocalsOf(fileAST, files, memo, exportRegistry);
+  // Seam-A Gap 1 — thread exportRegistry so a fn calling `safeCallAsync` (etc.)
+  // is recognized async here too, else the importing file never learns this
+  // export is async (repro-crossmodule: main.orchestrate → helper.wrapAsync).
+  for (const n of collectAsyncFnNamesFromFile(fileAST as never, seed, exportRegistry)) result.add(n);
   return result;
 }
 
 /**
  * The LOCAL binding names in `fileAST` that bind an ASYNC fn imported from
- * another `.scrml` lib (recursively resolved via `asyncExportNamesOf`). Used both
- * as the tool's call-site await-set (§64 / Flag C) and as the cross-import seed
- * for a db-context library's own async-coloring (W5b #2).
+ * another `.scrml` lib (recursively resolved via `asyncExportNamesOf`) OR — Seam-A
+ * Gap 3 — from a `scrml:` vendor module (a Promise-returning stdlib primitive like
+ * `safeCallAsync` / a `scrml:auth`/`http` async export). Used both as the tool's
+ * call-site await-set (§64 / Flag C) and as the cross-import seed for a library's
+ * own async-coloring (W5b #2).
  */
 function asyncImportedLocalsOf(
   fileAST: unknown,
   files: unknown[],
   memo: Map<string, Set<string>>,
+  exportRegistry?: CrossModuleExportRegistry | null,
 ): Set<string> {
   const result = new Set<string>();
   const tf = fileAST as any;
@@ -494,15 +510,34 @@ function asyncImportedLocalsOf(
   if (!filePath) return result;
   for (const imp of imports) {
     if (!imp || imp.kind !== "import-decl" || typeof imp.source !== "string") continue;
-    if (!imp.source.endsWith(".scrml")) continue;
+    if (!imp.source.endsWith(".scrml")) {
+      // Seam-A Gap 3 — a `scrml:` vendor async PRIMITIVE import. Its async-ness is
+      // known via the stdlib registry (isPromiseReturningStdlibFn, keyed on the
+      // Q5 `<repo>/stdlib/` carve-out + `isAsync`), so a local binding of such a
+      // primitive seeds this file's async-coloring fixpoint cross-module.
+      if (exportRegistry && exportRegistry.size > 0) {
+        const absVendor = resolveModulePath(imp.source, filePath);
+        if (absVendor) {
+          for (const spec of (imp.specifiers ?? [])) {
+            if (
+              spec && typeof spec.imported === "string" && typeof spec.local === "string" &&
+              isPromiseReturningStdlibFn(spec.imported, absVendor, exportRegistry)
+            ) {
+              result.add(spec.local);
+            }
+          }
+        }
+      }
+      continue;
+    }
     // Shape-aware resolve (posix key, no drive-prepend for a drive-less
     // importer) so `absSource` keys identically to the graph/AST `filePath`.
     // A bare `resolve()` drive-prepended on Windows and silently dropped
-    // await-coloring for imported async fns — the #26 failure class.
+    // await-coloring for imported async fns — the #26 failure class (Peter/#26).
     const absSource = resolveModulePath(imp.source, filePath);
     const srcFile = (files as any[]).find((fa) => toPosix(fa?.filePath) === absSource);
     if (!srcFile) continue;
-    const asyncNames = asyncExportNamesOf(srcFile, files, memo);
+    const asyncNames = asyncExportNamesOf(srcFile, files, memo, exportRegistry);
     if (asyncNames.size === 0) continue;
     // Default imports of a `.scrml` lib are rejected upstream (MOD E-IMPORT-004 —
     // scrml libs export NAMED bindings only), so only the named arm binds an
@@ -1100,7 +1135,7 @@ export function runCG(input: CgInput): CgOutput {
     // into computeAsyncFnNames). Stashed here because emit-server has no `files`
     // handle. `computeToolAsyncImportedLocals` is generic (any fileAST); it
     // early-returns empty for an import-free file, so the cost is ~O(1) there.
-    (fileAST as any)._asyncImportedLocals = computeToolAsyncImportedLocals(fileAST, files);
+    (fileAST as any)._asyncImportedLocals = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput);
 
     // ---------------------------------------------------------------------------
     // §64 STANDALONE TOOL TARGET — a `kind="tool"` top-level <program> re-targets
@@ -1116,7 +1151,7 @@ export function runCG(input: CgInput): CgOutput {
       // §64.6 — fail closed if the tool imports a non-importable `.scrml` dep
       // (page-shaped / no exports → no `<base>.js` → runtime Cannot-find-module).
       checkToolImportsAreImportable(fileAST, files, filePath, errors);
-      const asyncImportedNames = computeToolAsyncImportedLocals(fileAST, files);
+      const asyncImportedNames = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput);
       // §64 (Fork 1A, Unit 2) — a `kind="tool" serve=` program hosts its
       // `<endpoint>`/SSE routes via a compiler-emitted `Bun.serve`. Thread the
       // route-inference routeMap + the auth/middleware/protect stage results
@@ -1180,6 +1215,10 @@ export function runCG(input: CgInput): CgOutput {
         synthCellKeys: collectSynthCellKeys(fileAST),
         analysis: analysis ?? null,
         reachabilityRecord: reachabilityRecordInput,
+        // Seam-A colorless-async (GITI-037) — thread MOD's exportRegistry so
+        // generateLibraryJs can seed + auto-await a library fn calling a
+        // Promise-returning stdlib primitive (safeCallAsync / scrml:auth …).
+        exportRegistry: exportRegistryInput,
       };
       const libraryJs: string | null = codegenStage("emit-library", () =>
         generateLibraryJs(libCtx)
@@ -1636,7 +1675,7 @@ export function runCG(input: CgInput): CgOutput {
     if (toolDepFiles.has(filePath) && isLibraryShapedFile(fileAST)) {
       // Flag C — the LOCAL names this lib imports that bind an ASYNC fn from
       // ANOTHER lib, so a lib fn calling one awaits it (cross-import await-color).
-      const libAsyncImports = computeToolAsyncImportedLocals(fileAST, files);
+      const libAsyncImports = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput);
       // Route to the in-process emit when the lib either RUNS `?{}` SQL itself,
       // OR imports an ASYNC fn it may call (that fn's call site needs awaiting +
       // its `.scrml` import rewritten to `.js`). A `<transaction>`-ONLY lib with

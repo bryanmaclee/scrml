@@ -1,0 +1,15 @@
+${
+  import { safeCallAsync } from "scrml:host"
+  export function leaf(obj) {
+    const r = safeCallAsync(() => obj.doThing()) !{ | ::Thrown(msg) :> ({ ok: false, error: msg }) }
+    return r.ok
+  }
+  export function middle(obj) {
+    const ok = leaf(obj)
+    return ok
+  }
+  export function top(obj) {
+    const ok = middle(obj)
+    return ok
+  }
+}

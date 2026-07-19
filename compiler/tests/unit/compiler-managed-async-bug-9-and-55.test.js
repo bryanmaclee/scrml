@@ -26,8 +26,11 @@
  * Per the original Bug 9 3-layer framing:
  *   L1 (THIS — RESOLVED S138) — populate route.functionName
  *   L2 (Bug 55 — RESOLVED S138 same commit) — CPS planner shape gate
- *   L3 — transitive async coloring across client fn graphs (still
- *        deferred; tested negatively in §6 as the L3-tripwire)
+ *   L3 (RESOLVED — Seam-A colorless-async Gap 2 / GITI-037) — transitive async
+ *        coloring across client fn graphs: the plain/client-fn classification
+ *        now routes through the transitive computeAsyncFnNames fixpoint (a fn
+ *        reaching a server / stdlib-Promise call through a local client peer is
+ *        colored async AND awaits the peer). See §8.
  *
  * Coverage:
  *   §1  Direct caller: client fn calling server fn gets `async function`
@@ -37,7 +40,8 @@
  *   §5  Emitted client.js passes JS syntax check
  *   §6  Bug 55: guarded-expr stays in single-stmt group (not array element)
  *   §7  Bug 55: if-stmt stays in single-stmt group
- *   §8  L3 transitive boundary doc test — tripwire for future L3 implementation
+ *   §8  L3 transitive boundary — RESOLVED (Seam-A Gap 2): outerCaller is async
+ *       + awaits its client peer
  */
 
 import { describe, test, expect } from "bun:test";
@@ -330,11 +334,11 @@ describe("§7: Bug 55 — if-stmt stays in single-stmt group", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §8: L3 transitive boundary doc test — tripwire for future L3
+// §8: L3 transitive boundary — RESOLVED by Seam-A colorless-async Gap 2 (GITI-037)
 // ---------------------------------------------------------------------------
 
-describe("§8: L3 transitive boundary (doc test — L3 deferred)", () => {
-  test("a fn calling a client-fn-that-calls-server is NOT YET async (L3 deferred)", () => {
+describe("§8: L3 transitive boundary (RESOLVED — Seam-A Gap 2 / GITI-037)", () => {
+  test("a fn calling a client-fn-that-calls-server IS transitively async + awaits the peer", () => {
     const src = `<program>
 \${
     server function loadCount() {
@@ -362,10 +366,11 @@ describe("§8: L3 transitive boundary (doc test — L3 deferred)", () => {
     expect(clientJs).toBeTruthy();
     // L1 — clientWrapper correctly gets async (direct server caller).
     expect(clientJs).toMatch(/async function _scrml_clientWrapper_\d+/);
-    // L3 deferred — outerCaller calls clientWrapper (an async client fn)
-    // but doesn't itself get async/await. When L3 lands, this assertion
-    // will fail; the failure is the signal to update the test + flip the
-    // Bug 9 known-gaps entry to fully RESOLVED (currently RESOLVED-L1-only).
-    expect(clientJs).not.toMatch(/async function _scrml_outerCaller_\d+/);
+    // L3 RESOLVED (Seam-A Gap 2) — outerCaller calls clientWrapper (an async
+    // client peer), so the transitive fixpoint colors outerCaller async AND
+    // awaits its peer call. Without both, clientWrapper's Promise leaks into
+    // `@display` (`[object Promise]` instead of the resolved value).
+    expect(clientJs).toMatch(/async function _scrml_outerCaller_\d+/);
+    expect(clientJs).toMatch(/await\s+_scrml_clientWrapper_\d+\s*\(/);
   });
 });

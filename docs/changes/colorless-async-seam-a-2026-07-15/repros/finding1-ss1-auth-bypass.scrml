@@ -1,0 +1,11 @@
+${
+  import { verifyPassword } from "scrml:auth"
+  // A value-exported fn with a stdlib-async call in a SYNC .some callback: `await`
+  // is illegal there, so verifyPassword(...) ships BARE — every Promise is truthy,
+  // so anyValid returns true for a WRONG password (accept-all auth bypass). This
+  // MUST fire E-ASYNC-STDLIB-IN-SYNC-CALLBACK, not ship the leak.
+  export function anyValid(pw, hs) {
+    const ok = hs.some(h => verifyPassword(pw, h))
+    return ok
+  }
+}

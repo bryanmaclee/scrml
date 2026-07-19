@@ -1,0 +1,16 @@
+${
+  import { safeCallAsync } from "scrml:host"
+  export function middle(obj) {
+    const r = safeCallAsync(() => obj.doThing()) !{ | ::Thrown(m) :> ({ ok: false }) }
+    return r.ok
+  }
+  // `g` aliases the async `middle`. collectCalleeIdents sees only direct ident
+  // calls, so `g()` is neither colored async, awaited, nor drained → the Promise
+  // leaks (`ok` is a pending Promise, not the resolved boolean). MUST diagnose
+  // (or await) the indirect async call, never leak.
+  export function outer(obj) {
+    const g = middle
+    const ok = g(obj)
+    return ok
+  }
+}
