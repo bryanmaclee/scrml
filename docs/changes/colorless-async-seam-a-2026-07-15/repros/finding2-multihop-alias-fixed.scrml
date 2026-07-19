@@ -1,0 +1,18 @@
+${
+  import { safeCallAsync } from "scrml:host"
+  export function middle(o) {
+    const r = safeCallAsync(() => o.doThing()) !{ | ::Thrown(m) :> ({ ok: false }) }
+    return r.ok
+  }
+  // finding 2 — a MULTI-HOP alias chain `h -> g -> middle(async)`. The single-level
+  // collector recorded `X = <rhs>` only when `isAsyncName(rhs)`, so `const h = g`
+  // (g is itself an alias, not directly async) was never recorded and `h(o)` shipped
+  // bare-unawaited on a plain sync `outer`, ZERO errors. Post-fix the chain resolves
+  // transitively so `h(o)` is caught — awaited, or FAIL CLOSED via the diagnostic.
+  export function outer(o) {
+    const g = middle
+    const h = g
+    const ok = h(o)
+    return ok
+  }
+}

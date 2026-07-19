@@ -423,7 +423,7 @@ function emitAsyncLibraryFns(
     if (!dup) errors.push(err);
   };
   for (const fn of fns) {
-    for (const site of collectNonAwaitableAsyncCalls(fn.body, calleeMap, exportRegistry, asyncFnNames)) {
+    for (const site of collectNonAwaitableAsyncCalls(fn.body, calleeMap, exportRegistry, asyncFnNames, fn.params, fn.span)) {
       pushDeduped(asyncStdlibSyncCallbackError(site.name, site.span, filePath));
     }
     for (const a of collectAliasedAsyncCalls(fn.body, calleeMap, exportRegistry, asyncFnNames)) {

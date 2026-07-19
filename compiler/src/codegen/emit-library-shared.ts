@@ -198,11 +198,14 @@ export function asyncStdlibSyncCallbackError(
 }
 
 /**
- * Seam-A no-silent-leak backstop (S239 finding 6) — the SHARED indirect-alias
- * diagnostic. A local `const g = middle` (middle async) then `g()` is an indirect
- * async call: `collectCalleeIdents` sees only DIRECT ident calls, so `g()` is
- * neither colored, awaited, nor drained → the Promise leaks. Bounded single-level
- * alias resolution is a follow-on; for now FAIL CLOSED so the leak never ships.
+ * Seam-A no-silent-leak backstop (S239 finding 6 + finding 2 multi-hop) — the
+ * SHARED indirect-alias diagnostic. A local `const g = middle` (middle async), or a
+ * multi-hop `const g = middle; const h = g`, then a call `g()`/`h()` is an indirect
+ * async call: `collectCalleeIdents` sees only DIRECT ident calls, so the aliased
+ * call is neither colored, awaited, nor drained → the Promise leaks. `collectAliasedAsyncCalls`
+ * now chain-follows the alias to its async terminal (`resolvedName`); we FAIL CLOSED
+ * so the leak never ships (consistent with the single-level case — the caller can
+ * call the resolved async fn directly for auto-await).
  */
 export function aliasedAsyncCallError(
   aliasName: string,
@@ -224,12 +227,15 @@ export function aliasedAsyncCallError(
 }
 
 /**
- * Seam-A no-silent-leak backstop (S239 finding 6) — structurally detect calls to a
- * LOCAL binding that aliases an async fn (`const g = middle; g()`). Returns each
- * indirect call site (with the alias + resolved async name) for the caller to
- * fail-close via `aliasedAsyncCallError`. Bounded: single-level DIRECT ident alias
- * (`const/let/tilde/lin-decl X = <asyncName>`); a re-aliased or computed binding is
- * out of scope (a future follow-on) — but never a silent leak within this level.
+ * Seam-A no-silent-leak backstop (S239 finding 6 + finding 2) — structurally detect
+ * calls to a LOCAL binding that aliases an async fn, including a MULTI-HOP chain
+ * (`const g = middle; const h = g; h()` → `h -> g -> middle(async)`). Pass 1 collects
+ * every simple `X = <ident>` decl; Pass 1b chain-follows each to its async terminal
+ * (cycle-safe); Pass 2 flags every call to a resolved alias. Returns each indirect
+ * call site (with the alias + terminal async name) for the caller to fail-close via
+ * `aliasedAsyncCallError`. A computed/non-ident binding is still out of scope — but
+ * never a silent leak: an un-resolvable alias simply is not flagged as async, and a
+ * resolvable chain of any depth is caught.
  */
 export function collectAliasedAsyncCalls(
   fnBody: unknown,
@@ -246,9 +252,12 @@ export function collectAliasedAsyncCalls(
     }
     return false;
   };
-  // Pass 1 — collect `X = <asyncName>` aliases (const/let/tilde/lin decl whose
-  // initializer is a bare async ident, structurally OR from the raw init text).
-  const aliasToResolved = new Map<string, string>();
+  // Pass 1 — collect EVERY simple ident alias `X = <ident>` (const/let/tilde/lin
+  // decl whose initializer is a bare ident, structurally OR from the raw init text),
+  // REGARDLESS of whether the RHS is itself async. A re-alias `h = g` (g not
+  // directly async, itself an alias) must be captured so the chain can be followed
+  // to its async terminal (finding 2 — the pre-fix single-level scan missed it).
+  const declToRhs = new Map<string, string>();
   const DECL_KINDS = new Set(["const-decl", "let-decl", "tilde-decl", "lin-decl"]);
   const collectAliases = (node: unknown): void => {
     if (!node || typeof node !== "object") return;
@@ -262,7 +271,7 @@ export function collectAliasedAsyncCalls(
         const m = n.init.trim().match(/^([A-Za-z_$][A-Za-z0-9_$]*)$/);
         if (m) rhs = m[1];
       }
-      if (rhs && rhs !== n.name && isAsyncName(rhs)) aliasToResolved.set(n.name, rhs);
+      if (rhs && rhs !== n.name) declToRhs.set(n.name, rhs);
     }
     for (const key of Object.keys(n)) {
       if (key === "span") continue;
@@ -271,6 +280,23 @@ export function collectAliasedAsyncCalls(
     }
   };
   collectAliases(fnBody);
+  if (declToRhs.size === 0) return [];
+  // Pass 1b — CHAIN-FOLLOW each alias transitively to a terminal async name
+  // (`h -> g -> middle(async)`), the ratified full-multi-hop resolution. Cycle-safe:
+  // a `visited` set terminates a self/mutual alias cycle (`a = b; b = a`). Only an
+  // alias whose chain terminates in an async fn is recorded; a chain ending in a
+  // plain sync name (or a cycle) is not a leak and is left out.
+  const aliasToResolved = new Map<string, string>();
+  for (const start of declToRhs.keys()) {
+    const visited = new Set<string>([start]);
+    let cur: string | undefined = declToRhs.get(start);
+    while (cur !== undefined) {
+      if (isAsyncName(cur)) { aliasToResolved.set(start, cur); break; }
+      if (visited.has(cur)) break;   // cycle → not async, stop
+      visited.add(cur);
+      cur = declToRhs.get(cur);      // next hop; undefined ends the chain (sync)
+    }
+  }
   if (aliasToResolved.size === 0) return [];
   // Pass 2 — flag every call to an aliased name.
   const out: Array<{ alias: string; resolved: string; span: unknown }> = [];
@@ -307,19 +333,33 @@ export function collectAliasedAsyncCalls(
  *      no source `await` — so any async call in one is un-awaitable), OR
  *   2. inside a raw `escape-hatch` (block-body callback / raw JS) or a template-
  *      literal `.raw` body — emitted VERBATIM, so `emit-expr` never structurally
- *      sees the inner call to lower it.
+ *      sees the inner call to lower it, OR
+ *   3. (S239 param-default fix) inside the ENCLOSING fn's OWN parameter default —
+ *      `function f(x = safeCallAsync(...))`. A param default is eagerly evaluated
+ *      OUTSIDE the fn's async body; `await` is a JS SyntaxError in a default even
+ *      in an async fn (DD colorless-async-boundaries position-2, the CONFIRMED
+ *      fail-close anchor). `paramSignature` splices `p.defaultValue` as RAW TEXT,
+ *      so it is neither in `fnBody` nor structurally reachable — scan the text.
  * Returns each such site for the caller to fail-close via `asyncStdlibSyncCallbackError`.
  *
  * An AWAITABLE-position async call (a top-level statement / decl init / control-flow
  * condition, NOT inside a lambda) is handled by the emit's auto-await and is NOT
  * returned. This is the SAME structural traversal shape as `computeAsyncFnNames`'s
  * coloring, so coloring and this drain cannot drift (the S239 root cause).
+ *
+ * @param params  the enclosing fn's `fnNode.params` — each `{defaultValue?: string}`
+ *                entry's raw default text is scanned (case 3). Omit for a bare-body
+ *                scan (back-compatible).
+ * @param fnSpan  a fallback span for a param-default site (param entries carry no
+ *                span of their own; points the diagnostic at the fn declaration).
  */
 export function collectNonAwaitableAsyncCalls(
   fnBody: unknown,
   calleeMap: CalleeImportMap | null,
   exportRegistry: ExportRegistry | null,
   asyncFnNames: Set<string>,
+  params?: unknown,
+  fnSpan?: unknown,
 ): Array<{ name: string; span: unknown }> {
   const out: Array<{ name: string; span: unknown }> = [];
   const seen = new Set<string>();
@@ -363,6 +403,24 @@ export function collectNonAwaitableAsyncCalls(
     }
   };
   walk(fnBody, false);
+  // Case 3 — the enclosing fn's OWN parameter defaults. `paramSignature` splices
+  // `p.defaultValue` as RAW TEXT, so it lives in neither `fnBody` nor a structural
+  // node — scan the text for async callees (mirrors the raw escape-hatch branch).
+  // A structured default (a destructure-pattern's `defaultExpr` ExprNode) is walked
+  // structurally as an un-awaitable region.
+  if (Array.isArray(params)) {
+    for (const p of params) {
+      if (!p || typeof p !== "object") continue;
+      const pd = p as { defaultValue?: unknown; defaultExpr?: unknown; span?: unknown };
+      const site = pd.span ?? fnSpan;
+      if (typeof pd.defaultValue === "string" && pd.defaultValue.length > 0) {
+        for (const c of extractCalleeNames(pd.defaultValue)) if (isAsyncName(c)) record(c, site);
+      } else if (pd.defaultValue && typeof pd.defaultValue === "object") {
+        walk(pd.defaultValue, true);
+      }
+      if (pd.defaultExpr && typeof pd.defaultExpr === "object") walk(pd.defaultExpr, true);
+    }
+  }
   return out;
 }
 

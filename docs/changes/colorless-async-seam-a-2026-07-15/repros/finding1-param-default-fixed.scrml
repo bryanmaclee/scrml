@@ -1,0 +1,16 @@
+<program>
+${
+  import { safeCallAsync } from "scrml:host"
+  // finding 1 — an async stdlib-Promise call in a CLIENT fn's PARAM DEFAULT.
+  // A param default is eagerly evaluated OUTSIDE the async body; `await` is a JS
+  // SyntaxError in a default even in an async fn. Pre-fix this compiled clean and
+  // leaked: `x` is a Promise, `x.ok` is `undefined`, ZERO errors. Post-fix it must
+  // FAIL CLOSED with E-ASYNC-STDLIB-IN-SYNC-CALLBACK pointing at the param default.
+  function f(x = safeCallAsync(() => window.g())) {
+    @done = x.ok
+  }
+  <done> = false
+}
+<button onclick=f()>Go</button>
+<span>${@done}</span>
+</program>

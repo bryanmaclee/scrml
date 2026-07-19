@@ -1397,7 +1397,11 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   for (const fn of _clientFns) {
     const nm = fn.name as string | undefined;
     if (!nm) continue;
-    for (const site of collectNonAwaitableAsyncCalls(fn.body, _calleeMap, _exportRegistry, _clientAsyncFnNames)) {
+    // `fn.params` + `fn.span` are threaded so an async call in a SIGNATURE param
+    // default (`function f(x = safeCallAsync(...))` / `function f(x = middle())`)
+    // fails closed. It lives in `fn.params` (spliced as raw text by paramSignature),
+    // NOT `fn.body`, so the body walk alone never reaches it — the pre-S239-fix leak.
+    for (const site of collectNonAwaitableAsyncCalls(fn.body, _calleeMap, _exportRegistry, _clientAsyncFnNames, fn.params, fn.span)) {
       _pushClientLeak(asyncStdlibSyncCallbackError(site.name, site.span, filePath));
     }
     for (const a of collectAliasedAsyncCalls(fn.body, _calleeMap, _exportRegistry, _clientAsyncFnNames)) {
@@ -1406,9 +1410,11 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   }
   // Belt-and-suspenders — emit-expr records a client async-peer call emitted BARE
   // in a non-awaitable position (`peerAwaitable === false`) into `_clientSyncPeerCalls`.
-  // This covers a fn-SIGNATURE param default (`function f(x = middle())`) — which
-  // lives in `fn.params`, NOT `fn.body`, so the structural body scan above does not
-  // reach it. Deduped against the detector's diagnostics by (code, span).
+  // NOTE: this sink is NOT populated for a fn-SIGNATURE param default — a param
+  // default is spliced as raw text by `paramSignature` and never reaches emit-expr's
+  // call lowering, so `_clientSyncPeerCalls` stays empty for that shape. The param
+  // default is covered by the `fn.params` scan in the detector loop ABOVE, not here.
+  // This sink remains for any peer call emit-expr records BARE inside a fn body.
   for (const _sp of _clientSyncPeerCalls) {
     _pushClientLeak(asyncStdlibSyncCallbackError(_sp.name, _sp.span, filePath));
   }

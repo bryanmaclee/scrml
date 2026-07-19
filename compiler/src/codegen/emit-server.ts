@@ -881,7 +881,7 @@ function emitModuleValueExportLines(
     for (const fnNode of fnDeclByName.values()) {
       const nm = fnNode?.name as string | undefined;
       if (!nm) continue;
-      for (const site of collectNonAwaitableAsyncCalls(fnNode.body, _veCalleeMap, exportRegistry ?? null, asyncFnNames)) {
+      for (const site of collectNonAwaitableAsyncCalls(fnNode.body, _veCalleeMap, exportRegistry ?? null, asyncFnNames, fnNode.params, fnNode.span)) {
         _pushVeDeduped(asyncStdlibSyncCallbackError(site.name, site.span, filePath));
       }
       for (const a of collectAliasedAsyncCalls(fnNode.body, _veCalleeMap, exportRegistry ?? null, asyncFnNames)) {
