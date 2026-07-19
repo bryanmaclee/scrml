@@ -2646,6 +2646,16 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       if ((node as any).markupNode) {
         return `return ${emitMarkupValueExpr((node as any).markupNode)};`;
       }
+      // GITI-038 — `return function name(){…}` returns a function EXPRESSION. The
+      // parser attaches the structural function-decl as `fnExprNode` (rather than
+      // emptying the return + hoisting an orphaned sibling decl). Emit it inline as
+      // `return [async] function name(){…};` — `case "function-decl"` produces the
+      // named-function-expression text and derives its own `async` keyword from the
+      // lowered body's `await`s, so a returned async closure lands correct while its
+      // ENCLOSING factory stays non-async (its own body just returns the value).
+      if ((node as any).fnExprNode) {
+        return `return ${emitLogicNode((node as any).fnExprNode, opts)};`;
+      }
       // Phase 3 fast path: when exprNode is present, skip all string splitting
       if (node.exprNode) {
         return _wrapReturnWithCheck(emitExpr(node.exprNode, _makeExprCtx(opts)));

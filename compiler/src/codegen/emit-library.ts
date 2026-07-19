@@ -10,7 +10,7 @@ import type { CompileContext } from "./context.ts";
 // Seam-A colorless-async (GITI-037) — the structured async-fn emitter + its
 // transitive coloring fixpoint (shared with emit-server ss1 / emit-tool), the
 // per-file callee resolver, and the SERVER-mode stdlib auto-await classifier.
-import { computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, asyncStdlibSyncCallbackError, aliasedAsyncCallError } from "./emit-library-shared.ts";
+import { computeAsyncFnNames, computeNestedAsyncFnHolders, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, asyncStdlibSyncCallbackError, aliasedAsyncCallError } from "./emit-library-shared.ts";
 import { buildCalleeImportMap } from "./scheduling.ts";
 import { setServerAsyncClassifier } from "./emit-expr.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
@@ -421,7 +421,14 @@ function emitAsyncLibraryFns(
   // the LOCAL names binding an async fn imported from another lib / a `scrml:`
   // vendor primitive, so a fn calling one is colored + its call awaited) UNION the
   // Gap-1 stdlib-Promise seed, then the call-graph fixpoint.
-  const asyncFnNames = computeAsyncFnNames(fns, sourceText, crossImportSeed, calleeMap, exportRegistry);
+  // GITI-038 — Q1 (OWN-signature async): `guardNestedFnValues=true` so a nested
+  // returned/held closure's async call does NOT color its enclosing factory. Q2
+  // (needs AST re-emission) is `asyncFnNames` ∪ the nested-async-closure holders
+  // (`composeFail` returns `dispatch` whose body awaits `safeCallAsync`): the factory
+  // is non-async but MUST leave the verbatim path so `dispatch` picks up `async`+
+  // `await` (verbatim would ship a bare Promise into the `!{}` check).
+  const asyncFnNames = computeAsyncFnNames(fns, sourceText, crossImportSeed, calleeMap, exportRegistry, undefined, /*guardNestedFnValues*/ true);
+  const nestedAsyncHolders = computeNestedAsyncFnHolders(fns, asyncFnNames, calleeMap, exportRegistry);
 
   // No-silent-leak backstop (bucket c) — run the structural detectors over ALL fns
   // (NOT just the colored ones): after [4] a raw-verbatim-body async call no longer
@@ -445,12 +452,14 @@ function emitAsyncLibraryFns(
     }
   }
 
-  if (asyncFnNames.size === 0) return none;
-  // Route only NON-SQL async fns — a `?{}`/transaction body is pruned to
-  // `.server.js` by collectSqlFnRemovalRanges (a client-facing raw `?{}` is
-  // invalid JS, §2.2.1).
+  if (asyncFnNames.size === 0 && nestedAsyncHolders.size === 0) return none;
+  // Route NON-SQL fns that are async OR hold a nested async closure (GITI-038 Q2) —
+  // a `?{}`/transaction body is pruned to `.server.js` by collectSqlFnRemovalRanges
+  // (a client-facing raw `?{}` is invalid JS, §2.2.1).
   const toEmit = fns.filter(
-    (fn) => asyncFnNames.has(fn.name as string) && !containsSqlOrTransaction(fn),
+    (fn) =>
+      (asyncFnNames.has(fn.name as string) || nestedAsyncHolders.has(fn.name as string)) &&
+      !containsSqlOrTransaction(fn),
   );
   if (toEmit.length === 0) return none;
 
@@ -478,6 +487,10 @@ function emitAsyncLibraryFns(
           isExported: fn.fromExport === true,
           asyncFnNames,
           foreignCrossingErrors,
+          // GITI-038 — a nested-async-closure holder that is NOT itself async: emit
+          // its body server-side (nested await legal) but keep its OWN signature sync.
+          nonAsyncReemit:
+            !asyncFnNames.has(fn.name as string) && nestedAsyncHolders.has(fn.name as string),
         }),
       );
     }

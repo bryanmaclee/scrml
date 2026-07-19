@@ -2012,7 +2012,17 @@ function substitutePropsInLogicStmt(
     }
     case "return-stmt": {
       const n = stmt as ReturnStmtNode;
-      return { ...n, exprNode: subInExpr(n.exprNode) } satisfies ReturnStmtNode;
+      // GITI-038 — a returned function expression (`return function name(){…}`)
+      // lives on `fnExprNode` (a `function-decl`). The `...n` spread would carry it
+      // UNSUBSTITUTED — route it through `substitutePropsInLogicStmt` so a component
+      // prop referenced inside the returned closure is substituted (same as a nested
+      // function-decl statement).
+      const rfn = n.fnExprNode;
+      return {
+        ...n,
+        exprNode: subInExpr(n.exprNode),
+        ...(rfn ? { fnExprNode: substitutePropsInLogicStmt(rfn, propExprMap, shadowed) as FunctionDeclNode } : {}),
+      } satisfies ReturnStmtNode;
     }
     case "throw-stmt": {
       const n = stmt as ThrowStmtNode;

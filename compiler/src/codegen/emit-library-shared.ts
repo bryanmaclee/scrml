@@ -63,10 +63,19 @@ export function bodyHasForeignOrSql(node: unknown): boolean {
  * (fail-closed, structurally detected) or bucket (a) (an array-method callback
  * routed to the async combinator), never a raw text-scan for coloring.
  */
-function collectCalleeIdents(node: unknown, out: Set<string>): void {
+function collectCalleeIdents(node: unknown, out: Set<string>, guardNestedFnValues = false): void {
   if (!node || typeof node !== "object") return;
-  if (Array.isArray(node)) { for (const c of node) collectCalleeIdents(c, out); return; }
+  if (Array.isArray(node)) { for (const c of node) collectCalleeIdents(c, out, guardNestedFnValues); return; }
   const n = node as ASTNode;
+  // GITI-038 — when `guardNestedFnValues`, a nested function VALUE (a returned
+  // `function name(){…}` carried on a return-stmt's `fnExprNode`, or a nested
+  // `function-decl` statement) has its OWN async scope: an async call inside it
+  // does NOT color the ENCLOSING function's OWN signature (the enclosing body just
+  // holds/returns the value). Mirrors scheduling.ts's `hasServerCallees`, which
+  // "deliberately does NOT descend into nested function-decl / lambda / sync-callback
+  // bodies." A combinator callback (a `lambda` ARG to `.map`/`.some`/…) is NOT a
+  // `function-decl`, so it is still descended — #110's combinator coloring intact.
+  if (guardNestedFnValues && n.kind === "function-decl") return;
   if (n.kind === "call") {
     if (typeof n.name === "string") out.add(n.name);
     const callee = n.callee as ASTNode | undefined;
@@ -75,7 +84,7 @@ function collectCalleeIdents(node: unknown, out: Set<string>): void {
   for (const key of Object.keys(n)) {
     if (key === "span") continue;
     const v = n[key];
-    if (v && typeof v === "object") collectCalleeIdents(v, out);
+    if (v && typeof v === "object") collectCalleeIdents(v, out, guardNestedFnValues);
   }
 }
 
@@ -109,6 +118,11 @@ export function computeAsyncFnNames(
   calleeMap?: CalleeImportMap | null,
   exportRegistry?: ExportRegistry | null,
   serverFnNames?: Set<string> | null,
+  // GITI-038 — when true, the OWN-signature callee walk does NOT descend into a
+  // nested function VALUE (a returned/held `function-decl`): its async calls color
+  // ITS signature, not the enclosing factory's. Opt-in (library path) so existing
+  // callers (server/client/tool) are byte-identical.
+  guardNestedFnValues?: boolean,
 ): Set<string> {
   const async = new Set<string>(seedAsync ?? []);
   const calleesByName = new Map<string, Set<string>>();
@@ -143,7 +157,7 @@ export function computeAsyncFnNames(
     const name = fn.name as string | undefined;
     if (!name) continue;
     const callees = new Set<string>();
-    collectCalleeIdents(fn.body, callees);
+    collectCalleeIdents(fn.body, callees, guardNestedFnValues === true);
     calleesByName.set(name, callees);
     if (fn.isAsync === true || bodyHasForeignOrSql(fn.body) || callsStdlibPromise(callees) || callsServerFn(callees)) {
       async.add(name);
@@ -168,6 +182,70 @@ export function computeAsyncFnNames(
     }
   }
   return async;
+}
+
+/**
+ * GITI-038 (Q2 — the re-emission routing question, distinct from Q1's own-signature
+ * async coloring). Compute the set of top-level fn names that must be AST-re-emitted
+ * NOT because their OWN body is async, but because they HOLD a nested function VALUE
+ * — a returned `function name(){…}` (a return-stmt's `fnExprNode`) or a nested
+ * `function-decl` statement — whose body makes an async call. Such a factory must be
+ * pulled off the verbatim path so its nested closure picks up `async`+`await` (the
+ * verbatim path lowers `!{}` with NO await → a bare Promise → an always-truthy
+ * failable check). The factory's OWN signature stays non-async (Q1); only its body
+ * lowers server-side so the nested await is legal.
+ *
+ * Detection reuses the SAME `isPromiseReturningStdlibFn` classifier + the transitive
+ * `ownAsyncFnNames` (an async peer) that Q1 uses — so a nested closure calling a
+ * SYNC stdlib primitive (`safeCall`, not `safeCallAsync`) does NOT route (invariant
+ * 2: the `composeOkSync` control stays verbatim). Absent the classifier (no imports
+ * / test harness) only the async-peer terminal fires.
+ */
+export function computeNestedAsyncFnHolders(
+  fns: ASTNode[],
+  ownAsyncFnNames: Set<string>,
+  calleeMap?: CalleeImportMap | null,
+  exportRegistry?: ExportRegistry | null,
+): Set<string> {
+  const holders = new Set<string>();
+  const hasStdlibClassifier = !!(calleeMap && exportRegistry && exportRegistry.size > 0);
+  const isAsyncCallee = (name: string): boolean => {
+    if (ownAsyncFnNames.has(name)) return true;
+    if (hasStdlibClassifier) {
+      const src = calleeMap!.get(name);
+      if (src && isPromiseReturningStdlibFn(name, src, exportRegistry!)) return true;
+    }
+    return false;
+  };
+  // Collect the callees WITHIN every nested function VALUE reachable from `body`
+  // (descend once INTO each nested `function-decl`, then keep looking for further
+  // nesting). `collectCalleeIdents` with the guard OFF gathers a nested body's own
+  // direct calls; the outer recursion crosses the nesting boundary.
+  const collectNestedFnBodyCallees = (node: unknown, out: Set<string>): void => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) { for (const c of node) collectNestedFnBodyCallees(c, out); return; }
+    const n = node as ASTNode;
+    if (n.kind === "function-decl") {
+      collectCalleeIdents((n as ASTNode).body, out, /*guardNestedFnValues*/ true);
+      collectNestedFnBodyCallees((n as ASTNode).body, out); // doubly-nested closures too
+      return;
+    }
+    for (const key of Object.keys(n)) {
+      if (key === "span") continue;
+      const v = n[key];
+      if (v && typeof v === "object") collectNestedFnBodyCallees(v, out);
+    }
+  };
+  for (const fn of fns) {
+    const name = fn.name as string | undefined;
+    if (!name) continue;
+    const nestedCallees = new Set<string>();
+    collectNestedFnBodyCallees(fn.body, nestedCallees);
+    for (const c of nestedCallees) {
+      if (isAsyncCallee(c)) { holders.add(name); break; }
+    }
+  }
+  return holders;
 }
 
 /**
@@ -472,13 +550,25 @@ export function collectNonAwaitableAsyncCalls(
  * (a peer-call to another async fn is awaited — S218). A SYNC fn lowers at the
  * CLIENT boundary (a server-boundary `match` wraps in `await (async () => …)()`,
  * which would make a non-async fn `await` — a SyntaxError).
+ *
+ * GITI-038 — `nonAsyncReemit` is the Q1/Q2 SPLIT: a factory that HOLDS a nested
+ * async closure (`computeNestedAsyncFnHolders`) but whose OWN body awaits nothing.
+ * It must lower its body at the SERVER boundary (so the nested closure's stdlib
+ * call is auto-awaited + the closure emits `async`) while its OWN signature stays
+ * NON-async (its body just returns the closure — no top-level await). Undefined on
+ * the server/tool callers → byte-identical to the pre-GITI-038 `isAsync?server:client`.
  */
 export function emitLibraryFnMember(
   fnNode: ASTNode,
-  opts: { isExported: boolean; asyncFnNames: Set<string>; foreignCrossingErrors?: unknown[] },
+  opts: { isExported: boolean; asyncFnNames: Set<string>; foreignCrossingErrors?: unknown[]; nonAsyncReemit?: boolean },
 ): string {
   const name = (fnNode.name ?? "anon") as string;
-  const isAsync = opts.asyncFnNames.has(name);
+  const ownAsync = opts.asyncFnNames.has(name);
+  // Q1 — the OWN signature carries `async` only when the fn's own body awaits.
+  const signatureAsync = ownAsync;
+  // Q2 — the body lowers server-side when it is async OR merely holds a nested
+  // async closure (so the nested await is legal + the closure is colored async).
+  const serverBody = ownAsync || opts.nonAsyncReemit === true;
   const params = (fnNode.params ?? []) as unknown[];
   const paramList = params.map((p, i) => paramSignature(p as never, i)).join(", ");
   const star = fnNode.isGenerator ? "*" : "";
@@ -487,7 +577,7 @@ export function emitLibraryFnMember(
       .map((p) => (typeof p === "string" ? p.split(/[:=]/)[0].trim() : (p as ASTNode)?.name))
       .filter((n): n is string => typeof n === "string" && n.length > 0),
   );
-  const bodyOpts = isAsync
+  const bodyOpts = serverBody
     ? { boundary: "server", serverFnNames: opts.asyncFnNames, declaredNames, insideFunctionBody: true, foreignCrossingErrors: opts.foreignCrossingErrors }
     : { boundary: "client", declaredNames, insideFunctionBody: true };
   const bodyCodes = emitFnShortcutBody(
@@ -497,7 +587,7 @@ export function emitLibraryFnMember(
     fnNode.hasReturnType as boolean | undefined,
   );
   const lines: string[] = [
-    `${opts.isExported ? "export " : ""}${isAsync ? "async " : ""}function${star} ${name}(${paramList}) {`,
+    `${opts.isExported ? "export " : ""}${signatureAsync ? "async " : ""}function${star} ${name}(${paramList}) {`,
   ];
   for (const code of bodyCodes) for (const line of code.split("\n")) lines.push(`  ${line}`);
   lines.push("}");

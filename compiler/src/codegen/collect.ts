@@ -628,6 +628,12 @@ export function isServerOnlyNode(node: unknown): boolean {
     const expr = (n as any).exprNode ? emitStringFromTree((n as any).exprNode) : (typeof (n as any).expr === "string" ? (n as any).expr : "");
     if (SQL_SIGIL_PATTERN.test(expr)) return true;
     if (ENV_PATTERN.test(expr)) return true;
+    // GITI-038 (E-CG-006 defense-in-depth) — a returned function expression
+    // (`return function name(){…}`) lives on `fnExprNode`. Scan its direct body so a
+    // server-only resource (`?{}` SQL / env) inside the returned closure fails LOUD
+    // (routes the symbol server-side) instead of client-emitting a `return null` stub.
+    const rfn = (n as any).fnExprNode;
+    if (rfn && Array.isArray(rfn.body) && rfn.body.some((s: unknown) => isServerOnlyNode(s))) return true;
   }
 
   // S93 cg-006 fix (Layer 3, continued): lift-expr with a `sql` child carries

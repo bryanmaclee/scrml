@@ -686,6 +686,12 @@ function walkUsage(nodeList: unknown, usage: FeatureUsage): void {
     if (kind === "return-stmt" || kind === "throw-stmt") {
       walkExprNode(node.argument as ExprNode | undefined, usage);
       walkExprNode(node.expr as ExprNode | undefined, usage);
+      // GITI-038 — a returned function expression (`return function name(){…}`)
+      // lives on `fnExprNode` (a `function-decl`). Route it through walkUsage so its
+      // body's callees are marked used (else a helper called ONLY inside the returned
+      // closure is a W-DEAD-FUNCTION false positive).
+      const rfn = (node as Record<string, unknown>).fnExprNode;
+      if (rfn && typeof rfn === "object") walkUsage([rfn], usage);
       continue;
     }
 
