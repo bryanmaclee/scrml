@@ -1,0 +1,8 @@
+${
+  import { verifyPassword } from "scrml:auth"
+  # F1 (S239): a combinator in RECEIVER position must paren-wrap the await —
+  # (await _scrml_filterAsync(...)).length, not `await _scrml_filterAsync(...).length`.
+  export function countValid(pw, hs) {
+    return hs.filter(h => verifyPassword(pw, h)).length
+  }
+}

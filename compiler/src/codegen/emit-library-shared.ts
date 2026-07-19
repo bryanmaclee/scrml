@@ -403,6 +403,18 @@ export function collectNonAwaitableAsyncCalls(
     // async-comparator lambda stays a non-awaitable region and correctly fails
     // closed (DD FORK 2).
     if (k === "call" && isAsyncCombinatorCall(n, isAsyncName)) {
+      // F2 (S239 review) — the combinator CALL itself is awaitable (it returns a
+      // Promise), but if THIS call sits in a non-awaitable position (a sync-lambda
+      // param default / a raw region — `insideCallback`), emit-expr emits it BARE
+      // `_scrml_<m>Async(...)` (an unawaited Promise → accept-all leak). `await` is
+      // illegal there, so fail closed — mode-agnostically, since every drain
+      // (library / client / server value-export) runs this scan. The callback body
+      // is still walked AWAITABLE below (emit-expr re-emits it async even when the
+      // combinator itself is bare).
+      const propName = ((n.callee as ASTNode | undefined)?.property);
+      if (insideCallback && typeof propName === "string") {
+        record(`${propName}(…) async-callback combinator`, n.span);
+      }
       const callee = n.callee as ASTNode | undefined;
       if (callee) walk(callee, insideCallback);
       const cbArgs = Array.isArray(n.args) ? (n.args as unknown[]) : [];

@@ -1505,6 +1505,35 @@ function isAwaitedClientAsyncCall(node: ExprNode, ctx: EmitExprContext): boolean
   );
 }
 
+/**
+ * Phase-2 colorless-async (F1 — S239 review) — does this call node lower to an
+ * `await _scrml_<method>Async(...)` combinator form? Mirror of `isAwaitedPeerCall`
+ * for the combinator surface: it must satisfy the EXACT gate `emitCall`'s
+ * combinator interception uses AND be in an awaitable position (`peerAwaitable !==
+ * false`, so `emitCall` actually prefixes `await`). Used by `emitReceiver` so a
+ * combinator in receiver position is paren-wrapped `(await _scrml_<m>Async(...)).x`
+ * — `await` is an await-expression (unary precedence), LOOSER than member/index/
+ * call, so an unwrapped `await _scrml_filterAsync(...).length` mis-parses as
+ * `await (promise.length)` → `await undefined` (silent-wrong) / a `.join()` crash.
+ */
+function isAwaitedCombinatorCall(node: ExprNode, ctx: EmitExprContext): boolean {
+  if (node.kind !== "call") return false;
+  const call = node as CallExpr;
+  if (call.callee.kind !== "member" || (call.callee as MemberExpr).optional) return false;
+  const prop = (call.callee as MemberExpr).property;
+  if (typeof prop !== "string" || !ASYNC_COMBINATOR_METHODS.has(prop)) return false;
+  if (call.args.length < 1) return false;
+  // A non-awaitable position emits the combinator BARE (and fails closed) — not an
+  // await form, so no receiver wrap.
+  if (ctx.peerAwaitable === false) return false;
+  const obj = (call.callee as MemberExpr).object;
+  const isMapSetReceiver =
+    ctx.mode === "client" &&
+    (mapCellBareName(obj, ctx) !== null || setCellBareName(obj, ctx) !== null);
+  if (isMapSetReceiver) return false;
+  return callbackReachesAsync(call.args[0], (nm) => combinatorIsAsyncName(nm, ctx));
+}
+
 function emitReceiver(node: ExprNode, ctx: EmitExprContext): string {
   const s = emitExpr(node, ctx);
   // An awaited peer call (`await peer(...)`) is an await-expression (unary
@@ -1514,7 +1543,14 @@ function emitReceiver(node: ExprNode, ctx: EmitExprContext): string {
   // Issue #26 — the awaited stdlib-async call (`await verifyPassword(...)`)
   // needs the identical wrap for the same precedence reason. Seam-A Gap 2 — the
   // CLIENT transitively-async peer form (`await middle(...)`) needs it too.
-  if (isAwaitedPeerCall(node, ctx) || isAwaitedStdlibAsyncCall(node, ctx) || isAwaitedClientAsyncCall(node, ctx)) return `(${s})`;
+  // Phase-2 F1 — the awaited COMBINATOR form (`await _scrml_<m>Async(...)`) needs
+  // the SAME wrap, else `hs.filter(cb).length` → `await (promise.length)`.
+  if (
+    isAwaitedPeerCall(node, ctx) ||
+    isAwaitedStdlibAsyncCall(node, ctx) ||
+    isAwaitedClientAsyncCall(node, ctx) ||
+    isAwaitedCombinatorCall(node, ctx)
+  ) return `(${s})`;
   return receiverNeedsParens(node) ? `(${s})` : s;
 }
 

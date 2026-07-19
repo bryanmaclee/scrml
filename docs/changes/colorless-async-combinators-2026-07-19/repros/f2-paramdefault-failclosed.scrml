@@ -1,0 +1,9 @@
+${
+  import { verifyPassword } from "scrml:auth"
+  # F2 (S239): a combinator in a NON-awaitable position (a lambda param default)
+  # cannot be awaited -> must FAIL CLOSED (E-ASYNC-STDLIB-IN-SYNC-CALLBACK), never
+  # leak a bare _scrml_someAsync(...) Promise.
+  export function leak(pw, outer, inner) {
+    return outer.map((x, d = inner.some(h => verifyPassword(pw, h))) => x)
+  }
+}

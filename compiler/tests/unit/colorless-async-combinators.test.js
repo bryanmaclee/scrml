@@ -244,3 +244,80 @@ describe("EXECUTED end-to-end — compiled module imports + runs", () => {
     expect(await mod.firstBig([1, 2, 3, 4])).toBe(3);
   });
 });
+
+// ---------------------------------------------------------------------------
+// F1 (S239 review) — a combinator in RECEIVER position must paren-wrap the await.
+// `await _scrml_<m>Async(...).member` mis-parses as `await (promise.member)` (await
+// is unary, LOOSER than member/index/call) → `await undefined` (silent-wrong) / a
+// `.join()` TypeError. The fix wraps: `(await _scrml_<m>Async(...)).member`.
+// ---------------------------------------------------------------------------
+describe("F1 — combinator in receiver position is paren-wrapped", () => {
+  const recv = (expr) => compileLib("f1-" + expr.replace(/[^a-z]/gi, ""), `\${
+  import { verifyPassword } from "scrml:auth"
+  export function f(pw, hs) { return ${expr} }
+}
+`);
+  test(".member (.length): (await _scrml_filterAsync(...)).length", () => {
+    const { js } = recv("hs.filter(h => verifyPassword(pw, h)).length");
+    // The await MUST be paren-wrapped: `(await …).length`, never the bug shape
+    // `await …).length` with no leading `(` on the await (the executed test below
+    // proves the resulting value is correct, not `await undefined`).
+    expect(js).toMatch(/return \(await _scrml_filterAsync\([^\n]*\)\)\.length;/);
+  });
+  test(".call (.join): (await _scrml_filterAsync(...)).join(...)", () => {
+    const { js } = recv("hs.filter(h => verifyPassword(pw, h)).join(\",\")");
+    expect(js).toMatch(/\(await _scrml_filterAsync\([^\n]*\)\)\.join\(/);
+  });
+  test("index [0]: (await _scrml_filterAsync(...))[0]", () => {
+    const { js } = recv("hs.filter(h => verifyPassword(pw, h))[0]");
+    expect(js).toMatch(/\(await _scrml_filterAsync\([^\n]*\)\)\[0\]/);
+  });
+  test("chained sync .map: (await _scrml_filterAsync(...)).map(...)", () => {
+    const { js } = recv("hs.filter(h => verifyPassword(pw, h)).map(h => h.id)");
+    expect(js).toMatch(/\(await _scrml_filterAsync\([^\n]*\)\)\.map\(/);
+  });
+
+  test("EXECUTED — receiver-position values are correct (not undefined / crash)", async () => {
+    const dir = join(FIXTURE_DIR, "f1-e2e");
+    mkdirSync(dir, { recursive: true });
+    const srcPath = join(dir, "recv.scrml");
+    writeFileSync(srcPath, `\${
+  import { safeCallAsync } from "scrml:host"
+  export function bigCount(nums) { return nums.filter(n => safeCallAsync(() => n > 2)).length }
+  export function bigJoined(nums) { return nums.filter(n => safeCallAsync(() => n > 2)).join(",") }
+  export function firstBig(nums) { return nums.filter(n => safeCallAsync(() => n > 2))[0] }
+  export function bigDoubled(nums) { return nums.filter(n => safeCallAsync(() => n > 2)).map(n => n * 2) }
+}
+`);
+    const outDir = join(dir, "out");
+    compileScrml({ inputFiles: [srcPath], outputDir: outDir, write: true, log: () => {} });
+    const mod = await import(join(outDir, "recv.js"));
+    const nums = [1, 2, 3, 4];
+    expect(await mod.bigCount(nums)).toBe(2);       // was `await undefined` pre-fix
+    expect(await mod.bigJoined(nums)).toBe("3,4");  // crashed pre-fix
+    expect(await mod.firstBig(nums)).toBe(3);
+    expect(await mod.bigDoubled(nums)).toEqual([6, 8]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F2 (S239 review) — a combinator in a NON-awaitable position (a sync-lambda param
+// default) cannot be awaited; emit-expr emits it BARE (an unawaited Promise →
+// accept-all leak). no-silent-leak is ABSOLUTE — it must fail closed in EVERY mode.
+// ---------------------------------------------------------------------------
+describe("F2 — combinator in a non-awaitable position fails closed (all modes)", () => {
+  test("library: a combinator in a lambda param default → E-ASYNC-STDLIB-IN-SYNC-CALLBACK", () => {
+    const { codes, js } = compileLib("f2-lib-paramdefault", `\${
+  import { verifyPassword } from "scrml:auth"
+  export function leak(pw, outer, inner) {
+    return outer.map((x, d = inner.some(h => verifyPassword(pw, h))) => x)
+  }
+}
+`);
+    expect(codes).toContain(CODE);
+    // The bare combinator Promise must NOT ship as the emitted (fatal) artifact's
+    // param default (a truthy Promise → accept-all). The error is fatal so nothing
+    // ships, but assert the leak shape is what fired the diagnostic.
+    expect(js).toContain("_scrml_someAsync(inner");
+  });
+});

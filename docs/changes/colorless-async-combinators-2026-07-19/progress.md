@@ -74,3 +74,14 @@ Design authority: scrml-support/docs/deep-dives/colorless-async-boundaries-2026-
 - All emission paths (server/library/client/tool) lower clean-family async callbacks to the
   sequential-for-await combinators + inject on-use; .sort stays fail-closed; sync callbacks native.
 - EXECUTED order + early-exit proven; end-to-end compile→import→run proven; R26 Phase-1 unbroken.
+
+## S239 review fixes (2026-07-19)
+- F1 (emit-expr.ts): NEW isAwaitedCombinatorCall + wired into emitReceiver → a combinator in
+  receiver position paren-wraps `(await _scrml_<m>Async(...)).member`. EXECUTED: bigCount=2,
+  bigJoined="3,4", firstBig=3, bigDoubled=[6,8] (were undefined/crash pre-fix).
+- F2 (emit-library-shared.ts): collectNonAwaitableAsyncCalls records a combinator call that is
+  ITSELF in a non-awaitable position (insideCallback) → fails closed mode-agnostically
+  (library/client/server-value-export). emit-tool.ts: NEW drainToolAsyncSyncCallbackLeaks in both
+  tool paths (tool had no such drain). Server routes already fail-closed via emit-expr syncCallSink.
+  VERIFIED fail-closed in library / client / server-route / tool; normal awaitable combinator + all
+  28 combinator unit tests still green.

@@ -28,7 +28,7 @@
 
 import type { CompileContext } from "./context.ts";
 import { getNodes, containsSql, containsSqlOrTransaction } from "./collect.ts";
-import { bodyHasForeignOrSql, computeAsyncFnNames, emitLibraryFnMember } from "./emit-library-shared.ts";
+import { bodyHasForeignOrSql, computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, asyncStdlibSyncCallbackError } from "./emit-library-shared.ts";
 import { buildCalleeImportMap } from "./scheduling.ts";
 import { emitLogicNode } from "./emit-logic.js";
 import { emitEnumVariantObjects } from "./emit-client.js";
@@ -335,6 +335,38 @@ export interface ToolServeEmitDeps {
  * A NON-serve tool (or a serve= tool with no deps threaded) stays on the plain
  * CLI/long-running-`main` path below — byte-identical to the pre-Unit-2 emit.
  */
+/**
+ * Phase-2 colorless-async (F2 — S239 review) — the tool no-silent-leak drain. A
+ * Promise-returning async call (a stdlib primitive OR a clean-family async-callback
+ * COMBINATOR) that lands in a non-awaitable position (a sync-lambda body / param
+ * default / raw region) cannot be auto-awaited — emit-expr emits it BARE (an
+ * unawaited Promise → accept-all leak). Mirror the library/server/client drain
+ * (`collectNonAwaitableAsyncCalls`) so the tool fails closed instead of leaking.
+ * `calleeMap`/`exportRegistry` are null here — the tool's `asyncFnNames` already
+ * carries the imported async names (the `asyncImportedNames` seed to
+ * `computeAsyncFnNames`), which is the source of truth `isAsyncName` consults.
+ */
+function drainToolAsyncSyncCallbackLeaks(
+  fns: ASTNode[],
+  asyncFnNames: Set<string>,
+  filePath: string,
+  errors?: unknown[],
+): void {
+  if (!errors) return;
+  const seen = new Set<string>();
+  for (const fn of fns) {
+    const params = (fn as { params?: unknown }).params;
+    const span = (fn as { span?: unknown }).span;
+    for (const site of collectNonAwaitableAsyncCalls(fn.body, null, null, asyncFnNames, params, span)) {
+      const sp = (site.span ?? {}) as { start?: number };
+      const key = `${site.name}@${sp.start ?? -1}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      errors.push(asyncStdlibSyncCallbackError(site.name, site.span, filePath));
+    }
+  }
+}
+
 export function generateToolJs(
   ctxOrFileAST: CompileContext | ASTNode,
   errors?: unknown[],
@@ -408,6 +440,10 @@ export function generateToolJs(
       bodyLines.push(code);
     }
   }
+
+  // F2 no-silent-leak — fail closed on any non-awaitable async (stdlib primitive or
+  // async-callback combinator) the tool emitted BARE.
+  drainToolAsyncSyncCallbackLeaks(fns, asyncFnNames, filePath, errors);
 
   const body = bodyLines.join("\n");
 
@@ -615,6 +651,13 @@ function generateServeHarnessToolJs(
     for (const line of code.split("\n")) extraLines.push(line);
     extraLines.push("");
   }
+
+  // F2 no-silent-leak — fail closed on any non-awaitable async (stdlib primitive or
+  // async-callback combinator) emitted BARE in a composing `main`/helper. (Route
+  // fns ride on the headless module, which drains them via emit-server; dedup keeps
+  // an overlapping report single.)
+  drainToolAsyncSyncCallbackLeaks(fns, asyncFnNames, filePath, errors);
+
   const extraBody = extraLines.join("\n");
 
   // Inline the runtime helpers the composing `main`/helpers reference that the
