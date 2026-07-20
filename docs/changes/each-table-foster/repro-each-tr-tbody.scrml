@@ -1,0 +1,15 @@
+<program>
+  ${
+    <rows> = []
+  }
+  <table>
+    <thead><tr><th>Email</th></tr></thead>
+    <tbody>
+      <each in=@rows as r key=@.id>
+        <tr><td>${r.email}</td></tr>
+        <empty><tr><td colspan="1">No rows.</td></tr></empty>
+      </each>
+    </tbody>
+  </table>
+  <button onclick=${ @rows = [{id:1,email:"a@x.com"},{id:2,email:"b@x.com"}] }>load</button>
+</program>

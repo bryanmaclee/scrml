@@ -56,6 +56,7 @@ import { runIMatchPromotable } from "./lint-i-match-promotable.js";
 import { runIFnPromotable } from "./lint-i-fn-promotable.js";
 import { runWEachPromotable } from "./lint-w-each-promotable.js";
 import { runWEachKey } from "./lint-w-each-key.js";
+import { runWEachTableFoster } from "./lint-w-each-table-foster.js";
 import { runWMapIterationOrder } from "./lint-w-map-iteration-order.js";
 import { runWInterpInRawContent } from "./lint-w-interp-in-raw-content.js";
 import { runWInputStateMarkupNonreactive } from "./lint-w-input-state-markup-nonreactive.js";
@@ -2211,6 +2212,26 @@ export function compileScrml(options = {}) {
       }
     } catch (e) {
       if (verbose) log(`  [LINT] W-MAP-ITERATION-ORDER pass threw: ${e?.message ?? String(e)}`);
+    }
+  }
+
+  // Stage 6.4f: W-EACH-TABLE-FOSTER info-level lint (S272 — adopter report).
+  // Fires when a top-level (static-shell) `<each>` sits directly inside a
+  // table-context element (`<table>/<thead>/<tbody>/<tfoot>/<tr>`): its static
+  // `<div>` mount placeholder is FOSTER-PARENTED out of the table by the HTML
+  // parser, so the list silently renders zero rows. Turns a currently-silent
+  // failure loud + points at the `<div>`-layout workaround. Info-level:
+  // partitions into result.warnings (W- prefix), never result.errors. Tracked:
+  // known-gap g-each-mount-div-foster-parented-in-table.
+  if (Array.isArray(tsResult.files) && tsResult.files.length > 0) {
+    try {
+      const tableFosterDiags = runWEachTableFoster(tsResult.files);
+      for (const d of tableFosterDiags) {
+        allLintDiagnostics.push(d);
+        if (verbose) log(`  [LINT] ${d.filePath}:${d.line}:${d.column} ${d.code}: ${d.message}`);
+      }
+    } catch (e) {
+      if (verbose) log(`  [LINT] W-EACH-TABLE-FOSTER pass threw: ${e?.message ?? String(e)}`);
     }
   }
 
