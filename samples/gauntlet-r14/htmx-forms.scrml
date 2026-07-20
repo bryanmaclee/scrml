@@ -2,6 +2,10 @@
 // Tests R13 fixes: E-RI-002 false positive, nested functions, if= parens
 // New: ~ tilde-decl, parenthesized onclick args, multiple nested functions
 
+<program db="./messages.db">
+<schema>
+    ?{`CREATE TABLE messages (id INTEGER PRIMARY KEY, name TEXT, email TEXT, phone TEXT, body TEXT)`}
+</schema>
 <div class="contact-form">
     ${
         @name = ""
@@ -80,3 +84,4 @@
         <button onclick=resetForm()>Send Another</>
     </div>
 </div>
+</program>

@@ -1,6 +1,10 @@
 // server-008-form-handler.scrml
 // Form with server-side handler. Tests: form + server function.
 
+<program db="./users.db">
+<schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)`}
+</schema>
 <div>
     ${
         server function createUser() {
@@ -12,3 +16,4 @@
         <button type="submit">Create</>
     </form>
 </div>
+</program>

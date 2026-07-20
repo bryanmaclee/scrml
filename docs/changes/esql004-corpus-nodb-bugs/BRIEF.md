@@ -24,5 +24,25 @@ the test suite. **bryan RULED (S264, option B): migrate the 2 shipped `examples/
   `samples/multi-step-form.scrml` · the `samples/compilation-tests/gauntlet-s19-phase2-*097`
   case · `samples/gauntlet-r13/htmx-forms.scrml` · `samples/gauntlet-r13/react-auth-dashboard.scrml`
 
-Probe stays OPEN until the clean-sample set is migrated (proxied on one representative file).
+## DONE (S274 — bryan ruled option (a): migrate + document the native-parity growth)
+The **4 clean-before samples** migrated (wrapped in `<program db="./X.db">` + a `<schema>`
+matching each `?{}` query): `server-005-mixed` (articles) · `gauntlet-r10-react-wizard`
+(registrations) · `server-008-form-handler` (users) · `gauntlet-r14/htmx-forms` (messages).
+All compile clean (E-SQL-004 gone), PA-verified.
+
+**Native-parity tradeoff (bryan-ruled).** The added `<program>` wrapper hits a PRE-EXISTING
+native-parser divergence on program-node structure (proven: even a minimal `db=`-only wrapper,
+no schema, grows it identically — it's the wrapper, not the schema). So 4
+`parser-conformance-within-node-allowlist.json` entries grew: server-005 MISSING-FIELD 9→10 +
+SPAN-COORD 2→4 · r10 SPAN-COORD 273→275 · server-008 SPAN-COORD 12→14 · htmx MISSING-FIELD
+132→133. A known native gap newly-exercised, NOT a fresh regression; grows against the
+allowlist's shrink-only default by explicit S274 ruling (option (a)). The test is a
+non-required baseline (already 17-fail on main). r10's e2e-render-map cell returns to its
+existing `renders-clean` baseline (no baseline edit needed).
+
+## STILL TRACKED — the 5 already-erroring samples (unchanged; low-value — `db=` alone won't compile them)
+`samples/debate-async-dashboard-react-perspective.scrml` · `samples/multi-step-form.scrml` ·
+the `gauntlet-s19-phase2-*097` case · `samples/gauntlet-r13/htmx-forms.scrml` ·
+`samples/gauntlet-r13/react-auth-dashboard.scrml`
+
 DONE-PROBE: grep -q 'db=' samples/compilation-tests/server-005-mixed.scrml

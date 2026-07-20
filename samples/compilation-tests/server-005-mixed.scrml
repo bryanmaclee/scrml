@@ -1,6 +1,10 @@
 // server-005-mixed.scrml
 // Mixed server and client content. Tests: server func + client markup.
 
+<program db="./articles.db">
+<schema>
+    ?{`CREATE TABLE articles (id INTEGER PRIMARY KEY, title TEXT)`}
+</schema>
 <div>
     ${
         server function loadData() {
@@ -12,3 +16,4 @@
         <li>Article list goes here</>
     </ul>
 </div>
+</program>
