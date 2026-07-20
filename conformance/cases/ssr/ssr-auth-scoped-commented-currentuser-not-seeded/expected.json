@@ -1,0 +1,31 @@
+{
+  "id": "ssr-auth-scoped-commented-currentuser-not-seeded",
+  "description": "§52.15.5 (S255) Leak 3 regression — a `${@currentUser.id}` buried in a `-- line comment` is INERT at the DB (the live query is `SELECT * FROM posts`, unscoped). Before the SQL-comment strip, the raw-text scan counted the commented interpolation as row-scope by BOTH the omission and the lint → the auth-scoped unscoped cell was KEPT in the anon SSR seed, silently. Now `stripSqlComments` runs before the interpolation scan, so the cell is treated as the unscoped query it executes as → omitted from the anon first-paint + `window.__scrml_ssr_state` seed, and the I-SSR-AUTH-SCOPED-CLIENT-HYDRATED info lint fires on @posts. A sibling PUBLIC `@widgets` (auth=none) is NOT over-omitted.",
+  "language-version": "1.0",
+  "spec": "§52.15.5, §52.8",
+  "rationale": "§52.15.5: `queryInterpolationsAreServerAmbientOnly` scans the COMMENT-STRIPPED query — a DB ignores comments at execution, so a `${@currentUser}` inside `--`/`/* */` must not count as row-scope. The commented row-scope filter is treated as the unscoped query it executes as → omitted from the anon seed → client-hydrated behind the gated /__serverLoad fetch.",
+  "expect": {
+    "codes": ["I-SSR-AUTH-SCOPED-CLIENT-HYDRATED"],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "severity": { "I-SSR-AUTH-SCOPED-CLIENT-HYDRATED": "info" },
+    "serverDb": {
+      "posts": [
+        { "id": 1, "body": "SECRETPOST_ALICE" },
+        { "id": 2, "body": "SECRETPOST_BOB" }
+      ],
+      "widgets": [
+        { "id": 10, "label": "PublicWidget" }
+      ]
+    },
+    "firstPaint": {
+      "contains": [
+        "<li data-scrml-key=\"10\" class=\"wid\">PublicWidget</li>",
+        "window.__scrml_ssr_state=",
+        "\"widgets\""
+      ],
+      "notContains": ["SECRETPOST", "\"posts\""]
+    },
+    "state": { "widgets": [{ "id": 10, "label": "PublicWidget" }] }
+  }
+}

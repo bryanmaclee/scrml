@@ -1,0 +1,12 @@
+{
+  "id": "ssr-i-ssr-auth-scoped-prerender-rowscoped-neg",
+  "description": "§52.15.5/§52.8 — a per-user row-scoped Pattern-C cell (`SELECT * ... WHERE user_id = ${@currentUser.id}`) fires no I-SSR-AUTH-SCOPED-CLIENT-HYDRATED: it is NOT auto-omitted from the SSR seed. The compose handler runs it UNDER the request, so each viewer's first paint contains only their own rows (anon → @currentUser.id is not → SQL NULL → zero rows, fail-closed) — no cross-user leak. The clean control for the auto-make-safe omission: row-scoped cells are seeded, not omitted.",
+  "language-version": "1.0",
+  "spec": "§52.15.5",
+  "source-test": "compiler/tests/integration/server-load-authority.test.js",
+  "rationale": "§52.15.5: the `${@currentUser.id}` WHERE clause row-scopes the query to the request user (a LIVE server-ambient interpolation counted by `queryInterpolationsAreServerAmbientOnly`), so the SSR pre-render is per-user and the cell stays SSR-seeded — I-SSR-AUTH-SCOPED-CLIENT-HYDRATED does not fire (§52.15.3). The auto-omission never over-omits a row-scoped cell.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["I-SSR-AUTH-SCOPED-CLIENT-HYDRATED"]
+  }
+}

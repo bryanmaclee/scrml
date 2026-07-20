@@ -283,6 +283,15 @@ function makeScaffoldRichFixture() {
     kind: "state-decl", name: "usersCell", isServer: true,
     serverAuthorityTable: "users", init: "", span: span(70),
   };
+  // §52.15.5 (S255) — a PUBLIC (auth="none") Tier-1 cell. Under the auth
+  // middleware, the auth-scoped cells (usersCell/aCell/bCell) are AUTO-OMITTED
+  // from the SSR seed (they hydrate client-side behind their gate), so a public
+  // cell is what exercises the `__scrml_ssr_state` seed marker in web-app shape —
+  // present here, absent in headless (the whole compose route is web-app-only).
+  const publicAuthDecl = {
+    kind: "state-decl", name: "publicCell", isServer: true, auth: "none",
+    serverAuthorityTable: "widgets", init: "", span: span(75),
+  };
   // Two §8.11 callable server-var decls → the synthetic `/__mountHydrate` route.
   const mh1 = { kind: "state-decl", name: "aCell", isServer: true, init: "loadA()", span: span(80) };
   const mh2 = { kind: "state-decl", name: "bCell", isServer: true, init: "loadB()", span: span(90) };
@@ -299,7 +308,7 @@ function makeScaffoldRichFixture() {
 
   const fileAST = {
     filePath: FP,
-    nodes: [{ kind: "logic", body: [saveFn, serverAuthDecl, mh1, mh2], span: span(0) }, channelNode],
+    nodes: [{ kind: "logic", body: [saveFn, serverAuthDecl, publicAuthDecl, mh1, mh2], span: span(0) }, channelNode],
     imports: [], exports: [], components: [], typeDecls: [],
     nodeTypes: new Map(), componentShapes: new Map(), scopeChain: null, spans: new Map(),
   };

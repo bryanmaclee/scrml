@@ -4,7 +4,7 @@
   "language-version": "1.0",
   "spec": "§52.15",
   "source-test": "compiler/tests/integration/server-load-authority.test.js",
-  "rationale": "§52.15: with no per-var auth opt-out the serverLoad route default-inherits auth=\"required\", so the route is gated and W-SERVERLOAD-UNGATED does not fire. (Row-scoped by ${@currentUser.id} → W-SSR-PRERENDER-UNSCOPED also stays silent.)",
+  "rationale": "§52.15: with no per-var auth opt-out the serverLoad route default-inherits auth=\"required\", so the route is gated and W-SERVERLOAD-UNGATED does not fire. (Row-scoped by ${@currentUser.id} → I-SSR-AUTH-SCOPED-CLIENT-HYDRATED also stays silent — the cell is SSR-seeded, not auto-omitted.)",
   "expect": {
     "codes": [],
     "notCodes": ["W-SERVERLOAD-UNGATED"]

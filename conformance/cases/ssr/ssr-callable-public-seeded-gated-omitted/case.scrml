@@ -1,0 +1,17 @@
+<program db="sqlite:./app.db" auth="required">
+<schema>
+  ?{`CREATE TABLE secretlist (id INTEGER PRIMARY KEY, v TEXT)`}
+  ?{`CREATE TABLE publiclist (id INTEGER PRIMARY KEY, v TEXT)`}
+</schema>
+<db src="app.db" tables="secretlist,publiclist"></db>
+${
+  server function loadSecret() { return ?{`SELECT * FROM secretlist`}.all() }
+  server function loadPublic() { return ?{`SELECT * FROM publiclist`}.all() }
+  <secretCell server> = loadSecret()
+  <publicCell server auth="none"> = loadPublic()
+}
+<main>
+  <ul><each in=@secretCell key=@.id as s><li class="sec">${s.v}</li></each></ul>
+  <ul><each in=@publicCell key=@.id as p><li class="pub">${p.v}</li></each></ul>
+</main>
+</program>

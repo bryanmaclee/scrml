@@ -1,0 +1,31 @@
+{
+  "id": "ssr-callable-public-seeded-gated-omitted",
+  "description": "§52.15.5 (S255) round-3 defect 4 — a PUBLIC (auth=none) callable-init cell coalesced with a GATED one is NOT swept into the gated group: it stays SSR-seeded (its rows are server-rendered into the first paint + carried in window.__scrml_ssr_state), while the gated @secretCell is omitted (client-hydrated behind its per-cell /__mountHydrate gate). The E-ADAPTER SSR path composes the anon first-paint: @publicCell rows are PRESENT, @secretCell rows are ABSENT. The I-SSR-AUTH-SCOPED-CLIENT-HYDRATED info lint fires only on the gated @secretCell. (Round-2 gated + omitted the WHOLE callable group all-or-nothing → the public cell never hydrated for anon; the per-cell omission fixes that.)",
+  "language-version": "1.0",
+  "spec": "§52.15.5, §52.8, §8.11",
+  "rationale": "§52.15.5: the SSR seed is omitted PER CELL — a gated callable cell is omitted, a public callable cell stays seeded. The coalesced /__mountHydrate route gates each cell by its OWN auth (public always served, gated only to the authorized), never collapsing to one route gate.",
+  "expect": {
+    "codes": ["I-SSR-AUTH-SCOPED-CLIENT-HYDRATED"],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "severity": { "I-SSR-AUTH-SCOPED-CLIENT-HYDRATED": "info" },
+    "serverDb": {
+      "secretlist": [
+        { "id": 1, "v": "SECRETROW_ALICE" },
+        { "id": 2, "v": "SECRETROW_BOB" }
+      ],
+      "publiclist": [
+        { "id": 10, "v": "PublicRow" }
+      ]
+    },
+    "firstPaint": {
+      "contains": [
+        "<li data-scrml-key=\"10\" class=\"pub\">PublicRow</li>",
+        "window.__scrml_ssr_state=",
+        "\"publicCell\""
+      ],
+      "notContains": ["SECRETROW", "\"secretCell\""]
+    },
+    "state": { "publicCell": [{ "id": 10, "v": "PublicRow" }] }
+  }
+}

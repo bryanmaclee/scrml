@@ -282,3 +282,42 @@ describe("§8 handler body has sibling loader expressions", () => {
     expect(server).toContain("Promise.resolve(loadB())");
   });
 });
+
+// ---------------------------------------------------------------------------
+// §8: §52.15.5 (S255) — the /__mountHydrate handler (and the SSR compose seed)
+// call a callable cell's init `loadX()` by its BARE name, so a module-scope
+// `async function loadX` (the value-returning form, NOT only the route handler
+// `_scrml_handler_loadX_N`) MUST be emitted — else a dangling ReferenceError at
+// runtime. This was a pre-existing gap: the string-only checks above never
+// executed the route, so a callable-cell loader had no bare callable.
+// ---------------------------------------------------------------------------
+
+describe("§8 callable-cell loaders emit a bare module-scope callable (no dangling ref)", () => {
+  const SRC = [
+    '<program db="test.db">',
+    "${ server function loadA() { return 1 } }",
+    "${ server function loadB() { return 2 } }",
+    "${ server @a = loadA() }",
+    "${ server @b = loadB() }",
+    "</>",
+  ].join("\n");
+
+  test("a bare `async function loadA` / `loadB` is emitted (not only the route handler)", () => {
+    const server = serverJsOf(compile(SRC));
+    expect(server).toMatch(/\basync function loadA\s*\(\s*\)\s*\{/);
+    expect(server).toMatch(/\basync function loadB\s*\(\s*\)\s*\{/);
+    // The /__mountHydrate reference now resolves to a defined symbol.
+    expect(server).toContain("Promise.resolve(loadA())");
+    expect(server).toContain("Promise.resolve(loadB())");
+  });
+
+  test("every bare `loadX()` the mountHydrate handler references is a DEFINED function", () => {
+    const server = serverJsOf(compile(SRC));
+    // For each `Promise.resolve(<name>())` in the handler, `async function <name>` exists.
+    const called = [...server.matchAll(/Promise\.resolve\((\w+)\(\)\)/g)].map((m) => m[1]);
+    expect(called.length).toBeGreaterThan(0);
+    for (const name of called) {
+      expect(server).toMatch(new RegExp(`\\basync function ${name}\\s*\\(`));
+    }
+  });
+});

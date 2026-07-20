@@ -1,0 +1,17 @@
+<program db="sqlite:./app.db" auth="required">
+<schema>
+  ?{`CREATE TABLE posts (id INTEGER PRIMARY KEY, body TEXT)`}
+  ?{`CREATE TABLE widgets (id INTEGER PRIMARY KEY, label TEXT)`}
+</schema>
+<db src="app.db" tables="posts,widgets"></db>
+${
+  <posts server> = ?{`SELECT * FROM posts
+  -- WHERE user_id = ${@currentUser.id}
+`}.all()
+  <widgets server auth="none"> = ?{`SELECT * FROM widgets`}.all()
+}
+<main>
+  <ul><each in=@posts key=@.id as p><li class="post">${p.body}</li></each></ul>
+  <ul><each in=@widgets key=@.id as w><li class="wid">${w.label}</li></each></ul>
+</main>
+</program>

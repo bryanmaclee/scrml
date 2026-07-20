@@ -18,8 +18,10 @@
  * the supported each subset, so the per-type warning is gone. The remaining gap
  * is WIDENING the server-render subset (unsupported each shapes fall back to
  * client-render — g-ssr-render-subset-widen), which is not a per-type concern.
- * The cross-user unscoped-prerender gate `W-SSR-PRERENDER-UNSCOPED` (§52.15) is
- * a distinct, still-live warning and is unaffected by this retirement.
+ * The cross-user unscoped-prerender gate `I-SSR-AUTH-SCOPED-CLIENT-HYDRATED`
+ * (§52.15.5, was `W-SSR-PRERENDER-UNSCOPED` pre-S255) is a distinct, still-live
+ * lint (auto-make-safe: the cell is omitted from the SSR seed) and is unaffected
+ * by this retirement.
  *
  * Cross-stream note (memory: diagnostic-stream-partition): `runTS` returns all
  * diagnostics in `.errors`; the W-/I- prefix routing to the warnings stream

@@ -1,0 +1,31 @@
+{
+  "id": "ssr-auth-scoped-literal-currentuser-not-seeded",
+  "description": "§52.15.5 (S255) Leak 1 regression — the SSR-seed omission uses the STRUCTURED row-scope predicate (`queryInterpolationsAreServerAmbientOnly`), not a naive substring. An auth-scoped `?{ SELECT * FROM posts WHERE body LIKE '%@currentUser%' }` carries the literal text `@currentUser` OUTSIDE any `${...}` interpolation, so it is param-free + UNSCOPED (not row-scoped). The naive `q.includes('@currentUser')` would have mis-classified it row-scoped and KEPT it in the anon SSR seed (a cross-user leak while the lint reported it safe). Here the E-ADAPTER SSR path invokes the REAL compose handler anonymously: the posts rows are ABSENT from the first paint + `window.__scrml_ssr_state` seed; a sibling PUBLIC `@widgets` (auth=none) is NOT over-omitted (its rows ARE server-rendered + seeded). The I-SSR-AUTH-SCOPED-CLIENT-HYDRATED info lint fires on @posts.",
+  "language-version": "1.0",
+  "spec": "§52.15.5, §52.8",
+  "rationale": "§52.15.5: the omission predicate MUST provably coincide with the I-SSR lint — both use `queryInterpolationsAreServerAmbientOnly`, which counts `@currentUser` ONLY inside a live `${...}` interpolation. A literal `@currentUser` in SQL string data is not row-scope, so the query is unscoped → omitted from the anon seed → client-hydrated behind the gated /__serverLoad fetch.",
+  "expect": {
+    "codes": ["I-SSR-AUTH-SCOPED-CLIENT-HYDRATED"],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "severity": { "I-SSR-AUTH-SCOPED-CLIENT-HYDRATED": "info" },
+    "serverDb": {
+      "posts": [
+        { "id": 1, "body": "SECRETPOST_ALICE" },
+        { "id": 2, "body": "SECRETPOST_BOB" }
+      ],
+      "widgets": [
+        { "id": 10, "label": "PublicWidget" }
+      ]
+    },
+    "firstPaint": {
+      "contains": [
+        "<li data-scrml-key=\"10\" class=\"wid\">PublicWidget</li>",
+        "window.__scrml_ssr_state=",
+        "\"widgets\""
+      ],
+      "notContains": ["SECRETPOST", "\"posts\""]
+    },
+    "state": { "widgets": [{ "id": 10, "label": "PublicWidget" }] }
+  }
+}

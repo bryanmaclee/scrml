@@ -19,7 +19,9 @@
  *       bound from the request session; the client POSTs no params (sql-load)
  *   (c) the stacking — §14.8.9 column redaction STILL wraps the row-scoped result
  *   (d) W-SERVERLOAD-UNGATED — fires on a route that opts out under an auth-aware app
- *   (e) W-SSR-PRERENDER-UNSCOPED — fires on an auth-scoped UNSCOPED cell (Tier-1)
+ *   (e) I-SSR-AUTH-SCOPED-CLIENT-HYDRATED — an auth-scoped UNSCOPED cell (Tier-1)
+ *       is AUTO-OMITTED from the SSR seed (info lint); it hydrates client-side
+ *       behind its gated /__serverLoad fetch (S255 auto-make-safe, §52.15.5)
  *   (f) per-var auth= (4c) — "none" overrides the default-inherit gate; "role:X"
  *       emits the role-gated 401/403 form
  *   (g) byte-identical — a non-auth / non-server-authority page emits no infra
@@ -214,23 +216,48 @@ describe("server-load-authority (d): W-SERVERLOAD-UNGATED", () => {
 });
 
 // ---------------------------------------------------------------------------
-// (e) W-SSR-PRERENDER-UNSCOPED
+// (e) I-SSR-AUTH-SCOPED-CLIENT-HYDRATED (S255 auto-make-safe, §52.15.5)
+//
+// An auth-scoped cell whose SSR pre-render would be UNSCOPED is AUTO-OMITTED
+// from the anonymous-reachable SSR compose route (no seed, no first-paint fill,
+// no `window.__scrml_ssr_state` entry) + an INFO lint. It hydrates client-side
+// behind its gated /__serverLoad fetch (401 for anon) — safe by construction.
+// Mirrors the §14.8.9 protect-floor auto-redaction shape. Row-scoped Pattern-C
+// cells + explicitly-public cells are NOT omitted (do not over-omit).
 // ---------------------------------------------------------------------------
 
-describe("server-load-authority (e): W-SSR-PRERENDER-UNSCOPED", () => {
-  test("fires on an auth-scoped Tier-1 (unscoped SELECT *) — the cross-user SSR leak", () => {
+describe("server-load-authority (e): I-SSR-AUTH-SCOPED-CLIENT-HYDRATED", () => {
+  test("info lint fires on an auth-scoped Tier-1 (unscoped SELECT *) — the cross-user SSR leak", () => {
     const res = compileFull(TIER1_AUTH);
-    expect(hasCode(res, "W-SSR-PRERENDER-UNSCOPED")).toBe(true);
+    expect(hasCode(res, "I-SSR-AUTH-SCOPED-CLIENT-HYDRATED")).toBe(true);
+    // It is an INFO lint (non-fatal, partitions into result.warnings), NOT an error.
+    const hit = [...res.warnings, ...res.errors].find(
+      (d) => d && d.code === "I-SSR-AUTH-SCOPED-CLIENT-HYDRATED",
+    );
+    expect(hit && hit.severity).toBe("info");
+    expect(res.errors.some((d) => d && d.code === "I-SSR-AUTH-SCOPED-CLIENT-HYDRATED")).toBe(false);
+  });
+
+  test("the auth-scoped Tier-1 cell is NOT SSR-seeded (no unscoped SELECT in an anon-reachable compose route)", () => {
+    const { serverJs } = compileFull(TIER1_AUTH);
+    // The ONLY SELECT * FROM users left is inside the GATED /__serverLoad route
+    // (it carries _scrml_serverload_auth); the anonymous compose route no longer
+    // seeds it. Concretely: no `_scrml_ssr_state["<cell>"] = ... SELECT * FROM users`.
+    expect(serverJs).not.toMatch(/_scrml_ssr_state\[[^\]]*\]\s*=\s*await _scrml_sql`SELECT \* FROM users`/);
+    // The gated read route still runs the query, behind the 401 gate.
+    const gi = serverJs.indexOf("async function _scrml_serverLoad_accounts_handler");
+    expect(gi).toBeGreaterThan(-1);
+    expect(serverJs.slice(gi, gi + 300)).toContain("_scrml_serverload_auth");
   });
 
   test("does NOT fire on a per-user row-scoped Pattern-C cell (`${@currentUser.id}`)", () => {
     const res = compileFull(ROW_SCOPED);
-    expect(hasCode(res, "W-SSR-PRERENDER-UNSCOPED")).toBe(false);
+    expect(hasCode(res, "I-SSR-AUTH-SCOPED-CLIENT-HYDRATED")).toBe(false);
   });
 
   test("does NOT fire on an explicitly-public cell (auth=none)", () => {
     const res = compileFull(OPTOUT);
-    expect(hasCode(res, "W-SSR-PRERENDER-UNSCOPED")).toBe(false);
+    expect(hasCode(res, "I-SSR-AUTH-SCOPED-CLIENT-HYDRATED")).toBe(false);
   });
 });
 
@@ -288,7 +315,7 @@ describe("server-load-authority (h): a user <currentUser> cell shadows the ambie
 // (i) single-fire per code — family diagnostic-noise guard (S234)
 //
 // The whole isServer-block warning family (W-AUTH-001 / W-SERVERLOAD-UNGATED /
-// W-SSR-PRERENDER-UNSCOPED) emits from ONE `if (isServer)` block inside
+// I-SSR-AUTH-SCOPED-CLIENT-HYDRATED) emits from ONE `if (isServer)` block inside
 // `annotateNodes` -> `visitNode`. `visitNode` has no per-node memoization, so a
 // state-decl reachable via two walk paths WOULD double-fire the whole family.
 // Empirically (S234) every server state-decl is visited EXACTLY once per
@@ -326,8 +353,96 @@ describe("server-load-authority (i): single-fire per code (family noise guard)",
     expect(countCode(res, "W-SERVERLOAD-UNGATED")).toBe(1);
   });
 
-  test("W-SSR-PRERENDER-UNSCOPED fires exactly ONCE on a single Tier-1 decl", () => {
+  test("I-SSR-AUTH-SCOPED-CLIENT-HYDRATED fires exactly ONCE on a single Tier-1 decl", () => {
     const res = compileFull(TIER1_AUTH);
-    expect(countCode(res, "W-SSR-PRERENDER-UNSCOPED")).toBe(1);
+    expect(countCode(res, "I-SSR-AUTH-SCOPED-CLIENT-HYDRATED")).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (j) §52.15.5 (S255) round-3 — callable-init /__mountHydrate is gated PER CELL,
+//     never on one collapsed role (defect 1: cross-role escalation), and a public
+//     callable cell is NOT swept into the gated group (defect 4: content regress).
+// ---------------------------------------------------------------------------
+
+// Two callable cells with DIFFERENT per-var roles.
+const MIXED_ROLE = `<program auth="required" db="sqlite:./app.db">
+<db src="sqlite:./app.db" tables="adminstats,editorqueue">
+  \${
+    ?{\`CREATE TABLE IF NOT EXISTS adminstats (id INTEGER PRIMARY KEY, v TEXT)\`}.run()
+    ?{\`CREATE TABLE IF NOT EXISTS editorqueue (id INTEGER PRIMARY KEY, v TEXT)\`}.run()
+    server function loadAdminStats() { return ?{\`SELECT * FROM adminstats\`}.all() }
+    server function loadEditorQueue() { return ?{\`SELECT * FROM editorqueue\`}.all() }
+    <adminStats server auth="role:admin"> = loadAdminStats()
+    <editorQueue server auth="role:editor"> = loadEditorQueue()
+  }
+  <main>
+    <ul><each in=@adminStats key=@.id><li : @.v></each></ul>
+    <ul><each in=@editorQueue key=@.id><li : @.v></each></ul>
+  </main>
+</db>
+</program>`;
+
+// A public (auth="none") callable cell coalesced with a gated one.
+const PUBLIC_GATED = `<program auth="required" db="sqlite:./app.db">
+<db src="sqlite:./app.db" tables="secretlist,publiclist">
+  \${
+    ?{\`CREATE TABLE IF NOT EXISTS secretlist (id INTEGER PRIMARY KEY, v TEXT)\`}.run()
+    ?{\`CREATE TABLE IF NOT EXISTS publiclist (id INTEGER PRIMARY KEY, v TEXT)\`}.run()
+    server function loadSecret() { return ?{\`SELECT * FROM secretlist\`}.all() }
+    server function loadPublic() { return ?{\`SELECT * FROM publiclist\`}.all() }
+    <secretCell server> = loadSecret()
+    <publicCell server auth="none"> = loadPublic()
+  }
+  <main>
+    <ul><each in=@secretCell key=@.id><li : @.v></each></ul>
+    <ul><each in=@publicCell key=@.id><li : @.v></each></ul>
+  </main>
+</db>
+</program>`;
+
+describe("server-load-authority (j): callable /__mountHydrate per-cell gate (round-3)", () => {
+  test("defect 1 — mixed roles are gated PER CELL, never collapsed to one route gate", () => {
+    const { serverJs } = compileFull(MIXED_ROLE);
+    const gi = serverJs.indexOf("async function _scrml_mountHydrate_handler");
+    expect(gi).toBeGreaterThan(-1);
+    const handler = serverJs.slice(gi, serverJs.indexOf("}", serverJs.indexOf("return new Response", gi)));
+    // Each cell gated by its OWN role — both roles present, never collapsed.
+    expect(handler).toContain('_scrml_cu.role === "admin"');
+    expect(handler).toContain('_scrml_cu.role === "editor"');
+    // The buggy collapsed form (a single top-level serverload_auth gate) is GONE.
+    expect(handler).not.toContain("_scrml_serverload_auth(_scrml_req");
+  });
+
+  test("defect 1 — a plain authenticated viewer gets NEITHER role's rows (no cross-role read)", () => {
+    const { serverJs } = compileFull(MIXED_ROLE);
+    // adminStats is only assigned under the admin-role predicate; editorQueue under editor.
+    expect(serverJs).toContain('if ((_scrml_cu.isAuth && _scrml_cu.role === "admin")) _scrml_mh_out["adminStats"]');
+    expect(serverJs).toContain('if ((_scrml_cu.isAuth && _scrml_cu.role === "editor")) _scrml_mh_out["editorQueue"]');
+  });
+
+  test("defect 4 — a public callable cell stays SSR-seeded; only the gated one is omitted", () => {
+    const { serverJs } = compileFull(PUBLIC_GATED);
+    // The public cell IS seeded into the anon compose state.
+    expect(serverJs).toContain('_scrml_ssr_state["publicCell"]');
+    // The gated cell is NOT seeded (omitted, named in the readable comment).
+    expect(serverJs).not.toContain('_scrml_ssr_state["secretCell"]');
+    expect(serverJs).toContain("NOT SSR-seeded");
+    expect(serverJs).toContain("@secretCell");
+  });
+
+  test("defect 4 — the /__mountHydrate handler serves the public cell to ANY request (incl. anon)", () => {
+    const { serverJs } = compileFull(PUBLIC_GATED);
+    const gi = serverJs.indexOf("async function _scrml_mountHydrate_handler");
+    const handler = serverJs.slice(gi, serverJs.indexOf("return new Response", gi));
+    // publicCell is assigned unconditionally; secretCell only when authenticated.
+    expect(handler).toContain('_scrml_mh_out["publicCell"] = ');
+    expect(handler).toContain('if (_scrml_cu.isAuth) _scrml_mh_out["secretCell"]');
+    expect(handler).not.toMatch(/if \([^)]*\) _scrml_mh_out\["publicCell"\]/);
+  });
+
+  test("defect 4 — I-SSR fires only for the gated callable cell, not the public one", () => {
+    const res = compileFull(PUBLIC_GATED);
+    expect(countCode(res, "I-SSR-AUTH-SCOPED-CLIENT-HYDRATED")).toBe(1);
   });
 });

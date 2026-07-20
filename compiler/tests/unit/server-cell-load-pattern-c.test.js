@@ -29,7 +29,9 @@
 import { describe, test, expect } from "bun:test";
 
 import { emitDeclRhsSqlLoad } from "../../src/codegen/emit-sync.ts";
-import { serverVarDeclLoadKind } from "../../src/codegen/collect.ts";
+import { serverVarDeclLoadKind, queryInterpolationsAreServerAmbientOnly, queryHasLiveInterpolation } from "../../src/codegen/collect.ts";
+import { liveSqlInterpolationExprs } from "../../src/codegen/sql-lex.ts";
+import { extractSqlParams } from "../../src/codegen/rewrite.ts";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { runCG } from "../../src/code-generator.js";
@@ -186,6 +188,92 @@ describe("server-cell-load Pattern C §2: serverVarDeclLoadKind classifier", () 
     const decl = findServerSqlDecl(parseAST(AT_FORM));
     expect(decl).not.toBeNull();
     expect(serverVarDeclLoadKind(decl)).toBe("sql-load");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §2b: §52.15.5 (S255) — the row-scope predicate + comment stripping. The SSR-
+// seed omission (emit-server) and the I-SSR lint (type-system) BOTH depend on
+// `queryInterpolationsAreServerAmbientOnly` — it MUST only count a LIVE
+// `${@currentUser}` interpolation, never a literal `@currentUser` in SQL string
+// data (Leak 1) nor one inside a `--`/`/* */` comment (Leak 3). Over-counting
+// classifies a genuinely-unscoped query as row-scoped → kept in the anon SSR
+// seed → cross-user leak. These lock the predicate directly.
+// ---------------------------------------------------------------------------
+
+describe("server-cell-load Pattern C §2b: row-scope predicate (§52.15.5)", () => {
+  test("Leak 1 — literal @currentUser in SQL string data is NOT row-scope", () => {
+    // No `${...}` interpolation at all → not server-ambient → not row-scoped.
+    expect(queryInterpolationsAreServerAmbientOnly(
+      "SELECT * FROM posts WHERE body LIKE '%@currentUser%'",
+    )).toBe(false);
+  });
+
+  test("Leak 3 — a ${@currentUser} inside a -- line comment is INERT (not row-scope)", () => {
+    expect(queryInterpolationsAreServerAmbientOnly(
+      "SELECT * FROM posts\n  -- WHERE user_id = ${@currentUser.id}\n",
+    )).toBe(false);
+    // and it does not make the query param-bearing (the LIVE query is param-free)
+    expect(queryHasLiveInterpolation(
+      "SELECT * FROM posts\n  -- WHERE user_id = ${@currentUser.id}\n",
+    )).toBe(false);
+  });
+
+  test("Leak 3 — a ${@currentUser} inside a /* block */ comment is INERT", () => {
+    expect(queryInterpolationsAreServerAmbientOnly(
+      "SELECT * FROM posts /* WHERE user_id = ${@currentUser.id} */",
+    )).toBe(false);
+  });
+
+  test("positive — a LIVE ${@currentUser.id} interpolation IS row-scope", () => {
+    expect(queryInterpolationsAreServerAmbientOnly(
+      "SELECT * FROM orders WHERE user_id = ${@currentUser.id}",
+    )).toBe(true);
+  });
+
+  test("negative — a client-local ${@driverId} interpolation is NOT server-ambient", () => {
+    expect(queryInterpolationsAreServerAmbientOnly(
+      "SELECT * FROM loads WHERE driver = ${@driverId}",
+    )).toBe(false);
+  });
+
+  // Round-3 defect 2 — a `--` inside a DOUBLE-QUOTED identifier is NOT a comment,
+  // so a live `${@driverId}` after it survives (param-bearing, not mis-classified
+  // param-free → no 500 from a serverLoad route referencing an unbound cell).
+  test("defect 2 — a -- inside a double-quoted identifier does NOT eat a live interpolation", () => {
+    const q = 'SELECT * FROM "audit--log" WHERE id = ${@driverId}';
+    expect(liveSqlInterpolationExprs(q)).toEqual(["@driverId"]);
+    expect(queryHasLiveInterpolation(q)).toBe(true);
+    // client-local cell → not server-ambient (param-bearing)
+    expect(queryInterpolationsAreServerAmbientOnly(q)).toBe(false);
+  });
+
+  // Round-3 defect 3 — the classifier and the extractSqlParams EMITTER share the
+  // lexer: a `${@x}` in a comment is neither counted (classifier) nor bound
+  // (emitter) → no Postgres bind-count mismatch. This LOCKS their agreement.
+  test("defect 3 — classifier and extractSqlParams agree: a commented ${@x} is NOT a bound param", () => {
+    const q = "SELECT * FROM t\n  -- WHERE id = ${@selectedId}\n";
+    expect(queryHasLiveInterpolation(q)).toBe(false);          // classifier: no live interp
+    expect(extractSqlParams(q).params).toEqual([]);            // emitter: binds NOTHING
+  });
+
+  // Round-3 defect 5 — a real SQL lexer: nested block comments + E'...' escapes.
+  test("defect 5 — nested /* /* */ */ block comment is fully inert", () => {
+    const q = "SELECT * FROM t /* outer /* inner ${@currentUser.id} */ still */ WHERE 1=1";
+    expect(liveSqlInterpolationExprs(q)).toEqual([]);
+    expect(queryInterpolationsAreServerAmbientOnly(q)).toBe(false);
+  });
+
+  test("defect 5 — a ${} inside an E'..\\'..' escape string is inert", () => {
+    const q = "SELECT * FROM t WHERE v = E'a\\'b ${@x}' AND id = ${@currentUser.id}";
+    // only the LIVE interpolation (outside the E-string) counts
+    expect(liveSqlInterpolationExprs(q)).toEqual(["@currentUser.id"]);
+    expect(queryInterpolationsAreServerAmbientOnly(q)).toBe(true);
+  });
+
+  test("defect 5 — a ${} inside a $$-dollar-quoted body is inert", () => {
+    const q = "SELECT $$literal ${@x}$$ , id = ${@currentUser.id}";
+    expect(liveSqlInterpolationExprs(q)).toEqual(["@currentUser.id"]);
   });
 });
 

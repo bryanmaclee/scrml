@@ -76,7 +76,7 @@ import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST } from "./expression-parser.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { extractSelectProjection } from "./sql-projection.ts";
-import { queryInterpolationsAreServerAmbientOnly } from "./codegen/collect.ts";
+import { queryInterpolationsAreServerAmbientOnly, queryHasLiveInterpolation, collectServerVarDecls, callableServerVarDecls } from "./codegen/collect.ts";
 import type { SelectProjection, ProjectedColumn } from "./sql-projection.ts";
 import { parseMatchArms } from "./match-statechild-parser.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
@@ -7932,6 +7932,28 @@ function fileDeclaresReactiveCell(fileAST: FileAST, name: string): boolean {
 }
 
 /**
+ * §52.15.5 (S255) — the names of the callable-init server cells in the file
+ * (`server @x = loadAll()`), using the SAME `callableServerVarDecls` classifier
+ * emit-server uses for /__mountHydrate coalescing. The type-system I-SSR lint for
+ * an auth-scoped callable cell must fire on EXACTLY the set emit-server omits from
+ * the SSR seed, so both derive membership from this one classifier. Memoized per
+ * fileAST (the walk visits each state-decl once; recomputing per visit is O(n²)).
+ */
+const _callableServerNamesCache = new WeakMap<object, Set<string>>();
+function fileCallableServerCellNames(fileAST: FileAST): Set<string> {
+  const key = fileAST as unknown as object;
+  const cached = _callableServerNamesCache.get(key);
+  if (cached) return cached;
+  const names = new Set<string>();
+  for (const d of callableServerVarDecls(collectServerVarDecls(fileAST as unknown as Record<string, unknown>))) {
+    const nm = (d as { name?: unknown }).name;
+    if (typeof nm === "string") names.add(nm);
+  }
+  _callableServerNamesCache.set(key, names);
+  return names;
+}
+
+/**
  * §65.6 (css-wave1-theme-tokens) — collect the `<theme for=@cell>` bindings.
  *
  * A `<theme for=@mode>` OWNS the variant set that types the bound cell `@mode`
@@ -9391,8 +9413,9 @@ function annotateNodes(
           // server-render subset (unsupported each shapes still fall back to
           // client-render — tracked g-ssr-render-subset-widen), which is not a
           // per-type concern. The WRITE is always the dev's own `?{}` server fn
-          // (§52.6.2); cross-user unscoped pre-render is still gated by
-          // W-SSR-PRERENDER-UNSCOPED (§52.15), which is unaffected by this retirement.
+          // (§52.6.2); cross-user unscoped pre-render is auto-made-safe (the cell is
+          // omitted from the SSR seed + I-SSR-AUTH-SCOPED-CLIENT-HYDRATED, §52.15.5),
+          // which is unaffected by this retirement.
 
           for (const ta of (n.typedAttrs as ASTNodeLike[])) {
             scopeChain.bind(ta.name as string, {
@@ -10770,10 +10793,15 @@ function annotateNodes(
             const _patternCServerAmbient = _hasInlineSql &&
               !fileDeclaresReactiveCell(fileAST, "currentUser") &&
               queryInterpolationsAreServerAmbientOnly(_inlineSqlQuery);
+            // §52.15.5 (S255) — a LIVE `${...}` (comment-stripped) makes the query
+            // param-bearing; a commented-out interpolation is inert (matches
+            // serverVarDeclLoadKind, so the SSR-seed omission + this classification
+            // agree on the executed query shape).
+            const _hasLiveInterp = queryHasLiveInterpolation(_inlineSqlQuery);
             const _isPatternCParamFree = _hasInlineSql &&
-              (!_inlineSqlQuery.includes("${") || _patternCServerAmbient);
+              (!_hasLiveInterp || _patternCServerAmbient);
             const _isPatternCParamBearing = _hasInlineSql &&
-              _inlineSqlQuery.includes("${") && !_patternCServerAmbient;
+              _hasLiveInterp && !_patternCServerAmbient;
 
             if (_isPatternCParamBearing) {
               errors.push(new TSError(
@@ -10849,23 +10877,73 @@ function annotateNodes(
                 ));
               }
 
-              // W-SSR-PRERENDER-UNSCOPED — an auth-scoped cell whose SSR pre-render
-              // runs UNSCOPED bakes EVERY user's rows into the first paint, served
-              // identically to all viewers (a cross-user leak the client-fetch path
-              // does not have). A Tier-1 SELECT * is always unscoped; a Pattern-C
-              // cell is scoped only by a `${@currentUser.…}` WHERE. Public cells
-              // (no auth) do not fire.
+              // I-SSR-AUTH-SCOPED-CLIENT-HYDRATED (§52.15.5) — an auth-scoped cell
+              // whose SSR pre-render would run UNSCOPED (a Tier-1 SELECT *, or a
+              // Pattern-C query with no `${@currentUser.…}` WHERE) is NOT SSR-seeded:
+              // baking every row into the first paint of the anonymous-reachable
+              // compose GET route would leak all rows to an unauthenticated viewer.
+              // The compiler AUTO-OMITS it from the seed (mirror of the §14.8.9
+              // protect-floor auto-redaction), so the cell hydrates client-side
+              // behind its gated /__serverLoad fetch (401 for anon) — safe by
+              // construction, idiomatic code still compiles + renders for authorized
+              // viewers. This is an INFO lint (the auto-omission is never silent),
+              // NOT a hard error. Public cells (no auth) and row-scoped Pattern-C
+              // cells (which run under the request) are SSR-seeded normally.
               if (_authScoped && !_rowScoped) {
                 errors.push(new TSError(
-                  "W-SSR-PRERENDER-UNSCOPED",
-                  `W-SSR-PRERENDER-UNSCOPED: server-authority cell '@${n.name as string}' is ` +
-                  `auth-scoped but its SSR pre-render runs UNSCOPED — it bakes EVERY row into ` +
-                  `the first-paint HTML, served identically to all viewers (a cross-user leak). ` +
-                  `Row-scope it to the request user: promote to a Pattern-C query with ` +
+                  "I-SSR-AUTH-SCOPED-CLIENT-HYDRATED",
+                  `I-SSR-AUTH-SCOPED-CLIENT-HYDRATED: auth-scoped server-authority cell ` +
+                  `'@${n.name as string}' is NOT SSR-prerendered — the compiler omitted it from ` +
+                  `the first-paint HTML + \`window.__scrml_ssr_state\` seed (the SSR compose route ` +
+                  `is anonymous-reachable; seeding an UNSCOPED auth-scoped cell would leak every ` +
+                  `row to unauthenticated viewers). It hydrates client-side behind its gated ` +
+                  `/__serverLoad fetch (401 for anon) — safe by construction. To restore the ` +
+                  `first-paint acceleration for authorized viewers, row-scope the cell to the ` +
+                  `request user: promote to a Pattern-C query with ` +
                   `\`WHERE user_id = \${@currentUser.id}\` (§52.6.5) so each viewer's first paint ` +
-                  `contains only their rows. (Column redaction §14.8.9 does NOT scope rows.)`,
+                  `contains only their own rows. (Column redaction §14.8.9 does NOT scope rows.)`,
                   declSpan,
-                  "warning",
+                  "info",
+                ));
+              }
+            }
+
+            // §52.15.5 (S255) — a callable-init server cell (`server @x = loadAll()`)
+            // coalesced into /__mountHydrate (≥2 callable cells, the same
+            // `callableServerVarDecls` classifier + `_needsMountHydrate` gate
+            // emit-server uses) has an OPAQUE loader the compiler cannot row-scope.
+            // Under an auth floor a GATED callable cell is auto-omitted from the anon
+            // SSR seed and its payload is per-cell-gated on the coalesced /__mountHydrate
+            // route (emit-server serverLoadGateMode per cell), so it hydrates
+            // client-side behind its own gate. Fire the SAME I-SSR lint so the lint fires on
+            // EXACTLY the cells emit-server omits (per gated callable cell; the whole
+            // group is omitted together — a per-var-public cell in a mixed group is
+            // named in the emitted omission comment rather than linted).
+            const _callableServerNames = fileCallableServerCellNames(fileAST);
+            if (_callableServerNames.has(n.name as string) && _callableServerNames.size >= 2) {
+              const _perVarAuthC = (n as ASTNodeLike).auth;
+              const _authMWC = routeMap?.authMiddleware?.get(filePath) ?? null;
+              const _callableGated =
+                _perVarAuthC === "required" ||
+                (typeof _perVarAuthC === "string" && _perVarAuthC.startsWith("role:"))
+                  ? true
+                  : (_perVarAuthC === "none" || _perVarAuthC === "optional")
+                    ? false
+                    : (!!_authMWC && (_authMWC as { auth?: string }).auth === "required");
+              if (_callableGated) {
+                errors.push(new TSError(
+                  "I-SSR-AUTH-SCOPED-CLIENT-HYDRATED",
+                  `I-SSR-AUTH-SCOPED-CLIENT-HYDRATED: auth-scoped callable-init server cell ` +
+                  `'@${n.name as string}' is NOT SSR-prerendered — the compiler omitted it from ` +
+                  `the first-paint HTML + \`window.__scrml_ssr_state\` seed AND gated its ` +
+                  `coalesced /__mountHydrate loader route (that route is anonymous-reachable; ` +
+                  `seeding an auth-scoped callable cell would leak its rows to unauthenticated ` +
+                  `viewers). It hydrates client-side behind the gated fetch (401 for anon) — safe ` +
+                  `by construction. A callable loader cannot be compiler-row-scoped; scope it ` +
+                  `INSIDE the loader (\`WHERE user_id = \${@currentUser.id}\`) — the gate keeps ` +
+                  `anon out either way.`,
+                  declSpan,
+                  "info",
                 ));
               }
             }
