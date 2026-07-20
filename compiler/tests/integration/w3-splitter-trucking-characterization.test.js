@@ -66,7 +66,10 @@ beforeAll(() => {
     emitPerRoute: true,
     log: () => {},
   });
-});
+}, 30000); // beforeAll compiles the 36-file 23-trucking-dispatch app (~3.5-6.5s);
+           // the default 5000ms hook timeout is borderline under full-suite load and
+           // flakes (pre-existing, load-dependent — NOT codegen cost; verified the
+           // baseline is equally slow). 30s gives headroom without weakening any assert.
 
 afterAll(() => {
   if (TMP && existsSync(TMP)) rmSync(TMP, { recursive: true, force: true });

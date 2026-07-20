@@ -1,0 +1,31 @@
+{
+  "id": "ssr-auth-scoped-cell-not-seeded",
+  "description": "§52.15.5 (S255 auto-make-safe) — the SSR compose route is an ANONYMOUS-reachable GET, so an auth-scoped, non-row-scoped server-authority cell (Tier-1 `<Account authority=server table=users>` under `auth=required`) is AUTO-OMITTED from the first-paint: the E-ADAPTER SSR path invokes the REAL _scrml_ssr_compose_handler with an anonymous request and the composed HTML + `window.__scrml_ssr_state` seed contain NEITHER the users' rows (Alice/Bob) NOR an `accounts` seed key — they are absent by construction (the cell hydrates client-side behind its gated /__serverLoad fetch, 401 for anon). A SIBLING PUBLIC cell (`<widgets server auth=none> = ?{...}`) is NOT over-omitted: its rows ARE server-rendered into the first paint + carried in the seed, and hydrate in place. The compiler emits an I-SSR-AUTH-SCOPED-CLIENT-HYDRATED info lint (per-var, on @accounts) recording the omission, and NO E-* error (idiomatic code still compiles). This pins the route-admission × row-selection egress axis (§52.15.4), orthogonal to the §14.8.9 column-redaction floor.",
+  "language-version": "1.0",
+  "spec": "§52.15.5, §52.8, §52.15.4",
+  "rationale": "§52.15.5 (auto-make-safe): 'an auth-scoped unscoped cell is OMITTED from the SSR seed — no first-paint markup fill, no window.__scrml_ssr_state entry. The cell then hydrates client-side behind its already-gated /__serverLoad fetch (401 for anon) — safe by construction.' The compose route is anonymous-reachable (§52.8), so seeding @accounts would leak every user's rows to an unauthenticated viewer (strictly worse than the gated client fetch). The public @widgets cell (auth=none → gate false) is SSR-seeded normally — the omission never over-omits.",
+  "expect": {
+    "codes": ["I-SSR-AUTH-SCOPED-CLIENT-HYDRATED"],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "severity": { "I-SSR-AUTH-SCOPED-CLIENT-HYDRATED": "info" },
+    "serverDb": {
+      "users": [
+        { "id": 1, "name": "Alice" },
+        { "id": 2, "name": "Bob" }
+      ],
+      "widgets": [
+        { "id": 10, "label": "PublicWidget" }
+      ]
+    },
+    "firstPaint": {
+      "contains": [
+        "<li data-scrml-key=\"10\" class=\"wid\">PublicWidget</li>",
+        "window.__scrml_ssr_state=",
+        "\"widgets\""
+      ],
+      "notContains": ["Alice", "Bob", "\"accounts\""]
+    },
+    "state": { "widgets": [{ "id": 10, "label": "PublicWidget" }] }
+  }
+}

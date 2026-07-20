@@ -1,0 +1,19 @@
+<program db="sqlite:./app.db" auth="required">
+<schema>
+  ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)`}
+  ?{`CREATE TABLE widgets (id INTEGER PRIMARY KEY, label TEXT)`}
+</schema>
+<db src="app.db" tables="users,widgets"></db>
+${
+  <Account authority="server" table="users">
+    id: number
+    name: string
+  </>
+  <Account> @accounts
+  <widgets server auth="none"> = ?{`SELECT * FROM widgets`}.all()
+}
+<main>
+  <ul><each in=@accounts key=@.id as a><li class="acct">${a.name}</li></each></ul>
+  <ul><each in=@widgets key=@.id as w><li class="wid">${w.label}</li></each></ul>
+</main>
+</program>

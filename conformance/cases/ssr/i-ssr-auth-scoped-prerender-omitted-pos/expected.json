@@ -1,0 +1,13 @@
+{
+  "id": "ssr-i-ssr-auth-scoped-prerender-omitted-pos",
+  "description": "§52.15.5/§52.8 (S255 auto-make-safe) — an auth-scoped Tier-1 server-authority cell (`authority=\"server\"` → always an UNSCOPED SELECT *) under <program auth=\"required\"> fires I-SSR-AUTH-SCOPED-CLIENT-HYDRATED (info): the compiler AUTO-OMITS it from the anonymous-reachable SSR compose seed (no first-paint fill, no window.__scrml_ssr_state entry) rather than baking every user's rows into the first paint. It hydrates client-side behind its gated /__serverLoad fetch (401 for anon) — safe by construction. NO E-* (idiomatic code still compiles).",
+  "language-version": "1.0",
+  "spec": "§52.15.5",
+  "source-test": "compiler/tests/integration/server-load-authority.test.js",
+  "rationale": "§52.15.5: a Tier-1 authority cell's SELECT * is unscoped; when it is auth-scoped (the app is auth-aware and the route is not explicitly public) its unscoped SSR pre-render would leak every row across users on the anonymous-reachable compose route. The compiler auto-makes-safe by omitting it from the seed + firing the I-SSR-AUTH-SCOPED-CLIENT-HYDRATED info lint (was W-SSR-PRERENDER-UNSCOPED warning pre-S255 — the tracking-warning-for-the-hole, retired once the hole was auto-closed). Row-scope it to @currentUser.id (§52.15.3) to restore first-paint acceleration for authorized viewers.",
+  "expect": {
+    "codes": ["I-SSR-AUTH-SCOPED-CLIENT-HYDRATED"],
+    "notCodePrefixes": ["E-"],
+    "severity": { "I-SSR-AUTH-SCOPED-CLIENT-HYDRATED": "info" }
+  }
+}

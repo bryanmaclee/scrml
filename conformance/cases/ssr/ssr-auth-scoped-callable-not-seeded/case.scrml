@@ -1,0 +1,24 @@
+<program db="sqlite:./app.db" auth="required">
+<schema>
+  ?{`CREATE TABLE orders (id INTEGER PRIMARY KEY, item TEXT)`}
+  ?{`CREATE TABLE invoices (id INTEGER PRIMARY KEY, amount INTEGER)`}
+  ?{`CREATE TABLE widgets (id INTEGER PRIMARY KEY, label TEXT)`}
+</schema>
+<db src="app.db" tables="orders,invoices,widgets"></db>
+${
+  server function loadAllOrders() {
+    return ?{`SELECT * FROM orders`}.all()
+  }
+  server function loadAllInvoices() {
+    return ?{`SELECT * FROM invoices`}.all()
+  }
+  <orders server> = loadAllOrders()
+  <invoices server> = loadAllInvoices()
+  <widgets server auth="none"> = ?{`SELECT * FROM widgets`}.all()
+}
+<main>
+  <ul><each in=@orders key=@.id as o><li class="ord">${o.item}</li></each></ul>
+  <ul><each in=@invoices key=@.id as v><li class="inv">${v.amount}</li></each></ul>
+  <ul><each in=@widgets key=@.id as w><li class="wid">${w.label}</li></each></ul>
+</main>
+</program>

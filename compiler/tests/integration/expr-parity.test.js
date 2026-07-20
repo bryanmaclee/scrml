@@ -210,7 +210,9 @@ describe("ExprNode codegen parity", () => {
 
       // Compilation must not crash (AST build or full compile)
       expect(result.compileError).toBeNull();
-    });
+    }, 30000); // per-snippet compile (× the parity re-compile) is borderline vs the
+               // default 5000ms under full-suite load (e.g. 12-snippets-slots ~2s×2);
+               // 30s prevents the pre-existing load-dependent flake. Assertions unchanged.
   }
 
   test("summary", () => {

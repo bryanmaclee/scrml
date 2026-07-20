@@ -1,0 +1,34 @@
+{
+  "id": "ssr-auth-scoped-callable-not-seeded",
+  "description": "§52.15.5 (S255) Leak 2 regression — coalesced callable-init server cells (`server @orders = loadAllOrders()`, `server @invoices = loadAllInvoices()`, both unscoped SELECT *) under auth=required are auto-omitted from the anon SSR seed AND their coalesced /__mountHydrate loader route is auth-gated (previously the callable group bypassed BOTH the SSR-seed omission and the I-SSR lint, baking every user's rows into the anon first-paint with no diagnostic). The E-ADAPTER SSR path invokes the REAL compose handler anonymously: neither @orders nor @invoices rows appear in the first paint or `window.__scrml_ssr_state`; a sibling PUBLIC `@widgets` (auth=none) is NOT over-omitted (rows server-rendered + seeded). The I-SSR-AUTH-SCOPED-CLIENT-HYDRATED info lint fires on BOTH callable cells.",
+  "language-version": "1.0",
+  "spec": "§52.15.5, §52.8, §8.11",
+  "rationale": "§52.15.5: the /__mountHydrate coalesced loader route is anonymous-reachable (the page auth redirect does not cover it), so under an auth floor it is gated + the whole callable group is omitted from the SSR seed (all-or-nothing — the client _ssrGuard skips the fetch only when EVERY coalesced cell was seeded). A callable loader is opaque to the compiler (not row-scopable), so an auth-scoped callable group is always the omit-and-client-hydrate case.",
+  "expect": {
+    "codes": ["I-SSR-AUTH-SCOPED-CLIENT-HYDRATED"],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "severity": { "I-SSR-AUTH-SCOPED-CLIENT-HYDRATED": "info" },
+    "serverDb": {
+      "orders": [
+        { "id": 1, "item": "SECRETORDER_ALICE" },
+        { "id": 2, "item": "SECRETORDER_BOB" }
+      ],
+      "invoices": [
+        { "id": 1, "amount": 99999 }
+      ],
+      "widgets": [
+        { "id": 10, "label": "PublicWidget" }
+      ]
+    },
+    "firstPaint": {
+      "contains": [
+        "<li data-scrml-key=\"10\" class=\"wid\">PublicWidget</li>",
+        "window.__scrml_ssr_state=",
+        "\"widgets\""
+      ],
+      "notContains": ["SECRETORDER", "99999", "\"orders\"", "\"invoices\""]
+    },
+    "state": { "widgets": [{ "id": 10, "label": "PublicWidget" }] }
+  }
+}

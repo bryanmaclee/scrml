@@ -1,7 +1,7 @@
 import { CGError } from "./errors.ts";
 import { genVar, getVarCounter, setVarCounter } from "./var-counter.ts";
 import { routePath, paramSignature, paramName, stripPagesPrefix } from "./utils.ts";
-import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, serverVarDeclLoadKind, isServerOnlyNode, containsSqlOrTransaction, containsSql } from "./collect.ts";
+import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, serverVarDeclLoadKind, queryInterpolationsAreServerAmbientOnly, isServerOnlyNode, containsSqlOrTransaction, containsSql } from "./collect.ts";
 import { emitLogicNode, emitFnShortcutBody } from "./emit-logic.ts";
 import { computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, asyncStdlibSyncCallbackError, aliasedAsyncCallError } from "./emit-library-shared.ts";
 import { getNodes } from "./collect.ts";
@@ -1685,7 +1685,20 @@ export function generateServerJs(
   for (const decl of _patternCLoadDecls) {
     _serverLoadGateForVar.set(decl.name as string, serverLoadGateMode(decl, authMiddlewareEntry));
   }
-  const _anyServerLoadGates = [..._serverLoadGateForVar.values()].some((g) => g.gate);
+  // §52.15.5 (S255) — the coalesced /__mountHydrate loader route is ALSO an
+  // anonymous-reachable data route (like /__serverLoad — the page auth redirect
+  // does NOT cover it). It may batch cells with DIFFERENT auth (public +
+  // role:admin + role:editor), so the route is gated PER CELL, never on one
+  // collapsed role: each cell's payload is included IFF the request passes THAT
+  // cell's own gate (round-3 defect 1 — collapsing distinct roles to one gate
+  // admitted any authenticated viewer to the admin rows; round-3 defect 4 — a
+  // public cell swept into the gated group never hydrated for anon). The SSR seed
+  // is likewise omitted PER CELL: gated callable cells are omitted (client-
+  // hydrated behind the per-cell gate), public callable cells stay SSR-seeded.
+  const _anyCallableGated = _needsMountHydrate &&
+    _mhCallableDecls.some((d) => serverLoadGateMode(d, authMiddlewareEntry).gate);
+  const _anyServerLoadGates =
+    [..._serverLoadGateForVar.values()].some((g) => g.gate) || _anyCallableGated;
   // A Fork-3 row-scope Pattern-C query reads the @currentUser ambient (active).
   const _anyCurrentUserQuery = _currentUserAmbient && _patternCLoadDecls.some((d) => {
     const q = (d as any).sqlNode?.query ?? (d as any).sqlNode?.body ?? "";
@@ -2695,6 +2708,17 @@ export function generateServerJs(
     };
     for (const { fnNode: _sfn } of serverFns) {
       for (const _stmt of (_sfn?.body ?? [])) _walk(_stmt);
+    }
+    // §52.15.5 (S255) — the synthetic /__mountHydrate handler AND the SSR-compose
+    // seed call a callable cell's init `loadX()` by its BARE name (emitExprField),
+    // so `loadX` must be emitted as a module-scope callable, not only its route
+    // handler `_scrml_handler_loadX_N`. Walk the callable-cell init exprs so their
+    // peer callees register here → the bare `async function loadX` is emitted below.
+    // (Pre-existing gap: §8.11 /__mountHydrate referenced the bare name but never
+    // forced its emission — a dangling ReferenceError at runtime; the string-only
+    // mount-hydrate unit tests never executed the route to catch it.)
+    if (_needsMountHydrate) {
+      for (const _cd of _mhCallableDecls) _walk((_cd as any).initExpr);
     }
   }
 
@@ -3894,28 +3918,63 @@ export function generateServerJs(
     const mhRouteName = "_scrml_route___mountHydrate";
     lines.push("// --- §8.11 synthetic __mountHydrate route (compiler-generated) ---");
     lines.push(`async function ${mhHandlerName}(_scrml_req) {`);
-    // Build the list of (name, server-rewritten initExpr) pairs.
-    const mhEntries: Array<{ name: string; expr: string }> = [];
-    for (const decl of _mhCallableDecls) {
+    // Build the list of (name, server-rewritten initExpr, per-cell auth) triples.
+    // M-7C-D-12 Track 3: fallback uses "null" not "undefined" per §42.5/§42.8.
+    // authExpr === null → the cell is PUBLIC (always served). Otherwise it is the
+    // JS predicate that must hold for THIS request to receive the cell's payload
+    // (§52.15.5 per-cell gate; a `role:X` cell needs `role === X`, a `required`
+    // cell needs `isAuth`). Distinct roles are NEVER collapsed to one route gate.
+    const mhEntries = _mhCallableDecls.map((decl) => {
       const name = decl.name as string;
-      // M-7C-D-12 Track 3: fallback uses "null" not "undefined" per §42.5/§42.8.
       const expr = emitExprField((decl as any).initExpr, (decl as any).init ?? "null", { mode: "server" });
-      mhEntries.push({ name, expr });
-    }
-    // Parallel await via Promise.all — matches §8.11.2 intent.
-    lines.push(`  const [${mhEntries.map((_, i) => `_scrml_mh_v${i}`).join(", ")}] = await Promise.all([`);
-    for (const e of mhEntries) {
-      lines.push(`    Promise.resolve(${e.expr}),`);
-    }
-    lines.push(`  ]);`);
-    lines.push(`  return new Response(JSON.stringify({`);
-    mhEntries.forEach((e, i) => {
-      lines.push(`    ${JSON.stringify(e.name)}: _scrml_mh_v${i},`);
+      const _g = serverLoadGateMode(decl, authMiddlewareEntry);
+      const authExpr: string | null = !_g.gate
+        ? null
+        : (_g.role
+            ? `(_scrml_cu.isAuth && _scrml_cu.role === ${JSON.stringify(_g.role)})`
+            : "_scrml_cu.isAuth");
+      return { name, expr, authExpr };
     });
-    lines.push(`  }), {`);
-    lines.push(`    status: 200,`);
-    lines.push(`    headers: { "Content-Type": "application/json" },`);
-    lines.push(`  });`);
+    const _mhAnyGated = mhEntries.some((e) => e.authExpr !== null);
+    if (!_mhAnyGated) {
+      // All cells public — the original coalesced form (byte-identical, pre-S255).
+      lines.push(`  const [${mhEntries.map((_, i) => `_scrml_mh_v${i}`).join(", ")}] = await Promise.all([`);
+      for (const e of mhEntries) lines.push(`    Promise.resolve(${e.expr}),`);
+      lines.push(`  ]);`);
+      lines.push(`  return new Response(JSON.stringify({`);
+      mhEntries.forEach((e, i) => lines.push(`    ${JSON.stringify(e.name)}: _scrml_mh_v${i},`));
+      lines.push(`  }), {`);
+      lines.push(`    status: 200,`);
+      lines.push(`    headers: { "Content-Type": "application/json" },`);
+      lines.push(`  });`);
+    } else {
+      // Mixed / gated — resolve identity ONCE, then gate each cell by its OWN auth.
+      // A cell's loader RUNS only when the request is authorized for it (the ternary
+      // short-circuits — an unauthorized loader is never invoked), and its payload
+      // is included in the keyed response only when authorized. Unauthorized cells
+      // are simply absent from the response (the client leaves them unhydrated).
+      lines.push(`  const _scrml_cu = _scrml_current_user(_scrml_req);`);
+      lines.push(`  const [${mhEntries.map((_, i) => `_scrml_mh_v${i}`).join(", ")}] = await Promise.all([`);
+      for (const e of mhEntries) {
+        // §42.5/§42.8 — scrml absence is `null`, never `undefined`. The unauthorized
+        // branch value is discarded (the cell is not included in _scrml_mh_out below),
+        // but emit `null` to keep the output canon + quiet W-CG-UNDEFINED-INTERPOLATION.
+        lines.push(e.authExpr === null
+          ? `    Promise.resolve(${e.expr}),`
+          : `    (${e.authExpr}) ? Promise.resolve(${e.expr}) : Promise.resolve(null),`);
+      }
+      lines.push(`  ]);`);
+      lines.push(`  const _scrml_mh_out = {};`);
+      mhEntries.forEach((e, i) => {
+        lines.push(e.authExpr === null
+          ? `  _scrml_mh_out[${JSON.stringify(e.name)}] = _scrml_mh_v${i};`
+          : `  if (${e.authExpr}) _scrml_mh_out[${JSON.stringify(e.name)}] = _scrml_mh_v${i};`);
+      });
+      lines.push(`  return new Response(JSON.stringify(_scrml_mh_out), {`);
+      lines.push(`    status: 200,`);
+      lines.push(`    headers: { "Content-Type": "application/json" },`);
+      lines.push(`  });`);
+    }
     lines.push(`}`);
     lines.push("");
     lines.push(`export const ${mhRouteName} = {`);
@@ -4068,9 +4127,78 @@ export function generateServerJs(
   // so §52.8's "no placeholder on first paint" + W-AUTH-002 are the A-terminus,
   // out of scope here.
   {
-    const _ssrSeedTier1 = _serverAuthorityInstances;
-    const _ssrSeedPatternC = _patternCLoadDecls;
-    const _ssrSeedCallable = _needsMountHydrate ? _mhCallableDecls : [];
+    // §52.15.5 (S255 auto-make-safe) — the SSR compose route is an ANONYMOUS-
+    // reachable GET (it serves the first-paint HTML to every viewer, gated or
+    // not). Baking an AUTH-SCOPED, non-row-scoped cell's rows into that first
+    // paint + the `window.__scrml_ssr_state` seed leaks EVERY row to an
+    // unauthenticated viewer — strictly worse than the gated `/__serverLoad`
+    // client fetch (401 for anon) this route accelerates. Mirror the §14.8.9
+    // protect-floor shape: AUTO-OMIT the cell at this egress sink (it hydrates
+    // client-side behind its own gate) + an INFO lint (type-system emits
+    // I-SSR-AUTH-SCOPED-CLIENT-HYDRATED, §34), NOT a hard error. This is the
+    // route-admission × row-selection axis (§52.15.4), orthogonal to and
+    // stacking with the §14.8.9 column-redaction already applied below.
+    //
+    // A cell is omitted iff it is auth-scoped (its `/__serverLoad` route gates —
+    // `serverLoadGateMode(...).gate`) AND its SSR query is NOT row-scoped. Row
+    // scope means a Pattern-C query filtered by the server-ambient `@currentUser`
+    // (`WHERE … = ${@currentUser.id}`): the compose handler runs it UNDER the
+    // request, so anon → `@currentUser.id is not` → SQL NULL → zero rows
+    // (fail-closed, §52.15.3). Public cells (`auth="none"`/no app auth → gate
+    // false) and row-scoped cells stay SSR-seeded — do NOT over-omit.
+    // §52.15.5 (S255) — row-scope MUST use the SAME structured predicate the
+    // type-system lint uses (`queryInterpolationsAreServerAmbientOnly`, gated on
+    // the same `@currentUser` shadow check `_currentUserAmbient` ≡ the lint's
+    // `!fileDeclaresReactiveCell(...,"currentUser")`), so the SSR-seed OMISSION and
+    // the I-SSR lint PROVABLY coincide on the sql-load set. A naive substring
+    // (`q.includes("@currentUser")`) diverges — it counts a literal `@currentUser`
+    // in SQL string data / a comment as row-scope, KEEPING an auth-scoped unscoped
+    // cell in the anon seed while the lint reports it omitted-and-safe (a leak).
+    // The predicate scans ONLY the interior of each LIVE `${...}` (comment-stripped).
+    const _ssrCellIsRowScoped = (decl: unknown): boolean => {
+      const q = (decl as { sqlNode?: { query?: string; body?: string } })?.sqlNode?.query
+        ?? (decl as { sqlNode?: { query?: string; body?: string } })?.sqlNode?.body
+        ?? "";
+      return _currentUserAmbient && queryInterpolationsAreServerAmbientOnly(q);
+    };
+    const _ssrOmitAuthScoped = (varName: string, rowScoped: boolean): boolean => {
+      const _g = _serverLoadGateForVar.get(varName);
+      return !!(_g && _g.gate) && !rowScoped;
+    };
+    // The auth-scoped cells auto-omitted from this sink (kept for the readable
+    // header comment in the emitted handler — the omission must never be silent).
+    const _ssrOmittedVarNames: string[] = [];
+    const _ssrSeedTier1 = _serverAuthorityInstances.filter((inst) => {
+      // A Tier-1 instance is `SELECT * FROM <table>` — never row-scoped.
+      if (_ssrOmitAuthScoped(inst.name as string, false)) {
+        _ssrOmittedVarNames.push(inst.name as string);
+        return false;
+      }
+      return true;
+    });
+    const _ssrSeedPatternC = _patternCLoadDecls.filter((decl) => {
+      if (_ssrOmitAuthScoped(decl.name as string, _ssrCellIsRowScoped(decl))) {
+        _ssrOmittedVarNames.push(decl.name as string);
+        return false;
+      }
+      return true;
+    });
+    // Coalesced-callable-init cells hydrate via `/__mountHydrate`. §52.15.5 omits
+    // them from the anon SSR seed PER CELL: an auth-scoped (gated) callable cell is
+    // omitted (it client-hydrates behind its own per-cell /__mountHydrate gate; the
+    // I-SSR lint fires for it from the type-system) — a PUBLIC (auth="none")
+    // callable cell stays SSR-seeded (round-3 defect 4 — do NOT sweep public into
+    // the gated group). A callable loader is opaque to the compiler, so a gated
+    // callable cell is never row-scopable → always the omit case.
+    const _ssrSeedCallable = _needsMountHydrate
+      ? _mhCallableDecls.filter((d) => {
+          if (serverLoadGateMode(d, authMiddlewareEntry).gate) {
+            _ssrOmittedVarNames.push(d.name as string);
+            return false;
+          }
+          return true;
+        })
+      : [];
     const _hasSsrSeed =
       _ssrSeedTier1.length > 0 || _ssrSeedPatternC.length > 0 || _ssrSeedCallable.length > 0;
     // §39.2.3 canonical CSRF delivery — when `csrf="auto"` the request-time
@@ -4090,7 +4218,7 @@ export function generateServerJs(
       // §52 (S233) Fork-3 — a Pattern-C seed query reads @currentUser iff it
       // carries a row-scope filter. The SSR pre-render MUST run that query UNDER
       // the request (else an unscoped run bakes cross-user rows into the first
-      // paint — the W-SSR-PRERENDER-UNSCOPED severity, §52.8 / dive §7).
+      // paint — the auto-omitted I-SSR-AUTH-SCOPED-CLIENT-HYDRATED case above; §52.8 / dive §7).
       const _ssrUsesCurrentUser = _currentUserAmbient && _ssrSeedPatternC.some((d) => {
         const q = (d as any).sqlNode?.query ?? (d as any).sqlNode?.body ?? "";
         return typeof q === "string" && q.includes("@currentUser");
@@ -4114,6 +4242,15 @@ export function generateServerJs(
         }
       }
       lines.push(`// --- §52.8 SSR pre-render + §39.2.3 CSRF meta-token injection (request-time HTML composition) ---`);
+      if (_ssrOmittedVarNames.length > 0) {
+        // §52.15.5 auto-make-safe — record the auth-scoped cells the compiler kept
+        // OUT of this anonymous-reachable first paint (they hydrate client-side
+        // behind their gated /__serverLoad fetch). The omission is never silent.
+        lines.push(
+          `// §52.15.5: auth-scoped cell(s) NOT SSR-seeded (client-hydrated behind their gate): ` +
+          _ssrOmittedVarNames.map((n) => `@${n}`).join(", "),
+        );
+      }
       lines.push(`async function _scrml_ssr_compose_handler(_scrml_req) {`);
       if (_hasSsrSeed) {
         lines.push(`  const _scrml_ssr_state = {};`);

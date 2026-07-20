@@ -4,7 +4,7 @@
   "language-version": "1.0",
   "spec": "§52.8, §14.8.9",
   "runtime-half-ref": "compiler/tests/browser/ssr-a-terminus-hydration.browser.test.js",
-  "rationale": "§52.8 (SPEC.md §52 line ~30252): 'a view-source of the first paint already contains the rows ... It feeds on the §14.8.9-redacted rows (a protected column is absent — no first-paint confidentiality leak).' auth=\"none\" makes the pre-render public/unscoped (so W-SSR-PRERENDER-UNSCOPED does not fire — it is gated on non-explicit-auth), which is orthogonal to the column-redaction floor asserted here (§52 line ~30500 — the three axes STACK).",
+  "rationale": "§52.8 (SPEC.md §52 line ~30252): 'a view-source of the first paint already contains the rows ... It feeds on the §14.8.9-redacted rows (a protected column is absent — no first-paint confidentiality leak).' auth=\"none\" makes the cell public (so I-SSR-AUTH-SCOPED-CLIENT-HYDRATED does not fire and the cell is NOT auto-omitted from the SSR seed — the §52.15.5 auto-make-safe omission is gated on auth-scoping), which is orthogonal to the column-redaction floor asserted here (§52 line ~30500 — the three axes STACK).",
   "expect": {
     "codes": [],
     "notCodes": [],

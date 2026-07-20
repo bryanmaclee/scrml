@@ -1,4 +1,5 @@
 import { genVar } from "./var-counter.ts";
+import { liveSqlInterpolations } from "./sql-lex.ts";
 import { splitBareExprStatements } from "./compat/parser-workarounds.js";
 import { rewriteReactiveRefsAST, rewriteServerReactiveRefsAST, setParserCurrentUserAmbientActive } from "../expression-parser.ts";
 import { CGError } from "./errors.ts";
@@ -370,31 +371,25 @@ export function extractSqlParams(sqlContent: string): SqlParams {
   const params: string[] = [];
   const segments: string[] = [];
   let sql = "";
-  let curSeg = "";
-  let i = 0;
-
-  while (i < sqlContent.length) {
-    if (sqlContent[i] === '$' && sqlContent[i + 1] === '{') {
-      let depth = 1;
-      let j = i + 2;
-      while (j < sqlContent.length && depth > 0) {
-        if (sqlContent[j] === '{') depth++;
-        else if (sqlContent[j] === '}') depth--;
-        if (depth > 0) j++;
-      }
-      const paramExpr = sqlContent.slice(i + 2, j);
-      params.push(paramExpr);
-      sql += `?${params.length}`;
-      segments.push(curSeg);
-      curSeg = "";
-      i = j + 1;
-    } else {
-      sql += sqlContent[i];
-      curSeg += sqlContent[i];
-      i++;
-    }
+  // §52.15.5 (S255) — bind ONLY the LIVE (code-context) `${...}` interpolations.
+  // A `${}` inside a comment / string literal / quoted identifier / dollar-quoted
+  // body is INERT SQL text (round-3 defects 2/3/5): it stays in the segment text
+  // (buildTaggedTemplate's `escSeg` escapes its `${` so it renders as literal SQL,
+  // never a JS interpolation) so it is NEVER emitted as a bound `$N` param — which
+  // would 500 with a Postgres bind-count mismatch. This is the SAME lexer the
+  // classifier (collect.ts) uses, so param emit and classification cannot diverge.
+  const live = liveSqlInterpolations(sqlContent);
+  let cursor = 0;
+  for (const interp of live) {
+    const seg = sqlContent.slice(cursor, interp.start);
+    segments.push(seg);
+    sql += seg + `?${params.length + 1}`;
+    params.push(interp.expr);
+    cursor = interp.end;
   }
-  segments.push(curSeg);
+  const tail = sqlContent.slice(cursor);
+  segments.push(tail);
+  sql += tail;
 
   return { sql, params, segments };
 }

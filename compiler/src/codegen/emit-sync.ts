@@ -214,10 +214,10 @@ export function emitUnifiedMountHydrate(varNames: string[]): string[] {
   const lines: string[] = [];
   lines.push(`// <var server> initial loads — coalesced via /__mountHydrate (§8.11)`);
   lines.push(`(async () => {`);
-  // §52.8 (ssr-b-substrate) — when the SSR pre-render seeded EVERY coalesced
-  // cell from window.__scrml_ssr_state, skip the whole /__mountHydrate RTT.
-  // (The compiler bakes all coalesced-callable cells into the seed, so all-
-  // seeded is the SSR case; absent SSR, the guard is false and the fetch runs.)
+  // §52.8 (ssr-b-substrate) — when the SSR pre-render seeded EVERY coalesced cell
+  // from window.__scrml_ssr_state, skip the whole /__mountHydrate RTT. With §52.15.5
+  // PER-CELL omission a public cell is seeded but a gated cell is not, so all-seeded
+  // means "no gated cell" and the fetch is unnecessary; otherwise the fetch runs.
   const _ssrGuard = varNames.map((n) => `_scrml_ssr_seeded(${JSON.stringify(n)})`).join(" && ");
   lines.push(`  if (${_ssrGuard}) return;`);
   lines.push(`  const _scrml_mh_res = await fetch("/__mountHydrate", {`);
@@ -225,9 +225,17 @@ export function emitUnifiedMountHydrate(varNames: string[]): string[] {
   lines.push(`    headers: { "Content-Type": "application/json" },`);
   lines.push(`    body: "{}",`);
   lines.push(`  });`);
-  lines.push(`  const _scrml_mh_json = await _scrml_mh_res.json();`);
+  // §52.15.5 (S255) — a genuine error (network / non-200) must not overwrite cells
+  // from a failed response, and a null/empty body must not crash the keyed demux.
+  lines.push(`  if (!_scrml_mh_res.ok) return;`);
+  lines.push(`  const _scrml_mh_json = (await _scrml_mh_res.json()) || {};`);
+  // §52.15.5 — hydrate PER CELL, skipping any cell already SSR-seeded (a public
+  // cell keeps its first-paint value; the /__mountHydrate response may re-serve it,
+  // but re-setting is not needed and would clobber a seeded value with the mixed
+  // response when a sibling cell was gated). Gated cells are never SSR-seeded, so
+  // this only lands their (per-cell-authorized) payload — anon → absent → unhydrated.
   for (const name of varNames) {
-    lines.push(`  _scrml_reactive_set(${JSON.stringify(name)}, _scrml_mh_json[${JSON.stringify(name)}]);`);
+    lines.push(`  if (!_scrml_ssr_seeded(${JSON.stringify(name)})) _scrml_reactive_set(${JSON.stringify(name)}, _scrml_mh_json[${JSON.stringify(name)}]);`);
   }
   lines.push(`})();`);
   return lines;
