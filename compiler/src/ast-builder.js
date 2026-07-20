@@ -3923,11 +3923,35 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * new top-level statement (lift, function, fn, const, let, import, export,
    * type, pure, server), or EOF.
    */
-  /** Join token parts using newlines when tokens span different source lines, spaces otherwise. */
-  function joinWithNewlines(parts, partLines) {
+  /**
+   * Join token parts using newlines when tokens span different source lines,
+   * spaces otherwise.
+   *
+   * GITI-039: `partSpans` (optional) carries, per part, the source span of the
+   * token IF it was collected inside a markup region (angleDepth > 0), else
+   * `null`. When BOTH neighbouring parts are markup-region tokens AND their
+   * source spans are ADJACENT (`prev.end === cur.start`), they rejoin with NO
+   * separator — mirroring `parseLiftTag`'s span-gap text coalescing
+   * (ast-builder.js ~5115). This keeps literal markup TEXT verbatim
+   * (`a.txt` stays `a.txt`, not `a . txt`) BEFORE `parseExprWithMarkupValues`
+   * re-slices the markup out of this string. The span check is scoped to markup
+   * parts ONLY: a `null` span (pure-expression output, angleDepth === 0) falls
+   * through to the line-based separator, so pure-expression rejoin stays
+   * BYTE-IDENTICAL — downstream string-rewrite passes depend on the current
+   * spacing (expression-parser.ts:3003). Callers that never collect markup
+   * (collectBracedBody, collectLiftExpr) omit `partSpans` and are unaffected.
+   */
+  function joinWithNewlines(parts, partLines, partSpans) {
     if (parts.length === 0) return "";
     let result = parts[0];
     for (let i = 1; i < parts.length; i++) {
+      const prevSpan = partSpans ? partSpans[i - 1] : null;
+      const curSpan = partSpans ? partSpans[i] : null;
+      if (prevSpan && curSpan && prevSpan.end === curSpan.start) {
+        // Source-adjacent markup-region tokens: no separator (verbatim text).
+        result += parts[i];
+        continue;
+      }
       const sep = (partLines[i] > partLines[i - 1]) ? "\n" : " ";
       result += sep + parts[i];
     }
@@ -3943,6 +3967,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     const inCompoundBody = !!(opts && opts.compoundBody);
     const parts = [];
     const partLines = []; // parallel array: source line number for each part
+    // GITI-039: parallel array of source spans for markup-region parts (the
+    // span when angleDepth > 0 at push time, else `null`). joinWithNewlines
+    // uses span-adjacency to rejoin literal markup TEXT verbatim; a `null`
+    // (pure-expression) part keeps the current line-based spacing byte-identical.
+    const partSpans = [];
+    // GITI-039: push the per-part span (markup-region only) alongside each
+    // partLines entry — keeps parts/partLines/partSpans index-aligned.
+    const pushPartSpan = () => partSpans.push(angleDepth > 0 && lastTok && lastTok.span ? lastTok.span : null);
     const startTok = peek();
     let lastTok = startTok;
     let depth = 0;
@@ -4090,7 +4122,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
       // Statement boundary at depth 0
       if (depth === 0) {
-        if (tok.kind === "PUNCT" && tok.text === ";") {
+        // GITI-039 (Defect B): a `;` is a statement boundary ONLY outside markup.
+        // INSIDE a markup region (angleDepth > 0) a `;` is literal TEXT content
+        // (`<p>… semi;</p>`), NOT a statement terminator — breaking here truncated
+        // collection mid-markup so the element never closed, `parseExprWithMarkupValues`
+        // bailed, and the whole `${…}` fell to the acorn escape-hatch →
+        // E-CODEGEN-INVALID-LOGIC. Mirror the STMT_KEYWORD boundary below, which is
+        // likewise `angleDepth === 0`-guarded so keywords-as-markup-text don't break.
+        if (tok.kind === "PUNCT" && tok.text === ";" && angleDepth === 0) {
           lastTok = consume();
           break;
         }
@@ -4694,6 +4733,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         lastTok = consume();
         parts.push(replacement);
         partLines.push(lastTok.span?.line ?? 0);
+        pushPartSpan();
         continue;
       }
       // E-EQ-002: `== not` and `!= not` — use `is not` instead (§45)
@@ -4712,6 +4752,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           lastTok = consume(); // consume `not`
           parts.push(tok.text === "!=" ? "is not not" : "is not");
           partLines.push(lastTok.span?.line ?? 0);
+          pushPartSpan();
           continue;
         }
       }
@@ -4733,10 +4774,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         parts.push(lastTok.text);
       }
       partLines.push(lastTok.span?.line ?? 0);
+      pushPartSpan();
     }
 
     return {
-      expr: joinWithNewlines(parts, partLines),
+      expr: joinWithNewlines(parts, partLines, partSpans),
       span: parts.length > 0 ? spanOf(startTok, lastTok) : spanOf(startTok, startTok),
     };
   }
