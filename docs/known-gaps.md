@@ -16,8 +16,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 2 |
-| MED | 30 |
-| LOW | 23 |
+| MED | 31 |
+| LOW | 24 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -3008,3 +3008,9 @@ Arrow (`return (req) => { safeCallAsync(...) !{} }`) and const-bound anonymous-f
 - Gap 2 — make the plain-client-fn classifier transitive (`hasServerCallees`, `scheduling.ts:153-171` is non-transitive).
 - Gap 3 — include `scrml:` vendor imports in the cross-module seed (`codegen/index.ts:494` skips non-`.scrml`).
 GITI-037 = Gaps 1∩3. Owes: the interprocedural S4/S5 soundness extension + the effect-notation design (the surfaced `⟨async⟩` glyph is a placeholder).
+
+### g-tenant-channel-sse-per-subscriber-filter — the §14.8.10 tenant floor does NOT tenant-filter the §38.13 realtime `watches=` feed / SSE per subscriber — `NEW S274 (tenant-floor #118 residual); MED; open`
+The §14.8.10 V1-minimal tenant floor (#118, `9c406055`) redacts tenant rows at the compiler-emitted client-egress sinks it covers (server-fn return · SSR seed · the §14.8.9-shared sinks), fail-closed when `@currentUser.tenantId is not`. **NOT covered:** the §38.13 realtime change-feed (`<channel watches=table>`) publishes a per-table `__change` frame to ALL subscribers of the topic — a tenant-A row's Inserted/Updated delta would reach a tenant-B subscriber. §14.8.10 cross-amended §38.13.9 Phase-2(d) to NAME this obligation ("tenant-filter the `watches=` published frame per-subscriber") but the filter is unbuilt. **NOT a live leak today** — the §38.13 realtime runtime is itself Nominal/spec-ahead (no impl), so this is a land-WITH-the-realtime-impl obligation, not a present hole. Same shape for a future SSE `data:` per-subscriber tenant scope. Resolves when §38.13 realtime + the per-subscriber tenant filter land together. Authority: §14.8.10 (§38.13.9d cross-amendment) + the S273 tenant-floor #118 residual note. <!-- @gap id=g-tenant-channel-sse-per-subscriber-filter sev=MED status=open -->
+
+### g-ssr-auth-scoped-hardening-trio — 3 non-blocking S239 findings on the SSR auth-scoped omission (#120) — `NEW S274; LOW; open`
+Non-blocking hardening surfaced by the S239 pass on #120 (the security property itself is sound — all three do not affect the leak closure): **(1)** [altitude] `type-system.ts` recomputes the callable-cell gate (`_callableGated`) by hand instead of reusing emit-server's `serverLoadGateMode` — the classifier-split the shared `sql-lex` was built to eliminate, left un-shared for the auth axis (no live divergence — omission always keys off `serverLoadGateMode`; fix ≈ 2 lines: derive from it). **(2)** [correctness/low] `sql-lex.ts` `E'/e'` escape-string branch assumes Postgres; the default db is SQLite (no `E'…'` syntax) — an adversarial `code=E'${@x}'` could mis-classify a live interpolation. **(3)** [correctness/low] emit-sync hydrates a gated cell to `undefined` for anon (scrml absence is `not`/null; the mixed `/__mountHydrate` omits the key → `_scrml_mh_json[name]` is `undefined`). Address when the SSR area is next touched. <!-- @gap id=g-ssr-auth-scoped-hardening-trio sev=LOW status=open -->
