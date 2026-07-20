@@ -8383,6 +8383,152 @@ ceremony. It loses on soundness **and** idiomaticity at once. For a confidential
 compiler-owns-the-wiring language, soundness-by-construction and provability-from-the-natural-shape
 are the **same** axis, not a trade-off — both pull to one structural sink.
 
+#### 14.8.10 Server→client confidentiality — tenant-row isolation floor
+
+**Added:** 2026-07-20 (S273) — ratifies the tenant-scoping-floor design (DD
+`scrml-support/docs/deep-dives/tenant-floor-design-2026-07-19.md`; bryan RULED all forks
+S271). **Nominal / spec-ahead-of-implementation.** This subsection specifies the contract;
+the V1-minimal impl wave (the redact floor + the hard-fails, reusing the §14.8.9 sink — see
+"Implementation status" below) flips this banner and fires the codes.
+
+This is the **row-level twin of §14.8.9**. §14.8.9 strips protected **columns** at the
+compiler-owned client-egress sinks; this floor isolates tenant **rows** at the same sinks. It
+owns exactly the **isolation invariant** — *a row belonging to tenant A never reaches a request
+whose ambient tenant is B* — and nothing else. It does **not** own policy: which tenant a user
+may act as, which roles/grants exist, what each may do. Those stay app-owned server logic
+(§52.15.2 trusts `@currentUser.role` without re-deriving it — the same discipline).
+
+**The tenant key — consume, never derive (the invariant/policy firewall).** The floor
+CONSUMES an app-established session scalar `@currentUser.tenantId` and NEVER computes one. The
+app's login / tenant-switch code (policy) resolves the active tenant from whatever grant logic
+it likes and **pins** it: `session.set("tenantId", t)` (§20.5.1). From that moment the ambient
+tenant is a plain server-resolved scalar, exactly like `role`. The floor SHALL NOT read
+grant/role tables to derive a tenant — that would require policy knowledge, force a choice among
+multiple grants (a policy decision), and query a tenant-scoped table to bootstrap tenant-scoping
+(circular). `@currentUser.tenantId` is server-resolved and **never client-supplied**
+(E-REACTIVE-003, §52.15.1) → unspoofable, inheriting `role`'s integrity. **Corollary:** the
+identity/grant substrate (`users` / `user_roles`) is NOT tenant-scoped — you would need the
+tenant to read the table that tells you the tenant (infinite regress). The tenant-scoped set is
+the DOMAIN tables (assets, orders, work-orders), never the substrate the tenant is resolved from.
+
+**Declaration — the `tenant_id` column convention (fail-closed at the declaration layer).** A
+table whose `<schema>` carries a `tenant_id` column IS tenant-scoped; the column's **presence
+is the declaration** (detection via the FROM-tables of `extractSelectProjection()`, the same
+extractor §14.8.9 uses). There is no per-table opt-in attribute: a forgettable declaration is
+isomorphic to the forgettable `WHERE tenant_id=` predicate the floor exists to eliminate —
+forget to annotate a new `invoices` table and its reads silently leak. The convention encodes
+the ratified security property "a uniform `tenant_id` on every scoped table is itself a security
+property." The `tenant`-family vocabulary does NOT collide with §23.5 `capabilities=` (foreign-code
+host caps — `network` / `fs` / `spawn` / `db`, an unrelated sense of "capability").
+
+**Enforcement — HYBRID (redaction guarantees, injection optimizes).** Rows are not columns, and
+that asymmetry drives the mechanism split:
+
+- **Redaction is the guaranteeing FLOOR.** Every row read against a tenant-scoped table is tagged
+  with its source `tenant_id` at query-lowering (the §14.8.9 `_scrml_protect_tag` primitive, one
+  predicate deeper) and, at the client-egress sink, every row whose `tenant_id` ≠ the ambient
+  `@currentUser.tenantId` is dropped (`_scrml_protect_redact`, extended with the row-level
+  predicate). This **inherits §14.8.9's entire soundness argument verbatim** — sound by
+  construction, no query rewriting, no value-flow-completeness obligation — and reuses the
+  shipped egress paths (server-fn response, SSR `/__serverLoad`, channel `broadcast()`, SSE
+  `data:`). It fires `I-TENANT-STRIP` (the redaction is never silent).
+- **Injection is the optimization + the mandatory mechanism for what redaction can't cover.** For
+  a statically-rewritable row read, the compiler MAY inject `AND tenant_id = ${@currentUser.tenantId}`
+  into the WHERE (rows never materialize off the DB; indexes filter) — a **v1.next** optimization
+  gated on a SQL-WHERE-parser (it must parenthesize the existing WHERE — the `OR`-precedence
+  hazard makes every parser bug a silent leak, so it is deliberately deferred behind the redact
+  floor). Injection is **mandatory** (inject-or-hard-fail) exactly where redaction is unsound:
+  - **Aggregate / scalar** over a tenant-scoped table WITH an output tenant discriminator
+    (`GROUP BY tenant_id`) → redaction strips non-matching groups. WITHOUT a discriminator (a bare
+    `COUNT(*)` folds every tenant into one scalar — no row to key on) → inject the constraint, and
+    if un-injectable, **hard-fail `E-TENANT-AGG`** (redaction is UNSOUND here).
+  - **Write** (INSERT / UPDATE / DELETE) against a tenant-scoped table → **inject-or-hard-fail
+    `E-TENANT-WRITE`.** There is no egress sink for a write; a committed cross-tenant write is
+    durable before any redaction could run, so it must fail closed at compile. An INSERT gets
+    `tenant_id = @currentUser.tenantId` injected into its column-set; an UPDATE/DELETE without an
+    injectable tenant constraint hard-fails.
+- **Raw / foreign egress** (a `_{}` foreign-code block §23, a manual `Response` / `handle()` body
+  §40, an `asIs`-typed value §14.1.1) carrying a tenant-scoped table's rows → **hard-fail
+  `E-TENANT-RAW-EGRESS`** — the compiler cannot tag/redact an un-analyzable egress. The
+  confidentiality sibling of `E-PROTECT-004`, in the row-isolation direction. A `.acrossTenants()`
+  on the query suppresses it (explicit cross-tenant intent).
+- **Fail-closed when the tenant scalar is absent.** `@currentUser.tenantId is not` (anonymous /
+  unpinned) → the redact predicate matches **zero rows**; an unpinned request sees nothing —
+  fail-closed by construction, identical to §52.15.3's shipped anonymous-`NULL`-matches-zero shape.
+
+**Declassification — `.acrossTenants()` (the sole loud opt-out).** A greppable `?{…}.acrossTenants()`
+method suppresses tenant-scoping for one query, for legitimate cross-tenant reads (platform-admin
+dashboards, cross-tenant reporting). It is the **only** way to emit an unscoped read against a
+tenant-scoped table — the unscoped path is unrepresentable without it — and it fires
+`I-TENANT-ACROSS` so an audit can grep every cross-tenant read in the codebase. It mirrors
+`reveal()` (§14.8.9): the sole, checked, greppable admit path; the floor checks the marker, never
+trusts an annotation.
+
+**Composition — the fourth confidentiality axis.**
+- **§52.15 stacking axes** — tenant-scope is a **fourth, coarser row-selection axis**:
+  route-admission (§52.15.2) ⟂ **tenant-scope (§14.8.10)** ⟂ per-user row-selection (§52.15.3) ⟂
+  column-redaction (§14.8.9). They STACK; none substitutes — a per-user-scoped payload can still
+  leak a wrong tenant's rows if the request's tenant is unconstrained, and a tenant-scoped payload
+  can still leak another user's rows within the tenant.
+- **§52 authority** — a `authority="server" table=` Tier-1 cell's compiler-generated `SELECT *`
+  initial load (§52.3) is the **easiest** tag site (fully compiler-controlled, no author SQL);
+  the floor and §52's generated loads reinforce each other.
+- **§14.8.9 protect** — orthogonal (columns vs rows); both reuse `extractSelectProjection` and
+  compose at the same lowering choke and the same egress sink.
+- **§38.13 `watches=`** — the realtime feed re-SELECTs the changed row and publishes it, and the
+  published frame already runs §14.8.9 protect-redaction (§38.13.9 Phase-2 (d)). The tenant filter
+  SHALL slot in at the **same sink, per-subscriber** — a subscriber receives only its own tenant's
+  row changes; otherwise the realtime feed reopens the cross-tenant leak the read floor closed.
+
+**Soundness scope (normative bound — the prose SHALL NOT over-claim).** The guarantee is
+**complete for reads of statically-declared tenant-scoped tables whose row `tenant_id` origin is
+resolvable, by origin.** It does **NOT** cover: covert channels (timing, row presence/absence);
+derived/implicit flows (a value computed *from* tenant rows but of independent identity);
+cross-database tenant joins (the predicate form is single-DB). An unresolvable dynamic read
+degrades to redact-at-sink (never accept-unknown); aggregate-without-discriminator, writes, and
+raw egress fail closed at compile.
+
+**Anti-pattern (named) — auto-deriving the tenant.** The Trojan-horse design: have the floor join
+`user_roles` at query time to compute the tenant. It needs the grant schema (policy), must pick
+among possibly-many grants (policy), and queries a tenant-scoped table to bootstrap tenant-scoping
+(circular). The floor SHALL consume a pinned scalar, never compute one — this single prohibition
+is the entire invariant/policy firewall.
+
+**Diagnostics** (named now; emitted when the floor build lands, per the §14.8.9 / §38.13.8 / §60 /
+§61 named-codes-land-with-impl precedent — Rule 4):
+- **`E-TENANT-AGG`** (Error) — an aggregate/scalar over a tenant-scoped table with no output tenant
+  discriminator and no injectable tenant constraint (redaction has no row to key on).
+- **`E-TENANT-WRITE`** (Error) — an INSERT/UPDATE/DELETE against a tenant-scoped table with no
+  injectable tenant value (no egress sink can redact a durable write; it must fail closed).
+- **`E-TENANT-RAW-EGRESS`** (Error) — a tenant-scoped table's rows reach a compiler-unanalyzable
+  egress (raw `_{}` / manual `Response` / `asIs`); the row-isolation sibling of `E-PROTECT-004`.
+  Suppressed by an explicit `.acrossTenants()`.
+- **`I-TENANT-STRIP`** (Info) — the egress sink dropped one or more non-matching-tenant rows (the
+  redaction is never silent). Also fires on the wholesale-strip fallback of an unresolvable dynamic
+  read. Mirrors `I-PROTECT-STRIP-001`.
+- **`I-TENANT-ACROSS`** (Info) — a `.acrossTenants()` opt-out emitted an unscoped read against a
+  tenant-scoped table (the cross-tenant audit surface).
+
+**Implementation status (Nominal — V1-minimal = the redact floor + the hard-fails).**
+- **V1-minimal (the freeze scope — a second deliberate security-feature exception, alongside CSS
+  Wave-1):** the REDACT floor + the hard-fails — tag-then-strip at the shipped §14.8.9 egress sink
+  (reads), the `E-TENANT-AGG` / `E-TENANT-WRITE` / `E-TENANT-RAW-EGRESS` hard-fails, `.acrossTenants()`,
+  and the fail-closed-when-unpinned zero-row behavior. Reuses the shipped §14.8.9 machinery;
+  requires **NO** new SQL-WHERE-parser. Robustness note: the "DB-inside-the-TCB → redact is
+  sufficient" premise holds for the LAN SQLite target; injection coverage grows as shared/cloud
+  Postgres arrives.
+- **v1.next (the INJECT optimization):** predicate injection (`WHERE tenant_id=`) — which needs a
+  SQL-WHERE-parser (the `OR`-precedence hazard, deferred behind the redact floor) — for
+  defense-in-depth (rows never materialize off the DB), aggregate-over-tenant injection, and scale
+  (DB-side indexed filtering vs full-table-then-strip).
+
+**Cross-references:** §14.8.9 (the column twin — shares the tag/redact sink + the extractor);
+§52.15 (the per-user row-scope precedent + the stacking axes + `@currentUser`); §20.5.1
+(`session.set("tenantId", …)` — the tenant-key establishment); §38.13.9 (the `watches=`
+published-frame sink — per-subscriber tenant filter); §23.5 (`capabilities=` — a different sense
+of "capability"; no collision). Authority: DD `scrml-support/docs/deep-dives/tenant-floor-design-2026-07-19.md`
+(bryan RULED all forks S271) + design-insight (2026-07-20).
+
 ### 14.9 The `snippet` Type Kind
 
 A `snippet` is a deferred, parameterisable markup fragment. It is callable — it produces markup when invoked. `snippet` is a first-class type kind in the scrml type system.
@@ -14722,6 +14868,14 @@ token to a value it already knows and defeat the double-submit / synchronizer ch
 (mass-assignment defense). `userId` / `role` and adopter preference keys remain
 writable (they are the login primitive).
 
+**Tenant-key establishment (§14.8.10).** `session.set("tenantId", t)` establishes the ambient
+tenant the §14.8.10 tenant-row isolation floor reads via `@currentUser.tenantId`. It is a
+**preference-key write** (it does not touch `userId`), so a tenant-switch updates the record in
+place — no session-id rotation, no logout of an in-flight request. Set it after login: an
+identity-establishing write rebuilds the record from THIS request's changes alone (role-bleed
+defense), so include `tenantId` in the login write, or set it in the same request that mints the
+session.
+
 **Worked example — login (establishes a session):**
 
 ```scrml
@@ -20790,7 +20944,7 @@ The v1 capture substrate is **Postgres LISTEN/NOTIFY**, chosen (DD 2026-07-06) b
 
 **Phase 1 (`52c5afec`)** — the front-end: `<channel watches=>` + `key=` parse (ast/typer); `RowChange` synthesis from `<schema>` (`channel-watches.ts`); `<onchange>` structural element + arm dispatch (reuse §18.0.1/§51.0.B.1); the six `E-/W-CHANNEL-WATCHES-*` diagnostics + their §34 rows.
 
-**Phase 2 (S245)** — the runtime, in `emit-channel.ts`/`emit-server.ts`: (a) a server-boot **trigger install** — an idempotent `CREATE OR REPLACE FUNCTION … pg_notify(pk)` + `DROP TRIGGER IF EXISTS` / `CREATE TRIGGER … AFTER INSERT OR UPDATE OR DELETE` per feed, applied via `_scrml_sql.unsafe(...)` (the re-install each boot IS the drift-reconcile); (b) a dedicated per-instance **LISTEN bridge** using the compiler-bundled `pg` package (Bun.SQL has no LISTEN API) that, on each `NOTIFY`, re-SELECTs the row by PK and publishes the `{ __type:"__change", op, row|key }` frame via `_scrml_active_server.publish` (reusing the `collectDbScopes` connection record); (c) the client `__change`→`<onchange>`-arm dispatch in the §38.7 client IIFE; (d) §14.8.9 protect-egress redaction of the published row (tag-then-redact, mirroring the SSR `/__serverLoad` sink). Min Postgres 9.4 (`json_build_object`); the `LISTEN` connection must be session-mode (PgBouncer transaction pooling breaks LISTEN); multi-instance is free (each instance holds its own `LISTEN`). The `durable` (logical-replication) tier remains out of v1.
+**Phase 2 (S245)** — the runtime, in `emit-channel.ts`/`emit-server.ts`: (a) a server-boot **trigger install** — an idempotent `CREATE OR REPLACE FUNCTION … pg_notify(pk)` + `DROP TRIGGER IF EXISTS` / `CREATE TRIGGER … AFTER INSERT OR UPDATE OR DELETE` per feed, applied via `_scrml_sql.unsafe(...)` (the re-install each boot IS the drift-reconcile); (b) a dedicated per-instance **LISTEN bridge** using the compiler-bundled `pg` package (Bun.SQL has no LISTEN API) that, on each `NOTIFY`, re-SELECTs the row by PK and publishes the `{ __type:"__change", op, row|key }` frame via `_scrml_active_server.publish` (reusing the `collectDbScopes` connection record); (c) the client `__change`→`<onchange>`-arm dispatch in the §38.7 client IIFE; (d) §14.8.9 protect-egress redaction of the published row (tag-then-redact, mirroring the SSR `/__serverLoad` sink) — and, per §14.8.10 (Nominal), the tenant filter slots in at this SAME sink **per-subscriber**, so a subscriber receives only its own tenant's row changes (else the read floor's guarantee has a realtime hole). Min Postgres 9.4 (`json_build_object`); the `LISTEN` connection must be session-mode (PgBouncer transaction pooling breaks LISTEN); multi-instance is free (each instance holds its own `LISTEN`). The `durable` (logical-replication) tier remains out of v1.
 
 **Follow-ups (not v1-blocking):** (i) **§52 composition** — `_rowChangeSynth` is synthesized only from `<schema>` blocks (not §52 `authority="server" table=` decls), and the §52 authority form has separate front-end gaps, so the worked example above requires the watched table to be declared via a `<schema>` block today; (ii) **standalone-build `pg` bundling** — `scrml build`'s deploy output does not yet bundle/declare `pg` (dev-server resolves it); (iii) **live-Postgres end-to-end verification** — the test suite covers emitted-artifact shape + a mock-SQL bridge; a real commit→NOTIFY→client-patch path needs human verification against a live Postgres.
 
@@ -31337,6 +31491,10 @@ The Tier 2 example has three independent singleton cells — the right reach whe
 - `@currentUser.id : string | not` — the authenticated user id; `not` when anonymous.
 - `@currentUser.role : string | not` — the authenticated role; `not` when anonymous/unset.
 - `@currentUser.isAuth : bool` — whether the request is authenticated.
+- `@currentUser.tenantId : string | not` — the ambient tenant key; `not` when unpinned. Server-resolved
+  from the session `tenantId` scalar (§20.5.1) the app pins via `session.set("tenantId", …)`; the §14.8.10
+  tenant-row isolation floor CONSUMES it (consume-not-derive) and never computes one. Never client-supplied
+  (E-REACTIVE-003) → unspoofable, inheriting `role`'s integrity.
 
 Access is V5-strict (`@currentUser`); it is exempt from `E-STATE-UNDECLARED`. **Shadow rule:** `@currentUser` is ambient only when the file declares NO user `<currentUser>` reactive cell — a user-declared cell WINS (mirrors the `@session` projection precedent, §20.5). It is **server-context this revision** (the route gate + the row-scope query); a client-side `@currentUser` for UI gating is deferred to the per-role content-gating arc (GITI-027B).
 
@@ -31347,7 +31505,7 @@ A `/__serverLoad/<var>` handler SHALL enforce the enclosing `<page>` / `<program
 A server-authority cell scopes its rows to the request by promoting to a Tier-2 Pattern-C `?{}` query that reaches `@currentUser`: `<orders server> = ?{ select * from orders where user_id = ${@currentUser.id} }.all()`. For an anonymous request `@currentUser.id is not` → SQL `NULL` → `WHERE user_id = NULL` matches **zero rows** — **fail-closed by construction**. There is no `where=`/`scope=` keyword; the existing `?{}` SQL surface is the home.
 
 #### 52.15.4 The three stacking axes
-Route-admission (§52.15.2 — whole route → 401) ⟂ row-selection (§52.15.3 — per row → `WHERE`) ⟂ column-redaction (§14.8.9 protect-floor — per column → strip protected-origin). They STACK; none substitutes: a column-redacted payload can still leak every user's rows; a row-scoped payload can still leak a protected column. The compiler applies all three at the egress; §14.8.9 is reused unchanged.
+Route-admission (§52.15.2 — whole route → 401) ⟂ row-selection (§52.15.3 — per row → `WHERE`) ⟂ column-redaction (§14.8.9 protect-floor — per column → strip protected-origin). They STACK; none substitutes: a column-redacted payload can still leak every user's rows; a row-scoped payload can still leak a protected column. The compiler applies all three at the egress; §14.8.9 is reused unchanged. §14.8.10 tenant-row isolation (Nominal) adds a **fourth, coarser row-selection axis** (whole-tenant): route-admission ⟂ tenant-scope ⟂ per-user row-selection ⟂ column-redaction — a per-user-scoped payload can still leak a wrong tenant's rows, so it too stacks and substitutes for none.
 
 #### 52.15.5 SSR sequencing (`W-SSR-PRERENDER-UNSCOPED`)
 Per §52.8, a server-authority cell's SSR pre-render runs the seed query under the request. A per-user / auth-scoped cell whose pre-render is UNSCOPED (Tier-1 `SELECT *`, or a Pattern-C query with no `${@currentUser.…}` filter) would bake one query result into every viewer's first-paint HTML — a cross-user leak — and fires `W-SSR-PRERENDER-UNSCOPED` (per-var). Public cells do not fire.
