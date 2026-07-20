@@ -4,7 +4,10 @@
 // Tests: multi-step state, shared state across steps, back/forward nav, per-step validation,
 //        progress indicator, checkboxes, radio buttons, conditional rendering, reactive arrays
 
-<program>
+<program db="./registrations.db">
+<schema>
+    ?{`CREATE TABLE registrations (id INTEGER PRIMARY KEY, first_name TEXT, last_name TEXT, email TEXT, plan TEXT, email_updates INTEGER, sms_alerts INTEGER, newsletter INTEGER)`}
+</schema>
 
 ${
     // --- Step tracking ---

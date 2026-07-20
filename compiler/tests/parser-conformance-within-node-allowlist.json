@@ -1475,7 +1475,7 @@
     "FIELD-SHAPE": 63,
     "KIND-NAME": 17,
     "MISSING-FIELD": 242,
-    "SPAN-COORD": 273
+    "SPAN-COORD": 275
   },
   "samples/compilation-tests/gauntlet-r10-rust-orders.scrml": {
     "COUNT-LENGTH": 10,
@@ -5539,8 +5539,8 @@
   },
   "samples/compilation-tests/server-005-mixed.scrml": {
     "EXTRA-FIELD": 4,
-    "MISSING-FIELD": 9,
-    "SPAN-COORD": 2
+    "MISSING-FIELD": 10,
+    "SPAN-COORD": 4
   },
   "samples/compilation-tests/server-006-state-with-tables.scrml": {
     "EXTRA-FIELD": 2,
@@ -5558,7 +5558,7 @@
     "EXTRA-FIELD": 3,
     "FIELD-SHAPE": 1,
     "MISSING-FIELD": 9,
-    "SPAN-COORD": 12
+    "SPAN-COORD": 14
   },
   "samples/compilation-tests/server-009-server-fn.scrml": {
     "EXTRA-FIELD": 4,
@@ -6136,7 +6136,7 @@
     "EXTRA-FIELD": 39,
     "FIELD-SHAPE": 33,
     "KIND-NAME": 16,
-    "MISSING-FIELD": 132,
+    "MISSING-FIELD": 133,
     "SPAN-COORD": 103
   },
   "samples/gauntlet-r14/odin-gamelike.scrml": {
