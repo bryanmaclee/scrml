@@ -216,8 +216,10 @@ describe("collectExpr BLOCK_REF statement boundary", () => {
     expect(compNode).toBeDefined();
     expect(compNode.name).toBe("Card");
     // The component raw expression should include content AFTER the BLOCK_REF
-    // (i.e., it was not truncated at the ?{} boundary)
-    expect(compNode.raw).toContain("< / div >");
+    // (i.e., it was not truncated at the ?{} boundary). Spacing-agnostic: after
+    // GITI-039 markup regions rejoin span-verbatim, so the closing tag may be
+    // `</div>` (nested, angleDepth>0) or `< / div >` (root, angleDepth 0).
+    expect(compNode.raw).toMatch(/<\s*\/\s*div\s*>/);
   });
 
   test("BLOCK_REF inside nested tags preserved in expression", () => {
@@ -232,9 +234,11 @@ describe("collectExpr BLOCK_REF statement boundary", () => {
     const logicNode = ast.nodes[0];
     const compNode = logicNode.body.find(n => n.kind === "component-def");
     expect(compNode).toBeDefined();
-    // The expression should include closing tags after the BLOCK_REF
-    expect(compNode.raw).toContain("< / span >");
-    expect(compNode.raw).toContain("< / div >");
+    // The expression should include closing tags after the BLOCK_REF.
+    // Spacing-agnostic (GITI-039): the nested `</span>` rejoins verbatim
+    // (angleDepth>0) while the root `</div>` stays spaced (angleDepth 0).
+    expect(compNode.raw).toMatch(/<\s*\/\s*span\s*>/);
+    expect(compNode.raw).toMatch(/<\s*\/\s*div\s*>/);
   });
 
   test("multiple BLOCK_REFs inside tag body all preserved", () => {
@@ -251,8 +255,8 @@ describe("collectExpr BLOCK_REF statement boundary", () => {
     const logicNode = ast.nodes[0];
     const compNode = logicNode.body.find(n => n.kind === "component-def");
     expect(compNode).toBeDefined();
-    // Expression should reach all the way to </div>
-    expect(compNode.raw).toContain("< / div >");
+    // Expression should reach all the way to </div> (spacing-agnostic, GITI-039).
+    expect(compNode.raw).toMatch(/<\s*\/\s*div\s*>/);
   });
 
   test("BLOCK_REF after closing tag breaks expression (SQL is separate defChild)", () => {
@@ -270,8 +274,11 @@ describe("collectExpr BLOCK_REF statement boundary", () => {
     const compNode = logicNode.body.find(n => n.kind === "component-def");
     expect(compNode).toBeDefined();
     expect(compNode.name).toBe("Card");
-    // The raw expression ends at </div> - SQL is NOT in the expression
-    expect(compNode.raw).toBe("< div > content < / div >");
+    // The raw expression ends at </div> - SQL is NOT in the expression.
+    // GITI-039: the markup region rejoins span-verbatim, so the opening tag +
+    // text are tight (`<div>content`); the ROOT close tag stays spaced
+    // (`< / div >`) because its `<` drops angleDepth to 0 before the rejoin.
+    expect(compNode.raw).toBe("<div>content < / div >");
     // SQL is consumed as a defChild of the component-def
     expect(compNode.defChildren).toBeDefined();
     expect(compNode.defChildren.length).toBeGreaterThanOrEqual(1);

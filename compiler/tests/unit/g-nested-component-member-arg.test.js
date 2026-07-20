@@ -40,6 +40,18 @@ function runCEOn(source) {
   return runCEFile(tabOut);
 }
 
+// GITI-039: the component-def `.raw` (and `shorthandBodyRaw`) is the PRE-
+// substitution template source, which legitimately contains the un-substituted
+// member arg (`<Badge s=row.name/>`). Before GITI-039 the mangle spaced it to
+// `row . name`, so a whole-AST `not.toContain("row.name")` accidentally passed;
+// now the raw is verbatim. The S200/S201 guard is about the EXPANDED USAGE
+// nodes (where a stranded/dropped member would manifest), NOT the raw template —
+// so exclude the raw template fields from the "no unsubstituted leak" check.
+function stringifyWithoutRawTemplates(ast) {
+  return JSON.stringify(ast, (key, value) =>
+    (key === "raw" || key === "shorthandBodyRaw") ? undefined : value);
+}
+
 describe("g-nested-component-member-arg-misparse (S200)", () => {
   test("single member-access arg to a nested component — no E-COMPONENT-011, member tail preserved + base substituted", () => {
     const source = `<program>
@@ -53,7 +65,7 @@ describe("g-nested-component-member-arg-misparse (S200)", () => {
     expect(e011).toHaveLength(0);
     // S201: the member-access BASE prop `row` is substituted to the caller value
     // `@val`; the `.name` TAIL is preserved (not stranded, not dropped).
-    const j = JSON.stringify(ast);
+    const j = stringifyWithoutRawTemplates(ast);
     expect(j).toContain("@val.name");
     expect(j).not.toContain("row.name");
   });
@@ -68,7 +80,7 @@ describe("g-nested-component-member-arg-misparse (S200)", () => {
     const e011 = errors.filter(e => e.code === "E-COMPONENT-011");
     expect(e011).toHaveLength(0);
     // S201: base `row` -> `@val`; the full `.inner.name` chain tail survives.
-    const j = JSON.stringify(ast);
+    const j = stringifyWithoutRawTemplates(ast);
     expect(j).toContain("@val.inner.name");
     expect(j).not.toContain("row.inner.name");
   });
@@ -87,7 +99,7 @@ describe("g-nested-component-member-arg-misparse (S200)", () => {
     const e011 = errors.filter(e => e.code === "E-COMPONENT-011");
     expect(e011).toHaveLength(0);
     // member NOT dropped + base substituted — `@row.status` (not bare `load` / `load.status`).
-    const j = JSON.stringify(ast);
+    const j = stringifyWithoutRawTemplates(ast);
     expect(j).toContain("@row.status");
     expect(j).not.toContain("load.status");
   });
