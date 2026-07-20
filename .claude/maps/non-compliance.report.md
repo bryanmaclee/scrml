@@ -1,74 +1,78 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-07-18T08:36:53-06:00
-# scan mode: TARGETED_REFRESH (S265 CSS deep-verify + watermark advance c779e606 -> 99ae45ca); prior incremental base 0a79d838 -> c779e606; full scan base fbb4d9fd -> f079d0a9
+# generated: 2026-07-19T21:52:34-06:00
+# scan mode: TARGETED_REFRESH (S266-S271 catch-up — closes the entire unmapped gap from the 99ae45ca/S265-wrap watermark to df2ac831 in one pass); prior incremental base 99ae45ca; full scan base fbb4d9fd -> f079d0a9
 
-## This pass (targeted CSS/§65/§25/codegen refresh)
+## This pass (S266-S271 catch-up: session-establishment, writer-ownership, colorless-async, GITI-038/039)
 
-Scope: advance the map watermark to the S265 wrap HEAD 99ae45ca and DEEP-VERIFY the two S265
-bryan-lane CSS landings (#95 CSS Wave-1 emission §65, #98 §25 CSS-var bridge fix) against the actual
-source, because a concurrent-wrap collision had resolved the 6 nav maps to Peter's #101
-routing-level versions and left the stamp at c779e606. Only the maps were written; compiler/src was
-NOT touched (a concurrent fix agent owns it on a separate branch/worktree).
+Scope: advance the map watermark from 99ae45ca to df2ac831, re-verifying against source the full
+feature surface that landed across S266-S271 (six commits — `1e63bbb1`, `510cef8d`, `8931fd59`,
+`d8c814d5`, `1c577da5`, `9c950dfe`, `72ba19d6`, `df2ac831`; two recovery/dogfood wraps,
+`8fdab116`/`204b1897`, carried no compiler-source change per hand-off.md). Content maps
+(structure/dependencies/schema/error/domain/auth/test/primary) rewritten and re-stamped
+`df2ac831`. **config.map.md / build.map.md / infra.map.md intentionally LEFT at their prior
+stamps** — none of this window's changed files touch env vars, config-file shapes, CLI flags, or
+CI/infra; carrying an honest older stamp over a false "verified at df2ac831" (same discipline the
+S265-pass non-compliance report applied to config/auth/infra).
 
-### RESOLVED this pass — collision-staleness in the map set
-- **Stamp drift (8 maps):** structure / dependencies / schema / config[*] / build / error / test /
-  domain / primary all carried `commit: c779e606`. The 7 CSS-bearing maps (structure, dependencies,
-  schema, build, error, test, domain) + primary are now re-stamped `99ae45ca` @ 2026-07-18.
-  ([*] config/auth/infra intentionally LEFT at `f079d0a9`/S264 — they carry no CSS content and were
-  NOT re-verified this pass; an honest older stamp is preferable to a false "verified at 99ae45ca".)
-- **Deep-verified (were routing-level only under Peter's #101):** `codegen/emit-theme-reset.ts`
-  (9 exports, read in full), the §25 bridge fix in `codegen/collect.ts` + `codegen/emit-reactive-wiring.ts:882`,
-  the §34 catalog row `E-THEME-TOKEN-UNKNOWN` (SPEC.md:18148 + §65 banner SPEC.md:111-row), and the
-  `generateCss` (emit-css.ts:382 → index.ts:1146) CSS pipeline stage. Content confirmed accurate;
-  dependencies/schema/primary gained the #98 bridge-fix codegen specifics (dropped
-  `isScoped`/`scoped`/`_constructorScoped`; `document.documentElement` target).
-- Between c779e606 and 99ae45ca, ONLY docs changed (changelog/known-gaps/hand-off/delta-log/
-  master-list + 2 handOffs continuity docs) — verified via `git diff --name-only c779e606..99ae45ca`
-  over `compiler/src`, `compiler/tests`, `conformance/` (empty). So no source-derived map claim was
-  invalidated by the collision beyond the stamp itself.
+### NEW non-compliant item this window — stray root-level `progress.md`
 
-### New non-compliant docs this window: 0
-`git diff --diff-filter=A --name-only 0a79d838..99ae45ca -- '*.md'` filtered against
-`docs/changes/|handOffs/|spa-lists/|archive/` returns NOTHING. Every new `.md` this window is a
-correctly-parked dispatch-archive record (`docs/changes/css-wave1-emission-2026-07-16/**` incl. a
-`repros/` set, `docs/changes/component-css-var-scrml-el-fix-2026-07-17/progress.md`), a `handOffs/`
-hand-off / incoming-read, or `spa-lists/` bookkeeping — all out-of-scope per the scope principle.
+**File:** `/home/bryan-maclee/scrmlMaster/scrml/progress.md`
+**Reason:** location-heuristic + content-heuristic (WIP scratch bookkeeping outside its
+designated home) + currency (describes work that is now fully LANDED elsewhere).
+**Detail:** Added in commit `510cef8d` ("harden(§20.5): session pass-2"), this file is a
+`WIP(i29e-pass2): start at .../worktrees/agent-...` crash-recovery scratch note (per
+CLAUDE.md's "background/dispatched agents commit a progress.md as a crash-recovery anchor"
+convention) tracking the §20.5.1 B4b/B5 session-secure + reserved-key work IN PROGRESS. That
+work landed in the SAME commit that added this file — the file was never cleaned up /
+archived post-land. It sits at repo ROOT, not in `scratch/` (the designated ad-hoc-script
+home) or `docs/changes/i29e-session-pass2-b4b5-2026-07-18/` (the correctly-parked dispatch
+archive for this exact work, which DOES have its own BRIEF.md but no progress.md sibling — this
+file is the orphaned twin). A dev agent grepping the repo root for current state could mistake
+its stale "start at..." framing for in-flight work; it is not — SPEC §20.5.1, the §34 catalog
+rows, and docs/changelog.md all mark this LANDED.
+**Suggested disposition:** delete (superseded by the landed commit + the SPEC + the
+docs/changes/i29e-session-pass2-b4b5-2026-07-18/BRIEF.md dispatch record), or if crash-recovery
+value is still wanted, move to `docs/changes/i29e-session-pass2-b4b5-2026-07-18/progress.md`
+(its correct archive slot, matching every sibling dispatch dir's convention).
 
-## Source-side observations (for the concurrent fix agent — NOT a doc-compliance item, do not action from the map lane)
+### RESOLVED this pass — map-set self-audit items carried from the S265-pass report
 
-- **`compiler/src/codegen/emit-theme-reset.ts:189-197` — stale in-source comment.** The docstring on
-  `themeVariantAttr` states "the runtime reflection is a DEFERRED follow-on." That is stale: the
-  §65.6 runtime theme-switch reflection LANDED in round-4 (`emitThemeSwitchReflection`,
-  `emit-client.ts:1337`, wired at `:1994`), is asserted LANDED by SPEC §34 (SPEC.md:18148 area) +
-  the §65 banner + `hand-off.md` (tag `#runtime-theme-switch-works`, "re-verified BY EXECUTION").
-  A dev agent reading only that comment would wrongly believe theme-switching is unimplemented. The
-  maps correctly record it as LANDED; this is a code-comment fix for whoever owns compiler/src.
-- **`emit-theme-reset.ts` is the EMISSION half only** — the §65.2 conflict-CHECKER stays in
-  `css-conflict-check.ts` (confirmed; maps reflect this). No drift, noted for orientation.
+- **Test counts.** The S265-pass report flagged test.map.md/primary.map.md as undercounting HEAD
+  by ~8 (a pre-existing methodology drift, not a regression). This pass RE-COUNTED directly via
+  `git ls-files` at df2ac831 (unit 821, integration 173, conformance[compiler/tests] 120, browser
+  68, total 1221) and cross-verified against the window's actual added-file list (13 new test
+  files) — the counts now in test.map.md/structure.map.md/primary.map.md are exact, not
+  carried-forward estimates. Resolved.
+- **§34 diagnostic count.** The methodology-fork (776-vs-758 depending on extraction range) is
+  STILL UNRESOLVED — this pass did not attempt to reconcile it, only confirmed the +4 DELTA via a
+  `comm -13` set-diff of every `^| [EWI]-` catalog-row first-cell between the 99ae45ca and
+  df2ac831 SPEC.md (see error.map.md). The underlying baseline-count audit remains owed at the
+  next FULL_COLD_START, as previously flagged.
 
-## Map-set self-audit (drift found in maps NOT rewritten this pass — deferred, flagged for the PA)
+### Carried-forward, UNCHANGED this window — native-parser/ GITI-038/039 parity (flagged, not confirmed drift)
 
-- **Test counts undercount HEAD (test.map.md + primary.map.md Size line).** `git ls-files` at HEAD:
-  unit 813 (map says 807), integration 171 (170), conformance 118 (117), total 1208 (1200); D3
-  `conformance/cases/` top-level dirs 51 (map narrative says 49). The tree did NOT change in this
-  window, so this is PRE-EXISTING methodology drift, not a S265 regression. Left as-is (out of the
-  CSS remit + methodology not cleanly re-derivable this pass); primary.map.md's Size line + Map Index
-  now carry an explicit "undercounts HEAD by ~8" caveat pointing here. Reconcile at a full
-  test.map.md refresh.
-- **error.map.md §34 count (776) is "prior map + confirmed delta", NOT independently re-derived.** The
-  map's own caveat (an independent first-cell extraction returns 758) remains unresolved since ~S255.
-  The +1 (`E-THEME-TOKEN-UNKNOWN`) IS confirmed from source this pass; the 775 baseline is not. Carry
-  the caveat; a count-methodology audit is due at the next FULL_COLD_START.
-- **config.map.md / auth.map.md / infra.map.md stamped `f079d0a9` (S264).** Not non-compliant — their
-  surfaces (env vars, scrml:auth stdlib, CI/infra) had no S265 CSS touch — but they lag two watermarks
-  and were not re-verified. Re-verify on the next full pass.
+**Files:** `compiler/native-parser/*` (37 paired .js/.scrml stages)
+**Reason:** uncertain — needs verification, not yet a confirmed compliance violation.
+**Detail:** `git diff --stat 99ae45ca df2ac831 -- compiler/native-parser` returns EMPTY — the
+native parser had zero changes in this window. The live pipeline's GITI-038 (`return-stmt.
+fnExprNode`) and GITI-039 (markup-text-verbatim rejoin) fixes are LIVE-pipeline-only. Two
+readings are both plausible without further investigation: (a) the native parser never had
+these bugs (a different parse strategy sidesteps them), or (b) the native parser silently
+carries the SAME bugs and no one has checked. `--parser=scrml-native` is not yet the default
+pipeline (M5 gate), so this is not a shipping-correctness gap today, but a dev agent extending
+native-parser/ should not assume parity with the live pipeline on these two fixes without
+checking.
+**What to check:** run the GITI-038/039 repro `.scrml` files (docs/changes/giti-038-returned-
+closure-async/, docs/changes/giti-039-markup-text-expr-lexed/ — check for a repros/ subdir) through
+`--parser=scrml-native` and diff against the live-pipeline output, or grep native-parser/*.scrml
+for an equivalent `RETURN_DECL_KW`/`joinWithNewlines` construct.
 
-## Carried-forward — Non-compliant docs (unchanged this window; native-parser/ + docs/ untouched by S265)
+## Carried-forward — Non-compliant docs (unchanged this window; native-parser/ + docs/ untouched by S266-S271 except the new correctly-parked dispatch dirs below)
 
 ### compiler/native-parser/M5-SWAP-residual-decomposition.md
 **Reason:** content-heuristic (self-marked "⚠ SUPERSEDED S117 (2026-05-21)") + date (stale vs SPEC.md mtime)
-**Detail:** The document declares its own staleness. Unresolved across 948d3f2f/fbb4d9fd/f079d0a9 scans; native-parser/ showed no structural change in the S265 window.
+**Detail:** The document declares its own staleness. Unresolved across multiple prior scans; native-parser/ showed no structural change in this window either.
 **Suggested disposition:** deref to scrml-support/archive/.
 
 ### compiler/native-parser/M5-ast-bridge-scoping.md, M5-divergence-ledger.md
@@ -82,7 +86,7 @@ hand-off / incoming-read, or `spa-lists/` bookkeeping — all out-of-scope per t
 **Suggested disposition:** uncertain — needs human review.
 
 ### docs/changes/v0next-inventory/{SCOPE-MAP,SCOPE-SUPPLEMENT,ARTICLE-TRUTHFULNESS-AUDIT}-2026-05-0[5-7].md
-**Reason:** location (docs/changes/ dispatch-archive, correctly parked) + date (stale) + content-heuristic (v0.next planning inventory, doubly superseded — the repo has since shipped §20.8 Client Router/outlet, §64.9 serve=, §65 CSS Wave-1 emission, §47.9.8 content-hashing)
+**Reason:** location (docs/changes/ dispatch-archive, correctly parked) + date (stale) + content-heuristic (v0.next planning inventory, doubly superseded — the repo has since shipped §20.8 Client Router/outlet, §64.9 serve=, §65 CSS Wave-1 emission, §47.9.8 content-hashing, §20.5 session-establishment, §5.5.3/§5.5.4 writer-ownership, and colorless-async)
 **Detail:** Unresolved from prior scans.
 **Suggested disposition:** already correctly archived under docs/changes/ — no move needed; a dev agent must NOT treat it as a live scope reference.
 
@@ -101,15 +105,22 @@ hand-off / incoming-read, or `spa-lists/` bookkeeping — all out-of-scope per t
 
 `docs/changes/<change-id>/SPEC-DRAFT.md` / `SPEC-AMENDMENT.md` files match the "spec-draft" name-heuristic
 but are legitimately parked in dispatch-archive AND verified ratified into `compiler/SPEC.md`:
-- css-scrml-native-model-2026-07-07/SPEC-DRAFT.md -> SPEC.md §65 (Wave-1 emission half LANDED S265; the E-THEME-TOKEN-UNKNOWN §34 row + §65.6 theme-switch verified in-source this pass).
+- css-scrml-native-model-2026-07-07/SPEC-DRAFT.md -> SPEC.md §65 (Wave-1 emission half LANDED).
 - realtime-external-db-writes-2026-07-06/SPEC-AMENDMENT.md -> SPEC.md §38.13.
 - standalone-tool-target-2026-07-04/SPEC-AMENDMENT.md -> SPEC.md §64 (+§64.9).
 - clean-print-primitive-2026-07-06/SPEC-AMENDMENT.md -> SPEC.md §20.7.
 - capability-vocab-v1-2026-06-30/SPEC-DRAFT.md -> SPEC.md §23.5.
 
-`docs/changes/css-wave1-emission-2026-07-16/{BRIEF,BRIEF-s265-round4,progress}.md` + `repros/*` and
-`docs/changes/component-css-var-scrml-el-fix-2026-07-17/progress.md` are correctly-parked dispatch
-records for the two S265 CSS landings — same pattern, no action.
+**NEW this window — all correctly-parked dispatch records, BRIEF.md/progress.md only, no SPEC-DRAFT
+files, checked for the "spec-draft-not-ratified" pattern and clean:**
+- docs/changes/colorless-async-seam-a-2026-07-15/{BRIEF.md,BRIEF-phase1-fix-s239.md,progress.md,repros/*} -> ratified into SPEC.md §13.1/§13.2 (colorless-async design, S258) + landed source.
+- docs/changes/giti-038-returned-closure-async/BRIEF.md -> landed `72ba19d6`, no SPEC surface change (a completeness/correctness fix, not a new feature).
+- docs/changes/giti-039-markup-text-expr-lexed/BRIEF.md -> landed `df2ac831`, no SPEC surface change.
+- docs/changes/i29e-session-security-fixes-2026-07-18/{BRIEF.md,progress.md} + i29e-session-pass2-b4b5-2026-07-18/BRIEF.md -> ratified into SPEC.md §20.5/§20.5.1.
+- docs/changes/i81-writer-ownership/{BRIEF.md,progress.md} -> ratified into SPEC.md §5.5.3/§5.5.4.
+- docs/changes/i87-nested-server-call-autoawait-2026-07-18/{BRIEF.md,progress.md} -> SPEC.md §13.2 (no new normative text, a codegen behavior fix).
+- docs/changes/colorless-async-combinators-2026-07-19/{progress.md,repros/*} -> the Phase-2 combinator transform, landed `9c950dfe`.
+- handOffs/hand-off-265.md, handOffs/incoming/read/2026-07-18-1105-from-giti-*.md -> historical hand-off record, out-of-scope per the scope principle (handOffs/ excluded).
 
 Reclassified at the base scan (self-labeled, not misrepresenting live state):
 - docs/heads-up/const-deep-freeze-2026-05-26.md — `status: ratified`.
@@ -118,17 +129,20 @@ Reclassified at the base scan (self-labeled, not misrepresenting live state):
 
 ## Scope notes / exclusions applied
 - `docs/changes/` (dispatch-archive dirs) — designated historical-record location (like `handOffs/`); spot-checked, not exhaustively read.
-- `spa-lists/`, `handOffs/`, `archive/` — out-of-scope per the scope principle; not scanned.
+- `spa-lists/`, `handOffs/`, `archive/` — out-of-scope per the scope principle; not scanned. (Note: `handOffs/incoming/2026-07-19-1030-from-giti-GITI-038-safecallasync-in-returned-closure-drops-return.md` sits UNREAD in the incoming/ queue per `git status` at scan time — out-of-scope for this report, flagged only for PA awareness, not a compliance item.)
 - No new `docs/deep-dives/`, `docs/adrs/`, `docs/debates/`, `docs/gauntlets/`, or `docs/research/` content this window — the repo stays clean of that category (those belong in scrml-support).
 
 ## CAVEAT
-This was a TARGETED refresh of the CSS/§65/§25/codegen surface + a watermark advance, NOT a full
-`*.md` re-scan. The S256-S263 latent delta noted at the S264 watermark remains unscanned for
-doc-drift, as does anything outside the S265 CSS surface. A NON_COMPLIANCE_ONLY full re-scan +
-test-count/§34-count reconciliation is advisable at the next wrap.
+This pass closed the S266-S271 map-content gap (8 maps re-verified against source) but is still
+NOT a full `*.md` re-scan of the whole repo — the carried-forward native-parser/ + docs/audits/ +
+docs/heads-up/ items above were NOT re-read this pass (their underlying files are unchanged since
+the last scan, per prior-pass tracking). config.map.md/build.map.md/infra.map.md's surfaces were
+not touched by this window's source changes and were left unverified. A NON_COMPLIANCE_ONLY full
+re-scan (including config/build/infra content re-verification + the native-parser parity check
+above) is advisable at the next wrap.
 
 ## Tags
-#non-compliance #project-mapper #cleanup #scrml #css-wave1 #theme-token #css-var-bridge #comment-drift #test-count-drift #native-parser-stale #audit-currency #watermark-advance
+#non-compliance #project-mapper #cleanup #scrml #colorless-async #giti-037 #giti-038 #giti-039 #writer-ownership #session-establishment #stray-progress-md #native-parser-parity #test-count-drift #native-parser-stale #audit-currency #watermark-advance
 
 ## Links
 - [primary.map.md](./primary.map.md)
@@ -137,6 +151,8 @@ test-count/§34-count reconciliation is advisable at the next wrap.
 - [schema.map.md](./schema.map.md)
 - [error.map.md](./error.map.md)
 - [domain.map.md](./domain.map.md)
+- [auth.map.md](./auth.map.md)
+- [test.map.md](./test.map.md)
 - [project master-list](../../master-list.md)
 - [project pa.md](../../pa.md)
 - [scrml-support archive convention](../../../scrml-support/pa.md)
