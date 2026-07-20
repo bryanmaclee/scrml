@@ -1,4 +1,4 @@
-// bind:value and explicit oninput on same element → E-ATTR-012.
+// bind:value + explicit oninput on the same element — composable by design (E-ATTR-012 retired, S249); compiles clean.
 <program>
     ${
         <name> = ""
