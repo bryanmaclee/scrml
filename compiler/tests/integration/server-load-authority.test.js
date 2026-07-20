@@ -152,6 +152,9 @@ describe("server-load-authority (a): Fork-4 route gate closes the anon /__server
     // `role => authenticated`). Unified with the `isAuth` gate.
     expect(serverJs).toContain("role: (_rec && _rec.userId != null) ? (_rec.role ?? null) : null,");
     expect(serverJs).toContain("function _scrml_current_user(req)");
+    // §14.8.10 — a NON-tenant app (this row-scoped-by-user_id fixture has no
+    // `tenant_id` column) is byte-identical: the resolver does NOT project
+    // `tenantId` (the projection is gated on a tenant-scoped table being present).
     expect(serverJs).toContain("return { id: _s.userId, role: _s.role, isAuth: _s.isAuth };");
   });
 });

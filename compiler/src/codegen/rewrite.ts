@@ -13,6 +13,25 @@ import {
   type ProtectContext,
   type ProtectedColumns,
 } from "./protect-egress.ts";
+// §14.8.10 tenant-row isolation floor — resolve a lowered `?{}` read's tenant
+// scoping, add `tenant_id` to the projection when absent, and wrap its result
+// rows in the `_scrml_tenant_tag(...)` descriptor at query-lowering time (server
+// only). One predicate deeper than §14.8.9.
+import {
+  resolveTenantScoping,
+  rewriteSelectAddTenantId,
+  wrapWithTenantTag,
+  classifyTenantWrite,
+  rewriteInsertAddTenantId,
+  type TenantContext,
+  type TenantScoping,
+} from "./tenant-egress.ts";
+
+// §14.8.10 — the ambient tenant JS expression bound at every server handler's
+// egress + write sites. `_scrml_req` is the universal handler request var;
+// `_scrml_current_user` is always emitted for a tenant app (it establishes the
+// tenant via `session.set("tenantId", …)`, so the §20.5 session infra is present).
+const _TENANT_AMBIENT_EXPR = "_scrml_current_user(_scrml_req).tenantId";
 
 // Re-exported for back-compat with prior import sites that pulled the splitter
 // (and the regex-vs-division signal) from rewrite.ts.
@@ -149,6 +168,116 @@ export function protectTagSqlResult(inner: string, sqlContent: string): string {
     });
   }
   return wrapWithProtectTag(inner, resolved);
+}
+
+// §14.8.10 — module-level tenant context, set per-file by generateServerJs (and
+// cleared at the end) so the SERVER SQL-lowering pass can (a) ADD `tenant_id` to
+// a tenant-scoped read's projection when absent and (b) tag the result rows with
+// the `_scrml_tenant_tag(...)` descriptor. `null` (the default, and the only
+// state the CLIENT pipeline ever sees) means "tenant inactive" — the lowering
+// emits byte-identical output. Records, into `strips`, each tenant-scoped read
+// (for a deduped `I-TENANT-STRIP` info) and, into `acrosses`, each `.acrossTenants()`
+// opt-out (for `I-TENANT-ACROSS`).
+interface RewriterTenantState {
+  ctx: TenantContext;
+  strips: Array<{ sql: string }>;
+  acrosses: Array<{ sql: string }>;
+  seenStrip: Set<string>;
+  seenAcross: Set<string>;
+}
+let _rewriterTenantState: RewriterTenantState | null = null;
+
+export function setTenantContextForRewriter(ctx: TenantContext | null): void {
+  _rewriterTenantState = ctx && ctx.tenantScopedTables.size > 0
+    ? { ctx, strips: [], acrosses: [], seenStrip: new Set<string>(), seenAcross: new Set<string>() }
+    : null;
+}
+
+/** Drain the tenant-scoped strip records (→ `I-TENANT-STRIP`). */
+export function drainTenantStripsFromRewriter(): Array<{ sql: string }> {
+  return _rewriterTenantState ? _rewriterTenantState.strips : [];
+}
+
+/** Drain the `.acrossTenants()` opt-out records (→ `I-TENANT-ACROSS`). */
+export function drainTenantAcrossesFromRewriter(): Array<{ sql: string }> {
+  return _rewriterTenantState ? _rewriterTenantState.acrosses : [];
+}
+
+function _recordTenantStrip(sqlContent: string): void {
+  if (!_rewriterTenantState) return;
+  const key = sqlContent.trim();
+  if (_rewriterTenantState.seenStrip.has(key)) return;
+  _rewriterTenantState.seenStrip.add(key);
+  _rewriterTenantState.strips.push({ sql: sqlContent.trim().replace(/\s+/g, " ").slice(0, 80) });
+}
+
+function _recordTenantAcross(sqlContent: string): void {
+  if (!_rewriterTenantState) return;
+  const key = sqlContent.trim();
+  if (_rewriterTenantState.seenAcross.has(key)) return;
+  _rewriterTenantState.seenAcross.add(key);
+  _rewriterTenantState.acrosses.push({ sql: sqlContent.trim().replace(/\s+/g, " ").slice(0, 80) });
+}
+
+/**
+ * Apply the §14.8.10 tenant floor to a lowered `?{}` READ. Returns the
+ * (possibly projection-augmented) SQL to build the tagged template from, plus a
+ * `tag` function that wraps the built result expression in the tenant descriptor.
+ * A no-op (identity `tag`, unchanged SQL) when tenant is inactive, the query is
+ * not tenant-scoped, or the query is a `.acrossTenants()` opt-out. Shared by BOTH
+ * the text-rewrite SQL path (`rewriteSqlRefs`) and the structured `emit-logic.ts`
+ * `case "sql"` path so every compiler-emitted tenant-scoped read is tagged at the
+ * SAME choke.
+ */
+export function applyTenantFloor(
+  sqlContent: string,
+  isAcross: boolean,
+): { effectiveSql: string; tag: (inner: string) => string } {
+  const identity = { effectiveSql: sqlContent, tag: (inner: string) => inner };
+  if (!_rewriterTenantState) return identity;
+  if (isAcross) {
+    // The opt-out is only meaningful (and only audited) for a query that WOULD
+    // have been tenant-scoped; a `.acrossTenants()` on a non-tenant read is inert.
+    if (resolveTenantScoping(sqlContent, _rewriterTenantState.ctx) !== null) {
+      _recordTenantAcross(sqlContent);
+    }
+    return identity;
+  }
+  const scoping: TenantScoping = resolveTenantScoping(sqlContent, _rewriterTenantState.ctx);
+  if (scoping === null || scoping.kind === "agg") return identity; // "agg" hard-fails at compile.
+  const effectiveSql = rewriteSelectAddTenantId(sqlContent, scoping);
+  _recordTenantStrip(sqlContent);
+  return { effectiveSql, tag: (inner: string) => wrapWithTenantTag(inner, scoping) };
+}
+
+/**
+ * §14.8.10 per-query lowering: for a READ, apply the tenant floor (projection
+ * add + row tag); for a WRITE, inject `tenant_id` into an injectable INSERT
+ * (the E-TENANT-WRITE hard-fails fire from the emit-server source scan, not
+ * here). Returns the (possibly modified) SQL to build the tagged template from,
+ * plus a `tenantTag` wrapper for the built result. A no-op when tenant inactive.
+ */
+export function _lowerTenantForQuery(
+  sqlContent: string,
+  isAcross: boolean,
+  isRead: boolean,
+): { effectiveSql: string; tenantTag: (inner: string) => string } {
+  const identity = { effectiveSql: sqlContent, tenantTag: (inner: string) => inner };
+  if (!_rewriterTenantState) return identity;
+  if (isRead) {
+    const { effectiveSql, tag } = applyTenantFloor(sqlContent, isAcross);
+    return { effectiveSql, tenantTag: tag };
+  }
+  // Write path — inject `tenant_id` into an injectable INSERT (suppressed by an
+  // explicit `.acrossTenants()`). UPDATE/DELETE + un-injectable INSERT hard-fail
+  // in the emit-server scan; here they lower unchanged.
+  if (!isAcross) {
+    const write = classifyTenantWrite(sqlContent, _rewriterTenantState.ctx);
+    if (write && write.kind === "insert-inject") {
+      return { effectiveSql: rewriteInsertAddTenantId(sqlContent, _TENANT_AMBIENT_EXPR), tenantTag: (inner: string) => inner };
+    }
+  }
+  return identity;
 }
 
 /**
@@ -344,9 +473,20 @@ export function rewriteSqlRefs(
   //   ?{...}.get().nobatch()  →  ?{...}.get()
   let result = expr.replace(/\.nobatch\(\)/g, "");
 
-  result = result.replace(/\?\{`([^`]*)`\}\.(\w+)\(\)/g, (_, sqlContent: string, method: string) => {
-    const { params, segments } = extractSqlParams(sqlContent);
+  // §14.8.10 — collect + strip `.acrossTenants()` (the sole loud tenant opt-out;
+  // mirror of `.nobatch()`). A query whose chain carried `.acrossTenants()` is
+  // recorded so the tenant floor is SUPPRESSED for it (and `I-TENANT-ACROSS`
+  // fires). The marker has no runtime effect and is stripped from both positions.
+  const _acrossSqls = new Set<string>();
+  result = result.replace(/(\?\{`([^`]*)`\})((?:\s*\.\w+\(\s*\))*)/g, (full, q: string, sqlContent: string, chain: string) => {
+    if (/\.\s*acrossTenants\s*\(\s*\)/.test(chain)) {
+      _acrossSqls.add(sqlContent);
+      return q + chain.replace(/\.\s*acrossTenants\s*\(\s*\)/g, "");
+    }
+    return full;
+  });
 
+  result = result.replace(/\?\{`([^`]*)`\}\.(\w+)\(\)/g, (_, sqlContent: string, method: string) => {
     // §44.3: `.prepare()` is removed from Bun.SQL. Bound-statement caching
     // is handled internally — surface E-SQL-006 at compile time.
     if (method === "prepare") {
@@ -362,21 +502,29 @@ export function rewriteSqlRefs(
       return `(()=>{throw new Error(${JSON.stringify("E-SQL-006: .prepare() is removed in Bun.SQL (§44.3) — use .all()/.get()/.run() or bare ?{}")})})()`;
     }
 
+    const isRead = method === "get" || method === "first" || method === "all";
+    // §14.8.10 — reads: possibly ADD `tenant_id` to the projection + tag the rows.
+    // Writes (`.run()`, INSERT/UPDATE/DELETE): possibly inject `tenant_id` into an
+    // INSERT column-set (the hard-fail codes fire from the emit-server scan).
+    const { effectiveSql, tenantTag } = _lowerTenantForQuery(sqlContent, _acrossSqls.has(sqlContent), isRead);
+    const { params, segments } = extractSqlParams(effectiveSql);
     const tagged = buildTaggedTemplate(dbVar, segments, params);
 
     // .get() and .first() — single-row helpers (§44.3 .get() returns Row | not).
     // .first() is preserved as a back-compat alias for code emitted before §44
     // was finalized. Both produce `(await sql`...`)[0] ?? null`.
-    // §14.8.9 — wrap the resolved single row in the protected-origin descriptor
-    // so the egress sink can redact protected columns (no-op when protect inactive).
+    // §14.8.9 protect tag then §14.8.10 tenant tag — both descriptors coexist on
+    // the row; the egress sink redacts tenant-first, protect-outer (no-op when
+    // inactive). `sqlContent` (the ORIGINAL) resolves protected columns; the
+    // floor-added `tenant_id` is not a protected concern.
     if (method === "get" || method === "first") {
-      return protectTagSqlResult(`(await ${tagged})[0] ?? null`, sqlContent);
+      return tenantTag(protectTagSqlResult(`(await ${tagged})[0] ?? null`, sqlContent));
     }
 
-    // .all() (Row[]) emits the bare await form; §14.8.9 tags each row. `.run()`
-    // (void / mutation) discards its result, so it is left untagged.
+    // .all() (Row[]) emits the bare await form; §14.8.9/§14.8.10 tag each row.
+    // `.run()` (void / mutation) discards its result, so it is left untagged.
     if (method === "all") {
-      return protectTagSqlResult(`await ${tagged}`, sqlContent);
+      return tenantTag(protectTagSqlResult(`await ${tagged}`, sqlContent));
     }
 
     // .run() and any other terminator — bare await form, no row egress to tag.
@@ -388,7 +536,10 @@ export function rewriteSqlRefs(
   // built SQL strings are accepted, with params (if any) passed as a bound
   // array (Bun.SQL binds them per §44.5).
   result = result.replace(/\?\{`([^`]*)`\}/g, (_, sqlContent: string) => {
-    const { sql, params } = extractSqlParams(sqlContent);
+    // §14.8.10 — a bare INSERT into a tenant-scoped table gets `tenant_id`
+    // injected (no row egress to tag; the hard-fail codes fire from emit-server).
+    const { effectiveSql } = _lowerTenantForQuery(sqlContent, _acrossSqls.has(sqlContent), false);
+    const { sql, params } = extractSqlParams(effectiveSql);
     if (params.length === 0) {
       return `await ${dbVar}.unsafe(${JSON.stringify(sql)})`;
     }
