@@ -2,6 +2,16 @@
 
 **Date:** 2026-07-18. A recovery session (`/boot recover last session`): **S266 had landed #99/#103/#104 but died before wrapping**, stranding all continuity at S265. S268 reconstructed that record, then built + landed the #81 writer-ownership axiom bryan ruled at S265. Concurrent: **S267-peter** (Windows, adopter lane) — disjoint.
 
+---
+
+## 🔀 S270-peter FOLD (2026-07-19, AdiPDesk desktop) — concurrent adopter lane, NO scrml-main code change (full detail: board `S270-peter.md`, delta-log `[625]`–`[631]`)
+> Bryan has since landed **#108/#110/#111** (colorless-async Seam-A/Phase-2 + GITI-038) → **main = `72ba19d6`**, gate GREEN. S269/S271-bryan continuity (those changelog/delta-log blocks) is bryan's to record — this fold covers only the peter lane.
+- **Dogfood `assetManagement` = CLEAN R26** vs compiler `9c950dfe` — no regression from #87/#81/#108/#110. One LOW `W-DEAD-FUNCTION` false-positive folded into [[g-ri-dead-function-match-arm-edges]] (RI also misses lambda-callback + bare-ref-as-arg edges; non-breaking).
+- **`scrml-pinned` BUMPED `7f75b559`→`9c950dfe`** (the compiler aM runs on) — the old pin predated #87 so 4 nested server calls shipped unawaited (`saveAssetRows` guard bypassed · `resetPassword` false-"Saved" · `saveReading`/`saveQueueItems`). Bump verified: #26 P0 preserved, 4 bugs fixed, no regression. Rollback tag `pin-7f75b559-pre-s270-bump`. Local pin only (unpushed) — **laptop `scrml-pinned` (if any) still needs the same bump.**
+- **(B) TENANT-FLOOR capability SEED → routed to bryan** (`../scrml-support/docs/deep-dives/scrml-tenant-floor-capability-seed-2026-07-19.md` + inbox notice, **needs: reply**). Compiler-enforced tenant-scoping = row-level §14.8.9 `protect=` twin; own the invariant not the roles policy. Forcing case = aM S34 dPA C1 leak. **NOT a decision — bryan rules.** OPEN: bryan's ruling on the 6 Qs in §5 of the seed.
+- **aM PA notified** — `assetManagement/docs/INBOX-from-scrml-pa-2026-07-19.md` (UNCOMMITTED; aM 3-behind two-machine). Owed on aM side: local dev-DB migration (portal E-PA-004; prod already migrated S36), re-verify on the bumped pin, #87 workarounds now removable.
+- **Held (retire-eligible, surfaced not cleaned):** `scrml-i81-attrs` worktree + `fix/i81-value-attr-emitter`@`bcf85c29` (S268 marked retire-eligible — #81 ① landed via #105, `bcf85c29` superseded-by-reimplementation, not an ancestor). Squash-merged local branches (`wrap/s267-peter`#109 · `fix/i87-nested-server-autoawait`#106 · `feat/i29e-session-establishment`#99) are landed-but-show-unmerged (squash). Peter's live Windows branches (`fix/windows-*`, `chore/windows-test-portability`, `fix/scrml-path-*`, `fix/self-host-*`) — KEEP.
+
 ## ⚠️ READ FIRST — state as of close
 - **scrml main = `8931fd59`** (#105 = #81 ① on top of S266's #104 `510cef8d`; this wrap PR merges on top), gate GREEN, conformance **740/740**, coherence 0/0. scrml-support 0/0.
 - **The mechanical record is honest again.** S266's 3 lands + the #81 arc are now in `handOffs/delta-log.md` `[607]`–`[617]`, `docs/changelog.md` (S268 + S266 blocks), `master-list.md` §0, `docs/known-gaps.md` §S268. The S266 board is closed (wrapped-by-recovery).
