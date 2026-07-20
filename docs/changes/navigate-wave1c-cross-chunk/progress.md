@@ -53,8 +53,40 @@ Piece 1 (reconcile two shell models + normative ruling) and Piece 2 (boot-sequen
 exactly the STOP-IF-BIGGER triggers ("restructuring the boot sequence" / a redesign beyond a bounded
 idempotency guard). Per the HARD RULE: STOP, commit the survey, report the fork for a human ruling.
 
-### Next (pending PA/human ruling on the fork)
-- Do NOT build the redesign or land a SPEC amendment claiming Wave-1c implemented (would be a false
-  spec-ahead claim, Rule 4 / verify-before-claim).
-- One more probe pending: single-file `<program>` SPA + artifact-splitter — does the per-route
-  splitter emit outlet-bearing per-route CLIENT chunks (a narrower, in-scope cross-chunk scenario)?
+**Probe D (spa4/): single-file `<program>` + `<page route=...>` children.**
+- `<page route="/x">` is REJECTED (E-PAGE-ROUTE-ATTR-FORBIDDEN) — routes are filepath-inferred. A
+  single-file `<program>` is ONE document/route; the multi-route model IS the filesystem `pages/`
+  form. route-splitter.ts produces per-(EP, role, tier) chunk descriptors feeding `_SCRML_CHUNKS`
+  prefetch — a within-build code-split, NOT a separate outlet-bearing per-route artifact. So there
+  is no narrower already-outlet-bearing cross-chunk scenario; the fork stands.
+
+### RECOMMENDED OPTIONS FOR THE RULING
+
+- **Option A (SPEC-aligned; recommended) — unify on `<outlet>` as the composition slot.** Make
+  `<outlet>` the shell-composition slot so composed `<page>` HTML is `shell + page-body-in-outlet`
+  and lists shell-chunk + page-chunk. Most bounded concrete form: emit `<outlet>` as
+  `<main data-scrml-outlet ...>` (emit-html.ts:1594) so the EXISTING `<main>`-slot composition
+  (index.ts:1746) PRESERVES the wrapper (prefix up-to-and-incl `<main…>` + `</main>`-onward) while
+  filling it with the page body — the composed page then carries `[data-scrml-outlet]` on the
+  wrapper, which the runtime swap addresses. Requires: (a) a normative ruling on the
+  `<outlet>`↔`<main>` relationship (does `<outlet>` become the canonical slot / supersede the
+  bare-`<main>` static path? coexist?), (b) piece 2 (boot idempotency guard — a boot-sequence
+  restructure, an explicit STOP trigger; plus the (a)-(d) misfire handling when a route chunk's
+  tier-1 module-init + tier-2 boot run against the LIVE shell), (c) piece 3 (runtime chunk-load).
+- **Option B — two coexisting slot models** (`<main>` static + `<outlet>` soft-nav composed
+  separately). More surface, likely undesirable.
+- **Option C — defer Wave-1c; keep cross-chunk = hard-nav (honest current behavior).** Reclassify
+  Wave-1c as blocked-on-shell-composition; keep the §20.8 banner at Waves 1a/1b + link-boost. The
+  outlet-less-target hard-nav is already SPEC-permitted (W-OUTLET-ABSENT-SOFT-NAV-DISABLED).
+
+### DELIBERATE NON-ACTIONS (per STOP-IF-BIGGER HARD RULE)
+- Did NOT build the redesign (pieces 1-3).
+- Did NOT land a SPEC §20.8 amendment claiming Wave-1c implemented — that would be a false
+  spec-ahead claim (Rule 4 / verify-before-claim). The §20.8 banner stays honest until a ruling.
+- Did NOT add the browser/conformance/R26 cases — they presuppose an outlet-bearing composed target
+  the compiler cannot yet emit; a green test built on synthetic outlet HTML would mask the gap.
+
+### VERDICT
+STOP-IF-BIGGER fork REPORTED. Cross-chunk soft-nav is NOT a bounded runtime fix at L2441; it is
+blocked on reconciling the two shell-composition models (`<main>` vs `<outlet>`) + a boot-sequence
+restructure — a codegen redesign + a normative ruling, above this dispatch's build authority.
