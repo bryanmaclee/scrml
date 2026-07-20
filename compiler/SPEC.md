@@ -417,7 +417,7 @@ explicit-close ::= '</' identifier '>'
 **Normative statements:**
 
 - The explicit closer `</name>` SHALL match the innermost open tag whose name is `name`.
-- If the innermost open tag's name does not match, this SHALL be a compile error (E-CTX-001). (S263 — was E-MARKUP-002, now retired; closer-name-mismatch aligns to impl#1's live E-CTX-001 [§3.2]. impl#2/native additionally surfaces the mismatch, honoring this rule.)
+- If the innermost open tag's name does not match, this SHALL be a compile error (E-CTX-001). (S263 — was E-MARKUP-002, now retired; closer-name-mismatch aligns to impl#1's live E-CTX-001 [§3.2]. impl#2/native currently surfaces the mismatch under the now-retired E-MARKUP-002 code; migrating it to E-CTX-001 is a pending native-parity item (`tag-frame.js`), tracked separately.)
 - An explicit closer for a state block uses `</statename>` where `statename` is the identifier used in the state opener.
 - An explicit closer `</name>` SHALL NOT be used inside a `${ }` logic context (E-CTX-003). Markup/state closers cannot cross context boundaries.
 
@@ -1557,8 +1557,10 @@ bind-attr ::= 'bind:' attribute-name '=' '@' identifier ('.' identifier)*
   prefix on any other attribute name SHALL be a compile error (E-ATTR-011).
 - The compiler SHALL NOT require the developer to write the event handler manually
   when `bind:` is used. Writing both `bind:value=@x` and an explicit `oninput=`
-  handler on the same element SHALL be a compile error (E-ATTR-012: conflicting
-  binding and event handler).
+  handler on the same element is allowed and composable by design: the explicit
+  handler runs alongside the compiler-generated binding on the same event — the two
+  co-exist rather than conflict. (E-ATTR-012 retired, S249-drop; see
+  `bind-value.test.js` §12/§13.)
 - When `bind:value` is used on a `<select>` element and the bound `@variable` is declared
   with an inferrable type that is not `string`, the compiler SHALL emit a type coercion
   in the generated `onchange` handler. The coercions are:
@@ -1626,7 +1628,7 @@ Use `@name` or change `bind:value` to `value=name`.
 |---|---|---|
 | E-ATTR-010 | `bind:` target is not an `@` reactive variable | Error |
 | E-ATTR-011 | `bind:` used on an unsupported attribute name | Error |
-| E-ATTR-012 | `bind:` and an explicit event handler for the same event on the same element | Error |
+| ~~E-ATTR-012~~ | **Retired (S249-drop, SPEC-cleaned S274)** — `bind:`+same-event-handler is composable by design; see `bind-value.test.js` §12/§13. | Error |
 
 #### 5.4.1 The bind-dispatch table — by render-spec shape (Stage 0b D4 — L17)
 
@@ -9749,7 +9751,7 @@ stored-side reject) and §14.1.1 (the limit-the-primitive axiom this rule rests 
 - **§5.4 (`bind:` on DOM elements):** §15.11.1 extends `bind:` from DOM form elements to
   component props. The call-site syntax is identical. The compiler distinguishes DOM element
   bind from component prop bind by the target's classification (HTML element vs. component,
-  per §15.1). Error codes E-ATTR-010 through E-ATTR-012 continue to apply to the DOM element
+  per §15.1). Error codes E-ATTR-010 through E-ATTR-011 continue to apply to the DOM element
   form. E-COMPONENT-013 and E-COMPONENT-014 apply to the component prop form.
 
 - **§4.2 (State object syntax) and §6 (Reactivity):** State projection relies on the reactive
@@ -13339,7 +13341,7 @@ match riskyFunction() {
 For `?` to propagate, the error variants of the called function MUST be compatible with the error type of the enclosing function. Specifically:
 
 - Every error variant that the called function can produce MUST exist as a variant in the enclosing function's error type.
-- If the called function produces error variants that are not present in the enclosing function's error type, the compiler SHALL emit a compile error (E-TYPE-001) identifying the incompatible variants.
+- If the called function produces error variants that are not present in the enclosing function's error type, the compiler SHALL emit a compile error (E-ERROR-010) identifying the incompatible variants.
 
 This ensures that `?` never silently drops error information.
 
@@ -13349,7 +13351,7 @@ This ensures that `?` never silently drops error information.
 - `?` SHALL be valid only when applied to a call to a `!` function. Applying `?` to a call to a non-`!` function SHALL be a compile error: **E-ERROR-004** -- `'?' applied to call to '{name}' which is not a failable function. Only '!' functions can be propagated with '?'.`
 - `?` SHALL unwrap the success value when the called function succeeds.
 - `?` SHALL cause the enclosing function to return the error variant when the called function fails.
-- The error variants propagated by `?` SHALL be type-compatible with the enclosing function's declared error type. Incompatible error variants SHALL be a compile error (E-TYPE-001).
+- The error variants propagated by `?` SHALL be type-compatible with the enclosing function's declared error type. Incompatible error variants SHALL be a compile error (E-ERROR-010).
 
 ---
 
@@ -14188,6 +14190,7 @@ The following error codes are introduced by this section. They SHALL be added to
 | E-ERROR-006 | §19.2.3 | `renders` clause references undefined variable | Error |
 | E-ERROR-007 | §19.10.4 | Nested `transaction` blocks | Error |
 | E-ERROR-009 | §19.3.3 | `fail` variant not a valid variant of the declared error enum | Error |
+| E-ERROR-010 | §19.5.4 | `?`-propagation: a called function's error variants are incompatible with the enclosing function's declared error type (dedicated code; formerly overloaded on E-TYPE-001) | Error |
 | E-RENDER-NO-OF | §19.15.3 | `<render>` missing the required `of=` attribute | Error |
 | E-RENDER-NO-CLAUSE | §19.15.3 | `<render of=X>` — a reachable variant of X's enum has no `renders` clause (reuses the §19.6.6 E-ERROR-005 exhaustiveness fence at the render-expression fire site) | Error |
 | E-RENDER-NOT-ENUM | §19.15.3 | `<render of=X>` — X's static type resolves to a non-enum (the render-expression is enum-scoped) | Error |
@@ -18282,7 +18285,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-ATTR-002 | §5.3 | Boolean attribute assigned a string literal | Error |
 | E-ATTR-010 | §5.4 | `bind:` target is not an `@` reactive variable | Error |
 | E-ATTR-011 | §5.4 | `bind:` used on an unsupported attribute name | Error |
-| E-ATTR-012 | §5.4 | `bind:` and explicit event handler conflict on same element | Error |
+| ~~E-ATTR-012~~ | §5.4 | **Retired (S249-drop, SPEC-cleaned S274)** — `bind:`+same-event-handler is composable by design; see `bind-value.test.js` §12/§13. | Error |
 | E-ATTR-WRITER-CONFLICT | §5.5.3, §5.5.4 | A WHOLESALE reactive value writer — `class=(expr)` / `style=(expr)` (the whole attribute) or `value=(expr)` on a form control (the `.value` property) — shares a physical DOM surface with ANOTHER writer on the SAME element, so the wholesale write would silently erase the other's work on its next reactive evaluation. Detected pairs: `class=(expr)` with `class:name=` or transition classes (`className` surface); `style=(expr)` with `if=`/`show=` or transitions (`style`/`display` surface); `value=(expr)` with `bind:value` (`.value` surface). Axiom ① (bryan's #81 ruling): each physical DOM surface has at most one wholesale owner — the diagnostic names BOTH sites and the author picks one. The conflicting attribute is NOT emitted (byte-identical to pre-#81), so an ignored error degrades to the old behavior rather than a broken one. Generic string attributes (`title=`, `id=`, `alt=`, `data-*`) have no per-token composer form and are always sole writers. (Catalog addition S268 — #81 writer-ownership Axiom ①; emitted at `compiler/src/codegen/emit-html.ts` `analyzeWriterConflict`.) | Error |
 | E-ATTR-UNQUOTED-OPERATOR | §5.1, §17.1 | An unquoted attribute CONDITION (`if=`/`show=`/`else-if=`) contains a bare binary/ternary operator (`>= > < <= == != && \|\| + - * /` or ternary `?:`). An unquoted condition admits only the atomic forms (`@var` / `obj.prop` / `fn()` / prefix `!`); operator conditions SHALL be parenthesized `if=(expr)` or quoted `if="expr"`. Fires ONCE per offending attribute (cluster-A, S188 "reject + parens"). | Error |
 | E-SCOPE-001 | §5.2 | Unquoted identifier not resolvable in scope | Error |
@@ -18370,6 +18373,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-ERROR-006 | §19.2.3 | `renders` clause references undefined variable | Error |
 | E-ERROR-007 | §19.10.4 | Nested `transaction` blocks | Error |
 | E-ERROR-009 | §19.3.3 | `fail` variant not a valid variant of the declared error enum | Error |
+| E-ERROR-010 | §19.5.4 | `?`-propagation: a called function's error variants are incompatible with the enclosing function's declared error type (dedicated code; formerly overloaded on E-TYPE-001) | Error |
 | E-RENDER-NO-OF | §19.15.3 | `<render>` missing the required `of=` attribute (S196 — render-expression) | Error |
 | E-RENDER-NO-CLAUSE | §19.15.3 | `<render of=X>` — a reachable variant of X's held enum has no `renders` clause; reuses the §19.6.6 E-ERROR-005 per-variant exhaustiveness logic at the render-expression fire site (S196) | Error |
 | E-RENDER-NOT-ENUM | §19.15.3 | `<render of=X>` — X's static type resolves to a non-enum; the render-expression is enum-scoped (S196) | Error |
@@ -18424,7 +18428,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | W-PURE-DEPRECATED | §33, §48.11 | The `pure` modifier is deprecated language-wide; `fn` is the canonical pure form. Fires on ANY `pure`-modifier declaration (`pure function`, `pure fn`, `pure server function`). Migrate to `fn` / `server fn` (run `bun scrml migrate --fix`). Both forms compile during the deprecation window; `pure` becomes E-PURE-DEPRECATED at end-of-window. Mirrors the `<machine>`→`<engine>` (W-DEPRECATED-001) and `server function`→`function` (W-DEPRECATED-SERVER-MODIFIER) cycles. **Supersedes W-PURE-REDUNDANT.** **Fires:** emitted by TS (`compiler/src/type-system.ts`, the `case "function-decl"` path, gated on `isPure === true`). (Added 2026-06-09, deprecate-pure-modifier.) | Warning |
 | E-FN-007 | §48.4.1 | Branches return incompatible `<state>` types without an explicit union return type | Error |
 | E-FN-008 | §48.5.2 | `lift` inside `fn` body targets a `~` accumulator outside the `fn` boundary | Error |
-| E-FN-009 | §48.5.4 | Reactive `@variable` captured as live subscription inside `fn` body | Error |
+| E-FN-009 | §48.5.4 | Reactive `@variable` captured as live subscription inside `fn` body (Nominal — deferred, see §48.5.4) | Error |
 | W-FN-001 | §48.3.2 | `asIs`-typed value in DOM-mutation position inside `fn` body (probable violation) | Warning |
 | E-FN-ARROW-BODY | §48.2.1 | The `fn` keyword is followed by a parenthesized param list and an arrow `=>` body (e.g. `arr.map(fn(n) => n * 2)`). This mixes the two canonical anonymous-callable forms — the BLOCK-body anonymous `fn` (`fn(args) { return expr }`, §48.2.1) and the plain inline lambda (`args => expr`) — and is NOT a sanctioned scrml form. Pre-fix the shape fell through the codegen `fn`→`function` string-rewrite and emitted invalid JS `function(args) => …`, mis-framed as E-CODEGEN-INVALID-LOGIC. Resolution: use `args => expr` for an inline lambda, or `fn(args) { return expr }` for a named-style anonymous function. Detected at parse (the acorn-rejection path — `detectFnKeywordArrowBody`, `compiler/src/expression-parser.ts`; surfaced via `fnArrowDiagnostic` in `compiler/src/ast-builder.js`). (Added 2026-06-30 — g-fn-shortform-arrow-reject; ruling A — the form is not sanctioned.) | Error |
 | E-LOOP-001 | §49.9 | `break` outside any loop | Error |
@@ -18701,9 +18705,9 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-CHANNEL-008 | §38.12.8 | Two cross-file channel imports from different source files in the same consumer share the same `name=` attribute value — they would conflict on the same WebSocket route. Resolution: rename one of the channels in its source file. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts:2696`.) | Error |
 | E-CHANNEL-EXPORT-001 | §38.12 | `export <channel ...>` declared without a string-literal `name=` attribute. Reactive-ref / interpolated forms are not supported because the wire identity must be compile-time stable. Resolution: use a static `name="..."` literal. (Catalog addition S78 audit; emitted at `compiler/src/ast-builder.js:877`.) | Error |
 | E-CHANNEL-EXPORT-002 | §38.12 | Internal — channel declared as exported in MOD's exportRegistry but the corresponding `<channel>` markup node was not collected in `ast.channelDecls`. Indicates a compiler-internal invariant violation; surface bug report. (Catalog addition S78 audit; emitted at `compiler/src/component-expander.ts:2786`.) | Error |
-| E-MW-002 | §40 | `ratelimit=` attribute value does not match the canonical `N/unit` pattern (e.g., `100/minute`, `10/second`). Emitted at `compiler/src/ast-builder.js:10104`. | Error |
-| E-MW-005 | §40 | More than one `handle()` function definition in the same file. A file has at most one middleware handler. Emitted at `compiler/src/ast-builder.js:10148`. | Error |
-| E-MW-006 | §40 | `handle()` defined outside file top-level `${ }` logic context (e.g., inside a function body or nested scope). The middleware handler must be a file-top-level binding. Emitted at `compiler/src/ast-builder.js:10161`. | Error |
+| E-MW-002 | §40 | `ratelimit=` attribute value does not match the canonical `N/unit` pattern (e.g., `100/minute`, `10/second`). Emitted at `compiler/src/ast-builder.js` (the §40 middleware-validation block — the `E-MW-*` `ratelimit=` / `handle()` checks). | Error |
+| E-MW-005 | §40 | More than one `handle()` function definition in the same file. A file has at most one middleware handler. Emitted at `compiler/src/ast-builder.js` (the §40 middleware-validation block — the `E-MW-*` `ratelimit=` / `handle()` checks). | Error |
+| E-MW-006 | §40 | `handle()` defined outside file top-level `${ }` logic context (e.g., inside a function body or nested scope). The middleware handler must be a file-top-level binding. Emitted at `compiler/src/ast-builder.js` (the §40 middleware-validation block — the `E-MW-*` `ratelimit=` / `handle()` checks). | Error |
 | E-USE-001 | §41 | `use` declaration appears inside a `${ }` context, component body, or other nested scope. `use` is only valid at file top level. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase1-checks.js:283`.) | Error |
 | E-USE-002 | §41 | `use` declaration appears after the first markup element or logic context in the file. All `use` declarations must precede file body content. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase1-checks.js:198`.) | Error |
 | E-USE-005 | §41 | `use` specifier uses an unrecognized protocol prefix (must begin with `scrml:`, `vendor:`, `./`, or `../`). Bare npm-style specifiers are not valid in scrml. (Catalog addition S78 audit; emitted at `compiler/src/gauntlet-phase1-checks.js:211`.) | Error |
@@ -24849,6 +24853,8 @@ Capturing a reactive reference as a live subscription (i.e., in a way that would
 
 #### 48.5.4 E-FN-009 — Reactive Reference Captured as Live Subscription
 
+> **Nominal / spec-ahead (deferred).** The E-FN-009 check is specified but DEFERRED in impl#1 — reactive-subscription-capture detection requires call-graph analysis; `type-system.ts` defers it (zero fire site as of S274). Retained per the S31 "Fate of fn" ruling; wiring is v1.next.
+
 If a `fn` body contains an expression that would create a live reactive dependency on an `@variable` declared outside the `fn` boundary — such as wrapping the call in a reactive observer or registering a watcher — the compiler emits E-FN-009.
 
 ```scrml
@@ -25045,7 +25051,7 @@ Rationale: `fn` is a pure function, not a query executor. Database access is a c
 | ~~E-FN-006~~ | **Retired 2026-04-20 (S32).** Relocated to E-STATE-COMPLETE at every state literal site (§54.6.1). | — |
 | E-FN-007 | Branches produce incompatible `<state>` types without an explicit union return type | Error |
 | E-FN-008 | `lift` inside `fn` body targets a `~` accumulator initialized outside the `fn` boundary | Error |
-| E-FN-009 | Reactive `@variable` captured as a live subscription inside a `fn` body | Error |
+| E-FN-009 | Reactive `@variable` captured as a live subscription inside a `fn` body (Nominal — deferred, see §48.5.4) | Error |
 | W-FN-001 | `asIs`-typed value used in DOM-mutation position inside `fn` body (probable violation, unverifiable) | Warning |
 
 ### 48.13 Normative Statements
@@ -25063,7 +25069,7 @@ Rationale: `fn` is a pure function, not a query executor. Database access is a c
 - When `fn` branches return different `<state>` types without an explicit union return type annotation, the compiler SHALL emit E-FN-007. (§48.4.1)
 - `lift` inside a `fn` body SHALL accumulate into `~` at the `fn`-body level only. The compiler SHALL emit E-FN-008 if `lift` targets an outer scope's `~`. (§48.5.1–48.5.2)
 - A `lift` of an `@variable` inside a `fn` body SHALL read the current value only; it SHALL NOT establish a reactive subscription. (§48.5.3)
-- Establishing a live reactive dependency on an `@variable` declared outside the `fn` boundary SHALL be a compile error (E-FN-009). (§48.5.4)
+- Establishing a live reactive dependency on an `@variable` declared outside the `fn` boundary SHALL be a compile error (E-FN-009). (§48.5.4) (Nominal/spec-ahead — deferred; see §48.5.4)
 - A `fn` body MAY call other `fn`-declared functions. (§48.6.1)
 - A `fn` body MAY call `pure function` declarations. (§48.6.2)
 - **Added 2026-05-17 (S98).** `fn` declarations at file scope SHALL hoist per §6.9, mirroring `function` declarations. Within any structural scope (§6.9.1), all `fn` declarations SHALL be registered before any expression in that scope evaluates a call site, and mutual recursion of `fn` SHALL be supported without source-order constraints. `fn` declarations inside a logic context `${ }` SHALL NOT hoist beyond the `${ }` block. (§48.6.4)
