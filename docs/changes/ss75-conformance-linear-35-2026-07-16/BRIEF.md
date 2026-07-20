@@ -148,4 +148,5 @@ DETECTION site and the EMIT site are different lines. Read both.
 contradicted this brief's table, commit SHAs }`.
 
 <!-- thread-board: run `bun scripts/threads.ts` — DONE-PROBE asserts this arc's completion against landed artifacts -->
-DONE-PROBE: for c in E-LIN-001 E-LIN-002 E-LIN-003 E-LIN-006 E-TILDE-001 E-TILDE-002; do git grep -qF "\"$c\"" -- conformance/cases/linear || exit 1; done
+<!-- S274 (bryan "75 done"): E-TILDE-001/002 PARKED — their emit descriptors exist (type-system.ts:17448/17459) but the fire-wiring was scoped-separately per the S261 ruling, so they are UNREACHABLE via a conformance compile() (0 authorable cases; re-verified on 58c8161d). 12/14 items landed, 2 parked-legit. The probe drops the parked codes so the board reflects reality; re-add them if/when the E-TILDE fire-wiring lands. -->
+DONE-PROBE: for c in E-LIN-001 E-LIN-002 E-LIN-003 E-LIN-006; do git grep -qF "\"$c\"" -- conformance/cases/linear || exit 1; done
