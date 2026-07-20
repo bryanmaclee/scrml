@@ -12,7 +12,7 @@
  * This EXECUTES the emitted code (not a grep of the emitted text) — the standing
  * lesson (S265): a client/server feature's empirical verify must run the bundle.
  */
-import { describe, test, expect, afterAll } from "bun:test";
+import { describe, test, expect, afterAll, beforeAll } from "bun:test";
 import { Database } from "bun:sqlite";
 import { writeFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
@@ -21,6 +21,21 @@ import { compileScrml } from "../../src/api.js";
 
 const _cleanup = [];
 afterAll(() => { for (const d of _cleanup) { try { rmSync(d, { recursive: true, force: true }); } catch {} } });
+
+// Monotonic import-cache-buster: a bare Date.now() key can collide across two
+// same-millisecond dynamic imports (returning a CACHED wrong-bundle module).
+let _impSeq = 0;
+
+// Read the session's REAL server-minted csrfToken from the durable session store,
+// so an AUTHENTICATED POST passes CSRF regardless of whether the app runs baseline
+// double-submit or the session-synchronizer check. Falls back to the double-submit
+// token when the app stores none.
+function sessionCsrf(outDir, sidCookie, fallback) {
+  const sidVal = (String(sidCookie).match(/__Host-scrml_sid=([^;]+)/) || [])[1];
+  const store = globalThis.__scrml_session_stores?.[join(outDir, ".scrml-sessions.db")];
+  const rec = store && sidVal ? store.get(sidVal) : null;
+  return rec && rec.csrfToken ? rec.csrfToken : fallback;
+}
 
 // Diagnostics across both streams (errors + warnings; W-/I- info is partitioned
 // into result.warnings by api.js).
@@ -108,6 +123,10 @@ describe("§14.8.10 codes-half — each E-/I-TENANT fires on the right shape", (
 // ---------------------------------------------------------------------------
 describe("§14.8.10 runtime-half — the compiled bundle strips cross-tenant rows", () => {
   const CSRF = "tok-test";
+  beforeAll(() => {
+    globalThis.__scrml_session_stores = {};
+    globalThis.__scrml_session_store = new Map();
+  });
 
   async function buildAndDrive() {
     const dir = mkdtempSync(join(tmpdir(), "scrml-tenant-exec-"));
@@ -128,27 +147,28 @@ describe("§14.8.10 runtime-half — the compiled bundle strips cross-tenant row
     const outDir = join(dir, "out");
     compileScrml({ inputFiles: [file], write: true, outputDir: outDir, log: () => {} });
 
-    const mod = await import(join(outDir, "app.server.js") + "?t=" + Date.now());
+    const mod = await import(join(outDir, "app.server.js") + "?t=" + (++_impSeq) + "-" + Date.now());
     const handler = (name) => mod.routes.find((r) => r.path.includes(name)).handler;
 
-    async function call(name, { body = {}, cookies = "" } = {}) {
-      const cookie = ["scrml_csrf=" + CSRF, cookies].filter(Boolean).join("; ");
+    async function call(name, { body = {}, cookies = "", csrf = CSRF } = {}) {
+      const cookie = ["scrml_csrf=" + csrf, cookies].filter(Boolean).join("; ");
       const req = new Request("http://localhost/_scrml/x", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF, "Cookie": cookie },
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf, "Cookie": cookie },
         body: JSON.stringify(body),
       });
       const resp = await handler(name)(req);
       return { json: await resp.json(), setCookie: resp.headers.get("Set-Cookie") || "" };
     }
-    return { call };
+    return { call, outDir };
   }
 
   test("(a) a request pinned to tenant A sees ONLY tenant-A rows (tenant_id stripped)", async () => {
-    const { call } = await buildAndDrive();
+    const { call, outDir } = await buildAndDrive();
     const pin = await call("pin", { body: { t: "A" } });
     const sid = (pin.setCookie.match(/(__Host-scrml_sid=[^;]+)/) || [])[1] || "";
-    const rows = await call("loadAssets", { cookies: sid });
+    const csrf = sessionCsrf(outDir, sid, CSRF); // the session's real synchronizer token
+    const rows = await call("loadAssets", { cookies: sid, csrf });
     expect(rows.json).toEqual([{ id: 1, name: "a1" }, { id: 2, name: "a2" }]);
     // the floor-added tenant_id never crosses the wire.
     expect(rows.json.every((r) => !("tenant_id" in r))).toBe(true);
@@ -167,10 +187,11 @@ describe("§14.8.10 runtime-half — the compiled bundle strips cross-tenant row
   });
 
   test("a request pinned to tenant B sees ONLY tenant-B rows", async () => {
-    const { call } = await buildAndDrive();
+    const { call, outDir } = await buildAndDrive();
     const pin = await call("pin", { body: { t: "B" } });
     const sid = (pin.setCookie.match(/(__Host-scrml_sid=[^;]+)/) || [])[1] || "";
-    const rows = await call("loadAssets", { cookies: sid });
+    const csrf = sessionCsrf(outDir, sid, CSRF);
+    const rows = await call("loadAssets", { cookies: sid, csrf });
     expect(rows.json).toEqual([{ id: 3, name: "b1" }]);
   });
 });

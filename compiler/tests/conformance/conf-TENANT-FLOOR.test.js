@@ -14,15 +14,31 @@
  * in codegen/emit-server.ts (hard-fails), and the rewriter/sink drains
  * (I-TENANT-STRIP / I-TENANT-ACROSS); tag/redact runtime in codegen/tenant-egress.ts.
  */
-import { describe, test, expect, afterAll } from "bun:test";
+import { describe, test, expect, afterAll, beforeAll } from "bun:test";
 import { Database } from "bun:sqlite";
 import { writeFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 
+// Read the session's REAL server-minted csrfToken (the §40.2 synchronizer token)
+// from the durable session store, so an AUTHENTICATED POST passes CSRF regardless
+// of whether the app runs baseline double-submit (cookie==header) or the
+// session-synchronizer check (header==session.csrfToken). Falls back to the
+// double-submit token when the app stores none. `.get()` re-parses fresh.
+function sessionCsrf(outDir, sidCookie, fallback) {
+  const sidVal = (String(sidCookie).match(/__Host-scrml_sid=([^;]+)/) || [])[1];
+  const store = globalThis.__scrml_session_stores?.[join(outDir, ".scrml-sessions.db")];
+  const rec = store && sidVal ? store.get(sidVal) : null;
+  return rec && rec.csrfToken ? rec.csrfToken : fallback;
+}
+
 const _tmp = [];
 afterAll(() => { for (const d of _tmp) { try { rmSync(d, { recursive: true, force: true }); } catch {} } });
+
+// Monotonic import-cache-buster: a bare Date.now() key can collide across two
+// same-millisecond dynamic imports (returning a CACHED wrong-bundle module).
+let _impSeq = 0;
 
 function tenantApp(body, dbAbs) {
   return `<program db="${dbAbs}">
@@ -79,6 +95,12 @@ describe("CONF-TENANT-FLOOR (codes-half): each code fires on its shape", () => {
 
 describe("CONF-TENANT-FLOOR (runtime-half): the executed bundle isolates rows", () => {
   const CSRF = "conf-tok";
+  // Isolate the process-global session store so cross-bundle session pollution
+  // in a shared test process cannot bleed into this suite's requests.
+  beforeAll(() => {
+    globalThis.__scrml_session_stores = {};
+    globalThis.__scrml_session_store = new Map();
+  });
   async function drive() {
     const dir = mkdtempSync(join(tmpdir(), "conf-tenant-exec-"));
     _tmp.push(dir);
@@ -95,27 +117,31 @@ describe("CONF-TENANT-FLOOR (runtime-half): the executed bundle isolates rows", 
     writeFileSync(file, tenantApp(body, dbAbs));
     const outDir = join(dir, "out");
     compileScrml({ inputFiles: [file], write: true, outputDir: outDir, log: () => {} });
-    const mod = await import(join(outDir, "app.server.js") + "?t=" + Date.now());
+    const mod = await import(join(outDir, "app.server.js") + "?t=" + (++_impSeq) + "-" + Date.now());
     const h = (n) => mod.routes.find((r) => r.path.includes(n)).handler;
-    async function call(name, { body = {}, cookies = "" } = {}) {
-      const cookie = ["scrml_csrf=" + CSRF, cookies].filter(Boolean).join("; ");
+    async function call(name, { body = {}, cookies = "", csrf = CSRF } = {}) {
+      const cookie = ["scrml_csrf=" + csrf, cookies].filter(Boolean).join("; ");
       const req = new Request("http://localhost/_scrml/x", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-CSRF-Token": CSRF, Cookie: cookie },
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf, Cookie: cookie },
         body: JSON.stringify(body),
       });
       const resp = await h(name)(req);
       return { json: await resp.json(), setCookie: resp.headers.get("Set-Cookie") || "" };
     }
-    return call;
+    return { call, outDir };
   }
 
   test("tenant A → only A rows; unpinned → zero; acrossTenants → all", async () => {
-    const call = await drive();
+    const { call, outDir } = await drive();
     const pin = await call("pin", { body: { t: "A" } });
     const sid = (pin.setCookie.match(/(__Host-scrml_sid=[^;]+)/) || [])[1] || "";
+    // Use the session's REAL csrfToken for the AUTHENTICATED read (the anonymous
+    // `pin` minted it) — the hardcoded double-submit token does not match the
+    // session-synchronizer check once a session exists.
+    const csrf = sessionCsrf(outDir, sid, CSRF);
 
-    const a = await call("loadAssets", { cookies: sid });
+    const a = await call("loadAssets", { cookies: sid, csrf });
     expect(a.json).toEqual([{ id: 1, name: "a1" }, { id: 2, name: "a2" }]); // A only, tenant_id stripped
 
     const anon = await call("loadAssets", {});
