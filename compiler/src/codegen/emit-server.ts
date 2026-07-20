@@ -7,7 +7,7 @@ import { computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls
 import { getNodes } from "./collect.ts";
 import { collectReactiveVarNames } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitChannelWatchesServerBoot, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
-import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter } from "./rewrite.js";
+import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter } from "./rewrite.js";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
 import { emitExpr, emitExprField, setServerAsyncClassifier, resetSessionValueUseErrors, drainSessionValueUseErrors, type EmitExprContext } from "./emit-expr.ts";
 import type { CompileContext } from "./context.ts";
@@ -25,6 +25,14 @@ import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-pa
 import { isSingleJsExpression } from "./validate-emit.ts";
 // §14.8.9 — protected-column egress redaction (server→client confidentiality).
 import { buildProtectContext, resolveProtectedOutputColumns, detectProtectedRawEgress, SERVER_PROTECT_HELPER, type ProtectContext } from "./protect-egress.ts";
+import {
+  buildTenantContext,
+  resolveTenantScoping,
+  classifyTenantWrite,
+  detectTenantRawEgress,
+  SERVER_TENANT_HELPER,
+  type TenantContext,
+} from "./tenant-egress.ts";
 // §52.8 SSR A-terminus, Dispatch 1 — server-side per-row markup renderer.
 import { buildSsrEachRenderers, SSR_RENDER_HELPER } from "./emit-ssr-render.ts";
 
@@ -1278,6 +1286,33 @@ export function generateServerJs(
   const _protectCtx: ProtectContext = buildProtectContext(_protectAnalysis);
   const _protectActive: boolean = _protectCtx.protectedByTable.size > 0;
 
+  // §14.8.10 — tenant-row isolation floor context. Built from the SAME §14.8.9
+  // schema registry (a `<db>`-bound table carrying a `tenant_id` column IS
+  // tenant-scoped). `_tenantActive` is the master gate: an app with no such table
+  // emits byte-identically (every redaction site below is a no-op / absent).
+  const _tenantCtx: TenantContext = buildTenantContext(_protectCtx);
+  const _tenantActive: boolean = _tenantCtx.tenantScopedTables.size > 0;
+  // Cross-tenant writes/aggregates found by the hard-fail scan below that carry a
+  // `.acrossTenants()` opt-out — merged into the I-TENANT-ACROSS audit drain.
+  const _tenantAcrossFromScan: string[] = [];
+  // Tier-1 `SELECT * FROM <tenant table>` + SSR seed reads are hand-emitted (not
+  // via the rewriter), so their I-TENANT-STRIP records are collected here.
+  const _tenantStripsFromHandEmit: string[] = [];
+
+  // §14.8.9 + §14.8.10 — the composed client-egress redact for a value expression
+  // at a compiler-emitted sink. Tenant-redact runs INNER (filters rows by the
+  // ambient `@currentUser.tenantId`, strips the floor-added `tenant_id` column,
+  // and PRESERVES the §14.8.9 protect descriptor on survivors); protect-redact
+  // runs OUTER (strips protected columns). The order is load-bearing: protect
+  // rebuilds objects without Symbol keys, so it must run last. Returns the
+  // expression unchanged when both floors are inactive (byte-identical output).
+  const _egressRedact = (expr: string, reqVar: string = "_scrml_req"): string => {
+    let e = expr;
+    if (_tenantActive) e = `_scrml_tenant_redact(${e}, _scrml_active_tenant(${reqVar}))`;
+    if (_protectActive) e = `_scrml_protect_redact(${e})`;
+    return e;
+  };
+
   // §14.8.9 fail-closed gate — E-PROTECT-004. Scan each server-fn SOURCE for a
   // protected-origin `?{}` reaching a RAW / compiler-unanalyzable egress (`_{}`
   // / manual `Response` / `asIs`) where origin-keyed structural redaction cannot
@@ -1304,6 +1339,102 @@ export function generateServerJs(
             `proven stripped at this boundary (§14.8.9). The compiler will not silently ship it. Resolution: declassify ` +
             `explicitly at the value with \`reveal("col")\`, project the protected column out of the SELECT, or return the ` +
             `row through the normal compiler-emitted response (not a manual \`Response\` / \`_{}\` / \`asIs\`).`,
+            (_sp as any),
+            "error",
+          ));
+        }
+      }
+    }
+  }
+
+  // §14.8.10 hard-fail gates — a whole-source scan over every `?{...}` for the
+  // classes redaction cannot cover (inject-or-hard-fail): E-TENANT-WRITE (an
+  // UPDATE/DELETE, or an un-injectable INSERT, against a tenant-scoped table),
+  // E-TENANT-AGG (an aggregate/scalar over a tenant-scoped table with no output
+  // tenant discriminator), and E-TENANT-RAW-EGRESS (a tenant-scoped read reaching
+  // a `_{}` / manual `Response` / `asIs` egress the compiler cannot redact). Each
+  // is suppressed by an explicit `.acrossTenants()` on the query (which fires the
+  // I-TENANT-ACROSS audit info instead). Gated on `_tenantActive`.
+  if (_tenantActive) {
+    const _src: string = (fileAST as { _sourceText?: string })._sourceText ?? "";
+    if (_src) {
+      const _sqlRe = /\?\{`([^`]*)`\}/g;
+      let _tm: RegExpExecArray | null;
+      const _seenTenant = new Set<string>();
+      while ((_tm = _sqlRe.exec(_src)) !== null) {
+        const _q = _tm[1];
+        const _matchEnd = _tm.index + _tm[0].length;
+        // The method chain immediately following the `?{}` — an `.acrossTenants()`
+        // within it is the loud opt-out (suppress the hard-fail, audit instead).
+        const _chainAhead = /^((?:\s*\.\w+\(\s*\))*)/.exec(_src.slice(_matchEnd))?.[1] ?? "";
+        const _isAcross = /\.\s*acrossTenants\s*\(/.test(_chainAhead);
+        const _dispQ = _q.trim().replace(/\s+/g, " ").slice(0, 60);
+
+        const _write = classifyTenantWrite(_q, _tenantCtx);
+        const _scoping = resolveTenantScoping(_q, _tenantCtx);
+        const _isViolation = (_write && _write.kind === "hard-fail") || (_scoping && _scoping.kind === "agg");
+        if (_isAcross) {
+          // A cross-tenant write / aggregate is the audited legitimate case.
+          if (_isViolation && !_seenTenant.has("across::" + _dispQ)) {
+            _seenTenant.add("across::" + _dispQ);
+            _tenantAcrossFromScan.push(_dispQ);
+          }
+          continue;
+        }
+        if (_write && _write.kind === "hard-fail") {
+          const _key = "write::" + _dispQ;
+          if (_seenTenant.has(_key)) continue;
+          _seenTenant.add(_key);
+          errors.push(new CGError(
+            "E-TENANT-WRITE",
+            `E-TENANT-WRITE: a ${_write.op} against the tenant-scoped table \`${_write.table}\` in \`${_dispQ}\` ` +
+            `cannot be tenant-constrained by the V1 floor (no egress sink can redact a durable write; a committed ` +
+            `cross-tenant write is durable before any redaction). ${_write.op === "UPDATE" || _write.op === "DELETE" ? "An UPDATE/DELETE needs a WHERE constraint the V1 floor does not parse" : "This INSERT is not safely tenant-injectable (it already sets tenant_id, is multi-row, or is INSERT ... SELECT)"} (§14.8.10). ` +
+            `Resolution: for a per-tenant INSERT, omit \`tenant_id\` (the floor injects @currentUser.tenantId); for a ` +
+            `deliberate cross-tenant write, mark the query \`.acrossTenants()\`.`,
+            { start: _tm.index, end: _matchEnd } as any,
+            "error",
+          ));
+          continue;
+        }
+        if (_scoping && _scoping.kind === "agg") {
+          const _key = "agg::" + _dispQ;
+          if (_seenTenant.has(_key)) continue;
+          _seenTenant.add(_key);
+          errors.push(new CGError(
+            "E-TENANT-AGG",
+            `E-TENANT-AGG: an aggregate/scalar read over the tenant-scoped table \`${_scoping.table}\` in \`${_dispQ}\` ` +
+            `has no per-tenant output discriminator, so the row-redaction floor has no row to key on (a bare COUNT/SUM ` +
+            `folds every tenant into one scalar) (§14.8.10). Resolution: add \`GROUP BY tenant_id\` (and project it) so ` +
+            `each output row carries its tenant, or mark the query \`.acrossTenants()\` for a deliberate cross-tenant aggregate.`,
+            { start: _tm.index, end: _matchEnd } as any,
+            "error",
+          ));
+          continue;
+        }
+      }
+
+      // E-TENANT-RAW-EGRESS — per server-fn body co-occurrence (mirror of the
+      // §14.8.9 E-PROTECT-004 loop): a tenant-scoped read + a raw/unanalyzable
+      // egress in the same body, not suppressed by a `.acrossTenants()`.
+      const _seenRaw = new Set<string>();
+      for (const fn of fnNodes) {
+        const _sp = (fn as { span?: { start?: number; end?: number } }).span;
+        if (!_sp || typeof _sp.start !== "number" || typeof _sp.end !== "number") continue;
+        const _fnSrc = _src.slice(_sp.start, _sp.end);
+        const _leak = detectTenantRawEgress(_fnSrc, _tenantCtx);
+        if (_leak) {
+          const _fnName = (fn as { name?: string }).name ?? "<anonymous>";
+          const _dedupKey = `${_fnName}::${_leak.query}::${_leak.egressKind}`;
+          if (_seenRaw.has(_dedupKey)) continue;
+          _seenRaw.add(_dedupKey);
+          errors.push(new CGError(
+            "E-TENANT-RAW-EGRESS",
+            `E-TENANT-RAW-EGRESS: server function \`${_fnName}\` reads the tenant-scoped table in \`${_leak.query}\` ` +
+            `and reaches ${_leak.egressKind} — an egress the compiler cannot tag/redact, so a cross-tenant row cannot ` +
+            `be proven stripped at this boundary (§14.8.10, the row-isolation sibling of E-PROTECT-004). The compiler ` +
+            `will not silently ship it. Resolution: return the rows through the normal compiler-emitted response, or, ` +
+            `for a deliberate cross-tenant read, mark the query \`.acrossTenants()\`.`,
             (_sp as any),
             "error",
           ));
@@ -1347,6 +1478,12 @@ export function generateServerJs(
   // alongside the variant registry at the bottom of this function. `null` when
   // protect is inactive (no `protect=` field) — a true no-op.
   setProtectContextForRewriter(_protectActive ? _protectCtx : null);
+
+  // §14.8.10 — arm the SERVER SQL-lowering pass to (a) add `tenant_id` to a
+  // tenant-scoped read's projection when absent and (b) tag its rows with the
+  // `_scrml_tenant_tag(...)` descriptor. `null` when tenant is inactive (a true
+  // no-op — byte-identical output). Released alongside the protect ctx below.
+  setTenantContextForRewriter(_tenantActive ? _tenantCtx : null);
 
   // §8.9.2 / §19.10.5: determine whether a handler receives an implicit
   // per-handler transaction envelope. Applies iff:
@@ -1882,6 +2019,15 @@ export function generateServerJs(
     // record; reading `role` independent of `isAuth` violates the invariant
     // `role ⇒ authenticated`. Unified with the write-ctx `get role()` getter.
     lines.push("    role: (_rec && _rec.userId != null) ? (_rec.role ?? null) : null,");
+    // §14.8.10 / §52.15.1 — the ambient tenant key. A preference-key session
+    // scalar the app pins via `session.set("tenantId", …)`; `not` (null) when
+    // unpinned. Server-resolved, never client-supplied (E-REACTIVE-003) — the
+    // §14.8.10 tenant-row floor CONSUMES it (a null → zero rows, fail-closed).
+    // Gated on `_tenantActive` so a non-tenant app is byte-identical (the
+    // projection is inert without a tenant-scoped table to consume it).
+    if (_tenantActive) {
+      lines.push("    tenantId: _rec ? (_rec.tenantId ?? null) : null,");
+    }
     if (_csrfAuto) {
       lines.push("    csrfToken: _rec ? (_rec.csrfToken ?? null) : null,");
     }
@@ -1893,7 +2039,11 @@ export function generateServerJs(
     lines.push("// --- §20.5 @currentUser ambient identity resolver ---");
     lines.push("function _scrml_current_user(req) {");
     lines.push("  const _s = _scrml_session_middleware(req);");
-    lines.push("  return { id: _s.userId, role: _s.role, isAuth: _s.isAuth };");
+    // §14.8.10 — project the ambient tenant key ONLY for a tenant app (so a
+    // non-tenant app's resolver is byte-identical to its pre-floor emission).
+    lines.push(_tenantActive
+      ? "  return { id: _s.userId, role: _s.role, isAuth: _s.isAuth, tenantId: _s.tenantId };"
+      : "  return { id: _s.userId, role: _s.role, isAuth: _s.isAuth };");
     lines.push("}");
     lines.push("");
     // Fork-4 route gate for /__serverLoad data routes — 401 JSON (NOT a 302 page
@@ -3093,7 +3243,7 @@ export function generateServerJs(
       // §57 wire envelope. `_scrml_result` is THIS route's client-facing result
       // (a peer-helper's internal return is a separate `async function` whose
       // returns are NOT redacted — server-internal data flow keeps the column).
-      const _resultBaseCsrf = _protectActive ? "_scrml_protect_redact(_scrml_result)" : "_scrml_result";
+      const _resultBaseCsrf = _egressRedact("_scrml_result");
       const _resultExprCsrf = _wireWrapCsrf
         ? `_scrml_wire_encode(${_resultBaseCsrf})`
         : `${_resultBaseCsrf} ?? null`;
@@ -3226,7 +3376,7 @@ export function generateServerJs(
       // `_scrml_result` for the egress redact below. This is the COMMON
       // protect-bearing read path (protect= auto-injects auth → non-CSRF; a
       // simple read fn is non-CPS/non-Ext5).
-      const _wrapResultNonCsrf = _ext5DedupNonCsrf || _protectActive;
+      const _wrapResultNonCsrf = _ext5DedupNonCsrf || _protectActive || _tenantActive;
       if (_wrapResultNonCsrf) {
         lines.push(`  const _scrml_result = await (async () => {`);
       }
@@ -3294,9 +3444,9 @@ export function generateServerJs(
       // capture IIFE and return the REDACTED value. This handler returns a raw
       // value (the pre-floor behavior); the redact strips protected-origin
       // columns by descriptor before the value crosses to the client.
-      if (_protectActive && !_ext5DedupNonCsrf) {
+      if ((_protectActive || _tenantActive) && !_ext5DedupNonCsrf) {
         lines.push(`  })();`);
-        lines.push(`  return _scrml_protect_redact(_scrml_result);`);
+        lines.push(`  return ${_egressRedact("_scrml_result")};`);
       }
 
       // A9 Ext 5: close the inner IIFE, store the result, return as Response.
@@ -3311,7 +3461,7 @@ export function generateServerJs(
         const _wireWrapNonCsrf = returnTypeAllowsAbsence(_retAnnotNonCsrf);
         // §14.8.9 — redact protected-origin columns at the egress sink (see the
         // CSRF-path note above for why this is client-facing-only).
-        const _resultBaseNonCsrf = _protectActive ? "_scrml_protect_redact(_scrml_result)" : "_scrml_result";
+        const _resultBaseNonCsrf = _egressRedact("_scrml_result");
         const _resultExprNonCsrf = _wireWrapNonCsrf
           ? `_scrml_wire_encode(${_resultBaseNonCsrf})`
           : `${_resultBaseNonCsrf} ?? null`;
@@ -3442,8 +3592,8 @@ export function generateServerJs(
       out.push(`const _scrml_result = await (${expr});`);
       // §14.8.9 — the §61 `<endpoint>` JSON envelope is a client egress; redact
       // at the sink (the arm value's `?{}` was protect-tagged at lowering).
-      if (_protectActive) {
-        out.push(`return new Response(JSON.stringify(_scrml_protect_redact(_scrml_result)), {`);
+      if (_protectActive || _tenantActive) {
+        out.push(`return new Response(JSON.stringify(${_egressRedact("_scrml_result")}), {`);
       } else {
         out.push(`return new Response(JSON.stringify(_scrml_result), {`);
       }
@@ -3811,10 +3961,18 @@ export function generateServerJs(
     // protected column ships in the first-paint payload, the W-AUTH-002 leak).
     // This `SELECT * FROM <table>` is hand-emitted (not via rewriteSqlRefs), so
     // tag `_scrml_rows` inline with the table's protected columns, then redact.
+    // §14.8.10 — a `SELECT * FROM <tenant-scoped table>` already carries
+    // `tenant_id` (star includes it → no floor-add); tag the rows so the sink
+    // drops other tenants' rows, then redact. Composes with the protect tag.
     const _slProtCols = _protectActive ? _protectCtx.protectedByTable.get(table) : undefined;
-    if (_slProtCols && _slProtCols.size > 0) {
-      lines.push(`  const _scrml_rows = _scrml_protect_tag(await _scrml_sql\`SELECT * FROM ${table}\`, ${JSON.stringify([..._slProtCols])});`);
-      lines.push(`  return new Response(JSON.stringify(_scrml_protect_redact(_scrml_rows)), {`);
+    const _slTenant = _tenantActive && _tenantCtx.tenantScopedTables.has(table);
+    if (_slTenant) _tenantStripsFromHandEmit.push(`SELECT * FROM ${table}`);
+    if ((_slProtCols && _slProtCols.size > 0) || _slTenant) {
+      let _rowsExpr = `await _scrml_sql\`SELECT * FROM ${table}\``;
+      if (_slProtCols && _slProtCols.size > 0) _rowsExpr = `_scrml_protect_tag(${_rowsExpr}, ${JSON.stringify([..._slProtCols])})`;
+      if (_slTenant) _rowsExpr = `_scrml_tenant_tag(${_rowsExpr}, "tenant_id", false)`;
+      lines.push(`  const _scrml_rows = ${_rowsExpr};`);
+      lines.push(`  return new Response(JSON.stringify(${_egressRedact("_scrml_rows")}), {`);
     } else {
       lines.push(`  const _scrml_rows = await _scrml_sql\`SELECT * FROM ${table}\`;`);
       lines.push(`  return new Response(JSON.stringify(_scrml_rows), {`);
@@ -3879,8 +4037,8 @@ export function generateServerJs(
     // §14.8.9 — SSR `/__serverLoad` Pattern-C payload is a client egress. The
     // `?{}` was lowered through rewriteSqlRefs (protect-tagged when it carries a
     // protected column); redact at the sink so the descriptor is honored.
-    if (_protectActive) {
-      lines.push(`  return new Response(JSON.stringify(_scrml_protect_redact(_scrml_result)), {`);
+    if (_protectActive || _tenantActive) {
+      lines.push(`  return new Response(JSON.stringify(${_egressRedact("_scrml_result")}), {`);
     } else {
       lines.push(`  return new Response(JSON.stringify(_scrml_result), {`);
     }
@@ -3966,27 +4124,33 @@ export function generateServerJs(
       if (_ssrUsesCurrentUser) {
         lines.push(`  const _scrml_currentUser = _scrml_current_user(_scrml_req);`);
       }
-      // Tier-1 instances — SELECT * FROM <table> (+ §14.8.9 tag/redact when protected).
+      // Tier-1 instances — SELECT * FROM <table> (+ §14.8.9 protect tag/redact and
+      // §14.8.10 tenant tag/redact when applicable; both compose at the sink).
       for (const inst of _ssrSeedTier1) {
         const _vn = inst.name as string;
         const _tbl = (inst as any).serverAuthorityTable as string;
         const _prot = _protectActive ? _protectCtx.protectedByTable.get(_tbl) : undefined;
-        if (_prot && _prot.size > 0) {
-          lines.push(`  { const _scrml_rows = _scrml_protect_tag(await _scrml_sql\`SELECT * FROM ${_tbl}\`, ${JSON.stringify([..._prot])});`);
-          lines.push(`    _scrml_ssr_state[${JSON.stringify(_vn)}] = _scrml_protect_redact(_scrml_rows); }`);
+        const _tenTbl = _tenantActive && _tenantCtx.tenantScopedTables.has(_tbl);
+        if (_tenTbl) _tenantStripsFromHandEmit.push(`SELECT * FROM ${_tbl}`);
+        if ((_prot && _prot.size > 0) || _tenTbl) {
+          let _rowsExpr = `await _scrml_sql\`SELECT * FROM ${_tbl}\``;
+          if (_prot && _prot.size > 0) _rowsExpr = `_scrml_protect_tag(${_rowsExpr}, ${JSON.stringify([..._prot])})`;
+          if (_tenTbl) _rowsExpr = `_scrml_tenant_tag(${_rowsExpr}, "tenant_id", false)`;
+          lines.push(`  { const _scrml_rows = ${_rowsExpr};`);
+          lines.push(`    _scrml_ssr_state[${JSON.stringify(_vn)}] = ${_egressRedact("_scrml_rows")}; }`);
         } else {
           lines.push(`  _scrml_ssr_state[${JSON.stringify(_vn)}] = await _scrml_sql\`SELECT * FROM ${_tbl}\`;`);
         }
       }
       // Tier-2 Pattern-C — the cell's actual inline ?{} (same §44 lowering the
-      // /__serverLoad/<var> route uses), redacted at the sink when protected.
+      // /__serverLoad/<var> route uses), redacted at the sink when protected/tenant.
       for (const decl of _ssrSeedPatternC) {
         const _vn = decl.name as string;
         const _sqlNode = (decl as any).sqlNode;
         const _sqlExpr = (serverRewriteEmitted(emitLogicNode(_sqlNode, { boundary: "server" })) ?? "").replace(/;\s*$/, "");
-        if (_protectActive) {
+        if (_protectActive || _tenantActive) {
           lines.push(`  { const _scrml_result = ${_sqlExpr};`);
-          lines.push(`    _scrml_ssr_state[${JSON.stringify(_vn)}] = _scrml_protect_redact(_scrml_result); }`);
+          lines.push(`    _scrml_ssr_state[${JSON.stringify(_vn)}] = ${_egressRedact("_scrml_result")}; }`);
         } else {
           lines.push(`  _scrml_ssr_state[${JSON.stringify(_vn)}] = ${_sqlExpr};`);
         }
@@ -3996,9 +4160,9 @@ export function generateServerJs(
       for (const decl of _ssrSeedCallable) {
         const _vn = decl.name as string;
         const _expr = emitExprField((decl as any).initExpr, (decl as any).init ?? "null", { mode: "server" });
-        if (_protectActive) {
+        if (_protectActive || _tenantActive) {
           lines.push(`  { const _scrml_cv = await Promise.resolve(${_expr});`);
-          lines.push(`    _scrml_ssr_state[${JSON.stringify(_vn)}] = _scrml_protect_redact(_scrml_cv); }`);
+          lines.push(`    _scrml_ssr_state[${JSON.stringify(_vn)}] = ${_egressRedact("_scrml_cv")}; }`);
         } else {
           lines.push(`  _scrml_ssr_state[${JSON.stringify(_vn)}] = await Promise.resolve(${_expr});`);
         }
@@ -4342,6 +4506,14 @@ export function generateServerJs(
     finalEmitted = injectAfterHeader(finalEmitted, SERVER_PROTECT_HELPER);
   }
 
+  // §14.8.10 — inject the tenant-row isolation floor helper (tag/redact +
+  // `_scrml_active_tenant`) on-use, mirroring the protect helper. `_scrml_tenant_`
+  // and `_scrml_active_tenant(` are both covered by the single prefix probe.
+  // Server-only; a non-tenant app emits none of these and is byte-unchanged.
+  if (finalEmitted.includes("_scrml_tenant_") || finalEmitted.includes("_scrml_active_tenant(")) {
+    finalEmitted = injectAfterHeader(finalEmitted, SERVER_TENANT_HELPER);
+  }
+
   // §20.6 — log() server helper inlining. A SERVER-side log() lowers to a
   // `_scrml_log(side, loc, ...args)` call (the client runtime is never
   // imported here). Inline the helper at the post-header boundary so it is
@@ -4568,6 +4740,44 @@ export function generateServerJs(
   }
   // §14.8.9 — release the protect context (mirrors the variant-fields release).
   setProtectContextForRewriter(null);
+
+  // §14.8.10 — drain the tenant-scoped strip records (the rewriter-lowered reads +
+  // the hand-emitted Tier-1/SSR seeds) and the `.acrossTenants()` opt-outs, and
+  // surface one deduped `I-TENANT-STRIP` (Info) per tenant-scoped read + one
+  // `I-TENANT-ACROSS` (Info) per opt-out — the redaction / cross-tenant read is
+  // never silent (the audit surface). Routed into `errors` with severity "info".
+  if (_tenantActive) {
+    const _seenStripDrain = new Set<string>();
+    const _allStrips = [...drainTenantStripsFromRewriter().map((s) => s.sql), ..._tenantStripsFromHandEmit];
+    for (const _sql of _allStrips) {
+      if (_seenStripDrain.has(_sql)) continue;
+      _seenStripDrain.add(_sql);
+      errors.push(new CGError(
+        "I-TENANT-STRIP",
+        `I-TENANT-STRIP: the egress floor scopes the client response of \`${_sql}\` to the request's ambient ` +
+        `\`@currentUser.tenantId\` — any row of another tenant is dropped, and an unpinned request sees zero rows ` +
+        `(§14.8.10, the row-level twin of the §14.8.9 protect floor). For a deliberate cross-tenant read use \`.acrossTenants()\`.`,
+        { file: filePath, start: 0, end: 0 } as any,
+        "info",
+      ));
+    }
+    const _seenAcrossDrain = new Set<string>();
+    const _allAcross = [...drainTenantAcrossesFromRewriter().map((a) => a.sql), ..._tenantAcrossFromScan];
+    for (const _sql of _allAcross) {
+      if (_seenAcrossDrain.has(_sql)) continue;
+      _seenAcrossDrain.add(_sql);
+      errors.push(new CGError(
+        "I-TENANT-ACROSS",
+        `I-TENANT-ACROSS: \`${_sql}\` is marked \`.acrossTenants()\` — the §14.8.10 tenant floor is SUPPRESSED for ` +
+        `this query (a deliberate cross-tenant read/write). This is the cross-tenant audit surface — grep \`I-TENANT-ACROSS\` ` +
+        `to review every unscoped access against a tenant-scoped table.`,
+        { file: filePath, start: 0, end: 0 } as any,
+        "info",
+      ));
+    }
+  }
+  // §14.8.10 — release the tenant context.
+  setTenantContextForRewriter(null);
 
   // S95 Bug 2 — release the per-file variant-fields registry from the rewriter.
   // generateClientJs (which runs after generateServerJs per codegen/index.ts)

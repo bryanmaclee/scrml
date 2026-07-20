@@ -1,6 +1,6 @@
 import { genVar } from "./var-counter.ts";
 import { paramName, paramSignature, type ParamLike } from "./utils.ts";
-import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult } from "./rewrite.js";
+import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, _lowerTenantForQuery } from "./rewrite.js";
 import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
 import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
@@ -3057,8 +3057,17 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // path), we emit `await sql.unsafe(rawSql, [argList])` — Bun.SQL's
       // unsafe() accepts a bound-params array.
       const rawQuery: string = node.query ?? node.body ?? "";
-      const calls: any[] = node.chainedCalls ?? [];
-      const { sql, params, segments } = extractSqlParams(rawQuery);
+      const _rawCalls: any[] = node.chainedCalls ?? [];
+      // §14.8.10 — `.acrossTenants()` is the loud tenant opt-out, not a SQL
+      // terminator; filter it out of the chain and note the suppression.
+      const _tenantAcross = _rawCalls.some((c) => c && c.method === "acrossTenants");
+      const calls: any[] = _rawCalls.filter((c) => c && c.method !== "acrossTenants");
+      const _effMethod: string = calls.length > 0 ? calls[0].method : "";
+      const _isReadSql = _effMethod === "get" || _effMethod === "first" || _effMethod === "all";
+      // §14.8.10 — for a read, add `tenant_id` to the projection + get the row-tag
+      // wrapper; for an INSERT, inject the ambient tenant. No-op when tenant inactive.
+      const { effectiveSql: _tenantSql, tenantTag: _tenantTag } = _lowerTenantForQuery(rawQuery, _tenantAcross, _isReadSql);
+      const { sql, params, segments } = extractSqlParams(_tenantSql);
       const db = opts.dbVar ?? "_scrml_sql";
 
       const taggedFromParams = (): string => {
@@ -3136,10 +3145,10 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         if (params.length > 0) {
           const tagged = taggedFromParams();
           if (method === "get" || method === "first") {
-            return protectTagSqlResult(`(await ${tagged})[0] ?? null`, rawQuery) + ";";
+            return _tenantTag(protectTagSqlResult(`(await ${tagged})[0] ?? null`, rawQuery)) + ";";
           }
           if (method === "all") {
-            return protectTagSqlResult(`await ${tagged}`, rawQuery) + ";";
+            return _tenantTag(protectTagSqlResult(`await ${tagged}`, rawQuery)) + ";";
           }
           return `await ${tagged};`;
         }
@@ -3149,10 +3158,10 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         if (call.args && call.args.trim()) {
           const argList = emitExprField(null, call.args.trim(), _makeExprCtx(opts));
           if (method === "get" || method === "first") {
-            return protectTagSqlResult(`(await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}]))[0] ?? null`, rawQuery) + ";";
+            return _tenantTag(protectTagSqlResult(`(await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}]))[0] ?? null`, rawQuery)) + ";";
           }
           if (method === "all") {
-            return protectTagSqlResult(`await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}])`, rawQuery) + ";";
+            return _tenantTag(protectTagSqlResult(`await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}])`, rawQuery)) + ";";
           }
           return `await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}]);`;
         }
@@ -3160,10 +3169,10 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // Branch C: no params, no call.args. Bare tagged template.
         const taggedNoParams = `${db}\`${sql.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${")}\``;
         if (method === "get" || method === "first") {
-          return protectTagSqlResult(`(await ${taggedNoParams})[0] ?? null`, rawQuery) + ";";
+          return _tenantTag(protectTagSqlResult(`(await ${taggedNoParams})[0] ?? null`, rawQuery)) + ";";
         }
         if (method === "all") {
-          return protectTagSqlResult(`await ${taggedNoParams}`, rawQuery) + ";";
+          return _tenantTag(protectTagSqlResult(`await ${taggedNoParams}`, rawQuery)) + ";";
         }
         return `await ${taggedNoParams};`;
       }
