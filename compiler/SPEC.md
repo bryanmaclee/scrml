@@ -15077,6 +15077,30 @@ scrml owns whole-stack routing (§12). §20.8 extends that ownership to *client*
 - V1 supports **one flat `<outlet>`** per shell. Nested layouts (multiple / nested outlets, Remix-style) are v1.next.
 - More than one `<outlet>` in a shell SHALL be **E-OUTLET-DUPLICATE**; an `<outlet>` outside a `<program>` shell SHALL be **E-OUTLET-OUTSIDE-SHELL**. A multi-page project (`pages/` present) whose shell declares no `<outlet>` SHALL emit **W-OUTLET-ABSENT-SOFT-NAV-DISABLED** and fall back to hard navigation.
 
+##### 20.8.1.1 The one-landmark invariant (marker, not tag) — IMPLEMENTED
+
+The `<outlet>` region and an author `<main>` are both candidates for the same job: they are the document's primary route-content region. The governing rule is:
+
+> **Exactly one `<main>` landmark per composed document; the MARKER decides the route slot, never the tag.**
+
+- The emitted outlet region SHALL carry the attribute **`data-scrml-outlet`**. That attribute — never the element's tag name — SHALL identify the route slot, for BOTH the runtime swap (§20.8.2) and the multi-file shell composition (§40.8.2). Every consumer SHALL resolve the slot by attribute NAME (the `[data-scrml-outlet]` selector), not by substring, not by tag.
+- The emitted region SHALL be programmatically focusable for §20.8.5 item 3 (a synthetic `tabindex="-1"` when the author sets none; an author `tabindex` SHALL win).
+- A composed document SHALL contain **at most one `<main>` element**. Where an `<outlet>` and an author `<main>` would both be present, the compiler SHALL resolve it as follows — and SHALL emit an error ONLY where the source is genuinely ambiguous:
+
+| # | Shape | Emitted slot | Landmark owner | Diagnostic |
+|---|-------|--------------|----------------|------------|
+| 1 | `<outlet>` with no author `<main>` in the composed document | `<main data-scrml-outlet tabindex="-1">` | the outlet | — |
+| 2 | `<outlet>` INSIDE an author `<main>` (`<main><outlet/></main>`) | `<div data-scrml-outlet>` | the author's `<main>` | — |
+| 3 | a route body carrying its own `<main>`, composing into the slot | `<div data-scrml-outlet>` | the route's `<main>` | — |
+| 4 | a BARE / SIBLING author `<main>` alongside the `<outlet>` in the same shell | — | ambiguous | **E-OUTLET-AND-MAIN** |
+
+- **Case 1** — the outlet region IS the primary content region, so it SHALL be emitted AS the `<main>` landmark. This is what allows a shell to declare only an `<outlet>` and still emit a correctly landmarked document.
+- **Case 2** — the author's `<main>` wraps the outlet and is therefore the landmark; the outlet SHALL demote to a `<div>` carrying the marker. This SHALL NOT be an error: there is exactly one landmark and no ambiguity about where route content goes.
+- **Case 3** — route content owns the landmark, so the slot SHALL demote to a `<div>` carrying the marker. This SHALL hold in BOTH forms: the single-file form (a `<page>`-scoped `<main>`, which emits into the same document as the shell) and the multi-file form (a `pages/*.scrml` route body, resolved at composition time per §40.8.2). The demotion SHALL be **per composed document** — a sibling route with no `<main>` of its own still composes into a `<main>` slot.
+- **Case 4** — two candidate slots and two landmarks sit at the same level, and nothing in the source says which one the route content belongs in. Only the author can resolve it, so this SHALL be **E-OUTLET-AND-MAIN**, fired on the `<main>`. The diagnostic SHALL name the three resolutions: wrap the outlet (case 2), remove the `<main>` (case 1), or move the `<main>` inside the `<page>` whose content it is (case 3).
+- A `<main>` inside a `<page>` body SHALL be treated as ROUTE content, never as a competing shell landmark — it does not fire case 4.
+- An `<outlet>`-bearing shell in a multi-file project SHALL compose route content into its outlet region even when that region is EMPTY in the shell source. An empty slot is the normal soft-nav shape (route content composes in at build time), and SHALL NOT be read as "no slot".
+
 #### 20.8.2 Soft-navigation pipeline (SSR-HTML transport)
 
 On a soft navigation to `path`, the runtime SHALL:
@@ -15114,6 +15138,7 @@ The shell runtime SHALL NOT be re-booted. Client-side rendering of the route (du
 
 - A `<program>` SHALL be the persistent shell across soft navigations in both single- and multi-file forms.
 - A shell SHALL contain at most one `<outlet>` in V1; more than one SHALL be `E-OUTLET-DUPLICATE`. `<outlet>` SHALL appear only inside a `<program>` shell; elsewhere SHALL be `E-OUTLET-OUTSIDE-SHELL`.
+- A composed document SHALL contain at most one `<main>` landmark, and the route slot SHALL be identified by the `data-scrml-outlet` attribute NAME rather than by tag (§20.8.1.1). The outlet SHALL take the `<main>` landmark when the composed document has no author `<main>`, and SHALL demote to a marked `<div>` when an author `<main>` wraps it or a route body brings its own. A BARE / SIBLING author `<main>` alongside the outlet SHALL be `E-OUTLET-AND-MAIN`.
 - An internal `<a href>` SHALL soft-navigate by default unless it carries `hard`, is external / `target="_blank"` / `download` / non-http-scheme / hash-only, or the click is modified.
 - A kept-alive route's cached payload SHALL be invalidated by compiler-derived §52/§38 signals, never by an author-specified TTL.
 - Soft navigation SHALL NOT re-boot the shell runtime and SHALL preserve SSR-first (links work with JS off).
@@ -15122,6 +15147,7 @@ The shell runtime SHALL NOT be re-booted. Client-side rendering of the route (du
 
 - **E-OUTLET-DUPLICATE** — more than one `<outlet>` in a shell (V1 flat-outlet). Error.
 - **E-OUTLET-OUTSIDE-SHELL** — `<outlet>` outside a `<program>` shell. Error.
+- **E-OUTLET-AND-MAIN** — a shell declares an author `<main>` as a SIBLING of its `<outlet>`: two candidate route slots, two `<main>` landmarks, and no way to tell which the route content belongs in (§20.8.1.1 case 4). Error. (IMPLEMENTED — fired at the SYM `<outlet>` placement pass, PASS 15.5. Scoped to the bare/sibling case ONLY: a `<main>` WRAPPING the outlet and a `<page>`-scoped `<main>` are both legal and resolve without a diagnostic.)
 - **W-OUTLET-ABSENT-SOFT-NAV-DISABLED** — a multi-page project whose shell declares no `<outlet>`; soft-nav / link-boost fall back to hard. Info.
 - **W-KEEPALIVE-UNRESOLVABLE-READSET** — a `keep-alive` sub-load whose SQL read-set is not statically resolvable; that sub-load's cache is disabled (fail-closed). Info.
 - **W-KEEPALIVE-NO-REALTIME-SUBSTRATE** — `keep-alive` on a non-Postgres (or multi-DB non-PG) read; falls back to focus-revalidation. Info.
@@ -15129,7 +15155,7 @@ The shell runtime SHALL NOT be re-booted. Client-side rendering of the route (du
 - **E-NAV-NO-PATH** — `navigate(...)` called with no path argument (a bare `.Hard` / `.Soft` navigation-type modifier is not a destination). Error. (navigate-wave1b, IMPLEMENTED — fired by the type-system `checkNavigateCall` pass.)
 - **W-NAV-SOFT-SERVER** — an explicit `navigate(path, .Soft)` in a **server-escalated** context. Soft navigation requires a browser; the compiler does the server (hard-redirect) behavior instead (§20.3). Info. (navigate-wave1b — code RESERVED / behavior implemented; the lint emission is a bounded follow-on: firing it needs the navigate call site's server/client placement threaded into the diagnostic pass, OR a reliable codegen→diagnostics channel from `emit-expr` where `ctx.mode` is known — the type-system's `checkNavigateCall` walk lacks per-function placement and codegen's `EmitExprContext.errors` is not reliably drained.)
 
-**Cross-references:** §12 (route inference — the graph that classifies internal `<a href>` + resolves the fetch target) · §40.9.7 (route-chunk prefetch — now feeds real soft-nav) · §19 / §19.14.4 (error boundaries — nav-to-error) · §47.9.2 (SPA-vs-MPA filesystem inference — the `<program>`-as-shell model extends it; no new mode flag) · §52 / §38 / §38.13 (the table-write signals the keep-alive cache invalidates on) · §20.1–20.3 (`navigate()` — the soft-nav entry point).
+**Cross-references:** §12 (route inference — the graph that classifies internal `<a href>` + resolves the fetch target) · §40.8.2 (multi-file shell composition — the build-time consumer of the `data-scrml-outlet` marker; the same slot the runtime swaps) · §40.9.7 (route-chunk prefetch — now feeds real soft-nav) · §19 / §19.14.4 (error boundaries — nav-to-error) · §47.9.2 (SPA-vs-MPA filesystem inference — the `<program>`-as-shell model extends it; no new mode flag) · §52 / §38 / §38.13 (the table-write signals the keep-alive cache invalidates on) · §20.1–20.3 (`navigate()` — the soft-nav entry point).
 
 
 ---
@@ -18359,6 +18385,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | W-NAV-001 | §20.3 | `navigate(path, .Hard)` from client function cannot be escalated | Warning |
 | E-OUTLET-DUPLICATE | §20.8.1 | (Client Router — navigate-soft-nav Wave-1a.) More than one `<outlet>` in a `<program>` shell. V1 supports exactly one flat `<outlet>` per shell — the single region into which the current route's content renders (§20.8.2). Nested layouts (multiple / nested outlets, Remix-style) are v1.next. Remove the extra `<outlet>`. Fired at the SYM `<outlet>` placement pass (PASS 15.5, `compiler/src/symbol-table.ts`). | Error |
 | E-OUTLET-OUTSIDE-SHELL | §20.8.1 | (Client Router — navigate-soft-nav Wave-1a.) An `<outlet>` appears outside a `<program>` shell. `<outlet>` is the shell's route-content swap region (§20.8.1); outside a shell there is no route content to swap in. Move the `<outlet>` to be a descendant of the `<program>` shell. Unlike `E-CHANNEL-OUTSIDE-PROGRAM` there is NO module-file dispensation — an outlet has no meaning without a shell, so the fire is unconditional. Fired at the SYM `<outlet>` placement pass (PASS 15.5, `compiler/src/symbol-table.ts`). | Error |
+| E-OUTLET-AND-MAIN | §20.8.1.1 | (Client Router — the one-landmark invariant, navigate-wave1c.) A `<program>` shell declares an author `<main>` as a **SIBLING** of its `<outlet>`. Both are candidate route-content regions and a document may carry only one `<main>` landmark, so which one the route content belongs in is ambiguous — only the author can say. Three resolutions, each named in the diagnostic: (a) WRAP the outlet (`<main><outlet/></main>`), keeping the author's `<main>` as the landmark; (b) REMOVE the `<main>` and let the outlet be the landmark (it emits as `<main data-scrml-outlet>` when the document has no other `<main>`); (c) MOVE the `<main>` inside the `<page>` whose content it is, making it route content the outlet composes. **Scoped to the bare/sibling case ONLY** — the three resolvable arrangements of §20.8.1.1 (lone outlet · `<main>` wrapping the outlet · a `<page>`-scoped or `pages/*.scrml` route `<main>`) are all LEGAL and fire nothing; the compiler demotes the slot to a marked `<div>` instead. Fired on the `<main>` at the SYM `<outlet>` placement pass (PASS 15.5, `compiler/src/symbol-table.ts`). | Error |
 | W-OUTLET-ABSENT-SOFT-NAV-DISABLED | §20.8.1 | (Client Router — navigate-soft-nav Wave-1a; info-level.) A multi-page project (a `pages/` directory exists at the project root) declares a `<program>` shell with no `<outlet>`. Soft navigation + `<a>` link-boost (§20.8.2 / §20.8.3) have no region to swap into and fall back to hard (full-document) navigation; this is informational only (SSR-first hard navigation still works). To enable soft navigation, add a single `<outlet/>` to the shell where route content should render. Complementary to `W-PROGRAM-SPA-INFERRED` (§40.8.1) — that fires when `pages/` is ABSENT, this fires when `pages/` is PRESENT but the shell has no outlet; the two are mutually exclusive. Fired at the TAB filesystem-inference site (`compiler/src/ast-builder.js`, alongside `W-PROGRAM-SPA-INFERRED`). | Info |
 | W-NAME-001 | §15.6 | Component name misleadingly matches a different HTML element type | Warning |
 | W-LIN-001 | §35.7 | `lin` variable passed to server-escalated function; guarantee does not extend to server copy | Warning |
@@ -21910,6 +21937,24 @@ The original OQ framed a binary — explicit `<program spa>` marker vs pure file
 - §40.8 — v0.3 program-shape (the parent context).
 - §4.15 — `<page>` structural-element registration.
 - §47.9.2 — filesystem-to-route-URL inference (the broader Pillar 3 surface).
+
+### 40.8.2 Multi-file shell composition (the route slot) — IMPLEMENTED
+
+**Status:** IMPLEMENTED (navigate-wave1c PR-1). The mechanism predates this section and was previously unspecified; this section is its normative anchor.
+
+In the multi-file form (§40.8.1 — an entry file declaring the top-level `<program>` shell, plus `pages/*.scrml` route files), the emitted shell and the emitted route pages are separate documents. The compiler SHALL **compose** them: each route page's emitted document SHALL be the shell with that route's body filled into the shell's route slot, so every route is a complete, server-rendered, chrome-bearing document (SSR-first, §20.8).
+
+**Normative statements:**
+
+- The compiler SHALL locate the shell's route **slot** as the FIRST element carrying the `data-scrml-outlet` attribute (the `<outlet>` region, §20.8.1.1).
+- Slot resolution SHALL match on the **attribute NAME**, exactly as the runtime's `[data-scrml-outlet]` selector does. It SHALL NOT match a substring of a longer attribute name (`data-scrml-outlet-debug` is a different attribute), and SHALL NOT match text occurring inside another attribute's VALUE (`data-testid="data-scrml-outlet"` is not the marker). Codegen and the runtime SHALL agree on which element is the slot; a disagreement would compose route content into one element while the soft-nav swap targets another.
+- When the shell declares NO marked slot, the compiler SHALL fall back to the FIRST `<main>` element as the slot. This is the pre-§20.8 static / hard-navigation multi-page path, preserved for back-compat; `W-OUTLET-ABSENT-SOFT-NAV-DISABLED` already surfaces the missing outlet.
+- Composition SHALL **preserve the slot's wrapper element** and replace its children with the route body — the composed document therefore carries the marker, which is what the soft-nav swap (§20.8.2) addresses.
+- A slot that is EMPTY in the shell source SHALL still compose. An empty slot is the normal shape for a soft-nav `<outlet>` (the shell holds no route content at emit time), and SHALL NOT be read as "no slot present".
+- **Slot demotion (§20.8.1.1 case 3).** When the composing route body carries its own `<main>`, and the marked slot would otherwise emit as a `<main>`, the slot SHALL be re-tagged to a `<div>` for THAT composed document, preserving every attribute including the marker. The route owns the landmark; the composed document therefore carries exactly one `<main>`. The demotion SHALL be per composed document — a sibling route with no `<main>` composes into a `<main>` slot unchanged. Demotion applies to the MARKED slot only; the back-compat bare-`<main>` slot is the author's own element, and the compiler SHALL NOT re-tag it.
+- Where no slot is found at all, composition SHALL be a no-op and the per-route documents SHALL emit standalone.
+
+**Cross-references:** §20.8.1.1 (the one-landmark invariant — the rule this composition implements) · §20.8.2 (the soft-nav swap, the runtime consumer of the same marker) · §40.8.1 (SPA-vs-multi-page filesystem inference) · §47.9.2 (filesystem-to-route-URL inference; the leading-`pages/` dist-path strip).
 
 ### 40.9 Closure Analysis (Minimal Playable Surface)
 
