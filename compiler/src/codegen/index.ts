@@ -2151,11 +2151,23 @@ export function runCG(input: CgInput): CgOutput {
           // into the `<main>` slot and keeps the document landmarked). The
           // marker rides along unchanged, so the slot is still the slot.
           //
-          // Scoped to the MARKED slot deliberately. The back-compat bare-
-          // `<main>` slot is the author's own `<main>` element, not a synthetic
-          // outlet region; rewriting the author's tag there would silently
-          // change long-standing static-MPA output. That path's nesting
-          // behaviour is unchanged from before this PR.
+          // The DEMOTION is scoped to the MARKED slot deliberately. The
+          // back-compat bare-`<main>` slot is the author's own `<main>`
+          // element, not a synthetic outlet region; rewriting the author's tag
+          // there would silently change long-standing static-MPA output.
+          //
+          // The bare-`<main>` path is NOT otherwise untouched by this PR, and
+          // an earlier revision of this comment wrongly claimed it was. Two
+          // behaviours changed, both fixes, both now pinned by tests (§8):
+          //   - an EMPTY `<main></main>` slot now composes. The slot-bounds
+          //     test was `>` and is now `>=`; under `>` an empty slot silently
+          //     no-op'd composition and route pages emitted with no shell
+          //     chrome at all.
+          //   - `<MAIN>` (any casing) now matches. The prior slot regex was
+          //     case-sensitive.
+          // Byte-parity on the real corpus is unaffected — neither shape occurs
+          // in `examples/23-trucking-dispatch` or `docs/website`, both of which
+          // are verified byte-identical to base.
           const routeOwnsLandmark =
             slotIsMarked && slotHoldsLandmark && htmlHasMainElement(pageBodyStripped);
           const pageShellPrefix = routeOwnsLandmark

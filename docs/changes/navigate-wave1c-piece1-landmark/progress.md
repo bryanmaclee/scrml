@@ -102,3 +102,76 @@ future fix into a red suite.
 `htmlHasMainElement` (index.ts) scans open tags textually, so a `<main>` inside a `<template>` or an
 HTML comment in a route body would also trigger the slot demotion. Conservative direction (the
 composed document would then carry no rendered landmark rather than two); not observed in corpus.
+
+## 2026-07-21 — S276 PA-DIRECT FIX ROUND (bryan authorized "go pa-direct")
+
+The dispatched fix round was STOPPED after its first commit (`39deb811`, the test-oracle fix) to
+avoid two writers on one branch. That commit is retained — it is correct and was the right first
+step. Everything below is PA-authored.
+
+### Context — why a fix round existed
+`01aaad71` (PR-1 as built) went through a PA-side adversarial pass: 3 independent lenses + PA
+reproduction of every claim before acceptance. Result: 2 BLOCKING regressions vs base `020485b2`
+and 5 MED. Notably NOT defects: the attribute tokenizer (attacked hard, held), the test inversion
+(done properly), and the deferred-fork report (honest, independently verified pre-existing).
+
+### FIXED (commit `d5320ee3`)
+- **BLOCKING-1 — splice had no depth counting.** `indexOf('</'+slotTag+'>')` was valid only while
+  the slot was always `<main>` and always empty. This PR made `slotTag` variable and `<outlet>`
+  accepts children, so a `<div>` slot holding a `<div>` terminated on the inner close: unbalanced
+  document, following siblings reparented out of their container, slot children silently dropped,
+  clean compile. NEW `findMatchingCloseIdx()` depth-counts, skips comments + `<script>`/`<style>`
+  raw text, and does not open a level for a self-closing same-tag element.
+- **BLOCKING-2 — landmark decision was invocation-scoped.** `generateHtml` is RE-ENTERED with
+  `arm.body`, so an `<outlet>` in a match/engine arm could not see an author `<main>` wrapping the
+  match; it took the `<main>` landmark and the dispatcher injected it inside that `<main>` →
+  nested `<main>` on initial paint, in the shape CASE 2 blesses as legal. Now computed once at the
+  top-level invocation and shared via CompileContext, with a `fileAST` fallback so the answer stays
+  document-scoped regardless of invocation order.
+- **MED-2 — open-mains leaked across a shell boundary.** A nested `<program>`'s outlet marked the
+  OUTER shell's `<main>` as wrapping, silencing a textbook case-4 shell. The path now resets at a
+  `<program>` boundary.
+
+### FIXTURES (commit `b153f8b5`) — the real gap
+7 added. **Verified as genuine regression tests:** with the 3 source fixes reverted to `39deb811`
+and the fixtures kept, **5 of 7 FAIL**; restored, all pass. The 2 that pass both ways pin behaviour
+PR-1 itself changed without claiming (empty `<main></main>` now composes; `<MAIN>` now matches) —
+that is their purpose. §7 asserts on the CLIENT CHUNK, because an arm body lowers into
+`app.client.js` and an html-only oracle is structurally blind to BLOCKING-2.
+
+### OPEN — NOT fixed, needs a ruling (do not improvise)
+
+**MED-1 — the conditionally-rendered `<main>` fork.** Two shapes, one question:
+  (a) a `<main>` living only in a NON-INITIAL match/engine arm;
+  (b) `<main if=@cell>`, which the compiler parks in a `<template>`.
+In both, the `<main>` is absent on initial paint and present after the condition flips. Current
+behaviour treats it as PRESENT and demotes the outlet → ZERO rendered landmarks initially, ONE
+after the flip. The alternative (ignore it) → ONE initially, TWO after the flip (invalid HTML).
+**Neither satisfies "exactly one" at all times** — the invariant is not achievable for a
+conditionally-rendered landmark without a third move. Options: (a) keep the conservative demote and
+accept a transient zero-landmark; (b) ignore conditional mains and accept transient invalid HTML;
+(c) DIAGNOSE it — extend the case-4 family to a conditional shell `<main>` coexisting with an
+`<outlet>`, consistent with case 4's "two candidate landmarks, only the author can resolve it".
+PA lean: **(c)**. Left unimplemented pending bryan's ruling; deliberately NOT pinned by a test,
+since pinning either current behaviour would turn the eventual fix red.
+
+**MED-3 — component-mounted `<main>` under-fires case 4.** `collectOutlets` (SYM) runs
+pre-expansion; `treeHasAuthorMain` (emit) runs post-expansion. The EMIT is correct (it demotes),
+only the DIAGNOSTIC is inconsistent: `<Shellmain/>` + `<outlet/>` compiles clean where the literal
+`<main>…</main>` + `<outlet/>` fires. Output is valid (one landmark), so this is a diagnostic
+consistency gap, not a correctness one. Reconciling the two phases is a larger change than this
+round's scope; surfaced rather than half-fixed.
+
+**KNOWN-OPEN (pre-existing, unchanged).** A case-2 shell (`<main><outlet/></main>`) composed with a
+route that owns its own `<main>` still yields two nested `<main>`. Independently verified
+PRE-EXISTING (base 2, tip 2) and this PR strictly improves it — base additionally DESTROYED the
+outlet marker, tip preserves it. Awaits a separate ruling. Not pinned by a test, for the same
+reason as MED-1.
+
+### Gates
+Pre-commit **21012 pass / 0 fail / 68 skip** (unchanged from `01aaad71`). R26 byte-identity vs base
+`020485b2` re-verified after the fixes: `examples/23-trucking-dispatch` (25 docs) and `docs/website`
+(98 docs), `diff` exit 0 — with both output trees confirmed non-empty BEFORE trusting the compare
+(an earlier R26 run in this session printed a false "no diff" because `wc`/`head` had dropped off
+PATH and the comparison ran against missing directories). All four ruling cases re-verified by
+compile.
