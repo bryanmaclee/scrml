@@ -2170,13 +2170,48 @@ export function runCG(input: CgInput): CgOutput {
           // are verified byte-identical to base.
           const routeOwnsLandmark =
             slotIsMarked && slotHoldsLandmark && htmlHasMainElement(pageBodyStripped);
+
+          // The MIRROR of routeOwnsLandmark: RE-PROMOTE a demoted slot when the
+          // only author `<main>` was the outlet's own PLACEHOLDER — which
+          // composition discards.
+          //
+          // `treeHasAuthorMain` (emit-html) counts every `<main>` in the tree,
+          // including one inside an `<outlet>` body. That is the RIGHT call for
+          // a document where the placeholder actually renders (a single-file
+          // shell with no routes composing in) and the WRONG call here, because
+          // composing replaces the slot's children — the placeholder `<main>`
+          // never reaches the composed document. Left uncorrected, an
+          // `<outlet><main>skeleton</main></outlet>` shell demoted the slot and
+          // every composed route emitted with ZERO `<main>` landmarks, where
+          // base emitted one.
+          //
+          // Emit-time cannot distinguish those two futures; composition can, so
+          // the correction belongs HERE rather than in `treeHasAuthorMain`.
+          // (Simply skipping `<outlet>` bodies there fixes the composed case and
+          // breaks the rendered-placeholder case, which then emits two `<main>`.)
+          // Promote only when nothing else claims the landmark: no `<main>`
+          // survives in the shell outside the slot, and the route brings none.
+          const shellOutsideSlot =
+            shellPrefix.slice(0, shellPrefix.length - slotOpenTagText.length) + shellSuffix;
+          const slotShouldPromote =
+            slotIsMarked &&
+            !slotHoldsLandmark &&
+            !routeOwnsLandmark &&
+            !htmlHasMainElement(shellOutsideSlot) &&
+            !htmlHasMainElement(pageBodyStripped);
+
           const pageShellPrefix = routeOwnsLandmark
             ? shellPrefix.slice(0, shellPrefix.length - slotOpenTagText.length) +
               retagOpenTag(slotOpenTagText, "div")
-            : shellPrefix;
+            : slotShouldPromote
+              ? shellPrefix.slice(0, shellPrefix.length - slotOpenTagText.length) +
+                retagOpenTag(slotOpenTagText, "main")
+              : shellPrefix;
           const pageShellSuffix = routeOwnsLandmark
             ? "</div>" + shellSuffix.slice(`</${slotTag}>`.length)
-            : shellSuffix;
+            : slotShouldPromote
+              ? "</main>" + shellSuffix.slice(`</${slotTag}>`.length)
+              : shellSuffix;
 
           // Compose: shell prefix (everything up to and including the slot's
           // opening tag) + page body + shell suffix (the slot's closing tag and

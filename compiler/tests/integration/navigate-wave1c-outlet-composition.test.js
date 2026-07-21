@@ -521,3 +521,44 @@ describe("§8 — shell-boundary scoping + the bare-`<main>` static path", () =>
     expect(about).toContain("Shell");
   });
 });
+
+describe("§9 — an outlet PLACEHOLDER `<main>` is not the document's landmark", () => {
+  // `treeHasAuthorMain` counts every `<main>` in the tree, including one inside
+  // an `<outlet>` body. Composition DISCARDS the slot's children, so such a
+  // `<main>` never reaches the composed document — counting it demoted the slot
+  // and left every composed route with ZERO landmarks (base emitted one).
+  // The correction lives at composition time, which is the only place that
+  // knows whether the placeholder survives.
+
+  test("a placeholder `<main>` inside the `<outlet>` does NOT demote the composed slot", () => {
+    const { errors, read } = buildDir("outlet-placeholder-main", {
+      "app.scrml":
+        `<program>\n<header>HDR</header>\n<outlet><main>PLACEHOLDER-MAIN</main></outlet>\n<footer>FTR</footer>\n</program>\n`,
+      "pages/r.scrml": `<page>\n<h1>ROUTE-NO-MAIN</h1>\n</page>\n`,
+    });
+    expect(errors).toEqual([]);
+    const r = read("r.html");
+    expect(r).not.toBeNull();
+    expect(mainCount(r)).toBe(1);
+    expect(tagBalance(r, "main").balanced).toBe(true);
+    // The placeholder is replaced by the route body, not carried through.
+    expect(r).not.toContain("PLACEHOLDER-MAIN");
+    expect(r).toContain("ROUTE-NO-MAIN");
+  });
+
+  test("but a placeholder that actually RENDERS (no route composes in) keeps the slot demoted", () => {
+    // Single-file shell, no `pages/` — nothing replaces the placeholder, so it
+    // is a real rendered `<main>` and the slot must stay a `<div>`. This is the
+    // shape that makes "just skip `<outlet>` bodies" the wrong fix.
+    const { errors, read } = buildDir("outlet-placeholder-renders", {
+      "app.scrml":
+        `<program>\n<h1>Solo</h1>\n<outlet><main>PLACEHOLDER-MAIN</main></outlet>\n</program>\n`,
+    });
+    expect(errors).toEqual([]);
+    const app = read("app.html");
+    expect(app).not.toBeNull();
+    expect(mainCount(app)).toBe(1);
+    expect(markerOpenTag(app)).toMatch(/^<div\b/);
+    expect(app).toContain("PLACEHOLDER-MAIN");
+  });
+});
