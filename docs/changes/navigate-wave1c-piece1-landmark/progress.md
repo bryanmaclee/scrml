@@ -51,3 +51,54 @@ describes. Handled in `emit-html.ts` (see below), not only in `index.ts`.
   DEMOTED `<main>` -> `<div>` in that page's composed output (ruling case 3, multi-file form).
 - `symbol-table.ts` — `E-OUTLET-AND-MAIN` narrowed to the BARE/SIBLING case only: an author `<main>`
   in shell scope that neither encloses nor is enclosed by the outlet, and is not inside a `<page>`.
+
+---
+
+## 2026-07-20 — landed
+
+All four ruling cases implemented + verified empirically (see the report table). Files:
+`compiler/src/codegen/emit-html.ts`, `compiler/src/codegen/index.ts`, `compiler/src/symbol-table.ts`,
+`compiler/tests/integration/navigate-wave1c-outlet-composition.test.js` (16 tests),
+`compiler/SPEC.md` (NEW §20.8.1.1 + NEW §40.8.2 + §20.8.6 + §20.8.7 + §34), `compiler/SPEC-INDEX.md`.
+
+### R26 empirical
+
+- `examples/23-trucking-dispatch` (25 html) + `docs/website` (98 html), base `020485b2` vs final:
+  **`diff -rq` clean — byte-identical, both.** `runtime-template.js` untouched, so no content-hash shift.
+- Real-scale `<outlet>` MPA: `docs/website` with its shell `<main>` swapped for `<outlet>` (98 route
+  files). AFTER: 98/98 documents have **exactly one `<main>`**, 98/98 carry `[data-scrml-outlet]`,
+  98/98 carry shell chrome, slot tag = `main` on all 98. BEFORE (base `020485b2`), same source:
+  **0/98 documents had any `<main>`**, 97/98 had **no marker and no shell chrome** — composition
+  never ran. That is the coherence gap, measured at corpus scale.
+
+### DEFERRED — an UNRULED shape found adversarially (NOT improvised past)
+
+`<main><outlet/></main>` shell (case 2) composed with a route body that brings its own `<main>`
+(case 3) emits **two nested `<main>` elements**:
+
+```
+<main><div data-scrml-outlet>  <main class="route">…</main>  </div></main>
+```
+
+The ruling states case 3 as "the SLOT emits as a `<div data-scrml-outlet>`". Here the landmark is NOT
+the slot — it is the author's `<main>` ANCESTOR of the slot, outside the spliced region — so the
+stated remedy does not reach it. Resolving it means picking one of: (a) a new composition-time
+diagnostic (the shell alone is legal and the route alone is legal; only the cross-file combination is
+bad, which the per-file SYM pass cannot see); (b) demote the ROUTE's `<main>`; (c) demote the SHELL's
+wrapping author `<main>` for that composed document. (b) and (c) both rewrite AUTHOR markup, which
+§40.8.2 deliberately declines to do for the back-compat bare-`<main>` slot — so this is a genuine
+fork, not an obvious extension. **Surfaced, not improvised** (per BRIEF: "STOP and report the fork").
+
+**This is PRE-EXISTING, not a regression.** Base `020485b2` emits two nested `<main>` for the same
+source AND additionally loses the outlet marker entirely (the old composition picked the author's
+`<main>` as the slot and overwrote the `<div data-scrml-outlet>` with the route body). This PR
+strictly improves the shape — the marker now survives — without closing the two-landmark half.
+
+No test asserts the current output here: pinning a known-defective shape as "expected" would turn a
+future fix into a red suite.
+
+### Minor, noted
+
+`htmlHasMainElement` (index.ts) scans open tags textually, so a `<main>` inside a `<template>` or an
+HTML comment in a route body would also trigger the slot demotion. Conservative direction (the
+composed document would then carry no rendered landmark rather than two); not observed in corpus.
