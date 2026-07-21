@@ -1603,15 +1603,23 @@ export function generateHtml(
         const outletFocusAttrs = outletHasTabindex
           ? [outletMarkerAttr]
           : [outletMarkerAttr, { name: "tabindex", value: { kind: "string-literal", value: "-1" } }];
-        const outletDivNode = {
+        // navigate-wave1c (Option A ruling) — the `<outlet>` region emits as a
+        // `<main data-scrml-outlet tabindex="-1">`, NOT a `<div>`. This unifies the
+        // §20.8 soft-nav swap region with the multi-file MPA shell-composition slot
+        // (index.ts): the composition is MARKER-driven (keys on `[data-scrml-outlet]`,
+        // falling back to a bare `<main>` for the static/hard-nav back-compat path),
+        // so a `<page>` route body composes INTO this element — the composed route
+        // page then carries `[data-scrml-outlet]`, which the runtime swap addresses.
+        // `<main>` is the correct landmark for the primary route-content region.
+        const outletMainNode = {
           ...node,
-          tag: "div",
-          tagName: "div",
+          tag: "main",
+          tagName: "main",
           selfClosing: false,
           attributes: [...outletFocusAttrs, ...attrs],
           attrs: [...outletFocusAttrs, ...attrs],
         };
-        emitNode(outletDivNode);
+        emitNode(outletMainNode);
         return;
       }
 

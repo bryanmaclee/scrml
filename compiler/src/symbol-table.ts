@@ -10102,12 +10102,14 @@ function walkValidateOutlets(
   if (!nodes) return;
 
   // outlets grouped by their nearest enclosing `<program>` node; orphans (no
-  // program ancestor) collected separately.
+  // program ancestor) collected separately. `mainsByShell` collects author
+  // `<main>` elements per shell for the E-OUTLET-AND-MAIN check (navigate-wave1c).
   const byShell = new Map<object, any[]>();
+  const mainsByShell = new Map<object, any[]>();
   const orphans: any[] = [];
   const visited = new WeakSet<object>();
 
-  collectOutlets(nodes, /*enclosingProgram*/ null, byShell, orphans, visited);
+  collectOutlets(nodes, /*enclosingProgram*/ null, byShell, mainsByShell, orphans, visited);
 
   // E-OUTLET-OUTSIDE-SHELL — every outlet with no `<program>` ancestor.
   for (const outletNode of orphans) {
@@ -10119,6 +10121,21 @@ function walkValidateOutlets(
   for (const outlets of byShell.values()) {
     for (let i = 1; i < outlets.length; i++) {
       fireOutletDuplicate(outlets[i], errors, filePath);
+    }
+  }
+
+  // E-OUTLET-AND-MAIN (navigate-wave1c, Option A ruling item 3) — a shell that
+  // declares BOTH an `<outlet>` AND an author `<main>` is invalid: the `<outlet>`
+  // itself emits as `<main data-scrml-outlet>` (the canonical route-content slot),
+  // so a second author `<main>` produces two `<main>` landmarks — invalid HTML,
+  // and ambiguous for the marker-driven shell composition. Fire on the author
+  // `<main>` (the element to remove) for each such shell.
+  for (const [shell, outlets] of byShell.entries()) {
+    if (outlets.length === 0) continue;
+    const mains = mainsByShell.get(shell);
+    if (!mains || mains.length === 0) continue;
+    for (const mainNode of mains) {
+      fireOutletAndMain(mainNode, errors, filePath);
     }
   }
 }
@@ -10135,13 +10152,14 @@ function collectOutlets(
   nodes: any,
   enclosingProgram: object | null,
   byShell: Map<object, any[]>,
+  mainsByShell: Map<object, any[]>,
   orphans: any[],
   visited: WeakSet<object>,
 ): void {
   if (!nodes) return;
   if (Array.isArray(nodes)) {
     for (const n of nodes) {
-      collectOutlets(n, enclosingProgram, byShell, orphans, visited);
+      collectOutlets(n, enclosingProgram, byShell, mainsByShell, orphans, visited);
     }
     return;
   }
@@ -10161,30 +10179,39 @@ function collectOutlets(
     }
   }
 
+  // navigate-wave1c — record an author `<main>` under its shell (for the
+  // E-OUTLET-AND-MAIN both-slots check). Only mains WITHIN a shell matter (a
+  // bare `<main>` in a non-shell file is the static composition slot, valid).
+  if (node.kind === "markup" && (node.tag ?? "") === "main" && enclosingProgram) {
+    const list = mainsByShell.get(enclosingProgram);
+    if (list) list.push(node);
+    else mainsByShell.set(enclosingProgram, [node]);
+  }
+
   // Descend. A `<program>` node becomes the enclosing shell for its subtree.
   const isProgramMarkup =
     node.kind === "markup" && (node.tag ?? "") === "program";
   const childProgram = isProgramMarkup ? node : enclosingProgram;
 
   if (Array.isArray(node.children)) {
-    collectOutlets(node.children, childProgram, byShell, orphans, visited);
+    collectOutlets(node.children, childProgram, byShell, mainsByShell, orphans, visited);
   }
   if (Array.isArray(node.body)) {
-    collectOutlets(node.body, childProgram, byShell, orphans, visited);
+    collectOutlets(node.body, childProgram, byShell, mainsByShell, orphans, visited);
   }
   if (Array.isArray(node.defChildren)) {
-    collectOutlets(node.defChildren, childProgram, byShell, orphans, visited);
+    collectOutlets(node.defChildren, childProgram, byShell, mainsByShell, orphans, visited);
   }
   if (Array.isArray(node.consequent)) {
-    collectOutlets(node.consequent, childProgram, byShell, orphans, visited);
+    collectOutlets(node.consequent, childProgram, byShell, mainsByShell, orphans, visited);
   }
   if (Array.isArray(node.alternate)) {
-    collectOutlets(node.alternate, childProgram, byShell, orphans, visited);
+    collectOutlets(node.alternate, childProgram, byShell, mainsByShell, orphans, visited);
   }
   if (Array.isArray(node.arms)) {
     for (const arm of node.arms) {
       if (arm && Array.isArray(arm.body)) {
-        collectOutlets(arm.body, childProgram, byShell, orphans, visited);
+        collectOutlets(arm.body, childProgram, byShell, mainsByShell, orphans, visited);
       }
     }
   }
@@ -10198,12 +10225,12 @@ function collectOutlets(
   if (Array.isArray(node.branches)) {
     for (const br of node.branches) {
       if (br && br.element) {
-        collectOutlets(br.element, childProgram, byShell, orphans, visited);
+        collectOutlets(br.element, childProgram, byShell, mainsByShell, orphans, visited);
       }
     }
   }
   if (node.elseBranch) {
-    collectOutlets(node.elseBranch, childProgram, byShell, orphans, visited);
+    collectOutlets(node.elseBranch, childProgram, byShell, mainsByShell, orphans, visited);
   }
 }
 
@@ -10255,6 +10282,39 @@ function fireOutletDuplicate(
       `the current route's content renders (§20.8.1). Nested layouts (multiple / nested ` +
       `outlets, Remix-style) are v1.next. Remove the extra \`<outlet>\` so the shell ` +
       `declares one swap region. ` +
+      `(SPEC §20.8.1 + §34.)`,
+    span,
+    severity: "error",
+  });
+}
+
+/**
+ * Fire `E-OUTLET-AND-MAIN` per SPEC §20.8.1 / §20.8.6 + §34 (navigate-wave1c,
+ * Option A ruling item 3). Triggered when a `<program>` shell declares BOTH an
+ * `<outlet>` AND an author `<main>`. The `<outlet>` emits as
+ * `<main data-scrml-outlet>` — the canonical route-content slot AND the primary
+ * `<main>` landmark — so a second author `<main>` is invalid HTML (two `<main>`s)
+ * and ambiguates the marker-driven multi-file shell composition. Fired on the
+ * author `<main>` (the element to remove).
+ */
+function fireOutletAndMain(
+  mainNode: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const span: SYMDiagnostic["span"] = mainNode.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+  errors.push({
+    code: "E-OUTLET-AND-MAIN",
+    message:
+      `E-OUTLET-AND-MAIN: a \`<program>\` shell declares BOTH a \`<main>\` and an \`<outlet>\`. ` +
+      `The \`<outlet>\` is the Client-Router route-content region and itself renders as the ` +
+      `page's \`<main>\` landmark (\`<main data-scrml-outlet>\`, §20.8.1), so a second author ` +
+      `\`<main>\` produces two \`<main>\` elements — invalid HTML — and makes the route-content ` +
+      `slot ambiguous for multi-file shell composition (§40.8). Use ONLY the \`<outlet>\` as the ` +
+      `route region (remove the \`<main>\`), or drop the \`<outlet>\` if this shell is a ` +
+      `static (hard-nav) multi-page app that composes into a bare \`<main>\`. ` +
       `(SPEC §20.8.1 + §34.)`,
     span,
     severity: "error",

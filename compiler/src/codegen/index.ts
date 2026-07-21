@@ -1861,34 +1861,63 @@ export function runCG(input: CgInput): CgOutput {
         }
       }
 
-      // Locate the FIRST `<main ...>...</main>` in the shell body. The
-      // `<main>` content is the slot — we'll replace its children with
-      // the page body during composition. If no `<main>` is found,
-      // composition is a no-op (the shell has nowhere to host page
-      // content; the per-page HTML emits standalone).
-      let mainOpenIdx = -1;
-      let mainOpenEndIdx = -1;
-      let mainCloseIdx = -1;
+      // navigate-wave1c (Option A ruling) — locate the route-content SLOT in the
+      // shell body. The slot is MARKER-driven: prefer the FIRST element carrying
+      // `[data-scrml-outlet]` (the `<outlet>`, emitted as `<main data-scrml-outlet>`,
+      // §20.8.1) so a soft-nav-enabled shell composes route content into the outlet
+      // region — the composed route page then carries `[data-scrml-outlet]`, which
+      // the runtime swap (§20.8.2) addresses. When NO outlet marker is present, fall
+      // back to the FIRST bare `<main>` (the static / hard-nav multi-page back-compat
+      // path; `W-OUTLET-ABSENT-SOFT-NAV-DISABLED` already nudges toward an outlet).
+      // We slice the shell PRESERVING the slot's wrapper element (prefix up to and
+      // including its open tag + suffix from its close tag), filling its children
+      // with the route body. If no slot is found, composition is a no-op (per-page
+      // HTML emits standalone).
+      let slotOpenIdx = -1;
+      let slotOpenEndIdx = -1;
+      let slotCloseIdx = -1;
       if (shellBody) {
-        const mainOpenMatch = shellBody.match(/<main(\s[^>]*)?>/);
-        if (mainOpenMatch && mainOpenMatch.index !== undefined) {
-          mainOpenIdx = mainOpenMatch.index;
-          mainOpenEndIdx = mainOpenIdx + mainOpenMatch[0].length;
-          // Find the matching </main>. Simple lookup — nested <main>s
-          // would defeat this but HTML5 forbids nested <main>
-          // (https://html.spec.whatwg.org/#the-main-element). For v0.3.x
-          // we honor the spec rule; future work can teach this a depth
-          // counter if adopters actually nest <main>.
-          mainCloseIdx = shellBody.indexOf("</main>", mainOpenEndIdx);
+        // Marker-driven: match an opening tag containing `data-scrml-outlet`,
+        // capturing its tag name to locate the matching close tag.
+        const outletOpenMatch = shellBody.match(
+          /<([a-zA-Z][\w-]*)\b[^>]*\bdata-scrml-outlet\b[^>]*>/,
+        );
+        let slotTag: string | null = null;
+        let openMatch: RegExpMatchArray | null = null;
+        if (outletOpenMatch && outletOpenMatch.index !== undefined) {
+          slotTag = outletOpenMatch[1];
+          openMatch = outletOpenMatch;
+        } else {
+          // Back-compat: the first bare `<main>` is the static composition slot.
+          const mainOpenMatch = shellBody.match(/<main(\s[^>]*)?>/);
+          if (mainOpenMatch && mainOpenMatch.index !== undefined) {
+            slotTag = "main";
+            openMatch = mainOpenMatch;
+          }
+        }
+        if (openMatch && openMatch.index !== undefined && slotTag) {
+          slotOpenIdx = openMatch.index;
+          slotOpenEndIdx = slotOpenIdx + openMatch[0].length;
+          // Find the matching close tag. Nested same-tag elements would defeat
+          // this, but the shell's outlet/`<main>` slot is empty at emit time
+          // (route content composes IN), and HTML5 forbids nested <main>
+          // (https://html.spec.whatwg.org/#the-main-element) — and the
+          // E-OUTLET-AND-MAIN gate rejects a shell carrying both an outlet and a
+          // bare <main>, so the slot is unambiguous here.
+          slotCloseIdx = shellBody.indexOf(`</${slotTag}>`, slotOpenEndIdx);
         }
       }
 
+      // `>=` (not `>`) — an EMPTY slot (`<main data-scrml-outlet></main>`) is the
+      // normal case for a soft-nav `<outlet>` (route content composes IN; the shell
+      // slot is empty at emit time). `indexOf` returns -1 when no close tag is found,
+      // which fails `>= slotOpenEndIdx`, so a malformed/absent close still no-ops.
       const shellAvailable =
-        shellBody !== null && mainOpenIdx >= 0 && mainCloseIdx > mainOpenEndIdx;
+        shellBody !== null && slotOpenIdx >= 0 && slotCloseIdx >= slotOpenEndIdx;
 
       if (shellAvailable && shellBody !== null) {
-        const shellPrefix = shellBody.slice(0, mainOpenEndIdx);
-        const shellSuffix = shellBody.slice(mainCloseIdx);
+        const shellPrefix = shellBody.slice(0, slotOpenEndIdx);
+        const shellSuffix = shellBody.slice(slotCloseIdx);
         // entryClientJs base is needed so per-page HTMLs can <script src=>
         // the shell's app.client.js (so reactive shell elements such as
         // `${VERSION}` in the docs/website shell remain wired).

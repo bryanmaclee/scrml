@@ -90,3 +90,24 @@ idempotency guard). Per the HARD RULE: STOP, commit the survey, report the fork 
 STOP-IF-BIGGER fork REPORTED. Cross-chunk soft-nav is NOT a bounded runtime fix at L2441; it is
 blocked on reconciling the two shell-composition models (`<main>` vs `<outlet>`) + a boot-sequence
 restructure — a codegen redesign + a normative ruling, above this dispatch's build authority.
+
+## 2026-07-20 — RULING RECEIVED (Option A) — BUILD
+
+bryan ruled Option A (+ native-leg V1 exception). Building 3 pieces.
+
+### Piece 1 — marker-driven composition + `<outlet>`→`<main data-scrml-outlet>` + both-slots error — DONE
+- emit-html.ts: `<outlet>` now emits as `<main data-scrml-outlet tabindex="-1">` (was `<div>`).
+- index.ts (composition ~L1746): slot detection is MARKER-driven — first `[data-scrml-outlet]`
+  element, falling back to first bare `<main>` (static back-compat). Fixed the empty-slot bug
+  (`slotCloseIdx >= slotOpenEndIdx`, was `>`) so an EMPTY outlet (the normal soft-nav case) composes.
+- symbol-table.ts PASS 15.5: NEW E-OUTLET-AND-MAIN — a shell with BOTH `<main>` and `<outlet>`
+  (two `<main>` landmarks = invalid HTML + ambiguous slot). Fires on the author `<main>`.
+
+CHECKPOINT (empirical `scrml build`, mpa/ = `<outlet/>` shell + 2 pages/ routes):
+- reports.html NOW carries `<main data-scrml-outlet tabindex="-1">` wrapping the route body, with
+  shell chrome (`<h1>Shell</h1>`/`<nav>`/`<footer>`) AND lists runtime + index.client.js (shell
+  chunk) + reports.client.js (route chunk) — the exact multi-chunk outlet-bearing shape Piece 3 needs.
+- bare-`<main>` shell (mpa5/) still composes statically (back-compat verified).
+- `<main><outlet/></main>` (mpa3/) now errors E-OUTLET-AND-MAIN (verified).
+- Tests: navigate-wave1c-outlet-composition.test.js 9/9 pass; mpa-shell-clean-urls 17/17;
+  navigate-soft-nav-lowering + link-boost + navigate-w-outlet-absent + trucking-smoke 54/54.
