@@ -3495,6 +3495,40 @@ export function splitBlocks(filePath, source) {
           continue;
         }
 
+        // E-SCRIPT-001: <script> elements are not supported in scrml.
+        // SPEC §4.17 / §23 — scrml does not admit `<script>` AT ALL. JS lives in
+        // logic-context `${...}`; genuine foreign code has the `_{...}` escape
+        // hatch (§23). Recovery mirrors E-STYLE-001 exactly: record the error,
+        // scan past the entire <script>...</script> body, and continue — so a
+        // brace-heavy JS body does not cascade into a storm of parse errors.
+        //
+        // Exact `===` compare (never a prefix match) so `<noscript>` is
+        // untouched: readIdent() accumulates the FULL `[A-Za-z0-9_-]+` ident,
+        // yielding "noscript", which is not equal to "script".
+        //
+        // This check is SOURCE-side only. The emitter's own
+        // `<script src="scrml-runtime.<hash>.js">` / `<page>.client.js` tags are
+        // produced downstream of the block splitter and never pass through here.
+        if (tagName.toLowerCase() === "script") {
+          errors.push(new BSError(
+            "E-SCRIPT-001",
+            `<script> elements are not supported in scrml. Use \${...} for scrml logic.\n` +
+            `  Hint: for genuine foreign JS, use the \`_{...}\` foreign-code block (SPEC §23).`,
+            { start: curPos, end: pos, line: curLine, col: curCol }
+          ));
+          // Scan to the matching </script> close tag (case-insensitive), or EOF.
+          while (pos < len) {
+            if (source[pos] === "<" && source.slice(pos, pos + 9).toLowerCase() === "</script>") {
+              advance(9);
+              break;
+            }
+            step();
+          }
+          inDoubleQuote = false;
+          inSingleQuote = false;
+          continue;
+        }
+
         const isComp = isComponentName(tagName);
         const { attrRaw: openerAttrRaw, selfClosing, shorthand, shorthandColonAttrOff } = scanAttributes();
         const lowerTagName = tagName.toLowerCase();
