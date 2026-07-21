@@ -222,3 +222,25 @@ Commits (on branch, base 020485b2): survey (eedd4a62, cdd4eb4b) · Piece1 (86ee7
 (21085 tests, 0 fail); full browser suite 609 pass / 12 fail (== pre-existing baseline, zero new
 regressions); conformance conf-NAV-CROSS-CHUNK 9/9; R26 empirical (unhashed browser + hashed deploy)
 PASS. A latent deploy-path bug (hashed-chunk regex) was found + fixed en route.
+
+## S239 review follow-ups (post-land review by PA)
+1. [BLOCKING → RESOLVED, no freeze] Engine/match cross-chunk EXECUTION test added
+   (browser-navigate-cross-chunk.test.js): a target route in its OWN chunk carries `<engine for=Phase
+   initial=.Idle>`. Empirically EXECUTED: on first cross-chunk visit the initial (.Idle) arm renders
+   after the swap (SSR-rendered arm + the engine's tier-1 `_scrml_reactive_subscribe`, which runs on
+   chunk-load), AND a variant transition (button `@phase = .Running`) re-renders to the .Running arm.
+   NO frozen render — the eager `_fire()` no-ops pre-swap (mount not in DOM yet), but the SSR initial
+   arm + the tier-1 subscription cover both the initial render and the transition. Test locks it.
+2. [test add] Reactive SHELL-cell survival across a cross-chunk nav — added: a reactive shell cell
+   (`<count>` + `inc()` + `${@count}` OUTSIDE the outlet), mutated to 2 via the shell button, then a
+   cross-nav to a DIFFERENT chunk (reports). `@count` KEEPS 2 (the injected chunk's eager-boot seed-
+   apply carries no shell keys) + the shell display still shows 2. Empirically confirms the finding-#5
+   "route seed carries no shell keys" claim. (Also found+fixed a happy-dom listener-accumulation leak
+   in the test harness via per-test fresh-document register/unregister; and used the canonical
+   helper-fn onclick form after `onclick=@count = @count + 1` mis-parsed the `+ 1` — a pre-existing
+   unquoted-attr limitation, NOT Wave-1c.)
+3. [optional unify] SKIPPED per PA guidance — a shared `_scrml_boot_dispatch(fn)` helper would move
+   `_scrml_chunk_loading`/`addEventListener` OUT of the emitted client.js into the runtime, breaking
+   the engine-body-render + navigate-wave1c §5 emit-shape assertions (the exact churn the PA said to
+   avoid). The inline duplication is 2 small sites; drift risk documented here.
+Browser suite after: 611 pass / 12 fail (== pre-existing baseline; +2 new passing cross-chunk tests).
