@@ -207,3 +207,18 @@ cross-route hard-nav now flows through the Wave-1c chunk-load-failure fallback; 
   (render-by-tag ×5, each-per-item ×3, text-interp-lift ×4; identical set + count on the merge base).
   ZERO new browser regressions; the 4 cross-chunk tests pass. Cross-chunk browser + if-chain-null +
   error-boundary = 22/22.
+
+### DEPLOY-PATH R26 (content-hashed `scrml build` output) — PASS
+Beyond the unhashed browser test, executed a REAL `scrml build` (content-hashed) cross-chunk MPA in
+happy-dom: shell page live (runtime + index.client.<hash>.js), soft-nav to /reports injects
+reports.client.00ojuxat.js (hashed), evaluated. Result: shell `<h1>` SURVIVED ("Shell", no reload/
+reboot), outlet swapped to the route (`<h2>Reports`), the `<each>` re-rendered (3 li), and post-swap
+`_scrml_reactive_set("rows",[5])` re-rendered to 5 li. Proves the hashed-chunk detection fix + the
+whole Wave-1c path work on the DEPLOY output, not just dev/unhashed.
+
+## FINAL STATUS — Wave-1c COMPLETE (Option A, all 3 pieces + SPEC + gates)
+Commits (on branch, base 020485b2): survey (eedd4a62, cdd4eb4b) · Piece1 (86ee7b97) · Piece2+3+SPEC
+(abae85cd) · flag-redesign fix (3a8feab5). Gates: pre-commit (unit+integration+conformance) PASS
+(21085 tests, 0 fail); full browser suite 609 pass / 12 fail (== pre-existing baseline, zero new
+regressions); conformance conf-NAV-CROSS-CHUNK 9/9; R26 empirical (unhashed browser + hashed deploy)
+PASS. A latent deploy-path bug (hashed-chunk regex) was found + fixed en route.
