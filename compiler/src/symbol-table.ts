@@ -2733,17 +2733,33 @@ function walkClassifyCells(
 //   E-CELL-NO-RENDER-SPEC          — cell has no render-spec (Shape 1, Shape 3
 //                                    derived plain, Shape 3 markup-typed
 //                                    derived, or Variant C compound parent).
-//   E-CELL-RENDER-SPEC-NOT-BINDABLE — Shape 2 with non-bindable RHS markup
-//                                    (e.g., `<msg> = <div>...</div>`). Use
-//                                    Shape 3 (`const`) for display-only markup.
 //
-// The walker reads B5's `_cellKind` annotation + `decl.isConst` to disambiguate
-// the spec-distinct cases collapsed into B5's `"markup-typed"` bucket:
+// B6 has TWO fire sites, at two different scopes, and the split is deliberate:
+//
+//   USE-scoped  (`walkRenderByTagUses` / `checkRenderByTag`, PASS 5) —
+//     E-CELL-NO-RENDER-SPEC. "You rendered `<x/>` but that cell has nothing to
+//     render" is a property of the USE: the same decl is perfectly legal when
+//     read with `${@x}` instead. It can only be judged where the tag appears.
+//
+//   DECL-scoped (`walkNonBindableMarkupDecls`, PASS 5a) —
+//     E-CELL-RENDER-SPEC-NOT-BINDABLE. SPEC §6.2 Shape 2 states this one as a
+//     property of the DECLARATION — "The RHS markup is a non-input element" —
+//     and names the alternative (Shape 3 `const`). Nothing about it depends on
+//     a use site, so gating it behind one under-fired: `${@x}` interpolation,
+//     and a decl with no use at all, were silently accepted and lowered to
+//     `_scrml_reactive_set(name, null)` with the authored markup discarded.
+//
+// Both read B5's `_cellKind` annotation + `decl.isConst` to disambiguate the
+// spec-distinct cases collapsed into B5's `"markup-typed"` bucket:
 //
 //   markup-typed && isConst === true  → Shape 3 markup-typed derived
-//                                       → E-CELL-NO-RENDER-SPEC (SPEC §6.6.17 line 3027)
-//   markup-typed && isConst === false → Shape 2 non-bindable RHS
-//                                       → E-CELL-RENDER-SPEC-NOT-BINDABLE
+//                                       → E-CELL-NO-RENDER-SPEC at a `<x/>` use
+//                                         (SPEC §6.6.17 line 3027); the decl
+//                                         itself is LEGAL — this is the
+//                                         sanctioned display-only markup cell.
+//   markup-typed && isConst !== true  → Shape 2 non-bindable RHS
+//                                       → E-CELL-RENDER-SPEC-NOT-BINDABLE at
+//                                         the DECL, once, use or no use.
 //
 // **Phase 0 dispositions (Bryan-ratified):**
 //
@@ -2825,29 +2841,126 @@ function makeNoRenderSpecDiagnostic(
 }
 
 /**
- * Build the diagnostic for E-CELL-RENDER-SPEC-NOT-BINDABLE at a `<tag/>`
- * use-site. The decl is Shape 2 with a non-bindable HTML element as the RHS
- * markup (e.g., `<msg> = <div>...</div>`). Spec mandates Shape 3 (`const`)
- * for display-only markup cells.
+ * Build the diagnostic for E-CELL-RENDER-SPEC-NOT-BINDABLE at the
+ * DECLARATION. The decl is Shape 2 with a non-bindable HTML element as the RHS
+ * markup (e.g., `<msg> = <div>...</div>`). Spec mandates Shape 3 (`const`) for
+ * display-only markup cells.
+ *
+ * DECL-SCOPED, not use-scoped — SPEC §6.2 Shape 2 states the rule as a property
+ * of the declaration ("The RHS markup is a non-input element"), with no mention
+ * of a use site. Firing only at `<x/>` render-by-tag uses (as this did) left
+ * `${@x}` interpolation — and a decl with no use at all — silently accepted and
+ * lowered to `_scrml_reactive_set(name, null)`, discarding the authored markup
+ * with no diagnostic. The declaration is the offending construct and the only
+ * place the author can fix it, so it is the only place this fires.
  */
-function makeNotBindableDiagnostic(
-  use: MinimalMarkupNode,
-  decl: ReactiveDeclNode,
-): SYMDiagnostic {
+function makeNotBindableDiagnostic(decl: ReactiveDeclNode): SYMDiagnostic {
   const cellName = decl.name;
   const renderTag = decl.renderSpec?.element?.tag ?? "(non-bindable)";
   return {
     code: B6_NOT_BINDABLE,
     message:
-      `${B6_NOT_BINDABLE}: \`<${cellName}/>\` render-by-tag use is illegal — `
-      + `the cell's render-spec root is \`<${renderTag}>\`, which is not a bindable `
-      + `form element. Shape 2 (\`<${cellName}> = <markup>\`) requires a bindable `
-      + `element (input, textarea, select). For display-only markup, use Shape 3: `
-      + `\`const <${cellName}> = <${renderTag}>...</${renderTag}>\` and reference via `
+      `${B6_NOT_BINDABLE}: \`<${cellName}> = <${renderTag}>...\` — the RHS markup is a `
+      + `non-input element. Shape 2 (\`<${cellName}> = <markup>\`) requires bindable `
+      + `markup (input, textarea, select), because the cell holds the element's VALUE. `
+      + `For a display-only markup cell use Shape 3: `
+      + `\`const <${cellName}> = <${renderTag}>...</${renderTag}>\`, then render it with `
       + `\`\${@${cellName}}\` interpolation. (SPEC §6.2 + §34.)`,
-    span: use.span,
+    span: decl.span,
     severity: "error",
   };
+}
+
+/**
+ * Walk every state-decl firing E-CELL-RENDER-SPEC-NOT-BINDABLE on the
+ * non-bindable-markup Shape 2 form. Recursion mirrors `walkClassifyCells`
+ * (PASS 4) exactly, so every decl B5 classified is also reached here —
+ * including Variant C compound children, which are themselves state-decls
+ * inside the parent's `children[]`.
+ *
+ * The predicate is B5's `_cellKind` annotation, NEVER the RHS markup shape.
+ * That distinction is load-bearing and easy to get wrong: a LEGAL Shape 2
+ * bindable cell (`<userName req> = <input type="text"/>`) also has a markup
+ * RHS, and also lowers to `_scrml_reactive_set("userName", null)` — the cell
+ * holds the input's value, which starts empty. The emitted symptom is
+ * byte-identical between the legal and the illegal form, so any check keying on
+ * "the RHS is markup" or on the emitted null-set turns every form input in the
+ * corpus into an error. `_cellKind` is the only signal that separates them:
+ * B5 classifies input/textarea/select as `"bindable"` and everything else with
+ * a non-`const` markup RHS as `"markup-typed"`.
+ */
+function walkNonBindableMarkupDecls(
+  nodes: ASTNode[] | undefined,
+  visited: WeakSet<object>,
+  errors: SYMDiagnostic[],
+): void {
+  if (!nodes) return;
+  for (const n of nodes) {
+    if (!n || typeof n !== "object") continue;
+    if (visited.has(n)) continue;
+    visited.add(n);
+    const anyN = n as any;
+    const kind = anyN.kind as string;
+
+    if (kind === "state-decl") {
+      const decl = n as ReactiveDeclNode;
+      checkDeclRenderSpecBindable(decl, errors);
+      if (Array.isArray(decl.children)) {
+        walkNonBindableMarkupDecls(decl.children as ASTNode[], visited, errors);
+      }
+      continue;
+    }
+
+    if (kind === "function-decl") {
+      walkNonBindableMarkupDecls(anyN.body, visited, errors);
+      continue;
+    }
+
+    if (Array.isArray(anyN.children)) walkNonBindableMarkupDecls(anyN.children, visited, errors);
+    if (Array.isArray(anyN.body)) walkNonBindableMarkupDecls(anyN.body, visited, errors);
+    if (Array.isArray(anyN.consequent)) walkNonBindableMarkupDecls(anyN.consequent, visited, errors);
+    if (Array.isArray(anyN.alternate)) walkNonBindableMarkupDecls(anyN.alternate, visited, errors);
+    if (Array.isArray(anyN.arms)) {
+      for (const arm of anyN.arms) {
+        if (arm && Array.isArray(arm.body)) walkNonBindableMarkupDecls(arm.body, visited, errors);
+      }
+    }
+    if (kind === "lift-expr" && anyN.expr && anyN.expr.kind === "markup" && anyN.expr.node) {
+      walkNonBindableMarkupDecls([anyN.expr.node], visited, errors);
+    }
+  }
+}
+
+/**
+ * The decl-scoped bindability check for one state-decl. Fires at most once.
+ *
+ * The `markup-typed` bucket collapses two spec-distinct cases, and `isConst`
+ * is what separates them — the SAME discrimination `checkRenderByTag` applies,
+ * deliberately spelled the same way (`=== true`) so the two sites cannot drift:
+ *
+ *   markup-typed && isConst === true  -> Shape 3 markup-typed derived. LEGAL —
+ *                                        this is the sanctioned door for a
+ *                                        display-only markup cell (§6.2).
+ *   markup-typed && isConst !== true  -> Shape 2 with a non-bindable RHS. FIRES.
+ */
+function checkDeclRenderSpecBindable(
+  decl: ReactiveDeclNode,
+  errors: SYMDiagnostic[],
+): void {
+  if (getCellKind(decl) !== "markup-typed") return;
+  // Shape 3 (`const`) is the SPEC-named alternative, not the error.
+  if (decl.isConst === true) return;
+  // Phase 0 §3.2 — a PascalCase RHS is a COMPONENT render-spec. Deciding
+  // whether a component exposes a bindable prop needs the component prop
+  // catalog (B14/M18/M20), so those are still accepted silently here. Mirrors
+  // the identical deferral in `checkRenderByTag`; tightening one without the
+  // other would make the decl and use sites disagree.
+  const renderTag = decl.renderSpec?.element?.tag;
+  if (typeof renderTag === "string" && renderTag.length > 0) {
+    const rFirst = renderTag.charCodeAt(0);
+    if (rFirst >= 65 && rFirst <= 90) return;
+  }
+  errors.push(makeNotBindableDiagnostic(decl));
 }
 
 /**
@@ -2922,19 +3035,12 @@ function checkRenderByTag(
         errors.push(makeNoRenderSpecDiagnostic(node, declNode, cellKind));
         return;
       }
-      // Shape 2 non-bindable RHS — but defer if PascalCase RHS (component).
-      // Phase 0 §3.2 — deferred to B14/M18/M20 component-prop-catalog work.
-      const renderTag = declNode.renderSpec?.element?.tag;
-      if (typeof renderTag === "string" && renderTag.length > 0) {
-        const rFirst = renderTag.charCodeAt(0);
-        if (rFirst >= 65 && rFirst <= 90) {
-          // PascalCase RHS — component render-spec; needs prop-catalog.
-          // B6 v1 accepts silently; B14/M18/M20 will extend with the
-          // bindable-prop check.
-          return;
-        }
-      }
-      errors.push(makeNotBindableDiagnostic(node, declNode));
+      // Shape 2 non-bindable RHS. NOT fired here — `checkDeclRenderSpecBindable`
+      // already fired E-CELL-RENDER-SPEC-NOT-BINDABLE at the DECLARATION, which
+      // is where SPEC §6.2 states the rule and the only place the author can fix
+      // it. Firing again on each `<x/>` use would emit N diagnostics for one
+      // defect, and would report the first of them on a use site whose only
+      // fault is naming a cell that was already invalid at birth.
       return;
     }
   }
@@ -10311,9 +10417,27 @@ function collectOutlets(
       ? [...openMains, node]
       : openMains;
   // `<page>` bodies are ROUTE content and `<outlet>` bodies are SLOT content —
-  // both leave shell scope for landmark purposes, permanently for the subtree.
-  const childInRouteScope =
-    inRouteScope || nodeTag === "page" || nodeTag === "outlet";
+  // both leave shell scope for landmark purposes, for the rest of the subtree.
+  //
+  // ...but NOT across a nested `<program>`. This is the SIBLING of the
+  // `childOpenMains` reset directly above, and it exists for the same reason:
+  // "a nested `<program>` is a completely isolated compilation unit. It does NOT
+  // inherit any lexical bindings from its parent `<program>`" (SPEC §4.12.1).
+  // Route scope inherited from an OUTER `<page>` is precisely the parent's
+  // context leaking into that isolated unit. Without the reset `inRouteScope`
+  // latched true for the whole `<page>` subtree, so a nested `<program>` inside
+  // a `<page>` never re-opened shell scope, its `<main>` was never collected,
+  // and a textbook case-4 violation in the INNER shell was silently exempted:
+  //
+  //   <program><outlet/><page>
+  //     <program><outlet/><main>bare</main></program>   <-- fires only WITH the
+  //   </page></program>                                      reset
+  //
+  // The `<div>`-wrapped twin of that shape always fired; the two differed only
+  // in the wrapper element, which is not a difference the invariant recognises.
+  const childInRouteScope = isProgramMarkup
+    ? false
+    : inRouteScope || nodeTag === "page" || nodeTag === "outlet";
 
   const descend = (edge: any): void =>
     collectOutlets(
@@ -12290,6 +12414,16 @@ export function runSYM(input: SYMInput): SYMResult {
   // E-CELL-RENDER-SPEC-NOT-BINDABLE based on B5's `_cellKind` annotation +
   // `decl.isConst`. Phase 0 dispositions: compound-parent fires
   // E-CELL-NO-RENDER-SPEC (§3.1); PascalCase RHS deferred (§3.2).
+  // PASS 5a (B6, decl-scoped): fire E-CELL-RENDER-SPEC-NOT-BINDABLE on every
+  // non-`const` state-decl whose RHS markup is not a bindable element. SPEC
+  // §6.2 Shape 2 states this as a property of the DECLARATION, so it fires
+  // there and is independent of whether the cell is ever used — `${@x}`
+  // interpolation and no-use-at-all previously slipped through the use-site
+  // check entirely. Runs BEFORE the use-site walk so the decl diagnostic is
+  // reported ahead of any diagnostic on the markup that references it.
+  const visited5a = new WeakSet<object>();
+  walkNonBindableMarkupDecls(ast.nodes, visited5a, errors);
+
   const visited5 = new WeakSet<object>();
   walkRenderByTagUses(ast.nodes, fileScope, visited5, errors);
 

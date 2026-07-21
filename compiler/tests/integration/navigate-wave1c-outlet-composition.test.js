@@ -506,6 +506,51 @@ describe("§8 — shell-boundary scoping + the bare-`<main>` static path", () =>
     expect(errors.some((e) => e.code === "E-OUTLET-AND-MAIN")).toBe(true);
   });
 
+  // A nested `<program>` is "a completely isolated compilation unit [that] does
+  // NOT inherit any lexical bindings from its parent `<program>`" (SPEC §4.12.1).
+  // Route scope inherited from an OUTER `<page>` is exactly such an inheritance,
+  // so it must stop at the shell boundary — the twin of the open-mains reset
+  // asserted by the test above. The k01/k02 pair below is minimal: identical
+  // inner shell, identical inner violation, differing ONLY in whether the
+  // wrapper is a `<div>` or a `<page>`. Both must fire; before the fix k02 was
+  // silent, because `inRouteScope` latched true for the whole `<page>` subtree
+  // and the inner shell's `<main>` was never collected at all.
+  const INNER_SHELL_CASE4 = (wrapper) =>
+    `<program>\n  <outlet/>\n  <${wrapper}>\n    <program name="w"><outlet/><main>inner bare</main></program>\n  </${wrapper}>\n</program>\n`;
+
+  test("k01 — a nested `<program>` inside a `<div>`: the INNER shell's case-4 fires (guard)", () => {
+    const { errors } = buildDir("nested-program-in-div-case4", {
+      "app.scrml": INNER_SHELL_CASE4("div"),
+    });
+    const d = diagsOf(errors, "E-OUTLET-AND-MAIN");
+    // Exactly one: the INNER `<main>`. The outer shell owns no shell-scope
+    // `<main>` at all (the inner one re-parents to the inner shell), so a count
+    // of 2 here would mean the shell attribution itself had broken.
+    expect(d.length).toBe(1);
+    expect(d[0].span.line).toBe(4);
+  });
+
+  test("k02 — a nested `<program>` inside a `<page>`: route scope RESETS at the shell boundary (§4.12.1)", () => {
+    const { errors } = buildDir("nested-program-in-page-case4", {
+      "app.scrml": INNER_SHELL_CASE4("page"),
+    });
+    const d = diagsOf(errors, "E-OUTLET-AND-MAIN");
+    expect(d.length).toBe(1);
+    expect(d[0].span.line).toBe(4);
+  });
+
+  test("a `<page>`-scoped `<main>` NOT inside a nested shell still does not fire (case 3 preserved)", () => {
+    // The guard on the fix above: resetting route scope at a `<program>`
+    // boundary must not leak into resetting it at a plain element boundary.
+    // Without a nested shell, a `<main>` under a `<page>` is route content and
+    // stays exempt no matter how deeply it is wrapped.
+    const { errors } = buildDir("page-main-nested-in-div", {
+      "app.scrml":
+        `<program>\n  <outlet/>\n  <page>\n    <div><section><main>route</main></section></div>\n  </page>\n</program>\n`,
+    });
+    expect(diagsOf(errors, "E-OUTLET-AND-MAIN").length).toBe(0);
+  });
+
   test("an EMPTY bare `<main></main>` slot composes (it is still a slot)", () => {
     // Behaviour CHANGED by this PR (the `>` -> `>=` slot-bounds fix): before it,
     // an empty bare `<main></main>` shell silently no-op'd composition and the

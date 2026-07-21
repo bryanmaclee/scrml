@@ -348,3 +348,127 @@ describe("§B6.18 Unresolved lowercase tag", () => {
     expect(errsByCode(sym, "E-CELL-RENDER-SPEC-NOT-BINDABLE").length).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §B6.19 — E-CELL-RENDER-SPEC-NOT-BINDABLE is DECL-scoped, not use-scoped
+//
+// SPEC §6.2 Shape 2 states the rule as a property of the DECLARATION: "The RHS
+// markup is a non-input element (e.g., `<div>`, `<span>`). Shape 2 requires
+// bindable markup. Use Shape 3 (`const <derived>`) for display-only markup
+// cells." Nothing in that sentence mentions a use site.
+//
+// The check used to fire only at `<x/>` render-by-tag uses, so the two shapes
+// below — `${@x}` interpolation, and no use at all — were silently ACCEPTED and
+// lowered to `_scrml_reactive_set(x, null)`, discarding the authored markup with
+// no diagnostic at all. §B6.11/§B6.12 above pin the same two use-patterns for
+// Shape 1, where silence is correct; these pin them for the shape where it was
+// a hole.
+// ---------------------------------------------------------------------------
+
+describe("§B6.19 decl-scoped E-CELL-RENDER-SPEC-NOT-BINDABLE", () => {
+  test("fires on `${@plain}` interpolation use (no render-by-tag use at all)", () => {
+    const src = `<program>\${ <plain> = <span class="p">yo</span> }<div>\${@plain}</div></program>`;
+    const { sym } = buildAndRun(src);
+    const fires = errsByCode(sym, "E-CELL-RENDER-SPEC-NOT-BINDABLE");
+    expect(fires.length).toBe(1);
+    expect(fires[0].message).toContain("plain");
+    expect(fires[0].severity).toBe("error");
+  });
+
+  test("fires on a decl with NO use anywhere", () => {
+    const src = `<program>\${ <plain> = <span class="p">yo</span> }<div>hi</div></program>`;
+    const { sym } = buildAndRun(src);
+    const fires = errsByCode(sym, "E-CELL-RENDER-SPEC-NOT-BINDABLE");
+    expect(fires.length).toBe(1);
+    expect(fires[0].message).toContain("plain");
+  });
+
+  test("fires EXACTLY ONCE with a `<plain/>` render-by-tag use — no double-fire", () => {
+    // The decl-scoped fire and the old use-site fire must not both land. One
+    // offending declaration, one diagnostic.
+    const src = `<program>\${ <plain> = <span class="p">yo</span> }<plain/></program>`;
+    const { sym } = buildAndRun(src);
+    expect(errsByCode(sym, "E-CELL-RENDER-SPEC-NOT-BINDABLE").length).toBe(1);
+  });
+
+  test("fires ONCE even with THREE `<plain/>` uses — the count tracks decls, not uses", () => {
+    // The sharpest no-double-fire probe: under the old use-site rule this shape
+    // emitted 3. Contrast §B6.16, where Shape 1's E-CELL-NO-RENDER-SPEC
+    // correctly DOES fire per use, because that one really is a use-site fault.
+    const src = `<program>\${ <plain> = <span>yo</span> }<plain/><div><plain/></div><span><plain/></span></program>`;
+    const { sym } = buildAndRun(src);
+    expect(errsByCode(sym, "E-CELL-RENDER-SPEC-NOT-BINDABLE").length).toBe(1);
+  });
+
+  test("the diagnostic is reported at the DECLARATION, not at the use site", () => {
+    const src = `<program>\${ <plain> = <span>yo</span> }<plain/></program>`;
+    const { sym } = buildAndRun(src);
+    const fires = errsByCode(sym, "E-CELL-RENDER-SPEC-NOT-BINDABLE");
+    expect(fires.length).toBe(1);
+    // The `<plain/>` use is the LAST occurrence in the source; the decl comes
+    // first. A span at or past the use would mean the old anchoring survived.
+    expect(fires[0].span.start).toBeLessThan(src.lastIndexOf("<plain/>"));
+  });
+
+  test("two distinct offending decls fire twice — one diagnostic each", () => {
+    const src = `<program>\${ <a> = <span>x</span>; <b> = <div>y</div> }<p>\${@a}\${@b}</p></program>`;
+    const { sym } = buildAndRun(src);
+    const fires = errsByCode(sym, "E-CELL-RENDER-SPEC-NOT-BINDABLE");
+    expect(fires.length).toBe(2);
+    expect(fires.filter((e) => e.message.includes("<a>")).length).toBe(1);
+    expect(fires.filter((e) => e.message.includes("<b>")).length).toBe(1);
+  });
+
+  // -- THE TRAP: these guards are the reason the check keys on `_cellKind` --
+  //
+  // A LEGAL Shape 2 bindable cell also has a markup RHS, and also lowers to
+  // `_scrml_reactive_set(name, null)` — the cell holds the input's VALUE, which
+  // starts empty. The emitted symptom is byte-identical to the broken case, so
+  // any check keying on "the RHS is markup" makes every form input in the
+  // corpus an error. Only `_cellKind` separates them.
+
+  test("REGRESSION — a bindable `<input>` RHS with NO use stays clean", () => {
+    const src = `<program>\${ <userName req> = <input type="text"/> }<div>hi</div></program>`;
+    const { sym } = buildAndRun(src);
+    expect(errsByCode(sym, "E-CELL-RENDER-SPEC-NOT-BINDABLE").length).toBe(0);
+  });
+
+  test("REGRESSION — bindable `<textarea>` / `<select>` RHS with only `${@x}` use stay clean", () => {
+    const src = `<program>\${ <bio> = <textarea/>; <role> = <select/> }<p>\${@bio}\${@role}</p></program>`;
+    const { sym } = buildAndRun(src);
+    expect(errsByCode(sym, "E-CELL-RENDER-SPEC-NOT-BINDABLE").length).toBe(0);
+  });
+
+  test("REGRESSION — Shape 3 `const` markup cell with `${@badge}` use stays clean", () => {
+    // `const` IS the SPEC-named alternative this diagnostic points authors at.
+    // If the decl check ever fired here it would reject its own remediation.
+    const src = `<program>\${ const <badge> = <span class="b">B</span> }<p>\${@badge}</p></program>`;
+    const { sym } = buildAndRun(src);
+    expect(errsByCode(sym, "E-CELL-RENDER-SPEC-NOT-BINDABLE").length).toBe(0);
+  });
+
+  test("REGRESSION — Shape 1 `<count> = 0` (no markup RHS) unaffected", () => {
+    const src = `<program>\${ <count> = 0 }<p>\${@count}</p></program>`;
+    const { sym } = buildAndRun(src);
+    expect(errsByCode(sym, "E-CELL-RENDER-SPEC-NOT-BINDABLE").length).toBe(0);
+  });
+
+  test("REGRESSION — a PascalCase (component) RHS stays deferred, not newly rejected", () => {
+    // Phase 0 §3.2: deciding whether a component exposes a bindable prop needs
+    // the component prop catalog (B14/M18/M20). The decl check mirrors the
+    // use-site deferral rather than tightening one side of it.
+    const src = `<program>\${ <widget> = <MyComp/> }<p>\${@widget}</p></program>`;
+    const { sym } = buildAndRun(src);
+    expect(errsByCode(sym, "E-CELL-RENDER-SPEC-NOT-BINDABLE").length).toBe(0);
+  });
+
+  test("the message names the RHS tag and the Shape 3 `const` remediation", () => {
+    const src = `<program>\${ <plain> = <span>yo</span> }</program>`;
+    const { sym } = buildAndRun(src);
+    const f = errsByCode(sym, "E-CELL-RENDER-SPEC-NOT-BINDABLE")[0];
+    expect(f).toBeDefined();
+    expect(f.message).toContain("<span>");
+    expect(f.message).toContain("const <plain>");
+    expect(f.message).toMatch(/input, textarea, select/);
+  });
+});
