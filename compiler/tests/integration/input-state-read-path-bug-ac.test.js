@@ -177,17 +177,12 @@ describe("S144 Bug AC — input-state read path resolves through registry", () =
       // Strip the <script> tags from the HTML body — we wire the JS ourselves.
       document.body.innerHTML = bodyMatch[1].replace(/<script[\s\S]*?<\/script>/gi, "");
 
-      // navigate-wave1c — the compiled event-wiring boot is readyState-gated: on a
-      // real end-of-body `<script>` load `document.readyState` is "loading", so the
-      // boot DEFERS to DOMContentLoaded. happy-dom defaults to "interactive", which
-      // would boot immediately at exec() — BEFORE the mousemove below — so the
-      // one-shot `<#cursor>` read would capture (0,0). Force "loading" here to model
-      // the real end-of-body load so the read fires at the DCL dispatch (after the
-      // mousemove), matching browser timing.
-      Object.defineProperty(document, "readyState", { configurable: true, get: () => "loading" });
-
       // Execute runtime + compiled client in a single scope (the client refs
       // runtime globals like _scrml_input_state_registry / _scrml_input_mouse_create).
+      // navigate-wave1c: the event-wiring boot defers to DOMContentLoaded on an
+      // initial load (the `_scrml_chunk_loading` eager path fires ONLY for a chunk
+      // injected during a soft-nav), so the one-shot `<#cursor>` read still runs at
+      // the DCL dispatch below (after the mousemove) — original timing preserved.
       const exec = new Function("window", "document", `${runtimeJs}\n${clientJs}\n`);
 
       // 1) ReferenceError gate — executing the compiled output must NOT throw.

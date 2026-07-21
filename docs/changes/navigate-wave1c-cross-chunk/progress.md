@@ -189,3 +189,21 @@ cross-route hard-nav now flows through the Wave-1c chunk-load-failure fallback; 
   (both forms); the per-content hash is stable so shell-chunk basename matching still holds across pages.
 - Wildcard-test collision fix: emit-variant-guard's readyState guard used `} else {`, tripping the
   match-block §3 "no default-arm else" regression grep; rewrote as two `if`s (no `else {`).
+
+### Piece 2 REDESIGN — flag-gated boot (not readyState) — full browser suite triage
+- The readyState-gated boot (`if readyState==='loading' defer else boot-now`) regressed 7 happy-dom
+  browser tests (g-if-chain-branch-display-null-interp ×6, browser-error-boundary ×1): happy-dom's
+  document.readyState is "interactive" (not "loading"), so the boot ran at EVAL time instead of at the
+  test's manual DOMContentLoaded dispatch — a test-harness timing artifact (a REAL end-of-body script
+  loads at readyState "loading", so real-browser behavior was unchanged). Confirmed via a merge-base
+  source run: those 7 PASS on merge-base, fail on the readyState build.
+- REDESIGN (strictly better): the initial-load boot keeps the ORIGINAL pure
+  `document.addEventListener("DOMContentLoaded", _scrml_boot)` (byte-for-byte unchanged → the 7 pass
+  again). Eager boot fires ONLY for an INJECTED chunk, gated on a NEW runtime flag `_scrml_chunk_loading`
+  that `_scrml_nav_load_chunks` sets true around each `<script>` injection (the chunk's IIFE reads it,
+  then onload clears it). emit-event-wiring.ts + emit-variant-guard.ts emit the flag guard; the
+  readyState test-hack in input-state-read-path-bug-ac.test.js was reverted.
+- Full browser suite AFTER redesign: 609 pass / 12 fail — the 12 are EXACTLY the pre-existing baseline
+  (render-by-tag ×5, each-per-item ×3, text-interp-lift ×4; identical set + count on the merge base).
+  ZERO new browser regressions; the 4 cross-chunk tests pass. Cross-chunk browser + if-chain-null +
+  error-boundary = 22/22.

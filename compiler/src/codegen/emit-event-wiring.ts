@@ -638,19 +638,19 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
 
   lines.push("");
   lines.push("// --- Event handler wiring (compiler-generated) ---");
-  // navigate-wave1c — the boot runs when the DOM is ready. On the INITIAL page
-  // load an end-of-body `<script>` executes while `document.readyState` is still
-  // "loading" (the parser hasn't fired DOMContentLoaded yet), so we defer to
-  // DOMContentLoaded exactly as before — zero behavior change. But a chunk
-  // INJECTED after the page has booted (a cross-chunk soft-nav loading a route's
-  // client chunk, §20.8.2) runs with `readyState` already "interactive"/"complete";
-  // DOMContentLoaded has fired and will NOT fire again, so we boot it immediately
-  // — this is what lets an injected route chunk register its delegable handlers,
-  // its `_scrml_nav_rewire` rehydrator, and its if=/each wiring. The boot fn is
-  // wrapped in an IIFE so it needs no global name (classic scripts share one
-  // global scope across chunks). Shared document-level listeners
-  // (`_scrml_link_ensure_click` / popstate) are idempotent-guarded at their own
-  // sites, so a re-run boot never double-registers them.
+  // navigate-wave1c — the boot dispatch. An INITIAL page load defers to
+  // DOMContentLoaded exactly as before (zero behavior change — scrml emits its
+  // scripts at end-of-<body>, so DCL has not fired yet). But a chunk INJECTED
+  // after the page has booted (a cross-chunk soft-nav loading a route's client
+  // chunk, §20.8.2) runs when DCL has ALREADY fired and will not fire again, so it
+  // must boot immediately. The runtime's chunk-loader sets `_scrml_chunk_loading`
+  // ONLY around such an injection (runtime-template.js `_scrml_nav_load_chunks`),
+  // so an ordinary initial load never takes the eager path — this leaves the
+  // initial-load boot timing byte-for-byte unchanged. The boot fn is wrapped in an
+  // IIFE so it needs no global name (classic scripts share one global scope across
+  // chunks). Shared document-level listeners (`_scrml_link_ensure_click` /
+  // popstate) are idempotent-guarded at their own sites, so a re-run boot never
+  // double-registers them.
   lines.push("(function() {");
   lines.push("function _scrml_boot() {");
 
@@ -2052,13 +2052,15 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     lines.push('  if (typeof _scrml_register_rehydrator === "function") _scrml_register_rehydrator(_scrml_nav_rewire);');
   }
 
-  // Close `function _scrml_boot()` + the readyState-gated boot dispatch + the IIFE
-  // (navigate-wave1c — see the opening comment at the DOMContentLoaded site).
+  // Close `function _scrml_boot()` + the boot dispatch + the IIFE (navigate-wave1c
+  // — see the opening comment). An injected route chunk (`_scrml_chunk_loading`)
+  // boots now; an initial load defers to DOMContentLoaded (unchanged).
   lines.push("}");
-  lines.push('if (typeof document !== "undefined" && document.readyState === "loading") {');
-  lines.push('  document.addEventListener("DOMContentLoaded", _scrml_boot);');
-  lines.push("} else {");
+  lines.push('if (typeof document === "undefined") { return; }');
+  lines.push('if (typeof _scrml_chunk_loading !== "undefined" && _scrml_chunk_loading) {');
   lines.push("  _scrml_boot();");
+  lines.push("} else {");
+  lines.push('  document.addEventListener("DOMContentLoaded", _scrml_boot);');
   lines.push("}");
   lines.push("})();");
 
