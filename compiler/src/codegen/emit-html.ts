@@ -9,6 +9,7 @@ import { emitExprField } from "./emit-expr.ts";
 import { extractReactiveDeps, collectReactiveVarNames, extractReactiveDepsTransitive, buildFunctionBodyRegistry, collectRequestIds } from "./reactive-deps.ts";
 import { hasTemplateInterpolation } from "./rewrite.js";
 import { isRcdataElement, isHtmlElement } from "../html-elements.js";
+import { isAuthorMainTag } from "../landmark-tag.ts";
 import { CGError } from "./errors.ts";
 import * as acorn from "acorn";
 import type { BindingRegistry } from "./binding-registry.ts";
@@ -1003,6 +1004,12 @@ function _validatorAttrsForCell(declNode: any): Array<{ name: string; value: { k
  * `WeakSet` cycle guard: AST nodes carry parent/owner backrefs in places.
  */
 function treeHasAuthorMain(root: any): boolean {
+  // The tag test is `isAuthorMainTag` (src/landmark-tag.ts) — SHARED with the
+  // SYM-side `collectOutlets`, because these two walks decide two halves of one
+  // question and must not answer "is `<MAIN>` a `<main>`?" differently.
+  // It is case-INSENSITIVE (HTML element names are), but guarded via NR's
+  // `resolvedKind` so a legal component named `Main` is not mistaken for the
+  // landmark. See that module for the full capitalization rule.
   const seen = new WeakSet<object>();
   function walk(n: any): boolean {
     if (!n || typeof n !== "object") return false;
@@ -1012,7 +1019,7 @@ function treeHasAuthorMain(root: any): boolean {
       for (const item of n) if (walk(item)) return true;
       return false;
     }
-    if (n.kind === "markup" && (n.tag ?? n.tagName ?? "") === "main") return true;
+    if (isAuthorMainTag(n)) return true;
     for (const key of Object.keys(n)) {
       // `span` is a position record (file/start/end/line/col) present on every
       // node — never markup. Skipping it is a meaningful walk-cost saving.

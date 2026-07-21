@@ -110,7 +110,23 @@ function strippedBody(html) {
  * live DOM — so inert content is stripped before counting.
  */
 function mainCount(html) {
-  return (strippedBody(html).match(/<main\b/g) || []).length;
+  // `/gi`, NOT `/g`. HTML element names are ASCII case-insensitive, so `<MAIN>`
+  // is a landmark to a browser. A case-SENSITIVE oracle shares the exact blind
+  // spot the implementation had (`=== "main"`) and scores a document emitting
+  // `<main data-scrml-outlet></main> <MAIN>m</MAIN>` — two live landmarks — as
+  // a compliant 1. That is the S276 failure mode a second time: an oracle
+  // written from the same assumption as the code cannot see the bug class.
+  return (strippedBody(html).match(/<main\b/gi) || []).length;
+}
+
+/**
+ * All diagnostics of one code, so a test can pin HOW MANY fired and WHERE.
+ * `.some(e => e.code === …)` is one bit wide: it passes when the code fires
+ * twice, or on the wrong node — which is how the degenerate-span defect
+ * (every new diagnostic reporting L1:C1) shipped through a green suite.
+ */
+function diagsOf(errors, code) {
+  return errors.filter((e) => e.code === code);
 }
 
 /**
@@ -561,4 +577,290 @@ describe("§9 — an outlet PLACEHOLDER `<main>` is not the document's landmark"
     expect(markerOpenTag(app)).toMatch(/^<div\b/);
     expect(app).toContain("PLACEHOLDER-MAIN");
   });
+});
+
+// ---------------------------------------------------------------------------
+// §10 — the COLLECTOR'S REACH. SYM PASS 15.5 (`collectOutlets`, symbol-table.ts)
+// used to descend a hand-listed edge set; its emit-side twin `treeHasAuthorMain`
+// (codegen/emit-html.ts) has always been a TOTAL walk. So the two disagreed
+// about which `<main>` elements exist, and every shape below compiled CLEAN
+// while emit demoted the slot on account of a `<main>` the collector could not
+// see — leaving documents with ZERO rendered landmarks.
+//
+// The missed edges were `armBodyChildren` (match block-form arms),
+// `bodyChildren` (engine state-children AND `<each>` bodies) and
+// `templateChildren`. The header comment claimed coverage of "arms[].body",
+// an edge name those node kinds do not carry.
+//
+// The collector is now a total walk too. These pin BOTH halves: the diagnostic
+// fires, AND (for the legal shapes) the emitted document carries exactly one
+// rendered landmark.
+// ---------------------------------------------------------------------------
+
+/** A `${...}` logic block declaring the enum + cell the match fixtures drive. */
+const PHASE_DECLS = `\${\n  type Phase:enum = { A, B }\n  <phase>: Phase = .A\n}`;
+/** Engines auto-declare their own cell from `for=`/`initial=` — type only. */
+const PHASE_TYPE_ONLY = `\${\n  type Phase:enum = { A, B }\n}`;
+
+describe("§10 — `<main>` / `<outlet>` inside match arms + engine state-children", () => {
+  // Every assertion below pins the diagnostic COUNT and the reported LINE, not
+  // just "the code appears somewhere". The one-bit `.some(…)` form is what let
+  // the degenerate-span defect ship: all of these reported L1:C1 (the
+  // `<program>` open tag) while passing a green suite.
+
+  test("a `<main>` in a NON-INITIAL match block-form arm fires E-OUTLET-AND-MAIN once, at the match", () => {
+    // The zero-landmark case in its purest form: arm `<B>` does not render on
+    // first paint, but emit's total walk saw its `<main>` and demoted the slot,
+    // so the composed document carried NO landmark at all. Verified pre-fix:
+    // codes=[] and rendered mainCount === 0.
+    const { errors } = buildDir("arm-main-fires", {
+      "app.scrml":
+        `<program>\n${PHASE_DECLS}\n<outlet/>\n<match for=Phase on=@phase>\n` +
+        `<A>\n<p>a</p>\n</>\n<B>\n<main>arm main</main>\n</>\n</match>\n</program>\n`,
+    });
+    const d = diagsOf(errors, "E-OUTLET-AND-MAIN");
+    expect(d).toHaveLength(1);
+    // L7 is the `<match>` opener. The `<main>` itself is at L12, but a
+    // match-arm subtree is sub-parsed and its spans are never rebased to file
+    // coordinates, so the pass falls back to the nearest enclosing node with a
+    // real span. L7 puts the author on the right construct; L1 did not.
+    expect(d[0].span.line).toBe(7);
+  });
+
+  test("a `<main>` in an ENGINE STATE-CHILD fires E-OUTLET-AND-MAIN once, on the `<main>` itself", () => {
+    // Engine state-child bodies hang off `bodyChildren[i].children[j]` — an edge
+    // the allow-list never carried. Landmark count here is state-DEPENDENT:
+    // 1 in the initial state, 0 after any transition. Still case 4.
+    // Engine state-child spans ARE rebased, so this one is exact.
+    const { errors } = buildDir("engine-main-fires", {
+      "app.scrml":
+        `<program>\n${PHASE_TYPE_ONLY}\n<outlet/>\n<engine for=Phase initial=.A>\n` +
+        `<A rule=.B><main>engine main</main></>\n<B rule=.A><p>b</p></>\n</engine>\n</program>\n`,
+    });
+    const d = diagsOf(errors, "E-OUTLET-AND-MAIN");
+    expect(d).toHaveLength(1);
+    expect(d[0].span.line).toBe(7);
+    expect(d[0].span.col).toBe(12);
+  });
+
+  test("a SECOND `<outlet>` in a match arm counts toward E-OUTLET-DUPLICATE, exactly once", () => {
+    // The V1 count ruling is STATIC across all edges: two outlets in mutually
+    // exclusive arms are still a duplicate. The pass header recorded that ruling
+    // verbatim while the walk did not implement it. Exactly ONE fires — the
+    // first outlet is canonical and stays silent.
+    const { errors } = buildDir("arm-outlet-dup", {
+      "app.scrml":
+        `<program>\n${PHASE_DECLS}\n<outlet/>\n<match for=Phase on=@phase>\n` +
+        `<A>\n<outlet/>\n</>\n<B>\n<p>b</p>\n</>\n</match>\n</program>\n`,
+    });
+    const d = diagsOf(errors, "E-OUTLET-DUPLICATE");
+    expect(d).toHaveLength(1);
+    expect(d[0].span.line).toBe(7);
+  });
+
+  test("a SECOND `<outlet>` in an engine state-child counts toward E-OUTLET-DUPLICATE, exactly once", () => {
+    // Pre-fix this compiled clean AND emitted TWO rendered
+    // `<main data-scrml-outlet>` landmarks — both outlets took the landmark
+    // because neither walker could see the other.
+    const { errors } = buildDir("engine-outlet-dup", {
+      "app.scrml":
+        `<program>\n${PHASE_TYPE_ONLY}\n<outlet/>\n<engine for=Phase initial=.A>\n` +
+        `<A rule=.B><outlet/></>\n<B rule=.A><p>b</p></>\n</engine>\n</program>\n`,
+    });
+    const d = diagsOf(errors, "E-OUTLET-DUPLICATE");
+    expect(d).toHaveLength(1);
+    expect(d[0].span.line).toBe(7);
+    expect(d[0].span.col).toBe(12);
+  });
+
+  test("a SECOND `<outlet>` in an `<each>` body counts toward E-OUTLET-DUPLICATE, exactly once", () => {
+    // Found by probe while verifying the brief's premise: `<each>` bodies hang
+    // off `bodyChildren`/`templateChildren` (ast-builder.js) — a THIRD missed
+    // edge name beyond the two the dispatch was scoped around, and the reason
+    // the fix is a total walk rather than three appended edge names.
+    const { errors } = buildDir("each-outlet-dup", {
+      "app.scrml":
+        `<program>\n<rows> = ["a"]\n<outlet/>\n<each in=@rows><outlet/></each>\n</program>\n`,
+    });
+    const d = diagsOf(errors, "E-OUTLET-DUPLICATE");
+    expect(d).toHaveLength(1);
+    expect(d[0].span.line).toBe(4);
+  });
+
+  test("REGRESSION GUARD — a COMPONENT-mounted `<main>` stays legal and yields exactly ONE landmark", () => {
+    // Row 4 of the ruling table and the one shape that must NOT fire. A
+    // component's `<main>` is not in the SYM AST at all (raw text pre-expansion),
+    // so the placement pass cannot see it — BY DESIGN, per SPEC §20.8.1.1. The
+    // component's `<main>` takes the landmark, the slot demotes to a `<div>`,
+    // and the document carries exactly one. Firing here would reject a program
+    // that compiles to valid, accessible HTML.
+    const { errors, read } = buildDir("component-main-legal", {
+      "app.scrml":
+        `<program>\n` +
+        `const Shell = <div class="shell">\n<main class="cmp">\${children}</main>\n</>\n` +
+        `<outlet/>\n<Shell><p>inside</p></Shell>\n</program>\n`,
+    });
+    expect(errors.some((e) => e.code === "E-OUTLET-AND-MAIN")).toBe(false);
+    expect(errors.some((e) => String(e.code).startsWith("E-OUTLET-"))).toBe(false);
+    const html = read("app.html");
+    expect(html).not.toBeNull();
+    // Assert the COUNT, not merely the absence of a diagnostic.
+    expect(mainCount(html)).toBe(1);
+    expect(tagBalance(html, "main").balanced).toBe(true);
+  });
+});
+
+describe("§10b — the landmark tag test is CASE-INSENSITIVE, but not naively", () => {
+  // HTML element names are ASCII case-insensitive, and the compiler passes an
+  // unrecognized capitalized tag through to the output verbatim — so `<MAIN>`
+  // really reaches the document and really is a landmark to a browser. Both
+  // walkers used `=== "main"` and could not see it; `mainCount` used `/g` and
+  // scored the resulting two-landmark document as a compliant 1.
+  //
+  // The guard matters as much as the fix: in scrml a CAPITALIZED tag is a
+  // COMPONENT reference, and ast-builder classifies component-vs-element by
+  // capitalization ALONE, so `<MAIN>` and a user's `<Main/>` both arrive with
+  // `isComponent: true`. A bare `toLowerCase()` test rejects legal programs.
+  // The discriminator is NR's `resolvedKind` (src/landmark-tag.ts).
+
+  test("`<MAIN>` alongside an `<outlet>` fires E-OUTLET-AND-MAIN once", () => {
+    const { errors } = buildDir("uppercase-main-fires", {
+      "app.scrml": `<program>\n<outlet/>\n<MAIN>m</MAIN>\n</program>\n`,
+    });
+    const d = diagsOf(errors, "E-OUTLET-AND-MAIN");
+    expect(d).toHaveLength(1);
+    expect(d[0].span.line).toBe(3);
+  });
+
+  test("a DEFINED component named `Main` is NOT the landmark (no false positive)", () => {
+    // Legal, working program: compiles clean, emits exactly one landmark (the
+    // outlet's). A naive case-insensitive tag test fires E-OUTLET-AND-MAIN here
+    // and, on the emit side, demotes the slot so the document renders ZERO.
+    const { errors, read } = buildDir("component-named-main", {
+      "app.scrml":
+        `<program>\nconst Main = <div class="cmp">c</>\n<outlet/>\n<Main/>\n</program>\n`,
+    });
+    expect(errors).toEqual([]);
+    const html = read("app.html");
+    expect(mainCount(html)).toBe(1);
+    // The slot keeps the landmark — nothing else claims it.
+    expect(markerOpenTag(html)).toMatch(/^<main\b/i);
+  });
+
+  test("a component named `Main` that CONTAINS a `<main>` still resolves to one landmark", () => {
+    // Component expansion is the case-3 family per SPEC §20.8.1.1: the
+    // component's `<main>` takes the landmark and the slot demotes. No
+    // diagnostic, exactly one landmark.
+    const { errors, read } = buildDir("component-main-inner", {
+      "app.scrml":
+        `<program>\nconst Main = <div class="cmp"><main>inner</main></>\n<outlet/>\n<Main/>\n</program>\n`,
+    });
+    expect(errors).toEqual([]);
+    const html = read("app.html");
+    expect(mainCount(html)).toBe(1);
+    expect(markerOpenTag(html)).toMatch(/^<div\b/i);
+  });
+});
+
+describe("§10c — KNOWN GAPS (pre-existing, filed, deliberately not asserted green)", () => {
+  // These two shapes are BROKEN on base and on tip alike. They are recorded
+  // here as skips rather than as passing assertions on purpose: a green test
+  // pinning today's broken output turns the eventual fix RED and reads to a
+  // future maintainer as intent. (S276 precedent — a test titled "…(nested)
+  // ALSO fires" locked in an overreach exactly that way.)
+
+  test.skip("GAP: an `<each>` NESTED IN A MATCH ARM is absent from the AST at PASS 15.5", () => {
+    // `<program>… <outlet/> <match><B><each in=@rows><main>m</main></each></></match>`
+    // compiles silent and the slot stays `<main data-scrml-outlet>`. BOTH
+    // walkers miss it, so they agree — on the wrong answer. `<each>` at top
+    // level, in an engine state-child, and in another `<each>` all DO fire, so
+    // this is an AST-completeness / pass-ordering gap, not a walker gap.
+  });
+
+  test.skip("GAP: an `if=`-guarded `<main>` wrapping the outlet renders ZERO landmarks", () => {
+    // `<main if=@show><outlet/></main>` emits an entirely EMPTY body — the
+    // whole subtree INCLUDING the slot is entombed in a `<template>`, so there
+    // is no addressable `[data-scrml-outlet]` in live DOM at all. `<page>` +
+    // `<main if=>` likewise demotes the slot and renders zero landmarks.
+  });
+});
+
+describe("§11 — the invariant itself, asserted on emitted HTML", () => {
+  // The S276 review found a test oracle that counted `<main` over the raw body
+  // and so shared the implementation's blind spot, letting an entire
+  // zero-landmark class through 16 green tests. `mainCount` strips
+  // `<template>` / `<script>` / `<style>` / comments before counting, so it
+  // counts RENDERED landmarks only — re-verified above before reuse here.
+  //
+  // Every LEGAL shape in this suite must land on exactly one. A shape that
+  // fires a diagnostic is exempt (it never reaches an emitted document).
+
+  const legalShapes = {
+    "outlet alone": {
+      files: { "app.scrml": `<program>\n<h1>S</h1>\n<outlet/>\n</program>\n` },
+      doc: "app.html",
+    },
+    "author `<main>` WRAPPING the outlet (case 2)": {
+      files: { "app.scrml": `<program>\n<main><outlet/></main>\n</program>\n` },
+      doc: "app.html",
+    },
+    "`<page>`-scoped `<main>`, single-file (case 3a)": {
+      files: {
+        "app.scrml":
+          `<program>\n<nav>chrome</nav>\n<outlet/>\n<page><main class="route">R</main></page>\n</program>\n`,
+      },
+      doc: "app.html",
+    },
+    "multi-file route bringing its own `<main>` (case 3b)": {
+      files: {
+        "index.scrml": `<program>\n<h1>Shell</h1>\n<outlet/>\n</program>\n`,
+        "pages/reports.scrml": `<page>\n<main class="route"><h2>R</h2></main>\n</page>\n`,
+      },
+      doc: "reports.html",
+    },
+    "multi-file route with NO `<main>` (slot keeps the landmark)": {
+      files: {
+        "index.scrml": `<program>\n<h1>Shell</h1>\n<outlet/>\n</program>\n`,
+        "pages/about.scrml": `<page>\n<h2>About</h2>\n</page>\n`,
+      },
+      doc: "about.html",
+    },
+    "bare `<main>` static back-compat, no outlet": {
+      files: {
+        "index.scrml": `<program>\n<h1>Static</h1>\n<main>ph</main>\n</program>\n`,
+        "pages/reports.scrml": `<page>\n<h2>R</h2>\n</page>\n`,
+      },
+      doc: "reports.html",
+    },
+    "outlet with placeholder children, composed": {
+      files: {
+        "index.scrml": `<program>\n<main>\n<outlet><div class="ph">sk</div></outlet>\n</main>\n</program>\n`,
+        "pages/about.scrml": `<page>\n<h2>About</h2>\n</page>\n`,
+      },
+      doc: "about.html",
+    },
+    "component-mounted `<main>` (row 4 — legal, no diagnostic)": {
+      files: {
+        "app.scrml":
+          `<program>\n` +
+          `const Shell = <div class="shell">\n<main class="cmp">\${children}</main>\n</>\n` +
+          `<outlet/>\n<Shell><p>inside</p></Shell>\n</program>\n`,
+      },
+      doc: "app.html",
+    },
+  };
+
+  for (const [name, { files, doc }] of Object.entries(legalShapes)) {
+    test(`exactly ONE rendered <main> — ${name}`, () => {
+      const id = "inv-" + name.replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 40);
+      const { errors, read } = buildDir(id, files);
+      // Legal shape: it must compile clean, otherwise it is exempt for the
+      // wrong reason and this row is not testing what it claims to test.
+      expect(errors).toEqual([]);
+      const html = read(doc);
+      expect(html).not.toBeNull();
+      expect(mainCount(html)).toBe(1);
+      expect(tagBalance(html, "main").balanced).toBe(true);
+    });
+  }
 });

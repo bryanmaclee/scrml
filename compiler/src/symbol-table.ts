@@ -155,6 +155,7 @@ import {
 } from "./native-walker/engine-statechild-walker.ts";
 // B18 — multi-statement event-handler validation helper.
 import { scanForTopLevelSemicolon } from "./multi-statement-scan.ts";
+import { isAuthorMainTag } from "./landmark-tag.ts";
 // B14 fix — `resolveModulePath` is the path-shape normalizer used by MOD when
 // it builds `exportRegistry` (keys are absolute, post-`resolveModulePath`).
 // Import-binding `sourcePath` is the LITERAL `imp.source` string — typically
@@ -10079,12 +10080,19 @@ function fireChannelSharedModifier(
 // outlet" §20.8.1). So collectOutlets descends BOTH arms of every conditional/
 // match and files each outlet under its shell — the twin of the ast-builder.js
 // W-OUTLET-ABSENT-SOFT-NAV-DISABLED scan (which for the SAME reason must count an outlet inside a
-// branch as PRESENT). Both walkers descend the identical full edge set.
+// branch as PRESENT).
 //
 // The walk carries the nearest enclosing `<program>` node so outlets partition
 // per-shell (a nested worker/sidecar `<program name=>` owns its own outlets).
-// Traversal shape mirrors walkChannelPlacement — children / body / defChildren
-// / consequent / alternate / arms[].body, with a WeakSet cycle guard.
+//
+// **Traversal is TOTAL, not an allow-list** — every object-valued property,
+// `span` excluded, WeakSet-cycle-guarded. It deliberately mirrors
+// `treeHasAuthorMain` (codegen/emit-html.ts:1005) because the two decide two
+// halves of ONE question (may the outlet take the `<main>` landmark, and is that
+// arrangement legal) and must not be able to disagree about which elements
+// exist. This pass previously mirrored walkChannelPlacement's hand-listed edge
+// set instead, which silently missed match-arm, engine-state-child and
+// `<each>` bodies — see the rationale block at the descent itself.
 
 /**
  * PASS 15.5 — validate `<outlet>` placement + count per SPEC §20.8.1.
@@ -10112,6 +10120,11 @@ function walkValidateOutlets(
   // `<main>`s that ENCLOSE an outlet — legal, so they never fire.
   const shellMains = new Map<object, any[]>();
   const wrappingMains = new WeakSet<object>();
+  // REPORTING SPAN per collected node — see `resolveReportSpan`. Nodes reached
+  // through a sub-parsed subtree (match arms, `<each>` bodies) carry spans that
+  // were never rebased to file coordinates, so their own `span` would point at
+  // L1:C1. This records the best available file-absolute position instead.
+  const reportSpans = new WeakMap<object, any>();
 
   collectOutlets(
     nodes,
@@ -10123,18 +10136,20 @@ function walkValidateOutlets(
     wrappingMains,
     /*openMains*/ [],
     /*inRouteScope*/ false,
+    reportSpans,
+    /*spanAnchor*/ null,
   );
 
   // E-OUTLET-OUTSIDE-SHELL — every outlet with no `<program>` ancestor.
   for (const outletNode of orphans) {
-    fireOutletOutsideShell(outletNode, errors, filePath);
+    fireOutletOutsideShell(outletNode, errors, filePath, reportSpans.get(outletNode));
   }
 
   // E-OUTLET-DUPLICATE — the 2nd..nth outlet within a single shell. The first
   // outlet in a shell is canonical (silent); each subsequent one fires.
   for (const outlets of byShell.values()) {
     for (let i = 1; i < outlets.length; i++) {
-      fireOutletDuplicate(outlets[i], errors, filePath);
+      fireOutletDuplicate(outlets[i], errors, filePath, reportSpans.get(outlets[i]));
     }
   }
 
@@ -10166,7 +10181,7 @@ function walkValidateOutlets(
     if (!mains) continue;
     for (const mainNode of mains) {
       if (wrappingMains.has(mainNode)) continue;
-      fireOutletAndMain(mainNode, errors, filePath);
+      fireOutletAndMain(mainNode, errors, filePath, reportSpans.get(mainNode));
     }
   }
 }
@@ -10190,6 +10205,9 @@ function walkValidateOutlets(
  *                      into the slot — never a competing shell landmark) or
  *                      inside an `<outlet>` (already the slot's own subtree).
  *                      `<main>`s below this point are not collected at all.
+ * @param reportSpans   out-param: node -> the span a diagnostic should report.
+ * @param spanAnchor    the nearest ancestor span known to be in FILE
+ *                      coordinates; the fallback for sub-parse-relative spans.
  */
 function collectOutlets(
   nodes: any,
@@ -10201,22 +10219,52 @@ function collectOutlets(
   wrappingMains: WeakSet<object>,
   openMains: any[],
   inRouteScope: boolean,
+  reportSpans: WeakMap<object, any>,
+  spanAnchor: any,
 ): void {
   if (!nodes) return;
+  if (typeof nodes !== "object") return;
+  // Cycle guard BEFORE the array branch: the total walk below reaches shared and
+  // back-referencing structures, so arrays need the same guard objects do.
+  if (visited.has(nodes)) return;
+  visited.add(nodes);
   if (Array.isArray(nodes)) {
     for (const n of nodes) {
       collectOutlets(
         n, enclosingProgram, byShell, orphans, visited,
         shellMains, wrappingMains, openMains, inRouteScope,
+        reportSpans, spanAnchor,
       );
     }
     return;
   }
-  if (typeof nodes !== "object") return;
-  if (visited.has(nodes)) return;
-  visited.add(nodes);
 
   const node = nodes as any;
+  // REPORTING SPAN. A subtree that the ast-builder produced by SUB-PARSING raw
+  // text (match-arm bodies via `armBodyChildren`, `<each>` bodies via
+  // `bodyChildren`/`templateChildren`) carries spans measured from the start of
+  // that sub-parse, never rebased to file coordinates — so the node's own span
+  // reads L1:C1. This is a general ast-builder gap, not an outlet one: an
+  // unrelated `E-STATE-UNDECLARED` inside a match arm mislocates identically.
+  //
+  // Detect it structurally rather than by pattern-matching L1:C1 — a span that
+  // starts BEFORE its own ancestor cannot be a real file position for a
+  // descendant. When that happens, report the nearest enclosing node that does
+  // have a file-absolute span (the arm / the `<each>`), which puts the author on
+  // the right construct instead of on the `<program>` open tag.
+  const ownSpan = node.span;
+  const anchorStart =
+    spanAnchor && typeof spanAnchor.start === "number" ? spanAnchor.start : -1;
+  const ownSpanIsAbsolute =
+    ownSpan && typeof ownSpan.start === "number" && ownSpan.start >= anchorStart;
+  const effectiveSpan = ownSpanIsAbsolute ? ownSpan : spanAnchor;
+  if (effectiveSpan) reportSpans.set(node, effectiveSpan);
+  // Structural tags (`outlet` / `program` / `page`) are matched lowercase — the
+  // canonical spelling the ast-builder produces for them. The `<main>` LANDMARK
+  // test is deliberately NOT this string compare: it is `isAuthorMainTag`
+  // (src/landmark-tag.ts), shared with emit's `treeHasAuthorMain`, because it
+  // must be case-insensitive (`<MAIN>` is a landmark to a browser) while still
+  // not swallowing a legal component named `Main`.
   const nodeTag = node.kind === "markup" ? (node.tag ?? "") : "";
 
   if (nodeTag === "outlet") {
@@ -10237,7 +10285,7 @@ function collectOutlets(
   // case 3) and one inside an `<outlet>` is already slot content, so neither
   // competes with the outlet for the shell's landmark. A `<main>` outside any
   // shell is the classic static composition slot and is likewise irrelevant here.
-  const isAuthorMain = nodeTag === "main";
+  const isAuthorMain = isAuthorMainTag(node);
   if (isAuthorMain && enclosingProgram && !inRouteScope) {
     const list = shellMains.get(enclosingProgram);
     if (list) list.push(node);
@@ -10271,46 +10319,68 @@ function collectOutlets(
     collectOutlets(
       edge, childProgram, byShell, orphans, visited,
       shellMains, wrappingMains, childOpenMains, childInRouteScope,
+      reportSpans, effectiveSpan ?? spanAnchor,
     );
 
-  if (Array.isArray(node.children)) {
-    descend(node.children);
-  }
-  if (Array.isArray(node.body)) {
-    descend(node.body);
-  }
-  if (Array.isArray(node.defChildren)) {
-    descend(node.defChildren);
-  }
-  if (Array.isArray(node.consequent)) {
-    descend(node.consequent);
-  }
-  if (Array.isArray(node.alternate)) {
-    descend(node.alternate);
-  }
-  if (Array.isArray(node.arms)) {
-    for (const arm of node.arms) {
-      if (arm && Array.isArray(arm.body)) {
-        descend(arm.body);
-      }
+  // TOTAL WALK — descend EVERY object-valued property, not a hand-listed edge
+  // set. This is the deliberate twin of `treeHasAuthorMain`
+  // (codegen/emit-html.ts:1005), and the two MUST agree: emit uses that walk to
+  // decide whether the outlet may take the `<main>` landmark, and this walk
+  // decides whether that arrangement is legal. Where one saw a node the other
+  // did not, the result was a silent correctness hole — which is what the
+  // allow-list this replaces produced (see below).
+  //
+  // SCOPE OF THE GUARANTEE — read this before trusting the walk:
+  // matching descent rules mean the two walkers can no longer disagree about
+  // any node PRESENT IN THE AST at this stage. It does NOT mean every author
+  // `<main>` is reachable. Totality of the walk is not totality of coverage,
+  // and two known classes sit outside it:
+  //
+  //   - an `<each>` NESTED INSIDE a match arm is absent from the AST at PASS
+  //     15.5 entirely (`<each>` at top level, in an engine state-child, and in
+  //     another `<each>` are all present and DO fire). Both walkers miss it and
+  //     therefore agree — on the wrong answer. That is an AST-completeness /
+  //     pass-ordering gap, not a walker gap; filed as a known-gap, not fixed
+  //     here.
+  //   - markup living in RAW STRING positions — component definition bodies,
+  //     `renders` clauses, `fallback={…}` attribute values — is unparsed text at
+  //     this stage, so no object walk can reach it. For component expansion this
+  //     is BY DESIGN and normative (SPEC §20.8.1.1: content-owned, no
+  //     diagnostic); for `renders` / `fallback` it is an open question.
+  //
+  // The allow-list this replaces descended `children` / `body` / `defChildren` /
+  // `consequent` / `alternate` / `arms[].body` / `branches[].element` /
+  // `elseBranch`, and its header claimed that set covered "BOTH arms of every
+  // conditional/match". It did not, and never had:
+  //
+  //   - a match block-form arm body hangs off `armBodyChildren[i].children[j]`
+  //     — `arms[].body` is not an edge these nodes carry at all;
+  //   - an engine state-child body hangs off `bodyChildren[i].children[j]`
+  //     (ast-builder.js:16760);
+  //   - an `<each>` body hangs off `bodyChildren` / `templateChildren`
+  //     (ast-builder.js:15911).
+  //
+  // So a `<main>` in a match arm alongside an `<outlet>` compiled CLEAN while
+  // emit's broad walk saw that `<main>`, concluded the document had an author
+  // landmark, and demoted the slot to a `<div>` — and a non-initial arm body
+  // does not render on first paint, so the composed document carried ZERO
+  // `<main>` landmarks. Two `<outlet>`s in those positions likewise both took
+  // the landmark and emitted TWO. Appending the three missing edge names would
+  // fix today's shapes and re-open the same hole on the next node kind that
+  // invents an edge; descending everything removes the edge list that has to be
+  // kept in sync with its twin in the first place (within the limits recorded
+  // under SCOPE OF THE GUARANTEE above).
+  //
+  // `span` is a position record (file/start/end/line/col) present on every node
+  // and never markup — the same exclusion `treeHasAuthorMain` makes, for the
+  // same reason. The `visited` WeakSet remains the cycle guard: a total walk
+  // reaches parent/owner backrefs, and without it those would loop.
+  for (const key of Object.keys(node)) {
+    if (key === "span") continue;
+    const value = node[key];
+    if (value && typeof value === "object") {
+      descend(value);
     }
-  }
-  // Markup if-chain (ast-builder.js:17624 — a `<el if=…>` … `<el else-if=…>` …
-  // `<el else>` chain) stores its branch elements in `branches[].element` +
-  // `elseBranch` (single markup nodes, NOT arrays), distinct from a logic-body
-  // `if` statement's `consequent`/`alternate`. Descending these is what makes an
-  // outlet in an if/else BRANCH count statically (V1 ruling: branch-exclusive
-  // outlets are still a duplicate). A single `<outlet if=…/>` with no else stays
-  // a plain markup node (reached via `children`) and needs no special edge.
-  if (Array.isArray(node.branches)) {
-    for (const br of node.branches) {
-      if (br && br.element) {
-        descend(br.element);
-      }
-    }
-  }
-  if (node.elseBranch) {
-    descend(node.elseBranch);
   }
 }
 
@@ -10323,8 +10393,9 @@ function fireOutletOutsideShell(
   outletNode: any,
   errors: SYMDiagnostic[],
   filePath: string,
+  reportSpan?: any,
 ): void {
-  const span: SYMDiagnostic["span"] = outletNode.span ?? {
+  const span: SYMDiagnostic["span"] = reportSpan ?? outletNode.span ?? {
     file: filePath, start: 0, end: 0, line: 1, col: 1,
   };
   errors.push({
@@ -10350,8 +10421,9 @@ function fireOutletDuplicate(
   outletNode: any,
   errors: SYMDiagnostic[],
   filePath: string,
+  reportSpan?: any,
 ): void {
-  const span: SYMDiagnostic["span"] = outletNode.span ?? {
+  const span: SYMDiagnostic["span"] = reportSpan ?? outletNode.span ?? {
     file: filePath, start: 0, end: 0, line: 1, col: 1,
   };
   errors.push({
@@ -10385,8 +10457,9 @@ function fireOutletAndMain(
   mainNode: any,
   errors: SYMDiagnostic[],
   filePath: string,
+  reportSpan?: any,
 ): void {
-  const span: SYMDiagnostic["span"] = mainNode.span ?? {
+  const span: SYMDiagnostic["span"] = reportSpan ?? mainNode.span ?? {
     file: filePath, start: 0, end: 0, line: 1, col: 1,
   };
   errors.push({
