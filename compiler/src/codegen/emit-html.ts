@@ -982,6 +982,50 @@ function _validatorAttrsForCell(declNode: any): Array<{ name: string; value: { k
 }
 
 /**
+ * navigate-wave1c (SPEC §20.8.1, the ONE-LANDMARK invariant) — does this markup
+ * tree contain an AUTHOR `<main>` element anywhere?
+ *
+ * `<outlet>` is NOT a dedicated AST node: it is an ordinary `kind: "markup"`
+ * node with `tag: "outlet"`, and so is `<main>`. There is therefore no typed
+ * edge set to consult — this walks EVERY array- and object-valued property, so
+ * it reaches `<main>`s hiding in shapes the typed walkers enumerate one by one
+ * (`children` / `body` / `arms[].body` / `branches[].element` / `elseBranch` /
+ * `fallback=` markup / `renders` clauses / …).
+ *
+ * Being broad is the POINT, not sloppiness. The caller uses this to decide
+ * whether the outlet may take the `<main>` landmark. A false positive costs a
+ * `<div data-scrml-outlet>` where a `<main data-scrml-outlet>` would also have
+ * been valid — invisible, since the marker (not the tag) identifies the slot.
+ * A false NEGATIVE emits two `<main>` elements in one document, which is
+ * invalid HTML and the exact defect the invariant exists to prevent. So the
+ * walk errs toward "yes".
+ *
+ * `WeakSet` cycle guard: AST nodes carry parent/owner backrefs in places.
+ */
+function treeHasAuthorMain(root: any): boolean {
+  const seen = new WeakSet<object>();
+  function walk(n: any): boolean {
+    if (!n || typeof n !== "object") return false;
+    if (seen.has(n)) return false;
+    seen.add(n);
+    if (Array.isArray(n)) {
+      for (const item of n) if (walk(item)) return true;
+      return false;
+    }
+    if (n.kind === "markup" && (n.tag ?? n.tagName ?? "") === "main") return true;
+    for (const key of Object.keys(n)) {
+      // `span` is a position record (file/start/end/line/col) present on every
+      // node — never markup. Skipping it is a meaningful walk-cost saving.
+      if (key === "span") continue;
+      const v = (n as any)[key];
+      if (v && typeof v === "object" && walk(v)) return true;
+    }
+    return false;
+  }
+  return walk(root);
+}
+
+/**
  * Generate HTML from markup AST nodes.
  * Also populates the BindingRegistry for client JS wiring.
  */
@@ -1251,6 +1295,20 @@ export function generateHtml(
   // choice follows from the compound parent being render-spec-less (E-CELL-NO-
   // RENDER-SPEC is the SELF-tag `<x/>` rule per §34:16466, NOT the block-wrapper).
   const enclosingCompoundStack: string[] = [];
+
+  // navigate-wave1c — ONE-LANDMARK invariant support (SPEC §20.8.1). Does the
+  // tree this invocation is lowering carry an AUTHOR `<main>` element anywhere?
+  // Consulted ONLY by the `<outlet>` branch, to decide whether the outlet may
+  // take the `<main>` landmark itself or must demote to a marked `<div>`.
+  //
+  // Computed lazily + memoized: outlets are rare (at most one per shell,
+  // §20.8.1) and `generateHtml` is re-entered per nested markup subtree, so an
+  // eager scan on every invocation would be pure waste.
+  let authorMainMemo: boolean | null = null;
+  function documentHasAuthorMain(): boolean {
+    if (authorMainMemo === null) authorMainMemo = treeHasAuthorMain(nodes);
+    return authorMainMemo;
+  }
 
   // Build the full variant -> renders JS-expr map ONCE (every enum's renders,
   // flattened by variant name). A boundary's catchable variants are not known
@@ -1573,24 +1631,25 @@ export function generateHtml(
         // renders here, and a soft navigation (§20.8.2) swaps this subtree with
         // the target route's `<outlet>` content over the live shell.
         //
-        // Wave-1a emits a stable, addressable region marker — a `<div
-        // data-scrml-outlet>` (mirroring the `data-scrml-each-mount` /
-        // `data-scrml-error-boundary` anchor convention). A `<div>` (not the raw
-        // `<outlet>` custom element) is the block-level region a page-content
-        // slot needs, and `[data-scrml-outlet]` is the impl-stable selector the
-        // Wave-1b runtime swap + focus (§20.8.5 item 3) will address.
+        // The emitted region is a stable, addressable container carrying the
+        // synthetic `data-scrml-outlet` marker (mirroring the
+        // `data-scrml-each-mount` / `data-scrml-error-boundary` anchor
+        // convention). `[data-scrml-outlet]` — the ATTRIBUTE, never the tag — is
+        // the impl-stable selector that both the runtime swap + focus (§20.8.5
+        // item 3) and the multi-file shell composition (§40.8, codegen/index.ts)
+        // address.
         //
         // Rather than reimplement `if=` guarding, class/id (interpolation-aware)
         // emission, and markup-parent child handling, we REWRITE the outlet to a
-        // `div` carrying a synthetic `data-scrml-outlet` marker + the outlet's
-        // own attrs, and DELEGATE to the generic markup path. That path already
-        // honors the universal `if=` directive (mount/unmount OR display-toggle),
-        // emits the registered `class` / `id` (static or `${}`-interpolated), and
-        // pushes the markup-parent context so a `<outlet>${x}</outlet>` logic
-        // child keeps its render slot. `selfClosing` is forced false so a
-        // `<outlet/>` void slot still emits the container form `<div…></div>`
-        // (never a `<div/>`, which HTML does not self-close). Re-entry is safe:
-        // the rewritten tag is `div`, so the outlet branch does not re-trigger.
+        // plain container element carrying that marker + the outlet's own attrs,
+        // and DELEGATE to the generic markup path. That path already honors the
+        // universal `if=` directive (mount/unmount OR display-toggle), emits the
+        // registered `class` / `id` (static or `${}`-interpolated), and pushes
+        // the markup-parent context so a `<outlet>${x}</outlet>` logic child
+        // keeps its render slot. `selfClosing` is forced false so a `<outlet/>`
+        // void slot still emits the container form `<el…></el>` (never `<el/>`,
+        // which HTML does not self-close). Re-entry is safe: the rewritten tag
+        // is `main`/`div`, so the outlet branch does not re-trigger.
         const outletMarkerAttr = { name: "data-scrml-outlet", value: null };
         // §20.8.5(3) focus-after-swap (navigate-wave1b) — the region is the
         // focus target the soft-nav runtime moves keyboard/AT focus to after a
@@ -1603,15 +1662,49 @@ export function generateHtml(
         const outletFocusAttrs = outletHasTabindex
           ? [outletMarkerAttr]
           : [outletMarkerAttr, { name: "tabindex", value: { kind: "string-literal", value: "-1" } }];
-        const outletDivNode = {
+
+        // navigate-wave1c — THE ONE-LANDMARK INVARIANT (SPEC §20.8.1).
+        //
+        //   Exactly one `<main>` landmark per composed document; the MARKER
+        //   decides the route slot, never the tag.
+        //
+        // The outlet region IS the page's primary content region, so when the
+        // document has no author `<main>` of its own the outlet is emitted AS
+        // the `<main>` landmark — `<main data-scrml-outlet tabindex="-1">`.
+        // That is what lets the §40.8 multi-file composition (codegen/index.ts)
+        // key on the marker and still produce a landmarked document.
+        //
+        // But the author may already own the landmark, in two legal shapes:
+        //
+        //   (a) the outlet is WRAPPED by an author `<main>`
+        //       (`<main><outlet/></main>`) — the author's `<main>` is the
+        //       landmark; and
+        //   (b) the route content carries its own `<main>`
+        //       (`<program><outlet/><page><main/></page></program>`) — in a
+        //       SINGLE-FILE program the `<page>` bodies emit inline into THIS
+        //       same document, so the route's `<main>` is already here.
+        //
+        // In both, emitting the outlet as a second `<main>` would produce two
+        // `<main>` elements in one document — invalid HTML. So the outlet
+        // DEMOTES to a `<div>`, keeping the marker + focus target. Nothing
+        // downstream cares: the marker, not the tag, identifies the slot.
+        //
+        // One predicate covers both: does this document carry an author
+        // `<main>` anywhere? Over-detection is the safe direction (a spurious
+        // `<div>` outlet is harmless; a spurious second `<main>` is not), so
+        // the scan is deliberately broad. The multi-file form of (b) — where
+        // the route body lives in another file — is handled at composition
+        // time in codegen/index.ts, which demotes the slot per composed page.
+        const outletTag = documentHasAuthorMain() ? "div" : "main";
+        const outletContainerNode = {
           ...node,
-          tag: "div",
-          tagName: "div",
+          tag: outletTag,
+          tagName: outletTag,
           selfClosing: false,
           attributes: [...outletFocusAttrs, ...attrs],
           attrs: [...outletFocusAttrs, ...attrs],
         };
-        emitNode(outletDivNode);
+        emitNode(outletContainerNode);
         return;
       }
 
