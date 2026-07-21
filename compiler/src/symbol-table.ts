@@ -10106,8 +10106,24 @@ function walkValidateOutlets(
   const byShell = new Map<object, any[]>();
   const orphans: any[] = [];
   const visited = new WeakSet<object>();
+  // navigate-wave1c — SHELL-scope author `<main>` elements per shell, for the
+  // E-OUTLET-AND-MAIN check. "Shell scope" excludes `<page>` bodies (route
+  // content, not shell chrome) and `<outlet>` bodies. `wrappingMains` are the
+  // `<main>`s that ENCLOSE an outlet — legal, so they never fire.
+  const shellMains = new Map<object, any[]>();
+  const wrappingMains = new WeakSet<object>();
 
-  collectOutlets(nodes, /*enclosingProgram*/ null, byShell, orphans, visited);
+  collectOutlets(
+    nodes,
+    /*enclosingProgram*/ null,
+    byShell,
+    orphans,
+    visited,
+    shellMains,
+    wrappingMains,
+    /*openMains*/ [],
+    /*inRouteScope*/ false,
+  );
 
   // E-OUTLET-OUTSIDE-SHELL — every outlet with no `<program>` ancestor.
   for (const outletNode of orphans) {
@@ -10121,6 +10137,38 @@ function walkValidateOutlets(
       fireOutletDuplicate(outlets[i], errors, filePath);
     }
   }
+
+  // E-OUTLET-AND-MAIN (navigate-wave1c) — THE ONE-LANDMARK INVARIANT, §20.8.1:
+  //
+  //   Exactly one `<main>` landmark per composed document; the MARKER decides
+  //   the route slot, never the tag.
+  //
+  // The `<outlet>` and an author `<main>` are BOTH candidate route slots, so a
+  // shell holding both is ambiguous — but only in ONE arrangement. The
+  // compiler resolves the other three, and they are legal:
+  //
+  //   1. `<outlet>` alone            -> the outlet emits AS the `<main>`.
+  //   2. `<main><outlet/></main>`    -> the author's `<main>` is the landmark;
+  //                                     the outlet demotes to a marked `<div>`.
+  //   3. a `<page>`-scoped `<main>`  -> route content owns the landmark; the
+  //                                     slot demotes to a marked `<div>`.
+  //   4. a BARE / SIBLING `<main>` next to the outlet -> ERROR. Two candidate
+  //      slots at the same level, two landmarks, and nothing in the source says
+  //      which one the route content belongs in. Only the author can resolve it.
+  //
+  // So this fires ONLY on case 4: an author `<main>` in SHELL scope (cases 3's
+  // `<page>`-scoped mains were never collected) that does NOT enclose an outlet
+  // (excluding case 2). Fired on the `<main>`, the element the author must move
+  // or remove.
+  for (const [shell, outlets] of byShell.entries()) {
+    if (outlets.length === 0) continue;
+    const mains = shellMains.get(shell);
+    if (!mains) continue;
+    for (const mainNode of mains) {
+      if (wrappingMains.has(mainNode)) continue;
+      fireOutletAndMain(mainNode, errors, filePath);
+    }
+  }
 }
 
 /**
@@ -10130,6 +10178,18 @@ function walkValidateOutlets(
  * check) or into `orphans` (for the outside-shell check). Descending through a
  * `<program>` re-parents subsequent outlets to that shell so a nested
  * worker/sidecar `<program>` owns its own outlet budget.
+ *
+ * navigate-wave1c adds the ONE-LANDMARK bookkeeping (§20.8.1) alongside:
+ *
+ * @param shellMains    per-shell author `<main>` elements in SHELL scope.
+ * @param wrappingMains the subset of those that ENCLOSE an outlet (legal —
+ *                      the author owns the landmark; the outlet demotes).
+ * @param openMains     the `<main>` elements currently open on the walk path;
+ *                      reaching an outlet marks all of them as wrapping.
+ * @param inRouteScope  true once inside a `<page>` (ROUTE content, composed
+ *                      into the slot — never a competing shell landmark) or
+ *                      inside an `<outlet>` (already the slot's own subtree).
+ *                      `<main>`s below this point are not collected at all.
  */
 function collectOutlets(
   nodes: any,
@@ -10137,11 +10197,18 @@ function collectOutlets(
   byShell: Map<object, any[]>,
   orphans: any[],
   visited: WeakSet<object>,
+  shellMains: Map<object, any[]>,
+  wrappingMains: WeakSet<object>,
+  openMains: any[],
+  inRouteScope: boolean,
 ): void {
   if (!nodes) return;
   if (Array.isArray(nodes)) {
     for (const n of nodes) {
-      collectOutlets(n, enclosingProgram, byShell, orphans, visited);
+      collectOutlets(
+        n, enclosingProgram, byShell, orphans, visited,
+        shellMains, wrappingMains, openMains, inRouteScope,
+      );
     }
     return;
   }
@@ -10150,8 +10217,9 @@ function collectOutlets(
   visited.add(nodes);
 
   const node = nodes as any;
+  const nodeTag = node.kind === "markup" ? (node.tag ?? "") : "";
 
-  if (node.kind === "markup" && (node.tag ?? "") === "outlet") {
+  if (nodeTag === "outlet") {
     if (enclosingProgram) {
       const list = byShell.get(enclosingProgram);
       if (list) list.push(node);
@@ -10159,32 +10227,63 @@ function collectOutlets(
     } else {
       orphans.push(node);
     }
+    // Every `<main>` open on the path to this outlet WRAPS it (ruling case 2),
+    // so it is the document's legitimate landmark and must not fire.
+    for (const m of openMains) wrappingMains.add(m);
+  }
+
+  // navigate-wave1c — record an author `<main>` under its shell. Only SHELL-
+  // scope mains are candidates: one inside a `<page>` is route content (ruling
+  // case 3) and one inside an `<outlet>` is already slot content, so neither
+  // competes with the outlet for the shell's landmark. A `<main>` outside any
+  // shell is the classic static composition slot and is likewise irrelevant here.
+  const isAuthorMain = nodeTag === "main";
+  if (isAuthorMain && enclosingProgram && !inRouteScope) {
+    const list = shellMains.get(enclosingProgram);
+    if (list) list.push(node);
+    else shellMains.set(enclosingProgram, [node]);
   }
 
   // Descend. A `<program>` node becomes the enclosing shell for its subtree.
-  const isProgramMarkup =
-    node.kind === "markup" && (node.tag ?? "") === "program";
+  const isProgramMarkup = nodeTag === "program";
   const childProgram = isProgramMarkup ? node : enclosingProgram;
+  // A `<main>` we are descending INTO joins the open-mains path, so an outlet
+  // found below marks it as wrapping. Only shell-scope mains are tracked —
+  // a route-scope `<main>` never fires, so wrapping-ness is moot for it.
+  const childOpenMains =
+    isAuthorMain && enclosingProgram && !inRouteScope
+      ? [...openMains, node]
+      : openMains;
+  // `<page>` bodies are ROUTE content and `<outlet>` bodies are SLOT content —
+  // both leave shell scope for landmark purposes, permanently for the subtree.
+  const childInRouteScope =
+    inRouteScope || nodeTag === "page" || nodeTag === "outlet";
+
+  const descend = (edge: any): void =>
+    collectOutlets(
+      edge, childProgram, byShell, orphans, visited,
+      shellMains, wrappingMains, childOpenMains, childInRouteScope,
+    );
 
   if (Array.isArray(node.children)) {
-    collectOutlets(node.children, childProgram, byShell, orphans, visited);
+    descend(node.children);
   }
   if (Array.isArray(node.body)) {
-    collectOutlets(node.body, childProgram, byShell, orphans, visited);
+    descend(node.body);
   }
   if (Array.isArray(node.defChildren)) {
-    collectOutlets(node.defChildren, childProgram, byShell, orphans, visited);
+    descend(node.defChildren);
   }
   if (Array.isArray(node.consequent)) {
-    collectOutlets(node.consequent, childProgram, byShell, orphans, visited);
+    descend(node.consequent);
   }
   if (Array.isArray(node.alternate)) {
-    collectOutlets(node.alternate, childProgram, byShell, orphans, visited);
+    descend(node.alternate);
   }
   if (Array.isArray(node.arms)) {
     for (const arm of node.arms) {
       if (arm && Array.isArray(arm.body)) {
-        collectOutlets(arm.body, childProgram, byShell, orphans, visited);
+        descend(arm.body);
       }
     }
   }
@@ -10198,12 +10297,12 @@ function collectOutlets(
   if (Array.isArray(node.branches)) {
     for (const br of node.branches) {
       if (br && br.element) {
-        collectOutlets(br.element, childProgram, byShell, orphans, visited);
+        descend(br.element);
       }
     }
   }
   if (node.elseBranch) {
-    collectOutlets(node.elseBranch, childProgram, byShell, orphans, visited);
+    descend(node.elseBranch);
   }
 }
 
@@ -10255,6 +10354,45 @@ function fireOutletDuplicate(
       `the current route's content renders (§20.8.1). Nested layouts (multiple / nested ` +
       `outlets, Remix-style) are v1.next. Remove the extra \`<outlet>\` so the shell ` +
       `declares one swap region. ` +
+      `(SPEC §20.8.1 + §34.)`,
+    span,
+    severity: "error",
+  });
+}
+
+/**
+ * Fire `E-OUTLET-AND-MAIN` per SPEC §20.8.1 + §34 (navigate-wave1c). Triggered
+ * ONLY on the ambiguous arrangement: a `<program>` shell holding an author
+ * `<main>` as a SIBLING of its `<outlet>` — two candidate route slots and two
+ * `<main>` landmarks at the same level, with nothing in the source saying which
+ * the route content belongs in.
+ *
+ * The three RESOLVABLE arrangements never reach here: a lone `<outlet>` becomes
+ * the `<main>` itself; a `<main>` WRAPPING the outlet keeps the landmark (the
+ * outlet demotes to a marked `<div>`); and a `<page>`-scoped `<main>` is route
+ * content, which the slot defers to. Fired on the `<main>` — the element the
+ * author must move or remove.
+ */
+function fireOutletAndMain(
+  mainNode: any,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const span: SYMDiagnostic["span"] = mainNode.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+  errors.push({
+    code: "E-OUTLET-AND-MAIN",
+    message:
+      `E-OUTLET-AND-MAIN: a \`<program>\` shell declares an author \`<main>\` as a SIBLING ` +
+      `of its \`<outlet>\`. Both are candidate route-content regions, and a document may ` +
+      `carry only one \`<main>\` landmark (§20.8.1), so which one the route content belongs ` +
+      `in is ambiguous — only you can say. Resolve it one of three ways: ` +
+      `(a) WRAP the outlet — \`<main><outlet/></main>\` — keeping your \`<main>\` as the ` +
+      `landmark; (b) REMOVE the \`<main>\` and let the \`<outlet>\` be the landmark (it ` +
+      `emits as \`<main data-scrml-outlet>\` when the document has no other \`<main>\`); or ` +
+      `(c) move that \`<main>\` INSIDE the \`<page>\` whose content it belongs to, making it ` +
+      `route content the outlet composes. ` +
       `(SPEC §20.8.1 + §34.)`,
     span,
     severity: "error",
