@@ -1,68 +1,71 @@
-# scrml — Session 276 (bryan) — WRAP
+# scrml — Session 277 (bryan) — WRAP
 
-**Date:** 2026-07-20 → 2026-07-21. A **recovery + adversarial-gate** session. Recovered S275's stranded continuity (the 4th unwrapped death), then took adopter #27 navigate Wave-1c from "complete, staged, uncommitted" to **PR-1 LANDED (#124)** — through THREE rounds of adversarial review that found **six BLOCKING defects**, every one past a green suite. Solo.
+**Date:** 2026-07-21. A **normative-grounding** session. Three PRs landed; the durable output is not the code — it is `pa-base v2.3`, hardened from three same-session failures of the same kind, on a project that now has live adopters. Solo.
 
 ## ⚠️ READ FIRST — state as of close
-- **scrml main = `c48e59a2`** (#124 Wave-1c PR-1). Coherence **0/0** both repos. Gate GREEN.
-- **Suite: 21012 pass / 0 fail / 68 skip.** Outlet suite 16 → **25**.
-- Mechanical state (counts / recent deltas / board) lives in `handOffs/delta-log.md` **[667]-[676]** and the flogence digest — not duplicated here.
+- **scrml main = `9481bc69`** (#128). Coherence **0/0** both repos. Gate GREEN.
+- **scrml-support = `f0fef98`** (`pa-base v2.3`), pushed.
+- Mechanical state (counts / deltas / board) lives in `handOffs/delta-log.md` **[677]-[702]** and the flogence digest — not duplicated here.
 
-## 🎬 WHAT LANDED — #124 (`c48e59a2`) Wave-1c PR-1
-Marker-driven MPA shell composition + the **ONE-LANDMARK invariant** (bryan-ruled S276):
-> *Exactly one `<main>` landmark per composed document; the MARKER decides the slot, never the tag.*
+## 🎬 WHAT LANDED
+| PR | SHA | what |
+|---|---|---|
+| **#126** | `499dd740` | outlet-collector **total-walk** + shared `landmark-tag.ts` predicate |
+| **#127** | `07901878` | **`E-SCRIPT-001`** — `<script>` rejected in scrml source |
+| **#128** | `9481bc69` | nested-`<program>` route-scope reset + **decl-scoped** non-bindable markup reject |
 
-Four cases: (1) `<outlet>` alone → `<main data-scrml-outlet tabindex="-1">`; (2) `<outlet>` inside an author `<main>` → `<div>`, author's main is the landmark, LEGAL; (3) route body owns a `<main>` → slot demotes, LEGAL; (4) BARE/SIBLING `<main>` + `<outlet>` → `E-OUTLET-AND-MAIN`, the ONLY error. SPEC §20.8.1.1 + §40.8.2 (composition was previously UNSPECIFIED) + §34.
+Plus **`pa-base` v2.1 → v2.3** (scrml-support, direct-push).
 
-**Measured gap-closure** (`docs/website`, 98 route docs, shell `<main>`→`<outlet>`): base **0/98** had exactly one `<main>`, 1/98 carried the marker, 1/98 had shell chrome — composition never ran for 97/98. After: **98/98** on all three.
+## 🔴 OPEN — needs bryan
+1. **The Shape-1 markup question.** *Should a plain reactive cell be able to hold a markup value?* Surfaced properly, deliberately NOT bundled into the bug fix. For: L1 says markup is a value and Shape 1 is the value shape. Against: Shape 3 already covers display-only markup (no expressive gap, only ergonomic); widening is a one-way door; "limit primitives, don't god-ify." **SPEC amendment, ladder R2 minimum.**
+2. **§34 `E-STYLE-001` row defect** — row says "CSS: syntax error in `#{}` style block"; the code rejects the `<style>` ELEMENT. Needs a ruling: is the row stale, or is the code double-duty with one trigger dead? Now more visible beside an accurate `E-SCRIPT-001` row.
+3. **Conformance rationale prose staleness** — `conformance/cases/forms/compound-render-not-bindable/expected.json` still PASSES (code-only assertion) but its prose describes the retired use-site mechanism. Prose-only; a rationale rewrite is a judgment call.
+4. **ESM-chunks arc** — ruled, unblocked, unstarted. See below.
 
-**§20.8 banner deliberately NOT flipped** — pieces 2+3 are held, so cross-chunk soft-nav stays Nominal (Rule 4: no false spec-ahead claim).
+## 🧭 THE SESSION'S REAL CONTENT — three failures of one kind
 
-## 🔴 OPEN — needs bryan (nothing else is blocked)
-1. **MED-1 conditional-`<main>` fork — bryan RULED "your leans" = DIAGNOSE it.** A `<main>` only in a non-initial match/engine arm, or behind `if=` (parked in a `<template>`), is absent on first paint and present after the flip. Demote-conservatively → ZERO landmarks initially; ignore → TWO after the flip (invalid HTML). **Neither satisfies "exactly one" at all times.** Ruled resolution: extend the case-4 family to a conditional shell `<main>` coexisting with an `<outlet>` ("two candidates, only the author can resolve it"). NOT implemented; deliberately NOT pinned by a test — pinning either behaviour turns the eventual fix red.
-2. **MED-3 component-mounted `<main>` under-fires case 4 — ruled "your leans" = reconcile.** `collectOutlets` (SYM) runs pre-expansion, `treeHasAuthorMain` (emit) post-expansion. Emit is CORRECT (demotes); only the diagnostic disagrees. Reconciling the two phases was bigger than PR-1's scope.
-3. **Wave-1c pieces 2+3 remain HELD** behind 3 confirmed HIGH gaps (below). bryan RULED **option (a) IIFE-wrap chunk top-level lexicals** for the collision — scoped as its OWN arc (it changes how every chunk is emitted).
+All three: **a solid reproducer of a SYMPTOM, then a fix proposed without establishing what the surrounding system MEANS.** Two recurred *after* the pattern had been analysed in-session, which is why the countermeasures are gates that leave ARTIFACTS rather than rules to remember.
 
-## 🧪 THE THREE ADVERSARIAL ROUNDS (the session's real content)
-Every finding was **PA-reproduced before acceptance**; nothing taken on a reviewer's argument or an agent's self-report.
+1. **The markup-cell near-miss (caught by bryan, not the PA).** I reasoned from the PRIMER + a symptom to a language WIDENING, asserting "SPEC is silent" without reading §6.2 — which explicitly governs the shape and says the opposite. bryan's instinct caught it: *"was `const` = derived, bare = reactive only — does any of that line up?"* It does: `const` IS the derived marker (§6.2 Shape 3, read-only, recomputes), so "widen the Shape-3 lowering to non-`const` cells" was a category error, and my own brief's "reassignment must work" contradicted the shape it named. **Ruling given, then REVERSED on the evidence.**
+2. **FIX 1 (caught by the dev agent).** I specified a bare `toLowerCase() === "main"`. `ast-builder` classifies component-vs-element by capitalization ALONE, so that maps `<MAIN>` and a user's `<Main/>` to the same string — it would have fired on a legal component and demoted its slot to zero landmarks. The agent verified by installing my predicate and watching two guard tests go red, then built the right discriminator (name resolution via NR's `resolvedKind`) as a SHARED module so the predicate exists once.
+3. **FIX 2 (caught by the dev agent).** I attributed degenerate diagnostic spans to the agent's change. It is a pre-existing compiler-wide `ast-builder` gap — **PA-confirmed on the untouched base with an unrelated diagnostic**: `${@nope}` reports L2:C10 at top level but L1:C8 inside a match arm.
 
-**Round 1 — the full 3-piece Wave-1c (agent `a2ed…` @ `8fd5fd07`, never landed): 5 BLOCKING.**
-- cross-chunk **lexical collision** — two chunks each declaring a top-level type/enum of the same name emit duplicate top-level `const`s; executed both real chunks in ONE shared `vm` context → `SyntaxError: Can't create duplicate variable: 'Phase_toEnum'` → onerror → hard-nav. Feature silently degrades to the full reload #27 was filed about. Exposure MEASURED: imported types compile to one shared chunk and are NOT re-declared per importer (trucking clean), so it needs two files each declaring locally.
-- **concurrent-nav flag race** — `_scrml_chunk_loading` is one module-scope boolean cleared by a per-script `settle()`; drove two overlapping navs through the real loader → `chunkB flagAtExec=false booted=FALSE`, and nav2's onDone STILL fired → swap proceeds with dead markup, permanently.
-- **basename-collision** in already-loaded detection → unhydrated swap.
-- `E-OUTLET-AND-MAIN` scoped wrong in **both** directions.
-- **The browser harness is structurally blind** to the first two: direct `eval` (fresh declarative scope) + an `appendChild` override that returns nodes WITHOUT connecting them.
+**Cumulative: dev agents corrected the PA 4× this session** (the three above + a non-existent `--outdir` flag in a brief). Telling agents refusal is welcome is now empirically load-bearing, not courtesy. Say it in every brief.
 
-**Round 2 — PR-1 as built (`01aaad71`): 2 BLOCKING + 5 MED.** Splice with no depth counting (a stray close **reparented `<footer>` out of its container** and silently destroyed content); landmark decision invocation-scoped → nested `<main>` from a match arm. **The test oracle shared the implementation's blind spot** (`mainCount()` counted `<main` inside `<template>`/`<script>`) — which is why 16 green tests missed an entire ZERO-landmark class.
+## 📐 DOCTRINE — `pa-base v2.3` (the durable output)
 
-**Round 3 — on the PA's OWN fix delta: 1 BLOCKING.** An outlet **PLACEHOLDER** `<main>` (content composition discards) counted as the document landmark → composed routes had ZERO landmarks. **The obvious one-liner was WRONG** and I verified both shapes on base before choosing: skipping `<outlet>` bodies in `treeHasAuthorMain` fixes the composed case and breaks the rendered one (single-file, no pages → TWO `<main>`). Emit-time cannot tell those futures apart; composition can — so the fix is the mirror of `routeOwnsLandmark`, applied at composition.
+Placed in **Layer 1**, not the scrml overlay and not memory (bryan: *"they are project agnostic, so it should go in PA documentation not memory"*). All pass the §Q1 split test.
 
-## 🧭 RECOVERED-FROM ANOMALIES (reasoning, for the next PA)
-- **S275 died pre-wrap — the 4th unwrapped death** (S266→S268, S269→S271, S273→S274, S275→S276). Its record survived ONLY in delta-log [662]-[666]; hand-off was stale at S274, no board file, no user-voice. All reconstructed this session, S275's user-voice entry recovered VERBATIM from its session JSONL.
-- **I reported a drift conclusion BACKWARDS and bryan caught it.** On the `<main><outlet/></main>` contradiction I said "SPEC is self-consistent; only RULING.md is stale." bryan: *"go deeper… look in .claude sessions dir for the transcript."* The JSONL showed the approved text was *"a shell with both a **bare** `<main>` and an `<outlet>` → error"* — **"bare" is load-bearing**. RULING.md was FAITHFUL; the IMPLEMENTATION dropped the word, errored on any co-occurrence, dragged the SPEC text along, and **locked the overreach in with a test literally titled "…(nested) ALSO fires E-OUTLET-AND-MAIN"** — so it read as intent. **DURABLE: when a derived artifact and the impl disagree, go to the verbatim session log before deciding which drifted. A terse "A"/"go" ratifies the FULL text it answered, sub-choices included. A test asserting a behaviour is NOT evidence it was ruled.**
-- **A false-green R26.** A run printed `DIFF: NONE` while `wc`/`head` had transiently dropped off PATH and the tip compile produced nothing — `diff` was comparing MISSING directories. Caught only because the file counts came back empty. **Every later R26 asserts both trees are non-empty BEFORE trusting the compare.**
-- **I destroyed my own uncommitted work.** Running `git checkout` to revert source (to prove a fixture fails pre-fix) wiped the promotion fix, which wasn't committed yet. Caught by checking the fix was still present rather than trusting "restore". Re-applied + committed immediately. Don't run revert experiments with uncommitted source in the tree.
-- **The main checkout was a HOLDING PEN** all session (old 3-piece staged tree on `feat/navigate-wave1c`). It blocked the post-merge fast-forward twice. Resolved by backing up, confirming the staged content was byte-identical to agent branch `8fd5fd07` before discarding, and proving the continuity edits were a clean **prefix match** before restoring.
+- **§0 — the empirical-sufficiency illusion.** The spine's own blind spot: every mechanism it names answers *"does the code do what we said"*; none answers *"was what we said right."* A reproducer proves a SYMPTOM and says nothing about intent — and feels sufficient exactly when it is not. Invisible from inside, because everything checked did check out.
+- **§1 Rule 4 — the governing-sentence gate.** Rule 4 fails SILENTLY: not-consulting leaves no trace and looks identical to consulted-and-agreed. So the consultation must produce an ARTIFACT — quote the governing sentence, or record "searched §X/§Y, none found." **Outcome 2 is a FINDING**, converting a PA-scoped fix into a USER ruling. Triggered MECHANICALLY (would a program's acceptance or meaning change?), because "does this feel spec-implicating" is precisely the classifier that failed. A primer is NOT a governing sentence.
+- **§8 — direction-of-change classification.** inert / newly-rejecting / newly-accepting / semantics-changed, computable from the real-input recompile already mandated. Newly-rejecting owes a MEASURED migration (assumed-zero ≠ measured-zero). semantics-changed is the class the gates are weakest against.
+- **v2.3 — newly-accepting SPLITS.** v2.2's flat "never ship as a bug fix" was tested against real history within the hour and **over-blocked**. An audit of all 18 SPEC+src co-change landings since adopters arrived found one newly-accepting case (`bdb9b6ac`, E-MATCH-012) whose SPEC delta was ONLY a catalog line-number update and which cited pre-existing sentences making the form legal — impl#1 was wrongly REJECTING SPEC-canonical code. Under v2.2 that correct fix would have been blocked and an implementation defect frozen into the language. Now: **toward the contract** (a pre-existing sentence says it's legal → bug fix, ship it) vs **beyond the contract** (no sentence → amendment, R2+), with the §1 gate as the DECIDER. The two additions now compose.
 
-## 📌 known-gaps filed this session (6)
-`g-nav-chunk-lexical-collision` (HIGH, IIFE-wrap RULED) · `g-nav-chunk-loading-flag-race` (HIGH) · `g-nav-chunk-basename-collision-key` (HIGH) · `g-nav-browser-harness-fidelity` (MED) · `g-mpa-composed-page-duplicate-runtime-script` (MED, PRE-EXISTING — composed route pages emit the runtime `<script>` twice, one 404s) · `g-nav-cross-chunk-hardening-tail` (LOW, 7 items incl. no same-origin check on injected chunk URLs).
+**The audit's other result — for bryan's adopter-safety question:** no wrong-angle landing found in the dangerous class. 18 co-change landings, exactly one newly-accepting, and it is legitimate. Narrower than feared.
 
-## 🧷 Held branches / worktrees
-- `worktree-agent-a2ed001a5de228134` @ `8fd5fd07` — **RETAINED**: the only copy of Wave-1c pieces 2+3. Do NOT delete until 2+3 land.
-- `feat/navigate-wave1c` (local, 0 commits) — holding-pen branch, now empty of value; safe to delete.
+## 🧪 VERIFICATION NOTES (what earned its keep)
+- **The non-empty R26 assertion caught a live false-green.** My first tip compile silently emitted 0 files from a bad `--cwd`; `diff` against an empty tree reports "no differences." Without the guard I would have reported a clean R26 off nothing. It then caught the SAME shape again for a dev agent (a non-existent `--outdir` flag).
+- **Commit timeouts ≠ commit failure.** Two commits reported timeout and one had FINALIZED. Verify `git log` + `git show --stat`, never exit code. (The tool timeout is the one that matters — `timeout 300000` as a shell verb does nothing.)
+- **Count-only test comparisons lie.** A dev agent measured the base failure set itself, found 38 vs the briefed 36, and only the SET diff showed the 2 as a gitignored-dist env artifact. A count comparison would have read as a phantom 2-test improvement.
+- **An unfiltered grep is not a measurement.** A dev agent's first corpus scan returned 20 hits; re-scanning with comments and string literals blanked returned **0 across 3091 files** (parser sources carry tag names as DATA). It recorded the wrong number deliberately.
 
-## 🗺️ 6c maps — REFRESHED (S274's partial run closed)
-5 maps rewritten to stamp **`c48e59a2`** (watermark verified advanced): `domain.map.md` (the S274 miss — now carries §14.8.10 tenant floor, §52.15.5 SSR auto-make-safe, and a dedicated §20.8.1.1/§40.8.2 section with the four-case table + the three-stage ownership split: emit-html = landmark, index.ts = composition slot, symbol-table = diagnostic) · `error.map.md` (+`E-OUTLET-AND-MAIN`) · `structure.map.md` (counts were stale) · `dependencies.map.md` · `primary.map.md`. **Deliberately left at older stamps** (recorded in-map, not silently skipped): `schema`/`test`/`auth` @ `df2ac831`, `build` @ `99ae45ca`, `config`/`infra` @ `f079d0a9` — #124 added no AST type, CLI flag, env var, or CI change; an honest older stamp beats a false "verified at HEAD".
+## 📌 known-gaps filed (8)
+`g-subparse-span-not-rebased` (MED-HIGH — **compiler-wide**: every diagnostic inside a match arm / `<each>` body reports the wrong line; a real adopter debugging a match-heavy file is misdirected by every error in it) · `g-each-in-match-arm-absent-from-sym-ast` (MED) · `g-if-guarded-main-zero-landmarks` (MED) · `g-capitalized-unknown-tag-neither-normalized-nor-rejected` (MED) · `g-markup-rhs-nonconst-cell-dropped-to-null` (MED — **entry CORRECTED mid-session**; its first revision claimed HIGH + a Pillar-1 violation + "unspecified", all three false; kept as a worked example) · plus the block-comment cloak and the §34 `E-STYLE-001` row, recorded in the delta-log.
 
-**Non-compliance — 3 FIXED this wrap, 3 OWED:**
-- ✅ FIXED — `docs/changes/navigate-wave1c-cross-chunk/progress.md` claimed *"FINAL STATUS — Wave-1c COMPLETE (all 3 pieces)"*, **false at HEAD** and never true of main. Correcting banner added; the file is retained as the forensic record of the survey + 3-piece build, and now points at `navigate-wave1c-piece1-landmark/progress.md` as current truth. **Committing it uncorrected would have planted a false landed-claim** — the single highest-value catch of the maps pass.
-- ✅ FIXED — SPEC gap: slot **RE-PROMOTION** was implemented (`index.ts` `slotShouldPromote`) but unspecified; §40.8.2 specified demotion only. Normative clause added (land-with-impl, Rule 4).
-- ✅ FIXED — `symbol-table.ts:10081` referenced a bare `W-OUTLET-ABSENT`, which is not a real code (no fire site, no §34 row); it read as a fifth outlet code to anyone grepping. Corrected to `W-OUTLET-ABSENT-SOFT-NAV-DISABLED`.
-- ⬜ OWED — `compiler/native-parser/` has had **ZERO diff** across the whole `df2ac831`→`c48e59a2` window; parity for GITI-038/039 and the new outlet/landmark surface is **unconfirmed, not confirmed-drifted**. Carried from the prior map report.
-- ⬜ OWED — `error.map.md`'s catalog-count methodology is unresolved (carried 787 vs a raw §34 extraction differ by ~1; the raw grep over-matches sibling tables, so neither is authoritative). Flagged in-map as not independently re-verified; a full count audit is owed at the next cold-start. Both of this window's legs ARE set-diff-confirmed against the actual SPEC diff.
-- ⬜ OWED — `.claude/maps/non-compliance.report.md` still carries its `df2ac831` stamp; the six items above were returned inline rather than written to it.
+## 🧷 Held / retained
+- **`worktree-agent-a2ed001a5de228134` @ `8fd5fd07` — RETAINED, do NOT delete.** Still the ONLY copy of Wave-1c pieces 2+3.
+- `.claude/worktrees/s251` + 9 `../scrml-spa-ss*` — pre-date this session, not mine, untouched.
+- 3 spent worktrees removed (dry-run listed first).
 
-## pa.md directives in force / lessons
-Adversarial-not-confirmatory is now **4-for-4** on this arc (#111, #120, and twice here) — confirmatory green is worthless as a landing signal · verify-before-claim in BOTH directions · **fix the test ORACLE before the code** when the oracle shares the implementation's blind spot · `tracking`/`ai-review` CI failures are pre-existing (verified on #120-#123); only `gate` is required · PR-flow: branch → PR → gate → squash-merge → re-sync → 0/0.
+## 🚀 NEXT — the ESM-chunks arc (ruled, unblocked, unstarted)
+bryan RULED **ESM chunks**, superseding the S276 IIFE-wrap ruling after a Tier-2 probe invalidated its premise: a blanket IIFE wrap severs cross-chunk linkage, because an imported type compiles to ONE shared chunk whose top-level declarations importing chunks reference BARE — the emitted chunk system uses **shared top-level lexical scope AS its linkage mechanism**.
+
+**ESM likely collapses THREE held gaps, not one:** `g-nav-chunk-lexical-collision` (module scope, direct) · `g-nav-chunk-basename-collision-key` (the ESM registry keys on RESOLVED URL, so the `pages/reports` vs `pages/admin/reports` collision cannot occur) · `g-nav-chunk-loading-flag-race` (`await import(url)` returns a per-call promise — no shared mutable flag to race). Piece 2's boot restructure also simplifies.
+
+**Risks for the brief:** module scripts are deferred + always strict, so boot ORDERING changes — the current emit deliberately loads the shell's `app.client.js` first "so its const declarations are in scope", which IS the shared-lexical-scope dependency and must be replaced by real imports, not preserved. `file://` cannot load module scripts and `compiler/tests/browser/ssr-a-terminus-hydration.browser.test.js` loads that way. The S276 browser-harness fidelity gap must be rebuilt for ESM regardless, so it folds into this arc.
+
+## 📣 Non-code: the adoption question
+bryan raised distribution (Rule 1's condition met). Measured: clone traffic is ~100% CI (correlates with our PR cadence; the floor collapses to ~6 uniques on quiet days; "58 unique cloners" ≈ 58 ephemeral runner VMs). The human metric is **171 views / 16 unique visitors / 14 days**, one referrer of size (`t.co`, bryan's own link), 5 stars / 2 forks. Framing offered and NOT acted on: this is ~one distribution attempt, not a rejection; the tractable target is **a second Peter**, not broad attention — one real adopter produced GITI-038/039, #81, #82, #27 and the aM findings. Left with bryan; no marketing work started.
 
 ## Tags
-#session-276 #wave1c-pr1-LANDED-124 #one-landmark-invariant #six-blocking-caught-past-green #oracle-shared-the-blind-spot #s275-continuity-recovered #transcript-adjudicates-drift #pieces-2-3-held #iife-wrap-ruled
+#session-277 #pa-base-v2.3 #governing-sentence-gate #direction-of-change #empirical-sufficiency-illusion #three-prs-126-127-128 #agents-corrected-the-pa-4x #ruling-reversed-on-spec-evidence #esm-chunks-next
