@@ -10078,7 +10078,7 @@ function fireChannelSharedModifier(
 // (branch-exclusive / per-branch outlets are a v1.next nicety, not "one flat
 // outlet" §20.8.1). So collectOutlets descends BOTH arms of every conditional/
 // match and files each outlet under its shell — the twin of the ast-builder.js
-// W-OUTLET-ABSENT scan (which for the SAME reason must count an outlet inside a
+// W-OUTLET-ABSENT-SOFT-NAV-DISABLED scan (which for the SAME reason must count an outlet inside a
 // branch as PRESENT). Both walkers descend the identical full edge set.
 //
 // The walk carries the nearest enclosing `<program>` node so outlets partition
