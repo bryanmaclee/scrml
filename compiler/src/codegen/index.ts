@@ -701,6 +701,71 @@ function retagOpenTag(openTagText: string, newTag: string): string {
 }
 
 /**
+ * Index of the close tag MATCHING the slot's open tag — depth-counted, so a
+ * same-tag element nested inside the slot cannot terminate it early.
+ *
+ * A naive `indexOf('</' + tag + '>')` was correct only while two assumptions
+ * held: that the slot is always `<main>` (which HTML5 forbids nesting) and that
+ * the slot is empty at emit time. BOTH are false now. The slot demotes to
+ * `<div>` whenever the document carries an author `<main>` (§20.8.1 case 2/3),
+ * and `<div>` nests freely; and an `<outlet>` may carry placeholder/fallback
+ * children, so the slot is not necessarily empty. Under the naive scan a
+ * `<div>` slot holding a `<div>` terminated on the inner close, which spliced
+ * the route body in ABOVE the real close tag — emitting an unbalanced document
+ * that reparents following siblings out of their container and silently drops
+ * the slot's remaining children. Depth counting is the fix.
+ *
+ * Skips regions where markup does not nest: comments, and the raw-text elements
+ * `<script>` / `<style>` (whose text may contain tag-shaped substrings).
+ * Self-closing same-tag opens (`<div … />`) do not open a level.
+ *
+ * Returns -1 when no matching close exists (caller then no-ops composition).
+ */
+function findMatchingCloseIdx(html: string, tag: string, fromIdx: number): number {
+  const want = tag.toLowerCase();
+  // Alternation order matters: comments and close tags are recognised before
+  // the general open-tag form. The open-tag branch reuses OPEN_TAG_RE's
+  // attribute grammar so a quoted `>` cannot end a tag.
+  const scan =
+    /<!--|<\/([a-zA-Z][\w-]*)\s*>|<([a-zA-Z][\w-]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>/g;
+  scan.lastIndex = fromIdx;
+  let depth = 0;
+  let m: RegExpExecArray | null;
+  while ((m = scan.exec(html)) !== null) {
+    if (m[0] === "<!--") {
+      const end = html.indexOf("-->", m.index + 4);
+      if (end === -1) return -1; // unterminated comment — refuse to guess
+      scan.lastIndex = end + 3;
+      continue;
+    }
+    const closeName = m[1];
+    if (closeName !== undefined) {
+      if (closeName.toLowerCase() === want) {
+        if (depth === 0) return m.index; // the matching close
+        depth--;
+      }
+      continue;
+    }
+    const openName = (m[2] ?? "").toLowerCase();
+    const attrRegion = m[3] ?? "";
+    if (openName === "script" || openName === "style") {
+      // Raw-text element: its content is not markup. Skip past its close so a
+      // `</div>` inside a JS string cannot decrement our depth.
+      const rawClose = new RegExp(`</${openName}\\s*>`, "i");
+      const rest = html.slice(scan.lastIndex);
+      const rm = rest.match(rawClose);
+      if (rm && rm.index !== undefined) {
+        scan.lastIndex = scan.lastIndex + rm.index + rm[0].length;
+      }
+      continue;
+    }
+    // `<div … />` is self-closing: it opens no level to close.
+    if (openName === want && !/\/\s*$/.test(attrRegion)) depth++;
+  }
+  return -1;
+}
+
+/**
  * Run the Code Generator (CG, Stage 8).
  */
 export function runCG(input: CgInput): CgOutput {
@@ -1996,11 +2061,15 @@ export function runCG(input: CgInput): CgOutput {
           slotOpenTagText = openTag.text;
           slotOpenIdx = openTag.index;
           slotOpenEndIdx = slotOpenIdx + openTag.text.length;
-          // Find the matching close tag. A depth counter is unnecessary: the
-          // shell's slot is EMPTY at emit time (route content composes IN), so
-          // no same-tag element can nest inside it. HTML5 also forbids nested
-          // `<main>` (https://html.spec.whatwg.org/#the-main-element).
-          slotCloseIdx = shellBody.indexOf(`</${slotTag}>`, slotOpenEndIdx);
+          // Find the MATCHING close tag, depth-counted. Do not be tempted back
+          // to `indexOf('</' + slotTag + '>')`: that is correct only if the slot
+          // is always `<main>` (unnestable per HTML5) AND always empty at emit
+          // time. Neither holds — the slot demotes to `<div>` under §20.8.1
+          // case 2/3, and an `<outlet>` may carry placeholder children. The
+          // naive scan terminated on the first inner `</div>`, producing an
+          // unbalanced splice that reparented later siblings and dropped
+          // content, with a clean compile and no diagnostic.
+          slotCloseIdx = findMatchingCloseIdx(shellBody, slotTag, slotOpenEndIdx);
         }
       }
 

@@ -10250,8 +10250,16 @@ function collectOutlets(
   // A `<main>` we are descending INTO joins the open-mains path, so an outlet
   // found below marks it as wrapping. Only shell-scope mains are tracked —
   // a route-scope `<main>` never fires, so wrapping-ness is moot for it.
-  const childOpenMains =
-    isAuthorMain && enclosingProgram && !inRouteScope
+  //
+  // A nested `<program>` opens a NEW shell scope, so the open-mains path RESETS
+  // there: an outer shell's `<main>` does not wrap an INNER shell's outlet.
+  // Without this reset, `<program><main><program><outlet/></program></main>
+  // <outlet/></program>` marked the outer `<main>` as wrapping on account of the
+  // inner shell's outlet, silently exempting a textbook case-4 shell (the outer
+  // `<main>` is a pure SIBLING of the outer `<outlet>`) from E-OUTLET-AND-MAIN.
+  const childOpenMains = isProgramMarkup
+    ? []
+    : isAuthorMain && enclosingProgram && !inRouteScope
       ? [...openMains, node]
       : openMains;
   // `<page>` bodies are ROUTE content and `<outlet>` bodies are SLOT content —

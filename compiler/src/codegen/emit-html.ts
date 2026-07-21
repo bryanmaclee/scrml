@@ -1297,16 +1297,38 @@ export function generateHtml(
   const enclosingCompoundStack: string[] = [];
 
   // navigate-wave1c — ONE-LANDMARK invariant support (SPEC §20.8.1). Does the
-  // tree this invocation is lowering carry an AUTHOR `<main>` element anywhere?
-  // Consulted ONLY by the `<outlet>` branch, to decide whether the outlet may
-  // take the `<main>` landmark itself or must demote to a marked `<div>`.
+  // DOCUMENT carry an AUTHOR `<main>` element anywhere? Consulted ONLY by the
+  // `<outlet>` branch, to decide whether the outlet may take the `<main>`
+  // landmark itself or must demote to a marked `<div>`.
   //
-  // Computed lazily + memoized: outlets are rare (at most one per shell,
-  // §20.8.1) and `generateHtml` is re-entered per nested markup subtree, so an
-  // eager scan on every invocation would be pure waste.
+  // The scope is the DOCUMENT, deliberately — NOT `nodes`. `generateHtml` is
+  // RE-ENTERED with `arm.body` for engine/match arm bodies (see the
+  // `nestedMarkupContext` parameter), so an invocation lowering an arm receives
+  // only that subtree. Scoping the question to `nodes` therefore made an
+  // `<outlet>` inside an arm blind to an author `<main>` WRAPPING the whole
+  // match — it emitted `<main data-scrml-outlet>`, which the arm dispatcher
+  // then injects inside that author `<main>`, producing nested `<main>` on
+  // initial paint. That is precisely the invalid HTML this invariant exists to
+  // prevent, in a shape the validator blesses as legal (§20.8.1 case 2).
+  //
+  // So: compute ONCE at the top-level invocation and share it through the
+  // CompileContext; nested invocations read the shared answer. The `fileAST`
+  // fallback keeps the answer document-scoped even if a nested invocation runs
+  // before any top-level one (order-independence — do not rely on call order).
+  if (liveCtx && !nestedMarkupContext) {
+    (liveCtx as any).__scrmlDocumentHasAuthorMain = treeHasAuthorMain(nodes);
+  }
   let authorMainMemo: boolean | null = null;
   function documentHasAuthorMain(): boolean {
-    if (authorMainMemo === null) authorMainMemo = treeHasAuthorMain(nodes);
+    const shared = liveCtx as any;
+    if (shared && typeof shared.__scrmlDocumentHasAuthorMain === "boolean") {
+      return shared.__scrmlDocumentHasAuthorMain;
+    }
+    if (authorMainMemo === null) {
+      // Document scope, not this invocation's subtree.
+      const scope = fileAST && typeof fileAST === "object" ? fileAST : nodes;
+      authorMainMemo = treeHasAuthorMain(scope);
+    }
     return authorMainMemo;
   }
 
