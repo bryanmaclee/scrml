@@ -1307,25 +1307,21 @@ export function emitVariantGuardedRender(
   // Item-scoped mode has no module-init DOMContentLoaded fire either — the
   // each factory dispatches every item explicitly at create/reconcile time.
   if (!itemScoped && subscribeName !== null) {
-    // navigate-wave1c — run the initial dispatch when the DOM is ready. On the
-    // initial page load `readyState` is "loading" so we defer to DOMContentLoaded
-    // (unchanged). But when this dispatcher's chunk is INJECTED after boot (a
-    // cross-chunk soft-nav loading a route whose content carries an engine/match),
-    // DOMContentLoaded has already fired and will NOT fire again, so we dispatch
-    // immediately — otherwise the route's initial arm would render frozen. The
-    // local `_fire` needs no global name (multiple dispatchers per file / classic
-    // scripts share one global scope).
-    // GITI-031 — apply the Shape-A member-access sub-path to the initial cell read
-    // so the init-fire dispatches on the enum-variant discriminant, not the parent
-    // struct. `subPath` is "" for a bare `@cell` ref.
-    // Two `if`s (no `else`) so the dispatcher body never contains an `else {` —
-    // a match-block's default-arm regression guards grep the dispatcher for that
-    // token, and this init-fire boot is unrelated to a match default arm.
+    // navigate-wave1c — the initial dispatch defers to DOMContentLoaded on an
+    // ordinary page load (unchanged). When this dispatcher's chunk is INJECTED
+    // after boot (a cross-chunk soft-nav loading a route whose content carries an
+    // engine/match), DOMContentLoaded has already fired, so the runtime-set
+    // `_scrml_chunk_loading` flag routes it to an immediate dispatch — otherwise
+    // the route's initial arm would render frozen. Two `if`s (no `else {`) so the
+    // dispatcher body never contains an `else {` a match-block default-arm
+    // regression grep would trip. GITI-031 — the Shape-A member-access `subPath`
+    // makes the init-fire dispatch on the enum-variant discriminant (`""` for a
+    // bare `@cell`).
     dispatcherLines.push(`(function() {`);
     dispatcherLines.push(`  var _fire = function() { ${dispatchFnName}(_scrml_reactive_get(${JSON.stringify(subscribeName)})${subPath}); };`);
-    dispatcherLines.push(`  var _defer = typeof document !== "undefined" && document.readyState === "loading";`);
-    dispatcherLines.push(`  if (_defer) { document.addEventListener("DOMContentLoaded", _fire); }`);
-    dispatcherLines.push(`  if (!_defer) { _fire(); }`);
+    dispatcherLines.push(`  var _eager = typeof _scrml_chunk_loading !== "undefined" && _scrml_chunk_loading;`);
+    dispatcherLines.push(`  if (_eager) { _fire(); }`);
+    dispatcherLines.push(`  if (!_eager && typeof document !== "undefined") { document.addEventListener("DOMContentLoaded", _fire); }`);
     dispatcherLines.push(`})();`);
   }
 

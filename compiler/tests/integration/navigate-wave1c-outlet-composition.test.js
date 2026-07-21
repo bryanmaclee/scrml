@@ -179,8 +179,8 @@ describe("§4 — E-OUTLET-AND-MAIN: a shell with BOTH `<main>` and `<outlet>` e
   });
 });
 
-describe("§5 — Piece 2: the event-wiring boot is readyState-gated (injected-chunk-safe)", () => {
-  test("a route chunk with event wiring emits a readyState-gated `_scrml_boot`, not a bare DOMContentLoaded listener", () => {
+describe("§5 — Piece 2: the event-wiring boot is injected-chunk-safe (flag-gated)", () => {
+  test("a route chunk with event wiring emits a `_scrml_boot` gated on `_scrml_chunk_loading`, deferring to DOMContentLoaded on an initial load", () => {
     const { errors, read } = buildDir("boot-gate", {
       "index.scrml": `<program>\n  <outlet/>\n</program>\n`,
       "pages/reports.scrml": `<page>\n  <n> = 0\n  <button onclick=@n = @n + 1>inc</button>\n</page>\n`,
@@ -188,13 +188,12 @@ describe("§5 — Piece 2: the event-wiring boot is readyState-gated (injected-c
     expect(errors).toEqual([]);
     const route = read("reports.client.js");
     expect(route).not.toBeNull();
-    // The boot is a named fn dispatched via a readyState guard: initial load
-    // (`readyState === "loading"`) defers to DOMContentLoaded; an injected chunk
-    // (`readyState` already interactive/complete) boots immediately.
+    // The boot is a named fn: an INJECTED chunk (`_scrml_chunk_loading`) boots
+    // immediately; an INITIAL load defers to DOMContentLoaded (byte-for-byte
+    // unchanged from the pre-wave1c behavior).
     expect(route).toContain("function _scrml_boot()");
-    expect(route).toMatch(/document\.readyState === "loading"/);
+    expect(route).toMatch(/_scrml_chunk_loading[\s\S]*?_scrml_boot\(\)/);
     expect(route).toMatch(/document\.addEventListener\("DOMContentLoaded", _scrml_boot\)/);
-    expect(route).toMatch(/}\s*else\s*{\s*_scrml_boot\(\);\s*}/);
     // NOT the old bare anonymous DOMContentLoaded closure.
     expect(route).not.toContain("document.addEventListener('DOMContentLoaded', function()");
   });

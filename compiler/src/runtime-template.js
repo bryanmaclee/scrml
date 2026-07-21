@@ -2477,12 +2477,21 @@ function _scrml_nav_chunk_failed(path, token, url, reason) {
   _scrml_navigate(path);
 }
 
+// True ONLY while a route chunk is being injected + executed during a cross-chunk
+// soft nav. A freshly-injected chunk's module-init reads this flag to decide it
+// must boot IMMEDIATELY (DOMContentLoaded has already fired for the live document
+// and will not fire again) rather than defer to DOMContentLoaded as it would on an
+// initial page load — see the boot dispatch emitted by emit-event-wiring.ts. This
+// keeps the initial-load boot path byte-for-byte unchanged (the flag is false /
+// undefined then) while making an injected chunk self-boot.
+var _scrml_chunk_loading = false;
+
 // Load the missing route client chunk(s) SEQUENTIALLY in deps-first order, then
 // invoke onDone. Each chunk is a classic <script> whose module-init self-registers
-// its soft-nav rehydrator (the readyState-gated boot runs immediately since the
-// document is already loaded, navigate-wave1c), so once all have loaded the target
-// route's wiring is present in _scrml_rehydrators. async=false preserves the
-// deps-first execution order for a dynamically-inserted script.
+// its soft-nav rehydrator (it boots eagerly because _scrml_chunk_loading is set
+// while it executes, navigate-wave1c), so once all have loaded the target route's
+// wiring is present in _scrml_rehydrators. async=false preserves the deps-first
+// execution order for a dynamically-inserted script.
 function _scrml_nav_load_chunks(urls, token, onDone, path) {
   var i = 0;
   var loadNext = function () {
@@ -2494,31 +2503,32 @@ function _scrml_nav_load_chunks(urls, token, onDone, path) {
     s.src = url;
     s.async = false;
     var settled = false;
+    var settle = function () { settled = true; _scrml_chunk_loading = false; if (timer) clearTimeout(timer); };
     var timer = setTimeout(function () {
       if (settled) return;
-      settled = true;
+      settle();
       _scrml_nav_chunk_failed(path, token, url, "timeout");
     }, _SCRML_NAV_CHUNK_TIMEOUT_MS);
     s.onload = function () {
       if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
+      settle();
       loadNext();
     };
     s.onerror = function () {
       if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
+      settle();
       _scrml_nav_chunk_failed(path, token, url, "error");
     };
+    // Mark the injection window so the chunk's module-init boots eagerly (its IIFE
+    // runs between this appendChild and the onload below), then clear it on settle.
+    _scrml_chunk_loading = true;
     // A synchronous append failure (CSP block / a host that rejects dynamic
     // script insertion) is a load failure too → hard-nav fallback.
     try {
       (document.head || document.documentElement).appendChild(s);
     } catch (e) {
       if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
+      settle();
       _scrml_nav_chunk_failed(path, token, url, "error");
     }
   };
