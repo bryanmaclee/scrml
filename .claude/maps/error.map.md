@@ -1,39 +1,68 @@
 # error.map.md
 # project: scrml
-# updated: 2026-07-21T12:51:06Z  commit: c48e59a2
+# updated: 2026-07-21T13:40:00Z  commit: 9481bc69
 
 ## Diagnostic Catalog (SPEC §34, `compiler/SPEC.md:18010-18723`)
-787 distinct diagnostic codes cataloged (was 780 at the df2ac831/S271 watermark; +7 NET across
-S272-S276 — carried baseline + confirmed delta, NOT independently re-derived from scratch, see
-caveat). §34 is a lookup index only — each code's normative definition lives in the SPEC section
-that introduces it (cited in the table's Section column). Do not enumerate all codes here; grep
-`compiler/SPEC.md` for a specific `E-XXX`/`W-XXX`/`I-XXX` code, or read §34 directly for the full
-table.
+**787 distinct diagnostic codes** cataloged in §34 at `9481bc69` (`compiler/SPEC.md:18204-19033`,
+main table + the §34.1 native-parser sub-table at :18925). §34 is a lookup index only — each code's
+normative definition lives in the SPEC section that introduces it (cited in the table's Section
+column). Do not enumerate all codes here; grep `compiler/SPEC.md` for a specific `E-XXX`/`W-XXX`/
+`I-XXX`, or read §34 directly.
 
-**Delta confirmation.** Both legs are confirmed directly against the source diff (a `comm -13`
-set-diff over every `^| ~?~?[EWI]-` catalog-row first-cell):
+### COUNT-METHODOLOGY AUDIT — RESOLVED at 9481bc69 (was owed since S265)
 
-- `df2ac831..58c8161d` (S272-S274) — **+6 net**. +7 added: `E-ERROR-010` (#121, dedicated
-  `?`-propagation code, was overloaded on E-TYPE-001), `E-TENANT-AGG` / `E-TENANT-WRITE` /
-  `E-TENANT-RAW-EGRESS` + `I-TENANT-STRIP` / `I-TENANT-ACROSS` (#117/#118 §14.8.10 tenant-row
-  floor), and `I-SSR-AUTH-SCOPED-CLIENT-HYDRATED` (#120). -1 removed: `W-SSR-PRERENDER-UNSCOPED`
-  (#120, RENAMED to the I-code; the code was brought in line with the S255-spec-ahead catalog).
-  `W-EACH-TABLE-FOSTER` (#115) is a Stage-6.4f info-lint, NOT a §34-catalog row (no count impact).
-  `E-ATTR-012` stays a struck-through retired tombstone (SPEC-prose cleaned #121, no row removed).
-- `58c8161d..c48e59a2` (S276, #124 navigate Wave-1c PR-1) — **+1 net**. +1 added:
-  `E-OUTLET-AND-MAIN` (§20.8.1.1, catalog row at `SPEC.md:18388`). ZERO removed. Re-verified this
-  pass by re-running the set-diff on the commit range.
+The persistent off-by-one across every prior map generation is **fully explained and closed**.
+Two figures were being conflated:
 
-**NOT implemented — do not add.** `W-NAV-CHUNK-LOAD-FAILED` has ZERO occurrences anywhere in
-`compiler/src/` (grep-verified at c48e59a2) and NO §34 catalog row. Wave-1c pieces 2+3 (cross-chunk
-navigation) are HELD, not landed. A doc or brief mentioning this code is describing planned work.
+| Methodology | at df2ac831 | 58c8161d | c48e59a2 | **9481bc69 (HEAD)** |
+|---|---|---|---|---|
+| raw catalog ROWS (`^\| ~?~?[EWI]-` first-cell) | 780 | 786 | 787 | **788** |
+| **UNIQUE code strings** (authoritative) | 779 | 785 | 786 | **787** |
 
-**Watermark caveat.** The 780 baseline is carried forward, NOT re-verified; a raw first-cell
-extraction of the CURRENT full §34 table returns a value ~1 below the carried count (a persistent
-off-by-one, still unresolved — the raw `^| [EWI]-` grep also over-matches sibling tables, so
-neither figure is authoritative). Treat 787 as "prior map + confirmed delta", NOT independently
-re-verified; a full count-methodology audit is still owed at the next FULL_COLD_START or
-NON_COMPLIANCE_ONLY pass.
+**Root cause:** §34 carries **two distinct rows for the same code `E-MARKUP-003`** — `SPEC.md:18304`
+(§4.4.1, closer-in-logic) and `:18507` (§24.1, unknown-attr-on-known-element), both retired-S263
+tombstones for two different meanings. Every carried baseline since S265 was a raw-ROW count and
+therefore ran exactly +1 high against the unique-code count. **The unique-code count is the
+authoritative methodology**; the raw-row count is not (it also cannot be trusted to stay off by
+exactly one — a future duplicate row would widen it silently). The prior map's "787 at c48e59a2"
+was the raw-row figure; the true unique count there was 786. That today's HEAD figure is *also*
+787 is a coincidence of the two errors cancelling, not a confirmation.
+
+Range discipline that makes this reproducible: bound the extraction at the `## 34. Error Codes`
+heading and the `## 35.` heading. Within that range there is no sibling-table over-match — the
+earlier "the raw grep over-matches sibling tables" suspicion was wrong; the §34.1 native-parser
+sub-tables (81 unique codes: `E-EXPR-*`, `E-STMT-*`, `E-MARKUP-VALUE-UNCLOSED`,
+`I-NATIVE-BLOCK-*`) are legitimately part of the catalog. Main table = 706 unique, §34.1 = 81,
+total 787.
+
+**Delta confirmation, every leg set-diff-verified (`comm` over unique first-cells):**
+
+- `df2ac831..58c8161d` — **779 -> 785**. +7: `E-ERROR-010`, `E-TENANT-AGG`/`-WRITE`/`-RAW-EGRESS`,
+  `I-TENANT-STRIP`/`-ACROSS`, `I-SSR-AUTH-SCOPED-CLIENT-HYDRATED`. -1: `W-SSR-PRERENDER-UNSCOPED`
+  (renamed to the I-code).
+- `58c8161d..c48e59a2` — **785 -> 786**. +1 `E-OUTLET-AND-MAIN`. Zero removed.
+- `c48e59a2..9481bc69` (S277, this pass) — **786 -> 787**. +1 **`E-SCRIPT-001`** (#127, row at
+  `SPEC.md:18512`). Zero removed. #126 and #128 added ZERO codes — both are behavior/scope
+  corrections to codes that already existed.
+
+`W-EACH-TABLE-FOSTER` (#115) remains a Stage-6.4f info-lint with no §34 row (no count impact).
+
+**Two catalog-vs-impl defects the audit surfaced — both open, both filed in
+non-compliance.report.md:**
+1. The `E-STYLE-001` row (`SPEC.md:18516`) reads "CSS: syntax error in `#{}` style block", but the
+   code rejects the `<style>` ELEMENT (`block-splitter.js:3475-3495`). The row describes a trigger
+   the compiler does not have — and it now sits four rows below the new, accurate `E-SCRIPT-001`
+   row that explicitly calls itself "the symmetric twin of `<style>` -> `E-STYLE-001`".
+2. **Nine LIVE `W-LINT-*` codes have no §34 row at all** — `W-LINT-016` through `W-LINT-024`, all
+   real `code:` emit sites in `src/lint-ghost-patterns.js` (:1024, :1072, :1097 … :1299; 26 emit
+   sites across the module). §34 catalogs only `W-LINT-001..008` + `010..015`. So the true count of
+   codes the compiler can EMIT exceeds the catalog count; 787 is a count of §34, not of the
+   implementation.
+
+**NOT implemented — do not add.** `W-NAV-CHUNK-LOAD-FAILED` has ZERO occurrences in
+`compiler/src/` (re-grepped at 9481bc69) and NO §34 row. Wave-1c pieces 2+3 (cross-chunk
+navigation) are HELD, not landed — see `docs/changes/navigate-wave1c-cross-chunk/` (a correctly
+parked dispatch archive describing UNBUILT work). A doc naming this code describes planned work.
 
 ## Diagnostic stream partition (how severity routes)
 `W-` prefix + `severity:"info"|"warning"` -> `result.warnings` (non-fatal, CLI exit unchanged). Everything else -> `result.errors` (CLI exit 1). Tests asserting on `W-*`/`I-*` codes must check BOTH streams — `result.errors.filter(...)` silently misses warning-partitioned codes. Partition logic lives in `compiler/src/api.js` (`collectErrors`, severity-keyed pushes).
@@ -75,12 +104,92 @@ NON_COMPLIANCE_ONLY pass.
 | Test blocks | E-TEST-* | 6 | codegen/emit-test.ts (§19.13) |
 | Linear types | E-LIN-* | 6 | type-system.ts (§35) |
 | Endpoint declarations | E-ENDPOINT-* | 6 | ast-builder.js, type-system.ts, emit-server.ts (§61) |
-| **Client Router / outlet (§20.8, +1 #124)** | E-OUTLET-DUPLICATE / E-OUTLET-OUTSIDE-SHELL / **E-OUTLET-AND-MAIN** / W-OUTLET-ABSENT-SOFT-NAV-DISABLED | **4** | symbol-table.ts PASS 15.5 `walkValidateOutlets` (all three E-codes); W-OUTLET-ABSENT-SOFT-NAV-DISABLED fires at the ast-builder.js filesystem-inference site alongside W-PROGRAM-SPA-INFERRED |
+| **Client Router / outlet (§20.8, +1 #124)** | E-OUTLET-DUPLICATE / E-OUTLET-OUTSIDE-SHELL / **E-OUTLET-AND-MAIN** / W-OUTLET-ABSENT-SOFT-NAV-DISABLED | **4** | symbol-table.ts PASS 15.5 `walkValidateOutlets` (:10210) -> `collectOutlets` (:10318, TOTAL walk since #126) (all three E-codes); W-OUTLET-ABSENT-SOFT-NAV-DISABLED fires at the ast-builder.js filesystem-inference site alongside W-PROGRAM-SPA-INFERRED |
 | Async/stdlib callback | E-ASYNC-* | 2 | async-stdlib-in-sync-callback guard, codegen/emit-server.ts, codegen/emit-expr.ts (client-mode sink) |
 | Server-derived marshal | W-SERVER-* | 2 | server-fn / client-cell split, §6.6.9 |
 | Table-context `<each>` foster (#115, info-lint, NOT §34-catalogued) | W-EACH-TABLE-FOSTER | 1 | lint-w-each-table-foster.js, wired api.js:2218 Stage 6.4f |
-| CSS (§65 native model) | E-STYLE-* / W-STYLE-* / E-THEME-* / E-DEFAULTS-* | 4 live (E-STYLE-001, E-STYLE-CONFLICT, W-STYLE-CONFLICT-POSSIBLE, E-THEME-TOKEN-UNKNOWN) | codegen/css-conflict-check.ts, api.js Stage 3.4 (§65.2); codegen/emit-theme-reset.ts (§65.3.2/§65.6) |
+| CSS (§65 native model) | E-STYLE-* / W-STYLE-* / E-THEME-* / E-DEFAULTS-* | 4 live (E-STYLE-001, E-STYLE-CONFLICT, W-STYLE-CONFLICT-POSSIBLE, E-THEME-TOKEN-UNKNOWN) | **E-STYLE-001 at block-splitter.js:3475** (rejects the `<style>` ELEMENT — NOT what its §34 row says, see the audit above); codegen/css-conflict-check.ts, api.js Stage 3.4 (§65.2); codegen/emit-theme-reset.ts (§65.3.2/§65.6) |
+| **Foreign element rejection (§4.17, NEW #127)** | **E-SCRIPT-001** | **1** | **block-splitter.js:3498-3528** — the markup-opener path, immediately after the `<style>`/E-STYLE-001 branch. Exact `===` tag compare (never a prefix) so `<noscript>` is untouched; recovery scans to a case-insensitive `</script>` or EOF so a brace-heavy JS body does not cascade. SOURCE-side only — the emitter's own `<script src=…>` tags are produced downstream of BS |
+| **Cell render-spec (§6.2/§6.6.17)** | E-CELL-NO-RENDER-SPEC / **E-CELL-RENDER-SPEC-NOT-BINDABLE** / E-CELL-OUT-OF-SCOPE | 3 | symbol-table.ts — **two different scopes, deliberately** (#128): `E-CELL-NO-RENDER-SPEC` is USE-scoped (PASS 5 `walkRenderByTagUses` :3060 -> `checkRenderByTag` :3000); `E-CELL-RENDER-SPEC-NOT-BINDABLE` is **DECL-scoped** (PASS 5a `walkNonBindableMarkupDecls` :2892 -> `checkDeclRenderSpecBindable` :2946). See the relocation note below |
 | Enum case | E-ENUM-VARIANT-CASE / E-ENUM-TYPE-CASE | 2 | type-system.ts (§14.4) |
+
+## New + MOVED fire sites this pass (c48e59a2 -> 9481bc69, S277 #126/#127/#128)
+
+- **`E-SCRIPT-001` (Error, NEW — #127 `07901878`)** — §4.17. A `<script>` element in scrml SOURCE.
+  Fire site: `compiler/src/block-splitter.js:3498` (a `BSError`), in the markup-opener path
+  directly beside the pre-existing `<style>`/`E-STYLE-001` branch, and shaped to mirror it exactly:
+  record the diagnostic, then scan past the whole `<script>…</script>` body (case-insensitive close
+  match, or EOF) and continue — so a JS body full of braces does not cascade into a storm of parse
+  errors. Two details that are load-bearing if you touch this:
+    - **Exact `===` compare, never a prefix.** `readIdent()` accumulates the FULL
+      `[A-Za-z0-9_-]+` identifier, so `<noscript>` yields `"noscript"` and is unaffected.
+    - **Source-side only.** The emitter's own `<script src="scrml-runtime.<hash>.js">` and
+      `<script src="<page>.client.js">` tags are produced DOWNSTREAM of the block splitter and
+      never pass through this check.
+  What it closes: before #127 a `<script>` element compiled **clean** and its body reached the
+  emitted document **verbatim**. SPEC §4.17 had claimed `<script>` was "a Ghost-Pattern lint
+  surface (W-LINT-018 family)" — false in both halves (`W-LINT-018` is `lint-ghost-patterns.js`
+  Pattern 19, *Svelte store API calls*; no ghost-pattern rule targeted `<script>` at all). #127
+  corrected §4.17 (`SPEC.md:1144-1149`, with an explicit S277 correction note) and added the §34
+  row at `:18512`. Test: `compiler/tests/unit/script-element-rejected.test.js`.
+  **Native-parser parity: CONFIRMED GAP** — `native-parser/parse-markup.js:983-995` carries a P5-4
+  `<style>`->E-STYLE-001 mirror written precisely to match the live BS (its own comment names the
+  D-void phantom-node divergence family it fixed) and has NO `<script>` counterpart. See
+  non-compliance.report.md.
+
+- **`E-CELL-RENDER-SPEC-NOT-BINDABLE` — FIRE SITE RELOCATED, use-site -> declaration
+  (#128 `9481bc69`).** This is a MOVE, not a new code, and it is the kind of change a stale map
+  gets wrong: **the old `<x/>` render-by-tag use-site fire was REMOVED.**
+    - **Before:** fired inside `checkRenderByTag` (PASS 5), only when a `<x/>` render-by-tag use
+      was reached. Consequence: `${@x}` interpolation of the offending cell, and a decl with NO use
+      at all, were **silently accepted** and lowered to `_scrml_reactive_set(name, null)` with the
+      authored markup discarded — no diagnostic.
+    - **Now:** fires in **SYM PASS 5a**, `walkNonBindableMarkupDecls` (`symbol-table.ts:2892`) ->
+      `checkDeclRenderSpecBindable` (:2946), wired at `:12425` and run BEFORE the use-site walk so
+      the decl diagnostic is reported ahead of anything on the markup that references it. Fires
+      **once per decl**, on the decl's own span; `makeNotBindableDiagnostic` (:2857) now takes only
+      the decl (its `use` parameter is gone) and its message was rewritten to lead with the decl
+      shape (`` `<x> = <div>...` — the RHS markup is a non-input element ``).
+    - **Rationale (SPEC §6.2 Shape 2):** the rule is stated as a property of the DECLARATION ("the
+      RHS markup is a non-input element") and names the alternative (Shape 3 `const`). Nothing
+      about it depends on a use site. `E-CELL-NO-RENDER-SPEC` stays USE-scoped for the mirror-image
+      reason — "you rendered `<x/>` but that cell has nothing to render" is genuinely a property of
+      the use, and the same decl is legal when read with `${@x}`.
+    - **The predicate is B5's `_cellKind`, NEVER the RHS markup shape.** A LEGAL Shape 2 bindable
+      cell (`<userName req> = <input type="text"/>`) also has a markup RHS and also lowers to
+      `_scrml_reactive_set(…, null)` — the emitted symptom is byte-identical between the legal and
+      the illegal form. Any check keying on "the RHS is markup" or on the emitted null-set turns
+      every form input in the corpus into an error.
+    - PascalCase (component) RHS is still deferred silently at BOTH sites (Phase 0 §3.2, awaiting
+      the B14/M18/M20 component prop catalog) — deliberately spelled the same way (`isConst ===
+      true`, `charCodeAt(0)` 65-90) so decl and use cannot drift.
+    - Test: `compiler/tests/integration/cell-render-spec-decl-scoped.test.js`.
+
+- **`E-OUTLET-*` family — collector widened, NO code change (#126 `499dd740` + #128 `9481bc69`).**
+  `collectOutlets` (SYM PASS 15.5, `symbol-table.ts:10318`) changed shape in three ways that alter
+  WHEN the existing three E-OUTLET codes fire:
+    1. **TOTAL walk** (#126) — every object-valued property, `span` excluded, WeakSet-guarded (the
+       guard moved ABOVE the array branch, so arrays are guarded too). It replaced a hand-listed
+       edge set copied from `walkChannelPlacement`, which silently missed `armBodyChildren` (match
+       block-form), `bodyChildren` (engine state-children) and `<each>` bodies. It now deliberately
+       mirrors its emit twin `treeHasAuthorMain`.
+    2. **Shared `<main>` predicate** (#126) — the `nodeTag === "main"` compare became
+       `isAuthorMainTag(node)` from the NEW `compiler/src/landmark-tag.ts`, imported by BOTH this
+       pass and `codegen/emit-html.ts`. Case-insensitive (`<MAIN>` is a landmark to a browser) but
+       NR-guarded so a legal component named `Main` is not mistaken for it.
+    3. **Nested-`<program>` route-scope reset** (#128) — `inRouteScope` now resets to `false` at a
+       nested `<program>`, the sibling of the existing `openMains` reset (§4.12.1: a nested
+       `<program>` inherits nothing). Without it `inRouteScope` latched true for a whole `<page>`
+       subtree, so a nested shell's `<main>` was never collected and a textbook case-4 violation in
+       the INNER shell was silently exempted — while its `<div>`-wrapped twin always fired.
+  Also new (#126): a `reportSpans` WeakMap. Nodes reached through a SUB-PARSED subtree (match-arm
+  bodies, `<each>` bodies) carry spans measured from the start of that sub-parse and never rebased
+  to file coordinates, so their own span reads L1:C1. Detected structurally (a span starting BEFORE
+  its own ancestor cannot be a real descendant position), falling back to the nearest
+  file-absolute ancestor span. `fireOutletOutsideShell` / `fireOutletDuplicate` /
+  `fireOutletAndMain` all take the resolved span as a 4th argument. **This is a general ast-builder
+  gap, not an outlet one** — an unrelated `E-STATE-UNDECLARED` inside a match arm mislocates the
+  same way.
 
 ## New fire sites this session (58c8161d -> c48e59a2, S276 #124)
 
@@ -230,9 +339,9 @@ is SQLite — `g-ssr-auth-scoped-hardening-trio` finding 2.
 | MetaEvalError | compiler/src/meta-eval.ts:54 | Meta eval |
 | CGError | compiler/src/codegen/errors.ts:11 | Codegen (shared across all emit-*.ts) |
 
-Line numbers not re-verified this incremental pass (the S276 diff touched only
+Line numbers not re-verified this incremental pass. The S277 diff (#126/#127/#128) touched `symbol-table.ts`, `block-splitter.js`, `codegen/emit-html.ts` and added `landmark-tag.ts`; `block-splitter.js:59` (BSError) sits ~3400 lines above the E-SCRIPT-001 insertion and is unmoved, and none of the other three declare an Error class. (Prior-window note carried: the S276 diff touched only
 `codegen/emit-html.ts`, `codegen/index.ts` and `symbol-table.ts`, none of which declare an Error
-class; the S272-S274 diff touched type-system.ts, codegen/{collect,emit-logic,emit-server,emit-sync,rewrite}.ts, api.js and added codegen/{sql-lex,tenant-egress}.ts + lint-w-each-table-foster.js, likewise none of the ten declaration lines; carried forward from the df2ac831 watermark).
+class; the S272-S274 diff touched type-system.ts, codegen/{collect,emit-logic,emit-server,emit-sync,rewrite}.ts, api.js and added codegen/{sql-lex,tenant-egress}.ts + lint-w-each-table-foster.js, likewise none of the ten declaration lines; carried forward from the df2ac831 watermark.)
 
 ## Runtime error classes (emitted into generated apps, compiler/src/runtime-template.js)
 `_ScrmlError` (base) -> NetworkError, ValidationError, SQLError, AuthError, TimeoutError, ParseError, NotFoundError, ConflictError. These ship in the CLIENT bundle for generated apps' `!{}` error-handling / failable-fn machinery — not this compiler's own error handling. Unchanged.
@@ -246,7 +355,7 @@ Every pipeline stage returns/throws its own `<Stage>Error` class; `compiler/src/
 For the full per-session diagnostic-change narrative (S148 onward), see `docs/changelog.md` — not reproduced here.
 
 ## Tags
-#scrml #map #error #diagnostics #semdiff #css65 #diagnostic-partition #result-warnings #outlet #e-outlet-and-main #one-landmark #tenant-floor #e-tenant #ssr-auth-scoped #i-ssr-auth-scoped-client-hydrated #sql-lex #e-error-010 #e-fn-009 #e-attr-012-retired #e-mw #w-each-table-foster #e-attr-writer-conflict #session-establishment #e-theme-token-unknown
+#scrml #map #error #diagnostics #semdiff #css65 #diagnostic-partition #result-warnings #outlet #e-outlet-and-main #one-landmark #tenant-floor #e-tenant #ssr-auth-scoped #i-ssr-auth-scoped-client-hydrated #sql-lex #e-error-010 #e-fn-009 #e-attr-012-retired #e-mw #w-each-table-foster #e-attr-writer-conflict #session-establishment #e-theme-token-unknown #e-script-001 #e-cell-render-spec-not-bindable #fire-site-relocation #sym-pass-5a #landmark-tag #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -1,6 +1,6 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-07-21T12:51:06Z  commit: c48e59a2
+# updated: 2026-07-21T13:40:00Z  commit: 9481bc69
 
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
 
@@ -29,7 +29,7 @@ scrml is a single-file full-stack language + compiler (not a web app with a runt
 **Input state** — `<keyboard>`/`<mouse>`/`<gamepad>` (§36) are LIVE-READ, not reactive-subscribed; `<#id>.field` inside `${}` renders once at mount (W-INPUT-STATE-MARKUP-NONREACTIVE steers to the `@cell` bridge).
 **Build/deploy asset addressing — §47.9.8.** On the `scrml build` deploy path, per-page client bundles and per-page CSS are content-addressed (FNV-1a hash spliced before the extension); both serve paths send `immutable`/`no-cache`+ETag cache headers accordingly. Not a language-surface feature — a compiler build-output contract. See build.map.md.
 
-## The one-landmark invariant + multi-file shell composition (§20.8.1.1 / §40.8.2, #124 Wave-1c PR-1)
+## The one-landmark invariant + multi-file shell composition (§20.8.1.1 / §40.8.2, #124 Wave-1c PR-1; widened #126/#128 S277)
 
 **Read this before touching outlet, `<main>`, or MPA composition anywhere in codegen.**
 
@@ -45,12 +45,49 @@ scrml is a single-file full-stack language + compiler (not a web app with a runt
 | 2 | `<main><outlet/></main>` (wrapping) | author's `<main>` is the landmark; outlet demotes to marked `<div>` |
 | 3 | `<page>`-scoped / `pages/*.scrml` `<main>` | route content owns the landmark; slot demotes to marked `<div>` |
 | 4 | BARE / SIBLING `<main>` next to the outlet | **`E-OUTLET-AND-MAIN`** — ambiguous, only the author can resolve |
+| 3b | `<main>` arriving via **COMPONENT EXPANSION** (written in a component's definition body, mounted at a call site) | **content-owned — the case-3 family** (#126, S277). The component's `<main>` takes the landmark, the marked slot demotes to `<div>`, and NO diagnostic fires. See the SYM-blindness note below — it is BY DESIGN |
 
 **Where each decision actually lives — three files, three different stages:**
 
 - **`codegen/emit-html.ts` — the LANDMARK decision (per-file, emit time).** The `tag === "outlet"` branch (~:1650-1730) rewrites the outlet to a plain container carrying a synthetic `data-scrml-outlet` marker + `tabindex="-1"` (skipped if the author set their own tabindex), forces `selfClosing: false` so `<outlet/>` still opens a markup-parent context, and picks the tag: `documentHasAuthorMain() ? "div" : "main"` (:1720). The predicate is `treeHasAuthorMain(root)` (:1005) — a deliberately BROAD walk over every array- and object-valued property (not the typed child edges), `WeakSet`-cycle-guarded, `span` skipped. Breadth is the point: a false positive costs a `<div>` where `<main>` would also have been valid (invisible — the marker identifies the slot), a false NEGATIVE emits two `<main>`s in one document, which is the exact defect the invariant exists to prevent. The walk errs toward "yes".
 - **`codegen/index.ts` — the COMPOSITION SLOT (cross-file, composition time).** Slot = the FIRST element carrying the marker (`findOutletMarkedOpenTag`), falling back to the FIRST bare `<main>` (`findBareMainOpenTag`) for the pre-§20.8 static/hard-nav back-compat path. Matching is on attribute NAME via a real open-tag/attribute tokenizer, so `data-scrml-outlet-debug` (longer name) and `data-testid="data-scrml-outlet"` (value text) both correctly fail to match. `findMatchingCloseIdx` (:724) is a DEPTH-COUNTING close-tag scanner that skips comments and the raw-text elements `<script>`/`<style>`; a naive `indexOf('</'+tag+'>')` was correct only while the slot was always `<main>` (unnestable) and always empty — both false now, and the naive scan spliced route bodies above the real close, reparenting siblings and dropping content with a clean compile and no diagnostic. Slot bounds test is `>=`, not `>`, so an EMPTY slot (the NORMAL soft-nav shape) still composes. Then per composed page: `routeOwnsLandmark` (:2171) DEMOTES a marked `<main>` slot to `<div>` when the route body brings its own `<main>`, and `slotShouldPromote` (:2196) RE-PROMOTES a demoted slot back to `<main>` when the only author `<main>` was the outlet's own placeholder (which composition discards) and nothing else claims the landmark. Both are per-composed-document — a sibling route with no `<main>` composes into the `<main>` slot unchanged. Demotion is scoped to the MARKED slot only; the back-compat bare-`<main>` slot is the author's own element and is never re-tagged.
-- **`compiler/src/symbol-table.ts` — the DIAGNOSTIC (SYM PASS 15.5).** `walkValidateOutlets` (:10096) → `collectOutlets` (:10194) group outlets by nearest enclosing `<program>` (orphans → `E-OUTLET-OUTSIDE-SHELL`; 2nd..nth per shell → `E-OUTLET-DUPLICATE`). The Wave-1c addition is per-shell `shellMains` + a `wrappingMains` WeakSet + an `inRouteScope` flag: `<main>`s inside a `<page>` body or an `<outlet>` body are NOT collected at all (case 3), and a `<main>` on the open walk path when an outlet is reached is marked WRAPPING (case 2). `E-OUTLET-AND-MAIN` (`fireOutletAndMain`, :10372) fires on the remaining set — case 4 only — reported ON the `<main>`, naming all three resolutions (wrap / remove / move into the `<page>`).
+- **`compiler/src/symbol-table.ts` — the DIAGNOSTIC (SYM PASS 15.5).** `walkValidateOutlets` (:10096) → `collectOutlets` (:10194) group outlets by nearest enclosing `<program>` (orphans → `E-OUTLET-OUTSIDE-SHELL`; 2nd..nth per shell → `E-OUTLET-DUPLICATE`). The Wave-1c addition is per-shell `shellMains` + a `wrappingMains` WeakSet + an `inRouteScope` flag: `<main>`s inside a `<page>` body or an `<outlet>` body are NOT collected at all (case 3), and a `<main>` on the open walk path when an outlet is reached is marked WRAPPING (case 2). `E-OUTLET-AND-MAIN` (`fireOutletAndMain`, :10580) fires on the remaining set — case 4 only — reported ON the `<main>`, naming all three resolutions (wrap / remove / move into the `<page>`). **S277 widened this collector three ways without adding a code (#126/#128):** (a) the walk became **TOTAL** — every object-valued property, `span` excluded, WeakSet-guarded (guard hoisted above the array branch) — deliberately mirroring `treeHasAuthorMain`, because the two decide two halves of ONE question and must not disagree about which elements exist; the prior hand-listed edge set (copied from `walkChannelPlacement`) silently missed `armBodyChildren` (match block-form), `bodyChildren` (engine state-children) and `<each>` bodies. (b) the `<main>` test became the shared `isAuthorMainTag` (see below). (c) `inRouteScope` now **resets at a nested `<program>` boundary** — the sibling of the existing `openMains` reset, on the same §4.12.1 grounds (a nested `<program>` is an isolated compilation unit inheriting nothing); without it `inRouteScope` latched true for a whole `<page>` subtree, so a nested shell never re-opened shell scope and a textbook case-4 violation in the INNER shell was silently exempted, while its `<div>`-wrapped twin always fired. Diagnostics also now resolve their reporting span through a `reportSpans` WeakMap: sub-parsed subtrees (match arms, `<each>` bodies) carry spans never rebased to file coordinates (they read L1:C1), detected structurally and replaced with the nearest file-absolute ancestor span — a **general ast-builder gap**, not an outlet one.
+
+**Component-expanded `<main>` — and why SYM deliberately cannot see it (#126, SPEC §20.8.1.1).**
+A `<main>` written inside a component's definition body and brought into the document by mounting
+that component is **content-owned: the case-3 family.** No diagnostic. Case 4 does NOT apply,
+because the composed document still carries exactly one landmark.
+
+The reason this is a normative bullet rather than a coverage gap: **at SYM time a component
+definition body is still RAW TEXT (pre-expansion), so NO AST walk — however broad — reaches it.**
+That is why widening `collectOutlets` to a total walk (#126) did not and could not pick these up.
+The landmark decision for this shape is made DOWNSTREAM at emit time, where the expanded markup is
+visible. Do not "fix" the SYM blindness: firing case 4 here would reject a program that compiles to
+valid, accessible HTML and force the author to restructure working code. This is the one place in
+the invariant where the diagnostic pass is intentionally weaker than the emitter.
+
+**ONE shared `<main>` predicate — `compiler/src/landmark-tag.ts` (#126).** The two walkers that
+decide the two halves of this question (`collectOutlets` fires the diagnostic; `treeHasAuthorMain`
+picks the emitted tag) previously open-coded `=== "main"` separately. They now both import
+`isAuthorMainTag(node)`. The predicate is subtle enough that two copies *will* diverge:
+
+- It must be case-INSENSITIVE. HTML element names are ASCII case-insensitive and the compiler
+  passes an unrecognized capitalized tag through verbatim, so `<MAIN>` really does reach the
+  document and really is a second landmark to a browser. A `=== "main"` test cannot see it.
+- It must NOT be a bare `toLowerCase()`. In scrml a capitalized tag is a COMPONENT reference and
+  `ast-builder.js` classifies component-vs-element by capitalization ALONE, so `<MAIN>` and a
+  user's `<Main/>` leave the parser flagged identically. Lowercasing without a guard fires
+  `E-OUTLET-AND-MAIN` on a legal program AND demotes its slot to a `<div>`, yielding a document
+  with ZERO landmarks.
+- The discriminator is therefore NAME RESOLUTION, not spelling: `isUserComponentMarkup` reads NR's
+  `resolvedKind` (authoritative, cross-file aware). NR runs at `api.js:1585`, before SYM at
+  `:1626`, so `resolvedKind` is populated by the time PASS 15.5 asks. **Rule: a capitalized
+  spelling of `main` is the HTML landmark unless NR resolved that tag to a user component.**
+
+Upstream caveat recorded in that module: `<MAIN>` escaping `E-COMPONENT-035` (which `<Widget/>`
+does fire) is a deeper classifier inconsistency — an unrecognized capitalized tag is neither
+normalized to the HTML element nor rejected. `landmark-tag.ts` makes the landmark walkers agree
+with the browser; it does not fix that.
 
 **Outlet diagnostic family (4 codes):** `E-OUTLET-DUPLICATE`, `E-OUTLET-OUTSIDE-SHELL`, `E-OUTLET-AND-MAIN`, `W-OUTLET-ABSENT-SOFT-NAV-DISABLED`. See error.map.md.
 
@@ -66,6 +103,11 @@ scrml is a single-file full-stack language + compiler (not a web app with a runt
 - Auth tokens (magic-link/verify/reset) are single-use (get-then-delete) and namespace-scoped per purpose — a reset token cannot replay as a magic link.
 - A shell SHALL contain at most one `<outlet>` (§20.8) — no nested/multiple outlets in V1.
 - **A composed document SHALL carry at most one `<main>` landmark, and the route slot is identified by the `data-scrml-outlet` attribute NAME, never by tag (§20.8.1.1).** The slot's tag is a derived emission detail (`<main>` or `<div>`); every consumer — codegen and runtime alike — addresses the MARKER.
+- **A `<main>` arriving through COMPONENT EXPANSION is content-owned, never a competing shell landmark (§20.8.1.1).** The SYM pass provably cannot see it (component bodies are raw text pre-expansion); the emitter can, and decides there. The asymmetry is normative, not a hole.
+- **One predicate decides "is this element a `<main>` landmark" for the whole compiler** (`src/landmark-tag.ts`, §20.8.1.1) — imported by both the SYM diagnostic walk and the codegen emit walk, so they cannot answer it differently. Case-insensitive, but NR-`resolvedKind`-guarded so a user component named `Main` wins over the HTML element.
+- **A nested `<program>` inherits NOTHING from its parent — including route scope (§4.12.1).** Any latching flag carried down a walk (`openMains`, `inRouteScope`) must reset at that boundary.
+- **A diagnostic whose rule SPEC states as a property of a DECLARATION fires at the declaration, not at a use site (§6.2 Shape 2, `E-CELL-RENDER-SPEC-NOT-BINDABLE`).** Gating a decl-property rule behind a use site under-fires: interpolation reads and unused decls slip through silently. The converse holds too — `E-CELL-NO-RENDER-SPEC` is genuinely a property of the USE and stays use-scoped.
+- **scrml admits neither `<style>` nor `<script>` as elements (§4.17).** Both are rejected at the block-splitter with a scan-past-close recovery (`E-STYLE-001` / `E-SCRIPT-001`); CSS lives in `#{...}`, scrml logic in `${...}`, and genuine foreign JS in the `_{...}` block (§23). The rejection is SOURCE-side only — the emitter's own `<script src=…>` tags are produced downstream of BS.
 - A `serve=` headless tool target has NO cookie-session auth surface — fail-closed rejected, not silently unguarded (§64.9).
 - An unresolved server-only `scrml:*` re-export's async classification defaults to async (fail-closed), never sync (the STDLIB-EXPORT-SEED backstop).
 - A `@`-sigil is required at a CSS value use site to reference a `<theme>` token or a reactive cell (§65.3.2/§25) — a bare identifier is always a literal CSS value.
@@ -92,7 +134,7 @@ Diagnostic emission — every pipeline stage (BS/TAB/CE/TS/CG, see dependencies.
 A returned function-expression closure (`return function name(){…}`, GITI-038) — owns its own body's scope/type/async analysis independent of its enclosing factory (`ReturnStmtNode.fnExprNode`, see schema.map.md).
 
 ## Tags
-#scrml #map #domain #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes
+#scrml #map #domain #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics
 
 ## Links
 - [primary.map.md](./primary.map.md)

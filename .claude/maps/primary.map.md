@@ -1,6 +1,6 @@
 # primary.map.md
 # project: scrml
-# updated: 2026-07-21T12:51:06Z  commit: c48e59a2
+# updated: 2026-07-21T14:05:00Z  commit: 9481bc69
 # For per-session history, see docs/changelog.md (NOT this file — maps are current-truth navigation, not an archive).
 
 ## Project Fingerprint
@@ -8,19 +8,49 @@ Language:   TypeScript / JavaScript (mixed) + scrml itself (self-hosting stdlib 
 Framework:  Custom compiler pipeline (no web framework) — Bun-native
 Runtime:    Bun >=1.3.13 (no Node support; Bun-specific APIs used throughout)
 Type:       CLI compiler + language toolchain (single-file full-stack web-language compiler, with LSP + editor-tooling + MCP surfaces)
-Size:       6944 git-tracked files total (up from 6910 at the df2ac831/S271-wrap watermark; +34, 0 deletions, across the S272-S276 window); compiler/src/ 178 files (135 .ts + 41 .js + 1 .md + 1 .json; +3 = codegen/sql-lex.ts, codegen/tenant-egress.ts, lint-w-each-table-foster.js), compiler/src/codegen/ 79 files (75 .ts + 3 .js + 1 .md; +2), compiler/native-parser/ 79 files (37 paired .js/.scrml + 5 planning docs, UNCHANGED across the entire window — flagged as a parity-check item, see below), compiler/tests/ 1227 *.test.js (directly counted, +6 this window — see test.map.md). All counts directly `git ls-files`-derived this pass.
+Size:       6962 git-tracked files total (up from 6944 at the c48e59a2/S276-wrap watermark; +18 across the S277 window); compiler/src/ 179 files (136 .ts + 41 .js + 2 other; +1 = the NEW codegen-adjacent `src/landmark-tag.ts`), compiler/src/codegen/ 79 files (unchanged), compiler/native-parser/ 79 files (**still ZERO diff since `df2ac831`** — directly re-verified this pass: `git diff --name-only df2ac831..HEAD -- compiler/native-parser/` returns 0 files; carried as a parity-check item, see the non-compliance report), compiler/tests/ 1229 *.test.js (+2 this window: `unit/script-element-rejected.test.js`, `integration/cell-render-spec-decl-scoped.test.js`). All counts directly `git ls-files`-derived this pass.
 Version:    v0.7.1 (root package.json; compiler/package.json reads 0.2.0 — subpackage drift, longstanding, ignore). No manifest change this window.
 Monorepo:   yes — `workspaces: ["compiler"]`; compiler/ is the sole npm workspace member; stdlib/, editors/, lsp/ are NOT npm workspaces but are integral first-party surfaces of the same repo.
 CI:         GitHub Actions — `.github/workflows/ci.yml` (gate/tracking/windows) + `advisory-review.yml` (advisory AI /code-review). Unchanged this window.
 
 ## Watermark note
 
-This pass advances the map watermark from `df2ac831` (S271) to the current HEAD `c48e59a2` (S276),
-and **completes the PARTIAL S274 map refresh** — that pass updated `error.map.md` and
-`dependencies.map.md` to `58c8161d`, then stalled before reaching `domain.map.md` and before
-bumping this file's stamp. Both are now done.
+This pass advances the map watermark from `c48e59a2` (S276) to the current HEAD `9481bc69` (S277).
+
+**Refresh provenance — read this before trusting a stamp.** The S277 `project-mapper` run STALLED
+(watchdog, no progress for 600s) after completing `domain.map.md`, `error.map.md` and
+`structure.map.md` — all three verified content-complete and stamped `9481bc69` — but before bumping
+THIS file. The PA salvaged the partial (content verified present + files intact to their cross-ref
+footers, not truncated) and finished this file and the non-compliance report PA-direct, recounting
+every figure above from `git ls-files` rather than carrying the agent's numbers forward.
+
+**This is the THIRD consecutive stalled mapper run** (S274 stalled before `domain.map.md`; the S276
+pass was partial by design; S277 stalled before this file). The failure mode is consistent — a long
+single-agent pass over ~11 maps runs out of runway near the end — and it is filed as friction, not
+normalised. Maps stamped BELOW HEAD below are deliberate, recorded, and not silent.
 
 Landings folded in since the prior stamp:
+
+# S277 landings folded into this map set
+
+1. **#126 `499dd740` — outlet-collector total-walk + a shared landmark predicate.**
+   `symbol-table.ts` `collectOutlets` (SYM PASS 15.5) converted from a hand-listed edge walk to a
+   TOTAL walk (every object-valued property, `span` excluded, WeakSet-guarded), deliberately
+   mirroring `codegen/emit-html.ts` `treeHasAuthorMain`. **NEW `compiler/src/landmark-tag.ts`** —
+   `isAuthorMainTag(node)`, the single `<main>` predicate imported by BOTH walkers so it cannot
+   drift; case-insensitive but guarded by NAME RESOLUTION (`isUserComponentMarkup` via NR's
+   `resolvedKind`), because ast-builder classifies component-vs-element by capitalization alone.
+   SPEC §20.8.1.1 +1 bullet (component-expanded `<main>` = content-owned, case-3 family).
+2. **#127 `07901878` — `E-SCRIPT-001`.** `block-splitter.js` rejects the `<script>` element beside
+   the existing `<style>`/`E-STYLE-001` rejection (fire + scan-to-close recovery). SPEC §4.17
+   corrected (its "W-LINT-018 Ghost-Pattern surface" claim was false in both halves) + a NEW §34 row.
+3. **#128 `9481bc69` — SYM diagnostic corrections.** `collectOutlets` now resets `inRouteScope` at a
+   nested `<program>` boundary (SPEC §4.12.1; the twin of the existing `openMains` reset). **NEW SYM
+   PASS 5a `walkNonBindableMarkupDecls`** — `E-CELL-RENDER-SPEC-NOT-BINDABLE` MOVED from the `<x/>`
+   render-by-tag use site to the DECLARATION; the use-site fire was REMOVED. Fire-site relocation,
+   reflected in `error.map.md`.
+
+### Prior window (S272-S276), retained for context
 
 1. **#115 each-foster lint** (S272) — `W-EACH-TABLE-FOSTER` info-lint; NEW
    `compiler/src/lint-w-each-table-foster.js`, wired at api.js Stage 6.4f.
