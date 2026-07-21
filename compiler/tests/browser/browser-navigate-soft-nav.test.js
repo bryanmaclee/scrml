@@ -528,17 +528,20 @@ describe("M1 Phase 4 — an outlet-resident <timer> STOPS on nav; a shell timer 
   });
 });
 
-describe("finding #4 — a cross-route target hard-navigates (no frozen swap)", () => {
-  test("a target that needs a client chunk we don't have is NOT soft-swapped", async () => {
+describe("finding #4 / Wave-1c — an UNLOADABLE cross-chunk target hard-navigates (no frozen swap)", () => {
+  test("a target whose missing client chunk fails to load falls back to hard-nav (never frozen-swaps)", async () => {
     const { html, clientJs } = compileInline(SHELL);
     mount(html, clientJs);
     const before = document.querySelector("[data-scrml-outlet]").innerHTML;
     // The target references a DIFFERENT client chunk (a separate pages/ file).
+    // Wave-1c ATTEMPTS to load it; here `other-route.client.js` cannot load
+    // (happy-dom blocks injected-script file loading), so `_scrml_nav_load_chunks`
+    // fails → W-NAV-CHUNK-LOAD-FAILED hard-nav fallback (the swap never runs).
     mockFetch({ "/other": ssrDoc('<p id="cross">cross-route</p>', null, "other-route.client.js") });
     window._scrml_navigate_soft("/other");
     await flush();
     // Hard-nav fallback: happy-dom's window.location assignment is inert, so the
-    // outlet is LEFT AS-IS (never frozen-swapped with the cross-route content).
+    // outlet is LEFT AS-IS (never frozen-swapped with unhydrated cross-route content).
     expect(document.querySelector("#cross")).toBeNull();
     expect(document.querySelector("[data-scrml-outlet]").innerHTML).toBe(before);
   });

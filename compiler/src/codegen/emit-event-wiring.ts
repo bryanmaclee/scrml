@@ -638,7 +638,21 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
 
   lines.push("");
   lines.push("// --- Event handler wiring (compiler-generated) ---");
-  lines.push("document.addEventListener('DOMContentLoaded', function() {");
+  // navigate-wave1c — the boot runs when the DOM is ready. On the INITIAL page
+  // load an end-of-body `<script>` executes while `document.readyState` is still
+  // "loading" (the parser hasn't fired DOMContentLoaded yet), so we defer to
+  // DOMContentLoaded exactly as before — zero behavior change. But a chunk
+  // INJECTED after the page has booted (a cross-chunk soft-nav loading a route's
+  // client chunk, §20.8.2) runs with `readyState` already "interactive"/"complete";
+  // DOMContentLoaded has fired and will NOT fire again, so we boot it immediately
+  // — this is what lets an injected route chunk register its delegable handlers,
+  // its `_scrml_nav_rewire` rehydrator, and its if=/each wiring. The boot fn is
+  // wrapped in an IIFE so it needs no global name (classic scripts share one
+  // global scope across chunks). Shared document-level listeners
+  // (`_scrml_link_ensure_click` / popstate) are idempotent-guarded at their own
+  // sites, so a re-run boot never double-registers them.
+  lines.push("(function() {");
+  lines.push("function _scrml_boot() {");
 
   // -------------------------------------------------------------------------
   // Step 8: Wire event handlers from HTML bindings to generated functions
@@ -2038,7 +2052,15 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     lines.push('  if (typeof _scrml_register_rehydrator === "function") _scrml_register_rehydrator(_scrml_nav_rewire);');
   }
 
-  lines.push("});");
+  // Close `function _scrml_boot()` + the readyState-gated boot dispatch + the IIFE
+  // (navigate-wave1c — see the opening comment at the DOMContentLoaded site).
+  lines.push("}");
+  lines.push('if (typeof document !== "undefined" && document.readyState === "loading") {');
+  lines.push('  document.addEventListener("DOMContentLoaded", _scrml_boot);');
+  lines.push("} else {");
+  lines.push("  _scrml_boot();");
+  lines.push("}");
+  lines.push("})();");
 
   return lines;
 }

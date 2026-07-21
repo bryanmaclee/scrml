@@ -665,10 +665,14 @@ describe("Phase A10 re-wire §12 — per-arm wire fn shape", () => {
 `;
     const { errors, clientJs } = compileToOutputs(src, "rewire-domcl");
     expect(errors).toEqual([]);
-    // DOMContentLoaded block invokes the dispatch fn with the initial value.
+    // The initial dispatch fires on DOM-ready. navigate-wave1c reshaped this into
+    // a readyState-gated boot (`var _fire = ...; if (readyState === "loading")
+    // addEventListener else _fire()`) so an injected route chunk still dispatches.
     expect(clientJs).toMatch(
-      /document\.addEventListener\('DOMContentLoaded', function\(\) {\s*__scrml_engine_phase_dispatch\(_scrml_reactive_get\("phase"\)\);\s*}\);/,
+      /var _fire = function\(\) { __scrml_engine_phase_dispatch\(_scrml_reactive_get\("phase"\)\); };/,
     );
+    expect(clientJs).toMatch(/document\.readyState === "loading"/);
+    expect(clientJs).toMatch(/document\.addEventListener\("DOMContentLoaded", _fire\)/);
   });
 
   test("arm-tagged logic-bindings are FILTERED OUT of global reactive-wiring block", () => {

@@ -178,3 +178,35 @@ describe("§4 — E-OUTLET-AND-MAIN: a shell with BOTH `<main>` and `<outlet>` e
     expect(errors.some((e) => e.code === "E-OUTLET-AND-MAIN")).toBe(false);
   });
 });
+
+describe("§5 — Piece 2: the event-wiring boot is readyState-gated (injected-chunk-safe)", () => {
+  test("a route chunk with event wiring emits a readyState-gated `_scrml_boot`, not a bare DOMContentLoaded listener", () => {
+    const { errors, read } = buildDir("boot-gate", {
+      "index.scrml": `<program>\n  <outlet/>\n</program>\n`,
+      "pages/reports.scrml": `<page>\n  <n> = 0\n  <button onclick=@n = @n + 1>inc</button>\n</page>\n`,
+    });
+    expect(errors).toEqual([]);
+    const route = read("reports.client.js");
+    expect(route).not.toBeNull();
+    // The boot is a named fn dispatched via a readyState guard: initial load
+    // (`readyState === "loading"`) defers to DOMContentLoaded; an injected chunk
+    // (`readyState` already interactive/complete) boots immediately.
+    expect(route).toContain("function _scrml_boot()");
+    expect(route).toMatch(/document\.readyState === "loading"/);
+    expect(route).toMatch(/document\.addEventListener\("DOMContentLoaded", _scrml_boot\)/);
+    expect(route).toMatch(/}\s*else\s*{\s*_scrml_boot\(\);\s*}/);
+    // NOT the old bare anonymous DOMContentLoaded closure.
+    expect(route).not.toContain("document.addEventListener('DOMContentLoaded', function()");
+  });
+
+  test("the reshaped boot emits valid JS (parses clean)", async () => {
+    const { read } = buildDir("boot-valid", {
+      "index.scrml": `<program>\n  <outlet/>\n</program>\n`,
+      "pages/reports.scrml": `<page>\n  <n> = 0\n  <p>\${@n}</p>\n  <button onclick=@n = @n + 1>inc</button>\n</page>\n`,
+    });
+    const route = read("reports.client.js");
+    // acorn parses the emitted chunk without error (the IIFE + guard is well-formed).
+    const acorn = await import("acorn");
+    expect(() => acorn.parse(route, { ecmaVersion: 2022 })).not.toThrow();
+  });
+});

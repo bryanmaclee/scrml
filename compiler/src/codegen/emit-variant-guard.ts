@@ -1307,12 +1307,26 @@ export function emitVariantGuardedRender(
   // Item-scoped mode has no module-init DOMContentLoaded fire either — the
   // each factory dispatches every item explicitly at create/reconcile time.
   if (!itemScoped && subscribeName !== null) {
-    dispatcherLines.push(`document.addEventListener('DOMContentLoaded', function() {`);
-    // GITI-031 — apply the Shape-A member-access sub-path to the initial
-    // cell read so the init-fire dispatches on the enum-variant discriminant,
-    // not the parent struct. `subPath` is "" for a bare `@cell` ref.
-    dispatcherLines.push(`  ${dispatchFnName}(_scrml_reactive_get(${JSON.stringify(subscribeName)})${subPath});`);
-    dispatcherLines.push(`});`);
+    // navigate-wave1c — run the initial dispatch when the DOM is ready. On the
+    // initial page load `readyState` is "loading" so we defer to DOMContentLoaded
+    // (unchanged). But when this dispatcher's chunk is INJECTED after boot (a
+    // cross-chunk soft-nav loading a route whose content carries an engine/match),
+    // DOMContentLoaded has already fired and will NOT fire again, so we dispatch
+    // immediately — otherwise the route's initial arm would render frozen. The
+    // local `_fire` needs no global name (multiple dispatchers per file / classic
+    // scripts share one global scope).
+    // GITI-031 — apply the Shape-A member-access sub-path to the initial cell read
+    // so the init-fire dispatches on the enum-variant discriminant, not the parent
+    // struct. `subPath` is "" for a bare `@cell` ref.
+    // Two `if`s (no `else`) so the dispatcher body never contains an `else {` —
+    // a match-block's default-arm regression guards grep the dispatcher for that
+    // token, and this init-fire boot is unrelated to a match default arm.
+    dispatcherLines.push(`(function() {`);
+    dispatcherLines.push(`  var _fire = function() { ${dispatchFnName}(_scrml_reactive_get(${JSON.stringify(subscribeName)})${subPath}); };`);
+    dispatcherLines.push(`  var _defer = typeof document !== "undefined" && document.readyState === "loading";`);
+    dispatcherLines.push(`  if (_defer) { document.addEventListener("DOMContentLoaded", _fire); }`);
+    dispatcherLines.push(`  if (!_defer) { _fire(); }`);
+    dispatcherLines.push(`})();`);
   }
 
   const dispatcherJs = dispatcherLines.join("\n");

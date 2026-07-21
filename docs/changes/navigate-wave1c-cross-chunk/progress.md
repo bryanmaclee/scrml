@@ -111,3 +111,81 @@ CHECKPOINT (empirical `scrml build`, mpa/ = `<outlet/>` shell + 2 pages/ routes)
 - `<main><outlet/></main>` (mpa3/) now errors E-OUTLET-AND-MAIN (verified).
 - Tests: navigate-wave1c-outlet-composition.test.js 9/9 pass; mpa-shell-clean-urls 17/17;
   navigate-soft-nav-lowering + link-boost + navigate-w-outlet-absent + trucking-smoke 54/54.
+
+### Piece 2 — boot restructure (readyState guard) — DONE
+- emit-event-wiring.ts: the main event-wiring boot is now `(function(){ function _scrml_boot(){…}
+  if (readyState==='loading') addEventListener('DOMContentLoaded', _scrml_boot) else _scrml_boot() })()`.
+  Initial page load (end-of-body script → readyState 'loading') defers to DCL (unchanged); an
+  INJECTED route chunk (readyState 'interactive'/'complete') boots IMMEDIATELY → registers its
+  delegable handlers + `_scrml_nav_rewire` rehydrator + if=/each wiring.
+- emit-variant-guard.ts: same readyState guard on the engine/match initial-dispatch DCL block
+  (local `_fire`, no global name — multiple dispatchers/file) so an injected route carrying an
+  engine/match does its initial dispatch on first visit instead of rendering frozen.
+- "Skip re-registering delegated document listeners / shell re-boot": NO new skip flag needed — the
+  only SHARED document listeners are `_scrml_link_ensure_click` (emit-client.ts, `fileHasOutlet`-gated
+  → shell-only, never injected) + popstate, BOTH already idempotent-guarded (`_scrml_link_click_wired`
+  / `_scrml_nav_popstate_wired`). A route chunk emits NO shared listeners; its per-file delegable
+  click/submit listeners dispatch off a per-file registry (disjoint placeholder ids) so accumulating
+  them across visited routes is not a double-fire. Documented in code + here.
+- happy-dom readyState is 'interactive' → the boot runs at eval (else branch); the browser suite's
+  mount()+manual-DCL-dispatch still works (boot runs regardless). navigate 22/22, link-boost 10/10.
+- Test updates (coupled): state-block-event-wiring (7 assertions → `_scrml_boot` marker),
+  engine-body-render (dispatcher DCL regex → reshaped `_fire`/readyState form). +2 new Piece-2
+  assertions in navigate-wave1c-outlet-composition.test.js (11/11).
+- RESIDUAL (pre-existing, OUT OF SCOPE): full engine/match REHYDRATION on a REPEAT soft-nav (2nd+
+  visit) is a pre-existing same-chunk gap (`_scrml_rehydrate_region` re-fires rehydrators +
+  `_scrml_remount_each`, not top-level match/engine dispatchers). The readyState guard fixes the
+  FIRST-visit-of-injected-chunk case (parity with normal first load); repeat-visit engine/match
+  rehydration is untouched by Wave-1c.
+
+### Piece 3 — runtime cross-chunk load — DONE
+- runtime-template.js `_scrml_nav_apply_html`: replaced the L2441 `!_scrml_nav_same_chunk` hard-nav
+  bail with the real load path. New helpers:
+  - `_scrml_nav_missing_chunks(doc, path)` — ordered (deps-first) ABSOLUTE URLs of the target's
+    `.client.js` scripts NOT already loaded; resolves each src against the TARGET page URL (nested
+    upToRoot-correct), from the FETCHED doc (not by convention).
+  - `_scrml_nav_load_chunks(urls, token, onDone, path)` — sequentially injects `<script async=false>`
+    (deps-first order), awaits onload; timeout (`_SCRML_NAV_CHUNK_TIMEOUT_MS=10000`) / onerror /
+    synchronous-append-throw → `_scrml_nav_chunk_failed` → W-NAV-CHUNK-LOAD-FAILED (console.info) +
+    hard-nav. Token recheck at each step (a chunk finishing after a newer nav bails silently).
+  - Seed installed BEFORE chunk load (injected chunk's tier-1 seed-apply uses the new-route seed;
+    no stale re-apply over live shell cells — finding #5). View-Transition/token/abort/popstate/focus/
+    scroll all preserved (cross-chunk rides `_scrml_nav_fetch_and_swap` → works on back/forward too).
+- Fixed a self-inflicted bug: comment backticks (`<script src>`) broke the SCRML_RUNTIME template
+  literal → self-host-meta-checker compile failed. De-backticked; runtime parses + node --check clean.
+
+### R26 EMPIRICAL (MANDATORY) — PASS
+browser-navigate-cross-chunk.test.js EXECUTES the REAL emitted cross-chunk MPA bundle (compiled to
+disk: shell index.scrml + pages/reports.scrml + pages/about.scrml → separate chunks) in happy-dom.
+happy-dom blocks injected-script loading, so a route chunk's `<script>` append is intercepted and the
+REAL emitted reports.client.js is executed in the shared runtime scope (a direct-eval closure — faithful
+classic-script scope sharing). Verified (4/4):
+  1. the composed reports.html carries `[data-scrml-outlet]` + shell chrome + lists BOTH chunks;
+  2. a soft-nav to /reports LOADS reports.client.js, swaps the outlet to the route content, and the
+     shell `<h1>` SURVIVES (no full reload, no runtime re-boot);
+  3. the swapped route's reactivity works AFTER the swap — `_scrml_reactive_set("rows", [4 items])`
+     re-renders the `<each>` to 4 `<li>` + the `${@rows.length}` interpolation updates to 4;
+  4. a chunk-load FAILURE hard-navs (W-NAV-CHUNK-LOAD-FAILED) — the outlet is left intact, never
+     frozen-swapped with unhydrated content.
+Browser suite: navigate 22 + link-boost 10 + cross-chunk 4 = 36/36. finding #4 test updated (its
+cross-route hard-nav now flows through the Wave-1c chunk-load-failure fallback; assertion unchanged).
+
+### SPEC (land-with-impl) + conformance + a deploy-path bug — DONE
+- SPEC §20.8 banner flipped to IMPLEMENTED (Waves 1a/1b + link-boost + 1c); keep-alive §20.8.4 +
+  nested outlets stay Nominal/v1.next. §20.8.1 (marker-driven `<outlet>`→`<main data-scrml-outlet>` +
+  E-OUTLET-AND-MAIN + composition note), §20.8.2 (cross-chunk load step + hard-nav-on-failure, now a
+  5-step pipeline), §20.8.6 (normative statements), §20.8.7 (E-OUTLET-AND-MAIN + W-NAV-CHUNK-LOAD-FAILED
+  named), §40.8 (the previously-UNSPECIFIED composition mechanism — marker-driven slot, now normative),
+  §34 catalog rows (E-OUTLET-AND-MAIN + W-NAV-CHUNK-LOAD-FAILED). SPEC-INDEX regenerated (46 rows).
+- Conformance: conf-NAV-CROSS-CHUNK.test.js — codes-half (E-OUTLET-AND-MAIN pos/neg) + a DETERMINISTIC
+  runtime-half that EXECUTES the shipped helpers in isolation (a `new Function` + DOM stub, no HTTP, no
+  happy-dom global): `_scrml_nav_missing_chunks` returns the not-loaded chunk (need\have, abs-resolved),
+  returns [] same-chunk; `_scrml_nav_chunk_failed` emits W-NAV-CHUNK-LOAD-FAILED + hard-navs, and bails
+  silently under a superseded token. 9/9.
+- DEPLOY-PATH BUG (caught by the conformance test, fixed): `_scrml_nav_client_chunks`'s regex
+  `/\.client\.js/` did NOT match content-hashed chunk names (`reports.client.<hash>.js`, the `scrml
+  build` §47.9.8 output) — so cross-chunk detection would silently NO-OP on the deploy path (only the
+  dev/unhashed path worked). Broadened to `_SCRML_CLIENT_CHUNK_RE = /\.client\.(?:[0-9a-z]+\.)?js(\?|$)/i`
+  (both forms); the per-content hash is stable so shell-chunk basename matching still holds across pages.
+- Wildcard-test collision fix: emit-variant-guard's readyState guard used `} else {`, tripping the
+  match-block §3 "no default-arm else" regression grep; rewrote as two `if`s (no `else {`).
