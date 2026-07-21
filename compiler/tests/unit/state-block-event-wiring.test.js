@@ -109,7 +109,7 @@ describe("BUG-R14-005 §1: onclick inside state block → DOMContentLoaded", () 
     ]);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("document.addEventListener('DOMContentLoaded'");
+    expect(out.clientJs).toContain("function _scrml_boot()");
   });
 
   test("client JS has event handler wiring inside DOMContentLoaded", () => {
@@ -171,7 +171,7 @@ describe("BUG-R14-005 §2: multiple buttons inside state block all wired", () =>
     ]);
 
     const out = result.outputs.get("/test/app.scrml");
-    const matches = (out.clientJs ?? "").match(/document\.addEventListener\('DOMContentLoaded'/g);
+    const matches = (out.clientJs ?? "").match(/function _scrml_boot\(\)/g);
     expect(matches).not.toBeNull();
     expect(matches.length).toBe(1);
   });
@@ -196,7 +196,7 @@ describe("BUG-R14-005 §3: deeply nested button inside state block", () => {
     ]);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("document.addEventListener('DOMContentLoaded'");
+    expect(out.clientJs).toContain("function _scrml_boot()");
     expect(out.clientJs).toContain("openForm()");
   });
 
@@ -249,7 +249,7 @@ describe("BUG-R14-005 §4: handle() middleware does not suppress DOMContentLoade
     ]);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("document.addEventListener('DOMContentLoaded'");
+    expect(out.clientJs).toContain("function _scrml_boot()");
     expect(out.clientJs).toContain("createEntry()");
   });
 });
@@ -323,7 +323,7 @@ describe("BUG-R14-005 §6: top-level button regression (outside state block)", (
     ]);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("document.addEventListener('DOMContentLoaded'");
+    expect(out.clientJs).toContain("function _scrml_boot()");
     expect(out.clientJs).toContain("topLevelAction()");
   });
 });
@@ -381,7 +381,7 @@ describe("BUG-R14-005 §8: state block with no onclick markup — no spurious bl
 
     const out = result.outputs.get("/test/app.scrml");
     // No event bindings → no DOMContentLoaded block
-    expect(out.clientJs).not.toContain("document.addEventListener('DOMContentLoaded'");
+    expect(out.clientJs).not.toContain("function _scrml_boot()");
   });
 
   test("state block with markup but no onclick attributes produces no DOMContentLoaded", () => {
@@ -394,6 +394,6 @@ describe("BUG-R14-005 §8: state block with no onclick markup — no spurious bl
 
     const out = result.outputs.get("/test/app.scrml");
     // No event bindings → no DOMContentLoaded block
-    expect(out.clientJs).not.toContain("document.addEventListener('DOMContentLoaded'");
+    expect(out.clientJs).not.toContain("function _scrml_boot()");
   });
 });

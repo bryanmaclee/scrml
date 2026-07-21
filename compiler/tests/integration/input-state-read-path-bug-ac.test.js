@@ -94,9 +94,13 @@ describe("S144 Bug AC — input-state read path resolves through registry", () =
     expect(clientJs).not.toContain("_scrml_input_cursor_");
 
     // And it must NOT leak a file-scope orphan statement that would run before
-    // _scrml_input_mouse_create registers the state (fresh TypeError class).
-    const beforeDCL = clientJs.split("DOMContentLoaded")[0];
-    expect(beforeDCL).not.toContain('_scrml_input_state_registry.get("cursor")');
+    // _scrml_input_mouse_create registers the state (fresh TypeError class). The
+    // read belongs INSIDE the boot; module-init (everything before `_scrml_boot`)
+    // must not contain it. (navigate-wave1c reshaped the boot into a readyState-
+    // gated `function _scrml_boot()`, so split on that marker, not "DOMContentLoaded"
+    // — the token now sits AFTER the boot body, in the readyState guard.)
+    const beforeBoot = clientJs.split("function _scrml_boot()")[0];
+    expect(beforeBoot).not.toContain('_scrml_input_state_registry.get("cursor")');
 
     rmSync(TMP_ROOT, { recursive: true, force: true });
   });
@@ -172,6 +176,15 @@ describe("S144 Bug AC — input-state read path resolves through registry", () =
       expect(bodyMatch).toBeTruthy();
       // Strip the <script> tags from the HTML body — we wire the JS ourselves.
       document.body.innerHTML = bodyMatch[1].replace(/<script[\s\S]*?<\/script>/gi, "");
+
+      // navigate-wave1c — the compiled event-wiring boot is readyState-gated: on a
+      // real end-of-body `<script>` load `document.readyState` is "loading", so the
+      // boot DEFERS to DOMContentLoaded. happy-dom defaults to "interactive", which
+      // would boot immediately at exec() — BEFORE the mousemove below — so the
+      // one-shot `<#cursor>` read would capture (0,0). Force "loading" here to model
+      // the real end-of-body load so the read fires at the DCL dispatch (after the
+      // mousemove), matching browser timing.
+      Object.defineProperty(document, "readyState", { configurable: true, get: () => "loading" });
 
       // Execute runtime + compiled client in a single scope (the client refs
       // runtime globals like _scrml_input_state_registry / _scrml_input_mouse_create).
