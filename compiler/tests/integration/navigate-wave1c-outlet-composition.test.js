@@ -382,3 +382,142 @@ describe("§5 — the slot is matched on the ATTRIBUTE NAME, not a `\\b`-delimit
     expect(body.indexOf("DECOY")).toBeLessThan(real);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The blocks below were added by the S276 PA-direct fix round. Every one of
+// them is a shape the first two dispatches did NOT have a fixture for — which
+// is why a green suite shipped two BLOCKING regressions. The defects were all
+// found adversarially, not by the suite; these pin them.
+// ---------------------------------------------------------------------------
+
+describe("§6 — the composed document stays BALANCED (the slot close is depth-counted)", () => {
+  // The slot close was found with `indexOf('</' + slotTag + '>')`. That is safe
+  // only while the slot is always `<main>` (unnestable per HTML5) AND always
+  // empty at emit time. Both stopped being true: the slot demotes to `<div>`
+  // (cases 2/3) and `<outlet>` accepts placeholder children. A `<div>` slot
+  // holding a `<div>` then terminated on the INNER close, splicing the route
+  // body above the real close tag — reparenting later siblings out of their
+  // container and silently dropping the slot's remaining children, with a
+  // clean compile and no diagnostic.
+
+  test("an `<outlet>` carrying PLACEHOLDER CHILDREN composes balanced", () => {
+    const { errors, read } = buildDir("splice-outlet-children", {
+      "index.scrml":
+        `<program>\n  <main>\n    <outlet><div class="ph">skeleton</div><p>TAIL</p></outlet>\n  </main>\n</program>\n`,
+      "pages/about.scrml": `<page>\n  <h2>About</h2>\n</page>\n`,
+    });
+    expect(errors).toEqual([]);
+    const about = read("about.html");
+    expect(about).not.toBeNull();
+    expect(tagBalance(about, "div").balanced).toBe(true);
+    expect(tagBalance(about, "main").balanced).toBe(true);
+    expect(mainCount(about)).toBe(1);
+    // The route body REPLACES the slot's children, so the placeholder is gone —
+    // and, critically, has not leaked OUTSIDE the slot where the runtime swap
+    // (`querySelector("[data-scrml-outlet]")`) could never clear it.
+    expect(about).not.toContain("TAIL");
+    expect(about).toContain("About");
+  });
+
+  test("a DEMOTED `<div>` slot containing `<div>`s keeps following siblings inside their container", () => {
+    const { errors, read } = buildDir("splice-div-slot", {
+      "index.scrml":
+        `<program>\n  <div class="layout">\n    <outlet><main>ph</main><div>b</div></outlet>\n    <footer>foot</footer>\n  </div>\n</program>\n`,
+      "pages/reports.scrml": `<page>\n  <h2>R</h2>\n</page>\n`,
+    });
+    expect(errors).toEqual([]);
+    const reports = read("reports.html");
+    expect(reports).not.toBeNull();
+    expect(tagBalance(reports, "div").balanced).toBe(true);
+    // The stray close previously terminated `.layout`, hoisting `<footer>` out.
+    expect(reports).toContain("foot");
+  });
+
+  test("an AUTHOR-WRITTEN `data-scrml-outlet` marker with children composes balanced", () => {
+    const { errors, read } = buildDir("splice-author-marker", {
+      "index.scrml":
+        `<program>\n  <h1>Shell</h1>\n  <div data-scrml-outlet>\n    <div>alpha</div>\n    <div>beta</div>\n  </div>\n  <footer>foot</footer>\n</program>\n`,
+      "pages/reports.scrml": `<page>\n  <h2>R</h2>\n</page>\n`,
+    });
+    expect(errors).toEqual([]);
+    const reports = read("reports.html");
+    expect(reports).not.toBeNull();
+    expect(tagBalance(reports, "div").balanced).toBe(true);
+    expect(reports).toContain("foot");
+  });
+});
+
+describe("§7 — the landmark decision is DOCUMENT-scoped, not invocation-scoped", () => {
+  // `generateHtml` is RE-ENTERED with `arm.body` for engine/match arm bodies.
+  // Scoping "does the document have an author `<main>`?" to that invocation's
+  // subtree made an `<outlet>` inside an arm blind to a `<main>` wrapping the
+  // whole match — it took the `<main>` landmark, and the arm dispatcher then
+  // injects it INSIDE the author `<main>`: nested `<main>` on initial paint, in
+  // the shape CASE 2 blesses as legal.
+  //
+  // NOTE the assertion target: an arm body is lowered into the CLIENT CHUNK,
+  // not the static HTML. A `.html`-only oracle is structurally blind here.
+
+  test("an `<outlet>` inside a match ARM, wrapped by an author `<main>`, demotes to a `<div>`", () => {
+    const { errors, read } = buildDir("arm-scoped-landmark", {
+      "app.scrml":
+        `<program>\n` +
+        `    \${\n        type Phase:enum = { A, B }\n        <phase>: Phase = .A\n    }\n` +
+        `    <main>\n        <h1>Shell</h1>\n` +
+        `        <match for=Phase on=@phase>\n` +
+        `            <A>\n                <outlet/>\n            </>\n` +
+        `            <B>\n                <p>b</p>\n            </>\n` +
+        `        </match>\n    </main>\n</program>\n`,
+    });
+    expect(errors).toEqual([]);
+    const clientJs = read("app.client.js");
+    expect(clientJs).not.toBeNull();
+    // The arm's marker must be a <div>: the author <main> owns the landmark.
+    expect(clientJs).toMatch(/<div data-scrml-outlet/);
+    expect(clientJs).not.toMatch(/<main data-scrml-outlet/);
+  });
+});
+
+describe("§8 — shell-boundary scoping + the bare-`<main>` static path", () => {
+  test("a NESTED `<program>`'s outlet does not exempt the OUTER shell's sibling `<main>` (CASE 4 still fires)", () => {
+    // The open-mains path leaked across the shell boundary, so the inner
+    // shell's outlet marked the outer `<main>` as "wrapping" and silenced a
+    // textbook case-4 shell.
+    const { errors } = buildDir("nested-program-case4", {
+      "app.scrml":
+        `<program>\n  <main>\n    <program><outlet/></program>\n  </main>\n  <outlet/>\n</program>\n`,
+    });
+    expect(errors.some((e) => e.code === "E-OUTLET-AND-MAIN")).toBe(true);
+  });
+
+  test("an EMPTY bare `<main></main>` slot composes (it is still a slot)", () => {
+    // Behaviour CHANGED by this PR (the `>` -> `>=` slot-bounds fix): before it,
+    // an empty bare `<main></main>` shell silently no-op'd composition and the
+    // route pages emitted standalone with no shell chrome at all. Pinned here
+    // because the PR's own comments claimed this path was untouched.
+    const { errors, read } = buildDir("empty-bare-main", {
+      "index.scrml": `<program>\n<h1>Shell</h1>\n<main></main>\n<footer>f</footer>\n</program>\n`,
+      "pages/about.scrml": `<page>\n<h2>About</h2>\n</page>\n`,
+    });
+    expect(errors).toEqual([]);
+    const about = read("about.html");
+    expect(about).not.toBeNull();
+    expect(mainCount(about)).toBe(1);
+    expect(about).toContain("About");
+    expect(about).toContain("<footer>f");
+  });
+
+  test("an UPPERCASE `<MAIN>` bare slot composes (tag match is case-insensitive)", () => {
+    // Also changed by this PR: the pre-existing bare-slot regex was
+    // case-sensitive. Strictly an improvement, but unclaimed and untested.
+    const { errors, read } = buildDir("uppercase-bare-main", {
+      "index.scrml": `<program>\n<h1>Shell</h1>\n<MAIN>ph</MAIN>\n</program>\n`,
+      "pages/about.scrml": `<page>\n<h2>About</h2>\n</page>\n`,
+    });
+    expect(errors).toEqual([]);
+    const about = read("about.html");
+    expect(about).not.toBeNull();
+    expect(about).toContain("About");
+    expect(about).toContain("Shell");
+  });
+});
