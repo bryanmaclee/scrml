@@ -596,6 +596,110 @@ function checkToolImportsAreImportable(
   }
 }
 
+// ---------------------------------------------------------------------------
+// navigate-wave1c — HTML open-tag scanning for §40.8 shell composition.
+// ---------------------------------------------------------------------------
+//
+// Shell composition is textual: it splices a route body into a slot element in
+// the already-emitted shell HTML. Finding that slot means finding an open tag
+// that carries a particular ATTRIBUTE NAME — which a naive
+// `/<(\w+)[^>]*\bdata-scrml-outlet\b[^>]*>/` gets wrong twice:
+//
+//   1. `\b` treats `-` as a word boundary, so a `data-scrml-outlet-debug`
+//      attribute matches; and
+//   2. `[^>]*` runs straight through quoted attribute VALUES, so
+//      `<div data-testid="data-scrml-outlet">` matches.
+//
+// Either decoy hands the slot to the wrong element. The runtime resolves the
+// slot with `querySelector("[data-scrml-outlet]")` — a genuine attribute-name
+// match — so codegen and runtime would then disagree about which element the
+// route content lives in, and the soft-nav swap would target the wrong node.
+// These helpers implement the same attribute-NAME semantics the runtime uses.
+
+/** An open tag located in an HTML string. */
+interface FoundOpenTag {
+  /** Lowercase-as-written tag name (`main`, `div`, …). */
+  tag: string;
+  /** The full open-tag text, e.g. `<main data-scrml-outlet tabindex="-1">`. */
+  text: string;
+  /** Index of `<` within the source string. */
+  index: number;
+}
+
+/**
+ * Match open tags, keeping quoted attribute values from swallowing the `>`
+ * terminator. The attribute region alternates over `"…"` / `'…'` / any char
+ * that is neither `>` nor a quote, so a `>` INSIDE a quoted value cannot end
+ * the tag and a quoted value cannot leak past its closing quote.
+ * Close tags (`</x>`), comments (`<!--`) and doctypes do not match: the tag
+ * name must start with an ASCII letter immediately after `<`.
+ */
+const OPEN_TAG_RE = /<([a-zA-Z][\w-]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>/g;
+
+/**
+ * Does this open tag's attribute region declare `attrName` as an attribute
+ * NAME (not as part of another name, and not inside some other attribute's
+ * value)?
+ *
+ * Tokenizes the region as a sequence of `name[=value]` pairs. Because the value
+ * — quoted or bare — is consumed by the same match that consumed its name, no
+ * text inside a value is ever offered as a name. And because names are compared
+ * whole, `data-scrml-outlet-debug` is simply a different name.
+ */
+function openTagHasAttribute(attrRegion: string, attrName: string): boolean {
+  const attrRe = /([^\s=/>"']+)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*))?/g;
+  let m: RegExpExecArray | null;
+  while ((m = attrRe.exec(attrRegion)) !== null) {
+    if (m[1] === attrName) return true;
+  }
+  return false;
+}
+
+/**
+ * The FIRST element carrying the `data-scrml-outlet` marker attribute — the
+ * §20.8.1 route-content slot. Null when the shell declares no outlet.
+ */
+function findOutletMarkedOpenTag(html: string): FoundOpenTag | null {
+  OPEN_TAG_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = OPEN_TAG_RE.exec(html)) !== null) {
+    if (openTagHasAttribute(m[2] ?? "", "data-scrml-outlet")) {
+      return { tag: m[1], text: m[0], index: m.index };
+    }
+  }
+  return null;
+}
+
+/**
+ * The FIRST `<main>` open tag — the pre-§20.8 static/hard-nav composition slot,
+ * used only when the shell declares no `<outlet>` marker.
+ */
+function findBareMainOpenTag(html: string): FoundOpenTag | null {
+  OPEN_TAG_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = OPEN_TAG_RE.exec(html)) !== null) {
+    if (m[1].toLowerCase() === "main") {
+      return { tag: m[1], text: m[0], index: m.index };
+    }
+  }
+  return null;
+}
+
+/** Does this emitted HTML fragment contain a `<main>` element? */
+function htmlHasMainElement(html: string): boolean {
+  return findBareMainOpenTag(html) !== null;
+}
+
+/**
+ * Rewrite an open tag's element name, preserving every attribute verbatim —
+ * `<main data-scrml-outlet tabindex="-1">` -> `<div data-scrml-outlet
+ * tabindex="-1">`. Used to demote the marked slot when the composed route body
+ * brings its own `<main>` landmark.
+ */
+function retagOpenTag(openTagText: string, newTag: string): string {
+  return openTagText.replace(/^<[a-zA-Z][\w-]*/, `<${newTag}`);
+}
+
 /**
  * Run the Code Generator (CG, Stage 8).
  */
@@ -1861,34 +1965,61 @@ export function runCG(input: CgInput): CgOutput {
         }
       }
 
-      // Locate the FIRST `<main ...>...</main>` in the shell body. The
-      // `<main>` content is the slot — we'll replace its children with
-      // the page body during composition. If no `<main>` is found,
-      // composition is a no-op (the shell has nowhere to host page
-      // content; the per-page HTML emits standalone).
-      let mainOpenIdx = -1;
-      let mainOpenEndIdx = -1;
-      let mainCloseIdx = -1;
+      // navigate-wave1c (SPEC §40.8) — locate the route-content SLOT in the
+      // shell body. The slot is MARKER-driven: the FIRST element carrying the
+      // `data-scrml-outlet` attribute (the `<outlet>`, §20.8.1). The marker —
+      // never the tag — identifies the slot, which is what keeps codegen and
+      // the runtime (`querySelector("[data-scrml-outlet]")`) in agreement even
+      // though the outlet's tag varies (`<main>` or `<div>`) with the
+      // one-landmark invariant.
+      //
+      // When NO marker is present, fall back to the FIRST bare `<main>` — the
+      // static / hard-nav multi-page back-compat path that predates §20.8
+      // (`W-OUTLET-ABSENT-SOFT-NAV-DISABLED` already nudges toward an outlet).
+      //
+      // We slice the shell PRESERVING the slot's wrapper element (prefix up to
+      // and including its open tag, suffix from its close tag) and fill its
+      // children with the route body. No slot found → composition is a no-op
+      // (the per-page HTML emits standalone).
+      let slotOpenIdx = -1;
+      let slotOpenEndIdx = -1;
+      let slotCloseIdx = -1;
+      let slotTag: string | null = null;
+      let slotOpenTagText = "";
+      let slotIsMarked = false;
       if (shellBody) {
-        const mainOpenMatch = shellBody.match(/<main(\s[^>]*)?>/);
-        if (mainOpenMatch && mainOpenMatch.index !== undefined) {
-          mainOpenIdx = mainOpenMatch.index;
-          mainOpenEndIdx = mainOpenIdx + mainOpenMatch[0].length;
-          // Find the matching </main>. Simple lookup — nested <main>s
-          // would defeat this but HTML5 forbids nested <main>
-          // (https://html.spec.whatwg.org/#the-main-element). For v0.3.x
-          // we honor the spec rule; future work can teach this a depth
-          // counter if adopters actually nest <main>.
-          mainCloseIdx = shellBody.indexOf("</main>", mainOpenEndIdx);
+        const marked = findOutletMarkedOpenTag(shellBody);
+        const openTag = marked ?? findBareMainOpenTag(shellBody);
+        slotIsMarked = marked !== null;
+        if (openTag) {
+          slotTag = openTag.tag;
+          slotOpenTagText = openTag.text;
+          slotOpenIdx = openTag.index;
+          slotOpenEndIdx = slotOpenIdx + openTag.text.length;
+          // Find the matching close tag. A depth counter is unnecessary: the
+          // shell's slot is EMPTY at emit time (route content composes IN), so
+          // no same-tag element can nest inside it. HTML5 also forbids nested
+          // `<main>` (https://html.spec.whatwg.org/#the-main-element).
+          slotCloseIdx = shellBody.indexOf(`</${slotTag}>`, slotOpenEndIdx);
         }
       }
 
+      // `>=`, not `>` — an EMPTY slot (`<main data-scrml-outlet></main>`, where
+      // slotCloseIdx === slotOpenEndIdx) is the NORMAL shape for a soft-nav
+      // `<outlet>`: the shell slot holds nothing at emit time and the route
+      // content composes in. Under the old `>` an empty shell slot silently
+      // no-op'd composition, emitting route pages with no shell chrome at all.
+      // `indexOf` returns -1 when there is no close tag, which still fails
+      // `>= slotOpenEndIdx`, so a malformed/absent close tag still no-ops.
       const shellAvailable =
-        shellBody !== null && mainOpenIdx >= 0 && mainCloseIdx > mainOpenEndIdx;
+        shellBody !== null && slotOpenIdx >= 0 && slotCloseIdx >= slotOpenEndIdx;
 
-      if (shellAvailable && shellBody !== null) {
-        const shellPrefix = shellBody.slice(0, mainOpenEndIdx);
-        const shellSuffix = shellBody.slice(mainCloseIdx);
+      if (shellAvailable && shellBody !== null && slotTag !== null) {
+        const shellPrefix = shellBody.slice(0, slotOpenEndIdx);
+        const shellSuffix = shellBody.slice(slotCloseIdx);
+        // Does the slot currently hold the `<main>` landmark? (With
+        // `slotIsMarked` above, this drives the per-page demotion below.)
+        const slotHoldsLandmark = slotTag.toLowerCase() === "main";
         // entryClientJs base is needed so per-page HTMLs can <script src=>
         // the shell's app.client.js (so reactive shell elements such as
         // `${VERSION}` in the docs/website shell remain wired).
@@ -1938,11 +2069,39 @@ export function runCG(input: CgInput): CgOutput {
               "",
             );
 
-          // Compose: shell prefix (everything up to and including the
-          // `<main ...>` opener) + page body + shell suffix (the
-          // `</main>` and everything after it).
+          // navigate-wave1c — the ONE-LANDMARK invariant across files (SPEC
+          // §20.8.1 case 3 / §40.8). The shell's outlet took the `<main>`
+          // landmark because the SHELL file had no author `<main>` — but this
+          // route body lives in another file, and it may carry its own
+          // `<main>`. Composing it into a `<main>` slot would nest two `<main>`
+          // elements in the composed document: invalid HTML, and precisely the
+          // silent cross-file defect the per-file check cannot see.
+          //
+          // The route owns the landmark, so the SLOT demotes to a `<div>` — for
+          // THIS page only (a sibling route with no `<main>` still composes
+          // into the `<main>` slot and keeps the document landmarked). The
+          // marker rides along unchanged, so the slot is still the slot.
+          //
+          // Scoped to the MARKED slot deliberately. The back-compat bare-
+          // `<main>` slot is the author's own `<main>` element, not a synthetic
+          // outlet region; rewriting the author's tag there would silently
+          // change long-standing static-MPA output. That path's nesting
+          // behaviour is unchanged from before this PR.
+          const routeOwnsLandmark =
+            slotIsMarked && slotHoldsLandmark && htmlHasMainElement(pageBodyStripped);
+          const pageShellPrefix = routeOwnsLandmark
+            ? shellPrefix.slice(0, shellPrefix.length - slotOpenTagText.length) +
+              retagOpenTag(slotOpenTagText, "div")
+            : shellPrefix;
+          const pageShellSuffix = routeOwnsLandmark
+            ? "</div>" + shellSuffix.slice(`</${slotTag}>`.length)
+            : shellSuffix;
+
+          // Compose: shell prefix (everything up to and including the slot's
+          // opening tag) + page body + shell suffix (the slot's closing tag and
+          // everything after it).
           const composedBody =
-            shellPrefix + "\n" + pageBodyStripped + "\n" + shellSuffix;
+            pageShellPrefix + "\n" + pageBodyStripped + "\n" + pageShellSuffix;
 
           // Re-emit the script set on the composed body. The shell's
           // app.client.js is added FIRST (so its const declarations are
