@@ -80,9 +80,50 @@ function bodyOf(html) {
   return m ? m[1] : (html ?? "");
 }
 
-/** How many `<main>` elements does this document's body carry? */
+/**
+ * Strip INERT content — anything present in the document text but NOT rendered
+ * as live DOM on initial paint:
+ *
+ *   - `<template>` bodies: the compiler parks `if=`-guarded subtrees there
+ *     (`<main if=@hide>` becomes `<template …><main>…</main></template>`), so
+ *     a `<main>` inside one is NOT a landmark until the guard mounts it.
+ *   - `<script>` / `<style>` bodies: JS/CSS text, not markup. A client chunk
+ *     that builds `"<main>…"` as a string is not a rendered landmark either.
+ *   - comments.
+ *
+ * This is the oracle's whole job. Counting `<main` textually over the raw body
+ * — which is what this helper used to do — makes a `<template>` occurrence
+ * indistinguishable from a live landmark, and that blind spot is precisely why
+ * 16 green tests failed to catch a document emitting ZERO rendered landmarks.
+ */
+function strippedBody(html) {
+  return bodyOf(html)
+    .replace(/<template\b[^>]*>[\s\S]*?<\/template>/gi, "")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<!--[\s\S]*?-->/g, "");
+}
+
+/**
+ * How many RENDERED `<main>` landmarks does this document carry? The invariant
+ * is "exactly one `<main>` landmark per composed document", and a landmark is
+ * live DOM — so inert content is stripped before counting.
+ */
 function mainCount(html) {
-  return (bodyOf(html).match(/<main\b/g) || []).length;
+  return (strippedBody(html).match(/<main\b/g) || []).length;
+}
+
+/**
+ * Open-vs-close tag balance for a tag within the rendered body. The composition
+ * splices text around a slot's open/close tags, so an off-by-one close tag
+ * silently reparents or destroys sibling content. Every composed fixture
+ * asserts balance.
+ */
+function tagBalance(html, tag) {
+  const body = strippedBody(html);
+  const opens = (body.match(new RegExp(`<${tag}\\b(?![^>]*/>)`, "gi")) || []).length;
+  const closes = (body.match(new RegExp(`</${tag}\\s*>`, "gi")) || []).length;
+  return { opens, closes, balanced: opens === closes };
 }
 
 /**
