@@ -34,8 +34,14 @@ function buildMpa() {
     join(dir, "index.scrml"),
     [
       "<program>",
+      "  <count> = 0",
+      "  ${ function inc() { @count = @count + 1 } }",
       "  <h1>Shell</h1>",
-      '  <nav><a href="/reports">Reports</a><a href="/about">About</a></nav>',
+      '  <nav><a href="/reports">Reports</a><a href="/about">About</a><a href="/machine">Machine</a></nav>',
+      // A REACTIVE shell cell + display + mutator OUTSIDE the outlet — the
+      // finding-#5 shell-cell-survival subject (must survive a cross-chunk nav).
+      '  <p id="shellcount">shell ${@count}</p>',
+      '  <button id="shellinc" onclick=inc()>inc</button>',
       "  <outlet/>",
       "  <footer>foot</footer>",
       "</program>",
@@ -59,9 +65,27 @@ function buildMpa() {
     join(dir, "pages", "about.scrml"),
     ["<page>", "  <n> = 0", "  <h2>About</h2>", "  <p>count ${@n}</p>", "</page>", ""].join("\n"),
   );
+  // An ENGINE route (its own chunk) — the cross-chunk engine/match execution case.
+  writeFileSync(
+    join(dir, "pages", "machine.scrml"),
+    [
+      "<page>",
+      "${",
+      "  type Phase:enum = { Idle, Running }",
+      "}",
+      "  <engine for=Phase initial=.Idle>",
+      "    <Idle rule=.Running>idle-arm</Idle>",
+      "    <Running rule=.Idle>running-arm</Running>",
+      "  </engine>",
+      '  <button id="mbtn" onclick=@phase = .Running>go</button>',
+      "</page>",
+      "",
+    ].join("\n"),
+  );
   const outDir = join(dir, "dist");
   const result = compileScrml({ inputFiles: [
-    join(dir, "index.scrml"), join(dir, "pages", "reports.scrml"), join(dir, "pages", "about.scrml"),
+    join(dir, "index.scrml"), join(dir, "pages", "reports.scrml"),
+    join(dir, "pages", "about.scrml"), join(dir, "pages", "machine.scrml"),
   ], write: true, outputDir: outDir, log: () => {} });
   const errors = (result.errors ?? []).filter((e) => (e.severity ?? "error") === "error");
   const read = (rel) => (existsSync(join(outDir, rel)) ? readFileSync(join(outDir, rel), "utf8") : null);
@@ -73,6 +97,8 @@ function buildMpa() {
     runtimeJs: read(runtimeName),
     shellClientJs: read("index.client.js"),
     reportsClientJs: read("reports.client.js"),
+    machineHtml: read("machine.html"),
+    machineClientJs: read("machine.client.js"),
     read,
   };
 }
@@ -131,6 +157,11 @@ function mountShell(m) {
     "globalThis.__scrml_test_route_loader = function(__chunkSrc) { eval(__chunkSrc); };\n";
   (0, eval)(combined);
   __loadRouteChunk = globalThis.__scrml_test_route_loader;
+  // The shell chunk's boot defers to DOMContentLoaded (an ordinary initial load —
+  // _scrml_chunk_loading is false); fire it so the shell's own event wiring +
+  // reactive display (the shell button + `${@count}`) is registered, mirroring a
+  // real page load. Route chunks boot eagerly on injection (the flag), not here.
+  document.dispatchEvent(new Event("DOMContentLoaded"));
 }
 
 async function flush(cycles = 8) {
@@ -152,7 +183,12 @@ function mockFetch(routes) {
 }
 
 let M = null;
-beforeEach(() => {
+beforeEach(async () => {
+  // A FRESH document per test — the shell boot registers document-level delegated
+  // click/submit listeners that would otherwise ACCUMULATE across tests (a
+  // happy-dom global-state leak), double-firing a subsequent test's clicks.
+  try { await GlobalRegistrator.unregister(); } catch (_) { /* not registered */ }
+  GlobalRegistrator.register();
   if (!M) M = buildMpa();
   loadedScripts = [];
   restoreFetch = null;
@@ -234,5 +270,72 @@ describe("navigate-wave1c — cross-chunk soft navigation loads the chunk + swap
     const outlet = document.querySelector("[data-scrml-outlet]");
     expect(outlet.querySelector("h2")).toBeNull();
     expect(outlet.innerHTML).toBe(outletBefore);
+  });
+});
+
+describe("navigate-wave1c — an ENGINE route loaded cross-chunk renders + transitions", () => {
+  // The target route (its own chunk) carries an `<engine for=Phase>`. Its dispatcher
+  // subscribes at module-init (tier-1, runs on chunk load) and the initial arm is
+  // SSR-rendered; the eager `_fire()` runs before the swap (no mount yet → no-op),
+  // so this asserts the REAL post-swap path: initial arm present, transition works.
+  test("first cross-chunk visit: the initial arm renders after the swap, and a variant transition re-renders", async () => {
+    const m = M;
+    expect(m.errors).toEqual([]);
+    expect(m.machineClientJs).not.toBeNull();
+    mountShell(m);
+    installChunkLoader({ "machine.client.js": m.machineClientJs }, null);
+    mockFetch({ "/machine": m.machineHtml });
+
+    globalThis._scrml_navigate_soft("/machine");
+    await flush();
+
+    const outlet = document.querySelector("[data-scrml-outlet]");
+    // The engine mount + initial (.Idle) arm are in the swapped-in region.
+    expect(outlet.querySelector('[data-scrml-engine-mount="phase"]')).not.toBeNull();
+    expect(outlet.textContent).toContain("idle-arm");
+    expect(outlet.textContent).not.toContain("running-arm");
+    // The shell survived (no reload / re-boot).
+    expect(document.querySelector("h1").textContent).toBe("Shell");
+
+    // Drive a variant transition via the route's own button (its click handler was
+    // wired by the eager chunk boot). The tier-1 subscription re-renders the arm.
+    const btn = document.querySelector("[data-scrml-outlet] #mbtn");
+    expect(btn).not.toBeNull();
+    btn.dispatchEvent(new Event("click", { bubbles: true }));
+    await flush();
+
+    const after = document.querySelector("[data-scrml-outlet]");
+    expect(after.textContent).toContain("running-arm");
+    expect(after.textContent).not.toContain("idle-arm");
+  });
+});
+
+describe("navigate-wave1c — finding #5: a MUTATED reactive shell cell survives a cross-chunk nav", () => {
+  test("the injected route chunk's eager boot + seed-apply does NOT reset a mutated shell cell", async () => {
+    const m = M;
+    mountShell(m);
+    // The shell cell starts at 0; mutate it via the shell button (outside the outlet).
+    expect(globalThis._scrml_reactive_get("count")).toBe(0);
+    const shellBtn = document.querySelector("#shellinc");
+    expect(shellBtn).not.toBeNull();
+    shellBtn.dispatchEvent(new Event("click", { bubbles: true }));
+    shellBtn.dispatchEvent(new Event("click", { bubbles: true }));
+    expect(globalThis._scrml_reactive_get("count")).toBe(2);
+    // The shell display (outside the outlet) reflects the mutation.
+    expect(document.querySelector("#shellcount").textContent).toContain("2");
+
+    // Cross-nav to a DIFFERENT chunk (reports) — the injected reports.client.js
+    // runs its module-init seed-apply; the reports seed carries NO shell keys, so
+    // the mutated shell cell must survive (finding #5, the seed-clobber class).
+    installChunkLoader({ "reports.client.js": m.reportsClientJs }, null);
+    mockFetch({ "/reports": m.reportsHtml });
+    globalThis._scrml_navigate_soft("/reports");
+    await flush();
+
+    // The route swapped in (proves the cross-chunk nav happened, not a no-op).
+    expect(document.querySelector("[data-scrml-outlet] h2").textContent).toBe("Reports");
+    // The mutated shell cell KEPT its value; the shell display still shows it.
+    expect(globalThis._scrml_reactive_get("count")).toBe(2);
+    expect(document.querySelector("#shellcount").textContent).toContain("2");
   });
 });
