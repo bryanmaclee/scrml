@@ -16,7 +16,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 12 |
-| MED | 45 |
+| MED | 46 |
 | LOW | 29 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -58,6 +58,24 @@
 **Why the alternative (enforce single-root via a named `E-EACH-MULTI-ROOT`) was REJECTED (bryan, S281):** (a) it is a hole in what was thought to be working, not an unbuilt feature; (b) **the workaround is not universally available** — Peter's "wrap the per-item body in one root" fails exactly where it is most needed: `<tr>` pairs in a table, `<dt>`/`<dd>` in a `<dl>`, `<option>` under `<select>`. A wrapper `<div>` in those positions is foster-parented or dropped — the *same* bug class as #131 / S272 — so single-root-as-contract would make legal HTML inexpressible in Tier-1 iteration; (c) it would newly-REJECT the §10.8 Tier-0 multi-`lift` grant, or enforce at Tier 1 only and break the ladder's *"the per-item template carries forward"* promotion promise — note `W-EACH-PROMOTABLE` **already fires** on a multi-`lift` Tier-0 loop, offering a `promote --each` lift that would silently delete markup; (d) a real adopter is affected now.
 
 **Fix in flight (S281).** Design: root count is statically known at codegen — when exactly 1, emit today's `return _itemFrag.firstChild` **byte-identical** (the ~99% case, and the assertable safety gate); emit the fragment form only when > 1. The runtime `createFn` contract widens to `Node | DocumentFragment`, and the reconciler owns a node **group per key** (key stamped on every top-level node; `_childList`/`_clearAll`/`_insert`/`_remove`/`_replace` group-aware; LIS reorder over groups, moving a group's nodes together preserving intra-group order) across BOTH container modes — range (`nodeType === 8` comment fence, the #131 model) and element. Tier-0 lift fixed in the same landing per §10.8. SPEC §17.7.2 gains a minimal normative statement making the N-root grant explicit. No new §34 code. **PRESERVED deliberately:** create-time `if=` semantics (`emit-each.ts:860`) — a reused group does not gain/lose roots on later reconciles; that is a pre-existing limitation and is NOT fixed here. — `NEW S281 (adopter #141); HIGH; open — build in flight`
+
+### g-ssr-each-multi-root-client-only-fallback — SSR silently declines to server-render ANY multi-root `<each>`; the list has no server HTML, no first paint and no DOM adoption, with zero diagnostic
+<!-- @gap id=g-ssr-each-multi-root-client-only-fallback sev=MED status=open -->
+Surfaced by the #141 build (S281) and **ruled a follow-up arc by bryan** rather than folded into that fix. **PRE-EXISTING, PA-verified at source** — `compiler/src/codegen/emit-ssr-render.ts:337`:
+
+```ts
+if (roots.length !== 1 || roots[0].kind !== "markup") return null;
+```
+
+`buildOneRenderer`'s own header documents the consequence: *"return null when the template is outside the supported subset (the each then falls back to the pre-existing client-only render — empty mount, no regression)."* The #141 diff does not touch this file.
+
+Before #141 the guard was harmless in this respect, because a multi-root `<each>` did not render its extra roots on the client either — the list was broken everywhere, equally. **#141 changes the picture**: multi-root eaches now render correctly on the client, which makes the SSR hole the ONLY remaining place they behave differently. The list arrives empty in the server HTML and is populated after hydration.
+
+Costs: no first paint for that list (a visible pop-in on slow connections), nothing for a crawler that does not execute JS, and no DOM adoption — so the client rebuilds nodes the server could have shipped. **It is silent**: no lint, no warning, nothing tells an adopter that adding a second root element to a per-item template just cost them server rendering of that list. An adopter would experience it as "my table SSRs, and then one day it didn't."
+
+Scope note (why it was NOT done inside #141, and this reasoning should survive into the arc): extending SSR to N roots per item is a genuine capability extension, **not** conformance restoration. The two governing sentences that made #141 a fix — §10.8 line 6769 (`lift` MAY appear multiple times) and §17.7.2 line 11289 ("at least one per-item template element") — grant the multi-root *authoring* form; neither says anything about server-render coverage. So the arc needs its own governing-sentence pass, and the `roots[0].kind !== "markup"` half of the guard (a non-markup first root) wants triage in the same sweep.
+
+Cheap interim worth considering on its own: an **info-lint** naming the SSR fallback at the multi-root site, so the loss is loud even before the arc lands. — `NEW S281 (#141 build, bryan ruled follow-up arc); MED; open`
 
 ### g-static-component-import-dead-destructure — importing a PURELY-STATIC component emits a client-side destructure the module can never satisfy (it exports `{}`); harmless alone, a page-killing `TypeError` the moment the dep `<script>` fails to load
 <!-- @gap id=g-static-component-import-dead-destructure sev=HIGH status=open -->
