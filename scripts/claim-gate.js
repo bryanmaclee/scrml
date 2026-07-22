@@ -42,10 +42,10 @@
  *
  * Exit: 0 on all-pass (or any --report run); 1 on any failure in GATE mode.
  *
- * Authored S280 (2026-07-22). Supersedes the file-scope half of
- * `scripts/extract-readme-scrml.js`; that script remains the release-tag
- * README hook entry point until the hook is re-pointed.
- */
+ * Authored S280 (2026-07-22). `scripts/extract-readme-scrml.js` (S101) was
+ * RETIRED in the same landing: its gate role passed to `scripts/snippet-gate.js`
+ * (real files), and its fence-extraction capability lives on here as a survey
+ * instrument.
 
 import { readFileSync, existsSync, statSync, readdirSync, writeFileSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";

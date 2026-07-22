@@ -1,14 +1,14 @@
 #!/bin/bash
-# scrml pre-push hook — full test suite + gauntlet quick check + README gate
+# scrml pre-push hook — full test suite + gauntlet quick check + snippet gate
 #
 # Source-controlled baseline. Install via `bash scripts/git-hooks/install.sh`
 # from the repo root.
 #
-# README gate (S101): runs `scripts/extract-readme-scrml.js` ONLY when the
+# Snippet gate (S101, re-pointed S280): runs `scripts/snippet-gate.js` ONLY when the
 # push payload contains a release-tag ref (`refs/tags/v*`). Regular pushes
-# skip the README gate. Rationale: README.md is the community-facing
-# nominal reference for scrml; release-tag pushes are the cut points
-# where accuracy must be verified.
+# skip it (CI `gate` runs snippet-gate on every push). Rationale: public code
+# samples are the community-facing reference for scrml; release-tag pushes are
+# the cut points where accuracy must be verified.
 
 set -e
 
@@ -69,17 +69,21 @@ if [ -f benchmarks/todomvc/app.scrml ]; then
     fi
 fi
 
-# 3. README scrml gate (ONLY on release-tag pushes — S101)
+# 3. Public snippet gate (ONLY on release-tag pushes — S101, re-pointed S280)
+#    Supersedes the S101 README fence gate: public code samples are now REAL
+#    .scrml files under the snippet corpus, and README's blocks are excerpts of
+#    them. `scripts/snippet-gate.js` also runs in CI `gate` on every push; this
+#    is the release-tag second net.
 if [ "$PUSHING_RELEASE_TAG" = "1" ]; then
     echo ""
-    echo "--- README scrml gate (release-tag push detected) ---"
-    if bun run scripts/extract-readme-scrml.js; then
+    echo "--- public snippet gate (release-tag push detected) ---"
+    if bun run scripts/snippet-gate.js; then
         :
     else
         echo ""
-        echo "❌ README scrml gate failed — release-tag push blocked."
-        echo "   Fix the failing snippet(s) in README.md or mark them"
-        echo "   illustrative with a leading \`// gate: skip\` line."
+        echo "❌ Snippet gate failed — release-tag push blocked."
+        echo "   A public document cites each corpus file; fix the snippet,"
+        echo "   or fix the document if the feature genuinely changed."
         exit 1
     fi
 fi

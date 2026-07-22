@@ -16,13 +16,14 @@ You declare the shape of the app; the compiler builds the machine.
 
 ## One app, one file
 
-Here's a real app — a todo list, but the kind you actually ship: SQLite-backed, server-rendered, auth-gated, synced across every device you're signed in on, driven by a load-state machine. It's one `.scrml` file. We'll build it in five pieces, and after each piece, the part that matters: **what the compiler did that you never wrote.**
+Here's a real app — a todo list, but the kind you actually ship: SQLite-backed, server-rendered, auth-gated, live-synced, driven by a load-state machine. It's one `.scrml` file. We'll build it in five pieces, and after each piece, the part that matters: **what the compiler did that you never wrote.**
+
+The four blocks below are excerpts of one file: [`docs/readme-snippets/tasks-app.scrml`](./docs/readme-snippets/tasks-app.scrml). It is compiled by CI on every push — if it ever stops compiling, the build fails and this README stops being able to lie to you.
 
 ### 1 — the data
 
 ```scrml
-// gate: skip
-<program>
+<program db="tasks.db" auth="required">
 
 <db src="tasks.db" protect="passwordHash" tables="users"/>
 
@@ -30,39 +31,46 @@ Here's a real app — a todo list, but the kind you actually ship: SQLite-backed
     users {
         id:           integer primary key
         email:        text req email
-        passwordHash: (not to string)
+        passwordHash: text
     }
     tasks {
         id:           integer primary key
         user_id:      integer not null references(users.id)
         text:         text req length(>=1)
-        completed_at: (not to timestamp)
+        completed_at: timestamp
     }
 </>
 ```
 
-You wrote a schema. The compiler turns it into the `CREATE TABLE` on first run **and** a migration diff on every compile after — add a column, the migration emits itself; drop one, it surfaces for review. `protect="passwordHash"` makes that field server-only: it's stripped from the type the browser ever sees, so a server response carrying a user row simply doesn't include it, and `@user.passwordHash` on the client is a *compile* error. And `completed_at: (not to timestamp)` is a lifecycle gate — the column starts unset and *becomes* a timestamp when written; read it before that and the compiler refuses to treat `not` as a time. All tracked at compile time, zero runtime cost.
+You wrote a schema. The compiler turns it into the `CREATE TABLE` on first run **and** a migration diff on every compile after — add a column, the migration emits itself; drop one, it surfaces for review. `protect="passwordHash"` makes that field server-only: it's stripped from the type the browser ever sees, so a server response carrying a user row simply doesn't include it, and `@user.passwordHash` on the client is a *compile* error. All tracked at compile time, zero runtime cost.
 
 ### 2 — the server (you won't notice writing it)
 
 ```scrml
-// gate: skip
 ${
+    type Role:enum   = { User, Admin }
     type Filter:enum = { All, Active, Done }
     type Phase:enum  = { Loading, Empty, Editing, Saving, Saved, ErrorState(msg: string) }
     type LoadError:enum = { Network(msg: string) }
-    type User:struct = { id: number, email: string }
+
+    // The lifecycle annotation lives on the struct field, not the schema
+    // column — the two surfaces are orthogonal (§39.12.8).
+    type Task:struct = {
+        id: number,
+        text: string,
+        completed_at: (not to timestamp)
+    }
 
     fn isActive(t) -> boolean {
         return t.completed_at is not
     }
 
-    function loadTasks()! -> LoadError {
-        return ?{`SELECT id, text, completed_at FROM tasks WHERE user_id = ${@user.id} ORDER BY id`}.all()
+    function loadTasks(userId)! -> LoadError {
+        return ?{`SELECT id, text, completed_at FROM tasks WHERE user_id = ${userId} ORDER BY id`}.all()
     }
 
-    function createTask(text: string(.length >= 1))! -> LoadError {
-        return ?{`INSERT INTO tasks (user_id, text, completed_at) VALUES (${@user.id}, ${text}, ${not}) RETURNING *`}.get()
+    function createTask(userId, text: string(.length >= 1))! -> LoadError {
+        return ?{`INSERT INTO tasks (user_id, text, completed_at) VALUES (${userId}, ${text}, ${not}) RETURNING *`}.get()
     }
 
     function toggle(id) {
@@ -73,7 +81,7 @@ ${
 
     function submit() {
         @phase = .Saving
-        createTask(@newTask) !{
+        createTask(@userId, @newTask) !{
             | ::Network msg :> { @phase = .ErrorState(msg); return }
         }
         reset(@newTask)
@@ -84,13 +92,14 @@ ${
 
 You wrote three functions that happen to touch the database — so the compiler classified them server-side and generated everything in between: the route handlers, the client-side `fetch` calls, the CSRF tokens, the parameterized queries, the serialization. You call them like local functions because in your source they *are* local functions. No `/api` folder, no fetch boilerplate, nothing to keep in sync. And errors aren't booleans here: `createTask` fails with a typed `LoadError`, and the `!{}` handler routes the failure straight into a `Phase` state — miss a variant and it won't compile.
 
+Note the `userId` parameter. A server-escalated function runs in the Bun process and receives only its declared arguments — arguments are marshalled into the request, a client cell is not. Reading `@userId` directly inside one of these bodies is a compile error (`E-REACTIVE-003`, §6.6.9), which is the compiler refusing to let a value silently arrive as `undefined` at request time.
+
 ### 3 — reactive state, realtime, and a test
 
 ```scrml
-// gate: skip
-<user>: User = not        // populated from the session token at boot
+<userId>: number = 0        // populated from the session token at boot
 
-<channel name="tasks" topic="user-${@user.id}">
+<channel name="tasks">
     <tasks> = []
 </>
 
@@ -111,16 +120,15 @@ const <visible> = match @filter {
 }
 ```
 
-`<tasks> = []` lives *inside* the `<channel>` body, which is the whole trick: that state auto-syncs across every device signed into the same account. The compiler emitted the WebSocket upgrade route, a reconnecting client, and the pub/sub plumbing — you wrote a list. `<newTask req length(>=1)> = <input/>` hands you a reactive validity surface for free (`@newTask.isValid` / `.errors` / `.touched`), and the *same* `length(>=1)` predicate fires in the HTML attribute, on the server, and in the DB constraint. `const <visible>` recomputes whenever `@filter` or `@tasks` change. And that `~{}` test sits right next to the code it checks — it runs against the live compile in dev and is stripped entirely from production.
+`<tasks> = []` lives *inside* the `<channel>` body, which is the whole trick: that state auto-syncs across every subscriber, live. The compiler emitted the WebSocket upgrade route, a reconnecting client, and the pub/sub plumbing — you wrote a list. (`name=` and `topic=` are static literals by design — interpolating a per-user id into the topic is `E-CHANNEL-007`, because a topic computed on the client is a scoping guarantee the server never agreed to.) `<newTask req length(>=1)> = <input/>` hands you a reactive validity surface for free (`@newTask.isValid` / `.errors` / `.touched`), and the *same* `length(>=1)` predicate fires in the HTML attribute, on the server, and in the DB constraint. `const <visible>` recomputes whenever `@filter` or `@tasks` change. And that `~{}` test sits right next to the code it checks — it runs against the live compile in dev and is stripped entirely from production.
 
 ### 4 — the UI is a state machine
 
 ```scrml
-// gate: skip
 <auth role="User">
 
 <engine for=Phase initial=.Loading effect=${
-    @tasks = loadTasks() !{
+    @tasks = loadTasks(@userId) !{
         | ::Network msg :> { @phase = .ErrorState(msg); return }
     }
     @phase = @tasks.length == 0 ? .Empty : .Editing
@@ -153,7 +161,7 @@ const <visible> = match @filter {
         </nav>
 
         <each in=@visible key=@.id>
-            <li class:done=${@.completed_at is some}>
+            <li class:done=${!isActive(@.)}>
                 <input type="checkbox"
                        checked=${@.completed_at is some}
                        onchange=${toggle(@.id)}/>

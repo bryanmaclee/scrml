@@ -15,7 +15,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 5 |
+| HIGH | 6 |
 | MED | 40 |
 | LOW | 28 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -2773,6 +2773,29 @@ The fence anchor lookup (`runtime-template.js` `_scrml_find_each_anchor`) walks 
 
 ### G-ASYNC-STDLIB-IN-SYNC-CALLBACK-OVER-FIRES — the diagnostic fires on fire-and-forget timer callbacks + intentionally-awaited thunks, not just the boolean-coercion class it names — `NEW S279 (flogence-PA dogfood report, bryan-directed PRIORITY RULING); HIGH; gate-regression; ⚠️ freeze-asymmetric`
 **PRIORITY RULING PENDING (bryan).** flogence's gate went GREEN(2026-07-17)→RED(2026-07-22) with ZERO changes to flogence `src/` — a scrml compiler change tightened `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` (a **newly-rejecting** change per §8). It now fires on 4 sites, none in its stated danger class (*"a `.some`/`.find`/`.filter`/`.map` callback / param default / raw escape-hatch body … returns an unawaited Promise → accept-all bug"*): **(1)(2)** `setTimeout(() => hydrate(), 0)` / `setInterval(() => chatTick(), 3000)` — return value discarded by construction, no boolean coercion; the suggested remedy ("hoist into a `for` loop") is nonsensical for a timer callback, and scrml has no source `await`. **(3)** a documented thunk `() => provider=="open" ? runAider(…) : runClaude(…)` passed to `runGatedAgentic` which AWAITS it — returning a Promise IS the contract (2 of the 4 errors). Hypothesis (flogence): the check fires on ANY async call in an arrow body in callee position, not the narrow "unawaited Promise used as a value" it advertises → the message is wrong OR the tightening is unintended. **Freeze-asymmetry (why priority):** an over-firing ERROR that lands in V1 is expensive to unwind (§63.7 — relaxing is additive/MINOR, but adopters who restructured working timer callbacks to appease it already paid); the cheap moment to rule is BEFORE freeze. **RULING NEEDED:** intended tightening (then flogence needs the migration path for `setInterval(() => tick())` — unclear with no source `await`) vs over-fire (then fix the check to match its stated scope). Also owes a MEASURED §8 migration sweep (which adopters does the tightening newly-reject?). Repro: flogence root `bun run compile` (2 err) / `compile:dir` (4 err) against `src/@29d8012`. Source: `handOffs/incoming/read/2026-07-22-flogence-to-scrml-E-ASYNC-STDLIB-overfires-on-timer-callbacks-and-thunks.md`. **S279 RULING (bryan) — SPLITS IN TWO:** the backstop is a colorless-async (S259) fail-closed for an async call the compiler can neither auto-await nor lower to a clean-family combinator (`some`/`find`/`filter`/`map`/…). **CASE 1 — fire-and-forget timer callbacks (`setTimeout`/`setInterval`/…) = OVER-FIRE, FIX DISPATCHED S279:** the HOF structurally DISCARDS the callback's return → the coercion hazard is unreachable, and the "hoist into a `for` loop" remedy is actively wrong. Fix = mirror the `ASYNC_COMBINATOR_METHODS` lowering for a KNOWN-DISCARD-HOF set → re-emit the async callback async so the inner call auto-awaits inside the discarded-return callback. This RESTORES the diagnostic's own stated scope (toward-the-contract, not a widening). **CASE 2 — an async thunk passed to a USER HOF that awaits it (`runGatedAgentic(() => runAider())`) = a real colorless-async BOUNDARY GAP, DEFERRED to an R2 design Q:** the Promise IS consumed correctly (awaited by the callee), but the compiler can't verify a user HOF awaits its callback param without cross-fn coloring → the fail-closed is defensible but blocks a legit idiom. Design options: a typed async-thunk/`snippet` param the compiler can color, vs document-the-workaround (inline, don't thunk). NOT rushed under freeze. **CASE 3 — the MESSAGE is wrong for both** (promises a `.some/.filter` scope + for-loop remedy that fit neither timers nor thunks) → fixed with Case 1. <!-- @gap id=g-async-stdlib-in-sync-callback-over-fires sev=HIGH status=in-progress -->
+
+### G-CLASS-ATTR-EXPR-NOT-LOWERED — `class:<name>=${expr}` emits scrml operators RAW into the client JS (unparseable bundle) — `NEW S280 (surfaced by the README flagship example under the new snippet gate); HIGH; codegen-defect`
+A reactive class-toggle attribute `class:<name>=${expr}` does **not** run its expression through scrml→JS operator lowering. A scrml-only operator inside it (`is some`, and by inspection the `is not` / `is .Variant` family) is emitted **verbatim** into the client bundle, producing JavaScript that does not parse. The identical expression in an ordinary value-attribute lowers correctly, so the defect is specific to the `class:` emitter path — same expression, same `<each>` body, two emitters, one of which skips the lowering pass:
+```js
+// class:done=${@.completed_at is some}   →  RAW, unparseable:
+_scrml_el_2.classList.toggle("done", !!(_scrml_each_item.completed_at is some));
+// checked=${@.completed_at is some}      →  correctly lowered:
+_scrml_el_4.setAttribute("checked", String(((__scrml_is_v) => __scrml_is_v !== null && __scrml_is_v !== undefined)(_scrml_each_item.completed_at)));
+```
+**Fails closed, loudly** — `E-CODEGEN-INVALID-LOGIC` fires (or `E-CG-001` first, when the program also uses `protect=`, because the egress verifier parses the bundle before the codegen self-check reaches it), and no artifacts are written. So this is not a silent-miscompile; it is an unbuildable construct that the docs and README used. **Blast radius:** any `class:` toggle whose expression uses a scrml operator — a common idiom for `is some` / `is not` presence toggles on list rows.
+**Repro** (12 lines, compiles on `7caf8f34`):
+```scrml
+<program>
+${ type Row:struct = { id: number, done: (not to timestamp) } }
+<rows>: Row[] = []
+<ul>
+  <each in=@rows key=@.id>
+    <li class:done=${@.done is some}>${@.id}</li>
+  </each>
+</ul>
+</>
+```
+**Workaround in use:** hoist the predicate into a `fn` and call it — `class:done=${!isActive(@.)}` — which lowers correctly (a call expression needs no operator rewrite). Applied to `docs/readme-snippets/tasks-app.scrml` at S280 so the README example builds; the underlying defect is untouched. **Fix direction:** route the `class:` attribute expression through the same lowering the value-attribute path uses. Needs a codegen dispatch + the S239 adversarial gate (not PA-direct). <!-- @gap id=g-class-attr-expr-not-lowered sev=HIGH status=open -->
 
 ### G-CSS-SYNTAX-ERROR-IN-HASH-BLOCK-NO-DIAGNOSTIC — a genuine CSS syntax error inside a `#{}` block emits no diagnostic — `NEW S279 (surfaced fixing the §34 E-STYLE-001 row defect); LOW`
 The §34 `E-STYLE-001` catalog row historically read "CSS: syntax error in `#{}` style block" — but `E-STYLE-001` is emitted ONLY for the `<style>` element (block-splitter.js), never for a CSS syntax error inside a `#{}` block. `grep -r E-STYLE-001 compiler/src/` returns only the `<style>`-element site, and there is no separate CSS-parse-error diagnostic (`E-CSS-*` / CSS-syntax code) anywhere. So a real syntax error inside a `#{}` CSS block currently produces no `E-STYLE`-class diagnostic — it is silently mis-parsed or passes through. The §34 row was corrected S279 to describe the actual `<style>`-element rejection ([[g-e-style-001-row]]); this gap tracks the SEPARATE question bryan flagged: whether `#{}` CSS syntax errors should get a real diagnostic (a distinct code, e.g. `E-CSS-SYNTAX-001`). Not scoped — a v1.next DX polish, filed so the phantom row-description becomes real work rather than vanishing. <!-- @gap id=g-css-syntax-error-in-hash-block-no-diagnostic sev=LOW status=open -->
