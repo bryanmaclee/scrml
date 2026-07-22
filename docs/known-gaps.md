@@ -15,9 +15,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 11 |
+| HIGH | 12 |
 | MED | 45 |
-| LOW | 28 |
+| LOW | 29 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -58,6 +58,41 @@
 **Why the alternative (enforce single-root via a named `E-EACH-MULTI-ROOT`) was REJECTED (bryan, S281):** (a) it is a hole in what was thought to be working, not an unbuilt feature; (b) **the workaround is not universally available** — Peter's "wrap the per-item body in one root" fails exactly where it is most needed: `<tr>` pairs in a table, `<dt>`/`<dd>` in a `<dl>`, `<option>` under `<select>`. A wrapper `<div>` in those positions is foster-parented or dropped — the *same* bug class as #131 / S272 — so single-root-as-contract would make legal HTML inexpressible in Tier-1 iteration; (c) it would newly-REJECT the §10.8 Tier-0 multi-`lift` grant, or enforce at Tier 1 only and break the ladder's *"the per-item template carries forward"* promotion promise — note `W-EACH-PROMOTABLE` **already fires** on a multi-`lift` Tier-0 loop, offering a `promote --each` lift that would silently delete markup; (d) a real adopter is affected now.
 
 **Fix in flight (S281).** Design: root count is statically known at codegen — when exactly 1, emit today's `return _itemFrag.firstChild` **byte-identical** (the ~99% case, and the assertable safety gate); emit the fragment form only when > 1. The runtime `createFn` contract widens to `Node | DocumentFragment`, and the reconciler owns a node **group per key** (key stamped on every top-level node; `_childList`/`_clearAll`/`_insert`/`_remove`/`_replace` group-aware; LIS reorder over groups, moving a group's nodes together preserving intra-group order) across BOTH container modes — range (`nodeType === 8` comment fence, the #131 model) and element. Tier-0 lift fixed in the same landing per §10.8. SPEC §17.7.2 gains a minimal normative statement making the N-root grant explicit. No new §34 code. **PRESERVED deliberately:** create-time `if=` semantics (`emit-each.ts:860`) — a reused group does not gain/lose roots on later reconciles; that is a pre-existing limitation and is NOT fixed here. — `NEW S281 (adopter #141); HIGH; open — build in flight`
+
+### g-static-component-import-dead-destructure — importing a PURELY-STATIC component emits a client-side destructure the module can never satisfy (it exports `{}`); harmless alone, a page-killing `TypeError` the moment the dep `<script>` fails to load
+<!-- @gap id=g-static-component-import-dead-destructure sev=HIGH status=open -->
+Reported by **scrml-site** (inbox `2026-07-22-1930-…`, `needs: action`) — cost them a full rebuild; 66 of their 74 reference pages threw. PA-reproduced at `a0344d75` from their minimal repro, and the reproduction **splits their single "new bug" into one new defect plus two already-filed ones.**
+
+Repro: `components/side.scrml` = `${ export const SideNav = <aside class="x">…</> }`; a page does `${ import { SideNav } from "../components/side.scrml" }` then `<SideNav/>`.
+
+**THE NEW DEFECT (this entry).** The consumer page emits
+```js
+const { SideNav } = _scrml_modules["components/side.client.js"];
+```
+while the dep module registers **an empty object**:
+```js
+_scrml_modules["components/side.client.js"] = {  };
+```
+A purely-static presentational component has no client-side value to export — correct — but the consumer emits the destructure anyway. The markup is inlined into the server HTML (verified: `<aside data-scrml="SideNav" class="x">` is in `p.html`), so the binding is **dead code that can never do anything except throw**. In a FLAT layout it is harmless-but-wasteful: the dep script IS included, the registry entry is `{}`, and `SideNav` destructures to `undefined` with no throw. Its severity is entirely in what it AMPLIFIES — see below. Fix direction (scrml-site's own suggestion, and it is the right one): **do not emit the import/destructure when every imported binding resolves to static markup.**
+
+**THE AMPLIFICATION — reproduced, and it is why they saw a TypeError.** On the MPA composition path with a nested route (`app.scrml` shell with `<outlet/>` + `pages/reference/deep.scrml`), `dist/reference/deep.html` emits:
+```html
+<script src="scrml-runtime.00b4l8yq.js">      <!-- BARE — 404s from dist/reference/ -->
+<script src="../scrml-runtime.00b4l8yq.js">   <!-- correct, DUPLICATE -->
+<script src="../app.client.00kqddye.js">
+<script src="deep.client.006ram1h.js">
+```
+— and **ZERO tag for `components/side.client.js`**, though the module exists on disk at `dist/components/side.client.00qor7o2.js` and `deep.client.js` still contains the destructure. Registry entry `undefined` → `const { SideNav } = undefined` → **exactly the reported `TypeError: Cannot destructure property 'SideNav' … as it is undefined`.**
+
+Those two halves are **already-filed S280 gaps, now CONFIRMED LIVE with an adopter consequence** (they were filed as latent):
+- [[g-composition-strip-eats-last-dep-script]] — the dep `<script>` is dropped on the composition path. **This is the actual cause of scrml-site's throw.**
+- [[g-runtime-script-tag-not-depth-prefixed]] — the bare runtime ref, here emitted as a bogus 404 tag ALONGSIDE the correct `../` one (a duplicate, not a replacement — sharpens the original entry).
+
+**Triage conclusion:** scrml-site's defect (1) ("the page never loads the module") is NOT new — it is the composition dep-script strip, already scoped. Their defect (2) IS new and is this entry. The pairing is what makes it HIGH: the dead destructure converts a script-loading failure from a degraded-but-alive page into a hard page-kill, and it does so **silently at build time** (exit 0, correct HTML, screenshot-perfect — their site-wide `no uncaught page errors` gate is what caught it, not the compiler). Fixing THIS entry alone would render the dep-script gaps non-fatal for static components. — `NEW S281 (scrml-site inbox); HIGH; open`
+
+### g-foreach-lift-codegen-stage-rejection — `forEach(x => lift <li>…</li>)` fails at CODEGEN with `E-CODEGEN-INVALID-LOGIC` ("could not lower this construct") instead of a structural rejection naming the canonical `for … of` + `lift` form
+<!-- @gap id=g-foreach-lift-codegen-stage-rejection sev=LOW status=open -->
+Reported by scrml-site (same inbox message), hit on **our own** `reference/keywords/lift` doc page during their content audit; cost them a bisect. `lift` inside a `.forEach(…)` callback is not a supported lift site (§10.8 accumulation is defined for the enclosing logic block, and a callback body is not that block), but the failure surfaces only at the codegen stage with the generic "the compiler could not lower this construct to valid output" — which names neither the offending construct nor the fix. An earlier structural rejection naming `for … of` + `lift` (or `<each>`) as the canonical iteration form would be trivially actionable. Adjacent: the 20 `@cell.map(…)` / `.forEach(…)` markup sites in the corpus were noted as UNSWEPT under [[g-tier0-reactive-lift-mixed-text-interp-literal]] — the same call-callback lowering path, worth sweeping with this. — `NEW S281 (scrml-site inbox); LOW; open`
 
 ### g-tier0-reactive-lift-mixed-text-interp-literal — a Tier-0 `${for/lift}` over a REACTIVE collection emits a MIXED literal-plus-`${…}` text run as a LITERAL string; the adopter sees `${r.label}` rendered as visible page text
 <!-- @gap id=g-tier0-reactive-lift-mixed-text-interp-literal sev=MED status=open -->
