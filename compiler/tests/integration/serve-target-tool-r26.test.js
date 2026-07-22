@@ -100,29 +100,36 @@ describe("R26 — fsp-wire serve= tool compiles + node --check + inspect", () =>
   });
 });
 
-describe("R26 — the booted server serves the endpoint + SSE over real HTTP", () => {
+// Drive the booted server through its OWN handler (`Server.fetch(new Request())`),
+// NOT a real localhost socket round-trip. The integration suite registers happy-dom,
+// which overrides global `fetch` with a socket-fetch that ECONNREFUSED-races the
+// in-process listener under the full combined run (a boot-vs-connect flake — S273
+// ruling: a runtime test executes the shipped helper + asserts the wiring; it must
+// NOT drive an over-HTTP round-trip). `Server.fetch` routes through the same mounted
+// handlers and returns the same Response, deterministically, with no socket.
+describe("R26 — the booted server serves the endpoint + SSE (via Server.fetch, no socket)", () => {
   test("POST /fsp {tag:FleetStatus} → 200 + the JSON-RPC result envelope", async () => {
-    const res = await fetch(`http://localhost:${SRV.port}/fsp`, {
+    const res = await SRV.fetch(new Request(`http://localhost/fsp`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tag: "FleetStatus" }),
-    });
+    }));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ jsonrpc: "2.0", result: { active: 3, note: "fleet" } });
   });
 
   test("POST /fsp {tag:Dispatch,...} → 200 + the positional payload back on the wire", async () => {
-    const res = await fetch(`http://localhost:${SRV.port}/fsp`, {
+    const res = await SRV.fetch(new Request(`http://localhost/fsp`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tag: "Dispatch", prompt: "scale", project: "atlas" }),
-    });
+    }));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ jsonrpc: "2.0", result: { prompt: "scale", project: "atlas" } });
   });
 
   test("GET /fsp/deltas → the SSE stream frames (event: delta / data:)", async () => {
-    const res = await fetch(`http://localhost:${SRV.port}/fsp/deltas`);
+    const res = await SRV.fetch(new Request(`http://localhost/fsp/deltas`));
     expect(res.headers.get("Content-Type")).toContain("text/event-stream");
     const body = await res.text();
     expect(body).toContain("event: delta");
@@ -131,12 +138,12 @@ describe("R26 — the booted server serves the endpoint + SSE over real HTTP", (
   });
 
   test("an unmatched path → 404 (the serve-harness fallback)", async () => {
-    const res = await fetch(`http://localhost:${SRV.port}/nope`);
+    const res = await SRV.fetch(new Request(`http://localhost/nope`));
     expect(res.status).toBe(404);
   });
 
   test("OPTIONS preflight on any path → 204 + CORS headers (the /* route)", async () => {
-    const res = await fetch(`http://localhost:${SRV.port}/fsp`, { method: "OPTIONS" });
+    const res = await SRV.fetch(new Request(`http://localhost/fsp`, { method: "OPTIONS" }));
     expect(res.status).toBe(204);
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
   });
@@ -168,11 +175,11 @@ describe("R26 — FIX 2: a top-level const referenced by an endpoint arm flows l
   afterAll(() => { if (srv2) srv2.stop(true); });
 
   test("POST /ping → 200 + the top-level const value (no ReferenceError)", async () => {
-    const res = await fetch(`http://localhost:${srv2.port}/ping`, {
+    const res = await srv2.fetch(new Request(`http://localhost/ping`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tag: "Ping" }),
-    });
+    }));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ msg: "hello-from-const" });
   });
