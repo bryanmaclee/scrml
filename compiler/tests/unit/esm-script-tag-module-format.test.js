@@ -120,14 +120,18 @@ describe("§2 composed MPA — per-page re-emitted script set (docs/website)", (
     }
     expect(sawComposedPage).toBe(true);
     expect(sawNestedUpToRoot).toBe(true);
-  });
+    // Compiles the full 98-file docs/website in-process (~13s locally, slower on a
+    // loaded CI runner); the default 5s test timeout tripped on the cloud gate.
+    // Generous timeout for now; TODO(esm-u3-followup) swap to a small shell+nested-page
+    // fixture so this stays sub-second and OS-path-agnostic (Windows canary).
+  }, 60_000);
 
   test("classic: composed per-page + shell tags carry NO type attr", async () => {
     const htmlByFile = await compileHtml(WEBSITE_MPA, "classic");
     for (const [, html] of htmlByFile) {
       for (const t of scriptSrcTags(html)) expect(t).not.toContain("type=");
     }
-  });
+  }, 60_000);
 });
 
 // Role-detection bootstrap: the pure-function surface (emit-html.ts). The
