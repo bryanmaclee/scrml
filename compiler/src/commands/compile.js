@@ -11,6 +11,7 @@ import { statSync, watch, readFileSync, existsSync, writeFileSync } from "fs";
 import { resolve, dirname, join, relative, basename } from "path";
 import { fileURLToPath } from "url";
 import { compileScrml, scanDirectory } from "../api.js";
+import { moduleFormatNotices } from "./module-format-notice.js";
 import { serializeBlockAnalysis } from "../block-analysis.ts";
 
 // ---------------------------------------------------------------------------
@@ -61,6 +62,13 @@ Options:
   --validate-emit         Parse every emitted JS artifact (E-CODEGEN-INVALID-LOGIC); abort on malformed output (§2.2.1)
   --no-validate-emit      Opt out of the emitted-JS parse gate (dev/CI escape hatch)
   --mode <mode>           Output mode: browser (default) or library
+  --module-format=<fmt>   Client runtime module format: classic (default) or esm.
+                          classic emits the shared runtime as a <script src> body
+                          (byte-identical to prior output). esm is EXPERIMENTAL and
+                          not yet browser-loadable (module <script> tags + chunk
+                          imports land in a later unit) — it emits an ES-module
+                          runtime but the app will not run in a browser yet.
+                          Emitted-JS shape only; adopter source unchanged.
   --self-host             Use compiled scrml modules (requires build-self-host.js)
   --parser=scrml-native   Opt-in native-parser routing (M5-swap C2). When set,
                           the per-file parse is driven by the native parser
@@ -142,6 +150,12 @@ function parseArgs(args) {
   // opt-out is an OPERATIONAL escape, NOT a relaxation of the SPEC §2.2.1
   // "SHALL NOT emit JS that fails to parse" invariant.
   let validateEmit = undefined;
+  // ESM chunks arc (Unit 1) — client runtime module format. `classic` (default)
+  // emits the shared runtime as a classic `<script src>` body, byte-identical to
+  // pre-arc output; `esm` emits it as a valid ES module. Emitted-JS shape only
+  // (D3 implementation freedom), NOT a language-spec change; reversible; adopter-
+  // source-neutral. Threaded into compileScrml -> runCG.
+  let moduleFormat = "classic";
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -256,6 +270,26 @@ function parseArgs(args) {
         process.exit(1);
       }
       parser = raw;
+    } else if (arg === "--module-format" || arg.startsWith("--module-format=")) {
+      // ESM chunks arc (Unit 1) — `--module-format=classic|esm`. Both
+      // `--module-format=esm` and `--module-format esm` shapes are accepted.
+      // Default `classic` (byte-identical to pre-arc output). Mirrors the
+      // `--mode` validation shape (unknown value errors).
+      let raw;
+      if (arg === "--module-format") {
+        raw = args[++i];
+        if (!raw) {
+          console.error(c.red("error:") + ` ${arg} requires a value (classic or esm)`);
+          process.exit(1);
+        }
+      } else {
+        raw = arg.substring("--module-format=".length);
+      }
+      if (raw !== "classic" && raw !== "esm") {
+        console.error(c.red("error:") + ` Unknown module format: ${raw}. Valid values: classic, esm`);
+        process.exit(1);
+      }
+      moduleFormat = raw;
     } else if (arg === "--help" || arg === "-h") {
       printHelp();
       process.exit(0);
@@ -291,7 +325,7 @@ function parseArgs(args) {
     }
   }
 
-  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitTokenSet, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit, production };
+  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitTokenSet, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit, production, moduleFormat };
 }
 
 // ---------------------------------------------------------------------------
@@ -421,7 +455,7 @@ function formatLintDiagnostic(diag, cwd) {
  * @returns {{ success: boolean }}
  */
 function runOnce(opts, selfHostModules = null) {
-  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitTokenSet, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit, production } = opts;
+  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitTokenSet, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit, production, moduleFormat } = opts;
   const cwd = process.cwd();
 
   if (verbose) {
@@ -433,6 +467,14 @@ function runOnce(opts, selfHostModules = null) {
     for (const f of inputFiles) {
       console.log(c.dim(`  ${relative(cwd, f)}`));
     }
+  }
+
+  // ESM chunks arc (Unit 1) — operational heads-up when --module-format=esm is
+  // selected: the esm runtime is not yet browser-loadable (module <script> tags
+  // + chunk imports are a later unit). Empty for classic → default prints
+  // nothing. NOT a §34 source diagnostic.
+  for (const line of moduleFormatNotices(moduleFormat, embedRuntime)) {
+    console.error(c.yellow(line));
   }
 
   let result;
@@ -476,6 +518,10 @@ function runOnce(opts, selfHostModules = null) {
       // The emitted-JS parse gate (E-CODEGEN-INVALID-LOGIC) makes SPEC §2.2.1 a
       // compile-time invariant; `--no-validate-emit` is the operational opt-out.
       validateEmit,
+      // ESM chunks arc (Unit 1) — `--module-format=classic|esm`. Default
+      // `classic` is byte-identical to pre-arc output; `esm` emits the shared
+      // runtime as an ES module.
+      moduleFormat,
     });
   } catch (err) {
     // ENOENT — file not found, not a compiler bug

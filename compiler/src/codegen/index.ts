@@ -23,6 +23,7 @@ import { basename, dirname, relative, resolve } from "path";
 import { toPosix } from "../path-canonical.js";
 import { RUNTIME_FILENAME } from "../runtime-template.js";
 import { assembleRuntime } from "./runtime-chunks.ts";
+import { toEsmRuntime } from "./runtime-esm.ts";
 import { fnv1aHash } from "./fnv1a-hash.ts";
 import { CGError } from "./errors.ts";
 
@@ -141,6 +142,17 @@ export interface CgInput {
    * §19.12.7). Default false (development — log() is active).
    */
   production?: boolean;
+  /**
+   * ESM chunks arc (Unit 1) — client runtime module format. `"classic"` (the
+   * default) emits the shared runtime as a classic `<script src>` body,
+   * byte-identical to pre-arc output. `"esm"` emits the runtime as a valid ES
+   * module (`export { … }` surface + R1 meta-block rework) so client chunks can
+   * `import` from it. This is emitted-JS shape only (D3 implementation freedom),
+   * NOT a language-spec change; fully reversible; adopter-source-neutral.
+   * Surfaced via the `--module-format=classic|esm` CLI flag; threaded from
+   * `compileScrml` in api.js.
+   */
+  moduleFormat?: "classic" | "esm";
   /**
    * §51.13 — When true, generate auto-property-tests for every non-derived
    * machine declaration. Independent of testMode. Output lands on
@@ -794,6 +806,10 @@ export function runCG(input: CgInput): CgOutput {
     // release artefacts; mirrors the test-bind 0-byte production guarantee,
     // §19.12.7). Threaded into EmitLogicOpts.production -> EmitExprContext.
     production = false,
+    // ESM chunks arc (Unit 1) — runtime module format. Default "classic" keeps
+    // the shared runtime byte-identical to pre-arc output; "esm" transforms the
+    // assembled runtime into an ES module (see the `!embedRuntime` path below).
+    moduleFormat = "classic",
     log = console.log,
   } = input;
 
@@ -2398,6 +2414,18 @@ export function runCG(input: CgInput): CgOutput {
     union.add("errors");
     union.add("transitions");
     runtimeJs = assembleRuntime(union);
+
+    // ESM chunks arc (Unit 1) — under `--module-format=esm`, transform the
+    // assembled (post-slice) runtime into a valid ES module: the R1 meta-block
+    // dep-tracking rework, redeclare-guard simplification, and a derived
+    // `export { … }` surface (see codegen/runtime-esm.ts). Applied AFTER slicing
+    // so the export set names only the symbols that survived tree-shaking (an
+    // export of a shaken-out name would be a link error) and BEFORE the content
+    // hash so the esm bytes get their own cache key and `classic` stays hash-
+    // identical to pre-arc output. `classic` (the default) is a no-op here.
+    if (moduleFormat === "esm") {
+      runtimeJs = toEsmRuntime(runtimeJs);
+    }
 
     // Phase B 3.3 — content-hash the assembled runtime. FNV-1a 32-bit
     // (the same primitive used for §47 type-encoding and §47.5 per-chunk

@@ -810,6 +810,17 @@ export function compileScrml(options = {}) {
      *   of the §2.2.1 "SHALL NOT emit JS that fails to parse" invariant.
      */
     validateEmit = true,
+    /**
+     * ESM chunks arc (Unit 1) — client runtime module format
+     * (`"classic"` | `"esm"`). Default `"classic"` emits the shared runtime as a
+     * classic `<script src>` body, byte-identical to pre-arc output. `"esm"`
+     * emits it as a valid ES module (`export` surface + R1 meta-block rework) so
+     * client chunks can `import` from it (chunk-side import emit lands in a later
+     * arc unit). Emitted-JS shape only (D3 implementation freedom), NOT a
+     * language-spec change; adopter-source-neutral; fully reversible. Threaded
+     * to runCG; surfaced via the `--module-format=classic|esm` CLI flag.
+     */
+    moduleFormat = "classic",
   } = options;
 
   let { outputDir } = options;
@@ -2370,6 +2381,10 @@ export function compileScrml(options = {}) {
     testMode,
     // §20.6 (F4=A) — production strip flag for the log() builtin.
     production,
+    // ESM chunks arc (Unit 1) — client runtime module format. `"classic"`
+    // (default) keeps the shared runtime byte-identical to pre-arc output;
+    // `"esm"` emits it as an ES module. Surfaced via `--module-format`.
+    moduleFormat,
     // C15 — pass MOD's exportRegistry so codegen can identify cross-file
     // engine mount sites (`<engineVarName/>` resolving to `category: "engine"`)
     // and emit the §21.8 mount-position marker per SPEC §51.0.D.
