@@ -16,7 +16,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 11 |
-| MED | 44 |
+| MED | 45 |
 | LOW | 28 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -58,6 +58,29 @@
 **Why the alternative (enforce single-root via a named `E-EACH-MULTI-ROOT`) was REJECTED (bryan, S281):** (a) it is a hole in what was thought to be working, not an unbuilt feature; (b) **the workaround is not universally available** — Peter's "wrap the per-item body in one root" fails exactly where it is most needed: `<tr>` pairs in a table, `<dt>`/`<dd>` in a `<dl>`, `<option>` under `<select>`. A wrapper `<div>` in those positions is foster-parented or dropped — the *same* bug class as #131 / S272 — so single-root-as-contract would make legal HTML inexpressible in Tier-1 iteration; (c) it would newly-REJECT the §10.8 Tier-0 multi-`lift` grant, or enforce at Tier 1 only and break the ladder's *"the per-item template carries forward"* promotion promise — note `W-EACH-PROMOTABLE` **already fires** on a multi-`lift` Tier-0 loop, offering a `promote --each` lift that would silently delete markup; (d) a real adopter is affected now.
 
 **Fix in flight (S281).** Design: root count is statically known at codegen — when exactly 1, emit today's `return _itemFrag.firstChild` **byte-identical** (the ~99% case, and the assertable safety gate); emit the fragment form only when > 1. The runtime `createFn` contract widens to `Node | DocumentFragment`, and the reconciler owns a node **group per key** (key stamped on every top-level node; `_childList`/`_clearAll`/`_insert`/`_remove`/`_replace` group-aware; LIS reorder over groups, moving a group's nodes together preserving intra-group order) across BOTH container modes — range (`nodeType === 8` comment fence, the #131 model) and element. Tier-0 lift fixed in the same landing per §10.8. SPEC §17.7.2 gains a minimal normative statement making the N-root grant explicit. No new §34 code. **PRESERVED deliberately:** create-time `if=` semantics (`emit-each.ts:860`) — a reused group does not gain/lose roots on later reconciles; that is a pre-existing limitation and is NOT fixed here. — `NEW S281 (adopter #141); HIGH; open — build in flight`
+
+### g-tier0-reactive-lift-mixed-text-interp-literal — a Tier-0 `${for/lift}` over a REACTIVE collection emits a MIXED literal-plus-`${…}` text run as a LITERAL string; the adopter sees `${r.label}` rendered as visible page text
+<!-- @gap id=g-tier0-reactive-lift-mixed-text-interp-literal sev=MED status=open -->
+Found while verifying #141 (S281), on a side observation — **a distinct defect on a different axis, NOT part of the #141 truncation fix.** In the Tier-0 `${ for (x of @cell) { lift … } }` path, a lifted markup **text run that MIXES literal text with `${…}` interpolation** is emitted as a single literal JS string:
+
+```
+lift <div>A${r.label}</>      ->  createTextNode("A${r.label}")     // BROKEN — literal, no effect
+lift <div>B${r.label}</div>   ->  createTextNode("B${r.label}")     // BROKEN — closer form is NOT the trigger
+lift <li><span>M${r.label}</span></li>  ->  createTextNode("M${r.label}")   // BROKEN — nesting is NOT the trigger
+```
+
+Nothing ever overwrites those nodes — PA-confirmed by reading the whole emitted `_scrml_create_item_N`; there is no repairing `_scrml_effect`. The literal text `A${r.label}` reaches the DOM and is visible to the user. Clean compile, exit 0, zero diagnostics.
+
+**Precisely bounded — three discriminators tested, only one fires:**
+- **PURE-interpolation runs are CORRECT.** `lift <div>${r.label}</div>` emits `createTextNode("")` + a live-keyed `_scrml_effect` doing `textContent = String((r.label) ?? "")`. Only MIXED runs break.
+- **REACTIVITY is the trigger, not member access.** The identical single-line shape over a NON-reactive literal array (`for (r of [{label:"s"}])`) emits correctly — `createTextNode("Q")` + `createTextNode(String((r.label) ?? ""))`. Bare `${r}` over a reactive cell breaks too, so it is not `.field` access. The break is specific to the **keyed-reconcile create-item path**.
+- **Closer form and nesting are irrelevant** — `</>` and `</div>`, single-line and multi-line-with-nested-element, all break identically.
+
+**Tier-1 `<each>` handles the same content correctly** — `<div class="hdr">H${r.label}</div>` inside an `<each>` splits into `createTextNode("H")` + a live-keyed `_scrml_each_tn_N` effect. So this is a **Tier-0-lift-only** defect, and it strengthens rather than weakens the `W-EACH-PROMOTABLE` promotion nudge.
+
+**Measured blast radius (reverse-direction R26 — verify before claim-OPEN):** 79 corpus files use a Tier-0 loop over a reactive cell, but 3 sampled real files (`examples/15-channel-chat.scrml`, `samples/dashboard.scrml`, `examples/12-snippets-slots.scrml`) compile with **ZERO** literal-interpolation text nodes — their lift bodies do not use mixed runs. So this is a **latent trap, not a currently-biting bug**: the shape is entirely natural (`Total: ${n}`, `${a} of ${b}`) and would be silent when hit, but nothing in the sampled corpus hits it. Severity MED on that basis, not HIGH. A full 79-file sweep was NOT run — the 3-file sample is what was measured, and the count could rise.
+
+**Deliberately NOT folded into the #141 dispatch** (different axis, tight brief, mid-flight). Fix direction: the reactive create-item lift path needs the same literal/interpolation text-run SPLIT that both the static lift path and `emit-each.ts` already perform. Reproducers preserved in the S281 scratchpad; regenerate from the three snippets above. — `NEW S281 (found verifying #141); MED; open`
 
 ---
 
