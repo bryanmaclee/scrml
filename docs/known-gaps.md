@@ -15,8 +15,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 9 |
-| MED | 43 |
+| HIGH | 10 |
+| MED | 44 |
 | LOW | 28 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -2797,6 +2797,33 @@ ${ type Row:struct = { id: number, done: (not to timestamp) } }
 </>
 ```
 **Workaround in use:** hoist the predicate into a `fn` and call it — `class:done=${!isActive(@.)}` — which lowers correctly (a call expression needs no operator rewrite). Applied to `docs/readme-snippets/tasks-app.scrml` at S280 so the README example builds; the underlying defect is untouched. **Fix direction:** route the `class:` attribute expression through the same lowering the value-attribute path uses. Needs a codegen dispatch + the S239 adversarial gate (not PA-direct). <!-- @gap id=g-class-attr-expr-not-lowered sev=HIGH status=open -->
+
+### G-TRIGGER-3-SERVER-ONLY-IMPORT-DOES-NOT-ESCALATE — §12.2 Trigger 3 is spec'd but not wired as an escalation trigger; a `scrml:auth` call + its secret stay CLIENT-SIDE — `NEW S280 (scrml-site blocking docs query; PA-reproduced); HIGH; ⚠️ confidentiality-adjacent + falsifies a normative SPEC claim`
+**SPEC §12.2 Trigger 3** states the compiler SHALL escalate when *"developer configuration declares that a specific module or function SHALL never run client-side. The `SERVER_ONLY_SCRML_MODULES` set names the canonical server-only stdlib modules; importing any of them — `scrml:auth`, `scrml:db`, `scrml:redis`, `scrml:fs`…"*. **It does not fire.**
+The set EXISTS and contains `scrml:auth` (`route-inference.ts:578`), but its only consumer is `isServerOnlyScrmlModuleSource`, whose own doc comment scopes it elsewhere: *"Used by the STDLIB-EXPORT-SEED fail-closed backstop (api.js): an unresolvable re-export in a server-only stdlib module MUST default to async…"* — i.e. **async classification, not route placement.** Nothing consumes it as a §12.2 escalation trigger.
+**PA-REPRODUCED on `38aec2a9`.** A `<program>` importing `signJwt` from `scrml:auth` and calling it inside a plain `function`:
+- WITHOUT the `server` keyword → **no `.server.js` is emitted at all**; the function appears in `<entry>.client.js`, `signJwt` resolves to `_scrml_stdlib.auth` client-side, and **the secret string is present in the client bundle** (`grep -c "s3cr3t" <entry>.client.js` → 1).
+- WITH `server` → `.server.js` emitted, and `W-DEPRECATED-SERVER-MODIFIER` correctly does **NOT** fire (no other trigger exists to make the keyword redundant).
+**Two consequences, both load-bearing:**
+1. **The normative claim at §12.2 Trigger 4 is FALSE.** It asserts *"Triggers 1, 2, 3, 5, 6, 7, and 8 cover every case the keyword previously communicated."* Trigger 3 does not fire, so this class is uncovered and the `server` keyword is **genuinely load-bearing**, not redundant.
+2. **"Deprecated" is therefore dangerous advice on this shape.** An adopter who reads the deprecation and deletes the keyword silently relocates auth logic AND its secrets to the browser — the docs-shaped-misconception class the Peter/Supabase incident is the standing reminder for.
+**Blocked a downstream arc:** scrml-site holds ~99 wiki pages with **31 `server function` uses across 11 pages**, including `getting-started` and `learn/server-boundary`. Source: `handOffs/incoming/read/2026-07-22-1700-scrml-site-to-scrml-server-keyword-deprecation-path.md`.
+**RULED (bryan, S280): option 1 — WIRE Trigger 3 as specified**, making `server` genuinely redundant for the stdlib-import class so the deprecation completes as designed. No replacement annotation; no permanent dual-status. Interim guidance relayed downstream: migrate only the sites where `W-DEPRECATED-SERVER-MODIFIER` actually fires (provably redundant); HOLD the trigger-free sites until this lands. NB `server fn` stays permanently non-deprecated for a PURE server-pinned helper (SPEC §48: *"`fn` is the canonical pure form (and `server fn` for server-side pure functions)"*) — a pure `fn` has no trigger to infer from. No hard-removal version is set; `server` stays warn-only until the fix lands and a §8 migration sweep is measured. <!-- @gap id=g-trigger-3-server-only-import-does-not-escalate sev=HIGH status=open -->
+
+### G-PROSE-CODE-COLOR-LIGHT-THEME-ONLY — the built-in typography layer emits a hardcoded light `code` colour with no dark handling — `NEW S280 (scrml-site wiki migration; PA-REPRODUCED); MED; adopter-visible`
+The built-in Tailwind/typography (`prose`) layer emits a hardcoded light-theme `code` colour and **no `prefers-color-scheme` handling at all**. On a dark site every fenced code example renders near-background-coloured — effectively invisible.
+**PA-REPRODUCED on `38aec2a9`** (`<div class="prose prose-slate"><pre><code>x</code></pre></div>`), emitted `.css`:
+```css
+:where(code):not(:where([class~="not-prose"] *)) { color: #111827; … }   /* prose */
+:where(code):not(:where([class~="not-prose"] *)) { color: #0f172a }      /* prose-slate */
+```
+`grep -c "prefers-color-scheme"` on the emitted CSS → **0**. The reporter's in-browser measurement matches exactly: `<pre>` background `rgb(15,23,42)`, `<code>` colour `rgb(15,23,42)` — identical, on every reference page of the migrated wiki.
+**Second half, UNRESOLVED and potentially worse:** the site's own `app.scrml` carried `.prose code { color: rgb(241 245 249) }`, which *should* out-specify a `:where()` rule (0,1,1 vs 0,1,0) and **did not win in practice**. The reporter stopped once `pre code { color: inherit !important }` fixed it empirically. If a `:where()`-emitted rule really does beat a higher-specificity author rule, that is a separate and more serious cascade defect — requested as its own report.
+**Fix directions:** have the emitted `prose` defaults follow `color-scheme`/`prefers-color-scheme`, or at minimum leave `pre code` inheriting rather than pinning a colour. Same family as the Bug-1 shims already carried in the site's `app.scrml`, suggesting the Tailwind layer's coverage gaps are a recurring adopter cost. Downstream now gates it (`scripts/wiki-verify.mjs` luminance separation on sampled `<pre>`). Source: `handOffs/incoming/read/2026-07-22-1530-scrml-site-to-scrml-wiki-migrated-out-of-docs-website.md`. <!-- @gap id=g-prose-code-color-light-theme-only sev=MED status=open -->
+
+### G-DOCS-WEBSITE-RETAINED-AS-TEST-FIXTURE — `docs/website/` is NOT retiring; it is a live fixture for three tests — `RULED S280 (bryan); non-gap, recorded so the ask is not re-raised`
+scrml-site migrated the 98-page wiki into its own repo (`6554ce7`) and asked whether `docs/website/` + `docs/build.ts` could retire. **bryan ruled KEEP.** `docs/website/` is a live test fixture for three files — `compiler/tests/unit/esm-script-tag-module-format.test.js` (compiles all 98 files in-process as its composed-MPA case), `tailwind-phase1-coverage.test.js`, `bs-layer-corpus-friction-bugs.test.js` — so deleting it breaks the suite. The reporter had no way to see that from their side; copying rather than moving was the right call.
+**Disposition:** our copy is a COMPILER FIXTURE, not a second source of truth — **scrml-site is canonical for the wiki**. The `docs/build.ts` observation is confirmed (it renders only `docs/articles/`), so retiring the build script is now decoupled from the directory and can happen independently. <!-- @gap id=g-docs-website-retained-as-test-fixture sev=LOW status=non-gap -->
 
 ### G-ESM-MODULE-SCOPE-DOES-NOT-ISOLATE-CHUNK-STATE — ES-module scope does NOT dissolve the cross-chunk collision; the colliding state is in the RUNTIME singleton — `NEW S280 (U4 dispatch REFUSED on a falsified premise; PA-reverified end-to-end); HIGH; ⚠️ invalidates the S279 Option-B ruling`
 **The S279 ruling's premise is false, and it was proven false in a real browser.** Option B deferred the classic Wave-1c soft-nav loader and folded cross-chunk nav into ESM U4 on the reasoning that *"module scope dissolves the each-id collision."* It does not. Module scope dissolves only the **lexical** collision (two chunks each declaring `function _scrml_each_render_9` — the separate [[g-nav-chunk-lexical-collision]]). **The S279 collision is not lexical: the colliding state lives in the RUNTIME, and under `--module-format=esm` the runtime is ONE ES module every chunk imports — a singleton by necessity** (it must be, or the cell store, subscriber list and rehydrator registry would fork). Chunks mutate it through member expressions on an imported binding (`_scrml_each_renderers["each_9"] = …`, `_scrml_reactive_set("rows", …)`), which is legal ESM and is deliberately NOT covered by the arc's fail-loud guard — `emit-client-esm.ts:181`: *"MemberExpression targets bind no bare identifier and are skipped (they never trip the read-only-import hazard)"* (correct as written; imports are read-only *bindings*, and `o.x = …` mutates the object, not the binding).
