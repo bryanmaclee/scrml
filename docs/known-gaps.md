@@ -15,7 +15,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 10 |
+| HIGH | 11 |
 | MED | 44 |
 | LOW | 28 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -35,6 +35,29 @@
 > carries an inline `@gap` token in its final cell. This basis reproduced the canonical S170 hand-count
 > HIGH 0 · MED 9 · LOW 18 · Nominal 9 exactly (the S170 baseline) — the LIVE count is the generated table
 > above, which moves as gaps are filed/closed (S174 filed 4 → MED 11 · LOW 20).
+
+---
+
+## §S281 — gaps filed S281 (2026-07-22, adopter issue #141 triage)
+
+> Context: GH issue **#141** (pjoliver11, 2026-07-22) — filed from a real app. Triaged + ruled by bryan the same session: **support N roots**, not a deferred arc. Build in flight (`docs/changes/each-multi-root/BRIEF.md`).
+
+### g-each-multi-root-per-item-truncated — an `<each>` (or reactive Tier-0 `lift`) body with MORE THAN ONE root element per item renders only the FIRST; every later root is built, wired, then silently discarded
+<!-- @gap id=g-each-multi-root-per-item-truncated sev=HIGH status=open -->
+`compiler/src/codegen/emit-each.ts:2191` ends the per-item `createFn` with **`return _itemFrag.firstChild;`**. Every root IS appended to `_itemFrag` — including its live-keyed `_scrml_effect` text/attr bindings — and then all but the first are dropped on the floor. Clean build, exit 0, **no error, no warning, nothing in the console**. Keyed and unkeyed behave identically (`key=` is not the trigger); 2-root and 3-root bodies both truncate to 1. Adopter symptom (`pjoliver11`, real grouped-list UI): **32 day-headers and 0 rows**. Because the first root *does* render, the failure reads as "my data is wrong" rather than "the compiler dropped my markup" — which is what made it expensive to localise.
+
+**PA-verified at `a0344d75` (S281), three facts:**
+1. The `<each>` (Tier-1) truncation, as above.
+2. The **Tier-0 `${ for/lift }` path truncates identically** — the emitted `_scrml_create_item_N` ends `return _scrml_tmp_M.firstChild;`. So this is NOT `<each>`-specific.
+3. **The truncation is a property of the RECONCILE path, not of the language.** A Tier-0 multi-`lift` loop over a **non-reactive** plain array emits both roots and contains no `firstChild` call at all. Same authored source; whether your second element exists depends on whether the collection is a reactive cell.
+
+⇒ Root cause is the **`createFn` returns exactly one `Node`** contract inside `_scrml_reconcile_list` (`compiler/src/runtime-template.js:1652`) leaking out as an apparent language rule. The reconciler keys ONE node per item (`newKeys[i]` compared positionally against `child._scrml_key`), so it cannot represent an item owning N sibling nodes.
+
+**Governing-sentence gate (§1) — this is a FIX, not an amendment.** Searched §17.7, §10.8, §4.14, §24. Two pre-existing normative sentences already grant it: **§10.8 (line 6769)** *"In accumulation mode, `lift` MAY appear multiple times in a single logic block; each call appends one item"* — an explicit grant of N nodes per iteration at Tier 0; and **§17.7.2 (line 11289)** *"The body of `<each>` SHALL contain **at least one** per-item template element OR the `<empty>` sub-element (or both)"* — weaker (its job is to define `E-EACH-EMPTY-BODY`) but nothing anywhere rejects more than one. Per `pa-base v2.4` §8 the change is **newly-accepting → toward the contract → conformance restoration**. Every §17.7 worked example (Shapes 1–4) happens to use exactly one root, and "multi-element body" there means multiple elements *nested inside* a single root — but an accident of the examples is not a contract.
+
+**Why the alternative (enforce single-root via a named `E-EACH-MULTI-ROOT`) was REJECTED (bryan, S281):** (a) it is a hole in what was thought to be working, not an unbuilt feature; (b) **the workaround is not universally available** — Peter's "wrap the per-item body in one root" fails exactly where it is most needed: `<tr>` pairs in a table, `<dt>`/`<dd>` in a `<dl>`, `<option>` under `<select>`. A wrapper `<div>` in those positions is foster-parented or dropped — the *same* bug class as #131 / S272 — so single-root-as-contract would make legal HTML inexpressible in Tier-1 iteration; (c) it would newly-REJECT the §10.8 Tier-0 multi-`lift` grant, or enforce at Tier 1 only and break the ladder's *"the per-item template carries forward"* promotion promise — note `W-EACH-PROMOTABLE` **already fires** on a multi-`lift` Tier-0 loop, offering a `promote --each` lift that would silently delete markup; (d) a real adopter is affected now.
+
+**Fix in flight (S281).** Design: root count is statically known at codegen — when exactly 1, emit today's `return _itemFrag.firstChild` **byte-identical** (the ~99% case, and the assertable safety gate); emit the fragment form only when > 1. The runtime `createFn` contract widens to `Node | DocumentFragment`, and the reconciler owns a node **group per key** (key stamped on every top-level node; `_childList`/`_clearAll`/`_insert`/`_remove`/`_replace` group-aware; LIS reorder over groups, moving a group's nodes together preserving intra-group order) across BOTH container modes — range (`nodeType === 8` comment fence, the #131 model) and element. Tier-0 lift fixed in the same landing per §10.8. SPEC §17.7.2 gains a minimal normative statement making the N-root grant explicit. No new §34 code. **PRESERVED deliberately:** create-time `if=` semantics (`emit-each.ts:860`) — a reused group does not gain/lose roots on later reconciles; that is a pre-existing limitation and is NOT fixed here. — `NEW S281 (adopter #141); HIGH; open — build in flight`
 
 ---
 
