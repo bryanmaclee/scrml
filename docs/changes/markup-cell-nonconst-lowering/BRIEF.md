@@ -102,6 +102,8 @@ you must STOP and report it.
 Final SHA · files touched · the corpus grep count for the newly-rejected shape · confirmation of
 no-double-fire · suite numbers · R26 result · maps load-bearing yes/no.
 
-DONE-PROBE: `<plain> = <span class="p">yo</span>` used only via `${@plain}` fires
-`E-CELL-RENDER-SPEC-NOT-BINDABLE`, AND `<userName req> = <input type="text"/>` still compiles clean as
-a bindable render-spec.
+DONE-PROBE: test -f compiler/tests/integration/cell-render-spec-decl-scoped.test.js
+Expected behaviour the probe stands in for: `<plain> = <span class="p">yo</span>` used only via
+`${@plain}` fires `E-CELL-RENDER-SPEC-NOT-BINDABLE` at the declaration, while `<userName req> =
+<input type="text"/>` still compiles clean as a bindable render-spec (landed #128 `9481bc69`; the
+decl-scoped integration test is the landed artifact this probe asserts).

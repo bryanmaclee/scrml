@@ -18,10 +18,18 @@
 //
 // DONE-PROBE CONTRACT — put ONE line anywhere in a BRIEF.md:
 //   DONE-PROBE: <shell command>
-//   Runs `bash -c <command>` with cwd = repo root, 10s timeout. exit 0 => DONE ; exit non-0 => OPEN ;
-//   spawn-failure / timeout => ERROR. Keep it CHEAP + DETERMINISTIC — a grep on a landed artifact, a
+//   The probe is first VALIDATED as a real shell command, then RUN: exit 0 => DONE ; exit non-0 => OPEN ;
+//   spawn-failure / timeout => ERROR ; MALFORMED (not a command) => ERROR. It runs `bash -c <command>`
+//   with cwd = repo root, 10s timeout. Keep it CHEAP + DETERMINISTIC — a grep on a landed artifact, a
 //   conformance-case existence check, a `bun test -t <name>` name match. It runs on every boot: no network,
 //   no full-suite, no side effects.
+//   MALFORMED-PROBE GUARD (S278): a PROSE sentence in this field is NOT a shell command, but `bash -c`
+//   runs it to a non-zero exit indistinguishable from a legit-open probe — so it silently read as OPEN,
+//   masquerading as real open work (four S277 threads did exactly this — the false-OPEN class the board
+//   exists to prevent, re-entered through the probe-authoring door). runProbe now validates STRUCTURALLY
+//   before running: (1) `bash -n` must parse it, and (2) its FIRST TOKEN must resolve to a command
+//   (`command -v`). Either check failing => ERROR (loud), never OPEN. So a prose probe fails the board
+//   loudly (and `--check`, run at boot/CI, exits 1 on it) instead of hiding as open work.
 //
 // House style mirrors scripts/state.ts (plain bun-run TS, dependency-free Bun/node built-ins, spawnSync,
 // ROOT via import.meta.url).
@@ -68,7 +76,29 @@ function discover(): Omit<Thread, "status" | "detail">[] {
   return threads;
 }
 
+// A probe must be a real shell command, not prose. A prose sentence bash-c-runs to a non-zero exit that
+// is indistinguishable from a legit-open probe (the S278 false-OPEN class). So validate STRUCTURALLY,
+// before running: it must parse (`bash -n`) AND its first token must resolve to a command (`command -v`).
+// Either check failing => the probe is malformed => ERROR (loud), never a silent OPEN. See the header
+// MALFORMED-PROBE GUARD note. (cmd is passed as a bash positional arg `$1`, never interpolated — no
+// injection, and no premature expansion of backticks in a prose probe.)
+function validateProbe(cmd: string): string | null {
+  const syn = sh("bash", ["-n", "-c", cmd], 10_000);
+  if (syn.status !== 0) {
+    const msg = (syn.stderr || "").trim().split("\n").pop() || "bash -n rejected it";
+    return `malformed probe (syntax error — prose, not a command?): ${msg}`;
+  }
+  const tokR = sh("bash", ["-c", 'read -ra t <<< "$1"; printf %s "${t[0]-}"', "_", cmd]);
+  const tok = (tokR.stdout || "").trim();
+  const cv = sh("bash", ["-c", 'command -v -- "$1" >/dev/null 2>&1', "_", tok]);
+  if (cv.status !== 0) return `malformed probe (first token '${tok}' is not a command — prose, not a shell probe?)`;
+  return null;
+}
+
 function runProbe(cmd: string): { status: Status; detail: string } {
+  const bad = validateProbe(cmd);
+  if (bad) return { status: "ERROR", detail: bad };
+
   const r = sh("bash", ["-c", cmd], 10_000);
   if (r.error) {
     const code = (r.error as NodeJS.ErrnoException).code;
