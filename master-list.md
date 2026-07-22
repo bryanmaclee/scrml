@@ -94,7 +94,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `568583a2` — wrap(s279): hand-off + changelog + delta-log [715]-[722] + 8 gaps + user-voice tail — **LOCAL-ONLY**
+- `ea4c720a` — wrap(S279): E-ASYNC timer over-fire fix + continuity (#139) — **pushed**
 - `d6cae6c2` — wrap(S278): ESM-chunks arc U1→U3 landed — esm now runs (behind default classic) (#136) — **pushed**
 - `825eec5f` — wrap(S277): normative grounding — 3 PRs + pa-base v2.3 + maps to 9481bc69 (#129) — **pushed**
 - `5823b495` — wrap(S276): Wave-1c PR-1 LANDED (#124) — hand-off/changelog/delta-log/master-list/known-gaps + maps to c48e59a2 + 3 non-compliance fixes (#125) — **pushed**
