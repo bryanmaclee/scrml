@@ -9,7 +9,7 @@
     "notCodes": [],
     "input": [{ "click": "#add" }],
     "state": { "items": [{ "id": 1, "label": "Item 1" }], "nextId": 2 },
-    "dom": "<button id=\"add\">Add</button><ul id=\"list\"><div><li class=\"row\">Item 1</li></div></ul>",
+    "dom": "<button id=\"add\">Add</button><ul id=\"list\"><li class=\"row\">Item 1</li></ul>",
     "domAnchored": [
       { "selector": ".row", "count": 1 },
       { "selector": "#empty-row", "count": 0 }

@@ -345,13 +345,28 @@ export function stampArmPayloadEaches(
 // ---------------------------------------------------------------------------
 
 /**
- * Emit a static placeholder `<div data-scrml-each-mount="each_<id>"></div>`
- * at the `<each>`'s source position in HTML output. The runtime dispatcher
- * (emit-each-body-render below) writes the rendered iteration into this
- * slot on subscription fire.
+ * Emit a PARSE-SAFE comment FENCE mount at the `<each>`'s source position in
+ * HTML output — `<!--scrml-each:N-->` … (rows inserted here) … `<!--/scrml-each:N-->`.
+ *
+ * Approach A-unified (g-each-mount-div-foster-parented-in-table): the previous
+ * `<div data-scrml-each-mount="each_N">` wrapper was UNCONDITIONAL and
+ * context-blind, so under `<table>/<tbody>/<tr>` the HTML tree-builder
+ * FOSTER-PARENTED it out of the table (rows landed before `<table>` → 0 rows)
+ * and under `<select>/<optgroup>` the "in select" insertion mode is a parse
+ * error → the token was DROPPED (no mount → empty dropdown). A COMMENT is
+ * inserted normally in EVERY insertion mode (never foster-parented, never
+ * dropped, zero layout), so the fence survives; the runtime inserts each row as
+ * a SIBLING between the two anchors, landing rows as legal `<option>`/`<tr>`
+ * children of the real parent. This mirrors the established `scrml-if-marker:N`
+ * comment-marker precedent (`<if>` blocks). The two-comment fence (not a single
+ * anchor) bounds the each's keyed-reconcile range against arbitrary static
+ * siblings that may precede/follow the each in the SAME parent (e.g. a static
+ * `<option value="">Select…</option>` placeholder before the each).
  *
  * Returns "" when the each-block has no per-item template content (rare —
- * structurally requires at least one templateChild OR an emptyChild).
+ * structurally requires at least one templateChild OR an emptyChild). The
+ * tree-shake `return ""` guard is preserved (no fence emitted → no runtime
+ * render fn / SSR fill can target it).
  */
 export function emitEachMountHtml(node: EachBlockAstNode, _ctx: CompileContext): string {
   if (!node || node.kind !== "each-block") return "";
@@ -359,7 +374,7 @@ export function emitEachMountHtml(node: EachBlockAstNode, _ctx: CompileContext):
   if ((!Array.isArray(node.templateChildren) || node.templateChildren.length === 0) && !node.emptyChild) {
     return "";
   }
-  return `<div data-scrml-each-mount="each_${node.id}"></div>`;
+  return `<!--scrml-each:${node.id}--><!--/scrml-each:${node.id}-->`;
 }
 
 // ---------------------------------------------------------------------------
@@ -2040,7 +2055,7 @@ function resolveKeyFnBody(
  *
  *   function _scrml_each_render_N() {
  *     const items = _scrml_reactive_get("contacts");   // dep-read FIRST (S153)
- *     const mount = document.querySelector('[data-scrml-each-mount="each_N"]');
+ *     const mount = _scrml_find_each_anchor(document, N); // parse-safe comment fence
  *     if (!mount) return;                               // dep already tracked
  *     // Empty-state path: <empty> sub-element fires when items.length === 0.
  *     if (!items || items.length === 0) {
@@ -2099,14 +2114,21 @@ function emitEachReconcileLines(
   const lengthRef = `${itemsVar}.length`;
 
   // Empty-state path (when `<empty>` sub-element is present).
+  //
+  // `mountVar` is either a comment FENCE anchor (top-level each — the parse-safe
+  // mount) or an element `<div>` (nested each — runtime createElement, immune to
+  // foster-parenting, kept as-is). `_scrml_each_clear` / `_scrml_each_append`
+  // are the runtime polymorphic ops that clear/insert over the fence sibling
+  // RANGE for a comment anchor, and delegate to `.replaceChildren()` /
+  // `.appendChild()` for an element — so this emit is uniform across both paths.
   if (node.emptyChild) {
     lines.push(`${indent}if (!${itemsVar} || ${lengthRef} === 0) {`);
-    lines.push(`${indent}  ${mountVar}.replaceChildren();`);
+    lines.push(`${indent}  _scrml_each_clear(${mountVar});`);
     lines.push(`${indent}  const _emptyFrag = document.createDocumentFragment();`);
     const emptyLines: string[] = [];
     renderEmptyChildToJs(node.emptyChild, "_emptyFrag", emptyLines, `${indent}  `, engineCtx);
     for (const l of emptyLines) lines.push(l);
-    lines.push(`${indent}  ${mountVar}.appendChild(_emptyFrag);`);
+    lines.push(`${indent}  _scrml_each_append(${mountVar}, _emptyFrag);`);
     lines.push(`${indent}  return;`);
     lines.push(`${indent}}`);
   } else {
@@ -2117,7 +2139,7 @@ function emitEachReconcileLines(
     // the module-scope path via the effect subscription; for the nested path the
     // outer factory re-runs per outer-collection change).
     lines.push(`${indent}if (!${itemsVar}) {`);
-    lines.push(`${indent}  ${mountVar}.replaceChildren();`);
+    lines.push(`${indent}  _scrml_each_clear(${mountVar});`);
     lines.push(`${indent}  return;`);
     lines.push(`${indent}}`);
   }
@@ -2625,10 +2647,14 @@ export function emitEachBodyRenderForFile(
 
     // Dep-establishing read FIRST (see comment above).
     fnLines.push(`  const _items = ${itemsExpr};`);
-    // Now query the mount; if it is not in the DOM yet (non-initial engine arm
+    // Now locate the mount; if it is not in the DOM yet (non-initial engine arm
     // pre-entry), bail — the dep above is already tracked, so a later arm-entry
     // remount (via `_scrml_remount_each`) will re-run this fn with the mount present.
-    fnLines.push(`  const _mount = document.querySelector('[data-scrml-each-mount="each_${node.id}"]');`);
+    // The mount is a parse-safe comment fence `<!--scrml-each:N-->` (foster-safe);
+    // comments are invisible to querySelector, so the runtime walks SHOW_COMMENT
+    // nodes (mirrors `_scrml_find_if_marker`). `_mount` is the START anchor — the
+    // stable container-identity object the reconcile + per-item effects key on.
+    fnLines.push(`  const _mount = _scrml_find_each_anchor(document, ${node.id});`);
     fnLines.push(`  if (!_mount) return;`);
 
     // Empty-guard + per-item reconcile (shared with the nested-each inline path).

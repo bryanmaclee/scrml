@@ -72,7 +72,7 @@ function mount(source, baseName) {
     threw,
     set: (name, val) => globalThis.__scrml_set__(name, val),
     get: (name) => globalThis.__scrml_get__(name),
-    mountEl: () => document.querySelector('[data-scrml-each-mount^="each_"]'),
+    mountEl: () => (function(){var w=document.createTreeWalker(document.body,NodeFilter.SHOW_COMMENT),n;while((n=w.nextNode())){if(String(n.data||'').trim().indexOf('scrml-each:')===0)return n.parentNode;}return null;})(),
   };
 }
 

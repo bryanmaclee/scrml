@@ -170,8 +170,9 @@ describe("ssr-b-substrate (a): the SSR HTML-composition route injects the inline
     expect(serverJs).toContain('method: "GET"');
     expect(serverJs).toContain('Content-Type": "text/html');
     expect(serverJs).toContain("window.__scrml_ssr_state=");
-    // injected before </head>
-    expect(serverJs).toContain('_scrml_html.replace("</head>", _scrml_seed_tag + "</head>")');
+    // injected before </head> via a FUNCTION replacer (FIX E — so $-patterns in the
+    // seed JSON are spliced literally, not interpreted by String.replace).
+    expect(serverJs).toContain('_scrml_html.replace("</head>", () => _scrml_seed_tag + "</head>")');
     // the route is registered in the aggregate routes[] (so the host dispatches it)
     expect(serverJs).toMatch(/export const routes = \[[^\]]*_scrml_route___ssr/);
   });

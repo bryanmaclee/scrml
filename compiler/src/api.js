@@ -56,7 +56,6 @@ import { runIMatchPromotable } from "./lint-i-match-promotable.js";
 import { runIFnPromotable } from "./lint-i-fn-promotable.js";
 import { runWEachPromotable } from "./lint-w-each-promotable.js";
 import { runWEachKey } from "./lint-w-each-key.js";
-import { runWEachTableFoster } from "./lint-w-each-table-foster.js";
 import { runWMapIterationOrder } from "./lint-w-map-iteration-order.js";
 import { runWInterpInRawContent } from "./lint-w-interp-in-raw-content.js";
 import { runWInputStateMarkupNonreactive } from "./lint-w-input-state-markup-nonreactive.js";
@@ -2226,25 +2225,13 @@ export function compileScrml(options = {}) {
     }
   }
 
-  // Stage 6.4f: W-EACH-TABLE-FOSTER info-level lint (S272 — adopter report).
-  // Fires when a top-level (static-shell) `<each>` sits directly inside a
-  // table-context element (`<table>/<thead>/<tbody>/<tfoot>/<tr>`): its static
-  // `<div>` mount placeholder is FOSTER-PARENTED out of the table by the HTML
-  // parser, so the list silently renders zero rows. Turns a currently-silent
-  // failure loud + points at the `<div>`-layout workaround. Info-level:
-  // partitions into result.warnings (W- prefix), never result.errors. Tracked:
-  // known-gap g-each-mount-div-foster-parented-in-table.
-  if (Array.isArray(tsResult.files) && tsResult.files.length > 0) {
-    try {
-      const tableFosterDiags = runWEachTableFoster(tsResult.files);
-      for (const d of tableFosterDiags) {
-        allLintDiagnostics.push(d);
-        if (verbose) log(`  [LINT] ${d.filePath}:${d.line}:${d.column} ${d.code}: ${d.message}`);
-      }
-    } catch (e) {
-      if (verbose) log(`  [LINT] W-EACH-TABLE-FOSTER pass threw: ${e?.message ?? String(e)}`);
-    }
-  }
+  // Stage 6.4f RETIRED (Approach A-unified, g-each-mount-div-foster-parented-in-table):
+  // W-EACH-TABLE-FOSTER warned that a top-level `<each>`'s static `<div>` mount was
+  // foster-parented out of `<table>`/dropped under `<select>`. The mount is now a
+  // parse-safe comment FENCE (`<!--scrml-each:N-->`, emit-each.ts `emitEachMountHtml`)
+  // inserted normally in every insertion mode, with rows placed as siblings — so the
+  // foster/drop failure the lint flagged CANNOT occur. Warning it now would be a false
+  // positive. Lint module + its test removed with the fix.
 
   // Stage 6.5: META — Meta Check + Eval (merged MC+ME, runs before DG)
   // MC validates phase separation (E-META-001) and reflect() calls (E-META-003).

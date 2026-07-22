@@ -9,7 +9,7 @@
     "notCodes": [],
     "input": [{ "click": ".toggle" }],
     "state": { "todos": [{ "id": 1, "text": "Buy milk", "done": true }, { "id": 2, "text": "Walk dog", "done": false }] },
-    "dom": "<ul id=\"todos\"><div><li class=\"todo\"><span class=\"text\">Buy milk</span><span class=\"status\">true</span><button class=\"toggle\">toggle</button></li><li class=\"todo\"><span class=\"text\">Walk dog</span><span class=\"status\">false</span><button class=\"toggle\">toggle</button></li></div></ul>",
+    "dom": "<ul id=\"todos\"><li class=\"todo\"><span class=\"text\">Buy milk</span><span class=\"status\">true</span><button class=\"toggle\">toggle</button></li><li class=\"todo\"><span class=\"text\">Walk dog</span><span class=\"status\">false</span><button class=\"toggle\">toggle</button></li></ul>",
     "domAnchored": [
       { "selector": ".todo", "count": 2 },
       { "selector": "#todos li:first-child .status", "text": "true" },

@@ -9,7 +9,7 @@
     "notCodes": [],
     "input": [{ "click": "#add" }, { "click": "#add" }],
     "state": { "items": [{ "id": 1, "label": "Item 1" }, { "id": 2, "label": "Item 2" }], "nextId": 3 },
-    "dom": "<button id=\"add\">Add</button><ul id=\"list\"><div><li class=\"row\">Item 1</li><li class=\"row\">Item 2</li></div></ul><p id=\"count\">Count: 2</p>",
+    "dom": "<button id=\"add\">Add</button><ul id=\"list\"><li class=\"row\">Item 1</li><li class=\"row\">Item 2</li></ul><p id=\"count\">Count: 2</p>",
     "domAnchored": [
       { "selector": ".row", "count": 2 },
       { "selector": "#count", "text": "Count: 2" }

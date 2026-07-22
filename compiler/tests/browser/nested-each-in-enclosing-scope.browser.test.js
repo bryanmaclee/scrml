@@ -164,8 +164,19 @@ describe("nested-each §2 — nested list populates (real module-init order)", (
     return {
       set: (name, val) => globalThis.__scrml_set__(name, val),
       get: (name) => globalThis.__scrml_get__(name),
-      // All <li> nodes rendered ANYWHERE inside the outer each mount.
-      allRows: () => document.querySelectorAll('[data-scrml-each-mount="each_14"] li'),
+      // All <li> nodes rendered ANYWHERE inside the outer each region. The outer
+      // each (top-level) mounts as a comment fence in <ul>; its per-group rows are
+      // the inner nested-each divs (nested eaches keep their runtime <div>). So the
+      // outer fence's parent (<ul>) holds every rendered <li>. Locate it via the
+      // fence comment (the only scrml-each: fence — inner eaches use div mounts).
+      allRows: () => {
+        const _w = document.createTreeWalker(document.body, NodeFilter.SHOW_COMMENT);
+        let _n;
+        while ((_n = _w.nextNode())) {
+          if (String(_n.data || "").trim().indexOf("scrml-each:") === 0) return _n.parentNode.querySelectorAll("li");
+        }
+        return [];
+      },
     };
   }
 

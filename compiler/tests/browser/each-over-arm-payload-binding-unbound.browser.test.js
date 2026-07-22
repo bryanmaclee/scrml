@@ -217,7 +217,7 @@ describe("each-over-arm-payload §2 — mounts without throwing + renders the ar
   test("match arm: an empty payload list renders the `<empty>` body", () => {
     const app = mount(MATCH_SRC, "match-arm");
     app.set("phase", { variant: "Loaded", data: { rows: [] } });
-    const mountEl = document.querySelector('[data-scrml-each-mount^="each_"]');
+    const mountEl = (function(){var w=document.createTreeWalker(document.body,NodeFilter.SHOW_COMMENT),n;while((n=w.nextNode())){if(String(n.data||'').trim().indexOf('scrml-each:')===0)return n.parentNode;}return null;})();
     expect(mountEl).not.toBeNull();
     // The empty body is `<li>none</li>` (one li, the placeholder — NOT a data row).
     const lis = mountEl.querySelectorAll("li");
@@ -246,7 +246,7 @@ describe("each-over-arm-payload §2 — mounts without throwing + renders the ar
   test("engine arm: an empty payload list renders the `<empty>` body", () => {
     const app = mount(ENGINE_SRC, "engine-arm");
     app.set("itemsPhase", { variant: "Loaded", data: { items: [] } });
-    const mountEl = document.querySelector('[data-scrml-each-mount^="each_"]');
+    const mountEl = (function(){var w=document.createTreeWalker(document.body,NodeFilter.SHOW_COMMENT),n;while((n=w.nextNode())){if(String(n.data||'').trim().indexOf('scrml-each:')===0)return n.parentNode;}return null;})();
     expect(mountEl).not.toBeNull();
     const lis = mountEl.querySelectorAll("li");
     expect(lis.length).toBe(1);

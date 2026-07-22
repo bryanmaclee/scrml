@@ -1651,6 +1651,40 @@ function animationFrame(fn) {
  */
 function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
   const __t_rec_top = __SCRML_PERF ? __SCRML_PERF_NOW() : 0;
+  // Range (comment fence anchor) vs element mode. In range mode the managed
+  // children are the nodes strictly between the fence anchors in the shared
+  // parent (static siblings before/after untouched); the container still holds the
+  // _scrml_item_by_key / tracking expandos in both modes. Element mode delegates to
+  // native methods (nested-each path byte-identical).
+  const _isRange = !!container && container.nodeType === 8;
+  const _parent = _isRange ? container.parentNode : container;
+  const _endAnchor = _isRange ? _scrml_each_end(container) : null;
+  // Fail-closed: a range mount with no paired end fence (should never happen —
+  // fences are always emitted as a pair) would let the range ops walk to the end
+  // of the parent and append PAST trailing static siblings, clobbering them. Bail
+  // rather than fall through to parent-end operations.
+  if (_isRange && !_endAnchor) return;
+  const _childList = () => {
+    if (!_isRange) return [...container.childNodes];
+    const _out = [];
+    let n = container.nextSibling;
+    while (n && n !== _endAnchor) { _out.push(n); n = n.nextSibling; }
+    return _out;
+  };
+  const _clearAll = () => {
+    if (!_isRange) { container.replaceChildren(); return; }
+    if (!_parent) return;
+    let n = container.nextSibling;
+    while (n && n !== _endAnchor) { const _nx = n.nextSibling; _parent.removeChild(n); n = _nx; }
+  };
+  const _insert = (node, ref) => {
+    // Element mode: insertBefore(node, null) === appendChild(node), so a single
+    // call preserves the pre-fix behavior (LIS placement always used insertBefore).
+    if (!_isRange) { container.insertBefore(node, ref); return; }
+    _parent.insertBefore(node, ref || _endAnchor);
+  };
+  const _remove = (node) => { if (_parent) _parent.removeChild(node); };
+  const _replace = (fresh, old) => { if (_parent) _parent.replaceChild(fresh, old); };
   // Defensive: tolerate an undefined / not-yet-initialized collection. The each
   // render fn can run once at module-init BEFORE the source cell's
   // _scrml_reactive_set(...) runs (same-file cell-init ordering), so newItems may
@@ -1692,14 +1726,14 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
   if (newItems.length === 0) {
     if (__SCRML_PERF) {
       const __t_dw = __SCRML_PERF_NOW();
-      container.replaceChildren();
+      _clearAll();
       __SCRML_PERF.dom_write.ms += __SCRML_PERF_NOW() - __t_dw;
       __SCRML_PERF.dom_write.count++;
       __SCRML_PERF.reconcile_list.ms += __SCRML_PERF_NOW() - __t_rec_top;
       __SCRML_PERF.reconcile_list.count++;
       return;
     }
-    container.replaceChildren();
+    _clearAll();
     return;
   }
 
@@ -1736,14 +1770,14 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
   let adoptedAny = false;
   if (_prevItemMap === undefined) {
     let _ssrSeen = false;
-    for (const child of container.childNodes) {
+    for (const child of _childList()) {
       if (child.nodeType === 1 && child._scrml_key === undefined
           && child.getAttribute?.("data-scrml-key") != null) { _ssrSeen = true; break; }
     }
     if (_ssrSeen) {
       const _strToClient = new Map();
       for (let _s = 0; _s < newLen; _s++) _strToClient.set(String(newKeys[_s]), newKeys[_s]);
-      for (const child of container.childNodes) {
+      for (const child of _childList()) {
         if (child.nodeType !== 1 || child._scrml_key !== undefined) continue;
         const _attrKey = child.getAttribute?.("data-scrml-key");
         if (_attrKey == null) continue;
@@ -1755,7 +1789,7 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
   }
 
   const oldNodes = new Map();
-  for (const child of [...container.childNodes]) {
+  for (const child of _childList()) {
     const key = child._scrml_key;
     if (key !== undefined) oldNodes.set(key, child);
   }
@@ -1770,14 +1804,14 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
     // Without this, the fallback survives beside the first real items. The keyed
     // reconcile path below (oldNodes.size > 0) is NOT affected — it owns its
     // keyed nodes and is reached only when keyed children already exist.
-    container.replaceChildren();
+    _clearAll();
     if (__SCRML_PERF) {
       for (let i = 0; i < newItems.length; i++) {
         const node = createFn(newItems[i], i);
         if (!node) continue; // createFn returned undefined (filtered item)
         node._scrml_key = newKeys[i];
         const __t_dw = __SCRML_PERF_NOW();
-        container.appendChild(node);
+        _insert(node, null);
         __SCRML_PERF.dom_write.ms += __SCRML_PERF_NOW() - __t_dw;
         __SCRML_PERF.dom_write.count++;
       }
@@ -1787,7 +1821,7 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
       const node = createFn(newItems[i], i);
       if (!node) continue; // createFn returned undefined (filtered item)
       node._scrml_key = newKeys[i];
-      container.appendChild(node);
+      _insert(node, null);
     }
     return;
   }
@@ -1805,7 +1839,7 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
   if (newItems.length === oldNodes.size && !adoptedAny) {
     let i = 0;
     let sameOrder = true;
-    for (const child of container.childNodes) {
+    for (const child of _childList()) {
       if (child._scrml_key === undefined) continue;
       if (i >= newItems.length) { sameOrder = false; break; }
       if (newKeys[i] !== child._scrml_key) { sameOrder = false; break; }
@@ -1823,21 +1857,21 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
     for (const [key, node] of oldNodes) {
       if (!newKeySet.has(key)) {
         const __t_dw = __SCRML_PERF_NOW();
-        container.removeChild(node);
+        _remove(node);
         __SCRML_PERF.dom_write.ms += __SCRML_PERF_NOW() - __t_dw;
         __SCRML_PERF.dom_write.count++;
       }
     }
   } else {
     for (const [key, node] of oldNodes) {
-      if (!newKeySet.has(key)) container.removeChild(node);
+      if (!newKeySet.has(key)) _remove(node);
     }
   }
 
   // Build old key→position map for LIS computation
   const oldKeyPos = new Map();
   let pos = 0;
-  for (const child of [...container.childNodes]) {
+  for (const child of _childList()) {
     if (child._scrml_key !== undefined) oldKeyPos.set(child._scrml_key, pos++);
   }
 
@@ -1860,14 +1894,14 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
         // never emptied, and (identical content) there is no visible flash.
         const _skey = node.getAttribute?.("data-scrml-key");
         const _fresh = createFn(newItems[i], i);
-        if (!_fresh) { container.removeChild(node); oldPositions[i] = -2; newNodes[i] = null; continue; } // createFn filtered this item
+        if (!_fresh) { _remove(node); oldPositions[i] = -2; newNodes[i] = null; continue; } // createFn filtered this item
         _fresh._scrml_key = key;
         // Preserve the server-origin key marker so the upgraded row stays a
         // faithful in-place continuation of the server row. Client-only rows
         // never carry data-scrml-key — its presence marks a server-rendered,
         // adopted-then-upgraded row (honestly absent on post-hydration new rows).
         if (_skey != null && _fresh.nodeType === 1) _fresh.setAttribute("data-scrml-key", _skey);
-        container.replaceChild(_fresh, node);
+        _replace(_fresh, node);
         node = _fresh;
       }
       oldPositions[i] = oldKeyPos.get(key) ?? -1;
@@ -1889,7 +1923,7 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
       if (!node) continue; // filtered item (createFn returned undefined)
       if (!inLIS.has(i)) {
         const __t_dw = __SCRML_PERF_NOW();
-        container.insertBefore(node, nextSibling);
+        _insert(node, nextSibling);
         __SCRML_PERF.dom_write.ms += __SCRML_PERF_NOW() - __t_dw;
         __SCRML_PERF.dom_write.count++;
       }
@@ -1900,7 +1934,7 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
       const node = newNodes[i];
       if (!node) continue; // filtered item (createFn returned undefined)
       if (!inLIS.has(i)) {
-        container.insertBefore(node, nextSibling);
+        _insert(node, nextSibling);
       }
       nextSibling = node;
     }
@@ -1913,6 +1947,84 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
       __SCRML_PERF.reconcile_list.count++;
     }
   }
+}
+
+// Approach A-unified (g-each-mount-div-foster-parented-in-table): the top-level
+// <each> mounts as a parse-safe two-comment fence \`<!--scrml-each:N-->…<!--/scrml-each:N-->\`
+// (foster-safe in every insertion mode, unlike the old <div data-scrml-each-mount>);
+// rows are inserted as SIBLINGS between the anchors in the each's real parent. A
+// NESTED each still mounts as a runtime <div> (immune), so these helpers are
+// polymorphic: comment anchor (nodeType 8) → fence range; element → native methods.
+// They live in the 'reconciliation' chunk (only ships when the app uses a list), so
+// a list-free app pays nothing. Function decls hoist, so _scrml_reconcile_list above
+// may call _scrml_each_end before its textual definition here.
+
+// Paired end anchor \`<!--/scrml-each:N-->\` for a start anchor (cached per node).
+function _scrml_each_end(start) {
+  if (!start || start.nodeType !== 8) return null;
+  const _cached = start._scrml_each_end_node;
+  if (_cached && _cached.parentNode === start.parentNode) return _cached;
+  const _want = "/" + String(start.data || "").trim();
+  let n = start.nextSibling;
+  while (n) {
+    if (n.nodeType === 8 && String(n.data || "").trim() === _want) {
+      start._scrml_each_end_node = n;
+      return n;
+    }
+    n = n.nextSibling;
+  }
+  return null;
+}
+
+// Per-each-id cache of the START fence anchor node. The anchor is a parse-time
+// comment that never moves, so a hot-path reconcile (per-keystroke list filter)
+// is a cache hit — no full-document SHOW_COMMENT walk per update. Guarded by
+// isConnected: on engine/match-arm re-entry the arm's innerHTML replaces the
+// fence → the cached node goes !isConnected → exactly one re-walk + re-cache
+// (preserves S153 remount correctness).
+const _scrml_each_anchor_cache = new Map();
+
+// Find the START fence anchor for each id N (comments are invisible to
+// querySelector; mirrors _scrml_find_if_marker). root: document or element subtree.
+function _scrml_find_each_anchor(root, id) {
+  const _cached = _scrml_each_anchor_cache.get(id);
+  if (_cached && _cached.isConnected) return _cached;
+  const _want = "scrml-each:" + id;
+  const _doc = (root && root.nodeType === 9) ? root
+    : (root && root.ownerDocument) ? root.ownerDocument
+    : (typeof document !== "undefined" ? document : null);
+  if (!_doc || typeof _doc.createTreeWalker !== "function") return null;
+  const _walker = _doc.createTreeWalker(root || _doc, NodeFilter.SHOW_COMMENT);
+  let node;
+  while ((node = _walker.nextNode())) {
+    if (String(node.data || "").trim() === _want) { _scrml_each_anchor_cache.set(id, node); return node; }
+  }
+  return null;
+}
+
+// Clear the each mount — comment anchor: remove the fence range; element: replaceChildren.
+function _scrml_each_clear(mount) {
+  if (mount && mount.nodeType === 8) {
+    const _end = _scrml_each_end(mount);
+    const _parent = mount.parentNode;
+    if (!_parent) return;
+    let n = mount.nextSibling;
+    while (n && n !== _end) { const _nx = n.nextSibling; _parent.removeChild(n); n = _nx; }
+    return;
+  }
+  if (mount && typeof mount.replaceChildren === "function") mount.replaceChildren();
+}
+
+// Append into the each mount — comment anchor: insert before end fence; element: appendChild.
+function _scrml_each_append(mount, node) {
+  if (mount && mount.nodeType === 8) {
+    const _end = _scrml_each_end(mount);
+    const _parent = mount.parentNode;
+    if (!_parent) return;
+    _parent.insertBefore(node, _end);
+    return;
+  }
+  if (mount && typeof mount.appendChild === "function") mount.appendChild(node);
 }
 
 /**
@@ -2011,16 +2123,29 @@ function _scrml_lis(arr) {
 // entry re-renders from the live cell; ongoing mutations while the arm is visible
 // re-render via the existing effect subscription.
 //
-// querySelectorAll handles nested eaches (an each several levels deep inside the
-// arm body is matched the same as a top-level one). Reusable by any dynamic-HTML
-// insertion site (engine arm-entry today; match-block dispatch is a follow-up).
+// The SHOW_COMMENT walk in _scrml_remount_each finds each fence anchor at any
+// depth inside the arm body (top-level each within the arm). Reusable by any
+// dynamic-HTML insertion site (engine arm-entry today; match-block dispatch too).
 const _scrml_each_renderers = {};
 
 function _scrml_remount_each(root) {
-  if (!root || typeof root.querySelectorAll !== "function") return;
-  const _mounts = root.querySelectorAll('[data-scrml-each-mount]');
-  for (const _el of _mounts) {
-    const _id = _el.getAttribute("data-scrml-each-mount");
+  if (!root) return;
+  // The static each mount is a comment FENCE (invisible to querySelectorAll), so
+  // walk SHOW_COMMENT nodes and re-invoke the registered renderer for every START
+  // anchor in the freshly-mounted subtree (end anchor "/…" skipped by prefix guard).
+  const _doc = (root.nodeType === 9) ? root
+    : (root.ownerDocument) ? root.ownerDocument
+    : (typeof document !== "undefined" ? document : null);
+  if (!_doc || typeof _doc.createTreeWalker !== "function") return;
+  const _walker = _doc.createTreeWalker(root, NodeFilter.SHOW_COMMENT);
+  const _seen = new Set();
+  let _node;
+  while ((_node = _walker.nextNode())) {
+    const _d = String(_node.data || "").trim();
+    if (_d.indexOf("scrml-each:") !== 0) continue;
+    const _id = "each_" + _d.slice("scrml-each:".length);
+    if (_seen.has(_id)) continue;
+    _seen.add(_id);
     const _fn = _scrml_each_renderers[_id];
     if (typeof _fn === "function") _fn();
   }

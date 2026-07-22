@@ -133,13 +133,25 @@ The scrml compiler SHALL run on Bun. The compiler is a Bun program. Compiled out
 
 scrml treats markup as a first-class value type. Markup elements may sit anywhere expressions sit — passed as function arguments, stored in reactive state cells, returned from functions, and placed on the right-hand side of `=` declarations.
 
-This is not a rendering shortcut or a JSX-style convenience. Markup IS a value. A cell may hold a `<span>` element as its current value; a derived cell may compute a `<div>` from reactive inputs; a function may accept a markup argument and return a transformed markup tree.
+This is not a rendering shortcut or a JSX-style convenience. Markup IS a value. A **derived** cell may compute a `<div>` from reactive inputs; a function may accept a markup argument and return a transformed markup tree; a component encapsulates a reusable markup unit.
 
-**Held since:** the scrml8 era; explicitly pinned in S56 deliberations (S56, Lock L1).
+**A markup value reaches a cell by DERIVATION, BINDING, or STATE-KEYING — never by imperative reassignment of a plain writable cell.** This is the reactive-first grain of the pillar: markup that varies does so because a *derivation recomputes it* or a *typed state selects it*, not because code reassigns a `<span>` into a cell. The **five declarative doors** through which markup enters the value world — each with a distinct job, and together an exhaustive, non-overlapping partition:
+
+| Door | Form | Job | Markup varies by |
+|---|---|---|---|
+| **Component** | `<Foo>` constructor (§15) | reuse an encapsulated markup + logic + style unit | instantiation |
+| **Bindable cell** | `<draft> = <input/>` (§6.2 Shape 2) | a form control's live value | user input |
+| **Derived cell** | `const <view> = …` (§6.2 Shape 3) | markup **recomputed** from reactive inputs | reactive recompute |
+| **Enum `renders`** | `type S: enum { Idle renders <…> … }` (§19.15 / §18) | markup **keyed to a typed state variant**, exhaustive | state transition |
+| **Iteration** | `<each in=@rows>` (§17.7) | markup **repeated** over a collection | data |
+
+A **plain reactive cell (§6.2 Shape 1)** is the writable door for a **non-markup value** (scalar, struct, list) — it is NOT a markup door. A plain writable cell whose RHS is display-only markup (`<thing> = <span>hi</span>`) is therefore **rejected**: `E-CELL-RENDER-SPEC-NOT-BINDABLE` (§34) — display-only markup uses `const` (Shape 3), input-bound markup uses Shape 2. **This restriction is deliberate (S279 ruling — Ruling 1 = A):** a writable, imperatively-reassigned markup cell would serve no purpose the derived / state-keyed / component doors above do not already serve better (declaratively, typed, reactive-by-construction) — a common request-shape ("swap between a fixed set of markups") is exactly the enum-`renders` door. Admitting it would add a redundant primitive and widening it is a one-way door (§8 direction-of-change); the five-door partition stays minimal.
+
+**Held since:** the scrml8 era; explicitly pinned in S56 deliberations (S56, Lock L1); the five-door partition + Shape-1 exclusion clarified S279.
 
 **Touchpoints (cross-references):**
 - §3 — Context Model: markup-as-value rules per locus (where markup values may appear)
-- §6.2 — Three RHS shapes: Shape 2 (decl-coupled-with-render-spec) and Shape 3 (markup-typed derived cell) are direct applications of this pillar
+- §6.2 — Three RHS shapes: Shape 2 (decl-coupled-with-render-spec) and Shape 3 (markup-typed derived cell) are direct applications of this pillar; Shape 1 (plain writable cell) is the non-markup value door — display-only markup on a Shape-1 RHS is `E-CELL-RENDER-SPEC-NOT-BINDABLE` (the S279 five-doors ruling above)
 - §6.4 — Render-by-tag semantics: how the compiler expands a markup-valued cell at render time
 - §7 — Logic contexts: markup-as-expression in logic positions (`lift`, conditional markup)
 - §10 — The `lift` keyword: value-lift of markup expressions
@@ -18513,7 +18525,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | ~~E-STATE-004~~ | §6 | **Retired 2026-07-16 (S263).** Unknown-attr-on-user-state-type never fired (dead `validateMarkupAttributes` — the caller-guard reads `n.name`, always `undefined`) and un-gating would false-fire on valid scrml-special attributes (`capabilities=`, `log=`, `cors=`) by consulting the html-elements registry instead of the authoritative VP-1 surface — reddening a valid-clean conformance case. Not viable 1.0 surface as written (bryan-ruled retire, S261). Whether V1 validates state-type attribute names at all — and if so under which code (folding into the VP-1 / E-ATTR family) — is deferred to v1.next. Audit: `scrml-support/docs/audits/emarkup-ctx-reconciliation-2026-07-16.md`. | — |
 | E-STATE-005 | §6 | State type name collides with a built-in HTML element name — choose a different name for the state type. (S260 §34-vs-impl audit: pre-fold row = dead V4 field semantics citing folded §11.1 [→ §6]; rewritten to the shipping trigger. Emitted at `compiler/src/type-system.ts`.) | Error |
 | E-STATE-006 | §6 | Duplicate state type definition — a state type with this name is already defined. (S260 §34-vs-impl audit: pre-fold row = dead V4 field semantics citing folded §11.1 [→ §6]; rewritten to the shipping trigger. Emitted at `compiler/src/type-system.ts`.) | Error |
-| E-STYLE-001 | §9 | CSS: syntax error in `#{}` style block | Error |
+| E-STYLE-001 | §9 | `<style>` element in scrml source. scrml does not admit `<style>` at all — CSS lives in `#{...}` (§9 / §26). The symmetric twin of `<script>` → `E-SCRIPT-001` (§4.17): both are element-level rejections at the **block-splitter** level, both recover by scanning past the matching close tag (case-insensitive) or to EOF so the rejected body does not cascade. Tag-name match is EXACT, not a prefix. Recovery hint: `scrml compile --convert-legacy-css` auto-converts a legacy `<style>` body to `#{}`. **Source-side only:** the check fires only on a `<style>` element in the source; the compiler's downstream CSS emission (`.css` file + `<link>`) is produced after the block splitter and is never subject to it. (Row corrected S279 — the prior "CSS: syntax error in `#{}` style block" text was stale residue that mis-described the diagnostic; `E-STYLE-001` has only ever been emitted for the `<style>` element, at `compiler/src/block-splitter.js`, and the §4 prose + the `E-SCRIPT-001` row both already describe it as the element rejection.) | Error |
 | E-TEST-001 | §~ | `~{}` test block: assertion failed | Test |
 | E-TEST-002 | §~ | `~{}` test block: unexpected error during execution | Test |
 | E-TEST-003 | §~ | `~{}` test block: timeout exceeded | Test |

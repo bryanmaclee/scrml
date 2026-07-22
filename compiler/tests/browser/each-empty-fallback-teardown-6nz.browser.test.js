@@ -141,13 +141,35 @@ describe("6nz Bug AI browser — <each>/<empty> fallback teardown on empty -> no
     return {
       set: (name, val) => globalThis.__scrml_set__(name, val),
       get: (name) => globalThis.__scrml_get__(name),
-      // The each renders into the per-each mount div (data-scrml-each-mount).
-      // Query the FIRST mount under a given list selector (or the only one).
-      mount: (listSel) => document.querySelector(`${listSel} [data-scrml-each-mount]`),
-      // Outer-mount direct <li> children only. `> [data-scrml-each-mount] > li`
-      // scopes to the OUTER each mount (a direct child of the list element) and
-      // its OWN <li> rows — NOT the inner nested-each mounts' <li>s.
-      lisIn: (listSel) => [...document.querySelectorAll(`${listSel} > [data-scrml-each-mount] > li`)],
+      // Approach A-unified: the each mounts as a comment fence `<!--scrml-each:N-->`
+      // and renders rows as SIBLINGS between the anchors in the each's real parent
+      // (the list element). Return a view whose `innerHTML` is exactly the
+      // between-fence content — the equivalent of the old mount div's innerHTML,
+      // so the exact-match teardown assertions hold unchanged.
+      mount: (listSel) => {
+        const host = document.querySelector(listSel);
+        if (!host) return null;
+        const w = document.createTreeWalker(host, NodeFilter.SHOW_COMMENT);
+        let start = null, n;
+        while ((n = w.nextNode())) {
+          if (String(n.data || "").trim().indexOf("scrml-each:") === 0) { start = n; break; }
+        }
+        if (!start) return null;
+        const endData = "/" + String(start.data || "").trim();
+        return {
+          get innerHTML() {
+            let s = "", c = start.nextSibling;
+            while (c && !(c.nodeType === 8 && String(c.data || "").trim() === endData)) {
+              s += c.nodeType === 1 ? c.outerHTML : (c.nodeType === 3 ? c.textContent : "");
+              c = c.nextSibling;
+            }
+            return s;
+          },
+        };
+      },
+      // Outer each's direct <li> rows only (now direct children of the list element)
+      // — NOT the inner nested-each mounts' <li>s (those live under <ul.tags>).
+      lisIn: (listSel) => [...document.querySelectorAll(`${listSel} > li`)],
     };
   }
 

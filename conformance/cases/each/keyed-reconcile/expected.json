@@ -9,7 +9,7 @@
     "notCodes": [],
     "input": [{ "click": ".del" }],
     "state": { "items": [{ "id": 2, "label": "B" }, { "id": 3, "label": "C" }] },
-    "dom": "<ul id=\"list\"><div><li class=\"row\"><span class=\"label\">B</span><button class=\"del\">x</button></li><li class=\"row\"><span class=\"label\">C</span><button class=\"del\">x</button></li></div></ul>",
+    "dom": "<ul id=\"list\"><li class=\"row\"><span class=\"label\">B</span><button class=\"del\">x</button></li><li class=\"row\"><span class=\"label\">C</span><button class=\"del\">x</button></li></ul>",
     "domAnchored": [
       { "selector": ".row", "count": 2 },
       { "selector": "#list li:first-child .label", "text": "B" }

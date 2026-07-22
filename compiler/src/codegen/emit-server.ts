@@ -4313,7 +4313,7 @@ export function generateServerJs(
       // server-rendered (redacted) rows so view-source of the first paint shows
       // the data, not an empty placeholder. data-scrml-key markers ride each row.
       for (const _r of _ssrRenderers) {
-        lines.push(`  _scrml_html = _scrml_ssr_fill_mount(_scrml_html, ${JSON.stringify("each_" + _r.id)}, ${_r.fnName}(_scrml_ssr_state[${JSON.stringify(_r.varName)}]));`);
+        lines.push(`  _scrml_html = _scrml_ssr_fill_mount(_scrml_html, ${JSON.stringify(_r.id)}, ${_r.fnName}(_scrml_ssr_state[${JSON.stringify(_r.varName)}]));`);
       }
       // §39.2.3 — fill the `<meta name="csrf-token" content="">` placeholder with
       // THIS viewer's session synchronizer token. The middleware mints + persists
@@ -4325,7 +4325,10 @@ export function generateServerJs(
       // the attribute even if the token format ever changes.
       if (_csrfMetaInject) {
         lines.push(`  const _scrml_csrf_meta_token = String((_scrml_session_middleware(_scrml_req).csrfToken) || "").replace(/[<>"]/g, "");`);
-        lines.push(`  _scrml_html = _scrml_html.replace('<meta name="csrf-token" content="">', '<meta name="csrf-token" content="' + _scrml_csrf_meta_token + '">');`);
+        // FUNCTION replacer: a string 2nd-arg honors $&/$'/$`/$$ — a token containing
+        // a $-sequence would otherwise expand into page content. The token is stripped
+        // of [<>"] but NOT $, so the replacer form is the safe splice.
+        lines.push(`  _scrml_html = _scrml_html.replace('<meta name="csrf-token" content="">', () => '<meta name="csrf-token" content="' + _scrml_csrf_meta_token + '">');`);
       }
       if (_hasSsrSeed) {
         // Inline the server-authoritative state seed before </head> so the client
@@ -4335,8 +4338,12 @@ export function generateServerJs(
         // data stays inert).
         lines.push(`  const _scrml_seed_json = JSON.stringify(_scrml_ssr_state).replace(/</g, String.fromCharCode(92) + "u003c");`);
         lines.push(`  const _scrml_seed_tag = "<script>window.__scrml_ssr_state=" + _scrml_seed_json + ";</script>";`);
+        // FUNCTION replacer: the seed JSON embeds server-authority cell/row values; a
+        // string 2nd-arg would honor $&/$'/$`/$$ in that data and duplicate/corrupt the
+        // page tail. (The </head> boundary is a literal string, not a regex, so a $ in
+        // the DATA — not the pattern — is the hazard the replacer form neutralizes.)
         lines.push(`  _scrml_html = _scrml_html.includes("</head>")`);
-        lines.push(`    ? _scrml_html.replace("</head>", _scrml_seed_tag + "</head>")`);
+        lines.push(`    ? _scrml_html.replace("</head>", () => _scrml_seed_tag + "</head>")`);
         lines.push(`    : _scrml_seed_tag + _scrml_html;`);
       }
       lines.push(`  return new Response(_scrml_html, {`);

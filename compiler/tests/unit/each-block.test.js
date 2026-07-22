@@ -98,8 +98,8 @@ describe("each-block §1 — canonical <each in=@cell>", () => {
 </program>`;
     const { errors, clientJs, html } = compileToOutputs(src, "in-basic");
     expect(errors).toEqual([]);
-    // Static HTML carries the mount slot at the source position.
-    expect(html).toMatch(/data-scrml-each-mount="each_\d+"/);
+    // Static HTML carries the parse-safe comment-fence mount at the source position.
+    expect(html).toMatch(/<!--scrml-each:\d+--><!--\/scrml-each:\d+-->/);
     // Client JS emits the render function.
     expect(clientJs).toMatch(/function _scrml_each_render_\d+\(\)/);
     // Reactive subscription via _scrml_effect_static.
@@ -166,7 +166,7 @@ describe("each-block §3 — canonical <each of=N> count iteration", () => {
 </program>`;
     const { errors, clientJs, html } = compileToOutputs(src, "of-literal");
     expect(errors).toEqual([]);
-    expect(html).toMatch(/data-scrml-each-mount="each_\d+"/);
+    expect(html).toMatch(/<!--scrml-each:\d+--><!--\/scrml-each:\d+-->/);
     expect(clientJs).toMatch(/Array\.from\(\{length: Number\(5\) \|\| 0\}/);
     // Default key for of= form is the index itself (positional), named with the
     // canonical internal index var (gate fix-wave clash-avoidance).
@@ -233,7 +233,7 @@ describe("each-block §5 — <empty> sub-element fallback", () => {
     // <empty> body content.
     expect(clientJs).toMatch(/if \(!_items \|\| _items\.length === 0\)/);
     expect(clientJs).toContain("nothing here");
-    expect(clientJs).toMatch(/_mount\.appendChild\(_emptyFrag\)/);
+    expect(clientJs).toMatch(/_scrml_each_append\(_mount, _emptyFrag\)/);
   });
 
   test("no <empty> sub-element → no empty-state guard emitted", () => {
