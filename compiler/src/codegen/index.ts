@@ -819,6 +819,14 @@ export function runCG(input: CgInput): CgOutput {
   // §20.6 (F4=A) — set the compile-wide log() production-strip flag.
   setLogProductionStrip(production);
 
+  // ESM chunks arc (Unit 3) — under `--module-format=esm` every emitted client
+  // chunk + runtime `<script src>` tag is an ES module, so its tag must carry
+  // `type="module"` (a classic `<script src>` throws `SyntaxError: Cannot use
+  // import statement outside a module` on an ES-module chunk). Module scripts
+  // are deferred + strict; the DOMContentLoaded-gated boot still fires. Classic
+  // (the default) emits the empty attr → byte-identical to pre-arc output.
+  const scriptModuleTypeAttr = moduleFormat === "esm" ? ` type="module"` : "";
+
   // Resolve encoding configuration (§47)
   const encodingOpts = typeof encodingInput === "object"
     ? encodingInput
@@ -1755,7 +1763,7 @@ export function runCG(input: CgInput): CgOutput {
       if (clientJs && !embedRuntime) {
         // v0.3.x SPA tree-shake Phase B 3.3 — placeholder; runCG
         // substitutes the final hashed filename in a post-pass.
-        docParts.push(`<script src="${RUNTIME_FILENAME_PLACEHOLDER}"></script>`);
+        docParts.push(`<script${scriptModuleTypeAttr} src="${RUNTIME_FILENAME_PLACEHOLDER}"></script>`);
       }
       if (clientJs) {
         // known-gaps-#6 (S152, Approach B) — emit the transitive `.scrml`
@@ -1767,9 +1775,9 @@ export function runCG(input: CgInput): CgOutput {
         // single-file / leaf pages with no cross-file `.scrml` deps.
         const depScripts = computeDependencyClientScripts(filePath, importGraphInput, cgOutputBaseDir);
         for (const depSrc of depScripts) {
-          docParts.push(`<script src="${depSrc}"></script>`);
+          docParts.push(`<script${scriptModuleTypeAttr} src="${depSrc}"></script>`);
         }
-        docParts.push(`<script src="${base}.client.js"></script>`);
+        docParts.push(`<script${scriptModuleTypeAttr} src="${base}.client.js"></script>`);
       }
       docParts.push("</body>");
       docParts.push("</html>");
@@ -2064,8 +2072,11 @@ export function runCG(input: CgInput): CgOutput {
           // (including the runtime placeholder + the entry's client.js).
           // The envelope emits these in sequence at the end of <body>;
           // they're identifiable by being the LAST non-whitespace content.
+          // The optional `type="module"` group matches the esm-format tags
+          // (Unit 3); classic tags carry no type attr, so the group matches
+          // empty and the strip is byte-identical to pre-arc behaviour.
           shellBody = bodyMatch[1].replace(
-            /(\s*<script\s+src="[^"]*"><\/script>)+\s*$/,
+            /(\s*<script(?:\s+type="module")?\s+src="[^"]*"><\/script>)+\s*$/,
             "",
           );
         }
@@ -2171,11 +2182,11 @@ export function runCG(input: CgInput): CgOutput {
           // client.js) below.
           const pageBodyStripped = pageBodyRaw
             .replace(
-              /\s*<script\s+src="[^"]*\.client\.js"><\/script>\s*$/,
+              /\s*<script(?:\s+type="module")?\s+src="[^"]*\.client\.js"><\/script>\s*$/,
               "",
             )
             .replace(
-              /\s*<script\s+src="[^"]*"><\/script>\s*$/,
+              /\s*<script(?:\s+type="module")?\s+src="[^"]*"><\/script>\s*$/,
               "",
             );
 
@@ -2299,7 +2310,7 @@ export function runCG(input: CgInput): CgOutput {
           // page's existing runtime tag with the relative-up prefix.
           if (entryOutput?.clientJs && entryBase) {
             scriptParts.push(
-              `<script src="${upToRoot}${entryBase}.client.js"></script>`,
+              `<script${scriptModuleTypeAttr} src="${upToRoot}${entryBase}.client.js"></script>`,
             );
           }
           // Re-add the page's own client.js (was stripped above). basename
@@ -2309,7 +2320,7 @@ export function runCG(input: CgInput): CgOutput {
           const pageBase = basename(filePath, ".scrml");
           if (output.clientJs) {
             scriptParts.push(
-              `<script src="${pageBase}.client.js"></script>`,
+              `<script${scriptModuleTypeAttr} src="${pageBase}.client.js"></script>`,
             );
           }
 
@@ -2320,8 +2331,10 @@ export function runCG(input: CgInput): CgOutput {
           // hashed filename. We rewrite the placeholder's href with the
           // upToRoot prefix so the substituted runtime URL resolves
           // from the per-page HTML's nested dist dir.
+          // The optional `type="module"` group matches the esm-format runtime
+          // tag (Unit 3); classic emits no type attr so the group matches empty.
           const runtimeMatch = pageHtml.match(
-            /<script\s+src="([^"]*)"><\/script>/,
+            /<script(?:\s+type="module")?\s+src="([^"]*)"><\/script>/,
           );
           let runtimeTagRewritten: string | null = null;
           if (runtimeMatch) {
@@ -2333,7 +2346,7 @@ export function runCG(input: CgInput): CgOutput {
               if (src.startsWith("/") || /^https?:/.test(src)) {
                 runtimeTagRewritten = runtimeMatch[0];
               } else {
-                runtimeTagRewritten = `<script src="${upToRoot}${src.replace(/^\.\//, "")}"></script>`;
+                runtimeTagRewritten = `<script${scriptModuleTypeAttr} src="${upToRoot}${src.replace(/^\.\//, "")}"></script>`;
               }
             }
           }
@@ -2424,6 +2437,11 @@ export function runCG(input: CgInput): CgOutput {
   // -------------------------------------------------------------------------
   let runtimeJs: string | null = null;
   let runtimeFilename: string = RUNTIME_FILENAME;
+  // ESM chunks arc (Unit 3) — the CLASSIC assembled runtime slice, captured
+  // before the esm transform, so the per-route chunk esm conversion (below,
+  // after route-splitting) can derive the runtime-export universe exactly as the
+  // per-file `output.clientJs` path does.
+  let classicRuntimeSliceForChunks: string | null = null;
   if (!embedRuntime) {
     // Union usedRuntimeChunks across every compiled file in this run.
     // Always include the per-spec always-present set (`core`, `scope`,
@@ -2439,6 +2457,9 @@ export function runCG(input: CgInput): CgOutput {
     union.add("errors");
     union.add("transitions");
     runtimeJs = assembleRuntime(union);
+    // Capture the CLASSIC slice (its top-level decls are the runtime-export
+    // universe) before the esm transform, for the per-route chunk conversion.
+    classicRuntimeSliceForChunks = runtimeJs;
 
     // ESM chunks arc (Unit 1) — under `--module-format=esm`, transform the
     // assembled (post-slice) runtime into a valid ES module: the R1 meta-block
@@ -2532,6 +2553,40 @@ export function runCG(input: CgInput): CgOutput {
     chunksManifest = splitterResult.manifest;
     if (splitterResult.diagnostics.length > 0) {
       errors.push(...splitterResult.diagnostics);
+    }
+
+    // ESM chunks arc (Unit 3) — convert per-route chunk payloads to ES modules.
+    //
+    // Under `--module-format=esm` the role-bootstrap injects the per-role INITIAL
+    // chunk as a `<script type="module">` (emit-html.ts), and U4 will `import()`
+    // the tier chunks. But the route-splitter emits each chunk as a CLASSIC IIFE
+    // that calls runtime functions (`_scrml_reactive_set` / `_scrml_chunk_mount` /
+    // …) as FREE GLOBALS. The esm runtime is a MODULE — it `export`s those, it
+    // does not globalize them — so a module-scoped chunk would throw an uncaught
+    // `ReferenceError` on load (`--emit-per-route --module-format=esm` was
+    // browser-DOA before this). Run each non-empty payload through the SAME
+    // `toEsmClientChunk` transform the per-file `output.clientJs` uses: the
+    // footer/registry passes are no-ops for these mount-by-id chunks; the
+    // runtime-import surface, the shared-mutable-global bridge, and the fail-loud
+    // guard are what apply. The runtime import points at the FINALIZED runtime
+    // filename via an explicit `../`-depth URL — per-route chunks are written RAW
+    // to `<route-segment>/<Role>.<tier>.<hash>.js` (a URL route segment, never a
+    // source `pages/` path, NOT `pages/`-stripped) with the runtime at dist root,
+    // so the placeholder-substitution + `stripPagesPrefix` logic of the per-file
+    // path does not apply. Gated on `!embedRuntime` (esm needs a standalone
+    // runtime module to import from), mirroring the per-file path.
+    if (moduleFormat === "esm" && !embedRuntime && classicRuntimeSliceForChunks !== null) {
+      for (const chunk of chunks.values()) {
+        if (!chunk.payloadJs) continue;
+        const depth = chunk.filename.split("/").length - 1;
+        const runtimeUrl = (depth > 0 ? "../".repeat(depth) : "./") + runtimeFilename;
+        chunk.payloadJs = toEsmClientChunk(chunk.payloadJs, {
+          runtimeSlice: classicRuntimeSliceForChunks,
+          runtimePlaceholder: runtimeFilename, // unused when runtimeUrl is set
+          importerDistDir: ".", // unused when runtimeUrl is set
+          runtimeUrl,
+        });
+      }
     }
 
     // -------------------------------------------------------------------------
@@ -2644,6 +2699,7 @@ export function runCG(input: CgInput): CgOutput {
           chunks,
           fileEntryPointIds: fileEpIds,
           epIdToRoutePath,
+          moduleFormat,
         });
         // Avoid mutating the existing output object reference; replace
         // the HTML field on a fresh shallow copy. (`output` is the

@@ -235,18 +235,21 @@ describe("§5 drift guard — esm transforms present in the output", () => {
   });
 });
 
-describe("§6 operational notice — esm is not yet browser-loadable (fail-closed-Nominal)", () => {
+describe("§6 operational notice — esm is experimental/opt-in (Unit 3: runs in a browser)", () => {
   test("classic (and any non-esm) format produces NO notice — default path stays silent", () => {
     expect(moduleFormatNotices("classic", false)).toEqual([]);
     expect(moduleFormatNotices("classic", true)).toEqual([]);
     expect(moduleFormatNotices(undefined, false)).toEqual([]);
   });
 
-  test("esm produces a single browser-not-loadable warning line", () => {
+  test("esm produces a single experimental/opt-in warning line (no longer claims it's broken)", () => {
     const lines = moduleFormatNotices("esm", false);
     expect(lines.length).toBe(1);
     expect(lines[0]).toContain(W_MODULE_FORMAT_ESM_INCOMPLETE);
-    expect(lines[0]).toContain("not yet browser-loadable");
+    expect(lines[0]).toContain("experimental");
+    // Unit 3 narrowed the notice: it must NOT still claim esm is un-runnable.
+    expect(lines[0]).not.toContain("not yet browser-loadable");
+    expect(lines[0]).not.toContain("will NOT run");
   });
 
   test("esm + --embed-runtime adds an honest note that esm is dropped for embedded runtimes", () => {

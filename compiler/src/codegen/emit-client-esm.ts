@@ -97,6 +97,20 @@ export interface EsmChunkContext {
    * two STRIPPED locations to resolve on disk.
    */
   importerDistDir: string;
+  /**
+   * OPTIONAL explicit runtime import specifier (Unit 3, per-route chunks). When
+   * set, the runtime `import` uses THIS URL verbatim instead of resolving
+   * `runtimePlaceholder` against `importerDistDir` via the `pages/`-aware
+   * relative logic above. Per-route chunks (`route-splitter.ts`) are written RAW
+   * to `<outputDir>/<route-segment>/<Role>.<tier>.<hash>.js` — their dist path is
+   * the URL route segment (leading `/` stripped, never a source `pages/` path)
+   * and is NOT `pages/`-stripped, and the runtime filename is already finalized
+   * (not the placeholder). So the caller computes the correct `../`-depth URL to
+   * the dist-root runtime directly and passes it here, bypassing both the
+   * placeholder-substitution and the `stripPagesPrefix` normalization (both of
+   * which are correct ONLY for the per-file `output.clientJs` path).
+   */
+  runtimeUrl?: string;
 }
 
 // A `_scrml_modules` registry key is JSON.stringify'd (double-quoted, escaped).
@@ -345,7 +359,11 @@ export function toEsmClientChunk(body: string, ctx: EsmChunkContext): string {
     header.push("// --- runtime + cross-file imports (esm-chunks) ---");
   }
   if (runtimeSurface.length > 0) {
-    header.push(`import { ${runtimeSurface.join(", ")} } from "${resolveUrl(ctx.runtimePlaceholder)}";`);
+    // Per-route chunks (Unit 3) pass an explicit, already-finalized runtime URL;
+    // the per-file path resolves the placeholder against the pages-stripped dist
+    // location.
+    const runtimeUrl = ctx.runtimeUrl ?? resolveUrl(ctx.runtimePlaceholder);
+    header.push(`import { ${runtimeSurface.join(", ")} } from "${runtimeUrl}";`);
   }
   for (const [key, alias] of keyToAlias) {
     header.push(`import * as ${alias} from "${resolveUrl(key)}";`);

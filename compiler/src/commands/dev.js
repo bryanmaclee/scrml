@@ -41,8 +41,9 @@ Options:
                           the 10s default so long data-layer routes finish)
   --verbose, -v           Show per-stage timing and counts
   --module-format=<fmt>   Client runtime module format: classic (default) or esm
-                          (esm is experimental — not browser-loadable until
-                          chunk-module support lands in a later unit)
+                          (esm emits ES modules + type="module" tags and runs in a
+                          browser, but is experimental/opt-in; classic is the only
+                          conformance-tested path)
   --embed-runtime         Embed runtime inline instead of writing a separate file
   --convert-legacy-css    Convert <style> blocks to #{...}
   --validate-emit         Parse every emitted JS artifact (E-CODEGEN-INVALID-LOGIC); abort on malformed output
@@ -278,9 +279,9 @@ async function loadServerRoutes(outputDir) {
 function runOnce(opts, gatheredOut) {
   const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, gather, validateEmit, moduleFormat } = opts;
 
-  // ESM chunks arc (Unit 1) — operational heads-up when --module-format=esm is
-  // selected (esm runtime is not yet browser-loadable; module <script> tags +
-  // chunk imports are a later unit). Empty for classic. NOT a §34 diagnostic.
+  // ESM chunks arc — operational heads-up when --module-format=esm is selected
+  // (esm now runs in a browser as of Unit 3, but is experimental/opt-in; classic
+  // is the only conformance-tested path). Empty for classic. NOT a §34 diagnostic.
   for (const line of moduleFormatNotices(moduleFormat, embedRuntime)) {
     console.error(line);
   }

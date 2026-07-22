@@ -259,3 +259,143 @@ import URLs, OR hard-gate `build --module-format=esm`. Un-skip the §6 pin when 
 - Guard FIRES on destructure + array-destructure + rest + for-of + for-in + update writes to an
   unbridged global; does NOT false-positive on new-locals / member-writes (unit §1, 7 forms + 2 neg).
 - Unit file: 16 pass / 1 skip (U3 pin) / 0 fail.
+
+## 2026-07-21 — Unit 3 (script-tag emit + build hash + notice) (agent-a7d244367cf65e628)
+
+Worktree base = 62f2cf4f (U1+U2 landed, PR #132/#133). Maps stamped 9481bc69 (pre-U1/U2 —
+NOT load-bearing for U3 beyond confirming the codegen surface + the three-file one-landmark
+composition topology; the load-bearing loci are U1/U2 code the map predates). Baseline gate
+GREEN (21182 tests, 0 fail) at first WIP commit.
+
+### Empirical premise-check (before building) — both brief premises CONFIRMED
+- Compiled 22-multifile `build --module-format=esm`: HTML `<script src>` tags were CLASSIC (no
+  `type="module"`) → browser-DEAD (scope A confirmed). In-chunk cross-chunk imports pointed at
+  PRE-hash names (`./types.client.js`) while on-disk files were `types.client.<hash>.js` → 404
+  (scope B confirmed).
+
+### Scope A — `type="module"` on client-chunk + runtime `<script src>` under esm (committed 8e38b61a)
+- index.ts: NEW `scriptModuleTypeAttr` (`" type=\"module\""` under esm, `""` classic) threaded to
+  the single-file envelope (runtime + dep + entry tags), the composed-MPA per-page re-emit (entry +
+  page client.js + runtime rewrite), and the composition strip/match regexes (made tolerant of the
+  optional `type="module"` group so esm tags are stripped-and-readded; classic matches empty →
+  byte-identical). `moduleFormat` threaded to `augmentHtmlForChunks`.
+- emit-html.ts: `HtmlAugmentInput.moduleFormat`; the role-bootstrap dynamic inject adds
+  `s.type = "module";` under esm (module scripts are always deferred, so `s.defer` stays
+  redundant-but-harmless).
+- VERIFIED: single-file, composed website pages (incl. nested `../` upToRoot), all carry
+  `type="module"` under esm; ZERO classic client-chunk tags remain. Classic byte-identity: website
+  + trucking-dispatch, compile dir mode, `diff -rq` main-classic == wt-default == wt-explicit-classic
+  IDENTICAL.
+
+### Scope B — content-hash the in-chunk ES import URLs (build+esm) (committed 14fb861a)
+- api.js: NEW `rewriteChunkImportRefs` (esm + `hashAssets`-gated) rewrites every `.client.js`
+  import specifier to its content-hashed on-disk name (resolved against the importing chunk's own
+  dist dir via the SAME `assetHashMap` + posix helpers the HTML rewrite uses; re-adds the `./`/`../`
+  ES-relative prefix — `posixRelFrom` drops a same-dir `./`, which would be an unresolvable BARE
+  specifier). Runtime import untouched (codegen-baked hash, not `.client.js`). Applied to the cached
+  esm client bytes before write; the chunk's filename hash stays pre-rewrite (single-pass design).
+- VERIFIED: flat 22-multifile (4 imports) + NESTED trucking-dispatch (36 chunks, 94 imports incl.
+  cross-dir `../components/…`) `build --module-format=esm` resolve 0 404s on disk. Build classic
+  byte-identity: trucking main-classic == wt-default IDENTICAL (rewrite is esm-gated).
+- Known-gap `g-esm-build-content-hash-import-urls` → RESOLVED (docs/known-gaps.md, with the
+  immutable-cache-cascade follow-up NOTE — pre-rewrite filename hash means a dep-only-hash-change
+  redeploy rewrites an importer's specifier without changing its URL; not biting anyone since esm
+  is opt-in + a fresh build is self-consistent; topological hash deferred to ~U6).
+
+### Scope C — narrow `W-MODULE-FORMAT-ESM-INCOMPLETE` (committed a382e775)
+- module-format-notice.js + compile/build/dev help text + inline comments: dropped the false
+  "not yet browser-loadable / will NOT run" claim; now "esm runs in a browser but is
+  EXPERIMENTAL/opt-in; classic is the default + only conformance-tested path; committed browser
+  harness (U5) + default-flip (U6) pending." Flag + embed+esm note retained. U1 notice test updated.
+
+### Tests (committed f1205ba3)
+- esm-client-chunk-format.test.js §6: UN-SKIPPED + de-vacuumed. CRITICAL FINDING: the U2-authored
+  §6 used `clientChunks` (matches only `.client.js`), but build content-hashes to
+  `.client.<hash>.js`, so an as-written un-skip would have passed VACUOUSLY (found 0 chunks). Added
+  `buildClientChunks` (matches the hashed shape) + guards (>0 hashed chunks, >0 imports checked) +
+  a second test asserting cross-chunk specifiers carry the 8-char hash. 16+1skip → 18 pass.
+- NEW esm-script-tag-module-format.test.js (7 pass): `type="module"` present under esm / absent
+  under classic across all three scope-A surfaces (single-file/flat envelope, composed MPA per-page
+  re-emit incl. nested `../`, role-bootstrap dynamic inject).
+
+### ACCEPTANCE 3 — full `--esm` app RUNS in real Chromium (playwright-core + chromium-1228)
+Harness: Bun.serve static server (correct `text/javascript` MIME for modules) + real Chromium,
+capture pageerrors/console-errors/failed-requests, assert boot + reactivity.
+- 02-counter (reactive cells + onclick handlers, client-only): `compile --module-format=esm` AND
+  `build --module-format=esm` → 0 pageerrors, 0 module errors, page boots (bodyLen ~1133), clicking
+  `+` changes count 0→1 (reactivity + event handler end-to-end). Used 02-counter because trucking
+  has a server-only session store that errors in a bare browser (pre-existing, classic-identical).
+- 22-multifile (CROSS-CHUNK ES module graph: app imports types + components as modules): `compile`
+  AND `build --module-format=esm` → 0 pageerrors, 0 module errors, body renders the team. The
+  build-mode run exercises scope B (hashed cross-chunk import specifiers link cleanly).
+
+### BRIEF LOCI/PREMISES — status
+- All scope-A/B loci verified present (line numbers had shifted +8 from U1/U2, as the brief warned).
+- CORRECTION surfaced: the §6 pinned test's `clientChunks` helper (`.client.js` tail) does NOT
+  match build's hashed `.client.<hash>.js` names — an un-skip alone would pass vacuously; fixed the
+  finder + added non-vacuous guards. (The brief said "un-skip + make it pass"; a real pass required
+  strengthening the helper, per Rule 2/3.)
+- Follow-up surfaced (NOT in scope, filed in the known-gap NOTE): immutable-cache cascade under
+  pre-rewrite filename hashing.
+
+## 2026-07-22 — U3 fix-round (post-PA-S239 HIGH) (agent-a7d244367cf65e628)
+
+PA S239 cleared U3 on the non-per-route path (2 finders + R26: classic byte-identical across 34
+examples + website + 297 samples; a full --esm app RUNS in real Chromium). An adversarial finder
+found ONE HIGH that U3 INTRODUCED.
+
+### HIGH — `--emit-per-route --module-format=esm` was browser-DOA (uncaught ReferenceError)
+Scope A added `s.type = "module"` to the role-bootstrap's dynamically-injected per-role INITIAL
+chunk. But that chunk's body is emitted by the ROUTE-SPLITTER and written RAW at `api.js:3163`
+(`writeFileSync(chunkPath, chunk.payloadJs)`) — it NEVER went through U2's `toEsmClientChunk`. So
+the per-route chunk stayed a classic IIFE calling runtime fns (`_scrml_reactive_set` /
+`_scrml_chunk_mount` / …) as FREE GLOBALS. Under esm the runtime is a MODULE (exports them, does
+not globalize) → the module-scoped chunk sees no global → uncaught `ReferenceError` on load.
+Reachable via `--emit-per-route --module-format=esm` (public flag) + `<program mcp> + esm`
+(auto-flips emit-per-route, `api.js:1326`). The `esm-script-tag-module-format §3` test missed it —
+the S265 "emitted ≠ runs" trap AGAIN: it asserted only the `s.type = "module"` MARKER was present,
+never EXECUTED the injected chunk.
+
+### FIX TAKEN — ROOT FIX (preferred; NOT the hard-gate fallback)
+The per-route payload shape is a plain IIFE with the SAME free-global runtime calls the per-file
+`output.clientJs` has, so `toEsmClientChunk` applies cleanly (footer/registry passes no-op; the
+runtime-import surface + shared-mutable-global bridge + fail-loud guard are what run). It was NOT a
+new unit's worth of work. Implementation:
+- `codegen/index.ts`: after route-splitting (where `runtimeFilename` is already finalized and the
+  classic runtime slice is captured), convert each non-empty `chunk.payloadJs` via
+  `toEsmClientChunk` under `esm && !embedRuntime`. The runtime import points at the FINALIZED
+  runtime filename through an explicit `../`-depth URL (`../`.repeat(dirDepth of chunk.filename)) —
+  per-route chunks are written RAW to `<route-segment>/<Role>.<tier>.<hash>.js` (a URL route
+  segment, leading `/` stripped, NEVER a source `pages/` path, NOT pages-stripped) with the runtime
+  at dist root, so neither the placeholder-substitution nor the `stripPagesPrefix` logic of the
+  per-file path applies. Build needs no extra rewrite (per-route chunks are not re-hashed; the
+  runtime hash is stable across compile↔build — proven: compile and build both emit
+  `scrml-runtime.01s5s9me.js`).
+- `codegen/emit-client-esm.ts`: NEW optional `EsmChunkContext.runtimeUrl` — when set, the runtime
+  import uses it verbatim (bypassing `resolveUrl`/`stripPagesPrefix`); the per-file path passes no
+  `runtimeUrl` → unchanged, byte-identical.
+
+### VERIFIED
+- Real Chromium (playwright + chromium-1228): `02-counter --emit-per-route --module-format=esm`
+  FULLY CLEAN (0 pageerrors, per-route initial chunk loads as a module importing
+  `../scrml-runtime.<hash>.js`, reactivity 0→1 on click); `07-admin-dashboard --emit-per-route
+  --module-format=esm` → 0 module/ReferenceError pageerrors + page renders (the `/_scrml/session`
+  404 is a PRE-EXISTING server dep — byte-identical failure under classic emit-per-route).
+- Classic emit-per-route BYTE-IDENTITY: main vs wt-default `diff -rq` IDENTICAL (conversion is
+  esm-gated).
+- §3-test EXECUTE fix (S265): `esm-script-tag-module-format §4` now EXECUTES the chunk via the bun
+  native ESM loader — NEGATIVE control (raw IIFE payload as a module → throws
+  `ReferenceError: _scrml_reactive_set is not defined`) + POSITIVE (the `toEsmClientChunk`-converted
+  payload links against a stub esm runtime + runs, both runtime calls fire). Fails on the old DOA,
+  passes on the fix.
+- Notice text: the narrowed `W-MODULE-FORMAT-ESM-INCOMPLETE` claim "esm runs in a browser" is now
+  TRUE unconditionally (root fix covers the per-route shape) → KEPT as-is (no per-route caveat
+  needed).
+
+### PRE-EXISTING FLAKE surfaced (NOT mine — proven)
+`compiler/tests/integration/serve-target-tool-r26.test.js` "R26 — the booted server serves the
+endpoint + SSE over real HTTP > POST /fsp {tag:FleetStatus} → 200" flakes under the FULL combined
+pre-commit run (unit+integration+conformance, ~21k tests / 22 cores) — a real-HTTP server-boot vs
+client-connect race (`node:_http_client` ECONNREFUSED). PROVEN pre-existing + not mine: reproduces
+identically on the STASHED (pre-fix) tree AND with my new test file removed; passes in isolation
+and in integration-alone (3165 pass). Matches the known cloud-CI full-bundle-HTTP flake class.

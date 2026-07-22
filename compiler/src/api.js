@@ -2955,6 +2955,48 @@ export function compileScrml(options = {}) {
         );
       };
 
+      // ESM chunks arc (Unit 3) — content-hash the in-chunk ES `import` URLs.
+      //
+      // Under `--module-format=esm` each client chunk emits cross-chunk imports
+      // (`import * as __scrml_dep_0 from "./types.client.js"`). Content-hashing
+      // renames the chunk FILES + the HTML `<script src>` refs (above), but the
+      // in-chunk specifier still names the PRE-hash file → 404 → the module
+      // graph fails to link (`g-esm-build-content-hash-import-urls`). Rewrite
+      // every `.client.js` import specifier to its hashed name, resolved against
+      // the importing chunk's own dist dir (same coordinate space + assetHashMap
+      // the HTML rewrite uses, so a shared dep resolves to ONE hashed name in
+      // every importer).
+      //
+      // The runtime import (`… from "./scrml-runtime.<hash>.js"`) already carries
+      // the codegen-baked hash and does NOT end in `.client.js`, so the regex
+      // leaves it untouched (no double-hash). ES module specifiers MUST be
+      // `./`/`../`-relative — `posixRelFrom` drops a same-dir `./`, so it is
+      // re-added (a bare `types.client.<hash>.js` would be an unresolvable BARE
+      // specifier in a browser).
+      //
+      // esm-gated: classic chunk bodies link via the `_scrml_modules` registry
+      // (no `import … from "*.client.js"` at all), so classic bytes are
+      // untouched — but the format guard makes that explicit + belt-and-suspenders.
+      const rewriteChunkImportRefs = (js, chunkFilePath) => {
+        if (!hashAssets || moduleFormat !== "esm" || !js) return js;
+        const { targetDir } = pathFor(chunkFilePath, ".client.js");
+        const chunkDir = toPosixRel(targetDir); // "" at dist root, "dispatch" nested
+        return js.replace(
+          /(\bfrom\s+")([^"]+?\.client\.js)(")/g,
+          (m, pre, ref, post) => {
+            if (/^[a-z][a-z0-9+.-]*:/i.test(ref) || ref.startsWith("//") || ref.startsWith("/")) {
+              return m; // scheme-qualified, protocol-relative, or root-absolute
+            }
+            const resolved = posixNormalize(chunkDir ? `${chunkDir}/${ref}` : ref);
+            const hashed = assetHashMap.get(resolved);
+            if (!hashed) return m;
+            const rel = posixRelFrom(chunkDir, hashed);
+            const spec = rel.startsWith(".") ? rel : `./${rel}`;
+            return `${pre}${spec}${post}`;
+          },
+        );
+      };
+
       for (const [filePath, output] of cgResult.outputs) {
         // GITI-009 + OQ-2: post-codegen rewrites for emitted JS.
         //   - rewriteRelativeImportPaths: ./*.js relative imports point at
@@ -3001,6 +3043,10 @@ export function compileScrml(options = {}) {
             // already carries the post-`rewriteStdlibImports` bytes + hash.
             const cached = finalClientByFile.get(filePath);
             let c = cached.contents;
+            // ESM chunks arc (Unit 3) — rewrite the in-chunk ES `import` URLs to
+            // the hashed dep names (no-op for classic; the chunk's own filename
+            // hash stays `cached.hash`, computed on the pre-rewrite bytes).
+            c = rewriteChunkImportRefs(c, filePath);
             // CRITICAL #4 — keep the `.map` sibling name and the embedded
             // `//# sourceMappingURL` in lockstep with the hashed js name.
             if (output.clientJsMap) {
