@@ -17,6 +17,7 @@
 import { statSync, readdirSync, readFileSync, writeFileSync, existsSync } from "fs";
 import { resolve, join, basename } from "path";
 import { compileScrml, scanDirectory, findOutputFiles } from "../api.js";
+import { moduleFormatNotices } from "./module-format-notice.js";
 
 /** Valid deployment target identifiers. */
 const VALID_TARGETS = ["fly", "railway", "render", "static", "docker"];
@@ -36,6 +37,9 @@ Arguments:
 
 Options:
   --output, -o <dir>        Output directory (default: dist/ next to input)
+  --module-format=<fmt>     Client runtime module format: classic (default) or esm
+                            (esm is experimental — not browser-loadable until
+                            chunk-module support lands in a later unit)
   --embed-runtime           Embed runtime inline instead of writing a separate file
   --minify                  Accepted flag (minification is a Phase 2 feature)
   --verbose, -v             Per-stage timing and counts
@@ -75,11 +79,32 @@ export function parseArgs(args) {
   // S142 — emitted-JS parse gate. undefined = compileScrml default; `true`
   // forces on; `false` (--no-validate-emit) is the dev/CI opt-out.
   let validateEmit = undefined;
+  // ESM chunks arc (Unit 1) — client runtime module format (classic|esm).
+  // Default `classic` is byte-identical to pre-arc output.
+  let moduleFormat = "classic";
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--output" || arg === "-o") {
       outputDir = args[++i];
+    } else if (arg === "--module-format" || arg.startsWith("--module-format=")) {
+      // ESM chunks arc (Unit 1) — `--module-format=classic|esm`. Both `=value`
+      // and space-separated shapes accepted; unknown value errors.
+      let raw;
+      if (arg === "--module-format") {
+        raw = args[++i];
+        if (!raw) {
+          console.error(`--module-format requires a value: classic|esm`);
+          process.exit(1);
+        }
+      } else {
+        raw = arg.substring("--module-format=".length);
+      }
+      if (raw !== "classic" && raw !== "esm") {
+        console.error(`Unknown --module-format value: "${raw}". Valid values: classic, esm`);
+        process.exit(1);
+      }
+      moduleFormat = raw;
     } else if (arg === "--validate-emit") {
       validateEmit = true;
     } else if (arg === "--no-validate-emit") {
@@ -125,7 +150,7 @@ export function parseArgs(args) {
     }
   }
 
-  return { inputDir, outputDir, embedRuntime, minify, verbose, target, idleTimeout, validateEmit };
+  return { inputDir, outputDir, embedRuntime, minify, verbose, target, idleTimeout, validateEmit, moduleFormat };
 }
 
 /**
@@ -682,6 +707,13 @@ export async function runBuild(args) {
   const targetLabel = opts.target ? ` [--target ${opts.target}]` : "";
   console.log(`scrml build — compiling ${inputFiles.length} file(s)...${targetLabel}`);
 
+  // ESM chunks arc (Unit 1) — operational heads-up when --module-format=esm is
+  // selected (esm runtime is not yet browser-loadable; module <script> tags +
+  // chunk imports are a later unit). Empty for classic. NOT a §34 diagnostic.
+  for (const line of moduleFormatNotices(opts.moduleFormat, opts.embedRuntime)) {
+    console.error(line);
+  }
+
   const result = compileScrml({
     inputFiles,
     outputDir,
@@ -698,6 +730,9 @@ export async function runBuild(args) {
     // default; the emitted-JS parse gate (E-CODEGEN-INVALID-LOGIC) is especially
     // valuable for `build` (catches malformed output before deploy).
     validateEmit: opts.validateEmit,
+    // ESM chunks arc (Unit 1) — `--module-format=classic|esm`. Default
+    // `classic` keeps the shared runtime byte-identical to pre-arc output.
+    moduleFormat: opts.moduleFormat,
   });
 
   if (result.errors.length > 0) {

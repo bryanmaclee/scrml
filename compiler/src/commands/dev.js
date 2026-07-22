@@ -18,6 +18,7 @@
 import { statSync, readdirSync, watch } from "fs";
 import { resolve, dirname, join, basename } from "path";
 import { compileScrml, scanDirectory, findOutputFiles, toPosixSpecifier } from "../api.js";
+import { moduleFormatNotices } from "./module-format-notice.js";
 
 // ---------------------------------------------------------------------------
 // Help text
@@ -39,6 +40,9 @@ Options:
   --idle-timeout <n>      Bun.serve idleTimeout in seconds (default: 120; raises
                           the 10s default so long data-layer routes finish)
   --verbose, -v           Show per-stage timing and counts
+  --module-format=<fmt>   Client runtime module format: classic (default) or esm
+                          (esm is experimental — not browser-loadable until
+                          chunk-module support lands in a later unit)
   --embed-runtime         Embed runtime inline instead of writing a separate file
   --convert-legacy-css    Convert <style> blocks to #{...}
   --validate-emit         Parse every emitted JS artifact (E-CODEGEN-INVALID-LOGIC); abort on malformed output
@@ -76,11 +80,32 @@ function parseArgs(args) {
   // S142 — emitted-JS parse gate. undefined = compileScrml default; `true`
   // forces on; `false` (--no-validate-emit) is the dev opt-out.
   let validateEmit = undefined;
+  // ESM chunks arc (Unit 1) — client runtime module format (classic|esm).
+  // Default `classic` is byte-identical to pre-arc output.
+  let moduleFormat = "classic";
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--output" || arg === "-o") {
       outputDir = args[++i];
+    } else if (arg === "--module-format" || arg.startsWith("--module-format=")) {
+      // ESM chunks arc (Unit 1) — `--module-format=classic|esm`. Both `=value`
+      // and space-separated shapes accepted; unknown value errors.
+      let raw;
+      if (arg === "--module-format") {
+        raw = args[++i];
+        if (!raw) {
+          console.error(`--module-format requires a value: classic|esm`);
+          process.exit(1);
+        }
+      } else {
+        raw = arg.substring("--module-format=".length);
+      }
+      if (raw !== "classic" && raw !== "esm") {
+        console.error(`Unknown --module-format value: "${raw}". Valid values: classic, esm`);
+        process.exit(1);
+      }
+      moduleFormat = raw;
     } else if (arg === "--verbose" || arg === "-v") {
       verbose = true;
     } else if (arg === "--convert-legacy-css") {
@@ -126,7 +151,7 @@ function parseArgs(args) {
     }
   }
 
-  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, port, idleTimeout, gather, validateEmit };
+  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, port, idleTimeout, gather, validateEmit, moduleFormat };
 }
 
 // ---------------------------------------------------------------------------
@@ -251,7 +276,14 @@ async function loadServerRoutes(outputDir) {
  * @returns {{ success: boolean, outputDir: string }}
  */
 function runOnce(opts, gatheredOut) {
-  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, gather, validateEmit } = opts;
+  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, gather, validateEmit, moduleFormat } = opts;
+
+  // ESM chunks arc (Unit 1) — operational heads-up when --module-format=esm is
+  // selected (esm runtime is not yet browser-loadable; module <script> tags +
+  // chunk imports are a later unit). Empty for classic. NOT a §34 diagnostic.
+  for (const line of moduleFormatNotices(moduleFormat, embedRuntime)) {
+    console.error(line);
+  }
 
   const result = compileScrml({
     inputFiles,
@@ -264,6 +296,9 @@ function runOnce(opts, gatheredOut) {
     log: console.log,
     // S142 — `--validate-emit` / `--no-validate-emit`. undefined = compileScrml default.
     validateEmit,
+    // ESM chunks arc (Unit 1) — `--module-format=classic|esm`. Default
+    // `classic` keeps the shared runtime byte-identical to pre-arc output.
+    moduleFormat,
   });
 
   // W2 B5: surface the gathered .scrml file set so the watcher can extend
