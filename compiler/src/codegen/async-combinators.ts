@@ -51,6 +51,61 @@ export const ASYNC_COMBINATOR_METHOD_ORDER = [
 export const ASYNC_COMBINATOR_METHODS: ReadonlySet<string> = new Set(ASYNC_COMBINATOR_METHOD_ORDER);
 
 /**
+ * The KNOWN-DISCARD-HOF set (S279) — global callables that STRUCTURALLY DISCARD
+ * their callback's return value. A fire-and-forget timer / scheduler runs the
+ * callback for its side effects and throws the return away, so the value-coercion
+ * hazard the `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` backstop guards (a bare Promise
+ * coerced as a truthy value → accept-all bug) is UNREACHABLE here. When such a
+ * call is passed an async callback, the compiler MIRRORS the combinator lowering:
+ * re-emit the callback lambda ASYNC so its inner async call auto-awaits INSIDE the
+ * async callback. The HOF call itself is NOT awaited — `setTimeout` returns a timer
+ * id, not a Promise. This is the fail-OPEN sibling of the combinator transform: a
+ * discard context is provably safe, so an async callback compiles clean instead of
+ * hitting the backstop with a nonsensical "hoist into a `for` loop" remedy.
+ *
+ * SCOPE: only a BARE-IDENT global call matches (`setTimeout(cb, 0)`), never a
+ * member method (`obj.setTimeout(cb)` / `scheduler.setTimeout(cb)`) — a member
+ * receiver is a user object whose discard semantics the compiler cannot verify, so
+ * it stays fail-closed (mirrors the deferred user-HOF Case 2). A local of the same
+ * name that shadows the global is likewise NOT matched (checked at the call site
+ * against `declaredNames`).
+ */
+export const KNOWN_DISCARD_HOF: ReadonlySet<string> = new Set([
+  "setTimeout",
+  "setInterval",
+  "setImmediate",
+  "queueMicrotask",
+  "requestAnimationFrame",
+  "requestIdleCallback",
+]);
+
+/**
+ * Is `node` a BARE-IDENT call to a KNOWN-DISCARD-HOF global with at least one
+ * lambda argument whose body reaches an async call? True → emit-expr re-emits that
+ * lambda async, and the fail-closed drain must walk the callback body as AWAITABLE
+ * (the inner async call becomes an awaited async-callback body, not a leak). Shared
+ * by the emit site and the drain so they cannot drift on which calls are exempted.
+ * A MEMBER callee (`obj.setTimeout`) never matches — discard semantics are only
+ * known for the globals.
+ */
+export function isKnownDiscardHofCall(
+  node: unknown,
+  isAsyncName: (name: string) => boolean,
+): boolean {
+  if (!node || typeof node !== "object") return false;
+  const n = node as ASTNode;
+  if (n.kind !== "call" || n.optional) return false;
+  const callee = n.callee as ASTNode | undefined;
+  if (!callee || callee.kind !== "ident" || typeof callee.name !== "string") return false;
+  if (!KNOWN_DISCARD_HOF.has(callee.name)) return false;
+  const args = n.args as unknown[] | undefined;
+  if (!Array.isArray(args) || args.length < 1) return false;
+  return args.some(
+    (a) => (a as ASTNode | undefined)?.kind === "lambda" && callbackReachesAsync(a, isAsyncName),
+  );
+}
+
+/**
  * Structural detector — does the callback argument of a collection method reach
  * an async call? Two accepted shapes:
  *   - a LAMBDA `fn(x) => …` / `(x) => …`: walk its body's `call` nodes (minus the

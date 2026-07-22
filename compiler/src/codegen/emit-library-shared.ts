@@ -22,7 +22,7 @@ import { CGError } from "./errors.ts";
 // Phase-2 colorless-async — the clean-family combinator detector, shared with the
 // emit-expr lowering site so the fail-closed drain and the lowering agree on which
 // callbacks are transformed (and therefore must NOT fail closed).
-import { isAsyncCombinatorCall } from "./async-combinators.ts";
+import { isAsyncCombinatorCall, isKnownDiscardHofCall, callbackReachesAsync } from "./async-combinators.ts";
 
 /** A loosely-typed AST node. */
 type ASTNode = Record<string, unknown>;
@@ -267,13 +267,17 @@ export function asyncStdlibSyncCallbackError(
   return new CGError(
     "E-ASYNC-STDLIB-IN-SYNC-CALLBACK",
     `E-ASYNC-STDLIB-IN-SYNC-CALLBACK: the async call \`${calleeName}(…)\` cannot be awaited ` +
-      `here — it sits in a position where \`await\` is not valid (a \`.some\`/\`.find\`/` +
-      `\`.filter\`/\`.map\` callback body, a parameter default, or a raw escape-hatch body). ` +
-      `scrml has no source \`await\`, so the compiler auto-awaits async calls — but only where ` +
-      `\`await\` is legal. A bare \`${calleeName}(…)\` here returns an unawaited Promise (always ` +
-      `truthy → an accept-all / wrong-value bug). Restructure so the call runs in the enclosing ` +
-      `function's async body — e.g. hoist it into a \`for\` loop: ` +
-      `\`for (const x of xs) { const r = ${calleeName}(…); … }\`.`,
+      `here — it sits in a position that CONSUMES the callback's return value where \`await\` is ` +
+      `not valid (a value-coercing callback body such as \`.filter\`/\`.find\`/\`.some\`/\`.map\`, ` +
+      `a parameter default, or a raw escape-hatch body). scrml has no source \`await\`, so the ` +
+      `compiler auto-awaits async calls — but only where \`await\` is legal AND the resulting value ` +
+      `is used correctly. A bare \`${calleeName}(…)\` here returns an unawaited Promise (always ` +
+      `truthy → an accept-all / wrong-value bug). Restructure so the value is produced in an async ` +
+      `body where it can be awaited before it is used — e.g. compute it in the enclosing async ` +
+      `function (a \`for\` loop over the collection, or a \`const r = ${calleeName}(…)\` binding) ` +
+      `rather than inside the value-consuming callback. (Fire-and-forget scheduler callbacks — ` +
+      `\`setTimeout\`/\`setInterval\`/… — DISCARD the return and are handled automatically; this ` +
+      `error is only for positions whose value is actually consumed.)`,
     { file: filePath ?? sp.file ?? "", start: sp.start ?? 0, end: sp.end ?? 0, line: sp.line ?? 1, col: sp.col ?? 1 },
     "error",
   );
@@ -504,6 +508,31 @@ export function collectNonAwaitableAsyncCalls(
         walk(cb, insideCallback);
       }
       for (let ai = 1; ai < cbArgs.length; ai++) walk(cbArgs[ai], insideCallback);
+      return;
+    }
+    // KNOWN-DISCARD-HOF colorless-async (S279 over-fire fix) — a bare-ident call to a
+    // global fire-and-forget scheduler (setTimeout/setInterval/…) that DISCARDS its
+    // callback's return is NOT a non-awaitable leak: emit-expr re-emits the async
+    // callback lambda ASYNC so its inner async call becomes an awaited async-callback
+    // body, and the HOF call itself is never awaited (it returns a timer id, not a
+    // Promise — so it is NOT recorded even in a non-awaitable position). Walk the
+    // callee + non-lambda args normally, and each async-reaching callback lambda's
+    // body as AWAITABLE (insideCallback=false) — still descending so a DOUBLY-nested
+    // SYNC lambda inside the callback is caught. A member callee (`obj.setTimeout`)
+    // does NOT match here and stays fail-closed (deferred user-HOF Case 2).
+    if (k === "call" && isKnownDiscardHofCall(n, isAsyncName)) {
+      const callee = n.callee as ASTNode | undefined;
+      if (callee) walk(callee, insideCallback);
+      const hofArgs = Array.isArray(n.args) ? (n.args as unknown[]) : [];
+      for (const a of hofArgs) {
+        const an = a as ASTNode | undefined;
+        if (an && an.kind === "lambda" && callbackReachesAsync(an, isAsyncName)) {
+          walk(an.body, false);
+          for (const p of (Array.isArray(an.params) ? (an.params as unknown[]) : [])) walk(p, true);
+        } else if (an) {
+          walk(an, insideCallback);
+        }
+      }
       return;
     }
     // A structured call to an async name INSIDE a callback/param-default lambda.
