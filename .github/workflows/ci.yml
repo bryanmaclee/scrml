@@ -60,6 +60,8 @@ jobs:
           node --check benchmarks/todomvc/dist/app.client.js
       - name: Snippet gate (every public-cited .scrml still compiles)
         run: bun scripts/snippet-gate.js
+      - name: Facts gate (published figures still match the repo)
+        run: bun scripts/facts.ts --check
 
   tracking:
     runs-on: ubuntu-latest

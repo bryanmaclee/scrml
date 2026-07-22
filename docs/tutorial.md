@@ -1030,7 +1030,7 @@ You now know enough scrml to write working programs. From here:
 
 - **The kickstarter** — `docs/articles/llm-kickstarter-v2-2026-05-04.md` is the LLM-targeted one-paste context. It is more compact than this tutorial and useful as a refresher.
 
-- **The full specification** — `compiler/SPEC.md` (about 32,000 lines) is the formal grammar and semantics. The tutorial covers the common 80%; the SPEC covers the edges. `compiler/SPEC-INDEX.md` is the quick-lookup table of contents.
+- **The full specification** — `compiler/SPEC.md` is the formal grammar and semantics. The tutorial covers the common 80%; the SPEC covers the edges. `compiler/SPEC-INDEX.md` is the quick-lookup table of contents.
 
 - **Error codes** — when the compiler flags an error, the code (`E-NAME-COLLIDES-STATE`, `E-RI-002`, `E-DERIVED-WRITE`, ...) is your best search term. Each code has a dedicated section in the SPEC explaining the rule that was violated and the usual fix.
 
