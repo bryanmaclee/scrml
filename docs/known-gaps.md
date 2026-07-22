@@ -78,7 +78,28 @@ Nothing ever overwrites those nodes — PA-confirmed by reading the whole emitte
 
 **Tier-1 `<each>` handles the same content correctly** — `<div class="hdr">H${r.label}</div>` inside an `<each>` splits into `createTextNode("H")` + a live-keyed `_scrml_each_tn_N` effect. So this is a **Tier-0-lift-only** defect, and it strengthens rather than weakens the `W-EACH-PROMOTABLE` promotion nudge.
 
-**Measured blast radius (reverse-direction R26 — verify before claim-OPEN):** 79 corpus files use a Tier-0 loop over a reactive cell, but 3 sampled real files (`examples/15-channel-chat.scrml`, `samples/dashboard.scrml`, `examples/12-snippets-slots.scrml`) compile with **ZERO** literal-interpolation text nodes — their lift bodies do not use mixed runs. So this is a **latent trap, not a currently-biting bug**: the shape is entirely natural (`Total: ${n}`, `${a} of ${b}`) and would be silent when hit, but nothing in the sampled corpus hits it. Severity MED on that basis, not HIGH. A full 79-file sweep was NOT run — the 3-file sample is what was measured, and the count could rise.
+**Measured blast radius — FULL SWEEP RUN (S281, reverse-direction R26).** All **79** corpus files carrying a Tier-0 loop over a reactive cell were compiled and their emitted `.client.js` grepped for the literal signature `createTextNode("…${…")`. **78 scanned · 1 file hits · 1 no-coverage.**
+
+Sweep-method note, because the first attempt was wrong and the correction matters: the initial pass gated on the compiler's **exit code**, which silently dropped 36 files that exit non-zero for environmental reasons (e.g. `E-PA-002` missing `.db`) while still emitting a complete `client.js`. Gating on **the emitted artifact** instead took coverage from 43 → 78. Only ONE file genuinely emits no client artifact: `samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-else-empty-049.scrml`.
+
+**The single hit — `samples/compilation-tests/combined-011-shopping-cart.scrml:37`** — is a textbook instance that proves the discriminator on REAL corpus code, with both behaviors in the SAME element:
+
+```scrml
+for (let item of @cart) {
+    lift <li>${item.name} - $${item.price}</>
+}
+```
+```js
+const _scrml_lift_tn_14 = document.createTextNode("");          // PURE run  -> correct
+_scrml_lift_tn_14.textContent = String((item.name) ?? "");      //   live-keyed effect
+_scrml_lift_el_13.appendChild(document.createTextNode("- $${item.price}"));   // MIXED run -> LITERAL
+```
+
+A shopper sees `Widget- $${item.price}` where the price should be. The file is a tracked fixture referenced by `compiler/tests/parser-conformance-within-node-allowlist.json`.
+
+**Sweep bounds (stated, not assumed):** the file filter matches `for (<ident> of @…)`. Destructuring/index loop forms over a reactive cell were checked and number **0**, so the filter missed none of those. **NOT swept:** 20 `@cell.map(…)` / `.forEach(…)` markup sites — a different lowering path, out of this defect's scope but unverified against it.
+
+So: **1.3% incidence (1/78), live on real corpus code but not in an adopter app.** Severity stays **MED** — silent and adopter-visible when hit, natural shape (`Total: ${n}`, `$${price}`), but rare in practice because most lift bodies use pure-`${}` runs.
 
 **Deliberately NOT folded into the #141 dispatch** (different axis, tight brief, mid-flight). Fix direction: the reactive create-item lift path needs the same literal/interpolation text-run SPLIT that both the static lift path and `emit-each.ts` already perform. Reproducers preserved in the S281 scratchpad; regenerate from the three snippets above. — `NEW S281 (found verifying #141); MED; open`
 
