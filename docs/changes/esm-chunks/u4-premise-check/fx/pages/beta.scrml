@@ -1,0 +1,5 @@
+<page>
+  <rows> = ["b1", "b2"]
+  <h2>Beta</h2>
+  <ul><each in=@rows><li>${@.}</li></each></ul>
+</page>
