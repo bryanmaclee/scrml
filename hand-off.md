@@ -1,51 +1,82 @@
-# scrml — Session 279 (bryan) — WRAP
+# scrml — Session 280 (bryan) — WRAP
 
-**Date:** 2026-07-22. A dense multi-arc session: **#131 adopter each-mount fix landed**, the **two carried S277 rulings resolved**, a **cross-machine Wave-1c rebase caught a severe blocker → deferred to ESM U4**, and an **E-ASYNC over-fire ruling + Case-1 fix**. Machine = **`bryan-XPS-8950`** (the previously-262-behind clone). Solo, but the **other machine (`bryan-maclee`) went LIVE mid-session** (pushed the Wave-1c branch) — treat as a concurrent sibling next boot.
+**Date:** 2026-07-22. Booted `/boot concurrent` as a **successor while S279 was still live in the same checkout**. A marketing-arc session that turned into a verification-methodology session: 9 PRs, ~14 gaps, one bryan ruling falsified by empirical proof, `pa-base v2.4`, and three arcs scoped.
 
 ## ⚠️ READ FIRST — state as of close
-- **scrml main = `df6d269c`** (#131 + S279 rulings, PR #137). The **E-ASYNC Case-1 fix + this session's continuity** land via a **`wrap/s279` PR** (held for bryan's merge at close — see Open).
-- Mechanical stream is in `handOffs/delta-log.md` **[715]–[722]** — not duplicated here. This hand-off carries the irreducible.
-- **CROSS-MACHINE:** this machine lacked `gh` (installed+authed HTTPS this session), the canonical `scrml-js-codegen-engineer` agent (used `general-purpose` fallback throughout), and the live `assetManagement` adopter corpus (R26 used gauntlet-r25 + samples + reproes). The `active-sessions/` board doesn't exist on this clone. **Boot next time fetches BOTH scrml + scrml-support AND checks `gh issue list` / `gh pr list` (now that gh works).**
+- **scrml main = `f681a777`.** Coherence 0/0. Inbox **EMPTY**. No open adopter issues beyond #27.
+- **One PR still open: #148** (`fix/inbox-server-wiki-triage`) — rebased onto main, waiting on `gate` to re-run under `strict:true`. Merge it first thing.
+- Mechanical detail lives in `handOffs/delta-log.md` and `docs/changelog.md` — not duplicated here.
 
-## 🎬 WHAT LANDED (main `df6d269c`, PR #137)
-- **#131 — each mount is a foster-safe comment fence (A-unified).** `emitEachMountHtml` now emits `<!--scrml-each:N-->…<!--/scrml-each:N-->` with rows as SIBLINGS (foster-safe + drop-safe in every insertion mode; `<option>`s land as direct `<select>` children). 6 consumers moved. Closes GH **#131** (`<select>` empty in Firefox) + the S272 `<tbody>` foster report. Interim `W-EACH-TABLE-FOSTER` lint removed. Also closed the `$`-pattern `String.replace` injection across all 3 SSR splice loci (mount fill + seed-state + CSRF-meta) + memoized the anchor lookup (was a full-document walk per reconcile). Verified: parse5 spec-accurate proof (fences survive in select+tbody; old-div controls confirm the bug = Firefox) + 3-lens adversarial + committed pin `each-mount-fence-foster-safe.test.js`.
-- **S279 RULINGS (both carried from S277):**
-  - **Ruling 1 = A** (Shape-1 markup) — SPEC §1.4 tightened with the **five-doors** markup-as-value partition + Shape-1 exclusion; PRIMER §4 condensed. *Reactive markup = derivation/state-keying, never imperative reassignment.*
-  - **Ruling 2** (§34 `E-STYLE-001`) — corrected the stale row (it's the `<style>`-element rejection, `E-SCRIPT-001`'s twin — not a `#{}` CSS syntax error).
+## 🔴 THE ONE THING THAT CHANGES A RULING
 
-## 🟡 LANDING IN THIS WRAP PR (`wrap/s279`)
-- **E-ASYNC Case-1 fix** (compiler code, from agent worktree `a09ca727`, verified 134/0 + identical 52-fail baseline). `KNOWN_DISCARD_HOF` set (setTimeout/setInterval/setImmediate/queueMicrotask/requestAnimationFrame/requestIdleCallback) — an async callback to a bare-ident global discard-HOF is re-emitted async (inner call auto-awaits inside the discarded-return callback) instead of firing the backstop. Message softened. **Unblocks flogence's RED gate on merge.** (Exclude the agent's stray `…workflow-union.md` + `progress.md` at land.)
-- The continuity docs (this hand-off, changelog, master-list, delta-log [715]-[722], known-gaps updates).
+**bryan's S279 Option-B ruling rests on a false premise, and U4 cannot be built as scoped.**
 
-## 🧭 THE BIG DEFERRAL — Wave-1c cross-chunk soft-nav → ESM U4 (bryan RULED B)
-The other machine pushed the held Wave-1c pieces-2+3 (`origin/worktree-agent-a2ed001a5de228134`, `8fd5fd07`, stale pre-S277 base). **This machine rebased it** (`--onto df6d269c 86ee7b97`, dropping the already-landed piece1) → local branch **`feat/wave1c-nav`** (RETAINED as the U4 reference). Two findings stopped the land:
-1. **★ S277-drift landmine — the stale branch re-introduced the pre-S277 OVERBROAD `E-OUTLET-AND-MAIN` in FOUR places** (2 SPEC conflict regions + the outlet test + the conf-NAV nested test + [adversarially] a duplicate §34 row + a §20.8.1 bullet). All resolved to S277 on the branch. **Watch this: any future Wave-1c port must preserve the S277 one-landmark invariant (nested `<main><outlet/></main>` is LEGAL; only bare/sibling fires).**
-2. **★ SEVERE BLOCKER (empirically confirmed) — cross-chunk global collision.** Per-file each-ids/cells in shared classic globals: two routes both emit `scrml-each:6` + register `_scrml_each_renderers["each_6"]` at module top-level → soft-nav coexistence clobbers → route B's rows render into route A's fence. **This is the exact collision ESM module scope dissolves.** → **bryan RULED B: cross-chunk nav is an esm/module-scope feature; fold into ESM U4, NOT classic.** Wave-1c-classic REJECTED; loader/flag-gate-boot/S277-outlet/tests PORT to U4.
-- **U4 DESIGN CONSTRAINT (record):** cross-chunk nav requires per-module chunk scope (esm) OR per-chunk id/cell namespacing — the classic shared-global model is unsound for coexisting chunks. Also (Finder A, MEDIUM): a lost-race nav still runs its chunk's module-init (pollutes globals); `_scrml_chunk_loading` is not nav-scoped.
+Option B deferred the classic Wave-1c loader and folded cross-chunk nav into ESM U4, reasoning that *"module scope dissolves the each-id collision."* **It does not.** Module scope dissolves only the *lexical* collision. The colliding state lives in the **runtime**, which under `--module-format=esm` is one ES module every chunk imports — a **singleton by necessity** (a forked cell store / subscriber list / rehydrator registry would break reactivity outright). Chunks mutate it through member expressions on an imported binding: legal ESM, and deliberately outside the arc's fail-loud guard (`emit-client-esm.ts:181` — *"MemberExpression targets bind no bare identifier and are skipped"*).
 
-## 🔴 OPEN — needs bryan / next session
-1. **Merge the `wrap/s279` PR** (held at close — the one main-touching step; E-ASYNC fix + continuity). Cloud `gate` is the authority. On merge, close nothing new but flogence's gate unblocks.
-2. **E-ASYNC Case 2 — an R2 DESIGN QUESTION (deferred, not rushed under freeze).** An async thunk passed to a USER HOF that awaits it (`runGatedAgentic(() => runAider())`) still fails closed — the compiler can't verify a user HOF awaits its callback param without cross-fn coloring. Design options: a typed async-thunk/`snippet` param the compiler colors, vs document-the-workaround (inline, don't thunk). Gap `g-async-stdlib-in-sync-callback-over-fires` (status now `in-progress`; Case 1 fixed, Case 2 open).
-3. **ESM U4 — the next arc.** The `import()` nav-time chunk loader on the esm/module path (closes adopter #27 soft-nav + is the sound home for Wave-1c cross-chunk nav). Reference: `feat/wave1c-nav` + `origin/worktree-agent-a2ed001a5de228134` + `docs/changes/navigate-wave1c-cross-chunk/`. Then U5 (module browser harness) · U6 (default-flip).
+Proven in real Chromium against real emitted artifacts, **with no navigation at all** — just the `await import()` a nav loader performs:
+```
+alpha BEFORE import : {"rows":["a1","a2"]}
+alpha AFTER  import : {"rows":["b1","b2"]}
+```
+The dispatched agent **REFUSED to build** and was right. The PA re-verified every load-bearing claim independently rather than accepting the report — source claims first (4/4 confirmed), then a fresh recompile, then the browser run.
 
-## 📌 gaps filed this session (all in `docs/known-gaps.md`)
-- `g-each-mount-div-foster-parented-in-table` → **RESOLVED** (fence model).
-- `g-nested-each-div-mount-in-restricted-parent` (MED) — nested each under select/tbody still div-wraps (same class as #131, out of scope; the "nested is immune" reasoning was incomplete — foster-immune ≠ render-correct).
-- `g-each-anchor-lookup-first-match-document-wide` (LOW, pre-existing).
-- `g-navigate-soft-nav-full-reload` (#27, MED) — carries the Wave-1c/U4 deferral + the collision finding + the U4 module-scope constraint.
-- `g-async-stdlib-in-sync-callback-over-fires` (HIGH, in-progress) — Case 1 fixed, Case 2 design-Q open.
-- `g-css-syntax-error-in-hash-block-no-diagnostic` (LOW) · `g-tailwind-lint-false-positive-on-same-file-hash-class` (LOW, master-PA report) · `g-e-style-001-row` (resolved via Ruling 2).
-- **Unfiled edge:** `<each ... key=@>` (bare-item key on primitives) → `E-CODEGEN-INVALID-LOGIC`; proper `key=@.id` compiles clean. Likely pre-existing — verify on a clean main before filing.
+**Consequences:** the real gate is the SECOND disjunct of `g-navigate-soft-nav-full-reload` — **per-chunk id/cell namespacing** — and it is **module-format-agnostic**, so fixing it also unblocks the held **classic** Wave-1c loader. Option B relocated the blocker; it did not remove it. Evidence preserved at `origin/evidence/u4-premise-falsified`.
+
+## 🎬 WHAT LANDED (9 PRs)
+| PR | what |
+|---|---|
+| #139 | S279's wrap (merged at S280 open) — E-ASYNC timer over-fire fix |
+| #140 | **snippet-gate** — every public-cited `.scrml` compiles in CI |
+| #142 | **README flagship compiles** — 7 SPEC contradictions closed |
+| #143 | scrml-site lint triage — 2 gaps, 2 widened |
+| #144 | claude-workflow union capture (this machine's `~/.claude`) |
+| #145 | **U2 FACTS.md** — generated + gated; caught 2 already-stale public figures |
+| #146 | dep-script `pages/` depth fix + 3 gaps |
+| #147 | LOC facts + profile stops hardcoding derived figures |
+| #148 | **OPEN** — server-keyword ruling + wiki triage, 3 gaps |
+
+## 🧭 ARCS — where each stands
+
+**Marketing claim-gate.** U1 (#140/#142) + U2 (#145/#147) **DONE** — both automatable claim classes closed. U3 (capability cites + Nominal rejector) and U4 (marketing repo + satellite PA) deferred past freeze per bryan's OQ-4. Scope doc: `docs/changes/marketing-claim-gate/SCOPING.md` (+ `readme-flagship-triage.md`). The claim taxonomy (C1 code / C2 numbers / C3 capability / C4 comparative / C5 framing) is the durable output — C4/C5 are explicitly NOT gateable and stay bryan's.
+
+**chunk-namespacing — DISPATCHABLE, all 3 OQs ruled.** Scope doc: `docs/changes/chunk-namespacing/SCOPING.md`. Token = **FNV-1a of the dist-relative source PATH**, base36, 8 chars (path-identity, not content — content-hash answers "has this changed", namespacing answers "which unit is this"). **Always-on.** Byte-identity = one-time global churn gated by an artifact-diff asserting only id tokens moved, classified `semantics-changed` per §8. **~390 touch points across 8 files.** TWO namespaces collide independently — numeric node ids AND source-name-keyed cell keys — so fixing either alone still clobbers.
+
+**ESM arc.** U1-U3 landed (S278). **U4 blocked** on chunk-namespacing above. U5/U6 untouched.
+
+## 🔬 THE SESSION'S METHOD-LESSONS (the durable output)
+
+**`pa-base v2.4` — gate design: three ways a gate reports green while verifying nothing.** Distilled from building a claim-gate and finding the PRIOR one hollow. (1) **The absorbed escape hatch** — README had 4 scrml blocks, 4 skip markers, green since 2026-05-18 while checking ZERO; detection is a RATIO not an inspection; gate whole artifacts, not fragments. (2) **The unproven gate** — never-failed is indistinguishable from cannot-fail; corrupt an input, confirm red, restore. (3) **The non-deterministic input** — a gate over a generated artifact derives only from inputs that change WITH the commit.
+
+**PA verification failures, recorded because they recurred:**
+- **Wrong corpus.** Reported "293 script refs / 0 dead" on `docs/website` — which has **no cross-file `.scrml` deps**, so the changed code never fired there. The most confident-sounding evidence was vacuous.
+- **Method blind to the bug.** A ref-resolution sweep cannot see a ref that was never emitted.
+- **Corpus that passes by luck.** `trucking-dispatch` does not collide because its pages differ in node count. A corpus check returns a false green on the namespacing arc — a purpose-built colliding fixture is mandatory.
+- **Nearly shipped a wrong headline twice** ("62% of public code rotten"; "the README gate is vacuous by accident"). Both wrong, both caught by measuring instead of asserting.
+
+**Process slips (3, one lossy):** dispatched twice against UNCOMMITTED work (the U4 brief, then the dep-fix — finders got an empty diff); and `git checkout <branch> -- docs/known-gaps.md` **destroyed two just-written gap entries**, recovered from context. Root cause is consistent: working in the tree without committing before touching it.
+
+## 🔴 OPEN — needs bryan
+1. **Nothing blocking.** All rulings given this session were applied.
+2. Carried from S278, still unanswered: the **Shape-1 markup question** and the **§34 `E-STYLE-001` row** were both resolved at S279 — no carry.
+
+## 📌 Gaps filed this session (~14)
+HIGH: `g-esm-module-scope-does-not-isolate-chunk-state` · `g-trigger-3-server-only-import-does-not-escalate` · `g-composition-strip-eats-last-dep-script` · `g-runtime-script-tag-not-depth-prefixed` · `g-class-attr-expr-not-lowered`
+MED: `g-uptoroot-vs-distrel-anchor-mismatch` · `g-dead-function-misses-arrow-callback-bodies` · `g-dev-shell-edit-no-page-recompose` · `g-prose-code-color-light-theme-only`
+Widened: `g-tailwind-lint-false-positive-on-same-file-hash-class` (cross-file, 2nd reporter) · `g-route-001-object-literal-value-position` (3rd reporter → consolidate all three)
+Non-gap: `g-docs-website-retained-as-test-fixture` (bryan ruled KEEP — live fixture for 3 tests)
 
 ## 🧷 Held / retained
-- **`feat/wave1c-nav`** (local) + **`origin/worktree-agent-a2ed001a5de228134`** — the U4 cross-chunk-nav reference. Do NOT delete.
-- **E-ASYNC worktree `agent-a09ca727`** — its work rides the `wrap/s279` PR; clean at wrap 6b once the PR is cut.
-- The #131 each-fix worktree — already removed (landed).
-
-## 🧪 THE SESSION'S METHOD-LESSONS (for the next PA)
-- **The boot nearly shipped thin.** bryan caught a "caught up" report that had SKIPPED the full contract + 3 mandatory boot steps (adopter-issue channel, CI/PR state, concurrent-session board) under a false "context economy." The S277 doctrine (empirical-sufficiency illusion, governing-sentence gate, direction-of-change) was exactly what the thin boot skipped. **Boot the full read-set; the "economy" that skips the contract is the expensive miss.**
-- **The adversarial gate earned its keep THREE times:** #131 (the dev-agent's "ran real Chromium+Firefox" claim was UNVERIFIABLE — S265 false-browser-pass; parse5 proved it instead), the Wave-1c rebase (4 S277-drift sites + the SEVERE collision blocker — stopped an unsound land), and the perf regression on the #131 anchor lookup. **Never trust a dev-agent's green self-report; the PA-side adversarial + empirical gate is non-delegable.**
-- **A stale-based cross-machine branch carries superseded decisions.** The Wave-1c branch (pre-S277) would have silently regressed the exact E-OUTLET overreach bryan reversed in S277. **Sweep newest-first; re-ground SPEC drift against the newest ruling, not the branch's base.**
+- `origin/evidence/u4-premise-falsified` — the U4 falsification repro + harness. **Do not delete.**
+- `origin/worktree-agent-a2ed001a5de228134` + local `feat/wave1c-nav` — Wave-1c pieces 2+3, still held, now unblocked by chunk-namespacing rather than by ESM U4.
+- `claude-workflow` branch `incoming/bryan-XPS-8950` — **awaiting the ASUS session's union merge.** Until then `scrml-js-codegen-engineer` (the canonical dev-agent) is NOT installed here and every codegen dispatch takes the documented `general-purpose` fallback.
+- All S280 agent worktrees removed at wrap.
 
 ## Tags
-#session-279 #131-each-fence-landed #s279-rulings-shape1-A-estyle001 #wave1c-deferred-to-esm-u4 #cross-chunk-collision-blocker #s277-drift-caught-4-sites #e-async-case1-fixed-case2-deferred #adversarial-gate-3-catches #other-machine-live #next-esm-u4
+#session-280 #claim-gate-u1-u2 #pa-base-v2.4 #s279-option-b-falsified #agent-refusal-correct #verification-wrong-corpus #chunk-namespacing-dispatchable #trigger-3-not-wired
+
+## 🗺️ Maps — REFRESH OWED (explicitly, not silently)
+`.claude/maps/primary.map.md` is stamped **`9481bc69`** (2026-07-21). Main is `f681a777` — the entire ESM arc (U1/U2/U3), the #131 fence model, and all of S280 landed after it. The map cannot see `runtime-esm.ts`, `emit-client-esm.ts`, the `--module-format` flag, `snippet-gate.js`, `facts.ts`, or `FACTS.md`.
+
+**Not refreshed at this wrap, deliberately.** Step 6c wants a `project-mapper` dispatch; firing one at the tail of a very long session risks a poor refresh landing as authoritative navigation, which is worse than a map everyone knows is stale. The S280 U4 dispatch worked around it correctly by enumerating post-map landings in the brief — that is the documented fallback (*"refresh or tell the agent which post-map landings to factor in — a stale map is worse than no map"*).
+
+**Next session: refresh maps early, before any dispatch.**
