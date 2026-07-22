@@ -57,7 +57,7 @@ import { emitMarkupValueExpr } from "./emit-lift.js";
 // Phase-2 colorless-async — the async-callback collection-method combinator
 // transform (DD colorless-async-boundaries §2 position 1, FORK 1). Dependency-
 // neutral, so no import cycle.
-import { ASYNC_COMBINATOR_METHODS, callbackReachesAsync } from "./async-combinators.ts";
+import { ASYNC_COMBINATOR_METHODS, KNOWN_DISCARD_HOF, callbackReachesAsync } from "./async-combinators.ts";
 
 // ---------------------------------------------------------------------------
 // §20.6 (F4=A) — production strip toggle for the log() builtin.
@@ -2746,6 +2746,48 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
         return combinatorCall;
       }
       return `await ${combinatorCall}`;
+    }
+  }
+
+  // KNOWN-DISCARD-HOF colorless-async (S279 over-fire fix) — a BARE-IDENT call to a
+  // global fire-and-forget scheduler that STRUCTURALLY DISCARDS its callback's
+  // return (`setTimeout`/`setInterval`/`setImmediate`/`queueMicrotask`/
+  // `requestAnimationFrame`/`requestIdleCallback` — KNOWN_DISCARD_HOF). An async
+  // callback here has an UNREACHABLE value-coercion hazard (the timer ignores the
+  // return), so instead of fail-closing on the inner async call, MIRROR the
+  // combinator lowering: re-emit the callback lambda ASYNC (`{ ...lambda, isAsync:
+  // true }`) so its inner async call auto-awaits INSIDE the async callback — exactly
+  // as the combinator branch does. The HOF call ITSELF is NOT awaited (it returns a
+  // timer id, not a Promise). A member callee (`obj.setTimeout`) never matches — the
+  // discard semantics are only known for the globals; a shadowing local is excluded
+  // via `declaredNames`. NON-async-lambda args (the delay/options) emit unchanged, so
+  // the common `setTimeout(() => syncFn(), 0)` is byte-identical.
+  if (
+    node.callee.kind === "ident" &&
+    !node.optional &&
+    typeof node.callee.name === "string" &&
+    KNOWN_DISCARD_HOF.has(node.callee.name) &&
+    !(ctx.declaredNames != null && ctx.declaredNames.has(node.callee.name)) &&
+    node.args.length >= 1
+  ) {
+    const isAsyncName = (nm: string) => combinatorIsAsyncName(nm, ctx);
+    const hasAsyncLambdaArg = node.args.some(
+      (a) => a.kind === "lambda" && callbackReachesAsync(a, isAsyncName),
+    );
+    if (hasAsyncLambdaArg) {
+      // clientAsyncBody:true so the CLIENT stdlib auto-await fires in the re-emitted
+      // async callback (mirrors the combinator branch's callback context).
+      const cbCtx: EmitExprContext =
+        ctx.mode === "client" ? { ...ctx, clientAsyncBody: true } : ctx;
+      const hofCallee = emitReceiver(node.callee, ctx);
+      const hofArgs = node.args
+        .map((a) =>
+          a.kind === "lambda" && callbackReachesAsync(a, isAsyncName)
+            ? emitExpr({ ...(a as LambdaExpr), isAsync: true }, cbCtx)
+            : emitExpr(a, ctx),
+        )
+        .join(", ");
+      return `${hofCallee}(${hofArgs})`;
     }
   }
 

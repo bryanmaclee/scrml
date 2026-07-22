@@ -94,14 +94,14 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `568583a2` — wrap(s279): hand-off + changelog + delta-log [715]-[722] + 8 gaps + user-voice tail — **LOCAL-ONLY**
+- `d6cae6c2` — wrap(S278): ESM-chunks arc U1→U3 landed — esm now runs (behind default classic) (#136) — **pushed**
 - `825eec5f` — wrap(S277): normative grounding — 3 PRs + pa-base v2.3 + maps to 9481bc69 (#129) — **pushed**
 - `5823b495` — wrap(S276): Wave-1c PR-1 LANDED (#124) — hand-off/changelog/delta-log/master-list/known-gaps + maps to c48e59a2 + 3 non-compliance fixes (#125) — **pushed**
 - `020485b2` — wrap(S274): freeze-spec campaign COMPLETE — hand-off/changelog/delta-log/known-gaps/master-list + ss75 list-close + partial maps (#123) — **pushed**
 - `d7b63fd5` — wrap(S273): tenant-floor 14.8.10 LANDED (#117/#118) + SSR-leak re-do in flight — hand-off/changelog/delta-log/board bookkeeping (#119) — **pushed**
 - `026b9f25` — wrap(S271): recover S269 continuity + GITI-038/039 landed + tenant-floor RULED (#114) — **pushed**
 - `109f33e9` — wrap(S268): recover S266 continuity + #81 ① writer-ownership landed (#107) — **pushed**
-- `99ae45ca` — wrap(S265): CSS Wave-1 (65) emission + 25 bridge fix landed — hand-off + delta-log [590]-[598] + changelog + master-list 0 + known-gaps + maps stamp + digest-currency (#102) — **pushed**
-- `c82550dd` — wrap(S264): hand-off + delta-log [580]-[589] + changelog S264 + master-list §0 + 4 known-gaps + maps refresh + inbox drain (#94) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
