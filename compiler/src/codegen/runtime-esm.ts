@@ -56,6 +56,20 @@ import * as acorn from "acorn";
  */
 export const REACTIVE_GET_OVERRIDE_SLOT = "__scrml_reactive_get_override";
 
+/**
+ * The shared lift-target global (R2, esm-chunks Unit 2). `_scrml_lift_target` is
+ * a mutable module global that client chunks SET (a bare `_scrml_lift_target =
+ * <el>`, emit-reactive-wiring.ts) before calling `_scrml_lift`, which reads it.
+ * Under classic scripts the bare binding IS `globalThis._scrml_lift_target`; under
+ * ESM a chunk cannot assign this module's binding, so the chunk transform
+ * (emit-client-esm.ts) routes its writes through `globalThis._scrml_lift_target`
+ * and the runtime read consults the same slot. Kept here so both sides name the
+ * identical property. Same-named-on-globalThis (not a `__`-prefixed slot) because
+ * it reads as what it is; classic `let _scrml_lift_target` never lands on
+ * globalThis, so there is no cross-mode collision.
+ */
+export const LIFT_TARGET_GLOBAL = "_scrml_lift_target";
+
 // ---------------------------------------------------------------------------
 // Anchored string replacement helper.
 //
@@ -156,6 +170,28 @@ function applyR1(src: string): string {
     );
   }
   return c.result;
+}
+
+// ---------------------------------------------------------------------------
+// R2 — shared lift-target bridge (esm-chunks Unit 2). The `_scrml_lift`
+// container read consults `globalThis._scrml_lift_target` first (the slot the
+// esm chunk transform writes) before the module-local `let _scrml_lift_target`
+// (the classic fallback, always null under ESM). Chunk-gated (`lift` chunk) →
+// at-most-once. Both anchors live in the same chunk so their presence is joint.
+// ---------------------------------------------------------------------------
+
+const R2_LIFT_TARGET_FIND =
+  `  const container = _scrml_lift_target || document.querySelector("[data-scrml-lift-target]") || document.body;`;
+const R2_LIFT_TARGET_REPL =
+  `  // R2 (esm-chunks) — under ESM a client chunk cannot assign this module's\n` +
+  `  // \`_scrml_lift_target\` binding, so it writes globalThis.${LIFT_TARGET_GLOBAL}\n` +
+  `  // instead; read that slot first, then fall back to the classic module-local.\n` +
+  `  const container = (typeof globalThis !== "undefined" && globalThis.${LIFT_TARGET_GLOBAL})\n` +
+  `    || _scrml_lift_target || document.querySelector("[data-scrml-lift-target]") || document.body;`;
+
+function applyR2(src: string): string {
+  // `_scrml_lift` lives in the tree-shakeable `lift` chunk → at-most-once.
+  return replaceAnchored(src, R2_LIFT_TARGET_FIND, R2_LIFT_TARGET_REPL, "R2 lift-target container read", 0, 1).result;
 }
 
 // ---------------------------------------------------------------------------
@@ -267,6 +303,7 @@ function buildExportBlock(names: string[]): string {
  */
 export function toEsmRuntime(assembledRuntime: string): string {
   let body = applyR1(assembledRuntime);
+  body = applyR2(body);
   body = simplifyRedeclareGuards(body);
   const names = deriveTopLevelExportNames(body);
   return body + buildExportBlock(names);
