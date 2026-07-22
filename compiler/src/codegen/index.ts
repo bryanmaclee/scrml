@@ -331,10 +331,24 @@ function computeDependencyClientScripts(
 ): string[] {
   if (!importGraph || !entryFilePath) return [];
 
+  // Source-relative path → the path the artifact ACTUALLY occupies in dist.
+  // The dist layout STRIPS a leading `pages/` segment (a `pages/X/` source
+  // emits at dist `X/` — same rule the per-page `upToRoot` derivation applies
+  // below). Modelling that strip here is load-bearing: without it the entry
+  // side carries a `pages/` segment the dist tree does not have while a
+  // root-level dep carries none, and the asymmetry inflates every cross-file
+  // `<script src>` by one `../` — emitting refs that escape the dist root
+  // entirely (S280: `dist/dispatch/board.html` asked for
+  // `../../schema.client.js`, i.e. a sibling of dist, and 404'd on every
+  // cross-file dependency of every nested route). POSIX-normalized first so a
+  // native `\` cannot defeat the match on Windows.
+  const toDistRel = (absPath: string): string =>
+    relative(outputBaseDir!, absPath)
+      .replace(/\\/g, "/")
+      .replace(/^pages(?:\/|$)/, "");
+
   // Dist dir of the entry HTML — `<script src>` paths are relative to it.
-  const entryDistDir = outputBaseDir
-    ? dirname(relative(outputBaseDir, entryFilePath))
-    : "";
+  const entryDistDir = outputBaseDir ? dirname(toDistRel(entryFilePath)) : "";
 
   const ordered: string[] = []; // absolute .scrml dep paths, deps-first
   const done = new Set<string>();
@@ -376,14 +390,24 @@ function computeDependencyClientScripts(
   visit(entryFilePath);
 
   // Map each dep's absolute .scrml path to a `<script src>` relative to the
-  // entry HTML's dist dir. Both the dep + entry dist paths are
-  // `relative(outputBaseDir, ...)`, so the inter-file relative path is stable
-  // regardless of nesting depth (handles the shell-composition `upToRoot` case
-  // by construction). Fallback (no outputBaseDir): basename siblings.
+  // entry HTML's dist dir. BOTH sides go through `toDistRel`, so both model the
+  // same dist layout (incl. the `pages/` strip) and the inter-file relative path
+  // is stable regardless of nesting depth. Fallback (no outputBaseDir):
+  // basename siblings.
+  //
+  // NOT claimed: agreement with the per-page composition `upToRoot`
+  // (~`index.ts:2311`). That anchors on `relative(dirname(entryFilePath), …)`
+  // while this anchors on `relative(outputBaseDir, …)` (which is what `pathFor`
+  // uses, i.e. the real dist layout). The two coincide only when the entry sits
+  // at `outputBaseDir` or `outputBaseDir/pages`; a shell entry in some OTHER
+  // subdir makes them disagree, and `upToRoot` is the one that is wrong there
+  // (S280 finder-B fixture: a `shell/app.scrml` entry emits `../../app.css`
+  // from a root-level route, escaping dist). Tracked separately — this function
+  // does not fix it and must not be read as doing so.
   return ordered.map((depAbs) => {
     const depClient = depAbs.replace(/\.scrml$/, ".client.js");
     if (!outputBaseDir) return basename(depClient);
-    const depDist = relative(outputBaseDir, depClient);
+    const depDist = toDistRel(depClient);
     // Relative path from the entry HTML's dist dir to the dep's dist file,
     // POSIX-normalized. A same-dir sibling yields a bare basename (matching the
     // entry's own `<script src="${base}.client.js">` form); a nested dep yields
