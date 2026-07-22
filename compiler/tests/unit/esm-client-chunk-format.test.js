@@ -354,28 +354,68 @@ describe("§5 runtime R2 — shared lift-target bridged through globalThis (U1-g
   });
 });
 
-describe("§6 U3 BLOCKER — build+esm content-hash must rewrite in-chunk import URLs", () => {
-  // PINNED, SKIPPED requirement (known-gap `g-esm-build-content-hash-import-urls`,
-  // MED, DEFERRED to U3). `scrml build --module-format=esm` content-hashes the
-  // chunk FILES (`x.client.js` → `x.client.<hash>.js`) and rewrites the HTML
-  // <script src> refs, but NOT the in-chunk ES `import` specifiers U2 emits — so a
-  // cross-chunk `import * as __scrml_dep_0 from "./types.client.js"` points at the
-  // PRE-hash name → 404 on disk → dead module graph. Harmless today (the esm path
-  // is browser-DOA + `W-MODULE-FORMAT-ESM-INCOMPLETE`-warned until U3). U3 must
-  // extend the content-hash rewrite to in-chunk import URLs (or hard-gate
-  // build+esm), then UN-SKIP this test.
-  test.skip("every cross-chunk import specifier in a build+esm chunk resolves on disk", () => {
+// Build-mode chunk finder: content-hashing renames `x.client.js` →
+// `x.client.<hash>.js`, so the compile-mode `clientChunks` (`.client.js` tail)
+// finds NOTHING in a build output. Match either shape so the §6 assertions are
+// real, not vacuous.
+function buildClientChunks(dir) {
+  const found = [];
+  const walk = (d) => {
+    for (const n of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, n.name);
+      if (n.isDirectory()) walk(p);
+      else if (/\.client(?:\.[0-9a-z]+)?\.js$/.test(n.name)) found.push(p);
+    }
+  };
+  walk(dir);
+  return found;
+}
+
+describe("§6 U3 — build+esm content-hash rewrites the in-chunk ES import URLs", () => {
+  // RESOLVED known-gap `g-esm-build-content-hash-import-urls`. `scrml build
+  // --module-format=esm` content-hashes the chunk FILES (`x.client.js` →
+  // `x.client.<hash>.js`) + the HTML <script src> refs; U3 (api.js
+  // `rewriteChunkImportRefs`) now also rewrites the in-chunk ES `import`
+  // specifiers so a cross-chunk `import * as __scrml_dep_0 from "./x.client.js"`
+  // points at the ON-DISK hashed name instead of the 404-ing pre-hash name.
+  test("every cross-chunk import specifier in a build+esm chunk resolves on disk", () => {
     const src = MF_EXAMPLE;
-    const out = freshDir("scrml-u2-build-esm-");
+    const out = freshDir("scrml-u3-build-esm-");
     const r = spawnSync("bun", [CLI, "build", src, "--output", out, "--module-format=esm"], { encoding: "utf8" });
     expect(r.status).toBe(0);
-    for (const chunk of clientChunks(out)) {
+    const chunks = buildClientChunks(out);
+    // Guard against a vacuous pass: build+esm MUST content-hash the chunk files
+    // (a plain `.client.js` here would mean the build path was not exercised).
+    expect(chunks.length).toBeGreaterThan(0);
+    expect(chunks.every((c) => /\.client\.[0-9a-z]+\.js$/.test(c))).toBe(true);
+    let importsChecked = 0;
+    for (const chunk of chunks) {
       const dir = chunk.slice(0, chunk.lastIndexOf("/"));
       const srcText = readFileSync(chunk, "utf8");
       for (const m of srcText.matchAll(/import (?:\* as \w+|\{[^}]*\}) from "(\.\.?\/[^"]+)"/g)) {
+        importsChecked++;
         const resolved = join(dir, m[1]);
-        expect(existsSync(resolved)).toBe(true); // FAILS today: spec is the pre-hash name
+        expect(existsSync(resolved)).toBe(true);
       }
     }
+    // 22-multifile cross-imports (app→types, app→components) + the runtime
+    // import must actually have been checked — proves the rewrite ran.
+    expect(importsChecked).toBeGreaterThan(0);
+  });
+
+  test("cross-chunk imports point at the HASHED dep name, not the pre-hash `.client.js`", () => {
+    const src = MF_EXAMPLE;
+    const out = freshDir("scrml-u3-build-esm-hashed-");
+    const r = spawnSync("bun", [CLI, "build", src, "--output", out, "--module-format=esm"], { encoding: "utf8" });
+    expect(r.status).toBe(0);
+    let sawCrossChunkImport = false;
+    for (const chunk of buildClientChunks(out)) {
+      for (const m of readFileSync(chunk, "utf8").matchAll(/import \* as \w+ from "(\.\.?\/[^"]+\.client\.[^"]+)"/g)) {
+        sawCrossChunkImport = true;
+        // The rewritten specifier carries an 8-char content hash before `.js`.
+        expect(m[1]).toMatch(/\.client\.[0-9a-z]{8}\.js$/);
+      }
+    }
+    expect(sawCrossChunkImport).toBe(true);
   });
 });

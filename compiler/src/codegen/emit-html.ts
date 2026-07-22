@@ -3885,6 +3885,13 @@ export interface HtmlAugmentInput {
    * `console.warn` path in `_scrml_prefetch_tier2`.
    */
   epIdToRoutePath: Map<string, string>;
+  /**
+   * ESM chunks arc (Unit 3) — client runtime module format. Under `"esm"` the
+   * per-role initial chunk is an ES module, so the role-bootstrap injects a
+   * `<script type="module">` (a classic script throws on the chunk's `import`).
+   * Default `"classic"` injects a plain deferred classic script → byte-identical.
+   */
+  moduleFormat?: "classic" | "esm";
 }
 
 /**
@@ -3922,6 +3929,7 @@ export interface HtmlAugmentInput {
  */
 export function augmentHtmlForChunks(input: HtmlAugmentInput): string {
   const { html, chunks, fileEntryPointIds, epIdToRoutePath } = input;
+  const moduleFormat = input.moduleFormat ?? "classic";
 
   // No entry points belong to this file → no augmentation possible.
   // Return the input HTML unchanged for byte-identity preservation
@@ -4035,6 +4043,14 @@ export function augmentHtmlForChunks(input: HtmlAugmentInput): string {
   // document-order alongside any other deferred scripts (the
   // per-file `.client.js` etc.).
   //
+  // ESM chunks arc (Unit 3): under `--module-format=esm` the chunk is an ES
+  // module, so the injected script is marked `s.type = "module"` (a classic
+  // injected script throws on the chunk's `import`). Module scripts are always
+  // deferred, so `s.defer` is redundant-but-harmless there. Classic (default)
+  // injects the plain deferred classic script → byte-identical to pre-arc.
+  const bootstrapModuleTypeLine =
+    moduleFormat === "esm" ? `\n      s.type = "module";` : "";
+  //
   // When no chunk URL is found for the resolved role + active route,
   // the bootstrap warns to the console and proceeds — the per-file
   // `.client.js` continues to load, so the page degrades to the
@@ -4075,7 +4091,7 @@ export function augmentHtmlForChunks(input: HtmlAugmentInput): string {
         return;
       }
       var s = document.createElement("script");
-      s.src = chunkUrl;
+      s.src = chunkUrl;${bootstrapModuleTypeLine}
       s.defer = true;
       document.head.appendChild(s);
     })();

@@ -64,11 +64,11 @@ Options:
   --mode <mode>           Output mode: browser (default) or library
   --module-format=<fmt>   Client runtime module format: classic (default) or esm.
                           classic emits the shared runtime as a <script src> body
-                          (byte-identical to prior output). esm is EXPERIMENTAL and
-                          not yet browser-loadable (module <script> tags + chunk
-                          imports land in a later unit) — it emits an ES-module
-                          runtime but the app will not run in a browser yet.
-                          Emitted-JS shape only; adopter source unchanged.
+                          (byte-identical to prior output). esm emits the runtime
+                          + chunks as ES modules with type="module" tags; the app
+                          runs in a browser but esm is EXPERIMENTAL/opt-in — classic
+                          is the only conformance-tested path. Emitted-JS shape
+                          only; adopter source unchanged.
   --self-host             Use compiled scrml modules (requires build-self-host.js)
   --parser=scrml-native   Opt-in native-parser routing (M5-swap C2). When set,
                           the per-file parse is driven by the native parser
@@ -469,9 +469,9 @@ function runOnce(opts, selfHostModules = null) {
     }
   }
 
-  // ESM chunks arc (Unit 1) — operational heads-up when --module-format=esm is
-  // selected: the esm runtime is not yet browser-loadable (module <script> tags
-  // + chunk imports are a later unit). Empty for classic → default prints
+  // ESM chunks arc — operational heads-up when --module-format=esm is selected:
+  // esm now runs in a browser (Unit 3) but is experimental/opt-in; classic is
+  // the only conformance-tested path. Empty for classic → default prints
   // nothing. NOT a §34 source diagnostic.
   for (const line of moduleFormatNotices(moduleFormat, embedRuntime)) {
     console.error(c.yellow(line));

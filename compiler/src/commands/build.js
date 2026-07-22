@@ -38,8 +38,9 @@ Arguments:
 Options:
   --output, -o <dir>        Output directory (default: dist/ next to input)
   --module-format=<fmt>     Client runtime module format: classic (default) or esm
-                            (esm is experimental — not browser-loadable until
-                            chunk-module support lands in a later unit)
+                            (esm emits ES modules + type="module" tags and runs in
+                            a browser, but is experimental/opt-in; classic is the
+                            only conformance-tested path)
   --embed-runtime           Embed runtime inline instead of writing a separate file
   --minify                  Accepted flag (minification is a Phase 2 feature)
   --verbose, -v             Per-stage timing and counts
@@ -707,9 +708,9 @@ export async function runBuild(args) {
   const targetLabel = opts.target ? ` [--target ${opts.target}]` : "";
   console.log(`scrml build — compiling ${inputFiles.length} file(s)...${targetLabel}`);
 
-  // ESM chunks arc (Unit 1) — operational heads-up when --module-format=esm is
-  // selected (esm runtime is not yet browser-loadable; module <script> tags +
-  // chunk imports are a later unit). Empty for classic. NOT a §34 diagnostic.
+  // ESM chunks arc — operational heads-up when --module-format=esm is selected
+  // (esm now runs in a browser as of Unit 3, but is experimental/opt-in; classic
+  // is the only conformance-tested path). Empty for classic. NOT a §34 diagnostic.
   for (const line of moduleFormatNotices(opts.moduleFormat, opts.embedRuntime)) {
     console.error(line);
   }
