@@ -1,0 +1,20 @@
+<program>
+  ${
+    const <items> = [{ id: 1, label: "Alice" }, { id: 2, label: "Bob" }]
+    const <picked> = ""
+  }
+
+  <!-- BUG (#131): the each mount emits <div data-scrml-each-mount> inside <select>, -->
+  <!-- which the "in select" parser mode DROPS → empty dropdown in Firefox. -->
+  <select bind:value=@picked>
+    <option value="">Select…</option>
+    <each in=@items as it key=@.id>
+      <option value=${it.id}>${it.label}</option>
+    </each>
+  </select>
+
+  <!-- CONTROL: identical each in a legal parent renders fine everywhere. -->
+  <div>
+    <each in=@items as it key=@.id><span>${it.label}</span></each>
+  </div>
+</program>

@@ -88,6 +88,8 @@ const <badge>       = <span class="badge">${@userName}</span>   // markup-typed
 
 `<derivedName/>` in markup with a non-markup-typed derived cell is `E-CELL-NO-RENDER-SPEC`.
 
+**Shape 1 is the non-markup value door.** Display-only markup on a Shape-1 (writable) RHS — `<thing> = <span>hi</span>` — is **`E-CELL-RENDER-SPEC-NOT-BINDABLE`**: use `const` (Shape 3) for display-only markup, Shape 2 for input-bound. A markup value reaches a cell by **derivation / binding / state-keying — never imperative reassignment** (the reactive-first grain). The **five declarative doors** markup enters through (§1.4, S279 ruling — an exhaustive, non-overlapping partition): **Component** (`<Foo>` reuse), **Bindable cell** (Shape 2, input value), **Derived cell** (Shape 3, recomputed), **Enum `renders`** (state-keyed, exhaustive — the home for "swap between a fixed set of markups"), **Iteration** (`<each>`, per-item). A writable markup cell is a redundant sixth door → deliberately rejected.
+
 **Optional `default=` attribute** — any cell may declare an explicit reset target: `<startTime default=not> = Date.now()`.
 
 **Optional `debounced=DURATION` / `throttled=DURATION` attributes (S79; SPEC §6.13)** — any Shape 1 or Shape 2 cell may carry one of two reactivity attributes that wrap the cell's write path with timing semantics:
