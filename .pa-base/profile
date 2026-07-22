@@ -23,8 +23,14 @@ STAGE:  V1 = scrml-LANGUAGE 1.0 (compilers decoupled). Critical path = language 
         NOT big feature builds. In flight: the language/compiler SPLIT (mitosis) + Road-B impl#2
         (compiler/self-host-v2/). Adopter-driven thread: flogence 100%-scrml (standalone-tool §64 +
         W5b in-process db library).
-SCOPE:  large — compiler/src ~24.7K LOC · SPEC.md ~24K lines/~410k tokens · ~26.6K tests ·
-        18 stdlib modules · samples/ + examples/ · lsp/ + editors/. Single operator (bryan) / two machines.
+SCOPE:  large. **Derived figures live in `docs/FACTS.md` (generated; `bun scripts/facts.ts --check`
+        gates it in CI) — do NOT hardcode them here.** S280: this line claimed "compiler/src ~24.7K LOC ·
+        SPEC.md ~24K lines · 18 stdlib modules"; the real values were ~225K, 36,114 and 21 — a ~9× miss
+        on the first, read at every boot and reasoned from all session. A derived number in a maintained
+        doc rots silently and nothing fails; that is the whole reason FACTS.md exists.
+        Non-derived shape (stable, safe to state): samples/ + examples/ · lsp/ + editors/ · conformance/ ·
+        18 spa-lists · a second in-progress implementation (compiler/self-host-v2) + an opt-in native
+        parser (compiler/native-parser, behind `--parser=scrml-native`). Single operator (bryan) / two machines.
 GATE:   tests-as-gate (stable infra) + runtime-verify (codegen) + types (always-on).
   - pre-commit hook: `bun test compiler/tests/{unit,integration,conformance} --bail` (0 failures = contract).
   - pre-push (config B, this machine): RELAXED (S254) — a NEW-REF feature-branch push SKIPS the full suite
