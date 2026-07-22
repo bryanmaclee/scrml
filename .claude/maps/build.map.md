@@ -1,6 +1,6 @@
 # build.map.md
 # project: scrml
-# updated: 2026-07-18T08:36:53-06:00  commit: 99ae45ca
+# updated: 2026-07-22T17:10:00Z  commit: a0344d75
 
 ## Development Commands (root package.json scripts)
 compile — `bun run compiler/src/cli.js compile`
@@ -16,18 +16,18 @@ e2e / e2e:ui / e2e:docs — Playwright suites (playwright.config.ts / playwright
 e2e:install — `playwright install chromium firefox webkit`
 
 ## scrml CLI subcommands (compiler/src/cli.js -> commands/*.js)
-compile, dev, build, serve, migrate, promote, generate, init, introspect, semdiff. No subcommand added/removed this window (S265) — `build`/`dev` gained internal cache/content-hash behavior (see below), not new flags.
+compile, dev, build, serve, migrate, promote, generate, init, introspect, semdiff (10 verbs — the figure `docs/FACTS.md` derives from `compiler/src/commands/`). No subcommand added or removed. **`compile`, `dev` and `build` each gained `--module-format=<classic|esm>` this window** (see below).
 
 ### `scrml compile` flags
---parser (live|scrml-native), --mode, --output/--output-dir, --watch, --embed-runtime, --self-host, --convert-legacy-css, --prod/--production (§20.6.5 log() strip), --validate-emit/--no-validate-emit, --no-gather, --debug-perf, --verbose, --chunk-size-budget, --emit-batch-plan, --emit-block-analysis, --emit-engine-graph, --emit-reachability, --emit-token-set, --emit-per-route, --emit-machine-tests, --help.
+--parser (live|scrml-native), --mode, --output/--output-dir, --watch, --embed-runtime, --self-host, --convert-legacy-css, --prod/--production (§20.6.5 log() strip), --validate-emit/--no-validate-emit, --no-gather, --debug-perf, --verbose, --chunk-size-budget, --emit-batch-plan, --emit-block-analysis, --emit-engine-graph, --emit-reachability, --emit-token-set, --emit-per-route, --emit-machine-tests, **--module-format=<classic|esm>**, --help.
 `compileScrml()` (compiler/src/api.js) gained an internal `contentHashAssets` option (default `false`) — NOT a CLI flag; `scrml compile`'s output stays byte-identical (un-hashed `.client.js`/`.css` names) so the dev/inspection path and every disk-reading test are unaffected. See "Content-addressed build assets" below.
 
 ### `scrml dev` flags
---port, --idle-timeout <n> (configurable Bun.serve idleTimeout, default 120s), --embed-runtime, --convert-legacy-css, --validate-emit/--no-validate-emit, --no-gather, --verbose, --help.
+--port, --idle-timeout <n> (configurable Bun.serve idleTimeout, default 120s), --embed-runtime, --convert-legacy-css, --validate-emit/--no-validate-emit, --no-gather, --verbose, **--module-format=<classic|esm>**, --help.
 `scrml dev` now attaches cache headers to every static response (see below) — no new flag gates this; it is always on.
 
 ### `scrml build` flags
---target, --minify, --output, --idle-timeout, --embed-runtime, --copy-config, --validate-emit/--no-validate-emit, --verbose, --help.
+--target, --minify, --output, --idle-timeout, --embed-runtime, --copy-config, --validate-emit/--no-validate-emit, --verbose, **--module-format=<classic|esm>**, --help.
 `scrml build` now calls `compileScrml({ ..., contentHashAssets: true })` unconditionally (no opt-out flag) and threads the returned `hashedAssets` set into the generated `_server.js` (see below).
 
 ### `scrml semdiff <base> <head>` flags (the #6b P0 semantic-diff primitive, landed S264)
@@ -36,6 +36,56 @@ Classify a change between two .scrml versions by AXIS + soundness TIER — never
 --json                 Structured JSON output (the consumer review-row / merge input).
 --help, -h.
 Both versions are compiled in-process (full pipeline, write:false); the synthesized top-level `verdict` field is the single value a consumer keys on. Exit codes: **0** = cosmetic (no-op on every modeled axis) · **1** = behavioral (a change on some axis; gate/review stays consumer-side) · **2** = a version failed to compile (fail-closed — the compiler is the first reviewer). Consumers: giti MERGE, flogence REVIEW. Classifier math lives in `compiler/src/semdiff.ts` (pure, unit-tested); the command is the I/O shell.
+
+## `--module-format=classic|esm` (NEW — ESM-chunks arc U1-U3)
+
+Selects the CLIENT module format. Accepted on `compile`, `dev` and `build`, in both the
+`--module-format=esm` and `--module-format esm` shapes; any other value is a hard exit with
+`Unknown --module-format value: "<x>". Valid values: classic, esm`. Parsed in each command's arg
+loop (compile.js:273, dev.js:92, build.js:91) and threaded to `compileScrml({ moduleFormat })`
+(api.js:822) -> `runCG` (codegen/index.ts:156/:837).
+
+- **`classic` is the DEFAULT and the only conformance-tested path.** The client runtime is a
+  non-module `<script src>` sharing one global scope with every page chunk; cross-file linkage goes
+  through the global `_scrml_modules` registry. Every esm transform is gated, so classic output is
+  byte-identical to pre-arc output.
+- **`esm`** emits the runtime as an ES module with a derived `export {…}` surface, each client chunk
+  as an ES module that namespace-imports its deps and the runtime subset it uses, `type="module"` on
+  the emitted `<script>` tags, and (on the build path) content-hashed in-chunk import URLs. A full
+  esm app RUNS in a browser. Still EXPERIMENTAL: the module-capable browser-test harness and the
+  default-flip are not built.
+- **`esm` + `--embed-runtime` = no effect** — the embedded runtime stays a classic script.
+- Selecting esm prints an operational stderr notice keyed **`W-MODULE-FORMAT-ESM-INCOMPLETE`**
+  (`compiler/src/commands/module-format-notice.js`). It is deliberately NOT a §34 catalog code and
+  never enters the diagnostic stream or the compile result; classic prints nothing.
+
+## Public-claim gates (NEW — S280)
+
+Three scripts, two of them CI-required. They exist because a public claim that was true when
+written rots silently.
+
+- **`scripts/snippet-gate.js`** — GATE. Discovers every `.scrml` under a declared corpus
+  (`SNIPPET_CORPUS = ["docs/tutorial-snippets", "docs/readme-snippets"]`; 12 files today) and
+  compiles each through `compiler/bin/scrml.js compile` into a temp dir; exit 1 on any failure.
+  Modes: default gate, `--list` (print the corpus, compile nothing), explicit paths (override the
+  corpus). Real files, not fenced blocks, and no opt-out marker — an opt-out gate under fragment
+  pressure degrades to zero coverage. **Wired into CI `gate` and the release-tag `pre-push` hook.**
+- **`scripts/facts.ts`** — generator + checker for `docs/FACTS.md`. `bun scripts/facts.ts` prints,
+  `--write` regenerates the `@generated:*` anchored sections in place (idempotent), `--check`
+  regenerates in memory and exits 1 on any stale section. **`--check` is wired into CI `gate`.**
+  Derives: compiler version, live compiler LOC + file count (`compiler/src`), test files
+  (`compiler/tests/**.test.js`), SPEC lines, conformance cases (`expected.json` under
+  `conformance/cases`), stdlib modules, CLI verbs, LSP capabilities, editor integrations, deploy
+  targets, gated snippets. Deliberately EXCLUDES anything that changes without a commit (GitHub
+  stars, issue counts, test PASS counts) and the §34 diagnostic total (not reliably extractable).
+  **A public doc SHALL cite FACTS.md rather than hardcode any of these figures.**
+- **`scripts/claim-gate.js`** — the fenced-block (C1) half: extracts ```scrml fences from a declared
+  PUBLIC_SURFACE, compiles + ghost-pattern-lints each, `// gate: skip` opt-OUT. Modes: default gate,
+  `--report` (MEASURE a surface without failing). **Not wired into CI** — the measured fence
+  approach scored 92/149 failures dominated by narrative-fragment artifacts, which is why
+  snippet-gate (real files) is the CI-required gate. Deliberately does NOT gate
+  `handOffs/incoming/**` (bug reproducers), `compiler/SPEC.md` (error demos), or `docs/changes/**`.
+- `scripts/extract-readme-scrml.js` (the S101 README gate) is **DELETED** — superseded by the above.
 
 ## Content-addressed build assets + cache headers (NEW S265, adopter #82, PR #96)
 
@@ -87,7 +137,7 @@ integration test: `compiler/tests/integration/i82-content-hash-cache-headers.tes
 ## CI/CD Pipeline  [.github/workflows/ci.yml]
 Three jobs, "gate-layering" model (types → pre-commit fast subset → CI-here → PA judgment):
 
-**gate** — BLOCKING (the merge-gate). checkout → setup-bun → `bun install --frozen-lockfile` → `bun run pretest` → `bun test compiler/tests/unit compiler/tests/conformance` (reproducibly-green-from-source core) → gauntlet quick check (compile benchmarks/todomvc/app.scrml, `node --check` the emitted client.js).
+**gate** — BLOCKING (the merge-gate). checkout → setup-bun → `bun install --frozen-lockfile` → `bun run pretest` → `bun test compiler/tests/unit compiler/tests/conformance` (reproducibly-green-from-source core) → gauntlet quick check (compile benchmarks/todomvc/app.scrml, `node --check` the emitted client.js) → **`bun scripts/snippet-gate.js`** (every public-cited `.scrml` still compiles) → **`bun scripts/facts.ts --check`** (published figures still match the repo). The last two steps are NEW this window.
 Triggers: push (paths-ignore: **.md, handOffs/**, docs/**) and pull_request. `concurrency: group ci-${{ref}}, cancel-in-progress: true`.
 
 **tracking** — NON-BLOCKING (`continue-on-error: true`). integration + lsp + commands tests, browser tests (known real fails tracked, not gated), and the parser-conformance-within-node.test.js M6.x native-parser-migration backlog. Same checkout/install/pretest steps as gate.
@@ -96,7 +146,7 @@ Triggers: push (paths-ignore: **.md, handOffs/**, docs/**) and pull_request. `co
 
 Rationale banner in the workflow (S253): the prior single-job CI ran the FULL suite and went red on known self-host/within-node backlog (self-host tests need a locally-built, non-reproducible-from-source dist) — untrustworthy as a merge gate. `gate` is now the guaranteed-green-from-source core only.
 
-No workflow file changed this window (S265) — the #82/#29-D/#27/CSS-Wave-1 PRs are source+test only.
+`.github/workflows/ci.yml` CHANGED this window: the two claim-gate steps above were appended to `gate`. No other workflow change.
 
 ## CI/CD Pipeline  [.github/workflows/advisory-review.yml]
 **ai-review** job — non-blocking second-opinion AI `/code-review` on every code PR (deliberately NOT in branch-protection required checks; comments only, never fails the PR).
@@ -108,13 +158,13 @@ Runs `anthropics/claude-code-action@v1` with the packaged `/code-review` skill a
 
 ## Git Hooks (source-controlled, `.git/hooks/pre-commit` + `pre-push`; install via `scripts/git-hooks/install.sh`)
 pre-commit — runs `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail` (~2min, excludes browser/e2e/self-host); warns (non-blocking) on direct commits to `main`.
-pre-push — full test suite (`bun test compiler/tests/`) + gauntlet quick check (TodoMVC compile + emitted-JS parse check); refreshes samples/compilation-tests/ fixtures first (stale fixtures previously faked ~9 browser-suite failures, S250); README-vs-source extraction gate (`scripts/extract-readme-scrml.js`) ONLY on a `refs/tags/v*` release-tag push.
+pre-push — full test suite (`bun test compiler/tests/`) + gauntlet quick check (TodoMVC compile + emitted-JS parse check); refreshes samples/compilation-tests/ fixtures first (stale fixtures previously faked ~9 browser-suite failures, S250); and the **public snippet gate (`scripts/snippet-gate.js`)** ONLY on a `refs/tags/v*` release-tag push (re-pointed from the deleted `scripts/extract-readme-scrml.js`; snippet-gate also runs in CI `gate` on every push, so the hook is the release-tag second net).
 
 ## Docker
 None. No Dockerfile / docker-compose in this repo — see infra.map.md.
 
 ## Tags
-#scrml #map #build #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82
+#scrml #map #build #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims
 
 ## Links
 - [primary.map.md](./primary.map.md)

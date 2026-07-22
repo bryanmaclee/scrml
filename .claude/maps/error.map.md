@@ -1,9 +1,9 @@
 # error.map.md
 # project: scrml
-# updated: 2026-07-21T13:40:00Z  commit: 9481bc69
+# updated: 2026-07-22T17:10:00Z  commit: a0344d75
 
 ## Diagnostic Catalog (SPEC §34, `compiler/SPEC.md:18010-18723`)
-**787 distinct diagnostic codes** cataloged in §34 at `9481bc69` (`compiler/SPEC.md:18204-19033`,
+**787 distinct diagnostic codes** cataloged in §34 at `a0344d75` (re-extracted this pass; UNCHANGED from `9481bc69` — the ESM-chunks arc, the #131 each-fence model and the S280 claim-gate landings added **ZERO** catalog codes between them) (`compiler/SPEC.md:18204-19033`,
 main table + the §34.1 native-parser sub-table at :18925). §34 is a lookup index only — each code's
 normative definition lives in the SPEC section that introduces it (cited in the table's Section
 column). Do not enumerate all codes here; grep `compiler/SPEC.md` for a specific `E-XXX`/`W-XXX`/
@@ -45,22 +45,33 @@ total 787.
   `SPEC.md:18512`). Zero removed. #126 and #128 added ZERO codes — both are behavior/scope
   corrections to codes that already existed.
 
-`W-EACH-TABLE-FOSTER` (#115) remains a Stage-6.4f info-lint with no §34 row (no count impact).
+**`W-EACH-TABLE-FOSTER` is RETIRED and DELETED (#131).** It was a Stage-6.4f info-lint with no §34
+row, so the retirement has no count impact — but the code, its module
+(`compiler/src/lint-w-each-table-foster.js`), its Stage 6.4f wiring and its unit test are all gone.
+The `<each>` mount is now a parse-safe comment fence, so the foster/drop condition the lint warned
+about cannot occur; warning would be a false positive. Do not re-add it.
+
+**`W-MODULE-FORMAT-ESM-INCOMPLETE` is NOT a diagnostic code.** It is an OPERATIONAL stderr notice
+key printed by `compiler/src/commands/module-format-notice.js` when `--module-format=esm` is
+selected. It has no §34 row by design (the freeze-gated catalog is for language-level diagnostics,
+not internal build-flag state), never enters `result.errors`/`result.warnings`, and must not be
+counted or asserted on as a compiler diagnostic.
 
 **Two catalog-vs-impl defects the audit surfaced — both open, both filed in
 non-compliance.report.md:**
-1. The `E-STYLE-001` row (`SPEC.md:18516`) reads "CSS: syntax error in `#{}` style block", but the
-   code rejects the `<style>` ELEMENT (`block-splitter.js:3475-3495`). The row describes a trigger
-   the compiler does not have — and it now sits four rows below the new, accurate `E-SCRIPT-001`
-   row that explicitly calls itself "the symmetric twin of `<style>` -> `E-STYLE-001`".
-2. **Nine LIVE `W-LINT-*` codes have no §34 row at all** — `W-LINT-016` through `W-LINT-024`, all
+1. ~~The `E-STYLE-001` row describes a trigger the code does not fire~~ — **RESOLVED at this HEAD.**
+   The §34 row was corrected (S279/S280): it now reads "`<style>` element in scrml source … the
+   symmetric twin of `<script>` → `E-SCRIPT-001` (§4.17)", records the exact-match + scan-to-close
+   recovery, the `--convert-legacy-css` hint, and the SOURCE-side-only scope. The row and
+   `block-splitter.js` now agree.
+2. **STILL OPEN — nine LIVE `W-LINT-*` codes have no §34 row at all** — `W-LINT-016` through `W-LINT-024`, all
    real `code:` emit sites in `src/lint-ghost-patterns.js` (:1024, :1072, :1097 … :1299; 26 emit
    sites across the module). §34 catalogs only `W-LINT-001..008` + `010..015`. So the true count of
    codes the compiler can EMIT exceeds the catalog count; 787 is a count of §34, not of the
    implementation.
 
 **NOT implemented — do not add.** `W-NAV-CHUNK-LOAD-FAILED` has ZERO occurrences in
-`compiler/src/` (re-grepped at 9481bc69) and NO §34 row. Wave-1c pieces 2+3 (cross-chunk
+`compiler/src/` (re-grepped at `a0344d75`) and NO §34 row. Wave-1c pieces 2+3 (cross-chunk
 navigation) are HELD, not landed — see `docs/changes/navigate-wave1c-cross-chunk/` (a correctly
 parked dispatch archive describing UNBUILT work). A doc naming this code describes planned work.
 
@@ -107,13 +118,37 @@ parked dispatch archive describing UNBUILT work). A doc naming this code describ
 | **Client Router / outlet (§20.8, +1 #124)** | E-OUTLET-DUPLICATE / E-OUTLET-OUTSIDE-SHELL / **E-OUTLET-AND-MAIN** / W-OUTLET-ABSENT-SOFT-NAV-DISABLED | **4** | symbol-table.ts PASS 15.5 `walkValidateOutlets` (:10210) -> `collectOutlets` (:10318, TOTAL walk since #126) (all three E-codes); W-OUTLET-ABSENT-SOFT-NAV-DISABLED fires at the ast-builder.js filesystem-inference site alongside W-PROGRAM-SPA-INFERRED |
 | Async/stdlib callback | E-ASYNC-* | 2 | async-stdlib-in-sync-callback guard, codegen/emit-server.ts, codegen/emit-expr.ts (client-mode sink) |
 | Server-derived marshal | W-SERVER-* | 2 | server-fn / client-cell split, §6.6.9 |
-| Table-context `<each>` foster (#115, info-lint, NOT §34-catalogued) | W-EACH-TABLE-FOSTER | 1 | lint-w-each-table-foster.js, wired api.js:2218 Stage 6.4f |
+| ~~Table-context `<each>` foster~~ | ~~W-EACH-TABLE-FOSTER~~ | **0 — RETIRED** | The code, its module `lint-w-each-table-foster.js` and its api.js Stage 6.4f wiring are DELETED (#131). Nothing emits it. No §34 impact (it never had a row). |
 | CSS (§65 native model) | E-STYLE-* / W-STYLE-* / E-THEME-* / E-DEFAULTS-* | 4 live (E-STYLE-001, E-STYLE-CONFLICT, W-STYLE-CONFLICT-POSSIBLE, E-THEME-TOKEN-UNKNOWN) | **E-STYLE-001 at block-splitter.js:3475** (rejects the `<style>` ELEMENT — NOT what its §34 row says, see the audit above); codegen/css-conflict-check.ts, api.js Stage 3.4 (§65.2); codegen/emit-theme-reset.ts (§65.3.2/§65.6) |
 | **Foreign element rejection (§4.17, NEW #127)** | **E-SCRIPT-001** | **1** | **block-splitter.js:3498-3528** — the markup-opener path, immediately after the `<style>`/E-STYLE-001 branch. Exact `===` tag compare (never a prefix) so `<noscript>` is untouched; recovery scans to a case-insensitive `</script>` or EOF so a brace-heavy JS body does not cascade. SOURCE-side only — the emitter's own `<script src=…>` tags are produced downstream of BS |
 | **Cell render-spec (§6.2/§6.6.17)** | E-CELL-NO-RENDER-SPEC / **E-CELL-RENDER-SPEC-NOT-BINDABLE** / E-CELL-OUT-OF-SCOPE | 3 | symbol-table.ts — **two different scopes, deliberately** (#128): `E-CELL-NO-RENDER-SPEC` is USE-scoped (PASS 5 `walkRenderByTagUses` :3060 -> `checkRenderByTag` :3000); `E-CELL-RENDER-SPEC-NOT-BINDABLE` is **DECL-scoped** (PASS 5a `walkNonBindableMarkupDecls` :2892 -> `checkDeclRenderSpecBindable` :2946). See the relocation note below |
 | Enum case | E-ENUM-VARIANT-CASE / E-ENUM-TYPE-CASE | 2 | type-system.ts (§14.4) |
 
-## New + MOVED fire sites this pass (c48e59a2 -> 9481bc69, S277 #126/#127/#128)
+## Diagnostic-surface changes this pass (9481bc69 -> a0344d75, S278-S280)
+
+**Zero new §34 codes.** Three changes to the diagnostic surface, none of them a catalog addition:
+
+- **RETIRED + DELETED: `W-EACH-TABLE-FOSTER`** (#131 `df6d269c`). The interim info-lint warned that a
+  top-level `<each>`'s static `<div data-scrml-each-mount>` was foster-parented out of a `<table>`
+  (or dropped by the "in select" insertion mode) → 0 rows, silently. `emitEachMountHtml`
+  (`codegen/emit-each.ts:371`) now emits a comment FENCE `<!--scrml-each:N--><!--/scrml-each:N-->`,
+  which every HTML insertion mode inserts normally, so the warned condition is unreachable. Module
+  `compiler/src/lint-w-each-table-foster.js` DELETED; `api.js` Stage 6.4f retired (the api.js comment
+  at ~:2229 records why); unit test `each-table-foster-warn-s272.test.js` DELETED. Gap
+  `g-each-mount-div-foster-parented-in-table` is RESOLVED. **A separate gap remains open:**
+  `g-nested-each-div-mount-in-restricted-parent` — a NESTED each still builds a runtime `<div>`
+  mount (`emit-each.ts:1041`), which is immune to parse-time foster-parenting but not to a
+  restricted parent at runtime. No diagnostic covers it.
+- **NARROWED: `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`** (`ea4c720a`, S279 bryan-ruled over-fire). The
+  colorless-async backstop fired on an async callback passed to a fire-and-forget scheduler. A
+  `KNOWN_DISCARD_HOF` set (`setTimeout`/`setInterval`/`setImmediate`/`queueMicrotask`/…) now exempts
+  HOFs that structurally DISCARD the callback's return value — the value-coercion hazard the code
+  guards is unreachable there, and its "hoist into a for loop" remedy was nonsensical. Pin:
+  `compiler/tests/unit/colorless-async-discard-hof.test.js`. The code itself is unchanged in the
+  catalog; only its trigger set narrowed.
+- **NOT A CODE: `W-MODULE-FORMAT-ESM-INCOMPLETE`** — see the note in the catalog section above.
+
+## New + MOVED fire sites, prior window (c48e59a2 -> 9481bc69, S277 #126/#127/#128)
 
 - **`E-SCRIPT-001` (Error, NEW — #127 `07901878`)** — §4.17. A `<script>` element in scrml SOURCE.
   Fire site: `compiler/src/block-splitter.js:3498` (a `BSError`), in the markup-opener path
@@ -262,12 +297,8 @@ parked dispatch archive describing UNBUILT work). A doc naming this code describ
   enclosing fn's declared error type. Now a DEDICATED code (was overloaded on E-TYPE-001);
   §19.5.3/.4 repointed. Emitted at `type-system.ts:9853` — the check was already live; #121 is the
   catalog/cite reconciliation, not a codegen change.
-- **`W-EACH-TABLE-FOSTER`** (info-lint, #115, S272 — NOT a §34-catalog code) — a top-level
-  `<each>` inside a table section (`<table>/<thead>/<tbody>/<tfoot>/<tr>`) emits a `<div>` mount
-  the HTML parser foster-parents OUT of the table -> the reactive list silently renders 0 rows.
-  The lint turns it loud and points at the `<div>`-layout workaround. Module
-  `compiler/src/lint-w-each-table-foster.js`, wired at `api.js:2218` (Stage 6.4f). The real
-  foster-safe mount fix is DEFERRED (`g-each-mount-div-foster-parented-in-table`).
+- ~~**`W-EACH-TABLE-FOSTER`**~~ — **RETIRED + DELETED (#131).** Superseded by the fix it was an
+  interim warning for; see "Retired / removed fire sites this pass" below.
 
 ### Freeze-spec doc-reconciliation (#121, S274 — SPEC-text only, no fire-site change)
 - **`E-ATTR-012`** stays RETIRED (S249-drop: `bind:`+same-event-handler is composable by design);
@@ -355,7 +386,7 @@ Every pipeline stage returns/throws its own `<Stage>Error` class; `compiler/src/
 For the full per-session diagnostic-change narrative (S148 onward), see `docs/changelog.md` — not reproduced here.
 
 ## Tags
-#scrml #map #error #diagnostics #semdiff #css65 #diagnostic-partition #result-warnings #outlet #e-outlet-and-main #one-landmark #tenant-floor #e-tenant #ssr-auth-scoped #i-ssr-auth-scoped-client-hydrated #sql-lex #e-error-010 #e-fn-009 #e-attr-012-retired #e-mw #w-each-table-foster #e-attr-writer-conflict #session-establishment #e-theme-token-unknown #e-script-001 #e-cell-render-spec-not-bindable #fire-site-relocation #sym-pass-5a #landmark-tag #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued
+#scrml #map #error #diagnostics #semdiff #css65 #diagnostic-partition #result-warnings #outlet #e-outlet-and-main #one-landmark #tenant-floor #e-tenant #ssr-auth-scoped #i-ssr-auth-scoped-client-hydrated #sql-lex #e-error-010 #e-fn-009 #e-attr-012-retired #e-mw #w-each-table-foster-retired #each-fence #e-async-stdlib-discard-hof #module-format-notice #e-attr-writer-conflict #session-establishment #e-theme-token-unknown #e-script-001 #e-cell-render-spec-not-bindable #fire-site-relocation #sym-pass-5a #landmark-tag #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued
 
 ## Links
 - [primary.map.md](./primary.map.md)
