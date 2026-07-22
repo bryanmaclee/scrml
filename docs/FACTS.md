@@ -21,6 +21,8 @@ Also absent: the §34 diagnostic-code total. It is load-bearing but not reliably
 | fact | value |
 |---|---|
 | compiler version | `0.7.1` |
+| live compiler source (`compiler/src`) | 225,289 lines across 179 files |
+| test files | 1,234 |
 | specification lines (`compiler/SPEC.md`) | 36,114 |
 | conformance cases | 745 |
 | standard-library modules | 21 |
@@ -49,6 +51,8 @@ Also absent: the §34 diagnostic-code total. It is load-bearing but not reliably
 
 ## What each figure means
 
+- **live compiler source** — `compiler/src`, the **default** pipeline. Excludes `compiler/native-parser` (~47k lines, gated behind the opt-in `--parser=scrml-native` flag) and `compiler/self-host-v2` (implementation #2). Verified hand-written: no file averages over 200 chars/line, and there is no bundled, vendored or generated directory under `src`.
+- **test files** — files, not test *cases*. A case count requires running the suite, which is exactly the non-determinism this file excludes.
 - **conformance cases** — every `expected.json` under `conformance/cases`. The case *is* the assertion: this is the language-1.0 gate, and any implementation has to pass all of them.
 - **standard-library modules** — directories under `stdlib/`, each importable as `scrml:<name>`. Bundled with the compiler, single-version, no registry.
 - **CLI verbs** — subcommands in `compiler/src/commands/`.

@@ -108,6 +108,42 @@ function deployTargets(): string[] {
   return known.filter((t) => new RegExp(`["'\`]${t}["'\`]`).test(src)).sort();
 }
 
+/** Recursively count files under `root` matching any of `exts`. */
+function countFiles(root: string, exts: string[], suffix?: string): { files: number; lines: number } {
+  let files = 0;
+  let lines = 0;
+  const walk = (p: string) => {
+    if (!existsSync(p)) return;
+    if (statSync(p).isDirectory()) {
+      for (const e of readdirSync(p)) walk(join(p, e));
+      return;
+    }
+    if (!exts.includes(extname(p))) return;
+    if (suffix && !p.endsWith(suffix)) return;
+    files++;
+    lines += read(p).split("\n").length - 1;
+  };
+  walk(join(ROOT, root));
+  return { files, lines };
+}
+
+/**
+ * The LIVE compiler — `compiler/src`, the DEFAULT pipeline. Deliberately excludes
+ * `compiler/native-parser` (~47k lines, gated behind the opt-in
+ * `--parser=scrml-native` flag, so not the default path) and
+ * `compiler/self-host-v2` (impl #2). Verified hand-written: no file in the tree
+ * averages >200 chars/line, and there is no bundled, vendored or generated
+ * directory under `src`.
+ */
+function compilerSource(): { files: number; lines: number } {
+  return countFiles("compiler/src", [".ts", ".js"]);
+}
+
+/** Test FILES, not test cases — a case count needs a run, which is non-deterministic here. */
+function testFiles(): number {
+  return countFiles("compiler/tests", [".js"], ".test.js").files;
+}
+
 /** Public code samples under the snippet gate (scripts/snippet-gate.js corpus). */
 function gatedSnippets(): number {
   let n = 0;
@@ -143,6 +179,8 @@ const GEN_SECTIONS: GenSection[] = [
         `| fact | value |`,
         `|---|---|`,
         `| compiler version | \`${compilerVersion()}\` |`,
+        `| live compiler source (\`compiler/src\`) | ${compilerSource().lines.toLocaleString("en-US")} lines across ${compilerSource().files} files |`,
+        `| test files | ${testFiles().toLocaleString("en-US")} |`,
         `| specification lines (\`compiler/SPEC.md\`) | ${specLines().toLocaleString("en-US")} |`,
         `| conformance cases | ${conformanceCases()} |`,
         `| standard-library modules | ${stdlib.length} |`,
