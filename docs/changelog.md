@@ -2,6 +2,20 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S280 — 2026-07-22 (bryan) — the marketing claim-gate; a bryan ruling falsified; pa-base v2.4
+
+**9 PRs.** Booted `/boot concurrent` as a successor while S279 was still LIVE in the same checkout.
+
+**The marketing claim-gate (U1+U2).** bryan raised marketing (Rule 1 satisfied) and worried a marketing PA would hallucinate. Framed as a GATE problem, not a discipline problem, with a 5-class claim taxonomy — C1 code and C2 derived-numbers automate completely; C4 comparative and C5 framing explicitly do NOT and stay bryan's. **#140** snippet-gate (real files, after the fence approach was built, measured at 24 files/149 blocks/92 failures, and REJECTED as measuring narrative fragments). **#142** the README flagship example compiled for the FIRST time: 8 errors, **7 contradicting the SPEC** — a class the README's own nominal disclaimer does not cover, and 3 of them taught as features in the prose. **#145/#147** FACTS.md, generated and CI-gated, which immediately caught 2 stale public figures and then a ~9× LOC miss in the boot profile.
+
+**⚠️ bryan's S279 Option-B ruling was FALSIFIED.** A dispatched U4 agent REFUSED to build; the PA re-verified every claim independently and confirmed it. ES-module scope dissolves only the *lexical* chunk collision — the colliding state lives in the RUNTIME, a singleton module every chunk imports. Proven in real Chromium with **no navigation at all**. The real gate is per-chunk id/cell namespacing, which is module-format-AGNOSTIC and therefore also unblocks the held classic Wave-1c loader. Arc scoped, all 3 OQs ruled, dispatchable.
+
+**#146** cross-file `<script src>` refs escaped the dist root on every nested route in CLASSIC (the default path); an S239 fan-out could not break the fix across 361k fuzzed path shapes but both finders independently surfaced 2 pre-existing defects on the same path. **#148** SPEC §12.2 Trigger 3 proven not wired — a `scrml:auth` import does not escalate, shipping auth logic and its secret to the browser; bryan ruled to wire it, unblocking a 99-page downstream docs arc.
+
+**`pa-base v2.4`** — gate design: the absorbed escape hatch, the unproven gate, the non-deterministic input. Distilled from finding the PRIOR gate hollow (README: 4 blocks, 4 skip markers, green for two months while checking zero).
+
+~14 gaps filed. Full detail: `handOffs/delta-log.md` [721]-[731].
+
 ## S279 — 2026-07-22 (bryan) — the #131 adopter each-fix + the two carried S277 rulings; a cross-machine Wave-1c rebase caught a severe blocker (→ ESM U4); an E-ASYNC over-fire ruling
 
 A dense multi-arc session on the `bryan-XPS-8950` clone (the one that was 262 commits behind — rebased clean at boot; the other machine went live mid-session and pushed the held Wave-1c branch). The boot itself was a lesson: bryan caught a "caught up" report that had skipped the full two-party contract + three mandatory boot steps (the adopter-issue channel, CI/PR state, the concurrent-session board) under a false "context economy" — and the skipped S277 doctrine was exactly what governs the work. `gh` was not installed on this clone (installed + authed mid-session, which surfaced two open adopter issues); the canonical `scrml-js-codegen-engineer` agent is not on this machine either (a `general-purpose` fallback carried every codegen dispatch).
@@ -358,7 +372,6 @@ Concurrent boot to LIVE S251 → took the baton when S251 wrapped → led as sin
 - **known-gaps currency** — 3 gaps resolved, 7 residuals filed (incl. the deferred equality gap + the ss66 SPEC-vs-compiler emission gap + the freeze-coverage real-DB-adapter dependency).
 
 
-
 Booted concurrent to S250, took over main after S250 wrapped. Execution phase landed four arcs; strategy phase reframed the pre-V1 push around flogence releasing *in tandem* with scrml V1 ("do it right, go all the way") and ratified five design deep-dives. Conformance 386/386, gate green. Plan-of-record: `scrml-support/docs/pre-v1-execution-board-2026-07-12.md`.
 
 - **Fork A — the server-fn / client-cell SPLIT** (`47ea59ac`): E-REACTIVE-003 errors on a wholly-server fn reading a free client cell (pass-as-arg); a CPS form-submit fn *marshals* the reads. Fixed a systemic bug — the canonical form/login idiom silently POSTed `undefined` (react-auth login hashed `undefined`). §52 `<x server>` is client-held; `@session`/`@currentUser` spoofing-guarded. +9 conformance; adversarially reviewed (anti-drift verified).
@@ -466,7 +479,6 @@ The whole S235-launched conformance-authoring program came home. All 8 sPA lists
 - **Ratified `serverDb` + `firstPaint`** as normative language-1.0 conformance contract verbs (impl#2 must seed its DB, run real handlers, emit an impl-neutral first-paint) — parallel to `advance-time`.
 - **SPEC ruling-tail** — §55.10 Level-2 example fixed to the named-import form; §41.13/§34 parseVariant null-routing aligned to impl (null→`Malformed`, object-without-`tag`→`MissingDiscriminator`).
 - **V1-freeze-readiness assessment** authored (`scrml-support/docs/deep-dives/v1-freeze-readiness-2026-07-03.md`) + the fail-closed-lexer-error-recovery DD queued (run-trigger: the parser wave).
-
 
 
 A marathon. Finished the last V1-required feature (SSR), then drove the language/compiler split toward a language-1.0 freeze — and discovered the split's load-bearing build was already done.
@@ -665,7 +677,6 @@ A big execution session: a SPEC-amendment feature that surfaced a latent shipped
 - **giti render-codegen cluster (GITI-029/030/031) + g-onmount — 4 silent (compile-clean, browser-only) miscompiles fixed in one parallel wave (3 dispatches).** GITI-031 (`078c2f58`): `<match on=@cell.state>` dropped the `.state` subpath → whole-cell dispatch → blank mount; fixed to thread the sub-path into the Shape-A subscribe + init-fire. GITI-030 (`7bf92bf1`): the brief misdiagnosed it as a key-field bug; the Rule-4 cross-check found it's a §4.17 raw-content bug (`${@.id}` inside `<code>` half-rewritten → corrupted) — fixed to emit raw-content verbatim (adopter note: `<code>`/`<pre>` don't interpolate by spec). GITI-029 + g-onmount (on-mount commit): a `//` comment before `on mount {}` made it emit as literal text (parser recognition; new `TOPLEVEL_ON_LIFECYCLE_RE` lift gate); and a program-level `on mount { call() }` was mis-classified as a reactive display-slot in the SSR-template path (`[object Promise]` for async) — fixed per SPEC §6.7.1 (on-mount is an UNCONDITIONAL fire-and-forget effect; `_onMountEffect` marker). flogence's each-item-hidden-stale (the 4th reported) = NOT-REPRODUCED (likely already closed by the S158 Bug64 fix; guard-canary'd, no fabricated fix). Combined full suite 25007/0.
 - **Ryan (rjantz3) PR #1 re-verify → HOLD; #2 (CSRF) verified GOOD.** The first external contributor's reworked server-fn-composition PR closes the original F1/F3 (confirmed), but an adversarial pass found 2 new regressions (peer-name collision with synthesized bindings; peer-call in a sync-callback param default) + a HIGH silent-crash (the peer-emission scan is lambda-blind). round-2 guidance drafted. **Round-2 then LANDED post-wrap** — Ryan's rework closed all of them (A/B regressions + D4 lambda-blind via "single-source peer-call lowering"; F1/F3 held; fresh-adversarial 9-shapes clean; suite 25022/0). #1 `--no-ff` merge `b2bf9959` (authorship preserved); #2 CSRF cherry-picked `939d673e`/`d706f111` (his #2 branch was on a stale S214 base → cherry-pick the diff, not merge, to avoid reverting S216/S217). **First external-contributor landing.** The S215 adversarial-verify-not-confirmatory doctrine paid off both directions: round-1 caught the regressions, round-2 fixed + re-verified them.
 - **Multi-user PA MVP (S217 — IP=private) + the DD.** First increments of making the PA system multi-user so a contributor can run their own PA: per-user profile split (`pa-profile-bryan/ryan.md` + git-config identity), the dev agents staged into private scrml-support (the hard portability gap, closed). DD `multi-user-pa-system-2026-06-23.md` (S96 refined, not reversed; the shoot-straight ethos is universal).
-
 
 
 A high-throughput execution session: a giti P0, the only open HIGH, a 4-item sPA re-integration, and a SPEC-amendment feature, plus two design ratifications.
@@ -1345,7 +1356,6 @@ The S148-ratified self-demo website went from a lost `/tmp` spike to a real, lan
 - **MCP-dogfood research (delivered; nothing built).** MCP V0 is SHIPPED — `<program mcp>` activates an 11-tool read-only stdio MCP server (`compiler/runtime/stdlib/mcp.js`); 8 topology tools work, 3 live-state tools broken (= Bug 14, no server-side `globalThis._scrml_reactive_get` stash). The S122 "DevTools-for-agents" candidate is NOT unbuilt — it IS that shipped V0 (framing-corrected). NEW work = a "site-as-corpus" MCP (engineReachableStates/provenanceFor/corpusStatus; ~half free reads). Queued: `<program mcp>` flip → inc2 (`docs/website-viewer/app.scrml` is flip-ready); corpus-MCP → own arc.
 - **R28-8 RATIFIED** (extend §14.10 bare-variant inference to typed object-literal fields + `is some`-narrowed `==` RHS — condition "only extra work" PA-verified; same union-guard, no new ambiguity; makes kickstarter §4.8 correct; impl-pending). Predicate-fields standing question PARKED (enum-subset `oneOf` possible gap; awaiting user's reading).
 - **7 C1-dogfood bug-candidates filed (needs-PA-confirm, reverse-direction R26 before fix):** #6 cross-file client imports → non-module `<script>` runtime break (potential HIGH, looks new); #7 Tier-1 `<each>` body drops attribute-interp/`class:`/handler codegen (overlaps the documented Landing-1 caveat — confirm scope); + 5 lower (no `--sourceMap` CLI flag, inline-object/`->{}` return-type miscompile, inline-object-string-in-reactive-write, multi-statement `when` body, `for=`-substring-in-fn-string E-FN-003).
-
 
 
 The S148 self-demo-website crux (a faked source map) resolved end-to-end, plus the engine-view feed, the tier-ladder disposition, and a working live-edit demo spike. On top of v0.7.0, no version cut. **F1+F2 provenance debate ran first** (3 experts: in-browser-compilation / source-map-provenance / simplicity-defender + judge): **F2 settled 3-0 by convergence** on the standards-hybrid (Source Map v3 + `names` for JS, CSS source maps, `data-scrml-span` for HTML); **F1 = C1-static launch + C2a fast-follow** (user call). Design insight banked.
@@ -3895,7 +3905,6 @@ PA wrote a bash worktree-cleanup loop intended to preserve 4 must-not-touch work
 - **Depth-of-survey-discount frequency at #14** (the dispatch for #13 surfaced that PA's locus-hint was correct, mechanism-hint hypothesis-shaped, agent picked the right option from the surveyed space).
 
 
-
 ### 2026-05-12 (S85 CLOSE — v0.2.5 + v0.2.6 tagged · v0.3 Wave 1 spec anchor · F-COMPONENT-001 family CLOSED · Wave 3 Playwright e2e infra live · scrml.dev substantive refresh)
 
 **Session-defining outcome:** Two semver tags + the v0.3 spec anchor landed in one session. Trucking-dispatch reference app went from 11 errors to 0 errors at v0.2.6 close. v0.3 program-shape ratified end-to-end: R2 (one-program-per-app) + `<page>` helper element (route-free per user's "scrml has been designed to not force the dev to think about routing") + channel-placement reversal + co-location-of-behavior recorded as #1 design principle. Wave 3 e2e infrastructure (Playwright across Chromium + Firefox + WebKit) landed; 02-counter canary validates green on 2 of 3 browsers (WebKit blocked on libavif13 host-deps).
@@ -4364,7 +4373,6 @@ Heavy-throughput session combining one large background-agent dispatch (A9 Ext 5
 - **Spec-Rule-4 enforcement at OQ audits.** Both OQ-bridge-3 and OQ-bridge-4 closed by direct spec-text inspection rather than corpus heuristics. The methodology that prevents Rule-4 drift on spec-derivative claims also closes audits efficiently — read the spec, count what's there, report.
 
 
-
 Massive cross-cutting session. **A1c CLOSED entirely** — Wave 5 remainder shipped (C16 refinement-type runtime emission, C17 schema additive shared-core lowering, C18 channel WS broadcast/disconnect, C19 closed as already-shipped-S59 with +2 gap-fill, C20 implicit-via-JS-hoist with +14 regression tests, C21 Tier 3 positional sugar bug fix, C22 bare-variant inference codegen, C23 PIPELINE prose pass with NEW Stage 6.7 VSS sub-stage + Lock Enforcement Map + IFMC reorder). **A8 test-bind family** advanced four steps in one session — A6-2 parser + A6-3 typer + A6-4 codegen (with 0-byte production cost guarantee verified bit-identically). **B14 PASS 10.B path-shape fix** plus bonus channel-mount-false-positive scope-expansion finding. **TS state-child rule= recognition** Phase 0 SURVEY + Option A body-shape dispatch implementation. **C15.14 unskip** verifies S75 fixes work end-to-end. **A9 Ext 5 SURVEY** landed 599-line dispatch-ready brief (~50h budget; prerequisites all cleared by S75's C17/C18/C19/Trigger-5 ships). **Insight 28** ratified — zod-schema-as-validator stdlib-adapter bridge CLOSED as a synonym for `custom(fn)` (Position A 109/140 vs C 101/140 vs B 84.5/140); ratification amendment landed (validate.scrml docs section + §55.1 closure note + §53.14.4 worked example pairing with SCXML strike + parseShape rejection as synonym-detection precedent triplet). **Voice-author article draft v1** — "Run-anywhere + run-forever" musing landed at scrml-support/voice/articles/.
 
 Per-step test deltas: C19 +2 / C22 +14 / C23 0 (docs) / C20 +14 / C17 +44 / C21 +17 / C16 +23 / C18 +20 / B14 PASS 10.B +8 / A6-2 +25 / A6-3 +23 / TS state-child +11 / C15.14 unskip +1 / A6-4 +26 = **+228 net pass**. Three depth-of-survey-discount wins (C19 already-shipped, C20 implicit-via-JS-hoist, C16 manufactured-work-skipped); 2 F4 path-discipline issues (CWD drift fired multiple times during landings, recovered each time); 1 dispatch agent ignored S67 protocol and committed to a custom branch (C18 to `agent/c18-channel-ws-emission` instead of harness-assigned worktree branch — work pulled cleanly anyway).
@@ -4596,7 +4604,6 @@ Substantial session: started as deliberation (Zod deep-dive + debate-05 + parseV
 - **Honest scope-revision-up is also a discount-pattern signal** — promotion ergonomics Tier B revised UP to 25-41h (not down). The depth-of-survey methodology catches both directions: when existing infrastructure carries more than expected (down) AND when assumed-similar infrastructure is actually different (up). Both are valuable findings; both are surfaced by survey.
 
 
-
 ### 2026-05-06 (S65 — predicate-Zod deep-dive + debate-05 + npm-myth amend + parseVariant scope)
 
 A predicate-system-vs-Zod deep-dive followed by a 5-expert adversarial debate on whether scrml should ship a boundary-parsing primitive (`parseVariant`/`parseShape`) in `scrml:data`. Bryan: "I strongly lean yes, and this is the time to do it" — anti-sycophancy convener stance, fired the debate to test the lean. The 5/5 unanimous panel verdict NARROWED Bryan's lean: ship `parseVariant` only; close `parseShape` as intentional absent — the synonym-detection test (debate-04 methodology) demoted `parseShape` because §53 SPARK boundary-zone refinement on assignment to typed parameters already does what `parseShape` would do. The simplicity-defender (B-default) flipped to C-narrow under the synonym test — third consecutive debate (debate-03 roc, debate-04 crystal, debate-05 simplicity-defender) where an expert positioned to argue X voted against X after honest construction. Frequency-of-three confirms pro-X-voice-voting-against-X as methodology-grade signal.
@@ -4614,7 +4621,6 @@ A predicate-system-vs-Zod deep-dive followed by a 5-expert adversarial debate on
 - **Read-only agent positions need PA-side persistence.** simplicity-defender, roc-expert, crystal-multi-dispatch-expert all dispatched with Read-only tools per their agent definitions. PA persisted their position content from task-notification output. scrml-dev-typescript and scrml-dev-react had Write and self-persisted. Worth tracking: agent-tool-set audit may improve dispatch ergonomics later.
 - **Design-insights.md write-truncation hazard mitigated** (S64 note 47). Judge agent correctly flagged its lack of Edit access for the large file and requested PA action with exact text. PA used Edit to append cleanly. The hazard documentation worked.
 - **Pro-X-voice-voting-against-X confirmed at frequency-3.** Debate-03 roc, debate-04 crystal, debate-05 simplicity-defender. Methodology-grade settled signal: when a partisan-defender voice flips under their own methodology lens, the rejection is structurally stronger than expected agreement.
-
 
 
 ### 2026-05-06 (S64 — Stage 0c.A + B2 + Phase 4d + 3 debates + audit + 11 primer amendments)
@@ -4644,7 +4650,6 @@ The session landed an unusual amount of work spanning compiler-source dispatches
 - **Worktree-isolation harness routing bug.** Pipeline dispatched with `isolation: "worktree"` may route to scrml-support worktree instead of scrmlTS. Workaround: re-dispatch as `general-purpose` no-isolation with frequent commits + progress.md. Clean across Stage 0c.A + Phase 4d + B2.
 - **Brief-locus correction authorization.** When survey reveals audit's named touchpoint or surface assumption is off, agent corrects scope without re-confirmation. Phase 4d's 5→1 reactive-* AST kinds correction is the canonical example this session.
 - **Methodology-stack triangulation.** Three orthogonal tests (per-shape sliver + predicate-survival + asymmetric-forfeit-cost) applied to the same option produce structurally stronger verdict than unanimous voting on one axis. Ratified across debate-02/03/04.
-
 
 
 ### 2026-05-06 (S63 — Stage 0c INSERTED: overload-deprecation housekeeping queued before A1c-C0)
@@ -4875,7 +4880,6 @@ S59 opened on the outstanding L21 deliberation (E-DERIVED-VALUE-MUTATE) and ende
 - **Step 5 path-discipline leak (S59 close)** — agent leaked progress.md content directly to main's working tree (not just to its worktree). Recovered cleanly via `git checkout -- progress.md` then proper cherry-pick. No code damage. Investigation queued for next session — extend pa.md F4 path-discipline check to detect leaks earlier.
 
 
-
 Previous baseline (2026-05-04 after S58 close): **8,720 pass / 43 skip / 0 fail / 432 files** (pre-commit hook excluding browser; full suite 8,763 / 43 / 0). **Stage 0b COMPLETE** — D3 + D4 landed, scrml:oauth shipped, const-form sweep complete, F4 path-discipline addendum live. 47 commits past S57 close, all pushed. Phase A1+ implementation phase opens at S59.
 
 ### 2026-05-05 (S59 — small-deliberation lock L21 + sibling-error rename)
@@ -4916,6 +4920,7 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 ---
 
 ## Recently Landed
+
 
 ### 2026-07-16/17 — S262 (Peter) — the adopter-issue channel was never read · boot step 0 named a deleted script · #81 held on a design fork
 
