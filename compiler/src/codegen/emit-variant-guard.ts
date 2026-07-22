@@ -1015,21 +1015,24 @@ export function emitVariantGuardedRender(
   const renderFunctionsJs = renderFnLines.join("\n\n");
 
   // engine-gated-each-populate (S153) — does ANY arm's render output contain an
-  // each-mount? An <each> inside a NON-initial arm renders its mount div as part
-  // of the arm's render-fn HTML string (`<div data-scrml-each-mount="each_N">`).
-  // That mount is absent from the DOM until the arm is entered; the each render
-  // fn registered itself in `_scrml_each_renderers` at module-init but bailed
-  // (mount absent) after establishing its reactive dep. So after the dispatcher
-  // writes an arm's innerHTML + wires it, we must call `_scrml_remount_each(_mount)`
-  // to walk the freshly-mounted subtree and invoke the renderer(s) for any
-  // each-mount now present (nested eaches included — querySelectorAll matches at
-  // any depth). Detecting via the emitted render HTML is robust to arbitrary
-  // nesting AND self-gates the runtime helper: an each-mount in the render output
-  // means an <each> exists in the file, which forces the `reconciliation` runtime
-  // chunk (where `_scrml_remount_each` lives) to ship — so the call is never
-  // emitted against an absent helper. Covers BOTH the engine dispatcher AND the
-  // block-form `<match>` dispatcher (this helper is shared by both).
-  const hasEachMount = renderFunctionsJs.includes("data-scrml-each-mount");
+  // each-mount? An <each> inside a NON-initial arm renders its parse-safe mount
+  // FENCE as part of the arm's render-fn HTML string (`<!--scrml-each:N-->` — the
+  // foster-safe comment anchor, Approach A-unified). That mount is absent from the
+  // DOM until the arm is entered; the each render fn registered itself in
+  // `_scrml_each_renderers` at module-init but bailed (mount absent) after
+  // establishing its reactive dep. So after the dispatcher writes an arm's
+  // innerHTML + wires it, we must call `_scrml_remount_each(_mount)` to walk the
+  // freshly-mounted subtree (SHOW_COMMENT TreeWalker) and invoke the renderer(s)
+  // for any each-mount now present. Detecting via the emitted render HTML is robust
+  // to arbitrary nesting AND self-gates the runtime helper: an each-mount fence in
+  // the render output means an <each> exists in the file, which forces the
+  // `reconciliation` runtime chunk (where `_scrml_remount_each` lives) to ship — so
+  // the call is never emitted against an absent helper. The marker MUST match the
+  // NEW fence string emitted by emitEachMountHtml (`scrml-each:`); the old
+  // `data-scrml-each-mount` attribute is gone for the static mount (the nested-each
+  // div still uses it but is created at runtime, never in this render HTML string).
+  // Covers BOTH the engine dispatcher AND the block-form `<match>` dispatcher.
+  const hasEachMount = renderFunctionsJs.includes("scrml-each:");
 
   // ---------------- Per-arm wire functions ----------------
   // Phase A10 (S78, 2026-05-10) — for each arm, emit a wire function that

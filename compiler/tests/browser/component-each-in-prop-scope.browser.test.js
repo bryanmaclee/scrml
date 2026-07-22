@@ -142,7 +142,7 @@ describe("component-each §2 — list populates (real module-init order)", () =>
     return {
       set: (name, val) => globalThis.__scrml_set__(name, val),
       get: (name) => globalThis.__scrml_get__(name),
-      rows: () => document.querySelectorAll('[data-scrml-each-mount^="each_"] li'),
+      rows: () => (function(){var w=document.createTreeWalker(document.body,NodeFilter.SHOW_COMMENT),n;while((n=w.nextNode())){if(String(n.data||'').trim().indexOf('scrml-each:')===0)return n.parentNode.querySelectorAll('li');}return [];})(),
     };
   }
 

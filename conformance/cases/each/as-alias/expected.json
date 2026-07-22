@@ -9,7 +9,7 @@
     "notCodes": [],
     "input": [],
     "state": { "people": [{ "id": 1, "name": "Ada", "role": "Pioneer" }, { "id": 2, "name": "Alan", "role": "Founder" }] },
-    "dom": "<ul id=\"people\"><div><li class=\"person\"><span class=\"name\">Ada</span> - <span class=\"role\">Pioneer</span></li><li class=\"person\"><span class=\"name\">Alan</span> - <span class=\"role\">Founder</span></li></div></ul>",
+    "dom": "<ul id=\"people\"><li class=\"person\"><span class=\"name\">Ada</span> - <span class=\"role\">Pioneer</span></li><li class=\"person\"><span class=\"name\">Alan</span> - <span class=\"role\">Founder</span></li></ul>",
     "domAnchored": [
       { "selector": ".person", "count": 2 },
       { "selector": "#people li:first-child .name", "text": "Ada" },

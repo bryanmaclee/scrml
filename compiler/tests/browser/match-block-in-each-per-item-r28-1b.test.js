@@ -164,7 +164,7 @@ describe("R28-1b §2 — each <li> renders its own match arm in happy-dom", () =
     document.dispatchEvent(new Event("DOMContentLoaded"));
     return {
       set: (name, val) => globalThis.__scrml_set__(name, val),
-      mountEl: () => document.querySelector('[data-scrml-each-mount^="each_"]'),
+      mountEl: () => (function(){var w=document.createTreeWalker(document.body,NodeFilter.SHOW_COMMENT),n;while((n=w.nextNode())){if(String(n.data||'').trim().indexOf('scrml-each:')===0)return n.parentNode;}return null;})(),
     };
   }
 

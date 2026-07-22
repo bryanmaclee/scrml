@@ -154,7 +154,17 @@ function runClient({ domHtml, clientJs, seedState }) {
   if (seedState) window.__scrml_ssr_state = seedState;
   else { try { delete window.__scrml_ssr_state; } catch (_) { window.__scrml_ssr_state = null; } }
 
-  const mount = document.querySelector("[data-scrml-each-mount]");
+  // Approach A-unified: the each mounts as a comment fence; rows are siblings in
+  // the each's real parent. Adoption upgrades each server row via parent.replaceChild
+  // and NEVER wipes the range with replaceChildren — so spy on the fence's PARENT.
+  let mount = null;
+  {
+    const _w = document.createTreeWalker(document.body, NodeFilter.SHOW_COMMENT);
+    let _n;
+    while ((_n = _w.nextNode())) {
+      if (String(_n.data || "").trim().indexOf("scrml-each:") === 0) { mount = _n.parentNode; break; }
+    }
+  }
   const spy = { replaceChildren: 0, replaceChild: 0 };
   if (mount) {
     const origRC = mount.replaceChildren.bind(mount);
@@ -273,14 +283,16 @@ describe("ssr-a-terminus D2 — DOM-adoption hydration (R26 runtime gate)", () =
       { id: 2, name: "Bob",   active: true },
     ];
     const firstPaint = await composeFirstPaint(serverJs, html, dbActive);
-    expect(firstPaint).toMatch(/<div data-scrml-each-mount="each_\d+"><\/div>/);
+    // D1 fell back — the mount ships as an empty fence (no data-scrml-key rows to adopt).
+    expect(firstPaint).toMatch(/<!--scrml-each:\d+--><!--\/scrml-each:\d+-->/);
 
     const seed = extractSeed(firstPaint);
     const app = runClient({ domHtml: firstPaint, clientJs, seedState: seed });
 
-    // No server nodes → adoption is a no-op → the pre-existing bulk-from-empty
-    // client render runs (it calls replaceChildren). No crash; rows appear.
-    expect(app.spy.replaceChildren).toBeGreaterThanOrEqual(1);
+    // No server nodes → adoption is a no-op → the bulk-from-empty client render
+    // runs (build fresh rows, no in-place upgrade). Proof: zero adoption upgrades
+    // (replaceChild), and the rows appear; no crash.
+    expect(app.spy.replaceChild).toBe(0);
     expect(app.text()).toContain("Alice");
     expect(app.text()).toContain("Bob");
   });

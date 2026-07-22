@@ -175,7 +175,17 @@ describe("Bug 57 §2 — `<each>` renders + reconciles in happy-dom", () => {
     return {
       set: (name, val) => globalThis.__scrml_set__(name, val),
       get: (name) => globalThis.__scrml_get__(name),
-      mountEl: () => document.querySelector('[data-scrml-each-mount^="each_"]'),
+      // Approach A-unified: the each mounts as a comment fence `<!--scrml-each:N-->`;
+      // rows render as SIBLINGS in the each's real parent (<ul>). Locate that parent
+      // via the fence comment (comments are invisible to querySelector).
+      mountEl: () => {
+        const _w = document.createTreeWalker(document.body, NodeFilter.SHOW_COMMENT);
+        let _n;
+        while ((_n = _w.nextNode())) {
+          if (String(_n.data || "").trim().indexOf("scrml-each:") === 0) return _n.parentNode;
+        }
+        return null;
+      },
     };
   }
 

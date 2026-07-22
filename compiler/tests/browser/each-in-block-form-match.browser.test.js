@@ -133,9 +133,9 @@ describe("each-in-match §1 — emit shape (no leak, mount div, helpers ship)", 
 
   test("the Browsing arm renders the each MOUNT DIV, not a literal <each> string (Mode A fix)", () => {
     const { clientJs } = compileToOutputs(SIGIL_SRC, "sigil");
-    // The arm render fn returns the mount div, and there is NO literal <each>
+    // The arm render fn returns the mount fence, and there is NO literal <each>
     // tag in any emitted render string.
-    expect(clientJs).toMatch(/render_Browsing\(\)\s*\{[\s\S]*?data-scrml-each-mount=/);
+    expect(clientJs).toMatch(/render_Browsing\(\)\s*\{[\s\S]*?<!--scrml-each:/);
     expect(clientJs).not.toMatch(/<each\b/);
   });
 
@@ -153,7 +153,7 @@ describe("each-in-match §1 — emit shape (no leak, mount div, helpers ship)", 
   test("alias form: each renderer uses the `t` alias (not @.) and ships a mount div", () => {
     const { clientJs } = compileToOutputs(ALIAS_SRC, "alias");
     expect(clientJs).toContain("t.name");
-    expect(clientJs).toMatch(/data-scrml-each-mount=/);
+    expect(clientJs).toMatch(/<!--scrml-each:/);
     expect(clientJs).not.toMatch(/<each\b/);
   });
 
@@ -197,7 +197,7 @@ describe("each-in-match §2 — list populates on arm entry (real module-init or
       set: (name, val) => globalThis.__scrml_set__(name, val),
       get: (name) => globalThis.__scrml_get__(name),
       matchMount: () => document.querySelector('[data-scrml-match-mount="match_7"]'),
-      rows: () => document.querySelectorAll('[data-scrml-each-mount^="each_"] li'),
+      rows: () => (function(){var w=document.createTreeWalker(document.body,NodeFilter.SHOW_COMMENT),n;while((n=w.nextNode())){if(String(n.data||'').trim().indexOf('scrml-each:')===0)return n.parentNode.querySelectorAll('li');}return [];})(),
     };
   }
 

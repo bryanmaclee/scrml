@@ -9,7 +9,7 @@
     "notCodes": [],
     "input": [],
     "state": { "groups": [{ "id": 1, "name": "Fruits", "items": [{ "id": 11, "label": "Apple" }, { "id": 12, "label": "Pear" }] }, { "id": 2, "name": "Veggies", "items": [{ "id": 21, "label": "Carrot" }] }] },
-    "dom": "<div id=\"groups\"><div><section class=\"group\"><h3 class=\"group-name\">Fruits</h3><ul><div><li class=\"item\">Apple</li><li class=\"item\">Pear</li></div></ul></section><section class=\"group\"><h3 class=\"group-name\">Veggies</h3><ul><div><li class=\"item\">Carrot</li></div></ul></section></div></div>",
+    "dom": "<div id=\"groups\"><section class=\"group\"><h3 class=\"group-name\">Fruits</h3><ul><div><li class=\"item\">Apple</li><li class=\"item\">Pear</li></div></ul></section><section class=\"group\"><h3 class=\"group-name\">Veggies</h3><ul><div><li class=\"item\">Carrot</li></div></ul></section></div>",
     "domAnchored": [
       { "selector": ".group", "count": 2 },
       { "selector": ".item", "count": 3 },

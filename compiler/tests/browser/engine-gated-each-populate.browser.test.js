@@ -126,7 +126,7 @@ describe("engine-gated-each §1 — emit shape (dep-first read, remount call, he
   test("each render fn reads the source cell BEFORE the mount guard (Mode 1 fix)", () => {
     const { clientJs } = compileToOutputs(BUTTON_SRC, "button");
     const getIdx = clientJs.indexOf('const _items = _scrml_reactive_get("todos");');
-    const mountIdx = clientJs.indexOf("const _mount = document.querySelector('[data-scrml-each-mount=");
+    const mountIdx = clientJs.indexOf("const _mount = _scrml_find_each_anchor(document,");
     expect(getIdx).toBeGreaterThan(-1);
     expect(mountIdx).toBeGreaterThan(-1);
     expect(getIdx).toBeLessThan(mountIdx);
@@ -188,7 +188,7 @@ describe("engine-gated-each §2 — list populates on arm entry (real module-ini
       directSet: (tag) =>
         globalThis.__scrml_engine_direct_set__("phase", tag, globalThis.__scrml_phase_transitions__),
       engineMount: () => document.querySelector('[data-scrml-engine-mount="phase"]'),
-      rows: () => document.querySelectorAll('[data-scrml-each-mount^="each_"] li'),
+      rows: () => (function(){var w=document.createTreeWalker(document.body,NodeFilter.SHOW_COMMENT),n;while((n=w.nextNode())){if(String(n.data||'').trim().indexOf('scrml-each:')===0)return n.parentNode.querySelectorAll('li');}return [];})(),
     };
   }
 

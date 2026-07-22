@@ -9,7 +9,7 @@
     "notCodes": [],
     "input": [],
     "state": { "items": [{ "id": 1, "label": "Alpha" }, { "id": 2, "label": "Beta" }, { "id": 3, "label": "Gamma" }] },
-    "dom": "<ul id=\"list\"><div><li class=\"row\">Alpha</li><li class=\"row\">Beta</li><li class=\"row\">Gamma</li></div></ul>",
+    "dom": "<ul id=\"list\"><li class=\"row\">Alpha</li><li class=\"row\">Beta</li><li class=\"row\">Gamma</li></ul>",
     "domAnchored": [
       { "selector": ".row", "count": 3 },
       { "selector": "#list li:first-child", "text": "Alpha" }

@@ -9,7 +9,7 @@
     "notCodes": [],
     "input": [],
     "state": { "items": [] },
-    "dom": "<ul id=\"list\"><div><li id=\"empty-row\">Nothing yet</li></div></ul>",
+    "dom": "<ul id=\"list\"><li id=\"empty-row\">Nothing yet</li></ul>",
     "domAnchored": [
       { "selector": ".row", "count": 0 },
       { "selector": "#empty-row", "count": 1, "text": "Nothing yet" }

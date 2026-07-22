@@ -165,14 +165,14 @@ describe("ssr-a-terminus (a): a server-authority each gets a server-side row ren
     // the mount-fill helper + the per-mount fill call fed from the seed cell
     expect(serverJs).toContain("function _scrml_ssr_fill_mount(html, mountId, rowsHtml)");
     expect(serverJs).toMatch(
-      /_scrml_html = _scrml_ssr_fill_mount\(_scrml_html, "each_\d+", _scrml_ssr_render_each_\d+\(_scrml_ssr_state\["accounts"\]\)\);/,
+      /_scrml_html = _scrml_ssr_fill_mount\(_scrml_html, \d+, _scrml_ssr_render_each_\d+\(_scrml_ssr_state\["accounts"\]\)\);/,
     );
   });
 
   test("the compiled HTML ships the (still-empty) mount div the fill targets", () => {
     const { html } = compileBundles(TIER1, { protectAnalysis: usersProtect() });
     // BEFORE the compose handler runs, the mount is empty (the B-substrate shape).
-    expect(html).toMatch(/<div data-scrml-each-mount="each_\d+"><\/div>/);
+    expect(html).toMatch(/<!--scrml-each:\d+--><!--\/scrml-each:\d+-->/);
   });
 });
 
@@ -222,7 +222,7 @@ describe("ssr-a-terminus (d): an unsupported each falls back to the client-only 
     expect(serverJs).not.toContain("_scrml_ssr_fill_mount(_scrml_html");
     // the B-substrate seed still runs — only the markup pre-render falls back
     expect(serverJs).toContain('_scrml_ssr_state["accounts"]');
-    expect(html).toMatch(/<div data-scrml-each-mount="each_\d+"><\/div>/);
+    expect(html).toMatch(/<!--scrml-each:\d+--><!--\/scrml-each:\d+-->/);
   });
 
   test("a user component in the row → the isUserComponentMarkup guard falls back, no crash", () => {
@@ -230,7 +230,7 @@ describe("ssr-a-terminus (d): an unsupported each falls back to the client-only 
     expect(serverJs).not.toMatch(/_scrml_ssr_render_each_\d+/);
     expect(serverJs).not.toContain("_scrml_ssr_fill_mount(_scrml_html");
     expect(serverJs).toContain('_scrml_ssr_state["accounts"]');
-    expect(html).toMatch(/<div data-scrml-each-mount="each_\d+"><\/div>/);
+    expect(html).toMatch(/<!--scrml-each:\d+--><!--\/scrml-each:\d+-->/);
   });
 });
 
@@ -256,7 +256,7 @@ describe("ssr-a-terminus (R26): the composed first-paint HTML contains the rende
     const { serverJs, html } = compileBundles(TIER1, { protectAnalysis: usersProtect() });
 
     // BEFORE: the mount ships empty (the B-substrate first-paint shape).
-    expect(html).toMatch(/<div data-scrml-each-mount="each_\d+"><\/div>/);
+    expect(html).toMatch(/<!--scrml-each:\d+--><!--\/scrml-each:\d+-->/);
 
     // The DB returns rows carrying the protected column; the seed pipeline must
     // strip it before the render fn ever sees it.
@@ -273,10 +273,58 @@ describe("ssr-a-terminus (R26): the composed first-paint HTML contains the rende
     expect(firstPaint).toContain('data-scrml-key="1"');
     expect(firstPaint).toContain('data-scrml-key="2"');
     // the mount is no longer the empty placeholder
-    expect(firstPaint).not.toMatch(/<div data-scrml-each-mount="each_\d+"><\/div>/);
+    expect(firstPaint).not.toMatch(/<!--scrml-each:\d+--><!--\/scrml-each:\d+-->/);
     // §14.8.9 — the protected column value is absent from the first paint
     // (both the rendered rows AND the inline seed json)
     expect(firstPaint).not.toContain("SECRET_HASH");
     expect(firstPaint).not.toContain("passwordHash");
+  });
+
+  test("a row value containing a $-replacement pattern ($') renders literally in the mount (FIX A)", async () => {
+    // _scrml_ssr_fill_mount injects rowsHtml into the page HTML. A STRING
+    // replacement in String.prototype.replace honors $&, $`, $', $$ — so a row
+    // value containing `$'` would, with a string replacement, expand to "the rest
+    // of the document" and corrupt the filled mount. The function replacer must
+    // insert the literal bytes. The row renderer escapes & < > but NOT $, so the
+    // `$'` reaches rowsHtml verbatim — this is the exact adversarial payload.
+    // Scoped to the between-fence mount region so it pins _scrml_ssr_fill_mount
+    // precisely (a sibling $-pattern bug in the seed-<script> splice — emit-server.ts,
+    // pre-existing, outside this each-mount rework — is intentionally not asserted here).
+    const { serverJs, html } = compileBundles(TIER1, { protectAnalysis: usersProtect() });
+    const dbRows = [
+      { id: 1, name: "a$'b", passwordHash: "x" },
+      { id: 2, name: "c$&d", passwordHash: "y" },
+    ];
+    const firstPaint = await composeFirstPaint(serverJs, html, dbRows);
+    // Extract exactly the content the fill placed between the fence anchors.
+    const fence = /<!--scrml-each:(\d+)-->([\s\S]*?)<!--\/scrml-each:\1-->/.exec(firstPaint);
+    expect(fence).not.toBeNull();
+    const between = fence[2];
+    // The rows are placed verbatim — no $'/$& expansion clobbering the region.
+    expect(between).toBe(
+      '<li data-scrml-key="1">a$\'b</li><li data-scrml-key="2">c$&amp;d</li>',
+    );
+  });
+
+  test("a server cell seeded with a $-pattern value composes a document whose tail is NOT duplicated (FIX E)", async () => {
+    // The seed-state <script> splice (emit-server.ts _scrml_ssr_compose_handler)
+    // embeds the server-authority cell JSON into the page HTML. A STRING
+    // replacement 2nd-arg would honor $&/$'/$`/$$ in that seed data → a cell value
+    // containing `$'` expands to "the rest of the document" and duplicates the
+    // page tail. The function replacer must splice the seed literally.
+    const { serverJs, html } = compileBundles(TIER1, { protectAnalysis: usersProtect() });
+    const dbRows = [
+      { id: 1, name: "a$'b", passwordHash: "x" },
+      { id: 2, name: "c$&d", passwordHash: "y" },
+    ];
+    const firstPaint = await composeFirstPaint(serverJs, html, dbRows);
+    // No tail duplication — the document is well-formed exactly once.
+    expect(firstPaint.match(/<\/html>/g)?.length ?? 0).toBe(1);
+    expect(firstPaint.match(/<\/body>/g)?.length ?? 0).toBe(1);
+    // The seed round-trips literally: the inline state carries the verbatim value.
+    const seedTag = /window\.__scrml_ssr_state=([\s\S]*?);<\/script>/.exec(firstPaint);
+    expect(seedTag).not.toBeNull();
+    const seed = JSON.parse(seedTag[1]);
+    expect(seed.accounts.map((r) => r.name)).toEqual(["a$'b", "c$&d"]);
   });
 });
