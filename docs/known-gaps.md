@@ -61,20 +61,35 @@
 
 ### g-tier0-reactive-lift-mixed-text-interp-literal — a Tier-0 `${for/lift}` over a REACTIVE collection emits a MIXED literal-plus-`${…}` text run as a LITERAL string; the adopter sees `${r.label}` rendered as visible page text
 <!-- @gap id=g-tier0-reactive-lift-mixed-text-interp-literal sev=MED status=open -->
-Found while verifying #141 (S281), on a side observation — **a distinct defect on a different axis, NOT part of the #141 truncation fix.** In the Tier-0 `${ for (x of @cell) { lift … } }` path, a lifted markup **text run that MIXES literal text with `${…}` interpolation** is emitted as a single literal JS string:
+Found while verifying #141 (S281), on a side observation — **a distinct defect on a different axis, NOT part of the #141 truncation fix.**
+
+⚠️ **CHARACTERIZATION CORRECTED (same session, before any fix was scoped).** This gap was first filed as "a text run that MIXES literal text with `${…}` breaks." **That was wrong** — a follow-up boundary probe (prompted by bryan asking what `$$` meant) showed mixed runs are usually FINE. The real trigger is **ADJACENCY**:
+
+> In the Tier-0 `${ for (x of @cell) { lift … } }` reactive path, a literal character **immediately touching** the `${` opener — no intervening whitespace — defeats the interpolation scanner, and the run from that literal onward is emitted as a single literal JS string.
+
+Every observation fits this one rule, and nothing else does:
 
 ```
-lift <div>A${r.label}</>      ->  createTextNode("A${r.label}")     // BROKEN — literal, no effect
-lift <div>B${r.label}</div>   ->  createTextNode("B${r.label}")     // BROKEN — closer form is NOT the trigger
-lift <li><span>M${r.label}</span></li>  ->  createTextNode("M${r.label}")   // BROKEN — nesting is NOT the trigger
+lift <li>${r.a}</>              -> "" + effect                        // CORRECT
+lift <li>${r.a}${r.b}</>        -> "" + effect, "" + effect           // CORRECT — back-to-back interps fine
+lift <li>${r.a} mid ${r.b}</>   -> effect + "mid" + effect            // CORRECT — literal BETWEEN, space-separated
+lift <li>${r.a}tail</>          -> effect + "tail"                    // CORRECT — trailing literal fine
+lift <li>lit${r.a}</>           -> createTextNode("lit${r.a}")        // BROKEN — `t` touches `${`
+lift <li>${r.a} x${r.b}</>      -> effect + createTextNode("x${r.b}") // BROKEN — `x` touches `${`
+lift <li>$${r.b}</>             -> createTextNode("$${r.b}")          // BROKEN — `$` touches `${`
 ```
 
-Nothing ever overwrites those nodes — PA-confirmed by reading the whole emitted `_scrml_create_item_N`; there is no repairing `_scrml_effect`. The literal text `A${r.label}` reaches the DOM and is visible to the user. Clean compile, exit 0, zero diagnostics.
+Note `$${…}` is NOT an escape — SPEC §4.18.3 escapes a literal `${` as `\${`, and SPEC's own worked example (line 14262) writes `$${available}`. So `$${price}` is the ordinary **currency idiom**: a literal `$` followed by an interpolation. It breaks only because the `$` is glued to the `${`.
 
-**Precisely bounded — three discriminators tested, only one fires:**
-- **PURE-interpolation runs are CORRECT.** `lift <div>${r.label}</div>` emits `createTextNode("")` + a live-keyed `_scrml_effect` doing `textContent = String((r.label) ?? "")`. Only MIXED runs break.
-- **REACTIVITY is the trigger, not member access.** The identical single-line shape over a NON-reactive literal array (`for (r of [{label:"s"}])`) emits correctly — `createTextNode("Q")` + `createTextNode(String((r.label) ?? ""))`. Bare `${r}` over a reactive cell breaks too, so it is not `.field` access. The break is specific to the **keyed-reconcile create-item path**.
-- **Closer form and nesting are irrelevant** — `</>` and `</div>`, single-line and multi-line-with-nested-element, all break identically.
+Nothing ever overwrites those nodes — PA-confirmed by reading the whole emitted `_scrml_create_item_N`; there is no repairing `_scrml_effect`. The literal reaches the DOM and is visible to the user. Clean compile, exit 0, zero diagnostics.
+
+**Other discriminators tested and RULED OUT:**
+- **REACTIVITY is required.** The identical glued shape over a NON-reactive literal array (`for (r of [{label:"s"}])`) emits correctly — `createTextNode("Q")` + `createTextNode(String((r.label) ?? ""))`. The break is specific to the **keyed-reconcile create-item path**.
+- **Not member access** — bare `${r}` glued to a literal breaks too.
+- **Closer form and nesting are irrelevant** — `</>` and `</div>`, single-line and multi-line-with-nested-element, all behave identically.
+- **Position matters.** `class=${expr}` / `key=${expr}` attribute interpolation is a DIFFERENT position (the `=` touching `${` is normal attribute syntax) and is unaffected — 12 corpus lift bodies match a naive "glued" grep, but most are attribute-position.
+
+Likely mechanism (unconfirmed, for whoever fixes it): the lift text path appears to scan whitespace-delimited tokens, so an interpolation fused to a preceding literal token is never recognized as its own token. Cf. the `joinWithNewlines` / token-spacing behavior documented in PRIMER §13.7 B20.
 
 **Tier-1 `<each>` handles the same content correctly** — `<div class="hdr">H${r.label}</div>` inside an `<each>` splits into `createTextNode("H")` + a live-keyed `_scrml_each_tn_N` effect. So this is a **Tier-0-lift-only** defect, and it strengthens rather than weakens the `W-EACH-PROMOTABLE` promotion nudge.
 
