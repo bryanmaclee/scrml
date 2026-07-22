@@ -392,9 +392,18 @@ function computeDependencyClientScripts(
   // Map each dep's absolute .scrml path to a `<script src>` relative to the
   // entry HTML's dist dir. BOTH sides go through `toDistRel`, so both model the
   // same dist layout (incl. the `pages/` strip) and the inter-file relative path
-  // is stable regardless of nesting depth — which also handles the
-  // shell-composition `upToRoot` case by construction. Fallback (no
-  // outputBaseDir): basename siblings.
+  // is stable regardless of nesting depth. Fallback (no outputBaseDir):
+  // basename siblings.
+  //
+  // NOT claimed: agreement with the per-page composition `upToRoot`
+  // (~`index.ts:2311`). That anchors on `relative(dirname(entryFilePath), …)`
+  // while this anchors on `relative(outputBaseDir, …)` (which is what `pathFor`
+  // uses, i.e. the real dist layout). The two coincide only when the entry sits
+  // at `outputBaseDir` or `outputBaseDir/pages`; a shell entry in some OTHER
+  // subdir makes them disagree, and `upToRoot` is the one that is wrong there
+  // (S280 finder-B fixture: a `shell/app.scrml` entry emits `../../app.css`
+  // from a root-level route, escaping dist). Tracked separately — this function
+  // does not fix it and must not be read as doing so.
   return ordered.map((depAbs) => {
     const depClient = depAbs.replace(/\.scrml$/, ".client.js");
     if (!outputBaseDir) return basename(depClient);
