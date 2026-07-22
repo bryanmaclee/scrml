@@ -160,5 +160,7 @@ Regression-tests-pass is NOT empirical-pass.
 Worktree path · final commit SHA · files touched · the blast-radius enumeration · suite numbers ·
 corpus-recompile result · maps load-bearing yes/no · anything you deferred and why.
 
-DONE-PROBE: `bun test compiler/tests/integration/navigate-wave1c-outlet-composition.test.js` passes AND
-a `<main>` inside a match arm or engine state-child alongside an `<outlet>` fires `E-OUTLET-AND-MAIN`.
+DONE-PROBE: grep -qF landmark-tag compiler/src/symbol-table.ts
+Expected behaviour the probe stands in for: the outlet/landmark collector total-walks every edge
+via the shared `landmark-tag.ts` predicate, so a `<main>` in a match arm or engine state-child
+alongside an `<outlet>` fires `E-OUTLET-AND-MAIN` (landed #126 `499dd740`).

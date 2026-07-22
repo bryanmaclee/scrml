@@ -143,6 +143,8 @@ Final SHA · files touched · both corpus grep counts · confirmation of no-doub
 with the failure-set diff · R26 result · maps load-bearing · **anything you disagree with — say so;
 the last dispatch on this file was right to refuse an instruction and it saved a false positive.**
 
-DONE-PROBE: a nested `<program>` inside a `<page>` with a bare inner `<main>` + inner `<outlet>` fires
-`E-OUTLET-AND-MAIN`, AND `<plain> = <span>yo</span>` used only via `${@plain}` fires
-`E-CELL-RENDER-SPEC-NOT-BINDABLE`, AND `<userName req> = <input type="text"/>` still compiles clean.
+DONE-PROBE: grep -qF inRouteScope compiler/src/symbol-table.ts
+Expected behaviour the probe stands in for (both SYM corrections, landed #128 `9481bc69`): a nested
+`<program>` resets `inRouteScope` so a bare inner `<main>` + inner `<outlet>` fires `E-OUTLET-AND-MAIN`;
+and `<plain> = <span>yo</span>` used only via `${@plain}` fires `E-CELL-RENDER-SPEC-NOT-BINDABLE` at the
+declaration while `<userName req> = <input type="text"/>` still compiles clean.

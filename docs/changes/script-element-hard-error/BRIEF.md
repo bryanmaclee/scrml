@@ -116,5 +116,7 @@ New unit file `compiler/tests/unit/script-element-rejected.test.js`:
 Worktree path · final SHA · files touched · the 5 must-not-fire cases each with its verifying fixture ·
 the E-STYLE-001 §34 row finding · suite numbers · corpus result · maps load-bearing yes/no.
 
-DONE-PROBE: a scrml source containing a `<script>` element fires `E-SCRIPT-001`, AND a scrml source
-mentioning `<script>` only inside a `//` comment fires nothing.
+DONE-PROBE: grep -qF E-SCRIPT-001 compiler/src/block-splitter.js
+Expected behaviour the probe stands in for: a `<script>` element in scrml source is a hard error
+(`E-SCRIPT-001`); a `<script>` mentioned only inside a `//` comment fires nothing (landed #127
+`07901878`).
