@@ -16,7 +16,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 5 |
-| MED | 38 |
+| MED | 39 |
 | LOW | 25 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -37,6 +37,14 @@
 > above, which moves as gaps are filed/closed (S174 filed 4 → MED 11 · LOW 20).
 
 ---
+
+## §S278 — gaps filed S278 (2026-07-21, ESM-chunks arc U2 S239 gate)
+
+> Context: the ESM-chunks arc (BRIEF `docs/changes/esm-chunks/`) makes client chunks ES modules under `--module-format=esm` (default `classic`, byte-identical). U2 (chunk emit) landed the `export`/`import` rewrite + the runtime-import surface. The following build-pipeline gap was surfaced by the U2 S239 gate; it is DEFERRED to U3 (browser-path wiring) by design — the esm path is browser-DOA and `W-MODULE-FORMAT-ESM-INCOMPLETE`-warned until U3, so nobody reaches it yet.
+
+### g-esm-build-content-hash-import-urls — `scrml build --module-format=esm` renames chunk files but NOT their in-chunk ES `import` URLs → cross-chunk imports 404
+<!-- @gap id=g-esm-build-content-hash-import-urls sev=MED status=open -->
+`build.js` sets `contentHashAssets:true`; the content-hash pass renames each `.client.js` → `.client.<hash>.js` and rewrites the HTML `<script src>` refs, but does NOT rewrite the in-chunk ES `import` specifiers that U2 now emits (`import * as __scrml_dep_0 from "./components/x.client.js"` and `import { … } from "./scrml-runtime.<hash>.js"`). So under `build --module-format=esm` a chunk's cross-chunk import points at the PRE-hash filename (`./components/x.client.js`) while the artifact on disk is `components/x.client.<hash>.js` → 404 → the importing module fails to link → dead page. The RUNTIME import is unaffected (it carries the codegen-baked runtime hash, which the placeholder substitution already resolves). `compile --module-format=esm` (no content-hashing) is clean — this is BUILD-path only. NOT biting anyone: the esm path is browser-DOA until U3 (no `type="module"` on the HTML tags yet) and is warned by `W-MODULE-FORMAT-ESM-INCOMPLETE`. **U3 (browser-path wiring) MUST extend the content-hash rewrite to the in-chunk ES import URLs (both the `import * as __scrml_dep_N from "./…client.js"` and any non-runtime specifier), OR hard-gate `build --module-format=esm` with an error, BEFORE the esm path is browser-loadable.** Reproducer: a NESTED multi-file app compiled with `scrml build --module-format=esm` — grep an importer chunk for `import * as __scrml_dep` and compare the specifier to the actual on-disk `*.client.<hash>.js` name (mismatch). A pinned `.todo` test lives at `compiler/tests/unit/esm-client-chunk-format.test.js` (§6 — activate when U3 lands the rewrite). Sibling of the classic-path 404 gaps `g-nested-flatpage-runtime-bare-ref` / `g-crossfile-dep-ref-pages-unstripped` (§S265). — `NEW S278 (ESM-chunks U2 S239 gate); MED; open — DEFERRED to U3`
 
 ## §S268 — gaps filed S268 (2026-07-18, #81 writer-ownership Axiom ① build)
 

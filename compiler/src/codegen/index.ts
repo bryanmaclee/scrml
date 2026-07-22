@@ -24,6 +24,7 @@ import { toPosix } from "../path-canonical.js";
 import { RUNTIME_FILENAME } from "../runtime-template.js";
 import { assembleRuntime } from "./runtime-chunks.ts";
 import { toEsmRuntime } from "./runtime-esm.ts";
+import { toEsmClientChunk } from "./emit-client-esm.ts";
 import { fnv1aHash } from "./fnv1a-hash.ts";
 import { CGError } from "./errors.ts";
 
@@ -1611,6 +1612,27 @@ export function runCG(input: CgInput): CgOutput {
       }
     }
 
+    // ESM chunks arc (Unit 2) — under `--module-format=esm`, transform the
+    // stripped (runtime-factored-out) client chunk body into a valid ES module:
+    // the `_scrml_modules` registration footer becomes `export {…}`, each
+    // registry read becomes a namespace `import`, and the runtime symbols the
+    // chunk references become a runtime `import` (see codegen/emit-client-esm.ts).
+    // Gated on `!embedRuntime` (esm is a standalone-runtime feature — an embedded
+    // runtime has no separate module to import from, so esm is a no-op there, per
+    // the Unit 1 module-format notice). `classic` (the default) is untouched, so
+    // its output stays byte-identical. This MUST precede the classic IIFE wrap
+    // below (which the esm path skips — an IIFE cannot contain `import`/`export`).
+    if (clientJs && !embedRuntime && moduleFormat === "esm") {
+      const importerDistDir = cgOutputBaseDir
+        ? dirname(relative(cgOutputBaseDir, filePath))
+        : ".";
+      clientJs = toEsmClientChunk(clientJs, {
+        runtimeSlice: assembleRuntime(compileCtx.usedRuntimeChunks),
+        runtimePlaceholder: RUNTIME_FILENAME_PLACEHOLDER,
+        importerDistDir,
+      });
+    }
+
     // known-gaps-#6 (S152, Approach B) — IIFE-wrap the client.js body for files
     // that participate in cross-file local `.scrml` linking, so their top-level
     // `const`/`function` declarations do not collide in the SHARED global
@@ -1624,8 +1646,11 @@ export function runCG(input: CgInput): CgOutput {
     // inlined per file (each file would carry its own `_scrml_modules`), so
     // cross-file linking is structurally a no-op there regardless — wrapping
     // the embedded runtime would only further isolate it; leave embed mode
-    // unwrapped (the default `compile` path is external mode).
-    if (clientJs && !embedRuntime && isCrossFileLinked(filePath, importGraphInput)) {
+    // unwrapped (the default `compile` path is external mode). Under `esm` the
+    // module scope already isolates top-level decls (each chunk is its own
+    // module), so no IIFE is needed OR permitted (it would enclose the chunk's
+    // top-level `import`/`export`, which is a syntax error).
+    if (clientJs && !embedRuntime && moduleFormat !== "esm" && isCrossFileLinked(filePath, importGraphInput)) {
       clientJs = wrapClientBodyInIife(clientJs);
     }
 
