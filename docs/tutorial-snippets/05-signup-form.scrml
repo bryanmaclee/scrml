@@ -6,8 +6,11 @@
 // All synth properties are read-only — the compiler computes them.
 //
 // The engine lives inside <program>; markup uses `match` to switch on the phase.
+//
+// `db=` is required because persistSignup() runs a `?{}` write (E-SQL-004,
+// §44.7): a `?{}` with no db= in any ancestor <program> has no connection.
 
-<program>
+<program db="users.db">
 
   type SignupPhase:enum = { Editing, Submitting, Done }
 
