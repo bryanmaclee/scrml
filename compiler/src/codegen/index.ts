@@ -82,6 +82,7 @@ import {
   buildCellOwnerMap,
   chunkNamespaceToken,
 } from "./chunk-namespace.ts";
+import { renameCellAccessors, CS_PREFIX } from "./cell-accessor-rename.ts";
 
 import { EncodingContext } from "./type-encoding.ts";
 import { collectDerivedVarNames, collectReactiveVarNames, collectSynthCellKeys, stampCompoundDeepSetTargets } from "./reactive-deps.ts";
@@ -507,76 +508,167 @@ const CELL_SCOPE_ACCESSORS = [
 ] as const;
 
 /**
- * N2/N3/N4 chunk-namespacing — build the per-chunk cell-scope prologue.
- *
- * Emits only the accessors `body` actually references. Over-inclusion would be
- * harmless (an extra destructured binding) but noisy; UNDER-inclusion would be a
- * bug, so the scan matches the bare identifier rather than `name(` — an accessor
- * passed as a value still counts.
- *
- * Returns "" when the body touches no cell accessor, so a chunk with no reactive
- * state carries no prologue at all.
+ * BUG-6 — the key-argument SHAPE of each accessor, driving the `_scrml_cs_`
+ * wrapper the prologue emits. The default ("arg0") namespaces the first argument
+ * and forwards the rest untouched; only the four exceptions below deviate.
+ * Lifted VERBATIM from the core `_scrml_cell_scope` factory
+ * (runtime-template.js:850) this replaces — the shapes are the same, they just
+ * moved from a core function into each chunk's inlined prologue.
  */
-function buildCellScopePrologue(
-  body: string,
-  token: string,
-  owners: Record<string, string>,
-): string {
-  if (!token) return "";
-  const used = CELL_SCOPE_ACCESSORS.filter((n) => new RegExp(`\\b${n}\\b`).test(body));
-  if (used.length === 0) return "";
-  const ownerArg = Object.keys(owners).length > 0 ? `, ${JSON.stringify(owners)}` : "";
-  const names = used.length === 1 ? ` ${used[0]} ` : `\n  ${used.join(",\n  ")},\n`;
+const CELL_SCOPE_ACCESSOR_POSITIONS: Record<
+  string,
+  "arg0" | "arg01" | "arg2" | "passthrough" | "ssrApply"
+> = {
+  // BOTH arguments are cell keys — a dirty-propagation edge between two cells.
+  _scrml_derived_subscribe: "arg01",
+  // §41.12 Level-1 lookup takes the cell LAST (its register-side sibling takes
+  // it FIRST — the split-key pair BUG 2/4 were). A non-string sentinel passes
+  // through untouched.
+  _scrml_message_for: "arg2",
+  // The SSR seed's WIRE FORMAT keeps BARE names; the seed side asks about the
+  // bare name and the apply side (below) maps through the key fn.
+  _scrml_ssr_seeded: "passthrough",
+  // Threads THIS chunk's key fn into the shared apply routine, which STAYS in
+  // core (`_scrml_ssr_seed_apply_scoped`); the seed keys are mapped at apply time.
+  _scrml_ssr_seed_apply: "ssrApply",
+};
+
+/** The RHS arrow expression for one `_scrml_cs_<accessor>` prologue wrapper. */
+function cellScopeWrapper(name: string): string {
+  switch (CELL_SCOPE_ACCESSOR_POSITIONS[name]) {
+    case "arg01":
+      return `(d, u) => ${name}(_scrml_cs_key(d), _scrml_cs_key(u))`;
+    case "arg2":
+      return `(e, f, c) => ${name}(e, f, (typeof c === "string" && c) ? _scrml_cs_key(c) : c)`;
+    case "passthrough":
+      return `(n) => ${name}(n)`;
+    case "ssrApply":
+      return `(skipShell) => _scrml_ssr_seed_apply_scoped(_scrml_cs_key, skipShell)`;
+    default:
+      return `(n, ...r) => ${name}(_scrml_cs_key(n), ...r)`;
+  }
+}
+
+/**
+ * The inlined per-chunk key fn — mirrors core `_scrml_cell_key` semantics
+ * (runtime-template.js:828) so the mechanism adds ZERO bytes to the always-loaded
+ * runtime (the BUG-6 gzip constraint): the key derivation moves OUT of core and
+ * into each chunk's prologue. Emits the compact no-owner form when the chunk
+ * imports no stateful cells (the common case) and the dotted-root owner form
+ * otherwise (imported cells key under the EXPORTER's token, §51.0.A/§51.0.D).
+ */
+function cellScopeKeyFn(token: string, owners: Record<string, string>): string {
+  const prefix = JSON.stringify(token + "$");
+  if (Object.keys(owners).length === 0) {
+    return (
+      `const _scrml_cs_key = (n) => {\n` +
+      `  const raw = String(n == null ? "" : n);\n` +
+      `  return raw ? ${prefix} + raw : raw;\n` +
+      `};\n`
+    );
+  }
   return (
-    `// --- chunk cell scope (${token}) ---\n` +
-    // NOTE: this comment text deliberately avoids a bare ` and ` / ` or `.
-    // Several tests assert the emitted JS contains no bare boolean keyword in
-    // operator position (they must lower to `&&` / `||`), and prose in a
-    // compiler-emitted comment trips that guard. The guard is right; the comment
-    // should not be what fires it.
-    `// Cell keys in this chunk resolve into THIS chunk's slice of the shared\n` +
-    `// store, so two routes that both declare <rows> no longer clobber each\n` +
-    `// other. The store / scheduler / subscriber lists stay singletons (forking\n` +
-    `// them would break reactivity); only the KEY SPACE is per-chunk. Every call\n` +
-    `// below is unchanged — the namespace is applied by these bindings.\n` +
-    `const {${names}} = _scrml_cell_scope(${JSON.stringify(token)}${ownerArg});\n\n`
+    `const _scrml_cs_owners = ${JSON.stringify(owners)};\n` +
+    `const _scrml_cs_key = (n) => {\n` +
+    `  const raw = String(n == null ? "" : n);\n` +
+    `  if (!raw) return raw;\n` +
+    `  const d = raw.indexOf(".");\n` +
+    `  const owned = _scrml_cs_owners[d === -1 ? raw : raw.slice(0, d)];\n` +
+    `  if (owned) return d === -1 ? owned : owned + raw.slice(d);\n` +
+    `  return ${prefix} + raw;\n` +
+    `};\n`
   );
 }
 
 /**
- * Insert the per-chunk cell-scope prologue.
+ * BUG-6 chunk-namespacing — build the per-chunk cell-scope prologue.
  *
- * Goes after the `// Requires:` header and after an EMBEDDED runtime (whose own
- * declarations must stay where they are), and after any top-level `import` in an
- * esm chunk. The body itself is untouched — that is the entire point: every
- * `_scrml_reactive_get("rows")` call site stays byte-identical to the
- * pre-namespacing output, and the namespace is applied by the bindings the
- * prologue introduces.
+ * `used` is the exact set the callee-rename pass renamed (see
+ * `renameCellAccessors`), so the wrappers defined here and the `_scrml_cs_*`
+ * calls in the body cannot drift. Each wrapper applies THIS chunk's namespace via
+ * the inlined `_scrml_cs_key`, then delegates to the REAL runtime accessor of the
+ * same name (a global in classic, a read-only import in esm). Because the wrapper
+ * name (`_scrml_cs_reactive_get`) differs from the accessor it wraps
+ * (`_scrml_reactive_get`) there is no shadow, hence no TDZ and no need to wrap the
+ * initializer — the crux that let this replace the reverted core factory.
+ *
+ * Returns "" when `used` is empty, so a chunk with no reactive state carries no
+ * prologue at all.
+ */
+function buildCellScopePrologue(
+  used: Set<string>,
+  token: string,
+  owners: Record<string, string>,
+): string {
+  if (!token || used.size === 0) return "";
+  const ordered = CELL_SCOPE_ACCESSORS.filter((n) => used.has(n));
+  // Every wrapper except the pure-passthrough `_scrml_ssr_seeded` needs the key fn.
+  const needsKey = ordered.some((n) => n !== "_scrml_ssr_seeded");
+
+  let out =
+    `// --- chunk cell scope (${token}) ---\n` +
+    // NOTE: no bare ` and ` / ` or ` in this comment. Several tests assert the
+    // emitted JS lowers boolean keywords to `&&` / `||` in operator position, and
+    // prose in a compiler comment trips that guard. The guard is right; the
+    // comment must not be what fires it.
+    `// Cell keys resolve into THIS chunk's slice of the shared store, so two\n` +
+    `// routes both declaring <rows> no longer clobber. The store / scheduler /\n` +
+    `// subscriber lists stay singletons; only the KEY SPACE is per-chunk. The\n` +
+    `// body calls the _scrml_cs_* wrappers below; each applies the namespace\n` +
+    `// through _scrml_cs_key, then delegates to the real runtime accessor.\n`;
+
+  if (needsKey) out += cellScopeKeyFn(token, owners);
+  for (const name of ordered) {
+    out += `const ${CS_PREFIX}${name.slice("_scrml_".length)} = ${cellScopeWrapper(name)};\n`;
+  }
+  out += `// --- end chunk cell scope ---\n\n`;
+  return out;
+}
+
+/**
+ * Rename cell-accessor calls in the chunk body to their `_scrml_cs_` wrappers,
+ * then prepend the prologue that DEFINES those wrappers.
+ *
+ * The rename runs on the BODY ONLY, before the prologue is prepended — so the
+ * prologue's own references to the real accessors are never renamed (§1.2
+ * ordering). "Body" = everything after an EMBEDDED runtime (whose accessor
+ * DEFINITIONS must stay put) or, in the standalone case, after the last
+ * `// Requires:` / `import` header line.
  */
 function addCellScopePrologue(
   clientJs: string,
   token: string,
   owners: Record<string, string>,
 ): string {
-  const prologue = buildCellScopePrologue(clientJs, token, owners);
-  if (!prologue) return clientJs;
+  if (!token) return clientJs;
 
   const runtimeEndMarker = "// --- end scrml reactive runtime ---";
   const runtimeEnd = clientJs.indexOf(runtimeEndMarker);
+
+  let header: string;
+  let body: string;
   if (runtimeEnd !== -1) {
+    // Embedded runtime — its accessor definitions + internal calls stay in the
+    // header, untouched; only the post-marker chunk body is renamed + scoped.
     const cut = runtimeEnd + runtimeEndMarker.length;
-    return clientJs.slice(0, cut) + "\n" + prologue + clientJs.slice(cut).replace(/^\n/, "");
+    header = clientJs.slice(0, cut) + "\n";
+    body = clientJs.slice(cut).replace(/^\n/, "");
+  } else {
+    // Standalone runtime — the body starts after the last header line.
+    const lines = clientJs.split("\n");
+    let last = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith("// Requires: ") || /^\s*import\s/.test(lines[i])) last = i;
+    }
+    header = lines.slice(0, last + 1).join("\n") + "\n";
+    body = lines.slice(last + 1).join("\n").replace(/^\n+/, "");
   }
 
-  const lines = clientJs.split("\n");
-  let insertAt = 0;
-  for (let i = 0; i < lines.length; i++) {
-    const l = lines[i];
-    if (l.startsWith("// Requires: ")) insertAt = i + 1;
-    else if (/^\s*import\s/.test(l)) insertAt = i + 1;
-  }
-  lines.splice(insertAt, 0, "", prologue.replace(/\n+$/, ""), "");
-  return lines.join("\n");
+  const { code: renamedBody, used } = renameCellAccessors(body, CELL_SCOPE_ACCESSORS);
+  if (used.size === 0) return clientJs; // no cell accessors — carry no scope
+
+  const prologue = buildCellScopePrologue(used, token, owners);
+  return header + prologue + renamedBody;
 }
 
 /**

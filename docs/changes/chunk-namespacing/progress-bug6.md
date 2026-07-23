@@ -45,3 +45,23 @@ parse, back-to-front splice, shielded-position guard) as a checkpoint before
 touching `index.ts`. e8fdd44c subset baseline + current-HEAD (76-fail) baseline
 captured to scratchpad for the step-8 name-diff. Next: wire steps 1-2 (position
 metadata + `_scrml_cs_*` prologue) into `codegen/index.ts`.
+
+## 2026-07-23 — steps 1-3 landed (emit mechanism)
+
+`codegen/index.ts`: added `CELL_SCOPE_ACCESSOR_POSITIONS` (arg0/arg01/arg2/
+passthrough/ssrApply), `cellScopeWrapper`, `cellScopeKeyFn` (inlined key deriv,
+mirrors core `_scrml_cell_key`), rewrote `buildCellScopePrologue` to emit
+`_scrml_cs_*` wrappers + end-marker, rewrote `addCellScopePrologue` to split
+header/body + run `renameCellAccessors` on the body BEFORE prepending the
+prologue. Call site at ~1856 unchanged.
+
+Verified on real emitted output (classic + esm):
+- wide: prologue emits only the 4 used wrappers; 15 `_scrml_cs_*` body call
+  sites; 0 `_scrml_cell_scope`; 0 leaked bare accessor calls. collision-scan: 0
+  colliding tokens.
+- ESM CRUX CONFIRMED: alpha.client.js imports the REAL accessors read-only
+  (`_scrml_reactive_get`,…); imports ZERO `_scrml_cs_*` (own-decls); no shadow,
+  no IIFE. Matches SCOPING §1.3 exactly.
+- N4 preserved: `__scrml_engine_01nk4qam_phase_transitions` still namespaced.
+Next: step 4 strip core (delete `_scrml_cell_scope`/`_scrml_cell_key`, move
+`_scrml_cell_name` to conformance shim, trim banner) + gzip re-measure (STOP gate).
