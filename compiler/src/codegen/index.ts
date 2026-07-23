@@ -74,7 +74,7 @@ import { buildSourceMap } from "./build-source-map.ts";
 import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender, filePrintBuiltinsShadowed, fileDeclaresFileScopeBinding } from "./log-loc.ts";
 import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setSessionShadowedInFile, setCurrentUserAmbientActive } from "./emit-expr.ts";
 import { buildChunkNamespaceState, setChunkNamespaceState, resetChunkNamespaceState } from "./chunk-namespace.ts";
-import { namespaceCellKeys } from "./cell-namespace-pass.ts";
+
 import { EncodingContext } from "./type-encoding.ts";
 import { collectDerivedVarNames, collectReactiveVarNames, collectSynthCellKeys, stampCompoundDeepSetTargets } from "./reactive-deps.ts";
 import { collectTopLevelLogicStatements, containsSql, getNodes } from "./collect.ts";
@@ -1632,15 +1632,22 @@ export function runCG(input: CgInput): CgOutput {
       generateClientJs(compileCtx)
     ) || null;
 
-    // chunk-namespacing N2 — namespace every reactive-cell STORE KEY in the
-    // assembled chunk. Applied here, once, rather than at the ~190 emission
-    // sites across 23 modules: a half-namespaced store is worse than none (half
-    // the writes land in one slot, half in another), and a per-site fix re-opens
-    // the hole the moment anyone adds an emitter. Acorn-located + text-spliced,
-    // so comments and formatting survive byte-for-byte.
-    const clientJsRaw: string | null = clientJsRawUnnamespaced === null
-      ? null
-      : codegenStage("namespace-cell-keys", () => namespaceCellKeys(clientJsRawUnnamespaced));
+    // chunk-namespacing N2 — NOT YET WIRED. `namespaceCellKeys` (see
+    // codegen/cell-namespace-pass.ts) is built, unit-tested, and EMPIRICALLY
+    // PROVEN to flip the cross-chunk collision repro in real Chromium under BOTH
+    // module formats. It is held out of the emit path pending a PA ruling on the
+    // landing shape, because enabling it moves the reactive-cell store key from
+    // `"rows"` to `"<token>$rows"` in EVERY emitted chunk — and 198 test files /
+    // ~1210 assertions pin the bare key as the observable lowering contract
+    // (`expect(clientJs).toContain('_scrml_reactive_get("items")')`).
+    //
+    // That is ~40x the surface docs/changes/chunk-namespacing/SCOPING.md §3
+    // measured for N2, and bulk-rewriting those assertions would launder any
+    // real regression hiding among them. See docs/changes/chunk-namespacing/
+    // progress.md for the two candidate landing shapes and the numbers.
+    //
+    // To enable: `namespaceCellKeys(clientJsRawUnnamespaced)`.
+    const clientJsRaw: string | null = clientJsRawUnnamespaced;
 
     let clientJs: string | null = clientJsRaw;
     if (clientJsRaw && !embedRuntime) {

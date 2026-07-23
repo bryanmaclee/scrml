@@ -110,7 +110,7 @@ describe("component-each §1 — emit shape (each survives expansion, prop + @. 
 
   test("an each render fn IS emitted (the each-block survived expansion)", () => {
     const { clientJs } = compileToOutputs(COMPONENT_SRC, "comp");
-    expect(clientJs).toMatch(/^function _scrml_each_render_\d+\(\) \{/m);
+    expect(clientJs).toMatch(/^function _scrml_each_render_[0-9a-z]{8}_\d+\(\) \{/m);
   });
 });
 

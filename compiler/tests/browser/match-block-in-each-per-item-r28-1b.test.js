@@ -119,20 +119,20 @@ describe("R28-1b §1 — match-in-each emits per-item dispatch, NOT a dropped ch
   test("per-item factory dispatches the match on the live item discriminant", () => {
     const { clientJs } = compileToOutputs(SRC);
     // The per-item dispatch passes the item-local mount + `article.status`.
-    expect(clientJs).toMatch(/__scrml_match_match_\d+_dispatch\(_scrml_match_mount_\d+, article\.status\)/);
+    expect(clientJs).toMatch(/__scrml_match_match_[0-9a-z]{8}_\d+_dispatch\(_scrml_match_mount_\d+, article\.status\)/);
   });
 
   test("NO phantom module-scope dispatch referencing the per-item iter var", () => {
     const { clientJs } = compileToOutputs(SRC);
     // Pre-fix: `_scrml_effect(() => __scrml_match_match_NN_dispatch(article.status))`
     // at module scope where `article` is undefined.
-    expect(clientJs).not.toMatch(/_scrml_effect\(\s*function\(\)\s*\{[\s\S]*__scrml_match_match_\d+_dispatch\(article\.status/);
-    expect(clientJs).not.toMatch(/__scrml_match_match_\d+_dispatch\(article\.status\)/);
+    expect(clientJs).not.toMatch(/_scrml_effect\(\s*function\(\)\s*\{[\s\S]*__scrml_match_match_[0-9a-z]{8}_\d+_dispatch\(article\.status/);
+    expect(clientJs).not.toMatch(/__scrml_match_match_[0-9a-z]{8}_\d+_dispatch\(article\.status\)/);
   });
 
   test("the match dispatch fn is item-scoped (takes the mount as a parameter)", () => {
     const { clientJs } = compileToOutputs(SRC);
-    expect(clientJs).toMatch(/function __scrml_match_match_\d+_dispatch\(_mount, _v\)/);
+    expect(clientJs).toMatch(/function __scrml_match_match_[0-9a-z]{8}_\d+_dispatch\(_mount, _v\)/);
   });
 });
 

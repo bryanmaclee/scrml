@@ -284,7 +284,7 @@ describe("ssr-a-terminus D2 — DOM-adoption hydration (R26 runtime gate)", () =
     ];
     const firstPaint = await composeFirstPaint(serverJs, html, dbActive);
     // D1 fell back — the mount ships as an empty fence (no data-scrml-key rows to adopt).
-    expect(firstPaint).toMatch(/<!--scrml-each:\d+--><!--\/scrml-each:\d+-->/);
+    expect(firstPaint).toMatch(/<!--scrml-each:[0-9a-z]{8}_\d+--><!--\/scrml-each:[0-9a-z]{8}_\d+-->/);
 
     const seed = extractSeed(firstPaint);
     const app = runClient({ domHtml: firstPaint, clientJs, seedState: seed });

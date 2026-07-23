@@ -100,7 +100,7 @@ describe("each-render-before-cell-init §1 — emit ordering (cell-init before d
   test("the _scrml_reactive_set cell-init is emitted BEFORE the each-render dispatcher call", () => {
     const { clientJs } = compileToOutputs(NONEMPTY_SRC, "no-empty");
     const setIdx = clientJs.indexOf('_scrml_reactive_set("items"');
-    const dispatchIdx = clientJs.search(/_scrml_each_render_\d+\(\);/);
+    const dispatchIdx = clientJs.search(/_scrml_each_render_[0-9a-z]{8}_\d+\(\);/);
     expect(setIdx).toBeGreaterThan(-1);
     expect(dispatchIdx).toBeGreaterThan(-1);
     // Root fix: cell-init precedes the synchronous initial render call.

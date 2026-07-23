@@ -120,7 +120,7 @@ describe("nested-each §1 — emit shape (inline inner each, no phantom module-s
     const { clientJs } = compileToOutputs(NESTED_SRC, "nested");
     // Exactly ONE module-scope each render fn (the OUTER each). The inner each
     // is inline; it gets no `function _scrml_each_render_<innerId>() {` of its own.
-    const renderFnCount = (clientJs.match(/^function _scrml_each_render_\d+\(\) \{/gm) || []).length;
+    const renderFnCount = (clientJs.match(/^function _scrml_each_render_[0-9a-z]{8}_\d+\(\) \{/gm) || []).length;
     expect(renderFnCount).toBe(1);
     // No unhandled-kind drop comment for the inner each.
     expect(clientJs).not.toContain('each: unhandled template child kind="each-block"');

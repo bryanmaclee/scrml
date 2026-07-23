@@ -140,7 +140,7 @@ describe("engine-gated-each §1 — emit shape (dep-first read, remount call, he
 
   test("the each renderer registers itself in _scrml_each_renderers", () => {
     const { clientJs } = compileToOutputs(BUTTON_SRC, "button");
-    expect(clientJs).toMatch(/_scrml_each_renderers\["each_\d+"\] = _scrml_each_render_\d+;/);
+    expect(clientJs).toMatch(/_scrml_each_renderers\["each_[0-9a-z]{8}_\d+"\] = _scrml_each_render_[0-9a-z]{8}_\d+;/);
   });
 
   test("the runtime ships reconcile_list + remount_each + registry + effect_static (Mode 3 fix)", () => {
