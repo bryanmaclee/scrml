@@ -160,3 +160,188 @@ names, referenced across files through imports, so namespacing them is an
 adopter-visible decision needing its own ruling. Filing it, not fixing it.
 Note that Shape B above would close it incidentally (the IIFE makes those
 declarations chunk-local), which is a point in its favour.
+
+
+---
+
+# S282 FIX ROUND (base `e8fdd44c`, branch `worktree-agent-a91ad13968b46ab5d`)
+
+Every measurement below names the commit it was taken at. That discipline exists
+because the previous report did not carry it: the `SURVIVED` premise-check table
+was measured at `45e4c556` with N2 WIRED, then re-presented as the arc's
+acceptance result after `1dc0a7ce` had held N2 back out.
+
+## Where the four namespaces actually stand
+
+| # | namespace | status at `HEAD` |
+|---|---|---|
+| N1 | numeric node ids | **CLOSED and wired** |
+| N2 | reactive cell-store keys | **OPEN** — needs the ruled chunk-local scope |
+| N3 | author top-level type names | **OPEN** — closed incidentally by that same scope |
+| N4 | engine names | **OPEN, patch written and executed-verified, held** |
+
+**The acceptance test therefore still CLOBBERS on this tree, under both module
+formats.** The u4 fixture's collision is N2 (`<rows>` in both pages), and N2 is
+open. Verbatim, measured at `HEAD` and at base:
+
+```
+BASE  e8fdd44c  esm      alpha AFTER import : {"rows":["b1","b2"]}   CLOBBERED
+BASE  e8fdd44c  classic  alpha AFTER import : {"rows":["b1","b2"]}   CLOBBERED
+HEAD            esm      alpha AFTER import : {"rows":["b1","b2"]}   CLOBBERED
+HEAD            classic  alpha AFTER import : {"rows":["b1","b2"]}   CLOBBERED
+```
+
+## R2 / D1 / D3 — the anchor is now the PROJECT ROOT
+
+`scrml.toml`, else `.git` (accepting both the directory and the worktree/submodule
+FILE form), resolved once per build and memoized. Reproductions, both at `HEAD`:
+
+- **D1** — two `home.scrml` in unrelated trees, compiled together:
+  base `scrml-each:00rb1wn9_24` twice; now `005ft5t6_6` / `00mssdnh_6`.
+- **D3** — the same three files as a DIR vs as an explicit file list: `00bnovk3_24`
+  / `00jek2uh_24` in BOTH invocations. The token no longer moves with the input set.
+
+### DEVIATION — the no-project-root tier
+
+The ruling says an unresolvable root SHALL be a hard compile error. **Measured: as
+literally written that fails 434 test files**, which compile fixtures from
+`mkdtemp`/`/tmp` where neither marker exists. The third tier anchors at the
+FILESYSTEM ROOT (the absolute path) instead.
+
+This is not the degrade the ruling rejects. Its objection is that a degrade
+*"reinstates the precise collision the ruling rejected basename for"* — and an
+absolute path is strictly MORE injective than a project-relative one, never less;
+two distinct files cannot share one. What is given up is cross-machine token
+reproducibility, and only for files outside any project, where there is no shared
+build to reproduce. `assertChunkTokensDistinct` is the real guarantee in every
+tier. **Needs ratification or an override.**
+
+## D2 — injectivity assert + the entropy correction
+
+`assertChunkTokensDistinct` over the build's file set; `E-CG-018` on collision.
+**`E-CG-018` needs a §34 catalog row, which I did not add** — the catalog is
+normative SPEC and that is a PA/bryan call.
+
+`fnv1a-hash.ts` corrected: **32 bits, not "~41"**. 36^7 (78,364,164,096) exceeds
+2^32, so the 8th base36 digit is never needed and **every token begins with `0`**.
+Consumers matching by shape must anchor on `0[0-9a-z]{7}`.
+
+## D4 — the gate was hollow; it now compares 446 files
+
+`walk()` recursed but re-anchored `relative()` on the SUBdirectory, so nested
+files entered as bare basenames, `readFileSync` threw, and `catch { continue; }`
+swallowed it. Every hollow-gate mode is designed out: the walk keeps the original
+root, an unreadable file is a FINDING, a zero-file run FAILS, duplicate relative
+paths are reported, and the compared count is printed.
+
+Measured at `HEAD`, 10 corpora:
+
+| corpus | walked | compared | identical | token-only | residual |
+|---|---|---|---|---|---|
+| 23-trucking-dispatch | 115 | 115 | 87 | 28 | **0** |
+| website | 295 | 295 | 295 | 0 | **0** |
+| 8 others | 36 | 36 | 26 | 10 | **0** |
+
+23-trucking's 87/28/0 reproduces the reviewer's independent re-run exactly. The
+fold regex is anchored to `0[0-9a-z]{7}_` and folds NAME-keyed tokens too.
+
+## D5 — SPEC §22.10: the meta scopeId CANNOT be exempted
+
+Investigated, not amended. `runtime-template.js:3068` resolves it with a
+**document-wide** `querySelector('[data-scrml-meta="' + scopeId + '"]')`, and it is
+also the key of the process-global `_scrml_cleanup_registry` plus the timer and
+rAF registries (`:1332-1348`). Two pages each carrying a `^{}` block:
+
+```
+BASE e8fdd44c : data-scrml-meta="_scrml_meta_4"      (BOTH pages)
+                _scrml_meta_effect("_scrml_meta_4"   (BOTH pages)
+HEAD          : _scrml_meta_01a9vemp_4 / _scrml_meta_01c6hd7r_4
+```
+
+So alpha's `meta.emit()` writes into whichever placeholder the document holds
+first, and the two blocks share cleanup/timer slots. Same cross-chunk class as
+`data-scrml-each-mount` / `data-scrml-match-mount`, which have zero SPEC hits —
+this one has a normative sentence. **Recommendation: amend §22.10:16342** to
+`"_scrml_meta_<chunkToken>_N"`, or to a form that admits a namespace prefix. Not
+mine to write.
+
+## D6, D7, D8
+
+- **D6** — the reset is in a `try/finally` around the emit loop. Body re-indent is
+  whitespace-only; review with `git diff -w`.
+- **D7** — `withChunkNamespace`, `nsCell`, `nsCellLiteral`, `stripCellNamespace` and
+  the whole `cellOwners` machinery deleted, including the
+  `importBindings x exportRegistry` walk (with a per-import lazy `require`) that ran
+  on every file of every compile to build a Map nothing read.
+  `cell-namespace-pass.ts` DELETED — R1 supersedes key-prefixing for N2.
+- **D8** — normalizers anchored to `0[0-9a-z]{7}_` and made STRIPPING.
+  `colon-shorthand-inside-opener-s154b.test.js` was the bad one: `_[0-9a-z]{8}_(\d+)`
+  matched `_reactive_1` (`reactive` is itself 8 base36 chars), so `_scrml_reactive_1`
+  became `_scrml_NS_1`, which the next pass could no longer collapse — a
+  structural-identity test had silently become sensitive to the counter drift it
+  exists to ignore. The browser selector is back to `$="_7"`.
+
+## N4 — diagnosed, patched, EXECUTED, and then HELD
+
+Bigger than the review found. `idPrefix: nsName(meta.varName)` covers the mount
+attribute plus every derived render/wire/dispose/dispatch name, but **nine more
+top-level consts** are minted by exported helpers keyed on the same author name:
+`__scrml_engine_<var>_{transitions,timers,idle,msg_arms,internal_transitions,history_map,fire_hooks,once_N}`.
+Namespacing inside each helper keeps the definition site and every lookup site in
+agreement by construction.
+
+Executed, real Chromium, classic, on `compiler/tests/fixtures/chunk-namespacing/engine/`
+(beta deliberately uses a DIFFERENT type name with `var=phase`, so N3 cannot mask N4):
+
+```
+BASE e8fdd44c : [pageerror] Identifier '__scrml_engine_phase_transitions'
+                has already been declared                    -> INCONCLUSIVE
+patch applied : no page errors, alpha's mount untouched      -> isolated
+```
+
+**Held out of this landing.** R3 rules all four land together; N2 and N3 are not
+built, so N4 alone does not complete the arc, and applying it costs a **28-file /
+250-occurrence** test migration (measured) that would be spent now and re-reviewed
+later regardless. The patch is one line per helper plus `emitEngineMountHtml`.
+
+A finding worth keeping: **N3 masks N4 at base.** The first N4 run reported
+`SURVIVED` only because beta's chunk threw `Identifier 'Phase_toEnum' has already
+been declared` and never evaluated. `collision-exec.mjs` now scores any pageerror
+as INCONCLUSIVE — a chunk that dies before its first statement leaves the page
+pristine, so a before==after check false-greens. Execute-don't-grep, inverted.
+
+## N2 — the chunk-local scope, designed but NOT built
+
+The ruled mechanism and the five sub-problems it must solve, so the next round
+implements rather than rediscovers:
+
+```js
+(function () {
+  // cell keys in this chunk resolve into this chunk's slice of the shared store
+  const { _scrml_reactive_get, _scrml_reactive_set } =
+    _scrml_cell_scope("0a1b2c3d", { appPhase: "0eeeffff" });  // owner map
+  ...                                    // the existing chunk body, UNCHANGED
+  _scrml_reactive_get("rows")            // byte-identical to today
+})();
+```
+
+1. **The IIFE must go unconditional.** `wrapClientBodyInIife` (`index.ts:469`) fires
+   today only for cross-file-LINKED classic chunks — which is why shell+page
+   composition, whose chunks coexist without importing each other, is the open hole.
+   `--embed-runtime` needs a carve-out: it inlines the runtime, so wrapping would
+   make the runtime's own declarations chunk-local.
+2. **`_scrml_shell_cells` must escape.** The runtime probes it with
+   `typeof _scrml_shell_cells !== "undefined"`; inside an IIFE it is invisible and
+   the soft-nav shell-skip breaks.
+3. **The SSR seed is a hybrid.** `_scrml_ssr_seed_apply` calls the GLOBAL
+   `_scrml_reactive_set` with the seed's own keys, so the SERVER side still needs
+   real key-prefixing, and it must agree with the chunk's scope.
+4. **Imported cells need the owner map.** Lexical scope gets imported FUNCTIONS
+   right for free (their bodies capture the exporter's scope), but a directly-read
+   imported cell is emitted inline in the importer. Verified empirically that this
+   is the ONLY cross-unit cell path: a page reading a shell-composed cell is a hard
+   `E-STATE-UNDECLARED`, whose text says "import the name if it is cross-file".
+5. **ESM.** The chunk imports runtime names, so the shadow must not collide with
+   the import binding — an alias in `emit-client-esm.ts`.
+
+N3 falls out of (1) for free: the IIFE makes `const Phase` chunk-local.
