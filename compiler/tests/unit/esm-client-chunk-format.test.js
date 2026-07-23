@@ -28,7 +28,7 @@ import { assembleRuntime, RUNTIME_CHUNK_ORDER } from "../../src/codegen/runtime-
 import * as acorn from "acorn";
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, readdirSync, rmSync, copyFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, basename, dirname } from "node:path";
 
 const CLI = join(import.meta.dir, "../../bin/scrml.js");
 const MF_EXAMPLE = join(import.meta.dir, "../../../examples/22-multifile");
@@ -260,7 +260,7 @@ describe("§2 compile integration — esm chunks are ES modules; classic stays b
       expect(Buffer.compare(readFileSync(join(a.out, rel)), readFileSync(join(b.out, rel)))).toBe(0);
     }
     // Same runtime hash == same runtime bytes.
-    expect(runtimeFileIn(a.out).split("/").pop()).toBe(runtimeFileIn(b.out).split("/").pop());
+    expect(basename(runtimeFileIn(a.out))).toBe(basename(runtimeFileIn(b.out)));
   });
 });
 
@@ -390,7 +390,7 @@ describe("§6 U3 — build+esm content-hash rewrites the in-chunk ES import URLs
     expect(chunks.every((c) => /\.client\.[0-9a-z]+\.js$/.test(c))).toBe(true);
     let importsChecked = 0;
     for (const chunk of chunks) {
-      const dir = chunk.slice(0, chunk.lastIndexOf("/"));
+      const dir = dirname(chunk);
       const srcText = readFileSync(chunk, "utf8");
       for (const m of srcText.matchAll(/import (?:\* as \w+|\{[^}]*\}) from "(\.\.?\/[^"]+)"/g)) {
         importsChecked++;
