@@ -1,9 +1,10 @@
 /**
  * e-dg-002-false-positive-class.test.js — Stage 11 DG E-DG-002 reader-credit
- * for two under-counted reader loci (closes S146 match-DG + R27 C9).
+ * for three under-counted reader loci (closes S146 match-DG + R27 C9 +
+ * `g-dg-class-attr-interp-not-consumed`).
  *
  * E-DG-002 ("Reactive variable `@x` is declared but never consumed") fired
- * SPURIOUSLY on two real read loci the DG's reader-accounting missed:
+ * SPURIOUSLY on three real read loci the DG's reader-accounting missed:
  *
  *   (A) Derived-cell RHS arrow-body read (R27 "C9"): a `@var` read only inside
  *       a `.map`/`.filter`/`.reduce` callback body
@@ -19,6 +20,19 @@
  *       ExprNode markup-sweep never credited the subject cell. Fix: a
  *       match-block special-case (analogous to each-block opener-attr credit)
  *       scans `onExprRaw` + `armsRaw` for @cell reads.
+ *
+ *   (C) Template-literal attribute interpolation ("SB3",
+ *       `g-dg-class-attr-interp-not-consumed`): a `@var` read only inside a
+ *       quoted attribute value's `${...}` (`<div class="box ${@theme}">`). Such
+ *       a value is `{ kind: "string-literal", value: "box ${@theme}" }` — an
+ *       OBJECT whose payload is `value` — so it matched none of the DG's
+ *       attribute-value branches and was never credited at all. NOT
+ *       class-specific: the miss is in the value SHAPE, so `style` / `title` /
+ *       `data-*` / `aria-*` were equally affected. Fix: credit the cells
+ *       reported by `rewriteTemplateAttrValue` (codegen's own lowerer, reused
+ *       so the DG's reader set is the WIRED set by construction).
+ *       Spec: §5.5.3 (interpolated `@var` SHALL subscribe), §5 line 1244
+ *       (the `${...}` token is attribute-name-agnostic).
  *
  * HARD regression guard: E-DG-002 MUST STILL FIRE on genuinely-unused reactive
  * vars (the fix CREDITS specific real read loci; it must NOT blanket-suppress).
@@ -156,6 +170,128 @@ describe("E-DG-002 false-positive class — credit under-counted reader loci", (
     ].join("\n");
     const { all } = compileSource(source);
     expect(edg002For(all, "wrapper")).toBeUndefined();
+  });
+
+  // ---- (C) Template-literal attribute interpolation (SB3) ----
+  //
+  // `g-dg-class-attr-interp-not-consumed`. A quoted attribute value carrying
+  // `${...}` arrives as `{ kind: "string-literal", value: "box ${@theme}" }` —
+  // an OBJECT whose payload lives in `value`. Pre-fix it matched NONE of the
+  // DG markup-sweep attribute branches (`name` = variable-ref, `refs` =
+  // expr-attr, `raw` = expr fallback, kind "call-ref") and none of the
+  // string-typed path above them, so the read was never credited AT ALL.
+  //
+  // The read is normative, not incidental: SPEC §5.5.3 — "Reactive variables
+  // referenced as `${@varName}` inside the template literal SHALL each
+  // subscribe to changes" — and codegen agrees, emitting
+  // `_scrml_effect(() => el.setAttribute(name, `…${_scrml_reactive_get(…)}…`))`.
+
+  test("(C) class attr interpolation is the ONLY read: fires NO E-DG-002", () => {
+    const source = [
+      "<program>",
+      '  <theme> = "dark"',
+      '  <div class="box ${@theme}">hello</div>',
+      "</program>",
+    ].join("\n");
+    const { all } = compileSource(source);
+    expect(edg002For(all, "theme")).toBeUndefined();
+  });
+
+  test("(C) class attr interpolation + a text read: still clean", () => {
+    // The text read alone already credited @theme pre-fix; this pins that the
+    // SB3 credit is additive and did not disturb the already-working path.
+    const source = [
+      "<program>",
+      '  <theme> = "dark"',
+      '  <div class="box ${@theme}">hello ${@theme}</div>',
+      "</program>",
+    ].join("\n");
+    const { all } = compileSource(source);
+    expect(edg002For(all, "theme")).toBeUndefined();
+  });
+
+  test("(C) interpolation with no static prefix (class=\"${@theme}\") is credited", () => {
+    const source = [
+      "<program>",
+      '  <theme> = "dark"',
+      '  <div class="${@theme}">hello</div>',
+      "</program>",
+    ].join("\n");
+    const { all } = compileSource(source);
+    expect(edg002For(all, "theme")).toBeUndefined();
+  });
+
+  test("(C) the credit is attribute-name-agnostic, not class-specific", () => {
+    // The miss was in the attribute VALUE SHAPE, not the attribute name —
+    // codegen emits an identical setAttribute + _scrml_effect pair for every
+    // one of these, so each must be credited. A class-only fix would leave
+    // these four false-fire shapes standing.
+    const source = [
+      "<program>",
+      '  <tone> = "dark"',
+      '  <hue> = "red"',
+      '  <tag> = "x"',
+      '  <label> = "l"',
+      '  <div title="t ${@tone}">a</div>',
+      '  <div style="color: ${@hue}">b</div>',
+      '  <div data-kind="k ${@tag}">c</div>',
+      '  <div aria-label="al ${@label}">d</div>',
+      "</program>",
+    ].join("\n");
+    const { all } = compileSource(source);
+    expect(edg002For(all, "tone")).toBeUndefined();
+    expect(edg002For(all, "hue")).toBeUndefined();
+    expect(edg002For(all, "tag")).toBeUndefined();
+    expect(edg002For(all, "label")).toBeUndefined();
+  });
+
+  test("(C) every cell across multiple interpolations in one attr is credited", () => {
+    // SPEC §5.5.3: "Multiple `${...}` interpolations in a single `class`
+    // attribute are supported. Each reactive variable in any interpolation
+    // produces an independent reactive subscription."
+    const source = [
+      "<program>",
+      '  <size> = "lg"',
+      '  <tone> = "dark"',
+      '  <div class="btn-${@size} tone-${@tone}">hello</div>',
+      "</program>",
+    ].join("\n");
+    const { all } = compileSource(source);
+    expect(edg002For(all, "size")).toBeUndefined();
+    expect(edg002For(all, "tone")).toBeUndefined();
+  });
+
+  test("(C-GUARD) a bare @x in LITERAL attr text (no ${}) STILL fires", () => {
+    // The bound on the fix. Codegen does NOT wire `title="mail @theme now"` —
+    // the compiled client contains no `_scrml_reactive_get("theme")` — so
+    // E-DG-002 there is CORRECT. Scanning the whole attribute string instead
+    // of only the `${...}` segments would silence a REAL unused-cell warning,
+    // which is a worse bug than the false fire and invisible without this test.
+    const source = [
+      "<program>",
+      '  <theme> = "dark"',
+      '  <div title="mail @theme now">hello</div>',
+      "</program>",
+    ].join("\n");
+    const { all } = compileSource(source);
+    expect(edg002For(all, "theme")).toBeDefined();
+  });
+
+  test("(C-GUARD) a credited attr interp does NOT credit a sibling unused cell", () => {
+    // Precision check, mirroring the (A) lambda guard: @theme is read in the
+    // class template and must be credited; @bystander is declared and read
+    // nowhere and must still fire. Proves SB3 is a targeted per-cell credit,
+    // not a blanket suppression for any file containing an interpolated attr.
+    const source = [
+      "<program>",
+      '  <theme> = "dark"',
+      "  <bystander> = 99",
+      '  <div class="box ${@theme}">hello</div>',
+      "</program>",
+    ].join("\n");
+    const { all } = compileSource(source);
+    expect(edg002For(all, "theme")).toBeUndefined();
+    expect(edg002For(all, "bystander")).toBeDefined();
   });
 
   // ---- HARD regression guard — genuinely-unused MUST still fire ----
