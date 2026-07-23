@@ -15,11 +15,18 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 14 |
+| HIGH | 15 |
 | MED | 46 |
 | LOW | 31 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### G-SPA-RUNTIME-GZIP-BUDGET-KNIFE-EDGE — the 16 KB SPA-runtime gzip budget is at ~127 B margin on base, independent of any in-flight arc — `NEW S282; HIGH; open (a bryan decision, not a bug)`
+Surfaced while scoping the BUG-6 accessor-rename (`docs/changes/chunk-namespacing/BUG6-RENAME-SCOPING.md` §6). `v0-3-x-spa-tree-shake-phase-b.test.js:145` asserts the assembled SPA runtime is `< 16 * 1024` gzip. **Agent-measured on the test's own `SPA_COUNTER` fixture at base `e8fdd44c`: 16,257 B — 127 B under the 16,384 budget, with no chunk-namespacing changes present.** (Scoping measurement; the execution session re-measures as its step 1, R26-style — do not treat 127 B as verified-final.)
+
+**Why it is filed as a decision, not a bug:** the budget was near-saturated before chunk-namespacing existed, so ANY feature that adds core-runtime bytes now risks tripping it — this arc is merely the first to hit it. The BUG-6 rename passes only in its **zero-core-residue** form (16,255 B, ~2 B over base); the naive form fails by 1,147 B. That 129 B margin is *smaller than the ~200 B gzip whitespace-noise band* the scoping hit while measuring, so "passing" is not robust.
+
+**The fork (bryan, for the execution session):** (a) **hold 16 KB** and require zero-core-residue forever — every future core-runtime addition must be offset; or (b) **raise the budget** to give the mechanism air. The rename meets either answer; this is about the standing constraint, not this fix. Recommendation deferred to the execution session's re-measurement — if base has drifted over 16 KB by then, (b) is forced. <!-- @gap id=g-spa-runtime-gzip-budget-knife-edge sev=HIGH status=open -->
 
 > The four data rows above are a GENERATED artifact derived from the `<!-- @gap … -->` tokens — run `bun scripts/state.ts --write` to refresh (and `--check` to gate). For WHAT closed each arc, see [`docs/changelog.md`](changelog.md); the old per-severity "Closed-this-arc" narrative cells were retired (DD3 Fork 2B, `dd3-state-self-evidence-2026-06-07`).
 

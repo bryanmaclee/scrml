@@ -96,6 +96,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `f1dceb2d` — wrap(S282): changelog + master-list §0 + delta-log [741-752] + gap currency + hand-off rotate — **LOCAL-ONLY**
 - `a0344d75` — wrap(S280): marketing claim-gate U1+U2; a bryan ruling falsified; pa-base v2.4 (#149) — **pushed**
 - `ea4c720a` — wrap(S279): E-ASYNC timer over-fire fix + continuity (#139) — **pushed**
 - `d6cae6c2` — wrap(S278): ESM-chunks arc U1→U3 landed — esm now runs (behind default classic) (#136) — **pushed**
@@ -103,7 +104,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `5823b495` — wrap(S276): Wave-1c PR-1 LANDED (#124) — hand-off/changelog/delta-log/master-list/known-gaps + maps to c48e59a2 + 3 non-compliance fixes (#125) — **pushed**
 - `020485b2` — wrap(S274): freeze-spec campaign COMPLETE — hand-off/changelog/delta-log/known-gaps/master-list + ss75 list-close + partial maps (#123) — **pushed**
 - `d7b63fd5` — wrap(S273): tenant-floor 14.8.10 LANDED (#117/#118) + SSR-leak re-do in flight — hand-off/changelog/delta-log/board bookkeeping (#119) — **pushed**
-- `026b9f25` — wrap(S271): recover S269 continuity + GITI-038/039 landed + tenant-floor RULED (#114) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
