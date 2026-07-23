@@ -15,9 +15,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 12 |
-| MED | 46 |
-| LOW | 29 |
+| HIGH | 13 |
+| MED | 47 |
+| LOW | 31 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -58,6 +58,38 @@
 **Why the alternative (enforce single-root via a named `E-EACH-MULTI-ROOT`) was REJECTED (bryan, S281):** (a) it is a hole in what was thought to be working, not an unbuilt feature; (b) **the workaround is not universally available** — Peter's "wrap the per-item body in one root" fails exactly where it is most needed: `<tr>` pairs in a table, `<dt>`/`<dd>` in a `<dl>`, `<option>` under `<select>`. A wrapper `<div>` in those positions is foster-parented or dropped — the *same* bug class as #131 / S272 — so single-root-as-contract would make legal HTML inexpressible in Tier-1 iteration; (c) it would newly-REJECT the §10.8 Tier-0 multi-`lift` grant, or enforce at Tier 1 only and break the ladder's *"the per-item template carries forward"* promotion promise — note `W-EACH-PROMOTABLE` **already fires** on a multi-`lift` Tier-0 loop, offering a `promote --each` lift that would silently delete markup; (d) a real adopter is affected now.
 
 **Fix in flight (S281).** Design: root count is statically known at codegen — when exactly 1, emit today's `return _itemFrag.firstChild` **byte-identical** (the ~99% case, and the assertable safety gate); emit the fragment form only when > 1. The runtime `createFn` contract widens to `Node | DocumentFragment`, and the reconciler owns a node **group per key** (key stamped on every top-level node; `_childList`/`_clearAll`/`_insert`/`_remove`/`_replace` group-aware; LIS reorder over groups, moving a group's nodes together preserving intra-group order) across BOTH container modes — range (`nodeType === 8` comment fence, the #131 model) and element. Tier-0 lift fixed in the same landing per §10.8. SPEC §17.7.2 gains a minimal normative statement making the N-root grant explicit. No new §34 code. **PRESERVED deliberately:** create-time `if=` semantics (`emit-each.ts:860`) — a reused group does not gain/lose roots on later reconciles; that is a pre-existing limitation and is NOT fixed here. — `NEW S281 (adopter #141); HIGH; open — build in flight`
+
+### g-match-without-for-plus-when-children-silent-undeclared-dispatch — a `<match on=…>` with invented `<when is="…">` children is SILENTLY ACCEPTED (0 errors, `<when>` never flagged) and emits a reference to a dispatch function that is never declared → runtime `ReferenceError`, dead page
+<!-- @gap id=g-match-without-for-plus-when-children-silent-undeclared-dispatch sev=HIGH status=open -->
+**PRE-EXISTING** (reproduces on `6e0c6191`, unrelated to #141). Surfaced by the #141 adversarial review — **and materially corrected by PA verification**, see below.
+
+`<match on=@.status>` with `<when is="ok">…</when>` children compiles with **0 errors**; `<when>` is never flagged (E-MARKUP-001, the unknown-element gate landed S264, does not fire on it); and the emitted client contains **1 reference to `__scrml_match_<id>_dispatch` and 0 declarations** → `ReferenceError` at load → the page renders nothing. Silent accept, clean build, dead page — the worst failure shape we have.
+
+Neither half of that source is scrml: there is no `<when>` structural element (§4.15 / §24.4 registry), and §18.0.1 block-form requires `<match for=Type …>` with variant-named arms. It is a Ghost-Pattern shape — the Vue/Svelte-ish conditional an LLM or a framework-refugee reaches for. The gap is that the compiler **accepts it and emits broken output** instead of rejecting it.
+
+⚠️ **PA CORRECTION to the review that found this.** The reviewer reported it as *"`<match>` inside an `<each>` body is page-fatal"* and flagged the multi-root `<match>`-as-a-root path as untestable in practice. **That claim does not hold.** Its reproducer used the invalid `<when>` shape; a **valid** `<match for=Phase on=r.p>` with variant-named arms inside an `<each>` compiles clean and emits **1 declaration + 2 references** — correctly wired. The defect is invalid-source-not-rejected, NOT valid-match-in-each. Recorded because the difference decides both the severity and who the fix belongs to: this is a diagnostic gap, not a codegen gap in the iteration surface. (Cf. the gauntlet-overseer discipline — compiler bug vs dev error is exactly the distinction that must not be collapsed.)
+
+Fix direction: reject at parse/structural time — `<when>` should hit the unknown-element gate, and a `<match>` without `for=` should hit a named error rather than reaching codegen. Also reported by the same review but **NOT PA-verified**: a `<match>` as a direct child of a `<div>` inside `<program>` reportedly emits no codegen at all (`probes/arm.scrml`). Verify before acting on it. — `NEW S281 (#141 adversarial review, PA-corrected); HIGH; open`
+
+### g-each-root-count-coupled-to-emitted-text-formatting — the per-item root count is derived from generated-string formatting with no invariant; a future emitter change silently reverts issue #141
+<!-- @gap id=g-each-root-count-coupled-to-emitted-text-formatting sev=MED status=open -->
+Filed from the #141 adversarial review (finding 1), **accepted as a known design risk at land time rather than fixed** — the review found it non-blocking and it is correct today on the full corpus plus ~15 hand-built probes.
+
+`emit-each.ts` derives correctness-critical behavior from `l.startsWith(_childIndent) && l[_childIndent.length] !== " "` over emitted strings. The failure mode is **silent reversion to #141**: any future emitter that indents a top-level `_itemFrag.appendChild(` differently (e.g. wraps a root append in a block), or renames `_itemFrag`, drops the count to 1, emits `return _itemFrag.firstChild;`, and ships a clean build rendering only the first root — no lint, no error, and no test failure unless a multi-root fixture happens to be in that exact shape. The guard itself was only added *after* `examples/25-triage-board.scrml` caught the nested-each shadowing case via the byte-identity gate.
+
+The reviewer traced why under-count is structurally unreachable **in the current emitter** (every `${fragmentVar}.appendChild(` in `emit-each.ts` is emitted at the one child indent; a nested each's factory is always ≥6 spaces deeper), and a runtime `Node.prototype.firstChild` shim detecting the truncation signature across 62 corpus programs returned zero events. So this is about future drift, not present breakage.
+
+Cheap mitigations, both missing: assert `_rootCount >= 1` when `templateChildren` has renderable content (a body emitting zero appends currently yields `firstChild → null → item silently dropped`), and cross-check the textual count against the AST's non-whitespace `templateChildren` count so a divergence fails loudly. — `NEW S281 (#141 review finding 1); MED; open`
+
+### g-reconcile-duplicate-key-inverts-intra-group-root-order — with DUPLICATE keys, a multi-root item's roots are re-inserted in reverse within the group
+<!-- @gap id=g-reconcile-duplicate-key-inverts-intra-group-root-order sev=LOW status=open -->
+Filed from the #141 adversarial review (finding 2). With a duplicate `key=`, `newNodes[i]` and `newNodes[i+1]` are the same head node, so the reverse placement loop calls `_insertGroup(head, nextSibling)` twice with `nextSibling === head`, re-inserting the group's tail before its own head → intra-group root order inverted (`Mb, Hb` instead of `Hb, Mb`).
+
+**UB → UB, not a regression:** on base the same source drops roots 2..N entirely (single node), and the single-root equivalent is identical on both. Duplicate keys are already garbage-in on this codebase. Worth a one-line note in the reconciler documenting the behavior rather than a fix; a real fix belongs with a duplicate-key diagnostic, which does not exist yet. — `NEW S281 (#141 review finding 2); LOW; open`
+
+### g-consolidated-lift-directreturn-first-lift-only — the `emitConsolidatedLift(directReturn)` recovery branch still returns only the FIRST lift's root
+<!-- @gap id=g-consolidated-lift-directreturn-first-lift-only sev=LOW status=open -->
+**PRE-EXISTING**, surfaced by the #141 adversarial review and deliberately NOT covered by that fix. `emit-lift.js` `emitConsolidatedLift(…, {directReturn:true})` — reached via the `hasFragmentedLiftBody` branch at `emit-control-flow.ts:675` — returns a single `rootVar` built from the first lift only. It fires only on the misparsed-markup recovery shape (a `lift` plus a bare html-fragment / tilde-decl sibling), so it is not the #141 path, but it means the Tier-0 multi-root fix is **not universal**. Flagged so this is not mistaken for covered ground. — `NEW S281 (#141 review); LOW; open`
 
 ### g-ssr-each-multi-root-client-only-fallback — SSR silently declines to server-render ANY multi-root `<each>`; the list has no server HTML, no first paint and no DOM adoption, with zero diagnostic
 <!-- @gap id=g-ssr-each-multi-root-client-only-fallback sev=MED status=open -->
