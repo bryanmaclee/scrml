@@ -79,6 +79,8 @@ import {
   resetChunkNamespaceState,
   resolveProjectRoot,
   assertChunkTokensDistinct,
+  buildCellOwnerMap,
+  chunkNamespaceToken,
 } from "./chunk-namespace.ts";
 
 import { EncodingContext } from "./type-encoding.ts";
@@ -464,15 +466,130 @@ function isCrossFileLinked(
 }
 
 /**
- * known-gaps-#6 (S152) — wrap a cross-file-linked file's client.js BODY in an
- * IIFE so its top-level `const`/`function` declarations are local (not in the
- * shared global lexical env). The `_scrml_modules[key] = {...}` footer + the
- * runtime shared-global ASSIGNMENTS (e.g. `_scrml_lift_target = ...`) still
- * reach the global registry/runtime (assignments, not declarations, escape the
- * IIFE). The `// Requires: <runtime>` header line is preserved OUTSIDE the IIFE
- * (it is a comment the dev server reads to wire the runtime <script>).
+ * The accessors `_scrml_cell_scope` binds. Kept in one place because the chunk
+ * prologue destructures a SUBSET of these (only what the body references), and
+ * the runtime must offer every one of them.
  */
-function wrapClientBodyInIife(clientJs: string): string {
+const CELL_SCOPE_ACCESSORS = [
+  "_scrml_reactive_get",
+  "_scrml_reactive_set",
+  "_scrml_init_set",
+  "_scrml_default_set",
+  "_scrml_reset",
+  "_scrml_derived_declare",
+  "_scrml_derived_get",
+  "_scrml_derived_subscribe",
+  "_scrml_reactive_subscribe",
+  "_scrml_reactive_subscribe_when",
+  "_scrml_reactive_derived",
+  "_scrml_reactive_debounced",
+  "_scrml_reactive_throttled",
+  "_scrml_reactivity_register",
+  "_scrml_reactivity_cancel",
+  "_scrml_ssr_seeded",
+  "_scrml_replay",
+  "_scrml_messages_register_inline",
+  "_scrml_machine_clear_timer",
+  "_scrml_machine_arm_timer",
+  "_scrml_machine_arm_initial",
+  "_scrml_engine_advance",
+  "_scrml_engine_direct_set",
+  "_scrml_engine_hydrate_init",
+  "_scrml_engine_dispatch_message",
+  "_scrml_engine_history_capture_on_exit",
+  "_scrml_engine_arm_state_timers",
+  "_scrml_engine_clear_state_timers",
+  "_scrml_engine_clear_named_timer",
+  "_scrml_engine_arm_idle_watchdog",
+  "_scrml_engine_reset_idle_watchdog",
+] as const;
+
+/**
+ * N2/N3/N4 chunk-namespacing — build the per-chunk cell-scope prologue.
+ *
+ * Emits only the accessors `body` actually references. Over-inclusion would be
+ * harmless (an extra destructured binding) but noisy; UNDER-inclusion would be a
+ * bug, so the scan matches the bare identifier rather than `name(` — an accessor
+ * passed as a value still counts.
+ *
+ * Returns "" when the body touches no cell accessor, so a chunk with no reactive
+ * state carries no prologue at all.
+ */
+function buildCellScopePrologue(
+  body: string,
+  token: string,
+  owners: Record<string, string>,
+): string {
+  if (!token) return "";
+  const used = CELL_SCOPE_ACCESSORS.filter((n) => new RegExp(`\\b${n}\\b`).test(body));
+  if (used.length === 0) return "";
+  const ownerArg = Object.keys(owners).length > 0 ? `, ${JSON.stringify(owners)}` : "";
+  const names = used.length === 1 ? ` ${used[0]} ` : `\n  ${used.join(",\n  ")},\n`;
+  return (
+    `// --- chunk cell scope (${token}) ---\n` +
+    `// Cell keys in this chunk resolve into THIS chunk's slice of the shared\n` +
+    `// store, so two routes that both declare <rows> no longer clobber each\n` +
+    `// other. The store, scheduler and subscriber lists stay singletons (forking\n` +
+    `// them would break reactivity); only the KEY SPACE is per-chunk. Every call\n` +
+    `// below is unchanged — the namespace is applied by these bindings.\n` +
+    `const {${names}} = _scrml_cell_scope(${JSON.stringify(token)}${ownerArg});\n\n`
+  );
+}
+
+/**
+ * Insert the per-chunk cell-scope prologue.
+ *
+ * Goes after the `// Requires:` header and after an EMBEDDED runtime (whose own
+ * declarations must stay where they are), and after any top-level `import` in an
+ * esm chunk. The body itself is untouched — that is the entire point: every
+ * `_scrml_reactive_get("rows")` call site stays byte-identical to the
+ * pre-namespacing output, and the namespace is applied by the bindings the
+ * prologue introduces.
+ */
+function addCellScopePrologue(
+  clientJs: string,
+  token: string,
+  owners: Record<string, string>,
+): string {
+  const prologue = buildCellScopePrologue(clientJs, token, owners);
+  if (!prologue) return clientJs;
+
+  const runtimeEndMarker = "// --- end scrml reactive runtime ---";
+  const runtimeEnd = clientJs.indexOf(runtimeEndMarker);
+  if (runtimeEnd !== -1) {
+    const cut = runtimeEnd + runtimeEndMarker.length;
+    return clientJs.slice(0, cut) + "\n" + prologue + clientJs.slice(cut).replace(/^\n/, "");
+  }
+
+  const lines = clientJs.split("\n");
+  let insertAt = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (l.startsWith("// Requires: ")) insertAt = i + 1;
+    else if (/^\s*import\s/.test(l)) insertAt = i + 1;
+  }
+  lines.splice(insertAt, 0, "", prologue.replace(/\n+$/, ""), "");
+  return lines.join("\n");
+}
+
+/**
+ * Wrap a chunk BODY in an IIFE so its top-level `const`/`function` declarations
+ * are chunk-local rather than shared across the classic global lexical
+ * environment. See the call site for why this is unconditional and what is
+ * audited to still escape.
+ *
+ * The `// Requires: <runtime>` header stays outside (the dev server reads it to
+ * wire the runtime `<script>`), and so does an embedded runtime.
+ */
+function wrapChunkBodyInIife(clientJs: string): string {
+  const runtimeEndMarker = "// --- end scrml reactive runtime ---";
+  const runtimeEnd = clientJs.indexOf(runtimeEndMarker);
+  if (runtimeEnd !== -1) {
+    const cut = runtimeEnd + runtimeEndMarker.length;
+    const header = clientJs.slice(0, cut) + "\n";
+    const body = clientJs.slice(cut).replace(/^\n/, "");
+    return `${header}(function() {\n${body}\n})();\n`;
+  }
   const reqPrefix = "// Requires: ";
   const nl = clientJs.indexOf("\n");
   if (clientJs.startsWith(reqPrefix) && nl !== -1) {
@@ -482,6 +599,7 @@ function wrapClientBodyInIife(clientJs: string): string {
   }
   return `(function() {\n${clientJs}\n})();\n`;
 }
+
 
 /**
  * §64 / Flag C — the LOCAL names a tool imports that bind to an ASYNC library fn.
@@ -1715,6 +1833,22 @@ export function runCG(input: CgInput): CgOutput {
         }
       }
 
+      // chunk-namespacing N2 — install the per-chunk cell scope BEFORE the esm
+      // transform. Under esm the transform computes its runtime import set as
+      // `(runtime exports ∩ chunk idents) − own decls`; the prologue's `const`
+      // bindings ARE own-decls, so the accessors this chunk shadows drop out of
+      // the import automatically and `_scrml_cell_scope` is imported instead.
+      // Inserting afterwards produced `import { _scrml_reactive_get }` next to
+      // `const { _scrml_reactive_get }` — a redeclaration, and 3 hard
+      // E-CODEGEN-INVALID-LOGIC errors.
+      const cellOwners = clientJs
+        ? buildCellOwnerMap(fileAST, chunkNamespaceRoot, exportRegistryInput ?? null)
+        : {};
+      const chunkToken = chunkNamespaceToken(filePath, chunkNamespaceRoot);
+      if (clientJs) {
+        clientJs = addCellScopePrologue(clientJs, chunkToken, cellOwners);
+      }
+
       // ESM chunks arc (Unit 2) — under `--module-format=esm`, transform the
       // stripped (runtime-factored-out) client chunk body into a valid ES module:
       // the `_scrml_modules` registration footer becomes `export {…}`, each
@@ -1736,25 +1870,29 @@ export function runCG(input: CgInput): CgOutput {
         });
       }
 
-      // known-gaps-#6 (S152, Approach B) — IIFE-wrap the client.js body for files
-      // that participate in cross-file local `.scrml` linking, so their top-level
-      // `const`/`function` declarations do not collide in the SHARED global
-      // lexical environment of classic <script>s (exporter `const UserRole` vs an
-      // importer's `const { UserRole } = _scrml_modules[...]` → redeclaration
-      // error). The `_scrml_modules[...] = {...}` footer + runtime shared-global
-      // assignments still escape the IIFE. Single-file apps are NOT wrapped (zero
-      // behavior change). Gated on `!embedRuntime`: the registry (`_scrml_modules`)
-      // lives in the SHARED runtime file (external mode), so wrapping only the
-      // per-file body keeps the registry global. In embed mode the runtime is
-      // inlined per file (each file would carry its own `_scrml_modules`), so
-      // cross-file linking is structurally a no-op there regardless — wrapping
-      // the embedded runtime would only further isolate it; leave embed mode
-      // unwrapped (the default `compile` path is external mode). Under `esm` the
-      // module scope already isolates top-level decls (each chunk is its own
-      // module), so no IIFE is needed OR permitted (it would enclose the chunk's
-      // top-level `import`/`export`, which is a syntax error).
-      if (clientJs && !embedRuntime && moduleFormat !== "esm" && isCrossFileLinked(filePath, importGraphInput)) {
-        clientJs = wrapClientBodyInIife(clientJs);
+      // known-gaps-#6 (S152) + chunk-namespacing N3/N4 (S282) — give the chunk its
+      // own lexical scope.
+      //
+      // S152 wrapped only cross-file-LINKED chunks, to stop an exporter's
+      // `const UserRole` colliding with an importer's destructured one. That gate
+      // is exactly why shell+page composition stayed broken: those chunks coexist
+      // in one document WITHOUT importing each other, so they were never wrapped,
+      // and two routes both declaring `type Phase` still emitted `const Phase`
+      // twice — a redeclaration SyntaxError that killed the second chunk outright
+      // (it never evaluated, so nothing on that page hydrated). Unconditional now.
+      //
+      // `_scrml_modules[...] = {...}` and the runtime shared-global writes are
+      // ASSIGNMENTS, so they still escape the IIFE. An audit of the runtime for
+      // bare references to chunk-declared globals found exactly ONE —
+      // `_scrml_shell_cells` — which emit-reactive-wiring now also publishes on
+      // `globalThis` for that reason.
+      //
+      // esm is skipped: a module is already its own scope, and an IIFE there is
+      // not merely unnecessary but illegal (it would enclose the top-level
+      // `import`/`export`). embedRuntime keeps the inlined runtime OUTSIDE the
+      // wrap — wrapping it would make the runtime's own declarations chunk-local.
+      if (clientJs && moduleFormat !== "esm") {
+        clientJs = wrapChunkBodyInIife(clientJs);
       }
 
       const base = basename(filePath, ".scrml");

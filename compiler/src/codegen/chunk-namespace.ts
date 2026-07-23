@@ -270,3 +270,122 @@ export function buildChunkNamespaceState(
   const filePath = (fileAST as { filePath?: string } | null)?.filePath ?? "";
   return { token: chunkNamespaceToken(filePath, projectRoot) };
 }
+
+/**
+ * Cells this unit does NOT own, mapped to their fully-resolved store key
+ * (`<exporterToken>$<exportedName>`).
+ *
+ * A cross-file imported engine/cell is the SAME instance across every importing
+ * file (§51.0.A / §51.0.D) — the mechanism IS one shared `_scrml_state` slot —
+ * so an imported name must key under the EXPORTER's token. Lexical scope alone
+ * does not cover this: an imported FUNCTION carries its own chunk's scope with
+ * it, but a directly-READ imported cell is emitted inline in the importer.
+ *
+ * Composition is not such a path, and does not need an entry here: a page
+ * reading a shell-declared cell is a hard `E-STATE-UNDECLARED`, whose own text
+ * says "import the name if it is cross-file".
+ *
+ * `importBindings` lives on the SYM-attached scope, which hangs off the INNER
+ * `ast` for the wrapper-shaped `fileAST` codegen carries — mirroring the
+ * wrapper-vs-inner fallback `collectCrossFileEngineMounts` needs.
+ */
+export function buildCellOwnerMap(
+  fileAST: unknown,
+  projectRoot: string | null | undefined,
+  exportRegistry?: Map<string, Map<string, ExportEntryShape>> | null,
+): Record<string, string> {
+  const owners: Record<string, string> = {};
+  if (!exportRegistry || exportRegistry.size === 0) return owners;
+
+  const filePath = (fileAST as { filePath?: string } | null)?.filePath ?? "";
+  const scope =
+    (fileAST as { _scope?: unknown } | null)?._scope ??
+    (fileAST as { ast?: { _scope?: unknown } } | null)?.ast?._scope ??
+    null;
+  const importBindings = (scope as {
+    importBindings?: Map<string, { exportedName?: string; sourcePath?: string }>;
+  } | null)?.importBindings;
+  if (!importBindings || importBindings.size === 0) return owners;
+
+  for (const [localName, binding] of importBindings) {
+    const sourcePath = binding?.sourcePath;
+    if (typeof sourcePath !== "string" || !sourcePath) continue;
+    const exportedName = binding?.exportedName ?? localName;
+    const resolved = resolveExporterPath(sourcePath, filePath, exportRegistry);
+    if (!resolved) continue;
+    const entry = exportRegistry.get(resolved)?.get(exportedName);
+    // Only STATEFUL exports occupy a cell slot. A pure `fn` or a `type` export is
+    // an ordinary lexical binding and never keys the store — entering one here
+    // would let an imported function name shadow a same-named LOCAL cell's key.
+    if (!entry || !isCellBackedCategory(entry.category, entry.kind)) continue;
+    const exporterToken = chunkNamespaceToken(resolved, projectRoot);
+    if (!exporterToken) continue;
+    owners[localName] = `${exporterToken}$${exportedName}`;
+  }
+  return owners;
+}
+
+/** The subset of a MOD export-registry entry this module reads. */
+interface ExportEntryShape {
+  kind: string;
+  category: string;
+}
+
+/**
+ * Which export categories are backed by a `_scrml_state` cell slot. Deliberately
+ * narrow — see the shadowing hazard noted in `buildCellOwnerMap`.
+ */
+function isCellBackedCategory(category: string, kind: string): boolean {
+  return (
+    category === "engine" ||
+    category === "cell" ||
+    category === "reactive" ||
+    category === "state" ||
+    kind === "engine" ||
+    kind === "cell"
+  );
+}
+
+/**
+ * Resolve an import's literal `sourcePath` to the key `exportRegistry` uses.
+ * Tries the literal first (unit-test harnesses key relatively), then the module
+ * resolver's absolute form (the production shape).
+ */
+function resolveExporterPath(
+  sourcePath: string,
+  importerPath: string,
+  exportRegistry: Map<string, Map<string, unknown>>,
+): string | null {
+  if (exportRegistry.has(sourcePath)) return sourcePath;
+  if ((sourcePath.startsWith("./") || sourcePath.startsWith("../")) && importerPath) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { resolveModulePath } = require("../module-resolver.js");
+      const abs: string = resolveModulePath(sourcePath, importerPath);
+      if (exportRegistry.has(abs)) return abs;
+    } catch {
+      /* resolver unavailable — fall through */
+    }
+  }
+  return null;
+}
+
+/**
+ * The `_scrml_ssr_state` seed key for a cell owned by THIS unit.
+ *
+ * The SSR seed is the one place a cell key must be resolved at COMPILE time
+ * rather than by the chunk's local scope: `_scrml_ssr_seed_apply`
+ * (`runtime-template.js`) walks `window.__scrml_ssr_state` and feeds each key to
+ * the GLOBAL `_scrml_reactive_set`, which never sees a chunk-local shadow. So the
+ * server must bake the resolved key, and it must be exactly what
+ * `_scrml_cell_key(token, name)` produces on the client — hence the shared `$`
+ * separator and the root-only rule for dotted keys.
+ */
+export function nsSsrSeedKey(name: string): string {
+  const raw = String(name ?? "");
+  if (!raw || !_state.token) return raw;
+  const dot = raw.indexOf(".");
+  const root = dot === -1 ? raw : raw.slice(0, dot);
+  const rest = dot === -1 ? "" : raw.slice(dot);
+  return `${_state.token}$${root}${rest}`;
+}
