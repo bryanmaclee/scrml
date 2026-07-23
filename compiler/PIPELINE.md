@@ -166,6 +166,7 @@ maps to the per-file budgets below when running with full worker parallelism.
 | 2 | Block Splitter | BS | per-file |
 | 3 | Tokenizer + AST Builder | TAB | per-file |
 | 3.05 | Name Resolution (IMPLEMENTED P1.E — shadow mode; routing flip in P2/P3) | NR | per-file (after MOD) |
+| 3.055 | Tag Canonicalization | TC | per-file (after NR) |
 | 3.1 | Module Resolver | MOD | project-wide (needs all TAB outputs) |
 | 3.2 | Component Expander | CE | per-file (after MOD complete) |
 | 3.3 | Unified Validation Bundle (VP-1, VP-2, VP-3) | UVB | per-file (after CE) |
@@ -850,6 +851,88 @@ practice — pure AST traversal).
 no MOD dependency). Cross-file lookups defer to MOD's `exportRegistry`.
 **Dependencies:** TAB must complete; MOD optional (only required for cross-file
 lookups; same-file + lifecycle + HTML lookups run pre-MOD).
+
+---
+
+## Stage 3.055: Tag Canonicalization (TC)
+
+**Source:** `compiler/src/tag-canonicalizer.ts` (`runTC` / `runTCBatch`), wired in
+`compiler/src/api.js` immediately after NR.
+
+**Purpose.** Make each markup node's SPELLING agree with the classification NR
+just made. SPEC §4.3: *"Casing is irrelevant to resolution; convention is
+PascalCase for components and lowercase for HTML elements / built-in scrml
+lifecycle types."* SPEC §4.2: *"Classification is by the registry, never by
+whitespace."*
+
+NR already honours that on the resolution side — `resolveName` matches built-in
+HTML elements case-insensitively (§15.15.2 step 4), so `<Button>` is stamped
+`resolvedKind: "html-builtin"` exactly like `<button>`. What was missing is the
+spelling side. BS classifies component-vs-element by capitalization alone (it is
+a pre-registry syntactic stage and cannot do better), so the node still SPELLS
+itself `Button`; every downstream element consumer lowercases its own registry
+lookups but emits `node.tag` verbatim. An unregistered `<Button>` therefore
+escaped `E-COMPONENT-035` (NR resolved it, so VP-2's residual-component test
+does not fire) AND reached the document as a literal `<Button>` tag — bypassing
+the attribute allowlist and the content model, and "working" only because an
+HTML parser is ASCII-case-insensitive. Neither normalized nor rejected.
+
+**Input contract:** the per-file TAB ASTs, post-NR (`resolvedKind` /
+`resolvedCategory` stamped).
+
+**Output contract:** the same ASTs, mutated in place, plus a per-file
+`TCResult { filePath, rewrites: { from, to, line, col }[] }` (observability
+only — no stage consumes it). TC emits NO diagnostics.
+
+**The rule.** The walk reaches every `kind: "markup"` node in the file; the
+action is one POSITIVE gate — `resolvedKind === "html-builtin"` — so the three
+arms below are two code paths, not three:
+
+1. `resolvedKind` is `user-component` / `user-state-type` / `scrml-lifecycle` —
+   LEAVE IT ALONE. Registration is what makes a tag a component, not
+   capitalization, so a registered `Button` component still beats the HTML
+   `button` element. (Live corpus case:
+   `compiler/tests/integration/fixtures/a5/cross-file/app.scrml`, whose
+   `<Header/>` is an IMPORTED component sharing a name with `<header>`.)
+2. `resolvedKind` is `html-builtin` — rewrite `tag` to the canonical element
+   spelling (`canonicalElementName` in `html-elements.js`; HTML wins every
+   cross-namespace collision, SVG recovers its camelCase form) and clear the
+   legacy `isComponent` flag. A canonical spelling that is a scrml
+   structural / directive tag name (`SCRML_NON_ELEMENT_TAGS`) is refused — such
+   a tag is parsed by dedicated upstream machinery keyed on the tag string, so
+   synthesising one here would hand a later stage a node that never went through
+   it. The two sets are disjoint today; the guard exists so adding a structural
+   element cannot silently break that.
+3. `resolvedKind` is `unknown`, or ABSENT (a shape that bypassed NR, e.g. a
+   component body CE re-parses later) — LEAVE IT ALONE. `<Widget/>` keeps firing
+   `E-COMPONENT-035` at VP-2, which is the correct *rejected* outcome, and a
+   node with no registry verdict is never guessed at from its spelling.
+
+**Post-condition (the property to test against):** after TC, `<Button>` compiles
+to exactly what `<button>` compiles to — same diagnostics, same bytes. TC never
+invents a classification; it only propagates NR's.
+
+**Why a separate stage rather than part of NR.** SPEC §15.15.6: *"NR SHALL NOT
+mutate any existing AST field; it adds only the two advisory fields."* Rewriting
+`node.tag` inside NR would violate that normative invariant. TC owns the
+mutation instead and runs before SYM/CE/TS/CG, so no consumer sees a
+half-normalized AST.
+
+**Reach.** Arm 2 keys on `resolvedKind`, so its reach is exactly NR's §15.15.2
+step 4 — the curated `html-elements.js` REGISTRY (46 render elements). Element
+names outside that registry (`pre`, `code`, `dialog`, `details`, and the
+SVG/MathML namespaces) resolve to `unknown` at NR even in their lowercase
+spelling, so a capitalized `<Pre>` lands in arm 3 and is rejected rather than
+normalized. Widening that means widening NR's step-4 registry, which is a
+§15.15.2 change, not a TC change.
+
+**Performance budget:** <= 2 ms per file (single AST traversal, no allocation
+beyond the rewrite log). MEASURED on `examples/05-multi-step-form.scrml`
+(`scrml compile --verbose`): `[TC] 0.8ms`, against `[NR] 1.7ms` and
+`[SYM] 27.5ms` on the same file.
+**Parallelism opportunity:** Yes — fully per-file.
+**Dependencies:** NR must have run (TC reads its stamp and does nothing without
+one).
 
 ---
 

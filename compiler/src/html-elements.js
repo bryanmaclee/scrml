@@ -1045,6 +1045,13 @@ const MATHML_ELEMENTS = new Set([
 const SVG_ELEMENTS_LC = new Set([...SVG_ELEMENTS].map((n) => n.toLowerCase()));
 const MATHML_ELEMENTS_LC = new Set([...MATHML_ELEMENTS].map((n) => n.toLowerCase()));
 
+// Lowercased spelling -> canonical SVG spelling (`fegaussianblur` ->
+// `feGaussianBlur`). SVG is the only namespace whose canonical element names are
+// not all-lowercase, so it is the only one that needs a recovery map.
+const SVG_CANONICAL_BY_LC = new Map(
+  [...SVG_ELEMENTS].map((n) => [n.toLowerCase(), n]),
+);
+
 /**
  * A valid custom-element name per the HTML spec: a lowercase-initial name that
  * contains at least one hyphen. Any hyphenated lowercase tag is a legitimate
@@ -1086,4 +1093,50 @@ export function isKnownElementName(name) {
   // MathML.
   if (MATHML_ELEMENTS.has(name) || MATHML_ELEMENTS_LC.has(lower)) return true;
   return false;
+}
+
+/**
+ * The CANONICAL spelling of `name` when `name` is a markup element name in any
+ * namespace, matched CASE-INSENSITIVELY; `null` when it is not.
+ *
+ *   canonicalElementName("Button")         -> "button"
+ *   canonicalElementName("MAIN")           -> "main"
+ *   canonicalElementName("FeGaussianBlur") -> "feGaussianBlur"
+ *   canonicalElementName("my-widget")      -> "my-widget"
+ *   canonicalElementName("Widget")         -> null
+ *
+ * SPEC §4.3 / §15.15.3: "Casing is irrelevant to resolution"; casing is a
+ * CONVENTION (PascalCase for components, lowercase for elements), never the
+ * classifier. This function is the spelling half of that rule — it answers
+ * "which element does this identifier spell?" and nothing else. WHETHER a given
+ * opener is an element at all is decided by the registry at NR (§15.15.2 lookup
+ * order), never here; callers must consult NR's `resolvedKind` FIRST so a
+ * registered `Button` component keeps winning over the HTML `button` element.
+ *
+ * Deliberately does NOT consult the curated `REGISTRY` (unlike
+ * `isKnownElementName`): REGISTRY also carries scrml structural forms
+ * (`program`, `each`, `errors`, …) that are NOT HTML elements and must never be
+ * produced as a canonical spelling. Only the three real markup namespaces plus
+ * the custom-element grammar are consulted here.
+ *
+ * @param {string} name
+ * @returns {string | null}
+ */
+export function canonicalElementName(name) {
+  if (typeof name !== "string" || name.length === 0) return null;
+  // Custom elements are already canonical by construction: the grammar demands
+  // a lowercase-initial hyphenated name, so no case recovery is possible or
+  // needed. A capitalized spelling (`<My-Widget>`) is NOT a custom element.
+  if (isCustomElementName(name)) return name;
+  const lower = name.toLowerCase();
+  // HTML first — it wins every cross-namespace name collision (`a`, `script`,
+  // `style`, `title`, `font`, `image`), matching the HTML parser's own
+  // precedence outside an `<svg>` / `<math>` integration point.
+  if (STANDARD_HTML_ELEMENTS.has(lower)) return lower;
+  // SVG — recover the canonical (possibly camelCase) spelling.
+  const svg = SVG_CANONICAL_BY_LC.get(lower);
+  if (svg !== undefined) return svg;
+  // MathML — all canonical names are lowercase.
+  if (MATHML_ELEMENTS_LC.has(lower)) return lower;
+  return null;
 }

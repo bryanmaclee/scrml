@@ -91,6 +91,13 @@ const ALLOWED = {
   "gauntlet-phase1-checks.js": 5,  // pre-NR check + doc
   "api.js": 5,                     // doc comments only
   "name-resolver.ts": 10,          // type field + fallback consumer + doc
+  // Stage 3.055 (TC) — tag canonicalization. TC's ROUTING read is NR's
+  // `resolvedKind` and nothing else (`resolvedKind !== "html-builtin"` is the
+  // only gate); `isComponent` appears solely as a WRITE-SIDE stamp, cleared to
+  // keep BS's legacy uppercase-first-char guess consistent with the canonical
+  // spelling TC just wrote, plus doc comments explaining exactly that. Zero
+  // isComponent routing reads.
+  "tag-canonicalizer.ts": 6,       // 1 write-side stamp (guarded) + doc comments
   "types/ast.ts": 5,               // field declaration + deprecation note
   "validators/post-ce-invariant.ts": 7, // doc comments only — no code reads
   "type-system.ts": 2,             // single doc-comment line

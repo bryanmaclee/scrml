@@ -49,6 +49,7 @@ import { runMetaEval } from "./meta-eval.ts";
 import { resolveModules, resolveModulePath, resolveModulePathNative } from "./module-resolver.js";
 import { PathKeyedMap, PathKeyedSet } from "./path-canonical.js";
 import { runNRBatch } from "./name-resolver.ts";
+import { runTCBatch } from "./tag-canonicalizer.ts";
 import { runSYMBatch } from "./symbol-table.ts";
 import { setBPPOverrides } from "./codegen/compat/parser-workarounds.js";
 import { lintGhostPatterns } from "./lint-ghost-patterns.js";
@@ -1610,6 +1611,29 @@ export function compileScrml(options = {}) {
     let totalDiag = 0;
     for (const nr of nrResults) totalDiag += nr.errors.length;
     log(`  [NR] ${nrResults.length} file(s), ${totalDiag} diagnostic(s) (shadow mode)`);
+  }
+
+  // Stage 3.055 (TC): Tag Canonicalization — makes each markup node's SPELLING
+  // agree with the classification NR just made. SPEC §4.3: "Casing is
+  // irrelevant to resolution." A tag NR resolved to an HTML element by the
+  // registry (`<Button>` -> html-builtin, case-insensitively per §15.15.2 step
+  // 4) is rewritten to the canonical element name, so every downstream element
+  // consumer — attribute allowlist, content model, SSR, emit — sees a real
+  // element instead of a verbatim PascalCase tag it silently passes through.
+  //
+  // Tags NR resolved to a same-file declaration, an import, or a lifecycle type
+  // are untouched (a registered `Button` component still beats `<button>`), and
+  // so are unresolved tags (`<Widget/>` keeps firing E-COMPONENT-035 at VP-2).
+  //
+  // Why not inside NR: SPEC §15.15.6 — "NR SHALL NOT mutate any existing AST
+  // field; it adds only the two advisory fields." TC owns the mutation instead,
+  // and runs before SYM/CE/TS/CG so no consumer sees a half-normalized AST.
+  // Emits no diagnostics.
+  const tcResults = stage("TC", () => runTCBatch(tabResultsForNR));
+  if (verbose) {
+    let totalRewrites = 0;
+    for (const tc of tcResults) totalRewrites += tc.rewrites.length;
+    log(`  [TC] ${tcResults.length} file(s), ${totalRewrites} tag(s) canonicalized`);
   }
 
   // Stage 3.06 (SYM): Symbol Table — Phase A1b Step B1 foundational pass.
