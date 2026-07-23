@@ -102,3 +102,33 @@ export function unNamespaceEngineNames(js) {
 export function unNamespaceCellKeys(js) {
   return String(js ?? "").replace(/("|')0[0-9a-z]{7}\$/g, "$1");
 }
+
+/**
+ * The inverse of the chunk wrap: strip the per-chunk IIFE and its cell-scope
+ * prologue, leaving the body's declarations at top level.
+ *
+ * For harnesses that execute an emitted chunk WITHOUT the runtime, to probe pure
+ * LOWERING — they build `new Function(shims + clientJs + "return (someFn())")`
+ * and read a top-level declaration the chunk makes. Chunk isolation is precisely
+ * what hides that declaration from them, and the prologue's `_scrml_cell_scope`
+ * call has no runtime to resolve against.
+ *
+ * This does NOT weaken what those tests assert: they pin the SHAPE of the
+ * emitted lowering, and the wrap is not part of that shape. Chunk isolation has
+ * its own dedicated coverage in `compiler/tests/unit/chunk-namespacing.test.js`.
+ */
+export function unwrapChunkScope(js) {
+  let out = String(js ?? "");
+  // Drop the prologue (comment block + the destructuring const).
+  out = out.replace(
+    /\n?\/\/ --- chunk cell scope \([0-9a-z]{8}\) ---[\s\S]*?_scrml_cell_scope\([^;]*\);\n/,
+    "\n",
+  );
+  // Drop the IIFE wrapper, keeping the body.
+  const open = out.indexOf("(function() {\n");
+  const close = out.lastIndexOf("\n})();");
+  if (open !== -1 && close > open) {
+    out = out.slice(0, open) + out.slice(open + "(function() {\n".length, close) + out.slice(close + "\n})();".length);
+  }
+  return out;
+}

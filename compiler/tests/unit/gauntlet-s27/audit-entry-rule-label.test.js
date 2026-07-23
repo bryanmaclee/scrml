@@ -26,6 +26,7 @@ import { tmpdir } from "os";
 import { compileScrml } from "../../../src/api.js";
 import { SCRML_RUNTIME } from "../../../src/runtime-template.js";
 import { extractUserFns } from "../../helpers/extract-user-fns.js";
+import { unwrapChunkScope } from "../../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-s27-audit-shape");
 let tmpCounter = 0;
@@ -142,11 +143,11 @@ describe("S27 §51.11.4 — transition table embeds labels", () => {
     // still names __auditLabel; scope the assertion to the table literal.)
     // Extract via indexOf instead of regex — entries contain `{}` which
     // breaks naive `[^}]*` scoping.
-    const startIdx = clientJs.indexOf("const __scrml_transitions_M = {");
+    const startIdx = unwrapChunkScope(clientJs).indexOf("const __scrml_transitions_M = {");
     expect(startIdx).toBeGreaterThan(-1);
-    const endIdx = clientJs.indexOf("\n};", startIdx);
+    const endIdx = unwrapChunkScope(clientJs).indexOf("\n};", startIdx);
     expect(endIdx).toBeGreaterThan(startIdx);
-    const tableLiteral = clientJs.slice(startIdx, endIdx);
+    const tableLiteral = unwrapChunkScope(clientJs).slice(startIdx, endIdx);
     expect(tableLiteral).not.toContain("label:");
   });
 });

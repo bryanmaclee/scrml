@@ -40,6 +40,7 @@ import { compileScrml } from "../../src/api.js";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
+import { unwrapChunkScope } from "../helpers/chunk-scope.js";
 
 /**
  * Compile a scrml source string and return { clientJs, errors, warnings }.
@@ -92,7 +93,7 @@ function runClientJs(clientJs, finalExpression) {
     const _scrml_init_set = () => {};
     const _scrml_logic_1 = {};
   `;
-  const fn = new Function(shims + "\n" + clientJs + "\n" + `return (${finalExpression});`);
+  const fn = new Function(shims + "\n" + unwrapChunkScope(clientJs) + "\n" + `return (${finalExpression});`);
   return fn();
 }
 
