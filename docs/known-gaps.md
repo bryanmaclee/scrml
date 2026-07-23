@@ -15,8 +15,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 15 |
-| MED | 47 |
+| HIGH | 14 |
+| MED | 46 |
 | LOW | 31 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -78,8 +78,14 @@ any multi-root `<each>`).
 **Fix in flight (S281).** Design: root count is statically known at codegen — when exactly 1, emit today's `return _itemFrag.firstChild` **byte-identical** (the ~99% case, and the assertable safety gate); emit the fragment form only when > 1. The runtime `createFn` contract widens to `Node | DocumentFragment`, and the reconciler owns a node **group per key** (key stamped on every top-level node; `_childList`/`_clearAll`/`_insert`/`_remove`/`_replace` group-aware; LIS reorder over groups, moving a group's nodes together preserving intra-group order) across BOTH container modes — range (`nodeType === 8` comment fence, the #131 model) and element. Tier-0 lift fixed in the same landing per §10.8. SPEC §17.7.2 gains a minimal normative statement making the N-root grant explicit. No new §34 code. **PRESERVED deliberately:** create-time `if=` semantics (`emit-each.ts:860`) — a reused group does not gain/lose roots on later reconciles; that is a pre-existing limitation and is NOT fixed here. — `NEW S281 (adopter #141); HIGH; open — build in flight`
 
 ### g-main-red-against-its-own-pre-commit-gate — `main` FAILS the documented pre-commit gate: an emitted `.server.js` carries an ESM `export`, which `node --check` rejects as CJS
-<!-- @gap id=g-main-red-against-its-own-pre-commit-gate sev=HIGH status=open -->
-**PRE-EXISTING at `a0344d75`, PA-verified in a clean detached worktree at that exact commit** (11 pass / 1 fail, identical failure, without any S281 change). Not caused by #141.
+<!-- @gap id=g-main-red-against-its-own-pre-commit-gate sev=HIGH status=narrowed -->
+**S282 — DOES NOT REPRODUCE on the ASUS-Vivobook clone; almost certainly XPS-clone-local, not a tree property.** The failure was recorded on `bryan-XPS-8950`. On `bryan-maclee-ASUS-Vivobook` this session, at both `a0344d75` and `feddd6b4`:
+- the exact named test `endpoint-conformance-integration.test.js` ("the emitted `.server.js` is `node --check` clean") passes **12/12**;
+- the full canonical gate `bun test compiler/tests/{unit,integration,conformance} --bail` passes **21129 / 0 fail** (219s).
+
+So `main` passes its own pre-commit gate here. Since the tree is byte-identical across clones (same commit), a failure on one clone and a pass on another points to a **clone-local environment cause on XPS**, not an ESM-`export` emission defect in the tree — most likely stale gitignored artifacts (`samples/compilation-tests/dist/`, i.e. a missing `bun run pretest`), the same class that produced S281's other XPS-only reports. **The tree-level claim ("`main` fails its own gate") is therefore NOT established.** Left `narrowed` rather than resolved because the XPS clone's actual state has not been re-checked from here — the fix on XPS is to run `bun run pretest` and re-run the gate before trusting a local red. Companion: `g-commit-gate-absent-on-bryan-xps-8950` (also XPS-clone-local).
+
+**PRIOR (S281, on XPS):** PA-verified in a clean detached worktree at `a0344d75` (11 pass / 1 fail, identical failure, without any S281 change). Not caused by #141.
 
 The canonical gate (`scripts/git-hooks/pre-commit:17`) is
 `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail`.
