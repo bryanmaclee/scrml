@@ -99,11 +99,11 @@ describe("each-block §1 — canonical <each in=@cell>", () => {
     const { errors, clientJs, html } = compileToOutputs(src, "in-basic");
     expect(errors).toEqual([]);
     // Static HTML carries the parse-safe comment-fence mount at the source position.
-    expect(html).toMatch(/<!--scrml-each:\d+--><!--\/scrml-each:\d+-->/);
+    expect(html).toMatch(/<!--scrml-each:[0-9a-z]{8}_\d+--><!--\/scrml-each:[0-9a-z]{8}_\d+-->/);
     // Client JS emits the render function.
-    expect(clientJs).toMatch(/function _scrml_each_render_\d+\(\)/);
+    expect(clientJs).toMatch(/function _scrml_each_render_[0-9a-z]{8}_\d+\(\)/);
     // Reactive subscription via _scrml_effect_static.
-    expect(clientJs).toMatch(/_scrml_effect_static\(_scrml_each_render_\d+\)/);
+    expect(clientJs).toMatch(/_scrml_effect_static\(_scrml_each_render_[0-9a-z]{8}_\d+\)/);
     // The source @cell is read through _scrml_reactive_get (V5-strict).
     expect(clientJs).toContain('_scrml_reactive_get("items")');
     // Reconcile_list call shape.
@@ -166,7 +166,7 @@ describe("each-block §3 — canonical <each of=N> count iteration", () => {
 </program>`;
     const { errors, clientJs, html } = compileToOutputs(src, "of-literal");
     expect(errors).toEqual([]);
-    expect(html).toMatch(/<!--scrml-each:\d+--><!--\/scrml-each:\d+-->/);
+    expect(html).toMatch(/<!--scrml-each:[0-9a-z]{8}_\d+--><!--\/scrml-each:[0-9a-z]{8}_\d+-->/);
     expect(clientJs).toMatch(/Array\.from\(\{length: Number\(5\) \|\| 0\}/);
     // Default key for of= form is the index itself (positional), named with the
     // canonical internal index var (gate fix-wave clash-avoidance).
@@ -349,7 +349,7 @@ type Group:struct = { id: string, items: Item[] }
     expect(errors).toEqual([]);
     // Exactly ONE module-scope each render fn (the OUTER each). The inner each is
     // inline — it gets no module-scope render fn of its own (the old phantom).
-    const renderCount = (clientJs.match(/^function _scrml_each_render_\d+\(\)/gm) || []).length;
+    const renderCount = (clientJs.match(/^function _scrml_each_render_[0-9a-z]{8}_\d+\(\)/gm) || []).length;
     expect(renderCount).toBe(1);
     // The inner source is read INSIDE the outer factory (after its `(group, ...)`
     // opener) — NOT at module scope. No unhandled-kind drop comment.

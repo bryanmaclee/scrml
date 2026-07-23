@@ -154,7 +154,7 @@ const COMP_ROW = `<program db="sqlite:./test.db">
 describe("ssr-a-terminus (a): a server-authority each gets a server-side row renderer", () => {
   test("emits a per-each string-building render fn fed the seeded (redacted) rows", () => {
     const { serverJs } = compileBundles(TIER1, { protectAnalysis: usersProtect() });
-    expect(serverJs).toMatch(/function _scrml_ssr_render_each_\d+\(_scrml_rows\)/);
+    expect(serverJs).toMatch(/function _scrml_ssr_render_each_[0-9a-z]{8}_\d+\(_scrml_rows\)/);
     // it iterates the rows and builds an HTML string per item
     expect(serverJs).toContain("for (let _scrml_i = 0; _scrml_i < _scrml_rows.length; _scrml_i++)");
     expect(serverJs).toContain("const _scrml_item = _scrml_rows[_scrml_i];");
@@ -164,15 +164,19 @@ describe("ssr-a-terminus (a): a server-authority each gets a server-side row ren
     const { serverJs } = compileBundles(TIER1, { protectAnalysis: usersProtect() });
     // the mount-fill helper + the per-mount fill call fed from the seed cell
     expect(serverJs).toContain("function _scrml_ssr_fill_mount(html, mountId, rowsHtml)");
+    // The mount id is now a chunk-namespaced STRING, and the back-reference is
+    // load-bearing: the fill's token MUST equal the render fn's token, which is
+    // the same token the HTML fence carries. A divergence here breaks
+    // rehydration silently, so pin the agreement rather than the shape alone.
     expect(serverJs).toMatch(
-      /_scrml_html = _scrml_ssr_fill_mount\(_scrml_html, \d+, _scrml_ssr_render_each_\d+\(_scrml_ssr_state\["accounts"\]\)\);/,
+      /_scrml_html = _scrml_ssr_fill_mount\(_scrml_html, "([0-9a-z]{8}_\d+)", _scrml_ssr_render_each_\1\(_scrml_ssr_state\["accounts"\]\)\);/,
     );
   });
 
   test("the compiled HTML ships the (still-empty) mount div the fill targets", () => {
     const { html } = compileBundles(TIER1, { protectAnalysis: usersProtect() });
     // BEFORE the compose handler runs, the mount is empty (the B-substrate shape).
-    expect(html).toMatch(/<!--scrml-each:\d+--><!--\/scrml-each:\d+-->/);
+    expect(html).toMatch(/<!--scrml-each:[0-9a-z]{8}_\d+--><!--\/scrml-each:[0-9a-z]{8}_\d+-->/);
   });
 });
 
@@ -218,19 +222,19 @@ describe("ssr-a-terminus (c): each rendered row carries a data-scrml-key marker"
 describe("ssr-a-terminus (d): an unsupported each falls back to the client-only render", () => {
   test("an if= visibility toggle in the row → no server render fn, no fill, mount stays empty", () => {
     const { serverJs, html } = compileBundles(IF_ROW, { protectAnalysis: usersProtect() });
-    expect(serverJs).not.toMatch(/_scrml_ssr_render_each_\d+/);
+    expect(serverJs).not.toMatch(/_scrml_ssr_render_each_[0-9a-z]{8}_\d+/);
     expect(serverJs).not.toContain("_scrml_ssr_fill_mount(_scrml_html");
     // the B-substrate seed still runs — only the markup pre-render falls back
     expect(serverJs).toContain('_scrml_ssr_state["accounts"]');
-    expect(html).toMatch(/<!--scrml-each:\d+--><!--\/scrml-each:\d+-->/);
+    expect(html).toMatch(/<!--scrml-each:[0-9a-z]{8}_\d+--><!--\/scrml-each:[0-9a-z]{8}_\d+-->/);
   });
 
   test("a user component in the row → the isUserComponentMarkup guard falls back, no crash", () => {
     const { serverJs, html } = compileBundles(COMP_ROW, { protectAnalysis: usersProtect() });
-    expect(serverJs).not.toMatch(/_scrml_ssr_render_each_\d+/);
+    expect(serverJs).not.toMatch(/_scrml_ssr_render_each_[0-9a-z]{8}_\d+/);
     expect(serverJs).not.toContain("_scrml_ssr_fill_mount(_scrml_html");
     expect(serverJs).toContain('_scrml_ssr_state["accounts"]');
-    expect(html).toMatch(/<!--scrml-each:\d+--><!--\/scrml-each:\d+-->/);
+    expect(html).toMatch(/<!--scrml-each:[0-9a-z]{8}_\d+--><!--\/scrml-each:[0-9a-z]{8}_\d+-->/);
   });
 });
 
@@ -256,7 +260,7 @@ describe("ssr-a-terminus (R26): the composed first-paint HTML contains the rende
     const { serverJs, html } = compileBundles(TIER1, { protectAnalysis: usersProtect() });
 
     // BEFORE: the mount ships empty (the B-substrate first-paint shape).
-    expect(html).toMatch(/<!--scrml-each:\d+--><!--\/scrml-each:\d+-->/);
+    expect(html).toMatch(/<!--scrml-each:[0-9a-z]{8}_\d+--><!--\/scrml-each:[0-9a-z]{8}_\d+-->/);
 
     // The DB returns rows carrying the protected column; the seed pipeline must
     // strip it before the render fn ever sees it.
@@ -273,7 +277,7 @@ describe("ssr-a-terminus (R26): the composed first-paint HTML contains the rende
     expect(firstPaint).toContain('data-scrml-key="1"');
     expect(firstPaint).toContain('data-scrml-key="2"');
     // the mount is no longer the empty placeholder
-    expect(firstPaint).not.toMatch(/<!--scrml-each:\d+--><!--\/scrml-each:\d+-->/);
+    expect(firstPaint).not.toMatch(/<!--scrml-each:[0-9a-z]{8}_\d+--><!--\/scrml-each:[0-9a-z]{8}_\d+-->/);
     // §14.8.9 — the protected column value is absent from the first paint
     // (both the rendered rows AND the inline seed json)
     expect(firstPaint).not.toContain("SECRET_HASH");
@@ -297,7 +301,7 @@ describe("ssr-a-terminus (R26): the composed first-paint HTML contains the rende
     ];
     const firstPaint = await composeFirstPaint(serverJs, html, dbRows);
     // Extract exactly the content the fill placed between the fence anchors.
-    const fence = /<!--scrml-each:(\d+)-->([\s\S]*?)<!--\/scrml-each:\1-->/.exec(firstPaint);
+    const fence = /<!--scrml-each:([0-9a-z]{8}_\d+)-->([\s\S]*?)<!--\/scrml-each:\1-->/.exec(firstPaint);
     expect(fence).not.toBeNull();
     const between = fence[2];
     // The rows are placed verbatim — no $'/$& expansion clobbering the region.

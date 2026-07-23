@@ -118,7 +118,7 @@ describe("runtime-meta RT-1: meta.emit() dynamic markup", () => {
     expect(fatalErrors).toHaveLength(0);
 
     // The _scrml_meta_effect call should have a stable scopeId
-    expect(clientJs).toMatch(/_scrml_meta_effect\("_scrml_meta_\d+"/);
+    expect(clientJs).toMatch(/_scrml_meta_effect\("_scrml_meta_[0-9a-z]{8}_\d+"/);
     // The runtime meta.emit function uses the scopeId to find the DOM placeholder
     // at runtime via data-scrml-meta attribute
     expect(clientJs).toContain("function(meta)");

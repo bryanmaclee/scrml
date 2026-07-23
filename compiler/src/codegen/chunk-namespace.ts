@@ -77,6 +77,18 @@
 
 import { fnv1aHash } from "./fnv1a-hash.ts";
 
+/**
+ * The subset of a MOD export-registry entry this module reads. Deliberately
+ * structural rather than an import of `codegen/index.ts`'s
+ * `CrossModuleExportRegistry` — that type is module-local there, and a wider
+ * shape would drag routing-discrimination fields into a module that has no
+ * business making routing decisions.
+ */
+interface ExportEntryShape {
+  kind: string;
+  category: string;
+}
+
 /** Separator between the namespace token and a numeric node id. */
 const ID_SEP = "_";
 /** Separator between the namespace token and a cell name. */
@@ -240,7 +252,7 @@ export function stripCellNamespace(key: string): string {
 export function buildChunkNamespaceState(
   fileAST: unknown,
   outputBaseDir: string | null | undefined,
-  exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean }>> | null,
+  exportRegistry?: Map<string, Map<string, ExportEntryShape>> | null,
 ): ChunkNamespaceState {
   const filePath = (fileAST as { filePath?: string } | null)?.filePath ?? "";
   const token = chunkNamespaceToken(filePath, outputBaseDir);

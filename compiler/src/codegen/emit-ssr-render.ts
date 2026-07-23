@@ -41,6 +41,7 @@ import { escapeHtmlAttr, VOID_ELEMENTS } from "./utils.ts";
 import { getNodes } from "./collect.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { isUserComponentMarkup } from "../component-expander.ts";
+import { nsId } from "./chunk-namespace.ts";
 
 /**
  * The server-bundle runtime helper block for the SSR markup renderer. Injected
@@ -71,7 +72,7 @@ export const SSR_RENDER_HELPER: string = [
   "// _scrml_reconcile_list adopts them as siblings between the anchors. An unmatched",
   "// id (mount not on this page, or an auth-omitted §14.8.9/§14.8.10 cell that was",
   "// never seeded → fill never called) leaves the fence empty; the client hydrates",
-  "// post-mount. `mountId` is the numeric each id.",
+  "// post-mount. `mountId` is the chunk-namespaced each id (`<token>_<n>`).",
   "function _scrml_ssr_fill_mount(html, mountId, rowsHtml) {",
   "  const _start = '<!--scrml-each:' + mountId + '-->';",
   "  // FUNCTION replacer (not a string): a string replacement would honor the",
@@ -87,7 +88,15 @@ export const SSR_RENDER_HELPER: string = [
  * emitted render-function name, and the render-function source lines.
  */
 export interface SsrEachRenderer {
+  /** Raw AST node id — ordering only. */
   id: number;
+  /**
+   * The CHUNK-NAMESPACED mount id (`"a1b2c3d4_9"`), i.e. exactly the token
+   * `emitEachMountHtml` stamped into `<!--scrml-each:...-->`. Both are derived
+   * from the one per-file namespace state, so the SSR fill and the client
+   * emit cannot disagree about which fence they mean.
+   */
+  mountId: string;
   varName: string;
   fnName: string;
   fnLines: string[];
@@ -342,10 +351,11 @@ function buildOneRenderer(node: any, varName: string): SsrEachRenderer | null {
     const rowParts = nodeToParts(roots[0], iterVarName, true, keyReadExpr);
     if (rowParts.length === 0) return null;
 
-    const fnName = `_scrml_ssr_render_each_${node.id}`;
+    const mountId = nsId(node.id);
+    const fnName = `_scrml_ssr_render_each_${mountId}`;
     const rowExpr = rowParts.join(" + ");
     const fnLines: string[] = [
-      `// §52.8 SSR server-side render for < ${varName} > (each_${node.id})`,
+      `// §52.8 SSR server-side render for < ${varName} > (each_${mountId})`,
       `function ${fnName}(_scrml_rows) {`,
       `  if (!Array.isArray(_scrml_rows)) return "";`,
       `  let _scrml_h = "";`,
@@ -356,7 +366,7 @@ function buildOneRenderer(node: any, varName: string): SsrEachRenderer | null {
       `  return _scrml_h;`,
       `}`,
     ];
-    return { id: node.id, varName, fnName, fnLines };
+    return { id: node.id, mountId, varName, fnName, fnLines };
   } catch (e) {
     if (e instanceof SsrUnsupported) return null;
     throw e;

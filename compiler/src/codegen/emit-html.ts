@@ -3,6 +3,7 @@ import { emitStringFromTree, exprNodeContainsMemberAccess } from "../expression-
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
 import { escapeHtmlAttr, VOID_ELEMENTS, HTML_BOOLEAN_ATTRS } from "./utils.ts";
+import { nsId } from "./chunk-namespace.ts";
 import { isUserComponentMarkup } from "../component-expander.ts";
 import { validateEmittedArtifact } from "./validate-emit.ts";
 import { emitExprField } from "./emit-expr.ts";
@@ -3679,7 +3680,7 @@ export function generateHtml(
 
     if (isMetaKind(node.kind)) {
       if (node.id != null) {
-        const metaScopeId = `_scrml_meta_${node.id}`;
+        const metaScopeId = `_scrml_meta_${nsId(node.id)}`;
         parts.push(`<span data-scrml-meta="${metaScopeId}"></span>`);
       }
       return;

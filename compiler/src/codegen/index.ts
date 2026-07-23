@@ -73,6 +73,7 @@ import { appendSourceMappingUrl } from "./source-map.ts";
 import { buildSourceMap } from "./build-source-map.ts";
 import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender, filePrintBuiltinsShadowed, fileDeclaresFileScopeBinding } from "./log-loc.ts";
 import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setSessionShadowedInFile, setCurrentUserAmbientActive } from "./emit-expr.ts";
+import { buildChunkNamespaceState, setChunkNamespaceState, resetChunkNamespaceState } from "./chunk-namespace.ts";
 import { EncodingContext } from "./type-encoding.ts";
 import { collectDerivedVarNames, collectReactiveVarNames, collectSynthCellKeys, stampCompoundDeepSetTargets } from "./reactive-deps.ts";
 import { collectTopLevelLogicStatements, containsSql, getNodes } from "./collect.ts";
@@ -989,6 +990,13 @@ export function runCG(input: CgInput): CgOutput {
     // §20.7 — a file-level `function print` / `println` shadows that builtin;
     // the print/println lowering then yields to the user fn (name-precise).
     setPrintShadowedNames(filePrintBuiltinsShadowed(fileAST));
+    // chunk-namespacing — install THIS unit's id/cell namespace. Every emitted
+    // token that is unit-local at compile time but process-global at run time
+    // (each/match ids, the each-fence comment, the renderer-registry key, the
+    // reactive-cell store key) reads it. ONE install per file, consumed by BOTH
+    // the HTML and the JS emitters, so the SSR and client sides cannot disagree
+    // about which fence or which cell slot they mean.
+    setChunkNamespaceState(buildChunkNamespaceState(fileAST, cgOutputBaseDir, exportRegistryInput ?? null));
     // g-markup-session-read-undeclared — default the `@session` projection-active
     // flag OFF; worker bundles carry no auth session projection. Re-set per-file
     // in the main emit loop once auth middleware is resolved.
@@ -1258,6 +1266,13 @@ export function runCG(input: CgInput): CgOutput {
     setRenderShadowedInFile(fileDeclaresRender(fileAST));
     // §20.7 — a file-level `function print` / `println` shadows that builtin.
     setPrintShadowedNames(filePrintBuiltinsShadowed(fileAST));
+    // chunk-namespacing — install THIS unit's id/cell namespace. Every emitted
+    // token that is unit-local at compile time but process-global at run time
+    // (each/match ids, the each-fence comment, the renderer-registry key, the
+    // reactive-cell store key) reads it. ONE install per file, consumed by BOTH
+    // the HTML and the JS emitters, so the SSR and client sides cannot disagree
+    // about which fence or which cell slot they mean.
+    setChunkNamespaceState(buildChunkNamespaceState(fileAST, cgOutputBaseDir, exportRegistryInput ?? null));
     // g-markup-session-read-undeclared — default OFF; re-set after auth-MW
     // resolution below (needs `authMW`, resolved later in this iteration).
     setSessionProjectionActive(false);
@@ -1983,6 +1998,12 @@ export function runCG(input: CgInput): CgOutput {
     );
     if (undefinedLintErrors.length > 0) errors.push(...undefinedLintErrors);
   }
+
+  // chunk-namespacing — the per-file loop is done; drop the last file's
+  // namespace so nothing emitted AFTER it (shell composition, route splitting)
+  // and no emitter invoked later in this process (unit tests drive the emitters
+  // directly with synthetic ASTs) inherits a stale token.
+  resetChunkNamespaceState();
 
   // -------------------------------------------------------------------------
   // mpa-shell-clean-urls Sub 2 (2026-05-17) — per-page shell composition.

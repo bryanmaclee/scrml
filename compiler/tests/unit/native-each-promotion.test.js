@@ -532,7 +532,10 @@ describe("native-each §10 — per-item ${expr} text interpolation (#2f codegen)
     expect(def.clientJs).toContain("String(item.x)");
     // Normalize the numeric local-id suffixes (`_4`, `_tn_6`, …) so the only
     // remaining difference is id ordering, then assert structural identity.
-    const norm = (s) => s.replace(/_\d+\b/g, "_N");
+    // The chunk-namespace token folds in FIRST: the two fixtures are written to
+    // different temp paths on purpose, so their 8-char path-hash tokens differ
+    // by construction and are not part of what this test compares.
+    const norm = (s) => s.replace(/[0-9a-z]{8}_(\d+)/g, "NSTOK_$1").replace(/_\d+\b/g, "_N");
     expect(norm(native.clientJs)).toBe(norm(def.clientJs));
   });
 

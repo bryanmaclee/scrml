@@ -80,9 +80,14 @@ function getOut(result, key) {
 function getClientJs(result) { return getOut(result, "clientJs"); }
 // Normalize gensym counters + per-file client-js script name so two
 // STRUCTURALLY identical lowerings compare equal modulo placeholder ids.
+// The chunk-namespace token (8-char base36 FNV-1a of the dist-relative source
+// path) is folded in FIRST: these two fixtures are written to different temp
+// paths on purpose, so their tokens differ by construction and would otherwise
+// swamp the structural comparison this test exists to make.
 function norm(s) {
   return String(s)
-    .replace(/_scrml_[a-z_]+_\d+/g, "_scrml_GEN")
+    .replace(/_[0-9a-z]{8}_(\d+)/g, "_NS_$1")
+    .replace(/_scrml_[a-z_]+_(?:NS_)?\d+/g, "_scrml_GEN")
     .replace(/[A-Za-z0-9_-]+\.client\.js/g, "GEN.client.js");
 }
 
