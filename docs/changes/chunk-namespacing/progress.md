@@ -545,3 +545,80 @@ been laundered.
 | iifeShape | 13 | 38 | byte/structural comparisons that now see the wrapper — most want `unwrapChunkScope` at the read site |
 | engineName | 10 | 24 | the 8 files whose compile helper does not return an object literal, so the scripted normalization had no anchor |
 | unclassified | 15 | 26 | needs individual reading — this is the bucket that produced all five bugs above, so it should NOT be batch-forced |
+
+
+---
+
+# S282 ROUND 2 — bug-yield-ordered migration
+
+**Head `a399555a`.** 197 -> **162** failures (160 unique, 129 new vs base).
+`base-only-now-passing` is **0**, so nothing has been masked.
+
+## BUG 6 — SHIP-BLOCKING, FOUND, NOT FIXED
+
+Working the unclassified bucket first produced a sixth bug, and it is the first
+one that blocks landing rather than just needing a fix.
+
+**`_scrml_cell_scope` lives in the CORE runtime chunk and hardcodes all ~33
+cell-keyed accessors.** Two independent measured symptoms:
+
+| symptom | pinned by |
+|---|---|
+| a CORE-ONLY assembly now contains `_scrml_message_for` / `_scrml_messages_register_inline` — §C10.1 tree-shaking no longer holds | `c10-error-message-resolution.test.js` |
+| the SPA-shape shared runtime is **18,346 B gzip** against a documented **16,384 B** budget (it was under before) | `v0-3-x-spa-tree-shake-phase-b.test.js` |
+
+I attempted two fixes and **reverted both** rather than ship them:
+
+- **(a) generic core + prologue-supplied impls.** Right on tree-shaking, but it
+  hits a temporal-dead-zone wall: the prologue's `const` bindings shadow those
+  names for the whole chunk block, so the argument supplying them cannot
+  reference them. Classic can dodge it by evaluating the argument on the IIFE
+  call; **ESM cannot**, because its `export`s must stay at module top level, so
+  the body cannot be wrapped at all.
+- **(b) a registration table** — each helper registers itself beside its own
+  definition, travelling with its chunk. Fixed §C10.1 and dodges the TDZ
+  entirely, but did **not** fix the size budget (18,568 B — slightly WORSE; the
+  registration lines cost more than the inline literal) and broke six C10.6
+  default-catalog tests.
+
+So the ~2 KB gzip cost looks **inherent to the ruled mechanism** rather than to
+how it is spelled. That is a design question for a full-budget pass, not a third
+attempt under pressure. Both symptoms are pinned by existing tests, so neither
+can be lost.
+
+## Migrated this round — 24 files
+
+| recipe | for | files |
+|---|---|---|
+| `unwrapChunkScope` | harnesses that execute a chunk with no runtime and read a top-level decl | 11 |
+| `normalizeChunkToken` | BYTE-PARITY comparisons of two compiles at two temp paths — reads the chunk's own token and replaces exactly that string | 5 |
+| `storeByAuthorName` | harnesses capturing the raw `_scrml_state` OBJECT and indexing it by bare name | 1 |
+| (compiler fix) | the prologue comment contained a bare `" and "`, tripping `boolean-keywords-lowering`'s guard that emitted JS carries no bare boolean keyword in operator position. The guard is right; the comment should not fire it. | 1 |
+
+Also fixed an import path the earlier script got wrong for files at the tests
+ROOT (`helpers/…` needs a leading `./`) — that one failed to LOAD rather than
+failing an assertion, which is a louder failure than it looked.
+
+## Verification at `a399555a`
+
+```
+classic  BASE e8fdd44c  CLOBBERED   ->  a399555a  SURVIVED
+esm      BASE e8fdd44c  CLOBBERED   ->  a399555a  SURVIVED
+```
+
+All three fixtures isolated; all three `INCONCLUSIVE` at base (the second chunk
+threw and never evaluated). Artifact-diff gate: **PASS on all 10 corpora, 446
+files compared**.
+
+## Remaining — 46 files, 160 failures
+
+| class | files | failures |
+|---|---|---|
+| harness | 25 | 106 |
+| engineName | 10 | 24 |
+| iifeShape | 8 | 26 |
+| unclassified | 3 | 4 |
+
+The harness remainder is the bespoke-shape tail; `storeByAuthorName` covers one
+of its sub-shapes and two more files want it. The 3 unclassified should be read
+individually — that bucket has now produced 6 of the 6 bugs found in this arc.
