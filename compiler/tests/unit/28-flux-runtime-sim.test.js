@@ -22,6 +22,7 @@ import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { storeByAuthorName, chunkCellKey } from "../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-28-flux-runtime-sim");
 
@@ -62,8 +63,8 @@ function boot() {
   const boardEl = Array.from(document.querySelectorAll("[data-scrml-logic]"))
     .find((e) => (e.textContent || "").includes("@"));
   return {
-    S: () => globalThis.__s,
-    D: (k) => globalThis.__d(k),
+    S: () => storeByAuthorName(globalThis.__s),
+    D: (k) => globalThis.__d(chunkCellKey(clientJs)(k)),
     boardDom: () => boardEl.textContent,
     btn: (label) => Array.from(document.querySelectorAll("button")).find((b) => (b.textContent || "").trim().startsWith(label)),
   };

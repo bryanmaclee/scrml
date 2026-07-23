@@ -34,6 +34,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { nativeParseFile } from "../../native-parser/parse-file.js";
+import { normalizeChunkToken } from "../helpers/chunk-scope.js";
 
 // compileWith — compile `source` under `parser` (null = default live BS+TAB;
 // "scrml-native" = native pipeline). Returns errors + warnings + client.js text.
@@ -143,7 +144,7 @@ describe("native markup-as-value close-tag span — R26 byte-parity", () => {
       const def = compileWith(src, null, `${suffix}-d`);
       const nat = compileWith(src, "scrml-native", `${suffix}-n`);
       expect(nat.clientJs.length).toBeGreaterThan(0);
-      expect(nat.clientJs).toBe(def.clientJs);
+      expect(normalizeChunkToken(nat.clientJs)).toBe(normalizeChunkToken(def.clientJs));
     });
   }
 

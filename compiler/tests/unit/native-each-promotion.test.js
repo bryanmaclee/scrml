@@ -26,6 +26,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { nativeParseFile } from "../../native-parser/parse-file.js";
 import { compileScrml } from "../../src/api.js";
+import { normalizeChunkToken } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -538,7 +539,7 @@ describe("native-each §10 — per-item ${expr} text interpolation (#2f codegen)
     // Strip the chunk-namespace token (anchored: `0` + 7 base36 + `_`) before
     // the id fold. Unanchored, it ate the trailing 8 chars of real identifiers.
     const norm = (s) => s.replace(/(?<![0-9a-z])0[0-9a-z]{7}_(?=[0-9A-Za-z_])/g, "").replace(/_\d+\b/g, "_N");
-    expect(norm(native.clientJs)).toBe(norm(def.clientJs));
+    expect(norm(normalizeChunkToken(native.clientJs))).toBe(norm(normalizeChunkToken(def.clientJs)));
   });
 
   test("legacy (default-parser) per-item interpolation is unchanged — `${item.name}` still emitted", () => {

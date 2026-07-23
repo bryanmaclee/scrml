@@ -132,3 +132,43 @@ export function unwrapChunkScope(js) {
   }
   return out;
 }
+
+/**
+ * Normalize a chunk's namespace token to a fixed placeholder.
+ *
+ * For BYTE-PARITY comparisons: two compiles of the same source at two different
+ * temp paths get two different tokens by construction, since the token is a hash
+ * of the path. Those tests compare the two LOWERINGS, not the two paths.
+ *
+ * Exact rather than pattern-based — it reads the chunk's own token out of the
+ * prologue and replaces exactly that string, so it cannot touch anything else
+ * that happens to look token-shaped.
+ */
+export function normalizeChunkToken(js) {
+  const src = String(js ?? "");
+  const ns = chunkNamespaceToken(src);
+  return ns ? src.split(ns).join("NSTOK") : src;
+}
+
+/**
+ * A view of the raw `_scrml_state` store keyed by AUTHOR cell names.
+ *
+ * For harnesses that capture the store OBJECT itself rather than an accessor and
+ * then index it by bare name. Splicing a capture inside the chunk scope does not
+ * help them: the store is the shared singleton, and it is its KEYS that are
+ * namespaced.
+ *
+ * A stripped name that COLLIDES keeps the namespaced key alongside it, so a
+ * second chunk's value is surfaced rather than silently overwritten — a snapshot
+ * that quietly drops a cell is exactly the hollow evidence this whole arc is
+ * about.
+ */
+export function storeByAuthorName(state) {
+  const out = {};
+  for (const k of Object.keys(state ?? {})) {
+    const name = k.replace(/^0[0-9a-z]{7}\$/, "");
+    if (name !== k && Object.prototype.hasOwnProperty.call(out, name)) out[k] = state[k];
+    else out[name] = state[k];
+  }
+  return out;
+}
