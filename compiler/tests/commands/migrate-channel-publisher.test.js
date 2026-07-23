@@ -175,7 +175,7 @@ describe("§3 SQL-escalated publisher reading a cell → NOT stripped (keyword r
     // A `?{}` SQL block escalates via §12.2 Trigger 1 regardless of the keyword,
     // so W-DEPRECATED FIRES (keyword redundant). Same reasoning as §2 — Migration
     // 5 leaves it; the channel-cell read error stays for the manual fix.
-    const source = `<program>
+    const source = `<program db="./app.db">
   <channel name="chat" topic="lobby">
     <count> = 0
 
@@ -259,7 +259,7 @@ describe("§6 non-channel `server function` → Migration 5 leaves it (no E-CHAN
   test("a plain SQL `server function` outside any channel → untouched by Migration 5", () => {
     // No channel, no channel cell → no E-CHANNEL-SERVER-CELL-READ → Migration 5
     // is a no-op. (Migration 4 owns the redundant-keyword strip for this fn.)
-    const source = `<program>
+    const source = `<program db="./app.db">
 \${
   server function getRows() {
     return ?{ select id from users }.all()
@@ -348,7 +348,7 @@ describe("§9 composition — Migration 4 (SQL server fn) + Migration 5 (channel
     // The channel publisher (keyword-sole) → Migration 5 strips it to client.
     // The page-scope SQL `server function` (keyword redundant) → Migration 4
     // strips its redundant keyword (stays server). Both land via migrateFile.
-    const source = `<program>
+    const source = `<program db="./app.db">
 \${
   server function getRows() {
     return ?{ select id from users }.all()
