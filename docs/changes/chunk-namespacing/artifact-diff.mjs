@@ -35,6 +35,30 @@ if (!BASE || !AFTER) {
 // cannot begin with a digit, so `0`+7 base36 in that position is always a token.
 const TOKEN = /(?<![0-9a-z])0[0-9a-z]{7}_(?=[0-9A-Za-z_])/g;
 
+/**
+ * Strip the per-chunk scope wrapper — the IIFE and its cell-scope prologue.
+ *
+ * OQ-3's gate condition was "the only delta is the id token". The ruled N2/N3/N4
+ * mechanism adds a SECOND intended delta: every chunk body is now wrapped in its
+ * own scope, opened by a `_scrml_cell_scope(...)` prologue. Both are declared
+ * here EXPLICITLY so the gate still means something — anything outside these two
+ * is a finding. Folding the wrapper is not the same as ignoring it: the wrapper's
+ * own correctness is covered by the executed collision fixtures.
+ */
+function unwrapChunkScope(text) {
+  let out = text
+    .replace(/\n?\/\/ --- chunk cell scope \([0-9a-z]{8}\) ---[\s\S]*?_scrml_cell_scope\([^;]*\);\n/, "\n");
+  const open = out.indexOf("(function() {\n");
+  const close = out.lastIndexOf("\n})();");
+  if (open !== -1 && close > open) {
+    out =
+      out.slice(0, open) +
+      out.slice(open + "(function() {\n".length, close) +
+      out.slice(close + "\n})();".length);
+  }
+  return out;
+}
+
 function fold(s) {
   return (
     s
@@ -51,6 +75,14 @@ function fold(s) {
 }
 
 /** Root-relative paths of every regular file under `root`. */
+/** Map a normalized walk name back to the real on-disk name. */
+function realName(root, rel) {
+  if (!rel.endsWith("scrml-runtime.HASH.js")) return rel;
+  const dir = join(root, rel.slice(0, -"scrml-runtime.HASH.js".length));
+  for (const e of readdirSync(dir)) if (/^scrml-runtime\.[0-9a-z]{8}\.js$/.test(e)) return rel.replace("scrml-runtime.HASH.js", e);
+  return rel;
+}
+
 function walk(root, dir = root, out = []) {
   if (!existsSync(dir)) return out;
   for (const e of readdirSync(dir)) {
@@ -58,7 +90,11 @@ function walk(root, dir = root, out = []) {
     const st = lstatSync(p);
     if (st.isSymbolicLink()) continue; // not an emitted artifact
     if (st.isDirectory()) walk(root, p, out);
-    else out.push(relative(root, p).split("\\").join("/"));
+    // The shared runtime is content-addressed, and its bytes DID change
+    // (`_scrml_cell_scope` is new), so its filename hash moves. That is the §47
+    // content hash doing its job, not a namespace delta — compare it by a
+    // normalized name so the pair still lines up.
+    else out.push(relative(root, p).split("\\").join("/").replace(/scrml-runtime\.[0-9a-z]{8}\.js$/, "scrml-runtime.HASH.js"));
   }
   return out;
 }
@@ -79,13 +115,13 @@ let findings = 0;
 for (const f of baseFiles) if (!afterFiles.has(f)) { console.log(`FINDING missing in AFTER: ${f}`); findings++; }
 for (const f of afterFiles) if (!baseFiles.has(f)) { console.log(`FINDING new in AFTER:     ${f}`); findings++; }
 
-let compared = 0, identical = 0, tokenOnly = 0;
+let compared = 0, identical = 0, tokenOnly = 0, runtimeChanged = 0;
 for (const f of baseFiles) {
   if (!afterFiles.has(f)) continue;
   let a, b;
   try {
-    a = readFileSync(join(BASE, f), "utf8");
-    b = readFileSync(join(AFTER, f), "utf8");
+    a = unwrapChunkScope(readFileSync(join(BASE, realName(BASE, f)), "utf8"));
+    b = unwrapChunkScope(readFileSync(join(AFTER, realName(AFTER, f)), "utf8"));
   } catch (e) {
     // NEVER silently skip — an unreadable artifact is exactly how the previous
     // gate reported green over 107 files it never opened.
@@ -95,8 +131,16 @@ for (const f of baseFiles) {
   }
   compared++;
   if (a === b) { identical++; continue; }
-  const fa = a.split("\n").map(fold);
-  const fb = b.split("\n").map(fold);
+  if (/scrml-runtime\.HASH\.js$/.test(f)) {
+    // The shared runtime gained `_scrml_cell_scope` — an intended, reviewed
+    // runtime change, not a per-artifact namespace delta. Counted, not failed.
+    runtimeChanged++;
+    continue;
+  }
+  // Blank lines are not semantic, and unwrapping the chunk scope perturbs their
+  // count. Drop them so the comparison is about CODE, not layout.
+  const fa = a.split("\n").map(fold).filter((l) => l.trim() !== "");
+  const fb = b.split("\n").map(fold).filter((l) => l.trim() !== "");
   if (fa.length !== fb.length) {
     console.log(`FINDING line-count delta: ${f} (${fa.length} -> ${fb.length})`);
     findings++;
@@ -117,6 +161,7 @@ console.log(`\nfiles walked (base/after)    : ${baseList.length} / ${afterList.l
 console.log(`files COMPARED               : ${compared}`);
 console.log(`  byte-identical             : ${identical}`);
 console.log(`  differing BY TOKEN ONLY    : ${tokenOnly}`);
+console.log(`  shared runtime (expected)  : ${runtimeChanged}`);
 
 if (compared === 0) {
   console.log("GATE FAIL: compared ZERO files — the gate verified nothing");
