@@ -30,7 +30,7 @@ import { moduleFormatNotices, W_MODULE_FORMAT_ESM_INCOMPLETE } from "../../src/c
 import * as acorn from "acorn";
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 
 // A trivial markup fixture — enough to emit a shared runtime file. Byte-identity
 // of the runtime is independent of the source; this keeps the test self-contained.
@@ -80,7 +80,7 @@ describe("§1 classic default is byte-identical", () => {
     expect(rtB).not.toBeNull();
 
     // Same content-hashed filename == same bytes (the runtime is FNV-hashed).
-    expect(rtA.split("/").pop()).toBe(rtB.split("/").pop());
+    expect(basename(rtA)).toBe(basename(rtB));
     const bytesA = readFileSync(rtA);
     const bytesB = readFileSync(rtB);
     expect(Buffer.compare(bytesA, bytesB)).toBe(0);
@@ -101,7 +101,7 @@ describe("§2 esm emits an importable ES module", () => {
     const src = readFileSync(rt, "utf8");
     // A distinct content hash from classic (different bytes → different key).
     const classic = compileFixture("classic");
-    expect(rt.split("/").pop()).not.toBe(runtimeFileIn(classic.outDir).split("/").pop());
+    expect(basename(rt)).not.toBe(basename(runtimeFileIn(classic.outDir)));
 
     // Parses under the module goal (a script goal would reject `export`).
     expect(() => acorn.parse(src, { ecmaVersion: 2022, sourceType: "module" })).not.toThrow();

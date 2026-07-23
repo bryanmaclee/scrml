@@ -20,7 +20,7 @@
 import { describe, test, expect, afterAll } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import { compileScrml, scanDirectory } from "../../src/api.js";
 import { augmentHtmlForChunks } from "../../src/codegen/emit-html.ts";
 import { toEsmClientChunk } from "../../src/codegen/emit-client-esm.ts";
@@ -64,7 +64,10 @@ async function compileHtml(srcDir, moduleFormat) {
   return htmlByFile;
 }
 function entryHtml(htmlByFile, base) {
-  for (const [fp, html] of htmlByFile) if (fp.endsWith(`/${base}`)) return html;
+  // basename(), not `endsWith("/" + base)` — the compiler's output keys are
+  // OS-native paths, so a `/`-anchored suffix match never fires on Windows and
+  // every caller here threw `no HTML output for …` on the windows canary.
+  for (const [fp, html] of htmlByFile) if (basename(fp) === base) return html;
   throw new Error(`no HTML output for ${base}`);
 }
 
