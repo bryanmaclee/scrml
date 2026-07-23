@@ -125,3 +125,27 @@ file's shared compile helper at the read boundary. REFERENCE: if-expression.test
 60/4 -> 64/0 with one 8-line edit. This is NOT the "bulk assertion rewrite" the
 S239/§6 laundering warning targets (that was round-1's in-quote key rewrite); a
 prefix fold provably cannot mask a non-rename delta.
+
+## 2026-07-23 — DECISION: mechanism DONE + PROVEN; migration SURFACED to PA (182 files)
+
+Precise migration surface (pre-commit subset, HEAD 971fe5c7): **182 firing test
+files / 675 failures** — unit 126, integration 38, conformance 6, gauntlet 12.
+That is ~4x the SCOPING's "46 files / 160 failures". e8fdd44c subset baseline is
+GREEN (0), so all these are arc-migration, NOT pre-existing.
+
+Steps 1-5 + 7 COMPLETE + committed. Step 6 (the 182-file assertion migration) is a
+4x-scoped campaign; per the brief's guardrail (do not silently expand scope; STOP
+and surface a scope/premise discovery) + §7 (report where the SCOPING was WRONG),
+this is SURFACED to the PA rather than ground through unilaterally in-dispatch.
+
+Artifact-diff fold changes VALIDATED (self-consistency: wide at two paths ->
+GATE PASS, token-only delta). Reference migration proven (if-expression 60/4->64/0).
+
+RECOMMENDED next: authorize the fold campaign — for each of the 181 remaining
+firing files, apply `foldChunkAccessors(clientJs)` once at the file's compile-read
+boundary (shared `compile()`/`compileScrml` wrapper where present; else per read).
+It is a surgical prefix fold, provably non-laundering. Then step 8 full-tree
+verification (acceptance already green both formats; gzip 16,330; C10.1 green;
+E-CG-018 catalogued).
+
+Base worktree (e8fdd44c) used for baselines removed.
