@@ -371,17 +371,16 @@ function resolveExporterPath(
 }
 
 /**
- * The `_scrml_ssr_state` seed key for a cell owned by THIS unit.
+ * The STORE key for a cell owned by this unit: `"rows"` -> `"0a1b2c3d$rows"`.
  *
- * The SSR seed is the one place a cell key must be resolved at COMPILE time
- * rather than by the chunk's local scope: `_scrml_ssr_seed_apply`
- * (`runtime-template.js`) walks `window.__scrml_ssr_state` and feeds each key to
- * the GLOBAL `_scrml_reactive_set`, which never sees a chunk-local shadow. So the
- * server must bake the resolved key, and it must be exactly what
- * `_scrml_cell_key(token, name)` produces on the client — hence the shared `$`
- * separator and the root-only rule for dotted keys.
+ * Almost all emitted code should go through the chunk's scoped accessors and
+ * keep writing the BARE name — that is the whole point of the scope. This helper
+ * is for the handful of sites that index `_scrml_state` (or a store-keyed
+ * registry) DIRECTLY and so never pass through a scoped accessor. It must agree
+ * exactly with the runtime's `_scrml_cell_key`, hence the shared `$` separator
+ * and the root-only rule for dotted §6.3.2 keys.
  */
-export function nsSsrSeedKey(name: string): string {
+export function nsCellKey(name: string): string {
   const raw = String(name ?? "");
   if (!raw || !_state.token) return raw;
   const dot = raw.indexOf(".");

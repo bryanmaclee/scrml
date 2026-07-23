@@ -52,7 +52,7 @@
  */
 
 import { parseAfterDuration } from "./parse-after-duration.ts";
-import { nsName } from "./chunk-namespace.ts";
+import { nsName, nsCellKey } from "./chunk-namespace.ts";
 
 // ---------------------------------------------------------------------------
 // Types — canonical engine-decl + engineMeta shapes consumed
@@ -2509,14 +2509,18 @@ function buildEngineArms(
         lines.push(`// §51.0.Q.1 composite-arm post-mount: init/restore inner engine ${innerVar}`);
         lines.push(`{`);
         if (scHasHistory) {
+          // chunk-namespacing — `_scrml_engine_pending_history_restore` and
+          // `_scrml_state` are indexed DIRECTLY here, bypassing this chunk's
+          // scoped accessors, so these keys carry the store form explicitly. The
+          // runtime wrote the flag under the namespaced varName it received.
           // History-restore: check the pending-restore flag set by
           // `_scrml_engine_direct_set` / `_scrml_engine_advance` when the
           // write was the structured `.Tag.history` form. Read+clear.
           lines.push(`  var _pending = (typeof _scrml_engine_pending_history_restore === "object" && _scrml_engine_pending_history_restore !== null)`);
-          lines.push(`    ? _scrml_engine_pending_history_restore[${JSON.stringify(outerVar)}] : null;`);
+          lines.push(`    ? _scrml_engine_pending_history_restore[${JSON.stringify(nsCellKey(outerVar))}] : null;`);
           lines.push(`  if (_pending === ${JSON.stringify(tag)}) {`);
-          lines.push(`    delete _scrml_engine_pending_history_restore[${JSON.stringify(outerVar)}];`);
-          lines.push(`    var _saved = _scrml_state[${JSON.stringify(synthCellKey)}];`);
+          lines.push(`    delete _scrml_engine_pending_history_restore[${JSON.stringify(nsCellKey(outerVar))}];`);
+          lines.push(`    var _saved = _scrml_state[${JSON.stringify(nsCellKey(synthCellKey))}];`);
           lines.push(`    if (_saved != null) {`);
           lines.push(`      _scrml_reactive_set(${JSON.stringify(innerVar)}, _saved);`);
           lines.push(`    } else {`);

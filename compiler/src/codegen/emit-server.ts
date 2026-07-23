@@ -35,7 +35,6 @@ import {
 } from "./tenant-egress.ts";
 // §52.8 SSR A-terminus, Dispatch 1 — server-side per-row markup renderer.
 import { buildSsrEachRenderers, SSR_RENDER_HELPER } from "./emit-ssr-render.ts";
-import { nsSsrSeedKey } from "./chunk-namespace.ts";
 
 // g-pure-module-server-emit (S207): sentinel line marking where deferred
 // local-`.scrml` server imports are re-injected after usage-pruning. Pruned by
@@ -4275,9 +4274,9 @@ export function generateServerJs(
           if (_prot && _prot.size > 0) _rowsExpr = `_scrml_protect_tag(${_rowsExpr}, ${JSON.stringify([..._prot])})`;
           if (_tenTbl) _rowsExpr = `_scrml_tenant_tag(${_rowsExpr}, "tenant_id", false)`;
           lines.push(`  { const _scrml_rows = ${_rowsExpr};`);
-          lines.push(`    _scrml_ssr_state[${JSON.stringify(nsSsrSeedKey(_vn))}] = ${_egressRedact("_scrml_rows")}; }`);
+          lines.push(`    _scrml_ssr_state[${JSON.stringify(_vn)}] = ${_egressRedact("_scrml_rows")}; }`);
         } else {
-          lines.push(`  _scrml_ssr_state[${JSON.stringify(nsSsrSeedKey(_vn))}] = await _scrml_sql\`SELECT * FROM ${_tbl}\`;`);
+          lines.push(`  _scrml_ssr_state[${JSON.stringify(_vn)}] = await _scrml_sql\`SELECT * FROM ${_tbl}\`;`);
         }
       }
       // Tier-2 Pattern-C — the cell's actual inline ?{} (same §44 lowering the
@@ -4288,9 +4287,9 @@ export function generateServerJs(
         const _sqlExpr = (serverRewriteEmitted(emitLogicNode(_sqlNode, { boundary: "server" })) ?? "").replace(/;\s*$/, "");
         if (_protectActive || _tenantActive) {
           lines.push(`  { const _scrml_result = ${_sqlExpr};`);
-          lines.push(`    _scrml_ssr_state[${JSON.stringify(nsSsrSeedKey(_vn))}] = ${_egressRedact("_scrml_result")}; }`);
+          lines.push(`    _scrml_ssr_state[${JSON.stringify(_vn)}] = ${_egressRedact("_scrml_result")}; }`);
         } else {
-          lines.push(`  _scrml_ssr_state[${JSON.stringify(nsSsrSeedKey(_vn))}] = ${_sqlExpr};`);
+          lines.push(`  _scrml_ssr_state[${JSON.stringify(_vn)}] = ${_sqlExpr};`);
         }
       }
       // Tier-2 coalesced-callable-init — run the same server-rewritten initExpr the
@@ -4300,9 +4299,9 @@ export function generateServerJs(
         const _expr = emitExprField((decl as any).initExpr, (decl as any).init ?? "null", { mode: "server" });
         if (_protectActive || _tenantActive) {
           lines.push(`  { const _scrml_cv = await Promise.resolve(${_expr});`);
-          lines.push(`    _scrml_ssr_state[${JSON.stringify(nsSsrSeedKey(_vn))}] = ${_egressRedact("_scrml_cv")}; }`);
+          lines.push(`    _scrml_ssr_state[${JSON.stringify(_vn)}] = ${_egressRedact("_scrml_cv")}; }`);
         } else {
-          lines.push(`  _scrml_ssr_state[${JSON.stringify(nsSsrSeedKey(_vn))}] = await Promise.resolve(${_expr});`);
+          lines.push(`  _scrml_ssr_state[${JSON.stringify(_vn)}] = await Promise.resolve(${_expr});`);
         }
       }
       // Read the sibling compiled <base>.html. Always `let`: the enclosing gate
@@ -4314,7 +4313,7 @@ export function generateServerJs(
       // server-rendered (redacted) rows so view-source of the first paint shows
       // the data, not an empty placeholder. data-scrml-key markers ride each row.
       for (const _r of _ssrRenderers) {
-        lines.push(`  _scrml_html = _scrml_ssr_fill_mount(_scrml_html, ${JSON.stringify(_r.mountId)}, ${_r.fnName}(_scrml_ssr_state[${JSON.stringify(nsSsrSeedKey(_r.varName))}]));`);
+        lines.push(`  _scrml_html = _scrml_ssr_fill_mount(_scrml_html, ${JSON.stringify(_r.mountId)}, ${_r.fnName}(_scrml_ssr_state[${JSON.stringify(_r.varName)}]));`);
       }
       // §39.2.3 — fill the `<meta name="csrf-token" content="">` placeholder with
       // THIS viewer's session synchronizer token. The middleware mints + persists
