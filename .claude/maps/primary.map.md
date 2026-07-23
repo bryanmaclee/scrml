@@ -1,6 +1,11 @@
 # primary.map.md
 # project: scrml
-# updated: 2026-07-22T17:10:00Z  commit: a0344d75
+# updated: 2026-07-22T22:00:00Z  commit: e8fdd44c
+# NOTE (S282): content-verified current, not regenerated. The map files were refreshed inside the
+# d3e961de (#141) landing, so they already reflect that codegen change; the only commits after it
+# (1531b341, e8fdd44c) are test-only. ESM-arc coverage spot-checked present: runtime-esm,
+# emit-client-esm, module-format, snippet-gate, facts.ts, FACTS.md. The S280 hand-off's claim that
+# this map 'cannot see' those was true when written and is now stale.
 # For per-session history, see docs/changelog.md (NOT this file — maps are current-truth navigation, not an archive).
 
 ## Project Fingerprint
