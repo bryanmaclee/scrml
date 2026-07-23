@@ -87,7 +87,7 @@ afterEach(teardownTmp);
 
 describe("§1 SQL-body server function → `server` stripped", () => {
   test("`server function f() { ?{ select ... } }` → `function f()`", () => {
-    const source = `<program>
+    const source = `<program db="./app.db">
 \${
   server function getRows() {
     return ?{ select id from users }.all()
@@ -141,7 +141,7 @@ describe("§3 SSE `server function*` → untouched (deferred exclusion)", () => 
     // escalates), so the `function*` exclusion is what protects it — not the
     // lint. This is the load-bearing exclusion: without it, the SSE keyword
     // would be stripped and SSE is deferred to its own DD.
-    const source = `<program>
+    const source = `<program db="./app.db">
 \${
   server function* sseFeed() {
     yield ?{ select id from users }.all()
@@ -258,7 +258,7 @@ describe("§6 reserved-name handle() (Trigger 8) → `server` stripped", () => {
 
 describe("§7 idempotency", () => {
   test("re-running Migration 4 on the stripped output finds no W-DEPRECATED → 0", () => {
-    const source = `<program>
+    const source = `<program db="./app.db">
 \${
   server function getRows() {
     return ?{ select id from users }.all()
@@ -288,7 +288,7 @@ describe("§7 idempotency", () => {
 
 describe("§8 composition with M1/M2/M3 via migrateFile --fix", () => {
   test("a file with <machine>, a `pure function`, and a SQL `server function` migrates all", () => {
-    const source = `<program>
+    const source = `<program db="./app.db">
 \${
   type FlowState:enum = { Idle, Done }
 
@@ -322,7 +322,7 @@ describe("§8 composition with M1/M2/M3 via migrateFile --fix", () => {
   });
 
   test("in-place --fix run writes a file that strips all three + still compiles", () => {
-    const source = `<program>
+    const source = `<program db="./app.db">
 \${
   type FlowState:enum = { Idle, Done }
 
@@ -388,7 +388,7 @@ function compileOutput(source, path) {
 
 describe("§9 no-client-flip — stripped server stays server-side", () => {
   test("stripped SQL server function keeps the SQL in serverJs, NOT clientJs", () => {
-    const source = `<program>
+    const source = `<program db="./app.db">
 \${
   server function getSecret() {
     return ?{ select secretcol from users }.all()
@@ -495,7 +495,7 @@ describe("§10 bare-decl shape (Gaps A+B) — lift-SQL + handle strip, lift-pure
     // The 03/07/08/17 SQL-lift class as a bare decl. Gap A (lint now fires on
     // lift-bearing escalating fns) + Gap B (bare-decl span anchored at
     // `server`) together let Migration 4 reach it.
-    const source = `<program>
+    const source = `<program db="./app.db">
   server function loadContacts() {
     lift ?{ select id, name from contacts }.all()
   }
@@ -552,7 +552,7 @@ describe("§10 bare-decl shape (Gaps A+B) — lift-SQL + handle strip, lift-pure
 
 describe("§11 integration — migrate --fix reaches the SQL-lift + handle classes, preserves fn + danger", () => {
   test("4-class fixture: (a)+(b) stripped, (c)+(d) untouched, still compiles", () => {
-    const source = `<program>
+    const source = `<program db="./app.db">
   server function handle(request, resolve) {
     return resolve(request)
   }
