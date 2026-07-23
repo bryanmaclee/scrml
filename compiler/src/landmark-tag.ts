@@ -50,10 +50,20 @@ import { isUserComponentMarkup } from "./component-expander.ts";
  * arrives through component expansion and is content-owned per §20.8.1.1 (no
  * diagnostic).
  *
- * UPSTREAM NOTE: `<MAIN>` escaping `E-COMPONENT-035` (which `<Widget/>` does
- * fire) is the deeper inconsistency — an unrecognized capitalized tag is
- * neither normalized to the HTML element nor rejected. This module makes the
- * landmark walkers agree with the browser; it does not fix that classifier.
+ * UPSTREAM NOTE (updated — the classifier IS now fixed). This module used to
+ * record that `<MAIN>` escaping `E-COMPONENT-035` (which `<Widget/>` does fire)
+ * was a deeper, unfixed inconsistency: an unrecognized capitalized tag was
+ * neither normalized to the HTML element nor rejected. Stage 3.055 (TC,
+ * `tag-canonicalizer.ts`) closes it generally — a tag NR resolved to an HTML
+ * element by the registry is rewritten to the canonical element spelling before
+ * SYM/CE/TS/CG run, so `<MAIN>` reaches these walkers already spelled `main`
+ * and takes the `tag === "main"` fast path above.
+ *
+ * The capitalization branch below is therefore no longer the load-bearing path
+ * for a normally-compiled file — but it is still correct and still required:
+ * TC only acts on nodes NR stamped, and these walkers also run over AST shapes
+ * that bypass NR (component bodies CE re-parses, direct unit-test entry). The
+ * rule it encodes is exactly TC's, so the two can only agree.
  */
 
 /**
