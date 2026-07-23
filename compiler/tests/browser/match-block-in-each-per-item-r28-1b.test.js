@@ -41,6 +41,7 @@ import {
   mkdirSync,
 } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 // Block-form `<match>` as a child of `<each>`. The `<empty>` sub-element adds
 // the empty-state guard (the each render fn's `if (!_items || length === 0)`
@@ -156,9 +157,8 @@ describe("R28-1b §2 — each <li> renders its own match arm in happy-dom", () =
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${clientJs}\n` +
-        `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
-        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`,
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
+        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`),
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));

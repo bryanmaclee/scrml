@@ -24,6 +24,7 @@ import {
 } from "../../../src/codegen/emit-machines.ts";
 import { compileScrml } from "../../../src/api.js";
 import { SCRML_RUNTIME } from "../../../src/runtime-template.js";
+import { captureInsideChunkScope } from "../../helpers/chunk-scope.js";
 
 const FIXTURE_DIR = join(import.meta.dir, "__fixtures__/derived-machines");
 const FIXTURE_OUTPUT = join(FIXTURE_DIR, "dist");
@@ -545,10 +546,8 @@ describe("§51.9 follow-up — DOM read-wiring for projected vars", () => {
 
     document.body.innerHTML = cleanHtml;
 
-    const code = `(function() {\n${SCRML_RUNTIME}\n${clientJs}\n` +
-      `window._scrml_reactive_get = _scrml_reactive_get;\n` +
-      `window._scrml_reactive_set = _scrml_reactive_set;\n` +
-      `})();`;
+    const code = `(function() {\n${SCRML_RUNTIME}\n` + captureInsideChunkScope(clientJs, `window._scrml_reactive_get = _scrml_reactive_get;\n` +
+      `window._scrml_reactive_set = _scrml_reactive_set;\n`) + `\n})();`;
     eval(code);
     document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
 

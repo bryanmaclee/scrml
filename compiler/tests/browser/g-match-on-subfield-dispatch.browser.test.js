@@ -44,6 +44,7 @@ import {
   mkdirSync,
 } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 // Single-level sub-path: `<cell> = { state: P.Idle, n: 0 }` + `on=@cell.state`.
 const SRC = `<program>
@@ -156,9 +157,8 @@ describe("GITI-031 §2 — match on=@cell.state renders the correct arm at runti
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${clientJs}\n` +
-        `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
-        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`,
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
+        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`),
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));

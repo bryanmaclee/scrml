@@ -38,6 +38,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 // The bug shape: `<each in=@CELL>` over a SAME-PROGRAM cell, NO `<empty>` block.
 const NONEMPTY_SRC = `<program>
@@ -134,9 +135,8 @@ describe("each-render-before-cell-init §2 — real module-init order mounts wit
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${clientJs}\n` +
-        `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
-        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`,
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
+        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`),
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));

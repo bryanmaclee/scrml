@@ -20,6 +20,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 // `<each in=@lines>` whose per-item body uses BOTH the `@.field` sigil (text)
 // and a chained `@.foo.bar` sigil — the exact shapes the native lexer fix
@@ -83,9 +84,8 @@ describe("each-contextual-sigil native render canary", () => {
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${clientJs}\n` +
-        `globalThis.__scrml_set__ = (n, v) => _scrml_reactive_set(n, _scrml_deep_reactive(v));\n` +
-        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`,
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = (n, v) => _scrml_reactive_set(n, _scrml_deep_reactive(v));\n` +
+        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`),
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));

@@ -33,6 +33,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 // Delegable (onclick) + non-delegable (onmousedown) bare-ref forms, side-by-side
 // with the call form (onclick=bump()) and expr form (onmousedown=${(e)=>...}).
@@ -127,8 +128,7 @@ describe("g-bare-ref-event-handler §2 — fires in happy-dom (was dead handler)
     const origErr = console.error;
     console.error = (...a) => { errs.push(a.join(" ")); };
     const exec = new Function("window", "document",
-      `${runtimeJs}\n${clientJs}\n` +
-      `globalThis.__get__ = (typeof _scrml_reactive_get!=='undefined')?_scrml_reactive_get:null;`);
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__get__ = (typeof _scrml_reactive_get!=='undefined')?_scrml_reactive_get:null;`));
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));
 

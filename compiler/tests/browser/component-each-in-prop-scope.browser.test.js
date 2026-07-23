@@ -38,6 +38,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 // repro: a component with a typed prop iterated by <each>, instantiated with @todos.
 const COMPONENT_SRC = `<program>
@@ -133,9 +134,8 @@ describe("component-each §2 — list populates (real module-init order)", () =>
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${clientJs}\n` +
-        `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
-        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`,
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
+        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`),
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));

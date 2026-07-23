@@ -25,6 +25,7 @@ import { compileScrml } from "../../src/api.js";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -54,10 +55,8 @@ function mountAndRun(html, clientJs) {
   const bodyHtml = bodyMatch ? bodyMatch[1] : html;
   const cleanHtml = bodyHtml.replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
   document.body.innerHTML = cleanHtml;
-  const code = `(function() {\n${SCRML_RUNTIME}\n${clientJs}\n` +
-    `window._scrml_reactive_get = _scrml_reactive_get;\n` +
-    `window._scrml_reactive_set = _scrml_reactive_set;\n` +
-    `})();`;
+  const code = `(function() {\n${SCRML_RUNTIME}\n` + captureInsideChunkScope(clientJs, `window._scrml_reactive_get = _scrml_reactive_get;\n` +
+    `window._scrml_reactive_set = _scrml_reactive_set;\n`) + `\n})();`;
   eval(code);
   document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
   return { get: (n) => window._scrml_reactive_get(n), set: (n, v) => window._scrml_reactive_set(n, v) };

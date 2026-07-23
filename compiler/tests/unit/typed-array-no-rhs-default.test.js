@@ -48,6 +48,7 @@ import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 function parse(source, filePath = "/test/app.scrml") {
   const bs = splitBlocks(filePath, source);
@@ -282,9 +283,8 @@ describe("§6.2 Shape 4 — runtime (happy-dom)", () => {
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${reordered}\n` +
-        `globalThis.__scrml_reactive_set__ = _scrml_reactive_set;\n` +
-        `globalThis.__scrml_reactive_get__ = _scrml_reactive_get;\n`,
+      `${runtimeJs}\n` + captureInsideChunkScope(reordered, `globalThis.__scrml_reactive_set__ = _scrml_reactive_set;\n` +
+        `globalThis.__scrml_reactive_get__ = _scrml_reactive_get;\n`),
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));

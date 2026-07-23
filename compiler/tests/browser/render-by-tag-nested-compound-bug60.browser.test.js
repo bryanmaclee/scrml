@@ -22,6 +22,7 @@ import { mkdtempSync, rmSync, existsSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -60,10 +61,8 @@ function mount() {
   const bodyHtml = (html.match(/<body[^>]*>([\s\S]*)<\/body>/i) || [])[1] || html;
   document.body.innerHTML = bodyHtml.replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
 
-  const code = `(function() {\n${SCRML_RUNTIME}\n${clientJs}\n` +
-    `window.__sg = _scrml_reactive_get;\n` +
-    `window.__ss = _scrml_reactive_set;\n` +
-    `})();`;
+  const code = `(function() {\n${SCRML_RUNTIME}\n` + captureInsideChunkScope(clientJs, `window.__sg = _scrml_reactive_get;\n` +
+    `window.__ss = _scrml_reactive_set;\n`) + `\n})();`;
   eval(code);
   document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
 

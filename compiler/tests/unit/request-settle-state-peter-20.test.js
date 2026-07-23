@@ -33,6 +33,7 @@ import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-request-settle-peter-20");
 
@@ -207,10 +208,9 @@ function mountWithFetch(src, baseName, respond) {
     };
     const exec = new Function(
       "window", "document", "fetch",
-      `${runtimeJs}\n${clientJs}\n` +
-      `if (typeof _scrml_run_dom_ready === "function") { _scrml_run_dom_ready(); }\n` +
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `if (typeof _scrml_run_dom_ready === "function") { _scrml_run_dom_ready(); }\n` +
       `globalThis.__req__ = _scrml_request_userReq;\n` +
-      `globalThis.__get__ = _scrml_reactive_get;\n`,
+      `globalThis.__get__ = _scrml_reactive_get;\n`),
     );
     exec(window, document, fetchStub);
     return { errors: result.errors ?? [], req: globalThis.__req__, get: globalThis.__get__ };

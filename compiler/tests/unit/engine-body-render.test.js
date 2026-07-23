@@ -785,6 +785,7 @@ describe("Phase A10 re-wire §12 — per-arm wire fn shape", () => {
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -806,11 +807,9 @@ function compileAndLoad(source, suffix) {
   // Wrap runtime + client in an IIFE that exposes reactive handles to window.
   // eslint-disable-next-line no-eval
   const code =
-    `(function() {\n${SCRML_RUNTIME}\n${clientJs}\n` +
-    `window._scrml_reactive_get = _scrml_reactive_get;\n` +
+    `(function() {\n${SCRML_RUNTIME}\n` + captureInsideChunkScope(clientJs, `window._scrml_reactive_get = _scrml_reactive_get;\n` +
     `window._scrml_reactive_set = _scrml_reactive_set;\n` +
-    `window._scrml_reactive_subscribe = _scrml_reactive_subscribe;\n` +
-    `})();`;
+    `window._scrml_reactive_subscribe = _scrml_reactive_subscribe;\n`) + `\n})();`;
   // eslint-disable-next-line no-eval
   eval(code);
 
