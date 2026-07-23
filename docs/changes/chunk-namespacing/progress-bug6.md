@@ -36,3 +36,12 @@ Read + verified against source (not assumed):
   `chunkNamespaceToken` read the OLD prologue; MUST become rename-aware (step 5).
 - Emitting a clean `// --- end chunk cell scope ---` end-marker gives every
   fold/unwrap a reliable delimiter.
+
+## 2026-07-23 — resume after transient API drop (ENOTIMP)
+
+Worktree intact at `074f6ddc`. Banking the step-3 scaffold
+`cell-accessor-rename.ts` (Acorn callee/reference rename pass, module→script
+parse, back-to-front splice, shielded-position guard) as a checkpoint before
+touching `index.ts`. e8fdd44c subset baseline + current-HEAD (76-fail) baseline
+captured to scratchpad for the step-8 name-diff. Next: wire steps 1-2 (position
+metadata + `_scrml_cs_*` prologue) into `codegen/index.ts`.
