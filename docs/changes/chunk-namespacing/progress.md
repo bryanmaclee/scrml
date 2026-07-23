@@ -622,3 +622,62 @@ files compared**.
 The harness remainder is the bespoke-shape tail; `storeByAuthorName` covers one
 of its sub-shapes and two more files want it. The 3 unclassified should be read
 individually — that bucket has now produced 6 of the 6 bugs found in this arc.
+
+
+---
+
+# S282 SCOPING ROUND — BUG-6 rename approach
+
+**Head `0581f480`.** No fix code this round; scoping only, per the ruling that the
+accessor-rename fix runs next session. Full doc:
+`docs/changes/chunk-namespacing/BUG6-RENAME-SCOPING.md` (`status: current`).
+
+## The three verdicts asked for
+
+- **ESM crux: SOUND, no hole.** A renamed local (`_scrml_cs_reactive_get`) has a
+  name distinct from the runtime accessor it wraps, so it never shadows it — the
+  exact thing attempt (a) died on. Grounded in `emit-client-esm.ts:359-362`: the
+  real accessor is imported (referenced in the wrapper, not a chunk-own-decl);
+  the renamed local is a chunk-own-decl so it is excluded from imports; no
+  collision, no TDZ, no IIFE needed under ESM.
+
+- **Rename surface: ~959 emitted call occurrences across 37 files** (heuristic
+  ceiling; `_scrml_reactive_get` alone 470). This forces a POST-HOC Acorn
+  callee-rename pass over the assembled body — NOT per-emitter edits.
+
+- **Migration count both ways: 46 files / 160 failures (per-file), 129 new vs the
+  31-name base set, 0 base failures masked.** The name-diff (129) is
+  authoritative; the per-file taxonomy double-counts base failures. The rename
+  re-migrates ZERO already-done files IF `captureInsideChunkScope` /
+  `unwrapChunkScope` are made rename-aware first (a 2-helper change).
+
+## The finding that outranks all of them
+
+**The 16 KB SPA-runtime budget is a pre-existing knife-edge.** Measured on the
+size test's own SPA_COUNTER fixture:
+
+| | gzip B | vs 16384 |
+|---|---|---|
+| BASE e8fdd44c | 16,257 | −127 |
+| HEAD 0581f480 | 18,346 | +1,962 |
+| naive rename (keep cell_key+cell_name in core) | 17,531 | **+1,147 FAIL** |
+| ZERO core residue (inline key-derivation, drop cell_name+banner) | 16,255 | −129 PASS |
+
+So the rename passes the size test ONLY with zero net core residue — and even
+then by ~2 B over base, a margin smaller than the gzip whitespace-noise band
+(~200 B). The budget was already 127 B from saturation at BASE, independent of
+this arc. That is flagged HIGH to bryan in §6: the rename can meet either answer,
+but "hold 16 KB / raise it" is a real decision the executing session should not
+make alone.
+
+Two facts that make zero-residue reachable, both grep-confirmed:
+- `_scrml_cell_key` has ZERO runtime callers under the rename (only the deleted
+  `_scrml_cell_scope` called it) → inline it into each prologue.
+- `_scrml_cell_name` has ZERO production callers (only the conformance test shim,
+  guarded) → move it into the shim, out of core.
+
+## N3 + N4 under the rename: PRESERVED (confirmed by reading)
+
+The IIFE wrap (`index.ts:1901`) and `nsName` (`emit-engine.ts:355+`) are
+independent of accessor names; the rename touches neither. The two structural
+closures that made design B beat A survive unchanged.
