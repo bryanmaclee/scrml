@@ -149,8 +149,7 @@ describe("g-bare-ref-event-handler §2 — fires in happy-dom (was dead handler)
     const origErr = console.error;
     console.error = (...a) => { errs.push(a.join(" ")); };
     const exec = new Function("window", "document",
-      `${runtimeJs}\n${clientJs}\n` +
-      `globalThis.__get__ = (typeof _scrml_reactive_get!=='undefined')?_scrml_reactive_get:null;`);
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__get__ = (typeof _scrml_reactive_get!=='undefined')?_scrml_reactive_get:null;`));
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));
 
@@ -166,8 +165,7 @@ describe("g-bare-ref-event-handler §2 — fires in happy-dom (was dead handler)
     const { html, clientJs, runtimeJs } = compileCase();
     document.documentElement.innerHTML = html;
     const exec = new Function("window", "document",
-      `${runtimeJs}\n${clientJs}\n` +
-      `globalThis.__get__ = (typeof _scrml_reactive_get!=='undefined')?_scrml_reactive_get:null;`);
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__get__ = (typeof _scrml_reactive_get!=='undefined')?_scrml_reactive_get:null;`));
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));
 
