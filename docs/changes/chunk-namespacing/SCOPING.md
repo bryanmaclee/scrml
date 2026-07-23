@@ -161,3 +161,51 @@ it is a crash rather than a follow-on.
 normatively-pinned shape the arc touches. Pending: does the meta scope id need namespacing at all
 (is it cross-chunk visible), or can it be exempted? If it must change, that is a SPEC amendment and a
 separate ruling under the governing-sentence gate.
+
+
+---
+
+## §8 S282 — R2 deviation RATIFIED (bryan), and the §22.10 amendment landed
+
+### R2 third tier — RATIFIED
+
+R2 ruled the token anchored to the **project root** with **no fallback** — an unresolvable root
+a hard compile error. Implemented literally, that fails **434 test files**, which compile
+fixtures out of `mkdtemp`/`/tmp` where neither `scrml.toml` nor `.git` exists.
+
+The implementing agent flagged rather than silently degraded, and proposed a third tier
+anchoring at the **filesystem root** (the absolute path). **bryan RATIFIED it (S282).**
+
+The reasoning that carried it, recorded because it should outlast the decision: R2's objection
+to a fallback was that a degrade *"reinstates the precise collision the ruling rejected basename
+for."* An absolute path is **strictly more injective** than a project-relative one — it cannot
+collide anywhere the project-relative form would not. So the third tier does not reinstate
+anything; it satisfies R2's intent rather than eroding it. What is traded is cross-machine token
+reproducibility, and only for files with no project — where there is no shared build to
+reproduce.
+
+**The resolution order is therefore:** `scrml.toml` location → else the git root → else the
+absolute path. A collision remains impossible at every tier, which is the property R2 exists to
+protect.
+
+### SPEC §22.10 — AMENDED (bryan-directed, S282)
+
+The `<scopeId>` clause fixed the form as `"_scrml_meta_N"` with N a per-file integer, which N1's
+namespacing necessarily violates. The agent established the block **cannot be exempted**: the
+scope ID is resolved by a document-wide `querySelector` and keys three process-global registries,
+so a cross-chunk collision is a live fault, not a cosmetic one.
+
+Amended to specify the **contract** rather than the **form** — `<scopeId>` SHALL be
+*deterministic* (same block, same source, same project-relative path → same ID) and
+*document-unique* (two blocks whose chunks can coexist in one document SHALL NOT share an ID,
+**including blocks from different source files** — a per-file counter alone does not satisfy
+this). The encoding is otherwise implementation-defined, so the token derivation stays
+compiler-spec (D3) and is deliberately not normative.
+
+Two things stated honestly in the amendment rather than papered over: determinism is now relative
+to the project-relative PATH, so moving a file changes its scope IDs — intended, and the same
+property that makes them unique; and the companion `_scrml_types_meta_N` clause is **not emitted
+by impl#1 at all today** (the registry is constructed inline), so that clause was already
+unimplemented independently of the naming question. Recorded, not silently rewritten.
+
+**Still open:** `E-CG-018` needs a §34 catalog row.

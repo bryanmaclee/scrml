@@ -16339,9 +16339,26 @@ _scrml_meta_effect(
 
 Where:
 
-- `<scopeId>` is a string literal of the form `"_scrml_meta_N"` where N is a stable
-  integer assigned during the codegen pass. The same `^{}` block SHALL produce the same
-  scope ID across compilations of the same source file (deterministic assignment).
+- `<scopeId>` is a string literal that SHALL satisfy two properties, and whose exact
+  encoding is otherwise implementation-defined:
+  - **Deterministic.** The same `^{}` block SHALL produce the same scope ID across
+    compilations of the same source file at the same project-relative path.
+  - **Document-unique.** Two `^{}` blocks whose emitted chunks can coexist in one runtime
+    document SHALL NOT produce the same scope ID — including blocks originating in
+    *different* source files. This is a cross-compilation-unit requirement: a per-file
+    counter alone does NOT satisfy it.
+
+  > **S282 amendment.** This clause previously fixed the form as `"_scrml_meta_N"` with N a
+  > per-file integer. That form cannot satisfy document-uniqueness: every compilation unit
+  > restarts its counter, so two routes that coexist under cross-chunk navigation emit the
+  > same scope ID. The scope ID is resolved by a document-wide `querySelector` and keys three
+  > process-global registries, so a collision is not cosmetic and the block cannot be exempted
+  > from namespacing. impl#1 satisfies both properties by prefixing a per-compilation-unit
+  > token derived from the source file's project-relative path; that derivation is
+  > compiler-spec (D3), not language-spec, and is deliberately NOT normative here. Note the
+  > determinism property is now stated relative to the file's project-relative PATH — moving a
+  > source file within a project changes its scope IDs, which is intended and is the same
+  > property that makes the ID unique.
 - `<body>` is the compiled form of the meta block's statements, indented by two spaces.
 - `<capturedBindings>` is `Object.freeze({...})` where `...` contains:
   - A plain property for each `const`, `let`, and `lin` binding:
@@ -16350,7 +16367,13 @@ Where:
     `get bindingName() { return _scrml_reactive_get("<encodedAtVarName>"); }`
 - `<typeRegistry>` is an object literal declared as a `const` before the
   `_scrml_meta_effect` call (to avoid constructing it inline on every re-run). The variable
-  SHALL be named `_scrml_types_meta_N` where N matches the scope ID integer.
+  SHALL be named by applying the same unique-per-block encoding used for `<scopeId>`, so the
+  registry variable and its scope ID cannot drift apart.
+
+  > **S282 note — pre-existing, NOT closed by this amendment.** This hoisted `const` is not
+  > emitted by impl#1 at all today; the type registry is constructed inline. The clause is
+  > therefore currently unimplemented independently of the naming question, and the S282
+  > amendment does not change that. Recorded rather than silently rewritten.
 
 **Normative statement on type registry hoisting:**
 
