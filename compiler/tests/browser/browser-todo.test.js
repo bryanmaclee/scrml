@@ -43,9 +43,18 @@ function loadSample(baseName) {
 
   document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
 
+  // chunk-namespacing — the chunk's cells live under ITS namespace
+  // (`<token>$name`), so a harness holding the GLOBAL accessor must key through
+  // the same token. The emitted prologue states it literally:
+  //   const { … } = _scrml_cell_scope("0a1b2c3d");
+  // An unnamespaced chunk (synthetic fixture, no project context) yields no
+  // match and the bare name is used, exactly as before.
+  const nsMatch = /_scrml_cell_scope\("([0-9a-z]{8})"/.exec(clientJs);
+  const key = (name) => (nsMatch ? `${nsMatch[1]}$${name}` : name);
+
   return {
-    get: (name) => window._scrml_reactive_get(name),
-    set: (name, val) => window._scrml_reactive_set(name, val),
+    get: (name) => window._scrml_reactive_get(key(name)),
+    set: (name, val) => window._scrml_reactive_set(key(name), val),
   };
 }
 

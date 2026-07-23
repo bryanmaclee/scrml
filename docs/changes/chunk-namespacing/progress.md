@@ -345,3 +345,113 @@ implements rather than rediscovers:
    the import binding — an alias in `emit-client-esm.ts`.
 
 N3 falls out of (1) for free: the IIFE makes `const Phase` chunk-local.
+
+
+---
+
+# S282 RESUME — N2 + N3 built via the chunk-local scope
+
+**Commit `dc0b85b9`.** All four namespaces are now isolated, executed. The tree is
+**RED**: the mechanism works, the test corpus has not been migrated to it yet.
+
+## The acceptance test FLIPS — measured at `dc0b85b9`
+
+```
+classic  BASE e8fdd44c  alpha AFTER import : {"rows":["b1","b2"]}  CLOBBERED
+classic  dc0b85b9       alpha AFTER import : {"rows":["a1","a2"]}  SURVIVED
+esm      BASE e8fdd44c  alpha AFTER import : {"rows":["b1","b2"]}  CLOBBERED
+esm      dc0b85b9       alpha AFTER import : {"rows":["a1","a2"]}  SURVIVED
+```
+
+Plus the three purpose-built fixtures, executed in real Chromium, classic.
+`INCONCLUSIVE` means the second chunk THREW and never evaluated — the page looks
+pristine, which is why `collision-exec.mjs` refuses to score that as isolation:
+
+| fixture | BASE `e8fdd44c` | `dc0b85b9` |
+|---|---|---|
+| `types/` (N3 — both pages `type Phase:enum`) | `[pageerror] Identifier 'Phase_toEnum' has already been declared` -> INCONCLUSIVE | **isolated** |
+| `engine/` (N4 — both pages an engine cell `phase`) | `[pageerror] Identifier '__scrml_engine_phase_transitions' has already been declared` -> INCONCLUSIVE | **isolated** |
+| `wide/` (N1+N2 — same source both pages) | `[pageerror] Phase_toEnum …` -> INCONCLUSIVE | **isolated** |
+
+## The mechanism
+
+The store stays a SINGLETON; only the KEY SPACE is per-chunk. Each chunk opens
+with a prologue that SHADOWS the global accessors:
+
+```js
+const { _scrml_reactive_get, _scrml_reactive_set } =
+  _scrml_cell_scope("0a1b2c3d", { appPhase: "0eeeffff$appPhase" });
+```
+
+Every call site in the body is byte-identical to the pre-namespacing output —
+`_scrml_reactive_get("rows")` — while the key reaching the store is
+`0a1b2c3d$rows`. That is what keeps the ~1210 assertions across 198 files valid
+unmodified. Effects, handlers and render fns are all created during module init
+and capture this scope lexically; nothing is dynamically scoped.
+
+### The two complications, solved
+
+- **`_scrml_ssr_seed_apply` calls the GLOBAL setter** and never sees a chunk-local
+  shadow. The SERVER now bakes the resolved key (`nsSsrSeedKey`), matching what
+  `_scrml_cell_key` produces on the client.
+- **`wrapClientBodyInIife` was conditional** for `_scrml_modules` + the `var
+  session` singleton. Both are ASSIGNMENTS and still escape an IIFE. Rather than
+  assume that was the whole list, I audited the runtime for bare references to
+  chunk-declared globals: **201 declared, 209 referenced, exactly ONE real
+  chunk-declared global — `_scrml_shell_cells`**, which `emit-reactive-wiring`
+  now also publishes on `globalThis`. The other seven are property names
+  (`node._scrml_key`, `container._scrml_item_by_key`, `_scrml_ssr_adopt`), not
+  bindings.
+
+### A pre-existing bug this surfaced
+
+`emit-client-esm.ts`'s `topLevelDecls` only handled
+`decl.id.type === "Identifier"`, so a DESTRUCTURED top-level `const` bound
+nothing as far as the collector was concerned. The prologue is exactly that
+shape, so every esm chunk emitted `import { _scrml_reactive_get }` NEXT TO the
+`const` and died with three hard `E-CODEGEN-INVALID-LOGIC`. It now routes through
+the existing `collectAssignmentTargets` pattern walker.
+
+## What is NOT done: the test migration
+
+`bun run test` at `dc0b85b9`: **27692 pass / 673 fail** (base is 33 fail), i.e.
+**~635 new failures across 143 files**. Every one traced so far is test-corpus
+drift, not a runtime break. Taxonomy:
+
+| class | files | what changed |
+|---|---|---|
+| **harness** | **71** | a happy-dom harness captures a cell accessor AFTER the chunk runs, then drives cells by BARE name. Those cells now live under `<token>$name`, so the captured GLOBAL accessor sees nothing. |
+| **engineName** | 20 | asserts `__scrml_engine_<name>_*` / `_scrml_engine_<name>_render_*`, now namespaced (N4). |
+| **iifeShape** | 13 | byte/structural comparisons that now see the IIFE + prologue. |
+| **ssrSeed** | 4 | asserts `_scrml_ssr_state["accounts"]`, now the resolved key. |
+| **other** | 35 | mostly the harness shape my first classifier missed (`window.X = _scrml_…` rather than `globalThis.X = …`). |
+
+### The harness recipe — PROVEN, not proposed
+
+Applied to `compiler/tests/browser/browser-todo.test.js`: **10 pass / 0 fail**,
+six lines. The chunk states its own token in the prologue, so the harness reads
+it out rather than hardcoding one:
+
+```js
+const nsMatch = /_scrml_cell_scope\("([0-9a-z]{8})"/.exec(clientJs);
+const key = (name) => (nsMatch ? `${nsMatch[1]}$${name}` : name);
+return {
+  get: (name) => window._scrml_reactive_get(key(name)),
+  set: (name, val) => window._scrml_reactive_set(key(name), val),
+};
+```
+
+An unnamespaced chunk yields no match and the bare name is used, so synthetic
+fixtures are unaffected.
+
+**This is the remaining work and it is mechanical, but it is ~143 files with a
+4-5 minute verification loop — a dispatch of its own, not a tail-end task.** It
+should be done with a full budget and an adversarial re-review, not squeezed in.
+
+## Still open
+
+- `E-CG-018` (token collision) needs a §34 catalog row — normative SPEC, not mine.
+- SPEC §22.10:16342 needs the meta-scopeId amendment (see the previous section —
+  the id is document-wide `querySelector`-resolved and keys three process-global
+  registries, so it cannot be exempted).
+- The R2 no-project-root tier is a ratified deviation pending bryan's veto.
