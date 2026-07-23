@@ -64,3 +64,41 @@ export function chunkCellKey(clientJs) {
   const ns = chunkNamespaceToken(clientJs);
   return (name) => (ns ? `${ns}$${name}` : name);
 }
+
+/**
+ * Fold the chunk-namespace token out of ENGINE-derived names only.
+ *
+ * N4 namespaces every per-engine top-level const and the mount attribute, so
+ * `__scrml_engine_appMode_transitions` is emitted as
+ * `__scrml_engine_0a1b2c3d_appMode_transitions`. A test asserting the former is
+ * asserting WHICH ENGINE, not which chunk — the chunk-identity axis has its own
+ * dedicated coverage in `compiler/tests/unit/chunk-namespacing.test.js`, which
+ * pins the token directly.
+ *
+ * Deliberately NARROW: it touches only `_scrml_engine_<token>_` /
+ * `__scrml_engine_<token>_` and `data-scrml-engine-mount="<token>_"`. A blanket
+ * token strip would also eat the N1 each/match tokens that other assertions in
+ * the same corpus legitimately pin.
+ */
+export function unNamespaceEngineNames(js) {
+  return String(js ?? "")
+    .replace(/(_{1,2}scrml_engine_)0[0-9a-z]{7}_/g, "$1")
+    .replace(/(data-scrml-engine-mount=")0[0-9a-z]{7}_/g, "$1");
+}
+
+/**
+ * Fold the chunk-namespace token out of QUOTED cell-store keys:
+ * `"0a1b2c3d$appMode"` -> `"appMode"`.
+ *
+ * Almost no emitted code needs this — the chunk's scoped accessors keep writing
+ * BARE names, which is the point. It exists for the handful of assertions that
+ * pin a site indexing `_scrml_state` (or a store-keyed registry) DIRECTLY, where
+ * the resolved key really is what lands in the output.
+ *
+ * The `"0` + 7 base36 + `$` shape is unambiguous: a token always starts `0`
+ * (fnv1a is a u32, and 36^7 > 2^32) and `$` is not otherwise used as a key
+ * separator.
+ */
+export function unNamespaceCellKeys(js) {
+  return String(js ?? "").replace(/("|')0[0-9a-z]{7}\$/g, "$1");
+}

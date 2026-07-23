@@ -24,6 +24,7 @@ import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { parseAfterDuration } from "../../src/codegen/parse-after-duration.ts";
 import { emitEngineTimersTable } from "../../src/codegen/emit-engine.ts";
 import { compileScrml } from "../../src/api.js";
+import { unNamespaceEngineNames } from "../helpers/chunk-scope.js";
 
 /**
  * Compile the source through the full pipeline (BS→TAB→...→CG) and return the
@@ -47,7 +48,7 @@ function compileToClientJs(source, suffix = "computed-delay") {
     });
     const clientPath = resolve(outDir, `${name}.client.js`);
     const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
-    return { errors: result.errors ?? [], clientJs };
+    return { errors: result.errors ?? [], clientJs: unNamespaceEngineNames(clientJs) };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   }

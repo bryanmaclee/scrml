@@ -52,7 +52,7 @@
  */
 
 import { parseAfterDuration } from "./parse-after-duration.ts";
-import { nsName, nsCellKey } from "./chunk-namespace.ts";
+import { nsName, nsCellKey, stripNsName } from "./chunk-namespace.ts";
 
 // ---------------------------------------------------------------------------
 // Types — canonical engine-decl + engineMeta shapes consumed
@@ -4645,7 +4645,13 @@ export function maybeLowerCancelTimerCallRef(
   if (typeof engineArm !== "string" || engineArm.length === 0) return null;
   const colonIdx = engineArm.indexOf(":");
   if (colonIdx < 0) return null;
-  const varName = engineArm.slice(0, colonIdx);
+  // The arm-context id is `<idPrefix>:<armTag>` and `idPrefix` is CHUNK-NAMESPACED
+  // (N4). What is needed here is the engine's CELL name, which the chunk scope
+  // namespaces itself — so strip the marker token back off. Leaving it on emitted
+  // `_scrml_engine_clear_named_timer("0a1b2c3d_appMode", …)`, which the scope then
+  // namespaced a SECOND time, so the named timer was never found and cancelTimer
+  // silently did nothing.
+  const varName = stripNsName(engineArm.slice(0, colonIdx));
   const armTag = engineArm.slice(colonIdx + 1);
   if (varName.length === 0 || armTag.length === 0) return null;
 

@@ -50,6 +50,7 @@ import { resolve } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import { unNamespaceEngineNames } from "../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-match-arm-bundle-1.6-1.7");
 let tmpCounter = 0;
@@ -70,7 +71,7 @@ function compile(source) {
     const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf-8") : "";
     return {
       errors: (result.errors ?? []).filter(e => e.severity !== "warning"),
-      clientJs,
+      clientJs: unNamespaceEngineNames(clientJs),
     };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });

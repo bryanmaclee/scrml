@@ -388,3 +388,19 @@ export function nsCellKey(name: string): string {
   const rest = dot === -1 ? "" : raw.slice(dot);
   return `${_state.token}$${root}${rest}`;
 }
+
+/**
+ * Inverse of `nsName` — recover the author name from a namespaced DOM/marker
+ * token (`"0a1b2c3d_itemsPhase"` -> `"itemsPhase"`).
+ *
+ * Needed where a marker id is MINED for the author name it embeds. The engine
+ * arm-context id is `<idPrefix>:<armTag>` and `idPrefix` is namespaced, so the
+ * `cancelTimer` lowering — which splits that id to recover the engine's CELL
+ * name — would otherwise pass a marker token where a cell key belongs, and the
+ * chunk scope would namespace it a second time.
+ */
+export function stripNsName(name: string): string {
+  const raw = String(name ?? "");
+  const m = /^0[0-9a-z]{7}_(.+)$/.exec(raw);
+  return m ? m[1] : raw;
+}
