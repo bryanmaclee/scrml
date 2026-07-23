@@ -80,7 +80,7 @@ function compileWith(source, parser, suffix) {
 // 8-char chunk-namespace tokens (an FNV-1a of the dist-relative source path)
 // differ by construction. Fold the token out first, then the numeric local-id
 // suffixes — what this compares is the native-vs-default LOWERING.
-const normIds = (s) => s.replace(/[0-9a-z]{8}_(\d+)/g, "NSTOK_$1").replace(/_\d+\b/g, "_N");
+const normIds = (s) => s.replace(/(?<![0-9a-z])0[0-9a-z]{7}_(?=[0-9A-Za-z_])/g, "").replace(/_\d+\b/g, "_N");
 
 // ===========================================================================
 // §1 — LEXER: `@.` contextual sigil lexes to a single ScrmlAt token.

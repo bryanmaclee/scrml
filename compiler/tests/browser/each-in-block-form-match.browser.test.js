@@ -196,9 +196,10 @@ describe("each-in-match §2 — list populates on arm entry (real module-init or
     return {
       set: (name, val) => globalThis.__scrml_set__(name, val),
       get: (name) => globalThis.__scrml_get__(name),
-      // The mount id is chunk-namespaced (`match_<token>_<nodeId>`), so match on
-      // the prefix — this fixture has exactly one match block.
-      matchMount: () => document.querySelector('[data-scrml-match-mount^="match_"]'),
+      // The mount id is chunk-namespaced (`match_<token>_<nodeId>`). Match on the
+      // SUFFIX so the token is tolerated while WHICH match is still pinned — a
+      // `^="match_"` prefix match would select any match block on the page.
+      matchMount: () => document.querySelector('[data-scrml-match-mount$="_7"]'),
       rows: () => (function(){var w=document.createTreeWalker(document.body,NodeFilter.SHOW_COMMENT),n;while((n=w.nextNode())){if(String(n.data||'').trim().indexOf('scrml-each:')===0)return n.parentNode.querySelectorAll('li');}return [];})(),
     };
   }

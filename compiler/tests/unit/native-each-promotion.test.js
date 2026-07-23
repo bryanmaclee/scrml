@@ -535,7 +535,9 @@ describe("native-each §10 — per-item ${expr} text interpolation (#2f codegen)
     // The chunk-namespace token folds in FIRST: the two fixtures are written to
     // different temp paths on purpose, so their 8-char path-hash tokens differ
     // by construction and are not part of what this test compares.
-    const norm = (s) => s.replace(/[0-9a-z]{8}_(\d+)/g, "NSTOK_$1").replace(/_\d+\b/g, "_N");
+    // Strip the chunk-namespace token (anchored: `0` + 7 base36 + `_`) before
+    // the id fold. Unanchored, it ate the trailing 8 chars of real identifiers.
+    const norm = (s) => s.replace(/(?<![0-9a-z])0[0-9a-z]{7}_(?=[0-9A-Za-z_])/g, "").replace(/_\d+\b/g, "_N");
     expect(norm(native.clientJs)).toBe(norm(def.clientJs));
   });
 
