@@ -11287,6 +11287,7 @@ The outer `as row` makes the outer item addressable as `row` inside nested scope
 
 - An `<each>` opener SHALL carry exactly one of `in=expr` or `of=expr` (`E-EACH-ITER-SHAPE` — §34, queued).
 - The body of `<each>` SHALL contain at least one per-item template element OR the `<empty>` sub-element (or both). An `<each>` with no body content is `E-EACH-EMPTY-BODY` (§34, queued).
+- The per-item template MAY contain MORE THAN ONE root element. "At least one" above is a floor, not a cap: an `<each>` body with N sibling roots SHALL render all N per item, in source order, with no wrapper element introduced. The N roots of one item are one reconciliation unit — a keyed insert, move or removal SHALL act on the whole run and SHALL preserve intra-item root order. This mirrors §10.8 accumulation mode ("`lift` MAY appear multiple times in a single logic block; each call appends one item"), which grants the same N-root-per-iteration shape at Tier 0. (Restored S281 for adopter issue #141; roots 2..N were previously built and then discarded.)
 - The `as name` clause is OPTIONAL. When present, it binds the current iteration value to the named identifier in the body scope (per §17.7.3).
 - The `key=expr` attribute is OPTIONAL. When absent, the compiler attempts inference (per §17.7.5).
 - Per-item element openers MAY use §4.14 `:`-shorthand body when the per-item rendering is a single expression. The `:`-shorthand grammar is §4.14 verbatim — no `<each>`-specific extension.

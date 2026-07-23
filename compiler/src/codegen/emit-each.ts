@@ -2188,7 +2188,43 @@ function emitEachReconcileLines(
   for (const l of templateLines) lines.push(l);
   popEachReconcileCtx();
 
-  lines.push(`${indent}    return _itemFrag.firstChild;`);
+  // #141 — per-item ROOT COUNT (SPEC §17.7.2 "at least one", §10.8 multi-lift).
+  // The count is read off the emission itself: `_itemFrag.appendChild(` appears
+  // exactly once per TOP-LEVEL root (renderTemplateChildToJs threads a child
+  // element var as the container for anything nested), so this is exact and
+  // needs no second AST filter that could drift from the emitter.
+  //
+  // The indent guard is load-bearing, NOT cosmetic. A NESTED `<each>` emits its
+  // own per-item factory inline inside this one, and that factory declares its
+  // own `const _itemFrag` — the same literal name, SHADOWED. Counting bare
+  // occurrences therefore mis-reads a single-root outer each that contains a
+  // nested each as multi-root (caught by the corpus byte-identity gate on
+  // examples/25-triage-board.scrml). The nested factory's lines are strictly
+  // deeper-indented, so requiring the line to begin at EXACTLY this factory's
+  // child indent — and not one space further — counts only OUR roots.
+  //
+  // N === 1 (the ~99% case) emits `return _itemFrag.firstChild;` — BYTE-IDENTICAL
+  // to the pre-fix emission. N > 1 returns the fragment itself; the reconciler
+  // (`_scrml_reconcile_list`) accepts a DocumentFragment and reconciles its
+  // top-level nodes as one keyed GROUP. Before this, roots 2..N were built and
+  // wired and then silently dropped by `.firstChild`.
+  //
+  // A create-time `if=` root (line ~860) is counted here even though it may not
+  // materialize at runtime — that is correct: the fragment simply carries
+  // however many nodes were actually appended, and a 1-node fragment behaves
+  // exactly like the single-Node return. `if=` remains a CREATE-TIME decision
+  // (a reused group does not gain/lose roots on later reconciles) — pre-existing,
+  // deliberately preserved.
+  const _childIndent = `${indent}    `;
+  const _rootCount = templateLines.reduce((n, l) => {
+    if (!l.startsWith(_childIndent) || l[_childIndent.length] === " ") return n;
+    return n + (l.split("_itemFrag.appendChild(").length - 1);
+  }, 0);
+  lines.push(
+    _rootCount > 1
+      ? `${indent}    return _itemFrag;`
+      : `${indent}    return _itemFrag.firstChild;`,
+  );
   lines.push(`${indent}  }`);
   lines.push(`${indent});`);
   return lines;

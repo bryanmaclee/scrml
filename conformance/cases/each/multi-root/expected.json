@@ -1,0 +1,21 @@
+{
+  "id": "each-multi-root",
+  "description": "An <each> body with MORE THAN ONE per-item root renders EVERY root, and the keyed reconciler treats the roots of one item as a single group. Three items x 2 roots = 6 nodes, interleaved hdr/row per item. Clicking the first row's delete button drops id=1 and removes BOTH of that item's roots, leaving the B and C groups intact and in order.",
+  "language-version": "1.0",
+  "spec": "§17.7.2",
+  "rationale": "§17.7.2 requires 'at least one' per-item template element — it does not cap the count at one, and §10.8 grants N nodes per iteration explicitly for the Tier-0 accumulation form. Adopter issue #141: roots 2..N were built, wired, and then silently discarded by a createFn contract that returned exactly one Node. Pinning the RUNTIME half: N roots must reach the DOM, and a per-key removal must take the whole group with it.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": ".del" }],
+    "state": { "items": [{ "id": 2, "label": "B" }, { "id": 3, "label": "C" }] },
+    "domAnchored": [
+      { "selector": ".hdr", "count": 2 },
+      { "selector": ".row", "count": 2 },
+      { "selector": "#list > div:nth-child(1)", "text": "HB" },
+      { "selector": "#list > div:nth-child(2)", "text": "Bx" },
+      { "selector": "#list > div:nth-child(3)", "text": "HC" },
+      { "selector": "#list > div:nth-child(4)", "text": "Cx" }
+    ]
+  }
+}
