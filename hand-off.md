@@ -8,10 +8,16 @@
 
 ### 1. PUSH IS BLOCKED ON `bryan-XPS-8950`. Nothing this session is on the remote.
 
-`git push` hangs and dies with no output. **Fetch works, `gh api` works, TCP 443 to github.com is fine** — this is push-path-specific.
+`git push` hangs and dies with no output — **4 attempts, up to 9 minutes each**. Fetch works, `gh api` works, TCP 443 to github.com is fine.
 
-- `credential.helper = manager` (Git Credential Manager). It hung the first attempt with zero output.
-- `gh` IS authenticated (`gh auth status` → logged in as `bryanmaclee`), but **`gh auth token` exits non-zero** while emitting 142 chars that match no known token prefix — so the `gh`-as-credential-helper workaround and a `GIT_ASKPASS` shim both failed (`fatal: could not read Password`).
+**The sharpest clue: it is REPO-SPECIFIC, not credential-wide.** In the same session, on the same machine, with the same credentials:
+- `../scrml-site` push → **SUCCEEDED**
+- `../scrml-support` push → **SUCCEEDED** (board is on the remote)
+- `scrml` push → **fails every time, silently**
+
+So this is not simply Git Credential Manager or auth. Something about pushing to `bryanmaclee/scrml` specifically hangs — plausibly object-transfer size on a large repo over HTTPS, or a proxy/body limit. `credential.helper = manager` did hang the very first attempt with zero output, and `gh auth token` exits non-zero (emitting 142 chars matching no known token prefix), so the gh-as-credential-helper and `GIT_ASKPASS` workarounds both failed (`fatal: could not read Password`) — but neither explains why the two sibling repos push fine.
+
+**Untried diagnostic, if it recurs on the other machine:** push an already-remote commit as a new ref (`git push origin a0344d75:refs/heads/probe`, zero objects to transfer). If that succeeds, the problem is object transfer/size; if it hangs, it is ref-creation on this repo. I did not run it here to avoid leaving a junk branch on the remote while bryan was away.
 
 **On the other machine, do this — everything is committed and ready:**
 ```bash
