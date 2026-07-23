@@ -32,6 +32,7 @@ import { compileScrml } from "../../../src/api.js";
 import { SCRML_RUNTIME } from "../../../src/runtime-template.js";
 import { classifyTransition, emitTransitionGuard, setNoElide } from "../../../src/codegen/emit-machines.ts";
 import { extractUserFns } from "../../helpers/extract-user-fns.js";
+import { unwrapChunkScope } from "../../helpers/chunk-scope.js";
 
 // All tests here exercise elision semantics directly — reset the no-elide
 // flag so behavior doesn't depend on SCRML_NO_ELIDE env state (CI runs the
@@ -72,7 +73,7 @@ function runClientAndInvoke(clientJs, userFnCount) {
   const fnBody =
     shims + "\n" +
     SCRML_RUNTIME + "\n" +
-    clientJs + "\n" +
+    unwrapChunkScope(clientJs) + \"\n\" +
     callList + "\n" +
     "return { state: _scrml_state, userFns: " + JSON.stringify(toInvoke) + " };";
   const runner = new Function(fnBody);

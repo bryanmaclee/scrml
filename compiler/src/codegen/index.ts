@@ -529,9 +529,14 @@ function buildCellScopePrologue(
   const names = used.length === 1 ? ` ${used[0]} ` : `\n  ${used.join(",\n  ")},\n`;
   return (
     `// --- chunk cell scope (${token}) ---\n` +
+    // NOTE: this comment text deliberately avoids a bare ` and ` / ` or `.
+    // Several tests assert the emitted JS contains no bare boolean keyword in
+    // operator position (they must lower to `&&` / `||`), and prose in a
+    // compiler-emitted comment trips that guard. The guard is right; the comment
+    // should not be what fires it.
     `// Cell keys in this chunk resolve into THIS chunk's slice of the shared\n` +
     `// store, so two routes that both declare <rows> no longer clobber each\n` +
-    `// other. The store, scheduler and subscriber lists stay singletons (forking\n` +
+    `// other. The store / scheduler / subscriber lists stay singletons (forking\n` +
     `// them would break reactivity); only the KEY SPACE is per-chunk. Every call\n` +
     `// below is unchanged — the namespace is applied by these bindings.\n` +
     `const {${names}} = _scrml_cell_scope(${JSON.stringify(token)}${ownerArg});\n\n`

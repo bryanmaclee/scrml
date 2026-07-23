@@ -86,7 +86,9 @@ function runClientAndInvoke(clientJs, userFnCount) {
   const fnBody =
     shims + "\n" +
     SCRML_RUNTIME + "\n" +
-    clientJs + "\n" +
+    // The chunk is wrapped in its own scope; this harness invokes the chunk's
+    // user fns by name and reads _scrml_state by bare key, so unwrap it.
+    unwrapChunkScope(clientJs) + "\n" +
     callList + "\n" +
     "return { state: _scrml_state, userFns: " + JSON.stringify(toInvoke) + " };";
   // eslint-disable-next-line no-new-func
