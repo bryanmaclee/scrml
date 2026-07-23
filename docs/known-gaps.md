@@ -43,7 +43,25 @@
 > Context: GH issue **#141** (pjoliver11, 2026-07-22) — filed from a real app. Triaged + ruled by bryan the same session: **support N roots**, not a deferred arc. Build in flight (`docs/changes/each-multi-root/BRIEF.md`).
 
 ### g-each-multi-root-per-item-truncated — an `<each>` (or reactive Tier-0 `lift`) body with MORE THAN ONE root element per item renders only the FIRST; every later root is built, wired, then silently discarded
-<!-- @gap id=g-each-multi-root-per-item-truncated sev=HIGH status=open -->
+<!-- @gap id=g-each-multi-root-per-item-truncated sev=HIGH status=resolved -->
+**RESOLVED — landed `d3e961de` (PR #150), S282.** Codegen reads the per-item root count off the
+emission: `N === 1` still emits `return _itemFrag.firstChild;` **byte-identically**, `N > 1` returns
+the `DocumentFragment`. The runtime's `_scrml_reconcile_list` now owns a node **group** per key rather
+than a node per key (`_scrml_key` on every top-level node, `_scrml_group_member` on the non-heads,
+`_scrml_group` on the head) so insert / remove / LIS-reorder move a whole run together and preserve
+intra-group order, in both container modes. Conformance case `conformance/cases/each/multi-root/` +
+20 unit tests pin it. GH #141 closed with the SHA.
+
+**PA re-verified independently before merging** (not on the predecessor's record): the issue's verbatim
+reproducer compiled and EXECUTED in a real DOM on both trees — main `a0344d75` gave
+`{hdr:4, row:0, uhdr:4, urow:0, t1:4, t2:0, t3:0}` (the issue's "actual" column exactly), the PR gave
+all-4s with intra-item DOM order correctly interleaved (`Ha, Ra, Hb, Rb, …`). The PR's own test file
+was also run against main first and failed 17/20 there, proving it is not vacuous.
+
+**Deliberately still open, pre-existing and out of scope:** a create-time `if=` on a per-item root is
+decided ONCE at create time, so a reused group does not gain or lose roots on later reconciles. Also
+still open and separate: [[g-ssr-each-multi-root-client-only-fallback]] (SSR declines to server-render
+any multi-root `<each>`).
 `compiler/src/codegen/emit-each.ts:2191` ends the per-item `createFn` with **`return _itemFrag.firstChild;`**. Every root IS appended to `_itemFrag` — including its live-keyed `_scrml_effect` text/attr bindings — and then all but the first are dropped on the floor. Clean build, exit 0, **no error, no warning, nothing in the console**. Keyed and unkeyed behave identically (`key=` is not the trigger); 2-root and 3-root bodies both truncate to 1. Adopter symptom (`pjoliver11`, real grouped-list UI): **32 day-headers and 0 rows**. Because the first root *does* render, the failure reads as "my data is wrong" rather than "the compiler dropped my markup" — which is what made it expensive to localise.
 
 **PA-verified at `a0344d75` (S281), three facts:**
