@@ -50,6 +50,12 @@ import type {
 import { isMetaKind } from "./types/ast.ts";
 import { forEachIdentInExprNode, emitStringFromTree } from "./expression-parser.ts";
 import { forEachIdentInValidators, forEachQualifiedCellRefInValidators } from "./validator-arg-parser.ts";
+// SB3 (`g-dg-class-attr-interp-not-consumed`) — the SINGLE source of truth for
+// "which reactive cells does this template-literal attribute value interpolate".
+// Shared with the codegen wiring paths (emit-html.ts -> lowerAttrTemplateValue),
+// so the DG's reader accounting cannot drift from what actually gets wired.
+// Imported for reader-credit only; nothing here emits code.
+import { hasTemplateInterpolation, rewriteTemplateAttrValue } from "./codegen/rewrite.ts";
 
 // ---------------------------------------------------------------------------
 // DG-internal types (not in the shared AST, specific to Stage 7 output)
@@ -2720,6 +2726,60 @@ export function runDG(input: DGInput): DGOutput {
                 }
               } else if (attrVal && typeof attrVal === "object") {
                 const valObj = attrVal as Record<string, unknown>;
+                // E-DG-002 false-positive class (SB3) — template-literal
+                // attribute values (`g-dg-class-attr-interp-not-consumed`).
+                //
+                // A quoted attribute value carrying `${...}` interpolations
+                // arrives as `{ kind: "string-literal", value: "box ${@theme}" }`
+                // — an OBJECT whose payload is `value`. Pre-fix it matched NONE
+                // of the branches below (`name` is a variable-ref field, `refs`
+                // an expr-attr field, `raw` the expr fallback, and the kind is
+                // not "call-ref") and none above (`typeof attrVal === "string"`
+                // is false), so the read was never credited AT ALL — not
+                // credited-then-lost. A cell read only there false-fired
+                // E-DG-002 even though SPEC §5.5.3 makes the read normative:
+                // "Reactive variables referenced as `${@varName}` inside the
+                // template literal SHALL each subscribe to changes." Codegen
+                // agrees — it emits `_scrml_effect(() => el.setAttribute(name,
+                // `…${_scrml_reactive_get("theme")}…`))` — which is precisely
+                // the "reader edge in a render context" whose absence the §34
+                // E-DG-002 row defines as the trigger.
+                //
+                // NOT `class`-specific. The miss is in the value SHAPE, not the
+                // attribute name, and codegen wires `class` / `style` / `title` /
+                // `data-*` / `aria-*` identically, so the credit is
+                // attribute-name-agnostic too.
+                //
+                // Parity by construction: `rewriteTemplateAttrValue` is the SAME
+                // function the two codegen wiring paths use (emit-html.ts ->
+                // lowerAttrTemplateValue -> here, plus the <match>-arm path), so
+                // `reactiveVars` is by definition the exact set of cells the
+                // emitted effect subscribes to. Reusing it — rather than adding
+                // a second markup-attr `${}` scanner — means the DG cannot drift
+                // out of agreement with what actually gets wired.
+                //
+                // Bounded deliberately: the scan looks ONLY inside `${...}`
+                // segments (that is what `rewriteTemplateAttrValue` does). A bare
+                // `@x` in literal attribute text (`title="mail @theme now"`) is
+                // NOT wired by codegen, so E-DG-002 there is CORRECT and must
+                // keep firing — an over-wide whole-string scan would silence a
+                // real unused-cell warning.
+                //
+                // Scope note: this credits readers for E-DG-002 accounting only.
+                // It deliberately does NOT emit a MarkupReadDGNode (as the
+                // sibling attribute branches below do), so no other DG consumer
+                // — notably the reachability substrate — sees a change from this
+                // fix. Same scope-discipline as SB1 (collectLambdaBodyReactiveRefs).
+                if (
+                  valObj.kind === "string-literal" &&
+                  typeof valObj.value === "string" &&
+                  hasTemplateInterpolation(valObj.value)
+                ) {
+                  const { reactiveVars } = rewriteTemplateAttrValue(valObj.value);
+                  for (const cellName of reactiveVars) {
+                    creditReader(cellName);
+                  }
+                }
                 // e.g. bind:value={ kind: "variable-ref", name: "@country" }
                 // Also handles attr=@x simple variable-ref attribute.
                 // A-1.3 Shapes 2 + 3: variable-ref attr + bind:value=@x.
