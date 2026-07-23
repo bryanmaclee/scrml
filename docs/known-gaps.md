@@ -16,10 +16,17 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 15 |
-| MED | 47 |
+| MED | 46 |
 | LOW | 31 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### G-SPA-RUNTIME-GZIP-BUDGET-KNIFE-EDGE — the 16 KB SPA-runtime gzip budget is at ~127 B margin on base, independent of any in-flight arc — `NEW S282; HIGH; open (a bryan decision, not a bug)`
+Surfaced while scoping the BUG-6 accessor-rename (`docs/changes/chunk-namespacing/BUG6-RENAME-SCOPING.md` §6). `v0-3-x-spa-tree-shake-phase-b.test.js:145` asserts the assembled SPA runtime is `< 16 * 1024` gzip. **Agent-measured on the test's own `SPA_COUNTER` fixture at base `e8fdd44c`: 16,257 B — 127 B under the 16,384 budget, with no chunk-namespacing changes present.** (Scoping measurement; the execution session re-measures as its step 1, R26-style — do not treat 127 B as verified-final.)
+
+**Why it is filed as a decision, not a bug:** the budget was near-saturated before chunk-namespacing existed, so ANY feature that adds core-runtime bytes now risks tripping it — this arc is merely the first to hit it. The BUG-6 rename passes only in its **zero-core-residue** form (16,255 B, ~2 B over base); the naive form fails by 1,147 B. That 129 B margin is *smaller than the ~200 B gzip whitespace-noise band* the scoping hit while measuring, so "passing" is not robust.
+
+**The fork (bryan, for the execution session):** (a) **hold 16 KB** and require zero-core-residue forever — every future core-runtime addition must be offset; or (b) **raise the budget** to give the mechanism air. The rename meets either answer; this is about the standing constraint, not this fix. Recommendation deferred to the execution session's re-measurement — if base has drifted over 16 KB by then, (b) is forced. <!-- @gap id=g-spa-runtime-gzip-budget-knife-edge sev=HIGH status=open -->
 
 > The four data rows above are a GENERATED artifact derived from the `<!-- @gap … -->` tokens — run `bun scripts/state.ts --write` to refresh (and `--check` to gate). For WHAT closed each arc, see [`docs/changelog.md`](changelog.md); the old per-severity "Closed-this-arc" narrative cells were retired (DD3 Fork 2B, `dd3-state-self-evidence-2026-06-07`).
 
@@ -78,8 +85,14 @@ any multi-root `<each>`).
 **Fix in flight (S281).** Design: root count is statically known at codegen — when exactly 1, emit today's `return _itemFrag.firstChild` **byte-identical** (the ~99% case, and the assertable safety gate); emit the fragment form only when > 1. The runtime `createFn` contract widens to `Node | DocumentFragment`, and the reconciler owns a node **group per key** (key stamped on every top-level node; `_childList`/`_clearAll`/`_insert`/`_remove`/`_replace` group-aware; LIS reorder over groups, moving a group's nodes together preserving intra-group order) across BOTH container modes — range (`nodeType === 8` comment fence, the #131 model) and element. Tier-0 lift fixed in the same landing per §10.8. SPEC §17.7.2 gains a minimal normative statement making the N-root grant explicit. No new §34 code. **PRESERVED deliberately:** create-time `if=` semantics (`emit-each.ts:860`) — a reused group does not gain/lose roots on later reconciles; that is a pre-existing limitation and is NOT fixed here. — `NEW S281 (adopter #141); HIGH; open — build in flight`
 
 ### g-main-red-against-its-own-pre-commit-gate — `main` FAILS the documented pre-commit gate: an emitted `.server.js` carries an ESM `export`, which `node --check` rejects as CJS
-<!-- @gap id=g-main-red-against-its-own-pre-commit-gate sev=HIGH status=open -->
-**PRE-EXISTING at `a0344d75`, PA-verified in a clean detached worktree at that exact commit** (11 pass / 1 fail, identical failure, without any S281 change). Not caused by #141.
+<!-- @gap id=g-main-red-against-its-own-pre-commit-gate sev=HIGH status=narrowed -->
+**S282 — DOES NOT REPRODUCE on the ASUS-Vivobook clone; almost certainly XPS-clone-local, not a tree property.** The failure was recorded on `bryan-XPS-8950`. On `bryan-maclee-ASUS-Vivobook` this session, at both `a0344d75` and `feddd6b4`:
+- the exact named test `endpoint-conformance-integration.test.js` ("the emitted `.server.js` is `node --check` clean") passes **12/12**;
+- the full canonical gate `bun test compiler/tests/{unit,integration,conformance} --bail` passes **21129 / 0 fail** (219s).
+
+So `main` passes its own pre-commit gate here. Since the tree is byte-identical across clones (same commit), a failure on one clone and a pass on another points to a **clone-local environment cause on XPS**, not an ESM-`export` emission defect in the tree — most likely stale gitignored artifacts (`samples/compilation-tests/dist/`, i.e. a missing `bun run pretest`), the same class that produced S281's other XPS-only reports. **The tree-level claim ("`main` fails its own gate") is therefore NOT established.** Left `narrowed` rather than resolved because the XPS clone's actual state has not been re-checked from here — the fix on XPS is to run `bun run pretest` and re-run the gate before trusting a local red. Companion: `g-commit-gate-absent-on-bryan-xps-8950` (also XPS-clone-local).
+
+**PRIOR (S281, on XPS):** PA-verified in a clean detached worktree at `a0344d75` (11 pass / 1 fail, identical failure, without any S281 change). Not caused by #141.
 
 The canonical gate (`scripts/git-hooks/pre-commit:17`) is
 `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail`.
