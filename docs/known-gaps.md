@@ -15,7 +15,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 13 |
+| HIGH | 15 |
 | MED | 47 |
 | LOW | 31 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -58,6 +58,35 @@
 **Why the alternative (enforce single-root via a named `E-EACH-MULTI-ROOT`) was REJECTED (bryan, S281):** (a) it is a hole in what was thought to be working, not an unbuilt feature; (b) **the workaround is not universally available** — Peter's "wrap the per-item body in one root" fails exactly where it is most needed: `<tr>` pairs in a table, `<dt>`/`<dd>` in a `<dl>`, `<option>` under `<select>`. A wrapper `<div>` in those positions is foster-parented or dropped — the *same* bug class as #131 / S272 — so single-root-as-contract would make legal HTML inexpressible in Tier-1 iteration; (c) it would newly-REJECT the §10.8 Tier-0 multi-`lift` grant, or enforce at Tier 1 only and break the ladder's *"the per-item template carries forward"* promotion promise — note `W-EACH-PROMOTABLE` **already fires** on a multi-`lift` Tier-0 loop, offering a `promote --each` lift that would silently delete markup; (d) a real adopter is affected now.
 
 **Fix in flight (S281).** Design: root count is statically known at codegen — when exactly 1, emit today's `return _itemFrag.firstChild` **byte-identical** (the ~99% case, and the assertable safety gate); emit the fragment form only when > 1. The runtime `createFn` contract widens to `Node | DocumentFragment`, and the reconciler owns a node **group per key** (key stamped on every top-level node; `_childList`/`_clearAll`/`_insert`/`_remove`/`_replace` group-aware; LIS reorder over groups, moving a group's nodes together preserving intra-group order) across BOTH container modes — range (`nodeType === 8` comment fence, the #131 model) and element. Tier-0 lift fixed in the same landing per §10.8. SPEC §17.7.2 gains a minimal normative statement making the N-root grant explicit. No new §34 code. **PRESERVED deliberately:** create-time `if=` semantics (`emit-each.ts:860`) — a reused group does not gain/lose roots on later reconciles; that is a pre-existing limitation and is NOT fixed here. — `NEW S281 (adopter #141); HIGH; open — build in flight`
+
+### g-main-red-against-its-own-pre-commit-gate — `main` FAILS the documented pre-commit gate: an emitted `.server.js` carries an ESM `export`, which `node --check` rejects as CJS
+<!-- @gap id=g-main-red-against-its-own-pre-commit-gate sev=HIGH status=open -->
+**PRE-EXISTING at `a0344d75`, PA-verified in a clean detached worktree at that exact commit** (11 pass / 1 fail, identical failure, without any S281 change). Not caused by #141.
+
+The canonical gate (`scripts/git-hooks/pre-commit:17`) is
+`bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail`.
+Run against `main` it **bails**:
+
+```
+compiler/tests/integration/endpoint-conformance-integration.test.js
+  (D) route registration … > the emitted .server.js is node --check clean
+  error: Command failed: node --check /tmp/…/nc-3.js
+  SyntaxError: Unexpected token 'export'
+```
+
+The test's own comment states the stakes — *"a codegen miscompile is silent"*. The emitted `.server.js` contains an ESM `export` while `node --check` treats a bare `.js` as CommonJS. Strong suspicion (UNVERIFIED — do not act on it without checking) that this is ESM-arc fallout: S278 U1 split `<endpoint>`/§37-SSE emit into `generateHeadlessServerJs`, and the S281 maps refresh separately recorded that `--module-format` now threads through `compile`/`dev`/`build`. Either the server emit gained an `export` it should not have, or the artifact needs `.mjs` / a `type: module` declaration / a CJS-shaped emit.
+
+**Consequence, and it is the reason this is HIGH:** the project's own "0 failures = contract" pre-commit gate cannot pass on `main`. Anyone with the hooks correctly installed **cannot commit at all**. Companion finding [[g-commit-gate-absent-on-bryan-xps-8950]] explains why that went unnoticed on this machine.
+
+Note the cloud `gate` is presumably green on `main` (S280 merged 9 PRs through it), so the cloud check and the local pre-commit gate DISAGREE about the same tree — which makes this also a gate-integrity finding in the `pa-base v2.4` §8 sense: one of the two gates is not measuring what it claims. Determine which before "fixing" either. — `NEW S281; HIGH; open`
+
+### g-commit-gate-absent-on-bryan-xps-8950 — the local commit gate is NOT INSTALLED on this machine; every commit bypasses it silently
+<!-- @gap id=g-commit-gate-absent-on-bryan-xps-8950 sev=HIGH status=open -->
+`core.hooksPath` is **unset** and `.git/hooks` contains only `*.sample` files — there is no active `pre-commit`, `post-commit` or `pre-push` hook in the `bryan-XPS-8950` clone. The profile documents this machine as **Config B (local-rich)** with all three installed, so the richer non-source-controlled setup has been **LOST** (the profile itself warns of the mechanism: "a dir-rename can orphan an absolute `core.hooksPath` → silent dead gate").
+
+**PA process miss, recorded plainly:** `pa-base` §9 makes verifying the hook configuration a session-start step, and the S281 boot did **not** run it. Consequence: every commit this session — including the #141 landing — went in **without the pre-commit test gate running**. The landing was independently verified by other means (conformance 746/746, 20/20 unit, corpus byte-identity, adversarial review, real-Chrome execution both sides), so the *work* is covered; the *gate* was not. The two are not the same thing and the difference is exactly what this ledger exists to record.
+
+**Deliberately NOT auto-repaired, because repairing it would block all work.** `scripts/git-hooks/install.sh` exists and would restore Config A — but the gate it installs is RED on `main` ([[g-main-red-against-its-own-pre-commit-gate]]), so installing it now would leave the clone unable to commit anything. That is a genuine fork for bryan: (a) fix the endpoint/ESM emit first, then install; (b) install and use a documented per-commit bypass until fixed (weak — the no-`--no-verify` rule exists for good reason); (c) install Config A and accept the red gate as a forcing function. Contract also says never auto-reset B→A, which is a further reason not to silently pick. — `NEW S281 (PA boot miss); HIGH; open`
 
 ### g-match-without-for-plus-when-children-silent-undeclared-dispatch — a `<match on=…>` with invented `<when is="…">` children is SILENTLY ACCEPTED (0 errors, `<when>` never flagged) and emits a reference to a dispatch function that is never declared → runtime `ReferenceError`, dead page
 <!-- @gap id=g-match-without-for-plus-when-children-silent-undeclared-dispatch sev=HIGH status=open -->
