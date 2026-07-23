@@ -3470,3 +3470,26 @@ Surfaced by the `chunk-namespacing` arc (S282), which found **four separate inst
 **How to find the rest:** grep for string-concatenation of a cell/engine name into a key at an emit site, and for any runtime that rebuilds such a key rather than being handed it. The durable fix direction is a single shared key-builder used by BOTH sides, so the pair cannot drift by construction — the same discipline the DG fix used (`rewriteTemplateAttrValue` reused so the reader set IS the wired set).
 
 **Not yet swept.** The four above were found incidentally by one arc. No systematic sweep has run. <!-- @gap id=g-split-key-pair-class sev=MED status=open -->
+
+### G-PGNOTIFY-LISTEN-CASE-SPLIT — a `<channel>` name with any UPPERCASE letter notifies one PG channel and listens on another; the `watches=` feed delivers zero rows, silently — `NEW S282; HIGH; open`
+**PA-CONFIRMED EMPIRICALLY at `34f2b863`** (compiled, emitted SQL read — not inferred).
+
+`compiler/src/codegen/emit-channel.ts` builds the PostgreSQL NOTIFY channel name twice, independently, and the two forms are not case-equivalent:
+
+- **`:903`** `notifyChannel = \`scrml_${safeName}\`` → baked at `:910` into `PERFORM pg_notify('scrml_ordersFeed', …)`. A **string literal** — PostgreSQL preserves its case exactly.
+- **`:987`** `notifyChannel = \`scrml_${ident}\`` → rebuilt by hand, emitted at `:1028` as `LISTEN scrml_ordersFeed`. A **bare/unquoted identifier** — PostgreSQL folds it to `scrml_ordersfeed`.
+
+Measured on `<channel name="ordersFeed" watches=orders>`:
+```
+pg_notify('scrml_ordersFeed'      <- NOTIFY target, case preserved
+LISTEN scrml_ordersFeed           <- folds to scrml_ordersfeed at the server
+```
+`scrml_ordersFeed` != `scrml_ordersfeed`, so the listener never receives the notification. **Silent by construction:** a NOTIFY with no listener and a LISTEN on an un-notified channel are both legal PostgreSQL no-ops. No error, no warning, no dropped connection — the feed simply never fires.
+
+**Neither sanitiser lowercases, and one says it does.** `safeName` (`:263`) is `name.replace(/[^a-zA-Z0-9_]/g,"_")` — `A-Z` is in the keep-set. `sqlSafeIdent` (`:879`) carries the docstring *"Sanitise an identifier into a safe **lowercase** SQL/JS identifier segment"* and then never lowercases. The docstring is false.
+
+**Why 28k tests are green:** every conformance fixture uses lowercase-kebab (`orders-feed`, `events-feed`), so the fold is a no-op on all of them. A single camelCase fixture would have caught it.
+
+**Reachability today:** the trigger DDL and the LISTEN bridge ARE built and emitted (verified by compiling). The consumer half — `<onchange>` (§38.13.3) — is **Nominal/spec-ahead** per the §4.15 / §24.4 registry rows, so an adopter cannot yet receive frames through the sanctioned handler. That caps the blast radius **today** and does not reduce the defect: the moment the §38.13 impl wave lands, any camelCase channel name is a feed that silently delivers nothing.
+
+**Fix — the value already exists and is thrown away.** `buildWatchesTriggerDDL` RETURNS `notifyChannel` (`:917`); the caller at `:969` destructures only the three DDL strings and the site at `:990` rebuilds it by hand. Thread the returned value to the LISTEN site so the pair cannot drift, AND quote the identifier (`LISTEN "scrml_ordersFeed"`) so PostgreSQL does not fold it. Add a camelCase-named `watches=` conformance case. An instance of [[g-split-key-pair-class]]. <!-- @gap id=g-pgnotify-listen-case-split sev=HIGH status=open -->
