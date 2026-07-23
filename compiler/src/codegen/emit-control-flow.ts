@@ -683,6 +683,11 @@ function _emitForStmtInner(
     } else {
       // Fallback: use DocumentFragment for non-consolidated lift bodies
       lines.push(`  const ${tmpContainerVar} = document.createDocumentFragment();`);
+      // #141 — SPEC §10.8: "In accumulation mode, `lift` MAY appear multiple
+      // times in a single logic block; each call appends one item." Track where
+      // the per-item build starts so the root count can be read off the emission
+      // below (see the return at the end of this block).
+      const _liftBodyStart = lines.length;
       for (const child of body) {
         if (child && child.kind === "lift-expr") {
           const code = emitLiftExpr(child, { containerVar: tmpContainerVar, engineCtx: _liftEngineCtx, scopeVar: varName });
@@ -720,7 +725,28 @@ function _emitForStmtInner(
           }
         }
       }
-      lines.push(`  return ${tmpContainerVar}.firstChild;`);
+      // #141 — per-item ROOT COUNT for the Tier-0 `for … lift` path. Every
+      // top-level root is one `<tmp>.appendChild(` in the emitted body (nested
+      // markup appends to its own element var), so the count is read off the
+      // emission itself. A `for-stmt` / `while-stmt` child routes its inner
+      // lifts into the same fragment an UNBOUNDED number of times, so it counts
+      // as multi regardless of the textual occurrence count.
+      //
+      // N === 1 keeps `return <tmp>.firstChild;` — byte-identical to the pre-fix
+      // emission. N > 1 returns the fragment; `_scrml_reconcile_list` reconciles
+      // its top-level nodes as one keyed group. Before this, a multi-`lift` body
+      // built every root and then dropped all but the first.
+      const _liftRootCount = lines
+        .slice(_liftBodyStart)
+        .reduce((n, l) => n + (l.split(`${tmpContainerVar}.appendChild(`).length - 1), 0);
+      const _liftUnbounded = body.some(
+        (c: any) => c && (c.kind === "for-stmt" || c.kind === "while-stmt"),
+      );
+      lines.push(
+        _liftRootCount > 1 || (_liftUnbounded && _liftRootCount >= 1)
+          ? `  return ${tmpContainerVar};`
+          : `  return ${tmpContainerVar}.firstChild;`,
+      );
     }
     popLiftReconcileCtx();
     lines.push(`}`);

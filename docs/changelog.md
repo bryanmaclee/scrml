@@ -2,6 +2,22 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S281 — 2026-07-22 (bryan) — adopter #141 ruled + built + verified; merge BLOCKED on a broken push path
+
+**Adopter issue #141** (pjoliver11, real app): an `<each>` body with more than one root element per item rendered only the FIRST — later roots built, wired, then dropped by `return _itemFrag.firstChild;`. Clean build, exit 0, no diagnostic; their symptom was 32 day-headers and 0 rows.
+
+**The reframe:** not an `<each>` rule at all. Tier-0 `${for/lift}` truncated identically, and a NON-reactive Tier-0 multi-lift kept both roots with no `firstChild` call — so the defect was the `createFn`-returns-one-`Node` contract inside `_scrml_reconcile_list` leaking out as an apparent language rule. **Ruled a FIX, not an amendment**, on the governing-sentence gate (§10.8:6769 + §17.7.2:11289 ⇒ newly-accepting *toward the contract*). bryan chose N-roots over a named error because the wrap-in-one-root workaround is **unavailable** in `<table>`/`<dl>`/`<select>`, where a wrapper `<div>` is foster-parented or dropped.
+
+**Landed `ee6b6ea1` on `fix/each-multi-root` — NOT merged.** `git push` does not work from this clone (hangs, no output; fetch and `gh api` both fine; `credential.helper=manager`, and `gh auth token` exits non-zero so the gh-helper and GIT_ASKPASS workarounds both failed). Verification was complete before the blockage: byte-identity **0 normalized diffs** across 66 corpus programs (62 independently), conformance **745→746**, 20 new unit tests, full-suite fail set byte-identical to baseline, **real Chrome both sides** (pre-fix reproduces 4/0 exactly; post-fix 4/4). Adversarial review found **no blocking finding** — including a `Node.prototype.firstChild` runtime shim over 62 programs (zero truncation events) and 1550 rounds of randomized reconcile stress against a DOM oracle.
+
+**⚠️ TWO GATE FINDINGS, both pre-existing, both HIGH.** (1) `main` **fails its own pre-commit gate** — `endpoint-conformance-integration` bails because an emitted `.server.js` carries an ESM `export` that `node --check` rejects as CJS; verified in a clean detached worktree at `a0344d75`. The cloud `gate` merged 9 PRs at S280, so **the two gates disagree about the same tree**. (2) The **commit gate is not installed on `bryan-XPS-8950`** (`core.hooksPath` unset, `.git/hooks` all `*.sample`) — a documented Config-B setup that has been lost, and a `pa-base` §9 boot step this session skipped, so every commit including the landing bypassed the gate. NOT auto-repaired: installing it would install a RED gate and block all commits.
+
+**scrml-site triage.** Their "new compiler bug" was **three defects, one new**: the dead client-side destructure for a purely-static component (NEW, HIGH — the module registers `{}`) plus the already-filed `g-composition-strip-eats-last-dep-script` and `g-runtime-script-tag-not-depth-prefixed`, both filed S280 as *latent* and now **confirmed live with an adopter consequence**. The flat repro does not throw; only the composition path does. Reply pushed to their inbox before the push path broke.
+
+**Method lessons.** A corpus sweep gated on **exit code** silently dropped 36 of 79 files that exit non-zero environmentally while emitting complete output — gating on the **artifact** took coverage 43→78. A gap characterization filed early was **wrong and corrected in place** after bryan asked what `$$` meant: the tier-0 lift defect is **adjacency** (a literal touching `${`), not "mixed runs". And the adversarial reviewer **over-claimed on invalid source** — its "`<match>` inside `<each>` is page-fatal" used invented `<when is=>` syntax; valid `<match for=…>` wires correctly, and the real defect is invalid-source-not-rejected.
+
+**9 gaps filed** (HIGH 10→15). SSR's client-only fallback for multi-root eaches was ruled a **follow-up arc** by bryan rather than folded into the fix — extending it is a capability extension, not conformance restoration.
+
 ## S280 — 2026-07-22 (bryan) — the marketing claim-gate; a bryan ruling falsified; pa-base v2.4
 
 **9 PRs.** Booted `/boot concurrent` as a successor while S279 was still LIVE in the same checkout.

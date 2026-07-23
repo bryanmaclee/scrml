@@ -15,9 +15,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 10 |
-| MED | 44 |
-| LOW | 28 |
+| HIGH | 15 |
+| MED | 47 |
+| LOW | 31 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -35,6 +35,202 @@
 > carries an inline `@gap` token in its final cell. This basis reproduced the canonical S170 hand-count
 > HIGH 0 · MED 9 · LOW 18 · Nominal 9 exactly (the S170 baseline) — the LIVE count is the generated table
 > above, which moves as gaps are filed/closed (S174 filed 4 → MED 11 · LOW 20).
+
+---
+
+## §S281 — gaps filed S281 (2026-07-22, adopter issue #141 triage)
+
+> Context: GH issue **#141** (pjoliver11, 2026-07-22) — filed from a real app. Triaged + ruled by bryan the same session: **support N roots**, not a deferred arc. Build in flight (`docs/changes/each-multi-root/BRIEF.md`).
+
+### g-each-multi-root-per-item-truncated — an `<each>` (or reactive Tier-0 `lift`) body with MORE THAN ONE root element per item renders only the FIRST; every later root is built, wired, then silently discarded
+<!-- @gap id=g-each-multi-root-per-item-truncated sev=HIGH status=open -->
+`compiler/src/codegen/emit-each.ts:2191` ends the per-item `createFn` with **`return _itemFrag.firstChild;`**. Every root IS appended to `_itemFrag` — including its live-keyed `_scrml_effect` text/attr bindings — and then all but the first are dropped on the floor. Clean build, exit 0, **no error, no warning, nothing in the console**. Keyed and unkeyed behave identically (`key=` is not the trigger); 2-root and 3-root bodies both truncate to 1. Adopter symptom (`pjoliver11`, real grouped-list UI): **32 day-headers and 0 rows**. Because the first root *does* render, the failure reads as "my data is wrong" rather than "the compiler dropped my markup" — which is what made it expensive to localise.
+
+**PA-verified at `a0344d75` (S281), three facts:**
+1. The `<each>` (Tier-1) truncation, as above.
+2. The **Tier-0 `${ for/lift }` path truncates identically** — the emitted `_scrml_create_item_N` ends `return _scrml_tmp_M.firstChild;`. So this is NOT `<each>`-specific.
+3. **The truncation is a property of the RECONCILE path, not of the language.** A Tier-0 multi-`lift` loop over a **non-reactive** plain array emits both roots and contains no `firstChild` call at all. Same authored source; whether your second element exists depends on whether the collection is a reactive cell.
+
+⇒ Root cause is the **`createFn` returns exactly one `Node`** contract inside `_scrml_reconcile_list` (`compiler/src/runtime-template.js:1652`) leaking out as an apparent language rule. The reconciler keys ONE node per item (`newKeys[i]` compared positionally against `child._scrml_key`), so it cannot represent an item owning N sibling nodes.
+
+**Governing-sentence gate (§1) — this is a FIX, not an amendment.** Searched §17.7, §10.8, §4.14, §24. Two pre-existing normative sentences already grant it: **§10.8 (line 6769)** *"In accumulation mode, `lift` MAY appear multiple times in a single logic block; each call appends one item"* — an explicit grant of N nodes per iteration at Tier 0; and **§17.7.2 (line 11289)** *"The body of `<each>` SHALL contain **at least one** per-item template element OR the `<empty>` sub-element (or both)"* — weaker (its job is to define `E-EACH-EMPTY-BODY`) but nothing anywhere rejects more than one. Per `pa-base v2.4` §8 the change is **newly-accepting → toward the contract → conformance restoration**. Every §17.7 worked example (Shapes 1–4) happens to use exactly one root, and "multi-element body" there means multiple elements *nested inside* a single root — but an accident of the examples is not a contract.
+
+**Why the alternative (enforce single-root via a named `E-EACH-MULTI-ROOT`) was REJECTED (bryan, S281):** (a) it is a hole in what was thought to be working, not an unbuilt feature; (b) **the workaround is not universally available** — Peter's "wrap the per-item body in one root" fails exactly where it is most needed: `<tr>` pairs in a table, `<dt>`/`<dd>` in a `<dl>`, `<option>` under `<select>`. A wrapper `<div>` in those positions is foster-parented or dropped — the *same* bug class as #131 / S272 — so single-root-as-contract would make legal HTML inexpressible in Tier-1 iteration; (c) it would newly-REJECT the §10.8 Tier-0 multi-`lift` grant, or enforce at Tier 1 only and break the ladder's *"the per-item template carries forward"* promotion promise — note `W-EACH-PROMOTABLE` **already fires** on a multi-`lift` Tier-0 loop, offering a `promote --each` lift that would silently delete markup; (d) a real adopter is affected now.
+
+**Fix in flight (S281).** Design: root count is statically known at codegen — when exactly 1, emit today's `return _itemFrag.firstChild` **byte-identical** (the ~99% case, and the assertable safety gate); emit the fragment form only when > 1. The runtime `createFn` contract widens to `Node | DocumentFragment`, and the reconciler owns a node **group per key** (key stamped on every top-level node; `_childList`/`_clearAll`/`_insert`/`_remove`/`_replace` group-aware; LIS reorder over groups, moving a group's nodes together preserving intra-group order) across BOTH container modes — range (`nodeType === 8` comment fence, the #131 model) and element. Tier-0 lift fixed in the same landing per §10.8. SPEC §17.7.2 gains a minimal normative statement making the N-root grant explicit. No new §34 code. **PRESERVED deliberately:** create-time `if=` semantics (`emit-each.ts:860`) — a reused group does not gain/lose roots on later reconciles; that is a pre-existing limitation and is NOT fixed here. — `NEW S281 (adopter #141); HIGH; open — build in flight`
+
+### g-main-red-against-its-own-pre-commit-gate — `main` FAILS the documented pre-commit gate: an emitted `.server.js` carries an ESM `export`, which `node --check` rejects as CJS
+<!-- @gap id=g-main-red-against-its-own-pre-commit-gate sev=HIGH status=open -->
+**PRE-EXISTING at `a0344d75`, PA-verified in a clean detached worktree at that exact commit** (11 pass / 1 fail, identical failure, without any S281 change). Not caused by #141.
+
+The canonical gate (`scripts/git-hooks/pre-commit:17`) is
+`bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail`.
+Run against `main` it **bails**:
+
+```
+compiler/tests/integration/endpoint-conformance-integration.test.js
+  (D) route registration … > the emitted .server.js is node --check clean
+  error: Command failed: node --check /tmp/…/nc-3.js
+  SyntaxError: Unexpected token 'export'
+```
+
+The test's own comment states the stakes — *"a codegen miscompile is silent"*. The emitted `.server.js` contains an ESM `export` while `node --check` treats a bare `.js` as CommonJS. Strong suspicion (UNVERIFIED — do not act on it without checking) that this is ESM-arc fallout: S278 U1 split `<endpoint>`/§37-SSE emit into `generateHeadlessServerJs`, and the S281 maps refresh separately recorded that `--module-format` now threads through `compile`/`dev`/`build`. Either the server emit gained an `export` it should not have, or the artifact needs `.mjs` / a `type: module` declaration / a CJS-shaped emit.
+
+**Consequence, and it is the reason this is HIGH:** the project's own "0 failures = contract" pre-commit gate cannot pass on `main`. Anyone with the hooks correctly installed **cannot commit at all**. Companion finding [[g-commit-gate-absent-on-bryan-xps-8950]] explains why that went unnoticed on this machine.
+
+Note the cloud `gate` is presumably green on `main` (S280 merged 9 PRs through it), so the cloud check and the local pre-commit gate DISAGREE about the same tree — which makes this also a gate-integrity finding in the `pa-base v2.4` §8 sense: one of the two gates is not measuring what it claims. Determine which before "fixing" either. — `NEW S281; HIGH; open`
+
+### g-commit-gate-absent-on-bryan-xps-8950 — the local commit gate is NOT INSTALLED on this machine; every commit bypasses it silently
+<!-- @gap id=g-commit-gate-absent-on-bryan-xps-8950 sev=HIGH status=open -->
+`core.hooksPath` is **unset** and `.git/hooks` contains only `*.sample` files — there is no active `pre-commit`, `post-commit` or `pre-push` hook in the `bryan-XPS-8950` clone. The profile documents this machine as **Config B (local-rich)** with all three installed, so the richer non-source-controlled setup has been **LOST** (the profile itself warns of the mechanism: "a dir-rename can orphan an absolute `core.hooksPath` → silent dead gate").
+
+**PA process miss, recorded plainly:** `pa-base` §9 makes verifying the hook configuration a session-start step, and the S281 boot did **not** run it. Consequence: every commit this session — including the #141 landing — went in **without the pre-commit test gate running**. The landing was independently verified by other means (conformance 746/746, 20/20 unit, corpus byte-identity, adversarial review, real-Chrome execution both sides), so the *work* is covered; the *gate* was not. The two are not the same thing and the difference is exactly what this ledger exists to record.
+
+**Deliberately NOT auto-repaired, because repairing it would block all work.** `scripts/git-hooks/install.sh` exists and would restore Config A — but the gate it installs is RED on `main` ([[g-main-red-against-its-own-pre-commit-gate]]), so installing it now would leave the clone unable to commit anything. That is a genuine fork for bryan: (a) fix the endpoint/ESM emit first, then install; (b) install and use a documented per-commit bypass until fixed (weak — the no-`--no-verify` rule exists for good reason); (c) install Config A and accept the red gate as a forcing function. Contract also says never auto-reset B→A, which is a further reason not to silently pick. — `NEW S281 (PA boot miss); HIGH; open`
+
+### g-match-without-for-plus-when-children-silent-undeclared-dispatch — a `<match on=…>` with invented `<when is="…">` children is SILENTLY ACCEPTED (0 errors, `<when>` never flagged) and emits a reference to a dispatch function that is never declared → runtime `ReferenceError`, dead page
+<!-- @gap id=g-match-without-for-plus-when-children-silent-undeclared-dispatch sev=HIGH status=open -->
+**PRE-EXISTING** (reproduces on `6e0c6191`, unrelated to #141). Surfaced by the #141 adversarial review — **and materially corrected by PA verification**, see below.
+
+`<match on=@.status>` with `<when is="ok">…</when>` children compiles with **0 errors**; `<when>` is never flagged (E-MARKUP-001, the unknown-element gate landed S264, does not fire on it); and the emitted client contains **1 reference to `__scrml_match_<id>_dispatch` and 0 declarations** → `ReferenceError` at load → the page renders nothing. Silent accept, clean build, dead page — the worst failure shape we have.
+
+Neither half of that source is scrml: there is no `<when>` structural element (§4.15 / §24.4 registry), and §18.0.1 block-form requires `<match for=Type …>` with variant-named arms. It is a Ghost-Pattern shape — the Vue/Svelte-ish conditional an LLM or a framework-refugee reaches for. The gap is that the compiler **accepts it and emits broken output** instead of rejecting it.
+
+⚠️ **PA CORRECTION to the review that found this.** The reviewer reported it as *"`<match>` inside an `<each>` body is page-fatal"* and flagged the multi-root `<match>`-as-a-root path as untestable in practice. **That claim does not hold.** Its reproducer used the invalid `<when>` shape; a **valid** `<match for=Phase on=r.p>` with variant-named arms inside an `<each>` compiles clean and emits **1 declaration + 2 references** — correctly wired. The defect is invalid-source-not-rejected, NOT valid-match-in-each. Recorded because the difference decides both the severity and who the fix belongs to: this is a diagnostic gap, not a codegen gap in the iteration surface. (Cf. the gauntlet-overseer discipline — compiler bug vs dev error is exactly the distinction that must not be collapsed.)
+
+Fix direction: reject at parse/structural time — `<when>` should hit the unknown-element gate, and a `<match>` without `for=` should hit a named error rather than reaching codegen. Also reported by the same review but **NOT PA-verified**: a `<match>` as a direct child of a `<div>` inside `<program>` reportedly emits no codegen at all (`probes/arm.scrml`). Verify before acting on it. — `NEW S281 (#141 adversarial review, PA-corrected); HIGH; open`
+
+### g-each-root-count-coupled-to-emitted-text-formatting — the per-item root count is derived from generated-string formatting with no invariant; a future emitter change silently reverts issue #141
+<!-- @gap id=g-each-root-count-coupled-to-emitted-text-formatting sev=MED status=open -->
+Filed from the #141 adversarial review (finding 1), **accepted as a known design risk at land time rather than fixed** — the review found it non-blocking and it is correct today on the full corpus plus ~15 hand-built probes.
+
+`emit-each.ts` derives correctness-critical behavior from `l.startsWith(_childIndent) && l[_childIndent.length] !== " "` over emitted strings. The failure mode is **silent reversion to #141**: any future emitter that indents a top-level `_itemFrag.appendChild(` differently (e.g. wraps a root append in a block), or renames `_itemFrag`, drops the count to 1, emits `return _itemFrag.firstChild;`, and ships a clean build rendering only the first root — no lint, no error, and no test failure unless a multi-root fixture happens to be in that exact shape. The guard itself was only added *after* `examples/25-triage-board.scrml` caught the nested-each shadowing case via the byte-identity gate.
+
+The reviewer traced why under-count is structurally unreachable **in the current emitter** (every `${fragmentVar}.appendChild(` in `emit-each.ts` is emitted at the one child indent; a nested each's factory is always ≥6 spaces deeper), and a runtime `Node.prototype.firstChild` shim detecting the truncation signature across 62 corpus programs returned zero events. So this is about future drift, not present breakage.
+
+Cheap mitigations, both missing: assert `_rootCount >= 1` when `templateChildren` has renderable content (a body emitting zero appends currently yields `firstChild → null → item silently dropped`), and cross-check the textual count against the AST's non-whitespace `templateChildren` count so a divergence fails loudly. — `NEW S281 (#141 review finding 1); MED; open`
+
+### g-reconcile-duplicate-key-inverts-intra-group-root-order — with DUPLICATE keys, a multi-root item's roots are re-inserted in reverse within the group
+<!-- @gap id=g-reconcile-duplicate-key-inverts-intra-group-root-order sev=LOW status=open -->
+Filed from the #141 adversarial review (finding 2). With a duplicate `key=`, `newNodes[i]` and `newNodes[i+1]` are the same head node, so the reverse placement loop calls `_insertGroup(head, nextSibling)` twice with `nextSibling === head`, re-inserting the group's tail before its own head → intra-group root order inverted (`Mb, Hb` instead of `Hb, Mb`).
+
+**UB → UB, not a regression:** on base the same source drops roots 2..N entirely (single node), and the single-root equivalent is identical on both. Duplicate keys are already garbage-in on this codebase. Worth a one-line note in the reconciler documenting the behavior rather than a fix; a real fix belongs with a duplicate-key diagnostic, which does not exist yet. — `NEW S281 (#141 review finding 2); LOW; open`
+
+### g-consolidated-lift-directreturn-first-lift-only — the `emitConsolidatedLift(directReturn)` recovery branch still returns only the FIRST lift's root
+<!-- @gap id=g-consolidated-lift-directreturn-first-lift-only sev=LOW status=open -->
+**PRE-EXISTING**, surfaced by the #141 adversarial review and deliberately NOT covered by that fix. `emit-lift.js` `emitConsolidatedLift(…, {directReturn:true})` — reached via the `hasFragmentedLiftBody` branch at `emit-control-flow.ts:675` — returns a single `rootVar` built from the first lift only. It fires only on the misparsed-markup recovery shape (a `lift` plus a bare html-fragment / tilde-decl sibling), so it is not the #141 path, but it means the Tier-0 multi-root fix is **not universal**. Flagged so this is not mistaken for covered ground. — `NEW S281 (#141 review); LOW; open`
+
+### g-ssr-each-multi-root-client-only-fallback — SSR silently declines to server-render ANY multi-root `<each>`; the list has no server HTML, no first paint and no DOM adoption, with zero diagnostic
+<!-- @gap id=g-ssr-each-multi-root-client-only-fallback sev=MED status=open -->
+Surfaced by the #141 build (S281) and **ruled a follow-up arc by bryan** rather than folded into that fix. **PRE-EXISTING, PA-verified at source** — `compiler/src/codegen/emit-ssr-render.ts:337`:
+
+```ts
+if (roots.length !== 1 || roots[0].kind !== "markup") return null;
+```
+
+`buildOneRenderer`'s own header documents the consequence: *"return null when the template is outside the supported subset (the each then falls back to the pre-existing client-only render — empty mount, no regression)."* The #141 diff does not touch this file.
+
+Before #141 the guard was harmless in this respect, because a multi-root `<each>` did not render its extra roots on the client either — the list was broken everywhere, equally. **#141 changes the picture**: multi-root eaches now render correctly on the client, which makes the SSR hole the ONLY remaining place they behave differently. The list arrives empty in the server HTML and is populated after hydration.
+
+Costs: no first paint for that list (a visible pop-in on slow connections), nothing for a crawler that does not execute JS, and no DOM adoption — so the client rebuilds nodes the server could have shipped. **It is silent**: no lint, no warning, nothing tells an adopter that adding a second root element to a per-item template just cost them server rendering of that list. An adopter would experience it as "my table SSRs, and then one day it didn't."
+
+Scope note (why it was NOT done inside #141, and this reasoning should survive into the arc): extending SSR to N roots per item is a genuine capability extension, **not** conformance restoration. The two governing sentences that made #141 a fix — §10.8 line 6769 (`lift` MAY appear multiple times) and §17.7.2 line 11289 ("at least one per-item template element") — grant the multi-root *authoring* form; neither says anything about server-render coverage. So the arc needs its own governing-sentence pass, and the `roots[0].kind !== "markup"` half of the guard (a non-markup first root) wants triage in the same sweep.
+
+Cheap interim worth considering on its own: an **info-lint** naming the SSR fallback at the multi-root site, so the loss is loud even before the arc lands. — `NEW S281 (#141 build, bryan ruled follow-up arc); MED; open`
+
+### g-static-component-import-dead-destructure — importing a PURELY-STATIC component emits a client-side destructure the module can never satisfy (it exports `{}`); harmless alone, a page-killing `TypeError` the moment the dep `<script>` fails to load
+<!-- @gap id=g-static-component-import-dead-destructure sev=HIGH status=open -->
+Reported by **scrml-site** (inbox `2026-07-22-1930-…`, `needs: action`) — cost them a full rebuild; 66 of their 74 reference pages threw. PA-reproduced at `a0344d75` from their minimal repro, and the reproduction **splits their single "new bug" into one new defect plus two already-filed ones.**
+
+Repro: `components/side.scrml` = `${ export const SideNav = <aside class="x">…</> }`; a page does `${ import { SideNav } from "../components/side.scrml" }` then `<SideNav/>`.
+
+**THE NEW DEFECT (this entry).** The consumer page emits
+```js
+const { SideNav } = _scrml_modules["components/side.client.js"];
+```
+while the dep module registers **an empty object**:
+```js
+_scrml_modules["components/side.client.js"] = {  };
+```
+A purely-static presentational component has no client-side value to export — correct — but the consumer emits the destructure anyway. The markup is inlined into the server HTML (verified: `<aside data-scrml="SideNav" class="x">` is in `p.html`), so the binding is **dead code that can never do anything except throw**. In a FLAT layout it is harmless-but-wasteful: the dep script IS included, the registry entry is `{}`, and `SideNav` destructures to `undefined` with no throw. Its severity is entirely in what it AMPLIFIES — see below. Fix direction (scrml-site's own suggestion, and it is the right one): **do not emit the import/destructure when every imported binding resolves to static markup.**
+
+**THE AMPLIFICATION — reproduced, and it is why they saw a TypeError.** On the MPA composition path with a nested route (`app.scrml` shell with `<outlet/>` + `pages/reference/deep.scrml`), `dist/reference/deep.html` emits:
+```html
+<script src="scrml-runtime.00b4l8yq.js">      <!-- BARE — 404s from dist/reference/ -->
+<script src="../scrml-runtime.00b4l8yq.js">   <!-- correct, DUPLICATE -->
+<script src="../app.client.00kqddye.js">
+<script src="deep.client.006ram1h.js">
+```
+— and **ZERO tag for `components/side.client.js`**, though the module exists on disk at `dist/components/side.client.00qor7o2.js` and `deep.client.js` still contains the destructure. Registry entry `undefined` → `const { SideNav } = undefined` → **exactly the reported `TypeError: Cannot destructure property 'SideNav' … as it is undefined`.**
+
+Those two halves are **already-filed S280 gaps, now CONFIRMED LIVE with an adopter consequence** (they were filed as latent):
+- [[g-composition-strip-eats-last-dep-script]] — the dep `<script>` is dropped on the composition path. **This is the actual cause of scrml-site's throw.**
+- [[g-runtime-script-tag-not-depth-prefixed]] — the bare runtime ref, here emitted as a bogus 404 tag ALONGSIDE the correct `../` one (a duplicate, not a replacement — sharpens the original entry).
+
+**Triage conclusion:** scrml-site's defect (1) ("the page never loads the module") is NOT new — it is the composition dep-script strip, already scoped. Their defect (2) IS new and is this entry. The pairing is what makes it HIGH: the dead destructure converts a script-loading failure from a degraded-but-alive page into a hard page-kill, and it does so **silently at build time** (exit 0, correct HTML, screenshot-perfect — their site-wide `no uncaught page errors` gate is what caught it, not the compiler). Fixing THIS entry alone would render the dep-script gaps non-fatal for static components. — `NEW S281 (scrml-site inbox); HIGH; open`
+
+### g-foreach-lift-codegen-stage-rejection — `forEach(x => lift <li>…</li>)` fails at CODEGEN with `E-CODEGEN-INVALID-LOGIC` ("could not lower this construct") instead of a structural rejection naming the canonical `for … of` + `lift` form
+<!-- @gap id=g-foreach-lift-codegen-stage-rejection sev=LOW status=open -->
+Reported by scrml-site (same inbox message), hit on **our own** `reference/keywords/lift` doc page during their content audit; cost them a bisect. `lift` inside a `.forEach(…)` callback is not a supported lift site (§10.8 accumulation is defined for the enclosing logic block, and a callback body is not that block), but the failure surfaces only at the codegen stage with the generic "the compiler could not lower this construct to valid output" — which names neither the offending construct nor the fix. An earlier structural rejection naming `for … of` + `lift` (or `<each>`) as the canonical iteration form would be trivially actionable. Adjacent: the 20 `@cell.map(…)` / `.forEach(…)` markup sites in the corpus were noted as UNSWEPT under [[g-tier0-reactive-lift-mixed-text-interp-literal]] — the same call-callback lowering path, worth sweeping with this. — `NEW S281 (scrml-site inbox); LOW; open`
+
+### g-tier0-reactive-lift-mixed-text-interp-literal — a Tier-0 `${for/lift}` over a REACTIVE collection emits a MIXED literal-plus-`${…}` text run as a LITERAL string; the adopter sees `${r.label}` rendered as visible page text
+<!-- @gap id=g-tier0-reactive-lift-mixed-text-interp-literal sev=MED status=open -->
+Found while verifying #141 (S281), on a side observation — **a distinct defect on a different axis, NOT part of the #141 truncation fix.**
+
+⚠️ **CHARACTERIZATION CORRECTED (same session, before any fix was scoped).** This gap was first filed as "a text run that MIXES literal text with `${…}` breaks." **That was wrong** — a follow-up boundary probe (prompted by bryan asking what `$$` meant) showed mixed runs are usually FINE. The real trigger is **ADJACENCY**:
+
+> In the Tier-0 `${ for (x of @cell) { lift … } }` reactive path, a literal character **immediately touching** the `${` opener — no intervening whitespace — defeats the interpolation scanner, and the run from that literal onward is emitted as a single literal JS string.
+
+Every observation fits this one rule, and nothing else does:
+
+```
+lift <li>${r.a}</>              -> "" + effect                        // CORRECT
+lift <li>${r.a}${r.b}</>        -> "" + effect, "" + effect           // CORRECT — back-to-back interps fine
+lift <li>${r.a} mid ${r.b}</>   -> effect + "mid" + effect            // CORRECT — literal BETWEEN, space-separated
+lift <li>${r.a}tail</>          -> effect + "tail"                    // CORRECT — trailing literal fine
+lift <li>lit${r.a}</>           -> createTextNode("lit${r.a}")        // BROKEN — `t` touches `${`
+lift <li>${r.a} x${r.b}</>      -> effect + createTextNode("x${r.b}") // BROKEN — `x` touches `${`
+lift <li>$${r.b}</>             -> createTextNode("$${r.b}")          // BROKEN — `$` touches `${`
+```
+
+Note `$${…}` is NOT an escape — SPEC §4.18.3 escapes a literal `${` as `\${`, and SPEC's own worked example (line 14262) writes `$${available}`. So `$${price}` is the ordinary **currency idiom**: a literal `$` followed by an interpolation. It breaks only because the `$` is glued to the `${`.
+
+Nothing ever overwrites those nodes — PA-confirmed by reading the whole emitted `_scrml_create_item_N`; there is no repairing `_scrml_effect`. The literal reaches the DOM and is visible to the user. Clean compile, exit 0, zero diagnostics.
+
+**Other discriminators tested and RULED OUT:**
+- **REACTIVITY is required.** The identical glued shape over a NON-reactive literal array (`for (r of [{label:"s"}])`) emits correctly — `createTextNode("Q")` + `createTextNode(String((r.label) ?? ""))`. The break is specific to the **keyed-reconcile create-item path**.
+- **Not member access** — bare `${r}` glued to a literal breaks too.
+- **Closer form and nesting are irrelevant** — `</>` and `</div>`, single-line and multi-line-with-nested-element, all behave identically.
+- **Position matters.** `class=${expr}` / `key=${expr}` attribute interpolation is a DIFFERENT position (the `=` touching `${` is normal attribute syntax) and is unaffected — 12 corpus lift bodies match a naive "glued" grep, but most are attribute-position.
+
+Likely mechanism (unconfirmed, for whoever fixes it): the lift text path appears to scan whitespace-delimited tokens, so an interpolation fused to a preceding literal token is never recognized as its own token. Cf. the `joinWithNewlines` / token-spacing behavior documented in PRIMER §13.7 B20.
+
+**Tier-1 `<each>` handles the same content correctly** — `<div class="hdr">H${r.label}</div>` inside an `<each>` splits into `createTextNode("H")` + a live-keyed `_scrml_each_tn_N` effect. So this is a **Tier-0-lift-only** defect, and it strengthens rather than weakens the `W-EACH-PROMOTABLE` promotion nudge.
+
+**Measured blast radius — FULL SWEEP RUN (S281, reverse-direction R26).** All **79** corpus files carrying a Tier-0 loop over a reactive cell were compiled and their emitted `.client.js` grepped for the literal signature `createTextNode("…${…")`. **78 scanned · 1 file hits · 1 no-coverage.**
+
+Sweep-method note, because the first attempt was wrong and the correction matters: the initial pass gated on the compiler's **exit code**, which silently dropped 36 files that exit non-zero for environmental reasons (e.g. `E-PA-002` missing `.db`) while still emitting a complete `client.js`. Gating on **the emitted artifact** instead took coverage from 43 → 78. Only ONE file genuinely emits no client artifact: `samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-for-lift-else-empty-049.scrml`.
+
+**The single hit — `samples/compilation-tests/combined-011-shopping-cart.scrml:37`** — is a textbook instance that proves the discriminator on REAL corpus code, with both behaviors in the SAME element:
+
+```scrml
+for (let item of @cart) {
+    lift <li>${item.name} - $${item.price}</>
+}
+```
+```js
+const _scrml_lift_tn_14 = document.createTextNode("");          // PURE run  -> correct
+_scrml_lift_tn_14.textContent = String((item.name) ?? "");      //   live-keyed effect
+_scrml_lift_el_13.appendChild(document.createTextNode("- $${item.price}"));   // MIXED run -> LITERAL
+```
+
+A shopper sees `Widget- $${item.price}` where the price should be. The file is a tracked fixture referenced by `compiler/tests/parser-conformance-within-node-allowlist.json`.
+
+**Sweep bounds (stated, not assumed):** the file filter matches `for (<ident> of @…)`. Destructuring/index loop forms over a reactive cell were checked and number **0**, so the filter missed none of those. **NOT swept:** 20 `@cell.map(…)` / `.forEach(…)` markup sites — a different lowering path, out of this defect's scope but unverified against it.
+
+So: **1.3% incidence (1/78), live on real corpus code but not in an adopter app.** Severity stays **MED** — silent and adopter-visible when hit, natural shape (`Total: ${n}`, `$${price}`), but rare in practice because most lift bodies use pure-`${}` runs.
+
+**Deliberately NOT folded into the #141 dispatch** (different axis, tight brief, mid-flight). Fix direction: the reactive create-item lift path needs the same literal/interpolation text-run SPLIT that both the static lift path and `emit-each.ts` already perform. Reproducers preserved in the S281 scratchpad; regenerate from the three snippets above. — `NEW S281 (found verifying #141); MED; open`
 
 ---
 

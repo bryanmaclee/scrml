@@ -1647,7 +1647,9 @@ function animationFrame(fn) {
  * @param {HTMLElement} container — the wrapper div that holds the list items
  * @param {Array} newItems — the new array of items to render
  * @param {function} keyFn — (item, index) => key — extracts a stable key from each item
- * @param {function} createFn — (item, index) => HTMLElement — creates a DOM node for a new item
+ * @param {function} createFn — (item, index) => Node | DocumentFragment — builds the
+ *        DOM for one item. A DocumentFragment carries N top-level roots (#141,
+ *        SPEC 10.8 / 17.7.2) and is reconciled as a node GROUP under one key.
  */
 function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
   const __t_rec_top = __SCRML_PERF ? __SCRML_PERF_NOW() : 0;
@@ -1685,6 +1687,54 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
   };
   const _remove = (node) => { if (_parent) _parent.removeChild(node); };
   const _replace = (fresh, old) => { if (_parent) _parent.replaceChild(fresh, old); };
+
+  // ---- Multi-root items (#141, SPEC 10.8 + 17.7.2) -------------------------
+  // createFn may return EITHER a single Node (the historical contract — an each
+  // / for-lift body with exactly ONE per-item root, which codegen still emits
+  // byte-identically) OR a DocumentFragment carrying N top-level nodes (a body
+  // with more than one root). The reconciler therefore owns a node GROUP per
+  // key, not a node per key:
+  //   - every top-level node of the group carries _scrml_key (so a stray-node
+  //     scan and the SSR-adoption scan still see them as managed);
+  //   - the non-head nodes additionally carry _scrml_group_member, so every
+  //     keyed scan below (oldNodes, the B2 order check, oldKeyPos) yields
+  //     exactly ONE entry per key — the HEAD;
+  //   - the head carries _scrml_group, the ordered node array, so a move / a
+  //     remove / a replace acts on the whole run and preserves intra-group
+  //     order.
+  // A plain-Node return sets NO new expando and takes no new branch, so the
+  // N === 1 path stays exactly what it was.
+  const _mkGroup = (ret, key) => {
+    if (!ret) return null;
+    if (ret.nodeType !== 11) { ret._scrml_key = key; return ret; }
+    const _ns = [];
+    for (let n = ret.firstChild; n; n = n.nextSibling) _ns.push(n);
+    if (_ns.length === 0) return null;
+    for (let i = 0; i < _ns.length; i++) {
+      _ns[i]._scrml_key = key;
+      if (i > 0) _ns[i]._scrml_group_member = true;
+    }
+    if (_ns.length > 1) _ns[0]._scrml_group = _ns;
+    return _ns[0];
+  };
+  // Keyed HEAD nodes only — the per-key scan list. Identical to _childList()
+  // when no item is multi-root.
+  const _headList = () => _childList().filter((n) => !n._scrml_group_member);
+  const _insertGroup = (head, ref) => {
+    const _ns = head._scrml_group;
+    if (!_ns) { _insert(head, ref); return; }
+    for (let i = 0; i < _ns.length; i++) _insert(_ns[i], ref);
+  };
+  const _removeGroup = (head) => {
+    const _ns = head._scrml_group;
+    if (!_ns) { _remove(head); return; }
+    for (let i = 0; i < _ns.length; i++) { if (_ns[i].parentNode) _remove(_ns[i]); }
+  };
+  const _replaceGroup = (fresh, old) => {
+    if (!fresh._scrml_group && !old._scrml_group) { _replace(fresh, old); return; }
+    _insertGroup(fresh, old);
+    _removeGroup(old);
+  };
   // Defensive: tolerate an undefined / not-yet-initialized collection. The each
   // render fn can run once at module-init BEFORE the source cell's
   // _scrml_reactive_set(...) runs (same-file cell-init ordering), so newItems may
@@ -1789,7 +1839,7 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
   }
 
   const oldNodes = new Map();
-  for (const child of _childList()) {
+  for (const child of _headList()) {
     const key = child._scrml_key;
     if (key !== undefined) oldNodes.set(key, child);
   }
@@ -1807,21 +1857,19 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
     _clearAll();
     if (__SCRML_PERF) {
       for (let i = 0; i < newItems.length; i++) {
-        const node = createFn(newItems[i], i);
+        const node = _mkGroup(createFn(newItems[i], i), newKeys[i]);
         if (!node) continue; // createFn returned undefined (filtered item)
-        node._scrml_key = newKeys[i];
         const __t_dw = __SCRML_PERF_NOW();
-        _insert(node, null);
+        _insertGroup(node, null);
         __SCRML_PERF.dom_write.ms += __SCRML_PERF_NOW() - __t_dw;
         __SCRML_PERF.dom_write.count++;
       }
       return;
     }
     for (let i = 0; i < newItems.length; i++) {
-      const node = createFn(newItems[i], i);
+      const node = _mkGroup(createFn(newItems[i], i), newKeys[i]);
       if (!node) continue; // createFn returned undefined (filtered item)
-      node._scrml_key = newKeys[i];
-      _insert(node, null);
+      _insertGroup(node, null);
     }
     return;
   }
@@ -1839,7 +1887,7 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
   if (newItems.length === oldNodes.size && !adoptedAny) {
     let i = 0;
     let sameOrder = true;
-    for (const child of _childList()) {
+    for (const child of _headList()) {
       if (child._scrml_key === undefined) continue;
       if (i >= newItems.length) { sameOrder = false; break; }
       if (newKeys[i] !== child._scrml_key) { sameOrder = false; break; }
@@ -1857,21 +1905,21 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
     for (const [key, node] of oldNodes) {
       if (!newKeySet.has(key)) {
         const __t_dw = __SCRML_PERF_NOW();
-        _remove(node);
+        _removeGroup(node);
         __SCRML_PERF.dom_write.ms += __SCRML_PERF_NOW() - __t_dw;
         __SCRML_PERF.dom_write.count++;
       }
     }
   } else {
     for (const [key, node] of oldNodes) {
-      if (!newKeySet.has(key)) _remove(node);
+      if (!newKeySet.has(key)) _removeGroup(node);
     }
   }
 
   // Build old key→position map for LIS computation
   const oldKeyPos = new Map();
   let pos = 0;
-  for (const child of _childList()) {
+  for (const child of _headList()) {
     if (child._scrml_key !== undefined) oldKeyPos.set(child._scrml_key, pos++);
   }
 
@@ -1882,9 +1930,8 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
     const key = newKeys[i];
     let node = oldNodes.get(key);
     if (!node) {
-      node = createFn(newItems[i], i);
+      node = _mkGroup(createFn(newItems[i], i), key);
       if (!node) { oldPositions[i] = -2; newNodes[i] = null; continue; } // filtered item
-      node._scrml_key = key;
       oldPositions[i] = -1; // new node, no old position
     } else {
       if (node._scrml_ssr_adopt === true) {
@@ -1893,15 +1940,14 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
         // node and swap it into the server node's exact DOM slot — the mount is
         // never emptied, and (identical content) there is no visible flash.
         const _skey = node.getAttribute?.("data-scrml-key");
-        const _fresh = createFn(newItems[i], i);
-        if (!_fresh) { _remove(node); oldPositions[i] = -2; newNodes[i] = null; continue; } // createFn filtered this item
-        _fresh._scrml_key = key;
+        const _fresh = _mkGroup(createFn(newItems[i], i), key);
+        if (!_fresh) { _removeGroup(node); oldPositions[i] = -2; newNodes[i] = null; continue; } // createFn filtered this item
         // Preserve the server-origin key marker so the upgraded row stays a
         // faithful in-place continuation of the server row. Client-only rows
         // never carry data-scrml-key — its presence marks a server-rendered,
         // adopted-then-upgraded row (honestly absent on post-hydration new rows).
         if (_skey != null && _fresh.nodeType === 1) _fresh.setAttribute("data-scrml-key", _skey);
-        _replace(_fresh, node);
+        _replaceGroup(_fresh, node);
         node = _fresh;
       }
       oldPositions[i] = oldKeyPos.get(key) ?? -1;
@@ -1923,7 +1969,7 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
       if (!node) continue; // filtered item (createFn returned undefined)
       if (!inLIS.has(i)) {
         const __t_dw = __SCRML_PERF_NOW();
-        _insert(node, nextSibling);
+        _insertGroup(node, nextSibling);
         __SCRML_PERF.dom_write.ms += __SCRML_PERF_NOW() - __t_dw;
         __SCRML_PERF.dom_write.count++;
       }
@@ -1934,7 +1980,7 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
       const node = newNodes[i];
       if (!node) continue; // filtered item (createFn returned undefined)
       if (!inLIS.has(i)) {
-        _insert(node, nextSibling);
+        _insertGroup(node, nextSibling);
       }
       nextSibling = node;
     }

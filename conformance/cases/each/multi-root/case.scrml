@@ -1,0 +1,12 @@
+${
+    <items> = [{ id: 1, label: "A" }, { id: 2, label: "B" }, { id: 3, label: "C" }]
+    function remove(id: number) {
+        @items = @items.filter(it => it.id != id)
+    }
+}
+<div id="list">
+    <each in=@items key=@.id as item>
+        <div class="hdr">H${item.label}</div>
+        <div class="row"><span class="label">${item.label}</span><button class="del" onclick=remove(item.id)>x</button></div>
+    </each>
+</div>
