@@ -65,3 +65,20 @@ Verified on real emitted output (classic + esm):
 - N4 preserved: `__scrml_engine_01nk4qam_phase_transitions` still namespaced.
 Next: step 4 strip core (delete `_scrml_cell_scope`/`_scrml_cell_key`, move
 `_scrml_cell_name` to conformance shim, trim banner) + gzip re-measure (STOP gate).
+
+## 2026-07-23 — step 4 (strip core) DONE — gzip GREEN
+
+Deleted `_scrml_cell_scope` + `_scrml_cell_key` + `_scrml_cell_name` from
+`runtime-template.js` (replaced with a ONE-LINE pointer); moved the author-name
+inverse into the conformance shim as `_conf_cell_name`
+(`conformance/adapters/impl1-ts.ts`). `_scrml_ssr_seed_apply_scoped` stays in core.
+
+MEASURED (whitespace-clean, deterministic): SPA runtime gzip = **16,330 B**
+(< 16,384 budget by 54 B). §C10.1 GREEN (61 pass / 0 fail). gzip test GREEN
+(19 pass / 0 fail).
+
+SCOPING-vs-reality note: SCOPING §2.2 predicted zero-residue = 16,255. My clean
+removal proves ZERO CODE residue — the core runtime diffs against base e8fdd44c
+by EXACTLY ONE comment line, nothing else. gzip is 16,330 (73 B over base's
+16,257) — that entire delta is the one-line pointer comment. The knife-edge is
+real: base is only 127 B under budget, PRE-EXISTING (§6 HIGH, bryan's policy call).

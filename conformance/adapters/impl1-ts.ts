@@ -152,15 +152,23 @@ const CONFORMANCE_SHIM = `
   function _conf_json(v) { return (v === undefined || v === null) ? null : v; }
   // chunk-namespacing — the store is keyed per-chunk ("<token>$rows"); this
   // snapshot's contract is AUTHOR-visible source names, so strip the token back
-  // off. \`_scrml_cell_name\` is the runtime's own inverse, used rather than a
-  // local regex so the two cannot drift apart.
+  // off. The token->author-name inverse is inlined here: BUG-6 removed the core
+  // \`_scrml_cell_name\` to keep the always-loaded runtime under its gzip budget,
+  // and this shim was its only consumer. Tokens are exactly 8 lowercase base36
+  // chars followed by "$".
+  function _conf_cell_name(key) {
+    var raw = String(key == null ? "" : key);
+    var sep = raw.indexOf("$");
+    if (sep !== 8) return raw;
+    return /^[0-9a-z]{8}$/.test(raw.slice(0, 8)) ? raw.slice(9) : raw;
+  }
   //
   // A stripped name that COLLIDES (two chunks both declaring \`rows\`) keeps the
   // namespaced key as well, so the second value is surfaced rather than silently
   // overwritten — a snapshot that quietly drops a cell is exactly the kind of
   // hollow evidence this corpus exists to prevent.
   function _conf_put(out, key, val) {
-    var name = (typeof _scrml_cell_name === "function") ? _scrml_cell_name(key) : key;
+    var name = _conf_cell_name(key);
     if (name !== key && Object.prototype.hasOwnProperty.call(out, name)) { out[key] = val; return; }
     out[name] = val;
   }
