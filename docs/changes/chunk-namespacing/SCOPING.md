@@ -99,3 +99,65 @@ This arc **precedes** any nav-loader work. Once it lands, BOTH loaders unblock:
 
 **Estimate:** ~390 touch points across 8 files, but highly mechanical once the token scheme is ruled. The hard parts are the SSR/client token agreement (§3) and the byte-churn review (OQ-3), not the edit volume.
 
+
+---
+
+## §7 S282 RULINGS — supersede §4 OQ-1 and extend the arc to FOUR namespaces
+
+Adversarial review (S282) grew the surface from 2 namespaces to 4 and found the ruled token
+under-specified. bryan ruled all three follow-on questions. Full evidence:
+[`S282-REVIEW-FINDINGS.md`](./S282-REVIEW-FINDINGS.md).
+
+### R1 — mechanism: SPLIT BY KEY-KIND
+
+The four namespaces divide on **what they are keyed by**, and that division is the design:
+
+| keyed by | namespaces | mechanism |
+|---|---|---|
+| a compiler COUNTER | N1 (node ids) | **emission-time prefixing** — as built S282, verified sound, unchanged |
+| an author-chosen NAME | N2 (cell keys) · N3 (author type names) · N4 (engine names) | **a chunk-local scope** |
+
+Rationale: per-token prefixing fixes name-keyed collisions one at a time and re-opens whenever an
+emitter is added — N4 was found only because a reviewer went looking for it. A chunk-local scope
+closes all three structurally.
+
+**Consequence that unblocked the arc:** under a chunk-local scope the store key stays **bare**, so
+the ~1210 assertions across 198 test files pinning `_scrml_reactive_get("rows")` remain valid
+unmodified. The 198-file migration that forced the S282 agent to hold N2 largely evaporates.
+`cell-namespace-pass.ts` (the key-prefixing approach) is superseded and deleted.
+
+Known complications, to be solved rather than routed around: the SSR seed calls the **global**
+setter (`_scrml_ssr_seed_apply`); `wrapClientBodyInIife` (`index.ts:469`) is **conditional** because
+of `_scrml_modules` registration and the `var session` singleton.
+
+### R2 — token root: the PROJECT ROOT, no fallback
+
+**Supersedes OQ-1's "dist-relative source path."** OQ-1 chose path-identity over content and over
+basename, and that stands — but "dist-relative" was implemented against
+`computeOutputBaseDir(inputs)` = the input set's common directory, which produced three defects:
+
+- the token **rotates for every file** when a file at a shallower path joins the input set, churning
+  every id, every fence and every §47.5 content-addressed chunk hash — the exact instability OQ-1
+  rejected *build index* for;
+- a **basename fallback** fires when the prefix does not match (and on any single-file compile),
+  making `pages/driver/home.scrml` and `pages/dispatch/home.scrml` namespace **identically** — the
+  exact collision OQ-1 rejected *basename* for.
+
+Ruled: anchor to the **project root** (`scrml.toml` location, else the git root). **No fallback** —
+an unresolvable root is a hard compile error, never a silent degrade. Plus a **pairwise-distinctness
+assert** over the build's file set (the token is 32-bit FNV-1a, not the "~41 bits" the docstring
+claims, and §47.1.5 / `E-CG-010` does not cover this call site).
+
+### R3 — scope: all four land together
+
+One landing, one artifact-diff gate, one `semantics-changed` classification — the single churn event
+OQ-3 authorised. N3 is a live redeclaration `SyntaxError` that kills the second chunk outright, so
+it is a crash rather than a follow-on.
+
+### Still open — NOT ruled
+
+**SPEC §22.10.** `SPEC.md:16342` normatively fixes `_scrml_meta_N` as "a string literal of the form
+`_scrml_meta_N` where N is a stable integer"; N1 emits `_scrml_meta_004951nv_3`. This is the ONLY
+normatively-pinned shape the arc touches. Pending: does the meta scope id need namespacing at all
+(is it cross-chunk visible), or can it be exempted? If it must change, that is a SPEC amendment and a
+separate ruling under the governing-sentence gate.
