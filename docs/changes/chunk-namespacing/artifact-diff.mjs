@@ -47,7 +47,8 @@ const TOKEN = /(?<![0-9a-z])0[0-9a-z]{7}_(?=[0-9A-Za-z_])/g;
  */
 function unwrapChunkScope(text) {
   let out = text
-    .replace(/\n?\/\/ --- chunk cell scope \([0-9a-z]{8}\) ---[\s\S]*?_scrml_cell_scope\([^;]*\);\n/, "\n");
+    // BUG-6 prologue: banner comment block through its end-marker.
+    .replace(/\n?\/\/ --- chunk cell scope \([0-9a-z]{8}\) ---[\s\S]*?\/\/ --- end chunk cell scope ---\n/, "\n");
   const open = out.indexOf("(function() {\n");
   const close = out.lastIndexOf("\n})();");
   if (open !== -1 && close > open) {
@@ -62,6 +63,11 @@ function unwrapChunkScope(text) {
 function fold(s) {
   return (
     s
+      // BUG-6: the body's namespaced accessor calls (`_scrml_cs_reactive_get`)
+      // fold back to the bare pre-change name so the comparison is about the CALL,
+      // not the wrapper the ruled prologue introduced. The prologue itself is
+      // dropped by unwrapChunkScope; this only touches body call sites.
+      .replace(/(?<![.$\w])_scrml_cs_([a-z_]+)/g, "_scrml_$1")
       // `each_01nk4qam_24` -> `each_24`; `01nk4qam_phase` -> `phase`
       .replace(TOKEN, "")
       // content-addressed runtime/chunk filenames move when the runtime moves;

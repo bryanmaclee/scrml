@@ -42,17 +42,30 @@ const CHUNK_CLOSER = "\n})();";
 export function captureInsideChunkScope(clientJs, captureSrc) {
   const at = clientJs.lastIndexOf(CHUNK_CLOSER);
   if (at === -1) return clientJs + "\n" + captureSrc;
-  return clientJs.slice(0, at) + "\n" + captureSrc + clientJs.slice(at);
+  // BUG-6: the chunk's SCOPED accessors are the `_scrml_cs_*` wrappers its
+  // prologue defines (a bare `_scrml_reactive_get` inside the scope is now the
+  // UN-namespaced global, not a shadow). A capture spliced inside the scope must
+  // reference the wrappers, so rewrite each bare accessor the prologue actually
+  // wraps to its `_scrml_cs_` form. An accessor the chunk does not scope is left
+  // bare (it keys un-namespaced either way).
+  const scoped = new Set();
+  for (const m of String(clientJs).matchAll(/const (_scrml_cs_[a-z_]+) =/g)) scoped.add(m[1]);
+  let src = captureSrc;
+  for (const csName of scoped) {
+    const bare = "_scrml_" + csName.slice("_scrml_cs_".length);
+    src = src.replace(new RegExp(`(?<![.$\\w])${bare}(?![$\\w])`, "g"), csName);
+  }
+  return clientJs.slice(0, at) + "\n" + src + clientJs.slice(at);
 }
 
 /**
  * The chunk's namespace token, or "" when it carries none.
  *
- * Read from the prologue the chunk emits for itself, so a token-shape change
- * cannot silently desynchronise the tests from the compiler.
+ * Read from the prologue banner the chunk emits for itself, so a token-shape
+ * change cannot silently desynchronise the tests from the compiler.
  */
 export function chunkNamespaceToken(clientJs) {
-  const m = /_scrml_cell_scope\("([0-9a-z]{8})"/.exec(String(clientJs ?? ""));
+  const m = /\/\/ --- chunk cell scope \(([0-9a-z]{8})\) ---/.exec(String(clientJs ?? ""));
   return m ? m[1] : "";
 }
 
@@ -119,9 +132,9 @@ export function unNamespaceCellKeys(js) {
  */
 export function unwrapChunkScope(js) {
   let out = String(js ?? "");
-  // Drop the prologue (comment block + the destructuring const).
+  // Drop the prologue (banner comment block through its end-marker).
   out = out.replace(
-    /\n?\/\/ --- chunk cell scope \([0-9a-z]{8}\) ---[\s\S]*?_scrml_cell_scope\([^;]*\);\n/,
+    /\n?\/\/ --- chunk cell scope \([0-9a-z]{8}\) ---[\s\S]*?\/\/ --- end chunk cell scope ---\n/,
     "\n",
   );
   // Drop the IIFE wrapper, keeping the body.
@@ -130,6 +143,11 @@ export function unwrapChunkScope(js) {
   if (open !== -1 && close > open) {
     out = out.slice(0, open) + out.slice(open + "(function() {\n".length, close) + out.slice(close + "\n})();".length);
   }
+  // BUG-6: un-rename the body's `_scrml_cs_*` calls back to the bare runtime
+  // names, so a no-runtime harness's shims (which provide the bare accessors)
+  // resolve. The prologue that DEFINED the wrappers is already gone above; the
+  // only `_scrml_cs_*` left are body call sites.
+  out = out.replace(/(?<![.$\w])_scrml_cs_([a-z_]+)/g, "_scrml_$1");
   return out;
 }
 

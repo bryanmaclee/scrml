@@ -82,3 +82,18 @@ removal proves ZERO CODE residue — the core runtime diffs against base e8fdd44
 by EXACTLY ONE comment line, nothing else. gzip is 16,330 (73 B over base's
 16,257) — that entire delta is the one-line pointer comment. The knife-edge is
 real: base is only 127 B under budget, PRE-EXISTING (§6 HIGH, bryan's policy call).
+
+## 2026-07-23 — step 5 (rename-aware tooling)
+
+`compiler/tests/helpers/chunk-scope.js`:
+- `chunkNamespaceToken` now reads the token from the `// --- chunk cell scope
+  (TOKEN) ---` banner (was `_scrml_cell_scope("TOKEN"`).
+- `captureInsideChunkScope` rewrites each bare accessor the prologue wraps to its
+  `_scrml_cs_` form before splicing (inside the scope the bare name is now the
+  UN-namespaced global, not a shadow).
+- `unwrapChunkScope` drops the prologue (banner→end-marker) + IIFE, then
+  un-renames body `_scrml_cs_*` → `_scrml_*` so no-runtime shims resolve.
+
+`docs/changes/chunk-namespacing/artifact-diff.mjs`: `unwrapChunkScope` matches the
+new banner→end-marker prologue; `fold` un-renames `_scrml_cs_*`→`_scrml_*` per
+line so body call sites compare equal to base. (These are the two plan-deltas.)
