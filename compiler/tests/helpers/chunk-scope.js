@@ -70,6 +70,24 @@ export function chunkNamespaceToken(clientJs) {
 }
 
 /**
+ * BUG-6 — fold the `_scrml_cs_` cell-scope prefix back off emitted accessor
+ * calls, so an assertion pinning the pre-rename lowering contract
+ * (`_scrml_reactive_get("x")`) reads the ACCESSOR, not the per-chunk wrapper the
+ * rename introduced (`_scrml_cs_reactive_get("x")`).
+ *
+ * This is a SURGICAL fold, not an assertion rewrite: it can only turn
+ * `_scrml_cs_X` into `_scrml_X`, so it removes exactly the known, intended rename
+ * delta and masks NOTHING else — any other difference still surfaces. Apply it at
+ * a test's READ site (once, where it reads `clientJs`), the same way
+ * `artifact-diff.mjs` folds the wrapper. The chunk-IDENTITY axis keeps its own
+ * dedicated coverage in `chunk-namespacing.test.js`, which pins the token
+ * directly and must NOT fold.
+ */
+export function foldChunkAccessors(js) {
+  return String(js ?? "").replace(/(?<![.$\w])_scrml_cs_([a-z_]+)/g, "_scrml_$1");
+}
+
+/**
  * Build a `name -> storeKey` mapper for a chunk. Bare names pass through
  * unchanged when the chunk has no namespace.
  */

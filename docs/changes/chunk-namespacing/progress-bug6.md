@@ -97,3 +97,31 @@ real: base is only 127 B under budget, PRE-EXISTING (§6 HIGH, bryan's policy ca
 `docs/changes/chunk-namespacing/artifact-diff.mjs`: `unwrapChunkScope` matches the
 new banner→end-marker prologue; `fold` un-renames `_scrml_cs_*`→`_scrml_*` per
 line so body call sites compare equal to base. (These are the two plan-deltas.)
+
+## 2026-07-23 — MECHANISM PROVEN; SCOPING MISCOUNT FOUND (load-bearing)
+
+Mechanism verified COMPLETE + CORRECT:
+- Both pinned tests GREEN (§C10.1 tree-shake; gzip 16,330 B < 16,384).
+- Acceptance in REAL Chromium, BOTH formats: alpha's rows SURVIVE beta's chunk
+  (classic + esm ISOLATED, no clobber, no pageerror).
+- ESM crux verified on emitted output; N3 IIFE / N4 nsName preserved; zero core
+  code residue (core diffs base by one comment line).
+
+**SCOPING WAS WRONG about the migration surface (§3.2/§3.3).** It claimed "46
+files / 160 failures, 129 new" and "the rename re-migrates ZERO already-done
+files if the helpers are rename-aware." REALITY: the callee-rename changes
+`_scrml_reactive_get("x")` -> `_scrml_cs_reactive_get("x")` at ~959 sites, and the
+pre-commit subset jumps from 76 -> **679 failures** (~607 NEW). The SCOPING
+measured migration against the reverted SHADOW design (`0581f480`), where the
+callee stayed BYTE-IDENTICAL — so ~600 text-assertion tests that pin
+`_scrml_reactive_get("x")` in compiled `clientJs` passed there and FAIL under the
+rename. The two rename-aware helpers cover EXECUTION harnesses, not text
+assertions. True surface: ~131 files using `compileScrml` (1443 accessor-assert
+lines across 205 files; not all fire), no central patch point.
+
+Migration PATH proven safe + mechanical: new helper `foldChunkAccessors(js)` folds
+`_scrml_cs_X` -> `_scrml_X` (surgical — masks nothing else). Applied once in a
+file's shared compile helper at the read boundary. REFERENCE: if-expression.test.js
+60/4 -> 64/0 with one 8-line edit. This is NOT the "bulk assertion rewrite" the
+S239/§6 laundering warning targets (that was round-1's in-quote key rewrite); a
+prefix fold provably cannot mask a non-rename delta.
