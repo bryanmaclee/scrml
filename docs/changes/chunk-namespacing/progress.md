@@ -455,3 +455,93 @@ should be done with a full budget and an adversarial re-review, not squeezed in.
   the id is document-wide `querySelector`-resolved and keys three process-global
   registries, so it cannot be exempted).
 - The R2 no-project-root tier is a ratified deviation pending bryan's veto.
+
+
+---
+
+# S282 FINAL ROUND — the migration
+
+**Head `fc423b6d`.** All four namespaces isolated and executed. Migration
+673 -> **197** failures. NOT finished: 63 files remain.
+
+## Acceptance — measured at `fc423b6d`, real Chromium
+
+```
+classic  BASE e8fdd44c  alpha AFTER import : {"rows":["b1","b2"]}  CLOBBERED
+classic  fc423b6d       alpha AFTER import : {"rows":["a1","a2"]}  SURVIVED
+esm      BASE e8fdd44c  alpha AFTER import : {"rows":["b1","b2"]}  CLOBBERED
+esm      fc423b6d       alpha AFTER import : {"rows":["a1","a2"]}  SURVIVED
+```
+
+All three fixtures, classic, base vs `fc423b6d` (`INCONCLUSIVE` = the second
+chunk THREW and never evaluated, so the page looking pristine proves nothing):
+
+| fixture | BASE `e8fdd44c` | `fc423b6d` |
+|---|---|---|
+| `types/` (N3) | `[pageerror] Identifier 'Phase_toEnum' has already been declared` | **isolated** |
+| `engine/` (N4) | `[pageerror] Identifier '__scrml_engine_phase_transitions' has already been declared` | **isolated** |
+| `wide/` (N1+N2) | `[pageerror] Phase_toEnum …` | **isolated** |
+
+## Artifact-diff gate — PASS, 446 files, at `fc423b6d`
+
+OQ-3's condition was "the only delta is the id token". The ruled mechanism adds a
+SECOND: the chunk-scope wrapper. Both are now declared explicitly, and the shared
+runtime is counted separately rather than folded — its bytes really did change
+(`_scrml_cell_scope`), which moves its §47 content-address.
+
+| corpus | compared | identical | token-only | residual |
+|---|---|---|---|---|
+| 23-trucking-dispatch | 115 | 53 | 61 | **0** |
+| website | 295 | 98 | 196 | **0** |
+| 8 others | 36 | 10 | 18 | **0** |
+
+## FIVE real bugs the migration surfaced
+
+Every one was found because an "unclassified" test was treated as a FINDING
+rather than forced. Forcing them would have shipped five live defects.
+
+1. **SSR seed wire format.** Baking the resolved key server-side worked but leaked
+   the token into every SSR document. The seed now stays BARE and the CHUNK maps
+   at apply time (`_scrml_ssr_seed_apply_scoped`) — the chunk that consumes the
+   seed is exactly the one that knows the namespace.
+2. **§41.12 inline message overrides — silently dead.** The Level-1 table is keyed
+   `cell::validator`, but `_scrml_messages_register_inline` takes the cell FIRST
+   and `_scrml_message_for` takes it THIRD. Namespacing only the register side
+   split the pair, so every override fell through to the Level-3 default.
+3. **§51.0.N engine history restore — broken three ways.**
+   `_scrml_engine_history_capture_on_exit` gets an already-namespaced varName and
+   then rebuilds two more keys by CONCATENATION, while the historyMap's values are
+   bare — so it wrote one slot and read another that does not exist. Plus two
+   codegen sites indexing `_scrml_state` / the pending-restore registry DIRECTLY.
+4. **`cancelTimer` mined a CELL name out of a namespaced MARKER.** The arm-context
+   id is `<idPrefix>:<armTag>` with `idPrefix` namespaced, so it emitted
+   `_scrml_engine_clear_named_timer("0a1b2c3d_appMode", …)` which the scope then
+   namespaced a SECOND time. The named timer was never found.
+5. **`emit-client-esm.ts` `topLevelDecls` ignored destructuring** — a pre-existing
+   bug, latent until the prologue became the first destructured top-level `const`.
+
+## Migration recipes (all in `compiler/tests/helpers/chunk-scope.js`)
+
+| recipe | for | files |
+|---|---|---|
+| `captureInsideChunkScope` | a harness that captures an accessor AFTER the chunk and drives cells by bare name — splice the capture INSIDE the scope so every call site stays untouched | 64 |
+| `unwrapChunkScope` | a harness that executes a chunk with NO runtime to probe pure lowering, and reads a top-level decl | 7 |
+| `unNamespaceEngineNames` | assertions on `__scrml_engine_<name>_*` (N4) | 11 |
+| `unNamespaceCellKeys` | assertions on a site indexing the store DIRECTLY | 2 |
+| `chunkCellKey` | a harness that cannot inject code at all | — |
+
+All READ the token from the chunk's own prologue and degrade to the bare name
+when a chunk carries none, so a token-shape change cannot silently desynchronise
+the corpus from the compiler.
+
+## REMAINING — 63 files, 197 failures, 160 new names vs base
+
+Zero base failures were fixed or masked (`base-only` diff is 0), so nothing has
+been laundered.
+
+| class | files | failures | shape |
+|---|---|---|---|
+| harness | 25 | 109 | bespoke capture shapes the two scripts did not match; several capture `_scrml_state` itself and index it by bare name, which needs a stripped-key snapshot view rather than an accessor splice |
+| iifeShape | 13 | 38 | byte/structural comparisons that now see the wrapper — most want `unwrapChunkScope` at the read site |
+| engineName | 10 | 24 | the 8 files whose compile helper does not return an object literal, so the scripted normalization had no anchor |
+| unclassified | 15 | 26 | needs individual reading — this is the bucket that produced all five bugs above, so it should NOT be batch-forced |
