@@ -52,16 +52,33 @@ const before = await page.evaluate(() => ({
   h2: document.querySelector("h2")?.textContent,
 }));
 
-// === exactly what a U4 import()-based nav loader does for a cross-chunk target:
-// dynamic-import the target route's client chunk into the LIVE document.
-const after = await page.evaluate(async () => {
-  await import("./beta.client.js");
+// === exactly what a nav loader does for a cross-chunk target: pull the target
+// route's client chunk into the LIVE document.
+//
+//   default  — the ESM shape: `await import("./beta.client.js")`.
+//   --classic — the CLASSIC shape: append a <script src> and await its load.
+//               A classic chunk is NOT a module; loading it via import() would
+//               hand it module scope it never has in production, which is the
+//               opposite of the shape under test.
+const CLASSIC = process.argv.includes("--classic");
+const after = await page.evaluate(async (classic) => {
+  if (classic) {
+    await new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "./beta.client.js";
+      s.onload = resolve;
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  } else {
+    await import("./beta.client.js");
+  }
   await new Promise((r) => setTimeout(r, 50));
   return {
     rows: [...document.querySelectorAll("li")].map((n) => n.textContent),
     h2: document.querySelector("h2")?.textContent,
   };
-});
+}, CLASSIC);
 
 console.log("DIST                :", DIST);
 console.log("alpha BEFORE import :", JSON.stringify(before));

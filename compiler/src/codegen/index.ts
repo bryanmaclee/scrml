@@ -74,6 +74,7 @@ import { buildSourceMap } from "./build-source-map.ts";
 import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender, filePrintBuiltinsShadowed, fileDeclaresFileScopeBinding } from "./log-loc.ts";
 import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setSessionShadowedInFile, setCurrentUserAmbientActive } from "./emit-expr.ts";
 import { buildChunkNamespaceState, setChunkNamespaceState, resetChunkNamespaceState } from "./chunk-namespace.ts";
+import { namespaceCellKeys } from "./cell-namespace-pass.ts";
 import { EncodingContext } from "./type-encoding.ts";
 import { collectDerivedVarNames, collectReactiveVarNames, collectSynthCellKeys, stampCompoundDeepSetTargets } from "./reactive-deps.ts";
 import { collectTopLevelLogicStatements, containsSql, getNodes } from "./collect.ts";
@@ -1627,9 +1628,19 @@ export function runCG(input: CgInput): CgOutput {
       }
     }
 
-    const clientJsRaw: string | null = codegenStage("emit-client", () =>
+    const clientJsRawUnnamespaced: string | null = codegenStage("emit-client", () =>
       generateClientJs(compileCtx)
     ) || null;
+
+    // chunk-namespacing N2 — namespace every reactive-cell STORE KEY in the
+    // assembled chunk. Applied here, once, rather than at the ~190 emission
+    // sites across 23 modules: a half-namespaced store is worse than none (half
+    // the writes land in one slot, half in another), and a per-site fix re-opens
+    // the hole the moment anyone adds an emitter. Acorn-located + text-spliced,
+    // so comments and formatting survive byte-for-byte.
+    const clientJsRaw: string | null = clientJsRawUnnamespaced === null
+      ? null
+      : codegenStage("namespace-cell-keys", () => namespaceCellKeys(clientJsRawUnnamespaced));
 
     let clientJs: string | null = clientJsRaw;
     if (clientJsRaw && !embedRuntime) {
