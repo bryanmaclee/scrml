@@ -1,0 +1,10 @@
+<program>
+  <count> = 0
+  ${ function inc() { @count = @count + 1 } }
+  <h1>Shell</h1>
+  <nav><a href="/alpha">Alpha</a><a href="/beta">Beta</a></nav>
+  <p id="shellcount">shell ${@count}</p>
+  <button id="shellinc" onclick=inc()>inc</button>
+  <outlet/>
+  <footer>foot</footer>
+</program>
