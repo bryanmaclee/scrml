@@ -185,7 +185,7 @@ describe("§i81.1 — the issue's own reproducer: class= is no longer dropped", 
     expect(client).toContain('setAttribute("class", String(');
     expect(client).toContain("_scrml_effect");
     // Reactive dependency is actually subscribed, not a one-shot literal.
-    expect(client).toContain('_scrml_reactive_get("mode")');
+    expect(client).toContain('_scrml_cs_reactive_get("mode")');
   });
 
   test("string-concat class= wires", () => {
@@ -1043,7 +1043,7 @@ describe("§i81.13 — component-root string-prop value-attr fails closed (no pa
     // The title site drops; the data-n site is untouched and wires reactively.
     expect(emittedHtml(r)).not.toContain("data-scrml-bind-attr-title");
     expect(emittedHtml(r)).toMatch(/data-scrml-bind-attr-data-n="[^"]+"/);
-    expect(emittedClient(r)).toContain('_scrml_reactive_get("count")');
+    expect(emittedClient(r)).toContain('_scrml_cs_reactive_get("count")');
   });
 
   test("a REACTIVE value-attr on a component root is NOT over-refused (only free idents drop)", () => {

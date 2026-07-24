@@ -107,7 +107,7 @@ describe("§A: the §6.7.7 settle machine is emitted (state object is mutated)",
   test("SUCCESS path sets the cell BEFORE .data and only inside the try (never on error)", () => {
     const { clientJs } = compile(REQ_SRC, "req-emit-order");
     // cell set precedes `.data` set (avoids a `<#R>.data`-gated cell-read window).
-    expect(clientJs).toMatch(/_scrml_reactive_set\("userData", _scrml_data\);\s*\n\s*_scrml_request_userReq\.data = _scrml_data;/);
+    expect(clientJs).toMatch(/_scrml_cs_reactive_set\("userData", _scrml_data\);\s*\n\s*_scrml_request_userReq\.data = _scrml_data;/);
     // The cell-set does NOT appear in the catch arm (error must not write the cell).
     const catchArm = clientJs.slice(clientJs.indexOf("} catch (_scrml_e) {"));
     const catchBody = catchArm.slice(0, catchArm.indexOf("}\n  _scrml_request_userReq.loading = false;"));
@@ -157,7 +157,7 @@ describe("§A: deps drive a reactive re-fetch effect (§6.7.7 re-execution)", ()
     const { errors, clientJs } = compile(DEPS_SRC, "req-deps-inferred");
     expect(errors).toEqual([]);
     expect(clientJs).toContain("_scrml_effect(function() {");
-    expect(clientJs).toContain('_scrml_reactive_get("userId")');
+    expect(clientJs).toContain('_scrml_cs_reactive_get("userId")');
     expect(clientJs).toContain("if (_scrml_request_userReq_mounted) _scrml_request_userReq_fetch();");
   });
 

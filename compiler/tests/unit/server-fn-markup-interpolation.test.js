@@ -143,7 +143,7 @@ describe("§3: `${@var}` interpolation uses synchronous effect (no async wrappin
     // markup-value-in-expression-2026-06-17: the display now routes through the
     // node-aware `_scrml_render_value(el, expr)` helper (was `el.textContent =`).
     // Still synchronous — no async IIFE for a reactive-only interpolation.
-    expect(js).toMatch(/_scrml_render_value\(el,\s*_scrml_reactive_get\(/);
+    expect(js).toMatch(/_scrml_render_value\(el,\s*_scrml_cs_reactive_get\(/);
     // No async IIFE around the assignment in this reactive-only case
     expect(js).not.toMatch(/\(async\s*\(\s*\)\s*=>\s*\{[^}]*_scrml_reactive_get\("count"\)/);
   });
@@ -169,6 +169,6 @@ describe("§4: mixed `${@var + serverFn()}` uses async wrapping", () => {
     expect(js).toContain("await (");
     expect(js).toMatch(/_scrml_fetch_loadSuffix_\d+\(\)/);
     // The reactive var also participates in the async-wrapped expression
-    expect(js).toContain('_scrml_reactive_get("count")');
+    expect(js).toContain('_scrml_cs_reactive_get("count")');
   });
 });

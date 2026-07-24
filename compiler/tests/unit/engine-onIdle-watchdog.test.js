@@ -172,7 +172,7 @@ describe("A5-6 §A5-6.6 — codegen computed form", () => {
     expect(errors.filter(e => e.severity === "error")).toEqual([]);
     expect(clientJs).toContain("__scrml_engine_phase_idle");
     expect(clientJs).toContain("msExpr: function()");
-    expect(clientJs).toContain('_scrml_reactive_get("delay")');
+    expect(clientJs).toContain('_scrml_cs_reactive_get("delay")');
     // Unit multiplier for `s` is 1000.
     expect(clientJs).toContain("* 1000");
   });
@@ -245,9 +245,9 @@ describe("A5-6 §A5-6.10 — runtime helpers in template", () => {
       require.resolve("../../src/runtime-template.js"),
       "utf8",
     );
-    expect(rt).toContain("function _scrml_engine_arm_idle_watchdog(");
-    expect(rt).toContain("function _scrml_engine_reset_idle_watchdog(");
+    expect(rt).toContain("function _scrml_cs_engine_arm_idle_watchdog(");
+    expect(rt).toContain("function _scrml_cs_engine_reset_idle_watchdog(");
     // Reset is called in both _scrml_engine_direct_set + _scrml_engine_advance.
-    expect(rt).toMatch(/_scrml_engine_reset_idle_watchdog\(varName,\s*idleEntry,\s*table\)/);
+    expect(rt).toMatch(/_scrml_cs_engine_reset_idle_watchdog\(varName,\s*idleEntry,\s*table\)/);
   });
 });

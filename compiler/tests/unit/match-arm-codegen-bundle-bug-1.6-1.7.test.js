@@ -180,9 +180,9 @@ describe("Bug 1.7 — inline-arm engine-write routing", () => {
     expect(errors).toEqual([]);
     // ALL three arms must dispatch through the canonical engine helper.
     // Pre-fix (Bug 1.7) emitted `_scrml_reactive_set("state", "Big")` — bypass.
-    expect(clientJs).toContain('_scrml_engine_direct_set("state", "Big", __scrml_engine_state_transitions)');
-    expect(clientJs).toContain('_scrml_engine_direct_set("state", "Fire", __scrml_engine_state_transitions)');
-    expect(clientJs).toContain('_scrml_engine_direct_set("state", "Small", __scrml_engine_state_transitions)');
+    expect(clientJs).toContain('_scrml_cs_engine_direct_set("state", "Big", __scrml_engine_state_transitions)');
+    expect(clientJs).toContain('_scrml_cs_engine_direct_set("state", "Fire", __scrml_engine_state_transitions)');
+    expect(clientJs).toContain('_scrml_cs_engine_direct_set("state", "Small", __scrml_engine_state_transitions)');
     // None of the arm bodies should emit bare _scrml_reactive_set for the engine cell.
     // (We exclude the §51.0.C init line which legitimately uses _scrml_reactive_set.)
     const eatBody = clientJs.match(/function _scrml_eat[^}]+?\(p\) \{[\s\S]+?\n\}/)?.[0] ?? "";
@@ -213,8 +213,8 @@ describe("Bug 1.7 — inline-arm engine-write routing", () => {
     const { errors, clientJs } = compile(src);
     expect(errors).toEqual([]);
     expect(clientJs).toContain("// §51.0.F engine direct-write hook: s (S)");
-    expect(clientJs).toContain('_scrml_engine_direct_set("s", "Running", __scrml_engine_s_transitions)');
-    expect(clientJs).toContain('_scrml_engine_direct_set("s", "Idle", __scrml_engine_s_transitions)');
+    expect(clientJs).toContain('_scrml_cs_engine_direct_set("s", "Running", __scrml_engine_s_transitions)');
+    expect(clientJs).toContain('_scrml_cs_engine_direct_set("s", "Idle", __scrml_engine_s_transitions)');
   });
 
   test("§1.7.A3 block-arm `. V => { @engine = .X }` regression-guard (fixed by Bug 1 fix-C)", () => {
@@ -237,7 +237,7 @@ describe("Bug 1.7 — inline-arm engine-write routing", () => {
 </program>`;
     const { errors, clientJs } = compile(src);
     expect(errors).toEqual([]);
-    expect(clientJs).toContain('_scrml_engine_direct_set("s", "Running", __scrml_engine_s_transitions)');
+    expect(clientJs).toContain('_scrml_cs_engine_direct_set("s", "Running", __scrml_engine_s_transitions)');
   });
 
   test("§1.7.A4 braced-inline `. V => { @engine = .X }` (single statement) routes correctly", () => {
@@ -272,7 +272,7 @@ describe("Bug 1.7 — inline-arm engine-write routing", () => {
     expect(errors.filter(e => e.code !== "W-MATCH-001")).toEqual([]);
     if (clientJs.includes("dispatch")) {
       // When the form succeeds, the engine routing must fire.
-      expect(clientJs).toMatch(/_scrml_engine_direct_set\("s",/);
+      expect(clientJs).toMatch(/_scrml_cs_engine_direct_set\("s",/);
     }
   });
 
@@ -297,7 +297,7 @@ describe("Bug 1.7 — inline-arm engine-write routing", () => {
     expect(errors).toEqual([]);
     // The plain @count cell must use the canonical _scrml_reactive_set form,
     // NOT _scrml_engine_direct_set (no engine of forType `count` exists).
-    expect(clientJs).toContain('_scrml_reactive_set("count"');
+    expect(clientJs).toContain('_scrml_cs_reactive_set("count"');
     expect(clientJs).not.toContain('_scrml_engine_direct_set("count"');
   });
 
@@ -330,7 +330,7 @@ describe("Bug 1.7 — inline-arm engine-write routing", () => {
     expect(errors.filter(e => e.code !== "W-ENGINE-SELF-WRITE-DETECTED")).toEqual([]);
     // The self-write target `.Running` must route through the canonical helper
     // for §51.0.F.1 idempotent no-op semantics to apply at runtime.
-    expect(clientJs).toContain('_scrml_engine_direct_set("s", "Running", __scrml_engine_s_transitions)');
+    expect(clientJs).toContain('_scrml_cs_engine_direct_set("s", "Running", __scrml_engine_s_transitions)');
     // The §51.0.C init line (`_scrml_reactive_set("s", "Idle");` at file-init
     // position) is allowed; the assertion targets non-init writes inside the
     // dispatch function body specifically.
@@ -361,12 +361,12 @@ describe("14-mario fixture (Bug 1.7 integration smoke)", () => {
     // Block-arm engine writes (Mushroom branch with self-conditional inner match):
     //   `@marioState = match @marioState { .Small => .Big else => @marioState }`
     // The OUTER assignment must route through engine_direct_set.
-    expect(clientJs).toMatch(/_scrml_engine_direct_set\("marioState",/);
+    expect(clientJs).toMatch(/_scrml_cs_engine_direct_set\("marioState",/);
     // Flower / Feather inline arms: `@marioState = .Fire` / `@marioState = .Cape`
-    expect(clientJs).toContain('_scrml_engine_direct_set("marioState", "Fire", __scrml_engine_marioState_transitions)');
-    expect(clientJs).toContain('_scrml_engine_direct_set("marioState", "Cape", __scrml_engine_marioState_transitions)');
+    expect(clientJs).toContain('_scrml_cs_engine_direct_set("marioState", "Fire", __scrml_engine_marioState_transitions)');
+    expect(clientJs).toContain('_scrml_cs_engine_direct_set("marioState", "Cape", __scrml_engine_marioState_transitions)');
     // Top-level body usage in getHurt + restart (was working pre-1.7):
-    expect(clientJs).toContain('_scrml_engine_direct_set("marioState", "Small", __scrml_engine_marioState_transitions)');
+    expect(clientJs).toContain('_scrml_cs_engine_direct_set("marioState", "Small", __scrml_engine_marioState_transitions)');
     // No bare _scrml_reactive_set on marioState OUTSIDE the §51.0.C init line.
     // (init: `_scrml_reactive_set("marioState", "Small");` at line ~26 — allowed.)
     const initLineCount = (clientJs.match(/^_scrml_reactive_set\("marioState",/gm) ?? []).length;
