@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let _tmp = 0;
@@ -37,7 +38,7 @@ function compile(source, slug) {
     const result = compileScrml({ inputFiles: [tmpInput], write: false, outputDir: resolve(tmpDir, "out") });
     let clientJs = "";
     for (const out of (result.outputs ?? new Map()).values()) {
-      if (out && out.clientJs) clientJs += out.clientJs;
+      if (out && out.clientJs) clientJs += foldChunkNamespacing(out.clientJs);
     }
     return { errors: result.errors ?? [], clientJs };
   } finally {

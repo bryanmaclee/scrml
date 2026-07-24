@@ -27,6 +27,7 @@ import {
   runCaseRuntime,
   hasRuntimeHalf,
 } from "../../../conformance/run.ts";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 describe("conformance corpus (gated bridge) — impl#1 codes + runtime", () => {
   const cases = loadCases();

@@ -88,6 +88,21 @@ export function foldChunkAccessors(js) {
 }
 
 /**
+ * Fold ALL of a chunk's per-unit namespace tokens back off emitted client JS,
+ * for a text-assertion read site. Composes the three surgical, token-shaped folds
+ * this arc introduced — BUG-6 accessor rename (`_scrml_cs_`), N4 engine names
+ * (`__scrml_engine_<token>_`), and directly-pinned N2 store keys (`"<token>$k"`).
+ * Each is a no-op when its axis is absent, so applying all three is safe and masks
+ * NOTHING but the arc's own intended deltas — a real behavioral difference in any
+ * axis still surfaces. Does NOT strip the N1 each/match id tokens, which many
+ * assertions legitimately pin. The chunk-IDENTITY axis keeps dedicated coverage in
+ * `chunk-namespacing.test.js`, which pins tokens directly and must NOT fold.
+ */
+export function foldChunkNamespacing(js) {
+  return unNamespaceCellKeys(unNamespaceEngineNames(foldChunkAccessors(js)));
+}
+
+/**
  * Build a `name -> storeKey` mapper for a chunk. Bare names pass through
  * unchanged when the chunk has no namespace.
  */

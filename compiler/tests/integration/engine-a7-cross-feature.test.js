@@ -30,6 +30,7 @@ import { runSYM } from "../../src/symbol-table.ts";
 import { analyzeUsage } from "../../src/codegen/usage-analyzer.ts";
 import { compileScrml } from "../../src/api.js";
 import { unNamespaceEngineNames } from "../helpers/chunk-scope.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -56,8 +57,8 @@ function compileToClientJs(source, suffix = "a7x") {
       outputDir: outDir,
     });
     const clientPath = resolve(outDir, `${name}.client.js`);
-    const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
-    return { errors: result.errors ?? [], clientJs: unNamespaceEngineNames(clientJs) };
+    const clientJs = foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "");
+    return { errors: result.errors ?? [], clientJs: foldChunkNamespacing(unNamespaceEngineNames(clientJs) )};
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   }

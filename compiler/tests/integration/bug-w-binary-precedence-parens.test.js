@@ -36,6 +36,7 @@ import { tmpdir } from "os";
 import * as acorn from "acorn";
 import { emitExpr } from "../../src/codegen/emit-expr.ts";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // AST builders (minimal — span is unused by the emit path).
@@ -219,7 +220,7 @@ function compileSource(name, source) {
 
 function clientJsFor(result, srcName) {
   for (const [filePath, out] of result.outputs) {
-    if (filePath.endsWith(srcName) && typeof out.clientJs === "string") return out.clientJs;
+    if (filePath.endsWith(srcName) && typeof out.clientJs === "string") return foldChunkNamespacing(out.clientJs);
   }
   return undefined;
 }

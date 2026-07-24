@@ -39,6 +39,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -57,7 +58,7 @@ function compile(source, suffix = "bug-ab-direct") {
     const runtimePath = resolve(outDir, runtimeFilename);
     return {
       errors: result.errors ?? [],
-      clientJs: existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "",
+      clientJs: foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""),
       runtimeJs: existsSync(runtimePath) ? readFileSync(runtimePath, "utf8") : "",
       cleanup: () => existsSync(tmpDir) && rmSync(tmpDir, { recursive: true, force: true }),
     };

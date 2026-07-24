@@ -35,6 +35,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, exist
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 let TMP;
 beforeAll(() => {
@@ -61,7 +62,7 @@ function build(caseId, source) {
   // The app's own client chunk — deliberately NOT the shared runtime, which is
   // 60kB+ of library text that would make any `toContain` assertion below
   // meaningless.
-  const clientJs = readOut("app.client.js") ?? "";
+  const clientJs = foldChunkNamespacing(readOut("app.client.js") ?? "");
   const html = readOut("app.html") ?? "";
   return { errors, files, clientJs, html };
 }

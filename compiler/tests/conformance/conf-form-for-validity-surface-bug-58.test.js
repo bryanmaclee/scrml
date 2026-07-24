@@ -25,6 +25,7 @@ import { mkdirSync, writeFileSync, rmSync, existsSync, mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 let TMP;
 
@@ -87,7 +88,7 @@ describe("Bug 58 — formFor validity surface IS emitted into client.js", () => 
     result = compile("bug58-formfor.scrml", CANONICAL_SRC);
     const out = getOutput(result);
     html = out?.html ?? "";
-    clientJs = out?.clientJs ?? "";
+    clientJs = foldChunkNamespacing(out?.clientJs ?? "");
   });
 
   // ---- routing fix: the compound cell + per-field cells are DECLARED ----

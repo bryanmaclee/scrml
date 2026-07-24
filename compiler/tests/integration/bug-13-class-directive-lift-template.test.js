@@ -19,6 +19,7 @@ import { compileScrml } from "../../src/api.js";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 let TMP;
 
@@ -45,7 +46,7 @@ function compileSource(name, source) {
   );
   let clientJs = "";
   try {
-    clientJs = readFileSync(join(outDir, `${name}.client.js`), "utf8");
+    clientJs = foldChunkNamespacing(readFileSync(join(outDir, `${name}.client.js`), "utf8"));
   } catch {
     // file missing — leave clientJs empty so assertions surface a clear failure
   }

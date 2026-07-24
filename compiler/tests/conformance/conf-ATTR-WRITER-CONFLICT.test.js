@@ -24,6 +24,7 @@ import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import * as acorn from "acorn";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let _tmp = 0;
@@ -41,7 +42,7 @@ function compile(source, slug) {
     for (const [fp, output] of result.outputs) {
       if (fp.includes(name)) {
         html = output.html ?? null;
-        clientJs = output.clientJs ?? null;
+        clientJs = foldChunkNamespacing(output.clientJs ?? null);
       }
     }
     return { errors: result.errors ?? [], warnings: result.warnings ?? [], html, clientJs };
