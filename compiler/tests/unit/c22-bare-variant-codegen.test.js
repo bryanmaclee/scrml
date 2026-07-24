@@ -73,7 +73,7 @@ render(m)
     const variantErrs = (result.errors ?? []).filter(e => /VARIANT/.test(e.code ?? ""));
     expect(variantErrs).toEqual([]);
     // The reactive_set call has the string "Idle", not bare `.Idle`
-    expect(clientJs).toMatch(/_scrml_reactive_set\("phase",\s*"Idle"\)/);
+    expect(clientJs).toMatch(/_scrml_cs_reactive_set\("phase",\s*"Idle"\)/);
     // Negative: no broken `.Idle` token in the output
     expect(clientJs).not.toMatch(/_scrml_reactive_set\("phase",\s*\.Idle\)/);
   });
@@ -87,7 +87,7 @@ const m = <main>${"$"}{@phase}</>
 
 render(m)
 `);
-    expect(clientJs).toMatch(/_scrml_reactive_set\("phase",\s*"Loading"\)/);
+    expect(clientJs).toMatch(/_scrml_cs_reactive_set\("phase",\s*"Loading"\)/);
   });
 });
 
@@ -152,8 +152,8 @@ const m = <main>${"$"}{@phase} ${"$"}{@color} ${"$"}{target}</>
 render(m)
 `);
     expect((result.errors ?? []).filter(e => /VARIANT/.test(e.code ?? ""))).toEqual([]);
-    expect(clientJs).toMatch(/_scrml_reactive_set\("phase",\s*"Idle"\)/);
-    expect(clientJs).toMatch(/_scrml_reactive_set\("color",\s*"Red"\)/);
+    expect(clientJs).toMatch(/_scrml_cs_reactive_set\("phase",\s*"Idle"\)/);
+    expect(clientJs).toMatch(/_scrml_cs_reactive_set\("color",\s*"Red"\)/);
     expect(clientJs).toMatch(/let target = "Done"/);
   });
 });
@@ -256,7 +256,7 @@ render(m)
     expect((result.errors ?? [])).toEqual([]);
     // The reactive_set call should reference Idle (either as "Idle" string OR
     // Phase.Idle property access) — both resolve to the variant tag at runtime.
-    expect(clientJs).toMatch(/_scrml_reactive_set\("phase",\s*(?:"Idle"|Phase\.Idle)\)/);
+    expect(clientJs).toMatch(/_scrml_cs_reactive_set\("phase",\s*(?:"Idle"|Phase\.Idle)\)/);
   });
 });
 

@@ -139,8 +139,8 @@ function toggle() { if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav
       expect(clientJs).not.toContain("modeMachine");
       // The write routes through the engine direct-set against the populated
       // table (not the empty §51.3 table).
-      expect(clientJs).toContain('_scrml_engine_direct_set("mode", "Edit", __scrml_engine_mode_transitions)');
-      expect(clientJs).toContain('_scrml_engine_direct_set("mode", "Nav", __scrml_engine_mode_transitions)');
+      expect(clientJs).toContain('_scrml_cs_engine_direct_set("mode", "Edit", __scrml_engine_mode_transitions)');
+      expect(clientJs).toContain('_scrml_cs_engine_direct_set("mode", "Nav", __scrml_engine_mode_transitions)');
       // No dead empty §51.3 table for the modern engine.
       expect(clientJs).not.toContain("__scrml_transitions_ModeMachine");
 
@@ -181,7 +181,7 @@ function toggle() { if (@m == Mode.Nav) { @m = .Edit } else { @m = .Nav } }
       expect(errorsOf(errors)).toEqual([]);
       // The engine governs `@m`; the write-guard reads the populated table keyed on `m`.
       expect(clientJs).toContain("__scrml_engine_m_transitions");
-      expect(clientJs).toContain('_scrml_engine_direct_set("m", "Edit", __scrml_engine_m_transitions)');
+      expect(clientJs).toContain('_scrml_cs_engine_direct_set("m", "Edit", __scrml_engine_m_transitions)');
 
       const toggleName = findGeneratedFnName(clientJs, "toggle");
       const ctx = makeEvaluator(runtimeJs, clientJs, [toggleName]);

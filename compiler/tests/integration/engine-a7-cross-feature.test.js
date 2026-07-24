@@ -284,7 +284,7 @@ describe("engine-a7-cross-feature §4 — named timer + cancelTimer inside compo
     expect(fatal).toEqual([]);
     // The named-timer composite-key cancelTimer lowering MUST land:
     //   _scrml_engine_clear_named_timer("appMode", "Confirming", "autoConfirm")
-    expect(clientJs).toContain('_scrml_engine_clear_named_timer("appMode", "Confirming", "autoConfirm")');
+    expect(clientJs).toContain('_scrml_cs_engine_clear_named_timer("appMode", "Confirming", "autoConfirm")');
     // And the named-timer entry itself must still be emitted.
     expect(clientJs).toContain('name: "autoConfirm"');
   });
@@ -336,7 +336,7 @@ describe("engine-a7-cross-feature §5 — computed-delay + composite", () => {
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Computed form emits msExpr arrow.
     expect(clientJs).toContain("msExpr: function()");
-    expect(clientJs).toContain('_scrml_reactive_get("workDelayMs")');
+    expect(clientJs).toContain('_scrml_cs_reactive_get("workDelayMs")');
   });
 });
 

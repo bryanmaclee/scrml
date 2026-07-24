@@ -92,10 +92,10 @@ describe("engine-event-handler-writes §1 — direct assignment routing", () => 
     // not bare _scrml_reactive_set. The handler body should reference the
     // canonical transition table identifier.
     expect(clientJs).toMatch(
-      /_scrml_engine_direct_set\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions\)/,
+      /_scrml_cs_engine_direct_set\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions\)/,
     );
     expect(clientJs).toMatch(
-      /_scrml_engine_direct_set\("appMode",\s*AppMode\.Title,\s*__scrml_engine_appMode_transitions\)/,
+      /_scrml_cs_engine_direct_set\("appMode",\s*AppMode\.Title,\s*__scrml_engine_appMode_transitions\)/,
     );
 
     // Anti-regression: the engine variable's onclick handler should NOT
@@ -137,7 +137,7 @@ describe("engine-event-handler-writes §1 — direct assignment routing", () => 
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // The function definition contains the engine direct-write helper call.
     expect(clientJs).toMatch(
-      /_scrml_engine_direct_set\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions\)/,
+      /_scrml_cs_engine_direct_set\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions\)/,
     );
   });
 });
@@ -164,7 +164,7 @@ describe("engine-event-handler-writes §2 — .advance() routing", () => {
     // pre-fix bypass `_scrml_reactive_get("appMode").advance(...)` which
     // would fail at runtime (bare-string variant has no .advance method).
     expect(clientJs).toMatch(
-      /_scrml_engine_advance\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions\)/,
+      /_scrml_cs_engine_advance\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions\)/,
     );
     // Anti-regression: the onclick handler must NOT have called .advance as
     // a property method on the reactive-get result.
@@ -260,7 +260,7 @@ describe("engine-event-handler-writes §4 — internal:rule= threading", () => {
     const writingHandler = handlerBodies.find((b) => b.includes("appMode"));
     expect(writingHandler).toBeDefined();
     expect(writingHandler).toMatch(
-      /_scrml_engine_direct_set\([\s\S]*?__scrml_engine_appMode_internal_transitions\)/,
+      /_scrml_cs_engine_direct_set\([\s\S]*?__scrml_engine_appMode_internal_transitions\)/,
     );
   });
 });
@@ -349,7 +349,7 @@ describe("engine-event-handler-writes §6 — .Variant.history restore-form", ()
     expect(callStart).toBeGreaterThan(-1);
     const callSlice = slice.slice(callStart, callStart + 500);
     // `.history` suffix stripped — the runtime value is bare variant.
-    expect(callSlice).toMatch(/_scrml_engine_advance\("appMode",\s*AppMode\.Playing[\s,]/);
+    expect(callSlice).toMatch(/_scrml_cs_engine_advance\("appMode",\s*AppMode\.Playing[\s,]/);
     expect(callSlice).not.toMatch(/AppMode\.Playing\.history/);
     // isHistoryRestore=true is threaded as the trailing positional arg.
     expect(callSlice).toMatch(/,\s*true\)/);
@@ -362,7 +362,7 @@ describe("engine-event-handler-writes §6 — .Variant.history restore-form", ()
     //     __scrml_engine_appMode_transitions, null, null, null,
     //     __scrml_engine_appMode_history_map, true)
     expect(callSlice).toMatch(
-      /_scrml_engine_advance\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map,\s*true\)/,
+      /_scrml_cs_engine_advance\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map,\s*true\)/,
     );
     // Anti-regression: the pre-Bug-6.5-equivalent symmetric bug would
     // emit `null` in the 7th slot. Pin against that shape.
@@ -404,7 +404,7 @@ describe("engine-event-handler-writes §6 — .Variant.history restore-form", ()
     expect(callStart).toBeGreaterThan(-1);
     const callSlice = slice.slice(callStart, callStart + 500);
     // Stripped value: `AppMode.Playing` (not `AppMode.Playing.history`).
-    expect(callSlice).toMatch(/_scrml_engine_direct_set\("appMode",\s*AppMode\.Playing[\s,]/);
+    expect(callSlice).toMatch(/_scrml_cs_engine_direct_set\("appMode",\s*AppMode\.Playing[\s,]/);
     // Anti-regression: the .history suffix MUST be stripped.
     expect(callSlice).not.toMatch(/AppMode\.Playing\.history/);
     // isHistoryRestore=true threaded as the trailing positional arg.
@@ -416,7 +416,7 @@ describe("engine-event-handler-writes §6 — .Variant.history restore-form", ()
     // that funnels direct-write through `_makeExprCtx` wouldn't silently
     // regress.
     expect(callSlice).toMatch(
-      /_scrml_engine_direct_set\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map,\s*true\)/,
+      /_scrml_cs_engine_direct_set\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map,\s*true\)/,
     );
   });
 });
@@ -440,7 +440,7 @@ describe("engine-event-handler-writes §7 — non-engine writes regression", () 
     const handlerBodies = clientJs.match(onclickHandlerRe) || [];
     const writingHandler = handlerBodies.find((b) => b.includes("count"));
     expect(writingHandler).toBeDefined();
-    expect(writingHandler).toMatch(/_scrml_reactive_set\("count",\s*99\)/);
+    expect(writingHandler).toMatch(/_scrml_cs_reactive_set\("count",\s*99\)/);
     // Anti-regression: a non-engine cell must NOT route through the engine
     // direct-write hook.
     expect(writingHandler).not.toContain("_scrml_engine_direct_set");
@@ -470,10 +470,10 @@ describe("engine-event-handler-writes §7 — non-engine writes regression", () 
     const { errors, clientJs } = compileToClientJs(src, "evt-mixed");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Plain cell uses bare set.
-    expect(clientJs).toMatch(/_scrml_reactive_set\("score",\s*99\)/);
+    expect(clientJs).toMatch(/_scrml_cs_reactive_set\("score",\s*99\)/);
     // Engine cell uses direct_set (canonical guard).
     expect(clientJs).toMatch(
-      /_scrml_engine_direct_set\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions\)/,
+      /_scrml_cs_engine_direct_set\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions\)/,
     );
   });
 });
@@ -532,7 +532,7 @@ describe("engine-event-handler-writes §9 — arm-body event handlers", () => {
     // `_<prefix>_<varName>_wire_<tag>` — search for a function definition
     // containing the engine direct-write helper call.
     expect(clientJs).toMatch(
-      /function\s+_\S*?wire_Playing\([\s\S]*?_scrml_engine_direct_set\("appMode",\s*AppMode\.Title,\s*__scrml_engine_appMode_transitions\)/,
+      /function\s+_\S*?wire_Playing\([\s\S]*?_scrml_cs_engine_direct_set\("appMode",\s*AppMode\.Title,\s*__scrml_engine_appMode_transitions\)/,
     );
   });
 
@@ -556,7 +556,7 @@ describe("engine-event-handler-writes §9 — arm-body event handlers", () => {
 
     // The onclick handler in the global registry must route through the guard.
     expect(clientJs).toMatch(
-      /_scrml_engine_direct_set\("appMode",\s*AppMode\.Title,\s*__scrml_engine_appMode_transitions\)/,
+      /_scrml_cs_engine_direct_set\("appMode",\s*AppMode\.Title,\s*__scrml_engine_appMode_transitions\)/,
     );
   });
 });

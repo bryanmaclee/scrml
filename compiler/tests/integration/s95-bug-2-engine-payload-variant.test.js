@@ -73,7 +73,7 @@ function startDrag(taskId) {
     // emits a tagged-object literal directly.
     expect(clientJs).not.toMatch(/"Dragging"\(/);
     expect(clientJs).toMatch(
-      /_scrml_engine_direct_set\("dragPhase", \{ variant: "Dragging", data: \{ id: taskId \} \}/,
+      /_scrml_cs_engine_direct_set\("dragPhase", \{ variant: "Dragging", data: \{ id: taskId \} \}/,
     );
   });
 
@@ -125,7 +125,7 @@ function stopDrag() {
     // helpers extract via _scrml_engine_variant_tag passes bare strings
     // through unchanged).
     expect(clientJs).toMatch(
-      /_scrml_engine_direct_set\("dragPhase", "Idle", __scrml_engine_dragPhase_transitions/,
+      /_scrml_cs_engine_direct_set\("dragPhase", "Idle", __scrml_engine_dragPhase_transitions/,
     );
     // And NO tagged-object literal for the unit-variant write.
     expect(clientJs).not.toMatch(/_scrml_engine_direct_set\("dragPhase", \{ variant: "Idle"/);
@@ -156,7 +156,7 @@ function startDrag(taskId) {
     expect(clientJs).not.toMatch(/"Dragging"\(/);
     // The advance helper receives the tagged-object literal
     expect(clientJs).toMatch(
-      /_scrml_engine_advance\("dragPhase", \{ variant: "Dragging", data: \{ id: taskId \} \}/,
+      /_scrml_cs_engine_advance\("dragPhase", \{ variant: "Dragging", data: \{ id: taskId \} \}/,
     );
   });
 
@@ -175,7 +175,7 @@ function stopDrag() {
 </>`;
     const { errors, clientJs } = compileToClientJs(src, "advance-unit");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
-    expect(clientJs).toMatch(/_scrml_engine_advance\("dragPhase", "Idle"/);
+    expect(clientJs).toMatch(/_scrml_cs_engine_advance\("dragPhase", "Idle"/);
   });
 });
 
@@ -211,11 +211,11 @@ function reset() {
     const { errors, clientJs } = compileToClientJs(src, "mixed-variants");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Unit-variant writes — bare string
-    expect(clientJs).toMatch(/_scrml_engine_direct_set\("phase", "Loading"/);
-    expect(clientJs).toMatch(/_scrml_engine_direct_set\("phase", "Idle"/);
+    expect(clientJs).toMatch(/_scrml_cs_engine_direct_set\("phase", "Loading"/);
+    expect(clientJs).toMatch(/_scrml_cs_engine_direct_set\("phase", "Idle"/);
     // Payload-bearing writes — tagged-object literal
-    expect(clientJs).toMatch(/_scrml_engine_direct_set\("phase", \{ variant: "Loaded", data: \{ count: n \} \}/);
-    expect(clientJs).toMatch(/_scrml_engine_direct_set\("phase", \{ variant: "Error", data: \{ msg: reason \} \}/);
+    expect(clientJs).toMatch(/_scrml_cs_engine_direct_set\("phase", \{ variant: "Loaded", data: \{ count: n \} \}/);
+    expect(clientJs).toMatch(/_scrml_cs_engine_direct_set\("phase", \{ variant: "Error", data: \{ msg: reason \} \}/);
     // No string-as-function bug anywhere
     expect(clientJs).not.toMatch(/"Loaded"\(/);
     expect(clientJs).not.toMatch(/"Error"\(/);
@@ -246,7 +246,7 @@ function done(n) {
     // emit, which produces `Phase.Loaded(n)` — invoking the constructor
     // function on the frozen enum object. The cell stores the returned
     // tagged-object; runtime helpers handle the tag extraction.
-    expect(clientJs).toMatch(/_scrml_engine_direct_set\("phase", Phase\.Loaded\(n\)/);
+    expect(clientJs).toMatch(/_scrml_cs_engine_direct_set\("phase", Phase\.Loaded\(n\)/);
   });
 });
 
@@ -434,6 +434,6 @@ describe("s95-bug-2 §9 — `is .Variant` AST-path tag normalization", () => {
     // the right-side variant-name string.
     expect(out).toContain('typeof __v.variant === "string"');
     expect(out).toContain('=== "Dragging"');
-    expect(out).toContain('_scrml_reactive_get("dragPhase")');
+    expect(out).toContain('_scrml_cs_reactive_get("dragPhase")');
   });
 });

@@ -494,7 +494,7 @@ describe("engine-a7-internal-rule §7 — distinct write path codegen", () => {
 
     // The wrap captures the boolean return and gates the hook-fire on it.
     // The exact identifier name is __scrml_engine_external (set by codegen).
-    expect(clientJs).toMatch(/const __scrml_engine_external = _scrml_engine_direct_set\(/);
+    expect(clientJs).toMatch(/const __scrml_engine_external = _scrml_cs_engine_direct_set\(/);
     expect(clientJs).toMatch(/if \(__scrml_engine_external\) __scrml_engine_appMode_fire_hooks\(/);
 
     // The internal-transitions table identifier must be threaded to the
@@ -503,7 +503,7 @@ describe("engine-a7-internal-rule §7 — distinct write path codegen", () => {
     // internal-rules in scope): direct_set(name, value, externalTable, null,
     // null, internalTable). Position-padding emits two `null` args before the
     // internal-table identifier so positional alignment holds.
-    expect(clientJs).toMatch(/_scrml_engine_direct_set\([\s\S]*?__scrml_engine_appMode_internal_transitions\)/);
+    expect(clientJs).toMatch(/_scrml_cs_engine_direct_set\([\s\S]*?__scrml_engine_appMode_internal_transitions\)/);
   });
 
   test("history cell is NOT written on internal transition (Bug #3 shipped, Wave 2.3)", () => {
@@ -552,7 +552,7 @@ describe("engine-a7-internal-rule §7 — distinct write path codegen", () => {
     //       _scrml_engine_direct_set(name, value, table, null, null,
     //         internalTable, historyMap)
     expect(clientJs).toMatch(
-      /_scrml_engine_direct_set\("appMode",[^,]+,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*__scrml_engine_appMode_internal_transitions,\s*__scrml_engine_appMode_history_map\)/,
+      /_scrml_cs_engine_direct_set\("appMode",[^,]+,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*__scrml_engine_appMode_internal_transitions,\s*__scrml_engine_appMode_history_map\)/,
     );
 
     // (4) The runtime-side contract — that the INTERNAL branch of

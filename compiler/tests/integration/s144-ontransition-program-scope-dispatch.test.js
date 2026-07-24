@@ -133,7 +133,7 @@ function toggle() { if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav
 
       // Emit-level guard: the if-body write must route through the engine
       // dispatcher, NOT a bare reactive_set, and fire_hooks must be emitted.
-      expect(clientJs).toContain("_scrml_engine_direct_set(\"mode\", \"Edit\"");
+      expect(clientJs).toContain("_scrml_cs_engine_direct_set(\"mode\", \"Edit\"");
       expect(clientJs).toContain("__scrml_engine_mode_fire_hooks");
       expect(clientJs).not.toMatch(/_scrml_reactive_set\("mode", "Edit"\)/);
 
@@ -172,7 +172,7 @@ function go() { if (@mode == Mode.Nav) { @mode.advance(.Edit) } }
 
       // Emit-level guard: routes through _scrml_engine_advance (NOT a method
       // call on the variant-string value).
-      expect(clientJs).toContain("_scrml_engine_advance(\"mode\", \"Edit\"");
+      expect(clientJs).toContain("_scrml_cs_engine_advance(\"mode\", \"Edit\"");
       expect(clientJs).toContain("__scrml_engine_mode_fire_hooks");
       expect(clientJs).not.toMatch(/_scrml_reactive_get\("mode"\)\.advance\(/);
 

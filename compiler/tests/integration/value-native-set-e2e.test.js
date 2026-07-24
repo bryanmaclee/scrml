@@ -100,24 +100,24 @@ describe("§59.12 value-native set — END-TO-END", () => {
   });
 
   test(".add(k) lowers to _scrml_map_insert(_, k, true) (the membership marker)", () => {
-    expect(out.clientJs).toMatch(/_scrml_map_insert\(_scrml_reactive_get\("tags"\), "urgent", true\)/);
+    expect(out.clientJs).toMatch(/_scrml_map_insert\(_scrml_cs_reactive_get\("tags"\), "urgent", true\)/);
   });
 
   test(".remove(k) lowers to _scrml_map_remove (shared map surface)", () => {
-    expect(out.clientJs).toMatch(/_scrml_map_remove\(_scrml_reactive_get\("tags"\), "urgent"\)/);
+    expect(out.clientJs).toMatch(/_scrml_map_remove\(_scrml_cs_reactive_get\("tags"\), "urgent"\)/);
   });
 
   test(".size lowers to _scrml_map_size; .has lowers to _scrml_map_has", () => {
-    expect(out.clientJs).toContain('_scrml_map_size(_scrml_reactive_get("tags"))');
-    expect(out.clientJs).toContain('_scrml_map_has(_scrml_reactive_get("tags"), "urgent")');
+    expect(out.clientJs).toContain('_scrml_map_size(_scrml_cs_reactive_get("tags"))');
+    expect(out.clientJs).toContain('_scrml_map_has(_scrml_cs_reactive_get("tags"), "urgent")');
   });
 
   test("bare <each in=@s> iterates the ELEMENTS via _scrml_map_keys", () => {
-    expect(out.clientJs).toContain('_scrml_map_keys(_scrml_reactive_get("tags"))');
+    expect(out.clientJs).toContain('_scrml_map_keys(_scrml_cs_reactive_get("tags"))');
   });
 
   test(".union/.intersect/.difference delegate to _scrml_stdlib.data + rebuild a set", () => {
-    expect(out.clientJs).toMatch(/_scrml_stdlib\.data\.union\(_scrml_map_keys\(_scrml_reactive_get\("tags"\)\), _scrml_map_keys\(_scrml_reactive_get\("other"\)\)\)/);
+    expect(out.clientJs).toMatch(/_scrml_stdlib\.data\.union\(_scrml_map_keys\(_scrml_cs_reactive_get\("tags"\)\), _scrml_map_keys\(_scrml_cs_reactive_get\("other"\)\)\)/);
     expect(out.clientJs).toContain("_scrml_stdlib.data.intersection(");
     expect(out.clientJs).toContain("_scrml_stdlib.data.difference(");
     // rebuilds a set: each result element → [k, true] → _scrml_map_from_entries
