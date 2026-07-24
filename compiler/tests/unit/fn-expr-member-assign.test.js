@@ -198,7 +198,7 @@ function compile(path) {
 function getJs(path) {
   const result = compile(path);
   expect(result.errors).toEqual([]);
-  return result.outputs.get(path).clientJs;
+  return foldChunkNamespacing(result.outputs.get(path).clientJs);
 }
 
 // ---------------------------------------------------------------------------

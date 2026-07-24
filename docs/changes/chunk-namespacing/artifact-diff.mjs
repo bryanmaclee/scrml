@@ -67,7 +67,7 @@ function fold(s) {
       // fold back to the bare pre-change name so the comparison is about the CALL,
       // not the wrapper the ruled prologue introduced. The prologue itself is
       // dropped by unwrapChunkScope; this only touches body call sites.
-      .replace(/(?<![.$\w])_scrml_cs_([a-z_]+)/g, "_scrml_$1")
+      .replace(/(?<![$\w])_scrml_cs_([a-z_]+)/g, "_scrml_$1")
       // `each_01nk4qam_24` -> `each_24`; `01nk4qam_phase` -> `phase`
       .replace(TOKEN, "")
       // content-addressed runtime/chunk filenames move when the runtime moves;

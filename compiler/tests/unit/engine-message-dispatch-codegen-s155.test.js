@@ -86,7 +86,7 @@ function compileFullClient(source, baseName = "msg-route") {
     const clientPath = resolve(outDir, `${baseName}.client.js`);
     return {
       errors: (result.errors ?? []).filter((e) => (e.severity ?? "error") === "error"),
-      js: existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "",
+      js: foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""),
     };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });

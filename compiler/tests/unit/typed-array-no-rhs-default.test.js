@@ -81,7 +81,7 @@ function compileToTmp(source, baseName = "app") {
 }
 
 function readClient(out, baseName) {
-  return readFileSync(join(out, `${baseName}.client.js`), "utf-8");
+  return foldChunkNamespacing(readFileSync(join(out, `${baseName}.client.js`), "utf-8"));
 }
 
 describe("§6.2 Shape 4 — typed-array no-RHS default to [] (AST)", () => {

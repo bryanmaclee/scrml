@@ -78,7 +78,7 @@ function getOut(result, key) {
   for (const [, v] of outputs) { if (v && typeof v === "object" && v[key]) return v[key]; }
   return "";
 }
-function getClientJs(result) { return getOut(result, "clientJs"); }
+function getClientJs(result) { return foldChunkNamespacing(getOut(result, "clientJs")); }
 // Normalize gensym counters + per-file client-js script name so two
 // STRUCTURALLY identical lowerings compare equal modulo placeholder ids.
 // The chunk-namespace token is STRIPPED first: these two fixtures are written to

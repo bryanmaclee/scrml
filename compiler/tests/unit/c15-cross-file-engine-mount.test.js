@@ -869,9 +869,9 @@ export
     });
     expect(realCompileErrors(result)).toEqual([]);
 
-    const aClient = readFileSync(join(outDir, "a.client.js"), "utf8");
-    const bClient = readFileSync(join(outDir, "b.client.js"), "utf8");
-    const enginesClient = readFileSync(join(outDir, "engines.client.js"), "utf8");
+    const aClient = foldChunkNamespacing(readFileSync(join(outDir, "a.client.js"), "utf8"));
+    const bClient = foldChunkNamespacing(readFileSync(join(outDir, "b.client.js"), "utf8"));
+    const enginesClient = foldChunkNamespacing(readFileSync(join(outDir, "engines.client.js"), "utf8"));
 
     // Both importers have the marker
     expect(aClient).toContain("§21.8 cross-file engine mount: phase");

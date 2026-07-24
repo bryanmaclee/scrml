@@ -44,7 +44,7 @@ function compileClientJs(filename, source) {
   writeFileSync(abs, source);
   compileScrml({ inputFiles: [abs], outputDir: join(TMP, "dist"), write: true, log: () => {} });
   const p = join(TMP, "dist", filename.replace(/\.scrml$/, "") + ".client.js");
-  return existsSync(p) ? readFileSync(p, "utf8") : "";
+  return foldChunkNamespacing(existsSync(p) ? readFileSync(p, "utf8") : "");
 }
 
 describe("§1-2 inline map-assign handler lowers `.insert` -> `_scrml_map_insert`", () => {

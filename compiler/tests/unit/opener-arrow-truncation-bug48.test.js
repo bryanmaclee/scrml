@@ -54,7 +54,7 @@ function fatalCodes(result) {
 function clientJs(filename) {
   const base = filename.replace(/\.scrml$/, "");
   const p = join(TMP, "dist", base + ".client.js");
-  return existsSync(p) ? readFileSync(p, "utf8") : "";
+  return foldChunkNamespacing(existsSync(p) ? readFileSync(p, "utf8") : "");
 }
 
 describe("§1 <match> opener with inline `=>` arrow in on=", () => {

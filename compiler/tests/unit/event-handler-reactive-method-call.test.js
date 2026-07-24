@@ -46,7 +46,7 @@ function compileSrcToTmp(src, basename = "method-call-test") {
       outputDir: tmpDir,
     });
     const clientPath = path.join(tmpDir, `${basename}.client.js`);
-    return fs.existsSync(clientPath) ? fs.readFileSync(clientPath, "utf-8") : null;
+    return foldChunkNamespacing(fs.existsSync(clientPath) ? fs.readFileSync(clientPath, "utf-8") : null);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

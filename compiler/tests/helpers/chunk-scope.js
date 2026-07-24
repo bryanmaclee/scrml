@@ -84,7 +84,7 @@ export function chunkNamespaceToken(clientJs) {
  * directly and must NOT fold.
  */
 export function foldChunkAccessors(js) {
-  return String(js ?? "").replace(/(?<![.$\w])_scrml_cs_([a-z_]+)/g, "_scrml_$1");
+  return String(js ?? "").replace(/(?<![$\w])_scrml_cs_([a-z_]+)/g, "_scrml_$1");
 }
 
 /**
@@ -180,7 +180,7 @@ export function unwrapChunkScope(js) {
   // names, so a no-runtime harness's shims (which provide the bare accessors)
   // resolve. The prologue that DEFINED the wrappers is already gone above; the
   // only `_scrml_cs_*` left are body call sites.
-  out = out.replace(/(?<![.$\w])_scrml_cs_([a-z_]+)/g, "_scrml_$1");
+  out = out.replace(/(?<![$\w])_scrml_cs_([a-z_]+)/g, "_scrml_$1");
   return out;
 }
 
