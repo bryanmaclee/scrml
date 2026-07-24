@@ -86,6 +86,14 @@ export function renameCellAccessors(
 
   const accessorSet = new Set(accessors);
   const ast = parseChunk(body);
+  // A body that does not parse is left UNCHANGED (no rename), never a hard error.
+  // Valid JS always parses (module-or-script + allowReturnOutsideFunction), so a
+  // failure means the chunk is ALREADY invalid from a PRE-EXISTING codegen quirk
+  // (e.g. the http stdlib emits `await` inside a non-async `function`) — such a
+  // chunk cannot run regardless, so skipping its rename introduces no scope leak
+  // that matters, whereas throwing would REGRESS a unit that compiled before this
+  // pass existed.
+  if (ast === null) return { code: body, used, valueReferences: 0 };
 
   interface Hit {
     start: number;
@@ -141,9 +149,12 @@ function isShieldedPosition(parent: AnyNode | null, key: string | null): boolean
 /**
  * Parse an emitted chunk. Classic chunks are scripts; the pre-esm shape still
  * parses as a module (the strictly larger grammar for our purposes). Module
- * first, script fallback — matching the deleted N2 pass this resurrects.
+ * first, script fallback — matching the deleted N2 pass this resurrects. Returns
+ * `null` when NEITHER grammar accepts the body: valid JS always parses, so a null
+ * here is a pre-existing invalid-JS chunk (a separate codegen bug), which the
+ * caller leaves un-renamed rather than crash a compile that succeeded before.
  */
-function parseChunk(js: string): AnyNode {
+function parseChunk(js: string): AnyNode | null {
   try {
     return acorn.parse(js, {
       ecmaVersion: 2022,
@@ -157,13 +168,8 @@ function parseChunk(js: string): AnyNode {
         sourceType: "script",
         allowReturnOutsideFunction: true,
       }) as unknown as AnyNode;
-    } catch (e) {
-      throw new Error(
-        `[scrml cell-accessor-rename] failed to parse a client chunk body while ` +
-          `renaming cell accessors: ${(e as Error).message}. The chunk drifted from a ` +
-          `parseable shape — the always-on rename cannot proceed, and skipping it would ` +
-          `leave calls bound to the un-namespaced global (a silent runtime clobber).`,
-      );
+    } catch {
+      return null;
     }
   }
 }

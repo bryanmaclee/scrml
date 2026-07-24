@@ -149,3 +149,22 @@ verification (acceptance already green both formats; gzip 16,330; C10.1 green;
 E-CG-018 catalogued).
 
 Base worktree (e8fdd44c) used for baselines removed.
+
+## 2026-07-23 — MECHANISM FIX: rename pass no longer crashes on pre-existing invalid JS
+
+Found during the fold campaign (batch 1): the rename pass HARD-THREW on the
+http stdlib chunk, which emits `await` inside a non-async `function`
+(`_scrml__request_1`) — genuinely invalid JS from a PRE-EXISTING async-coloring
+quirk (NOT caused by chunk-namespacing; conf-TRY-CATCH passed at 096f2239). My
+always-on `renameCellAccessors` parsed it and threw, converting a
+previously-tolerated emit into a codegen crash (regression).
+
+FIX (`cell-accessor-rename.ts`): `parseChunk` returns null (not throw) when
+neither module nor script grammar accepts the body; `renameCellAccessors` then
+leaves the body UNCHANGED. Valid JS always parses, so this only skips genuinely-
+invalid chunks (which cannot run anyway — no scope leak that matters), rather than
+crash a unit that compiled before the pass existed. http stdlib now compiles;
+conf-TRY-CATCH + both BUG-6 tests green (87/0).
+
+SEPARATE PRE-EXISTING BUG surfaced (report, out of scope): stdlib/http emits
+`_scrml__request_1` as a non-async `function` containing `await` — invalid JS.
