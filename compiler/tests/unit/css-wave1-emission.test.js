@@ -32,6 +32,7 @@ import {
   RESET_LAYER_CSS,
 } from "../../src/codegen/emit-theme-reset.ts";
 import { hoistCharsetAndImports } from "../../src/codegen/emit-css.ts";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -448,7 +449,7 @@ function compileClient(source) {
     writeFileSync(file, source);
     const r = compileScrml({ inputFiles: [file], write: false, outputDir: join(dir, "out") });
     const outputs = [...(r.outputs?.values() ?? [])];
-    const client = outputs.map((o) => o.clientJs ?? o.client ?? "").filter(Boolean).join("\n");
+    const client = outputs.map((o) => foldChunkNamespacing(o.clientJs) ?? o.client ?? "").filter(Boolean).join("\n");
     const css = outputs.map((o) => o.css ?? "").filter(Boolean).join("\n");
     return { client, css, errors: r.errors ?? [], warnings: r.warnings ?? [] };
   } finally {

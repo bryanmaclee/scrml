@@ -26,6 +26,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { runCG, CGError } from "../../src/code-generator.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -206,13 +207,13 @@ describe("§2: Server function → server route handler + client fetch stub", ()
     expect(out.serverJs).toContain("return 42");
 
     // Client JS should contain a fetch stub
-    expect(out.clientJs).toBeTruthy();
-    expect(out.clientJs).toContain("fetch");
-    expect(out.clientJs).toContain("/_scrml/__ri_route_getData_1");
-    expect(out.clientJs).toContain("async function");
-    expect(out.clientJs).toContain("POST");
-    expect(out.clientJs).toContain("Content-Type");
-    expect(out.clientJs).toContain("json");
+    expect(foldChunkNamespacing(out.clientJs)).toBeTruthy();
+    expect(foldChunkNamespacing(out.clientJs)).toContain("fetch");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("/_scrml/__ri_route_getData_1");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("async function");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("POST");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("Content-Type");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("json");
   });
 });
 
@@ -255,10 +256,10 @@ describe("§3: Independent operations → Promise.all in client JS", () => {
     });
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toBeTruthy();
+    expect(foldChunkNamespacing(out.clientJs)).toBeTruthy();
     // Client-only functions emit sequentially (Promise.all only for server calls)
-    expect(out.clientJs).toContain("fetchA()");
-    expect(out.clientJs).toContain("fetchB()");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("fetchA()");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("fetchB()");
   });
 });
 
@@ -304,9 +305,9 @@ describe("§4: Dependent operations → await chain", () => {
     });
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toBeTruthy();
+    expect(foldChunkNamespacing(out.clientJs)).toBeTruthy();
     // With a dependency edge, they should NOT be in Promise.all
-    expect(out.clientJs).not.toContain("Promise.all");
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("Promise.all");
   });
 });
 
@@ -414,7 +415,7 @@ describe("§6: Protected fields absent from client JS", () => {
 
     const out = result.outputs.get("/test/app.scrml");
     // The client JS should not contain .ssn (it wasn't in the source either, so no error)
-    expect(out.clientJs).not.toContain(".ssn");
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain(".ssn");
   });
 
   test("protected field in client JS triggers E-CG-001", () => {
@@ -511,7 +512,7 @@ describe("§6: Protected fields absent from client JS", () => {
     const out = result.outputs.get("/test/app.scrml");
     // The field name is present in the client bundle, but ONLY inside the string
     // literal — confirming this is the over-fire shape, not a missing emission.
-    expect(out.clientJs).toContain(".ssn");
+    expect(foldChunkNamespacing(out.clientJs)).toContain(".ssn");
     // ...and the scan must NOT fire, because it is not a code-position leak.
     const cgErrors = result.errors.filter(e => e.code === "E-CG-001");
     expect(cgErrors.length).toBe(0);
@@ -596,7 +597,7 @@ describe("§6: Protected fields absent from client JS", () => {
     });
     // The leak is present in the emitted client JS as a real member access...
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("row.ssn");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("row.ssn");
     // ...and the scan must now catch it (previously it silently leaked).
     const cgErrors = result.errors.filter(e => e.code === "E-CG-001");
     expect(cgErrors.length).toBeGreaterThanOrEqual(1);
@@ -1196,11 +1197,11 @@ describe("§17 — bind: directive code generation", () => {
     });
 
     const output = result.outputs.get("/test/app.scrml");
-    expect(output.clientJs).toContain('_scrml_reactive_get("username")');
-    expect(output.clientJs).toContain('addEventListener("input"');
-    expect(output.clientJs).toContain('_scrml_reactive_set("username"');
-    expect(output.clientJs).toContain('event.target.value');
-    expect(output.clientJs).toContain('_scrml_effect(');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_reactive_get("username")');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('addEventListener("input"');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_reactive_set("username"');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('event.target.value');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_effect(');
   });
 
   test("bind:checked generates addEventListener('change') with checked", () => {
@@ -1217,10 +1218,10 @@ describe("§17 — bind: directive code generation", () => {
     });
 
     const output = result.outputs.get("/test/app.scrml");
-    expect(output.clientJs).toContain('_scrml_reactive_get("agreed")');
-    expect(output.clientJs).toContain('addEventListener("change"');
-    expect(output.clientJs).toContain('event.target.checked');
-    expect(output.clientJs).toContain('_scrml_effect(');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_reactive_get("agreed")');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('addEventListener("change"');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('event.target.checked');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_effect(');
   });
 
   test("bind:selected generates onchange with target.value", () => {
@@ -1236,9 +1237,9 @@ describe("§17 — bind: directive code generation", () => {
     });
 
     const output = result.outputs.get("/test/app.scrml");
-    expect(output.clientJs).toContain('_scrml_reactive_get("choice")');
-    expect(output.clientJs).toContain('addEventListener("change"');
-    expect(output.clientJs).toContain('event.target.value');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_reactive_get("choice")');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('addEventListener("change"');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('event.target.value');
   });
 
   test("bind:group generates radio group binding with value comparison", () => {
@@ -1256,9 +1257,9 @@ describe("§17 — bind: directive code generation", () => {
     });
 
     const output = result.outputs.get("/test/app.scrml");
-    expect(output.clientJs).toContain('_scrml_reactive_get("color")');
-    expect(output.clientJs).toContain('.checked');
-    expect(output.clientJs).toContain('addEventListener("change"');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_reactive_get("color")');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('.checked');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('addEventListener("change"');
   });
 
   test("class:active directive generates classList.toggle", () => {
@@ -1274,10 +1275,10 @@ describe("§17 — bind: directive code generation", () => {
     });
 
     const output = result.outputs.get("/test/app.scrml");
-    expect(output.clientJs).toContain('classList.add("active")');
-    expect(output.clientJs).toContain('classList.toggle("active"');
-    expect(output.clientJs).toContain('_scrml_reactive_get("isActive")');
-    expect(output.clientJs).toContain('_scrml_effect(');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('classList.add("active")');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('classList.toggle("active"');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_reactive_get("isActive")');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_effect(');
   });
 
   test("class:active with expr RHS generates classList.toggle using expression", () => {
@@ -1298,13 +1299,13 @@ describe("§17 — bind: directive code generation", () => {
 
     const output = result.outputs.get("/test/app.scrml");
     // Initial mount: add class if expression is truthy
-    expect(output.clientJs).toContain('classList.add("active")');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('classList.add("active")');
     // Reactive subscription to the referenced variable
-    expect(output.clientJs).toContain('_scrml_effect(');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_effect(');
     // classList.toggle with the rewritten expression
-    expect(output.clientJs).toContain('classList.toggle("active"');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('classList.toggle("active"');
     // Expression rewritten: @tool -> _scrml_reactive_get("tool")
-    expect(output.clientJs).toContain('_scrml_reactive_get("tool")');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_reactive_get("tool")');
   });
 
   test("class:active with expr RHS NOT rendered as class: in HTML", () => {
@@ -1347,8 +1348,8 @@ describe("§17 — bind: directive code generation", () => {
     });
 
     const output = result.outputs.get("/test/app.scrml");
-    expect(output.clientJs).toContain('_scrml_effect(');
-    expect(output.clientJs).toContain('_scrml_effect(');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_effect(');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_effect(');
   });
 
   test("bind: attributes are NOT rendered in HTML output", () => {
@@ -1457,11 +1458,11 @@ describe("§18 — derived state-decl code generation", () => {
     });
 
     const output = result.outputs.get("/test/app.scrml");
-    expect(output.clientJs).toContain('_scrml_derived_declare("total"');
-    expect(output.clientJs).toContain('_scrml_derived_subscribe("total", "price")');
-    expect(output.clientJs).toContain('_scrml_derived_subscribe("total", "quantity")');
-    expect(output.clientJs).toContain('_scrml_reactive_get("price")');
-    expect(output.clientJs).toContain('_scrml_reactive_get("quantity")');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_derived_declare("total"');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_derived_subscribe("total", "price")');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_derived_subscribe("total", "quantity")');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_reactive_get("price")');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_reactive_get("quantity")');
   });
 
   test("const @x = 5 + 3 (no deps) emits W-DERIVED-001 and treats as const", () => {
@@ -1493,11 +1494,11 @@ describe("§18 — derived state-decl code generation", () => {
     });
 
     const output = result.outputs.get("/test/app.scrml");
-    expect(output.clientJs).toContain("W-DERIVED-001");
-    expect(output.clientJs).toContain("const x = 5 + 3");
+    expect(foldChunkNamespacing(output.clientJs)).toContain("W-DERIVED-001");
+    expect(foldChunkNamespacing(output.clientJs)).toContain("const x = 5 + 3");
     // The emitted statement for this no-deps derived should NOT call _scrml_reactive_derived.
     // (The runtime definition of _scrml_reactive_derived is present but not called for this case.)
-    expect(output.clientJs).not.toContain('_scrml_reactive_derived("x"');
+    expect(foldChunkNamespacing(output.clientJs)).not.toContain('_scrml_reactive_derived("x"');
   });
 
   test("derived with single reactive dep emits _scrml_derived_declare + _scrml_derived_subscribe (§6.6)", () => {
@@ -1529,9 +1530,9 @@ describe("§18 — derived state-decl code generation", () => {
     });
 
     const output = result.outputs.get("/test/app.scrml");
-    expect(output.clientJs).toContain('_scrml_derived_declare("doubled"');
-    expect(output.clientJs).toContain('_scrml_derived_subscribe("doubled", "count")');
-    expect(output.clientJs).toContain('_scrml_reactive_get("count")');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_derived_declare("doubled"');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_derived_subscribe("doubled", "count")');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_reactive_get("count")');
   });
 
   test("no CG errors for valid derived decl", () => {
@@ -1763,9 +1764,9 @@ describe("ref= attribute", () => {
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('querySelector');
-    expect(out.clientJs).toContain('data-scrml-ref="el"');
-    expect(out.clientJs).toContain('_scrml_reactive_set("el"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('querySelector');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('data-scrml-ref="el"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_set("el"');
   });
 
   test("ref= does not appear in server JS", () => {
@@ -1820,8 +1821,8 @@ describe("cleanup() built-in", () => {
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("_scrml_register_cleanup");
-    expect(out.clientJs).toContain("clearInterval(timer)");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_register_cleanup");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("clearInterval(timer)");
   });
 });
 
@@ -1846,7 +1847,7 @@ describe("upload() built-in", () => {
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("_scrml_upload");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_upload");
   });
 });
 
@@ -1872,8 +1873,8 @@ describe("bind:files directive", () => {
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("selectedFiles");
-    expect(out.clientJs).toContain("files");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("selectedFiles");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("files");
   });
 });
 
@@ -1914,8 +1915,8 @@ describe("debounce/throttle built-ins — RETIRED S81 OQ-2", () => {
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
     // The two retired helpers MUST NOT appear in default compiled output.
-    expect(out.clientJs).not.toContain("function _scrml_debounce(");
-    expect(out.clientJs).not.toContain("function _scrml_throttle(");
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("function _scrml_debounce(");
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("function _scrml_throttle(");
   });
 });
 
@@ -1942,8 +1943,8 @@ describe("navigate() rewriting", () => {
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("_scrml_navigate");
-    expect(out.clientJs).not.toMatch(/(?<!_scrml_)navigate\s*\(/);
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_navigate");
+    expect(foldChunkNamespacing(out.clientJs)).not.toMatch(/(?<!_scrml_)navigate\s*\(/);
   });
 
   test("navigate with template literal is rewritten (client → soft, navigate-wave1b #4)", () => {
@@ -1965,7 +1966,7 @@ describe("navigate() rewriting", () => {
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
     // A client-context navigate lowers to the §20.8 soft-navigation engine.
-    expect(out.clientJs).toContain("_scrml_navigate_soft(`/users/");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_navigate_soft(`/users/");
   });
 });
 
@@ -1992,10 +1993,10 @@ describe("nested reactive rewriting", () => {
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("_scrml_deep_set");
-    expect(out.clientJs).toContain("_scrml_reactive_set");
-    expect(out.clientJs).toContain('"user"');
-    expect(out.clientJs).toContain('["name"]');
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_deep_set");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_reactive_set");
+    expect(foldChunkNamespacing(out.clientJs)).toContain('"user"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('["name"]');
   });
 
   test("reactive-array-mutation push uses direct Proxy mutation", () => {
@@ -2016,8 +2017,8 @@ describe("nested reactive rewriting", () => {
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain(".push(newItem)");
-    expect(out.clientJs).toContain("newItem");
+    expect(foldChunkNamespacing(out.clientJs)).toContain(".push(newItem)");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("newItem");
   });
 
   test("reactive-array-mutation splice generates immutable splice", () => {
@@ -2038,8 +2039,8 @@ describe("nested reactive rewriting", () => {
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain(".splice(idx, 1)");
-    expect(out.clientJs).toContain("_scrml_reactive_set");
+    expect(foldChunkNamespacing(out.clientJs)).toContain(".splice(idx, 1)");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_reactive_set");
   });
 
   test("reactive-explicit-set generates _scrml_reactive_explicit_set call", () => {
@@ -2060,7 +2061,7 @@ describe("nested reactive rewriting", () => {
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("_scrml_reactive_explicit_set");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_reactive_explicit_set");
   });
 });
 

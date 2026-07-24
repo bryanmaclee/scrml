@@ -18,6 +18,7 @@ import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync } from "f
 import { join } from "path";
 import { tmpdir } from "os";
 import vm from "vm";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 let TMP;
 
@@ -53,7 +54,7 @@ function compileSample() {
   const outDir = join(TMP, "dist");
   const result = compileScrml({ inputFiles: [filePath], outputDir: outDir, write: true, log: () => {} });
   const errors = (result.errors || []).filter(e => e.severity == null || e.severity === "error");
-  const clientJs = readFileSync(join(outDir, "fares.client.js"), "utf8");
+  const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "fares.client.js"), "utf8")));
   const runtimeFile = readdirSync(outDir).find(f => f.startsWith("scrml-runtime."));
   const runtimeJs = readFileSync(join(outDir, runtimeFile), "utf8");
   return { errors, clientJs, runtimeJs };
@@ -68,7 +69,7 @@ describe("§59 value-native map — END-TO-END", () => {
   });
 
   test("emitted client JS is syntactically valid", () => {
-    expect(() => new vm.Script(out.clientJs)).not.toThrow();
+    expect(() => new vm.Script(foldChunkNamespacing(out.clientJs))).not.toThrow();
   });
 
   test("emitted runtime JS is syntactically valid", () => {
@@ -76,23 +77,23 @@ describe("§59 value-native map — END-TO-END", () => {
   });
 
   test("map literal [:] lowers to _scrml_map_from_entries", () => {
-    expect(out.clientJs).toContain("_scrml_map_from_entries([], false)");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_map_from_entries([], false)");
   });
 
   test(".insert lowers to _scrml_map_insert via _scrml_reactive_set (reassignment-canonical)", () => {
-    expect(out.clientJs).toMatch(/_scrml_reactive_set\("fareByLane", _scrml_map_insert\(_scrml_reactive_get\("fareByLane"\), "DAL-001", 4500\)\)/);
+    expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_reactive_set\("fareByLane", _scrml_map_insert\(_scrml_reactive_get\("fareByLane"\), "DAL-001", 4500\)\)/);
   });
 
   test("@m[k] bracket-read lowers to _scrml_map_get", () => {
-    expect(out.clientJs).toContain('_scrml_map_get(_scrml_reactive_get("fareByLane"), "DAL-001")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_map_get(_scrml_reactive_get("fareByLane"), "DAL-001")');
   });
 
   test("@m.size lowers to _scrml_map_size", () => {
-    expect(out.clientJs).toContain('_scrml_map_size(_scrml_reactive_get("fareByLane"))');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_map_size(_scrml_reactive_get("fareByLane"))');
   });
 
   test("<each in=@m.entries()> lowers to _scrml_map_entries", () => {
-    expect(out.clientJs).toContain('_scrml_map_entries(_scrml_reactive_get("fareByLane"))');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_map_entries(_scrml_reactive_get("fareByLane"))');
   });
 
   test("the 'map' runtime chunk SURVIVES tree-shaking (helpers present)", () => {
@@ -189,7 +190,7 @@ function compileOrdered() {
   const outDir = join(dir, "dist");
   const result = compileScrml({ inputFiles: [filePath], outputDir: outDir, write: true, log: () => {} });
   const errors = (result.errors || []).filter(e => e.severity == null || e.severity === "error");
-  const clientJs = readFileSync(join(outDir, "ordered.client.js"), "utf8");
+  const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "ordered.client.js"), "utf8")));
   rmSync(dir, { recursive: true, force: true });
   return { errors, clientJs };
 }
@@ -203,29 +204,29 @@ describe("§59.8 value-native map — @ordered builds ORDERED (S169)", () => {
   });
 
   test("emitted client JS is syntactically valid", () => {
-    expect(() => new vm.Script(out.clientJs)).not.toThrow();
+    expect(() => new vm.Script(foldChunkNamespacing(out.clientJs))).not.toThrow();
   });
 
   test("@ordered decl-init literal lowers ORDERED (reactive_set + init_set)", () => {
-    expect(out.clientJs).toContain('_scrml_reactive_set("ordered", _scrml_map_from_entries([["b", 2], ["a", 1]], true))');
-    expect(out.clientJs).toContain('_scrml_init_set("ordered", () => _scrml_map_from_entries([["b", 2], ["a", 1]], true))');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_set("ordered", _scrml_map_from_entries([["b", 2], ["a", 1]], true))');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_init_set("ordered", () => _scrml_map_from_entries([["b", 2], ["a", 1]], true))');
   });
 
   test("@ordered empty [:] init lowers ORDERED", () => {
-    expect(out.clientJs).toContain('_scrml_reactive_set("emptyOrdered", _scrml_map_from_entries([], true))');
-    expect(out.clientJs).toContain('_scrml_init_set("emptyOrdered", () => _scrml_map_from_entries([], true))');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_set("emptyOrdered", _scrml_map_from_entries([], true))');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_init_set("emptyOrdered", () => _scrml_map_from_entries([], true))');
   });
 
   test("a reassignment `@ordered = [...]` inside a function body lowers ORDERED", () => {
-    expect(out.clientJs).toContain('_scrml_reactive_set("ordered", _scrml_map_from_entries([["c", 3], ["d", 4]], true))');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_set("ordered", _scrml_map_from_entries([["c", 3], ["d", 4]], true))');
   });
 
   test("a NON-@ordered map cell stays UNORDERED", () => {
-    expect(out.clientJs).toContain('_scrml_reactive_set("plain", _scrml_map_from_entries([["b", 2], ["a", 1]], false))');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_set("plain", _scrml_map_from_entries([["b", 2], ["a", 1]], false))');
   });
 
   test("a NESTED map-VALUE literal inside an @ordered cell stays UNORDERED (outer ordered)", () => {
     // Outer ordered (`, true)`), inner value-map unordered (`, false)`).
-    expect(out.clientJs).toContain('_scrml_reactive_set("nested", _scrml_map_from_entries([["outer", _scrml_map_from_entries([["b", 2], ["a", 1]], false)]], true))');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_set("nested", _scrml_map_from_entries([["outer", _scrml_map_from_entries([["b", 2], ["a", 1]], false)]], true))');
   });
 });

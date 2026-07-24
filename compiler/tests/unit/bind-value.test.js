@@ -34,6 +34,7 @@ import { describe, test, expect } from "bun:test";
 import { runCG, CGError } from "../../src/code-generator.js";
 import { generateHtml } from "../../src/codegen/emit-html.js";
 import { resetVarCounter } from "../../src/codegen/var-counter.ts";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -161,7 +162,7 @@ describe("§1: bind:value on <input> uses 'input' event", () => {
 
     expect(result.errors.filter(e => e.code === "E-ATTR-010" || e.code === "E-ATTR-011" || e.code === "E-ATTR-012")).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('addEventListener("input"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('addEventListener("input"');
   });
 
   test("clientJs subscribes reactively for <input bind:value=@name>", () => {
@@ -169,8 +170,8 @@ describe("§1: bind:value on <input> uses 'input' event", () => {
     const result = compile(node);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("_scrml_effect");
-    expect(out.clientJs).toContain('"name"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_effect");
+    expect(foldChunkNamespacing(out.clientJs)).toContain('"name"');
   });
 });
 
@@ -185,7 +186,7 @@ describe("§2: bind:value on <textarea> uses 'input' event", () => {
 
     expect(result.errors.filter(e => e.code === "E-ATTR-010" || e.code === "E-ATTR-011" || e.code === "E-ATTR-012")).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('addEventListener("input"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('addEventListener("input"');
   });
 });
 
@@ -200,8 +201,8 @@ describe("§3: bind:value on <select> uses 'change' event", () => {
 
     expect(result.errors.filter(e => e.code === "E-ATTR-010" || e.code === "E-ATTR-011" || e.code === "E-ATTR-012")).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('addEventListener("change"');
-    expect(out.clientJs).not.toContain('addEventListener("input"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('addEventListener("change"');
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain('addEventListener("input"');
   });
 
   test("select bind:value comment says bind:value=@choice", () => {
@@ -209,7 +210,7 @@ describe("§3: bind:value on <select> uses 'change' event", () => {
     const result = compile(node);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("// bind:value=@choice");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("// bind:value=@choice");
   });
 });
 
@@ -227,8 +228,8 @@ describe("§4: bind:checked on <input> uses 'change' event", () => {
 
     expect(result.errors.filter(e => e.code === "E-ATTR-010" || e.code === "E-ATTR-011" || e.code === "E-ATTR-012")).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('addEventListener("change"');
-    expect(out.clientJs).toContain("event.target.checked");
+    expect(foldChunkNamespacing(out.clientJs)).toContain('addEventListener("change"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain("event.target.checked");
   });
 });
 
@@ -243,7 +244,7 @@ describe("§5: bind:selected on <select> uses 'change' event", () => {
 
     expect(result.errors.filter(e => e.code === "E-ATTR-010" || e.code === "E-ATTR-011" || e.code === "E-ATTR-012")).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('addEventListener("change"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('addEventListener("change"');
   });
 });
 
@@ -262,8 +263,8 @@ describe("§6: bind:group on <input type=radio> uses 'change' event", () => {
 
     expect(result.errors.filter(e => e.code === "E-ATTR-010" || e.code === "E-ATTR-011" || e.code === "E-ATTR-012")).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('addEventListener("change"');
-    expect(out.clientJs).toContain(".checked");
+    expect(foldChunkNamespacing(out.clientJs)).toContain('addEventListener("change"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain(".checked");
   });
 });
 
@@ -636,8 +637,8 @@ describe("§16: Multiple bind: elements — no cross-contamination", () => {
     expect(out.html).toContain("data-scrml-bind-value=");
     expect(out.html).toContain("data-scrml-bind-checked=");
     // input event for bind:value, change event for bind:checked
-    expect(out.clientJs).toContain('addEventListener("input"');
-    expect(out.clientJs).toContain('addEventListener("change"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('addEventListener("input"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('addEventListener("change"');
   });
 });
 
@@ -661,8 +662,8 @@ describe("§17: bind:value=@obj.field — one-level path binding on <input>", ()
     const result = compile(node);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('_scrml_reactive_get("form").email');
-    expect(out.clientJs).not.toContain('_scrml_reactive_get("form.email")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_get("form").email');
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain('_scrml_reactive_get("form.email")');
   });
 
   test("write uses _scrml_deep_set on event", () => {
@@ -670,10 +671,10 @@ describe("§17: bind:value=@obj.field — one-level path binding on <input>", ()
     const result = compile(node);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('_scrml_deep_set');
-    expect(out.clientJs).toContain('"form"');
-    expect(out.clientJs).toContain('["email"]');
-    expect(out.clientJs).toContain('event.target.value');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_deep_set');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('"form"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('["email"]');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('event.target.value');
   });
 
   test("subscription subscribes to root key 'form', not 'form.email'", () => {
@@ -682,10 +683,10 @@ describe("§17: bind:value=@obj.field — one-level path binding on <input>", ()
 
     const out = result.outputs.get("/test/app.scrml");
     // Effect reads the root "form" key via _scrml_reactive_get
-    expect(out.clientJs).toContain('_scrml_effect');
-    expect(out.clientJs).toContain('_scrml_reactive_get("form")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_effect');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_get("form")');
     // Must NOT subscribe to the dotted key directly
-    expect(out.clientJs).not.toContain('_scrml_reactive_get("form.email"');
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain('_scrml_reactive_get("form.email"');
   });
 
   test("effect reads the path directly via _scrml_reactive_get", () => {
@@ -694,7 +695,7 @@ describe("§17: bind:value=@obj.field — one-level path binding on <input>", ()
 
     const out = result.outputs.get("/test/app.scrml");
     // Effect reads the full path: _scrml_reactive_get("form").email
-    expect(out.clientJs).toContain('_scrml_reactive_get("form").email');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_get("form").email');
   });
 
   test("uses 'input' event (not 'change') for <input>", () => {
@@ -702,7 +703,7 @@ describe("§17: bind:value=@obj.field — one-level path binding on <input>", ()
     const result = compile(node);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('addEventListener("input"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('addEventListener("input"');
   });
 
   test("comment identifies the path variable correctly", () => {
@@ -710,7 +711,7 @@ describe("§17: bind:value=@obj.field — one-level path binding on <input>", ()
     const result = compile(node);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("// bind:value=@form.email");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("// bind:value=@form.email");
   });
 });
 
@@ -734,8 +735,8 @@ describe("§18: bind:value=@obj.field path binding on <select>", () => {
     const result = compile(node);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('addEventListener("change"');
-    expect(out.clientJs).not.toContain('addEventListener("input"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('addEventListener("change"');
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain('addEventListener("input"');
   });
 
   test("write uses _scrml_deep_set for <select bind:value=@form.country>", () => {
@@ -743,9 +744,9 @@ describe("§18: bind:value=@obj.field path binding on <select>", () => {
     const result = compile(node);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('_scrml_deep_set');
-    expect(out.clientJs).toContain('"form"');
-    expect(out.clientJs).toContain('["country"]');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_deep_set');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('"form"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('["country"]');
   });
 
   test("subscription subscribes to root key 'form' for <select bind:value=@form.country>", () => {
@@ -753,9 +754,9 @@ describe("§18: bind:value=@obj.field path binding on <select>", () => {
     const result = compile(node);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('_scrml_effect');
-    expect(out.clientJs).toContain('_scrml_reactive_get("form")');
-    expect(out.clientJs).not.toContain('_scrml_reactive_get("form.country"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_effect');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_get("form")');
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain('_scrml_reactive_get("form.country"');
   });
 });
 
@@ -779,7 +780,7 @@ describe("§19: bind:value=@a.b.c — multi-level path binding", () => {
     const result = compile(node);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('_scrml_reactive_get("config").user.name');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_get("config").user.name');
   });
 
   test("write uses _scrml_deep_set with path [\"user\",\"name\"]", () => {
@@ -787,8 +788,8 @@ describe("§19: bind:value=@a.b.c — multi-level path binding", () => {
     const result = compile(node);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('["user","name"]');
-    expect(out.clientJs).toContain('"config"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('["user","name"]');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('"config"');
   });
 
   test("subscription subscribes to root key 'config'", () => {
@@ -796,9 +797,9 @@ describe("§19: bind:value=@a.b.c — multi-level path binding", () => {
     const result = compile(node);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('_scrml_effect');
-    expect(out.clientJs).toContain('_scrml_reactive_get("config")');
-    expect(out.clientJs).not.toContain('_scrml_reactive_get("config.user.name"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_effect');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_get("config")');
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain('_scrml_reactive_get("config.user.name"');
   });
 
   test("effect reads the full path via _scrml_reactive_get", () => {
@@ -807,7 +808,7 @@ describe("§19: bind:value=@a.b.c — multi-level path binding", () => {
 
     const out = result.outputs.get("/test/app.scrml");
     // Effect reads _scrml_reactive_get("config").user.name directly
-    expect(out.clientJs).toContain('_scrml_reactive_get("config").user.name');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_get("config").user.name');
   });
 });
 
@@ -821,7 +822,7 @@ describe("§20: Simple @var binding still uses flat reactive key (no regression)
     const result = compile(node);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).not.toContain('_scrml_deep_set');
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain('_scrml_deep_set');
   });
 
   test("<input bind:value=@name> subscribe key is 'name' (no dot)", () => {
@@ -829,7 +830,7 @@ describe("§20: Simple @var binding still uses flat reactive key (no regression)
     const result = compile(node);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('_scrml_effect');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_effect');
   });
 
   test("<input bind:value=@name> set call uses flat _scrml_reactive_set(\"name\", ...)", () => {
@@ -837,7 +838,7 @@ describe("§20: Simple @var binding still uses flat reactive key (no regression)
     const result = compile(node);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('_scrml_reactive_set("name", event.target.value)');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_set("name", event.target.value)');
   });
 });
 
@@ -881,10 +882,10 @@ describe("§22: Two path-bound inputs — no cross-contamination", () => {
 
     const out = result.outputs.get("/test/app.scrml");
     // Both fields projected in callbacks
-    expect(out.clientJs).toContain('["email"]');
-    expect(out.clientJs).toContain('["password"]');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('["email"]');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('["password"]');
     // Both fields use _scrml_effect that reads _scrml_reactive_get("form")
-    const effectMatches = [...out.clientJs.matchAll(/_scrml_effect\(\(\) => \{/g)];
+    const effectMatches = [...foldChunkNamespacing(out.clientJs).matchAll(/_scrml_effect\(\(\) => \{/g)];
     expect(effectMatches.length).toBe(2);
   });
 });
@@ -915,7 +916,7 @@ describe("§23: bind:valueAsNumber — Number() coercion", () => {
     const result = compile(node);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("Number(event.target.value)");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("Number(event.target.value)");
   });
 
   test("bind:valueAsNumber emits input event (not change) for <input>", () => {
@@ -926,7 +927,7 @@ describe("§23: bind:valueAsNumber — Number() coercion", () => {
     const result = compile(node);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('addEventListener("input"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('addEventListener("input"');
   });
 
   test("bind:valueAsNumber emits change event for <select>", () => {
@@ -934,7 +935,7 @@ describe("§23: bind:valueAsNumber — Number() coercion", () => {
     const result = compile(node);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('addEventListener("change"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('addEventListener("change"');
   });
 
   test("bind:valueAsNumber emits data-scrml-bind-valueAsNumber placeholder in HTML", () => {
@@ -982,8 +983,8 @@ describe("§24: bind:value + oninput= coexistence — both bindings emitted", ()
 
     const out = result.outputs.get("/test/app.scrml");
     // bind:value wiring — reactive set on input event
-    expect(out.clientJs).toContain('addEventListener("input"');
-    expect(out.clientJs).toContain('_scrml_reactive_set("filter"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('addEventListener("input"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_set("filter"');
   });
 
   test("bind:value + oninput= registers the explicit handler in event bindings", () => {
@@ -1009,7 +1010,7 @@ describe("§24: bind:value + oninput= coexistence — both bindings emitted", ()
 
     const out = result.outputs.get("/test/app.scrml");
     // bind:checked uses _scrml_effect for reactive updates
-    expect(out.clientJs).toContain('_scrml_effect');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_effect');
     // explicit handler placeholder in HTML
     expect(out.html).toContain("data-scrml-bind-onchange=");
   });
@@ -1057,8 +1058,8 @@ describe("§25: bind:value on <select> with enum-typed @var — toEnum coercion"
 
     const out = result.outputs.get("/test/app.scrml");
     expect(result.errors.filter(e => e.code && e.code.startsWith("E-ATTR"))).toHaveLength(0);
-    expect(out.clientJs).toContain("Theme_toEnum[event.target.value]");
-    expect(out.clientJs).toContain('addEventListener("change"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain("Theme_toEnum[event.target.value]");
+    expect(foldChunkNamespacing(out.clientJs)).toContain('addEventListener("change"');
   });
 
   test("§25.2 non-enum @var on <select> does NOT get toEnum coercion", () => {
@@ -1074,8 +1075,8 @@ describe("§25: bind:value on <select> with enum-typed @var — toEnum coercion"
     });
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).not.toContain("_toEnum[event.target.value]");
-    expect(out.clientJs).toContain("event.target.value");
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("_toEnum[event.target.value]");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("event.target.value");
   });
 
   test("§25.3 enum-typed @var on <input> (not <select>) does NOT get toEnum coercion", () => {
@@ -1094,8 +1095,8 @@ describe("§25: bind:value on <select> with enum-typed @var — toEnum coercion"
     });
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).not.toContain("Status_toEnum[event.target.value]");
-    expect(out.clientJs).toContain("event.target.value");
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("Status_toEnum[event.target.value]");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("event.target.value");
   });
 
   test("§25.4 enum select with dot-prefix init (.Light) is correctly inferred", () => {
@@ -1114,7 +1115,7 @@ describe("§25: bind:value on <select> with enum-typed @var — toEnum coercion"
     });
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("Theme_toEnum[event.target.value]");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("Theme_toEnum[event.target.value]");
   });
 
   test("§25.5 enum select with :: prefix init (::Light) is correctly inferred", () => {
@@ -1133,7 +1134,7 @@ describe("§25: bind:value on <select> with enum-typed @var — toEnum coercion"
     });
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("Theme_toEnum[event.target.value]");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("Theme_toEnum[event.target.value]");
   });
 
   test("§25.6 coercion uses fallback: ?? event.target.value for unknown variants", () => {
@@ -1152,7 +1153,7 @@ describe("§25: bind:value on <select> with enum-typed @var — toEnum coercion"
     });
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("?? event.target.value");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("?? event.target.value");
   });
 
   test("§25.7 multiple enum types — each select var coerces to its own enum type", () => {
@@ -1176,8 +1177,8 @@ describe("§25: bind:value on <select> with enum-typed @var — toEnum coercion"
     });
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("Theme_toEnum[event.target.value]");
-    expect(out.clientJs).toContain("Role_toEnum[event.target.value]");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("Theme_toEnum[event.target.value]");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("Role_toEnum[event.target.value]");
   });
 
   test("§25.8 enum lookup tables are emitted when typeDecls includes enum", () => {
@@ -1196,8 +1197,8 @@ describe("§25: bind:value on <select> with enum-typed @var — toEnum coercion"
     });
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('const Theme_toEnum');
-    expect(out.clientJs).toContain('"Light": "Light"');
-    expect(out.clientJs).toContain('"Dark": "Dark"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('const Theme_toEnum');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('"Light": "Light"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('"Dark": "Dark"');
   });
 });

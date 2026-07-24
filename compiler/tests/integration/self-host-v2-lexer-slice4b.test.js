@@ -26,6 +26,7 @@ import { tmpdir } from "os";
 
 import { compileScrml } from "../../src/api.js";
 import { lex as lex1 } from "../../native-parser/lex.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const LEX_SCRML = join(import.meta.dir, "..", "..", "self-host-v2", "lex.scrml");
 

@@ -55,6 +55,7 @@ import { parseEngineStateChildren } from "../../src/engine-statechild-parser.ts"
 import { parseMatchArms } from "../../src/match-statechild-parser.ts";
 import { compileScrml } from "../../src/api.js";
 import { rewriteColonShorthandPlacement } from "../../src/commands/migrate.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 let TMP;
 beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "s154b-")); });

@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
@@ -46,7 +47,7 @@ function compile(scrmlSource) {
     });
     let clientJs = "";
     for (const [fp, output] of result.outputs) {
-      if (fp.includes(tag)) clientJs = output.clientJs ?? "";
+      if (fp.includes(tag)) clientJs = foldChunkNamespacing(output.clientJs) ?? "";
     }
     return { errors: result.errors ?? [], warnings: result.warnings ?? [], clientJs };
   } finally {
@@ -62,11 +63,11 @@ function fnBody(clientJs, name) {
 
 describe("COW-all bracket-write emit shape (cycles-prereq S168)", () => {
   test("computed index `@arr[@sel] = 99` → _scrml_deep_set with inline index expr", () => {
-    const { errors, clientJs } = compile([
+    const { errors, clientJs: __cjRaw } = compile([
       "<arr> = [1, 2, 3]",
       "<sel> = 1",
       "function bump() { @arr[@sel] = 99 }",
-    ].join("\n"));
+    ].join("\n")); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.length).toBe(0);
     const body = fnBody(clientJs, "bump");
     expect(body).toBeTruthy();
@@ -78,10 +79,10 @@ describe("COW-all bracket-write emit shape (cycles-prereq S168)", () => {
   });
 
   test("literal numeric index `@arr[0] = @arr` → COW string segment, NO live cycle", () => {
-    const { errors, clientJs } = compile([
+    const { errors, clientJs: __cjRaw } = compile([
       "<arr> = [1, 2, 3]",
       "function evil() { @arr[0] = @arr }",
-    ].join("\n"));
+    ].join("\n")); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.length).toBe(0);
     const body = fnBody(clientJs, "evil");
     expect(body).toBeTruthy();
@@ -94,10 +95,10 @@ describe("COW-all bracket-write emit shape (cycles-prereq S168)", () => {
   });
 
   test("literal string index `@m[\"DAL\"] = 99` → COW string segment", () => {
-    const { errors, clientJs } = compile([
+    const { errors, clientJs: __cjRaw } = compile([
       "<m> = { DAL: 1, IAH: 2 }",
       'function setKey() { @m["DAL"] = 99 }',
-    ].join("\n"));
+    ].join("\n")); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.length).toBe(0);
     const body = fnBody(clientJs, "setKey");
     expect(body).toContain(
@@ -106,12 +107,12 @@ describe("COW-all bracket-write emit shape (cycles-prereq S168)", () => {
   });
 
   test("nested computed indices `@grid[@r][@c] = 9` → two inline index exprs", () => {
-    const { errors, clientJs } = compile([
+    const { errors, clientJs: __cjRaw } = compile([
       "<grid> = [[1, 2], [3, 4]]",
       "<r> = 0",
       "<c> = 1",
       "function setCell() { @grid[@r][@c] = 9 }",
-    ].join("\n"));
+    ].join("\n")); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.length).toBe(0);
     const body = fnBody(clientJs, "setCell");
     expect(body).toContain(
@@ -126,12 +127,12 @@ describe("COW-all bracket-write emit shape (cycles-prereq S168)", () => {
     // leaf `obj.field` and COW the bracket index `[0]` into its value. (Pre-fix
     // this asserted `_scrml_reactive_set("obj", _scrml_deep_set(... ["field","0"]))`,
     // which wrote the composite and was clobbered by the derived recompute.)
-    const { errors, clientJs } = compile([
+    const { errors, clientJs: __cjRaw } = compile([
       "<obj>",
       "    <field> = [1, 2]",
       "</>",
       "function setMix() { @obj.field[0] = 5 }",
-    ].join("\n"));
+    ].join("\n")); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.length).toBe(0);
     const body = fnBody(clientJs, "setMix");
     expect(body).toContain(
@@ -141,11 +142,11 @@ describe("COW-all bracket-write emit shape (cycles-prereq S168)", () => {
   });
 
   test("bracket READ `let x = @arr[@sel]` reconstructs verbatim — NOT COW'd", () => {
-    const { errors, clientJs } = compile([
+    const { errors, clientJs: __cjRaw } = compile([
       "<arr> = [1, 2, 3]",
       "<sel> = 0",
       "function readIt() { let x = @arr[@sel]\n return x }",
-    ].join("\n"));
+    ].join("\n")); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.length).toBe(0);
     const body = fnBody(clientJs, "readIt");
     expect(body).toContain('_scrml_reactive_get("arr")[_scrml_reactive_get("sel")]');
@@ -153,13 +154,13 @@ describe("COW-all bracket-write emit shape (cycles-prereq S168)", () => {
   });
 
   test("multi-statement: bracket + dotted writes ALL survive in source order", () => {
-    const { errors, clientJs } = compile([
+    const { errors, clientJs: __cjRaw } = compile([
       "<a> = [1, 2, 3]",
       "<b>",
       "    <k> = 0",
       "</>",
       "function multi() {\n @a[0] = 10\n @b.k = 20\n @a[1] = 30\n }",
-    ].join("\n"));
+    ].join("\n")); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.length).toBe(0);
     const body = fnBody(clientJs, "multi");
     expect(body).toBeTruthy();

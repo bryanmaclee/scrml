@@ -33,6 +33,7 @@ import { compileScrml } from "../../src/api.js";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -79,7 +80,7 @@ function compileInline(source) {
     return {
       errors: result.errors || [],
       warnings: result.warnings || [],
-      clientJs: existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "",
+      clientJs:foldChunkNamespacing( foldChunkNamespacing)(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""),
       html: existsSync(htmlPath) ? readFileSync(htmlPath, "utf8") : "",
     };
   } finally {
@@ -217,7 +218,7 @@ describe("Cluster-C Bug 2 — markup const over-consuming siblings", () => {
 </page>`;
     const r = compileInline(src);
     expect(r.errors).toEqual([]);
-    expect(r.clientJs).toContain('_scrml_reactive_set("name", "Ada")');
+    expect(foldChunkNamespacing(r.clientJs)).toContain('_scrml_reactive_set("name", "Ada")');
   });
 
   test("multi-cell — const then `<a>=1 <b>=2 <c>=3` all register with init", () => {
@@ -232,9 +233,9 @@ describe("Cluster-C Bug 2 — markup const over-consuming siblings", () => {
 </page>`;
     const r = compileInline(src);
     expect(r.errors).toEqual([]);
-    expect(r.clientJs).toContain('_scrml_reactive_set("a", 1)');
-    expect(r.clientJs).toContain('_scrml_reactive_set("b", 2)');
-    expect(r.clientJs).toContain('_scrml_reactive_set("c", 3)');
+    expect(foldChunkNamespacing(r.clientJs)).toContain('_scrml_reactive_set("a", 1)');
+    expect(foldChunkNamespacing(r.clientJs)).toContain('_scrml_reactive_set("b", 2)');
+    expect(foldChunkNamespacing(r.clientJs)).toContain('_scrml_reactive_set("c", 3)');
   });
 
   test("const-then-cell-then-derived — count=5 + doubled both wired", () => {
@@ -248,8 +249,8 @@ describe("Cluster-C Bug 2 — markup const over-consuming siblings", () => {
 </page>`;
     const r = compileInline(src);
     expect(r.errors).toEqual([]);
-    expect(r.clientJs).toContain('_scrml_reactive_set("count", 5)');
-    expect(r.clientJs).toContain('_scrml_derived_declare("doubled"');
+    expect(foldChunkNamespacing(r.clientJs)).toContain('_scrml_reactive_set("count", 5)');
+    expect(foldChunkNamespacing(r.clientJs)).toContain('_scrml_derived_declare("doubled"');
   });
 
   test("const-then-fn — the function resolves (no E-SCOPE-001 on the name)", () => {
@@ -264,7 +265,7 @@ describe("Cluster-C Bug 2 — markup const over-consuming siblings", () => {
     const r = compileInline(src);
     expect((r.errors || []).map((e) => e.code)).not.toContain("E-SCOPE-001");
     expect(r.errors).toEqual([]);
-    expect(r.clientJs).toContain('_scrml_reactive_set("name", "Ada")');
+    expect(foldChunkNamespacing(r.clientJs)).toContain('_scrml_reactive_set("name", "Ada")');
   });
 
   test("const-then-Shape-2-bindable — `<userName/>` EXPANDS (not the literal tag)", () => {
@@ -296,7 +297,7 @@ describe("Cluster-C Bug 2 — markup const over-consuming siblings", () => {
     expect(findDecl(ast, "component-def", "B")).toBeDefined();
     const r = compileInline(src);
     expect(r.errors).toEqual([]);
-    expect(r.clientJs).toContain('_scrml_reactive_set("name", "Ada")');
+    expect(foldChunkNamespacing(r.clientJs)).toContain('_scrml_reactive_set("name", "Ada")');
   });
 
   test("SELF-CLOSING markup const `const G = <br/>` then cell — cell sets", () => {
@@ -313,7 +314,7 @@ describe("Cluster-C Bug 2 — markup const over-consuming siblings", () => {
     expect(g.raw).not.toContain("name");
     const r = compileInline(src);
     expect(r.errors).toEqual([]);
-    expect(r.clientJs).toContain('_scrml_reactive_set("name", "Ada")');
+    expect(foldChunkNamespacing(r.clientJs)).toContain('_scrml_reactive_set("name", "Ada")');
   });
 
   test("nested-interp markup const — cells before AND after both wired", () => {
@@ -327,8 +328,8 @@ describe("Cluster-C Bug 2 — markup const over-consuming siblings", () => {
 </page>`;
     const r = compileInline(src);
     expect(r.errors).toEqual([]);
-    expect(r.clientJs).toContain('_scrml_reactive_set("name", "Ada")');
-    expect(r.clientJs).toContain('_scrml_reactive_set("userName", "Bob")');
+    expect(foldChunkNamespacing(r.clientJs)).toContain('_scrml_reactive_set("name", "Ada")');
+    expect(foldChunkNamespacing(r.clientJs)).toContain('_scrml_reactive_set("userName", "Bob")');
   });
 
   test("inner void `<br>` inside the markup const root does NOT prematurely close", () => {
@@ -347,7 +348,7 @@ describe("Cluster-C Bug 2 — markup const over-consuming siblings", () => {
     expect(g.raw).not.toContain("name");
     const r = compileInline(src);
     expect(r.errors).toEqual([]);
-    expect(r.clientJs).toContain('_scrml_reactive_set("name", "Ada")');
+    expect(foldChunkNamespacing(r.clientJs)).toContain('_scrml_reactive_set("name", "Ada")');
   });
 
   test("CONTROL: cell-FIRST ordering stays clean — Ada present", () => {
@@ -360,7 +361,7 @@ describe("Cluster-C Bug 2 — markup const over-consuming siblings", () => {
 </page>`;
     const r = compileInline(src);
     expect(r.errors).toEqual([]);
-    expect(r.clientJs).toContain('_scrml_reactive_set("name", "Ada")');
+    expect(foldChunkNamespacing(r.clientJs)).toContain('_scrml_reactive_set("name", "Ada")');
   });
 
   test("CONTROL: bare top-level (no `${}`) ordering stays clean — Ada present", () => {
@@ -371,7 +372,7 @@ const G = <div class="x">hi</div>
 </page>`;
     const r = compileInline(src);
     expect(r.errors).toEqual([]);
-    expect(r.clientJs).toContain('_scrml_reactive_set("name", "Ada")');
+    expect(foldChunkNamespacing(r.clientJs)).toContain('_scrml_reactive_set("name", "Ada")');
   });
 
   test("CONTROL: multi-line single-root component body (nested </> closers) still registers as ONE component-def", () => {

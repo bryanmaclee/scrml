@@ -20,6 +20,7 @@ import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-select-row-regression");
 
@@ -62,7 +63,7 @@ function compileFixture() {
       throw new Error("compile errors: " + JSON.stringify(result.errors));
     }
     const html = readFileSync(resolve(outDir, "fixture.html"), "utf-8");
-    const clientJs = readFileSync(resolve(outDir, "fixture.client.js"), "utf-8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(resolve(outDir, "fixture.client.js"), "utf-8")));
     const runtimeJs = readFileSync(resolve(outDir, result.runtimeFilename ?? "scrml-runtime.js"), "utf-8");
     return { html, clientJs, runtimeJs };
   } finally {
@@ -72,7 +73,7 @@ function compileFixture() {
 
 describe("select-row value-indexed regression", () => {
   test("compiled output uses _scrml_reactive_subscribe_when for == predicate", () => {
-    const { clientJs } = compileFixture();
+    const { clientJs: __cjRaw } = compileFixture(); const clientJs = foldChunkNamespacing(__cjRaw);
     // The == predicate bind uses the value-indexed registration
     // (Step 2b wiring + S103 detector).
     expect(clientJs).toMatch(/_scrml_reactive_subscribe_when\("editingId",\s*item\.id/);
@@ -88,7 +89,7 @@ describe("select-row value-indexed regression", () => {
   });
 
   test("select-row sequence produces correct DOM (== narrowed bind)", () => {
-    const { html, clientJs, runtimeJs } = compileFixture();
+    const { html, clientJs: __cjRaw, runtimeJs } = compileFixture(); const clientJs = foldChunkNamespacing(__cjRaw);
     document.documentElement.innerHTML = html;
     // The runtime-chunks detector did not flag `==`/`!=` inside lift if=
     // for this minimal fixture (pre-existing edge case; orthogonal to S103
@@ -162,7 +163,7 @@ describe("select-row value-indexed regression", () => {
   });
 
   test("no-op write (editingId = X then = X) is idempotent", () => {
-    const { html, clientJs, runtimeJs } = compileFixture();
+    const { html, clientJs: __cjRaw, runtimeJs } = compileFixture(); const clientJs = foldChunkNamespacing(__cjRaw);
     document.documentElement.innerHTML = html;
     // Same equality-chunk-stub as the previous test (see that test for rationale).
     const stubEq = `function _scrml_structural_eq(a, b) { if (a === b) return true; if (a == null || b == null) return false; return JSON.stringify(a) === JSON.stringify(b); }\n`;

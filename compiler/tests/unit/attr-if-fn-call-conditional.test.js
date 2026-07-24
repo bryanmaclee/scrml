@@ -31,6 +31,7 @@ import { generateHtml } from "../../src/codegen/emit-html.js";
 import { BindingRegistry } from "../../src/codegen/binding-registry.ts";
 import { resetVarCounter } from "../../src/codegen/var-counter.ts";
 import { runCG } from "../../src/code-generator.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers (mirrors if-mount-emission.test.js)
@@ -182,7 +183,7 @@ describe("§2: if=fn() emits a reactive conditional in client JS", () => {
 
     expect(out.html).toContain("data-scrml-bind-if=");
     // The bug signature MUST be gone.
-    expect(out.clientJs).not.toContain('addEventListener("if"');
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain('addEventListener("if"');
   });
 
   test("S6: if=isVisible() emits a _scrml_effect-wrapped conditional calling the fn", () => {
@@ -192,10 +193,10 @@ describe("§2: if=fn() emits a reactive conditional in client JS", () => {
     const out = result.outputs.get("/test/app.scrml");
 
     // Reactive effect present and the call site is inside it.
-    expect(out.clientJs).toContain("_scrml_effect(");
-    expect(out.clientJs).toMatch(/_scrml_effect\(function\(\)[\s\S]*isVisible\(\)/);
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_effect(");
+    expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_effect\(function\(\)[\s\S]*isVisible\(\)/);
     // Display-toggle conditional (the fallback if= path) drives el.style.display.
-    expect(out.clientJs).toContain("el.style.display");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("el.style.display");
   });
 
   test("S7: show=isVisible() emits a display-toggle conditional (not event-bound)", () => {
@@ -206,9 +207,9 @@ describe("§2: if=fn() emits a reactive conditional in client JS", () => {
     const out = result.outputs.get("/test/app.scrml");
 
     expect(out.html).toContain("data-scrml-bind-show=");
-    expect(out.clientJs).not.toContain('addEventListener("show"');
-    expect(out.clientJs).toContain("_scrml_effect(");
-    expect(out.clientJs).toContain("el.style.display");
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain('addEventListener("show"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_effect(");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("el.style.display");
   });
 
   test("S8: if=check(@x) reactive-arg call surfaces the reactive read in the condition", () => {
@@ -217,10 +218,10 @@ describe("§2: if=fn() emits a reactive conditional in client JS", () => {
     const result = compile([node]);
     const out = result.outputs.get("/test/app.scrml");
 
-    expect(out.clientJs).not.toContain('addEventListener("if"');
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain('addEventListener("if"');
     // The @x arg is lowered to a reactive read inside the condition.
-    expect(out.clientJs).toContain('_scrml_reactive_get("x")');
-    expect(out.clientJs).toContain("check(");
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_get("x")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain("check(");
   });
 });
 
@@ -235,9 +236,9 @@ describe("§3: controls — paren/varref conditionals unchanged; onclick still e
     const result = compile([node]);
     const out = result.outputs.get("/test/app.scrml");
 
-    expect(out.clientJs).not.toContain('addEventListener("if"');
-    expect(out.clientJs).toContain("_scrml_effect(");
-    expect(out.clientJs).toContain("el.style.display");
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain('addEventListener("if"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_effect(");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("el.style.display");
   });
 
   test("S10: CONTROL if=@count (varref) still emits a conditional", () => {
@@ -246,9 +247,9 @@ describe("§3: controls — paren/varref conditionals unchanged; onclick still e
     const result = compile([node]);
     const out = result.outputs.get("/test/app.scrml");
 
-    expect(out.clientJs).not.toContain('addEventListener("if"');
-    expect(out.clientJs).toContain("el.style.display");
-    expect(out.clientJs).toContain('_scrml_reactive_get("count")');
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain('addEventListener("if"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain("el.style.display");
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_get("count")');
   });
 
   test("S11: CONTROL onclick=fn() STILL event-binds (the else path is untouched)", () => {

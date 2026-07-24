@@ -40,6 +40,7 @@ import { compileScrml } from "../../src/api.js";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { parse as acornParse } from "acorn";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const FIXTURE_DIR = join(import.meta.dir, "__fixtures__/arrow-object-literal-init-thunks");
 const FIXTURE_OUTPUT = join(FIXTURE_DIR, "dist");
@@ -152,7 +153,7 @@ describe("§1: _scrml_init_set with object-literal init", () => {
 
   test("client.js: _scrml_init_set body is paren-wrapped", () => {
     const result = compile(initSetFx);
-    const clientJs = result.outputs.get(initSetFx).clientJs;
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(result.outputs.get(initSetFx).clientJs));
     // Canonical fix shape — `_scrml_init_set("probe", () => ({error: ...})`
     expect(clientJs).toMatch(/_scrml_init_set\("probe",\s*\(\)\s*=>\s*\(\s*\{\s*error/);
     // Bug shape — `_scrml_init_set("probe", () => {error:` — must NOT appear
@@ -161,7 +162,7 @@ describe("§1: _scrml_init_set with object-literal init", () => {
 
   test("client.js parses as a valid ESM module (no block-vs-object collision)", () => {
     const result = compile(initSetFx);
-    const clientJs = result.outputs.get(initSetFx).clientJs;
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(result.outputs.get(initSetFx).clientJs));
     const err = parseModule(clientJs);
     expect(err).toBeNull();
   });
@@ -179,14 +180,14 @@ describe("§2: _scrml_default_set with object-literal default", () => {
 
   test("client.js: _scrml_default_set body is paren-wrapped when object", () => {
     const result = compile(defaultSetFx);
-    const clientJs = result.outputs.get(defaultSetFx).clientJs;
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(result.outputs.get(defaultSetFx).clientJs));
     expect(clientJs).toMatch(/_scrml_default_set\("cfg",\s*\(\)\s*=>\s*\(\s*\{\s*mode/);
     expect(clientJs).not.toMatch(/_scrml_default_set\("cfg",\s*\(\)\s*=>\s*\{\s*mode\s*:/);
   });
 
   test("client.js parses as a valid ESM module", () => {
     const result = compile(defaultSetFx);
-    const clientJs = result.outputs.get(defaultSetFx).clientJs;
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(result.outputs.get(defaultSetFx).clientJs));
     expect(parseModule(clientJs)).toBeNull();
   });
 });
@@ -203,7 +204,7 @@ describe("§3: _scrml_derived_declare with object-literal derived body", () => {
 
   test("client.js: derived-declare body OR init_set sidecar uses paren-wrap", () => {
     const result = compile(derivedDeclareFx);
-    const clientJs = result.outputs.get(derivedDeclareFx).clientJs;
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(result.outputs.get(derivedDeclareFx).clientJs));
     // The @-decl with reactive-cell-referencing object init can route through
     // either _scrml_derived_declare (if classified derived) OR
     // _scrml_reactive_set + _scrml_init_set (if classified reactive). Either
@@ -218,7 +219,7 @@ describe("§3: _scrml_derived_declare with object-literal derived body", () => {
 
   test("client.js parses as a valid ESM module", () => {
     const result = compile(derivedDeclareFx);
-    const clientJs = result.outputs.get(derivedDeclareFx).clientJs;
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(result.outputs.get(derivedDeclareFx).clientJs));
     expect(parseModule(clientJs)).toBeNull();
   });
 });
@@ -231,7 +232,7 @@ describe("§4: scalar init — no spurious parens", () => {
   test("client.js init_set body is the bare scalar (no extra parens)", () => {
     const result = compile(scalarInitFx);
     expect(result.errors).toEqual([]);
-    const clientJs = result.outputs.get(scalarInitFx).clientJs;
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(result.outputs.get(scalarInitFx).clientJs));
     // Either no init_set at all (constant-fold path) or `() => 42` not `() => (42)`.
     if (clientJs.includes("_scrml_init_set")) {
       expect(clientJs).toMatch(/_scrml_init_set\("n",\s*\(\)\s*=>\s*42\)/);
@@ -248,7 +249,7 @@ describe("§5: array init — no spurious parens", () => {
   test("client.js init_set body is the bare array (no extra parens)", () => {
     const result = compile(arrayInitFx);
     expect(result.errors).toEqual([]);
-    const clientJs = result.outputs.get(arrayInitFx).clientJs;
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(result.outputs.get(arrayInitFx).clientJs));
     // Array literals are unambiguous as arrow expression bodies.
     if (clientJs.includes("_scrml_init_set")) {
       expect(clientJs).toMatch(/_scrml_init_set\("xs",\s*\(\)\s*=>\s*\[/);
@@ -258,7 +259,7 @@ describe("§5: array init — no spurious parens", () => {
 
   test("client.js parses as a valid ESM module", () => {
     const result = compile(arrayInitFx);
-    const clientJs = result.outputs.get(arrayInitFx).clientJs;
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(result.outputs.get(arrayInitFx).clientJs));
     expect(parseModule(clientJs)).toBeNull();
   });
 });
@@ -271,14 +272,14 @@ describe("§6: GITI-013 single-arg arrow regression guard", () => {
   test("single-arg `(it) => ({...})` is still paren-wrapped via emitLambda", () => {
     const result = compile(giti013GuardFx);
     expect(result.errors).toEqual([]);
-    const clientJs = result.outputs.get(giti013GuardFx).clientJs;
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(result.outputs.get(giti013GuardFx).clientJs));
     expect(clientJs).toMatch(/=>\s*\(\s*\{\s*key\s*:/);
     expect(clientJs).not.toMatch(/=>\s*\{\s*key\s*:/);
   });
 
   test("client.js parses as a valid ESM module", () => {
     const result = compile(giti013GuardFx);
-    const clientJs = result.outputs.get(giti013GuardFx).clientJs;
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(result.outputs.get(giti013GuardFx).clientJs));
     expect(parseModule(clientJs)).toBeNull();
   });
 });

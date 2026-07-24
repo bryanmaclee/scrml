@@ -32,6 +32,7 @@ import { tmpdir } from "os";
 import { execFileSync } from "child_process";
 import { compileScrml } from "../../src/api.js";
 import { isRcdataElement, getElementShape } from "../../src/html-elements.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers — full-pipeline compile (source string → { html, clientJs }) via the
@@ -47,7 +48,7 @@ function compileSource(source) {
     const out = [...r.outputs.values()][0] ?? {};
     return {
       html: out.html ?? "",
-      clientJs: out.clientJs ?? "",
+      clientJs:foldChunkNamespacing( foldChunkNamespacing(foldChunkNamespacing(out.clientJs) ?? "")),
       errors: r.errors ?? [],
       warnings: r.warnings ?? [],
       lints: r.lintDiagnostics ?? [],
@@ -99,7 +100,7 @@ describe("§1: reactive ${@x} in <textarea> binds .value (the repro)", () => {
   });
 
   test("client JS binds el.value to the reactive cell inside an effect", () => {
-    const { clientJs } = compileSource(src);
+    const { clientJs: __cjRaw } = compileSource(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toContain("data-scrml-rcdata=");
     expect(clientJs).toMatch(/el\.value\s*=\s*""\s*\+\s*\(_scrml_reactive_get\("x"\)\)/);
     // The bind re-runs reactively.
@@ -107,7 +108,7 @@ describe("§1: reactive ${@x} in <textarea> binds .value (the repro)", () => {
   });
 
   test("emitted client JS is `node --check` clean", () => {
-    const { clientJs } = compileSource(src);
+    const { clientJs: __cjRaw } = compileSource(src); const clientJs = foldChunkNamespacing(__cjRaw);
     const r = nodeCheck(clientJs);
     expect(r.err).toBe("");
     expect(r.ok).toBe(true);
@@ -148,7 +149,7 @@ describe("§3: mixed static + interp → concatenated into .value", () => {
   });
 
   test("client JS concatenates static + reactive into el.value", () => {
-    const { clientJs } = compileSource(src);
+    const { clientJs: __cjRaw } = compileSource(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toMatch(/el\.value\s*=\s*""\s*\+\s*"pre "\s*\+\s*\(_scrml_reactive_get\("x"\)\)\s*\+\s*" post"/);
   });
 
@@ -165,7 +166,7 @@ describe("§4: multiple interps → all concatenated reactively", () => {
   const src = `<program>\n\${ @first = "a" }\n\${ @last = "b" }\n<div class="app">\n    <textarea class="ta">\${@first} and \${@last}!</textarea>\n</div>\n</program>\n`;
 
   test("both cells bind into el.value; no span leak", () => {
-    const { html, clientJs } = compileSource(src);
+    const { html, clientJs: __cjRaw } = compileSource(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(textareaOf(html)).not.toContain("<span");
     expect(clientJs).toContain(`_scrml_reactive_get("first")`);
     expect(clientJs).toContain(`_scrml_reactive_get("last")`);
@@ -188,7 +189,7 @@ describe("§5: bind:value + content ${} → bind:value wins + warning (no double
   });
 
   test("bind:value wins: bind wiring present, NO rcdata content binding, NO span leak", () => {
-    const { html, clientJs } = compileSource(src);
+    const { html, clientJs: __cjRaw } = compileSource(src); const clientJs = foldChunkNamespacing(__cjRaw);
     const ta = textareaOf(html);
     expect(ta).not.toContain("<span");
     expect(ta).not.toContain("data-scrml-rcdata");
@@ -207,7 +208,7 @@ describe("§6: reactive <textarea> inside <each> binds .value per item", () => {
   const src = `<program>\n\${ @notes = ["one", "two", "three"] }\n<div class="app">\n    <each in=@notes as note>\n        <textarea class="ta" rows="2">\${@.}</textarea>\n    </each>\n</div>\n</program>\n`;
 
   test("each per-item factory creates a textarea and sets .value (no text-node/span leak)", () => {
-    const { clientJs } = compileSource(src);
+    const { clientJs: __cjRaw } = compileSource(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toContain('document.createElement("textarea")');
     // .value is set from the item, NOT appended as a child text node.
     expect(clientJs).toMatch(/\.value\s*=\s*String\(/);

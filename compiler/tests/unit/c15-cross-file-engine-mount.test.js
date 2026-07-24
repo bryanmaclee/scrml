@@ -58,6 +58,7 @@ import { generateClientJs } from "../../src/codegen/emit-client.ts";
 import { makeCompileContext } from "../../src/codegen/context.ts";
 import { BindingRegistry } from "../../src/codegen/binding-registry.ts";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers

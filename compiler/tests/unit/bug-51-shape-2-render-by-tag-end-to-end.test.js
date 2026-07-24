@@ -40,6 +40,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { compileScrml } from "../../src/api.js";
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const FIXTURE_DIR = join(import.meta.dir, "__fixtures__/bug-51");
 
@@ -83,7 +84,7 @@ function compileSource(name, src) {
 describe("Bug 51-A §1: Shape 2 use-site expansion via render-by-tag (post-CE `_scope` preservation)", () => {
   test("canonical Shape 2: `<userName/>` expands to bound `<input>` with validators lowered to HTML attrs", () => {
     const src = `<program>\${ <userName req length(>=2)> = <input type="text"/> }<userName/></program>\n`;
-    const { html, clientJs } = compileSource("bug-51-a-canonical.scrml", src);
+    const { html, clientJs: __cjRaw } = compileSource("bug-51-a-canonical.scrml", src); const clientJs = foldChunkNamespacing(__cjRaw);
     // The use-site `<userName/>` should expand to the bound `<input type="text">`.
     expect(html).toMatch(/<input type="text"/);
     // Validators should lower to HTML-native attributes (req → required, length(>=2) → minlength="2").
@@ -116,7 +117,7 @@ describe("Bug 51-A §1: Shape 2 use-site expansion via render-by-tag (post-CE `_
 describe("Bug 51-B §2: Shape 2 cell init produces valid JS (not empty-arg reactive_set)", () => {
   test("reactive_set call carries an actual argument (not empty-arg trailing-comma form)", () => {
     const src = `<program>\${ <userName req length(>=2)> = <input type="text"/> }<userName/></program>\n`;
-    const { clientJs } = compileSource("bug-51-b-init.scrml", src);
+    const { clientJs: __cjRaw } = compileSource("bug-51-b-init.scrml", src); const clientJs = foldChunkNamespacing(__cjRaw);
     // Init call should NOT have empty second arg (matches `( "userName" , )` or `("userName",)`).
     expect(clientJs).not.toMatch(/_scrml_reactive_set\("userName",\s*\)/);
     // Should carry `null` (the canonical scrml absence sentinel per §42.5).
@@ -125,7 +126,7 @@ describe("Bug 51-B §2: Shape 2 cell init produces valid JS (not empty-arg react
 
   test("node --check passes on the emitted client.js", () => {
     const src = `<program>\${ <userName req length(>=2)> = <input type="text"/> }<userName/></program>\n`;
-    const { clientJs } = compileSource("bug-51-b-node-check.scrml", src);
+    const { clientJs: __cjRaw } = compileSource("bug-51-b-node-check.scrml", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs.length).toBeGreaterThan(0);
     // The emit should compile as a JS module. The pre-fix `_scrml_reactive_set("userName", )`
     // form is valid JS (ES2017 trailing comma) but semantically broken (cell gets undefined).
@@ -141,7 +142,7 @@ describe("Bug 51-B §2: Shape 2 cell init produces valid JS (not empty-arg react
 describe("Bug 51-C §3: auto-lift at top-level of `<program>` body (BS-gobble fix)", () => {
   test("`${...}` wrap form produces correct emit + HTML expansion (regression-guard for §1+§2)", () => {
     const src = `<program>\${ <userName req length(>=2)> = <input type="text"/> }<userName/></program>\n`;
-    const { html, clientJs, errors } = compileSource("bug-51-c-workaround.scrml", src);
+    const { html, clientJs: __cjRaw, errors } = compileSource("bug-51-c-workaround.scrml", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.length).toBe(0);
     expect(html).toMatch(/<input type="text"/);
     expect(clientJs).toMatch(/_scrml_reactive_set\("userName", null\)/);
@@ -158,7 +159,7 @@ describe("Bug 51-C §3: auto-lift at top-level of `<program>` body (BS-gobble fi
     // sees the full decl → parser produces shape:"decl-with-spec" with the
     // renderSpec → SYM classifies as `bindable` → use-site expands cleanly.
     const src = `<program>\n<userName req length(>=2)> = <input type="text"/>\n<form>\n    <userName/>\n</form>\n</>\n`;
-    const { html, clientJs, errors } = compileSource("bug-51-c-autolift.scrml", src);
+    const { html, clientJs: __cjRaw, errors } = compileSource("bug-51-c-autolift.scrml", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.length).toBe(0);
     // The use-site `<userName/>` should expand to the bound input.
     expect(html).toMatch(/<input type="text"/);
@@ -175,7 +176,7 @@ describe("Bug 51-C §3: auto-lift at top-level of `<program>` body (BS-gobble fi
     // per-char text accumulation. This test guards that Shape 1 still lifts
     // correctly through the legacy path.
     const src = `<program>\n<count> = 0\n<div>\${'$'}{@count}</div>\n</>\n`.replace(/\$\{'\$'\}/g, "$");
-    const { clientJs, errors } = compileSource("bug-51-c-shape-1.scrml", src);
+    const { clientJs: __cjRaw, errors } = compileSource("bug-51-c-shape-1.scrml", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.length).toBe(0);
     expect(clientJs).toMatch(/_scrml_reactive_set\("count", 0\)/);
   });
@@ -195,7 +196,7 @@ describe("Bug 51-C §3: auto-lift at top-level of `<program>` body (BS-gobble fi
     }
     <div>\${'$'}{@display}</div>
 </program>`.replace(/\$\{'\$'\}/g, "$");
-    const { clientJs, errors } = compileSource("bug-51-c-shape-3-multiline.scrml", src);
+    const { clientJs: __cjRaw, errors } = compileSource("bug-51-c-shape-3-multiline.scrml", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.length).toBe(0);
     expect(clientJs).toMatch(/_scrml_derived_declare\("display"/);
   });

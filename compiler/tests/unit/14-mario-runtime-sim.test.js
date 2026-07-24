@@ -20,6 +20,7 @@ import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-14-mario-runtime-sim");
 
@@ -46,7 +47,7 @@ function compileMario() {
   try {
     const result = compileScrml({ inputFiles: [tmpInput], write: true, outputDir: outDir });
     const html = readFileSync(resolve(outDir, "14-mario.html"), "utf-8");
-    const clientJs = readFileSync(resolve(outDir, "14-mario.client.js"), "utf-8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(resolve(outDir, "14-mario.client.js"), "utf-8")));
     // v0.3.x SPA tree-shake Phase B 3.3 — runtime filename is hashed
     // (scrml-runtime.<hash>.js); read it from compileScrml result.
     const runtimeJs = readFileSync(resolve(outDir, result.runtimeFilename ?? "scrml-runtime.js"), "utf-8");
@@ -58,7 +59,7 @@ function compileMario() {
 
 describe("14-mario runtime simulation (Bug 1 e2e gap)", () => {
   test("MUSHROOM click transitions marioState cell from Small to Big", () => {
-    const { html, clientJs, runtimeJs } = compileMario();
+    const { html, clientJs: __cjRaw, runtimeJs } = compileMario(); const clientJs = foldChunkNamespacing(__cjRaw);
 
     // Set up DOM with the compiled HTML body.
     document.documentElement.innerHTML = html;

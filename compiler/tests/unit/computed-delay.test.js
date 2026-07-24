@@ -25,6 +25,7 @@ import { parseAfterDuration } from "../../src/codegen/parse-after-duration.ts";
 import { emitEngineTimersTable } from "../../src/codegen/emit-engine.ts";
 import { compileScrml } from "../../src/api.js";
 import { unNamespaceEngineNames } from "../helpers/chunk-scope.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 /**
  * Compile the source through the full pipeline (BS→TAB→...→CG) and return the
@@ -47,8 +48,8 @@ function compileToClientJs(source, suffix = "computed-delay") {
       outputDir: outDir,
     });
     const clientPath = resolve(outDir, `${name}.client.js`);
-    const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
-    return { errors: result.errors ?? [], clientJs: unNamespaceEngineNames(clientJs) };
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""));
+    return { errors: result.errors ?? [], clientJs:foldChunkNamespacing( foldChunkNamespacing)(unNamespaceEngineNames(clientJs) )};
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -190,7 +191,7 @@ describe("A5-5 §A5-5.4 — legacy machine literal preserves constant-fold", () 
   .Loading after 30s => .TimedOut
 </>
 </program>`;
-    const { errors, clientJs } = compileToClientJs(src);
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Literal-form: the rulesPayload encodes 30000 as a literal number; the
     // _scrml_machine_arm_initial call is what arms timers at init. The payload
@@ -218,7 +219,7 @@ describe("A5-5 §A5-5.4 — legacy machine literal preserves constant-fold", () 
   .Loading after 30s => .TimedOut
 </>
 </program>`;
-    const { errors, clientJs } = compileToClientJs(src);
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // The write-site arm-after-set path emits a guarded arm call with
     // the literal duration as the 2nd arg (no IIFE wrapper).
@@ -273,7 +274,7 @@ describe("A5-5 §A5-5.5 — legacy machine computed form (helper-level coverage)
   <TimedOut></>
 </>
 </program>`;
-    const { errors, clientJs } = compileToClientJs(src);
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Verify the timer-config table + msExpr wiring at the codegen layer.
     // (The runtime clamp lives in the 'engine' chunk of the runtime
@@ -341,7 +342,7 @@ describe("A5-5 §A5-5.5b — legacy <machine> computed-form end-to-end (S77 fix)
   .Connecting after \${@backoffDelay}ms => .Open
   .Open => .Closed
 </>`;
-    const { errors, clientJs } = compileToClientJs(src);
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity === "error")).toEqual([]);
     // Verify the runtime arm site is emitted (the IIFE body) and the
     // reactive read is rewritten through _scrml_reactive_get.
@@ -359,7 +360,7 @@ describe("A5-5 §A5-5.5b — legacy <machine> computed-form end-to-end (S77 fix)
 <machine name=M for=Phase>
   .Connecting after 500ms => .Open
 </>`;
-    const { errors, clientJs } = compileToClientJs(src);
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity === "error")).toEqual([]);
     // Literal-form rules at module-init use _scrml_machine_arm_initial with
     // a JSON-encoded rulesPayload (computed rules opt out per §51.12.4 S77).
@@ -541,7 +542,7 @@ describe("A5-5 §A5-5.11 — chained re-arm payload (literal-only form)", () => 
   .C after 3s => .D
 </>
 </program>`;
-    const { errors, clientJs } = compileToClientJs(src);
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity === "error")).toEqual([]);
     // All three rules in the rulesPayload (literal-form path).
     expect(clientJs).toMatch(/afterMs\\":1000/);
