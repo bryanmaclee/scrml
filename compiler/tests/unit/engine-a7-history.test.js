@@ -34,6 +34,7 @@ import { analyzeUsage } from "../../src/codegen/usage-analyzer.ts";
 import { parseRuleAttrValue } from "../../src/engine-statechild-parser.ts";
 import { compileScrml } from "../../src/api.js";
 import { unNamespaceEngineNames, unNamespaceCellKeys } from "../helpers/chunk-scope.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -83,8 +84,8 @@ function compileToClientJs(source, suffix = "history") {
       outputDir: outDir,
     });
     const clientPath = resolve(outDir, `${name}.client.js`);
-    const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
-    return { errors: result.errors ?? [], clientJs: unNamespaceCellKeys(unNamespaceEngineNames(clientJs)) };
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""));
+    return { errors: result.errors ?? [], clientJs:foldChunkNamespacing( foldChunkNamespacing(unNamespaceCellKeys))(unNamespaceEngineNames(clientJs)) };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -277,7 +278,7 @@ describe("engine-a7-history §5 — canonical §51.0.N example compiles end-to-e
   </>
   <Paused rule=.Playing.history></>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "history-canon");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "history-canon"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Outer engine transitions table is emitted normally.
     expect(clientJs).toContain("__scrml_engine_appMode_transitions");
@@ -305,7 +306,7 @@ describe("engine-a7-history §5 — canonical §51.0.N example compiles end-to-e
   </>
   <Paused rule=.Playing.history></>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "history-flatten");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "history-flatten"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Flattened target: rule=.Playing.history → "Paused": ["Playing"] (no ".history" suffix)
     expect(clientJs).toMatch(/"Paused":\s*\[\s*"Playing"\s*\]/);
@@ -383,7 +384,7 @@ describe("engine-a7-history §7 — synth-cell emission + history-map (Bug #3, W
   </>
   <Paused rule=.Playing.history></>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "history-w23-emit");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "history-w23-emit"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     // (1) Per-engine history-map const emitted alongside the transitions
@@ -436,7 +437,7 @@ describe("engine-a7-history §7 — synth-cell emission + history-map (Bug #3, W
 </>
 
 \${ function leavePlaying() { @appMode = AppMode.Title } }`;
-    const { errors, clientJs } = compileToClientJs(src, "history-w23-writeguard");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "history-w23-writeguard"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     // (1) The function body's engine write dispatches through the canonical
@@ -474,7 +475,7 @@ describe("engine-a7-history §7 — synth-cell emission + history-map (Bug #3, W
 </>
 
 \${ function go() { @appMode = AppMode.Playing } }`;
-    const { errors, clientJs } = compileToClientJs(src, "history-w23-treeshake");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "history-w23-treeshake"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     // (1) NO history-map const emits anywhere (per-engine tree-shake).
@@ -549,7 +550,7 @@ describe("engine-a7-history §8 — restore-form write-site lowering (Wave 2.4)"
 </>
 
 \${ function resume() { @appMode = AppMode.Playing.history } }`;
-    const { errors, clientJs } = compileToClientJs(src, "w24-history-write");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "w24-history-write"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // The lowered call: bare `AppMode.Playing` (no `.history` chain), and
     // trailing `true` as the isHistoryRestore positional arg. Engine has
@@ -580,7 +581,7 @@ describe("engine-a7-history §8 — restore-form write-site lowering (Wave 2.4)"
 </>
 
 \${ function leave() { @appMode = AppMode.Title } }`;
-    const { errors, clientJs } = compileToClientJs(src, "w24-bare-write");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "w24-bare-write"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Call shape with history but WITHOUT isHistoryRestore — trailing `true`
     // must be absent.
@@ -613,7 +614,7 @@ describe("engine-a7-history §8 — restore-form write-site lowering (Wave 2.4)"
   </>
   <Paused rule=.Playing.history></>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "w24-dispatcher-shape");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "w24-dispatcher-shape"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // postMountJs marker + flag read.
     expect(clientJs).toContain("§51.0.Q.1 composite-arm post-mount: init/restore inner engine playMode");
@@ -647,7 +648,7 @@ describe("engine-a7-history §8 — restore-form write-site lowering (Wave 2.4)"
 </>
 
 \${ function go() { @phase.advance(Phase.Active) } }`;
-    const { errors, clientJs } = compileToClientJs(src, "w24-advance-bare");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "w24-advance-bare"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Positive: helper call present with bare-variant target, no `.history`.
     expect(clientJs).toMatch(
@@ -696,7 +697,7 @@ describe("engine-a7-history §8 — restore-form write-site lowering (Wave 2.4)"
 </>
 
 \${ function resumeFromHistory() { @appMode.advance(AppMode.Playing.history) } }`;
-    const { errors, clientJs } = compileToClientJs(src, "w24-advance-history-fnbody");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "w24-advance-history-fnbody"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     // Locate the function body so the assertions check the call inside it
@@ -766,7 +767,7 @@ describe("engine-a7-history §9 — function-body .advance(.X.history) history-m
 \${ function resume() { @appMode.advance(AppMode.Playing.history) } }
 
 <button onclick=resume()>Resume</>`;
-    const { errors, clientJs } = compileToClientJs(src, "bug-6.5-advance-fnbody");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "bug-6.5-advance-fnbody"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     expect(clientJs).toMatch(
@@ -796,7 +797,7 @@ describe("engine-a7-history §9 — function-body .advance(.X.history) history-m
 \${ function quit() { @appMode.advance(AppMode.Title) } }
 
 <button onclick=quit()>Quit</>`;
-    const { errors, clientJs } = compileToClientJs(src, "bug-6.5-advance-bare-fnbody");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "bug-6.5-advance-bare-fnbody"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     expect(clientJs).toMatch(
@@ -826,7 +827,7 @@ describe("engine-a7-history §9 — function-body .advance(.X.history) history-m
 \${ function resumeWrite() { @appMode = AppMode.Playing.history } }
 
 <button onclick=resumeWrite()>Resume</>`;
-    const { errors, clientJs } = compileToClientJs(src, "bug-6.5-write-fnbody");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "bug-6.5-write-fnbody"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     expect(clientJs).toMatch(

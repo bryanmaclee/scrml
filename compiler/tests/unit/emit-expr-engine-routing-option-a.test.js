@@ -42,6 +42,7 @@ import { resolve } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-emit-expr-engine-routing-opt-a");
 let tmpCounter = 0;
@@ -59,7 +60,7 @@ function compile(source) {
       outputDir: outDir,
     });
     const clientPath = resolve(outDir, "app.client.js");
-    const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf-8") : "";
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf-8") : ""));
     return {
       errors: (result.errors ?? []).filter(e => e.severity !== "warning"),
       clientJs,
@@ -90,7 +91,7 @@ describe("Option A — comprehensive emit-expr.ts engine-routing", () => {
 </>
 <button onclick=entry()>Click</button>
 </program>`;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // The ternary RHS must route through the engine helper (NOT bare reactive_set).
     expect(clientJs).toMatch(/_scrml_engine_direct_set\("state"/);
@@ -116,7 +117,7 @@ describe("Option A — comprehensive emit-expr.ts engine-routing", () => {
 </>
 <button onclick=entry()>Click</button>
 </program>`;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toMatch(/_scrml_engine_direct_set\("state"/);
     // Inside viaArrow the engine helper must appear (within the forEach arrow body).
@@ -142,7 +143,7 @@ describe("Option A — comprehensive emit-expr.ts engine-routing", () => {
 </>
 <button onclick=entry()>Click</button>
 </program>`;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toMatch(/_scrml_engine_direct_set\("state"/);
     const compoundFn = clientJs.split("_scrml_viaCompound")[1] ?? "";
@@ -170,7 +171,7 @@ describe("Option A — comprehensive emit-expr.ts engine-routing", () => {
 </>
 <button onclick=entry()>Click</button>
 </program>`;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toMatch(/_scrml_engine_direct_set\("state"/);
     const callFn = clientJs.split("_scrml_viaCallArg")[1] ?? "";
@@ -194,7 +195,7 @@ describe("Option A — comprehensive emit-expr.ts engine-routing", () => {
 </>
 <button onclick=entry()>Click</button>
 </program>`;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toMatch(/_scrml_engine_direct_set\("state"/);
     const nestedFn = clientJs.split("_scrml_viaNested")[1] ?? "";
@@ -218,7 +219,7 @@ describe("Option A — comprehensive emit-expr.ts engine-routing", () => {
 </>
 <button onclick=entry()>Click</button>
 </program>`;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // The IIFE structure: bind value to a local, fire guard, return local.
     // Guarantees the value-expression is evaluated exactly once and the
@@ -251,7 +252,7 @@ describe("Option A — comprehensive emit-expr.ts engine-routing", () => {
 </>
 <button onclick=entry()>Click</button>
 </program>`;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Plain (non-engine) cell writes MUST still emit bare reactive_set —
     // Option A's detection arm should not misfire on non-engine names.
@@ -281,7 +282,7 @@ describe("Option A — comprehensive emit-expr.ts engine-routing", () => {
 </>
 <button onclick=entry()>Click</button>
 </program>`;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Self-write is .A -> .A. The runtime helper short-circuits on
     // current === target (returns false, no rule= violation). The codegen
@@ -317,7 +318,7 @@ describe("Option A — comprehensive emit-expr.ts engine-routing", () => {
 </>
 <button onclick=entry()>Click</button>
 </program>`;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Bug 1.7 Option B path (string-rewrite layer) handles inline-arm results
     // — no ExprNode reaches Option A. Both layers stay live independently.

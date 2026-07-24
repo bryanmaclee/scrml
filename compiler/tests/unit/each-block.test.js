@@ -28,6 +28,7 @@ import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // compile helper — mirrors engine-body-render.test.js pattern.
@@ -49,7 +50,7 @@ function compileToOutputs(source, suffix = "each") {
     });
     const clientPath = resolve(outDir, `${name}.client.js`);
     const htmlPath = resolve(outDir, `${name}.html`);
-    const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""));
     const html = existsSync(htmlPath) ? readFileSync(htmlPath, "utf8") : "";
     return {
       errors: result.errors ?? [],
@@ -96,7 +97,7 @@ describe("each-block §1 — canonical <each in=@cell>", () => {
 </each>
 
 </program>`;
-    const { errors, clientJs, html } = compileToOutputs(src, "in-basic");
+    const { errors, clientJs: __cjRaw, html } = compileToOutputs(src, "in-basic"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Static HTML carries the parse-safe comment-fence mount at the source position.
     expect(html).toMatch(/<!--scrml-each:[0-9a-z]{8}_\d+--><!--\/scrml-each:[0-9a-z]{8}_\d+-->/);
@@ -125,7 +126,7 @@ describe("each-block §2 — canonical <each in=@cell as name>", () => {
 </each>
 
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "in-as");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "in-as"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // The factory closure uses 'contact' as the iter-var name.
     expect(clientJs).toMatch(/\(contact, _scrml_each_idx\) =>/);
@@ -145,7 +146,7 @@ describe("each-block §2 — canonical <each in=@cell as name>", () => {
 </each>
 
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "in-as-interp");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "in-as-interp"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // The interpolated expression references `contact.name` (the iter-var
     // binding), not @cell. Verifies TS scope plumbing.
@@ -164,7 +165,7 @@ describe("each-block §3 — canonical <each of=N> count iteration", () => {
     <li>row</li>
 </each>
 </program>`;
-    const { errors, clientJs, html } = compileToOutputs(src, "of-literal");
+    const { errors, clientJs: __cjRaw, html } = compileToOutputs(src, "of-literal"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(html).toMatch(/<!--scrml-each:[0-9a-z]{8}_\d+--><!--\/scrml-each:[0-9a-z]{8}_\d+-->/);
     expect(clientJs).toMatch(/Array\.from\(\{length: Number\(5\) \|\| 0\}/);
@@ -182,7 +183,7 @@ describe("each-block §3 — canonical <each of=N> count iteration", () => {
 </each>
 
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "of-cell");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "of-cell"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toContain('_scrml_reactive_get("rowCount")');
     expect(clientJs).toMatch(/Array\.from\(\{length: Number\(_scrml_reactive_get\("rowCount"\)\) \|\| 0\}/);
@@ -200,7 +201,7 @@ describe("each-block §4 — canonical <each of=N as name>", () => {
     <li>i</li>
 </each>
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "of-as");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "of-as"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toMatch(/\(i, _scrml_each_idx\) =>/);
     // gate-found-invalid-js-fix-wave (S141): when the alias is `i`, the keyFn
@@ -227,7 +228,7 @@ describe("each-block §5 — <empty> sub-element fallback", () => {
 </each>
 
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "empty");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "empty"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Empty-state path checks _items.length === 0 then renders the
     // <empty> body content.
@@ -245,7 +246,7 @@ describe("each-block §5 — <empty> sub-element fallback", () => {
 </each>
 
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "no-empty");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "no-empty"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // The if (!_items || _items.length === 0) early-return guard is
     // ONLY emitted when an <empty> sub-element is present. When absent,
@@ -269,7 +270,7 @@ describe("each-block §6 — explicit key= override", () => {
 </each>
 
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "key-explicit");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "key-explicit"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // The keyFn body should be `row.uuid` (the explicit key=); the index param
     // is the canonical internal name (gate fix-wave clash-avoidance).
@@ -285,7 +286,7 @@ describe("each-block §6 — explicit key= override", () => {
 </each>
 
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "key-index");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "key-index"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toMatch(/\(_scrml_each_item, _scrml_each_idx\) => _scrml_each_idx,/);
   });
@@ -345,7 +346,7 @@ type Group:struct = { id: string, items: Item[] }
 </each>
 
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "nested");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "nested"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Exactly ONE module-scope each render fn (the OUTER each). The inner each is
     // inline — it gets no module-scope render fn of its own (the old phantom).
@@ -545,7 +546,7 @@ describe("each-block §12 — tree-shake invariant", () => {
     const src = `<program>
 <each in=@items></each>
 </program>`;
-    const { clientJs } = compileToOutputs(src, "shake");
+    const { clientJs: __cjRaw } = compileToOutputs(src, "shake"); const clientJs = foldChunkNamespacing(__cjRaw);
     // No render functions emitted for the empty each-block.
     expect(clientJs).not.toMatch(/_scrml_each_render_/);
   });
@@ -613,7 +614,7 @@ describe("each-block §15 — per-item body interactivity (Landing 2)", () => {
 </each>
 
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "l2-class");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "l2-class"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // class:done lowers to a classList.toggle keyed on the iteration value's
     // field — NOT an inert setAttribute("class:done", "").
@@ -633,7 +634,7 @@ function pick(id) {
 </each>
 
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "l2-onclick");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "l2-onclick"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // onclick lowers to addEventListener("click", ...) — NOT inert
     // setAttribute("onclick", "").
@@ -656,7 +657,7 @@ function handle(id) {
 </each>
 
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "l2-on-ns");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "l2-on-ns"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toMatch(/\.addEventListener\("dblclick", function\(event\) \{ /);
     expect(clientJs).not.toContain('setAttribute("on:dblclick"');
@@ -671,7 +672,7 @@ function handle(id) {
 </each>
 
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "l2-interp");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "l2-interp"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // The ${@.id} interpolation lowers to setAttribute("data-id", String(<expr>))
     // where <expr> is the iter-var field — NOT the literalized source string
@@ -690,7 +691,7 @@ function handle(id) {
 </each>
 
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "l2-bare-at");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "l2-bare-at"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // No false E-SCOPE-001 on the bare @. in attribute position (Locus 1).
     expect(errors).toEqual([]);
@@ -715,7 +716,7 @@ function toggle(id) {
 </ul>
 
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "l2-compose");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "l2-compose"); const clientJs = foldChunkNamespacing(__cjRaw);
     // The whole reproducer compiles with no errors (was E-SCOPE-001 pre-fix).
     expect(errors).toEqual([]);
     expect(clientJs).toContain('.classList.toggle("done", !!(_scrml_each_item.done));');
@@ -733,7 +734,7 @@ function toggle(id) {
 </each>
 
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "l2-literal");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "l2-literal"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toContain('.setAttribute("title", "static label");');
   });
@@ -749,7 +750,7 @@ function clk(i) {
 </each>
 
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "l2-of-index");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "l2-of-index"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // @. (the index) rewrites to the iter var in both handler arg + interp.
     // Bug 73 (S159) — the per-item handler is now LIVE-KEYED: it re-resolves the
@@ -779,7 +780,7 @@ type Card:struct = { id: int, status: Status }
         <li><button onclick=moveTo(card.id, .InProgress)>Start</button></li>
     </each>
 </ul>`;
-    const { errors, clientJs } = compileToOutputs(src, "ebv-bare");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "ebv-bare"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     // The bare-variant is lowered to its frozen string, not left raw.
     expect(clientJs).toContain('"InProgress"');
@@ -800,7 +801,7 @@ type Card:struct = { id: int }
         <li><button onclick=@phase.advance(.Active)>Go</button></li>
     </each>
 </ul>`;
-    const { errors, clientJs } = compileToOutputs(src, "ebv-engine");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "ebv-engine"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     // The engine transition routes through the canonical engine machinery — NOT
     // the bare-variant string-lowering fallback (the engine path keeps the raw

@@ -41,6 +41,7 @@ import { runSYM } from "../../src/symbol-table.ts";
 import { analyzeUsage } from "../../src/codegen/usage-analyzer.ts";
 import { compileScrml } from "../../src/api.js";
 import { unNamespaceEngineNames } from "../helpers/chunk-scope.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -87,8 +88,8 @@ function compileToClientJs(source, suffix = "hier") {
       outputDir: outDir,
     });
     const clientPath = resolve(outDir, `${name}.client.js`);
-    const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
-    return { errors: result.errors ?? [], clientJs: unNamespaceEngineNames(clientJs) };
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""));
+    return { errors: result.errors ?? [], clientJs:foldChunkNamespacing( foldChunkNamespacing)(unNamespaceEngineNames(clientJs) )};
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -256,7 +257,7 @@ describe("engine-a7-hierarchy §4 — outer engine end-to-end compilation", () =
   </>
   <Paused rule=.Playing></>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "outer-emit");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "outer-emit"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     expect(clientJs).toContain("__scrml_engine_appMode_transitions");
     // Outer dispatcher wires to appMode.
@@ -332,7 +333,7 @@ describe("engine-a7-hierarchy §6 — multi-engine pattern (§51.4)", () => {
   <Off rule=.On></>
   <On rule=.Off></>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "multi");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "multi"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     expect(clientJs).toContain("__scrml_engine_phase_transitions");
     expect(clientJs).toContain("__scrml_engine_toggle_transitions");
@@ -438,7 +439,7 @@ describe("engine-a7-hierarchy §7 — non-empty inner state-child bodies (Bug #1
   </>
   <Paused rule=.Playing></>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "bug2-inner-dispatcher");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "bug2-inner-dispatcher"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Inner engine substrate emits — transitions table, variant cell init.
     expect(clientJs).toContain("__scrml_engine_playMode_transitions");
@@ -464,7 +465,7 @@ describe("engine-a7-hierarchy §7 — non-empty inner state-child bodies (Bug #1
   </>
   <Active rule=.Idle></>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "bug2-treeshake-flat");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "bug2-treeshake-flat"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     expect(clientJs).toContain("__scrml_engine_phase_transitions");
     // No mention of any other engine.
@@ -495,7 +496,7 @@ describe("engine-a7-hierarchy §7 — non-empty inner state-child bodies (Bug #1
     </>
   </>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "bug2-init-on-entry");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "bug2-init-on-entry"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Composite-arm post-mount block emits.
     expect(clientJs).toContain("§51.0.Q.1 composite-arm post-mount");
@@ -529,7 +530,7 @@ describe("engine-a7-hierarchy §7 — non-empty inner state-child bodies (Bug #1
   </>
   <Paused rule=.Playing.history></>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "bug2-history-restore-branch");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "bug2-history-restore-branch"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Restore branch references the synth-cell key.
     expect(clientJs).toContain("_appMode_Playing_history");

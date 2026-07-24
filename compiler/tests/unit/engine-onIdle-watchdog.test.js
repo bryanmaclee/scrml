@@ -27,6 +27,7 @@ import { buildAST } from "../../src/ast-builder.js";
 import { scanForOnIdleEntries } from "../../src/engine-statechild-parser.ts";
 import { compileScrml } from "../../src/api.js";
 import { unNamespaceEngineNames } from "../helpers/chunk-scope.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function compileToClientJs(source, suffix = "onIdle") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -43,8 +44,8 @@ function compileToClientJs(source, suffix = "onIdle") {
       outputDir: outDir,
     });
     const clientPath = resolve(outDir, `${name}.client.js`);
-    const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
-    return { errors: result.errors ?? [], clientJs: unNamespaceEngineNames(clientJs) };
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""));
+    return { errors: result.errors ?? [], clientJs:foldChunkNamespacing( foldChunkNamespacing)(unNamespaceEngineNames(clientJs) )};
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -149,7 +150,7 @@ describe("A5-6 §A5-6.5 — codegen literal form", () => {
   <Idle></>
   <onIdle after=5m to=.Idle/>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "lit");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "lit"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity === "error")).toEqual([]);
     expect(clientJs).toContain("__scrml_engine_phase_idle");
     expect(clientJs).toMatch(/ms:\s*300000/);
@@ -168,7 +169,7 @@ describe("A5-6 §A5-6.6 — codegen computed form", () => {
   <Idle></>
   <onIdle after=\${@delay}s to=.Idle/>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "cmp");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "cmp"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity === "error")).toEqual([]);
     expect(clientJs).toContain("__scrml_engine_phase_idle");
     expect(clientJs).toContain("msExpr: function()");
@@ -187,7 +188,7 @@ describe("A5-6 §A5-6.7 — tree-shake when no <onIdle>", () => {
   <Active rule=.Idle></>
   <Idle></>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "shake");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "shake"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity === "error")).toEqual([]);
     expect(clientJs).not.toContain("__scrml_engine_phase_idle");
     expect(clientJs).not.toContain("_scrml_engine_arm_idle_watchdog");
@@ -204,7 +205,7 @@ describe("A5-6 §A5-6.8 — initial-arm at module-init", () => {
   <Idle></>
   <onIdle after=5m to=.Idle/>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "init");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "init"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity === "error")).toEqual([]);
     expect(clientJs).toContain(
       `_scrml_engine_arm_idle_watchdog("phase", __scrml_engine_phase_idle, __scrml_engine_phase_transitions);`,
@@ -225,7 +226,7 @@ describe("A5-6 §A5-6.9 — direct-write call sites pass watchdog as 5th arg", (
   <Idle></>
   <onIdle after=10s to=.Idle/>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "ds");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "ds"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity === "error")).toEqual([]);
     // direct_set 5-arg form: ("name", value, transitions, null, __scrml_engine_phase_idle)
     expect(clientJs).toContain(

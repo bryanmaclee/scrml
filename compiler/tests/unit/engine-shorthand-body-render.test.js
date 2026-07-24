@@ -29,6 +29,7 @@ import { compileScrml } from "../../src/api.js";
 import { writeFileSync, mkdirSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function compileSrc(src, baseName) {
   const tmp = join(tmpdir(), `scrml-engine-shorthand-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
@@ -76,7 +77,7 @@ describe("engine-shorthand-body-render §1: pure-literal `:`-shorthand arm rende
   });
 
   test("each pure-literal shorthand body appears in its render fn (not dropped)", () => {
-    const { clientJs, cleanup } = compileSrc(src, "esb-1-lit");
+    const { clientJs: __cjRaw, cleanup } = compileSrc(src, "esb-1-lit"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toContain("Loading...");
     expect(clientJs).toContain("No tasks yet.");
     expect(clientJs).toContain("done");
@@ -110,13 +111,13 @@ describe("engine-shorthand-body-render §2: `${...}` interp `:`-shorthand arm wi
   });
 
   test("the literal `${@count}` substring is ABSENT (lowered, not dead text)", () => {
-    const { clientJs, cleanup } = compileSrc(src, "esb-2-noliteral");
+    const { clientJs: __cjRaw, cleanup } = compileSrc(src, "esb-2-noliteral"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).not.toContain("${@count}");
     cleanup();
   });
 
   test("the render fn emits a data-scrml-logic span + the literal ` items` segment", () => {
-    const { clientJs, cleanup } = compileSrc(src, "esb-2-wire");
+    const { clientJs: __cjRaw, cleanup } = compileSrc(src, "esb-2-wire"); const clientJs = foldChunkNamespacing(__cjRaw);
     const editing = renderFnBody(clientJs, "Editing");
     expect(editing).not.toBeNull();
     // <span data-scrml-logic="..."></span> items  (inner `"` backslash-escaped in JS literal)
@@ -125,7 +126,7 @@ describe("engine-shorthand-body-render §2: `${...}` interp `:`-shorthand arm wi
   });
 
   test("the @count interp wires via _scrml_reactive_get(\"count\")", () => {
-    const { clientJs, cleanup } = compileSrc(src, "esb-2-get");
+    const { clientJs: __cjRaw, cleanup } = compileSrc(src, "esb-2-get"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toContain('_scrml_reactive_get("count")');
     cleanup();
   });
@@ -166,8 +167,8 @@ describe("engine-shorthand-body-render §3: shorthand body byte-equivalent to ba
   test("the shorthand and bare-body render-fn return values are byte-equivalent", () => {
     const a = compileSrc(shorthand, "esb-3-short");
     const b = compileSrc(bareBody, "esb-3-bare");
-    const shortRet = editingReturn(a.clientJs);
-    const bareRet = editingReturn(b.clientJs);
+    const shortRet = editingReturn(foldChunkNamespacing(a.clientJs));
+    const bareRet = editingReturn(foldChunkNamespacing(b.clientJs));
     expect(shortRet).not.toBeNull();
     expect(bareRet).not.toBeNull();
     expect(shortRet).toBe(bareRet);
@@ -190,7 +191,7 @@ describe("engine-shorthand-body-render §4: markup-as-value + bare-expr shorthan
       `</>`,
       `</program>`,
     ].join("\n");
-    const { result, clientJs, cleanup } = compileSrc(src, "esb-4-markup");
+    const { result, clientJs: __cjRaw, cleanup } = compileSrc(src, "esb-4-markup"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errorCodes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect(clientJs).toContain("<strong>hi</strong>");
     cleanup();
@@ -207,7 +208,7 @@ describe("engine-shorthand-body-render §4: markup-as-value + bare-expr shorthan
       `</>`,
       `</program>`,
     ].join("\n");
-    const { result, clientJs, cleanup } = compileSrc(src, "esb-4-bareexpr");
+    const { result, clientJs: __cjRaw, cleanup } = compileSrc(src, "esb-4-bareexpr"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errorCodes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     const on = renderFnBody(clientJs, "On");
     expect(on).not.toBeNull();
@@ -241,7 +242,7 @@ describe("engine-shorthand-body-render §5: mixed shorthand + bare-body arms all
   });
 
   test("the shorthand-literal, bare-body, AND shorthand-interp arms all render", () => {
-    const { clientJs, cleanup } = compileSrc(src, "esb-5-all");
+    const { clientJs: __cjRaw, cleanup } = compileSrc(src, "esb-5-all"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toContain("Loading...");          // shorthand literal
     expect(clientJs).toContain("<p>No tasks yet.</p>"); // bare-body markup
     expect(clientJs).toContain('_scrml_reactive_get("count")'); // shorthand interp wire

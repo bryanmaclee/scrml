@@ -38,6 +38,7 @@ import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { runSYM } from "../../src/symbol-table.ts";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -86,7 +87,7 @@ function compileToClientJs(source, baseName = "opener-effect") {
     const clientPath = resolve(outDir, `${baseName}.client.js`);
     return {
       errors: (result.errors ?? []).filter((e) => (e.severity ?? "error") === "error"),
-      clientJs: existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "",
+      clientJs:foldChunkNamespacing( foldChunkNamespacing)(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""),
       clientPath,
       keepDir: tmpDir,
     };
@@ -342,13 +343,13 @@ describe("C1 §4 — CODEGEN: opener effect lowers to a boot-only module-init fi
   });
 
   test("emits the §51.0.H Form 3 opener-effect block at module scope (not in a render/wire fn)", () => {
-    const { clientJs } = compileToClientJs(FLAGSHIP_SRC, "flagship");
+    const { clientJs: __cjRaw } = compileToClientJs(FLAGSHIP_SRC, "flagship"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toContain("engine opener effect= boot-init effects");
     expect(clientJs).toContain("§51.0.H Form 3 opener effect= (boot-only init effect): phase");
   });
 
   test("the boot effect body calls loadTasks() ONCE at module-init (not inside a per-arm handler)", () => {
-    const { clientJs } = compileToClientJs(FLAGSHIP_SRC, "flagship");
+    const { clientJs: __cjRaw } = compileToClientJs(FLAGSHIP_SRC, "flagship"); const clientJs = foldChunkNamespacing(__cjRaw);
     // The opener-effect IIFE block.
     const blockStart = clientJs.indexOf("engine opener effect= boot-init effects");
     expect(blockStart).toBeGreaterThan(-1);
@@ -378,7 +379,7 @@ describe("C1 §4 — CODEGEN: opener effect lowers to a boot-only module-init fi
   });
 
   test("cross-variant boot write `@phase = …` lowers to _scrml_engine_direct_set (engine-aware, not bare reactive_set)", () => {
-    const { clientJs } = compileToClientJs(FLAGSHIP_SRC, "flagship");
+    const { clientJs: __cjRaw } = compileToClientJs(FLAGSHIP_SRC, "flagship"); const clientJs = foldChunkNamespacing(__cjRaw);
     const blockStart = clientJs.indexOf("engine opener effect= boot-init effects");
     const block = clientJs.slice(blockStart);
     // The boot write routes through the engine transition machinery (rule= /
@@ -401,7 +402,7 @@ describe("C1 §4 — CODEGEN: opener effect lowers to a boot-only module-init fi
   });
 
   test("tree-shake: engine with NO opener effect emits ZERO opener-effect code", () => {
-    const { clientJs, errors } = compileToClientJs(NO_EFFECT_SRC, "no-effect");
+    const { clientJs: __cjRaw, errors } = compileToClientJs(NO_EFFECT_SRC, "no-effect"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).not.toContain("engine opener effect= boot-init effects");
     expect(clientJs).not.toContain("§51.0.H Form 3 opener effect=");

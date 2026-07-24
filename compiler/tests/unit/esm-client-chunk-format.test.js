@@ -29,6 +29,7 @@ import * as acorn from "acorn";
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, readdirSync, rmSync, copyFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, basename, dirname } from "node:path";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const CLI = join(import.meta.dir, "../../bin/scrml.js");
 const MF_EXAMPLE = join(import.meta.dir, "../../../examples/22-multifile");

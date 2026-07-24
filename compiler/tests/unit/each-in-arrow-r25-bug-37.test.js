@@ -64,6 +64,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { execFileSync } from "child_process";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // compile helper — mirrors each-colon-shorthand-r25-bug-40.test.js pattern.
@@ -85,7 +86,7 @@ function compileToOutputs(source, suffix = "arrow") {
     });
     const clientPath = resolve(outDir, `${name}.client.js`);
     const htmlPath = resolve(outDir, `${name}.html`);
-    const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""));
     const html = existsSync(htmlPath) ? readFileSync(htmlPath, "utf8") : "";
     return {
       errors: result.errors ?? [],
@@ -117,7 +118,7 @@ describe("R25-Bug-37 §1 — minimal repro: inline arrow in <each in=...>", () =
     <li>\${@.foo}</li>
 </each>
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "bug37-min");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "bug37-min"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Pre-fix symptom: `filter(c =;` — arrow body truncated.
     expect(clientJs).not.toMatch(/filter\(c =;/);
@@ -139,7 +140,7 @@ describe("R25-Bug-37 §2 — brace-bodied arrow in <each in=...>", () => {
     <li>\${@.foo}</li>
 </each>
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "bug37-brace-body");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "bug37-brace-body"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Full filter expression preserved including the brace body.
     expect(clientJs).toMatch(/filter\(c => \{ return c\.foo > 0 \}\)/);
@@ -159,7 +160,7 @@ describe("R25-Bug-37 §3 — chained .filter(...).map(...) with two arrows", () 
     <li>\${@.}</li>
 </each>
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "bug37-chain");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "bug37-chain"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Both arrow bodies preserved.
     expect(clientJs).toMatch(/\.filter\(c => c\.foo == 1\)\.map\(c => c\.bar\)/);
@@ -179,7 +180,7 @@ describe("R25-Bug-37 §4 — count form (`<each of=...>`) with inline arrow", ()
     <li>row \${@.}</li>
 </each>
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "bug37-of-reduce");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "bug37-of-reduce"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Reduce arrow + final 0 both preserved.
     expect(clientJs).toMatch(/\.reduce\(\(a, c\) => a \+ 1, 0\)/);
@@ -199,7 +200,7 @@ describe("R25-Bug-37 §5 — bracketed access + inline arrow in <each in=...>", 
     <li>\${@.}</li>
 </each>
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "bug37-bracket");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "bug37-bracket"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Full expression preserved.
     expect(clientJs).toMatch(/\[0\]\.filter\(c => c > 0\)/);
@@ -219,7 +220,7 @@ describe("R25-Bug-37 §6 — braced attribute-value arrow (regression-guard)", (
     bump
 </button>
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "bug37-onclick");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "bug37-onclick"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Click handler should be wired.
     expect(clientJs).toMatch(/addEventListener\("click"|onclick/);
@@ -240,7 +241,7 @@ const <filtered> = @items.filter(c => c.foo == 1)
     <li>\${@.foo}</li>
 </each>
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "bug37-hoist");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "bug37-hoist"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Derived cell uses the @items source. Note: the derived-cell pipeline
     // emits structural-eq (`_scrml_structural_eq(c.foo, 1)`) for `c.foo == 1`
@@ -266,7 +267,7 @@ describe("R25-Bug-37 §8 — composition with Bug 40 `:`-shorthand body", () => 
     <li : @.foo>
 </each>
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "bug37-shorthand");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "bug37-shorthand"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Bug 37: filter arrow preserved.
     expect(clientJs).toMatch(/filter\(c => c\.foo == 1\)/);
@@ -288,7 +289,7 @@ describe("R25-Bug-37 §9 — `as name` alias with inline arrow in iter expressio
     <li>\${item.bar}</li>
 </each>
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "bug37-as");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "bug37-as"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Filter expression preserved.
     expect(clientJs).toMatch(/filter\(c => c\.foo == 1\)/);
@@ -384,7 +385,7 @@ describe("R25-Bug-37 §12 — nested parens inside the arrow body", () => {
     <li>\${@.a},\${@.b}</li>
 </each>
 </program>`;
-    const { errors, clientJs } = compileToOutputs(src, "bug37-nested");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "bug37-nested"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Full expression with nested parens preserved.
     expect(clientJs).toMatch(/filter\(c => \(c\.a == 1 \|\| c\.b > 2\)\)/);

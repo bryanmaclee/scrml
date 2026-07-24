@@ -34,6 +34,7 @@ import { runSYM } from "../../src/symbol-table.ts";
 import { analyzeUsage } from "../../src/codegen/usage-analyzer.ts";
 import { compileScrml } from "../../src/api.js";
 import { unNamespaceEngineNames } from "../helpers/chunk-scope.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -80,8 +81,8 @@ function compileToClientJs(source, suffix = "internal-rule") {
       outputDir: outDir,
     });
     const clientPath = resolve(outDir, `${name}.client.js`);
-    const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
-    return { errors: result.errors ?? [], clientJs: unNamespaceEngineNames(clientJs) };
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""));
+    return { errors: result.errors ?? [], clientJs:foldChunkNamespacing( foldChunkNamespacing)(unNamespaceEngineNames(clientJs) )};
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -281,7 +282,7 @@ describe("engine-a7-internal-rule §4 — canonical §51.0.O example compiles en
     </>
   </>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "ir-canon");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "ir-canon"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     expect(clientJs).toContain("__scrml_engine_appMode_transitions");
     // External rule= target lands in the transition table.
@@ -431,7 +432,7 @@ describe("engine-a7-internal-rule §7 — distinct write path codegen", () => {
 
 <button onclick=\${@appMode = AppMode.Playing}>Start</>
 <button onclick=\${@appMode = AppMode.Title}>Quit</>`;
-    const { errors, clientJs } = compileToClientJs(src, "ir-w22-tables");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "ir-w22-tables"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     // (1) Internal transition table emitted as a sibling const.
@@ -486,7 +487,7 @@ describe("engine-a7-internal-rule §7 — distinct write path codegen", () => {
 </>
 
 \${ function trigger() { @appMode = AppMode.Title } }`;
-    const { errors, clientJs } = compileToClientJs(src, "ir-w22-hooks");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "ir-w22-hooks"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     // Engine has a hook (effect= / <onTransition>); the wrap should be present.
@@ -537,7 +538,7 @@ describe("engine-a7-internal-rule §7 — distinct write path codegen", () => {
 </>
 
 \${ function leavePlaying() { @appMode = AppMode.Title } }`;
-    const { errors, clientJs } = compileToClientJs(src, "ir-w22-hist");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "ir-w22-hist"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     // (1) Both surfaces emit their tables — internal AND history.
@@ -590,7 +591,7 @@ describe("engine-a7-internal-rule §7 — distinct write path codegen", () => {
 </>
 
 <button onclick=\${@appMode = AppMode.Playing}>Start</>`;
-    const { errors, clientJs } = compileToClientJs(src, "ir-w22-treeshake");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "ir-w22-treeshake"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     // (1) The external transition table emits as usual.

@@ -25,6 +25,7 @@ import { BindingRegistry } from "../../src/codegen/binding-registry.ts";
 import { compileScrml } from "../../src/api.js";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { resolve } from "path";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function runUpToSYM(source, filePath = "msg-codegen.scrml") {
   const bs = splitBlocks(filePath, source);

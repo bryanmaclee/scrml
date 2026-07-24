@@ -29,6 +29,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { execFileSync } from "child_process";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function compile(source, suffix = "giti033") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -76,15 +77,15 @@ describe("giti033 §1 — bare ${@.} each in a <main>-direct ternary (null scope
     const r = compile(src, "giti033-s1");
     try {
       expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
-      expect(r.clientJs.length).toBeGreaterThan(0);
+      expect(foldChunkNamespacing(r.clientJs).length).toBeGreaterThan(0);
       // No raw sigil leaked, and no `${...}` shipped as LITERAL text.
-      expect(r.clientJs).not.toMatch(/\(@\s*\.\)/);
-      expect(r.clientJs).not.toContain("@ .");
-      expect(r.clientJs).not.toMatch(/createTextNode\("\$\{/);
+      expect(foldChunkNamespacing(r.clientJs)).not.toMatch(/\(@\s*\.\)/);
+      expect(foldChunkNamespacing(r.clientJs)).not.toContain("@ .");
+      expect(foldChunkNamespacing(r.clientJs)).not.toMatch(/createTextNode\("\$\{/);
       // The each was LOWERED (reconcile list), not rendered as a literal <each>.
-      expect(r.clientJs).toContain("_scrml_reconcile_list");
+      expect(foldChunkNamespacing(r.clientJs)).toContain("_scrml_reconcile_list");
       // The body `${@.}` lowered to the inner iter var (live text node).
-      expect(r.clientJs).toContain(".textContent = String(_scrml_each_item)");
+      expect(foldChunkNamespacing(r.clientJs)).toContain(".textContent = String(_scrml_each_item)");
       execFileSync("node", ["--check", r.clientPath]);
     } finally {
       cleanup(r.tmpDir);
@@ -115,9 +116,9 @@ describe("giti033 §2 — per-item attribute + text interpolation in a ternary e
     try {
       expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
       // Attribute interpolation → setAttribute with a template literal on the iter var.
-      expect(r.clientJs).toContain("`tag tag-${_scrml_each_item.kind}`");
+      expect(foldChunkNamespacing(r.clientJs)).toContain("`tag tag-${_scrml_each_item.kind}`");
       // Must NOT leak the raw sigil into the attribute.
-      expect(r.clientJs).not.toContain("tag-${@");
+      expect(foldChunkNamespacing(r.clientJs)).not.toContain("tag-${@");
       execFileSync("node", ["--check", r.clientPath]);
     } finally {
       cleanup(r.tmpDir);
@@ -128,10 +129,10 @@ describe("giti033 §2 — per-item attribute + text interpolation in a ternary e
     const r = compile(src, "giti033-s2b");
     try {
       // The interpolations render the VALUE, not the literal `${...}` framing.
-      expect(r.clientJs).toContain(".textContent = String(_scrml_each_item.kind)");
-      expect(r.clientJs).toContain(".textContent = String(_scrml_each_item.path)");
+      expect(foldChunkNamespacing(r.clientJs)).toContain(".textContent = String(_scrml_each_item.kind)");
+      expect(foldChunkNamespacing(r.clientJs)).toContain(".textContent = String(_scrml_each_item.path)");
       // Regression guard: the pre-fix bug shipped `createTextNode("${_scrml_each_item.kind}")`.
-      expect(r.clientJs).not.toMatch(/createTextNode\("\$\{/);
+      expect(foldChunkNamespacing(r.clientJs)).not.toMatch(/createTextNode\("\$\{/);
     } finally {
       cleanup(r.tmpDir);
     }
@@ -160,9 +161,9 @@ describe("giti033 §3 — reactive @cell source inside a ternary each", () => {
     try {
       expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
       // The source `@items` lowers to a reactive read (re-renders on update).
-      expect(r.clientJs).toContain('_scrml_reactive_get("items")');
+      expect(foldChunkNamespacing(r.clientJs)).toContain('_scrml_reactive_get("items")');
       // Wrapped in an effect so the subscription is live.
-      expect(r.clientJs).toContain("_scrml_effect(");
+      expect(foldChunkNamespacing(r.clientJs)).toContain("_scrml_effect(");
       execFileSync("node", ["--check", r.clientPath]);
     } finally {
       cleanup(r.tmpDir);
@@ -205,15 +206,15 @@ describe("giti033 §4 — ternary each in a <match> arm binding a payload var", 
     try {
       expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
       // The each source resolves the match-arm payload field in the arm closure.
-      expect(r.clientJs).toContain("d.conflicts");
-      expect(r.clientJs).toContain("d.publicFiles");
+      expect(foldChunkNamespacing(r.clientJs)).toContain("d.conflicts");
+      expect(foldChunkNamespacing(r.clientJs)).toContain("d.publicFiles");
       // The inner `@.` binds to the INNER each item, not the payload `d`.
-      expect(r.clientJs).toContain(".textContent = String(_scrml_each_item)");
-      expect(r.clientJs).toContain(".textContent = String(_scrml_each_item.kind)");
-      expect(r.clientJs).toContain("`tag tag-${_scrml_each_item.kind}`");
+      expect(foldChunkNamespacing(r.clientJs)).toContain(".textContent = String(_scrml_each_item)");
+      expect(foldChunkNamespacing(r.clientJs)).toContain(".textContent = String(_scrml_each_item.kind)");
+      expect(foldChunkNamespacing(r.clientJs)).toContain("`tag tag-${_scrml_each_item.kind}`");
       // No sigil / literal-`${}` leak.
-      expect(r.clientJs).not.toMatch(/\(@\s*\.\)/);
-      expect(r.clientJs).not.toMatch(/createTextNode\("\$\{/);
+      expect(foldChunkNamespacing(r.clientJs)).not.toMatch(/\(@\s*\.\)/);
+      expect(foldChunkNamespacing(r.clientJs)).not.toMatch(/createTextNode\("\$\{/);
       execFileSync("node", ["--check", r.clientPath]);
     } finally {
       cleanup(r.tmpDir);
@@ -246,12 +247,12 @@ describe("giti033 §4b — inner @. is the INNER item when nested in an outer <e
     try {
       expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
       // The inner text reads the inner item (§17.7.3 innermost-scope wins).
-      expect(r.clientJs).toContain(".textContent = String(_scrml_each_item)");
+      expect(foldChunkNamespacing(r.clientJs)).toContain(".textContent = String(_scrml_each_item)");
       // Regression guard: pre-fix the outer per-item markup-value over-rewrite
       // clobbered the inner `${@.}` to the outer alias → `String(d)`.
-      expect(r.clientJs).not.toContain(".textContent = String(d)");
+      expect(foldChunkNamespacing(r.clientJs)).not.toContain(".textContent = String(d)");
       // The inner source still resolves against the outer alias `d`.
-      expect(r.clientJs).toContain("d.files");
+      expect(foldChunkNamespacing(r.clientJs)).toContain("d.files");
       execFileSync("node", ["--check", r.clientPath]);
     } finally {
       cleanup(r.tmpDir);
@@ -281,9 +282,9 @@ describe("giti033 §5 — <empty> sub-element in a ternary each", () => {
     const r = compile(src, "giti033-s5");
     try {
       expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
-      expect(r.clientJs).toContain("none");
+      expect(foldChunkNamespacing(r.clientJs)).toContain("none");
       // The empty-branch guard on an empty collection.
-      expect(r.clientJs).toMatch(/\.length === 0/);
+      expect(foldChunkNamespacing(r.clientJs)).toMatch(/\.length === 0/);
       execFileSync("node", ["--check", r.clientPath]);
     } finally {
       cleanup(r.tmpDir);
@@ -308,7 +309,7 @@ describe("giti033 §6 — ternary consequent with no nested each is unaffected",
     const r = compile(src, "giti033-s6");
     try {
       expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
-      expect(r.clientJs).not.toContain("_scrml_reconcile_list");
+      expect(foldChunkNamespacing(r.clientJs)).not.toContain("_scrml_reconcile_list");
       execFileSync("node", ["--check", r.clientPath]);
     } finally {
       cleanup(r.tmpDir);
@@ -344,8 +345,8 @@ describe("giti033 §7 — string literal with braces inside a ${…} text-body i
       expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
       // Quotes survive: the string literal `"add"` and `"}"` are intact (not
       // dropped to bare idents / structural braces).
-      expect(r.clientJs).toContain(`_scrml_each_item.kind == "add"`);
-      expect(r.clientJs).toContain(`? "}" :`);
+      expect(foldChunkNamespacing(r.clientJs)).toContain(`_scrml_each_item.kind == "add"`);
+      expect(foldChunkNamespacing(r.clientJs)).toContain(`? "}" :`);
       execFileSync("node", ["--check", r.clientPath]);
     } finally {
       cleanup(r.tmpDir);
@@ -356,7 +357,7 @@ describe("giti033 §7 — string literal with braces inside a ${…} text-body i
     const r = compile(mk(`"{" + @.name`), "giti033-s7-open");
     try {
       expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
-      expect(r.clientJs).toContain(`"{" + _scrml_each_item.name`);
+      expect(foldChunkNamespacing(r.clientJs)).toContain(`"{" + _scrml_each_item.name`);
       execFileSync("node", ["--check", r.clientPath]);
     } finally {
       cleanup(r.tmpDir);
@@ -367,7 +368,7 @@ describe("giti033 §7 — string literal with braces inside a ${…} text-body i
     const r = compile(mk(`@.name == "n" ? "{loading}" : @.name`), "giti033-s7-balanced");
     try {
       expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
-      expect(r.clientJs).toContain(`"{loading}"`);
+      expect(foldChunkNamespacing(r.clientJs)).toContain(`"{loading}"`);
       execFileSync("node", ["--check", r.clientPath]);
     } finally {
       cleanup(r.tmpDir);
@@ -379,9 +380,9 @@ describe("giti033 §7 — string literal with braces inside a ${…} text-body i
     try {
       expect(codes(r.errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
       // Regression guard: pre-fix this emitted `== add ? ... : none` (bare idents).
-      expect(r.clientJs).toContain(`_scrml_each_item.kind == "add"`);
-      expect(r.clientJs).toContain(`: "none"`);
-      expect(r.clientJs).not.toMatch(/kind == add\b/);
+      expect(foldChunkNamespacing(r.clientJs)).toContain(`_scrml_each_item.kind == "add"`);
+      expect(foldChunkNamespacing(r.clientJs)).toContain(`: "none"`);
+      expect(foldChunkNamespacing(r.clientJs)).not.toMatch(/kind == add\b/);
       execFileSync("node", ["--check", r.clientPath]);
     } finally {
       cleanup(r.tmpDir);
