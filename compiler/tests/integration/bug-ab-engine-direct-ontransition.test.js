@@ -39,7 +39,6 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -58,7 +57,7 @@ function compile(source, suffix = "bug-ab-direct") {
     const runtimePath = resolve(outDir, runtimeFilename);
     return {
       errors: result.errors ?? [],
-      clientJs:foldChunkNamespacing( foldChunkNamespacing)(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""),
+      clientJs: existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "",
       runtimeJs: existsSync(runtimePath) ? readFileSync(runtimePath, "utf8") : "",
       cleanup: () => existsSync(tmpDir) && rmSync(tmpDir, { recursive: true, force: true }),
     };
@@ -121,7 +120,7 @@ function toggle() { if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav
 </engine>
 <div><button onclick=toggle()>toggle</button><span>\${@mode}</span><span>\${@transitions}</span></div>
 </program>`;
-    const { errors, clientJs: __cjRaw, runtimeJs, cleanup } = compile(src, "bug-ab-direct"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "bug-ab-direct");
     try {
       expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
@@ -170,7 +169,7 @@ function toggle() { if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav
 </engine>
 <div><button onclick=toggle()>toggle</button><span>\${@mode}</span><span>\${@transitions}</span></div>
 </program>`;
-    const { errors, clientJs: __cjRaw, runtimeJs, cleanup } = compile(src, "bug-ab-nested"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "bug-ab-nested");
     try {
       expect(errors.filter((e) => e.severity === "error")).toEqual([]);
       expect(clientJs).toContain("function __scrml_engine_mode_fire_hooks");
@@ -208,7 +207,7 @@ function toggle() { if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav
 </engine>
 <div><button onclick=toggle()>toggle</button><span>\${@mode}</span></div>
 </program>`;
-    const { errors, clientJs: __cjRaw, runtimeJs, cleanup } = compile(src, "bug-ab-mixed"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "bug-ab-mixed");
     try {
       expect(errors.filter((e) => e.severity === "error")).toEqual([]);
       // Nested edit-arm fires on Nav->Edit; engine-direct nav-arm on Edit->Nav.

@@ -51,7 +51,6 @@ import { compileScrml } from "../../src/api.js";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function compileSrcToTmp(src, basename = "bare-assign-test") {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bare-assign-"));
@@ -66,8 +65,8 @@ function compileSrcToTmp(src, basename = "bare-assign-test") {
     const clientPath = path.join(tmpDir, `${basename}.client.js`);
     const htmlPath = path.join(tmpDir, `${basename}.html`);
     return {
-      client: foldChunkNamespacing(fs.existsSync(clientPath) ? fs.readFileSync(clientPath, "utf-8") : null),
-      html: foldChunkNamespacing(fs.existsSync(htmlPath) ? fs.readFileSync(htmlPath, "utf-8") : null),
+      client: fs.existsSync(clientPath) ? fs.readFileSync(clientPath, "utf-8") : null,
+      html: fs.existsSync(htmlPath) ? fs.readFileSync(htmlPath, "utf-8") : null,
     };
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

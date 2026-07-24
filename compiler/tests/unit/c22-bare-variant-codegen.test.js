@@ -26,7 +26,6 @@ import { mkdirSync, writeFileSync, rmSync, existsSync, mkdtempSync } from "fs";
 import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 let TMP;
 
@@ -53,7 +52,7 @@ function compile(rel, src) {
     write: false,
     log: () => {},
   });
-  return { result, path, clientJs:foldChunkNamespacing( foldChunkNamespacing)(result.outputs?.get(path)?.clientJs ?? "" )};
+  return { result, path, clientJs: result.outputs?.get(path)?.clientJs ?? "" };
 }
 
 // ---------------------------------------------------------------------------
@@ -62,14 +61,14 @@ function compile(rel, src) {
 
 describe("C22 §C22.1 — state-decl LHS-typed bare-variant codegen", () => {
   test("`<phase>: Phase = .Idle` emits string literal \"Idle\"", () => {
-    const { clientJs: __cjRaw, result } = compile("p1.scrml", `type Phase:enum = { Idle, Loading, Done }
+    const { clientJs, result } = compile("p1.scrml", `type Phase:enum = { Idle, Loading, Done }
 
 <phase>: Phase = .Idle
 
 const m = <main>${"$"}{@phase}</>
 
 render(m)
-`); const clientJs = foldChunkNamespacing(__cjRaw);
+`);
     // No bare-variant errors
     const variantErrs = (result.errors ?? []).filter(e => /VARIANT/.test(e.code ?? ""));
     expect(variantErrs).toEqual([]);
@@ -80,14 +79,14 @@ render(m)
   });
 
   test("`<phase>: Phase = .Loading` (different variant) emits \"Loading\"", () => {
-    const { clientJs: __cjRaw } = compile("p1b.scrml", `type Phase:enum = { Idle, Loading, Done }
+    const { clientJs } = compile("p1b.scrml", `type Phase:enum = { Idle, Loading, Done }
 
 <phase>: Phase = .Loading
 
 const m = <main>${"$"}{@phase}</>
 
 render(m)
-`); const clientJs = foldChunkNamespacing(__cjRaw);
+`);
     expect(clientJs).toMatch(/_scrml_reactive_set\("phase",\s*"Loading"\)/);
   });
 });
@@ -98,7 +97,7 @@ render(m)
 
 describe("C22 §C22.2 — let-decl LHS-typed bare-variant codegen", () => {
   test("`let x: Phase = .Loading` emits `let x = \"Loading\";`", () => {
-    const { clientJs: __cjRaw, result } = compile("p2.scrml", `type Phase:enum = { Idle, Loading, Done }
+    const { clientJs, result } = compile("p2.scrml", `type Phase:enum = { Idle, Loading, Done }
 
 <phase>: Phase = Phase.Idle
 let x: Phase = .Loading
@@ -106,7 +105,7 @@ let x: Phase = .Loading
 const m = <main>${"$"}{x}</>
 
 render(m)
-`); const clientJs = foldChunkNamespacing(__cjRaw);
+`);
     const variantErrs = (result.errors ?? []).filter(e => /VARIANT/.test(e.code ?? ""));
     expect(variantErrs).toEqual([]);
     expect(clientJs).toMatch(/let x = "Loading"/);
@@ -120,7 +119,7 @@ render(m)
 
 describe("C22 §C22.3 — const-decl LHS-typed bare-variant codegen", () => {
   test("`const x: Phase = .Done` emits `const x = \"Done\";`", () => {
-    const { clientJs: __cjRaw, result } = compile("p3.scrml", `type Phase:enum = { Idle, Loading, Done }
+    const { clientJs, result } = compile("p3.scrml", `type Phase:enum = { Idle, Loading, Done }
 
 <phase>: Phase = Phase.Idle
 const x: Phase = .Done
@@ -128,7 +127,7 @@ const x: Phase = .Done
 const m = <main>${"$"}{x}</>
 
 render(m)
-`); const clientJs = foldChunkNamespacing(__cjRaw);
+`);
     const variantErrs = (result.errors ?? []).filter(e => /VARIANT/.test(e.code ?? ""));
     expect(variantErrs).toEqual([]);
     expect(clientJs).toMatch(/const x = "Done"/);
@@ -141,7 +140,7 @@ render(m)
 
 describe("C22 §C22.4 — multiple bare-variants in one file", () => {
   test("two state-decls + a let-decl, all bare-variant inits, all lower correctly", () => {
-    const { clientJs: __cjRaw, result } = compile("p4.scrml", `type Phase:enum = { Idle, Loading, Done }
+    const { clientJs, result } = compile("p4.scrml", `type Phase:enum = { Idle, Loading, Done }
 type Color:enum = { Red, Green, Blue }
 
 <phase>: Phase = .Idle
@@ -151,7 +150,7 @@ let target: Phase = .Done
 const m = <main>${"$"}{@phase} ${"$"}{@color} ${"$"}{target}</>
 
 render(m)
-`); const clientJs = foldChunkNamespacing(__cjRaw);
+`);
     expect((result.errors ?? []).filter(e => /VARIANT/.test(e.code ?? ""))).toEqual([]);
     expect(clientJs).toMatch(/_scrml_reactive_set\("phase",\s*"Idle"\)/);
     expect(clientJs).toMatch(/_scrml_reactive_set\("color",\s*"Red"\)/);
@@ -165,7 +164,7 @@ render(m)
 
 describe("C22 §C22.5 — bare-variant in ternary branches", () => {
   test("`let target: Phase = cond ? .Idle : .Done` lowers both branches", () => {
-    const { clientJs: __cjRaw, result } = compile("p5.scrml", `type Phase:enum = { Idle, Loading, Done }
+    const { clientJs, result } = compile("p5.scrml", `type Phase:enum = { Idle, Loading, Done }
 
 <flag>: boolean = true
 <phase>: Phase = Phase.Idle
@@ -174,7 +173,7 @@ let target: Phase = @flag ? .Idle : .Done
 const m = <main>${"$"}{target}</>
 
 render(m)
-`); const clientJs = foldChunkNamespacing(__cjRaw);
+`);
     expect((result.errors ?? []).filter(e => /VARIANT/.test(e.code ?? ""))).toEqual([]);
     // Both branches should be string literals — no `.Idle` / `.Done` survive.
     expect(clientJs).not.toMatch(/\?\s*\.Idle/);
@@ -196,7 +195,7 @@ describe("C22 §C22.6 — bare-variant inside compound literals (regression)", (
     // B20 may not currently fire for this position (it's a SPEC-prose forward
     // hedge), but the codegen should still emit the literal — ensuring this is
     // SAFE so future B20 extensions don't regress.
-    const { clientJs: __cjRaw } = compile("p6.scrml", `type Phase:enum = { Idle, Loading, Done }
+    const { clientJs } = compile("p6.scrml", `type Phase:enum = { Idle, Loading, Done }
 
 <phase>: Phase = Phase.Idle
 const phases = [Phase.Idle, Phase.Loading, Phase.Done]
@@ -204,7 +203,7 @@ const phases = [Phase.Idle, Phase.Loading, Phase.Done]
 const m = <main>${"$"}{phases.length}</>
 
 render(m)
-`); const clientJs = foldChunkNamespacing(__cjRaw);
+`);
     // Sanity: qualified Phase.Idle should still appear in some form
     // (after rewriteEnumVariantAccess it becomes a string in client output).
     expect(clientJs).toMatch(/Idle/);
@@ -219,14 +218,14 @@ render(m)
 
 describe("C22 §C22.7 — bare-variant in binary `==` (regression)", () => {
   test("`@phase == .Idle` → structural-eq with stringified rhs", () => {
-    const { clientJs: __cjRaw } = compile("p7.scrml", `type Phase:enum = { Idle, Loading, Done }
+    const { clientJs } = compile("p7.scrml", `type Phase:enum = { Idle, Loading, Done }
 
 <phase>: Phase = Phase.Idle
 
 const m = <main>${"$"}{@phase == Phase.Idle ? "yes" : "no"}</>
 
 render(m)
-`); const clientJs = foldChunkNamespacing(__cjRaw);
+`);
     // No `.Idle` survives unstringified; the qualified form is rewritten to
     // a string by rewriteEnumVariantAccess.
     expect(clientJs).not.toMatch(/[\s(]\.Idle\b/);
@@ -246,14 +245,14 @@ describe("C22 §C22.8 — qualified `Phase.Idle` regression (MemberExpr)", () =>
     // The exact emit form (whether "Phase.Idle" or "Idle") is an orthogonal
     // codegen concern — what matters is (a) no error, and (b) the variant
     // identity is preserved.
-    const { clientJs: __cjRaw, result } = compile("p8.scrml", `type Phase:enum = { Idle, Loading, Done }
+    const { clientJs, result } = compile("p8.scrml", `type Phase:enum = { Idle, Loading, Done }
 
 <phase>: Phase = Phase.Idle
 
 const m = <main>${"$"}{@phase}</>
 
 render(m)
-`); const clientJs = foldChunkNamespacing(__cjRaw);
+`);
     expect((result.errors ?? [])).toEqual([]);
     // The reactive_set call should reference Idle (either as "Idle" string OR
     // Phase.Idle property access) — both resolve to the variant tag at runtime.
@@ -267,7 +266,7 @@ render(m)
 
 describe("C22 §C22.9 — match-arm `.Variant => ...` regression", () => {
   test("match-arm patterns still emit `tagVar === \"Variant\"` (separate path)", () => {
-    const { clientJs: __cjRaw } = compile("p9.scrml", `type Phase:enum = { Idle, Loading, Done }
+    const { clientJs } = compile("p9.scrml", `type Phase:enum = { Idle, Loading, Done }
 
 <phase>: Phase = .Idle
 
@@ -280,7 +279,7 @@ const m = <main>${"$"}{
 }</>
 
 render(m)
-`); const clientJs = foldChunkNamespacing(__cjRaw);
+`);
     // Match-arm condition uses string-literal comparison.
     expect(clientJs).toMatch(/=== "Idle"/);
     expect(clientJs).toMatch(/=== "Loading"/);
@@ -297,14 +296,14 @@ describe("C22 §C22.10 — engine `initial=.V` regression", () => {
     // B15 captures `initial=.Idle` as a bare string ("Idle" without the dot)
     // on engineMeta.initialVariant; emit-engine.ts emits JSON.stringify(...).
     // The C22 fix shouldn't touch this; the engine code path is independent.
-    const { clientJs: __cjRaw } = compile("p10.scrml", `type Phase:enum = { Idle, Loading, Done, transitions { Idle -> Loading } }
+    const { clientJs } = compile("p10.scrml", `type Phase:enum = { Idle, Loading, Done, transitions { Idle -> Loading } }
 
 <engine for=Phase initial=.Idle></engine>
 
 const m = <main>${"$"}{@engine}</>
 
 render(m)
-`); const clientJs = foldChunkNamespacing(__cjRaw);
+`);
     // Engine path emits the variant via JSON.stringify in B15 codegen.
     // Look for the variant cell init.
     expect(clientJs).toMatch(/"Idle"/);
@@ -319,14 +318,14 @@ render(m)
 
 describe("C22 §C22.11 — `is .Variant` operator regression", () => {
   test("`@phase is .Idle` in if-stmt lowers to `=== \"Idle\"` (existing emitBinary path)", () => {
-    const { clientJs: __cjRaw } = compile("p11.scrml", `type Phase:enum = { Idle, Loading, Done }
+    const { clientJs } = compile("p11.scrml", `type Phase:enum = { Idle, Loading, Done }
 
 <phase>: Phase = .Idle
 
 if (@phase is .Idle) {
   console.log("yes")
 }
-`); const clientJs = foldChunkNamespacing(__cjRaw);
+`);
     // `is .Idle` lowers via emitBinary case "is" — must produce === "Idle".
     // The bare-variant `.Idle` is consumed by emitBinary's case "is" inspection
     // BEFORE emitIdent runs (see emit-expr.ts:401-407), so the operator path
@@ -345,14 +344,14 @@ describe("C22 §C22.12 — bare-variant emit lines parse as valid JS expressions
   // inputs — e.g., `const m;` from minimal markup roots), extract just the
   // lines containing the bare-variant emit and verify those parse.
   test("bare-variant in state-decl init: `_scrml_reactive_set(\"phase\", \"Idle\")` parses", () => {
-    const { clientJs: __cjRaw } = compile("p12.scrml", `type Phase:enum = { Idle, Loading, Done }
+    const { clientJs } = compile("p12.scrml", `type Phase:enum = { Idle, Loading, Done }
 
 <phase>: Phase = .Idle
 
 const m = <main>${"$"}{@phase}</>
 
 render(m)
-`); const clientJs = foldChunkNamespacing(__cjRaw);
+`);
     const lines = clientJs.split("\n").filter(l => l.includes("_scrml_reactive_set") && l.includes("phase"));
     expect(lines.length).toBeGreaterThan(0);
     for (const line of lines) {
@@ -364,7 +363,7 @@ render(m)
   });
 
   test("bare-variant in let-decl init: `let x = \"Loading\";` parses", () => {
-    const { clientJs: __cjRaw } = compile("p13.scrml", `type Phase:enum = { Idle, Loading, Done }
+    const { clientJs } = compile("p13.scrml", `type Phase:enum = { Idle, Loading, Done }
 
 <phase>: Phase = Phase.Idle
 let x: Phase = .Loading
@@ -372,7 +371,7 @@ let x: Phase = .Loading
 const m = <main>${"$"}{x}</>
 
 render(m)
-`); const clientJs = foldChunkNamespacing(__cjRaw);
+`);
     const lines = clientJs.split("\n").filter(l => /^\s*let x\s*=/.test(l));
     expect(lines.length).toBeGreaterThan(0);
     for (const line of lines) {

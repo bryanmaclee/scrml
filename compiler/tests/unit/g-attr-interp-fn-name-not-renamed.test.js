@@ -35,7 +35,6 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { compileScrml } from "../../src/api.js";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const FIXTURE_DIR = join(import.meta.dir, "__fixtures__/g-attr-interp-fn-name");
 const FIXTURE_OUTPUT = join(FIXTURE_DIR, "dist");
@@ -103,7 +102,7 @@ describe("§1 attr-value interpolation mangles the user fn name", () => {
   });
 
   test("setAttribute class template literal uses the encoded fn name, NOT bare tag()", () => {
-    const js = foldChunkNamespacing(compile(attrFnFx).outputs.get(attrFnFx).clientJs);
+    const js = compile(attrFnFx).outputs.get(attrFnFx).clientJs;
     // The generated name shape is _scrml_tag_<N>.
     const setAttrLine = js.split("\n").find((l) => l.includes('setAttribute("class"') && l.includes("box-"));
     expect(setAttrLine).toBeDefined();
@@ -114,17 +113,17 @@ describe("§1 attr-value interpolation mangles the user fn name", () => {
   });
 
   test("textContent path still emits the encoded fn name (regression guard)", () => {
-    const js = foldChunkNamespacing(compile(attrFnFx).outputs.get(attrFnFx).clientJs);
+    const js = compile(attrFnFx).outputs.get(attrFnFx).clientJs;
     expect(js).toMatch(/_scrml_render_value\([^,]+,\s*_scrml_tag_\d+\(\)\)/);
   });
 
   test("the @cell attr interp still emits _scrml_reactive_get (regression guard)", () => {
-    const js = foldChunkNamespacing(compile(attrFnFx).outputs.get(attrFnFx).clientJs);
+    const js = compile(attrFnFx).outputs.get(attrFnFx).clientJs;
     expect(js).toMatch(/setAttribute\("class",\s*`c-\$\{_scrml_reactive_get\("n"\)\}`\)/);
   });
 
   test("emitted client.js is parseable", () => {
-    const js = foldChunkNamespacing(compile(attrFnFx).outputs.get(attrFnFx).clientJs);
+    const js = compile(attrFnFx).outputs.get(attrFnFx).clientJs;
     expect(() => new Function(js)).not.toThrow();
   });
 });
@@ -137,7 +136,7 @@ describe("§2 fn referenced only in an attr interp", () => {
   test("attr-only fn call is mangled", () => {
     const result = compile(textAndCellFx);
     expect(result.errors).toEqual([]);
-    const js = foldChunkNamespacing(result.outputs.get(textAndCellFx).clientJs);
+    const js = result.outputs.get(textAndCellFx).clientJs;
     const setAttrLine = js.split("\n").find((l) => l.includes('setAttribute("class"') && l.includes("btn-"));
     expect(setAttrLine).toBeDefined();
     expect(setAttrLine).not.toMatch(/btn-\$\{\s*label\s*\(/);
@@ -154,7 +153,7 @@ describe("§3 multiple interpolated calls in one attr value", () => {
   test("both calls mangle", () => {
     const result = compile(multiFx);
     expect(result.errors).toEqual([]);
-    const js = foldChunkNamespacing(result.outputs.get(multiFx).clientJs);
+    const js = result.outputs.get(multiFx).clientJs;
     const setAttrLine = js.split("\n").find((l) => l.includes('setAttribute("class"') && l.includes("-mid-"));
     expect(setAttrLine).toBeDefined();
     expect(setAttrLine).not.toMatch(/\$\{\s*pre\s*\(/);

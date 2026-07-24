@@ -33,7 +33,6 @@ import { compileScrml } from "../../src/api.js";
 import fs from "fs";
 import path from "path";
 import os from "os";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function compileSrcToTmp(src, basename = "method-call-test") {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rmc-"));
@@ -46,7 +45,7 @@ function compileSrcToTmp(src, basename = "method-call-test") {
       outputDir: tmpDir,
     });
     const clientPath = path.join(tmpDir, `${basename}.client.js`);
-    return foldChunkNamespacing(fs.existsSync(clientPath) ? fs.readFileSync(clientPath, "utf-8") : null);
+    return fs.existsSync(clientPath) ? fs.readFileSync(clientPath, "utf-8") : null;
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

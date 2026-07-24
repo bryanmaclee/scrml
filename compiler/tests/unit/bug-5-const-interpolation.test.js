@@ -41,7 +41,6 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { compileScrml } from "../../src/api.js";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const FIXTURE_DIR = join(import.meta.dir, "__fixtures__/bug-5-const-interpolation");
 const FIXTURE_OUTPUT = join(FIXTURE_DIR, "dist");
@@ -179,7 +178,7 @@ describe("§1: Bug 5 — `${const-string}` in markup body folded to inline liter
 
   test("no `_scrml_effect` subscription emitted (folded — no wiring needed)", () => {
     const result = compile(constStringFx);
-    const js = foldChunkNamespacing(result.outputs.get(constStringFx).clientJs);
+    const js = result.outputs.get(constStringFx).clientJs;
     // The fold path emits NO wiring at all for this interpolation. The whole
     // "Reactive display wiring" section may not even exist for this file.
     expect(js).not.toMatch(/_scrml_effect\(function\(\)\s*\{\s*el\.textContent\s*=\s*VERSION/);
@@ -233,7 +232,7 @@ describe("§3: `${\"string-literal\"}` folded to inline literal (S108 Phase 3)",
 describe("§4: emitted JS is parseable", () => {
   test("const-string fixture's client.js parses via new Function", () => {
     const result = compile(constStringFx);
-    const js = foldChunkNamespacing(result.outputs.get(constStringFx).clientJs);
+    const js = result.outputs.get(constStringFx).clientJs;
     const stripped = js.replace(/^\s*import\s[^;]*;/gm, "");
     expect(() => new Function(stripped)).not.toThrow();
   });
@@ -244,7 +243,7 @@ describe("§4: emitted JS is parseable", () => {
     // The tilde-guard skips the wiring when expr has standalone `~`. Verify
     // emitted JS still parses cleanly.
     const result = compile(tildeFx);
-    const js = foldChunkNamespacing(result.outputs.get(tildeFx).clientJs);
+    const js = result.outputs.get(tildeFx).clientJs;
     const stripped = js.replace(/^\s*import\s[^;]*;/gm, "");
     expect(() => new Function(stripped)).not.toThrow();
   });
@@ -262,7 +261,7 @@ describe("§5: regression — `${@var}` interpolation still uses synchronous rea
 
   test("client.js still wires `_scrml_effect(function() { _scrml_render_value(el, _scrml_reactive_get(\"count\")) })`", () => {
     const result = compile(atVarFx);
-    const js = foldChunkNamespacing(result.outputs.get(atVarFx).clientJs);
+    const js = result.outputs.get(atVarFx).clientJs;
     // markup-value-in-expression-2026-06-17: the interpolation display now
     // routes through the node-aware `_scrml_render_value(el, expr)` helper
     // (a markup-typed value renders as a node; a primitive keeps textContent)
@@ -284,7 +283,7 @@ describe("§6: regression — `${serverFn()}` still uses async IIFE wrapper", ()
 
   test("client.js still wraps the server-fn call in async/await form", () => {
     const result = compile(serverFnFx);
-    const js = foldChunkNamespacing(result.outputs.get(serverFnFx).clientJs);
+    const js = result.outputs.get(serverFnFx).clientJs;
     // GITI-005 shape preserved
     expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*\{[^}]*await\s*\(_scrml_fetch_loadGreeting_\d+\(\)\)/);
     expect(js).toContain("el.textContent = await");
@@ -303,13 +302,13 @@ describe("§7: tilde guard — `${ initializer; ~ }` does NOT emit invalid bitwi
 
   test("client.js contains NO `el.textContent = ~;` (invalid JS)", () => {
     const result = compile(tildeFx);
-    const js = foldChunkNamespacing(result.outputs.get(tildeFx).clientJs);
+    const js = result.outputs.get(tildeFx).clientJs;
     expect(js).not.toMatch(/el\.textContent\s*=\s*~\s*;/);
   });
 
   test("file-scope tilde-rewriter hoist still produces `_scrml_tilde_N` vars (pre-existing behavior unchanged)", () => {
     const result = compile(tildeFx);
-    const js = foldChunkNamespacing(result.outputs.get(tildeFx).clientJs);
+    const js = result.outputs.get(tildeFx).clientJs;
     expect(js).toMatch(/let\s+_scrml_tilde_\d+\s*=/);
   });
 });
@@ -321,7 +320,7 @@ describe("§7: tilde guard — `${ initializer; ~ }` does NOT emit invalid bitwi
 describe("§8: reactive-display-wiring block is NOT empty for const interpolations", () => {
   test("const-string fixture: wiring block has content (matches GITI-005 negative-assertion shape)", () => {
     const result = compile(constStringFx);
-    const js = foldChunkNamespacing(result.outputs.get(constStringFx).clientJs);
+    const js = result.outputs.get(constStringFx).clientJs;
     // Pre-fix: `// --- Reactive display wiring ---\n});` — empty block.
     // Post-fix: wiring block contains the textContent write.
     expect(js).not.toMatch(/Reactive display wiring ---\s*\n\s*\}\);/);
@@ -329,7 +328,7 @@ describe("§8: reactive-display-wiring block is NOT empty for const interpolatio
 
   test("literal-string fixture: wiring block has content", () => {
     const result = compile(literalStringFx);
-    const js = foldChunkNamespacing(result.outputs.get(literalStringFx).clientJs);
+    const js = result.outputs.get(literalStringFx).clientJs;
     expect(js).not.toMatch(/Reactive display wiring ---\s*\n\s*\}\);/);
   });
 });
@@ -370,7 +369,7 @@ describe("§9 (Phase 2 + Phase 3): Anomaly C — bare `const` decl does NOT emit
 describe("§10 (Phase 2): Anomaly B — interpolation body does NOT emit orphan pure-read JS at file-scope", () => {
   test("const-string fixture: client.js does NOT have an orphan `VERSION;` no-op statement", () => {
     const result = compile(constStringFx);
-    const js = foldChunkNamespacing(result.outputs.get(constStringFx).clientJs);
+    const js = result.outputs.get(constStringFx).clientJs;
     // Pre-Phase-2: client.js had a line `VERSION;` at file scope from emit-reactive-wiring.ts
     // dumping the ${VERSION} body. Post-Phase-2: skipped per the pure-read orphan filter.
     // Match the file-scope region only (BEFORE the `// --- Event handler wiring` marker).
@@ -380,7 +379,7 @@ describe("§10 (Phase 2): Anomaly B — interpolation body does NOT emit orphan 
 
   test("at-var fixture: client.js does NOT have an orphan `_scrml_reactive_get(\"count\");` no-op", () => {
     const result = compile(atVarFx);
-    const js = foldChunkNamespacing(result.outputs.get(atVarFx).clientJs);
+    const js = result.outputs.get(atVarFx).clientJs;
     // Same pattern for reactive case: the `${@count}` body emitted
     // `_scrml_reactive_get("count");` at file-scope as a pure-read orphan.
     // Phase 2's orphan filter matches `_scrml_reactive_get(...);` shape.
@@ -392,7 +391,7 @@ describe("§10 (Phase 2): Anomaly B — interpolation body does NOT emit orphan 
     // Regression guard: Phase 2 filter must NOT skip legitimate declarations.
     // Only pure-read bare-exprs in pid groups are skipped.
     const result = compile(constStringFx);
-    const js = foldChunkNamespacing(result.outputs.get(constStringFx).clientJs);
+    const js = result.outputs.get(constStringFx).clientJs;
     expect(js).toMatch(/const\s+VERSION\s*=\s*"v0\.3\.0"\s*;/);
   });
 });
@@ -420,7 +419,7 @@ describe("§11 (Phase 2): Anomaly B filter preserves side-effecting bare-exprs i
 
   test("the assignment IS emitted at file-scope (not skipped as orphan)", () => {
     const result = compile(assignFx);
-    const js = foldChunkNamespacing(result.outputs.get(assignFx).clientJs);
+    const js = result.outputs.get(assignFx).clientJs;
     // The assignment expression in `${@count = @count + 1}` should produce
     // `_scrml_reactive_set("count", _scrml_reactive_get("count") + 1);` at
     // file scope. Phase 2's filter matches only pure-read shapes; assignment
@@ -442,7 +441,7 @@ describe("§12 (ss3 item7 / giti-006): dotted-path `${@data.name}` interpolation
 
   test("file-scope has NO orphan `_scrml_reactive_get(\"data\").name;` bare statement", () => {
     const result = compile(pathReadFx);
-    const js = foldChunkNamespacing(result.outputs.get(pathReadFx).clientJs);
+    const js = result.outputs.get(pathReadFx).clientJs;
     // Pre-fix: the suppression regex matched only the bare-cell read
     // `_scrml_reactive_get("data")` (from `${@data}`), NOT the dotted-path read
     // `_scrml_reactive_get("data").name` (from `${@data.name}`), so the path
@@ -455,13 +454,13 @@ describe("§12 (ss3 item7 / giti-006): dotted-path `${@data.name}` interpolation
 
   test("the render-effect inside DOMContentLoaded is STILL emitted (correct rendering preserved)", () => {
     const result = compile(pathReadFx);
-    const js = foldChunkNamespacing(result.outputs.get(pathReadFx).clientJs);
+    const js = result.outputs.get(pathReadFx).clientJs;
     expect(js).toMatch(/_scrml_effect\(function\(\)\s*\{\s*_scrml_render_value\(el,\s*_scrml_reactive_get\("data"\)\.name\)/);
   });
 
   test("emitted client.js parses as JS (node --check equivalent)", () => {
     const result = compile(pathReadFx);
-    const js = foldChunkNamespacing(result.outputs.get(pathReadFx).clientJs);
+    const js = result.outputs.get(pathReadFx).clientJs;
     const stripped = js.replace(/^\s*import\s[^;]*;/gm, "");
     expect(() => new Function(stripped)).not.toThrow();
   });
@@ -469,7 +468,7 @@ describe("§12 (ss3 item7 / giti-006): dotted-path `${@data.name}` interpolation
   test("async-initialized path read: NO module-top `_scrml_reactive_get(\"data\").name;` (would throw on null placeholder)", () => {
     const result = compile(pathReadAsyncFx);
     expect(result.errors).toEqual([]);
-    const js = foldChunkNamespacing(result.outputs.get(pathReadAsyncFx).clientJs);
+    const js = result.outputs.get(pathReadAsyncFx).clientJs;
     const fileScope = js.split("// --- Event handler wiring")[0] ?? "";
     // The headline crash: for an async reactive whose cell holds null until the
     // fetch resolves, a file-scope `null.name` throws at module-init.
@@ -485,7 +484,7 @@ describe("§12 (ss3 item7 / giti-006): dotted-path `${@data.name}` interpolation
     // render wiring still consumes the call shape (it is not silently dropped).
     const result = compile(methodCallFx);
     expect(result.errors).toEqual([]);
-    const js = foldChunkNamespacing(result.outputs.get(methodCallFx).clientJs);
+    const js = result.outputs.get(methodCallFx).clientJs;
     expect(js).toMatch(/_scrml_reactive_get\("items"\)\.join\(/);
   });
 });

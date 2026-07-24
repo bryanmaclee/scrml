@@ -25,7 +25,6 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { unNamespaceEngineNames } from "../helpers/chunk-scope.js";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function compileToClientJs(source, suffix = "bug2") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -42,8 +41,8 @@ function compileToClientJs(source, suffix = "bug2") {
       outputDir: outDir,
     });
     const clientPath = resolve(outDir, `${name}.client.js`);
-    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""));
-    return { errors: result.errors ?? [], warnings: result.warnings ?? [], clientJs:foldChunkNamespacing( foldChunkNamespacing)(unNamespaceEngineNames(clientJs) )};
+    const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
+    return { errors: result.errors ?? [], warnings: result.warnings ?? [], clientJs: unNamespaceEngineNames(clientJs) };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -68,7 +67,7 @@ function startDrag(taskId) {
 </>
 <button onclick=startDrag(42)>Test</>
 </>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "drag-payload"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "drag-payload");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // The bug: emit was `"Dragging"(taskId)` — calling a string. The fix
     // emits a tagged-object literal directly.
@@ -91,7 +90,7 @@ function startDrag(taskId) {
   <Dragging rule=.Idle></>
 </>
 </>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "drag-syntax"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "drag-syntax");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // The emitted client.js must parse — if `"Dragging"(taskId)` had landed,
     // `bun --check` would fail later but here we surface via `new Function`.
@@ -119,7 +118,7 @@ function stopDrag() {
   <Dragging rule=.Idle></>
 </>
 </>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "unit-direct"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "unit-direct");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Unit-variant direct-write emits the bare string tag — the OLD shape
     // is preserved (the transition table is keyed by tag, the runtime
@@ -151,7 +150,7 @@ function startDrag(taskId) {
   <Dragging rule=.Idle></>
 </>
 </>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "advance-payload"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "advance-payload");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // No string-as-function emission anywhere
     expect(clientJs).not.toMatch(/"Dragging"\(/);
@@ -174,7 +173,7 @@ function stopDrag() {
   <Dragging rule=.Idle></>
 </>
 </>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "advance-unit"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "advance-unit");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     expect(clientJs).toMatch(/_scrml_engine_advance\("dragPhase", "Idle"/);
   });
@@ -209,7 +208,7 @@ function reset() {
   <Error   rule=.Idle></>
 </>
 </>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "mixed-variants"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "mixed-variants");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Unit-variant writes — bare string
     expect(clientJs).toMatch(/_scrml_engine_direct_set\("phase", "Loading"/);
@@ -241,7 +240,7 @@ function done(n) {
   <Loaded rule=.Idle></>
 </>
 </>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "qualified"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "qualified");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // The qualified form routes through the standard MemberExpr → CallExpr
     // emit, which produces `Phase.Loaded(n)` — invoking the constructor
@@ -268,7 +267,7 @@ describe("s95-bug-2 §6 — dispatcher tag/data extraction", () => {
   </>
 </>
 </>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "dispatcher-data"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "dispatcher-data");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Tag extraction reads `.variant` (the canonical SPEC §51.3.2 shape).
     expect(clientJs).toMatch(/typeof _v\.variant === "string"/);
@@ -305,7 +304,7 @@ describe("s95-bug-2 §6 — dispatcher tag/data extraction", () => {
   </>
 </>
 </>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "dispatcher-named-data"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "dispatcher-named-data");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     expect(clientJs).toMatch(/_scrml_engine_phase_render_Error\(_data && _data\["msg"\]\)/);
   });
@@ -329,7 +328,7 @@ function startDrag(taskId) {
   <Dragging rule=.Idle></>
 </>
 </>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "runtime-helper"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "runtime-helper");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // The codegen reference to the runtime helper is the engine-write site —
     // verify the call shape (the actual helper-fn body lives in the runtime
@@ -354,7 +353,7 @@ describe("s95-bug-2 §8 — escape-hatch `\${...}` event-handler path", () => {
 </>
 <button onclick=\${@phase = .Loaded(42)}>Test</>
 </>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "escape-hatch"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "escape-hatch");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // The bug surface: the string-rewrite path produced \`"Loaded"(42)\` —
     // calling the string as a function. After the fix, the rewriter lowers
@@ -375,7 +374,7 @@ function compute(n) { return n * 2 }
 </>
 <button onclick=\${@phase = .Loaded(compute(21))}>Test</>
 </>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "escape-hatch-nested"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "escape-hatch-nested");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Paren-balanced args survive the rewriter. Function names get renamed
     // via the function-naming pass (\`compute\` → \`_scrml_compute_<n>\`), so
@@ -394,7 +393,7 @@ function compute(n) { return n * 2 }
 </>
 <button onclick=\${@phase = .Error(500, "boom")}>Test</>
 </>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "escape-hatch-multi"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "escape-hatch-multi");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Each positional arg pairs with the declared field name in order.
     expect(clientJs).toMatch(/\{ variant: "Error", data: \{ code: 500, msg: "boom" \} \}/);

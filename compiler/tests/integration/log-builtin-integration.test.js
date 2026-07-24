@@ -23,7 +23,6 @@ import { mkdtempSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { execFileSync } from "child_process";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 let TMP;
 beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "log-builtin-")); });
@@ -84,22 +83,22 @@ describe("§20.6 — client log() lowering", () => {
   test("client log() emits _scrml_log(\"client\", \"<file:line>\", ...)", () => {
     const { out } = compile(SRC);
     expect(out?.clientJs).toBeTruthy();
-    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_log("client",');
+    expect(out.clientJs).toContain('_scrml_log("client",');
     // Two log() calls, both tagged client.
-    const calls = foldChunkNamespacing(out.clientJs).match(/_scrml_log\("client"/g) || [];
+    const calls = out.clientJs.match(/_scrml_log\("client"/g) || [];
     expect(calls.length).toBe(2);
   });
 
   test("the origin tag carries the real source file:line", () => {
     const { out } = compile(SRC);
     // `log("bumped")` is on source line 8; `log(@count)` on line 9.
-    expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_log\("client", "[^"]*\.scrml:8"/);
-    expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_log\("client", "[^"]*\.scrml:9"/);
+    expect(out.clientJs).toMatch(/_scrml_log\("client", "[^"]*\.scrml:8"/);
+    expect(out.clientJs).toMatch(/_scrml_log\("client", "[^"]*\.scrml:9"/);
   });
 
   test("the emitted client JS is syntactically valid", () => {
     const { out } = compile(SRC);
-    validClientJs(foldChunkNamespacing(out.clientJs));
+    validClientJs(out.clientJs);
   });
 
   test("the client bundle carries a _scrml_log( call (the chunk gate signal)", () => {
@@ -107,7 +106,7 @@ describe("§20.6 — client log() lowering", () => {
     // runtimeJs is a separate artifact in write:false mode; the chunk-gate
     // signal we can observe here is the emitted _scrml_log( call itself (the
     // post-emit scan adds the runtime chunk iff this call is present).
-    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_log(");
+    expect(out.clientJs).toContain("_scrml_log(");
   });
 });
 
@@ -144,8 +143,8 @@ describe("§20.6 — server log() lowering", () => {
 
   test("the server log() does NOT leak its message into client.js", () => {
     const { out } = compile(SRC);
-    expect(foldChunkNamespacing(out.clientJs) ?? "").not.toContain("audit start");
-    expect(foldChunkNamespacing(out.clientJs) ?? "").not.toContain("audit done");
+    expect(out.clientJs ?? "").not.toContain("audit start");
+    expect(out.clientJs ?? "").not.toContain("audit done");
   });
 
   test("the emitted server JS is syntactically valid", () => {
@@ -181,21 +180,21 @@ describe("§20.6 — production strip", () => {
 
   test("production build contains ZERO _scrml_log in client + runtime", () => {
     const { out } = compile(SRC, { production: true });
-    expect(foldChunkNamespacing(out.clientJs)).not.toContain("_scrml_log");
+    expect(out.clientJs).not.toContain("_scrml_log");
   });
 
   test("production build strips log() to a no-op but keeps the surrounding code", () => {
     const { out } = compile(SRC, { production: true });
     // The @count increment survives; only log() is gone.
-    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_set("count"');
-    expect(foldChunkNamespacing(out.clientJs)).toContain("(void 0)");
-    expect(foldChunkNamespacing(out.clientJs)).not.toContain("debug only"); // arg literal dropped
-    validClientJs(foldChunkNamespacing(out.clientJs));
+    expect(out.clientJs).toContain('_scrml_reactive_set("count"');
+    expect(out.clientJs).toContain("(void 0)");
+    expect(out.clientJs).not.toContain("debug only"); // arg literal dropped
+    validClientJs(out.clientJs);
   });
 
   test("dev build (default) DOES include _scrml_log (the strip is opt-in)", () => {
     const { out } = compile(SRC);
-    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_log");
+    expect(out.clientJs).toContain("_scrml_log");
   });
 });
 
@@ -235,15 +234,15 @@ describe("§20.6 — shadowing", () => {
     const { out } = compile(SRC);
     // The builtin lowering is suppressed; the call resolves to the user fn
     // (whose name may be mangled, e.g. _scrml_log_N — but NOT _scrml_log(side,...)).
-    expect(foldChunkNamespacing(out.clientJs)).not.toContain('_scrml_log("client"');
-    expect(foldChunkNamespacing(out.clientJs)).not.toContain('_scrml_log("server"');
+    expect(out.clientJs).not.toContain('_scrml_log("client"');
+    expect(out.clientJs).not.toContain('_scrml_log("server"');
   });
 
   test("a shadowed build emits no _scrml_log( builtin call (chunk omitted)", () => {
     const { out } = compile(SRC);
     // The builtin lowering is suppressed, so no _scrml_log( call is emitted;
     // the post-emit chunk gate therefore omits the runtime chunk entirely.
-    expect(foldChunkNamespacing(out.clientJs)).not.toContain("_scrml_log(");
+    expect(out.clientJs).not.toContain("_scrml_log(");
   });
 
   test("compile still SUCCEEDS (the lint is non-fatal info)", () => {
@@ -274,10 +273,10 @@ describe("§20.6 — value rendering reaches the runtime", () => {
     // The struct value is passed through verbatim to _scrml_log; the runtime
     // _scrml_log_render handles the readable render (unit-tested separately
     // over SERVER_LOG_HELPER). Here we confirm the call lowers + is valid.
-    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_log("client"');
+    expect(out.clientJs).toContain('_scrml_log("client"');
     // The struct cell is READ (not re-wrapped) and passed to _scrml_log verbatim.
-    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_log("client", "f-');
-    expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_log\("client", "[^"]+", _scrml_reactive_get\("user"\)\)/);
-    validClientJs(foldChunkNamespacing(out.clientJs));
+    expect(out.clientJs).toContain('_scrml_log("client", "f-');
+    expect(out.clientJs).toMatch(/_scrml_log\("client", "[^"]+", _scrml_reactive_get\("user"\)\)/);
+    validClientJs(out.clientJs);
   });
 });

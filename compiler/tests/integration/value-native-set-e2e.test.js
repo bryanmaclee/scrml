@@ -29,7 +29,6 @@ import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync } from "f
 import { join } from "path";
 import { tmpdir } from "os";
 import vm from "vm";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 let TMP;
 beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "set-e2e-")); });
@@ -74,7 +73,7 @@ function compileSample() {
   const outDir = join(TMP, "dist");
   const result = compileScrml({ inputFiles: [filePath], outputDir: outDir, write: true, log: () => {} });
   const errors = (result.errors || []).filter(e => e.severity == null || e.severity === "error");
-  const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "tags.client.js"), "utf8")));
+  const clientJs = readFileSync(join(outDir, "tags.client.js"), "utf8");
   const runtimeFile = readdirSync(outDir).find(f => f.startsWith("scrml-runtime."));
   const runtimeJs = readFileSync(join(outDir, runtimeFile), "utf8");
   return { errors, clientJs, runtimeJs };
@@ -89,7 +88,7 @@ describe("§59.12 value-native set — END-TO-END", () => {
   });
 
   test("emitted client JS is syntactically valid", () => {
-    expect(() => new vm.Script(foldChunkNamespacing(out.clientJs))).not.toThrow();
+    expect(() => new vm.Script(out.clientJs)).not.toThrow();
   });
 
   test("emitted runtime JS is syntactically valid", () => {
@@ -97,32 +96,32 @@ describe("§59.12 value-native set — END-TO-END", () => {
   });
 
   test("empty set literal [:] lowers to _scrml_map_from_entries([], false)", () => {
-    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_map_from_entries([], false)");
+    expect(out.clientJs).toContain("_scrml_map_from_entries([], false)");
   });
 
   test(".add(k) lowers to _scrml_map_insert(_, k, true) (the membership marker)", () => {
-    expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_map_insert\(_scrml_reactive_get\("tags"\), "urgent", true\)/);
+    expect(out.clientJs).toMatch(/_scrml_map_insert\(_scrml_reactive_get\("tags"\), "urgent", true\)/);
   });
 
   test(".remove(k) lowers to _scrml_map_remove (shared map surface)", () => {
-    expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_map_remove\(_scrml_reactive_get\("tags"\), "urgent"\)/);
+    expect(out.clientJs).toMatch(/_scrml_map_remove\(_scrml_reactive_get\("tags"\), "urgent"\)/);
   });
 
   test(".size lowers to _scrml_map_size; .has lowers to _scrml_map_has", () => {
-    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_map_size(_scrml_reactive_get("tags"))');
-    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_map_has(_scrml_reactive_get("tags"), "urgent")');
+    expect(out.clientJs).toContain('_scrml_map_size(_scrml_reactive_get("tags"))');
+    expect(out.clientJs).toContain('_scrml_map_has(_scrml_reactive_get("tags"), "urgent")');
   });
 
   test("bare <each in=@s> iterates the ELEMENTS via _scrml_map_keys", () => {
-    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_map_keys(_scrml_reactive_get("tags"))');
+    expect(out.clientJs).toContain('_scrml_map_keys(_scrml_reactive_get("tags"))');
   });
 
   test(".union/.intersect/.difference delegate to _scrml_stdlib.data + rebuild a set", () => {
-    expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_stdlib\.data\.union\(_scrml_map_keys\(_scrml_reactive_get\("tags"\)\), _scrml_map_keys\(_scrml_reactive_get\("other"\)\)\)/);
-    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_stdlib.data.intersection(");
-    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_stdlib.data.difference(");
+    expect(out.clientJs).toMatch(/_scrml_stdlib\.data\.union\(_scrml_map_keys\(_scrml_reactive_get\("tags"\)\), _scrml_map_keys\(_scrml_reactive_get\("other"\)\)\)/);
+    expect(out.clientJs).toContain("_scrml_stdlib.data.intersection(");
+    expect(out.clientJs).toContain("_scrml_stdlib.data.difference(");
     // rebuilds a set: each result element → [k, true] → _scrml_map_from_entries
-    expect(foldChunkNamespacing(out.clientJs)).toMatch(/\.map\(function\(_e\) \{ return \[_e, true\]; \}\), false\)/);
+    expect(out.clientJs).toMatch(/\.map\(function\(_e\) \{ return \[_e, true\]; \}\), false\)/);
   });
 
   test("the 'map' AND 'stdlib-data' runtime chunks SURVIVE tree-shaking", () => {

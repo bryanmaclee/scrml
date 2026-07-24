@@ -23,7 +23,6 @@ import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 import { storeByAuthorName, chunkCellKey } from "../helpers/chunk-scope.js";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-28-flux-runtime-sim");
 
@@ -41,7 +40,7 @@ function compileFlux() {
   try {
     const result = compileScrml({ inputFiles: [tmpInput], write: true, outputDir: outDir });
     const html = readFileSync(resolve(outDir, "28-flux.html"), "utf-8");
-    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(resolve(outDir, "28-flux.client.js"), "utf-8")));
+    const clientJs = readFileSync(resolve(outDir, "28-flux.client.js"), "utf-8");
     const runtimeJs = readFileSync(resolve(outDir, result.runtimeFilename ?? "scrml-runtime.js"), "utf-8");
     COMPILED = { html, clientJs, runtimeJs };
     return COMPILED;
@@ -52,7 +51,7 @@ function compileFlux() {
 
 // Fresh game state in a fresh DOM for each test.
 function boot() {
-  const { html, clientJs: __cjRaw, runtimeJs } = compileFlux(); const clientJs = foldChunkNamespacing(__cjRaw);
+  const { html, clientJs, runtimeJs } = compileFlux();
   document.documentElement.innerHTML = html;
   new Function("window", "document",
     `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__s = _scrml_state;\n` +

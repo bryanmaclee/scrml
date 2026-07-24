@@ -31,7 +31,6 @@ import { join } from "path";
 import { tmpdir } from "os";
 import vm from "vm";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // A `${ for … lift }` reconciled list is the canonical dynamic-list-insert
 // mechanism: it emits `_scrml_reconcile_list` + per-item `_scrml_lift(() => ...)`
@@ -65,7 +64,7 @@ function compileEmbedSpa() {
   );
   const entry = [...result.outputs.values()][0] ?? {};
   rmSync(tmp, { recursive: true, force: true });
-  return { errors, clientJs:foldChunkNamespacing( foldChunkNamespacing(foldChunkNamespacing(entry.clientJs) ?? "")), html: entry.html ?? "" };
+  return { errors, clientJs: entry.clientJs ?? "", html: entry.html ?? "" };
 }
 
 describe("GitHub #19 — SPA lift-target chunk survival (END-TO-END)", () => {
@@ -80,19 +79,19 @@ describe("GitHub #19 — SPA lift-target chunk survival (END-TO-END)", () => {
     // Guards the repro: if this ever stops emitting _scrml_lift the decl-survival
     // test below would pass vacuously. The `${for…lift}` reconcile path lifts the
     // list wrapper into the ambient target via `_scrml_lift(_scrml_list_wrapper_N)`.
-    expect(foldChunkNamespacing(out.clientJs)).toContain("function _scrml_lift");
-    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_lift(_scrml_list_wrapper");
+    expect(out.clientJs).toContain("function _scrml_lift");
+    expect(out.clientJs).toContain("_scrml_lift(_scrml_list_wrapper");
   });
 
   test("the _scrml_lift_target ambient decl SURVIVES the SPA tree-shake (GitHub #19)", () => {
     // Pre-fix this was absent from the embed client (it lived in the tree-shaken
     // previous chunk), so the first insert threw `_scrml_lift_target is not
     // defined`. The fix moves it into the kept `lift` chunk.
-    expect(foldChunkNamespacing(out.clientJs)).toContain("let _scrml_lift_target = null;");
+    expect(out.clientJs).toContain("let _scrml_lift_target = null;");
   });
 
   test("emitted embed client is syntactically valid JS", () => {
-    expect(() => new vm.Script(foldChunkNamespacing(out.clientJs))).not.toThrow();
+    expect(() => new vm.Script(out.clientJs)).not.toThrow();
   });
 });
 
@@ -106,7 +105,7 @@ describe("GitHub #19 — dynamic insert does not throw ReferenceError (happy-dom
   });
 
   test("mount + first dynamic insert lifts new items without ReferenceError", () => {
-    const { clientJs: __cjRaw, html } = compileEmbedSpa(); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, html } = compileEmbedSpa();
     document.documentElement.innerHTML = html;
     let threw = null;
     try {

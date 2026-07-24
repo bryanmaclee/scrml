@@ -24,7 +24,6 @@ import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import * as acorn from "acorn";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let _tmp = 0;
@@ -42,7 +41,7 @@ function compile(source, slug) {
     for (const [fp, output] of result.outputs) {
       if (fp.includes(name)) {
         html = output.html ?? null;
-        clientJs =foldChunkNamespacing( foldChunkNamespacing(foldChunkNamespacing(output.clientJs) ?? null));
+        clientJs = output.clientJs ?? null;
       }
     }
     return { errors: result.errors ?? [], warnings: result.warnings ?? [], html, clientJs };
@@ -125,12 +124,12 @@ describe("CONF-ATTR-WRITER-CONFLICT — runtime-half (sole wholesale owner emits
     // HTML placeholder present (pre-#81 the whole attribute vanished).
     expect(r.html).toMatch(/data-scrml-bind-attr-class="[^"]+"/);
     // Reactive DOM write wired, subscribing to the cell.
-    expect(foldChunkNamespacing(r.clientJs)).toContain('setAttribute("class", String(');
-    expect(foldChunkNamespacing(r.clientJs)).toContain('_scrml_reactive_get("tab")');
+    expect(r.clientJs).toContain('setAttribute("class", String(');
+    expect(r.clientJs).toContain('_scrml_reactive_get("tab")');
     // Emitted bundle parses as an ES module (S267: sourceType:"module", not
     // new Function() which parses sloppy-mode and false-passes).
     expect(() =>
-      acorn.parse(foldChunkNamespacing(r.clientJs), { ecmaVersion: 2022, sourceType: "module" }),
+      acorn.parse(r.clientJs, { ecmaVersion: 2022, sourceType: "module" }),
     ).not.toThrow();
   });
 });

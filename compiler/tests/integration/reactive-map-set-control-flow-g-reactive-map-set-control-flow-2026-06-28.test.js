@@ -33,7 +33,6 @@ import { join } from "path";
 import { tmpdir } from "os";
 import vm from "vm";
 import { unwrapChunkScope } from "../helpers/chunk-scope.js";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 let TMP;
 beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "reactive-mapset-cf-")); });
@@ -299,10 +298,10 @@ function makeRunner(out) {
   vm.runInContext(out.runtimeJs, ctx);
   // The chunk is wrapped in its own scope; this harness pulls named user fns
   // out of the body and executes them with the runtime, so unwrap it.
-  const clientBody = unwrapChunkScope(foldChunkNamespacing(out.clientJs)).replace(/^\/\/ Requires.*$/m, "");
+  const clientBody = unwrapChunkScope(out.clientJs).replace(/^\/\/ Requires.*$/m, "");
   vm.runInContext(clientBody, ctx);
   return function call(fnName, ...args) {
-    const m = foldChunkNamespacing(out.clientJs).match(new RegExp("function (_scrml_" + fnName + "_\\d+)\\("));
+    const m = out.clientJs.match(new RegExp("function (_scrml_" + fnName + "_\\d+)\\("));
     if (!m) throw new Error("generated fn not found for " + fnName);
     ctx.__args = args;
     return vm.runInContext(m[1] + "(...__args)", ctx);
@@ -318,34 +317,34 @@ describe("g-reactive-map-set-control-flow — REACTIVE map/set in control flow �
   });
 
   test("emitted client JS is syntactically valid (node --check equivalent)", () => {
-    expect(() => new vm.Script(foldChunkNamespacing(out.clientJs))).not.toThrow();
+    expect(() => new vm.Script(out.clientJs)).not.toThrow();
   });
 
   test("reactive map ops INSIDE control flow LOWER to _scrml_map_*(_scrml_reactive_get(…))", () => {
     // The fix: a reactive `@m` op inside an if/for/while body or condition lowers
     // to the free-function form with `_scrml_reactive_get("m")` as the receiver.
-    expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_map_insert\(_scrml_reactive_get\("m"\), "a", 1\)/);
-    expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_map_size\(_scrml_reactive_get\("m"\)\)/);
-    expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_map_has\(_scrml_reactive_get\("m"\), "present"\)/);
-    expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_map_get\(_scrml_reactive_get\("m"\), "a"\)/);
-    expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_map_remove\(_scrml_reactive_get\("m"\), "a"\)/);
+    expect(out.clientJs).toMatch(/_scrml_map_insert\(_scrml_reactive_get\("m"\), "a", 1\)/);
+    expect(out.clientJs).toMatch(/_scrml_map_size\(_scrml_reactive_get\("m"\)\)/);
+    expect(out.clientJs).toMatch(/_scrml_map_has\(_scrml_reactive_get\("m"\), "present"\)/);
+    expect(out.clientJs).toMatch(/_scrml_map_get\(_scrml_reactive_get\("m"\), "a"\)/);
+    expect(out.clientJs).toMatch(/_scrml_map_remove\(_scrml_reactive_get\("m"\), "a"\)/);
   });
 
   test("NO RAW reactive-receiver method/property leaks (the bug symptom)", () => {
     // Pre-fix these RAW forms appeared and threw at runtime (HAMT has no .insert /
     // .size / .has / .remove). Post-fix they must NOT appear for `m`/`s`.
-    expect(foldChunkNamespacing(out.clientJs)).not.toMatch(/_scrml_reactive_get\("m"\)\.insert\(/);
-    expect(foldChunkNamespacing(out.clientJs)).not.toMatch(/_scrml_reactive_get\("m"\)\.has\(/);
-    expect(foldChunkNamespacing(out.clientJs)).not.toMatch(/_scrml_reactive_get\("m"\)\.remove\(/);
-    expect(foldChunkNamespacing(out.clientJs)).not.toMatch(/_scrml_reactive_get\("m"\)\.size\b/);
-    expect(foldChunkNamespacing(out.clientJs)).not.toMatch(/_scrml_reactive_get\("s"\)\.add\(/);
+    expect(out.clientJs).not.toMatch(/_scrml_reactive_get\("m"\)\.insert\(/);
+    expect(out.clientJs).not.toMatch(/_scrml_reactive_get\("m"\)\.has\(/);
+    expect(out.clientJs).not.toMatch(/_scrml_reactive_get\("m"\)\.remove\(/);
+    expect(out.clientJs).not.toMatch(/_scrml_reactive_get\("m"\)\.size\b/);
+    expect(out.clientJs).not.toMatch(/_scrml_reactive_get\("s"\)\.add\(/);
   });
 
   test("reactive set ops INSIDE control flow LOWER to the set-native helpers", () => {
-    expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_map_insert\(_scrml_reactive_get\("s"\), 7, true\)/); // .add
-    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_stdlib.data.union(");
-    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_stdlib.data.intersection(");
-    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_stdlib.data.difference(");
+    expect(out.clientJs).toMatch(/_scrml_map_insert\(_scrml_reactive_get\("s"\), 7, true\)/); // .add
+    expect(out.clientJs).toContain("_scrml_stdlib.data.union(");
+    expect(out.clientJs).toContain("_scrml_stdlib.data.intersection(");
+    expect(out.clientJs).toContain("_scrml_stdlib.data.difference(");
   });
 
   test("the 'map' AND 'stdlib-data' runtime chunks SURVIVE tree-shaking", () => {
@@ -398,8 +397,8 @@ describe("g-reactive-map-set-control-flow — REACTIVE map/set in control flow �
     // map — BOTH must lower (mine via reactive_get receiver, ss52's via bare).
     expect(call("localAndReactiveInFor")).toBe(4);
     // Verify the two distinct receiver forms coexist in the same loop body:
-    expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_map_insert\(_scrml_reactive_get\("m"\), k, 1\)/); // reactive
-    expect(foldChunkNamespacing(out.clientJs)).toMatch(/local = _scrml_map_insert\(local, k, 1\)/);              // local (ss52)
+    expect(out.clientJs).toMatch(/_scrml_map_insert\(_scrml_reactive_get\("m"\), k, 1\)/); // reactive
+    expect(out.clientJs).toMatch(/local = _scrml_map_insert\(local, k, 1\)/);              // local (ss52)
   });
 });
 
@@ -432,8 +431,8 @@ describe("g-reactive-map-set-control-flow — for-ITERABLE position lowering", (
 
   test("compiles clean and the for-iterable `@m.entries()` lowers (no raw `.entries()`)", () => {
     expect(out.errors).toEqual([]);
-    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_map_entries(_scrml_reactive_get("m"))');
-    expect(foldChunkNamespacing(out.clientJs)).not.toMatch(/_scrml_reactive_get\("m"\)\.entries\(/);
+    expect(out.clientJs).toContain('_scrml_map_entries(_scrml_reactive_get("m"))');
+    expect(out.clientJs).not.toMatch(/_scrml_reactive_get\("m"\)\.entries\(/);
   });
 });
 

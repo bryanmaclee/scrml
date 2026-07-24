@@ -36,7 +36,6 @@ import { generateHtml } from "../../src/codegen/emit-html.js";
 import { BindingRegistry } from "../../src/codegen/binding-registry.ts";
 import { resetVarCounter } from "../../src/codegen/var-counter.ts";
 import { runCG } from "../../src/code-generator.js";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -63,7 +62,7 @@ function compileFull(source) {
     protectAnalysis: { views: new Map() },
   });
   const file = out.outputs.get("/test/app.scrml");
-  return { html: file?.html ?? "", clientJs:foldChunkNamespacing( foldChunkNamespacing(file?.clientJs ?? "")), errors: result.errors };
+  return { html: file?.html ?? "", clientJs: file?.clientJs ?? "", errors: result.errors };
 }
 
 beforeEach(() => {
@@ -309,10 +308,10 @@ describe("§4: registry LogicBinding shape per chain branch (N13-N17)", () => {
 
 describe("§5: client JS controller for all-clean chains (N18-N22)", () => {
   test("N18: all-clean chain controller declares per-branch root + scope locals", () => {
-    const { clientJs: __cjRaw } = compileFull(`<program>
+    const { clientJs } = compileFull(`<program>
       <h2 if=@editMode>Edit</>
       <h2 else>Add</>
-    </>`); const clientJs = foldChunkNamespacing(__cjRaw);
+    </>`);
     expect(clientJs).toMatch(/let _scrml_chain__scrml_if_chain_1_b0_root = null;/);
     expect(clientJs).toMatch(/let _scrml_chain__scrml_if_chain_1_b0_scope = null;/);
     expect(clientJs).toMatch(/let _scrml_chain__scrml_if_chain_1_else_root = null;/);
@@ -320,35 +319,35 @@ describe("§5: client JS controller for all-clean chains (N18-N22)", () => {
   });
 
   test("N19: all-clean chain controller mounts via _scrml_mount_template with markerId + templateId", () => {
-    const { clientJs: __cjRaw } = compileFull(`<program>
+    const { clientJs } = compileFull(`<program>
       <h2 if=@editMode>Edit</>
       <h2 else>Add</>
-    </>`); const clientJs = foldChunkNamespacing(__cjRaw);
+    </>`);
     expect(clientJs).toContain("_scrml_create_scope()");
     expect(clientJs).toContain("_scrml_mount_template(");
   });
 
   test("N20: all-clean chain controller unmounts via _scrml_unmount_scope on transition", () => {
-    const { clientJs: __cjRaw } = compileFull(`<program>
+    const { clientJs } = compileFull(`<program>
       <h2 if=@editMode>Edit</>
       <h2 else>Add</>
-    </>`); const clientJs = foldChunkNamespacing(__cjRaw);
+    </>`);
     expect(clientJs).toContain("_scrml_unmount_scope(");
   });
 
   test("N21: chain controller has idempotency guard (`if (_next === active) return`)", () => {
-    const { clientJs: __cjRaw } = compileFull(`<program>
+    const { clientJs } = compileFull(`<program>
       <h2 if=@editMode>Edit</>
       <h2 else>Add</>
-    </>`); const clientJs = foldChunkNamespacing(__cjRaw);
+    </>`);
     expect(clientJs).toMatch(/if \(_next === _scrml_chain_[a-zA-Z0-9_]+_active\) return;/);
   });
 
   test("N22: chain controller invokes _scrml_effect for reactive subscription", () => {
-    const { clientJs: __cjRaw } = compileFull(`<program>
+    const { clientJs } = compileFull(`<program>
       <h2 if=@editMode>Edit</>
       <h2 else>Add</>
-    </>`); const clientJs = foldChunkNamespacing(__cjRaw);
+    </>`);
     expect(clientJs).toMatch(/_scrml_effect\(_update_chain_/);
   });
 });
@@ -362,30 +361,30 @@ describe("§6: client JS controller for all-dirty chains (N23-N25)", () => {
   // dirty per the cleanliness gate. This is the "today's behavior preserved"
   // case from deep-dive §3 ("All-dirty: 2 (`quiz-app:136`, `api-dashboard:176`)").
   test("N23: all-dirty chain controller resolves per-branch wrapper via querySelector", () => {
-    const { clientJs: __cjRaw } = compileFull(`<program>
+    const { clientJs } = compileFull(`<program>
       <p if=@show>Status: \${@status}</>
       <p else>Pending: \${@pending}</>
-    </>`); const clientJs = foldChunkNamespacing(__cjRaw);
+    </>`);
     // navigate-wave1b M1: the chain controller lives in `_scrml_nav_rewire(root)`
     // (re-invocable on soft nav), so the wrapper query is `(root || document)`-scoped.
     expect(clientJs).toMatch(/\(root \|\| document\)\.querySelector\('\[data-scrml-chain-branch="[^"]+"\]'\)/);
   });
 
   test("N24: all-dirty chain controller does NOT call _scrml_mount_template / _scrml_unmount_scope", () => {
-    const { clientJs: __cjRaw } = compileFull(`<program>
+    const { clientJs } = compileFull(`<program>
       <p if=@show>Status: \${@status}</>
       <p else>Pending: \${@pending}</>
-    </>`); const clientJs = foldChunkNamespacing(__cjRaw);
+    </>`);
     const chainBlock = clientJs.match(/\/\/ if-chain:[\s\S]*?\n  \}/)?.[0] ?? "";
     expect(chainBlock).not.toContain("_scrml_mount_template");
     expect(chainBlock).not.toContain("_scrml_unmount_scope");
   });
 
   test("N25: all-dirty chain controller sets wrapper.style.display = '' / 'none'", () => {
-    const { clientJs: __cjRaw } = compileFull(`<program>
+    const { clientJs } = compileFull(`<program>
       <p if=@show>Status: \${@status}</>
       <p else>Pending: \${@pending}</>
-    </>`); const clientJs = foldChunkNamespacing(__cjRaw);
+    </>`);
     const chainBlock = clientJs.match(/\/\/ if-chain:[\s\S]*?\n  \}/)?.[0] ?? "";
     expect(chainBlock).toMatch(/\.style\.display = "none";/);
     expect(chainBlock).toMatch(/\.style\.display = "";/);
@@ -398,10 +397,10 @@ describe("§6: client JS controller for all-dirty chains (N23-N25)", () => {
 
 describe("§7: client JS controller for mixed-cleanliness chains (N26-N28)", () => {
   test("N26: mixed chain — clean branch case mounts; dirty case toggles wrapper", () => {
-    const { clientJs: __cjRaw } = compileFull(`<program>
+    const { clientJs } = compileFull(`<program>
       <h2 if=@editMode>Edit</>
       <button else onclick={@cancel}>Cancel</>
-    </>`); const clientJs = foldChunkNamespacing(__cjRaw);
+    </>`);
     const chainBlock = clientJs.match(/\/\/ if-chain:[\s\S]*?\n  \}/)?.[0] ?? "";
     expect(chainBlock).toContain("_scrml_mount_template(");
     expect(chainBlock).toContain("_scrml_unmount_scope(");
@@ -410,21 +409,21 @@ describe("§7: client JS controller for mixed-cleanliness chains (N26-N28)", () 
   });
 
   test("N27: mixed chain — querySelector for dirty wrapper + per-branch root/scope for clean", () => {
-    const { clientJs: __cjRaw } = compileFull(`<program>
+    const { clientJs } = compileFull(`<program>
       <h2 if=@editMode>Edit</>
       <button else onclick={@cancel}>Cancel</>
-    </>`); const clientJs = foldChunkNamespacing(__cjRaw);
+    </>`);
     const chainBlock = clientJs.match(/\/\/ if-chain:[\s\S]*?\n  \}/)?.[0] ?? "";
     expect(chainBlock).toMatch(/_scrml_chain__scrml_if_chain_1_b0_root = null;/);
     expect(chainBlock).toMatch(/_scrml_chain__scrml_if_chain_1_else_wrapper =/);
   });
 
   test("N28: mixed chain — both dispatch arms (mount + display) appear in the same switch", () => {
-    const { clientJs: __cjRaw } = compileFull(`<program>
+    const { clientJs } = compileFull(`<program>
       <p if=@a>A</>
       <p else-if=@b>B</>
       <button else onclick={@cancel}>C</>
-    </>`); const clientJs = foldChunkNamespacing(__cjRaw);
+    </>`);
     const chainBlock = clientJs.match(/\/\/ if-chain:[\s\S]*?\n  \}/)?.[0] ?? "";
     // Two clean branches: should mount via templates.
     const mountCount = (chainBlock.match(/_scrml_mount_template\(/g) ?? []).length;
@@ -445,20 +444,20 @@ describe("§8: round-trip through full pipeline (N29-N31)", () => {
     // (navigate-wave1b M1 moved the chain controller into `_scrml_nav_rewire`, so
     // the old 2-space brace-parity extraction no longer bounds it — assert the
     // whole emitted body parses, which is the real invariant.)
-    const { clientJs: __cjRaw } = compileFull(`<program>
+    const { clientJs } = compileFull(`<program>
       <h2 if=@editMode>Edit</>
       <h2 else>Add</>
-    </>`); const clientJs = foldChunkNamespacing(__cjRaw);
+    </>`);
     expect(clientJs).toContain("_update_chain_");
     expect(() => new Function(clientJs.replace(/^\/\/ Requires:.*$/m, ""))).not.toThrow();
   });
 
   test("N30: condition cascade respects source order in chain controller", () => {
-    const { clientJs: __cjRaw } = compileFull(`<program>
+    const { clientJs } = compileFull(`<program>
       <p if=@a>A</>
       <p else-if=@b>B</>
       <p else>C</>
-    </>`); const clientJs = foldChunkNamespacing(__cjRaw);
+    </>`);
     const chainBlock = clientJs.match(/\/\/ if-chain:[\s\S]*?\n  \}/)?.[0] ?? "";
     const aIdx = chainBlock.indexOf('_scrml_reactive_get("a")');
     const bIdx = chainBlock.indexOf('_scrml_reactive_get("b")');
@@ -470,10 +469,10 @@ describe("§8: round-trip through full pipeline (N29-N31)", () => {
   test("N31: standalone if= (no chain) is unaffected — uses Phase 2c B1 single-`if=` shape", () => {
     // Standalone if= without an else sibling should NOT produce a chain
     // wrapper or chain controller. It should use Phase 2c B1 emission.
-    const { html, clientJs: __cjRaw } = compileFull(`<program>
+    const { html, clientJs } = compileFull(`<program>
       <h2 if=@solo>standalone</>
       <p>after</>
-    </>`); const clientJs = foldChunkNamespacing(__cjRaw);
+    </>`);
     expect(html).not.toContain("data-scrml-if-chain=");
     // Standalone clean if= still uses <template>+marker (Phase 2c B1).
     expect(html).toContain("<template");
@@ -497,7 +496,7 @@ describe("if-chain branch condition compares variant literal -> valid JS (gate f
   const acorn = require("acorn");
 
   test("else-if=(@step == .Confirm) chain emits valid client.js (no raw `== .Confirm`)", () => {
-    const { clientJs: __cjRaw } = compileFull(`<program>
+    const { clientJs } = compileFull(`<program>
       \${
         type Step = .Info | .Confirm
         <step>: Step = .Info
@@ -507,7 +506,7 @@ describe("if-chain branch condition compares variant literal -> valid JS (gate f
         <p else-if=(@step == .Confirm)>confirm</p>
         <p else>done</p>
       </div>
-    </>`); const clientJs = foldChunkNamespacing(__cjRaw);
+    </>`);
     expect(clientJs.length).toBeGreaterThan(0);
     expect(() => acorn.parse(clientJs, { ecmaVersion: 2022, sourceType: "module" })).not.toThrow();
     // The chain cascade must use the structural-eq lowering, not the raw literal.

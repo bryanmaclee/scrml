@@ -29,7 +29,6 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { compileScrml } from "../../src/api.js";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const FIXTURE_DIR = join(import.meta.dir, "__fixtures__/server-fn-markup");
 const FIXTURE_OUTPUT = join(FIXTURE_DIR, "dist");
@@ -101,7 +100,7 @@ describe("§1: GITI-005 — `${serverFn()}` wires an awaited fetch to DOM", () =
 
   test("client.js contains an async IIFE that awaits the server-fn fetch", () => {
     const result = compile(gitiFx);
-    const js = foldChunkNamespacing(result.outputs.get(gitiFx).clientJs);
+    const js = result.outputs.get(gitiFx).clientJs;
     // The async arrow IIFE assigning awaited value to textContent
     expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*\{[^}]*await\s*\(_scrml_fetch_loadGreeting_\d+\(\)\)/);
     // textContent is set (not left empty like before)
@@ -110,7 +109,7 @@ describe("§1: GITI-005 — `${serverFn()}` wires an awaited fetch to DOM", () =
 
   test("the reactive-display-wiring block is NOT empty for server-fn interpolations", () => {
     const result = compile(gitiFx);
-    const js = foldChunkNamespacing(result.outputs.get(gitiFx).clientJs);
+    const js = result.outputs.get(gitiFx).clientJs;
     // Before fix: `// --- Reactive display wiring ---\n});` — empty block.
     // After fix: the wiring block contains the async IIFE.
     expect(js).not.toMatch(/Reactive display wiring ---\s*\n\s*\}\);/);
@@ -124,7 +123,7 @@ describe("§1: GITI-005 — `${serverFn()}` wires an awaited fetch to DOM", () =
 describe("§2: emitted JS is parseable", () => {
   test("GITI-005 output parses as a module via new Function", () => {
     const result = compile(gitiFx);
-    const js = foldChunkNamespacing(result.outputs.get(gitiFx).clientJs);
+    const js = result.outputs.get(gitiFx).clientJs;
     // Strip the top-level import (new Function can't handle import syntax)
     const stripped = js.replace(/^\s*import\s[^;]*;/gm, "");
     expect(() => new Function(stripped)).not.toThrow();
@@ -139,7 +138,7 @@ describe("§3: `${@var}` interpolation uses synchronous effect (no async wrappin
   test("pure reactive interpolation does NOT wrap in async IIFE", () => {
     const result = compile(atVarFx);
     expect(result.errors).toEqual([]);
-    const js = foldChunkNamespacing(result.outputs.get(atVarFx).clientJs);
+    const js = result.outputs.get(atVarFx).clientJs;
     // Synchronous form: `_scrml_render_value(el, _scrml_reactive_get("count"));`
     // markup-value-in-expression-2026-06-17: the display now routes through the
     // node-aware `_scrml_render_value(el, expr)` helper (was `el.textContent =`).
@@ -162,7 +161,7 @@ describe("§4: mixed `${@var + serverFn()}` uses async wrapping", () => {
 
   test("the reactive effect re-runs with an async wrapper", () => {
     const result = compile(mixedFx);
-    const js = foldChunkNamespacing(result.outputs.get(mixedFx).clientJs);
+    const js = result.outputs.get(mixedFx).clientJs;
     // Effect body contains an async IIFE awaiting an expression that
     // includes the server-fn call (the expression also has @count rewrite,
     // so match await + server-fn presence separately).

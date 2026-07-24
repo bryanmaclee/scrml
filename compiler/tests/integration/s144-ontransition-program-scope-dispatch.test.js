@@ -30,7 +30,6 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -49,7 +48,7 @@ function compile(source, suffix = "s144-ab1") {
     const runtimePath = resolve(outDir, runtimeFilename);
     return {
       errors: result.errors ?? [],
-      clientJs:foldChunkNamespacing( foldChunkNamespacing)(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""),
+      clientJs: existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "",
       runtimeJs: existsSync(runtimePath) ? readFileSync(runtimePath, "utf8") : "",
       cleanup: () => existsSync(tmpDir) && rmSync(tmpDir, { recursive: true, force: true }),
     };
@@ -128,7 +127,7 @@ function toggle() { if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav
 </engine>
 <div><button onclick=toggle()>toggle</button><span>\${@mode}</span><span>\${@transitions}</span></div>
 </program>`;
-    const { errors, clientJs: __cjRaw, runtimeJs, cleanup } = compile(src, "s144-ab-direct"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "s144-ab-direct");
     try {
       expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
@@ -167,7 +166,7 @@ function go() { if (@mode == Mode.Nav) { @mode.advance(.Edit) } }
 </engine>
 <div><button onclick=go()>go</button><span>\${@mode}</span><span>\${@transitions}</span></div>
 </program>`;
-    const { errors, clientJs: __cjRaw, runtimeJs, cleanup } = compile(src, "s144-ab-advance"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "s144-ab-advance");
     try {
       expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 

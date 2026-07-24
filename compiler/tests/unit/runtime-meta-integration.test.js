@@ -22,7 +22,6 @@ import { mkdirSync, writeFileSync, rmSync } from "fs";
 import { join, resolve } from "path";
 import { compileScrml } from "../../src/api.js";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Fixture setup
@@ -55,7 +54,7 @@ function compileSource(source, filename = "test.scrml") {
 
   const output = result.outputs.get(filePath) ?? {};
   return {
-    clientJs:foldChunkNamespacing( foldChunkNamespacing(foldChunkNamespacing(output.clientJs) ?? "")),
+    clientJs: output.clientJs ?? "",
     serverJs: output.serverJs ?? "",
     html: output.html ?? "",
     errors: result.errors,
@@ -99,7 +98,7 @@ describe("runtime-meta RT-1: meta.emit() dynamic markup", () => {
   meta.emit("<div>dynamic content</div>")
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt1-emit-basic.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt1-emit-basic.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -114,7 +113,7 @@ describe("runtime-meta RT-1: meta.emit() dynamic markup", () => {
   meta.emit("<span>injected</span>")
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt1-emit-placeholder.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt1-emit-placeholder.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -132,7 +131,7 @@ p "greeting"
   meta.emit("<h1>Hello " + meta.get("name") + "</h1>")
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt1-emit-reactive.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt1-emit-reactive.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -157,7 +156,7 @@ p "type info"
   }
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt2-reflect-basic.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt2-reflect-basic.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -173,7 +172,7 @@ p "user type"
   meta.emit(String(info))
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt2-reflect-struct.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt2-reflect-struct.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -192,7 +191,7 @@ p "runtime reflect"
   meta.emit(String(info))
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt2-reflect-not-compiletime.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt2-reflect-not-compiletime.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -213,7 +212,7 @@ p "counter"
   meta.emit(String(@count))
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt3-reactive-read.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt3-reactive-read.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -228,7 +227,7 @@ p "counter"
   meta.set("count", meta.get("count") + 1)
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt3-reactive-write.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt3-reactive-write.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -245,7 +244,7 @@ p "multi-var"
   meta.emit(String(@x + @y))
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt3-multi-reactive.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt3-multi-reactive.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -266,7 +265,7 @@ describe("runtime-meta RT-4: compile-time vs runtime distinction", () => {
   emit("<span>compile-time</span>")
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt4-compiletime-emit.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt4-compiletime-emit.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -282,7 +281,7 @@ p "colors"
   emit("<p>" + info.name + "</p>")
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt4-compiletime-reflect.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt4-compiletime-reflect.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -295,7 +294,7 @@ p "colors"
   meta.emit("runtime meta")
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt4-runtime-basic.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt4-runtime-basic.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -310,7 +309,7 @@ p "test"
   meta.emit(String(@count))
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt4-four-args.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt4-four-args.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -334,7 +333,7 @@ p "captured"
   meta.emit(String(meta.bindings))
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt5-captured-reactive.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt5-captured-reactive.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -352,7 +351,7 @@ p "let captured"
   meta.emit(String(meta.bindings))
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt5-captured-let.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt5-captured-let.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -368,7 +367,7 @@ p "const captured"
   meta.emit(String(meta.bindings))
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt5-captured-const.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt5-captured-const.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -388,7 +387,7 @@ describe("runtime-meta RT-6: meta.cleanup() in runtime meta", () => {
   meta.emit("effect ran")
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt6-cleanup.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt6-cleanup.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -683,7 +682,7 @@ p "test"
   meta.emit(String(info))
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt9-struct-registry.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt9-struct-registry.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -705,7 +704,7 @@ p "test"
   meta.emit(String(info))
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt9-enum-registry.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt9-enum-registry.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -726,7 +725,7 @@ p "test"
   meta.emit(String(meta.types.reflect("Point")))
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt9-multi-type-registry.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt9-multi-type-registry.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -742,7 +741,7 @@ p "test"
   meta.emit("no types")
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt9-no-types.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt9-no-types.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -759,7 +758,7 @@ p "test"
   meta.emit(String(info))
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt9-type-const.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt9-type-const.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
@@ -775,7 +774,7 @@ p "test"
   meta.emit(String(meta.types.reflect("Color")))
 }
 `;
-    const { clientJs: __cjRaw, errors } = compileSource(source, "rt9-type-const-id-match.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, errors } = compileSource(source, "rt9-type-const-id-match.scrml");
     const fatalErrors = errors.filter(e => e.severity !== "warning");
     expect(fatalErrors).toHaveLength(0);
 
