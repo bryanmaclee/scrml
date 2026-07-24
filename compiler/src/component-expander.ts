@@ -3276,6 +3276,51 @@ function walkAndExpand(
       continue;
     }
 
+    // g-each-component-and-fn-markup-not-mounted (A) — an `each-block`'s per-item
+    // template (`templateChildren`) is NOT `.children`, so the markup/state arm
+    // above never descends into it; a `<Row/>` user-component USE-SITE inside
+    // `<each>...<Row name=it.name/>...</each>` therefore survived CE unexpanded
+    // and leaked into the per-item factory as `document.createElement("Row")`
+    // (an unknown `<row>` element — silent non-render, no VP-2 fire because the
+    // residual node is buried in templateChildren the invariant does not walk).
+    //
+    // Expand components inside the per-item template here. CE substitutes the
+    // caller-side prop-arg EXPRESSION for the prop reference (`${name}` → the arg
+    // `${it.name}`), so the inlined template body carries the each iter-var read;
+    // emit-each then lowers `it.name` against the per-item factory closure where
+    // `it` is bound (parity with the non-each expansion, which substitutes
+    // `${@who}` → a reactive binding). The `<empty>` body is a fallback rendered
+    // outside iteration — expand it too. IN-PLACE mutation: a top-level each-block
+    // is found via `ast.nodes`, but a match-arm-body / nested each-block is
+    // attached BY REFERENCE at codegen (collectEachBlocks re-walks the same node
+    // refs), so cloning would orphan the expansion — mutate the arrays in place
+    // and push the SAME node ref (mirrors the engine/match bodyChildren discipline).
+    if (node.kind === "each-block") {
+      const eachNode = node as MarkupNode & {
+        templateChildren?: ASTNode[];
+        bodyChildren?: ASTNode[];
+        emptyChild?: ASTNode;
+      };
+      const expandInPlace = (arr: ASTNode[] | undefined): void => {
+        if (!Array.isArray(arr)) return;
+        const nc = walkAndExpand(arr, registry, filePath, counter, ceErrors);
+        if (nc.length !== arr.length || nc.some((c, i) => c !== arr[i])) {
+          arr.length = 0;
+          arr.push(...nc);
+        }
+      };
+      expandInPlace(eachNode.templateChildren);
+      // bodyChildren shares node refs with templateChildren (seen-guarded on the
+      // codegen side); descend anyway so any node reachable only here expands.
+      expandInPlace(eachNode.bodyChildren);
+      if (eachNode.emptyChild && typeof eachNode.emptyChild === "object") {
+        const ec = walkAndExpandSingleMarkup(eachNode.emptyChild, registry, filePath, counter, ceErrors);
+        if (ec !== eachNode.emptyChild) eachNode.emptyChild = ec;
+      }
+      result.push(node);
+      continue;
+    }
+
     // g-formfor-in-match-arm (S177) — engine state-children (`engine-decl`)
     // host their renderable arm bodies under `bodyChildren` (a walkable AST
     // mirror, ast-builder Phase A10). A user-component USE-SITE inside an
