@@ -168,3 +168,55 @@ conf-TRY-CATCH + both BUG-6 tests green (87/0).
 
 SEPARATE PRE-EXISTING BUG surfaced (report, out of scope): stdlib/http emits
 `_scrml__request_1` as a non-async `function` containing `await` — invalid JS.
+
+## 2026-07-23 — STEP 6 fold campaign (PA-authorized) + a regression class found
+
+PA ruled: hold the 16 KB budget, run the fold campaign. Executed
+`foldChunkNamespacing` (accessor + N4 engine-name + N2 cell-key surgical folds) at
+the compile-read boundary across the 182-file surface via a scripted transform
+(migrate.mjs — production assign / `+=` / object-prop / destructure / `.get().clientJs`
+/ `getOut` / readFileSync-ternary read patterns), committed in batches.
+
+Result: 675 -> ~245 fails as pure text-assertion accessor-pins folded green
+(~136 files).
+
+MECHANISM FIXES found mid-campaign (committed):
+1. rename pass hard-threw on http stdlib (await-in-non-async, pre-existing invalid
+   JS) -> made `parseChunk` return null (no crash).
+2. `foldChunkAccessors` lookbehind `(?<![.$\w])` skipped `..._scrml_cs_x` spreads
+   -> dropped the `.` (spread now folds).
+
+REGRESSION CLASS found + REVERTED (load-bearing): the BLIND production-point fold
+was WRONG for any test that EXECUTES the clientJs (`new Function`/`captureInsideChunkScope`)
+or BYTE-COMPARES it (native==live parity, `node --check`, byte-identical). Folding
+the EXECUTED clientJs mangles the prologue (`_scrml_reactive_get = n => _scrml_reactive_get(...)`
+self-recurses) -> RangeError; folding one side of a parity compare breaks equality.
+28-flux "collision" etc. PASSED at step5, my fold broke them. Reverted the fold in
+**45 execution/parity/native-harness files** to step5 (they pass via the step-5
+rename-aware helpers). The correct migration for THOSE files is surgical — fold at
+the `expect(...)` read only, NOT the executed/compared clientJs — a bounded follow-up.
+
+NET: pure-text files migrated; execution/parity files at step5 (no regression).
+Residue = pre-existing behavioral (baseline) + execution-file text-pins (un-folded).
+
+## 2026-07-23 — FINAL STATE (converged, 0 regressions)
+
+Full pre-commit subset: **198 fails / 54 files. 0 regressions vs step5** (679 step5
+-> 198; ~481 accessor-pin text assertions folded GREEN in ~136 pure-text files;
+nothing that passed at step5 fails now).
+
+Residue (198) categorized:
+- **61 pre-existing behavioral** — failing at the 096f2239 baseline (pre-BUG-6),
+  from the earlier N1-N4 arc (engine runtime-sims, byte-parity, E-IDLE, migrate
+  --fix, etc.). Not fold-touchable; leave red, out of BUG-6 scope.
+- **137 BUG-6-era accessor-pins in the 45 reverted execution/parity/native files**
+  — the blind production-fold was REVERTED in those files (it mangled executed /
+  byte-compared clientJs); their `.toContain("_scrml_reactive_get(...)")` assertions
+  are now un-folded. FIX (bounded follow-up): surgical fold at the `expect(<X>)
+  .toContain(<accessor>)` READ only — NOT the `new Function(clientJs)` execution nor
+  a parity `.toBe(...)`. A precise per-file edit; an auto-regex attempt did not match
+  reliably and was NOT applied (regression-risk). This is the remaining green gap.
+
+Both pinned BUG-6 tests still GREEN (80 pass / 0 fail). Mechanism unchanged +
+proven. E-CG-018 catalogued. The branch is COHERENT (no regressions) but NOT fully
+green — the 137 execution-file text-pins are the surfaced, honest residue.
