@@ -96,7 +96,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `f1dceb2d` — wrap(S282): changelog + master-list §0 + delta-log [741-752] + gap currency + hand-off rotate — **LOCAL-ONLY**
+- `f28c35fb` — wrap(S282): continuity — 10 PRs, windows green, split-key class, chunk-ns BUG-6 scoped (#160) — **pushed**
 - `a0344d75` — wrap(S280): marketing claim-gate U1+U2; a bryan ruling falsified; pa-base v2.4 (#149) — **pushed**
 - `ea4c720a` — wrap(S279): E-ASYNC timer over-fire fix + continuity (#139) — **pushed**
 - `d6cae6c2` — wrap(S278): ESM-chunks arc U1→U3 landed — esm now runs (behind default classic) (#136) — **pushed**
