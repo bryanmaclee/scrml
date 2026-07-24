@@ -15,7 +15,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 15 |
+| HIGH | 17 |
 | MED | 46 |
 | LOW | 31 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -42,6 +42,28 @@ Surfaced while scoping the BUG-6 accessor-rename (`docs/changes/chunk-namespacin
 > carries an inline `@gap` token in its final cell. This basis reproduced the canonical S170 hand-count
 > HIGH 0 · MED 9 · LOW 18 · Nominal 9 exactly (the S170 baseline) — the LIVE count is the generated table
 > above, which moves as gaps are filed/closed (S174 filed 4 → MED 11 · LOW 20).
+
+---
+
+## §S284 — gaps filed S284 (2026-07-24, adopter issues #161/#162 triage)
+
+> Context: TWO silent-codegen bugs filed by **pjoliver11** from `assetManagement` (2026-07-24), each cross-checked on two versions by the reporter and PA-reproduced INDEPENDENTLY on `f28c35fb`. Both are the silent-failure class — clean build, zero diagnostics, wrong runtime. bryan (S284): file both, fix **#162 first**, both retained in bryan's tier-1/freeze lane.
+
+### g-multistatement-line-nonfirst-call-drop — a call expression that is NOT the first statement on a SAME-LINE, space-separated multi-statement run is SILENTLY DROPPED from emitted JS (clean build, no warning); assignments in the same position survive
+<!-- @gap id=g-multistatement-line-nonfirst-call-drop sev=HIGH status=open -->
+Adopter issue **#162** (pjoliver11). In the DEFAULT (legacy block-splitter + Acorn) pipeline, a body like `{ a = 1 b = 2 log.push("A") }` (statements space-separated on ONE line, no `;`) emits `a = 1; b = 2;` — `log.push("A")` is discarded. Rule: any call not first on a same-line multi-statement run is dropped; assignments survive. Same code path as S167 `75431e9e` (which taught `collectExpr`'s depth-0 boundary check to recognize assignment + dotted-reactive `@obj.path=`/`@arr.push()` forms as statement boundaries) — a bare LOCAL call-expression-statement start (`log.push(...)`) was NOT covered, so the preceding statement's RHS swallows it. PA-reproduced on `f28c35fb`: 3 of 6 `log.push` dropped, byte-matching the report (`a = 1; b = 2;` / `log.push("B"); a = 3;` / `a = 4; b = 5;` / `log.push("D");` / `log.push("E1");`). Real-world bite: `if (it.gk != gLast) { gLast = it.gk  gi = gi + 1  gkSeq.push(it.gk) }` — both assignments emitted, the `push` dropped → array stayed empty → a whole UI control rendered disabled with no data, no error.
+
+**GOVERNING SENTENCE (Rule 4):** §4 / `E-STMT-MISSING-SEMICOLON` — "Expected `;` or a newline to end the statement." A same-line space-separated multi-statement run is ILL-FORMED by that rule, and the **native parser (`--parser=scrml-native`) already REJECTS the #162 repro (6× E-STMT-MISSING-SEMICOLON)**. The legacy pipeline's silent partial-lowering is a legacy↔native CONFORMANCE bug. Disambiguated empirically: NEWLINE-separated calls (flat body AND inside an `if` block) are ALL preserved — so newline-separated multi-statement is legal-and-works (NO S167 tension); ONLY same-line space-separated is affected.
+
+**FIX DIRECTION (PA rec, Rule-4-resolved; pending bryan GO on the migration) = conformant-reject** — make the legacy pipeline fire the missing-semicolon diagnostic on a same-line multi-statement run, matching the native parser + §4. Lowering-it (the reporter's alternative) would WIDEN a legacy↔native divergence (anti-V1-conformance) and is newly-accepting-beyond-the-contract with no governing sentence. This is newly-rejecting-TOWARD-the-contract (§8) → owes a MEASURED corpus migration (same-line multi-statement, assignments included, → add `;`/newlines; ~≤14 candidate sites in samples+examples, needs a filtered count at land). — `NEW S284 (#162); HIGH; open`
+
+### g-each-component-and-fn-markup-not-mounted — inside `<each>`, a `<Component/>` renders NOTHING and `${fnReturningMarkup()}` emits the literal text `[object HTMLSpanElement]`; both markup-reuse mechanisms work OUTSIDE `<each>` (clean build, no warning)
+<!-- @gap id=g-each-component-and-fn-markup-not-mounted sev=HIGH status=open -->
+Adopter issue **#161** (pjoliver11). Two distinct `emit-each.ts` per-item-template codegen holes, both silent, PA-reproduced on `f28c35fb` by codegen inspection (dispositive) + matching the reporter's real-Firefox DOM verification:
+- **(A) Component-in-each → nothing.** `_scrml_each_render_*` emits `document.createElement("Row")` for a `<Row/>` component instance — a literal unknown `<row>` element; the component template is never expanded and `name=` never bound → no `.row` node renders. (Outside `<each>`, the same `<Row/>` correctly expands to `<div data-scrml="Row" class="row">`.)
+- **(B) fn-returning-markup-in-each → `[object HTMLSpanElement]`.** The each-render emits `_scrml_each_tn.textContent = String(rowMarkup(it.name))` — `String()` of the returned DOM node. The mount-not-stringify guard EXISTS in the runtime (`scrml-runtime.js:~295` carries the exact comment "stringify it to '[object HTMLSpanElement]'; render it into the element instead") but is not applied on the `<each>` path.
+
+Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode ships a green build with an empty list and no diagnostic. Also reported (possibly separate): a `snippet` prop rendered nothing even OUTSIDE `<each>` — split out if it doesn't fold in. Fix = `emit-each.ts` per-item template must (A) route PascalCase tags through the component-expander (as the non-each path does) and (B) mount a markup-valued `${}` result instead of `String()`-into-textContent. — `NEW S284 (#161); HIGH; open — #162 fixed first`
 
 ---
 
