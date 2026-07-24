@@ -1,101 +1,57 @@
-# scrml — Session 282 (bryan) — WRAP
+# scrml — Session 284 (bryan) — WRAP
 
-**Date:** 2026-07-22/23. Booted `/boot` Profile A on **`bryan-maclee-ASUS-Vivobook`** (the S278 machine) as a successor to two closed XPS sessions. **10 PRs merged**, `main` at `dc146119` before this wrap PR, coherence 0/0. Mechanical detail is in `handOffs/delta-log.md [741]-[752]` and `docs/changelog.md` S282 — not duplicated here. This carries the irreducible: the one open decision, the arc's exact resume state, and the recovered-from anomalies.
-
----
-
-## 🔴 THE ONE DECISION THAT GATES NEXT SESSION
-
-**BUG-6 is ruled and scoped, but the 16 KB SPA-runtime gzip budget is a pre-existing knife-edge, and it needs your call before the fix lands.** (`g-spa-runtime-gzip-budget-knife-edge`, HIGH.)
-
-`v0-3-x-spa-tree-shake-phase-b.test.js:145` asserts the assembled SPA runtime is `< 16*1024` gzip. Scoping measured base `e8fdd44c` at **16,257 B — 127 B under**, with no chunk-namespacing changes present. So the budget was near-saturated **before this arc existed**.
-
-- The **naive** accessor-rename (remove `_scrml_cell_scope`, keep `_scrml_cell_key`+`_scrml_cell_name` in core) → **17,531 B, FAILS by 1,147.**
-- Only the **zero-core-residue** rename (inline key-derivation into each prologue; move the production-dead `_scrml_cell_name` into the test shim; trim the banner) → **16,255 B, passes by 129 B.**
-
-129 B is **smaller than the ~200 B gzip whitespace-noise band** the scoping hit. So the rename is sound and CAN pass, but "passing" is not robust. **The fork:** (a) hold 16 KB, require zero-core-residue forever (every future core addition must be offset); or (b) raise the budget. The rename meets either. **Recommendation deferred to the execution session's re-measurement** — step 1 of the plan re-measures base; if it has drifted over 16 KB by then, (b) is forced regardless.
+**Date:** 2026-07-24. `/boot` Profile A on **`bryan-maclee-ASUS-Vivobook`** (successor to S283/S282, same machine). **4 PRs merged** (#163 #164 #166 #168), `main` at `33360949`, coherence 0/0. Mechanical stream in `handOffs/delta-log.md [753]-[762]`; changelog S284. This carries the irreducible.
 
 ---
 
-## 🧭 chunk-namespacing — EXACT RESUME STATE (do not re-derive)
+## 🔴 THE ONE THING THAT GATES NEXT SESSION — chunk-namespacing is 90% DONE, not "runs next session"
 
-**Mechanism COMPLETE and proven.** Acceptance flips CLOBBERED→isolated under **both** module formats; all three purpose-built fixtures (`wide/` N1+N2, `types/` N3, `engine/` N4) isolate in real Chromium. All three were **INCONCLUSIVE at base** — the second chunk threw a redeclaration error and never evaluated, so a naive before==after check would have false-greened the whole arc. The `INCONCLUSIVE` guard is why it didn't.
+**S283 already RAN the BUG-6 accessor-rename.** The board logged S283 as a "no-op orient"; git shows ~24 commits on `worktree-agent-a91ad13968b46ab5d @ 307bf9b7` (RETAINED). The S282 hand-off's "runs next session / 137 text-pins" framing is **wrong** — `verify-work-not-done` caught it before I re-dispatched a 90%-complete arc.
 
-**Resume from:** agent branch `worktree-agent-a91ad13968b46ab5d` @ `4f816389` (worktree RETAINED). Base `e8fdd44c`.
-
-**What is DONE on that branch:**
-- **N1** (numeric node ids) — emission-time `nsId`, built + adversarially verified sound (SSR↔client token identity 19/19/19, zero orphans; the number→string call-shape change actually repairs a latent cross-chunk cache clobber).
-- **R2** token anchored to **project root → git root → absolute path** (the third tier RATIFIED this session; `SCOPING.md §8`). D1/D2/D3 closed.
-- **D4** — the OQ-3 artifact-diff gate was found **HOLLOW** (compared 8 of 115 files) and hardened to 446 files with the hollow-gate modes designed out. PASSES on all 10 corpora.
-- **N2/N3/N4 built and proven** via a chunk-local scope; **partially migrated** — 673→162 test failures across two rounds.
-- **6 real bugs** found in migration (the split-key-pair class — see below).
-
-**What is LEFT (the ruled fix, next session):** the BUG-6 **accessor-rename** — the whole plan, ordered with per-step verification, is in **`docs/changes/chunk-namespacing/BUG6-RENAME-SCOPING.md`** (`status: current`). Key facts from it, verified by the agent:
-- **ESM-crux: SOUND, no hole.** A renamed local (`_scrml_cs_reactive_get`) has a name distinct from the imported runtime accessor, so it never shadows it — which is exactly what attempt (a) died on. Module scope isolates the body; no IIFE needed for the accessor mechanism (`emit-client-esm.ts:359-362`).
-- **Rename surface: ~959 accessor-call occurrences across 37 files** → do it as a **post-hoc Acorn callee-rename pass**, NOT per-emitter edits. The §3.1 enumeration is for verifying the pass's coverage.
-- **Migration: 46 files / 160 per-file failures = 129 new vs the authoritative 31-name base set, 0 base failures masked.** Re-migrates **zero** already-done files IF `captureInsideChunkScope` + `unwrapChunkScope` are made rename-aware first (a two-helper change, §3.3).
-- **N3/N4 closure preserved** under the rename (IIFE wrap + `nsName` are independent of accessor names) — confirmed by reading.
-- **`E-CG-018` needs a §34 catalog row** — lands WITH the impl (named-codes-land-with-impl).
-
-**The verification bar for the landing** (all on the FINAL tree, commit-labelled): acceptance CLOBBERED→isolated both formats real Chromium · both BUG-6 tests (§C10.1 tree-shake + the gzip budget) green · full suite name-diff clean vs `e8fdd44c` (the base set is **31 unique names**, from 34 lines / 3 dups — use 31) · artifact-diff PASS with its file count reported.
-
-**Held branches feeding this — do NOT delete:** `origin/evidence/u4-premise-falsified` · `origin/worktree-agent-a2ed001a5de228134` + local `feat/wave1c-nav` (Wave-1c pieces 2+3, unblocked the moment chunk-namespacing lands). Once the arc lands, BOTH the classic Wave-1c loader and ESM U4 unblock; that closes adopter **#27**.
+**Boot the finish from `docs/changes/chunk-namespacing/FINISH-SCOPE.md`** (landed #168, `status: current`). It is the current-truth kickoff. Summary:
+- **DONE + verified:** core strip (`_scrml_cell_scope/_cell_key/_cell_name` out of core), **gzip 16,330 B — holds the 16 KB budget** (PA-re-measured S284; base main still 16,257, 0 drift — the "raise-forced" trigger did NOT fire), Acorn callee-rename pass, `E-CG-018` §34 rows, most test migration.
+- **gzip decision RULED (bryan): HOLD 16 KB** via zero-core-residue (already achieved). Caveat: 54 B margin < ~200 B whitespace-noise band — whitespace-normalize + re-measure; the budget test self-guards future core additions.
+- **The real residual (NOT mechanical text-pins):** ~19 within-node **PARITY** fails (the rename shifts LIVE emitted accessor names → native-vs-live byte parity over-budget per fixture) + **executed-output correctness** (the campaign has REVERT commits of a "folded prologue self-recurses / mangled executed clientJs" — verify in real Chromium, S265) + a **rebase onto main** (1-file `emit-each.ts` conflict with #161) + the **full verification bar** (both module formats real Chromium · both BUG-6 tests · name-diff clean · artifact-diff · S239).
+- **The stale-branch 199-fail count is POLLUTED** (stale base + happy-dom global-state-leak cascade; 12 base browser flakes are expected). Get the clean rename-only count by rebasing onto main + running browser isolated.
+- **OPEN RULING for the finish (surface to bryan):** resolve the within-node parity by (a) regenerating parity baselines to post-rename live output [likely], (b) applying the rename to native too, or (c) rename-aware gate. See FINISH-SCOPE §3.
+- **Payoff on land:** closes adopter **#27** (navigate soft-nav) + unblocks the held classic Wave-1c loader AND ESM U4.
 
 ---
 
-## ⭐ THE SESSION'S LARGEST OUTPUT — the SPLIT-KEY-PAIR bug class
+## 🎬 WHAT LANDED (4 PRs)
 
-`docs/audits/split-key-pair-sweep-2026-07-23.md` + `g-split-key-pair-class` + `g-pgnotify-listen-case-split`.
-
-**The shape:** a lookup key concatenated from a source-level cell/engine NAME at the write site and rebuilt independently at the read site, with no shared key-builder. Any name transform (namespacing, aliasing, minification) splits the pair, and **the failure is SILENT** — the feature just stops working. **None is caught by the 28k-test suite, because a split pair passes every test that exercises one side.**
-
-The chunk-namespacing arc found 4 (it forces both sides of every name-keyed identifier to move at once, which is the only thing that makes the class visible). A read-only sweep found **14 more, 10 silent.** The sharpest is CONFIRMED LIVE + PA-empirical: `g-pgnotify-listen-case-split` (HIGH) — `pg_notify('scrml_ordersFeed')` is a string literal (case preserved), `LISTEN scrml_ordersFeed` is a bare identifier (PostgreSQL folds lowercase), so any camelCase `<channel>` name delivers zero rows silently, and `sqlSafeIdent`'s docstring claims a lowercasing it never does.
-
-**The durable fix is structural, NOT 14 point repairs:** one exported key-builder per key, called by both sides — the in-repo exemplar is `themeVariantAttr` (`emit-theme-reset.ts:195`, called by both the CSS emitter and the JS setter, cannot drift). §5 of the audit (the §55 validity surface with **five** independent implementations of one key predicate, two self-documented as "Mirror of") is the warning shot. The audit's checked-and-clean list is there so the next sweep does not re-walk it.
+- **#163** — gaps filed for #161/#162 (both PA-reproduced on f28c35fb first).
+- **#164 `374888b6`** — **#162** same-line multi-statement call-drop → CONFORMANT-REJECT (`E-STMT-MISSING-SEMICOLON`, §4 + native parity). GH #162 closed.
+- **#166 `c27dca49`** — **#161** component + item-root fn-markup mount in `<each>`. Item-root scope; nested deferred. GH #161 closed.
+- **#168 `33360949`** — chunk-ns `FINISH-SCOPE.md` (record correction + finish scope).
+- **Filed:** `g-each-nested-markup-interp-stringifies` (MED) — the deferred nested-markup-interp shape. HIGH gaps 17→15, MED +1.
 
 ---
 
-## 🎬 WHAT LANDED (10 PRs) — pointers, detail in changelog/delta-log
+## 🧭 METHOD — two disciplines earned their cost this session
 
-#150 `<each>` multi-root (adopter #141, PA-independent R26) · #151 **windows CI GREEN first time** (6 test-side path assumptions; promotion candidate for the blocking gate) · #152 tracking 15→9 · #153 continuity · #154 E-DG-002 attr-interp false-fire · #155 **NEW Stage 3.055 TC** (capitalized-tag registry resolution) · #156 gap currency · #157 split-key class · #158 the 14-instance sweep · #159 **SPEC §22.10 amended + R2 ratified**.
-
----
-
-## 🔬 METHOD LESSONS (the durable output)
-
-**The brief-authoring lesson, proven three times.** My symptom descriptions and governing-sentence citations held up; my proposed **mechanisms** did not, and twice the correction prevented a real bug:
-- the TC brief proposed keying on `isKnownElementName` — which would have rewritten engine state children (`<Small rule=...>`, `<Title rule=.Playing>`) and corrupted the Mario state machine + 3 samples. The agent keyed on NR's `resolvedKind` stamp instead. PA-verified byte-identical.
-- the DG brief scoped the bug to `class` attributes — the miss was in the value SHAPE, so class/style/title/data-*/aria-* all shared it.
-- the R2 ruling ("hard error on unresolvable root") failed 434 test files; the agent proposed the strictly-more-injective filesystem-root tier.
-**Going forward: a brief states the symptom + governing sentence as findings, and marks the mechanism explicitly as a hypothesis to verify.** The agents did that anyway, which is why it worked.
-
-**Verify-the-hand-off, three times.** S280 said the maps were `9481bc69`/blind to the ESM arc (S281 had refreshed them; refreshed again inside `d3e961de`; all 6 "invisible" symbols present — a cold `project-mapper` run would have been the S248 no-op). S281 said "main fails its own gate" (does not reproduce here, 21129/0 — XPS-clone-local). S280 said #148 was open (merged). **A hand-off is a derived doc; check it against git before spending a dispatch on it.**
-
-**Scope-estimation from a proxy, the agent's own lesson, applied to me too.** Its "143-file migration" came from a classifier matching `globalThis.X=` but not `window.X=`; 149 of 198 "unclassified" were one shared harness. The BUG-6 scope would have said "remove `_scrml_cell_scope` and the size test passes" — measuring showed removal alone leaves it 1,147 B over. **Measure the number that matters; do not reason from the proxy for it.**
-
-**The adversarial gate + R26 earned their cost outright.** They caught a green acceptance test that didn't reproduce (the chunk-namespacing report's SURVIVED table was measured with N2 wired, before N2 was held out), a merge gate that had checked 8 of 115 files, and the two brief-mechanism bugs above.
+1. **The S239 adversarial gate caught a real regression pre-merge (S282 repeating verbatim).** #162's agent self-reported green through 21k tests but silently broke `(x==1) or (y==2)` — word-form booleans after a grouping `)`. My **empirical** adversarial pass (10+ constructed blast-radius shapes covering operator-classes / declaration-heads / chaining / under+over-rejection) found it; routed back; fix-round folded in the same PR. A landing on the green report ships a newly-rejecting break on valid common code. **The empirical construct-reproducers form of the gate is stronger than a generic review for a bounded-blast-radius parser change.**
+2. **`verify-work-not-done-before-dispatch` saved a re-dispatch of a 90%-done arc.** The board said "no-op"; git said otherwise. **A board S<N>.md reflects boot-time intent, not what the session did — plan from git + landed artifacts, never the board marker.** (Process fix recorded on the S283 board.)
+3. **Executed-DOM (S265) for #161** — the "renders nothing" mode is invisible to codegen inspection; verified by executing the bundle in happy-dom (my own harness, independent of the agent's test), with a base control proving the bug + the harness's discrimination.
 
 ---
 
-## ⚠️ PA PROCESS SLIPS (3, recorded honestly)
+## ⚠️ ANOMALIES / FRICTION (recovered)
 
-1. **Branch leak onto local `main`.** After `gh pr merge` + `git checkout main && git pull`, I edited + committed without cutting a branch — the commit landed on local main (the S142 class). Caught by the S147 coherence check (`0 1` not `0 0`) + branch protection would have rejected the push. Recovered clean via cherry-pick onto the branch + `git branch -f main origin/main`. **The next edit after a merge+pull is where this happens — cut the branch first.**
-2. **E-SQL-009 wrong-shape reproducer.** Nearly closed a live silent-data-loss gap by testing a `<program>` (fires E-SQL-004, the `db=` attribute) instead of a pure-fn file (fires E-SQL-009, the `<db src>` element). Caught by the Rule-4 governing-sentence gate. Trap recorded in the gap.
-3. **The wrap-reflex, 4th recurrence** (`~48%`, disguised as care for the next session's quality). bryan: "48% is hardly fumes." Memory updated with the generalized tell: the reflex always arrives as a reason that sounds like good judgment. `[[feedback_dont_wrap_at_43_percent]]`.
-
-**Recurring mechanical friction:** every doc PR that moves a figure `FACTS.md` publishes (compiler LOC, test count, SPEC line count) trips the facts gate — 3 PRs this session round-tripped through a red gate. **Pre-regen `bun scripts/facts.ts --write` before pushing any PR that touches `compiler/src`, tests, or `SPEC.md`.**
+- **FACTS-gate tripped #164 once** — I failed to pre-regen despite the S282 hand-off flagging it. **Pre-regen `bun scripts/facts.ts --write` before pushing ANY PR touching `compiler/src`, tests, or `SPEC.md`.** Applied for #166/#168.
+- **GitHub partial outage** (~19:27-19:45Z) blocked #161's PR-create (GraphQL + REST 5xx, GitHub-internal error IDs). Background-retry auto-created the PR on recovery. `windows` failed on the mid-outage run (infra); the fresh run passed — no #161 regression.
+- **Concurrent session S285-peter** landed #167 mid-merge → bumped main → #168 rebased + re-gated (strict:true). scrml-support push rejected once (Peter's push) → rebased clean.
 
 ---
 
-## 🧷 OTHER OPEN / HELD
+## 🧷 CONCURRENT / HELD
 
-- **The inbox message `2026-07-22-2230-from-S282-to-XPS-…`** is MY outbound notice to the XPS clone (union merged, install now, its two HIGHs don't reproduce here). It lives in `handOffs/incoming/` and is unread FOR XPS by design — the boot hook will keep flagging it here until that machine consumes it. Leave it; it is not for this machine.
-- **`E-CG-018` §34 row** — with the chunk-namespacing impl.
-- **The split-key-pair sweep's 13 non-live instances** — structural fix (one shared key-builder per key). `g-pgnotify` (HIGH) is the one that's live today, but gated behind `<onchange>` being Nominal.
-- **Two XPS-clone-local HIGHs narrowed:** `g-main-red-against-its-own-pre-commit-gate` + `g-commit-gate-absent-on-bryan-xps-8950` — both are XPS environment, not tree; the fix there is `bun run pretest` then re-check.
+- **S285-peter LIVE** — his adopter lane (#165/#167). Disjoint from my surfaces; serialized by PR merge-order. Not a blocker.
+- **Held branches (do NOT delete):** `worktree-agent-a91ad13968b46ab5d` (chunk-ns rename — the finish resumes from it) · `bug6-base-e8fdd44c` (chunk-ns base) · `worktree-agent-a2ed001a5de228134` + local `feat/wave1c-nav` (Wave-1c, unblocked when chunk-ns lands) · `origin/evidence/u4-premise-falsified`.
+- **Inbox:** the `2026-07-22-2230-from-S282-to-XPS` message is THIS machine's own outbound to the XPS clone — LEFT in place (consuming it here denies XPS ever seeing it). The boot hook will keep flagging it until XPS consumes it. Not for this machine.
 
 ## Tags
-#session-282 #windows-canary-green #split-key-pair-class #pgnotify-case-split-live #chunk-ns-mechanism-proven #bug6-accessor-rename-scoped #gzip-budget-knife-edge #brief-mechanism-is-a-hypothesis #branch-leak-recovered
+#session-284 #adopter-161-162-landed #conformant-reject #s239-caught-or-and-regression #executed-dom-verify #s283-ran-the-rename-board-said-no-op #chunk-ns-90pct-done-scoped #gzip-hold-16 #facts-gate-friction #s285-peter-concurrent
 
 ## 🗺️ Maps
-`primary.map.md` stamped `e8fdd44c` (content-verified current this session, not regenerated — the ESM-arc symbols S280 flagged as missing are all present). The two new S282 stages/files (`tag-canonicalizer.ts` Stage 3.055, the chunk-namespace codegen once it lands) are NOT yet in the maps — refresh at the chunk-namespacing landing, since that arc adds the bulk of the new surface.
+`primary.map.md` stamped pre-session (was 8 commits behind at boot, now ~15 with #162/#161/#167/#168). **Refresh OWED** — the session added real surface (`ast-builder.js` same-line boundary detector, `emit-each.ts` item-root mount path + each-block CE descent). Deferred with the chunk-ns finish (which adds the bulk of new surface); a targeted `project-mapper` pass on `ast-builder.js`/`emit-each.ts`/`component-expander.ts` is the alternative if the finish slips.
