@@ -4040,6 +4040,49 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
 
     const STMT_KEYWORDS = new Set(["lift", "function", "fn", "const", "let", "import", "export", "use", "type", "server", "for", "while", "do", "if", "return", "match", "partial", "switch", "try", "fail", "transaction", "throw", "continue", "break", "when", "given"]);
     const DECL_KEYWORDS = new Set(["const", "let", "type", "function", "fn"]);
+    // Word-form INFIX operators that are IDENT-shaped (SPEC §45.9, S136): `or`/`and`
+    // are NOT in the tokenizer KEYWORDS set, so they lex as IDENT and only become
+    // `||`/`&&` in the expression-parser lowering (expression-parser.ts ~L1683).
+    // They are OPERATORS — they CONTINUE an expression and NEVER start a statement.
+    // The same-line boundary detector below (and the ASI-NEWLINE `tokStartsStmt`)
+    // must therefore NOT treat an IDENT that is one of these as a new-statement
+    // start. The KEYWORD-shaped word operators (`is`/`in`/`instanceof`/`as`/`of`)
+    // are already excluded because those detectors only consider `kind === "IDENT"`.
+    // This is the operator-CLASS exclusion (the extension point if a new word-form
+    // infix operator lands) — not a two-word `or`/`and` special-case.
+    const WORD_INFIX_OPERATORS = new Set(["or", "and"]);
+
+    // g-multistatement-line-nonfirst-call-drop (S284) — CONFORMANT-REJECT.
+    // A same-line multi-statement run (two statements juxtaposed on one source
+    // line, separated only by whitespace — NO `;`, NO newline) is ill-formed by
+    // SPEC §4: `E-STMT-MISSING-SEMICOLON` — "Expected `;` or a newline to end the
+    // statement." The native parser (`--parser=scrml-native`) ALREADY rejects
+    // this construct (parse-stmt.js `consumeSemicolon`); the legacy pipeline used
+    // to silently DROP the non-first bare call — assignments split fine, but a
+    // bare LOCAL call (`log.push(x)`) was swallowed into the preceding statement's
+    // RHS and lost at codegen (clean build, wrong output). This helper fires the
+    // SAME §34 code the native path uses, bringing legacy into conformance.
+    //
+    // Fires ONLY when the boundary token sits on the SAME source line as the last
+    // token of the just-collected statement. A NEWLINE-separated boundary is the
+    // legal ASI form and MUST stay clean — the caller's own break paths handle it.
+    // De-duped per collectExpr call: each call breaks at the first boundary, so we
+    // emit exactly one diagnostic per missing terminator (matching native's count).
+    let _missingSemiReported = false;
+    const reportMissingSemicolonIfSameLine = (boundaryTok) => {
+      if (_missingSemiReported) return;
+      if (!boundaryTok?.span || !lastTok?.span) return;
+      if (typeof boundaryTok.span.line !== "number" || typeof lastTok.span.line !== "number") return;
+      if (boundaryTok.span.line !== lastTok.span.line) return; // newline-separated = legal (ASI)
+      _missingSemiReported = true;
+      errors.push(new TABError(
+        "E-STMT-MISSING-SEMICOLON",
+        "E-STMT-MISSING-SEMICOLON: Expected `;` or a newline to end the statement. " +
+        "Two statements appear on one line separated only by whitespace — end the first " +
+        "statement with a `;` or put them on separate lines.",
+        spanOf(boundaryTok, boundaryTok),
+      ));
+    };
 
     while (true) {
       const tok = peek();
@@ -4347,8 +4390,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             const next1 = peek(1);
             const isAssign = next1 && next1.kind === "PUNCT" && next1.text === "=" && peek(2)?.text !== "=";
             if (isAssign) {
-              if (tok.kind === "AT_IDENT" && lastPart !== "=") break;
-              if (tok.kind === "IDENT" && lastPart !== "." && lastPart !== "=" && lastPart !== ":") break;
+              // Same-line multi-statement guard (S284): a `@x =`/`x =` assignment
+              // that begins a NEW statement on the same line as the previous one
+              // is ill-formed (§4). This break already fired for both same-line
+              // AND newline-separated boundaries; the helper only errors on the
+              // same-line case, so newline-separated multi-assign stays clean.
+              if (tok.kind === "AT_IDENT" && lastPart !== "=") { reportMissingSemicolonIfSameLine(tok); break; }
+              if (tok.kind === "IDENT" && lastPart !== "." && lastPart !== "=" && lastPart !== ":") { reportMissingSemicolonIfSameLine(tok); break; }
             }
             // W14-BB: extend the assignment-boundary check to compound assigns
             // (`+=`, `-=`, `*=`, `/=`, `%=`) and postfix updates (`++`, `--`)
@@ -4381,7 +4429,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               "++", "--",
             ]);
             const isCompoundOrUpdate = next1 && next1.kind === "OPERATOR" && COMPOUND_OPS.has(next1.text);
-            if (isCompoundOrUpdate && tok.kind === "AT_IDENT" && lastPart !== "=") break;
+            if (isCompoundOrUpdate && tok.kind === "AT_IDENT" && lastPart !== "=") { reportMissingSemicolonIfSameLine(tok); break; }
             // S25 — S22 §6 bug fix: `@name :` at depth 0 begins a typed
             // state-decl (§53). Without this guard, an untyped `@x = 1`
             // followed by `@y: Type = expr` in the same logic block silently
@@ -4398,7 +4446,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             // Guard with `ternaryDepth === 0` so the break fires ONLY for a
             // genuine top-level typed-reactive decl, never inside a ternary arm.
             const isTypedReactive = next1 && next1.kind === "PUNCT" && next1.text === ":";
-            if (isTypedReactive && ternaryDepth === 0 && tok.kind === "AT_IDENT" && lastPart !== "=") break;
+            if (isTypedReactive && ternaryDepth === 0 && tok.kind === "AT_IDENT" && lastPart !== "=") { reportMissingSemicolonIfSameLine(tok); break; }
             // high-deepset-write-loss (2026-06-06): a dotted-path reactive
             // statement at depth 0 also begins a NEW statement. The forms are
             //   `@obj.path.to.prop = value`     -> reactive-nested-assign (§5.2.3)
@@ -4472,9 +4520,72 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
                 const isDeepSet =
                   afterChain && afterChain.kind === "PUNCT" && afterChain.text === "=" &&
                   peek(k + 1)?.text !== "=";
-                if (isArrayMutation || isDeepSet) break;
+                if (isArrayMutation || isDeepSet) { reportMissingSemicolonIfSameLine(tok); break; }
               }
             }
+          }
+        }
+        // g-multistatement-line-nonfirst-call-drop (S284) — the SAME-LINE sibling
+        // of the BUG-ASI-NEWLINE boundary below. A bare call / member / index
+        // statement (`log.push(x)`, `foo()`, `arr[i] = v`) that begins a NEW
+        // statement on the SAME source line as the preceding statement — separated
+        // only by whitespace, no `;`, no newline — is a same-line multi-statement
+        // run, ill-formed by §4 (E-STMT-MISSING-SEMICOLON). The assignment /
+        // deep-set boundary checks above only recognize `@x =` / `x =` / `@x.y =`
+        // starts, so a bare LOCAL call was NOT seen as a boundary here: the
+        // preceding statement's collectExpr greedily swallowed it into its RHS and
+        // it was silently DROPPED at codegen. Detect the same-line juxtaposition
+        // and fire the SAME §34 code the native parser uses (conformant-reject),
+        // then break so the swallowed statement is still parsed as its own node
+        // (no cascade). The NEWLINE-separated form is untouched — it breaks via the
+        // BUG-ASI-NEWLINE path below and stays legal (the hard regression guard).
+        if (
+          parts.length > 0 &&
+          angleDepth === 0 &&
+          tok.kind === "IDENT" &&
+          // A word-form INFIX operator (`or`/`and`, §45.9) is IDENT-shaped but
+          // CONTINUES the expression — it never starts a statement. Without this
+          // guard, `(getA()) or (getB())` mis-read `or (` as a call-start (the
+          // grouping `)` is a hard value terminal) and false-fired. Excluded by
+          // operator class (WORD_INFIX_OPERATORS), so any future word-form infix
+          // operator is covered too. Bare `getA() or getB()` was already safe
+          // (peek(1) after `or` is an IDENT, not `(`/`.`/`[`); this closes the
+          // grouped-operand case.
+          !WORD_INFIX_OPERATORS.has(tok.text) &&
+          lastTok && tok.span && lastTok.span &&
+          typeof tok.span.line === "number" && typeof lastTok.span.line === "number" &&
+          tok.span.line === lastTok.span.line // SAME line — no newline between
+        ) {
+          const _n1 = peek(1);
+          // `tok` begins a call / member / index expression: `ident(` / `ident.`
+          // / `ident[` (incl. optional-chain `?.` / `?.(` / `?.[`). At depth 0 an
+          // IDENT immediately after a value-ending token — with no intervening
+          // operator — is always a statement juxtaposition, but requiring a
+          // call/member/index opener scopes this to the exact documented bug class.
+          const _startsCallOrMember =
+            _n1 &&
+            ((_n1.kind === "PUNCT" && (_n1.text === "." || _n1.text === "(" || _n1.text === "[")) ||
+             (_n1.kind === "OPERATOR" && (_n1.text === "?." || _n1.text === "?.[" || _n1.text === "?.(")));
+          // The previous statement must END in a HARD value terminal — a closing
+          // `)`/`]`/`}`, a number, a string, or a value keyword. Deliberately
+          // NARROWER than ASI-NEWLINE's lastEndsValue: a bare trailing IDENT /
+          // AT_IDENT is EXCLUDED because a multi-identifier DECLARATION / directive
+          // head legitimately juxtaposes two IDENTs on one line and is NOT a
+          // statement boundary — e.g. `extern r applyFilter(...)` (§23.3 WASM
+          // extern: call-char + name) and `render header()` (§15 snippet render:
+          // directive + name). Requiring a hard terminal keeps every documented
+          // bug shape firing (calls end in `)`, literal assignments in NUMBER/
+          // STRING) while never breaking those declaration heads.
+          // (`null`/`undefined` do not exist in scrml.)
+          const _lk = lastTok.kind, _lt = lastTok.text;
+          const _lastEndsValue = (
+            _lk === "NUMBER" || _lk === "STRING" ||
+            (_lk === "KEYWORD" && (_lt === "true" || _lt === "false" || _lt === "this" || _lt === "not")) ||
+            (_lk === "PUNCT" && (_lt === ")" || _lt === "]" || _lt === "}"))
+          );
+          if (_startsCallOrMember && _lastEndsValue) {
+            reportMissingSemicolonIfSameLine(tok);
+            break;
           }
         }
         // BUG-ASI-NEWLINE: When at depth 0 and the current token is on a new line
@@ -4535,9 +4646,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             (lastKind === "KEYWORD" && VALUE_KEYWORDS.has(lastText)) ||
             (lastKind === "PUNCT" && (lastText === ")" || lastText === "]" || lastText === "}"))
           );
-          // tok starts a new statement if it's an IDENT (function call) or unhandled KEYWORD
+          // tok starts a new statement if it's an IDENT (function call) or unhandled KEYWORD.
+          // A word-form INFIX operator (`or`/`and`, §45.9) is IDENT-shaped but continues
+          // the expression across a newline (`(a)\n  or (b)`) — it never starts a
+          // statement, so exclude it by operator class (mirrors the same-line detector).
           const tokStartsStmt = (
-            tok.kind === "IDENT" ||
+            (tok.kind === "IDENT" && !WORD_INFIX_OPERATORS.has(tok.text)) ||
             (tok.kind === "KEYWORD" && !STMT_KEYWORDS.has(tok.text))
           );
           if (lastEndsValue && tokStartsStmt) break;
