@@ -640,8 +640,23 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
   // statements get grouped into a single Promise.all batch, and stmt 1's
   // expression `x.field` is evaluated BEFORE the await destructures `x` →
   // ReferenceError (TDZ) at runtime. The body-DG's `reads` / `writes` /
-  // `awaits` / `invalidates` edges all force ordering; `control-anchors` is
-  // a structural fence we skip here (the planner upstream already respects it).
+  // `awaits` / `invalidates` edges all force ordering.
+  //
+  // #165 — the `control-anchors` edges are ALSO folded in (they were previously
+  // skipped here, "the planner upstream already respects it" — but this CLIENT
+  // scheduler is NOT that upstream planner, and it did not respect them). Each
+  // control-flow head (`if`/`for`/`while`/`switch`/`match`/`try`, per
+  // body-dg-builder `CONTROL_FLOW_KINDS`) emits an anchor `(k+1)→k`, making the
+  // statement AFTER the head depend on it. Folded into `depSets`, that puts the
+  // head into the transitive closure of everything after it, so the
+  // independence test below excludes a later decl from a batch seeded BEFORE
+  // the head. Without this, a server-call `const r = bump()` sitting after an
+  // `if (...) return` guard was hoisted INTO a batch seeded above the guard and
+  // ran unconditionally — a silent destructive-write reorder (the confirm-
+  // guarded write fired before the confirm; adopter #165). The anchor also
+  // covers `match`/`switch`/`try` guards, which an emit-shape predicate misses.
+  // (Reduces batching only ACROSS control flow — never the adjacent-server-call
+  // parallelization, and never the S212 pure-decl skip, which has no anchor.)
   // Reproducer: the original dashboard's refresh() emitted
   // `Promise.all([readHead(), _scrml_reactive_set("head", sha.slice(0,8))])`
   // where `sha` was the destructuring target of the await — broken pre-fix.
@@ -651,9 +666,9 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
       reactive: [],
     });
     for (const edge of bodyDG.edges) {
-      if (edge.kind === "control-anchors") continue;
       // body-DG edges carry direct statement indices (numbers) per
       // body-dg-builder.ts. Convention: `from` depends on `to` — `from` runs after.
+      // ALL edge kinds are folded, `control-anchors` included (#165).
       if (edge.from >= 0 && edge.from < body.length &&
           edge.to >= 0 && edge.to < body.length) {
         depSets[edge.from].add(edge.to);
@@ -802,6 +817,13 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
       // emitted AFTER the batch (forward-reference). Either way `j` cannot join.
       // depClosure[j] only contains indices < j, so the single guard "every
       // transitive dep < i" subsumes the prior direct group-member check.
+      //
+      // #165 — this is ALSO what fences a server call out of a batch seeded
+      // above a control-flow guard: the body-DG `control-anchors` edges (folded
+      // into depSets at the buildBodyDG loop below) make every statement after a
+      // control-flow head DEPEND on that head, so its transitive closure reaches
+      // an index >= i and it is excluded. Without that fold-in the guard was
+      // invisible here and the call hoisted above it (silent reorder).
       let independent = true;
       for (const dep of depClosure[j]) {
         if (dep >= i) {
