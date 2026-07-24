@@ -177,3 +177,78 @@ describe("#165 §2: no regression — consecutive server calls with no control f
     expect(fn).toMatch(/_scrml_fetch_bump_\d+\("D2"\)/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §3: the full control-transfer class — NOT just the reported `if…return`.
+// The first fix (fold control-anchors, #167) fenced only the guard's IMMEDIATE
+// successor and only `CONTROL_FLOW_KINDS`; this pins the shapes it missed:
+//   - a server call separated from the guard by a filler statement,
+//   - a `match` guard, a `throw` guard, and a `propagate` (`x?`) guard.
+// The fence now breaks the batch at ANY control-transfer statement.
+// ---------------------------------------------------------------------------
+
+describe("#165 §3: server call fenced across the FULL control-transfer class", () => {
+  // Guard preceded by two inert consts, then (optionally) filler, then the call.
+  function guardSrc(guardLines, fnName) {
+    return `<program>
+\${
+  type Err:enum = { Bad }
+  server function bump(tag) { return tag }
+  function validate(x: int)! Err { if (x < 0) fail Err::Bad
+    return x }
+  function ${fnName}()! Err {
+    const one = 1
+    const two = 2
+${guardLines}
+    const r = bump("X")
+    @log = "done: " + r
+  }
+  @log = ""
+}
+<div>\${@log}</div>
+<button onclick=\${${fnName}()}>x</button>
+</program>
+`;
+  }
+
+  // The invariant is ORDERING: the server fetch must appear AFTER the guard's
+  // control-transfer token — never hoisted into the batch seeded ABOVE it.
+  // (The call MAY legitimately batch with a statement that is itself after the
+  // guard, e.g. `const [filler, r] = Promise.all([99, bump()])` — that batch is
+  // below the guard, which is fine. So we assert position, not batch-membership.
+  // What must NOT happen is the fetch riding the PRE-guard `[one, two]` batch.)
+  function fetchIsAfter(fn, guardToken) {
+    const guardIdx = fn.indexOf(guardToken);
+    const callIdx = fn.indexOf("_scrml_fetch_bump");
+    expect(guardIdx).toBeGreaterThan(-1);
+    expect(callIdx).toBeGreaterThan(-1);
+    expect(callIdx).toBeGreaterThan(guardIdx);
+    // And it must not have joined the pre-guard batch (the one before guardIdx).
+    const preGuard = fn.slice(0, guardIdx);
+    expect(preGuard).not.toMatch(/_scrml_fetch_bump/);
+  }
+
+  test("filler-separated: `if…return`, then a filler decl, then the server call", () => {
+    const fn = fnBody(compileSource("g-filler.scrml", guardSrc(
+      "    if (one + two == 3) return\n    const filler = 99", "caseFiller")), "caseFiller");
+    fetchIsAfter(fn, "if (");
+  });
+
+  test("match guard: a `match` statement fences the batch", () => {
+    const fn = fnBody(compileSource("g-match.scrml", guardSrc(
+      '    match one {\n      1 => { @log = "a" }\n      _ => { @log = "b" }\n    }', "caseMatch")), "caseMatch");
+    fetchIsAfter(fn, "_scrml_match");
+  });
+
+  test("throw guard: `if (cond) throw`", () => {
+    const fn = fnBody(compileSource("g-throw.scrml", guardSrc(
+      '    if (one > 5) throw "x"', "caseThrow")), "caseThrow");
+    fetchIsAfter(fn, "if (");
+  });
+
+  test("propagate guard: `const chk = validate(...)?` (conditional early return)", () => {
+    const fn = fnBody(compileSource("g-prop.scrml", guardSrc(
+      "    const chk = validate(one)?", "caseProp")), "caseProp");
+    fetchIsAfter(fn, "__scrml_error");
+  });
+});

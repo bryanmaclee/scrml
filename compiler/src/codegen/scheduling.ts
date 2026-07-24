@@ -640,23 +640,12 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
   // statements get grouped into a single Promise.all batch, and stmt 1's
   // expression `x.field` is evaluated BEFORE the await destructures `x` →
   // ReferenceError (TDZ) at runtime. The body-DG's `reads` / `writes` /
-  // `awaits` / `invalidates` edges all force ordering.
-  //
-  // #165 — the `control-anchors` edges are ALSO folded in (they were previously
-  // skipped here, "the planner upstream already respects it" — but this CLIENT
-  // scheduler is NOT that upstream planner, and it did not respect them). Each
-  // control-flow head (`if`/`for`/`while`/`switch`/`match`/`try`, per
-  // body-dg-builder `CONTROL_FLOW_KINDS`) emits an anchor `(k+1)→k`, making the
-  // statement AFTER the head depend on it. Folded into `depSets`, that puts the
-  // head into the transitive closure of everything after it, so the
-  // independence test below excludes a later decl from a batch seeded BEFORE
-  // the head. Without this, a server-call `const r = bump()` sitting after an
-  // `if (...) return` guard was hoisted INTO a batch seeded above the guard and
-  // ran unconditionally — a silent destructive-write reorder (the confirm-
-  // guarded write fired before the confirm; adopter #165). The anchor also
-  // covers `match`/`switch`/`try` guards, which an emit-shape predicate misses.
-  // (Reduces batching only ACROSS control flow — never the adjacent-server-call
-  // parallelization, and never the S212 pure-decl skip, which has no anchor.)
+  // `awaits` / `invalidates` edges all force ordering; `control-anchors` is
+  // a structural fence we skip here. (#165's control-flow reorder is fenced
+  // directly in the grouping scan below via `isControlFlowBoundary`, which
+  // breaks the batch at ANY control-transfer statement — a stronger guarantee
+  // than the anchor edge, which only bound the guard's immediate successor and
+  // so missed a server call separated from the guard by filler statements.)
   // Reproducer: the original dashboard's refresh() emitted
   // `Promise.all([readHead(), _scrml_reactive_set("head", sha.slice(0,8))])`
   // where `sha` was the destructuring target of the await — broken pre-fix.
@@ -666,9 +655,9 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
       reactive: [],
     });
     for (const edge of bodyDG.edges) {
+      if (edge.kind === "control-anchors") continue;
       // body-DG edges carry direct statement indices (numbers) per
       // body-dg-builder.ts. Convention: `from` depends on `to` — `from` runs after.
-      // ALL edge kinds are folded, `control-anchors` included (#165).
       if (edge.from >= 0 && edge.from < body.length &&
           edge.to >= 0 && edge.to < body.length) {
         depSets[edge.from].add(edge.to);
@@ -681,34 +670,52 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     // the module-DG awaits loop above still catches cross-call deps.
   }
 
-  // S138 Bug 55 — certain stmt kinds emit MULTI-STATEMENT output that
-  // CANNOT live inside a `Promise.all([...])` parallelization batch (a JS
-  // array-literal element MUST be an expression, not a statement).
+  // #165 — a statement across which a later binding MUST NOT be reordered: any
+  // statement that can TRANSFER CONTROL (branch away or exit early), so that a
+  // side-effecting binding (a server call) hoisted above it would run when the
+  // control flow was meant to prevent it — the silent destructive-write reorder
+  // adopter #165 hit (a confirm-guarded delete firing before the confirm).
   //
-  //   guarded-expr   — failable call + error handler emits as
-  //                    `let X = await ...; if(...){...}` (multi-stmt)
-  //   if-stmt        — `if(cond){...} else {...}` is statement-shape
-  //   while-stmt     — `while(cond){...}` is statement-shape
-  //   for-stmt       — `for(...) {...}` is statement-shape
-  //   return-stmt    — `return X;` is statement-shape (also bare returns)
+  // This SUBSUMES the former `isStatementShapeStmt` (S138 Bug 55), which listed
+  // only `{guarded-expr, if, while, do-while, for, return}` for a NARROWER
+  // purpose: those kinds emit MULTI-STATEMENT output that can't be a
+  // `Promise.all([...])` array element. But "can't be an array element" is not
+  // the same question as "unsafe to reorder across" — conflating the two is what
+  // let the guard kinds slip (`match`/`switch`/`try`/`propagate`/`throw` are
+  // reorder-unsafe but were not on the emit-shape list). This set is the union:
+  // control-flow constructs (`if`/`for`/`while`/`do-while`/`switch`/`match`/
+  // `try`), the early-exit family route-inference already recognises
+  // (`return`/`throw`/`propagate-expr`, plus `fail`), and the presence/branch
+  // guards (`guarded-expr`/`given-guard`/`break`/`continue`). Because it is a
+  // superset, it also serves the S138 Bug-55 role: every multi-statement-shape
+  // kind is here, so none can become a `Promise.all` array element.
   //
-  // Surfaced by Bug 9 L1 attempt — populating route.functionName made
-  // client wrappers async, which triggered parallelization, which lifted
-  // the broken shapes into adopter-visible territory. The shapes were
-  // always wrong but silent pre-async (no Promise.all batching triggered).
-  //
-  // Fix: treat these kinds as "group boundaries." Each such stmt ALWAYS
-  // gets its own size-1 group → routed through the single-stmt emission
-  // path at line 492+ which emits `code` verbatim at function-body top-
-  // level (where multi-stmt + statement-shape is fine).
-  function isStatementShapeStmt(stmt: ASTNode): boolean {
-    const k = (stmt as ASTNode).kind;
-    return k === "guarded-expr" ||
-           k === "if-stmt" ||
-           k === "while-stmt" ||
-           k === "do-while-stmt" ||
-           k === "for-stmt" ||
-           k === "return-stmt";
+  // Used as a HARD group boundary in the scan below: hitting one ENDS the batch,
+  // which fences EVERY later statement — not just the guard's immediate
+  // neighbour (the filler-separated shape the control-anchors edge, anchored
+  // only to `k+1`, missed). A pure decl is NOT here, so the S212 skip of a
+  // dependent pure decl to reach a later independent one is preserved.
+  function isControlFlowBoundary(stmt: ASTNode): boolean {
+    switch ((stmt as ASTNode).kind) {
+      case "if-stmt":
+      case "for-stmt":
+      case "while-stmt":
+      case "do-while-stmt":
+      case "switch-stmt":
+      case "match-stmt":
+      case "try-stmt":
+      case "return-stmt":
+      case "throw-stmt":
+      case "propagate-expr":
+      case "fail-expr":
+      case "guarded-expr":
+      case "given-guard":
+      case "break-stmt":
+      case "continue-stmt":
+        return true;
+      default:
+        return false;
+    }
   }
 
   // S139 Bug 56 (companion) — only let-decl / const-decl statements can safely
@@ -788,9 +795,9 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     const group: number[] = [i];
     visited.add(i);
 
-    // S138 Bug 55 — if the seed stmt is statement-shape, the group stays
-    // size-1 (single-stmt emission path).
-    const seedIsStatementShape = isStatementShapeStmt(body[i] as ASTNode);
+    // #165 — a control-flow / control-transfer SEED can't batch with anything
+    // (it is also statement-shape, so it can't be a Promise.all array element).
+    const seedIsControlFlowBoundary = isControlFlowBoundary(body[i] as ASTNode);
     // S139 Bug 56 — if the seed stmt is not a decl, group stays size-1.
     // See isDeclShapeStmt comment above for the rationale.
     // S212 — a decl whose binding is reassigned later (a `let` accumulator)
@@ -799,12 +806,23 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     const seedIsNonDecl = !isDeclShapeStmt(body[i] as ASTNode) || declIsReassignedLater(body[i] as ASTNode);
 
     for (let j = i + 1; j < body.length; j++) {
+      // #165 g-batch-hoist-across-control-flow — a control-transfer statement
+      // between the seed and a candidate is a HARD group boundary: `break` ends
+      // the whole forward scan, so NOTHING after it is hoisted into a batch
+      // seeded before it — including a server call separated from the guard by
+      // filler statements (the case the control-anchors edge, anchored only to
+      // the guard's IMMEDIATE successor `k+1`, missed). A control-flow SEED
+      // likewise batches with nothing. `break`, not `continue`: `continue` would
+      // skip the guard but keep scanning FORWARD and pull a later server-call
+      // decl over it — the original silent destructive-write reorder.
+      if (seedIsControlFlowBoundary || isControlFlowBoundary(body[j] as ASTNode)) break;
       if (visited.has(j)) continue;
-      // S138 Bug 55 — statement-shape stmts never join multi-stmt groups
-      // (their statement-shape emission can't be an array literal element).
-      if (seedIsStatementShape || isStatementShapeStmt(body[j] as ASTNode)) continue;
       // S139 Bug 56 — non-decl stmts (reactive writes, expr-stmts) never join
-      // multi-stmt groups. Their emit shape isn't safe as a Promise.all entry.
+      // multi-stmt groups (not valid array entries). Skipped, NOT a boundary: a
+      // pure non-decl is safe to reorder past, which preserves the S212 skip of
+      // a dependent pure decl to reach a later independent one. (Only control
+      // transfer breaks; a side-effecting non-decl reorder is the separately
+      // filed g-batch-reorder-across-nondecl-sideeffect.)
       if (seedIsNonDecl || !isDeclShapeStmt(body[j] as ASTNode)) continue;
       // S212 — a reassigned-later decl (`let acc = []`) never joins a multi-
       // member batch: the const-destructure would break its later reassignment.
