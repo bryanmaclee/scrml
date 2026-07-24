@@ -817,15 +817,25 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
       // decl over it — the original silent destructive-write reorder.
       if (seedIsControlFlowBoundary || isControlFlowBoundary(body[j] as ASTNode)) break;
       if (visited.has(j)) continue;
-      // S139 Bug 56 — non-decl stmts (reactive writes, expr-stmts) never join
-      // multi-stmt groups (not valid array entries). Skipped, NOT a boundary: a
-      // pure non-decl is safe to reorder past, which preserves the S212 skip of
-      // a dependent pure decl to reach a later independent one. (Only control
-      // transfer breaks; a side-effecting non-decl reorder is the separately
-      // filed g-batch-reorder-across-nondecl-sideeffect.)
-      if (seedIsNonDecl || !isDeclShapeStmt(body[j] as ASTNode)) continue;
-      // S212 — a reassigned-later decl (`let acc = []`) never joins a multi-
-      // member batch: the const-destructure would break its later reassignment.
+      // §19.9.9.2 step 2 (g-batch-reorder-across-nondecl-sideeffect) — a non-decl
+      // statement (a reactive write `@x = …`, a bare call, an expr-stmt) is a
+      // client-tier side effect, and "a client-tier statement appearing between
+      // two server statements forces a batch boundary": break, NOT skip. The old
+      // `continue` skipped the non-decl but kept scanning FORWARD, pulling a
+      // later server-fetch decl into a batch seeded ABOVE it — so the client
+      // write emitted AFTER a fetch the source placed it BEFORE (a "saving…"
+      // indicator painted only after the round-trip, or never). Breaking here
+      // preserves observable source order (soundness S3, §19.9.9.1) — the same
+      // rule the CPS multi-batch planner already enforces (§19.9.9.5 example: an
+      // intervening `@reservationShown` write closes batch 0). Only the
+      // cross-server-call parallelization is declined; the write stays put. A
+      // non-decl SEED likewise can't batch. (The S212 pure-DECL skip is
+      // unaffected — a decl is not a non-decl, so it still `continue`s below.)
+      if (seedIsNonDecl || !isDeclShapeStmt(body[j] as ASTNode)) break;
+      // S212 — a reassigned-later decl (`let acc = []`) can't be const-
+      // destructured into the batch, but it is a pure binding (no observable
+      // side effect), so it is SKIPPED, not a boundary — a later independent
+      // decl may still batch across it.
       if (declIsReassignedLater(body[j] as ASTNode)) continue;
       // S212 — a Promise.all member may only depend on statements declared
       // BEFORE the batch (index < the seed `i`). The batch is emitted as a
@@ -834,14 +844,9 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
       // another member (TDZ — both destructure simultaneously) or a statement
       // emitted AFTER the batch (forward-reference). Either way `j` cannot join.
       // depClosure[j] only contains indices < j, so the single guard "every
-      // transitive dep < i" subsumes the prior direct group-member check.
-      //
-      // #165 — this is ALSO what fences a server call out of a batch seeded
-      // above a control-flow guard: the body-DG `control-anchors` edges (folded
-      // into depSets at the buildBodyDG loop below) make every statement after a
-      // control-flow head DEPEND on that head, so its transitive closure reaches
-      // an index >= i and it is excluded. Without that fold-in the guard was
-      // invisible here and the call hoisted above it (silent reorder).
+      // transitive dep < i" subsumes the prior direct group-member check. A
+      // dependent PURE decl is skipped (`continue`), preserving the S212 skip
+      // that reaches a later independent decl.
       let independent = true;
       for (const dep of depClosure[j]) {
         if (dep >= i) {
