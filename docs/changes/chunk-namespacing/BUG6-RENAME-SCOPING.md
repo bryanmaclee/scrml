@@ -1,7 +1,10 @@
 # BUG-6 rename-approach scoping
 
-**status:** `current` · **authored:** 2026-07-23 · **base** `e8fdd44c` · **branch** `worktree-agent-a91ad13968b46ab5d` @ `0581f480`
-**scoping only — no fix code in this session.** The fix runs next session; this doc exists to make that session open straight into execution.
+**status:** `partially-superseded` · **authored:** 2026-07-23 · **base** `e8fdd44c` · **branch** `worktree-agent-a91ad13968b46ab5d` @ `0581f480`
+**superseded-by (residual framing only):** [`FINISH-SCOPE.md`](FINISH-SCOPE.md)
+
+> **⚑ S284 CURRENCY BANNER.** This doc's §2 measurements + §3 rename surface + §0 rulings are still valid. But its "the fix runs next session / mechanical residual" framing is **superseded** — **S283 actually RAN this rename** (~90% done on the branch, now @ `307bf9b7`, unlanded + stale + red). The **current-truth state + finish plan is [`FINISH-SCOPE.md`](FINISH-SCOPE.md)** (S284): gzip holds 16 KB at 16,330 (bryan ruled HOLD-16), but the residual is NOT "137 text-pins" — it's ~19 within-node PARITY fails + executed-output correctness (the campaign has REVERTs of mangled executed clientJs) + a rebase-onto-main + the full verification bar. Read FINISH-SCOPE.md first.
+> **scoping only — no fix code in the S282 scoping session.**
 
 ---
 
