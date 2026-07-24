@@ -675,8 +675,34 @@ function emitEachInterpExprToJs(
   fragmentVar: string,
   lines: string[],
   indent: string,
+  markupCapable: boolean = false,
 ): void {
   const rewritten = lowerEachExpr(inner, iterVarName);
+  // g-each-component-and-fn-markup-not-mounted (B) — a STANDALONE `${expr}` in
+  // markup position (a `logic`-child, not a `${}` embedded in a text run) can
+  // resolve to a DOM node at runtime: markup is a first-class value that renders
+  // wherever it lands (Pillar 1), e.g. `${rowMarkup(it.name)}`. `String()`-ing a
+  // DOM node yields the literal text `[object HTMLSpanElement]`. Mount into a
+  // stable wrapper span with the SAME mount-or-text guard emitEachPerItemMarkupValue
+  // uses (:589) and the non-each `<span data-scrml-logic>` + `_scrml_render_value`
+  // shape: a Node is appended; a non-empty string becomes a text node; ""/absence
+  // renders nothing. A text-embedded interpolation stays a bare text node (textual
+  // by grammar position — parity with the non-each text-run interpolation).
+  if (markupCapable) {
+    const wrapVar = `_scrml_each_mv_${nextLocalId()}`;
+    const valVar = `_scrml_mv_v_${nextLocalId()}`;
+    lines.push(`${indent}const ${wrapVar} = document.createElement("span");`);
+    lines.push(`${indent}${wrapVar}.setAttribute("data-scrml-mv", "");`);
+    lines.push(`${indent}${fragmentVar}.appendChild(${wrapVar});`);
+    const body = [
+      `${indent}const ${valVar} = (${rewritten});`,
+      `${indent}${wrapVar}.replaceChildren();`,
+      `${indent}if (${valVar} instanceof Node) ${wrapVar}.appendChild(${valVar});`,
+      `${indent}else if (${valVar} !== null && ${valVar} !== undefined && ${valVar} !== "") ${wrapVar}.appendChild(document.createTextNode(String(${valVar})));`,
+    ];
+    for (const _l of maybeWrapEachPerItemEffect(body, iterVarName, indent)) lines.push(_l);
+    return;
+  }
   if (currentEachReconcileCtx() && currentEachReconcileCtx()!.iterVar === iterVarName) {
     const _tnVar = `_scrml_each_tn_${nextLocalId()}`;
     lines.push(`${indent}const ${_tnVar} = document.createTextNode("");`);
@@ -698,6 +724,14 @@ function renderTemplateChildToJs(
   indent: string,
   engineCtx: EachEngineCtx | null = null,
   parentIsRawContent: boolean = false,
+  // g-each-component-and-fn-markup-not-mounted (B) — true only for a DIRECT child
+  // of the each body (a top-level per-item root, rendered into `_itemFrag`). A
+  // standalone `${expr}` there IS the returned reconcile node, so a markup value
+  // needs a stable wrapper to be tracked/mounted (a bare text node cannot hold a
+  // DOM child; the reconcile list tracks exactly one node per item). A NESTED
+  // interpolation (inside an element) stays a bare text node — the common string
+  // case, unchanged. See emitEachInterpExprToJs.
+  isItemRoot: boolean = false,
 ): void {
   if (!child || typeof child !== "object") return;
 
@@ -735,6 +769,12 @@ function renderTemplateChildToJs(
         } else {
           // Collapse the BS-padded sigil-dot before lowering (mirrors the logic
           // branch's `inner` normalization) so `@ . kind` → `@.kind` lowers.
+          // NOT markupCapable: a `${expr}` INTERLEAVED with literal text in a text
+          // run stays a bare text node (the common string case; textual by grammar
+          // position). A markup-valued `${}` mid-text-run inside <each> (e.g.
+          // `<li>x ${fnMarkup()}</li>`) is a distinct, unreported latent parity gap
+          // (the non-each path wraps text-run interps in `<span data-scrml-logic>`);
+          // scoped out of #161 to keep this fix on the reported logic-child surface.
           emitEachInterpExprToJs(part.v.replace(/\s*\.\s*/g, "."), iterVarName, fragmentVar, lines, indent);
         }
       }
@@ -938,7 +978,13 @@ function renderTemplateChildToJs(
     // Bug 64 / R28-1c (S159) — inside a reconciled per-item factory this becomes
     // a LIVE-KEYED text node (re-resolve item by key on reconcile); outside a
     // reconcile ctx it is the static string append. Shared emitter (GITI-033).
-    emitEachInterpExprToJs(inner, iterVarName, fragmentVar, lines, indent);
+    // markupCapable=isItemRoot: a standalone `${expr}` that is a DIRECT each-body
+    // child is the returned reconcile node — its runtime value may be a DOM node
+    // (fn-returns-markup, Pillar 1), so mount-or-text via a stable wrapper rather
+    // than String() (g-each-...-not-mounted B). A NESTED interpolation stays a
+    // bare text node (the common string case; a nested markup-valued interp is a
+    // distinct unreported parity gap, scoped out of #161).
+    emitEachInterpExprToJs(inner, iterVarName, fragmentVar, lines, indent, isItemRoot);
     return;
   }
 
@@ -2180,10 +2226,12 @@ function emitEachReconcileLines(
   }
   pushEachReconcileCtx({ mountVar, keyVar: _eachKeyVar, iterVar: iterVarName, destructure });
 
-  // Walk template children — produce DOM-build JS.
+  // Walk template children — produce DOM-build JS. These are the DIRECT per-item
+  // roots (rendered into `_itemFrag`), so isItemRoot=true: a standalone `${expr}`
+  // here is the returned reconcile node and mounts markup-or-text (B).
   const templateLines: string[] = [];
   for (const child of node.templateChildren) {
-    renderTemplateChildToJs(child, iterVarName, iterIdxName, "_itemFrag", templateLines, `${indent}    `, engineCtx);
+    renderTemplateChildToJs(child, iterVarName, iterIdxName, "_itemFrag", templateLines, `${indent}    `, engineCtx, false, true);
   }
   for (const l of templateLines) lines.push(l);
   popEachReconcileCtx();
