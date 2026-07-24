@@ -51,7 +51,6 @@ import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 import { unNamespaceEngineNames } from "../helpers/chunk-scope.js";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-match-arm-bundle-1.6-1.7");
 let tmpCounter = 0;
@@ -69,10 +68,10 @@ function compile(source) {
       outputDir: outDir,
     });
     const clientPath = resolve(outDir, "app.client.js");
-    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf-8") : ""));
+    const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf-8") : "";
     return {
       errors: (result.errors ?? []).filter(e => e.severity !== "warning"),
-      clientJs:foldChunkNamespacing( foldChunkNamespacing)(unNamespaceEngineNames(clientJs)),
+      clientJs: unNamespaceEngineNames(clientJs),
     };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
@@ -99,7 +98,7 @@ describe("Bug 1.6 — inline-arm payload binding (regression-guards)", () => {
 <program>
 <button onclick=eat(PowerUp.Mushroom(1))>Eat</button>
 </program>`;
-    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compile(src);
     expect(errors).toEqual([]);
     // Inline-arm result `n + 1` MUST reference a bound `n` (preceded by const).
     expect(clientJs).toMatch(/const n = [\w]+\.data\.coins/);
@@ -121,7 +120,7 @@ describe("Bug 1.6 — inline-arm payload binding (regression-guards)", () => {
 <program>
 <button onclick=compute(Shape.Rect(2, 3))>Compute</button>
 </program>`;
-    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compile(src);
     expect(errors).toEqual([]);
     expect(clientJs).toMatch(/const w = [\w]+\.data\.w/);
     expect(clientJs).toMatch(/const h = [\w]+\.data\.h/);
@@ -142,7 +141,7 @@ describe("Bug 1.6 — inline-arm payload binding (regression-guards)", () => {
 <program>
 <button onclick=add(Reward.Coins(5))>Add</button>
 </program>`;
-    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compile(src);
     expect(errors).toEqual([]);
     // The arm body must declare n then use it.
     const armMatch = clientJs.match(/=== "Coins"\)[^]*?(?=else)/);
@@ -177,7 +176,7 @@ describe("Bug 1.7 — inline-arm engine-write routing", () => {
 <program>
 <button onclick=eat(PowerUp.Mushroom(1))>Eat</button>
 </program>`;
-    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compile(src);
     expect(errors).toEqual([]);
     // ALL three arms must dispatch through the canonical engine helper.
     // Pre-fix (Bug 1.7) emitted `_scrml_reactive_set("state", "Big")` — bypass.
@@ -211,7 +210,7 @@ describe("Bug 1.7 — inline-arm engine-write routing", () => {
 <program>
 <button onclick=dispatch(Cmd.Up)>Up</button>
 </program>`;
-    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compile(src);
     expect(errors).toEqual([]);
     expect(clientJs).toContain("// §51.0.F engine direct-write hook: s (S)");
     expect(clientJs).toContain('_scrml_engine_direct_set("s", "Running", __scrml_engine_s_transitions)');
@@ -236,7 +235,7 @@ describe("Bug 1.7 — inline-arm engine-write routing", () => {
 <program>
 <button onclick=dispatch(Cmd.Up)>Up</button>
 </program>`;
-    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compile(src);
     expect(errors).toEqual([]);
     expect(clientJs).toContain('_scrml_engine_direct_set("s", "Running", __scrml_engine_s_transitions)');
   });
@@ -265,7 +264,7 @@ describe("Bug 1.7 — inline-arm engine-write routing", () => {
 <program>
 <button onclick=dispatch(Cmd.Up)>Up</button>
 </program>`;
-    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compile(src);
     // The braced-inline form may be parsed as a structured match-arm-block by
     // the AST builder. Either path is acceptable for the routing check; the
     // only behavior we assert is that engine-direct-set is emitted (NOT bare
@@ -294,7 +293,7 @@ describe("Bug 1.7 — inline-arm engine-write routing", () => {
 <program>
 <button onclick=dispatch(Cmd.Up)>Up</button>
 </program>`;
-    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compile(src);
     expect(errors).toEqual([]);
     // The plain @count cell must use the canonical _scrml_reactive_set form,
     // NOT _scrml_engine_direct_set (no engine of forType `count` exists).
@@ -327,7 +326,7 @@ describe("Bug 1.7 — inline-arm engine-write routing", () => {
 <program>
 <button onclick=dispatch(Cmd.Refresh)>Refresh</button>
 </program>`;
-    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compile(src);
     expect(errors.filter(e => e.code !== "W-ENGINE-SELF-WRITE-DETECTED")).toEqual([]);
     // The self-write target `.Running` must route through the canonical helper
     // for §51.0.F.1 idempotent no-op semantics to apply at runtime.
@@ -357,7 +356,7 @@ describe("14-mario fixture (Bug 1.7 integration smoke)", () => {
     // guard: AC2-AC8 expected to flow once both halves fire.
     const fixturePath = resolve(__dirname, "../../../examples/14-mario-state-machine.scrml");
     const src = readFileSync(fixturePath, "utf-8");
-    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compile(src);
     expect(errors).toEqual([]);
     // Block-arm engine writes (Mushroom branch with self-conditional inner match):
     //   `@marioState = match @marioState { .Small => .Big else => @marioState }`

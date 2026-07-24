@@ -32,7 +32,6 @@ import { mkdtempSync, writeFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // Compile `source` under both pipelines; return { live, "scrml-native" } each
 // with { serverJs, clientJs, html, errs }.
@@ -47,7 +46,7 @@ function compileBoth(source) {
       let serverJs = "", clientJs = "", html = "";
       for (const [, v] of (r.outputs ?? [])) {
         serverJs += v.serverJs ?? "";
-        clientJs +=foldChunkNamespacing( foldChunkNamespacing(foldChunkNamespacing(v.clientJs) ?? ""));
+        clientJs += v.clientJs ?? "";
         html += v.html ?? "";
       }
       const errs = (r.errors ?? []).filter((e) => e && e.severity !== "warning").map((e) => e.code);
@@ -121,7 +120,7 @@ describe("§3 mount-hydrate client JS parity (native == live)", () => {
       '_scrml_reactive_set("b", _scrml_mh_json["b"])',
       "coalesced via /__mountHydrate",
     ]) {
-      expect(r.foldChunkNamespacing(live.clientJs)).toContain(needle);
+      expect(r.live.clientJs).toContain(needle);
       expect(r["scrml-native"].clientJs).toContain(needle);
     }
   });
@@ -130,7 +129,7 @@ describe("§3 mount-hydrate client JS parity (native == live)", () => {
     const r = compileBoth(MH2);
     expect(r["scrml-native"].clientJs).not.toContain("server @a — initial load on mount");
     expect(r["scrml-native"].clientJs).not.toContain("server @b — initial load on mount");
-    expect(r.foldChunkNamespacing(live.clientJs)).not.toContain("server @a — initial load on mount");
+    expect(r.live.clientJs).not.toContain("server @a — initial load on mount");
   });
 });
 
