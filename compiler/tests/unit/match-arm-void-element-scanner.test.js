@@ -164,7 +164,11 @@ describe("§2: unclosed NON-void arm still fires E-MATCH-PARSE-001 (fix did not 
 describe("§3: end-to-end compile — void direct child of a match arm compiles clean", () => {
   test("self-closed `<input/>` direct child — zero E- errors", () => {
     const r = compile(
-      `\${ type Phase:enum = { Viewing, Editing } @phase: Phase = .Viewing @name: string = "Bob" }
+      `\${
+    type Phase:enum = { Viewing, Editing }
+    @phase: Phase = .Viewing
+    @name: string = "Bob"
+}
 <match for=Phase on=@phase>
     <Viewing> : <p>viewing</p>
     <Editing>
@@ -181,7 +185,11 @@ describe("§3: end-to-end compile — void direct child of a match arm compiles 
 
   test("bare `<input>` (un-self-closed) direct child — zero E- errors", () => {
     const r = compile(
-      `\${ type Phase:enum = { Viewing, Editing } @phase: Phase = .Viewing @name: string = "Bob" }
+      `\${
+    type Phase:enum = { Viewing, Editing }
+    @phase: Phase = .Viewing
+    @name: string = "Bob"
+}
 <match for=Phase on=@phase>
     <Viewing> : <p>viewing</p>
     <Editing>
@@ -198,7 +206,10 @@ describe("§3: end-to-end compile — void direct child of a match arm compiles 
 
   test("`<br/>` + `<img/>` voids as direct children — zero E- errors", () => {
     const r = compile(
-      `\${ type Phase:enum = { Viewing, Editing } @phase: Phase = .Viewing }
+      `\${
+    type Phase:enum = { Viewing, Editing }
+    @phase: Phase = .Viewing
+}
 <match for=Phase on=@phase>
     <Viewing> : <p>viewing</p>
     <Editing>
@@ -217,7 +228,11 @@ describe("§3: end-to-end compile — void direct child of a match arm compiles 
 
   test("multiple voids + non-void siblings in one arm — zero E- errors", () => {
     const r = compile(
-      `\${ type Phase:enum = { Viewing, Editing } @phase: Phase = .Viewing @name: string = "Bob" }
+      `\${
+    type Phase:enum = { Viewing, Editing }
+    @phase: Phase = .Viewing
+    @name: string = "Bob"
+}
 <match for=Phase on=@phase>
     <Viewing> : <p>viewing</p>
     <Editing>
