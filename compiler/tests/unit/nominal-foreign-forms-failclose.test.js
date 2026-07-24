@@ -23,6 +23,7 @@ import { writeFileSync, mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const TMP = mkdtempSync(join(tmpdir(), "nominal-foreign-"));
 
@@ -136,7 +137,7 @@ describe("N6 §23.4 `use foreign:` fails closed with E-FOREIGN-SIDECAR-NOMINAL",
     writeFileSync(p, N6_SRC);
     const result = compileScrml({ inputFiles: [p], write: false, outputDir: join(TMP, "out") });
     const out = result.outputs.get(p) ?? {};
-    const clientJs = out.clientJs ?? "";
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(foldChunkNamespacing(out.clientJs) ?? ""));
     expect(clientJs).not.toContain("new Worker");
     expect(clientJs).not.toContain(".worker.js");
   });

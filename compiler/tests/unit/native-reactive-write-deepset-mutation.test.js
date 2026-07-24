@@ -31,6 +31,7 @@ import { describe, test, expect } from "bun:test";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // compileWith — full-compile `source` under `parser` (null = default LIVE
 // BS+TAB; "scrml-native" = native pipeline). Returns errors + client.js.
@@ -50,7 +51,7 @@ function compileWith(source, parser, suffix) {
     return {
       errors: result.errors ?? [],
       warnings: result.warnings ?? [],
-      clientJs: existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "",
+      clientJs:foldChunkNamespacing( foldChunkNamespacing)(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""),
     };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
@@ -81,7 +82,7 @@ describe("native reactive-write deep-set + array-mutation node synthesis (FIX A)
 
     const native = compileWith(src, "scrml-native", "ds-mut");
     expect(native.errors).toHaveLength(0);
-    const body = fnBody(native.clientJs, "multi");
+    const body = fnBody(foldChunkNamespacing(native.clientJs), "multi");
     expect(body).not.toBeNull();
 
     // The COW deep-set form — NOT the in-place `_scrml_reactive_get("a").ref = `.
@@ -184,8 +185,8 @@ describe("native reactive-write deep-set + array-mutation node synthesis (FIX A)
       expect(live.errors).toHaveLength(0);
       expect(native.errors).toHaveLength(0);
 
-      const liveBody = fnBody(live.clientJs, "op");
-      const nativeBody = fnBody(native.clientJs, "op");
+      const liveBody = fnBody(foldChunkNamespacing(live.clientJs), "op");
+      const nativeBody = fnBody(foldChunkNamespacing(native.clientJs), "op");
       expect(liveBody).not.toBeNull();
       expect(nativeBody).not.toBeNull();
       expect(nativeBody).toBe(liveBody);

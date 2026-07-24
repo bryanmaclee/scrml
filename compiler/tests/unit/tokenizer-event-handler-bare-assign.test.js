@@ -51,6 +51,7 @@ import { compileScrml } from "../../src/api.js";
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function compileSrcToTmp(src, basename = "bare-assign-test") {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bare-assign-"));

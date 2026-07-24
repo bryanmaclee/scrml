@@ -13,6 +13,7 @@
 import { describe, test, expect } from "bun:test";
 import { runCG } from "../../src/code-generator.js";
 import { generateWorkerJs, rewriteSendToPostMessage } from "../../src/codegen/emit-worker.ts";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers

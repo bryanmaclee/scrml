@@ -34,6 +34,7 @@ import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-request-settle-peter-20");
 
@@ -46,7 +47,7 @@ function compile(src, baseName) {
   try {
     const result = compileScrml({ inputFiles: [tmpInput], write: false, outputDir: outDir });
     const out = result.outputs.get(tmpInput);
-    return { errors: result.errors ?? [], clientJs: out ? out.clientJs : "", html: out ? out.html : "" };
+    return { errors: result.errors ?? [], clientJs:foldChunkNamespacing( foldChunkNamespacing(out ? foldChunkNamespacing(out.clientJs) : "")), html: out ? out.html : "" };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -84,7 +85,7 @@ describe("§A: the §6.7.7 settle machine is emitted (state object is mutated)",
   });
 
   test("all four settled-state fields + refetch + mounted guard + seq are written", () => {
-    const { clientJs } = compile(REQ_SRC, "req-emit-fields");
+    const { clientJs: __cjRaw } = compile(REQ_SRC, "req-emit-fields"); const clientJs = foldChunkNamespacing(__cjRaw);
     // The state object is declared (hoisted) AND now MUTATED.
     expect(clientJs).toContain("var _scrml_request_userReq = _scrml_deep_reactive({ loading: true, data: null, error: null, stale: false });");
     expect(clientJs).toContain("async function _scrml_request_userReq_fetch()");
@@ -105,7 +106,7 @@ describe("§A: the §6.7.7 settle machine is emitted (state object is mutated)",
   });
 
   test("SUCCESS path sets the cell BEFORE .data and only inside the try (never on error)", () => {
-    const { clientJs } = compile(REQ_SRC, "req-emit-order");
+    const { clientJs: __cjRaw } = compile(REQ_SRC, "req-emit-order"); const clientJs = foldChunkNamespacing(__cjRaw);
     // cell set precedes `.data` set (avoids a `<#R>.data`-gated cell-read window).
     expect(clientJs).toMatch(/_scrml_reactive_set\("userData", _scrml_data\);\s*\n\s*_scrml_request_userReq\.data = _scrml_data;/);
     // The cell-set does NOT appear in the catch arm (error must not write the cell).
@@ -116,7 +117,7 @@ describe("§A: the §6.7.7 settle machine is emitted (state object is mutated)",
   });
 
   test("emitted client parses as valid JS", () => {
-    const { clientJs } = compile(REQ_SRC, "req-emit-parse");
+    const { clientJs: __cjRaw } = compile(REQ_SRC, "req-emit-parse"); const clientJs = foldChunkNamespacing(__cjRaw);
     const stripped = clientJs.replace(/^\s*(import|\/\/ Requires)\s[^;\n]*;?/gm, "");
     expect(() => new Function(stripped)).not.toThrow();
   });
@@ -124,7 +125,7 @@ describe("§A: the §6.7.7 settle machine is emitted (state object is mutated)",
 
 describe("§A: the per-route stub surfaces a non-2xx (non-envelope) as a rejection", () => {
   test("ok-check throws on a non-2xx that is NOT a {__scrml_error} envelope", () => {
-    const { clientJs } = compile(REQ_SRC, "req-stub-okcheck");
+    const { clientJs: __cjRaw } = compile(REQ_SRC, "req-stub-okcheck"); const clientJs = foldChunkNamespacing(__cjRaw);
     // §19.9.2 — a non-2xx WITHOUT the scrml fail envelope throws (routes to .error).
     expect(clientJs).toContain('if (!_scrml_resp.ok && !(_scrml_body_json !== null && typeof _scrml_body_json === "object" && _scrml_body_json.__scrml_error === true)) {');
     expect(clientJs).toContain('throw new Error("HTTP " + _scrml_resp.status);');
@@ -154,7 +155,7 @@ describe("§A: deps drive a reactive re-fetch effect (§6.7.7 re-execution)", ()
 `;
 
   test("an inferred `@userId` dep wraps the fetch in a reactive effect", () => {
-    const { errors, clientJs } = compile(DEPS_SRC, "req-deps-inferred");
+    const { errors, clientJs: __cjRaw } = compile(DEPS_SRC, "req-deps-inferred"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toContain("_scrml_effect(function() {");
     expect(clientJs).toContain('_scrml_reactive_get("userId")');
@@ -162,7 +163,7 @@ describe("§A: deps drive a reactive re-fetch effect (§6.7.7 re-execution)", ()
   });
 
   test("a no-dep request fires the fetch once on mount (bare call, no effect wrap)", () => {
-    const { clientJs } = compile(REQ_SRC, "req-nodep");
+    const { clientJs: __cjRaw } = compile(REQ_SRC, "req-nodep"); const clientJs = foldChunkNamespacing(__cjRaw);
     // The no-dep form ends with a bare `_scrml_request_userReq_fetch();` mount call.
     expect(clientJs).toMatch(/_scrml_register_cleanup\(function\(\) \{ _scrml_request_userReq_mounted = false; \}\);\s*\n_scrml_request_userReq_fetch\(\);/);
   });
@@ -193,7 +194,7 @@ function mountWithFetch(src, baseName, respond) {
   try {
     const result = compileScrml({ inputFiles: [tmpInput], write: true, outputDir: outDir });
     const html = readFileSync(resolve(outDir, `${baseName}.html`), "utf8");
-    const clientJs = readFileSync(resolve(outDir, `${baseName}.client.js`), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(resolve(outDir, `${baseName}.client.js`), "utf8")));
     const runtimeJs = readFileSync(resolve(outDir, result.runtimeFilename ?? "scrml-runtime.js"), "utf8");
     const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
     const bodyHtml = bodyMatch ? bodyMatch[1] : html;

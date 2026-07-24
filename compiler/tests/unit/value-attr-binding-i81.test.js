@@ -30,6 +30,7 @@ import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import * as acorn from "acorn";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
@@ -52,7 +53,7 @@ function compile(scrmlSource, testName) {
     for (const [fp, output] of result.outputs) {
       if (fp.includes(tag)) {
         html = output.html ?? null;
-        clientJs = output.clientJs ?? null;
+        clientJs =foldChunkNamespacing( foldChunkNamespacing(foldChunkNamespacing(output.clientJs) ?? null));
       }
     }
     return { errors: result.errors ?? [], warnings: result.warnings ?? [], html, clientJs };
@@ -63,7 +64,7 @@ function compile(scrmlSource, testName) {
 }
 
 const emittedHtml = (r) => r.html ?? "";
-const emittedClient = (r) => r.clientJs ?? "";
+const emittedClient = (r) => foldChunkNamespacing(r.clientJs) ?? "";
 // compileScrml returns errors and warnings SEPARATELY — a severity:"warning"
 // CGError lands in `warnings`, never in `errors`.
 const diagCodes = (r) => [...r.errors, ...r.warnings].map((e) => e.code ?? "");

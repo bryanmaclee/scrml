@@ -35,6 +35,7 @@ import { compileScrml } from "../../src/api.js";
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const FIXTURE_DIR = join(import.meta.dir, "__fixtures__/g-compound-rbt-non-lexical");
 
@@ -120,14 +121,14 @@ describe("g-compound-rbt §1: compound-member render-by-tag in a sibling element
   });
 
   test("bind wiring keys on the QUALIFIED runtime cell (signup.uname)", () => {
-    const { clientJs } = compileSource("non-lexical-bind-keys.scrml", SRC);
+    const { clientJs: __cjRaw } = compileSource("non-lexical-bind-keys.scrml", SRC); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toMatch(/_scrml_reactive_get\("signup\.uname"\)/);
     expect(clientJs).toMatch(/_scrml_reactive_set\("signup\.uname",/);
     expect(clientJs).toMatch(/addEventListener\("input"/);
   });
 
   test("the §55 validity surface still wires (signup.uname.errors / .isValid)", () => {
-    const { clientJs } = compileSource("non-lexical-validity.scrml", SRC);
+    const { clientJs: __cjRaw } = compileSource("non-lexical-validity.scrml", SRC); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toMatch(/"signup\.uname\.errors"/);
     expect(clientJs).toMatch(/"signup\.uname\.isValid"/);
   });
@@ -192,7 +193,7 @@ describe("g-compound-rbt §3: top-level Shape-2 render-by-tag no-regression", ()
     `</>\n`;
 
   test("top-level <uname/> still expands to the bound input identically", () => {
-    const { html, clientJs, errors } = compileSource("toplevel-control.scrml", SRC);
+    const { html, clientJs: __cjRaw, errors } = compileSource("toplevel-control.scrml", SRC); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.length).toBe(0);
     expect(html).toMatch(/<input[^>]*type="text"/);
     expect(html).toMatch(/required/);

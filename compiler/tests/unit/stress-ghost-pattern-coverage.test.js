@@ -61,6 +61,7 @@ import { compileScrml } from "../../src/api.js";
 import fs from "fs";
 import path from "path";
 import os from "os";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function compileSrcToTmp(src, basename = "stress-test") {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "stress-"));

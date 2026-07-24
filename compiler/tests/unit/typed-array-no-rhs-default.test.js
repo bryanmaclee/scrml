@@ -49,6 +49,7 @@ import { buildAST } from "../../src/ast-builder.js";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function parse(source, filePath = "/test/app.scrml") {
   const bs = splitBlocks(filePath, source);
@@ -256,7 +257,7 @@ describe("§6.2 Shape 4 — runtime (happy-dom)", () => {
   // and then drives the render — the correct ordering the codegen bug subverts.
   function execClientInitFirst(out, baseName, result) {
     const html = readFileSync(join(out, `${baseName}.html`), "utf-8");
-    const clientJs = readFileSync(join(out, `${baseName}.client.js`), "utf-8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(out, `${baseName}.client.js`), "utf-8")));
     const runtimeJs = readFileSync(
       join(out, result.runtimeFilename ?? "scrml-runtime.js"),
       "utf-8",

@@ -50,6 +50,7 @@ import { compileScrml } from "../../src/api.js";
 import { RUNTIME_CHUNKS, assembleRuntime } from "../../src/codegen/runtime-chunks.ts";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const FIXTURE_DIR = join(import.meta.dir, "__fixtures__/request-tag");
 const FIXTURE_OUTPUT = join(FIXTURE_DIR, "dist");
@@ -224,7 +225,7 @@ describe("§1: GITI-001 — `@data = serverFn()` awaited before reactive set", (
     // auto-await IIFE. (The `<request>` body form now routes to the §6.7.7 settle
     // machine — asserted in §3 + §9.)
     const result = compile(plainTopFx);
-    const js = result.outputs.get(plainTopFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(plainTopFx).clientJs);
     // The wrapped form — now carries the ss32-item-1 `.catch` error arm so a
     // rejected fetch/CPS stub surfaces via the scrml uncaught surface instead of
     // a browser-level unhandledrejection (catch-less silent drop).
@@ -243,7 +244,7 @@ describe("§1: GITI-001 — `@data = serverFn()` awaited before reactive set", (
 describe("§2: emitted JS parses as a module", () => {
   test("GITI-001 output parses (new Function)", () => {
     const result = compile(gitiFx);
-    const js = result.outputs.get(gitiFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(gitiFx).clientJs);
     const stripped = js.replace(/^\s*import\s[^;]*;/gm, "");
     expect(() => new Function(stripped)).not.toThrow();
   });
@@ -256,7 +257,7 @@ describe("§2: emitted JS parses as a module", () => {
 describe("§3: `<request id=\"req1\">` without url= drives the §6.7.7 settle machine", () => {
   test("no empty-URL raw fetch is emitted (the fetch IS the body's server-fn stub)", () => {
     const result = compile(gitiFx);
-    const js = result.outputs.get(gitiFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(gitiFx).clientJs);
     // The old GITI-001 bug pattern was a raw `fetch("", { method: "GET" })`. The
     // body form never emits its own raw fetch — its fetch is the body's server-fn
     // stub (`_scrml_fetch_loadValue_N`), driven by the settle machine.
@@ -265,7 +266,7 @@ describe("§3: `<request id=\"req1\">` without url= drives the §6.7.7 settle ma
 
   test("Peter #20 — the settle machine IS emitted (state object is now mutated)", () => {
     const result = compile(gitiFx);
-    const js = result.outputs.get(gitiFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(gitiFx).clientJs);
     // GITI-001 wrongly deemed the request machinery "redundant" and emitted NONE —
     // so `_scrml_request_req1` was declared but never mutated (Peter #20). The
     // settle machine now wires the WRITES.
@@ -290,7 +291,7 @@ describe("§4: `<request url=\"/api/items\">` still emits the machinery", () => 
   test("regression: tag with url= produces fetch function referencing the URL", () => {
     const result = compile(urlFx);
     expect(result.errors).toEqual([]);
-    const js = result.outputs.get(urlFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(urlFx).clientJs);
     expect(js).toContain("_scrml_request_list_fetch");
     expect(js).toContain('"/api/items"');
   });
@@ -304,7 +305,7 @@ describe("§5: `@count = @count + 1` stays synchronous (regression guard)", () =
   test("plain reactive mutation does NOT get the async IIFE wrapper", () => {
     const result = compile(plainFx);
     expect(result.errors).toEqual([]);
-    const js = result.outputs.get(plainFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(plainFx).clientJs);
     // The count mutation must appear as a plain reactive-set
     expect(js).toContain('_scrml_reactive_set("count"');
     // And NOT inside an async IIFE
@@ -336,21 +337,21 @@ describe("§6: GITI-001 wrap is context-aware (S84 fix-lift-async-iife-paren)", 
 
   test("client.js parses as valid JS (no `;)` from extra semicolon)", () => {
     const result = compile(exprCtxFx);
-    const js = result.outputs.get(exprCtxFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(exprCtxFx).clientJs);
     const stripped = js.replace(/^\s*import\s[^;]*;/gm, "");
     expect(() => new Function(stripped)).not.toThrow();
   });
 
   test("no malformed `(async () => ...)();)` token sequence in output", () => {
     const result = compile(exprCtxFx);
-    const js = result.outputs.get(exprCtxFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(exprCtxFx).clientJs);
     // The bug signature: `;)` immediately after an IIFE invocation.
     expect(js).not.toMatch(/\)\(\);\s*\)/);
   });
 
   test("the on-mount runs as a file-scope mount effect, NOT a display slot (g-onmount-async S217)", () => {
     const result = compile(exprCtxFx);
-    const js = result.outputs.get(exprCtxFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(exprCtxFx).clientJs);
     // CORRECT: the on-mount `@data = loadValue()` is the GITI-001 STATEMENT-context
     // wrap at module init (well-formed, ends with `().catch(...);` — ss32-item-1
     // error arm).
@@ -362,7 +363,7 @@ describe("§6: GITI-001 wrap is context-aware (S84 fix-lift-async-iife-paren)", 
 
   test("the `${@data}` display binding (the cell read, not the on-mount) still renders", () => {
     const result = compile(exprCtxFx);
-    const js = result.outputs.get(exprCtxFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(exprCtxFx).clientJs);
     // The genuine markup interpolation inside <div><p> reads the cell the mount
     // effect populated — this is the ONLY display binding in the fixture.
     expect(js).toMatch(/_scrml_render_value\(el, _scrml_reactive_get\("data"\)\)/);
@@ -374,7 +375,7 @@ describe("§6: GITI-001 wrap is context-aware (S84 fix-lift-async-iife-paren)", 
     // (now after the ss32-item-1 `.catch` error arm) — must not regress. (The
     // `<request>` body form now routes to the §6.7.7 settle machine, §3/§9.)
     const result = compile(plainTopFx);
-    const js = result.outputs.get(plainTopFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(plainTopFx).clientJs);
     // Match the statement-form: `(async () => _scrml_reactive_set("data", await _scrml_fetch_loadValue_N()))().catch(_scrml_async_err => _scrml_error_boundary_log("data", _scrml_async_err));`
     expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*_scrml_reactive_set\("data",\s*await\s+_scrml_fetch_loadValue_\d+\(\s*\)\s*\)\)\(\s*\)\.catch\(_scrml_async_err\s*=>\s*_scrml_error_boundary_log\("data",\s*_scrml_async_err\)\)\s*;/);
   });
@@ -400,7 +401,7 @@ describe("§7: ss32-item-1 — auto-await IIFE error arm", () => {
     // General (non-`<request>`) reactive-server assignment — the plain IIFE path.
     const result = compile(plainTopFx);
     expect(result.errors).toEqual([]);
-    const js = result.outputs.get(plainTopFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(plainTopFx).clientJs);
     // The error arm routes through the typed uncaught surface, not a silent drop.
     expect(js).toContain(".catch(_scrml_async_err => _scrml_error_boundary_log(");
     // The reference target must be present in the (always-included) runtime.
@@ -413,7 +414,7 @@ describe("§7: ss32-item-1 — auto-await IIFE error arm", () => {
   test("`!{}`-carrying reactive server assignment: IIFE STILL carries the `.catch` safety net", () => {
     const result = compile(errArmHandlerFx);
     expect(result.errors).toEqual([]);
-    const js = result.outputs.get(errArmHandlerFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(errArmHandlerFx).clientJs);
     // ss41 (g-auto-await-error-arm-dead-promise-check): the `!{}` dispatch is now
     // relocated INSIDE the IIFE (reading the RESOLVED envelope), and the IIFE call
     // STILL carries ss32's `.catch` safety net for a genuine non-envelope rejection.
@@ -425,7 +426,7 @@ describe("§7: ss32-item-1 — auto-await IIFE error arm", () => {
   test("output still parses as valid JS (no `;)` from the appended `.catch`)", () => {
     for (const fxp of [gitiFx, errArmHandlerFx, exprCtxFx]) {
       const result = compile(fxp);
-      const js = result.outputs.get(fxp).clientJs;
+      const js = foldChunkNamespacing(result.outputs.get(fxp).clientJs);
       const stripped = js.replace(/^\s*import\s[^;]*;/gm, "");
       expect(() => new Function(stripped)).not.toThrow();
       // The malformed `;)` / `();)` token sequence must never appear.
@@ -465,7 +466,7 @@ describe("§8: ss41 — `!{}` error arm reads the resolved envelope (not the IIF
   test("the dead top-level `if (result && result.__scrml_error)` guard is GONE", () => {
     const result = compile(errArmHandlerFx);
     expect(result.errors).toEqual([]);
-    const js = result.outputs.get(errArmHandlerFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(errArmHandlerFx).clientJs);
     // The OLD dead shape — `let <resultVar> = (async () => ...)().catch(...)`
     // followed by a top-level `if (<resultVar> && <resultVar>.__scrml_error)` —
     // must NOT appear: the result var no longer captures the IIFE promise.
@@ -474,14 +475,14 @@ describe("§8: ss41 — `!{}` error arm reads the resolved envelope (not the IIF
 
   test("the await binds a `const <resultVar>` INSIDE the IIFE", () => {
     const result = compile(errArmHandlerFx);
-    const js = result.outputs.get(errArmHandlerFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(errArmHandlerFx).clientJs);
     // `(async () => { const <resultVar> = await _scrml_fetch_loadData_N(); ... `
     expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*\{\s*const\s+_scrml__scrml_result_\d+\s*=\s*await\s+_scrml_fetch_loadData_\d+\([^)]*\);/);
   });
 
   test("the `__scrml_error` guard + arm dispatch now reads the resolved const", () => {
     const result = compile(errArmHandlerFx);
-    const js = result.outputs.get(errArmHandlerFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(errArmHandlerFx).clientJs);
     // Capture the in-IIFE const name, then assert the guard reads IT (resolved
     // envelope), not a promise.
     const m = js.match(/const\s+(_scrml__scrml_result_\d+)\s*=\s*await\s+_scrml_fetch_loadData_\d+/);
@@ -495,7 +496,7 @@ describe("§8: ss41 — `!{}` error arm reads the resolved envelope (not the IIF
 
   test("a happy-path `else` sets the cell to the resolved value", () => {
     const result = compile(errArmHandlerFx);
-    const js = result.outputs.get(errArmHandlerFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(errArmHandlerFx).clientJs);
     const m = js.match(/const\s+(_scrml__scrml_result_\d+)\s*=\s*await\s+_scrml_fetch_loadData_\d+/);
     const rv = m[1];
     expect(js).toMatch(new RegExp(`\\}\\s*else\\s*\\{\\s*_scrml_reactive_set\\("data",\\s*${rv}\\);`));
@@ -503,7 +504,7 @@ describe("§8: ss41 — `!{}` error arm reads the resolved envelope (not the IIF
 
   test("the `.catch` safety net + the lazy `_scrml_init_set` both survive", () => {
     const result = compile(errArmHandlerFx);
-    const js = result.outputs.get(errArmHandlerFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(errArmHandlerFx).clientJs);
     expect(js).toMatch(/\}\)\(\)\.catch\(_scrml_async_err\s*=>\s*_scrml_error_boundary_log\("data",\s*_scrml_async_err\)\)/);
     // The lazy initializer stays OUTSIDE the IIFE.
     expect(js).toMatch(/_scrml_init_set\("data",\s*\(\)\s*=>\s*_scrml_fetch_loadData_\d+\(\)\)/);
@@ -511,7 +512,7 @@ describe("§8: ss41 — `!{}` error arm reads the resolved envelope (not the IIF
 
   test("output parses; no `;)` token sequence; no dead-promise guard", () => {
     const result = compile(errArmHandlerFx);
-    const js = result.outputs.get(errArmHandlerFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(errArmHandlerFx).clientJs);
     const stripped = js.replace(/^\s*import\s[^;]*;/gm, "");
     expect(() => new Function(stripped)).not.toThrow();
     expect(js).not.toMatch(/\)\(\);\s*\)/);
@@ -520,7 +521,7 @@ describe("§8: ss41 — `!{}` error arm reads the resolved envelope (not the IIF
   test("INVARIANCE: the no-`!{}` reactive-server form is byte-unchanged (no `let`/IIFE-block relocation)", () => {
     // General (non-`<request>`) plain form — must not acquire the error-arm block.
     const result = compile(plainTopFx);
-    const js = result.outputs.get(plainTopFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(plainTopFx).clientJs);
     // The plain `@data = loadValue()` (no `!{}`) keeps the ss32 single-line form:
     // `(async () => _scrml_reactive_set("data", await stub()))().catch(...)`.
     expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*_scrml_reactive_set\("data",\s*await\s+_scrml_fetch_loadValue_\d+\(\)\s*\)\)\(\s*\)\.catch\(_scrml_async_err\s*=>\s*_scrml_error_boundary_log\("data",\s*_scrml_async_err\)\)\s*;/);

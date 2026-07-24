@@ -35,6 +35,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { normalizeChunkToken } from "../helpers/chunk-scope.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // compileWith — full-compile `source` under `parser` (null = default live
 // BS+TAB; "scrml-native" = native pipeline). Returns errors + client.js.
@@ -54,7 +55,7 @@ function compileWith(source, parser, suffix) {
     return {
       errors: result.errors ?? [],
       warnings: result.warnings ?? [],
-      clientJs: existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "",
+      clientJs:foldChunkNamespacing( foldChunkNamespacing)(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""),
     };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
@@ -115,24 +116,24 @@ describe("native BlockStub verbatim-body recovery (S170 Wave 2)", () => {
     expect(nat.errors).toEqual([]);
     // The .Mushroom arm has two writes: coins AND score. A dropped body would
     // emit `{}` and these would be ABSENT. Assert BOTH statements present.
-    expect(nat.clientJs).toMatch(/_scrml_reactive_set\("coins"/);
-    expect(nat.clientJs).toMatch(/_scrml_reactive_set\("score"/);
+    expect(foldChunkNamespacing(nat.clientJs)).toMatch(/_scrml_reactive_set\("coins"/);
+    expect(foldChunkNamespacing(nat.clientJs)).toMatch(/_scrml_reactive_set\("score"/);
     // The score write proves the SECOND statement survived (a single-statement
     // recovery would emit coins but not score). Both the +100 and +300 literals
     // (the two distinct arms' score writes) must appear.
-    expect(nat.clientJs).toContain("100");
-    expect(nat.clientJs).toContain("300");
+    expect(foldChunkNamespacing(nat.clientJs)).toContain("100");
+    expect(foldChunkNamespacing(nat.clientJs)).toContain("300");
     // The +100 score write must NOT have collapsed to an empty `{}` arm.
-    expect(nat.clientJs).not.toMatch(/=== "Mushroom"\)\s*\{\s*\}/);
+    expect(foldChunkNamespacing(nat.clientJs)).not.toMatch(/=== "Mushroom"\)\s*\{\s*\}/);
   });
 
   test("match-arm bodies are emitted under native (arm dispatch + body present)", () => {
     const nat = compileWith(MATCH_BLOCK_ARM, "scrml-native", "match-arm-2");
     // Both arms must dispatch on their variant tag.
-    expect(nat.clientJs).toMatch(/=== "Mushroom"/);
-    expect(nat.clientJs).toMatch(/=== "Flower"/);
+    expect(foldChunkNamespacing(nat.clientJs)).toMatch(/=== "Mushroom"/);
+    expect(foldChunkNamespacing(nat.clientJs)).toMatch(/=== "Flower"/);
     // The payload binding `n` must be bound from the matched variant data.
-    expect(nat.clientJs).toMatch(/const n = /);
+    expect(foldChunkNamespacing(nat.clientJs)).toMatch(/const n = /);
   });
 
   test("block-bodied .filter callback — the callback BODY statement survives (not empty)", () => {
@@ -141,9 +142,9 @@ describe("native BlockStub verbatim-body recovery (S170 Wave 2)", () => {
     // The arrow body has `let doubled = n * 2` + `return doubled > 4`. A dropped
     // body would emit `() => {}` (or no callback at all). Assert the inner
     // statement survived.
-    expect(nat.clientJs).toMatch(/\.filter\(/);
-    expect(nat.clientJs).toContain("doubled");
-    expect(nat.clientJs).toMatch(/return doubled > 4/);
+    expect(foldChunkNamespacing(nat.clientJs)).toMatch(/\.filter\(/);
+    expect(foldChunkNamespacing(nat.clientJs)).toContain("doubled");
+    expect(foldChunkNamespacing(nat.clientJs)).toMatch(/return doubled > 4/);
   });
 
   test("match-arm-block emit is statement-identical native == default (modulo terminators)", () => {
@@ -167,7 +168,7 @@ describe("native BlockStub verbatim-body recovery (S170 Wave 2)", () => {
         .replace(/;\s*}/g, " }")
         .replace(/}\)\(\);/g, "})()")
         .trim();
-    expect(norm(normalizeChunkToken(nat.clientJs))).toBe(norm(normalizeChunkToken(def.clientJs)));
+    expect(norm(normalizeChunkToken(foldChunkNamespacing(nat.clientJs)))).toBe(norm(normalizeChunkToken(foldChunkNamespacing(def.clientJs))));
   });
 
   test("lambda-callback emit is structurally-identical native == default (modulo escape-hatch param spacing)", () => {
@@ -190,6 +191,6 @@ describe("native BlockStub verbatim-body recovery (S170 Wave 2)", () => {
         .replace(/\s+\)/g, ")")
         .replace(/\s+/g, " ")
         .trim();
-    expect(norm(normalizeChunkToken(nat.clientJs))).toBe(norm(normalizeChunkToken(def.clientJs)));
+    expect(norm(normalizeChunkToken(foldChunkNamespacing(nat.clientJs)))).toBe(norm(normalizeChunkToken(foldChunkNamespacing(def.clientJs))));
   });
 });

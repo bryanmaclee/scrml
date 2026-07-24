@@ -33,6 +33,7 @@ import { mkdirSync, writeFileSync, rmSync, existsSync, mkdtempSync, readFileSync
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 let TMP;
 beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "bug48-arrow-")); });
