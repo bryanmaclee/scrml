@@ -4980,6 +4980,16 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 ## Recently Landed
 
 
+### 2026-07-24 — S285 (Peter/AdiPDesk) — adopter #165: server call hoisted above a returning guard (silent destructive-write reorder) fixed via the control-anchors fold
+
+An adopter-lane session (concurrent with bryan's S284/#166; disjoint surface, rebased clean over it). Fixed **#165** (`g-batch-hoist-across-control-flow`, HIGH): the client-side statement scheduler batches consecutive independent `const`-decls into `const [...] = await Promise.all([...])`, and a server-call decl sitting after an `if (…) return` guard was hoisted INTO a batch seeded ABOVE the guard — so it ran unconditionally (a confirm-guarded destructive write firing before the confirm; clean build, no warning, invisible to any DOM-level assertion).
+
+- **#167 `cba2311a`** — root cause: `scheduling.ts` folds the body-DG's intra-statement edges to order the batch but *discarded* the `control-anchors` edges (line 654, "the planner upstream already respects it" — but this client scheduler is not that planner and did not). Fix: fold `control-anchors` in like every other edge kind, so a statement after a control-flow head enters its transitive closure and is excluded from a batch seeded before it. **Structural** — uses the pipeline's own `CONTROL_FLOW_KINDS` (`if`/`for`/`while`/`switch`/`match`/`try`), covering `match`/`switch`/`try` guards too, not a hand-listed emit-shape predicate. +25/−3 in one file + a regression test.
+- **Method:** a first `break`-on-statement-shape attempt was caught under-covering by an S239 adversarial finder (`match`/`switch`/`try` hole) AND a "contiguity" attempt was caught by the S212 test *killing* the tested pure-decl-skip optimization — the control-anchors fold threads both (fixes the full guard class, preserves S212). R26 executed-DOM: guard-true calls the server fn 0× (was 1×). Full unit 16761/0; integration+conformance new-failure-free (7 pre-existing/flaky confirmed on the `374888b6` baseline via `git stash`); cloud `gate` green.
+- **2 residual gaps filed** (`docs/known-gaps.md`, out of scope): `g-batch-hoist-across-propagate-throw` (MED — same class for bare `propagate`/`throw`/`return` early-exits, Peter's lane) and `g-batch-reorder-across-nondecl-sideeffect` (MED — interleaved reactive write between two batched server calls, a genuine spec-ordering question for bryan's tier-1 lane).
+
+Full state: board `../scrml-support/handOffs/active-sessions/S285-peter.md`; delta-log this session's `[S285]` entries. `hand-off.md` deliberately deferred — bryan's S284 shows LIVE on the board, and a successor with a live sibling defers only the shared WRAP (the S262 pattern).
+
 ### 2026-07-16/17 — S262 (Peter) — the adopter-issue channel was never read · boot step 0 named a deleted script · #81 held on a design fork
 
 A continuity/channel session, concurrent with bryan's S263. Two silent boot-path holes closed and the adopter bug-report channel found unread and wired; issue #81 taken to a design fork rather than a third patch. Full narrative: board `../scrml-support/handOffs/active-sessions/S262-peter.md` (S262's hand-off — `hand-off.md` was deliberately deferred: it holds S261's wrap and S263 is LIVE; a successor with a live sibling defers only the WRAP). Mechanical: delta-log [557]-[567].
