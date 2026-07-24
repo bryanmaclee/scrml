@@ -23,7 +23,6 @@ import { buildAST } from "../../src/ast-builder.js";
 import { runCG } from "../../src/code-generator.js";
 import { resetVarCounter } from "../../src/codegen/var-counter.ts";
 import { forBodyLiftsMarkup } from "../../src/codegen/reactive-deps.ts";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function makeRouteMap() { return { functions: new Map() }; }
 function makeDepGraph() { return { nodes: new Map(), edges: [] }; }
@@ -53,7 +52,7 @@ function compileClient(source, filePath = "/test/peter-23.scrml") {
     protectAnalysis: makeProtectAnalysis(),
   });
   return {
-    clientJs:foldChunkNamespacing( foldChunkNamespacing)(result.outputs.get(filePath)?.clientJs ?? ""),
+    clientJs: result.outputs.get(filePath)?.clientJs ?? "",
     fatalErrors: (result.errors ?? []).filter((e) => e.severity === "error"),
   };
 }
@@ -79,25 +78,25 @@ describe("peter-23 §1: plain function iterating a reactive cell is a plain loop
   </div>`;
 
   test("emits a plain for-of over the cell snapshot (_scrml_reactive_get)", () => {
-    const { clientJs: __cjRaw } = compileClient(source); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs } = compileClient(source);
     expect(clientJs).toMatch(/for \(const p of _scrml_reactive_get\("unitParts"\)\)/);
   });
 
   test("does NOT emit a reactive DOM list-render for the plain function", () => {
-    const { clientJs: __cjRaw } = compileClient(source); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs } = compileClient(source);
     expect(clientJs).not.toContain("_scrml_reconcile_list(");
     expect(clientJs).not.toMatch(/function _scrml_render_list_\d+\(\)/);
   });
 
   test("does NOT emit list-render DOM scaffolding (createElement wrapper / _scrml_lift)", () => {
-    const { clientJs: __cjRaw } = compileClient(source); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs } = compileClient(source);
     // No list wrapper div / lift for the plain-function loop.
     expect(clientJs).not.toContain('_scrml_list_wrapper');
     expect(clientJs).not.toContain("_scrml_lift(");
   });
 
   test("the loop body (return of the matched field) survives", () => {
-    const { clientJs: __cjRaw } = compileClient(source); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs } = compileClient(source);
     expect(clientJs).toContain("return p.unit;");
   });
 
@@ -122,13 +121,13 @@ describe("peter-23 §2: a genuine for…lift over a reactive cell STILL renders"
   </ul>`;
 
   test("for…lift over @items emits a keyed list-render", () => {
-    const { clientJs: __cjRaw } = compileClient(source); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs } = compileClient(source);
     expect(clientJs).toContain("_scrml_reconcile_list(");
     expect(clientJs).toMatch(/function _scrml_render_list_\d+\(\)/);
   });
 
   test("for…lift over @items emits the wrapper div + _scrml_lift mount", () => {
-    const { clientJs: __cjRaw } = compileClient(source); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs } = compileClient(source);
     expect(clientJs).toContain('createElement("div")');
     expect(clientJs).toContain("_scrml_lift(");
   });
@@ -151,7 +150,7 @@ describe("peter-23 §3: reactive for-of with no lift = plain snapshot loop", () 
       }
       \${ total() }
     </div>`;
-    const { clientJs: __cjRaw, fatalErrors } = compileClient(source); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, fatalErrors } = compileClient(source);
     expect(clientJs).toMatch(/for \(const n of _scrml_reactive_get\("nums"\)\)/);
     expect(clientJs).not.toContain("_scrml_reconcile_list(");
     expect(fatalErrors).toHaveLength(0);
@@ -171,7 +170,7 @@ describe("peter-23 §3: reactive for-of with no lift = plain snapshot loop", () 
       }
       \${ firstActive() }
     </div>`;
-    const { clientJs: __cjRaw, fatalErrors } = compileClient(source); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, fatalErrors } = compileClient(source);
     expect(clientJs).toMatch(/for \(const r of _scrml_reactive_get\("rows"\)\)/);
     expect(clientJs).toContain("continue;");
     expect(clientJs).not.toContain("_scrml_reconcile_list(");
@@ -192,7 +191,7 @@ describe("peter-23 §3: reactive for-of with no lift = plain snapshot loop", () 
       }
       \${ count() }
     </div>`;
-    const { clientJs: __cjRaw, fatalErrors } = compileClient(source); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { clientJs, fatalErrors } = compileClient(source);
     expect(clientJs).toMatch(/for \(const row of _scrml_reactive_get\("grid"\)\)/);
     expect(clientJs).toContain("for (const cell of row.cells)");
     expect(clientJs).not.toContain("_scrml_reconcile_list(");

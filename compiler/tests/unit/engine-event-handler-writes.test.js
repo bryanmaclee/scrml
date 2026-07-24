@@ -42,7 +42,6 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { unNamespaceEngineNames } from "../helpers/chunk-scope.js";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -63,8 +62,8 @@ function compileToClientJs(source, suffix = "evt-handler") {
       outputDir: outDir,
     });
     const clientPath = resolve(outDir, `${name}.client.js`);
-    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""));
-    return { errors: result.errors ?? [], clientJs:foldChunkNamespacing( foldChunkNamespacing)(unNamespaceEngineNames(clientJs) )};
+    const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
+    return { errors: result.errors ?? [], clientJs: unNamespaceEngineNames(clientJs) };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -86,7 +85,7 @@ describe("engine-event-handler-writes §1 — direct assignment routing", () => 
 
 <button onclick=\${@appMode = AppMode.Playing}>Start</>
 <button onclick=\${@appMode = AppMode.Title}>Quit</>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "evt-direct"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "evt-direct");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     // The onclick handlers must thread through _scrml_engine_direct_set —
@@ -134,7 +133,7 @@ describe("engine-event-handler-writes §1 — direct assignment routing", () => 
 </>
 
 <button onclick=trigger()>Start</>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "evt-fn-wrap"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "evt-fn-wrap");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // The function definition contains the engine direct-write helper call.
     expect(clientJs).toMatch(
@@ -158,7 +157,7 @@ describe("engine-event-handler-writes §2 — .advance() routing", () => {
 </>
 
 <button onclick=\${@appMode.advance(AppMode.Playing)}>Advance</>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "evt-advance"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "evt-advance");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     // The onclick handler must contain `_scrml_engine_advance(...)`, not the
@@ -196,7 +195,7 @@ describe("engine-event-handler-writes §3 — hooks wrap in event handlers", () 
 </>
 
 <button onclick=\${@appMode = AppMode.Title}>Quit</>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "evt-hooks"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "evt-hooks");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     // The hook-firing function is emitted at module scope.
@@ -247,7 +246,7 @@ describe("engine-event-handler-writes §4 — internal:rule= threading", () => {
 </>
 
 <button onclick=\${@appMode = AppMode.Playing}>Start</>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "evt-internal"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "evt-internal");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     // The internal-table identifier is emitted at module scope.
@@ -287,7 +286,7 @@ describe("engine-event-handler-writes §5 — history-map threading", () => {
 </>
 
 <button onclick=\${@appMode = AppMode.Title}>Quit</>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "evt-history"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "evt-history");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     // History map identifier emitted at module scope.
@@ -337,7 +336,7 @@ describe("engine-event-handler-writes §6 — .Variant.history restore-form", ()
 </>
 
 <button onclick=\${@appMode.advance(AppMode.Playing.history)}>Resume</>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "evt-advance-restore"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "evt-advance-restore");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     // Counter-resilient: match any _scrml_attr_onclick_N handler header.
@@ -388,7 +387,7 @@ describe("engine-event-handler-writes §6 — .Variant.history restore-form", ()
 </>
 
 <button onclick=\${@appMode = AppMode.Playing.history}>Resume</>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "evt-restore"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "evt-restore");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     // The .history suffix on the RHS must be STRIPPED at lowering — the
@@ -433,7 +432,7 @@ describe("engine-event-handler-writes §7 — non-engine writes regression", () 
     }
 
 <button onclick=\${@count = 99}>Set</>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "evt-plain"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "evt-plain");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     // The handler must use the plain reactive-set (no engine guard, no advance).
@@ -468,7 +467,7 @@ describe("engine-event-handler-writes §7 — non-engine writes regression", () 
 </>
 
 <button onclick=go()>Go</>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "evt-mixed"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "evt-mixed");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Plain cell uses bare set.
     expect(clientJs).toMatch(/_scrml_reactive_set\("score",\s*99\)/);
@@ -491,7 +490,7 @@ describe("engine-event-handler-writes §8 — tree-shake", () => {
 
 <button onclick=\${@count = 1}>Inc</>
 <button onclick=\${@count = 2}>Two</>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "evt-treeshake"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "evt-treeshake");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // No engine identifiers should leak into the output.
     expect(clientJs).not.toContain("_scrml_engine_direct_set");
@@ -524,7 +523,7 @@ describe("engine-event-handler-writes §9 — arm-body event handlers", () => {
     <input type="text" oninput=\${@appMode = AppMode.Title}/>
   </>
 </>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "evt-arm-body"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "evt-arm-body");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     // The arm-wire function should be emitted for the .Playing arm. Inside
@@ -552,7 +551,7 @@ describe("engine-event-handler-writes §9 — arm-body event handlers", () => {
     <button onclick=\${@appMode = AppMode.Title}>Quit</>
   </>
 </>`;
-    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "evt-arm-delegated"); const clientJs = foldChunkNamespacing(__cjRaw);
+    const { errors, clientJs } = compileToClientJs(src, "evt-arm-delegated");
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     // The onclick handler in the global registry must route through the guard.
