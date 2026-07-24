@@ -39,6 +39,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -57,7 +58,7 @@ function compile(source, suffix = "engine-name-dual") {
     const runtimePath = resolve(outDir, runtimeFilename);
     return {
       errors: result.errors ?? [],
-      clientJs: existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "",
+      clientJs:foldChunkNamespacing( foldChunkNamespacing)(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""),
       runtimeJs: existsSync(runtimePath) ? readFileSync(runtimePath, "utf8") : "",
       cleanup: () => existsSync(tmpDir) && rmSync(tmpDir, { recursive: true, force: true }),
     };
@@ -128,7 +129,7 @@ function toggle() { if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav
 </engine>
 <div><button onclick=toggle()>toggle</button><span>\${@mode}</span></div>
 </program>`;
-    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "engine-name-dual-repro");
+    const { errors, clientJs: __cjRaw, runtimeJs, cleanup } = compile(src, "engine-name-dual-repro"); const clientJs = foldChunkNamespacing(__cjRaw);
     try {
       // Compiles clean (exit 0 equivalent — no error-severity diagnostics).
       expect(errorsOf(errors)).toEqual([]);
@@ -176,7 +177,7 @@ function toggle() { if (@m == Mode.Nav) { @m = .Edit } else { @m = .Nav } }
 </engine>
 <div><button onclick=toggle()>toggle</button><span>\${@m}</span></div>
 </program>`;
-    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "engine-name-dual-m");
+    const { errors, clientJs: __cjRaw, runtimeJs, cleanup } = compile(src, "engine-name-dual-m"); const clientJs = foldChunkNamespacing(__cjRaw);
     try {
       expect(errorsOf(errors)).toEqual([]);
       // The engine governs `@m`; the write-guard reads the populated table keyed on `m`.
@@ -207,7 +208,7 @@ function toggle() { if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav
 </engine>
 <div><button onclick=toggle()>toggle</button><span>\${@mode}</span></div>
 </program>`;
-    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "engine-noname");
+    const { errors, clientJs: __cjRaw, runtimeJs, cleanup } = compile(src, "engine-noname"); const clientJs = foldChunkNamespacing(__cjRaw);
     try {
       expect(errorsOf(errors)).toEqual([]);
       expect(clientJs).toContain("__scrml_engine_mode_transitions");

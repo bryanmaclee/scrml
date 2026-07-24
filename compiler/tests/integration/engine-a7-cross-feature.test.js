@@ -57,8 +57,8 @@ function compileToClientJs(source, suffix = "a7x") {
       outputDir: outDir,
     });
     const clientPath = resolve(outDir, `${name}.client.js`);
-    const clientJs = foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "");
-    return { errors: result.errors ?? [], clientJs: foldChunkNamespacing(unNamespaceEngineNames(clientJs) )};
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""));
+    return { errors: result.errors ?? [], clientJs:foldChunkNamespacing( foldChunkNamespacing)(unNamespaceEngineNames(clientJs) )};
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -84,7 +84,7 @@ describe("engine-a7-cross-feature §1 — all hierarchy features coexist", () =>
   </>
   <Paused rule=.Playing.history></>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "all-hier");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "all-hier"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     expect(clientJs).toContain("__scrml_engine_appMode_transitions");
   });
@@ -137,7 +137,7 @@ describe("engine-a7-cross-feature §2 — composite + <onTimeout> on outer compo
   </>
   <Paused rule=.Playing></>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "comp-ot");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "comp-ot"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Outer engine emits its timers table for the <Playing> arm.
     expect(clientJs).toContain("__scrml_engine_appMode_timers");
@@ -175,7 +175,7 @@ describe("engine-a7-cross-feature §3 — <onIdle> watchdog + composite", () => 
   </>
   <Locked rule=.Title></>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "idle-comp");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "idle-comp"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Idle watchdog config emitted.
     expect(clientJs).toContain("__scrml_engine_appMode_idle");
@@ -236,7 +236,7 @@ describe("engine-a7-cross-feature §4 — named timer + cancelTimer inside compo
   </>
   <Confirmed rule=.Idle></>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "named-canc");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "named-canc"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Named timer composite key includes the name field per S79 §51.0.M.1.
     expect(clientJs).toContain('name: "autoConfirm"');
@@ -280,7 +280,7 @@ describe("engine-a7-cross-feature §4 — named timer + cancelTimer inside compo
   </>
   <Confirmed rule=.Idle></>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "canc-comp");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "canc-comp"); const clientJs = foldChunkNamespacing(__cjRaw);
     const fatal = errors.filter((e) => e.severity === "error");
     expect(fatal).toEqual([]);
     // The named-timer composite-key cancelTimer lowering MUST land:
@@ -333,7 +333,7 @@ describe("engine-a7-cross-feature §5 — computed-delay + composite", () => {
   </>
   <Done rule=.Idle></>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "comp-cd");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "comp-cd"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Computed form emits msExpr arrow.
     expect(clientJs).toContain("msExpr: function()");
@@ -403,7 +403,7 @@ describe("engine-a7-cross-feature §7 — sibling engines aggregate flags correc
   <Active rule=.Idle></>
   <Idle rule=.Active></>
 </>`;
-    const { errors, clientJs } = compileToClientJs(src, "siblings");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(src, "siblings"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Both engines emit their tables.
     expect(clientJs).toContain("__scrml_engine_appMode_transitions");

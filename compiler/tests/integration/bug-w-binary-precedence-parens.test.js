@@ -220,7 +220,7 @@ function compileSource(name, source) {
 
 function clientJsFor(result, srcName) {
   for (const [filePath, out] of result.outputs) {
-    if (filePath.endsWith(srcName) && typeof out.clientJs === "string") return foldChunkNamespacing(out.clientJs);
+    if (filePath.endsWith(srcName) && typeof foldChunkNamespacing(out.clientJs) === "string") return foldChunkNamespacing(out.clientJs);
   }
   return undefined;
 }

@@ -32,6 +32,7 @@ import * as acorn from "acorn";
 import { emitExpr } from "../../src/codegen/emit-expr.ts";
 import { emitStringFromTree } from "../../src/expression-parser.ts";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const SPAN = { start: 0, end: 0 };
 const num = (raw) => ({ kind: "lit", litType: "number", raw, span: SPAN });
@@ -137,7 +138,7 @@ function compileSource(name, source) {
 }
 function clientJsFor(result, srcName) {
   for (const [filePath, out] of result.outputs) {
-    if (filePath.endsWith(srcName) && typeof out.clientJs === "string") return out.clientJs;
+    if (filePath.endsWith(srcName) && typeof foldChunkNamespacing(out.clientJs) === "string") return foldChunkNamespacing(out.clientJs);
   }
   return undefined;
 }

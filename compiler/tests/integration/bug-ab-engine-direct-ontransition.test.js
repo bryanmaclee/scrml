@@ -58,7 +58,7 @@ function compile(source, suffix = "bug-ab-direct") {
     const runtimePath = resolve(outDir, runtimeFilename);
     return {
       errors: result.errors ?? [],
-      clientJs: foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""),
+      clientJs:foldChunkNamespacing( foldChunkNamespacing)(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""),
       runtimeJs: existsSync(runtimePath) ? readFileSync(runtimePath, "utf8") : "",
       cleanup: () => existsSync(tmpDir) && rmSync(tmpDir, { recursive: true, force: true }),
     };
@@ -121,7 +121,7 @@ function toggle() { if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav
 </engine>
 <div><button onclick=toggle()>toggle</button><span>\${@mode}</span><span>\${@transitions}</span></div>
 </program>`;
-    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "bug-ab-direct");
+    const { errors, clientJs: __cjRaw, runtimeJs, cleanup } = compile(src, "bug-ab-direct"); const clientJs = foldChunkNamespacing(__cjRaw);
     try {
       expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
@@ -170,7 +170,7 @@ function toggle() { if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav
 </engine>
 <div><button onclick=toggle()>toggle</button><span>\${@mode}</span><span>\${@transitions}</span></div>
 </program>`;
-    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "bug-ab-nested");
+    const { errors, clientJs: __cjRaw, runtimeJs, cleanup } = compile(src, "bug-ab-nested"); const clientJs = foldChunkNamespacing(__cjRaw);
     try {
       expect(errors.filter((e) => e.severity === "error")).toEqual([]);
       expect(clientJs).toContain("function __scrml_engine_mode_fire_hooks");
@@ -208,7 +208,7 @@ function toggle() { if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav
 </engine>
 <div><button onclick=toggle()>toggle</button><span>\${@mode}</span></div>
 </program>`;
-    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "bug-ab-mixed");
+    const { errors, clientJs: __cjRaw, runtimeJs, cleanup } = compile(src, "bug-ab-mixed"); const clientJs = foldChunkNamespacing(__cjRaw);
     try {
       expect(errors.filter((e) => e.severity === "error")).toEqual([]);
       // Nested edit-arm fires on Nav->Edit; engine-direct nav-arm on Edit->Nav.

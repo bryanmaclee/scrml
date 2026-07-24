@@ -23,6 +23,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { resolve, dirname } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 /**
  * Compile a source string through the full pipeline; return the runtime + client JS.
@@ -50,7 +51,7 @@ function compile(source, suffix = "ot-e2e") {
     const runtimePath = resolve(outDir, runtimeFilename);
     return {
       errors: result.errors ?? [],
-      clientJs: existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "",
+      clientJs:foldChunkNamespacing( foldChunkNamespacing)(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""),
       runtimeJs: existsSync(runtimePath) ? readFileSync(runtimePath, "utf8") : "",
       cleanup: () => existsSync(tmpDir) && rmSync(tmpDir, { recursive: true, force: true }),
     };
@@ -160,7 +161,7 @@ describe("A5-4/5 §1 — literal <onTimeout> fires after expected ms", () => {
   <TimedOut></>
 </>
 </program>`;
-    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "ot-fire");
+    const { errors, clientJs: __cjRaw, runtimeJs, cleanup } = compile(src, "ot-fire"); const clientJs = foldChunkNamespacing(__cjRaw);
     try {
       expect(errors.filter(e => e.severity === "error")).toEqual([]);
       const evalCtx = makeEvaluator(runtimeJs, clientJs);
@@ -196,7 +197,7 @@ describe("A5-4 §2 — clear-on-exit", () => {
   <TimedOut></>
 </>
 </program>`;
-    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "ot-clear");
+    const { errors, clientJs: __cjRaw, runtimeJs, cleanup } = compile(src, "ot-clear"); const clientJs = foldChunkNamespacing(__cjRaw);
     try {
       expect(errors.filter(e => e.severity === "error")).toEqual([]);
       const evalCtx = makeEvaluator(runtimeJs, clientJs);
@@ -257,7 +258,7 @@ describe("A5-4 §3 — multiple <onTimeout> on the same state", () => {
   <TimedOut></>
 </>
 </program>`;
-    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "ot-multi");
+    const { errors, clientJs: __cjRaw, runtimeJs, cleanup } = compile(src, "ot-multi"); const clientJs = foldChunkNamespacing(__cjRaw);
     try {
       expect(errors.filter(e => e.severity === "error")).toEqual([]);
       const evalCtx = makeEvaluator(runtimeJs, clientJs);
@@ -291,7 +292,7 @@ describe("A5-5 §4 — computed-form `${expr}<unit>` evaluates at arm time", () 
   <Retry></>
 </>
 </program>`;
-    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "ot-computed");
+    const { errors, clientJs: __cjRaw, runtimeJs, cleanup } = compile(src, "ot-computed"); const clientJs = foldChunkNamespacing(__cjRaw);
     try {
       expect(errors.filter(e => e.severity === "error")).toEqual([]);
       const evalCtx = makeEvaluator(runtimeJs, clientJs);
@@ -322,7 +323,7 @@ describe("A5-5 §4 — computed-form `${expr}<unit>` evaluates at arm time", () 
   <Retry></>
 </>
 </program>`;
-    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "ot-computed-math");
+    const { errors, clientJs: __cjRaw, runtimeJs, cleanup } = compile(src, "ot-computed-math"); const clientJs = foldChunkNamespacing(__cjRaw);
     try {
       expect(errors.filter(e => e.severity === "error")).toEqual([]);
       const evalCtx = makeEvaluator(runtimeJs, clientJs);
@@ -350,7 +351,7 @@ describe("A5-5 §4 — computed-form `${expr}<unit>` evaluates at arm time", () 
   <Retry></>
 </>
 </program>`;
-    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "ot-clamp");
+    const { errors, clientJs: __cjRaw, runtimeJs, cleanup } = compile(src, "ot-clamp"); const clientJs = foldChunkNamespacing(__cjRaw);
     try {
       expect(errors.filter(e => e.severity === "error")).toEqual([]);
       const evalCtx = makeEvaluator(runtimeJs, clientJs);
@@ -380,7 +381,7 @@ describe("A5-4 §5 — initial-arm at module-init", () => {
   <Done></>
 </>
 </program>`;
-    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "ot-initial");
+    const { errors, clientJs: __cjRaw, runtimeJs, cleanup } = compile(src, "ot-initial"); const clientJs = foldChunkNamespacing(__cjRaw);
     try {
       expect(errors.filter(e => e.severity === "error")).toEqual([]);
       const evalCtx = makeEvaluator(runtimeJs, clientJs);
@@ -407,7 +408,7 @@ describe("A5-4 §5 — initial-arm at module-init", () => {
   <Done></>
 </>
 </program>`;
-    const { errors, clientJs, runtimeJs, cleanup } = compile(src, "ot-no-init-arm");
+    const { errors, clientJs: __cjRaw, runtimeJs, cleanup } = compile(src, "ot-no-init-arm"); const clientJs = foldChunkNamespacing(__cjRaw);
     try {
       expect(errors.filter(e => e.severity === "error")).toEqual([]);
       const evalCtx = makeEvaluator(runtimeJs, clientJs);
@@ -436,7 +437,7 @@ describe("A5-4 §6 — tree-shake when no <onTimeout>", () => {
   <Done></>
 </>
 </program>`;
-    const { errors, clientJs, cleanup } = compile(src, "ot-shake");
+    const { errors, clientJs: __cjRaw, cleanup } = compile(src, "ot-shake"); const clientJs = foldChunkNamespacing(__cjRaw);
     try {
       expect(errors.filter(e => e.severity === "error")).toEqual([]);
       expect(clientJs).not.toContain("__scrml_engine_phase_timers");

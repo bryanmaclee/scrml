@@ -107,7 +107,7 @@ describe("Bug 61 — @compound.<synthProp> rollup read collapses to a dotted-key
   beforeAll(() => {
     result = compile("bug61-compound.scrml", COMPOUND_SRC);
     const out = getOutput(result);
-    clientJs = foldChunkNamespacing(out?.clientJs ?? "");
+    clientJs =foldChunkNamespacing( foldChunkNamespacing(out?.clientJs ?? ""));
   });
 
   test("compiles cleanly (no fatal errors)", () => {
@@ -182,7 +182,7 @@ describe("Bug 61 OVER-FIRE — plain cell w/ synth-named fields stays member acc
   beforeAll(() => {
     result = compile("bug61-plain.scrml", PLAIN_CELL_SRC);
     const out = getOutput(result);
-    clientJs = foldChunkNamespacing(out?.clientJs ?? "");
+    clientJs =foldChunkNamespacing( foldChunkNamespacing(out?.clientJs ?? ""));
   });
 
   test("compiles cleanly (no fatal errors)", () => {
@@ -233,7 +233,7 @@ describe("Bug 61 — per-field 3-segment @compound.field.<synthProp> also collap
   beforeAll(() => {
     result = compile("bug61-perfield.scrml", PER_FIELD_SRC);
     const out = getOutput(result);
-    clientJs = foldChunkNamespacing(out?.clientJs ?? "");
+    clientJs =foldChunkNamespacing( foldChunkNamespacing(out?.clientJs ?? ""));
   });
 
   test("compiles cleanly (no fatal errors)", () => {

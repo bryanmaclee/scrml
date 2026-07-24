@@ -88,7 +88,7 @@ describe("Bug 58 — formFor validity surface IS emitted into client.js", () => 
     result = compile("bug58-formfor.scrml", CANONICAL_SRC);
     const out = getOutput(result);
     html = out?.html ?? "";
-    clientJs = foldChunkNamespacing(out?.clientJs ?? "");
+    clientJs =foldChunkNamespacing( foldChunkNamespacing(out?.clientJs ?? ""));
   });
 
   // ---- routing fix: the compound cell + per-field cells are DECLARED ----

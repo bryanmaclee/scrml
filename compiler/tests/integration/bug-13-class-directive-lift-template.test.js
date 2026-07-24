@@ -46,7 +46,7 @@ function compileSource(name, source) {
   );
   let clientJs = "";
   try {
-    clientJs = foldChunkNamespacing(readFileSync(join(outDir, `${name}.client.js`), "utf8"));
+    clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, `${name}.client.js`), "utf8")));
   } catch {
     // file missing — leave clientJs empty so assertions surface a clear failure
   }
@@ -65,7 +65,7 @@ describe("Bug 13: class:NAME directive inside lift template", () => {
     }</ul>
 </program>
 `;
-    const { errors, clientJs } = compileSource("form1-varref", src);
+    const { errors, clientJs: __cjRaw } = compileSource("form1-varref", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).not.toMatch(/setAttribute\(\s*"class:/);
     expect(clientJs).toMatch(/classList\.toggle\("active",\s*!!\(_scrml_reactive_get\("isActive"\)\)/);
@@ -81,7 +81,7 @@ describe("Bug 13: class:NAME directive inside lift template", () => {
     }</ul>
 </program>
 `;
-    const { errors, clientJs } = compileSource("form2-objpath", src);
+    const { errors, clientJs: __cjRaw } = compileSource("form2-objpath", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).not.toMatch(/setAttribute\(\s*"class:/);
     expect(clientJs).toMatch(/classList\.toggle\("done",\s*!!\(item\.done\)/);
@@ -98,7 +98,7 @@ describe("Bug 13: class:NAME directive inside lift template", () => {
     }</ul>
 </program>
 `;
-    const { errors, clientJs } = compileSource("form3-parens", src);
+    const { errors, clientJs: __cjRaw } = compileSource("form3-parens", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).not.toMatch(/setAttribute\(\s*"class:/);
     expect(clientJs).toMatch(/classList\.toggle\("active"/);
@@ -116,7 +116,7 @@ describe("Bug 13: class:NAME directive inside lift template", () => {
     fn isPulsing() -> boolean { return true }
 </program>
 `;
-    const { errors, clientJs } = compileSource("form4-callref", src);
+    const { errors, clientJs: __cjRaw } = compileSource("form4-callref", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).not.toMatch(/setAttribute\(\s*"class:/);
     expect(clientJs).toMatch(/classList\.toggle\("pulse",\s*!!\(_scrml_isPulsing_\d+\(\)\)/);
@@ -133,7 +133,7 @@ describe("Bug 13: class:NAME directive inside lift template", () => {
     }</ul>
 </program>
 `;
-    const { errors, clientJs } = compileSource("coexist", src);
+    const { errors, clientJs: __cjRaw } = compileSource("coexist", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Static class= still uses setAttribute (correct)
     expect(clientJs).toMatch(/setAttribute\("class",\s*"task"\)/);
@@ -151,7 +151,7 @@ describe("Bug 13: top-level (non-lift) class:NAME emission still uses marker pat
     <button class:active=@isActive>Toggle</button>
 </program>
 `;
-    const { errors, clientJs } = compileSource("toplevel-varref", src);
+    const { errors, clientJs: __cjRaw } = compileSource("toplevel-varref", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Top-level wiring uses the marker attribute + querySelector lookup
     expect(clientJs).toMatch(/document\.querySelector\('\[data-scrml-class-active=/);
@@ -166,7 +166,7 @@ describe("Bug 13: top-level (non-lift) class:NAME emission still uses marker pat
     <button class:hot=(@count > 5)>Toggle</button>
 </program>
 `;
-    const { errors, clientJs } = compileSource("toplevel-parens", src);
+    const { errors, clientJs: __cjRaw } = compileSource("toplevel-parens", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toMatch(/document\.querySelector\('\[data-scrml-class-hot=/);
     expect(clientJs).toMatch(/_scrml_reactive_get\("count"\)/);
