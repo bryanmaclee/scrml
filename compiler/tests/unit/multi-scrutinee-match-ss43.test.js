@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { compileScrml } from "../../src/api.js";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
@@ -31,7 +32,7 @@ function compileSource(scrmlSource, testName) {
     const result = compileScrml({ inputFiles: [tmpInput], write: false, outputDir: resolve(tmpDir, "out") });
     let clientJs = null;
     for (const [fp, output] of result.outputs) {
-      if (fp.includes(tag)) clientJs = output.clientJs ?? null;
+      if (fp.includes(tag)) clientJs = foldChunkNamespacing(output.clientJs) ?? null;
     }
     return { errors: result.errors ?? [], warnings: result.warnings ?? [], clientJs };
   } finally {
@@ -228,19 +229,19 @@ const out = match (m, e) {
 }
 <p>{ out }</p>
 </program>`, "desugar");
-    expect(r.clientJs).toBeTruthy();
+    expect(foldChunkNamespacing(r.clientJs)).toBeTruthy();
     // Each scrutinee evaluated once into a temp + tag-normalized.
-    expect(r.clientJs).toMatch(/const _scrml_scrut_\d+ = m;/);
-    expect(r.clientJs).toMatch(/const _scrml_scrut_\d+ = e;/);
+    expect(foldChunkNamespacing(r.clientJs)).toMatch(/const _scrml_scrut_\d+ = m;/);
+    expect(foldChunkNamespacing(r.clientJs)).toMatch(/const _scrml_scrut_\d+ = e;/);
     // Conjunction condition over the per-scrutinee tags.
-    expect(r.clientJs).toMatch(/=== "InCode" && \S+ === "Quote"/);
+    expect(foldChunkNamespacing(r.clientJs)).toMatch(/=== "InCode" && \S+ === "Quote"/);
     // Payload binding from position 2 destructured into the arm body.
-    expect(r.clientJs).toMatch(/const q = _scrml_scrut_\d+\.data\.q;/);
+    expect(foldChunkNamespacing(r.clientJs)).toMatch(/const q = _scrml_scrut_\d+\.data\.q;/);
     // Per-position `_` arm tests only the non-wildcard position.
-    expect(r.clientJs).toMatch(/=== "Eof"\) \{ return "eof"; \}/);
+    expect(foldChunkNamespacing(r.clientJs)).toMatch(/=== "Eof"\) \{ return "eof"; \}/);
     // No tuple accessor leaks.
-    expect(r.clientJs).not.toMatch(/\.0\b/);
-    expect(r.clientJs).not.toMatch(/\bundefined\b/);
+    expect(foldChunkNamespacing(r.clientJs)).not.toMatch(/\.0\b/);
+    expect(foldChunkNamespacing(r.clientJs)).not.toMatch(/\bundefined\b/);
   });
 
   test("the §18.19 `step` worked example runs correctly (payload + wildcard)", () => {
@@ -259,7 +260,7 @@ const out = match (m, e) {
 <p>{ out }</p>
 </program>`, "runtime");
     // Extract the desugared IIFE and run it with concrete tagged inputs.
-    const mm = r.clientJs.match(/= (\(function\(\) \{[\s\S]*?\}\)\(\));/);
+    const mm = foldChunkNamespacing(r.clientJs).match(/= (\(function\(\) \{[\s\S]*?\}\)\(\));/);
     expect(mm).toBeTruthy();
     const iife = mm[1];
     const run = new Function("m", "e", `return ${iife}`);
@@ -289,7 +290,7 @@ const r = match (a, b, c) {
 </program>`, "n3");
     expect(hasCode(r, "E-TYPE-020")).toBe(false);
     expect(hasCode(r, "E-MATCH-SCRUTINEE-ARITY")).toBe(false);
-    expect(r.clientJs).toMatch(/=== "A1" && \S+ === "B1" && \S+ === "C1"/);
+    expect(foldChunkNamespacing(r.clientJs)).toMatch(/=== "A1" && \S+ === "B1" && \S+ === "C1"/);
   });
 });
 
@@ -313,10 +314,10 @@ const r = id(match (m, e) {
 })
 <p>{ r }</p>
 </program>`, "expr-pos");
-    expect(r.clientJs).toMatch(/=== "InCode" && \S+ === "Quote"/);
+    expect(foldChunkNamespacing(r.clientJs)).toMatch(/=== "InCode" && \S+ === "Quote"/);
     // The pre-fix silent stub must be gone.
-    expect(r.clientJs).not.toMatch(/no lowerable arms/);
-    expect(r.clientJs).not.toMatch(/\bundefined\b/);
+    expect(foldChunkNamespacing(r.clientJs)).not.toMatch(/no lowerable arms/);
+    expect(foldChunkNamespacing(r.clientJs)).not.toMatch(/\bundefined\b/);
   });
 
   test("`match (e)` with NO depth-1 comma stays single-scrutinee (zero regression)", () => {
@@ -333,7 +334,7 @@ const r = match (m) {
     expect(hasCode(r, "E-MATCH-SCRUTINEE-ARITY")).toBe(false);
     // Single-scrutinee emits the classic single-temp dispatch, not the
     // multi-scrutinee per-position temps.
-    expect(r.clientJs).toMatch(/const _scrml_match_\d+ = m;/);
-    expect(r.clientJs).not.toMatch(/_scrml_scrut_/);
+    expect(foldChunkNamespacing(r.clientJs)).toMatch(/const _scrml_match_\d+ = m;/);
+    expect(foldChunkNamespacing(r.clientJs)).not.toMatch(/_scrml_scrut_/);
   });
 });

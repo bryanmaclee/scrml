@@ -33,6 +33,7 @@ import { fileURLToPath } from "node:url";
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const _testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let _tmpCounter = 0;
@@ -55,7 +56,7 @@ function compile(source, tag) {
     for (const [fp, output] of (result.outputs ?? new Map())) {
       if (fp.includes(_tag)) {
         if (output && typeof output.serverJs === "string") server = output.serverJs;
-        if (output && typeof output.clientJs === "string") client = output.clientJs;
+        if (output && typeof foldChunkNamespacing(output.clientJs) === "string") client = foldChunkNamespacing(output.clientJs);
       }
     }
     return { server, client, errors: result.errors ?? [], warnings: result.warnings ?? [] };

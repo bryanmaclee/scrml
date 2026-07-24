@@ -28,6 +28,7 @@ import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../../src/api.js";
+import { foldChunkNamespacing } from "../../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
@@ -45,7 +46,7 @@ function compileSrc(source, testName = `s25-boundary-${++tmpCounter}`) {
       outputDir: outDir,
     });
     const clientJsPath = resolve(outDir, `${testName}.client.js`);
-    const clientJs = existsSync(clientJsPath) ? readFileSync(clientJsPath, "utf8") : "";
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientJsPath) ? readFileSync(clientJsPath, "utf8") : ""));
     return {
       errors: result.errors ?? [],
       clientJs,
@@ -69,7 +70,7 @@ describe("S25 §6 — untyped-then-typed state-decl boundary", () => {
 <p>x=\${@x} y=\${@y}</>
 </program>
 `;
-    const { errors, clientJs } = compileSrc(src);
+    const { errors, clientJs: __cjRaw } = compileSrc(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     expect(clientJs).toContain('_scrml_reactive_set("x", 1)');
     expect(clientJs).toContain('_scrml_reactive_set("y"');
@@ -90,7 +91,7 @@ describe("S25 §6 — untyped-then-typed state-decl boundary", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compileSrc(src);
+    const { errors, clientJs: __cjRaw } = compileSrc(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     expect(clientJs).toContain('_scrml_reactive_set("a", 1)');
     expect(clientJs).toContain('_scrml_reactive_set("b"');
@@ -111,7 +112,7 @@ describe("S25 §6 — untyped-then-typed state-decl boundary", () => {
 <p>x=\${@x} y=\${@y}</>
 </program>
 `;
-    const { errors, clientJs } = compileSrc(src);
+    const { errors, clientJs: __cjRaw } = compileSrc(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     expect(clientJs).toContain('_scrml_reactive_set("x", 1)');
     expect(clientJs).toContain('_scrml_reactive_set("y"');
@@ -129,7 +130,7 @@ describe("S25 §6 — untyped-then-typed state-decl boundary", () => {
 <p>a=\${@untypedFirst} b=\${@bounded}</>
 </program>
 `;
-    const { errors, clientJs } = compileSrc(src);
+    const { errors, clientJs: __cjRaw } = compileSrc(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     expect(clientJs).toContain('_scrml_reactive_set("untypedFirst"');
     expect(clientJs).toContain('_scrml_reactive_set("bounded", 42)');

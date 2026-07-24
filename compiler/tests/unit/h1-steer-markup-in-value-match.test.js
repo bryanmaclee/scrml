@@ -29,6 +29,7 @@ import { compileScrml } from "../../src/api.js";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const CODE = "E-MATCH-ARM-MARKUP-IN-VALUE";
 

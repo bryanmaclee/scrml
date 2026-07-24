@@ -25,6 +25,7 @@ import {
 import { compileScrml } from "../../../src/api.js";
 import { SCRML_RUNTIME } from "../../../src/runtime-template.js";
 import { captureInsideChunkScope } from "../../helpers/chunk-scope.js";
+import { foldChunkNamespacing } from "../../helpers/chunk-scope.js";
 
 const FIXTURE_DIR = join(import.meta.dir, "__fixtures__/derived-machines");
 const FIXTURE_OUTPUT = join(FIXTURE_DIR, "dist");
@@ -44,7 +45,7 @@ function compileSource(source, filename = "test.scrml") {
   // pattern-match on that. Keep the union as `errors`.
   const allErrors = [...fatalErrors, ...warnings];
   const outPath = join(FIXTURE_OUTPUT, filename.replace(/\.scrml$/, ".client.js"));
-  const clientJs = existsSync(outPath) ? readFileSync(outPath, "utf8") : "";
+  const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(outPath) ? readFileSync(outPath, "utf8") : ""));
   return { errors: allErrors, fatalErrors, warnings, clientJs };
 }
 
@@ -412,7 +413,7 @@ describe("§51.9 slice 2 — E-ENGINE-017 reject writes to projected vars", () =
 describe("§51.9 slice 2 — end-to-end compilation", () => {
   test("full file compiles and emits projection function + derived registration", () => {
     const source = `\${\n  type OrderState:enum = { Draft, Submitted, Paid, Shipping, Delivered, Cancelled, Refunded }\n  type UIMode:enum = { Editable, ReadOnly, Terminal }\n\n  @order: OrderMachine = OrderState.Draft\n}\n\n< machine name=OrderMachine for=OrderState>\n    .Draft => .Submitted\n</>\n\n< machine name=UI for=UIMode derived=@order>\n    .Draft => .Editable\n    .Submitted | .Paid | .Shipping => .ReadOnly\n    .Delivered | .Cancelled | .Refunded => .Terminal\n</>\n\n<program>\n    <p>ok</>\n</>\n`;
-    const { fatalErrors, clientJs } = compileSource(source, "end-to-end.scrml");
+    const { fatalErrors, clientJs: __cjRaw } = compileSource(source, "end-to-end.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(fatalErrors).toEqual([]);
     expect(clientJs).toContain("function _scrml_project_UI(src)");
     expect(clientJs).toContain('_scrml_derived_fns["ui"]');
@@ -475,7 +476,7 @@ describe("§51.9 follow-up — DOM read-wiring for projected vars", () => {
       "</>",
       "",
     ].join("\n");
-    const { fatalErrors, errors, clientJs } = compileSource(source, "dom-wiring.scrml");
+    const { fatalErrors, errors, clientJs: __cjRaw } = compileSource(source, "dom-wiring.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(fatalErrors).toEqual([]);
     // The derived-fn wiring is present (regression guard from slice 2).
     expect(clientJs).toContain('_scrml_derived_fns["ui"]');
@@ -539,7 +540,7 @@ describe("§51.9 follow-up — DOM read-wiring for projected vars", () => {
     expect(existsSync(jsPath)).toBe(true);
 
     const htmlContent = readFileSync(htmlPath, "utf-8");
-    const clientJs = readFileSync(jsPath, "utf-8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(jsPath, "utf-8")));
     const bodyMatch = htmlContent.match(/<body[^>]*>([\s\S]*)<\/body>/i);
     const bodyHtml = bodyMatch ? bodyMatch[1] : htmlContent;
     const cleanHtml = bodyHtml.replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();

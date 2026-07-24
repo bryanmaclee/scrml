@@ -25,6 +25,7 @@ import { tmpdir } from "os";
 import { compileScrml } from "../../../src/api.js";
 import { SCRML_RUNTIME } from "../../../src/runtime-template.js";
 import { extractUserFns } from "../../helpers/extract-user-fns.js";
+import { foldChunkNamespacing } from "../../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-s27-effect-refs");
 let tmpCounter = 0;
@@ -41,9 +42,9 @@ function compile(source) {
       write: true,
       outputDir: outDir,
     });
-    const clientJs = existsSync(resolve(outDir, "app.client.js"))
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(resolve(outDir, "app.client.js"))
       ? readFileSync(resolve(outDir, "app.client.js"), "utf8")
-      : "";
+      : ""));
     return { errors: result.errors ?? [], clientJs };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
@@ -83,7 +84,7 @@ describe("S27 — effect-body reactive refs compile + run correctly", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     // No literal @-tokens leaked into the compiled output for the effect body.
     // (Scope the check to the effect block; the audit/guard sections use `@`
@@ -110,7 +111,7 @@ describe("S27 — effect-body reactive refs compile + run correctly", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     expect(clientJs).toContain('_scrml_reactive_set("trace"');
     expect(clientJs).toContain('_scrml_reactive_get("trace")');
@@ -133,7 +134,7 @@ describe("S27 — effect-body reactive refs compile + run correctly", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     const env = buildEnv(clientJs);
     env.userFns[env.userFnNames.find(n => n.includes("go"))]();
@@ -159,7 +160,7 @@ describe("S27 — effect-body reactive refs compile + run correctly", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     const env = buildEnv(clientJs);
     env.userFns[env.userFnNames.find(n => n.includes("go"))]();
@@ -183,7 +184,7 @@ describe("S27 — effect-body reactive refs compile + run correctly", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     const env = buildEnv(clientJs);
     env.userFns[env.userFnNames.find(n => n.includes("toB"))]();

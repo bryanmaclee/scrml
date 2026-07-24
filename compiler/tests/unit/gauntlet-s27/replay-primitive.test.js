@@ -27,6 +27,7 @@ import { tmpdir } from "os";
 import { compileScrml } from "../../../src/api.js";
 import { SCRML_RUNTIME } from "../../../src/runtime-template.js";
 import { extractUserFns } from "../../helpers/extract-user-fns.js";
+import { foldChunkNamespacing } from "../../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-s27-replay");
 let tmpCounter = 0;
@@ -43,9 +44,9 @@ function compile(source) {
       write: true,
       outputDir: outDir,
     });
-    const clientJs = existsSync(resolve(outDir, "app.client.js"))
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(resolve(outDir, "app.client.js"))
       ? readFileSync(resolve(outDir, "app.client.js"), "utf8")
-      : "";
+      : ""));
     return { errors: result.errors ?? [], clientJs };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
@@ -91,7 +92,7 @@ describe("S27 §51.14 — codegen: replay call site", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     expect(clientJs).toContain('_scrml_replay("order", _scrml_reactive_get("log"))');
     // No stray `replay(` calls remain in user function bodies.
@@ -113,7 +114,7 @@ describe("S27 §51.14 — codegen: replay call site", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     expect(clientJs).toContain('_scrml_replay("order", _scrml_reactive_get("log"), n)');
   });
@@ -133,7 +134,7 @@ describe("S27 §51.14 — codegen: replay call site", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     // The index is its own expression — @log.length / 2 rewrites to the
     // reactive-get call with member access preserved.
@@ -180,7 +181,7 @@ describe("S27 §51.14 — runtime behavior", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     const env = buildEnv(clientJs);
     env.userFns[env.userFnNames.find(n => n.includes("step1"))]();
@@ -213,7 +214,7 @@ describe("S27 §51.14 — runtime behavior", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     const env = buildEnv(clientJs);
     env.userFns[env.userFnNames.find(n => n.includes("advance"))]();
@@ -248,7 +249,7 @@ describe("S27 §51.14 — runtime behavior", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     const env = buildEnv(clientJs);
     env.userFns[env.userFnNames.find(n => n.includes("publish"))]();
@@ -273,7 +274,7 @@ describe("S27 §51.14 — runtime behavior", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     const env = buildEnv(clientJs);
     // No transitions have happened; log is empty.
@@ -300,7 +301,7 @@ describe("S27 §51.14 — runtime behavior", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     const env = buildEnv(clientJs);
     env.userFns[env.userFnNames.find(n => n.includes("step"))]();
@@ -332,7 +333,7 @@ describe("S27 §51.14 — runtime behavior", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     const env = buildEnv(clientJs);
     env.userFns[env.userFnNames.find(n => n.includes("advance"))]();
@@ -362,7 +363,7 @@ describe("S27 §51.14 — runtime behavior", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     const env = buildEnv(clientJs);
     env.userFns[env.userFnNames.find(n => n.includes("step1"))]();
@@ -396,7 +397,7 @@ describe("S27 §51.14 — replay clears pending temporal timers", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     const env = buildEnv(clientJs);
     // Initial state armed the 50ms timer. Wait for it to fire.

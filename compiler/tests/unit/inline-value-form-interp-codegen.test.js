@@ -23,6 +23,7 @@ import { describe, test, expect } from "bun:test";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function compileToOutputs(source, suffix) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -38,7 +39,7 @@ function compileToOutputs(source, suffix) {
     const htmlPath = resolve(outDir, `${name}.html`);
     return {
       errors: result.errors ?? [],
-      clientJs: existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "",
+      clientJs:foldChunkNamespacing( foldChunkNamespacing)(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""),
       html: existsSync(htmlPath) ? readFileSync(htmlPath, "utf8") : "",
     };
   } finally {
@@ -51,7 +52,7 @@ describe("inline-value-form-interp — codegen shape", () => {
     const src = `type View:enum = .List | .Grid
 <x>: View = .List
 <p>\${ match @x { .List :> "list view"  .Grid :> "grid view" } }</p>`;
-    const { errors, clientJs, html } = compileToOutputs(src, "ivf-match");
+    const { errors, clientJs: __cjRaw, html } = compileToOutputs(src, "ivf-match"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     // A render slot is allocated in the HTML.
     expect(html).toMatch(/data-scrml-logic="_scrml_logic_\d+"/);
@@ -70,7 +71,7 @@ describe("inline-value-form-interp — codegen shape", () => {
   test("(if) sole-content value-if → render slot + readable ternary + render_value + effect", () => {
     const src = `<n>: int = 5
 <p>\${ if @n > 3 { "big" } else { "small" } }</p>`;
-    const { errors, clientJs, html } = compileToOutputs(src, "ivf-if");
+    const { errors, clientJs: __cjRaw, html } = compileToOutputs(src, "ivf-if"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(html).toMatch(/data-scrml-logic="_scrml_logic_\d+"/);
     // The if lowers to a readable conditional-expression cascade (a ternary).
@@ -86,7 +87,7 @@ describe("inline-value-form-interp — codegen shape", () => {
   test("(else-if chain) value-if cascade lowers to a right-associated nested ternary", () => {
     const src = `<n>: int = 5
 <p>\${ if @n > 8 { "hi" } else if @n > 3 { "mid" } else { "lo" } }</p>`;
-    const { errors, clientJs } = compileToOutputs(src, "ivf-elseif");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "ivf-elseif"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(clientJs).toContain('"hi"');
     expect(clientJs).toContain('"mid"');
@@ -98,7 +99,7 @@ describe("inline-value-form-interp — codegen shape", () => {
   test("(non-reactive scrutinee) a static-condition value-if renders once with NO effect", () => {
     const src = `const LIMIT = 10
 <p>\${ if LIMIT > 3 { "big" } else { "small" } }</p>`;
-    const { errors, clientJs } = compileToOutputs(src, "ivf-static");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "ivf-static"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(clientJs).toContain("_scrml_render_value(el,");
     // No reactive cell read → no _scrml_effect wrapper for this slot.
@@ -123,7 +124,7 @@ describe("inline-value-form-interp — codegen shape", () => {
     const src = `<n>: int = 5
 fn ping() { log("ping") }
 <p>\${ if @n > 3 { ping() } }</p>`;
-    const { clientJs } = compileToOutputs(src, "ivf-noelse");
+    const { clientJs: __cjRaw } = compileToOutputs(src, "ivf-noelse"); const clientJs = foldChunkNamespacing(__cjRaw);
     // No else → not a value-form-if → no value-control-flow render wiring.
     // The side-effecting body keeps its prior (statement) emit path; it must NOT
     // be wrapped in a _scrml_render_value of an if-value.
@@ -133,7 +134,7 @@ fn ping() { log("ping") }
   test("(ADVERSARIAL — plain `${@cell}` unchanged) primitive interp keeps the textContent path, no value-control-flow", () => {
     const src = `<count>: int = 5
 <p>\${@count}</p>`;
-    const { clientJs } = compileToOutputs(src, "ivf-plain");
+    const { clientJs: __cjRaw } = compileToOutputs(src, "ivf-plain"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toContain("_scrml_render_value(el,");
     // The plain-cell read lowers to the bare cell get, not a control-flow IIFE/ternary.
     expect(clientJs).toContain('_scrml_render_value(el, _scrml_reactive_get("count"))');
