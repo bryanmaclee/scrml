@@ -686,6 +686,80 @@ describe("§i81.9 — fail-closed dispositions (S239 findings 2, 3, 5, 6)", () =
     expect(client).toContain('setAttribute("value", String(_scrml_x))');
   });
 
+  // i174 — the TEMPLATE-STRING form `value="${@cell}"` (the adopter's exact
+  // shape, GH #174) lowers via the emit-bindings.ts template-attr path, a
+  // DIFFERENT code path from the paren `value=(expr)` form above. It carried the
+  // same defect: unconditional `setAttribute("value", …)`, so a programmatic
+  // `@cell = ""` re-ran setAttribute but never cleared the dirty control.
+  test("F5-tpl(i174): template-string value=\"${@cell}\" on a form control writes the .value PROPERTY", () => {
+    const src = `<program>
+      <name> = "alice"
+      <input type="text" value="\${@name}"/>
+    </program>`;
+    const client = emittedClient(compile(src));
+    // Property write, caret-safe inequality guard, NO setAttribute for value.
+    expect(client).toMatch(/\.value !== _scrml_tpl_val_\d+/);
+    expect(client).toMatch(/\.value = _scrml_tpl_val_\d+/);
+    expect(client).not.toContain('setAttribute("value"');
+  });
+
+  test("F5-tpl(i174): template-string on a NON-value attr still uses setAttribute", () => {
+    const src = `<program>
+      <status> = "ok"
+      <div title="state-\${@status}">x</div>
+    </program>`;
+    const client = emittedClient(compile(src));
+    // Generic attrs keep the attribute lowering — only the form-control value
+    // family moved to a property assignment.
+    expect(client).toContain('setAttribute("title"');
+    expect(client).not.toMatch(/\.value =/);
+  });
+
+  test("F5-tpl(i174): template-string value on a <textarea> writes the .value PROPERTY", () => {
+    const src = `<program>
+      <note> = "hi"
+      <textarea value="\${@note}"></textarea>
+    </program>`;
+    const client = emittedClient(compile(src));
+    expect(client).toMatch(/\.value = _scrml_tpl_val_\d+/);
+    expect(client).not.toContain('setAttribute("value"');
+  });
+
+  test("F5-each(i174): per-item value=\"${@.}\" inside <each> writes the .value PROPERTY", () => {
+    const src = `<program>
+      \${ @rows = ["a", "b"] }
+      <div>
+        <each in=@rows as row>
+          <input type="text" value="\${@.}"/>
+        </each>
+      </div>
+    </program>`;
+    const client = emittedClient(compile(src));
+    // The each per-item factory (emit-each.ts) carried the same defect. Now the
+    // form-control value is a property assignment, not setAttribute.
+    expect(client).toMatch(/\.value !== _scrml_v_\d+/);
+    expect(client).toMatch(/\.value = _scrml_v_\d+/);
+    expect(client).not.toContain('setAttribute("value"');
+    // A non-value attr (type) on the same element still uses setAttribute.
+    expect(client).toContain('setAttribute("type"');
+  });
+
+  test("F5-tpl(i174): value=\"${@x}\" + bind:value defers to bind:value (no double .value writer)", () => {
+    // Axiom ① — `bind:value` is the sanctioned two-way owner of `.value`. When it
+    // coexists with a template value=, the template value= must NOT emit a second
+    // competing `.value` property writer; it falls back to setAttribute (the
+    // pre-i174 behavior) so bind:value remains the sole property owner.
+    const src = `<program>
+      <name> = "x"
+      <input type="text" bind:value=@name value="\${@name}"/>
+    </program>`;
+    const client = emittedClient(compile(src));
+    // bind:value owns the property write-back.
+    expect(client).toContain('.addEventListener("input"');
+    // The template value= does NOT add a second .value property writer.
+    expect(client).toContain('setAttribute("value"');
+  });
+
   test("F6: a promise-returning expr is awaited, not stringified to [object Promise]", () => {
     const src = `<program>
       <mode> = "a"
