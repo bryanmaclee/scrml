@@ -94,7 +94,7 @@ describe("component-each §1 — emit shape (each survives expansion, prop + @. 
     const { clientJs } = compileToOutputs(COMPONENT_SRC, "comp");
     // FIX 2: no bare module-scope `const _items = items;` — the prop resolved to
     // the caller's reactive cell.
-    expect(clientJs).toContain('const _items = _scrml_reactive_get("todos");');
+    expect(clientJs).toContain('const _items = _scrml_cs_reactive_get("todos");');
     expect(clientJs).not.toMatch(/const _items = items;/);
   });
 

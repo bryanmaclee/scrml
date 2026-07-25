@@ -142,7 +142,7 @@ describe("each-in-match §1 — emit shape (no leak, mount div, helpers ship)", 
 
   test("the each renderer reads the source cell + registers itself", () => {
     const { clientJs } = compileToOutputs(SIGIL_SRC, "sigil");
-    expect(clientJs).toContain('const _items = _scrml_reactive_get("todos");');
+    expect(clientJs).toContain('const _items = _scrml_cs_reactive_get("todos");');
     expect(clientJs).toMatch(/_scrml_each_renderers\["each_[0-9a-z]{8}_\d+"\] = _scrml_each_render_[0-9a-z]{8}_\d+;/);
   });
 

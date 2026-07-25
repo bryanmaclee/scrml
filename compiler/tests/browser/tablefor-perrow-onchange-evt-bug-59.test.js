@@ -120,7 +120,7 @@ describe("Bug 59 §1: per-row onchange handler has no free `evt`", () => {
     // The per-row checkbox wires a "change" listener.
     expect(clientJs).toMatch(/addEventListener\(\s*"change"/);
     // The per-row handler still writes selectedIds (toggle body preserved).
-    expect(clientJs).toContain('_scrml_reactive_set("selectedIds"');
+    expect(clientJs).toContain('_scrml_cs_reactive_set("selectedIds"');
     expect(clientJs).toContain("row.id");
   });
 });

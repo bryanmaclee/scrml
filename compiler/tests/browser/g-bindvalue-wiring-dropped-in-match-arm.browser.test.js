@@ -125,7 +125,7 @@ describe("g-bindvalue-wiring-dropped-in-match-arm §1 — emit shape (arm body w
     expect(clientJs).toMatch(/_root\.querySelector\([^)]*data-scrml-bind-value/);
     expect(clientJs).toMatch(/addEventListener\("input"/);
     expect(clientJs).toMatch(/_disposers\.push\(_scrml_effect\(/);
-    expect(clientJs).toContain('_scrml_reactive_set("name", event.target.value)');
+    expect(clientJs).toContain('_scrml_cs_reactive_set("name", event.target.value)');
   });
 
   test("ENGINE state-child: the engine wire fn wires the inside bind:value identically", () => {
@@ -134,7 +134,7 @@ describe("g-bindvalue-wiring-dropped-in-match-arm §1 — emit shape (arm body w
     expect(clientJs).toMatch(/_root\.querySelector\([^)]*data-scrml-bind-value/);
     expect(clientJs).toMatch(/addEventListener\("input"/);
     expect(clientJs).toMatch(/_disposers\.push\(_scrml_effect\(/);
-    expect(clientJs).toContain('_scrml_reactive_set("draft", event.target.value)');
+    expect(clientJs).toContain('_scrml_cs_reactive_set("draft", event.target.value)');
   });
 
   test("MATCH arm: emitted client.js parses (no E-CODEGEN-INVALID-LOGIC)", () => {

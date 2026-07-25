@@ -187,7 +187,7 @@ function mount(clientJs, html) {
 // ---------------------------------------------------------------------------
 // §1 — emit shape: the column-slot `${@row.X}` TEXT child lowers to a LIVE-KEYED
 //      reactive text node (`row.X`), NOT a literal `${@row.X}` createTextNode
-//      string and NOT a `_scrml_reactive_get("row")` cell read.
+//      string and NOT a `_scrml_cs_reactive_get("row")` cell read.
 // ---------------------------------------------------------------------------
 
 describe("g-tablefor-column-slot-literal-interp §1 — emit shape (interp lowered, not literal)", () => {
@@ -208,7 +208,7 @@ describe("g-tablefor-column-slot-literal-interp §1 — emit shape (interp lower
     expect(clientJs).toContain('String((row.name) ?? "")');
     expect(clientJs).toContain("_scrml_resolve_item(");
     // The bug surface: a reactive read of a nonexistent "row" cell.
-    expect(clientJs).not.toContain('_scrml_reactive_get("row")');
+    expect(clientJs).not.toContain('_scrml_cs_reactive_get("row")');
   });
 
   test("`:let` form (§41.16.3) lowers identically (same root cause, one fix)", () => {
@@ -293,8 +293,8 @@ describe("g-tablefor-column-slot-literal-interp §2 — post-mount render (real 
   test("regression (@cell preservation): a genuine outer cell in the slot reads reactively + the row field is loop-local", () => {
     const { clientJs, html } = compileSource(AT_CELL_SRC);
     // The genuine outer cell `@suffix` still reads reactively; the row field does not.
-    expect(clientJs).toContain('_scrml_reactive_get("suffix")');
-    expect(clientJs).not.toContain('_scrml_reactive_get("row")');
+    expect(clientJs).toContain('_scrml_cs_reactive_get("suffix")');
+    expect(clientJs).not.toContain('_scrml_cs_reactive_get("row")');
     const app = mount(clientJs, html);
     expect(app.cellTexts()).toEqual(["Alice!"]);
     // Mutate the outer cell → the cell text updates.
