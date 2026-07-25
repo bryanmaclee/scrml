@@ -31,6 +31,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import vm from "vm";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 // A `${ for … lift }` reconciled list is the canonical dynamic-list-insert
 // mechanism: it emits `_scrml_reconcile_list` + per-item `_scrml_lift(() => ...)`
@@ -110,10 +111,14 @@ describe("GitHub #19 — dynamic insert does not throw ReferenceError (happy-dom
     let threw = null;
     try {
       // embedRuntime inlines the runtime into clientJs — one script body.
+      // BUG-6: splice the setter INSIDE the chunk scope so it binds the scoped
+      // `_scrml_cs_reactive_set` (keys under the chunk token), matching the
+      // reconciler's namespaced `items` cell key.
+      const cjWithSet = captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;`);
       const exec = new Function(
         "window",
         "document",
-        `${clientJs}\nglobalThis.__scrml_set__ = _scrml_reactive_set;`,
+        cjWithSet,
       );
       exec(window, document);
       document.dispatchEvent(new Event("DOMContentLoaded"));
