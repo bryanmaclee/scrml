@@ -25,7 +25,7 @@ import {
 import { compileScrml } from "../../../src/api.js";
 import { SCRML_RUNTIME } from "../../../src/runtime-template.js";
 import { captureInsideChunkScope } from "../../helpers/chunk-scope.js";
-import { foldChunkNamespacing } from "../../helpers/chunk-scope.js";
+import { foldChunkNamespacing, unwrapChunkScope } from "../../helpers/chunk-scope.js";
 
 const FIXTURE_DIR = join(import.meta.dir, "__fixtures__/derived-machines");
 const FIXTURE_OUTPUT = join(FIXTURE_DIR, "dist");
@@ -540,15 +540,22 @@ describe("§51.9 follow-up — DOM read-wiring for projected vars", () => {
     expect(existsSync(jsPath)).toBe(true);
 
     const htmlContent = readFileSync(htmlPath, "utf-8");
-    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(jsPath, "utf-8")));
+    // RAW client JS for EXECUTION — captureInsideChunkScope (below) binds the
+    // capture to the chunk's SCOPED `_scrml_cs_` accessors. Folding first would
+    // both erase those consts (nothing to capture) and self-recurse the prologue.
+    const clientJs = readFileSync(jsPath, "utf-8");
     const bodyMatch = htmlContent.match(/<body[^>]*>([\s\S]*)<\/body>/i);
     const bodyHtml = bodyMatch ? bodyMatch[1] : htmlContent;
     const cleanHtml = bodyHtml.replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
 
     document.body.innerHTML = cleanHtml;
 
-    const code = `(function() {\n${SCRML_RUNTIME}\n` + captureInsideChunkScope(clientJs, `window._scrml_reactive_get = _scrml_reactive_get;\n` +
-      `window._scrml_reactive_set = _scrml_reactive_set;\n`) + `\n})();`;
+    // BUG-6/N3: unwrap the chunk scope so execution keys BARE (this harness drives
+    // the machine + reads the DOM by author name), reproducing the pre-namespacing
+    // behavior. The window accessors bind the bare runtime globals.
+    const code = `(function() {\n${SCRML_RUNTIME}\n${unwrapChunkScope(clientJs)}\n` +
+      `window._scrml_reactive_get = _scrml_reactive_get;\n` +
+      `window._scrml_reactive_set = _scrml_reactive_set;\n})();`;
     eval(code);
     document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
 
