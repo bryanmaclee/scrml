@@ -66,8 +66,11 @@ function compileToOutputs(source, suffix = "bodyrender") {
     });
     const clientPath = resolve(outDir, `${name}.client.js`);
     const htmlPath = resolve(outDir, `${name}.html`);
-    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""));
-    const html = existsSync(htmlPath) ? readFileSync(htmlPath, "utf8") : "";
+    // RAW client JS — text-assert tests fold at their own read site; the §13
+    // happy-dom harness unwraps for execution. HTML folds the N4 engine-mount
+    // token off (`data-scrml-engine-mount="<token>_phase"` -> `"phase"`).
+    const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
+    const html = unNamespaceEngineNames(existsSync(htmlPath) ? readFileSync(htmlPath, "utf8") : "");
     return { errors: result.errors ?? [], warnings: result.warnings ?? [], clientJs, html };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
@@ -786,7 +789,7 @@ describe("Phase A10 re-wire §12 — per-arm wire fn shape", () => {
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
+import { foldChunkNamespacing, unNamespaceEngineNames, unwrapChunkScope } from "../helpers/chunk-scope.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -794,7 +797,7 @@ if (!globalThis.document) GlobalRegistrator.register();
 // client.js, loads them into happy-dom, fires DOMContentLoaded, and
 // returns reactive-set/get handles.
 function compileAndLoad(source, suffix) {
-  const { errors, clientJs: __cjRaw, html } = compileToOutputs(source, suffix); const clientJs = foldChunkNamespacing(__cjRaw);
+  const { errors, clientJs, html } = compileToOutputs(source, suffix);
   if (errors.length > 0) {
     throw new Error(
       `compile errors: ${errors.map((e) => e.code + ": " + e.message).join(", ")}`,
@@ -807,10 +810,15 @@ function compileAndLoad(source, suffix) {
 
   // Wrap runtime + client in an IIFE that exposes reactive handles to window.
   // eslint-disable-next-line no-eval
+  // BUG-6/N3: unwrap the chunk scope + fold the engine-name token so execution
+  // keys BARE (matching the bare window handles) and the engine dispatch's
+  // `data-scrml-engine-mount="phase"` query matches the folded HTML above.
+  const execClient = unNamespaceEngineNames(unwrapChunkScope(clientJs));
   const code =
-    `(function() {\n${SCRML_RUNTIME}\n` + captureInsideChunkScope(clientJs, `window._scrml_reactive_get = _scrml_reactive_get;\n` +
+    `(function() {\n${SCRML_RUNTIME}\n${execClient}\n` +
+    `window._scrml_reactive_get = _scrml_reactive_get;\n` +
     `window._scrml_reactive_set = _scrml_reactive_set;\n` +
-    `window._scrml_reactive_subscribe = _scrml_reactive_subscribe;\n`) + `\n})();`;
+    `window._scrml_reactive_subscribe = _scrml_reactive_subscribe;\n` + `\n})();`;
   // eslint-disable-next-line no-eval
   eval(code);
 
