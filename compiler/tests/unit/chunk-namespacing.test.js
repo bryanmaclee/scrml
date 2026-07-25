@@ -249,30 +249,33 @@ describe("chunk-namespacing N1: node-id-derived tokens do not collide", () => {
 // N4 — engine names
 // ---------------------------------------------------------------------------
 
-describe("chunk-namespacing N4: KNOWN-OPEN, pinned", () => {
-  // DIAGNOSED AND PATCHED, held out of this landing (see progress.md). The fix is
-  // `nsName(varName)` inside `emit-engine.ts`'s nine exported name helpers plus
-  // `emitEngineMountHtml` — verified in real Chromium — but R3 rules all four
-  // namespaces land together, and applying it now costs a 28-file / 250-occurrence
-  // test migration for a namespace that alone does not complete the arc.
-  test("two pages declaring the same engine cell still share the mount attribute", () => {
+describe("chunk-namespacing N4: CLOSED — engine names namespaced", () => {
+  // N4 landed (S286): `nsName(varName)` inside emit-engine.ts's nine exported
+  // name helpers + `emitEngineMountHtml` gives each per-engine top-level const and
+  // the mount attribute the chunk token. Two pages both declaring `phase` no
+  // longer collide or drive each other's mount. Verified in real Chromium.
+  test("two pages declaring the same engine cell get DISTINCT namespaced mount attributes", () => {
     const { alpha, beta } = compileTwoPageApp(ENGINE_PAGE);
     const mountOf = (html) => /data-scrml-engine-mount="([^"]+)"/.exec(html)?.[1];
-    // The dispatcher resolves this with a DOCUMENT-WIDE querySelector, so a
-    // shared value means each page drives the other's mount.
-    expect(mountOf(alpha.html)).toBe("phase");
-    expect(mountOf(beta.html)).toBe("phase");
+    const a = mountOf(alpha.html);
+    const b = mountOf(beta.html);
+    // Each mount is chunk-token-namespaced (`<token>_phase`), so the dispatcher's
+    // DOCUMENT-WIDE querySelector no longer resolves both pages to one mount.
+    expect(a).toMatch(/^[0-9a-z]{8}_phase$/);
+    expect(b).toMatch(/^[0-9a-z]{8}_phase$/);
+    expect(a).not.toBe(b);
   });
 
-  test("the per-engine top-level consts still collide — the redeclaration killer", () => {
-    // Nine consts are minted from the author's engine cell name. Two routes both
-    // declaring `phase` emit `__scrml_engine_phase_transitions` twice, and the
-    // second chunk dies with `Identifier ... has already been declared` — it
-    // never evaluates, so nothing on that page hydrates. Executed evidence for
-    // that pageerror is in progress.md.
+  test("the per-engine top-level consts are namespaced — no redeclaration collision", () => {
+    // Nine consts are minted from the author's engine cell name, each now carrying
+    // the chunk token. Two routes both declaring `phase` emit DISTINCT names, so
+    // concatenating the chunks no longer throws `Identifier ... has already been
+    // declared`; both pages hydrate.
     const { alpha, beta } = compileTwoPageApp(ENGINE_PAGE);
-    expect(alpha.js).toContain("__scrml_engine_phase_transitions");
-    expect(beta.js).toContain("__scrml_engine_phase_transitions");
+    const nameOf = (js) => /__scrml_engine_([0-9a-z]{8})_phase_transitions/.exec(js)?.[1];
+    expect(alpha.js).toMatch(/__scrml_engine_[0-9a-z]{8}_phase_transitions/);
+    expect(beta.js).toMatch(/__scrml_engine_[0-9a-z]{8}_phase_transitions/);
+    expect(nameOf(alpha.js)).not.toBe(nameOf(beta.js));
   });
 
   test("nsName is BUILT and ready — it is the shape N4's fix uses", () => {
@@ -283,26 +286,32 @@ describe("chunk-namespacing N4: KNOWN-OPEN, pinned", () => {
 });
 
 // ---------------------------------------------------------------------------
-// N2 / N3 — STILL OPEN. Pinned as such so the gap is visible rather than
-// implied by absence, and so closing it flips a test rather than adding one.
+// N2 / N3 — CLOSED (S286). Pinned so the closure is visible: N2 keys through a
+// per-chunk `_scrml_cs_key`, N3 wraps each chunk body in its own IIFE.
 // ---------------------------------------------------------------------------
 
-describe("chunk-namespacing N2/N3: KNOWN-OPEN, pinned", () => {
-  test("N2 — two pages that both declare <rows> still share ONE store key", () => {
+describe("chunk-namespacing N2/N3: CLOSED — per-chunk cell scope + IIFE", () => {
+  test("N2 — two pages that both declare <rows> get a chunk-scoped store key", () => {
     const { alpha, beta } = compileTwoPageApp();
-    // Both write the bare key. Whichever chunk evaluates last wins the slot, and
-    // then renders ITS rows into the other page's fence. Closing N2 (the ruled
-    // chunk-local scope) must flip this assertion.
-    expect(alpha.js).toContain('_scrml_reactive_set("rows"');
-    expect(beta.js).toContain('_scrml_reactive_set("rows"');
+    // N2 CLOSED: each chunk keys through its own inlined `_scrml_cs_key`, so the
+    // bare `"rows"` argument resolves to `<token>$rows` at runtime — a per-chunk
+    // slot, no shared clobber. The callee is the chunk-local `_scrml_cs_` wrapper.
+    expect(alpha.js).toContain('_scrml_cs_reactive_set("rows"');
+    expect(beta.js).toContain('_scrml_cs_reactive_set("rows"');
+    // The two pages carry DISTINCT chunk tokens (fnv1a of their source paths).
+    const tokenOf = (js) => /chunk cell scope \(([0-9a-z]{8})\)/.exec(js)?.[1];
+    expect(tokenOf(alpha.js)).not.toBe(tokenOf(beta.js));
   });
 
-  test("N3 — two pages that both declare `type Phase` still emit the same const", () => {
+  test("N3 — two pages that both declare `type Phase` are IIFE-isolated (no redeclaration)", () => {
     const { alpha, beta } = compileTwoPageApp(ENGINE_PAGE);
-    // In the classic global lexical env this is a hard redeclaration
-    // SyntaxError, so the second chunk never evaluates at all.
+    // N3 CLOSED: each chunk body is wrapped in its own IIFE, so the emitted
+    // `const Phase_variants` is chunk-LOCAL — the pre-N3 classic-global-scope
+    // redeclaration SyntaxError can no longer occur.
     expect(alpha.js).toContain("const Phase_variants");
     expect(beta.js).toContain("const Phase_variants");
+    expect(alpha.js).toContain("(function() {");
+    expect(beta.js).toContain("(function() {");
   });
 });
 
