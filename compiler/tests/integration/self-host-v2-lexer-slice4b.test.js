@@ -26,6 +26,7 @@ import { tmpdir } from "os";
 
 import { compileScrml } from "../../src/api.js";
 import { lex as lex1 } from "../../native-parser/lex.js";
+import { unwrapChunkScope } from "../helpers/chunk-scope.js";
 
 const LEX_SCRML = join(import.meta.dir, "..", "..", "self-host-v2", "lex.scrml");
 
@@ -158,7 +159,10 @@ beforeAll(() => {
   if (errs.length > 0) {
     throw new Error("lex.scrml failed to compile: " + errs.map((e) => e.code + " " + (e.message ?? "")).join("; "));
   }
-  const client = readFileSync(join(outDir, "lex.client.js"), "utf8");
+  // BUG-6/N3: unwrap the per-chunk IIFE so the emitted `_scrml_lex_N` factory is
+  // a top-level declaration the appended `return` can reach (the IIFE otherwise
+  // hides it). No-op on an unscoped chunk.
+  const client = unwrapChunkScope(readFileSync(join(outDir, "lex.client.js"), "utf8"));
   const m = client.match(/function (_scrml_lex_\d+)\s*\(/);
   if (!m) throw new Error("could not find emitted _scrml_lex_N in client.js");
   const factory = new Function("_scrml_structural_eq", client + `\nreturn ${m[1]};`);
