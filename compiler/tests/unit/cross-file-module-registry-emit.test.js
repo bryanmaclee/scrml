@@ -113,9 +113,17 @@ describe("known-gaps-#6 §4 — importer read assertion", () => {
     expect(c.app.clientJs).toMatch(
       /const \{[^}]*\bbadgeColor\b[^}]*\} = _scrml_modules\["types\.client\.js"\];/,
     );
-    expect(c.app.clientJs).toMatch(
-      /const \{ UserBadge \} = _scrml_modules\["components\.client\.js"\];/,
-    );
+    // g-static-component-import-dead-destructure (S285): `UserBadge` is a
+    // markup-only COMPONENT (components.client.js registers `{}` for it). The
+    // importer no longer emits a dead `const { UserBadge } = _scrml_modules[...]`
+    // read — the component is inlined at mount by CE and is never referenced as a
+    // JS value, so the destructure was pure dead code that yielded `undefined`
+    // (and a page-killing TypeError the moment the dep <script> is stripped on the
+    // composition path). Since `UserBadge` was the ONLY import from
+    // components.scrml, the whole `_scrml_modules["components.client.js"]` read is
+    // elided.
+    expect(c.app.clientJs).not.toMatch(/const \{[^}]*\bUserBadge\b[^}]*\} = _scrml_modules/);
+    expect(c.app.clientJs).not.toMatch(/_scrml_modules\["components\.client\.js"\]/);
     expect(c.app.clientJs).not.toMatch(/^\s*import[ {]/m);
   });
 

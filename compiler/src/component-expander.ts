@@ -361,7 +361,7 @@ interface ExportInfo {
  *  ("user-component"); falls back to the legacy `isComponent` boolean only when
  *  `category` is absent (pre-NR / older registry records). The single canonical
  *  classification for the cross-file enrichment + helper-hoisting filters. */
-function exportIsUserComponent(info: ExportInfo | undefined): boolean {
+export function exportIsUserComponent(info: ExportInfo | undefined): boolean {
   if (!info) return false;
   return info.category === "user-component" || (info.category == null && info.isComponent === true);
 }
