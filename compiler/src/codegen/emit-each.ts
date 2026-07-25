@@ -37,9 +37,11 @@
  */
 
 import type { CompileContext } from "./context.ts";
+import type { EncodingContext } from "./context.ts";
 import type { EngineRewriteCtx } from "./emit-control-flow.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { isRcdataElement } from "../html-elements.js";
+import { CGError } from "./errors.ts";
 
 // ---------------------------------------------------------------------------
 // Bug 62 (S156, §51.0.G / §51.0.G.1 / §51.0.S) — engine `.advance(.X)` (state
@@ -845,7 +847,7 @@ function renderTemplateChildToJs(
         if (raw) ifCond = lowerEachExpr(raw, iterVarName);
         continue;                                 // conditional, not a setAttribute
       }
-      renderTemplateAttrToJs(attr, iterVarName, _iterIdxName, elVar, lines, indent, engineCtx);
+      renderTemplateAttrToJs(attr, iterVarName, _iterIdxName, elVar, lines, indent, engineCtx, child);
     }
 
     // 6nz-F4 edge 5 — RCDATA (<textarea>) reactive body in an each per-item
@@ -1418,6 +1420,7 @@ function renderTemplateAttrToJs(
   lines: string[],
   indent: string,
   engineCtx: EachEngineCtx | null = null,
+  elNode: any = null,
 ): void {
   if (!attr || typeof attr !== "object") return;
   const aName = String(attr.name ?? "");
@@ -1527,8 +1530,75 @@ function renderTemplateAttrToJs(
     return;
   }
 
-  // ---- bind: / ref= / transition: — deferred (needs reactive registry) ----
-  if (aName.startsWith("bind:") || aName === "ref" || aName.startsWith("transition:") ||
+  // ---- bind:* — value-side wiring for OUTER/shared reactive cells (i175) ----
+  // SPEC §5.4 mandates a `bind:*` directive generate BOTH the value binding and
+  // the write-back handler on `<input>`/`<textarea>`/`<select>`; there is no
+  // `<each>` carve-out. Wire the value side by REUSING the root-agnostic
+  // `emitBindDirectiveBody` helper (emit-bindings.ts) — the SAME lowering the
+  // top-level + match-arm paths use — with an each-specific `acquire` (we already
+  // hold the freshly-created element local `elVar`, so no querySelector) and
+  // `wrapEffect` (live-key the read-back effect to the reconcile lifecycle).
+  //
+  // OUT of scope (deferred LOUDLY): a bind RHS rooted in the iteration item
+  // (`bind:value=@.field` / `@<iterVar>.field`) — no outer cell to write back to.
+  // Emit the W-EACH-BIND-ITEM-FIELD-DEFERRED warning (§34) instead of wiring.
+  if (aName.startsWith("bind:")) {
+    const _bindSupport = _eachBindSupportCtx;
+    // Only a `variable-ref` RHS is wireable (a `bind:` with any other value kind
+    // is malformed and handled upstream). No support ctx (Tier-0 lift path) →
+    // fall back to the pre-i175 deferred comment (byte-identical).
+    if (_bindSupport && valKind === "variable-ref") {
+      const bVarRaw = String(val.name ?? "").replace(/^@/, "").trim();
+      const _recCtx = currentEachReconcileCtx();
+      const _destructure = _recCtx && _recCtx.iterVar === iterVarName ? _recCtx.destructure : null;
+      if (bindRhsIsIterationItem(bVarRaw, iterVarName, _destructure)) {
+        // Deferred: item-field two-way bind is out of scope for i175.
+        if (_bindSupport.errors) {
+          _bindSupport.errors.push(new CGError(
+            "W-EACH-BIND-ITEM-FIELD-DEFERRED",
+            `W-EACH-BIND-ITEM-FIELD-DEFERRED: \`${aName}=@${bVarRaw}\` inside \`<each>\` binds to an ` +
+            `iteration-item field. Two-way binding to a per-item field is not yet wired — the input ` +
+            `will render but will not write back. Bind to an outer reactive cell (\`${aName}=@cell\`), or ` +
+            `track the edit through an event handler for now. See SPEC §5.4 / §34.`,
+            (attr && attr.span) ? attr.span : { start: 0, end: 0 },
+            "warning",
+          ));
+        }
+        lines.push(`${indent}// each: per-item ${aName}=@${bVarRaw} → item-field binding DEFERRED (W-EACH-BIND-ITEM-FIELD-DEFERRED)`);
+        return;
+      }
+      // Outer / shared reactive cell — wire the value side via the shared helper.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { emitBindDirectiveBody } = require("./emit-bindings.ts") as {
+        emitBindDirectiveBody: (bAttr: any, mkNode: any, opts: any) => string[];
+      };
+      const mkNode = elNode ?? { tag: undefined, attributes: [] };
+      const bodyLines = emitBindDirectiveBody(attr, mkNode, {
+        // We hold the freshly-created element directly — return it, ignore the
+        // `data-scrml-bind-*` selector (there is no static-HTML placeholder here).
+        acquire: (_sel: string) => elVar,
+        // Live-key the read-back effect to the reconcile lifecycle so it disposes
+        // with the item on list-shrink (see wrapEachValueSideEffect).
+        wrapEffect: (effectCall: string) => wrapEachValueSideEffect(effectCall),
+        enumVarMap: _bindSupport.enumVarMap,
+        reactiveTypeMap: _bindSupport.reactiveTypeMap,
+        encodingCtx: _bindSupport.encodingCtx,
+        compoundLeafKeys: _bindSupport.compoundLeafKeys,
+        compoundParentNames: _bindSupport.compoundParentNames,
+      });
+      if (bodyLines.length > 0) {
+        for (const bl of bodyLines) lines.push(`${indent}${bl}`);
+        return;
+      }
+      // Helper returned nothing (unrecognized bind flavor) — fall through to the
+      // deferred comment below rather than emitting nothing.
+    }
+    lines.push(`${indent}// each: per-item directive attr "${aName}" deferred (Landing 2 scope: class:/events/interpolation/literals)`);
+    return;
+  }
+
+  // ---- ref= / transition: — deferred (needs reactive registry) ------------
+  if (aName === "ref" || aName.startsWith("transition:") ||
       aName.startsWith("in:") || aName.startsWith("out:")) {
     lines.push(`${indent}// each: per-item directive attr "${aName}" deferred (Landing 2 scope: class:/events/interpolation/literals)`);
     return;
@@ -1874,6 +1944,94 @@ function popEachReconcileCtx(): void { _eachReconcileCtxStack.pop(); }
 function currentEachReconcileCtx(): EachReconcileCtx | null {
   const n = _eachReconcileCtxStack.length;
   return n > 0 ? _eachReconcileCtxStack[n - 1] : null;
+}
+
+// ---------------------------------------------------------------------------
+// i175 (GH adopter #175) — per-item `bind:*` value-side wiring support.
+//
+// The per-item attr emitter (`renderTemplateAttrToJs`) is deep in the template
+// walk and only receives `engineCtx`, but the shared `emitBindDirectiveBody`
+// helper (emit-bindings.ts) needs the file-level enum / reactive-type / compound
+// maps plus a diagnostic sink. Rather than churn the signature of every
+// template-walk fn on the path, we stash those file-scoped inputs in a
+// module-level context set once per file at `emitEachBodyRenderForFile` entry —
+// mirroring the `_eachReconcileCtxStack` module-state pattern above (codegen is
+// synchronous + single-threaded, so this is safe). When it is UNSET (e.g. the
+// Tier-0 `${for…lift}` path in emit-lift.js reaches the template walk without
+// going through `emitEachBodyRenderForFile`) the bind branch falls back to the
+// pre-i175 deferred comment — byte-identical, no regression.
+// ---------------------------------------------------------------------------
+interface EachBindSupportCtx {
+  enumVarMap: Map<string, string>;
+  reactiveTypeMap: Map<string, string>;
+  compoundLeafKeys: Set<string>;
+  compoundParentNames: Set<string>;
+  encodingCtx: EncodingContext | null | undefined;
+  errors: CGError[] | null;
+}
+let _eachBindSupportCtx: EachBindSupportCtx | null = null;
+
+/**
+ * i175 — transform the `emitBindDirectiveBody` read-back effect call so it
+ * lives + disposes with the per-item node across keyed reconcile. The helper
+ * emits the effect as `_scrml_effect(() => { <el>.value = <read>; })`; we inject
+ * the SAME item-resolution prelude `maybeWrapEachPerItemEffect` uses right after
+ * the arrow body opens. The effect then subscribes to BOTH the outer cell (via
+ * the read) AND the container's item slot (via `_scrml_resolve_item`), so:
+ *   - outer-cell change → effect re-fires → item still present → `.value` set;
+ *   - item removed (list shrink) → `_scrml_reconcile_list` fires the item-slot
+ *     trigger → effect re-runs → `=== null` early-return → the outer-cell dep is
+ *     dropped on that run, so the effect goes inert (no write to a detached node,
+ *     no leak). This is the each-path analog of the arm path's `_disposers`
+ *     teardown — the reconcile lifecycle is the disposal mechanism.
+ *
+ * The WRITE-BACK `addEventListener` is emitted ONCE inside the reconcile
+ * `createFn` (which is NOT re-run for reused nodes), so there is no duplicate
+ * listener on same-key reconcile — only the effect needs the live-keying.
+ */
+function wrapEachValueSideEffect(effectCall: string): string {
+  const ctx = currentEachReconcileCtx();
+  if (!ctx) return effectCall; // no reconcile ctx → bare page-lifetime effect
+  const preludeParts = [
+    `let ${ctx.iterVar} = _scrml_resolve_item(${ctx.mountVar}, ${ctx.keyVar});`,
+    `if (${ctx.iterVar} === null) return;`,
+  ];
+  if (ctx.destructure) {
+    preludeParts.push(`const ${ctx.destructure[0]} = ${ctx.iterVar}.key;`);
+    preludeParts.push(`const ${ctx.destructure[1]} = ${ctx.iterVar}.value;`);
+  }
+  const prelude = preludeParts.join(" ");
+  const marker = "() => { ";
+  const idx = effectCall.indexOf(marker);
+  if (idx === -1) return effectCall; // unexpected shape — leave untouched
+  return (
+    effectCall.slice(0, idx + marker.length) +
+    prelude + " " +
+    effectCall.slice(idx + marker.length)
+  );
+}
+
+/**
+ * i175 — is a `bind:*` RHS rooted in the ITERATION ITEM (`@.field` / `@.` /
+ * `@<iterVar>.field`) rather than an OUTER / shared reactive cell? Item-rooted
+ * binds are DEFERRED (W-EACH-BIND-ITEM-FIELD-DEFERRED) — the per-item element
+ * has no outer reactive cell to write back to, and lowering the item-field
+ * two-way path is out of scope for i175. `bVarRaw` is the sigil-stripped bind
+ * name (e.g. `.text`, `todo.text`, `msg`).
+ */
+function bindRhsIsIterationItem(
+  bVarRaw: string,
+  iterVarName: string,
+  destructure: [string, string] | null,
+): boolean {
+  const raw = bVarRaw.trim();
+  if (raw === "" ) return false;
+  if (raw.startsWith(".")) return true; // `@.field` / `@.`
+  const dot = raw.indexOf(".");
+  const root = dot === -1 ? raw : raw.slice(0, dot);
+  if (root === iterVarName) return true;
+  if (destructure && (root === destructure[0] || root === destructure[1])) return true;
+  return false;
 }
 
 /**
@@ -2654,6 +2812,34 @@ export function emitEachBodyRenderForFile(
   // markers), and `<each in=@s.elements()>` lowers `.elements()` → map `.keys()`.
   const eachSetVarNames: Set<string> = collectSetVarNames(ctx.fileAST ?? fileAST);
 
+  // i175 — publish the file-scoped inputs the per-item `bind:*` value-side
+  // wiring needs (enum / reactive-type / compound maps + a diagnostic sink) via
+  // the module-level ctx read by `renderTemplateAttrToJs`. Built ONCE per file
+  // from the SAME `ctx.fileAST` the top-level + arm bind paths use, so the
+  // reused `emitBindDirectiveBody` produces the same special-case lowering.
+  {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { buildEnumVarMap, buildReactiveTypeMap } = require("./emit-bindings.ts") as {
+      buildEnumVarMap: (fileAST: any) => Map<string, string>;
+      buildReactiveTypeMap: (fileAST: any) => Map<string, string>;
+    };
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { collectCompoundLeafTargets } = require("./reactive-deps.ts") as {
+      collectCompoundLeafTargets: (fileAST: any) => { leafKeys: Set<string>; parentNames: Set<string> };
+    };
+    const _astForBinds = ctx.fileAST ?? fileAST;
+    const { leafKeys, parentNames } = collectCompoundLeafTargets(_astForBinds);
+    _eachBindSupportCtx = {
+      enumVarMap: buildEnumVarMap(_astForBinds),
+      reactiveTypeMap: buildReactiveTypeMap(_astForBinds),
+      compoundLeafKeys: leafKeys,
+      compoundParentNames: parentNames,
+      encodingCtx: ctx.encodingCtx,
+      errors: ctx.errors ?? null,
+    };
+  }
+
+  try {
   const eachBlocks = collectEachBlocks(fileAST);
   for (const node of eachBlocks) {
     // Tree-shake (rare): empty block.
@@ -2763,6 +2949,11 @@ export function emitEachBodyRenderForFile(
     dispatchers.push(`_scrml_each_renderers[${JSON.stringify(`each_${node.id}`)}] = ${renderFnName};`);
     dispatchers.push(`${renderFnName}();`);
     dispatchers.push(`_scrml_effect_static(${renderFnName});`);
+  }
+  } finally {
+    // i175 — drop the per-file bind-support ctx so a later caller (or the
+    // Tier-0 lift path) never reads a stale file's maps / error sink.
+    _eachBindSupportCtx = null;
   }
 
   return { renderFunctions, dispatchers };
