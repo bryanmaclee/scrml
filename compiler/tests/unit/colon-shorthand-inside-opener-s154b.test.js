@@ -55,7 +55,7 @@ import { parseEngineStateChildren } from "../../src/engine-statechild-parser.ts"
 import { parseMatchArms } from "../../src/match-statechild-parser.ts";
 import { compileScrml } from "../../src/api.js";
 import { rewriteColonShorthandPlacement } from "../../src/commands/migrate.js";
-import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
+import { foldChunkNamespacing, normalizeChunkToken } from "../helpers/chunk-scope.js";
 
 let TMP;
 beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "s154b-")); });
@@ -78,7 +78,10 @@ function getOut(result, key) {
   for (const [, v] of outputs) { if (v && typeof v === "object" && v[key]) return v[key]; }
   return "";
 }
-function getClientJs(result) { return foldChunkNamespacing(getOut(result, "clientJs")); }
+// normalizeChunkToken folds the per-file chunk-namespace token (a hash of the
+// distinct fixture basename) to a fixed placeholder, so a byte-identity compare
+// pins the BODY lowering, not the incidental per-source token.
+function getClientJs(result) { return normalizeChunkToken(foldChunkNamespacing(getOut(result, "clientJs"))); }
 // Normalize gensym counters + per-file client-js script name so two
 // STRUCTURALLY identical lowerings compare equal modulo placeholder ids.
 // The chunk-namespace token is STRIPPED first: these two fixtures are written to
