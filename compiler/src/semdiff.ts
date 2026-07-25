@@ -660,6 +660,40 @@ export function canonicalizeSourceBasename(content: string, stem: string): strin
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Chunk-namespace token neutralization — D2, chunk-namespacing (BUG-6/N2-N4)
+// ---------------------------------------------------------------------------
+//
+// chunk-namespacing mints a per-compilation-unit token — `fnv1aHash` of the
+// SOURCE PATH — and bakes it into the emitted chunk: the cell-scope prologue
+// banner `// --- chunk cell scope (<token>) ---`, the inlined key fn's
+// `"<token>$"` prefix, the N4 engine-derived names `__scrml_engine_<token>_…`,
+// and the mount attribute `data-scrml-engine-mount="<token>_…"`. Two BYTE-
+// IDENTICAL programs at different paths therefore differ ONLY by this token — a
+// cosmetic, path-derived difference the emit-identity compare must neutralize
+// (exactly like the source-basename stem above), or every renamed/moved file
+// reads false-behavioral.
+const NS_TOKEN_PLACEHOLDER = "__SCRML_NSTOK__";
+/**
+ * Replace every chunk-namespace token in `content` with a stable placeholder.
+ * Tokens are DISCOVERED from their structural emission sites (prologue banner,
+ * engine names, mount attribute) — not matched by a blanket `0[0-9a-z]{7}`
+ * sweep — so a user literal that merely looks token-shaped is never touched.
+ * Each discovered token is then replaced everywhere it occurs (the same token
+ * also appears in the `"<token>$"` key prefix), which is safe: it is a specific
+ * per-unit hash, not a value an author would coincidentally emit.
+ */
+export function canonicalizeChunkNamespaceToken(content: string): string {
+  if (!content) return content;
+  const tokens = new Set<string>();
+  for (const m of content.matchAll(/\/\/ --- chunk cell scope \(([0-9a-z]{8})\) ---/g)) tokens.add(m[1]);
+  for (const m of content.matchAll(/_{1,2}scrml_engine_([0-9a-z]{8})_/g)) tokens.add(m[1]);
+  for (const m of content.matchAll(/data-scrml-engine-mount="([0-9a-z]{8})_/g)) tokens.add(m[1]);
+  let out = content;
+  for (const tok of tokens) out = out.split(tok).join(NS_TOKEN_PLACEHOLDER);
+  return out;
+}
+
 /**
  * Collect the raw emitted artifacts for a version, deterministic + PATH-
  * INDEPENDENT. Base and head are the SAME logical program at two versions (often
@@ -696,7 +730,7 @@ function buildComparableCorpus(
     // D2 — neutralize the source-basename stem baked into emitted content BEFORE
     // canonicalization (in JS it lives inside string literals canonicalizeJs
     // preserves verbatim, so it must be rewritten first).
-    const deBased = canonicalizeSourceBasename(a.content, stem);
+    const deBased = canonicalizeChunkNamespaceToken(canonicalizeSourceBasename(a.content, stem));
     const body = JS_KINDS.has(a.kind) ? canonicalizeJs(deBased, renameMap) : deBased;
     return a.kind + CORPUS_KIND_SEP + body;
   });
