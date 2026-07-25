@@ -1,3 +1,29 @@
+<!-- ============================================================= -->
+<!-- S285 ADDENDUM (Peter/AdiPDesk, adopter lane) — bryan's S284    -->
+<!-- chunk-namespacing WRAP is UNCHANGED below (his critical path). -->
+<!-- ============================================================= -->
+
+# scrml — S285 addendum (Peter/AdiPDesk) — adopter lane; chunk-ns (bryan, below) untouched
+
+**Date:** 2026-07-24. `/boot` Profile A on **AdiPDesk** (Peter). Solo (bryan wrapped S284). `main` at `b274ed2b`, both repos clean. **4 PRs merged** — full detail in `changelog.md` S285 + delta-log `[S285]` + board `../scrml-support/handOffs/active-sessions/S285-peter.md`. This addendum is the irreducible; the chunk-namespacing critical-path arc (bryan's) is the S284 wrap immediately below, unchanged.
+
+**Landed (adopter/silent-failure lane, all gate-green + regression-tested):**
+- **#165 fully closed** — `#167` (initial control-anchors fold) → **`#171`** completed it (the fold was incomplete: filler-distance + `propagate`/`throw`/`match` guards; replaced with a direct `isControlFlowBoundary` scan-break). Server call no longer hoists above a returning guard.
+- **`#172`** — a client side-effect between two batched server calls is now a batch boundary (§19.9.9.2 + S3; the client scheduler was inconsistent with the CPS planner).
+- **`#173`** — a static-component import no longer emits a dead `_scrml_modules` destructure (HIGH; scrml-site page-kill).
+
+**Open for a fresh boot (Peter lane, queued — NOT started):**
+- **auto-await expression positions** (MED×2): `g-reactive-write-member-server-call-no-autoawait` + `g-match-arm-server-call-no-autoawait` — `@cell = serverFn().field` / server-call-in-match-arm emit a bare unawaited Promise → silent `undefined`. The scheduler/auto-await area, freshest context.
+- `g-match-without-for-plus-when-children-silent-undeclared-dispatch` (HIGH) — invented `<when>` children silently accepted → runtime ReferenceError; clean diagnostic fix.
+- `g-nested-for-lift-no-reconcile-on-cell-replace` (HIGH) — stale render on cell replace; reconciler internals.
+- The **amplification halves** of #173 (`g-composition-strip-eats-last-dep-script` · `g-runtime-script-tag-not-depth-prefixed`) — now non-fatal for static components but still real on the composition path.
+
+**Owed to bryan (tier-1, flagged not done):**
+- **§13.2.4 spec-coherence** (`#172`) — §13.2.4 ("parallelize independent server calls unless data dependency") reads in tension with §19.9.9.2; impl follows §19.9.9.2. Outbox notice: `incoming/2026-07-24-from-S285-peter-to-bryan-spec-coherence-13.2.4-vs-19.9.9.2.md`. SPEC.md not touched.
+- **latent-coupling hardening** (`#173`) — the static-component drop is by a proxy (`exportIsUserComponent`) not ground truth (`declaredBinding`); documented at the fix site + gap, bites only if value-consts ever get client bindings.
+
+---
+
 # scrml — Session 284 (bryan) — WRAP
 
 **Date:** 2026-07-24. `/boot` Profile A on **`bryan-maclee-ASUS-Vivobook`** (successor to S283/S282, same machine). **4 PRs merged** (#163 #164 #166 #168), `main` at `33360949`, coherence 0/0. Mechanical stream in `handOffs/delta-log.md [753]-[762]`; changelog S284. This carries the irreducible.
