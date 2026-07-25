@@ -228,7 +228,7 @@ describe("§1: GITI-001 — `@data = serverFn()` awaited before reactive set", (
     // The wrapped form — now carries the ss32-item-1 `.catch` error arm so a
     // rejected fetch/CPS stub surfaces via the scrml uncaught surface instead of
     // a browser-level unhandledrejection (catch-less silent drop).
-    expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*_scrml_reactive_set\("data",\s*await\s+_scrml_fetch_loadValue_\d+\(\)\s*\)\)\(\s*\)\.catch\(_scrml_async_err\s*=>\s*_scrml_error_boundary_log\("data",\s*_scrml_async_err\)\)\s*;/);
+    expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*_scrml_cs_reactive_set\("data",\s*await\s+_scrml_fetch_loadValue_\d+\(\)\s*\)\)\(\s*\)\.catch\(_scrml_async_err\s*=>\s*_scrml_error_boundary_log\("data",\s*_scrml_async_err\)\)\s*;/);
     // Must NOT be the unawaited form
     expect(js).not.toMatch(/_scrml_reactive_set\("data",\s*_scrml_fetch_loadValue_\d+\(\s*\)\s*\);/);
     // Must NOT be the catch-less floating IIFE (the pre-ss32 bug shape).
@@ -278,7 +278,7 @@ describe("§3: `<request id=\"req1\">` without url= drives the §6.7.7 settle ma
     expect(js).toContain("_scrml_request_req1.refetch = _scrml_request_req1_fetch;");
     // The success cell is populated ONLY on the happy path, BEFORE `.data` (so a
     // `<#R>.data`-gated render reading the cell sees it populated — no window).
-    expect(js).toMatch(/_scrml_reactive_set\("data", _scrml_data\);\s*\n\s*_scrml_request_req1\.data = _scrml_data;/);
+    expect(js).toMatch(/_scrml_cs_reactive_set\("data", _scrml_data\);\s*\n\s*_scrml_request_req1\.data = _scrml_data;/);
   });
 });
 
@@ -306,7 +306,7 @@ describe("§5: `@count = @count + 1` stays synchronous (regression guard)", () =
     expect(result.errors).toEqual([]);
     const js = result.outputs.get(plainFx).clientJs;
     // The count mutation must appear as a plain reactive-set
-    expect(js).toContain('_scrml_reactive_set("count"');
+    expect(js).toContain('_scrml_cs_reactive_set("count"');
     // And NOT inside an async IIFE
     expect(js).not.toMatch(/\(async\s*\(\s*\)\s*=>\s*_scrml_reactive_set\("count"/);
   });
@@ -354,7 +354,7 @@ describe("§6: GITI-001 wrap is context-aware (S84 fix-lift-async-iife-paren)", 
     // CORRECT: the on-mount `@data = loadValue()` is the GITI-001 STATEMENT-context
     // wrap at module init (well-formed, ends with `().catch(...);` — ss32-item-1
     // error arm).
-    expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*_scrml_reactive_set\("data",\s*await\s+_scrml_fetch_loadValue_\d+\(\s*\)\s*\)\)\(\s*\)\.catch\(_scrml_async_err\s*=>\s*_scrml_error_boundary_log\("data",\s*_scrml_async_err\)\)\s*;/);
+    expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*_scrml_cs_reactive_set\("data",\s*await\s+_scrml_fetch_loadValue_\d+\(\s*\)\s*\)\)\(\s*\)\.catch\(_scrml_async_err\s*=>\s*_scrml_error_boundary_log\("data",\s*_scrml_async_err\)\)\s*;/);
     // The on-mount's call must NOT be rendered into the DOM (the former bug shape).
     expect(js).not.toMatch(/el\.textContent\s*=\s*await\s*\(\(async\s*\(\s*\)\s*=>\s*_scrml_reactive_set\("data"/);
     expect(js).not.toMatch(/_scrml_render_value\(el, _scrml_fetch_loadValue_\d+\(\)\)/);
@@ -365,7 +365,7 @@ describe("§6: GITI-001 wrap is context-aware (S84 fix-lift-async-iife-paren)", 
     const js = result.outputs.get(exprCtxFx).clientJs;
     // The genuine markup interpolation inside <div><p> reads the cell the mount
     // effect populated — this is the ONLY display binding in the fixture.
-    expect(js).toMatch(/_scrml_render_value\(el, _scrml_reactive_get\("data"\)\)/);
+    expect(js).toMatch(/_scrml_render_value\(el, _scrml_cs_reactive_get\("data"\)\)/);
   });
 
   test("statement-context wrap (top-level or in fn body) still ends with `().catch(...);`", () => {
@@ -376,7 +376,7 @@ describe("§6: GITI-001 wrap is context-aware (S84 fix-lift-async-iife-paren)", 
     const result = compile(plainTopFx);
     const js = result.outputs.get(plainTopFx).clientJs;
     // Match the statement-form: `(async () => _scrml_reactive_set("data", await _scrml_fetch_loadValue_N()))().catch(_scrml_async_err => _scrml_error_boundary_log("data", _scrml_async_err));`
-    expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*_scrml_reactive_set\("data",\s*await\s+_scrml_fetch_loadValue_\d+\(\s*\)\s*\)\)\(\s*\)\.catch\(_scrml_async_err\s*=>\s*_scrml_error_boundary_log\("data",\s*_scrml_async_err\)\)\s*;/);
+    expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*_scrml_cs_reactive_set\("data",\s*await\s+_scrml_fetch_loadValue_\d+\(\s*\)\s*\)\)\(\s*\)\.catch\(_scrml_async_err\s*=>\s*_scrml_error_boundary_log\("data",\s*_scrml_async_err\)\)\s*;/);
   });
 });
 
@@ -498,7 +498,7 @@ describe("§8: ss41 — `!{}` error arm reads the resolved envelope (not the IIF
     const js = result.outputs.get(errArmHandlerFx).clientJs;
     const m = js.match(/const\s+(_scrml__scrml_result_\d+)\s*=\s*await\s+_scrml_fetch_loadData_\d+/);
     const rv = m[1];
-    expect(js).toMatch(new RegExp(`\\}\\s*else\\s*\\{\\s*_scrml_reactive_set\\("data",\\s*${rv}\\);`));
+    expect(js).toMatch(new RegExp(`\\}\\s*else\\s*\\{\\s*_scrml_cs_reactive_set\\("data",\\s*${rv}\\);`));
   });
 
   test("the `.catch` safety net + the lazy `_scrml_init_set` both survive", () => {
@@ -506,7 +506,7 @@ describe("§8: ss41 — `!{}` error arm reads the resolved envelope (not the IIF
     const js = result.outputs.get(errArmHandlerFx).clientJs;
     expect(js).toMatch(/\}\)\(\)\.catch\(_scrml_async_err\s*=>\s*_scrml_error_boundary_log\("data",\s*_scrml_async_err\)\)/);
     // The lazy initializer stays OUTSIDE the IIFE.
-    expect(js).toMatch(/_scrml_init_set\("data",\s*\(\)\s*=>\s*_scrml_fetch_loadData_\d+\(\)\)/);
+    expect(js).toMatch(/_scrml_cs_init_set\("data",\s*\(\)\s*=>\s*_scrml_fetch_loadData_\d+\(\)\)/);
   });
 
   test("output parses; no `;)` token sequence; no dead-promise guard", () => {
@@ -523,7 +523,7 @@ describe("§8: ss41 — `!{}` error arm reads the resolved envelope (not the IIF
     const js = result.outputs.get(plainTopFx).clientJs;
     // The plain `@data = loadValue()` (no `!{}`) keeps the ss32 single-line form:
     // `(async () => _scrml_reactive_set("data", await stub()))().catch(...)`.
-    expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*_scrml_reactive_set\("data",\s*await\s+_scrml_fetch_loadValue_\d+\(\)\s*\)\)\(\s*\)\.catch\(_scrml_async_err\s*=>\s*_scrml_error_boundary_log\("data",\s*_scrml_async_err\)\)\s*;/);
+    expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*_scrml_cs_reactive_set\("data",\s*await\s+_scrml_fetch_loadValue_\d+\(\)\s*\)\)\(\s*\)\.catch\(_scrml_async_err\s*=>\s*_scrml_error_boundary_log\("data",\s*_scrml_async_err\)\)\s*;/);
     // And it must NOT acquire the block-form IIFE (that is error-arm-only).
     expect(js).not.toMatch(/\(async\s*\(\s*\)\s*=>\s*\{\s*const\s+_scrml__scrml_result_\d+/);
   });

@@ -37,6 +37,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 // --- repro A: bind:value=@name on an input INSIDE a <match for=Phase> arm. ---
 // @phase starts .Editing so the Editing arm mounts at load; @name is the bound
@@ -124,7 +125,7 @@ describe("g-bindvalue-wiring-dropped-in-match-arm §1 — emit shape (arm body w
     expect(clientJs).toMatch(/_root\.querySelector\([^)]*data-scrml-bind-value/);
     expect(clientJs).toMatch(/addEventListener\("input"/);
     expect(clientJs).toMatch(/_disposers\.push\(_scrml_effect\(/);
-    expect(clientJs).toContain('_scrml_reactive_set("name", event.target.value)');
+    expect(clientJs).toContain('_scrml_cs_reactive_set("name", event.target.value)');
   });
 
   test("ENGINE state-child: the engine wire fn wires the inside bind:value identically", () => {
@@ -133,7 +134,7 @@ describe("g-bindvalue-wiring-dropped-in-match-arm §1 — emit shape (arm body w
     expect(clientJs).toMatch(/_root\.querySelector\([^)]*data-scrml-bind-value/);
     expect(clientJs).toMatch(/addEventListener\("input"/);
     expect(clientJs).toMatch(/_disposers\.push\(_scrml_effect\(/);
-    expect(clientJs).toContain('_scrml_reactive_set("draft", event.target.value)');
+    expect(clientJs).toContain('_scrml_cs_reactive_set("draft", event.target.value)');
   });
 
   test("MATCH arm: emitted client.js parses (no E-CODEGEN-INVALID-LOGIC)", () => {
@@ -163,9 +164,8 @@ describe("g-bindvalue-wiring-dropped-in-match-arm §2 — post-mount drive (real
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${clientJs}\n` +
-        `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
-        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`,
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
+        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`),
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));

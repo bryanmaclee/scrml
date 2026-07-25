@@ -60,6 +60,7 @@ import { compileScrml } from "../../src/api.js";
 import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function compileSource(src, fname) {
   const dir = mkdtempSync(join(tmpdir(), "tilde-snapshot-"));
@@ -108,7 +109,7 @@ describe("~snapshot = {...} codegen fix — orphan ~ no longer leaks (HU-5 Q-W35
       "</program>",
     ].join("\n");
 
-    const { clientJs } = compileSource(src, "minimal-snapshot.scrml");
+    const { clientJs: __cjRaw } = compileSource(src, "minimal-snapshot.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
 
     // E-MU-001 (lin tracker) may fire here — that's a pre-existing
     // surface tension with "~name = expr" form and the lin-tracker's
@@ -140,7 +141,7 @@ describe("~snapshot = {...} codegen fix — orphan ~ no longer leaks (HU-5 Q-W35
       "</program>",
     ].join("\n");
 
-    const { clientJs } = compileSource(src, "two-deps-snapshot.scrml");
+    const { clientJs: __cjRaw } = compileSource(src, "two-deps-snapshot.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
 
     expect(clientJs).toBeTruthy();
     expect(clientJs).not.toMatch(/let\s+_scrml_tilde_\d+\s*=\s*~/);
@@ -170,7 +171,7 @@ describe("~snapshot = {...} codegen fix — orphan ~ no longer leaks (HU-5 Q-W35
       "</program>",
     ].join("\n");
 
-    const { clientJs } = compileSource(src, "orphan-consumer.scrml");
+    const { clientJs: __cjRaw } = compileSource(src, "orphan-consumer.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
 
     expect(clientJs).toBeTruthy();
     // No raw "~" in expression position.

@@ -15,6 +15,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { chunkCellKey } from "../helpers/chunk-scope.js";
 
 // Register happy-dom as global DOM
 if (!globalThis.document) GlobalRegistrator.register();
@@ -43,9 +44,15 @@ function loadSample(baseName) {
 
   document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
 
+  // BUG-6: the chunk's cells live under ITS namespace (`<token>$name`), so a
+  // harness holding the GLOBAL accessor must key through the same token.
+  // `chunkCellKey` reads the token from the emitted prologue banner (degrading to
+  // the bare name for an unnamespaced chunk).
+  const key = chunkCellKey(clientJs);
+
   return {
-    get: (name) => window._scrml_reactive_get(name),
-    set: (name, val) => window._scrml_reactive_set(name, val),
+    get: (name) => window._scrml_reactive_get(key(name)),
+    set: (name, val) => window._scrml_reactive_set(key(name), val),
   };
 }
 

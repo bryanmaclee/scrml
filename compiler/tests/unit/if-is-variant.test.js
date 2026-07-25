@@ -25,6 +25,7 @@ import { generateHtml } from "../../src/codegen/emit-html.js";
 import { BindingRegistry } from "../../src/codegen/binding-registry.ts";
 import { resetVarCounter } from "../../src/codegen/var-counter.ts";
 import { runCG } from "../../src/code-generator.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -237,7 +238,7 @@ describe("§5: is .Variant compiles to === \"Variant\" in client JS", () => {
     const result = compile(node);
     const out = result.outputs.get("/test/app.scrml");
 
-    expect(out.clientJs).toContain('=== "Loading"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('=== "Loading"');
   });
 
   test("if={x is .Active} — client JS contains === \"Active\"", () => {
@@ -247,7 +248,7 @@ describe("§5: is .Variant compiles to === \"Variant\" in client JS", () => {
     const result = compile(node);
     const out = result.outputs.get("/test/app.scrml");
 
-    expect(out.clientJs).toContain('=== "Active"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('=== "Active"');
   });
 
   test("if={status is .Done} — client JS contains === \"Done\"", () => {
@@ -257,7 +258,7 @@ describe("§5: is .Variant compiles to === \"Variant\" in client JS", () => {
     const result = compile(node);
     const out = result.outputs.get("/test/app.scrml");
 
-    expect(out.clientJs).toContain('=== "Done"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('=== "Done"');
   });
 });
 
@@ -276,8 +277,8 @@ describe("§6: el.style.display emitted even when refs is empty (non-reactive is
     const result = compile(node);
     const out = result.outputs.get("/test/app.scrml");
 
-    expect(out.clientJs).toContain("_scrml_mount_template");
-    expect(out.clientJs).not.toContain("el.style.display");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_mount_template");
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("el.style.display");
   });
 
   test("if={state is .Loading} — client JS contains _scrml_effect", () => {
@@ -287,7 +288,7 @@ describe("§6: el.style.display emitted even when refs is empty (non-reactive is
     const result = compile(node);
     const out = result.outputs.get("/test/app.scrml");
 
-    expect(out.clientJs).toContain("_scrml_effect");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_effect");
   });
 
   test("if={state is .Loading} — client JS contains _scrml_unmount_scope on falsy (Phase 2c B1)", () => {
@@ -300,7 +301,7 @@ describe("§6: el.style.display emitted even when refs is empty (non-reactive is
     const result = compile(node);
     const out = result.outputs.get("/test/app.scrml");
 
-    expect(out.clientJs).toContain("_scrml_unmount_scope");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_unmount_scope");
   });
 });
 
@@ -316,7 +317,7 @@ describe("§7: @state is .Variant reactive expression compiles correctly", () =>
     const result = compile(node);
     const out = result.outputs.get("/test/app.scrml");
 
-    expect(out.clientJs).toContain('_scrml_reactive_get("state")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_get("state")');
   });
 
   test("if={@state is .Loading} — client JS contains === \"Loading\"", () => {
@@ -326,7 +327,7 @@ describe("§7: @state is .Variant reactive expression compiles correctly", () =>
     const result = compile(node);
     const out = result.outputs.get("/test/app.scrml");
 
-    expect(out.clientJs).toContain('=== "Loading"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('=== "Loading"');
   });
 
   test("if={@state is .Loading} — client JS contains mount/unmount controller (Phase 2c B1)", () => {
@@ -337,8 +338,8 @@ describe("§7: @state is .Variant reactive expression compiles correctly", () =>
     const result = compile(node);
     const out = result.outputs.get("/test/app.scrml");
 
-    expect(out.clientJs).toContain("_scrml_mount_template");
-    expect(out.clientJs).toContain("_scrml_unmount_scope");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_mount_template");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_unmount_scope");
   });
 });
 
@@ -365,8 +366,8 @@ describe("§8: full pipeline round-trip for if={state is .Loading}", () => {
     // Phase 2c: HTML emits template + marker; client JS emits mount/unmount.
     expect(out.html).toContain('<template id="');
     expect(out.html).toContain("scrml-if-marker:");
-    expect(out.clientJs).toContain('=== "Loading"');
-    expect(out.clientJs).toContain("_scrml_mount_template");
+    expect(foldChunkNamespacing(out.clientJs)).toContain('=== "Loading"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_mount_template");
   });
 });
 
@@ -394,7 +395,7 @@ describe("§9: full pipeline round-trip for if={@state is .Active}", () => {
     // _scrml_reactive_get("state") in the controller's condition expression.
     expect(out.html).toContain('<template id="');
     expect(out.html).toContain("scrml-if-marker:");
-    expect(out.clientJs).toContain('_scrml_reactive_get("state")');
-    expect(out.clientJs).toContain('=== "Active"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_get("state")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('=== "Active"');
   });
 });

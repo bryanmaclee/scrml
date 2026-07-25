@@ -29,6 +29,7 @@ import * as acorn from "acorn";
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, readdirSync, rmSync, copyFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, basename, dirname } from "node:path";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const CLI = join(import.meta.dir, "../../bin/scrml.js");
 const MF_EXAMPLE = join(import.meta.dir, "../../../examples/22-multifile");
@@ -309,7 +310,7 @@ describe("§4 g-nav-chunk-lexical-collision dissolves under module scope", () =>
     return dir;
   }
 
-  test("classic: two chunks both declare top-level `const Phase_toEnum` → collide in one script scope", () => {
+  test("classic: two chunks' top-level `const Phase_toEnum` are IIFE-isolated → no collision in one script scope", () => {
     const src = writeCollisionApp();
     const { out, r } = compileDir(src, "classic");
     expect(r.status).toBe(0);
@@ -317,11 +318,14 @@ describe("§4 g-nav-chunk-lexical-collision dissolves under module scope", () =>
     const detail = readFileSync(join(out, "detail.client.js"), "utf8");
     expect(app).toContain("const Phase_toEnum");
     expect(detail).toContain("const Phase_toEnum");
-    // Simulate the shared classic-<script> document scope: concatenating both
-    // bodies into ONE scope is a hard redeclaration SyntaxError — the collision.
+    // chunk-namespacing N3 (S282): each chunk body is wrapped in its own IIFE, so
+    // `const Phase_toEnum` is chunk-LOCAL. Concatenating both into ONE script scope
+    // (the shared classic-<script> document) NO LONGER collides — the exact
+    // `g-nav-chunk-lexical-collision` redeclaration SyntaxError this arc dissolves.
+    // (Pre-N3 this concatenation threw `already been declared`.)
     expect(() =>
       acorn.parse(app + "\n" + detail, { ecmaVersion: 2022, sourceType: "script" }),
-    ).toThrow(/already been declared/);
+    ).not.toThrow();
   });
 
   test("esm: each chunk's `Phase_toEnum` is module-local → the two modules coexist", async () => {

@@ -35,6 +35,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync, readdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { chunkCellKey } from "../helpers/chunk-scope.js";
 
 // Faithful flogence drawer shape: visible header reads p.name (key field); drawer is
 // hidden-at-mount (static `hidden` class) + reactive `class:hidden` gated on a SEPARATE
@@ -109,9 +110,11 @@ describe("g-each-item-hidden-subtree-text-reconcile (guard)", () => {
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));
+    // BUG-6: key the bare-global writes through the chunk token.
+    const cellKey = chunkCellKey(clientJs);
     return {
-      set: (n, v) => globalThis.__set__(n, v),
-      setRaw: (n, v) => globalThis.__setRaw__(n, v),
+      set: (n, v) => globalThis.__set__(cellKey(n), v),
+      setRaw: (n, v) => globalThis.__setRaw__(cellKey(n), v),
       val: () => [...document.querySelectorAll(".val")].map((n) => n.textContent.trim()),
       hdr: () => [...document.querySelectorAll(".hdr")].map((n) => n.textContent.trim()),
       drawerHidden: () => [...document.querySelectorAll(".drawer")].map((n) => n.classList.contains("hidden")),

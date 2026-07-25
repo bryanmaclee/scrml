@@ -23,6 +23,7 @@ import { writeFileSync, mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const acorn = require("acorn");
 
@@ -67,9 +68,9 @@ describe("nested `!{}` inside an arm body does not leak the structural wrapper",
     const out = result.outputs ? [...result.outputs.values()][0] : null;
     expect(out?.clientJs).toBeTruthy();
     // The inner `!{ }` structural wrapper must NOT leak; both arm writes must emit.
-    expect(out.clientJs).not.toContain("!{");
-    expect(out.clientJs).toContain('_scrml_reactive_set("inner", "y")');
-    expect(out.clientJs).toContain('_scrml_reactive_set("outer", "x")');
-    expect(() => acorn.parse(out.clientJs, { ecmaVersion: 2022, sourceType: "module" })).not.toThrow();
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("!{");
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_set("inner", "y")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_set("outer", "x")');
+    expect(() => acorn.parse(foldChunkNamespacing(out.clientJs), { ecmaVersion: 2022, sourceType: "module" })).not.toThrow();
   });
 });

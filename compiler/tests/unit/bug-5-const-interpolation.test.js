@@ -267,7 +267,7 @@ describe("§5: regression — `${@var}` interpolation still uses synchronous rea
     // (a markup-typed value renders as a node; a primitive keeps textContent)
     // instead of the bare `el.textContent = expr`. Same reactive `_scrml_effect`
     // subscription; the display call is the only shape change.
-    expect(js).toMatch(/_scrml_effect\(function\(\)\s*\{\s*_scrml_render_value\(el,\s*_scrml_reactive_get\("count"\)\)/);
+    expect(js).toMatch(/_scrml_effect\(function\(\)\s*\{\s*_scrml_render_value\(el,\s*_scrml_cs_reactive_get\("count"\)\)/);
   });
 });
 
@@ -424,7 +424,7 @@ describe("§11 (Phase 2): Anomaly B filter preserves side-effecting bare-exprs i
     // `_scrml_reactive_set("count", _scrml_reactive_get("count") + 1);` at
     // file scope. Phase 2's filter matches only pure-read shapes; assignment
     // shapes (with `=` operator) are preserved.
-    expect(js).toMatch(/_scrml_reactive_set\("count",/);
+    expect(js).toMatch(/_scrml_cs_reactive_set\("count",/);
   });
 });
 
@@ -455,7 +455,7 @@ describe("§12 (ss3 item7 / giti-006): dotted-path `${@data.name}` interpolation
   test("the render-effect inside DOMContentLoaded is STILL emitted (correct rendering preserved)", () => {
     const result = compile(pathReadFx);
     const js = result.outputs.get(pathReadFx).clientJs;
-    expect(js).toMatch(/_scrml_effect\(function\(\)\s*\{\s*_scrml_render_value\(el,\s*_scrml_reactive_get\("data"\)\.name\)/);
+    expect(js).toMatch(/_scrml_effect\(function\(\)\s*\{\s*_scrml_render_value\(el,\s*_scrml_cs_reactive_get\("data"\)\.name\)/);
   });
 
   test("emitted client.js parses as JS (node --check equivalent)", () => {
@@ -474,7 +474,7 @@ describe("§12 (ss3 item7 / giti-006): dotted-path `${@data.name}` interpolation
     // fetch resolves, a file-scope `null.name` throws at module-init.
     expect(fileScope).not.toMatch(/^\s*_scrml_reactive_get\("data"\)\.name\s*;\s*$/m);
     // The async init wiring (server-fn fetch + reactive_set) is preserved.
-    expect(js).toMatch(/_scrml_reactive_set\("data",\s*await\s+_scrml_fetch_loadUser_\d+\(\)\)/);
+    expect(js).toMatch(/_scrml_cs_reactive_set\("data",\s*await\s+_scrml_fetch_loadUser_\d+\(\)\)/);
   });
 
   test("GUARD: a method-call on a reactive read (`${@items.join(\",\")}`) is NOT suppressed — side effects preserved", () => {
@@ -485,6 +485,6 @@ describe("§12 (ss3 item7 / giti-006): dotted-path `${@data.name}` interpolation
     const result = compile(methodCallFx);
     expect(result.errors).toEqual([]);
     const js = result.outputs.get(methodCallFx).clientJs;
-    expect(js).toMatch(/_scrml_reactive_get\("items"\)\.join\(/);
+    expect(js).toMatch(/_scrml_cs_reactive_get\("items"\)\.join\(/);
   });
 });

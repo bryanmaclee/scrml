@@ -29,6 +29,7 @@ import { compileScrml } from "../../src/api.js";
 import { writeFileSync, mkdirSync, rmSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function compileSrc(src, baseName) {
   const tmp = join(tmpdir(), `scrml-g-fanc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
@@ -77,13 +78,13 @@ describe("g-failable-arm-nested-constructor-crash §1: nested ctor in `!{}` arm"
   });
 
   test("no string-invoked-as-function mangle in emitted JS", () => {
-    const { clientJs, cleanup } = compileSrc(src, "fanc-nested-2");
+    const { clientJs: __cjRaw, cleanup } = compileSrc(src, "fanc-nested-2"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).not.toMatch(STRING_CALL_MANGLE);
     cleanup();
   });
 
   test("the inner constructor lowers to a valid frozen-enum constructor call", () => {
-    const { clientJs, cleanup } = compileSrc(src, "fanc-nested-3");
+    const { clientJs: __cjRaw, cleanup } = compileSrc(src, "fanc-nested-3"); const clientJs = foldChunkNamespacing(__cjRaw);
     // err: LoadError.NotFound( ... )  — NOT  err: "NotFound"( ... )
     expect(clientJs).toMatch(/variant:\s*"Failed",\s*data:\s*\{\s*err:\s*LoadError\.NotFound\s*\(/);
     cleanup();
@@ -113,7 +114,7 @@ describe("g-failable-arm-nested-constructor-crash §2: qualified-direct ctor in 
   ].join("\n");
 
   test("no string-call mangle; collapses to frozen-enum constructor call", () => {
-    const { result, clientJs, cleanup } = compileSrc(src, "fanc-qual-1");
+    const { result, clientJs: __cjRaw, cleanup } = compileSrc(src, "fanc-qual-1"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(codes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect(clientJs).not.toMatch(STRING_CALL_MANGLE);
     expect(clientJs).toMatch(/_scrml_reactive_set\("held",\s*LoadError\.NotFound\s*\(/);
@@ -137,7 +138,7 @@ describe("g-failable-arm-nested-constructor-crash §3: plain-fn-body control", (
   ].join("\n");
 
   test("plain-fn body lowers the qualified ctor to a member-access call (unchanged)", () => {
-    const { clientJs, cleanup } = compileSrc(src, "fanc-control-1");
+    const { clientJs: __cjRaw, cleanup } = compileSrc(src, "fanc-control-1"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).not.toMatch(STRING_CALL_MANGLE);
     expect(clientJs).toMatch(/return LoadError\.NotFound\(rid\)/);
     cleanup();
@@ -162,7 +163,7 @@ describe("g-failable-arm-nested-constructor-crash §4: unit-variant read unaffec
   ].join("\n");
 
   test("qualified unit-variant read resolves to the variant value, not a call", () => {
-    const { clientJs, cleanup } = compileSrc(src, "fanc-unitread-1");
+    const { clientJs: __cjRaw, cleanup } = compileSrc(src, "fanc-unitread-1"); const clientJs = foldChunkNamespacing(__cjRaw);
     // The qualified unit READ `Mode::Big` (no parens) must resolve to the variant
     // value (`Mode.Big`, which === "Big" at runtime) — it must NOT collapse to a
     // `Mode.Big(...)` constructor CALL (the collapse only applies to the call form

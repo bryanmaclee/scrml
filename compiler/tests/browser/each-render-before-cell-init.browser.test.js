@@ -38,6 +38,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope, foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // The bug shape: `<each in=@CELL>` over a SAME-PROGRAM cell, NO `<empty>` block.
 const NONEMPTY_SRC = `<program>
@@ -98,9 +99,11 @@ describe("each-render-before-cell-init §1 — emit ordering (cell-init before d
   });
 
   test("the _scrml_reactive_set cell-init is emitted BEFORE the each-render dispatcher call", () => {
-    const { clientJs } = compileToOutputs(NONEMPTY_SRC, "no-empty");
+    // namespace-folded view: pin the ORDERING contract (raw accessor names)
+    // independent of the BUG-6 `_scrml_cs_` callee rename.
+    const clientJs = foldChunkNamespacing(compileToOutputs(NONEMPTY_SRC, "no-empty").clientJs);
     const setIdx = clientJs.indexOf('_scrml_reactive_set("items"');
-    const dispatchIdx = clientJs.search(/_scrml_each_render_\d+\(\);/);
+    const dispatchIdx = clientJs.search(/_scrml_each_render_[0-9a-z]{8}_\d+\(\);/);
     expect(setIdx).toBeGreaterThan(-1);
     expect(dispatchIdx).toBeGreaterThan(-1);
     // Root fix: cell-init precedes the synchronous initial render call.
@@ -134,9 +137,8 @@ describe("each-render-before-cell-init §2 — real module-init order mounts wit
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${clientJs}\n` +
-        `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
-        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`,
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
+        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`),
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));

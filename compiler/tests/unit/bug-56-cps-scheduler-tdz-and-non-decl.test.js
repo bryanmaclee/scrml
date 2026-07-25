@@ -38,6 +38,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { compileScrml } from "../../src/api.js";
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const FIXTURE_DIR = join(import.meta.dir, "__fixtures__/bug-56");
 
@@ -69,7 +70,7 @@ function compileSource(name, src) {
     }
   }
   findClient(outDir);
-  return clientJs;
+  return foldChunkNamespacing(clientJs);
 }
 
 // ---------------------------------------------------------------------------

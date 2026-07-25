@@ -52,6 +52,7 @@ import { compileScrml } from "../../src/api.js";
 import { writeFileSync, mkdirSync, rmSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers (mirrors error-handler-terminator-arms.test.js)
@@ -393,7 +394,7 @@ describe("R25-Bug-38 §10: end-to-end — multi-line arm body compiles to clean 
     const result = compileScrml({ inputFiles: [srcFile], outputDir: outDir });
     expect(result.errors).toHaveLength(0);
 
-    const clientJs = readFileSync(join(outDir, "r25-bug-38.client.js"), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "r25-bug-38.client.js"), "utf8")));
     // The R25-Bug-38 corrupt wrap MUST NOT appear
     expect(clientJs).not.toMatch(/_scrml_\w+\s*=\s*_scrml_reactive_set\("x", "missing"\)/);
     expect(clientJs).not.toMatch(/_scrml_\w+\s*=\s*_scrml_reactive_set\("x", "empty"\)/);
@@ -440,7 +441,7 @@ describe("R25-Bug-38 §11: end-to-end — `let r = ...` workaround form", () => 
     const result = compileScrml({ inputFiles: [srcFile], outputDir: outDir });
     expect(result.errors).toHaveLength(0);
 
-    const clientJs = readFileSync(join(outDir, "r25-bug-38-letr.client.js"), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "r25-bug-38-letr.client.js"), "utf8")));
     // r binds to _result (the call's tagged-object on error, success value on ok)
     expect(clientJs).toMatch(/var r = _scrml_\w+_\d+\s*;/);
     // Reactive sets fire
@@ -484,7 +485,7 @@ describe("R25-Bug-38 §12: end-to-end — emitted function is node-parseable", (
     const result = compileScrml({ inputFiles: [srcFile], outputDir: outDir });
     expect(result.errors).toHaveLength(0);
 
-    const clientJs = readFileSync(join(outDir, "r25-bug-38-parse.client.js"), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "r25-bug-38-parse.client.js"), "utf8")));
     // Slice the _scrml_attempt_N function body and parse via new Function.
     // S138 Bug 9 L1 — accept optional `async` prefix; the L1 fix populates
     // route.functionName so transitive client-callers correctly emit as
@@ -529,7 +530,7 @@ describe("C5 (R27): `;` inside a string literal in an `!{}` arm body", () => {
     const outDir = join(tmp, "dist");
     mkdirSync(outDir, { recursive: true });
     const result = compileScrml({ inputFiles: [srcFile], outputDir: outDir });
-    const clientJs = readFileSync(join(outDir, `${baseName}.client.js`), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, `${baseName}.client.js`), "utf8")));
     return { result, clientJs, cleanup: () => rmSync(tmp, { recursive: true, force: true }) };
   }
 
@@ -550,7 +551,7 @@ describe("C5 (R27): `;` inside a string literal in an `!{}` arm body", () => {
       "<p>${@msg}</p>",
       "</program>",
     ].join("\n");
-    const { result, clientJs, cleanup } = compileSrc(src, "c5-double");
+    const { result, clientJs: __cjRaw, cleanup } = compileSrc(src, "c5-double"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(result.errors).toHaveLength(0);
     expect(clientJs).toContain('_scrml_reactive_set("msg", "write failed; rolled back")');
     expect(clientJs).not.toContain('"write failed)');
@@ -577,7 +578,7 @@ describe("C5 (R27): `;` inside a string literal in an `!{}` arm body", () => {
       "<p>${@msg}</p><p>${@other}</p><p>${@tpl}</p>",
       "</program>",
     ].join("\n");
-    const { result, clientJs, cleanup } = compileSrc(src, "c5-multi");
+    const { result, clientJs: __cjRaw, cleanup } = compileSrc(src, "c5-multi"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(result.errors).toHaveLength(0);
     expect(clientJs).toContain("single; quoted; semis");
     expect(clientJs).toContain("double; quote");

@@ -53,6 +53,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { compileScrml } from "../../src/api.js";
 import { readFileSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../..");
 const TODOMVC_PATH = join(REPO_ROOT, "benchmarks/todomvc/app.scrml");
@@ -183,7 +184,7 @@ describe("§A: TodoMVC fixture (benchmarks/todomvc/app.scrml) — post Bug 5 fix
   test("edit-mode markup is wired (<input class=\"edit\"> emitted inside lift body) — S89 anchor", () => {
     const result = compileScrml({ inputFiles: [TODOMVC_PATH], outputDir: FIXTURE_OUTPUT, write: false });
     expect(result.errors).toEqual([]);
-    const js = result.outputs.get(TODOMVC_PATH).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(TODOMVC_PATH).clientJs);
     // The edit input element must be created in the lift create-item factory.
     expect(js).toMatch(/document\.createElement\("input"\)/);
     // The edit input class is "edit" (canonical TodoMVC).
@@ -206,7 +207,7 @@ describe("§A: TodoMVC fixture (benchmarks/todomvc/app.scrml) — post Bug 5 fix
 
   test("activeCount() preserves .filter(cb).length callback (Bug 5 anchor)", () => {
     const result = compileScrml({ inputFiles: [TODOMVC_PATH], outputDir: FIXTURE_OUTPUT, write: false });
-    const js = result.outputs.get(TODOMVC_PATH).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(TODOMVC_PATH).clientJs);
     // The activeCount function body must contain the callback returning `!t.completed`.
     expect(js).toMatch(/_scrml_activeCount_\d+\s*\(\s*\)\s*\{[^}]*\.filter\(\s*function/);
     expect(js).toMatch(/return\s+!\s*t\s*\.\s*completed/);
@@ -216,7 +217,7 @@ describe("§A: TodoMVC fixture (benchmarks/todomvc/app.scrml) — post Bug 5 fix
 
   test("completedCount() preserves .filter(cb).length callback (Bug 5 anchor)", () => {
     const result = compileScrml({ inputFiles: [TODOMVC_PATH], outputDir: FIXTURE_OUTPUT, write: false });
-    const js = result.outputs.get(TODOMVC_PATH).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(TODOMVC_PATH).clientJs);
     expect(js).toMatch(/_scrml_completedCount_\d+\s*\(\s*\)\s*\{[^}]*\.filter\(\s*function/);
     expect(js).toMatch(/return\s+t\s*\.\s*completed/);
     expect(js).not.toMatch(/_scrml_completedCount_\d+\s*\(\s*\)\s*\{[^}]*\.filter\(\s*\)\.length/);
@@ -231,7 +232,7 @@ describe("§B: lift-template attribute parser — current-broken-output repros",
   test("§B.1 parens class:NAME=(expr) preserves parent element <li> (FIXED by LIFT-1 patch)", () => {
     const result = compile(liftParensClassFx);
     expect(result.errors).toEqual([]);
-    const js = result.outputs.get(liftParensClassFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(liftParensClassFx).clientJs);
     // LIFT-1 FIX verified: the lift element (_scrml_lift_el_N) is now "li", not the
     // broken "div" fallback that occurred when parseLiftTag returned null and the
     // rootTag default was used.
@@ -247,7 +248,7 @@ describe("§B: lift-template attribute parser — current-broken-output repros",
   test("§B.2 bind:value=@var inside lift emits two-way wiring (FIXED by LIFT-2 patch)", () => {
     const result = compile(liftBindValueFx);
     expect(result.errors).toEqual([]);
-    const js = result.outputs.get(liftBindValueFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(liftBindValueFx).clientJs);
     // LIFT-2 FIX: no literal setAttribute("bind:value", ...) call.
     expect(js).not.toMatch(/setAttribute\("bind:value"/);
     // Two-way wiring: addEventListener on "input" + reactive get/set/subscribe.
@@ -260,7 +261,7 @@ describe("§B: lift-template attribute parser — current-broken-output repros",
   test("§B.3 if=@expr inside lift emits display toggle (FIXED by LIFT-3 patch)", () => {
     const result = compile(liftIfExprFx);
     expect(result.errors).toEqual([]);
-    const js = result.outputs.get(liftIfExprFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(liftIfExprFx).clientJs);
     // LIFT-3 FIX: no literal setAttribute("if", ...) call.
     expect(js).not.toMatch(/setAttribute\("if"/);
     // Display-style toggle + subscription to the reactive cell.
@@ -276,7 +277,7 @@ describe("§B: lift-template attribute parser — current-broken-output repros",
   test("§B.4 onkeydown=fn() inside lift wraps without event-threading (SPEC §5.2.2)", () => {
     const result = compile(liftOnKeydownFx);
     expect(result.errors).toEqual([]);
-    const js = result.outputs.get(liftOnKeydownFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(liftOnKeydownFx).clientJs);
     // S96 Bug 14 — SPEC §5.2.2 normative: `onclick=fn()` SHALL emit
     // `function(event) { fn(); }`. The wrapper takes `event` (for the
     // listener signature) but does NOT forward it into `fn`. The pre-S96

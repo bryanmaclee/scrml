@@ -40,6 +40,7 @@ import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Script } from "node:vm";
 import { tmpdir } from "node:os";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // OS-portable temp root (see note in s144 test): hardcoded "/tmp/…" is drive-less
 // on Windows and mismatches the compiler's resolve()-to-absolute output key.
@@ -145,7 +146,7 @@ describe("§1 inline ?{} in a match arm → server-call boundary + client contin
 
   test("client.js contains NO raw SQL token / no _scrml_sql leak and parses as a classic script", () => {
     const { result, filePath } = compile(dir, "app.scrml", SOURCE(dir));
-    const clientJs = clientJsFor(result, filePath);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(clientJsFor(result, filePath)));
     expect(clientJs).not.toContain("_scrml_sql");
     expect(clientJs).not.toContain("?{");
     expect(clientJs).not.toContain("INSERT INTO todos");
@@ -155,7 +156,7 @@ describe("§1 inline ?{} in a match arm → server-call boundary + client contin
 
   test("the following `@items = ?{SELECT}` stays client-side as the CPS continuation", () => {
     const { result, filePath } = compile(dir, "app.scrml", SOURCE(dir));
-    const clientJs = clientJsFor(result, filePath);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(clientJsFor(result, filePath)));
     // The reactive cell write is performed on the client from the server result.
     expect(clientJs).toContain('_scrml_reactive_set("items"');
     // The client fetches the server route exactly once (single server batch).
@@ -209,7 +210,7 @@ describe("§2 inline ?{} in an if branch → no spurious E-RI-002; CPS-split", (
 
   test("client.js has no SQL leak, parses, and sets @items client-side", () => {
     const { result, filePath } = compile(dir, "app.scrml", SOURCE(dir));
-    const clientJs = clientJsFor(result, filePath);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(clientJsFor(result, filePath)));
     expect(clientJs).not.toContain("_scrml_sql");
     expect(clientJs).not.toContain("INSERT INTO todos");
     expect(clientJs).toContain('_scrml_reactive_set("items"');
@@ -256,7 +257,7 @@ describe("§3 inline ?{} in a for-loop body → server-call boundary", () => {
   test("the loop-body INSERT runs server-side; client.js carries no SQL and parses", () => {
     const { result, filePath } = compile(dir, "app.scrml", SOURCE(dir));
     expect(serverJsFor(result, filePath)).toContain("INSERT INTO todos");
-    const clientJs = clientJsFor(result, filePath);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(clientJsFor(result, filePath)));
     expect(clientJs).not.toContain("_scrml_sql");
     expect(() => new Script(clientJs)).not.toThrow();
   });
@@ -293,7 +294,7 @@ describe("§4 regression — top-level inline ?{} still CPS-splits (P1)", () => 
     const { result, filePath } = compile(dir, "app.scrml", SOURCE(dir));
     expect(result.errors ?? []).toEqual([]);
     expect(serverJsFor(result, filePath)).toContain("INSERT INTO todos");
-    const clientJs = clientJsFor(result, filePath);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(clientJsFor(result, filePath)));
     expect(clientJs).not.toContain("_scrml_sql");
     expect(clientJs).toContain('_scrml_reactive_set("items"');
     expect(() => new Script(clientJs)).not.toThrow();
@@ -341,7 +342,7 @@ describe("§5 regression — server-fn call in a match arm still compiles (P3)",
     expect(errorsByCode(result, "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(errorsByCode(result, "E-CG-006")).toHaveLength(0);
     expect(result.errors ?? []).toEqual([]);
-    const clientJs = clientJsFor(result, filePath);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(clientJsFor(result, filePath)));
     expect(clientJs).not.toContain("_scrml_sql");
     expect(() => new Script(clientJs)).not.toThrow();
   });
@@ -390,7 +391,7 @@ describe("§6 regression — named server fn with a match+?{} called from a hand
     const serverJs = serverJsFor(result, filePath);
     expect(serverJs).toContain("INSERT INTO todos");
     expect(serverJs).toContain("await (async function() {");
-    const clientJs = clientJsFor(result, filePath);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(clientJsFor(result, filePath)));
     expect(clientJs).not.toContain("_scrml_sql");
     expect(() => new Script(clientJs)).not.toThrow();
   });

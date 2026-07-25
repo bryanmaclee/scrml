@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { compileScrml } from "../../../src/api.js";
+import { foldChunkNamespacing } from "../../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
@@ -35,9 +36,9 @@ function compileSrc(source, testName = `s24-audit-${++tmpCounter}`) {
       write: true,
       outputDir: outDir,
     });
-    const clientJs = existsSync(resolve(outDir, `${testName}.client.js`))
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(resolve(outDir, `${testName}.client.js`))
       ? readFileSync(resolve(outDir, `${testName}.client.js`), "utf8")
-      : "";
+      : ""));
     return {
       errors: result.errors ?? [],
       m019: (result.errors ?? []).filter(e => e.code === "E-ENGINE-019"),
@@ -65,7 +66,7 @@ describe("S24 §51.11 — audit clause parses + compiles cleanly", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compileSrc(src);
+    const { errors, clientJs: __cjRaw } = compileSrc(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     expect(clientJs).toContain("§51.11 audit log push");
     // §51.11.4 (S27) — entry shape includes rule + label fields, and
@@ -86,7 +87,7 @@ describe("S24 §51.11 — audit clause parses + compiles cleanly", () => {
 <p>x</>
 </program>
 `;
-    const { clientJs } = compileSrc(src);
+    const { clientJs: __cjRaw } = compileSrc(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).not.toContain("§51.11 audit log push");
   });
 });
@@ -166,7 +167,7 @@ describe("S24 §51.11 — transition guard + audit ordering in generated JS", ()
 <p>x</>
 </program>
 `;
-    const { clientJs } = compileSrc(src);
+    const { clientJs: __cjRaw } = compileSrc(src); const clientJs = foldChunkNamespacing(__cjRaw);
     // Ordering: reactive_set("order"...) → audit log push. The effect-block
     // ordering sub-invariant is covered indirectly by emit-machines.ts unit
     // tests; here we only verify commit-before-audit since effect emission

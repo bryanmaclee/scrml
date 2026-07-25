@@ -1,5 +1,6 @@
 import { genVar } from "./var-counter.ts";
 import { paramName, paramSignature, type ParamLike } from "./utils.ts";
+import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, _lowerTenantForQuery } from "./rewrite.js";
 import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
@@ -3789,7 +3790,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       if (!Array.isArray(metaBody) || metaBody.length === 0) return "";
 
       const metaScopeId = node.id != null
-        ? `"_scrml_meta_${node.id}"`
+        ? `"_scrml_meta_${nsId(node.id)}"`
         : JSON.stringify(genVar("meta_scope"));
 
       const bodyLines: string[] = [];

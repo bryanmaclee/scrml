@@ -31,6 +31,7 @@ import { generateHtml } from "../../src/codegen/emit-html.js";
 import { BindingRegistry } from "../../src/codegen/binding-registry.ts";
 import { resetVarCounter } from "../../src/codegen/var-counter.ts";
 import { runCG } from "../../src/code-generator.js";
+import { foldChunkAccessors } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -83,12 +84,25 @@ function makeProtectAnalysis() { return { views: new Map() }; }
 /** Compile a single markup node through the full CG pipeline. */
 function compile(markupNode) {
   const ast = makeFileAST([markupNode]);
-  return runCG({
+  const result = runCG({
     files: [ast],
     routeMap: makeRouteMap(),
     depGraph: makeDepGraph(),
     protectAnalysis: makeProtectAnalysis(),
   });
+  // BUG-6 chunk-namespacing: a single-file compile still gets a chunk token, so
+  // cell-accessor CALLS emit as the per-chunk wrapper (`_scrml_cs_reactive_get`).
+  // These tests pin the pre-rename lowering contract (`_scrml_reactive_get(...)`),
+  // so fold the chunk-scope prefix back off the emitted client JS at the read
+  // boundary. A surgical fold (only `_scrml_cs_X` -> `_scrml_X`), not an assertion
+  // rewrite — it masks nothing else. Chunk-identity has its own coverage in
+  // chunk-namespacing.test.js.
+  if (result && result.outputs && typeof result.outputs.forEach === "function") {
+    for (const [, out] of result.outputs) {
+      if (out && typeof out.clientJs === "string") out.clientJs = foldChunkAccessors(out.clientJs);
+    }
+  }
+  return result;
 }
 
 /** Build an expr attribute value node (as produced by ast-builder from ATTR_EXPR). */

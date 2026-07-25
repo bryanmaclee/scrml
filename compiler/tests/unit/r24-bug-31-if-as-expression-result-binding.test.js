@@ -75,6 +75,7 @@ import { writeFileSync, mkdirSync, rmSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { execFileSync } from "child_process";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function makeTmpDir(label) {
   const tmp = join(tmpdir(), `scrml-r24-bug-31-${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
@@ -89,7 +90,7 @@ function compileAndRead(src, label) {
   const outDir = join(tmp, "dist");
   mkdirSync(outDir, { recursive: true });
   const result = compileScrml({ inputFiles: [srcFile], outputDir: outDir });
-  const clientJs = readFileSync(join(outDir, "repro.client.js"), "utf8");
+  const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "repro.client.js"), "utf8")));
   return { result, clientJs, tmp };
 }
 
@@ -132,7 +133,7 @@ describe("R24-Bug-31 §1: minimal repro — bare return + failable on next line"
       '}',
       '</program>',
     ].join("\n");
-    const { result, clientJs, tmp } = compileAndRead(src, "min");
+    const { result, clientJs: __cjRaw, tmp } = compileAndRead(src, "min"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(result.errors).toHaveLength(0);
 
     // The buggy emission contained `let _scrml_result_N = if (...)`.
@@ -181,7 +182,7 @@ describe("R24-Bug-31 §2: const-binding after bare return", () => {
       '}',
       '</program>',
     ].join("\n");
-    const { result, clientJs, tmp } = compileAndRead(src, "const");
+    const { result, clientJs: __cjRaw, tmp } = compileAndRead(src, "const"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(result.errors).toHaveLength(0);
     expect(clientJs).not.toMatch(/let _scrml_\w*result\w*\s*=\s*if\b/);
     const check = nodeCheckClean(clientJs, tmp);
@@ -219,7 +220,7 @@ describe("R24-Bug-31 §3: let-binding after bare return", () => {
       '}',
       '</program>',
     ].join("\n");
-    const { result, clientJs, tmp } = compileAndRead(src, "let");
+    const { result, clientJs: __cjRaw, tmp } = compileAndRead(src, "let"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(result.errors).toHaveLength(0);
     expect(clientJs).not.toMatch(/let _scrml_\w*result\w*\s*=\s*if\b/);
     const check = nodeCheckClean(clientJs, tmp);
@@ -250,7 +251,7 @@ describe("R24-Bug-31 §4: single-line collapsed arms after bare return", () => {
       '}',
       '</program>',
     ].join("\n");
-    const { result, clientJs, tmp } = compileAndRead(src, "collapsed");
+    const { result, clientJs: __cjRaw, tmp } = compileAndRead(src, "collapsed"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(result.errors).toHaveLength(0);
     expect(clientJs).not.toMatch(/let _scrml_\w*result\w*\s*=\s*if\b/);
     const check = nodeCheckClean(clientJs, tmp);
@@ -283,7 +284,7 @@ describe("R24-Bug-31 §5: regression-guard — no early-return path STILL works"
       '}',
       '</program>',
     ].join("\n");
-    const { result, clientJs, tmp } = compileAndRead(src, "noearly");
+    const { result, clientJs: __cjRaw, tmp } = compileAndRead(src, "noearly"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(result.errors).toHaveLength(0);
     expect(clientJs).not.toMatch(/let _scrml_\w*result\w*\s*=\s*if\b/);
     const check = nodeCheckClean(clientJs, tmp);
@@ -319,7 +320,7 @@ describe("R24-Bug-31 §6: multi-statement between early-return and failable", ()
       '}',
       '</program>',
     ].join("\n");
-    const { result, clientJs, tmp } = compileAndRead(src, "multistmt");
+    const { result, clientJs: __cjRaw, tmp } = compileAndRead(src, "multistmt"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(result.errors).toHaveLength(0);
     expect(clientJs).not.toMatch(/let _scrml_\w*result\w*\s*=\s*if\b/);
     const check = nodeCheckClean(clientJs, tmp);
@@ -358,7 +359,7 @@ describe("R24-Bug-31 §7: multiple sequential early-returns", () => {
       '}',
       '</program>',
     ].join("\n");
-    const { result, clientJs, tmp } = compileAndRead(src, "multiret");
+    const { result, clientJs: __cjRaw, tmp } = compileAndRead(src, "multiret"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(result.errors).toHaveLength(0);
     expect(clientJs).not.toMatch(/let _scrml_\w*result\w*\s*=\s*if\b/);
     const check = nodeCheckClean(clientJs, tmp);
@@ -401,7 +402,7 @@ describe("R24-Bug-31 §8: braced early-return then failable", () => {
       '}',
       '</program>',
     ].join("\n");
-    const { result, clientJs, tmp } = compileAndRead(src, "braced");
+    const { result, clientJs: __cjRaw, tmp } = compileAndRead(src, "braced"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(result.errors).toHaveLength(0);
     expect(clientJs).not.toMatch(/let _scrml_\w*result\w*\s*=\s*if\b/);
     const check = nodeCheckClean(clientJs, tmp);
@@ -432,7 +433,7 @@ describe("R24-Bug-31 §9: same-line return-with-expression — value-return path
       '}',
       '</program>',
     ].join("\n");
-    const { result, clientJs, tmp } = compileAndRead(src, "sameline");
+    const { result, clientJs: __cjRaw, tmp } = compileAndRead(src, "sameline"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(result.errors).toHaveLength(0);
     const check = nodeCheckClean(clientJs, tmp);
     expect(check.ok).toBe(true);
@@ -462,7 +463,7 @@ describe("R24-Bug-31 §10: return EXPR on same line, even with later content", (
       '}',
       '</program>',
     ].join("\n");
-    const { result, clientJs, tmp } = compileAndRead(src, "retexpr");
+    const { result, clientJs: __cjRaw, tmp } = compileAndRead(src, "retexpr"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(result.errors).toHaveLength(0);
     const check = nodeCheckClean(clientJs, tmp);
     expect(check.ok).toBe(true);
@@ -492,7 +493,7 @@ describe("R24-Bug-31 §11: ternary expression — negative control unchanged", (
       '}',
       '</program>',
     ].join("\n");
-    const { result, clientJs, tmp } = compileAndRead(src, "tern");
+    const { result, clientJs: __cjRaw, tmp } = compileAndRead(src, "tern"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(result.errors).toHaveLength(0);
     const check = nodeCheckClean(clientJs, tmp);
     expect(check.ok).toBe(true);
@@ -534,7 +535,7 @@ describe("R24-Bug-31 §12: empirical R24 dev-1-react shape", () => {
       '}',
       '</program>',
     ].join("\n");
-    const { result, clientJs, tmp } = compileAndRead(src, "r24-shape");
+    const { result, clientJs: __cjRaw, tmp } = compileAndRead(src, "r24-shape"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(result.errors).toHaveLength(0);
     expect(clientJs).not.toMatch(/let _scrml_\w*result\w*\s*=\s*if\b/);
     const check = nodeCheckClean(clientJs, tmp);

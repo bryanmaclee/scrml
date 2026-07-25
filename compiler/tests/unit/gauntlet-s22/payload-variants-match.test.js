@@ -25,6 +25,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from "fs";
 import { join, resolve } from "path";
 import { compileScrml } from "../../../src/api.js";
+import { unwrapChunkScope } from "../../helpers/chunk-scope.js";
 
 const FIXTURE_DIR = join(import.meta.dir, "__fixtures__/payload-variants-match");
 const FIXTURE_OUTPUT = join(FIXTURE_DIR, "dist");
@@ -47,7 +48,9 @@ function compileSource(source, filename = "test.scrml") {
 // everything else, and evaluate in a fresh Function scope so we can call
 // generated functions without a DOM. Returns the sandbox's module-like object.
 function executeClientJs(clientJs, invocation) {
-  const sanitized = clientJs
+  // This harness runs the chunk with NO runtime to probe pure lowering, so it
+  // needs the chunk's declarations at top level and its cell-scope prologue gone.
+  const sanitized = unwrapChunkScope(clientJs)
     .replace(/^\/\/ Requires:.*$/gm, "")
     .replace(/^import .*$/gm, "")
     // The emitted code includes a DOMContentLoaded listener we don't want to

@@ -36,6 +36,7 @@ import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
@@ -57,7 +58,7 @@ function compileSource(scrmlSource, testName) {
     for (const [fp, output] of result.outputs) {
       if (fp.includes(tag)) {
         html = output.html ?? null;
-        clientJs = output.clientJs ?? null;
+        clientJs =foldChunkNamespacing( foldChunkNamespacing(foldChunkNamespacing(output.clientJs) ?? null));
       }
     }
     return { errors: result.errors ?? [], html, clientJs };
@@ -146,7 +147,7 @@ describe("Bug 2c — bind:value HTML serialization in expanded component bodies"
 </div>
 
 </program>`;
-    const { errors, html, clientJs } = compileSource(src, "bind-value-wiring");
+    const { errors, html, clientJs: __cjRaw } = compileSource(src, "bind-value-wiring"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e && e.severity === "error" && e.code !== "W-PROGRAM-001")).toEqual([]);
     expect(clientJs).not.toBeNull();
     // The bind:value contract requires:

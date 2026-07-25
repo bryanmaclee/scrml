@@ -34,6 +34,7 @@ import {
   isNoElide,
 } from "../../../src/codegen/emit-machines.ts";
 import { extractUserFns } from "../../helpers/extract-user-fns.js";
+import { unwrapChunkScope } from "../../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-s28-slice-2-3-4");
 let tmpCounter = 0;
@@ -69,7 +70,7 @@ function runClientAndInvoke(clientJs, userFnCount) {
   const fnBody =
     shims + "\n" +
     SCRML_RUNTIME + "\n" +
-    clientJs + "\n" +
+    unwrapChunkScope(clientJs) + "\n" +
     callList + "\n" +
     "return { state: _scrml_state };";
   const runner = new Function(fnBody);

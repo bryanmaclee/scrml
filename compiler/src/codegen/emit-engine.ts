@@ -52,6 +52,7 @@
  */
 
 import { parseAfterDuration } from "./parse-after-duration.ts";
+import { nsName, nsCellKey, stripNsName } from "./chunk-namespace.ts";
 
 // ---------------------------------------------------------------------------
 // Types — canonical engine-decl + engineMeta shapes consumed
@@ -326,6 +327,15 @@ export function collectC12EngineDecls(fileAST: any): EngineDeclLike[] {
 // ---------------------------------------------------------------------------
 // Naming convention — exported so C13/C14/C15 can use the same names
 // ---------------------------------------------------------------------------
+//
+// N4 — every name below is CHUNK-NAMESPACED via `nsName(varName)`. These are
+// top-level `const` declarations in the classic global lexical environment,
+// keyed on the AUTHOR's engine cell name, so two routes that both declare an
+// engine named `phase` emit the same identifier twice and the second chunk
+// dies outright with `Identifier '__scrml_engine_phase_transitions' has already
+// been declared` — it never evaluates, so nothing on that page hydrates.
+// Namespacing INSIDE the helper (rather than at the call sites) keeps the
+// definition site and every lookup site in agreement by construction.
 
 /**
  * Compute the transition-table const name for an engine.
@@ -342,7 +352,7 @@ export function collectC12EngineDecls(fileAST: any): EngineDeclLike[] {
  * `<engine for=Foo>` (var: `foo`) with `<machine name=Foo for=Foo>`.
  */
 export function engineTransitionTableName(varName: string): string {
-  return `__scrml_engine_${varName}_transitions`;
+  return `__scrml_engine_${nsName(varName)}_transitions`;
 }
 
 /**
@@ -354,7 +364,7 @@ export function engineTransitionTableName(varName: string): string {
  * `_scrml_engine_clear_state_timers`) no-op when the timersTable arg is null.
  */
 export function engineTimersTableName(varName: string): string {
-  return `__scrml_engine_${varName}_timers`;
+  return `__scrml_engine_${nsName(varName)}_timers`;
 }
 
 /**
@@ -366,7 +376,7 @@ export function engineTimersTableName(varName: string): string {
  * the idleEntry arg is null).
  */
 export function engineIdleWatchdogName(varName: string): string {
-  return `__scrml_engine_${varName}_idle`;
+  return `__scrml_engine_${nsName(varName)}_idle`;
 }
 
 /**
@@ -378,7 +388,7 @@ export function engineIdleWatchdogName(varName: string): string {
  * const, and the codegen routes `.advance` calls to the state plane).
  */
 export function engineMessageArmTableName(varName: string): string {
-  return `__scrml_engine_${varName}_msg_arms`;
+  return `__scrml_engine_${nsName(varName)}_msg_arms`;
 }
 
 /**
@@ -400,7 +410,7 @@ export function engineMessageArmTableName(varName: string): string {
  * `null` for this arg at every write-guard / advance site (tree-shake).
  */
 export function engineInternalTransitionTableName(varName: string): string {
-  return `__scrml_engine_${varName}_internal_transitions`;
+  return `__scrml_engine_${nsName(varName)}_internal_transitions`;
 }
 
 /**
@@ -1292,7 +1302,7 @@ export function emitEngineInternalTransitionTable(meta: EngineMetadata): string[
  * write-guard / advance site.
  */
 export function engineHistoryMapName(varName: string): string {
-  return `__scrml_engine_${varName}_history_map`;
+  return `__scrml_engine_${nsName(varName)}_history_map`;
 }
 
 /**
@@ -2499,14 +2509,18 @@ function buildEngineArms(
         lines.push(`// §51.0.Q.1 composite-arm post-mount: init/restore inner engine ${innerVar}`);
         lines.push(`{`);
         if (scHasHistory) {
+          // chunk-namespacing — `_scrml_engine_pending_history_restore` and
+          // `_scrml_state` are indexed DIRECTLY here, bypassing this chunk's
+          // scoped accessors, so these keys carry the store form explicitly. The
+          // runtime wrote the flag under the namespaced varName it received.
           // History-restore: check the pending-restore flag set by
           // `_scrml_engine_direct_set` / `_scrml_engine_advance` when the
           // write was the structured `.Tag.history` form. Read+clear.
           lines.push(`  var _pending = (typeof _scrml_engine_pending_history_restore === "object" && _scrml_engine_pending_history_restore !== null)`);
-          lines.push(`    ? _scrml_engine_pending_history_restore[${JSON.stringify(outerVar)}] : null;`);
+          lines.push(`    ? _scrml_engine_pending_history_restore[${JSON.stringify(nsCellKey(outerVar))}] : null;`);
           lines.push(`  if (_pending === ${JSON.stringify(tag)}) {`);
-          lines.push(`    delete _scrml_engine_pending_history_restore[${JSON.stringify(outerVar)}];`);
-          lines.push(`    var _saved = _scrml_state[${JSON.stringify(synthCellKey)}];`);
+          lines.push(`    delete _scrml_engine_pending_history_restore[${JSON.stringify(nsCellKey(outerVar))}];`);
+          lines.push(`    var _saved = _scrml_state[${JSON.stringify(nsCellKey(synthCellKey))}];`);
           lines.push(`    if (_saved != null) {`);
           lines.push(`      _scrml_reactive_set(${JSON.stringify(innerVar)}, _saved);`);
           lines.push(`    } else {`);
@@ -2592,7 +2606,12 @@ export function emitEngineBodyRenderForFile(
       arms,
       ctx,
       {
-        idPrefix: meta.varName,
+        // N4 — CHUNK-NAMESPACED. `idPrefix` is the single source for the mount
+        // attribute AND every derived render/wire/dispose/dispatch fn name, so one
+        // substitution namespaces the whole engine. Two routes both declaring an
+        // engine cell named `phase` otherwise share a DOCUMENT-WIDE
+        // `querySelector('[data-scrml-engine-mount="phase"]')`.
+        idPrefix: nsName(meta.varName),
         mountAttr: "data-scrml-engine-mount",
         renderFnPrefix: "_scrml_engine",
         // Subscribe-on-set semantics — engine variable is always a
@@ -2643,7 +2662,12 @@ export function emitDerivedEngineBodyRenderForFile(
       arms,
       ctx,
       {
-        idPrefix: meta.varName,
+        // N4 — CHUNK-NAMESPACED. `idPrefix` is the single source for the mount
+        // attribute AND every derived render/wire/dispose/dispatch fn name, so one
+        // substitution namespaces the whole engine. Two routes both declaring an
+        // engine cell named `phase` otherwise share a DOCUMENT-WIDE
+        // `querySelector('[data-scrml-engine-mount="phase"]')`.
+        idPrefix: nsName(meta.varName),
         mountAttr: "data-scrml-engine-mount",
         renderFnPrefix: "_scrml_engine",
         // Derived engines also register as reactive cells — the
@@ -2712,7 +2736,10 @@ export function emitEngineMountHtml(
   // tag keeps the binding count minimal and avoids the per-render
   // querySelector miss on the orphaned id.
   const initialHtml = emitInitialArmHtmlForMount(arms, initialTag, ctx);
-  return `<div data-scrml-engine-mount="${meta.varName}">${initialHtml}</div>`;
+  // Namespaced to match the dispatcher's selector (emit-variant-guard builds it
+  // from the same `idPrefix`). Both read one per-file namespace state, so the
+  // HTML and the JS cannot disagree about which mount they mean.
+  return `<div data-scrml-engine-mount="${nsName(meta.varName)}">${initialHtml}</div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -4158,7 +4185,7 @@ function collectEngineHooks(meta: EngineMetadata): EngineHookArm[] {
  * (`_scrml_engine_*` family) for namespace discipline.
  */
 export function engineHookFiringFunctionName(varName: string): string {
-  return `__scrml_engine_${varName}_fire_hooks`;
+  return `__scrml_engine_${nsName(varName)}_fire_hooks`;
 }
 
 /**
@@ -4170,7 +4197,7 @@ export function engineHookFiringFunctionName(varName: string): string {
  * Tree-shaken when no `<onTransition>` in the engine has `once`.
  */
 function engineOnceFlagName(varName: string, idx: number): string {
-  return `__scrml_engine_${varName}_once_${idx}`;
+  return `__scrml_engine_${nsName(varName)}_once_${idx}`;
 }
 
 /**
@@ -4618,7 +4645,13 @@ export function maybeLowerCancelTimerCallRef(
   if (typeof engineArm !== "string" || engineArm.length === 0) return null;
   const colonIdx = engineArm.indexOf(":");
   if (colonIdx < 0) return null;
-  const varName = engineArm.slice(0, colonIdx);
+  // The arm-context id is `<idPrefix>:<armTag>` and `idPrefix` is CHUNK-NAMESPACED
+  // (N4). What is needed here is the engine's CELL name, which the chunk scope
+  // namespaces itself — so strip the marker token back off. Leaving it on emitted
+  // `_scrml_engine_clear_named_timer("0a1b2c3d_appMode", …)`, which the scope then
+  // namespaced a SECOND time, so the named timer was never found and cancelTimer
+  // silently did nothing.
+  const varName = stripNsName(engineArm.slice(0, colonIdx));
   const armTag = engineArm.slice(colonIdx + 1);
   if (varName.length === 0 || armTag.length === 0) return null;
 

@@ -35,6 +35,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope, chunkNamespaceToken } from "../helpers/chunk-scope.js";
 
 const tmpRoot = resolve("/tmp", "scrml-msg-dispatch-browser");
 
@@ -69,20 +70,23 @@ function mountModule(source, baseName, varName) {
   const { html, clientJs, runtimeJs, errors } = compileOutputs(source, baseName);
   expect(errors).toEqual([]);
   document.documentElement.innerHTML = html;
-  const armTableName = `__scrml_engine_${varName}_msg_arms`;
-  const txTableName = `__scrml_engine_${varName}_transitions`;
-  const idleName = `__scrml_engine_${varName}_idle`;
+  // BUG-6/N4: the per-engine tables are namespaced with the chunk token
+  // (`__scrml_engine_<token>_<var>_…`). Read the token from the chunk prologue.
+  const _tok = chunkNamespaceToken(clientJs);
+  const _ns = _tok ? `${_tok}_` : "";
+  const armTableName = `__scrml_engine_${_ns}${varName}_msg_arms`;
+  const txTableName = `__scrml_engine_${_ns}${varName}_transitions`;
+  const idleName = `__scrml_engine_${_ns}${varName}_idle`;
   const exec = new Function(
     "window",
     "document",
-    `${runtimeJs}\n${clientJs}\n` +
-      `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
+    `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
       `globalThis.__scrml_get__ = _scrml_reactive_get;\n` +
       `globalThis.__scrml_dispatch_fn__ = _scrml_engine_dispatch_message;\n` +
       `globalThis.__scrml_arm_table__ = (typeof ${armTableName} !== "undefined") ? ${armTableName} : null;\n` +
       `globalThis.__scrml_tx_table__ = (typeof ${txTableName} !== "undefined") ? ${txTableName} : null;\n` +
       `globalThis.__scrml_idle__ = (typeof ${idleName} !== "undefined") ? ${idleName} : null;\n` +
-      `globalThis.__scrml_machine_timers_ref__ = _scrml_machine_timers;\n`,
+      `globalThis.__scrml_machine_timers_ref__ = _scrml_machine_timers;\n`),
   );
   let threw = null;
   try {

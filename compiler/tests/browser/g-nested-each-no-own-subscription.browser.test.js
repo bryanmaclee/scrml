@@ -5,7 +5,7 @@
  * (filed docs/known-gaps.md §S212, HIGH).
  *
  * BUG: a NESTED `<each in=@cell>` created inside an OUTER `<each>`'s per-item body
- * was emitted as a ONE-SHOT inline IIFE — it read `_scrml_reactive_get("cell")`
+ * was emitted as a ONE-SHOT inline IIFE — it read `_scrml_cs_reactive_get("cell")`
  * ONCE at outer-render time and ran the inner reconcile ONCE, but was NEVER
  * wrapped in any reactive effect and NEVER registered in `_scrml_each_renderers`.
  * So the inner each had NO subscription to its own cell. A post-mount update to
@@ -37,6 +37,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 // repro: TWO outer projects, each with a nested `<each in=@shared>`. `@shared` is
 // EMPTY at outer-render time and populated post-mount by `load()` (the
@@ -112,14 +113,14 @@ describe("g-nested-each-no-own-subscription §1 — emit shape (inner each owns 
   test("the inner each's source-read happens INSIDE a _scrml_effect (subscribed, not one-shot)", () => {
     const { clientJs } = compileToOutputs(NESTED_CELL_SRC, "nested");
     // PRE-FIX the inner each emitted:
-    //   const _scrml_each_items_N = _scrml_reactive_get("shared");
+    //   const _scrml_each_items_N = _scrml_cs_reactive_get("shared");
     //   (() => { ... reconcile ... })();
     // i.e. a bare read + bare IIFE — NO effect. POST-FIX the read is INSIDE a
-    // `_scrml_effect(() => { const _scrml_each_items_N = _scrml_reactive_get("shared"); ... });`
+    // `_scrml_effect(() => { const _scrml_each_items_N = _scrml_cs_reactive_get("shared"); ... });`
     // so the read is a tracked dep. Assert the read sits inside an effect body by
     // confirming the read is NOT the bare one-shot form and an effect precedes the
     // inner reconcile against the item-local mount.
-    expect(clientJs).toContain('_scrml_reactive_get("shared")');
+    expect(clientJs).toContain('_scrml_cs_reactive_get("shared")');
     // The bare one-shot read at the start of a statement (the defective shape) is gone.
     expect(clientJs).not.toMatch(/^\s*const _scrml_each_items_\d+ = _scrml_reactive_get\("shared"\);\s*$\n\s*\(\(\) => \{/m);
     // The inner read is preceded by a `_scrml_effect(() => {` opener (the per-item
@@ -159,9 +160,8 @@ describe("g-nested-each-no-own-subscription §2 — post-mount inner update re-r
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${clientJs}\n` +
-        `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
-        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`,
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
+        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`),
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));

@@ -55,6 +55,7 @@ import { parseEngineStateChildren } from "../../src/engine-statechild-parser.ts"
 import { parseMatchArms } from "../../src/match-statechild-parser.ts";
 import { compileScrml } from "../../src/api.js";
 import { rewriteColonShorthandPlacement } from "../../src/commands/migrate.js";
+import { foldChunkNamespacing, normalizeChunkToken } from "../helpers/chunk-scope.js";
 
 let TMP;
 beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "s154b-")); });
@@ -77,11 +78,23 @@ function getOut(result, key) {
   for (const [, v] of outputs) { if (v && typeof v === "object" && v[key]) return v[key]; }
   return "";
 }
-function getClientJs(result) { return getOut(result, "clientJs"); }
+// normalizeChunkToken folds the per-file chunk-namespace token (a hash of the
+// distinct fixture basename) to a fixed placeholder, so a byte-identity compare
+// pins the BODY lowering, not the incidental per-source token.
+function getClientJs(result) { return normalizeChunkToken(foldChunkNamespacing(getOut(result, "clientJs"))); }
 // Normalize gensym counters + per-file client-js script name so two
 // STRUCTURALLY identical lowerings compare equal modulo placeholder ids.
+// The chunk-namespace token is STRIPPED first: these two fixtures are written to
+// different temp paths on purpose, so their tokens differ by construction and
+// would otherwise swamp the structural comparison this test exists to make.
+// A token is exactly `0` + 7 base36 chars + `_`; anchoring on that leading `0`
+// is load-bearing. The unanchored `_[0-9a-z]{8}_(\d+)` form this replaces
+// rewrote `_scrml_reactive_1` to `_scrml_NS_1` — which the NEXT pass could no
+// longer collapse to `_scrml_GEN`, so a structural-identity test silently became
+// sensitive to the counter drift it exists to ignore.
 function norm(s) {
   return String(s)
+    .replace(/(?<![0-9a-z])0[0-9a-z]{7}_(?=[0-9A-Za-z_])/g, "")
     .replace(/_scrml_[a-z_]+_\d+/g, "_scrml_GEN")
     .replace(/[A-Za-z0-9_-]+\.client\.js/g, "GEN.client.js");
 }

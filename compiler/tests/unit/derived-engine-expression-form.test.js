@@ -39,6 +39,7 @@ import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
@@ -59,7 +60,7 @@ function compileWhole(source, name = `dee-${++tmpCounter}`) {
     return {
       errors: (result.errors ?? []).filter((e) => (e.severity ?? "error") === "error"),
       warnings: result.warnings ?? [],
-      clientJs: out.clientJs ?? "",
+      clientJs:foldChunkNamespacing( foldChunkNamespacing(foldChunkNamespacing(out.clientJs) ?? "")),
     };
   } finally {
     if (existsSync(tmpInput)) rmSync(tmpInput);
@@ -96,7 +97,7 @@ type Health:enum = { Healthy, AtRisk, Critical }
   });
 
   test("emits the C14 derived substrate — subscribes to @marioState + recomputes via the match", () => {
-    const { clientJs } = compileWhole(MATCH_SRC, "match-arbitrary-js");
+    const { clientJs: __cjRaw } = compileWhole(MATCH_SRC, "match-arbitrary-js"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toContain('_scrml_derived_declare("health"');
     expect(clientJs).toContain('_scrml_derived_subscribe("health", "marioState");');
     expect(clientJs).toContain('_scrml_derived_get("health");');
@@ -241,7 +242,7 @@ describe("§51.0.J modern derived=<expr> — ternary / call / multi-cell", () =>
   <Low : "Low">
 </>
 <div>\${@level}</div>`;
-    const { errors, clientJs } = compileWhole(src, "expr-ternary");
+    const { errors, clientJs: __cjRaw } = compileWhole(src, "expr-ternary"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(codesOf(errors)).not.toContain("E-ENGINE-004");
     expect(codesOf(errors)).not.toContain("E-ENGINE-018");
     expect(errors).toEqual([]);
@@ -267,7 +268,7 @@ describe("§51.0.J modern derived=<expr> — ternary / call / multi-cell", () =>
   <Low : "Low">
 </>
 <div>\${@level}</div>`;
-    const { errors, clientJs } = compileWhole(src, "expr-call");
+    const { errors, clientJs: __cjRaw } = compileWhole(src, "expr-call"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toContain('_scrml_derived_declare("level"');
     expect(clientJs).toContain('_scrml_derived_subscribe("level", "miles");');
@@ -282,7 +283,7 @@ describe("§51.0.J modern derived=<expr> — ternary / call / multi-cell", () =>
   <Low : "Low">
 </>
 <div>\${@level}</div>`;
-    const { errors, clientJs } = compileWhole(src, "expr-multicell");
+    const { errors, clientJs: __cjRaw } = compileWhole(src, "expr-multicell"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toContain('_scrml_derived_subscribe("level", "miles");');
     expect(clientJs).toContain('_scrml_derived_subscribe("level", "bonus");');

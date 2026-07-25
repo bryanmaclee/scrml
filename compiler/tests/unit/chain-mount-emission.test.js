@@ -459,8 +459,8 @@ describe("§8: round-trip through full pipeline (N29-N31)", () => {
       <p else>C</>
     </>`);
     const chainBlock = clientJs.match(/\/\/ if-chain:[\s\S]*?\n  \}/)?.[0] ?? "";
-    const aIdx = chainBlock.indexOf('_scrml_reactive_get("a")');
-    const bIdx = chainBlock.indexOf('_scrml_reactive_get("b")');
+    const aIdx = chainBlock.indexOf('_scrml_cs_reactive_get("a")');
+    const bIdx = chainBlock.indexOf('_scrml_cs_reactive_get("b")');
     expect(aIdx).toBeGreaterThan(-1);
     expect(bIdx).toBeGreaterThan(-1);
     expect(aIdx).toBeLessThan(bIdx);

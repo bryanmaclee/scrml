@@ -29,6 +29,7 @@ import { writeFileSync, mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // --- Source Map v3 mappings decoder (test-local; no runtime dependency) -----
 
@@ -158,7 +159,7 @@ describe("source-map real provenance (Phase 1: JS)", () => {
     const { out } = compileCounter();
     const map = JSON.parse(out.clientJsMap);
     const kinds = map.x_scrml_kinds || [];
-    const lineCount = out.clientJs
+    const lineCount = foldChunkNamespacing(out.clientJs)
       .replace(/\n\/\/# sourceMappingURL=.*\n?$/, "")
       .split("\n").length;
     // Every generated line is categorized (length matches, give or take the
@@ -221,7 +222,7 @@ describe("source-map real provenance (Phase 1: JS)", () => {
     expect(
       (result.errors || []).filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC")
     ).toHaveLength(0);
-    expect(out.clientJs).toContain("//# sourceMappingURL=");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("//# sourceMappingURL=");
   });
 
   it("shipped client JS carries NO leftover provenance markers", () => {
@@ -229,7 +230,7 @@ describe("source-map real provenance (Phase 1: JS)", () => {
     // adopter ships and devtools loads MUST be marker-free (readability + the
     // S142 parse gate). A leaked marker would also corrupt generated columns.
     const { out } = compileCounter();
-    expect(out.clientJs.includes("#scrmlmap#")).toBe(false);
+    expect(foldChunkNamespacing(out.clientJs).includes("#scrmlmap#")).toBe(false);
     if (out.serverJs) expect(out.serverJs.includes("#scrmlmap#")).toBe(false);
   });
 });
@@ -282,7 +283,7 @@ describe("source-map B1 use-site resolution (NOT declaration-footprint)", () => 
     // The handler body emits BOTH a set and a get of `count` on one generated
     // line (`_scrml_reactive_set("count", _scrml_reactive_get("count") + 1)`).
     // EVERY `count` mapping on that line must be the USE line — never the decl.
-    const cleaned = out.clientJs.replace(/\n\/\/# sourceMappingURL=.*\n?$/, "");
+    const cleaned = foldChunkNamespacing(out.clientJs).replace(/\n\/\/# sourceMappingURL=.*\n?$/, "");
     const genLines = cleaned.split("\n");
     const handlerBodyGenLine = genLines.findIndex(
       (l) =>
@@ -310,7 +311,7 @@ describe("source-map B1 use-site resolution (NOT declaration-footprint)", () => 
     // decl span is a clean follow-up, out of scope for Phase 1b.
     const { out } = compileSplit();
     const { rows } = decodeSourceMap(out.clientJsMap);
-    const cleaned = out.clientJs.replace(/\n\/\/# sourceMappingURL=.*\n?$/, "");
+    const cleaned = foldChunkNamespacing(out.clientJs).replace(/\n\/\/# sourceMappingURL=.*\n?$/, "");
     const genLines = cleaned.split("\n");
 
     const handlerGenLine = genLines.findIndex(

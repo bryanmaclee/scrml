@@ -74,7 +74,7 @@ describe("inline-value-form-interp — codegen shape", () => {
     expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
     expect(html).toMatch(/data-scrml-logic="_scrml_logic_\d+"/);
     // The if lowers to a readable conditional-expression cascade (a ternary).
-    expect(clientJs).toContain('(_scrml_reactive_get("n") > 3 ? "big" : "small")');
+    expect(clientJs).toContain('(_scrml_cs_reactive_get("n") > 3 ? "big" : "small")');
     expect(clientJs).toContain("_scrml_render_value(el,");
     expect(clientJs).toContain("_scrml_effect(");
     // Pre-fix the branch values were discarded as a bare file-scope `if(){…}else{…}`
@@ -136,7 +136,7 @@ fn ping() { log("ping") }
     const { clientJs } = compileToOutputs(src, "ivf-plain");
     expect(clientJs).toContain("_scrml_render_value(el,");
     // The plain-cell read lowers to the bare cell get, not a control-flow IIFE/ternary.
-    expect(clientJs).toContain('_scrml_render_value(el, _scrml_reactive_get("count"))');
+    expect(clientJs).toContain('_scrml_render_value(el, _scrml_cs_reactive_get("count"))');
     expect(clientJs).not.toContain("_scrml_match_");
   });
 

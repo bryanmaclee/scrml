@@ -35,6 +35,7 @@ import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -70,10 +71,8 @@ function compileAndLoad(source, suffix) {
   const bodyHtml = bodyMatch ? bodyMatch[1] : html;
   document.body.innerHTML = bodyHtml.replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
   const code =
-    `(function() {\n${SCRML_RUNTIME}\n${clientJs}\n` +
-    `window._scrml_reactive_get = _scrml_reactive_get;\n` +
-    `window._scrml_reactive_set = _scrml_reactive_set;\n` +
-    `})();`;
+    `(function() {\n${SCRML_RUNTIME}\n` + captureInsideChunkScope(clientJs, `window._scrml_reactive_get = _scrml_reactive_get;\n` +
+    `window._scrml_reactive_set = _scrml_reactive_set;\n`) + `\n})();`;
   // eslint-disable-next-line no-eval
   eval(code);
   document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));

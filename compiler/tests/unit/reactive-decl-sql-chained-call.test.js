@@ -77,6 +77,7 @@ import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { emitLogicNode } from "../../src/codegen/emit-logic.ts";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
@@ -98,7 +99,7 @@ function compileSource(scrmlSource, testName) {
     for (const [fp, output] of result.outputs) {
       if (fp.includes(tag)) {
         serverJs = output.serverJs ?? null;
-        clientJs = output.clientJs ?? null;
+        clientJs =foldChunkNamespacing( foldChunkNamespacing(foldChunkNamespacing(output.clientJs) ?? null));
       }
     }
     return { errors: result.errors ?? [], serverJs, clientJs };
@@ -433,7 +434,7 @@ describe("§8 E2E — combined-007-crud.scrml shape compiles without sql-ref lea
 }
 <div>${"$"}{@users.length}</div>
 </program>`;
-    const { errors, serverJs, clientJs } = compileSource(src, "combined-007-shape");
+    const { errors, serverJs, clientJs: __cjRaw } = compileSource(src, "combined-007-shape"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(serverJs).toBeTruthy();
     expect(clientJs).toBeTruthy();
@@ -569,7 +570,7 @@ describe("§11 CG client — bare @x = ?{...} suppresses empty-arg reactive_set"
 }
 <div>\${@count}</div>
 </program>`;
-    const { errors, clientJs } = compileSource(src, "count-zero-baseline");
+    const { errors, clientJs: __cjRaw } = compileSource(src, "count-zero-baseline"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toBeTruthy();
     expect(clientJs).toContain('_scrml_reactive_set("count", 0)');
@@ -594,7 +595,7 @@ describe("§11 CG client — bare @x = ?{...} suppresses empty-arg reactive_set"
 }
 <div>\${@users.length}</div>
 </program>`;
-    const { errors, serverJs, clientJs } = compileSource(src, "combined-007-empty-arg");
+    const { errors, serverJs, clientJs: __cjRaw } = compileSource(src, "combined-007-empty-arg"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toBeTruthy();
     expect(serverJs).toBeTruthy();

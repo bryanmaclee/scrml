@@ -73,6 +73,17 @@ import { appendSourceMappingUrl } from "./source-map.ts";
 import { buildSourceMap } from "./build-source-map.ts";
 import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender, filePrintBuiltinsShadowed, fileDeclaresFileScopeBinding } from "./log-loc.ts";
 import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setSessionShadowedInFile, setCurrentUserAmbientActive } from "./emit-expr.ts";
+import {
+  buildChunkNamespaceState,
+  setChunkNamespaceState,
+  resetChunkNamespaceState,
+  resolveProjectRoot,
+  assertChunkTokensDistinct,
+  buildCellOwnerMap,
+  chunkNamespaceToken,
+} from "./chunk-namespace.ts";
+import { renameCellAccessors, CS_PREFIX } from "./cell-accessor-rename.ts";
+
 import { EncodingContext } from "./type-encoding.ts";
 import { collectDerivedVarNames, collectReactiveVarNames, collectSynthCellKeys, stampCompoundDeepSetTargets } from "./reactive-deps.ts";
 import { collectTopLevelLogicStatements, containsSql, getNodes } from "./collect.ts";
@@ -456,24 +467,263 @@ function isCrossFileLinked(
 }
 
 /**
- * known-gaps-#6 (S152) — wrap a cross-file-linked file's client.js BODY in an
- * IIFE so its top-level `const`/`function` declarations are local (not in the
- * shared global lexical env). The `_scrml_modules[key] = {...}` footer + the
- * runtime shared-global ASSIGNMENTS (e.g. `_scrml_lift_target = ...`) still
- * reach the global registry/runtime (assignments, not declarations, escape the
- * IIFE). The `// Requires: <runtime>` header line is preserved OUTSIDE the IIFE
- * (it is a comment the dev server reads to wire the runtime <script>).
+ * The accessors `_scrml_cell_scope` binds. Kept in one place because the chunk
+ * prologue destructures a SUBSET of these (only what the body references), and
+ * the runtime must offer every one of them.
  */
-function wrapClientBodyInIife(clientJs: string): string {
+const CELL_SCOPE_ACCESSORS = [
+  "_scrml_reactive_get",
+  "_scrml_reactive_set",
+  "_scrml_init_set",
+  "_scrml_default_set",
+  "_scrml_reset",
+  "_scrml_derived_declare",
+  "_scrml_derived_get",
+  "_scrml_derived_subscribe",
+  "_scrml_reactive_subscribe",
+  "_scrml_reactive_subscribe_when",
+  "_scrml_reactive_derived",
+  "_scrml_reactive_debounced",
+  "_scrml_reactive_throttled",
+  "_scrml_reactivity_register",
+  "_scrml_reactivity_cancel",
+  "_scrml_ssr_seeded",
+  "_scrml_ssr_seed_apply",
+  "_scrml_replay",
+  "_scrml_messages_register_inline",
+  "_scrml_message_for",
+  "_scrml_machine_clear_timer",
+  "_scrml_machine_arm_timer",
+  "_scrml_machine_arm_initial",
+  "_scrml_engine_advance",
+  "_scrml_engine_direct_set",
+  "_scrml_engine_hydrate_init",
+  "_scrml_engine_dispatch_message",
+  "_scrml_engine_history_capture_on_exit",
+  "_scrml_engine_arm_state_timers",
+  "_scrml_engine_clear_state_timers",
+  "_scrml_engine_clear_named_timer",
+  "_scrml_engine_arm_idle_watchdog",
+  "_scrml_engine_reset_idle_watchdog",
+] as const;
+
+/**
+ * BUG-6 — the key-argument SHAPE of each accessor, driving the `_scrml_cs_`
+ * wrapper the prologue emits. The default ("arg0") namespaces the first argument
+ * and forwards the rest untouched; only the four exceptions below deviate.
+ * Lifted VERBATIM from the core `_scrml_cell_scope` factory
+ * (runtime-template.js:850) this replaces — the shapes are the same, they just
+ * moved from a core function into each chunk's inlined prologue.
+ */
+const CELL_SCOPE_ACCESSOR_POSITIONS: Record<
+  string,
+  "arg0" | "arg01" | "arg2" | "passthrough" | "ssrApply"
+> = {
+  // BOTH arguments are cell keys — a dirty-propagation edge between two cells.
+  _scrml_derived_subscribe: "arg01",
+  // §41.12 Level-1 lookup takes the cell LAST (its register-side sibling takes
+  // it FIRST — the split-key pair BUG 2/4 were). A non-string sentinel passes
+  // through untouched.
+  _scrml_message_for: "arg2",
+  // The SSR seed's WIRE FORMAT keeps BARE names; the seed side asks about the
+  // bare name and the apply side (below) maps through the key fn.
+  _scrml_ssr_seeded: "passthrough",
+  // Threads THIS chunk's key fn into the shared apply routine, which STAYS in
+  // core (`_scrml_ssr_seed_apply_scoped`); the seed keys are mapped at apply time.
+  _scrml_ssr_seed_apply: "ssrApply",
+};
+
+/** The RHS arrow expression for one `_scrml_cs_<accessor>` prologue wrapper. */
+function cellScopeWrapper(name: string): string {
+  switch (CELL_SCOPE_ACCESSOR_POSITIONS[name]) {
+    case "arg01":
+      return `(d, u) => ${name}(_scrml_cs_key(d), _scrml_cs_key(u))`;
+    case "arg2":
+      return `(e, f, c) => ${name}(e, f, (typeof c === "string" && c) ? _scrml_cs_key(c) : c)`;
+    case "passthrough":
+      return `(n) => ${name}(n)`;
+    case "ssrApply":
+      return `(skipShell) => _scrml_ssr_seed_apply_scoped(_scrml_cs_key, skipShell)`;
+    default:
+      return `(n, ...r) => ${name}(_scrml_cs_key(n), ...r)`;
+  }
+}
+
+/**
+ * The inlined per-chunk key fn — mirrors core `_scrml_cell_key` semantics
+ * (runtime-template.js:828) so the mechanism adds ZERO bytes to the always-loaded
+ * runtime (the BUG-6 gzip constraint): the key derivation moves OUT of core and
+ * into each chunk's prologue. Emits the compact no-owner form when the chunk
+ * imports no stateful cells (the common case) and the dotted-root owner form
+ * otherwise (imported cells key under the EXPORTER's token, §51.0.A/§51.0.D).
+ */
+function cellScopeKeyFn(token: string, owners: Record<string, string>): string {
+  const prefix = JSON.stringify(token + "$");
+  if (Object.keys(owners).length === 0) {
+    return (
+      `const _scrml_cs_key = (n) => {\n` +
+      `  const raw = String(n == null ? "" : n);\n` +
+      `  return raw ? ${prefix} + raw : raw;\n` +
+      `};\n`
+    );
+  }
+  return (
+    `const _scrml_cs_owners = ${JSON.stringify(owners)};\n` +
+    `const _scrml_cs_key = (n) => {\n` +
+    `  const raw = String(n == null ? "" : n);\n` +
+    `  if (!raw) return raw;\n` +
+    `  const d = raw.indexOf(".");\n` +
+    `  const owned = _scrml_cs_owners[d === -1 ? raw : raw.slice(0, d)];\n` +
+    `  if (owned) return d === -1 ? owned : owned + raw.slice(d);\n` +
+    `  return ${prefix} + raw;\n` +
+    `};\n`
+  );
+}
+
+/**
+ * BUG-6 chunk-namespacing — build the per-chunk cell-scope prologue.
+ *
+ * `used` is the exact set the callee-rename pass renamed (see
+ * `renameCellAccessors`), so the wrappers defined here and the `_scrml_cs_*`
+ * calls in the body cannot drift. Each wrapper applies THIS chunk's namespace via
+ * the inlined `_scrml_cs_key`, then delegates to the REAL runtime accessor of the
+ * same name (a global in classic, a read-only import in esm). Because the wrapper
+ * name (`_scrml_cs_reactive_get`) differs from the accessor it wraps
+ * (`_scrml_reactive_get`) there is no shadow, hence no TDZ and no need to wrap the
+ * initializer — the crux that let this replace the reverted core factory.
+ *
+ * Returns "" when `used` is empty, so a chunk with no reactive state carries no
+ * prologue at all.
+ */
+function buildCellScopePrologue(
+  used: Set<string>,
+  token: string,
+  owners: Record<string, string>,
+): string {
+  if (!token || used.size === 0) return "";
+  const ordered = CELL_SCOPE_ACCESSORS.filter((n) => used.has(n));
+  // Every wrapper except the pure-passthrough `_scrml_ssr_seeded` needs the key fn.
+  const needsKey = ordered.some((n) => n !== "_scrml_ssr_seeded");
+
+  let out =
+    `// --- chunk cell scope (${token}) ---\n` +
+    // NOTE: no bare ` and ` / ` or ` in this comment. Several tests assert the
+    // emitted JS lowers boolean keywords to `&&` / `||` in operator position, and
+    // prose in a compiler comment trips that guard. The guard is right; the
+    // comment must not be what fires it.
+    `// Cell keys resolve into THIS chunk's slice of the shared store, so two\n` +
+    `// routes both declaring <rows> no longer clobber. The store / scheduler /\n` +
+    `// subscriber lists stay singletons; only the KEY SPACE is per-chunk. The\n` +
+    `// body calls the _scrml_cs_* wrappers below; each applies the namespace\n` +
+    `// through _scrml_cs_key, then delegates to the real runtime accessor.\n`;
+
+  if (needsKey) out += cellScopeKeyFn(token, owners);
+  for (const name of ordered) {
+    out += `const ${CS_PREFIX}${name.slice("_scrml_".length)} = ${cellScopeWrapper(name)};\n`;
+  }
+  out += `// --- end chunk cell scope ---\n\n`;
+  return out;
+}
+
+/**
+ * Rename cell-accessor calls in the chunk body to their `_scrml_cs_` wrappers,
+ * then prepend the prologue that DEFINES those wrappers.
+ *
+ * The rename runs on the BODY ONLY, before the prologue is prepended — so the
+ * prologue's own references to the real accessors are never renamed (§1.2
+ * ordering). "Body" = everything after an EMBEDDED runtime (whose accessor
+ * DEFINITIONS must stay put) or, in the standalone case, after the last
+ * `// Requires:` / `import` header line.
+ */
+function addCellScopePrologue(
+  clientJs: string,
+  token: string,
+  owners: Record<string, string>,
+): string {
+  if (!token) return clientJs;
+
+  const runtimeEndMarker = "// --- end scrml reactive runtime ---";
+  const runtimeEnd = clientJs.indexOf(runtimeEndMarker);
+
+  let header: string;
+  let body: string;
+  if (runtimeEnd !== -1) {
+    // Embedded runtime — its accessor definitions + internal calls stay in the
+    // header, untouched; only the post-marker chunk body is renamed + scoped.
+    const cut = runtimeEnd + runtimeEndMarker.length;
+    header = clientJs.slice(0, cut) + "\n";
+    body = clientJs.slice(cut).replace(/^\n/, "");
+  } else {
+    // Standalone runtime — the body starts after the last header line.
+    const lines = clientJs.split("\n");
+    let last = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith("// Requires: ") || /^\s*import\s/.test(lines[i])) last = i;
+    }
+    header = lines.slice(0, last + 1).join("\n") + "\n";
+    body = lines.slice(last + 1).join("\n").replace(/^\n+/, "");
+  }
+
+  const { code: renamedBody, used } = renameCellAccessors(body, CELL_SCOPE_ACCESSORS);
+  if (used.size === 0) return clientJs; // no cell accessors — carry no scope
+
+  const prologue = buildCellScopePrologue(used, token, owners);
+  return header + prologue + renamedBody;
+}
+
+/**
+ * Wrap a chunk BODY in an IIFE so its top-level `const`/`function` declarations
+ * are chunk-local rather than shared across the classic global lexical
+ * environment. See the call site for why this is unconditional and what is
+ * audited to still escape.
+ *
+ * The `// Requires: <runtime>` header stays outside (the dev server reads it to
+ * wire the runtime `<script>`), and so does an embedded runtime.
+ */
+function wrapChunkBodyInIife(clientJs: string): string {
+  const runtimeEndMarker = "// --- end scrml reactive runtime ---";
+  const runtimeEnd = clientJs.indexOf(runtimeEndMarker);
+  if (runtimeEnd !== -1) {
+    const cut = runtimeEnd + runtimeEndMarker.length;
+    const header = clientJs.slice(0, cut) + "\n";
+    const body = clientJs.slice(cut).replace(/^\n/, "");
+    return header + wrapBodyKeepingModuleStatementsOutside(body);
+  }
   const reqPrefix = "// Requires: ";
   const nl = clientJs.indexOf("\n");
   if (clientJs.startsWith(reqPrefix) && nl !== -1) {
     const header = clientJs.slice(0, nl + 1);
     const body = clientJs.slice(nl + 1);
-    return `${header}(function() {\n${body}\n})();\n`;
+    return header + wrapBodyKeepingModuleStatementsOutside(body);
   }
-  return `(function() {\n${clientJs}\n})();\n`;
+  return wrapBodyKeepingModuleStatementsOutside(clientJs);
 }
+
+/**
+ * Wrap `body` in the chunk IIFE, but HOIST any top-level `import`/`export`
+ * statements OUT of the wrap (a classic client chunk may still carry an ESM
+ * `import` for a `.js` helper module, and `import`/`export` are a SyntaxError
+ * inside a function body). The hoisted bindings sit at module scope, so the IIFE
+ * body closes over them exactly as before the wrap. `_scrml_modules[...] = {...}`
+ * registrations stay INSIDE (they are ASSIGNMENTS to a shared global, not
+ * `export` statements) — the documented escape path.
+ *
+ * The scan is line-based at column 0, which matches the single-line `import ...;`
+ * the emitter produces; indented references (`… import(…)` dynamic import, a
+ * string containing the word) are untouched.
+ */
+function wrapBodyKeepingModuleStatementsOutside(body: string): string {
+  const lines = body.split("\n");
+  const hoisted: string[] = [];
+  const rest: string[] = [];
+  for (const line of lines) {
+    if (/^(import|export)\s/.test(line)) hoisted.push(line);
+    else rest.push(line);
+  }
+  const hoistBlock = hoisted.length > 0 ? hoisted.join("\n") + "\n" : "";
+  return `${hoistBlock}(function() {\n${rest.join("\n")}\n})();\n`;
+}
+
 
 /**
  * §64 / Flag C — the LOCAL names a tool imports that bind to an ASYNC library fn.
@@ -974,6 +1224,48 @@ export function runCG(input: CgInput): CgOutput {
   // ---------------------------------------------------------------------------
   const workerBundlesPerFile = new Map<string, Map<string, string>>();
 
+  // ---------------------------------------------------------------------------
+  // chunk-namespacing — resolve the namespace ANCHOR once for the whole build.
+  //
+  // The anchor is the PROJECT ROOT (`scrml.toml`, else `.git`), not the input
+  // set's common directory. The common directory made the token a function of
+  // WHICH FILES were compiled together: adding one file at a shallower path
+  // rotated every other file's token (S282 D3), and for a single-file compile it
+  // collapsed to the bare basename, so two unrelated `home.scrml` files received
+  // the SAME token (S282 D1) — deterministically reinstating the collision the
+  // token exists to prevent. The project root is a property of the source tree,
+  // so it is stable across input sets and across checkouts.
+  //
+  // With no project root the token falls back to the absolute path, which is
+  // strictly MORE injective (see chunk-namespace.ts for why that is not the
+  // degrade the ruling rejects). `assertChunkTokensDistinct` below is the real
+  // guarantee either way.
+  const chunkNamespaceRoot = resolveProjectRoot(
+    cgOutputBaseDir || ((files[0] as any)?.filePath as string | undefined) || "",
+  );
+
+  // D2 — the token map must be INJECTIVE over this build. FNV-1a is 32-bit
+  // (~1.2e-4 birthday probability at a thousand units), and a token collision
+  // fails SILENTLY as exactly the cross-chunk clobber this arc fixes. §47.1.5's
+  // E-CG-010 is documented as not covering this call site, so assert it here.
+  {
+    const nsCollisions = assertChunkTokensDistinct(
+      files.map((f) => (f as any)?.filePath as string).filter(Boolean),
+      chunkNamespaceRoot,
+    );
+    for (const c of nsCollisions) {
+      errors.push(new CGError(
+        "E-CG-018",
+        `E-CG-018: chunk-namespace token collision — ${c.paths.length} source files ` +
+        `hash to the same namespace token '${c.token}': ${c.paths.join(", ")}. ` +
+        `Distinct compilation units must occupy distinct id/cell namespaces; sharing ` +
+        `one means their emitted node ids, each-mount fences and reactive cell keys ` +
+        `collide at runtime. Rename one of the files.`,
+        { file: c.paths[0], start: 0, end: 0, line: 1, col: 1 },
+      ));
+    }
+  }
+
   for (const fileAST of files) {
     const filePath = (fileAST as any).filePath as string;
     // §20.6 — register this file's source so the log() lowering can resolve
@@ -989,6 +1281,13 @@ export function runCG(input: CgInput): CgOutput {
     // §20.7 — a file-level `function print` / `println` shadows that builtin;
     // the print/println lowering then yields to the user fn (name-precise).
     setPrintShadowedNames(filePrintBuiltinsShadowed(fileAST));
+    // chunk-namespacing — install THIS unit's id/cell namespace. Every emitted
+    // token that is unit-local at compile time but process-global at run time
+    // (each/match ids, the each-fence comment, the renderer-registry key, the
+    // reactive-cell store key) reads it. ONE install per file, consumed by BOTH
+    // the HTML and the JS emitters, so the SSR and client sides cannot disagree
+    // about which fence or which cell slot they mean.
+    setChunkNamespaceState(buildChunkNamespaceState(fileAST, chunkNamespaceRoot));
     // g-markup-session-read-undeclared — default the `@session` projection-active
     // flag OFF; worker bundles carry no auth session projection. Re-set per-file
     // in the main emit loop once auth middleware is resolved.
@@ -1247,173 +1546,270 @@ export function runCG(input: CgInput): CgOutput {
   }
 
   // Process each file
-  for (const fileAST of files) {
-    const filePath = (fileAST as any).filePath as string;
-    // §20.6 — register this file's source for log() file:line resolution.
-    registerFileSource(filePath, ((fileAST as any)?._sourceText ?? "") as string);
-    // §20.6 (shadowing) — a file-level `function log` shadows the builtin
-    // across this whole file; the log() lowering then yields + lints.
-    setLogShadowedInFile(fileDeclaresLog(fileAST));
-    // ss16 C3 — a file-level `function render` shadows the render() builtin.
-    setRenderShadowedInFile(fileDeclaresRender(fileAST));
-    // §20.7 — a file-level `function print` / `println` shadows that builtin.
-    setPrintShadowedNames(filePrintBuiltinsShadowed(fileAST));
-    // g-markup-session-read-undeclared — default OFF; re-set after auth-MW
-    // resolution below (needs `authMW`, resolved later in this iteration).
-    setSessionProjectionActive(false);
-    // §20.5 (B2.5, S266) — per-file `session` file-scope-shadow flag (see the
-    // worker-loop note above). A file-scope `let session` / `<session>` cell shadows
-    // the reserved server establishment builtin file-wide.
-    setSessionShadowedInFile(fileDeclaresFileScopeBinding(fileAST, "session") || collectReactiveVarNames(fileAST).has("session"));
-    // §52 (S233) — default the `@currentUser` ambient OFF; re-set per-file below.
-    setCurrentUserAmbientActive(false);
-    const analysis = fileAnalyses.get(filePath);
-    const nodes: object[] = analysis ? (analysis as any).nodes : [];
+  // D6 — the reset below is EXCEPTION-SAFE by construction. A throw anywhere
+  // in emit would otherwise leave the last file's token installed in this
+  // module singleton for the rest of the process, which is precisely the
+  // contamination the reset exists to prevent (emitters driven directly by a
+  // unit test later in the same `bun test` process would inherit it), and the
+  // exceptional path is the one most likely to hit it.
+  try {
+    for (const fileAST of files) {
+      const filePath = (fileAST as any).filePath as string;
+      // §20.6 — register this file's source for log() file:line resolution.
+      registerFileSource(filePath, ((fileAST as any)?._sourceText ?? "") as string);
+      // §20.6 (shadowing) — a file-level `function log` shadows the builtin
+      // across this whole file; the log() lowering then yields + lints.
+      setLogShadowedInFile(fileDeclaresLog(fileAST));
+      // ss16 C3 — a file-level `function render` shadows the render() builtin.
+      setRenderShadowedInFile(fileDeclaresRender(fileAST));
+      // §20.7 — a file-level `function print` / `println` shadows that builtin.
+      setPrintShadowedNames(filePrintBuiltinsShadowed(fileAST));
+      // chunk-namespacing — install THIS unit's id/cell namespace. Every emitted
+      // token that is unit-local at compile time but process-global at run time
+      // (each/match ids, the each-fence comment, the renderer-registry key, the
+      // reactive-cell store key) reads it. ONE install per file, consumed by BOTH
+      // the HTML and the JS emitters, so the SSR and client sides cannot disagree
+      // about which fence or which cell slot they mean.
+      setChunkNamespaceState(buildChunkNamespaceState(fileAST, chunkNamespaceRoot));
+      // g-markup-session-read-undeclared — default OFF; re-set after auth-MW
+      // resolution below (needs `authMW`, resolved later in this iteration).
+      setSessionProjectionActive(false);
+      // §20.5 (B2.5, S266) — per-file `session` file-scope-shadow flag (see the
+      // worker-loop note above). A file-scope `let session` / `<session>` cell shadows
+      // the reserved server establishment builtin file-wide.
+      setSessionShadowedInFile(fileDeclaresFileScopeBinding(fileAST, "session") || collectReactiveVarNames(fileAST).has("session"));
+      // §52 (S233) — default the `@currentUser` ambient OFF; re-set per-file below.
+      setCurrentUserAmbientActive(false);
+      const analysis = fileAnalyses.get(filePath);
+      const nodes: object[] = analysis ? (analysis as any).nodes : [];
 
-    // Bug B (structural-compound deep-set mistarget): stamp each
-    // `reactive-nested-assign` whose target is a Variant C structural
-    // compound parent with its TRUE write destination (the backing LEAF
-    // cell key + residual path), so emit-logic writes `a.ref` not the
-    // derived composite `a` (SPEC §6.3.2). In-place on the shared AST
-    // nodes; no-op when the file has no compound parents.
-    stampCompoundDeepSetTargets(fileAST as Record<string, unknown>);
+      // Bug B (structural-compound deep-set mistarget): stamp each
+      // `reactive-nested-assign` whose target is a Variant C structural
+      // compound parent with its TRUE write destination (the backing LEAF
+      // cell key + residual path), so emit-logic writes `a.ref` not the
+      // derived composite `a` (SPEC §6.3.2). In-place on the shared AST
+      // nodes; no-op when the file has no compound parents.
+      stampCompoundDeepSetTargets(fileAST as Record<string, unknown>);
 
-    // Check for unknown types in nodeTypes
-    if ((fileAST as any).nodeTypes) {
-      for (const [nodeId, type] of (fileAST as any).nodeTypes as Map<string, any>) {
-        if (type && type.kind === "unknown") {
-          errors.push(new CGError(
-            "E-CG-001",
-            `E-CG-001: Internal: node '${nodeId}' has an unrecognized type. ` +
-            `This is likely a compiler bug — please report it with your .scrml file.`,
-            { file: filePath, start: 0, end: 0, line: 1, col: 1 },
-          ));
+      // Check for unknown types in nodeTypes
+      if ((fileAST as any).nodeTypes) {
+        for (const [nodeId, type] of (fileAST as any).nodeTypes as Map<string, any>) {
+          if (type && type.kind === "unknown") {
+            errors.push(new CGError(
+              "E-CG-001",
+              `E-CG-001: Internal: node '${nodeId}' has an unrecognized type. ` +
+              `This is likely a compiler bug — please report it with your .scrml file.`,
+              { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+            ));
+          }
         }
       }
-    }
 
-    // Resolve auth middleware for this file (from RI output)
-    const authMW = safeRouteMap.authMiddleware?.get(filePath) ?? null;
-    // g-markup-session-read-undeclared (S228 ruling) — the `@session` window-
-    // scoped auth projection (emit-client.ts `var session = ...`) is emitted iff
-    // auth middleware is configured for this file. When active AND the file does
-    // not declare a user reactive cell named `session` (which would otherwise own
-    // the `@session` read), a CLIENT-mode `@session` read lowers to the bare
-    // projection var `session` instead of `_scrml_reactive_get("session")` (the
-    // latter reads an unregistered reactive key → undefined → `.current` crash).
-    setSessionProjectionActive(authMW !== null && !collectReactiveVarNames(fileAST).has("session"));
-    // §20.5 / §52 (S233) — the `@currentUser` ambient identity cell is active iff
-    // the file declares NO user reactive cell named `currentUser` (which would own
-    // the `@currentUser` read). When active, a SERVER-mode `@currentUser` read
-    // lowers to the handler-scoped `_scrml_currentUser` binding (the session-
-    // resolved identity); when a user `<currentUser>` cell shadows the name it
-    // keeps the ordinary reactive / request-body form. Mirrors the @session gate.
-    setCurrentUserAmbientActive(!collectReactiveVarNames(fileAST).has("currentUser"));
-    // Resolve §39 middleware config from AST (compiler-auto tier). PRECG
-    // (compute-program-config) sets it on the INNER FileAST; at codegen the file
-    // may be the `{ ast: {…} }` wrapper (TAB result), so read the `.ast` fallback
-    // too — mirrors api.js's `f.middlewareConfig ?? f.ast?.middlewareConfig` read
-    // (without this, `cors=`/`log=`/etc. silently do not reach the emit).
-    const middlewareCfg = (fileAST as any).middlewareConfig ?? (fileAST as any).ast?.middlewareConfig ?? null;
+      // Resolve auth middleware for this file (from RI output)
+      const authMW = safeRouteMap.authMiddleware?.get(filePath) ?? null;
+      // g-markup-session-read-undeclared (S228 ruling) — the `@session` window-
+      // scoped auth projection (emit-client.ts `var session = ...`) is emitted iff
+      // auth middleware is configured for this file. When active AND the file does
+      // not declare a user reactive cell named `session` (which would otherwise own
+      // the `@session` read), a CLIENT-mode `@session` read lowers to the bare
+      // projection var `session` instead of `_scrml_reactive_get("session")` (the
+      // latter reads an unregistered reactive key → undefined → `.current` crash).
+      setSessionProjectionActive(authMW !== null && !collectReactiveVarNames(fileAST).has("session"));
+      // §20.5 / §52 (S233) — the `@currentUser` ambient identity cell is active iff
+      // the file declares NO user reactive cell named `currentUser` (which would own
+      // the `@currentUser` read). When active, a SERVER-mode `@currentUser` read
+      // lowers to the handler-scoped `_scrml_currentUser` binding (the session-
+      // resolved identity); when a user `<currentUser>` cell shadows the name it
+      // keeps the ordinary reactive / request-body form. Mirrors the @session gate.
+      setCurrentUserAmbientActive(!collectReactiveVarNames(fileAST).has("currentUser"));
+      // Resolve §39 middleware config from AST (compiler-auto tier). PRECG
+      // (compute-program-config) sets it on the INNER FileAST; at codegen the file
+      // may be the `{ ast: {…} }` wrapper (TAB result), so read the `.ast` fallback
+      // too — mirrors api.js's `f.middlewareConfig ?? f.ast?.middlewareConfig` read
+      // (without this, `cors=`/`log=`/etc. silently do not reach the emit).
+      const middlewareCfg = (fileAST as any).middlewareConfig ?? (fileAST as any).ast?.middlewareConfig ?? null;
 
-    // S79 audit fix C.2 — apply per-file <program batch-in-list-cap=> override
-    // to the emit-control-flow module-level cap. Reset to null after the file
-    // is emitted (mirrors setBatchLoopHoists lifecycle).
-    {
-      const rawCap = middlewareCfg?.batchInListCap;
-      if (typeof rawCap === "string" && /^\d+$/.test(rawCap.trim())) {
-        const n = parseInt(rawCap.trim(), 10);
-        if (Number.isFinite(n) && n > 0) {
-          setBatchInListCap(n);
+      // S79 audit fix C.2 — apply per-file <program batch-in-list-cap=> override
+      // to the emit-control-flow module-level cap. Reset to null after the file
+      // is emitted (mirrors setBatchLoopHoists lifecycle).
+      {
+        const rawCap = middlewareCfg?.batchInListCap;
+        if (typeof rawCap === "string" && /^\d+$/.test(rawCap.trim())) {
+          const n = parseInt(rawCap.trim(), 10);
+          if (Number.isFinite(n) && n > 0) {
+            setBatchInListCap(n);
+          } else {
+            setBatchInListCap(null);
+          }
         } else {
           setBatchInListCap(null);
         }
-      } else {
-        setBatchInListCap(null);
       }
-    }
 
-    // ---------------------------------------------------------------------------
-    // Generate server JS — emitted in both browser and library mode.
-    // ---------------------------------------------------------------------------
-    // ss19 #9 (g-db-src-compile-vs-runtime-path) — thread the project root
-    // (outputBaseDir = the runtime cwd) onto fileAST so emit-server can express
-    // the emitted `sqlite:` path relative to a CONSISTENT base. Without this, a
-    // <page> in a subdir (`src="../m.db"`) and the root entry (`src="./m.db"`)
-    // reference the same physical db at compile time but emit DIFFERENT runtime
-    // paths → the subdir page opens a different (empty) file from the project
-    // root. null for legacy single-file callers (handled verbatim downstream).
-    (fileAST as any)._outputBaseDir = cgOutputBaseDir;
+      // ---------------------------------------------------------------------------
+      // Generate server JS — emitted in both browser and library mode.
+      // ---------------------------------------------------------------------------
+      // ss19 #9 (g-db-src-compile-vs-runtime-path) — thread the project root
+      // (outputBaseDir = the runtime cwd) onto fileAST so emit-server can express
+      // the emitted `sqlite:` path relative to a CONSISTENT base. Without this, a
+      // <page> in a subdir (`src="../m.db"`) and the root entry (`src="./m.db"`)
+      // reference the same physical db at compile time but emit DIFFERENT runtime
+      // paths → the subdir page opens a different (empty) file from the project
+      // root. null for legacy single-file callers (handled verbatim downstream).
+      (fileAST as any)._outputBaseDir = cgOutputBaseDir;
 
-    // W5b (S239) — stash the module's cross-import async seed: the LOCAL names
-    // that bind an async fn imported from ANOTHER lib. emit-server's ss1
-    // value-export path (emitModuleValueExportLines) reads it so a server-exported
-    // fn that (transitively) calls a cross-lib async import is colored async and
-    // awaits it — parity with the tool path (which passes the same seed straight
-    // into computeAsyncFnNames). Stashed here because emit-server has no `files`
-    // handle. `computeToolAsyncImportedLocals` is generic (any fileAST); it
-    // early-returns empty for an import-free file, so the cost is ~O(1) there.
-    (fileAST as any)._asyncImportedLocals = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput);
+      // W5b (S239) — stash the module's cross-import async seed: the LOCAL names
+      // that bind an async fn imported from ANOTHER lib. emit-server's ss1
+      // value-export path (emitModuleValueExportLines) reads it so a server-exported
+      // fn that (transitively) calls a cross-lib async import is colored async and
+      // awaits it — parity with the tool path (which passes the same seed straight
+      // into computeAsyncFnNames). Stashed here because emit-server has no `files`
+      // handle. `computeToolAsyncImportedLocals` is generic (any fileAST); it
+      // early-returns empty for an import-free file, so the cost is ~O(1) there.
+      (fileAST as any)._asyncImportedLocals = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput);
 
-    // ---------------------------------------------------------------------------
-    // §64 STANDALONE TOOL TARGET — a `kind="tool"` top-level <program> re-targets
-    // the emit from a web application (html + client.js + CSRF + server routes) to
-    // a PLAIN runnable ES module. Bypass emit-server / emit-html / emit-client /
-    // CSRF entirely and emit the tool module + main() harness (§64.1/§64.3).
-    // ---------------------------------------------------------------------------
-    if (isToolProgram(fileAST)) {
-      // §64 / Flag C — cross-import await-coloring: find the LOCAL names the tool
-      // imports that bind to an ASYNC library fn (a `<foreign lang>` lib's
-      // `export fn` emits `export async function`), so `generateToolJs` awaits
-      // their call sites. `computeAsyncFnNames` only sees the tool's OWN fns.
-      // §64.6 — fail closed if the tool imports a non-importable `.scrml` dep
-      // (page-shaped / no exports → no `<base>.js` → runtime Cannot-find-module).
-      checkToolImportsAreImportable(fileAST, files, filePath, errors);
-      const asyncImportedNames = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput);
-      // §64 (Fork 1A, Unit 2) — a `kind="tool" serve=` program hosts its
-      // `<endpoint>`/SSE routes via a compiler-emitted `Bun.serve`. Thread the
-      // route-inference routeMap + the auth/middleware/protect stage results
-      // (the SAME objects the web-app `generateServerJs` call receives) so the
-      // serve-harness path can delegate to `generateHeadlessServerJs`. A NON-serve
-      // tool ignores these (getToolServeConfig → null → the plain CLI path).
-      const serveEmitDeps = {
-        routeMap: safeRouteMap,
-        authMiddleware: authMW,
-        middlewareConfig: middlewareCfg,
-        batchPlan,
-        batchPlannerErrors,
-        protectAnalysis,
-        exportRegistry: exportRegistryInput,
-      };
-      const toolJs: string = codegenStage("emit-tool", () =>
-        generateToolJs(fileAST as unknown as Record<string, unknown>, errors, asyncImportedNames, serveEmitDeps)
+      // ---------------------------------------------------------------------------
+      // §64 STANDALONE TOOL TARGET — a `kind="tool"` top-level <program> re-targets
+      // the emit from a web application (html + client.js + CSRF + server routes) to
+      // a PLAIN runnable ES module. Bypass emit-server / emit-html / emit-client /
+      // CSRF entirely and emit the tool module + main() harness (§64.1/§64.3).
+      // ---------------------------------------------------------------------------
+      if (isToolProgram(fileAST)) {
+        // §64 / Flag C — cross-import await-coloring: find the LOCAL names the tool
+        // imports that bind to an ASYNC library fn (a `<foreign lang>` lib's
+        // `export fn` emits `export async function`), so `generateToolJs` awaits
+        // their call sites. `computeAsyncFnNames` only sees the tool's OWN fns.
+        // §64.6 — fail closed if the tool imports a non-importable `.scrml` dep
+        // (page-shaped / no exports → no `<base>.js` → runtime Cannot-find-module).
+        checkToolImportsAreImportable(fileAST, files, filePath, errors);
+        const asyncImportedNames = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput);
+        // §64 (Fork 1A, Unit 2) — a `kind="tool" serve=` program hosts its
+        // `<endpoint>`/SSE routes via a compiler-emitted `Bun.serve`. Thread the
+        // route-inference routeMap + the auth/middleware/protect stage results
+        // (the SAME objects the web-app `generateServerJs` call receives) so the
+        // serve-harness path can delegate to `generateHeadlessServerJs`. A NON-serve
+        // tool ignores these (getToolServeConfig → null → the plain CLI path).
+        const serveEmitDeps = {
+          routeMap: safeRouteMap,
+          authMiddleware: authMW,
+          middlewareConfig: middlewareCfg,
+          batchPlan,
+          batchPlannerErrors,
+          protectAnalysis,
+          exportRegistry: exportRegistryInput,
+        };
+        const toolJs: string = codegenStage("emit-tool", () =>
+          generateToolJs(fileAST as unknown as Record<string, unknown>, errors, asyncImportedNames, serveEmitDeps)
+        );
+        const toolOutput: CgFileOutput = {
+          sourceFile: filePath,
+          toolJs,
+        };
+        outputs.set(filePath, toolOutput);
+        continue;
+      }
+
+      let serverJs: string | null = codegenStage("emit-server", () =>
+        // §14.8.9 — thread the PA stage's ProtectAnalysis so emit-server can apply
+        // protected-column egress redaction (server-fn response + SSR /__serverLoad).
+        generateServerJs(fileAST, safeRouteMap, errors, authMW, middlewareCfg, batchPlan, batchPlannerErrors, mode, protectAnalysis, exportRegistryInput)
+      ) || null;
+
+      // ---------------------------------------------------------------------------
+      // Generate CSS — emitted in both modes.
+      // ---------------------------------------------------------------------------
+      const userCss: string = codegenStage("emit-css", () =>
+        generateCss(nodes, analysis?.cssBlocks, errors, fileAST as Record<string, unknown>)
+      ) || "";
+
+      // ---------------------------------------------------------------------------
+      // LIBRARY MODE — emit ES module exports, skip HTML and browser client JS
+      // ---------------------------------------------------------------------------
+      if (mode === "library") {
+        const libCtx: CompileContext = {
+          filePath,
+          fileAST,
+          routeMap: safeRouteMap,
+          depGraph: safeDepGraph,
+          protectedFields,
+          authMiddleware: authMW,
+          middlewareConfig: middlewareCfg,
+          csrfEnabled: false,
+          encodingCtx: null,
+          mode,
+          testMode,
+          dbVar: "_scrml_sql",
+          workerNames: [],
+          errors,
+          registry: new BindingRegistry(),
+          derivedNames: collectDerivedVarNames(fileAST),
+          synthCellKeys: collectSynthCellKeys(fileAST),
+          analysis: analysis ?? null,
+          reachabilityRecord: reachabilityRecordInput,
+          // Seam-A colorless-async (GITI-037) — thread MOD's exportRegistry so
+          // generateLibraryJs can seed + auto-await a library fn calling a
+          // Promise-returning stdlib primitive (safeCallAsync / scrml:auth …).
+          exportRegistry: exportRegistryInput,
+        };
+        const libraryJs: string | null = codegenStage("emit-library", () =>
+          generateLibraryJs(libCtx)
+        ) || null;
+
+        const css: string | null = userCss || null;
+
+        let serverJsMap: string | null = null;
+        const base = basename(filePath, ".scrml");
+        if (sourceMap) {
+          const sourceBasename = `${base}.scrml`;
+          // source-map-real-provenance-js-2026-05-31 — real per-line provenance
+          // (was: addMapping(i, 0, 0) mapping every output line to source 0:0).
+          // The per-file source string rides on the TAB result as `_sourceText`
+          // (threaded in api.js via sourceByFile); byte-offset->line/col is exact
+          // and sourcesContent is embedded. Falls back to "" only for harnesses
+          // that bypass the full pipeline (map is then honestly all-synthetic
+          // rather than a fake 0:0).
+          const fileSource: string = (fileAST as any)?._sourceText ?? "";
+          if (serverJs) {
+            const serverMapFile = `${base}.server.js.map`;
+            const { builder: serverMapBuilder, cleanedJs: serverClean } =
+              buildSourceMap(serverJs, sourceBasename, fileSource, nodes);
+            serverJs = serverClean; // ship the marker-stripped JS
+            serverJsMap = serverMapBuilder.generate(`${base}.server.js`);
+            serverJs = appendSourceMappingUrl(serverJs, serverMapFile);
+          }
+        }
+
+        const fileWorkerBundles = workerBundlesPerFile.get(filePath);
+        const libOutput: CgFileOutput = {
+          sourceFile: filePath,
+          libraryJs,
+          serverJs,
+          css,
+          ...(fileWorkerBundles && { workerBundles: fileWorkerBundles }),
+          ...(serverJsMap !== null && { serverJsMap }),
+        };
+        outputs.set(filePath, libOutput);
+        continue;
+      }
+
+      // ---------------------------------------------------------------------------
+      // BROWSER MODE (default) — HTML + client IIFE JS + server JS
+      // ---------------------------------------------------------------------------
+
+      const hasServerFns = [...safeRouteMap.functions.entries()].some(
+        ([id, route]) => id.startsWith(filePath + "::") && route.boundary === "server"
       );
-      const toolOutput: CgFileOutput = {
-        sourceFile: filePath,
-        toolJs,
-      };
-      outputs.set(filePath, toolOutput);
-      continue;
-    }
+      const csrfEnabled = authMW !== null ? authMW.csrf === "auto" : hasServerFns;
 
-    let serverJs: string | null = codegenStage("emit-server", () =>
-      // §14.8.9 — thread the PA stage's ProtectAnalysis so emit-server can apply
-      // protected-column egress redaction (server-fn response + SSR /__serverLoad).
-      generateServerJs(fileAST, safeRouteMap, errors, authMW, middlewareCfg, batchPlan, batchPlannerErrors, mode, protectAnalysis, exportRegistryInput)
-    ) || null;
+      const registry = new BindingRegistry();
 
-    // ---------------------------------------------------------------------------
-    // Generate CSS — emitted in both modes.
-    // ---------------------------------------------------------------------------
-    const userCss: string = codegenStage("emit-css", () =>
-      generateCss(nodes, analysis?.cssBlocks, errors, fileAST as Record<string, unknown>)
-    ) || "";
+      const fileWorkerNames = workerBundlesPerFile.has(filePath)
+        ? [...workerBundlesPerFile.get(filePath)!.keys()]
+        : [];
 
-    // ---------------------------------------------------------------------------
-    // LIBRARY MODE — emit ES module exports, skip HTML and browser client JS
-    // ---------------------------------------------------------------------------
-    if (mode === "library") {
-      const libCtx: CompileContext = {
+      // Construct CompileContext early so all emitters can use it.
+      // encodingCtx starts null and is set after HTML gen.
+      const compileCtx: CompileContext = {
         filePath,
         fileAST,
         routeMap: safeRouteMap,
@@ -1421,41 +1817,354 @@ export function runCG(input: CgInput): CgOutput {
         protectedFields,
         authMiddleware: authMW,
         middlewareConfig: middlewareCfg,
-        csrfEnabled: false,
+        csrfEnabled,
         encodingCtx: null,
         mode,
         testMode,
         dbVar: "_scrml_sql",
-        workerNames: [],
+        workerNames: fileWorkerNames,
         errors,
-        registry: new BindingRegistry(),
+        registry,
         derivedNames: collectDerivedVarNames(fileAST),
         synthCellKeys: collectSynthCellKeys(fileAST),
         analysis: analysis ?? null,
-        reachabilityRecord: reachabilityRecordInput,
-        // Seam-A colorless-async (GITI-037) — thread MOD's exportRegistry so
-        // generateLibraryJs can seed + auto-await a library fn calling a
-        // Promise-returning stdlib primitive (safeCallAsync / scrml:auth …).
+        usedRuntimeChunks: new Set(['core', 'scope', 'errors', 'transitions']),
+        // C15 — propagate MOD exportRegistry per-file so emit-engine.ts can
+        // discriminate cross-file engine mount sites from local components / HTML.
         exportRegistry: exportRegistryInput,
+        // known-gaps-#6 (S152) — propagate MOD importGraph + dist outputBaseDir
+        // so emit-client's cross-file _scrml_modules footer/read derive a stable,
+        // identical dist-relative registry key on both the exporter + importer
+        // sides. outputBaseDir is computed below from the compile-unit source set.
+        importGraph: importGraphInput,
+        outputBaseDir: cgOutputBaseDir,
+        // A-2.1 — propagate Stage 7.6 ReachabilityRecord per-file; A-4 codegen
+        // will consume per-entry-point per-role ChunkPlans. Empty until A-2.2+.
+        reachabilityRecord: reachabilityRecordInput,
+        // PGO P2.1 (S102) — threaded so `emit-client.ts:clientStage` can
+        // gate timing on the same `debugPerf` flag, route output through
+        // the same `log` sink, and accumulate per-sub-emit totals into a
+        // SHARED Map (one instance for the whole runCG invocation, reused
+        // across every per-file compileCtx).
+        debugPerf,
+        log,
+        clientEmitTotals,
       };
-      const libraryJs: string | null = codegenStage("emit-library", () =>
-        generateLibraryJs(libCtx)
+
+      const hasMarkup = (analysis as any)?.markupNodes?.length > 0;
+      // Bug R18: After meta-eval, emit() may replace meta blocks with text nodes
+      // that have no sibling markup. Check for any renderable content, not just
+      // markup nodes.
+      const hasRenderableContent = hasMarkup || nodes.some((n: any) =>
+        n && typeof n === "object" && (
+          (n.kind === "text" && typeof n.value === "string" && n.value.trim() !== "") ||
+          (n.kind === "text" && typeof n.text === "string" && n.text.trim() !== "") ||
+          n.kind === "state" ||
+          n.kind === "if-chain" ||
+          // Phase A10 (S78, 2026-05-10) — engine-decl emits a mount slot at
+          // its source position when its body has any non-empty arm; gate
+          // HTML generation on engine-only files too. emit-html.ts:emitNode
+          // dispatches engine-decl to emit-engine.ts:emitEngineMountHtml.
+          n.kind === "engine-decl" ||
+          // S130 HU-1 iteration Landing 1 — each-block emits a mount slot
+          // mirror of engine-decl + match-block. Gate HTML generation on
+          // each-block presence so iteration-only files (no markup, no
+          // engine) still produce the mount placeholder.
+          n.kind === "each-block"
+        )
+      );
+      const htmlBody: string | null = hasRenderableContent
+        ? codegenStage("emit-html", () => generateHtml(nodes, compileCtx))
+        : null;
+
+      // Bug 17 (SPEC §26.1): collect Tailwind utility class names from BOTH the
+      // emitted static HTML AND the source AST. The HTML scan covers `class="..."`
+      // on top-level markup; the AST walker covers class names reachable ONLY
+      // through `${ for ... lift <markup class="..."> }` iteration bodies and
+      // sibling control-flow shapes (if-stmt, match-stmt, etc.) — those bodies
+      // are emitted as `_scrml_lift(() => { el.setAttribute("class", "...") })`
+      // factory JS, NOT as static HTML, so a pure HTML scan misses them.
+      let tailwindCss = "";
+      codegenStage("emit-tailwind", () => {
+        const usedClasses = new Set<string>();
+        if (htmlBody) {
+          for (const cls of scanClassesFromHtml(htmlBody)) usedClasses.add(cls);
+        }
+        // Even with no static HTML body, an engine-only file can carry markup
+        // inside arm bodies that emit-engine renders at runtime — walk the AST
+        // unconditionally.
+        for (const cls of collectClassNamesFromAst(nodes)) usedClasses.add(cls);
+        if (usedClasses.size > 0) {
+          tailwindCss = getAllUsedCSS([...usedClasses]);
+        }
+      });
+
+      const cssParts: string[] = [];
+      if (userCss) cssParts.push(userCss);
+      if (tailwindCss) cssParts.push(tailwindCss);
+      const css: string | null = cssParts.length > 0 ? cssParts.join("\n") : null;
+
+      // Create per-file EncodingContext (§47) and set it on the compile context
+      const encodingCtx = new EncodingContext({
+        enabled: encodingOpts.enabled,
+        debug: encodingOpts.debug,
+        __testOnly_typeEncodingSeqCap:
+          (encodingOpts as { __testOnly_typeEncodingSeqCap?: number })
+            .__testOnly_typeEncodingSeqCap,
+      });
+      compileCtx.encodingCtx = encodingCtx;
+
+      // Register reactive variables with the encoding context
+      if (encodingCtx.enabled) {
+        const topLevelLogic = analysis?.topLevelLogic ?? collectTopLevelLogicStatements(fileAST);
+        for (const stmt of topLevelLogic) {
+          if ((stmt as any).kind === "state-decl" && (stmt as any).name) {
+            const type = (fileAST as any).nodeTypes?.get((stmt as any).name) ?? { kind: "asIs", constraint: null };
+            encodingCtx.register((stmt as any).name, type);
+          }
+        }
+      }
+
+      const clientJsRaw: string | null = codegenStage("emit-client", () =>
+        generateClientJs(compileCtx)
       ) || null;
 
-      const css: string | null = userCss || null;
+      let clientJs: string | null = clientJsRaw;
+      if (clientJsRaw && !embedRuntime) {
+        // v0.3.x SPA tree-shake Phase B 3.3 — emit a placeholder filename
+        // here; runCG substitutes the final hashed filename
+        // (`scrml-runtime.<hash>.js`) in a post-pass once the union has
+        // been assembled.
+        const runtimeEnd = clientJsRaw.indexOf("\n// --- end scrml reactive runtime ---");
+        if (runtimeEnd !== -1) {
+          const afterRuntime = clientJsRaw.substring(
+            runtimeEnd + "\n// --- end scrml reactive runtime ---".length
+          );
+          clientJs = `// Requires: ${RUNTIME_FILENAME_PLACEHOLDER}\n` + afterRuntime;
+        } else {
+          const runtimeStart = clientJsRaw.indexOf("// --- scrml reactive runtime ---");
+          if (runtimeStart !== -1) {
+            const navigateEnd = clientJsRaw.indexOf("function _scrml_navigate(path) {");
+            if (navigateEnd !== -1) {
+              const closeBrace = clientJsRaw.indexOf("}\n", navigateEnd + 30);
+              if (closeBrace !== -1) {
+                const before = clientJsRaw.substring(0, runtimeStart);
+                const after = clientJsRaw.substring(closeBrace + 2);
+                clientJs = before + `// Requires: ${RUNTIME_FILENAME_PLACEHOLDER}\n` + after;
+              }
+            }
+          }
+        }
+      }
 
-      let serverJsMap: string | null = null;
+      // chunk-namespacing N2 — install the per-chunk cell scope BEFORE the esm
+      // transform. Under esm the transform computes its runtime import set as
+      // `(runtime exports ∩ chunk idents) − own decls`; the prologue's `const`
+      // bindings ARE own-decls, so the accessors this chunk shadows drop out of
+      // the import automatically and `_scrml_cell_scope` is imported instead.
+      // Inserting afterwards produced `import { _scrml_reactive_get }` next to
+      // `const { _scrml_reactive_get }` — a redeclaration, and 3 hard
+      // E-CODEGEN-INVALID-LOGIC errors.
+      const cellOwners = clientJs
+        ? buildCellOwnerMap(fileAST, chunkNamespaceRoot, exportRegistryInput ?? null)
+        : {};
+      const chunkToken = chunkNamespaceToken(filePath, chunkNamespaceRoot);
+      if (clientJs) {
+        clientJs = addCellScopePrologue(clientJs, chunkToken, cellOwners);
+      }
+
+      // ESM chunks arc (Unit 2) — under `--module-format=esm`, transform the
+      // stripped (runtime-factored-out) client chunk body into a valid ES module:
+      // the `_scrml_modules` registration footer becomes `export {…}`, each
+      // registry read becomes a namespace `import`, and the runtime symbols the
+      // chunk references become a runtime `import` (see codegen/emit-client-esm.ts).
+      // Gated on `!embedRuntime` (esm is a standalone-runtime feature — an embedded
+      // runtime has no separate module to import from, so esm is a no-op there, per
+      // the Unit 1 module-format notice). `classic` (the default) is untouched, so
+      // its output stays byte-identical. This MUST precede the classic IIFE wrap
+      // below (which the esm path skips — an IIFE cannot contain `import`/`export`).
+      if (clientJs && !embedRuntime && moduleFormat === "esm") {
+        const importerDistDir = cgOutputBaseDir
+          ? dirname(relative(cgOutputBaseDir, filePath))
+          : ".";
+        clientJs = toEsmClientChunk(clientJs, {
+          runtimeSlice: assembleRuntime(compileCtx.usedRuntimeChunks),
+          runtimePlaceholder: RUNTIME_FILENAME_PLACEHOLDER,
+          importerDistDir,
+        });
+      }
+
+      // known-gaps-#6 (S152) + chunk-namespacing N3/N4 (S282) — give the chunk its
+      // own lexical scope.
+      //
+      // S152 wrapped only cross-file-LINKED chunks, to stop an exporter's
+      // `const UserRole` colliding with an importer's destructured one. That gate
+      // is exactly why shell+page composition stayed broken: those chunks coexist
+      // in one document WITHOUT importing each other, so they were never wrapped,
+      // and two routes both declaring `type Phase` still emitted `const Phase`
+      // twice — a redeclaration SyntaxError that killed the second chunk outright
+      // (it never evaluated, so nothing on that page hydrated). Unconditional now.
+      //
+      // `_scrml_modules[...] = {...}` and the runtime shared-global writes are
+      // ASSIGNMENTS, so they still escape the IIFE. An audit of the runtime for
+      // bare references to chunk-declared globals found exactly ONE —
+      // `_scrml_shell_cells` — which emit-reactive-wiring now also publishes on
+      // `globalThis` for that reason.
+      //
+      // esm is skipped: a module is already its own scope, and an IIFE there is
+      // not merely unnecessary but illegal (it would enclose the top-level
+      // `import`/`export`). embedRuntime keeps the inlined runtime OUTSIDE the
+      // wrap — wrapping it would make the runtime's own declarations chunk-local.
+      if (clientJs && moduleFormat !== "esm") {
+        clientJs = wrapChunkBodyInIife(clientJs);
+      }
+
       const base = basename(filePath, ".scrml");
+
+      // §40.7 — extract documentary attributes from the top-level <program>
+      // (Phase A1a, 2026-05-05). The five attributes (title, description,
+      // version, author, license) emit standard HTML head tags. Empty-string
+      // values are treated as absent. Non-string-literal values are silently
+      // ignored — head metadata is static, not reactive.
+      const topLevelProgram = (nodes as any[]).find(
+        (n: any) => n && n.kind === "markup" && n.tag === "program",
+      );
+      function getDocAttr(name: string): string | null {
+        if (!topLevelProgram) return null;
+        const attrs: any[] = topLevelProgram.attributes ?? topLevelProgram.attrs ?? [];
+        const a = attrs.find((x: any) => x.name === name);
+        if (!a || !a.value) return null;
+        if (a.value.kind !== "string-literal") return null;
+        const v = a.value.value;
+        if (typeof v !== "string" || v === "") return null;
+        return v;
+      }
+      const docTitle = getDocAttr("title");
+      const docDescription = getDocAttr("description");
+      const docVersion = getDocAttr("version");
+      const docAuthor = getDocAttr("author");
+      const docLicense = getDocAttr("license");
+
+      // Detect author-written <title> in the source — any <title> markup node
+      // anywhere under the top-level <program>. When present, it suppresses
+      // both the documentary title= AND the default basename <title>.
+      function hasAuthorTitle(children: any[] | undefined): boolean {
+        if (!Array.isArray(children)) return false;
+        for (const c of children) {
+          if (!c || typeof c !== "object") continue;
+          if (c.kind === "markup" && c.tag === "title") return true;
+          if (c.kind === "markup" && Array.isArray(c.children) && hasAuthorTitle(c.children)) return true;
+          // The top-level <program>'s children are the document body — recurse
+          // through state nodes too (state-typed openers that wrap markup).
+          if (c.kind === "state" && Array.isArray(c.children) && hasAuthorTitle(c.children)) return true;
+        }
+        return false;
+      }
+      const authorTitlePresent = topLevelProgram
+        ? hasAuthorTitle(topLevelProgram.children)
+        : hasAuthorTitle(nodes as any[]);
+
+      let html: string | null = null;
+      if (htmlBody) {
+        const docParts: string[] = [];
+        docParts.push("<!DOCTYPE html>");
+        docParts.push("<html lang=\"en\">");
+        docParts.push("<head>");
+        docParts.push("  <meta charset=\"UTF-8\">");
+        docParts.push("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">");
+        // §39.2.3 canonical CSRF delivery — the `<meta name="csrf-token">` element.
+        // Emitted as an EMPTY placeholder in the static HTML for an auth + `csrf="auto"`
+        // app; the server's request-time HTML-composition route (emit-server.ts SSR
+        // compose handler) fills `content=""` with the loading viewer's session
+        // synchronizer token at serve time (the token is per-session, so it cannot be
+        // baked into the static file). The client reads it FIRST in
+        // `_scrml_get_csrf_token()` so the initial mutating POST already carries
+        // `X-CSRF-Token` — no 403 round-trip. Absent/empty (anon, or a non-composed
+        // serve) falls back to the cookie + the single-shot 403-retry. Baseline
+        // (no-auth) double-submit apps emit no meta tag (the client mints its own
+        // token), so this is auth-path only.
+        if (authMW !== null && authMW.csrf === "auto") {
+          docParts.push("  <meta name=\"csrf-token\" content=\"\">");
+        }
+        // <title> emission rule (§40.7):
+        //   1. Author-written <title> → no compiler-emitted <title>
+        //      (the author <title> renders via htmlBody itself)
+        //   2. Documentary title= and no author <title> → emit documentary <title>
+        //   3. Neither → fall back to default basename <title>
+        if (!authorTitlePresent) {
+          if (docTitle !== null) {
+            docParts.push(`  <title>${escapeHtmlAttr(docTitle)}</title>`);
+          } else {
+            docParts.push(`  <title>${escapeHtmlAttr(base)}</title>`);
+          }
+        }
+        // Documentary <meta> tags (§40.7) — fixed emission order.
+        if (docDescription !== null) {
+          docParts.push(`  <meta name="description" content="${escapeHtmlAttr(docDescription)}">`);
+        }
+        if (docVersion !== null) {
+          docParts.push(`  <meta name="application-version" content="${escapeHtmlAttr(docVersion)}">`);
+        }
+        if (docAuthor !== null) {
+          docParts.push(`  <meta name="author" content="${escapeHtmlAttr(docAuthor)}">`);
+        }
+        if (docLicense !== null) {
+          docParts.push(`  <meta name="license" content="${escapeHtmlAttr(docLicense)}">`);
+        }
+        if (css) {
+          docParts.push(`  <link rel="stylesheet" href="${base}.css">`);
+        }
+        docParts.push("</head>");
+        docParts.push("<body>");
+        docParts.push(htmlBody);
+        if (clientJs && !embedRuntime) {
+          // v0.3.x SPA tree-shake Phase B 3.3 — placeholder; runCG
+          // substitutes the final hashed filename in a post-pass.
+          docParts.push(`<script${scriptModuleTypeAttr} src="${RUNTIME_FILENAME_PLACEHOLDER}"></script>`);
+        }
+        if (clientJs) {
+          // known-gaps-#6 (S152, Approach B) — emit the transitive `.scrml`
+          // dependency `.client.js` <script>s BEFORE the entry's own, in
+          // topological (deps-first) order. Each dependency's
+          // `_scrml_modules[...] = {...}` footer must register before the entry's
+          // `const { x } = _scrml_modules[...]` read runs (classic-script eval is
+          // sequential top-to-bottom over the document's <script>s). Empty for
+          // single-file / leaf pages with no cross-file `.scrml` deps.
+          const depScripts = computeDependencyClientScripts(filePath, importGraphInput, cgOutputBaseDir);
+          for (const depSrc of depScripts) {
+            docParts.push(`<script${scriptModuleTypeAttr} src="${depSrc}"></script>`);
+          }
+          docParts.push(`<script${scriptModuleTypeAttr} src="${base}.client.js"></script>`);
+        }
+        docParts.push("</body>");
+        docParts.push("</html>");
+        html = docParts.join("\n");
+      }
+
+      let clientJsMap: string | null = null;
+      let serverJsMap: string | null = null;
+
       if (sourceMap) {
         const sourceBasename = `${base}.scrml`;
         // source-map-real-provenance-js-2026-05-31 — real per-line provenance
         // (was: addMapping(i, 0, 0) mapping every output line to source 0:0).
-        // The per-file source string rides on the TAB result as `_sourceText`
-        // (threaded in api.js via sourceByFile); byte-offset->line/col is exact
-        // and sourcesContent is embedded. Falls back to "" only for harnesses
-        // that bypass the full pipeline (map is then honestly all-synthetic
-        // rather than a fake 0:0).
+        // buildSourceMap correlates each generated line with the .scrml author
+        // construct that produced it, recovers author names into the `names`
+        // field, embeds sourcesContent, and categorizes synthetic boilerplate
+        // lines explicitly (never a fake 0:0). The per-file source rides on the
+        // TAB result as `_sourceText` (threaded in api.js via sourceByFile);
+        // falls back to "" only for harnesses that bypass the full pipeline.
         const fileSource: string = (fileAST as any)?._sourceText ?? "";
+
+        if (clientJs) {
+          const clientMapFile = `${base}.client.js.map`;
+          const { builder: clientMapBuilder, cleanedJs: clientClean } =
+            buildSourceMap(clientJs, sourceBasename, fileSource, nodes);
+          clientJs = clientClean; // ship the marker-stripped JS
+          clientJsMap = clientMapBuilder.generate(`${base}.client.js`);
+          clientJs = appendSourceMappingUrl(clientJs, clientMapFile);
+        }
+
         if (serverJs) {
           const serverMapFile = `${base}.server.js.map`;
           const { builder: serverMapBuilder, cleanedJs: serverClean } =
@@ -1466,522 +2175,153 @@ export function runCG(input: CgInput): CgOutput {
         }
       }
 
+      // Generate test JS when testMode is enabled
+      //
+      // Phase A6-4 (SPEC §19.12.7) — collect same-file server-fn names so
+      // emit-test.ts can emit E-TEST-006 thrower stubs for unbound server-fns
+      // called inside `~{}` test blocks. Walk the file's fn nodes and pick out
+      // those whose route entry has `boundary === "server"`.
+      const sameFileServerFnNames: string[] = [];
+      if (testMode) {
+        const fnNodes: any[] = (analysis as any)?.fnNodes ?? [];
+        for (const fnNode of fnNodes) {
+          const span = fnNode?.span;
+          if (!span || typeof span.start !== "number") continue;
+          const fnNodeId = `${filePath}::${span.start}`;
+          const route = safeRouteMap.functions.get(fnNodeId);
+          if (!route || route.boundary !== "server") continue;
+          const fnName = fnNode.name;
+          if (typeof fnName === "string" && fnName !== "anon" && fnName !== "") {
+            sameFileServerFnNames.push(fnName);
+          }
+        }
+      }
+      const testJs: string | null = testMode
+        ? codegenStage("emit-test", () =>
+            generateTestJs(filePath, (analysis as any)?.testGroups ?? [], [], sameFileServerFnNames)
+          ) ?? null
+        : null;
+
+      // §51.13 — auto-generated machine property tests.
+      let machineTestJs: string | null = null;
+      if (emitMachineTests) {
+        const machineRegistry = (fileAST as any).machineRegistry as Map<string, any> | undefined;
+        const initialVariants = new Map<string, string>();
+        function walkForMachineInitials(children: any[]): void {
+          if (!Array.isArray(children)) return;
+          for (const child of children) {
+            if (!child || typeof child !== "object") continue;
+            if (child.kind === "state-decl" && child.machineBinding && child.initialValue) {
+              const iv = child.initialValue;
+              const variant =
+                (iv.kind === "variant-literal" && typeof iv.variant === "string") ? iv.variant :
+                (iv.kind === "enum-variant" && typeof iv.variant === "string") ? iv.variant :
+                null;
+              if (variant) initialVariants.set(child.machineBinding, variant);
+            }
+            if (Array.isArray(child.children)) walkForMachineInitials(child.children);
+            if (Array.isArray(child.body)) walkForMachineInitials(child.body);
+          }
+        }
+        walkForMachineInitials(nodes);
+        machineTestJs = codegenStage("emit-machine-tests", () =>
+          generateMachineTestJs(filePath, machineRegistry ?? null, initialVariants)
+        );
+      }
+
       const fileWorkerBundles = workerBundlesPerFile.get(filePath);
-      const libOutput: CgFileOutput = {
+
+      // §64 A2 (ADDITIVE) — in a build that also emits a `kind="tool"`, a §21.5
+      // library-shaped file emits its normal browser artifacts (client.js +
+      // `_scrml_modules` registration, so co-resident browser `<page>` consumers
+      // keep working) AND, ADDITIONALLY, its library module `<base>.js` so the
+      // tool's ES import (`import { fn } from "./dep.js"`) resolves. The two never
+      // collide on disk (`<base>.js` vs `<base>.client.js`). A tool-free build
+      // never enters this branch, so browser-app output is byte-identical.
+      //
+      // W5b (S239, §44.7.1) — a DB-CONTEXT library (a `?{}` fn resolving against
+      // the file's OWN `<db src>`) routes to `generateToolLibraryJs`: the tool is
+      // an in-process monolith with NO client boundary, so its imported db fn runs
+      // IN-PROCESS (`await _scrml_sql\`…\``, own connection) rather than as the
+      // client-facing HTTP-route + null-stub `generateLibraryJs` emits for a
+      // browser consumer. A pure-fn / `<foreign lang>`-only tool-dep lib has no
+      // `?{}` to lower and stays on `generateLibraryJs` (the A/B-landed path).
+      let additiveLibraryJs: string | null = null;
+      if (toolDepFiles.has(filePath) && isLibraryShapedFile(fileAST)) {
+        // Flag C — the LOCAL names this lib imports that bind an ASYNC fn from
+        // ANOTHER lib, so a lib fn calling one awaits it (cross-import await-color).
+        const libAsyncImports = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput);
+        // Route to the in-process emit when the lib either RUNS `?{}` SQL itself,
+        // OR imports an ASYNC fn it may call (that fn's call site needs awaiting +
+        // its `.scrml` import rewritten to `.js`). A `<transaction>`-ONLY lib with
+        // no `?{}` and no async imports is STAGED (§44.6) and stays on the A/B
+        // `generateLibraryJs` path (routing a sync fn through the server-boundary
+        // transaction `await` would be a SyntaxError).
+        const libInProcess = containsSql(getNodes(fileAST as never) as never)
+          || libAsyncImports.size > 0;
+        const toolDepLibCtx: CompileContext = {
+          filePath,
+          fileAST,
+          routeMap: safeRouteMap,
+          depGraph: safeDepGraph,
+          protectedFields,
+          authMiddleware: authMW,
+          middlewareConfig: middlewareCfg,
+          csrfEnabled: false,
+          encodingCtx: null,
+          mode: "library",
+          testMode,
+          dbVar: "_scrml_sql",
+          workerNames: [],
+          errors,
+          registry: new BindingRegistry(),
+          derivedNames: collectDerivedVarNames(fileAST),
+          synthCellKeys: collectSynthCellKeys(fileAST),
+          analysis: analysis ?? null,
+          reachabilityRecord: reachabilityRecordInput,
+        };
+        additiveLibraryJs = codegenStage("emit-library", () =>
+          libInProcess
+            ? generateToolLibraryJs(toolDepLibCtx, errors, libAsyncImports)
+            : generateLibraryJs(toolDepLibCtx)
+        ) || null;
+      }
+
+      const browserOutput: CgFileOutput = {
         sourceFile: filePath,
-        libraryJs,
-        serverJs,
+        html,
         css,
+        clientJs,
+        serverJs,
+        ...(additiveLibraryJs !== null && { libraryJs: additiveLibraryJs }),
+        ...(testJs !== null && { testJs }),
+        ...(machineTestJs !== null && { machineTestJs }),
         ...(fileWorkerBundles && { workerBundles: fileWorkerBundles }),
+        ...(clientJsMap !== null && { clientJsMap }),
         ...(serverJsMap !== null && { serverJsMap }),
       };
-      outputs.set(filePath, libOutput);
-      continue;
-    }
+      outputs.set(filePath, browserOutput);
+      // S91 A-4.1 — stash per-file CompileContext for the route-splitter
+      // post-pass below. The splitter is reserved (A-4.2+) but the
+      // recording is unconditional so the contract is stable across
+      // sub-phases.
+      cgContextByFile.set(filePath, compileCtx);
 
-    // ---------------------------------------------------------------------------
-    // BROWSER MODE (default) — HTML + client IIFE JS + server JS
-    // ---------------------------------------------------------------------------
-
-    const hasServerFns = [...safeRouteMap.functions.entries()].some(
-      ([id, route]) => id.startsWith(filePath + "::") && route.boundary === "server"
-    );
-    const csrfEnabled = authMW !== null ? authMW.csrf === "auto" : hasServerFns;
-
-    const registry = new BindingRegistry();
-
-    const fileWorkerNames = workerBundlesPerFile.has(filePath)
-      ? [...workerBundlesPerFile.get(filePath)!.keys()]
-      : [];
-
-    // Construct CompileContext early so all emitters can use it.
-    // encodingCtx starts null and is set after HTML gen.
-    const compileCtx: CompileContext = {
-      filePath,
-      fileAST,
-      routeMap: safeRouteMap,
-      depGraph: safeDepGraph,
-      protectedFields,
-      authMiddleware: authMW,
-      middlewareConfig: middlewareCfg,
-      csrfEnabled,
-      encodingCtx: null,
-      mode,
-      testMode,
-      dbVar: "_scrml_sql",
-      workerNames: fileWorkerNames,
-      errors,
-      registry,
-      derivedNames: collectDerivedVarNames(fileAST),
-      synthCellKeys: collectSynthCellKeys(fileAST),
-      analysis: analysis ?? null,
-      usedRuntimeChunks: new Set(['core', 'scope', 'errors', 'transitions']),
-      // C15 — propagate MOD exportRegistry per-file so emit-engine.ts can
-      // discriminate cross-file engine mount sites from local components / HTML.
-      exportRegistry: exportRegistryInput,
-      // known-gaps-#6 (S152) — propagate MOD importGraph + dist outputBaseDir
-      // so emit-client's cross-file _scrml_modules footer/read derive a stable,
-      // identical dist-relative registry key on both the exporter + importer
-      // sides. outputBaseDir is computed below from the compile-unit source set.
-      importGraph: importGraphInput,
-      outputBaseDir: cgOutputBaseDir,
-      // A-2.1 — propagate Stage 7.6 ReachabilityRecord per-file; A-4 codegen
-      // will consume per-entry-point per-role ChunkPlans. Empty until A-2.2+.
-      reachabilityRecord: reachabilityRecordInput,
-      // PGO P2.1 (S102) — threaded so `emit-client.ts:clientStage` can
-      // gate timing on the same `debugPerf` flag, route output through
-      // the same `log` sink, and accumulate per-sub-emit totals into a
-      // SHARED Map (one instance for the whole runCG invocation, reused
-      // across every per-file compileCtx).
-      debugPerf,
-      log,
-      clientEmitTotals,
-    };
-
-    const hasMarkup = (analysis as any)?.markupNodes?.length > 0;
-    // Bug R18: After meta-eval, emit() may replace meta blocks with text nodes
-    // that have no sibling markup. Check for any renderable content, not just
-    // markup nodes.
-    const hasRenderableContent = hasMarkup || nodes.some((n: any) =>
-      n && typeof n === "object" && (
-        (n.kind === "text" && typeof n.value === "string" && n.value.trim() !== "") ||
-        (n.kind === "text" && typeof n.text === "string" && n.text.trim() !== "") ||
-        n.kind === "state" ||
-        n.kind === "if-chain" ||
-        // Phase A10 (S78, 2026-05-10) — engine-decl emits a mount slot at
-        // its source position when its body has any non-empty arm; gate
-        // HTML generation on engine-only files too. emit-html.ts:emitNode
-        // dispatches engine-decl to emit-engine.ts:emitEngineMountHtml.
-        n.kind === "engine-decl" ||
-        // S130 HU-1 iteration Landing 1 — each-block emits a mount slot
-        // mirror of engine-decl + match-block. Gate HTML generation on
-        // each-block presence so iteration-only files (no markup, no
-        // engine) still produce the mount placeholder.
-        n.kind === "each-block"
-      )
-    );
-    const htmlBody: string | null = hasRenderableContent
-      ? codegenStage("emit-html", () => generateHtml(nodes, compileCtx))
-      : null;
-
-    // Bug 17 (SPEC §26.1): collect Tailwind utility class names from BOTH the
-    // emitted static HTML AND the source AST. The HTML scan covers `class="..."`
-    // on top-level markup; the AST walker covers class names reachable ONLY
-    // through `${ for ... lift <markup class="..."> }` iteration bodies and
-    // sibling control-flow shapes (if-stmt, match-stmt, etc.) — those bodies
-    // are emitted as `_scrml_lift(() => { el.setAttribute("class", "...") })`
-    // factory JS, NOT as static HTML, so a pure HTML scan misses them.
-    let tailwindCss = "";
-    codegenStage("emit-tailwind", () => {
-      const usedClasses = new Set<string>();
-      if (htmlBody) {
-        for (const cls of scanClassesFromHtml(htmlBody)) usedClasses.add(cls);
-      }
-      // Even with no static HTML body, an engine-only file can carry markup
-      // inside arm bodies that emit-engine renders at runtime — walk the AST
-      // unconditionally.
-      for (const cls of collectClassNamesFromAst(nodes)) usedClasses.add(cls);
-      if (usedClasses.size > 0) {
-        tailwindCss = getAllUsedCSS([...usedClasses]);
-      }
-    });
-
-    const cssParts: string[] = [];
-    if (userCss) cssParts.push(userCss);
-    if (tailwindCss) cssParts.push(tailwindCss);
-    const css: string | null = cssParts.length > 0 ? cssParts.join("\n") : null;
-
-    // Create per-file EncodingContext (§47) and set it on the compile context
-    const encodingCtx = new EncodingContext({
-      enabled: encodingOpts.enabled,
-      debug: encodingOpts.debug,
-      __testOnly_typeEncodingSeqCap:
-        (encodingOpts as { __testOnly_typeEncodingSeqCap?: number })
-          .__testOnly_typeEncodingSeqCap,
-    });
-    compileCtx.encodingCtx = encodingCtx;
-
-    // Register reactive variables with the encoding context
-    if (encodingCtx.enabled) {
-      const topLevelLogic = analysis?.topLevelLogic ?? collectTopLevelLogicStatements(fileAST);
-      for (const stmt of topLevelLogic) {
-        if ((stmt as any).kind === "state-decl" && (stmt as any).name) {
-          const type = (fileAST as any).nodeTypes?.get((stmt as any).name) ?? { kind: "asIs", constraint: null };
-          encodingCtx.register((stmt as any).name, type);
-        }
-      }
-    }
-
-    const clientJsRaw: string | null = codegenStage("emit-client", () =>
-      generateClientJs(compileCtx)
-    ) || null;
-
-    let clientJs: string | null = clientJsRaw;
-    if (clientJsRaw && !embedRuntime) {
-      // v0.3.x SPA tree-shake Phase B 3.3 — emit a placeholder filename
-      // here; runCG substitutes the final hashed filename
-      // (`scrml-runtime.<hash>.js`) in a post-pass once the union has
-      // been assembled.
-      const runtimeEnd = clientJsRaw.indexOf("\n// --- end scrml reactive runtime ---");
-      if (runtimeEnd !== -1) {
-        const afterRuntime = clientJsRaw.substring(
-          runtimeEnd + "\n// --- end scrml reactive runtime ---".length
-        );
-        clientJs = `// Requires: ${RUNTIME_FILENAME_PLACEHOLDER}\n` + afterRuntime;
-      } else {
-        const runtimeStart = clientJsRaw.indexOf("// --- scrml reactive runtime ---");
-        if (runtimeStart !== -1) {
-          const navigateEnd = clientJsRaw.indexOf("function _scrml_navigate(path) {");
-          if (navigateEnd !== -1) {
-            const closeBrace = clientJsRaw.indexOf("}\n", navigateEnd + 30);
-            if (closeBrace !== -1) {
-              const before = clientJsRaw.substring(0, runtimeStart);
-              const after = clientJsRaw.substring(closeBrace + 2);
-              clientJs = before + `// Requires: ${RUNTIME_FILENAME_PLACEHOLDER}\n` + after;
-            }
-          }
-        }
-      }
-    }
-
-    // ESM chunks arc (Unit 2) — under `--module-format=esm`, transform the
-    // stripped (runtime-factored-out) client chunk body into a valid ES module:
-    // the `_scrml_modules` registration footer becomes `export {…}`, each
-    // registry read becomes a namespace `import`, and the runtime symbols the
-    // chunk references become a runtime `import` (see codegen/emit-client-esm.ts).
-    // Gated on `!embedRuntime` (esm is a standalone-runtime feature — an embedded
-    // runtime has no separate module to import from, so esm is a no-op there, per
-    // the Unit 1 module-format notice). `classic` (the default) is untouched, so
-    // its output stays byte-identical. This MUST precede the classic IIFE wrap
-    // below (which the esm path skips — an IIFE cannot contain `import`/`export`).
-    if (clientJs && !embedRuntime && moduleFormat === "esm") {
-      const importerDistDir = cgOutputBaseDir
-        ? dirname(relative(cgOutputBaseDir, filePath))
-        : ".";
-      clientJs = toEsmClientChunk(clientJs, {
-        runtimeSlice: assembleRuntime(compileCtx.usedRuntimeChunks),
-        runtimePlaceholder: RUNTIME_FILENAME_PLACEHOLDER,
-        importerDistDir,
-      });
-    }
-
-    // known-gaps-#6 (S152, Approach B) — IIFE-wrap the client.js body for files
-    // that participate in cross-file local `.scrml` linking, so their top-level
-    // `const`/`function` declarations do not collide in the SHARED global
-    // lexical environment of classic <script>s (exporter `const UserRole` vs an
-    // importer's `const { UserRole } = _scrml_modules[...]` → redeclaration
-    // error). The `_scrml_modules[...] = {...}` footer + runtime shared-global
-    // assignments still escape the IIFE. Single-file apps are NOT wrapped (zero
-    // behavior change). Gated on `!embedRuntime`: the registry (`_scrml_modules`)
-    // lives in the SHARED runtime file (external mode), so wrapping only the
-    // per-file body keeps the registry global. In embed mode the runtime is
-    // inlined per file (each file would carry its own `_scrml_modules`), so
-    // cross-file linking is structurally a no-op there regardless — wrapping
-    // the embedded runtime would only further isolate it; leave embed mode
-    // unwrapped (the default `compile` path is external mode). Under `esm` the
-    // module scope already isolates top-level decls (each chunk is its own
-    // module), so no IIFE is needed OR permitted (it would enclose the chunk's
-    // top-level `import`/`export`, which is a syntax error).
-    if (clientJs && !embedRuntime && moduleFormat !== "esm" && isCrossFileLinked(filePath, importGraphInput)) {
-      clientJs = wrapClientBodyInIife(clientJs);
-    }
-
-    const base = basename(filePath, ".scrml");
-
-    // §40.7 — extract documentary attributes from the top-level <program>
-    // (Phase A1a, 2026-05-05). The five attributes (title, description,
-    // version, author, license) emit standard HTML head tags. Empty-string
-    // values are treated as absent. Non-string-literal values are silently
-    // ignored — head metadata is static, not reactive.
-    const topLevelProgram = (nodes as any[]).find(
-      (n: any) => n && n.kind === "markup" && n.tag === "program",
-    );
-    function getDocAttr(name: string): string | null {
-      if (!topLevelProgram) return null;
-      const attrs: any[] = topLevelProgram.attributes ?? topLevelProgram.attrs ?? [];
-      const a = attrs.find((x: any) => x.name === name);
-      if (!a || !a.value) return null;
-      if (a.value.kind !== "string-literal") return null;
-      const v = a.value.value;
-      if (typeof v !== "string" || v === "") return null;
-      return v;
-    }
-    const docTitle = getDocAttr("title");
-    const docDescription = getDocAttr("description");
-    const docVersion = getDocAttr("version");
-    const docAuthor = getDocAttr("author");
-    const docLicense = getDocAttr("license");
-
-    // Detect author-written <title> in the source — any <title> markup node
-    // anywhere under the top-level <program>. When present, it suppresses
-    // both the documentary title= AND the default basename <title>.
-    function hasAuthorTitle(children: any[] | undefined): boolean {
-      if (!Array.isArray(children)) return false;
-      for (const c of children) {
-        if (!c || typeof c !== "object") continue;
-        if (c.kind === "markup" && c.tag === "title") return true;
-        if (c.kind === "markup" && Array.isArray(c.children) && hasAuthorTitle(c.children)) return true;
-        // The top-level <program>'s children are the document body — recurse
-        // through state nodes too (state-typed openers that wrap markup).
-        if (c.kind === "state" && Array.isArray(c.children) && hasAuthorTitle(c.children)) return true;
-      }
-      return false;
-    }
-    const authorTitlePresent = topLevelProgram
-      ? hasAuthorTitle(topLevelProgram.children)
-      : hasAuthorTitle(nodes as any[]);
-
-    let html: string | null = null;
-    if (htmlBody) {
-      const docParts: string[] = [];
-      docParts.push("<!DOCTYPE html>");
-      docParts.push("<html lang=\"en\">");
-      docParts.push("<head>");
-      docParts.push("  <meta charset=\"UTF-8\">");
-      docParts.push("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">");
-      // §39.2.3 canonical CSRF delivery — the `<meta name="csrf-token">` element.
-      // Emitted as an EMPTY placeholder in the static HTML for an auth + `csrf="auto"`
-      // app; the server's request-time HTML-composition route (emit-server.ts SSR
-      // compose handler) fills `content=""` with the loading viewer's session
-      // synchronizer token at serve time (the token is per-session, so it cannot be
-      // baked into the static file). The client reads it FIRST in
-      // `_scrml_get_csrf_token()` so the initial mutating POST already carries
-      // `X-CSRF-Token` — no 403 round-trip. Absent/empty (anon, or a non-composed
-      // serve) falls back to the cookie + the single-shot 403-retry. Baseline
-      // (no-auth) double-submit apps emit no meta tag (the client mints its own
-      // token), so this is auth-path only.
-      if (authMW !== null && authMW.csrf === "auto") {
-        docParts.push("  <meta name=\"csrf-token\" content=\"\">");
-      }
-      // <title> emission rule (§40.7):
-      //   1. Author-written <title> → no compiler-emitted <title>
-      //      (the author <title> renders via htmlBody itself)
-      //   2. Documentary title= and no author <title> → emit documentary <title>
-      //   3. Neither → fall back to default basename <title>
-      if (!authorTitlePresent) {
-        if (docTitle !== null) {
-          docParts.push(`  <title>${escapeHtmlAttr(docTitle)}</title>`);
-        } else {
-          docParts.push(`  <title>${escapeHtmlAttr(base)}</title>`);
-        }
-      }
-      // Documentary <meta> tags (§40.7) — fixed emission order.
-      if (docDescription !== null) {
-        docParts.push(`  <meta name="description" content="${escapeHtmlAttr(docDescription)}">`);
-      }
-      if (docVersion !== null) {
-        docParts.push(`  <meta name="application-version" content="${escapeHtmlAttr(docVersion)}">`);
-      }
-      if (docAuthor !== null) {
-        docParts.push(`  <meta name="author" content="${escapeHtmlAttr(docAuthor)}">`);
-      }
-      if (docLicense !== null) {
-        docParts.push(`  <meta name="license" content="${escapeHtmlAttr(docLicense)}">`);
-      }
-      if (css) {
-        docParts.push(`  <link rel="stylesheet" href="${base}.css">`);
-      }
-      docParts.push("</head>");
-      docParts.push("<body>");
-      docParts.push(htmlBody);
-      if (clientJs && !embedRuntime) {
-        // v0.3.x SPA tree-shake Phase B 3.3 — placeholder; runCG
-        // substitutes the final hashed filename in a post-pass.
-        docParts.push(`<script${scriptModuleTypeAttr} src="${RUNTIME_FILENAME_PLACEHOLDER}"></script>`);
-      }
-      if (clientJs) {
-        // known-gaps-#6 (S152, Approach B) — emit the transitive `.scrml`
-        // dependency `.client.js` <script>s BEFORE the entry's own, in
-        // topological (deps-first) order. Each dependency's
-        // `_scrml_modules[...] = {...}` footer must register before the entry's
-        // `const { x } = _scrml_modules[...]` read runs (classic-script eval is
-        // sequential top-to-bottom over the document's <script>s). Empty for
-        // single-file / leaf pages with no cross-file `.scrml` deps.
-        const depScripts = computeDependencyClientScripts(filePath, importGraphInput, cgOutputBaseDir);
-        for (const depSrc of depScripts) {
-          docParts.push(`<script${scriptModuleTypeAttr} src="${depSrc}"></script>`);
-        }
-        docParts.push(`<script${scriptModuleTypeAttr} src="${base}.client.js"></script>`);
-      }
-      docParts.push("</body>");
-      docParts.push("</html>");
-      html = docParts.join("\n");
-    }
-
-    let clientJsMap: string | null = null;
-    let serverJsMap: string | null = null;
-
-    if (sourceMap) {
-      const sourceBasename = `${base}.scrml`;
-      // source-map-real-provenance-js-2026-05-31 — real per-line provenance
-      // (was: addMapping(i, 0, 0) mapping every output line to source 0:0).
-      // buildSourceMap correlates each generated line with the .scrml author
-      // construct that produced it, recovers author names into the `names`
-      // field, embeds sourcesContent, and categorizes synthetic boilerplate
-      // lines explicitly (never a fake 0:0). The per-file source rides on the
-      // TAB result as `_sourceText` (threaded in api.js via sourceByFile);
-      // falls back to "" only for harnesses that bypass the full pipeline.
-      const fileSource: string = (fileAST as any)?._sourceText ?? "";
-
-      if (clientJs) {
-        const clientMapFile = `${base}.client.js.map`;
-        const { builder: clientMapBuilder, cleanedJs: clientClean } =
-          buildSourceMap(clientJs, sourceBasename, fileSource, nodes);
-        clientJs = clientClean; // ship the marker-stripped JS
-        clientJsMap = clientMapBuilder.generate(`${base}.client.js`);
-        clientJs = appendSourceMappingUrl(clientJs, clientMapFile);
-      }
-
-      if (serverJs) {
-        const serverMapFile = `${base}.server.js.map`;
-        const { builder: serverMapBuilder, cleanedJs: serverClean } =
-          buildSourceMap(serverJs, sourceBasename, fileSource, nodes);
-        serverJs = serverClean; // ship the marker-stripped JS
-        serverJsMap = serverMapBuilder.generate(`${base}.server.js`);
-        serverJs = appendSourceMappingUrl(serverJs, serverMapFile);
-      }
-    }
-
-    // Generate test JS when testMode is enabled
-    //
-    // Phase A6-4 (SPEC §19.12.7) — collect same-file server-fn names so
-    // emit-test.ts can emit E-TEST-006 thrower stubs for unbound server-fns
-    // called inside `~{}` test blocks. Walk the file's fn nodes and pick out
-    // those whose route entry has `boundary === "server"`.
-    const sameFileServerFnNames: string[] = [];
-    if (testMode) {
-      const fnNodes: any[] = (analysis as any)?.fnNodes ?? [];
-      for (const fnNode of fnNodes) {
-        const span = fnNode?.span;
-        if (!span || typeof span.start !== "number") continue;
-        const fnNodeId = `${filePath}::${span.start}`;
-        const route = safeRouteMap.functions.get(fnNodeId);
-        if (!route || route.boundary !== "server") continue;
-        const fnName = fnNode.name;
-        if (typeof fnName === "string" && fnName !== "anon" && fnName !== "") {
-          sameFileServerFnNames.push(fnName);
-        }
-      }
-    }
-    const testJs: string | null = testMode
-      ? codegenStage("emit-test", () =>
-          generateTestJs(filePath, (analysis as any)?.testGroups ?? [], [], sameFileServerFnNames)
-        ) ?? null
-      : null;
-
-    // §51.13 — auto-generated machine property tests.
-    let machineTestJs: string | null = null;
-    if (emitMachineTests) {
-      const machineRegistry = (fileAST as any).machineRegistry as Map<string, any> | undefined;
-      const initialVariants = new Map<string, string>();
-      function walkForMachineInitials(children: any[]): void {
-        if (!Array.isArray(children)) return;
-        for (const child of children) {
-          if (!child || typeof child !== "object") continue;
-          if (child.kind === "state-decl" && child.machineBinding && child.initialValue) {
-            const iv = child.initialValue;
-            const variant =
-              (iv.kind === "variant-literal" && typeof iv.variant === "string") ? iv.variant :
-              (iv.kind === "enum-variant" && typeof iv.variant === "string") ? iv.variant :
-              null;
-            if (variant) initialVariants.set(child.machineBinding, variant);
-          }
-          if (Array.isArray(child.children)) walkForMachineInitials(child.children);
-          if (Array.isArray(child.body)) walkForMachineInitials(child.body);
-        }
-      }
-      walkForMachineInitials(nodes);
-      machineTestJs = codegenStage("emit-machine-tests", () =>
-        generateMachineTestJs(filePath, machineRegistry ?? null, initialVariants)
+      // M-7C-D-12 Track 3 (S90): W-CG-UNDEFINED-INTERPOLATION regression guard.
+      // Scans the just-emitted compiled JS for bare `undefined` JS-keyword usage
+      // outside the canonical paired-absence-check idiom. Fires per-line. See
+      // lint-undefined-interpolation.ts for the legitimate-idiom exception set.
+      const undefinedLintErrors = codegenStage("lint-undefined", () =>
+        lintCompiledForUndefined(filePath, clientJs, serverJs)
       );
+      if (undefinedLintErrors.length > 0) errors.push(...undefinedLintErrors);
     }
-
-    const fileWorkerBundles = workerBundlesPerFile.get(filePath);
-
-    // §64 A2 (ADDITIVE) — in a build that also emits a `kind="tool"`, a §21.5
-    // library-shaped file emits its normal browser artifacts (client.js +
-    // `_scrml_modules` registration, so co-resident browser `<page>` consumers
-    // keep working) AND, ADDITIONALLY, its library module `<base>.js` so the
-    // tool's ES import (`import { fn } from "./dep.js"`) resolves. The two never
-    // collide on disk (`<base>.js` vs `<base>.client.js`). A tool-free build
-    // never enters this branch, so browser-app output is byte-identical.
-    //
-    // W5b (S239, §44.7.1) — a DB-CONTEXT library (a `?{}` fn resolving against
-    // the file's OWN `<db src>`) routes to `generateToolLibraryJs`: the tool is
-    // an in-process monolith with NO client boundary, so its imported db fn runs
-    // IN-PROCESS (`await _scrml_sql\`…\``, own connection) rather than as the
-    // client-facing HTTP-route + null-stub `generateLibraryJs` emits for a
-    // browser consumer. A pure-fn / `<foreign lang>`-only tool-dep lib has no
-    // `?{}` to lower and stays on `generateLibraryJs` (the A/B-landed path).
-    let additiveLibraryJs: string | null = null;
-    if (toolDepFiles.has(filePath) && isLibraryShapedFile(fileAST)) {
-      // Flag C — the LOCAL names this lib imports that bind an ASYNC fn from
-      // ANOTHER lib, so a lib fn calling one awaits it (cross-import await-color).
-      const libAsyncImports = computeToolAsyncImportedLocals(fileAST, files, exportRegistryInput);
-      // Route to the in-process emit when the lib either RUNS `?{}` SQL itself,
-      // OR imports an ASYNC fn it may call (that fn's call site needs awaiting +
-      // its `.scrml` import rewritten to `.js`). A `<transaction>`-ONLY lib with
-      // no `?{}` and no async imports is STAGED (§44.6) and stays on the A/B
-      // `generateLibraryJs` path (routing a sync fn through the server-boundary
-      // transaction `await` would be a SyntaxError).
-      const libInProcess = containsSql(getNodes(fileAST as never) as never)
-        || libAsyncImports.size > 0;
-      const toolDepLibCtx: CompileContext = {
-        filePath,
-        fileAST,
-        routeMap: safeRouteMap,
-        depGraph: safeDepGraph,
-        protectedFields,
-        authMiddleware: authMW,
-        middlewareConfig: middlewareCfg,
-        csrfEnabled: false,
-        encodingCtx: null,
-        mode: "library",
-        testMode,
-        dbVar: "_scrml_sql",
-        workerNames: [],
-        errors,
-        registry: new BindingRegistry(),
-        derivedNames: collectDerivedVarNames(fileAST),
-        synthCellKeys: collectSynthCellKeys(fileAST),
-        analysis: analysis ?? null,
-        reachabilityRecord: reachabilityRecordInput,
-      };
-      additiveLibraryJs = codegenStage("emit-library", () =>
-        libInProcess
-          ? generateToolLibraryJs(toolDepLibCtx, errors, libAsyncImports)
-          : generateLibraryJs(toolDepLibCtx)
-      ) || null;
-    }
-
-    const browserOutput: CgFileOutput = {
-      sourceFile: filePath,
-      html,
-      css,
-      clientJs,
-      serverJs,
-      ...(additiveLibraryJs !== null && { libraryJs: additiveLibraryJs }),
-      ...(testJs !== null && { testJs }),
-      ...(machineTestJs !== null && { machineTestJs }),
-      ...(fileWorkerBundles && { workerBundles: fileWorkerBundles }),
-      ...(clientJsMap !== null && { clientJsMap }),
-      ...(serverJsMap !== null && { serverJsMap }),
-    };
-    outputs.set(filePath, browserOutput);
-    // S91 A-4.1 — stash per-file CompileContext for the route-splitter
-    // post-pass below. The splitter is reserved (A-4.2+) but the
-    // recording is unconditional so the contract is stable across
-    // sub-phases.
-    cgContextByFile.set(filePath, compileCtx);
-
-    // M-7C-D-12 Track 3 (S90): W-CG-UNDEFINED-INTERPOLATION regression guard.
-    // Scans the just-emitted compiled JS for bare `undefined` JS-keyword usage
-    // outside the canonical paired-absence-check idiom. Fires per-line. See
-    // lint-undefined-interpolation.ts for the legitimate-idiom exception set.
-    const undefinedLintErrors = codegenStage("lint-undefined", () =>
-      lintCompiledForUndefined(filePath, clientJs, serverJs)
-    );
-    if (undefinedLintErrors.length > 0) errors.push(...undefinedLintErrors);
+  } finally {
+    // chunk-namespacing — the per-file loop is done; drop the last file's
+    // namespace so nothing emitted AFTER it (shell composition, route
+    // splitting) and no emitter invoked later in this process inherits a
+    // stale token.
+    resetChunkNamespaceState();
   }
 
   // -------------------------------------------------------------------------

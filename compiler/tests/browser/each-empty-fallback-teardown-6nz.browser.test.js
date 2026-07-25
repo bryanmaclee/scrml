@@ -27,6 +27,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 // The 6nz repro: <each in=@items key=__index__> with an <empty> fallback.
 const REPRO_SRC = `<program>
@@ -130,11 +131,14 @@ describe("6nz Bug AI browser — <each>/<empty> fallback teardown on empty -> no
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${clientJs}\n` +
+      // BUG-6: BOTH the get AND set captures must sit INSIDE the chunk scope so
+      // they bind the chunk's SCOPED `_scrml_cs_` accessors (keys under the chunk
+      // token) — matching the each-effect's namespaced cell subscription. A set
+      // spliced OUTSIDE would key bare and never trigger the scoped effect.
+      // (`_scrml_deep_reactive` is not a cell accessor, so it stays the bare global.)
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs,
         `globalThis.__scrml_get__ = _scrml_reactive_get;\n` +
-        // Mirror real codegen cell writes: store a deep-reactive proxy so field
-        // reads/writes go through the reactive Proxy (set trap -> trigger).
-        `globalThis.__scrml_set__ = (n, v) => _scrml_reactive_set(n, _scrml_deep_reactive(v));\n`,
+        `globalThis.__scrml_set__ = (n, v) => _scrml_reactive_set(n, _scrml_deep_reactive(v));\n`),
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));

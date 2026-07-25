@@ -31,6 +31,7 @@ import { compileScrml } from "../../src/api.js";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, afterAll } from "bun:test";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const FIXTURE_DIR = join(import.meta.dir, "__fixtures__/let-reassign");
 const FIXTURE_OUTPUT = join(FIXTURE_DIR, "dist");
@@ -158,7 +159,7 @@ describe("§1: Bug B — `let x = A; if (c) x = B` emits reassignment", () => {
 
   test("if-branch body is `label = \"HOLD\"` (no `const label`)", () => {
     const result = compile(bugB);
-    const js = result.outputs.get(bugB).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(bugB).clientJs);
     // Reassignment, not a new const binding
     expect(js).toMatch(/\blabel\s*=\s*"HOLD"/);
     expect(js).not.toMatch(/const\s+label\s*=\s*"HOLD"/);
@@ -166,14 +167,14 @@ describe("§1: Bug B — `let x = A; if (c) x = B` emits reassignment", () => {
 
   test("else-if branch body is `label = \"ROLL\"` (no `const label`)", () => {
     const result = compile(bugB);
-    const js = result.outputs.get(bugB).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(bugB).clientJs);
     expect(js).toMatch(/\blabel\s*=\s*"ROLL"/);
     expect(js).not.toMatch(/const\s+label\s*=\s*"ROLL"/);
   });
 
   test("the outer let declaration is still there", () => {
     const result = compile(bugB);
-    const js = result.outputs.get(bugB).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(bugB).clientJs);
     expect(js).toMatch(/let\s+label\s*=\s*"TAP"/);
   });
 });
@@ -190,14 +191,14 @@ describe("§2: Bug F — `let next = []` with conditional reassignment emits pla
 
   test("reassignment inside for-if-else branches is plain assignment", () => {
     const result = compile(bugF);
-    const js = result.outputs.get(bugF).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(bugF).clientJs);
     expect(js).toMatch(/\bnext\s*=\s*\[\.\.\.next,\s*"a"\]/);
     expect(js).toMatch(/\bnext\s*=\s*\[\.\.\.next,\s*"b"\]/);
   });
 
   test("does NOT emit _scrml_derived_declare for the local `next`", () => {
     const result = compile(bugF);
-    const js = result.outputs.get(bugF).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(bugF).clientJs);
     expect(js).not.toContain('_scrml_derived_declare("next"');
     expect(js).not.toContain('_scrml_derived_subscribe("next"');
   });
@@ -211,7 +212,7 @@ describe("§3: Bug F — reassignment with @reactive in RHS stays plain", () => 
   test("reassignment of outer `let next` referencing @pressed is still reassignment", () => {
     const result = compile(bugFReactive);
     expect(result.errors).toEqual([]);
-    const js = result.outputs.get(bugFReactive).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(bugFReactive).clientJs);
     // The critical regression: local `let next` must NOT be converted to
     // derived-reactive registration just because RHS references @pressed.
     expect(js).not.toContain('_scrml_derived_declare("next"');
@@ -248,7 +249,7 @@ describe("§5: nested — let at fn scope, reassignment inside for → if", () =
   test("reassignment reaches through for+if into outer let", () => {
     const result = compile(nested);
     expect(result.errors).toEqual([]);
-    const js = result.outputs.get(nested).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(nested).clientJs);
     expect(js).toMatch(/let\s+s\s*=\s*""/);
     expect(js).toMatch(/\bs\s*=\s*"first"/);
     expect(js).toMatch(/\bs\s*=\s*"second"/);

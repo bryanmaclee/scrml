@@ -9,6 +9,7 @@ import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { runCEFile } from "../../src/component-expander.js";
 import { runCG } from "../../src/codegen/index.ts";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function fullPipeline(source) {
   const bsOut = splitBlocks("test.scrml", source);
@@ -88,7 +89,7 @@ describe("§A Inline worker round-trip (§4.12.4)", () => {
 
   test("parent client JS has worker instantiation", () => {
     const { cgOut } = fullPipeline(src);
-    const clientJs = getOutput(cgOut).clientJs ?? "";
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(getOutput(cgOut).clientJs ?? ""));
     expect(clientJs).toContain('new Worker("doubler.worker.js")');
     expect(clientJs).toContain("_scrml_worker_doubler.send");
   });
@@ -164,7 +165,7 @@ describe("§D <#name>.send() in expressions (§4.12.4)", () => {
 </program>`;
     const { cgOut } = fullPipeline(src);
     const output = getOutput(cgOut);
-    const clientJs = output.clientJs ?? "";
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(foldChunkNamespacing(output.clientJs) ?? ""));
     // Worker instantiation + Promise wrapper should be in client JS
     expect(clientJs).toContain("_scrml_worker_doubler");
     expect(clientJs).toContain('new Worker("doubler.worker.js")');

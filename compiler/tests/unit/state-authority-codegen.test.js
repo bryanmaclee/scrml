@@ -44,6 +44,7 @@ import { emitInitialLoad } from "../../src/codegen/emit-sync.ts";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { runCG } from "../../src/code-generator.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers (full pipeline)
@@ -93,7 +94,7 @@ function compileClientJs(source, filePath = "/test/app.scrml") {
     protectAnalysis: makeProtectAnalysis(),
   });
   const out = result.outputs.get(filePath);
-  return out?.clientJs ?? "";
+  return foldChunkNamespacing(out?.clientJs) ?? "";
 }
 
 /**
@@ -281,7 +282,7 @@ describe("state-authority-codegen §7: client JS contains the READ path, no writ
     const source = `<program>
 \${ server @cards = loadCards() }
 </>`;
-    const clientJs = compileClientJs(source);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(compileClientJs(source)));
     expect(clientJs).not.toContain("_scrml_server_sync_cards");
     expect(clientJs).not.toContain("server sync stub");
   });
@@ -290,7 +291,7 @@ describe("state-authority-codegen §7: client JS contains the READ path, no writ
     const source = `<program>
 \${ server @cards = loadCards() }
 </>`;
-    const clientJs = compileClientJs(source);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(compileClientJs(source)));
     expect(clientJs).not.toContain("_scrml_prev_cards");
     expect(clientJs).not.toContain("_scrml_rollback_cards");
   });
@@ -299,7 +300,7 @@ describe("state-authority-codegen §7: client JS contains the READ path, no writ
     const source = `<program>
 \${ server @cards = loadCards() }
 </>`;
-    const clientJs = compileClientJs(source);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(compileClientJs(source)));
     // The IIFE sets cards from loadCards() on mount
     expect(clientJs).toContain("async");
     expect(clientJs).toContain("loadCards");
@@ -310,7 +311,7 @@ describe("state-authority-codegen §7: client JS contains the READ path, no writ
     const source = `<program>
 \${ server @cards = loadCards() }
 </>`;
-    const clientJs = compileClientJs(source);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(compileClientJs(source)));
     expect(clientJs).toContain("§52.6");
   });
 
@@ -319,7 +320,7 @@ describe("state-authority-codegen §7: client JS contains the READ path, no writ
     const source = `<program>
 \${ server @count = 0 }
 </>`;
-    const clientJs = compileClientJs(source);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(compileClientJs(source)));
     expect(clientJs).not.toContain("_scrml_server_sync_count");
     expect(clientJs).not.toContain("_scrml_prev_count");
   });
@@ -329,7 +330,7 @@ describe("state-authority-codegen §7: client JS contains the READ path, no writ
     const source = `<program>
 \${ server @count = 0 }
 </>`;
-    const clientJs = compileClientJs(source);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(compileClientJs(source)));
     // The IIFE pattern sets the reactive var via await; with no function call, no IIFE is emitted
     const hasCountIife = clientJs.includes('_scrml_reactive_set("count", await');
     expect(hasCountIife).toBe(false);
@@ -345,7 +346,7 @@ describe("state-authority-codegen §8: client JS does NOT contain sync for plain
     const source = `<program>
 \${ @editingId = null }
 </>`;
-    const clientJs = compileClientJs(source);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(compileClientJs(source)));
     expect(clientJs).not.toContain("_scrml_server_sync_editingId");
   });
 
@@ -353,7 +354,7 @@ describe("state-authority-codegen §8: client JS does NOT contain sync for plain
     const source = `<program>
 \${ @editingId = null }
 </>`;
-    const clientJs = compileClientJs(source);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(compileClientJs(source)));
     expect(clientJs).not.toContain("_scrml_prev_editingId");
   });
 
@@ -361,7 +362,7 @@ describe("state-authority-codegen §8: client JS does NOT contain sync for plain
     const source = `<program>
 \${ @cards = [] }
 </>`;
-    const clientJs = compileClientJs(source);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(compileClientJs(source)));
     expect(clientJs).not.toContain("_scrml_server_sync_cards");
     expect(clientJs).not.toContain("_scrml_prev_cards");
   });
@@ -371,7 +372,7 @@ describe("state-authority-codegen §8: client JS does NOT contain sync for plain
 \${ server @cards = loadCards() }
 \${ @editingId = null }
 </>`;
-    const clientJs = compileClientJs(source);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(compileClientJs(source)));
     // cards gets the READ (load) path
     expect(clientJs).toContain('_scrml_reactive_set("cards"');
     // no write-path artefacts for either var
@@ -423,7 +424,7 @@ describe("state-authority-codegen §9: Tier 1 authority='server' — READ-author
   });
 
   test("client JS emits the SELECT * initial-load IIFE for the @cards instance (§52.6.1)", () => {
-    const clientJs = compileClientJs(TIER1_SRC);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(compileClientJs(TIER1_SRC)));
     // The load fetches the per-instance serverLoad route and lands the rows.
     expect(clientJs).toContain("/__serverLoad/cards");
     expect(clientJs).toContain('_scrml_reactive_set("cards"');
@@ -447,7 +448,7 @@ describe("state-authority-codegen §9: Tier 1 authority='server' — READ-author
 
   test("the WRITE path is NOT generated (Q1=C — dev owns the `?{}` persist)", () => {
     const serverJs = compileServerJs(TIER1_SRC);
-    const clientJs = compileClientJs(TIER1_SRC);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(compileClientJs(TIER1_SRC)));
     // No auto-persist route / sync stub for the Tier-1 cell.
     expect(serverJs).not.toContain("/_scrml/sync/cards");
     expect(clientJs).not.toContain("_scrml_server_sync_cards");
@@ -462,7 +463,7 @@ describe("state-authority-codegen §9: Tier 1 authority='server' — READ-author
   <Note> @notes
 }
 </program>`;
-    const clientJs = compileClientJs(src);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(compileClientJs(src)));
     expect(clientJs).not.toContain("/__serverLoad/notes");
   });
 });

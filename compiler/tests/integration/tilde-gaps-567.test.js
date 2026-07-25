@@ -28,6 +28,7 @@ import { compileScrml } from "../../src/api.js";
 import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { unwrapChunkScope } from "../helpers/chunk-scope.js";
 
 function compileSource(src, fname = "tilde-gaps-fixture.scrml") {
   const dir = mkdtempSync(join(tmpdir(), "tilde-gaps-"));
@@ -64,7 +65,7 @@ function runClientJs(clientJs, finalExpression) {
     const _scrml_default_set = () => {};
     const _scrml_init_set = () => {};
   `;
-  const fn = new Function(shims + "\n" + clientJs + "\n" + `return (${finalExpression});`);
+  const fn = new Function(shims + "\n" + unwrapChunkScope(clientJs) + "\n" + `return (${finalExpression});`);
   return fn();
 }
 

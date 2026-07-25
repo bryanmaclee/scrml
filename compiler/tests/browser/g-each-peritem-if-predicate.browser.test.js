@@ -21,6 +21,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 const SRC = `<program>
 type Row:struct = { id: string, note: string }
@@ -111,8 +112,7 @@ describe("g-each-peritem-if §2 — conditional renders correctly in happy-dom",
     const origErr = console.error;
     console.error = (...a) => { errs.push(a.join(" ")); };
     const exec = new Function("window", "document",
-      `${runtimeJs}\n${clientJs}\n` +
-      `globalThis.__set__ = (typeof _scrml_reactive_set!=='undefined')?_scrml_reactive_set:null;`);
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__set__ = (typeof _scrml_reactive_set!=='undefined')?_scrml_reactive_set:null;`));
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));
     // one row WITH a note, one withOUT (note absent → `is some` false).

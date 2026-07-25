@@ -1,0 +1,32 @@
+<page>
+
+  type Phase:enum = { Idle, Busy(note: string) }
+
+  <rows> = ["a1", "a2"]
+  <label> = "beta"
+  <phase>: Phase = .Idle
+
+  fn shout(s: string) -> string {
+    return s + "!"
+  }
+
+  function toggle() {
+    @phase = .Busy("working")
+  }
+
+  <h2>${shout(@label)}</h2>
+  <button id="t" onclick=toggle()>toggle</button>
+  <p id="lbl">${@label}</p>
+
+  <ul><each in=@rows><li>${@.}</li></each></ul>
+
+  <match for=Phase on=@phase>
+    <Idle>
+      <em class="idle">idle</em>
+    </>
+    <Busy note>
+      <em class="busy">${note}</em>
+    </>
+  </match>
+
+</page>

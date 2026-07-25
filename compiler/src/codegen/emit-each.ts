@@ -42,6 +42,7 @@ import type { EngineRewriteCtx } from "./emit-control-flow.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { isRcdataElement } from "../html-elements.js";
 import { CGError } from "./errors.ts";
+import { nsId } from "./chunk-namespace.ts";
 
 // ---------------------------------------------------------------------------
 // Bug 62 (S156, §51.0.G / §51.0.G.1 / §51.0.S) — engine `.advance(.X)` (state
@@ -376,7 +377,12 @@ export function emitEachMountHtml(node: EachBlockAstNode, _ctx: CompileContext):
   if ((!Array.isArray(node.templateChildren) || node.templateChildren.length === 0) && !node.emptyChild) {
     return "";
   }
-  return `<!--scrml-each:${node.id}--><!--/scrml-each:${node.id}-->`;
+  // The fence id is CHUNK-NAMESPACED (`<!--scrml-each:<token>_N-->`): the same
+  // token the client emit stamps into `_scrml_each_renderers` and the
+  // `_scrml_find_each_anchor` argument. Both sides read one per-file state, so
+  // the HTML and the JS cannot disagree — an SSR/client token divergence would
+  // break rehydration silently.
+  return `<!--scrml-each:${nsId(node.id)}--><!--/scrml-each:${nsId(node.id)}-->`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1013,9 +1019,9 @@ function renderTemplateChildToJs(
     // The item-scoped dispatch fn name mirrors emit-variant-guard.ts:
     //   `_${renderFnPrefix}_${idPrefix}_dispatch` with renderFnPrefix
     //   "_scrml_match" and idPrefix "match_<id>" → "__scrml_match_match_<id>_dispatch".
-    const dispatchFnName = `__scrml_match_match_${matchId}_dispatch`;
+    const dispatchFnName = `__scrml_match_match_${nsId(matchId)}_dispatch`;
     const mountAttr = "data-scrml-match-mount";
-    const idPrefix = `match_${matchId}`;
+    const idPrefix = `match_${nsId(matchId)}`;
     // Resolve the per-item discriminant expression from the match's `on=`.
     const discriminant = resolveMatchDiscriminantForItem(child, iterVarName);
     // Item-local mount element. Carries the same data-attr the module-scope
@@ -1086,7 +1092,7 @@ function renderTemplateChildToJs(
     // The item-local mount is created + appended ONCE (stable DOM node identity
     // across inner re-renders); the inner reconcile writes into it in place.
     lines.push(`${indent}const ${innerMountVar} = document.createElement("div");`);
-    lines.push(`${indent}${innerMountVar}.setAttribute("data-scrml-each-mount", "each_${innerNode.id}");`);
+    lines.push(`${indent}${innerMountVar}.setAttribute("data-scrml-each-mount", "each_${nsId(innerNode.id)}");`);
     lines.push(`${indent}${fragmentVar}.appendChild(${innerMountVar});`);
     // g-nested-each-no-own-subscription (2026-06-21) — the inner each must own a
     // reactive subscription to ITS source so a post-mount cell update (the
@@ -2651,7 +2657,7 @@ export function emitNestedEachFromMarkup(
   // The item-local mount is created + appended ONCE (stable DOM node identity
   // across inner re-renders); the inner reconcile writes into it in place.
   lines.push(`${indent}const ${innerMountVar} = document.createElement("div");`);
-  lines.push(`${indent}${innerMountVar}.setAttribute("data-scrml-each-mount", "each_${eachBlock.id}");`);
+  lines.push(`${indent}${innerMountVar}.setAttribute("data-scrml-each-mount", "each_${nsId(eachBlock.id)}");`);
   lines.push(`${indent}${fragmentVar}.appendChild(${innerMountVar});`);
   // g-nested-each-no-own-subscription (2026-06-21) — Tier-0 `${for…lift}`-nested
   // sibling of the Tier-1 nested-each branch. Same fix: wrap the source-read +
@@ -2898,7 +2904,7 @@ export function emitEachBodyRenderForFile(
       continue;
     }
 
-    const renderFnName = `_scrml_each_render_${node.id}`;
+    const renderFnName = `_scrml_each_render_${nsId(node.id)}`;
     const iterVarName = node.asName ? node.asName : "_scrml_each_item";
     const iterIdxName = "_scrml_each_idx";
 
@@ -2932,7 +2938,7 @@ export function emitEachBodyRenderForFile(
       // NOT currently the payload-carrying variant, fall back to `[]` (the each
       // mount is not in the DOM then anyway — the arm isn't rendered).
       const { cellName, variantTag, fieldName } = node.armPayloadBinding;
-      const vVar = `_scrml_arm_v_${node.id}`;
+      const vVar = `_scrml_arm_v_${nsId(node.id)}`;
       fnLines.push(`  const ${vVar} = _scrml_reactive_get(${JSON.stringify(cellName)});`);
       itemsExpr = `(${vVar} && typeof ${vVar} === "object" && ${vVar}.variant === ${JSON.stringify(variantTag)} && ${vVar}.data) ? ${vVar}.data[${JSON.stringify(fieldName)}] : []`;
     } else if (node.iterShape === "in") {
@@ -2965,7 +2971,10 @@ export function emitEachBodyRenderForFile(
     // comments are invisible to querySelector, so the runtime walks SHOW_COMMENT
     // nodes (mirrors `_scrml_find_if_marker`). `_mount` is the START anchor — the
     // stable container-identity object the reconcile + per-item effects key on.
-    fnLines.push(`  const _mount = _scrml_find_each_anchor(document, ${node.id});`);
+    // The id is chunk-namespaced, so it is a STRING (`"a1b2c3d4_9"`) rather than
+    // a bare numeric literal. `_scrml_find_each_anchor` concatenates it into
+    // `"scrml-each:" + id`, so a string arg needs no runtime change.
+    fnLines.push(`  const _mount = _scrml_find_each_anchor(document, ${JSON.stringify(nsId(node.id))});`);
     fnLines.push(`  if (!_mount) return;`);
 
     // Empty-guard + per-item reconcile (shared with the nested-each inline path).
@@ -2987,7 +2996,7 @@ export function emitEachBodyRenderForFile(
     // `_scrml_remount_each` in the runtime. The dep edge was already established
     // by the dep-first read at module-init (Part A), so re-running here re-renders
     // with the now-present mount without re-subscribing.
-    dispatchers.push(`_scrml_each_renderers[${JSON.stringify(`each_${node.id}`)}] = ${renderFnName};`);
+    dispatchers.push(`_scrml_each_renderers[${JSON.stringify(`each_${nsId(node.id)}`)}] = ${renderFnName};`);
     dispatchers.push(`${renderFnName}();`);
     dispatchers.push(`_scrml_effect_static(${renderFnName});`);
   }

@@ -30,6 +30,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 import { emitExpr } from "../../src/codegen/emit-expr.ts";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const acorn = require("acorn");
 
@@ -68,27 +69,27 @@ type Status:enum = { Pending Active Done }
   test("the call is LOWERED to a table lookup (no un-lowered `.toEnum(` survives)", () => {
     const { result, out } = compileSource(SRC);
     expect(codesOf(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
-    expect(typeof out.clientJs).toBe("string");
+    expect(typeof foldChunkNamespacing(out.clientJs)).toBe("string");
     // The `Status.toEnum(...)` call must NOT survive un-lowered.
-    expect(out.clientJs).not.toMatch(/Status\.toEnum\s*\(/);
+    expect(foldChunkNamespacing(out.clientJs)).not.toMatch(/Status\.toEnum\s*\(/);
     // Lowered to the canonical `(Status_toEnum[...] ?? null)` form.
-    expect(out.clientJs).toContain("Status_toEnum[_scrml_reactive_get(\"raw\")] ?? null");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("Status_toEnum[_scrml_reactive_get(\"raw\")] ?? null");
   });
 
   test("BOTH the C1 dispatch (_scrml_reactive_set) and C5 reset thunk (_scrml_init_set) lower", () => {
     const { out } = compileSource(SRC);
-    expect(out.clientJs).toMatch(/_scrml_reactive_set\("status", \(Status_toEnum\[/);
-    expect(out.clientJs).toMatch(/_scrml_init_set\("status", \(\) => \(Status_toEnum\[/);
+    expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_reactive_set\("status", \(Status_toEnum\[/);
+    expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_init_set\("status", \(\) => \(Status_toEnum\[/);
   });
 
   test("the `Status_toEnum` lookup table is present in the CLIENT bundle", () => {
     const { out } = compileSource(SRC);
-    expect(out.clientJs).toMatch(/const\s+Status_toEnum\s*=\s*\{/);
+    expect(foldChunkNamespacing(out.clientJs)).toMatch(/const\s+Status_toEnum\s*=\s*\{/);
   });
 
   test("the emitted client JS is acorn-clean (no SyntaxError)", () => {
     const { out } = compileSource(SRC);
-    parseClean(out.clientJs);
+    parseClean(foldChunkNamespacing(out.clientJs));
   });
 
   test("RUNTIME: the lowered form resolves the coerced variant (Active) / null on miss", () => {
@@ -115,8 +116,8 @@ type Status:enum = { Pending Active Done }
 </program>`;
     const { result, out } = compileSource(SRC);
     expect(codesOf(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
-    parseClean(out.clientJs);
-    expect(out.clientJs).not.toMatch(/Status\.toEnum\s*\(/);
+    parseClean(foldChunkNamespacing(out.clientJs));
+    expect(foldChunkNamespacing(out.clientJs)).not.toMatch(/Status\.toEnum\s*\(/);
   });
 
   test("direct emitExpr: method form with a call-expr arg keeps the whole arg balanced", () => {

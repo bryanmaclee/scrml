@@ -20,6 +20,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { runCG } from "../../src/code-generator.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers (adapted from server-reactive-refs.test.js pattern)
@@ -96,7 +97,7 @@ function getClientJs(nodes, opts = {}) {
 describe("SC1: initial load — server @var with function call init", () => {
   test("emits async IIFE that calls the load function", () => {
     const decl = makeServerReactiveDecl("cards", "loadCards()", span(10));
-    const clientJs = getClientJs([makeLogicBlock([decl])]);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(getClientJs([makeLogicBlock([decl])])));
 
     // Should contain an async IIFE for the initial load
     expect(clientJs).toContain("(async () => {");
@@ -108,7 +109,7 @@ describe("SC1: initial load — server @var with function call init", () => {
 
   test("initial load section comment is present", () => {
     const decl = makeServerReactiveDecl("cards", "loadCards()", span(10));
-    const clientJs = getClientJs([makeLogicBlock([decl])]);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(getClientJs([makeLogicBlock([decl])])));
 
     expect(clientJs).toContain("<cards server>");
     expect(clientJs).toContain("§52.6.1");
@@ -122,14 +123,14 @@ describe("SC1: initial load — server @var with function call init", () => {
 describe("SC2: no optimistic subscriber — auto-persist retracted (Q1=C)", () => {
   test("does NOT emit a _scrml_reactive_subscribe for the server var write path", () => {
     const decl = makeServerReactiveDecl("cards", "loadCards()", span(10));
-    const clientJs = getClientJs([makeLogicBlock([decl])]);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(getClientJs([makeLogicBlock([decl])])));
 
     expect(clientJs).not.toContain('_scrml_reactive_subscribe("cards"');
   });
 
   test("does NOT emit a _scrml_server_sync_ stub for the server var", () => {
     const decl = makeServerReactiveDecl("cards", "loadCards()", span(10));
-    const clientJs = getClientJs([makeLogicBlock([decl])]);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(getClientJs([makeLogicBlock([decl])])));
 
     expect(clientJs).not.toContain("_scrml_server_sync_cards");
   });
@@ -142,7 +143,7 @@ describe("SC2: no optimistic subscriber — auto-persist retracted (Q1=C)", () =
 describe("SC3: literal init — no initial load IIFE", () => {
   test("no async IIFE when init has no function call", () => {
     const decl = makeServerReactiveDecl("count", "0", span(10));
-    const clientJs = getClientJs([makeLogicBlock([decl])]);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(getClientJs([makeLogicBlock([decl])])));
 
     // The type system emits W-AUTH-001 for this case.
     // The codegen should NOT emit an initial load IIFE.
@@ -153,7 +154,7 @@ describe("SC3: literal init — no initial load IIFE", () => {
     // Under Q1=C the write path is the dev's ?{} server fn; the compiler emits
     // neither an optimistic subscriber nor a _scrml_server_sync_ stub.
     const decl = makeServerReactiveDecl("count", "0", span(10));
-    const clientJs = getClientJs([makeLogicBlock([decl])]);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(getClientJs([makeLogicBlock([decl])])));
 
     expect(clientJs).not.toContain('_scrml_reactive_subscribe("count"');
     expect(clientJs).not.toContain("_scrml_server_sync_count");
@@ -167,14 +168,14 @@ describe("SC3: literal init — no initial load IIFE", () => {
 describe("SC4: no sync for regular reactive vars", () => {
   test("regular @var emits no async IIFE", () => {
     const decl = makeReactiveDecl("count", "0", span(10));
-    const clientJs = getClientJs([makeLogicBlock([decl])]);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(getClientJs([makeLogicBlock([decl])])));
 
     expect(clientJs).not.toContain("(async () => {");
   });
 
   test("regular @var emits no server sync subscribe", () => {
     const decl = makeReactiveDecl("count", "0", span(10));
-    const clientJs = getClientJs([makeLogicBlock([decl])]);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(getClientJs([makeLogicBlock([decl])])));
 
     // Check for the generated call site with the specific variable name.
     // The runtime defines _scrml_reactive_subscribe as a function, but only
@@ -184,7 +185,7 @@ describe("SC4: no sync for regular reactive vars", () => {
 
   test("regular @var emits no server sync stub", () => {
     const decl = makeReactiveDecl("count", "0", span(10));
-    const clientJs = getClientJs([makeLogicBlock([decl])]);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(getClientJs([makeLogicBlock([decl])])));
 
     expect(clientJs).not.toContain("_scrml_server_sync_");
   });
@@ -197,7 +198,7 @@ describe("SC4: no sync for regular reactive vars", () => {
 describe("SC5: no auto-rollback subscriber — auto-rollback retracted (Q1=C)", () => {
   test("emits no _scrml_prev_<var> rollback-tracking variable", () => {
     const decl = makeServerReactiveDecl("cards", "loadCards()", span(10));
-    const clientJs = getClientJs([makeLogicBlock([decl])]);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(getClientJs([makeLogicBlock([decl])])));
 
     expect(clientJs).not.toContain("_scrml_prev_cards");
     expect(clientJs).not.toContain("_scrml_rollback_cards");
@@ -205,7 +206,7 @@ describe("SC5: no auto-rollback subscriber — auto-rollback retracted (Q1=C)", 
 
   test("the READ (load) path still sets the reactive var on mount", () => {
     const decl = makeServerReactiveDecl("cards", "loadCards()", span(10));
-    const clientJs = getClientJs([makeLogicBlock([decl])]);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(getClientJs([makeLogicBlock([decl])])));
 
     // The load IIFE remains: it sets @cards from loadCards() on mount.
     expect(clientJs).toContain('_scrml_reactive_set("cards"');
@@ -219,21 +220,21 @@ describe("SC5: no auto-rollback subscriber — auto-rollback retracted (Q1=C)", 
 describe("SC6: no server sync stub — auto-persist retracted (Q1=C)", () => {
   test("emits no _scrml_server_sync_<var> stub function", () => {
     const decl = makeServerReactiveDecl("cards", "loadCards()", span(10));
-    const clientJs = getClientJs([makeLogicBlock([decl])]);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(getClientJs([makeLogicBlock([decl])])));
 
     expect(clientJs).not.toContain("_scrml_server_sync_cards");
   });
 
   test("emits no /_scrml/sync/ route path stub comment", () => {
     const decl = makeServerReactiveDecl("cards", "loadCards()", span(10));
-    const clientJs = getClientJs([makeLogicBlock([decl])]);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(getClientJs([makeLogicBlock([decl])])));
 
     expect(clientJs).not.toContain("/_scrml/sync/cards");
   });
 
   test("emits no 'server sync stub' console.warn no-op", () => {
     const decl = makeServerReactiveDecl("cards", "loadCards()", span(10));
-    const clientJs = getClientJs([makeLogicBlock([decl])]);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(getClientJs([makeLogicBlock([decl])])));
 
     expect(clientJs).not.toContain("server sync stub");
   });
@@ -247,7 +248,7 @@ describe("multiple server @vars in same file", () => {
   test("each server var gets its own READ (load) path, none gets a write stub", () => {
     const decl1 = makeServerReactiveDecl("cards", "loadCards()", span(10));
     const decl2 = makeServerReactiveDecl("users", "loadUsers()", span(20));
-    const clientJs = getClientJs([makeLogicBlock([decl1, decl2])]);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(getClientJs([makeLogicBlock([decl1, decl2])])));
 
     // Note: with 2 callable server vars, §8.11 coalesces the loads into one
     // /__mountHydrate fetch — so the per-var reactive_set is via _scrml_mh_json.
@@ -267,7 +268,7 @@ describe("multiple server @vars in same file", () => {
 describe("section header comment", () => {
   test("<var server> read-authority sync section comment is emitted", () => {
     const decl = makeServerReactiveDecl("cards", "loadCards()", span(10));
-    const clientJs = getClientJs([makeLogicBlock([decl])]);
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(getClientJs([makeLogicBlock([decl])])));
 
     expect(clientJs).toContain("<var server> read-authority sync");
   });

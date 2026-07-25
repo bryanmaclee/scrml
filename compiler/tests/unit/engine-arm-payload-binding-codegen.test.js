@@ -43,6 +43,7 @@ import { resolve } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-engine-arm-payload-binding-codegen");
 let tmpCounter = 0;
@@ -60,7 +61,7 @@ function compile(source) {
       outputDir: outDir,
     });
     const clientPath = resolve(outDir, "app.client.js");
-    const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf-8") : "";
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf-8") : ""));
     return {
       errors: (result.errors ?? []).filter(e => e.severity !== "warning"),
       clientJs,
@@ -88,7 +89,7 @@ describe("match-arm-block payload binding (Bug 1 fix-A)", () => {
 <program>
 <button onclick=eat(PowerUp.Mushroom(1))>Eat</button>
 </program>`;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // The arm body MUST bind `n` from tagged-object payload before the assignment.
     // Pattern: `if (<tag> === "Mushroom") { const n = <tmp>.data.coins; ...`
@@ -110,7 +111,7 @@ describe("match-arm-block payload binding (Bug 1 fix-A)", () => {
 <program>
 <button onclick=compute(Shape.Rect(2, 3))>Compute</button>
 </program>`;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Both bindings must be present.
     expect(clientJs).toMatch(/const w = [\w]+\.data\.w;/);
@@ -135,7 +136,7 @@ describe("match-arm-block payload binding (Bug 1 fix-A)", () => {
 <program>
 <button onclick=add(Reward.Coins(5))>Add</button>
 </program>`;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Locate the emitted arm. Must contain both `const n = ` AND `+ n` AFTER it.
     const armMatch = clientJs.match(/=== "Coins"\) \{[^}]+\}/);
@@ -165,7 +166,7 @@ describe("EnumType::Variant access (Bug 1 fix-B)", () => {
 <program>
 <button onclick=isSmall()>Check</button>
 </program>`;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Must compare against State.Small (resolves to "Small" at runtime), NOT
     // against the bare State enum object (the pre-fix bug).
@@ -186,7 +187,7 @@ describe("EnumType::Variant access (Bug 1 fix-B)", () => {
 <program>
 <button onclick=eat(PowerUp::Mushroom(7))>Eat</button>
 </program>`;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Must be PowerUp.Mushroom(7), NOT just PowerUp (the pre-fix bug would
     // pass the entire enum object instead of constructing the variant).
@@ -207,7 +208,7 @@ describe("EnumType::Variant access (Bug 1 fix-B)", () => {
 <program>
 <button onclick=isSmall()>Check</button>
 </program>`;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toContain("State.Small");
   });
@@ -226,7 +227,7 @@ describe("14-mario fixture (integration smoke)", () => {
     //   - getHurt's wasSmall comparison uses MarioState.Small (not bare MarioState).
     const fixturePath = resolve(__dirname, "../../../examples/14-mario-state-machine.scrml");
     const src = readFileSync(fixturePath, "utf-8");
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Fix-A surface: payload binding declared.
     expect(clientJs).toMatch(/=== "Mushroom"\) \{ const n = [\w]+\.data\.coins;/);

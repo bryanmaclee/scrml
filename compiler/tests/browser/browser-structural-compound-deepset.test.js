@@ -26,6 +26,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { execFileSync } from "child_process";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 const tmpRoot = resolve("/tmp", "scrml-structural-compound-deepset");
 
@@ -56,8 +57,7 @@ function mount(compiled) {
   const exec = new Function(
     "window",
     "document",
-    `${runtimeJs}\n${clientJs}\n` +
-      `globalThis.__scrml_get__ = _scrml_reactive_get;\n`,
+    `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_get__ = _scrml_reactive_get;\n`),
   );
   let threw = null;
   try {
@@ -106,7 +106,7 @@ describe("Bug B — structural-compound field write applies at RUNTIME (happy-do
       const m = compiled.clientJs.match(/function _scrml_multi_\d+\(\)\s*\{([\s\S]*?)\n\}/);
       expect(m).not.toBeNull();
       // The leaf-targeted writes, in source order.
-      const seen = [...m[1].matchAll(/_scrml_reactive_set\("a\.ref",\s*"([^"]+)"\)/g)].map((mm) => mm[1]);
+      const seen = [...m[1].matchAll(/_scrml_cs_reactive_set\("a\.ref",\s*"([^"]+)"\)/g)].map((mm) => mm[1]);
       expect(seen).toEqual(["p", "q"]);
       // The bug shape MUST be gone.
       expect(m[1]).not.toMatch(/_scrml_reactive_set\("a",\s*_scrml_deep_set/);

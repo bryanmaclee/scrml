@@ -25,6 +25,7 @@ import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { runCG } from "../../src/code-generator.js";
 import { resetVarCounter } from "../../src/codegen/var-counter.ts";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -230,8 +231,8 @@ describe("reactive-arrays §1: AST — state-decl produced for @arr = []", () =>
     });
     const out = result.outputs.get("/test/reactive-arrays.scrml");
     // Both declarations should produce reactive_set calls in the compiled JS
-    expect(out.clientJs).toContain('"todos"');
-    expect(out.clientJs).toContain('"count"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('"todos"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('"count"');
   });
 });
 
@@ -301,7 +302,7 @@ describe("reactive-arrays §3: codegen — _scrml_reactive_set for array decl", 
     ]);
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('_scrml_reactive_set("items"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_set("items"');
   });
 
   test("multiple reactive array declarations produce multiple _scrml_reactive_set calls", () => {
@@ -313,8 +314,8 @@ describe("reactive-arrays §3: codegen — _scrml_reactive_set for array decl", 
     ]);
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('"items"');
-    expect(out.clientJs).toContain('"selected"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('"items"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('"selected"');
   });
 });
 
@@ -341,8 +342,8 @@ describe("reactive-arrays §4: codegen — spread-replace @ref rewriting", () =>
     ]);
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("_scrml_reactive_set");
-    expect(out.clientJs).toContain("_scrml_reactive_get");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_reactive_set");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_reactive_get");
   });
 
   test("state-decl with @items in init rewrites @items to reactive_get in output", () => {
@@ -364,8 +365,8 @@ describe("reactive-arrays §4: codegen — spread-replace @ref rewriting", () =>
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
     // @list should be rewritten to _scrml_reactive_get("list")
-    expect(out.clientJs).toContain('_scrml_reactive_get("list")');
-    expect(out.clientJs).toContain('_scrml_reactive_set("list"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_get("list")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_set("list"');
   });
 });
 
@@ -385,9 +386,9 @@ describe("reactive-arrays §5: codegen — push mutation uses direct Proxy mutat
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
     // With Proxy-based reactivity, push mutates directly through the Proxy
-    expect(out.clientJs).toContain('.push(newItem)');
-    expect(out.clientJs).toContain("newItem");
-    expect(out.clientJs).toContain("_scrml_reactive_set");
+    expect(foldChunkNamespacing(out.clientJs)).toContain('.push(newItem)');
+    expect(foldChunkNamespacing(out.clientJs)).toContain("newItem");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_reactive_set");
   });
 
   test("push wraps result in _scrml_reactive_set for coarse-grained compat", () => {
@@ -400,7 +401,7 @@ describe("reactive-arrays §5: codegen — push mutation uses direct Proxy mutat
     ]);
     const out = result.outputs.get("/test/app.scrml");
     // The mutation must update reactive state for backwards compat with subscribers
-    expect(out.clientJs).toContain('_scrml_reactive_set("items"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_set("items"');
   });
 
   test("push calls .push() directly on the Proxy-wrapped reactive array", () => {
@@ -414,7 +415,7 @@ describe("reactive-arrays §5: codegen — push mutation uses direct Proxy mutat
     ]);
     const out = result.outputs.get("/test/app.scrml");
     // Should call .push() directly — Proxy traps handle notification
-    expect(out.clientJs).toMatch(/_scrml_reactive_get\("items"\)\.push\(/);
+    expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_reactive_get\("items"\)\.push\(/);
   });
 });
 
@@ -432,8 +433,8 @@ describe("reactive-arrays §6: codegen — pop/shift/sort/reverse use direct Pro
       ]),
     ]);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain(".pop()");
-    expect(out.clientJs).toContain("_scrml_reactive_set");
+    expect(foldChunkNamespacing(out.clientJs)).toContain(".pop()");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_reactive_set");
   });
 
   test("shift uses direct .shift() on Proxy-wrapped array", () => {
@@ -445,8 +446,8 @@ describe("reactive-arrays §6: codegen — pop/shift/sort/reverse use direct Pro
       ]),
     ]);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain(".shift()");
-    expect(out.clientJs).toContain("_scrml_reactive_set");
+    expect(foldChunkNamespacing(out.clientJs)).toContain(".shift()");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_reactive_set");
   });
 
   test("sort uses direct .sort() on Proxy-wrapped array", () => {
@@ -458,8 +459,8 @@ describe("reactive-arrays §6: codegen — pop/shift/sort/reverse use direct Pro
       ]),
     ]);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain(".sort(");
-    expect(out.clientJs).toContain("_scrml_reactive_set");
+    expect(foldChunkNamespacing(out.clientJs)).toContain(".sort(");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_reactive_set");
   });
 
   test("reverse uses direct .reverse() on Proxy-wrapped array", () => {
@@ -471,8 +472,8 @@ describe("reactive-arrays §6: codegen — pop/shift/sort/reverse use direct Pro
       ]),
     ]);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain(".reverse()");
-    expect(out.clientJs).toContain("_scrml_reactive_set");
+    expect(foldChunkNamespacing(out.clientJs)).toContain(".reverse()");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_reactive_set");
   });
 
   test("unshift uses direct .unshift() on Proxy-wrapped array", () => {
@@ -485,9 +486,9 @@ describe("reactive-arrays §6: codegen — pop/shift/sort/reverse use direct Pro
     ]);
     const out = result.outputs.get("/test/app.scrml");
     // unshift mutates directly through the Proxy
-    expect(out.clientJs).toContain(".unshift(newItem)");
-    expect(out.clientJs).toContain("newItem");
-    expect(out.clientJs).toContain("_scrml_reactive_set");
+    expect(foldChunkNamespacing(out.clientJs)).toContain(".unshift(newItem)");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("newItem");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_reactive_set");
   });
 });
 
@@ -505,8 +506,8 @@ describe("reactive-arrays §7: codegen — splice uses direct Proxy mutation", (
       ]),
     ]);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain(".splice(idx, 1)");
-    expect(out.clientJs).toContain("_scrml_reactive_set");
+    expect(foldChunkNamespacing(out.clientJs)).toContain(".splice(idx, 1)");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_reactive_set");
   });
 
   test("splice mutates directly through the Proxy and fires coarse-grained set", () => {
@@ -520,9 +521,9 @@ describe("reactive-arrays §7: codegen — splice uses direct Proxy mutation", (
       ]),
     ]);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('_scrml_reactive_set("todos"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_set("todos"');
     // Direct Proxy mutation: _scrml_reactive_get("todos").splice(0, 1)
-    expect(out.clientJs).toMatch(/_scrml_reactive_get\("todos"\)\.splice\(0, 1\)/);
+    expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_reactive_get\("todos"\)\.splice\(0, 1\)/);
   });
 });
 
@@ -556,7 +557,7 @@ describe("reactive-arrays §8: codegen — for/lift emits iteration code", () =>
     });
     const out = result.outputs.get("/test/reactive-arrays.scrml");
     // The for loop and lift should produce some iteration or element-creation code
-    expect(out.clientJs).toMatch(/for\s*\(/);
+    expect(foldChunkNamespacing(out.clientJs)).toMatch(/for\s*\(/);
   });
 
   test("for/lift with createElement inside produces element creation code", () => {
@@ -583,7 +584,7 @@ describe("reactive-arrays §8: codegen — for/lift emits iteration code", () =>
       protectAnalysis: makeProtectAnalysis(),
     });
     const out = result.outputs.get("/test/reactive-arrays.scrml");
-    expect(out.clientJs).toContain("createElement");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("createElement");
   });
 });
 
@@ -601,7 +602,7 @@ describe("reactive-arrays §9: codegen — @items.length emits reactive get", ()
     ]);
     const out = result.outputs.get("/test/app.scrml");
     // @items.length in a bare-expr should be rewritten to _scrml_reactive_get("items").length
-    expect(out.clientJs).toContain('_scrml_reactive_get("items")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_get("items")');
   });
 
   test("state-decl for items followed by length expression compiles without error", () => {
@@ -624,8 +625,8 @@ describe("reactive-arrays §9: codegen — @items.length emits reactive get", ()
       ]),
     ]);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('_scrml_reactive_get("items")');
-    expect(out.clientJs).toContain('_scrml_reactive_set("count"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_get("items")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_set("count"');
   });
 });
 
@@ -698,7 +699,7 @@ describe("reactive-arrays §11: codegen — for/lift over @reactive array emits 
     </div>`;
     const result = compileSource(source);
     const out = result.outputs.get("/test/reactive-arrays.scrml");
-    expect(out.clientJs).toContain('_scrml_effect_static(');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_effect_static(');
   });
 
   test("for/lift over @items emits a wrapper div via createElement", () => {
@@ -713,7 +714,7 @@ describe("reactive-arrays §11: codegen — for/lift over @reactive array emits 
     const result = compileSource(source);
     const out = result.outputs.get("/test/reactive-arrays.scrml");
     // The reactive for path creates a wrapper div as a stable list container
-    expect(out.clientJs).toContain('createElement("div")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('createElement("div")');
   });
 
   test("for/lift over @items emits _scrml_lift to mount the wrapper div", () => {
@@ -728,7 +729,7 @@ describe("reactive-arrays §11: codegen — for/lift over @reactive array emits 
     const result = compileSource(source);
     const out = result.outputs.get("/test/reactive-arrays.scrml");
     // The wrapper div is mounted via _scrml_lift
-    expect(out.clientJs).toContain("_scrml_lift(");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_lift(");
   });
 
   test("for/lift over @items emits keyed reconciliation instead of innerHTML clear", () => {
@@ -743,9 +744,9 @@ describe("reactive-arrays §11: codegen — for/lift over @reactive array emits 
     const result = compileSource(source);
     const out = result.outputs.get("/test/reactive-arrays.scrml");
     // The render function uses _scrml_reconcile_list for keyed diffing
-    expect(out.clientJs).toContain('_scrml_reconcile_list(');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reconcile_list(');
     // innerHTML clear should no longer be present
-    expect(out.clientJs).not.toContain('.innerHTML = ""');
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain('.innerHTML = ""');
   });
 
   test("for/lift over @items emits render function call before subscribe", () => {
@@ -761,10 +762,10 @@ describe("reactive-arrays §11: codegen — for/lift over @reactive array emits 
     const out = result.outputs.get("/test/reactive-arrays.scrml");
     // The render function must be called once (initial render) AND subscribed
     // Both the call and the subscribe must appear in output
-    const effectIdx = out.clientJs.indexOf('_scrml_effect_static(');
+    const effectIdx = foldChunkNamespacing(out.clientJs).indexOf('_scrml_effect_static(');
     expect(effectIdx).toBeGreaterThan(-1);
     // The function call (render_list_N()) appears before or around the subscribe
-    expect(out.clientJs).toMatch(/function _scrml_render_list_\d+\(\)/);
+    expect(foldChunkNamespacing(out.clientJs)).toMatch(/function _scrml_render_list_\d+\(\)/);
   });
 
   test("for/lift over @items compiles without errors", () => {
@@ -794,7 +795,7 @@ describe("reactive-arrays §11: codegen — for/lift over @reactive array emits 
     const result = compileSource(source);
     const out = result.outputs.get("/test/reactive-arrays.scrml");
     // Subscribe must use the actual variable name 'todos', not a generic 'items'
-    expect(out.clientJs).toContain('_scrml_effect_static(');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_effect_static(');
   });
 
   test("two separate for/lift loops over different @vars emit separate subscriptions", () => {
@@ -812,8 +813,8 @@ describe("reactive-arrays §11: codegen — for/lift over @reactive array emits 
     </div>`;
     const result = compileSource(source);
     const out = result.outputs.get("/test/reactive-arrays.scrml");
-    expect(out.clientJs).toContain('_scrml_effect_static(');
-    expect(out.clientJs).toContain('_scrml_effect_static(');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_effect_static(');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_effect_static(');
   });
 });
 
@@ -832,7 +833,7 @@ describe("reactive-arrays §12: codegen — non-reactive for loops do not subscr
     const result = compileSource(source);
     const out = result.outputs.get("/test/reactive-arrays.scrml");
     // No subscribe for non-reactive iterables
-    expect(out.clientJs).not.toContain('_scrml_effect(');
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain('_scrml_effect(');
   });
 
   test("for (let item of items) with plain 'items' still emits a JS for loop", () => {
@@ -845,7 +846,7 @@ describe("reactive-arrays §12: codegen — non-reactive for loops do not subscr
     const result = compileSource(source);
     const out = result.outputs.get("/test/reactive-arrays.scrml");
     // Plain for loop still emits iteration code
-    expect(out.clientJs).toMatch(/for\s*\(/);
+    expect(foldChunkNamespacing(out.clientJs)).toMatch(/for\s*\(/);
   });
 
   test("C-style for loop does NOT emit subscribe", () => {
@@ -856,7 +857,7 @@ describe("reactive-arrays §12: codegen — non-reactive for loops do not subscr
     }</div>`;
     const result = compileSource(source);
     const out = result.outputs.get("/test/reactive-arrays.scrml");
-    expect(out.clientJs).not.toContain("_scrml_effect");
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("_scrml_effect");
   });
 
   test("for loop over method call result does NOT emit reactive subscribe", () => {
@@ -872,6 +873,6 @@ describe("reactive-arrays §12: codegen — non-reactive for loops do not subscr
     const out = result.outputs.get("/test/reactive-arrays.scrml");
     // 'filtered' is not @varName — no reactive subscribe for the for loop
     // Derived vars don't get their own effect (they're dependencies of other effects)
-    expect(out.clientJs).not.toContain('_scrml_derived_subscribe("filtered"');
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain('_scrml_derived_subscribe("filtered"');
   });
 });

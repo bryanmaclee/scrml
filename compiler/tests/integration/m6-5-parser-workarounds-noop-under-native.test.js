@@ -47,6 +47,7 @@ import {
   stripLeakedComments,
   isLeakedComment,
 } from "../../src/codegen/compat/parser-workarounds.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const REPO_ROOT = resolve(__dirname, "..", "..", "..");
 const EXAMPLES_DIR = resolve(REPO_ROOT, "examples");

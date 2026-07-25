@@ -25,6 +25,7 @@ import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { generateHtml } from "../../src/codegen/emit-html.js";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
@@ -47,7 +48,7 @@ function compileClientJs(source, testName) {
     const result = compileScrml({ inputFiles: [tmpInput], write: false, outputDir: resolve(tmpDir, "out") });
     let clientJs = null;
     for (const [fp, output] of result.outputs) {
-      if (fp.includes(tag)) clientJs = output.clientJs ?? null;
+      if (fp.includes(tag)) clientJs = foldChunkNamespacing(output.clientJs) ?? null;
     }
     return { errors: result.errors ?? [], clientJs };
   } finally {
@@ -104,7 +105,7 @@ describe("GITI-029 — comment before on-mount must not defeat the directive", (
   });
 
   test("client.js runs the mount assignment (NOT literal text)", () => {
-    const { clientJs } = compileClientJs(REPRO, "comment-before-onmount");
+    const { clientJs: __cjRaw } = compileClientJs(REPRO, "comment-before-onmount"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toBeTruthy();
     // f() is called and its result is written into cell `a` at mount.
     expect(clientJs).toMatch(/_scrml_f_\d+\(\)/);

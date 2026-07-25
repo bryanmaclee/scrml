@@ -24,6 +24,7 @@ import { resolve } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { compileScrml } from "../../../src/api.js";
+import { foldChunkNamespacing } from "../../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-s27-match-arm-expr");
 let tmpCounter = 0;

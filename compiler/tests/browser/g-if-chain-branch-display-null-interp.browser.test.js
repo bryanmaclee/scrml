@@ -38,6 +38,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope, foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // A 3-branch chain (if=/else-if=/else), each branch over a DIFFERENT cell that
 // starts `not` (null). The else also carries a NESTED field chain
@@ -101,7 +102,7 @@ describe("g-if-chain-branch-null §1 — codegen gates each chain branch on its 
   });
 
   test("the if= head branch effect is gated on its OWN condition", () => {
-    const { clientJs } = compileCase();
+    const clientJs = foldChunkNamespacing(compileCase().clientJs);
     // b0: `if=(@x is some)` → gate is `(@x is some)`.
     expect(clientJs).toContain(
       `_scrml_effect(function() { if (!((${X_SOME}))) return; _scrml_render_value(el, _scrml_reactive_get("x").a); });`,
@@ -113,7 +114,7 @@ describe("g-if-chain-branch-null §1 — codegen gates each chain branch on its 
   });
 
   test("the else-if= branch effect is gated on priors-false AND own-true", () => {
-    const { clientJs } = compileCase();
+    const clientJs = foldChunkNamespacing(compileCase().clientJs);
     // b1: `else-if=(@y is some)` → visible iff `!(@x is some) && (@y is some)`.
     expect(clientJs).toContain(
       `_scrml_effect(function() { if (!(!(${X_SOME}) && (${Y_SOME}))) return; _scrml_render_value(el, _scrml_reactive_get("y").b); });`,
@@ -121,7 +122,7 @@ describe("g-if-chain-branch-null §1 — codegen gates each chain branch on its 
   });
 
   test("the else branch effect is gated on all-priors-false (incl. nested field as a unit)", () => {
-    const { clientJs } = compileCase();
+    const clientJs = foldChunkNamespacing(compileCase().clientJs);
     // else → visible iff `!(@x is some) && !(@y is some)`.
     const elseGate = `if (!(!(${X_SOME}) && !(${Y_SOME}))) return;`;
     expect(clientJs).toContain(`${elseGate} _scrml_render_value(el, _scrml_reactive_get("z").c);`);
@@ -130,7 +131,7 @@ describe("g-if-chain-branch-null §1 — codegen gates each chain branch on its 
   });
 
   test("each branch gate is BYTE-IDENTICAL to the chain controller's `_next` cascade (lockstep)", () => {
-    const { clientJs } = compileCase();
+    const clientJs = foldChunkNamespacing(compileCase().clientJs);
     // Capture the cascade predicate for the if= head (between `_next === null && `
     // and ` _next = "..._b0"`) and assert that exact predicate is the gate.
     const m = clientJs.match(/if \(_next === null && (\(\(_scrml_reactive_get\("x"\) !== null && _scrml_reactive_get\("x"\) !== undefined\)\))\) _next = "[^"]*_b0";/);
@@ -141,7 +142,7 @@ describe("g-if-chain-branch-null §1 — codegen gates each chain branch on its 
   });
 
   test("(regression) the standalone single-`if=` keeps the ss20 display-toggle gate", () => {
-    const { clientJs } = compileCase();
+    const clientJs = foldChunkNamespacing(compileCase().clientJs);
     // `#ssingle` interpolates `${@x.a}` under a standalone `if=(@x is some)`.
     // ss20 gates it via computeDisplayToggleCondition — same predicate shape,
     // NOT a chainGuard. It appears a SECOND time in the file (after the chain).
@@ -153,7 +154,7 @@ describe("g-if-chain-branch-null §1 — codegen gates each chain branch on its 
   });
 
   test("(regression) the sibling `show=` inner effect is NOT gated", () => {
-    const { clientJs } = compileCase();
+    const clientJs = foldChunkNamespacing(compileCase().clientJs);
     expect(clientJs).toContain(
       `_scrml_effect(function() { _scrml_render_value(el, _scrml_reactive_get("msg")); });`,
     );
@@ -183,8 +184,7 @@ describe("g-if-chain-branch-null §2 — runtime: hidden branches over null cell
     console.error = (...a) => { errs.push(a.join(" ")); };
     let threw = null;
     const exec = new Function("window", "document",
-      `${runtimeJs}\n${clientJs}\n` +
-      `globalThis.__set__ = (typeof _scrml_reactive_set!=='undefined')?_scrml_reactive_set:null;`);
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__set__ = (typeof _scrml_reactive_set!=='undefined')?_scrml_reactive_set:null;`));
     exec(window, document);
     if (preset) preset();
     try {

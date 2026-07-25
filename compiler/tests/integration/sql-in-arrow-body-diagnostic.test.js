@@ -32,6 +32,7 @@ import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 import { conciseArrowBodyHasSql } from "../../src/codegen/detect-sql-in-arrow.ts";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 const TMP_ROOT = resolve(testDir, "_tmp_sql_in_arrow");

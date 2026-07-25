@@ -29,6 +29,7 @@ import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../../src/api.js";
+import { foldChunkNamespacing } from "../../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 
@@ -53,7 +54,7 @@ function compileAndInspect(source, label = "s26-guard") {
       outputDir: outDir,
     });
     const clientJsPath = resolve(outDir, `${name}.client.js`);
-    const clientJs = existsSync(clientJsPath) ? readFileSync(clientJsPath, "utf8") : "";
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientJsPath) ? readFileSync(clientJsPath, "utf8") : ""));
     return { errors: result.errors ?? [], clientJs };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
@@ -75,7 +76,7 @@ describe("S26 bug A — machine guard @reactive refs rewritten to _scrml_reactiv
 <button on:click={doClose()}>close</>
 </program>
 `;
-    const { errors, clientJs } = compileAndInspect(src);
+    const { errors, clientJs: __cjRaw } = compileAndInspect(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     // The guard evaluation must use the reactive-getter, not raw @
     expect(clientJs).toContain('!(_scrml_reactive_get("allow"))');
@@ -101,7 +102,7 @@ describe("S26 bug A — machine guard @reactive refs rewritten to _scrml_reactiv
 <button on:click={doClose()}>close</>
 </program>
 `;
-    const { errors, clientJs } = compileAndInspect(src);
+    const { errors, clientJs: __cjRaw } = compileAndInspect(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     expect(clientJs).toContain('_scrml_reactive_get("a")');
     expect(clientJs).toContain('_scrml_reactive_get("b")');
@@ -122,7 +123,7 @@ describe("S26 bug A — machine guard @reactive refs rewritten to _scrml_reactiv
 <button on:click={doClose()}>close</>
 </program>
 `;
-    const { errors, clientJs } = compileAndInspect(src);
+    const { errors, clientJs: __cjRaw } = compileAndInspect(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     expect(clientJs).toContain('_scrml_reactive_get("count") > 3');
   });
@@ -140,7 +141,7 @@ describe("S26 bug A — machine guard @reactive refs rewritten to _scrml_reactiv
 <button on:click={doClose()}>close</>
 </program>
 `;
-    const { errors, clientJs } = compileAndInspect(src);
+    const { errors, clientJs: __cjRaw } = compileAndInspect(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     // Literal true survives rewriteExpr unchanged
     expect(clientJs).toContain("&& !(true)");
@@ -162,7 +163,7 @@ describe("S26 bug A — machine guard @reactive refs rewritten to _scrml_reactiv
 <button on:click={doClose()}>close</>
 </program>
 `;
-    const { errors, clientJs } = compileAndInspect(src);
+    const { errors, clientJs: __cjRaw } = compileAndInspect(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     // Extract the guard JS from the compiled output and evaluate it directly
     // against a stub reactive-getter. This isolates "guard expression is

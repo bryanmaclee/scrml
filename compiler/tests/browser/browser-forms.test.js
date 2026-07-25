@@ -13,6 +13,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { chunkCellKey } from "../helpers/chunk-scope.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -31,18 +32,22 @@ function loadSample(baseName) {
 
   document.body.innerHTML = cleanHtml;
 
+  // BUG-6: expose the BARE global accessors and key the harness reads/writes
+  // through the chunk token explicitly. (captureInsideChunkScope only rewrites the
+  // accessors the chunk's prologue actually wraps, so a get the fixture body never
+  // calls would stay bare and desync from a scoped set — hence the explicit key.)
   const code = `(function() {\n${SCRML_RUNTIME}\n${clientJs}\n` +
     `window._scrml_reactive_get = _scrml_reactive_get;\n` +
     `window._scrml_reactive_set = _scrml_reactive_set;\n` +
-    `window._scrml_reactive_subscribe = _scrml_reactive_subscribe;\n` +
-    `})();`;
+    `window._scrml_reactive_subscribe = _scrml_reactive_subscribe;\n` + `\n})();`;
   eval(code);
 
   document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
 
+  const cellKey = chunkCellKey(clientJs);
   return {
-    get: (name) => window._scrml_reactive_get(name),
-    set: (name, val) => window._scrml_reactive_set(name, val),
+    get: (name) => window._scrml_reactive_get(cellKey(name)),
+    set: (name, val) => window._scrml_reactive_set(cellKey(name), val),
   };
 }
 

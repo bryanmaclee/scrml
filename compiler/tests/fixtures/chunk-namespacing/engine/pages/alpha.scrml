@@ -1,0 +1,14 @@
+<page>
+
+  type Phase:enum = { Idle, Busy }
+
+  <engine for=Phase initial=.Idle>
+    <Idle rule=.Busy>
+      <em id="alpha-mark">alpha-idle</em>
+    </>
+    <Busy rule=.Idle>
+      <em id="alpha-mark">alpha-busy</em>
+    </>
+  </>
+
+</page>

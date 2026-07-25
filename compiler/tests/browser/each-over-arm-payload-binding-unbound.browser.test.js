@@ -42,6 +42,7 @@ import {
   mkdirSync,
 } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Repros — minimal single-file each-over-arm-payload-binding shapes.
@@ -145,7 +146,7 @@ describe("each-over-arm-payload §1 — each render fn resolves from the reactiv
   test("match arm: each render fn reads the cell payload, not the unbound `rows`", () => {
     const { clientJs } = compileToOutputs(MATCH_SRC, "match-arm");
     // The fix resolves the iterable from the discriminant cell `phase`.
-    expect(clientJs).toContain('_scrml_reactive_get("phase")');
+    expect(clientJs).toContain('_scrml_cs_reactive_get("phase")');
     // The dangerous pre-fix shape was a bare `const _items = rows;` at top level.
     expect(clientJs).not.toContain("const _items = rows;");
     // The resolved form gates on the variant tag.
@@ -159,7 +160,7 @@ describe("each-over-arm-payload §1 — each render fn resolves from the reactiv
 
   test("engine arm: each render fn reads the engine var payload, not the unbound `items`", () => {
     const { clientJs } = compileToOutputs(ENGINE_SRC, "engine-arm");
-    expect(clientJs).toContain('_scrml_reactive_get("itemsPhase")');
+    expect(clientJs).toContain('_scrml_cs_reactive_get("itemsPhase")');
     expect(clientJs).not.toContain("const _items = items;");
     expect(clientJs).toContain('.variant === "Loaded"');
   });
@@ -185,9 +186,8 @@ describe("each-over-arm-payload §2 — mounts without throwing + renders the ar
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${clientJs}\n` +
-        `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
-        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`,
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
+        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`),
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));

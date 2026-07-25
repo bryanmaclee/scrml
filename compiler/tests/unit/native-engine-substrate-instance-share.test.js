@@ -28,6 +28,7 @@ import { describe, test, expect } from "bun:test";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { unNamespaceEngineNames } from "../helpers/chunk-scope.js";
 
 // compileWith — compile `source` to client.js under `parser` (null = default
 // live BS+TAB; "scrml-native" = native pipeline). Returns errors + warnings +
@@ -49,7 +50,7 @@ function compileWith(source, parser, suffix) {
     return {
       errors: result.errors ?? [],
       warnings: result.warnings ?? [],
-      clientJs,
+      clientJs: unNamespaceEngineNames(clientJs),
     };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });

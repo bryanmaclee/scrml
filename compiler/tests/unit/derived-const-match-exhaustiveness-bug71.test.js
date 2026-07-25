@@ -40,6 +40,7 @@ import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
@@ -58,7 +59,7 @@ function compileSource(scrmlSource, testName) {
     });
     let clientJs = null;
     for (const [fp, output] of result.outputs) {
-      if (fp.includes(tag)) clientJs = output.clientJs ?? null;
+      if (fp.includes(tag)) clientJs = foldChunkNamespacing(output.clientJs) ?? null;
     }
     return { errors: result.errors ?? [], warnings: result.warnings ?? [], clientJs };
   } finally {
@@ -119,7 +120,7 @@ describe("Bug 71 — derived `const <x> = match @cell` exhaustiveness", () => {
 <div>\${@label}</div>
 </program>
 `;
-    const { errors, clientJs } = compileSource(src, "codegen-parity");
+    const { errors, clientJs: __cjRaw } = compileSource(src, "codegen-parity"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(hasCode(errors, "E-TYPE-020")).toBe(false);
     expect(clientJs).toBeTruthy();
     // Reactive derived-cell declaration (the recompute closure).
@@ -215,7 +216,7 @@ describe("Bug 71 — derived `const <x> = match @cell` exhaustiveness", () => {
 <div>\${@label}</div>
 </program>
 `;
-    const { errors, clientJs } = compileSource(src, "plain-exhaustive");
+    const { errors, clientJs: __cjRaw } = compileSource(src, "plain-exhaustive"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(hasCode(errors, "E-TYPE-020")).toBe(false);
     expect(clientJs).toBeTruthy();
     // Init-value match (not a derived closure) — still emits every arm.
@@ -240,7 +241,7 @@ describe("Bug 71 — derived `const <x> = match @cell` exhaustiveness", () => {
 <div>\${@isDragging}</div>
 </program>
 `;
-    const { errors, clientJs } = compileSource(src, "payload-wildcard");
+    const { errors, clientJs: __cjRaw } = compileSource(src, "payload-wildcard"); const clientJs = foldChunkNamespacing(__cjRaw);
     // A wildcard arm makes the match exhaustive — no E-TYPE-020.
     expect(hasCode(errors, "E-TYPE-020")).toBe(false);
     expect(clientJs).toBeTruthy();

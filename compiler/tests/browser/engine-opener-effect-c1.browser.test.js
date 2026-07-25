@@ -26,6 +26,7 @@ import {
   mkdirSync,
 } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 const tmpRoot = resolve("/tmp", "scrml-c1-browser");
 
@@ -98,10 +99,9 @@ describe("C1 acceptance — opener effect= boots ONCE + transitions out of .Load
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${clientJs}\n` +
-        `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
         `globalThis.__scrml_get__ = _scrml_reactive_get;\n` +
-        `globalThis.__c1_bootCount__ = (typeof __bootCount !== "undefined") ? __bootCount : null;\n`,
+        `globalThis.__c1_bootCount__ = (typeof __bootCount !== "undefined") ? __bootCount : null;\n`),
     );
     let threw = null;
     try {
@@ -114,7 +114,9 @@ describe("C1 acceptance — opener effect= boots ONCE + transitions out of .Load
       threw,
       get: (name) => globalThis.__scrml_get__(name),
       bootCount: () => globalThis.__c1_bootCount__,
-      mountEl: () => document.querySelector('[data-scrml-engine-mount="phase"]'),
+      // BUG-6/N4: the mount attribute is namespaced (`<token>_phase`), so match
+      // the token-suffixed form (an unnamespaced fixture matches too).
+      mountEl: () => document.querySelector('[data-scrml-engine-mount$="phase"]'),
     };
   }
 
