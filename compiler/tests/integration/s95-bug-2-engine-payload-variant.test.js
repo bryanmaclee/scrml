@@ -333,7 +333,7 @@ function startDrag(taskId) {
     // The codegen reference to the runtime helper is the engine-write site —
     // verify the call shape (the actual helper-fn body lives in the runtime
     // bundle, not the per-file client.js).
-    expect(clientJs).toContain(`_scrml_engine_direct_set("dragPhase",`);
+    expect(clientJs).toContain(`_scrml_cs_engine_direct_set("dragPhase",`);
   });
 });
 
@@ -434,6 +434,8 @@ describe("s95-bug-2 §9 — `is .Variant` AST-path tag normalization", () => {
     // the right-side variant-name string.
     expect(out).toContain('typeof __v.variant === "string"');
     expect(out).toContain('=== "Dragging"');
-    expect(out).toContain('_scrml_cs_reactive_get("dragPhase")');
+    // Direct emit-unit output — the BUG-6 `_scrml_cs_` callee-rename runs at
+    // bundle-assembly (index.ts), NOT in emitExpr, so this raw call is correct.
+    expect(out).toContain('_scrml_reactive_get("dragPhase")');
   });
 });
