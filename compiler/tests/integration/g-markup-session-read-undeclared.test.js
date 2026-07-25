@@ -34,6 +34,7 @@ import { execFileSync } from "child_process";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 let TMP;
 beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "g-markup-session-read-")); });
@@ -68,7 +69,7 @@ describe("g-markup-session-read-undeclared — @session ambient read (S228)", ()
     <h1>Welcome</h1>
     <p>\${@session.current}</p>
 </program>`;
-    const { errors, clientJs } = compileSource("markup-read", src);
+    const { errors, clientJs: __cjRaw } = compileSource("markup-read", src); const clientJs = foldChunkNamespacing(__cjRaw);
 
     expect(errors.filter(e => e.code === "E-STATE-UNDECLARED")).toEqual([]);
     expect(errors).toEqual([]);
@@ -84,7 +85,7 @@ describe("g-markup-session-read-undeclared — @session ambient read (S228)", ()
     const src = `${AUTH}
     <p>User: \${@session.current}</p>
 </program>`;
-    const { errors, clientJs, clientPath } = compileSource("markup-emit", src);
+    const { errors, clientJs: __cjRaw, clientPath } = compileSource("markup-emit", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // R26: the emitted client JS parses cleanly.
     expect(() => execFileSync("node", ["--check", clientPath])).not.toThrow();
@@ -98,7 +99,7 @@ describe("g-markup-session-read-undeclared — @session ambient read (S228)", ()
     const src = `${AUTH}
     <button on:click=\${ log(@session.current) }>Show</button>
 </program>`;
-    const { errors, clientJs } = compileSource("inline-read", src);
+    const { errors, clientJs: __cjRaw } = compileSource("inline-read", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toContain("session.current");
     expect(clientJs).not.toContain('_scrml_reactive_get("session")');
@@ -114,7 +115,7 @@ describe("g-markup-session-read-undeclared — @session ambient read (S228)", ()
     }
     <button on:click=\${ sessionName() }>Who</button>
 </program>`;
-    const { errors, clientJs, serverJs } = compileSource("named-fn-read", src);
+    const { errors, clientJs: __cjRaw, serverJs } = compileSource("named-fn-read", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // The fn body reads the client projection var directly.
     expect(clientJs).toContain("session.current");
@@ -140,7 +141,7 @@ describe("g-markup-session-read-undeclared — @session ambient read (S228)", ()
     <session> = { foo: "bar" }
     <p>\${@session.foo}</p>
 </program>`;
-    const { errors, clientJs } = compileSource("user-cell", src);
+    const { errors, clientJs: __cjRaw } = compileSource("user-cell", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // With a user cell present, the flag is OFF -> the read keeps the universal
     // accessor so the user's reactive cell value is read, NOT the projection var.

@@ -48,6 +48,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 // repro-1: @. contextual sigil form. Pre-populated @todos; a button click sets
 // @phase = .Browsing, which the match dispatcher subscribes to. The each is
@@ -142,12 +143,12 @@ describe("each-in-match §1 — emit shape (no leak, mount div, helpers ship)", 
   test("the each renderer reads the source cell + registers itself", () => {
     const { clientJs } = compileToOutputs(SIGIL_SRC, "sigil");
     expect(clientJs).toContain('const _items = _scrml_reactive_get("todos");');
-    expect(clientJs).toMatch(/_scrml_each_renderers\["each_\d+"\] = _scrml_each_render_\d+;/);
+    expect(clientJs).toMatch(/_scrml_each_renderers\["each_[0-9a-z]{8}_\d+"\] = _scrml_each_render_[0-9a-z]{8}_\d+;/);
   });
 
   test("the match dispatcher invokes _scrml_remount_each after writing the Browsing arm (Mode C fix)", () => {
     const { clientJs } = compileToOutputs(SIGIL_SRC, "sigil");
-    expect(clientJs).toMatch(/_mount\.innerHTML = _scrml_match_match_\d+_render_Browsing\(\);[\s\S]*?_scrml_remount_each\(_mount\);/);
+    expect(clientJs).toMatch(/_mount\.innerHTML = _scrml_match_match_[0-9a-z]{8}_\d+_render_Browsing\(\);[\s\S]*?_scrml_remount_each\(_mount\);/);
   });
 
   test("alias form: each renderer uses the `t` alias (not @.) and ships a mount div", () => {
@@ -187,16 +188,18 @@ describe("each-in-match §2 — list populates on arm entry (real module-init or
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${clientJs}\n` +
-        `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
-        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`,
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
+        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`),
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));
     return {
       set: (name, val) => globalThis.__scrml_set__(name, val),
       get: (name) => globalThis.__scrml_get__(name),
-      matchMount: () => document.querySelector('[data-scrml-match-mount="match_7"]'),
+      // The mount id is chunk-namespaced (`match_<token>_<nodeId>`). Match on the
+      // SUFFIX so the token is tolerated while WHICH match is still pinned — a
+      // `^="match_"` prefix match would select any match block on the page.
+      matchMount: () => document.querySelector('[data-scrml-match-mount$="_7"]'),
       rows: () => (function(){var w=document.createTreeWalker(document.body,NodeFilter.SHOW_COMMENT),n;while((n=w.nextNode())){if(String(n.data||'').trim().indexOf('scrml-each:')===0)return n.parentNode.querySelectorAll('li');}return [];})(),
     };
   }

@@ -29,6 +29,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { runCG, CGError } from "../../src/code-generator.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers (mirrors code-generator.test.js conventions)
@@ -94,7 +95,7 @@ describe("§1: string literal arg — onclick=fn(\"apple\") → fn(\"apple\")", 
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('selectItem("apple")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('selectItem("apple")');
   });
 
   test("arg is not silently dropped — fn() form is absent", () => {
@@ -110,7 +111,7 @@ describe("§1: string literal arg — onclick=fn(\"apple\") → fn(\"apple\")", 
 
     const out = result.outputs.get("/test/app.scrml");
     // selectItem() with no args must not appear
-    expect(out.clientJs).not.toMatch(/selectItem\(\s*\)/);
+    expect(foldChunkNamespacing(out.clientJs)).not.toMatch(/selectItem\(\s*\)/);
   });
 
   test("multiple buttons with distinct string args each get the correct arg", () => {
@@ -130,9 +131,9 @@ describe("§1: string literal arg — onclick=fn(\"apple\") → fn(\"apple\")", 
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('select("apple")');
-    expect(out.clientJs).toContain('select("banana")');
-    expect(out.clientJs).toContain('select("cherry")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('select("apple")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('select("banana")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('select("cherry")');
   });
 });
 
@@ -154,7 +155,7 @@ describe("§2: reactive variable arg — onclick=fn(@counter) → fn(_scrml_reac
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('increment(_scrml_reactive_get("counter"))');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('increment(_scrml_reactive_get("counter"))');
   });
 
   test("bare @var is not left unrewritten in output", () => {
@@ -169,8 +170,8 @@ describe("§2: reactive variable arg — onclick=fn(@counter) → fn(_scrml_reac
     ]);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).not.toContain("increment(@counter)");
-    expect(out.clientJs).not.toMatch(/increment\(\s*\)/);
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("increment(@counter)");
+    expect(foldChunkNamespacing(out.clientJs)).not.toMatch(/increment\(\s*\)/);
   });
 });
 
@@ -192,7 +193,7 @@ describe("§3: multiple args — onclick=fn(item.id, \"action\") → fn(item.id,
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('handleAction(item.id, "action")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('handleAction(item.id, "action")');
   });
 
   test("neither arg is dropped from the call", () => {
@@ -207,8 +208,8 @@ describe("§3: multiple args — onclick=fn(item.id, \"action\") → fn(item.id,
     ]);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).not.toMatch(/handleAction\(\s*\)/);
-    expect(out.clientJs).not.toMatch(/handleAction\(\s*item\.id\s*\)/);
+    expect(foldChunkNamespacing(out.clientJs)).not.toMatch(/handleAction\(\s*\)/);
+    expect(foldChunkNamespacing(out.clientJs)).not.toMatch(/handleAction\(\s*item\.id\s*\)/);
   });
 });
 
@@ -246,9 +247,9 @@ describe("§4: no args — onclick=fn() → function(event) { fn(); } (SPEC §5.
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
     // SPEC §5.2.2: fn() stays fn() — wrapper takes `event` but doesn't forward it
-    expect(out.clientJs).toMatch(/function\(event\)\s*\{\s*doThing\(\);/);
+    expect(foldChunkNamespacing(out.clientJs)).toMatch(/function\(event\)\s*\{\s*doThing\(\);/);
     // Pre-S96 spec-divergent shape must not reappear
-    expect(out.clientJs).not.toContain("doThing(event)");
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("doThing(event)");
   });
 
   test("onkeydown=handleKey() — bare-call wrapped without event-threading (SPEC §5.2.2)", () => {
@@ -268,8 +269,8 @@ describe("§4: no args — onclick=fn() → function(event) { fn(); } (SPEC §5.
     // The wrapper still takes `event` so the listener signature is satisfied,
     // but `event` is NOT forwarded into the call. The escape-hatch for keyboard
     // handlers that need the event is `onkeydown=${(e) => handleKey(e)}`.
-    expect(out.clientJs).toMatch(/function\(event\)\s*\{\s*handleKey\(\);/);
-    expect(out.clientJs).not.toContain("handleKey(event)");
+    expect(foldChunkNamespacing(out.clientJs)).toMatch(/function\(event\)\s*\{\s*handleKey\(\);/);
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("handleKey(event)");
   });
 
   test("non-empty args are NOT auto-injected (user was explicit)", () => {
@@ -285,10 +286,10 @@ describe("§4: no args — onclick=fn() → function(event) { fn(); } (SPEC §5.
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("classify(10)");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("classify(10)");
     // No auto-injection of event when args were explicit
-    expect(out.clientJs).not.toContain("classify(10, event)");
-    expect(out.clientJs).not.toContain("classify(event, 10)");
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("classify(10, event)");
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("classify(event, 10)");
   });
 });
 
@@ -312,7 +313,7 @@ describe("§5: HTML — data-scrml-bind-onclick attribute emitted for delegation
     const out = result.outputs.get("/test/app.scrml");
     expect(out.html).toContain("data-scrml-bind-onclick");
     // clientJs must also have the delegation wiring with the arg
-    expect(out.clientJs).toContain('go("home")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('go("home")');
   });
 
   test("HTML does not contain onclick= attribute directly", () => {
@@ -351,8 +352,8 @@ describe("§6: delegation path — click registry entry includes the arg", () =>
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
     // The delegation registry must contain the handler with the arg
-    expect(out.clientJs).toContain("_scrml_click");
-    expect(out.clientJs).toContain('selectItem("banana")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_click");
+    expect(foldChunkNamespacing(out.clientJs)).toContain('selectItem("banana")');
   });
 
   test("delegated click uses document.addEventListener (not querySelectorAll)", () => {
@@ -367,8 +368,8 @@ describe("§6: delegation path — click registry entry includes the arg", () =>
     ]);
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('document.addEventListener("click"');
-    expect(out.clientJs).not.toContain("querySelectorAll('[data-scrml-bind-onclick]')");
+    expect(foldChunkNamespacing(out.clientJs)).toContain('document.addEventListener("click"');
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("querySelectorAll('[data-scrml-bind-onclick]')");
   });
 });
 
@@ -390,8 +391,8 @@ describe("§7: non-delegable path — args preserved in onchange handler", () =>
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('onChange("option")');
-    expect(out.clientJs).toContain("_scrml_change_handlers");
-    expect(out.clientJs).toContain("querySelectorAll('[data-scrml-bind-onchange]')");
+    expect(foldChunkNamespacing(out.clientJs)).toContain('onChange("option")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_change_handlers");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("querySelectorAll('[data-scrml-bind-onchange]')");
   });
 });

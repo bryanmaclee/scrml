@@ -23,6 +23,7 @@ import { writeFileSync, mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function compileSource(src) {
   const dir = mkdtempSync(join(tmpdir(), "scrml-render-expr-"));
@@ -33,7 +34,7 @@ function compileSource(src) {
 
 function clientJs(result) {
   const out = result.outputs ? [...result.outputs.values()][0] : null;
-  return out?.clientJs ?? "";
+  return foldChunkNamespacing(out?.clientJs) ?? "";
 }
 
 function errsByCode(result, code) {

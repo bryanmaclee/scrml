@@ -40,6 +40,7 @@ import { buildAST } from "../../src/ast-builder.js";
 import { runSYM } from "../../src/symbol-table.ts";
 import { analyzeUsage } from "../../src/codegen/usage-analyzer.ts";
 import { compileScrml } from "../../src/api.js";
+import { unNamespaceEngineNames } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -87,7 +88,7 @@ function compileToClientJs(source, suffix = "hier") {
     });
     const clientPath = resolve(outDir, `${name}.client.js`);
     const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
-    return { errors: result.errors ?? [], clientJs };
+    return { errors: result.errors ?? [], clientJs: unNamespaceEngineNames(clientJs) };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -259,9 +260,9 @@ describe("engine-a7-hierarchy §4 — outer engine end-to-end compilation", () =
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     expect(clientJs).toContain("__scrml_engine_appMode_transitions");
     // Outer dispatcher wires to appMode.
-    expect(clientJs).toContain('_scrml_reactive_subscribe("appMode"');
+    expect(clientJs).toContain('_scrml_cs_reactive_subscribe("appMode"');
     // Initial variant set.
-    expect(clientJs).toMatch(/_scrml_reactive_set\("appMode",\s*"Title"\)/);
+    expect(clientJs).toMatch(/_scrml_cs_reactive_set\("appMode",\s*"Title"\)/);
   });
 
   test("compilation succeeds with EMPTY inner state-child bodies (canonical form)", () => {
@@ -441,13 +442,13 @@ describe("engine-a7-hierarchy §7 — non-empty inner state-child bodies (Bug #1
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Inner engine substrate emits — transitions table, variant cell init.
     expect(clientJs).toContain("__scrml_engine_playMode_transitions");
-    expect(clientJs).toMatch(/_scrml_reactive_set\("playMode",\s*"Exploring"\)/);
+    expect(clientJs).toMatch(/_scrml_cs_reactive_set\("playMode",\s*"Exploring"\)/);
     // Inner engine render functions + dispatcher emit.
     expect(clientJs).toContain("_scrml_engine_playMode_render_Exploring");
     expect(clientJs).toContain("_scrml_engine_playMode_render_Battle");
     expect(clientJs).toContain("__scrml_engine_playMode_dispatch");
     // Inner dispatcher subscribes to the inner cell.
-    expect(clientJs).toMatch(/_scrml_reactive_subscribe\("playMode",/);
+    expect(clientJs).toMatch(/_scrml_cs_reactive_subscribe\("playMode",/);
     // Outer engine ALSO emits unchanged.
     expect(clientJs).toContain("__scrml_engine_appMode_transitions");
     expect(clientJs).toContain("__scrml_engine_appMode_dispatch");
@@ -499,7 +500,7 @@ describe("engine-a7-hierarchy §7 — non-empty inner state-child bodies (Bug #1
     // Composite-arm post-mount block emits.
     expect(clientJs).toContain("§51.0.Q.1 composite-arm post-mount");
     // Inner cell reset to its initial=.
-    expect(clientJs).toMatch(/_scrml_reactive_set\("playMode",\s*"A"\)/);
+    expect(clientJs).toMatch(/_scrml_cs_reactive_set\("playMode",\s*"A"\)/);
     // Tree-shake: WITHOUT history on this state-child, no synth-cell
     // reference and no pending-restore branch.
     expect(clientJs).not.toContain("_appMode_Playing_history");
@@ -534,8 +535,8 @@ describe("engine-a7-hierarchy §7 — non-empty inner state-child bodies (Bug #1
     expect(clientJs).toContain("_appMode_Playing_history");
     expect(clientJs).toContain("_scrml_engine_pending_history_restore[\"appMode\"]");
     // Both restore (synth cell value) and fallback (inner initial) emit.
-    expect(clientJs).toMatch(/_scrml_reactive_set\("playMode",\s*_saved\)/);
-    expect(clientJs).toMatch(/_scrml_reactive_set\("playMode",\s*"A"\)/);
+    expect(clientJs).toMatch(/_scrml_cs_reactive_set\("playMode",\s*_saved\)/);
+    expect(clientJs).toMatch(/_scrml_cs_reactive_set\("playMode",\s*"A"\)/);
   });
 });
 

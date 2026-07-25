@@ -80,7 +80,7 @@ describe("each mount is a parse-safe comment fence, never a <div> (FIX D pin)", 
     const { errors, html } = compileHtml(src, "select");
     expect(errors).toEqual([]);
     const sel = regionOf(html, "select");
-    expect(sel).toMatch(/<!--scrml-each:\d+--><!--\/scrml-each:\d+-->/);
+    expect(sel).toMatch(/<!--scrml-each:[0-9a-z]{8}_\d+--><!--\/scrml-each:[0-9a-z]{8}_\d+-->/);
     // The critical invariant: NO <div> mount anywhere inside the <select>.
     expect(sel).not.toContain("data-scrml-each-mount");
     expect(html).not.toMatch(/<div data-scrml-each-mount/);
@@ -100,7 +100,7 @@ describe("each mount is a parse-safe comment fence, never a <div> (FIX D pin)", 
     const { errors, html } = compileHtml(src, "tbody");
     expect(errors).toEqual([]);
     const tb = regionOf(html, "tbody");
-    expect(tb).toMatch(/<!--scrml-each:\d+--><!--\/scrml-each:\d+-->/);
+    expect(tb).toMatch(/<!--scrml-each:[0-9a-z]{8}_\d+--><!--\/scrml-each:[0-9a-z]{8}_\d+-->/);
     expect(tb).not.toContain("data-scrml-each-mount");
     expect(html).not.toMatch(/<div data-scrml-each-mount/);
   });

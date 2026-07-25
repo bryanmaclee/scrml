@@ -791,6 +791,7 @@ function _scrml_replay(name, log, endIdx) {
   _scrml_reactive_set(name, log[n - 1].to);
 }
 
+// Chunk-local cell scope (BUG-6) is inlined per-chunk at codegen (codegen/index.ts buildCellScopePrologue), not here — zero always-loaded bytes.
 function _scrml_reactive_get(name) {
   if (__SCRML_PERF) {
     const __t0 = __SCRML_PERF_NOW();
@@ -4500,13 +4501,25 @@ function _scrml_engine_history_capture_on_exit(varName, current, target, history
   if (current === target) return; // self-loop — not a real exit, do not capture
   var innerVarName = historyMap[current];
   if (typeof innerVarName !== "string" || innerVarName.length === 0) return;
+  // chunk-namespacing — \`varName\` arrives ALREADY namespaced ("0abc$playMode"),
+  // because the chunk's scope mapped it on the way in. But this helper rebuilds
+  // two more keys by CONCATENATION, and the historyMap's values are the author's
+  // bare inner-engine names, so both have to be re-prefixed with the same
+  // namespace or they address slots that do not exist. Splitting the prefix back
+  // off \`varName\` keeps that consistent without threading a key function through
+  // \`_scrml_engine_advance\` / \`_scrml_engine_direct_set\`, which the chunk calls
+  // but this helper is reached from INSIDE.
+  var _sep = varName.indexOf("$");
+  var _ns = _sep === 8 ? varName.slice(0, 9) : "";
+  var _bare = _ns ? varName.slice(9) : varName;
   // Capture the inner-engine var's current value into the synth cell.
   // The synth cell key matches the codegen convention in
-  // emit-engine.ts:engineHistoryCellKey: "_<outerVar>_<currentVariant>_history".
-  var cellKey = "_" + varName + "_" + current + "_history";
+  // emit-engine.ts:engineHistoryCellKey: "_<outerVar>_<currentVariant>_history"
+  // — emitted bare and namespaced by the chunk scope, hence the ns prefix here.
+  var cellKey = _ns + "_" + _bare + "_" + current + "_history";
   // Read inner directly from _scrml_state (synth cells / engine cells live
   // in the same flat reactive store).
-  _scrml_state[cellKey] = _scrml_state[innerVarName];
+  _scrml_state[cellKey] = _scrml_state[_ns + innerVarName];
 }
 
 function _scrml_engine_advance(varName, target, table, timersTable, idleEntry, internalTable, historyMap, isHistoryRestore) {
@@ -5619,13 +5632,25 @@ function _scrml_ssr_seeded(name) {
 // page-load call (no skipShell) still seeds EVERY cell — the shell needs its
 // first-paint values too; only the rehydrate skips the shell cells.
 function _scrml_ssr_seed_apply(skipShell) {
+  _scrml_ssr_seed_apply_scoped(null, skipShell);
+}
+// chunk-namespacing — the seed's WIRE FORMAT keeps BARE author cell names, and
+// the calling chunk maps them through its own key function at apply time. The
+// alternative (baking the resolved key server-side) would leak the token into
+// every SSR document and into every conformance first-paint expectation, for no
+// gain: the chunk that consumes the seed is exactly the one that knows the
+// namespace.
+//
+// \`keyFn\` is null for an unscoped call (no chunk namespace active), which is
+// byte-for-byte the pre-namespacing behaviour.
+function _scrml_ssr_seed_apply_scoped(keyFn, skipShell) {
   if (typeof window === "undefined" || window.__scrml_ssr_state == null) return;
   var _seed = window.__scrml_ssr_state;
   var _shell = (skipShell && typeof _scrml_shell_cells !== "undefined") ? _scrml_shell_cells : null;
   for (var _k in _seed) {
     if (Object.prototype.hasOwnProperty.call(_seed, _k)) {
       if (_shell && Object.prototype.hasOwnProperty.call(_shell, _k)) continue; // shell cell — persist the live value
-      _scrml_reactive_set(_k, _seed[_k]);
+      _scrml_reactive_set(keyFn ? keyFn(_k) : _k, _seed[_k]);
     }
   }
 }

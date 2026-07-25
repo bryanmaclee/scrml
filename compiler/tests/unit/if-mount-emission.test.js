@@ -21,6 +21,7 @@ import { generateHtml } from "../../src/codegen/emit-html.js";
 import { BindingRegistry } from "../../src/codegen/binding-registry.ts";
 import { resetVarCounter } from "../../src/codegen/var-counter.ts";
 import { runCG } from "../../src/code-generator.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -275,9 +276,9 @@ describe("§3: clean-subtree if= emits mount/unmount controller (N16-N20)", () =
     ]);
     const result = compile(node);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("_scrml_create_scope");
-    expect(out.clientJs).toContain("_scrml_mount_template");
-    expect(out.clientJs).toContain("_scrml_unmount_scope");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_create_scope");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_mount_template");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_unmount_scope");
   });
 
   test("N17: clean if= controller wraps in `{` block scope and declares per-marker locals", () => {
@@ -286,8 +287,8 @@ describe("§3: clean-subtree if= emits mount/unmount controller (N16-N20)", () =
     ]);
     const result = compile(node);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toMatch(/let _scrml_mr_[A-Za-z0-9_]+ = null;/);
-    expect(out.clientJs).toMatch(/let _scrml_ms_[A-Za-z0-9_]+ = null;/);
+    expect(foldChunkNamespacing(out.clientJs)).toMatch(/let _scrml_mr_[A-Za-z0-9_]+ = null;/);
+    expect(foldChunkNamespacing(out.clientJs)).toMatch(/let _scrml_ms_[A-Za-z0-9_]+ = null;/);
   });
 
   test("N18: initial mount emitted when condition truthy on first render", () => {
@@ -297,8 +298,8 @@ describe("§3: clean-subtree if= emits mount/unmount controller (N16-N20)", () =
     const result = compile(node);
     const out = result.outputs.get("/test/app.scrml");
     // The initial-mount call appears BEFORE the _scrml_effect reactive registration.
-    const idxInit = out.clientJs.indexOf("_scrml_if_mount_");
-    const idxEffect = out.clientJs.indexOf("_scrml_effect(");
+    const idxInit = foldChunkNamespacing(out.clientJs).indexOf("_scrml_if_mount_");
+    const idxEffect = foldChunkNamespacing(out.clientJs).indexOf("_scrml_effect(");
     expect(idxInit).toBeGreaterThan(-1);
     expect(idxEffect).toBeGreaterThan(idxInit);
   });
@@ -310,7 +311,7 @@ describe("§3: clean-subtree if= emits mount/unmount controller (N16-N20)", () =
     const result = compile(node);
     const out = result.outputs.get("/test/app.scrml");
     // The _scrml_effect block contains both the truthy-mount and falsy-unmount branches.
-    expect(out.clientJs).toMatch(/_scrml_effect\(function\(\) \{[\s\S]*?_scrml_if_mount_[\s\S]*?_scrml_if_unmount_/);
+    expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_effect\(function\(\) \{[\s\S]*?_scrml_if_mount_[\s\S]*?_scrml_if_unmount_/);
   });
 
   test("N20: unmount path destroys scope and clears refs to null", () => {
@@ -320,8 +321,8 @@ describe("§3: clean-subtree if= emits mount/unmount controller (N16-N20)", () =
     const result = compile(node);
     const out = result.outputs.get("/test/app.scrml");
     // _scrml_unmount_scope is called; both mr/ms refs are reset to null.
-    expect(out.clientJs).toContain("_scrml_unmount_scope(_scrml_mr_");
-    expect(out.clientJs).toMatch(/_scrml_mr_[A-Za-z0-9_]+ = null;\s*\n\s*_scrml_ms_[A-Za-z0-9_]+ = null;/);
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_unmount_scope(_scrml_mr_");
+    expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_mr_[A-Za-z0-9_]+ = null;\s*\n\s*_scrml_ms_[A-Za-z0-9_]+ = null;/);
   });
 
   test("N21: non-clean if= still emits el.style.display (regression — fallback path)", () => {
@@ -329,9 +330,9 @@ describe("§3: clean-subtree if= emits mount/unmount controller (N16-N20)", () =
     const node = makeMarkupNode("div", [varRefAttr("if", "@visible")], [inner]);
     const result = compile(node);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("el.style.display");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("el.style.display");
     // And NOT a mount controller.
-    expect(out.clientJs).not.toContain("_scrml_mount_template");
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("_scrml_mount_template");
   });
 });
 
@@ -349,7 +350,7 @@ describe("§4: full pipeline round-trip (N22-N24)", () => {
     expect(out.html).toContain('<template id="');
     expect(out.html).toContain("scrml-if-marker:");
     expect(out.html).toContain("Welcome back!");
-    expect(out.clientJs).toContain("_scrml_mount_template");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_mount_template");
   });
 
   test("N23: <MyComp if=@a> uses fallback (component if=)", () => {
@@ -367,8 +368,8 @@ describe("§4: full pipeline round-trip (N22-N24)", () => {
     const result = compile(node);
     const out = result.outputs.get("/test/app.scrml");
     // Controller condition reads `_scrml_reactive_get("user").loggedIn`.
-    expect(out.clientJs).toContain('_scrml_reactive_get("user")');
-    expect(out.clientJs).toContain(".loggedIn");
-    expect(out.clientJs).toContain("_scrml_mount_template");
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_get("user")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain(".loggedIn");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_mount_template");
   });
 });

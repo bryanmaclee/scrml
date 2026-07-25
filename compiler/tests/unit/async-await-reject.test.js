@@ -28,6 +28,7 @@ import { isStdlibFile } from "../../src/validators/lint-async-user-source.ts";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 /** Compile a one-file program and return the async/await NOT-IN-SCRML codes. */
 function rejectCodes(src, parser) {

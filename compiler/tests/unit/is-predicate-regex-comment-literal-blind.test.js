@@ -22,6 +22,7 @@ import { mkdtempSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function compile(src, opts = {}) {
   const dir = mkdtempSync(join(tmpdir(), "scrml-is-lit-"));

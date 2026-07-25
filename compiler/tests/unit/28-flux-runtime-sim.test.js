@@ -21,6 +21,8 @@ import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { storeByAuthorName, chunkCellKey } from "../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-28-flux-runtime-sim");
 
@@ -52,9 +54,8 @@ function boot() {
   const { html, clientJs, runtimeJs } = compileFlux();
   document.documentElement.innerHTML = html;
   new Function("window", "document",
-    `${runtimeJs}\n${clientJs}\n` +
-    `globalThis.__s = _scrml_state;\n` +
-    `globalThis.__d = _scrml_derived_get;\n`
+    `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__s = _scrml_state;\n` +
+    `globalThis.__d = _scrml_derived_get;\n`)
   )(window, document);
   document.dispatchEvent(new Event("DOMContentLoaded"));
   // The board is the reactive-display element holding the player glyph — find it by
@@ -62,8 +63,8 @@ function boot() {
   const boardEl = Array.from(document.querySelectorAll("[data-scrml-logic]"))
     .find((e) => (e.textContent || "").includes("@"));
   return {
-    S: () => globalThis.__s,
-    D: (k) => globalThis.__d(k),
+    S: () => storeByAuthorName(globalThis.__s),
+    D: (k) => globalThis.__d(chunkCellKey(clientJs)(k)),
     boardDom: () => boardEl.textContent,
     btn: (label) => Array.from(document.querySelectorAll("button")).find((b) => (b.textContent || "").trim().startsWith(label)),
   };

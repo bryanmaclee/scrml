@@ -35,6 +35,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 const tmpRoot = resolve("/tmp", "scrml-msg-dispatch-browser");
 
@@ -75,14 +76,13 @@ function mountModule(source, baseName, varName) {
   const exec = new Function(
     "window",
     "document",
-    `${runtimeJs}\n${clientJs}\n` +
-      `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
+    `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
       `globalThis.__scrml_get__ = _scrml_reactive_get;\n` +
       `globalThis.__scrml_dispatch_fn__ = _scrml_engine_dispatch_message;\n` +
       `globalThis.__scrml_arm_table__ = (typeof ${armTableName} !== "undefined") ? ${armTableName} : null;\n` +
       `globalThis.__scrml_tx_table__ = (typeof ${txTableName} !== "undefined") ? ${txTableName} : null;\n` +
       `globalThis.__scrml_idle__ = (typeof ${idleName} !== "undefined") ? ${idleName} : null;\n` +
-      `globalThis.__scrml_machine_timers_ref__ = _scrml_machine_timers;\n`,
+      `globalThis.__scrml_machine_timers_ref__ = _scrml_machine_timers;\n`),
   );
   let threw = null;
   try {

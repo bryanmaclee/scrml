@@ -20,6 +20,7 @@
 import { describe, test, expect } from "bun:test";
 import { runCG } from "../../src/code-generator.js";
 import { tokenizeCSS } from "../../src/tokenizer.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -127,9 +128,9 @@ describe("CSS Variable Bridge", () => {
       ]),
     ]);
 
-    expect(output.clientJs).toBeTruthy();
-    expect(output.clientJs).toContain('style.setProperty("--scrml-brandColor"');
-    expect(output.clientJs).toContain('_scrml_reactive_get("brandColor")');
+    expect(foldChunkNamespacing(output.clientJs)).toBeTruthy();
+    expect(foldChunkNamespacing(output.clientJs)).toContain('style.setProperty("--scrml-brandColor"');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_reactive_get("brandColor")');
   });
 
   // T3: @var in CSS produces reactive subscription
@@ -143,9 +144,9 @@ describe("CSS Variable Bridge", () => {
       ]),
     ]);
 
-    expect(output.clientJs).toBeTruthy();
-    expect(output.clientJs).toContain('_scrml_effect');
-    expect(output.clientJs).toContain('style.setProperty("--scrml-brandColor"');
+    expect(foldChunkNamespacing(output.clientJs)).toBeTruthy();
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_effect');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('style.setProperty("--scrml-brandColor"');
   });
 
   // T4: Expression in CSS produces derived computation
@@ -162,11 +163,11 @@ describe("CSS Variable Bridge", () => {
     expect(output.css).toBeTruthy();
     expect(output.css).toContain("var(--scrml-expr-spacing)");
 
-    expect(output.clientJs).toBeTruthy();
-    expect(output.clientJs).toContain('_scrml_reactive_get("spacing")');
-    expect(output.clientJs).toContain('_scrml_effect');
+    expect(foldChunkNamespacing(output.clientJs)).toBeTruthy();
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_reactive_get("spacing")');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_effect');
     // The expression should be wrapped in a function
-    expect(output.clientJs).toMatch(/function _scrml_css_expr_\d+\(\)/);
+    expect(foldChunkNamespacing(output.clientJs)).toMatch(/function _scrml_css_expr_\d+\(\)/);
   });
 
   // T5: Ternary expression in CSS value position
@@ -183,9 +184,9 @@ describe("CSS Variable Bridge", () => {
     expect(output.css).toBeTruthy();
     expect(output.css).toContain("var(--scrml-expr-isDark)");
 
-    expect(output.clientJs).toBeTruthy();
-    expect(output.clientJs).toContain('_scrml_reactive_get("isDark")');
-    expect(output.clientJs).toContain('? "#1a1a1a" : "#fff"');
+    expect(foldChunkNamespacing(output.clientJs)).toBeTruthy();
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_reactive_get("isDark")');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('? "#1a1a1a" : "#fff"');
   });
 
   // T6: Multiple @var references in one rule
@@ -206,9 +207,9 @@ describe("CSS Variable Bridge", () => {
     // Expression with multiple vars gets a combined custom property name
     expect(output.css).toContain("var(--scrml-expr-borderWidth-borderColor)");
 
-    expect(output.clientJs).toBeTruthy();
+    expect(foldChunkNamespacing(output.clientJs)).toBeTruthy();
     // Single effect auto-tracks both vars
-    expect(output.clientJs).toContain('_scrml_effect');
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_effect');
   });
 
   // T7: @var with unit suffix
@@ -245,7 +246,7 @@ describe("CSS Variable Bridge", () => {
     ]);
 
     // Program-level (non-scoped): targets document.documentElement.
-    expect(output.clientJs).toContain("document.documentElement.style.setProperty");
+    expect(foldChunkNamespacing(output.clientJs)).toContain("document.documentElement.style.setProperty");
 
     // A component/constructor-scoped block targets the SAME :root — NOT a
     // per-instance `_scrml_el` (which is never defined → a ReferenceError at
@@ -266,9 +267,9 @@ describe("CSS Variable Bridge", () => {
     ];
     const scopedOutput = compileWithCss(scopedNodes);
 
-    expect(scopedOutput.clientJs).toBeTruthy();
-    expect(scopedOutput.clientJs).toContain("document.documentElement.style.setProperty");
-    expect(scopedOutput.clientJs).not.toContain("_scrml_el");
+    expect(foldChunkNamespacing(scopedOutput.clientJs)).toBeTruthy();
+    expect(foldChunkNamespacing(scopedOutput.clientJs)).toContain("document.documentElement.style.setProperty");
+    expect(foldChunkNamespacing(scopedOutput.clientJs)).not.toContain("_scrml_el");
   });
 
   // T9: CSS without @var remains unchanged (regression guard)
@@ -312,8 +313,8 @@ describe("CSS Variable Bridge", () => {
     expect(output.css).toContain("color: var(--scrml-brandColor);");
     expect(output.css).toContain("padding: 1rem;");
 
-    expect(output.clientJs).toBeTruthy();
-    expect(output.clientJs).toContain('_scrml_effect');
+    expect(foldChunkNamespacing(output.clientJs)).toBeTruthy();
+    expect(foldChunkNamespacing(output.clientJs)).toContain('_scrml_effect');
   });
 });
 

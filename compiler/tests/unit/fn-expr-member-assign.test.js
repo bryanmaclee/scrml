@@ -231,7 +231,7 @@ describe("§1: ws.onopen = function() { @opened = true }", () => {
 
   test("the reactive write inside the function body is present", () => {
     const js = getJs(canonicalFx);
-    expect(js).toContain('_scrml_reactive_set("opened"');
+    expect(js).toContain('_scrml_cs_reactive_set("opened"');
   });
 
   test("emitted JS is syntactically valid", () => {
@@ -267,8 +267,8 @@ describe("§4: target.handler = function() { @a = 1; @b = 2 }", () => {
   test("both reactive writes appear inside the function body", () => {
     const js = getJs(multiFx);
     expect(js).not.toMatch(/=\s*;/);
-    expect(js).toContain('_scrml_reactive_set("a"');
-    expect(js).toContain('_scrml_reactive_set("b"');
+    expect(js).toContain('_scrml_cs_reactive_set("a"');
+    expect(js).toContain('_scrml_cs_reactive_set("b"');
   });
 
   test("emitted JS is parseable", () => {
@@ -286,7 +286,7 @@ describe("§5: arr[0] = function() { @v = 7 }", () => {
     const js = getJs(computedFx);
     expect(js).not.toMatch(/=\s*;/);
     expect(js).toMatch(/arr\[\s*0\s*\]\s*=\s*function\s*\(/);
-    expect(js).toContain('_scrml_reactive_set("v"');
+    expect(js).toContain('_scrml_cs_reactive_set("v"');
   });
 
   test("emitted JS is parseable", () => {
@@ -304,7 +304,7 @@ describe("§6: let cb = function() { @x = 1 }", () => {
     const js = getJs(letFx);
     expect(js).not.toMatch(/=\s*;/);
     expect(js).toMatch(/let\s+cb\s*=\s*function\s*\(/);
-    expect(js).toContain('_scrml_reactive_set("x"');
+    expect(js).toContain('_scrml_cs_reactive_set("x"');
   });
 
   test("emitted JS is parseable", () => {
@@ -322,7 +322,7 @@ describe("§7: addEventListener(ev, function() { ... }) — regression guard", (
     const js = getJs(callArgFx);
     expect(js).not.toMatch(/addEventListener\(\s*[^)]*,\s*\)/);
     expect(js).toMatch(/addEventListener\([^)]*,\s*function\s*\(/);
-    expect(js).toContain('_scrml_reactive_set("c"');
+    expect(js).toContain('_scrml_cs_reactive_set("c"');
   });
 
   test("emitted JS is parseable", () => {
@@ -342,7 +342,7 @@ describe("§8: top-level `function helper() {...}` is still a function-decl", ()
     // reach. Compiler mangles the name, so we look for a function decl with
     // a `helper`-derived mangled name (e.g. `_scrml_helper_<n>`).
     expect(js).toMatch(/function\s+_scrml_helper/);
-    expect(js).toContain('_scrml_reactive_set("ran"');
+    expect(js).toContain('_scrml_cs_reactive_set("ran"');
   });
 
   test("emitted JS is parseable", () => {

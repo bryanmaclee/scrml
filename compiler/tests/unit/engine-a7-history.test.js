@@ -33,6 +33,7 @@ import { runSYM } from "../../src/symbol-table.ts";
 import { analyzeUsage } from "../../src/codegen/usage-analyzer.ts";
 import { parseRuleAttrValue } from "../../src/engine-statechild-parser.ts";
 import { compileScrml } from "../../src/api.js";
+import { unNamespaceEngineNames, unNamespaceCellKeys } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -83,7 +84,7 @@ function compileToClientJs(source, suffix = "history") {
     });
     const clientPath = resolve(outDir, `${name}.client.js`);
     const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
-    return { errors: result.errors ?? [], clientJs };
+    return { errors: result.errors ?? [], clientJs: unNamespaceCellKeys(unNamespaceEngineNames(clientJs)) };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -281,7 +282,7 @@ describe("engine-a7-history §5 — canonical §51.0.N example compiles end-to-e
     // Outer engine transitions table is emitted normally.
     expect(clientJs).toContain("__scrml_engine_appMode_transitions");
     // Outer dispatcher subscribes to appMode.
-    expect(clientJs).toContain('_scrml_reactive_subscribe("appMode"');
+    expect(clientJs).toContain('_scrml_cs_reactive_subscribe("appMode"');
   });
 
   test("rule=.Variant.history flattens to base variant in emitted transitions table (Wave 4 deferral)", () => {
@@ -441,14 +442,14 @@ describe("engine-a7-history §7 — synth-cell emission + history-map (Bug #3, W
     // (1) The function body's engine write dispatches through the canonical
     //     write-guard (NOT the event-handler shortcut path which is Bug #6
     //     territory — out of scope here).
-    expect(clientJs).toContain("_scrml_engine_direct_set");
+    expect(clientJs).toContain("_scrml_cs_engine_direct_set");
 
     // (2) The history-map identifier is threaded as the trailing positional
     //     arg. Engine has no timers / no idle / no internal:rule= in this
     //     test, so the position-padding emits three `null` args before
     //     the history-map identifier to maintain positional alignment.
     expect(clientJs).toMatch(
-      /_scrml_engine_direct_set\("appMode",[^,]+,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map\)/,
+      /_scrml_cs_engine_direct_set\("appMode",[^,]+,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map\)/,
     );
   });
 
@@ -487,13 +488,13 @@ describe("engine-a7-history §7 — synth-cell emission + history-map (Bug #3, W
     // (3) Canonical transitions table + write-guard still emit normally —
     //     non-history engines are not regressed.
     expect(clientJs).toContain("__scrml_engine_appMode_transitions");
-    expect(clientJs).toContain("_scrml_engine_direct_set");
+    expect(clientJs).toContain("_scrml_cs_engine_direct_set");
 
     // (4) The write-guard call has NO history-map arg appended. With no
     //     timers / idle / internal-rule / history, the call shape is the
     //     canonical 3-arg form (varName, value, table).
     expect(clientJs).toMatch(
-      /_scrml_engine_direct_set\("appMode",[^,]+,\s*__scrml_engine_appMode_transitions\)/,
+      /_scrml_cs_engine_direct_set\("appMode",[^,]+,\s*__scrml_engine_appMode_transitions\)/,
     );
   });
 });
@@ -555,7 +556,7 @@ describe("engine-a7-history §8 — restore-form write-site lowering (Wave 2.4)"
     // history + no timers/idle/internal, so the call shape is:
     //   _scrml_engine_direct_set("appMode", AppMode.Playing, table, null, null, null, history_map, true)
     expect(clientJs).toMatch(
-      /_scrml_engine_direct_set\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map,\s*true\)/,
+      /_scrml_cs_engine_direct_set\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map,\s*true\)/,
     );
     // Sanity: no `.history` member access on the variant string.
     expect(clientJs).not.toContain("AppMode.Playing.history");
@@ -584,7 +585,7 @@ describe("engine-a7-history §8 — restore-form write-site lowering (Wave 2.4)"
     // Call shape with history but WITHOUT isHistoryRestore — trailing `true`
     // must be absent.
     expect(clientJs).toMatch(
-      /_scrml_engine_direct_set\("appMode",\s*AppMode\.Title,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map\)/,
+      /_scrml_cs_engine_direct_set\("appMode",\s*AppMode\.Title,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map\)/,
     );
     // Confirm: the close paren immediately after the history_map arg (no
     // ", true" trailing).
@@ -623,8 +624,8 @@ describe("engine-a7-history §8 — restore-form write-site lowering (Wave 2.4)"
     // Synth-cell read.
     expect(clientJs).toContain('_scrml_state["_appMode_Playing_history"]');
     // Restore-from-synth + fallback-to-initial branches both present.
-    expect(clientJs).toMatch(/_scrml_reactive_set\("playMode",\s*_saved\)/);
-    expect(clientJs).toMatch(/_scrml_reactive_set\("playMode",\s*"Exploring"\)/);
+    expect(clientJs).toMatch(/_scrml_cs_reactive_set\("playMode",\s*_saved\)/);
+    expect(clientJs).toMatch(/_scrml_cs_reactive_set\("playMode",\s*"Exploring"\)/);
   });
 
   test("bare `.advance(.Variant)` (no `.history`) does NOT thread isHistoryRestore", () => {
@@ -650,7 +651,7 @@ describe("engine-a7-history §8 — restore-form write-site lowering (Wave 2.4)"
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Positive: helper call present with bare-variant target, no `.history`.
     expect(clientJs).toMatch(
-      /_scrml_engine_advance\("phase",\s*Phase\.Active,\s*__scrml_engine_phase_transitions\)/,
+      /_scrml_cs_engine_advance\("phase",\s*Phase\.Active,\s*__scrml_engine_phase_transitions\)/,
     );
     // Sanity: no `.history` chain anywhere on the variant string.
     expect(clientJs).not.toContain("Phase.Active.history");
@@ -709,7 +710,7 @@ describe("engine-a7-history §8 — restore-form write-site lowering (Wave 2.4)"
 
     // §6 parity assertion 1: `.history` suffix stripped — variant token is
     // bare `AppMode.Playing`.
-    expect(callSlice).toMatch(/_scrml_engine_advance\("appMode",\s*AppMode\.Playing[\s,]/);
+    expect(callSlice).toMatch(/_scrml_cs_engine_advance\("appMode",\s*AppMode\.Playing[\s,]/);
     // §6 parity assertion 2: no `.history` member access on the variant
     // string (would runtime-fail — variant values are strings).
     expect(callSlice).not.toMatch(/AppMode\.Playing\.history/);
@@ -769,7 +770,7 @@ describe("engine-a7-history §9 — function-body .advance(.X.history) history-m
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     expect(clientJs).toMatch(
-      /_scrml_engine_advance\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map,\s*true\)/,
+      /_scrml_cs_engine_advance\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map,\s*true\)/,
     );
     expect(clientJs).not.toContain("AppMode.Playing.history");
     expect(clientJs).not.toMatch(
@@ -799,7 +800,7 @@ describe("engine-a7-history §9 — function-body .advance(.X.history) history-m
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     expect(clientJs).toMatch(
-      /_scrml_engine_advance\("appMode",\s*AppMode\.Title,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map\)/,
+      /_scrml_cs_engine_advance\("appMode",\s*AppMode\.Title,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map\)/,
     );
     expect(clientJs).not.toMatch(
       /_scrml_engine_advance\("appMode"[^)]*__scrml_engine_appMode_history_map,\s*true\)/,
@@ -829,7 +830,7 @@ describe("engine-a7-history §9 — function-body .advance(.X.history) history-m
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
     expect(clientJs).toMatch(
-      /_scrml_engine_direct_set\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map,\s*true\)/,
+      /_scrml_cs_engine_direct_set\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*__scrml_engine_appMode_history_map,\s*true\)/,
     );
   });
 });

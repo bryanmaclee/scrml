@@ -37,6 +37,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { execFileSync } from "child_process";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function compileToOutputs(source, suffix = "bug65") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -49,7 +50,7 @@ function compileToOutputs(source, suffix = "bug65") {
   try {
     const result = compileScrml({ inputFiles: [tmpInput], write: true, outputDir: outDir });
     const clientPath = resolve(outDir, `${name}.client.js`);
-    const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""));
     return { errors: result.errors ?? [], warnings: result.warnings ?? [], clientJs, clientPath };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
@@ -113,7 +114,7 @@ ${"$"}{
   });
 
   test("lift handler lowers to _scrml_engine_advance — no raw @phase or .advance survives", () => {
-    const { clientJs } = compileToOutputs(src, "bug65-state");
+    const { clientJs: __cjRaw } = compileToOutputs(src, "bug65-state"); const clientJs = foldChunkNamespacing(__cjRaw);
     const bodies = liftHandlerBodies(clientJs);
     expect(bodies.some((b) => /_scrml_engine_advance\("phase",\s*"Active"/.test(b))).toBe(true);
     for (const b of bodies) {
@@ -125,7 +126,7 @@ ${"$"}{
   });
 
   test("emitted client.js passes node --check (silent-miscompile canary)", () => {
-    const { clientJs } = compileToOutputs(src, "bug65-state");
+    const { clientJs: __cjRaw } = compileToOutputs(src, "bug65-state"); const clientJs = foldChunkNamespacing(__cjRaw);
     const { ok, err } = nodeCheck(clientJs);
     expect(ok).toBe(true);
     if (!ok) throw new Error(err);
@@ -170,7 +171,7 @@ const taskMovedTo = (tasks, id, col) => tasks.map((t) => t.id == id ? { id: t.id
   });
 
   test("lift handler lowers to _scrml_engine_dispatch_message with the `col` iter-var payload", () => {
-    const { clientJs } = compileToOutputs(src, "bug65-msg");
+    const { clientJs: __cjRaw } = compileToOutputs(src, "bug65-msg"); const clientJs = foldChunkNamespacing(__cjRaw);
     const bodies = liftHandlerBodies(clientJs);
     expect(bodies.some((b) =>
       /_scrml_engine_dispatch_message\("dragPhase",\s*\{\s*variant:\s*"Drop",\s*data:\s*\{\s*col:\s*col\s*\}/.test(b)
@@ -182,7 +183,7 @@ const taskMovedTo = (tasks, id, col) => tasks.map((t) => t.id == id ? { id: t.id
   });
 
   test("emitted client.js passes node --check", () => {
-    const { clientJs } = compileToOutputs(src, "bug65-msg");
+    const { clientJs: __cjRaw } = compileToOutputs(src, "bug65-msg"); const clientJs = foldChunkNamespacing(__cjRaw);
     const { ok, err } = nodeCheck(clientJs);
     expect(ok).toBe(true);
     if (!ok) throw new Error(err);
@@ -215,14 +216,14 @@ ${"$"}{
   });
 
   test("lift handler lowers to _scrml_engine_direct_set (write-guard path)", () => {
-    const { clientJs } = compileToOutputs(src, "bug65-assign");
+    const { clientJs: __cjRaw } = compileToOutputs(src, "bug65-assign"); const clientJs = foldChunkNamespacing(__cjRaw);
     const bodies = liftHandlerBodies(clientJs);
     expect(bodies.some((b) => /_scrml_engine_direct_set\("phase",\s*"Active"/.test(b))).toBe(true);
     for (const b of bodies) expect(b).not.toMatch(/@phase\s*=/);
   });
 
   test("emitted client.js passes node --check", () => {
-    const { clientJs } = compileToOutputs(src, "bug65-assign");
+    const { clientJs: __cjRaw } = compileToOutputs(src, "bug65-assign"); const clientJs = foldChunkNamespacing(__cjRaw);
     const { ok, err } = nodeCheck(clientJs);
     expect(ok).toBe(true);
     if (!ok) throw new Error(err);
@@ -250,7 +251,7 @@ ${"$"}{
 </program>`;
 
   test("non-engine handler keeps plain-call lowering; NO engine machinery injected for it", () => {
-    const { errors, clientJs } = compileToOutputs(src, "bug65-mixed");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "bug65-mixed"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     const bodies = liftHandlerBodies(clientJs);
     // The plain handler stays a direct call — NOT routed through engine machinery.
@@ -278,7 +279,7 @@ ${"$"}{
 </program>`;
 
   test("plain call handler lowers to ping(it); ZERO engine helpers anywhere in the file", () => {
-    const { errors, clientJs } = compileToOutputs(src, "bug65-noeng");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "bug65-noeng"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     const bodies = liftHandlerBodies(clientJs);
     expect(bodies.some((b) => /ping\(it\)/.test(b))).toBe(true);
@@ -288,7 +289,7 @@ ${"$"}{
   });
 
   test("emitted client.js passes node --check", () => {
-    const { clientJs } = compileToOutputs(src, "bug65-noeng");
+    const { clientJs: __cjRaw } = compileToOutputs(src, "bug65-noeng"); const clientJs = foldChunkNamespacing(__cjRaw);
     const { ok, err } = nodeCheck(clientJs);
     expect(ok).toBe(true);
     if (!ok) throw new Error(err);

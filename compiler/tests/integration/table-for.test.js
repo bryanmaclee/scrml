@@ -19,6 +19,7 @@ import { mkdirSync, writeFileSync, rmSync, existsSync, mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 let TMP;
 
@@ -56,7 +57,7 @@ function getHtml(result) {
 
 function getClientJs(result) {
   for (const [, v] of (result.outputs || [])) {
-    if (typeof v === "object" && v && v.clientJs) return v.clientJs;
+    if (typeof v === "object" && v && foldChunkNamespacing(v.clientJs)) return foldChunkNamespacing(v.clientJs);
   }
   return "";
 }

@@ -119,7 +119,7 @@ describe("§1 attr-value interpolation mangles the user fn name", () => {
 
   test("the @cell attr interp still emits _scrml_reactive_get (regression guard)", () => {
     const js = compile(attrFnFx).outputs.get(attrFnFx).clientJs;
-    expect(js).toMatch(/setAttribute\("class",\s*`c-\$\{_scrml_reactive_get\("n"\)\}`\)/);
+    expect(js).toMatch(/setAttribute\("class",\s*`c-\$\{_scrml_cs_reactive_get\("n"\)\}`\)/);
   });
 
   test("emitted client.js is parseable", () => {

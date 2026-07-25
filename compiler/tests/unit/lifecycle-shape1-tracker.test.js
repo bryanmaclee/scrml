@@ -40,6 +40,7 @@ import {
   checkLifecycleFieldAccess,
   checkLifecycleBindingAccess,
 } from "../../src/type-system.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Direct-AST helpers — mirror the existing lifecycle test fixtures

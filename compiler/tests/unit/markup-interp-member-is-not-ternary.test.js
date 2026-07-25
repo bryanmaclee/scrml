@@ -37,6 +37,7 @@ import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
@@ -56,7 +57,7 @@ function compileSource(scrmlSource) {
     let clientJs = null;
     for (const [fp, output] of result.outputs) {
       if (fp.includes(tag)) {
-        clientJs = output.clientJs ?? null;
+        clientJs =foldChunkNamespacing( foldChunkNamespacing(foldChunkNamespacing(output.clientJs) ?? null));
       }
     }
     return { errors: result.errors ?? [], clientJs };
@@ -85,7 +86,7 @@ describe("A1 — `@expr.member is not` ternary in ${} markup interpolation", () 
   </body>
 </program>
 `;
-    const { errors, clientJs } = compileSource(src);
+    const { errors, clientJs: __cjRaw } = compileSource(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errsByCode(errors, "E-SCOPE-001")).toEqual([]);
     // Reactive-binding integrity: the compiled JS must read currentLoad through
     // the reactive-cell accessor on BOTH branches of the ternary.
@@ -132,7 +133,7 @@ describe("A1 — `@expr.member is not` ternary in ${} markup interpolation", () 
   </body>
 </program>
 `;
-    const { errors, clientJs } = compileSource(src);
+    const { errors, clientJs: __cjRaw } = compileSource(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errsByCode(errors, "E-SCOPE-001")).toEqual([]);
     // Every member access in the brief sites must surface as a reactive-cell
     // read on BOTH branches; count is 2 sites × 10 ternaries = 20 reads.
@@ -152,7 +153,7 @@ describe("A1 — `@expr.member is not` ternary in ${} markup interpolation", () 
   </body>
 </program>
 `;
-    const { errors, clientJs } = compileSource(src);
+    const { errors, clientJs: __cjRaw } = compileSource(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errsByCode(errors, "E-SCOPE-001")).toEqual([]);
     expect(clientJs).toContain('_scrml_reactive_get("assignment").driver_location');
     // `is some` lowering produces an `!== null && !== undefined` shape (or the
@@ -170,7 +171,7 @@ describe("A1 — `@expr.member is not` ternary in ${} markup interpolation", () 
   </body>
 </program>
 `;
-    const { errors, clientJs } = compileSource(src);
+    const { errors, clientJs: __cjRaw } = compileSource(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errsByCode(errors, "E-SCOPE-001")).toEqual([]);
     expect(clientJs).toContain('_scrml_reactive_get("user").profile.email');
   });

@@ -3,6 +3,7 @@ import { compileScrml } from "../../src/api.js";
 import { writeFileSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 /**
  * Reactive assignment inside error handler (!{}) arm bodies.
@@ -50,7 +51,7 @@ describe("Reactive assignment in error handler arm bodies", () => {
     expect(result.errors).toHaveLength(0);
 
     // Read the client JS and verify no invalid _scrml_reactive_get on LHS of assignment
-    const clientJs = require("fs").readFileSync(join(outDir, "err-arm.client.js"), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(require("fs").readFileSync(join(outDir, "err-arm.client.js"), "utf8")));
     const invalidAssignments = clientJs.match(/_scrml_reactive_get\([^)]+\)\s*=[^=]/g);
     expect(invalidAssignments).toBeNull();
 
@@ -94,7 +95,7 @@ describe("Reactive assignment in error handler arm bodies", () => {
     const result = compileScrml({ inputFiles: [srcFile], outputDir: outDir });
     expect(result.errors).toHaveLength(0);
 
-    const clientJs = require("fs").readFileSync(require("path").join(outDir, "err-return.client.js"), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(require("fs").readFileSync(require("path").join(outDir, "err-return.client.js"), "utf8")));
 
     // The reactive set must NOT include "return" as part of the value expression
     const badPattern = /_scrml_reactive_set\([^,]*,\s*[^)]*return[^)]*\)/;

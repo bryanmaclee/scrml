@@ -383,7 +383,7 @@ describe("C1 §4 — CODEGEN: opener effect lowers to a boot-only module-init fi
     const block = clientJs.slice(blockStart);
     // The boot write routes through the engine transition machinery (rule= /
     // watchdog / hooks), proving emitLogicBody ran with engineBindings threaded.
-    expect(block).toContain('_scrml_engine_direct_set("phase"');
+    expect(block).toContain('_scrml_cs_engine_direct_set("phase"');
     expect(block).toContain("__scrml_engine_phase_transitions");
   });
 

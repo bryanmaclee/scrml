@@ -31,6 +31,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import * as acorn from "acorn";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 let TMP;
 
@@ -58,7 +59,7 @@ function compileSource(name, source) {
 // `.clientJs`. Match on the source basename (e.g. "repro.scrml").
 function clientJsFor(result, srcName) {
   for (const [filePath, out] of result.outputs) {
-    if (filePath.endsWith(srcName) && typeof out.clientJs === "string") return out.clientJs;
+    if (filePath.endsWith(srcName) && typeof foldChunkNamespacing(out.clientJs) === "string") return foldChunkNamespacing(out.clientJs);
   }
   return undefined;
 }

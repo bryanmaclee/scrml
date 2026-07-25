@@ -4313,7 +4313,7 @@ export function generateServerJs(
       // server-rendered (redacted) rows so view-source of the first paint shows
       // the data, not an empty placeholder. data-scrml-key markers ride each row.
       for (const _r of _ssrRenderers) {
-        lines.push(`  _scrml_html = _scrml_ssr_fill_mount(_scrml_html, ${JSON.stringify(_r.id)}, ${_r.fnName}(_scrml_ssr_state[${JSON.stringify(_r.varName)}]));`);
+        lines.push(`  _scrml_html = _scrml_ssr_fill_mount(_scrml_html, ${JSON.stringify(_r.mountId)}, ${_r.fnName}(_scrml_ssr_state[${JSON.stringify(_r.varName)}]));`);
       }
       // §39.2.3 — fill the `<meta name="csrf-token" content="">` placeholder with
       // THIS viewer's session synchronizer token. The middleware mints + persists

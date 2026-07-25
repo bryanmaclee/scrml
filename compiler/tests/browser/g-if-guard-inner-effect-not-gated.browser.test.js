@@ -30,6 +30,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 // `@cell` starts `not` (null) and is NEVER auto-populated — the test drives the
 // null→obj→null→obj transitions itself, so the DOMContentLoaded mount runs with
@@ -124,9 +125,8 @@ describe("g-if-guard-inner-effect §2 — runtime: no crash on null mount, rende
     console.error = (...a) => { errs.push(a.join(" ")); };
     let threw = null;
     const exec = new Function("window", "document",
-      `${runtimeJs}\n${clientJs}\n` +
-      `globalThis.__set__ = (typeof _scrml_reactive_set!=='undefined')?_scrml_reactive_set:null;\n` +
-      `globalThis.__get__ = (typeof _scrml_reactive_get!=='undefined')?_scrml_reactive_get:null;`);
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__set__ = (typeof _scrml_reactive_set!=='undefined')?_scrml_reactive_set:null;\n` +
+      `globalThis.__get__ = (typeof _scrml_reactive_get!=='undefined')?_scrml_reactive_get:null;`));
     exec(window, document);
     try {
       // The crash window: mount runs with @cell === null. Pre-fix the ungated

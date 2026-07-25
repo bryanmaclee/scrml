@@ -25,6 +25,7 @@ import { BindingRegistry } from "../../src/codegen/binding-registry.ts";
 import { compileScrml } from "../../src/api.js";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { resolve } from "path";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function runUpToSYM(source, filePath = "msg-codegen.scrml") {
   const bs = splitBlocks(filePath, source);
@@ -85,7 +86,7 @@ function compileFullClient(source, baseName = "msg-route") {
     const clientPath = resolve(outDir, `${baseName}.client.js`);
     return {
       errors: (result.errors ?? []).filter((e) => (e.severity ?? "error") === "error"),
-      js: existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "",
+      js: foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""),
     };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });

@@ -32,6 +32,7 @@ import { mkdirSync, writeFileSync, rmSync, existsSync, mkdtempSync, readFileSync
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 let TMP;
 beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "s169-inline-map-")); });
@@ -43,7 +44,7 @@ function compileClientJs(filename, source) {
   writeFileSync(abs, source);
   compileScrml({ inputFiles: [abs], outputDir: join(TMP, "dist"), write: true, log: () => {} });
   const p = join(TMP, "dist", filename.replace(/\.scrml$/, "") + ".client.js");
-  return existsSync(p) ? readFileSync(p, "utf8") : "";
+  return foldChunkNamespacing(existsSync(p) ? readFileSync(p, "utf8") : "");
 }
 
 describe("§1-2 inline map-assign handler lowers `.insert` -> `_scrml_map_insert`", () => {

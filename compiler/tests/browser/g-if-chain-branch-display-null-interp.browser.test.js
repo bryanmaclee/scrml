@@ -38,6 +38,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 // A 3-branch chain (if=/else-if=/else), each branch over a DIFFERENT cell that
 // starts `not` (null). The else also carries a NESTED field chain
@@ -183,8 +184,7 @@ describe("g-if-chain-branch-null §2 — runtime: hidden branches over null cell
     console.error = (...a) => { errs.push(a.join(" ")); };
     let threw = null;
     const exec = new Function("window", "document",
-      `${runtimeJs}\n${clientJs}\n` +
-      `globalThis.__set__ = (typeof _scrml_reactive_set!=='undefined')?_scrml_reactive_set:null;`);
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__set__ = (typeof _scrml_reactive_set!=='undefined')?_scrml_reactive_set:null;`));
     exec(window, document);
     if (preset) preset();
     try {

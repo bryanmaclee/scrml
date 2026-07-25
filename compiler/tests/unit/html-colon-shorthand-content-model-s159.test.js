@@ -47,6 +47,7 @@ import { mkdirSync, writeFileSync, rmSync, existsSync, mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 let TMP;
 beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "s159-colon-shorthand-")); });
@@ -69,7 +70,7 @@ function getOut(result, key) {
   for (const [, v] of outputs) { if (v && typeof v === "object" && v[key]) return v[key]; }
   return "";
 }
-function getClientJs(result) { return getOut(result, "clientJs"); }
+function getClientJs(result) { return foldChunkNamespacing(getOut(result, "clientJs")); }
 function getHtml(result) { return getOut(result, "html"); }
 // Normalize gensym counters so two STRUCTURALLY identical lowerings compare
 // equal modulo placeholder ids.

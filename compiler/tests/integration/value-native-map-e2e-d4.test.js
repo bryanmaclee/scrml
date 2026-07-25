@@ -80,19 +80,19 @@ describe("§59 value-native map — END-TO-END", () => {
   });
 
   test(".insert lowers to _scrml_map_insert via _scrml_reactive_set (reassignment-canonical)", () => {
-    expect(out.clientJs).toMatch(/_scrml_reactive_set\("fareByLane", _scrml_map_insert\(_scrml_reactive_get\("fareByLane"\), "DAL-001", 4500\)\)/);
+    expect(out.clientJs).toMatch(/_scrml_cs_reactive_set\("fareByLane", _scrml_map_insert\(_scrml_cs_reactive_get\("fareByLane"\), "DAL-001", 4500\)\)/);
   });
 
   test("@m[k] bracket-read lowers to _scrml_map_get", () => {
-    expect(out.clientJs).toContain('_scrml_map_get(_scrml_reactive_get("fareByLane"), "DAL-001")');
+    expect(out.clientJs).toContain('_scrml_map_get(_scrml_cs_reactive_get("fareByLane"), "DAL-001")');
   });
 
   test("@m.size lowers to _scrml_map_size", () => {
-    expect(out.clientJs).toContain('_scrml_map_size(_scrml_reactive_get("fareByLane"))');
+    expect(out.clientJs).toContain('_scrml_map_size(_scrml_cs_reactive_get("fareByLane"))');
   });
 
   test("<each in=@m.entries()> lowers to _scrml_map_entries", () => {
-    expect(out.clientJs).toContain('_scrml_map_entries(_scrml_reactive_get("fareByLane"))');
+    expect(out.clientJs).toContain('_scrml_map_entries(_scrml_cs_reactive_get("fareByLane"))');
   });
 
   test("the 'map' runtime chunk SURVIVES tree-shaking (helpers present)", () => {
@@ -207,25 +207,25 @@ describe("§59.8 value-native map — @ordered builds ORDERED (S169)", () => {
   });
 
   test("@ordered decl-init literal lowers ORDERED (reactive_set + init_set)", () => {
-    expect(out.clientJs).toContain('_scrml_reactive_set("ordered", _scrml_map_from_entries([["b", 2], ["a", 1]], true))');
-    expect(out.clientJs).toContain('_scrml_init_set("ordered", () => _scrml_map_from_entries([["b", 2], ["a", 1]], true))');
+    expect(out.clientJs).toContain('_scrml_cs_reactive_set("ordered", _scrml_map_from_entries([["b", 2], ["a", 1]], true))');
+    expect(out.clientJs).toContain('_scrml_cs_init_set("ordered", () => _scrml_map_from_entries([["b", 2], ["a", 1]], true))');
   });
 
   test("@ordered empty [:] init lowers ORDERED", () => {
-    expect(out.clientJs).toContain('_scrml_reactive_set("emptyOrdered", _scrml_map_from_entries([], true))');
-    expect(out.clientJs).toContain('_scrml_init_set("emptyOrdered", () => _scrml_map_from_entries([], true))');
+    expect(out.clientJs).toContain('_scrml_cs_reactive_set("emptyOrdered", _scrml_map_from_entries([], true))');
+    expect(out.clientJs).toContain('_scrml_cs_init_set("emptyOrdered", () => _scrml_map_from_entries([], true))');
   });
 
   test("a reassignment `@ordered = [...]` inside a function body lowers ORDERED", () => {
-    expect(out.clientJs).toContain('_scrml_reactive_set("ordered", _scrml_map_from_entries([["c", 3], ["d", 4]], true))');
+    expect(out.clientJs).toContain('_scrml_cs_reactive_set("ordered", _scrml_map_from_entries([["c", 3], ["d", 4]], true))');
   });
 
   test("a NON-@ordered map cell stays UNORDERED", () => {
-    expect(out.clientJs).toContain('_scrml_reactive_set("plain", _scrml_map_from_entries([["b", 2], ["a", 1]], false))');
+    expect(out.clientJs).toContain('_scrml_cs_reactive_set("plain", _scrml_map_from_entries([["b", 2], ["a", 1]], false))');
   });
 
   test("a NESTED map-VALUE literal inside an @ordered cell stays UNORDERED (outer ordered)", () => {
     // Outer ordered (`, true)`), inner value-map unordered (`, false)`).
-    expect(out.clientJs).toContain('_scrml_reactive_set("nested", _scrml_map_from_entries([["outer", _scrml_map_from_entries([["b", 2], ["a", 1]], false)]], true))');
+    expect(out.clientJs).toContain('_scrml_cs_reactive_set("nested", _scrml_map_from_entries([["outer", _scrml_map_from_entries([["b", 2], ["a", 1]], false)]], true))');
   });
 });

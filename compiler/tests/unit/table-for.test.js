@@ -37,6 +37,7 @@ import {
   expandTableForElement,
   _resetSynthIdCounter,
 } from "../../src/codegen/emit-table-for.ts";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 let TMP;
 
@@ -82,7 +83,7 @@ function getClientJs(result) {
   const outputs = result.outputs;
   if (!outputs) return "";
   for (const [, v] of outputs) {
-    if (typeof v === "object" && v && v.clientJs) return v.clientJs;
+    if (typeof v === "object" && v && foldChunkNamespacing(v.clientJs)) return foldChunkNamespacing(v.clientJs);
   }
   return "";
 }

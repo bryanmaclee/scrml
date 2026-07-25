@@ -67,12 +67,23 @@ export const FNV_PRIME = 16777619;
 /**
  * FNV-1a 32-bit hash, output as a zero-padded 8-char base36 string.
  *
- * Output entropy: ~41 bits (base36^8). Per SPEC §47.1.5 this is the
- * documented length/collision trade-off; E-CG-010 enforces collision
- * detection for the type-encoding call site (per-binding names), and
- * the content-addressing call site (per-chunk hashes) does NOT enforce
- * E-CG-010 — chunk collisions surface as routing failures rather than
- * compile-time errors (informational policy).
+ * **Output entropy: 32 bits, not the base36^8 ≈ 41 the width suggests.** The
+ * hash IS a u32, and the base36 rendering is zero-padded to 8 chars purely for
+ * a fixed width — it adds no entropy. Because 36^7 (78,364,164,096) already
+ * exceeds 2^32 (4,294,967,296), a u32 never needs the 8th digit: **every token
+ * this function produces begins with `0`.** Consumers matching tokens by shape
+ * should anchor on `0[0-9a-z]{7}`, not `[0-9a-z]{8}` — the looser pattern eats
+ * the trailing 8 characters of unrelated identifiers.
+ *
+ * Birthday-collision probability at 32 bits: ~1.2e-4 over a thousand distinct
+ * inputs, ~1.2e-2 over ten thousand. Per SPEC §47.1.5 this is the documented
+ * length/collision trade-off; E-CG-010 enforces collision detection for the
+ * type-encoding call site (per-binding names), and the content-addressing call
+ * site (per-chunk hashes) does NOT enforce E-CG-010 — chunk collisions surface
+ * as routing failures rather than compile-time errors (informational policy).
+ * The chunk-NAMESPACE call site (`chunk-namespace.ts`) does enforce
+ * distinctness, because there a collision is silent and IS the defect the
+ * namespace exists to prevent.
  *
  * The walk treats `input` as a UTF-16 charcode sequence (matching the
  * existing per-binding encoding surface that predates A-4.6). For

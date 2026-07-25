@@ -22,6 +22,7 @@ import { describe, test, expect } from "bun:test";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../../src/api.js";
+import { foldChunkNamespacing } from "../../helpers/chunk-scope.js";
 
 function compileAndInspect(source, label = "s26-bugB") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -38,7 +39,7 @@ function compileAndInspect(source, label = "s26-bugB") {
       outputDir: outDir,
     });
     const clientJsPath = resolve(outDir, `${name}.client.js`);
-    const clientJs = existsSync(clientJsPath) ? readFileSync(clientJsPath, "utf8") : "";
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientJsPath) ? readFileSync(clientJsPath, "utf8") : ""));
     return { errors: result.errors ?? [], clientJs };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
@@ -54,7 +55,7 @@ describe("S26 bug B — typed const @name decls preserve their initializer", () 
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compileAndInspect(src);
+    const { errors, clientJs: __cjRaw } = compileAndInspect(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     expect(clientJs).toContain("const x = true;");
     // Regression guard for the pre-fix empty-init shape.
@@ -71,7 +72,7 @@ describe("S26 bug B — typed const @name decls preserve their initializer", () 
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compileAndInspect(src);
+    const { errors, clientJs: __cjRaw } = compileAndInspect(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     expect(clientJs).toContain("const y = 5;");
   });
@@ -84,7 +85,7 @@ describe("S26 bug B — typed const @name decls preserve their initializer", () 
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compileAndInspect(src);
+    const { errors, clientJs: __cjRaw } = compileAndInspect(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     expect(clientJs).toContain('const z = "hi";');
   });
@@ -97,7 +98,7 @@ describe("S26 bug B — typed const @name decls preserve their initializer", () 
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compileAndInspect(src);
+    const { errors, clientJs: __cjRaw } = compileAndInspect(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     expect(clientJs).toContain("const arr = [1, 2, 3];");
   });
@@ -110,7 +111,7 @@ describe("S26 bug B — typed const @name decls preserve their initializer", () 
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compileAndInspect(src);
+    const { errors, clientJs: __cjRaw } = compileAndInspect(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     expect(clientJs).toContain("const c = 1 + 2;");
   });
@@ -123,7 +124,7 @@ describe("S26 bug B — typed const @name decls preserve their initializer", () 
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compileAndInspect(src);
+    const { errors, clientJs: __cjRaw } = compileAndInspect(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     expect(clientJs).toContain("const w = 42;");
   });
@@ -141,7 +142,7 @@ describe("S26 bug B — typed const @name decls preserve their initializer", () 
 <p>\${@double}</>
 </program>
 `;
-    const { errors, clientJs } = compileAndInspect(src);
+    const { errors, clientJs: __cjRaw } = compileAndInspect(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     expect(clientJs).toContain("_scrml_derived_declare");
     expect(clientJs).toContain('"double"');
@@ -164,7 +165,7 @@ describe("S26 bug B — typed const @name decls preserve their initializer", () 
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compileAndInspect(src);
+    const { errors, clientJs: __cjRaw } = compileAndInspect(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     // Provide no-op stubs for the runtime hooks referenced by the output.
     const stubs = `

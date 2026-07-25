@@ -19,6 +19,7 @@ import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-14-mario-runtime-sim");
 
@@ -71,10 +72,9 @@ describe("14-mario runtime simulation (Bug 1 e2e gap)", () => {
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${clientJs}\n` +
-      `globalThis.__scrml_state__ = _scrml_state;\n` +
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_state__ = _scrml_state;\n` +
       `globalThis.__scrml_derived_get__ = _scrml_derived_get;\n` +
-      `globalThis.__scrml_engine_table__ = __scrml_engine_marioState_transitions;\n`
+      `globalThis.__scrml_engine_table__ = __scrml_engine_marioState_transitions;\n`)
     );
     exec(window, document);
 

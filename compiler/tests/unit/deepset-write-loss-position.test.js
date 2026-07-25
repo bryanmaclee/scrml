@@ -27,6 +27,7 @@ import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
@@ -46,7 +47,7 @@ function compile(scrmlSource) {
     });
     let clientJs = "";
     for (const [fp, output] of result.outputs) {
-      if (fp.includes(tag)) clientJs = output.clientJs ?? "";
+      if (fp.includes(tag)) clientJs = foldChunkNamespacing(output.clientJs) ?? "";
     }
     return { errors: result.errors ?? [], warnings: result.warnings ?? [], clientJs };
   } finally {
@@ -105,7 +106,7 @@ describe("high-deepset-write-loss — deep-set survives at every body position (
     test(`${name}: every deep-set survives codegen`, () => {
       const r = compile(program(lines));
       expect(r.errors).toHaveLength(0);
-      const body = multiBody(r.clientJs);
+      const body = multiBody(foldChunkNamespacing(r.clientJs));
       expect(body).not.toBeNull();
 
       // Count surviving deep-sets.
@@ -136,7 +137,7 @@ describe("high-deepset-write-loss — deep-set survives at every body position (
   test("canonical repro: @c=1; @a.ref=p; @c=2; @a.ref=q — all four statements emit in order", () => {
     const r = compile(program(["@c = 1", '@a.ref = "p"', "@c = 2", '@a.ref = "q"']));
     expect(r.errors).toHaveLength(0);
-    const body = multiBody(r.clientJs);
+    const body = multiBody(foldChunkNamespacing(r.clientJs));
     expect(body).not.toBeNull();
     // Pre-fix body was ONLY the two scalar sets; both deep-sets vanished.
     expect(body).toContain('_scrml_reactive_set("c", 1)');
@@ -162,7 +163,7 @@ describe("high-deepset-write-loss — deep-set survives at every body position (
     ].join("\n") + "\n";
     const r = compile(src);
     expect(r.errors).toHaveLength(0);
-    const body = multiBody(r.clientJs);
+    const body = multiBody(foldChunkNamespacing(r.clientJs));
     expect(body).not.toBeNull();
     // It is a `@y = ...` set whose RHS reads @x.prop — NOT a deep-set on @x.
     expect(body).toContain('_scrml_reactive_set("y"');
@@ -188,7 +189,7 @@ describe("high-deepset-write-loss — array-mutation sibling survives at every p
     test(`${name}: every @arr.push survives codegen`, () => {
       const r = compile(program(lines));
       expect(r.errors).toHaveLength(0);
-      const body = pushBody(r.clientJs);
+      const body = pushBody(foldChunkNamespacing(r.clientJs));
       expect(body).not.toBeNull();
       // Array mutations lower to `_scrml_reactive_get("arr").push(N); ...`. Assert
       // the surviving push count matches AND each pushed value appears in source

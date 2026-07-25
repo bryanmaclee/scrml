@@ -150,12 +150,34 @@ const CONFORMANCE_SHIM = `
 ;(function () {
   if (typeof globalThis === "undefined") return;
   function _conf_json(v) { return (v === undefined || v === null) ? null : v; }
+  // chunk-namespacing — the store is keyed per-chunk ("<token>$rows"); this
+  // snapshot's contract is AUTHOR-visible source names, so strip the token back
+  // off. The token->author-name inverse is inlined here: BUG-6 removed the core
+  // \`_scrml_cell_name\` to keep the always-loaded runtime under its gzip budget,
+  // and this shim was its only consumer. Tokens are exactly 8 lowercase base36
+  // chars followed by "$".
+  function _conf_cell_name(key) {
+    var raw = String(key == null ? "" : key);
+    var sep = raw.indexOf("$");
+    if (sep !== 8) return raw;
+    return /^[0-9a-z]{8}$/.test(raw.slice(0, 8)) ? raw.slice(9) : raw;
+  }
+  //
+  // A stripped name that COLLIDES (two chunks both declaring \`rows\`) keeps the
+  // namespaced key as well, so the second value is surfaced rather than silently
+  // overwritten — a snapshot that quietly drops a cell is exactly the kind of
+  // hollow evidence this corpus exists to prevent.
+  function _conf_put(out, key, val) {
+    var name = _conf_cell_name(key);
+    if (name !== key && Object.prototype.hasOwnProperty.call(out, name)) { out[key] = val; return; }
+    out[name] = val;
+  }
   globalThis.__scrml_conformance = {
     snapshot: function () {
       if (typeof flush === "function") flush();
       var cells = {}, derived = {};
-      for (var c in _scrml_state) cells[c] = _conf_json(_scrml_state[c]);
-      for (var d in _scrml_derived_fns) derived[d] = _conf_json(_scrml_derived_get(d));
+      for (var c in _scrml_state) _conf_put(cells, c, _conf_json(_scrml_state[c]));
+      for (var d in _scrml_derived_fns) _conf_put(derived, d, _conf_json(_scrml_derived_get(d)));
       return { cells: cells, derived: derived };
     },
     settled: function () {

@@ -36,6 +36,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parse as acornParse } from "acorn";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // AST-level helpers — assert collectExpr no longer truncates the raw init
@@ -173,7 +174,7 @@ describe("full compile — division in a ternary arm emits valid division JS", (
     const { res, fp } = compile(`${HEAD}    const <ratio> = @e > 0 ? @h / @e : @h\n${FOOT}`);
     expect(errCodes(res)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect((res.errors || []).length).toBe(0);
-    const clientJs = res.outputs.get(fp).clientJs ?? "";
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(res.outputs.get(fp).clientJs ?? ""));
     expect(parseModule(clientJs)).toBeNull();
     expect(clientJs).toContain(`_scrml_reactive_get("h") / _scrml_reactive_get("e")`);
   });
@@ -182,7 +183,7 @@ describe("full compile — division in a ternary arm emits valid division JS", (
     const { res, fp } = compile(`${HEAD}    const <ratio> = @e == 0 ? @h : @h / @e\n${FOOT}`);
     expect(errCodes(res)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect((res.errors || []).length).toBe(0);
-    const clientJs = res.outputs.get(fp).clientJs ?? "";
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(res.outputs.get(fp).clientJs ?? ""));
     expect(parseModule(clientJs)).toBeNull();
     expect(clientJs).toContain(`_scrml_reactive_get("h") / _scrml_reactive_get("e")`);
   });
@@ -198,7 +199,7 @@ describe("full compile — division in a ternary arm emits valid division JS", (
     const { res, fp } = compile(`<program>\n  \${\n    @h = 10\n    @e = 2\n  }\n  <p>\${@e > 0 ? @h / @e : @h}</p>\n</program>`);
     expect(errCodes(res)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect((res.errors || []).length).toBe(0);
-    const clientJs = res.outputs.get(fp).clientJs ?? "";
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(res.outputs.get(fp).clientJs ?? ""));
     expect(parseModule(clientJs)).toBeNull();
     expect(clientJs).toContain(`_scrml_reactive_get("h") / _scrml_reactive_get("e")`);
   });
@@ -212,7 +213,7 @@ describe("full compile — clean cases stay clean", () => {
   test("standalone `@h / @e` (no ternary) — valid client JS, division present", () => {
     const { res, fp } = compile(`${HEAD}    const ratio = @h / @e\n${FOOT}`);
     expect((res.errors || []).length).toBe(0);
-    const clientJs = res.outputs.get(fp).clientJs ?? "";
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(res.outputs.get(fp).clientJs ?? ""));
     expect(parseModule(clientJs)).toBeNull();
     expect(clientJs).toContain(`_scrml_reactive_get("h") / _scrml_reactive_get("e")`);
   });
@@ -233,7 +234,7 @@ describe("full compile — clean cases stay clean", () => {
     const { res, fp } = compile(`<program>\n  \${\n    @names = ["x"]\n    const hits = @names.filter(n => /not found/i.test(n))\n  }\n  <p>\${hits}</p>\n</program>`);
     expect(errCodes(res)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect((res.errors || []).length).toBe(0);
-    const clientJs = res.outputs.get(fp).clientJs ?? "";
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(res.outputs.get(fp).clientJs ?? ""));
     expect(parseModule(clientJs)).toBeNull();
     // The regex body must appear verbatim — the fix must not regress the
     // `/`-vs-regex disambiguation.

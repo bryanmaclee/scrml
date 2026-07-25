@@ -37,6 +37,7 @@ import { compileScrml } from "../../src/api.js";
 import { writeFileSync, mkdirSync, rmSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers (mirrors emit-logic-s19-error-handling.test.js shape)
@@ -369,7 +370,7 @@ describe("R24-BUG-2 §10: end-to-end — R24 reproducer compiles to valid JS at 
     const result = compileScrml({ inputFiles: [srcFile], outputDir: outDir });
     expect(result.errors).toHaveLength(0);
 
-    const clientJs = readFileSync(join(outDir, "r24-bug-2.client.js"), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "r24-bug-2.client.js"), "utf8")));
     // The exact bug shape from R24 — must not appear
     expect(clientJs).not.toMatch(/_scrml_\w+\s*=\s*return\s*;/);
     // All three variant arms must still fire bare `return;`
@@ -407,7 +408,7 @@ describe("R24-BUG-2 §10: end-to-end — R24 reproducer compiles to valid JS at 
     const result = compileScrml({ inputFiles: [srcFile], outputDir: outDir });
     expect(result.errors).toHaveLength(0);
 
-    const clientJs = readFileSync(join(outDir, "r24-bug-2-parse.client.js"), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "r24-bug-2-parse.client.js"), "utf8")));
     // Extract just the `_scrml_attempt_N(...)` function — slicing the file
     // avoids fighting unrelated R24 bugs elsewhere in the output. We assert
     // the slice is parseable by `new Function`. Use depth-tracked brace
@@ -462,7 +463,7 @@ describe("R24-BUG-2 §11: end-to-end — side-effect + terminal return arm", () 
     const result = compileScrml({ inputFiles: [srcFile], outputDir: outDir });
     expect(result.errors).toHaveLength(0);
 
-    const clientJs = readFileSync(join(outDir, "r24-bug-2-side.client.js"), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "r24-bug-2-side.client.js"), "utf8")));
     // No invalid wrap
     expect(clientJs).not.toMatch(/_scrml_\w+\s*=\s*[^;]*return\s*;/);
     // Reactive sets for .phase fire

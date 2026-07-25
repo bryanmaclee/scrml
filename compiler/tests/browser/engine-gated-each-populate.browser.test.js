@@ -47,6 +47,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 // repro-1: pre-populated @todos; button transitions Loading -> Browsing. Exercises
 // Mode 2 (entry render) and Mode 3 (chunk shipping). The each is inside the
@@ -140,7 +141,7 @@ describe("engine-gated-each §1 — emit shape (dep-first read, remount call, he
 
   test("the each renderer registers itself in _scrml_each_renderers", () => {
     const { clientJs } = compileToOutputs(BUTTON_SRC, "button");
-    expect(clientJs).toMatch(/_scrml_each_renderers\["each_\d+"\] = _scrml_each_render_\d+;/);
+    expect(clientJs).toMatch(/_scrml_each_renderers\["each_[0-9a-z]{8}_\d+"\] = _scrml_each_render_[0-9a-z]{8}_\d+;/);
   });
 
   test("the runtime ships reconcile_list + remount_each + registry + effect_static (Mode 3 fix)", () => {
@@ -173,11 +174,10 @@ describe("engine-gated-each §2 — list populates on arm entry (real module-ini
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${clientJs}\n` +
-        `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
         `globalThis.__scrml_get__ = _scrml_reactive_get;\n` +
         `globalThis.__scrml_engine_direct_set__ = _scrml_engine_direct_set;\n` +
-        `globalThis.__scrml_phase_transitions__ = __scrml_engine_phase_transitions;\n`,
+        `globalThis.__scrml_phase_transitions__ = __scrml_engine_phase_transitions;\n`),
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));

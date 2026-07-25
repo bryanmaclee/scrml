@@ -60,6 +60,7 @@
  */
 
 import type { CompileContext } from "./context.ts";
+import { nsId } from "./chunk-namespace.ts";
 
 interface MatchBlockAstNode {
   id: number;
@@ -1073,7 +1074,9 @@ export function emitMatchMountHtml(
   const onResolved = resolveOnExpr(matchBlock, ctx.fileAST);
   if (!onResolved) return null;
 
-  const idPrefix = `match_${matchBlock.id}`;
+  // Chunk-namespaced: the mount attr and every derived render/wire/dispatch
+  // fn name share this prefix, so ONE substitution namespaces the whole match.
+  const idPrefix = `match_${nsId(matchBlock.id)}`;
   return `<div data-scrml-match-mount="${idPrefix}"></div>`;
 }
 
@@ -1128,7 +1131,7 @@ export function emitMatchBodyRenderForFile(
     const onResolved = resolveOnExpr(matchBlock, fileAST);
     if (!onResolved) continue;
 
-    const idPrefix = `match_${matchBlock.id}`;
+    const idPrefix = `match_${nsId(matchBlock.id)}`;
     // S109 Phase 5 — when a wildcard `<_>` arm is present (tag `_`), pass
     // `defaultArmTag: "_"` so the helper renders it as the dispatcher's
     // catch-all `else` branch. When absent, `defaultArmTag` stays undefined

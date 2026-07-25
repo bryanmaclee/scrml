@@ -34,6 +34,7 @@ import { describe, test, expect } from "bun:test";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { normalizeChunkToken } from "../helpers/chunk-scope.js";
 
 // compileWith — full-compile `source` under `parser` (null = default live
 // BS+TAB; "scrml-native" = native pipeline). Returns errors + client.js.
@@ -114,8 +115,8 @@ describe("native BlockStub verbatim-body recovery (S170 Wave 2)", () => {
     expect(nat.errors).toEqual([]);
     // The .Mushroom arm has two writes: coins AND score. A dropped body would
     // emit `{}` and these would be ABSENT. Assert BOTH statements present.
-    expect(nat.clientJs).toMatch(/_scrml_reactive_set\("coins"/);
-    expect(nat.clientJs).toMatch(/_scrml_reactive_set\("score"/);
+    expect(nat.clientJs).toMatch(/_scrml_cs_reactive_set\("coins"/);
+    expect(nat.clientJs).toMatch(/_scrml_cs_reactive_set\("score"/);
     // The score write proves the SECOND statement survived (a single-statement
     // recovery would emit coins but not score). Both the +100 and +300 literals
     // (the two distinct arms' score writes) must appear.
@@ -166,7 +167,7 @@ describe("native BlockStub verbatim-body recovery (S170 Wave 2)", () => {
         .replace(/;\s*}/g, " }")
         .replace(/}\)\(\);/g, "})()")
         .trim();
-    expect(norm(nat.clientJs)).toBe(norm(def.clientJs));
+    expect(norm(normalizeChunkToken(nat.clientJs))).toBe(norm(normalizeChunkToken(def.clientJs)));
   });
 
   test("lambda-callback emit is structurally-identical native == default (modulo escape-hatch param spacing)", () => {
@@ -189,6 +190,6 @@ describe("native BlockStub verbatim-body recovery (S170 Wave 2)", () => {
         .replace(/\s+\)/g, ")")
         .replace(/\s+/g, " ")
         .trim();
-    expect(norm(nat.clientJs)).toBe(norm(def.clientJs));
+    expect(norm(normalizeChunkToken(nat.clientJs))).toBe(norm(normalizeChunkToken(def.clientJs)));
   });
 });

@@ -61,7 +61,7 @@ describe("§1 — reactive method call on array cell", () => {
     expect(client).not.toBeNull();
     // Pre-fix symptom: `function(event){ @items.push("c"); }` (invalid JS)
     expect(client).not.toMatch(/function\(event\)\s*\{\s*@/);
-    expect(client).toMatch(/_scrml_reactive_get\("items"\)\.push\("c"\)/);
+    expect(client).toMatch(/_scrml_cs_reactive_get\("items"\)\.push\("c"\)/);
     expect(() => new Function(client)).not.toThrow();
   });
 
@@ -73,7 +73,7 @@ describe("§1 — reactive method call on array cell", () => {
     const client = compileSrcToTmp(src);
     expect(client).not.toBeNull();
     expect(client).not.toMatch(/function\(event\)\s*\{\s*@/);
-    expect(client).toMatch(/_scrml_reactive_get\("items"\)\.sort\(\)/);
+    expect(client).toMatch(/_scrml_cs_reactive_get\("items"\)\.sort\(\)/);
     expect(() => new Function(client)).not.toThrow();
   });
 });
@@ -93,7 +93,7 @@ describe("§2 — engine .advance(.X) dispatches via C13", () => {
     expect(client).not.toBeNull();
     // Should use the engine-advance runtime helper, not `@mode.advance(...)`
     expect(client).not.toMatch(/@mode\.advance/);
-    expect(client).toMatch(/_scrml_engine_advance\("mode",\s*"B"/);
+    expect(client).toMatch(/_scrml_cs_engine_advance\("mode",\s*"B"/);
     expect(() => new Function(client)).not.toThrow();
   });
 
@@ -120,7 +120,7 @@ type Inner:enum = { Slow, Fast }
     expect(client).not.toMatch(/"Playing"\.history/);
     // Post-fix: engine-advance call with `.history` peeled + isHistoryRestore=true
     // Signature: _scrml_engine_advance(varName, variant, transitions, ..., history, isHistoryRestore)
-    expect(client).toMatch(/_scrml_engine_advance\("outer",\s*"Playing",[^)]*,\s*true\)/);
+    expect(client).toMatch(/_scrml_cs_engine_advance\("outer",\s*"Playing",[^)]*,\s*true\)/);
     expect(() => new Function(client)).not.toThrow();
   });
 });

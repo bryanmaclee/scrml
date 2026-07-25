@@ -44,6 +44,7 @@ import {
   mkdirSync,
 } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 // Single-level sub-path: `<cell> = { state: P.Idle, n: 0 }` + `on=@cell.state`.
 const SRC = `<program>
@@ -109,7 +110,7 @@ describe("GITI-031 §1 — match on=@cell.state emit reads the sub-path, not the
     const { clientJs } = compileToOutputs(SRC);
     // Post-fix: `_scrml_reactive_subscribe("cell", function(_cv) { <dispatch>((_cv).state); })`
     expect(clientJs).toMatch(
-      /_scrml_reactive_subscribe\("cell",\s*function\(_cv\)\s*\{\s*__scrml_match_match_\d+_dispatch\(\(_cv\)\.state\);\s*\}\)/,
+      /_scrml_reactive_subscribe\("cell",\s*function\(_cv\)\s*\{\s*__scrml_match_match_[0-9a-z]{8}_\d+_dispatch\(\(_cv\)\.state\);\s*\}\)/,
     );
   });
 
@@ -117,7 +118,7 @@ describe("GITI-031 §1 — match on=@cell.state emit reads the sub-path, not the
     const { clientJs } = compileToOutputs(SRC);
     // Post-fix: `<dispatch>(_scrml_reactive_get("cell").state)`
     expect(clientJs).toMatch(
-      /__scrml_match_match_\d+_dispatch\(_scrml_reactive_get\("cell"\)\.state\)/,
+      /__scrml_match_match_[0-9a-z]{8}_\d+_dispatch\(_scrml_reactive_get\("cell"\)\.state\)/,
     );
   });
 
@@ -128,10 +129,10 @@ describe("GITI-031 §1 — match on=@cell.state emit reads the sub-path, not the
     // the whole cell), and the init-fire read `_scrml_reactive_get("cell")`
     // with no sub-path.
     expect(clientJs).not.toMatch(
-      /_scrml_reactive_subscribe\("cell",\s*__scrml_match_match_\d+_dispatch\)/,
+      /_scrml_reactive_subscribe\("cell",\s*__scrml_match_match_[0-9a-z]{8}_\d+_dispatch\)/,
     );
     expect(clientJs).not.toMatch(
-      /__scrml_match_match_\d+_dispatch\(_scrml_reactive_get\("cell"\)\)/,
+      /__scrml_match_match_[0-9a-z]{8}_\d+_dispatch\(_scrml_reactive_get\("cell"\)\)/,
     );
   });
 });
@@ -156,9 +157,8 @@ describe("GITI-031 §2 — match on=@cell.state renders the correct arm at runti
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${clientJs}\n` +
-        `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
-        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`,
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
+        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`),
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));
@@ -213,9 +213,8 @@ describe("GITI-031 §3 — match on=@cell.inner.phase (deep sub-path)", () => {
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${clientJs}\n` +
-        `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
-        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`,
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
+        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`),
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));
@@ -228,10 +227,10 @@ describe("GITI-031 §3 — match on=@cell.inner.phase (deep sub-path)", () => {
   test("emit reads the full .inner.phase sub-path in both trigger paths", () => {
     const { clientJs } = compileToOutputs(SRC_DEEP);
     expect(clientJs).toMatch(
-      /_scrml_reactive_subscribe\("cell",\s*function\(_cv\)\s*\{\s*__scrml_match_match_\d+_dispatch\(\(_cv\)\.inner\.phase\);\s*\}\)/,
+      /_scrml_reactive_subscribe\("cell",\s*function\(_cv\)\s*\{\s*__scrml_match_match_[0-9a-z]{8}_\d+_dispatch\(\(_cv\)\.inner\.phase\);\s*\}\)/,
     );
     expect(clientJs).toMatch(
-      /__scrml_match_match_\d+_dispatch\(_scrml_reactive_get\("cell"\)\.inner\.phase\)/,
+      /__scrml_match_match_[0-9a-z]{8}_\d+_dispatch\(_scrml_reactive_get\("cell"\)\.inner\.phase\)/,
     );
   });
 

@@ -86,13 +86,13 @@ describe("native reactive-write deep-set + array-mutation node synthesis (FIX A)
 
     // The COW deep-set form — NOT the in-place `_scrml_reactive_get("a").ref = `.
     expect(body).toContain(
-      '_scrml_reactive_set("a", _scrml_deep_set(_scrml_reactive_get("a"), ["ref"], "p"))',
+      '_scrml_cs_reactive_set("a", _scrml_deep_set(_scrml_cs_reactive_get("a"), ["ref"], "p"))',
     );
     expect(body).not.toContain('_scrml_reactive_get("a").ref =');
 
     // The triggered array-mutation form — push + a follow-up reactive_set.
-    expect(body).toContain('_scrml_reactive_get("arr").push(5)');
-    expect(body).toContain('_scrml_reactive_set("arr", _scrml_reactive_get("arr"))');
+    expect(body).toContain('_scrml_cs_reactive_get("arr").push(5)');
+    expect(body).toContain('_scrml_cs_reactive_set("arr", _scrml_cs_reactive_get("arr"))');
   });
 
   // Byte-parity against the already-green LIVE emit across the reactive-write

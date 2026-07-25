@@ -15,6 +15,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 // Register happy-dom as global DOM
 if (!globalThis.document) GlobalRegistrator.register();
@@ -46,11 +47,9 @@ function loadSample(baseName) {
   document.body.innerHTML = cleanHtml;
 
   // Execute runtime + client JS in global scope (IIFE for shared scope)
-  const code = `(function() {\n${SCRML_RUNTIME}\n${clientJs}\n` +
-    `window._scrml_reactive_get = _scrml_reactive_get;\n` +
+  const code = `(function() {\n${SCRML_RUNTIME}\n` + captureInsideChunkScope(clientJs, `window._scrml_reactive_get = _scrml_reactive_get;\n` +
     `window._scrml_reactive_set = _scrml_reactive_set;\n` +
-    `window._scrml_reactive_subscribe = _scrml_reactive_subscribe;\n` +
-    `})();`;
+    `window._scrml_reactive_subscribe = _scrml_reactive_subscribe;\n`) + `\n})();`;
   eval(code);
 
   // Fire DOMContentLoaded

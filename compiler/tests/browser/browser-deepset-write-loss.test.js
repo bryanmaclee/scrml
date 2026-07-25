@@ -31,6 +31,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { execFileSync } from "child_process";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 const tmpRoot = resolve("/tmp", "scrml-deepset-write-loss");
 
@@ -61,8 +62,7 @@ function mount(compiled) {
   const exec = new Function(
     "window",
     "document",
-    `${runtimeJs}\n${clientJs}\n` +
-      `globalThis.__scrml_get__ = _scrml_reactive_get;\n`,
+    `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_get__ = _scrml_reactive_get;\n`),
   );
   let threw = null;
   try {

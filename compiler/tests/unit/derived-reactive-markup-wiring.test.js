@@ -36,6 +36,7 @@ import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
@@ -55,7 +56,7 @@ function compileSource(scrmlSource, testName) {
     let clientJs = null;
     for (const [fp, output] of result.outputs) {
       if (fp.includes(tag)) {
-        clientJs = output.clientJs ?? null;
+        clientJs =foldChunkNamespacing( foldChunkNamespacing(foldChunkNamespacing(output.clientJs) ?? null));
       }
     }
     return { errors: result.errors ?? [], clientJs };
@@ -73,7 +74,7 @@ describe("Bug 4 — derived-reactive markup display wiring", () => {
 }
 <p>\${@isInsert}</p>
 </program>`;
-    const { clientJs } = compileSource(src, "named-derived-has-wiring");
+    const { clientJs: __cjRaw } = compileSource(src, "named-derived-has-wiring"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toBeTruthy();
     // Count wiring blocks under "--- Reactive display wiring ---"
     const wiringSection = clientJs.split("--- Reactive display wiring ---")[1] ?? "";
@@ -91,7 +92,7 @@ describe("Bug 4 — derived-reactive markup display wiring", () => {
 }
 <p>\${@isInsert}</p>
 </program>`;
-    const { clientJs } = compileSource(src, "routes-through-derived-get");
+    const { clientJs: __cjRaw } = compileSource(src, "routes-through-derived-get"); const clientJs = foldChunkNamespacing(__cjRaw);
     const wiringSection = clientJs.split("--- Reactive display wiring ---")[1] ?? "";
     // Every reference to `@isInsert` inside the wiring must use derived_get.
     expect(wiringSection).toContain('_scrml_derived_get("isInsert")');
@@ -107,7 +108,7 @@ describe("Bug 4 — derived-reactive markup display wiring", () => {
 }
 <p>\${@isInsert}</p>
 </program>`;
-    const { clientJs } = compileSource(src, "effect-wrap");
+    const { clientJs: __cjRaw } = compileSource(src, "effect-wrap"); const clientJs = foldChunkNamespacing(__cjRaw);
     const wiringSection = clientJs.split("--- Reactive display wiring ---")[1] ?? "";
     expect(wiringSection).toContain("_scrml_effect(function()");
     // markup-value-in-expression-2026-06-17: the display routes through the
@@ -123,7 +124,7 @@ describe("Bug 4 — derived-reactive markup display wiring", () => {
 }
 <p>\${@greeting}</p>
 </program>`;
-    const { clientJs } = compileSource(src, "string-derived");
+    const { clientJs: __cjRaw } = compileSource(src, "string-derived"); const clientJs = foldChunkNamespacing(__cjRaw);
     const wiringSection = clientJs.split("--- Reactive display wiring ---")[1] ?? "";
     expect(wiringSection).toContain('_scrml_derived_get("greeting")');
   });
@@ -135,7 +136,7 @@ describe("Bug 4 — derived-reactive markup display wiring", () => {
 }
 <p>\${@count}</p>
 </program>`;
-    const { clientJs } = compileSource(src, "plain-reactive-unchanged");
+    const { clientJs: __cjRaw } = compileSource(src, "plain-reactive-unchanged"); const clientJs = foldChunkNamespacing(__cjRaw);
     const wiringSection = clientJs.split("--- Reactive display wiring ---")[1] ?? "";
     expect(wiringSection).toContain('_scrml_reactive_get("count")');
     expect(wiringSection).not.toContain('_scrml_derived_get("count")');
@@ -150,7 +151,7 @@ describe("Bug 4 — derived-reactive markup display wiring", () => {
 <p>direct: \${@mode == "insert"}</p>
 <p>derived: \${@isInsert}</p>
 </program>`;
-    const { clientJs } = compileSource(src, "mixed-direct-derived");
+    const { clientJs: __cjRaw } = compileSource(src, "mixed-direct-derived"); const clientJs = foldChunkNamespacing(__cjRaw);
     const wiringSection = clientJs.split("--- Reactive display wiring ---")[1] ?? "";
     // Both placeholders should produce wiring blocks.
     // navigate-wave1b: reactive display wiring is `(root || document)`-scoped
@@ -171,7 +172,7 @@ describe("Bug 4 — derived-reactive markup display wiring", () => {
 }
 <p>\${@isInsert ? "yes" : "no"}</p>
 </program>`;
-    const { clientJs } = compileSource(src, "derived-in-ternary");
+    const { clientJs: __cjRaw } = compileSource(src, "derived-in-ternary"); const clientJs = foldChunkNamespacing(__cjRaw);
     const wiringSection = clientJs.split("--- Reactive display wiring ---")[1] ?? "";
     expect(wiringSection).toContain('_scrml_derived_get("isInsert")');
     expect(wiringSection).toContain("_scrml_effect(function()");
@@ -186,7 +187,7 @@ describe("Bug 4 — derived-reactive markup display wiring", () => {
 }
 <p>\${@sum + @a}</p>
 </program>`;
-    const { clientJs } = compileSource(src, "mixed-in-expr");
+    const { clientJs: __cjRaw } = compileSource(src, "mixed-in-expr"); const clientJs = foldChunkNamespacing(__cjRaw);
     const wiringSection = clientJs.split("--- Reactive display wiring ---")[1] ?? "";
     expect(wiringSection).toContain('_scrml_derived_get("sum")');
     expect(wiringSection).toContain('_scrml_reactive_get("a")');

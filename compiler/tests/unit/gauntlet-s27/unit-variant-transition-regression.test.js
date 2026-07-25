@@ -21,6 +21,7 @@ import { tmpdir } from "os";
 import { compileScrml } from "../../../src/api.js";
 import { SCRML_RUNTIME } from "../../../src/runtime-template.js";
 import { extractUserFns } from "../../helpers/extract-user-fns.js";
+import { unwrapChunkScope } from "../../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-s27-unit-variant");
 let tmpCounter = 0;
@@ -53,7 +54,7 @@ function runAndInvokeAll(clientJs) {
     var requestAnimationFrame = function() {};
     var cancelAnimationFrame = function() {};
     ${SCRML_RUNTIME}
-    ${clientJs}
+    ${unwrapChunkScope(clientJs)}
     ${calls}
     return _scrml_state;
   `;

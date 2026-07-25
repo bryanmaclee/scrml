@@ -24,6 +24,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -54,9 +55,8 @@ function mount(compiled) {
   const exec = new Function(
     "window",
     "document",
-    `${runtimeJs}\n${clientJs}\n`
-      + `globalThis.__scrml_get__ = _scrml_reactive_get;\n`
-      + `globalThis.__scrml_set__ = _scrml_reactive_set;\n`,
+    `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_get__ = _scrml_reactive_get;\n`
+      + `globalThis.__scrml_set__ = _scrml_reactive_set;\n`),
   );
   let threw = null;
   try {

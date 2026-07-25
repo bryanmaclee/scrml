@@ -29,6 +29,7 @@ import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
@@ -48,7 +49,7 @@ function compile(scrmlSource) {
     });
     let clientJs = "";
     for (const [fp, output] of result.outputs) {
-      if (fp.includes(tag)) clientJs = output.clientJs ?? "";
+      if (fp.includes(tag)) clientJs = foldChunkNamespacing(output.clientJs) ?? "";
     }
     return { errors: (result.errors ?? []).filter((e) => (e.severity ?? "error") === "error"), clientJs };
   } finally {
@@ -64,7 +65,7 @@ function fnBody(clientJs, name) {
 
 describe("structural-compound deep-set retargets the backing leaf cell (Bug B)", () => {
   test("single-segment compound field `@a.ref = v` → _scrml_reactive_set(\"a.ref\", v) — NOT the composite", () => {
-    const { errors, clientJs } = compile([
+    const { errors, clientJs: __cjRaw } = compile([
       "<a>",
       "    <ref> = \"\"",
       "</>",
@@ -77,7 +78,7 @@ describe("structural-compound deep-set retargets the backing leaf cell (Bug B)",
       "}",
       "<button onclick=multi()>go</button>",
       "<p>${@c} ${@a.ref}</p>",
-    ].join("\n"));
+    ].join("\n")); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.length).toBe(0);
     const body = fnBody(clientJs, "multi");
     expect(body).toBeTruthy();
@@ -89,7 +90,7 @@ describe("structural-compound deep-set retargets the backing leaf cell (Bug B)",
   });
 
   test("nested structural compound `@a.b.ref = v` → _scrml_reactive_set(\"a.b.ref\", v) (deepest leaf)", () => {
-    const { errors, clientJs } = compile([
+    const { errors, clientJs: __cjRaw } = compile([
       "<a>",
       "    <b>",
       "        <ref> = \"\"",
@@ -98,7 +99,7 @@ describe("structural-compound deep-set retargets the backing leaf cell (Bug B)",
       "function setIt() { @a.b.ref = \"q\" }",
       "<button onclick=setIt()>go</button>",
       "<p>${@a.b.ref}</p>",
-    ].join("\n"));
+    ].join("\n")); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.length).toBe(0);
     const body = fnBody(clientJs, "setIt");
     expect(body).toBeTruthy();
@@ -108,14 +109,14 @@ describe("structural-compound deep-set retargets the backing leaf cell (Bug B)",
   });
 
   test("compound field holding a plain object `@a.cfg.deep = v` → COW the residual into the leaf `a.cfg`", () => {
-    const { errors, clientJs } = compile([
+    const { errors, clientJs: __cjRaw } = compile([
       "<a>",
       "    <cfg> = { deep: \"\" }",
       "</>",
       "function setIt() { @a.cfg.deep = \"p\" }",
       "<button onclick=setIt()>go</button>",
       "<p>${@a.cfg.deep}</p>",
-    ].join("\n"));
+    ].join("\n")); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.length).toBe(0);
     const body = fnBody(clientJs, "setIt");
     expect(body).toBeTruthy();
@@ -127,7 +128,7 @@ describe("structural-compound deep-set retargets the backing leaf cell (Bug B)",
   });
 
   test("computed-index segment on a compound array field `@a.items[@sel] = v` → COW computed index into the leaf `a.items`", () => {
-    const { errors, clientJs } = compile([
+    const { errors, clientJs: __cjRaw } = compile([
       "<a>",
       "    <items> = []",
       "</>",
@@ -135,7 +136,7 @@ describe("structural-compound deep-set retargets the backing leaf cell (Bug B)",
       "function setIt() { @a.items[@sel] = \"x\" }",
       "<button onclick=setIt()>go</button>",
       "<p>${@sel}</p>",
-    ].join("\n"));
+    ].join("\n")); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.length).toBe(0);
     const body = fnBody(clientJs, "setIt");
     expect(body).toBeTruthy();
@@ -146,7 +147,7 @@ describe("structural-compound deep-set retargets the backing leaf cell (Bug B)",
   });
 
   test("FLAT object cell `<a> = { ref: \"\" }` does NOT regress — keeps the cell-targeted deep-set", () => {
-    const { errors, clientJs } = compile([
+    const { errors, clientJs: __cjRaw } = compile([
       "<a> = { ref: \"\" }",
       "<c> = 0",
       "function multi() {",
@@ -157,7 +158,7 @@ describe("structural-compound deep-set retargets the backing leaf cell (Bug B)",
       "}",
       "<button onclick=multi()>go</button>",
       "<p>${@c} ${@a.ref}</p>",
-    ].join("\n"));
+    ].join("\n")); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.length).toBe(0);
     const body = fnBody(clientJs, "multi");
     expect(body).toBeTruthy();

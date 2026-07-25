@@ -186,7 +186,7 @@ describe("§20.6 — production strip", () => {
   test("production build strips log() to a no-op but keeps the surrounding code", () => {
     const { out } = compile(SRC, { production: true });
     // The @count increment survives; only log() is gone.
-    expect(out.clientJs).toContain('_scrml_reactive_set("count"');
+    expect(out.clientJs).toContain('_scrml_cs_reactive_set("count"');
     expect(out.clientJs).toContain("(void 0)");
     expect(out.clientJs).not.toContain("debug only"); // arg literal dropped
     validClientJs(out.clientJs);
@@ -276,7 +276,7 @@ describe("§20.6 — value rendering reaches the runtime", () => {
     expect(out.clientJs).toContain('_scrml_log("client"');
     // The struct cell is READ (not re-wrapped) and passed to _scrml_log verbatim.
     expect(out.clientJs).toContain('_scrml_log("client", "f-');
-    expect(out.clientJs).toMatch(/_scrml_log\("client", "[^"]+", _scrml_reactive_get\("user"\)\)/);
+    expect(out.clientJs).toMatch(/_scrml_log\("client", "[^"]+", _scrml_cs_reactive_get\("user"\)\)/);
     validClientJs(out.clientJs);
   });
 });

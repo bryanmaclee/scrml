@@ -30,6 +30,7 @@ import { tmpdir } from "os";
 
 import { compileScrml } from "../../src/api.js";
 import { lex as lex1 } from "../../native-parser/lex.js";
+import { unwrapChunkScope } from "../helpers/chunk-scope.js";
 
 const LEX_SCRML = join(import.meta.dir, "..", "..", "self-host-v2", "lex.scrml");
 
@@ -157,7 +158,10 @@ beforeAll(() => {
   const client = readFileSync(join(outDir, "lex.client.js"), "utf8");
   const m = client.match(/function (_scrml_lex_\d+)\s*\(/);
   if (!m) throw new Error("could not find emitted _scrml_lex_N in client.js");
-  const factory = new Function("_scrml_structural_eq", client + `\nreturn ${m[1]};`);
+  // The chunk is wrapped in its own scope (chunk-namespacing N3), which makes
+  // `_scrml_lex_N` chunk-local and hides it from the `return`. This harness runs
+  // the chunk with NO runtime to exercise pure lowering, so unwrap it.
+  const factory = new Function("_scrml_structural_eq", unwrapChunkScope(client) + `\nreturn ${m[1]};`);
   lex2 = factory(_scrml_structural_eq);
 });
 

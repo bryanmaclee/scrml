@@ -31,6 +31,7 @@ import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { nativeParseFile } from "../../native-parser/parse-file.js";
 import { populateNativeAttrValueExprNodes } from "../../src/native-walker/attrvalue-exprnode-walker.ts";
+import { normalizeChunkToken } from "../helpers/chunk-scope.js";
 
 // compileWith — compile `source` under `parser` (null = default live BS+TAB;
 // "scrml-native" = native pipeline). Returns errors + warnings + client.js text.
@@ -169,7 +170,7 @@ describe("native attr-value exprNode/argExprNodes population (parity-closer)", (
     const def = compileWith(ENGINE_HANDLER, null, "parity-def");
     expect(def.errors.length).toBe(0);
     expect(nat.errors.length).toBe(0);
-    expect(nat.clientJs).toBe(def.clientJs);
+    expect(normalizeChunkToken(nat.clientJs)).toBe(normalizeChunkToken(def.clientJs));
   });
 
   test("string-literal / props-style values are NOT given exprNode/argExprNodes (live parity)", () => {

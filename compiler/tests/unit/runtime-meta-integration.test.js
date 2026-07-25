@@ -118,7 +118,7 @@ describe("runtime-meta RT-1: meta.emit() dynamic markup", () => {
     expect(fatalErrors).toHaveLength(0);
 
     // The _scrml_meta_effect call should have a stable scopeId
-    expect(clientJs).toMatch(/_scrml_meta_effect\("_scrml_meta_\d+"/);
+    expect(clientJs).toMatch(/_scrml_meta_effect\("_scrml_meta_[0-9a-z]{8}_\d+"/);
     // The runtime meta.emit function uses the scopeId to find the DOM placeholder
     // at runtime via data-scrml-meta attribute
     expect(clientJs).toContain("function(meta)");
@@ -217,7 +217,7 @@ p "counter"
     expect(fatalErrors).toHaveLength(0);
 
     expect(clientJs).toContain("_scrml_meta_effect(");
-    expect(clientJs).toContain('_scrml_reactive_get("count")');
+    expect(clientJs).toContain('_scrml_cs_reactive_get("count")');
   });
 
   test("@var write inside ^{} via meta.set compiles correctly", () => {
@@ -249,8 +249,8 @@ p "multi-var"
     expect(fatalErrors).toHaveLength(0);
 
     expect(clientJs).toContain("_scrml_meta_effect(");
-    expect(clientJs).toContain('_scrml_reactive_get("x")');
-    expect(clientJs).toContain('_scrml_reactive_get("y")');
+    expect(clientJs).toContain('_scrml_cs_reactive_get("x")');
+    expect(clientJs).toContain('_scrml_cs_reactive_get("y")');
   });
 });
 
@@ -341,7 +341,7 @@ p "captured"
     // The capturedBindings should contain Object.freeze (not null)
     expect(clientJs).toContain("Object.freeze(");
     // Should have a getter for the reactive variable
-    expect(clientJs).toContain("_scrml_reactive_get");
+    expect(clientJs).toContain("_scrml_cs_reactive_get");
   });
 
   test("let variable in scope produces capturedBindings with direct reference", () => {
