@@ -817,7 +817,7 @@ export
 
     const enginesClientPath = join(outDir, "engines.client.js");
     expect(existsSync(enginesClientPath)).toBe(true);
-    const enginesClient = readFileSync(enginesClientPath, "utf8");
+    const enginesClient = foldChunkNamespacing(readFileSync(enginesClientPath, "utf8"));
 
     // C12 substrate must be in the EXPORTER's compiled output, not the importer's
     expect(enginesClient).toContain("__scrml_engine_phase_transitions");
@@ -937,7 +937,7 @@ export
     const enginesClientPath = join(outDir, "engines.client.js");
     const reexportClientPath = join(outDir, "reexport.client.js");
     expect(existsSync(enginesClientPath)).toBe(true);
-    const enginesClient = readFileSync(enginesClientPath, "utf8");
+    const enginesClient = foldChunkNamespacing(readFileSync(enginesClientPath, "utf8"));
 
     // The substrate lives EXCLUSIVELY in the original exporter
     expect(enginesClient).toContain('_scrml_reactive_set("phase", "Idle");');
