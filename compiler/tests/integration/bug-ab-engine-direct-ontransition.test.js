@@ -39,6 +39,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { foldChunkNamespacing, unwrapChunkScope } from "../helpers/chunk-scope.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -68,7 +69,14 @@ function compile(source, suffix = "bug-ab-direct") {
 }
 
 function makeEvaluator(runtimeJs, clientJs, generatedFnNames) {
-  const clientStripped = clientJs.replace(/^\/\/ Requires:.*\n/, "");
+  // BUG-6/N3: the client chunk wraps its body in an IIFE and gives its cell
+  // accessors a `_scrml_cs_` per-chunk scope. This evaluator reaches program-scope
+  // functions (e.g. `toggle`) and reads cells by BARE name from OUTSIDE the chunk,
+  // so unwrap the scope: strip the IIFE (top-levels the program fns), drop the
+  // prologue, and un-rename `_scrml_cs_*` back to the bare runtime accessors
+  // (keying bare, matching this evaluator's bare reads). A no-op on a chunk that
+  // carries no scope.
+  const clientStripped = unwrapChunkScope(clientJs.replace(/^\/\/ Requires:.*\n/, ""));
   const exportLines = generatedFnNames
     .map((fn) => `      ${JSON.stringify(fn)}: (typeof ${fn} !== "undefined" ? ${fn} : null),`)
     .join("\n");
@@ -124,18 +132,22 @@ function toggle() { if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav
     try {
       expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
+      // Emit-level guards read a namespace-folded view (BUG-6 `_scrml_cs_`
+      // accessor rename + N4 `__scrml_engine_<token>_` names folded off), so the
+      // assertions pin the token-independent lowering contract.
+      const cj = foldChunkNamespacing(clientJs);
       // Emit-level guards: the fire-hooks machinery must EXIST and be wired.
-      expect(clientJs).toContain("function __scrml_engine_mode_fire_hooks");
+      expect(cj).toContain("function __scrml_engine_mode_fire_hooks");
       // Both engine-direct edges present, each incrementing transitions.
-      expect(clientJs).toContain(`if (fromVariant === "Nav" && toVariant === "Edit")`);
-      expect(clientJs).toContain(`if (fromVariant === "Edit" && toVariant === "Nav")`);
+      expect(cj).toContain(`if (fromVariant === "Nav" && toVariant === "Edit")`);
+      expect(cj).toContain(`if (fromVariant === "Edit" && toVariant === "Nav")`);
       // The effect body is emitted (NOT just the <transitions>=0 init).
-      const effectMatches = clientJs.match(
+      const effectMatches = cj.match(
         /_scrml_reactive_set\("transitions", _scrml_reactive_get\("transitions"\) \+ 1\)/g,
       );
       expect(effectMatches && effectMatches.length).toBe(2);
       // The fire call is wired on the direct-set path.
-      expect(clientJs).toMatch(/__scrml_engine_mode_fire_hooks\(/);
+      expect(cj).toMatch(/__scrml_engine_mode_fire_hooks\(/);
 
       // Runtime: clicking toggle twice must fire BOTH engine-direct edges.
       const toggleName = findGeneratedFnName(clientJs, "toggle");
@@ -172,10 +184,11 @@ function toggle() { if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav
     const { errors, clientJs, runtimeJs, cleanup } = compile(src, "bug-ab-nested");
     try {
       expect(errors.filter((e) => e.severity === "error")).toEqual([]);
-      expect(clientJs).toContain("function __scrml_engine_mode_fire_hooks");
+      const cj = foldChunkNamespacing(clientJs);
+      expect(cj).toContain("function __scrml_engine_mode_fire_hooks");
       // Exactly 2 effect bodies — nested entries NOT double-counted via the
       // new engine-direct scan (skip-region exclusion).
-      const effectMatches = clientJs.match(
+      const effectMatches = cj.match(
         /_scrml_reactive_set\("transitions", _scrml_reactive_get\("transitions"\) \+ 1\)/g,
       );
       expect(effectMatches && effectMatches.length).toBe(2);
@@ -211,8 +224,9 @@ function toggle() { if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav
     try {
       expect(errors.filter((e) => e.severity === "error")).toEqual([]);
       // Nested edit-arm fires on Nav->Edit; engine-direct nav-arm on Edit->Nav.
-      const editHitMatches = clientJs.match(/_scrml_reactive_set\("editHits"/g);
-      const navHitMatches = clientJs.match(/_scrml_reactive_set\("navHits"/g);
+      const cj = foldChunkNamespacing(clientJs);
+      const editHitMatches = cj.match(/_scrml_reactive_set\("editHits"/g);
+      const navHitMatches = cj.match(/_scrml_reactive_set\("navHits"/g);
       // 1 init + 1 effect each (init = `=0`, effect = `+ 1`).
       expect((editHitMatches || []).length).toBe(2);
       expect((navHitMatches || []).length).toBe(2);
