@@ -34,6 +34,7 @@ import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { runCG } from "../../src/code-generator.js";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
+import { chunkCellKey } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Sources
@@ -185,12 +186,14 @@ function runClient({ domHtml, clientJs, seedState }) {
   document.dispatchEvent(new Event("DOMContentLoaded"));
 
   const lis = () => [...(mount || document).querySelectorAll("li")];
+  // BUG-6: key the bare-global set/get through the chunk token.
+  const cellKey = chunkCellKey(clientJs);
   return {
     mount, spy, lis,
     text: () => lis().map((n) => n.textContent.trim()),
     keys: () => lis().map((n) => n.getAttribute("data-scrml-key")),
-    set: (n, v) => globalThis.__scrml_set__(n, v),
-    get: (n) => globalThis.__scrml_get__(n),
+    set: (n, v) => globalThis.__scrml_set__(cellKey(n), v),
+    get: (n) => globalThis.__scrml_get__(cellKey(n)),
   };
 }
 
@@ -284,7 +287,7 @@ describe("ssr-a-terminus D2 — DOM-adoption hydration (R26 runtime gate)", () =
     ];
     const firstPaint = await composeFirstPaint(serverJs, html, dbActive);
     // D1 fell back — the mount ships as an empty fence (no data-scrml-key rows to adopt).
-    expect(firstPaint).toMatch(/<!--scrml-each:\d+--><!--\/scrml-each:\d+-->/);
+    expect(firstPaint).toMatch(/<!--scrml-each:[0-9a-z]{8}_\d+--><!--\/scrml-each:[0-9a-z]{8}_\d+-->/);
 
     const seed = extractSeed(firstPaint);
     const app = runClient({ domHtml: firstPaint, clientJs, seedState: seed });

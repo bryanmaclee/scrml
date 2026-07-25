@@ -38,6 +38,7 @@ import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { runSYM } from "../../src/symbol-table.ts";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -86,7 +87,9 @@ function compileToClientJs(source, baseName = "opener-effect") {
     const clientPath = resolve(outDir, `${baseName}.client.js`);
     return {
       errors: (result.errors ?? []).filter((e) => (e.severity ?? "error") === "error"),
-      clientJs: existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "",
+      // BUG-6 namespace-fold at the read boundary: assertions pin the
+      // token-independent lowering contract (raw accessor + engine names).
+      clientJs: existsSync(clientPath) ? foldChunkNamespacing(readFileSync(clientPath, "utf8")) : "",
       clientPath,
       keepDir: tmpDir,
     };

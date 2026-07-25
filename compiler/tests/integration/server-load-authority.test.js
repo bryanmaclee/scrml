@@ -34,6 +34,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // Full-pipeline compile (route-inference produces authMiddleware; the type pass
 // fires the W-* nudges; codegen emits the gate + row-scope).
@@ -46,7 +47,7 @@ function compileFull(source) {
     const out = result.outputs ? [...result.outputs.values()][0] : null;
     return {
       serverJs: out?.serverJs ?? "",
-      clientJs: out?.clientJs ?? "",
+      clientJs:foldChunkNamespacing( foldChunkNamespacing(out?.clientJs ?? "")),
       html: out?.html ?? "",
       warnings: result.warnings ?? [],
       errors: result.errors ?? [],
@@ -303,7 +304,7 @@ describe("server-load-authority (g): non-auth page emits no request-context infr
 
 describe("server-load-authority (h): a user <currentUser> cell shadows the ambient", () => {
   test("a user `<currentUser>` cell lowers as an ordinary reactive cell, not the ambient", () => {
-    const { clientJs, serverJs } = compileFull(USER_CELL_SHADOW);
+    const { clientJs: __cjRaw, serverJs } = compileFull(USER_CELL_SHADOW); const clientJs = foldChunkNamespacing(__cjRaw);
     // the client read of the user cell is the ordinary reactive accessor
     expect(clientJs).toContain('_scrml_reactive_get("currentUser")');
     // the ambient resolver is NOT emitted (no @currentUser ambient in this file)

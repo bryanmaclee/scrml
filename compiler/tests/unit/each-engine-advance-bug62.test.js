@@ -29,6 +29,7 @@ import { describe, test, expect } from "bun:test";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function compileToOutputs(source, suffix = "bug62") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -41,7 +42,7 @@ function compileToOutputs(source, suffix = "bug62") {
   try {
     const result = compileScrml({ inputFiles: [tmpInput], write: true, outputDir: outDir });
     const clientPath = resolve(outDir, `${name}.client.js`);
-    const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""));
     return { errors: result.errors ?? [], warnings: result.warnings ?? [], clientJs };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
@@ -88,7 +89,7 @@ ${"$"}{
   });
 
   test("each handler lowers to _scrml_engine_advance — no raw @ or .advance survives", () => {
-    const { clientJs } = compileToOutputs(src, "bug62-state");
+    const { clientJs: __cjRaw } = compileToOutputs(src, "bug62-state"); const clientJs = foldChunkNamespacing(__cjRaw);
     const bodies = eachHandlerBodies(clientJs);
     // At least one each handler body contains the lowered engine advance.
     expect(bodies.some((b) => /_scrml_engine_advance\("phase",\s*"Active"/.test(b))).toBe(true);
@@ -142,7 +143,7 @@ const taskMovedTo = (tasks, id, col) => tasks.map((t) => t.id == id ? { id: t.id
   });
 
   test("each handler lowers to _scrml_engine_dispatch_message with the `as`-name payload", () => {
-    const { clientJs } = compileToOutputs(src, "bug62-msg");
+    const { clientJs: __cjRaw } = compileToOutputs(src, "bug62-msg"); const clientJs = foldChunkNamespacing(__cjRaw);
     const bodies = eachHandlerBodies(clientJs);
     // Message-plane dispatch with the Drop variant + `col` payload (the as-name).
     expect(bodies.some((b) =>
@@ -185,7 +186,7 @@ ${"$"}{
   });
 
   test("each handler lowers to _scrml_engine_direct_set (write-guard path)", () => {
-    const { clientJs } = compileToOutputs(src, "bug62-assign");
+    const { clientJs: __cjRaw } = compileToOutputs(src, "bug62-assign"); const clientJs = foldChunkNamespacing(__cjRaw);
     const bodies = eachHandlerBodies(clientJs);
     expect(bodies.some((b) => /_scrml_engine_direct_set\("phase",\s*"Active"/.test(b))).toBe(true);
     for (const b of bodies) expect(b).not.toMatch(/@phase\s*=/);
@@ -218,7 +219,7 @@ ${"$"}{
 </program>`;
 
   test("non-engine handler keeps iter-scope-only lowering; engine handler still lowers", () => {
-    const { errors, clientJs } = compileToOutputs(src, "bug62-mixed");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "bug62-mixed"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     const bodies = eachHandlerBodies(clientJs);
     // The plain handler is iter-scope-lowered (remove(it.id)), NOT routed through engine machinery.
@@ -247,7 +248,7 @@ ${"$"}{
 </program>`;
 
   test("plain call handler with @.id arg lowers to ping(it.id); no engine helpers", () => {
-    const { errors, clientJs } = compileToOutputs(src, "bug62-noeng");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "bug62-noeng"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     const bodies = eachHandlerBodies(clientJs);
     expect(bodies.some((b) => /ping\(it\.id\)/.test(b))).toBe(true);

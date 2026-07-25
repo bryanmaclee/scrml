@@ -33,6 +33,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { collectReactiveVarNames } from "../../src/codegen/reactive-deps.ts";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // helpers — file-based pipeline compile (mirrors computed-delay.test.js)
@@ -53,7 +54,7 @@ function compileToClientJs(source, suffix = "engine-var-markup") {
       outputDir: outDir,
     });
     const clientPath = resolve(outDir, `${name}.client.js`);
-    const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""));
     return { errors: result.errors ?? [], clientJs };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
@@ -273,7 +274,7 @@ describe("Bug 1.5 §2 — end-to-end ${@engineVar} markup interpolation gets rea
     <span>STATE: \${@marioState}</span>
 </div>
 </program>`;
-    const { errors, clientJs } = compileToClientJs(source, "bug15-modern");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(source, "bug15-modern"); const clientJs = foldChunkNamespacing(__cjRaw);
     // Sanity: compile clean (warnings allowed; errors not).
     const hardErrors = errors.filter(e => e.severity !== "warning");
     expect(hardErrors).toEqual([]);
@@ -317,7 +318,7 @@ describe("Bug 1.5 §2 — end-to-end ${@engineVar} markup interpolation gets rea
     <span>RISK:  \${@healthRisk}</span>
 </div>
 </program>`;
-    const { errors, clientJs } = compileToClientJs(source, "bug15-derived");
+    const { errors, clientJs: __cjRaw } = compileToClientJs(source, "bug15-derived"); const clientJs = foldChunkNamespacing(__cjRaw);
     const hardErrors = errors.filter(e => e.severity !== "warning");
     expect(hardErrors).toEqual([]);
     expect(clientJs.length).toBeGreaterThan(0);

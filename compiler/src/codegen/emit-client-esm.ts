@@ -164,7 +164,14 @@ function analyzeChunk(body: string): ChunkAnalysis {
       topLevelDecls.add(node.id.name);
     } else if (node.type === "VariableDeclaration") {
       for (const decl of node.declarations) {
-        if (decl.id && decl.id.type === "Identifier") topLevelDecls.add(decl.id.name);
+        // Route through the pattern walker, not just `decl.id.type ===
+        // "Identifier"`: a DESTRUCTURED top-level declaration binds real names
+        // too, and treating it as binding nothing makes those names look
+        // undeclared. The chunk cell-scope prologue is exactly that shape —
+        // `const { _scrml_reactive_get, … } = _scrml_cell_scope(…)` — so the
+        // narrow check emitted `import { _scrml_reactive_get }` NEXT TO the
+        // const and every esm chunk died with "has already been declared".
+        if (decl.id) collectAssignmentTargets(decl.id, topLevelDecls);
       }
     }
   }

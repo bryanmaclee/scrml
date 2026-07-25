@@ -28,6 +28,7 @@ import { makeCompileContext } from "../../src/codegen/context.ts";
 import { resetVarCounter } from "../../src/codegen/var-counter.ts";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers — pre-built AST nodes for CG-stage tests (§1-§8, §13)
@@ -181,16 +182,16 @@ describe("§1: class:active=@isActive — @variable regression", () => {
     const node = makeMarkupNode("button", [reactiveClassAttr("active", "isActive")], [], { selfClosing: false });
     const result = compile(node);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('_scrml_effect');
-    expect(out.clientJs).toContain('classList.toggle("active"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_effect');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('classList.toggle("active"');
   });
 
   test("clientJs uses _scrml_reactive_get for initial mount check", () => {
     const node = makeMarkupNode("button", [reactiveClassAttr("active", "isActive")], [], { selfClosing: false });
     const result = compile(node);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('_scrml_reactive_get("isActive")');
-    expect(out.clientJs).toContain('classList.add("active")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_get("isActive")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('classList.add("active")');
   });
 
   test("effect uses classList.toggle with _scrml_reactive_get", () => {
@@ -619,6 +620,6 @@ describe("variant-literal class: directive lowers to valid JS (gate fix-wave)", 
     );
     const result = compile(node);
     const out = result.outputs.get("/test/app.scrml");
-    expect(() => acorn.parse(out.clientJs, { ecmaVersion: 2022, sourceType: "module" })).not.toThrow();
+    expect(() => acorn.parse(foldChunkNamespacing(out.clientJs), { ecmaVersion: 2022, sourceType: "module" })).not.toThrow();
   });
 });

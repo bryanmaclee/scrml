@@ -30,6 +30,7 @@ import { compileScrml } from "../../../src/api.js";
 import { isNoElide } from "../../../src/codegen/emit-machines.ts";
 import { extractUserFns } from "../../helpers/extract-user-fns.js";
 import { SCRML_RUNTIME } from "../../../src/runtime-template.js";
+import { unwrapChunkScope } from "../../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-s27-guarded-wildcard");
 let tmpCounter = 0;
@@ -62,7 +63,7 @@ function buildEnv(clientJs) {
     var requestAnimationFrame = function() {};
     var cancelAnimationFrame = function() {};
     ${SCRML_RUNTIME}
-    ${clientJs}
+    ${unwrapChunkScope(clientJs)}
     return {
       state: _scrml_state,
       userFns: { ${userFnBindings} },

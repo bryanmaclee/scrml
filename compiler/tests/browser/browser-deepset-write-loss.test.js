@@ -31,6 +31,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { execFileSync } from "child_process";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 const tmpRoot = resolve("/tmp", "scrml-deepset-write-loss");
 
@@ -61,8 +62,7 @@ function mount(compiled) {
   const exec = new Function(
     "window",
     "document",
-    `${runtimeJs}\n${clientJs}\n` +
-      `globalThis.__scrml_get__ = _scrml_reactive_get;\n`,
+    `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_get__ = _scrml_reactive_get;\n`),
   );
   let threw = null;
   try {
@@ -110,7 +110,7 @@ describe("high-deepset-write-loss — multi-statement deep-set RUNTIME (happy-do
       // Emit-shape sanity: both deep-sets present in source order.
       const m = compiled.clientJs.match(/function _scrml_multi_\d+\(\)\s*\{([\s\S]*?)\n\}/);
       expect(m).not.toBeNull();
-      const seen = [...m[1].matchAll(/_scrml_deep_set\(_scrml_reactive_get\("a"\), \["ref"\], "([^"]+)"\)/g)].map(
+      const seen = [...m[1].matchAll(/_scrml_deep_set\(_scrml_cs_reactive_get\("a"\), \["ref"\], "([^"]+)"\)/g)].map(
         (mm) => mm[1],
       );
       expect(seen).toEqual(["p", "q"]);

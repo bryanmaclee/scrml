@@ -1,0 +1,18 @@
+<page>
+
+  // A DIFFERENT type name from alpha's, deliberately. An identical one trips N3
+  // (`Identifier 'Phase_toEnum' has already been declared`) and kills this chunk
+  // before it ever reaches the engine mount — masking N4. `var=phase` forces the
+  // SAME engine cell name alpha derives, which is the N4 collision under test.
+  type Mode:enum = { Idle, Busy }
+
+  <engine for=Mode var=phase initial=.Idle>
+    <Idle rule=.Busy>
+      <em id="beta-mark">beta-idle</em>
+    </>
+    <Busy rule=.Idle>
+      <em id="beta-mark">beta-busy</em>
+    </>
+  </>
+
+</page>

@@ -66,8 +66,11 @@ function compileToOutputs(source, suffix = "bodyrender") {
     });
     const clientPath = resolve(outDir, `${name}.client.js`);
     const htmlPath = resolve(outDir, `${name}.html`);
+    // RAW client JS — text-assert tests fold at their own read site; the §13
+    // happy-dom harness unwraps for execution. HTML folds the N4 engine-mount
+    // token off (`data-scrml-engine-mount="<token>_phase"` -> `"phase"`).
     const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
-    const html = existsSync(htmlPath) ? readFileSync(htmlPath, "utf8") : "";
+    const html = unNamespaceEngineNames(existsSync(htmlPath) ? readFileSync(htmlPath, "utf8") : "");
     return { errors: result.errors ?? [], warnings: result.warnings ?? [], clientJs, html };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
@@ -88,7 +91,7 @@ describe("Phase A10 Phase 3 §1 — empty-body engine tree-shake", () => {
   <Loading rule=.Idle></>
 </>
 `;
-    const { errors, clientJs, html } = compileToOutputs(src, "shake-empty");
+    const { errors, clientJs: __cjRaw, html } = compileToOutputs(src, "shake-empty"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // No body-render section header
     expect(clientJs).not.toContain("// --- engine body render");
@@ -113,7 +116,7 @@ describe("Phase A10 Phase 3 §1 — empty-body engine tree-shake", () => {
   <Loading rule=.Idle/>
 </>
 `;
-    const { errors, clientJs, html } = compileToOutputs(src, "shake-selfclose");
+    const { errors, clientJs: __cjRaw, html } = compileToOutputs(src, "shake-selfclose"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // No body-render section header (each state-child is self-closing → empty body)
     expect(clientJs).not.toContain("// --- engine body render");
@@ -137,7 +140,7 @@ describe("Phase A10 Phase 3 §2 — single state-child with text body", () => {
   <Loading rule=.Idle></>
 </>
 `;
-    const { errors, clientJs, html } = compileToOutputs(src, "text-body");
+    const { errors, clientJs: __cjRaw, html } = compileToOutputs(src, "text-body"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Section header present (S108 — extended to cover match-block body
     // render emission alongside engine body render; shared section header).
@@ -170,7 +173,7 @@ describe("Phase A10 Phase 3 §3 — multi state-child dispatcher", () => {
   <Done>Done</>
 </>
 `;
-    const { errors, clientJs } = compileToOutputs(src, "multi");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "multi"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Phase A10 re-wire (S78, 2026-05-10): the dispatcher is now a NAMED
     // function `__scrml_engine_phase_dispatch(_v)` invoked by both the
@@ -205,7 +208,7 @@ describe("Phase A10 Phase 3 §4 — body with event-handler markup", () => {
   <Loading rule=.Idle></>
 </>
 `;
-    const { errors, clientJs, html } = compileToOutputs(src, "evt-btn");
+    const { errors, clientJs: __cjRaw, html } = compileToOutputs(src, "evt-btn"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Render function for Idle contains the button HTML
     expect(clientJs).toMatch(/function _scrml_engine_phase_render_Idle\(\) {[\s\S]*?<button[\s\S]*?>Load<\/button>/);
@@ -237,7 +240,7 @@ describe("Phase A10 Phase 3 §5 — body with ${@cell} interpolation", () => {
   </>
 </>
 `;
-    const { errors, clientJs, html } = compileToOutputs(src, "interp");
+    const { errors, clientJs: __cjRaw, html } = compileToOutputs(src, "interp"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Showing is initial — its body lands in mount slot HTML
     expect(html).toMatch(/data-scrml-engine-mount="phase"/);
@@ -270,7 +273,7 @@ describe("Phase A10 Phase 3 §6 — body with payload binding", () => {
   </>
 </>
 `;
-    const { errors, clientJs } = compileToOutputs(src, "payload");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "payload"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Error render fn signature includes the msg parameter
     expect(clientJs).toMatch(/function _scrml_engine_phase_render_Error\(msg\) {/);
@@ -296,7 +299,7 @@ describe("Phase A10 Phase 3 §7 — dispatcher subscribes via _scrml_reactive_su
   <Loading rule=.Idle>L</>
 </>
 `;
-    const { errors, clientJs } = compileToOutputs(src, "subscribe");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "subscribe"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Phase A10 re-wire (S78, 2026-05-10): the dispatcher body lives in
     // the NAMED function `__scrml_engine_phase_dispatch(_v)`. The subscribe
@@ -327,7 +330,7 @@ describe("Phase A10 Phase 3 §8 — tree-shake invariant", () => {
   <Loading rule=.Idle></>
 </>
 `;
-    const { errors, clientJs, html } = compileToOutputs(src, "shake-zero");
+    const { errors, clientJs: __cjRaw, html } = compileToOutputs(src, "shake-zero"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // No body-render section
     expect(clientJs).not.toContain("// --- engine body render");
@@ -487,7 +490,7 @@ describe("Phase A10 Phase 3 §10 — structural-element filter at boundary", () 
   <Loading rule=.Idle></>
 </>
 `;
-    const { errors, clientJs, html } = compileToOutputs(src, "filter-onTrans");
+    const { errors, clientJs: __cjRaw, html } = compileToOutputs(src, "filter-onTrans"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Render fn for Idle contains the div but NOT the <onTransition>
     const renderFnMatch = clientJs.match(/function _scrml_engine_phase_render_Idle\(\) {[\s\S]*?\n}/);
@@ -513,7 +516,7 @@ describe("Phase A10 Phase 3 §10 — structural-element filter at boundary", () 
   <Stale></>
 </>
 `;
-    const { errors, clientJs, html } = compileToOutputs(src, "filter-onTimeout");
+    const { errors, clientJs: __cjRaw, html } = compileToOutputs(src, "filter-onTimeout"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     const renderFnMatch = clientJs.match(/function _scrml_engine_phase_render_Active\(\) {[\s\S]*?\n}/);
     expect(renderFnMatch).not.toBeNull();
@@ -600,7 +603,7 @@ describe("Phase A10 re-wire §12 — per-arm wire fn shape", () => {
   </>
 </>
 `;
-    const { errors, clientJs } = compileToOutputs(src, "rewire-cell");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "rewire-cell"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Per-arm wire fn declared.
     expect(clientJs).toMatch(/function _scrml_engine_phase_wire_Showing\(_root\)/);
@@ -631,7 +634,7 @@ describe("Phase A10 re-wire §12 — per-arm wire fn shape", () => {
   <Showing><div>Count: \${@count}</div></>
 </>
 `;
-    const { errors, clientJs } = compileToOutputs(src, "rewire-dispose");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "rewire-dispose"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Module-scope dispose handle for the currently-mounted arm.
     expect(clientJs).toMatch(/let __scrml_engine_phase_dispose = null;/);
@@ -663,7 +666,7 @@ describe("Phase A10 re-wire §12 — per-arm wire fn shape", () => {
   <Showing>Count: \${@count}</>
 </>
 `;
-    const { errors, clientJs } = compileToOutputs(src, "rewire-domcl");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "rewire-domcl"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // DOMContentLoaded block invokes the dispatch fn with the initial value.
     expect(clientJs).toMatch(
@@ -685,7 +688,7 @@ describe("Phase A10 re-wire §12 — per-arm wire fn shape", () => {
   <Showing>Count: \${@count}</>
 </>
 `;
-    const { errors, clientJs } = compileToOutputs(src, "rewire-filter");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "rewire-filter"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // The global wiring block exists for top-level bindings (currently
     // none here so it may be absent). Critically: the count-binding
@@ -727,7 +730,7 @@ describe("Phase A10 re-wire §12 — per-arm wire fn shape", () => {
   <Showing>Count: \${@count}</>
 </>
 `;
-    const { errors, clientJs } = compileToOutputs(src, "rewire-idem");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "rewire-idem"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Single `if (_tag === "Idle")` path; no special guard short-circuiting
     // re-renders of the same variant. Every fire runs the dispose-then-wire
@@ -757,7 +760,7 @@ describe("Phase A10 re-wire §12 — per-arm wire fn shape", () => {
   <Loading rule=.Idle></>
 </>
 `;
-    const { errors, clientJs } = compileToOutputs(src, "rewire-shake");
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "rewire-shake"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).not.toMatch(/_scrml_engine_phase_wire_/);
     expect(clientJs).not.toMatch(/__scrml_engine_phase_dispose/);
@@ -785,6 +788,8 @@ describe("Phase A10 re-wire §12 — per-arm wire fn shape", () => {
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { foldChunkNamespacing, unNamespaceEngineNames, unwrapChunkScope } from "../helpers/chunk-scope.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -805,12 +810,15 @@ function compileAndLoad(source, suffix) {
 
   // Wrap runtime + client in an IIFE that exposes reactive handles to window.
   // eslint-disable-next-line no-eval
+  // BUG-6/N3: unwrap the chunk scope + fold the engine-name token so execution
+  // keys BARE (matching the bare window handles) and the engine dispatch's
+  // `data-scrml-engine-mount="phase"` query matches the folded HTML above.
+  const execClient = unNamespaceEngineNames(unwrapChunkScope(clientJs));
   const code =
-    `(function() {\n${SCRML_RUNTIME}\n${clientJs}\n` +
+    `(function() {\n${SCRML_RUNTIME}\n${execClient}\n` +
     `window._scrml_reactive_get = _scrml_reactive_get;\n` +
     `window._scrml_reactive_set = _scrml_reactive_set;\n` +
-    `window._scrml_reactive_subscribe = _scrml_reactive_subscribe;\n` +
-    `})();`;
+    `window._scrml_reactive_subscribe = _scrml_reactive_subscribe;\n` + `\n})();`;
   // eslint-disable-next-line no-eval
   eval(code);
 

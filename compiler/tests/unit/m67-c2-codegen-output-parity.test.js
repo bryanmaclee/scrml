@@ -116,8 +116,8 @@ describe("§3 mount-hydrate client JS parity (native == live)", () => {
     const r = compileBoth(MH2);
     for (const needle of [
       'fetch("/__mountHydrate"',
-      '_scrml_reactive_set("a", _scrml_mh_json["a"])',
-      '_scrml_reactive_set("b", _scrml_mh_json["b"])',
+      '_scrml_cs_reactive_set("a", _scrml_mh_json["a"])',
+      '_scrml_cs_reactive_set("b", _scrml_mh_json["b"])',
       "coalesced via /__mountHydrate",
     ]) {
       expect(r.live.clientJs).toContain(needle);

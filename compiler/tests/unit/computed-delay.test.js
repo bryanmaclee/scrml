@@ -24,6 +24,7 @@ import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { parseAfterDuration } from "../../src/codegen/parse-after-duration.ts";
 import { emitEngineTimersTable } from "../../src/codegen/emit-engine.ts";
 import { compileScrml } from "../../src/api.js";
+import { unNamespaceEngineNames } from "../helpers/chunk-scope.js";
 
 /**
  * Compile the source through the full pipeline (BS→TAB→...→CG) and return the
@@ -47,7 +48,7 @@ function compileToClientJs(source, suffix = "computed-delay") {
     });
     const clientPath = resolve(outDir, `${name}.client.js`);
     const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
-    return { errors: result.errors ?? [], clientJs };
+    return { errors: result.errors ?? [], clientJs: unNamespaceEngineNames(clientJs) };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -195,11 +196,11 @@ describe("A5-5 §A5-5.4 — legacy machine literal preserves constant-fold", () 
     // _scrml_machine_arm_initial call is what arms timers at init. The payload
     // is JSON-encoded as a string so the "afterMs" key + 30000 value appears
     // with backslash-escaped quotes inside the source.
-    expect(clientJs).toContain('_scrml_machine_arm_initial("phase"');
+    expect(clientJs).toContain('_scrml_cs_machine_arm_initial("phase"');
     expect(clientJs).toMatch(/afterMs\\":30000/);
     // Negative: NO computed-form IIFE clamp shape anywhere near the arm site
     // (the IIFE only appears for computed-form arms).
-    const initIdx = clientJs.indexOf('_scrml_machine_arm_initial("phase"');
+    const initIdx = clientJs.indexOf('_scrml_cs_machine_arm_initial("phase"');
     expect(initIdx).toBeGreaterThan(-1);
     const window = clientJs.slice(Math.max(0, initIdx - 500), initIdx + 500);
     expect(window).not.toContain('return (typeof v === "number"');
@@ -221,7 +222,7 @@ describe("A5-5 §A5-5.4 — legacy machine literal preserves constant-fold", () 
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // The write-site arm-after-set path emits a guarded arm call with
     // the literal duration as the 2nd arg (no IIFE wrapper).
-    expect(clientJs).toMatch(/_scrml_machine_arm_timer\("phase",\s*30000/);
+    expect(clientJs).toMatch(/_scrml_cs_machine_arm_timer\("phase",\s*30000/);
   });
 });
 
@@ -281,9 +282,9 @@ describe("A5-5 §A5-5.5 — legacy machine computed form (helper-level coverage)
     expect(clientJs).toContain("__scrml_engine_phase_timers");
     expect(clientJs).toContain("msExpr: function()");
     // Reactive read rewrite — @delay → _scrml_reactive_get("delay")
-    expect(clientJs).toContain('_scrml_reactive_get("delay")');
+    expect(clientJs).toContain('_scrml_cs_reactive_get("delay")');
     // Initial-arm at module-init for the Loading state.
-    expect(clientJs).toContain('_scrml_engine_arm_state_timers("phase", "Loading"');
+    expect(clientJs).toContain('_scrml_cs_engine_arm_state_timers("phase", "Loading"');
   });
 
   test("the runtime clamp shape ships with the 'engine' chunk runtime preamble", () => {
@@ -291,6 +292,9 @@ describe("A5-5 §A5-5.5 — legacy machine computed form (helper-level coverage)
     // confirm the source is in the runtime template.
     const fs = require("fs");
     const rt = fs.readFileSync(require.resolve("../../src/runtime-template.js"), "utf8");
+    // The runtime template carries the RAW helper name — the BUG-6 `_scrml_cs_`
+    // callee-rename is applied to the assembled bundle body (index.ts), never to
+    // the template source.
     expect(rt).toContain("_scrml_engine_arm_state_timers");
     expect(rt).toContain('typeof v === "number" && isFinite(v) && v >= 0');
   });
@@ -344,8 +348,8 @@ describe("A5-5 §A5-5.5b — legacy <machine> computed-form end-to-end (S77 fix)
     expect(errors.filter(e => e.severity === "error")).toEqual([]);
     // Verify the runtime arm site is emitted (the IIFE body) and the
     // reactive read is rewritten through _scrml_reactive_get.
-    expect(clientJs).toContain("_scrml_machine_arm_timer");
-    expect(clientJs).toContain('_scrml_reactive_get("backoffDelay")');
+    expect(clientJs).toContain("_scrml_cs_machine_arm_timer");
+    expect(clientJs).toContain('_scrml_cs_reactive_get("backoffDelay")');
     // The IIFE clamp shape (matches emitDurationLiteral output).
     expect(clientJs).toMatch(/typeof v === ["']number["'] && isFinite\(v\)/);
   });
@@ -364,7 +368,7 @@ describe("A5-5 §A5-5.5b — legacy <machine> computed-form end-to-end (S77 fix)
     // a JSON-encoded rulesPayload (computed rules opt out per §51.12.4 S77).
     // The payload is a JSON-stringified JSON string, so quotes inside appear
     // backslash-escaped: `\"afterMs\":500`. Verify the literal entry is present.
-    expect(clientJs).toContain("_scrml_machine_arm_initial");
+    expect(clientJs).toContain("_scrml_cs_machine_arm_initial");
     expect(clientJs).toContain('\\"afterMs\\":500');
     // No IIFE wrapper for literal cases.
     expect(clientJs).not.toMatch(/typeof v === ["']number["'] && isFinite\(v\)/);
@@ -438,6 +442,8 @@ describe("A5-5 §A5-5.8 — reactive-read rewrite", () => {
       onTimeoutElements: [{ stateChildTag: "Loading", entry: { after: "${@attempt * 1000}ms", to: "Retry", rawOffset: 0 } }],
     };
     const out = emitEngineTimersTable(m).join("\n");
+    // Direct emit-unit output — the BUG-6 `_scrml_cs_` callee-rename runs at
+    // bundle assembly (index.ts), not in emitEngineTimersTable, so raw here.
     expect(out).toContain('_scrml_reactive_get("attempt")');
   });
 });

@@ -27,6 +27,7 @@ import { mkdtempSync, rmSync, existsSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -63,11 +64,9 @@ function mount(src, mutate = "") {
   const realErr = console.error;
   console.error = (...args) => { logs.push(args.map(String).join(" ")); };
 
-  const code = `(function() {\n${SCRML_RUNTIME}\n${clientJs}\n` +
-    `${mutate}\n` +
+  const code = `(function() {\n${SCRML_RUNTIME}\n` + captureInsideChunkScope(clientJs, `${mutate}\n` +
     `window.__sg = _scrml_reactive_get;\n` +
-    `window.__ss = _scrml_reactive_set;\n` +
-    `})();`;
+    `window.__ss = _scrml_reactive_set;\n`) + `\n})();`;
   try {
     eval(code);
     document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));

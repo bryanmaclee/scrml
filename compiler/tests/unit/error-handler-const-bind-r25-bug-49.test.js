@@ -60,6 +60,7 @@ import { compileScrml } from "../../src/api.js";
 import { writeFileSync, mkdirSync, rmSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // Capture console.warn output to assert "statement boundary not detected"
 // does NOT fire on the BARE shape after the fix.
@@ -125,7 +126,7 @@ describe("R25-Bug-49 §1: const r = call() !{ multi-line arms } — BARE shape",
     expect(result.errors).toHaveLength(0);
     expectNoStatementBoundaryWarning();
 
-    const clientJs = readFileSync(join(outDir, "repro.client.js"), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "repro.client.js"), "utf8")));
     // Arm bodies MUST emit
     expect(clientJs).toContain('_scrml_reactive_set("msg", "net")');
     expect(clientJs).toContain('_scrml_reactive_set("msg", "val")');
@@ -173,7 +174,7 @@ describe("R25-Bug-49 §2: let r = call() !{...} — let-binding form", () => {
     expect(result.errors).toHaveLength(0);
     expectNoStatementBoundaryWarning();
 
-    const clientJs = readFileSync(join(outDir, "repro.client.js"), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "repro.client.js"), "utf8")));
     expect(clientJs).toContain('_scrml_reactive_set("msg", "a")');
     expect(clientJs).toContain('_scrml_reactive_set("msg", "b")');
 
@@ -217,7 +218,7 @@ describe("R25-Bug-49 §3: const r = call() !{ payload binding }", () => {
     expect(result.errors).toHaveLength(0);
     expectNoStatementBoundaryWarning();
 
-    const clientJs = readFileSync(join(outDir, "repro.client.js"), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "repro.client.js"), "utf8")));
     // Payload-bound msg arm — the reactive_set carries the bound msg variable
     expect(clientJs).toMatch(/_scrml_reactive_set\("msg",\s*msg\)/);
     expect(clientJs).toContain('_scrml_reactive_set("msg", "val")');
@@ -260,7 +261,7 @@ describe("R25-Bug-49 §4: single-line collapsed arm body", () => {
     expect(result.errors).toHaveLength(0);
     expectNoStatementBoundaryWarning();
 
-    const clientJs = readFileSync(join(outDir, "repro.client.js"), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "repro.client.js"), "utf8")));
     expect(clientJs).toContain('_scrml_reactive_set("msg", "oops")');
 
     rmSync(tmp, { recursive: true, force: true });
@@ -308,7 +309,7 @@ describe("R25-Bug-49 §5: nested handler — `!{...}` inside an arm body", () =>
     expect(result.errors).toHaveLength(0);
     expectNoStatementBoundaryWarning();
 
-    const clientJs = readFileSync(join(outDir, "repro.client.js"), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "repro.client.js"), "utf8")));
     expect(clientJs).toContain('_scrml_reactive_set("inner", "y")');
     expect(clientJs).toContain('_scrml_reactive_set("outer", "x")');
 
@@ -356,7 +357,7 @@ describe("R25-Bug-49 §6: arm body with internal `if`/branch", () => {
     expect(result.errors).toHaveLength(0);
     expectNoStatementBoundaryWarning();
 
-    const clientJs = readFileSync(join(outDir, "repro.client.js"), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "repro.client.js"), "utf8")));
     expect(clientJs).toContain('_scrml_reactive_set("msg", "flag-on")');
     expect(clientJs).toContain('_scrml_reactive_set("msg", "flag-off")');
 
@@ -397,7 +398,7 @@ describe("R25-Bug-49 §7: bare-call `risky() !{...}` (no const binding)", () => 
     expect(result.errors).toHaveLength(0);
     expectNoStatementBoundaryWarning();
 
-    const clientJs = readFileSync(join(outDir, "repro.client.js"), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "repro.client.js"), "utf8")));
     expect(clientJs).toContain('_scrml_reactive_set("msg", "bad")');
     expect(clientJs).toContain('.variant === "Bad"');
 
@@ -438,7 +439,7 @@ describe("R25-Bug-49 §8: empty arm body `{}`", () => {
     expect(result.errors).toHaveLength(0);
     expectNoStatementBoundaryWarning();
 
-    const clientJs = readFileSync(join(outDir, "repro.client.js"), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "repro.client.js"), "utf8")));
     // Variant guard present even though arm body is empty
     expect(clientJs).toContain('.variant === "Bad"');
 
@@ -477,7 +478,7 @@ describe("R25-Bug-49 §9: bare const-decl without `!{...}` — control", () => {
     expect(result.errors).toHaveLength(0);
     expectNoStatementBoundaryWarning();
 
-    const clientJs = readFileSync(join(outDir, "repro.client.js"), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "repro.client.js"), "utf8")));
     expect(clientJs).toContain('_scrml_reactive_set("n", r)');
 
     rmSync(tmp, { recursive: true, force: true });
@@ -518,7 +519,7 @@ describe("R25-Bug-49 §10: trailing usage after const-bind handler", () => {
     expect(result.errors).toHaveLength(0);
     expectNoStatementBoundaryWarning();
 
-    const clientJs = readFileSync(join(outDir, "repro.client.js"), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "repro.client.js"), "utf8")));
     // Trailing reactive write uses `created` — confirms r/created binding survived
     // (spread lowers `@items` to `_scrml_reactive_get("items")`; the spread
     // expression carries `created` as the appended element).
@@ -563,7 +564,7 @@ describe("R25-Bug-49 §11: explicit `${...}` wrap — pre-existing BS path", () 
     expect(result.errors).toHaveLength(0);
     expectNoStatementBoundaryWarning();
 
-    const clientJs = readFileSync(join(outDir, "repro.client.js"), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "repro.client.js"), "utf8")));
     expect(clientJs).toContain('_scrml_reactive_set("msg", "bad")');
 
     rmSync(tmp, { recursive: true, force: true });
@@ -605,7 +606,7 @@ describe("R25-Bug-49 §12: PRIMER §6 canonical shape — adopter mirror", () =>
     expect(result.errors).toHaveLength(0);
     expectNoStatementBoundaryWarning();
 
-    const clientJs = readFileSync(join(outDir, "repro.client.js"), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "repro.client.js"), "utf8")));
     expect(clientJs).toMatch(/_scrml_reactive_set\("phase",\s*msg\)/);
     expect(clientJs).toContain('_scrml_reactive_set("phase", "empty")');
     expect(clientJs).toContain('_scrml_reactive_set("phase", "loaded")');

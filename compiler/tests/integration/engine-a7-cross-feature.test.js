@@ -29,6 +29,7 @@ import { buildAST } from "../../src/ast-builder.js";
 import { runSYM } from "../../src/symbol-table.ts";
 import { analyzeUsage } from "../../src/codegen/usage-analyzer.ts";
 import { compileScrml } from "../../src/api.js";
+import { unNamespaceEngineNames } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -56,7 +57,7 @@ function compileToClientJs(source, suffix = "a7x") {
     });
     const clientPath = resolve(outDir, `${name}.client.js`);
     const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
-    return { errors: result.errors ?? [], clientJs };
+    return { errors: result.errors ?? [], clientJs: unNamespaceEngineNames(clientJs) };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -283,7 +284,7 @@ describe("engine-a7-cross-feature §4 — named timer + cancelTimer inside compo
     expect(fatal).toEqual([]);
     // The named-timer composite-key cancelTimer lowering MUST land:
     //   _scrml_engine_clear_named_timer("appMode", "Confirming", "autoConfirm")
-    expect(clientJs).toContain('_scrml_engine_clear_named_timer("appMode", "Confirming", "autoConfirm")');
+    expect(clientJs).toContain('_scrml_cs_engine_clear_named_timer("appMode", "Confirming", "autoConfirm")');
     // And the named-timer entry itself must still be emitted.
     expect(clientJs).toContain('name: "autoConfirm"');
   });
@@ -335,7 +336,7 @@ describe("engine-a7-cross-feature §5 — computed-delay + composite", () => {
     expect(errors.filter((e) => e.severity === "error")).toEqual([]);
     // Computed form emits msExpr arrow.
     expect(clientJs).toContain("msExpr: function()");
-    expect(clientJs).toContain('_scrml_reactive_get("workDelayMs")');
+    expect(clientJs).toContain('_scrml_cs_reactive_get("workDelayMs")');
   });
 });
 

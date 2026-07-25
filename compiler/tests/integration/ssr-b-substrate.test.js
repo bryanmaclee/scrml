@@ -35,6 +35,7 @@ import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { runCG } from "../../src/code-generator.js";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -79,7 +80,7 @@ function compileBundles(source, { protectAnalysis = noProtect(), filePath = "/te
     protectAnalysis,
   });
   const out = result.outputs.get(filePath);
-  return { clientJs: out?.clientJs ?? "", serverJs: out?.serverJs ?? "", html: out?.html ?? "" };
+  return { clientJs:foldChunkNamespacing( foldChunkNamespacing(out?.clientJs ?? "")), serverJs: out?.serverJs ?? "", html: out?.html ?? "" };
 }
 
 // Full-pipeline compile (SYM/TS passes run) — needed for the §51.0.E engine
@@ -93,7 +94,7 @@ function compileFull(source) {
   try {
     const result = compileScrml({ inputFiles: [file], write: false, log: () => {} });
     const out = result.outputs ? [...result.outputs.values()][0] : null;
-    return { clientJs: out?.clientJs ?? "", serverJs: out?.serverJs ?? "", html: out?.html ?? "" };
+    return { clientJs:foldChunkNamespacing( foldChunkNamespacing(out?.clientJs ?? "")), serverJs: out?.serverJs ?? "", html: out?.html ?? "" };
   } finally {
     try { rmSync(dir, { recursive: true }); } catch { /* best effort */ }
   }
@@ -202,7 +203,7 @@ describe("ssr-b-substrate (b): protected columns are redacted in the inline seed
   });
 
   test("a protected column never appears as a raw client-side literal (no view-source leak path)", () => {
-    const { clientJs } = compileBundles(TIER1, { protectAnalysis: usersProtect() });
+    const { clientJs: __cjRaw } = compileBundles(TIER1, { protectAnalysis: usersProtect() }); const clientJs = foldChunkNamespacing(__cjRaw);
     // the redaction is server-side; the inline-state assignment is server-only.
     expect(clientJs).not.toContain("__scrml_ssr_state=");
     expect(clientJs).not.toContain("passwordHash");
@@ -221,7 +222,7 @@ describe("ssr-b-substrate (b): protected columns are redacted in the inline seed
 
 describe("ssr-b-substrate (c): the mount fetch IIFE is skipped for a seeded cell", () => {
   test("Tier-1 client load applies the seed then guards the fetch on _scrml_ssr_seeded", () => {
-    const { clientJs } = compileBundles(TIER1);
+    const { clientJs: __cjRaw } = compileBundles(TIER1); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toContain("_scrml_ssr_seed_apply();");
     expect(clientJs).toContain('if (_scrml_ssr_seeded("accounts")) return;');
     expect(clientJs).toContain('fetch("/__serverLoad/accounts"');
@@ -233,13 +234,13 @@ describe("ssr-b-substrate (c): the mount fetch IIFE is skipped for a seeded cell
   });
 
   test("Pattern-C client load guards its /__serverLoad fetch on the seed too", () => {
-    const { clientJs } = compileBundles(PATTERNC);
+    const { clientJs: __cjRaw } = compileBundles(PATTERNC); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toContain('if (_scrml_ssr_seeded("driver")) return;');
     expect(clientJs).toContain('fetch("/__serverLoad/driver"');
   });
 
   test("seed-apply runs BEFORE the fetch IIFEs (override placeholder, then skip RTT)", () => {
-    const { clientJs } = compileBundles(TIER1);
+    const { clientJs: __cjRaw } = compileBundles(TIER1); const clientJs = foldChunkNamespacing(__cjRaw);
     const applyIdx = clientJs.indexOf("_scrml_ssr_seed_apply();");
     const guardIdx = clientJs.indexOf('if (_scrml_ssr_seeded("accounts")) return;');
     expect(applyIdx).toBeGreaterThan(-1);
@@ -253,7 +254,7 @@ describe("ssr-b-substrate (c): the mount fetch IIFE is skipped for a seeded cell
 
 describe("ssr-b-substrate (d): the engine server=@cell ride hydrates at construction from the seed", () => {
   test("(full pipeline) the seed is applied before the E-leg reads the source cell at construction", () => {
-    const { clientJs } = compileFull(ENGINE_RIDE);
+    const { clientJs: __cjRaw } = compileFull(ENGINE_RIDE); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toContain("_scrml_ssr_seed_apply();");
     // E-leg reads the (now seeded) source cell + hydrates guard-free at construction
     expect(clientJs).toContain('_scrml_reactive_get("driver")');
@@ -267,7 +268,7 @@ describe("ssr-b-substrate (d): the engine server=@cell ride hydrates at construc
   });
 
   test("the source cell's /__serverLoad fetch is skipped when seeded (no post-mount fetch)", () => {
-    const { clientJs } = compileBundles(ENGINE_RIDE);
+    const { clientJs: __cjRaw } = compileBundles(ENGINE_RIDE); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toContain('if (_scrml_ssr_seeded("driver")) return;');
   });
 
@@ -290,7 +291,7 @@ describe("ssr-b-substrate (e): a non-server-authority / non-protect page emits n
   });
 
   test("no seed-apply call and no seed-skip guard in the client bundle (fetch path unchanged)", () => {
-    const { clientJs } = compileBundles(NON_SERVER);
+    const { clientJs: __cjRaw } = compileBundles(NON_SERVER); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).not.toContain("_scrml_ssr_seed_apply");
     expect(clientJs).not.toContain("_scrml_ssr_seeded");
   });
@@ -313,7 +314,7 @@ describe("ssr-b-substrate parity: Tier-1 + Tier-2 Pattern-C + derived all seed u
   });
 
   test("a derived cell over a server source recomputes from the seeded source (its source is baked, not the derived value)", () => {
-    const { serverJs, clientJs } = compileBundles(DERIVED);
+    const { serverJs, clientJs: __cjRaw } = compileBundles(DERIVED); const clientJs = foldChunkNamespacing(__cjRaw);
     // the SERVER source @accounts is baked; @accountCount is NOT a separate seed key
     expect(serverJs).toContain('_scrml_ssr_state["accounts"]');
     expect(serverJs).not.toContain('_scrml_ssr_state["accountCount"]');

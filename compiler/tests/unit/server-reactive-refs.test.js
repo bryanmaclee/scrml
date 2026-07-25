@@ -27,6 +27,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { runCG } from "../../src/code-generator.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -132,7 +133,7 @@ function makeServerHandler(fnName, body = [], params = [], routeOpts = {}) {
   }]);
   const result = runCGForFile([makeLogicBlock([fnNode], span(90))], routeMap);
   const serverJs = result.outputs.get("/test/app.scrml").serverJs ?? "";
-  const clientJs = result.outputs.get("/test/app.scrml").clientJs ?? "";
+  const clientJs =foldChunkNamespacing( foldChunkNamespacing(result.outputs.get("/test/app.scrml").clientJs ?? ""));
   return { result, serverJs, clientJs };
 }
 
@@ -144,7 +145,7 @@ function makeClientHandler(fnName, body = [], params = []) {
   const fnNode = makeFunctionDecl(fnName, body, params, { span: fnSpan });
   const routeMap = makeRouteMap([]); // no server route
   const result = runCGForFile([makeLogicBlock([fnNode], span(190))], routeMap);
-  const clientJs = result.outputs.get("/test/app.scrml").clientJs ?? "";
+  const clientJs =foldChunkNamespacing( foldChunkNamespacing(result.outputs.get("/test/app.scrml").clientJs ?? ""));
   return { result, clientJs };
 }
 
@@ -245,9 +246,9 @@ describe("SR6: client function @var still uses _scrml_reactive_get (no regressio
   test("@counter in client function becomes _scrml_reactive_get in client JS", () => {
     // A client-only function (no server route entry) must continue to use
     // _scrml_reactive_get for @var references.
-    const { clientJs } = makeClientHandler("increment", [
+    const { clientJs: __cjRaw } = makeClientHandler("increment", [
       makeBareExpr("@counter + 1", span(210)),
-    ]);
+    ]); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toContain('_scrml_reactive_get("counter")');
   });
 });

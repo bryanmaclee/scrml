@@ -28,6 +28,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { nativeParseFile } from "../../native-parser/parse-file.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -65,7 +66,7 @@ function compileWith(source, parser, suffix) {
     if (parser) opts.parser = parser;
     const result = compileScrml(opts);
     const clientPath = resolve(outDir, `${name}.client.js`);
-    const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""));
     return {
       errors: result.errors ?? [],
       warnings: result.warnings ?? [],
@@ -108,7 +109,7 @@ describe("each-as-tuple §1 — legacy parse captures asNames", () => {
     // Drive the full compile (legacy) and assert no parse errors. Node-level
     // assertion uses the native parser path in §2; here we verify the legacy
     // pipeline accepts the form and emits the bindings (the parse evidence).
-    const { errors, clientJs } = compileWith(TUPLE_SRC, null, "leg-parse");
+    const { errors, clientJs: __cjRaw } = compileWith(TUPLE_SRC, null, "leg-parse"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // The over-read iteration-source must be CLEANED — `.entries()`/`@pairs`
     // iteration source must not carry the `as (k, v)` tail.
@@ -152,7 +153,7 @@ for (const parser of [null, "scrml-native"]) {
   const label = parser ? "native" : "legacy";
   describe(`each-as-tuple §3 — codegen bind (${label})`, () => {
     test("emits `const k = item.key; const v = item.value;` per-item", () => {
-      const { errors, clientJs } = compileWith(TUPLE_SRC, parser, `cg-${label}`);
+      const { errors, clientJs: __cjRaw } = compileWith(TUPLE_SRC, parser, `cg-${label}`); const clientJs = foldChunkNamespacing(__cjRaw);
       expect(errors).toEqual([]);
       // The synthetic entry-struct iter var is the item; k/v derive from it.
       expect(clientJs).toContain("const k = _scrml_each_item.key;");
@@ -163,7 +164,7 @@ for (const parser of [null, "scrml-native"]) {
     });
 
     test("derives k/v INSIDE the live-keyed effect (re-resolve across reconcile)", () => {
-      const { errors, clientJs } = compileWith(TUPLE_SRC, parser, `cg-eff-${label}`);
+      const { errors, clientJs: __cjRaw } = compileWith(TUPLE_SRC, parser, `cg-eff-${label}`); const clientJs = foldChunkNamespacing(__cjRaw);
       expect(errors).toEqual([]);
       // The effect re-binds the item then re-derives k/v before the body runs,
       // so `${k}`/`${v}` stay live when the list reconciles.
@@ -197,7 +198,7 @@ describe("each-as-tuple §5 — single-name `as e` regression", () => {
   for (const parser of [null, "scrml-native"]) {
     const label = parser ? "native" : "legacy";
     test(`\`as e\` + e.key/e.value still compiles + binds (${label})`, () => {
-      const { errors, clientJs } = compileWith(SINGLE_SRC, parser, `single-${label}`);
+      const { errors, clientJs: __cjRaw } = compileWith(SINGLE_SRC, parser, `single-${label}`); const clientJs = foldChunkNamespacing(__cjRaw);
       expect(errors).toEqual([]);
       // Single-name form: iter var is `e` (NOT the synthetic default), and the
       // destructure bindings are ABSENT (no `const k`/`const v`).
@@ -225,13 +226,13 @@ describe("each-as-tuple §6 — body-output equivalence with `as e` baseline", (
       // String(k)/String(v); the `as e` form assigns String(e.key)/String(e.value).
       // Both produce the SAME two textContent slots from the SAME entry fields.
       // Assert both forms read `.key` then `.value` in body order.
-      const tupleKeyIdx = tuple.clientJs.indexOf("const k = _scrml_each_item.key;");
-      const tupleValIdx = tuple.clientJs.indexOf("const v = _scrml_each_item.value;");
+      const tupleKeyIdx = foldChunkNamespacing(tuple.clientJs).indexOf("const k = _scrml_each_item.key;");
+      const tupleValIdx = foldChunkNamespacing(tuple.clientJs).indexOf("const v = _scrml_each_item.value;");
       expect(tupleKeyIdx).toBeGreaterThanOrEqual(0);
       expect(tupleValIdx).toBeGreaterThan(tupleKeyIdx);
       // Baseline reads e.key before e.value in the same body order.
-      const baseKeyIdx = single.clientJs.indexOf("String(e.key)");
-      const baseValIdx = single.clientJs.indexOf("String(e.value)");
+      const baseKeyIdx = foldChunkNamespacing(single.clientJs).indexOf("String(e.key)");
+      const baseValIdx = foldChunkNamespacing(single.clientJs).indexOf("String(e.value)");
       expect(baseKeyIdx).toBeGreaterThanOrEqual(0);
       expect(baseValIdx).toBeGreaterThan(baseKeyIdx);
     });

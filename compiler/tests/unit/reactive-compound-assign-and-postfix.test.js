@@ -45,6 +45,7 @@ import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
@@ -65,13 +66,13 @@ function compile(scrmlSource) {
     let clientJs = null;
     for (const [fp, output] of result.outputs) {
       if (fp.includes(tag)) {
-        clientJs = output.clientJs ?? null;
+        clientJs =foldChunkNamespacing( foldChunkNamespacing(foldChunkNamespacing(output.clientJs) ?? null));
       }
     }
     return {
       errors: result.errors ?? [],
       warnings: result.warnings ?? [],
-      clientJs: clientJs ?? "",
+      clientJs:foldChunkNamespacing( foldChunkNamespacing(clientJs ?? "")),
     };
   } finally {
     if (existsSync(tmpInput)) rmSync(tmpInput);
@@ -99,14 +100,14 @@ describe("W14 Unit BB — compound assign + postfix update for @x reactive vars"
         const src = `<program>\n  <x> = 0\n  \${ function go() { ${expr} } }\n  <button onclick=go()>Go</button>\n</>\n`;
         const r = compile(src);
         expect(r.errors).toHaveLength(0);
-        expect(r.clientJs).toContain(expected);
+        expect(foldChunkNamespacing(r.clientJs)).toContain(expected);
         // CRITICAL: the broken pre-Bug-A emission was
         // `_scrml_reactive_get("x")++` (invalid lvalue) or `... + +` (split
         // ++). Neither should appear in the output.
-        expect(r.clientJs).not.toContain('_scrml_reactive_get("x")++');
-        expect(r.clientJs).not.toContain('_scrml_reactive_get("x")--');
-        expect(r.clientJs).not.toContain("+ +");
-        expect(r.clientJs).not.toContain("- -");
+        expect(foldChunkNamespacing(r.clientJs)).not.toContain('_scrml_reactive_get("x")++');
+        expect(foldChunkNamespacing(r.clientJs)).not.toContain('_scrml_reactive_get("x")--');
+        expect(foldChunkNamespacing(r.clientJs)).not.toContain("+ +");
+        expect(foldChunkNamespacing(r.clientJs)).not.toContain("- -");
       });
     }
   });
@@ -131,7 +132,7 @@ describe("W14 Unit BB — compound assign + postfix update for @x reactive vars"
         const r = compile(src);
         expect(r.errors).toHaveLength(0);
         // Pre-fix the entire compound write was silently dropped.
-        expect(r.clientJs).toContain(expected);
+        expect(foldChunkNamespacing(r.clientJs)).toContain(expected);
       });
     }
 
@@ -144,9 +145,9 @@ describe("W14 Unit BB — compound assign + postfix update for @x reactive vars"
       //  would be silently dropped: ..."
       // and every compound + postfix line was dropped. Verify all five forms
       // emit their corresponding setter call.
-      expect(r.clientJs).toContain('_scrml_reactive_set("x", _scrml_reactive_get("x") + 1)');
-      expect(r.clientJs).toContain('_scrml_reactive_set("x", _scrml_reactive_get("x") - 1)');
-      expect(r.clientJs).toContain('_scrml_reactive_set("x", _scrml_reactive_get("x") * 2)');
+      expect(foldChunkNamespacing(r.clientJs)).toContain('_scrml_reactive_set("x", _scrml_reactive_get("x") + 1)');
+      expect(foldChunkNamespacing(r.clientJs)).toContain('_scrml_reactive_set("x", _scrml_reactive_get("x") - 1)');
+      expect(foldChunkNamespacing(r.clientJs)).toContain('_scrml_reactive_set("x", _scrml_reactive_get("x") * 2)');
     });
   });
 
@@ -160,16 +161,16 @@ describe("W14 Unit BB — compound assign + postfix update for @x reactive vars"
       expect(r.errors).toHaveLength(0);
       // The arrow body's exprNode is `unary{op:"++",argument:ident("@x"),prefix:false}`;
       // emitUnary's W14-BB lowering should produce the setter form.
-      expect(r.clientJs).toContain('() => _scrml_reactive_set("x", _scrml_reactive_get("x") + 1)');
+      expect(foldChunkNamespacing(r.clientJs)).toContain('() => _scrml_reactive_set("x", _scrml_reactive_get("x") + 1)');
       // Pre-fix: () => _scrml_reactive_get("x")++  (invalid — runtime ReferenceError)
-      expect(r.clientJs).not.toContain('_scrml_reactive_get("x")++');
+      expect(foldChunkNamespacing(r.clientJs)).not.toContain('_scrml_reactive_get("x")++');
     });
 
     test("@x += 1 in arrow body lowers to setter", () => {
       const src = `<program>\n  <x> = 0\n  <button onclick=\${() => @x += 1}>Add</button>\n</>\n`;
       const r = compile(src);
       expect(r.errors).toHaveLength(0);
-      expect(r.clientJs).toContain('() => _scrml_reactive_set("x", _scrml_reactive_get("x") + 1)');
+      expect(foldChunkNamespacing(r.clientJs)).toContain('() => _scrml_reactive_set("x", _scrml_reactive_get("x") + 1)');
     });
   });
 
@@ -181,7 +182,7 @@ describe("W14 Unit BB — compound assign + postfix update for @x reactive vars"
       const src = `<program>\n  <x> = 0\n  <button onclick=@x++>Inc</button>\n</>\n`;
       const r = compile(src);
       expect(r.errors).toHaveLength(0);
-      expect(r.clientJs).toContain('_scrml_reactive_set("x", _scrml_reactive_get("x") + 1)');
+      expect(foldChunkNamespacing(r.clientJs)).toContain('_scrml_reactive_set("x", _scrml_reactive_get("x") + 1)');
     });
 
     test("onclick=@x+=1 wires the setter form", () => {
@@ -190,7 +191,7 @@ describe("W14 Unit BB — compound assign + postfix update for @x reactive vars"
       expect(r.errors).toHaveLength(0);
       // Bare-form attribute uses the regex pipeline which wraps RHS in parens.
       // The compound-assign rewriter produces `... + (1)` (regex form).
-      expect(r.clientJs).toMatch(/_scrml_reactive_set\("x", _scrml_reactive_get\("x"\) \+ \(?1\)?\)/);
+      expect(foldChunkNamespacing(r.clientJs)).toMatch(/_scrml_reactive_set\("x", _scrml_reactive_get\("x"\) \+ \(?1\)?\)/);
     });
   });
 
@@ -207,8 +208,8 @@ describe("W14 Unit BB — compound assign + postfix update for @x reactive vars"
       expect(rp.errors).toHaveLength(0);
       // Both must use _scrml_reactive_set (the same reactive-trigger helper);
       // codegen lowers them to byte-identical setter calls modulo tmp-var name.
-      expect(rc.clientJs).toContain('_scrml_reactive_set("x", _scrml_reactive_get("x") + 1)');
-      expect(rp.clientJs).toContain('_scrml_reactive_set("x", _scrml_reactive_get("x") + 1)');
+      expect(foldChunkNamespacing(rc.clientJs)).toContain('_scrml_reactive_set("x", _scrml_reactive_get("x") + 1)');
+      expect(foldChunkNamespacing(rp.clientJs)).toContain('_scrml_reactive_set("x", _scrml_reactive_get("x") + 1)');
     });
 
     test("postfix update fires _scrml_reactive_set (not a bare ++ which would skip the reactive trigger)", () => {
@@ -217,7 +218,7 @@ describe("W14 Unit BB — compound assign + postfix update for @x reactive vars"
       expect(r.errors).toHaveLength(0);
       // The reactive trigger fires through _scrml_reactive_set. A bare `++`
       // would skip the dependent-cell propagation entirely.
-      expect(r.clientJs).toContain('_scrml_reactive_set("x", _scrml_reactive_get("x") + 1)');
+      expect(foldChunkNamespacing(r.clientJs)).toContain('_scrml_reactive_set("x", _scrml_reactive_get("x") + 1)');
     });
   });
 
@@ -238,13 +239,13 @@ describe("W14 Unit BB — compound assign + postfix update for @x reactive vars"
       // prefix-update output, to lock the deferred-scope decision in place.
       // (If/when SPEC adds prefix, flip this to .toContain and adjust the
       // implementation in emit-expr.ts:emitUnary.)
-      const hasReactiveSet = /_scrml_reactive_set\("x",\s*_scrml_reactive_get\("x"\)\s*\+\s*1\)/.test(r.clientJs);
+      const hasReactiveSet = /_scrml_reactive_set\("x",\s*_scrml_reactive_get\("x"\)\s*\+\s*1\)/.test(foldChunkNamespacing(r.clientJs));
       if (hasReactiveSet) {
         // Optimistic: an unrelated emit path lowered it correctly. Pass.
         expect(true).toBe(true);
       } else {
         // Pessimistic: pre-fix shape. Document the deferral.
-        expect(r.clientJs.includes("++") || hasReactiveSet).toBe(true);
+        expect(foldChunkNamespacing(r.clientJs).includes("++") || hasReactiveSet).toBe(true);
       }
     });
   });

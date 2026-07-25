@@ -13,6 +13,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { runCG } from "../../src/code-generator.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -113,9 +114,9 @@ describe("§1: encoding disabled by default", () => {
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toBeDefined();
-    expect(out.clientJs).not.toContain("_scrml_decode_table");
-    expect(out.clientJs).not.toContain("_scrml_reflect");
+    expect(foldChunkNamespacing(out.clientJs)).toBeDefined();
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("_scrml_decode_table");
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("_scrml_reflect");
   });
 
   test("runCG with encoding: false does not emit decode table", () => {
@@ -132,9 +133,9 @@ describe("§1: encoding disabled by default", () => {
     });
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).not.toContain("_scrml_decode_table");
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("_scrml_decode_table");
     // Original name should appear as-is
-    expect(out.clientJs).toContain('"count"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('"count"');
   });
 });
 
@@ -161,11 +162,11 @@ describe("§2: encoding enabled — reactive vars get encoded names", () => {
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toBeDefined();
+    expect(foldChunkNamespacing(out.clientJs)).toBeDefined();
     // The encoded name starts with _x (asIs kind marker)
-    expect(out.clientJs).toContain("_scrml_reactive_set(");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_reactive_set(");
     // Original name "count" should NOT appear as a reactive key
-    expect(out.clientJs).not.toContain('_scrml_reactive_set("count"');
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain('_scrml_reactive_set("count"');
   });
 
   test("multiple reactive vars each get distinct encoded names", () => {
@@ -190,10 +191,10 @@ describe("§2: encoding enabled — reactive vars get encoded names", () => {
 
     const out = result.outputs.get("/test/app.scrml");
     // Neither "a" nor "b" should appear as reactive keys
-    expect(out.clientJs).not.toContain('_scrml_reactive_set("a"');
-    expect(out.clientJs).not.toContain('_scrml_reactive_set("b"');
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain('_scrml_reactive_set("a"');
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain('_scrml_reactive_set("b"');
     // Should have two _scrml_reactive_set calls with encoded names
-    const setMatches = out.clientJs.match(/_scrml_reactive_set\("/g);
+    const setMatches = foldChunkNamespacing(out.clientJs).match(/_scrml_reactive_set\("/g);
     expect(setMatches.length).toBeGreaterThanOrEqual(2);
   });
 });
@@ -225,9 +226,9 @@ describe("§3: encoding + runtime meta blocks — decode table emitted", () => {
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain("_scrml_decode_table");
-    expect(out.clientJs).toContain("_scrml_reflect");
-    expect(out.clientJs).toContain("type decode table");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_decode_table");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_reflect");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("type decode table");
   });
 });
 
@@ -254,8 +255,8 @@ describe("§4: encoding without meta blocks — decode table tree-shaken", () =>
 
     const out = result.outputs.get("/test/app.scrml");
     // Encoding is enabled and names are encoded, but no decode table
-    expect(out.clientJs).not.toContain("_scrml_decode_table");
-    expect(out.clientJs).not.toContain("_scrml_reflect");
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("_scrml_decode_table");
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("_scrml_reflect");
   });
 
   test("meta block without capturedScope is NOT a runtime meta block", () => {
@@ -286,7 +287,7 @@ describe("§4: encoding without meta blocks — decode table tree-shaken", () =>
     });
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).not.toContain("_scrml_decode_table");
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("_scrml_decode_table");
   });
 });
 
@@ -313,7 +314,7 @@ describe("§5: debug mode encoding", () => {
 
     const out = result.outputs.get("/test/app.scrml");
     // Debug mode: encoded names contain $originalName
-    expect(out.clientJs).toContain("$score");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("$score");
   });
 
   test("non-debug mode does not produce $ in encoded names", () => {
@@ -334,7 +335,7 @@ describe("§5: debug mode encoding", () => {
 
     const out = result.outputs.get("/test/app.scrml");
     // The reactive set call should not contain $ (debug suffix)
-    const setCallMatch = out.clientJs.match(/_scrml_reactive_set\("([^"]+)"/);
+    const setCallMatch = foldChunkNamespacing(out.clientJs).match(/_scrml_reactive_set\("([^"]+)"/);
     expect(setCallMatch).toBeTruthy();
     expect(setCallMatch[1]).not.toContain("$");
   });
@@ -369,7 +370,7 @@ describe("§6: encoded names in reactive_set calls", () => {
 
     const out = result.outputs.get("/test/app.scrml");
     // The encoded name should start with _s (struct kind marker)
-    const setCallMatch = out.clientJs.match(/_scrml_reactive_set\("(_[a-z][0-9a-z]{8}[0-9a-z])"/);
+    const setCallMatch = foldChunkNamespacing(out.clientJs).match(/_scrml_reactive_set\("(_[a-z][0-9a-z]{8}[0-9a-z])"/);
     expect(setCallMatch).toBeTruthy();
     // Kind marker 's' for struct
     expect(setCallMatch[1][1]).toBe("s");
@@ -391,7 +392,7 @@ describe("§6: encoded names in reactive_set calls", () => {
 
     const out = result.outputs.get("/test/app.scrml");
     // Should use 'x' kind marker for asIs
-    const setCallMatch = out.clientJs.match(/_scrml_reactive_set\("(_[a-z][0-9a-z]{8}[0-9a-z])"/);
+    const setCallMatch = foldChunkNamespacing(out.clientJs).match(/_scrml_reactive_set\("(_[a-z][0-9a-z]{8}[0-9a-z])"/);
     expect(setCallMatch).toBeTruthy();
     expect(setCallMatch[1][1]).toBe("x");
   });
@@ -416,7 +417,7 @@ describe("§7: CgInput.encoding field variants", () => {
     });
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('"x"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('"x"');
   });
 
   test("encoding: { enabled: false } treated as disabled", () => {
@@ -433,6 +434,6 @@ describe("§7: CgInput.encoding field variants", () => {
     });
 
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('"x"');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('"x"');
   });
 });

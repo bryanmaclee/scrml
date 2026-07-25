@@ -31,6 +31,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 // repro-1: one outer group whose items render as nested <li>s. The inner each's
 // source `g.items` references the OUTER alias `g`, bound only in the outer factory.
@@ -120,7 +121,7 @@ describe("nested-each §1 — emit shape (inline inner each, no phantom module-s
     const { clientJs } = compileToOutputs(NESTED_SRC, "nested");
     // Exactly ONE module-scope each render fn (the OUTER each). The inner each
     // is inline; it gets no `function _scrml_each_render_<innerId>() {` of its own.
-    const renderFnCount = (clientJs.match(/^function _scrml_each_render_\d+\(\) \{/gm) || []).length;
+    const renderFnCount = (clientJs.match(/^function _scrml_each_render_[0-9a-z]{8}_\d+\(\) \{/gm) || []).length;
     expect(renderFnCount).toBe(1);
     // No unhandled-kind drop comment for the inner each.
     expect(clientJs).not.toContain('each: unhandled template child kind="each-block"');
@@ -155,9 +156,8 @@ describe("nested-each §2 — nested list populates (real module-init order)", (
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${clientJs}\n` +
-        `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
-        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`,
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
+        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`),
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));

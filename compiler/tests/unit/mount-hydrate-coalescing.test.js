@@ -24,6 +24,7 @@ import { compileScrml } from "../../src/api.js";
 import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function compile(source) {
   const dir = mkdtempSync(join(tmpdir(), "scrml-mh-"));
@@ -37,7 +38,7 @@ function compile(source) {
 }
 
 function clientJsOf(result) {
-  return [...(result.outputs?.values() ?? [])].map((o) => o.clientJs ?? "").join("\n");
+  return [...(result.outputs?.values() ?? [])].map((o) => foldChunkNamespacing(o.clientJs) ?? "").join("\n");
 }
 function serverJsOf(result) {
   return [...(result.outputs?.values() ?? [])].map((o) => o.serverJs ?? "").join("\n");

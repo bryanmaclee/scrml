@@ -32,6 +32,7 @@ import { generateHtml } from "../../src/codegen/emit-html.js";
 import { emitBindings } from "../../src/codegen/emit-bindings.ts";
 import { hasTemplateInterpolation, rewriteTemplateAttrValue } from "../../src/codegen/rewrite.js";
 import { resetVarCounter } from "../../src/codegen/var-counter.ts";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -309,7 +310,7 @@ describe("§11 Client JS — setAttribute call", () => {
       protectAnalysis: makeProtectAnalysis(),
       embedRuntime: true,
     });
-    const { clientJs } = result.outputs.get("/test/app.scrml");
+    const { clientJs: __cjRaw } = result.outputs.get("/test/app.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toContain(`setAttribute("class"`);
     expect(clientJs).toContain(`_scrml_reactive_get("status")`);
   });
@@ -324,7 +325,7 @@ describe("§11 Client JS — setAttribute call", () => {
       protectAnalysis: makeProtectAnalysis(),
       embedRuntime: true,
     });
-    const { clientJs } = result.outputs.get("/test/app.scrml");
+    const { clientJs: __cjRaw } = result.outputs.get("/test/app.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
     // Should use a JS template literal (backtick) not string concatenation
     expect(clientJs).toMatch(/setAttribute\("class",\s*`item-\$\{_scrml_reactive_get\("status"\)\}`\)/);
   });
@@ -345,7 +346,7 @@ describe("§12 Client JS — reactive subscription wired", () => {
       protectAnalysis: makeProtectAnalysis(),
       embedRuntime: true,
     });
-    const { clientJs } = result.outputs.get("/test/app.scrml");
+    const { clientJs: __cjRaw } = result.outputs.get("/test/app.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toContain(`_scrml_effect`);
     expect(clientJs).toContain(`_scrml_reactive_get("status")`);
   });
@@ -360,7 +361,7 @@ describe("§12 Client JS — reactive subscription wired", () => {
       protectAnalysis: makeProtectAnalysis(),
       embedRuntime: true,
     });
-    const { clientJs } = result.outputs.get("/test/app.scrml");
+    const { clientJs: __cjRaw } = result.outputs.get("/test/app.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toContain(`_scrml_effect`);
     expect(clientJs).toContain(`setAttribute("class"`);
   });
@@ -381,7 +382,7 @@ describe("§13 Client JS — non-reactive interpolation skips subscription", () 
       protectAnalysis: makeProtectAnalysis(),
       embedRuntime: true,
     });
-    const { clientJs } = result.outputs.get("/test/app.scrml");
+    const { clientJs: __cjRaw } = result.outputs.get("/test/app.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
     // setAttribute should still be called (one-time wiring)
     expect(clientJs).toContain(`setAttribute("class"`);
     // But no effect call since idx is not reactive (runtime defines _scrml_effect, but no call emitted)
@@ -404,7 +405,7 @@ describe("§14 Client JS — multiple reactive vars → single auto-tracking eff
       protectAnalysis: makeProtectAnalysis(),
       embedRuntime: true,
     });
-    const { clientJs } = result.outputs.get("/test/app.scrml");
+    const { clientJs: __cjRaw } = result.outputs.get("/test/app.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toContain(`_scrml_effect`);
     expect(clientJs).toContain(`_scrml_reactive_get("a")`);
     expect(clientJs).toContain(`_scrml_reactive_get("b")`);
@@ -442,7 +443,7 @@ describe("§15 E2E — class=\"item-${@status}\"", () => {
       protectAnalysis: makeProtectAnalysis(),
       embedRuntime: true,
     });
-    const { html, clientJs } = result.outputs.get("/test/app.scrml");
+    const { html, clientJs: __cjRaw } = result.outputs.get("/test/app.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
 
     // Extract placeholder ID from HTML
     const htmlMatch = html.match(/data-scrml-attr-tpl-class="(_scrml_[^"]+)"/);
@@ -482,7 +483,7 @@ describe("§16 E2E — mixed reactive and non-reactive interpolation", () => {
       protectAnalysis: makeProtectAnalysis(),
       embedRuntime: true,
     });
-    const { clientJs } = result.outputs.get("/test/app.scrml");
+    const { clientJs: __cjRaw } = result.outputs.get("/test/app.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toContain(`_scrml_effect`);
     expect(clientJs).toContain(`_scrml_reactive_get("isActive")`);
     expect(clientJs).toContain(`setAttribute("class"`);
@@ -504,7 +505,7 @@ describe("§17 E2E — template-attr on non-class attribute", () => {
       protectAnalysis: makeProtectAnalysis(),
       embedRuntime: true,
     });
-    const { html, clientJs } = result.outputs.get("/test/app.scrml");
+    const { html, clientJs: __cjRaw } = result.outputs.get("/test/app.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(html).toContain(`data-scrml-attr-tpl-data-id="`);
     expect(clientJs).toContain(`setAttribute("data-id"`);
     expect(clientJs).toContain(`_scrml_effect`);
@@ -521,7 +522,7 @@ describe("§17 E2E — template-attr on non-class attribute", () => {
       protectAnalysis: makeProtectAnalysis(),
       embedRuntime: true,
     });
-    const { clientJs } = result.outputs.get("/test/app.scrml");
+    const { clientJs: __cjRaw } = result.outputs.get("/test/app.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toContain(`setAttribute("aria-label"`);
     expect(clientJs).toContain(`_scrml_effect`);
   });
@@ -545,7 +546,7 @@ describe("§18 E2E — multiple elements with template-attrs", () => {
       protectAnalysis: makeProtectAnalysis(),
       embedRuntime: true,
     });
-    const { html, clientJs } = result.outputs.get("/test/app.scrml");
+    const { html, clientJs: __cjRaw } = result.outputs.get("/test/app.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
 
     // Two distinct placeholder IDs in HTML
     const placeholderMatches = [...html.matchAll(/data-scrml-attr-tpl-class="(_scrml_[^"]+)"/g)];

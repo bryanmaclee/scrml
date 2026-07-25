@@ -58,6 +58,7 @@ import { generateClientJs } from "../../src/codegen/emit-client.ts";
 import { makeCompileContext } from "../../src/codegen/context.ts";
 import { BindingRegistry } from "../../src/codegen/binding-registry.ts";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -816,7 +817,7 @@ export
 
     const enginesClientPath = join(outDir, "engines.client.js");
     expect(existsSync(enginesClientPath)).toBe(true);
-    const enginesClient = readFileSync(enginesClientPath, "utf8");
+    const enginesClient = foldChunkNamespacing(readFileSync(enginesClientPath, "utf8"));
 
     // C12 substrate must be in the EXPORTER's compiled output, not the importer's
     expect(enginesClient).toContain("__scrml_engine_phase_transitions");
@@ -868,9 +869,9 @@ export
     });
     expect(realCompileErrors(result)).toEqual([]);
 
-    const aClient = readFileSync(join(outDir, "a.client.js"), "utf8");
-    const bClient = readFileSync(join(outDir, "b.client.js"), "utf8");
-    const enginesClient = readFileSync(join(outDir, "engines.client.js"), "utf8");
+    const aClient = foldChunkNamespacing(readFileSync(join(outDir, "a.client.js"), "utf8"));
+    const bClient = foldChunkNamespacing(readFileSync(join(outDir, "b.client.js"), "utf8"));
+    const enginesClient = foldChunkNamespacing(readFileSync(join(outDir, "engines.client.js"), "utf8"));
 
     // Both importers have the marker
     expect(aClient).toContain("§21.8 cross-file engine mount: phase");
@@ -936,7 +937,7 @@ export
     const enginesClientPath = join(outDir, "engines.client.js");
     const reexportClientPath = join(outDir, "reexport.client.js");
     expect(existsSync(enginesClientPath)).toBe(true);
-    const enginesClient = readFileSync(enginesClientPath, "utf8");
+    const enginesClient = foldChunkNamespacing(readFileSync(enginesClientPath, "utf8"));
 
     // The substrate lives EXCLUSIVELY in the original exporter
     expect(enginesClient).toContain('_scrml_reactive_set("phase", "Idle");');

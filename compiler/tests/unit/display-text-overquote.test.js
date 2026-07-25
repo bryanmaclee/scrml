@@ -25,6 +25,7 @@ import { compileScrml } from "../../src/api.js";
 import { mkdtempSync, writeFileSync, rmSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 let TMP;
 beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "overquote-")); });

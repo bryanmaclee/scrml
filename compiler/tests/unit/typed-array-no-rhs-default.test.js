@@ -48,6 +48,8 @@ import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { foldChunkNamespacing, unwrapChunkScope } from "../helpers/chunk-scope.js";
 
 function parse(source, filePath = "/test/app.scrml") {
   const bs = splitBlocks(filePath, source);
@@ -79,7 +81,7 @@ function compileToTmp(source, baseName = "app") {
 }
 
 function readClient(out, baseName) {
-  return readFileSync(join(out, `${baseName}.client.js`), "utf-8");
+  return foldChunkNamespacing(readFileSync(join(out, `${baseName}.client.js`), "utf-8"));
 }
 
 describe("§6.2 Shape 4 — typed-array no-RHS default to [] (AST)", () => {
@@ -255,7 +257,12 @@ describe("§6.2 Shape 4 — runtime (happy-dom)", () => {
   // and then drives the render — the correct ordering the codegen bug subverts.
   function execClientInitFirst(out, baseName, result) {
     const html = readFileSync(join(out, `${baseName}.html`), "utf-8");
-    const clientJs = readFileSync(join(out, `${baseName}.client.js`), "utf-8");
+    // BUG-6/N3: unwrap the chunk scope so the body is bare + top-level (no IIFE,
+    // no `_scrml_cs_` prologue). The line-reordering below partitions bare
+    // `_scrml_reactive_set(...)` init statements; a folded prologue would smuggle
+    // a self-recursive `const _scrml_reactive_get = ... => _scrml_reactive_get(...)`
+    // into the def block and blow the stack.
+    const clientJs = unwrapChunkScope(readFileSync(join(out, `${baseName}.client.js`), "utf-8"));
     const runtimeJs = readFileSync(
       join(out, result.runtimeFilename ?? "scrml-runtime.js"),
       "utf-8",
@@ -282,9 +289,8 @@ describe("§6.2 Shape 4 — runtime (happy-dom)", () => {
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${reordered}\n` +
-        `globalThis.__scrml_reactive_set__ = _scrml_reactive_set;\n` +
-        `globalThis.__scrml_reactive_get__ = _scrml_reactive_get;\n`,
+      `${runtimeJs}\n` + captureInsideChunkScope(reordered, `globalThis.__scrml_reactive_set__ = _scrml_reactive_set;\n` +
+        `globalThis.__scrml_reactive_get__ = _scrml_reactive_get;\n`),
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));

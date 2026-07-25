@@ -26,6 +26,8 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { nativeParseFile } from "../../native-parser/parse-file.js";
 import { compileScrml } from "../../src/api.js";
+import { normalizeChunkToken } from "../helpers/chunk-scope.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -94,7 +96,7 @@ function compileWith(source, parser, suffix) {
     if (parser) opts.parser = parser;
     const result = compileScrml(opts);
     const clientPath = resolve(outDir, `${name}.client.js`);
-    const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(clientPath) ? readFileSync(clientPath, "utf8") : ""));
     return {
       errors: result.errors ?? [],
       warnings: result.warnings ?? [],
@@ -317,16 +319,16 @@ describe("native-each §8 — each inside a <match> arm (STOP-FLAG coupling)", (
     expect(def.errors.length).toBe(0);
     expect(nat.errors.length).toBe(0);
     // Default establishes the structural-each baseline inside the match arm.
-    expect(def.clientJs).toContain("_scrml_reconcile_list");
-    expect(def.clientJs).toContain("_scrml_each_renderers");
+    expect(foldChunkNamespacing(def.clientJs)).toContain("_scrml_reconcile_list");
+    expect(foldChunkNamespacing(def.clientJs)).toContain("_scrml_each_renderers");
     // Native must match — the inner each is promoted, not masked.
-    expect(nat.clientJs).toContain("_scrml_reconcile_list");
-    expect(nat.clientJs).toContain("_scrml_each_renderers");
+    expect(foldChunkNamespacing(nat.clientJs)).toContain("_scrml_reconcile_list");
+    expect(foldChunkNamespacing(nat.clientJs)).toContain("_scrml_each_renderers");
   });
 
   test("native each-in-match-arm does not regress to bare textContent", () => {
     const nat = compileWith(EACH_IN_MATCH_ARM, "scrml-native", "mm-bare");
-    expect(nat.clientJs).not.toMatch(/textContent\s*=\s*item\b/);
+    expect(foldChunkNamespacing(nat.clientJs)).not.toMatch(/textContent\s*=\s*item\b/);
   });
 });
 
@@ -352,8 +354,8 @@ describe("native-each §9 — native-vs-default client.js parity", () => {
     const nat = compileWith(EACH_IN_AS, "scrml-native", "par-nat");
     expect(def.errors.length).toBe(0);
     expect(nat.errors.length).toBe(0);
-    expect(def.clientJs).toContain("_scrml_reconcile_list");
-    expect(nat.clientJs).toContain("_scrml_reconcile_list");
+    expect(foldChunkNamespacing(def.clientJs)).toContain("_scrml_reconcile_list");
+    expect(foldChunkNamespacing(nat.clientJs)).toContain("_scrml_reconcile_list");
   });
 
   test("native does NOT fire W-ATTR-001 (as item stray attr) or E-SCOPE-001", () => {
@@ -367,7 +369,7 @@ describe("native-each §9 — native-vs-default client.js parity", () => {
     // The unpromoted path emitted `el.textContent = item`. The promoted path
     // builds the item via the per-item factory + reconcile — no bare
     // assignment of the loose `item` identifier to textContent.
-    expect(nat.clientJs).not.toMatch(/textContent\s*=\s*item\b/);
+    expect(foldChunkNamespacing(nat.clientJs)).not.toMatch(/textContent\s*=\s*item\b/);
   });
 });
 
@@ -394,8 +396,8 @@ describe("native-each §10 — standalone shorthand renders, matching default", 
     expect(def.errors.length).toBe(0);
     expect(nat.errors.length).toBe(0);
     // Default wires the reactive display; native must too (was empty pre-fix).
-    expect(def.clientJs).toContain('_scrml_reactive_get("label")');
-    expect(nat.clientJs).toContain('_scrml_reactive_get("label")');
+    expect(foldChunkNamespacing(def.clientJs)).toContain('_scrml_reactive_get("label")');
+    expect(foldChunkNamespacing(nat.clientJs)).toContain('_scrml_reactive_get("label")');
   });
 
   test("native AST synthesizes a logic body child carrying the expr (exprNode)", () => {
@@ -507,11 +509,11 @@ describe("native-each §10 — per-item ${expr} text interpolation (#2f codegen)
     const native = compileWith(src, "scrml-native", "interp-named");
     expect(native.errors).toHaveLength(0);
     // The per-item text node is now present — NOT the skip comment.
-    expect(native.clientJs).not.toContain("each: empty logic interpolation skipped");
-    expect(native.clientJs).toContain("String(item.name)");
+    expect(foldChunkNamespacing(native.clientJs)).not.toContain("each: empty logic interpolation skipped");
+    expect(foldChunkNamespacing(native.clientJs)).toContain("String(item.name)");
     // A live text node + reconcile resolve, just like the default pipeline.
-    expect(native.clientJs).toContain("createTextNode");
-    expect(native.clientJs).toContain("_scrml_resolve_item");
+    expect(foldChunkNamespacing(native.clientJs)).toContain("createTextNode");
+    expect(foldChunkNamespacing(native.clientJs)).toContain("_scrml_resolve_item");
   });
 
   test("native named-alias interpolation matches the default pipeline byte-for-byte (mod id offsets)", () => {
@@ -528,12 +530,17 @@ describe("native-each §10 — per-item ${expr} text interpolation (#2f codegen)
     expect(native.errors).toHaveLength(0);
     expect(def.errors).toHaveLength(0);
     // Both carry the per-item interpolation text node now.
-    expect(native.clientJs).toContain("String(item.x)");
-    expect(def.clientJs).toContain("String(item.x)");
+    expect(foldChunkNamespacing(native.clientJs)).toContain("String(item.x)");
+    expect(foldChunkNamespacing(def.clientJs)).toContain("String(item.x)");
     // Normalize the numeric local-id suffixes (`_4`, `_tn_6`, …) so the only
     // remaining difference is id ordering, then assert structural identity.
-    const norm = (s) => s.replace(/_\d+\b/g, "_N");
-    expect(norm(native.clientJs)).toBe(norm(def.clientJs));
+    // The chunk-namespace token folds in FIRST: the two fixtures are written to
+    // different temp paths on purpose, so their 8-char path-hash tokens differ
+    // by construction and are not part of what this test compares.
+    // Strip the chunk-namespace token (anchored: `0` + 7 base36 + `_`) before
+    // the id fold. Unanchored, it ate the trailing 8 chars of real identifiers.
+    const norm = (s) => s.replace(/(?<![0-9a-z])0[0-9a-z]{7}_(?=[0-9A-Za-z_])/g, "").replace(/_\d+\b/g, "_N");
+    expect(norm(normalizeChunkToken(foldChunkNamespacing(native.clientJs)))).toBe(norm(normalizeChunkToken(foldChunkNamespacing(def.clientJs))));
   });
 
   test("legacy (default-parser) per-item interpolation is unchanged — `${item.name}` still emitted", () => {
@@ -551,7 +558,7 @@ describe("native-each §10 — per-item ${expr} text interpolation (#2f codegen)
 </program>`;
     const def = compileWith(src, null, "interp-legacy");
     expect(def.errors).toHaveLength(0);
-    expect(def.clientJs).not.toContain("each: empty logic interpolation skipped");
-    expect(def.clientJs).toContain("String(item.name)");
+    expect(foldChunkNamespacing(def.clientJs)).not.toContain("each: empty logic interpolation skipped");
+    expect(foldChunkNamespacing(def.clientJs)).toContain("String(item.name)");
   });
 });

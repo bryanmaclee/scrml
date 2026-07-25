@@ -26,6 +26,7 @@ import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { compileScrml } from "../../src/api.js";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -82,7 +83,7 @@ function compileInline(source, filename = "test.scrml") {
   });
   let clientJs = "";
   for (const [, v] of result.outputs) {
-    if (v.clientJs) clientJs += v.clientJs;
+    if (foldChunkNamespacing(v.clientJs)) clientJs +=foldChunkNamespacing( foldChunkNamespacing(v.clientJs));
   }
   return { errors: result.errors || [], clientJs };
 }
@@ -226,10 +227,10 @@ describe("§2 typer: reactivity-attribute error codes", () => {
 
 describe("§3 codegen: state-decl emits _scrml_reactivity_register sidecar", () => {
   test("debounced= emits register('name', 'debounced', 300) sidecar", () => {
-    const { errors, clientJs } = compileInline(
+    const { errors, clientJs: __cjRaw } = compileInline(
       `<query debounced=300ms> = ""`,
       "register-debounced.scrml",
-    );
+    ); const clientJs = foldChunkNamespacing(__cjRaw);
     const hard = errors.filter(e => e.severity !== "warning" && e.severity !== "info");
     expect(hard.length).toBe(0);
     expect(clientJs).toContain("_scrml_reactivity_register");
@@ -238,10 +239,10 @@ describe("§3 codegen: state-decl emits _scrml_reactivity_register sidecar", () 
   });
 
   test("throttled= emits register('name', 'throttled', 100) sidecar", () => {
-    const { errors, clientJs } = compileInline(
+    const { errors, clientJs: __cjRaw } = compileInline(
       `<scrollY throttled=100ms> = 0`,
       "register-throttled.scrml",
-    );
+    ); const clientJs = foldChunkNamespacing(__cjRaw);
     const hard = errors.filter(e => e.severity !== "warning" && e.severity !== "info");
     expect(hard.length).toBe(0);
     expect(clientJs).toContain("_scrml_reactivity_register");
@@ -250,10 +251,10 @@ describe("§3 codegen: state-decl emits _scrml_reactivity_register sidecar", () 
   });
 
   test("plain state-decl WITHOUT reactivity does NOT emit register sidecar", () => {
-    const { clientJs } = compileInline(
+    const { clientJs: __cjRaw } = compileInline(
       `<count> = 0`,
       "no-register.scrml",
-    );
+    ); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).not.toContain("_scrml_reactivity_register");
   });
 });
@@ -264,10 +265,10 @@ describe("§3 codegen: state-decl emits _scrml_reactivity_register sidecar", () 
 
 describe("§4 codegen: computed-form msExpr arrow-fn (A5-5 mirror)", () => {
   test("computed `${expr}ms` lowers to () => (exprText) * unitMultiplier", () => {
-    const { errors, clientJs } = compileInline(
+    const { errors, clientJs: __cjRaw } = compileInline(
       `<program>\${<delay> = 500\n<x debounced=\${@delay}ms> = ""}</program>`,
       "computed-form.scrml",
-    );
+    ); const clientJs = foldChunkNamespacing(__cjRaw);
     const hard = errors.filter(e => e.severity !== "warning" && e.severity !== "info");
     expect(hard.length).toBe(0);
     // The msExpr arrow-fn shape: `() => (...) * 1`.
@@ -275,10 +276,10 @@ describe("§4 codegen: computed-form msExpr arrow-fn (A5-5 mirror)", () => {
   });
 
   test("computed `${expr}s` uses unit multiplier 1000", () => {
-    const { errors, clientJs } = compileInline(
+    const { errors, clientJs: __cjRaw } = compileInline(
       `<program>\${<delay> = 5\n<x debounced=\${@delay}s> = ""}</program>`,
       "computed-seconds.scrml",
-    );
+    ); const clientJs = foldChunkNamespacing(__cjRaw);
     const hard = errors.filter(e => e.severity !== "warning" && e.severity !== "info");
     expect(hard.length).toBe(0);
     expect(clientJs).toMatch(/\(\)\s*=>\s*\(.*\)\s*\*\s*1000/);
@@ -331,7 +332,7 @@ describe("§6 migrated probe samples", () => {
       "../../../samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-debounced-004.scrml",
     );
     const source = readFileSync(samplePath, "utf8");
-    const { errors, clientJs } = compileInline(source, "probe-debounced.scrml");
+    const { errors, clientJs: __cjRaw } = compileInline(source, "probe-debounced.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
     const hard = errors.filter(e => e.severity !== "warning" && e.severity !== "info");
     expect(hard.length).toBe(0);
     expect(clientJs).toContain("_scrml_reactivity_register");
@@ -344,7 +345,7 @@ describe("§6 migrated probe samples", () => {
       "../../../samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-reactive-throttled-005.scrml",
     );
     const source = readFileSync(samplePath, "utf8");
-    const { errors, clientJs } = compileInline(source, "probe-throttled.scrml");
+    const { errors, clientJs: __cjRaw } = compileInline(source, "probe-throttled.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
     const hard = errors.filter(e => e.severity !== "warning" && e.severity !== "info");
     expect(hard.length).toBe(0);
     expect(clientJs).toContain("_scrml_reactivity_register");

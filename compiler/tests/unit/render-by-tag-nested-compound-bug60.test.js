@@ -37,6 +37,7 @@ import { compileScrml } from "../../src/api.js";
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const FIXTURE_DIR = join(import.meta.dir, "__fixtures__/bug-60");
 
@@ -130,7 +131,7 @@ describe("Bug 60 §1: nested compound-field render-by-tag (text + email)", () =>
   });
 
   test("bind wiring keys on the QUALIFIED runtime cell (signupForm.userName/.email)", () => {
-    const { clientJs } = compileSource("nested-bind-keys.scrml", SRC);
+    const { clientJs: __cjRaw } = compileSource("nested-bind-keys.scrml", SRC); const clientJs = foldChunkNamespacing(__cjRaw);
     // The render-by-tag bind dispatch reads/writes the dotted runtime cell.
     expect(clientJs).toMatch(/_scrml_reactive_get\("signupForm\.userName"\)/);
     expect(clientJs).toMatch(/_scrml_reactive_set\("signupForm\.userName",/);
@@ -171,7 +172,7 @@ describe("Bug 60 §2: nested compound checkbox field", () => {
     `</div>\n`;
 
   test("checkbox nested field expands to <input type=checkbox> bound checked", () => {
-    const { html, clientJs } = compileSource("nested-checkbox.scrml", SRC);
+    const { html, clientJs: __cjRaw } = compileSource("nested-checkbox.scrml", SRC); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(html).toMatch(/<input[^>]*type="checkbox"/);
     expect(html).toMatch(/data-scrml-render-by-tag=/);
     expect(html).not.toMatch(/<newsletter/);
@@ -194,7 +195,7 @@ describe("Bug 60 §3: top-level Shape-2 render-by-tag no-regression", () => {
     `</div>\n`;
 
   test("top-level <userName/> still expands to the bound input identically", () => {
-    const { html, clientJs, errors } = compileSource("toplevel-control.scrml", SRC);
+    const { html, clientJs: __cjRaw, errors } = compileSource("toplevel-control.scrml", SRC); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.length).toBe(0);
     expect(html).toMatch(/<input[^>]*type="text"/);
     expect(html).toMatch(/required/);

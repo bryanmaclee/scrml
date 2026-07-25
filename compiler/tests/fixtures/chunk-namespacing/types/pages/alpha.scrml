@@ -1,0 +1,16 @@
+<page>
+
+  // BOTH pages declare a type with the SAME name on purpose. That is N3: the
+  // emitted `const Phase` / `Phase_variants` / `Phase_toEnum` are top-level
+  // declarations, so in the classic global lexical environment the second chunk
+  // to load throws `Identifier 'Phase_toEnum' has already been declared` and
+  // never evaluates at all — nothing on that page hydrates.
+  type Phase:enum = { Idle, Busy }
+
+  <phase>: Phase = .Idle
+  <rows> = ["alpha-1", "alpha-2"]
+
+  <p id="alpha-tag">${@phase}</p>
+  <ul><each in=@rows><li>${@.}</li></each></ul>
+
+</page>

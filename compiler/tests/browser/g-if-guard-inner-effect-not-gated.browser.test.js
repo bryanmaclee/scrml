@@ -30,6 +30,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope, foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // `@cell` starts `not` (null) and is NEVER auto-populated — the test drives the
 // null→obj→null→obj transitions itself, so the DOMContentLoaded mount runs with
@@ -81,7 +82,7 @@ describe("g-if-guard-inner-effect §1 — codegen gates inner effects on the tog
   });
 
   test("each guarded inner effect short-circuits on the SAME predicate as the toggle (lockstep)", () => {
-    const { clientJs } = compileCase();
+    const clientJs = foldChunkNamespacing(compileCase().clientJs);
     // The display-toggle predicate for `@cell is some`.
     const toggle = /el\.style\.display = \(\(_scrml_reactive_get\("cell"\) !== null && _scrml_reactive_get\("cell"\) !== undefined\)\) \? "" : "none";/;
     expect(toggle.test(clientJs)).toBe(true);
@@ -99,7 +100,7 @@ describe("g-if-guard-inner-effect §1 — codegen gates inner effects on the tog
   });
 
   test("show= inner effect is NOT gated (Vue v-show keeps running inner effects)", () => {
-    const { clientJs } = compileCase();
+    const clientJs = foldChunkNamespacing(compileCase().clientJs);
     // The msg interpolation effect must be the plain (ungated) shape.
     expect(/_scrml_effect\(function\(\) \{ _scrml_render_value\(el, _scrml_reactive_get\("msg"\)\); \}\);/.test(clientJs)).toBe(true);
     // It must NOT carry the cell guard.
@@ -124,9 +125,8 @@ describe("g-if-guard-inner-effect §2 — runtime: no crash on null mount, rende
     console.error = (...a) => { errs.push(a.join(" ")); };
     let threw = null;
     const exec = new Function("window", "document",
-      `${runtimeJs}\n${clientJs}\n` +
-      `globalThis.__set__ = (typeof _scrml_reactive_set!=='undefined')?_scrml_reactive_set:null;\n` +
-      `globalThis.__get__ = (typeof _scrml_reactive_get!=='undefined')?_scrml_reactive_get:null;`);
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__set__ = (typeof _scrml_reactive_set!=='undefined')?_scrml_reactive_set:null;\n` +
+      `globalThis.__get__ = (typeof _scrml_reactive_get!=='undefined')?_scrml_reactive_get:null;`));
     exec(window, document);
     try {
       // The crash window: mount runs with @cell === null. Pre-fix the ungated

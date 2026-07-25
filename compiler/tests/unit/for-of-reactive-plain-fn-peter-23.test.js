@@ -79,7 +79,7 @@ describe("peter-23 §1: plain function iterating a reactive cell is a plain loop
 
   test("emits a plain for-of over the cell snapshot (_scrml_reactive_get)", () => {
     const { clientJs } = compileClient(source);
-    expect(clientJs).toMatch(/for \(const p of _scrml_reactive_get\("unitParts"\)\)/);
+    expect(clientJs).toMatch(/for \(const p of _scrml_cs_reactive_get\("unitParts"\)\)/);
   });
 
   test("does NOT emit a reactive DOM list-render for the plain function", () => {
@@ -151,7 +151,7 @@ describe("peter-23 §3: reactive for-of with no lift = plain snapshot loop", () 
       \${ total() }
     </div>`;
     const { clientJs, fatalErrors } = compileClient(source);
-    expect(clientJs).toMatch(/for \(const n of _scrml_reactive_get\("nums"\)\)/);
+    expect(clientJs).toMatch(/for \(const n of _scrml_cs_reactive_get\("nums"\)\)/);
     expect(clientJs).not.toContain("_scrml_reconcile_list(");
     expect(fatalErrors).toHaveLength(0);
   });
@@ -171,7 +171,7 @@ describe("peter-23 §3: reactive for-of with no lift = plain snapshot loop", () 
       \${ firstActive() }
     </div>`;
     const { clientJs, fatalErrors } = compileClient(source);
-    expect(clientJs).toMatch(/for \(const r of _scrml_reactive_get\("rows"\)\)/);
+    expect(clientJs).toMatch(/for \(const r of _scrml_cs_reactive_get\("rows"\)\)/);
     expect(clientJs).toContain("continue;");
     expect(clientJs).not.toContain("_scrml_reconcile_list(");
     expect(fatalErrors).toHaveLength(0);
@@ -192,7 +192,7 @@ describe("peter-23 §3: reactive for-of with no lift = plain snapshot loop", () 
       \${ count() }
     </div>`;
     const { clientJs, fatalErrors } = compileClient(source);
-    expect(clientJs).toMatch(/for \(const row of _scrml_reactive_get\("grid"\)\)/);
+    expect(clientJs).toMatch(/for \(const row of _scrml_cs_reactive_get\("grid"\)\)/);
     expect(clientJs).toContain("for (const cell of row.cells)");
     expect(clientJs).not.toContain("_scrml_reconcile_list(");
     expect(fatalErrors).toHaveLength(0);

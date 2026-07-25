@@ -41,6 +41,7 @@ import { writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // §1: rewriteBooleanKeywords direct — canonical lowering
@@ -347,7 +348,7 @@ describe("§8 — gauntlet R24 reproducer (full compile)", () => {
     const result = compileScrml({ inputFiles: [inFile], outputDir: outDir });
     expect(result.errors?.length || 0).toBe(0);
 
-    const clientJs = readFileSync(join(outDir, "r24-repro.client.js"), "utf8");
+    const clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, "r24-repro.client.js"), "utf8")));
 
     // The emitted JS MUST NOT contain bare `or` / `and` tokens (operator position).
     // Pattern: whitespace + `or` + whitespace (operator context, never identifier).

@@ -27,6 +27,7 @@ import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync } from "f
 import { join } from "path";
 import { tmpdir } from "os";
 import vm from "vm";
+import { unwrapChunkScope } from "../helpers/chunk-scope.js";
 
 let TMP;
 beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "nonreactive-mapset-ss52-")); });
@@ -240,7 +241,9 @@ function makeRunner(out) {
   const ctx = { document, window: {}, console };
   vm.createContext(ctx);
   vm.runInContext(out.runtimeJs, ctx);
-  const clientBody = out.clientJs.replace(/^\/\/ Requires.*$/m, "");
+  // The chunk is wrapped in its own scope; this harness pulls named user fns
+  // out of the body and executes them with the runtime, so unwrap it.
+  const clientBody = unwrapChunkScope(out.clientJs).replace(/^\/\/ Requires.*$/m, "");
   vm.runInContext(clientBody, ctx);
   return function call(fnName, ...args) {
     const m = out.clientJs.match(new RegExp("function (_scrml_" + fnName + "_\\d+)\\("));

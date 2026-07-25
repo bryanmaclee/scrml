@@ -25,6 +25,7 @@ import { compileScrml } from "../../src/api.js";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 let TMP;
 
@@ -51,7 +52,7 @@ function compileSource(name, source) {
   );
   let clientJs = "";
   try {
-    clientJs = readFileSync(join(outDir, `${name}.client.js`), "utf8");
+    clientJs =foldChunkNamespacing( foldChunkNamespacing(readFileSync(join(outDir, `${name}.client.js`), "utf8")));
   } catch {
     // file missing — leave clientJs empty so assertions surface a clear failure
   }
@@ -80,7 +81,7 @@ describe("Bug O: for-loop variable does NOT leak into meta-effect frozen scope",
     }
 } </ul>
 `;
-    const { errors, clientJs } = compileSource("for-lift-with-meta", src);
+    const { errors, clientJs: __cjRaw } = compileSource("for-lift-with-meta", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs.length).toBeGreaterThan(0);
 
@@ -109,7 +110,7 @@ describe("Bug O: for-loop variable does NOT leak into meta-effect frozen scope",
     }
 } </ul>
 `;
-    const { errors, clientJs } = compileSource("for-lift-no-meta", src);
+    const { errors, clientJs: __cjRaw } = compileSource("for-lift-no-meta", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs.length).toBeGreaterThan(0);
     // No meta-effect means there should be no Object.freeze captured-scope
@@ -121,7 +122,7 @@ describe("Bug O: for-loop variable does NOT leak into meta-effect frozen scope",
     const src = `${PREAMBLE}
 <div>tick: \${@tick}</>
 `;
-    const { errors, clientJs } = compileSource("meta-no-for-loop", src);
+    const { errors, clientJs: __cjRaw } = compileSource("meta-no-for-loop", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toContain("_scrml_meta_effect");
     expect(clientJs).not.toMatch(/it:\s*it\b/);
@@ -145,7 +146,7 @@ describe("Bug O: for-loop variable does NOT leak into meta-effect frozen scope",
     }
 } </ul>
 `;
-    const { errors, clientJs } = compileSource("multi-meta-for-lift", src);
+    const { errors, clientJs: __cjRaw } = compileSource("multi-meta-for-lift", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toContain("_scrml_meta_effect");
     // Two meta-effects, neither should leak the loop variable.
@@ -162,7 +163,7 @@ describe("Bug O: for-loop variable does NOT leak into meta-effect frozen scope",
     }
 } </ul>
 `;
-    const { errors, clientJs } = compileSource("renamed-loop-var", src);
+    const { errors, clientJs: __cjRaw } = compileSource("renamed-loop-var", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toContain("_scrml_meta_effect");
     expect(clientJs).not.toMatch(/renamedItem:\s*renamedItem\b/);
@@ -177,7 +178,7 @@ describe("Bug O: for-loop variable does NOT leak into meta-effect frozen scope",
     }
 } </ul>
 `;
-    const { errors, clientJs } = compileSource("let-in-for-body", src);
+    const { errors, clientJs: __cjRaw } = compileSource("let-in-for-body", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     expect(clientJs).toContain("_scrml_meta_effect");
     expect(clientJs).not.toMatch(/it:\s*it\b/);
@@ -192,7 +193,7 @@ describe("Bug O: for-loop variable does NOT leak into meta-effect frozen scope",
     }
 } </ul>
 `;
-    const { errors, clientJs } = compileSource("indexed-for-lift", src);
+    const { errors, clientJs: __cjRaw } = compileSource("indexed-for-lift", src); const clientJs = foldChunkNamespacing(__cjRaw);
     // This shape may or may not be supported; if it compiles, neither name
     // should leak. If it doesn't compile, surfacing an error is acceptable —
     // we only care about NO leak in the emitted code.

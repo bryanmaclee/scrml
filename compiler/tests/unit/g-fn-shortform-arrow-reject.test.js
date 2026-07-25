@@ -23,6 +23,7 @@ import { writeFileSync, mkdtempSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const TMP = mkdtempSync(join(tmpdir(), "fn-arrow-reject-"));
 let _seq = 0;

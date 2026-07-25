@@ -36,6 +36,7 @@ import { parseExpr as scrmlNativeParseExpr } from "../native-parser/parse-expr.j
 import { translateExpr } from "../native-parser/translate-expr.js";
 import { TokenKind } from "../native-parser/token.js";
 import { compileScrml } from "../src/api.js";
+import { normalizeChunkToken } from "./helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -76,7 +77,11 @@ function compileWith(source, parser, suffix) {
 
 // Normalize local-id numeric suffixes (`_4`, `_tn_6`, …) so the only remaining
 // difference between native + default output is id ordering.
-const normIds = (s) => s.replace(/_\d+\b/g, "_N");
+// The two sides are compiled to DIFFERENT temp paths on purpose, so their
+// 8-char chunk-namespace tokens (an FNV-1a of the dist-relative source path)
+// differ by construction. Fold the token out first, then the numeric local-id
+// suffixes — what this compares is the native-vs-default LOWERING.
+const normIds = (s) => s.replace(/(?<![0-9a-z])0[0-9a-z]{7}_(?=[0-9A-Za-z_])/g, "").replace(/_\d+\b/g, "_N");
 
 // ===========================================================================
 // §1 — LEXER: `@.` contextual sigil lexes to a single ScrmlAt token.
@@ -195,7 +200,7 @@ describe("each-contextual-sigil §4 — native==default compile parity", () => {
     expect(def.errors).toHaveLength(0);
     expect(native.clientJs).toContain("_scrml_each_item.name");
     expect(def.clientJs).toContain("_scrml_each_item.name");
-    expect(normIds(native.clientJs)).toBe(normIds(def.clientJs));
+    expect(normIds(normalizeChunkToken(native.clientJs))).toBe(normIds(normalizeChunkToken(def.clientJs)));
   });
 
   test("`<li>Item ${@.}</li>` count-form resolves to the bare iter var (native==default)", () => {
@@ -210,7 +215,7 @@ describe("each-contextual-sigil §4 — native==default compile parity", () => {
     const def = compileWith(src, null, "sigil-bare-def");
     expect(native.errors).toHaveLength(0);
     expect(def.errors).toHaveLength(0);
-    expect(normIds(native.clientJs)).toBe(normIds(def.clientJs));
+    expect(normIds(normalizeChunkToken(native.clientJs))).toBe(normIds(normalizeChunkToken(def.clientJs)));
   });
 
   test("`<li>${@.foo.bar}</li>` chained sigil resolves to iter-var.foo.bar (native==default)", () => {
@@ -228,7 +233,7 @@ describe("each-contextual-sigil §4 — native==default compile parity", () => {
     expect(def.errors).toHaveLength(0);
     expect(native.clientJs).toContain("_scrml_each_item.foo.bar");
     expect(def.clientJs).toContain("_scrml_each_item.foo.bar");
-    expect(normIds(native.clientJs)).toBe(normIds(def.clientJs));
+    expect(normIds(normalizeChunkToken(native.clientJs))).toBe(normIds(normalizeChunkToken(def.clientJs)));
   });
 
   test("a real bare-variant `.Idle` alongside `@.name` does NOT regress (native==default)", () => {
@@ -248,6 +253,6 @@ type Flag:enum = { Idle, Busy }
     expect(def.errors).toHaveLength(0);
     expect(native.clientJs).toContain("_scrml_each_item.name");
     expect(native.clientJs).toContain("Idle");
-    expect(normIds(native.clientJs)).toBe(normIds(def.clientJs));
+    expect(normIds(normalizeChunkToken(native.clientJs))).toBe(normIds(normalizeChunkToken(def.clientJs)));
   });
 });

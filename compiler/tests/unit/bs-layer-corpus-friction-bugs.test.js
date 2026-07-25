@@ -19,6 +19,7 @@ import { compileScrml } from "../../src/api.js";
 import { writeFileSync, mkdirSync, rmSync, mkdtempSync } from "fs";
 import { join, dirname } from "path";
 import { tmpdir } from "os";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function compileSrc(srcName, src) {
   const TMP = mkdtempSync(join(tmpdir(), "bs-bug-"));

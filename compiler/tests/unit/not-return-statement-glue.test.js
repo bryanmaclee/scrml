@@ -36,6 +36,7 @@ import { execFileSync } from "node:child_process";
 import { compileScrml } from "../../src/api.js";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const FIXTURE_DIR = join(import.meta.dir, "__fixtures__/not-return-glue");
 const FIXTURE_OUTPUT = join(FIXTURE_DIR, "dist");
@@ -143,7 +144,7 @@ describe("§1 `return not` does not glue to the next statement", () => {
 
   test("emitted client JS has no glued `return !const`", () => {
     const result = compile(glueFx);
-    const js = result.outputs.get(glueFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(glueFx).clientJs);
     // The exact pre-fix corruption symptom.
     expect(js).not.toContain("return !const");
     expect(js).not.toMatch(/return\s*!\s*(const|let|var)\b/);
@@ -151,7 +152,7 @@ describe("§1 `return not` does not glue to the next statement", () => {
 
   test("emitted client JS is syntactically valid (node --check clean)", () => {
     const result = compile(glueFx);
-    const js = result.outputs.get(glueFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(glueFx).clientJs);
     const tmp = join(FIXTURE_OUTPUT, "_glue_check.js");
     mkdirSync(FIXTURE_OUTPUT, { recursive: true });
     writeFileSync(tmp, js);
@@ -161,7 +162,7 @@ describe("§1 `return not` does not glue to the next statement", () => {
 
   test("§2 standalone `return not` lowers to canonical absence value (`return null`)", () => {
     const result = compile(glueFx);
-    const js = result.outputs.get(glueFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(glueFx).clientJs);
     // `not` in value-completion position is the §42 absence value -> `null`.
     expect(js).toContain("return null");
   });
@@ -174,7 +175,7 @@ describe("§1 `return not` does not glue to the next statement", () => {
 describe("§3 standalone `@x = not` assignment is not mis-lowered", () => {
   test("no glued `= !` followed by a keyword in the assignment body", () => {
     const result = compile(glueFx);
-    const js = result.outputs.get(glueFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(glueFx).clientJs);
     expect(js).not.toMatch(/=\s*!\s*(const|let|var|return)\b/);
   });
 });
@@ -200,7 +201,7 @@ describe("§42.10 boolean negation — prefix `not` REJECTED, `!` is canonical",
 
   test("`!@ready` / `!@flag` emit boolean negation (`!`), not absence", () => {
     const result = compile(bangFx);
-    const js = result.outputs.get(bangFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(bangFx).clientJs);
     // The negation operator must appear against the reactive read. The exact
     // reactive accessor differs by codegen, so assert the `!`-against-read shape
     // and that we did NOT drop the operand into a standalone `null`.
@@ -210,7 +211,7 @@ describe("§42.10 boolean negation — prefix `not` REJECTED, `!` is canonical",
 
   test("emitted client JS is syntactically valid (node --check clean)", () => {
     const result = compile(bangFx);
-    const js = result.outputs.get(bangFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(bangFx).clientJs);
     const tmp = join(FIXTURE_OUTPUT, "_bang_check.js");
     mkdirSync(FIXTURE_OUTPUT, { recursive: true });
     writeFileSync(tmp, js);
@@ -230,7 +231,7 @@ describe("§5 GITI-017 regex fence holds — `/not a jj repo/i` verbatim", () =>
 
   test("regex literal interior preserved verbatim (not corrupted to `/!a .../`)", () => {
     const result = compile(regexFx);
-    const js = result.outputs.get(regexFx).clientJs;
+    const js = foldChunkNamespacing(result.outputs.get(regexFx).clientJs);
     expect(js).toContain("/not a jj repo/i");
     expect(js).not.toContain("/!a jj repo/i");
   });

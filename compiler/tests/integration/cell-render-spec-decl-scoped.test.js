@@ -35,6 +35,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, exist
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 let TMP;
 beforeAll(() => {
@@ -61,7 +62,7 @@ function build(caseId, source) {
   // The app's own client chunk — deliberately NOT the shared runtime, which is
   // 60kB+ of library text that would make any `toContain` assertion below
   // meaningless.
-  const clientJs = readOut("app.client.js") ?? "";
+  const clientJs =foldChunkNamespacing( foldChunkNamespacing(readOut("app.client.js") ?? ""));
   const html = readOut("app.html") ?? "";
   return { errors, files, clientJs, html };
 }
@@ -106,10 +107,10 @@ describe("E-CELL-RENDER-SPEC-NOT-BINDABLE fires at the declaration", () => {
 
 describe("REGRESSION — legal shapes with a markup RHS still compile and still emit", () => {
   test("Shape 2 bindable `<input>`: clean AND the bind:value dispatch survives", () => {
-    const { errors, clientJs, html } = build(
+    const { errors, clientJs: __cjRaw, html } = build(
       "bindable-input",
       `<program>\n  <userName req> = <input type="text"/>\n  <userName/>\n</program>\n`,
-    );
+    ); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(codes(errors, NOT_BINDABLE).length).toBe(0);
     expect(errors).toEqual([]);
 
@@ -135,10 +136,10 @@ describe("REGRESSION — legal shapes with a markup RHS still compile and still 
   });
 
   test("Shape 3 `const` markup cell: clean AND the markup factory survives", () => {
-    const { errors, clientJs, html } = build(
+    const { errors, clientJs: __cjRaw, html } = build(
       "const-markup",
       `<program>\n  const <badge> = <span class="b">B</span>\n  <div>\${@badge}</div>\n</program>\n`,
-    );
+    ); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(codes(errors, NOT_BINDABLE).length).toBe(0);
     expect(errors).toEqual([]);
 
@@ -155,10 +156,10 @@ describe("REGRESSION — legal shapes with a markup RHS still compile and still 
   });
 
   test("Shape 1 `<count> = 0` (no markup RHS at all) is unaffected", () => {
-    const { errors, clientJs } = build(
+    const { errors, clientJs: __cjRaw } = build(
       "plain-number",
       `<program>\n  <count> = 0\n  <div>\${@count}</div>\n</program>\n`,
-    );
+    ); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(codes(errors, NOT_BINDABLE).length).toBe(0);
     expect(errors).toEqual([]);
     expect(clientJs).toContain('_scrml_reactive_set("count", 0)');

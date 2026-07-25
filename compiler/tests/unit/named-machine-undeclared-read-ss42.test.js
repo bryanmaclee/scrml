@@ -142,7 +142,7 @@ describe("ss42 item-1 — NO-REGRESSION: non-named + derived reads still resolve
     const result = compileSource(source, "case-4-derived-projection-read.scrml");
     expect(diagsByCode(result, "E-STATE-UNDECLARED").length).toBe(0);
     // The projection cell is genuinely materialized (the reason it legitimately resolves).
-    expect(result.clientJs).toContain('_scrml_derived_declare("risk"');
+    expect(result.clientJs).toContain('_scrml_cs_derived_declare("risk"');
   });
 });
 
@@ -168,8 +168,8 @@ describe("ss42 item-1 — fix path: separate `@var: PM` decl compiles clean + in
     const result = compileSource(source, "case-5-fix-path-decl.scrml");
     expect(diagsByCode(result, "E-STATE-UNDECLARED").length).toBe(0);
     // Init comes from the STATE-DECL (§51.3.3), never from the engine.
-    expect(result.clientJs).toContain('_scrml_reactive_set("phase"');
-    expect(result.clientJs).toContain('_scrml_init_set("phase"');
+    expect(result.clientJs).toContain('_scrml_cs_reactive_set("phase"');
+    expect(result.clientJs).toContain('_scrml_cs_init_set("phase"');
   });
 });
 

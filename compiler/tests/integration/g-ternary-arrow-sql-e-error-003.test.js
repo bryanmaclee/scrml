@@ -38,6 +38,7 @@ import { resolve, dirname, join } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 const TMP_ROOT = resolve(testDir, "_tmp_ternary_arrow_sql");

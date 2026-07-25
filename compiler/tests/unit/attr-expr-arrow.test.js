@@ -18,6 +18,7 @@ import { tokenizeAttributes } from "../../src/tokenizer.js";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { runCG } from "../../src/code-generator.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -249,7 +250,7 @@ describe("§6: codegen — ${...} event handler compiles without error", () => {
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('save("draft")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('save("draft")');
   });
 });
 
@@ -310,7 +311,7 @@ describe("§8: codegen — ${...} event handler wiring in client JS", () => {
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
     // The expression should appear directly in the wiring
-    expect(out.clientJs).toContain("deleteItem(42)");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("deleteItem(42)");
   });
 
   test("onclick delegation uses handler registry with expr handler", () => {
@@ -329,8 +330,8 @@ describe("§8: codegen — ${...} event handler wiring in client JS", () => {
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
     // Click is delegable, so should use _scrml_click registry
-    expect(out.clientJs).toContain("_scrml_click");
-    expect(out.clientJs).toContain("document.addEventListener");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_click");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("document.addEventListener");
   });
 
   test("non-delegable event (onchange) with expr uses querySelectorAll path", () => {
@@ -349,8 +350,8 @@ describe("§8: codegen — ${...} event handler wiring in client JS", () => {
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
     // Change is non-delegable, so should use querySelectorAll
-    expect(out.clientJs).toContain("querySelectorAll");
-    expect(out.clientJs).toContain("setTheme");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("querySelectorAll");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("setTheme");
   });
 });
 
@@ -374,6 +375,6 @@ describe("§9: codegen — ${...} with @var references in expr handler", () => {
 
     expect(result.errors).toHaveLength(0);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.clientJs).toContain('_scrml_reactive_get("draft")');
+    expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_get("draft")');
   });
 });

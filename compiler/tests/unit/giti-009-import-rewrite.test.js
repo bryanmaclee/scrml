@@ -139,6 +139,7 @@ describe("rewriteRelativeImportPaths", () => {
 import { compileScrml } from "../../src/api.js";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "fs";
 import { join } from "path";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 describe("GITI-009 integration: compile rewrites import paths", () => {
 

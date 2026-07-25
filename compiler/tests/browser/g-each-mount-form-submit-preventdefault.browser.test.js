@@ -30,6 +30,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { chunkCellKey } from "../helpers/chunk-scope.js";
 
 // Per-item <form onsubmit=fn()> (the each factory mounts the <li> root per item;
 // the form + a non-submit control button live inside it). The handlers read the
@@ -106,15 +107,21 @@ describe("g-each-mount-form-submit-preventdefault (ss20 item 3)", () => {
     const exec = new Function(
       "window",
       "document",
+      // BUG-6: expose BARE global accessors OUTSIDE the chunk IIFE and key the
+      // harness get/set through the chunk token explicitly. (Splicing the capture
+      // INSIDE the scope only binds accessors the chunk's prologue actually wraps,
+      // so a get the fixture body never calls stays bare and desyncs from a scoped
+      // set — hence the explicit key on the bare globals here.)
       `${runtimeJs}\n${clientJs}\n` +
         `globalThis.__scrml_get__ = _scrml_reactive_get;\n` +
         `globalThis.__scrml_set__ = (n, v) => _scrml_reactive_set(n, _scrml_deep_reactive(v));\n`,
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));
+    const cellKey = chunkCellKey(clientJs);
     return {
-      set: (name, val) => globalThis.__scrml_set__(name, val),
-      get: (name) => globalThis.__scrml_get__(name),
+      set: (name, val) => globalThis.__scrml_set__(cellKey(name), val),
+      get: (name) => globalThis.__scrml_get__(cellKey(name)),
       forms: (c) => [...document.querySelectorAll(`form.${c}`)],
       buttons: (c) => [...document.querySelectorAll(`button.${c}`)],
       clientJs,

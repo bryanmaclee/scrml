@@ -26,6 +26,7 @@ import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { scanForOnIdleEntries } from "../../src/engine-statechild-parser.ts";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function compileToClientJs(source, suffix = "onIdle") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -43,7 +44,7 @@ function compileToClientJs(source, suffix = "onIdle") {
     });
     const clientPath = resolve(outDir, `${name}.client.js`);
     const clientJs = existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "";
-    return { errors: result.errors ?? [], clientJs };
+    return { errors: result.errors ?? [], clientJs: foldChunkNamespacing(clientJs) };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -244,6 +245,8 @@ describe("A5-6 §A5-6.10 — runtime helpers in template", () => {
       require.resolve("../../src/runtime-template.js"),
       "utf8",
     );
+    // The runtime template carries the RAW helper names — the BUG-6 `_scrml_cs_`
+    // callee-rename applies to the assembled bundle body, never the template source.
     expect(rt).toContain("function _scrml_engine_arm_idle_watchdog(");
     expect(rt).toContain("function _scrml_engine_reset_idle_watchdog(");
     // Reset is called in both _scrml_engine_direct_set + _scrml_engine_advance.

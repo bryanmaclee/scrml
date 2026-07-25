@@ -45,6 +45,7 @@ import {
   mkdirSync,
 } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 // Minimal Tier-1-`<each>`-only repro (BRIEF.md). No Tier-0 `${for…lift}`, so
 // the ONLY `reconciliation` trigger is the each-block. `<empty>` exercises the
@@ -166,9 +167,8 @@ describe("Bug 57 §2 — `<each>` renders + reconciles in happy-dom", () => {
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${clientJs}\n` +
-        `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
-        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`,
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;\n` +
+        `globalThis.__scrml_get__ = _scrml_reactive_get;\n`),
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));

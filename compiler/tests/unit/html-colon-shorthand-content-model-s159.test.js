@@ -47,6 +47,7 @@ import { mkdirSync, writeFileSync, rmSync, existsSync, mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing, normalizeChunkToken } from "../helpers/chunk-scope.js";
 
 let TMP;
 beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "s159-colon-shorthand-")); });
@@ -69,7 +70,10 @@ function getOut(result, key) {
   for (const [, v] of outputs) { if (v && typeof v === "object" && v[key]) return v[key]; }
   return "";
 }
-function getClientJs(result) { return getOut(result, "clientJs"); }
+// normalizeChunkToken folds the per-file chunk-namespace token (a hash of the
+// distinct fixture basename) to a fixed placeholder, so a byte-identity compare
+// pins the BODY lowering, not the incidental per-source token.
+function getClientJs(result) { return normalizeChunkToken(foldChunkNamespacing(getOut(result, "clientJs"))); }
 function getHtml(result) { return getOut(result, "html"); }
 // Normalize gensym counters so two STRUCTURALLY identical lowerings compare
 // equal modulo placeholder ids.

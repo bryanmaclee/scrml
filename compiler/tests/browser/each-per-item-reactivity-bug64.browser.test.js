@@ -29,6 +29,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 // Tier-0 — reactive ${for...lift} with per-item text + class:on.
 const TIER0_SRC = `<program>
@@ -112,14 +113,14 @@ describe("bug64/r28-1c browser — per-item content reactivity on reconcile", ()
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${clientJs}\n` +
-        `globalThis.__scrml_set_raw__ = _scrml_reactive_set;\n` +
+      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_set_raw__ = _scrml_reactive_set;\n` +
         `globalThis.__scrml_get__ = _scrml_reactive_get;\n` +
         // Mirror real codegen: cell writes store a deep-reactive proxy
         // (\`_scrml_reactive_set(name, _scrml_deep_reactive(arr))\`), so field
         // reads/writes go through the reactive Proxy. Without this the test
-        // would mutate raw objects (no set trap → no trigger).
-        `globalThis.__scrml_set__ = (n, v) => _scrml_reactive_set(n, _scrml_deep_reactive(v));\n`,
+        // would mutate raw objects (no set trap → no trigger). Must live INSIDE
+        // the chunk scope like the others, or it writes the un-namespaced key.
+        `globalThis.__scrml_set__ = (n, v) => _scrml_reactive_set(n, _scrml_deep_reactive(v));\n`),
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));

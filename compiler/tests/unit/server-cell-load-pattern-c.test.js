@@ -35,6 +35,7 @@ import { extractSqlParams } from "../../src/codegen/rewrite.ts";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { runCG } from "../../src/code-generator.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -63,7 +64,7 @@ function compileBundles(source, filePath = "/test/app.scrml") {
     protectAnalysis: makeProtectAnalysis(),
   });
   const out = result.outputs.get(filePath);
-  return { clientJs: out?.clientJs ?? "", serverJs: out?.serverJs ?? "" };
+  return { clientJs:foldChunkNamespacing( foldChunkNamespacing(out?.clientJs ?? "")), serverJs: out?.serverJs ?? "" };
 }
 
 // Locate the first server `state-decl` carrying a sqlNode in an AST.
@@ -312,7 +313,7 @@ describe("server-cell-load Pattern C §3: server /__serverLoad route", () => {
 
 describe("server-cell-load Pattern C §4: client fetch-on-mount", () => {
   test("client.js fetches /__serverLoad/<var> and lands via reactive set", () => {
-    const { clientJs } = compileBundles(BARE);
+    const { clientJs: __cjRaw } = compileBundles(BARE); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).toContain('fetch("/__serverLoad/driver"');
     expect(clientJs).toContain('_scrml_reactive_set("driver"');
   });
@@ -324,7 +325,7 @@ describe("server-cell-load Pattern C §4: client fetch-on-mount", () => {
 
 describe("server-cell-load Pattern C §5: no SQL leak into client", () => {
   test("client.js contains NO SQL text and NO _scrml_sql reference", () => {
-    const { clientJs } = compileBundles(BARE);
+    const { clientJs: __cjRaw } = compileBundles(BARE); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).not.toContain("SELECT * FROM drivers");
     expect(clientJs).not.toContain("_scrml_sql");
   });
@@ -336,7 +337,7 @@ describe("server-cell-load Pattern C §5: no SQL leak into client", () => {
 
 describe("server-cell-load Pattern C §6: @-form (server @var = ?{})", () => {
   test("the @-form emits the same /__serverLoad route + client fetch", () => {
-    const { clientJs, serverJs } = compileBundles(AT_FORM);
+    const { clientJs: __cjRaw, serverJs } = compileBundles(AT_FORM); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(serverJs).toContain('path: "/__serverLoad/driver"');
     expect(clientJs).toContain('fetch("/__serverLoad/driver"');
     expect(clientJs).not.toContain("_scrml_sql");
@@ -357,13 +358,13 @@ describe("server-cell-load Pattern C §7: engine-rides E-leg (source-cell load)"
   // section verifies the PART Pattern C unblocks: the source cell now LOADS so
   // the engine has something to ride.
   test("bare <engine server=@source> source cell emits the /__serverLoad route + fetch", () => {
-    const { clientJs, serverJs } = compileBundles(ENGINE_RIDES);
+    const { clientJs: __cjRaw, serverJs } = compileBundles(ENGINE_RIDES); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(serverJs).toContain('path: "/__serverLoad/driver"');
     expect(clientJs).toContain('fetch("/__serverLoad/driver"');
   });
 
   test("the source cell query is server-only (no SQL leak in the engine page client)", () => {
-    const { clientJs } = compileBundles(ENGINE_RIDES);
+    const { clientJs: __cjRaw } = compileBundles(ENGINE_RIDES); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).not.toContain("SELECT * FROM drivers");
   });
 });
@@ -379,13 +380,13 @@ describe("server-cell-load Pattern C §8: param-bearing graceful handling", () =
   });
 
   test("param-bearing does NOT leak SQL into the client bundle", () => {
-    const { clientJs } = compileBundles(PARAM_BEARING);
+    const { clientJs: __cjRaw } = compileBundles(PARAM_BEARING); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(clientJs).not.toContain("SELECT * FROM drivers");
     expect(clientJs).not.toContain("_scrml_sql");
   });
 
   test("param-bearing compile does not crash (returns bundles)", () => {
-    const { clientJs } = compileBundles(PARAM_BEARING);
+    const { clientJs: __cjRaw } = compileBundles(PARAM_BEARING); const clientJs = foldChunkNamespacing(__cjRaw);
     // The cell shows its placeholder; the client side is still valid output.
     expect(typeof clientJs).toBe("string");
     expect(clientJs.length).toBeGreaterThan(0);
@@ -409,7 +410,7 @@ describe("server-cell-load Pattern C §9: non-?{} RHS unaffected", () => {
 
 describe("server-cell-load Pattern C §10: multiple server cells", () => {
   test("each param-free server cell gets its own /__serverLoad route", () => {
-    const { serverJs, clientJs } = compileBundles(MULTI);
+    const { serverJs, clientJs: __cjRaw } = compileBundles(MULTI); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(serverJs).toContain('path: "/__serverLoad/drivers"');
     expect(serverJs).toContain('path: "/__serverLoad/trucks"');
     expect(clientJs).toContain('fetch("/__serverLoad/drivers"');

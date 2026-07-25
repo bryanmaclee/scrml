@@ -732,7 +732,14 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       if (seedShellCells.length > 0) {
         const entries = seedShellCells.map((n) => `${JSON.stringify(n)}: true`).join(", ");
         lines.push(`// navigate-wave1b #5 — shell cells skipped by the soft-nav rehydrate seed-apply.`);
+        // Published on globalThis as well as declared: the chunk body is wrapped
+        // in a per-chunk IIFE (chunk-namespacing N3), and `_scrml_ssr_seed_apply`
+        // in the RUNTIME probes this by bare name (`typeof _scrml_shell_cells
+        // !== "undefined"`). A bare `var` inside the wrap is invisible to it, so
+        // the soft-nav shell-skip would silently stop working. This is the ONLY
+        // chunk-declared global the runtime reads by name — audited, not assumed.
         lines.push(`var _scrml_shell_cells = { ${entries} };`);
+        lines.push(`if (typeof globalThis !== "undefined") globalThis._scrml_shell_cells = _scrml_shell_cells;`);
       }
     }
     lines.push("_scrml_ssr_seed_apply();");

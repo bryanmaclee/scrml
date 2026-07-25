@@ -95,9 +95,9 @@ describe("§1 — bare-assignment in event handler value", () => {
     // Post-fix: delegated event binding via data-scrml-bind-onclick
     expect(html).toMatch(/data-scrml-bind-onclick="[^"]+"/);
     // Wired as a real handler that uses the setter (not the getter)
-    expect(client).toMatch(/_scrml_reactive_set\("mode",\s*"Active"\)/);
+    expect(client).toMatch(/_scrml_cs_reactive_set\("mode",\s*"Active"\)/);
     // Wrapper shape per SPEC §5.2.2
-    expect(client).toMatch(/function\(event\)\s*\{[^}]*_scrml_reactive_set\("mode"/);
+    expect(client).toMatch(/function\(event\)\s*\{[^}]*_scrml_cs_reactive_set\("mode"/);
   });
 
   test("§1.2 emitted client JS passes syntax validation", () => {
@@ -121,8 +121,8 @@ describe("§1 — bare-assignment in event handler value", () => {
 </program>`;
     const { client } = compileSrcToTmp(src);
     expect(client).not.toBeNull();
-    expect(client).toMatch(/_scrml_reactive_set\("mode",\s*"Active"\)/);
-    expect(client).toMatch(/_scrml_reactive_set\("mode",\s*"Idle"\)/);
+    expect(client).toMatch(/_scrml_cs_reactive_set\("mode",\s*"Active"\)/);
+    expect(client).toMatch(/_scrml_cs_reactive_set\("mode",\s*"Idle"\)/);
   });
 });
 
@@ -138,7 +138,7 @@ describe("§1b — postfix update + compound assigns in event handler value", ()
 </program>`;
     const { client } = compileSrcToTmp(src);
     expect(client).not.toBeNull();
-    expect(client).toMatch(/_scrml_reactive_set\("count",\s*_scrml_reactive_get\("count"\)\s*\+\s*1\)/);
+    expect(client).toMatch(/_scrml_cs_reactive_set\("count",\s*_scrml_cs_reactive_get\("count"\)\s*\+\s*1\)/);
     // Pre-fix shape that we MUST NOT regress to:
     expect(client).not.toMatch(/_scrml_reactive_get\("count"\)\+\+/);
     expect(() => new Function(client)).not.toThrow();
@@ -151,7 +151,7 @@ describe("§1b — postfix update + compound assigns in event handler value", ()
 </program>`;
     const { client } = compileSrcToTmp(src);
     expect(client).not.toBeNull();
-    expect(client).toMatch(/_scrml_reactive_set\("count",\s*_scrml_reactive_get\("count"\)\s*-\s*1\)/);
+    expect(client).toMatch(/_scrml_cs_reactive_set\("count",\s*_scrml_cs_reactive_get\("count"\)\s*-\s*1\)/);
     expect(() => new Function(client)).not.toThrow();
   });
 
@@ -162,7 +162,7 @@ describe("§1b — postfix update + compound assigns in event handler value", ()
 </program>`;
     const { client } = compileSrcToTmp(src);
     expect(client).not.toBeNull();
-    expect(client).toMatch(/_scrml_reactive_set\("count",\s*_scrml_reactive_get\("count"\)\s*\+\s*\(5\)\)/);
+    expect(client).toMatch(/_scrml_cs_reactive_set\("count",\s*_scrml_cs_reactive_get\("count"\)\s*\+\s*\(5\)\)/);
     expect(() => new Function(client)).not.toThrow();
   });
 
@@ -173,7 +173,7 @@ describe("§1b — postfix update + compound assigns in event handler value", ()
 </program>`;
     const { client } = compileSrcToTmp(src);
     expect(client).not.toBeNull();
-    expect(client).toMatch(/_scrml_reactive_set\("count",\s*_scrml_reactive_get\("count"\)\s*\*\s*\(2\)\)/);
+    expect(client).toMatch(/_scrml_cs_reactive_set\("count",\s*_scrml_cs_reactive_get\("count"\)\s*\*\s*\(2\)\)/);
     expect(() => new Function(client)).not.toThrow();
   });
 
@@ -184,8 +184,8 @@ describe("§1b — postfix update + compound assigns in event handler value", ()
 </program>`;
     const { client } = compileSrcToTmp(src);
     expect(client).not.toBeNull();
-    expect(client).toMatch(/_scrml_reactive_set\("count",\s*_scrml_reactive_get\("count"\)\s*\+\s*\(5\)\)/);
-    expect(client).toMatch(/_scrml_reactive_set\("count",\s*_scrml_reactive_get\("count"\)\s*-\s*\(1\)\)/);
+    expect(client).toMatch(/_scrml_cs_reactive_set\("count",\s*_scrml_cs_reactive_get\("count"\)\s*\+\s*\(5\)\)/);
+    expect(client).toMatch(/_scrml_cs_reactive_set\("count",\s*_scrml_cs_reactive_get\("count"\)\s*-\s*\(1\)\)/);
   });
 });
 

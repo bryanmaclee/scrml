@@ -26,6 +26,7 @@ import {
   classifySemdiff,
 } from "../../src/semdiff.ts";
 import { compileVersion } from "../../src/commands/semdiff.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const FIX = resolve(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "semdiff");
 

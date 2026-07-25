@@ -39,6 +39,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { foldChunkNamespacing, unwrapChunkScope } from "../helpers/chunk-scope.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -68,7 +69,10 @@ function compile(source, suffix = "engine-name-dual") {
 }
 
 function makeEvaluator(runtimeJs, clientJs, generatedFnNames) {
-  const clientStripped = clientJs.replace(/^\/\/ Requires:.*\n/, "");
+  // BUG-6/N3: unwrap the per-chunk IIFE + `_scrml_cs_` cell scope so program-scope
+  // functions are top-level (reachable here) and accessors key BARE (matching this
+  // evaluator's bare read). A no-op on an unscoped chunk.
+  const clientStripped = unwrapChunkScope(clientJs.replace(/^\/\/ Requires:.*\n/, ""));
   const exportLines = generatedFnNames
     .map((fn) => `      ${JSON.stringify(fn)}: (typeof ${fn} !== "undefined" ? ${fn} : null),`)
     .join("\n");
@@ -133,16 +137,19 @@ function toggle() { if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav
       // Compiles clean (exit 0 equivalent — no error-severity diagnostics).
       expect(errorsOf(errors)).toEqual([]);
 
-      // Emit-level guards: the engine governs `@mode` (the unified cell), NOT a
-      // phantom `modeMachine`. The write-guard reads the POPULATED engine table.
-      expect(clientJs).toContain("__scrml_engine_mode_transitions");
-      expect(clientJs).not.toContain("modeMachine");
+      // Emit-level guards (namespace-folded view — BUG-6 `_scrml_cs_` accessor
+      // rename + N4 `__scrml_engine_<token>_` names folded off): the engine governs
+      // `@mode` (the unified cell), NOT a phantom `modeMachine`. The write-guard
+      // reads the POPULATED engine table.
+      const cj = foldChunkNamespacing(clientJs);
+      expect(cj).toContain("__scrml_engine_mode_transitions");
+      expect(cj).not.toContain("modeMachine");
       // The write routes through the engine direct-set against the populated
       // table (not the empty §51.3 table).
-      expect(clientJs).toContain('_scrml_engine_direct_set("mode", "Edit", __scrml_engine_mode_transitions)');
-      expect(clientJs).toContain('_scrml_engine_direct_set("mode", "Nav", __scrml_engine_mode_transitions)');
+      expect(cj).toContain('_scrml_engine_direct_set("mode", "Edit", __scrml_engine_mode_transitions)');
+      expect(cj).toContain('_scrml_engine_direct_set("mode", "Nav", __scrml_engine_mode_transitions)');
       // No dead empty §51.3 table for the modern engine.
-      expect(clientJs).not.toContain("__scrml_transitions_ModeMachine");
+      expect(cj).not.toContain("__scrml_transitions_ModeMachine");
 
       // Runtime: toggling flips @mode Nav<->Edit with no E-ENGINE-001-RT.
       const toggleName = findGeneratedFnName(clientJs, "toggle");
@@ -180,8 +187,9 @@ function toggle() { if (@m == Mode.Nav) { @m = .Edit } else { @m = .Nav } }
     try {
       expect(errorsOf(errors)).toEqual([]);
       // The engine governs `@m`; the write-guard reads the populated table keyed on `m`.
-      expect(clientJs).toContain("__scrml_engine_m_transitions");
-      expect(clientJs).toContain('_scrml_engine_direct_set("m", "Edit", __scrml_engine_m_transitions)');
+      const cj = foldChunkNamespacing(clientJs);
+      expect(cj).toContain("__scrml_engine_m_transitions");
+      expect(cj).toContain('_scrml_engine_direct_set("m", "Edit", __scrml_engine_m_transitions)');
 
       const toggleName = findGeneratedFnName(clientJs, "toggle");
       const ctx = makeEvaluator(runtimeJs, clientJs, [toggleName]);
@@ -210,7 +218,7 @@ function toggle() { if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav
     const { errors, clientJs, runtimeJs, cleanup } = compile(src, "engine-noname");
     try {
       expect(errorsOf(errors)).toEqual([]);
-      expect(clientJs).toContain("__scrml_engine_mode_transitions");
+      expect(foldChunkNamespacing(clientJs)).toContain("__scrml_engine_mode_transitions");
       const toggleName = findGeneratedFnName(clientJs, "toggle");
       const ctx = makeEvaluator(runtimeJs, clientJs, [toggleName]);
       expect(ctx.read("mode")).toBe("Nav");

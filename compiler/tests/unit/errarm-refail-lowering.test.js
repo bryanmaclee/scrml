@@ -39,6 +39,7 @@ import { compileScrml } from "../../src/api.js";
 import { writeFileSync, mkdirSync, rmSync, readFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 function compileSrc(src, baseName) {
   const tmp = join(tmpdir(), `scrml-errarm-refail-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
@@ -80,7 +81,7 @@ describe("errarm-refail §1: `!{}` block arm re-fail (Layer 1 — TYPER)", () =>
   });
 
   test("no E-CODEGEN-INVALID-LOGIC; fail-expr lowered to the tagged-error envelope", () => {
-    const { result, clientJs, cleanup } = compileSrc(src, "errarm-block-2");
+    const { result, clientJs: __cjRaw, cleanup } = compileSrc(src, "errarm-block-2"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(codes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     // The arm bodies emit the canonical fail-expr shape (not a literal `fail …`).
     // §51.3.2 — a payload variant's `.data` is a field-keyed object whose keys
@@ -94,7 +95,7 @@ describe("errarm-refail §1: `!{}` block arm re-fail (Layer 1 — TYPER)", () =>
   });
 
   test("the `::X reason` payload binding is in scope inside the re-fail arm", () => {
-    const { result, clientJs, cleanup } = compileSrc(src, "errarm-block-3");
+    const { result, clientJs: __cjRaw, cleanup } = compileSrc(src, "errarm-block-3"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(result.errors ?? []).toHaveLength(0);
     // §51.3.2 — single-field binding projects the declared field (`.data.reason`),
     // the same way `match` / `<errorBoundary>` read it (g-single-field-handler-bind).
@@ -123,7 +124,7 @@ describe("errarm-refail §2: JS-style match value-arm re-fail (Layer 2 — CODEG
   ].join("\n");
 
   test("no E-CODEGEN-INVALID-LOGIC; arm-value fail lowers to the tagged-error envelope", () => {
-    const { result, clientJs, cleanup } = compileSrc(src, "errarm-match");
+    const { result, clientJs: __cjRaw, cleanup } = compileSrc(src, "errarm-match"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(codes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     // §51.3.2 field-keyed `.data` (see §1 above).
     expect(clientJs).toMatch(/return \{ __scrml_error: true, type: "AErr", variant: "Wrapped", data: \{ reason: reason \} \};/);
@@ -148,7 +149,7 @@ describe("errarm-refail §3: `?` propagation desugars in a const-decl", () => {
   ].join("\n");
 
   test("no E-CODEGEN-INVALID-LOGIC; emits the propagate-expr desugaring", () => {
-    const { result, clientJs, cleanup } = compileSrc(src, "errarm-propagate");
+    const { result, clientJs: __cjRaw, cleanup } = compileSrc(src, "errarm-propagate"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(codes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     // The `?` must NOT survive into emitted JS as a literal suffix.
     expect(clientJs).not.toMatch(/\(\s*\)\s*\?\s*;/);
@@ -178,7 +179,7 @@ describe("errarm-refail §4: statement-position fail control (no regression)", (
       "    return amount",
       "}",
     ].join("\n");
-    const { result, clientJs, cleanup } = compileSrc(src, "errarm-control");
+    const { result, clientJs: __cjRaw, cleanup } = compileSrc(src, "errarm-control"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(codes(result)).not.toContain("E-SCOPE-001");
     expect(codes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     // §51.3.2 field-keyed `.data` — Bad(reason) -> `data: { reason: … }`.
@@ -258,7 +259,7 @@ describe("errarm-refail §7: route-to-state arm idiom (non-! function) — no re
       "<p>${@phase}</p>",
       "</program>",
     ].join("\n");
-    const { result, clientJs, cleanup } = compileSrc(src, "errarm-route-to-state");
+    const { result, clientJs: __cjRaw, cleanup } = compileSrc(src, "errarm-route-to-state"); const clientJs = foldChunkNamespacing(__cjRaw);
     // The route-to-state idiom is NOT a re-fail — it must compile clean and emit
     // a reactive write, not a tagged-error return (no regression from errarm-refail).
     expect(result.errors ?? []).toHaveLength(0);
@@ -335,7 +336,7 @@ describe("errarm-refail §8: emitted JS parses (node --check equivalent)", () =>
 
   for (const c of cases) {
     test(`${c.name} — emitted client.js parses as valid JS`, () => {
-      const { result, clientJs, cleanup } = compileSrc(c.src, c.base);
+      const { result, clientJs: __cjRaw, cleanup } = compileSrc(c.src, c.base); const clientJs = foldChunkNamespacing(__cjRaw);
       expect(result.errors ?? []).toHaveLength(0);
       // Strip ESM imports (the runtime shim imports aren't resolvable in new Function).
       const stripped = clientJs.replace(/^\s*import\s.*$/gm, "");

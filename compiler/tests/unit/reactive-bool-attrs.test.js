@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
@@ -38,7 +39,7 @@ function compile(scrmlSource, testName) {
     for (const [fp, output] of result.outputs) {
       if (fp.includes(tag)) {
         html = output.html ?? null;
-        clientJs = output.clientJs ?? null;
+        clientJs =foldChunkNamespacing( foldChunkNamespacing(foldChunkNamespacing(output.clientJs) ?? null));
       }
     }
     return { errors: result.errors ?? [], html, clientJs };
@@ -53,7 +54,7 @@ function emittedHtml(result) {
 }
 
 function emittedClient(result) {
-  return result.clientJs ?? "";
+  return foldChunkNamespacing(result.clientJs) ?? "";
 }
 
 describe("§B1.1 — disabled=${expr} emits bool-attr placeholder + runtime toggle", () => {

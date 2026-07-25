@@ -25,6 +25,7 @@ import { tmpdir } from "os";
 import { compileScrml } from "../../../src/api.js";
 import { SCRML_RUNTIME } from "../../../src/runtime-template.js";
 import { extractUserFns } from "../../helpers/extract-user-fns.js";
+import { foldChunkNamespacing, unwrapChunkScope } from "../../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-s27-effect-refs");
 let tmpCounter = 0;
@@ -41,6 +42,8 @@ function compile(source) {
       write: true,
       outputDir: outDir,
     });
+    // RAW client JS — text-assert tests fold at their own read site; runtime
+    // tests feed it to buildEnv() which unwraps the chunk scope for execution.
     const clientJs = existsSync(resolve(outDir, "app.client.js"))
       ? readFileSync(resolve(outDir, "app.client.js"), "utf8")
       : "";
@@ -50,7 +53,12 @@ function compile(source) {
   }
 }
 
-function buildEnv(clientJs) {
+function buildEnv(clientJsRaw) {
+  // BUG-6/N3: strip the per-chunk IIFE + `_scrml_cs_` cell scope so the emitted
+  // user functions are top-level (extractable + callable) and the accessors key
+  // BARE — this env reads `_scrml_state` by author name. A no-op on an unscoped
+  // chunk. Accepts already-folded input too (unwrap is idempotent over folds).
+  const clientJs = unwrapChunkScope(clientJsRaw);
   const userFns = extractUserFns(clientJs);
   const userFnBindings = userFns.map(n => `${JSON.stringify(n)}: ${n}`).join(",\n    ");
   const fnBody = `
@@ -83,7 +91,7 @@ describe("S27 — effect-body reactive refs compile + run correctly", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     // No literal @-tokens leaked into the compiled output for the effect body.
     // (Scope the check to the effect block; the audit/guard sections use `@`
@@ -110,7 +118,7 @@ describe("S27 — effect-body reactive refs compile + run correctly", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     expect(clientJs).toContain('_scrml_reactive_set("trace"');
     expect(clientJs).toContain('_scrml_reactive_get("trace")');
@@ -133,7 +141,7 @@ describe("S27 — effect-body reactive refs compile + run correctly", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     const env = buildEnv(clientJs);
     env.userFns[env.userFnNames.find(n => n.includes("go"))]();
@@ -159,7 +167,7 @@ describe("S27 — effect-body reactive refs compile + run correctly", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     const env = buildEnv(clientJs);
     env.userFns[env.userFnNames.find(n => n.includes("go"))]();
@@ -183,7 +191,7 @@ describe("S27 — effect-body reactive refs compile + run correctly", () => {
 <p>x</>
 </program>
 `;
-    const { errors, clientJs } = compile(src);
+    const { errors, clientJs: __cjRaw } = compile(src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors.filter(e => e.severity !== "warning")).toEqual([]);
     const env = buildEnv(clientJs);
     env.userFns[env.userFnNames.find(n => n.includes("toB"))]();
