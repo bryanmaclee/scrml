@@ -3,7 +3,9 @@
 **Dispatched:** S282 (2026-07-22) · base `e8fdd44c` · agent `scrml-js-codegen-engineer`, `isolation: worktree`
 **Full scoping:** [`SCOPING.md`](./SCOPING.md) — read it IN FULL first. All three OQs are RULED; do not re-open them.
 
-DONE-PROBE: grep -qE "namespaceToken|chunkNamespace" compiler/src/ast-builder.js
+DONE-PROBE: grep -q chunkNamespaceToken compiler/src/codegen/index.ts
+<!-- LANDED #180 (S283 campaign + S286 finish, closes #27). Probe repointed S287: the rename landed in the dedicated compiler/src/codegen/chunk-namespace.ts module (export chunkNamespaceToken, wired into index.ts:83), NOT ast-builder.js with the pre-rename symbols the original probe greped. -->
+
 
 ---
 
