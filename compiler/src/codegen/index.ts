@@ -90,6 +90,7 @@ import { collectTopLevelLogicStatements, containsSql, getNodes } from "./collect
 import type { CompileContext } from "./context.ts";
 import type { ReachabilityRecord } from "../types/reachability.ts";
 import { resolveDbDriver } from "./db-driver.ts";
+import { parseSchemaBlock } from "../schema-differ.js";
 import { lintCompiledForUndefined } from "./lint-undefined-interpolation.ts";
 import {
   emitPerRouteChunks,
@@ -1481,6 +1482,87 @@ export function runCG(input: CgInput): CgOutput {
       }
     }
     annotateDbScopes(nodes);
+
+    // §14.8.11 — E-DBAUTH-SQLITE gate. A `db-authoritative` table relocates the
+    // tenant-isolation floor to Postgres RLS (roles/FORCE-RLS/GUC) — primitives
+    // SQLite does not have. Fail CLOSED: a security feature that silently
+    // degrades to §14.8.10 egress-redaction is the exact "looks enforced and
+    // isn't" trap. If any table opts in and the resolved driver is not postgres,
+    // hard-fail at compile.
+    {
+      // Any db-authoritative table declared in a `<schema>` block?
+      let anyDbAuthoritative = false;
+      let firstDbAuthTable: string | null = null;
+      const findSchemas = (children: any[]): void => {
+        if (!Array.isArray(children)) return;
+        for (const node of children) {
+          if (!node || typeof node !== "object") continue;
+          if (node.kind === "state" && node.stateType === "schema") {
+            let body = "";
+            for (const c of node.children ?? []) {
+              if (c && c.kind === "text" && typeof c.value === "string") body += c.value;
+            }
+            if (body.trim().length > 0) {
+              let parsed: { tables?: Array<{ name?: string; dbAuthoritative?: boolean }> } = {};
+              try { parsed = parseSchemaBlock(body); } catch { parsed = {}; }
+              for (const t of parsed.tables ?? []) {
+                if (t && t.dbAuthoritative) {
+                  anyDbAuthoritative = true;
+                  if (firstDbAuthTable == null && typeof t.name === "string") firstDbAuthTable = t.name;
+                }
+              }
+            }
+          }
+          if (Array.isArray(node.children) && node.children.length > 0) findSchemas(node.children);
+        }
+      };
+      findSchemas(nodes);
+
+      if (anyDbAuthoritative) {
+        // Resolve the app driver: `<program db=>` (annotated `_dbScope.driver`)
+        // or a `<db src=>` block. First resolvable driver wins.
+        let resolvedDriver: "sqlite" | "postgres" | "mysql" | null = null;
+        const findDriver = (children: any[]): void => {
+          if (!Array.isArray(children) || resolvedDriver !== null) return;
+          for (const node of children) {
+            if (!node || typeof node !== "object") continue;
+            if (node.kind === "markup" && node.tag === "program" && (node as any)._dbScope) {
+              resolvedDriver = (node as any)._dbScope.driver ?? null;
+              if (resolvedDriver !== null) return;
+            }
+            if (node.kind === "state" && node.stateType === "db") {
+              const attrs: any[] = node.attrs ?? node.attributes ?? [];
+              const srcAttr = attrs.find((a: any) => a && a.name === "src");
+              const srcVal: string =
+                srcAttr?.value?.kind === "string-literal"
+                  ? srcAttr.value.value
+                  : srcAttr?.value?.value ?? srcAttr?.value?.name ?? "";
+              if (typeof srcVal === "string" && srcVal.length > 0) {
+                const r = resolveDbDriver(srcVal);
+                if (r.ok) { resolvedDriver = r.info.driver; return; }
+              }
+            }
+            if (Array.isArray(node.children) && node.children.length > 0) findDriver(node.children);
+          }
+        };
+        findDriver(nodes);
+
+        if (resolvedDriver !== "postgres") {
+          const _tbl = firstDbAuthTable ?? "a table";
+          const _seen = resolvedDriver ?? "no db= target";
+          errors.push(new CGError(
+            "E-DBAUTH-SQLITE",
+            `E-DBAUTH-SQLITE: table \`${_tbl}\` is marked \`db-authoritative\` but the resolved ` +
+            `database driver is \`${_seen}\`, not Postgres. DB-authoritative enforcement (Postgres ` +
+            `row-level security, bounded roles, per-request principal) has no SQLite equivalent, so ` +
+            `it fails closed rather than silently degrade to egress-redaction. Target Postgres ` +
+            `(e.g. \`<program db="postgres://...">\`), or drop the \`db-authoritative\` marker to ` +
+            `keep the §14.8.10 egress-redaction floor. See SPEC §14.8.11.`,
+            { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+          ));
+        }
+      }
+    }
   }
 
   // §64 A2 — a build containing a `kind="tool"` entry re-shapes how the tool's

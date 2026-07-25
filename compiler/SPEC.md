@@ -8553,6 +8553,136 @@ published-frame sink — per-subscriber tenant filter); §23.5 (`capabilities=` 
 of "capability"; no collision). Authority: DD `scrml-support/docs/deep-dives/tenant-floor-design-2026-07-19.md`
 (bryan RULED all forks S271) + design-insight (2026-07-20).
 
+#### 14.8.11 Opt-in DB-authoritative tier — Milestone 1 (reads-authoritative, Postgres)
+
+**Added:** 2026-07-25 (S286) — ratifies the DB-authoritative-security phasing plan
+(`scrml-support/docs/deep-dives/db-authoritative-security-PHASING-PLAN-2026-07-25.md`; evidence DD
+`db-authoritative-security-design-2026-07-25.md`; bryan RULED the threshold "add the tier" +
+reads-first phasing + `SET LOCAL ROLE`/`set_config`-in-a-txn A1 shape + SQLite hard-fail, all
+user-voice S286). **Implemented** 2026-07-25 (Milestone 1, reads-authoritative): the opt-in marker,
+the `E-DBAUTH-SQLITE` gate, the S1 RLS + S6 bounded-role DDL emitters, the S7-minimal
+never-DROP-the-table fence, and the A1 per-request principal transaction wrapper. Codegen:
+`compiler/src/schema-differ.js` (DDL) + `compiler/src/codegen/index.ts` (gate) +
+`compiler/src/codegen/emit-server.ts` (A1 wrapper).
+
+**What this tier IS — a trust-boundary reversal, opt-in per table.** §14.8.10 owns the isolation
+invariant at scrml's **compiler-owned client-egress sink** — its trust boundary is scrml's emitted
+server, and a direct `psql` connection reads unredacted rows **by design**. A `db-authoritative`
+table relocates the *same* isolation invariant **into the database** (Postgres row-level security),
+so it holds against **any** connection (a direct `psql`, a second service). This is a trust-boundary
+reversal, not a strength dial — but it stays on the **invariant side** of the §14.8.10 firewall
+(SPEC.md §14.8.10 "consume, never derive"): the RLS policy is keyed on the SAME app-pinned
+`@currentUser.tenantId` scalar §14.8.10 consumes; scrml decides **no authorization policy**
+(who-may-act-as-which-tenant stays app-owned). The two tiers **STACK** (defense-in-depth); the
+DB tier does **not** replace §14.8.10, which remains the SQLite-first, zero-config default.
+
+**Composition with the §14.8.10 floor (defense-in-depth, not a bypass).** Because an
+`invoices`-style `db-authoritative` table carries a `tenant_id` column, it is ALSO a
+§14.8.10 tenant-scoped table, and the §14.8.10 compile-time hard-fails still apply: a write
+against it (`INSERT` with an explicit `tenant_id`, `UPDATE`/`DELETE`) fires `E-TENANT-WRITE`,
+and a bare aggregate (`COUNT(*)` with no `GROUP BY tenant_id`) fires `E-TENANT-AGG`, exactly as
+for any tenant table. This is correct defense-in-depth — the two tiers stack — but an adopter WILL
+meet it: opting a table into DB-authority does NOT relax the §14.8.10 write/aggregate floor (M1 is
+reads-authoritative; the DB-side write-authority that would carry these is P2).
+
+**Milestone 1 is the READS half only.** It relocates the read-isolation invariant. It does **NOT**
+deliver write-authority — immutable financial fields, `SECURITY DEFINER` privileged-mutation
+functions, `DEFERRED` constraint triggers (double-entry balance), column `GRANT`/`REVOKE` — those
+cross the firewall (scrml emitting authorization + integrity) and are **P2+**, separately earned.
+The prose here SHALL NOT over-claim write-authority.
+
+**Declaration (M1-PROVISIONAL surface).** A `<schema>` table opts in with a bareword
+`db-authoritative` immediately after its closing `}`:
+
+```
+<program db="postgres://…">
+  <schema>
+    invoices {
+      id: text primary key
+      tenant_id: text not null
+      amount: real not null
+    } db-authoritative
+  </schema>
+</program>
+```
+
+The marker is Postgres-only and per-table. It is **M1-provisional** — a later owner-ruled syntax
+pass finalizes the surface; the keyword-after-`}` form is deliberately thin. (Note: the illustrative
+Postgres-native column types `uuid` / `decimal` are not yet §39.4-legal scrml schema types — a
+`db-authoritative` table today declares its columns with the §39.4 core types (`text` for a uuid PK,
+`real` for a decimal amount); Postgres-native column types on a Postgres-target schema is a separate
+owner-ruled type-system thread. The DDL emitter passes any non-core type token through verbatim so
+the tier is ready for that thread when it lands.)
+
+**`E-DBAUTH-SQLITE` — fail closed on a non-Postgres target.** A `db-authoritative` table whose
+resolved driver is not Postgres (SQLite, MySQL, or no `db=` target) is a compile error
+(`E-DBAUTH-SQLITE`, §34). Every DB-authoritative primitive (RLS, `FORCE ROW LEVEL SECURITY`,
+`CREATE ROLE`, `GRANT`, `current_setting`/`set_config`) is Postgres-only; SQLite has none. A security
+feature that silently degraded to §14.8.10 egress-redaction is the exact "looks enforced and isn't"
+trap, so the tier fails closed rather than degrade.
+
+**Emitted DDL (S1 RLS + S6 bounded role) — the spike-validated shape.** For a `db-authoritative`
+table `t` the compiler emits (idempotently, so a re-migration re-asserts and never clobbers a live
+policy — the S7-minimal never-clobber fence):
+
+```sql
+DO $$ BEGIN CREATE ROLE scrml_app NOLOGIN NOBYPASSRLS; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+GRANT SELECT, INSERT, UPDATE, DELETE ON t TO scrml_app;
+ALTER TABLE t ENABLE ROW LEVEL SECURITY;
+ALTER TABLE t FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS scrml_tenant_iso ON t;
+CREATE POLICY scrml_tenant_iso ON t USING (tenant_id = current_setting('scrml.tenant', true)::<tenant-type>);
+```
+
+- **S6 bounded role is MANDATORY, not optional.** A superuser / table-owner **BYPASSES** `FORCE ROW
+  LEVEL SECURITY` (spike finding, validated vs real PG16), so the per-request principal MUST drop to
+  the bounded `NOBYPASSRLS` `scrml_app` role. A1 without S6 is a **silent no-op** (RLS present, the
+  owner ignores it — the "looks enforced and isn't" trap).
+- **`current_setting('scrml.tenant', true)`** — the `true` (missing-ok) argument makes a missing GUC
+  return `NULL` (not raise), so an unpinned request's tenant is `NULL`, which matches **no row** — a
+  **fail-closed** read, identical in spirit to §14.8.10's unpinned-sees-zero-rows.
+- The `USING`-only policy also blocks cross-tenant `INSERT` for free (Postgres treats a `USING`
+  policy as the `WITH CHECK` default) — but full write-authority remains P2.
+
+**S7-minimal migration fence.** On a Postgres driver the schema differ emits native
+`ALTER TABLE … ADD/DROP COLUMN` and NEVER the SQLite 12-step DROP/recreate — dropping a table would
+`CASCADE`-drop its attached RLS policy, grants, and role membership. The differ emits forward DDL and
+does not diff policy state (object-aware policy diffing is the deferred S7-full tail).
+
+**A1 — the per-request principal (S2 GUC injection).** For an app that declares **≥1**
+`db-authoritative` table, every `?{}` query runs on a **reserved connection carrying the principal**:
+the compiler wraps the query in a `_scrml_sql.begin(async (tx) => …)` transaction that first pins the
+tenant and drops to the bounded role, then runs the original query on `tx`:
+
+```js
+await _scrml_sql.begin(async (tx) => {
+  await tx`SELECT set_config('scrml.tenant', ${_scrml_active_tenant(_scrml_req)}, true)`;
+  await tx.unsafe("SET LOCAL ROLE scrml_app");
+  return await tx`…the original query…`;
+});
+```
+
+`SET LOCAL` cannot be parameterized, so the tenant is injected via the txn-scoped
+`set_config(name, value, true)` form (the `true` = local/txn-scoped → auto-resets on commit → no
+cross-request principal bleed under a pool). `_scrml_active_tenant(_scrml_req)` is the SAME pinned
+scalar §14.8.10 consumes. **Conditional engagement:** an app that declares **zero**
+`db-authoritative` tables emits **byte-identically** to today (the single-ambient-handle fast path) —
+the tier's cost and blast radius are bounded to opt-in apps only.
+
+**The atomic-milestone acceptance gate (the negative test).** No DB-authoritative milestone counts
+as landed except as ONE atomic unit — declaration + DDL emission + GUC injection + migration
+preservation + a **direct-connection NEGATIVE test**: applied against a real Postgres, a bounded-role
+connection with NO `set_config` reads **zero** rows, and a connection WITH
+`set_config('scrml.tenant', <tenantA>)` reads ONLY tenant-A rows. A half-shipped RLS "looks enforced
+and isn't" — worse than none — so the negative test is the only proof that separates real DB
+enforcement from the egress-JS gap.
+
+**Cross-references:** §14.8.10 (the egress-redaction floor this tier stacks with + the pinned-tenant
+firewall); §44.2 (driver resolution — `resolveDbDriver`); §39 (`<schema>` tables); §20.5.1
+(`session.set("tenantId", …)` — the pinned scalar `set_config` injects). Authority: phasing plan +
+evidence DD (bryan RULED S286, user-voice). Milestone 1 is reads-authoritative; P2 (write-authority)
+is separately ruled.
+
 ### 14.9 The `snippet` Type Kind
 
 A `snippet` is a deferred, parameterisable markup fragment. It is callable — it produces markup when invoked. `snippet` is a first-class type kind in the scrml type system.
@@ -18385,6 +18515,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-TENANT-RAW-EGRESS | §14.8.10 | A tenant-scoped table's rows reach a compiler-unanalyzable egress path — a `_{}` foreign-code block (§23), a manual `Response` / `handle()` body (§40), or an `asIs`-typed value (§14.1.1) — where the compiler cannot tag/redact the rows, so a cross-tenant row cannot be proven stripped at this boundary. Fail-closed: the compiler will not silently ship a tenant-scoped row through a path it cannot redact. The row-isolation sibling of `E-PROTECT-004` (the column direction). Resolution: return the rows through the normal compiler-emitted response, or, for a deliberate cross-tenant read, mark the query `.acrossTenants()`. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `detectTenantRawEgress`.) | Error |
 | I-TENANT-STRIP | §14.8.10 | The compiler-emitted egress serializer scopes a client-egress payload — a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, or `server function*` SSE (§37) `data:` chunk — to the request's ambient `@currentUser.tenantId`: every row of another tenant is dropped, and an unpinned (anonymous) request sees ZERO rows (fail-closed). The row-level twin of `I-PROTECT-STRIP-001`. Names the read so the redaction is never silent. Also fires on the wholesale-strip fallback of an unresolvable dynamic read that mentions a tenant-scoped table. Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the rewriter/hand-emit strip drains.) | Info |
 | I-TENANT-ACROSS | §14.8.10 | A `?{…}.acrossTenants()` opt-out SUPPRESSED the §14.8.10 tenant floor for one query (a deliberate cross-tenant read/write — a platform-admin dashboard, cross-tenant reporting). It is the ONLY way to emit an unscoped read/write against a tenant-scoped table, and it fires this Info so an audit can grep every cross-tenant access in the codebase (the cross-tenant audit surface). Mirrors `reveal()`'s greppability for §14.8.9. Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the `.acrossTenants()` drains.) | Info |
+| E-DBAUTH-SQLITE | §14.8.11 | A `<schema>` table is marked `db-authoritative` (the opt-in DB-authoritative security tier — Postgres RLS `FORCE ROW LEVEL SECURITY` + a bounded `NOBYPASSRLS` role + a per-request principal), but the resolved database driver is not Postgres (SQLite, MySQL, or no `db=` target). SQLite has no per-connection principal, no roles, no `GRANT`, no RLS — every DB-authoritative primitive is Postgres-only. Fail CLOSED at compile: a security feature that silently degraded to §14.8.10 egress-redaction would be the exact "looks enforced and isn't" trap. Resolution: target Postgres (`<program db="postgres://...">`), or drop the `db-authoritative` marker to keep the §14.8.10 egress-redaction floor (which is the SQLite-first default). (Catalog addition: DB-authoritative tier Milestone 1 — reads-authoritative, S286; emitted at `compiler/src/codegen/index.ts` in the `annotateDbScopes` driver-resolution stage.) | Error |
 | E-ROUTE-001 | §12.4 | Unresolvable callee or computed member access in route analysis | Warning |
 | ~~E-RI-001~~ | — | **Retired 2026-04-21 (S37)**; `server pure` is now valid (§33.3, §48.10). | — |
 | E-RI-002 | §12 | Server-escalated function mutates `@` reactive variable | Error |

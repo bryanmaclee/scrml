@@ -13,6 +13,7 @@ import { emitExpr, emitExprField, setServerAsyncClassifier, resetSessionValueUse
 import type { CompileContext } from "./context.ts";
 import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
 import { resolveDbDriver } from "./db-driver.ts";
+import { appDeclaresDbAuthoritative, wrapPrincipalTxn } from "./db-authoritative.ts";
 import { isLibraryShapedFile } from "../tool-program.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
@@ -4648,6 +4649,19 @@ export function generateServerJs(
   // emitted call (a non-protect app emits none of these and is byte-unchanged).
   if (finalEmitted.includes("_scrml_protect_")) {
     finalEmitted = injectAfterHeader(finalEmitted, SERVER_PROTECT_HELPER);
+  }
+
+  // §14.8.11 — A1/S2 DB-authoritative principal transaction wrapper (CONDITIONAL
+  // ENGAGEMENT). Runs ONLY when the app declares ≥1 `db-authoritative` table; a
+  // non-db-authoritative app skips this entirely and the server bundle is
+  // byte-identical to today (the single-ambient-handle fast path). For a
+  // db-authoritative app, every `?{}` query (`_scrml_sql.unsafe(…)` /
+  // `_scrml_sql`…``) is rewritten to run on a reserved `.begin(async (tx) => …)`
+  // connection that pins the tenant GUC + drops to the bounded `scrml_app` role.
+  // MUST run BEFORE the §14.8.10 tenant-helper injection below so the wrapper's
+  // `_scrml_active_tenant(_scrml_req)` reference triggers that helper's emission.
+  if (appDeclaresDbAuthoritative(fileAST)) {
+    finalEmitted = wrapPrincipalTxn(finalEmitted);
   }
 
   // §14.8.10 — inject the tenant-row isolation floor helper (tag/redact +
