@@ -82,3 +82,51 @@ FULLY INTACT (prologue + N3 IIFE, ZERO fold/unwrap/normalize) in happy-dom:
 CONCLUSION: the unwrap/fold/normalize test helpers are test-side accommodations for
 eval-in-isolation harnesses reaching INTO the chunk (bare names / IIFE-local fns /
 byte-identity across path-derived tokens); the SHIPPED bundle is correct as-is.
+
+## Browser (Phase 4) — per-file isolated
+Fixed GREEN (isolated): browser-forms, browser-todo, browser-todomvc, each-empty-fallback,
+component-each-in-prop-scope, each-in-block-form-match, each-over-arm, g-bindvalue, g-nested-each,
+g-tablefor-column-slot, tablefor-perrow, g-each-mount-form-submit, g-each-component-helper-hoist,
+g-each-component-transitive, g-each-inline-prop-member, each-render-before-cell-init,
+engine-gated-each-populate, g-if-guard, g-if-chain, g-match, engine-opener, ssr-a-terminus,
+browser-deepset-write-loss, browser-structural-compound-deepset, g-each-item-hidden. (+ 14-mario,
+derived-machines, engine-body-render fixed in the unit set.)
+Fix shapes: chunkCellKey (key bare-global read/write through the token) | captureInsideChunkScope
+(scoped setter for effect-triggering) | unwrapChunkScope (reach IIFE-local fns / bare exec) |
+foldChunkNamespacing / _scrml_cs_ (text-assert on renamed clientJs) | namespaced mount selector.
+
+REMAINING browser RED (NOT chunk-ns-caused — surfaced, not papered):
+- peritem (3) + g-emit-lift (4): PRE-EXISTING markup-text whitespace bug (`Saved ${x}` ->
+  `createTextNode("Saved")` drops the trailing space). Codegen BYTE-IDENTICAL to fe1ad047 (verified).
+  NOT rename-caused. Their namespacing IS fixed; the whitespace assert/render remains.
+- render-by-tag-nested-compound-bug60: PRE-EXISTING E-TYPE-031 (validator vocabulary closed at 14 —
+  `email` rejected). Present on fe1ad047 too. Stale fixture, unrelated to chunk-ns.
+- browser-navigate-soft-nav (7) + engine-message-dispatch-s155 (6): COMPLEX multi-chunk harnesses
+  (soft-nav rehydration reads shell cells via window accessors; message-dispatch reimplements the
+  runtime call site). Test-side keying WIP. The SHIPPED equivalents work — engine transition + msg
+  arms are the same runtime path proven by the intact-bundle acceptance test.
+
+## (A) REAL codegen/source fixes (product changed):
+1. codegen/index.ts wrapChunkBodyInIife — hoist top-level import/export OUT of the N3 IIFE (a classic
+   client carrying a .js-helper ESM import was wrapped illegally -> E-CODEGEN-INVALID-LOGIC). giti-009.
+2. semdiff.ts canonicalizeChunkNamespaceToken — neutralize the path-derived chunk token in the
+   emit-identity compare (D2 cosmetic class), so a moved/renamed file stays Tier-0.
+(Plus the pre-existing rename machinery on the branch; these two are the NEW product changes this dispatch made.)
+
+## (B) test-harness accommodations (product already correct; not masking, one-line reason each):
+- makeEvaluator/loadSample/mount chunkCellKey keying: reads a cell by author name from OUTSIDE the
+  chunk; the chunk namespaces the key — keying externally is required, doesn't alter emitted code.
+- unwrapChunkScope executors (bug-ab/s144/engine-name-dual/14-mario/derived-machines/typed-array/
+  self-host-lexer): the harness reaches an IIFE-local program fn / bare-keyed state; unwrap makes a
+  TEST copy top-level+bare — the SHIPPED bundle (IIFE intact) executes correctly (intact-acceptance test).
+- foldChunkNamespacing text-asserts: pins the token-INDEPENDENT lowering contract; a surgical fold
+  that can ONLY remove the known `_scrml_cs_`/engine-token/cell-key delta — any other diff still surfaces.
+- normalizeChunkToken byte-identity: two byte-identical sources at different paths differ ONLY by the
+  path-hash token; normalizing both to a placeholder compares the BODY, not the incidental token.
+- captureInsideChunkScope setter-inside (each-empty-fallback/select-row/lift-target): the each-effect
+  subscribes to the SCOPED key; the injected setter must bind the scoped `_scrml_cs_` wrapper.
+- emit-unit reverts to raw (s95/computed-delay/c22/runtime-template reads): emitExpr/emitEngineTimersTable/
+  the runtime template emit the RAW name; the rename runs at bundle assembly, so `_scrml_cs_` was over-migrated.
+- N2/N3/N4 + esm-collision pin FLIPS: the arc CLOSED these; the tests now assert the fix, not the old bug.
+- within-node parity allowlist regen: classifier runs on PARSED FileASTs pre-codegen; rename cannot affect
+  it (parser/allowlist/fixtures byte-identical to fe1ad047) — main's #162 drift, designed baseline-regen.
