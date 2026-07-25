@@ -1604,6 +1604,47 @@ function renderTemplateAttrToJs(
     return;
   }
 
+  // ---- (2.5) i174 — `value` on a form control is the `.value` PROPERTY ------
+  // SPEC §5.5.4: `value=` on <input>/<textarea>/<select> owns the `.value`
+  // property, not the `value` attribute. setAttribute("value", …) writes only
+  // the DEFAULT value, which the browser ignores once the control is dirty, so a
+  // per-item reactive value would silently stop applying (same defect the
+  // top-level template-attr path carried). Mirrors emitValueAttrApply's caret-
+  // safe inequality guard. (<textarea> BODY text is handled separately by the
+  // RCDATA `.value` path; this covers the `value=` ATTRIBUTE form.)
+  const _elTag = String((elNode && ((elNode.tag as string) ?? (elNode.name as string))) ?? "").toLowerCase();
+  // Axiom ① (§5.5.4): `.value` has one wholesale owner. `bind:value` is the
+  // sanctioned two-way owner (and already sets `.value` on the per-item path), so
+  // only take the property route when `value=` is the sole `.value` writer.
+  const _elAttrs = (elNode && (elNode.attributes ?? elNode.attrs)) ?? [];
+  if (
+    aName === "value" &&
+    (_elTag === "input" || _elTag === "textarea" || _elTag === "select") &&
+    !eachHasBindValue(_elAttrs as any[]) &&
+    (valKind === "expr" || valKind === "variable-ref" || valKind === "call-ref" || valKind === "string-literal")
+  ) {
+    let _vexpr: string | null = null;
+    if (valKind === "expr") {
+      _vexpr = `String(${lowerEachExpr(String(val.raw ?? ""), iterVarName)})`;
+    } else if (valKind === "variable-ref") {
+      _vexpr = `String(${lowerEachExpr(String(val.name ?? ""), iterVarName)})`;
+    } else if (valKind === "call-ref") {
+      _vexpr = `String(${rewriteIterValueExpr(`${String(val.name ?? "")}(${serializeCallArgs(val, iterVarName)})`, iterVarName)})`;
+    } else {
+      const sv = String(val.value ?? "");
+      const tpl = buildEachAttrTemplate(sv, iterVarName);
+      _vexpr = tpl !== null ? tpl : JSON.stringify(sv);
+    }
+    const _vVar = `_scrml_v_${nextLocalId()}`;
+    for (const _l of maybeWrapEachPerItemEffect(
+      [
+        `${indent}const ${_vVar} = ${_vexpr};`,
+        `${indent}if (${elVar}.value !== ${_vVar}) ${elVar}.value = ${_vVar};`,
+      ], iterVarName, indent,
+    )) lines.push(_l);
+    return;
+  }
+
   // ---- (3) ${...} interpolation / @.field value → setAttribute value ------
   // Bug 64 / R28-1c (S159) — per-item attr interpolation is live-keyed too so
   // an attr value bound to item data refreshes on reconcile (matches Tier-0).

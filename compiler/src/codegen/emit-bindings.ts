@@ -33,6 +33,17 @@ interface Attr {
   [key: string]: unknown;
 }
 
+// i174 — form controls whose live state lives in the `value` PROPERTY, not the
+// `value` ATTRIBUTE. `setAttribute("value", …)` writes only the DEFAULT value,
+// which the browser ignores once the control is dirty (the user has typed), so a
+// reactive template-string `value="${@cell}"` silently stops applying and a
+// programmatic `@cell = ""` never clears the visible field. Mirrors
+// FORM_VALUE_ELEMENTS in emit-html.ts (the paren `value=(expr)` path); SPEC
+// §5.5.4 makes `value=` on a form control the exclusive owner of the `.value`
+// property, and §5's boolean/property rule makes emitting setAttribute here a
+// compiler defect.
+const FORM_VALUE_ELEMENTS = new Set(["input", "textarea", "select"]);
+
 // ---------------------------------------------------------------------------
 // buildEnumVarMap
 // ---------------------------------------------------------------------------
@@ -901,14 +912,45 @@ export function emitBindings(ctx: CompileContext): string[] {
           reactiveVars: Set<string>;
         };
 
+        // i174 — `value` on a form control (<input>/<textarea>/<select>) is the
+        // `.value` PROPERTY, not the `value` attribute (SPEC §5.5.4). The
+        // template-string form `value="${@cell}"` lands here, and emitting
+        // setAttribute writes only the DEFAULT value: once the user types, the
+        // property diverges and a reactive `@cell = ""` never clears the field.
+        // Write the live property instead, guarded by an inequality test so a
+        // re-assignment of the identical string cannot reset the caret
+        // mid-typing (matches emitValueAttrApply, the paren `value=(expr)` path).
+        const mkTag = String((mkNode.tag as string) ?? "").toLowerCase();
+        // Axiom ① (§5.5.4): the `.value` property has at most one WHOLESALE
+        // owner. `bind:value` is the sanctioned two-way owner, so take the
+        // property path ONLY when `value=` is the SOLE `.value` writer. When a
+        // `bind:value` is also present we fall through to the unchanged
+        // setAttribute (the pre-i174 behavior for that combo) rather than emit a
+        // second, competing `.value` writer — the property fix must never
+        // introduce a same-surface conflict it would otherwise catch.
+        const hasBindValue = nodeAttrs.some(
+          (a) => a && (a.name === "bind:value" || a.name === "bind:valueAsNumber"),
+        );
+        const isFormControlValue =
+          attrName === "value" && FORM_VALUE_ELEMENTS.has(mkTag) && !hasBindValue;
+
         lines.push(`// template-attr ${attrName}="${rawValue}"`);
         lines.push(`{`);
         lines.push(`  const ${tplElemId} = document.querySelector('${tplSelector}');`);
         lines.push(`  if (${tplElemId}) {`);
-        lines.push(`    ${tplElemId}.setAttribute(${JSON.stringify(attrName)}, ${jsExpr});`);
-        // Auto-tracking effect handles all reactive dependencies automatically
-        if (reactiveVars.size > 0) {
-          lines.push(`    _scrml_effect(() => { ${tplElemId}.setAttribute(${JSON.stringify(attrName)}, ${jsExpr}); });`);
+        if (isFormControlValue) {
+          const vVar = genVar("tpl_val");
+          lines.push(`    { const ${vVar} = ${jsExpr}; if (${tplElemId}.value !== ${vVar}) ${tplElemId}.value = ${vVar}; }`);
+          // Auto-tracking effect handles all reactive dependencies automatically
+          if (reactiveVars.size > 0) {
+            lines.push(`    _scrml_effect(() => { const ${vVar} = ${jsExpr}; if (${tplElemId}.value !== ${vVar}) ${tplElemId}.value = ${vVar}; });`);
+          }
+        } else {
+          lines.push(`    ${tplElemId}.setAttribute(${JSON.stringify(attrName)}, ${jsExpr});`);
+          // Auto-tracking effect handles all reactive dependencies automatically
+          if (reactiveVars.size > 0) {
+            lines.push(`    _scrml_effect(() => { ${tplElemId}.setAttribute(${JSON.stringify(attrName)}, ${jsExpr}); });`);
+          }
         }
         lines.push(`  }`);
         lines.push(`}`);
