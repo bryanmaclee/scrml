@@ -25,7 +25,7 @@ import { tmpdir } from "os";
 import { compileScrml } from "../../../src/api.js";
 import { SCRML_RUNTIME } from "../../../src/runtime-template.js";
 import { extractUserFns } from "../../helpers/extract-user-fns.js";
-import { foldChunkNamespacing } from "../../helpers/chunk-scope.js";
+import { foldChunkNamespacing, unwrapChunkScope } from "../../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-s27-effect-refs");
 let tmpCounter = 0;
@@ -42,16 +42,23 @@ function compile(source) {
       write: true,
       outputDir: outDir,
     });
-    const clientJs =foldChunkNamespacing( foldChunkNamespacing(existsSync(resolve(outDir, "app.client.js"))
+    // RAW client JS — text-assert tests fold at their own read site; runtime
+    // tests feed it to buildEnv() which unwraps the chunk scope for execution.
+    const clientJs = existsSync(resolve(outDir, "app.client.js"))
       ? readFileSync(resolve(outDir, "app.client.js"), "utf8")
-      : ""));
+      : "";
     return { errors: result.errors ?? [], clientJs };
   } finally {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   }
 }
 
-function buildEnv(clientJs) {
+function buildEnv(clientJsRaw) {
+  // BUG-6/N3: strip the per-chunk IIFE + `_scrml_cs_` cell scope so the emitted
+  // user functions are top-level (extractable + callable) and the accessors key
+  // BARE — this env reads `_scrml_state` by author name. A no-op on an unscoped
+  // chunk. Accepts already-folded input too (unwrap is idempotent over folds).
+  const clientJs = unwrapChunkScope(clientJsRaw);
   const userFns = extractUserFns(clientJs);
   const userFnBindings = userFns.map(n => `${JSON.stringify(n)}: ${n}`).join(",\n    ");
   const fnBody = `
