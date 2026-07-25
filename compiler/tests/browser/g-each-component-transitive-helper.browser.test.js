@@ -30,6 +30,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { chunkCellKey } from "../helpers/chunk-scope.js";
 
 // Innermost: a component with its OWN `export fn` helper used in its body.
 const BADGE = `\${
@@ -149,7 +150,8 @@ describe("g-each-transitive §2 — renders at runtime (no effect-error)", () =>
       `globalThis.__set__ = (typeof _scrml_reactive_set!=='undefined')?_scrml_reactive_set:null;`);
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));
-    if (globalThis.__set__) globalThis.__set__("nums", [1, 2]);
+    // BUG-6: key the bare-global write through the page chunk's token.
+    if (globalThis.__set__) globalThis.__set__(chunkCellKey(clientJs)("nums"), [1, 2]);
     console.error = origErr;
 
     const refErrors = errs.filter((e) => /ReferenceError|not defined|scrml effect error/.test(e));

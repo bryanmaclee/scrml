@@ -30,6 +30,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
+import { chunkCellKey } from "../helpers/chunk-scope.js";
 import { compileScrml } from "../../src/api.js";
 
 // Component with an `export fn` helper used in its OWN body — the load-card.scrml
@@ -164,7 +165,10 @@ describe("g-each-helper-hoist §2 — for-lift renders the helper output at runt
       `globalThis.__set__ = (typeof _scrml_reactive_set!=='undefined')?_scrml_reactive_set:null;`);
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));
-    if (globalThis.__set__) globalThis.__set__("nums", [1, 2, 3]);
+    // BUG-6: the page chunk keys its cells under its token; a bare-global write
+    // from OUTSIDE the chunk must key through it or the scoped each-effect never fires.
+    const cellKey = chunkCellKey(clientJs);
+    if (globalThis.__set__) globalThis.__set__(cellKey("nums"), [1, 2, 3]);
     console.error = origErr;
     return { errs, li: document.querySelectorAll("li") };
   }

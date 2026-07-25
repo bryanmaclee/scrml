@@ -38,6 +38,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { chunkCellKey } from "../helpers/chunk-scope.js";
 
 // Transitive inner component — a status pill whose ROOT class carries a ${}
 // interp referencing its OWN prop `status` (the case-c shape: g-inlined-
@@ -203,7 +204,8 @@ describe("g-each-inline-prop-member §2 — board-shape renders at runtime (both
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));
     if (globalThis.__set__) {
-      globalThis.__set__("rows", [
+      // BUG-6: key the bare-global write through the page chunk's token.
+      globalThis.__set__(chunkCellKey(clientJs)("rows"), [
         { id: 1, status: "hot", weight: 100 },
         { id: 2, status: "cold", weight: 200 },
       ]);

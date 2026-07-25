@@ -25,7 +25,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
-import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { chunkCellKey } from "../helpers/chunk-scope.js";
 
 const DOLLAR = "$";
 
@@ -83,14 +83,17 @@ describe("g-each-peritem-markup-value-ternary — item2 (GITI-032 follow-on)", (
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_get__ = _scrml_reactive_get;\n` +
-        `globalThis.__scrml_set__ = (n, v) => _scrml_reactive_set(n, _scrml_deep_reactive(v));\n`),
+      // BUG-6: BARE global accessors + explicit chunkCellKey (see g-each-mount-form-submit).
+      `${runtimeJs}\n${clientJs}\n` +
+        `globalThis.__scrml_get__ = _scrml_reactive_get;\n` +
+        `globalThis.__scrml_set__ = (n, v) => _scrml_reactive_set(n, _scrml_deep_reactive(v));\n`,
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));
+    const cellKey = chunkCellKey(clientJs);
     return {
-      set: (name, val) => globalThis.__scrml_set__(name, val),
-      get: (name) => globalThis.__scrml_get__(name),
+      set: (name, val) => globalThis.__scrml_set__(cellKey(name), val),
+      get: (name) => globalThis.__scrml_get__(cellKey(name)),
       badges: () => [...document.querySelectorAll("span.badge")].map((n) => n.textContent.trim()),
       badgeCount: () => document.querySelectorAll("span.badge").length,
     };
