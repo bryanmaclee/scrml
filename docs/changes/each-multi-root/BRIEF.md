@@ -2,7 +2,9 @@
 
 change-id: `each-multi-root`
 dispatched: S281 (2026-07-22) · base `f6f763b4` (branch `fix/each-multi-root`, off main `a0344d75`)
-DONE-PROBE: `bun test compiler/tests/unit/each-multi-root.test.js && bun conformance/run.ts --case each-multi-root`
+DONE-PROBE: bun test compiler/tests/unit/each-multi-root.test.js
+<!-- LANDED #141→PR#150 (S281/S282). Probe de-backticked S287 (the markdown code-span made the first token `` `bun `` → S278 malformed-guard ERROR). The unit test is the landed assertion; the prior `--case each-multi-root` filter matched no case (ran the full suite). -->
+
 
 ---
 
