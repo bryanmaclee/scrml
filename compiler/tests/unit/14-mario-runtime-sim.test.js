@@ -19,7 +19,7 @@ import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
-import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { unwrapChunkScope } from "../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-14-mario-runtime-sim");
 
@@ -69,12 +69,17 @@ describe("14-mario runtime simulation (Bug 1 e2e gap)", () => {
     //
     // Capture the runtime's _scrml_state via a side-channel on globalThis so
     // we can inspect it from the test.
+    // BUG-6/N3: unwrap the chunk scope so the accessors key BARE (this harness
+    // reads `_scrml_state` + derived by author name) and the body top-levels.
+    // Engine names keep their token (matching the un-folded HTML mount attribute),
+    // so the engine dispatch still resolves its own `data-scrml-engine-mount`.
+    const cjExec = unwrapChunkScope(clientJs);
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n` + captureInsideChunkScope(clientJs, `globalThis.__scrml_state__ = _scrml_state;\n` +
-      `globalThis.__scrml_derived_get__ = _scrml_derived_get;\n` +
-      `globalThis.__scrml_engine_table__ = __scrml_engine_marioState_transitions;\n`)
+      `${runtimeJs}\n${cjExec}\n` +
+      `globalThis.__scrml_state__ = _scrml_state;\n` +
+      `globalThis.__scrml_derived_get__ = _scrml_derived_get;\n`
     );
     exec(window, document);
 
