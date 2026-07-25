@@ -30,6 +30,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { foldChunkNamespacing, unwrapChunkScope } from "../helpers/chunk-scope.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -64,7 +65,10 @@ function compile(source, suffix = "s144-ab1") {
  * top-level function (e.g. `_scrml_toggle_4`).
  */
 function makeEvaluator(runtimeJs, clientJs, generatedFnNames) {
-  const clientStripped = clientJs.replace(/^\/\/ Requires:.*\n/, "");
+  // BUG-6/N3: unwrap the per-chunk IIFE + `_scrml_cs_` cell scope so the emitted
+  // program-scope functions are top-level (reachable here) and the accessors key
+  // BARE (matching this evaluator's bare get/set). A no-op on an unscoped chunk.
+  const clientStripped = unwrapChunkScope(clientJs.replace(/^\/\/ Requires:.*\n/, ""));
   const setTimeoutNoop = () => 0;
   const clearTimeoutNoop = () => {};
   const exportLines = generatedFnNames
@@ -131,11 +135,14 @@ function toggle() { if (@mode == Mode.Nav) { @mode = .Edit } else { @mode = .Nav
     try {
       expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
-      // Emit-level guard: the if-body write must route through the engine
-      // dispatcher, NOT a bare reactive_set, and fire_hooks must be emitted.
-      expect(clientJs).toContain("_scrml_cs_engine_direct_set(\"mode\", \"Edit\"");
-      expect(clientJs).toContain("__scrml_engine_mode_fire_hooks");
-      expect(clientJs).not.toMatch(/_scrml_reactive_set\("mode", "Edit"\)/);
+      // Emit-level guard (namespace-folded view — BUG-6 `_scrml_cs_` accessor
+      // rename + N4 `__scrml_engine_<token>_` names folded off): the if-body write
+      // must route through the engine dispatcher, NOT a bare reactive_set, and
+      // fire_hooks must be emitted.
+      const cj = foldChunkNamespacing(clientJs);
+      expect(cj).toContain("_scrml_engine_direct_set(\"mode\", \"Edit\"");
+      expect(cj).toContain("__scrml_engine_mode_fire_hooks");
+      expect(cj).not.toMatch(/_scrml_reactive_set\("mode", "Edit"\)/);
 
       const toggleName = findGeneratedFnName(clientJs, "toggle");
       expect(toggleName).toBeTruthy();
@@ -170,11 +177,12 @@ function go() { if (@mode == Mode.Nav) { @mode.advance(.Edit) } }
     try {
       expect(errors.filter((e) => e.severity === "error")).toEqual([]);
 
-      // Emit-level guard: routes through _scrml_engine_advance (NOT a method
-      // call on the variant-string value).
-      expect(clientJs).toContain("_scrml_cs_engine_advance(\"mode\", \"Edit\"");
-      expect(clientJs).toContain("__scrml_engine_mode_fire_hooks");
-      expect(clientJs).not.toMatch(/_scrml_reactive_get\("mode"\)\.advance\(/);
+      // Emit-level guard (namespace-folded view): routes through
+      // _scrml_engine_advance (NOT a method call on the variant-string value).
+      const cj = foldChunkNamespacing(clientJs);
+      expect(cj).toContain("_scrml_engine_advance(\"mode\", \"Edit\"");
+      expect(cj).toContain("__scrml_engine_mode_fire_hooks");
+      expect(cj).not.toMatch(/_scrml_reactive_get\("mode"\)\.advance\(/);
 
       const goName = findGeneratedFnName(clientJs, "go");
       expect(goName).toBeTruthy();
