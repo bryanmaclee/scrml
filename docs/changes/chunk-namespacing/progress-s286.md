@@ -50,3 +50,16 @@ OBSERVATION for PA: bare non-<program> script-files bypass BUG-6 namespacing (de
 chunks that compose into one document — but a theoretical hole if two bare files ever share a bundle).
 
 ## Next: happy-dom cluster + byte-identity + giti-009 + chunk-namespacing.test.js N2/N3/N4.
+
+## MILESTONE: unit+integration+conformance GREEN (0 fail / 0 errors, exit 0) — 21224 pass
+Remaining batch fixes since last note:
+- engine-name-dual-table, engine-a7(hier/hist), opener-c1, onIdle, chain-mount, request-tag, m67-c2,
+  self-host-v2-lexer(unwrap), byte-identity(normalizeChunkToken ×2), typed-array(unwrap), 28-flux(un-double-key),
+  14-mario(unwrap), select-row+lift-target(captureInsideChunkScope), derived-machines(unwrap), engine-body-render(fold-html+unwrap).
+- REAL CODEGEN FIX: wrapChunkBodyInIife now hoists top-level import/export OUT of the N3 IIFE
+  (a classic client carrying a .js-helper ESM import was wrapped illegally → E-CODEGEN-INVALID-LOGIC). giti-009 green.
+- semdiff: canonicalizeChunkNamespaceToken neutralizes the path-derived token in the emit-identity compare (D2 class).
+- esm-client §4 + chunk-namespacing N2/N3/N4: flipped the KNOWN-OPEN/collision pins to assert the CLOSED behavior.
+- elision-cat-2a-2b + elision-slice-2-3-4: repaired PART-A botched string escaping (parse errors).
+
+## Next: within-node parity regen, gzip re-measure, browser isolated, artifact-diff, R26.
