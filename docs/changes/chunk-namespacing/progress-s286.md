@@ -63,3 +63,22 @@ Remaining batch fixes since last note:
 - elision-cat-2a-2b + elision-slice-2-3-4: repaired PART-A botched string escaping (parse errors).
 
 ## Next: within-node parity regen, gzip re-measure, browser isolated, artifact-diff, R26.
+
+## SCRUTINY-DIRECTIVE RESPONSE (coordinator S286) — intact-bundle acceptance
+Ran an ADVERSARIAL probe (scratch) executing the SHIPPED bundle with chunk scope
+FULLY INTACT (prologue + N3 IIFE, ZERO fold/unwrap/normalize) in happy-dom:
+- PASS: intact bundle executes WITHOUT throw — self-recursion + dangling-ref classes
+  (`_scrml_lex_N`, `__scrml_engine_*_transitions`) are GONE in SHIPPED output. The
+  self-recursion was ONLY ever a TEST-HELPER artifact (foldChunkNamespacing on the
+  EXECUTED clientJs mangled `const _scrml_cs_X = (n)=>_scrml_X(...)` into
+  `_scrml_X=(n)=>_scrml_X(...)`); the shipped prologue calls the REAL accessor.
+- PASS: intact ENGINE transition on real button click (@phase Loading->Ready).
+- PASS: TWO intact bundles (colliding cell+engine names) eval in ONE document scope
+  WITHOUT `already been declared` (N3 IIFE isolation) — distinct tokens, distinct keys.
+- each-reconcile-on-write: authoritative proof is the each-empty-fallback +
+  g-each-* BROWSER tests (execute the INTACT bundle via captureInsideChunkScope,
+  prologue+IIFE untouched) — all green. (My minimal probe's each had a harness-init
+  quirk, not a shipped defect.)
+CONCLUSION: the unwrap/fold/normalize test helpers are test-side accommodations for
+eval-in-isolation harnesses reaching INTO the chunk (bare names / IIFE-local fns /
+byte-identity across path-derived tokens); the SHIPPED bundle is correct as-is.
