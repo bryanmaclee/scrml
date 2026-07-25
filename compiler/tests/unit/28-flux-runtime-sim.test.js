@@ -64,7 +64,10 @@ function boot() {
     .find((e) => (e.textContent || "").includes("@"));
   return {
     S: () => storeByAuthorName(globalThis.__s),
-    D: (k) => globalThis.__d(chunkCellKey(clientJs)(k)),
+    // `__d` is captured INSIDE the chunk scope, so captureInsideChunkScope rewrote
+    // it to the scoped `_scrml_cs_derived_get` — which applies the chunk key
+    // itself. Pass the BARE author name; keying again would double-namespace.
+    D: (k) => globalThis.__d(k),
     boardDom: () => boardEl.textContent,
     btn: (label) => Array.from(document.querySelectorAll("button")).find((b) => (b.textContent || "").trim().startsWith(label)),
   };
