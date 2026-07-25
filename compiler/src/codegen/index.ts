@@ -687,16 +687,41 @@ function wrapChunkBodyInIife(clientJs: string): string {
     const cut = runtimeEnd + runtimeEndMarker.length;
     const header = clientJs.slice(0, cut) + "\n";
     const body = clientJs.slice(cut).replace(/^\n/, "");
-    return `${header}(function() {\n${body}\n})();\n`;
+    return header + wrapBodyKeepingModuleStatementsOutside(body);
   }
   const reqPrefix = "// Requires: ";
   const nl = clientJs.indexOf("\n");
   if (clientJs.startsWith(reqPrefix) && nl !== -1) {
     const header = clientJs.slice(0, nl + 1);
     const body = clientJs.slice(nl + 1);
-    return `${header}(function() {\n${body}\n})();\n`;
+    return header + wrapBodyKeepingModuleStatementsOutside(body);
   }
-  return `(function() {\n${clientJs}\n})();\n`;
+  return wrapBodyKeepingModuleStatementsOutside(clientJs);
+}
+
+/**
+ * Wrap `body` in the chunk IIFE, but HOIST any top-level `import`/`export`
+ * statements OUT of the wrap (a classic client chunk may still carry an ESM
+ * `import` for a `.js` helper module, and `import`/`export` are a SyntaxError
+ * inside a function body). The hoisted bindings sit at module scope, so the IIFE
+ * body closes over them exactly as before the wrap. `_scrml_modules[...] = {...}`
+ * registrations stay INSIDE (they are ASSIGNMENTS to a shared global, not
+ * `export` statements) — the documented escape path.
+ *
+ * The scan is line-based at column 0, which matches the single-line `import ...;`
+ * the emitter produces; indented references (`… import(…)` dynamic import, a
+ * string containing the word) are untouched.
+ */
+function wrapBodyKeepingModuleStatementsOutside(body: string): string {
+  const lines = body.split("\n");
+  const hoisted: string[] = [];
+  const rest: string[] = [];
+  for (const line of lines) {
+    if (/^(import|export)\s/.test(line)) hoisted.push(line);
+    else rest.push(line);
+  }
+  const hoistBlock = hoisted.length > 0 ? hoisted.join("\n") + "\n" : "";
+  return `${hoistBlock}(function() {\n${rest.join("\n")}\n})();\n`;
 }
 
 
