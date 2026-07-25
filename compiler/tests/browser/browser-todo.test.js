@@ -15,6 +15,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { chunkCellKey } from "../helpers/chunk-scope.js";
 
 // Register happy-dom as global DOM
 if (!globalThis.document) GlobalRegistrator.register();
@@ -43,14 +44,11 @@ function loadSample(baseName) {
 
   document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
 
-  // chunk-namespacing — the chunk's cells live under ITS namespace
-  // (`<token>$name`), so a harness holding the GLOBAL accessor must key through
-  // the same token. The emitted prologue states it literally:
-  //   const { … } = _scrml_cell_scope("0a1b2c3d");
-  // An unnamespaced chunk (synthetic fixture, no project context) yields no
-  // match and the bare name is used, exactly as before.
-  const nsMatch = /_scrml_cell_scope\("([0-9a-z]{8})"/.exec(clientJs);
-  const key = (name) => (nsMatch ? `${nsMatch[1]}$${name}` : name);
+  // BUG-6: the chunk's cells live under ITS namespace (`<token>$name`), so a
+  // harness holding the GLOBAL accessor must key through the same token.
+  // `chunkCellKey` reads the token from the emitted prologue banner (degrading to
+  // the bare name for an unnamespaced chunk).
+  const key = chunkCellKey(clientJs);
 
   return {
     get: (name) => window._scrml_reactive_get(key(name)),

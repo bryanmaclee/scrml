@@ -44,6 +44,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { readFileSync, existsSync, readdirSync } from "fs";
 import { resolve } from "path";
+import { chunkCellKey } from "../helpers/chunk-scope.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -125,10 +126,14 @@ function loadTodoMVC() {
   // Step 3: Fire DOMContentLoaded to wire event delegation
   document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
 
+  // BUG-6: key the harness reads/writes through the chunk token (the client body
+  // scopes its cells under `<token>$name`); the exposed accessors are the bare
+  // globals, so the token must be applied here.
+  const cellKey = chunkCellKey(clientJs);
   return {
-    get: (name) => window._scrml_reactive_get(name),
-    set: (name, val) => window._scrml_reactive_set(name, val),
-    subscribe: (name, fn) => window._scrml_reactive_subscribe(name, fn),
+    get: (name) => window._scrml_reactive_get(cellKey(name)),
+    set: (name, val) => window._scrml_reactive_set(cellKey(name), val),
+    subscribe: (name, fn) => window._scrml_reactive_subscribe(cellKey(name), fn),
     initError,
   };
 }
