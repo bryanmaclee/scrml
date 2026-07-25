@@ -106,7 +106,7 @@ describe("Bug B — structural-compound field write applies at RUNTIME (happy-do
       const m = compiled.clientJs.match(/function _scrml_multi_\d+\(\)\s*\{([\s\S]*?)\n\}/);
       expect(m).not.toBeNull();
       // The leaf-targeted writes, in source order.
-      const seen = [...m[1].matchAll(/_scrml_reactive_set\("a\.ref",\s*"([^"]+)"\)/g)].map((mm) => mm[1]);
+      const seen = [...m[1].matchAll(/_scrml_cs_reactive_set\("a\.ref",\s*"([^"]+)"\)/g)].map((mm) => mm[1]);
       expect(seen).toEqual(["p", "q"]);
       // The bug shape MUST be gone.
       expect(m[1]).not.toMatch(/_scrml_reactive_set\("a",\s*_scrml_deep_set/);

@@ -110,7 +110,7 @@ describe("high-deepset-write-loss — multi-statement deep-set RUNTIME (happy-do
       // Emit-shape sanity: both deep-sets present in source order.
       const m = compiled.clientJs.match(/function _scrml_multi_\d+\(\)\s*\{([\s\S]*?)\n\}/);
       expect(m).not.toBeNull();
-      const seen = [...m[1].matchAll(/_scrml_deep_set\(_scrml_reactive_get\("a"\), \["ref"\], "([^"]+)"\)/g)].map(
+      const seen = [...m[1].matchAll(/_scrml_deep_set\(_scrml_cs_reactive_get\("a"\), \["ref"\], "([^"]+)"\)/g)].map(
         (mm) => mm[1],
       );
       expect(seen).toEqual(["p", "q"]);
