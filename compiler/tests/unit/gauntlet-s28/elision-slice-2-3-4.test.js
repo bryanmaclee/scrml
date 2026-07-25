@@ -70,7 +70,7 @@ function runClientAndInvoke(clientJs, userFnCount) {
   const fnBody =
     shims + "\n" +
     SCRML_RUNTIME + "\n" +
-    unwrapChunkScope(clientJs) + \"\n\" +
+    unwrapChunkScope(clientJs) + "\n" +
     callList + "\n" +
     "return { state: _scrml_state };";
   const runner = new Function(fnBody);
