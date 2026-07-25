@@ -498,7 +498,7 @@ describe("§8: ss41 — `!{}` error arm reads the resolved envelope (not the IIF
     const js = result.outputs.get(errArmHandlerFx).clientJs;
     const m = js.match(/const\s+(_scrml__scrml_result_\d+)\s*=\s*await\s+_scrml_fetch_loadData_\d+/);
     const rv = m[1];
-    expect(js).toMatch(new RegExp(`\\}\\s*else\\s*\\{\\s*_scrml_reactive_set\\("data",\\s*${rv}\\);`));
+    expect(js).toMatch(new RegExp(`\\}\\s*else\\s*\\{\\s*_scrml_cs_reactive_set\\("data",\\s*${rv}\\);`));
   });
 
   test("the `.catch` safety net + the lazy `_scrml_init_set` both survive", () => {
