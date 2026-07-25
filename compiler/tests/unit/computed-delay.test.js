@@ -200,7 +200,7 @@ describe("A5-5 §A5-5.4 — legacy machine literal preserves constant-fold", () 
     expect(clientJs).toMatch(/afterMs\\":30000/);
     // Negative: NO computed-form IIFE clamp shape anywhere near the arm site
     // (the IIFE only appears for computed-form arms).
-    const initIdx = clientJs.indexOf('_scrml_machine_arm_initial("phase"');
+    const initIdx = clientJs.indexOf('_scrml_cs_machine_arm_initial("phase"');
     expect(initIdx).toBeGreaterThan(-1);
     const window = clientJs.slice(Math.max(0, initIdx - 500), initIdx + 500);
     expect(window).not.toContain('return (typeof v === "number"');
@@ -292,7 +292,10 @@ describe("A5-5 §A5-5.5 — legacy machine computed form (helper-level coverage)
     // confirm the source is in the runtime template.
     const fs = require("fs");
     const rt = fs.readFileSync(require.resolve("../../src/runtime-template.js"), "utf8");
-    expect(rt).toContain("_scrml_cs_engine_arm_state_timers");
+    // The runtime template carries the RAW helper name — the BUG-6 `_scrml_cs_`
+    // callee-rename is applied to the assembled bundle body (index.ts), never to
+    // the template source.
+    expect(rt).toContain("_scrml_engine_arm_state_timers");
     expect(rt).toContain('typeof v === "number" && isFinite(v) && v >= 0');
   });
 });
@@ -439,7 +442,9 @@ describe("A5-5 §A5-5.8 — reactive-read rewrite", () => {
       onTimeoutElements: [{ stateChildTag: "Loading", entry: { after: "${@attempt * 1000}ms", to: "Retry", rawOffset: 0 } }],
     };
     const out = emitEngineTimersTable(m).join("\n");
-    expect(out).toContain('_scrml_cs_reactive_get("attempt")');
+    // Direct emit-unit output — the BUG-6 `_scrml_cs_` callee-rename runs at
+    // bundle assembly (index.ts), not in emitEngineTimersTable, so raw here.
+    expect(out).toContain('_scrml_reactive_get("attempt")');
   });
 });
 
