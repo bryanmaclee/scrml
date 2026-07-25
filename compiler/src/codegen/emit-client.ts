@@ -15,6 +15,7 @@ import { emitFunctions } from "./emit-functions.ts";
 import { emitBindings } from "./emit-bindings.ts";
 import { emitReactiveWiring, fileHasOutlet } from "./emit-reactive-wiring.ts";
 import { filterChannelImportSpecifiers } from "./emit-channel.ts";
+import { exportIsUserComponent } from "../component-expander.ts";
 import { emitEventWiring } from "./emit-event-wiring.ts";
 import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile, emitEngineInitialArmsForFile, emitEngineCellHydrationInitsForFile, emitEngineServerSourceHydrationsForFile, emitEngineOpenerEffectsForFile, emitEngineBodyRenderForFile, emitDerivedEngineBodyRenderForFile } from "./emit-engine.ts";
 import { setVariantFieldsForFile } from "./emit-control-flow.ts";
@@ -1489,7 +1490,38 @@ export function generateClientJs(ctx: CompileContext): string {
         }
         const keptLocal = filterChannelImportSpecifiers(stmt, filePath, ctx.exportRegistry ?? null);
         if (keptLocal.length === 0) continue; // All specifiers are channels — inlined by CHX.
-        const destructuredLocal = keptLocal
+        // g-static-component-import-dead-destructure — drop specifiers that
+        // resolve to a user COMPONENT. A cross-file component is inlined into the
+        // markup at mount by CE (its `<aside…>` lands in the server HTML), so the
+        // dep module registers NO client-side JS binding for it —
+        // `buildModuleRegistryFooter` omits it and the registry object is `{}` for
+        // a purely-static component. Destructuring it is dead code: `undefined` in
+        // a flat layout, but a page-killing `const { X } = undefined` TypeError the
+        // moment the dep `<script>` is absent (the composition dep-script strip,
+        // g-composition-strip-eats-last-dep-script). We reuse the SAME
+        // `exportIsUserComponent` predicate CE uses to decide inlining, so the
+        // consumer's skip and CE's inline can never drift. Non-component exports
+        // (helpers/values/functions/enums — including the helper imports CE hoists
+        // onto a component import so inlined bodies resolve) keep their binding.
+        //
+        // ⚠ COUPLING NOTE (adversarial review): this drops by a PROXY
+        // (component-ness) while `buildModuleRegistryFooter` registers by GROUND
+        // TRUTH (`declaredBinding` — an actual scan for a top-level emitted
+        // binding). They agree today only because a `user-component` NEVER has a
+        // client binding (a PascalCase const — even `Object.freeze(...)` — is
+        // classified a component and emits no top-level `const`, so the footer
+        // omits it and the value was always `undefined`). IF the compiler ever
+        // starts emitting a real client binding for a value-const that is also
+        // PascalCase, the footer WILL register it but this filter WOULD still drop
+        // it — a silent regression. The drift-proof form is to drop a specifier
+        // iff the dep's footer actually omitted it (mirror `declaredBinding` /
+        // check membership in the registered set), not re-derive component-ness.
+        const depExports = absSource !== null ? (ctx.exportRegistry?.get(absSource) ?? null) : null;
+        const valueLocal = depExports
+          ? keptLocal.filter((s) => !exportIsUserComponent(depExports.get(s.imported) as any))
+          : keptLocal;
+        if (valueLocal.length === 0) continue; // every binding is a static component — no client value to read
+        const destructuredLocal = valueLocal
           .map((s) => (s.imported === s.local ? s.imported : `${s.imported}: ${s.local}`))
           .join(", ");
         lines.push(`const { ${destructuredLocal} } = _scrml_modules[${JSON.stringify(moduleKey)}];`);
