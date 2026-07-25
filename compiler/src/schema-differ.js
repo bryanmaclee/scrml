@@ -24,7 +24,24 @@ export function parseSchemaBlock(schemaBody) {
     const tableName = match[1];
     const columnsText = match[2];
     const columns = parseColumns(columnsText);
-    tables.push({ name: tableName, columns });
+    const table = { name: tableName, columns };
+
+    // §14.8.11 opt-in DB-authoritative marker — a bareword `db-authoritative`
+    // immediately after the table's closing `}` relocates the tenant-isolation
+    // floor to the DB (Postgres RLS `FORCE ROW LEVEL SECURITY` keyed on the
+    // pinned `scrml.tenant` GUC). M1-PROVISIONAL surface (a later bryan-owned
+    // syntax pass finalizes it). Postgres-only; SQLite hard-fails E-DBAUTH-SQLITE
+    // (fired downstream in codegen, where the resolved driver is known). The
+    // `-` in `db-authoritative` cannot begin a `\w+` table name, so the keyword
+    // never re-parses as a spurious table; we still advance `lastIndex` past it
+    // so the scan resumes cleanly after the marker.
+    const trailing = text.slice(tablePattern.lastIndex).match(/^\s*db-authoritative\b/);
+    if (trailing) {
+      table.dbAuthoritative = true;
+      tablePattern.lastIndex += trailing[0].length;
+    }
+
+    tables.push(table);
   }
 
   return { tables };
@@ -234,6 +251,30 @@ function mapSqliteType(type) {
 }
 
 /**
+ * Map a scrml schema type token to its Postgres-native column type. Used ONLY
+ * on the Postgres CREATE-TABLE path (the SQLite path keeps the affinity map
+ * above, so existing SQLite output stays byte-identical). The §39.4 core types
+ * map to their PG equivalents; any OTHER token (`uuid`, `decimal`, `numeric`,
+ * `jsonb`, …) passes through VERBATIM — those are already valid Postgres types
+ * and a DB-authoritative table (`id: uuid`, `amount: decimal`) needs them
+ * emitted faithfully, not flattened to TEXT. The token is a single whitespace-
+ * free word taken from the column declaration at compile time (developer-
+ * authored), never runtime input.
+ */
+function mapPostgresType(scrmlType) {
+  const key = String(scrmlType ?? "").toLowerCase();
+  const map = {
+    text: "text",
+    integer: "integer",
+    real: "real",
+    blob: "bytea",
+    boolean: "boolean",
+    timestamp: "timestamptz",
+  };
+  return map[key] || scrmlType;
+}
+
+/**
  * Read actual database schema via PRAGMA table_info().
  *
  * @param {object} db — bun:sqlite Database instance
@@ -322,8 +363,14 @@ export function diffSchema(desired, actual, options = {}) {
         const canSimpleAdd = !lowersToNotNull || col.default !== null;
         if (canSimpleAdd) {
           sql.push(generateAddColumn(table.name, col, driver));
+        } else if (driver === "postgres") {
+          // S7-minimal fence (§14.8.11): Postgres has native ADD COLUMN — NEVER
+          // DROP/recreate the table (that CASCADE-drops its RLS policy + grants).
+          // A NOT NULL add without a default may fail at apply time on a non-empty
+          // table, but that is a legitimate migration error, not a silent drop.
+          sql.push(generateAddColumn(table.name, col, driver));
         } else {
-          // Needs 12-step rebuild
+          // Needs 12-step rebuild (SQLite only)
           const rebuildSql = generate12StepRebuild(table, actualTable, driver);
           sql.push(...rebuildSql);
           break; // Rebuild handles all column changes at once
@@ -336,10 +383,30 @@ export function diffSchema(desired, actual, options = {}) {
     for (const actualCol of actualTable.columns) {
       if (!desiredColMap.has(actualCol.name) && !renamedFrom.has(actualCol.name)) {
         warnings.push(`W-SCHEMA-002: Dropping column "${actualCol.name}" from table "${table.name}" — data will be lost.`);
+        if (driver === "postgres") {
+          // S7-minimal fence: native per-column DROP; never rebuild-via-DROP-TABLE.
+          sql.push(`ALTER TABLE "${table.name}" DROP COLUMN "${actualCol.name}";`);
+          continue;
+        }
         // DROP COLUMN requires 12-step rebuild on older SQLite
         const rebuildSql = generate12StepRebuild(table, actualTable, driver);
         sql.push(...rebuildSql);
         break;
+      }
+    }
+  }
+
+  // §14.8.11 — DB-authoritative DDL (S1 RLS + S6 bounded role). Emitted for every
+  // `db-authoritative` table on a Postgres driver, for BOTH new and existing
+  // tables: the statements are idempotent, so re-running a migration re-asserts
+  // the policy/role (the never-clobber fence — a live policy survives a
+  // re-migration). SQLite hard-fails E-DBAUTH-SQLITE upstream in codegen, so this
+  // path only runs on Postgres. Appended AFTER all table create/alter statements
+  // so the table always exists before ENABLE ROW LEVEL SECURITY runs.
+  if (driver === "postgres") {
+    for (const table of desired.tables) {
+      if (table.dbAuthoritative) {
+        sql.push(...generateDbAuthoritativeDDL(table));
       }
     }
   }
@@ -365,7 +432,11 @@ export function diffSchema(desired, actual, options = {}) {
  */
 export function generateCreateTable(table, driver = "sqlite") {
   const colDefs = table.columns.map(col => {
-    let def = `"${col.name}" ${col.type}`;
+    // On Postgres emit the native type (`uuid`, `decimal`, `timestamptz`, …);
+    // on SQLite keep the affinity type (`col.type`) so existing output is
+    // byte-identical.
+    const columnType = driver === "postgres" ? mapPostgresType(col.scrmlType) : col.type;
+    let def = `"${col.name}" ${columnType}`;
     if (col.primaryKey) def += " PRIMARY KEY";
 
     // SQL-mirror NOT NULL OR shared-core req → NOT NULL.
@@ -388,6 +459,83 @@ export function generateCreateTable(table, driver = "sqlite") {
   });
 
   return `CREATE TABLE "${table.name}" (\n${colDefs.join(",\n")}\n);`;
+}
+
+// ---------------------------------------------------------------------------
+// §14.8.11 DB-authoritative tier (Milestone 1 — reads-authoritative, Postgres).
+//
+// The spike-validated (real PG16) target shape for a `db-authoritative` table:
+//   S6 — a bounded NOLOGIN NOBYPASSRLS role the per-request principal drops to
+//        (MANDATORY: a superuser/table-owner BYPASSES `FORCE RLS`, so A1 without
+//        S6 is a silent no-op — the exact "looks enforced and isn't" trap).
+//   S1 — `ENABLE`+`FORCE ROW LEVEL SECURITY` + a tenant-isolation policy keyed on
+//        the pinned `scrml.tenant` GUC (consumed, never derived — stays on the
+//        invariant side of the §14.8.10 firewall). `current_setting(..., true)`
+//        returns NULL (not an error) for a missing GUC → a NULL tenant matches no
+//        row = fail-closed read.
+//
+// All statements are idempotent so a re-migration NEVER clobbers a live policy
+// mid-flight: the role is guarded by a `duplicate_object` catch; ENABLE/FORCE/
+// GRANT are naturally idempotent; the policy is `DROP POLICY IF EXISTS` +
+// `CREATE POLICY` (only the scrml-managed `scrml_tenant_iso` name is touched —
+// a hand-authored policy on the same table survives).
+// ---------------------------------------------------------------------------
+
+/** The bounded principal role the per-request A1 wrapper drops to (S6). */
+export const DBAUTH_ROLE = "scrml_app";
+/** The compiler-managed tenant-isolation policy name (S1). */
+export const DBAUTH_POLICY = "scrml_tenant_iso";
+/** The transaction-scoped GUC carrying the pinned tenant scalar (S2). */
+export const DBAUTH_TENANT_GUC = "scrml.tenant";
+
+/**
+ * Emit the S6 bounded-role DDL. Cluster-global and app-shared (a PG role is
+ * cluster-global, not per-DB — the shared-`authenticator` PostgREST pattern), so
+ * it is emitted once and guarded against duplicate creation.
+ *
+ * @returns {string} a single idempotent DO-block statement
+ */
+export function generateBoundedRoleDDL() {
+  return (
+    `DO $$ BEGIN CREATE ROLE ${DBAUTH_ROLE} NOLOGIN NOBYPASSRLS; ` +
+    `EXCEPTION WHEN duplicate_object THEN NULL; END $$;`
+  );
+}
+
+/**
+ * Emit the S1 (RLS + policy) + the per-table S6 GRANT DDL for one
+ * `db-authoritative` table. Postgres-only; the caller (diffSchema on a postgres
+ * driver) is responsible for gating on the driver.
+ *
+ * The policy casts the GUC to the `tenant_id` column's Postgres type so the
+ * comparison is well-typed (`tenant_id = current_setting('scrml.tenant',
+ * true)::uuid`). If the table declares no `tenant_id` column the comparison
+ * falls back to a text compare (M1 keys tenant isolation on `tenant_id`; a
+ * db-authoritative table is expected to carry one — the §14.8.10 convention).
+ *
+ * @param {TableDecl} table — a table with `dbAuthoritative: true`
+ * @returns {string[]} the ordered DDL statements
+ */
+export function generateDbAuthoritativeDDL(table) {
+  const t = `"${table.name}"`;
+  const tenantCol = (table.columns ?? []).find((c) => c.name === "tenant_id");
+  const castType = tenantCol ? mapPostgresType(tenantCol.scrmlType) : null;
+  const guc = `current_setting('${DBAUTH_TENANT_GUC}', true)`;
+  const rhs = castType ? `${guc}::${castType}` : guc;
+
+  return [
+    // S6 — the bounded principal role (idempotent).
+    generateBoundedRoleDDL(),
+    // S6 — grant the bounded role exactly CRUD on this table (no DDL, no BYPASS).
+    `GRANT SELECT, INSERT, UPDATE, DELETE ON ${t} TO ${DBAUTH_ROLE};`,
+    // S1 — turn RLS on and FORCE it (so even the table owner is subject to it).
+    `ALTER TABLE ${t} ENABLE ROW LEVEL SECURITY;`,
+    `ALTER TABLE ${t} FORCE ROW LEVEL SECURITY;`,
+    // S1 — the tenant-isolation policy, re-created idempotently (never clobbers a
+    // hand-authored policy — only the scrml-managed name is dropped).
+    `DROP POLICY IF EXISTS ${DBAUTH_POLICY} ON ${t};`,
+    `CREATE POLICY ${DBAUTH_POLICY} ON ${t} USING ("tenant_id" = ${rhs});`,
+  ];
 }
 
 /**
