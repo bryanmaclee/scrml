@@ -18,6 +18,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { chunkCellKey } from "../helpers/chunk-scope.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
@@ -72,8 +73,8 @@ describe("each bind:value i175 (browser) §1 — emitted wiring", () => {
   test("compiles with no errors and wires the outer-cell value side", () => {
     const { errors, clientJs } = compileToOutputs(REPRO_SRC);
     expect(errors).toEqual([]);
-    expect(clientJs).toContain('.value = _scrml_reactive_get("msg");');
-    expect(clientJs).toMatch(/\.addEventListener\("input", \(event\) => _scrml_reactive_set\("msg", event\.target\.value\)\)/);
+    expect(clientJs).toContain('.value = _scrml_cs_reactive_get("msg");');
+    expect(clientJs).toMatch(/\.addEventListener\("input", \(event\) => _scrml_cs_reactive_set\("msg", event\.target\.value\)\)/);
     expect(clientJs).not.toContain('"bind:value" deferred (Landing 2 scope');
   });
 });
@@ -94,6 +95,7 @@ describe("each bind:value i175 (browser) §2/§3 — executed DOM", () => {
   function mount() {
     const { html, clientJs, runtimeJs, errors } = compileToOutputs(REPRO_SRC);
     if (errors.length) throw new Error("compile errors: " + JSON.stringify(errors.map((e) => e.code)));
+    const key = chunkCellKey(clientJs);
     document.documentElement.innerHTML = html;
     const exec = new Function(
       "window",
@@ -105,8 +107,8 @@ describe("each bind:value i175 (browser) §2/§3 — executed DOM", () => {
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));
     return {
-      set: (name, val) => globalThis.__scrml_set__(name, val),
-      get: (name) => globalThis.__scrml_get__(name),
+      set: (name, val) => globalThis.__scrml_set__(key(name), val),
+      get: (name) => globalThis.__scrml_get__(key(name)),
       mountEl: () => (function () { var w = document.createTreeWalker(document.body, NodeFilter.SHOW_COMMENT), n; while ((n = w.nextNode())) { if (String(n.data || "").trim().indexOf("scrml-each:") === 0) return n.parentNode; } return null; })(),
     };
   }
