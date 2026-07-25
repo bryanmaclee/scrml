@@ -73,11 +73,11 @@ describe("each bind:value i175 §1 — outer cell wired", () => {
   test("value side + write-back + live-keyed read-back effect are emitted", () => {
     const { clientJs } = compileToOutputs(OUTER_SRC);
     // initial value binding + reactive read
-    expect(clientJs).toContain('.value = _scrml_reactive_get("msg");');
+    expect(clientJs).toContain('.value = _scrml_cs_reactive_get("msg");');
     // write-back handler
-    expect(clientJs).toMatch(/\.addEventListener\("input", \(event\) => _scrml_reactive_set\("msg", event\.target\.value\)\);/);
+    expect(clientJs).toMatch(/\.addEventListener\("input", \(event\) => _scrml_cs_reactive_set\("msg", event\.target\.value\)\);/);
     // read-back effect is LIVE-KEYED to the reconcile lifecycle (disposes with item)
-    expect(clientJs).toMatch(/_scrml_effect\(\(\) => \{ let \w+ = _scrml_resolve_item\(_mount, _scrml_each_key_\d+\); if \(\w+ === null\) return; .*\.value = _scrml_reactive_get\("msg"\); \}\)/);
+    expect(clientJs).toMatch(/_scrml_effect\(\(\) => \{ let \w+ = _scrml_resolve_item\(_mount, _scrml_each_key_\d+\); if \(\w+ === null\) return; .*\.value = _scrml_cs_reactive_get\("msg"\); \}\)/);
   });
 
   test("the old deferred comment is GONE for a wired bind:value", () => {
@@ -117,7 +117,7 @@ describe("each bind:value i175 §2 — item-field deferred loudly", () => {
     const { clientJs } = compileToOutputs(ITEM_FIELD_SRC);
     expect(clientJs).toContain("item-field binding DEFERRED (W-EACH-BIND-ITEM-FIELD-DEFERRED)");
     // No write-back reactive_set for the item field (it is NOT wired).
-    expect(clientJs).not.toContain('_scrml_reactive_set("text"');
+    expect(clientJs).not.toContain('_scrml_cs_reactive_set("text"');
   });
 
   test("the same-root iter-var form (@todo.text) is also treated as item-field", () => {
@@ -143,7 +143,7 @@ describe("each bind:value i175 §3 — top-level path unchanged", () => {
     const { clientJs, errors } = compileToOutputs(TOPLEVEL_SRC);
     expect(errors).toEqual([]);
     // Standard file-scope shape: document.querySelector acquire + bare effect.
-    expect(clientJs).toContain('.value = _scrml_reactive_get("name");');
+    expect(clientJs).toContain('.value = _scrml_cs_reactive_get("name");');
     expect(clientJs).toMatch(/document\.querySelector\('\[data-scrml-bind-value[^']*'\)/);
     // The each-only live-keying must not leak into the default path.
     expect(clientJs).not.toContain("_scrml_resolve_item");
