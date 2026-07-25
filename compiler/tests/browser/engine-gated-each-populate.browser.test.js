@@ -47,7 +47,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
-import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { captureInsideChunkScope, foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // repro-1: pre-populated @todos; button transitions Loading -> Browsing. Exercises
 // Mode 2 (entry render) and Mode 3 (chunk shipping). The each is inside the
@@ -125,7 +125,7 @@ describe("engine-gated-each §1 — emit shape (dep-first read, remount call, he
   });
 
   test("each render fn reads the source cell BEFORE the mount guard (Mode 1 fix)", () => {
-    const { clientJs } = compileToOutputs(BUTTON_SRC, "button");
+    const clientJs = foldChunkNamespacing(compileToOutputs(BUTTON_SRC, "button").clientJs);
     const getIdx = clientJs.indexOf('const _items = _scrml_reactive_get("todos");');
     const mountIdx = clientJs.indexOf("const _mount = _scrml_find_each_anchor(document,");
     expect(getIdx).toBeGreaterThan(-1);
@@ -134,13 +134,13 @@ describe("engine-gated-each §1 — emit shape (dep-first read, remount call, he
   });
 
   test("the engine dispatcher invokes _scrml_remount_each after writing the Browsing arm (Mode 2 fix)", () => {
-    const { clientJs } = compileToOutputs(BUTTON_SRC, "button");
+    const clientJs = foldChunkNamespacing(compileToOutputs(BUTTON_SRC, "button").clientJs);
     // The Browsing arm writes innerHTML then calls _scrml_remount_each(_mount).
     expect(clientJs).toMatch(/_mount\.innerHTML = _scrml_engine_phase_render_Browsing\(\);[\s\S]*?_scrml_remount_each\(_mount\);/);
   });
 
   test("the each renderer registers itself in _scrml_each_renderers", () => {
-    const { clientJs } = compileToOutputs(BUTTON_SRC, "button");
+    const clientJs = foldChunkNamespacing(compileToOutputs(BUTTON_SRC, "button").clientJs);
     expect(clientJs).toMatch(/_scrml_each_renderers\["each_[0-9a-z]{8}_\d+"\] = _scrml_each_render_[0-9a-z]{8}_\d+;/);
   });
 

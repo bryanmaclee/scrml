@@ -44,7 +44,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
-import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { captureInsideChunkScope, foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // --- item 4 + 5: top-level ternary markup-value with a `${@cell}` TEXT child. ---
 const TERNARY_SRC = `<program>
@@ -140,14 +140,14 @@ describe("g-emit-lift-markup-text-interp §1 — emit shape (text-child `${}` lo
   });
 
   test("the `${@cell}` text child is NOT shipped as a literal createTextNode string", () => {
-    const { clientJs } = compileToOutputs(TERNARY_SRC, "ternary");
+    const clientJs = foldChunkNamespacing(compileToOutputs(TERNARY_SRC, "ternary").clientJs);
     // Pre-fix this exact literal shipped to the DOM.
     expect(clientJs).not.toContain('createTextNode("Saved ${@cell}")');
     expect(clientJs).not.toMatch(/createTextNode\("[^"]*\$\{/);
   });
 
   test("the `${@cell}` text child lowers to a reactive interpolation (split static + emitExprField)", () => {
-    const { clientJs } = compileToOutputs(TERNARY_SRC, "ternary");
+    const clientJs = foldChunkNamespacing(compileToOutputs(TERNARY_SRC, "ternary").clientJs);
     expect(clientJs).toContain('createTextNode("Saved ")');
     expect(clientJs).toContain('createTextNode(String((_scrml_reactive_get("cell")) ?? ""))');
   });

@@ -44,7 +44,7 @@ import {
   mkdirSync,
 } from "fs";
 import { compileScrml } from "../../src/api.js";
-import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { captureInsideChunkScope, foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // Single-level sub-path: `<cell> = { state: P.Idle, n: 0 }` + `on=@cell.state`.
 const SRC = `<program>
@@ -107,7 +107,7 @@ describe("GITI-031 §1 — match on=@cell.state emit reads the sub-path, not the
   });
 
   test("the subscribe trigger applies the .state sub-path to the callback arg", () => {
-    const { clientJs } = compileToOutputs(SRC);
+    const clientJs = foldChunkNamespacing(compileToOutputs(SRC).clientJs);
     // Post-fix: `_scrml_reactive_subscribe("cell", function(_cv) { <dispatch>((_cv).state); })`
     expect(clientJs).toMatch(
       /_scrml_reactive_subscribe\("cell",\s*function\(_cv\)\s*\{\s*__scrml_match_match_[0-9a-z]{8}_\d+_dispatch\(\(_cv\)\.state\);\s*\}\)/,
@@ -115,7 +115,7 @@ describe("GITI-031 §1 — match on=@cell.state emit reads the sub-path, not the
   });
 
   test("the DOMContentLoaded init-fire reads the .state sub-path", () => {
-    const { clientJs } = compileToOutputs(SRC);
+    const clientJs = foldChunkNamespacing(compileToOutputs(SRC).clientJs);
     // Post-fix: `<dispatch>(_scrml_reactive_get("cell").state)`
     expect(clientJs).toMatch(
       /__scrml_match_match_[0-9a-z]{8}_\d+_dispatch\(_scrml_reactive_get\("cell"\)\.state\)/,
@@ -123,7 +123,7 @@ describe("GITI-031 §1 — match on=@cell.state emit reads the sub-path, not the
   });
 
   test("the dispatch does NOT pass the whole cell value (the bug shape is gone)", () => {
-    const { clientJs } = compileToOutputs(SRC);
+    const clientJs = foldChunkNamespacing(compileToOutputs(SRC).clientJs);
     // Pre-fix BOTH the subscribe trigger and the init-fire passed the whole
     // cell. The subscribe passed the dispatch fn directly (so the callback got
     // the whole cell), and the init-fire read `_scrml_reactive_get("cell")`
@@ -225,7 +225,7 @@ describe("GITI-031 §3 — match on=@cell.inner.phase (deep sub-path)", () => {
   }
 
   test("emit reads the full .inner.phase sub-path in both trigger paths", () => {
-    const { clientJs } = compileToOutputs(SRC_DEEP);
+    const clientJs = foldChunkNamespacing(compileToOutputs(SRC_DEEP).clientJs);
     expect(clientJs).toMatch(
       /_scrml_reactive_subscribe\("cell",\s*function\(_cv\)\s*\{\s*__scrml_match_match_[0-9a-z]{8}_\d+_dispatch\(\(_cv\)\.inner\.phase\);\s*\}\)/,
     );
