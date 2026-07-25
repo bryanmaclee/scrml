@@ -29,3 +29,24 @@ over-migrated emit-unit expectations. Fix taxonomy:
 
 ## Next
 Fix files by class, run per-file, commit incrementally.
+
+## Done (phase batches)
+- engine-ontimeout (8): makeEvaluator keys read/set via chunkCellKey.
+- s95-bug-2 (2): emitExpr direct→raw; §7 full-pipeline→cs.
+- computed-delay (3): direct-emit + runtime-template reads→raw; full-pipeline indexOf→cs.
+- bug-ab (3), s144 (2), engine-name-dual-table (3): foldChunkNamespacing text-asserts + unwrapChunkScope executor (IIFE-local program fns + bare reads).
+- engine-event-handler-writes (4): align raw-accessor indexOf sites→cs.
+- c15 (2): fold the two direct enginesClient readFileSync reads PART-A missed.
+- engine-a7-hierarchy (1): add unNamespaceCellKeys. a7-history (1): cs advance indexOf.
+- opener-c1 (2): foldChunkNamespacing at read + revert its 1 cs-assert. onIdle (3): fold + template-read raw.
+- chain-mount N30 (1): cs reactive_get indexOf.
+- replay-primitive (8) + effect-body-reactive-refs (5): compile returns RAW, buildEnv unwrapChunkScope for execution.
+
+## FLAG (over-migrated-vs-gap): c22 (4) reverted to raw.
+Empirically: BARE files (top-level `render(m)`, NO `<program>` wrapper) are NOT chunk-namespaced;
+`<program>` pages ARE. Both written+in-memory output raw for bare files. c22 tests bare-variant
+codegen (`.Idle`→"Idle") where accessor name is incidental. PART-A over-migrated. Reverted to raw.
+OBSERVATION for PA: bare non-<program> script-files bypass BUG-6 namespacing (defensible — not page
+chunks that compose into one document — but a theoretical hole if two bare files ever share a bundle).
+
+## Next: happy-dom cluster + byte-identity + giti-009 + chunk-namespacing.test.js N2/N3/N4.
