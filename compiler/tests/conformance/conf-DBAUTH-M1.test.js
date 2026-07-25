@@ -23,6 +23,7 @@
  */
 import { describe, test, expect, afterAll } from "bun:test";
 import { writeFileSync, mkdtempSync, rmSync } from "fs";
+import { spawnSync } from "child_process";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
@@ -160,5 +161,19 @@ describe("CONF-DBAUTH-M1 (A1-wrapper compile-shape): conditional engagement", ()
     expect(js).not.toContain(".begin(async (tx)");
     expect(js).not.toContain("set_config('scrml.tenant'");
     expect(js).not.toContain("SET LOCAL ROLE scrml_app");
+  });
+
+  test("the wrapped db-authoritative server bundle is syntactically valid (node --check)", () => {
+    // Full-pipeline check: the real emitted .server.js (with the A1 wrapper) parses
+    // as valid JS — the wrapper never produces broken syntax (execute-don't-grep
+    // belt over the text assertions above).
+    const js = serverJs(compile("postgres://localhost/app", " db-authoritative"));
+    expect(js.length).toBeGreaterThan(0);
+    const dir = mkdtempSync(join(tmpdir(), "conf-dbauth-check-"));
+    _tmp.push(dir);
+    const f = join(dir, "app.server.mjs");
+    writeFileSync(f, js);
+    const r = spawnSync("node", ["--check", f], { encoding: "utf8" });
+    expect(r.status).toBe(0);
   });
 });

@@ -8576,6 +8576,15 @@ reversal, not a strength dial — but it stays on the **invariant side** of the 
 (who-may-act-as-which-tenant stays app-owned). The two tiers **STACK** (defense-in-depth); the
 DB tier does **not** replace §14.8.10, which remains the SQLite-first, zero-config default.
 
+**Composition with the §14.8.10 floor (defense-in-depth, not a bypass).** Because an
+`invoices`-style `db-authoritative` table carries a `tenant_id` column, it is ALSO a
+§14.8.10 tenant-scoped table, and the §14.8.10 compile-time hard-fails still apply: a write
+against it (`INSERT` with an explicit `tenant_id`, `UPDATE`/`DELETE`) fires `E-TENANT-WRITE`,
+and a bare aggregate (`COUNT(*)` with no `GROUP BY tenant_id`) fires `E-TENANT-AGG`, exactly as
+for any tenant table. This is correct defense-in-depth — the two tiers stack — but an adopter WILL
+meet it: opting a table into DB-authority does NOT relax the §14.8.10 write/aggregate floor (M1 is
+reads-authoritative; the DB-side write-authority that would carry these is P2).
+
 **Milestone 1 is the READS half only.** It relocates the read-isolation invariant. It does **NOT**
 deliver write-authority — immutable financial fields, `SECURITY DEFINER` privileged-mutation
 functions, `DEFERRED` constraint triggers (double-entry balance), column `GRANT`/`REVOKE` — those

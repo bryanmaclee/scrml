@@ -51,3 +51,21 @@ Postgres-only, `E-DBAUTH-SQLITE` hard-fail on SQLite. Stacks with §14.8.10 (def
   callers. The DDL emitters ARE the migration-SQL producers; M1 does not wire a runtime apply seam.
 - A1 wrapper targets server-fn handler `?{}` queries (all take `_scrml_req`). SSR `/__serverLoad`
   query wrapping (different request binding) + the §8.9.2 write-envelope composition are P1-tail/P2.
+
+## S239 adversarial-review fix (PA-found HIGH — CLOSED)
+- BUG: `wrapPrincipalTxn` was a blind whole-module scan → it wrapped the MODULE-LEVEL
+  `_scrml_idempotency_*` shadow-table helpers (no `_scrml_req` param) → runtime ReferenceError +
+  role-drop of an un-granted infra query. FIX: made the transform SCOPE-AWARE — a single-pass
+  scanner tracks brace-scope + whether `_scrml_req` is in lexical scope (own param or closure), and
+  wraps ONLY query sites where it is. Module-level infra helpers stay on the ambient handle/base
+  role. Skips strings/templates/comments so a `_scrml_sql` mention there is never a false site.
+  Regression: `compiler/tests/unit/db-authoritative-wrap.test.js` (verbatim idempotency shapes →
+  handler queries wrapped incl. the arrow-IIFE closure case, infra helpers untouched, `node --check`
+  valid) + a full-pipeline `node --check` in the conformance case.
+- Related scope boundary (noted, not an M1 defect): the wrapper engages per-APP (any db-auth table)
+  and wraps ALL `?{}`, including queries against NON-db-authoritative tables in the same app. Such
+  tables get no `scrml_app` GRANT from the M1 DDL, so a mixed db-auth + plain-table app would need
+  grants on the plain tables (or query-level table-scoped engagement). M1's acceptance scope is ONE
+  db-authoritative table; mixed-table apps are a P1-tail refinement.
+- SPEC §14.8.11: added the §14.8.10 composition note (a db-authoritative `tenant_id` table still
+  fires E-TENANT-WRITE / E-TENANT-AGG — defense-in-depth, reads-authoritative M1 does not relax it).

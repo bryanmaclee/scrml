@@ -165,79 +165,212 @@ function matchingParenEnd(src: string, openIdx: number): number {
 }
 
 const IDENT_CHAR = /[A-Za-z0-9_$]/;
+const HANDLE = "_scrml_sql";
+const REQ_PARAM = "_scrml_req";
+
+/** True iff `word` sits at `src[at]` as a standalone identifier (word-boundary). */
+function matchesWordAt(src: string, at: number, word: string): boolean {
+  if (!src.startsWith(word, at)) return false;
+  if (at > 0 && IDENT_CHAR.test(src[at - 1])) return false;
+  const after = src[at + word.length];
+  if (after !== undefined && IDENT_CHAR.test(after)) return false;
+  return true;
+}
 
 /**
- * The A1/S2 transform. Rewrites every `_scrml_sql` (or scoped `_scrml_sql_<n>`)
- * QUERY expression in `src` into a principal-scoped `.begin(...)` transaction.
- * Transaction-control `.unsafe("BEGIN"/"COMMIT"/…)` calls, the module-level
- * `const _scrml_sql = new SQL(...)` declaration, and any non-query reference are
- * left untouched. Idempotent-safe: the injected wrapper runs queries on `tx`
- * (never `_scrml_sql`), so a re-scan finds no new `_scrml_sql` query site.
+ * From `afterKeyword` (just past the `function` keyword), skip an optional `*`
+ * generator marker + an optional name, then read the `( … )` parameter list.
+ * Returns `{ hasReq, paramsEnd }` (paramsEnd = index one past the closing `)`),
+ * or null if no param list is found.
+ */
+function parseFunctionParams(src: string, afterKeyword: number): { hasReq: boolean; paramsEnd: number } | null {
+  let i = afterKeyword;
+  const n = src.length;
+  while (i < n && /\s/.test(src[i])) i++;
+  if (src[i] === "*") { i++; while (i < n && /\s/.test(src[i])) i++; } // generator
+  while (i < n && IDENT_CHAR.test(src[i])) i++; // optional name
+  while (i < n && /\s/.test(src[i])) i++;
+  if (src[i] !== "(") return null;
+  const parenEnd = matchingParenEnd(src, i);
+  if (parenEnd === -1) return null;
+  const params = src.slice(i + 1, parenEnd - 1);
+  return { hasReq: new RegExp(`\\b${REQ_PARAM}\\b`).test(params), paramsEnd: parenEnd };
+}
+
+/**
+ * Given the index of an arrow `=>`, back-scan its parameter list and report
+ * whether it binds `_scrml_req`. Handles both `( … ) =>` and a single-ident
+ * `x =>` form.
+ */
+function arrowParamsHaveReq(src: string, arrowIdx: number): boolean {
+  let i = arrowIdx - 1;
+  while (i >= 0 && /\s/.test(src[i])) i--;
+  if (i < 0) return false;
+  if (src[i] === ")") {
+    // Back-match to the opening `(`.
+    let depth = 0;
+    for (let k = i; k >= 0; k--) {
+      const ch = src[k];
+      if (ch === ")") depth++;
+      else if (ch === "(") { depth--; if (depth === 0) return new RegExp(`\\b${REQ_PARAM}\\b`).test(src.slice(k + 1, i)); }
+    }
+    return false;
+  }
+  // Single-identifier param (`x =>`): read it backward.
+  let end = i + 1;
+  while (i >= 0 && IDENT_CHAR.test(src[i])) i--;
+  return src.slice(i + 1, end) === REQ_PARAM;
+}
+
+/**
+ * The A1/S2 transform — SCOPE-AWARE. Rewrites a `_scrml_sql` (or scoped
+ * `_scrml_sql_<n>`) QUERY expression into a principal-scoped `.begin(...)`
+ * transaction ONLY when the query site is lexically inside a function that has
+ * `_scrml_req` in scope (its own param, or an enclosing function's — closure).
+ *
+ * This is load-bearing for correctness, not a nicety: the compiler emits
+ * MODULE-LEVEL infra helpers that also use `_scrml_sql` — the `_scrml_idempotency_*`
+ * shadow-table functions (`_scrml_idempotency_ensure_table` / `_lookup` / `_store`)
+ * take NO `_scrml_req`. Those are bookkeeping queries against `_scrml_idempotency_keys`,
+ * NOT tenant-principal queries: wrapping them would (a) inject `_scrml_active_tenant(
+ * _scrml_req)` where `_scrml_req` is undefined → runtime ReferenceError, and (b) drop
+ * them to the bounded `scrml_app` role (no grant, no CREATE TABLE) → failure. They
+ * MUST stay on the ambient handle / base role. Tracking the `_scrml_req` scope (not
+ * a name-blacklist) keeps the next infra helper safe too.
+ *
+ * Transaction-control `.unsafe("BEGIN"/…)` calls and the module-level
+ * `const _scrml_sql = new SQL(...)` declaration are never wrapped. Strings,
+ * template literals, and comments are skipped so a `_scrml_sql` mention there is
+ * never mistaken for a query site.
  *
  * @param src the assembled server-module text
  * @returns the transformed text
  */
 export function wrapPrincipalTxn(src: string): string {
-  const HANDLE = "_scrml_sql";
   let out = "";
   let i = 0;
   const n = src.length;
+  // Brace-scope stack of `reqInScope` flags. Index 0 = module scope (no req).
+  const scope: boolean[] = [false];
+  // reqInScope the NEXT `{` should push (set by a function/arrow header); null =
+  // the next `{` inherits the current scope (object literal / control block).
+  let pending: boolean | null = null;
+  const top = () => scope[scope.length - 1];
 
   while (i < n) {
-    const idx = src.indexOf(HANDLE, i);
-    if (idx === -1) { out += src.slice(i); break; }
-    out += src.slice(i, idx);
+    const c = src[i];
 
-    // Confirm a standalone handle identifier (`_scrml_sql` or `_scrml_sql_<n>`),
-    // not a substring of a longer identifier and not preceded by an ident char.
-    const before = idx > 0 ? src[idx - 1] : "";
-    let j = idx + HANDLE.length;
-    if (src[j] === "_") {
-      let k = j + 1;
-      while (k < n && /[0-9]/.test(src[k])) k++;
-      if (k > j + 1) j = k;
+    // A pending function/arrow scope is consumed ONLY by the immediately
+    // following `{`. If a non-ws / non-comment token intervenes (an arrow with an
+    // EXPRESSION body, `=> expr`), the pending scope never opens — drop it.
+    if (pending !== null && !/\s/.test(c) && c !== "{" &&
+        !(c === "/" && (src[i + 1] === "/" || src[i + 1] === "*"))) {
+      pending = null;
     }
-    const ident = src.slice(idx, j);
-    if (before && IDENT_CHAR.test(before)) { out += ident; i = j; continue; }
-    if (j < n && IDENT_CHAR.test(src[j])) { out += ident; i = j; continue; }
 
-    // Classify what follows the handle.
-    let exprEnd = -1;
-    const next = src[j];
-    if (next === "`") {
-      // Tagged-template query: `_scrml_sql`…``
-      const end = templateLiteralEnd(src, j);
-      if (end !== -1) exprEnd = end;
-    } else if (next === ".") {
-      const rest = src.slice(j);
-      const m = /^\.unsafe\s*\(/.exec(rest);
-      if (m) {
-        const parenOpen = j + m[0].length - 1;
-        const parenEnd = matchingParenEnd(src, parenOpen);
-        if (parenEnd !== -1) {
-          const argText = src.slice(parenOpen + 1, parenEnd - 1);
-          if (!isTxnControlUnsafe(argText)) exprEnd = parenEnd;
+    // Line comment.
+    if (c === "/" && src[i + 1] === "/") {
+      const nl = src.indexOf("\n", i);
+      const end = nl === -1 ? n : nl;
+      out += src.slice(i, end); i = end; continue;
+    }
+    // Block comment.
+    if (c === "/" && src[i + 1] === "*") {
+      const close = src.indexOf("*/", i + 2);
+      const end = close === -1 ? n : close + 2;
+      out += src.slice(i, end); i = end; continue;
+    }
+    // String literal.
+    if (c === '"' || c === "'") {
+      const e = stringLiteralEnd(src, i);
+      const end = e === -1 ? n : e;
+      out += src.slice(i, end); i = end; continue;
+    }
+
+    // `_scrml_sql` handle — classified BEFORE the bare-template branch so a
+    // `_scrml_sql`…`` tagged template is treated as a query, not a skip.
+    if (matchesWordAt(src, i, HANDLE)) {
+      let j = i + HANDLE.length;
+      if (src[j] === "_") {
+        let k = j + 1;
+        while (k < n && /[0-9]/.test(src[k])) k++;
+        if (k > j + 1) j = k; // scoped `_scrml_sql_<n>`
+      }
+      const ident = src.slice(i, j);
+
+      let exprEnd = -1;
+      const next = src[j];
+      if (next === "`") {
+        const end = templateLiteralEnd(src, j);
+        if (end !== -1) exprEnd = end;
+      } else if (next === ".") {
+        const m = /^\.unsafe\s*\(/.exec(src.slice(j));
+        if (m) {
+          const parenOpen = j + m[0].length - 1;
+          const parenEnd = matchingParenEnd(src, parenOpen);
+          if (parenEnd !== -1 && !isTxnControlUnsafe(src.slice(parenOpen + 1, parenEnd - 1))) {
+            exprEnd = parenEnd;
+          }
         }
       }
+
+      // Wrap ONLY a genuine query site that is inside a `_scrml_req` scope.
+      if (exprEnd !== -1 && top()) {
+        const exprText = src.slice(i, exprEnd);
+        const innerOnTx = "tx" + exprText.slice(ident.length);
+        const lineStart = src.lastIndexOf("\n", i) + 1;
+        const indent = (src.slice(lineStart, i).match(/^\s*/) || [""])[0];
+        const b = indent + "  ";
+        out +=
+          `${ident}.begin(async (tx) => {\n` +
+          `${b}await tx\`SELECT set_config('${DBAUTH_TENANT_GUC}', ` +
+          "${_scrml_active_tenant(_scrml_req)}, true)`;\n" +
+          `${b}await tx.unsafe("SET LOCAL ROLE ${DBAUTH_ROLE}");\n` +
+          `${b}return await ${innerOnTx};\n` +
+          `${indent}})`;
+        i = exprEnd;
+        continue;
+      }
+      // Not a query, or not in a req scope (module-level infra) → emit the handle
+      // verbatim; the following template/parens are handled by the normal scan.
+      out += ident; i = j; continue;
     }
 
-    if (exprEnd === -1) { out += ident; i = j; continue; }
+    // Bare template literal (not `_scrml_sql`-tagged) — skip its content so its
+    // `${}` braces never perturb the scope stack.
+    if (c === "`") {
+      const e = templateLiteralEnd(src, i);
+      const end = e === -1 ? n : e;
+      out += src.slice(i, end); i = end; continue;
+    }
 
-    // Wrap [idx, exprEnd) — the whole `_scrml_sql`…query — in a principal txn.
-    const exprText = src.slice(idx, exprEnd);
-    const innerOnTx = "tx" + exprText.slice(ident.length);
-    const lineStart = src.lastIndexOf("\n", idx) + 1;
-    const indent = (src.slice(lineStart, idx).match(/^\s*/) || [""])[0];
-    const b = indent + "  ";
-    const wrapped =
-      `${ident}.begin(async (tx) => {\n` +
-      `${b}await tx\`SELECT set_config('${DBAUTH_TENANT_GUC}', ` +
-      "${_scrml_active_tenant(_scrml_req)}, true)`;\n" +
-      `${b}await tx.unsafe("SET LOCAL ROLE ${DBAUTH_ROLE}");\n` +
-      `${b}return await ${innerOnTx};\n` +
-      `${indent}})`;
-    out += wrapped;
-    i = exprEnd;
+    // `function` header — the next `{` opens a new scope carrying its params
+    // (plus closure over the current scope).
+    if (matchesWordAt(src, i, "function")) {
+      const parsed = parseFunctionParams(src, i + "function".length);
+      if (parsed) {
+        pending = parsed.hasReq || top();
+        out += src.slice(i, parsed.paramsEnd); i = parsed.paramsEnd; continue;
+      }
+    }
+    // Arrow header — its params precede `=>`; closure over the current scope.
+    if (c === "=" && src[i + 1] === ">") {
+      pending = arrowParamsHaveReq(src, i) || top();
+      out += "=>"; i += 2; continue;
+    }
+
+    // Brace bookkeeping.
+    if (c === "{") {
+      scope.push(pending === null ? top() : pending);
+      pending = null;
+      out += c; i++; continue;
+    }
+    if (c === "}") {
+      if (scope.length > 1) scope.pop();
+      out += c; i++; continue;
+    }
+
+    out += c; i++;
   }
 
   return out;
