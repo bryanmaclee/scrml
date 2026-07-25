@@ -216,8 +216,8 @@ describe("engine-event-handler-writes §3 — hooks wrap in event handlers", () 
     //   const __scrml_engine_from = _scrml_reactive_get("appMode");
     //   const __scrml_engine_external = _scrml_engine_direct_set("appMode", ...);
     //   if (__scrml_engine_external) __scrml_engine_appMode_fire_hooks(...);
-    const idxFrom = slice.indexOf('__scrml_engine_from = _scrml_reactive_get("appMode")');
-    const idxExt = slice.indexOf('const __scrml_engine_external = _scrml_engine_direct_set("appMode",');
+    const idxFrom = slice.indexOf('__scrml_engine_from = _scrml_cs_reactive_get("appMode")');
+    const idxExt = slice.indexOf('const __scrml_engine_external = _scrml_cs_engine_direct_set("appMode",');
     const idxHookFire = slice.indexOf('if (__scrml_engine_external) __scrml_engine_appMode_fire_hooks(');
     expect(idxFrom).toBeGreaterThan(-1);
     expect(idxExt).toBeGreaterThan(idxFrom);
@@ -304,7 +304,7 @@ describe("engine-event-handler-writes §5 — history-map threading", () => {
     const slice = clientJs.slice(handlerHeaderIdx);
     // Find _scrml_engine_direct_set call inside the handler slice and
     // verify it threads through __scrml_engine_appMode_history_map.
-    const callStart = slice.indexOf('_scrml_engine_direct_set("appMode",');
+    const callStart = slice.indexOf('_scrml_cs_engine_direct_set("appMode",');
     expect(callStart).toBeGreaterThan(-1);
     const callSlice = slice.slice(callStart, callStart + 400);
     expect(callSlice).toContain("__scrml_engine_appMode_history_map");
@@ -345,7 +345,7 @@ describe("engine-event-handler-writes §6 — .Variant.history restore-form", ()
     const handlerHeaderIdx = clientJs.search(/_scrml_attr_onclick_\d+": function\(event\)/);
     expect(handlerHeaderIdx).toBeGreaterThan(-1);
     const slice = clientJs.slice(handlerHeaderIdx);
-    const callStart = slice.indexOf('_scrml_engine_advance("appMode",');
+    const callStart = slice.indexOf('_scrml_cs_engine_advance("appMode",');
     expect(callStart).toBeGreaterThan(-1);
     const callSlice = slice.slice(callStart, callStart + 500);
     // `.history` suffix stripped — the runtime value is bare variant.
@@ -367,7 +367,7 @@ describe("engine-event-handler-writes §6 — .Variant.history restore-form", ()
     // Anti-regression: the pre-Bug-6.5-equivalent symmetric bug would
     // emit `null` in the 7th slot. Pin against that shape.
     expect(callSlice).not.toMatch(
-      /_scrml_engine_advance\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*null,\s*true\)/,
+      /_scrml_cs_engine_advance\("appMode",\s*AppMode\.Playing,\s*__scrml_engine_appMode_transitions,\s*null,\s*null,\s*null,\s*null,\s*true\)/,
     );
   });
 
@@ -400,7 +400,7 @@ describe("engine-event-handler-writes §6 — .Variant.history restore-form", ()
     const handlerHeaderIdx = clientJs.search(/_scrml_attr_onclick_\d+": function\(event\)/);
     expect(handlerHeaderIdx).toBeGreaterThan(-1);
     const slice = clientJs.slice(handlerHeaderIdx);
-    const callStart = slice.indexOf('_scrml_engine_direct_set("appMode",');
+    const callStart = slice.indexOf('_scrml_cs_engine_direct_set("appMode",');
     expect(callStart).toBeGreaterThan(-1);
     const callSlice = slice.slice(callStart, callStart + 500);
     // Stripped value: `AppMode.Playing` (not `AppMode.Playing.history`).
