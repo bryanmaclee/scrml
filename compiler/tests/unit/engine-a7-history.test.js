@@ -704,7 +704,7 @@ describe("engine-a7-history §8 — restore-form write-site lowering (Wave 2.4)"
     const fnHeaderIdx = clientJs.indexOf("function _scrml_resumeFromHistory");
     expect(fnHeaderIdx).toBeGreaterThan(-1);
     const slice = clientJs.slice(fnHeaderIdx);
-    const callStart = slice.indexOf('_scrml_engine_advance("appMode",');
+    const callStart = slice.indexOf('_scrml_cs_engine_advance("appMode",');
     expect(callStart).toBeGreaterThan(-1);
     const callSlice = slice.slice(callStart, callStart + 500);
 
