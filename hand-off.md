@@ -1,4 +1,41 @@
 <!-- ============================================================= -->
+<!-- S286 ADDENDUM (Peter/AdiPDesk, adopter lane) — prepended.      -->
+<!-- S285 addendum + bryan's S284 chunk-ns wrap UNCHANGED below.    -->
+<!-- ============================================================= -->
+
+# scrml — S286 addendum (Peter/AdiPDesk) — adopter form-binding pair closed
+
+**Date:** 2026-07-24. `/boot` Profile A on AdiPDesk (Peter). **SOLO** (S285-peter closed; bryan S284 wrapped). `main` at `2d192b6`, clean, coherence 0/0. **2 PRs merged** (#177 #178). Full detail: `changelog.md` S286 + delta-log `[763]-[766]` + board `../scrml-support/handOffs/active-sessions/S286-peter.md`. This is the irreducible.
+
+## Landed (adopter form-binding lane — the paired reason form input didn't work in `<each>`)
+- **#175 closed** (`c8dbd04`, PR #177) — `bind:value` value-side wired inside `<each>` (the S216 "Half-2"). Reuses `emitBindDirectiveBody` (root-agnostic Half-1 lowering) + a reconcile-lifecycle effect wrapper; outer/shared-cell scope; item-field RHS deferred *loudly* via NEW `W-EACH-BIND-ITEM-FIELD-DEFERRED` (§34). Generalizes to checked/selected/group.
+- **#174 closed** (`2d192b6`, PR #178) — reactive form-control `value=` writes the `.value` PROPERTY (not setAttribute), both top-level (`emit-bindings.ts`) + each (`emit-each.ts`) paths, caret-safe guard. Axiom① guard: property route only when `value=` is the sole `.value` writer (bind:value present → value= falls back to setAttribute).
+
+## Open for a fresh boot (Peter lane, queued — NOT started)
+- **`g-attr-writer-conflict-not-detected-template-value-form`** (MED, NEW this session) — template `value="${}"`+`bind:value` silently defers to bind:value instead of emitting `E-ATTR-WRITER-CONFLICT` (the template-attr path never runs `analyzeWriterConflict`; the paren `value=(expr)` form does). Not runtime-wrong (the #174 guard prevents the double-write); the gap is the MISSING diagnostic. Fix = route the template `value=` path through `analyzeWriterConflict`.
+- **From the S285 queue (still open, Peter lane):** `g-match-without-for-plus-when-children-silent-undeclared-dispatch` (HIGH — invented `<when>` children → silent runtime ReferenceError; clean diagnostic fix) · `g-nested-for-lift-no-reconcile-on-cell-replace` (HIGH — stale render on cell replace; reconciler internals; we're warm on this surface) · auto-await expr-positions MED×2 (`g-reactive-write-member-server-call-no-autoawait` + `g-match-arm-server-call-no-autoawait`) · the #173 amplification halves.
+- **#27** (navigate soft-nav) — still gated on bryan's chunk-namespacing.
+
+## Method / anomalies (recovered) — read before the next dispatch on AdiPDesk
+- **Both dispatches used the `general-purpose` fallback agent** — the canonical `scrml-js-codegen-engineer` is NOT installed on AdiPDesk (only `debate-judge` present). The fallback + a thorough self-contained brief (F4 startup + MAPS + empirical Phase-3 + crash-recovery blocks embedded in the prompt, since the archived BRIEF.md is not in the fresh worktree) worked cleanly for both codegen fixes.
+- **AdiPDesk has NO local git hooks** (only `.sample`) — no local commit/pre-push gate on this machine; the cloud `gate` is the sole authority. Offered the baseline-hook install; Peter did not take it up this session. [[delta-log 764]]
+- **AdiPDesk full-suite baseline = 6 fails** (self-host-smoke ×4 [cross-OS path + missing gitignored dist artifact `tab.js`/`bs.js`] · B5 CSRF middleware guard · 1 unnamed teardown). PROVEN pre-existing on pristine `cd65898` (zero i174/i175 changes). Do NOT re-investigate these each session; the Linux cloud `gate` does not have them. `--bail` is degenerate here (self-host-smoke bails first) — run WITHOUT `--bail` for a real count.
+- **verify-committed-state + S239 adversarial paid off on both:** caught the empty `after-count.txt` (agent's full-suite never finished → I ran it independently), the post-review chore-commit that moved the branch tip (re-reviewed the delta), and byte-identity of the untouched paths. #174's agent self-caught a writer-ownership regression its own fix created (the Axiom① guard).
+
+## CI check shape (both PRs — expected going forward)
+`gate` (required) + `windows` = GREEN; `ai-review` (no findings — infra-step fail) + `tracking` (self-host + serve-tool R26 known flakes) = RED but NON-required → merge on `gate` green. Matched S284/S285.
+
+## Concurrent / held
+- SOLO all session. Held branches (do NOT delete): chunk-ns `worktree-agent-a91ad13968b46ab5d` (bryan's, unlanded) · `origin/evidence/u4-premise-falsified` · `origin/worktree-agent-a2ed001a5de228134` + `feat/wave1c-nav`. `scrml-pinned` worktree is persistent (not a session tree).
+- **Inbox:** `2026-07-22-2230-from-S282-to-XPS` — bryan-machine-family's outbound to the XPS clone; NOT for AdiPDesk. Left in place.
+
+## Tags
+#session-286 #adopter-174-175-landed #form-binding-in-each-e2e #bindvalue-half2 #value-property-fix #axiom1-guard #general-purpose-fallback-agent #adipdesk-no-local-hooks #adipdesk-6-fail-baseline #new-gap-attr-writer-conflict-template
+
+## Maps
+`primary.map.md` unchanged this session — internal codegen edits to existing files (emit-each.ts bind path, emit-bindings.ts value path); no structural/file changes. The pre-existing S284 "refresh OWED" (map behind HEAD) carries forward; a targeted `project-mapper` pass on `emit-each.ts`/`emit-bindings.ts`/`component-expander.ts` remains the alternative when someone takes it.
+
+<!-- ============================================================= -->
 <!-- S285 ADDENDUM (Peter/AdiPDesk, adopter lane) — bryan's S284    -->
 <!-- chunk-namespacing WRAP is UNCHANGED below (his critical path). -->
 <!-- ============================================================= -->

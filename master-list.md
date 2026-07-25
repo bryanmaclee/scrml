@@ -96,14 +96,14 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `f28c35fb` — wrap(S282): continuity — 10 PRs, windows green, split-key class, chunk-ns BUG-6 scoped (#160) — **pushed**
-- `a0344d75` — wrap(S280): marketing claim-gate U1+U2; a bryan ruling falsified; pa-base v2.4 (#149) — **pushed**
-- `ea4c720a` — wrap(S279): E-ASYNC timer over-fire fix + continuity (#139) — **pushed**
-- `d6cae6c2` — wrap(S278): ESM-chunks arc U1→U3 landed — esm now runs (behind default classic) (#136) — **pushed**
-- `825eec5f` — wrap(S277): normative grounding — 3 PRs + pa-base v2.3 + maps to 9481bc69 (#129) — **pushed**
-- `5823b495` — wrap(S276): Wave-1c PR-1 LANDED (#124) — hand-off/changelog/delta-log/master-list/known-gaps + maps to c48e59a2 + 3 non-compliance fixes (#125) — **pushed**
-- `020485b2` — wrap(S274): freeze-spec campaign COMPLETE — hand-off/changelog/delta-log/known-gaps/master-list + ss75 list-close + partial maps (#123) — **pushed**
-- `d7b63fd5` — wrap(S273): tenant-floor 14.8.10 LANDED (#117/#118) + SSR-leak re-do in flight — hand-off/changelog/delta-log/board bookkeeping (#119) — **pushed**
+- `cd65898` — wrap(S285): changelog + hand-off addendum — 4 adopter/gap PRs (#167 #171 #172 #173) (#176) — **pushed**
+- `2eee3a9` — wrap(S284): continuity — 2 adopter bugs landed, S239 caught a regression, chunk-ns re-planned to truth (#169) — **pushed**
+- `f28c35f` — wrap(S282): continuity — 10 PRs, windows green, split-key class, chunk-ns BUG-6 scoped (#160) — **pushed**
+- `a0344d7` — wrap(S280): marketing claim-gate U1+U2; a bryan ruling falsified; pa-base v2.4 (#149) — **pushed**
+- `ea4c720` — wrap(S279): E-ASYNC timer over-fire fix + continuity (#139) — **pushed**
+- `d6cae6c` — wrap(S278): ESM-chunks arc U1→U3 landed — esm now runs (behind default classic) (#136) — **pushed**
+- `825eec5` — wrap(S277): normative grounding — 3 PRs + pa-base v2.3 + maps to 9481bc69 (#129) — **pushed**
+- `5823b49` — wrap(S276): Wave-1c PR-1 LANDED (#124) — hand-off/changelog/delta-log/master-list/known-gaps + maps to c48e59a2 + 3 non-compliance fixes (#125) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
