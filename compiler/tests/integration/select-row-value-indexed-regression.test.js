@@ -20,6 +20,7 @@ import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 const tmpRoot = resolve(tmpdir(), "scrml-select-row-regression");
 
@@ -97,12 +98,16 @@ describe("select-row value-indexed regression", () => {
     // so the regression test can run end-to-end. Primitives use === fast-path
     // per emitBinary (emit-expr.ts:555).
     const stubEq = `function _scrml_structural_eq(a, b) { if (a === b) return true; if (a == null || b == null) return false; return JSON.stringify(a) === JSON.stringify(b); }\n`;
+    // BUG-6: splice the setter capture INSIDE the chunk scope so it binds the
+    // chunk's SCOPED `_scrml_cs_reactive_set` (keys under the chunk token),
+    // matching the DOM bindings' namespaced cell keys. `_scrml_state` stays a
+    // shared global, reachable after the chunk body.
+    const cjWithSet = captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;`);
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${stubEq}${clientJs}\n` +
-      `globalThis.__scrml_state__ = _scrml_state;\n` +
-      `globalThis.__scrml_set__ = _scrml_reactive_set;\n`
+      `${runtimeJs}\n${stubEq}${cjWithSet}\n` +
+      `globalThis.__scrml_state__ = _scrml_state;\n`
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));
@@ -166,11 +171,12 @@ describe("select-row value-indexed regression", () => {
     document.documentElement.innerHTML = html;
     // Same equality-chunk-stub as the previous test (see that test for rationale).
     const stubEq = `function _scrml_structural_eq(a, b) { if (a === b) return true; if (a == null || b == null) return false; return JSON.stringify(a) === JSON.stringify(b); }\n`;
+    // BUG-6: capture the scoped setter inside the chunk scope (see prior test).
+    const cjWithSet = captureInsideChunkScope(clientJs, `globalThis.__scrml_set__ = _scrml_reactive_set;`);
     const exec = new Function(
       "window",
       "document",
-      `${runtimeJs}\n${stubEq}${clientJs}\n` +
-      `globalThis.__scrml_set__ = _scrml_reactive_set;\n`
+      `${runtimeJs}\n${stubEq}${cjWithSet}\n`
     );
     exec(window, document);
     document.dispatchEvent(new Event("DOMContentLoaded"));
