@@ -20,9 +20,15 @@ STACK:  scrml — the working compiler (TS/JS impl#1 of the scrml language, Bun-
 STAGE:  V1 = scrml-LANGUAGE 1.0 (compilers decoupled). Critical path = language frozen +
         conformance-tested + impl#1(TS) conformant. FREEZE BAR = "do it right" / HIGH-coverage-first
         (~220 of ~200-270 cases). Remaining V1 = conformance coverage-GROWTH + D1/D2/D4 labeling,
-        NOT big feature builds. In flight: the language/compiler SPLIT (mitosis) + Road-B impl#2
-        (compiler/self-host-v2/). Adopter-driven thread: flogence 100%-scrml (standalone-tool §64 +
-        W5b in-process db library).
+        NOT big feature builds. **[S286 (2026-07-25): freeze-bar TIMING RELAXED — the "do-it-right"/
+        high-coverage QUALITY bar STANDS, but a serious adopter's foundational ask is NOT freeze-deferred
+        (get a real DD, not a defer). "NOT big feature builds" is superseded on the TIMING axis. See
+        user-voice S286 + [[feedback_freeze_timing_relaxed]].]**
+        In flight: the language/compiler SPLIT (mitosis) + Road-B impl#2
+        (compiler/self-host-v2/). Adopter-driven threads: flogence 100%-scrml (standalone-tool §64 +
+        W5b in-process db library); **RediLedger DB-authoritative security tier (greenlit S286; reads-first
+        phasing; Milestone-1 codegen build = next arc; plan: scrml-support/docs/deep-dives/db-authoritative-
+        security-PHASING-PLAN-2026-07-25.md).**
 SCOPE:  large. **Derived figures live in `docs/FACTS.md` (generated; `bun scripts/facts.ts --check`
         gates it in CI) — do NOT hardcode them here.** S280: this line claimed "compiler/src ~24.7K LOC ·
         SPEC.md ~24K lines · 18 stdlib modules"; the real values were ~225K, 36,114 and 21 — a ~9× miss

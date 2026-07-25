@@ -1,4 +1,55 @@
 <!-- ============================================================= -->
+<!-- S286 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-25.        -->
+<!-- Peter/AdiPDesk S286 adopter-lane addendum UNCHANGED below.     -->
+<!-- (S286 session-number collides: two machines. Disambig by name) -->
+<!-- ============================================================= -->
+
+# scrml — Session 286 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-07-25. `/boot` Profile A. `main` at **`1c5c2aee`** (PR #180 chunk-ns landing), CI `gate` GREEN, coherence 0/0. Two big arcs: **(1) the chunk-namespacing BUG-6 rename LANDED** (the boot-gating item), **(2) the RediLedger DB-authoritative security ask → DD → threshold ruled → full scope/phasing ruled → Milestone-1 P0 spike validated.** Mechanical stream in `handOffs/delta-log.md [767]+` (bryan-S286 section). Changelog S286. This carries the irreducible.
+
+## 🔴 THE NEXT PRIORITY — RediLedger DB-authoritative Milestone-1 codegen build
+
+**bryan RULED "add the tier" + the full scope/phasing (all five to PA recs) + "kick off Milestone 1".** The P0 spike is DONE (mechanism empirically validated); the next step is the **codegen build**, NOT started.
+
+**Boot the build from `scrml-support/docs/deep-dives/db-authoritative-security-PHASING-PLAN-2026-07-25.md`** (ruled plan of record) + the DD (`db-authoritative-security-design-2026-07-25.md`, the evidence). The plan's "Milestone 1 — P0 spike RESULT" section carries the findings that shape the codegen.
+
+**Ruled decisions (do NOT re-litigate — user-voice S286):** phasing = **reads-first** (P0 foundations A1+S2, S7-min fence → P1 reads-authoritative RLS+S6 roles → P2 writes column-GRANT+SECDEF-managed-text → P3 triggers → P4 tail; seam = the §14.8.10 firewall, P1 relocates the invariant/doesn't cross, P2+ crosses) · A1 = **pooled + `SET LOCAL ROLE` + `set_config(...,true)` in a per-request txn** · SQLite = **hard-fail `E-DBAUTH-SQLITE`** · SECDEF/trigger bodies = **managed plpgsql-text** (NOT a mini-compiler) · acceptance unit = decl + DDL + `SET LOCAL` + migration-preservation + **direct-`psql`-denied negative test**.
+
+**P0 spike findings (validated vs real Postgres 16 via Bun.SQL — shape the codegen):** (1) **superuser BYPASSES `FORCE RLS`** → per-request principal MUST be a bounded `NOBYPASSRLS` role → **S6 mandatory in P1** (A1-without-S6 = silent no-op). (2) **`SET LOCAL` can't be parameterized** → emit `set_config('scrml.tenant', $x, true)` + `SET LOCAL ROLE`; confirmed txn-scoped, no pooled bleed. (3) **`USING` doubles as `WITH CHECK` for INSERT** → P1 blocks cross-tenant inserts free. (4) Bun.SQL socket peer-auth = `new SQL({ path: "/var/run/postgresql", database, username })`.
+
+**The build = a real `scrml-js-codegen-engineer` dispatch (higher-risk — A1 reverses the single ambient `new SQL()` handle on the hottest path, `emit-server.ts:4738-4764`):** S7-min fence → S1/S6 emitters → wire the negative test into the harness → land atomically. **Never dispatched — bryan wrapped instead. Teed up.** Spike script: scratchpad `dbauth-spike.ts` (5/5 core). Local Postgres 16 available (socket `/var/run/postgresql`) for the negative-test harness.
+
+## 🎬 WHAT LANDED / DECIDED
+- **PR #180 (`1c5c2aee`) — chunk-namespacing BUG-6 rename FINISHED + LANDED.** S283 campaign + S286 finish (agent `0cbfe5be`, 44 commits) reconciled onto Peter's main. **Closes #27**; **unblocks Wave-1c + ESM U4**. gzip holds 16 KB; anti-masking proven (`chunk-ns-intact-bundle-acceptance.test.js`).
+- **RediLedger DB-authoritative** — DD + threshold ruled (add-tier) + scope/phasing ruled (5 recs) + phasing plan + M1 P0 spike. **freeze-bar TIMING relaxed** (bryan: the freeze/split rush "jumped the gun"; profile + master-list reconciled this wrap).
+- **Replies sent (reply-on-resolve, adopted from flogence §4):** RediLedger ×2, flogence ×1 (Case-2 witness HOLD).
+
+## 🧭 ANOMALIES (recovered — reasoning)
+1. **Finish agent ENOTIMP crash + resume** — transient API error mid-Phase-4 after 34 WIP commits (green). SendMessage-resumed (first crash, transient → resumable); completed.
+2. **Stale-index bug caught pre-push** — `8b571a07` committed RAW assertions from a stale index (earlier pkill'd commits), yet its gate PASSED because the pre-commit hook tests the WORKING TREE (my correct cs edits), not the committed index. Caught via a compile-probe before push; fixed `f440e721`. **LESSON: `git add` before every commit; gate-green ≠ committed-content-right when index≠worktree.**
+3. **Reconcile write-skew caught by the gate** — the rename merged clean over Peter's #175, but the full suite caught #175's tests asserting the pre-rename accessor. Fixed unit (5) + browser (keyed via `chunkCellKey`). The OCC backstop, as doctrine says.
+4. **pkill matched my own commit's hook** (`bun test compiler/tests/unit…`) → aborted a commit (exit 144). Don't pkill a test-pattern mid-commit.
+5. **Wrap-conflation correction (DURABLE, user-voice S286)** — floated a wrap-pacing decision at 53%, conflating wrap with landing/CI/bookkeeping. Wrap = session-END only; never manufacture a wrap-pacing decision above ~20% remaining.
+
+## 🧷 CONCURRENT / HELD
+- **Peter (S285/S286) adopter lane** — landed #171-#179 while I worked (delta `[763]-[766]`); his #175/#174 forced the reconcile. S286 number collides (2 machines; disambig by name).
+- **Retained worktree (do NOT delete):** `worktree-agent-a2ed001a5de228134` (Wave-1c — UNBLOCKED by the chunk-ns land, not yet built; the next execution arc after/alongside the RediLedger build) · local `feat/wave1c-nav` · `origin/evidence/u4-premise-falsified`.
+- **Cleaned this wrap:** chunk-ns finish/rename/base worktrees (a4e2f7f2, a91ad13, bug6-base — landed via #180) + `finish/chunk-ns-bug6-rename`.
+
+## 📥 INBOX
+- **XPS-outbound** — LEFT in `incoming/` (this machine's outbound to XPS; unconsumed; archiving denies XPS's boot from auto-flagging it). bryan didn't rule leave-vs-archive → defaulted LEAVE. The boot hook keeps flagging it until XPS consumes it.
+- **RediLedger + flogence** — REPLIED → moved to `read/` this wrap.
+
+## 🗺️ Maps
+Refreshed this wrap (`project-mapper` incremental — chunk-ns + #171-#179 surface; stamp → `1c5c2aee`; was `e8fdd44c`).
+
+## Tags
+#session-286-bryan #chunk-ns-LANDED-pr180 #adopter-27-closed #rediledger-db-authoritative-ruled #m1-p0-spike-validated #freeze-timing-relaxed #reply-on-resolve #stale-index-caught #wrap-conflation-corrected #peter-concurrent-171-179
+
+---
+
+<!-- ============================================================= -->
 <!-- S286 ADDENDUM (Peter/AdiPDesk, adopter lane) — prepended.      -->
 <!-- S285 addendum + bryan's S284 chunk-ns wrap UNCHANGED below.    -->
 <!-- ============================================================= -->
