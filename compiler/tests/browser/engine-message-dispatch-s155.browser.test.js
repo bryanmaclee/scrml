@@ -35,7 +35,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
-import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { captureInsideChunkScope, chunkNamespaceToken } from "../helpers/chunk-scope.js";
 
 const tmpRoot = resolve("/tmp", "scrml-msg-dispatch-browser");
 
@@ -70,9 +70,13 @@ function mountModule(source, baseName, varName) {
   const { html, clientJs, runtimeJs, errors } = compileOutputs(source, baseName);
   expect(errors).toEqual([]);
   document.documentElement.innerHTML = html;
-  const armTableName = `__scrml_engine_${varName}_msg_arms`;
-  const txTableName = `__scrml_engine_${varName}_transitions`;
-  const idleName = `__scrml_engine_${varName}_idle`;
+  // BUG-6/N4: the per-engine tables are namespaced with the chunk token
+  // (`__scrml_engine_<token>_<var>_…`). Read the token from the chunk prologue.
+  const _tok = chunkNamespaceToken(clientJs);
+  const _ns = _tok ? `${_tok}_` : "";
+  const armTableName = `__scrml_engine_${_ns}${varName}_msg_arms`;
+  const txTableName = `__scrml_engine_${_ns}${varName}_transitions`;
+  const idleName = `__scrml_engine_${_ns}${varName}_idle`;
   const exec = new Function(
     "window",
     "document",

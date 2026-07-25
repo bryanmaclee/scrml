@@ -114,7 +114,9 @@ describe("C1 acceptance — opener effect= boots ONCE + transitions out of .Load
       threw,
       get: (name) => globalThis.__scrml_get__(name),
       bootCount: () => globalThis.__c1_bootCount__,
-      mountEl: () => document.querySelector('[data-scrml-engine-mount="phase"]'),
+      // BUG-6/N4: the mount attribute is namespaced (`<token>_phase`), so match
+      // the token-suffixed form (an unnamespaced fixture matches too).
+      mountEl: () => document.querySelector('[data-scrml-engine-mount$="phase"]'),
     };
   }
 
