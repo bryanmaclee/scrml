@@ -23,6 +23,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { resolve, dirname } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { chunkCellKey } from "../helpers/chunk-scope.js";
 
 /**
  * Compile a source string through the full pipeline; return the runtime + client JS.
@@ -119,9 +120,15 @@ function makeEvaluator(runtimeJs, clientJs) {
     fakeSetTimeout, fakeClearTimeout, console, Math, Date, fakeIsFinite,
     Array, Object, JSON
   );
+  // BUG-6 chunk-namespacing: the client chunk keys its cells under its own
+  // per-chunk token (`<token>$phase`), so a read/write from OUTSIDE the chunk
+  // (this evaluator's global-scope `reactiveGet`) must key through the chunk's
+  // token. `chunkCellKey` reads the token out of the emitted prologue and
+  // degrades to the bare name when the chunk carries no namespace.
+  const cellKey = chunkCellKey(clientJs);
   return {
-    read: (name) => exports.reactiveGet(name),
-    set: (name, value) => exports.reactiveSet(name, value),
+    read: (name) => exports.reactiveGet(cellKey(name)),
+    set: (name, value) => exports.reactiveSet(cellKey(name), value),
     tick: (ms) => {
       fakeTimers.now += ms;
       // Process all pending timers whose fireAt <= now, in order, allowing
