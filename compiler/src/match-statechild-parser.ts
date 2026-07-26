@@ -39,8 +39,17 @@
  *        — markup body terminated by matching closer. `bodyForm: "bare-body"`,
  *        `bodyRaw: <body-text>`. Either `</>` or `</NAME>` closes.
  *
- * Phase 2 DOES NOT validate. It just tokenizes. SYM PASS at symbol-table.ts
- * does:
+ * Phase 2 tokenizes; it emits only STRUCTURAL parse errors (a malformed arm the
+ * tokenizer cannot recover), deferring all SEMANTIC validation to SYM PASS:
+ *   - E-MATCH-PARSE-001    — an arm opener with no matching closer.
+ *   - E-MATCH-INVALID-ARM  — a tag opener at the arm position that is not a
+ *                            variant-named `<VariantName>` or the wildcard `<_>`
+ *                            (e.g. the Ghost-Pattern `<when is="…">`). Emitted
+ *                            here because such a tag is silently un-tokenizable
+ *                            as an arm — left un-flagged it yields zero arms →
+ *                            a dead page with 0 errors (g-match-without-for-plus-
+ *                            when-children, S288).
+ * SYM PASS at symbol-table.ts does the SEMANTIC checks:
  *   - E-MATCH-NOT-EXHAUSTIVE  — variant-set vs for=Type's variants
  *   - W-MATCH-RULE-INERT      — any `rule=` attr on any arm
  *   - E-MATCH-EFFECT-FORBIDDEN — any `effect=` attr on any arm
@@ -561,15 +570,72 @@ export function parseMatchArms(armsRaw: string): MatchParseResult {
     skipWhitespace();
     if (pos >= len) break;
     if (!isArmOpener(pos)) {
-      // Skip stray content between arms (whitespace, comments — Phase 2
-      // doesn't lint these; Phase 4 may add). Comment trivia is skipped as a
-      // unit so a PascalCase `<Loading>` mention inside a between-arms comment
-      // isn't mis-read as an arm-opener on a later iteration
-      // (g-markup-comment-angle-bracket-parsed-as-tag, ss39 item 1). Otherwise
-      // advance one char to make progress (stray text is unusual but must not
-      // infinite-loop).
+      // Comment trivia is skipped as a unit so a PascalCase `<Loading>` mention
+      // inside a between-arms comment isn't mis-read as an arm-opener on a later
+      // iteration (g-markup-comment-angle-bracket-parsed-as-tag, ss39 item 1).
       const afterComment = skipMatchComment(armsRaw, pos);
-      pos = afterComment !== pos ? afterComment : pos + 1;
+      if (afterComment !== pos) { pos = afterComment; continue; }
+
+      // g-match-without-for-plus-when-children (S288) — a tag OPENER at the arm
+      // position whose name is NOT PascalCase/`_` (isArmOpener already excluded
+      // `<`+`[A-Z_]`) is an INVALID arm. Block-form `<match>` arms must be
+      // variant-named openers (`<VariantName>…</>`) or the wildcard `<_>…</_>`
+      // catch-all (SPEC §18.0.1); a lowercase-initial tag at the arm position is
+      // the Ghost-Pattern shape (`<when is="…">`, the Vue/Svelte-ish conditional
+      // an LLM or framework-refugee reaches for). Previously it was silently
+      // skipped as stray content → zero recognised arms → the match tree-shook to
+      // nothing → a DEAD PAGE emitted with 0 errors (the worst failure shape).
+      // Emit E-MATCH-INVALID-ARM and skip PAST the whole stray element (opener +
+      // body + closer) as a UNIT so its own nested lowercase children aren't
+      // re-flagged, and so a following real arm still parses. Arm BODIES never
+      // reach here (they are consumed by the isArmOpener branch below), so this
+      // only fires on top-level arm-position content.
+      if (
+        armsRaw[pos] === "<" &&
+        pos + 1 < len &&
+        /[A-Za-z]/.test(armsRaw[pos + 1]) &&
+        armsRaw[pos + 1] !== "/"
+      ) {
+        const strayStart = pos;
+        let ne = pos + 1;
+        while (ne < len && /[A-Za-z0-9_-]/.test(armsRaw[ne])) ne++;
+        const strayTag = armsRaw.slice(pos + 1, ne);
+        // Scan to the opener's terminating `>` (string-/`${}`-/nesting-aware).
+        const openerEnd = scanToOpenerClose(ne);
+        const selfClosing = openerEnd > 0 && openerEnd <= len && armsRaw[openerEnd - 1] === "/";
+        const isVoid = VOID_ELEMENTS.has(strayTag.toLowerCase());
+        let skipTo = openerEnd < len ? openerEnd + 1 : len;
+        if (!selfClosing && !isVoid && openerEnd < len) {
+          // Skip the element body up to and including its matching closer so the
+          // element is consumed as a unit (`</strayTag>` or a bare `</>` closes
+          // it; nesting/void rules mirror findArmCloser). No closer found ⇒ leave
+          // skipTo just past the opener (best-effort recovery).
+          const strayCloser = findArmCloser(openerEnd + 1, strayTag);
+          if (strayCloser) skipTo = strayCloser.closerEnd;
+        }
+        diagnostics.push({
+          code: "E-MATCH-INVALID-ARM",
+          message:
+            `E-MATCH-INVALID-ARM: \`<${strayTag}>\` is not a valid \`<match>\` arm. ` +
+            `Block-form match arms must be variant-named openers (\`<VariantName>…</>\`) ` +
+            `matching the enum of \`for=Type\`/the \`on=\` cell, or the wildcard ` +
+            `\`<_>…</_>\` catch-all (SPEC §18.0.1). \`<${strayTag}>\` is not a scrml ` +
+            `structural element` +
+            (strayTag.toLowerCase() === "when"
+              ? ` — \`<when is="…">\` is a Vue/Svelte-style conditional; rewrite each case as a variant arm (e.g. \`<Ok>…</>\`, \`<Err>…</>\`).`
+              : `.`),
+          spanStart: strayStart,
+          spanEnd: ne,
+        });
+        pos = skipTo > pos ? skipTo : pos + 1;
+        continue;
+      }
+
+      // Otherwise (stray prose text, a lone `</closer>`, `${…}` leakage) advance
+      // one char to make progress (unusual, but must not infinite-loop). Phase 2
+      // doesn't lint non-tag stray content; SYM's exhaustiveness catches the
+      // downstream effect where a for=Type is present.
+      pos = pos + 1;
       continue;
     }
     const armOpenerStart = pos;
