@@ -1,7 +1,7 @@
 import { emitExprField } from "./emit-expr.ts";
 import { rewriteExprArrowBody } from "./rewrite.js";
 import { emitStringFromTree } from "../expression-parser.ts";
-import { emitLogicNode } from "./emit-logic.js";
+import { emitLogicNode, _iterDestructureBindNames } from "./emit-logic.js";
 import { genVar } from "./var-counter.ts";
 import { VOID_ELEMENTS } from "./utils.ts";
 import { iterableHasReactiveRefs, forBodyLiftsMarkup } from "./reactive-deps.ts";
@@ -40,6 +40,109 @@ export function popLiftReconcileCtx() { _scrml_lift_reconcile_ctx_stack.pop(); }
 function currentLiftReconcileCtx() {
   const n = _scrml_lift_reconcile_ctx_stack.length;
   return n > 0 ? _scrml_lift_reconcile_ctx_stack[n - 1] : null;
+}
+
+// S288 FINDING 1 — item-derived local aliases. A per-item factory body may alias
+// an enclosing item's collection into a local before the inner for-lift iterates
+// it: `let sts = e.states; … for (s of sts) { lift … }` (and transitively `let a =
+// e.states; let b = a.filter(…); for (s of b) …`). The inner iterable then names
+// NO ancestor iter var directly, so the reactive-branch predicate would miss it →
+// stale-on-REPLACE. Scan an about-to-be-pushed ctx's body for `let`/`const` decls
+// whose initializer references any VISIBLE reactive scope name — an ancestor ctx
+// iter var, an ancestor ctx's item-derived local, or an earlier item-derived local
+// in this same body (transitive) — and record them on the ctx. The inner for-lift
+// (below) then treats an iterable referencing such a local as item-dependent and
+// REPLAYS the needed decls inside its reactive render fn (after re-resolving the
+// ancestor item), so the iterable reads fresh on every re-run.
+//
+// Scoped to `let-decl`/`const-decl` ONLY (side-effect-free bindings). Assignment /
+// expression statements are never recorded or replayed, so no arbitrary or
+// side-effecting statement is ever re-executed.
+//
+// DETECTION covers every let/const decl SHAPE (S288 review 2 — the replay path
+// `emitLogicNode(node,{})` already lowers them all; only detection was incomplete):
+//   • bare ident LHS + string init         — `let sts = e.states`
+//   • destructuring LHS (object/array/rest) — `let { states } = e`,
+//     `let [first, ...rest] = e.states` (enumerate EVERY bound name via
+//     `_iterDestructureBindNames`; one decl node → N bound names, replayed once).
+//   • expr-form init (empty `node.init`)    — `let ups = for (…) { lift … }`,
+//     if/match-as-expression, `?{}`-SQL: fall back to a structured init text
+//     (`_collectDeclInitRefText`) that surfaces the ancestor-var reference for the
+//     scan's token test. Detection text NEVER runs `emitLogicNode` (which would
+//     bump the shared genVar counter at scan time and drift var numbers) — it
+//     harvests the AST's own string leaves instead.
+function _collectDeclInitRefText(node) {
+  // Common case: the init is a ready string ("e", "e . states", …).
+  if (typeof node.init === "string" && node.init) return node.init;
+  // Expr-form / structured init: harvest string leaves from every field EXCEPT
+  // the LHS `name` pattern (that is the bound target, not a reference) and the
+  // positional/identity keys. An ancestor ref (`{kind:"ident",name:"e"}` /
+  // `iterable:"e . states"`) surfaces as one of these strings regardless of the
+  // init form (for-expr / if-expr / match-expr / sql).
+  const parts = [];
+  const seen = new Set();
+  const walk = (v) => {
+    if (v == null) return;
+    if (typeof v === "string") { parts.push(v); return; }
+    if (typeof v !== "object") return;
+    if (seen.has(v)) return; seen.add(v);
+    if (Array.isArray(v)) { for (const x of v) walk(x); return; }
+    for (const k in v) {
+      if (k === "id" || k === "span" || k === "loc" || k === "kind") continue;
+      walk(v[k]);
+    }
+  };
+  for (const k in node) {
+    if (k === "name" || k === "init" || k === "id" || k === "span" || k === "loc" || k === "kind") continue;
+    walk(node[k]);
+  }
+  return parts.join(" ");
+}
+
+// Bound names of a let/const decl LHS: a bare string → [name]; a destructure
+// pattern → every bound identifier (object props, array elements, `...rest`,
+// nested patterns) via the shared emit-logic enumerator.
+function _declBindNames(node) {
+  if (typeof node.name === "string" && node.name) return [node.name];
+  if (isDestructurePattern(node.name)) return [..._iterDestructureBindNames(node.name)];
+  return [];
+}
+
+function scanItemDerivedLocals(body, newIterVar) {
+  // Names already reactive in scope: every ancestor ctx's iter var + its
+  // item-derived locals' bound names, plus the iter var about to be pushed here.
+  const visible = new Set();
+  for (const ctx of _scrml_lift_reconcile_ctx_stack) {
+    if (ctx.iterVar) visible.add(ctx.iterVar);
+    if (ctx.itemDerivedLocals) for (const l of ctx.itemDerivedLocals) for (const bn of l.bindNames) visible.add(bn);
+  }
+  if (newIterVar) visible.add(newIterVar);
+
+  const locals = [];
+  const localNames = new Set();
+  for (const node of (body || [])) {
+    if (!node || (node.kind !== "let-decl" && node.kind !== "const-decl")) continue;
+    const bindNames = _declBindNames(node);
+    if (bindNames.length === 0) continue;
+    const initText = _collectDeclInitRefText(node);
+    if (!initText) continue;
+    let derived = false;
+    for (const nm of visible) { if (_liftIterScopeReferenced(initText, nm)) { derived = true; break; } }
+    if (!derived) for (const nm of localNames) { if (_liftIterScopeReferenced(initText, nm)) { derived = true; break; } }
+    if (derived) {
+      locals.push({ bindNames, node, init: initText });
+      for (const bn of bindNames) localNames.add(bn);
+    }
+  }
+  return locals;
+}
+
+// S288 — build a reconcile ctx, folding in the item-derived local scan (FINDING 1)
+// so both push sites (this file's nested for-lift path + emit-control-flow.ts's
+// top-level Tier-0 path) capture aliases uniformly. MUST be called BEFORE the ctx
+// is pushed (the scan reads the ancestor-only stack).
+export function buildLiftReconcileCtx(wrapperVar, keyVar, iterVar, body) {
+  return { wrapperVar, keyVar, iterVar, itemDerivedLocals: scanItemDerivedLocals(body, iterVar) };
 }
 
 // ---------------------------------------------------------------------------
@@ -1851,13 +1954,81 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
   const iterIsReactive = iterableHasReactiveRefs(forNode, opts.fnBodyRegistry ?? null);
   const body = forNode.body ?? [];
 
+  // g-nested-for-lift-no-reconcile-on-cell-replace (S288, HIGH) — inner for-lift
+  // that iterates the OUTER reconciled item's collection (`for (s of e.states)`,
+  // where `e` is the enclosing `${for…lift}` iter var). Its iterable carries NO
+  // `@`-ref, so `iterIsReactive` is false → pre-fix it fell to the plain-loop
+  // path and ran ONCE at outer-item creation. When the OUTER cell is REPLACED
+  // and the outer reconcile REUSES the DOM node (index keys match — the item has
+  // no `id`), that factory is never re-invoked, so the inner list stayed STALE
+  // (silent wrong-render): the outer `<h3>` name updated via its live-keyed
+  // effect, but the inner `<li>`s did not, and even the inner text effect closed
+  // over the create-time `s`.
+  //
+  // FIX: when this for-lift sits INSIDE an outer reconcile ctx AND its iterable
+  // depends on an enclosing reconciled item, emit it as its OWN reactive inner
+  // reconcile — an `_scrml_effect` that re-resolves the live ancestor item(s) by
+  // key, (re)computes any item-derived local aliases, reads the CURRENT collection
+  // off them, and reconciles the inner list against that. Symmetric with the
+  // nested-`<each>` reference path (bug72): the inner list gains full keyed
+  // reconciliation and re-renders on ancestor REPLACE (the ancestor reconcile's
+  // `_scrml_items` trigger re-fires this effect) AND on inner MUTATE-in-place (a
+  // dynamic effect re-subscribes to the current item's collection each run; the
+  // `.length` touch below tracks in-place array growth).
+  //
+  // The iterable's dependency is resolved against the WHOLE ancestor ctx stack,
+  // not just the innermost (S288 FINDING 2 — a grandparent reference in a 3-level
+  // nest, `for (g) { for (r) { for (c of g.rows) … } }`, names an ancestor two
+  // levels up), AND against item-derived local aliases in any ancestor body
+  // (S288 FINDING 1 — `let sts = e.states; for (s of sts) …`). We compute the
+  // transitive closure of the ancestor iter vars + item-derived locals the
+  // iterable needs, then re-resolve / replay exactly those in the render fn.
+  // Every ancestor ctx's wrapperVar + keyVar is in lexical scope at this emission
+  // point because per-item factories NEST (a nested factory closes over the
+  // enclosing factory's `_scrml_item_key_*` const) — verified in emitted output.
+  const _ctxStack = _scrml_lift_reconcile_ctx_stack.slice(); // outermost-first
+  const _iterVarToCtx = new Map(); // iterVar -> ctx
+  const _localByName = new Map();  // EACH bound name -> its decl record { bindNames, node, init }
+  for (const ctx of _ctxStack) {
+    if (ctx.iterVar) _iterVarToCtx.set(ctx.iterVar, ctx);
+    if (ctx.itemDerivedLocals) for (const l of ctx.itemDerivedLocals) for (const bn of l.bindNames) _localByName.set(bn, l);
+  }
+  // Transitive closure: which ancestor iter vars must be re-resolved and which
+  // item-derived local DECLS must be replayed for `rewrittenIterable` to read
+  // fresh. A destructure decl exposes N bound names but is ONE node — replayed
+  // once (deduped by node), so `let [first, ...rest] = e.states` referenced via
+  // `rest` replays the single decl (binding both `first` and `rest`).
+  const _neededIterVars = new Map();     // iterVar -> ctx
+  const _neededBindNames = new Set();
+  const _neededLocalNodes = new Set();   // dedupe replay by decl node identity
+  const _neededLocals = [];              // decl order (deps first)
+  const _pullFromText = (text) => {
+    if (!text) return;
+    for (const [nm, ctx] of _iterVarToCtx) {
+      if (_liftIterScopeReferenced(text, nm)) _neededIterVars.set(nm, ctx);
+    }
+    for (const [nm, l] of _localByName) {
+      if (_neededBindNames.has(nm)) continue;
+      if (_liftIterScopeReferenced(text, nm)) {
+        _neededBindNames.add(nm);
+        if (!_neededLocalNodes.has(l.node)) {
+          _neededLocalNodes.add(l.node);
+          _pullFromText(l.init); // pull the decl's own deps FIRST
+          _neededLocals.push(l); // …then the decl (post-order = deps precede use)
+        }
+      }
+    }
+  };
+  _pullFromText(rewrittenIterable);
+  const _iterRefsOuterItem = _neededIterVars.size > 0 || _neededLocals.length > 0;
+
   // GitHub #23 (Peter) — render-context gate, mirror of emit-control-flow.ts.
   // Even nested inside a lift body, a for-of over a reactive cell is a DOM
   // list-render ONLY when its OWN body `lift`s markup (SPEC §17.4). A nested
   // data-loop (no `lift`, e.g. `for (t of @tasks) { total = total + t }`) is a
   // plain snapshot loop, not a reconcile_list. Fall through to the plain-loop
   // path when the body does not render.
-  if (iterIsReactive && forBodyLiftsMarkup(body)) {
+  if ((iterIsReactive || _iterRefsOuterItem) && forBodyLiftsMarkup(body)) {
     const wrapperVar = genVar('list_wrapper');
     const renderFn = genVar('render_list');
     const createFnVar = genVar('create_item');
@@ -1873,7 +2044,7 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
     // MUST mirror the keyFn passed to _scrml_reconcile_list below (id-or-index).
     const keyVar = genVar('item_key');
     lines.push(`  const ${keyVar} = ${varName}?.id != null ? ${varName}.id : _scrml_idx;`);
-    pushLiftReconcileCtx({ wrapperVar, keyVar, iterVar: varName });
+    pushLiftReconcileCtx(buildLiftReconcileCtx(wrapperVar, keyVar, varName, body));
 
     for (const child of body) {
       if (!child) continue;
@@ -1903,10 +2074,46 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
     lines.push(`}`);
 
     lines.push(`function ${renderFn}() {`);
-    lines.push(`  _scrml_reconcile_list(${wrapperVar}, ${rewrittenIterable}, (item, i) => item?.id != null ? item.id : i, ${createFnVar});`);
+    if (_iterRefsOuterItem) {
+      // Item-dependent inner list (the S288 fix). Re-resolve every LIVE ancestor
+      // item the iterable needs — by that ancestor's create-time key — so the
+      // iterable reads off the CURRENT item(s) on every re-run, not a create-time
+      // snapshot. Bail if any needed key is gone (its subtree being torn down).
+      // Then replay the item-derived local aliases (declaration order, deps first)
+      // so `for (s of sts)` / `for (s of a.filter(…))` recompute against the fresh
+      // ancestor items. Reading `.length` on the resolved collection subscribes
+      // this effect to in-place array growth (push/splice); each `_scrml_resolve_
+      // item` read subscribes it to that ancestor reconcile's item-slot trigger
+      // (→ re-fires on ancestor REPLACE / reorder).
+      const srcVar = genVar('inner_src');
+      // Re-resolve needed ancestors outermost-first (so a replayed local that
+      // reads a shallower ancestor sees it already bound).
+      for (const ctx of _ctxStack) {
+        if (!_neededIterVars.has(ctx.iterVar)) continue;
+        lines.push(`  let ${ctx.iterVar} = _scrml_resolve_item(${ctx.wrapperVar}, ${ctx.keyVar});`);
+        lines.push(`  if (${ctx.iterVar} === null) return;`);
+      }
+      // Replay the needed item-derived local declarations via the SAME lowering
+      // emitLogicNode uses in the factory body (so `@`-refs / render calls / etc.
+      // lower identically). Post-order closure above guarantees deps precede use.
+      for (const l of _neededLocals) {
+        const declCode = emitLogicNode(l.node, {});
+        if (declCode) for (const dl of declCode.split('\n')) lines.push('  ' + dl);
+      }
+      lines.push(`  const ${srcVar} = ${rewrittenIterable};`);
+      lines.push(`  void (${srcVar} && ${srcVar}.length);`);
+      lines.push(`  _scrml_reconcile_list(${wrapperVar}, ${srcVar}, (item, i) => item?.id != null ? item.id : i, ${createFnVar});`);
+    } else {
+      lines.push(`  _scrml_reconcile_list(${wrapperVar}, ${rewrittenIterable}, (item, i) => item?.id != null ? item.id : i, ${createFnVar});`);
+    }
     lines.push(`}`);
     lines.push(`${renderFn}();`);
-    lines.push(`_scrml_effect_static(${renderFn});`);
+    // Item-dependent inner lists use a DYNAMIC effect: their deps (the current
+    // outer item's collection) CHANGE across runs, so first-run-only tracking
+    // (_scrml_effect_static) would keep subscribing to the create-time item and
+    // miss later items' in-place mutations. `@`-cell inner lists keep the static
+    // effect (they always read the same cell — the pre-fix behaviour).
+    lines.push(_iterRefsOuterItem ? `_scrml_effect(${renderFn});` : `_scrml_effect_static(${renderFn});`);
     return lines.join('\n');
   }
 
