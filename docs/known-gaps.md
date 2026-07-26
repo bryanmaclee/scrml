@@ -17,7 +17,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 13 |
 | MED | 55 |
-| LOW | 34 |
+| LOW | 35 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -37,6 +37,9 @@ The M1/P2 tier was **non-functional end-to-end** for a `<schema>`-only app — t
 **Why it was silent rather than loud, and why it is the dangerous shape:** §14.8.11 gates on the `<schema>` `db-authoritative` MARKER — a *different* signal from §14.8.10's registry — so the tier DID engage and faithfully pinned `set_config('scrml.tenant', null)` before dropping to the bounded role; RLS then matched nothing. Each half was internally consistent; only the composition was dead. And `_scrml_active_tenant` guards its resolver call with `typeof _scrml_current_user === "function"`, which converts "resolver missing" into "tenant is null" **with no diagnostic at all**.
 
 **Blast radius of the D fix, MEASURED:** zero — no `.scrml` file in scrml, scrml-support or scrml-native contains `tenant_id`, so no in-repo program newly activates the tenant floor. Full gate 21375 pass / 0 fail.
+
+### G-DBAUTH-DOCS-NO-DO-NOT-MARK-USERS-EXAMPLE — the `db-authoritative` marker reads as "apply to everything" — `NEW S288; LOW; open`
+Adopter-experience signal from RediLedger S4, offered as their own error but a predictable one. They marked their `users` table `db-authoritative`; the login lookup then ran under the moat with no principal pinned yet (the principal comes FROM that lookup), matched 0 rows, and returned `InvalidCredentials` **for a valid password** — the moat locked out its own front door. §14.8.10's corollary warns about exactly this (*"the identity/grant substrate is NOT tenant-scoped — you would need the tenant to read the table that tells you the tenant"*), but it is prose in a long section, and the marker's own name suggests blanket application. Ask: a **worked example in the db-authoritative docs** — "do not mark your `users` table" — with the bootstrap-ordering reason. Cheap, and it saves the next adopter an afternoon. Fold into the §14.8.11 doc pass. <!-- @gap id=g-dbauth-docs-no-do-not-mark-users-example sev=LOW status=open -->
 
 **Test debt this exposed (the load-bearing lesson):** the tier's own live-PG tests open a transaction and HAND-EXECUTE `SELECT set_config('scrml.tenant', …)` before asserting. That is a faithful test of the DDL + RLS and it passed throughout — but it never issues a request, so it cannot observe a session-sourced tenant failing to arrive nor an unbound identity in a route handler. **The DDL negative test proves the floor exists; only the request path proves the app is standing on it.** `compiler/tests/integration/schema-only-tenant-principal.test.js` now locks both defects (verified to FAIL on pre-fix source — 4 fail / 3 pass — so the gate is proven to bite, not merely green). See `g-dbauth-no-request-path-test` for the remaining stronger form. <!-- @gap id=g-dbauth-session-principal-not-wired sev=HIGH status=resolved -->
 
