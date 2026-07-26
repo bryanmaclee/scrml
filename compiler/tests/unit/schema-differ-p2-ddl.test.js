@@ -156,11 +156,12 @@ describe("§14.8.11.2 S4 — generateSecdefDDL (the SECURITY-DEFINER mutation ch
     expect(joined).not.toContain("pg_temp");
   });
 
-  test("the cap check is injected as the FIRST statement inside the emitter-owned BEGIN", () => {
+  test("the cap check is injected as the FIRST statement inside the emitter-owned BEGIN, schema-qualified", () => {
     // Author body had no BEGIN/END; the emitter provides them and the guard leads.
-    expect(joined).toMatch(/BEGIN\s+IF NOT scrml_has_cap\('void'\) THEN RAISE EXCEPTION 'denied'; END IF;/);
+    // The call is public.scrml_has_cap (belt over the pinned search_path).
+    expect(joined).toMatch(/BEGIN\s+IF NOT public\.scrml_has_cap\('void'\) THEN RAISE EXCEPTION 'denied'; END IF;/);
     // The author statement follows the guard.
-    expect(joined.indexOf("scrml_has_cap('void')")).toBeLessThan(
+    expect(joined.indexOf("public.scrml_has_cap('void')")).toBeLessThan(
       joined.indexOf("UPDATE invoices SET status = 'void'"),
     );
   });

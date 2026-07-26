@@ -8917,6 +8917,31 @@ does not trip `E-TENANT-WRITE` — it is the SOLE sanctioned mutation path the b
 toward. Inside the SECDEF the owner is still subject to the tenant policy, so an unpinned or
 wrong-tenant call touches zero rows (tenant isolation holds THROUGH the choke).
 
+**Threat model — the half-RLS honesty bar (tier-wide, NOT just P2; do not over-claim).** The
+GUC-based per-request principal (`scrml.tenant` + `scrml.principal.caps`) is **server-resolved per
+request** and pinned transaction-locally, but the GUCs are **self-settable by the `scrml_app` role**:
+a `scrml_app` connection that can execute arbitrary SQL — e.g. through app-layer SQL injection in an
+adopter's own foreign query — can `set_config('scrml.principal.caps', '["void"]', true)` (or a forged
+`scrml.tenant`) and then invoke the SECDEF. Therefore, stated plainly:
+
+- **What the cap gate and tenant isolation enforce against a NON-compromised app:** the capability
+  check and the tenant scope hold for every request whose SQL channel is un-injectable. scrml's
+  **parameterized query emission** (bound parameters, never string interpolation — §8.2) is precisely
+  what keeps the app's SQL channel un-injectable and the GUCs un-attacker-controlled. The SECDEF cap
+  check is thus an **app-layer capability gate over a self-settable GUC** — it is NOT DB-enforced
+  authorization that survives a fully-compromised `scrml_app` SQL channel, and MUST NOT be presented as
+  such.
+- **What survives a fully-compromised `scrml_app` SQL channel (the hard DB-authorities):** the S3
+  immutable-column `REVOKE` (`scrml_app` cannot UPDATE a locked column regardless of ANY GUC value),
+  the SECDEF-only mutation choke (`scrml_app` cannot mutate the locked table except by CALLing the
+  SECDEF), and the `NOBYPASSRLS` bound (`scrml_app` cannot disable RLS to read/write across tenants).
+  These are Postgres privilege grants, not GUC-gated — an attacker with `scrml_app`'s full SQL channel
+  still cannot forge them.
+
+This is the same self-settable-GUC model M1's `scrml.tenant` already uses; the honesty bar is to name
+it, not to hedge it — the GUC principal is a strong per-request mechanism for a non-compromised app,
+and the column `REVOKE` + choke + `NOBYPASSRLS` are the floor that holds even under app compromise.
+
 **Postgres-only; SQLite fails closed.** A `db-authoritative` table OR a SECURITY-DEFINER `fn` on a
 non-Postgres target hard-fails `E-DBAUTH-SQLITE` (SECURITY DEFINER / column GRANT/REVOKE / roles are
 Postgres-only) — at compile (`codegen/index.ts`) and at the deploy layer (`scrml db-migrate`). S4 DDL

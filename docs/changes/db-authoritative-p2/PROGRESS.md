@@ -49,6 +49,18 @@ DIFFERENT migrator pre-created the owner role hits the M1 cluster-global-role op
 
 ## DONE — all 6 steps landed; acceptance gate green on live PG16.
 
+## PA adversarial-review hardening round (review came back CLEAN — no HIGH/MED; 3 LOW folded in)
+1. proowner REGRESSION LOCK — acceptance assertion (4b): pg_proc JOIN pg_roles asserts the SECDEF owner
+   is the bounded per-run owner role (NOT the migrator), rolsuper=false, rolbypassrls=false.
+2. SPEC §14.8.11.2 THREAT-MODEL note (tier-wide honesty bar): the GUC principal (scrml.tenant +
+   scrml.principal.caps) is self-settable by a scrml_app with an injectable SQL channel → cap gate +
+   tenant isolation enforce against a NON-compromised app (parameterized emission is what keeps the
+   channel un-injectable); the hard DB-authorities that survive full app compromise are the immutable
+   REVOKE + the SECDEF-only choke + NOBYPASSRLS. Do NOT present the cap check as DB-enforced authz.
+3. Schema-qualify the injected guard: `public.scrml_has_cap('x')` (belt over the pinned search_path).
+Acceptance re-run: 8/8 on PG16 (incl. proowner). NOT built (PA-filed gaps): auto-immutable-PK,
+owner over-grant on all db-auth tables, real caps source (S8), $user-schema-migrator edge.
+
 ## Caps-source disposition
 `_scrml_active_caps(req)` resolves from the session-derived `_scrml_current_user(req)` (reads
 `_cu.caps` if present, else `[]`). Server-resolved, never client-supplied (mirrors tenantId /

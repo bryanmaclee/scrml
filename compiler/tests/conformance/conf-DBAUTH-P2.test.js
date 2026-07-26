@@ -135,8 +135,8 @@ describe("CONF-DBAUTH-P2 (S4 SQL-shape): the hardened SECDEF mutation choke", ()
     expect(ddl).toContain(`ALTER FUNCTION "void_invoice"(uuid) OWNER TO "invoice_admin";`);
     expect(ddl).toContain(`REVOKE EXECUTE ON FUNCTION "void_invoice"(uuid) FROM PUBLIC;`);
     expect(ddl).toContain(`GRANT EXECUTE ON FUNCTION "void_invoice"(uuid) TO scrml_app;`);
-    // the cap check is the FIRST statement inside the emitter-owned BEGIN.
-    expect(ddl).toMatch(/BEGIN\s+IF NOT scrml_has_cap\('void'\) THEN RAISE EXCEPTION 'denied'; END IF;/);
+    // the cap check is the FIRST statement inside the emitter-owned BEGIN, schema-qualified.
+    expect(ddl).toMatch(/BEGIN\s+IF NOT public\.scrml_has_cap\('void'\) THEN RAISE EXCEPTION 'denied'; END IF;/);
   });
 
   test("diffSchema (postgres) wires scrml_has_cap + the SECDEF onto the plan; sqlite emits neither", () => {

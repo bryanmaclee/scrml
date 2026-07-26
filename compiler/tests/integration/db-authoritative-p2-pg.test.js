@@ -257,6 +257,24 @@ d("§14.8.11.2 P2 writes-authority — through-CLI acceptance (live Postgres)", 
     expect(r.app_exec).toBe(true); // GRANT EXECUTE TO scrml_app held
   });
 
+  test("(4b) proowner REGRESSION LOCK — the SECDEF runs as the BOUNDED owner, NOT the migrator/superuser", async () => {
+    // The load-bearing property: a SECURITY DEFINER function runs AS ITS OWNER, so if
+    // a future regression left the owner as the migrator (which created the fn) the
+    // choke would run with the migrator's high privileges — defeating the whole tier.
+    // Assert the owner is the bounded, per-run owner role AND is neither superuser nor
+    // BYPASSRLS.
+    const rows = await m`
+      SELECT r.rolname, r.rolsuper, r.rolbypassrls
+      FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner
+      WHERE p.proname = 'void_invoice'
+    `;
+    expect(rows.length).toBe(1);
+    expect(rows[0].rolname).toBe(OWNER_ROLE); // the bounded owner, NOT the migrator
+    expect(rows[0].rolname).not.toBe(MIGRATOR);
+    expect(rows[0].rolsuper).toBe(false); // not a superuser (SECDEF ≠ superuser gateway)
+    expect(rows[0].rolbypassrls).toBe(false); // stays subject to tenant RLS through the choke
+  });
+
   test("bonus: scrml_app CAN update a MUTABLE column (memo) — the reshape is precise, not a blanket lock", async () => {
     await m.begin(async (tx) => {
       await tx`SELECT set_config('scrml.tenant', ${TENANT_A}, true)`;

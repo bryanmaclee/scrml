@@ -878,9 +878,14 @@ export function generateSecdefDDL(fn, dbAuthTables = []) {
 
   // The cap gate (first statement inside BEGIN). The cap value came from the parser
   // bounded by quotes (no `'` inside); escaped anyway (SQL single-quote doubling).
+  // The call is SCHEMA-QUALIFIED (`public.scrml_has_cap`) — belt-and-suspenders over
+  // the pinned `search_path`, so the guard resolves to the compiler-installed helper
+  // even if an operator ever re-grants CREATE on `public` to an untrusted role (the
+  // CVE-2020-25695 shadowing surface). The helper is installed unqualified into the
+  // migrator's default schema (public in the standard deploy — same as the tables).
   const capEsc = String(fn.cap ?? "").replace(/'/g, "''");
   const capGuard = fn.cap
-    ? `    IF NOT scrml_has_cap('${capEsc}') THEN RAISE EXCEPTION 'denied'; END IF;\n`
+    ? `    IF NOT public.scrml_has_cap('${capEsc}') THEN RAISE EXCEPTION 'denied'; END IF;\n`
     : "";
 
   const bodyText = indentPlpgsqlBody(fn.body ?? "");
