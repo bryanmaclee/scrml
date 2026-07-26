@@ -1,9 +1,9 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-07-19T21:52:34-06:00  commit: df2ac831
+# updated: 2026-07-26T07:00:00Z  commit: f8a138e9
 
 The compiler's "schema" is its own AST, not an application data model. Root catalog:
-`compiler/src/types/ast.ts` (2104 lines, 114 exported interfaces/types, ~91 distinct `kind` discriminants — line count +7 this window, GITI-038's `ReturnStmtNode.fnExprNode` field, see below; unchanged otherwise since fbb4d9fd). Read that file directly for the exhaustive list; this map groups it and calls out the load-bearing shapes.
+`compiler/src/types/ast.ts` (2104 lines, 114 exported interfaces/types, ~91 distinct `kind` discriminants — unchanged since fbb4d9fd/df2ac831; the S287 DB-authoritative tier below added NO ast.ts shape). Read that file directly for the exhaustive list; this map groups it and calls out the load-bearing shapes.
 
 ## Root pipeline types
 ### FileAST  [types/ast.ts:1551]
@@ -32,7 +32,7 @@ Discriminated union over ~91 `kind` string literals — the single node-shape sw
 
 **State machine** — EngineDeclNode [910] (`kind:"engine-decl"`; engineName, governedType `for=`, rulesRaw + bodyChildren walkable body, sourceVar, varName/varNameOverride, initialVariant, plus acceptsType/subsetVariants/inlineMatchArmArrows annotations added across S154-S172).
 
-**Control flow (statement)** — IfStmtNode [995], ForStmtNode [1044], WhileStmtNode [1062], ReturnStmtNode [1071] (gained `fnExprNode` this window — see the GITI-038 callout below), ThrowStmtNode [1085], SwitchStmtNode [1092], TryStmtNode [1101], MatchStmtNode [1120], MatchArmInlineNode [1138], BareExprNode [1156].
+**Control flow (statement)** — IfStmtNode [995], ForStmtNode [1044], WhileStmtNode [1062], ReturnStmtNode [1071] (carries `fnExprNode` — see the GITI-038 callout below), ThrowStmtNode [1085], SwitchStmtNode [1092], TryStmtNode [1101], MatchStmtNode [1120], MatchArmInlineNode [1138], BareExprNode [1156].
 
 **Control flow (expression)** — IfExprNode [1006], ForExprNode [1017], MatchExprNode (statement-form) [1028] and the expression-layer MatchExpr [1904], TernaryExpr [1781], GuardedExprNode [1222] (`given`).
 
@@ -48,46 +48,89 @@ Discriminated union over ~91 `kind` string literals — the single node-shape sw
 
 **Validators / lift / meta** — ValidatorEntry [679], RelationalPredicateNode [646], RenderSpecNode [730], LiftExprNode [1186], LiftTarget [195], MetaNode [359].
 
-**Misc runtime-adjacent** — TransactionBlockNode [1352], CleanupRegistrationNode [1361], WhenEffectNode [1373], WhenMessageNode [1387], UploadCallNode [1398], AuthConfig [1503] (unchanged this window — see the "duplicate AuthConfig shapes" note below), MiddlewareConfig [1515].
+**Misc runtime-adjacent** — TransactionBlockNode [1352], CleanupRegistrationNode [1361], WhenEffectNode [1373], WhenMessageNode [1387], UploadCallNode [1398], AuthConfig [1503] (see the "duplicate AuthConfig shapes" note in auth.map.md), MiddlewareConfig [1515].
 
 **Expression-layer types (ExprNode union, [types/ast.ts:2082])** — IdentExpr [1638], LitExpr [1660], ArrayExpr [1683], ObjectExpr [1690] / ObjectProp [1696], SpreadExpr [1702], UnaryExpr [1719], BinaryExpr [1747], AssignExpr [1769], TernaryExpr [1781], MemberExpr [1799], IndexExpr [1810], CallExpr [1820], NewExpr [1830], LambdaExpr [1858], CastExpr [1886], MatchExpr [1904], MapEntry [1929] / MapLitExpr [1956] (§59 value-native map/set), SqlRefExpr [1977], InputStateRefExpr [1991] (§36 `<#id>` reads), EscapeHatchExpr [2005] (`_{}` foreign block), ResetExpr [2046], MarkupValueExpr [2070].
 
-## GITI-038 (NEW this window) — `ReturnStmtNode.fnExprNode` (a returned function expression)
-`return function name(){…}` / `return async function name(){…}` is parsed STRUCTURALLY, not stripped-and-hoisted. `ReturnStmtNode` [types/ast.ts:1071] gained an optional `fnExprNode?: FunctionDeclNode` field [types/ast.ts:1081] carrying the returned closure as a full `function-decl` node — the SAME shape a top-level `FunctionDeclNode` uses (`kind:"function-decl"`). Prior behavior (`RETURN_DECL_KW` in ast-builder.js stripped `function` from the return, emptying it and hoisting the function as an orphaned unreachable sibling) is what caused the GITI-038 miscompile. `RETURN_DECL_KW` now covers only `const`/`let`/`type`/`fn` — `function`/`async function` route through a recursive `parseOneStatement()` call instead (ast-builder.js ~8329).
+## GITI-038 — `ReturnStmtNode.fnExprNode` (a returned function expression)
+`return function name(){…}` / `return async function name(){…}` is parsed STRUCTURALLY, not stripped-and-hoisted. `ReturnStmtNode` [types/ast.ts:1071] carries an optional `fnExprNode?: FunctionDeclNode` field [types/ast.ts:1081] holding the returned closure as a full `function-decl` node — the SAME shape a top-level `FunctionDeclNode` uses. `RETURN_DECL_KW` (ast-builder.js) covers only `const`/`let`/`type`/`fn` — `function`/`async function` route through a recursive `parseOneStatement()` call.
 
-**Contract: every AST pass that walks a `return-stmt` MUST also descend into `fnExprNode`** if it exists, treating it exactly like a nested `function-decl` statement — a `return-stmt`'s own `exprNode`/`expr` fields are EMPTY when `fnExprNode` is set (the return value IS the function). This window's fix routed ~10 analysis passes through it (round-2 completeness fix after the S239 gate caught the round-1 gap as a live server/client-split regression):
-- `route-inference.ts` — `collectFunctionNodes` collects `fnExprNode` as its own analysis entry (marked `_returnedInline` so it is exempt from the `W-DEAD-FUNCTION` dead-code pass — a returned closure is used BY POSITION, not by a named caller); `walkBodyForTriggers` re-enters `visitNode` on it so a server-only resource inside the closure escalates the enclosing route instead of leaking to the client bundle.
-- `type-system.ts` — `annotateNodes`'s return-stmt handler visits `fnExprNode` for scope/type analysis; `checkLinear`'s return-stmt handler walks it for §35 linear/must-use analysis.
-- `codegen/usage-analyzer.ts` — `walkUsage` recurses into `fnExprNode` so a helper called ONLY inside the returned closure isn't a `W-DEAD-FUNCTION` false positive.
-- `component-expander.ts` — `substitutePropsInLogicStmt`'s return-stmt case now ALSO substitutes props inside `fnExprNode` (the `{...n}` spread alone would carry it unsubstituted).
-- `meta-eval.ts` — `serializeNode`'s return-stmt case serializes `fnExprNode` as a named function expression (else `^{}` compile-time meta-evaluation silently dropped the returned closure).
-- `codegen/collect.ts` — `isServerOnlyNode` scans `fnExprNode`'s direct body (E-CG-006 defense-in-depth) so a server-only resource (`?{}` SQL / env read) inside the returned closure fails loud instead of client-emitting a `return null` stub.
-- `codegen/emit-logic.ts` — `emitLogicNode`'s `return-stmt` case emits `fnExprNode` inline via `case "function-decl"` (which derives its OWN `async` keyword from the lowered body's `await`s — the returned closure can be async while the enclosing factory stays sync). See dependencies.map.md for the Q1/Q2 async-classification split this feeds.
+**Contract: every AST pass that walks a `return-stmt` MUST also descend into `fnExprNode`** if it exists, treating it exactly like a nested `function-decl` statement — a `return-stmt`'s own `exprNode`/`expr` fields are EMPTY when `fnExprNode` is set. ~10 analysis passes route through it (route-inference.ts, type-system.ts, codegen/usage-analyzer.ts, component-expander.ts, meta-eval.ts, codegen/collect.ts, codegen/emit-logic.ts) — see dependencies.map.md for the Q1/Q2 async-classification split this feeds.
 
-## GITI-039 (NEW this window) — no new AST shape, a parse-time rejoin fix
-No `ReturnStmtNode`/`ExprNode` shape changed. `ast-builder.js`'s `collectExpr`/`joinWithNewlines` (the token-collector for `${}` logic bodies) gained a `partSpans` parallel array carrying each collected token's source span WHEN it was collected inside a markup region (`angleDepth > 0`, else `null`). Two adjacent markup-region parts whose spans are byte-adjacent (`prev.end === cur.start`) now rejoin with NO separator, preserving literal markup TEXT verbatim (`a.txt` stays `a.txt`, not `a . txt`). A `null`-span (pure-expression, `angleDepth === 0`) part falls through to the pre-existing line-based separator, so pure-expression rejoin stays byte-identical (verified S239, 948-sample). A companion fix scopes the `;` statement-boundary break to `angleDepth === 0` — inside a markup region a `;` is literal text, not a statement terminator.
+## GITI-039 — no new AST shape, a parse-time rejoin fix
+No `ReturnStmtNode`/`ExprNode` shape changed. `ast-builder.js`'s `collectExpr`/`joinWithNewlines` (the token-collector for `${}` logic bodies) carries a `partSpans` parallel array so two adjacent markup-region parts whose spans are byte-adjacent rejoin with NO separator, preserving literal markup TEXT verbatim.
+
+## §14.8.11 DB-authoritative tier — codegen-internal shapes, NOT a FileAST or ast.ts type (NEW S287)
+
+`schema-differ.js`'s `parseSchemaBlock(schemaBody)` return shape is the desired-state input BOTH
+`diffSchema` (the SQLite/Postgres migration differ) and `commands/db-migrate.js` (via
+`codegen/db-authoritative.ts`'s `extractDesiredSchema`) consume. It is a plain-object shape local to
+this pipeline stage — like `ThemeContext`/`ProtectContext` below, it has no `ast.ts` entry and no
+`kind` discriminant.
+
+```
+{ tables: TableDecl[], fns: SecdefFnDecl[] }   // fns is ADDITIVE — [] for a schema with no `fn`
+```
+
+### TableDecl  [schema-differ.js, `parseSchemaBlock`/`parseColumns`]
+name: string
+columns: ColumnDecl[]
+dbAuthoritative?: boolean          // the §14.8.11 opt-in marker — bareword `db-authoritative` immediately after the table's closing `}`
+
+### ColumnDecl  [schema-differ.js, `parseColumns`]
+name: string
+type: string                        // mapped SQLite affinity type
+scrmlType: string                   // lowercased source token, preserved for cell-type-aware lowering
+primaryKey / notNull / unique: boolean
+immutable: boolean                  // §14.8.11.2 S3 — NEW S287. A bareword mirroring `not null`/`unique`; consumed ONLY by `generateDbAuthoritativeDDL`, which narrows the bounded role's table-level UPDATE grant to the mutable columns. Inert on a non-`db-authoritative` table (no bounded-role grant to narrow).
+default: string | null
+references: {table, column} | null
+renameFrom: string | null
+sharedCorePredicates: SharedCorePredicate[]   // §39.5.7 — req/length/pattern/min/max/gt/lt/gte/lte/eq/neq/oneOf/notIn
+
+### SecdefFnDecl  [schema-differ.js, `parseFnDecl`]  — NEW S287, §14.8.11.2 S4
+The parsed shape of a co-located `<schema>` `fn NAME(args) security definer owner(<role>) [returns
+<type>] [requires cap("x")] { """ <plpgsql statements> """ }` declaration (M1-PROVISIONAL surface;
+a later owner-ruled syntax pass finalizes it). Every identifier below is captured with a STRICT
+`[A-Za-z_]\w*` pattern (parse-time defense complementing emit-time `quoteIdent`).
+name: string
+args: Array<{name: string, type: string}>
+owner: string                       // MANDATORY — the bounded NOLOGIN role the SECDEF runs AS (distinct from `scrml_app`)
+returns: string                     // defaults to "void"
+cap: string | null                  // the `requires cap("x")` gate value, or null (no gate)
+isSecurityDefiner: boolean          // advisory this pass — every P2 `fn` emits SECURITY DEFINER regardless
+body: string                        // the raw plpgsql STATEMENTS only (no outer BEGIN/END — the emitter owns that envelope so the injected cap check is un-bypassable and always first)
+
+### ActualTable / ActualColumn  [schema-differ.js, `readActualSchema`/`readActualSchemaPg`]
+The LIVE-database-read counterpart `diffSchema` compares `TableDecl`/`ColumnDecl` against. Same
+shape family, `sharedCorePredicates` always `[]` (not recoverable from `PRAGMA table_info()` /
+`information_schema.columns` in v1 — CHECK-constraint text isn't exposed).
+
+**Known parser gap riding this shape** (`g-db-migrate-check-constraint-oneof-pattern`, MED, open,
+`docs/known-gaps.md`): a `ColumnDecl` whose source line carries `oneOf([...])` or `pattern(/…/)`
+trips `parseColumns`'/`parseSharedCorePredicates`' line-based scan — the DIFFER's parse, not the
+main compiler's (`type-system.ts` parses these fine) — and the table false-fails the
+`E-DBAUTH-NO-TENANT-COLUMN` pre-flight even when it DOES declare `tenant_id`. If you touch
+`parseColumns`/`parseSharedCorePredicates`, this is the reproducer.
 
 ## §65 CSS-native model — NOT a dedicated FileAST shape
-`<theme>` / `<defaults>` are recognized as ordinary MarkupNode instances via the structural-element registry (`compiler/src/attribute-registry.js:485` onchange, `:503` theme, `:516` defaults) — same pattern as `<endpoint>` (§61) and `<onchange>` (§38.13). No `ThemeDeclNode`/`EndpointDeclNode`/`OnchangeNode` type exists in ast.ts as of this watermark; theme-body-parser.ts + symbol-table.ts + type-system.ts consume the raw markup body directly. Codegen-internal (non-FileAST) types for these features:
-- `ThemeContext` — exported from `codegen/emit-theme-reset.ts:56`: `{ themeDecls: ThemeDecl[]; programNode; cellNames: Set<string> }`, the single-walk gather of `<theme>` decls + the `<program>` node + declared reactive/derived cell names that feeds every §65 lowering path. (`ThemeDecl`/`ThemeToken` are file-local shapes typing the `kind:"theme-decl"` node theme-body-parser.ts produces.)
-- `CSSVariableBridge` — `codegen/collect.ts`: the §25 reactive-CSS-var bridge descriptor (`{ varName, customProp, isExpression, expr, refs }`). Its `scoped` field was REMOVED in #98/`bf316828` — reactive CSS custom props are no longer per-instance scoped.
-- `ProtectContext`/`ProtectedColumns` (protect-egress.ts:47/101, §14.8.9), css-conflict-check.ts's internal `CssConflictFinding` (E-STYLE-CONFLICT/W-STYLE-CONFLICT-POSSIBLE), `RowChange` synthesis (channel-watches.ts, §38.13, pipeline-internal not an AST node), `EndpointArmBinding`/`IfDisplayGuard` (codegen-internal, §61).
-- `<program reset="none">`. `compiler/src/attribute-registry.js`'s `"program"` element carries a `reset` attrSpec (`allowedValues: ["none"]`, `supportsInterpolation:false`) — the §65.3.4 built-in-reset opt-out. Consumed by `emitResetLayer` in `codegen/emit-theme-reset.ts` (also owns `<theme>` token → `:root` custom-property lowering §65.3.2/§25.7, and `themeVariantAttr` — the `data-scrml-theme-<cell>` name shared by the runtime theme-switch reflection in emit-client.ts and the emitted variant selector in emit-css.ts). See domain.map.md / error.map.md for `E-THEME-TOKEN-UNKNOWN`.
+`<theme>` / `<defaults>` are recognized as ordinary MarkupNode instances via the structural-element registry (`compiler/src/attribute-registry.js:485` onchange, `:503` theme, `:516` defaults) — same pattern as `<endpoint>` (§61) and `<onchange>` (§38.13). No `ThemeDeclNode`/`EndpointDeclNode`/`OnchangeNode` type exists in ast.ts. Codegen-internal (non-FileAST) types for these features:
+- `ThemeContext` — exported from `codegen/emit-theme-reset.ts:56`: `{ themeDecls: ThemeDecl[]; programNode; cellNames: Set<string> }`.
+- `CSSVariableBridge` — `codegen/collect.ts`: the §25 reactive-CSS-var bridge descriptor.
+- `ProtectContext`/`ProtectedColumns` (protect-egress.ts, §14.8.9), css-conflict-check.ts's internal `CssConflictFinding`, `RowChange` synthesis (channel-watches.ts, §38.13), `EndpointArmBinding`/`IfDisplayGuard` (codegen-internal, §61).
+- `<program reset="none">`. `attribute-registry.js`'s `"program"` element carries a `reset` attrSpec — the §65.3.4 built-in-reset opt-out.
 
 ## `<outlet>` (§20.8) — also NOT a dedicated FileAST shape
-Same structural-element-registry pattern as `<theme>`/`<defaults>`/`<onchange>` — no `OutletNode` type in ast.ts. Recognized/validated by symbol-table.ts PASS 15.5 (E-OUTLET-DUPLICATE / E-OUTLET-OUTSIDE-SHELL / W-OUTLET-ABSENT-SOFT-NAV-DISABLED). §20.8.3 link-boost (the delegated `<a href>` click-interception that makes internal links actually soft-navigate by default) — runtime side in `compiler/src/runtime-template.js`, boot-call emission gated on `fileHasOutlet(fileAST)` in `compiler/src/codegen/emit-client.ts`. Not a new AST shape either — `hard` is a plain boolean `<a>` attribute (html-elements.js).
+Same structural-element-registry pattern as `<theme>`/`<defaults>`/`<onchange>` — no `OutletNode` type in ast.ts. Recognized/validated by symbol-table.ts PASS 15.5.
 
 ## §20.5 session-establishment — new attributes/config fields, NOT a new FileAST node type
-No `SessionDeclNode` exists — `session` is a reserved server-scope BUILTIN identifier (bound into scope by type-system.ts's `annotateNodes` when `boundary === "server"`, see auth.map.md), not a declaration form. Three DIFFERENT non-FileAST "auth config" shapes carry the new `session-secure=` attribute (`"true"`\|`"false"`, closed value set, registered on BOTH `<program>` and `<page>` in attribute-registry.js + html-elements.js) — these are three SEPARATE interfaces, not one shared type, a pre-existing architecture (not introduced this window):
-- `compute-program-config.ts`'s own `AuthConfig` [:28] — gained `sessionSecure: string` (the raw `"true"`/`"false"` attribute value; ProgramConfig-level, consumed by route-inference.ts).
-- `route-inference.ts`'s `AuthMiddleware` interface [:294] — gained `sessionSecure?: boolean` (coerced boolean, `authConfig.sessionSecure !== "false"`; optional so pre-existing test constructions default to the safe secure mode).
-- `types/ast.ts`'s own `AuthConfig` [:1503] (the FileAST-level copy, `{auth, loginRedirect, csrf, sessionExpiry}`) did NOT gain a `sessionSecure` field this window — see auth.map.md for which shape codegen actually reads.
+No `SessionDeclNode` exists — `session` is a reserved server-scope BUILTIN identifier. See auth.map.md for the three separate non-FileAST "auth config" shapes.
 
 ## Type-system ResolvedType layer (type-system.ts, not ast.ts)
-FunctionType [type-system.ts:423], MapType [:318] (with `.set?: boolean` for §59.12 value-native Set), PredicatedType [:468] (with `subsetVariants`), the `<fn-return>` over-approximation sentinel (`FN_RETURN_TYPE_NAME`, :754). NO `AnyType`/`null` member exists — `any` and `null` are not scrml types (§14.1.1 / null-does-not-exist axiom). Unchanged this window.
+FunctionType [type-system.ts:423], MapType [:318] (with `.set?: boolean` for §59.12 value-native Set), PredicatedType [:468] (with `subsetVariants`), the `<fn-return>` over-approximation sentinel (`FN_RETURN_TYPE_NAME`, :754). NO `AnyType`/`null` member exists — `any` and `null` are not scrml types (§14.1.1 / null-does-not-exist axiom).
 
 ## Tags
-#scrml #map #schema #ast #types #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async
+#scrml #map #schema #ast #types #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column
 
 ## Links
 - [primary.map.md](./primary.map.md)
@@ -97,3 +140,4 @@ FunctionType [type-system.ts:423], MapType [:318] (with `.set?: boolean` for §5
 - [domain.map.md](./domain.map.md)
 - [auth.map.md](./auth.map.md)
 - [dependencies.map.md](./dependencies.map.md)
+- [migrations.map.md](./migrations.map.md)

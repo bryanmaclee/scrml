@@ -1,6 +1,6 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-07-21T13:40:00Z  commit: 9481bc69
+# updated: 2026-07-26T07:00:00Z  commit: f8a138e9
 
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
 
@@ -13,29 +13,140 @@ scrml is a single-file full-stack language + compiler (not a web app with a runt
 **Pattern matching / enums** — `match`/`is` over closed enum unions (§18); shorthand `.Variant` forms (§14.5); exhaustiveness is a compile error, not a runtime default. E-TYPE-082 fail-arity ruling for enum-variant construction payload arity.
 **Absence** — `not` is the ONE canonical absence value (§42). `null` and `undefined` are NOT valid scrml tokens in ANY position (expression/attribute/type/identifier) — hard rule, W-ABSENCE-IN-SCRML-SOURCE lint + E-SYNTAX-042 hard error. Defined-but-empty values (`""`, `0`, `false`, `[]`, `{}`) are NOT absence.
 **Logic contexts** — `${}` (logic), `?{}` (SQL), `#{}` (CSS), `_{}` (foreign/escape-hatch, §23), `^{}` (meta/compile-time eval, §22), `~{}` (test, §19.13), `!{}` (error-arm, §19). Each is a distinct parse context (§3-§4, §7-§9).
-**SQL** — `?{}` inline SQL blocks (§8) resolve against `<db>`/`<schema>` (§39); `?{}` in a library context emits reactive-deps-aware client SQL (W5b). E-SCHEMA-001/002/004 + W-SCHEMA-001 strict §39.4 `<schema>` column-type checks wired; a real-DB conformance adapter (Bun.SQL in-memory seam, `sqlEngine` opt-in) exercises live-DB behavior in the D3 corpus. **`codegen/sql-lex.ts` (#120) is the SINGLE source of truth for which `${…}` inside a `?{}` body is LIVE (code context) vs INERT (inside a string literal, `""`-quoted identifier, `E'…'`, `$tag$…$tag$` dollar-quote, `--` line comment, or a NESTED `/* */` block comment).** The same function feeds BOTH the classifier (`collect.ts` load-kind / row-scope predicate) and the emitter (`rewrite.ts` `extractSqlParams`), so a `${}` the classifier ignores is provably the same `${}` the emitter does not bind — the round-3 divergence that emitted a `$N` inside a comment cannot recur.
+**SQL** — `?{}` inline SQL blocks (§8) resolve against `<db>`/`<schema>` (§39); `?{}` in a library context emits reactive-deps-aware client SQL (W5b). E-SCHEMA-001/002/004 + W-SCHEMA-001 strict §39.4 `<schema>` column-type checks wired; a real-DB conformance adapter (Bun.SQL in-memory seam, `sqlEngine` opt-in) exercises live-DB behavior in the D3 corpus. **`codegen/sql-lex.ts` (#120) is the SINGLE source of truth for which `${…}` inside a `?{}` body is LIVE (code context) vs INERT** (inside a string literal, `""`-quoted identifier, `E'…'`, `$tag$…$tag$` dollar-quote, `--` line comment, or a NESTED `/* */` block comment). The same function feeds BOTH the classifier (`collect.ts` load-kind / row-scope predicate) and the emitter (`rewrite.ts` `extractSqlParams`).
 **Confidentiality — the four axes (§52.15.4).** route-admission (§52.15.2) ⟂ tenant-scope (§14.8.10) ⟂ per-user row-selection (§52.15.3) ⟂ column-redaction (§14.8.9). These STACK; none substitutes for another. The two compiler-enforced floors:
   - **§14.8.9 column floor** — a protected `<schema>` column can never reach the client bundle (E-CG-001, acorn-exact egress scan, `codegen/egress-field-scan.ts` + `codegen/protect-egress.ts`).
-  - **§14.8.10 tenant-row isolation floor (S273, #117/#118)** — the ROW-level twin of §14.8.9, one predicate deeper on the SAME schema registry and the SAME egress sinks. It owns ONLY the isolation INVARIANT ("a row of tenant A never reaches a request whose ambient tenant is B"), never policy (roles/grants/who-may-act-as stay app-owned). `tenant_id` is a CONVENTION, not a declaration keyword — a `<schema>` table carrying that column IS tenant-scoped, fail-closed by default. The ambient tenant is CONSUMED, never derived: the app pins `session.set("tenantId", t)` and the floor reads `@currentUser.tenantId`; auto-deriving one from grants is the explicitly named anti-pattern. REDACTION is the guaranteeing mechanism (reuses the §14.8.9 `_scrml_protect_tag`/`_scrml_protect_redact` sink, `I-TENANT-STRIP`); INJECTION is mandatory only where redaction cannot cover — aggregates with no per-tenant output discriminator (`E-TENANT-AGG`), writes (`E-TENANT-WRITE`, with single-row `INSERT` auto-injection), raw/foreign egress (`E-TENANT-RAW-EGRESS`). `.acrossTenants()` is the sole loud greppable opt-out (`I-TENANT-ACROSS`, mirroring `reveal()`). When `@currentUser.tenantId is not`, the floor yields ZERO rows (fail-closed). Implementation: `codegen/tenant-egress.ts`, consumed by `codegen/emit-server.ts`.
-**SSR sequencing — auto-make-safe, §52.15.5 (#120, S274).** The SSR compose route is an ANONYMOUS-REACHABLE GET: it serves first-paint HTML to every viewer, gated or not (the `<page>`/`<program auth="required">` redirect covers navigation, not the compose route's own output). Seeding an auth-scoped, UNSCOPED cell (a Tier-1 `SELECT *`, or a Pattern-C query with no `${@currentUser.…}` filter) into that paint would bake one query result into every viewer's HTML *and* the `window.__scrml_ssr_state` seed. The compiler **auto-makes-safe rather than hard-erroring** (mirroring the §14.8.9 auto-redaction): such a cell is OMITTED from the SSR seed entirely — no first-paint markup fill, no `__scrml_ssr_state` entry — and hydrates client-side post-mount behind its already-gated `/__serverLoad` fetch. `I-SSR-AUTH-SCOPED-CLIENT-HYDRATED` (Info, per-var) records the omission so it is never silent and steers toward §52.15.3 row-scoping to restore the acceleration. Public cells (`auth="none"`/no app auth) and row-scoped Pattern-C cells are seeded normally — the omission never over-omits. Row-scope identity is decided by the shared `sql-lex` LIVE-interpolation predicate. This RETIRED the warning-level `W-SSR-PRERENDER-UNSCOPED`.
-**CSS — the §65 scrml-native model — Wave-1 EMISSION LANDED.** Deletes cascade specificity. `<theme>` (program-scope named-token block, lowers to §25 CSS custom properties) + `<defaults>` (app-wide bare-element defaults, the "base" @layer) are structural elements (NOT HTML; attribute-registry.js:503/516). `:where()`-flat emission on scoped `#{}` (unconditional arms), the `@layer reset, global;` order + a built-in default-ON `reset` layer (opt-out `<program reset="none">`), `<theme>` token → `:root` custom-property lowering via a `@`-sigil use-site syntax (a token DECLARATION stays bare; a use-site REFERENCE requires `@`, disambiguating from the §25 reactive-CSS-var cell bridge and from a literal CSS keyword), and the §65.6 runtime theme-switch reflection are all implemented in `emit-css.ts` + `emit-theme-reset.ts` + `emit-client.ts`. Diagnostic: `E-THEME-TOKEN-UNKNOWN`. Remaining Wave 2-3 work: the `style`-value type + dispatch, `<defaults>` as style-as-value, the full `@layer` chain + Tailwind-in-`utilities` integration, `--explain-style`.
-**Realtime — §38.13 `<channel watches=table>`** — a change-feed-over-external-DB-writes primitive, distinct from the general §38 WebSocket `<channel>`. Front-end recognition + `RowChange` synthesis (`channel-watches.ts`) + Postgres trigger DDL install + the bundled-`pg` LISTEN bridge + client `__change` frame dispatch are all landed. `<onchange>` is the client-side handler element (attribute-registry.js:485).
-**Auth / BaaS** — `scrml:auth` stdlib module: magic-link / email-verify / password-reset flows + HS256 JWT + JWKS RS256 verification + `generatePassword`. §20.5 session-establishment (`session.set`/`.destroy`/`.userId`/`.role`/`.get`/`.isAuth`) is the write half of the session model (the compiler owns an HttpOnly session cookie, read back for `@currentUser`); `session.set("tenantId", t)` is also the §14.8.10 tenant-key establishment point. See auth.map.md for the full mechanism.
+  - **§14.8.10 tenant-row isolation floor (#117/#118)** — the ROW-level twin of §14.8.9, one predicate deeper on the SAME schema registry and the SAME egress sinks. It owns ONLY the isolation INVARIANT ("a row of tenant A never reaches a request whose ambient tenant is B"), never policy (roles/grants/who-may-act-as stay app-owned). `tenant_id` is a CONVENTION, not a declaration keyword — a `<schema>` table carrying that column IS tenant-scoped, fail-closed by default. The ambient tenant is CONSUMED, never derived: the app pins `session.set("tenantId", t)` and the floor reads `@currentUser.tenantId`. REDACTION is the guaranteeing mechanism; INJECTION is mandatory only where redaction cannot cover (aggregates `E-TENANT-AGG`, writes `E-TENANT-WRITE`, raw/foreign egress `E-TENANT-RAW-EGRESS`). `.acrossTenants()` is the sole loud opt-out (`I-TENANT-ACROSS`). Implementation: `codegen/tenant-egress.ts`, consumed by `codegen/emit-server.ts`. **§14.8.11 below relocates this SAME invariant into the database, as an opt-in escalation — see "STACK, not supersede" there.**
+**SSR sequencing — auto-make-safe, §52.15.5 (#120).** The SSR compose route is an ANONYMOUS-REACHABLE GET. Seeding an auth-scoped, UNSCOPED cell into that paint would bake one query result into every viewer's HTML. The compiler **auto-makes-safe rather than hard-erroring**: such a cell is OMITTED from the SSR seed entirely and hydrates client-side post-mount behind its already-gated `/__serverLoad` fetch. `I-SSR-AUTH-SCOPED-CLIENT-HYDRATED` (Info, per-var) records the omission. Row-scope identity is decided by the shared `sql-lex` LIVE-interpolation predicate.
+**CSS — the §65 scrml-native model — Wave-1 EMISSION LANDED.** Deletes cascade specificity. `<theme>` + `<defaults>` are structural elements (NOT HTML). `:where()`-flat emission, the `@layer reset, global;` order, `<theme>` token → `:root` custom-property lowering via a `@`-sigil use-site syntax, and the §65.6 runtime theme-switch reflection are implemented. Diagnostic: `E-THEME-TOKEN-UNKNOWN`.
+**Realtime — §38.13 `<channel watches=table>`** — a change-feed-over-external-DB-writes primitive, distinct from the general §38 WebSocket `<channel>`. Front-end recognition + `RowChange` synthesis (`channel-watches.ts`) + Postgres trigger DDL install + the bundled-`pg` LISTEN bridge + client `__change` frame dispatch are all landed. `<onchange>` is the client-side handler element.
+**Auth / BaaS** — `scrml:auth` stdlib module: magic-link / email-verify / password-reset flows + HS256 JWT + JWKS RS256 verification + `generatePassword`. §20.5 session-establishment (`session.set`/`.destroy`/`.userId`/`.role`/`.get`/`.isAuth`) is the write half of the session model; `session.set("tenantId", t)` is also the §14.8.10 tenant-key establishment point AND the identity source the §14.8.11 DB-authoritative A1 wrapper's `_scrml_active_tenant`/`_scrml_active_caps` resolvers read. See auth.map.md.
 **Server/client boundary** — inferred, not annotated: importing a server-tagged stdlib module (or DB/crypto/host access) escalates the importing function to server-only (§12.2); referencing `session` also escalates (§20.5). `E-CG-001` is the fail-closed backstop that blocks any protected DB column from reaching the emitted client bundle (acorn-exact scan, §14.8.9).
-**Colorless async — §13.1/§13.2, ratified S258, Seam-A LANDED (GITI-037/GITI-038, S267/S269/S271).** scrml source has no `async`/`await` keywords; the compiler infers async-ness by tracing calls to Promise-returning host primitives (stdlib, or a returned/aliased local peer) and auto-inserts `await`, coloring the enclosing function `async`. Landed: (a) the classifier-unification Phase-1 fix (GITI-037 — a plain function calling `safeCallAsync` no longer silently leaks the Promise; unified onto `computeAsyncFnNames`); (b) the Phase-2 async-collection-combinator TRANSFORM (`some`/`every`/`find`/`filter`/`map`/`forEach`/`reduce`/`flatMap` compile through a `_scrml_*Async` runtime combinator instead of leaking a Promise into a sync iterator method; `.sort` stays fail-closed, no async form); (c) GITI-038 — a factory `return`ing a NAMED function expression whose body is async-colored now TRANSFORMS correctly (`return async function name(){await…}`, the outer factory stays non-async); (d) i87 §13.2 position-invariant auto-await (#87) — auto-await fires one block deep inside `if`/`for`/`while` bodies, not just at function top. Remaining bucket-(c) fail-closed cases (a raw async call in a param default / `.sort` comparator / a not-fully-transformed arrow/const-bound returned closure) are tracked as `g-async-closure-body-raw-no-lower` (deferred).
-**Writer-ownership Axiom ① — §5.5.3/§5.5.4 (#81, S268).** A physical DOM surface (a `class`/`style`/`value` attribute or a form control's `.value` property) has AT MOST ONE wholesale reactive writer. A sole wholesale writer emits correctly (fixes #81 — it previously dropped silently outside `<each>`, 0 diagnostics); a wholesale writer CONTENDING with another on the same surface fires `E-ATTR-WRITER-CONFLICT` naming both sites. Axiom ② (decomposed-surface MERGE) is ruled-but-HELD, not built.
-**Typed API surfaces** — `<api>` (§60, typed EXTERNAL API consumption) vs `<endpoint>` (§61, typed INBOUND endpoint — the serve-side mirror). §61/§64.9 compose: an `<endpoint>` inside a `kind="tool"` program needs a `serve=` listener or it is unhosted (E-TOOL-ROUTE-NEEDS-SERVE).
+**Colorless async — §13.1/§13.2, ratified S258, Seam-A LANDED.** scrml source has no `async`/`await` keywords; the compiler infers async-ness by tracing calls to Promise-returning host primitives. See dependencies.map.md for the landed unit breakdown.
+**Writer-ownership Axiom ① — §5.5.3/§5.5.4 (#81).** A physical DOM surface has AT MOST ONE wholesale reactive writer; a contending second writer fires `E-ATTR-WRITER-CONFLICT` naming both sites.
+**Typed API surfaces** — `<api>` (§60, typed EXTERNAL API consumption) vs `<endpoint>` (§61, typed INBOUND endpoint — the serve-side mirror).
 **Linear types** — `lin` (§35) + the `~` pipeline-accumulator keyword (§32) for exactly-once-consumed values.
-**Input state** — `<keyboard>`/`<mouse>`/`<gamepad>` (§36) are LIVE-READ, not reactive-subscribed; `<#id>.field` inside `${}` renders once at mount (W-INPUT-STATE-MARKUP-NONREACTIVE steers to the `@cell` bridge).
-**Build/deploy asset addressing — §47.9.8.** On the `scrml build` deploy path, per-page client bundles and per-page CSS are content-addressed (FNV-1a hash spliced before the extension); both serve paths send `immutable`/`no-cache`+ETag cache headers accordingly. Not a language-surface feature — a compiler build-output contract. See build.map.md.
+**Input state** — `<keyboard>`/`<mouse>`/`<gamepad>` (§36) are LIVE-READ, not reactive-subscribed.
+**Build/deploy asset addressing — §47.9.8.** Content-addressed per-page client bundles/CSS on `scrml build`. See build.map.md.
 
-## The one-landmark invariant + multi-file shell composition (§20.8.1.1 / §40.8.2, #124 Wave-1c PR-1; widened #126/#128 S277)
+## §14.8.11 / §14.8.11.1 / §14.8.11.2 — the opt-in DB-authoritative security tier (NEW S287, M1/M2/P2)
+
+**Read this before touching `schema-differ.js`, `codegen/db-authoritative.ts`, `codegen/sql-ident.ts`,
+`commands/db-migrate.js`, or the §14.8.10 tenant floor's `tenant-egress.ts`.**
+
+**What it IS — a trust-boundary REVERSAL, opt-in per table, that STACKS with §14.8.10 rather than
+superseding it.** §14.8.10 owns the isolation invariant at scrml's compiler-owned client-egress
+sink — a direct `psql` connection reads unredacted rows BY DESIGN. A `db-authoritative` table
+relocates the SAME isolation invariant INTO the database (Postgres row-level security), so it holds
+against ANY connection. It stays on the invariant side of the §14.8.10 "consume, never derive"
+firewall through M1 (the RLS policy is keyed on the SAME app-pinned `@currentUser.tenantId` scalar);
+P2 (below) is the first milestone that deliberately CROSSES that firewall. The two tiers compose as
+defense-in-depth: an `invoices`-style `db-authoritative` table also carries a `tenant_id` column, so
+it is ALSO a §14.8.10 tenant-scoped table and the §14.8.10 compile-time hard-fails (`E-TENANT-WRITE`/
+`E-TENANT-AGG`) still apply on top.
+
+**Milestone 1 — reads-authoritative (Postgres RLS).** A table opts in with a bareword
+`db-authoritative` immediately after its closing `}` (Postgres-only; M1-PROVISIONAL surface). Emits,
+idempotently (never clobbers a live policy on re-migration): a bounded `scrml_app` role (`NOLOGIN
+NOBYPASSRLS` — MANDATORY, because a superuser/owner BYPASSES `FORCE ROW LEVEL SECURITY`, so A1
+without this bounded role is a SILENT NO-OP, the "looks enforced and isn't" trap); `ENABLE`+`FORCE
+ROW LEVEL SECURITY`; a `scrml_tenant_iso` policy keyed on `current_setting('scrml.tenant', true)`
+(missing GUC -> NULL -> matches NO row -> fail-closed). **A1 — the per-request principal (S2 GUC
+injection):** for an app with ≥1 `db-authoritative` table, EVERY `?{}` query runs inside a
+`_scrml_sql.begin(async (tx) => …)` transaction that pins `scrml.tenant` (txn-scoped `set_config`,
+so it auto-resets on commit — no cross-request bleed under a pool) then `SET LOCAL ROLE scrml_app`,
+then runs the original query on `tx`. Conditional engagement: zero `db-authoritative` tables emits
+BYTE-IDENTICAL to today. Mechanism: `schema-differ.js` (`generateDbAuthoritativeDDL`) +
+`codegen/db-authoritative.ts` (`wrapPrincipalTxn`, `appDeclaresDbAuthoritative`).
+
+**Milestone 2 — the migration-apply seam (`scrml db-migrate`).** M1 EMITTED the DDL but nothing
+applied it — a shipped db-authoritative app never installed its own RLS policy. M2 closes that gap
+with a PRIVILEGED OUT-OF-APP CLI, never auto-apply-on-boot: the running app is, by construction, the
+bounded `scrml_app` role with NO DDL rights (a role that could install the RLS policy could also
+`DROP` it), so applying the security DDL requires a DIFFERENT, more-privileged migrator/owner
+principal, run out-of-process (`scrml db-migrate <project> --db <migrator-url>` — mirrors
+PostgREST's migrator-vs-authenticator discipline). Under the migrator connection, in ONE
+transaction: `pg_advisory_xact_lock` (serializes concurrent migrators, auto-releases on
+commit/rollback) -> ensure the thin `_scrml_migrations` ledger (apply-atomicity + object-authorship,
+NOT a versioned migration-file history) -> read actual state (`readActualSchemaPg` + a narrow
+scrml-managed policy/role PRESENCE read) -> `diffSchema` -> apply + record. The never-clobber fence:
+a bare `DROP TABLE` for an actual-but-not-desired table is REFUSED by default
+(`W-SCHEMA-DESTRUCTIVE-DROP`) because a Postgres DROP CASCADEs the attached RLS policy/grants —
+`--allow-destructive` opts in. `scrml db-migrate` is ALSO general (Fork 5): it applies a plain
+`<schema>` to SQLite too (no roles/policies), finally making `<schema>` do-something-at-deploy for
+every adopter, not just db-authoritative ones. Identifier escaping (`codegen/sql-ident.ts`'s
+`quoteIdent`) is a SECURITY INVARIANT here, not a nicety — names read from the live DB via
+`readActualSchemaPg` are attacker-influenceable, and the seam applies each statement as the MIGRATOR
+(the most-privileged principal) via `tx.unsafe(stmt)`.
+
+**Milestone 2 / P2 — writes-authority (immutable columns + the SECURITY-DEFINER mutation choke).**
+P2 DELIBERATELY CROSSES the §14.8.10 "consume, never derive" firewall — scrml now COMPUTES an
+authorization decision in DDL it authored, not just relocates an isolation invariant. Two pieces:
+- **S3 — the `immutable` column keyword.** A per-column bareword (mirrors `not null`/`unique`)
+  marks a column `scrml_app` may INSERT but never UPDATE. Because a Postgres column-level `REVOKE`
+  CANNOT narrow a table-level `GRANT`, a table with ≥1 `immutable` column gets its M1 blanket
+  `GRANT … UPDATE …` RE-SHAPED to `GRANT SELECT,INSERT,DELETE` + `REVOKE UPDATE` + a column-scoped
+  `GRANT UPDATE (<mutable cols>)`. **Anti-regression (normative):** zero `immutable` columns emits
+  byte-identical to M1.
+- **S4 — the SECURITY-DEFINER `fn`, co-located in `<schema>`.** `fn NAME(args) security definer
+  owner(<role>) requires cap("x") { """ <plpgsql> """ }` — the SOLE sanctioned mutation path for a
+  column `scrml_app` was revoked from. The `fn` body is managed-migratable TEXT (opaque to the
+  compiler, never compiled — the scrml→plpgsql mini-compiler is a deliberately-rejected trap, §23.5
+  `_{}` precedent). SECDEF hardening is a CODEGEN INVARIANT, mandatory and gate-verified: `SET
+  search_path = pg_catalog, public` (pins built-ins against shadowing — a missing search_path pin is
+  a CVE-2020-25695-class privilege-escalation hole, WORSE than no enforcement, not merely
+  unenforced); a bounded NOLOGIN owner role DISTINCT from `scrml_app` and from a superuser;
+  `REVOKE EXECUTE FROM PUBLIC` + `GRANT EXECUTE TO scrml_app`. The compiler emits the `requires
+  cap("x")` check as the FIRST statement inside its OWNED `BEGIN…END` envelope (un-bypassable). The
+  capability GUC: a single txn-scoped `scrml.principal.caps` (JSON array), pinned by the A1 wrapper
+  in the SAME reserved txn as `scrml.tenant`, read by ONE checked helper `scrml_has_cap(text)`
+  (unpinned -> `false`, fail-closed). Source: `tenant-egress.ts`'s `_scrml_active_caps(req)` —
+  reads `@currentUser.caps` (M1-PROVISIONAL; an empty array when no caps source exists yet).
+
+**The threat-model honesty bar (tier-wide, not just P2 — do not over-claim).** The GUC-based
+principal (`scrml.tenant` + `scrml.principal.caps`) is server-resolved per request, but the GUCs are
+SELF-SETTABLE by the `scrml_app` role: a `scrml_app` connection with an INJECTABLE SQL channel could
+forge either and then invoke a SECDEF. What survives EVEN a fully-compromised `scrml_app` SQL
+channel: the S3 immutable-column `REVOKE` (a Postgres privilege grant, not GUC-gated), the
+SECDEF-only mutation choke, and the `NOBYPASSRLS` bound. What does NOT survive that compromise: the
+GUC-gated tenant scope and cap check — those hold only for a non-compromised app (i.e., as long as
+scrml's own parameterized-query emission, §8.2, keeps the SQL channel un-injectable). This is the
+same self-settable-GUC model M1's `scrml.tenant` already uses.
+
+**The atomic-milestone acceptance gate (the negative test, doubled at P2).** No milestone counts as
+landed except as ONE atomic unit proven via a DIRECT-CONNECTION NEGATIVE test against a real
+Postgres — a bounded `scrml_app` connection with NO `set_config` reads ZERO rows; WITH the tenant
+pinned it reads ONLY that tenant's rows; at P2, additionally: a direct `scrml_app` UPDATE of an
+immutable column is DENIED, a locked-column mutation NOT via the SECDEF is DENIED, the SECDEF
+enforces its cap check both ways, and `pg_proc.prosecdef`/`proconfig`/`EXECUTE`-grantee are asserted
+hardened. A half-shipped RLS "looks enforced and isn't" — worse than none.
+
+**Known open gaps** (`docs/known-gaps.md`, all S287, none blocking): `g-db-migrate-check-constraint-
+oneof-pattern` (MED — a `oneOf([...])`/`pattern(/…/)` column trips the differ's own diff-parser,
+false-failing `E-DBAUTH-NO-TENANT-COLUMN`, plus an unquoted-bareword CHECK bug and a brace-matcher
+false-positive on `W-DBAUTH-MARKER-NEARMISS`; fix site `schema-differ.js` `parseColumns`/
+`parseSharedCorePredicates`/`lowerSharedCoreToChecks`); `g-dbauth-p2-caps-provenance` (MED —
+`_scrml_active_caps` has no real session-caps source yet, so a `requires cap` SECDEF is inert-deny
+until wired, couples to S8 live revocation); `g-dbauth-p2-pk-tenant-not-auto-immutable` (LOW, bryan
+design call); `g-dbauth-secdef-owner-crud-all-tables` (LOW, over-grant). S5 (double-entry /
+DEFERRED-constraint balance triggers) is a separate P3 milestone; S7-full object-aware policy
+diffing and the non-provisional surface-syntax pass are separately scoped.
+
+**Cross-references:** §14.8.10 (the egress-redaction floor this tier stacks with); §44.2 (driver
+resolution, `resolveDbDriver`); §39 (`<schema>` tables); §20.5.1 (`session.set("tenantId", …)`, the
+pinned scalar `set_config` injects); §23.5 (`_{}` managed-foreign-text precedent for the plpgsql
+body). Authority: bryan RULED (S286 threshold + phasing; S287 migration-apply-seam DD all-five-forks;
+S287 P2 writes-authority DD S4-A co-location + "your recs"). See error.map.md (the 4 new §34 codes),
+dependencies.map.md (module graph), schema.map.md (`TableDecl`/`SecdefFnDecl`), build.map.md
+(`scrml db-migrate` flags), migrations.map.md (the whole apply model).
+
+## The one-landmark invariant + multi-file shell composition (§20.8.1.1 / §40.8.2, #124 Wave-1c PR-1; widened #126/#128)
 
 **Read this before touching outlet, `<main>`, or MPA composition anywhere in codegen.**
 
 **`<outlet>` is NOT a dedicated AST node.** It is an ordinary `kind: "markup"` node with `tag: "outlet"` — and so is `<main>`. There is no typed edge set, no `OutletNode` interface in `types/ast.ts`, and no ast-builder case that constructs one. Every consumer matches structurally (`n.kind === "markup" && n.tag === "outlet"`). This is the single most load-bearing fact about this surface: any pass that expects a typed node will silently find nothing.
 
-**The invariant (§20.8.1.1):** exactly one `<main>` landmark per COMPOSED document, and the route slot is identified by the `data-scrml-outlet` attribute NAME — never by tag. The marker-not-tag rule is what keeps codegen and the runtime (`querySelector("[data-scrml-outlet]")`, runtime-template.js:2238/2436/3709) in agreement even though the slot's tag varies between `<main>` and `<div>`.
+**The invariant (§20.8.1.1):** exactly one `<main>` landmark per COMPOSED document, and the route slot is identified by the `data-scrml-outlet` attribute NAME — never by tag. The marker-not-tag rule is what keeps codegen and the runtime (`querySelector("[data-scrml-outlet]")`, runtime-template.js) in agreement even though the slot's tag varies between `<main>` and `<div>`.
 
 **Four arrangements, three legal:**
 
@@ -45,49 +156,15 @@ scrml is a single-file full-stack language + compiler (not a web app with a runt
 | 2 | `<main><outlet/></main>` (wrapping) | author's `<main>` is the landmark; outlet demotes to marked `<div>` |
 | 3 | `<page>`-scoped / `pages/*.scrml` `<main>` | route content owns the landmark; slot demotes to marked `<div>` |
 | 4 | BARE / SIBLING `<main>` next to the outlet | **`E-OUTLET-AND-MAIN`** — ambiguous, only the author can resolve |
-| 3b | `<main>` arriving via **COMPONENT EXPANSION** (written in a component's definition body, mounted at a call site) | **content-owned — the case-3 family** (#126, S277). The component's `<main>` takes the landmark, the marked slot demotes to `<div>`, and NO diagnostic fires. See the SYM-blindness note below — it is BY DESIGN |
+| 3b | `<main>` arriving via **COMPONENT EXPANSION** | **content-owned — the case-3 family (#126).** The SYM pass provably cannot see it (component bodies are raw text pre-expansion); the emitter can, and decides there. NO diagnostic fires — BY DESIGN |
 
 **Where each decision actually lives — three files, three different stages:**
 
-- **`codegen/emit-html.ts` — the LANDMARK decision (per-file, emit time).** The `tag === "outlet"` branch (~:1650-1730) rewrites the outlet to a plain container carrying a synthetic `data-scrml-outlet` marker + `tabindex="-1"` (skipped if the author set their own tabindex), forces `selfClosing: false` so `<outlet/>` still opens a markup-parent context, and picks the tag: `documentHasAuthorMain() ? "div" : "main"` (:1720). The predicate is `treeHasAuthorMain(root)` (:1005) — a deliberately BROAD walk over every array- and object-valued property (not the typed child edges), `WeakSet`-cycle-guarded, `span` skipped. Breadth is the point: a false positive costs a `<div>` where `<main>` would also have been valid (invisible — the marker identifies the slot), a false NEGATIVE emits two `<main>`s in one document, which is the exact defect the invariant exists to prevent. The walk errs toward "yes".
-- **`codegen/index.ts` — the COMPOSITION SLOT (cross-file, composition time).** Slot = the FIRST element carrying the marker (`findOutletMarkedOpenTag`), falling back to the FIRST bare `<main>` (`findBareMainOpenTag`) for the pre-§20.8 static/hard-nav back-compat path. Matching is on attribute NAME via a real open-tag/attribute tokenizer, so `data-scrml-outlet-debug` (longer name) and `data-testid="data-scrml-outlet"` (value text) both correctly fail to match. `findMatchingCloseIdx` (:724) is a DEPTH-COUNTING close-tag scanner that skips comments and the raw-text elements `<script>`/`<style>`; a naive `indexOf('</'+tag+'>')` was correct only while the slot was always `<main>` (unnestable) and always empty — both false now, and the naive scan spliced route bodies above the real close, reparenting siblings and dropping content with a clean compile and no diagnostic. Slot bounds test is `>=`, not `>`, so an EMPTY slot (the NORMAL soft-nav shape) still composes. Then per composed page: `routeOwnsLandmark` (:2171) DEMOTES a marked `<main>` slot to `<div>` when the route body brings its own `<main>`, and `slotShouldPromote` (:2196) RE-PROMOTES a demoted slot back to `<main>` when the only author `<main>` was the outlet's own placeholder (which composition discards) and nothing else claims the landmark. Both are per-composed-document — a sibling route with no `<main>` composes into the `<main>` slot unchanged. Demotion is scoped to the MARKED slot only; the back-compat bare-`<main>` slot is the author's own element and is never re-tagged.
-- **`compiler/src/symbol-table.ts` — the DIAGNOSTIC (SYM PASS 15.5).** `walkValidateOutlets` (:10096) → `collectOutlets` (:10194) group outlets by nearest enclosing `<program>` (orphans → `E-OUTLET-OUTSIDE-SHELL`; 2nd..nth per shell → `E-OUTLET-DUPLICATE`). The Wave-1c addition is per-shell `shellMains` + a `wrappingMains` WeakSet + an `inRouteScope` flag: `<main>`s inside a `<page>` body or an `<outlet>` body are NOT collected at all (case 3), and a `<main>` on the open walk path when an outlet is reached is marked WRAPPING (case 2). `E-OUTLET-AND-MAIN` (`fireOutletAndMain`, :10580) fires on the remaining set — case 4 only — reported ON the `<main>`, naming all three resolutions (wrap / remove / move into the `<page>`). **S277 widened this collector three ways without adding a code (#126/#128):** (a) the walk became **TOTAL** — every object-valued property, `span` excluded, WeakSet-guarded (guard hoisted above the array branch) — deliberately mirroring `treeHasAuthorMain`, because the two decide two halves of ONE question and must not disagree about which elements exist; the prior hand-listed edge set (copied from `walkChannelPlacement`) silently missed `armBodyChildren` (match block-form), `bodyChildren` (engine state-children) and `<each>` bodies. (b) the `<main>` test became the shared `isAuthorMainTag` (see below). (c) `inRouteScope` now **resets at a nested `<program>` boundary** — the sibling of the existing `openMains` reset, on the same §4.12.1 grounds (a nested `<program>` is an isolated compilation unit inheriting nothing); without it `inRouteScope` latched true for a whole `<page>` subtree, so a nested shell never re-opened shell scope and a textbook case-4 violation in the INNER shell was silently exempted, while its `<div>`-wrapped twin always fired. Diagnostics also now resolve their reporting span through a `reportSpans` WeakMap: sub-parsed subtrees (match arms, `<each>` bodies) carry spans never rebased to file coordinates (they read L1:C1), detected structurally and replaced with the nearest file-absolute ancestor span — a **general ast-builder gap**, not an outlet one.
+- **`codegen/emit-html.ts` — the LANDMARK decision (per-file, emit time).** `treeHasAuthorMain(root)` is a deliberately BROAD walk over every array/object-valued property, WeakSet-cycle-guarded. Breadth is the point: a false positive costs a `<div>` where `<main>` would also have been valid (invisible), a false NEGATIVE emits two `<main>`s (the exact defect the invariant prevents).
+- **`codegen/index.ts` — the COMPOSITION SLOT (cross-file, composition time).** Slot = the FIRST marked element, falling back to the FIRST bare `<main>` for the pre-§20.8 back-compat path. `findMatchingCloseIdx` is a DEPTH-COUNTING close-tag scanner (skips comments and raw-text elements). `routeOwnsLandmark`/`slotShouldPromote` DEMOTE/RE-PROMOTE per composed document.
+- **`compiler/src/symbol-table.ts` — the DIAGNOSTIC (SYM PASS 15.5).** `walkValidateOutlets` -> `collectOutlets` groups outlets by nearest enclosing `<program>` (orphans -> `E-OUTLET-OUTSIDE-SHELL`; 2nd..nth -> `E-OUTLET-DUPLICATE`); `E-OUTLET-AND-MAIN` fires on case 4 only, naming all three resolutions.
 
-**Component-expanded `<main>` — and why SYM deliberately cannot see it (#126, SPEC §20.8.1.1).**
-A `<main>` written inside a component's definition body and brought into the document by mounting
-that component is **content-owned: the case-3 family.** No diagnostic. Case 4 does NOT apply,
-because the composed document still carries exactly one landmark.
-
-The reason this is a normative bullet rather than a coverage gap: **at SYM time a component
-definition body is still RAW TEXT (pre-expansion), so NO AST walk — however broad — reaches it.**
-That is why widening `collectOutlets` to a total walk (#126) did not and could not pick these up.
-The landmark decision for this shape is made DOWNSTREAM at emit time, where the expanded markup is
-visible. Do not "fix" the SYM blindness: firing case 4 here would reject a program that compiles to
-valid, accessible HTML and force the author to restructure working code. This is the one place in
-the invariant where the diagnostic pass is intentionally weaker than the emitter.
-
-**ONE shared `<main>` predicate — `compiler/src/landmark-tag.ts` (#126).** The two walkers that
-decide the two halves of this question (`collectOutlets` fires the diagnostic; `treeHasAuthorMain`
-picks the emitted tag) previously open-coded `=== "main"` separately. They now both import
-`isAuthorMainTag(node)`. The predicate is subtle enough that two copies *will* diverge:
-
-- It must be case-INSENSITIVE. HTML element names are ASCII case-insensitive and the compiler
-  passes an unrecognized capitalized tag through verbatim, so `<MAIN>` really does reach the
-  document and really is a second landmark to a browser. A `=== "main"` test cannot see it.
-- It must NOT be a bare `toLowerCase()`. In scrml a capitalized tag is a COMPONENT reference and
-  `ast-builder.js` classifies component-vs-element by capitalization ALONE, so `<MAIN>` and a
-  user's `<Main/>` leave the parser flagged identically. Lowercasing without a guard fires
-  `E-OUTLET-AND-MAIN` on a legal program AND demotes its slot to a `<div>`, yielding a document
-  with ZERO landmarks.
-- The discriminator is therefore NAME RESOLUTION, not spelling: `isUserComponentMarkup` reads NR's
-  `resolvedKind` (authoritative, cross-file aware). NR runs at `api.js:1585`, before SYM at
-  `:1626`, so `resolvedKind` is populated by the time PASS 15.5 asks. **Rule: a capitalized
-  spelling of `main` is the HTML landmark unless NR resolved that tag to a user component.**
-
-Upstream caveat recorded in that module: `<MAIN>` escaping `E-COMPONENT-035` (which `<Widget/>`
-does fire) is a deeper classifier inconsistency — an unrecognized capitalized tag is neither
-normalized to the HTML element nor rejected. `landmark-tag.ts` makes the landmark walkers agree
-with the browser; it does not fix that.
+**ONE shared `<main>` predicate — `compiler/src/landmark-tag.ts`.** `isAuthorMainTag(node)` — case-INSENSITIVE (HTML is case-insensitive) but NR-`resolvedKind`-guarded (a user component named `Main` is not mistaken for the HTML element). Imported by BOTH `collectOutlets` and `treeHasAuthorMain`, so they cannot disagree.
 
 **Outlet diagnostic family (4 codes):** `E-OUTLET-DUPLICATE`, `E-OUTLET-OUTSIDE-SHELL`, `E-OUTLET-AND-MAIN`, `W-OUTLET-ABSENT-SOFT-NAV-DISABLED`. See error.map.md.
 
@@ -96,45 +173,50 @@ with the browser; it does not fix that.
 - Specificity is deleted under §65: an unconditional same-property overlap on a provably-shared element is a COMPILE ERROR (E-STYLE-CONFLICT), never a silent cascade pick.
 - A protected DB column can never reach the client bundle — fail-closed, acorn-exact (E-CG-001, §14.8.9).
 - A row of tenant A never reaches a request whose ambient tenant is B (§14.8.10) — a FLOOR (isolation invariant only), not a policy engine; the ambient tenant is CONSUMED from `session`, never derived by the compiler.
+- **A `db-authoritative` table's tenant-isolation invariant holds against ANY connection, not just scrml's own egress sink (§14.8.11) — but the bounded `scrml_app` role is MANDATORY, because a superuser/owner BYPASSES `FORCE ROW LEVEL SECURITY` (a silent no-op trap without it).**
+- **The security DDL an app declares is applied by a DIFFERENT, more-privileged principal than the app runtime, out-of-process, NEVER auto-apply-on-boot (§14.8.11.1) — a role that could install its own RLS policy could also drop it.**
+- **A Postgres column-level REVOKE cannot narrow a table-level GRANT — an `immutable` column requires the WHOLE grant to be re-shaped, never a partial per-column subtraction (§14.8.11.2 S3).**
+- **A SECURITY-DEFINER function missing `SET search_path` is a privilege-escalation HOLE (CVE-2020-25695 class), not merely unenforced — the pin is a mandatory codegen invariant, not a nicety (§14.8.11.2 S4).**
 - An auth-scoped UNSCOPED cell is never SSR-seeded into the anonymous-reachable compose route (§52.15.5) — auto-omitted + Info-lint, never a hard error and never a silent leak.
 - Server/client execution boundary is INFERRED from usage (import/API surface, or `session` reference), never author-annotated.
 - Match/enum coverage must be exhaustive at compile time (§18) — no runtime default-arm fallthrough.
-- `async`/`await` are not scrml keywords (§19.9.8/§13.1) — async is an inferred/desugared codegen concern; a returned function EXPRESSION carries its own independent async coloring from its enclosing factory (GITI-038).
+- `async`/`await` are not scrml keywords (§19.9.8/§13.1) — async is an inferred/desugared codegen concern.
 - Auth tokens (magic-link/verify/reset) are single-use (get-then-delete) and namespace-scoped per purpose — a reset token cannot replay as a magic link.
 - A shell SHALL contain at most one `<outlet>` (§20.8) — no nested/multiple outlets in V1.
-- **A composed document SHALL carry at most one `<main>` landmark, and the route slot is identified by the `data-scrml-outlet` attribute NAME, never by tag (§20.8.1.1).** The slot's tag is a derived emission detail (`<main>` or `<div>`); every consumer — codegen and runtime alike — addresses the MARKER.
-- **A `<main>` arriving through COMPONENT EXPANSION is content-owned, never a competing shell landmark (§20.8.1.1).** The SYM pass provably cannot see it (component bodies are raw text pre-expansion); the emitter can, and decides there. The asymmetry is normative, not a hole.
-- **One predicate decides "is this element a `<main>` landmark" for the whole compiler** (`src/landmark-tag.ts`, §20.8.1.1) — imported by both the SYM diagnostic walk and the codegen emit walk, so they cannot answer it differently. Case-insensitive, but NR-`resolvedKind`-guarded so a user component named `Main` wins over the HTML element.
-- **A nested `<program>` inherits NOTHING from its parent — including route scope (§4.12.1).** Any latching flag carried down a walk (`openMains`, `inRouteScope`) must reset at that boundary.
-- **A diagnostic whose rule SPEC states as a property of a DECLARATION fires at the declaration, not at a use site (§6.2 Shape 2, `E-CELL-RENDER-SPEC-NOT-BINDABLE`).** Gating a decl-property rule behind a use site under-fires: interpolation reads and unused decls slip through silently. The converse holds too — `E-CELL-NO-RENDER-SPEC` is genuinely a property of the USE and stays use-scoped.
-- **scrml admits neither `<style>` nor `<script>` as elements (§4.17).** Both are rejected at the block-splitter with a scan-past-close recovery (`E-STYLE-001` / `E-SCRIPT-001`); CSS lives in `#{...}`, scrml logic in `${...}`, and genuine foreign JS in the `_{...}` block (§23). The rejection is SOURCE-side only — the emitter's own `<script src=…>` tags are produced downstream of BS.
+- **A composed document SHALL carry at most one `<main>` landmark, and the route slot is identified by the `data-scrml-outlet` attribute NAME, never by tag (§20.8.1.1).**
+- **A `<main>` arriving through COMPONENT EXPANSION is content-owned, never a competing shell landmark (§20.8.1.1).** The SYM pass provably cannot see it; the emitter can, and decides there.
+- **One predicate decides "is this element a `<main>` landmark" for the whole compiler** (`src/landmark-tag.ts`, §20.8.1.1).
+- **A nested `<program>` inherits NOTHING from its parent — including route scope (§4.12.1).**
+- **A diagnostic whose rule SPEC states as a property of a DECLARATION fires at the declaration, not at a use site (§6.2 Shape 2, `E-CELL-RENDER-SPEC-NOT-BINDABLE`).**
+- **scrml admits neither `<style>` nor `<script>` as elements (§4.17).** Both are rejected at the block-splitter with a scan-past-close recovery; CSS lives in `#{...}`, scrml logic in `${...}`, genuine foreign JS in `_{...}` (§23).
 - A `serve=` headless tool target has NO cookie-session auth surface — fail-closed rejected, not silently unguarded (§64.9).
-- An unresolved server-only `scrml:*` re-export's async classification defaults to async (fail-closed), never sync (the STDLIB-EXPORT-SEED backstop).
-- A `@`-sigil is required at a CSS value use site to reference a `<theme>` token or a reactive cell (§65.3.2/§25) — a bare identifier is always a literal CSS value.
-- Cache immutability for a build artifact is decided by EXACT set membership in the compiler's own content-addressed output, never by a filename-shape guess (§47.9.8).
-- Each physical DOM surface has at most ONE wholesale reactive writer (§5.5.3/§5.5.4, Axiom ①) — a second wholesale writer is a compile error, not a silent clobber.
-- `session` is reachable ONLY from a server-escalated function body (§20.5) — a client-side/top-level `session` reference is E-SCOPE-012; the client-side equivalent is the `@session` projection.
-- `session.set("csrfToken", …)` is a reserved-key write and is rejected at compile time when literal (§20.5.1) — the compiler alone mints the CSRF synchronizer token; a dynamic-key write is refused at runtime as a no-op.
-- LIVE-vs-INERT identity for a `?{}` `${}` interpolation is decided by ONE shared lexer (§52.15.5, `codegen/sql-lex.ts`) — the classifier and the param emitter CANNOT disagree by construction.
+- An unresolved server-only `scrml:*` re-export's async classification defaults to async (fail-closed), never sync.
+- A `@`-sigil is required at a CSS value use site to reference a `<theme>` token or a reactive cell (§65.3.2/§25).
+- Cache immutability for a build artifact is decided by EXACT set membership in the compiler's own content-addressed output (§47.9.8).
+- Each physical DOM surface has at most ONE wholesale reactive writer (§5.5.3/§5.5.4, Axiom ①).
+- `session` is reachable ONLY from a server-escalated function body (§20.5) — a client-side/top-level `session` reference is E-SCOPE-012.
+- `session.set("csrfToken", …)` is a reserved-key write and is rejected at compile time when literal (§20.5.1).
+- LIVE-vs-INERT identity for a `?{}` `${}` interpolation is decided by ONE shared lexer (§52.15.5, `codegen/sql-lex.ts`).
 
 ## Domain Events (compiler-pipeline analogs)
 `RowChange` — synthesized per §38.13 watched-table row mutation (INSERT/UPDATE/DELETE), dispatched client-side via the `__change` frame to `<onchange>` handlers.
 Engine variant transition — an `<engine>` cell's `rule=`-governed state change, optionally observed via `<onTransition>`/`<onTimeout>`/`<onIdle>`.
-Soft navigation — a route swap into the `[data-scrml-outlet]` region (fetch → swap → hydrate → transition), NOT a shell re-boot (§20.8.2); reachable both by explicit `navigate()` calls AND by an ordinary `<a href>` click (link-boost).
-Shell composition — a BUILD-time (not runtime) event: each `pages/*.scrml` route body is spliced into the shell's slot, producing one complete chrome-bearing SSR document per route (§40.8.2). Where no slot is found, composition is a no-op and per-route documents emit standalone.
-Theme-switch reflection — a `<theme for=@cell>` binding re-runs a `_scrml_effect` on every `@cell` change, writing the active variant tag onto `<html data-scrml-theme-<cell>>` (§65.6) — a page-wide CSS-selector flip with zero re-render.
-Diagnostic emission — every pipeline stage (BS/TAB/CE/TS/CG, see dependencies.map.md) emits `{code, message, severity, span}` records partitioned into `result.errors`/`result.warnings` (see error.map.md).
+Soft navigation — a route swap into the `[data-scrml-outlet]` region (fetch → swap → hydrate → transition), NOT a shell re-boot (§20.8.2).
+Shell composition — a BUILD-time (not runtime) event: each `pages/*.scrml` route body is spliced into the shell's slot (§40.8.2).
+Theme-switch reflection — a `<theme for=@cell>` binding re-runs a `_scrml_effect` on every `@cell` change (§65.6).
+Diagnostic emission — every pipeline stage emits `{code, message, severity, span}` records partitioned into `result.errors`/`result.warnings` (see error.map.md).
+**DB-authoritative migration apply — a DEPLOY-time (not build-time, not runtime) event: `scrml db-migrate` reconciles a project's `<schema>` (incl. the M1/P2 security DDL) against a live Postgres, recording object-authorship in the `_scrml_migrations` ledger (§14.8.11.1).**
 
 ## Aggregates (structural elements that own a bounded body)
 `<engine>` in compiler/src/ast-builder.js — owns its variant-graph rules + state-child bodies (EngineDeclNode.bodyChildren).
 `<channel>` in compiler/src/ast-builder.js — owns its watches= table binding + message/broadcast handlers (ChannelDeclNode).
 `<theme>` in compiler/src/theme-body-parser.ts — owns its named-token bindings + `.Variant`/`@media` re-bind blocks (§65.6); its emission is owned by `compiler/src/codegen/emit-theme-reset.ts`.
-`<schema>` — owns its table/column DDL surface (§39), consumed by protect-analyzer.ts for the §14.8.9 protect-floor and by codegen/tenant-egress.ts for the §14.8.10 tenant floor (a `tenant_id` column IS the tenant declaration).
-`<outlet>` — owns the swappable route-content region inside a `<program>` shell (§20.8.1). **NOT a dedicated AST node** — a `kind: "markup"` node with `tag: "outlet"`; the emitted region is identified downstream by the `data-scrml-outlet` ATTRIBUTE, not by tag. Its body (if any) is a placeholder that composition DISCARDS. See the one-landmark section above.
+`<schema>` — owns its table/column DDL surface (§39), consumed by protect-analyzer.ts for the §14.8.9 protect-floor, by codegen/tenant-egress.ts for the §14.8.10 tenant floor (a `tenant_id` column IS the tenant declaration), and by schema-differ.js's `parseSchemaBlock`/`generateDbAuthoritativeDDL`/`generateSecdefDDL` for the §14.8.11 DB-authoritative tier (a `db-authoritative` bareword after `}` IS the opt-in; a co-located `fn … security definer …` block IS the writes-authority mutation choke).
+`<outlet>` — owns the swappable route-content region inside a `<program>` shell (§20.8.1). **NOT a dedicated AST node** — a `kind: "markup"` node with `tag: "outlet"`; the emitted region is identified downstream by the `data-scrml-outlet` ATTRIBUTE, not by tag.
 A returned function-expression closure (`return function name(){…}`, GITI-038) — owns its own body's scope/type/async analysis independent of its enclosing factory (`ReturnStmtNode.fnExprNode`, see schema.map.md).
 
 ## Tags
-#scrml #map #domain #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics
+#scrml #map #domain #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar
 
 ## Links
 - [primary.map.md](./primary.map.md)
@@ -145,3 +227,4 @@ A returned function-expression closure (`return function name(){…}`, GITI-038)
 - [auth.map.md](./auth.map.md)
 - [dependencies.map.md](./dependencies.map.md)
 - [structure.map.md](./structure.map.md)
+- [migrations.map.md](./migrations.map.md)

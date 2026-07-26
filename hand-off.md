@@ -1,4 +1,55 @@
 <!-- ============================================================= -->
+<!-- S287 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-26.        -->
+<!-- Prior S286 wrap + Peter addendum UNCHANGED below.             -->
+<!-- ============================================================= -->
+
+# scrml — Session 287 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-07-26. `/boot` Profile A. `main` at **`f8a138e9`**, both repos coherence 0/0, tree clean, no open PRs, CI gate green. Mechanical stream: `handOffs/delta-log.md [775]-[786]`. Changelog S287 (three entries). This carries the irreducible.
+
+## 🎯 THE HEADLINE — the DB-authoritative security tier is COMPLETE for reads + writes
+From a bare `/boot`, the tier went from **nonexistent → M1 (emit) + M2 (apply) + P2 (write-authority)**, each: **deep-dive → bryan ruling → build → adversarial security review → independent PG16 verify → land via PR**. All three PG16-proven; **RediLedger run-verified invariant #1 in their real app** (Track-R slice 3a). Six PRs merged this session: #182 (board-hygiene), #183 (M1), #184 (M1 bookkeeping), #185 (M2), #186 (M2 bookkeeping), #188 (P2), #189 (P2 bookkeeping). ~~Peter's lane was quiet~~ — solo all session.
+
+| Milestone | PR / SHA | What | Adversarial review |
+|---|---|---|---|
+| **M1 emit** | #183 | per-table `db-authoritative` → S1 RLS + S6 bounded-role DDL; A1/S2 principal txn wrapper (`set_config(scrml.tenant)`+`SET LOCAL ROLE scrml_app`); `E-DBAUTH-SQLITE` | **HIGH caught+fixed**: `wrapPrincipalTxn` mangled module-level idempotency helpers → ReferenceError. Scope-aware fix. |
+| **M2 apply** | #185 | `scrml db-migrate` (privileged out-of-app CLI): reads `<schema>`+actual, diffs, applies under advisory-xact-lock + thin `_scrml_migrations` ledger + no-bare-DROP fence | **HIGH caught+fixed**: unescaped live-DB identifier injection → durable tenant-isolation bypass + RCE. `sql-ident.ts quoteIdent`. |
+| **P2 writes** | #188, `1c8aef79` | `immutable` columns (M1 GRANT reshaped) + SECDEF mutation-choke (`fn … security definer` in `<schema>`, hardened, bounded owner role, un-bypassable `public.scrml_has_cap` gate) | **CLEAN** — 6 empirical attacks, could not defeat; proowner=bounded confirmed. 3 LOW folded. |
+
+**DDs (all in `scrml-support/docs/deep-dives/`, frontmatter carries the RULING):** `db-authoritative-security-design-2026-07-25` + `-PHASING-PLAN-` (M1 threshold), `db-authoritative-migration-apply-seam-2026-07-26` (M2, ruled deep-dive-it-first then your-recs), `db-authoritative-p2-writes-authority-2026-07-26` (P2, ruled S4-A + your-recs).
+
+## 🔴 THE NATURAL NEXT ARC (bryan surfaced the options at wrap; his call at next boot)
+**My lean: the `db-migrate` CHECK-constraint fix** — `g-db-migrate-check-constraint-oneof-pattern` (MED, adopter-reported by RediLedger, well-bisected to `79cd79ce`). Three sub-bugs in `schema-differ.js`: (1) `oneOf([...])` emits unquoted barewords in the CHECK (`IN (income, expense)` not `IN ('income','expense')`); (2) a `oneOf`/`pattern` column trips the newline diff-parser → false `E-DBAUTH-NO-TENANT-COLUMN`; (3) `pattern(/…{n}…/)` brace fools the marker matcher (touches the brace-matcher P2 rewrote — **REPRODUCE all three on post-P2 `1c8aef79` FIRST**; #3 may have shifted). Non-gating for RediLedger (workaround in place) but blocks turnkey-from-source for real (CHECK-carrying) schemas — the highest-value small fix on the board. Scoped `schema-differ` fix.
+
+**Other queued (bryan's pick):** **P3 integrity** (double-entry balance / DEFERRED-constraint trigger + audit hash-chain — RediLedger's HC-5; needs a DD) · **caps-provenance** (`g-dbauth-p2-caps-provenance` MED — P2's `requires cap` SECDEFs are **fail-closed inert-deny** until a real session caps source is wired; couples to S8 live revocation) · **S9 decimal** money type + wire-codec seam · **M2 fast-follow** (build-`.sql` artifact · `scrml dev` auto-apply · S7-full) · **Wave-1c nav**.
+
+## ⚠️ OPEN for the next PA's judgment
+- **`g-dbauth-p2-pk-tenant-not-auto-immutable` (LOW, design call for bryan)** — a db-authoritative table's PK + `tenant_id` are still UPDATE-grantable (fails-safe: cross-tenant blocked by RLS WITH CHECK, but within-tenant PK UPDATE succeeds). Auto-immutable-PK/tenant (safe default) vs author-explicit. Surface to bryan.
+- **The tier's threat-model honesty** (now in SPEC §14.8.11.2): the GUC principal (`scrml.tenant` + `scrml.principal.caps`) is **self-settable by a `scrml_app` with an injectable SQL channel** — the cap gate + tenant isolation are enforced against a *non-compromised* app (scrml's parameterized emission is the guard); the HARD authorities surviving app compromise are the immutable REVOKE + SECDEF-only-choke + NOBYPASSRLS. Do NOT let the tier be over-sold. RediLedger was told this explicitly.
+
+## 🧭 ANOMALIES / LESSONS (reasoning, not state)
+1. **Adversarial-not-confirmatory earned its cost 3× this session** (M1 idempotency-wrap HIGH, M2 identifier-injection HIGH — both invisible to the happy-path acceptance test + my own read; P2 clean only after the review confirmed it). The independent break-it reviewer is MANDATORY for authorization/security emission; my own read is confirmation-biased.
+2. **verify-the-premise-empirically reframed two arcs**: the apply-seam looked like a MED patch but scrml had NO DB-schema-apply path at all (foundational); M2's DD line-numbers had drifted. Compile/grep the actual target before scoping.
+3. **R26 through a REAL non-superuser migrator caught a gap in my own P2 brief** (owner-provisioning grants — the SECDEF would otherwise run as the migrator, defeating the bounded owner). Executing the real deploy posture > reading the emit.
+4. The `2d0525df` pages-release chore landed on main mid-P2-PR (disjoint) → a server-side `gh api update-branch` (not a local rebase — the earlier apply-seam-era local rebase hung on a per-commit hook).
+
+## 🧷 CONCURRENT / HELD
+- **SOLO all session.** No live sibling. Registered S287-bryan on the board (now marked CLOSED).
+- **Retained worktrees (do NOT delete):** `worktree-agent-a2ed001a5de228134` [`feat/wave1c-nav`] — Wave-1c nav, unblocked by chunk-ns, unbuilt. Plus a pre-existing `s251` worktree (NOT this session's — left untouched; a stale-cleanup candidate for whoever owns it).
+
+## 📥 INBOX
+- **`2026-07-22-2230-from-S282-to-XPS`** — LEFT in `incoming/` (this machine-family's outbound to the XPS clone; the boot hook keeps flagging it until XPS consumes it; not for this machine). All RediLedger inbound drained to `read/` + acked cross-repo (their `scrml-rewrite`).
+
+## ✅ GATE / MAPS
+- Full suite: **21351 pass / 0 fail / ~20 skip** (measured on the P2 build; unchanged since — the #189 bookkeeping was docs-only). main is gate-green by every merge's cloud `gate` + pre-commit hook. The wrap-time local re-run neared the 300s timeout (the integration PG tests are slow run all-together) — not a failure. Generated docs (`FACTS.md`, `state.ts` §0) `--check` PASS.
+- Maps: refreshed at wrap (`project-mapper` incremental on the db-authoritative subsystem → watermark `f8a138e9`).
+
+## Tags
+#session-287-bryan #db-authoritative-COMPLETE-reads+writes #m1-emit #m2-apply-dbmigrate #p2-writes-authority-secdef #3-adversarial-HIGHs-caught #rediledger-run-verified-invariant1 #check-constraint-bug-next #caps-provenance-open #solo
+
+---
+
+<!-- ============================================================= -->
 <!-- S286 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-25.        -->
 <!-- Peter/AdiPDesk S286 adopter-lane addendum UNCHANGED below.     -->
 <!-- (S286 session-number collides: two machines. Disambig by name) -->
