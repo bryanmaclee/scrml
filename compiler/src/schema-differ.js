@@ -321,7 +321,11 @@ export function readActualSchema(db) {
  *
  * @param {{ tables: TableDecl[] }} desired
  * @param {{ tables: ActualTable[] }} actual
- * @param {{ driver?: "sqlite"|"postgres"|"mysql" }} [options]
+ * @param {{ driver?: "sqlite"|"postgres"|"mysql", allowDestructive?: boolean }} [options]
+ *   `allowDestructive` (default false) gates the §14.8.11-M2 fence: a bare
+ *   `DROP TABLE` for an actual-but-not-desired table is emitted ONLY when true
+ *   (on Postgres a DROP CASCADE-drops attached RLS policies/grants); when false
+ *   the drop is suppressed with a `W-SCHEMA-DESTRUCTIVE-DROP` warning.
  * @returns {{ sql: string[], warnings: string[] }}
  */
 export function diffSchema(desired, actual, options = {}) {
@@ -411,11 +415,30 @@ export function diffSchema(desired, actual, options = {}) {
     }
   }
 
-  // 3. Dropped tables (in actual but not desired)
+  // 3. Dropped tables (in actual but not desired).
+  //
+  // §14.8.11 M2 fence (ruled — Fork 3): a bare `DROP TABLE` is NEVER emitted by
+  // default. On Postgres a `DROP TABLE` CASCADE-drops the table's attached RLS
+  // policy, grants, and role membership — the exact db-authoritative security
+  // objects the tier installs — so the destructive drop is gated behind an
+  // explicit `--allow-destructive` opt-in (mirrors Prisma's destructive-change
+  // gate). Suppressed → a `W-SCHEMA-DESTRUCTIVE-DROP` warning points the operator
+  // at the opt-in; opted-in → the historical `W-SCHEMA-002` + the DROP. A
+  // scrml-managed security object is a role/policy, never a table, so the
+  // table-DROP gate is the whole fence at the table grain.
   for (const actualTable of actual.tables) {
     if (!desiredMap.has(actualTable.name)) {
-      warnings.push(`W-SCHEMA-002: Dropping table "${actualTable.name}" — all data will be lost.`);
-      sql.push(`DROP TABLE IF EXISTS "${actualTable.name}";`);
+      if (options.allowDestructive) {
+        warnings.push(`W-SCHEMA-002: Dropping table "${actualTable.name}" — all data will be lost.`);
+        sql.push(`DROP TABLE IF EXISTS "${actualTable.name}";`);
+      } else {
+        warnings.push(
+          `W-SCHEMA-DESTRUCTIVE-DROP: table "${actualTable.name}" exists in the database but ` +
+          `not in <schema> — refusing to DROP it (on Postgres a DROP would CASCADE-drop any ` +
+          `attached RLS policy, grants, and role membership). Re-run with --allow-destructive to ` +
+          `drop it, or add "${actualTable.name}" to <schema> to keep it.`,
+        );
+      }
     }
   }
 

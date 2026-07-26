@@ -199,17 +199,29 @@ describe("schema-differ §4: diffSchema rename columns", () => {
 // §5 — diffSchema: drop tables
 // ==========================================================================
 describe("schema-differ §5: diffSchema drop tables", () => {
-  test("generates DROP TABLE for removed table", () => {
-    const desired = parseSchemaBlock(`
-      users { id: integer primary key }
-    `);
-    const actual = {
-      tables: [
-        { name: "users", columns: [{ name: "id", type: "INTEGER", primaryKey: true, notNull: false, default: null }] },
-        { name: "legacy", columns: [{ name: "id", type: "INTEGER", primaryKey: true, notNull: false, default: null }] },
-      ],
-    };
+  const desired = parseSchemaBlock(`
+    users { id: integer primary key }
+  `);
+  const actual = {
+    tables: [
+      { name: "users", columns: [{ name: "id", type: "INTEGER", primaryKey: true, notNull: false, default: null }] },
+      { name: "legacy", columns: [{ name: "id", type: "INTEGER", primaryKey: true, notNull: false, default: null }] },
+    ],
+  };
+
+  // §14.8.11 M2 fence (ruled): the bare `DROP TABLE` is gated behind
+  // `--allow-destructive`. Default (fence ON) suppresses the drop with a
+  // W-SCHEMA-DESTRUCTIVE-DROP warning; opt-in restores the historical DROP.
+  test("default (fence ON) — suppresses DROP TABLE, warns W-SCHEMA-DESTRUCTIVE-DROP", () => {
     const { sql, warnings } = diffSchema(desired, actual);
+    expect(sql.some(s => s.includes("DROP TABLE"))).toBe(false);
+    expect(warnings.some(w => w.includes("W-SCHEMA-DESTRUCTIVE-DROP") && w.includes('"legacy"'))).toBe(true);
+    // The historical destructive W-SCHEMA-002 is NOT emitted when the drop is fenced off.
+    expect(warnings.some(w => w.includes("W-SCHEMA-002"))).toBe(false);
+  });
+
+  test("--allow-destructive — emits DROP TABLE + W-SCHEMA-002 for a removed table", () => {
+    const { sql, warnings } = diffSchema(desired, actual, { allowDestructive: true });
     expect(sql.some(s => s.includes("DROP TABLE") && s.includes('"legacy"'))).toBe(true);
     expect(warnings.some(w => w.includes("W-SCHEMA-002"))).toBe(true);
   });
