@@ -790,18 +790,23 @@ export function generateDbAuthoritativeDDL(table) {
   const rhs = castType ? `${guc}::${castType}` : guc;
 
   const cols = table.columns ?? [];
-  const immutableCols = cols.filter((c) => c.immutable);
+  const immutableCols = cols.filter((c) => isEffectivelyImmutable(c));
 
   // S6 — the bounded role's write grant.
   let grantStmts;
   if (immutableCols.length === 0) {
-    // No immutable columns → BYTE-IDENTICAL to M1 (a single table-level grant).
+    // No immutable columns → a single table-level grant. In practice a
+    // db-authoritative table always has at least its PK here (see
+    // `isEffectivelyImmutable`), so this branch is now reached only by a
+    // (malformed) table with neither a primary key nor a `tenant_id` — which the
+    // `E-DBAUTH-NO-TENANT-COLUMN` pre-flight rejects before apply anyway. Retained
+    // as the honest zero case rather than deleted.
     grantStmts = [`GRANT SELECT, INSERT, UPDATE, DELETE ON ${t} TO ${DBAUTH_ROLE};`];
   } else {
     // S3 — column-scoped write authority: no table-level UPDATE, only the mutable
     // columns. The REVOKE UPDATE clears any prior table-level grant (idempotent —
     // harmless on a fresh table, load-bearing when migrating from M1).
-    const mutableCols = cols.filter((c) => !c.immutable);
+    const mutableCols = cols.filter((c) => !isEffectivelyImmutable(c));
     grantStmts = [
       `GRANT SELECT, INSERT, DELETE ON ${t} TO ${DBAUTH_ROLE};`,
       `REVOKE UPDATE ON ${t} FROM ${DBAUTH_ROLE};`,
@@ -1188,6 +1193,39 @@ function stripArrayLiteral(arg) {
   const trimmed = arg.trim();
   if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) return null;
   return trimmed.slice(1, -1).trim();
+}
+
+/**
+ * §14.8.11.2 S3 — is this column immutable to the bounded `scrml_app` role?
+ *
+ * A column is immutable if the author WROTE `immutable`, **or** if it is the
+ * table's PRIMARY KEY, **or** if it is `tenant_id`.
+ *
+ * The two automatic members are RULED S288 (bryan), and the reasoning is the same
+ * one §14.8.10 already used to reject a per-table tenant opt-in: *a forgettable
+ * declaration protecting a security invariant is the wrong shape.* Before this,
+ * a db-authoritative table's PK and `tenant_id` were still UPDATE-grantable —
+ * cross-tenant re-pointing is blocked by the RLS `WITH CHECK` (it fails safe), but
+ * a WITHIN-tenant primary-key UPDATE succeeded. For a ledger, silently re-pointing
+ * a row's identity under its own tenant is precisely the class the tier's
+ * audit-defensibility claim rests on.
+ *
+ * CONSEQUENCE, stated plainly: a db-authoritative table now always takes the
+ * column-scoped grant path, because it always has at least a PK. The "zero
+ * immutable columns → byte-identical to M1" property therefore no longer holds for
+ * db-authoritative tables — that is the intended semantic change, not an oversight.
+ * Non-db-authoritative tables are untouched (this helper is only consulted from
+ * `generateDbAuthoritativeDDL`).
+ *
+ * An author who genuinely needs a mutable PK has to say so by not marking the table
+ * db-authoritative; there is deliberately no per-column opt-OUT, for the same reason
+ * there is no per-table tenant opt-in.
+ */
+function isEffectivelyImmutable(col) {
+  if (!col) return false;
+  if (col.immutable) return true;
+  if (col.primaryKey) return true;
+  return typeof col.name === "string" && col.name.toLowerCase() === "tenant_id";
 }
 
 /**

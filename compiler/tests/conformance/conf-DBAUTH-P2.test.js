@@ -101,16 +101,27 @@ describe("CONF-DBAUTH-P2 (S3 SQL-shape): the immutable GRANT reshape", () => {
     expect(ddl).not.toContain("GRANT SELECT, INSERT, UPDATE, DELETE"); // no blanket UPDATE
     expect(ddl).toContain('GRANT SELECT, INSERT, DELETE ON "invoices" TO scrml_app;');
     expect(ddl).toContain('REVOKE UPDATE ON "invoices" FROM scrml_app;');
-    expect(ddl).toContain('GRANT UPDATE ("id", "tenant_id", "memo") ON "invoices" TO scrml_app;');
+    // S288: `id` (PK) + `tenant_id` are auto-immutable — only `memo` stays mutable.
+    expect(ddl).toContain('GRANT UPDATE ("memo") ON "invoices" TO scrml_app;');
   });
 
-  test("ZERO immutable columns stays BYTE-IDENTICAL to M1", () => {
+  test("NO declared immutable columns → PK + tenant_id still auto-immutable (S288 ruling)", () => {
+    // NB one column PER LINE — `parseColumns` is newline-based, so the prior
+    // single-line fixture only ever parsed `id` and the test was asserting against
+    // a one-column table while reading as if it had three.
     const t = parseSchemaBlock(`
-      invoices { id: uuid primary key  tenant_id: uuid not null  amount: decimal not null } db-authoritative
+      invoices {
+        id: uuid primary key
+        tenant_id: uuid not null
+        amount: decimal not null
+      } db-authoritative
     `).tables[0];
-    expect(generateDbAuthoritativeDDL(t)).toContain(
-      'GRANT SELECT, INSERT, UPDATE, DELETE ON "invoices" TO scrml_app;',
-    );
+    const ddl = generateDbAuthoritativeDDL(t);
+    // The prior "byte-identical to M1" property is deliberately retired: a
+    // db-authoritative table always has a PK, so it always takes the column-scoped
+    // path. Non-db-authoritative tables are untouched.
+    expect(ddl).not.toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON "invoices" TO scrml_app;');
+    expect(ddl).toContain('GRANT UPDATE ("amount") ON "invoices" TO scrml_app;');
   });
 });
 

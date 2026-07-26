@@ -148,7 +148,9 @@ d("§14.8.11 M2 — scrml db-migrate through-CLI acceptance (live Postgres)", ()
     expect(cliStdout).toContain("CREATE ROLE scrml_app NOLOGIN NOBYPASSRLS");
     expect(cliStdout).toContain("FORCE ROW LEVEL SECURITY");
     expect(cliStdout).toContain("CREATE POLICY scrml_tenant_iso");
-    expect(cliStdout).toContain("applied 7 statement(s) in 1 transaction.");
+    // S288 — 7 -> 9: the single table-level GRANT became GRANT + REVOKE UPDATE +
+    // column-scoped GRANT UPDATE (PK + tenant_id are auto-immutable).
+    expect(cliStdout).toContain("applied 9 statement(s) in 1 transaction.");
   });
 
   test("(a) bounded role, NO set_config → ZERO rows (fail-closed, THROUGH the CLI apply)", async () => {

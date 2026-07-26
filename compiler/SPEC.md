@@ -8823,10 +8823,23 @@ REVOKE UPDATE ON t FROM scrml_app;                 -- clears any prior table-lev
 GRANT UPDATE (<mutable cols only>) ON t TO scrml_app;   -- omitted entirely if ALL columns are immutable
 ```
 
-**Anti-regression (normative):** a `db-authoritative` table with ZERO `immutable` columns emits
-BYTE-IDENTICAL to M1 (the single table-level grant). `immutable` on a non-`db-authoritative` table is
-inert (there is no bounded-role grant to narrow) — enforcement requires `db-authoritative`, which is
-Postgres-gated by `E-DBAUTH-SQLITE`.
+**Auto-immutable PRIMARY KEY and `tenant_id` (normative; RULED S288).** On a `db-authoritative`
+table the compiler treats the PRIMARY KEY column(s) and `tenant_id` as `immutable` **whether or not
+the author wrote the keyword**. Rationale: before this, both were still UPDATE-grantable — a
+*cross*-tenant re-point failed safe on the RLS `WITH CHECK`, but a **within-tenant PRIMARY KEY
+UPDATE succeeded**, and silently re-pointing a row's identity under its own tenant is exactly the
+class the tier's audit-defensibility claim rests on. This is the same reasoning §14.8.10 used to
+reject a per-table tenant opt-in: *a forgettable declaration guarding a security invariant is the
+wrong shape.* There is deliberately no per-column opt-OUT — an author who needs a mutable primary
+key declines the `db-authoritative` marker for that table.
+
+**Consequence (supersedes the prior anti-regression clause):** a `db-authoritative` table ALWAYS
+takes the column-scoped grant path, because it always carries at least a primary key. The former
+guarantee — *"a `db-authoritative` table with ZERO `immutable` columns emits BYTE-IDENTICAL to
+M1"* — is **retired as of S288**; it was the property that left the PK grantable. Tables that are
+NOT `db-authoritative` are entirely unaffected. `immutable` on a non-`db-authoritative` table
+remains inert (there is no bounded-role grant to narrow) — enforcement requires `db-authoritative`,
+which is Postgres-gated by `E-DBAUTH-SQLITE`.
 
 **S4 — the SECURITY-DEFINER `fn`, co-located in `<schema>` (RULED S4-A).** A privileged mutation lives
 inside `<schema>` next to the tables it guards:

@@ -118,7 +118,11 @@ d("§14.8.11 DB-authoritative reads (live Postgres negative test)", () => {
     const joined = dbauthDDL.join("\n");
     expect(createTableSql).toContain('"tenant_id" uuid NOT NULL');
     expect(joined).toContain("CREATE ROLE scrml_app NOLOGIN NOBYPASSRLS");
-    expect(joined).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON "invoices" TO scrml_app');
+    // S288 RULING — PK + `tenant_id` are auto-immutable on a db-authoritative
+    // table, so the grant is column-scoped even with nothing declared `immutable`.
+    expect(joined).toContain('GRANT SELECT, INSERT, DELETE ON "invoices" TO scrml_app');
+    expect(joined).toContain('REVOKE UPDATE ON "invoices" FROM scrml_app');
+    expect(joined).toContain('GRANT UPDATE ("amount") ON "invoices" TO scrml_app');
     expect(joined).toContain('ALTER TABLE "invoices" ENABLE ROW LEVEL SECURITY');
     expect(joined).toContain('ALTER TABLE "invoices" FORCE ROW LEVEL SECURITY');
     expect(joined).toContain(
