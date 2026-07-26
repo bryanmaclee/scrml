@@ -1,5 +1,69 @@
 import { describe, test, expect } from "bun:test";
-import { parseSchemaBlock, diffSchema } from "../../src/schema-differ.js";
+import {
+  parseSchemaBlock,
+  diffSchema,
+  generateCreateTable,
+  generateDbAuthoritativeDDL,
+} from "../../src/schema-differ.js";
+import { quoteIdent } from "../../src/codegen/sql-ident.ts";
+
+// ==========================================================================
+// SECURITY — identifier interpolation must quote-double embedded `"` so a
+// live-DB-sourced (attacker-influencable) table/column name cannot break out of
+// its identifier and inject a second statement executed as the migrator (the
+// PA-found blocking HIGH — durable tenant-isolation bypass / owner→superuser RCE).
+// ==========================================================================
+describe("schema-differ SECURITY: identifier escaping in emitted DDL", () => {
+  // The exact PoC from the review: a live column name that, interpolated naively,
+  // closes the identifier and appends a permissive-policy statement.
+  const PAYLOAD = `amount"; CREATE POLICY pleak ON invoices USING (true); --`;
+
+  test("DROP COLUMN quote-doubles a malicious live column name (no break-out)", () => {
+    const desired = { tables: [{ name: "invoices", columns: [{ name: "id", type: "uuid", scrmlType: "uuid", primaryKey: true, notNull: false, default: null, sharedCorePredicates: [] }] }] };
+    const actual = {
+      tables: [
+        {
+          name: "invoices",
+          columns: [
+            { name: "id", type: "uuid", primaryKey: true, notNull: false, default: null, sharedCorePredicates: [] },
+            { name: PAYLOAD, type: "numeric", primaryKey: false, notNull: false, default: null, sharedCorePredicates: [] },
+          ],
+        },
+      ],
+    };
+    const { sql } = diffSchema(desired, actual, { driver: "postgres" });
+    const drop = sql.find((s) => s.startsWith("ALTER TABLE") && s.includes("DROP COLUMN"));
+    expect(drop).toBeDefined();
+    // Exact escaped form — the payload's `"` is doubled, keeping it ONE identifier.
+    expect(drop).toBe(`ALTER TABLE "invoices" DROP COLUMN ${quoteIdent(PAYLOAD)};`);
+    // Escape applied (a doubled quote is present) …
+    expect(drop).toContain('amount""');
+    // … and the naive break-out (`amount"` immediately closing the identifier
+    // before the injected `;`) is NOT present — the injected statement stays inert
+    // text inside the quoted identifier, not a second executable statement.
+    expect(drop).not.toContain('amount";');
+  });
+
+  test("CREATE TABLE quote-doubles a `\"`-bearing column name", () => {
+    const ddl = generateCreateTable(
+      { name: `t"x`, columns: [{ name: `a"b`, type: "text", scrmlType: "text", primaryKey: false, notNull: false, default: null, references: null, sharedCorePredicates: [] }] },
+      "postgres",
+    );
+    expect(ddl).toContain('"t""x"');
+    expect(ddl).toContain('"a""b"');
+  });
+
+  test("generateDbAuthoritativeDDL quote-doubles the table name", () => {
+    const ddl = generateDbAuthoritativeDDL({
+      name: `inv"x`,
+      columns: [{ name: "tenant_id", type: "uuid", scrmlType: "uuid" }],
+    }).join("\n");
+    // Every statement that names the table uses the escaped identifier …
+    expect(ddl).toContain('"inv""x"');
+    // … and never the un-doubled form that would break out.
+    expect(ddl).not.toContain('"inv"x"');
+  });
+});
 
 // ==========================================================================
 // §1 — parseSchemaBlock: basic table parsing
@@ -199,17 +263,29 @@ describe("schema-differ §4: diffSchema rename columns", () => {
 // §5 — diffSchema: drop tables
 // ==========================================================================
 describe("schema-differ §5: diffSchema drop tables", () => {
-  test("generates DROP TABLE for removed table", () => {
-    const desired = parseSchemaBlock(`
-      users { id: integer primary key }
-    `);
-    const actual = {
-      tables: [
-        { name: "users", columns: [{ name: "id", type: "INTEGER", primaryKey: true, notNull: false, default: null }] },
-        { name: "legacy", columns: [{ name: "id", type: "INTEGER", primaryKey: true, notNull: false, default: null }] },
-      ],
-    };
+  const desired = parseSchemaBlock(`
+    users { id: integer primary key }
+  `);
+  const actual = {
+    tables: [
+      { name: "users", columns: [{ name: "id", type: "INTEGER", primaryKey: true, notNull: false, default: null }] },
+      { name: "legacy", columns: [{ name: "id", type: "INTEGER", primaryKey: true, notNull: false, default: null }] },
+    ],
+  };
+
+  // §14.8.11 M2 fence (ruled): the bare `DROP TABLE` is gated behind
+  // `--allow-destructive`. Default (fence ON) suppresses the drop with a
+  // W-SCHEMA-DESTRUCTIVE-DROP warning; opt-in restores the historical DROP.
+  test("default (fence ON) — suppresses DROP TABLE, warns W-SCHEMA-DESTRUCTIVE-DROP", () => {
     const { sql, warnings } = diffSchema(desired, actual);
+    expect(sql.some(s => s.includes("DROP TABLE"))).toBe(false);
+    expect(warnings.some(w => w.includes("W-SCHEMA-DESTRUCTIVE-DROP") && w.includes('"legacy"'))).toBe(true);
+    // The historical destructive W-SCHEMA-002 is NOT emitted when the drop is fenced off.
+    expect(warnings.some(w => w.includes("W-SCHEMA-002"))).toBe(false);
+  });
+
+  test("--allow-destructive — emits DROP TABLE + W-SCHEMA-002 for a removed table", () => {
+    const { sql, warnings } = diffSchema(desired, actual, { allowDestructive: true });
     expect(sql.some(s => s.includes("DROP TABLE") && s.includes('"legacy"'))).toBe(true);
     expect(warnings.some(w => w.includes("W-SCHEMA-002"))).toBe(true);
   });

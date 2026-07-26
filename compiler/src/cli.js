@@ -44,6 +44,7 @@ Usage:
   scrml serve [options]                      Start persistent compiler server
   scrml generate <type> [options]            Scaffold adopter-owned source (e.g. \`scrml generate auth\`)
   scrml migrate <file|dir> [options]         Apply automated source rewrites for deprecated patterns
+  scrml db-migrate <project> --db <url>      Apply a project's <schema> (incl. db-authoritative RLS/role DDL) to a real DB
   scrml promote --match|--engine <file|dir>  Promote tier-1 if-else → <match> or <match> → <engine> (CLI surface; impl pending)
   scrml introspect <postgres-url> [options]  Read a live Postgres schema and emit scrml <schema> source
   scrml semdiff <base> <head> [options]      Classify a change by AXIS + soundness TIER (#6b P0)
@@ -95,6 +96,15 @@ Options (introspect):
   --table <name>        Emit only the named table (default: all base tables)
   Status: Postgres-only (v1).
 
+Options (db-migrate):
+  --db <url>            REQUIRED. The MIGRATOR/owner connection string (postgres://...
+                        or a SQLite path). A DIFFERENT, more-privileged principal than
+                        the app runtime — never the app's bounded scrml_app role.
+  --dry-run             Print the reconcile plan; apply nothing.
+  --allow-destructive   Permit a bare DROP TABLE for a table absent from <schema>
+                        (default: refused — a DROP CASCADE-drops attached RLS policies).
+  Postgres is db-authoritative-capable; SQLite gets a general <schema> apply.
+
 Options (semdiff):
   --emit-classification Emit the per-matched-entity classification (default)
   --json                Structured JSON output (consumer review-row / merge input)
@@ -117,7 +127,7 @@ let subcommand = args[0];
 let subArgs = args.slice(1);
 
 // Fall through: if first arg is a .scrml file or a directory, treat as compile
-if (subcommand !== "compile" && subcommand !== "dev" && subcommand !== "build" && subcommand !== "serve" && subcommand !== "init" && subcommand !== "migrate" && subcommand !== "promote" && subcommand !== "generate" && subcommand !== "introspect" && subcommand !== "semdiff") {
+if (subcommand !== "compile" && subcommand !== "dev" && subcommand !== "build" && subcommand !== "serve" && subcommand !== "init" && subcommand !== "migrate" && subcommand !== "db-migrate" && subcommand !== "promote" && subcommand !== "generate" && subcommand !== "introspect" && subcommand !== "semdiff") {
   // Check if it looks like a file or directory rather than a subcommand
   const looksLikeInput = subcommand.endsWith(".scrml") || (() => {
     try { return statSync(subcommand).isDirectory(); } catch { return false; }
@@ -152,6 +162,9 @@ if (subcommand === "init") {
 } else if (subcommand === "migrate") {
   const { runMigrate } = await import("./commands/migrate.js");
   await runMigrate(subArgs);
+} else if (subcommand === "db-migrate") {
+  const { runDbMigrate } = await import("./commands/db-migrate.js");
+  await runDbMigrate(subArgs);
 } else if (subcommand === "promote") {
   const { runPromote } = await import("./commands/promote.js");
   await runPromote(subArgs);

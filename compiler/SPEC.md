@@ -8683,6 +8683,111 @@ firewall); §44.2 (driver resolution — `resolveDbDriver`); §39 (`<schema>` ta
 evidence DD (bryan RULED S286, user-voice). Milestone 1 is reads-authoritative; P2 (write-authority)
 is separately ruled.
 
+#### 14.8.11.1 The migration-apply seam — `scrml db-migrate` (Milestone 2)
+
+**Added:** 2026-07-26 — ratifies the migration-apply-seam deep-dive
+(`scrml-support/docs/deep-dives/db-authoritative-migration-apply-seam-2026-07-26.md`; bryan RULED all
+five forks to their recommendations). **Implemented** the same session (Milestone 2): the `scrml
+db-migrate` CLI, the never-clobber table-DROP fence, the thin `_scrml_migrations` ledger, and a
+through-CLI live-Postgres acceptance gate. Codegen: `compiler/src/commands/db-migrate.js` (the
+command) + `compiler/src/schema-differ.js` (the fence + the desired-state diff) +
+`compiler/src/codegen/db-authoritative.ts` (`extractDesiredSchema`).
+
+**The gap M2 closes.** Milestone 1 EMITS the S1 RLS + S6 bounded-role DDL (`generateDbAuthoritativeDDL`
+inside `diffSchema`), but nothing in `src/` APPLIES it — a shipped db-authoritative app never installs
+its own RLS policy / bounded role. `<schema>` was compile-time-only. M2 adds the missing third leg:
+apply the emitted DDL to a live database at deploy.
+
+**The apply model — a privileged out-of-app CLI, NEVER auto-apply-on-boot (Fork 1).** The running app
+is, by construction, a **bounded `NOBYPASSRLS` role with no DDL rights** (§14.8.11 — the A1 wrapper
+drops every principal query to `scrml_app`). The DDL the seam applies (`CREATE ROLE`, `ALTER TABLE …
+FORCE ROW LEVEL SECURITY`, `CREATE POLICY`, `GRANT`) requires **owner/superuser** privileges — and a
+role that could apply the RLS policy could equally `DROP POLICY` it. Therefore the apply step SHALL
+run under a **migrator/owner principal distinct from the app runtime principal**, out of the app
+process. `scrml db-migrate <project> --db <migrator-url>` is that step (the PostgREST
+migrator-vs-authenticator discipline). **Auto-apply-on-server-boot is ELIMINATED for Postgres** — it
+would re-arm the app's deployment credential with the power to rewrite its own security objects,
+defeating the tier. (`scrml dev` local auto-apply and a build-emitted `.sql` artifact are a
+separately-scoped fast-follow, not this milestone.)
+
+- The command is named **`db-migrate`**, NOT `migrate` — `scrml migrate` is the source-codemod verb.
+- `--db` is the MIGRATOR/owner connection string (a `postgres://…` URL or a SQLite path). It is a
+  **different, more-privileged principal** than the app runtime's `db=` — this separation IS the
+  security property, not incidental friction. The compiler SHALL NOT make the app process able to
+  apply or alter the security DDL.
+- `--dry-run` prints the reconcile plan and applies nothing. `--allow-destructive` opts into the
+  gated bare `DROP TABLE` (below).
+
+**Postgres apply flow.** Under the migrator connection, in ONE transaction: acquire a
+`pg_advisory_xact_lock(<fixed key>)` (serialize concurrent migrators; auto-released at commit/rollback
+so a dead process leaks no lock); ensure the thin `_scrml_migrations` ledger; read actual state via
+`readActualSchemaPg` PLUS a narrow scrml-managed policy/role presence read (`pg_policies WHERE
+policyname LIKE 'scrml\_%'`, `pg_roles WHERE rolname = 'scrml_app'`); `diffSchema(desired, actual, {
+driver: "postgres" })` (which appends the idempotent `generateDbAuthoritativeDDL` for each
+`db-authoritative` table); apply each statement, recording object-authorship in the ledger; commit. A
+statement failure rolls the WHOLE run back (atomicity — the ledger is never half-written).
+
+**The reader is extended MINIMALLY (Fork 2).** The seam reads columns/constraints (already present) +
+a narrow **presence** read of the scrml-managed policy/role — just enough for an honest plan and the
+fence. Because the M1 DDL is idempotent, correctness does not depend on diffing policy state. **Full
+object-aware diffing of arbitrary policies/triggers/functions is the deferred S7-full tail.**
+
+**The never-clobber fence (Fork 3).** `diffSchema` SHALL NOT emit a bare `DROP TABLE` for an
+actual-but-not-desired table unless `--allow-destructive` (`options.allowDestructive`) is set — on
+Postgres a `DROP TABLE` CASCADE-drops the table's attached RLS policy, grants, and role membership.
+Suppressed, it fires `W-SCHEMA-DESTRUCTIVE-DROP` and points the operator at `--allow-destructive`. The
+scrml-managed security objects are roles/policies (never tables), so the table-DROP gate is the whole
+fence at the table grain; the idempotent `DROP POLICY IF EXISTS scrml_tenant_iso` re-creates its own
+policy in place and never touches a hand-authored one.
+
+**Identifier escaping is MANDATORY (SQL-injection defense).** Every table/column/constraint name
+interpolated into emitted DDL SHALL be quoted through the shared `quoteIdent`
+(`compiler/src/codegen/sql-ident.ts`), which doubles an embedded `"` (`a"b` → `"a""b"`). Names read
+from the LIVE database (`readActualSchemaPg` / `readActualSchema` — an `ALTER TABLE … DROP COLUMN`
+target, a `DROP TABLE` target) are attacker-influencable: a name containing a `"` interpolated naively
+would close the identifier and let the remainder execute as injected SQL under the MIGRATOR principal
+(a durable tenant-isolation bypass via an injected permissive policy, or `ALTER ROLE … SUPERUSER` RCE
+against a superuser migrator). `<schema>`-sourced names are escaped too (defense-in-depth; do not rely
+on `parseSchemaBlock`'s `\w+` constraint). The seam applies each diff statement via `tx.unsafe(stmt)`,
+so an unescaped identifier is directly exploitable — the escaping is a security invariant, not a
+nicety.
+
+**Marker near-miss is surfaced, and the recognized set is echoed (silent-downgrade guard).** The
+`db-authoritative` opt-in marker must be the EXACT lowercase `db-authoritative` immediately after a
+table's closing `}`. A case/separator/placement typo silently downgrades the table to plain — the
+"looks enforced and isn't" trap. `scrml db-migrate` SHALL echo the set of tables it recognized as
+db-authoritative, and fires `W-DBAUTH-MARKER-NEARMISS` when a `db-authoritative`-like token is not
+recognized. It also pre-flights that every db-authoritative table declares a `tenant_id` column
+(`E-DBAUTH-NO-TENANT-COLUMN`, fail-closed before touching the DB) — the policy is keyed on it.
+
+**The ledger is a THIN desired-state companion, NOT a versioned migration-file history (Fork 4).** The
+differ is already desired-state-shaped (`diffSchema` reconciles current→desired each run; the DDL is
+idempotent). A thin `_scrml_migrations` table (`id`, `applied_at`, `object_kind`, `object_name`,
+`ddl_hash`) earns its keep for apply-atomicity, the advisory lock, and **object-authorship** (a row
+per scrml-authored object — so an audit can answer "did scrml author this object"). There is no
+per-file version history and no migration-authoring surface.
+
+**Scope (Fork 5).** The apply machinery is built GENERAL — `diffSchema` is already driver-agnostic, so
+`scrml db-migrate` applies a plain `<schema>` for **SQLite** too (in one transaction; no
+roles/policies), finally making `<schema>` do-something-at-deploy for every adopter. The
+**Postgres-db-authoritative** path carries the privilege/fence complexity and is the acceptance-gated
+one. A `db-authoritative` table against a non-Postgres target fails closed (`E-DBAUTH-SQLITE`, at the
+deploy layer, mirroring the compile-time gate).
+
+**The acceptance gate (turnkey-from-source, proven THROUGH the CLI).** M2 counts as landed only when
+the M1 negative test passes through the CLI: after `scrml db-migrate` runs (as the migrator/owner) on
+a `db-authoritative` `invoices` table, a bounded `scrml_app` connection with NO `set_config` reads
+**zero** rows, and with `set_config('scrml.tenant', <tenantA>)` reads **only** tenant-A rows. This
+proves the SEAM end-to-end (M1 emitted the DDL; M2 applied it), not just the DDL in a harness.
+
+**Cross-references:** §14.8.11 (Milestone 1 — the DDL this seam applies + the bounded-role model);
+§44.2 (driver resolution — `resolveDbDriver`); §38.6 (the schema differ + the `DROP` confirmation
+norm); §34 (`W-SCHEMA-DESTRUCTIVE-DROP`, `E-DBAUTH-SQLITE`, `E-DBAUTH-NO-TENANT-COLUMN`,
+`W-DBAUTH-MARKER-NEARMISS`). Authority: migration-apply-seam DD (bryan
+RULED 2026-07-26, "your recs" on all five forks). Milestone 2 is the apply seam; the `scrml build`
+`.sql` artifact + `scrml dev` auto-apply overlay + S7-full object-aware diff are separately-scoped
+fast-follows.
+
 ### 14.9 The `snippet` Type Kind
 
 A `snippet` is a deferred, parameterisable markup fragment. It is callable — it produces markup when invoked. `snippet` is a first-class type kind in the scrml type system.
@@ -18515,7 +18620,9 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-TENANT-RAW-EGRESS | §14.8.10 | A tenant-scoped table's rows reach a compiler-unanalyzable egress path — a `_{}` foreign-code block (§23), a manual `Response` / `handle()` body (§40), or an `asIs`-typed value (§14.1.1) — where the compiler cannot tag/redact the rows, so a cross-tenant row cannot be proven stripped at this boundary. Fail-closed: the compiler will not silently ship a tenant-scoped row through a path it cannot redact. The row-isolation sibling of `E-PROTECT-004` (the column direction). Resolution: return the rows through the normal compiler-emitted response, or, for a deliberate cross-tenant read, mark the query `.acrossTenants()`. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `detectTenantRawEgress`.) | Error |
 | I-TENANT-STRIP | §14.8.10 | The compiler-emitted egress serializer scopes a client-egress payload — a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, or `server function*` SSE (§37) `data:` chunk — to the request's ambient `@currentUser.tenantId`: every row of another tenant is dropped, and an unpinned (anonymous) request sees ZERO rows (fail-closed). The row-level twin of `I-PROTECT-STRIP-001`. Names the read so the redaction is never silent. Also fires on the wholesale-strip fallback of an unresolvable dynamic read that mentions a tenant-scoped table. Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the rewriter/hand-emit strip drains.) | Info |
 | I-TENANT-ACROSS | §14.8.10 | A `?{…}.acrossTenants()` opt-out SUPPRESSED the §14.8.10 tenant floor for one query (a deliberate cross-tenant read/write — a platform-admin dashboard, cross-tenant reporting). It is the ONLY way to emit an unscoped read/write against a tenant-scoped table, and it fires this Info so an audit can grep every cross-tenant access in the codebase (the cross-tenant audit surface). Mirrors `reveal()`'s greppability for §14.8.9. Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the `.acrossTenants()` drains.) | Info |
-| E-DBAUTH-SQLITE | §14.8.11 | A `<schema>` table is marked `db-authoritative` (the opt-in DB-authoritative security tier — Postgres RLS `FORCE ROW LEVEL SECURITY` + a bounded `NOBYPASSRLS` role + a per-request principal), but the resolved database driver is not Postgres (SQLite, MySQL, or no `db=` target). SQLite has no per-connection principal, no roles, no `GRANT`, no RLS — every DB-authoritative primitive is Postgres-only. Fail CLOSED at compile: a security feature that silently degraded to §14.8.10 egress-redaction would be the exact "looks enforced and isn't" trap. Resolution: target Postgres (`<program db="postgres://...">`), or drop the `db-authoritative` marker to keep the §14.8.10 egress-redaction floor (which is the SQLite-first default). (Catalog addition: DB-authoritative tier Milestone 1 — reads-authoritative, S286; emitted at `compiler/src/codegen/index.ts` in the `annotateDbScopes` driver-resolution stage.) | Error |
+| E-DBAUTH-SQLITE | §14.8.11 | A `<schema>` table is marked `db-authoritative` (the opt-in DB-authoritative security tier — Postgres RLS `FORCE ROW LEVEL SECURITY` + a bounded `NOBYPASSRLS` role + a per-request principal), but the resolved database driver is not Postgres (SQLite, MySQL, or no `db=` target). SQLite has no per-connection principal, no roles, no `GRANT`, no RLS — every DB-authoritative primitive is Postgres-only. Fail CLOSED at compile: a security feature that silently degraded to §14.8.10 egress-redaction would be the exact "looks enforced and isn't" trap. Resolution: target Postgres (`<program db="postgres://...">`), or drop the `db-authoritative` marker to keep the §14.8.10 egress-redaction floor (which is the SQLite-first default). (Catalog addition: DB-authoritative tier Milestone 1 — reads-authoritative, S286; emitted at `compiler/src/codegen/index.ts` in the `annotateDbScopes` driver-resolution stage. `scrml db-migrate` (§14.8.11.1) re-fires it at the deploy layer for a db-authoritative project pointed at a non-Postgres `--db`.) | Error |
+| E-DBAUTH-NO-TENANT-COLUMN | §14.8.11 | A `db-authoritative` `<schema>` table declares no `tenant_id` column. The M1 tenant-isolation policy is keyed on `tenant_id` (`CREATE POLICY … USING ("tenant_id" = current_setting('scrml.tenant', true)::…)`), so a db-authoritative table without one would emit DDL referencing a missing column — an opaque Postgres error + full transaction rollback at apply time. `scrml db-migrate` (§14.8.11.1) pre-flights this BEFORE touching the DB and fails closed, naming the offending table(s). Resolution: add a `tenant_id` column, or drop the `db-authoritative` marker. (Catalog addition: DB-authoritative tier Milestone 2 — migration-apply seam, 2026-07-26; emitted at `compiler/src/commands/db-migrate.js`.) | Error |
+| W-DBAUTH-MARKER-NEARMISS | §14.8.11 | A `<schema>` body contains a `db-authoritative`-like token that was NOT recognized as the opt-in marker — the marker must be the EXACT lowercase `db-authoritative` immediately after a table's closing `}`. A case variant (`DB-AUTHORITATIVE`), a separator variant (`db_authoritative`), or a token wedged between `}` and the marker (`} secure db-authoritative`) silently downgrades the table to non-db-authoritative (no RLS installed; on a SQLite target the `E-DBAUTH-SQLITE` fail-closed gate never fires) — the "looks enforced and isn't" trap. `scrml db-migrate` (§14.8.11.1) surfaces the near-miss and echoes the set of tables it DID recognize as db-authoritative so the miss is visible. Resolution: fix the marker spelling/placement. (Catalog addition: DB-authoritative tier Milestone 2 — migration-apply seam, 2026-07-26; emitted at `compiler/src/codegen/db-authoritative.ts` in `extractDesiredSchema`.) | Warning |
 | E-ROUTE-001 | §12.4 | Unresolvable callee or computed member access in route analysis | Warning |
 | ~~E-RI-001~~ | — | **Retired 2026-04-21 (S37)**; `server pure` is now valid (§33.3, §48.10). | — |
 | E-RI-002 | §12 | Server-escalated function mutates `@` reactive variable | Error |
@@ -19016,6 +19123,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | W-SCHEMA-001 | §39.12 | A table declaration in `<schema>` has no primary key. Most tooling, ORMs, and migration assumptions presume a primary key; the absence is surfaced as a warning. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16983.) | Warning |
 | W-SCHEMA-002 | §39.12 | The migration diff between the desired schema and the live database contains a destructive operation (`DROP TABLE` or `DROP COLUMN`). Destructive migrations are not auto-applied; the warning surfaces them for adopter review. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16984.) | Warning |
 | W-SCHEMA-003 | §39.12 | The compiler generated TypeScript / scrml types from the desired-state `<schema>`, but the live database is currently out of sync with that schema. The emitted types describe the desired shape, not the current shape. Resolution: run `bun scrml migrate` to bring the live database in line. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16985.) | Warning |
+| W-SCHEMA-DESTRUCTIVE-DROP | §14.8.11 | The reconcile plan (`scrml db-migrate`, §14.8.11 Milestone 2) found a table that exists in the live database but not in `<schema>`. A bare `DROP TABLE` is REFUSED by default: on Postgres a `DROP` CASCADE-drops the table's attached RLS policy, grants, and role membership — the exact db-authoritative security objects the tier installs (the M2 never-clobber fence, Fork 3). The differ suppresses the drop and surfaces this warning instead. Resolution: re-run with `--allow-destructive` to permit the drop (which then also fires `W-SCHEMA-002`), or add the table to `<schema>` to keep it. Distinct from `W-SCHEMA-002` (which fires only when a destructive op is actually emitted). (Catalog addition: DB-authoritative tier Milestone 2 — migration-apply seam, 2026-07-26; emitted at `compiler/src/schema-differ.js` in `diffSchema` when `options.allowDestructive` is false.) | Warning |
 | E-CG-011 | §47.6 | The build configuration enables `output.debug: true` together with `output.mode: "production"`. Production-mode debug output leaks source-map / internal-name information; this combination is rejected as a hard error rather than a warning. (Catalog addition S84 Wave 2 #5; full prose at §47.6 lines 18462-18469.) | Error |
 | E-CG-012 | §47.6 | A user-authored scrml identifier (or vanilla JS identifier in a `_{}` foreign block) matches the compiler-reserved encoded-name pattern (`_` + kind char + 8 base36 chars). The `_` prefix is reserved for compiler-generated names. Resolution: rename the identifier. (Catalog addition S84 Wave 2 #5; full prose at §47.6 line 18301.) | Error |
 | E-CG-013 | §47.6 | The codegen type-encoding function received a `ResolvedType` with `kind: "unknown"`. PIPELINE.md §Stage 6 and §Stage 8 preconditions exclude this case; reaching the encoder with kind:"unknown" indicates an internal invariant violation. (Catalog addition S84 Wave 2 #5; full prose at §47.6 line 18323.) | Error |
@@ -21617,6 +21725,7 @@ rule); §39.1 (`<schema>` opener forms).
 | W-SCHEMA-001 | Table declaration has no primary key | Warning |
 | W-SCHEMA-002 | Migration diff contains a destructive operation (DROP TABLE or DROP COLUMN) | Warning |
 | W-SCHEMA-003 | Types generated from `<schema>` desired state; database is out of sync | Warning |
+| W-SCHEMA-DESTRUCTIVE-DROP | `scrml db-migrate` refused a bare DROP TABLE (fence; re-run with `--allow-destructive`) — §14.8.11 M2 | Warning |
 
 ---
 
