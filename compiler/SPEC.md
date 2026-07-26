@@ -8788,6 +8788,184 @@ RULED 2026-07-26, "your recs" on all five forks). Milestone 2 is the apply seam;
 `.sql` artifact + `scrml dev` auto-apply overlay + S7-full object-aware diff are separately-scoped
 fast-follows.
 
+#### 14.8.11.2 Writes-authority — immutable columns + the SECURITY-DEFINER mutation choke (Milestone 2 / P2)
+
+**Added:** 2026-07-26 — ratifies the P2 writes-authority deep-dive
+(`scrml-support/docs/deep-dives/db-authoritative-p2-writes-authority-2026-07-26.md`; bryan RULED S4-A
+co-location + "your recs" on the rest). **Implemented** the same session: the S3 `immutable` column
+surface + the re-shaped column-scoped GRANT (`schema-differ.js`
+`parseColumns`/`generateDbAuthoritativeDDL`), the S4 SECURITY-DEFINER `fn` surface + the
+`generateSecdefDDL` emitter + the `scrml_has_cap` helper, the `scrml.principal.caps` GUC injection
+(`codegen/db-authoritative.ts` `wrapPrincipalTxn` + `tenant-egress.ts` `_scrml_active_caps`), the M2
+apply-seam wiring (`extractDesiredSchema` fns + `classifyStatement` `function`/`role`/`revoke` kinds),
+and a live-PG 4-assertion acceptance gate.
+
+**P2 CROSSES the §14.8.10 firewall — deliberately, owner-ruled.** M1 (§14.8.11) relocated the
+isolation *invariant* (an RLS policy that CONSUMES the pinned `scrml.tenant` scalar — it stays on the
+invariant side of the "consume, never derive" firewall (§14.8.10)). **P2 emits AUTHORIZATION:** the S3
+column `GRANT`/`REVOKE` encodes *who-may-write-which-column*, and the S4 `SECURITY DEFINER` +
+`scrml_has_cap('x')` encodes *who-may-perform-which-operation* — scrml now COMPUTES an authorization
+decision in DDL it authored. This is the remit expansion bryan RULED in (S286: "add the tier"). Two
+load-bearing consequences: **(1)** a Postgres column-level `REVOKE` CANNOT narrow a table-level
+`GRANT`, so M1's blanket `GRANT … UPDATE …` is re-shaped or every `immutable` is a silent no-op;
+**(2)** the half-RLS guardrail applies DOUBLY — a `SECURITY DEFINER` function missing `SET search_path`
+is not merely unenforced, it is a **privilege-escalation hole (CVE-2020-25695 class)**, worse than none.
+
+**S3 — the `immutable` column keyword + the re-shaped GRANT.** A per-column bareword `immutable`
+(mirroring `not null` / `unique`) marks a column the bounded `scrml_app` role may INSERT but never
+UPDATE. Because a column `REVOKE` cannot narrow a table `GRANT`, for a `db-authoritative` table with
+≥1 `immutable` column the compiler emits, in place of M1's single `GRANT SELECT, INSERT, UPDATE,
+DELETE`:
+
+```sql
+GRANT SELECT, INSERT, DELETE ON t TO scrml_app;
+REVOKE UPDATE ON t FROM scrml_app;                 -- clears any prior table-level UPDATE (incl. an M1 migration)
+GRANT UPDATE (<mutable cols only>) ON t TO scrml_app;   -- omitted entirely if ALL columns are immutable
+```
+
+**Anti-regression (normative):** a `db-authoritative` table with ZERO `immutable` columns emits
+BYTE-IDENTICAL to M1 (the single table-level grant). `immutable` on a non-`db-authoritative` table is
+inert (there is no bounded-role grant to narrow) — enforcement requires `db-authoritative`, which is
+Postgres-gated by `E-DBAUTH-SQLITE`.
+
+**S4 — the SECURITY-DEFINER `fn`, co-located in `<schema>` (RULED S4-A).** A privileged mutation lives
+inside `<schema>` next to the tables it guards:
+
+```scrml
+<schema>
+  invoices {
+    id: uuid primary key
+    tenant_id: uuid not null
+    status: text not null immutable      // only the SECDEF may change it
+    amount: decimal not null immutable   // posted — never changes
+    memo: text                           // freely mutable
+  } db-authoritative
+
+  fn void_invoice(id: uuid) security definer owner(invoice_admin) requires cap("void") {
+    """
+    UPDATE invoices SET status = 'void' WHERE invoices.id = void_invoice.id;
+    """
+  }
+</schema>
+```
+
+The `fn` body carries the plpgsql STATEMENTS as **managed migratable text** — opaque to the compiler,
+NOT compiled (the scrml→plpgsql mini-compiler is a deliberately-rejected trap; §23.5 `_{}` precedent).
+The body contains the statements ONLY (no outer `BEGIN`/`END`): the emitter OWNS the `BEGIN … END`
+envelope and injects the `requires cap("x")` check as the FIRST statement inside it, so the capability
+gate is **un-bypassable and always runs first**. The surface is M1-PROVISIONAL (a later owner-ruled
+syntax pass finalizes it). The `parseSchemaBlock` scan is brace-depth-aware (skipping the `"""…"""`
+body) so a braced plpgsql body (`IF … END IF`) is not truncated; the return shape stays `{ tables }`
+with an ADDITIVE `{ fns }`.
+
+**SECDEF hardening is a CODEGEN INVARIANT (mandatory, gate-verified).** Every emitted SECURITY-DEFINER
+function SHALL carry, by construction:
+
+```sql
+CREATE OR REPLACE FUNCTION void_invoice("id" uuid) RETURNS void
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = pg_catalog, public   -- pg_catalog FIRST (pins built-ins vs shadowing); public REQUIRED for the body's
+  AS $scrml_fn$                           -- unqualified table refs; pg_temp deliberately ABSENT
+  BEGIN
+    IF NOT scrml_has_cap('void') THEN RAISE EXCEPTION 'denied'; END IF;
+    UPDATE invoices SET status = 'void' WHERE invoices.id = void_invoice.id;
+  END
+  $scrml_fn$;
+ALTER FUNCTION void_invoice(uuid) OWNER TO "invoice_admin";   -- a bounded NOLOGIN NOBYPASSRLS owner, NOT scrml_app, NOT a superuser
+REVOKE EXECUTE ON FUNCTION void_invoice(uuid) FROM PUBLIC;    -- no ambient EXECUTE
+GRANT  EXECUTE ON FUNCTION void_invoice(uuid) TO scrml_app;   -- only the runtime role may CALL it
+```
+
+- **`SET search_path = pg_catalog, public`** — MANDATORY. `pg_catalog` FIRST so a built-in
+  function/operator cannot be shadowed (CVE-2020-25695); `public` is REQUIRED so the body's unqualified
+  table references resolve; `pg_temp` is deliberately NOT on the path.
+- **A bounded NOLOGIN owner role** distinct from `scrml_app` (which lacks the immutable-column UPDATE)
+  and from a superuser (which would over-privilege the choke). The compiler scaffolds it idempotently
+  (`DO $…$ … CREATE ROLE … NOLOGIN NOBYPASSRLS … EXCEPTION WHEN duplicate_object THEN NULL`), grants it
+  CRUD on the `db-authoritative` tables (table-level UPDATE — i.e. the immutable columns), and — so a
+  NON-superuser migrator can reassign the function's ownership to it — emits `GRANT <owner> TO
+  CURRENT_USER;` + `GRANT CREATE ON SCHEMA public TO <owner>;` before `ALTER FUNCTION … OWNER TO
+  <owner>`. **No permissive owner-bypass policy is emitted** — the owner stays subject to the M1 tenant
+  policy (no `TO`-clause ⇒ applies to every role), so the SECDEF write STACKS on top of tenant isolation.
+- Every identifier is escaped via `quoteIdent`; the parser additionally constrains fn / owner / arg
+  names to `[A-Za-z_]\w*`, so a `$` cannot enter and break a dollar-quote (defense-in-depth).
+
+**The capability GUC + `scrml_has_cap` (RULED GUC-1).** A single txn-scoped GUC `scrml.principal.caps`
+carries the principal's capability SET as a JSON array. The A1 wrapper pins it alongside `scrml.tenant`
+in the SAME reserved transaction (`set_config('scrml.principal.caps', _scrml_active_caps(_scrml_req),
+true)`), server-resolved from the session-derived `@currentUser` and **never client-supplied** (the
+E-REACTIVE-003 discipline `tenantId` follows). The compiler emits ONE checked, greppable read helper:
+
+```sql
+CREATE OR REPLACE FUNCTION scrml_has_cap(cap text) RETURNS boolean
+  LANGUAGE sql STABLE SET search_path = pg_catalog, public AS $scrml_hascap$
+    SELECT coalesce(current_setting('scrml.principal.caps', true)::jsonb ? cap, false)
+  $scrml_hascap$;
+```
+
+An unpinned GUC yields `false` (fail-closed — no caps ⇒ no privileged mutation), identical in spirit
+to M1's unpinned-tenant-sees-zero-rows. **Caps SOURCE (M1-PROVISIONAL):** `_scrml_active_caps(req)`
+reads `@currentUser.caps` (an empty array when no caps source exists yet) — the caps-provenance
+(session claim / permissions table / role→caps map) is a P2-tail follow-on that couples to live
+revocation (S8); it is server-resolved by construction and the default is fail-closed.
+
+**Composition — STACK, not supersede.** The §14.8.10 `E-TENANT-WRITE` compile-time ban on the direct
+`?{ INSERT/UPDATE/DELETE }` template REMAINS, and the S3 column `REVOKE` blocks the direct write at the
+DB. The SECDEF CALL (`SELECT void_invoice(…)`) is a function call, NOT a bare write template, so it
+does not trip `E-TENANT-WRITE` — it is the SOLE sanctioned mutation path the ban channels callers
+toward. Inside the SECDEF the owner is still subject to the tenant policy, so an unpinned or
+wrong-tenant call touches zero rows (tenant isolation holds THROUGH the choke).
+
+**Threat model — the half-RLS honesty bar (tier-wide, NOT just P2; do not over-claim).** The
+GUC-based per-request principal (`scrml.tenant` + `scrml.principal.caps`) is **server-resolved per
+request** and pinned transaction-locally, but the GUCs are **self-settable by the `scrml_app` role**:
+a `scrml_app` connection that can execute arbitrary SQL — e.g. through app-layer SQL injection in an
+adopter's own foreign query — can `set_config('scrml.principal.caps', '["void"]', true)` (or a forged
+`scrml.tenant`) and then invoke the SECDEF. Therefore, stated plainly:
+
+- **What the cap gate and tenant isolation enforce against a NON-compromised app:** the capability
+  check and the tenant scope hold for every request whose SQL channel is un-injectable. scrml's
+  **parameterized query emission** (bound parameters, never string interpolation — §8.2) is precisely
+  what keeps the app's SQL channel un-injectable and the GUCs un-attacker-controlled. The SECDEF cap
+  check is thus an **app-layer capability gate over a self-settable GUC** — it is NOT DB-enforced
+  authorization that survives a fully-compromised `scrml_app` SQL channel, and MUST NOT be presented as
+  such.
+- **What survives a fully-compromised `scrml_app` SQL channel (the hard DB-authorities):** the S3
+  immutable-column `REVOKE` (`scrml_app` cannot UPDATE a locked column regardless of ANY GUC value),
+  the SECDEF-only mutation choke (`scrml_app` cannot mutate the locked table except by CALLing the
+  SECDEF), and the `NOBYPASSRLS` bound (`scrml_app` cannot disable RLS to read/write across tenants).
+  These are Postgres privilege grants, not GUC-gated — an attacker with `scrml_app`'s full SQL channel
+  still cannot forge them.
+
+This is the same self-settable-GUC model M1's `scrml.tenant` already uses; the honesty bar is to name
+it, not to hedge it — the GUC principal is a strong per-request mechanism for a non-compromised app,
+and the column `REVOKE` + choke + `NOBYPASSRLS` are the floor that holds even under app compromise.
+
+**Postgres-only; SQLite fails closed.** A `db-authoritative` table OR a SECURITY-DEFINER `fn` on a
+non-Postgres target hard-fails `E-DBAUTH-SQLITE` (SECURITY DEFINER / column GRANT/REVOKE / roles are
+Postgres-only) — at compile (`codegen/index.ts`) and at the deploy layer (`scrml db-migrate`). S4 DDL
+rides the M2 apply plan (`CREATE FUNCTION` + owner role + reshaped grants are idempotent statements on
+`diffSchema`'s plan); scrml NEVER emits `DROP FUNCTION` / `DROP ROLE`, so the never-clobber fence holds
+by construction. `scrml db-migrate --dry-run` shows the full SECDEF plan.
+
+**The atomic-milestone acceptance gate (the doubled negative test).** Because P2 emits AUTHORIZATION,
+the "looks enforced and isn't" risk is DOUBLED — the negative test is the only real proof. On the
+RediLedger `invoices` shape (an `immutable` column + a SECDEF `fn`), after `scrml db-migrate` applies
+as a non-superuser migrator against a real Postgres 16: **(1)** a bounded `scrml_app` direct `UPDATE`
+of an immutable column is DENIED; **(2)** a `scrml_app` mutation of a locked column NOT via the SECDEF
+is DENIED; **(3)** the SECDEF enforces the cap check — WITH `scrml.principal.caps` containing the cap it
+succeeds, WITHOUT it raises `denied`; **(4)** the emitted SECDEF is hardened — `pg_proc.prosecdef` is
+true, `proconfig` carries `search_path=pg_catalog, public`, and `EXECUTE` is granted to `scrml_app`,
+NOT `PUBLIC`. Skip-graceful when PG is unreachable (mirrors M1/M2).
+
+**Cross-references:** §14.8.11 / §14.8.11.1 (M1 reads-tier + M2 apply seam this stacks on); §14.8.10
+(the "consume, never derive" firewall P2 deliberately crosses + the `E-TENANT-WRITE` floor it stacks
+with); §23.5 (`_{}` managed-foreign-text precedent for the plpgsql body); §34 (`E-DBAUTH-SQLITE` — now
+also fires on a SECDEF `fn`). Authority: P2 writes-authority DD (bryan RULED S4-A co-location + "your
+recs", 2026-07-26). S5 (double-entry / DEFERRED-constraint balance triggers) is a separate P3
+milestone; the non-provisional surface-syntax pass and S7-full are separately scoped.
+
 ### 14.9 The `snippet` Type Kind
 
 A `snippet` is a deferred, parameterisable markup fragment. It is callable — it produces markup when invoked. `snippet` is a first-class type kind in the scrml type system.
@@ -18620,7 +18798,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-TENANT-RAW-EGRESS | §14.8.10 | A tenant-scoped table's rows reach a compiler-unanalyzable egress path — a `_{}` foreign-code block (§23), a manual `Response` / `handle()` body (§40), or an `asIs`-typed value (§14.1.1) — where the compiler cannot tag/redact the rows, so a cross-tenant row cannot be proven stripped at this boundary. Fail-closed: the compiler will not silently ship a tenant-scoped row through a path it cannot redact. The row-isolation sibling of `E-PROTECT-004` (the column direction). Resolution: return the rows through the normal compiler-emitted response, or, for a deliberate cross-tenant read, mark the query `.acrossTenants()`. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `detectTenantRawEgress`.) | Error |
 | I-TENANT-STRIP | §14.8.10 | The compiler-emitted egress serializer scopes a client-egress payload — a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, or `server function*` SSE (§37) `data:` chunk — to the request's ambient `@currentUser.tenantId`: every row of another tenant is dropped, and an unpinned (anonymous) request sees ZERO rows (fail-closed). The row-level twin of `I-PROTECT-STRIP-001`. Names the read so the redaction is never silent. Also fires on the wholesale-strip fallback of an unresolvable dynamic read that mentions a tenant-scoped table. Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the rewriter/hand-emit strip drains.) | Info |
 | I-TENANT-ACROSS | §14.8.10 | A `?{…}.acrossTenants()` opt-out SUPPRESSED the §14.8.10 tenant floor for one query (a deliberate cross-tenant read/write — a platform-admin dashboard, cross-tenant reporting). It is the ONLY way to emit an unscoped read/write against a tenant-scoped table, and it fires this Info so an audit can grep every cross-tenant access in the codebase (the cross-tenant audit surface). Mirrors `reveal()`'s greppability for §14.8.9. Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the `.acrossTenants()` drains.) | Info |
-| E-DBAUTH-SQLITE | §14.8.11 | A `<schema>` table is marked `db-authoritative` (the opt-in DB-authoritative security tier — Postgres RLS `FORCE ROW LEVEL SECURITY` + a bounded `NOBYPASSRLS` role + a per-request principal), but the resolved database driver is not Postgres (SQLite, MySQL, or no `db=` target). SQLite has no per-connection principal, no roles, no `GRANT`, no RLS — every DB-authoritative primitive is Postgres-only. Fail CLOSED at compile: a security feature that silently degraded to §14.8.10 egress-redaction would be the exact "looks enforced and isn't" trap. Resolution: target Postgres (`<program db="postgres://...">`), or drop the `db-authoritative` marker to keep the §14.8.10 egress-redaction floor (which is the SQLite-first default). (Catalog addition: DB-authoritative tier Milestone 1 — reads-authoritative, S286; emitted at `compiler/src/codegen/index.ts` in the `annotateDbScopes` driver-resolution stage. `scrml db-migrate` (§14.8.11.1) re-fires it at the deploy layer for a db-authoritative project pointed at a non-Postgres `--db`.) | Error |
+| E-DBAUTH-SQLITE | §14.8.11 | A `<schema>` table is marked `db-authoritative` (the opt-in DB-authoritative security tier — Postgres RLS `FORCE ROW LEVEL SECURITY` + a bounded `NOBYPASSRLS` role + a per-request principal), OR the `<schema>` declares a SECURITY-DEFINER `fn` (§14.8.11.2 P2 writes-authority — `CREATE FUNCTION … SECURITY DEFINER`, a bounded owner role, `GRANT`/`REVOKE`), but the resolved database driver is not Postgres (SQLite, MySQL, or no `db=` target). SQLite has no per-connection principal, no roles, no `GRANT`, no RLS, no `SECURITY DEFINER` — every DB-authoritative primitive is Postgres-only. Fail CLOSED at compile: a security feature that silently degraded to §14.8.10 egress-redaction would be the exact "looks enforced and isn't" trap. Resolution: target Postgres (`<program db="postgres://...">`), or drop the `db-authoritative` marker / SECDEF `fn` to keep the §14.8.10 egress-redaction floor (which is the SQLite-first default). (Catalog addition: DB-authoritative tier Milestone 1 — reads-authoritative, S286; emitted at `compiler/src/codegen/index.ts` in the `annotateDbScopes` driver-resolution stage. `scrml db-migrate` (§14.8.11.1) re-fires it at the deploy layer for a db-authoritative project pointed at a non-Postgres `--db`. P2 (2026-07-26) extended the trigger to a SECDEF `fn`.) | Error |
 | E-DBAUTH-NO-TENANT-COLUMN | §14.8.11 | A `db-authoritative` `<schema>` table declares no `tenant_id` column. The M1 tenant-isolation policy is keyed on `tenant_id` (`CREATE POLICY … USING ("tenant_id" = current_setting('scrml.tenant', true)::…)`), so a db-authoritative table without one would emit DDL referencing a missing column — an opaque Postgres error + full transaction rollback at apply time. `scrml db-migrate` (§14.8.11.1) pre-flights this BEFORE touching the DB and fails closed, naming the offending table(s). Resolution: add a `tenant_id` column, or drop the `db-authoritative` marker. (Catalog addition: DB-authoritative tier Milestone 2 — migration-apply seam, 2026-07-26; emitted at `compiler/src/commands/db-migrate.js`.) | Error |
 | W-DBAUTH-MARKER-NEARMISS | §14.8.11 | A `<schema>` body contains a `db-authoritative`-like token that was NOT recognized as the opt-in marker — the marker must be the EXACT lowercase `db-authoritative` immediately after a table's closing `}`. A case variant (`DB-AUTHORITATIVE`), a separator variant (`db_authoritative`), or a token wedged between `}` and the marker (`} secure db-authoritative`) silently downgrades the table to non-db-authoritative (no RLS installed; on a SQLite target the `E-DBAUTH-SQLITE` fail-closed gate never fires) — the "looks enforced and isn't" trap. `scrml db-migrate` (§14.8.11.1) surfaces the near-miss and echoes the set of tables it DID recognize as db-authoritative so the miss is visible. Resolution: fix the marker spelling/placement. (Catalog addition: DB-authoritative tier Milestone 2 — migration-apply seam, 2026-07-26; emitted at `compiler/src/codegen/db-authoritative.ts` in `extractDesiredSchema`.) | Warning |
 | E-ROUTE-001 | §12.4 | Unresolvable callee or computed member access in route analysis | Warning |

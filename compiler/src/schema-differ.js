@@ -12,41 +12,205 @@ import { quoteIdent } from "./codegen/sql-ident.ts";
 /**
  * Parse a < schema> AST node into structured table declarations.
  *
- * @param {object} schemaNode — AST node with kind: "schema" and body text
- * @returns {{ tables: TableDecl[] }}
+ * BACKWARD-COMPAT (§14.8.11.2 P2): the return shape stays `{ tables: [...] }` — all
+ * six consumers (`protect-analyzer`, `channel-watches`, `gauntlet-phase1-checks`,
+ * `codegen/index`, `db-authoritative`, this module) read `.tables ?? []`. The P2
+ * SECURITY-DEFINER `fn` surface adds an ADDITIVE `fns: [...]` (empty for a schema
+ * with no `fn` — so existing schemas are unaffected).
+ *
+ * The scan is BRACE-DEPTH-AWARE (a hand scan, not the old non-nested
+ * `/(\w+)\s*\{([^}]*)\}/g` regex): a P2 `fn` carries a `"""…"""`-quoted plpgsql body
+ * that itself contains `{`/`}` (an `IF … END IF`), which the `[^}]*` regex would
+ * truncate at the first inner `}`. The scanner tolerates a braced/triple-quoted
+ * body and still parses a plain `tableName { … }` table identically to the old
+ * regex (a table body has no nested braces, so depth returns to 0 at the SAME `}`).
+ *
+ * @param {object} schemaBody — AST node with body text, or the raw body string
+ * @returns {{ tables: TableDecl[], fns: SecdefFnDecl[] }}
  */
 export function parseSchemaBlock(schemaBody) {
   const tables = [];
+  const fns = [];
   const text = typeof schemaBody === "string" ? schemaBody : (schemaBody?.body ?? "");
+  const n = text.length;
+  let i = 0;
 
-  // Match: tableName { ... }
-  const tablePattern = /(\w+)\s*\{([^}]*)\}/g;
-  let match;
-  while ((match = tablePattern.exec(text)) !== null) {
-    const tableName = match[1];
-    const columnsText = match[2];
-    const columns = parseColumns(columnsText);
-    const table = { name: tableName, columns };
+  while (i < n) {
+    // Skip whitespace between top-level entries.
+    while (i < n && /\s/.test(text[i])) i++;
+    if (i >= n) break;
 
-    // §14.8.11 opt-in DB-authoritative marker — a bareword `db-authoritative`
-    // immediately after the table's closing `}` relocates the tenant-isolation
-    // floor to the DB (Postgres RLS `FORCE ROW LEVEL SECURITY` keyed on the
-    // pinned `scrml.tenant` GUC). M1-PROVISIONAL surface (a later bryan-owned
-    // syntax pass finalizes it). Postgres-only; SQLite hard-fails E-DBAUTH-SQLITE
-    // (fired downstream in codegen, where the resolved driver is known). The
-    // `-` in `db-authoritative` cannot begin a `\w+` table name, so the keyword
-    // never re-parses as a spurious table; we still advance `lastIndex` past it
-    // so the scan resumes cleanly after the marker.
-    const trailing = text.slice(tablePattern.lastIndex).match(/^\s*db-authoritative\b/);
-    if (trailing) {
-      table.dbAuthoritative = true;
-      tablePattern.lastIndex += trailing[0].length;
+    const rest = text.slice(i);
+
+    // §14.8.11.2 S4 — a SECURITY-DEFINER `fn` decl: `fn NAME(args) …modifiers… { body }`.
+    const fnHead = /^fn\s+([A-Za-z_]\w*)\s*\(/.exec(rest);
+    if (fnHead) {
+      const parsed = parseFnDecl(text, i, fnHead);
+      if (parsed) {
+        fns.push(parsed.fn);
+        i = parsed.next;
+        continue;
+      }
+      // Malformed `fn` head — advance one char and resume (graceful, never throws).
+      i++;
+      continue;
     }
 
-    tables.push(table);
+    // A plain table: `tableName { … }` optionally followed by the `db-authoritative` marker.
+    const tblHead = /^([A-Za-z_]\w*)\s*\{/.exec(rest);
+    if (tblHead) {
+      const tableName = tblHead[1];
+      const braceOpen = i + tblHead[0].length - 1; // index of the `{`
+      const braceClose = findSchemaBlockEnd(text, braceOpen);
+      if (braceClose === -1) {
+        // Unbalanced braces — bail on this entry (mirrors the old regex silently
+        // not matching an unterminated block).
+        i = braceOpen + 1;
+        continue;
+      }
+      const columnsText = text.slice(braceOpen + 1, braceClose);
+      const table = { name: tableName, columns: parseColumns(columnsText) };
+      i = braceClose + 1;
+
+      // §14.8.11 opt-in DB-authoritative marker — a bareword `db-authoritative`
+      // immediately after the table's closing `}` relocates the tenant-isolation
+      // floor to the DB. M1-PROVISIONAL surface. Postgres-only; SQLite hard-fails
+      // E-DBAUTH-SQLITE downstream in codegen.
+      const trailing = text.slice(i).match(/^\s*db-authoritative\b/);
+      if (trailing) {
+        table.dbAuthoritative = true;
+        i += trailing[0].length;
+      }
+
+      tables.push(table);
+      continue;
+    }
+
+    // Nothing recognized at this position — advance one char (skips stray tokens
+    // like a dangling `db-authoritative` marker whose table already consumed it).
+    i++;
   }
 
-  return { tables };
+  return { tables, fns };
+}
+
+/**
+ * Find the index of the `}` that closes the block opened at `openIdx` (which MUST
+ * point at a `{`), tracking brace depth and SKIPPING over `"""…"""` triple-quoted
+ * regions (a plpgsql `fn` body, whose `IF … END IF` braces must not miscount).
+ * Returns -1 if unbalanced.
+ *
+ * DELIBERATELY NOT quote-aware for single/double quotes: a plain table body has no
+ * nested braces, so brace-depth alone stops at the SAME `}` the old
+ * `/\{([^}]*)\}/` regex captured — byte-identical on existing schemas, INCLUDING a
+ * `pattern(/o'brien/)` whose lone `'` must stay an ordinary char (skipping to a
+ * "matching" quote would swallow the closing brace). A P2 `fn` block is `{ """…""" }`
+ * — its plpgsql quotes live inside the triple-quoted region this DOES skip.
+ */
+function findSchemaBlockEnd(text, openIdx) {
+  if (text[openIdx] !== "{") return -1;
+  const n = text.length;
+  let depth = 0;
+  let i = openIdx;
+  while (i < n) {
+    // Triple-quoted plpgsql body — skip the whole `"""…"""` region verbatim.
+    if (text.startsWith('"""', i)) {
+      const close = text.indexOf('"""', i + 3);
+      i = close === -1 ? n : close + 3;
+      continue;
+    }
+    const ch = text[i];
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return i;
+    }
+    i++;
+  }
+  return -1;
+}
+
+/**
+ * Parse a P2 SECURITY-DEFINER `fn` declaration starting at `startIdx`
+ * (`fnHead` = the `/^fn\s+NAME\s*\(/` match already run by the caller).
+ *
+ * Surface (M1-PROVISIONAL, §14.8.11.2):
+ *   `fn NAME(arg: type, …) security definer owner(<role>) [returns <type>]
+ *      [lang="plpgsql"] [requires cap("x")] { """ <plpgsql statements> """ }`
+ *
+ * The body carries the plpgsql STATEMENTS only (no outer BEGIN/END — the emitter
+ * owns the envelope so the injected cap check is un-bypassable and always first).
+ * Every identifier (fn name, arg names, owner role) is captured with a STRICT
+ * `[A-Za-z_]\w*` pattern, so a `$`/quote cannot enter and later break a dollar-quote
+ * or an identifier — the parse-time defense that complements emit-time quoteIdent.
+ *
+ * @returns {{ fn: SecdefFnDecl, next: number } | null} null on a malformed decl.
+ */
+function parseFnDecl(text, startIdx, fnHead) {
+  const name = fnHead[1];
+  const parenOpen = startIdx + fnHead[0].length - 1; // index of `(`
+  const parenClose = findMatchingParen(text, parenOpen);
+  if (parenClose === -1) return null;
+
+  const argText = text.slice(parenOpen + 1, parenClose).trim();
+  const args = parseFnArgs(argText);
+  if (args === null) return null;
+
+  // The modifier run is everything between `)` and the body-opening `{`.
+  const braceOpen = text.indexOf("{", parenClose + 1);
+  if (braceOpen === -1) return null;
+  const modifiers = text.slice(parenClose + 1, braceOpen);
+
+  // owner(<role>) — MANDATORY (the SECDEF runs as this bounded NOLOGIN role, NOT
+  // scrml_app). Strict identifier capture.
+  const ownerMatch = /\bowner\s*\(\s*([A-Za-z_]\w*)\s*\)/.exec(modifiers);
+  if (!ownerMatch) return null;
+  const owner = ownerMatch[1];
+
+  // returns <type> — optional; defaults to `void`.
+  const returnsMatch = /\breturns\s+([A-Za-z_]\w*)/i.exec(modifiers);
+  const returns = returnsMatch ? returnsMatch[1] : "void";
+
+  // requires cap("x") — optional in-body capability gate (extracted, NOT trusted
+  // verbatim; the quotes bound the value so no `'` can enter, and we still escape).
+  const capMatch = /\brequires\s+cap\s*\(\s*["']([^"']*)["']\s*\)/i.exec(modifiers);
+  const cap = capMatch ? capMatch[1] : null;
+
+  // `security definer` is the only supported mode in P2; its presence is advisory
+  // here (every P2 `fn` emits SECURITY DEFINER). We record it for future modes.
+  const isSecurityDefiner = /\bsecurity\s+definer\b/i.test(modifiers);
+
+  const braceClose = findSchemaBlockEnd(text, braceOpen);
+  if (braceClose === -1) return null;
+  const blockText = text.slice(braceOpen + 1, braceClose);
+
+  // The body: the `"""…"""` triple-quoted plpgsql statements.
+  const bodyMatch = /"""([\s\S]*?)"""/.exec(blockText);
+  const body = bodyMatch ? bodyMatch[1] : blockText;
+
+  return {
+    fn: { name, args, owner, returns, cap, isSecurityDefiner, body },
+    next: braceClose + 1,
+  };
+}
+
+/**
+ * Parse a `fn` argument list: comma-separated `name: type` (or `name type`) pairs.
+ * Returns `[{ name, type }]`, or `[]` for an empty list, or `null` if any arg is
+ * malformed (a strict identifier is required for both name and type token).
+ */
+function parseFnArgs(argText) {
+  if (argText.length === 0) return [];
+  const out = [];
+  for (const raw of argText.split(",")) {
+    const part = raw.trim();
+    if (part.length === 0) return null;
+    // `name: type` (canonical) or `name type` (SQL-ish).
+    const m = /^([A-Za-z_]\w*)\s*(?::\s*|\s+)([A-Za-z_]\w*)$/.exec(part);
+    if (!m) return null;
+    out.push({ name: m[1], type: m[2] });
+  }
+  return out;
 }
 
 /**
@@ -83,6 +247,14 @@ function parseColumns(text) {
       primaryKey: /primary\s+key/i.test(restStr),
       notNull: /not\s+null/i.test(restStr),
       unique: /unique/i.test(restStr),
+      // §14.8.11.2 S3 — a per-column `immutable` keyword (mirrors `not null`/`unique`).
+      // Consumed ONLY by generateDbAuthoritativeDDL, which narrows the bounded role's
+      // table-level UPDATE grant to the mutable columns (a Postgres column-level
+      // REVOKE cannot narrow a table GRANT, so the grant itself is re-shaped). On a
+      // non-db-authoritative table the flag is inert (there is no bounded-role grant
+      // to narrow) — a db-authoritative table is required for enforcement, and that
+      // is Postgres-gated by the E-DBAUTH-SQLITE compile gate.
+      immutable: /\bimmutable\b/i.test(restStr),
       default: null,
       references: null,
       renameFrom: null,
@@ -415,6 +587,19 @@ export function diffSchema(desired, actual, options = {}) {
         sql.push(...generateDbAuthoritativeDDL(table));
       }
     }
+    // §14.8.11.2 S4 — the SECURITY-DEFINER mutation choke. Emitted AFTER the
+    // db-authoritative table DDL (the tables + tenant policy + bounded role must
+    // exist first). The `scrml_has_cap` read helper is emitted ONCE when any `fn`
+    // is present. All SECDEF/owner-role/grant statements are idempotent (CREATE OR
+    // REPLACE FUNCTION, DO-block role, idempotent GRANT/REVOKE), so a re-migration
+    // re-asserts them — and scrml NEVER emits a DROP FUNCTION / DROP ROLE, so the
+    // never-clobber fence holds by construction for these objects.
+    const fns = desired.fns ?? [];
+    if (fns.length > 0) {
+      const dbAuthTables = desired.tables.filter((t) => t.dbAuthoritative).map((t) => t.name);
+      sql.push(generateScrmlHasCapDDL());
+      for (const fn of fns) sql.push(...generateSecdefDDL(fn, dbAuthTables));
+    }
   }
 
   // 3. Dropped tables (in actual but not desired).
@@ -512,6 +697,14 @@ export const DBAUTH_ROLE = "scrml_app";
 export const DBAUTH_POLICY = "scrml_tenant_iso";
 /** The transaction-scoped GUC carrying the pinned tenant scalar (S2). */
 export const DBAUTH_TENANT_GUC = "scrml.tenant";
+/**
+ * §14.8.11.2 S4 — the transaction-scoped GUC carrying the principal's capability
+ * SET as a JSON array (`["void","reconcile"]`). Injected alongside the tenant GUC
+ * by the A1 wrapper (server-resolved, never client-supplied — the E-REACTIVE-003
+ * discipline `tenantId` already follows) and READ by the `scrml_has_cap(text)`
+ * helper inside a SECURITY-DEFINER body.
+ */
+export const DBAUTH_CAPS_GUC = "scrml.principal.caps";
 
 /**
  * Emit the S6 bounded-role DDL. Cluster-global and app-shared (a PG role is
@@ -538,6 +731,16 @@ export function generateBoundedRoleDDL() {
  * falls back to a text compare (M1 keys tenant isolation on `tenant_id`; a
  * db-authoritative table is expected to carry one — the §14.8.10 convention).
  *
+ * §14.8.11.2 S3 (writes-authority) — a per-column `immutable` keyword narrows the
+ * bounded role's write authority. A Postgres column-level `REVOKE` CANNOT narrow a
+ * table-level `GRANT`, so when ANY column is `immutable` the blanket table-level
+ * `GRANT … UPDATE …` is RE-SHAPED to `GRANT SELECT, INSERT, DELETE` + a `REVOKE
+ * UPDATE` (clears any prior table-level UPDATE, e.g. from an M1 migration) + a
+ * column-scoped `GRANT UPDATE (<mutable cols>)`. Result: `scrml_app` can never
+ * UPDATE an immutable column — the sole sanctioned path is the S4 SECDEF choke.
+ * ANTI-REGRESSION: a table with ZERO immutable columns emits BYTE-IDENTICAL to M1
+ * (the single table-level `GRANT SELECT, INSERT, UPDATE, DELETE`).
+ *
  * @param {TableDecl} table — a table with `dbAuthoritative: true`
  * @returns {string[]} the ordered DDL statements
  */
@@ -548,11 +751,35 @@ export function generateDbAuthoritativeDDL(table) {
   const guc = `current_setting('${DBAUTH_TENANT_GUC}', true)`;
   const rhs = castType ? `${guc}::${castType}` : guc;
 
+  const cols = table.columns ?? [];
+  const immutableCols = cols.filter((c) => c.immutable);
+
+  // S6 — the bounded role's write grant.
+  let grantStmts;
+  if (immutableCols.length === 0) {
+    // No immutable columns → BYTE-IDENTICAL to M1 (a single table-level grant).
+    grantStmts = [`GRANT SELECT, INSERT, UPDATE, DELETE ON ${t} TO ${DBAUTH_ROLE};`];
+  } else {
+    // S3 — column-scoped write authority: no table-level UPDATE, only the mutable
+    // columns. The REVOKE UPDATE clears any prior table-level grant (idempotent —
+    // harmless on a fresh table, load-bearing when migrating from M1).
+    const mutableCols = cols.filter((c) => !c.immutable);
+    grantStmts = [
+      `GRANT SELECT, INSERT, DELETE ON ${t} TO ${DBAUTH_ROLE};`,
+      `REVOKE UPDATE ON ${t} FROM ${DBAUTH_ROLE};`,
+    ];
+    if (mutableCols.length > 0) {
+      const colList = mutableCols.map((c) => quoteIdent(c.name)).join(", ");
+      grantStmts.push(`GRANT UPDATE (${colList}) ON ${t} TO ${DBAUTH_ROLE};`);
+    }
+    // (all columns immutable → no UPDATE grant at all — insert-once, never-update.)
+  }
+
   return [
     // S6 — the bounded principal role (idempotent).
     generateBoundedRoleDDL(),
-    // S6 — grant the bounded role exactly CRUD on this table (no DDL, no BYPASS).
-    `GRANT SELECT, INSERT, UPDATE, DELETE ON ${t} TO ${DBAUTH_ROLE};`,
+    // S6 — grant the bounded role its write authority (table-level, or S3 column-scoped).
+    ...grantStmts,
     // S1 — turn RLS on and FORCE it (so even the table owner is subject to it).
     `ALTER TABLE ${t} ENABLE ROW LEVEL SECURITY;`,
     `ALTER TABLE ${t} FORCE ROW LEVEL SECURITY;`,
@@ -561,6 +788,173 @@ export function generateDbAuthoritativeDDL(table) {
     `DROP POLICY IF EXISTS ${DBAUTH_POLICY} ON ${t};`,
     `CREATE POLICY ${DBAUTH_POLICY} ON ${t} USING ("tenant_id" = ${rhs});`,
   ];
+}
+
+// ---------------------------------------------------------------------------
+// §14.8.11.2 DB-authoritative tier (Milestone 2 — writes-authoritative, Postgres).
+//
+// P2 is the FIRST milestone that crosses the §14.8.10 invariant/policy firewall:
+// scrml begins emitting AUTHORIZATION (who-may-perform-which-operation), not just
+// relocating the isolation invariant. The S4 SECURITY-DEFINER mutation choke is the
+// sole sanctioned write path for a column `scrml_app` was revoked from (S3).
+//
+// SECDEF HARDENING is a CODEGEN INVARIANT (a SECDEF that forgot `SET search_path`
+// is a CVE-2020-25695 privesc hole — WORSE than no enforcement):
+//   • SECURITY DEFINER SET search_path = pg_catalog, public
+//       (pg_catalog FIRST pins the built-ins against shadowing; public is REQUIRED
+//        so the body's unqualified table refs — `UPDATE invoices …` in public —
+//        resolve. `pg_temp` is deliberately NOT on the path.)
+//   • owned by a bounded NOLOGIN owner role DISTINCT from scrml_app (a SECDEF runs
+//     AS its owner; scrml_app lacks the immutable-column UPDATE, a superuser would
+//     over-privilege the choke).
+//   • REVOKE EXECUTE FROM PUBLIC + GRANT EXECUTE TO scrml_app (no ambient EXECUTE).
+// Every identifier is escaped via quoteIdent (the M2-HIGH lesson) — and the parser
+// already constrained fn/owner/arg names to `[A-Za-z_]\w*`, so a `$` can never
+// enter and break a dollar-quote.
+// ---------------------------------------------------------------------------
+
+/**
+ * §14.8.11.2 S4 — the `scrml_has_cap(text)` read helper. Emitted ONCE per apply
+ * (idempotent CREATE OR REPLACE) when a schema declares ≥1 SECDEF `fn`. Reads the
+ * txn-scoped `scrml.principal.caps` JSON-array GUC; a missing/unpinned GUC yields
+ * FALSE (fail-closed — no caps ⇒ no privileged mutation). NOT security-definer
+ * (a pure GUC read needs no elevated privilege); still search_path-pinned so the
+ * `::jsonb` cast + `?` operator resolve to pg_catalog and cannot be shadowed.
+ *
+ * @returns {string}
+ */
+export function generateScrmlHasCapDDL() {
+  return (
+    `CREATE OR REPLACE FUNCTION scrml_has_cap(cap text) RETURNS boolean\n` +
+    `  LANGUAGE sql STABLE\n` +
+    `  SET search_path = pg_catalog, public\n` +
+    `  AS $scrml_hascap$\n` +
+    `    SELECT coalesce(current_setting('${DBAUTH_CAPS_GUC}', true)::jsonb ? cap, false)\n` +
+    `  $scrml_hascap$;`
+  );
+}
+
+/**
+ * Pick a dollar-quote tag that does NOT occur in `body`, so an author's plpgsql
+ * text can never accidentally terminate the `$…$` wrapper. Tries `$scrml_fn$`,
+ * then `$scrml_fn0$`, `$scrml_fn1$`, … (correctness robustness, not a security
+ * boundary — the body is compile-time author source at the same trust level as the
+ * rest of the schema).
+ */
+function dollarTag(body) {
+  let tag = "scrml_fn";
+  let i = 0;
+  while (body.includes(`$${tag}$`)) tag = `scrml_fn${i++}`;
+  return `$${tag}$`;
+}
+
+/**
+ * §14.8.11.2 S4 — emit the hardened SECURITY-DEFINER DDL for one `fn` declaration.
+ * The body carries the plpgsql STATEMENTS only; the emitter OWNS the `BEGIN … END`
+ * envelope and injects the `requires cap("x")` check as the FIRST statement inside
+ * it, so the capability gate is un-bypassable and always runs first.
+ *
+ * The bounded owner role is granted full CRUD on the db-authoritative tables so the
+ * body (running AS the owner) can mutate an immutable column scrml_app is revoked
+ * from — but the owner is STILL subject to the tenant-isolation policy (which has no
+ * TO-clause ⇒ applies to every role), so the SECDEF's writes STACK on top of tenant
+ * isolation (the caps txn pins `scrml.tenant`; an unpinned txn ⇒ the body touches
+ * zero rows, fail-closed). No permissive owner-bypass policy is emitted — that would
+ * let the choke escape tenant scope.
+ *
+ * @param {SecdefFnDecl} fn — a parsed `fn` (name, args, owner, returns, cap, body)
+ * @param {string[]} dbAuthTables — the db-authoritative table names in the schema
+ * @returns {string[]} the ordered DDL statements
+ */
+export function generateSecdefDDL(fn, dbAuthTables = []) {
+  const fnName = quoteIdent(fn.name);
+  const owner = quoteIdent(fn.owner);
+  const createArgs = (fn.args ?? [])
+    .map((a) => `${quoteIdent(a.name)} ${mapPostgresType(a.type)}`)
+    .join(", ");
+  const typeArgs = (fn.args ?? []).map((a) => mapPostgresType(a.type)).join(", ");
+  const signature = `${fnName}(${typeArgs})`; // ALTER/REVOKE/GRANT identify by arg TYPES
+  const ret = mapPostgresType(fn.returns || "void");
+
+  // The cap gate (first statement inside BEGIN). The cap value came from the parser
+  // bounded by quotes (no `'` inside); escaped anyway (SQL single-quote doubling).
+  // The call is SCHEMA-QUALIFIED (`public.scrml_has_cap`) — belt-and-suspenders over
+  // the pinned `search_path`, so the guard resolves to the compiler-installed helper
+  // even if an operator ever re-grants CREATE on `public` to an untrusted role (the
+  // CVE-2020-25695 shadowing surface). The helper is installed unqualified into the
+  // migrator's default schema (public in the standard deploy — same as the tables).
+  const capEsc = String(fn.cap ?? "").replace(/'/g, "''");
+  const capGuard = fn.cap
+    ? `    IF NOT public.scrml_has_cap('${capEsc}') THEN RAISE EXCEPTION 'denied'; END IF;\n`
+    : "";
+
+  const bodyText = indentPlpgsqlBody(fn.body ?? "");
+  const tag = dollarTag(fn.body ?? "");
+
+  const stmts = [];
+
+  // 1. the bounded NOLOGIN owner role (idempotent; distinct from scrml_app).
+  stmts.push(
+    `DO $scrml_secdef$ BEGIN CREATE ROLE ${owner} NOLOGIN NOBYPASSRLS; ` +
+      `EXCEPTION WHEN duplicate_object THEN NULL; END $scrml_secdef$;`,
+  );
+  // 2. provision the owner so the (non-superuser) migrator can reassign the function
+  //    to it below — SECURITY-CRITICAL: without the reassignment the SECDEF would run
+  //    as the powerful migrator, not the bounded owner. `ALTER FUNCTION … OWNER TO`
+  //    requires (a) the migrator can SET ROLE to the owner and (b) the owner holds
+  //    CREATE on the function's schema. Both idempotent; both succeed on first deploy
+  //    (the migrator created the owner ⇒ holds ADMIN OPTION). PG16 plain GRANT
+  //    membership defaults SET TRUE (PG15-portable). (A cluster where a DIFFERENT
+  //    migrator pre-created the owner role hits the M1 cluster-global-role open.)
+  stmts.push(`GRANT ${owner} TO CURRENT_USER;`);
+  stmts.push(`GRANT CREATE ON SCHEMA public TO ${owner};`);
+  // 3. grant the owner CRUD on the db-authoritative tables (table-level UPDATE, i.e.
+  //    including the immutable columns scrml_app cannot touch). Idempotent.
+  for (const tbl of dbAuthTables) {
+    stmts.push(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${quoteIdent(tbl)} TO ${owner};`);
+  }
+  // 4. the hardened SECDEF function (idempotent CREATE OR REPLACE).
+  stmts.push(
+    `CREATE OR REPLACE FUNCTION ${fnName}(${createArgs}) RETURNS ${ret}\n` +
+      `  LANGUAGE plpgsql\n` +
+      `  SECURITY DEFINER\n` +
+      `  SET search_path = pg_catalog, public\n` +
+      `  AS ${tag}\n` +
+      `  BEGIN\n` +
+      capGuard +
+      bodyText +
+      `\n  END\n` +
+      `  ${tag};`,
+  );
+  // 5. bind ownership (the SECDEF now runs as the bounded owner, NOT the migrator).
+  stmts.push(`ALTER FUNCTION ${signature} OWNER TO ${owner};`);
+  // 6. lock down EXECUTE — no ambient PUBLIC EXECUTE; only the runtime role may CALL.
+  stmts.push(`REVOKE EXECUTE ON FUNCTION ${signature} FROM PUBLIC;`);
+  stmts.push(`GRANT EXECUTE ON FUNCTION ${signature} TO ${DBAUTH_ROLE};`);
+
+  return stmts;
+}
+
+/**
+ * Re-indent a plpgsql body (the `"""…"""` content) to sit cleanly inside the
+ * emitter-owned `BEGIN … END`: trim outer blank lines, strip the common leading
+ * indentation, then indent every non-empty line by 4 spaces. Readability only —
+ * plpgsql is whitespace-insensitive.
+ */
+function indentPlpgsqlBody(body) {
+  const lines = String(body).replace(/\t/g, "  ").split("\n");
+  // Drop leading/trailing blank lines.
+  while (lines.length && lines[0].trim() === "") lines.shift();
+  while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
+  if (lines.length === 0) return "";
+  // Common leading whitespace across non-blank lines.
+  const indents = lines
+    .filter((l) => l.trim() !== "")
+    .map((l) => (l.match(/^[ ]*/) || [""])[0].length);
+  const common = indents.length ? Math.min(...indents) : 0;
+  return lines
+    .map((l) => (l.trim() === "" ? "" : "    " + l.slice(common)))
+    .join("\n");
 }
 
 /**

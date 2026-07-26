@@ -33,7 +33,7 @@
  */
 
 import { parseSchemaBlock } from "../schema-differ.js";
-import { DBAUTH_ROLE, DBAUTH_TENANT_GUC } from "../schema-differ.js";
+import { DBAUTH_ROLE, DBAUTH_TENANT_GUC, DBAUTH_CAPS_GUC } from "../schema-differ.js";
 
 /**
  * Walk a file AST for `<schema>` state blocks and report whether ANY declared
@@ -96,7 +96,11 @@ export function appDeclaresDbAuthoritative(fileAST: unknown): boolean {
  */
 export function extractDesiredSchema(
   fileAST: unknown,
-): { tables: Array<{ name: string; dbAuthoritative?: boolean; [k: string]: unknown }>; warnings: string[] } {
+): {
+  tables: Array<{ name: string; dbAuthoritative?: boolean; [k: string]: unknown }>;
+  fns: Array<{ name: string; [k: string]: unknown }>;
+  warnings: string[];
+} {
   const seen = new WeakSet<object>();
   const bodies: string[] = [];
 
@@ -130,14 +134,27 @@ export function extractDesiredSchema(
   walk(fileAST, 0);
 
   const tables: Array<{ name: string; dbAuthoritative?: boolean; [k: string]: unknown }> = [];
+  const fns: Array<{ name: string; [k: string]: unknown }> = [];
   const warnings: string[] = [];
   const seenNames = new Set<string>();
+  const seenFnNames = new Set<string>();
   for (const body of bodies) {
-    let parsed: { tables?: Array<{ name?: string; dbAuthoritative?: boolean }> } = {};
+    let parsed: {
+      tables?: Array<{ name?: string; dbAuthoritative?: boolean }>;
+      fns?: Array<{ name?: string }>;
+    } = {};
     try {
       parsed = parseSchemaBlock(body) as any;
     } catch {
       continue;
+    }
+    // §14.8.11.2 S4 — carry the SECURITY-DEFINER fns onto the desired state so
+    // diffSchema (postgres) appends the SECDEF DDL to the migration plan.
+    for (const fn of parsed.fns ?? []) {
+      if (fn && typeof fn.name === "string" && !seenFnNames.has(fn.name)) {
+        seenFnNames.add(fn.name);
+        fns.push(fn as any);
+      }
     }
     for (const t of parsed.tables ?? []) {
       if (t && typeof t.name === "string" && !seenNames.has(t.name)) {
@@ -165,7 +182,7 @@ export function extractDesiredSchema(
       );
     }
   }
-  return { tables, warnings };
+  return { tables, fns, warnings };
 }
 
 /**
@@ -413,6 +430,11 @@ export function wrapPrincipalTxn(src: string): string {
           `${ident}.begin(async (tx) => {\n` +
           `${b}await tx\`SELECT set_config('${DBAUTH_TENANT_GUC}', ` +
           "${_scrml_active_tenant(_scrml_req)}, true)`;\n" +
+          // §14.8.11.2 S4 — pin the principal's capability set alongside the tenant
+          // scalar, in the SAME reserved txn (server-resolved, never client-supplied —
+          // the E-REACTIVE-003 discipline). Read by `scrml_has_cap()` inside a SECDEF.
+          `${b}await tx\`SELECT set_config('${DBAUTH_CAPS_GUC}', ` +
+          "${_scrml_active_caps(_scrml_req)}, true)`;\n" +
           `${b}await tx.unsafe("SET LOCAL ROLE ${DBAUTH_ROLE}");\n` +
           `${b}return await ${innerOnTx};\n` +
           `${indent}})`;
