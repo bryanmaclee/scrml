@@ -96,7 +96,7 @@ export function appDeclaresDbAuthoritative(fileAST: unknown): boolean {
  */
 export function extractDesiredSchema(
   fileAST: unknown,
-): { tables: Array<{ name: string; dbAuthoritative?: boolean; [k: string]: unknown }> } {
+): { tables: Array<{ name: string; dbAuthoritative?: boolean; [k: string]: unknown }>; warnings: string[] } {
   const seen = new WeakSet<object>();
   const bodies: string[] = [];
 
@@ -130,9 +130,10 @@ export function extractDesiredSchema(
   walk(fileAST, 0);
 
   const tables: Array<{ name: string; dbAuthoritative?: boolean; [k: string]: unknown }> = [];
+  const warnings: string[] = [];
   const seenNames = new Set<string>();
   for (const body of bodies) {
-    let parsed: { tables?: Array<{ name?: string }> } = {};
+    let parsed: { tables?: Array<{ name?: string; dbAuthoritative?: boolean }> } = {};
     try {
       parsed = parseSchemaBlock(body) as any;
     } catch {
@@ -144,8 +145,27 @@ export function extractDesiredSchema(
         tables.push(t as any);
       }
     }
+    // Near-miss detection (§14.8.11 M2 — silent-downgrade guard): the opt-in marker
+    // must be the EXACT lowercase `db-authoritative` immediately after a table's
+    // closing `}`. A case variant (`DB-AUTHORITATIVE`), a separator variant
+    // (`db_authoritative`), or a token wedged between `}` and the marker
+    // (`} secure db-authoritative`) is NOT recognized → the table silently applies
+    // as plain (no RLS, and on a SQLite target the `E-DBAUTH-SQLITE` fail-closed
+    // gate never fires). Any `db-authoritative`-like token beyond the strictly
+    // recognized count is a candidate typo — surface it rather than downgrade silently.
+    const recognized = (parsed.tables ?? []).filter((t) => t && t.dbAuthoritative).length;
+    const looseHits = (body.match(/db[-_\s]?authoritative/gi) ?? []).length;
+    if (looseHits > recognized) {
+      warnings.push(
+        `W-DBAUTH-MARKER-NEARMISS: a "db-authoritative"-like token in <schema> was NOT ` +
+        `recognized as the opt-in marker (it must be the exact lowercase ` +
+        `\`db-authoritative\` immediately after the table's closing \`}\`). ` +
+        `${recognized} table(s) recognized as db-authoritative. Check for a case/spacing ` +
+        `typo — a mis-typed marker silently downgrades the table to non-db-authoritative.`,
+      );
+    }
   }
-  return { tables };
+  return { tables, warnings };
 }
 
 /**

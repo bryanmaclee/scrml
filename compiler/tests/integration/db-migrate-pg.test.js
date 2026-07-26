@@ -197,3 +197,103 @@ d("§14.8.11 M2 — scrml db-migrate through-CLI acceptance (live Postgres)", ()
     expect(rows[0].n).toBe(2);
   });
 });
+
+// ── SECURITY (PA-found HIGH) — a malicious live-DB column name must NOT break out
+// of its identifier and inject a policy executed as the migrator. The ACTUAL schema
+// carries a column named with the injection payload; `scrml db-migrate` diffs it
+// (→ DROP COLUMN) and MUST apply it as one escaped statement, leaving tenant
+// isolation intact (bounded no-GUC read stays 0 rows; the injected `pleak` policy
+// never gets created). ─────────────────────────────────────────────────────────
+const MIGRATOR2 = `scrml_m2_secmig_${SUFFIX}`;
+const SCRATCH_DB2 = `scrml_m2_secdb_${SUFFIX}`;
+// The exact review PoC — a column name that, interpolated naively, closes the
+// identifier and appends a permissive policy (USING (true) → all tenants visible).
+const INJECT_COL = `amount"; CREATE POLICY pleak ON invoices USING (true); --`;
+
+d("§14.8.11 M2 SECURITY — malicious live-DB identifier cannot inject via db-migrate", () => {
+  let projectDir;
+  let migratorUrl;
+  let run2Exit;
+  let m;
+
+  beforeAll(async () => {
+    const admin = new SQL({ path: SOCK, database: "postgres", username: PG_USER });
+    await admin.unsafe(`DROP DATABASE IF EXISTS ${SCRATCH_DB2}`).catch(() => {});
+    await admin.unsafe(`DROP ROLE IF EXISTS ${MIGRATOR2}`).catch(() => {});
+    await admin.unsafe(`CREATE ROLE ${MIGRATOR2} LOGIN PASSWORD '${MIGRATOR_PW}' CREATEROLE CREATEDB`);
+    await admin.unsafe(`CREATE DATABASE ${SCRATCH_DB2} OWNER ${MIGRATOR2}`);
+
+    projectDir = mkdtempSync(join(tmpdir(), "scrml-m2-sec-"));
+    writeFileSync(join(projectDir, "app.scrml"), PROJECT_SRC);
+    migratorUrl = `postgres://${MIGRATOR2}:${MIGRATOR_PW}@localhost:5432/${SCRATCH_DB2}`;
+
+    // Run #1 — normal apply (creates invoices + RLS).
+    const p1 = Bun.spawn(
+      [process.execPath, CLI, "db-migrate", join(projectDir, "app.scrml"), "--db", migratorUrl],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    await new Response(p1.stdout).text();
+    await p1.exited;
+
+    m = new SQL(migratorUrl);
+    // Inject the malicious column into the ACTUAL schema (hand-escaped in THIS setup
+    // so the column is LITERALLY named the payload — the hostile/pre-existing state).
+    const escaped = INJECT_COL.replace(/"/g, '""');
+    await m.unsafe(`ALTER TABLE invoices ADD COLUMN "${escaped}" text`);
+
+    await admin.unsafe(`GRANT scrml_app TO ${MIGRATOR2}`);
+    await admin.close();
+
+    // Run #2 — the ATTACK TRIGGER: desired has no payload column → the differ emits
+    // ALTER TABLE … DROP COLUMN "<payload>". A correct escape keeps it one statement.
+    const p2 = Bun.spawn(
+      [process.execPath, CLI, "db-migrate", join(projectDir, "app.scrml"), "--db", migratorUrl],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+    await new Response(p2.stdout).text();
+    await p2.exited;
+    run2Exit = p2.exitCode;
+
+    // Seed both tenants (bounded role) so a bypass would be observable as >0 rows.
+    await m.begin(async (tx) => {
+      await tx`SELECT set_config('scrml.tenant', ${TENANT_A}, true)`;
+      await tx.unsafe("SET LOCAL ROLE scrml_app");
+      await tx`INSERT INTO invoices (id, tenant_id, amount) VALUES (gen_random_uuid(), ${TENANT_A}, 100.00)`;
+      await tx`INSERT INTO invoices (id, tenant_id, amount) VALUES (gen_random_uuid(), ${TENANT_A}, 200.00)`;
+    });
+    await m.begin(async (tx) => {
+      await tx`SELECT set_config('scrml.tenant', ${TENANT_B}, true)`;
+      await tx.unsafe("SET LOCAL ROLE scrml_app");
+      await tx`INSERT INTO invoices (id, tenant_id, amount) VALUES (gen_random_uuid(), ${TENANT_B}, 999.00)`;
+    });
+  });
+
+  afterAll(async () => {
+    if (m) await m.close().catch(() => {});
+    if (projectDir) rmSync(projectDir, { recursive: true, force: true });
+    const admin = new SQL({ path: SOCK, database: "postgres", username: PG_USER });
+    await admin.unsafe(`DROP DATABASE IF EXISTS ${SCRATCH_DB2}`).catch(() => {});
+    await admin.unsafe(`DROP ROLE IF EXISTS ${MIGRATOR2}`).catch(() => {});
+    await admin.close().catch(() => {});
+  });
+
+  test("db-migrate over a malicious-identifier schema applies cleanly (exit 0)", () => {
+    expect(run2Exit).toBe(0);
+  });
+
+  test("the injected `pleak` policy was NOT created (no break-out)", async () => {
+    const rows = await m`SELECT policyname FROM pg_policies WHERE tablename = 'invoices'`;
+    const names = rows.map((r) => r.policyname);
+    expect(names).toContain("scrml_tenant_iso");
+    expect(names).not.toContain("pleak");
+  });
+
+  test("tenant isolation HOLDS through the malicious migration (bounded no-GUC → 0 rows)", async () => {
+    const rows = await m.begin(async (tx) => {
+      await tx.unsafe("SET LOCAL ROLE scrml_app");
+      return await tx`SELECT count(*)::int AS n FROM invoices`;
+    });
+    // If the injection had installed `pleak ON invoices USING (true)`, this would be 3.
+    expect(rows[0].n).toBe(0);
+  });
+});

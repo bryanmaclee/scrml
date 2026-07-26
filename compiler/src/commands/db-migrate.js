@@ -180,6 +180,7 @@ function parseProjectSchema(input) {
   const tables = [];
   const seenNames = new Set();
   const parseErrors = [];
+  const schemaWarnings = [];
   for (const f of files) {
     let source;
     try {
@@ -196,14 +197,16 @@ function parseProjectSchema(input) {
       continue;
     }
     if (!ast) continue;
-    for (const t of extractDesiredSchema(ast).tables) {
+    const extracted = extractDesiredSchema(ast);
+    for (const t of extracted.tables) {
       if (!seenNames.has(t.name)) {
         seenNames.add(t.name);
         tables.push(t);
       }
     }
+    for (const w of extracted.warnings ?? []) schemaWarnings.push(w);
   }
-  return { tables, parseErrors };
+  return { tables, parseErrors, schemaWarnings };
 }
 
 /**
@@ -447,6 +450,11 @@ export async function runDbMigrate(args) {
   for (const pe of parsed.parseErrors ?? []) {
     console.error(c.yellow("warning:") + ` skipped a source file that failed to parse — ${pe}`);
   }
+  // Surface db-authoritative marker near-misses (a mis-typed marker is a silent
+  // security downgrade — §14.8.11 M2 MED).
+  for (const w of parsed.schemaWarnings ?? []) {
+    console.error(c.yellow("warning: ") + w);
+  }
 
   const desired = { tables: parsed.tables };
   if (desired.tables.length === 0) {
@@ -454,9 +462,19 @@ export async function runDbMigrate(args) {
     return;
   }
 
+  // ECHO the recognized db-authoritative set (§14.8.11 M2 MED): a silent marker
+  // miss (case/spacing typo) is otherwise invisible — printing the recognized set
+  // makes "I marked it db-authoritative but it applied as plain" catchable at a glance.
+  const dbAuthNames = desired.tables.filter((t) => t.dbAuthoritative).map((t) => t.name);
+  console.error(
+    c.dim(`db-authoritative tables: ${dbAuthNames.length ? dbAuthNames.join(", ") : "(none)"}`),
+  );
+
   // db-authoritative is Postgres-only (SQLite has no roles/policies/RLS). Applying
   // a db-authoritative schema against a non-Postgres target is the E-DBAUTH-SQLITE
-  // trap at the deploy layer — fail closed, mirroring the compile-time gate.
+  // trap at the deploy layer — fail closed, mirroring the compile-time gate. This
+  // is the MORE fundamental error (wrong driver entirely), so it precedes the
+  // per-table tenant-column preflight.
   const hasDbAuth = desired.tables.some((t) => t.dbAuthoritative);
   if (hasDbAuth && driver !== "postgres") {
     console.error(
@@ -464,6 +482,26 @@ export async function runDbMigrate(args) {
         " E-DBAUTH-SQLITE: this project declares db-authoritative table(s), which require a " +
         `Postgres target (RLS / roles / GRANT are Postgres-only). The --db URL resolves to the ` +
         `"${driver}" driver. Provide a postgres:// migrator URL.`,
+    );
+    process.exit(1);
+  }
+
+  // Pre-flight (§14.8.11 M2 LOW): a db-authoritative table with no `tenant_id`
+  // column would emit `CREATE POLICY … USING ("tenant_id" = …)` referencing a
+  // missing column → an opaque PG error + full rollback at apply time. Fail closed
+  // BEFORE touching the DB, naming the table. Only reachable on the Postgres path
+  // (E-DBAUTH-SQLITE already caught a non-Postgres db-authoritative target above).
+  const missingTenant = desired.tables
+    .filter((t) => t.dbAuthoritative)
+    .filter((t) => !(t.columns ?? []).some((col) => col.name === "tenant_id"))
+    .map((t) => t.name);
+  if (missingTenant.length > 0) {
+    console.error(
+      c.red("error:") +
+        ` E-DBAUTH-NO-TENANT-COLUMN: db-authoritative table(s) ${missingTenant.join(", ")} ` +
+        `declare no \`tenant_id\` column. The M1 tenant-isolation policy is keyed on ` +
+        `\`tenant_id\` (§14.8.11), so a db-authoritative table MUST declare one. Add a ` +
+        `\`tenant_id\` column, or drop the \`db-authoritative\` marker.`,
     );
     process.exit(1);
   }

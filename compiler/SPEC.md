@@ -8740,6 +8740,26 @@ scrml-managed security objects are roles/policies (never tables), so the table-D
 fence at the table grain; the idempotent `DROP POLICY IF EXISTS scrml_tenant_iso` re-creates its own
 policy in place and never touches a hand-authored one.
 
+**Identifier escaping is MANDATORY (SQL-injection defense).** Every table/column/constraint name
+interpolated into emitted DDL SHALL be quoted through the shared `quoteIdent`
+(`compiler/src/codegen/sql-ident.ts`), which doubles an embedded `"` (`a"b` → `"a""b"`). Names read
+from the LIVE database (`readActualSchemaPg` / `readActualSchema` — an `ALTER TABLE … DROP COLUMN`
+target, a `DROP TABLE` target) are attacker-influencable: a name containing a `"` interpolated naively
+would close the identifier and let the remainder execute as injected SQL under the MIGRATOR principal
+(a durable tenant-isolation bypass via an injected permissive policy, or `ALTER ROLE … SUPERUSER` RCE
+against a superuser migrator). `<schema>`-sourced names are escaped too (defense-in-depth; do not rely
+on `parseSchemaBlock`'s `\w+` constraint). The seam applies each diff statement via `tx.unsafe(stmt)`,
+so an unescaped identifier is directly exploitable — the escaping is a security invariant, not a
+nicety.
+
+**Marker near-miss is surfaced, and the recognized set is echoed (silent-downgrade guard).** The
+`db-authoritative` opt-in marker must be the EXACT lowercase `db-authoritative` immediately after a
+table's closing `}`. A case/separator/placement typo silently downgrades the table to plain — the
+"looks enforced and isn't" trap. `scrml db-migrate` SHALL echo the set of tables it recognized as
+db-authoritative, and fires `W-DBAUTH-MARKER-NEARMISS` when a `db-authoritative`-like token is not
+recognized. It also pre-flights that every db-authoritative table declares a `tenant_id` column
+(`E-DBAUTH-NO-TENANT-COLUMN`, fail-closed before touching the DB) — the policy is keyed on it.
+
 **The ledger is a THIN desired-state companion, NOT a versioned migration-file history (Fork 4).** The
 differ is already desired-state-shaped (`diffSchema` reconciles current→desired each run; the DDL is
 idempotent). A thin `_scrml_migrations` table (`id`, `applied_at`, `object_kind`, `object_name`,
@@ -8762,7 +8782,8 @@ proves the SEAM end-to-end (M1 emitted the DDL; M2 applied it), not just the DDL
 
 **Cross-references:** §14.8.11 (Milestone 1 — the DDL this seam applies + the bounded-role model);
 §44.2 (driver resolution — `resolveDbDriver`); §38.6 (the schema differ + the `DROP` confirmation
-norm); §34 (`W-SCHEMA-DESTRUCTIVE-DROP`, `E-DBAUTH-SQLITE`). Authority: migration-apply-seam DD (bryan
+norm); §34 (`W-SCHEMA-DESTRUCTIVE-DROP`, `E-DBAUTH-SQLITE`, `E-DBAUTH-NO-TENANT-COLUMN`,
+`W-DBAUTH-MARKER-NEARMISS`). Authority: migration-apply-seam DD (bryan
 RULED 2026-07-26, "your recs" on all five forks). Milestone 2 is the apply seam; the `scrml build`
 `.sql` artifact + `scrml dev` auto-apply overlay + S7-full object-aware diff are separately-scoped
 fast-follows.
@@ -18599,7 +18620,9 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-TENANT-RAW-EGRESS | §14.8.10 | A tenant-scoped table's rows reach a compiler-unanalyzable egress path — a `_{}` foreign-code block (§23), a manual `Response` / `handle()` body (§40), or an `asIs`-typed value (§14.1.1) — where the compiler cannot tag/redact the rows, so a cross-tenant row cannot be proven stripped at this boundary. Fail-closed: the compiler will not silently ship a tenant-scoped row through a path it cannot redact. The row-isolation sibling of `E-PROTECT-004` (the column direction). Resolution: return the rows through the normal compiler-emitted response, or, for a deliberate cross-tenant read, mark the query `.acrossTenants()`. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `detectTenantRawEgress`.) | Error |
 | I-TENANT-STRIP | §14.8.10 | The compiler-emitted egress serializer scopes a client-egress payload — a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, or `server function*` SSE (§37) `data:` chunk — to the request's ambient `@currentUser.tenantId`: every row of another tenant is dropped, and an unpinned (anonymous) request sees ZERO rows (fail-closed). The row-level twin of `I-PROTECT-STRIP-001`. Names the read so the redaction is never silent. Also fires on the wholesale-strip fallback of an unresolvable dynamic read that mentions a tenant-scoped table. Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the rewriter/hand-emit strip drains.) | Info |
 | I-TENANT-ACROSS | §14.8.10 | A `?{…}.acrossTenants()` opt-out SUPPRESSED the §14.8.10 tenant floor for one query (a deliberate cross-tenant read/write — a platform-admin dashboard, cross-tenant reporting). It is the ONLY way to emit an unscoped read/write against a tenant-scoped table, and it fires this Info so an audit can grep every cross-tenant access in the codebase (the cross-tenant audit surface). Mirrors `reveal()`'s greppability for §14.8.9. Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the `.acrossTenants()` drains.) | Info |
-| E-DBAUTH-SQLITE | §14.8.11 | A `<schema>` table is marked `db-authoritative` (the opt-in DB-authoritative security tier — Postgres RLS `FORCE ROW LEVEL SECURITY` + a bounded `NOBYPASSRLS` role + a per-request principal), but the resolved database driver is not Postgres (SQLite, MySQL, or no `db=` target). SQLite has no per-connection principal, no roles, no `GRANT`, no RLS — every DB-authoritative primitive is Postgres-only. Fail CLOSED at compile: a security feature that silently degraded to §14.8.10 egress-redaction would be the exact "looks enforced and isn't" trap. Resolution: target Postgres (`<program db="postgres://...">`), or drop the `db-authoritative` marker to keep the §14.8.10 egress-redaction floor (which is the SQLite-first default). (Catalog addition: DB-authoritative tier Milestone 1 — reads-authoritative, S286; emitted at `compiler/src/codegen/index.ts` in the `annotateDbScopes` driver-resolution stage.) | Error |
+| E-DBAUTH-SQLITE | §14.8.11 | A `<schema>` table is marked `db-authoritative` (the opt-in DB-authoritative security tier — Postgres RLS `FORCE ROW LEVEL SECURITY` + a bounded `NOBYPASSRLS` role + a per-request principal), but the resolved database driver is not Postgres (SQLite, MySQL, or no `db=` target). SQLite has no per-connection principal, no roles, no `GRANT`, no RLS — every DB-authoritative primitive is Postgres-only. Fail CLOSED at compile: a security feature that silently degraded to §14.8.10 egress-redaction would be the exact "looks enforced and isn't" trap. Resolution: target Postgres (`<program db="postgres://...">`), or drop the `db-authoritative` marker to keep the §14.8.10 egress-redaction floor (which is the SQLite-first default). (Catalog addition: DB-authoritative tier Milestone 1 — reads-authoritative, S286; emitted at `compiler/src/codegen/index.ts` in the `annotateDbScopes` driver-resolution stage. `scrml db-migrate` (§14.8.11.1) re-fires it at the deploy layer for a db-authoritative project pointed at a non-Postgres `--db`.) | Error |
+| E-DBAUTH-NO-TENANT-COLUMN | §14.8.11 | A `db-authoritative` `<schema>` table declares no `tenant_id` column. The M1 tenant-isolation policy is keyed on `tenant_id` (`CREATE POLICY … USING ("tenant_id" = current_setting('scrml.tenant', true)::…)`), so a db-authoritative table without one would emit DDL referencing a missing column — an opaque Postgres error + full transaction rollback at apply time. `scrml db-migrate` (§14.8.11.1) pre-flights this BEFORE touching the DB and fails closed, naming the offending table(s). Resolution: add a `tenant_id` column, or drop the `db-authoritative` marker. (Catalog addition: DB-authoritative tier Milestone 2 — migration-apply seam, 2026-07-26; emitted at `compiler/src/commands/db-migrate.js`.) | Error |
+| W-DBAUTH-MARKER-NEARMISS | §14.8.11 | A `<schema>` body contains a `db-authoritative`-like token that was NOT recognized as the opt-in marker — the marker must be the EXACT lowercase `db-authoritative` immediately after a table's closing `}`. A case variant (`DB-AUTHORITATIVE`), a separator variant (`db_authoritative`), or a token wedged between `}` and the marker (`} secure db-authoritative`) silently downgrades the table to non-db-authoritative (no RLS installed; on a SQLite target the `E-DBAUTH-SQLITE` fail-closed gate never fires) — the "looks enforced and isn't" trap. `scrml db-migrate` (§14.8.11.1) surfaces the near-miss and echoes the set of tables it DID recognize as db-authoritative so the miss is visible. Resolution: fix the marker spelling/placement. (Catalog addition: DB-authoritative tier Milestone 2 — migration-apply seam, 2026-07-26; emitted at `compiler/src/codegen/db-authoritative.ts` in `extractDesiredSchema`.) | Warning |
 | E-ROUTE-001 | §12.4 | Unresolvable callee or computed member access in route analysis | Warning |
 | ~~E-RI-001~~ | — | **Retired 2026-04-21 (S37)**; `server pure` is now valid (§33.3, §48.10). | — |
 | E-RI-002 | §12 | Server-escalated function mutates `@` reactive variable | Error |

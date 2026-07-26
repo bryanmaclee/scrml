@@ -43,6 +43,22 @@ Used `pg_advisory_xact_lock(<key>)` INSIDE the apply txn (auto-released at commi
 than session-level `pg_advisory_lock` + explicit `pg_advisory_unlock`. Strictly better: no lock leak
 if the process dies mid-apply, and it is the atomicity property the DD's ledger argument wants.
 
+## PA adversarial review (S239) — HIGH/MED/LOW fixed in-place
+- **HIGH (blocking) — unescaped identifier interpolation → injection as the migrator.** Routed EVERY
+  identifier interpolation in `schema-differ.js`'s DDL-emit path (RENAME/DROP COLUMN, DROP TABLE,
+  CREATE TABLE, ADD COLUMN, REFERENCES, generateDbAuthoritativeDDL, the SQLite 12-step rebuild, the
+  CHECK-clause helper, PRAGMA) through a shared `quoteIdent` (new `compiler/src/codegen/sql-ident.ts`,
+  `"` → `""`). Lifted `emit-channel.ts`'s local `pgQuoteIdent` to import from the shared util (no dup).
+  Regression: unit (schema-differ SECURITY — the PoC payload quote-doubles, no break-out) + live-PG
+  (db-migrate-pg SECURITY — ACTUAL schema carries the injection-payload column; through-CLI migration
+  applies cleanly, `pleak` policy NOT created, bounded no-GUC read still 0 rows).
+- **MED — mis-detected marker → silent downgrade.** `db-migrate` ECHOES the recognized db-authoritative
+  set; `extractDesiredSchema` fires `W-DBAUTH-MARKER-NEARMISS` on a case/spacing/placement near-miss.
+- **LOW — db-authoritative table with no tenant_id.** Pre-flight `E-DBAUTH-NO-TENANT-COLUMN` (fail-closed
+  before touching the DB, names the table) instead of an opaque PG error + rollback.
+- SPEC: §14.8.11.1 identifier-escaping invariant + near-miss/echo/preflight prose; §34 registers
+  `E-DBAUTH-NO-TENANT-COLUMN` + `W-DBAUTH-MARKER-NEARMISS`.
+
 ## Explicitly OUT (fast-follow M2-part-2 — NOT built here)
 - Approach B: `scrml build` `.sql` artifact emission.
 - `scrml dev` auto-apply overlay.

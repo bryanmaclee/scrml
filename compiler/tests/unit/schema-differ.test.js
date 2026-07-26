@@ -1,5 +1,69 @@
 import { describe, test, expect } from "bun:test";
-import { parseSchemaBlock, diffSchema } from "../../src/schema-differ.js";
+import {
+  parseSchemaBlock,
+  diffSchema,
+  generateCreateTable,
+  generateDbAuthoritativeDDL,
+} from "../../src/schema-differ.js";
+import { quoteIdent } from "../../src/codegen/sql-ident.ts";
+
+// ==========================================================================
+// SECURITY — identifier interpolation must quote-double embedded `"` so a
+// live-DB-sourced (attacker-influencable) table/column name cannot break out of
+// its identifier and inject a second statement executed as the migrator (the
+// PA-found blocking HIGH — durable tenant-isolation bypass / owner→superuser RCE).
+// ==========================================================================
+describe("schema-differ SECURITY: identifier escaping in emitted DDL", () => {
+  // The exact PoC from the review: a live column name that, interpolated naively,
+  // closes the identifier and appends a permissive-policy statement.
+  const PAYLOAD = `amount"; CREATE POLICY pleak ON invoices USING (true); --`;
+
+  test("DROP COLUMN quote-doubles a malicious live column name (no break-out)", () => {
+    const desired = { tables: [{ name: "invoices", columns: [{ name: "id", type: "uuid", scrmlType: "uuid", primaryKey: true, notNull: false, default: null, sharedCorePredicates: [] }] }] };
+    const actual = {
+      tables: [
+        {
+          name: "invoices",
+          columns: [
+            { name: "id", type: "uuid", primaryKey: true, notNull: false, default: null, sharedCorePredicates: [] },
+            { name: PAYLOAD, type: "numeric", primaryKey: false, notNull: false, default: null, sharedCorePredicates: [] },
+          ],
+        },
+      ],
+    };
+    const { sql } = diffSchema(desired, actual, { driver: "postgres" });
+    const drop = sql.find((s) => s.startsWith("ALTER TABLE") && s.includes("DROP COLUMN"));
+    expect(drop).toBeDefined();
+    // Exact escaped form — the payload's `"` is doubled, keeping it ONE identifier.
+    expect(drop).toBe(`ALTER TABLE "invoices" DROP COLUMN ${quoteIdent(PAYLOAD)};`);
+    // Escape applied (a doubled quote is present) …
+    expect(drop).toContain('amount""');
+    // … and the naive break-out (`amount"` immediately closing the identifier
+    // before the injected `;`) is NOT present — the injected statement stays inert
+    // text inside the quoted identifier, not a second executable statement.
+    expect(drop).not.toContain('amount";');
+  });
+
+  test("CREATE TABLE quote-doubles a `\"`-bearing column name", () => {
+    const ddl = generateCreateTable(
+      { name: `t"x`, columns: [{ name: `a"b`, type: "text", scrmlType: "text", primaryKey: false, notNull: false, default: null, references: null, sharedCorePredicates: [] }] },
+      "postgres",
+    );
+    expect(ddl).toContain('"t""x"');
+    expect(ddl).toContain('"a""b"');
+  });
+
+  test("generateDbAuthoritativeDDL quote-doubles the table name", () => {
+    const ddl = generateDbAuthoritativeDDL({
+      name: `inv"x`,
+      columns: [{ name: "tenant_id", type: "uuid", scrmlType: "uuid" }],
+    }).join("\n");
+    // Every statement that names the table uses the escaped identifier …
+    expect(ddl).toContain('"inv""x"');
+    // … and never the un-doubled form that would break out.
+    expect(ddl).not.toContain('"inv"x"');
+  });
+});
 
 // ==========================================================================
 // §1 — parseSchemaBlock: basic table parsing

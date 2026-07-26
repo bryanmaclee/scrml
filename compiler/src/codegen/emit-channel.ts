@@ -2,6 +2,7 @@ import { genVar } from "./var-counter.ts";
 import { emitLogicNode } from "./emit-logic.js";
 import { emitExprField } from "./emit-expr.ts";
 import { CGError } from "./errors.ts";
+import { quoteIdent as pgQuoteIdent } from "./sql-ident.ts";
 
 /**
  * §38 `<channel>` — WebSocket state type codegen.
@@ -879,11 +880,6 @@ export function emitChannelServerJs(node: any, errors: CGError[], filePath: stri
 function sqlSafeIdent(name: string): string {
   const s = String(name ?? "").replace(/[^A-Za-z0-9_]/g, "_");
   return (/^[0-9]/.test(s) ? "_" + s : s) || "ch";
-}
-
-/** Double-quote a Postgres identifier (table / column), escaping embedded `"`. */
-function pgQuoteIdent(name: string): string {
-  return '"' + String(name ?? "").replace(/"/g, '""') + '"';
 }
 
 /**

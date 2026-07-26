@@ -178,19 +178,90 @@ describe("db-migrate: SQLite apply smoke", () => {
     const dbPath = join(dir, "app.db");
     const project = join(dir, "app.scrml");
     writeFileSync(project, DBAUTH_PROJECT.replace('db="postgres://x"', `db="${dbPath}"`));
-    // runDbMigrate calls process.exit(1) on the E-DBAUTH-SQLITE guard; assert that.
-    const origExit = process.exit;
-    let exitCode = null;
-    // @ts-ignore
-    process.exit = (code) => { exitCode = code; throw new Error("__exit__"); };
-    try {
-      await runDbMigrate([project, "--db", dbPath]);
-    } catch (e) {
-      if (e.message !== "__exit__") throw e;
-    } finally {
-      process.exit = origExit;
-      rmSync(dir, { recursive: true, force: true });
-    }
+    const { exitCode } = await captureRun([project, "--db", dbPath]);
     expect(exitCode).toBe(1);
+    rmSync(dir, { recursive: true, force: true });
   });
 });
+
+// ==========================================================================
+// db-authoritative marker near-miss (MED) + the recognized-set echo
+// ==========================================================================
+describe("db-migrate: db-authoritative marker near-miss (MED)", () => {
+  test("extractDesiredSchema warns W-DBAUTH-MARKER-NEARMISS on a mis-cased marker", () => {
+    const src = `<program db="postgres://x">\n  <schema>\n    invoices {\n      id: uuid primary key\n      tenant_id: uuid not null\n    } DB-AUTHORITATIVE\n  </schema>\n</program>\n`;
+    const { tables, warnings } = extractDesiredSchema(astOf(src));
+    // The mis-cased marker is NOT recognized (silent downgrade) …
+    expect(tables[0].dbAuthoritative).toBeFalsy();
+    // … but the near-miss is surfaced.
+    expect(warnings.some((w) => w.includes("W-DBAUTH-MARKER-NEARMISS"))).toBe(true);
+  });
+
+  test("the exact lowercase marker is recognized with no near-miss warning", () => {
+    const { tables, warnings } = extractDesiredSchema(astOf(DBAUTH_PROJECT));
+    expect(tables.find((t) => t.name === "invoices").dbAuthoritative).toBe(true);
+    expect(warnings.some((w) => w.includes("NEARMISS"))).toBe(false);
+  });
+
+  test("db-migrate ECHOES the recognized db-authoritative set to stderr", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scrml-m2-echo-"));
+    const dbPath = join(dir, "app.db");
+    const project = join(dir, "app.scrml");
+    // A plain SQLite project (no db-auth) → the echo says "(none)".
+    writeFileSync(
+      project,
+      `<program db="${dbPath}">\n  <schema>\n    widgets {\n      id: integer primary key\n    }\n  </schema>\n</program>\n`,
+    );
+    const { stderr } = await captureRun([project, "--db", dbPath]);
+    expect(stderr).toContain("db-authoritative tables: (none)");
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+// ==========================================================================
+// E-DBAUTH-NO-TENANT-COLUMN pre-flight (LOW)
+// ==========================================================================
+describe("db-migrate: E-DBAUTH-NO-TENANT-COLUMN pre-flight (LOW)", () => {
+  test("a db-authoritative table with no tenant_id fails closed BEFORE connecting", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scrml-m2-notenant-"));
+    const project = join(dir, "app.scrml");
+    writeFileSync(
+      project,
+      `<program db="postgres://x">\n  <schema>\n    ledger {\n      id: uuid primary key\n      amount: decimal not null\n    } db-authoritative\n  </schema>\n</program>\n`,
+    );
+    // A postgres:// URL that would never accept a connection — the pre-flight must
+    // exit(1) BEFORE any connection attempt.
+    const { exitCode, stderr } = await captureRun([project, "--db", "postgres://nope@127.0.0.1:1/none"]);
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("E-DBAUTH-NO-TENANT-COLUMN");
+    expect(stderr).toContain("ledger");
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+/**
+ * Run runDbMigrate while capturing process.exit + console.error/log. Returns
+ * `{ exitCode, stderr, stdout }`. process.exit is trapped by throwing a sentinel.
+ */
+async function captureRun(argv) {
+  const origExit = process.exit;
+  const origErr = console.error;
+  const origLog = console.log;
+  let exitCode = null;
+  let stderr = "";
+  let stdout = "";
+  // @ts-ignore
+  process.exit = (code) => { exitCode = code; throw new Error("__exit__"); };
+  console.error = (...a) => { stderr += a.join(" ") + "\n"; };
+  console.log = (...a) => { stdout += a.join(" ") + "\n"; };
+  try {
+    await runDbMigrate(argv);
+  } catch (e) {
+    if (e.message !== "__exit__") throw e;
+  } finally {
+    process.exit = origExit;
+    console.error = origErr;
+    console.log = origLog;
+  }
+  return { exitCode, stderr, stdout };
+}

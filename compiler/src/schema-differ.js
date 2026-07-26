@@ -7,6 +7,8 @@
  * @module schema-differ
  */
 
+import { quoteIdent } from "./codegen/sql-ident.ts";
+
 /**
  * Parse a < schema> AST node into structured table declarations.
  *
@@ -287,7 +289,7 @@ export function readActualSchema(db) {
   ).all();
 
   for (const { name } of tableNames) {
-    const columns = db.query(`PRAGMA table_info("${name}")`).all();
+    const columns = db.query(`PRAGMA table_info(${quoteIdent(name)})`).all();
     tables.push({
       name,
       columns: columns.map(c => ({
@@ -355,7 +357,7 @@ export function diffSchema(desired, actual, options = {}) {
     for (const col of table.columns) {
       // Check rename
       if (col.renameFrom && actualColMap.has(col.renameFrom)) {
-        sql.push(`ALTER TABLE "${table.name}" RENAME COLUMN "${col.renameFrom}" TO "${col.name}";`);
+        sql.push(`ALTER TABLE ${quoteIdent(table.name)} RENAME COLUMN ${quoteIdent(col.renameFrom)} TO ${quoteIdent(col.name)};`);
         continue;
       }
 
@@ -389,7 +391,7 @@ export function diffSchema(desired, actual, options = {}) {
         warnings.push(`W-SCHEMA-002: Dropping column "${actualCol.name}" from table "${table.name}" — data will be lost.`);
         if (driver === "postgres") {
           // S7-minimal fence: native per-column DROP; never rebuild-via-DROP-TABLE.
-          sql.push(`ALTER TABLE "${table.name}" DROP COLUMN "${actualCol.name}";`);
+          sql.push(`ALTER TABLE ${quoteIdent(table.name)} DROP COLUMN ${quoteIdent(actualCol.name)};`);
           continue;
         }
         // DROP COLUMN requires 12-step rebuild on older SQLite
@@ -430,7 +432,7 @@ export function diffSchema(desired, actual, options = {}) {
     if (!desiredMap.has(actualTable.name)) {
       if (options.allowDestructive) {
         warnings.push(`W-SCHEMA-002: Dropping table "${actualTable.name}" — all data will be lost.`);
-        sql.push(`DROP TABLE IF EXISTS "${actualTable.name}";`);
+        sql.push(`DROP TABLE IF EXISTS ${quoteIdent(actualTable.name)};`);
       } else {
         warnings.push(
           `W-SCHEMA-DESTRUCTIVE-DROP: table "${actualTable.name}" exists in the database but ` +
@@ -459,7 +461,7 @@ export function generateCreateTable(table, driver = "sqlite") {
     // on SQLite keep the affinity type (`col.type`) so existing output is
     // byte-identical.
     const columnType = driver === "postgres" ? mapPostgresType(col.scrmlType) : col.type;
-    let def = `"${col.name}" ${columnType}`;
+    let def = `${quoteIdent(col.name)} ${columnType}`;
     if (col.primaryKey) def += " PRIMARY KEY";
 
     // SQL-mirror NOT NULL OR shared-core req → NOT NULL.
@@ -469,7 +471,7 @@ export function generateCreateTable(table, driver = "sqlite") {
 
     if (col.unique) def += " UNIQUE";
     if (col.default !== null) def += ` DEFAULT (${col.default})`;
-    if (col.references) def += ` REFERENCES "${col.references.table}"("${col.references.column}")`;
+    if (col.references) def += ` REFERENCES ${quoteIdent(col.references.table)}(${quoteIdent(col.references.column)})`;
 
     // §39.5.8 shared-core lowering: append CHECK clauses (and the req empty-
     // string check for text/blob).
@@ -481,7 +483,7 @@ export function generateCreateTable(table, driver = "sqlite") {
     return "  " + def;
   });
 
-  return `CREATE TABLE "${table.name}" (\n${colDefs.join(",\n")}\n);`;
+  return `CREATE TABLE ${quoteIdent(table.name)} (\n${colDefs.join(",\n")}\n);`;
 }
 
 // ---------------------------------------------------------------------------
@@ -540,7 +542,7 @@ export function generateBoundedRoleDDL() {
  * @returns {string[]} the ordered DDL statements
  */
 export function generateDbAuthoritativeDDL(table) {
-  const t = `"${table.name}"`;
+  const t = quoteIdent(table.name);
   const tenantCol = (table.columns ?? []).find((c) => c.name === "tenant_id");
   const castType = tenantCol ? mapPostgresType(tenantCol.scrmlType) : null;
   const guc = `current_setting('${DBAUTH_TENANT_GUC}', true)`;
@@ -565,7 +567,7 @@ export function generateDbAuthoritativeDDL(table) {
  * Generate ALTER TABLE ADD COLUMN SQL.
  */
 function generateAddColumn(tableName, col, driver = "sqlite") {
-  let def = `ALTER TABLE "${tableName}" ADD COLUMN "${col.name}" ${col.type}`;
+  let def = `ALTER TABLE ${quoteIdent(tableName)} ADD COLUMN ${quoteIdent(col.name)} ${col.type}`;
 
   // NOT NULL on ADD COLUMN requires a default (handled by the diff
   // canSimpleAdd guard). When both shared-core req and a default are present,
@@ -575,7 +577,7 @@ function generateAddColumn(tableName, col, driver = "sqlite") {
 
   if (col.unique) def += " UNIQUE";
   if (col.default !== null) def += ` DEFAULT (${col.default})`;
-  if (col.references) def += ` REFERENCES "${col.references.table}"("${col.references.column}")`;
+  if (col.references) def += ` REFERENCES ${quoteIdent(col.references.table)}(${quoteIdent(col.references.column)})`;
 
   // Shared-core CHECK clauses (per §39.5.8).
   const checkClauses = lowerSharedCoreToChecks(col, driver);
@@ -624,7 +626,7 @@ function lowerSharedCoreToChecks(col, driver) {
   const out = [];
   const preds = col.sharedCorePredicates ?? [];
   const colName = col.name;
-  const quotedCol = `"${colName}"`;
+  const quotedCol = quoteIdent(colName);
 
   for (const p of preds) {
     switch (p.name) {
@@ -782,26 +784,26 @@ function generate12StepRebuild(desiredTable, actualTable, driver = "sqlite") {
 
   const selectCols = desiredCols.map(name => {
     if (renames.has(name) && actualCols.has(renames.get(name))) {
-      return `"${renames.get(name)}" AS "${name}"`;
+      return `${quoteIdent(renames.get(name))} AS ${quoteIdent(name)}`;
     }
     if (actualCols.has(name)) {
-      return `"${name}"`;
+      return `${quoteIdent(name)}`;
     }
     // New column — use default or NULL
     const col = desiredTable.columns.find(c => c.name === name);
     if (col?.default !== null) {
-      return `${col.default} AS "${name}"`;
+      return `${col.default} AS ${quoteIdent(name)}`;
     }
-    return `NULL AS "${name}"`;
+    return `NULL AS ${quoteIdent(name)}`;
   });
 
-  lines.push(`INSERT INTO "${tmpName}" (${desiredCols.map(n => `"${n}"`).join(", ")}) SELECT ${selectCols.join(", ")} FROM "${desiredTable.name}";`);
+  lines.push(`INSERT INTO ${quoteIdent(tmpName)} (${desiredCols.map(n => quoteIdent(n)).join(", ")}) SELECT ${selectCols.join(", ")} FROM ${quoteIdent(desiredTable.name)};`);
 
   // 3. Drop old table
-  lines.push(`DROP TABLE "${desiredTable.name}";`);
+  lines.push(`DROP TABLE ${quoteIdent(desiredTable.name)};`);
 
   // 4. Rename temp to final
-  lines.push(`ALTER TABLE "${tmpName}" RENAME TO "${desiredTable.name}";`);
+  lines.push(`ALTER TABLE ${quoteIdent(tmpName)} RENAME TO ${quoteIdent(desiredTable.name)};`);
 
   return lines;
 }
