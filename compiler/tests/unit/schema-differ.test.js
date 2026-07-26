@@ -4,6 +4,7 @@ import {
   diffSchema,
   generateCreateTable,
   generateDbAuthoritativeDDL,
+  findNonLiteralSetItems,
 } from "../../src/schema-differ.js";
 import { quoteIdent } from "../../src/codegen/sql-ident.ts";
 
@@ -1133,5 +1134,128 @@ describe("S288 regression: a regex quantifier brace must not truncate a table bo
     `);
     expect(tables[0].columns.map(c => c.name)).toEqual(["slug", "tenant_id"]);
     expect(tables[0].dbAuthoritative).toBe(true);
+  });
+});
+
+// ==========================================================================
+// S288 wave 2 — the `default(...)` sibling path + the E-SCHEMA-010 ruling.
+//
+// RediLedger caught the S288 `oneOf` fix as INCOMPLETE: `default("US")` emitted
+// `DEFAULT ("US")` — the identical literal-as-identifier class, in the sibling
+// path, one function away. The blast-radius question the first pass never asked
+// was "this lowering injects a literal — where ELSE can that land?"
+//
+// Plus a separate defect in the same argument: `default\(([^)]+)\)` stopped at
+// the FIRST `)`, so `default(now())` captured `now(` and emitted an unbalanced
+// `DEFAULT (now() )` that TRUNCATED the whole CREATE TABLE (surfacing as a
+// misleading Postgres "syntax error at or near ;"). It blocked 7 of 10 tables in
+// RediLedger's real schema.
+// ==========================================================================
+describe("S288 default(...) — balanced capture + SQL-literal lowering", () => {
+  const ddlOf = (body, driver = "postgres") =>
+    generateCreateTable(parseSchemaBlock(body).tables[0], driver);
+  const colOf = (body) => parseSchemaBlock(body).tables[0].columns[0];
+
+  test("REGRESSION: a function-call default captures BALANCED and emits balanced", () => {
+    expect(colOf(`t { created_at: timestamp default(now()) }`).default).toBe("now()");
+    const ddl = ddlOf(`t { created_at: timestamp default(now()) }`);
+    expect(ddl).toContain("DEFAULT (now())");
+    // The defect emitted `DEFAULT (now() )` — one paren short, truncating the DDL.
+    expect(ddl).not.toContain("DEFAULT (now() )");
+    // Balanced overall: the statement must still close.
+    expect((ddl.match(/\(/g) ?? []).length).toBe((ddl.match(/\)/g) ?? []).length);
+  });
+
+  test("REGRESSION: a double-quoted default lowers to a SQL string literal", () => {
+    const ddl = ddlOf(`t { country: text default("US") }`);
+    expect(ddl).toContain(`DEFAULT ('US')`);
+    // `"US"` is a SQL IDENTIFIER — the exact class the oneOf fix addressed.
+    expect(ddl).not.toContain(`DEFAULT ("US")`);
+  });
+
+  test("a single-quoted default is unchanged (inert)", () => {
+    expect(ddlOf(`t { country: text default('US') }`)).toContain(`DEFAULT ('US')`);
+  });
+
+  test("numeric and keyword defaults pass through verbatim", () => {
+    expect(ddlOf(`t { n: integer default(0) }`)).toContain("DEFAULT (0)");
+    // A bare SQL keyword/expression is LEGITIMATE here — the deliberate divergence
+    // from oneOf, where a bareword is meaningless and now hard-errors.
+    expect(ddlOf(`t { ts: timestamp default(CURRENT_TIMESTAMP) }`))
+      .toContain("DEFAULT (CURRENT_TIMESTAMP)");
+  });
+
+  test("a nested-call default survives (two levels of parens)", () => {
+    expect(colOf(`t { id: text default(lower(hex(randomblob(16)))) }`).default)
+      .toBe("lower(hex(randomblob(16)))");
+  });
+
+  test("a `)` inside a quoted default no longer truncates it", () => {
+    // findMatchingParen is now quote-aware (it was paren/bracket-aware only).
+    expect(colOf(`t { note: text default("a)b") }`).default).toBe(`"a)b"`);
+    expect(ddlOf(`t { note: text default("a)b") }`)).toContain(`DEFAULT ('a)b')`);
+  });
+});
+
+describe("S288 E-SCHEMA-010 — findNonLiteralSetItems (the bareword ruling)", () => {
+  const colOf = (body) => parseSchemaBlock(body).tables[0].columns[0];
+
+  test("a bare identifier is reported", () => {
+    const bad = findNonLiteralSetItems(colOf(`t { role: text oneOf([user, admin]) }`));
+    expect(bad.map((b) => b.item)).toEqual(["user", "admin"]);
+    expect(bad.every((b) => b.predicate === "oneOf")).toBe(true);
+  });
+
+  test("notIn is covered too", () => {
+    const bad = findNonLiteralSetItems(colOf(`t { s: text notIn([banned]) }`));
+    expect(bad).toHaveLength(1);
+    expect(bad[0].predicate).toBe("notIn");
+  });
+
+  test("every LITERAL form is clean — no false positives", () => {
+    for (const body of [
+      `t { a: text oneOf(["x","y"]) }`,
+      `t { b: text oneOf(['x','y']) }`,
+      `t { c: text oneOf([.Admin, .Editor]) }`,
+      `t { d: integer oneOf([1, 2, -3]) }`,
+      `t { e: boolean oneOf([true, false]) }`,
+      `t { f: text oneOf(["a,b"]) }`,
+    ]) {
+      expect(findNonLiteralSetItems(colOf(body))).toEqual([]);
+    }
+  });
+
+  test("a column with no set predicate is clean", () => {
+    expect(findNonLiteralSetItems(colOf(`t { a: text req length(>=2) }`))).toEqual([]);
+    expect(findNonLiteralSetItems({})).toEqual([]);
+  });
+
+  test("a `)` inside a quoted item no longer swallows the whole predicate", () => {
+    // Pre-S288 the quote-blind findMatchingParen closed the predicate early and
+    // the CHECK vanished entirely — a SILENT constraint downgrade.
+    const col = colOf(`t { k: text oneOf(["x); DROP TABLE u; --"]) }`);
+    expect(col.sharedCorePredicates.some((p) => p.name === "oneOf")).toBe(true);
+    expect(findNonLiteralSetItems(col)).toEqual([]);
+    const ddl = generateCreateTable(parseSchemaBlock(`t { k: text oneOf(["x); DROP TABLE u; --"]) }`).tables[0], "postgres");
+    // Quoted as ONE literal — the injection payload cannot break out.
+    expect(ddl).toContain(`CHECK ("k" IN ('x); DROP TABLE u; --'))`);
+  });
+});
+
+describe("S288 findMatchingParen — quote-aware with a quote-blind fallback", () => {
+  const colOf = (body) => parseSchemaBlock(body).tables[0].columns[0];
+
+  test("an unpaired apostrophe in a regex literal still resolves (the fallback)", () => {
+    // The quote-aware pass alone regressed this: `'` opened a quote that never
+    // closed, so the predicate was lost. Caught by an existing test, kept here
+    // explicitly because the fallback is easy to delete by accident.
+    const col = colOf(`t { s: text pattern(/o'brien/) }`);
+    const pat = col.sharedCorePredicates.find((p) => p.name === "pattern");
+    expect(pat).toBeDefined();
+    expect(pat.arg).toBe("/o'brien/");
+  });
+
+  test("balanced quotes still win over a `)` inside them", () => {
+    expect(colOf(`t { k: text default("a)b") }`).default).toBe(`"a)b"`);
   });
 });

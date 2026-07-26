@@ -261,9 +261,18 @@ function parseColumns(text) {
       sharedCorePredicates: [],
     };
 
-    // Parse default(...)
-    const defaultMatch = restStr.match(/default\(([^)]+)\)/i);
-    if (defaultMatch) col.default = defaultMatch[1];
+    // Parse default(...) — BALANCED scan, not `[^)]+`. The argument may itself
+    // contain parens (`default(now())`) or a quoted string containing one, and the
+    // old `default\(([^)]+)\)` stopped at the FIRST `)`: `default(now())` captured
+    // `now(`, which emitted an unbalanced `DEFAULT (now() )` that TRUNCATED the
+    // whole CREATE TABLE and surfaced as a misleading "syntax error at or near ;"
+    // from Postgres. Blocked 7 of 10 tables in RediLedger's real schema (S4).
+    const _defIdx = restStr.search(/\bdefault\s*\(/i);
+    if (_defIdx !== -1) {
+      const _defOpen = restStr.indexOf("(", _defIdx);
+      const _defClose = _defOpen === -1 ? -1 : findMatchingParen(restStr, _defOpen);
+      if (_defClose !== -1) col.default = restStr.slice(_defOpen + 1, _defClose).trim();
+    }
 
     // Parse references table(column)
     const refMatch = restStr.match(/references\s+(\w+)\((\w+)\)/i);
@@ -394,11 +403,40 @@ function parseSharedCorePredicates(restStr) {
  * if a future extension needs that, this helper will need string-tracking.)
  */
 function findMatchingParen(str, openIdx) {
+  // S288 — TWO-PASS, quote-aware first with a quote-BLIND fallback.
+  //
+  // Quote-awareness is needed because a `)` inside a string ARGUMENT closed the
+  // predicate early: `oneOf(["x); DROP TABLE u; --"])` yielded a column with NO
+  // CHECK AT ALL (a silent constraint downgrade — the same class as the pre-P2
+  // brace bug), and `default("a)b")` truncated the default value.
+  //
+  // But a scrml `pattern(/…/)` argument is a REGEX literal, which may carry an
+  // unpaired apostrophe (`pattern(/o'brien/)`). Treating that as an opening quote
+  // swallows the rest of the string and loses the predicate — a regression the
+  // quote-aware pass introduced and this fallback removes. Distinguishing a regex
+  // literal from a string generically is the division-vs-regex ambiguity, so
+  // instead: run quote-aware, and if it fails to close, re-run with quote-tracking
+  // OFF. Strictly no worse than the pre-S288 behavior in every case, and better
+  // whenever the quotes are actually balanced.
+  const hit = scanMatchingParen(str, openIdx, true);
+  return hit !== -1 ? hit : scanMatchingParen(str, openIdx, false);
+}
+
+function scanMatchingParen(str, openIdx, quoteAware) {
   if (str[openIdx] !== "(") return -1;
   let depth = 0;
   let bracketDepth = 0;
+  let quote = null;
   for (let i = openIdx; i < str.length; i++) {
     const ch = str[i];
+    if (quoteAware) {
+      if (quote) {
+        if (ch === "\\") { i++; continue; }
+        if (ch === quote) quote = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'") { quote = ch; continue; }
+    }
     if (ch === "(") depth++;
     else if (ch === ")") {
       depth--;
@@ -655,7 +693,7 @@ export function generateCreateTable(table, driver = "sqlite") {
     if (wantsNotNull) def += " NOT NULL";
 
     if (col.unique) def += " UNIQUE";
-    if (col.default !== null) def += ` DEFAULT (${col.default})`;
+    if (col.default !== null) def += ` DEFAULT (${lowerDefaultToSql(col.default)})`;
     if (col.references) def += ` REFERENCES ${quoteIdent(col.references.table)}(${quoteIdent(col.references.column)})`;
 
     // §39.5.8 shared-core lowering: append CHECK clauses (and the req empty-
@@ -970,7 +1008,7 @@ function generateAddColumn(tableName, col, driver = "sqlite") {
   if (wantsNotNull) def += " NOT NULL";
 
   if (col.unique) def += " UNIQUE";
-  if (col.default !== null) def += ` DEFAULT (${col.default})`;
+  if (col.default !== null) def += ` DEFAULT (${lowerDefaultToSql(col.default)})`;
   if (col.references) def += ` REFERENCES ${quoteIdent(col.references.table)}(${quoteIdent(col.references.column)})`;
 
   // Shared-core CHECK clauses (per §39.5.8).
@@ -1153,6 +1191,31 @@ function stripArrayLiteral(arg) {
 }
 
 /**
+ * Lower a `default(...)` value from its scrml form to its SQL form.
+ *
+ * A scrml STRING literal in either quote form lowers to a SQL single-quoted
+ * string literal — `default("US")` previously emitted `DEFAULT ("US")`, a SQL
+ * IDENTIFIER, failing at apply with `column "US" does not exist`. That is the
+ * SAME literal-as-identifier class the S288 `oneOf` fix addressed, in the sibling
+ * path: the fix landed on the item list and MISSED `default()`, one function
+ * away. RediLedger caught the incomplete fix (S4).
+ *
+ * Anything that is NOT a scrml literal is passed through VERBATIM, and here that
+ * is CORRECT rather than a fallback: a `default()` argument is legitimately a SQL
+ * expression — `default(now())`, `default(CURRENT_TIMESTAMP)`, `default(gen_random_uuid())`.
+ * This is the deliberate divergence from `oneOf`/`notIn`, where a non-literal item
+ * is meaningless and now hard-errors (`E-SCHEMA-010`). Same helper, different
+ * disposition for the same residue, because the two positions genuinely differ.
+ *
+ * @returns {string}
+ */
+function lowerDefaultToSql(rawDefault) {
+  if (typeof rawDefault !== "string") return rawDefault;
+  const lowered = lowerArrayItemToSqlLiteral(rawDefault);
+  return lowered === null ? rawDefault : lowered;
+}
+
+/**
  * Split an array-literal's interior on TOP-LEVEL commas, honoring string
  * literals (`"…"` / `'…'`, with backslash escapes) and nested `(`/`[`/`{`
  * grouping. `"a,b", 'c'` → `['"a,b"', "'c'"]`.
@@ -1263,10 +1326,41 @@ function lowerArrayLiteralToSqlItems(arg) {
   const lowered = [];
   for (const item of items) {
     const sql = lowerArrayItemToSqlLiteral(item);
-    if (sql === null) return inner; // unrecognized shape → verbatim (pre-fix behavior)
+    // Unrecognized shape → whole list verbatim. Reaching the emitter with one is
+    // now a compile error (`E-SCHEMA-010`, `findNonLiteralSetItems`), so this is
+    // the belt-and-braces path for a caller that skipped the check (e.g. an older
+    // `scrml db-migrate` invocation against a source the compiler never saw).
+    if (sql === null) return inner;
     lowered.push(sql);
   }
   return lowered.join(", ");
+}
+
+/**
+ * §39.5.8 / `E-SCHEMA-010` — the `oneOf([…])` / `notIn([…])` items on a column
+ * that are NOT scrml literals (in practice: a BARE IDENTIFIER, `oneOf([user, admin])`).
+ *
+ * §39.5.8 specifies a *literal* list, and a bareword is not one — it lowers to a
+ * SQL identifier and fails at apply with `column "user" does not exist`. RULED
+ * S288 (bryan, option b): reject it at COMPILE time rather than widen a bareword
+ * into a string. Rejecting is the reversible direction, it moves the failure from
+ * mid-migration to compile, and the migration cost was measured at zero — the only
+ * two sites teaching the form were scrml's own reference doc, corrected in #191.
+ *
+ * @param {{ sharedCorePredicates?: Array<{name: string, arg: string|null}> }} col
+ * @returns {Array<{ predicate: string, item: string }>} empty when the column is clean
+ */
+export function findNonLiteralSetItems(col) {
+  const out = [];
+  for (const p of col?.sharedCorePredicates ?? []) {
+    if (p?.name !== "oneOf" && p?.name !== "notIn") continue;
+    const inner = stripArrayLiteral(p.arg);
+    if (inner === null || inner.length === 0) continue;
+    for (const item of splitTopLevelItems(inner)) {
+      if (lowerArrayItemToSqlLiteral(item) === null) out.push({ predicate: p.name, item });
+    }
+  }
+  return out;
 }
 
 /**
