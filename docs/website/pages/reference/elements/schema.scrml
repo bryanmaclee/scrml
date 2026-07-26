@@ -76,7 +76,7 @@
     email: text not null unique
     name:  text req length(&gt;=2)
     age:   integer min(18) max(120)
-    role:  text default('user') oneOf([user, admin])
+    role:  text default('user') oneOf(["user", "admin"])
   &#125;
 
   posts &#123;
@@ -149,9 +149,11 @@
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">pattern(re)</code>
                 lowers driver-dependent (Postgres &#126;, SQLite/MySQL
                 REGEXP);
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">oneOf([a, b, c])</code>
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">oneOf(["a", "b"])</code>
                 lowers to
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">CHECK (col IN (a, b, c))</code>.
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">CHECK (col IN ('a', 'b'))</code>
+                (each scrml string literal becomes a SQL string literal &#8212; write
+                the values QUOTED; a bare word is not a literal).
             </li>
             <li>
                 <strong>SQL passthrough is inviolable.</strong> SQL

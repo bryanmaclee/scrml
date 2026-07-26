@@ -659,14 +659,19 @@ describe("schema-differ §9 (C17): shared-core lowering to DDL (sqlite)", () => 
     expect(sql[0]).toContain(`CHECK ("b" != 0)`);
   });
 
-  test("oneOf([...]) → CHECK (col IN (...)) — verbatim list", () => {
+  // S288: the item list is no longer emitted VERBATIM — each scrml literal is
+  // lowered to its SQL literal form, and the separator is normalized to `, ` to
+  // match the OUTPUT the SPEC specifies (§39.5.8's bare-variant-enum row and
+  // §41.15.6 both show `CHECK (col IN ('Variant1', 'Variant2', ...))`). The
+  // VALUES here are unchanged — single-quoted input was already conformant.
+  test("oneOf([...]) → CHECK (col IN (...)) — SQL string literals", () => {
     const desired = parseSchemaBlock(`
       users {
         role: text oneOf(['admin','editor','viewer'])
       }
     `);
     const { sql } = diffSchema(desired, { tables: [] });
-    expect(sql[0]).toContain(`CHECK ("role" IN ('admin','editor','viewer'))`);
+    expect(sql[0]).toContain(`CHECK ("role" IN ('admin', 'editor', 'viewer'))`);
   });
 
   test("notIn([...]) → CHECK (col NOT IN (...))", () => {
@@ -676,7 +681,7 @@ describe("schema-differ §9 (C17): shared-core lowering to DDL (sqlite)", () => 
       }
     `);
     const { sql } = diffSchema(desired, { tables: [] });
-    expect(sql[0]).toContain(`CHECK ("status" NOT IN ('banned','deleted'))`);
+    expect(sql[0]).toContain(`CHECK ("status" NOT IN ('banned', 'deleted'))`);
   });
 });
 
@@ -776,10 +781,10 @@ describe("schema-differ §11 (C17): mixed SQL-mirror + shared-core", () => {
     `);
     const { sql } = diffSchema(desired, { tables: [] });
     expect(sql[0]).toContain(`REFERENCES "kinds"("id")`);
-    expect(sql[0]).toContain(`CHECK ("kind" IN ('draft','published'))`);
+    expect(sql[0]).toContain(`CHECK ("kind" IN ('draft', 'published'))`);
   });
 
-  test("worked example from SPEC §39.5.8 — verbatim regression", () => {
+  test("worked example from SPEC §39.5.8 — full-column-set regression", () => {
     // SPEC.md §39.5.8 worked example (line 16452+):
     //   id, email (SQL-mirror), name (req length(>=2)), age (min/max),
     //   role (oneOf), bio (length(<=500)), created_at (default timestamp)
@@ -803,7 +808,7 @@ describe("schema-differ §11 (C17): mixed SQL-mirror + shared-core", () => {
     expect(create).toContain(`CHECK (length("name") >= 2)`);
     expect(create).toContain(`CHECK ("age" >= 18)`);
     expect(create).toContain(`CHECK ("age" <= 120)`);
-    expect(create).toContain(`CHECK ("role" IN ('admin','editor','viewer'))`);
+    expect(create).toContain(`CHECK ("role" IN ('admin', 'editor', 'viewer'))`);
     expect(create).toContain(`CHECK (length("bio") <= 500)`);
     expect(create).toContain(`"created_at" TEXT DEFAULT (CURRENT_TIMESTAMP)`);
     // bio has no req, so no NOT NULL — only the length check.
@@ -986,5 +991,147 @@ describe("schema-differ §15 (C17): ADD COLUMN with shared-core req", () => {
     expect(sql.some(s => s.includes("_scrml_tmp_users"))).toBe(true);
     // Rebuild's CREATE has the new req column with NOT NULL + check.
     expect(sql.some(s => s.includes("CREATE TABLE") && s.includes("_scrml_tmp_users") && s.includes("NOT NULL"))).toBe(true);
+  });
+});
+
+// ==========================================================================
+// S288 — `oneOf`/`notIn` CHECK item lowering (g-db-migrate-check-constraint-
+// oneof-pattern, RediLedger-reported).
+//
+// THE DEFECT: the item list was passed VERBATIM into the SQL `IN (…)` clause.
+// scrml's CANONICAL string quote is `"` (§5.1, §4.18.3) and `"` is SQL's
+// IDENTIFIER quote, so `oneOf(["income","expense"])` emitted
+// `CHECK ("kind" IN ("income","expense"))` — an identifier reference. Reproduced
+// end-to-end through `scrml db-migrate` against real PG16:
+// `column "income" does not exist`, whole migration rolled back.
+//
+// The specified OUTPUT was never the verbatim text: §39.5.8's own bare-variant-
+// enum row, §41.15.6 and §53.15 all state `CHECK (col IN ('Variant1', …))` —
+// SQL single-quoted STRING literals. So this is a conformance restoration
+// (pa-base §8 "toward the contract"), and §39.5.8's "verbatim" note is corrected
+// in the same landing.
+// ==========================================================================
+describe("S288 oneOf/notIn — scrml literal → SQL literal lowering", () => {
+  const colDDL = (body, driver = "postgres") => {
+    const parsed = parseSchemaBlock(body);
+    return generateCreateTable(parsed.tables[0], driver);
+  };
+
+  test("REGRESSION: double-quoted (CANONICAL scrml) values lower to SQL string literals", () => {
+    const ddl = colDDL(`t { kind: text oneOf(["income","expense"]) }`);
+    expect(ddl).toContain(`CHECK ("kind" IN ('income', 'expense'))`);
+    // The defect shape must be gone — `"income"` is a SQL identifier.
+    expect(ddl).not.toContain(`IN ("income"`);
+  });
+
+  test("single-quoted values still lower to the same SQL string literals (inert)", () => {
+    const ddl = colDDL(`t { kind: text oneOf(['income','expense']) }`);
+    expect(ddl).toContain(`CHECK ("kind" IN ('income', 'expense'))`);
+  });
+
+  test("notIn lowers identically, as NOT IN", () => {
+    const ddl = colDDL(`t { status: text notIn(["banned","deleted"]) }`);
+    expect(ddl).toContain(`CHECK ("status" NOT IN ('banned', 'deleted'))`);
+  });
+
+  test("bare-variant literals lower to their variant NAME as a string (§41.15.6)", () => {
+    const ddl = colDDL(`t { role: text oneOf([.Admin, .Editor]) }`);
+    expect(ddl).toContain(`CHECK ("role" IN ('Admin', 'Editor'))`);
+  });
+
+  test("numeric and boolean literals lower verbatim", () => {
+    expect(colDDL(`t { n: integer oneOf([1, 2, -3, 4.5]) }`))
+      .toContain(`CHECK ("n" IN (1, 2, -3, 4.5))`);
+    expect(colDDL(`t { b: boolean oneOf([true, false]) }`))
+      .toContain(`CHECK ("b" IN (true, false))`);
+  });
+
+  test("a comma INSIDE a string value does not split the item list", () => {
+    const ddl = colDDL(`t { k: text oneOf(["a,b","c"]) }`);
+    expect(ddl).toContain(`CHECK ("k" IN ('a,b', 'c'))`);
+  });
+
+  test("an embedded single-quote is SQL-escaped by doubling (no literal break-out)", () => {
+    const ddl = colDDL(`t { k: text oneOf(["it's"]) }`);
+    expect(ddl).toContain(`CHECK ("k" IN ('it''s'))`);
+    // A single un-doubled quote would close the literal and leave trailing SQL.
+    expect(ddl).not.toContain(`IN ('it's')`);
+  });
+
+  test("SQLite lowers identically (the item form is driver-independent)", () => {
+    const ddl = colDDL(`t { kind: text oneOf(["income","expense"]) }`, "sqlite");
+    expect(ddl).toContain(`CHECK ("kind" IN ('income', 'expense'))`);
+  });
+
+  test("OPEN RULING — a bare identifier is NOT a literal, so the list is left verbatim", () => {
+    // `oneOf([user, admin])` is the form scrml's OWN reference doc teaches
+    // (docs/website/pages/reference/elements/schema.scrml). It is not a literal,
+    // §39.5.8 specifies a "literal list", and BOTH available dispositions
+    // (treat-as-string = a widening / hard-error = newly-rejecting) are rulings.
+    // Until ruled, behavior is UNCHANGED from pre-fix — this test pins that, and
+    // is the one to flip when the ruling lands.
+    const ddl = colDDL(`t { role: text oneOf([user, admin]) }`);
+    expect(ddl).toContain(`CHECK ("role" IN (user, admin))`);
+  });
+
+  test("all-or-nothing: ONE unrecognized item leaves the WHOLE list verbatim", () => {
+    // A mixed list (some items converted, some raw) would be incoherent; silently
+    // DROPPING the CHECK would be a silent constraint downgrade.
+    const ddl = colDDL(`t { k: text oneOf(["quoted", bare]) }`);
+    expect(ddl).toContain(`CHECK ("k" IN ("quoted", bare))`);
+  });
+});
+
+// ==========================================================================
+// S288 — regression lock for the `pattern(/…{n}…/)` quantifier-brace bug
+// (sub-bug 3 of g-db-migrate-check-constraint-oneof-pattern).
+//
+// This was FIXED by the P2 `parseSchemaBlock` brace-depth rewrite (`1c8aef79`),
+// NOT by this landing — but it was never regression-locked, and the pre-P2
+// symptom was far worse than the reported "spurious W-DBAUTH-MARKER-NEARMISS":
+// the old `/(\w+)\s*\{([^}]*)\}/g` table scanner truncated the table body at the
+// regex quantifier's `}`, so the columns AFTER it AND the trailing
+// `db-authoritative` marker were both lost — the table SILENTLY DOWNGRADED to a
+// plain table with NO RLS, NO FORCE, and NO tenant policy, exit 0. Verified on
+// pre-P2 `79cd79ce`: a 3-table schema shipped 2 of 3 db-authoritative tables
+// with zero security DDL.
+// ==========================================================================
+describe("S288 regression: a regex quantifier brace must not truncate a table body", () => {
+  const SRC = `
+    accounts {
+      id: uuid primary key
+      code: text pattern(/^[0-9]{4}$/)
+      tenant_id: text not null
+      memo: text
+    } db-authoritative
+  `;
+
+  test("every column AFTER a {n}-quantifier column survives the parse", () => {
+    const { tables } = parseSchemaBlock(SRC);
+    expect(tables).toHaveLength(1);
+    const names = tables[0].columns.map(c => c.name);
+    expect(names).toEqual(["id", "code", "tenant_id", "memo"]);
+  });
+
+  test("the db-authoritative marker still attaches (no silent security downgrade)", () => {
+    const { tables } = parseSchemaBlock(SRC);
+    expect(tables[0].dbAuthoritative).toBe(true);
+  });
+
+  test("the pattern predicate itself survives and lowers to a CHECK", () => {
+    const { tables } = parseSchemaBlock(SRC);
+    const ddl = generateCreateTable(tables[0], "postgres");
+    expect(ddl).toContain(`CHECK ("code" ~ '^[0-9]{4}$')`);
+  });
+
+  test("a {n,m} range quantifier is handled the same way", () => {
+    const { tables } = parseSchemaBlock(`
+      books {
+        slug: text pattern(/^[a-z]{3,32}$/)
+        tenant_id: text not null
+      } db-authoritative
+    `);
+    expect(tables[0].columns.map(c => c.name)).toEqual(["slug", "tenant_id"]);
+    expect(tables[0].dbAuthoritative).toBe(true);
   });
 });

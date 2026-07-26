@@ -1076,13 +1076,13 @@ function lowerSharedCoreToChecks(col, driver) {
         out.push(`CHECK (${quotedCol} != ${p.arg})`);
         break;
       case "oneOf": {
-        const items = stripArrayLiteral(p.arg);
+        const items = lowerArrayLiteralToSqlItems(p.arg);
         if (items === null) break;
         out.push(`CHECK (${quotedCol} IN (${items}))`);
         break;
       }
       case "notIn": {
-        const items = stripArrayLiteral(p.arg);
+        const items = lowerArrayLiteralToSqlItems(p.arg);
         if (items === null) break;
         out.push(`CHECK (${quotedCol} NOT IN (${items}))`);
         break;
@@ -1138,9 +1138,10 @@ function stripPatternLiteral(arg) {
 
 /**
  * Extract array-literal contents from `oneOf([v1, v2, ...])` or
- * `notIn([...])`. Returns the verbatim contents (without surrounding `[` `]`),
- * suitable for direct injection into a SQL `IN (...)` clause. Items are passed
- * through verbatim — string literals retain their quotes, numerics their digits.
+ * `notIn([...])`. Returns the verbatim contents (without surrounding `[` `]`).
+ *
+ * This is the RAW extraction only — see `lowerArrayLiteralToSqlItems` for the
+ * SQL-literal lowering that callers actually emit into a `CHECK … IN (…)`.
  *
  * @returns {string|null}
  */
@@ -1149,6 +1150,123 @@ function stripArrayLiteral(arg) {
   const trimmed = arg.trim();
   if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) return null;
   return trimmed.slice(1, -1).trim();
+}
+
+/**
+ * Split an array-literal's interior on TOP-LEVEL commas, honoring string
+ * literals (`"…"` / `'…'`, with backslash escapes) and nested `(`/`[`/`{`
+ * grouping. `"a,b", 'c'` → `['"a,b"', "'c'"]`.
+ *
+ * @param {string} inner — the text between `[` and `]`
+ * @returns {string[]}
+ */
+function splitTopLevelItems(inner) {
+  const items = [];
+  let depth = 0;
+  let quote = null;
+  let start = 0;
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i];
+    if (quote) {
+      if (ch === "\\") { i++; continue; }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; continue; }
+    if (ch === "(" || ch === "[" || ch === "{") { depth++; continue; }
+    if (ch === ")" || ch === "]" || ch === "}") { depth--; continue; }
+    if (ch === "," && depth === 0) {
+      items.push(inner.slice(start, i));
+      start = i + 1;
+    }
+  }
+  items.push(inner.slice(start));
+  return items.map((s) => s.trim()).filter((s) => s.length > 0);
+}
+
+/**
+ * Lower ONE `oneOf`/`notIn` array item from scrml source form to its SQL
+ * literal form. Returns `null` if the item is not a shape this lowering is
+ * specified for (see `lowerArrayLiteralToSqlItems` for the all-or-nothing rule).
+ *
+ * scrml source form            → SQL literal
+ *   `"income"` (CANONICAL)     → `'income'`
+ *   `'income'`                 → `'income'`
+ *   `.Admin`   (bare variant)  → `'Admin'`     (§53.15 / §41.15.6)
+ *   `42`, `-1`, `3.5`          → verbatim
+ *   `true` / `false`           → verbatim
+ *
+ * @returns {string|null}
+ */
+function lowerArrayItemToSqlLiteral(item) {
+  const t = item.trim();
+  if (t.length === 0) return null;
+
+  // scrml string literal → SQL string literal. scrml's CANONICAL string quote is
+  // `"` (§5.1 attribute strings, §4.18.3 display-text), which in SQL is an
+  // IDENTIFIER quote — passing it through verbatim is the g-db-migrate-check-
+  // constraint-oneof-pattern defect (`IN ("income")` → `column "income" does not
+  // exist`). Both quote forms normalize to a SQL single-quoted literal.
+  if ((t.startsWith('"') && t.endsWith('"') && t.length >= 2) ||
+      (t.startsWith("'") && t.endsWith("'") && t.length >= 2)) {
+    const raw = t.slice(1, -1).replace(/\\(["'\\])/g, "$1");
+    return `'${escapeSqlString(raw)}'`;
+  }
+
+  // Bare-variant literal `.Admin` → the variant NAME as a string. §41.15.6:
+  // "The variant-literal `.Admin` mechanically lowers to the string `'Admin'`
+  // exactly as a bare enum field does — no new mini-DSL."
+  const variant = /^\.([A-Za-z_][A-Za-z0-9_]*)$/.exec(t);
+  if (variant) return `'${escapeSqlString(variant[1])}'`;
+
+  // Numeric literal → verbatim.
+  if (/^-?\d+(?:\.\d+)?$/.test(t)) return t;
+
+  // Boolean literal → verbatim (SQL TRUE/FALSE).
+  if (t === "true" || t === "false") return t;
+
+  // Anything else (notably a BARE IDENTIFIER — `oneOf([user, admin])`) is NOT a
+  // literal, and §39.5.8 specifies a "literal list". Unhandled here on purpose:
+  // treating a bareword as a string would INVENT a meaning the SPEC does not
+  // state (a widening — pa-base §8), and rejecting it is a newly-rejecting
+  // change owing a ruling. Both are bryan's call; until then the caller
+  // preserves the pre-existing verbatim behavior for such lists.
+  return null;
+}
+
+/**
+ * Lower an `oneOf([…])` / `notIn([…])` argument to the SQL `IN (…)` item list.
+ *
+ * ALL-OR-NOTHING: if EVERY item lowers to a specified SQL literal, the lowered
+ * list is returned; if ANY item is an unrecognized shape, the ENTIRE interior is
+ * returned VERBATIM — the exact pre-fix behavior. A mixed list (some items
+ * converted, some raw) would be incoherent, and silently DROPPING the CHECK
+ * would be a silent constraint downgrade (the failure class the §14.8.11 M2
+ * near-miss guard exists to prevent).
+ *
+ * Governing sentences (§39.5.8 + §41.15.6 + §53.15): the specified OUTPUT of the
+ * enum/`oneOf` lowering is `CHECK (col IN ('Variant1', 'Variant2', …))` — SQL
+ * single-quoted STRING literals. §39.5.8's "the literal list is verbatim to the
+ * SQL `IN` clause" note only produces that output when the author happens to
+ * have written SQL-flavored single quotes, and is corrected in the same landing.
+ *
+ * @returns {string|null}
+ */
+function lowerArrayLiteralToSqlItems(arg) {
+  const inner = stripArrayLiteral(arg);
+  if (inner === null) return null;
+  if (inner.length === 0) return inner;
+
+  const items = splitTopLevelItems(inner);
+  if (items.length === 0) return inner;
+
+  const lowered = [];
+  for (const item of items) {
+    const sql = lowerArrayItemToSqlLiteral(item);
+    if (sql === null) return inner; // unrecognized shape → verbatim (pre-fix behavior)
+    lowered.push(sql);
+  }
+  return lowered.join(", ");
 }
 
 /**
