@@ -29,7 +29,7 @@ turnkey-from-source. The M1 negative test must pass THROUGH the CLI.
 - [x] `extractDesiredSchema(fileAST)` in db-authoritative.ts (reuses the schema-body walk).
 - [x] `compiler/src/commands/db-migrate.js` — argv, PG apply flow, SQLite apply, dry-run.
 - [x] `cli.js` registration (guard + dispatch + help).
-- [ ] SPEC §14.8.11.1 (apply seam) + W-SCHEMA-DESTRUCTIVE-DROP §34 registration.
+- [x] SPEC §14.8.11.1 (apply seam) + W-SCHEMA-DESTRUCTIVE-DROP §34/§39.12 registration. (28ee1921)
 - [x] Tests: through-CLI PG acceptance (skip-graceful), argv/fence/diff unit, SQLite smoke.
 
 ## Acceptance gate — PASSED (this session, real PG16)
