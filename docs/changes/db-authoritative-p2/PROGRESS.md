@@ -29,7 +29,7 @@ the acceptance gate asserts `proconfig` contains `search_path=pg_catalog, public
 - [x] 1. parseSchemaBlock brace-depth-aware upgrade (+ `fns`) + backward-compat regression test
       (also: `immutable` keyword parse in parseColumns; introspect self-verify now KEEPS balanced-brace
        defaults like jsonb `'{}'` — data-fidelity gain, sibling drop-path test added)
-- [ ] 2. S3 immutable column keyword + GRANT reshape (byte-identical when zero immutable)
+- [x] 2. S3 immutable column keyword + GRANT reshape (byte-identical when zero immutable)
 - [ ] 3. S4 generateSecdefDDL (owner role + hardened CREATE FUNCTION + EXECUTE lockdown) + scrml_has_cap
 - [ ] 4. caps-GUC injection in wrapPrincipalTxn + `_scrml_active_caps` resolver
 - [ ] 5. M2 apply-seam wiring (extractDesiredSchema fns → diffSchema; classifyStatement function/role kinds)

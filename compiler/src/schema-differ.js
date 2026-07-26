@@ -710,6 +710,16 @@ export function generateBoundedRoleDDL() {
  * falls back to a text compare (M1 keys tenant isolation on `tenant_id`; a
  * db-authoritative table is expected to carry one — the §14.8.10 convention).
  *
+ * §14.8.11.2 S3 (writes-authority) — a per-column `immutable` keyword narrows the
+ * bounded role's write authority. A Postgres column-level `REVOKE` CANNOT narrow a
+ * table-level `GRANT`, so when ANY column is `immutable` the blanket table-level
+ * `GRANT … UPDATE …` is RE-SHAPED to `GRANT SELECT, INSERT, DELETE` + a `REVOKE
+ * UPDATE` (clears any prior table-level UPDATE, e.g. from an M1 migration) + a
+ * column-scoped `GRANT UPDATE (<mutable cols>)`. Result: `scrml_app` can never
+ * UPDATE an immutable column — the sole sanctioned path is the S4 SECDEF choke.
+ * ANTI-REGRESSION: a table with ZERO immutable columns emits BYTE-IDENTICAL to M1
+ * (the single table-level `GRANT SELECT, INSERT, UPDATE, DELETE`).
+ *
  * @param {TableDecl} table — a table with `dbAuthoritative: true`
  * @returns {string[]} the ordered DDL statements
  */
@@ -720,11 +730,35 @@ export function generateDbAuthoritativeDDL(table) {
   const guc = `current_setting('${DBAUTH_TENANT_GUC}', true)`;
   const rhs = castType ? `${guc}::${castType}` : guc;
 
+  const cols = table.columns ?? [];
+  const immutableCols = cols.filter((c) => c.immutable);
+
+  // S6 — the bounded role's write grant.
+  let grantStmts;
+  if (immutableCols.length === 0) {
+    // No immutable columns → BYTE-IDENTICAL to M1 (a single table-level grant).
+    grantStmts = [`GRANT SELECT, INSERT, UPDATE, DELETE ON ${t} TO ${DBAUTH_ROLE};`];
+  } else {
+    // S3 — column-scoped write authority: no table-level UPDATE, only the mutable
+    // columns. The REVOKE UPDATE clears any prior table-level grant (idempotent —
+    // harmless on a fresh table, load-bearing when migrating from M1).
+    const mutableCols = cols.filter((c) => !c.immutable);
+    grantStmts = [
+      `GRANT SELECT, INSERT, DELETE ON ${t} TO ${DBAUTH_ROLE};`,
+      `REVOKE UPDATE ON ${t} FROM ${DBAUTH_ROLE};`,
+    ];
+    if (mutableCols.length > 0) {
+      const colList = mutableCols.map((c) => quoteIdent(c.name)).join(", ");
+      grantStmts.push(`GRANT UPDATE (${colList}) ON ${t} TO ${DBAUTH_ROLE};`);
+    }
+    // (all columns immutable → no UPDATE grant at all — insert-once, never-update.)
+  }
+
   return [
     // S6 — the bounded principal role (idempotent).
     generateBoundedRoleDDL(),
-    // S6 — grant the bounded role exactly CRUD on this table (no DDL, no BYPASS).
-    `GRANT SELECT, INSERT, UPDATE, DELETE ON ${t} TO ${DBAUTH_ROLE};`,
+    // S6 — grant the bounded role its write authority (table-level, or S3 column-scoped).
+    ...grantStmts,
     // S1 — turn RLS on and FORCE it (so even the table owner is subject to it).
     `ALTER TABLE ${t} ENABLE ROW LEVEL SECURITY;`,
     `ALTER TABLE ${t} FORCE ROW LEVEL SECURITY;`,
