@@ -587,6 +587,19 @@ export function diffSchema(desired, actual, options = {}) {
         sql.push(...generateDbAuthoritativeDDL(table));
       }
     }
+    // §14.8.11.2 S4 — the SECURITY-DEFINER mutation choke. Emitted AFTER the
+    // db-authoritative table DDL (the tables + tenant policy + bounded role must
+    // exist first). The `scrml_has_cap` read helper is emitted ONCE when any `fn`
+    // is present. All SECDEF/owner-role/grant statements are idempotent (CREATE OR
+    // REPLACE FUNCTION, DO-block role, idempotent GRANT/REVOKE), so a re-migration
+    // re-asserts them — and scrml NEVER emits a DROP FUNCTION / DROP ROLE, so the
+    // never-clobber fence holds by construction for these objects.
+    const fns = desired.fns ?? [];
+    if (fns.length > 0) {
+      const dbAuthTables = desired.tables.filter((t) => t.dbAuthoritative).map((t) => t.name);
+      sql.push(generateScrmlHasCapDDL());
+      for (const fn of fns) sql.push(...generateSecdefDDL(fn, dbAuthTables));
+    }
   }
 
   // 3. Dropped tables (in actual but not desired).
@@ -684,6 +697,14 @@ export const DBAUTH_ROLE = "scrml_app";
 export const DBAUTH_POLICY = "scrml_tenant_iso";
 /** The transaction-scoped GUC carrying the pinned tenant scalar (S2). */
 export const DBAUTH_TENANT_GUC = "scrml.tenant";
+/**
+ * §14.8.11.2 S4 — the transaction-scoped GUC carrying the principal's capability
+ * SET as a JSON array (`["void","reconcile"]`). Injected alongside the tenant GUC
+ * by the A1 wrapper (server-resolved, never client-supplied — the E-REACTIVE-003
+ * discipline `tenantId` already follows) and READ by the `scrml_has_cap(text)`
+ * helper inside a SECURITY-DEFINER body.
+ */
+export const DBAUTH_CAPS_GUC = "scrml.principal.caps";
 
 /**
  * Emit the S6 bounded-role DDL. Cluster-global and app-shared (a PG role is
@@ -767,6 +788,158 @@ export function generateDbAuthoritativeDDL(table) {
     `DROP POLICY IF EXISTS ${DBAUTH_POLICY} ON ${t};`,
     `CREATE POLICY ${DBAUTH_POLICY} ON ${t} USING ("tenant_id" = ${rhs});`,
   ];
+}
+
+// ---------------------------------------------------------------------------
+// §14.8.11.2 DB-authoritative tier (Milestone 2 — writes-authoritative, Postgres).
+//
+// P2 is the FIRST milestone that crosses the §14.8.10 invariant/policy firewall:
+// scrml begins emitting AUTHORIZATION (who-may-perform-which-operation), not just
+// relocating the isolation invariant. The S4 SECURITY-DEFINER mutation choke is the
+// sole sanctioned write path for a column `scrml_app` was revoked from (S3).
+//
+// SECDEF HARDENING is a CODEGEN INVARIANT (a SECDEF that forgot `SET search_path`
+// is a CVE-2020-25695 privesc hole — WORSE than no enforcement):
+//   • SECURITY DEFINER SET search_path = pg_catalog, public
+//       (pg_catalog FIRST pins the built-ins against shadowing; public is REQUIRED
+//        so the body's unqualified table refs — `UPDATE invoices …` in public —
+//        resolve. `pg_temp` is deliberately NOT on the path.)
+//   • owned by a bounded NOLOGIN owner role DISTINCT from scrml_app (a SECDEF runs
+//     AS its owner; scrml_app lacks the immutable-column UPDATE, a superuser would
+//     over-privilege the choke).
+//   • REVOKE EXECUTE FROM PUBLIC + GRANT EXECUTE TO scrml_app (no ambient EXECUTE).
+// Every identifier is escaped via quoteIdent (the M2-HIGH lesson) — and the parser
+// already constrained fn/owner/arg names to `[A-Za-z_]\w*`, so a `$` can never
+// enter and break a dollar-quote.
+// ---------------------------------------------------------------------------
+
+/**
+ * §14.8.11.2 S4 — the `scrml_has_cap(text)` read helper. Emitted ONCE per apply
+ * (idempotent CREATE OR REPLACE) when a schema declares ≥1 SECDEF `fn`. Reads the
+ * txn-scoped `scrml.principal.caps` JSON-array GUC; a missing/unpinned GUC yields
+ * FALSE (fail-closed — no caps ⇒ no privileged mutation). NOT security-definer
+ * (a pure GUC read needs no elevated privilege); still search_path-pinned so the
+ * `::jsonb` cast + `?` operator resolve to pg_catalog and cannot be shadowed.
+ *
+ * @returns {string}
+ */
+export function generateScrmlHasCapDDL() {
+  return (
+    `CREATE OR REPLACE FUNCTION scrml_has_cap(cap text) RETURNS boolean\n` +
+    `  LANGUAGE sql STABLE\n` +
+    `  SET search_path = pg_catalog, public\n` +
+    `  AS $scrml_hascap$\n` +
+    `    SELECT coalesce(current_setting('${DBAUTH_CAPS_GUC}', true)::jsonb ? cap, false)\n` +
+    `  $scrml_hascap$;`
+  );
+}
+
+/**
+ * Pick a dollar-quote tag that does NOT occur in `body`, so an author's plpgsql
+ * text can never accidentally terminate the `$…$` wrapper. Tries `$scrml_fn$`,
+ * then `$scrml_fn0$`, `$scrml_fn1$`, … (correctness robustness, not a security
+ * boundary — the body is compile-time author source at the same trust level as the
+ * rest of the schema).
+ */
+function dollarTag(body) {
+  let tag = "scrml_fn";
+  let i = 0;
+  while (body.includes(`$${tag}$`)) tag = `scrml_fn${i++}`;
+  return `$${tag}$`;
+}
+
+/**
+ * §14.8.11.2 S4 — emit the hardened SECURITY-DEFINER DDL for one `fn` declaration.
+ * The body carries the plpgsql STATEMENTS only; the emitter OWNS the `BEGIN … END`
+ * envelope and injects the `requires cap("x")` check as the FIRST statement inside
+ * it, so the capability gate is un-bypassable and always runs first.
+ *
+ * The bounded owner role is granted full CRUD on the db-authoritative tables so the
+ * body (running AS the owner) can mutate an immutable column scrml_app is revoked
+ * from — but the owner is STILL subject to the tenant-isolation policy (which has no
+ * TO-clause ⇒ applies to every role), so the SECDEF's writes STACK on top of tenant
+ * isolation (the caps txn pins `scrml.tenant`; an unpinned txn ⇒ the body touches
+ * zero rows, fail-closed). No permissive owner-bypass policy is emitted — that would
+ * let the choke escape tenant scope.
+ *
+ * @param {SecdefFnDecl} fn — a parsed `fn` (name, args, owner, returns, cap, body)
+ * @param {string[]} dbAuthTables — the db-authoritative table names in the schema
+ * @returns {string[]} the ordered DDL statements
+ */
+export function generateSecdefDDL(fn, dbAuthTables = []) {
+  const fnName = quoteIdent(fn.name);
+  const owner = quoteIdent(fn.owner);
+  const createArgs = (fn.args ?? [])
+    .map((a) => `${quoteIdent(a.name)} ${mapPostgresType(a.type)}`)
+    .join(", ");
+  const typeArgs = (fn.args ?? []).map((a) => mapPostgresType(a.type)).join(", ");
+  const signature = `${fnName}(${typeArgs})`; // ALTER/REVOKE/GRANT identify by arg TYPES
+  const ret = mapPostgresType(fn.returns || "void");
+
+  // The cap gate (first statement inside BEGIN). The cap value came from the parser
+  // bounded by quotes (no `'` inside); escaped anyway (SQL single-quote doubling).
+  const capEsc = String(fn.cap ?? "").replace(/'/g, "''");
+  const capGuard = fn.cap
+    ? `    IF NOT scrml_has_cap('${capEsc}') THEN RAISE EXCEPTION 'denied'; END IF;\n`
+    : "";
+
+  const bodyText = indentPlpgsqlBody(fn.body ?? "");
+  const tag = dollarTag(fn.body ?? "");
+
+  const stmts = [];
+
+  // 1. the bounded NOLOGIN owner role (idempotent; distinct from scrml_app).
+  stmts.push(
+    `DO $scrml_secdef$ BEGIN CREATE ROLE ${owner} NOLOGIN NOBYPASSRLS; ` +
+      `EXCEPTION WHEN duplicate_object THEN NULL; END $scrml_secdef$;`,
+  );
+  // 2. grant the owner CRUD on the db-authoritative tables (table-level UPDATE, i.e.
+  //    including the immutable columns scrml_app cannot touch). Idempotent.
+  for (const tbl of dbAuthTables) {
+    stmts.push(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${quoteIdent(tbl)} TO ${owner};`);
+  }
+  // 3. the hardened SECDEF function (idempotent CREATE OR REPLACE).
+  stmts.push(
+    `CREATE OR REPLACE FUNCTION ${fnName}(${createArgs}) RETURNS ${ret}\n` +
+      `  LANGUAGE plpgsql\n` +
+      `  SECURITY DEFINER\n` +
+      `  SET search_path = pg_catalog, public\n` +
+      `  AS ${tag}\n` +
+      `  BEGIN\n` +
+      capGuard +
+      bodyText +
+      `\n  END\n` +
+      `  ${tag};`,
+  );
+  // 4. bind ownership (the SECDEF now runs as the bounded owner).
+  stmts.push(`ALTER FUNCTION ${signature} OWNER TO ${owner};`);
+  // 5. lock down EXECUTE — no ambient PUBLIC EXECUTE; only the runtime role may CALL.
+  stmts.push(`REVOKE EXECUTE ON FUNCTION ${signature} FROM PUBLIC;`);
+  stmts.push(`GRANT EXECUTE ON FUNCTION ${signature} TO ${DBAUTH_ROLE};`);
+
+  return stmts;
+}
+
+/**
+ * Re-indent a plpgsql body (the `"""…"""` content) to sit cleanly inside the
+ * emitter-owned `BEGIN … END`: trim outer blank lines, strip the common leading
+ * indentation, then indent every non-empty line by 4 spaces. Readability only —
+ * plpgsql is whitespace-insensitive.
+ */
+function indentPlpgsqlBody(body) {
+  const lines = String(body).replace(/\t/g, "  ").split("\n");
+  // Drop leading/trailing blank lines.
+  while (lines.length && lines[0].trim() === "") lines.shift();
+  while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
+  if (lines.length === 0) return "";
+  // Common leading whitespace across non-blank lines.
+  const indents = lines
+    .filter((l) => l.trim() !== "")
+    .map((l) => (l.match(/^[ ]*/) || [""])[0].length);
+  const common = indents.length ? Math.min(...indents) : 0;
+  return lines
+    .map((l) => (l.trim() === "" ? "" : "    " + l.slice(common)))
+    .join("\n");
 }
 
 /**

@@ -30,7 +30,8 @@ the acceptance gate asserts `proconfig` contains `search_path=pg_catalog, public
       (also: `immutable` keyword parse in parseColumns; introspect self-verify now KEEPS balanced-brace
        defaults like jsonb `'{}'` — data-fidelity gain, sibling drop-path test added)
 - [x] 2. S3 immutable column keyword + GRANT reshape (byte-identical when zero immutable)
-- [ ] 3. S4 generateSecdefDDL (owner role + hardened CREATE FUNCTION + EXECUTE lockdown) + scrml_has_cap
+- [x] 3. S4 generateSecdefDDL (owner role + hardened CREATE FUNCTION + EXECUTE lockdown) + scrml_has_cap
+      + wired into diffSchema (postgres-only; scrml_has_cap once when fns present)
 - [ ] 4. caps-GUC injection in wrapPrincipalTxn + `_scrml_active_caps` resolver
 - [ ] 5. M2 apply-seam wiring (extractDesiredSchema fns → diffSchema; classifyStatement function/role kinds)
 - [ ] 6. live-PG 4-assertion acceptance gate + compile-shape conformance + SPEC §14.8.11.2

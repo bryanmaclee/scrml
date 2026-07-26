@@ -8,7 +8,13 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { parseSchemaBlock, generateDbAuthoritativeDDL } from "../../src/schema-differ.js";
+import {
+  parseSchemaBlock,
+  generateDbAuthoritativeDDL,
+  generateSecdefDDL,
+  generateScrmlHasCapDDL,
+  diffSchema,
+} from "../../src/schema-differ.js";
 
 const table = (body) => parseSchemaBlock(body).tables[0];
 
@@ -90,5 +96,122 @@ describe("§14.8.11.2 S3 — generateDbAuthoritativeDDL GRANT reshape", () => {
     // The break-out form (a single, un-doubled `"` that would close the identifier
     // and let `; DROP TABLE` execute) must NOT appear.
     expect(joined).not.toContain(`"a" ;`);
+  });
+});
+
+describe("§14.8.11.2 S4 — generateScrmlHasCapDDL (the capability read helper)", () => {
+  test("hardened, fail-closed, reads the caps GUC as jsonb", () => {
+    const ddl = generateScrmlHasCapDDL();
+    expect(ddl).toContain("CREATE OR REPLACE FUNCTION scrml_has_cap(cap text) RETURNS boolean");
+    expect(ddl).toContain("LANGUAGE sql STABLE");
+    expect(ddl).toContain("SET search_path = pg_catalog, public");
+    expect(ddl).toContain("current_setting('scrml.principal.caps', true)::jsonb ? cap");
+    expect(ddl).toContain("coalesce(");
+    expect(ddl).toContain("false"); // unpinned ⇒ false ⇒ fail-closed
+  });
+});
+
+describe("§14.8.11.2 S4 — generateSecdefDDL (the SECURITY-DEFINER mutation choke)", () => {
+  const fn = parseSchemaBlock(`
+    fn void_invoice(id: text) security definer owner(invoice_admin) requires cap("void") {
+      """
+      UPDATE invoices SET status = 'void' WHERE id = void_invoice.id;
+      """
+    }
+  `).fns[0];
+
+  const ddl = generateSecdefDDL(fn, ["invoices"]);
+  const joined = ddl.join("\n");
+
+  test("emits a bounded NOLOGIN owner role, distinct from scrml_app", () => {
+    expect(joined).toContain(
+      `DO $scrml_secdef$ BEGIN CREATE ROLE "invoice_admin" NOLOGIN NOBYPASSRLS; ` +
+        `EXCEPTION WHEN duplicate_object THEN NULL; END $scrml_secdef$;`,
+    );
+    // NOBYPASSRLS is mandatory (an owner that bypassed RLS would escape tenant scope).
+    expect(joined).toContain("NOBYPASSRLS");
+  });
+
+  test("grants the owner CRUD on the db-authoritative tables (table-level UPDATE)", () => {
+    expect(joined).toContain(`GRANT SELECT, INSERT, UPDATE, DELETE ON "invoices" TO "invoice_admin";`);
+  });
+
+  test("the CREATE FUNCTION carries every hardening invariant", () => {
+    expect(joined).toContain(`CREATE OR REPLACE FUNCTION "void_invoice"("id" text) RETURNS void`);
+    expect(joined).toContain("LANGUAGE plpgsql");
+    expect(joined).toContain("SECURITY DEFINER");
+    // The search_path pin — pg_catalog FIRST, public required, NO pg_temp.
+    expect(joined).toContain("SET search_path = pg_catalog, public");
+    expect(joined).not.toContain("pg_temp");
+  });
+
+  test("the cap check is injected as the FIRST statement inside the emitter-owned BEGIN", () => {
+    // Author body had no BEGIN/END; the emitter provides them and the guard leads.
+    expect(joined).toMatch(/BEGIN\s+IF NOT scrml_has_cap\('void'\) THEN RAISE EXCEPTION 'denied'; END IF;/);
+    // The author statement follows the guard.
+    expect(joined.indexOf("scrml_has_cap('void')")).toBeLessThan(
+      joined.indexOf("UPDATE invoices SET status = 'void'"),
+    );
+  });
+
+  test("ownership + EXECUTE lockdown (revoke PUBLIC, grant only scrml_app)", () => {
+    expect(joined).toContain(`ALTER FUNCTION "void_invoice"(text) OWNER TO "invoice_admin";`);
+    expect(joined).toContain(`REVOKE EXECUTE ON FUNCTION "void_invoice"(text) FROM PUBLIC;`);
+    expect(joined).toContain(`GRANT EXECUTE ON FUNCTION "void_invoice"(text) TO scrml_app;`);
+  });
+
+  test("a no-cap fn omits the guard but still hardens", () => {
+    const f = parseSchemaBlock(`
+      fn touch(id: uuid) security definer owner(admin) {
+        """ UPDATE t SET seen = true WHERE id = touch.id; """
+      }
+    `).fns[0];
+    const j = generateSecdefDDL(f, ["t"]).join("\n");
+    expect(j).not.toContain("scrml_has_cap");
+    expect(j).not.toContain("RAISE EXCEPTION 'denied'");
+    expect(j).toContain("SECURITY DEFINER");
+    expect(j).toContain("SET search_path = pg_catalog, public");
+    expect(j).toContain(`REVOKE EXECUTE ON FUNCTION "touch"(uuid) FROM PUBLIC;`);
+  });
+});
+
+describe("§14.8.11.2 — diffSchema wires S4 into the migration plan (postgres only)", () => {
+  const desired = parseSchemaBlock(`
+    invoices {
+      id: uuid primary key
+      tenant_id: uuid not null
+      status: text not null
+      amount: decimal not null immutable
+    } db-authoritative
+
+    fn void_invoice(id: uuid) security definer owner(invoice_admin) requires cap("void") {
+      """
+      UPDATE invoices SET status = 'void' WHERE id = void_invoice.id;
+      """
+    }
+  `);
+
+  test("postgres: the plan carries CREATE TABLE + S3 reshape + scrml_has_cap + the SECDEF", () => {
+    const { sql } = diffSchema(desired, { tables: [] }, { driver: "postgres" });
+    const joined = sql.join("\n");
+    expect(joined).toContain(`CREATE TABLE "invoices"`);
+    expect(joined).toContain(`GRANT SELECT, INSERT, DELETE ON "invoices" TO scrml_app;`);
+    expect(joined).toContain(`REVOKE UPDATE ON "invoices" FROM scrml_app;`);
+    expect(joined).toContain("CREATE OR REPLACE FUNCTION scrml_has_cap(cap text)");
+    expect(joined).toContain(`CREATE OR REPLACE FUNCTION "void_invoice"("id" uuid) RETURNS void`);
+    // scrml_has_cap must precede the SECDEF that calls it (it references the helper).
+    expect(joined.indexOf("scrml_has_cap(cap text)")).toBeLessThan(joined.indexOf(`"void_invoice"`));
+    // the table must precede the owner grant on it.
+    expect(joined.indexOf(`CREATE TABLE "invoices"`)).toBeLessThan(
+      joined.indexOf(`ON "invoices" TO "invoice_admin"`),
+    );
+  });
+
+  test("sqlite: the SECDEF DDL is NOT emitted (postgres-only)", () => {
+    const { sql } = diffSchema(desired, { tables: [] }, { driver: "sqlite" });
+    const joined = sql.join("\n");
+    expect(joined).not.toContain("scrml_has_cap");
+    expect(joined).not.toContain("SECURITY DEFINER");
+    expect(joined).not.toContain("void_invoice");
   });
 });
