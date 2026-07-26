@@ -271,6 +271,19 @@ function printPlan(plan, actualTableCount) {
   for (const stmt of plan) console.log(`  ${c.green("+")} ${oneLine(stmt)}`);
 }
 
+/**
+ * Echo the statement that actually failed, when the apply loop attributed one.
+ * The plan is printed before the apply, so without this the operator has an error
+ * message and a wall of statements with nothing tying them together.
+ */
+function printFailedStatement(e) {
+  const f = e?.scrmlFailedStatement;
+  if (!f) return;
+  console.error(
+    c.red("  failing statement:") + c.dim(` (${f.index} of ${f.total})`) + "\n    " + f.sql,
+  );
+}
+
 /** Close a Bun.SQL handle, tolerating .end()/.close() presence + teardown errors. */
 async function closeSql(sql) {
   try {
@@ -352,8 +365,21 @@ async function runPgApply({ connectionString, desired, dryRun, allowDestructive 
       // (5) apply each statement in the txn + record authorship. If any statement
       // throws, `sql.begin` rolls the WHOLE run back (atomicity — the ledger is
       // never left half-written).
-      for (const stmt of plan) {
-        await tx.unsafe(stmt);
+      for (let _i = 0; _i < plan.length; _i++) {
+        const stmt = plan[_i];
+        // Attribute a failure to its EXACT statement. The whole plan is printed
+        // BEFORE the apply, so an error's position in the output says nothing about
+        // which statement failed — and Postgres's own message can point nowhere near
+        // the cause (a truncated `CREATE TABLE` surfaces as `syntax error at or near
+        // ";"`). RediLedger burned a bisection cycle on that combination and
+        // disproved a wrong hypothesis by repro; echoing the statement is cheap and
+        // pays for itself the next time an adopter reports here. (S5 signal.)
+        try {
+          await tx.unsafe(stmt);
+        } catch (e) {
+          e.scrmlFailedStatement = { index: _i + 1, total: plan.length, sql: stmt };
+          throw e;
+        }
         const { kind, name } = classifyStatement(stmt);
         await tx`
           INSERT INTO "_scrml_migrations" (object_kind, object_name, ddl_hash)
@@ -376,6 +402,7 @@ async function runPgApply({ connectionString, desired, dryRun, allowDestructive 
     );
   } catch (e) {
     console.error(c.red("error:") + ` migration failed (rolled back): ${e.message}`);
+    printFailedStatement(e);
     await closeSql(sql);
     process.exit(1);
   }
@@ -418,7 +445,14 @@ function runSqliteApply({ connectionString, desired, dryRun, allowDestructive })
     // + privilege machinery is additive on top of this general base).
     db.run("BEGIN");
     try {
-      for (const stmt of plan) db.run(stmt);
+      for (let _i = 0; _i < plan.length; _i++) {
+        try {
+          db.run(plan[_i]);
+        } catch (e) {
+          e.scrmlFailedStatement = { index: _i + 1, total: plan.length, sql: plan[_i] };
+          throw e;
+        }
+      }
       db.run("COMMIT");
     } catch (e) {
       db.run("ROLLBACK");
@@ -427,6 +461,7 @@ function runSqliteApply({ connectionString, desired, dryRun, allowDestructive })
     console.log(c.green(`applied ${plan.length} statement(s) in 1 transaction.`));
   } catch (e) {
     console.error(c.red("error:") + ` migration failed (rolled back): ${e.message}`);
+    printFailedStatement(e);
     process.exit(1);
   } finally {
     db.close();
