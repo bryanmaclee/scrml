@@ -36,7 +36,7 @@ import { CGError } from "./errors.ts";
  * Used by const-decl / let-decl emission to track destructure-bound names in
  * `opts.declaredNames`. Mirrors type-system.ts iterDestructuredNames.
  */
-function* _iterDestructureBindNames(p: any): Iterable<string> {
+export function* _iterDestructureBindNames(p: any): Iterable<string> {
   if (!p || typeof p !== "object") return;
   if (p.kind === "destructure-array") {
     for (const el of (p.elements ?? [])) {
