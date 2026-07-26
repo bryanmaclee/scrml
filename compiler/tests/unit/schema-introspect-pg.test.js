@@ -315,7 +315,13 @@ describe("introspect §5: composite constraint guards", () => {
 // §6 — Self-verifying emit: the INVARIANT (fail-loud, no mis-parse).
 // ==========================================================================
 describe("introspect §6: self-verifying emit", () => {
-  test("brace string default ('{}') is DROPPED + warned; surviving columns intact", () => {
+  test("balanced-brace string default ('{}') now round-trips and is KEPT (P2 §14.8.11.2 parser upgrade)", () => {
+    // P2 upgraded parseSchemaBlock's table scan from the non-nested `[^}]*` regex
+    // to a brace-DEPTH-aware scan (needed for a SECURITY-DEFINER `fn`'s `"""…"""`
+    // plpgsql body). A side benefit: a BALANCED-brace default like a jsonb `'{}'`
+    // now survives the self-verify round-trip, so the introspect emitter preserves
+    // it (data-fidelity gain) instead of defensively dropping it. Unbalanced-brace
+    // and newline defaults are STILL dropped (the sibling tests cover the drop path).
     const { source, warnings } = emitScrmlSchemaSource({
       tables: [{ name: "t", columns: [
         { name: "id",   type: "integer", notNull: true,  unique: false, primaryKey: true,  default: null,          references: null },
@@ -323,12 +329,28 @@ describe("introspect §6: self-verifying emit", () => {
         { name: "tail", type: "text",    notNull: false, unique: false, primaryKey: false, default: null,          references: null },
       ] }],
     });
-    expect(source).not.toContain("'{}'");
+    expect(source).toContain("meta: text default('{}')"); // preserved, cast stripped
+    expect(source).toContain("tail: text");               // NOT truncated by the brace
+    expect(warnings.some((w) => w.startsWith("W-INTROSPECT-DEFAULT-DROPPED") && w.includes("t.meta"))).toBe(false);
+    // invariant: the emitted source round-trips cleanly (columns AND the default).
+    const parsed = parseSchemaBlock(source);
+    expect(parsed.tables[0].columns.map((c) => c.name)).toEqual(["id", "meta", "tail"]);
+    expect(parsed.tables[0].columns.find((c) => c.name === "meta").default).toBe("'{}'");
+  });
+
+  test("UNBALANCED-brace string default ('{') is STILL dropped + warned (drop path intact)", () => {
+    const { source, warnings } = emitScrmlSchemaSource({
+      tables: [{ name: "t", columns: [
+        { name: "id",   type: "integer", notNull: true,  unique: false, primaryKey: true,  default: null,         references: null },
+        { name: "meta", type: "jsonb",   notNull: false, unique: false, primaryKey: false, default: "'{'::jsonb", references: null },
+        { name: "tail", type: "text",    notNull: false, unique: false, primaryKey: false, default: null,         references: null },
+      ] }],
+    });
+    expect(source).not.toContain("'{'");
     expect(source).not.toContain("default(");
     expect(source).toContain("meta: text");
     expect(source).toContain("tail: text"); // NOT truncated by the brace
     expect(warnings.some((w) => w.startsWith("W-INTROSPECT-DEFAULT-DROPPED") && w.includes("t.meta"))).toBe(true);
-    // invariant: the emitted source round-trips cleanly
     const parsed = parseSchemaBlock(source);
     expect(parsed.tables[0].columns.map((c) => c.name)).toEqual(["id", "meta", "tail"]);
   });
