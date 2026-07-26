@@ -66,7 +66,7 @@
  * stream by the api.js driver.
  */
 
-import { parseSchemaBlock } from "./schema-differ.js";
+import { parseSchemaBlock, findNonLiteralSetItems } from "./schema-differ.js";
 
 // ---------------------------------------------------------------------------
 // Error class — matches TABError shape for uniform collection in api.js
@@ -781,6 +781,28 @@ function checkSchemaDeclarations(ast, filePath, errors) {
             `E-SCHEMA-004: column \`${col.name}\` in table \`${table.name}\` has unrecognized ` +
             `type \`${col.scrmlType}\`. Legal \`<schema>\` column types are: text, integer, real, ` +
             `blob, boolean, timestamp. (See SPEC §39.4.)`,
+            span,
+          ));
+        }
+      }
+
+      // E-SCHEMA-010 — a `oneOf([…])` / `notIn([…])` item that is NOT a scrml
+      // literal (in practice a BARE IDENTIFIER: `oneOf([user, admin])`). §39.5.8
+      // specifies a LITERAL list; a bareword lowers to a SQL identifier and fails
+      // at apply with `column "user" does not exist`. RULED S288 (bryan, option b):
+      // reject at compile rather than widen a bareword into a string — rejecting is
+      // the reversible direction, and the migration was MEASURED at zero (the only
+      // two sites teaching the form were scrml's own reference doc).
+      for (const col of cols) {
+        for (const bad of findNonLiteralSetItems(col)) {
+          errors.push(new GauntletError(
+            "E-SCHEMA-010",
+            `E-SCHEMA-010: \`${bad.predicate}\` on column \`${col.name}\` in table ` +
+            `\`${table.name}\` lists \`${bad.item}\`, which is not a literal. §39.5.8 lowers ` +
+            `each item to a SQL literal, and a bare word lowers to a SQL IDENTIFIER — the ` +
+            `migration then fails with \`column "${bad.item}" does not exist\`. Quote it ` +
+            `(\`${bad.predicate}(["${bad.item}"])\`), or use a numeric/boolean/\`.Variant\` ` +
+            `literal. (See SPEC §39.5.8.)`,
             span,
           ));
         }
