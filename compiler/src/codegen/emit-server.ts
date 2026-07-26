@@ -13,7 +13,7 @@ import { emitExpr, emitExprField, setServerAsyncClassifier, resetSessionValueUse
 import type { CompileContext } from "./context.ts";
 import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
 import { resolveDbDriver } from "./db-driver.ts";
-import { appDeclaresDbAuthoritative, wrapPrincipalTxn } from "./db-authoritative.ts";
+import { appDeclaresDbAuthoritative, extractDesiredSchema, wrapPrincipalTxn } from "./db-authoritative.ts";
 import { isLibraryShapedFile } from "../tool-program.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
@@ -352,6 +352,47 @@ function astUsesSessionBuiltin(node: unknown): boolean {
  */
 function astUsesSessionWrite(node: unknown): boolean {
   return astSessionMemberMatch(node, ["set", "destroy"]);
+}
+
+/**
+ * §20.5 / §52 Fork-3 — does this subtree carry a `?{}` whose query text reads the
+ * `@currentUser` ambient?
+ *
+ * The `_anyCurrentUserQuery` gate above asks this of the §52 Pattern-C server-
+ * authority CELL declarations only. A plain server `function` with a
+ * `?{ … where user_id = ${@currentUser.id} }` in its body is a THIRD shape that
+ * needs the same session infra, and it was not counted — so the `@currentUser`
+ * resolver (`_scrml_current_user`) was never emitted for a `<schema>`-only app
+ * whose per-user reads live in server functions, and the handler's binding would
+ * dangle. Same miss as the handler-binding gap, one layer up. (RediLedger S4.)
+ *
+ * Matches the node shape the parser actually produces — a `kind: "sql"` node with
+ * a string `query` — and reuses the established `.includes("@currentUser")` text
+ * test rather than introducing a second, divergent notion of "reads the ambient".
+ * A false POSITIVE here only emits unused session infra; a false NEGATIVE emits a
+ * dangling binding, so the test is deliberately the permissive one.
+ */
+function astSqlQueryUsesCurrentUser(node: unknown, seen?: WeakSet<object>, depth = 0): boolean {
+  if (!node || typeof node !== "object" || depth > 64) return false;
+  const _seen = seen ?? new WeakSet<object>();
+  if (_seen.has(node as object)) return false;
+  _seen.add(node as object);
+  if (Array.isArray(node)) {
+    for (const child of node) if (astSqlQueryUsesCurrentUser(child, _seen, depth + 1)) return true;
+    return false;
+  }
+  const n = node as Record<string, unknown>;
+  if (n.kind === "sql") {
+    for (const prop of ["query", "body"] as const) {
+      const q = n[prop];
+      if (typeof q === "string" && q.includes("@currentUser")) return true;
+    }
+  }
+  for (const key of Object.keys(n)) {
+    if (key === "span") continue;
+    if (astSqlQueryUsesCurrentUser(n[key], _seen, depth + 1)) return true;
+  }
+  return false;
 }
 
 function astSessionMemberMatch(node: unknown, props: string[] | null): boolean {
@@ -1287,11 +1328,19 @@ export function generateServerJs(
   const _protectCtx: ProtectContext = buildProtectContext(_protectAnalysis);
   const _protectActive: boolean = _protectCtx.protectedByTable.size > 0;
 
-  // §14.8.10 — tenant-row isolation floor context. Built from the SAME §14.8.9
-  // schema registry (a `<db>`-bound table carrying a `tenant_id` column IS
-  // tenant-scoped). `_tenantActive` is the master gate: an app with no such table
-  // emits byte-identically (every redaction site below is a no-op / absent).
-  const _tenantCtx: TenantContext = buildTenantContext(_protectCtx);
+  // §14.8.10 — tenant-row isolation floor context. Built from BOTH the §14.8.9
+  // `<db>`-derived schema registry AND the app's own `<schema>` declarations —
+  // per §14.8.10 the `<schema>` `tenant_id` column's PRESENCE is the declaration,
+  // and reading only the `<db>` registry left a `<schema>`-only app with an empty
+  // tenant set while the §14.8.11 tier (which gates on the `<schema>`
+  // `db-authoritative` marker) engaged anyway and pinned a null tenant. See
+  // `buildTenantContext` for the full account. `_tenantActive` remains the master
+  // gate: an app with no tenant-scoped table in EITHER registry emits
+  // byte-identically (every redaction site below is a no-op / absent).
+  const _tenantCtx: TenantContext = buildTenantContext(
+    _protectCtx,
+    extractDesiredSchema(fileAST).tables,
+  );
   const _tenantActive: boolean = _tenantCtx.tenantScopedTables.size > 0;
   // Cross-tenant writes/aggregates found by the hard-fail scan below that carry a
   // `.acrossTenants()` opt-out — merged into the I-TENANT-ACROSS audit drain.
@@ -1721,7 +1770,12 @@ export function generateServerJs(
   // read-only-auth / `@currentUser` / serverLoad app that never writes keeps the
   // prior in-memory Map (no unrequested file / startup I/O / durability change).
   const _anySessionWrite = astUsesSessionWrite(fileAST);
-  const _needsSessionInfra = !!authMiddlewareEntry || _anyServerLoadGates || _anyCurrentUserQuery || _anySessionBuiltin;
+  // §20.5 / §52 Fork-3 — a plain server `function` whose `?{}` reads
+  // `@currentUser` needs the resolver exactly as a Pattern-C cell load does. This
+  // was the missing third shape: without it the handler binds `_scrml_currentUser`
+  // to an unemitted `_scrml_current_user`. (RediLedger S4.)
+  const _anyFnCurrentUserQuery = _currentUserAmbient && fnNodes.some((f) => astSqlQueryUsesCurrentUser(f));
+  const _needsSessionInfra = !!authMiddlewareEntry || _anyServerLoadGates || _anyCurrentUserQuery || _anyFnCurrentUserQuery || _anySessionBuiltin;
 
   // §20.5.1 (S266, i29e B4a) — secure-cookie mode. DEFAULT TRUE → the session
   // cookie is named `__Host-scrml_sid` and is ALWAYS emitted `Secure`. The
@@ -3019,6 +3073,15 @@ export function generateServerJs(
     lines.push(`  // route.query injection (SPEC §20.3)`);
     lines.push(`  const _scrml_url = new URL(_scrml_req.url, 'http://localhost');`);
     lines.push(`  const route = { query: Object.fromEntries(_scrml_url.searchParams) };`);
+    // §20.5 — the insertion point for this handler's `@currentUser` binding. The
+    // body below is emitted line-by-line and only THEN can we tell whether it
+    // referenced `_scrml_currentUser` (a `?{}` may reach it through several
+    // lowerings), so the binding is spliced back in here after the body closes —
+    // see the `_cuBodyRefsCurrentUser` splice at the handler's `}`. Handler-scope
+    // entry per the §20.5 resolver contract above ("bound at handler scope
+    // entry"), which keeps it visible inside the nested `_scrml_result` IIFE the
+    // baseline-CSRF path emits.
+    const _cuInsertIdx = lines.length;
 
     // Fork 2A: cookie-session auth-check + auth-path CSRF are web-app-only (they
     // reference the `_needsSessionInfra` scaffold, gated identically above).
@@ -3519,6 +3582,36 @@ export function generateServerJs(
 
     lines.push(`}`);
     lines.push("");
+
+    // §20.5 / §52 Fork-3 — bind `@currentUser` for THIS handler if its body
+    // referenced it. The serverLoad (§52 Fork-3) and SSR-seed paths already do
+    // this; the RI-route shape a plain server `function` compiles to did NOT, so
+    // a `?{ … where user_id = ${@currentUser.id} }` inside one emitted a use of
+    // `_scrml_currentUser` with NO declaration anywhere in the module — a
+    // ReferenceError on EVERY call, authenticated or anonymous, and therefore the
+    // whole db-authoritative per-user read path was dead end-to-end. Found by
+    // RediLedger's behavioral run (real PG + real cookie sessions), NOT by any
+    // suite: the tier's own tests hand-execute `set_config` inside a transaction
+    // and never issue a request, so they cannot observe an unbound identity in a
+    // route handler.
+    //
+    // The check is on the EMITTED body rather than the AST because `@currentUser`
+    // reaches the handler through several lowerings (rewriteSqlRefs, the CPS
+    // batch splitter, the §14.8.11 principal wrapper); the emitted text is the
+    // one place they all converge — the same reason `_slUsesCurrentUser` above
+    // tests `sqlExpr.includes(...)`. Gated on `_currentUserAmbient` so a user cell
+    // named `currentUser` (which shadows the ambient) is never rebound, and on
+    // the absence of an existing binding so a future emitter that binds it
+    // directly does not get a duplicate `const`.
+    {
+      const _cuBody = lines.slice(_cuInsertIdx);
+      const _cuBodyRefsCurrentUser = _cuBody.some((l) => l.includes("_scrml_currentUser"));
+      const _cuAlreadyBound = _cuBody.some((l) =>
+        l.includes("const _scrml_currentUser = _scrml_current_user("));
+      if (_currentUserAmbient && _cuBodyRefsCurrentUser && !_cuAlreadyBound) {
+        lines.splice(_cuInsertIdx, 0, `  const _scrml_currentUser = _scrml_current_user(_scrml_req);`);
+      }
+    }
 
     // Ext 1 M1.5: route export uses the per-batch name + path. For the
     // single-handler case `_curRouteName`/`_curPath` are the route's own name

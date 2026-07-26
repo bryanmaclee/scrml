@@ -57,14 +57,50 @@ export interface TenantContext {
 }
 
 /**
- * Build the TenantContext from the §14.8.9 ProtectContext's `schemaByTable`
- * registry (populated for EVERY `<db>`-bound table, regardless of `protect=`).
+ * Build the TenantContext from BOTH table registries the compiler holds:
+ *
+ *  1. the §14.8.9 ProtectContext's `schemaByTable` (every `<db>`-bound table), and
+ *  2. the app's own `<schema>` declarations.
+ *
  * A table is tenant-scoped iff its column list includes `tenant_id`.
+ *
+ * **Both are required, and (2) is the one SPEC §14.8.10 actually names.** Its
+ * declaration clause is unambiguous — *"A table whose `<schema>` carries a
+ * `tenant_id` column IS tenant-scoped; the column's presence is the declaration…
+ * There is no per-table opt-in attribute."* Until S288 this function read ONLY
+ * the `<db>`-derived registry, so a `<schema>`-only app — no `<db>` block, which
+ * is the ordinary shape for an app that lets scrml own its schema — produced an
+ * EMPTY tenant set. `_tenantActive` was therefore false, `_scrml_current_user`
+ * omitted the `tenantId` projection, and `_scrml_active_tenant()` returned null
+ * on every request.
+ *
+ * That is worse than a missing feature, because the §14.8.11 db-authoritative
+ * tier gates on a DIFFERENT signal (the `<schema>` `db-authoritative` marker) and
+ * so DID engage: its per-request wrapper faithfully pinned
+ * `set_config('scrml.tenant', null)` and dropped to the bounded role, and RLS
+ * then matched nothing. Each half was internally consistent; the composition was
+ * dead. Found by RediLedger's behavioral run (S4), not by any suite — the tier's
+ * own tests hand-execute `set_config` inside a transaction and never issue a
+ * request, so a session-sourced tenant failing to arrive is invisible to them.
+ *
+ * @param schemaTables — the `<schema>`-declared tables (`extractDesiredSchema`'s
+ *   `tables`). Optional so the existing `<db>`-only callers and the unit tests
+ *   that construct a bare ProtectContext keep working unchanged.
  */
-export function buildTenantContext(protectCtx: ProtectContext): TenantContext {
+export function buildTenantContext(
+  protectCtx: ProtectContext,
+  schemaTables?: Array<{ name?: unknown; columns?: unknown }>,
+): TenantContext {
   const tenantScopedTables = new Set<string>();
   for (const [table, cols] of protectCtx.schemaByTable) {
     if (cols.some((c) => c.toLowerCase() === TENANT_COLUMN)) tenantScopedTables.add(table);
+  }
+  for (const t of schemaTables ?? []) {
+    if (typeof t?.name !== "string" || !Array.isArray(t?.columns)) continue;
+    const carriesTenant = (t.columns as Array<{ name?: unknown }>).some(
+      (c) => typeof c?.name === "string" && c.name.toLowerCase() === TENANT_COLUMN,
+    );
+    if (carriesTenant) tenantScopedTables.add(t.name);
   }
   return { tenantScopedTables };
 }
