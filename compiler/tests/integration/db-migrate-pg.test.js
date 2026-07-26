@@ -50,6 +50,7 @@ const PROJECT_SRC = `<program db="postgres://placeholder">
       id: uuid primary key
       tenant_id: uuid not null
       amount: decimal not null
+      kind: text oneOf(["income","expense"])
     } db-authoritative
   </schema>
 </program>
@@ -166,6 +167,49 @@ d("§14.8.11 M2 — scrml db-migrate through-CLI acceptance (live Postgres)", ()
     });
     expect(rows.length).toBe(2);
     expect(rows.every((r) => r.tenant_id === TENANT_A)).toBe(true);
+  });
+
+  // S288 — g-db-migrate-check-constraint-oneof-pattern sub-bug 1. The fixture's
+  // `kind` column uses the CANONICAL scrml string quote (`"`), which is SQL's
+  // IDENTIFIER quote. Emitted verbatim it produced `CHECK (kind IN ("income",…))`
+  // and this whole migration FAILED at apply with `column "income" does not
+  // exist` (reproduced end-to-end pre-fix). These two tests lock the real applied
+  // constraint, not just the emitted text — the "emitted ≠ runs" lesson.
+  // Runs inside a DELIBERATELY rolled-back transaction so it leaves no row behind
+  // — the later idempotency test asserts an exact tenant-A row count.
+  test("S288: a double-quoted oneOf applied a WORKING CHECK — declared value accepted", async () => {
+    const ROLLBACK = Symbol("rollback");
+    let accepted = null;
+    try {
+      await m.begin(async (tx) => {
+        await tx`SELECT set_config('scrml.tenant', ${TENANT_A}, true)`;
+        await tx.unsafe("SET LOCAL ROLE scrml_app");
+        await tx`INSERT INTO invoices (id, tenant_id, amount, kind)
+                 VALUES (gen_random_uuid(), ${TENANT_A}, 5.00, 'income')`;
+        const r = await tx`SELECT count(*)::int AS n FROM invoices WHERE kind = 'income'`;
+        accepted = r[0].n;
+        throw ROLLBACK;
+      });
+    } catch (e) {
+      if (e !== ROLLBACK) throw e;
+    }
+    expect(accepted).toBe(1);
+  });
+
+  test("S288: the applied CHECK REJECTS a value outside the oneOf set", async () => {
+    let threw = null;
+    try {
+      await m.begin(async (tx) => {
+        await tx`SELECT set_config('scrml.tenant', ${TENANT_A}, true)`;
+        await tx.unsafe("SET LOCAL ROLE scrml_app");
+        await tx`INSERT INTO invoices (id, tenant_id, amount, kind)
+                 VALUES (gen_random_uuid(), ${TENANT_A}, 5.00, 'bogus')`;
+      });
+    } catch (e) {
+      threw = e;
+    }
+    expect(threw).not.toBeNull();
+    expect(String(threw?.message ?? threw)).toMatch(/check constraint/i);
   });
 
   test("the thin _scrml_migrations ledger recorded object-authorship", async () => {

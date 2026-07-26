@@ -31,7 +31,7 @@
 //            email  TEXT NOT NULL CHECK (length(email) <= 120),
 //            name   TEXT NOT NULL CHECK (length(name) >= 2)
 //                                CHECK (length(name) <= 80),
-//            role   TEXT NOT NULL CHECK (role IN ('Admin','Editor','Viewer'))
+//            role   TEXT NOT NULL CHECK (role IN ('Admin', 'Editor', 'Viewer'))
 //        );
 //
 // The L22 vocabulary-unification loop closes here:
