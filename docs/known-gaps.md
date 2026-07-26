@@ -15,8 +15,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 14 |
-| MED | 53 |
+| HIGH | 13 |
+| MED | 55 |
 | LOW | 34 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -27,6 +27,21 @@ Surfaced while scoping the BUG-6 accessor-rename (`docs/changes/chunk-namespacin
 **Why it is filed as a decision, not a bug:** the budget was near-saturated before chunk-namespacing existed, so ANY feature that adds core-runtime bytes now risks tripping it — this arc is merely the first to hit it. The BUG-6 rename passes only in its **zero-core-residue** form (16,255 B, ~2 B over base); the naive form fails by 1,147 B. That 129 B margin is *smaller than the ~200 B gzip whitespace-noise band* the scoping hit while measuring, so "passing" is not robust.
 
 **The fork (bryan, for the execution session):** (a) **hold 16 KB** and require zero-core-residue forever — every future core-runtime addition must be offset; or (b) **raise the budget** to give the mechanism air. The rename meets either answer; this is about the standing constraint, not this fix. Recommendation deferred to the execution session's re-measurement — if base has drifted over 16 KB by then, (b) is forced. <!-- @gap id=g-spa-runtime-gzip-budget-knife-edge sev=HIGH status=open -->
+
+### G-DBAUTH-SESSION-PRINCIPAL-NOT-WIRED — the db-authoritative tier's session principal never reached a request — `NEW S288; HIGH; RESOLVED S288 (adopter-reported, RediLedger S4)`
+The M1/P2 tier was **non-functional end-to-end** for a `<schema>`-only app — the exact shape it targets. Both defects failed CLOSED (no leak), but the feature could not run. Found by RediLedger's **behavioral** run (real PG16, real Argon2id credentials, real cookie sessions over HTTP), independently reproduced here before any fix.
+
+- **C — the RI-route handler interpolated `_scrml_currentUser` without ever binding it.** A plain server `function` whose `?{}` reads `@currentUser` compiled to a handler with **one use site and zero definitions** → `ReferenceError` on every call, authenticated or anonymous. The §52 Fork-3 serverLoad path and the SSR-seed path both bind it; this third shape did not. **A second layer sat under it:** `_needsSessionInfra` counted only Pattern-C server-authority CELL loads, so for this shape the `_scrml_current_user` RESOLVER was not emitted either — fixing only the binding just moved the ReferenceError. Fixed in `emit-server.ts`: the handler splices its binding at handler-scope entry when its emitted body references the ambient, and a new `astSqlQueryUsesCurrentUser` walker adds the server-function shape to the session-infra gate.
+- **D — `@currentUser.tenantId` was never projected for a `<schema>`-only app.** `buildTenantContext` read ONLY the `<db>`-derived `schemaByTable` registry, so an app with no `<db>` block had an empty tenant set → `_tenantActive` false → `_scrml_current_user` omitted `tenantId` → `_scrml_active_tenant()` returned null on every request. **This contradicted SPEC §14.8.10 verbatim:** *"A table whose `<schema>` carries a `tenant_id` column IS tenant-scoped; the column's presence is the declaration… There is no per-table opt-in attribute."* Fixed: `buildTenantContext` now unions the `<schema>`-declared tables (`extractDesiredSchema`).
+
+**Why it was silent rather than loud, and why it is the dangerous shape:** §14.8.11 gates on the `<schema>` `db-authoritative` MARKER — a *different* signal from §14.8.10's registry — so the tier DID engage and faithfully pinned `set_config('scrml.tenant', null)` before dropping to the bounded role; RLS then matched nothing. Each half was internally consistent; only the composition was dead. And `_scrml_active_tenant` guards its resolver call with `typeof _scrml_current_user === "function"`, which converts "resolver missing" into "tenant is null" **with no diagnostic at all**.
+
+**Blast radius of the D fix, MEASURED:** zero — no `.scrml` file in scrml, scrml-support or scrml-native contains `tenant_id`, so no in-repo program newly activates the tenant floor. Full gate 21375 pass / 0 fail.
+
+**Test debt this exposed (the load-bearing lesson):** the tier's own live-PG tests open a transaction and HAND-EXECUTE `SELECT set_config('scrml.tenant', …)` before asserting. That is a faithful test of the DDL + RLS and it passed throughout — but it never issues a request, so it cannot observe a session-sourced tenant failing to arrive nor an unbound identity in a route handler. **The DDL negative test proves the floor exists; only the request path proves the app is standing on it.** `compiler/tests/integration/schema-only-tenant-principal.test.js` now locks both defects (verified to FAIL on pre-fix source — 4 fail / 3 pass — so the gate is proven to bite, not merely green). See `g-dbauth-no-request-path-test` for the remaining stronger form. <!-- @gap id=g-dbauth-session-principal-not-wired sev=HIGH status=resolved -->
+
+### G-DBAUTH-NO-REQUEST-PATH-TEST — the tier has no login-over-HTTP → cookie → per-user-read round trip — `NEW S288; MED; open`
+The S288 regression lock (`schema-only-tenant-principal.test.js`) asserts EMISSION — deterministic and cloud-safe, and sufficient to catch both S288 defects. The stronger form is a full request-path test: login over HTTP → `Set-Cookie` → a `@currentUser`-scoped read returns exactly that user's rows, with the tenant sourced from `session.set("tenantId", …)`. That single test would have caught C and D together *behaviorally*, and it is the shape RediLedger used to find them. They have offered theirs (`scrml-app/verify/per-user-reads-{setup.sql,test.sh}`, self-contained). Blocker to be careful of: session-auth full-bundle-over-HTTP conformance is cloud-runner-infra-flaky ([[feedback_cloud_ci_full_bundle_http_flaky]], S273) — so this wants the live-PG-gated local tier (skips gracefully in cloud), executing the shipped handler rather than driving a socket. <!-- @gap id=g-dbauth-no-request-path-test sev=MED status=open -->
 
 ### G-DB-MIGRATE-CHECK-CONSTRAINT-ONEOF-PATTERN — `scrml db-migrate` mis-handles `oneOf`/`pattern` CHECK columns — blocks turnkey apply of real schemas — `NEW S287; MED; RESOLVED S288 (adopter-reported, RediLedger)`
 
