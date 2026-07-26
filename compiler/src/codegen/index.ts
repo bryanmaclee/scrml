@@ -1503,12 +1503,26 @@ export function runCG(input: CgInput): CgOutput {
               if (c && c.kind === "text" && typeof c.value === "string") body += c.value;
             }
             if (body.trim().length > 0) {
-              let parsed: { tables?: Array<{ name?: string; dbAuthoritative?: boolean }> } = {};
+              let parsed: {
+                tables?: Array<{ name?: string; dbAuthoritative?: boolean }>;
+                fns?: Array<{ name?: string }>;
+              } = {};
               try { parsed = parseSchemaBlock(body); } catch { parsed = {}; }
               for (const t of parsed.tables ?? []) {
                 if (t && t.dbAuthoritative) {
                   anyDbAuthoritative = true;
                   if (firstDbAuthTable == null && typeof t.name === "string") firstDbAuthTable = t.name;
+                }
+              }
+              // §14.8.11.2 S4 — a SECURITY-DEFINER `fn` is Postgres-only too (it emits
+              // CREATE FUNCTION … SECURITY DEFINER, roles, GRANT/REVOKE). Treat its
+              // presence as db-authoritative for the fail-closed non-Postgres gate.
+              if ((parsed.fns ?? []).length > 0) {
+                anyDbAuthoritative = true;
+                if (firstDbAuthTable == null) {
+                  const f0 = (parsed.fns ?? [])[0];
+                  firstDbAuthTable =
+                    f0 && typeof f0.name === "string" ? `fn ${f0.name}` : "a security-definer fn";
                 }
               }
             }

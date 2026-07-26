@@ -90,6 +90,14 @@ describe("db-migrate: classifyStatement (ledger authorship)", () => {
     [`DROP POLICY IF EXISTS scrml_tenant_iso ON "invoices";`, "drop-policy", "scrml_tenant_iso ON invoices"],
     [`CREATE POLICY scrml_tenant_iso ON "invoices" USING (true);`, "policy", "scrml_tenant_iso ON invoices"],
     [`DROP TABLE IF EXISTS "legacy";`, "drop-table", "legacy"],
+    // §14.8.11.2 S4 — the SECURITY-DEFINER function object + its ACL + the quoted owner role.
+    [`CREATE OR REPLACE FUNCTION "void_invoice"("id" uuid) RETURNS void\n  LANGUAGE plpgsql`, "function", "void_invoice"],
+    [`ALTER FUNCTION "void_invoice"(uuid) OWNER TO "invoice_admin";`, "function", "void_invoice"],
+    [`REVOKE EXECUTE ON FUNCTION "void_invoice"(uuid) FROM PUBLIC;`, "function", "void_invoice"],
+    [`GRANT EXECUTE ON FUNCTION "void_invoice"(uuid) TO scrml_app;`, "function", "void_invoice"],
+    [`DO $scrml_secdef$ BEGIN CREATE ROLE "invoice_admin" NOLOGIN NOBYPASSRLS; EXCEPTION WHEN duplicate_object THEN NULL; END $scrml_secdef$;`, "role", "invoice_admin"],
+    [`GRANT SELECT, INSERT, DELETE ON "invoices" TO scrml_app;`, "grant", "invoices"],
+    [`REVOKE UPDATE ON "invoices" FROM scrml_app;`, "revoke", "invoices"],
   ];
   for (const [stmt, kind, name] of cases) {
     test(`${kind} — ${name}`, () => {
@@ -115,6 +123,36 @@ describe("db-migrate: extractDesiredSchema", () => {
   test("a file with no <schema> yields zero tables", () => {
     const { tables } = extractDesiredSchema(astOf(`<program>\n  <page>\n    <h1>hi</h1>\n  </page>\n</program>\n`));
     expect(tables).toEqual([]);
+  });
+
+  test("§14.8.11.2 S4 — collects SECURITY-DEFINER fns alongside tables", () => {
+    const src = `<program db="postgres://x">
+  <schema>
+    invoices {
+      id: uuid primary key
+      tenant_id: uuid not null
+      status: text not null
+      amount: decimal not null immutable
+    } db-authoritative
+
+    fn void_invoice(id: uuid) security definer owner(invoice_admin) requires cap("void") {
+      """
+      UPDATE invoices SET status = 'void' WHERE id = void_invoice.id;
+      """
+    }
+  </schema>
+</program>
+`;
+    const { tables, fns } = extractDesiredSchema(astOf(src));
+    expect(tables.map((t) => t.name)).toEqual(["invoices"]);
+    expect(fns.map((f) => f.name)).toEqual(["void_invoice"]);
+    expect(fns[0].owner).toBe("invoice_admin");
+    expect(fns[0].cap).toBe("void");
+  });
+
+  test("a file with no fns yields an empty fns array", () => {
+    const { fns } = extractDesiredSchema(astOf(DBAUTH_PROJECT));
+    expect(fns).toEqual([]);
   });
 });
 

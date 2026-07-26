@@ -122,4 +122,17 @@ describe("§14.8.11 wrapPrincipalTxn — scope-aware A1 wrapping", () => {
   test("the module-level handle declaration is not wrapped", () => {
     expect(out).toContain('const _scrml_sql = new SQL("postgres://x/y");');
   });
+
+  // §14.8.11.2 S4 — the capability GUC is pinned alongside the tenant GUC in the
+  // SAME reserved txn, before the SET LOCAL ROLE, once per wrapped handler query.
+  test("each wrapped query pins scrml.principal.caps alongside scrml.tenant", () => {
+    const capRefs = out.match(/set_config\('scrml\.principal\.caps', \$\{_scrml_active_caps\(_scrml_req\)\}, true\)/g) || [];
+    expect(capRefs.length).toBe(2); // one per wrapped handler query
+    // Ordering per wrapped block: tenant set_config → caps set_config → SET LOCAL ROLE.
+    const tIdx = out.indexOf("set_config('scrml.tenant'");
+    const cIdx = out.indexOf("set_config('scrml.principal.caps'");
+    const rIdx = out.indexOf("SET LOCAL ROLE scrml_app");
+    expect(tIdx).toBeLessThan(cIdx);
+    expect(cIdx).toBeLessThan(rIdx);
+  });
 });

@@ -178,7 +178,9 @@ function parseProjectSchema(input) {
   }
 
   const tables = [];
+  const fns = [];
   const seenNames = new Set();
+  const seenFnNames = new Set();
   const parseErrors = [];
   const schemaWarnings = [];
   for (const f of files) {
@@ -204,9 +206,16 @@ function parseProjectSchema(input) {
         tables.push(t);
       }
     }
+    // §14.8.11.2 S4 — collect the SECURITY-DEFINER fns (first decl of a name wins).
+    for (const fn of extracted.fns ?? []) {
+      if (!seenFnNames.has(fn.name)) {
+        seenFnNames.add(fn.name);
+        fns.push(fn);
+      }
+    }
     for (const w of extracted.warnings ?? []) schemaWarnings.push(w);
   }
-  return { tables, parseErrors, schemaWarnings };
+  return { tables, fns, parseErrors, schemaWarnings };
 }
 
 /**
@@ -220,9 +229,23 @@ export function classifyStatement(stmt) {
     return { kind: "table", name: m[1] };
   if ((m = /^CREATE POLICY\s+(\w+)\s+ON\s+"?([A-Za-z_][\w$]*)"?/i.exec(s)))
     return { kind: "policy", name: `${m[1]} ON ${m[2]}` };
-  if ((m = /CREATE ROLE\s+(\w+)/i.exec(s))) return { kind: "role", name: m[1] };
+  // §14.8.11.2 S4 — the SECURITY-DEFINER function object + its ACL statements. The
+  // function checks precede the generic GRANT check (a `GRANT EXECUTE ON FUNCTION …`
+  // would otherwise capture the literal `FUNCTION` token as the object name).
+  if ((m = /^CREATE(?: OR REPLACE)? FUNCTION\s+"?([A-Za-z_][\w$]*)"?/i.exec(s)))
+    return { kind: "function", name: m[1] };
+  if ((m = /^ALTER FUNCTION\s+"?([A-Za-z_][\w$]*)"?/i.exec(s)))
+    return { kind: "function", name: m[1] };
+  if ((m = /^(?:GRANT|REVOKE)\b[\s\S]*?\bON FUNCTION\s+"?([A-Za-z_][\w$]*)"?/i.exec(s)))
+    return { kind: "function", name: m[1] };
+  // CREATE ROLE — anchored inside its idempotent `DO $…$ BEGIN CREATE ROLE …` block;
+  // the name may be a quoted identifier (a P2 SECDEF owner role) or a bareword (M1
+  // `scrml_app`).
+  if ((m = /CREATE ROLE\s+"?([A-Za-z_][\w$]*)"?/i.exec(s))) return { kind: "role", name: m[1] };
   if ((m = /^GRANT\b[\s\S]*?\bON\s+"?([A-Za-z_][\w$]*)"?/i.exec(s)))
     return { kind: "grant", name: m[1] };
+  if ((m = /^REVOKE\b[\s\S]*?\bON\s+"?([A-Za-z_][\w$]*)"?/i.exec(s)))
+    return { kind: "revoke", name: m[1] };
   if ((m = /^ALTER TABLE\s+"?([A-Za-z_][\w$]*)"?/i.exec(s)))
     return { kind: "alter", name: m[1] };
   if ((m = /^DROP POLICY IF EXISTS\s+(\w+)\s+ON\s+"?([A-Za-z_][\w$]*)"?/i.exec(s)))
@@ -456,8 +479,8 @@ export async function runDbMigrate(args) {
     console.error(c.yellow("warning: ") + w);
   }
 
-  const desired = { tables: parsed.tables };
-  if (desired.tables.length === 0) {
+  const desired = { tables: parsed.tables, fns: parsed.fns ?? [] };
+  if (desired.tables.length === 0 && desired.fns.length === 0) {
     console.error(c.dim("no <schema> tables found — nothing to apply."));
     return;
   }
@@ -476,12 +499,16 @@ export async function runDbMigrate(args) {
   // is the MORE fundamental error (wrong driver entirely), so it precedes the
   // per-table tenant-column preflight.
   const hasDbAuth = desired.tables.some((t) => t.dbAuthoritative);
-  if (hasDbAuth && driver !== "postgres") {
+  const hasSecdef = desired.fns.length > 0; // §14.8.11.2 S4 — SECDEF is Postgres-only too
+  if ((hasDbAuth || hasSecdef) && driver !== "postgres") {
+    const what = hasDbAuth
+      ? "db-authoritative table(s)"
+      : "security-definer fn(s)";
     console.error(
       c.red("error:") +
-        " E-DBAUTH-SQLITE: this project declares db-authoritative table(s), which require a " +
-        `Postgres target (RLS / roles / GRANT are Postgres-only). The --db URL resolves to the ` +
-        `"${driver}" driver. Provide a postgres:// migrator URL.`,
+        ` E-DBAUTH-SQLITE: this project declares ${what}, which require a ` +
+        `Postgres target (RLS / roles / GRANT / SECURITY DEFINER are Postgres-only). The --db URL ` +
+        `resolves to the "${driver}" driver. Provide a postgres:// migrator URL.`,
     );
     process.exit(1);
   }
