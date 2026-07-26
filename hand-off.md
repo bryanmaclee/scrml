@@ -1,4 +1,47 @@
 <!-- ============================================================= -->
+<!-- S288 WRAP (Peter/AdiPDesk, adopter lane) — prepended 2026-07-26. -->
+<!-- bryan's S287 wrap + all prior UNCHANGED below.                  -->
+<!-- (S288 number collides w/ bryan's concurrent s288-tagged chores; -->
+<!--  disambiguate by name — this is Peter/AdiPDesk.)                -->
+<!-- ============================================================= -->
+
+# scrml — Session 288 (Peter · AdiPDesk) — WRAP — two HIGH adopter bugs landed
+
+**Date:** 2026-07-26. `/boot` Profile A on AdiPDesk (Peter). `main` at **`52585b25`**, scrml coherence 0/0, tree clean, no open PRs (mine). Delta-log `[787]`+. Changelog S288. This carries the irreducible. **Both recommended HIGH adopter bugs FIXED, verified, merged.**
+
+## 🎯 THE HEADLINE — the two queued HIGH gaps are closed, and BOTH gap reports' stated fix directions were WRONG (corrected)
+- **`g-match-without-for-plus-when-children` (HIGH) → PR #192 (`235f47c2`), `E-MATCH-INVALID-ARM`.** Ghost `<when is="…">` arms at the block-form `<match>` arm position were silently dropped by the Phase-2 arm tokenizer (`isArmOpener` only accepts `<`+`[A-Z_]`) → zero recognised arms → the match tree-shook to nothing → a DEAD PAGE with 0 errors. **The gap said "reject `<match>` without `for=`" — WRONG:** `<match on=@cell>` without `for=` is a LEGITIMATE inferred-type form (e-dg-002 / match-on-atdot tests rely on it); rejecting it would break valid code. Real fix = arm-validation in `parseMatchArms` (emit one E-MATCH-INVALID-ARM per stray tag, skip the element as a unit). The reviewer's "match-in-a-div emits no codegen" claim was DISPROVEN (that was the same `<when>` bug conflated).
+- **`g-nested-for-lift-no-reconcile-on-cell-replace` (HIGH) → PR #197 (`52585b25`).** A nested Tier-0 `for (s of e.states) { lift }` inside an outer reconciled `${for (e of @engines) lift}` rendered STALE inner content on REPLACE of `@engines`: the outer reconcile keys by `id ?? index`, so index-key match → DOM node REUSED → the inner one-shot creation-loop never re-ran (outer `<h3>` updated via its live-keyed effect → stale-but-plausible pane). **The gap's `emit-each.ts:1041` hypothesis was WRONG** — the defect was the Tier-0 for-lift emitter (`emit-lift.js emitForStmtWithContainer`), not the each createElement path. Fix = when an inner for-lift's iterable depends transitively on an enclosing reconciled item, emit its OWN reactive inner reconcile (dynamic `_scrml_effect` re-resolves the live ancestor item(s) by key, replays item-derived local aliases, reconciles). Dependence resolved across the WHOLE ancestor ctx stack + EVERY decl form.
+
+## 🧭 THE LESSON worth carrying (reconfirmed at scale) — adversarial-review-before-land caught 3 real HIGH false-negatives across Gap 2
+Gap 2 went dev-agent-dispatch → **TWO adversarial-review rounds**, each of which BROKE the then-current fix on nearby shapes the happy-path tests missed:
+- Round-1 review: whole-stack ancestor ref (`for (g){for(r){for(c of g.rows)}}`) + local alias (`let sts=e.states`) both slipped the single-innermost-ctx predicate → still stale.
+- Round-2 review: object destructure (`let {states}=e`, idiomatic), array/rest destructure, and expr-form init (`let x=for(…)`) all skipped by the detection scan → still stale.
+Each was the EXACT reported bug reached through a different binding form. **This is the [[feedback-verify-the-bug-class-not-just-reported-instance]] discipline earning its cost — a single-shape codegen fix landed on a green happy-path is an incomplete fix (the S285 "needed a 2nd PR" pattern). For a reconciler/codegen fix, sweep the bug CLASS across all binding/nesting forms via an independent break-it reviewer BEFORE landing.** Decl forms are finite {simple, member/method, alias, destructure, rest, expr-form} → the fix converged after round 3; the detection is now decl-form-exhaustive.
+
+## 🔴 OPEN / QUEUED for the next Peter-lane boot (filed this session, NOT started)
+- **`g-item-derived-local-stale-in-per-item-effect-paths` (MED, NEW S288)** — the natural next arc. The Gap-2 fix made the inner-list RECONCILE path re-resolve item-derived locals, but the OTHER per-item effect wrappers (`maybeWrapLiftPerItemEffect` for TEXT bindings, + almost-certainly attr/event) re-resolve only the iterVar, not item-derived locals: `let {name}=e; lift <h3>${name}</h3>` stays stale on REPLACE (confirmed executed-DOM for text; attr/event unverified). Fix = thread the same `scanItemDerivedLocals`/`_pullFromText` replay into those per-item effect paths. Idiomatic → worth its own focused arc.
+- **`g-match-nofor-block-form-skips-exhaustiveness` (MED, NEW S288 — bryan's tier-1 lane)** — a no-`for=` `<match on=@enumCell>` skips exhaustiveness ENTIRELY (a missing variant + no wildcard compiles clean). Intersects a real SPEC/impl divergence: SPEC §18.0.1 line 1073 lists `for=Type` as REQUIRED, but the impl supports (and tests rely on) `on=@cell` inference. Either SPEC blesses inference (Rule 4 reconcile) or impl rejects no-`for=`; then wire on-cell-type→exhaustiveness in `validateMatchBlock`. Surfaced to bryan.
+- **From the S285/S286 Peter queue (still open):** auto-await expr-positions MED×2 (`g-reactive-write-member-server-call-no-autoawait` + `g-match-arm-server-call-no-autoawait`) · `g-attr-writer-conflict-not-detected-template-value-form` (MED) · #173 amplification halves.
+
+## 🧷 CONCURRENT / CROSS-MACHINE
+- **bryan's DB-authoritative lane was ACTIVE concurrently** — #191 (db-migrate CHECK oneOf/notIn→SQL literals), #193 (@currentUser in RI-route + tenant registry from `<schema>`), #194 (db-auth users-table docs gap) landed on `main` WHILE I worked. My two PRs rebased cleanly over each (disjoint surface: match-parser / for-lift-codegen vs schema/dbauth). No live `S288-bryan` board file seen — bryan tagged #194 "chore(s288)" (session-number collision, 2 machines; disambiguate by name). If bryan is still live, this wrap advances ONLY the Peter lane's durable state; main is PR-serialized regardless.
+- **scrml-support boot-merge (uncommitted → committed THIS wrap):** at boot `user-voice-pjoliver11.md` had a local flogence-S35 addition that conflicted with the upstream S286 entry on rebase — I kept BOTH (chronological). Committed this wrap.
+
+## 🖥️ AdiPDesk specifics (carry — this machine)
+- **NO local git hooks** (only `.sample`) — cloud `gate` is the sole authority. **canonical `scrml-js-codegen-engineer` NOT installed** — used `general-purpose` fallback with thorough self-contained briefs (worked for the Gap-2 dispatch + 2 fix rounds). Full-suite baseline has ~11 pre-existing lift/each fails + ~8 integration (self-host-smoke ×4 / CSRF ×2 / teardown) — PROVEN pre-existing (verified identical on HEAD); Linux cloud gate is clean on them. Run WITHOUT `--bail`.
+- **CI shape (both PRs):** `gate` (required) + `windows` = GREEN; `tracking`/`ai-review` = RED non-required → auto-merge on gate-green. Matched S284-S287.
+
+## ✅ GATE / MAPS
+- unit **16895 / 0 fail / 17 skip** · conformance **746/746** · Gap-2 gate `g-nested-for-lift-no-reconcile-on-cell-replace.browser.test.js` **15 executed-DOM cases** (all fail→pass verified) · Gap-1 `g-match-invalid-arm-ghost-pattern.test.js` **10 cases**. lift/each subset: 0 NEW fails (11 pre-existing, verified on HEAD). FACTS `--check` PASS (regenerated in both PRs).
+- **Maps: unchanged** — both fixes were internal codegen/parser edits to EXISTING files (`match-statechild-parser.ts`, `emit-lift.js`, `emit-control-flow.ts`, `emit-logic.ts`); no new surface files. (New error code E-MATCH-INVALID-ARM + a couple exported helpers — not structural.) Consistent with the S286-peter internal-edits-no-refresh precedent.
+
+## Tags
+#session-288-peter #adopter-match-when-ghost-pattern-E-MATCH-INVALID-ARM #adopter-nested-for-lift-reconcile-on-replace #both-gap-reports-fix-direction-corrected #adversarial-caught-3-HIGH-false-negatives-preland #verify-the-bug-class #2-new-gaps-filed #bryan-dbauth-concurrent-191-193-194 #general-purpose-fallback-agent
+
+---
+
+<!-- ============================================================= -->
 <!-- S287 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-26.        -->
 <!-- Prior S286 wrap + Peter addendum UNCHANGED below.             -->
 <!-- ============================================================= -->
