@@ -893,12 +893,22 @@ export function generateSecdefDDL(fn, dbAuthTables = []) {
     `DO $scrml_secdef$ BEGIN CREATE ROLE ${owner} NOLOGIN NOBYPASSRLS; ` +
       `EXCEPTION WHEN duplicate_object THEN NULL; END $scrml_secdef$;`,
   );
-  // 2. grant the owner CRUD on the db-authoritative tables (table-level UPDATE, i.e.
+  // 2. provision the owner so the (non-superuser) migrator can reassign the function
+  //    to it below — SECURITY-CRITICAL: without the reassignment the SECDEF would run
+  //    as the powerful migrator, not the bounded owner. `ALTER FUNCTION … OWNER TO`
+  //    requires (a) the migrator can SET ROLE to the owner and (b) the owner holds
+  //    CREATE on the function's schema. Both idempotent; both succeed on first deploy
+  //    (the migrator created the owner ⇒ holds ADMIN OPTION). PG16 plain GRANT
+  //    membership defaults SET TRUE (PG15-portable). (A cluster where a DIFFERENT
+  //    migrator pre-created the owner role hits the M1 cluster-global-role open.)
+  stmts.push(`GRANT ${owner} TO CURRENT_USER;`);
+  stmts.push(`GRANT CREATE ON SCHEMA public TO ${owner};`);
+  // 3. grant the owner CRUD on the db-authoritative tables (table-level UPDATE, i.e.
   //    including the immutable columns scrml_app cannot touch). Idempotent.
   for (const tbl of dbAuthTables) {
     stmts.push(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${quoteIdent(tbl)} TO ${owner};`);
   }
-  // 3. the hardened SECDEF function (idempotent CREATE OR REPLACE).
+  // 4. the hardened SECDEF function (idempotent CREATE OR REPLACE).
   stmts.push(
     `CREATE OR REPLACE FUNCTION ${fnName}(${createArgs}) RETURNS ${ret}\n` +
       `  LANGUAGE plpgsql\n` +
@@ -911,9 +921,9 @@ export function generateSecdefDDL(fn, dbAuthTables = []) {
       `\n  END\n` +
       `  ${tag};`,
   );
-  // 4. bind ownership (the SECDEF now runs as the bounded owner).
+  // 5. bind ownership (the SECDEF now runs as the bounded owner, NOT the migrator).
   stmts.push(`ALTER FUNCTION ${signature} OWNER TO ${owner};`);
-  // 5. lock down EXECUTE — no ambient PUBLIC EXECUTE; only the runtime role may CALL.
+  // 6. lock down EXECUTE — no ambient PUBLIC EXECUTE; only the runtime role may CALL.
   stmts.push(`REVOKE EXECUTE ON FUNCTION ${signature} FROM PUBLIC;`);
   stmts.push(`GRANT EXECUTE ON FUNCTION ${signature} TO ${DBAUTH_ROLE};`);
 

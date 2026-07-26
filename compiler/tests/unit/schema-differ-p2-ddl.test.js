@@ -136,6 +136,17 @@ describe("§14.8.11.2 S4 — generateSecdefDDL (the SECURITY-DEFINER mutation ch
     expect(joined).toContain(`GRANT SELECT, INSERT, UPDATE, DELETE ON "invoices" TO "invoice_admin";`);
   });
 
+  test("provisions the owner so a non-superuser migrator can reassign ownership", () => {
+    // The migrator must be able to SET ROLE to the owner + the owner must hold CREATE
+    // on the schema, else ALTER FUNCTION … OWNER TO fails under a non-superuser migrator.
+    expect(joined).toContain(`GRANT "invoice_admin" TO CURRENT_USER;`);
+    expect(joined).toContain(`GRANT CREATE ON SCHEMA public TO "invoice_admin";`);
+    // These provisioning grants precede the ownership reassignment.
+    expect(joined.indexOf(`GRANT "invoice_admin" TO CURRENT_USER;`)).toBeLessThan(
+      joined.indexOf(`ALTER FUNCTION "void_invoice"(text) OWNER TO "invoice_admin";`),
+    );
+  });
+
   test("the CREATE FUNCTION carries every hardening invariant", () => {
     expect(joined).toContain(`CREATE OR REPLACE FUNCTION "void_invoice"("id" text) RETURNS void`);
     expect(joined).toContain("LANGUAGE plpgsql");

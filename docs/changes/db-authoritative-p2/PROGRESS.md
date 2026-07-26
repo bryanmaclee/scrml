@@ -36,7 +36,18 @@ the acceptance gate asserts `proconfig` contains `search_path=pg_catalog, public
 - [x] 5. M2 apply-seam wiring (extractDesiredSchema fns → parseProjectSchema → desired.fns → diffSchema;
       classifyStatement function/role(quoted)/revoke kinds; E-DBAUTH-SQLITE also fires on fns
       (db-migrate + codegen/index compile gate))
-- [ ] 6. live-PG 4-assertion acceptance gate + compile-shape conformance + SPEC §14.8.11.2
+- [x] 6. live-PG 4-assertion acceptance gate (db-authoritative-p2-pg.test.js — 7/7 pass on PG16) +
+      compile-shape conformance (conf-DBAUTH-P2.test.js — 8/8) + SPEC §14.8.11.2 + E-DBAUTH-SQLITE §34 update
+
+## Deploy-role finding (surfaced during the acceptance run)
+`ALTER FUNCTION … OWNER TO <owner>` under a NON-superuser migrator requires (a) the migrator can SET
+ROLE to the owner and (b) the owner holds CREATE on the function's schema. The emitter now provisions
+both: `GRANT <owner> TO CURRENT_USER;` + `GRANT CREATE ON SCHEMA public TO <owner>;` before the ALTER.
+SECURITY-CRITICAL: without the ownership reassignment the SECDEF would run as the powerful migrator,
+not the bounded owner. PG16 plain GRANT membership defaults SET TRUE (PG15-portable). A cluster where a
+DIFFERENT migrator pre-created the owner role hits the M1 cluster-global-role open (documented).
+
+## DONE — all 6 steps landed; acceptance gate green on live PG16.
 
 ## Caps-source disposition
 `_scrml_active_caps(req)` resolves from the session-derived `_scrml_current_user(req)` (reads
