@@ -81,6 +81,74 @@ export function appDeclaresDbAuthoritative(fileAST: unknown): boolean {
 }
 
 /**
+ * Extract the DESIRED `<schema>` table set from a file AST — the migration-apply
+ * seam's (§14.8.11 M2) desired-state input. Walks every `<schema>` state block,
+ * parses each body with `parseSchemaBlock`, and merges the tables (first
+ * declaration of a name wins). Each returned table carries its `dbAuthoritative`
+ * flag, so `scrml db-migrate` can drive `diffSchema({ driver: "postgres" })` (which
+ * appends the S1/S6 db-authoritative DDL for a `dbAuthoritative` table). Pure; no I/O.
+ *
+ * This is the desired-state counterpart to the reverse-direction `readActualSchemaPg`
+ * (live DB → actual): together they feed `diffSchema` the desired-vs-actual pair the
+ * apply loop reconciles.
+ *
+ * @returns `{ tables }` in the same shape `parseSchemaBlock` yields.
+ */
+export function extractDesiredSchema(
+  fileAST: unknown,
+): { tables: Array<{ name: string; dbAuthoritative?: boolean; [k: string]: unknown }> } {
+  const seen = new WeakSet<object>();
+  const bodies: string[] = [];
+
+  const collectSchemaBody = (node: any): string => {
+    let text = "";
+    for (const c of node?.children ?? []) {
+      if (c && c.kind === "text" && typeof c.value === "string") text += c.value;
+    }
+    return text;
+  };
+
+  const walk = (value: unknown, depth: number): void => {
+    if (value === null || typeof value !== "object" || depth > 64) return;
+    if (seen.has(value as object)) return;
+    seen.add(value as object);
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item, depth + 1);
+      return;
+    }
+    const node = value as Record<string, any>;
+    if (node.kind === "state" && node.stateType === "schema") {
+      const body = collectSchemaBody(node);
+      if (body.trim().length > 0) bodies.push(body);
+    }
+    for (const key of Object.keys(node)) {
+      if (key === "span" || key.startsWith("_")) continue;
+      walk(node[key], depth + 1);
+    }
+  };
+
+  walk(fileAST, 0);
+
+  const tables: Array<{ name: string; dbAuthoritative?: boolean; [k: string]: unknown }> = [];
+  const seenNames = new Set<string>();
+  for (const body of bodies) {
+    let parsed: { tables?: Array<{ name?: string }> } = {};
+    try {
+      parsed = parseSchemaBlock(body) as any;
+    } catch {
+      continue;
+    }
+    for (const t of parsed.tables ?? []) {
+      if (t && typeof t.name === "string" && !seenNames.has(t.name)) {
+        seenNames.add(t.name);
+        tables.push(t as any);
+      }
+    }
+  }
+  return { tables };
+}
+
+/**
  * True iff `argText` (the raw argument text of a `_scrml_sql.unsafe(...)` call)
  * is a transaction-control / session-control statement — BEGIN / COMMIT /
  * ROLLBACK / SET / SAVEPOINT / RELEASE / START / ABORT / END. Those are NOT

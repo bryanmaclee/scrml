@@ -25,12 +25,18 @@ turnkey-from-source. The M1 negative test must pass THROUGH the CLI.
   RLS, CREATE POLICY, read pg_policies/pg_roles, GRANT scrml_app TO migrator — all OK.
 
 ## Build status
-- [ ] Fence: `diffSchema` `allowDestructive` gate — no bare DROP TABLE by default (W-SCHEMA-DESTRUCTIVE-DROP).
-- [ ] `extractDesiredSchema(fileAST)` in db-authoritative.ts (reuses the schema-body walk).
-- [ ] `compiler/src/commands/db-migrate.js` — argv, PG apply flow, SQLite apply, dry-run.
-- [ ] `cli.js` registration (guard + dispatch + help).
+- [x] Fence: `diffSchema` `allowDestructive` gate — no bare DROP TABLE by default (W-SCHEMA-DESTRUCTIVE-DROP). (bff46efe)
+- [x] `extractDesiredSchema(fileAST)` in db-authoritative.ts (reuses the schema-body walk).
+- [x] `compiler/src/commands/db-migrate.js` — argv, PG apply flow, SQLite apply, dry-run.
+- [x] `cli.js` registration (guard + dispatch + help).
 - [ ] SPEC §14.8.11.1 (apply seam) + W-SCHEMA-DESTRUCTIVE-DROP §34 registration.
-- [ ] Tests: through-CLI PG acceptance (skip-graceful), argv/fence/diff unit, SQLite smoke.
+- [x] Tests: through-CLI PG acceptance (skip-graceful), argv/fence/diff unit, SQLite smoke.
+
+## Acceptance gate — PASSED (this session, real PG16)
+Through-CLI: `scrml db-migrate <invoices-project> --db postgres://migrator:pw@localhost:5432/db`
+applies 7 stmts in 1 txn; then a bounded scrml_app conn: NO set_config → 0 rows; set_config(tenantA)
+→ tenant-A-only. Ledger records authorship. Re-run idempotent. Cross-test order-independent (the
+cluster-global scrml_app membership grant goes through the peer superuser, not the migrator).
 
 ## Advisory-lock note
 Used `pg_advisory_xact_lock(<key>)` INSIDE the apply txn (auto-released at commit/rollback) rather
