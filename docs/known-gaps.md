@@ -15,7 +15,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 13 |
+| HIGH | 12 |
 | MED | 56 |
 | LOW | 34 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -109,7 +109,44 @@ CONSTRAINT` / `SET NOT NULL` / `ADD UNIQUE`); SQLite needs the 12-step rebuild a
 fail on orphan rows, correctly — so it owes a pre-flight orphan check and a clear diagnostic rather
 than a raw driver error, plus the §14.8.11 S7 fence (never DROP/recreate a db-authoritative table:
 that CASCADE-drops its RLS policies and grants). Its own arc; ruled S290 not to bundle it with the
-parse fix. <!-- @gap id=g-db-migrate-ignores-constraint-drift-on-existing-columns sev=HIGH status=open -->
+parse fix. 
+
+**RESOLVED S290 — and the governing-sentence gate made it a conformance restoration, not an amendment.**
+§38.6.2's operations table has listed `CREATE INDEX` (unique added), `DROP INDEX` (unique removed) and
+"Full table rebuild — all other column-level changes (type changes, **constraint changes**)" since the
+section was written, and §38.6.3 names "no constraint changes via `ALTER`" as the very reason the
+rebuild exists. **Three of the eight specified operations were simply never built.** The fix restores
+behaviour the spec already required; no ruling was needed.
+
+What landed:
+- **Postgres — native ALTERs**, never a rebuild: `ALTER COLUMN … SET/DROP NOT NULL`, `ADD/DROP
+  CONSTRAINT … UNIQUE`, `ALTER COLUMN … SET/DROP DEFAULT`, `ADD CONSTRAINT … FOREIGN KEY`. The
+  §14.8.11 S7 fence makes this mandatory rather than merely nicer — a rebuild CASCADE-drops the
+  table's RLS policies and grants. Locked by a test asserting the PG path emits no `DROP TABLE`.
+- **SQLite — the actual-state read was INCOMPLETE, and that came first.** `PRAGMA table_info` exposes
+  only name/type/notnull/dflt_value/pk, so `UNIQUE` and `REFERENCES` drift was not merely unreconciled,
+  it was **invisible to the differ**. Added `PRAGMA index_list` + `PRAGMA foreign_key_list`
+  (single-column only; composite indexes/FKs are recorded, not attributed to a column). Unique drift
+  then uses `CREATE`/`DROP INDEX` per §38.6.2 rows 6/7; everything else needs the §38.6.3 rebuild and is
+  gated behind `--allow-destructive` — generated when permitted, reported as **withheld** when not.
+- **`db-migrate` no longer says "up to date" when it withheld work.** `printPlan` reported an empty plan
+  as up-to-date regardless of WHY it was empty, so a suppressed reconcile was indistinguishable from a
+  matching database. The same defect class one layer up.
+- **2 new §34 codes:** `W-SCHEMA-CONSTRAINT-TIGHTENED` (a constraint is being ADDED to a populated
+  column — will fail on a NULL / duplicate / orphan, correctly) and `W-SCHEMA-CONSTRAINT-DRIFT-UNAPPLIED`.
+
+Verified on live PG16 and SQLite: the three constraints apply and are present in `pg_constraint`;
+re-running is a clean no-op (**no phantom drift** — defaults compare through a normalizer because
+drivers echo `'x'::text` for `'x'`, and a gate that cries wolf gets bypassed then deleted); and the
+newly-rejecting hazard behaves — with an orphan row present the migration fails naming the failing
+statement (`4 of 4`) and **rolls back atomically**, leaving zero FK constraints behind. Gate suite
+18,238 pass / 0 fail.
+
+**Still out of scope, named honestly:** column TYPE changes (§38.6.2 row 8 covers them too; a Postgres
+type change needs a `USING` clause and is its own design) and shared-core predicate drift (`oneOf`,
+`length`, `min` …) — `CHECK` text is not recoverable from `PRAGMA` and is not yet introspected on the PG
+side either. Both remain unreconciled, and neither is reported as up-to-date-safe.
+— `RESOLVED S290` <!-- @gap id=g-db-migrate-ignores-constraint-drift-on-existing-columns sev=HIGH status=resolved -->
 
 ### G-SCHEMA-TABLE-LEVEL-CONSTRAINT-LINES-SILENTLY-DROPPED — a table-body line that is not `name: type` is discarded without a diagnostic — `NEW S290; MED; open`
 `parseColumns` keeps only lines containing a `:` and treats the text before it as a column name; every

@@ -598,24 +598,76 @@ export function readActualSchema(db) {
 
   for (const { name } of tableNames) {
     const columns = db.query(`PRAGMA table_info(${quoteIdent(name)})`).all();
+
+    // S290 — `PRAGMA table_info` exposes name/type/notnull/dflt_value/pk and
+    // NOTHING ELSE. Until now that was the whole actual-state read, so UNIQUE
+    // and REFERENCES drift on an existing column was not merely unreconciled,
+    // it was INVISIBLE: the differ had no `unique`/`references` on the actual
+    // side to compare against. Two more PRAGMAs recover them, bringing the
+    // SQLite read to parity with `readActualSchemaPg` so §38.6.2's
+    // CREATE INDEX / DROP INDEX / rebuild rows can actually be triggered.
+
+    // Single-column UNIQUE indexes. `origin` is "u" for a UNIQUE constraint
+    // declared in CREATE TABLE and "c" for a standalone CREATE UNIQUE INDEX;
+    // both make the column unique, so both count. Composite indexes are
+    // recorded separately — they are not a per-column property and a
+    // single-column comparison must not be fooled by one.
+    const uniqueCols = new Set();
+    const compositeUnique = [];
+    for (const idx of db.query(`PRAGMA index_list(${quoteIdent(name)})`).all()) {
+      if (idx.unique !== 1) continue;
+      const cols = db.query(`PRAGMA index_info(${quoteIdent(idx.name)})`).all().map(r => r.name);
+      if (cols.length === 1) uniqueCols.add(cols[0]);
+      else if (cols.length > 1) compositeUnique.push({ name: idx.name, columns: cols });
+    }
+
+    // Single-column FOREIGN KEYs, shaped exactly like `parseColumns` produces
+    // (`{ table, column }`) so `sameRef` compares like with like. A composite
+    // FK is not a per-column property either; record it, do not attribute it.
+    const fkByColumn = new Map();
+    const compositeFk = [];
+    for (const [, rows] of groupBy(
+      db.query(`PRAGMA foreign_key_list(${quoteIdent(name)})`).all(),
+      r => String(r.id),
+    )) {
+      if (rows.length !== 1) { compositeFk.push(rows); continue; }
+      const r = rows[0];
+      // `to` is null when the FK targets the parent's PRIMARY KEY implicitly.
+      fkByColumn.set(r.from, { table: r.table, column: r.to ?? "id" });
+    }
+
     tables.push({
       name,
+      compositeUnique,
+      compositeFk,
       columns: columns.map(c => ({
         name: c.name,
         type: c.type || "TEXT",
         notNull: c.notnull === 1,
         default: c.dflt_value,
         primaryKey: c.pk === 1,
-        // Shared-core predicates are NOT recoverable from PRAGMA table_info
-        // (CHECK constraint text isn't exposed through PRAGMA). The diff is
-        // structural-only for now — adding a CHECK to an existing column
-        // shows up via the schema-rebuild path, not as a per-predicate diff.
+        unique: uniqueCols.has(c.name),
+        references: fkByColumn.get(c.name) ?? null,
+        // CHECK constraint text is still NOT recoverable through PRAGMA, so
+        // shared-core predicate drift (`oneOf`, `length`, `min`…) remains
+        // outside the per-column diff. Stated, not silently implied.
         sharedCorePredicates: [],
       })),
     });
   }
 
   return { tables };
+}
+
+/** Group rows by a key, preserving insertion order. */
+function groupBy(rows, keyOf) {
+  const out = new Map();
+  for (const r of rows) {
+    const k = keyOf(r);
+    if (!out.has(k)) out.set(k, []);
+    out.get(k).push(r);
+  }
+  return out;
 }
 
 /**
@@ -638,6 +690,58 @@ export function readActualSchema(db) {
  *   the drop is suppressed with a `W-SCHEMA-DESTRUCTIVE-DROP` warning.
  * @returns {{ sql: string[], warnings: string[] }}
  */
+/**
+ * Which per-column CONSTRAINTS differ between the desired and actual column?
+ *
+ * §38.6.2's operation table has always listed these — `CREATE INDEX` /
+ * `DROP INDEX` for unique drift and "Full table rebuild — all other
+ * column-level changes (type changes, constraint changes)" — and §38.6.3
+ * names "no constraint changes via ALTER" as the reason the rebuild exists.
+ * The implementation nonetheless handled only ADD / DROP / RENAME COLUMN, so
+ * three of the eight specified operations were never built and every
+ * constraint change on an existing column was silently ignored (S290,
+ * `g-db-migrate-ignores-constraint-drift-on-existing-columns`). This is
+ * therefore a conformance RESTORATION, not an amendment — the governing
+ * sentences pre-date the gap.
+ *
+ * `default` is compared loosely: drivers echo defaults back with their own
+ * quoting/casts, so a raw string compare would report permanent phantom drift
+ * — a gate that cries wolf gets bypassed then deleted (`pa-base v2.4` §8).
+ *
+ * @returns {{ notNull: boolean, unique: boolean, references: boolean, default: boolean }}
+ */
+export function columnConstraintDrift(desiredCol, actualCol) {
+  const wantNotNull = !!(desiredCol.notNull || hasReqPredicate(desiredCol));
+  const wantUnique = !!desiredCol.unique;
+  const dRef = desiredCol.references ?? null;
+  const aRef = actualCol.references ?? null;
+  return {
+    // A PRIMARY KEY column is implicitly NOT NULL; do not fight the driver over it.
+    notNull: !desiredCol.primaryKey && !actualCol.primaryKey && wantNotNull !== !!actualCol.notNull,
+    // Likewise a PK is implicitly unique.
+    unique: !desiredCol.primaryKey && !actualCol.primaryKey && wantUnique !== !!actualCol.unique,
+    references: !(dRef === null && aRef === null) && !sameRef(dRef, aRef),
+    default: !sameDefaultText(desiredCol.default, actualCol.default),
+  };
+}
+
+/**
+ * Compare two DEFAULT expressions tolerantly. Postgres echoes `'x'::text` for
+ * `'x'` and SQLite re-quotes; comparing raw text would make every already-
+ * correct default read as permanent drift.
+ */
+function sameDefaultText(a, b) {
+  const norm = (v) => {
+    if (v === null || v === undefined) return null;
+    let s = String(v).trim();
+    s = s.replace(/::[A-Za-z_][A-Za-z0-9_ ]*$/, "").trim();   // drop a PG cast suffix
+    if (/^'(.*)'$/s.test(s)) s = s.slice(1, -1);               // unwrap one quote layer
+    else if (/^"(.*)"$/s.test(s)) s = s.slice(1, -1);
+    return s.toLowerCase();
+  };
+  return norm(a) === norm(b);
+}
+
 export function diffSchema(desired, actual, options = {}) {
   const driver = options.driver ?? "sqlite";
   const sql = [];
@@ -707,6 +811,116 @@ export function diffSchema(desired, actual, options = {}) {
         sql.push(...rebuildSql);
         break;
       }
+    }
+
+    // 2c. CONSTRAINT DRIFT on a column present in BOTH — §38.6.2 rows 6/7/8.
+    //
+    // Never implemented until S290: the loop above handles ADD, the loop below
+    // DROP, and RENAME is folded into ADD — so a column whose NOT NULL / UNIQUE
+    // / DEFAULT / REFERENCES changed produced NO statement and NO warning, and
+    // the planner reported "up to date". An adopter whose tables were already
+    // applied could not obtain a declared constraint by any route.
+    let rebuiltThisTable = false;
+    for (const col of table.columns) {
+      const actualCol = actualColMap.get(col.renameFrom && actualColMap.has(col.renameFrom) ? col.renameFrom : col.name);
+      if (!actualCol) continue;
+      const drift = columnConstraintDrift(col, actualCol);
+      if (!drift.notNull && !drift.unique && !drift.references && !drift.default) continue;
+
+      const qt = quoteIdent(table.name);
+      const qc = quoteIdent(col.name);
+      const wantNotNull = !!(col.notNull || hasReqPredicate(col));
+
+      if (driver === "postgres") {
+        // Postgres reconciles every one of these natively. This matters beyond
+        // convenience: the §14.8.11 S7 fence forbids DROP/recreate on a
+        // db-authoritative table (it CASCADE-drops the RLS policies + grants),
+        // so the rebuild path must never be reachable on this driver.
+        if (drift.notNull) {
+          sql.push(`ALTER TABLE ${qt} ALTER COLUMN ${qc} ${wantNotNull ? "SET" : "DROP"} NOT NULL;`);
+          if (wantNotNull) {
+            warnings.push(
+              `W-SCHEMA-CONSTRAINT-TIGHTENED: adding NOT NULL to existing column "${table.name}"."${col.name}". ` +
+              `The migration will FAIL — correctly — if any existing row holds NULL there. ` +
+              `Backfill first, or give the column a \`default(...)\`.`,
+            );
+          }
+        }
+        if (drift.unique) {
+          // A named constraint, so the inverse operation can find it again.
+          const cn = quoteIdent(`${table.name}_${col.name}_scrml_key`);
+          sql.push(col.unique
+            ? `ALTER TABLE ${qt} ADD CONSTRAINT ${cn} UNIQUE (${qc});`
+            : `ALTER TABLE ${qt} DROP CONSTRAINT IF EXISTS ${cn};`);
+          if (col.unique) {
+            warnings.push(
+              `W-SCHEMA-CONSTRAINT-TIGHTENED: adding UNIQUE to existing column "${table.name}"."${col.name}". ` +
+              `The migration will FAIL — correctly — if duplicate values already exist there.`,
+            );
+          }
+        }
+        if (drift.default) {
+          sql.push(col.default !== null
+            ? `ALTER TABLE ${qt} ALTER COLUMN ${qc} SET DEFAULT ${col.default};`
+            : `ALTER TABLE ${qt} ALTER COLUMN ${qc} DROP DEFAULT;`);
+        }
+        if (drift.references) {
+          const cn = quoteIdent(`${table.name}_${col.name}_scrml_fkey`);
+          sql.push(`ALTER TABLE ${qt} DROP CONSTRAINT IF EXISTS ${cn};`);
+          if (col.references) {
+            sql.push(
+              `ALTER TABLE ${qt} ADD CONSTRAINT ${cn} FOREIGN KEY (${qc}) ` +
+              `REFERENCES ${quoteIdent(col.references.table)}(${quoteIdent(col.references.column)});`,
+            );
+            warnings.push(
+              `W-SCHEMA-CONSTRAINT-TIGHTENED: adding a FOREIGN KEY to existing column "${table.name}"."${col.name}" ` +
+              `→ "${col.references.table}"."${col.references.column}". The migration will FAIL — correctly — if any ` +
+              `existing row references a parent that does not exist. Reconcile the orphans first.`,
+            );
+          }
+        }
+        continue;
+      }
+
+      // SQLite. §38.6.2 gives unique drift its own non-destructive operations;
+      // everything else needs the full-table rebuild (§38.6.3), because SQLite
+      // cannot change a constraint via ALTER at all.
+      if (drift.unique && !drift.notNull && !drift.references && !drift.default) {
+        const idx = quoteIdent(`${table.name}_${col.name}_scrml_key`);
+        sql.push(col.unique
+          ? `CREATE UNIQUE INDEX IF NOT EXISTS ${idx} ON ${qt} (${qc});`
+          : `DROP INDEX IF EXISTS ${idx};`);
+        if (col.unique) {
+          warnings.push(
+            `W-SCHEMA-CONSTRAINT-TIGHTENED: adding UNIQUE to existing column "${table.name}"."${col.name}". ` +
+            `The migration will FAIL — correctly — if duplicate values already exist there.`,
+          );
+        }
+        continue;
+      }
+
+      // The rebuild DROPs and recreates the table. §38.6.3 says generate it
+      // automatically; §38.6.2 says a DROP requires explicit confirmation.
+      // Both hold: generate it, gate it behind the same `--allow-destructive`
+      // switch as every other destructive operation, and when suppressed say
+      // exactly what was not applied rather than reporting "up to date".
+      if (rebuiltThisTable) continue;
+      if (options.allowDestructive) {
+        sql.push(...generate12StepRebuild(table, actualTable, driver));
+        warnings.push(
+          `W-SCHEMA-002: rebuilding table "${table.name}" to reconcile a constraint change on ` +
+          `"${col.name}" (SQLite cannot ALTER a constraint). The table is recreated and its rows copied.`,
+        );
+      } else {
+        warnings.push(
+          `W-SCHEMA-CONSTRAINT-DRIFT-UNAPPLIED: column "${table.name}"."${col.name}" declares a constraint ` +
+          `the database does not have (${Object.entries(drift).filter(([, v]) => v).map(([k]) => k).join(", ")}), ` +
+          `and SQLite cannot change a constraint via ALTER (§38.6.3). Applying it requires a full-table ` +
+          `rebuild, which DROPs and recreates the table — re-run with \`--allow-destructive\` to perform it. ` +
+          `NOTHING WAS APPLIED for this column.`,
+        );
+      }
+      rebuiltThisTable = true;
     }
   }
 
