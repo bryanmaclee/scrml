@@ -16,7 +16,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 13 |
-| MED | 55 |
+| MED | 56 |
 | LOW | 34 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -59,7 +59,95 @@ either — confirmed here (`parseColumns` only reads `name: type` lines, so a ba
 skipped entirely). Single-column `unique` works. Same fix locus.
 
 Impact: **integrity constraints an adopter declared do not exist in their database, silently.** For a
-double-entry ledger this is the class that matters most. Filed at wrap; NOT started. <!-- @gap id=g-schema-references-dot-form-emits-no-foreign-key sev=HIGH status=open -->
+double-entry ledger this is the class that matters most.
+
+**RESOLVED S290 (`E-SCHEMA-011`) — and BOTH decision framings above were corrected by measurement.**
+
+*(1) Not two documented forms — one production plus three prose sites contradicting it.* The
+governing-sentence gate found **§39.5.5** is the only grammar production (`references table(column)`,
+a `####` heading whose siblings `default(literal)` / `rename from identifier` are likewise the
+syntax). **§39.5.7** prose and the **§41.15** `schemaFor` guidance (including the *emitted*
+`E-SCHEMAFOR-NESTED-STRUCT-NO-FK-V1` message text) illustrated the dot form while never declaring it.
+So accepting it would be **newly-ACCEPTING beyond the contract** — an amendment through a one-way
+door (`pa-base v2.4` §8) — while rejecting is recoverable. **bryan RULED reject.** Migration MEASURED
+at 17 sites, **every one of them scrml's own docs/spec/tests**; all migrated in the same landing, and
+an R26 sweep compiled **all 82 corpus `<schema>` files with 0 false fires** (sweep proven to bite on
+an injected known-bad file — the first version of that sweep scanned 0 blocks and would have reported
+a hollow green).
+
+*(2) The newly-rejecting ALTER hazard does not exist — and that is worse news, not better.* Probed on
+a live SQLite **and** PG16 database carrying an orphan row: after the fix the planner reports
+`plan: up to date — 0 statements`. `db-migrate` never emits an ALTER to add the FK, so no existing
+database can fail on one — and **the parse fix alone gives an already-migrated adopter nothing.** That
+is now its own gap: `g-db-migrate-ignores-constraint-drift-on-existing-columns`.
+
+*Detection is of the CLASS, not the reported shape* — `references` written with nothing parsed —
+so `references t (c)`, `references t.c` and a bare `references` are caught too, with string and regex
+bodies blanked first so `default('see references')` cannot false-fire. — `RESOLVED S290` <!-- @gap id=g-schema-references-dot-form-emits-no-foreign-key sev=HIGH status=resolved -->
+
+### G-DB-MIGRATE-IGNORES-CONSTRAINT-DRIFT-ON-EXISTING-COLUMNS — `db-migrate` reconciles column ADD/DROP/RENAME only; every constraint change on an existing column is silently ignored — `NEW S290; HIGH; open`
+Found while ruling the FK gap above, and **larger than it**. `diffSchema`'s existing-table branch
+(`compiler/src/schema-differ.js`, the `if (!actualTable) continue;` block) has exactly three cases:
+`renameFrom` → `RENAME COLUMN`, absent-in-actual → `ADD COLUMN`, absent-in-desired → `DROP COLUMN`.
+**There is no branch for a column present in BOTH whose constraints differ.** (`parsedColumnMatches` /
+`sameRef` exist and do compare `references` — but they live in the introspect/emit-source path, not
+the reconcile.)
+
+EXECUTED on a live PG16 database and on SQLite, both reporting `plan: up to date — 0 statements`:
+- adding a correct `references owners(id)` to an already-migrated column → **no ALTER, no warning**
+- dropping `not null` from an existing column → **nothing**
+- adding `unique` to an existing column → **nothing**
+
+So `NOT NULL`, `UNIQUE`, `DEFAULT`, `REFERENCES` and `immutable` drift are all unreconciled. **Impact:
+an adopter whose tables are already applied cannot obtain a declared constraint by any route** short
+of dropping the table — RediLedger's 19 tables are in exactly this state, which is why `E-SCHEMA-011`
+is necessary but not sufficient for them.
+
+Fix shape: an existing-column constraint-diff branch. Postgres is clean (`ALTER TABLE … ADD
+CONSTRAINT` / `SET NOT NULL` / `ADD UNIQUE`); SQLite needs the 12-step rebuild already implemented at
+`generate12StepRebuild`. **This one carries a REAL newly-rejecting hazard** — an FK-adding ALTER *will*
+fail on orphan rows, correctly — so it owes a pre-flight orphan check and a clear diagnostic rather
+than a raw driver error, plus the §14.8.11 S7 fence (never DROP/recreate a db-authoritative table:
+that CASCADE-drops its RLS policies and grants). Its own arc; ruled S290 not to bundle it with the
+parse fix. <!-- @gap id=g-db-migrate-ignores-constraint-drift-on-existing-columns sev=HIGH status=open -->
+
+### G-SCHEMA-TABLE-LEVEL-CONSTRAINT-LINES-SILENTLY-DROPPED — a table-body line that is not `name: type` is discarded without a diagnostic — `NEW S290; MED; open`
+`parseColumns` keeps only lines containing a `:` and treats the text before it as a column name; every
+other line is `continue`d. A table-level composite constraint — `unique(a, b)`, and by the same route
+a table-level `primary key(a, b)` or `foreign key(a) references t(b)` — is therefore **dropped whole,
+silently**. Confirmed by `db-migrate --dry-run`: a table declaring `unique(a, b)` emits a `CREATE
+TABLE` with no constraint and no warning. Same silent-drop class as `E-SCHEMA-011`; the sibling half
+of the RediLedger S5 report. Smallest of the three, but it is the same "a form that looks right,
+compiles clean, and produces nothing" shape and should not be left to be rediscovered by an adopter.
+Fix: either implement table-level constraints or reject an unrecognized table-body line loudly —
+NOT continue to discard it. <!-- @gap id=g-schema-table-level-constraint-lines-silently-dropped sev=MED status=open -->
+
+### G-SCHEMA-COMMENTS-PARSED-AS-SCHEMA-TEXT — a `//` comment inside a table body shaped the emitted DDL — `NEW S290; HIGH; RESOLVED S290`
+Found by the **S239 adversarial pass** on the `E-SCHEMA-011` fix, not by the corpus sweep — no corpus
+file comments inside a table body in a way that bites, so the 21k-test suite was structurally blind to
+it. `parseColumns` never stripped `//` (§27, the universal scrml comment). Three live consequences,
+all silent, all confirmed by execution on main:
+
+1. **A commented-out column emitted a REAL column.** `// owner_id: integer references owners(id)`
+   became `"// owner_id" integer REFERENCES "owners"("id")` — quoted, so Postgres accepts it. Comment
+   a column out, get a garbage column plus its foreign key.
+2. **A TRAILING comment's PROSE was scanned for constraints.** `a: integer // make this unique later`
+   emitted `"a" integer UNIQUE`; `b: text // not null yet, TODO` emitted `"b" text NOT NULL`. Writing
+   "make this unique later" in English *made the column unique in the database.*
+3. It false-fired the new `E-SCHEMA-011` on any comment mentioning `references` — which is the thread
+   that exposed 1 and 2.
+
+Fix: strip `//` to end-of-line before parsing each table-body line, with comment detection run over a
+**literal-blanked** copy of the line so a `//` inside a string (`default('http://example.com')`) is
+not mistaken for a comment (length-preserving, so the index maps back to the raw line).
+
+**Migration MEASURED, not assumed:** every corpus `<schema>` body (86 extracted across the 82 files
+that declare one) parsed under both the old and new parser and compared field-by-field — column names,
+`not null` / `unique` / `primary key`, `references`, `default`. **Zero real schema blocks change.** The
+single diff came from the measurement harness itself matching a `<schema>` mention inside
+`examples/26-type-derived-schema.scrml`'s documentation header, where the old parser hallucinated three
+columns out of prose and the new one correctly does not — the bug demonstrating itself.
+<!-- @gap id=g-schema-comments-parsed-as-schema-text sev=HIGH status=resolved -->
 
 ### G-DBAUTH-SESSION-PRINCIPAL-NOT-WIRED — the db-authoritative tier's session principal never reached a request — `NEW S288; HIGH; RESOLVED S288 (adopter-reported, RediLedger S4)`
 The M1/P2 tier was **non-functional end-to-end** for a `<schema>`-only app — the exact shape it targets. Both defects failed CLOSED (no leak), but the feature could not run. Found by RediLedger's **behavioral** run (real PG16, real Argon2id credentials, real cookie sessions over HTTP), independently reproduced here before any fix.

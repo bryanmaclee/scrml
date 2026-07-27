@@ -66,7 +66,7 @@
  * stream by the api.js driver.
  */
 
-import { parseSchemaBlock, findNonLiteralSetItems } from "./schema-differ.js";
+import { parseSchemaBlock, findNonLiteralSetItems, referencesHint } from "./schema-differ.js";
 
 // ---------------------------------------------------------------------------
 // Error class — matches TABError shape for uniform collection in api.js
@@ -793,6 +793,32 @@ function checkSchemaDeclarations(ast, filePath, errors) {
       // reject at compile rather than widen a bareword into a string — rejecting is
       // the reversible direction, and the migration was MEASURED at zero (the only
       // two sites teaching the form were scrml's own reference doc).
+      // E-SCHEMA-011 — the author wrote `references` but no foreign key parsed.
+      // §39.5.5 declares exactly one production, `references table(column)`;
+      // every other shape (notably the dot-in-parens `references(owners.id)`
+      // that §39.5.7 prose and the §41.15 schemaFor guidance both illustrated)
+      // silently emitted NO `REFERENCES` clause. RULED S290 (bryan): REJECT
+      // rather than widen — accepting a second form is newly-ACCEPTING beyond
+      // the contract (an amendment, a one-way door), while rejecting is
+      // recoverable and the migration was MEASURED at 17 sites, every one of
+      // them ours. The three SPEC/docs sites that taught the wrong form move in
+      // this same landing.
+      for (const col of cols) {
+        if (col && col.malformedReferences) {
+          errors.push(new GauntletError(
+            "E-SCHEMA-011",
+            `E-SCHEMA-011: column \`${col.name}\` in table \`${table.name}\` writes ` +
+            `\`${col.malformedReferences}\`, which is not a foreign-key declaration. ` +
+            `§39.5.5 declares exactly one form: \`references <table>(<column>)\` — the table ` +
+            `name OUTSIDE the parentheses, the column name inside. Until this diagnostic ` +
+            `existed the clause was silently dropped: the column compiled and migrated ` +
+            `clean with NO foreign key and no error. Write ` +
+            `\`references ${referencesHint(col.malformedReferences)}\`. (See SPEC §39.5.5.)`,
+            span,
+          ));
+        }
+      }
+
       for (const col of cols) {
         for (const bad of findNonLiteralSetItems(col)) {
           errors.push(new GauntletError(

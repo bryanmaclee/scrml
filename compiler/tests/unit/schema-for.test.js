@@ -674,7 +674,7 @@ describe("§11 transforms + multi-table composition", () => {
     \${ schemaFor(User) }
 
     posts {
-      author_id: integer req references(users.id)
+      author_id: integer req references users(id)
       title:     text req length(<=200)
     }
   </>

@@ -100,7 +100,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `12bceb62` — wrap(S288) 6c follow-up: land the LATE project-mapper output + correct my premature claim (#203) — **pushed**
+- `258ff020` — wrap(S288) addendum: file the FK HIGH (root-caused) + RediLedger's turnkey PASS (#204) — **pushed**
 - `89fe9748` — wrap(S287): hand-off + delta-log [786] + maps refresh (DB-authoritative tier) (#190) — **pushed**
 - `7ae6a055` — wrap(S286): adopter form-binding pair closed — #174 + #175 landed, hand-off/changelog/gap-counts (#179) — **pushed**
 - `cd658984` — wrap(S285): changelog + hand-off addendum — 4 adopter/gap PRs (#167 #171 #172 #173) (#176) — **pushed**
