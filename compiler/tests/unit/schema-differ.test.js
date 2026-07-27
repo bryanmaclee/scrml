@@ -5,6 +5,7 @@ import {
   generateCreateTable,
   generateDbAuthoritativeDDL,
   findNonLiteralSetItems,
+  referencesHint,
 } from "../../src/schema-differ.js";
 import { quoteIdent } from "../../src/codegen/sql-ident.ts";
 
@@ -774,7 +775,7 @@ describe("schema-differ §11 (C17): mixed SQL-mirror + shared-core", () => {
     expect(sql[0]).toContain(`CHECK (length("slug") >= 2)`);
   });
 
-  test("references(table.col) + oneOf([...]) — both clauses emitted on FK col", () => {
+  test("references table(col) + oneOf([...]) — both clauses emitted on FK col", () => {
     const desired = parseSchemaBlock(`
       posts {
         kind: text references kinds(id) oneOf(['draft','published'])
@@ -1257,5 +1258,137 @@ describe("S288 findMatchingParen — quote-aware with a quote-blind fallback", (
 
   test("balanced quotes still win over a `)` inside them", () => {
     expect(colOf(`t { k: text default("a)b") }`).default).toBe(`"a)b"`);
+  });
+});
+
+describe("S290 E-SCHEMA-011 — the foreign key that silently vanished (§39.5.5)", () => {
+  const colOf = (body) => parseSchemaBlock(body).tables[0].columns[0];
+  const ddlOf = (body) => generateCreateTable(parseSchemaBlock(body).tables[0], "postgres");
+
+  // The CANONICAL production keeps working, unchanged.
+  test("`references t(c)` parses and emits, and reports no malformation", () => {
+    const col = colOf(`p { owner_id: integer not null references owners(id) }`);
+    expect(col.references).toEqual({ table: "owners", column: "id" });
+    expect(col.malformedReferences).toBeNull();
+    expect(ddlOf(`p { owner_id: integer not null references owners(id) }`))
+      .toContain(`REFERENCES "owners"("id")`);
+  });
+
+  // The reported shape. Pre-S290 this parsed to `references: null` with NO
+  // diagnostic — the adopter lost 34 foreign keys to exactly this.
+  test("the dot-in-parens form is DETECTED, not silently dropped", () => {
+    const col = colOf(`p { owner_id: integer not null references(owners.id) }`);
+    expect(col.references).toBeNull();
+    expect(col.malformedReferences).toContain("references(owners.id)");
+  });
+
+  // The CLASS, not just the reported instance (the S288 incomplete-fix lesson).
+  test("every other malformed shape is detected too", () => {
+    for (const body of [
+      `p { c: integer references(owners.id) }`,
+      `p { c: integer references owners (id) }`,
+      `p { c: integer references owners.id }`,
+      `p { c: integer references owners }`,
+      `p { c: integer references }`,
+    ]) {
+      const col = colOf(body);
+      expect(col.references).toBeNull();
+      expect(col.malformedReferences).not.toBeNull();
+    }
+  });
+
+  // Over-firing is the risk a keyword scan carries; these must stay clean.
+  test("no false positive when `references` appears inside a literal", () => {
+    for (const body of [
+      `p { note: text default('see references') }`,
+      `p { note: text default("references(a.b)") }`,
+      `p { note: text pattern(/references/) }`,
+      `p { note: text oneOf(["references"]) }`,
+    ]) {
+      expect(colOf(body).malformedReferences).toBeNull();
+    }
+  });
+
+  test("a column with no `references` at all is clean", () => {
+    expect(colOf(`p { a: text req length(>=2) }`).malformedReferences).toBeNull();
+    expect(colOf(`p { id: integer primary key }`).malformedReferences).toBeNull();
+  });
+
+  // The message has to say what to TYPE, not only what is wrong.
+  test("referencesHint recovers the canonical form from each malformed shape", () => {
+    expect(referencesHint("references(owners.id)")).toBe("owners(id)");
+    expect(referencesHint("references owners (id)")).toBe("owners(id)");
+    expect(referencesHint("references owners.id")).toBe("owners(id)");
+    expect(referencesHint("references")).toBe("<table>(<column>)");
+    expect(referencesHint(null)).toBe("<table>(<column>)");
+  });
+
+  // The malformed clause must not corrupt the rest of the column.
+  test("the other constraints on a malformed column still survive", () => {
+    const ddl = ddlOf(`p { owner_id: integer not null references(owners.id) }`);
+    expect(ddl).toContain(`"owner_id" integer NOT NULL`);
+    expect(ddl).not.toContain("REFERENCES");
+  });
+});
+
+describe("S290 — `//` comments inside a table body are stripped, not parsed (§27)", () => {
+  const ddlOf = (body) => generateCreateTable(parseSchemaBlock(body).tables[0], "postgres");
+  const colsOf = (body) => parseSchemaBlock(body).tables[0].columns.map((c) => c.name);
+
+  // Found by the S239 adversarial pass, NOT by the corpus sweep — no corpus file
+  // comments inside a table body in a way that bites, so the suite was blind.
+
+  test("a commented-out column no longer emits a real column", () => {
+    const body = `t {
+      id: integer primary key
+      // owner_id: integer references owners(id)
+      name: text not null
+    }`;
+    expect(colsOf(body)).toEqual(["id", "name"]);
+    // Pre-S290 this emitted a quoted column literally named `// owner_id`,
+    // carrying the foreign key, which Postgres accepted.
+    expect(ddlOf(body)).not.toContain("//");
+    expect(ddlOf(body)).not.toContain("REFERENCES");
+  });
+
+  test("a TRAILING comment's prose is no longer scanned for constraints", () => {
+    // Pre-S290 `// make this unique later` emitted UNIQUE, and
+    // `// not null yet, TODO` emitted NOT NULL — the comment shaped the schema.
+    const ddl = ddlOf(`t {
+      a: integer // make this unique later
+      b: text // not null yet, TODO
+    }`);
+    expect(ddl).not.toContain("UNIQUE");
+    expect(ddl).not.toContain("NOT NULL");
+    expect(ddl).toContain(`"a" integer`);
+    expect(ddl).toContain(`"b" text`);
+  });
+
+  test("a `//` inside a string literal is NOT a comment", () => {
+    expect(ddlOf(`t { site: text default("http://example.com") }`))
+      .toContain(`DEFAULT ('http://example.com')`);
+    expect(ddlOf(`t { site: text default('https://x.io/a') }`))
+      .toContain(`DEFAULT ('https://x.io/a')`);
+  });
+
+  test("a comment mentioning `references` does not false-fire E-SCHEMA-011", () => {
+    for (const body of [
+      `t {\n  // owner_id: integer references owners table\n  id: integer primary key\n}`,
+      `t {\n  // legacy: was references(owners.id)\n  id: integer primary key\n}`,
+      `t {\n  id: integer primary key // references nothing\n}`,
+    ]) {
+      const cols = parseSchemaBlock(body).tables[0].columns;
+      expect(cols.every((c) => c.malformedReferences === null)).toBe(true);
+    }
+  });
+
+  test("a comment does not disturb the surrounding real columns", () => {
+    const ddl = ddlOf(`t {
+      id: integer primary key
+      // a note
+      email: text not null unique
+    }`);
+    expect(ddl).toContain(`"id" integer PRIMARY KEY`);
+    expect(ddl).toContain(`"email" text NOT NULL UNIQUE`);
   });
 });

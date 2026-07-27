@@ -35,7 +35,7 @@ The four blocks below are excerpts of one file: [`docs/readme-snippets/tasks-app
     }
     tasks {
         id:           integer primary key
-        user_id:      integer not null references(users.id)
+        user_id:      integer not null references users(id)
         text:         text req length(>=1)
         completed_at: timestamp
     }

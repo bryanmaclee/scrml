@@ -850,7 +850,7 @@ D3 landed S58 — `compiler/SPEC.md` §38 / §39 / §42 / §53 / §34 are now au
 </>
 ```
 
-- SQL-mirror (`not null`, `unique`, `references(table.col)`, `default(literal)`, `primary key`) remains **canonical**.
+- SQL-mirror (`not null`, `unique`, `references table(col)`, `default(literal)`, `primary key`) remains **canonical**.
 - Shared-core (`req`, `length`, `pattern`, `min`, `max`, `gt`, `lt`, `gte`, `lte`, `eq`, `neq`, `oneOf`, `notIn`) is **additive**. Both forms legal; mixed is legal.
 - Lowering rules (§39.5.8): `req → NOT NULL`; `length(>=N) → CHECK (length(col) >= N)`; `pattern(re) → CHECK (col REGEXP …)` driver-dependent (Postgres `~`, SQLite/MySQL `REGEXP`); `min/max/gt/lt/gte/lte/eq/neq → CHECK`; `oneOf([...]) → CHECK (col IN (...))`.
 - **Inviolable:** SQL strings sent to the database are unchanged in shape. Vocabulary unification touches scrml source-level only.

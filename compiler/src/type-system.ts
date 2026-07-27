@@ -20415,7 +20415,7 @@ function _processSchemaForCallInSchemaContext(
         "E-SCHEMAFOR-NESTED-STRUCT-NO-FK-V1",
         `E-SCHEMAFOR-NESTED-STRUCT-NO-FK-V1: \`schemaFor(${structTypeName})\` has a struct-typed field '${fieldName}' but v1.0 does NOT derive foreign-key columns from cross-type struct references ` +
         `(OQ-SCH-4 ratified out-of-scope; deferred to v1.next). ` +
-        `Resolution: omit the nested struct field via \`schemaFor(${structTypeName}, { omit: ["${fieldName}"] })\` and hand-author the FK column inside the same \`<schema>\` block per §41.15.3 interleaving (e.g., \`${fieldName}_id: integer req references(<Table>.id)\`), OR refactor the struct to use a flat \`_id\` field instead of the nested struct reference. ` +
+        `Resolution: omit the nested struct field via \`schemaFor(${structTypeName}, { omit: ["${fieldName}"] })\` and hand-author the FK column inside the same \`<schema>\` block per §41.15.3 interleaving (e.g., \`${fieldName}_id: integer req references <Table>(id)\`), OR refactor the struct to use a flat \`_id\` field instead of the nested struct reference. ` +
         `See SPEC §41.15.7.`,
         span,
       ));

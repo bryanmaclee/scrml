@@ -224,11 +224,84 @@ function parseFnArgs(argText) {
  *     min(n), max(n), gt(n), lt(n), gte(n), lte(n), eq(n), neq(n),
  *     oneOf([...]), notIn([...]). Each captured into `sharedCorePredicates`.
  */
+/**
+ * Blank the BODIES of quoted strings and regex literals, preserving length and
+ * the delimiters themselves, so a keyword scan cannot see inside them.
+ * Length-preserving so an index into the result is still valid in the input.
+ *
+ * Used by the E-SCHEMA-011 detection so `default('see references')` and
+ * `pattern(/references/)` do not read as a malformed foreign key.
+ *
+ * @param {string} s
+ * @returns {string}
+ */
+function blankLiteralBodies(s) {
+  let out = "";
+  let i = 0;
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch === "'" || ch === '"' || ch === "`") {
+      out += ch;
+      i++;
+      while (i < s.length && s[i] !== ch) {
+        if (s[i] === "\\" && i + 1 < s.length) { out += "  "; i += 2; continue; }
+        out += " ";
+        i++;
+      }
+      if (i < s.length) { out += s[i]; i++; }
+      continue;
+    }
+    // A regex literal — only `pattern(/…/)`-shaped in this grammar. Require the
+    // close on the same line so a lone `/` (never legal here, but cheap to be
+    // safe about) cannot swallow the rest of the constraint text.
+    if (ch === "/" && s[i + 1] !== "/" && s[i + 1] !== "*") {
+      let j = i + 1;
+      let closed = false;
+      while (j < s.length && s[j] !== "\n") {
+        if (s[j] === "\\") { j += 2; continue; }
+        if (s[j] === "/") { closed = true; break; }
+        j++;
+      }
+      if (closed) {
+        out += "/" + " ".repeat(j - i - 1) + "/";
+        i = j + 1;
+        continue;
+      }
+    }
+    out += ch;
+    i++;
+  }
+  return out;
+}
+
 function parseColumns(text) {
   const columns = [];
   const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
 
-  for (const line of lines) {
+  for (const rawLine of lines) {
+    // Strip `//` comments (§27 — the universal scrml comment) BEFORE parsing.
+    //
+    // S290: until now comments inside a table body were parsed as schema text,
+    // with three separate live consequences, all silent:
+    //   1. a commented-out column emitted a REAL column — `// owner_id: integer
+    //      references owners(id)` became `"// owner_id" integer REFERENCES …`,
+    //      quoted, so Postgres accepted it;
+    //   2. a TRAILING comment's PROSE was scanned for constraints — `a: integer
+    //      // make this unique later` emitted `"a" integer UNIQUE`, and
+    //      `b: text // not null yet, TODO` emitted `"b" text NOT NULL`;
+    //   3. it false-fired the new E-SCHEMA-011 on any comment mentioning
+    //      `references` — which is how the whole class was found.
+    // Found by the S239 adversarial pass, not by the corpus sweep: no corpus
+    // file happens to comment inside a table body in a way that bites, so the
+    // full suite could not have caught it.
+    //
+    // Comment detection runs over the LITERAL-BLANKED line so a `//` inside a
+    // string (`default('http://example.com')`) is not mistaken for a comment;
+    // blanking is length-preserving, so the index maps back to the raw line.
+    const commentAt = blankLiteralBodies(rawLine).indexOf("//");
+    const line = (commentAt === -1 ? rawLine : rawLine.slice(0, commentAt)).trim();
+    if (!line) continue;
+
     const colonIdx = line.indexOf(":");
     if (colonIdx === -1) continue;
 
@@ -277,6 +350,31 @@ function parseColumns(text) {
     // Parse references table(column)
     const refMatch = restStr.match(/references\s+(\w+)\((\w+)\)/i);
     if (refMatch) col.references = { table: refMatch[1], column: refMatch[2] };
+
+    // §39.5.5 / E-SCHEMA-011 (S290) — the author WROTE `references` but no
+    // foreign key was parsed. `references table(column)` is the only grammar
+    // production §39.5.5 declares, so every other shape — the dot-in-parens
+    // form `references(owners.id)`, a spaced `references owners (id)`, a bare
+    // `references owners.id` — fell through this regex, left `col.references`
+    // null, and emitted NO `REFERENCES` clause with NO diagnostic. RediLedger
+    // declared 34 foreign keys in a real 19-table ledger schema and got zero
+    // rows in `pg_constraint`; an INSERT naming a non-existent parent was
+    // accepted. Compile clean, apply clean, silent.
+    //
+    // Detect the CLASS (`references` written, nothing parsed) rather than the
+    // one reported shape — enumerating shapes inside a function is not the same
+    // as enumerating the ways a class of defect can be written (the S288
+    // incomplete-fix lesson, handed back by the adopter). String and regex
+    // bodies are blanked first so `default('see references')` and
+    // `pattern(/references/)` cannot false-fire.
+    col.malformedReferences = null;
+    if (col.references === null) {
+      const scannable = blankLiteralBodies(restStr);
+      const refTok = scannable.search(/\breferences\b/i);
+      if (refTok !== -1) {
+        col.malformedReferences = restStr.slice(refTok, refTok + 48).trim();
+      }
+    }
 
     // Parse rename from identifier
     const renameMatch = restStr.match(/rename\s+from\s+(\w+)/i);
@@ -1388,6 +1486,29 @@ function lowerArrayLiteralToSqlItems(arg) {
  * @param {{ sharedCorePredicates?: Array<{name: string, arg: string|null}> }} col
  * @returns {Array<{ predicate: string, item: string }>} empty when the column is clean
  */
+/**
+ * Turn a malformed `references …` snippet into the canonical §39.5.5 form for
+ * the E-SCHEMA-011 message, so the diagnostic tells the author exactly what to
+ * type instead of only what is wrong.
+ *
+ * `references(owners.id)` → `owners(id)` · `references owners (id)` →
+ * `owners(id)` · `references owners.id` → `owners(id)`. When the two
+ * identifiers cannot be recovered, fall back to the grammar placeholder rather
+ * than guessing.
+ *
+ * @param {string} raw the snippet recorded in `col.malformedReferences`
+ * @returns {string}
+ */
+export function referencesHint(raw) {
+  const s = String(raw ?? "");
+  // Any two dot- or paren-separated identifiers after the keyword.
+  const m =
+    s.match(/references\s*\(\s*([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)\s*\)/i) ||
+    s.match(/references\s+([A-Za-z_]\w*)\s*\(\s*([A-Za-z_]\w*)\s*\)/i) ||
+    s.match(/references\s+([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*)/i);
+  return m ? `${m[1]}(${m[2]})` : "<table>(<column>)";
+}
+
 export function findNonLiteralSetItems(col) {
   const out = [];
   for (const p of col?.sharedCorePredicates ?? []) {

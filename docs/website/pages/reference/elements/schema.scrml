@@ -81,7 +81,7 @@
 
   posts &#123;
     id:        integer primary key
-    user_id:   integer not null references(users.id)
+    user_id:   integer not null references users(id)
     title:     text req length(&gt;=1) length(&lt;=200)
     body:      text req
     published: integer default(0)
@@ -112,7 +112,7 @@
                 (<code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">not null</code>,
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">unique</code>,
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">primary key</code>,
-                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">references(table.col)</code>,
+                <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">references table(col)</code>,
                 <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">default(literal)</code>)
                 are the source-level canonical form. They map 1:1 to
                 emitted DDL.

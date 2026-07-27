@@ -147,3 +147,42 @@ describe("W-SCHEMA-001 — table has no primary key (§39.5.1)", () => {
     expect(codes).not.toContain("W-SCHEMA-001");
   });
 });
+
+describe("E-SCHEMA-011 — a `references` clause that parses to no foreign key (§39.5.5)", () => {
+  const schema = (col) => `<program db="./app.db">
+  <schema>
+    owners { id: integer primary key
+      name: text not null }
+    child { id: integer primary key
+      ${col} }
+  </>
+</program>`;
+
+  test("the dot-in-parens form now FIRES instead of silently dropping the FK", () => {
+    const codes = allCodes(compileFromString(schema("owner_id: integer references(owners.id)"), "011-dot"));
+    expect(codes).toContain("E-SCHEMA-011");
+  });
+
+  test("the message names the canonical replacement the author should type", () => {
+    const r = compileFromString(schema("owner_id: integer references(owners.id)"), "011-msg");
+    const d = [...(r.errors || []), ...(r.warnings || [])].find((e) => e.code === "E-SCHEMA-011");
+    expect(d).toBeDefined();
+    expect(d.message).toContain("references owners(id)");
+    expect(d.message).toContain("§39.5.5");
+  });
+
+  test("the canonical form does NOT fire (the control)", () => {
+    const codes = allCodes(compileFromString(schema("owner_id: integer references owners(id)"), "011-ok"));
+    expect(codes).not.toContain("E-SCHEMA-011");
+  });
+
+  test("a column with no `references` at all does NOT fire", () => {
+    const codes = allCodes(compileFromString(schema("label: text not null"), "011-none"));
+    expect(codes).not.toContain("E-SCHEMA-011");
+  });
+
+  test("`references` inside a string default does NOT fire (no keyword-scan false positive)", () => {
+    const codes = allCodes(compileFromString(schema(`note: text default('see references')`), "011-literal"));
+    expect(codes).not.toContain("E-SCHEMA-011");
+  });
+});

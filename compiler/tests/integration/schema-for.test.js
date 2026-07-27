@@ -358,10 +358,18 @@ describe("§5 pluralization rule", () => {
 
 describe("§6 interleaved hand-authored + schemaFor", () => {
   test("schemaFor + hand-authored 'posts' table both emit", () => {
-    // Hand-authored 'posts' uses the SQL-mirror `references users(id)` form
-    // that schema-differ recognizes per §39.5.7. The shared-core
-    // `references(users.id)` function-call form is reserved for v1.next
-    // schema-differ enhancement (out of scope for this dispatch).
+    // Hand-authored 'posts' uses `references users(id)` — the ONLY foreign-key
+    // production §39.5.5 declares.
+    //
+    // CORRECTED S290: this comment previously said the dot-in-parens form
+    // `references(users.id)` was "reserved for v1.next schema-differ
+    // enhancement". It was never a reserved feature — it was a silent DEFECT.
+    // §39.5.5 declared one production the whole time; the dot form matched
+    // nothing, so the foreign key was dropped with no diagnostic, and this
+    // comment recorded that as planned work rather than filing it. An adopter
+    // later lost all 34 foreign keys in a real ledger schema to exactly this.
+    // The form is now rejected at compile time (`E-SCHEMA-011`).
+    // Do not soft-classify a defect as an unbuilt feature.
     const source = `\${
   import { schemaFor } from 'scrml:data'
 
