@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrml
-# updated: 2026-07-26T07:00:00Z  commit: f8a138e9
+# updated: 2026-07-27T10:00:00Z  commit: c700c435
 
 ## Diagnostic Catalog (SPEC §34, `compiler/SPEC.md:18010-18723`)
 **787 distinct diagnostic codes** cataloged in §34 at `a0344d75` (re-extracted this pass; UNCHANGED from `9481bc69` — the ESM-chunks arc, the #131 each-fence model and the S280 claim-gate landings added **ZERO** catalog codes between them) (`compiler/SPEC.md:18204-19033`,
@@ -9,16 +9,34 @@ normative definition lives in the SPEC section that introduces it (cited in the 
 column). Do not enumerate all codes here; grep `compiler/SPEC.md` for a specific `E-XXX`/`W-XXX`/
 `I-XXX`, or read §34 directly.
 
-**S287 update (this pass, `a0344d75` -> `f8a138e9`): unique count is now 793** (+6, zero removed —
+**S287 update (prior pass, `a0344d75` -> `f8a138e9`): unique count was 793** (+6, zero removed —
 verified by `comm` set-diff of unique `^\| ~?~?[EWI]-` first-cells, bounded at the `## 34.`/`## 35.`
-headings, same methodology as below). Four are IN-SCOPE for this incremental pass (§14.8.11
-DB-authoritative tier M2 — `E-DBAUTH-SQLITE`, `E-DBAUTH-NO-TENANT-COLUMN`,
-`W-DBAUTH-MARKER-NEARMISS`, `W-SCHEMA-DESTRUCTIVE-DROP`; see the new section below). Two more landed
-the SAME window from an unrelated track and are reconciled here only because this pass touches the
+headings, same methodology as below). Four are IN-SCOPE for that pass (§14.8.11 DB-authoritative
+tier M2 — `E-DBAUTH-SQLITE`, `E-DBAUTH-NO-TENANT-COLUMN`,
+`W-DBAUTH-MARKER-NEARMISS`, `W-SCHEMA-DESTRUCTIVE-DROP`; see the section below). Two more landed
+the SAME window from an unrelated track and were reconciled then only because that pass touched the
 count anyway: `E-CG-018` (chunk-namespacing BUG-6 token-distinctness guard, `assertChunkTokensDistinct`
 — already mechanism-mapped in dependencies.map.md/structure.map.md, just never had its §34 row
 counted) and `W-EACH-BIND-ITEM-FIELD-DEFERRED` (i175 per-item `bind:value` write-back-not-yet-lowered
 warning, `codegen/emit-each.ts`, `SPEC.md:19361`).
+
+**S288/S289 update (THIS pass, `f8a138e9` -> `c700c435`): unique count is now 795** (+2, zero
+removed — re-verified with a UTF-8-safe `awk -F'|'` field-split extraction, NOT the earlier `grep -oP`
+methodology, which silently drops at least one row when run over the whole SPEC.md in this
+environment — see the caveat below. Cross-checked against the prior 793 baseline via `comm`
+set-diff; both legs agree: `793 -> 795`, zero retired). The two additions landed in TWO independent
+lanes the same window: **`E-SCHEMA-010`** (§39.5.8, bryan's S288 schema-lowering pass) and
+**`E-MATCH-INVALID-ARM`** (§18.0.1, Peter's #192 — the Ghost-Pattern `<match>`-arm fix). See "New fire
+sites this window" below for both. `docs/FACTS.md` deliberately does NOT publish this figure (it
+states the §34 total "is load-bearing but not reliably extractable — a scan from the §34 heading
+over-counts by catching later tables, and in a file whose whole purpose is accuracy, a wrong number
+is worse than an absent one") — this map's own `comm`-set-diff methodology (below) is the reconciled
+answer, not a naive grep. **If you re-derive this count, do NOT trust a bare `grep -oP` over the
+whole file** — verify with `awk -F'|' '{gsub(/^[ \t]+|[ \t]+\$/,"",\$2); ...}'`-style field splitting
+instead; a raw `grep -oP '^\|\s*~{0,2}\K[EWI]-\S+'` piped over the full `SPEC.md` was independently
+observed to silently omit at least one matching row (`E-CG-013`) that IS extracted correctly when the
+same line is isolated — root cause not chased down (this map does not need to own a grep-tooling
+defect), but the discrepancy is worth knowing if you hand-roll this count again.
 
 ### COUNT-METHODOLOGY AUDIT — RESOLVED at 9481bc69 (was owed since S265)
 
@@ -55,13 +73,14 @@ total 787.
 - `c48e59a2..9481bc69` (S277, this pass) — **786 -> 787**. +1 **`E-SCRIPT-001`** (#127, row at
   `SPEC.md:18512`). Zero removed. #126 and #128 added ZERO codes — both are behavior/scope
   corrections to codes that already existed.
-- `a0344d75..f8a138e9` (S287, this pass) — **787 -> 793**. +6, zero removed: `E-DBAUTH-SQLITE`,
+- `a0344d75..f8a138e9` (S287) — **787 -> 793**. +6, zero removed: `E-DBAUTH-SQLITE`,
   `E-DBAUTH-NO-TENANT-COLUMN`, `W-DBAUTH-MARKER-NEARMISS`, `W-SCHEMA-DESTRUCTIVE-DROP` (§14.8.11
-  DB-authoritative tier M2, this pass's in-scope subsystem — see below), `E-CG-018`
+  DB-authoritative tier M2), `E-CG-018`
   (chunk-namespacing BUG-6, already-landed/already-mapped, catalog row only), `W-EACH-BIND-ITEM-
-  FIELD-DEFERRED` (i175, already-landed/already-mapped). No intervening map generation touched
-  this count between `a0344d75` and this pass (chunk-ns/Peter's-fixes pass at `1c5c2aee` explicitly
-  did NOT re-verify error.map.md — see its own prior header note, now superseded).
+  FIELD-DEFERRED` (i175, already-landed/already-mapped).
+- `f8a138e9..c700c435` (S288/S289, THIS pass) — **793 -> 795**. +2, zero removed: `E-SCHEMA-010`
+  (§39.5.8, bareword `oneOf`/`notIn` set item, bryan S288) and `E-MATCH-INVALID-ARM` (§18.0.1,
+  Ghost-Pattern `<match>` arm, Peter #192).
 
 **`W-EACH-TABLE-FOSTER` is RETIRED and DELETED (#131).** It was a Stage-6.4f info-lint with no §34
 row, so the retirement has no count impact — but the code, its module
@@ -85,7 +104,7 @@ non-compliance.report.md:**
 2. **STILL OPEN — nine LIVE `W-LINT-*` codes have no §34 row at all** — `W-LINT-016` through `W-LINT-024`, all
    real `code:` emit sites in `src/lint-ghost-patterns.js` (:1024, :1072, :1097 … :1299; 26 emit
    sites across the module). §34 catalogs only `W-LINT-001..008` + `010..015`. So the true count of
-   codes the compiler can EMIT exceeds the catalog count; 793 is a count of §34, not of the
+   codes the compiler can EMIT exceeds the catalog count; 795 is a count of §34, not of the
    implementation.
 
 **NOT implemented — do not add.** `W-NAV-CHUNK-LOAD-FAILED` has ZERO occurrences in
@@ -114,15 +133,15 @@ parked dispatch archive describing UNBUILT work). A doc naming this code describ
 | Meta (`^{}`) | E-META-* | 12 | meta-eval.ts, meta-checker.ts |
 | Import | E-IMPORT-* | 10 | module-resolver.js |
 | SQL | E-SQL-* | 10 | type-system.ts, sql-projection.ts, ast-builder.js (E-SQL-003 runtime-expr body), codegen/emit-server.ts + emit-tool.ts (E-SQL-004 `?{}`-without-`db=`) |
-| **DB-authoritative tier (§14.8.11/.1/.2, NEW S287)** | E-DBAUTH-* / W-DBAUTH-* / W-SCHEMA-DESTRUCTIVE-DROP | 4 | `codegen/index.ts` (`annotateDbScopes`, compile-time E-DBAUTH-SQLITE) + `compiler/src/commands/db-migrate.js` (deploy-time E-DBAUTH-SQLITE/E-DBAUTH-NO-TENANT-COLUMN pre-flight) + `codegen/db-authoritative.ts` (`extractDesiredSchema`, W-DBAUTH-MARKER-NEARMISS) + `schema-differ.js` (`diffSchema`, W-SCHEMA-DESTRUCTIVE-DROP) — see new section below |
-| Confidentiality — tenant-row floor (§14.8.10, #117/#118) | E-TENANT-AGG/WRITE/RAW-EGRESS / I-TENANT-STRIP/ACROSS | 5 | codegen/tenant-egress.ts (`resolveTenantScoping`/`classifyTenantWrite`/`detectTenantRawEgress`), emitted at codegen/emit-server.ts:1389/1405/1432 (E-WRITE/AGG/RAW-EGRESS) + :4893/4907 (I-STRIP/ACROSS) — the row-level twin of §14.8.9 protect-egress.ts. `tenant-egress.ts` also now owns `_scrml_active_tenant`/`_scrml_active_caps` (§14.8.11.2 S4), the SAME server-resolved-principal helpers the DB-authoritative A1 wrapper injects — see below |
+| **DB-authoritative tier (§14.8.11/.1/.2)** | E-DBAUTH-* / W-DBAUTH-* / W-SCHEMA-DESTRUCTIVE-DROP | 4 | `codegen/index.ts` (`annotateDbScopes`, compile-time E-DBAUTH-SQLITE) + `compiler/src/commands/db-migrate.js` (deploy-time E-DBAUTH-SQLITE/E-DBAUTH-NO-TENANT-COLUMN pre-flight) + `codegen/db-authoritative.ts` (`extractDesiredSchema`, W-DBAUTH-MARKER-NEARMISS) + `schema-differ.js` (`diffSchema`, W-SCHEMA-DESTRUCTIVE-DROP) — see the S287 section below |
+| Confidentiality — tenant-row floor (§14.8.10, #117/#118) | E-TENANT-AGG/WRITE/RAW-EGRESS / I-TENANT-STRIP/ACROSS | 5 | codegen/tenant-egress.ts (`resolveTenantScoping`/`classifyTenantWrite`/`detectTenantRawEgress`), emitted at codegen/emit-server.ts:1389/1405/1432 (E-WRITE/AGG/RAW-EGRESS) + :4893/4907 (I-STRIP/ACROSS) — the row-level twin of §14.8.9 protect-egress.ts. `tenant-egress.ts` also owns `_scrml_active_tenant`/`_scrml_active_caps` (§14.8.11.2 S4), the SAME server-resolved-principal helpers the DB-authoritative A1 wrapper injects — see below. **S288: `buildTenantContext` now takes a SECOND arg, the `<schema>`-declared tables, unioned into the tenant-scoped set** — see the S288/S289 section below and domain.map.md |
 | SSR prerender confidentiality (§52.15.5, RENAMED #120) | I-SSR-AUTH-SCOPED-CLIENT-HYDRATED | 1 | type-system.ts:10894 (server-authority cell) + :10935 (callable-init); auto-omit at codegen/emit-server.ts:~4138. Was retired W-SSR-PRERENDER-UNSCOPED |
 | Auth | E-AUTH-* / E-AUTH-GRAPH-* | 9 | auth-graph.ts, type-system.ts (§52) |
 | Session (§20.5) | E-SCOPE-012 / E-SESSION-* | 4 | type-system.ts (E-SCOPE-012, ident-walker), codegen/emit-expr.ts (E-SESSION-VALUE/E-SESSION-RESERVED-KEY sinks, drained by emit-server.ts), emit-server.ts (E-SESSION-CONTEXT context scan) |
-| Schema | E-SCHEMA-* / W-SCHEMA-* | 12 (+1: W-SCHEMA-DESTRUCTIVE-DROP, counted in the DB-authoritative row above, not double-counted here) | protect-analyzer.ts, type-system.ts, schema-differ.js |
+| Schema | E-SCHEMA-* / W-SCHEMA-* | **13** (+1: W-SCHEMA-DESTRUCTIVE-DROP, counted in the DB-authoritative row above, not double-counted here; includes the **NEW `E-SCHEMA-010`**, S288 — see below) | protect-analyzer.ts, type-system.ts, schema-differ.js, gauntlet-phase1-checks.js |
 | Error handling (`!{}`/fail) | E-ERROR-* | 9 (E-ERROR-010 §19.5.4 dedicated, #121) | emit-logic.ts, type-system.ts (E-ERROR-010 emit at type-system.ts:9853, formerly overloaded on E-TYPE-001) |
 | Functions | E-FN-* | 9 (E-FN-009 Nominal/deferred — zero fire site) | type-system.ts (§48.5; E-FN-006 retired -> E-STATE-COMPLETE) |
-| Route inference (client/server boundary) | E-ROUTE-* | — | route-inference.ts (§12.4 E-ROUTE-002 + E-ROUTE-005 client/server soundness) |
+| Route inference (client/server boundary) | E-ROUTE-* | — | route-inference.ts (§12.4 E-ROUTE-002 + E-ROUTE-005 client/server soundness; §12.2 Trigger 6 `W-DEAD-FUNCTION` clarified S288, see below — not a new code) |
 | Markup / element name | E-MARKUP-001 | 1 live | name-resolver.ts (§4.1 gate) + html-elements.js (`isKnownElementName` HTML∪SVG∪MathML∪custom union) |
 | Middleware (§40) | E-MW-002/005/006 | 3 live | ast-builder.js §40-block (E-MW-002 emit at ast-builder.js:18190, E-MW-005/006 at :18231; §34 cites corrected #121 to this drift-proof anchor) |
 | Control-flow-in-markup | E-CTRL-* / E-CONTROL-FLOW-IN-MARKUP | 8 | ast-builder.js |
@@ -143,10 +162,55 @@ parked dispatch archive describing UNBUILT work). A doc naming this code describ
 | Cell render-spec (§6.2/§6.6.17) | E-CELL-NO-RENDER-SPEC / E-CELL-RENDER-SPEC-NOT-BINDABLE / E-CELL-OUT-OF-SCOPE | 3 | symbol-table.ts — two different scopes, deliberately (#128): `E-CELL-NO-RENDER-SPEC` is USE-scoped (PASS 5 `walkRenderByTagUses`); `E-CELL-RENDER-SPEC-NOT-BINDABLE` is DECL-scoped (PASS 5a `walkNonBindableMarkupDecls`) |
 | `<each>` per-item bind (i175, NEW) | W-EACH-BIND-ITEM-FIELD-DEFERRED | 1 | codegen/emit-each.ts `renderTemplateAttrToJs` — a per-item `bind:*` writing to an ITERATION-ITEM field (not an outer cell) renders but does not yet write back; `SPEC.md:19361` |
 | Enum case | E-ENUM-VARIANT-CASE / E-ENUM-TYPE-CASE | 2 | type-system.ts (§14.4) |
+| **Block-form `<match>` arm validity (§18.0.1, NEW S288)** | E-MATCH-INVALID-ARM | 1 | match-statechild-parser.ts `parseMatchArms` (Phase 2 tokenizer — STRUCTURAL, distinct from the SYM-pass SEMANTIC E-MATCH-* checks) — see below |
 
-## New fire sites this session (`a0344d75` -> `f8a138e9`, S287 — §14.8.11 DB-authoritative tier, in-scope subsystem for this pass)
+## New fire sites this window (`f8a138e9` -> `c700c435`, S288/S289 — TWO independent lanes)
 
-Four NEW §34 codes, all Postgres-only, all fail-closed. The tier itself (RLS DDL, roles, SECDEF —
+**`E-SCHEMA-010`** (Error, §39.5.8, bryan S288) — a `oneOf([…])`/`notIn([…])` item on a `<schema>`
+column that is not a scrml literal — in practice a BARE IDENTIFIER, `oneOf([user, admin])`. §39.5.8
+lowers each item to a SQL literal; a bareword lowers to a SQL IDENTIFIER instead and fails at
+`db-migrate` apply with `column "user" does not exist`. **RULED S288 (bryan, option b):** reject
+rather than widen a bareword into a string — the reversible direction, and the corpus migration
+measured at ZERO (the only two sites teaching the bareword form were scrml's own reference doc,
+already corrected in #191). Fires from `compiler/src/gauntlet-phase1-checks.js`'s
+`checkSchemaDeclarations`, via the NEW exported `findNonLiteralSetItems` (`schema-differ.js`). §34
+row: `SPEC.md` §34 (after `E-SCHEMA-009`). Closes `g-schema-oneof-bare-identifier-item`
+(`docs/known-gaps.md`, RESOLVED S288). See schema.map.md for the full lowering-function inventory
+this same landing added (`lowerArrayLiteralToSqlItems`/`lowerArrayItemToSqlLiteral`/
+`splitTopLevelItems`/`lowerDefaultToSql`) and the sibling `default(...)` position, which takes the
+OPPOSITE disposition for the same residue (a non-literal there is a legitimate SQL expression and
+passes through verbatim).
+
+**`E-MATCH-INVALID-ARM`** (Error, §18.0.1, Peter #192) — a tag opener at the block-form `<match>` arm
+position that is neither a variant-named arm (`<VariantName>…</>`) nor the wildcard `<_>…</_>`
+catch-all — the Ghost-Pattern `<when is="…">` a Vue/Svelte-refugee or an LLM reaches for. Previously
+such a tag was silently skipped as "stray content between arms", yielding ZERO recognised arms → the
+match tree-shook to nothing → a DEAD PAGE emitted with 0 errors (the worst failure shape). Fires from
+`compiler/src/match-statechild-parser.ts`'s `parseMatchArms` — Phase 2 is a TOKENIZER emitting only
+STRUCTURAL parse errors (this code + the pre-existing `E-MATCH-PARSE-001`); all SEMANTIC checks
+(`E-MATCH-NOT-EXHAUSTIVE`, `W-MATCH-RULE-INERT`, `E-MATCH-EFFECT-FORBIDDEN`, etc.) remain SYM-pass.
+The fix skips the whole stray element (opener + body + closer) as a UNIT so nested lowercase children
+aren't double-flagged and a following real arm still parses. **Note the fix-direction correction:**
+the gap's ORIGINAL stated fix ("reject `<match>` without `for=`") would have broken a legitimate,
+relied-upon form (`<match on=@cell>` type-inferred from the cell's enum) — the real defect was
+arm-validation, not a `for=`-presence check. Closes
+`g-match-without-for-plus-when-children-silent-undeclared-dispatch`; split off
+`g-match-nofor-block-form-skips-exhaustiveness` (MED, open, `docs/known-gaps.md` — a no-`for=`
+block-form `<match>` skips exhaustiveness entirely, a SPEC/impl divergence flagged for bryan) as a
+distinct residual.
+
+**Not a new code — `W-DEAD-FUNCTION` Trigger-6 clarified (§12.2, #195/#200, Peter).** SPEC §12.2
+Trigger 6 now states explicitly that a first-class function reference (passed as a call argument,
+assigned, stored in an array/object, or otherwise named without being called) keeps a function
+reachable and un-tree-shakeable, and that reachability DESCENDS into nested closure bodies (an arrow
+`=>` or `function` expression) within a reachable function. This closes a FALSE-POSITIVE in the
+dead-function diagnostic walk (`route-inference.ts`) — the tree-shaker already retained these values;
+only the WARNING under-counted reachability. No placement/tree-shake behavior changed. See
+`docs/changes/w-dead-function-fp-closure-and-value-ref/BRIEF.md`.
+
+## New fire sites, prior window (`a0344d75` -> `f8a138e9`, S287 — §14.8.11 DB-authoritative tier)
+
+Four codes, all Postgres-only, all fail-closed. The tier itself (RLS DDL, roles, SECDEF —
 none of which are diagnostics) is mapped in domain.map.md (§14.8.11 concept), dependencies.map.md
 (module graph), schema.map.md (the `TableDecl`/`SecdefFnDecl` codegen-internal shapes), build.map.md
 (`scrml db-migrate`) — this section is diagnostics only.
@@ -161,13 +225,11 @@ none of which are diagnostics) is mapped in domain.map.md (§14.8.11 concept), d
   (the M1 tenant-isolation policy is keyed on it — an opaque PG error + full rollback would otherwise
   result at apply time). Pre-flighted in `commands/db-migrate.js`'s `runDbMigrate` BEFORE touching the
   DB, naming the offending table(s). §34 row: `:18802`.
-  **Known false-positive** (`g-db-migrate-check-constraint-oneof-pattern`, MED, open,
-  `docs/known-gaps.md`): a column carrying `oneOf([...])`/`pattern(/…/)` trips `schema-differ.js`'s
-  `parseColumns`/`parseSharedCorePredicates` diff-parser and the table false-fails this gate even
-  though it DOES declare `tenant_id` (the main compiler parses these fine — only the differ's
-  diff-parser trips). Same gap also notes (1) `oneOf([...])` emits an UNQUOTED bareword CHECK
-  (`lowerSharedCoreToChecks`) and (3) a `pattern(/…{n}…/)` quantifier brace can fool the
-  brace/marker matcher and spuriously fire `W-DBAUTH-MARKER-NEARMISS` below.
+  **The originally-reported false-positive here (`g-db-migrate-check-constraint-oneof-pattern` item
+  2) is RESOLVED S288 — see the "Known open gaps" note below.** At S288, 9 shapes were tried
+  (single/double-quoted `oneOf`, `pattern` with/without `{n}` quantifiers, offending column
+  before/after `tenant_id`, single/multi-table) and the false-fire was NOT REPRODUCED on either
+  baseline. If it recurs, open a new gap with the exact table.
 - **`W-DBAUTH-MARKER-NEARMISS`** (Warning) — a `db-authoritative`-like token in `<schema>` NOT
   recognized as the opt-in marker (must be the exact lowercase `db-authoritative` immediately after
   a table's closing `}` — a case/separator/placement typo silently downgrades the table to plain).
@@ -181,16 +243,32 @@ none of which are diagnostics) is mapped in domain.map.md (§14.8.11 concept), d
   Fires in `schema-differ.js`'s `diffSchema` when `options.allowDestructive` is false. §34 row:
   `:19304`.
 
-**Known open gaps riding this tier** (`docs/known-gaps.md`, all filed S287, none blocking the
-milestones they attach to): `g-dbauth-p2-caps-provenance` (MED — `tenant-egress.ts`'s
-`_scrml_active_caps(req)` has no real session-caps source yet, `@currentUser.caps` is always `[]`,
-so any `requires cap("x")` SECDEF is inert-deny until a caps source is wired; couples to S8 live
-revocation); `g-dbauth-p2-pk-tenant-not-auto-immutable` (LOW, bryan design call — `id`/`tenant_id`
-are UPDATE-grantable unless explicitly marked `immutable`); `g-dbauth-secdef-owner-crud-all-tables`
-(LOW — a SECDEF owner role gets CRUD on every db-authoritative table, not just the ones its `fn`
-body touches).
+**Known open gaps riding this tier** (`docs/known-gaps.md`; none blocking the milestones they attach
+to). **RESOLVED THIS WINDOW (S288):** `g-dbauth-p2-pk-tenant-not-auto-immutable` — a `db-authoritative`
+table's PRIMARY KEY and `tenant_id` are now auto-immutable regardless of the `immutable` bareword (RULED
+S288, `isEffectivelyImmutable` — see schema.map.md); `g-db-migrate-check-constraint-oneof-pattern` — all
+three original sub-bugs verdicted against real PG16 (see the `E-DBAUTH-NO-TENANT-COLUMN` note above and
+schema.map.md's lowering-function section). **Still open:** `g-dbauth-p2-caps-provenance` (MED, S287 —
+`tenant-egress.ts`'s `_scrml_active_caps(req)` has no real session-caps source yet, `@currentUser.caps`
+is always `[]`, so any `requires cap("x")` SECDEF is inert-deny until a caps source is wired; couples
+to S8 live revocation); `g-dbauth-secdef-owner-crud-all-tables` (LOW, S287 — a SECDEF owner role gets
+CRUD on every db-authoritative table, not just the ones its `fn` body touches); `g-schema-predicate-
+arg-parse-edges` (MED, NEW S288 — two residual edges: `oneOf([])` on an empty array still emits invalid
+SQL `CHECK (col IN ())` rather than a compile rejection or `CHECK (false)`; `escapeSqlString` doubles
+`'` but doesn't escape `\`, a latent MySQL-only trap, unreachable today since `db-migrate` hard-refuses
+MySQL); `g-dbauth-no-request-path-test` (MED, NEW S288 — the tier's regression lock asserts EMISSION,
+not a real login-over-HTTP → cookie → per-user-read round trip); `g-dbauth-docs-no-do-not-mark-users-
+example` (LOW, NEW S288 — the `db-authoritative` marker reads as "apply to everything"; ask is a worked
+counter-example, don't mark the `users` table itself, in the docs pass).
 
-## New + MOVED fire sites, prior window (c48e59a2 -> 9481bc69, S277 #126/#127/#128)
+**Also this window (S288, not a new §34 code but adjacent to this tier):** the session-principal
+wiring fix (`emit-server.ts`'s `astSqlQueryUsesCurrentUser` walker + the RI-route handler's
+`_scrml_currentUser` splice; `tenant-egress.ts`'s `buildTenantContext` second-arg union with
+`<schema>`-declared tables) closed `g-dbauth-session-principal-not-wired` (was HIGH — the tier was
+non-functional end-to-end for a `<schema>`-only app). See domain.map.md's §14.8.11 section and
+dependencies.map.md's module graph.
+
+## New + MOVED fire sites, earlier window (c48e59a2 -> 9481bc69, S277 #126/#127/#128)
 
 - **`E-SCRIPT-001` (Error, NEW — #127 `07901878`)** — §4.17. A `<script>` element in scrml SOURCE.
   Fire site: `compiler/src/block-splitter.js:3498` (a `BSError`), in the markup-opener path
@@ -228,9 +306,8 @@ table). `E-TENANT-AGG`/`E-TENANT-WRITE`/`E-TENANT-RAW-EGRESS`/`I-TENANT-STRIP`/`
 (§14.8.10 tenant-row floor, #117/#118, S273) and `I-SSR-AUTH-SCOPED-CLIENT-HYDRATED` (renamed from
 `W-SSR-PRERENDER-UNSCOPED`, §52.15.5, #120, S274) and `E-ERROR-010` (dedicated code, was overloaded
 on `E-TYPE-001`, §19.5.4, #121, S274) are all documented in the feature-area table above and in
-domain.map.md; per-fire-site line numbers for this window are not re-verified at this HEAD (no file
-in that diff was touched by the S287 DB-authoritative or count-reconciliation work) — see prior map
-generations / `docs/changelog.md` for the full narrative if a line-exact cite is needed.
+domain.map.md; per-fire-site line numbers for this window are not re-verified at this HEAD — see
+prior map generations / `docs/changelog.md` for the full narrative if a line-exact cite is needed.
 `E-ATTR-WRITER-CONFLICT` (§5.5.3/§5.5.4, S268, #81), `E-SCOPE-012`/`E-SESSION-*` (§20.5, S266), and
 `E-THEME-TOKEN-UNKNOWN` (§65.3.2, S265) are likewise carried — see auth.map.md (session) and
 domain.map.md (CSS §65) for their current-state mechanism.
@@ -264,10 +341,15 @@ branch assumes Postgres, but the default db is SQLite — `g-ssr-auth-scoped-har
 | CGError | compiler/src/codegen/errors.ts:11 | Codegen (shared across all emit-*.ts) |
 
 `schema-differ.js`/`commands/db-migrate.js`/`codegen/db-authoritative.ts`/`codegen/sql-ident.ts`
-(the S287 DB-authoritative additions) declare NO new Error class — `schema-differ.js` returns
-`{sql, warnings}` structurally (no throw), and `db-migrate.js` reports via `console.error` +
-`process.exit(1)` (a CLI, not a pipeline stage feeding `collectErrors`). Line numbers for the
-pre-existing ten classes not re-verified this pass (none of the five touched files declares one).
+declare NO new Error class — `schema-differ.js` returns `{sql, warnings}` structurally (no throw),
+and `db-migrate.js` reports via `console.error` + `process.exit(1)` (a CLI, not a pipeline stage
+feeding `collectErrors`). **S288: `db-migrate.js` gained non-diagnostic failure ATTRIBUTION** (not a
+new Error class) — both apply loops (Postgres tx loop, SQLite loop) now catch a per-statement throw
+and attach `e.scrmlFailedStatement = {index, total, sql}` before rethrowing, and the CLI's error path
+(`printFailedStatement`) echoes it — see migrations.map.md for the full mechanism. `match-
+statechild-parser.ts` likewise declares no Error class for `E-MATCH-INVALID-ARM`; Phase 2 returns a
+`diagnostics` array on its `MatchParseResult`, consumed by the caller into the normal
+`errors`/`warnings` streams.
 
 ## Runtime error classes (emitted into generated apps, compiler/src/runtime-template.js)
 `_ScrmlError` (base) -> NetworkError, ValidationError, SQLError, AuthError, TimeoutError, ParseError, NotFoundError, ConflictError. These ship in the CLIENT bundle for generated apps' `!{}` error-handling / failable-fn machinery — not this compiler's own error handling. Unchanged.
@@ -281,7 +363,7 @@ Every pipeline stage returns/throws its own `<Stage>Error` class; `compiler/src/
 For the full per-session diagnostic-change narrative (S148 onward), see `docs/changelog.md` — not reproduced here.
 
 ## Tags
-#scrml #map #error #diagnostics #semdiff #css65 #diagnostic-partition #result-warnings #outlet #e-outlet-and-main #one-landmark #tenant-floor #e-tenant #ssr-auth-scoped #i-ssr-auth-scoped-client-hydrated #sql-lex #e-error-010 #e-fn-009 #e-attr-012-retired #e-mw #w-each-table-foster-retired #each-fence #e-async-stdlib-discard-hof #module-format-notice #e-attr-writer-conflict #session-establishment #e-theme-token-unknown #e-script-001 #e-cell-render-spec-not-bindable #fire-site-relocation #sym-pass-5a #landmark-tag #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued #dbauth #e-dbauth-sqlite #e-dbauth-no-tenant-column #w-dbauth-marker-nearmiss #w-schema-destructive-drop #db-migrate #rls #secdef #e-cg-018 #w-each-bind-item-field-deferred
+#scrml #map #error #diagnostics #semdiff #css65 #diagnostic-partition #result-warnings #outlet #e-outlet-and-main #one-landmark #tenant-floor #e-tenant #ssr-auth-scoped #i-ssr-auth-scoped-client-hydrated #sql-lex #e-error-010 #e-fn-009 #e-attr-012-retired #e-mw #w-each-table-foster-retired #each-fence #e-async-stdlib-discard-hof #module-format-notice #e-attr-writer-conflict #session-establishment #e-theme-token-unknown #e-script-001 #e-cell-render-spec-not-bindable #fire-site-relocation #sym-pass-5a #landmark-tag #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued #dbauth #e-dbauth-sqlite #e-dbauth-no-tenant-column #w-dbauth-marker-nearmiss #w-schema-destructive-drop #db-migrate #rls #secdef #e-cg-018 #w-each-bind-item-field-deferred #e-schema-010 #e-match-invalid-arm #ghost-pattern #w-dead-function #failing-statement-attribution #auto-immutable-pk-tenant #session-principal-wiring #resolved-gaps
 
 ## Links
 - [primary.map.md](./primary.map.md)
@@ -292,3 +374,4 @@ For the full per-session diagnostic-change narrative (S148 onward), see `docs/ch
 - [dependencies.map.md](./dependencies.map.md)
 - [build.map.md](./build.map.md)
 - [auth.map.md](./auth.map.md)
+- [migrations.map.md](./migrations.map.md)
