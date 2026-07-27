@@ -1,9 +1,9 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-07-26T07:00:00Z  commit: f8a138e9
+# updated: 2026-07-27T10:00:00Z  commit: c700c435
 
 The compiler's "schema" is its own AST, not an application data model. Root catalog:
-`compiler/src/types/ast.ts` (2104 lines, 114 exported interfaces/types, ~91 distinct `kind` discriminants — unchanged since fbb4d9fd/df2ac831; the S287 DB-authoritative tier below added NO ast.ts shape). Read that file directly for the exhaustive list; this map groups it and calls out the load-bearing shapes.
+`compiler/src/types/ast.ts` (2104 lines, 114 exported interfaces/types, ~91 distinct `kind` discriminants — unchanged since fbb4d9fd/df2ac831; this window's schema-differ.js changes below added NO ast.ts shape, same as the S287 DB-authoritative tier before it). Read that file directly for the exhaustive list; this map groups it and calls out the load-bearing shapes.
 
 ## Root pipeline types
 ### FileAST  [types/ast.ts:1551]
@@ -55,12 +55,12 @@ Discriminated union over ~91 `kind` string literals — the single node-shape sw
 ## GITI-038 — `ReturnStmtNode.fnExprNode` (a returned function expression)
 `return function name(){…}` / `return async function name(){…}` is parsed STRUCTURALLY, not stripped-and-hoisted. `ReturnStmtNode` [types/ast.ts:1071] carries an optional `fnExprNode?: FunctionDeclNode` field [types/ast.ts:1081] holding the returned closure as a full `function-decl` node — the SAME shape a top-level `FunctionDeclNode` uses. `RETURN_DECL_KW` (ast-builder.js) covers only `const`/`let`/`type`/`fn` — `function`/`async function` route through a recursive `parseOneStatement()` call.
 
-**Contract: every AST pass that walks a `return-stmt` MUST also descend into `fnExprNode`** if it exists, treating it exactly like a nested `function-decl` statement — a `return-stmt`'s own `exprNode`/`expr` fields are EMPTY when `fnExprNode` is set. ~10 analysis passes route through it (route-inference.ts, type-system.ts, codegen/usage-analyzer.ts, component-expander.ts, meta-eval.ts, codegen/collect.ts, codegen/emit-logic.ts) — see dependencies.map.md for the Q1/Q2 async-classification split this feeds.
+**Contract: every AST pass that walks a `return-stmt` MUST also descend into `fnExprNode`** if it exists, treating it exactly like a nested `function-decl` statement — a `return-stmt`'s own `exprNode`/`expr` fields are EMPTY when `fnExprNode` is set. ~10 analysis passes route through it (route-inference.ts, type-system.ts, codegen/usage-analyzer.ts, component-expander.ts, meta-eval.ts, codegen/collect.ts, codegen/emit-logic.ts) — see dependencies.map.md for the Q1/Q2 async-classification split this feeds. **route-inference.ts's dead-function reachability walk is a sibling concern, not this contract** — S288 (#195/#200) clarified that a first-class function reference (not a call) also counts as reachable, and that reachability descends into nested closure bodies; see error.map.md's `W-DEAD-FUNCTION` note.
 
 ## GITI-039 — no new AST shape, a parse-time rejoin fix
 No `ReturnStmtNode`/`ExprNode` shape changed. `ast-builder.js`'s `collectExpr`/`joinWithNewlines` (the token-collector for `${}` logic bodies) carries a `partSpans` parallel array so two adjacent markup-region parts whose spans are byte-adjacent rejoin with NO separator, preserving literal markup TEXT verbatim.
 
-## §14.8.11 DB-authoritative tier — codegen-internal shapes, NOT a FileAST or ast.ts type (NEW S287)
+## §14.8.11 DB-authoritative tier — codegen-internal shapes, NOT a FileAST or ast.ts type
 
 `schema-differ.js`'s `parseSchemaBlock(schemaBody)` return shape is the desired-state input BOTH
 `diffSchema` (the SQLite/Postgres migration differ) and `commands/db-migrate.js` (via
@@ -82,13 +82,13 @@ name: string
 type: string                        // mapped SQLite affinity type
 scrmlType: string                   // lowercased source token, preserved for cell-type-aware lowering
 primaryKey / notNull / unique: boolean
-immutable: boolean                  // §14.8.11.2 S3 — NEW S287. A bareword mirroring `not null`/`unique`; consumed ONLY by `generateDbAuthoritativeDDL`, which narrows the bounded role's table-level UPDATE grant to the mutable columns. Inert on a non-`db-authoritative` table (no bounded-role grant to narrow).
-default: string | null
+immutable: boolean                  // §14.8.11.2 S3. A bareword mirroring `not null`/`unique`; the AUTHOR-WRITTEN half of immutability. Consumed ONLY by `generateDbAuthoritativeDDL`. Inert on a non-`db-authoritative` table (no bounded-role grant to narrow). **S288: no longer the WHOLE story — a `db-authoritative` table's PRIMARY KEY column(s) and `tenant_id` are ALSO effectively immutable whether or not this bareword is written, and there is deliberately no per-column opt-out. See `isEffectivelyImmutable` below.**
+default: string | null              // §14.8.11.2 S288 — the RAW captured value, now via a BALANCED paren scan (see "Literal-lowering functions" below); lowered at emit time by `lowerDefaultToSql`, not stored pre-lowered
 references: {table, column} | null
 renameFrom: string | null
-sharedCorePredicates: SharedCorePredicate[]   // §39.5.7 — req/length/pattern/min/max/gt/lt/gte/lte/eq/neq/oneOf/notIn
+sharedCorePredicates: SharedCorePredicate[]   // §39.5.7 — req/length/pattern/min/max/gt/lt/gte/lte/eq/neq/oneOf/notIn. §39.5.8 S288: `oneOf`/`notIn` items are now lowered to SQL literals at emit time (see below), and a non-literal item is a COMPILE ERROR (`E-SCHEMA-010`), not a silent pass-through.
 
-### SecdefFnDecl  [schema-differ.js, `parseFnDecl`]  — NEW S287, §14.8.11.2 S4
+### SecdefFnDecl  [schema-differ.js, `parseFnDecl`]  — §14.8.11.2 S4
 The parsed shape of a co-located `<schema>` `fn NAME(args) security definer owner(<role>) [returns
 <type>] [requires cap("x")] { """ <plpgsql statements> """ }` declaration (M1-PROVISIONAL surface;
 a later owner-ruled syntax pass finalizes it). Every identifier below is captured with a STRICT
@@ -101,17 +101,68 @@ cap: string | null                  // the `requires cap("x")` gate value, or nu
 isSecurityDefiner: boolean          // advisory this pass — every P2 `fn` emits SECURITY DEFINER regardless
 body: string                        // the raw plpgsql STATEMENTS only (no outer BEGIN/END — the emitter owns that envelope so the injected cap check is un-bypassable and always first)
 
+## §14.8.11.2 S288 — auto-immutable PK/`tenant_id` + the literal-lowering functions (schema-differ.js)
+
+**`isEffectivelyImmutable(col)`** — is a `db-authoritative` table's column immutable to the bounded
+`scrml_app` role? True if the author WROTE `immutable`, **or** it is the table's PRIMARY KEY, **or**
+its name is `tenant_id` (case-insensitive) — whether or not the bareword is present. **RULED S288
+(bryan):** the same §14.8.10 reasoning that rejected a per-table tenant opt-in applies here — a
+forgettable declaration guarding a security invariant is the wrong shape. Before this, a
+WITHIN-tenant PRIMARY KEY UPDATE succeeded (only a CROSS-tenant re-point was RLS-blocked) — silently
+re-pointing a row's identity under its own tenant is exactly the class the tier's audit-defensibility
+claim rests on. **Consequence, stated normatively in SPEC §14.8.11.2: the prior guarantee "a
+`db-authoritative` table with ZERO `immutable` columns emits BYTE-IDENTICAL to M1" is RETIRED** — such
+a table always carries a PK, so it always takes the column-scoped GRANT path now. No per-column
+opt-out; an author needing a mutable PK declines the `db-authoritative` marker for that table.
+Consumed ONLY by `generateDbAuthoritativeDDL`'s `immutableCols`/`mutableCols` filters —
+non-`db-authoritative` tables are entirely unaffected.
+
+**Literal-lowering functions (§39.5.8 + `default()`), deliberately OPPOSITE dispositions for the
+same residue:**
+- `lowerArrayLiteralToSqlItems(arg)` / `lowerArrayItemToSqlLiteral(item)` / `splitTopLevelItems(inner)`
+  — lower a `oneOf([…])`/`notIn([…])` item list from scrml literal form (either string-quote form,
+  bare-variant `.Admin` per §41.15.6, numeric, boolean) to its SQL literal form (`'…'`-quoted
+  strings, `.Admin` → `'Admin'`). ALL-OR-NOTHING: any unrecognized item (a bareword) returns the
+  WHOLE list verbatim — belt-and-braces, since a compile-time caller now rejects a bareword before
+  reaching here (see `findNonLiteralSetItems` next / `E-SCHEMA-010` in error.map.md).
+- `lowerDefaultToSql(rawDefault)` — lowers `default(…)`'s value. A scrml STRING literal (either
+  quote form) lowers to a SQL string literal — fixes `default("US")` emitting the SQL IDENTIFIER
+  `DEFAULT ("US")`. A NON-literal (`default(now())`, `default(CURRENT_TIMESTAMP)`,
+  `default(gen_random_uuid())`) passes through VERBATIM — here that is CORRECT, not a fallback,
+  because a `default()` argument is legitimately a SQL EXPRESSION. This is the deliberate divergence
+  from the `oneOf`/`notIn` position, where a non-literal is meaningless and now hard-errors.
+- **`export function findNonLiteralSetItems(col)`** — the `E-SCHEMA-010` fire-site helper (see
+  error.map.md), consumed from `gauntlet-phase1-checks.js`'s `checkSchemaDeclarations`.
+- `findMatchingParen`/`scanMatchingParen` — now a TWO-PASS wrapper: quote-aware first (a `)` inside a
+  string ARGUMENT no longer closes the predicate early — the pre-S288 silent-CHECK-drop defect,
+  `oneOf(["x); DROP TABLE u; --"])` used to emit a column with NO CHECK AT ALL), falling back to a
+  quote-BLIND scan when the quote-aware pass fails to close (load-bearing: a `pattern(/o'brien/)`
+  regex literal can carry an unpaired apostrophe, which a quote-aware-ONLY pass would swallow).
+  `parseColumns`'s `default(...)` capture is now this SAME balanced scan, not the old `[^)]+` regex
+  (which stopped at the FIRST `)`, truncating `default(now())` into an unbalanced
+  `DEFAULT (now() )` — a syntax error blocking 7/10 of a real adopter schema, RediLedger S4).
+
+**Residual, still-open edges surfaced by the S288 adversarial pass** (`g-schema-predicate-arg-
+parse-edges`, MED, `docs/known-gaps.md`): `oneOf([])` on an empty array emits invalid SQL
+(`CHECK (col IN ())`) rather than a compile rejection or `CHECK (false)`; `escapeSqlString` doubles
+`'` but does not escape `\` — a latent MySQL-only trap (unreachable today — `db-migrate` hard-refuses
+MySQL, "Phase 3").
+
 ### ActualTable / ActualColumn  [schema-differ.js, `readActualSchema`/`readActualSchemaPg`]
 The LIVE-database-read counterpart `diffSchema` compares `TableDecl`/`ColumnDecl` against. Same
 shape family, `sharedCorePredicates` always `[]` (not recoverable from `PRAGMA table_info()` /
 `information_schema.columns` in v1 — CHECK-constraint text isn't exposed).
 
-**Known parser gap riding this shape** (`g-db-migrate-check-constraint-oneof-pattern`, MED, open,
-`docs/known-gaps.md`): a `ColumnDecl` whose source line carries `oneOf([...])` or `pattern(/…/)`
-trips `parseColumns`'/`parseSharedCorePredicates`' line-based scan — the DIFFER's parse, not the
-main compiler's (`type-system.ts` parses these fine) — and the table false-fails the
-`E-DBAUTH-NO-TENANT-COLUMN` pre-flight even when it DOES declare `tenant_id`. If you touch
-`parseColumns`/`parseSharedCorePredicates`, this is the reproducer.
+**`g-db-migrate-check-constraint-oneof-pattern` — RESOLVED S288** (`docs/known-gaps.md`). The
+originally-reported three sub-bugs, verdicted against real Postgres 16 through the real CLI: (1) the
+unquoted-bareword CHECK — FIXED (the literal-lowering functions above); (2) the false
+`E-DBAUTH-NO-TENANT-COLUMN` pre-flight fire on a `tenant_id`-carrying table — tried 9 shapes, NOT
+REPRODUCED (open a fresh gap with the exact table if it recurs — the main compiler's own parse was
+always fine, only the differ's line-based scan was suspect); (3) a `pattern(/…{n}…/)` quantifier
+brace fooling the marker/brace matcher — was ALREADY fixed by the P2 brace-depth `parseSchemaBlock`
+rewrite, now regression-locked. If you touch `parseColumns`/`parseSharedCorePredicates`, the
+regression tests in `compiler/tests/unit/schema-differ.test.js` (this window's +124 lines) are the
+reproducer set to run first.
 
 ## §65 CSS-native model — NOT a dedicated FileAST shape
 `<theme>` / `<defaults>` are recognized as ordinary MarkupNode instances via the structural-element registry (`compiler/src/attribute-registry.js:485` onchange, `:503` theme, `:516` defaults) — same pattern as `<endpoint>` (§61) and `<onchange>` (§38.13). No `ThemeDeclNode`/`EndpointDeclNode`/`OnchangeNode` type exists in ast.ts. Codegen-internal (non-FileAST) types for these features:
@@ -124,13 +175,13 @@ main compiler's (`type-system.ts` parses these fine) — and the table false-fai
 Same structural-element-registry pattern as `<theme>`/`<defaults>`/`<onchange>` — no `OutletNode` type in ast.ts. Recognized/validated by symbol-table.ts PASS 15.5.
 
 ## §20.5 session-establishment — new attributes/config fields, NOT a new FileAST node type
-No `SessionDeclNode` exists — `session` is a reserved server-scope BUILTIN identifier. See auth.map.md for the three separate non-FileAST "auth config" shapes.
+No `SessionDeclNode` exists — `session` is a reserved server-scope BUILTIN identifier. See auth.map.md for the three separate non-FileAST "auth config" shapes. **S288: `tenant-egress.ts`'s `buildTenantContext` now takes a second, optional arg (the `<schema>`-declared tables, from `extractDesiredSchema(fileAST).tables`) and unions them into `TenantContext.tenantScopedTables`** — previously it read ONLY the `<db>`-derived `ProtectContext.schemaByTable` registry, which left a `<schema>`-only app (no `<db>` block) with an EMPTY tenant set even though §14.8.10 says a `<schema>` table's `tenant_id` column presence IS the tenant declaration. See domain.map.md's §14.8.11 section for the full defect narrative (`g-dbauth-session-principal-not-wired`, RESOLVED S288).
 
 ## Type-system ResolvedType layer (type-system.ts, not ast.ts)
 FunctionType [type-system.ts:423], MapType [:318] (with `.set?: boolean` for §59.12 value-native Set), PredicatedType [:468] (with `subsetVariants`), the `<fn-return>` over-approximation sentinel (`FN_RETURN_TYPE_NAME`, :754). NO `AnyType`/`null` member exists — `any` and `null` are not scrml types (§14.1.1 / null-does-not-exist axiom).
 
 ## Tags
-#scrml #map #schema #ast #types #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column
+#scrml #map #schema #ast #types #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column #auto-immutable #is-effectively-immutable #e-schema-010 #lowering-functions #sql-literal-lowering #tenant-context-union #resolved-gaps
 
 ## Links
 - [primary.map.md](./primary.map.md)
