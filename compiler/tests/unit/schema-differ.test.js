@@ -6,6 +6,7 @@ import {
   generateDbAuthoritativeDDL,
   findNonLiteralSetItems,
   referencesHint,
+  columnConstraintDrift,
 } from "../../src/schema-differ.js";
 import { quoteIdent } from "../../src/codegen/sql-ident.ts";
 
@@ -1390,5 +1391,112 @@ describe("S290 — `//` comments inside a table body are stripped, not parsed (�
     }`);
     expect(ddl).toContain(`"id" integer PRIMARY KEY`);
     expect(ddl).toContain(`"email" text NOT NULL UNIQUE`);
+  });
+});
+
+describe("S290 §38.6.2 rows 6/7/8 — constraint drift on an EXISTING column", () => {
+  // Until S290 diffSchema handled only ADD / DROP / RENAME COLUMN, so a column
+  // present in both whose constraints changed produced NO statement and NO
+  // warning and the planner said "up to date". §38.6.2 has listed CREATE INDEX /
+  // DROP INDEX / "full table rebuild — constraint changes" the whole time, so
+  // this is a conformance RESTORATION, not an amendment.
+  const desired = (colDef) => parseSchemaBlock(
+    `owners { id: integer primary key }\nchild { id: integer primary key\n  ${colDef} }`);
+  const actualPlain = {
+    tables: [
+      { name: "owners", columns: [{ name: "id", type: "integer", notNull: false, default: null, primaryKey: true, unique: false, references: null, sharedCorePredicates: [] }] },
+      { name: "child", columns: [
+        { name: "id", type: "integer", notNull: false, default: null, primaryKey: true, unique: false, references: null, sharedCorePredicates: [] },
+        { name: "owner_id", type: "integer", notNull: false, default: null, primaryKey: false, unique: false, references: null, sharedCorePredicates: [] },
+      ] },
+    ],
+  };
+
+  test("PG emits native ALTERs for NOT NULL + UNIQUE + FOREIGN KEY", () => {
+    const { sql } = diffSchema(desired("owner_id: integer not null unique references owners(id)"), actualPlain, { driver: "postgres" });
+    const joined = sql.join("\n");
+    expect(joined).toContain(`ALTER COLUMN "owner_id" SET NOT NULL`);
+    expect(joined).toContain(`ADD CONSTRAINT "child_owner_id_scrml_key" UNIQUE ("owner_id")`);
+    expect(joined).toContain(`FOREIGN KEY ("owner_id") REFERENCES "owners"("id")`);
+  });
+
+  test("PG NEVER rebuilds — the §14.8.11 S7 fence (a rebuild CASCADE-drops RLS)", () => {
+    const { sql } = diffSchema(desired("owner_id: integer not null unique references owners(id)"), actualPlain, { driver: "postgres" });
+    const joined = sql.join("\n");
+    expect(joined).not.toContain("DROP TABLE");
+    expect(joined).not.toContain("_scrml_tmp_");
+  });
+
+  test("PG warns BEFORE a tightening that can fail on existing rows", () => {
+    const { warnings } = diffSchema(desired("owner_id: integer not null unique references owners(id)"), actualPlain, { driver: "postgres" });
+    const w = warnings.join("\n");
+    expect(w).toContain("W-SCHEMA-CONSTRAINT-TIGHTENED");
+    expect(w).toContain("FOREIGN KEY");
+    expect(w).toContain("orphan");
+  });
+
+  test("PG drops a constraint the schema no longer declares", () => {
+    const actualTight = JSON.parse(JSON.stringify(actualPlain));
+    const oc = actualTight.tables[1].columns[1];
+    oc.notNull = true; oc.unique = true; oc.references = { table: "owners", column: "id" };
+    const { sql } = diffSchema(desired("owner_id: integer"), actualTight, { driver: "postgres" });
+    const joined = sql.join("\n");
+    expect(joined).toContain(`ALTER COLUMN "owner_id" DROP NOT NULL`);
+    expect(joined).toContain(`DROP CONSTRAINT IF EXISTS "child_owner_id_scrml_key"`);
+    expect(joined).toContain(`DROP CONSTRAINT IF EXISTS "child_owner_id_scrml_fkey"`);
+  });
+
+  test("SQLite unique-only drift uses CREATE INDEX, NOT a rebuild (§38.6.2 row 6)", () => {
+    const { sql } = diffSchema(desired("owner_id: integer unique"), actualPlain, { driver: "sqlite" });
+    const joined = sql.join("\n");
+    expect(joined).toContain(`CREATE UNIQUE INDEX IF NOT EXISTS "child_owner_id_scrml_key"`);
+    expect(joined).not.toContain("DROP TABLE");
+  });
+
+  test("SQLite non-unique drift is WITHHELD without --allow-destructive, and says so", () => {
+    const { sql, warnings } = diffSchema(desired("owner_id: integer not null references owners(id)"), actualPlain, { driver: "sqlite" });
+    expect(sql).toEqual([]);
+    expect(warnings.join("\n")).toContain("W-SCHEMA-CONSTRAINT-DRIFT-UNAPPLIED");
+    expect(warnings.join("\n")).toContain("NOTHING WAS APPLIED");
+  });
+
+  test("SQLite performs the rebuild WITH --allow-destructive (§38.6.3)", () => {
+    const { sql } = diffSchema(desired("owner_id: integer not null references owners(id)"), actualPlain, { driver: "sqlite", allowDestructive: true });
+    const joined = sql.join("\n");
+    expect(joined).toContain("_scrml_tmp_child");
+    expect(joined).toContain(`DROP TABLE "child"`);
+    expect(joined).toContain(`REFERENCES "owners"("id")`);
+  });
+
+  test("IDEMPOTENT — an already-matching column produces nothing (no phantom drift)", () => {
+    const actualTight = JSON.parse(JSON.stringify(actualPlain));
+    const oc = actualTight.tables[1].columns[1];
+    oc.notNull = true; oc.unique = true; oc.references = { table: "owners", column: "id" };
+    for (const driver of ["postgres", "sqlite"]) {
+      const { sql, warnings } = diffSchema(desired("owner_id: integer not null unique references owners(id)"), actualTight, { driver });
+      expect(sql).toEqual([]);
+      expect(warnings).toEqual([]);
+    }
+  });
+
+  test("a PRIMARY KEY column is not fought over (implicitly NOT NULL + unique)", () => {
+    const d = { name: "id", primaryKey: true, notNull: true, unique: true, references: null, default: null, sharedCorePredicates: [] };
+    const a = { name: "id", primaryKey: true, notNull: false, unique: false, references: null, default: null, sharedCorePredicates: [] };
+    const drift = columnConstraintDrift(d, a);
+    expect(drift.notNull).toBe(false);
+    expect(drift.unique).toBe(false);
+  });
+
+  test("a DEFAULT echoed back with driver quoting/casts is NOT drift", () => {
+    const mk = (def) => ({ name: "c", primaryKey: false, notNull: false, unique: false, references: null, default: def, sharedCorePredicates: [] });
+    for (const [want, have] of [["'x'", "'x'::text"], ["'x'", "x"], ["0", "0"], ["now()", "now()"], [null, null]]) {
+      expect(columnConstraintDrift(mk(want), mk(have)).default).toBe(false);
+    }
+    expect(columnConstraintDrift(mk("'a'"), mk("'b'")).default).toBe(true);
+  });
+
+  test("`req` lowers to NOT NULL for drift purposes, same as `not null`", () => {
+    const { sql } = diffSchema(desired("owner_id: integer req"), actualPlain, { driver: "postgres" });
+    expect(sql.join("\n")).toContain(`ALTER COLUMN "owner_id" SET NOT NULL`);
   });
 });

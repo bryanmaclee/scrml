@@ -261,9 +261,24 @@ function oneLine(stmt) {
   return flat.length > 140 ? flat.slice(0, 137) + "…" : flat;
 }
 
-function printPlan(plan, actualTableCount) {
+function printPlan(plan, actualTableCount, warnings = []) {
   console.log(c.dim(`reading actual state … ${actualTableCount} table(s)`));
   if (plan.length === 0) {
+    // S290 — an EMPTY plan and a SUPPRESSED plan are not the same thing, and
+    // until now they printed identically. When the differ detected drift it
+    // could not apply (SQLite cannot ALTER a constraint, so it needs the
+    // destructive rebuild), the plan came back empty and this line reported
+    // "up to date" — the operator was told the database matched the schema
+    // while a declared constraint was missing from it. Report withheld work as
+    // withheld.
+    const withheld = warnings.filter((w) => w.includes("W-SCHEMA-CONSTRAINT-DRIFT-UNAPPLIED"));
+    if (withheld.length > 0) {
+      console.log(c.yellow(
+        `plan: 0 statements — but ${withheld.length} column(s) have constraint drift that was NOT applied. ` +
+        `NOT up to date. See the warnings above.`,
+      ));
+      return;
+    }
     console.log(c.green("plan: up to date — 0 statements."));
     return;
   }
@@ -335,7 +350,7 @@ async function runPgApply({ connectionString, desired, dryRun, allowDestructive 
         allowDestructive,
       });
       for (const w of warnings) console.error(c.yellow(w));
-      printPlan(plan, actual.tables.length);
+      printPlan(plan, actual.tables.length, warnings);
       if (actual.hasAppRole || actual.managedPolicies.length > 0) {
         console.log(
           c.dim(
@@ -361,7 +376,7 @@ async function runPgApply({ connectionString, desired, dryRun, allowDestructive 
         driver: "postgres",
         allowDestructive,
       });
-      printPlan(plan, actual.tables.length);
+      printPlan(plan, actual.tables.length, warnings);
       // (5) apply each statement in the txn + record authorship. If any statement
       // throws, `sql.begin` rolls the WHOLE run back (atomicity — the ledger is
       // never left half-written).
@@ -433,7 +448,7 @@ function runSqliteApply({ connectionString, desired, dryRun, allowDestructive })
       allowDestructive,
     });
     for (const w of warnings) console.error(c.yellow(w));
-    printPlan(plan, actual.tables.length);
+    printPlan(plan, actual.tables.length, warnings);
 
     if (dryRun) {
       console.error(c.dim("--dry-run: no statements applied."));
