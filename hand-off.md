@@ -1,4 +1,153 @@
 <!-- ============================================================= -->
+<!-- S290 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-27.       -->
+<!-- S291-XPS wrap + all prior UNCHANGED below.                     -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 290 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-07-27. `/boot` Profile A. `main` at **`9a4062bc`**, coherence 0/0 BOTH repos, tree
+clean, **no open PRs, no open adopter issues**. Gate suite 18,245 pass / 50 skip / 0 fail;
+conformance **747/747**. Open HIGHs **12 → 11**. Mechanical stream: `handOffs/delta-log.md`
+**[812]-[823]**. Changelog S290. This carries the irreducible.
+
+## 🔴 THE NEXT PA'S FIRST MOVE — bryan ruled it explicitly at close
+
+**Re-derive Wave-1c pieces 2+3 against current main.** The branch is rebased and waiting:
+**`feat/wave1c-nav-s290` @ `bc96a2a3`** on main `9a4062bc`, worktree
+`.claude/worktrees/agent-a2ed001a5de228134`, tree clean, API loads. Pre-rebase anchor
+**`worktree-agent-a2ed001a5de228134` @ `8fd5fd07` RETAINED — do not delete.**
+
+**Do NOT start by fixing its two known defects.** The loader was authored at base **S274, BEFORE
+chunk-namespacing landed** (#180, S286). Its entire premise was a world where two coexisting route
+chunks clobber each other — and that collision is **VERIFIED CLOSED** (below). So it may be carrying
+compensation it no longer needs. A rebase moved it onto main; **it did not make it current.**
+Re-derive the design first, then fix `_scrml_chunk_loading` (`g-nav-chunk-loading-flag-race`) and
+`_scrml_nav_missing_chunks` (`g-nav-chunk-basename-collision-key`) — both branch-only, neither live
+on main.
+
+**What the rebase decided, and why it matters.** Piece 1 was **SKIPPED, not merged**. It had landed
+as `c48e59a2` (#124, S276) and main then REFINED it twice: #126 (`499dd740` — the total-walk
+collector fix + the shared `landmark-tag.ts` predicate, which fixed a real ZERO-landmark bug) and
+#128. Evidence the branch's copy is older: it fires `E-OUTLET-AND-MAIN` from `emit-html.ts`, main
+from `compiler/src/landmark-tag.ts`; and its SPEC text carried the **pre-ruling** un-narrowed
+`E-OUTLET-AND-MAIN` with no one-landmark invariant. Hand-merging those conflicts would have
+re-introduced the exact overreach S277 fixed — the drift S279 independently caught here. Conflicts
+resolved main-side on `SPEC.md` / `SPEC-INDEX.md` / the outlet composition test; the branch kept only
+its own `progress.md`. Net: **10 files, +720/−55** (was 16 pre-rebase).
+
+## 🎯 THE HEADLINE — seven PRs; five defects, one shape
+
+#205 · #206 · #208 · #207 (S291-XPS's wrap, rebased+landed for them) · #209 · #210 · #211.
+
+Every defect closed this session was the same shape: **a form that looks right, compiles clean, and
+produces nothing or the wrong thing.** Silent FK drop · comment-prose parsed as SQL constraints ·
+unreconciled constraint drift · `?{q}` emitting the identifier as the query · an inbox check that
+passes on the wrong disk. **Four of the five had a governing sentence already on the books** — the
+gap was never the contract, it was that nothing executed it.
+
+| PR | What |
+|---|---|
+| #205 `0d95c364` | SPEC-INDEX history dereffed (−44.5%); totals `@generated` + CI-gated |
+| #206 `14da1e9e` | `E-SCHEMA-011` + the `//`-comment root fix |
+| #208 `93f297b3` | constraint-drift reconciliation (§38.6.2 rows 6/7/8) |
+| #209 `ad56551d` | `E-SQL-003` bare-identifier `?{q}` + `pa-base v2.5` |
+| #210/#211 | the four nav HIGHs re-verified; one closed by execution |
+
+## 🧭 THE FINDINGS THAT OUTLAST THE FIXES
+
+1. **The governing-sentence gate decided the DIRECTION three times, and twice it overrode the
+   framing I arrived with.** The FK gap was filed as "SPEC documents BOTH forms" — it does not:
+   §39.5.5 is the only production; §39.5.7 prose and the §41.15 `schemaFor` guidance (including the
+   *emitted* error message) illustrated a form they never declared. The reconcile gap looked like an
+   amendment and was a **conformance restoration** — §38.6.2 had listed all three missing operations
+   the whole time. `?{q}` looked like it needed a ruling and did not — §8.4 says *"Developers SHALL
+   NOT construct SQL strings dynamically in JavaScript and pass them to `?{}`"*. **Produce the
+   sentence before deciding whether you have a bug or a ruling.**
+2. **A fix's blast radius is measured in the SIBLING call sites of its class, not in the shapes
+   inside the function you touched.** The `?{}` detector keyed on `interpolations >= 1`; the bare
+   identifier fell through the OTHER side of the same test. RediLedger handed this lesson back at
+   S288 and it recurred immediately.
+3. **My own verification was hollow before it was real, twice — and both would have reported
+   green.** A corpus sweep that scanned **zero** blocks (regex never matched) and a fixture whose
+   `sed` anchor never matched, so the "bug doesn't reproduce" result was the fixture, not the code.
+   Proving the check BITES before trusting it caught both. This is the pa-base §8 unproven-gate rule
+   applied to my own scaffolding, not just to shipped gates.
+
+## ⚠️ OWN MISSES
+
+- **Three wrong greps on the nav verification**, reported to bryan as "unverified" one turn before
+  it turned out to be closed. The wrapper emits `(function() {` with NO space; the scope marker is
+  `_scrml_cs_key` while `_scrml_cell_scope` exists only in a TEST HELPER's prose describing a
+  different shape; and `exit=$?` after a pipe captured `head`. Each produced a confident wrong
+  answer. **Grepping for a symbol a doc told you to expect is not verification.**
+- **CWD slipped into `scrml-support` twice** after a `cd`-bearing parallel command; caught both
+  times by `pwd` before anything landed wrong. The known S94/S159 hazard, still live.
+
+## 🔵 OPEN — needs bryan
+
+- **The scrml.dev orm-trap article** (inherited from S291, deferred by bryan this session): correct
+  it, or hold as target state? **I have given no lean** — Rule 1, and I have not read it against
+  current truth. Cheap first step: diff its claims against `docs/FACTS.md` + landed `?{}`/schema
+  behaviour; the correct-vs-hold call stays bryan's.
+- **`g-route-splitter-chunk-payload-not-namespaced`** (MED, NEW) — filed at OBSERVATION strength on
+  purpose. The splitter's per-route payload uses BARE cell keys (0 of 63 chunks carry the scope the
+  `.client.js` path has). Not established whether two payloads can be resident at once; if they can
+  it is the same clobber, if they cannot it is by-design and `chunk-namespace.ts`'s header should
+  say so.
+
+## ✅ RULED THIS SESSION, BANKED, NOT STARTED
+
+Bryan ruled my leans on all four: **(1)** bless `<match on=@cell>` inference + wire the cell→enum
+resolution so exhaustiveness actually runs (`g-match-nofor-block-form-skips-exhaustiveness`);
+**(2)** clarify §13.2.4's prose (impl already matches §19.9.9.2); **(3)** reject an unrecognized
+table-body line loudly rather than implement table-level constraints
+(`g-schema-table-level-constraint-lines-silently-dropped`); **(4)** leave db-migrate column TYPE
+changes named-out. All recorded with direction; none begun.
+
+## 🧷 CONCURRENT / HELD
+
+- **S291-bryan-xps went LIVE mid-session** and wrapped. I rebased their PR #207 over my two landings
+  (zero conflicts) and merged it so their continuity reached main. Their finding — the per-clone
+  inbox — became `pa-base v2.5`.
+- **Retained worktrees (do NOT delete):** `agent-a2ed001a5de228134` [`feat/wave1c-nav-s290`] — the
+  rebased arc. Plus the pre-existing `s251` tree and the nine persistent `scrml-spa-ss*` sPA trees.
+
+## 📥 INBOX
+
+`2026-07-22-2230-from-S282-to-XPS` — **DRAINED this wrap.** It was addressed to the XPS clone; S291
+ran on XPS and acted on it (their wrap records the `install.sh` run and its wrong-branch outcome), so
+the message is consumed and moves to `read/`. This retires the boot-hook nag that has fired every
+turn since S284.
+
+## 🗺️ MAPS — REFRESH OWED (recorded, not skipped)
+
+`project-mapper` was **NOT run** this wrap. Compiler source DID land, so a refresh is genuinely owed;
+it is recorded here rather than skipped silently (wrap 6c). A pass on this repo runs ~23 minutes
+(S288 measured it and mis-called it dead at 15), which did not fit the remaining context, and this
+session could not dispatch agents. **Surfaces added/changed that a refresh must factor in:**
+`compiler/src/schema-differ.js` (the constraint-drift reconcile branch + `blankLiteralBodies` +
+`referencesHint` + the completed SQLite introspection), `compiler/src/gauntlet-phase1-checks.js`
+(`E-SCHEMA-011` fire site), `compiler/src/ast-builder.js` (`sqlBodyIsRuntimeExpr` bare-identifier
+branch), `compiler/src/commands/db-migrate.js` (`printPlan` withheld-work reporting),
+`scripts/regen-spec-index.ts` (`--check` mode). Map stamp remains at its prior commit.
+
+## ✅ GATE
+
+- Gate suite **18,245 pass / 50 skip / 0 fail**; conformance **747/747**; cloud `gate` GREEN on every
+  merge. `tracking` red on exactly the documented 3 (serve-tool R26 flake + the two gitignored
+  self-host artifacts `bs.js`/`tab.js`) — verified per-PR, not inferred.
+- Generated docs (`FACTS.md`, `state.ts` §0, the NEW SPEC-INDEX totals) all `--check` PASS.
+
+## Tags
+#session-290-bryan #7-prs #spec-index-deref-44pct #e-schema-011 #schema-comments-parsed-as-constraints
+#constraint-drift-reconcile-38.6.2 #e-sql-003-bare-identifier #pa-base-v2.5-per-clone-inbox
+#nav-highs-triaged-12-to-11 #lexical-collision-verified-closed-by-execution #wave1c-rebased-piece1-skipped
+#governing-sentence-decided-direction-3x #my-own-gates-were-hollow-twice #s291-xps-concurrent
+
+---
+
+<!-- ============================================================= -->
 <!-- S291 WRAP (bryan/XPS-8950) — prepended 2026-07-27.            -->
 <!-- ⚠ S290-bryan was LIVE on the ASUS while this was written.     -->
 <!--   His wrap will prepend ABOVE this one and rebase over it.    -->
