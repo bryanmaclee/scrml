@@ -15,7 +15,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 12 |
+| HIGH | 13 |
 | MED | 55 |
 | LOW | 34 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -27,6 +27,39 @@ Surfaced while scoping the BUG-6 accessor-rename (`docs/changes/chunk-namespacin
 **Why it is filed as a decision, not a bug:** the budget was near-saturated before chunk-namespacing existed, so ANY feature that adds core-runtime bytes now risks tripping it — this arc is merely the first to hit it. The BUG-6 rename passes only in its **zero-core-residue** form (16,255 B, ~2 B over base); the naive form fails by 1,147 B. That 129 B margin is *smaller than the ~200 B gzip whitespace-noise band* the scoping hit while measuring, so "passing" is not robust.
 
 **The fork (bryan, for the execution session):** (a) **hold 16 KB** and require zero-core-residue forever — every future core-runtime addition must be offset; or (b) **raise the budget** to give the mechanism air. The rename meets either answer; this is about the standing constraint, not this fix. Recommendation deferred to the execution session's re-measurement — if base has drifted over 16 KB by then, (b) is forced. <!-- @gap id=g-spa-runtime-gzip-budget-knife-edge sev=HIGH status=open -->
+
+### G-SCHEMA-REFERENCES-DOT-FORM-EMITS-NO-FOREIGN-KEY — the SPEC-documented `references(parent.col)` form silently emits NO foreign key — `NEW S288; HIGH; open (adopter-reported, RediLedger S5)`
+**Run-verified by RediLedger against a real 19-table schema at `c700c435`: 34 `references()` declared → 189 statements applied → `0` rows in `pg_constraint WHERE contype='f'`, and an INSERT naming a non-existent parent was ACCEPTED.** Compile-clean, apply-clean, no diagnostic anywhere.
+
+**Root-caused here in one probe (S288, before wrap):** `parseColumns` matches FKs with
+`/references\s+(\w+)\((\w+)\)/i` — the **bare-paren** form `references owners(id)`. The
+**dot-in-parens** form `references(owners.id)` does not match, so `col.references` stays `null` and no
+`REFERENCES` clause is emitted:
+
+| source form | `col.references` | emitted |
+|---|---|---|
+| `references owners(id)` | `{table:"owners",column:"id"}` | `REFERENCES "owners"("id")` ✅ |
+| `references(owners.id)` | `null` | **nothing** ⛔ |
+
+**And SPEC documents BOTH** — `grep` finds `references(users.id)` *and* `references users(id)`, plus the
+schematic `references(table.col)` *and* `references table(column)`. So the language blesses a form the
+parser silently ignores. This is the S288 through-line for the third time: *a form that looks right,
+compiles clean, and produces nothing.*
+
+**Fix is nearly mechanical** — accept both forms in `parseColumns` (a second alternation, or one regex
+with an optional dot-form branch). **But two decisions ride along and are bryan's:** (1) is emitting no
+FK for a documented form a *bug fix* (yes — a governing sentence exists, both forms are documented) or
+does it want a SPEC narrowing to ONE canonical form with a deprecation on the other? (2) an FK that
+appears where none existed is **newly-rejecting** against live data — an existing DB with orphan rows
+will fail the migration on ALTER. That owes a MEASURED migration path and probably a diagnostic, not a
+silent tightening.
+
+**Sibling defect in the same report (MED-HIGH):** a table-level composite `unique(a, b)` emits nothing
+either — confirmed here (`parseColumns` only reads `name: type` lines, so a bare `unique(a, b)` line is
+skipped entirely). Single-column `unique` works. Same fix locus.
+
+Impact: **integrity constraints an adopter declared do not exist in their database, silently.** For a
+double-entry ledger this is the class that matters most. Filed at wrap; NOT started. <!-- @gap id=g-schema-references-dot-form-emits-no-foreign-key sev=HIGH status=open -->
 
 ### G-DBAUTH-SESSION-PRINCIPAL-NOT-WIRED — the db-authoritative tier's session principal never reached a request — `NEW S288; HIGH; RESOLVED S288 (adopter-reported, RediLedger S4)`
 The M1/P2 tier was **non-functional end-to-end** for a `<schema>`-only app — the exact shape it targets. Both defects failed CLOSED (no leak), but the feature could not run. Found by RediLedger's **behavioral** run (real PG16, real Argon2id credentials, real cookie sessions over HTTP), independently reproduced here before any fix.

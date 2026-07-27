@@ -25,16 +25,41 @@ emitted text.
 | #196 `1a488c46` | `default()` ×2 + `E-SCHEMA-010` + `db-migrate` failing-statement echo |
 | #199 `c700c435` | auto-immutable PK + `tenant_id` |
 
-## 🔴 THE NEXT PA'S FIRST MOVE — RediLedger's turnkey run is PENDING and is the real verdict
+## 🔴 THE NEXT PA'S FIRST MOVE — a HIGH that arrived AFTER the wrap PR merged
 
-They will run `scrml db-migrate` against their **REAL 11-table schema** (money-as-`text` +
-`pattern()`, ISO-date text, `oneOf` CHECKs, `references()` FKs, `immutable` columns, a composite
-`unique`, mixed marked/unmarked tables including the un-RLS'd `users` identity substrate, and a
-`void_transaction` SECDEF with a plpgsql body) now that #196 is on `main`.
+**`g-schema-references-dot-form-emits-no-foreign-key` (HIGH, RediLedger S5).** Their turnkey run
+landed post-wrap. Two halves:
 
-**Do not call `db-migrate` turnkey until that lands.** Turnkey apply has been claimed-then-retracted
-TWICE on their side, and that schema shape is one our unit tests demonstrably cannot stand in for —
-this session's `default()` bugs were found by their run, not by our 21k tests.
+**The good half — the verification we owed is DONE and PASSES.** `scrml db-migrate` against their
+**real 19-table schema** at `c700c435`: `applied 189 statement(s) in 1 transaction`, verified IN the
+resulting database — 34 column DEFAULTs with `now()` intact (the #196 fix, confirmed on a real adopter
+schema), 27 CHECK constraints, and #199's auto-immutable PK/`tenant_id` working on their tables
+(`jobs.id`/`jobs.tenant_id` not UPDATE-grantable to `scrml_app`, `jobs.name` is — their control).
+**Slice 3b is DELIVERED**: 11/11 twice on `d5bccc0f`, again on `c700c435`, on the real login-over-HTTP
+→ cookie → per-user-read path — the round trip S288 explicitly said it had NOT proven.
+
+**The HIGH — `<schema>` silently emits NO foreign keys.** 34 `references()` declared → **0 rows in
+`pg_constraint WHERE contype='f'`**, and an INSERT naming a non-existent parent was ACCEPTED. Compile
+clean, apply clean, no diagnostic.
+
+**Root-caused HERE before wrapping, so the next session starts from the mechanism, not the symptom:**
+`parseColumns` matches `/references\s+(\w+)\((\w+)\)/i` — the BARE-PAREN form
+`references owners(id)`. The DOT-IN-PARENS form `references(owners.id)` does not match →
+`col.references` stays null → no `REFERENCES` clause. **SPEC documents BOTH forms.** Verified both
+ways in one probe. A composite table-level `unique(a, b)` emits nothing either (same locus —
+`parseColumns` only reads `name: type` lines).
+
+**Two decisions ride along and are bryan's, so do not just widen the regex and land it:**
+1. Bug fix or SPEC narrowing? A governing sentence exists for BOTH forms, so accepting both is a
+   conformance restoration — but narrowing to one canonical form with a deprecation is defensible and
+   is the limit-the-primitive direction.
+2. **An FK appearing where none existed is NEWLY-REJECTING against live data.** An existing database
+   carrying orphan rows will fail the migration on ALTER. That owes a measured migration path and
+   probably a diagnostic, not a silent tightening. This is the pa-base §8 one-way-door analysis in the
+   *other* direction from the usual.
+
+This is the S288 through-line for the THIRD time — a form that looks right, compiles clean, and
+produces nothing. Same shape as the gate mismatch and the incomplete `default()` fix.
 
 ## 🧭 THE THREE FINDINGS THAT OUTLAST THE FIXES (reasoning, not state)
 
@@ -124,26 +149,22 @@ nested-closure uses as non-dead. Flagged because SPEC is this lane.
   docs (`FACTS.md`, `state.ts` §0) `--check` PASS.
 - `tracking` fails on 3 known tests every run (serve-tool R26 flake + the two gitignored self-host
   artifacts `bs.js`/`tab.js`) — verified directly on #191 and #193, inferred thereafter. Non-required.
-- ⚠️ **MAPS REFRESH IS PARTIAL — corrected note.** A `project-mapper` dispatch was fired at wrap. It
-  had written nothing after ~15 min, so I recorded it as "produced no output" and hand-corrected
-  `migrations.map.md` myself (it was actively WRONG — naming
-  `g-db-migrate-check-constraint-oneof-pattern` as open and "the natural next `db-migrate` fix" when
-  this session resolved it). **That claim was premature: the agent finished LATE**, after the wrap PR
-  had already merged, and its output is accurate — `error.map.md` and `schema.map.md` correctly pick
-  up `E-SCHEMA-010`, the auto-immutable PK/`tenant_id` change, `lowerDefaultToSql`, the balanced
-  `default()` capture and Peter's lane. Both landed in a follow-up. **The commit message on the wrap
-  PR still says "produced NO output" and is wrong — this is the corrected record.** Lesson for the
-  next PA: a `project-mapper` pass on this repo can take well over 15 minutes; don't call it dead on
-  a 15-minute silence.
-- **Current map state:** `error.map.md` + `schema.map.md` refreshed by the agent (stamp `c700c435`);
-  `migrations.map.md` carries a targeted PA-direct correction (stamp `c700c435`) but the rest of that
-  file is pre-S288. **Every OTHER map is still stamped pre-S288** — `primary.map.md` at `f8a138e9`.
-  A refresh of the remainder is still OWED.
-- **What a refresh must still pick up:** `emit-server.ts` — NEW `astSqlQueryUsesCurrentUser`, the
-  `_anyFnCurrentUserQuery` gate term, the RI-route `_scrml_currentUser` splice · `tenant-egress.ts` —
-  `buildTenantContext`'s second arg · `db-migrate.js` — `printFailedStatement` + per-statement
-  attribution · NEW test `integration/schema-only-tenant-principal.test.js` · Peter's #192 / #197 /
-  #200.
+- ⚠️ **MAPS — corrected note, twice.** A `project-mapper` dispatch was fired at wrap. After ~15 min of
+  silence I recorded it as "produced no output" and hand-patched `migrations.map.md` myself (it was
+  actively WRONG — naming `g-db-migrate-check-constraint-oneof-pattern` as open and "the natural next
+  `db-migrate` fix" when this session resolved it). **That call was premature twice over:** the agent
+  then wrote `error`/`schema`, and finally COMPLETED at ~23 min with a full pass, overwriting my
+  hand-patch with a better rewrite. **The wrap commit message on #202 still says "produced NO output"
+  and is wrong; this is the corrected record.** Lesson for the next PA: a `project-mapper` pass on
+  this repo runs ~23 minutes — do not call it dead at 15.
+- **Map state:** `primary` · `error` · `schema` · `migrations` · `domain` all refreshed and stamped
+  `c700c435`. The agent deliberately LEFT `structure`/`dependencies`/`build`/`test`/`config`/`auth`/
+  `infra` at their prior honest stamps because it did not re-verify their source — that is correct
+  behavior, not an omission. It also flagged **`test.map.md`'s test-file counts as now stale** (a
+  future pass should recount) and left `non-compliance.report.md` untouched rather than fabricate a
+  sweep it did not run.
+- **Not in any map:** the FK HIGH above (`b1856870`) postdates the mapped window — the agent flagged
+  this itself. Pick it up in the next incremental pass.
 
 ## Tags
 #session-288-bryan #rediledger-arc #5-prs #oneof-sql-literals #currentuser-binding #schema-tenant-registry #default-emission #e-schema-010-ruled #auto-immutable-pk-tenant #gate-mismatch-lesson #incomplete-fix-lesson #request-path-test-debt #facts-gate-caught-me #sibling-repo-pathspec-miss #four-rebases-peter-concurrent
