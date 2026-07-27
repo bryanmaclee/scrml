@@ -62,6 +62,8 @@ jobs:
         run: bun scripts/snippet-gate.js
       - name: Facts gate (published figures still match the repo)
         run: bun scripts/facts.ts --check
+      - name: SPEC-INDEX totals gate (the navigation map's own counts still match SPEC.md)
+        run: bun run scripts/regen-spec-index.ts --check
 
   tracking:
     runs-on: ubuntu-latest

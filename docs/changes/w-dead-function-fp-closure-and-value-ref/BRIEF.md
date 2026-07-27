@@ -2,7 +2,12 @@
 
 change-id: `w-dead-function-fp-closure-and-value-ref`
 dispatched: 2026-07-26 (S289-peter / AdiPDesk) · agent: general-purpose (iso worktree, opus)
-DONE-PROBE: `bun test compiler/tests/unit/route-inference.test.js` green with the new cases + control cases + the server-placement regression guard.
+DONE-PROBE: bun test compiler/tests/unit/route-inference.test.js
+probe-intent: green with the new cases + the control cases (truly-dead + self-recursive-only still
+fire) + the server-placement regression guard. Corrected at S290 — this field was authored as prose
+with the command in backticks, which the `scripts/threads.ts` structural validator correctly rejected
+as ERROR (first token `` `bun `` is not a command). The board reported ERROR, not DONE, from S289
+until this fix; the thread itself landed in PR #200 (`73e85e64`).
 
 ## The bug (adopter issue #195, filed by pjoliver11 — Peter's lane)
 

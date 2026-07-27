@@ -1,5 +1,11 @@
 import { readFileSync, writeFileSync } from "fs";
 
+// `--check` verifies the @generated totals block matches SPEC.md and exits non-zero if not,
+// without writing. The Sections-table line ranges are deliberately NOT gated: they drift by
+// design between amendments and a gate that cries wolf gets bypassed then deleted
+// (`pa-base v2.4` §8). The totals are a single derived fact that changes only with the commit.
+const CHECK = process.argv.includes("--check");
+
 const SPEC = readFileSync("compiler/SPEC.md", "utf8");
 const INDEX_PATH = "compiler/SPEC-INDEX.md";
 const INDEX = readFileSync(INDEX_PATH, "utf8");
@@ -37,7 +43,10 @@ for (let i = 0; i < lines.length; i++) {
 }
 
 // Compute ranges.
-const totalLines = lines.length;
+// `split("\n")` yields a trailing empty element for a file ending in a newline; drop it so the
+// count matches `wc -l` AND `scripts/facts.ts specLines()`. Two generated figures for the same
+// quantity disagreeing by one makes a reader distrust both.
+const totalLines = lines.length - (lines[lines.length - 1] === "" ? 1 : 0);
 const ranges = new Map<string, { start: number; end: number; size: number }>();
 for (let i = 0; i < sections.length; i++) {
   const start = sections[i].line;
@@ -83,6 +92,46 @@ for (const line of indexLines) {
   out.push(newLine);
 }
 
+// Regenerate the totals block (S290).
+//
+// This footer was hand-maintained while this script regenerated the table rows around it, so it
+// rotted silently: it read `Total lines: 33,436 | Total sections: 61` while SPEC.md was 36,575
+// lines and the table ran to §65. A stale total in the file whose job is navigation accuracy is
+// exactly the `pa-base v2.4` §8 non-deterministic-input class — except the input here DOES change
+// with the commit, so there was never a reason not to derive it.
+const TOTALS_START = "<!-- @generated:spec-index-totals START (do not edit — `bun run scripts/regen-spec-index.ts`) -->";
+const TOTALS_END = "<!-- @generated:spec-index-totals END -->";
+const numberedSections = sections.filter((s) => /^\d+$/.test(s.key)).length;
+const totalsBody = `Total lines: ${totalLines.toLocaleString("en-US")} | Total sections: ${numberedSections} + appendices`;
+
+const startIdx = out.indexOf(TOTALS_START);
+const endIdx = out.indexOf(TOTALS_END);
+let totalsUpdated = false;
+if (startIdx === -1 || endIdx === -1 || endIdx < startIdx) {
+  console.error(
+    `\nERROR: the @generated:spec-index-totals block is missing or malformed in ${INDEX_PATH}.\n` +
+      `Restore the START/END marker pair around the totals line, then re-run.`,
+  );
+  process.exit(1);
+}
+const oldTotals = out.slice(startIdx + 1, endIdx).join("\n");
+if (oldTotals !== totalsBody) totalsUpdated = true;
+
+if (CHECK) {
+  if (totalsUpdated) {
+    console.error(
+      `\nSPEC-INDEX totals are STALE.\n  have: ${oldTotals}\n  want: ${totalsBody}\n` +
+        `Run \`bun run scripts/regen-spec-index.ts\` and commit the result.`,
+    );
+    process.exit(1);
+  }
+  console.log(`SPEC-INDEX totals OK — ${totalsBody}`);
+  process.exit(0);
+}
+
+out.splice(startIdx + 1, endIdx - startIdx - 1, totalsBody);
+
 writeFileSync(INDEX_PATH, out.join("\n"));
 console.log(`\nUpdated ${updated} rows; missing ${missing.length}`);
 for (const m of missing) console.log(`  ${m}`);
+console.log(`Totals: ${totalsBody}${totalsUpdated ? "  (CHANGED)" : "  (unchanged)"}`);
