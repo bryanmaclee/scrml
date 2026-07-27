@@ -1,12 +1,10 @@
 # migrations.map.md
 # project: scrml
-# updated: 2026-07-27T10:40:00Z  commit: c700c435
+# updated: 2026-07-27T10:50:00Z  commit: c700c435
 
-**NEW map this pass.** The conditional check (a real DB-migration-apply tool now exists) fires for
-the first time — `scrml migrate` (pre-existing) is a scrml-SOURCE syntax codemod, NOT a DB
-schema-migration tool, so this map did not exist before `scrml db-migrate` (§14.8.11.1, S287) landed.
-This is why `primary.map.md` previously listed migrations.map.md as absent with that reasoning; that
-row is now updated — see primary.map.md's Map Index.
+The conditional check (a real DB-migration-apply tool exists) fires because `scrml db-migrate`
+(§14.8.11.1) exists — `scrml migrate` (pre-existing) is a scrml-SOURCE syntax codemod, NOT a DB
+schema-migration tool.
 
 This is NOT a Prisma/Knex/Alembic-shaped versioned-migration-file tool. Read the model section below
 before assuming a `migrations/0001_*.sql`-style directory exists — it does not.
@@ -37,17 +35,43 @@ reconciling DDL on the live DB). Every run:
 3. `diffSchema(desired, actual, {driver, allowDestructive})` computes the reconcile plan: `CREATE
    TABLE`/`ALTER TABLE … ADD/DROP COLUMN` for structural drift, PLUS (Postgres only, per
    `db-authoritative` table) the idempotent §14.8.11 DDL — S1 RLS+policy, S6 bounded-role GRANT
-   (S3-reshaped if any column is `immutable`) — PLUS (Postgres only, if any `fn` is declared) the
-   §14.8.11.2 S4 SECDEF mutation-choke DDL (`generateScrmlHasCapDDL` once + `generateSecdefDDL` per
-   `fn`).
+   (S3-reshaped whenever any column is EFFECTIVELY immutable: author-marked `immutable`, OR the
+   table's PRIMARY KEY, OR `tenant_id` — **auto-immutable as of S288**, `isEffectivelyImmutable` in
+   schema-differ.js, see schema.map.md. Every `db-authoritative` table always carries a PK, so this
+   branch is now ALWAYS taken for such a table — the prior "zero-immutable-columns emits
+   byte-identical to M1" guarantee is RETIRED, SPEC §14.8.11.2 records the supersession explicitly)
+   — PLUS (Postgres only, if any `fn` is declared) the §14.8.11.2 S4 SECDEF mutation-choke DDL
+   (`generateScrmlHasCapDDL` once + `generateSecdefDDL` per `fn`).
 4. Applies the WHOLE plan in ONE transaction under the migrator connection; a statement failure
-   rolls the entire run back (no partial-apply state).
+   rolls the entire run back (no partial-apply state). **S288: a statement failure is now
+   ATTRIBUTED to its exact index + SQL text** — see "Failing-statement attribution" below.
 
 Because every piece of DDL the tier emits is IDEMPOTENT (`CREATE ROLE … EXCEPTION WHEN
 duplicate_object`, `DROP POLICY IF EXISTS` + `CREATE POLICY`, `CREATE OR REPLACE FUNCTION`, natural
 `GRANT`/`ALTER TABLE ENABLE/FORCE ROW LEVEL SECURITY` idempotency), re-running `db-migrate` against
 an already-migrated database is a SAFE no-op re-assertion, not an error — this is what lets the tool
 skip a versioned migration-file history entirely.
+
+## Failing-statement attribution (NEW S288)
+
+Both apply loops (the Postgres transaction loop in `runPgApply`, and the SQLite loop in
+`runSqliteApply`) now wrap each statement's execution individually: on a throw, they attach
+`e.scrmlFailedStatement = {index, total, sql}` before rethrowing. The CLI's error path
+(`printFailedStatement`, `db-migrate.js`) echoes it:
+
+```
+error: migration failed (rolled back): relation "nonexistent_table" does not exist
+  failing statement: (2 of 8)
+    CREATE TABLE "bad_two" ( ... )
+```
+
+**Motivation (RediLedger S5 signal, offered as data, not filed as a bug):** the whole plan is printed
+BEFORE the apply step, so an error's position in the printed output previously said nothing about
+which statement actually failed — and Postgres's own message can point nowhere near the cause (e.g.
+the pre-fix `default(now())` truncation bug surfaced as a misleading `syntax error at or near ";"`
+with no indication which `CREATE TABLE` was truncated). RediLedger burned a bisection cycle on that
+exact combination before disproving a wrong hypothesis by repro. Verified by executing a
+deliberately-failing migration against real PG16, not by reading the emit.
 
 ## Privilege separation (load-bearing, §14.8.11.1)
 
@@ -110,33 +134,43 @@ whole fence at the table grain; `DROP POLICY IF EXISTS scrml_tenant_iso` re-crea
 scrml-managed policy name, never touching a hand-authored one on the same table.
 
 ## Known open gaps (`docs/known-gaps.md`)
-`g-db-migrate-check-constraint-oneof-pattern` is **RESOLVED (S288)** — the row that previously called
-it "the natural next `scrml db-migrate` fix" is retired. Of its three sub-bugs: (1) the `oneOf`
-unquoted CHECK was CONFIRMED and fixed (#191); (2) the false `E-DBAUTH-NO-TENANT-COLUMN` did NOT
-reproduce across 9 shapes on either baseline; (3) the `pattern(/…{n}…/)` brace bug had ALREADY been
-fixed by P2's brace-depth `parseSchemaBlock` rewrite and is now regression-locked.
 
-Two follow-ons landed the same session: **`g-db-migrate-default-emission`** (RESOLVED — `default(now())`
-truncated the DDL via a first-`)` capture; `default("US")` emitted a SQL identifier, the same
-literal-as-identifier class one function away from #191) and **`E-SCHEMA-010`** (NEW — a bareword
-`oneOf([user, admin])` item is rejected at compile; RULED S288, reject-don't-widen).
+**RESOLVED S288 — `g-db-migrate-check-constraint-oneof-pattern`.** All three original sub-bugs
+verdicted against real Postgres 16 through the real CLI: (1) the unquoted-bareword CHECK — FIXED
+(the `oneOf`/`notIn` SQL-literal lowering, see schema.map.md's literal-lowering-functions section);
+(2) the false `E-DBAUTH-NO-TENANT-COLUMN` pre-flight fire — tried 9 shapes, NOT REPRODUCED; (3) the
+`pattern(/…{n}…/)` brace — was ALREADY fixed by P2, now regression-locked.
 
-Still open here: `g-schema-predicate-arg-parse-edges` items 2-3 (`oneOf([])` emits `CHECK (col IN ())`,
-a SQL syntax error; `escapeSqlString` does not escape `\` for a future MySQL apply path — unreachable
-today, `db-migrate` hard-refuses MySQL).
+**RESOLVED S288 — `g-db-migrate-default-emission`** (was HIGH) — `default(now())` truncated the
+whole `CREATE TABLE` (the old `[^)]+` capture stopped at the first `)`) and `default("US")` emitted
+the SQL IDENTIFIER `DEFAULT ("US")` instead of a string literal; both fixed in the same landing
+(`findMatchingParen` balanced two-pass scan + `lowerDefaultToSql`). Blocked 7 of RediLedger's 10
+real tables pre-fix.
 
-**db-migrate DX (S288):** an apply failure now echoes the FAILING statement and its index
-(`failing statement: (2 of 8)` + the SQL) from both apply loops — the plan prints before the apply, so
-an error's position in the output previously identified nothing.
+**RESOLVED S288 — `g-dbauth-p2-pk-tenant-not-auto-immutable`.** See schema.map.md's
+`isEffectivelyImmutable` — a `db-authoritative` table's PRIMARY KEY and `tenant_id` are now
+auto-immutable regardless of the `immutable` bareword.
 
-⚠️ **This map got a TARGETED currency correction only.** A dispatched `project-mapper` pass produced
-no output, so the rest of this file is still stamped against pre-S288 source. `schema-differ.js` gained
-`findNonLiteralSetItems` (exported), `lowerArrayLiteralToSqlItems`, `lowerDefaultToSql`,
-`isEffectivelyImmutable`, `splitTopLevelItems` and a two-pass `findMatchingParen`; `db-migrate.js`
-gained `printFailedStatement`. **A full refresh is OWED** — see the S288 hand-off.
+**Still open:** `g-schema-predicate-arg-parse-edges` (MED, NEW S288) — `oneOf([])` on an empty array
+still emits invalid SQL (`CHECK (col IN ())`) rather than a compile rejection or `CHECK (false)`;
+`escapeSqlString` doesn't escape `\` (a latent MySQL-only trap, unreachable today — MySQL apply is
+hard-refused, "Phase 3" in `db-migrate.js`). `g-dbauth-p2-caps-provenance` (MED, S287) —
+`tenant-egress.ts`'s `_scrml_active_caps(req)` has no real session-caps source yet, so any
+`requires cap("x")` SECDEF is inert-deny until wired (couples to S8 live revocation).
+`g-dbauth-secdef-owner-crud-all-tables` (LOW, S287) — a SECDEF owner role gets CRUD on every
+db-authoritative table, not just the ones its `fn` body touches. `g-dbauth-no-request-path-test`
+(MED, NEW S288) — the tier's regression lock (`schema-only-tenant-principal.test.js`) asserts
+EMISSION, not a real login-over-HTTP → cookie → per-user-read round trip; RediLedger has offered
+their own request-path harness. `g-dbauth-docs-no-do-not-mark-users-example` (LOW, NEW S288) — the
+`db-authoritative` marker reads as "apply to everything"; ask is a worked counter-example (don't
+mark the `users` table itself — the login lookup that establishes the principal can't yet BE the
+principal) in the docs pass.
+
+Also see error.map.md (the exact §34 fire sites) and schema.map.md (the lowering-function
+inventory and `isEffectivelyImmutable`).
 
 ## Tags
-#scrml #map #migrations #db-migrate #dbauth #db-authoritative #schema-differ #privilege-separation #ledger #never-clobber-fence #rls #secdef #postgres
+#scrml #map #migrations #db-migrate #dbauth #db-authoritative #schema-differ #privilege-separation #ledger #never-clobber-fence #rls #secdef #postgres #failing-statement-attribution #auto-immutable #e-schema-010 #resolved-gaps #print-failed-statement
 
 ## Links
 - [primary.map.md](./primary.map.md)

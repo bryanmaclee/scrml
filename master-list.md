@@ -100,6 +100,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `12bceb62` — wrap(S288) 6c follow-up: land the LATE project-mapper output + correct my premature claim (#203) — **pushed**
 - `89fe9748` — wrap(S287): hand-off + delta-log [786] + maps refresh (DB-authoritative tier) (#190) — **pushed**
 - `7ae6a055` — wrap(S286): adopter form-binding pair closed — #174 + #175 landed, hand-off/changelog/gap-counts (#179) — **pushed**
 - `cd658984` — wrap(S285): changelog + hand-off addendum — 4 adopter/gap PRs (#167 #171 #172 #173) (#176) — **pushed**
@@ -107,7 +108,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `f28c35fb` — wrap(S282): continuity — 10 PRs, windows green, split-key class, chunk-ns BUG-6 scoped (#160) — **pushed**
 - `a0344d75` — wrap(S280): marketing claim-gate U1+U2; a bryan ruling falsified; pa-base v2.4 (#149) — **pushed**
 - `ea4c720a` — wrap(S279): E-ASYNC timer over-fire fix + continuity (#139) — **pushed**
-- `d6cae6c2` — wrap(S278): ESM-chunks arc U1→U3 landed — esm now runs (behind default classic) (#136) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
