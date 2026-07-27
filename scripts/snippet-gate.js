@@ -58,6 +58,16 @@ import { execFileSync } from "child_process";
 const SNIPPET_CORPUS = [
   "docs/tutorial-snippets",
   "docs/readme-snippets",
+  // S292: the scrml.dev pages. These are the most-read public surface we ship
+  // and they sat OUTSIDE this gate until now — the same hollow-gate shape the
+  // gate was built to close at S280, one directory over. Adding the root (98
+  // files, all passing at time of addition) rather than naming pages, so a new
+  // page is gated by existing rather than by someone remembering to list it.
+  // NB: this gates that a page COMPILES. It cannot gate whether the page's
+  // PROSE is true — the seven false claims corrected at S292 were all in prose
+  // on a page that compiled fine. Prose currency needs the empirical re-verify,
+  // not this gate.
+  "docs/website",
 ];
 
 const args = process.argv.slice(2);

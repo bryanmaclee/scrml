@@ -31,10 +31,73 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 11 |
-| MED | 57 |
-| LOW | 34 |
+| MED | 60 |
+| LOW | 35 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### G-ESQL006-PREPARE-EMITS-RUNTIME-THROW-NO-COMPILE-DIAGNOSTIC — `.prepare()` is refused in the ARTIFACT but never reported to the developer — `NEW S292; MED; open`
+Found verifying the scrml.dev `orm-trap` article by execution. `?{`SELECT username FROM users`}.prepare()`
+**compiles clean — exit 0, zero errors** — and the emitted `.server.js` carries
+`(()=>{throw new Error("E-SQL-006: .prepare() is removed in Bun.SQL (§44.3) …")})()`. So the refusal is real
+but lands at RUNTIME; the compile-time diagnostic the code name implies never reaches the developer.
+The fire site EXISTS (`compiler/src/codegen/rewrite.ts:490`) and `ctx.errors` IS passed at both
+`rewriteSqlRefs` call sites (`rewrite.ts:2642`, `:2723`) — so the `errors.push` is reached-or-dropped, not
+absent. **Mechanism unpinned; do not scope the fix from this entry without re-deriving it.**
+Second defect, same locus: the branch regex `/\?\{`([^`]*)`\}\.(\w+)\(\)/` matches only the BACKTICK body,
+so bare-brace `?{ … }.prepare()` never reaches it at all — verified, compiles clean with no throw emitted
+either. That is the #209 shape exactly ("the detector keyed on one side of the test; the other side fell
+through"), recurring in a sibling emitter. <!-- @gap id=g-esql006-prepare-emits-runtime-throw-no-compile-diagnostic sev=MED status=open -->
+
+### G-EPA001-NEVER-FIRES-MISSING-DB-REPORTS-EPA002 — the compiler emits an error code §34 assigns to a different condition — `NEW S292; MED; open`
+`E-PA-001` has **zero fire sites** in `compiler/src/` (only docstring mentions at `protect-analyzer.ts:36`,
+`:38`, `:281`). A `<db src="./nope-missing.db">` empirically emits **`E-PA-002`**. Per SPEC §34 those are
+two different codes: line 18797 `E-PA-001 | §11.5 | src= file does not exist`, line 18974
+`E-PA-002 | §11.3 | Protect analyzer: invalid protect= syntax`. So the developer is handed a code whose
+catalog entry describes an unrelated failure, and the code that *does* describe their failure never fires.
+Governing sentence exists and is unambiguous (§34 line 18797) — this is a conformance restoration, not an
+amendment: route the missing-file case to `E-PA-001`. Surfaced because the `orm-trap` article cited
+`E-PA-001` correctly-per-SPEC and the compiler contradicted it; the ARTICLE was left as-is deliberately
+(Rule 4 — writing `E-PA-002` into public prose would enshrine the defect as the contract).
+<!-- @gap id=g-epa001-never-fires-missing-db-reports-epa002 sev=MED status=open -->
+
+### G-SQL-DYNAMIC-IDENTIFIER-NO-FORM-NO-DIAGNOSTIC — a dynamic table/column name compiles clean and fails 100% at runtime, with no expressible alternative — `NEW S292; MED; open`
+`?{`SELECT * FROM ${tbl}`}` **compiles clean, zero diagnostics** — then fails every time it runs, because
+`${}` lowers to a BOUND PARAMETER and a bound parameter cannot be an identifier. The bind guarantee is
+absolute and correct (§8; scrml-site independently probed injection and confirmed no opt-out exists), so
+this is a correctness+diagnostics gap, NOT a security one — they explicitly ruled injection out.
+The hole is that there is **no expressible form, no diagnostic, and no documented alternative** for a
+legitimately dynamic identifier. #209 (S290) closed the sibling case — a bare-identifier BODY now fires
+`E-SQL-003` — and left this one open; scrml-site named it in the same report. Minimum honest fix is a
+diagnostic; whether scrml should offer a checked identifier-interpolation form at all is a RULING (it is
+the widen-vs-limit shape, so R2 minimum per the ladder).
+<!-- @gap id=g-sql-dynamic-identifier-no-form-no-diagnostic sev=MED status=open -->
+
+### G-ESQL002-NORMATIVELY-REQUIRED-NO-FIRE-SITE — §8.1.1 says the compiler SHALL reject invalid SQL; it has no SQL parser — `NEW S292; LOW; open (scoped, deliberately not built)`
+SPEC §8.1.1 line 6331: *"The compiler SHALL validate the SQL template string … A syntactically invalid SQL
+template SHALL be a compile error (E-SQL-002)."* Zero fire sites; `?{ SELEKT zzz FROM FROM WHERE ORDER }`
+compiles clean. §34 already annotates the code honestly ("Reserved / spec-ahead, S263 — no fire site …
+excluded from the freeze fireable set"), so the two halves of SPEC disagree in tone but not in fact.
+**bryan RULED S292: correct the article prose, do not build the parser** — the scrml.dev + dev.to copies
+now state the limitation plainly. Filed LOW to carry the SURVEY so it is not re-derived:
+- **Do NOT hand-write a SQL parser.** It becomes a ceiling on expressiveness across 3 dialects (§44), and
+  every uncovered CTE/window-fn/JSON-operator is a false reject on working adopter code (newly-rejecting,
+  pa-base §8, owed a measured migration over 383 `?{}`-bearing files). That reimplements the
+  DSL-approximates-SQL seam the article attacks, inside our own compiler.
+- **Option A — borrow the database's parser.** `protect-analyzer.ts:307` ALREADY opens the real
+  `bun:sqlite` DB readonly at compile time and `:340` ALREADY builds a `:memory:` shadow DB by executing
+  the `CREATE TABLE`s when the file is absent. `db.prepare(sql)` in a try/catch then yields syntax AND
+  unknown-column rejection with zero grammar written and no expressiveness ceiling (it accepts exactly
+  what the DB accepts). Real cost is `?N` substitution (not implemented; `codegen/sql-lex.ts` already
+  classifies the interpolations), error-offset→source-span mapping, and a fail-open policy.
+  SQLite-target only; Postgres would need a reachable DB at compile time → must degrade to silent-skip.
+- **Option C — no parser at all.** Resolve identifiers positionally (after `FROM`/`JOIN` → table;
+  `alias.column` → `fullSchema`) + Levenshtein, exactly what `E-PA-007` already does; `batch-planner.ts:430`
+  already extracts `SELECT … FROM <table>` this way. Fails open, so no false rejects and no migration owed.
+  Catches the case the article actually sells (a column typo surfacing at 3am).
+A and C are independent and both worth doing. **Re-trigger: the first adopter report of a column typo that
+reached production.** Confirm cost with a real survey before committing — the depth-of-survey discount cuts
+both ways and span-mapping is where these bleed. <!-- @gap id=g-esql002-normatively-required-no-fire-site sev=LOW status=open -->
 
 ### G-SPA-RUNTIME-GZIP-BUDGET-KNIFE-EDGE — the 16 KB SPA-runtime gzip budget is at ~127 B margin on base, independent of any in-flight arc — `NEW S282; HIGH; open (a bryan decision, not a bug)`
 Surfaced while scoping the BUG-6 accessor-rename (`docs/changes/chunk-namespacing/BUG6-RENAME-SCOPING.md` §6). `v0-3-x-spa-tree-shake-phase-b.test.js:145` asserts the assembled SPA runtime is `< 16 * 1024` gzip. **Agent-measured on the test's own `SPA_COUNTER` fixture at base `e8fdd44c`: 16,257 B — 127 B under the 16,384 budget, with no chunk-namespacing changes present.** (Scoping measurement; the execution session re-measures as its step 1, R26-style — do not treat 127 B as verified-final.)
