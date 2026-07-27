@@ -2544,23 +2544,49 @@ function _scrml_nav_extract_seed(doc) {
 
 // The set of route client-chunk filenames (name.client.js) a document loads.
 // Two routes served by the SAME <program> chunk share this set; a separate
-// pages/ file references a DIFFERENT client chunk.
-function _scrml_nav_client_chunks(d) {
+// pages/ file references a DIFFERENT client chunk. The pattern matches BOTH the
+// dev/unhashed form (name.client.js) AND the deploy content-hashed form
+// (name.client.<hash>.js, §47.9.8) — the hash is deterministic per chunk content,
+// so the shell chunk shares one basename across every route page.
+// Keyed on the RESOLVED ABSOLUTE url, never a bare basename. A route's own script
+// is emitted as <basename>.client.js with NO directory component, so pages/reports
+// and pages/admin/reports BOTH reference "reports.client.js" while resolving to two
+// DISTINCT files ([[g-nav-chunk-basename-collision-key]], PA-reproduced S276/S292:
+// live on /admin/reports, a soft-nav to /reports computed missing = [] and swapped
+// in a route hydrated only by the OTHER route's wiring). Content hashing does not
+// disambiguate them either — per §47.9.8 it is build-path only, so scrml compile
+// and scrml dev keep the un-hashed suffix. baseHref defaults to the live document's
+// url; a FETCHED doc must pass the TARGET page's url so its relative upToRoot
+// script-srcs resolve against the right base.
+function _scrml_nav_client_chunks(d, baseHref) {
   var out = {};
   if (!d || typeof d.querySelectorAll !== "function") return out;
+  var base = baseHref || (typeof window !== "undefined" && window.location ? window.location.href : "");
   var s = d.querySelectorAll("script[src]");
   for (var i = 0; i < s.length; i++) {
     var src = s[i].getAttribute("src") || "";
-    if (/\\.client\\.js(\\?|$)/.test(src)) out[src.split("/").pop()] = true;
+    if (!_SCRML_CLIENT_CHUNK_RE.test(src)) continue;
+    var key;
+    try { key = new URL(src, base).href; }
+    catch (e) { key = src; }   // unresolvable base — fall back to the raw src
+    out[key] = true;
   }
   return out;
 }
+// Matches a .client.js OR a content-hashed .client.HASH.js script src (§47.9.8).
+var _SCRML_CLIENT_CHUNK_RE = /\\.client\\.(?:[0-9a-z]+\\.)?js(\\?|$)/i;
 
 // Finding #4 — same-chunk iff every client chunk the target references is ALREADY
-// loaded in the current document. A target needing a chunk we don't have is a
-// CROSS-ROUTE navigation (a separate pages/ file): the current runtime has no
-// wiring for it, so a soft swap would render frozen, dead markup. Cross-route
-// chunk-loading is Wave-1c; until then, cross-route hard-navigates.
+// loaded in the current document.
+//
+// ⚠️ SUPERSEDED BY WAVE-1C AND NO LONGER CALLED. Its former comment ended "Cross-route
+// chunk-loading is Wave-1c; until then, cross-route hard-navigates" — that sentence
+// described the PRE-Wave-1c world and is false here: the hard-nav bail it gated has
+// been replaced by _scrml_nav_missing_chunks + _scrml_nav_load_chunks, which LOAD
+// the missing chunk instead of bailing. Retained (not deleted) only because
+// navigate-soft-nav-lowering.test.js:121 pins its presence in the runtime text;
+// retiring it is a separate change that updates that assertion. Do NOT re-wire it —
+// it would reinstate the cross-route hard-nav Wave-1c exists to remove.
 function _scrml_nav_same_chunk(doc) {
   var have = _scrml_nav_client_chunks(document);
   var need = _scrml_nav_client_chunks(doc);
@@ -2597,8 +2623,139 @@ function _scrml_nav_sync_head_el(doc, selector, tag, keyAttr, valueAttr) {
   } catch (e) { /* non-fatal */ }
 }
 
-// Parse the fetched HTML, extract the target outlet subtree + seed, and swap the
-// live outlet's children (View-Transition-wrapped where available).
+// navigate-wave1c — how long to wait for a cross-chunk route script to load
+// before giving up and hard-navigating (§20.8.2 / §20.8.7).
+var _SCRML_NAV_CHUNK_TIMEOUT_MS = 10000;
+
+// The ORDERED set of client-chunk URLs the target document references but the
+// live document has NOT loaded (need \ have). Resolved to ABSOLUTE URLs against
+// the TARGET page's URL (not by convention) so a nested route's own upToRoot
+// script-src prefixes resolve correctly, and preserved in the fetched doc's
+// script order (deps-first — a dependency chunk precedes its importer).
+function _scrml_nav_missing_chunks(doc, path) {
+  var out = [];
+  if (!doc || typeof doc.querySelectorAll !== "function") return out;
+  // Absolute-url keyed on BOTH sides (have + seen) so two same-basename chunks in
+  // different directories no longer collide — [[g-nav-chunk-basename-collision-key]].
+  var have = _scrml_nav_client_chunks(document);
+  var pageUrl;
+  try { pageUrl = new URL(path, window.location.href); }
+  catch (e) { pageUrl = window.location.href; }
+  var s = doc.querySelectorAll("script[src]");
+  var seen = {};
+  for (var i = 0; i < s.length; i++) {
+    var src = s[i].getAttribute("src") || "";
+    if (!_SCRML_CLIENT_CHUNK_RE.test(src)) continue;
+    var abs;
+    try { abs = new URL(src, pageUrl).href; }
+    catch (e) { abs = src; }
+    if (have[abs] || seen[abs]) continue;
+    seen[abs] = true;
+    out.push(abs);
+  }
+  return out;
+}
+
+// A cross-chunk route script failed to load (error or timeout): fall back to a
+// hard navigation, emitting the W-NAV-CHUNK-LOAD-FAILED info diagnostic (§20.8.7).
+// A failure that arrives AFTER a newer nav superseded us bails silently — the
+// newer nav owns the outcome (last-nav-wins).
+function _scrml_nav_chunk_failed(path, token, url, reason) {
+  if (typeof token === "number" && token !== _scrml_nav_token) return;
+  if (typeof console !== "undefined" && typeof console.info === "function") {
+    console.info(
+      "[scrml] W-NAV-CHUNK-LOAD-FAILED: cross-chunk soft navigation to \\"" + path +
+      "\\" fell back to a hard navigation (route client chunk " + reason + ": " + url + ")."
+    );
+  }
+  _scrml_navigate(path);
+}
+
+// True ONLY while a route chunk is being injected + executed during a cross-chunk
+// soft nav. A freshly-injected chunk's module-init reads this flag to decide it
+// must boot IMMEDIATELY (DOMContentLoaded has already fired for the live document
+// and will not fire again) rather than defer to DOMContentLoaded as it would on an
+// initial page load — see the boot dispatch emitted by emit-event-wiring.ts. This
+// keeps the initial-load boot path byte-for-byte unchanged (the flag is false /
+// undefined then) while making an injected chunk self-boot.
+// A DEPTH COUNTER, not a boolean — the name is kept because the emitted boot
+// dispatch tests it for TRUTHINESS (&& _scrml_chunk_loading), which reads a
+// non-negative count correctly (0 falsy / >0 truthy) with no codegen change.
+//
+// It must count, not latch: two OVERLAPPING cross-chunk navigations (an impatient
+// double-click on two nav links) each inject a script, and async=false guarantees
+// chunkA executes and fires load BEFORE chunkB executes. With a shared boolean,
+// chunkA's settle() cleared the flag out from under chunkB, which then took the
+// else branch and registered _scrml_boot on a DOMContentLoaded that had already
+// fired and never fires again — so chunkB never booted, never registered its
+// rehydrator, and the newer nav STILL swapped, producing correct SSR markup that was
+// completely unwired (inert handlers, unbound interpolations), with no diagnostic and
+// no hard-nav fallback. PERMANENT, because the injected <script> stays connected so
+// the already-loaded set counts it and the chunk is never re-injected.
+// [[g-nav-chunk-loading-flag-race]] — PA-reproduced S276, re-reproduced S292 under
+// real classic-script ordering before this fix.
+var _scrml_chunk_loading = 0;
+
+// Load the missing route client chunk(s) SEQUENTIALLY in deps-first order, then
+// invoke onDone. Each chunk is a classic <script> whose module-init self-registers
+// its soft-nav rehydrator (it boots eagerly because _scrml_chunk_loading is set
+// while it executes, navigate-wave1c), so once all have loaded the target route's
+// wiring is present in _scrml_rehydrators. async=false preserves the deps-first
+// execution order for a dynamically-inserted script.
+function _scrml_nav_load_chunks(urls, token, onDone, path) {
+  var i = 0;
+  var loadNext = function () {
+    // Last-nav-wins (§20.8.5(4)) — a newer nav superseded us: stop, do NOT swap.
+    if (typeof token === "number" && token !== _scrml_nav_token) return;
+    if (i >= urls.length) { onDone(); return; }
+    var url = urls[i++];
+    var s = document.createElement("script");
+    s.src = url;
+    s.async = false;
+    var settled = false;
+    // DECREMENT (never assign) — this injection releases only its OWN depth, so a
+    // concurrent nav's in-flight injection keeps the counter above zero and its
+    // chunk still boots. settled guarantees exactly one decrement per injection.
+    var settle = function () {
+      if (settled) return;
+      settled = true;
+      if (_scrml_chunk_loading > 0) _scrml_chunk_loading--;
+      if (timer) clearTimeout(timer);
+    };
+    var timer = setTimeout(function () {
+      if (settled) return;
+      settle();
+      _scrml_nav_chunk_failed(path, token, url, "timeout");
+    }, _SCRML_NAV_CHUNK_TIMEOUT_MS);
+    s.onload = function () {
+      if (settled) return;
+      settle();
+      loadNext();
+    };
+    s.onerror = function () {
+      if (settled) return;
+      settle();
+      _scrml_nav_chunk_failed(path, token, url, "error");
+    };
+    // Mark the injection window so the chunk's module-init boots eagerly (its IIFE
+    // runs between this appendChild and the onload below), then clear it on settle.
+    _scrml_chunk_loading++;
+    // A synchronous append failure (CSP block / a host that rejects dynamic
+    // script insertion) is a load failure too → hard-nav fallback.
+    try {
+      (document.head || document.documentElement).appendChild(s);
+    } catch (e) {
+      if (settled) return;
+      settle();
+      _scrml_nav_chunk_failed(path, token, url, "error");
+    }
+  };
+  loadNext();
+}
+
+// Parse the fetched HTML, extract the target outlet subtree + seed, load any
+// missing route chunk(s) (Wave-1c), and swap the live outlet's children
+// (View-Transition-wrapped where available).
 function _scrml_nav_apply_html(html, path, restore, token) {
   var liveOutlet = _scrml_nav_outlet();
   if (!liveOutlet) return;
@@ -2608,41 +2765,58 @@ function _scrml_nav_apply_html(html, path, restore, token) {
   var fetchedOutlet = doc.querySelector("[data-scrml-outlet]");
   if (!fetchedOutlet) { _scrml_navigate(path); return; } // target isn't a shell page → hard nav
 
-  // Finding #4 — a cross-route target (needs a client chunk we don't have) would
-  // frozen-swap; hard-navigate so the browser loads the route's own chunk.
-  if (!_scrml_nav_same_chunk(doc)) { _scrml_navigate(path); return; }
-
-  // Install the target route's seed BEFORE rehydration so server-authority cells
-  // apply the new route's values (§52.8).
+  // Install the target route's seed BEFORE loading its chunk(s) so an injected
+  // chunk's module-init seed-apply hydrates the ROUTE's cells from the new-route
+  // seed (which carries no shell keys) and never re-applies a stale seed over the
+  // live shell cells (§52.8 + finding #5). Same-chunk navs are unaffected.
   _scrml_nav_extract_seed(doc);
 
   // Sync <title> + description + canonical (§20.8 head sync, finding #9).
   _scrml_nav_sync_head(doc);
 
   var newHtml = fetchedOutlet.innerHTML;
+  // The swap — deferred behind a cross-chunk load when needed (Wave-1c).
   var swap = function () {
     // #6 — re-check the nav token INSIDE the swap. Under startViewTransition the
     // swap runs ASYNCHRONOUSLY (the browser defers it), so a fast second nav can
     // bump _scrml_nav_token between apply-html and this callback; without this
-    // guard we would tear down + swap in STALE content over the newer nav.
+    // guard we would tear down + swap in STALE content over the newer nav. Also
+    // guards the cross-chunk case: a chunk that finishes loading after a newer
+    // nav must not swap.
     if (typeof token === "number" && token !== _scrml_nav_token) return;
     // Tear down the OUTGOING region's reactive effects/subscriptions/timers
     // before replacing it (finding #2 — no leak).
     _scrml_teardown_region(liveOutlet);
     liveOutlet.innerHTML = newHtml;
     // Re-hydrate the swapped-in region (seed + scoped re-wiring incl. reactive
-    // display) without re-booting the shell (finding #1).
+    // display) without re-booting the shell (finding #1). For a cross-chunk nav
+    // the newly loaded chunk has registered its rehydrator into _scrml_rehydrators,
+    // so the target route's wiring is applied here.
     _scrml_rehydrate_region(liveOutlet);
     _scrml_nav_focus(liveOutlet);   // §20.8.5(3)
     _scrml_nav_scroll(restore);     // §20.8.5(2)
   };
 
-  // View Transitions where available; instant swap otherwise (§20.8.5(7)).
-  if (typeof document.startViewTransition === "function") {
-    try { document.startViewTransition(swap); } catch (e) { swap(); }
-  } else {
-    swap();
+  var runSwap = function () {
+    // View Transitions where available; instant swap otherwise (§20.8.5(7)).
+    if (typeof document.startViewTransition === "function") {
+      try { document.startViewTransition(swap); } catch (e) { swap(); }
+    } else {
+      swap();
+    }
+  };
+
+  // Wave-1c — the target references route client chunk(s) not yet loaded (a
+  // separate pages/ route). Load them (deps-first, in the fetched doc's script
+  // order) THEN swap+rehydrate; a load failure/timeout hard-navigates
+  // (W-NAV-CHUNK-LOAD-FAILED, §20.8.2/§20.8.7). SSR-first is preserved — the
+  // fallback is a full navigation to the same SSR document.
+  var missing = _scrml_nav_missing_chunks(doc, path);
+  if (missing.length > 0) {
+    _scrml_nav_load_chunks(missing, token, runSwap, path);
+    return;
   }
+  runSwap();
 }
 
 // §20.8.5(3) — after a swap, move focus to the region (its first heading, else

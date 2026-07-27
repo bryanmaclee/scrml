@@ -94,9 +94,13 @@ describe("S144 Bug AC — input-state read path resolves through registry", () =
     expect(clientJs).not.toContain("_scrml_input_cursor_");
 
     // And it must NOT leak a file-scope orphan statement that would run before
-    // _scrml_input_mouse_create registers the state (fresh TypeError class).
-    const beforeDCL = clientJs.split("DOMContentLoaded")[0];
-    expect(beforeDCL).not.toContain('_scrml_input_state_registry.get("cursor")');
+    // _scrml_input_mouse_create registers the state (fresh TypeError class). The
+    // read belongs INSIDE the boot; module-init (everything before `_scrml_boot`)
+    // must not contain it. (navigate-wave1c reshaped the boot into a readyState-
+    // gated `function _scrml_boot()`, so split on that marker, not "DOMContentLoaded"
+    // — the token now sits AFTER the boot body, in the readyState guard.)
+    const beforeBoot = clientJs.split("function _scrml_boot()")[0];
+    expect(beforeBoot).not.toContain('_scrml_input_state_registry.get("cursor")');
 
     rmSync(TMP_ROOT, { recursive: true, force: true });
   });
@@ -175,6 +179,10 @@ describe("S144 Bug AC — input-state read path resolves through registry", () =
 
       // Execute runtime + compiled client in a single scope (the client refs
       // runtime globals like _scrml_input_state_registry / _scrml_input_mouse_create).
+      // navigate-wave1c: the event-wiring boot defers to DOMContentLoaded on an
+      // initial load (the `_scrml_chunk_loading` eager path fires ONLY for a chunk
+      // injected during a soft-nav), so the one-shot `<#cursor>` read still runs at
+      // the DCL dispatch below (after the mousemove) — original timing preserved.
       const exec = new Function("window", "document", `${runtimeJs}\n${clientJs}\n`);
 
       // 1) ReferenceError gate — executing the compiled output must NOT throw.
