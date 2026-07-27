@@ -1,4 +1,40 @@
 <!-- ============================================================= -->
+<!-- S289 WRAP (Peter/AdiPDesk, adopter lane) — prepended 2026-07-27. -->
+<!-- S288 wrap + all prior UNCHANGED below.                          -->
+<!-- ============================================================= -->
+
+# scrml — Session 289 (Peter · AdiPDesk) — WRAP — adopter #195 W-DEAD-FUNCTION false-positives fixed
+
+**Date:** 2026-07-27. `/boot` Profile A on AdiPDesk (Peter), full reads. `main` at **`73e85e64`**, coherence 0/0, tree clean, no open PRs (mine). Delta-log `[793]-[794]`. Changelog S289. One adopter bug closed. This carries the irreducible.
+
+## 🎯 THE HEADLINE — adopter #195 closed (PR #200, `73e85e64`); the fix is dead-code-reachability-SCOPED, not a shared-collector change
+`W-DEAD-FUNCTION` (§12.2 Trigger 6) false-fired on two live-code classes Peter found in a real-app dead-code sweep: **(1)** a fn called only inside a nested closure body (arrow / `function`-expression — `.sort((a,b)=>cmp(a,b))`); **(2)** a fn passed as a first-class value (`setTimeout(fn)`, `el.onscroll=fn`, `[fn]`, `{h:fn}`, ternary/return). Warning-only (the tree-shaker already retains them) but "delete dead functions" would have removed 5 live fns. Fix = a NEW dead-code-reachability-only set `logicReferencedFnNames` in `route-inference.ts` (harvest call-callee OR bare value-ref, descending closures, non-self) + ONE D4 gate term. SPEC §12.2 Trigger 6 co-located 1-line clarification (no new §34 code). +9 route-inference.test.js.
+
+## 🧭 THE LESSON worth carrying — the SHARED-COLLECTOR scoping catch (re-derive a gap's fix DIRECTION, don't just implement it)
+The issue's stated fix — *"the reachability analysis should descend into nested bodies"* — is **right for dead-code but dangerous if applied literally.** The D4 dead-warn walk builds its caller edges from `record.callees` (→`exprNodeCollectCallees`→`forEachCallInExprNode`), which is **SHARED** — it also drives §12.2 **server-placement inference** (Step 5c caller-context propagation) + E-ROUTE-001. Broadening that shared collector to descend into closures would have silently moved server/client placement (spec-implicating, out of scope, real regression). So the fix is a **separate dead-code-only reference set + one gate term; the shared path is UNTOUCHED** (verified by diff + a server-placement regression guard: a `?{}`-helper called only in a client arrow keeps its server route). This is [[feedback-gap-report-fix-direction-can-be-wrong]] again — the reported locus/direction needed re-derivation before implementing.
+
+## 🔬 METHOD (AdiPDesk) — verify-the-CLASS earned its cost, all on committed state
+Dispatched `general-purpose` fallback (canonical `scrml-js-codegen-engineer` absent on AdiPDesk) with a self-contained brief carrying the fix + the hard constraint + the bug-class sweep. PA-side S239 pass was an **independent adversarial construct-reproducer set** (not the agent's tests), compiled on the COMMITTED branch: 2-deep nested closures · block-body arrows · value-refs INSIDE closures · array/object/ternary positions all suppressed; controls (truly-dead, self-recursive-only) + the `pay`⊂`payroll` substring case still fire; server-placement no-leak; **W-DEAD blast radius (all 10 W-DEAD-referencing test files) 351/0**; R26 on landed main (only the control `trulyDead` warns). The **local full suite showed 1067 fails — environmental** (fresh worktree with no `bun run pretest` → browser/happy-dom/self-host cascade), NOT the fix: proven by the green blast radius + the fix touching only W-DEAD emission. Cloud `gate` (the authority) GREEN on #200; `tracking`/`ai-review` red = the known non-required flakes; `windows` green.
+
+## 🧷 CONCURRENT / CROSS-MACHINE
+- **bryan LIVE all session.** His PR **#196** (schema `default()` balanced-capture + `E-SCHEMA-010` bareword, `1a488c46`) merged mid-session — I cut my branch fresh off it and applied my SPEC.md **§12.2 delta SURGICALLY** (a `git apply` of the agent's own-base hunk, NOT a wholesale checkout) to avoid clobbering his §39 edits (OCC lost-update discipline — SPEC.md is a shared hot doc). His **#199** (auto-immutable PK/tenant, SPEC §14.8.11.2) is OPEN — his lane, disjoint. **Bryan notice sent** → `scrml-support/handOffs/incoming/2026-07-27-0709-from-S289-peter-to-bryan-spec-12.2-trigger6-...md` (FYI, SPEC §12.2 Trigger-6 heads-up).
+
+## 🔴 OPEN / QUEUED for the next Peter-lane boot (NOT started)
+- `g-item-derived-local-stale-in-per-item-effect-paths` (MED, S288 natural-next — the for-lift per-item effect wrappers re-resolve only the iterVar, not item-derived locals).
+- auto-await expr-positions MED×2 (`g-reactive-write-member-server-call-no-autoawait` + `g-match-arm-server-call-no-autoawait`).
+- `g-attr-writer-conflict-not-detected-template-value-form` (MED).
+- #173 amplification halves.
+
+## ✅ GATE / MAPS
+- W-DEAD blast radius **351/0** (route-inference 210 + usage-analyzer/endpoint 73 + const-let-sql/dep-graph/spec-server-deprecate/todomvc-edit/nested-fn-sql-escalation + 2 lsp). Cloud `gate` GREEN on #200. FACTS `--check` PASS (regen rode the PR).
+- **Maps unchanged** — internal edit to the existing `route-inference.ts` + a SPEC prose line; no new surface files (S286/S288 internal-edits-no-refresh precedent). Map stamp `f8a138e9`.
+
+## Tags
+#session-289-peter #adopter-195-w-dead-function-false-positives #closure-body-and-first-class-value-reachability #shared-collector-scoping-catch #server-placement-no-leak #gap-report-direction-re-derived #general-purpose-fallback-agent #bryan-196-merged-midsession-surgical-spec-apply #adipdesk-full-suite-1067-environmental
+
+---
+
+<!-- ============================================================= -->
 <!-- S288 WRAP (Peter/AdiPDesk, adopter lane) — prepended 2026-07-26. -->
 <!-- bryan's S287 wrap + all prior UNCHANGED below.                  -->
 <!-- (S288 number collides w/ bryan's concurrent s288-tagged chores; -->

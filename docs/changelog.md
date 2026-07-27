@@ -2,7 +2,13 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-## S288 — 2026-07-26 (Peter · AdiPDesk) — two HIGH adopter bugs landed: the `<when>` Ghost-Pattern reject + nested for-lift reconcile-on-replace
+## S289 — 2026-07-27 (Peter · AdiPDesk) — adopter #195 W-DEAD-FUNCTION false-positives fixed (closure-body calls + first-class-value refs)
+
+Adopter issue **#195** (pjoliver11 — found in a real-app dead-code sweep): `W-DEAD-FUNCTION` (§12.2 Trigger 6) falsely flagged live functions whose only use is (1) a call inside a nested closure body (arrow / `function`-expression) or (2) a first-class value reference (`setTimeout(fn)`, `el.onscroll = fn`, `[fn]`, `{h: fn}`, ternary/return). Warning-only (the tree-shaker already retained them) but "delete all dead functions" would have removed 5 live functions from the app. Fixed + verified + merged in one session.
+
+- **PR #200 (`73e85e64`)** — the D4 dead-warn walk in `route-inference.ts` decided "dead" from `record.callees` → `exprNodeCollectCallees` → `forEachCallInExprNode`, which (a) never descends into `lambda`/closure bodies and (b) records only call-callee idents (a fn passed as a value is never counted). Fix = a NEW dead-code-reachability-only set `logicReferencedFnNames` (harvests every referenced ident — call callee OR bare value-ref — descending into nested closures; non-self) + ONE suppression term on the D4 gate. **The shared call-graph path (`record.callees` / `inverseCallerMap` / `exprNodeCollectCallees`) is UNTOUCHED** — so §12.2 server-placement inference is unchanged (regression-guarded). SPEC §12.2 Trigger 6 got a co-located 1-line clarification naming the value-ref + nested-closure use-forms (no new §34 code). +9 `route-inference.test.js` cases. Closes #195.
+
+
 
 Peter's adopter lane. The two queued HIGH gaps from the S285/S286 backlog, both fixed end-to-end (empirical repro → root-cause → executed-DOM/full-gate verification → S239 adversarial review → PR → cloud-gate → merge). Notably, **both gap reports' stated fix directions were wrong and were corrected during reproduction.** `main` `235f47c2`→`52585b25` (two PRs; rebased cleanly over bryan's concurrent DB-authoritative landings #191/#193/#194).
 
