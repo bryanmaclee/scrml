@@ -4657,6 +4657,102 @@ export function runRI(input: RIInput): RIOutput {
   // inferred-server plain `function` body, so a lift-bearing escalating
   // `server function` IS a redundant-keyword site and SHOULD fire the lint.)
 
+  // ------------------------------------------------------------------
+  // W-DEAD false-positive suppression: logic-referenced function names
+  // (adopter #195, change-id `w-dead-function-fp-closure-and-value-ref`).
+  //
+  // The D4 dead-warn gate below decides "dead" from `inverseCallerMap`, which
+  // is built from `record.callees`. `record.callees` (exprNodeCollectCallees →
+  // forEachCallInExprNode) has TWO blind spots that surface as W-DEAD false
+  // positives even though the tree-shaker (usage-analyzer) correctly KEEPS the
+  // function:
+  //   Case 1 — a call located inside a NESTED CLOSURE body (an arrow `=>` or a
+  //     `function`-expression). forEachCallInExprNode returns at `case
+  //     "lambda"` and never descends, and a block-body closure is an opaque
+  //     `escape-hatch` node it cannot see into at all.
+  //   Case 2 — a function passed as a FIRST-CLASS VALUE (`setTimeout(fn, 10)`,
+  //     `el.onscroll = fn`, `[fn]`, `{ h: fn }`, `c ? fn : g`, `return fn`).
+  //     `callees` records ONLY `call.callee` idents, so a bare fn-name in
+  //     argument/value position is never counted as a use.
+  //
+  // The shared call-graph path (exprNodeCollectCallees / forEachCallInExprNode /
+  // record.callees / inverseCallerMap) MUST NOT be broadened to descend into
+  // closures — it also drives §12.2 server-placement inference (Step 5c
+  // caller-context propagation) and E-ROUTE-001, so widening it would silently
+  // change placement (spec-implicating, out of scope). Instead we build a
+  // SEPARATE, dead-code-reachability-ONLY set here — a superset suppressor,
+  // parallel to `markupReferencedNames` above — and add ONE suppression term to
+  // the D4 gate. It never feeds placement.
+  //
+  // `logicReferencedFnNames`: fn-name → Set<enclosing-analyzed-fnNodeId that
+  // references it>. Collected by harvesting EVERY identifier reference (call
+  // callee OR bare value-reference) from each analyzed function's body while
+  // DESCENDING into nested closure bodies (arrow expression bodies structurally;
+  // block-body arrows / `function`-expressions via an IDENT_RE scan over the
+  // opaque `escape-hatch` raw text — the same over-inclusive-but-safe philosophy
+  // as `markupReferencedNames`, since over-inclusion only ever SUPPRESSES an
+  // advisory warning). References to a nested NAMED function-decl's OWN body are
+  // NOT harvested here — that decl is its own analyzed function and is harvested
+  // under its own nodeId (so self-only reachability is preserved for the D4
+  // non-self check below).
+  const logicReferencedFnNames = new Map<string, Set<string>>();
+  {
+    const LOGIC_IDENT_RE = /[A-Za-z_$][A-Za-z0-9_$]*/g;
+    const isClosureEscapeHatch = (n: any): boolean =>
+      n && n.kind === "escape-hatch" && typeof n.raw === "string" &&
+      (n.nativeKind === "ArrowFunctionExpression" || n.nativeKind === "FunctionExpression");
+    // Harvest all referenced identifier names from an AST subtree (statement or
+    // ExprNode), descending into closures but NOT into nested named
+    // function-decl / component-def scopes.
+    const harvest = (node: any, out: Set<string>): void => {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) { for (const c of node) harvest(c, out); return; }
+      const kind = node.kind;
+      // Own-scope boundary: a nested named function / component is harvested
+      // separately under its own fnNodeId. Do not attribute its body refs here.
+      if (kind === "function-decl" || kind === "component-def") return;
+      if (kind === "ident" && typeof node.name === "string") {
+        const nm = node.name;
+        if (nm && nm[0] !== "@" && nm !== "~" && !JS_KEYWORDS.has(nm)) out.add(nm);
+      }
+      // Object-property shorthand (`{ fn }`) carries the ref as a `name` string.
+      if (kind === "shorthand" && typeof node.name === "string") {
+        const nm = node.name;
+        if (nm && nm[0] !== "@" && nm !== "~" && !JS_KEYWORDS.has(nm)) out.add(nm);
+      }
+      // Opaque block-body closure (arrow-with-block / `function`-expression) —
+      // its interior is raw text. IDENT_RE-scan it (Case 1b). Over-inclusive,
+      // suppression-only → safe direction.
+      if (isClosureEscapeHatch(node)) {
+        let m: RegExpExecArray | null;
+        LOGIC_IDENT_RE.lastIndex = 0;
+        while ((m = LOGIC_IDENT_RE.exec(node.raw)) !== null) {
+          const nm = m[0];
+          if (nm && !JS_KEYWORDS.has(nm)) out.add(nm);
+        }
+      }
+      // Recurse into every child object/array field (this is what descends into
+      // arrow EXPRESSION bodies — `lambda.body.value` is a plain child ExprNode —
+      // giving Case 1a / Case 3, and into arg / array / object / ternary / return
+      // positions giving Case 2).
+      for (const key of Object.keys(node)) {
+        if (key === "span" || key === "id") continue;
+        const v = node[key];
+        if (v && typeof v === "object") harvest(v, out);
+      }
+    };
+    for (const [fnNodeId, record] of analysisMap) {
+      const body = Array.isArray(record.fnNode.body) ? record.fnNode.body : [];
+      const names = new Set<string>();
+      for (const stmt of body) harvest(stmt, names);
+      for (const nm of names) {
+        let s = logicReferencedFnNames.get(nm);
+        if (!s) { s = new Set<string>(); logicReferencedFnNames.set(nm, s); }
+        s.add(fnNodeId);
+      }
+    }
+  }
+
   // Now emit D4 (W-DEAD-FUNCTION) + D5 (W-DEPRECATED-SERVER-MODIFIER).
   for (const [fnNodeId, record] of analysisMap) {
     const fnName = record.fnNode.name;
@@ -4698,7 +4794,17 @@ export function runRI(input: RIInput): RIOutput {
     // dead-function false-fire (collectFunctionNodes flags it `_returnedInline`).
     const isReturnedInline = (record.fnNode as { _returnedInline?: boolean })._returnedInline === true;
 
-    if (!isHandleHatch && !hasCallers && !isExported && !isExplicitServer && !isMarkupReferenced && !isEndpointReferenced && !isGenerator && !isToolMainEntry && !isReturnedInline) {
+    // adopter #195 — referenced from reachable LOGIC as a call callee inside a
+    // nested closure body, or as a bare first-class value (arg / assignment /
+    // array / object / ternary / return). NON-SELF only, mirroring `hasCallers`:
+    // a function that references ONLY itself as a value (`function f(){
+    // setTimeout(f,10) }`) with no external caller is still dead.
+    const logicRefs = logicReferencedFnNames.get(fnName);
+    const isLogicReferenced =
+      logicRefs !== undefined &&
+      Array.from(logicRefs).some(id => id !== fnNodeId);
+
+    if (!isHandleHatch && !hasCallers && !isExported && !isExplicitServer && !isMarkupReferenced && !isEndpointReferenced && !isGenerator && !isToolMainEntry && !isReturnedInline && !isLogicReferenced) {
       const warn = new RIError(
         "W-DEAD-FUNCTION",
         `W-DEAD-FUNCTION: Function \`${fnName}\` has no callers, is not exported, ` +
