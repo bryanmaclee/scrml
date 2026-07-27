@@ -97,6 +97,13 @@ CONTINUITY store (PR-flow: main's HEAD is advanced by PR merge [gate-serialized,
   delta-log: handOffs/delta-log.md (PA-written terse stream; flogence bridge.ts consumes it for the digest)
   changelog: docs/changelog.md   gaps: docs/known-gaps.md (+ `bun scripts/state.ts` §0 rollup)
   inbox: handOffs/incoming/ (move read -> read/)   outboxes: sibling handOffs/incoming/ (the ONE write exception)
+  ⚑ PER-CLONE (S290, base v2.5 §10): `ls` shows only THIS disk. A dropped message is UNTRACKED until
+    committed, so it never reaches another clone. At boot ALSO run
+      git status --porcelain handOffs/incoming/
+    an untracked file there = a message a co-located writer dropped that no session committed —
+    invisible everywhere else until you commit it. When DROPPING into a sibling: write + commit + push
+    (the write alone delivers to yourself). Witnessed: scrml-site is co-located with the XPS clone; 3
+    messages (1 blocking) sat invisible 2 days while every ASUS boot reported a clean inbox.
   memory: ~/.claude/projects/-home-bryan-scrmlMaster-scrml/memory/ (per-machine; pa.md is the cross-machine carrier)
 
 MAP: .claude/maps/primary.map.md   (Task-Shape Routing; project-mapper refresh at wrap step 6c)

@@ -159,6 +159,39 @@ compiles clean, and produces nothing" shape and should not be left to be redisco
 Fix: either implement table-level constraints or reject an unrecognized table-body line loudly —
 NOT continue to discard it. <!-- @gap id=g-schema-table-level-constraint-lines-silently-dropped sev=MED status=open -->
 
+### G-SQL-BARE-IDENTIFIER-BODY-EMITS-IDENTIFIER-AS-QUERY — `?{q}` compiled clean and shipped the identifier as the SQL text — `NEW S290; HIGH; RESOLVED S290`
+Reported by the scrml-site consumer via the S291-XPS session, reproduced independently here on
+`0d95c364` before any change:
+
+```scrml
+const q = "SELECT * FROM items"
+return ?{q}.all()          // exit 0, zero diagnostics → emits _scrml_sql`q`
+```
+
+**Narrower-than-claimed, NOT regressed** — the distinction the report asked for. `E-SQL-003` exists and
+fires correctly on `?{ ${q} }`; `sqlBodyIsRuntimeExpr` returns true only when the body has **at least one
+`${...}` interpolation** and no literal SQL around it. A bare `?{q}` has ZERO interpolations, so it fell
+through the other side of that test and was treated as literal SQL text — which is exactly what got
+emitted.
+
+**A conformance restoration, not a widening.** §8.4 states verbatim: *"Developers SHALL NOT construct SQL
+strings dynamically in JavaScript and pass them to `?{}`"*, and §8.4.1 adds *"The `?{}` template body SHALL
+remain a literal string at compile time (E-SQL-003)"*. Both predate the gap and name this shape exactly, so
+no ruling was required; bryan's `refuse` lean matched the governing sentence rather than overriding it.
+
+Fix: extend `sqlBodyIsRuntimeExpr` to the zero-interpolation single-identifier form, with the genuinely
+one-word SQL statements (`VACUUM` / `ANALYZE` / `BEGIN` / `COMMIT` / `END` / `ROLLBACK` / `CHECKPOINT`)
+allowlisted explicitly rather than inferred — a false positive here hard-errors a valid query. The
+diagnostic message branches on shape, because telling someone who wrote `?{q}` that their body is
+"composed solely of `${...}` interpolations" describes a construct that is not on their screen.
+
+Verified: R26 swept all **268** corpus files containing `?{`, E-SQL-003 fired on exactly **2** — both the
+conformance cases designed to trigger it, zero false positives. Controls (real queries, parameterized,
+comment-prefixed, `VACUUM`, `BEGIN`, lowercase `analyze`) all still compile. Conformance **746 → 747** with
+a new pinned case; +6 unit tests. Also corrected: the §34 row cited `§8.1.1 lines 5619, 5643` for its
+governing prose — §8.1.1 is driver resolution and those line numbers are long stale; the real sentences
+are in §8.4 / §8.4.1. — `RESOLVED S290` <!-- @gap id=g-sql-bare-identifier-body-emits-identifier-as-query sev=HIGH status=resolved -->
+
 ### G-SCHEMA-COMMENTS-PARSED-AS-SCHEMA-TEXT — a `//` comment inside a table body shaped the emitted DDL — `NEW S290; HIGH; RESOLVED S290`
 Found by the **S239 adversarial pass** on the `E-SCHEMA-011` fix, not by the corpus sweep — no corpus
 file comments inside a table body in a way that bites, so the 21k-test suite was structurally blind to

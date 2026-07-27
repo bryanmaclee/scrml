@@ -1,0 +1,12 @@
+{
+  "id": "sql-bare-identifier-body-e-sql-003-neg",
+  "description": "§8.4 compile-time rejection — the `?{}` body is a BARE IDENTIFIER (`?{q}`) rather than literal SQL. This is the sibling shape of `sql-runtime-expr-body-e-sql-003-neg`: that case covers a body made of `${...}` interpolations, this one covers a body with NO interpolation at all. The distinction is load-bearing because the detector originally keyed on `interpolations >= 1`, so `?{q}` fell through as literal SQL TEXT and was emitted verbatim as ``_scrml_sql`q``` — the identifier as the query — compiling exit 0 with zero diagnostics and failing only at runtime against the database. Adopter-reported (scrml-site, 2026-07); fixed S290 by extending `sqlBodyIsRuntimeExpr` to the zero-interpolation single-identifier form, with single-word SQL statements (VACUUM / BEGIN / COMMIT / END / ROLLBACK / ANALYZE / CHECKPOINT) allowlisted so they keep compiling.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/sql-runtime-expr-body-e-sql-003.test.js",
+  "spec": "§8.4",
+  "rationale": "§8.4 normative, verbatim: `Developers SHALL NOT construct SQL strings dynamically in JavaScript and pass them to ?{}`. `const q = \"SELECT id FROM tasks\"; ?{q}` is exactly that — a SQL string built in JavaScript and handed to `?{}` — so the rejection is a CONFORMANCE RESTORATION, not a new rule: the governing sentence predates the gap by a wide margin. §8.4.1 adds `The ?{} template body SHALL remain a literal string at compile time (E-SQL-003); fragment reuse is achieved via the call graph, not via runtime template assembly.` Resolution: write the SQL literally inside the braces and bind values via `${...}`, or extract a function per §8.4.1.",
+  "expect": {
+    "codes": ["E-SQL-003"],
+    "notCodes": []
+  }
+}
