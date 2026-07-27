@@ -42,6 +42,78 @@ function currentLiftReconcileCtx() {
   return n > 0 ? _scrml_lift_reconcile_ctx_stack[n - 1] : null;
 }
 
+// S293 — item-derived-local REPLAY prelude for per-item effect / handler wraps.
+//
+// The S288 render path (emitForStmtWithContainer) re-resolves ancestor items by
+// key and replays item-derived local decls so an inner iterable reads fresh on
+// REPLACE. The per-item TEXT / class: / event wraps below re-resolved only the
+// iter var, never replaying `let {name}=e` / `let nm=e.field` locals → a binding
+// that reads such a local stayed STALE on REPLACE (g-item-derived-local-stale-in-
+// per-item-effect-paths). This shares that exact machinery: given a binding's JS
+// text and the LIVE reconcile ctx stack, return the re-resolution prelude —
+// re-resolve each NEEDED ancestor iter var (outermost-first) + replay each needed
+// item-derived local decl (deps-first, via the same `emitLogicNode` lowering the
+// render path uses) — so the binding's reads of item-derived locals hit the LIVE
+// item. Mirror of the `_pullFromText` closure in emitForStmtWithContainer.
+//
+// Purely ADDITIVE: when the text references no item-derived local, the prelude is
+// byte-identical to the prior iter-var-only re-resolve.
+//
+// @param bodyText       — the binding's JS text (scanned for referenced names)
+// @param forceIterVars  — iter vars to resolve even if not textually referenced
+//   (the effect wrap forces its own ctx.iterVar to preserve the pre-fix
+//   unconditional re-resolve + null-bail); null for the handler wraps.
+// @param bail           — the bail statement emitted on a gone key (`return;`).
+// @returns string[]     — prelude JS statements (empty when nothing to resolve).
+function computeItemDerivedReplay(bodyText, forceIterVars, bail) {
+  const stack = _scrml_lift_reconcile_ctx_stack;
+  if (!stack || stack.length === 0) return [];
+  const _iterVarToCtx = new Map();  // iterVar -> ctx
+  const _localByName = new Map();   // bound name -> its decl record { bindNames, node, init }
+  for (const ctx of stack) {
+    if (ctx.iterVar) _iterVarToCtx.set(ctx.iterVar, ctx);
+    if (ctx.itemDerivedLocals) for (const l of ctx.itemDerivedLocals) for (const bn of l.bindNames) _localByName.set(bn, l);
+  }
+  const _neededIterVars = new Map();
+  const _neededBindNames = new Set();
+  const _neededLocalNodes = new Set();  // dedupe replay by decl node identity
+  const _neededLocals = [];             // decl order (deps first)
+  const _pull = (text) => {
+    if (!text) return;
+    for (const [nm, ctx] of _iterVarToCtx) if (_liftIterScopeReferenced(text, nm)) _neededIterVars.set(nm, ctx);
+    for (const [nm, l] of _localByName) {
+      if (_neededBindNames.has(nm)) continue;
+      if (_liftIterScopeReferenced(text, nm)) {
+        _neededBindNames.add(nm);
+        if (!_neededLocalNodes.has(l.node)) {
+          _neededLocalNodes.add(l.node);
+          _pull(l.init);          // pull the decl's own deps FIRST (post-order)
+          _neededLocals.push(l);  // …then the decl (deps precede use)
+        }
+      }
+    }
+  };
+  _pull(bodyText);
+  if (forceIterVars) for (const iv of forceIterVars) {
+    const ctx = _iterVarToCtx.get(iv);
+    if (ctx) _neededIterVars.set(iv, ctx);
+  }
+  if (_neededIterVars.size === 0 && _neededLocals.length === 0) return [];
+  const out = [];
+  // Re-resolve needed ancestors outermost-first (a shallower ancestor is bound
+  // before a replayed local that reads it).
+  for (const ctx of stack) {
+    if (!_neededIterVars.has(ctx.iterVar)) continue;
+    out.push(`let ${ctx.iterVar} = _scrml_resolve_item(${ctx.wrapperVar}, ${ctx.keyVar});`);
+    out.push(`if (${ctx.iterVar} === null) ${bail}`);
+  }
+  for (const l of _neededLocals) {
+    const declCode = emitLogicNode(l.node, {});
+    if (declCode) for (const dl of declCode.split('\n')) out.push(dl);
+  }
+  return out;
+}
+
 // S288 FINDING 1 — item-derived local aliases. A per-item factory body may alias
 // an enclosing item's collection into a local before the inner for-lift iterates
 // it: `let sts = e.states; … for (s of sts) { lift … }` (and transitively `let a =
@@ -108,6 +180,27 @@ function _declBindNames(node) {
   return [];
 }
 
+// S293 — collect `let`/`const` decl nodes in SOURCE ORDER, descending into
+// non-loop nested blocks that SHARE the current iter-var scope: an `if`-stmt's
+// consequent/alternate (and nested `if`/else-if chains). A local declared inside
+// `if (e.active) { let nm = e.name; lift <h3>${nm}</h3> }` is item-derived and
+// must be replayed on reconcile exactly like a top-level `let nm = e.name` (the
+// per-item binding that reads it lives in the SAME block). Inner FOR-STMTs are
+// deliberately NOT descended — they introduce their own iter var + reconcile ctx
+// and get their own scan, so a local derived from an inner loop var is not
+// item-derived from THIS ctx's item (it belongs to the inner ctx).
+function _collectDeclNodesInScope(body, out) {
+  for (const node of (body || [])) {
+    if (!node) continue;
+    if (node.kind === "let-decl" || node.kind === "const-decl") { out.push(node); continue; }
+    if (node.kind === "if-stmt") {
+      _collectDeclNodesInScope(node.consequent ?? node.body ?? [], out);
+      if (node.alternate) _collectDeclNodesInScope(Array.isArray(node.alternate) ? node.alternate : [node.alternate], out);
+    }
+    // for-stmt / lift-expr / everything else: not a decl scope we hoist from.
+  }
+}
+
 function scanItemDerivedLocals(body, newIterVar) {
   // Names already reactive in scope: every ancestor ctx's iter var + its
   // item-derived locals' bound names, plus the iter var about to be pushed here.
@@ -120,8 +213,9 @@ function scanItemDerivedLocals(body, newIterVar) {
 
   const locals = [];
   const localNames = new Set();
-  for (const node of (body || [])) {
-    if (!node || (node.kind !== "let-decl" && node.kind !== "const-decl")) continue;
+  const declNodes = [];
+  _collectDeclNodesInScope(body, declNodes);
+  for (const node of declNodes) {
     const bindNames = _declBindNames(node);
     if (bindNames.length === 0) continue;
     const initText = _collectDeclInitRefText(node);
@@ -130,6 +224,10 @@ function scanItemDerivedLocals(body, newIterVar) {
     for (const nm of visible) { if (_liftIterScopeReferenced(initText, nm)) { derived = true; break; } }
     if (!derived) for (const nm of localNames) { if (_liftIterScopeReferenced(initText, nm)) { derived = true; break; } }
     if (derived) {
+      // First occurrence in source order wins: a name already recorded (a
+      // shadowing decl in a sibling branch) is not double-recorded — the replay
+      // stays deterministic and can never emit a duplicate `let` for one name.
+      if (bindNames.every((bn) => localNames.has(bn))) continue;
       locals.push({ bindNames, node, init: initText });
       for (const bn of bindNames) localNames.add(bn);
     }
@@ -239,13 +337,15 @@ function maybeWrapLiftPerItemEffect(bodyLines) {
   if (!ctx) return bodyLines;
   const out = [];
   out.push(`_scrml_effect(() => {`);
-  // Re-resolve the live item by this node's create-time key; bail if the key is
-  // gone (node being removed) so the body never reads a field off `undefined`.
-  out.push(`  let ${ctx.iterVar} = _scrml_resolve_item(${ctx.wrapperVar}, ${ctx.keyVar});`);
-  // Canonical absence is null (SPEC §42.5) — the W-CG-UNDEFINED-INTERPOLATION
-  // lint forbids the `undefined` keyword in emitted JS. _scrml_resolve_item
-  // returns null when the key is gone (node being removed).
-  out.push(`  if (${ctx.iterVar} === null) return;`);
+  // Re-resolve the live item by this node's create-time key + replay any item-
+  // derived local aliases the body reads (S293), so `item.field` and
+  // `let {name}=item` reads hit the live Proxy on every reconcile. ctx.iterVar is
+  // always resolved (forced) — preserving the pre-fix unconditional re-resolve +
+  // null-bail (SPEC §42.5 canonical-absence: bail before reading a field off a
+  // gone node; the W-CG-UNDEFINED-INTERPOLATION lint forbids the `undefined`
+  // keyword in emitted JS, so the bail keys on `=== null`).
+  const prelude = computeItemDerivedReplay(bodyLines.join('\n'), [ctx.iterVar], 'return;');
+  for (const l of prelude) out.push('  ' + l);
   for (const l of bodyLines) out.push('  ' + l);
   out.push(`});`);
   return out;
@@ -305,8 +405,13 @@ function _liftIterScopeReferenced(handlerBody, iterVarName) {
 export function maybeWrapLiftPerItemHandler(handlerBody) {
   const ctx = currentLiftReconcileCtx();
   if (!ctx) return handlerBody;
-  if (!_liftIterScopeReferenced(handlerBody, ctx.iterVar)) return handlerBody;
-  return `let ${ctx.iterVar} = _scrml_resolve_item(${ctx.wrapperVar}, ${ctx.keyVar}); if (${ctx.iterVar} === null) return; ${handlerBody}`;
+  // Wrap when the body reads the iter var OR an item-derived local (S293) — a
+  // handler over `let {name}=e` must re-resolve `e` and replay the local so it
+  // fires with the LIVE item after a same-key reconcile (node reuse), not the
+  // stale create-time snapshot. Empty prelude → not item-dependent → unchanged.
+  const prelude = computeItemDerivedReplay(handlerBody, null, 'return;');
+  if (prelude.length === 0) return handlerBody;
+  return `${prelude.join(' ')} ${handlerBody}`;
 }
 
 /**
@@ -328,8 +433,13 @@ export function maybeWrapLiftPerItemHandler(handlerBody) {
 export function maybeWrapLiftCallableHandler(arrowText) {
   const ctx = currentLiftReconcileCtx();
   if (!ctx) return null;
-  if (!_liftIterScopeReferenced(arrowText, ctx.iterVar)) return null;
-  return `function(event) { let ${ctx.iterVar} = _scrml_resolve_item(${ctx.wrapperVar}, ${ctx.keyVar}); if (${ctx.iterVar} === null) return; (${arrowText})(event); }`;
+  // Wrap when the arrow reads the iter var OR an item-derived local (S293). The
+  // arrow is INLINED inside a wrapper whose `let <iterVar>` + replayed locals
+  // lexically shadow the arrow's free references. Empty prelude → no wrap (caller
+  // emits the arrow directly, byte-identical to pre-fix).
+  const prelude = computeItemDerivedReplay(arrowText, null, 'return;');
+  if (prelude.length === 0) return null;
+  return `function(event) { ${prelude.join(' ')} (${arrowText})(event); }`;
 }
 
 // ---------------------------------------------------------------------------
