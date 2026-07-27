@@ -40,6 +40,18 @@ function codesForSqlBlock(sqlBlock) {
   return (errors ?? []).map((e) => e.code);
 }
 
+/** As above, but returns the diagnostic MESSAGES (S290 — the message must name
+ *  the shape the author wrote; the two E-SQL-003 forms read differently). */
+function messagesForSqlBlock(sqlBlock) {
+  const src =
+    `<program db="sqlite:./app.db">\n` +
+    `\${ function loadRows(q, id, name, x, y, prefix, suffix, pattern) { return ${sqlBlock}.all() } }\n` +
+    `</program>\n`;
+  const bs = splitBlocks("/test/app.scrml", src);
+  const { errors } = buildAST(bs);
+  return (errors ?? []).map((e) => e.message ?? "");
+}
+
 // ---------------------------------------------------------------------------
 // §A — MUST FIRE E-SQL-003 (pure runtime-expression bodies, no literal SQL)
 // ---------------------------------------------------------------------------
@@ -127,5 +139,57 @@ describe("§B: valid parameterized `?{}` bodies do NOT fire E-SQL-003", () => {
 
   test("§B.8 — block-comment + real parameterized query stays clean", () => {
     expect(codesForSqlBlock("?{`/* fetch */ SELECT id FROM users WHERE id = ${id}`}")).not.toContain("E-SQL-003");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §C — the BARE-IDENTIFIER body (S290). Adopter-reported via scrml-site.
+//
+// The detector above keyed on `interpolations >= 1`, so `?{q}` — zero
+// interpolations — fell through as literal SQL TEXT and was emitted verbatim
+// as ``_scrml_sql`q```: the identifier as the query, exit 0, no diagnostic,
+// failing only at runtime against the database. §8.4 has said
+// "Developers SHALL NOT construct SQL strings dynamically in JavaScript and
+// pass them to `?{}`" the whole time, so this is a conformance restoration.
+// ---------------------------------------------------------------------------
+
+describe("§C E-SQL-003 — bare-identifier `?{}` body (S290)", () => {
+  test("§C.1 — the reported shape `?{q}` fires", () => {
+    expect(codesForSqlBlock("?{q}")).toContain("E-SQL-003");
+  });
+
+  test("§C.2 — any identifier shape fires (the class, not the one name)", () => {
+    for (const id of ["q", "sqlText", "_q", "$q", "QUERY2", "myQuery"]) {
+      expect(codesForSqlBlock(`?{${id}}`)).toContain("E-SQL-003");
+    }
+  });
+
+  test("§C.3 — whitespace and comments around the identifier do not cloak it", () => {
+    expect(codesForSqlBlock("?{  q  }")).toContain("E-SQL-003");
+    expect(codesForSqlBlock("?{-- pick one\nq}")).toContain("E-SQL-003");
+    expect(codesForSqlBlock("?{/* pick */ q}")).toContain("E-SQL-003");
+  });
+
+  test("§C.4 — SINGLE-WORD SQL STATEMENTS still compile (the allowlist)", () => {
+    for (const stmt of ["VACUUM", "ANALYZE", "BEGIN", "COMMIT", "END", "ROLLBACK", "CHECKPOINT"]) {
+      expect(codesForSqlBlock(`?{${stmt}}`)).not.toContain("E-SQL-003");
+      expect(codesForSqlBlock(`?{${stmt.toLowerCase()}}`)).not.toContain("E-SQL-003");
+    }
+  });
+
+  test("§C.5 — a real multi-token query is never mistaken for an identifier", () => {
+    for (const q of ["SELECT 1", "select * from t", "DELETE FROM t", "PRAGMA foreign_keys = ON"]) {
+      expect(codesForSqlBlock(`?{${q}}`)).not.toContain("E-SQL-003");
+    }
+  });
+
+  test("§C.6 — the message names the shape the author actually wrote", () => {
+    const bare = messagesForSqlBlock("?{q}").join(" ");
+    expect(bare).toContain("bare identifier");
+    expect(bare).toContain("does not read the variable");
+    // and the interpolation form keeps its own, different lead
+    const interp = messagesForSqlBlock("?{`${q}`}").join(" ");
+    expect(interp).toContain("runtime expression");
+    expect(interp).not.toContain("bare identifier");
   });
 });

@@ -13552,8 +13552,48 @@ function sqlBodyIsRuntimeExpr(query) {
     if (!/\s/.test(query[i])) hasLiteral = true;
     i++;
   }
-  return interpolations >= 1 && !hasLiteral;
+  if (interpolations >= 1 && !hasLiteral) return true;
+
+  // S290 — the BARE-IDENTIFIER form, `?{q}`.
+  //
+  // The interpolation test above requires at least one `${...}`. A body that is
+  // a bare identifier has ZERO, so it read as literal SQL text and was emitted
+  // verbatim: `const q = "SELECT …"; ?{q}` compiled exit 0 with no diagnostic
+  // and emitted ``_scrml_sql`q``` — the identifier as the query. Same rule,
+  // same remedy, one shape the detector's shape did not reach; the §34 row
+  // already states it generally ("a runtime expression rather than a literal
+  // string template"), so this is a conformance restoration, not a new rule.
+  //
+  // Safe because a bare identifier is not SQL — with one exception: a handful
+  // of SQL statements ARE a single word. Those are allowlisted below rather
+  // than guessed at, so `?{ VACUUM }` keeps working.
+  if (interpolations === 0) {
+    const bare = query
+      .replace(/--[^\n]*/g, " ")
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .trim();
+    if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(bare) && !SINGLE_WORD_SQL_STATEMENTS.has(bare.toUpperCase())) {
+      return true;
+    }
+  }
+  return false;
 }
+
+/**
+ * SQL statements that are legitimately ONE word, so a single-token `?{}` body
+ * is not automatically an identifier reference. Kept explicit and auditable
+ * rather than inferred — the cost of a false positive here is hard-erroring a
+ * valid query (the E-ATTR-012 lesson the sibling comment above cites).
+ */
+const SINGLE_WORD_SQL_STATEMENTS = new Set([
+  "VACUUM",     // SQLite + Postgres
+  "ANALYZE",    // SQLite (bare form analyses everything)
+  "BEGIN",
+  "COMMIT",
+  "END",        // SQLite's COMMIT synonym
+  "ROLLBACK",
+  "CHECKPOINT", // Postgres
+]);
 
 function parseSQLTokens(tokens, filePath) {
   let query = "";
@@ -17544,16 +17584,30 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       // separate pre-existing sql-ref-unresolved path that bypasses buildBlock —
       // orthogonal to E-SQL-003, tracked separately.)
       if (errors && sqlBodyIsRuntimeExpr(query)) {
+        // Name the shape the author actually WROTE. The two forms need
+        // different first sentences: telling someone who wrote `?{q}` that
+        // their body is "composed solely of ${...} interpolations" describes a
+        // construct that is not on their screen.
+        const bareIdent = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(
+          query.replace(/--[^\n]*/g, " ").replace(/\/\*[\s\S]*?\*\//g, " ").trim(),
+        );
+        const lead = bareIdent
+          ? "E-SQL-003: the `?{}` SQL template body is a bare identifier, not a " +
+            "literal string template. `?{" + query.trim() + "}` does not read the " +
+            "variable `" + query.trim() + "` — the body is taken as literal SQL text, " +
+            "so this emits ``_scrml_sql`" + query.trim() + "``` and fails at runtime " +
+            "against the database. "
+          : "E-SQL-003: the `?{}` SQL template body is a runtime expression, not a " +
+            "literal string template. A `?{}` body composed solely of `${...}` " +
+            "interpolation(s) with no literal SQL text is a runtime-assembled query " +
+            "— an injection vector the compiler cannot validate or parameter-bind. ";
         errors.push(new TABError(
           "E-SQL-003",
-          "E-SQL-003: the `?{}` SQL template body is a runtime expression, not a " +
-          "literal string template. A `?{}` body composed solely of `${...}` " +
-          "interpolation(s) with no literal SQL text is a runtime-assembled query " +
-          "— an injection vector the compiler cannot validate or parameter-bind. " +
+          lead +
           "Write the SQL literally inside the backticks and bind values via " +
           "`${...}` (e.g. `?{`SELECT * FROM users WHERE id = ${id}`}`); reuse SQL " +
           "patterns by extracting a function, not by assembling the template at " +
-          "runtime (§8.1.1, §8.4.1).",
+          "runtime (§8.6, §8.4.1).",
           span,
         ));
       }

@@ -1,0 +1,9 @@
+${
+    function loadRows() {
+        const q = "SELECT id FROM tasks"
+        return ?{q}.all()
+    }
+}
+<program db="./app.db">
+    <button id="load" onclick=loadRows()>Load</>
+</program>
