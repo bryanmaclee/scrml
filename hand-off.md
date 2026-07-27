@@ -149,26 +149,22 @@ nested-closure uses as non-dead. Flagged because SPEC is this lane.
   docs (`FACTS.md`, `state.ts` §0) `--check` PASS.
 - `tracking` fails on 3 known tests every run (serve-tool R26 flake + the two gitignored self-host
   artifacts `bs.js`/`tab.js`) — verified directly on #191 and #193, inferred thereafter. Non-required.
-- ⚠️ **MAPS REFRESH IS PARTIAL — corrected note.** A `project-mapper` dispatch was fired at wrap. It
-  had written nothing after ~15 min, so I recorded it as "produced no output" and hand-corrected
-  `migrations.map.md` myself (it was actively WRONG — naming
-  `g-db-migrate-check-constraint-oneof-pattern` as open and "the natural next `db-migrate` fix" when
-  this session resolved it). **That claim was premature: the agent finished LATE**, after the wrap PR
-  had already merged, and its output is accurate — `error.map.md` and `schema.map.md` correctly pick
-  up `E-SCHEMA-010`, the auto-immutable PK/`tenant_id` change, `lowerDefaultToSql`, the balanced
-  `default()` capture and Peter's lane. Both landed in a follow-up. **The commit message on the wrap
-  PR still says "produced NO output" and is wrong — this is the corrected record.** Lesson for the
-  next PA: a `project-mapper` pass on this repo can take well over 15 minutes; don't call it dead on
-  a 15-minute silence.
-- **Current map state:** `error.map.md` + `schema.map.md` refreshed by the agent (stamp `c700c435`);
-  `migrations.map.md` carries a targeted PA-direct correction (stamp `c700c435`) but the rest of that
-  file is pre-S288. **Every OTHER map is still stamped pre-S288** — `primary.map.md` at `f8a138e9`.
-  A refresh of the remainder is still OWED.
-- **What a refresh must still pick up:** `emit-server.ts` — NEW `astSqlQueryUsesCurrentUser`, the
-  `_anyFnCurrentUserQuery` gate term, the RI-route `_scrml_currentUser` splice · `tenant-egress.ts` —
-  `buildTenantContext`'s second arg · `db-migrate.js` — `printFailedStatement` + per-statement
-  attribution · NEW test `integration/schema-only-tenant-principal.test.js` · Peter's #192 / #197 /
-  #200.
+- ⚠️ **MAPS — corrected note, twice.** A `project-mapper` dispatch was fired at wrap. After ~15 min of
+  silence I recorded it as "produced no output" and hand-patched `migrations.map.md` myself (it was
+  actively WRONG — naming `g-db-migrate-check-constraint-oneof-pattern` as open and "the natural next
+  `db-migrate` fix" when this session resolved it). **That call was premature twice over:** the agent
+  then wrote `error`/`schema`, and finally COMPLETED at ~23 min with a full pass, overwriting my
+  hand-patch with a better rewrite. **The wrap commit message on #202 still says "produced NO output"
+  and is wrong; this is the corrected record.** Lesson for the next PA: a `project-mapper` pass on
+  this repo runs ~23 minutes — do not call it dead at 15.
+- **Map state:** `primary` · `error` · `schema` · `migrations` · `domain` all refreshed and stamped
+  `c700c435`. The agent deliberately LEFT `structure`/`dependencies`/`build`/`test`/`config`/`auth`/
+  `infra` at their prior honest stamps because it did not re-verify their source — that is correct
+  behavior, not an omission. It also flagged **`test.map.md`'s test-file counts as now stale** (a
+  future pass should recount) and left `non-compliance.report.md` untouched rather than fabricate a
+  sweep it did not run.
+- **Not in any map:** the FK HIGH above (`b1856870`) postdates the mapped window — the agent flagged
+  this itself. Pick it up in the next incremental pass.
 
 ## Tags
 #session-288-bryan #rediledger-arc #5-prs #oneof-sql-literals #currentuser-binding #schema-tenant-registry #default-emission #e-schema-010-ruled #auto-immutable-pk-tenant #gate-mismatch-lesson #incomplete-fix-lesson #request-path-test-debt #facts-gate-caught-me #sibling-repo-pathspec-miss #four-rebases-peter-concurrent
