@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 11 |
+| HIGH | 10 |
 | MED | 60 |
 | LOW | 35 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -98,6 +98,38 @@ now state the limitation plainly. Filed LOW to carry the SURVEY so it is not re-
 A and C are independent and both worth doing. **Re-trigger: the first adopter report of a column typo that
 reached production.** Confirm cost with a real survey before committing — the depth-of-survey discount cuts
 both ways and span-mapping is where these bleed. <!-- @gap id=g-esql002-normatively-required-no-fire-site sev=LOW status=open -->
+
+### G-DBAUTH-MIGRATE-NO-GRANTS-FOR-UNMARKED-IDENTITY-TABLE — turnkey `db-migrate` produces a database whose login 500s, for exactly the shape §14.8.10's corollary prescribes — `NEW S292; HIGH; open (adopter-reported, RediLedger S11; run-verified by them at d19d79ea)`
+**The asymmetry.** `db-migrate` emits `GRANT` **per db-authoritative table** (`schema-differ.js`, the S6
+per-table DDL). The `SET LOCAL ROLE scrml_app` drop is emitted **per `?{}` in any request scope**
+(`codegen/db-authoritative.ts`), NOT per table — so once ANY table is db-authoritative, EVERY query in a
+request runs as `scrml_app`, including reads against tables that were never marked. Both halves confirmed
+in-source at `20ebbf0c`.
+
+**Why that is exactly the prescribed shape.** §14.8.10's corollary says do NOT mark the identity table —
+you cannot tenant-scope the table that tells you the tenant — and `[[g-dbauth-docs-no-do-not-mark-users-example]]`
+(LOW) exists to document that. So `users` correctly carries no marker, therefore receives **zero grants**,
+and is then read under the restricted role. RediLedger verified `grantee='scrml_app' AND table_name='users'`
+-> **0 rows**, and over HTTP: `POST …/authenticate` -> `500 {"error":"permission denied for table users"}`.
+
+**The failure mode is quiet.** After the 500, every downstream read returns the anonymous fail-closed
+result (`"0"`, `[]`) — correct behaviour for an unauthenticated request. So it reads as "my seed data is
+wrong", not "login is broken". They lost three sessions to it.
+
+**Why every existing test is blind.** The tier's live-PG tests hand-execute `set_config` and never issue a
+request (already tracked as `[[g-dbauth-no-request-path-test]]`, MED) — and, the part that is NEW here, a
+fixture that hand-writes its DDL carries the grant inline and stays green. Catching this needs a login-over-HTTP
+round trip against a **turnkey-migrated** database specifically. This is the strongest evidence yet for that
+MED gap and should raise its priority.
+
+**Ruling owed before a fix — this is not mechanical.** At least four directions: (a) grant on every
+`<schema>` table rather than only marked ones; (b) grant on the tables `?{}` actually touches; (c) a
+`<schema>` surface for declaring grants on an unmarked table (RediLedger looked for one and found none);
+(d) do not wrap unmarked-table reads in `SET LOCAL ROLE` at all — arguably the real defect, but it may be
+deliberate defence-in-depth since a dynamic query's table set is not always statically known. (a) is the
+widening direction and (d) narrows the security envelope, so this is the widen-vs-limit shape -> R2 minimum.
+Their workaround is one line (`GRANT SELECT ON users TO scrml_app;`) and they explicitly did NOT propose it
+as the fix. <!-- @gap id=g-dbauth-migrate-no-grants-for-unmarked-identity-table sev=HIGH status=open -->
 
 ### G-SPA-RUNTIME-GZIP-BUDGET-KNIFE-EDGE — the 16 KB SPA-runtime gzip budget is at ~127 B margin on base, independent of any in-flight arc — `NEW S282; HIGH; open (a bryan decision, not a bug)`
 Surfaced while scoping the BUG-6 accessor-rename (`docs/changes/chunk-namespacing/BUG6-RENAME-SCOPING.md` §6). `v0-3-x-spa-tree-shake-phase-b.test.js:145` asserts the assembled SPA runtime is `< 16 * 1024` gzip. **Agent-measured on the test's own `SPA_COUNTER` fixture at base `e8fdd44c`: 16,257 B — 127 B under the 16,384 budget, with no chunk-namespacing changes present.** (Scoping measurement; the execution session re-measures as its step 1, R26-style — do not treat 127 B as verified-final.)
@@ -3887,12 +3919,14 @@ EXECUTING the artifact, not by matching a symbol a doc told you to expect.
 ### g-nav-chunk-loading-flag-race — a superseded navigation's chunk clears the global boot flag, so a newer route's chunk never boots and swaps in as dead markup — `NEW S276 (Wave-1c S239); HIGH; open (held with Wave-1c pieces 2+3)`
 Wave-1c's injected-chunk boot is gated on a single module-scope boolean `_scrml_chunk_loading` (`runtime-template.js`), set before each `appendChild` and cleared in a PER-SCRIPT `settle()` with no check that the settling load owns the flag. With two overlapping cross-chunk navigations (an impatient double-click on two nav links), `async=false` guarantees chunkA executes and fires `load` BEFORE chunkB executes — so chunkA's `settle()` clears the flag out from under chunkB, which then takes the `else` branch and registers `_scrml_boot` on a `DOMContentLoaded` that already fired and never fires again. chunkB never boots, never registers its rehydrator, and nav2's `onDone` STILL fires → the outlet swaps to correct SSR markup that is **completely unwired** (inert handlers, unbound interpolations), with no diagnostic and no hard-nav fallback. **PERMANENT** — the injected `<script>` stays connected, so the already-loaded set counts it and the chunk is never re-injected. **PA-REPRODUCED (S276)** driving two overlapping navs through the real loader: `chunkA flagAtExec=true booted=true` / `chunkB flagAtExec=false booted=FALSE`, `onDone fired for ["nav2"]`. Found independently by TWO adversarial lenses. Fix shape: a depth COUNTER (increment before append, decrement in settle, chunk tests `> 0`), or save/restore around each injection, or have `settle()` clear only when it owns the flag. Invisible to the browser suite: it never has two navs in flight, and its `appendChild` override returns nodes WITHOUT connecting them, so every chunk re-boots on every nav. 
 **S290 RE-VERIFIED — NOT LIVE ON `main`.** `_scrml_chunk_loading` exists in **0 files** under `compiler/src` on `main` and in **3** in the retained Wave-1c worktree. The flag this gap describes is unlanded branch code, so there is no product defect to fix — it is a **work item for the Wave-1c arc**, to be resolved before that branch lands, not an open HIGH against the compiler. Severity left as filed pending the arc's own re-scope; do NOT treat it as live breakage.
-<!-- @gap id=g-nav-chunk-loading-flag-race sev=HIGH status=open -->
+**S292 RESOLVED — PR #215 (`20ebbf0c`).** Boolean -> DEPTH COUNTER (increment before append, decrement in settle, one decrement per injection). REPRODUCED first under real classic-script `async=false` ordering via `node:vm` (chunkA settle cleared the flag, chunkB read false and never booted); the browser suite structurally cannot see it ([[g-nav-browser-harness-fidelity]], still open). No codegen change — both emitter reads are truthiness tests a non-negative count satisfies. Regression guard `compiler/tests/unit/navigate-cross-chunk-loader.test.js`, PROVEN TO BITE (fix reverted: 4 fail / 4 pass; restored: 8 pass).
+<!-- @gap id=g-nav-chunk-loading-flag-race sev=HIGH status=resolved -->
 
 ### g-nav-chunk-basename-collision-key — "already loaded" is keyed on bare basename, so same-named chunks in different directories collide and a needed chunk is silently skipped — `NEW S276 (Wave-1c S239); HIGH; open (held with Wave-1c pieces 2+3)`
 `_scrml_nav_missing_chunks` (and the pre-existing `_scrml_nav_same_chunk`) key the loaded-set on `src.split("/").pop()` — a bare basename. A route's own script is emitted as `<basename>.client.js` with no subdirectory component, so `pages/reports.scrml` and `pages/admin/reports.scrml` BOTH reference `reports.client.js` while resolving to two DISTINCT files. Live on `/admin/reports`, a soft-nav to `/reports` computes `missing = []` and swaps immediately → the route renders hydrated only by the OTHER route's wiring. **PA-REPRODUCED (S276)** on a real compiled fixture: `MISSING = []` where `/reports.client.js` was required. Content hashing does NOT disambiguate — per §47.9.8 it is build-path only, so `scrml compile` / `scrml dev` (the path developers use) keep the un-hashed suffix. The basename key PRE-DATES Wave-1c (`_scrml_nav_same_chunk` used it, where a collision produced a frozen same-chunk swap), but Wave-1c routes the whole cross-chunk feature through it and removes the hard-nav escape hatch that previously bounded the damage. Fix shape: key on the resolved ABSOLUTE url, which the loader already computes. 
 **S290 RE-VERIFIED — NOT LIVE ON `main`.** `_scrml_nav_missing_chunks` is **0 files** on `main` (1 in the Wave-1c worktree). The one symbol that IS on `main`, `_scrml_nav_same_chunk`, is not the buggy loader — it is the deliberate SAFETY GUARD that makes a cross-route navigation hard-navigate, carrying the in-source comment *"Cross-route chunk-loading is Wave-1c; until then, cross-route hard-navigates."* It compares which chunks are present and bails to a full navigation; there is no basename-keyed loaded-set on `main` to collide. Same disposition as the flag-race gap: a Wave-1c arc item, not live breakage.
-<!-- @gap id=g-nav-chunk-basename-collision-key sev=HIGH status=open -->
+**S292 RESOLVED — PR #215 (`20ebbf0c`).** Keyed on the RESOLVED ABSOLUTE url on both sides (`_scrml_nav_client_chunks` takes a baseHref; `_scrml_nav_missing_chunks` keys have+seen on the absolute url it already computed). Confirmed against REAL compiler output, not hand-written srcs: a `pages/reports.scrml` + `pages/admin/reports.scrml` fixture emits `src="reports.client.js"` for BOTH routes — identical text, two distinct files. A content-hashed `scrml build` of the same fixture does NOT collide (different content -> different hash), confirming this gap's own claim that hashing is build-path only and the dev path is where it bites.
+<!-- @gap id=g-nav-chunk-basename-collision-key sev=HIGH status=resolved -->
 
 ### g-nav-browser-harness-fidelity — the cross-chunk browser harness cannot model classic-script semantics, so it passes on code that fails in a real browser — `NEW S276 (Wave-1c S239); MED (test-infrastructure); open`
 `compiler/tests/browser/browser-navigate-cross-chunk.test.js` diverges from real classic-script execution in two structural ways, and each hides a confirmed HIGH defect. **(1)** Route chunks run through direct `eval` inside a loader closure, so their top-level lexicals land in a fresh per-eval declarative environment that is discarded — cross-chunk redeclaration (`[[g-nav-chunk-lexical-collision]]`) is impossible to observe. **(2)** The harness's `head.appendChild` override returns the node WITHOUT connecting it (to dodge happy-dom's disabled-loader throw), so `document.querySelectorAll("script[src]")` never sees an injected chunk: the already-loaded set never grows, every chunk is re-injected and re-booted on every navigation, and the flag is always freshly true at eval — hiding `[[g-nav-chunk-loading-flag-race]]` AND the entire no-re-injection-on-revisit path. The suite has been exercising a multi-boot state that CANNOT occur in production, so a genuine double-boot regression would also pass. Fix shape: execute chunks under real classic-script semantics (`vm.runInContext` against one shared context works today — used for the S276 reproduction), or connect a script-element shim the runtime's loaded-set query can see. Also uncovered: `_SCRML_NAV_CHUNK_TIMEOUT_MS` has ZERO coverage anywhere, and the chunk-load-FAILURE path is never pinned end-to-end (the conformance test calls `_scrml_nav_chunk_failed` directly, which never proves `s.onerror`/the timer are wired to it). <!-- @gap id=g-nav-browser-harness-fidelity sev=MED status=open -->
