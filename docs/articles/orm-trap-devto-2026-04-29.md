@@ -89,8 +89,8 @@ What the compiler did:
 1. Parsed the `<schema>` block (§39) and held the column list for `users` and `posts` in memory.
 2. Parsed the `<db>` block (§52) and resolved the driver from the connection string (§44).
 3. Parsed the `?{}` SQL template (§8). The `${userId}` interpolation compiled to a bound parameter, not string concatenation. There is no `sql.raw()` in scrml.
-4. Validated the SQL template syntactically against the database. A malformed template is E-SQL-002 at compile time, not a runtime exception.
-5. Computed the migration diff between `<schema>` and the live database. `scrml migrate` applies it. The developer never writes `ALTER TABLE` by hand.
+4. Held the `?{}` body as a fixed template. It cannot be assembled at runtime — that is E-SQL-003, refused at compile time. The SQL's own syntax is checked by Bun.SQL when the query runs; scrml does not carry a second SQL parser.
+5. Computed the migration diff between `<schema>` and the live database. `scrml db-migrate` applies it. The developer never writes `ALTER TABLE` by hand.
 
 There is no `prisma generate` step. There is no generated client. There is no separate query DSL to learn. The query is SQL. The compiler reads SQL. The schema is in the same file the compiler is already parsing.
 
@@ -110,15 +110,13 @@ The N+1 batching story (the intro article walks the numbers) is a separate piece
 
 ## What gets refused at compile time
 
-Six refusals worth naming, each a real diagnostic with an E-code:
+Five refusals worth naming, each a real diagnostic with an E-code:
 
 **E-PA-001 / E-PA-006.** `<db src="./missing.db">` where the file does not exist, or the `src=` attribute is missing entirely. The build fails before any query runs.
 
 **E-PA-004.** `<db tables="usrs">` where the table is misspelled or does not exist. The build prints the actual table list.
 
 **E-PA-007.** `protect="passwrd"` against a table whose actual protected column is `password_hash`. Compile error with a Levenshtein-ranked "did you mean `password_hash`?" quick-fix from the LSP.
-
-**E-SQL-002.** A SQL template that is syntactically invalid. The compiler validates the template at compile time, before the query ever ships.
 
 **E-SQL-003.** Trying to construct the SQL string at runtime and pass it to `?{}`. The content between `?{`` and ``}` is a fixed template, not a runtime expression. The compiler refuses.
 
@@ -141,11 +139,15 @@ This is not "ORMs are wrong." Honest list of what they earn:
 
 **Cross-database portability.** Drizzle and Kysely both target multiple engines. If the same TypeScript codebase has to ship against Postgres in production and SQLite in tests, the DSL abstracts the dialect differences. scrml's `?{}` adapts driver based on `<program db="...">`, so Bun.SQL handles SQLite, Postgres, and MySQL. MongoDB is explicitly out of `?{}` (use `^{}` meta context). So the portability story is real but bounded by Bun.SQL's coverage.
 
-**Migrations exist.** scrml has them. They are computed by diffing `<schema>` against the live database, but they exist as their own artifact and `scrml migrate` is a separate command. The schema-first ORMs got this part right. The difference is who owns the source-of-truth declaration.
+**Migrations exist.** scrml has them. They are computed by diffing `<schema>` against the live database, but they exist as their own artifact and `scrml db-migrate` is a separate command. The schema-first ORMs got this part right. The difference is who owns the source-of-truth declaration.
 
-**Transactions are deferred.** A native scrml syntax for transactions has not shipped; this is a real gap and worth naming honestly.
+**SQL syntax is checked by the database, not by scrml.** The compiler owns everything around the query — the schema, the driver, the bound parameters, the migration diff — but it does not carry its own SQL parser, so a malformed `SELECT` surfaces when Bun.SQL prepares it, not at compile time. A column typo inside `?{}` is likewise a runtime question today. The schema is sitting in compiler memory (that is what powers the LSP completion above), so closing this is a question of scope rather than of missing information — but it is open, and the honest statement is that scrml has not closed it yet.
+
+**Explicit transaction blocks are deferred.** Handler-scoped atomicity *does* ship: the SQL writes an `!{}` error-handler arm performs are wrapped in an implicit transaction and roll back if the arm fails (§19.10.5) — no `BEGIN`/`COMMIT` ceremony. What has not shipped is an explicit, author-controlled `<transaction>` block spanning whatever scope you choose (§44.6). That one is a real gap and worth naming honestly.
 
 > **Correction, May 2026:** this section previously suggested a `^{}` meta block calling Bun.SQL `sql.begin()` directly as a workaround. As of Approach C, `^{}` is no longer a general JavaScript escape hatch — that workaround is no longer valid.
+>
+> **Correction, July 2026:** this article previously listed **E-SQL-002** among the compile-time refusals, claiming the compiler validated SQL template syntax before the query shipped. It does not — E-SQL-002 is reserved and has no fire site; scrml carries no compile-time SQL parser, and Bun.SQL validates at runtime. The claim has been removed and the limitation is now stated plainly above. Two further currency fixes in the same pass: the DB migration verb is `scrml db-migrate` (`scrml migrate` is the unrelated source codemod), and handler-scoped implicit transactions have shipped since this was written.
 
 **Specialized query patterns.** Window functions, recursive CTEs, JSON operators, full-text search. SQL has all of these. So does `?{}`, because `?{}` is SQL. ORMs vary in how cleanly they expose them. The point is not that scrml is more powerful than every ORM at every query shape. The point is that the SQL string is the language the compiler reads, so the language is as expressive as SQL itself.
 
@@ -169,7 +171,7 @@ That is the design. A little short of perfect is still pretty awesome.
 - [Null was a billion-dollar mistake. Falsy was the second.](https://dev.to/bryan_maclee/null-was-a-billion-dollar-mistake-falsy-was-the-second-3o61). On `not`, presence as a type-system question, and why scrml refuses to inherit JavaScript's truthiness rules.
 - [Retraction — scrml's Living Compiler](./living-compiler-retraction-devto-2026-05-21.md). The "scrml's Living Compiler" article has been retracted; scrml chose a sealed, deterministic build-story model instead.
 - Companion drafts in this batch: [Components are states](./components-are-states-devto-2026-04-29.md), [Mutability contracts](./mutability-contracts-devto-2026-04-29.md), [CSS without a build step](./css-without-build-step-devto-2026-04-29.md), [Realtime and workers as syntax](./realtime-and-workers-as-syntax-devto-2026-04-29.md).
-- **scrml on GitHub:** [github.com/bryanmaclee/scrmlTS](https://github.com/bryanmaclee/scrmlTS). The working compiler, examples, spec, benchmarks.
+- **scrml on GitHub:** [github.com/bryanmaclee/scrml](https://github.com/bryanmaclee/scrml). The working compiler, examples, spec, benchmarks.
 
 <!--
 
@@ -177,16 +179,16 @@ That is the design. A little short of perfect is still pretty awesome.
 
 This block is an HTML comment so it does not render on dev.to.
 
-- Bio: `/home/bryan/scrmlMaster/scrml-support/voice/user-bio.md` (v1, signed off 2026-04-27; project memory marks BAKED 2026-04-28).
-- Private draft / verification log: `/home/bryan/scrmlMaster/scrml-support/voice/articles/orm-trap-draft-2026-04-29.md`.
+- Bio: `/home/bryan-maclee/scrmlMaster/scrml-support/voice/user-bio.md` (v1, signed off 2026-04-27; project memory marks BAKED 2026-04-28).
+- Private draft / verification log: `/home/bryan-maclee/scrmlMaster/scrml-support/voice/articles/orm-trap-draft-2026-04-29.md`.
 - Companion published: `why-programming-for-the-browser-needs-a-different-kind-of-language-devto-2026-04-27.md` (overview).
 - Companion published: `server-boundary-disappears-devto-2026-04-28.md` (sister piece on the wire seam).
 - Companion published: `lsp-and-giti-advantages-devto-2026-04-28.md` (E-PA-007 quick-fix prior framing).
 - Companion published: `npm-myth-devto-2026-04-28.md` (ORM-replaced-by-language line item).
-- Agent: `/home/bryan/.claude/agents/scrml-voice-author.md` (article mode, gate cleared per project memory bio-baked 2026-04-28).
-- SPEC: `/home/bryan/scrmlMaster/scrmlTS/compiler/SPEC.md` (§8, §39, §44, §52 cited; error codes E-PA-001/004/006/007, E-SQL-002/003/004/006).
-- LSP source: `/home/bryan/scrmlMaster/scrmlTS/lsp/l4.js` (Levenshtein quick-fix for E-PA-007, lines 21-30).
-- PA source: `/home/bryan/scrmlMaster/scrmlTS/compiler/src/protect-analyzer.ts` (`fullSchema` field at line 81; constructor lines 795-800).
+- Agent: `/home/bryan-maclee/.claude/agents/scrml-voice-author.md` (article mode, gate cleared per project memory bio-baked 2026-04-28).
+- SPEC: `/home/bryan-maclee/scrmlMaster/scrml/compiler/SPEC.md` (§8, §39, §44, §52 cited; error codes E-PA-001/004/006/007, E-SQL-002/003/004/006).
+- LSP source: `/home/bryan-maclee/scrmlMaster/scrml/lsp/l4.js` (Levenshtein quick-fix for E-PA-007, lines 21-30).
+- PA source: `/home/bryan-maclee/scrmlMaster/scrml/compiler/src/protect-analyzer.ts` (`fullSchema` field at line 81; constructor lines 795-800).
 
 **Spec validation summary:**
 
@@ -195,7 +197,7 @@ This block is an HTML comment so it does not render on dev.to.
 - ✅ `<schema>` block syntax with worked example (§39.1 line 13620; §39.2 lines 13640-13670).
 - ✅ Schema introspection field path verified against compiler source (`protect-analyzer.ts:81, 795-800`).
 - ✅ E-PA-007 LSP L4 Levenshtein quick-fix shipped (`lsp/l4.js:21-30`).
-- ✅ E-SQL-002/003/004/006 codes accurate against §8 error table (lines 4722-4728) and §44.7 (lines 14685-14688).
+- ⚠️ **Superseded 2026-07-27 (S292).** This line originally read "✅ E-SQL-002/003/004/006 codes accurate against §8 error table and §44.7." The audit checked the codes against the SPEC **catalog** and not against the **implementation**, which is the whole failure mode: E-SQL-002 is catalogued and normatively required by §8.1.1 but has **zero fire sites**, and §34 itself annotates it "Reserved / spec-ahead — no fire site." A code existing in §34 is not evidence it fires. Re-verified by execution at S292: E-SQL-003 and E-SQL-004 fire; E-SQL-002 does not; E-SQL-006 emits a runtime throw rather than a compile diagnostic (filed). Article prose corrected in the same pass.
 - ✅ §44 Bun.SQL migration normative (`.prepare()` removed → E-SQL-006; `.get()`/`.all()`/`.run()` semantics).
 - ✅ Bound-parameter mandatory, no `sql.raw()` (§44.5 line 14675; §8.1 line 4380).
 - ⚠️ E-PA-007 is **specifically** for `protect=` field-name validation, NOT general SELECT-clause column-name typos. Article wording soft-framed: column-completion is an LSP feature, E-PA-007 is `protect=` validation, no claim that arbitrary SELECT-column typos are caught at compile time. Spec does not currently normatively guarantee schema-driven SELECT-column validation; that's plausible-future-work.
