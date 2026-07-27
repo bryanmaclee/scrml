@@ -937,6 +937,46 @@ export function diffSchema(desired, actual, options = {}) {
         sql.push(...generateDbAuthoritativeDDL(table));
       }
     }
+
+    // §14.8.11 S292 — grant the bounded role on tables `?{}` TOUCHES but that are NOT
+    // db-authoritative. [[g-dbauth-migrate-no-grants-for-unmarked-identity-table]]:
+    // the grant above is per-TABLE, but the `SET LOCAL ROLE scrml_app` drop is emitted
+    // per-QUERY in any request scope — so once ANY table is db-authoritative, an unmarked
+    // table read at request time runs as `scrml_app` with zero grants and fails
+    // `permission denied`. §14.8.10's corollary PRESCRIBES leaving the identity table
+    // unmarked (you cannot tenant-scope the table that tells you the tenant), so the
+    // documented shape was the broken one. bryan RULED direction (b) at S292: grant what
+    // the queries actually touch.
+    //
+    // Gated on ≥1 db-authoritative table, because that is exactly when the role exists and
+    // when the role-drop is emitted. With none, there is no `scrml_app` to grant to and
+    // these statements would fail.
+    //
+    // NO RLS, NO POLICY, NO column-scoped UPDATE narrowing here — those are the
+    // db-authoritative tier's guarantees and an unmarked table has deliberately not opted
+    // into them. This grants exactly the access the app already demonstrably needs.
+    const anyDbAuth = desired.tables.some((t) => t.dbAuthoritative);
+    const queried = options.queriedTables;
+    const queriedPrivs = options.queriedPrivileges;
+    if (anyDbAuth && queried && queried.size > 0) {
+      for (const table of desired.tables) {
+        if (table.dbAuthoritative) continue;
+        const key = String(table.name).toLowerCase();
+        if (!queried.has(key)) continue;
+        // Grant ONLY the privileges the queries actually exercise. Blanket CRUD here would
+        // hand the bounded role DELETE on the identity table, which login merely SELECTs —
+        // strictly more permissive than the db-authoritative path beside it. Absent
+        // privilege info, fall back to SELECT (the least privilege that can make a read
+        // work) rather than to CRUD.
+        const privs = queriedPrivs?.get?.(key);
+        const list = privs && privs.size > 0 ? [...privs].sort().join(", ") : "SELECT";
+        const t = quoteIdent(table.name);
+        sql.push(
+          `-- §14.8.11: ${table.name} is not db-authoritative but is read under SET LOCAL ROLE ${DBAUTH_ROLE}.`,
+          `GRANT ${list} ON ${t} TO ${DBAUTH_ROLE};`,
+        );
+      }
+    }
     // §14.8.11.2 S4 — the SECURITY-DEFINER mutation choke. Emitted AFTER the
     // db-authoritative table DDL (the tables + tenant policy + bounded role must
     // exist first). The `scrml_has_cap` read helper is emitted ONCE when any `fn`

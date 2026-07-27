@@ -43,6 +43,7 @@ import { resolveDbDriver } from "../codegen/db-driver.ts";
 import { splitBlocks } from "../block-splitter.js";
 import { buildAST } from "../ast-builder.js";
 import { extractDesiredSchema } from "../codegen/db-authoritative.ts";
+import { tableRefsInSource } from "../sql-table-refs.js";
 import {
   diffSchema,
   readActualSchema,
@@ -183,6 +184,15 @@ function parseProjectSchema(input) {
   const seenFnNames = new Set();
   const parseErrors = [];
   const schemaWarnings = [];
+  // §14.8.11 S292 — the tables `?{}` actually TOUCHES, unioned across the project. The
+  // bounded-role grant is emitted per db-authoritative table, but the `SET LOCAL ROLE`
+  // drop is per-query in any request scope, so an UNMARKED table read at request time
+  // needs a grant too ([[g-dbauth-migrate-no-grants-for-unmarked-identity-table]]).
+  // `undetermined` carries bodies whose table set the scanner could not establish — it is
+  // reported, never silently treated as "touches nothing".
+  const queriedTables = new Set();
+  const queriedPrivileges = new Map();
+  const undeterminedSql = [];
   for (const f of files) {
     let source;
     try {
@@ -191,6 +201,13 @@ function parseProjectSchema(input) {
       parseErrors.push(`${f}: ${e.message}`);
       continue;
     }
+    const refs = tableRefsInSource(source);
+    for (const t of refs.tables) queriedTables.add(t);
+    for (const [t, privs] of refs.privileges ?? []) {
+      if (!queriedPrivileges.has(t)) queriedPrivileges.set(t, new Set());
+      for (const pv of privs) queriedPrivileges.get(t).add(pv);
+    }
+    for (const u of refs.undetermined) undeterminedSql.push(`${f}: ${u}`);
     let ast;
     try {
       ast = buildAST(splitBlocks(f, source)).ast;
@@ -215,7 +232,7 @@ function parseProjectSchema(input) {
     }
     for (const w of extracted.warnings ?? []) schemaWarnings.push(w);
   }
-  return { tables, fns, parseErrors, schemaWarnings };
+  return { tables, fns, parseErrors, schemaWarnings, queriedTables, queriedPrivileges, undeterminedSql };
 }
 
 /**
@@ -331,7 +348,7 @@ async function readActualForApply(handle) {
   };
 }
 
-async function runPgApply({ connectionString, desired, dryRun, allowDestructive }) {
+async function runPgApply({ connectionString, desired, dryRun, allowDestructive, queriedTables, queriedPrivileges }) {
   let sql;
   try {
     sql = new SQL(connectionString);
@@ -348,6 +365,8 @@ async function runPgApply({ connectionString, desired, dryRun, allowDestructive 
       const { sql: plan, warnings } = diffSchema(desired, actual, {
         driver: "postgres",
         allowDestructive,
+        queriedTables,
+        queriedPrivileges,
       });
       for (const w of warnings) console.error(c.yellow(w));
       printPlan(plan, actual.tables.length, warnings);
@@ -375,6 +394,8 @@ async function runPgApply({ connectionString, desired, dryRun, allowDestructive 
       const { sql: plan, warnings } = diffSchema(desired, actual, {
         driver: "postgres",
         allowDestructive,
+        queriedTables,
+        queriedPrivileges,
       });
       printPlan(plan, actual.tables.length, warnings);
       // (5) apply each statement in the txn + record authorship. If any statement
@@ -530,6 +551,23 @@ export async function runDbMigrate(args) {
   }
 
   const desired = { tables: parsed.tables, fns: parsed.fns ?? [] };
+  const queriedTables = parsed.queriedTables ?? new Set();
+  const queriedPrivileges = parsed.queriedPrivileges ?? new Map();
+
+  // §14.8.11 S292 — a `?{}` whose table set the scanner could NOT establish (a CTE, a
+  // subquery in FROM/JOIN, a dynamic identifier). Reported, never silently skipped: an
+  // unreported miss re-creates [[g-dbauth-migrate-no-grants-for-unmarked-identity-table]]
+  // on a different table, and it fails closed at runtime as an opaque `permission denied`
+  // — the failure mode that cost the reporting adopter three sessions. scrml carries no
+  // compile-time SQL parser, so this is the honest boundary of a bounded scanner.
+  for (const u of parsed.undeterminedSql ?? []) {
+    console.error(
+      c.yellow("warning: ") +
+        "could not determine the table(s) this query touches, so no grant was derived " +
+        "for it. If it reads a table that is NOT db-authoritative, that read will fail " +
+        `with "permission denied" at request time — grant it manually. (${u})`,
+    );
+  }
   if (desired.tables.length === 0 && desired.fns.length === 0) {
     console.error(c.dim("no <schema> tables found — nothing to apply."));
     return;
@@ -589,6 +627,8 @@ export async function runDbMigrate(args) {
       desired,
       dryRun,
       allowDestructive,
+      queriedTables,
+      queriedPrivileges,
     });
   } else {
     runSqliteApply({
