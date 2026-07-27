@@ -1,6 +1,6 @@
 # migrations.map.md
 # project: scrml
-# updated: 2026-07-26T07:00:00Z  commit: f8a138e9
+# updated: 2026-07-27T10:40:00Z  commit: c700c435
 
 **NEW map this pass.** The conditional check (a real DB-migration-apply tool now exists) fires for
 the first time — `scrml migrate` (pre-existing) is a scrml-SOURCE syntax codemod, NOT a DB
@@ -109,17 +109,31 @@ scrml-managed security objects are roles/policies (never tables), so the table-D
 whole fence at the table grain; `DROP POLICY IF EXISTS scrml_tenant_iso` re-creates ONLY the
 scrml-managed policy name, never touching a hand-authored one on the same table.
 
-## Known open gaps (`docs/known-gaps.md`, all S287)
-`g-db-migrate-check-constraint-oneof-pattern` (MED, open) — a `<schema>` column carrying
-`oneOf([...])`/`pattern(/…/)` trips the differ's OWN diff-parser (`parseColumns`/
-`parseSharedCorePredicates` in `schema-differ.js`) three ways: (1) `oneOf([...])` emits an UNQUOTED
-bareword CHECK (should be a string literal); (2) the table false-fails `E-DBAUTH-NO-TENANT-COLUMN`
-even though it DOES declare `tenant_id` (the main compiler's own parse is fine — only the differ's
-line-based diff-parser chokes on the `[...]`/`/.../` payload); (3, minor) a `pattern(/…{n}…/)`
-quantifier brace can fool the brace/marker matcher and spuriously fire
-`W-DBAUTH-MARKER-NEARMISS`. **This is the natural next `scrml db-migrate` fix** — impact: turnkey-
-from-source works for simple schemas but not CHECK-carrying ones (most real schemas). Also see
-error.map.md/schema.map.md for the exact fire sites.
+## Known open gaps (`docs/known-gaps.md`)
+`g-db-migrate-check-constraint-oneof-pattern` is **RESOLVED (S288)** — the row that previously called
+it "the natural next `scrml db-migrate` fix" is retired. Of its three sub-bugs: (1) the `oneOf`
+unquoted CHECK was CONFIRMED and fixed (#191); (2) the false `E-DBAUTH-NO-TENANT-COLUMN` did NOT
+reproduce across 9 shapes on either baseline; (3) the `pattern(/…{n}…/)` brace bug had ALREADY been
+fixed by P2's brace-depth `parseSchemaBlock` rewrite and is now regression-locked.
+
+Two follow-ons landed the same session: **`g-db-migrate-default-emission`** (RESOLVED — `default(now())`
+truncated the DDL via a first-`)` capture; `default("US")` emitted a SQL identifier, the same
+literal-as-identifier class one function away from #191) and **`E-SCHEMA-010`** (NEW — a bareword
+`oneOf([user, admin])` item is rejected at compile; RULED S288, reject-don't-widen).
+
+Still open here: `g-schema-predicate-arg-parse-edges` items 2-3 (`oneOf([])` emits `CHECK (col IN ())`,
+a SQL syntax error; `escapeSqlString` does not escape `\` for a future MySQL apply path — unreachable
+today, `db-migrate` hard-refuses MySQL).
+
+**db-migrate DX (S288):** an apply failure now echoes the FAILING statement and its index
+(`failing statement: (2 of 8)` + the SQL) from both apply loops — the plan prints before the apply, so
+an error's position in the output previously identified nothing.
+
+⚠️ **This map got a TARGETED currency correction only.** A dispatched `project-mapper` pass produced
+no output, so the rest of this file is still stamped against pre-S288 source. `schema-differ.js` gained
+`findNonLiteralSetItems` (exported), `lowerArrayLiteralToSqlItems`, `lowerDefaultToSql`,
+`isEffectivelyImmutable`, `splitTopLevelItems` and a two-pass `findMatchingParen`; `db-migrate.js`
+gained `printFailedStatement`. **A full refresh is OWED** — see the S288 hand-off.
 
 ## Tags
 #scrml #map #migrations #db-migrate #dbauth #db-authoritative #schema-differ #privilege-separation #ledger #never-clobber-fence #rls #secdef #postgres

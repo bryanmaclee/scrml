@@ -2,6 +2,78 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S288 (2026-07-26/27) — bryan · ASUS-Vivobook — the RediLedger adopter-bug arc: 5 PRs, two compiler-wide fix-classes, two rulings
+
+**`main` `c700c435`** · coherence 0/0 · no open PRs · no open adopter issues · full gate 21408 pass / 0 fail.
+
+A session driven end-to-end by one adopter's bug reports. Every fix was reproduced-or-refuted on the
+current baseline BEFORE any change, per bryan's opening instruction, and every claim below was
+verified by EXECUTION (real Postgres 16, real emitted handlers) rather than by reading emitted text.
+
+### Landed
+
+- **#191 `103051ad` — `oneOf`/`notIn` items lower to SQL literals.** scrml's canonical string quote
+  `"` is SQL's IDENTIFIER quote, so the idiomatic `oneOf(["income","expense"])` emitted
+  `CHECK (… IN ("income","expense"))` and `db-migrate` died with `column "income" does not exist`.
+  **The SPEC sentence was the defect** — §39.5.8's "the literal list is verbatim" contradicted its own
+  bare-variant-enum row and §41.15.6; corrected in the same landing. Corpus measured: every
+  schema-locus `oneOf` site was broken and ZERO used the form that worked — our own reference doc
+  taught the broken one.
+- **#193 `d5bccc0f` — the db-authoritative tier was non-functional end-to-end for a `<schema>`-only
+  app** (HIGH). `_scrml_currentUser` was interpolated with zero definitions (ReferenceError on every
+  call), and a second layer under it meant the resolver wasn't emitted either; `buildTenantContext`
+  read only the `<db>` registry, contradicting §14.8.10 verbatim.
+- **#194 `9c4632fa`** — filed the db-authoritative `users`-table docs gap off an adopter signal.
+- **#196 `1a488c46` — the `default()` sibling path + `E-SCHEMA-010` + failing-statement echo.**
+- **#199 `c700c435` — auto-immutable PRIMARY KEY + `tenant_id`** (ruled).
+
+### Two rulings
+
+- **`E-SCHEMA-010`** — a bareword `oneOf([user, admin])` is REJECTED at compile rather than widened
+  into a string. Reversible direction; migration MEASURED at zero by compile sweep.
+- **Auto-immutable PK + `tenant_id`** on db-authoritative tables. A cross-tenant re-point already
+  failed safe on the RLS `WITH CHECK`, but a WITHIN-tenant primary-key UPDATE succeeded. Reasoning is
+  §14.8.10's own — a forgettable declaration guarding a security invariant is the wrong shape. This
+  **retires a normative guarantee** ("zero immutable columns → byte-identical to M1"), which was
+  precisely the property leaving the PK grantable; SPEC §14.8.11.2 records the supersession.
+
+### What the session was actually about
+
+Three findings outlast the individual fixes.
+
+1. **A gate mismatch is more dangerous than a missing feature.** §14.8.11 gates on the `<schema>`
+   `db-authoritative` marker; §14.8.10's projection gated on the `<db>` registry. Each half was
+   internally consistent, so the tier engaged and faithfully pinned `scrml.tenant = NULL`. Nothing
+   errored. And `_scrml_active_tenant`'s `typeof … === "function"` guard converted "resolver missing"
+   into "tenant null" with no diagnostic — a fail-closed guard masking a dead composition.
+2. **A fix verified thoroughly inside too small a surface is still incomplete.** #191 shipped with 11
+   tests, an adversarial edge-case matrix and both baselines — and missed `default()`, one function
+   away, in the identical class. The adopter caught it. *Enumerating shapes inside a function is not
+   the same as enumerating the functions a class of defect can inhabit.*
+3. **The DDL negative test proves the floor exists; only the request path proves the app is standing
+   on it.** The tier's own live-PG tests hand-execute `set_config` inside a transaction and never
+   issue a request, which is why every one stayed green while the feature was dead.
+
+### Own misses, recorded
+
+- The **FACTS gate caught a stale regen** — cloud `gate` went red on exactly the S284 rule quoted
+  earlier in the same session. The gate did its job.
+- A **bare `git commit` in a sibling repo** swept three of that repo's pre-staged renames into a
+  scrml commit — the shared-index hazard the pathspec rule exists to prevent. Local-only and pure
+  renames; repaired via `reset --soft` + explicit pathspec, their index restored byte-for-byte.
+
+### Concurrency
+
+**Four rebases** — Peter landed #192/#197/#198/#200-#201 on his adopter lane throughout. Every
+conflict was confined to GENERATED files, resolved by regenerating rather than hand-merging, with a
+full gate re-run on each rebased tip proving no write-skew between lanes.
+
+### Open
+
+`g-dbauth-no-request-path-test` (the adopter offered their harness) · `g-schema-predicate-arg-parse-edges`
+items 2-3 · RediLedger's turnkey `db-migrate` run against their real 11-table schema is PENDING and is
+the shape our unit tests cannot stand in for.
+
 ## S289 — 2026-07-27 (Peter · AdiPDesk) — adopter #195 W-DEAD-FUNCTION false-positives fixed (closure-body calls + first-class-value refs)
 
 Adopter issue **#195** (pjoliver11 — found in a real-app dead-code sweep): `W-DEAD-FUNCTION` (§12.2 Trigger 6) falsely flagged live functions whose only use is (1) a call inside a nested closure body (arrow / `function`-expression) or (2) a first-class value reference (`setTimeout(fn)`, `el.onscroll = fn`, `[fn]`, `{h: fn}`, ternary/return). Warning-only (the tree-shaker already retained them) but "delete all dead functions" would have removed 5 live functions from the app. Fixed + verified + merged in one session.

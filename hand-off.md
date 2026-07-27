@@ -1,4 +1,155 @@
 <!-- ============================================================= -->
+<!-- S288 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-27.       -->
+<!-- Peter's S289/S288 addenda + prior wraps UNCHANGED below.      -->
+<!-- (Session numbers collide across the two machines — disambig    -->
+<!--  by NAME, not number: this is S288-bryan.)                     -->
+<!-- ============================================================= -->
+
+# scrml — Session 288 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-07-26/27. `/boot` Profile A. `main` at **`c700c435`**, coherence 0/0 both repos, tree
+clean, **no open PRs, no open adopter issues**, gate green. Full suite **21408 pass / 0 fail**.
+Mechanical stream: `handOffs/delta-log.md [795]-[805]`. Changelog S288. This carries the irreducible.
+
+## 🎯 THE HEADLINE — one adopter's reports drove the whole session; two fixes were compiler-WIDE classes
+
+Five PRs, all RediLedger-originated. Every one reproduced-or-refuted on the current baseline BEFORE
+any change (bryan's opening instruction), every claim verified by EXECUTION rather than by reading
+emitted text.
+
+| PR | What |
+|---|---|
+| #191 `103051ad` | `oneOf`/`notIn` → SQL literals; §39.5.8's "verbatim" note WAS the defect |
+| #193 `d5bccc0f` | the db-authoritative tier was **non-functional end-to-end** for a `<schema>`-only app |
+| #194 `9c4632fa` | the `users`-table docs gap |
+| #196 `1a488c46` | `default()` ×2 + `E-SCHEMA-010` + `db-migrate` failing-statement echo |
+| #199 `c700c435` | auto-immutable PK + `tenant_id` |
+
+## 🔴 THE NEXT PA'S FIRST MOVE — RediLedger's turnkey run is PENDING and is the real verdict
+
+They will run `scrml db-migrate` against their **REAL 11-table schema** (money-as-`text` +
+`pattern()`, ISO-date text, `oneOf` CHECKs, `references()` FKs, `immutable` columns, a composite
+`unique`, mixed marked/unmarked tables including the un-RLS'd `users` identity substrate, and a
+`void_transaction` SECDEF with a plpgsql body) now that #196 is on `main`.
+
+**Do not call `db-migrate` turnkey until that lands.** Turnkey apply has been claimed-then-retracted
+TWICE on their side, and that schema shape is one our unit tests demonstrably cannot stand in for —
+this session's `default()` bugs were found by their run, not by our 21k tests.
+
+## 🧭 THE THREE FINDINGS THAT OUTLAST THE FIXES (reasoning, not state)
+
+1. **A gate mismatch is more dangerous than a missing feature.** §14.8.11 gates on the `<schema>`
+   `db-authoritative` marker; §14.8.10's tenant projection gated on the `<db>` registry. Each half
+   was internally consistent, so the tier ENGAGED and faithfully pinned `scrml.tenant = NULL`, and
+   RLS matched nothing. Nothing errored anywhere. Compounding it, `_scrml_active_tenant` guards its
+   resolver call with `typeof _scrml_current_user === "function"` — **a fail-closed guard that
+   converted "resolver missing" into "tenant null" with no diagnostic at all.** When two features
+   gate on different signals for the same fact, verify the COMPOSITION, not each half.
+2. **A fix verified thoroughly inside too small a surface is still incomplete.** #191 shipped with 11
+   tests, an adversarial edge-case matrix and both baselines — and missed `default()`, one function
+   away, in the identical literal-as-identifier class. The adopter caught it and called it
+   correctly: *an incomplete fix.* **Enumerating shapes inside a function is not the same as
+   enumerating the functions a class of defect can inhabit.** The S239 blast-radius question names
+   this exactly; I asked it of the item list instead of the emitter.
+3. **The DDL negative test proves the floor exists; only the request path proves the app is standing
+   on it.** The tier's own live-PG tests open a transaction and HAND-EXECUTE `set_config` before
+   asserting — a faithful DDL+RLS test that passed the entire time the feature was dead. Tracked as
+   `g-dbauth-no-request-path-test`; RediLedger offered their harness, and per the S273 cloud-flake
+   lesson it belongs in the live-PG-gated LOCAL tier executing the shipped handler, not driving a socket.
+
+## ⚠️ OWN MISSES (both mine, both recorded rather than smoothed)
+
+- **The FACTS gate caught a stale regen.** I regenerated after a rebase, then edited `db-migrate.js`
+  without re-regenerating; cloud `gate` went red on exactly the S284 rule I had quoted earlier the
+  same session. Pre-regen before pushing ANY PR touching `compiler/src`.
+- **A bare `git commit` in RediLedger's repo** swept three of THEIR pre-staged renames into my
+  commit — the shared-index hazard the explicit-pathspec rule exists to prevent. Local-only, pure
+  renames, repaired via `reset --soft` + re-commit with `-- <pathspec>`; their index restored
+  byte-for-byte. **Always pathspec a sibling-repo commit.**
+
+## 🔵 OPEN FORK INHERITED FROM PETER — needs bryan (a SPEC ruling, not a bug fix)
+
+**`g-match-nofor-block-form-skips-exhaustiveness` (MED)** — routed to this lane by S288-peter while
+he fixed the adopter `<match>`/`<when>` bug (#192). A **real SPEC/impl divergence**:
+
+- **SPEC §18.0.1** lists `for=Type` as **REQUIRED** on block-form `<match>`.
+- **The impl supports `<match on=@cell>` WITHOUT `for=`**, inferring the type from the cell's declared
+  enum — and existing tests RELY on it (`e-dg-002-false-positive-class`,
+  `match-on-atdot-in-each-r28-bug-1`). Peter confirmed it load-bearing and correctly did not touch it.
+- **The hole:** `validateMatchBlock` reads `matchBlock.forType` verbatim; absent `for=` it is `""`, so
+  the variant set is empty and **`E-MATCH-NOT-EXHAUSTIVE` passes silently**. Empirically on
+  `235f47c2`: `<match on=@status>` over `Status = {Ok, Err}` with ONLY an `<Ok>` arm and no wildcard
+  **compiles with 0 errors** and the `.Err` case renders nothing. The explicit-`for=` form catches it.
+
+**Two coupled decisions, both bryan's:** (1) reconcile per Rule 4 — either SPEC blesses the inference
+form (drop "required") or the impl rejects no-`for=`; the current state is neither. (2) if inference
+stays legal, resolve the enum from the `on=` cell's declared type in `validateMatchBlock` (codegen
+already does this via arm tags; SYM does not) and run the existing check — the adjacent
+`subsetCellRegistry`/`cellStructTypes` machinery is already threaded, a cell→enumType map is what's
+missing.
+
+**PA read:** same shape as the S288 gate-mismatch lesson above — two layers disagreeing about where a
+fact lives, with the failure landing as SILENCE. It is a tier-1 freeze-surface item (a claimed
+exhaustiveness guarantee that does not hold on a legal form), so it wants the ruling before the next
+conformance pass, not after.
+
+*Also inbound, FYI only:* S289-peter co-located a 1-line SPEC §12.2 Trigger-6 clarification into the
+`W-DEAD-FUNCTION` fix (`73e85e64`, PR #200) — prose only, naming first-class value references and
+nested-closure uses as non-dead. Flagged because SPEC is this lane.
+
+
+## 🧷 CONCURRENT / HELD
+
+- **Peter was live ALL session** (S288-peter, S289-peter) — #192/#197/#198/#200/#201. **Four rebases.**
+  Every conflict was confined to GENERATED files (`FACTS.md`, gap-counts), resolved by REGENERATING
+  rather than hand-merging, with a full gate re-run on each rebased tip (21398→21408, 0 fail) proving
+  no write-skew across lanes. **Cadence note for the next PA: with two lanes landing this fast, a
+  long-running branch pays a rebase toll per landing — land smaller and sooner.**
+- **Retained worktrees (do NOT delete):** `worktree-agent-a2ed001a5de228134` [`feat/wave1c-nav`] —
+  Wave-1c, unblocked, unbuilt. Plus the pre-existing `s251` tree (not this session's) and the
+  persistent `scrml-spa-ss*` sPA trees.
+- **Cleaned this wrap:** `s288-prep2-79cd79ce` (the pre-P2 reproduction worktree; purpose served).
+
+## 📥 INBOX
+
+- **`2026-07-22-2230-from-S282-to-XPS`** — LEFT in `incoming/`. This machine-family's own OUTBOUND to
+  the XPS clone; the boot hook flags it every turn but it is not for this machine. Unchanged
+  disposition since S284.
+- RediLedger ×2 (the S4 session-principal report, the S5 ack) — both drained to `read/`, both replied
+  to; the reply is committed AND pushed on their `scrml-rewrite` (`d440deb`).
+
+## ✅ GATE / MAPS
+
+- Full suite **21408 pass / 0 fail**. `gate` green on every merge and at HEAD (`c700c435`). Generated
+  docs (`FACTS.md`, `state.ts` §0) `--check` PASS.
+- `tracking` fails on 3 known tests every run (serve-tool R26 flake + the two gitignored self-host
+  artifacts `bs.js`/`tab.js`) — verified directly on #191 and #193, inferred thereafter. Non-required.
+- ⚠️ **MAPS REFRESH IS OWED.** A `project-mapper` dispatch was fired at wrap and **produced no output
+  at all** (no file written after ~15 min; not a crash notification, just silence — treat as a
+  non-productive dispatch, and per the repeated-crash rule go PA-direct if it recurs). Rather than
+  land a stale map silently, `migrations.map.md` got a **targeted PA-direct currency correction**,
+  because it was actively WRONG: it named `g-db-migrate-check-constraint-oneof-pattern` as open and
+  "the natural next `db-migrate` fix" when this session resolved it. Its "Known open gaps" section and
+  stamp are now current; the REST of that file, and every other map, is still stamped against pre-S288
+  source.
+- **What a refresh must pick up** (all this session unless noted): `schema-differ.js` — NEW exported
+  `findNonLiteralSetItems` + `lowerArrayLiteralToSqlItems` / `lowerArrayItemToSqlLiteral` /
+  `splitTopLevelItems` / `lowerDefaultToSql` / `isEffectivelyImmutable` / `scanMatchingParen`, a
+  two-pass `findMatchingParen`, balanced `default()` capture, auto-immutable PK+`tenant_id` in the
+  GRANT reshape · `gauntlet-phase1-checks.js` — NEW `E-SCHEMA-010` fire site · `db-migrate.js` — NEW
+  `printFailedStatement` + per-statement attribution · `emit-server.ts` — NEW
+  `astSqlQueryUsesCurrentUser`, the `_anyFnCurrentUserQuery` gate term, the RI-route
+  `_scrml_currentUser` splice · `tenant-egress.ts` — `buildTenantContext` second arg · NEW test
+  `integration/schema-only-tenant-principal.test.js` · SPEC §39.5.8 / §34 / §14.8.11.2. **Peter's lane
+  too:** #192 `E-MATCH-INVALID-ARM`, #197 nested for-lift reconcile, #200 `W-DEAD-FUNCTION` +
+  SPEC §12.2 Trigger-6.
+
+## Tags
+#session-288-bryan #rediledger-arc #5-prs #oneof-sql-literals #currentuser-binding #schema-tenant-registry #default-emission #e-schema-010-ruled #auto-immutable-pk-tenant #gate-mismatch-lesson #incomplete-fix-lesson #request-path-test-debt #facts-gate-caught-me #sibling-repo-pathspec-miss #four-rebases-peter-concurrent
+
+---
+
+<!-- ============================================================= -->
 <!-- S289 WRAP (Peter/AdiPDesk, adopter lane) — prepended 2026-07-27. -->
 <!-- S288 wrap + all prior UNCHANGED below.                          -->
 <!-- ============================================================= -->
