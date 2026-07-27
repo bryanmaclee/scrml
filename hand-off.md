@@ -1,4 +1,153 @@
 <!-- ============================================================= -->
+<!-- S291 WRAP (bryan/XPS-8950) — prepended 2026-07-27.            -->
+<!-- ⚠ S290-bryan was LIVE on the ASUS while this was written.     -->
+<!--   His wrap will prepend ABOVE this one and rebase over it.    -->
+<!-- All prior wraps UNCHANGED below.                              -->
+<!-- ============================================================= -->
+
+# scrml — Session 291 (bryan · **bryan-XPS-8950**, the XPS clone) — WRAP
+
+**Date:** 2026-07-27. `/boot` Profile A (full read-set). `main` at **`0d95c364`**, coherence 0/0 on
+both repos, tree clean apart from the three deliberately-untouched inbox files. **No compiler source
+was touched this session.** Delta-log `[806]`-`[811]`. Changelog S291.
+
+**This was a boot + a discovery, not a build.** The discovery is the reason it is worth a wrap.
+
+## 🔴 THE HEADLINE — an inbox is PER-CLONE, and three messages have been invisible for two days
+
+`handOffs/incoming/` is a git-tracked directory, but a message dropped into it is an **untracked
+file until someone commits it.** scrml-site is colocated with THIS clone, so it writes here — and
+**S284 / S286 / S287 / S288 / S290 on the ASUS have never been able to see any of it.** Three
+messages were sitting unread:
+
+| message | needs | age at discovery |
+|---|---|---|
+| `2026-07-27-0300-…-sql-refusals-not-enforced` | **`reply`, `blocking: true`** | same day |
+| `2026-07-26-0400-…-three-unemittable-or-shadowed-error-codes` | `action` | ~1 day |
+| `2026-07-26-1130-…-npm-install-path-readiness` | `action` | ~1 day |
+
+This is the **S262 adopter-issue trap in a new shape.** S262's lesson was "a channel the contract
+does not name is a channel that does not exist to the PA." This one is worse, because the contract
+DOES name the channel and every boot dutifully reads it — the channel just **resolves to a different
+set of files depending on which machine booted.** Both sides behaved correctly and the message still
+sat. The ASUS PA reporting "inbox clean" was *true on its clone* and false about the project.
+
+The obvious structural fix (NOT taken this session — it is a ruling, not a chore): either the
+inbox is committed-on-arrival by whoever drops the message, or cross-clone messages route through
+`scrml-support` (which every machine pulls at boot), or boot gains a "sibling repos on this machine
+have written to us" probe. Route (b) is the one the contract already half-implies, since
+scrml-support is the storage hub and is direct-push.
+
+**Left UNTOUCHED by bryan's explicit instruction** (*"keep messages untouched for other machine"*) —
+NOT drained to `read/`, NOT replied to, NO gaps filed from them. They are still `??` in git status.
+The next machine to boot sees them exactly as they arrived. **scrml-site is BLOCKED and has not been
+acknowledged** — that is a known, accepted cost of the instruction, recorded here rather than
+smoothed over.
+
+## 🔬 THE `?{q}` CLAIM — REPRODUCED on current `main`, not taken on report
+
+Per the S288 reproduce-first discipline, before surfacing anything I compiled their exact case
+against `0d95c364`:
+
+```scrml
+function getUser(uid) {
+    const q = "SELECT username FROM users"
+    return ?{q}.all()
+}
+```
+
+→ **exit 0**, zero diagnostics, and `app.server.js` line 43 carries:
+
+```js
+return await _scrml_sql`q`;
+```
+
+The compiler emits the *identifier* as literal SQL text. The claim holds exactly as filed.
+
+**The part that needs the next PA's attention:** `E-SQL-003` was recorded as **LANDED at S264
+(PR #92, "§8.1.1 runtime-expr SQL body fires")** and again in the S264 master-list block. It does
+not fire on this shape. So either #92 covered a narrower shape than the changelog claims, or it
+regressed — **verify which before scoping any fix.** SPEC §8 says the compiler "refuses"; it does
+not. Reproducer lives at `scratchpad/sqlprobe/` (transient — recreate from the block above).
+
+Their other two findings in the same message (unverified by me): `E-SQL-002` never fires on invalid
+SQL syntax; dynamic identifiers (`?{\`SELECT … ${tbl}\`}`) compile clean and then fail **100% of the
+time** at runtime, with no expressible alternative and no `.raw()` escape hatch. They explicitly
+**ruled OUT injection** — they probed it, Bun.SQL binds every interpolation, and the normative
+"no opt-out" guarantee holds absolutely. This is correctness + diagnostics, not security.
+
+## 🔵 TWO RULINGS OWED (bryan's — both surfaced, neither given)
+
+1. **`?{q}` — refuse or resolve?** A language decision, not a bug fix; the governing-sentence gate
+   is owed either way. **PA lean: refuse** (fire `E-SQL-003`) — the reversible direction, consistent
+   with the S288 `E-SCHEMA-010` reject-don't-widen ruling and the S284 conformant-reject ruling, and
+   "resolve" is newly-accepting into a shape nobody can currently write. Caveat that lean does not
+   cover: dynamic identifiers having *no expressible form, no diagnostic, and no documented
+   alternative* is a real hole a refusal alone leaves open, and they named it as such.
+2. **The `orm-trap` article**, live on scrml.dev asserting both unenforced refusals in the present
+   tense — correct the prose to today's behaviour, or leave it as target state pending a fix? They
+   will not leave it overclaiming while waiting, and they are scripting a video on this subject.
+
+## ⚠️ XPS-CLONE STATE — the agent set is currently DEGRADED, fix pending
+
+`claude-workflow`'s `install.sh` was run this session and **linked the wrong branch.** The checkout
+sits on `incoming/bryan-XPS-8950` @ `29ba8f5` — the pre-merge *capture* branch — so
+`git pull --ff-only` correctly reported "Already up to date" while `origin/main` moved
+`4696204..c0bdf5e` and was never checked out. `install.sh` then symlinked `~/.claude/agents` at that
+branch's **8** agents.
+
+**Net: the live agent set went 16 → 8.** Gained `scrml-js-codegen-engineer` (the whole point);
+**lost 11** — `debate-judge`, `scrml-deep-dive`, `gauntlet-overseer`, `scrml-compiler-architect`,
+`scrml-voice-author`, and the full expert panel. `origin/main` has all **19** (the real union).
+Nothing is destroyed: the prior set is at `~/.claude/agents.pre-workflow.bak`.
+
+**Unrun fix, owed at the next XPS boot:**
+
+```sh
+cd ~/scrmlMaster/claude-workflow && git checkout main && git pull --ff-only && ./install.sh
+```
+
+Until that runs, this clone **cannot dispatch a deep-dive or a debate** (those agents are gone) but
+CAN dispatch codegen. Plan arcs accordingly. The capture branch holds the only copy of that capture
+until it is deleted; S282's message says it is fully absorbed into `main`.
+
+## 🧷 CONCURRENT
+
+- **S290-bryan LIVE on the ASUS all session** (bryan confirmed at boot). Successor mode: my
+  write-footprint is disjoint from his three open items by construction — he owns
+  `g-schema-references-dot-form-emits-no-foreign-key` (HIGH), `g-match-nofor-block-form-skips-
+  exhaustiveness` (MED), and the §13.2.4-vs-§19.9.9.2 coherence ruling. I touched none of them.
+- **This wrap will collide with his** if he wraps after me — both prepend to `hand-off.md` and
+  append to `delta-log.md`. `strict:true` forces the second PR to rebase; the resolution is
+  mechanical (both are prepend/append, no semantic overlap). Flagging so it is expected, not
+  alarming.
+- `scrml-support` was **46 commits behind** at boot on this clone → `pull --rebase`, clean. That is
+  the S43/S240 cross-machine trap; on a clone that has been idle since S282 it is the default state,
+  not an anomaly.
+
+## ✅ GATE / MAPS / HOUSEKEEPING
+
+- **No compiler source touched** → no full-suite run, no adversarial pass, no R26 owed. The
+  pre-commit hook (unit+integration+conformance subset) gates this docs-only commit; cloud `gate` on
+  the PR is the authority. Hooks here are **config B** (`core.hooksPath` unset → `.git/hooks`;
+  pre-commit + post-commit + pre-push all present).
+- **Maps: no-op with note.** Zero source files changed; a `project-mapper` pass would be a
+  near-no-op and costs ~23 min on this repo (S288's measured figure). Stamp stays where S288 left it.
+- **6b worktree cleanup: `agent-a14165e93444dcd12` RELEASED** (`1484d33f`, branch deleted). Its
+  content was verified on `main` first — the #141 `<each>` multi-root fix landed as `d3e961de`
+  (PR #150, PA-reauthored) and `conformance/cases/each/multi-root/` is present on `main`. S282's
+  own message had already cleared it for release. **No worktrees remain on this clone.**
+- Inbox: **deliberately not drained** (see headline). `2026-07-22-2230-from-S282-to-XPS` also stays —
+  its action item (the agent install) is the one recorded above as still owed.
+
+## Tags
+#session-291-bryan-xps #inbox-is-per-clone #three-messages-invisible-two-days #sql-refusals-blocking
+#q-identifier-emitted-as-sql-reproduced #e-sql-003-claimed-landed-s264-doesnt-fire #two-rulings-owed
+#claude-workflow-installed-wrong-branch #agent-set-16-to-8 #s290-concurrent-asus #docs-only-no-source
+
+---
+
+<!-- ============================================================= -->
 <!-- S288 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-27.       -->
 <!-- Peter's S289/S288 addenda + prior wraps UNCHANGED below.      -->
 <!-- (Session numbers collide across the two machines — disambig    -->

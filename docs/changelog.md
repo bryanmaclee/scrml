@@ -2,6 +2,55 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S291 (2026-07-27) — bryan · **XPS-8950** — the inbox is per-clone: three scrml-site messages invisible for two days, one blocking
+
+**`main` `0d95c364`** · coherence 0/0 both repos · no open PRs · no open adopter issues · **no
+compiler source touched** (docs-only wrap). Concurrent with **S290-bryan LIVE on the ASUS**.
+
+First session on the XPS clone since S282. A boot and a discovery, not a build.
+
+### The finding — a named channel that resolves per-machine
+
+`handOffs/incoming/` is tracked, but a dropped message is an **untracked file until committed**.
+scrml-site is colocated with the XPS clone and writes there, so **every ASUS session since S284 read
+a clean inbox that was clean only on its own disk.** Three messages had accumulated: an
+**escalated, `blocking: true`, operator-ruled** SQL report; a three-error-code triage; and an npm
+install-path readiness note flagging that `handOffs/` (7.2 MB of PA session state) would ship to npm
+absent a `files` allowlist. This is the S262 "unnamed channel" trap inverted — the contract names
+this channel and every boot reads it; the channel just points at different files per clone.
+Structural fix surfaced, not taken (it is a ruling): commit-on-arrival, or route cross-clone traffic
+through `scrml-support`, which every machine pulls at boot.
+
+### Reproduced, not taken on report
+
+Per the S288 reproduce-first discipline, the blocking claim was compiled against `0d95c364` before
+being surfaced: `const q = "SELECT …"; return ?{q}.all()` → **exit 0, zero diagnostics**, emitting
+`` return await _scrml_sql`q`; `` — the identifier as literal SQL text. The claim holds.
+**Load-bearing for whoever scopes the fix:** `E-SQL-003` is recorded as LANDED at S264 (PR #92) in
+both the changelog and master-list §0, and it does not fire on this shape — establish whether #92
+was narrower than claimed or regressed *before* scoping. SPEC §8 says the compiler "refuses"; it
+does not. Their companion findings (`E-SQL-002` never fires; dynamic identifiers compile clean then
+fail 100% at runtime with no expressible alternative) are unverified here. They explicitly ruled OUT
+injection — Bun.SQL binds every interpolation and the normative no-opt-out guarantee holds.
+
+### Owed to bryan
+
+Two rulings, both surfaced and neither given: **(1)** `?{q}` — refuse or resolve (PA lean: refuse,
+per the S288 reject-don't-widen and S284 conformant-reject precedents); **(2)** whether the live
+`orm-trap` article on scrml.dev is corrected to today's behaviour or held as target state.
+
+### Housekeeping
+
+- Messages left **untouched by explicit instruction** — not drained, not replied to, no gaps filed.
+  scrml-site remains blocked and unacknowledged; recorded as an accepted cost, not smoothed over.
+- **XPS agent set degraded 16 → 8.** `claude-workflow`'s `install.sh` ran against the pre-merge
+  capture branch (`incoming/bryan-XPS-8950` @ `29ba8f5`) instead of `main` @ `c0bdf5e`; gained
+  `scrml-js-codegen-engineer`, lost 11 including `scrml-deep-dive` and `debate-judge`. Prior set
+  preserved at `~/.claude/agents.pre-workflow.bak`; one-line fix recorded in the hand-off.
+- Worktree `agent-a14165e93444dcd12` released after verifying its content on `main` (#141 landed as
+  `d3e961de`/PR #150). No worktrees remain on this clone. `scrml-support` was 46 commits behind at
+  boot → rebased clean.
+
 ## S288 (2026-07-26/27) — bryan · ASUS-Vivobook — the RediLedger adopter-bug arc: 5 PRs, two compiler-wide fix-classes, two rulings
 
 **`main` `c700c435`** · coherence 0/0 · no open PRs · no open adopter issues · full gate 21408 pass / 0 fail.
