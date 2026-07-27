@@ -30,6 +30,8 @@
 
 import { describe, test, expect } from "bun:test";
 import { runRI, RIError, buildPageRouteTree } from "../../src/route-inference.js";
+import { splitBlocks } from "../../src/block-splitter.js";
+import { buildAST } from "../../src/ast-builder.js";
 
 // ---------------------------------------------------------------------------
 // FileAST / ProtectAnalysis construction helpers
@@ -4827,5 +4829,183 @@ describe("§33 — Wave 12 Unit Y: walkBodyForTriggers — Trigger 1/2 detection
 
     const helperDead = errors.filter(e => e.code === "W-DEAD-FUNCTION" && e.message.includes("`helper`"));
     expect(helperDead, "Wave 10-P CALLEE collection must still work — helper has a call from if-condExpr").toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §195 — W-DEAD-FUNCTION false positives: closure-body calls + first-class
+// value references (adopter #195, change-id
+// `w-dead-function-fp-closure-and-value-ref`).
+//
+// The D4 dead-warn gate decides "dead" from `inverseCallerMap` (built from
+// `record.callees` → exprNodeCollectCallees → forEachCallInExprNode). That
+// shared path has two blind spots that surface as W-DEAD FALSE POSITIVES even
+// though the tree-shaker (usage-analyzer) correctly KEEPS the function:
+//   Case 1 — a call located inside a NESTED CLOSURE body (arrow `=>` or a
+//     `function`-expression); the callee walk returns at `case "lambda"` and
+//     never descends, and a block-body closure is an opaque escape-hatch.
+//   Case 2 — a function passed as a FIRST-CLASS VALUE (arg / assignment /
+//     array / object / ternary / return); only `call.callee` idents count as
+//     callees, so a bare fn-name in value position is never a use.
+//
+// The fix adds a SEPARATE dead-code-reachability set (`logicReferencedFnNames`)
+// + one D4 gate term. The shared call-graph path (which also drives §12.2
+// server-placement inference / Step 5c) is untouched — test 9 is the placement
+// regression guard proving the fix did NOT leak into Step 5c.
+//
+// These tests parse REAL .scrml source through the front-end (splitBlocks +
+// buildAST) so the lambda / escape-hatch ExprNode shapes are the production
+// ones the fix depends on, then run RI and assert on W-DEAD-FUNCTION.
+// ---------------------------------------------------------------------------
+describe("§195 — W-DEAD-FUNCTION false positives (closure body + first-class value)", () => {
+  /** Parse real source → FileAST → runRI. Returns { routeMap, errors }. */
+  function riFromSource(source, filePath = "/test/dead195.scrml") {
+    const bs = splitBlocks(filePath, source);
+    const { ast } = buildAST(bs);
+    const fileAST = {
+      filePath,
+      source,
+      nodes: ast.nodes ?? [],
+      imports: ast.imports ?? [],
+      exports: ast.exports ?? [],
+      components: ast.components ?? [],
+      typeDecls: ast.typeDecls ?? [],
+      machineDecls: ast.machineDecls ?? [],
+      spans: ast.spans ?? new Map(),
+    };
+    return runRI({ files: [fileAST], protectAnalysis: emptyProtectAnalysis() });
+  }
+  /** W-DEAD-FUNCTION warnings naming `fnName` (the message wraps it in backticks). */
+  function deadWarns(errors, fnName) {
+    return errors.filter(e => e.code === "W-DEAD-FUNCTION" && e.message.includes("`" + fnName + "`"));
+  }
+
+  test("1. fn called only inside an arrow EXPRESSION body → NO W-DEAD", () => {
+    const src = [
+      "function cmp(x) { return x * 2 }",
+      "function sortIt(list) { return list.slice().sort((a, b) => cmp(a) - cmp(b)) }",
+      "<div>${sortIt([3, 1, 2]).join(\",\")}</div>",
+    ].join("\n");
+    const { errors } = riFromSource(src);
+    expect(deadWarns(errors, "cmp")).toHaveLength(0);
+  });
+
+  test("2. fn called only inside a FUNCTION-EXPRESSION body → NO W-DEAD", () => {
+    const src = [
+      "function helper2() { return 7 }",
+      "function arm2() { const f = function() { return helper2() }; return f() }",
+      "<div>${arm2()}</div>",
+    ].join("\n");
+    const { errors } = riFromSource(src);
+    expect(deadWarns(errors, "helper2")).toHaveLength(0);
+  });
+
+  test("3. real-app shape `.sort((a,b) => compareItems(a,b))` → NO W-DEAD for compareItems", () => {
+    const src = [
+      "function compareItems(a, b) { return a - b }",
+      "function ordered(list) { return list.slice().sort((a, b) => compareItems(a, b)) }",
+      "<div>${ordered([2, 1]).join(\",\")}</div>",
+    ].join("\n");
+    const { errors } = riFromSource(src);
+    expect(deadWarns(errors, "compareItems")).toHaveLength(0);
+  });
+
+  test("4. setTimeout(fn, 10) — fn passed as a value → NO W-DEAD", () => {
+    const src = [
+      "<tick> = 0",
+      "function usedAsValue() { @tick = @tick + 1 }",
+      "function arm4() { setTimeout(usedAsValue, 10) }",
+      "<button onclick=arm4()>go</button>",
+      "<div>${@tick}</div>",
+    ].join("\n");
+    const { errors } = riFromSource(src);
+    expect(deadWarns(errors, "usedAsValue")).toHaveLength(0);
+  });
+
+  test("5. assignment / array / object / ternary value refs → NO W-DEAD", () => {
+    const src = [
+      "function hAssign() { return 1 }",
+      "function hArray() { return 2 }",
+      "function hObj() { return 3 }",
+      "function hTernA() { return 4 }",
+      "function hTernB() { return 5 }",
+      "function wire(flag) {",
+      "  const el = {}",
+      "  el.onscroll = hAssign",
+      "  const arr = [hArray]",
+      "  const o = { handler: hObj }",
+      "  const pick = flag ? hTernA : hTernB",
+      "  return [el, arr, o, pick]",
+      "}",
+      "<div>${wire(true).length}</div>",
+    ].join("\n");
+    const { errors } = riFromSource(src);
+    for (const nm of ["hAssign", "hArray", "hObj", "hTernA", "hTernB"]) {
+      expect(deadWarns(errors, nm), `${nm} is referenced as a first-class value — must NOT fire W-DEAD`).toHaveLength(0);
+    }
+  });
+
+  test("6. CONTROL — a genuinely-unreferenced fn STILL fires W-DEAD", () => {
+    const src = [
+      "function reallyDead() { return 42 }",
+      "function alive() { return 1 }",
+      "<div>${alive()}</div>",
+    ].join("\n");
+    const { errors } = riFromSource(src);
+    expect(deadWarns(errors, "reallyDead"), "genuinely dead fn must still warn").toHaveLength(1);
+    expect(deadWarns(errors, "alive")).toHaveLength(0);
+  });
+
+  test("7. CONTROL — a self-recursive-only fn STILL fires W-DEAD", () => {
+    const src = [
+      "function loopOnly(n) { if (n > 0) { return loopOnly(n - 1) } return 0 }",
+      "<div>hi</div>",
+    ].join("\n");
+    const { errors } = riFromSource(src);
+    expect(deadWarns(errors, "loopOnly"), "a fn that references only itself is still dead").toHaveLength(1);
+  });
+
+  test("8. CONTROL — a self-value-ref-only fn STILL fires W-DEAD", () => {
+    const src = [
+      "function timerOnly() { setTimeout(timerOnly, 10) }",
+      "<div>bye</div>",
+    ].join("\n");
+    const { errors } = riFromSource(src);
+    expect(deadWarns(errors, "timerOnly"), "a fn referenced only by itself as a value is still dead").toHaveLength(1);
+  });
+
+  test("9. PLACEMENT REGRESSION GUARD — a `?{}`-SQL helper called ONLY inside a client-context arrow keeps its server classification (fix did not leak into Step 5c)", () => {
+    const src = [
+      '<program db="./t195.db">',
+      "<schema>",
+      "    table items {",
+      "        id: integer primary key",
+      "        n: string",
+      "    }",
+      "</>",
+      '<db src="./t195.db" tables="items">',
+      "    ${",
+      "        function dbHelper(id) {",
+      "            return ?{`SELECT n FROM items WHERE id = ${id}`}.get()",
+      "        }",
+      "        function render(list) {",
+      "            return list.map((x) => dbHelper(x))",
+      "        }",
+      "    }",
+      "</db>",
+      "<page><main>${render([1, 2]).join(\",\")}</main></page>",
+      "</program>",
+    ].join("\n");
+    const { routeMap, errors } = riFromSource(src, "/test/dead195-placement.scrml");
+
+    // (a) The fix suppresses the false W-DEAD for the closure-referenced helper.
+    expect(deadWarns(errors, "dbHelper")).toHaveLength(0);
+
+    // (b) Placement is UNCHANGED: dbHelper has a DIRECT server trigger (?{} SQL,
+    // Trigger 1), so it is server-classified regardless of caller context. The
+    // fix only touches the D4 dead-warn gate — never Step 5c — so this must hold.
+    const dbHelperRoute = [...routeMap.functions.values()].find(r => r.functionName === "dbHelper");
+    expect(dbHelperRoute, "dbHelper must have a route entry").toBeDefined();
+    expect(dbHelperRoute.boundary, "dbHelper stays server-classified (Trigger 1 ?{} SQL)").toBe("server");
   });
 });
