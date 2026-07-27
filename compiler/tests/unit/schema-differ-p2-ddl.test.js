@@ -19,7 +19,18 @@ import {
 const table = (body) => parseSchemaBlock(body).tables[0];
 
 describe("§14.8.11.2 S3 — generateDbAuthoritativeDDL GRANT reshape", () => {
-  test("ZERO immutable columns → BYTE-IDENTICAL to M1 (table-level UPDATE grant kept)", () => {
+  // S288 RULING (bryan) — a db-authoritative table's PRIMARY KEY and `tenant_id`
+  // are AUTO-immutable. Before this, both were still UPDATE-grantable: cross-tenant
+  // re-pointing failed safe on the RLS WITH CHECK, but a WITHIN-tenant primary-key
+  // UPDATE succeeded, which for a ledger is exactly the class the tier's
+  // audit-defensibility claim rests on. Same reasoning §14.8.10 used to reject a
+  // per-table tenant opt-in: a forgettable declaration guarding a security invariant
+  // is the wrong shape.
+  //
+  // CONSEQUENCE this test now pins: a db-authoritative table ALWAYS takes the
+  // column-scoped grant path, because it always has at least a PK. The prior
+  // "zero declared immutable → byte-identical to M1" property is deliberately gone.
+  test("NO declared immutable columns → PK + tenant_id are STILL auto-immutable", () => {
     const t = table(`
       invoices {
         id: uuid primary key
@@ -28,15 +39,32 @@ describe("§14.8.11.2 S3 — generateDbAuthoritativeDDL GRANT reshape", () => {
       } db-authoritative
     `);
     const ddl = generateDbAuthoritativeDDL(t);
-    // The exact M1 shape (matches compiler/tests/integration/db-authoritative-pg.test.js).
     expect(ddl).toEqual([
       `DO $$ BEGIN CREATE ROLE scrml_app NOLOGIN NOBYPASSRLS; EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
-      `GRANT SELECT, INSERT, UPDATE, DELETE ON "invoices" TO scrml_app;`,
+      `GRANT SELECT, INSERT, DELETE ON "invoices" TO scrml_app;`,
+      `REVOKE UPDATE ON "invoices" FROM scrml_app;`,
+      `GRANT UPDATE ("amount") ON "invoices" TO scrml_app;`,
       `ALTER TABLE "invoices" ENABLE ROW LEVEL SECURITY;`,
       `ALTER TABLE "invoices" FORCE ROW LEVEL SECURITY;`,
       `DROP POLICY IF EXISTS scrml_tenant_iso ON "invoices";`,
       `CREATE POLICY scrml_tenant_iso ON "invoices" USING ("tenant_id" = current_setting('scrml.tenant', true)::uuid);`,
     ]);
+    // The blanket table-level UPDATE is gone even with nothing declared immutable.
+    expect(ddl.join("\n")).not.toContain("GRANT SELECT, INSERT, UPDATE, DELETE");
+  });
+
+  test("a within-tenant PK UPDATE is no longer grantable (the ruling's whole point)", () => {
+    const t = table(`
+      invoices {
+        id: uuid primary key
+        tenant_id: uuid not null
+        amount: decimal not null
+      } db-authoritative
+    `);
+    const grantUpdate = generateDbAuthoritativeDDL(t).find((s) => s.startsWith("GRANT UPDATE ("));
+    expect(grantUpdate).toBeDefined();
+    expect(grantUpdate).not.toContain(`"id"`);
+    expect(grantUpdate).not.toContain(`"tenant_id"`);
   });
 
   test("one immutable column → REVOKE table UPDATE + column-scoped GRANT UPDATE (mutable only)", () => {
@@ -56,7 +84,8 @@ describe("§14.8.11.2 S3 — generateDbAuthoritativeDDL GRANT reshape", () => {
     expect(joined).toContain(`GRANT SELECT, INSERT, DELETE ON "invoices" TO scrml_app;`);
     expect(joined).toContain(`REVOKE UPDATE ON "invoices" FROM scrml_app;`);
     // UPDATE granted ONLY on the mutable columns — amount (immutable) absent.
-    expect(joined).toContain(`GRANT UPDATE ("id", "tenant_id", "status", "memo") ON "invoices" TO scrml_app;`);
+    // S288: `id` (PK) and `tenant_id` are auto-immutable, so neither appears.
+    expect(joined).toContain(`GRANT UPDATE ("status", "memo") ON "invoices" TO scrml_app;`);
     // REVOKE must precede the column GRANT (a table REVOKE UPDATE clears column grants too).
     expect(joined.indexOf("REVOKE UPDATE")).toBeLessThan(joined.indexOf("GRANT UPDATE ("));
     // RLS + policy still emitted after the grants.

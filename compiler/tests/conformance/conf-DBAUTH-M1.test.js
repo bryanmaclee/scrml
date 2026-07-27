@@ -103,7 +103,15 @@ describe("CONF-DBAUTH-M1 (SQL-shape half): the emitted S1/S6 DDL", () => {
   test("S6 — a bounded NOLOGIN NOBYPASSRLS role + scoped GRANT", () => {
     const ddl = generateDbAuthoritativeDDL(table).join("\n");
     expect(ddl).toContain("CREATE ROLE scrml_app NOLOGIN NOBYPASSRLS");
-    expect(ddl).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON "invoices" TO scrml_app');
+    // S288 RULING — a db-authoritative table's PK + `tenant_id` are AUTO-immutable,
+    // so the grant is column-scoped even with nothing declared `immutable`. The
+    // blanket table-level UPDATE that M1 originally emitted is deliberately gone:
+    // it left a WITHIN-tenant primary-key UPDATE grantable (cross-tenant already
+    // failed safe on the RLS WITH CHECK).
+    expect(ddl).not.toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON "invoices" TO scrml_app');
+    expect(ddl).toContain('GRANT SELECT, INSERT, DELETE ON "invoices" TO scrml_app');
+    expect(ddl).toContain('REVOKE UPDATE ON "invoices" FROM scrml_app');
+    expect(ddl).toContain('GRANT UPDATE ("amount") ON "invoices" TO scrml_app');
   });
 
   test("S1 — ENABLE + FORCE RLS + tenant-iso policy keyed on the pinned GUC", () => {
