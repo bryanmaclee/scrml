@@ -2,6 +2,57 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S290 (2026-07-27) — bryan · ASUS-Vivobook — five silent-acceptance defects, and the governing sentence decided each one
+
+Seven PRs. Every defect closed was the same shape — **a form that looks right, compiles clean, and
+produces nothing or the wrong thing** — and four of the five had a governing sentence already on the
+books, so the gap was never the contract but that nothing executed it.
+
+- **#205 `0d95c364` — SPEC-INDEX amendment history dereffed.** 158,373 → 87,909 chars (−44.5%,
+  ~34k tokens off every Profile-A boot); the per-landing narrative moved to
+  `scrml-support/archive/spec-index-changelog.md`. The totals footer is now `@generated` with a
+  `--check` in the CI gate: it read `33,436 lines / 61 sections` while SPEC.md was 36,575 / §65 —
+  ~3,140 lines and 4 sections stale, hand-maintained beside a script that regenerated the rows
+  around it. Bite proven (corrupt → red → regen → green).
+- **#206 `14da1e9e` — `E-SCHEMA-011`.** A `references` clause that parses to no foreign key is now
+  rejected; RULED reject because §39.5.5 declares ONE production, so accepting the dot-in-parens form
+  would be newly-accepting beyond the contract. Migration MEASURED at 17 sites, every one ours.
+  **The adversarial pass then found a larger pre-existing bug:** `parseColumns` never stripped `//`,
+  so a commented-out column emitted a REAL column (`"// owner_id" integer REFERENCES …` — quoted, so
+  Postgres accepted it) and a trailing comment's PROSE set constraints (`// make this unique later`
+  → `UNIQUE`). No corpus file comments in a way that bites, so 21k tests were blind. 86 schema bodies
+  diffed old-vs-new: zero real changes.
+- **#208 `93f297b3` — constraint-drift reconciliation (§38.6.2 rows 6/7/8).** A conformance
+  restoration, not an amendment: the operations table has listed `CREATE INDEX` / `DROP INDEX` /
+  rebuild-for-constraint-changes from the outset and three of the eight were never built. Postgres
+  gets native ALTERs (the §14.8.11 S7 fence forbids a rebuild there); SQLite's actual-state read was
+  COMPLETED with `PRAGMA index_list` + `foreign_key_list` — UNIQUE and REFERENCES drift had been
+  invisible to the differ, not merely unreconciled. `db-migrate` no longer reports "up to date" when
+  it withheld work.
+- **#207 `4289b217`** — S291-XPS's wrap, rebased over the two landings above (zero conflicts) and
+  merged so the sibling's continuity reached main.
+- **#209 `ad56551d` — `E-SQL-003` covers the bare-identifier `?{q}` body.** Narrower-than-claimed,
+  not regressed: the detector required ≥1 `${…}` interpolation, so a zero-interpolation body read as
+  literal SQL text and emitted ``_scrml_sql`q``` — the identifier as the query. §8.4 already said
+  *"Developers SHALL NOT construct SQL strings dynamically in JavaScript and pass them to `?{}`"*.
+  R26 over all 268 corpus `?{`-bearing files fired on exactly 2, both intended conformance negatives.
+  Conformance 746 → 747. Ships with **`pa-base v2.5`** — the async file-dropbox is PER-CLONE: a
+  dropped message is untracked until committed, so it exists only on the disk that wrote it and
+  defeats a mandatory boot step while leaving it green.
+- **#210 / #211 — the four nav/chunk HIGHs re-verified against main.** Three are not live breakage
+  (two describe symbols absent from main and present only in the unlanded Wave-1c worktree; one is
+  superseded by #180, its finding now the recorded rationale in `chunk-namespace.ts`). The fourth,
+  `g-nav-chunk-lexical-collision`, is **VERIFIED CLOSED by execution** — two routes both declaring
+  `type Phase:enum`, concatenated `node --check` exit 0, and **exit 1 with the IIFEs stripped**,
+  which is the bite proof. Open HIGHs 12 → 11. Filed
+  `g-route-splitter-chunk-payload-not-namespaced` (MED) at observation strength.
+
+**Wave-1c rebased** onto current main as `feat/wave1c-nav-s290` @ `bc96a2a3` (10 files, +720/−55).
+Piece 1 was SKIPPED as superseded — it landed at #124 and main refined it twice (#126, #128), so
+hand-merging would have re-introduced the `E-OUTLET-AND-MAIN` overreach S277 fixed.
+
+Gate suite 18,245 pass / 0 fail; conformance 747/747; `main` `9a4062bc`, coherence 0/0.
+
 ## S291 (2026-07-27) — bryan · **XPS-8950** — the inbox is per-clone: three scrml-site messages invisible for two days, one blocking
 
 **`main` `0d95c364`** · coherence 0/0 both repos · no open PRs · no open adopter issues · **no

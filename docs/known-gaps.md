@@ -155,7 +155,7 @@ re-running is a clean no-op (**no phantom drift** — defaults compare through a
 drivers echo `'x'::text` for `'x'`, and a gate that cries wolf gets bypassed then deleted); and the
 newly-rejecting hazard behaves — with an orphan row present the migration fails naming the failing
 statement (`4 of 4`) and **rolls back atomically**, leaving zero FK constraints behind. Gate suite
-18,238 pass / 0 fail.
+18,245 pass / 0 fail.
 
 **Still out of scope, named honestly:** column TYPE changes (§38.6.2 row 8 covers them too; a Postgres
 type change needs a `USING` clause and is its own design) and shared-core predicate drift (`oneOf`,
