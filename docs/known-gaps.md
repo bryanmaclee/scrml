@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 12 |
-| MED | 56 |
+| HIGH | 11 |
+| MED | 57 |
 | LOW | 34 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -173,6 +173,26 @@ of the RediLedger S5 report. Smallest of the three, but it is the same "a form t
 compiles clean, and produces nothing" shape and should not be left to be rediscovered by an adopter.
 Fix: either implement table-level constraints or reject an unrecognized table-body line loudly —
 NOT continue to discard it. <!-- @gap id=g-schema-table-level-constraint-lines-silently-dropped sev=MED status=open -->
+
+### G-ROUTE-SPLITTER-CHUNK-PAYLOAD-NOT-NAMESPACED — the per-route splitter payload does not carry the chunk cell scope the `.client.js` path does — `NEW S290; MED; open (needs disposition)`
+Surfaced while verifying `g-nav-chunk-lexical-collision`. The two emission paths differ:
+
+- **`*.client.js` (per-file)** — IIFE-wrapped, carries `// --- chunk cell scope (<token>) ---` and
+  `_scrml_cs_key`, so every cell key is namespaced `<token>$name`. Verified closed (above).
+- **the A-4 route-splitter's per-route `payloadJs`** (`emitPerRoute: true`) — IIFE-wrapped, but the
+  body calls `_scrml_reactive_set("customerEvents", null)` with a **BARE key**. No `_scrml_cs_key`, no
+  token, no scope prologue. Checked across all 63 chunks emitted for `examples/23-trucking-dispatch`:
+  **zero** carry it.
+
+**This is an OBSERVATION, not yet a confirmed defect** — recorded deliberately at that strength. It is
+not established here whether the splitter payload is intended to inherit the namespace from the
+`.client.js` that loaded first, whether two routes' payloads can be resident at once, or whether the
+bare key is correct for its execution context. **The disposition owed:** determine whether two per-route
+payloads sharing a cell name can coexist in one document; if they can, this is the same clobber
+`chunk-namespacing` closed on the other path, and the splitter needs the same prologue. If they cannot
+(one payload resident at a time), close this as by-design and say so in `chunk-namespace.ts`, whose
+module header currently reads as though the namespace covers every chunk.
+<!-- @gap id=g-route-splitter-chunk-payload-not-namespaced sev=MED status=open -->
 
 ### G-SQL-BARE-IDENTIFIER-BODY-EMITS-IDENTIFIER-AS-QUERY — `?{q}` compiled clean and shipped the identifier as the SQL text — `NEW S290; HIGH; RESOLVED S290`
 Reported by the scrml-site consumer via the S291-XPS session, reproduced independently here on
@@ -3771,8 +3791,29 @@ Non-blocking hardening surfaced by the S239 pass on #120 (the security property 
 
 ### g-nav-chunk-lexical-collision — two client chunks declaring the same top-level type/enum name cannot coexist; cross-chunk soft-nav silently degrades to a full reload — `NEW S276 (Wave-1c S239); HIGH (silent feature-loss); open (RULED: IIFE-wrap, own arc)`
 Emitted `.client.js` chunks declare type/enum runtime reps as TOP-LEVEL `const`s (`const Phase`, `const Phase_toEnum`, `const Phase_variants`). Classic scripts share ONE global lexical environment, so injecting a route chunk into a document whose shell chunk already declared the same name is a **parse-time `SyntaxError` — the script never executes**. Wave-1c's loader then routes that to `onerror` → `W-NAV-CHUNK-LOAD-FAILED` → hard navigation. Net effect: cross-chunk soft-nav silently degrades to the full page reload that adopter issue #27 was filed about, with a CLEAN compile and no diagnostic. **PA-REPRODUCED (S276)** by executing two real emitted chunks in one shared `vm` context: shell executed OK, route → `SyntaxError: Can't create duplicate variable: 'Phase_toEnum'`. Trigger is two files each declaring a type of the same name locally (e.g. a shell and a route both writing `type Phase:enum`) — a mainstream naming shape. **Exposure measured, not assumed:** IMPORTED types compile to ONE shared chunk and are NOT re-declared per importing chunk (verified on `examples/23-trucking-dispatch` — clean), so import-based corpora are unaffected. **The browser suite is structurally blind to this** — it executes route chunks via direct `eval` (a fresh per-eval declarative environment; collisions are impossible by construction). **bryan RULED (S276) option (a): IIFE-wrap chunk top-level lexicals in codegen** — over a compile-time collision diagnostic (rejected: makes the developer rename their type to satisfy the bundler) and over documenting the constraint. Scoped as its OWN arc — it changes how every chunk is emitted. Blocks Wave-1c pieces 2+3. 
-**S290 RE-VERIFIED — STILL UNVERIFIED, and it is the ONE of the four that needs a real check.** The namespacing machinery IS on `main` (`codegen/chunk-namespace.ts` + `codegen/cell-accessor-rename.ts`), and its contract names **N3 — author top-level type names** as closed by a chunk-local scope, which would close exactly this gap: a chunk wrapped in its own IIFE cannot collide with another chunk's top-level `const Phase`. **But the prologue was NOT observed in emitted output** — compiling `examples/23-trucking-dispatch/app.scrml` produced `.client.js` files with zero `_scrml_cell_scope(...)` calls, so either the scope wrapper is gated behind the route-splitter / a module-format flag, or it does not reach this path. **The check owed:** produce a build that actually emits per-route chunks (`chunks.json`), confirm each chunk carries the `_scrml_cell_scope("<token>")` prologue, and execute two same-named-type chunks in one document. Reasoning from the module header alone is exactly the inference this triage exists to stop.
-<!-- @gap id=g-nav-chunk-lexical-collision sev=HIGH status=open -->
+**S290 — VERIFIED CLOSED by chunk-namespacing (#180, S286), by EXECUTION.** The earlier S290 note in
+this entry said "still unverified"; the check has now been run and the gap is closed.
+
+Probe: two route files each declaring `type Phase:enum` with DIFFERENT variant sets, compiled together.
+
+| check | result |
+|---|---|
+| distinct per-chunk token | `a.client.js` = `015uexil`, `b.client.js` = `00pc04x0` |
+| `const Phase` position | INSIDE the chunk IIFE in both (line 23 vs IIFE at line 2) |
+| `node --check` on `a.client.js` + `b.client.js` concatenated | **exit 0** — no redeclaration |
+| same concatenation with the IIFEs STRIPPED | **exit 1, SyntaxError** |
+
+The last row is the bite proof: removing the wrapper reintroduces the collision, so the IIFE is what
+prevents it rather than something incidental. Each chunk carries a `// --- chunk cell scope (<token>) ---`
+prologue whose `_scrml_cs_key` prefixes every cell key with `<token>$`, so cell keys are per-chunk too.
+
+**Why this took three wrong greps, recorded so the next reader does not repeat them:** the emitted
+wrapper is `(function() {` with NO space, so a `^\(function \(\)` pattern misses it; and the scope
+marker in emitted output is **`_scrml_cs_key`**, not `_scrml_cell_scope` — that name appears only in
+`compiler/tests/helpers/chunk-scope.js`'s explanatory prose, which describes a different shape. Grepping
+for the helper's name against real output returns zero on a file that is fully namespaced. Verify by
+EXECUTING the artifact, not by matching a symbol a doc told you to expect.
+— `RESOLVED S290 (verified by execution)` <!-- @gap id=g-nav-chunk-lexical-collision sev=HIGH status=resolved -->
 
 ### g-nav-chunk-loading-flag-race — a superseded navigation's chunk clears the global boot flag, so a newer route's chunk never boots and swaps in as dead markup — `NEW S276 (Wave-1c S239); HIGH; open (held with Wave-1c pieces 2+3)`
 Wave-1c's injected-chunk boot is gated on a single module-scope boolean `_scrml_chunk_loading` (`runtime-template.js`), set before each `appendChild` and cleared in a PER-SCRIPT `settle()` with no check that the settling load owns the flag. With two overlapping cross-chunk navigations (an impatient double-click on two nav links), `async=false` guarantees chunkA executes and fires `load` BEFORE chunkB executes — so chunkA's `settle()` clears the flag out from under chunkB, which then takes the `else` branch and registers `_scrml_boot` on a `DOMContentLoaded` that already fired and never fires again. chunkB never boots, never registers its rehydrator, and nav2's `onDone` STILL fires → the outlet swaps to correct SSR markup that is **completely unwired** (inert handlers, unbound interpolations), with no diagnostic and no hard-nav fallback. **PERMANENT** — the injected `<script>` stays connected, so the already-loaded set counts it and the chunk is never re-injected. **PA-REPRODUCED (S276)** driving two overlapping navs through the real loader: `chunkA flagAtExec=true booted=true` / `chunkB flagAtExec=false booted=FALSE`, `onDone fired for ["nav2"]`. Found independently by TWO adversarial lenses. Fix shape: a depth COUNTER (increment before append, decrement in settle, chunk tests `> 0`), or save/restore around each injection, or have `settle()` clear only when it owns the flag. Invisible to the browser suite: it never has two navs in flight, and its `appendChild` override returns nodes WITHOUT connecting them, so every chunk re-boots on every nav. 
