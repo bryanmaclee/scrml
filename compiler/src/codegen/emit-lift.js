@@ -351,6 +351,22 @@ function maybeWrapLiftPerItemEffect(bodyLines) {
   return out;
 }
 
+// S293 — a per-item value-attribute `setAttribute` that reads the item must
+// re-evaluate on reconcile. Inside a reconciled per-item factory, drive the write
+// from a live-keyed effect (re-resolves the item + replays item-derived locals via
+// maybeWrapLiftPerItemEffect); outside one, emit the plain set (byte-identical to
+// pre-fix). Brings the `${expr}` / call / bare-ref attr forms to parity with the
+// template-string attr path + the interpolated-text path (emitSetContent) — and
+// with the Tier-1 `<each>` path, which already effect-wraps per-item attributes.
+// (g-lift-per-item-attribute-binding-not-reactive-on-reconcile.)
+function pushLiftAttrSet(lines, setStmt) {
+  if (currentLiftReconcileCtx()) {
+    for (const l of maybeWrapLiftPerItemEffect([setStmt])) lines.push(l);
+  } else {
+    lines.push(setStmt);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Bug 73 (sibling-gap #2 of Bug 64) — Tier-0 per-item EVENT HANDLER live-keying.
 //
@@ -1201,7 +1217,7 @@ function emitSetAttrs(elVar, attrs, engineCtx = null) {
           }
         }
         tpl += "`";
-        lines.push(`${elVar}.setAttribute(${JSON.stringify(attr.name)}, ${tpl});`);
+        pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(attr.name)}, ${tpl});`);
       } else {
         lines.push(`${elVar}.setAttribute(${JSON.stringify(attr.name)}, ${JSON.stringify(attr.value)});`);
       }
@@ -1442,7 +1458,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         // an item-held handler (`onclick=@.handler`) re-resolves the live item.
         lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten}(event);`)} });`);
       } else {
-        lines.push(`${elVar}.setAttribute(${JSON.stringify(name)}, ${rewritten});`);
+        pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, ${rewritten});`);
       }
     } else if (val.kind === "call-ref") {
       // Function call in attribute — reconstruct full call with arguments.
@@ -1475,7 +1491,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         }
       } else {
         const callExpr = `${rewrittenName}(${rewrittenArgs})`;
-        lines.push(`${elVar}.setAttribute(${JSON.stringify(name)}, String(${callExpr} ?? ""));`);
+        pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, String(${callExpr} ?? ""));`);
       }
     } else if (typeof val === "string") {
       // Raw string value
@@ -1553,7 +1569,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         }
       } else {
         const rewritten = emitExprField(val.exprNode, raw, liftExprCtx());
-        lines.push(`${elVar}.setAttribute(${JSON.stringify(name)}, String(${rewritten} ?? ""));`);
+        pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, String(${rewritten} ?? ""));`);
       }
     } else if (val && val.kind) {
       // Exhaustiveness guard — surface unhandled attribute value kinds
