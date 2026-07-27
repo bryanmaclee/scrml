@@ -58,9 +58,21 @@ describe("CONF-NAV-CROSS-CHUNK — codes-half (E-OUTLET-AND-MAIN)", () => {
     expect(e.message).toContain("<outlet>");
   });
 
-  test("POS: <main><outlet/></main> (nested) also fires E-OUTLET-AND-MAIN", () => {
+  // S292 — this case was INVERTED on the branch. It asserted the PRE-RULING overreach
+  // (fire on ANY <main> + <outlet> co-occurrence) that S277 fixed on main via #126/#128;
+  // the Wave-1c branch predates that narrowing, and the rebase deliberately SKIPPED its
+  // stale piece-1 copy rather than hand-merging it back in. bryan's S276 invariant:
+  // exactly ONE <main> landmark per composed document, the MARKER decides the slot never
+  // the tag — so an <outlet> INSIDE an author <main> is case (2), LEGAL: the author's
+  // <main> is the landmark and the slot demotes to a <div>. E-OUTLET-AND-MAIN fires only
+  // on the bare/sibling shape (case 4), which the POS case above still pins.
+  // Verified by compiling this exact source: exit 0, emitting
+  // <main> ... <div data-scrml-outlet tabindex="-1">.
+  test("NEG: <main><outlet/></main> (nested) does NOT fire — the outlet demotes to a div", () => {
     const r = compile(`<program>\n  <main><outlet/></main>\n</program>`, "oam-nested");
-    expect(outletAndMain(r)).toBeDefined();
+    expect(outletAndMain(r)).toBeUndefined();
+    expect(r.html).toContain("<div data-scrml-outlet");
+    expect(r.html).not.toContain("<main data-scrml-outlet");
   });
 
   test("NEG: an <outlet> alone does NOT fire", () => {
