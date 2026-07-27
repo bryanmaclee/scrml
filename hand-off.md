@@ -120,11 +120,29 @@ nested-closure uses as non-dead. Flagged because SPEC is this lane.
 
 ## ✅ GATE / MAPS
 
-- Full suite **21408 pass / 0 fail**. `gate` green on every merge. Generated docs (`FACTS.md`,
-  `state.ts` §0) `--check` PASS.
-- `tracking` fails on 3 known tests every run (serve-tool R26 flake + two gitignored self-host
+- Full suite **21408 pass / 0 fail**. `gate` green on every merge and at HEAD (`c700c435`). Generated
+  docs (`FACTS.md`, `state.ts` §0) `--check` PASS.
+- `tracking` fails on 3 known tests every run (serve-tool R26 flake + the two gitignored self-host
   artifacts `bs.js`/`tab.js`) — verified directly on #191 and #193, inferred thereafter. Non-required.
-- Maps refreshed at wrap.
+- ⚠️ **MAPS REFRESH IS OWED.** A `project-mapper` dispatch was fired at wrap and **produced no output
+  at all** (no file written after ~15 min; not a crash notification, just silence — treat as a
+  non-productive dispatch, and per the repeated-crash rule go PA-direct if it recurs). Rather than
+  land a stale map silently, `migrations.map.md` got a **targeted PA-direct currency correction**,
+  because it was actively WRONG: it named `g-db-migrate-check-constraint-oneof-pattern` as open and
+  "the natural next `db-migrate` fix" when this session resolved it. Its "Known open gaps" section and
+  stamp are now current; the REST of that file, and every other map, is still stamped against pre-S288
+  source.
+- **What a refresh must pick up** (all this session unless noted): `schema-differ.js` — NEW exported
+  `findNonLiteralSetItems` + `lowerArrayLiteralToSqlItems` / `lowerArrayItemToSqlLiteral` /
+  `splitTopLevelItems` / `lowerDefaultToSql` / `isEffectivelyImmutable` / `scanMatchingParen`, a
+  two-pass `findMatchingParen`, balanced `default()` capture, auto-immutable PK+`tenant_id` in the
+  GRANT reshape · `gauntlet-phase1-checks.js` — NEW `E-SCHEMA-010` fire site · `db-migrate.js` — NEW
+  `printFailedStatement` + per-statement attribution · `emit-server.ts` — NEW
+  `astSqlQueryUsesCurrentUser`, the `_anyFnCurrentUserQuery` gate term, the RI-route
+  `_scrml_currentUser` splice · `tenant-egress.ts` — `buildTenantContext` second arg · NEW test
+  `integration/schema-only-tenant-principal.test.js` · SPEC §39.5.8 / §34 / §14.8.11.2. **Peter's lane
+  too:** #192 `E-MATCH-INVALID-ARM`, #197 nested for-lift reconcile, #200 `W-DEAD-FUNCTION` +
+  SPEC §12.2 Trigger-6.
 
 ## Tags
 #session-288-bryan #rediledger-arc #5-prs #oneof-sql-literals #currentuser-binding #schema-tenant-registry #default-emission #e-schema-010-ruled #auto-immutable-pk-tenant #gate-mismatch-lesson #incomplete-fix-lesson #request-path-test-debt #facts-gate-caught-me #sibling-repo-pathspec-miss #four-rebases-peter-concurrent
