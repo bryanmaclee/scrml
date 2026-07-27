@@ -1,5 +1,42 @@
 # navigate Wave-1c (cross-chunk soft-nav) — progress
 
+> **✅ STATUS S292 (2026-07-27) — SUPERSEDES THE S276 BANNER BELOW.** Pieces 2+3 **LANDED**. The two
+> HIGH gaps that held them are CLOSED: `g-nav-chunk-loading-flag-race` (boolean → depth counter) and
+> `g-nav-chunk-basename-collision-key` (basename → resolved absolute url). Both were **REPRODUCED on
+> the rebased branch before either was touched**, under real classic-script `async=false` ordering
+> rather than the browser harness — which per `g-nav-browser-harness-fidelity` structurally cannot
+> observe either. The third gap that held them, `g-nav-chunk-lexical-collision`, was **VERIFIED CLOSED
+> by execution at S290** (IIFE-stripped control as the bite proof) — it was closed by the IIFE wrap
+> this branch already carried, not by new work.
+>
+> **`W-NAV-CHUNK-LOAD-FAILED` IS now implemented** (`_scrml_nav_chunk_failed`, runtime-template.js) —
+> the S276 "documented but NOT implemented / do not harvest into §34" instruction below is retired.
+>
+> **Still open, NOT closed by this landing:** `g-nav-browser-harness-fidelity` (MED) — the browser
+> suite still evals chunks in a throwaway environment and returns un-connected nodes from its
+> `appendChild` override, so it continues to exercise a multi-boot state that cannot occur in
+> production. The S292 landing routes around it with a `node:vm` unit suite
+> (`compiler/tests/unit/navigate-cross-chunk-loader.test.js`) rather than fixing it; the browser
+> harness itself is unchanged and a genuine double-boot regression would still pass there.
+> `_SCRML_NAV_CHUNK_TIMEOUT_MS` also still has zero coverage.
+>
+> The S276 banner below is retained as the forensic record of the held period.
+
+> **⚠️ STATUS CORRECTED S276 (2026-07-21) — READ BEFORE THE BODY BELOW.** The "FINAL STATUS —
+> Wave-1c COMPLETE (all 3 pieces + SPEC + gates)" claim further down is **FALSE at HEAD** and was
+> never true of `main`. Only **PIECE 1** landed, as PR #124 (`c48e59a2`), and it landed REWRITTEN —
+> a PA adversarial pass found 6 BLOCKING defects across three rounds. **Pieces 2 (boot restructure)
+> and 3 (runtime cross-chunk load) are HELD, unlanded**, behind three confirmed HIGH gaps:
+> `g-nav-chunk-lexical-collision` (bryan RULED the IIFE-wrap fix — its own arc),
+> `g-nav-chunk-loading-flag-race`, `g-nav-chunk-basename-collision-key` — plus
+> `g-nav-browser-harness-fidelity` and a 7-item hardening tail. `W-NAV-CHUNK-LOAD-FAILED` is
+> **documented here but NOT implemented** (zero occurrences in `compiler/src/`); do not harvest it
+> into the §34 catalog. The only copy of pieces 2+3 is branch
+> `worktree-agent-a2ed001a5de228134` @ `8fd5fd07`.
+>
+> This file is retained as the **forensic record of the survey + the 3-piece build**, not as a
+> statement of what shipped. Current truth: `docs/changes/navigate-wave1c-piece1-landmark/progress.md`.
+
 Startup pwd: /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a2ed001a5de228134
 Merge base HEAD: 020485b2
 

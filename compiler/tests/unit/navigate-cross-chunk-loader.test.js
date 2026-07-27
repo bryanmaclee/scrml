@@ -99,6 +99,20 @@ describe("navigate-wave1c cross-chunk loader — g-nav-chunk-basename-collision-
     expect(missing).toEqual([]);
   });
 
+  test("the REAL emitted shape — a bare relative src on both sides still resolves distinctly", () => {
+    // The compiler emits a route's own chunk as a BARE RELATIVE src with no directory
+    // component. Verified against real `scrml compile` output for this exact fixture
+    // (pages/reports.scrml + pages/admin/reports.scrml):
+    //     /admin/reports.html -> src="reports.client.js"
+    //     /reports.html       -> src="reports.client.js"
+    // Identical text, two distinct files — resolution against each page's own url is
+    // the ONLY thing that separates them. The absolute-src case above is a strictly
+    // easier shape than what ships; this is the faithful one.
+    const { ctx } = makeRuntimeContext(["reports.client.js"], "http://x/admin/reports");
+    const missing = ctx._scrml_nav_missing_chunks(fetchedDoc(["reports.client.js"]), "/reports");
+    expect(missing).toEqual(["http://x/reports.client.js"]);
+  });
+
   test("CONTROL — a nested route's relative src resolving to a LOADED chunk is skipped", () => {
     // ../index.client.js from /admin/reports resolves to /index.client.js, already loaded.
     const { ctx } = makeRuntimeContext(["/index.client.js"], "http://x/admin/reports");
