@@ -1,9 +1,15 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-07-27T10:00:00Z  commit: c700c435
+# updated: 2026-07-28T16:55:00Z  commit: 115e8b1b
 
 The compiler's "schema" is its own AST, not an application data model. Root catalog:
 `compiler/src/types/ast.ts` (2104 lines, 114 exported interfaces/types, ~91 distinct `kind` discriminants — unchanged since fbb4d9fd/df2ac831; this window's schema-differ.js changes below added NO ast.ts shape, same as the S287 DB-authoritative tier before it). Read that file directly for the exhaustive list; this map groups it and calls out the load-bearing shapes.
+
+**Currency (S297, `c700c435` -> `115e8b1b`):** re-verified this pass. `types/ast.ts` gained NO new
+shape this window either — every landing works through existing node kinds. THREE additions below
+are codegen-internal / schema-differ-internal shapes, not `ast.ts` types: the §38.6.2
+constraint-drift record, the D-5 module-const candidate filter's reliance on
+`ConstDeclNode`/`LetDeclNode.initExpr`, and `LogicBinding.directiveIsFormValue`.
 
 ## Root pipeline types
 ### FileAST  [types/ast.ts:1551]
@@ -28,7 +34,7 @@ Discriminated union over ~91 `kind` string literals — the single node-shape sw
 
 **Markup / structural** — MarkupNode [214], TextNode [249], CommentNode [256], HtmlFragmentNode [1169], ChannelDeclNode extends MarkupNode [1326] (tag:"channel"; isExport?; P3.A CHX-inline provenance fields).
 
-**Declarations** — LetDeclNode [447], ConstDeclNode [462], TildeDeclNode [480] (`~` linear-adjacent decl), LinDeclNode [492] (§35 linear types), ReactiveDeclNode [503] (the `@cell` declaration — carries `matchExpr` side-field for engine-adjacent typing), ImportDeclNode [1247] / ImportSpecifier [1235], UseDeclNode [1265] (`use foreign:` sidecar), ExportDeclNode [1279], TypeDeclNode [1298].
+**Declarations** — LetDeclNode [447], ConstDeclNode [462] (**both carry `initExpr?: ExprNode`, the STRUCTURED initializer — D-5 (S293) depends on it: `emit-server.ts`'s `emitReferencedModuleConstLines` SKIPS any candidate with no `initExpr`, and walks the ones that have it via `forEachIdentInExprNode` to prove every free identifier resolves at server module scope. A `const X = compute()` whose `compute` is not in the server bundle is skipped rather than emitted — a module-load ReferenceError is strictly worse than the call-time one, and the honest answer for that shape is a diagnostic, not a guess**), TildeDeclNode [480] (`~` linear-adjacent decl), LinDeclNode [492] (§35 linear types), ReactiveDeclNode [503] (the `@cell` declaration — carries `matchExpr` side-field for engine-adjacent typing), ImportDeclNode [1247] / ImportSpecifier [1235], UseDeclNode [1265] (`use foreign:` sidecar), ExportDeclNode [1279], TypeDeclNode [1298].
 
 **State machine** — EngineDeclNode [910] (`kind:"engine-decl"`; engineName, governedType `for=`, rulesRaw + bodyChildren walkable body, sourceVar, varName/varNameOverride, initialVariant, plus acceptsType/subsetVariants/inlineMatchArmArrows annotations added across S154-S172).
 
@@ -140,13 +146,49 @@ same residue:**
   regex literal can carry an unpaired apostrophe, which a quote-aware-ONLY pass would swallow).
   `parseColumns`'s `default(...)` capture is now this SAME balanced scan, not the old `[^)]+` regex
   (which stopped at the FIRST `)`, truncating `default(now())` into an unbalanced
-  `DEFAULT (now() )` — a syntax error blocking 7/10 of a real adopter schema, RediLedger S4).
+  `DEFAULT (now() )` — a syntax error blocking 7/10 of a real adopter schema (adopter report, S4)).
 
 **Residual, still-open edges surfaced by the S288 adversarial pass** (`g-schema-predicate-arg-
 parse-edges`, MED, `docs/known-gaps.md`): `oneOf([])` on an empty array emits invalid SQL
 (`CHECK (col IN ())`) rather than a compile rejection or `CHECK (false)`; `escapeSqlString` doubles
 `'` but does not escape `\` — a latent MySQL-only trap (unreachable today — `db-migrate` hard-refuses
 MySQL, "Phase 3").
+
+## §38.6.2 / §39.5.5 — constraint-drift + foreign-key shapes (NEW this window, S290)
+
+**`columnConstraintDrift(desiredCol, actualCol)`** — exported from `schema-differ.js` (:713).
+Returns `{ notNull: boolean, unique: boolean, references: boolean, default: boolean }`: which of a
+column's declared constraints differ from what the LIVE database reports for an EXISTING column.
+§38.6.2's governing sentences always required this; the implementation only handled ADD / DROP /
+RENAME COLUMN, so three of eight specified operations were never built and **every constraint change
+on an existing column was silently ignored** (`g-db-migrate-ignores-constraint-drift-on-existing-
+columns`). This is a conformance RESTORATION, not an amendment.
+
+Two shape details are load-bearing:
+- **PK-aware.** A PRIMARY KEY column is implicitly NOT NULL and implicitly UNIQUE, so both flags are
+  forced false when either side is a PK — do not fight the driver over an implied constraint.
+- **`default` is compared TOLERANTLY** via the private `sameDefaultText(a, b)` (:731): it drops a
+  Postgres `::type` cast suffix, unwraps ONE quote layer (`'x'` or `"x"`), trims and case-folds.
+  Drivers echo defaults back with their own quoting/casts, so a raw string compare would report
+  permanent phantom drift — and a gate that cries wolf gets bypassed, then deleted.
+
+Consumers: `diffSchema` emits `W-SCHEMA-CONSTRAINT-TIGHTENED` (Postgres — the DDL IS emitted, and
+will correctly fail on non-conforming rows) or `W-SCHEMA-CONSTRAINT-DRIFT-UNAPPLIED` (SQLite — the
+§38.6.3 rebuild is destructive and refused by default, so NOTHING is applied and the plan is
+reported as WITHHELD). See error.map.md + migrations.map.md.
+
+**`referencesHint(raw)`** — exported from `schema-differ.js` (:1756). Builds the "you wrote X, the
+only form is Y" half of the `E-SCHEMA-011` message from the author's raw text.
+
+**`ColumnDecl.references` is now two-valued at parse time.** `parseColumns` records a `references`
+clause that does NOT match the single §39.5.5 production (`references <table>(<column>)`, table name
+OUTSIDE the parens) into a `malformedReferences` collection rather than dropping it. Every other
+shape — `references(owners.id)`, `references owners (id)`, `references owners.id` — used to compile
+and migrate clean with NO `REFERENCES` clause and NO diagnostic. `gauntlet-phase1-checks.js` turns
+that collection into `E-SCHEMA-011`. Supporting helper: `blankLiteralBodies(s)` (:232) blanks string
+literals and strips `//` comments first, so `default('see references')` or a comment mentioning the
+word cannot false-fire the detector.
+
 
 ### ActualTable / ActualColumn  [schema-differ.js, `readActualSchema`/`readActualSchemaPg`]
 The LIVE-database-read counterpart `diffSchema` compares `TableDecl`/`ColumnDecl` against. Same
@@ -174,6 +216,29 @@ reproducer set to run first.
 ## `<outlet>` (§20.8) — also NOT a dedicated FileAST shape
 Same structural-element-registry pattern as `<theme>`/`<defaults>`/`<onchange>` — no `OutletNode` type in ast.ts. Recognized/validated by symbol-table.ts PASS 15.5.
 
+## Codegen-internal binding shapes (binding-registry.ts) — NOT ast.ts types
+
+`LogicBinding` (`codegen/binding-registry.ts`, a pure data registry with no imports) is the
+emit-time record every event/logic binding is registered as. Fields that decide EMISSION SHAPE, not
+just wiring:
+
+- `isReactiveValueAttr` / `valueAttrName` / `valueAttrIsFormValue` / `valueAttrKey` — the #81
+  writer-ownership set, computed by `emit-html.ts`'s `analyzeWriterConflict`.
+- **`directiveIsFormValue?: boolean` (NEW this window, i225)** — set ONLY when an `attr-template`
+  binding is a `value="${…}"` on a form control (`<input>`/`<textarea>`/`<select>`) with NO sibling
+  `bind:value`/`bind:valueAsNumber`. When set, `emit-variant-guard.ts` writes the caret-safe `.value`
+  PROPERTY (`{ const _v = expr; if (el.value !== _v) el.value = _v; }`) instead of
+  `setAttribute("value", …)`. **It must be computed at REGISTRATION in `emit-html.ts`**, where the
+  element `tag` and the sibling `attrs` array are in scope — the arm wire fn only ever sees the
+  pre-lowered binding, never the markup node. This mirrors the file-scope `isFormControlValue`
+  decision in `emit-bindings.ts` (i174); the `!hasBindValue` half is deliberate, because a sibling
+  `bind:value` is the sanctioned two-way owner and a second `.value` writer would compete with it.
+
+`EachReconcileCtx` (`codegen/emit-each.ts`, module-level `_eachReconcileCtxStack`) — the LIVE stack
+of enclosing `<each>`/for-lift contexts at emit time, carrying `{iterVar, destructure?, …}`. S293/S294
+read it to build the per-item re-resolution preludes; the stack (not the AST) is what makes shadowing
+decidable, since a name bound by a NEARER ctx must suppress re-resolving a same-named enclosing var.
+
 ## §20.5 session-establishment — new attributes/config fields, NOT a new FileAST node type
 No `SessionDeclNode` exists — `session` is a reserved server-scope BUILTIN identifier. See auth.map.md for the three separate non-FileAST "auth config" shapes. **S288: `tenant-egress.ts`'s `buildTenantContext` now takes a second, optional arg (the `<schema>`-declared tables, from `extractDesiredSchema(fileAST).tables`) and unions them into `TenantContext.tenantScopedTables`** — previously it read ONLY the `<db>`-derived `ProtectContext.schemaByTable` registry, which left a `<schema>`-only app (no `<db>` block) with an EMPTY tenant set even though §14.8.10 says a `<schema>` table's `tenant_id` column presence IS the tenant declaration. See domain.map.md's §14.8.11 section for the full defect narrative (`g-dbauth-session-principal-not-wired`, RESOLVED S288).
 
@@ -181,7 +246,7 @@ No `SessionDeclNode` exists — `session` is a reserved server-scope BUILTIN ide
 FunctionType [type-system.ts:423], MapType [:318] (with `.set?: boolean` for §59.12 value-native Set), PredicatedType [:468] (with `subsetVariants`), the `<fn-return>` over-approximation sentinel (`FN_RETURN_TYPE_NAME`, :754). NO `AnyType`/`null` member exists — `any` and `null` are not scrml types (§14.1.1 / null-does-not-exist axiom).
 
 ## Tags
-#scrml #map #schema #ast #types #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column #auto-immutable #is-effectively-immutable #e-schema-010 #lowering-functions #sql-literal-lowering #tenant-context-union #resolved-gaps
+#scrml #map #schema #ast #types #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column #auto-immutable #is-effectively-immutable #e-schema-010 #lowering-functions #sql-literal-lowering #tenant-context-union #resolved-gaps #e-schema-011 #column-constraint-drift #references-hint #same-default-text #d5 #init-expr #logic-binding #directive-is-form-value #i225 #each-reconcile-ctx
 
 ## Links
 - [primary.map.md](./primary.map.md)

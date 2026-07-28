@@ -1,13 +1,21 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-07-27T11:00:00Z  commit: c700c435
+# updated: 2026-07-28T17:28:00Z  commit: 115e8b1b
 
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
 
-**Currency note (S288/S289, `f8a138e9` -> `c700c435`):** this pass made TWO targeted corrections
-below (the M1 mechanism note + the "Known open gaps" paragraph) to keep the §14.8.11 section from
-misstating now-resolved gap status. The rest of this file's content was NOT re-verified this window
-— see error.map.md/schema.map.md/migrations.map.md for the fully re-verified account of what changed.
+**Currency note (S297, `c700c435` -> `115e8b1b`):** this pass made THREE targeted changes and did
+NOT re-walk the rest of the file. (1) The third-party adopter's identity was scrubbed to match the
+`89db7981` privacy landing. (2) A NEW section — **"Coordinate space: SOURCE vs DIST"** — was added
+below the one-landmark section; it is a cross-cutting CLASS, not a bug, and no map row covered it,
+which is why an S296 dispatch found this map set "not load-bearing" for that arc. (3) A NEW section
+on **cross-chunk soft navigation (§20.8.2/§20.8.7)** was added, because navigate-wave1c moved that
+surface from "held/parked" to shipped. Everything else here is carried at its prior verification —
+see error.map.md / schema.map.md / migrations.map.md / dependencies.map.md for the fully re-verified
+account of what changed this window.
+
+**PRIOR currency note (S288/S289):** two targeted corrections (the M1 mechanism note + the "Known
+open gaps" paragraph); the rest was not re-walked then either.
 
 ## Core Concepts (by SPEC section)
 
@@ -66,7 +74,7 @@ BYTE-IDENTICAL to today. Mechanism: `schema-differ.js` (`generateDbAuthoritative
 
 **S288 fix — the session principal wasn't actually reaching a request (`g-dbauth-session-principal-
 not-wired`, was HIGH, RESOLVED).** Two compounding defects made the tier non-functional end-to-end
-for a `<schema>`-only app (no `<db>` block) — the exact shape it targets. Found by RediLedger's
+for a `<schema>`-only app (no `<db>` block) — the exact shape it targets. Found by an adopter's
 BEHAVIORAL run (real PG16, real Argon2id credentials, real cookie sessions over HTTP), not by any
 suite (the tier's own tests hand-execute `set_config` inside a transaction and never issue a
 request). **(C)** the RI-route handler a plain server `function` compiles to interpolated
@@ -210,6 +218,126 @@ build.map.md (`scrml db-migrate` flags), migrations.map.md (the whole apply mode
 
 **Outlet diagnostic family (4 codes):** `E-OUTLET-DUPLICATE`, `E-OUTLET-OUTSIDE-SHELL`, `E-OUTLET-AND-MAIN`, `W-OUTLET-ABSENT-SOFT-NAV-DISABLED`. See error.map.md.
 
+## Coordinate space: SOURCE vs DIST (§47.9.5) — a CLASS, not a bug (NEW section, S296 D-4)
+
+**Read this before touching any path computation in codegen, api.js, or a path-shaped oracle.**
+
+scrml's emitted tree is **not** a mirror of its source tree. SPEC §47.9.5 strips a leading `pages/`
+segment from `dirname(relative(outputBaseDir, source))`, so:
+
+| source | dist artifact |
+|---|---|
+| `pages/login.scrml` | `dist/login.server.js`, `dist/login.client.js`, `dist/login.html` |
+| `pages/customer/home.scrml` | `dist/customer/home.server.js` |
+| `models/auth.scrml` | `dist/models/auth.server.js` |
+| `pages.scrml` (root-level file, not a dir) | `dist/pages.server.js` |
+
+**The strip applies to the DIRNAME only; the basename is untouched.** `api.js`'s `pathFor` is the
+reference implementation; `emit-server.ts`'s `distServerPathOf` and `computeServedPath`, and
+`api.js`'s own forward-index builder, each mirror it explicitly.
+
+**The failure mode this creates.** Any code that reasons about a relationship between two files in
+SOURCE space and then emits or validates it against the DIST tree is off by **exactly one segment**
+— constant at every nesting depth, because the strip removes exactly one — for every file under
+`pages/`. It is off by ZERO on a project with no `pages/` segment, which is why it survives most
+fixtures. D-4's instance: a source-space `../models/auth.scrml` import emitted as
+`../models/auth.server.js`, which from `dist/login.server.js` points ABOVE `dist/`. **The compile
+stays GREEN** (a missing FILE is not a syntax error) and the bundle dies at runtime with
+`Cannot find module`.
+
+**Three lessons that generalize past D-4:**
+1. **A relationship between two files must be expressed in ONE space, consistently.** The fix is not
+   a `../` adjustment; it is to express BOTH endpoints in post-strip dist space and take the
+   relative path between them (`emit-server.ts` `distRelativeServerSpecifier`). `emit-client-esm.ts`
+   already did this for the client half — which is precisely why the client half resolved at every
+   depth while the server half did not.
+2. **The inverse transform is AMBIGUOUS; reversal must be a FORWARD INDEX.** A dist
+   `models/auth.server.js` could have come from `models/auth.scrml` OR from
+   `pages/models/auth.scrml`. `api.js` therefore maps every compiled source to the dist path it
+   WRITES (`distServerKeyToSource`) and looks the specifier up, rather than inverting.
+3. **An oracle validating in the implementation's own coordinate space inherits its blind spot.**
+   `W-SERVER-IMPORT-UNEMITTED` exists specifically to catch a cross-file `Cannot find module`, and
+   it was SILENT on the D-4 reproducer because it reversed in SOURCE space — the one space where the
+   path is always self-consistent. This is the S276 shape restated: *a guard written from the same
+   assumption as the code it guards proves nothing.* Both reversal sites in `api.js`
+   (`checkServerImportInvariant` and `emitValueOnlyServerJsForDanglingImports`) now route through
+   the same two-tier `serverImportTargetSource`, mirroring emit-server's two emission modes
+   one-for-one so guard and emitter cannot drift apart.
+
+Adjacent, same family: `rewriteRelativeImportPaths` (`api.js`) skips `.server.js`/`.client.js`
+specifiers. The SKIP is still correct — but its old justification ("they live in the dist tree at
+the same relative position as their `.scrml` source") was **FALSE**, and is now annotated as such.
+It is correct only because the emitter speaks dist space.
+
+**Platform note.** `isOutsideBase` and `distRelativeServerSpecifier` split on the PLATFORM `sep` and
+normalize to `/` — never on a hardcoded backslash, because on POSIX a literal `\` is a legal
+filename character. Same rationale `stripPagesPrefix` documents. This is exactly the class the
+non-blocking `windows` CI job exists to surface.
+
+## Runtime-chunk tree-shaking — a two-phase decision (§47.5, GH #234 / Bug 57 / GITI-036 class)
+
+The client runtime ships as CHUNKS, and a chunk is included only if something proves it is needed.
+The decision lives in **`codegen/emit-client.ts`**, in two phases, plus a declarative closure:
+
+1. **Pre-emit** — `detectRuntimeChunks(fileAST, ctx)` walks the AST. Sound for anything a walkable
+   node shape proves (an `<each>` needs `_scrml_reconcile_list`; a `==` on a structural value needs
+   `equality`).
+2. **Post-emit** — `POST_EMIT_HELPER_CHUNK_GATES` scans the EMITTED lines for helper references.
+   Necessary because some wiring is minted from the binding registry at emit time and has no
+   walkable pre-emit shape at all.
+3. **Closure** — `runtime-chunks.ts`'s `CHUNK_DEPENDENCIES` is transitively closed at the END of
+   `detectRuntimeChunks`, before the chunk set is frozen.
+
+**The failure mode is always the same shape and always ships silently:** the compile is green, the
+bundle references a helper nothing defined, and the app dies at load with
+`ReferenceError: _scrml_* is not defined` — which, when it lands at the top of `_scrml_boot`, aborts
+boot before ANY event handler binds. The adopter symptom is a page that renders correctly and does
+nothing.
+
+**Two traps specific to the post-emit phase.** (a) Entries match as SUBSTRINGS: a trailing `(` pins
+a CALL site, a bare name also catches a VALUE or `typeof` reference. GH #234 needed the bare form
+because `<errors of=…/>` captures `_scrml_message_for` as a value, never calling it. (b) A `typeof`
+guard around the reference does NOT make it safe: `_scrml_message_for` is a `CELL_SCOPE_ACCESSOR`, so
+`cell-accessor-rename.ts` rewrites BOTH occurrences — including the one inside `typeof` — to
+`_scrml_cs_message_for`, whose wrapper the chunk prologue always defines, so the guard always takes
+the true branch and the ReferenceError fires inside the wrapper body. The post-emit scan runs BEFORE
+that rename, which is what keeps the bare-name entry exact.
+
+## Cross-chunk soft navigation (§20.8.2 / §20.8.7) — SHIPPED (navigate-wave1c)
+
+Previously HELD/parked. Now implemented and SPEC-ratified, with `W-NAV-CHUNK-LOAD-FAILED` cataloged.
+
+A route served by a separate `pages/` file rides its OWN client chunk, and its reactive wiring lives
+THERE — so hydrating a soft-nav target without that chunk swaps in correct markup that is completely
+unwired. §20.8.2 step 3 therefore requires the runtime to LOAD the missing chunk(s) before swapping,
+**in the fetched document's own script order** (deps-first — a dependency chunk precedes its
+importer) and resolving URLs from that document's `<script src>` list rather than reconstructing
+them by convention.
+
+**"Already loaded" SHALL be decided by RESOLVED ABSOLUTE URL, never by file name.** A route's own
+chunk is emitted with NO directory component, so `pages/reports` and `pages/admin/reports` both
+reference `reports.client.js` while resolving to two distinct files
+(`g-nav-chunk-basename-collision-key`, PA-reproduced). Content hashing does not disambiguate them
+either — §47.9.8 hashing is build-path only, so `scrml compile`/`scrml dev` keep the un-hashed
+suffix.
+
+**On failure or timeout: hard-navigate, do not swap.** SSR-first is preserved; the destination still
+loads, as a full document. A failure arriving AFTER a newer navigation superseded this one bails
+SILENTLY — the newer navigation owns the outcome (last-nav-wins, §20.8.5).
+
+**The boot-timing consequence, which is the subtle half.** An INITIAL page load defers to
+`DOMContentLoaded` exactly as before. A chunk INJECTED after boot runs when DCL has already fired
+and will not fire again, so it must boot IMMEDIATELY. The emitted boot dispatch
+(`emit-event-wiring.ts`, mirrored in `emit-variant-guard.ts`) is therefore an IIFE around
+`function _scrml_boot()` plus a branch on the runtime flag `_scrml_chunk_loading`.
+**That flag is a DEPTH COUNTER, not a boolean** — the name is retained because the emitted dispatch
+tests it for truthiness, which reads a non-negative count correctly. It must COUNT because two
+OVERLAPPING navigations (an impatient double-click) each inject a script: with a shared boolean, the
+first chunk's settle cleared the flag out from under the second, which then registered `_scrml_boot`
+on a `DOMContentLoaded` that had already fired — so it never booted, never registered its
+rehydrator, and the newer nav still swapped, producing correct SSR markup that was completely inert,
+with no diagnostic and no hard-nav fallback.
+
 ## Business Invariants (language axioms, not app rules)
 - `null`/`undefined` do not exist in scrml source, in ANY position (§42). Absence is `not`.
 - Specificity is deleted under §65: an unconditional same-property overlap on a provably-shared element is a COMPILE ERROR (E-STYLE-CONFLICT), never a silent cascade pick.
@@ -258,7 +386,7 @@ Diagnostic emission — every pipeline stage emits `{code, message, severity, sp
 A returned function-expression closure (`return function name(){…}`, GITI-038) — owns its own body's scope/type/async analysis independent of its enclosing factory (`ReturnStmtNode.fnExprNode`, see schema.map.md).
 
 ## Tags
-#scrml #map #domain #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union
+#scrml #map #domain #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins
 
 ## Links
 - [primary.map.md](./primary.map.md)

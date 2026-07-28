@@ -1,16 +1,22 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-07-26T07:00:00Z  commit: f8a138e9
+# updated: 2026-07-28T16:40:00Z  commit: 115e8b1b
 
-## Runtime Dependencies — root package.json (v0.7.1)
+## MANIFEST SHAPE CHANGED THIS WINDOW — read this first
+
+`171f5f23` ("make scrml publishable") **deleted `compiler/package.json`** and **removed
+`"workspaces": ["compiler"]`**. There is now exactly ONE manifest in the repo (root
+`package.json`, v0.7.1). `acorn` and `astring` were HOISTED from the deleted compiler manifest into
+the root `dependencies`; `"private": true` was dropped; a `files` ALLOWLIST was added. Any map, doc
+or brief still describing a `compiler/` workspace at v0.2.0 is stale.
+
+## Runtime Dependencies — root package.json (v0.7.1, the SOLE manifest)
 @modelcontextprotocol/sdk@1.29.0 — MCP server SDK for the scrml MCP integration
+acorn@^8.16.0 — JS parser for escape-hatch (`_{}`) expressions + the E-CG-001 acorn-exact egress scan + the chunk-namespace cell-accessor-rename pass **(HOISTED this window from the deleted compiler manifest)**
+astring@^1.9.0 — JS AST-to-source printer, paired with acorn for re-serializing escape-hatch nodes **(HOISTED this window)**
 pg@^8.22.0 — bundled Postgres client; drives §38.13 realtime LISTEN bridge + `scrml introspect`
 vscode-languageserver@^9.0.1 — LSP server protocol implementation
 vscode-languageserver-textdocument@^1.0.11 — LSP text document utilities
-
-## Runtime Dependencies — compiler/package.json (compiler workspace, v0.2.0)
-acorn@^8.16.0 — JS parser for escape-hatch (`_{}`) expressions + the E-CG-001 acorn-exact egress scan + the chunk-namespace cell-accessor-rename pass
-astring@^1.9.0 — JS AST-to-source printer, paired with acorn for re-serializing escape-hatch nodes
 
 ## Dev / Build Dependencies — root package.json
 @happy-dom/global-registrator@^20.8.9 — DOM environment for browser-suite Bun tests
@@ -19,123 +25,198 @@ happy-dom@^20.8.9 — fast in-process DOM used by compiler/tests/browser
 marked@^14.1.3 — Markdown parser used by docs/build.ts
 puppeteer@^24.40.0 — headless browser support for e2e/docs tooling
 
-## Dev Dependencies — compiler/package.json
-@happy-dom/global-registrator@^20.8.9 — DOM environment for compiler-workspace browser tests
+## Published surface (`files` allowlist — new this window)
+`compiler/bin/`, `compiler/src/`, `compiler/native-parser/`, `compiler/runtime/`, `stdlib/`,
+`README.md`, `LICENSE`. It is an ALLOWLIST, not a denylist — **anything new is excluded by
+default**. `stdlib/` is REQUIRED at runtime (`module-resolver.js`'s `STDLIB_ROOT` resolves
+`../../stdlib`), not optional. Deliberately excluded: `compiler/tests` (20M), `self-host*`,
+`samples/`, `examples/` (12M), `SPEC.md`/`PIPELINE.md` (docs live on scrml.dev).
 
 ## Editor-tooling Dev Dependencies — editors/vscode/package.json
 vscode-textmate, vscode-oniguruma — bundled TextMate-grammar test harness (tokenize.js / regression-scan.js); not part of the compiler pre-commit gate, needs its own `npm i`.
 
 ## CI-only External Actions (not npm deps — GitHub Actions)
-actions/checkout@v4/v6, oven-sh/setup-bun@v2, anthropics/claude-code-action@v1 — see build.map.md / infra.map.md for CI wiring; anthropics/claude-code-action needs the `ANTHROPIC_API_KEY` repo secret to activate.
+actions/checkout@v4, oven-sh/setup-bun@v2, anthropics/claude-code-action@v1 — see build.map.md / infra.map.md. **`ANTHROPIC_API_KEY` IS now set** (the daily `cloud-maps` run passes it), which retires the older "unset today" note; `MAPS_PAT` (a fine-grained PAT) is the checkout/PR identity for `cloud-maps.yml`.
 
 ## Runtime Engine
-bun>=1.3.13 — required; no Node support (Bun-specific APIs used throughout: Bun.serve, bun:sqlite, Bun.$, Bun.SQL). **The DB-authoritative tier (below) is the first surface to depend on `Bun.SQL`'s transaction API (`sql.begin(async (tx) => …)`) and `bun:sqlite`'s `Database` for the `scrml db-migrate` apply loop** — both already-bundled Bun APIs, so this adds ZERO new external dependency.
+bun>=1.3.13 — required; no Node support (Bun-specific APIs used throughout: Bun.serve, bun:sqlite, Bun.$, Bun.SQL, Bun.hash). The DB-authoritative tier depends on `Bun.SQL`'s transaction API (`sql.begin`) and `bun:sqlite`'s `Database` for the `scrml db-migrate` apply loop — both already-bundled.
 
-No dependency-manifest change at this HEAD — root `package.json` and `compiler/package.json` are untouched by every landing in this window, including the S287 DB-authoritative tier (M1 reads/M2 apply-seam/P2 writes): it is entirely first-party (`Bun.SQL`/`bun:sqlite`, already-bundled) and adds ZERO external dependency. The chunk-namespacing BUG-6 arc (prior window) likewise added none.
+**Zero NEW external dependency this window.** Every landing (`sql-table-refs.js`, the D-4 dist-space
+re-basing, the D-5 module-const emission, the §13.2 `on mount` async scope, the navigate-wave1c
+cross-chunk loader, the per-item reconcile family, the `outline-*` Tailwind registrations) is
+entirely first-party. The only manifest movement is the hoist + de-workspacing above.
 
 ## Internal Module Graph — compiler pipeline (compiler/src/api.js is the spine)
 
 | Stage | Module(s) | Feeds |
 |---|---|---|
-| CLI dispatch | cli.js | commands/{compile,dev,build,serve,migrate,**db-migrate**,promote,generate,init,introspect,semdiff}.js — **11 verbs** (was 10; `db-migrate` NEW S287, see below) |
+| CLI dispatch | cli.js | commands/{compile,dev,build,serve,migrate,db-migrate,promote,generate,init,introspect,semdiff}.js — **11 verbs** |
 | Split | block-splitter.js | ast-builder.js, native-parser/parse-file.js |
-| Parse (live) | ast-builder.js, expression-parser.ts | type-system.ts, symbol-table.ts, codegen. Carries the GITI-038/039 `return-stmt.fnExprNode` structural parse + `joinWithNewlines` span-adjacency rejoin (see schema.map.md). |
-| Parse (native, canary) | native-parser/*.js (paired w/ *.scrml) | native-walker/*, native-parser-canary/within-node-classifier.ts, lsp/handlers.js |
-| Tag-canonicalize (Stage 3.055 TC) | tag-canonicalizer.ts | landmark-tag.ts + api.js — a capitalized tag (`<Button>`) emits what the §15.X registry resolved it to (§4.2/§4.3 casing-irrelevant). |
-| Component expand | component-expander.ts | validators/post-ce-invariant.ts, attribute-interpolation.ts, attribute-allowlist.ts. `substitutePropsInLogicStmt`/`expandComponentNode` carry the GITI-038 fnExprNode + #81 `_componentPropNames` work. |
-| Protect / route infer | protect-analyzer.ts, route-inference.ts | codegen/protect-egress.ts, codegen/egress-field-scan.ts (E-CG-001). `collectFunctionNodes`/`walkBodyForTriggers` descend into `fnExprNode` (GITI-038); `AuthMiddleware.sessionSecure?` (§20.5.1). |
-| Type check | type-system.ts, meta-checker.ts | dependency-graph.ts, auth-graph.ts. `annotateNodes` binds the `session` server builtin (§20.5, E-SCOPE-012). The SSR auth-scoped omission LINT fires `I-SSR-AUTH-SCOPED-CLIENT-HYDRATED` off the shared `codegen/sql-lex.ts` row-scope predicate (§52.15.5, #120). `E-ERROR-010` dedicated (#121). |
+| Parse (live) | ast-builder.js, expression-parser.ts | type-system.ts, symbol-table.ts, codegen. **`expression-parser.ts` now also exports `forEachIdentInExprNode`**, consumed by `emit-server.ts`'s D-5 module-const resolvability check. |
+| Parse (native, canary) | native-parser/*.js (paired w/ *.scrml) | native-walker/*, native-parser-canary/within-node-classifier.ts, lsp/handlers.js. ZERO diff this window. |
+| Tag-canonicalize (Stage 3.055 TC) | tag-canonicalizer.ts | landmark-tag.ts + api.js |
+| Component expand | component-expander.ts | validators/post-ce-invariant.ts, attribute-interpolation.ts, attribute-allowlist.ts |
+| Protect / route infer | protect-analyzer.ts, route-inference.ts | codegen/protect-egress.ts, codegen/egress-field-scan.ts (E-CG-001). **protect-analyzer.ts is the SOLE `E-PA-*` fire site (7 codes); `E-PA-002`'s message now leads with the `<schema>` + `scrml db-migrate` remedy (S292).** |
+| Type check | type-system.ts, meta-checker.ts | dependency-graph.ts, auth-graph.ts |
+| Schema declaration checks | gauntlet-phase1-checks.js | `E-SCHEMA-010` (via `findNonLiteralSetItems`) + **NEW `E-SCHEMA-011`** (via `parseColumns`'s `malformedReferences` + `referencesHint`) — both helpers live in schema-differ.js |
 | Reachability / batch | reachability-solver.ts, batch-planner.ts, cps-batch-planner.ts | codegen |
-| Name/symbol resolve | name-resolver.ts, symbol-table.ts | codegen. **symbol-table.ts PASS 15.5 owns the `<outlet>` placement pass** (E-OUTLET-OUTSIDE-SHELL / E-OUTLET-DUPLICATE / E-OUTLET-AND-MAIN). |
-| Codegen dispatch | code-generator.js (= codegen/index.ts) | codegen/emit-*.ts (client, server, html, css, each, match, engine, ssr, channel, worker, functions, validators, library, table-for, form-for, tool, test, theme-reset, async-combinators). **Also decides `E-DBAUTH-SQLITE` at compile time** (`annotateDbScopes` driver-resolution stage) for a `db-authoritative` table or a SECDEF `fn` on a non-Postgres target. |
-| **DB-authoritative tier — §14.8.11/.1/.2, NEW S287 (M1 reads / M2 apply-seam / P2 writes)** | `schema-differ.js` (`parseSchemaBlock` — brace-depth-aware, returns `{tables, fns}`; `parseColumns`'s `immutable` keyword; `generateDbAuthoritativeDDL` S1 RLS + S6 role + S3 column-scoped GRANT reshape; `generateSecdefDDL` + `generateScrmlHasCapDDL` S4 SECDEF choke; the `allowDestructive` never-clobber fence in `diffSchema`) + `codegen/db-authoritative.ts` (NEW file — `appDeclaresDbAuthoritative`, `wrapPrincipalTxn` the A1/S2 per-request principal-txn wrapper, `extractDesiredSchema` the migration-apply desired-state seam) + `codegen/sql-ident.ts` (NEW file — `quoteIdent`, the sole safe SQL-identifier escaper) + `codegen/tenant-egress.ts` (extended: `_scrml_active_tenant`/`_scrml_active_caps` server-resolved principal resolvers, part of `SERVER_TENANT_HELPER`) + `compiler/src/commands/db-migrate.js` (NEW file — the `scrml db-migrate` CLI) | `codegen/index.ts` :4663-4672 wires `appDeclaresDbAuthoritative`/`wrapPrincipalTxn` into `emit-server.ts`'s `generateServerJs`; `emit-channel.ts` also imports `quoteIdent` (aliased `pgQuoteIdent`) for channel-DDL identifier safety. See error.map.md (E-DBAUTH-*/W-DBAUTH-*/W-SCHEMA-DESTRUCTIVE-DROP), domain.map.md (§14.8.11 concept), schema.map.md (`TableDecl`/`SecdefFnDecl` codegen-internal shapes), build.map.md (`scrml db-migrate` flags). |
-| Confidentiality — tenant-row floor (#117/#118, §14.8.10) | codegen/tenant-egress.ts (`buildTenantContext`, `resolveTenantScoping`, `classifyTenantWrite`, `detectTenantRawEgress`, `rewriteSelectAddTenantId`, `rewriteInsertAddTenantId`, **+ `_scrml_active_tenant`/`_scrml_active_caps`, NEW S287**) | consumed by codegen/emit-server.ts: E-TENANT-WRITE/AGG/RAW-EGRESS hard-fails + I-TENANT-STRIP/ACROSS. The ROW-level twin of protect-egress.ts (§14.8.9 column floor). `_scrml_active_tenant`/`_scrml_active_caps` are the SAME server-resolved-principal helpers the DB-authoritative A1 wrapper (`wrapPrincipalTxn`) injects into the reserved txn — one principal, two consumers. See error.map.md + domain.map.md. |
-| Client Router — landmark + shell composition (§20.8.1.1/§40.8.2) | codegen/emit-html.ts (`treeHasAuthorMain`) + codegen/index.ts (`findOutletMarkedOpenTag`/`findBareMainOpenTag` slot detection, `retagOpenTag`, `findMatchingCloseIdx`) | TWO STAGES, one invariant, communicating ONLY through the emitted `data-scrml-outlet` marker. See domain.map.md. |
-| SSR auth-scoped omission + SQL-interp classifier (#120, §52.15.5) | codegen/sql-lex.ts (`liveSqlInterpolations`, `liveSqlInterpolationExprs`, `sqlHasLiveInterpolation`) | the SINGLE LIVE-vs-INERT `${}` classifier, imported by codegen/collect.ts AND codegen/rewrite.ts so they CANNOT diverge; the omission itself is emitted in type-system.ts (the lint) + codegen/emit-server.ts (the SSR-seed drop + per-cell /__mountHydrate gate). |
-| Colorless-async classification | codegen/emit-library-shared.ts (`computeAsyncFnNames`, `computeNestedAsyncFnHolders`), codegen/scheduling.ts (`buildCalleeImportMap`, `injectPromiseAwait`), codegen/emit-expr.ts (`setServerAsyncClassifier`, `clientAsyncFnNames`) | emit-library.ts, emit-server.ts, emit-tool.ts, emit-logic.ts, emit-control-flow.ts, emit-functions.ts — see "Colorless-async" section below |
-| Batch-hoist / server-call fencing (§19.9.9.2) | codegen/emit-server.ts + codegen/scheduling.ts | full control-transfer set + filler-distance across control-flow guards; a client side-effect between two server calls is a batch boundary. |
-| Reactive value= form-control write | codegen/emit-bindings.ts | a reactive `value=` on a form control writes the `.value` PROPERTY (not the attribute). |
+| Name/symbol resolve | name-resolver.ts, symbol-table.ts | codegen. symbol-table.ts PASS 15.5 owns the `<outlet>` placement pass. |
+| Codegen dispatch | code-generator.js (= codegen/index.ts) | codegen/emit-*.ts. Also the `E-DBAUTH-SQLITE` compile-time gate (`annotateDbScopes`) and the §40.8.2 shell composition. **NOT the runtime-chunk gates — those are emit-client.ts.** |
+| **Runtime-chunk tree-shake gates** | **codegen/emit-client.ts** (`detectRuntimeChunks` :273 pre-emit AST walk; `POST_EMIT_HELPER_CHUNK_GATES` :2167 post-emit reference scan) + **codegen/runtime-chunks.ts** (`CHUNK_DEPENDENCIES` :384, closed over at the END of `detectRuntimeChunks`) + compute-pgo-flags.ts (the `reset`/`equality`/for-stmt PGO inputs `detectRuntimeChunks` reads) | `ctx.usedRuntimeChunks` -> the assembled runtime slice. **This is the locus for any `ReferenceError: _scrml_* is not defined` in a shipped bundle.** See "Runtime-chunk gating" below. |
+| **Coordinate space — SOURCE vs DIST (D-4, S296)** | **codegen/emit-server.ts** (`distRelativeServerSpecifier`, `isOutsideBase`, `distServerPathOf`) emits; **api.js** (`distServerKeyToSource` + `distDirOfSource` forward index, `serverImportTargetSource`) reverses; **codegen/emit-client-esm.ts** already computed client URLs in dist space | `checkServerImportInvariant` (`W-SERVER-IMPORT-UNEMITTED`) and `emitValueOnlyServerJsForDanglingImports` — BOTH reversal sites. See "Coordinate space" below. |
+| **§13.2 async scope for `on mount` (GH #237)** | **codegen/scheduling.ts** (`scanEmittedCode`, `precedesBlockBrace`, `continuesEmittedStatement`, `splitEmittedStatements`, `liftEmittedStatementAwaits`, `emittedCodeCallsServerFn` — all NEW this window) | **codegen/emit-reactive-wiring.ts:536-537** — the sole consumer. A `_onMountEffect` body that calls a server fn is wrapped in `(async () => { … })().catch(_scrml_error_boundary_log)` with the same `injectPromiseAwait` policy the two already-correct paths use. |
+| **D-5 server module-const closure** | **codegen/emit-server.ts** `emitReferencedModuleConstLines(fileAST, assembledBody)` | the assembled `.server.js` bundle, emitted AFTER the value exports and BEFORE `finalEmitted` is joined. ADDITIVE — the client bundle is byte-unchanged. |
+| **§14.8.11 queried-table grants (S292)** | **sql-table-refs.js** (NEW — `tableRefsInSql`/`sqlBodiesInSource`/`tableRefsInSource`) -> **commands/db-migrate.js** (`parseProjectSchema` returns `{queriedTables, queriedPrivileges, undeterminedSql}`; `runPgApply`'s signature widened to carry the first two) -> **schema-differ.js** `diffSchema(options.queriedTables, options.queriedPrivileges)` | the `GRANT <privs> ON <table> TO scrml_app` branch for NON-db-authoritative tables the app's `?{}` bodies touch. See migrations.map.md. |
+| DB-authoritative tier — §14.8.11/.1/.2 | schema-differ.js + codegen/db-authoritative.ts + codegen/sql-ident.ts + codegen/tenant-egress.ts + commands/db-migrate.js | codegen/index.ts wires `appDeclaresDbAuthoritative`/`wrapPrincipalTxn` into emit-server.ts's `generateServerJs`; emit-channel.ts imports `quoteIdent` (aliased `pgQuoteIdent`). See error.map.md / domain.map.md / schema.map.md / migrations.map.md. |
+| Confidentiality — tenant-row floor (§14.8.10) | codegen/tenant-egress.ts (`buildTenantContext` — two-arg since S288, unioning `<schema>`-declared tables; `resolveTenantScoping`, `classifyTenantWrite`, `detectTenantRawEgress`, `rewriteSelectAddTenantId`, `rewriteInsertAddTenantId`, `_scrml_active_tenant`/`_scrml_active_caps`) | codegen/emit-server.ts: E-TENANT-WRITE/AGG/RAW-EGRESS + I-TENANT-STRIP/ACROSS |
+| Client Router — landmark + shell composition (§20.8.1.1/§40.8.2) | codegen/emit-html.ts (`treeHasAuthorMain`) + codegen/index.ts (`findOutletMarkedOpenTag`/`findBareMainOpenTag`, `retagOpenTag`, `findMatchingCloseIdx`, **`computeDependencyClientScripts` — 4-arg since GH #235**) | TWO STAGES, one invariant, communicating ONLY through the emitted `data-scrml-outlet` marker. |
+| **Client Router — cross-chunk soft nav (navigate-wave1c, §20.8.2/§20.8.7)** | **runtime-template.js** (`_scrml_nav_client_chunks`, `_scrml_nav_missing_chunks`, `_scrml_nav_load_chunks`, `_scrml_nav_chunk_failed`, `_SCRML_NAV_CHUNK_TIMEOUT_MS`, the `_scrml_chunk_loading` DEPTH COUNTER) + **codegen/emit-event-wiring.ts** (the IIFE + `_scrml_boot` boot dispatch) + **codegen/emit-variant-guard.ts** (the same eager-vs-DCL dispatch for engine/match arm wiring) | `W-NAV-CHUNK-LOAD-FAILED` (now IMPLEMENTED and cataloged — see error.map.md). |
+| SSR auth-scoped omission + SQL-interp classifier (§52.15.5) | codegen/sql-lex.ts | imported by codegen/collect.ts AND codegen/rewrite.ts so they CANNOT diverge |
+| Colorless-async classification | codegen/emit-library-shared.ts, codegen/scheduling.ts, codegen/emit-expr.ts | emit-library.ts, emit-server.ts, emit-tool.ts, emit-logic.ts, emit-control-flow.ts, emit-functions.ts |
+| Batch-hoist / server-call fencing (§19.9.9.2) | codegen/emit-server.ts + codegen/scheduling.ts | full control-transfer set + filler-distance across control-flow guards |
+| Reactive value= form-control write | codegen/emit-bindings.ts (file scope, i174) **+ codegen/emit-html.ts -> binding-registry.ts `directiveIsFormValue` -> codegen/emit-variant-guard.ts (arm bodies, i225, NEW this window)** | a reactive `value=` on `<input>`/`<textarea>`/`<select>` writes the `.value` PROPERTY, inequality-guarded so re-assigning the same string cannot reset the caret. Falls through to `setAttribute` when a sibling `bind:value`/`bind:valueAsNumber` owns it. |
+| **Per-item reconcile family (S293/S294)** | **codegen/emit-lift.js** (`computeItemDerivedReplay`, `_collectDeclNodesInScope`) + **codegen/emit-each.ts** (`pickReferencedEnclosingCtxs`, `referencesFreeIdent`, `enclosingResolvePreludeLines`, `enclosingResolvePreludeForHandler`) | per-item text/class/attribute/if/event bindings re-resolve the live item BY KEY and replay item-derived locals on REPLACE. Shadow-safe: a nearer ctx's binding suppresses re-resolving a same-named enclosing var (a `let` redeclaration would be `E-CODEGEN-INVALID-LOGIC`). |
+| Tailwind utility registry + lint | **tailwind-classes.js** (`registerColors`/`registerBorders`/`registerEffects`/`registerRing`/**`registerOutline` NEW D-3**/`registerGradient`/`registerTransform`/`registerTransition`…, `findUnsupportedTailwindShapes`, `findUnrecognizedClasses`, `validateArbitraryCss`) | `W-TAILWIND-001`, `W-TAILWIND-UNRECOGNIZED-CLASS`, `E-TAILWIND-001` — see error.map.md |
 | Tool serve-harness | tool-program.ts, codegen/emit-tool.ts, codegen/emit-server.ts | §64.9 `serve=` listener-owning headless target |
-| CSS emission | codegen/emit-css.ts (`generateCss`, invoked from codegen/index.ts), codegen/emit-theme-reset.ts | §65 Wave-1: built-in `@layer reset`, `:where()`-flat, `<theme>` token→`:root` lowering; the §65.6 runtime theme-switch reflection is emitted in emit-client.ts (`emitThemeSwitchReflection`) |
-| CSS conflict check | codegen/css-conflict-check.ts | run post-CE at api.js Stage 3.4 over `collectCssBlocks`; emits E-STYLE-CONFLICT / W-STYLE-CONFLICT-POSSIBLE |
-| Reactive-attr writer-ownership (#81) | codegen/emit-html.ts (`analyzeWriterConflict`) | detects two writers on ONE physical DOM surface and emits `E-ATTR-WRITER-CONFLICT`, or a `LogicBinding` with `isReactiveValueAttr`/`valueAttrName`/`valueAttrKey` (codegen/binding-registry.ts) when there is no conflict |
-| Session establishment | compute-program-config.ts, route-inference.ts (`AuthMiddleware.sessionSecure`), codegen/emit-server.ts, codegen/emit-expr.ts | §20.5 `session.*` server builtin — see auth.map.md |
-| Content-hash asset naming | api.js pre-pass (`fnv1aHash`, gated on `contentHashAssets`) | build.js's `generateServerEntry` (cache-header policy); see build.map.md |
-| Validate emit | codegen/validate-emit.ts | final artifact sanity (single-JS-expression checks etc.) |
-| Meta-eval | meta-eval.ts | `^{}` meta-block execution. `serializeNode`'s return-stmt case serializes `fnExprNode` (GITI-038). |
+| CSS emission / conflict check | codegen/emit-css.ts, codegen/emit-theme-reset.ts / codegen/css-conflict-check.ts | §65 Wave-1; E-STYLE-CONFLICT / W-STYLE-CONFLICT-POSSIBLE |
+| Reactive-attr writer-ownership (#81) | codegen/emit-html.ts (`analyzeWriterConflict`) | `E-ATTR-WRITER-CONFLICT`, or a `LogicBinding` with `isReactiveValueAttr`/`valueAttrName`/`valueAttrKey` |
+| Session establishment | compute-program-config.ts, route-inference.ts, codegen/emit-server.ts, codegen/emit-expr.ts | §20.5 `session.*` server builtin — see auth.map.md |
+| Content-hash asset naming | api.js pre-pass (`fnv1aHash`, gated on `contentHashAssets`) | build.js's `generateServerEntry` |
+| Validate emit | codegen/validate-emit.ts | final artifact sanity |
+| Meta-eval | meta-eval.ts | `^{}` meta-block execution |
 
-## §14.8.11 DB-authoritative tier — the `scrml db-migrate` command graph (NEW S287)
+## Runtime-chunk gating — the tree-shake locus (READ BEFORE FIXING A BUNDLE ReferenceError)
 
-`commands/db-migrate.js`'s `runDbMigrate(args)` is the CLI entry: `parseArgs` (`--db`, `--dry-run`,
-`--allow-destructive`, exported for unit tests) -> `parseProjectSchema` (reuses the live parse
-pipeline `splitBlocks`->`buildAST`, then `extractDesiredSchema` per file, merging tables/fns
-first-decl-wins) -> the `E-DBAUTH-SQLITE` / `E-DBAUTH-NO-TENANT-COLUMN` pre-flights -> either
-`runPgApply` (Postgres: `pg_advisory_xact_lock` -> ensure the `_scrml_migrations` ledger DDL ->
-`readActualSchemaPg` + a narrow `pg_policies`/`pg_roles` presence read -> `diffSchema({driver:
-"postgres"})` -> apply each statement in ONE txn, recording `{object_kind, object_name, ddl_hash}`
-via `classifyStatement` — a statement failure rolls the WHOLE txn back) or `runSqliteApply`
-(general `<schema>`-apply, no roles/policies, one txn — Fork 5, "finally makes `<schema>` do
-something at deploy for every adopter"). `classifyStatement` (exported for unit tests) coarsely
-names an applied DDL statement's `{kind, name}` for the ledger row (table/policy/function/role/
-grant/revoke/alter/drop-policy/drop-table).
+Three files, one decision, and **none of them is `codegen/index.ts`**:
+
+1. **`codegen/emit-client.ts` `detectRuntimeChunks(fileAST, ctx)` (:273)** — the PRE-EMIT AST walk.
+   Registers a chunk when a walkable AST shape proves it is needed. Reads `compute-pgo-flags.ts`
+   results for the `reset` / `equality` / for-stmt gates and `ctx.hasPrefetchableLinks`. Several
+   emitters (`emit-control-flow.ts:625`, `emit-html.ts:3314/3890`, `route-splitter.ts`,
+   `reactive-deps.ts`, `emit-synth-surface.ts`, `context.ts`) carry "both sites must agree" comments
+   pointing back here — those are MIRRORS of the gate, not the gate.
+2. **`codegen/emit-client.ts` `POST_EMIT_HELPER_CHUNK_GATES` (:2167)** — the POST-EMIT reference
+   scan, for helpers no pre-emit AST walk can see (wiring minted from the binding registry at emit
+   time). Entries match as **SUBSTRINGS** of an emitted line: a trailing `(` pins a CALL site, a
+   bare name also catches a VALUE / `typeof` reference. Current table:
+   `["_scrml_structural_eq(", "equality"]`, `["_scrml_reset(", "reset"]`,
+   **`["_scrml_message_for", "messages"]` (NEW, GH #234)**. The scan runs BEFORE
+   `cell-accessor-rename.ts`'s `_scrml_cs_` rename, which is why the bare-name entry is exact
+   (`_scrml_cs_message_for` does not contain `_scrml_message_for` as a substring).
+3. **`codegen/runtime-chunks.ts` `CHUNK_DEPENDENCIES` (:384)** — declarative cross-chunk edges,
+   transitively closed at the END of `detectRuntimeChunks` before the chunk set is frozen.
+
+**GH #234, the shape to recognize:** `<errors of=…/>` wiring (emit-event-wiring.ts) captures
+`_scrml_message_for` as a VALUE behind `typeof` rather than calling it, so the call-form gate could
+not match; the `messages` chunk that DEFINES it was gated only on a state-decl validator carrying an
+inline override. The `typeof` guard did NOT save it: `_scrml_message_for` is a
+`CELL_SCOPE_ACCESSOR`, so the post-hoc namespace rename rewrote BOTH occurrences — including the one
+inside `typeof` — to `_scrml_cs_message_for`, whose wrapper the chunk prologue ALWAYS defines. The
+guard therefore always took the true branch and the `ReferenceError` fired inside the wrapper body
+at the top of `_scrml_boot`, aborting boot before any handler bound. Adopter symptom: a login form
+issuing zero network requests while every server route was green.
+
+## Coordinate space — SOURCE vs DIST (D-4, S296). The class, not just the bug.
+
+**The dist tree is NOT a mirror of the source tree.** SPEC §47.9.5 strips a leading `pages/`
+segment from `dirname(relative(outputBaseDir, source))`, so `pages/login.scrml` lands at
+`dist/login.server.js`, NOT `dist/pages/login.server.js`. The strip applies to the DIRNAME only;
+the basename is untouched.
+
+- **Emission.** `emit-server.ts` previously swapped only the extension on `stmt.source`, which
+  overshoots by exactly one segment for every importer under `pages/`: a source-space
+  `../models/auth.scrml` became `../models/auth.server.js`, which from `dist/login.server.js` points
+  ABOVE `dist/`. The compile stayed GREEN (a missing file is not a syntax error) and the bundle died
+  at runtime with `Cannot find module`. Now `distRelativeServerSpecifier` expresses BOTH endpoints in
+  post-strip dist space and takes the relative path between them, prefixing `./` when needed (a bare
+  `models/auth.server.js` would be a node_modules lookup). Falls back to verbatim when
+  `outputBaseDir` is absent or either endpoint is outside the base. On a project with no `pages/`
+  segment the two spaces coincide and the emit is byte-identical.
+- **Reversal.** `api.js` must reverse an emitted specifier back to a SOURCE path to look the target
+  up in `cgResult.outputs` (source-keyed). The inverse transform is **AMBIGUOUS** — a dist
+  `models/auth.server.js` could come from `models/auth.scrml` OR `pages/models/auth.scrml` — so
+  reversal is a FORWARD INDEX, not an inverse: `distServerKeyToSource` maps every compiled source to
+  the dist-relative `.server.js` it writes, through the same `pathFor` transform.
+  `serverImportTargetSource` is two-tier (dist first, source as the legacy no-`outputBaseDir`
+  fallback), mirroring emit-server's two emission modes one-for-one.
+- **Why the guard was silent.** `W-SERVER-IMPORT-UNEMITTED` exists precisely to catch a runtime
+  `Cannot find module`, and it stayed quiet on the D-4 reproducer because it validated in the ONE
+  space where the path is always self-consistent. **The oracle inherited the implementation's
+  coordinate assumption** (the S276 shape). `rewriteRelativeImportPaths`'s `.server.js`/`.client.js`
+  skip is still correct, but its OLD justification ("they live at the same relative position as
+  their source") was FALSE — the skip is correct only because the emitter now speaks dist space.
+
+## §14.8.11 DB-authoritative tier — the `scrml db-migrate` command graph
+
+`commands/db-migrate.js`'s `runDbMigrate(args)`: `parseArgs` (`--db`, `--dry-run`,
+`--allow-destructive`) -> `parseProjectSchema` (live parse pipeline `splitBlocks`->`buildAST`, then
+`extractDesiredSchema` per file, merging first-decl-wins; **NOW ALSO** unions
+`tableRefsInSource(source)` across every file into `{queriedTables, queriedPrivileges,
+undeterminedSql}`) -> the `E-DBAUTH-SQLITE` / `E-DBAUTH-NO-TENANT-COLUMN` pre-flights + an explicit
+operator warning per `undeterminedSql` entry -> either `runPgApply({connectionString, desired,
+dryRun, allowDestructive, queriedTables, queriedPrivileges})` or `runSqliteApply`. `printPlan(plan,
+actualTableCount, warnings)` distinguishes an EMPTY plan from a WITHHELD one.
 
 `schema-differ.js`'s `parseSchemaBlock` is the SHARED parser both `db-migrate` (via
-`extractDesiredSchema`) and the pre-existing SQLite migrate path consume — brace-depth-aware
-(`findSchemaBlockEnd` skips `"""…"""`-quoted plpgsql bodies so a P2 `fn`'s `IF…END IF` braces don't
-truncate a table scan), returns `{tables, fns}` (the `fns` array is ADDITIVE — empty for a schema
-with no `fn`, so all five pre-existing consumers of `.tables` are unaffected: protect-analyzer.ts,
-channel-watches.ts, gauntlet-phase1-checks, codegen/index.ts, db-authoritative.ts).
+`extractDesiredSchema`) and the pre-existing SQLite migrate path consume — brace-depth-aware,
+returns `{tables, fns}` (`fns` is ADDITIVE, so all five pre-existing `.tables` consumers —
+protect-analyzer.ts, channel-watches.ts, gauntlet-phase1-checks.js, codegen/index.ts,
+db-authoritative.ts — are unaffected).
 
 ## Internal Module Graph — supporting layers
 
 | Module | Role |
 |---|---|
-| codegen/db-authoritative.ts (NEW S287) | §14.8.11 M1/P2 server-emission: `appDeclaresDbAuthoritative(fileAST)` — the conditional-engagement gate (an app with ZERO `db-authoritative` tables emits byte-identically); `wrapPrincipalTxn(src)` — the A1/S2 SCOPE-AWARE hot-path transform, rewriting a `_scrml_sql`/`_scrml_sql_<n>` query site into a `.begin(async (tx) => …)` transaction that pins `scrml.tenant` + `scrml.principal.caps` (`set_config`, txn-scoped) then `SET LOCAL ROLE scrml_app`, ONLY inside a lexical scope where `_scrml_req` is bound (tracked via a brace-scope stack, not a name-blacklist — so a module-level infra helper like `_scrml_idempotency_ensure_table` is never wrongly wrapped); `extractDesiredSchema(fileAST)` — walks every `<schema>` block, merges tables+fns, and detects `W-DBAUTH-MARKER-NEARMISS`. Imported by codegen/index.ts (wired into emit-server.ts's `generateServerJs`) and commands/db-migrate.js. |
-| codegen/sql-ident.ts (NEW S287) | `quoteIdent(name)` — doubles an embedded `"` (`a"b` -> `"a""b"`), the ONLY safe way to interpolate a table/column/constraint name into emitted DDL. Security-critical: `readActualSchemaPg`/`readActualSchema` read names from the LIVE database (introspection), which an attacker who can influence the schema controls — `db-migrate` runs the resulting SQL as the MIGRATOR (most-privileged principal). Imported by schema-differ.js and codegen/emit-channel.ts (aliased `pgQuoteIdent`). |
-| schema-differ.js (extended S287) | Was §38.6 SQLite-only migration-SQL differ; now ALSO the desired-vs-actual Postgres differ + the DB-authoritative DDL emitter. NEW exports: `DBAUTH_ROLE` ("scrml_app"), `DBAUTH_POLICY` ("scrml_tenant_iso"), `DBAUTH_TENANT_GUC` ("scrml.tenant"), `DBAUTH_CAPS_GUC` ("scrml.principal.caps"), `generateBoundedRoleDDL`, `generateDbAuthoritativeDDL(table)` (S1 RLS+policy + S6/S3 GRANT — byte-identical to M1 when zero columns are `immutable`), `generateScrmlHasCapDDL()` (the `scrml_has_cap(text)` read helper, emitted once when any `fn` is declared), `generateSecdefDDL(fn, dbAuthTables)` (the hardened SECURITY-DEFINER emitter: bounded NOLOGIN owner role, `SET search_path = pg_catalog, public`, `REVOKE EXECUTE FROM PUBLIC` + `GRANT … TO scrml_app`), `readActualSchemaPg`/`readTableNamesPg` (async Postgres introspection, pre-existing), `emitScrmlSchemaSource` (pre-existing, `scrml introspect`'s self-verifying emit). `diffSchema`'s new `options.allowDestructive` fence (default false) suppresses a bare `DROP TABLE` for an actual-but-not-desired table (`W-SCHEMA-DESTRUCTIVE-DROP`) — Postgres DROP CASCADE-drops attached RLS/grants. |
-| codegen/chunk-namespace.ts | per-compilation-unit namespace for the runtime-global token space (N1 node-ids / N2 cell-keys / N3 type-names / N4 engine-names). Owns the module-level state + `nsId`/`nsName`/`nsCellKey`/`stripNsName`, the `fnv1aHash`-of-project-relative-path token (`chunkNamespaceToken`), the project-root walk (`resolveProjectRoot`), the cross-file cell owner map (`buildCellOwnerMap`), and the D2 distinctness guard (`assertChunkTokensDistinct` — a hard error, not `E-CG-010`). Imported ONLY by codegen/index.ts + the emit sites that call `nsId`. |
-| codegen/cell-accessor-rename.ts | `renameCellAccessors` — the Acorn-parse + range-SPLICE pass that rewrites every cell-accessor CALL in the assembled chunk body to its `_scrml_cs_` chunk-local wrapper. Only the callee moves; the store-key argument stays byte-identical. The SOLE producer of `_scrml_cs_*` — no emitter emits it. `CS_PREFIX`, `AccessorRenameResult{code,used,valueReferences}`. Imported ONLY by codegen/index.ts. |
-| codegen/fnv1a-hash.ts | the shared FNV-1a 32-bit -> 8-char base36 primitive (§47.1.3 normative). Three call-site classes: §47.1.2 per-binding type-encoding, §47.5 per-chunk content-address, and the chunk-NAMESPACE token — the only site that enforces token distinctness. Every token starts with `0`. |
-| codegen/sql-lex.ts (#120) | pure SQL-lexer-grade LIVE-vs-INERT `${}` classifier (§52.15.5). One function feeds BOTH `collect.ts` and `rewrite.ts` so a `${}` the classifier ignores is the SAME `${}` the emitter does not bind. |
-| codegen/tenant-egress.ts (#117/#118, extended S287) | the §14.8.10 tenant-row isolation floor — the ROW-level twin of protect-egress.ts (§14.8.9). Consumed by codegen/emit-server.ts. NOW ALSO owns `_scrml_active_tenant`/`_scrml_active_caps` (part of `SERVER_TENANT_HELPER`) — the server-resolved principal resolvers §14.8.11.2's A1 wrapper injects into the GUC-pinning txn. |
-| codegen/index.ts (= code-generator.js) | the codegen dispatcher AND the owner of the chunk-namespace WIRING AND §40.8.2 multi-file shell composition AND (S287) the `E-DBAUTH-SQLITE` compile-time driver-resolution gate (`annotateDbScopes`) AND the `appDeclaresDbAuthoritative`/`wrapPrincipalTxn` call sites (:4663-4672, feeding emit-server.ts's `generateServerJs`). |
-| codegen/emit-html.ts | markup emission; owns `analyzeWriterConflict` (#81, E-ATTR-WRITER-CONFLICT) and the §20.8.1.1 landmark decision (`treeHasAuthorMain`). |
-| codegen/emit-channel.ts | §38 realtime channel emission; imports `quoteIdent` (S287, aliased `pgQuoteIdent`) for identifier-safe channel-trigger DDL. |
-| codegen/emit-bindings.ts | event/logic binding emission; a reactive `value=` on a form control writes the `.value` property. |
-| codegen/reactive-deps.ts | cross-cutting reactive-cell/request/set/map dependency collectors, consumed by most emit-*.ts |
-| codegen/collect.ts | FileAST-shape collectors; imports `sql-lex.ts` for the §52.15.5 row-scope predicate + the GITI-038 fnExprNode descent + the #98 `collectCssVariableBridges` :root retarget. |
-| codegen/rewrite.ts | imports `sql-lex.ts` — `extractSqlParams` binds `$N` params off the SAME live-interpolation set the classifier uses. |
-| codegen/emit-theme-reset.ts | §65 CSS Wave-1 EMISSION half (the §65.2 conflict-CHECKER stays in css-conflict-check.ts). Imported by emit-css.ts, emit-html.ts, emit-client.ts, codegen/collect.ts. |
-| codegen/async-combinators.ts | pure async-combinator classification + runtime-helper-block synthesis; imported by emit-library.ts only |
-| codegen/binding-registry.ts | pure data registry for event/logic bindings, no imports. Carries (#81) `isReactiveValueAttr`/`valueAttrName`/`valueAttrIsFormValue`/`valueAttrKey` on `LogicBinding`. |
-| codegen/log-loc.ts | source-location resolver, standalone |
-| codegen/route-splitter.ts | per-route chunk manifest serialization (`serializeChunksManifest`) |
-| codegen/mcp-descriptors.ts | MCP tool descriptor synthesis (`buildMcpDescriptors`) |
-| codegen/db-driver.ts | `resolveDbDriver(url)` — classifies a `--db`/`db=` connection string into `{driver: "postgres"|"sqlite"|"mysql", connectionString}`; consumed by db-migrate.js and codegen/index.ts's driver-resolution gate. |
-| tag-canonicalizer.ts | Stage 3.055 TC — a capitalized tag emits its registry-resolved kind (§4.2/§4.3). Imported by landmark-tag.ts + api.js. |
-| engine-statechild-grammar.ts | pure constants shared by type-system.ts + codegen (no cycle) |
-| channel-watches.ts | shared §38.13 `watches=` schema/RowChange derivation, consumed by symbol-table.ts + type-system.ts |
-| theme-body-parser.ts | §65 `<theme>`/`<defaults>` BODY-FORM parser (declaration side); emit-theme-reset.ts owns EMISSION |
-| module-resolver.js | resolves `scrml:*` stdlib imports + relative imports; STDLIB_ROOT via `fileURLToPath`. Also consulted by chunk-namespace.ts `resolveExporterPath` for the cross-file cell owner map. |
-| semdiff.ts | emit-identity Tier-0 compare; `canonicalizeChunkNamespaceToken` discovers each chunk-namespace token from its structural emission sites and replaces it with a stable placeholder, so two byte-identical programs at different paths are not flagged behavioral. |
+| **sql-table-refs.js (NEW S292)** | A bounded identifier SCANNER over `?{}` SQL bodies — **explicitly not a SQL parser**. `tableRefsInSql(sql)` / `sqlBodiesInSource(source)` / `tableRefsInSource(source)` return `{tables, privileges, undetermined}`. `TABLE_INTRODUCERS` pairs each clause with the privilege it implies (`PRIV_RANK` resolves `DELETE FROM`'s double match); `UNRESOLVABLE` enumerates the five deliberately-unhandled shapes (CTE, subquery in FROM/JOIN, LATERAL, dynamic EXECUTE). **A caller MUST NOT read an empty `tables` as "touches nothing"** — that is how the bug re-reproduces on a different table, and it fails closed at runtime as an opaque `permission denied`. Consumed ONLY by commands/db-migrate.js. |
+| codegen/scheduling.ts | Colorless-async + batch-hoist scheduling, **plus (NEW this window) the emitted-JS scanner family**: `scanEmittedCode` tracks code / `'` / `"` / template-literal (incl. re-entrant `${}`) / `//` / block-comment modes, raises one depth counter on `(`/`[`/`{`, and reports depth-0 statement ends + depth-0 BLOCK brace groups (an object literal's closer is NOT a statement end). Consumed by emit-reactive-wiring.ts only. |
+| codegen/db-authoritative.ts | `appDeclaresDbAuthoritative` (conditional-engagement gate), `wrapPrincipalTxn` (A1/S2 scope-aware txn wrapper, brace-scope-stack tracked so module-level infra helpers are never wrapped), `extractDesiredSchema` (+ `W-DBAUTH-MARKER-NEARMISS`). Unchanged this window. |
+| codegen/sql-ident.ts | `quoteIdent(name)` — doubles an embedded `"`. The ONLY safe way to interpolate a DB identifier anywhere in the pipeline. Imported by schema-differ.js and codegen/emit-channel.ts (aliased `pgQuoteIdent`). Unchanged this window. |
+| schema-differ.js | The differ + DB-authoritative DDL emitter. Exports: `parseSchemaBlock`, `readActualSchema`, **`columnConstraintDrift` (NEW)**, `diffSchema`, `generateCreateTable`, `DBAUTH_ROLE`/`DBAUTH_POLICY`/`DBAUTH_TENANT_GUC`/`DBAUTH_CAPS_GUC`, `generateBoundedRoleDDL`, `generateDbAuthoritativeDDL`, `generateScrmlHasCapDDL`, `generateSecdefDDL`, **`referencesHint` (NEW)**, `findNonLiteralSetItems`, `mapPgTypeToScrml`, `emitScrmlSchemaSource`. |
+| codegen/chunk-namespace.ts | per-compilation-unit namespace for the runtime-global token space. Owns `nsId`/`nsName`/`nsCellKey`/`stripNsName`, `chunkNamespaceToken`, `resolveProjectRoot`, `buildCellOwnerMap`, and `assertChunkTokensDistinct` (a hard error, deliberately NOT `E-CG-010`). |
+| codegen/cell-accessor-rename.ts | `renameCellAccessors` — the Acorn-parse + range-SPLICE pass rewriting every cell-accessor CALL to its `_scrml_cs_` chunk-local wrapper. The SOLE producer of `_scrml_cs_*`. **Runs at bundle assembly in index.ts, AFTER emit-client.ts's post-emit chunk scan** — that ordering is what makes the bare-name gate entry exact. |
+| codegen/fnv1a-hash.ts | the shared FNV-1a 32-bit -> 8-char base36 primitive (§47.1.3). |
+| codegen/runtime-chunks.ts | the runtime chunk catalog + `CHUNK_DEPENDENCIES`. |
+| compute-pgo-flags.ts | the profile-guided flags `detectRuntimeChunks` reads for the `reset` / `equality` / for-stmt gates. Its header comments are the best in-tree narrative of what a missed gate costs. |
+| codegen/sql-lex.ts | the pure LIVE-vs-INERT `${}` classifier (§52.15.5). One function feeds BOTH collect.ts and rewrite.ts. |
+| codegen/tenant-egress.ts | the §14.8.10 tenant-row isolation floor; also owns `_scrml_active_tenant`/`_scrml_active_caps`. |
+| codegen/index.ts | the codegen dispatcher; chunk-namespace WIRING; §40.8.2 shell composition (`computeDependencyClientScripts` is 4-arg since GH #235); the `E-DBAUTH-SQLITE` compile-time gate. |
+| codegen/emit-html.ts | markup emission; `analyzeWriterConflict` (#81); `treeHasAuthorMain` (§20.8.1.1); **`directiveIsFormValue` computation for arm-body `value=` (i225)**. |
+| codegen/binding-registry.ts | pure data registry, no imports. `LogicBinding` carries `isReactiveValueAttr`/`valueAttrName`/`valueAttrIsFormValue`/`valueAttrKey` and **`directiveIsFormValue` (NEW, i225)**. |
+| codegen/emit-variant-guard.ts | `<match>`/`<engine>` arm wiring; consumes `directiveIsFormValue`; carries the navigate-wave1c eager-vs-DCL dispatch for arm wiring. |
+| codegen/emit-event-wiring.ts | event-handler wiring; owns the `_scrml_boot` IIFE + boot dispatch. |
+| codegen/route-splitter.ts | per-route chunk manifest serialization (`serializeChunksManifest`); several comments mirror the `detectRuntimeChunks` activation gates. |
+| codegen/db-driver.ts | `resolveDbDriver(url)` -> `{driver, connectionString}`. |
+| tailwind-classes.js | the Tailwind v3 utility registry + the three `*-TAILWIND-*` diagnostics. |
+| module-resolver.js | resolves `scrml:*` stdlib imports (`STDLIB_ROOT` via `fileURLToPath` — hence `stdlib/` in the publish allowlist) + relative imports. |
+| semdiff.ts | emit-identity Tier-0 compare; `canonicalizeChunkNamespaceToken` neutralizes per-path tokens. |
+| expression-parser.ts | `parseExprToNode`, `exprNodeCollectCallees`, **`forEachIdentInExprNode` (consumed by D-5)**. |
 
-## Colorless-async (Seam-A / Phase-2 combinators, GITI-037/GITI-038)
-
-A plain (non-`?{}`) function calling a Promise-returning host primitive (`safeCallAsync`, a `scrml:auth`/`scrml:http` async export) — directly, transitively through a local peer, or as a returned closure — is compiler-classified `async` and auto-awaited; there is no `async`/`await` in scrml source (§13.1/§13.2). Landed in 3 units:
-
-- **Seam-A Phase-1 (GITI-037 fix)** — unified the async classifiers onto `computeAsyncFnNames` (codegen/emit-library-shared.ts), closing 3 seed-holes. No-silent-leak backstop: a stdlib-async call in a non-awaitable position drains into a fatal `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`.
-- **Phase-2 combinator transform (FORK 1)** — the async-aware collection-callback combinator rewrite. `codegen/async-combinators.ts`: `ASYNC_COMBINATOR_METHODS` (`some`/`every`/`find`/`filter`/`map`/`forEach`/`reduce`/`flatMap`; `.sort` fail-closed), `callbackReachesAsync`, `asyncCombinatorHelperBlock` (emits the on-use `_scrml_someAsync`… helpers as a module FOOTER). Consumed by `emit-library.ts`'s `withAsyncCombinators`.
-- **GITI-038 fix — Q1/Q2 async-classification split.** `computeAsyncFnNames` gained a `guardNestedFnValues` param: Q1 (own-signature async) a nested closure's async call does NOT color its factory; Q2 (needs AST re-emission) `computeNestedAsyncFnHolders` identifies factories whose returned closure (`fnExprNode`) itself needs `async`+`await`. `emit-logic.ts`'s `return-stmt` case emits `fnExprNode` inline via the `function-decl` case.
-- **i87 §13.2 position-invariant auto-await (#87)** — a server-fn/stdlib-async call one block deep inside an `if`/`else`/`for`/`while`/`do-while` body now gets its `await`. `EmitLogicOpts.awaitNestedPromises` gates `codegen/scheduling.ts`'s `injectPromiseAwait`, called from `emitLogicBody`.
+## Colorless-async (Seam-A / Phase-2 combinators, GITI-037/GITI-038) — unchanged this window
+A plain (non-`?{}`) function calling a Promise-returning host primitive — directly, transitively, or
+as a returned closure — is compiler-classified `async` and auto-awaited; there is no `async`/`await`
+in scrml source (§13.1/§13.2). Seam-A Phase-1 unified the classifiers onto `computeAsyncFnNames`
+with `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` as the no-silent-leak backstop; the Phase-2 combinator
+transform lives in `codegen/async-combinators.ts`; GITI-038 split Q1 (own-signature async) from Q2
+(needs AST re-emission, `computeNestedAsyncFnHolders`); i87 gave `injectPromiseAwait` its
+position-invariance. **GH #237 extends the same §13.2 obligation to a THIRD destination —
+a desugared `on mount { … }` body, which is emitted at MODULE scope inside a SYNC IIFE where
+`await` is illegal.** Before the fix, every server call in a mount block landed as a bare pending
+Promise, so an `if (u is not) { redirect("/login") }` guard could never take its deny branch —
+fail-OPEN. The sibling reactive-cell destination (`@you = loadMe(1)`) was already correct
+(emit-client.ts lifts it into its own async IIFE).
 
 ## Defense-in-depth: stdlib async classification (api.js STDLIB-EXPORT-SEED)
-A server-only `scrml:*` re-export whose {kind, isAsync} cannot be resolved FAILS CLOSED (defaults to async) instead of fail-open to sync — hardened after the 2026-07-11 jwt-auth-bypass regression. Unchanged.
+A server-only `scrml:*` re-export whose `{kind, isAsync}` cannot be resolved FAILS CLOSED (defaults
+to async). Unchanged.
 
 ## stdlib module pairing (compiler/runtime/stdlib/*.js <-> stdlib/*/index.scrml)
-21 modules: auth, compiler, cron, crypto, data, format, fs, host, http, math, mcp, oauth (+5 provider sub-modules: discord/github/google/microsoft/pkce), path, process, random, redis, regex, router, store, test, time. Each ships BOTH a canonical `.scrml` source (stdlib/<mod>/) and a JS host shim (compiler/runtime/stdlib/<mod>.js). Unchanged this window.
+21 modules: auth, compiler, cron, crypto, data, format, fs, host, http, math, mcp, oauth (+5
+provider sub-modules), path, process, random, redis, regex, router, store, test, time. Each ships
+BOTH a canonical `.scrml` source and a JS host shim. Unchanged this window — but `stdlib/` is now
+part of the PUBLISHED package surface.
 
 ## Tags
-#scrml #map #dependencies #module-graph #stdlib #chunk-namespace #cell-accessor-rename #cs-prefix #ns-token #fnv1a #iife-hoist #semdiff #css-conflict-check #pipeline #bun #acorn #sql-lex #tenant-egress #tenant-floor #ssr-auth-scoped #theme-reset #content-hash #css-wave1 #colorless-async #async-combinators #writer-ownership #bind-value #batch-hoist #session-establishment #outlet #one-landmark #shell-composition #e-outlet-and-main #esm-chunks #module-format #runtime-esm #emit-client-esm #each-fence #foster-safe #dep-script-depth #tag-canonicalizer #dbauth #db-migrate #db-authoritative #rls #secdef #quoteIdent #sql-ident #wrapPrincipalTxn #scrml-migrations-ledger #bun-sql #privilege-separation
+#scrml #map #dependencies #module-graph #stdlib #chunk-namespace #cell-accessor-rename #detect-runtime-chunks #post-emit-chunk-gates #runtime-chunks #chunk-dependencies #fnv1a #semdiff #pipeline #bun #acorn #sql-lex #tenant-egress #tenant-floor #theme-reset #content-hash #colorless-async #async-combinators #on-mount #gh237 #scheduling #writer-ownership #bind-value #i225 #directive-is-form-value #batch-hoist #session-establishment #outlet #one-landmark #shell-composition #esm-chunks #module-format #each-fence #dist-space #source-space #d4 #d5 #forward-index #server-import-unemitted #dbauth #db-migrate #sql-table-refs #queried-table-grants #quoteIdent #sql-ident #navigate-wave1c #chunk-loading-depth-counter #tailwind-outline #e-schema-011 #npm-publishable #no-workspaces
 
 ## Links
 - [primary.map.md](./primary.map.md)
@@ -147,3 +228,4 @@ A server-only `scrml:*` re-export whose {kind, isAsync} cannot be resolved FAILS
 - [domain.map.md](./domain.map.md)
 - [auth.map.md](./auth.map.md)
 - [migrations.map.md](./migrations.map.md)
+- [build.map.md](./build.map.md)

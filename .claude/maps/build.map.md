@@ -1,6 +1,6 @@
 # build.map.md
 # project: scrml
-# updated: 2026-07-26T07:00:00Z  commit: f8a138e9
+# updated: 2026-07-28T17:10:00Z  commit: 115e8b1b
 
 ## Development Commands (root package.json scripts)
 compile — `bun run compiler/src/cli.js compile`
@@ -14,6 +14,19 @@ lsp — `bun run lsp/server.js --stdio`
 docs:build — `bun run docs/build.ts`
 e2e / e2e:ui / e2e:docs — Playwright suites (playwright.config.ts / playwright.docs.config.ts)
 e2e:install — `playwright install chromium firefox webkit`
+
+## Packaging — scrml is PUBLISHABLE as of this window (`171f5f23`)
+
+`"private": true` removed · `"workspaces": ["compiler"]` removed · **`compiler/package.json`
+DELETED** (acorn + astring hoisted into the root `dependencies`) · a `files` ALLOWLIST added. There
+is now exactly ONE manifest. Published surface: `compiler/bin/`, `compiler/src/`,
+`compiler/native-parser/`, `compiler/runtime/`, `stdlib/`, `README.md`, `LICENSE` — an allowlist, so
+**anything new is excluded by default**. `stdlib/` is REQUIRED at runtime
+(`module-resolver.js`'s `STDLIB_ROOT` resolves `../../stdlib`), not documentation. Deliberately
+excluded: `compiler/tests` (20M), `self-host*`, `samples/`, `examples/` (12M),
+`SPEC.md`/`PIPELINE.md` (docs live on scrml.dev) — widening a published surface is easy, narrowing
+it is not. `bin: { scrml: "compiler/bin/scrml.js" }` is unchanged. Any doc or brief describing a
+`compiler/` workspace at v0.2.0 is stale.
 
 ## scrml CLI subcommands (compiler/src/cli.js -> commands/*.js)
 compile, dev, build, serve, migrate, **db-migrate (NEW S287)**, promote, generate, init, introspect, semdiff — **11 verbs** (was 10; `db-migrate` is the only addition this window). `migrate` and `db-migrate` are DELIBERATELY DISTINCT commands, not a rename: `migrate` is the pre-existing scrml-SOURCE syntax codemod tool; `db-migrate` (below) applies a project's `<schema>` to a REAL database. `compile`, `dev` and `build` carry `--module-format=<classic|esm>` (prior window, unchanged).
@@ -102,10 +115,19 @@ loop (compile.js, dev.js, build.js) and threaded to `compileScrml({ moduleFormat
 Three scripts, two of them CI-required. They exist because a public claim that was true when
 written rots silently.
 
-- **`scripts/snippet-gate.js`** — GATE. Discovers every `.scrml` under a declared corpus
-  (`SNIPPET_CORPUS = ["docs/tutorial-snippets", "docs/readme-snippets"]`; 12 files) and compiles each
-  through `compiler/bin/scrml.js compile` into a temp dir; exit 1 on any failure. **Wired into CI
-  `gate` and the release-tag `pre-push` hook.**
+- **`scripts/snippet-gate.js`** — GATE. Discovers every `.scrml` under a declared corpus and
+  compiles each through `compiler/bin/scrml.js compile` into a temp dir; exit 1 on any failure.
+  **Wired into CI `gate` and the release-tag `pre-push` hook.** **CORPUS WIDENED S292:**
+  `SNIPPET_CORPUS = ["docs/tutorial-snippets", "docs/readme-snippets", "docs/website"]`. The
+  scrml.dev pages are the most-read public surface shipped and sat OUTSIDE the gate until now — the
+  same hollow-gate shape the gate was built to close at S280, one directory over. The ROOT is
+  declared (98 files at time of addition) rather than individual pages, so a NEW page is gated by
+  EXISTING rather than by someone remembering to list it. A declared-but-absent row is tolerated.
+  **Known limit, stated in the source:** this gates that a page COMPILES; it cannot gate whether the
+  page's PROSE is true — the seven false claims corrected at S292 were all prose on a page that
+  compiled fine. Prose currency needs an empirical re-verify, not this gate. `docs/FACTS.md`'s
+  "public code samples under the compile gate" figure (12) counts the tutorial/readme snippet
+  corpus, not the widened `docs/website` root.
 - **`scripts/facts.ts`** — generator + checker for `docs/FACTS.md`. `bun scripts/facts.ts` prints,
   `--write` regenerates the `@generated:*` anchored sections in place (idempotent), `--check`
   regenerates in memory and exits 1 on any stale section. **`--check` is wired into CI `gate`.**
@@ -113,6 +135,17 @@ written rots silently.
   cases, stdlib modules, **CLI verbs (now 11, `db-migrate` included)**, LSP capabilities, editor
   integrations, deploy targets, gated snippets. **A public doc SHALL cite FACTS.md rather than
   hardcode any of these figures.**
+- **`scripts/regen-spec-index.ts`** — generator + **NEW `--check`er (S290)** for
+  `compiler/SPEC-INDEX.md`. Regenerates the Sections-table line ranges/sizes AND the
+  `@generated:spec-index-totals` block in place from SPEC.md headings, preserving hand-written
+  summaries. **`--check` is wired into CI `gate` (a 6th step) and the local pre-push currency gate.**
+  Only the TOTALS are gated — the per-section line ranges drift by design between amendments, and a
+  gate that cries wolf gets bypassed then deleted. The totals line (`Total lines: N | Total
+  sections: M + appendices`) was hand-maintained while the script regenerated the rows around it, so
+  it had rotted to `33,436 lines / 61 sections` against a 36,575-line, §65-deep SPEC. The line count
+  drops a trailing empty split element so it matches BOTH `wc -l` and `scripts/facts.ts`'s
+  `specLines()` — two generated figures for one quantity disagreeing by one makes a reader distrust
+  both.
 - **`scripts/claim-gate.js`** — the fenced-block (C1) half: extracts ```scrml fences from a declared
   PUBLIC_SURFACE, compiles + ghost-pattern-lints each, `// gate: skip` opt-OUT. **Not wired into CI**
   (measure-mode only).
@@ -136,7 +169,7 @@ Implementation: `compiler/src/api.js` (`contentHashAssets` option), `compiler/sr
 ## CI/CD Pipeline  [.github/workflows/ci.yml]
 Three jobs, "gate-layering" model (types → pre-commit fast subset → CI-here → PA judgment):
 
-**gate** — BLOCKING (the merge-gate). checkout → setup-bun → `bun install --frozen-lockfile` → `bun run pretest` → `bun test compiler/tests/unit compiler/tests/conformance` (reproducibly-green-from-source core) → gauntlet quick check (compile benchmarks/todomvc/app.scrml, `node --check` the emitted client.js) → `bun scripts/snippet-gate.js` → `bun scripts/facts.ts --check`.
+**gate** — BLOCKING (the merge-gate), **7 steps** (was 6; the SPEC-INDEX totals check is NEW this window). checkout → setup-bun → `bun install --frozen-lockfile` → `bun run pretest` → `bun test compiler/tests/unit compiler/tests/conformance` (reproducibly-green-from-source core) → gauntlet quick check (compile benchmarks/todomvc/app.scrml, `node --check` the emitted client.js) → `bun scripts/snippet-gate.js` → `bun scripts/facts.ts --check` → **`bun run scripts/regen-spec-index.ts --check`**.
 Triggers: push (paths-ignore: **.md, handOffs/**, docs/**) and pull_request. `concurrency: group ci-${{ref}}, cancel-in-progress: true`.
 
 **tracking** — NON-BLOCKING (`continue-on-error: true`). integration + lsp + commands tests (**incl. `commands/db-migrate.test.js`, S287**), browser tests, and the parser-conformance-within-node.test.js M6.x native-parser-migration backlog. Same checkout/install/pretest steps as gate.
@@ -145,25 +178,87 @@ Triggers: push (paths-ignore: **.md, handOffs/**, docs/**) and pull_request. `co
 
 Rationale banner in the workflow (S253): `gate` is the guaranteed-green-from-source core only — no self-host/within-node backlog noise.
 
-`.github/workflows/ci.yml` unchanged this window (no new step; `db-migrate`'s own tests run within the existing unit/integration/conformance tiers, gated the same way as everything else — the new integration tests `db-authoritative-pg.test.js`/`db-authoritative-p2-pg.test.js`/`db-migrate-pg.test.js` are `tracking`-tier and skip-graceful when a live Postgres is unreachable, mirroring the pre-existing `schema-introspect-pg.test.js` pattern).
+**`.github/workflows/ci.yml` DID change this window** — `gate` gained the SPEC-INDEX totals step (`0d95c364`). Everything else is unchanged: the window's new tests run within the existing unit/integration/conformance/browser tiers, gated the same way as everything else. The live-PG DB-authoritative integration tests remain `tracking`-tier and skip-graceful when Postgres is unreachable.
 
 ## CI/CD Pipeline  [.github/workflows/advisory-review.yml]
 **ai-review** job — non-blocking second-opinion AI `/code-review` on every code PR (deliberately NOT in branch-protection required checks; comments only, never fails the PR).
 Triggers: `pull_request` (opened/synchronize/ready_for_review/reopened), paths-filtered to `compiler/**`, `stdlib/**`, `lsp/**`. `concurrency: group ai-review-${{pr#}}, cancel-in-progress: true`.
-Runs `anthropics/claude-code-action@v1` with the packaged `/code-review` skill against the PR diff. Needs the `ANTHROPIC_API_KEY` repo secret — unset today, so a run currently errors at the auth step (harmless; not a required check).
+Runs `anthropics/claude-code-action@v1` with the packaged `/code-review` skill against the PR diff. Needs the `ANTHROPIC_API_KEY` repo secret. **CORRECTION vs. prior map generations: that secret IS set** — the daily `cloud-maps` run passes it (`anthropic_api_key: ***` in the run log). Any "unset today, so a run errors at the auth step" note is stale.
 
-## Pending / not-yet-merged CI (informational — NOT current truth at HEAD)
-`.github/workflows/cloud-maps.yml` exists on branch `feat/cloud-maps-beachhead` but is NOT merged into `main` as of this HEAD — a scheduled + dispatch nav-map regen workflow. Needs the `scrml-maps-bot` GitHub App + secrets before it can go green. Status re-verify on a full refresh — carried, not re-checked this pass.
+## CI/CD Pipeline  [.github/workflows/cloud-maps.yml] — MERGED, SCHEDULED, and FAILING
+
+**CORRECTION vs. prior map generations.** This workflow is NOT on an unmerged branch and does NOT
+need a `scrml-maps-bot` GitHub App. It landed on `main` at `1971a87d` (2026-07-14), was retooled to a
+fine-grained PAT at `b5ec120b`, and last changed at `752574d9` (2026-07-16). It is live.
+
+**name:** `cloud-maps` · **job:** `regen` · **triggers:** `workflow_dispatch` + `schedule` cron
+`17 9 * * *` (daily ~09:17 UTC) · **concurrency:** group `cloud-maps`, `cancel-in-progress: false` ·
+**permissions:** `contents: write`, `pull-requests: write`, `id-token: write` (claude-code-action
+needs OIDC even with an API key).
+
+**Steps.** checkout (token `secrets.MAPS_PAT`, `fetch-depth: 0`) → setup-bun → `bun install
+--frozen-lockfile` → **Stage 1** `bun scripts/state.ts --write` (deterministic @generated rollup,
+zero AI cost) → **Stage 1b** `bun scripts/threads.ts --check && bun scripts/threads.ts`
+(`continue-on-error: true`) → **Stage 2** `anthropics/claude-code-action@v1` running the
+`project-mapper` subagent in FULL_COLD_START mode (`--permission-mode acceptEdits --max-turns 40`)
+→ **Stage 3** if `git status --porcelain -- .claude/maps master-list.md` is non-empty: branch
+`maps/regen-<run_id>`, `git add -f .claude/maps master-list.md` (the `-f` is load-bearing — `.claude/`
+is gitignored and the maps are force-tracked), commit, push, `gh pr create --base main`,
+`gh pr merge --squash --auto --delete-branch`.
+
+**Design constraints worth not re-litigating:** it NEVER pushes to protected `main` — it opens a PR
+and enables auto-merge, so `ci.yml`'s `gate` runs on it (that workflow's `pull_request:` trigger has
+no path filter, so it fires on docs-only PRs) and auto-merge stamps it on green. The PAT (not
+`GITHUB_TOKEN`) is required because a PR opened by `GITHUB_TOKEN` does not cascade events, so `gate`
+would never fire and auto-merge would wait forever. Fine-grained PATs expire (≤1 yr) — `MAPS_PAT`
+must be renewed or the bot goes dark.
+
+### STATUS AT THIS HEAD: **FAILING — every scheduled run, ~14 days running.**
+
+Verified via `gh run list --workflow=cloud-maps.yml`: **17 of 17 recorded runs failed** — 3 `workflow_dispatch`
+and 14 scheduled — from 2026-07-15 through the 2026-07-28 09:09 UTC schedule.
+
+**The signature changed on 2026-07-17, and the change is the diagnosis.** The 2026-07-16 run lasted
+**12m31s** — the agent genuinely ran and the job failed downstream. Every run from 2026-07-17 onward
+lasts **35-60s wall**, of which the agent accounts for **~0.55-0.60s**:
+
+```
+"type": "result", "subtype": "success", "is_error": true,
+"duration_ms": 594, "num_turns": 1, "total_cost_usd": 0, "permission_denials_count": 0
+##[error] Claude result reported subtype success with is_error:true
+##[error] Action failed with error: Claude execution failed: result is_error:true
+```
+
+**Read that shape literally: one turn, ~0.6 seconds, ZERO cost, zero permission denials.** The
+session initializes fine (`"model": "claude-opus-5[1m]"`) and then errors before consuming a single
+billable token. That is an **API-level rejection of the very first request** — a credential /
+entitlement / quota condition on `ANTHROPIC_API_KEY`, not a mapper-agent fault, not a repo-content
+fault, and not `--max-turns 40` exhaustion (that would burn minutes and dollars, as the 07-16 run
+did). Stages 1 and 1b pass; Stage 3 never runs.
+
+**Corroborating negatives:** `cloud-maps.yml` has not changed since 2026-07-16 12:31, which is AFTER
+the last long-running run — so the workflow file is not the regression. The only repo-side change
+between the 07-16 and 07-17 runs is `752574d9`, whose Stage 1b is `continue-on-error: true` and
+therefore cannot fail the job.
+
+**The one-line diagnostic that would confirm it:** the action is configured `show_full_output:
+false`, so the agent's actual error TEXT is suppressed ("full output hidden for security"). Setting
+`show_full_output: true` (or adding `--debug` to `claude_args`) on one `workflow_dispatch` run would
+print the rejection verbatim. **Not done here — this refresh's write-footprint excludes `.github/`.**
+
+**Consequence for map currency:** the maps have had NO automated refresh since 2026-07-16, which is
+why the watermark sat at `c700c435` while three sessions of landings accumulated. Until `cloud-maps`
+is green, every map refresh is a manual PA action.
 
 ## Git Hooks (source-controlled, `.git/hooks/pre-commit` + `pre-push`; install via `scripts/git-hooks/install.sh`)
 pre-commit — runs `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail` (~2min, excludes browser/e2e/self-host); warns (non-blocking) on direct commits to `main`.
-pre-push — full test suite (`bun test compiler/tests/`) + gauntlet quick check; refreshes samples/compilation-tests/ fixtures first; and the public snippet gate ONLY on a `refs/tags/v*` release-tag push.
+pre-push — full test suite (`bun test compiler/tests/`) + gauntlet quick check; refreshes samples/compilation-tests/ fixtures first; the public snippet gate ONLY on a `refs/tags/v*` release-tag push; and **NEW S292, step 2.5 — a GENERATED-DOC CURRENCY gate** that mirrors the cloud gate's CHEAP checks so a stale generated artifact is caught locally instead of ~3 minutes later in CI. Runs `bun scripts/facts.ts --check` (~200ms) + `bun run scripts/regen-spec-index.ts --check` (~61ms) on EVERY non-deletion push, including the feature-branch pushes the S254 relaxation exempts from the full suite (exactly the ones that were failing). **`bun scripts/snippet-gate.js` is deliberately NOT in this hook — it costs ~48s**, and a hook that expensive gets bypassed, and a bypassed gate gets deleted. 261ms does not get bypassed. Skipped entirely when the push payload is deletions only. Failure message names the fix (`bun scripts/facts.ts --write && bun run scripts/regen-spec-index.ts`) and warns to regenerate AFTER the last content commit, not before — regenerating early and then editing `compiler/src` again is the exact loop this gate exists to catch (three rejected pushes in one S292 session).
 
 ## Docker
 None. No Dockerfile / docker-compose in this repo — see infra.map.md.
 
 ## Tags
-#scrml #map #build #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam
+#scrml #map #build #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist
 
 ## Links
 - [primary.map.md](./primary.map.md)

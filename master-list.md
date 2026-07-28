@@ -106,6 +106,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `115e8b1b` — wrap(S295): hand-off + changelog — three-lane arc, pa-base v2.6/v2.7, three privacy scrubs (#246) — **pushed**
 - `04477cb1` — wrap(S292): hand-off + changelog + master-list §0 + delta-log [824]-[839] + inbox drain (#220) — **pushed**
 - `89bbbc1f` — wrap(S290): hand-off + changelog + delta-log [812]-[823] + master-list §0 + inbox drained (#212) — **pushed**
 - `258ff020` — wrap(S288) addendum: file the FK HIGH (root-caused) + RediLedger's turnkey PASS (#204) — **pushed**
@@ -113,7 +114,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `7ae6a055` — wrap(S286): adopter form-binding pair closed — #174 + #175 landed, hand-off/changelog/gap-counts (#179) — **pushed**
 - `cd658984` — wrap(S285): changelog + hand-off addendum — 4 adopter/gap PRs (#167 #171 #172 #173) (#176) — **pushed**
 - `2eee3a98` — wrap(S284): continuity — 2 adopter bugs landed, S239 caught a regression, chunk-ns re-planned to truth (#169) — **pushed**
-- `f28c35fb` — wrap(S282): continuity — 10 PRs, windows green, split-key class, chunk-ns BUG-6 scoped (#160) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
