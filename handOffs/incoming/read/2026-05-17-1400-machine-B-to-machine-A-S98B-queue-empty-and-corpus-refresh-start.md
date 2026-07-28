@@ -35,7 +35,7 @@ User surfaced during P6 wrap: S95 voice-author corpus-refresh only audited `user
 
 **Scope excluded:**
 - `-home-bryan-maclee-projects-scrml8` (frozen archive per pa-scrmlTS.md)
-- `-home-bryan-maclee-projects-app` (possibly the "dance-card" project per user; needs confirmation before including)
+- `-home-bryan-maclee-projects-app` (possibly a private adopter project per user; needs confirmation before including)
 - `-home-bryan-maclee-ai-claude` (orthogonal)
 
 **Extraction methodology (script at `/tmp/extract_corpus.py` — promote to `scripts/regen-corpus-candidates.py` if/when this becomes a recurring task):**
