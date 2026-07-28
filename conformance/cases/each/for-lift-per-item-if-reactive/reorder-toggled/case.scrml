@@ -1,0 +1,21 @@
+${
+    <rows> = [{ id: 1, name: "A", on: true }, { id: 2, name: "B", on: true }, { id: 3, name: "C", on: true }]
+    function hideB() {
+        @rows = @rows.map(r => {
+            if (r.id == 2) {
+                return { ...r, on: false }
+            }
+            return r
+        })
+    }
+    function rev() {
+        @rows = @rows.slice().reverse()
+    }
+}
+<ul id="list">${
+    for (let it of @rows) {
+        lift <li class="row" data-id=it.id if=it.on><span class="nm">${it.name}</span></li>
+    }
+}</ul>
+<button id="hideB" onclick=hideB()>hideB</button>
+<button id="rev" onclick=rev()>rev</button>

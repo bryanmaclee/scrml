@@ -1,0 +1,19 @@
+{
+  "id": "for-lift-per-item-if-reactive-reorder-toggled",
+  "description": "Tier-0 ${for…lift} per-item if= key transplant across a REORDER (SPEC §17.1 + §42). Three rows on:true; hideB flips id=2 off (its <li> becomes a comment placeholder carrying id=2's key); rev reverses the array. Reversed order is [C, B(hidden), A]; the visible rows must be C then A (count 2, no dup/drop) and id=2 stays absent — proving the comment placeholder moved with its transplanted key through the keyed reorder.",
+  "language-version": "1.0",
+  "spec": "§17.1",
+  "rationale": "§17.1 + §42 the swap transplants _scrml_key onto the placeholder, so it is a fully valid tracked node the Tier-0 reconciler moves on reorder. After hideB+rev the survivors are C (first) and A (last) in reversed order; a stale/dropped key would mis-move or duplicate.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#hideB" }, { "click": "#rev" }],
+    "state": { "rows": [{ "id": 3, "name": "C", "on": true }, { "id": 2, "name": "B", "on": false }, { "id": 1, "name": "A", "on": true }] },
+    "domAnchored": [
+      { "selector": ".row", "count": 2 },
+      { "selector": "#list li.row[data-id=\"2\"]", "count": 0 },
+      { "selector": "#list li.row:first-child .nm", "text": "C" },
+      { "selector": "#list li.row:last-child .nm", "text": "A" }
+    ]
+  }
+}

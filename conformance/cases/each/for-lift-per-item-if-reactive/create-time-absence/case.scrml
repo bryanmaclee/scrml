@@ -1,0 +1,8 @@
+${
+    <rows> = [{ id: 1, name: "Alice", on: true }, { id: 2, name: "Bob", on: false }]
+}
+<ul id="list">${
+    for (let it of @rows) {
+        lift <li class="row" data-id=it.id if=it.on><span class="nm">${it.name}</span></li>
+    }
+}</ul>
