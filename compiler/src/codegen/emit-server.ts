@@ -18,7 +18,7 @@ import { isLibraryShapedFile } from "../tool-program.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
-import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRelative, basename as _pathBasename } from "node:path";
+import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRelative, basename as _pathBasename, sep as _pathSep } from "node:path";
 import { parseExprToNode } from "../expression-parser.ts";
 import { extractCalleeNames, buildCalleeImportMap } from "./scheduling.ts";
 import { isPromiseReturningStdlibFn } from "../module-resolver.js";
@@ -152,6 +152,86 @@ function computeServedPath(filePath: string, outputBaseDir: string | null | unde
     return "/" + segs.join("/");
   }
   return "/" + [...segs, base].join("/");
+}
+
+// D-4 (S296, adopter-blocking): is a `path.relative()` result OUTSIDE the base it
+// was taken against? `relative()` is the only producer here, so a leading `..`
+// SEGMENT is the sole escape marker. Split on the platform `sep` (NOT a
+// hardcoded backslash): on POSIX a literal backslash is a legal filename
+// character and must not be mistaken for a separator — the same rationale
+// `stripPagesPrefix` documents.
+function isOutsideBase(rel: string): boolean {
+  const norm = rel.split(_pathSep).join("/");
+  return norm === ".." || norm.startsWith("../");
+}
+
+// D-4: the DIST-relative path of the `.server.js` artifact a source file emits,
+// as a `/`-separated path relative to `outputBaseDir`. Mirrors api.js `pathFor`
+// EXACTLY — the `pages/` strip applies to the DIRNAME only, the basename is
+// untouched — so `pages/customer/home.scrml` maps to `customer/home.server.js`,
+// while a root-level `pages.scrml` keeps its name.
+function distServerPathOf(relSource: string): string {
+  const dir = stripPagesPrefix(_pathDirname(relSource));
+  const file = _pathBasename(relSource, ".scrml") + ".server.js";
+  return dir === "." || dir === "" ? file : dir + "/" + file;
+}
+
+/**
+ * D-4 (S296) — re-base a LOCAL `.scrml` import specifier from SOURCE coordinate
+ * space into the DIST coordinate space the emitted `.server.js` files occupy.
+ *
+ * The dist tree is NOT a mirror of the source tree. SPEC §47.9.5 strips a
+ * leading `pages/` segment from `dirname(relative(outputBaseDir, source))`, so
+ * `pages/login.scrml` lands at `dist/login.server.js` — NOT `dist/pages/...`.
+ * Swapping only the extension on `stmt.source` therefore overshoots by exactly
+ * that one segment for every importer under `pages/`: a source-space
+ * `../models/auth.scrml` emits `../models/auth.server.js`, which from
+ * `dist/login.server.js` points ABOVE `dist/`. The compile stays green (a
+ * missing FILE is not a syntax error) and the bundle dies at runtime with
+ * `Cannot find module` — the exact adopter-blocking shape D-4 hit. The overshoot
+ * is a CONSTANT one segment at every nesting depth, because the strip removes
+ * exactly one.
+ *
+ * Fix: express BOTH endpoints in the post-strip dist space and take the relative
+ * path between them. This is the same computation `emit-client-esm.ts` already
+ * performs for the client half (which is why the client half resolves at every
+ * depth), over the same `pathFor`-mirroring `stripPagesPrefix` transform
+ * `computeServedPath` above uses.
+ *
+ * Falls back to today's verbatim source-space specifier when:
+ *   - `outputBaseDir` is absent (legacy single-file callers — there is no dist
+ *     tree to re-base against), or
+ *   - either endpoint lies OUTSIDE the output base — no artifact is written for
+ *     such a file, so it has no dist coordinate to express, and the pre-existing
+ *     behavior is preserved byte-for-byte.
+ *
+ * On a project with NO `pages/` segment the two spaces coincide, so the result is
+ * byte-identical to the pre-fix emit.
+ *
+ * NOTE for `api.js`: the emitted specifier is now DIST-space, so reversing it
+ * with `resolve(dirname(sourcePath), spec)` — SOURCE space — mis-resolves. Both
+ * reversal sites there (`checkServerImportInvariant` and
+ * `emitValueOnlyServerJsForDanglingImports`) route through a dist-keyed index.
+ */
+export function distRelativeServerSpecifier(
+  sourceSpecifier: string,
+  importerFilePath: string,
+  outputBaseDir: string | null | undefined,
+): string {
+  const verbatim = sourceSpecifier.replace(/\.scrml$/, ".server.js");
+  if (!outputBaseDir || !importerFilePath) return verbatim;
+
+  const importerRel = _pathRelative(outputBaseDir, importerFilePath);
+  const targetAbs = _pathResolve(_pathDirname(importerFilePath), sourceSpecifier);
+  const targetRel = _pathRelative(outputBaseDir, targetAbs);
+  if (isOutsideBase(importerRel) || isOutsideBase(targetRel)) return verbatim;
+
+  const fromDir = stripPagesPrefix(_pathDirname(importerRel));
+  const toPath = distServerPathOf(targetRel);
+  const rel = _pathRelative(fromDir, toPath).split(_pathSep).join("/");
+  // A relative ES specifier MUST start with `./` or `../`; a bare
+  // `models/auth.server.js` would be a BARE specifier (node_modules lookup).
+  return rel.startsWith(".") ? rel : "./" + rel;
 }
 
 // g-pure-module-server-emit (S207): conservative identifier-reference check.
@@ -1883,7 +1963,12 @@ export function generateServerJs(
       let jsSource: string = stmt.source;
       const isLocalScrml = jsSource.endsWith(".scrml");
       if (isLocalScrml) {
-        jsSource = jsSource.replace(/\.scrml$/, ".server.js");
+        // D-4: NOT a bare extension swap — the dist tree strips a leading
+        // `pages/` segment (§47.9.5), so the specifier must be re-based into
+        // dist space or it overshoots by that segment and dangles at runtime.
+        // See `distRelativeServerSpecifier` above. The deferred/S207 prune pass
+        // reuses this same `jsSource`, so it is corrected there too.
+        jsSource = distRelativeServerSpecifier(jsSource, filePath, (fileAST as any)?._outputBaseDir);
       }
       if (stmt.isDefault) {
         // Default imports cannot be channel bindings (channels are always

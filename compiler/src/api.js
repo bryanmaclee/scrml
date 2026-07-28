@@ -8,7 +8,7 @@
  */
 
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, lstatSync, existsSync, copyFileSync } from "fs";
-import { resolve, extname, dirname, basename, join, relative } from "path";
+import { resolve, extname, dirname, basename, join, relative, posix as pathPosix } from "path";
 import { fileURLToPath } from "url";
 import { splitBlocks } from "./block-splitter.js";
 import { buildAST } from "./ast-builder.js";
@@ -545,9 +545,15 @@ export function rewriteRelativeImportPaths(jsCode, sourceFilePath, outputDir, em
     /^(import\s+(?:\{[^}]*\}|[^\s]+)\s+from\s+)(["'])(\.\.?\/[^"']+\.js)\2(;?)$/gm,
     (match, prefix, quote, relPath, semi) => {
       // F-COMPILE-002: skip .server.js / .client.js — these are scrml output
-      // artefacts that live in the dist tree at the same relative position as
-      // their .scrml source, so the source-relative path is already correct
-      // for the output tree (no relocation needed).
+      // artefacts whose specifier is ALREADY expressed in dist coordinates by
+      // the emitter, so relocating it here would double-apply the transform.
+      // (D-4, S296: the older justification here — "they live in the dist tree
+      // at the same relative position as their .scrml source" — is FALSE. The
+      // dist tree strips a leading `pages/` segment per SPEC §47.9.5, so a
+      // `pages/` file does NOT sit at its source-relative position. The skip is
+      // still correct, but only because `emit-server.ts`
+      // `distRelativeServerSpecifier` now emits a dist-space specifier and the
+      // client half computes its URLs in dist space too.)
       if (relPath.endsWith(".server.js") || relPath.endsWith(".client.js")) {
         return match;
       }
@@ -2466,6 +2472,76 @@ export function compileScrml(options = {}) {
     : new Set();
 
   // ---------------------------------------------------------------------------
+  // D-4 (S296) — DIST-space reversal of an emitted server import specifier.
+  //
+  // `emit-server.ts` emits a local `.scrml` server import in DIST coordinate
+  // space (`distRelativeServerSpecifier`). The dist tree strips a leading
+  // `pages/` segment (SPEC §47.9.5), so `pages/login.scrml` lands at
+  // `dist/login.server.js` and its source-space `../models/auth.scrml` import
+  // must be emitted as `./models/auth.server.js`.
+  //
+  // The two consumers below reverse that specifier back to a SOURCE path so the
+  // target can be found in `cgResult.outputs` (keyed by source path). Doing that
+  // with `resolve(dirname(sourceFilePath), spec)` — SOURCE space — is off by
+  // exactly one `pages/` segment for every importer under `pages/`. That blind
+  // spot is WHY `W-SERVER-IMPORT-UNEMITTED` stayed silent on the D-4 reproducer
+  // despite existing to catch precisely that runtime `Cannot find module`: it
+  // validated in the ONE space where the path is always self-consistent, so the
+  // guard shared the emitter's blind spot (the S276 shape — the oracle inherits
+  // the implementation's coordinate assumption).
+  //
+  // Correct reversal is a FORWARD index, not an inverse transform: the inverse is
+  // AMBIGUOUS (a dist `models/auth.server.js` could come from `models/auth.scrml`
+  // OR from `pages/models/auth.scrml`). So map every compiled source to the
+  // dist-relative `.server.js` path it writes — through the same `pathFor`
+  // transform — and look the specifier up in that map.
+  // ---------------------------------------------------------------------------
+
+  // dist-relative `.server.js` path (POSIX, e.g. "customer/home.server.js")
+  //   -> absolute SOURCE path of the `.scrml` that emits it.
+  const distServerKeyToSource = new Map();
+  // absolute SOURCE path -> its dist-relative directory ("." at the dist root).
+  const distDirOfSource = new Map();
+  if (cgOutputBaseDir && cgResult.outputs) {
+    for (const fp of cgResult.outputs.keys()) {
+      const abs = resolve(fp);
+      // Mirrors `pathFor` below: the `pages/` strip applies to the DIRNAME only;
+      // the basename is untouched.
+      const relDir = stripPagesPrefix(dirname(relative(cgOutputBaseDir, abs)));
+      const dir = (relDir === "." || relDir === "") ? "." : relDir;
+      distDirOfSource.set(abs, dir);
+      const key = (dir === "." ? "" : dir + "/") + basename(abs, ".scrml") + ".server.js";
+      distServerKeyToSource.set(key, abs);
+    }
+  }
+
+  /**
+   * Reverse an emitted `./X.server.js` / `../X.server.js` import specifier back
+   * to the absolute SOURCE path of the module it names.
+   *
+   * Tier 1 — DIST space: join the specifier onto the importer's dist directory
+   *   and look the normalized key up in the forward index. This is what
+   *   `emit-server.ts` emits whenever `outputBaseDir` is known.
+   * Tier 2 — SOURCE space: the pre-D-4 reversal, retained because it is still
+   *   EXACT for the legacy single-file callers where `emit-server.ts` falls back
+   *   to a verbatim source-space specifier (no `outputBaseDir`), and because a
+   *   specifier naming a module outside this compile unit must keep resolving to
+   *   a non-output path so the callers treat it as external, exactly as before.
+   *
+   * The two tiers mirror emit-server's two emission modes one-for-one, so the
+   * guard and the emitter cannot drift into disagreement.
+   */
+  function serverImportTargetSource(importerSourcePath, relServer) {
+    const fromDir = distDirOfSource.get(resolve(importerSourcePath));
+    if (fromDir !== undefined) {
+      const specPosix = relServer.split(/[\\/]/).join("/");
+      const hit = distServerKeyToSource.get(pathPosix.normalize(pathPosix.join(fromDir, specPosix)));
+      if (hit) return hit;
+    }
+    return resolve(dirname(importerSourcePath), relServer.replace(/\.server\.js$/, ".scrml"));
+  }
+
+  // ---------------------------------------------------------------------------
   // W-SERVER-IMPORT-UNEMITTED (S208, Fix B) — cross-file server-import invariant.
   //
   // A server bundle that imports `from "./X.server.js"` produces a GREEN compile
@@ -2480,9 +2556,12 @@ export function compileScrml(options = {}) {
   // referenced server-side; this warning is the cross-file defense-in-depth that
   // catches the residual broken shapes emit-server cannot see (no sibling-emission
   // knowledge). Runs on the COMPILE (before the write gate) so it fires in any
-  // write mode; non-fatal — surfaces in result.warnings. Works in SOURCE-path
-  // space: `./X.server.js` reverses to `./X.scrml`, resolved against the importing
-  // file's source dir, looked up in cgResult.outputs (keyed by source path).
+  // write mode; non-fatal — surfaces in result.warnings. Reverses the emitted
+  // specifier through `serverImportTargetSource` above (DIST space first, SOURCE
+  // space as the legacy fallback) and looks the result up in cgResult.outputs
+  // (keyed by source path). It must NOT reverse in source space alone — see the
+  // D-4 note above for why that made this very guard blind to the class it
+  // exists to catch.
   // ---------------------------------------------------------------------------
   function checkServerImportInvariant() {
     if (!cgResult.outputs) return;
@@ -2525,8 +2604,9 @@ export function compileScrml(options = {}) {
       importRe.lastIndex = 0;
       while ((m = importRe.exec(output.serverJs))) {
         const [, defaultName, namedClause, relServer] = m;
-        const relScrml = relServer.replace(/\.server\.js$/, ".scrml");
-        const targetAbs = resolve(dirname(filePath), relScrml);
+        // D-4: the emitted specifier is DIST-space — reverse it through the
+        // forward index, not `resolve(dirname(source), spec)`.
+        const targetAbs = serverImportTargetSource(filePath, relServer);
         const target = outputByAbsSource.get(targetAbs);
         if (!target) continue; // external / cross-unit / vendor — not our invariant
         const targetBase = basename(targetAbs, ".scrml");
@@ -2622,8 +2702,11 @@ export function compileScrml(options = {}) {
       let m;
       while ((m = importRe.exec(output.serverJs))) {
         const relServer = m[1];
-        const relScrml = relServer.replace(/\.server\.js$/, ".scrml");
-        const targetAbs = resolve(dirname(filePath), relScrml);
+        // D-4: same DIST-space reversal the invariant check uses — a source-space
+        // reversal here silently fails to materialize the value-only
+        // `.server.js` for any importer under `pages/`, and the guard then never
+        // sees the dangling target either.
+        const targetAbs = serverImportTargetSource(filePath, relServer);
         if (emittedFor.has(targetAbs)) continue;
         const target = outputByAbsSource.get(targetAbs);
         if (!target) continue; // external / cross-unit / vendor — not ours.
