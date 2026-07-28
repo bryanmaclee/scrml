@@ -2,6 +2,38 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S293 (2026-07-27/28) — Peter · Windows — the per-item reconcile family (text/attr/if), and a full `<each>` sweep
+
+Three PRs, one shape: in a Tier-0 reconciled `${for…lift}`, every per-item binding that reads the item was
+**stale on a same-key REPLACE** — the per-item factory does not rebuild a reused DOM node, so a create-time
+read never updates. Fixed across the family; each fix reused the S288 `maybeWrapLiftPerItemEffect`
+live-keyed-effect machinery, and the independent adversarial finder caught a real class-hole on all three.
+
+- **#214 `db879d01` — item-derived LOCAL aliases stay live.** A per-item TEXT / `class:` / EVENT binding
+  that reads an item-derived local (`let {name}=e`, `let nm=e.field`) rather than the loop var directly
+  stayed stale on REPLACE. Shared `computeItemDerivedReplay` (mirror of the S288 render-path closure) wired
+  into the effect + both handler wraps; additive (byte-identical when no local is read). The finder caught a
+  nested-`if`-block scan false-negative pre-land (`scanItemDerivedLocals` was top-level-only → now recurses).
+  The gap's "also applies to attributes" guess was disproven on reproduction and split off.
+- **#218 `08174f59` — per-item ATTRIBUTES stay live.** `title`/`checked`/`data-*`/call/local attr forms were
+  set once at create; `pushLiftAttrSet` now drives them from a live-keyed effect in a reconcile ctx (parity
+  with text/`class:` and the Tier-1 `<each>` path). R26: 13 corpus files, all correct attr-effect additions
+  (e.g. `18-state-authority` checkbox `checked=${t.completed}` now reconciles), zero error-count moves.
+- **#222 `83888ee3` — per-item `if=` display toggle stays live (Tier-0).** A per-row `if=<item expr>` was
+  evaluated once at create; `tryEmitLiftIfReactive` drives the toggle from a live-keyed effect when the
+  predicate reads the item (the effect also auto-tracks `@cell` reads). **Scoped to preserve the S103
+  value-indexed select-row optimization** — a `@cell == item.field` predicate keeps its O(2) subscribe_when
+  path (the first pass regressed it to O(N) and broke its guard tests; caught pre-land and narrowed). The
+  value-indexed predicate's item-side staleness is a narrower deferred sub-gap. The Tier-1 `<each>` `if=`
+  (a structural append-gate, not a display toggle) is a semantics fork routed to bryan.
+
+**The `<each>` sweep** (Peter: "make sure nothing else pertaining to `<each>`") — verified SOUND on main
+(executed-DOM): per-item text/attr/`class=`/event reconcile, keyed reorder/reverse/move, nested-each
+reconcile, item-root markup reuse. → adopter **Fieldman/assetManagement workarounds #1/#2/#4 retired**;
+**#3 (`if=`) half-retired** (Tier-0 landed, Tier-1 routed). 10 open each gaps, 0 HIGH. Filed
+`g-estmt-missing-semicolon-no-source-span` (adopter diagnostic-DX) and `g-each-body-let-alias-silently-dropped`.
+RediLedger's S11 storage-tier ask + `_{}` contract questions routed to bryan.
+
 ## S290 (2026-07-27) — bryan · ASUS-Vivobook — five silent-acceptance defects, and the governing sentence decided each one
 
 Seven PRs. Every defect closed was the same shape — **a form that looks right, compiles clean, and

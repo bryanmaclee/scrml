@@ -104,6 +104,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `04477cb1` — wrap(S292): hand-off + changelog + master-list §0 + delta-log [824]-[839] + inbox drain (#220) — **pushed**
 - `89bbbc1f` — wrap(S290): hand-off + changelog + delta-log [812]-[823] + master-list §0 + inbox drained (#212) — **pushed**
 - `258ff020` — wrap(S288) addendum: file the FK HIGH (root-caused) + RediLedger's turnkey PASS (#204) — **pushed**
 - `89fe9748` — wrap(S287): hand-off + delta-log [786] + maps refresh (DB-authoritative tier) (#190) — **pushed**
@@ -111,7 +112,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `cd658984` — wrap(S285): changelog + hand-off addendum — 4 adopter/gap PRs (#167 #171 #172 #173) (#176) — **pushed**
 - `2eee3a98` — wrap(S284): continuity — 2 adopter bugs landed, S239 caught a regression, chunk-ns re-planned to truth (#169) — **pushed**
 - `f28c35fb` — wrap(S282): continuity — 10 PRs, windows green, split-key class, chunk-ns BUG-6 scoped (#160) — **pushed**
-- `a0344d75` — wrap(S280): marketing claim-gate U1+U2; a bryan ruling falsified; pa-base v2.4 (#149) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
