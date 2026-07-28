@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 10 |
-| MED | 61 |
+| MED | 62 |
 | LOW | 36 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -4062,4 +4062,30 @@ The `@log = "midway"` write the adopter placed BETWEEN the two calls is moved AF
 **RESOLVED S285 (#172) — the spec already rules it; it was NOT an open question.** I filed this as needing a ruling, but the spec is normative on it: **§19.9.9.2 step 2** — *"A client-tier statement appearing between two server statements forces a batch boundary — the client statement must observe the earlier batch's commit before the later batch may start"* — grounded in soundness predicate **S3** (§19.9.9.1: the body-DG is *observation, not transformation*; observable source order is preserved). The **CPS multi-batch planner already enforces this** (§19.9.9.5 worked example: an intervening `@reservationShown` write closes batch 0). The client-side `scheduleStatements` was simply INCONSISTENT with it — it skipped (`continue`) the non-decl write and hoisted the later fetch above it. Fix: a non-decl statement is a HARD batch boundary (`break`) in the grouping scan. Only the cross-call parallelization is declined; the write stays in source order. Adjacent server calls with no intervening statement still batch; the S212 pure-DECL skip is untouched (a decl is not a non-decl). Verified: `caseInterleaved` now sequential, `caseAdjacent` still batches; unit 16765/0; int+conf new-failure-free.
 
 **Spec-coherence note (Rule 4 — flag, do not unilaterally edit SPEC.md; bryan's tier-1 lane).** **§13.2.4** reads *"Independent server calls … SHALL be parallelized … unless there is a data dependency"* — a literal reading omits the intervening-client-side-effect case and so reads as *in tension* with §19.9.9.2. The implementation now follows §19.9.9.2 + S3 (the more specific, soundness-grounded rule the CPS planner also obeys), so "independent" must be read as "reorderable under S3", not merely "no data dependency". **Recommend** clarifying §13.2.4 to add "and no intervening client-observable statement" so the two sections are coherent. <!-- @gap id=g-batch-reorder-across-nondecl-sideeffect sev=MED status=resolved -->
+
+## §S295 — gaps filed S295 (2026-07-28, flogenceP per-workaround retirement pass)
+
+### g-tailwind-class-scan-skips-engine-non-initial-arms — the Tailwind class collector reaches an `<engine>`'s INITIAL state-child body but NOT the non-initial ones, so a utility class used only in a non-initial arm gets NO CSS rule — `NEW S295 (bryan, flogenceP workaround-retirement pass); MED; OPEN`
+<!-- @gap id=g-tailwind-class-scan-skips-engine-non-initial-arms sev=MED status=open -->
+Residual of [[g-tailwind-class-scan-skips-markup-block-bodies]] (RESOLVED S212, `a648b34b`). That fix added `match-block` + `each-block` branches to `collect-class-names.ts visitNode` and its closing note said the fix mirrored "the existing `engine-decl` arm branch" and that "flogence's hoisted-safelist workaround now removable." **Both halves of that claim are partly wrong**, and the adopter's surviving safelist is the evidence: flogenceP reduced but could not delete its hoist, recording that "engine bodies are a THIRD block-form the S212 scan doesn't yet descend into."
+
+**Empirically established on `d22ffc25`** (two minimal repros, `scratchpad/wa/w7-engine-class.scrml` + `w7-nested.scrml`, compiled via `bun compiler/bin/scrml.js compile`, CSS rules counted in the emitted `.css`):
+
+| class locus | rule emitted? |
+|---|---|
+| top level (control) | YES |
+| `<engine>` **initial** state-child body (`<Idle>`) | YES |
+| `<engine>` **non-initial** state-child body (`<Busy>`, `<Done>`) | **NO** |
+| `<match>` arm body | YES |
+| `<match>` arm nested inside an `<each>` body | YES |
+| `<each>` nested inside a `<match>` arm | YES |
+| `<each>` nested inside an `<engine>` **non-initial** state-child | **NO** |
+
+So the miss is **narrower and sharper than the adopter's framing**: the collector does not skip "engine bodies" wholesale — it reaches the INITIAL arm (which emit-engine materializes into the static HTML at module init, per PRIMER §7, so the ordinary markup walk picks it up) and misses every other arm, including anything nested beneath one. The adopter's second stated cause ("a residual set of `<match>`-arm classes the scan still misses") did **NOT** reproduce in any nesting combination probed — those misses are most likely this same engine-arm root, or the documented dynamic-class case.
+
+**Not covered by this gap (by design):** classes returned dynamically from helper fns (`satelliteStateColor(...)` → `"text-…-400"`). The scanner never sees those at any depth — documented, `W-TAILWIND-001`, out of scope. A safelist remains the correct answer for that class.
+
+**Fix direction:** the `engine-decl` branch in `compiler/src/codegen/collect-class-names.ts` (~L194) walks `arms[].body`, `arms[].children`, `node.children`, `node.body`. Non-initial state-child bodies are not reachable through any of those — the engine's state-child bodies are parser-held as raw text (`engine-decl.rulesRaw`; PRIMER §13.7 B15: "bodies are raw text today", the same precondition that defers compile-time `E-ENGINE-INVALID-TRANSITION`). The fix therefore needs the walkable state-child body the engine state-child parser produces (`EngineStateChildEntry.bodyRaw` → parsed children), not another field guess. Verify the bite before/after per the pa-base §8 unproven-gate rule: the two repros above go from NO to YES on the non-initial rows.
+
+**Impact:** silent unstyled render — green compile, no warning, only visible in a browser. Same failure signature as the S212 parent (flogenceP: "the PA cards look squashed"). Reporter: flogenceP safelist comment (`src/app.scrml` ~L2896-2914), root-caused here.
 
