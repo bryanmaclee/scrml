@@ -1,4 +1,128 @@
 <!-- ============================================================= -->
+<!-- S296 WRAP (bryan/bryan-XPS-8950, the XPS clone) — 2026-07-28. -->
+<!-- S294/S293/S292 + all prior UNCHANGED below.                    -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 296 (bryan · **bryan-XPS-8950**, the XPS clone) — WRAP
+
+**Date:** 2026-07-28. `/boot` Profile A. `main` at **`6814b1d8`**, coherence 0/0 on BOTH repos, tree
+clean. **One PR (#241).** Cloud `gate` + `windows` GREEN. Delta-log **[857]-[868]**. Changelog S296.
+**Concurrent with LIVE S295-bryan on the ASUS the entire session.** This carries the irreducible;
+the mechanical stream is the delta-log.
+
+## 🔴 THE NEXT PA'S PICKUP
+
+1. **`g-crossfile-dep-ref-pages-unstripped` (S265, MED) needs flipping to RESOLVED — I did not do it.**
+   Its client half is fixed on main (`computeDependencyClientScripts` routes both sides through
+   `toDistRel`), verified by EXECUTION at depth-1 and depth-2. The adopter asked us to *widen* it to
+   cover `.server.js`; that ask rested on the entry still being live and the correct action is the
+   opposite. I left the edit to S295 (hot doc, they were mid-lane) and routed the facts in
+   `scrml-support/handOffs/incoming/2026-07-28-1520-…-drop-the-lane1-foldin.md`. **If they did not
+   take it, it is still owed.**
+2. **Two deferred siblings of D-4's class, filed nowhere but here and the changelog:**
+   `emit-tool.ts:281` (`source.replace(/\.scrml$/, ".js")` — identical defect for the §64
+   `kind="tool"` / library artifact; a library-shaped `.scrml` under `pages/` dangles the same way)
+   and `api.js rewriteRelativeImportPaths`'s bare-`.js` skip (~L566), which rests on the same
+   "mirrors the source tree at the same relative position" reasoning §47.9.5 falsifies. **Worth
+   filing as real gap entries** — they are one grep from being found again and one adopter from
+   biting.
+3. **⚠️ THIS CLONE HAS NO GIT HOOKS.** `core.hooksPath` unset, `.git/hooks` holds only `*.sample`,
+   `scripts/git-hooks/{install.sh,pre-commit,pre-push}` sits uninstalled. Nothing local gates a commit
+   or refuses a push that would fail CI. **I did not install it** — that is a per-machine change and
+   the S292-proposed `facts --check` addition is bryan's call; installing the baseline silently
+   would also have risked blocking an autonomous run mid-arc. Decide deliberately. **And check the
+   ASUS**: my board recorded "Config B" from the S291 hand-off *narrative* rather than a probe, so
+   the same belief may be stale there.
+4. **A boot-time `gh issue list` is a point read, not standing truth.** Three adopter issues
+   (#234/#235/#237) were filed 11:56–12:04Z — *after both live sessions had booted*. Both boot
+   snapshots were stale within the hour. Re-query before picking an arc.
+
+## 🎯 WHAT LANDED — #241 `6814b1d8` (D-4)
+
+Server import specifiers were emitted in **source** coordinate space while the dist tree strips a
+leading `pages/` segment (SPEC §47.9.5, normative), so every specifier from a `pages/` importer
+overshot by exactly that segment. Compile exit 0, zero diagnostics; the bundle died at runtime.
+Full narrative in the changelog; the three durable findings are below.
+
+## 🧭 THE FINDINGS THAT OUTLAST THE FIX
+
+1. ⭐ **It was never an adopter-only bug.** `examples/23-trucking-dispatch` — our canonical
+   multi-file example — had **23 of 24 server import specifiers DANGLING on main**. 21k tests were
+   structurally blind because **nothing asserts that an emitted specifier resolves on disk**:
+   `node --check` passes (a missing FILE is not a syntax error) and the suite never executes the
+   emitted server bundles. That absence is the reusable lesson, not the fix.
+2. **A guard existed for exactly this symptom and could not see it.**
+   `W-SERVER-IMPORT-UNEMITTED` was written to catch runtime `Cannot find module`, and its own comment
+   named its blind spot: *"Works in SOURCE-path space."* That is the one space where the path is
+   always self-consistent — so it was incapable of seeing a coordinate-space bug. **The S276 shape:
+   the oracle inherits the implementation's assumption.** Generalizable check: when a guard and the
+   thing it guards share a coordinate system / normalization / parser, the guard cannot see defects
+   *in* that shared layer.
+3. **The governing-sentence gate killed my first reading, and that was the point.** I had a clean
+   reproducer and a compelling reframe — "the emitter is faithful to §47.9.2's tree-preserving
+   formula and `pathFor` is the deviant" — which would have made this a RULING (amend the spec or
+   revert the strip). §47.9.5's S100 amendment explicitly specifies the strip, so the layout is
+   normative and the specifier is simply wrong. **The empirical-sufficiency illusion caught live:
+   strong evidence carrying a normative conclusion it could not support.**
+
+## ⚠️ MISSES — recorded, not smoothed
+
+- **I asserted a hook configuration I never probed** (see pickup 3). The dispatched dev-agent caught
+  it. Verify state, not narrative — the spine, missed at my own boot step.
+- **The FACTS gate caught me, third session running** (S292 hit it 3× in one session). Regenerated as
+  the LAST content commit and then verified *every* generated gate rather than only the one that
+  reddened — facts + `state.ts` + SPEC-INDEX totals.
+- **Near-miss in my own review:** I diffed gate failure-sets against a partially-written capture file
+  and nearly reported a false "4 tests improved." Caught only because the totals line was absent.
+  A background capture is not a result until it says it finished.
+
+## 🧷 CONCURRENCY — a collision caught before it cost anything
+
+S295's #238 lane-1 brief (`dc-client-boot-blockers`) folded **D-4** in and located it in
+`codegen/index.ts computeDependencyClientScripts`. Wrong locus: D-4 is `emit-server.ts` + `api.js`,
+**file-disjoint from their lane** — the only reason landing under a live sibling was safe. Their
+brief's own escape hatch (*"…IF they share the coordinate computation"*) fires: they do not. Urgent
+note sent to drop the fold-in. Their #239/#240 landed mid-arc; the `docs/FACTS.md` rebase conflict was
+**REGENERATED, never hand-merged** (S288/S292 precedent) and the fix re-verified by execution on the
+rebased tree before the force-push.
+
+Also delivered a new adopter's report that was sitting UNTRACKED on this disk — the `pa-base v2.5`
+per-clone class **recurring on the very clone that produced the doctrine** — plus a consolidated bug
+inventory and a privacy-residue note (`0272069`). **Open ruling for bryan, untouched by me:** the
+published history was never in scope of the identity scrub (35 commits carry the name in their
+*messages*; `filter-repo` `0801d988` targeted `user-voice.md`, a different action).
+
+## ✅ GATE / MAPS / HOUSEKEEPING
+
+- **Cloud `gate` GREEN + `windows` GREEN** on #241 — the authority, and the *sole* gate here since
+  this clone has no hooks. `tracking` / `ai-review` red = the documented non-required flakes (the
+  tracking log showed exactly the known three: §64 Bun.serve R26 + gitignored `bs.js`/`tab.js`).
+- Gate subset run manually BOTH sides: 9 pre-existing failures, **failure-name sets identical**,
+  +38 tests all passing. FACTS + `state.ts` + SPEC-INDEX `--check` all PASS.
+- **Maps: NOT refreshed — owed, and now owed twice.** The stamp is `c700c435` vs HEAD `6814b1d8`; the
+  S292 refresh was already outstanding. The dispatched agent reported maps **"not load-bearing"** for
+  this arc: no map row covers `stripPagesPrefix`, the §47.9.5 strip, or the source-vs-dist coordinate
+  space of an emitted specifier. **A refresh must factor in:** `emit-server.ts`
+  (`distRelativeServerSpecifier`), `api.js` (the dist-keyed forward index + both reversal sites), plus
+  everything the S292 note listed.
+- **Worktree `agent-a13a0346a415fdaf4` RELEASED** — clean status confirmed, content verified on main
+  first, branch deleted, pruned. **No worktrees remain on this clone.**
+- **Branch hygiene:** 4 stale local branches reaped (one anchored as tag
+  `archive/wave1c-nav-xps-pre-215` because its 5 commits existed on NO remote). **Remote sweep HELD by
+  bryan** — 52 remain, 45 with a merged PR, 6 that must not be batch-deleted. See `[858]`.
+- Inbox: empty on the scrml side (S295 drained it). Three notes sent to S295 this session.
+
+## Tags
+#session-296-bryan-xps #d4-server-import-dist-space #coordinate-space-defect #241
+#canonical-example-app-96pct-dangling #guard-shared-the-emitters-blind-spot #s276-shape
+#governing-sentence-killed-my-reframe #empirical-sufficiency-illusion-caught-live
+#no-hooks-on-this-clone #asserted-config-b-without-probing #facts-gate-caught-me-again
+#collision-caught-before-it-cost #client-gap-is-stale-not-widenable #maps-owed-twice
+
+---
+
+<!-- ============================================================= -->
 <!-- S294 WRAP (Peter/Windows) — prepended 2026-07-28.              -->
 <!-- S293 (Peter) + all prior UNCHANGED below.                      -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->
