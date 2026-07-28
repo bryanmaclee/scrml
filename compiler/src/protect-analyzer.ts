@@ -828,10 +828,14 @@ function resolveDb(
       "E-PA-002",
       `E-PA-002: ${what} and no CREATE TABLE statement ` +
       `was found in any \`?{}\` block for ${tableWord} \`${missingList}\`. ` +
+      `First remedy: declare ${tableWord} \`${missingList}\` in a \`<schema>\` block, then run ` +
+      `\`scrml db-migrate . --db ${dbPath}\` to create ${tableWord === "table" ? "it" : "them"}. ` +
+      `The compiler generates that DDL from your \`<schema>\` — do NOT hand-write the schema ` +
+      `or rebuild it by hand against \`bun:sqlite\`. ` +
       (srcIsDriverUri
-        ? `Add a CREATE TABLE statement (e.g. in a startup \`?{}\` block) so the compiler ` +
+        ? `Otherwise add a CREATE TABLE statement (e.g. in a startup \`?{}\` block) so the compiler ` +
           `can validate the schema. Real Postgres / MySQL introspection lands in a future phase.`
-        : `Either create the database file first, or add a CREATE TABLE statement in a \`?{}\` ` +
+        : `Otherwise create the database file first, or add a CREATE TABLE statement in a \`?{}\` ` +
           `block so the compiler can validate the schema at compile time.`),
       blockSpan,
     ));
