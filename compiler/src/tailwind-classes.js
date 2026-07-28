@@ -627,6 +627,70 @@ function registerRing() {
 }
 
 // ---------------------------------------------------------------------------
+// Outline (outline / outline-none / outline-{style} / outline-{width} /
+// outline-offset-{width} / outline-{color}) — D-3.
+//
+// The whole family was absent from the registry, so every real `outline-*`
+// utility false-fired W-TAILWIND-UNRECOGNIZED-CLASS. `outline-none` is the one
+// adopters hit constantly (it is the standard companion to a custom `ring`
+// focus treatment: `focus:outline-none focus:ring-2`), and a typo-detector that
+// cries wolf on a real utility teaches adopters to ignore it.
+//
+// Only the ARBITRARY forms resolved before this (`outline-[2px]`,
+// `outline-offset-[3px]`) — those come from the arbitrary-value property map,
+// not from named registration, and are unaffected by the entries below.
+//
+// TAILWIND v3 SEMANTICS (this engine is v3 throughout: bare `ring` is 3px,
+// gradients are `bg-gradient-to-*`). v3 and v4 disagree here and the difference
+// is load-bearing:
+//   v3: `outline-none` = the transparent-outline trick (preserves the focus
+//       ring for forced-colors / Windows High Contrast users), and the bare
+//       `outline` = `outline-style: solid`.
+//   v4: `outline-none` = `outline-style: none`, and the trick moved to the new
+//       `outline-hidden`.
+// Emitting v4's `outline-style: none` here would silently delete the
+// accessibility affordance v3 authors are relying on, so v3 it is.
+// `outline-hidden` is deliberately NOT registered — it is v4-only vocabulary.
+// ---------------------------------------------------------------------------
+
+function registerOutline() {
+  // Style. Bare `outline` is v3's `outline-style: solid` (NOT a width).
+  registry.set("outline", ".outline { outline-style: solid }");
+  registry.set("outline-dashed", ".outline-dashed { outline-style: dashed }");
+  registry.set("outline-dotted", ".outline-dotted { outline-style: dotted }");
+  registry.set("outline-double", ".outline-double { outline-style: double }");
+
+  // `outline-none` — v3's transparent outline, not `outline-style: none`. The
+  // 2px transparent outline stays visible under forced-colors mode, which is
+  // exactly why Tailwind spells it this way instead of removing the outline.
+  registry.set(
+    "outline-none",
+    ".outline-none { outline: 2px solid transparent; outline-offset: 2px }",
+  );
+
+  // outline-{width} and outline-offset-{width}.
+  const OUTLINE_WIDTHS = { "0": "0px", "1": "1px", "2": "2px", "4": "4px", "8": "8px" };
+  for (const [k, px] of Object.entries(OUTLINE_WIDTHS)) {
+    registry.set(`outline-${k}`, `.outline-${k} { outline-width: ${px} }`);
+    registry.set(`outline-offset-${k}`, `.outline-offset-${k} { outline-offset: ${px} }`);
+  }
+
+  // outline-{color}-{shade}, mirroring the border/ring color loops.
+  for (const [colorName, shades] of Object.entries(COLOR_PALETTE)) {
+    for (const shade of COLOR_SHADES) {
+      const hex = shades[shade];
+      if (!hex) continue;
+      registry.set(`outline-${colorName}-${shade}`, `.outline-${colorName}-${shade} { outline-color: ${hex} }`);
+    }
+  }
+  registry.set("outline-white", ".outline-white { outline-color: #ffffff }");
+  registry.set("outline-black", ".outline-black { outline-color: #000000 }");
+  registry.set("outline-transparent", ".outline-transparent { outline-color: transparent }");
+  registry.set("outline-current", ".outline-current { outline-color: currentColor }");
+  registry.set("outline-inherit", ".outline-inherit { outline-color: inherit }");
+}
+
+// ---------------------------------------------------------------------------
 // Composing gradient family (bg-gradient-to-* / from-* / via-* / to-*) —
 // Approach C (§26.7). Same inline-`var()`-fallback model as the box-shadow
 // composing family above (registerRing / registerEffects). A gradient is built
@@ -3382,6 +3446,7 @@ registerColors();
 registerBorders();
 registerEffects();
 registerRing();
+registerOutline();
 registerGradient();
 registerTransform();
 registerTransition();
