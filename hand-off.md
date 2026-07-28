@@ -1,4 +1,104 @@
 <!-- ============================================================= -->
+<!-- S293 WRAP (Peter/Windows) — prepended 2026-07-28.              -->
+<!-- S292 (bryan) + all prior UNCHANGED below.                      -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 293 (Peter · Windows) — WRAP
+
+**Date:** 2026-07-27/28. `/boot` Profile A. `main` at **`83888ee3`**, coherence 0/0 both repos, tree clean
+(bar 2 inbox notes, dispositioned below). Delta-log **[840]-[848]**. Changelog S293. **THREE PRs landed** —
+the per-item reconcile family. This carries the irreducible.
+
+## 🎯 THE HEADLINE — the per-item reconcile family, closed across text/attr/if (Tier-0)
+
+Started on ONE queued Peter-lane gap; it opened a coherent family — every per-item binding in a Tier-0
+reconciled `${for…lift}` that reads the item was stale on same-key REPLACE (the factory does NOT rebuild a
+reused node). Landed three:
+
+| PR | What |
+|---|---|
+| #214 `db879d01` | text / `class:` / event over an **item-derived local** stay live (+ nested-`if` scan recursion) |
+| #218 `08174f59` | per-item **attributes** stay live (`pushLiftAttrSet` → live-keyed effect) |
+| #222 `83888ee3` | per-item **`if=`** display toggle stays live (Tier-0; `tryEmitLiftIfReactive`) |
+
+All three share the S288 `maybeWrapLiftPerItemEffect` machinery. Every one adversarially verified; **the
+independent finder caught a real class-hole on all three** ([840]/[841]/[844]) — the reconfirmed
+verify-the-CLASS discipline earned its cost three times.
+
+## 🔴 THE NEXT PA'S PICKUP — what's live, what's routed
+
+- **Tier-1 `<each>` `if=` is ROUTED to bryan** (a semantics fork, not a bug fix). It's a STRUCTURAL
+  append-gate (`if(cond) appendChild` — false → element absent, not hidden), VERIFIED stale on reconcile.
+  Making it reactive = (a) reactive add/remove keeping structural semantics vs (b) display-toggle like
+  Tier-0 (changes what `if=false` means). Freeze-adjacent → bryan rules before anyone implements. Note in
+  his scrml-support inbox. **This is the last half of Fieldman workaround #3.**
+- **Value-indexed `if=` sub-gap (narrower, deferred):** the fix deliberately EXCLUDES the S103 select-row
+  shape (`@cell == item.field`) to preserve its O(2) subscribe_when opt — so that predicate's *item side*
+  stays stale on reconcile. Fixing it without losing the opt needs reconcile-aware bucket re-registration.
+  Rarer (edit-a-row-then-reorder). Noted on the if= gap.
+- **Two NEW gaps filed, both Peter-lane-ish, both cheap-ish next arcs:**
+  `g-estmt-missing-semicolon-no-source-span` (MED — adopter Obs 1; `E-STMT-MISSING-SEMICOLON` prints no
+  `:line:col`; attach the span) · `g-each-body-let-alias-silently-dropped` (MED — `${ let nm=@.name }` in
+  an each body is dropped → empty render, no diagnostic; support-or-reject).
+
+## 🧭 THE `<each>` SWEEP (Peter asked "make sure nothing else pertaining to `<each>`")
+
+Empirically verified SOUND on main (executed-DOM): per-item text/attr/`class=`/event reconcile, keyed
+reorder/reverse/move/insert-remove, nested-each reconcile on outer replace, item-root markup reuse
+(#161/#166). → **Fieldman workarounds #1, #2, #4 RETIRED on main** (they're pinned old at #110). **10 open
+each gaps, 0 HIGH** — the only live reconcile-correctness hole was `if=` (Tier-0 now fixed; Tier-1 routed).
+The rest are niche (nested-markup-interp stringifies · SSR multi-root empty · restricted-parent mount ·
+etc.). **Coordination flag:** 3 unmerged `fix/each-*` branches — `fix/each-markup-mount` (#161) +
+`fix/g-nested-for-lift-reconcile` target gaps ALREADY resolved on main → likely STALE (bryan to confirm);
+`fix/each-table-foster-warn` is genuine. And 3 each browser tests are red-on-Windows/green-on-Linux
+(environmental) yet assert reconcile-on-replace — worth a Linux confirm before declaring "`<each>` settled".
+
+## 🤝 ADOPTERS
+
+- **Fieldman/assetManagement (Peter lane) — HANDLED.** A real `<each>` consumer holding pin #110 until
+  `<each>` settles; offered a headless-Firefox run-verify (~28 gates, the `<each>` analog of RediLedger's
+  turnkey run). Reply in their inbox (`docs/INBOX-from-scrml-pa-2026-07-27-each-how-to-proceed.md`): the
+  workaround map, the single "settled" signal to wait for, offer accepted. Send the settled signal when the
+  `fix/each-*` branches land + a consolidated `<each>` reconcile pass (incl. Tier-1 if= once bryan rules).
+- **RediLedger S11 (bryan lane) — ROUTED, not acted on.** New inbox note (`…-1956-rediledger-…-content-
+  addressed-bytes-tier-ask`): a content-addressed bytes/storage tier ask (BaaS-parity #4) + 2 `_{}`
+  contract Qs (Q1 multi-statement inline slice; Q2 `capabilities=` enforcement). Storage-tier roadmap +
+  SPEC contract = bryan's. LEFT in `incoming/` + committed (his clone sees it on pull); flagged here.
+
+## ⚠️ OWN MISS (recorded, not smoothed)
+
+The if= fix's FIRST pass blanket-routed every item-reading `if=` to the effect → **regressed S103's
+value-indexed O(2) select-row optimization** (`@editingId == item.id` went O(N)) and broke its 2 guard
+tests. I did NOT just update the tests to green — that would have silently killed a deliberately-built opt.
+Caught it, narrowed the fix to exclude the value-indexed shape. The lesson: a failing guard test on an
+optimization is a signal to preserve the opt, not to update the assertion.
+
+## 🧷 CONCURRENT / HOUSEKEEPING
+
+- **bryan landed fast all session** — main moved db879d01→…→83888ee3 under me; **five rebases** across the 3
+  PRs, every conflict confined to generated `docs/FACTS.md`, resolved by REGENERATING not hand-merging.
+- **Inbox:** Fieldman note → drained to `read/` (handled). RediLedger S11 → LEFT in `incoming/` (bryan's).
+- **Worktrees:** only main + the persistent `scrml-pinned` (app-pinned `9c950dfe`, not this session's) —
+  nothing to clean.
+- **Maps:** internal edits to existing `emit-lift.js` (no new surface files) → unchanged-with-note (the
+  S286/S288/S289 internal-edits precedent). `project-mapper` not run.
+
+## ✅ GATE
+
+- Full unit+integration+conformance **21,4xx pass / 6 fail** (the documented pre-existing env set: self-host
+  `bs.js`/`tab.js` ×4 + csrf-B5 + value-indexed-subscribers boom — verified identical on clean HEAD; Linux
+  gate clean). Cloud `gate` GREEN on all 3 merges. `tracking`/`ai-review` red = the known non-required flakes.
+- FACTS `--check` PASS (regen rode each PR). gap-counts regen at this wrap.
+
+## Tags
+#session-293-peter #per-item-reconcile-family #item-derived-local #per-item-attributes #per-item-if-tier0
+#each-swept-sound #fieldman-workarounds-1-2-4-retired #tier1-if-routed-to-bryan #value-indexed-opt-preserved
+#finder-caught-holes-x3 #rediledger-s11-routed #three-prs
+
+---
+
+<!-- ============================================================= -->
 <!-- S292 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-27.        -->
 <!-- S290 + S291-XPS + all prior UNCHANGED below.                   -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->
