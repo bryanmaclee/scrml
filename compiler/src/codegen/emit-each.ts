@@ -157,13 +157,62 @@ function exprNodeHasMarkupValue(node: any): boolean {
 let _eachMarkupFnNames: Set<string> | null = null;
 
 /**
+ * POSITIONAL markup-value detection: does this expression YIELD a markup value
+ * (a DOM node) in VALUE position — a bare `markup-value` leaf, or a ternary /
+ * match whose VALUE branches do? Unlike `exprNodeHasMarkupValue` (which descends
+ * every child key indiscriminately), this does NOT descend into call ARGUMENTS,
+ * member objects, ternary CONDITIONS, binary operands, or closures — markup
+ * appearing there is NOT the expression's yielded value. This mirrors the
+ * site-side `interpMayYieldNode` discipline so the collector matches its own
+ * documented "returns markup in value position" contract. Using the
+ * recurse-everywhere helper here would flag a STRING-returning fn whose return
+ * expression merely CONTAINS a markup literal in a sub-position (e.g.
+ * `return classify(row, <b>!</b>)` — markup as an argument), which would then
+ * over-wrap the interp in a `<span data-scrml-mv>` and regress restricted
+ * parents (`<option>`/`<textarea>`). (Currently LATENT — such sub-position
+ * markup shapes fail codegen with E-CODEGEN-INVALID-LOGIC before reaching here —
+ * but closing the class keeps a future grammar relaxation from exposing it;
+ * flagged by the S239 adversarial review.)
+ */
+function exprYieldsMarkupValue(node: any): boolean {
+  if (!node || typeof node !== "object") return false;
+  const k = node.kind;
+  if (k === "markup-value") return true;
+  if (k === "ternary") {
+    return exprYieldsMarkupValue(node.consequent) || exprYieldsMarkupValue(node.alternate);
+  }
+  if (k === "match-expr") {
+    const arms = Array.isArray(node.body) ? node.body : Array.isArray(node.arms) ? node.arms : [];
+    for (const arm of arms) {
+      if (!arm || typeof arm !== "object") continue;
+      for (const vk of ["value", "result", "consequent", "body", "exprNode", "expr"]) {
+        const v = (arm as Record<string, unknown>)[vk];
+        if (Array.isArray(v)) {
+          for (const it of v) if (exprYieldsMarkupValue(it)) return true;
+        } else if (v && typeof v === "object" && exprYieldsMarkupValue(v)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+  if (k === "paren" || k === "group" || k === "sequence") {
+    return exprYieldsMarkupValue(node.expr ?? node.inner ?? node.body);
+  }
+  return false;
+}
+
+/**
  * Does this fn body carry a markup value in ANY of its `return`s? A return
  * "carries markup" when it returns a markup literal directly
  * (`return-stmt.markupNode`, kind "markup"/"component") OR its returned
- * expression contains a `markup-value` leaf anywhere (a ternary / match arm
- * that yields markup — via the existing `exprNodeHasMarkupValue`). Scans
- * returns at any depth in the body (guards / if / match arms), but does NOT
- * descend into a NESTED `function-decl` (its returns are its own).
+ * expression YIELDS a markup value in VALUE position (a ternary / match arm
+ * that yields markup — via the POSITIONAL `exprYieldsMarkupValue`, NOT the
+ * recurse-everywhere `exprNodeHasMarkupValue`, so markup in an argument /
+ * closure / condition of the returned expression does NOT falsely flag a
+ * string-returning fn). Scans returns at any depth in the body (guards / if /
+ * match arms), but does NOT descend into a NESTED `function-decl` (its returns
+ * are its own).
  */
 function fnBodyReturnsMarkup(body: any): boolean {
   const seen = new WeakSet<object>();
@@ -182,7 +231,7 @@ function fnBodyReturnsMarkup(body: any): boolean {
       if (mk && typeof mk === "object" && (mk.kind === "markup" || mk.kind === "markup-value" || mk.kind === "component")) {
         return true;
       }
-      if (exprNodeHasMarkupValue(n.exprNode)) return true;
+      if (exprYieldsMarkupValue(n.exprNode)) return true;
     }
     for (const key of Object.keys(n)) {
       const v = (n as Record<string, unknown>)[key];
