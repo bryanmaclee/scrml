@@ -5389,6 +5389,25 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+## S295 (2026-07-28) — bryan · ASUS-Vivobook — a three-lane parallel adopter arc, two pa-base amendments, and three privacy scrubs
+
+**Six PRs.** Three concurrent lanes verified file-disjoint before dispatch, plus a SPEC ratification and the deferred-item filing.
+
+- **#244 — client-boot blockers.** GH **#234**: `<errors of=…/>` emitted `_scrml_cs_message_for` while the `messages` runtime chunk was tree-shaken out — the ReferenceError fired INSIDE `_scrml_boot`, so no event handler on the page ever bound and clicking Sign in produced zero network requests. Fixed by demand-marking in `emit-client.ts`; verified a page WITHOUT `<errors>` emits zero such bytes, so the §C10.1 budget is intact. GH **#235**: composition carried the shell's bundle into child pages without its transitive module `<script>`s. A PRE-EXISTING double-runtime `<script>` bug surfaced by the reproducer was fixed alongside.
+- **#242 — the boundary/async walker.** GH **#237 (FAIL-OPEN) CLOSED.** A server-fn result assigned to a plain local in `on mount` emitted with no `await`, so the Promise was always truthy and a deny branch could never be taken. **The reported cause was wrong and the correction is the finding:** both destinations already await inside a `function` body; the real gate is SCOPE — a desugared `on mount` body is emitted at module scope inside a SYNC IIFE. Governing sentence §13.2, unconditional. **D-5**: server code referenced module consts it never emitted.
+- **#240 — diagnostic quality.** `E-PA-002` now leads with `scrml db-migrate` instead of steering newcomers into hand-rebuilding their schema; the entire `outline-*` family registered (23 utilities), deliberately with **Tailwind v3** semantics — v4's `outline-none` would have silently deleted an accessibility affordance under forced-colors.
+- **#239 — SPEC §23.2.4a.** The multi-statement inline `_{}` slice RATIFIED as normative, with a worked example compiled before landing. Conformance restoration, not a widening: `E-FOREIGN-006` is unintelligible under an expression-only reading, has 3 fire sites, and was verified firing.
+- **#245** — the nine deferred items filed, two of them explicitly ruling-gated.
+
+**pa-base v2.5 → v2.7, two amendments.** **v2.6:** third-party identity is handle-only from first contact — a WRITING-time rule, not a publishing-time review, because ordinary work writes provenance into artifacts whose publication status is decided later and elsewhere. **v2.7:** a PA-asserted fix locus is a HYPOTHESIS and shall be labelled one — all three dispatch briefs this session named a wrong or self-contradicting locus, one of which would have shipped an INCOMPLETE fix with green tests.
+
+**Three privacy scrubs**, two of them third-party property, all found only when the repo was packaged for npm. The third-party name was removed from the working tree (`89db7981`), the hub (`4dc0eb7`), and 9 residual hub hits S296 caught where the surname survived as a filesystem PATH component (`9ea187f`). **The published history was never in scope and remains a ruling for bryan** — 35 commits carry the name in their message.
+
+**npm packaging made publishable** (`171d5f23`): files allowlist, deps hoisted, the shadowing nested manifest deleted. 7,060 files / 57.5 MB → 471 / 15.9 MB. The suggested allowlist would have shipped a BROKEN package — `stdlib/` is required at runtime. Publish itself is deliberately not taken.
+
+Adopter issues **4 → 1** (#234/#235/#237 closed with landing SHAs). Open HIGHs 17 → 18. Concurrent with S296 (XPS) throughout.
+
+
 ### 2026-07-27 — S292 (bryan · ASUS-Vivobook): article currency, Wave-1c landed, and an adopter's login unbroken
 
 Four PRs. A concurrent session (S293) landed #214 and #218 alongside, so both of my later PRs were
