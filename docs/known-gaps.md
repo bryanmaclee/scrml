@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 11 |
-| MED | 67 |
+| HIGH | 10 |
+| MED | 69 |
 | LOW | 39 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -129,7 +129,19 @@ MED gap and should raise its priority.
 deliberate defence-in-depth since a dynamic query's table set is not always statically known. (a) is the
 widening direction and (d) narrows the security envelope, so this is the widen-vs-limit shape -> R2 minimum.
 Their workaround is one line (`GRANT SELECT ON users TO scrml_app;`) and they explicitly did NOT propose it
-as the fix. <!-- @gap id=g-dbauth-migrate-no-grants-for-unmarked-identity-table sev=HIGH status=open -->
+as the fix. <!-- @gap id=g-dbauth-migrate-no-grants-for-unmarked-identity-table sev=HIGH status=resolved -->
+
+**RESOLVED S292 (bryan) — ledger flip landed S297.** bryan RULED **direction (b)**: grant the bounded role on the tables `?{}` actually touches, least-privilege. Fixed in **`32ef5b52` (#217)**, verified an ancestor of `main`. The first cut over-granted blanket CRUD — handing `scrml_app` DELETE on the identity table login merely reads — and the PA's own S239 pass caught it pre-merge; privileges are now derived per reference. **Adopter RUN-verified at `115e8b1b` (S297)**: `users` carries exactly `SELECT`, 0 non-SELECT privileges, 227 statements in one transaction; their `GRANT SELECT` workaround is deleted and both harnesses pass without it (17/17 + 11/11). They kept a `has_table_privilege(...)` assertion as a downstream tripwire on our behaviour.
+⚠️ **This entry sat `status=open` at `sev=HIGH` for five sessions after its own fix merged**, and was caught by **the adopter reading our ledger**, not by us — a stale-open HIGH distorts the freeze denominator, which is a count we manage deliberately. Same class as the S295 finding that the gap ledger drifts faster than it is reconciled; pa-base §2's same-landing supersession discipline applies to this ledger verbatim and is still not being followed here.
+**Direction (d) is NOT resolved and is spun out** → [[g-dbauth-unmarked-reads-wrapped-in-set-local-role]]. Keeping the resolved symptom open alongside a genuinely-open policy question was what made this entry unreadable. — `RESOLVED S292 (bryan), flipped S297`
+
+### g-dbauth-unmarked-reads-wrapped-in-set-local-role — unmarked-table reads are wrapped in `SET LOCAL ROLE scrml_app` at all; (b) treats the symptom, (d) was named the truer fix and needs a policy for statically-unknown table sets — `NEW S297 (spun out of g-dbauth-migrate-no-grants-for-unmarked-identity-table; adopter-flagged); MED; policy`
+<!-- @gap id=g-dbauth-unmarked-reads-wrapped-in-set-local-role sev=MED status=open -->
+The parent gap offered four directions; bryan ruled **(b)** (grant what `?{}` touches) and that landed as `32ef5b52`. **Direction (d) — do not wrap unmarked-table reads in `SET LOCAL ROLE` at all — was named in the same entry as "arguably the real defect" and was never ruled.** (b) makes the bounded role *sufficient* for the reads it performs; (d) asks whether those reads should be performed under the bounded role in the first place.
+
+The reason (d) was not simply taken: the role-drop may be deliberate defence-in-depth, because **a dynamic query's table set is not always statically known**. That is the policy question, and it is real — the grant scanner is explicitly not a SQL parser (a CTE, a subquery in FROM/JOIN position, LATERAL, EXECUTE, or a dynamic table identifier makes the query undetermined and emits a warning naming it; all-or-nothing by design, since a partial answer is indistinguishable from a complete one). So (d) cannot be decided by "just don't wrap unmarked reads" — it needs a rule for what happens when we cannot tell which tables a query touches.
+
+Adopter-flagged S297 (they observed the parent read as resolved-symptom-plus-open-policy in one entry and suggested the split; their queries do not hit the scanner's undetermined set today, and they accept the warning as the contract if one ever does). Widen-vs-limit shape → **R2 minimum**, bryan rules. — `NEW S297; MED; open`
 
 ### G-SPA-RUNTIME-GZIP-BUDGET-KNIFE-EDGE — the 16 KB SPA-runtime gzip budget is at ~127 B margin on base, independent of any in-flight arc — `NEW S282; HIGH; open (a bryan decision, not a bug)`
 Surfaced while scoping the BUG-6 accessor-rename (`docs/changes/chunk-namespacing/BUG6-RENAME-SCOPING.md` §6). `v0-3-x-spa-tree-shake-phase-b.test.js:145` asserts the assembled SPA runtime is `< 16 * 1024` gzip. **Agent-measured on the test's own `SPA_COUNTER` fixture at base `e8fdd44c`: 16,257 B — 127 B under the 16,384 budget, with no chunk-namespacing changes present.** (Scoping measurement; the execution session re-measures as its step 1, R26-style — do not treat 127 B as verified-final.)
@@ -167,6 +179,9 @@ silent tightening.
 **Sibling defect in the same report (MED-HIGH):** a table-level composite `unique(a, b)` emits nothing
 either — confirmed here (`parseColumns` only reads `name: type` lines, so a bare `unique(a, b)` line is
 skipped entirely). Single-column `unique` works. Same fix locus.
+**→ This sibling now has its own id: [[g-schema-composite-unique-emits-nothing]] (filed S297).** It was
+carried as prose under a since-RESOLVED parent for multiple sessions, which is exactly how it stayed
+unactioned — see that entry.
 
 Impact: **integrity constraints an adopter declared do not exist in their database, silently.** For a
 double-entry ledger this is the class that matters most.
@@ -194,6 +209,16 @@ is now its own gap: `g-db-migrate-ignores-constraint-drift-on-existing-columns`.
 *Detection is of the CLASS, not the reported shape* — `references` written with nothing parsed —
 so `references t (c)`, `references t.c` and a bare `references` are caught too, with string and regex
 bodies blanked first so `default('see references')` cannot false-fire. — `RESOLVED S290` <!-- @gap id=g-schema-references-dot-form-emits-no-foreign-key sev=HIGH status=resolved -->
+
+### g-schema-composite-unique-emits-nothing — a table-level composite `unique(a, b)` in `<schema>` is silently skipped; the constraint the adopter declared does not exist in their database — `NEW S297 (adopter-flagged; carried as prose under a resolved parent since S288); MED; schema/db-migrate`
+<!-- @gap id=g-schema-composite-unique-emits-nothing sev=MED status=open -->
+A table-level composite uniqueness constraint — `unique(a, b)` on its own line inside a `<schema>` table body — **emits nothing**. `parseColumns` reads only `name: type` lines, so a bare `unique(a, b)` line is skipped entirely and no `UNIQUE` constraint reaches the DDL. **Single-column `unique` works**, which is what makes this quiet: the feature appears to function.
+
+**Why this is filed now and not earlier — the point of the entry.** This defect has been *described accurately* since S288, as a "sibling defect in the same report" paragraph inside [[g-schema-references-dot-form-emits-no-foreign-key]] — an entry that went **RESOLVED at S290**. So the prose survived, attached to a closed parent, with **no `@gap id=` of its own**: it appeared in no count, matched no status query, and was never a work item. **Adopter-flagged S297**, in their words: *"a gap with no id is the kind that gets forgotten."* They are hand-applying the constraints behind assertions, so nothing of theirs is broken — this is a report about our ledger as much as about the compiler.
+
+**Impact is the same class as the parent's** and the parent stated it best: *integrity constraints an adopter declared do not exist in their database, silently.* For a double-entry ledger, a missing composite uniqueness constraint is precisely the constraint that matters.
+
+**Fix locus (PA-located, VERIFY — pa-base v2.7):** same as the parent's, `parseColumns` in the `<schema>` body scan. Unverified by me at S297; the "same fix locus" claim is inherited from the S288 report, and the parent's own fix has landed since, so re-derive rather than trust it. Direction is not obvious and wants the governing-sentence gate first: §39 must be read for whether a table-level constraint line is grammar at all. If §39 does not admit the form, the conformant fix is to **reject it loudly** rather than to start emitting it — accepting it would be newly-ACCEPTING beyond the contract, the one-way door the parent gap was ruled on (`pa-base` §8). Migration must be MEASURED before either direction. — `NEW S297; MED; open`
 
 ### G-DB-MIGRATE-IGNORES-CONSTRAINT-DRIFT-ON-EXISTING-COLUMNS — `db-migrate` reconciles column ADD/DROP/RENAME only; every constraint change on an existing column is silently ignored — `NEW S290; HIGH; open`
 Found while ruling the FK gap above, and **larger than it**. `diffSchema`'s existing-table branch
