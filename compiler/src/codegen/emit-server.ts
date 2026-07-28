@@ -19,7 +19,7 @@ import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-form
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRelative, basename as _pathBasename, sep as _pathSep } from "node:path";
-import { parseExprToNode } from "../expression-parser.ts";
+import { parseExprToNode, forEachIdentInExprNode } from "../expression-parser.ts";
 import { extractCalleeNames, buildCalleeImportMap } from "./scheduling.ts";
 import { isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
@@ -1034,6 +1034,124 @@ function emitModuleValueExportLines(
     out.push(fnBlocks[i]);
     if (i < fnBlocks.length - 1) out.push("");
   }
+  out.push("");
+  return out;
+}
+
+/**
+ * D-5 (adopter report, S293) — emit a MODULE-LEVEL `const` / `let` VALUE binding
+ * that the server bundle CLOSES OVER.
+ *
+ * THE BUG. A `fn` declaration crosses the server/client boundary fine (route
+ * inference promotes it and `emitEndpointServerHelperLines` / the peer-callable
+ * loop re-emit its body server-side). A module-level `const` did NOT:
+ *
+ *     ${ const ROLES = ["admin", "editor", "viewer"]
+ *        fn labelFor(i) { return ROLES[i] }
+ *        server fn describe(i) -> string { return labelFor(i) } }
+ *
+ * emitted `return ROLES[i];` into `.server.js` with NO `const ROLES` anywhere in
+ * that bundle — a runtime `ReferenceError`, with ZERO compile errors and ZERO
+ * warnings. (The declaration ships to the CLIENT bundle, where nothing on the
+ * server path can reach it.) The reporter said this cost them the most debugging
+ * time in their slice.
+ *
+ * WHAT THIS IS NOT. It does NOT move anything out of the client bundle — the
+ * declaration still ships to the client exactly as before, so the §14.8.9
+ * protect-floor surface is untouched. It only ADDS the binding to the server
+ * bundle, alongside the server-side code that already references it.
+ *
+ * FILTERS (each one keeps a non-value out of the server bundle):
+ *   - `isServerOnlyNode` — a `?{}` / transaction / server-meta init is not a
+ *     module value; the route path owns it.
+ *   - markup-component consts (`const Card = <div>…`) — not a runtime value.
+ *   - already declared in the assembled body — no double declaration.
+ *   - NOT referenced by the assembled server body — a client-only const stays
+ *     client-only, so a program with no closure across the boundary emits
+ *     byte-identically to before this fix.
+ *   - the initializer's free identifiers must ALL resolve at server module scope
+ *     (an earlier emitted const, something already declared in the bundle, or a
+ *     host global). A `const X = compute()` whose `compute` is not in the server
+ *     bundle is SKIPPED rather than emitted: a module-load `ReferenceError` is
+ *     strictly worse than the call-time one, and the honest answer for that
+ *     shape is a diagnostic, not a guess.
+ *
+ * Emission is in SOURCE ORDER so a const that reads an earlier const resolves.
+ * Placement at the END of the bundle is safe: every reference is inside a
+ * function body (a route handler or an in-process peer), evaluated at call time,
+ * never during module init.
+ */
+function emitReferencedModuleConstLines(fileAST: any, assembledBody: string): string[] {
+  const candidates: any[] = [];
+  const collectLogic = (nodeList: any[]): void => {
+    for (const node of (Array.isArray(nodeList) ? nodeList : [])) {
+      if (!node || typeof node !== "object") continue;
+      if (node.kind === "logic" && Array.isArray(node.body)) {
+        for (const stmt of node.body) {
+          if (
+            stmt && typeof stmt === "object" &&
+            (stmt.kind === "const-decl" || stmt.kind === "let-decl") &&
+            typeof stmt.name === "string" && stmt.name
+          ) {
+            candidates.push(stmt);
+          }
+        }
+      }
+      if (Array.isArray(node.children)) collectLogic(node.children);
+    }
+  };
+  collectLogic(getNodes(fileAST));
+  if (candidates.length === 0) return [];
+
+  const esc = (n: string): string => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const isDeclared = (name: string): boolean =>
+    new RegExp(`^(?:export\\s+)?(?:async\\s+)?(?:function\\*?|const|let|var)\\s+${esc(name)}\\b`, "m")
+      .test(assembledBody);
+  const isReferenced = (name: string): boolean =>
+    new RegExp(`(?<![.$\\w])${esc(name)}(?![$\\w])`).test(assembledBody);
+
+  // Host globals a module-value initializer may legitimately reach for. Kept
+  // deliberately small — anything not here makes the candidate unresolvable and
+  // therefore skipped, which is the fail-closed direction.
+  const HOST_GLOBALS = new Set<string>([
+    "Math", "JSON", "Date", "Object", "Array", "String", "Number", "Boolean",
+    "RegExp", "Map", "Set", "BigInt", "Symbol", "Infinity", "NaN", "globalThis",
+  ]);
+
+  const available = new Set<string>();
+  const emitted: string[] = [];
+  for (const decl of candidates) {
+    const name: string = decl.name;
+    if (isDeclared(name)) { available.add(name); continue; }
+    if (isServerOnlyNode(decl)) continue;
+    const initStr: string = typeof decl.init === "string" ? decl.init : "";
+    if (initStr.trim().startsWith("<") || initStr.includes("?{")) continue;
+    if (!isReferenced(name)) continue;
+    if (!decl.initExpr) continue;
+    let resolvable = true;
+    forEachIdentInExprNode(decl.initExpr, (id: any) => {
+      const n: string = typeof id?.name === "string" ? id.name : "";
+      if (!n || n.startsWith("@")) { resolvable = false; return; }
+      if (HOST_GLOBALS.has(n) || available.has(n) || isDeclared(n)) return;
+      resolvable = false;
+    });
+    if (!resolvable) continue;
+    const code = emitLogicNode(decl, {
+      boundary: "server" as const,
+      insideFunctionBody: true,
+      declaredNames: new Set<string>(available),
+    });
+    if (!code) continue;
+    emitted.push(serverRewriteEmitted(code));
+    available.add(name);
+  }
+  if (emitted.length === 0) return [];
+  const out: string[] = [];
+  out.push("");
+  out.push("// --- module-level values the server bundle closes over (D-5) ---");
+  out.push("// Also present in the client bundle; this is an ADDITIONAL declaration for");
+  out.push("// the server side, not a relocation — nothing leaves the client output.");
+  for (const l of emitted) out.push(l);
   out.push("");
   return out;
 }
@@ -4687,6 +4805,22 @@ export function generateServerJs(
     const _veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"), errors, _asyncExportRegistry);
     setVarCounter(_veSnapshot);
     for (const _l of _veLines) lines.push(_l);
+  }
+
+  // D-5 (adopter report, S293) — a module-level `const` / `let` VALUE binding the
+  // server bundle closes over. `fn` declarations already cross the boundary (the
+  // peer-callable loop above + the §61 endpoint-helper path below); a module const
+  // did not, so `return ROLES[i];` reached `.server.js` with no `ROLES` in scope —
+  // a runtime ReferenceError with ZERO errors and ZERO warnings. Emitted AFTER the
+  // value exports so an already-exported binding wins the already-declared guard,
+  // and BEFORE `finalEmitted` is joined so the helper-inline scans see it. The
+  // client bundle is UNCHANGED — this ADDS a server-side declaration, it does not
+  // relocate one, so the §14.8.9 protect-floor surface is untouched.
+  {
+    const _mcSnapshot = getVarCounter();
+    const _mcLines = emitReferencedModuleConstLines(fileAST, lines.join("\n"));
+    setVarCounter(_mcSnapshot);
+    for (const _l of _mcLines) lines.push(_l);
   }
 
   // §61 <endpoint> private-arm reachability — retain endpoint-only private server

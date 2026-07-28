@@ -16,6 +16,7 @@ import { collectDerivedVarNames, buildFunctionBodyRegistry, collectReactiveVarNa
 import { collectChannelNodes, emitChannelClientJs, parseChannelReconnect } from "./emit-channel.ts";
 import { emitInitialLoad, emitUnifiedMountHydrate, emitServerAuthorityLoad, emitDeclRhsSqlLoad } from "./emit-sync.ts";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
+import { liftEmittedStatementAwaits, emittedCodeCallsServerFn } from "./scheduling.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
 
@@ -504,6 +505,46 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
         continue;
       }
       const code = emitLogicNode(stmt, groupEmitOpts);
+
+      // GH #237 (fail-open, S293) — `on mount { … }` calling a server function.
+      //
+      // SPEC §13.2: "The compiler SHALL insert `await` at every call site where a
+      // server-generated fetch call is made." Inside a scrml `function` body that
+      // already holds: `emit-functions` colours the fn `async` and
+      // `scheduleStatements` -> `injectPromiseAwait` inserts the `await`. A
+      // desugared `on mount { … }` body (§6.7.1a) had NEITHER — it is emitted at
+      // MODULE scope, and the chunk body is a SYNC IIFE where `await` is illegal,
+      // so every server call in a mount block landed as a bare, unawaited Promise:
+      //
+      //     const u = _scrml_fetch_loadMe_2(1);          // a PENDING Promise
+      //     if (u === null || u === undefined) { … }     // ALWAYS false
+      //
+      // That is fail-OPEN: an `if (u is not) { redirect("/login") }` sign-in guard
+      // can never take its deny branch, and `u.type` is `undefined` so every role
+      // test downstream silently fails. (The sibling reactive-cell destination
+      // `@you = loadMe(1)` was already correct — emit-client.ts lifts it into its
+      // own `(async () => _scrml_reactive_set(…, await …))()`.)
+      //
+      // Fix: give the mount block the async scope §13.2 requires. The body runs
+      // inside a self-contained `(async () => { … })()` — the same shape, and the
+      // same `injectPromiseAwait` await policy, the two already-correct paths use.
+      // `on mount { … }` is a fire-and-forget lifecycle effect (§6.7.1a), and its
+      // locals are BLOCK-scoped in source, so nothing outside the block can
+      // reference them: the wrap changes no visible binding. Gated on the body
+      // actually calling a server fn — a mount block without one emits
+      // byte-identically to before.
+      if (code && (stmt as any)._onMountEffect === true && ctx.routeMap && emittedCodeCallsServerFn(code, ctx.routeMap)) {
+        const awaited = liftEmittedStatementAwaits(code, ctx.routeMap, ctx.filePath ?? "");
+        const indented = awaited
+          .split("\n")
+          .map((l) => (l.length ? "  " + l : l))
+          .join("\n");
+        codes.push(
+          `// §6.7.1a \`on mount\` — async scope for the server calls in this block (§13.2).\n` +
+          `(async () => {\n${indented}\n})().catch(_scrml_async_err => _scrml_error_boundary_log("on mount", _scrml_async_err));`,
+        );
+        continue;
+      }
 
       // Bug 5 Phase 2 (S107, 2026-05-19) — Anomaly B fix.
       //
