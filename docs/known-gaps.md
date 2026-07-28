@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 10 |
-| MED | 69 |
+| MED | 70 |
 | LOW | 39 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -209,6 +209,26 @@ is now its own gap: `g-db-migrate-ignores-constraint-drift-on-existing-columns`.
 *Detection is of the CLASS, not the reported shape* — `references` written with nothing parsed —
 so `references t (c)`, `references t.c` and a bare `references` are caught too, with string and regex
 bodies blanked first so `default('see references')` cannot false-fire. — `RESOLVED S290` <!-- @gap id=g-schema-references-dot-form-emits-no-foreign-key sev=HIGH status=resolved -->
+
+### g-if-dirty-path-ships-gated-content-visible-pre-hydration — content behind a false `if=` ships in the initial HTML with no `display:none` and is visible until hydration (and permanently with JS off) — `NEW S297 (found while scoping if= Phase 2); MED; codegen/if-lowering`
+<!-- @gap id=g-if-dirty-path-ships-gated-content-visible-pre-hydration sev=MED status=open -->
+`if=` compiles to two lowerings (see [[g-if-two-lowerings-display-vs-mount]] context in `docs/changes/if-mount-unmount-phase2/SCOPING.md`). On the **dirty** path — selected whenever the gated subtree contains anything dynamic, which a single `${…}` interpolation is enough to trigger — the element is emitted into the initial HTML **with no `style="display:none"`** and is hidden only once client JS boots.
+
+**Verified by execution on `115e8b1b`** with the predicate FALSE at compile time:
+
+```
+source: <div id="panel" if=@isAdmin onclick=noop()>ADMIN ONLY — static text…</div>   (@isAdmin = false)
+emitted: <div id="panel" data-scrml-bind-if="_scrml_attr_if_1" data-scrml-bind-onclick="_scrml_attr_onclick_2">ADMIN ONLY — static text…</div>
+grep -c 'display:none' on the emitted HTML → 0
+```
+
+The **clean** path in the same file correctly emits its subtree inside `<template>` and it never renders. So the defect is path-selected, not universal.
+
+**Consequences:** a flash of content that should never have appeared; and with JS disabled or the bundle failing to load, the content is **permanently visible**.
+
+⚠️ **Scope this claim precisely — do not escalate it.** `if=` is NOT and never was a confidentiality boundary; that is `protect=` / §14.8.9 / `<auth>`. Interpolated *values* are filled client-side and are absent from the initial HTML, so dynamic data does not leak by this route. What ships is the subtree's **static skeleton and static text**. This is a correctness + FOUC defect, **not** a §14.8.9 breach. It matters because §17.1 says in normative terms that a false `if=` element *"does not exist in the DOM"*, and adopters will reasonably read that as a guarantee they can gate markup on — today it is not one on the dominant path.
+
+**Disposition:** filed with its own id per bryan's S297 ruling (OQ-4) rather than folded into the Phase-2 scoping doc — folding it in would reproduce the exact defect filed the same session ([[g-schema-composite-unique-emits-nothing]]), where an accurate description lived as prose inside another entry from S288 onward and therefore counted nowhere. **Expected to be closed BY the Phase-2 arc** rather than fixed separately: making the dirty path mount/unmount removes this by construction. Kept open so that if Phase 2 slips, this does not vanish with it. — `NEW S297; MED; open`
 
 ### g-schema-composite-unique-emits-nothing — a table-level composite `unique(a, b)` in `<schema>` is silently skipped; the constraint the adopter declared does not exist in their database — `NEW S297 (adopter-flagged; carried as prose under a resolved parent since S288); MED; schema/db-migrate`
 <!-- @gap id=g-schema-composite-unique-emits-nothing sev=MED status=open -->
