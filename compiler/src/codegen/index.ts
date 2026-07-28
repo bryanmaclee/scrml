@@ -335,11 +335,19 @@ export interface CgOutput {
  * The DFS post-order over the importGraph yields deps-before-importer ordering;
  * circular imports cannot occur (forbidden at MOD, E-IMPORT-002), so the
  * `visiting` guard is a defensive backstop, not a load-bearing cycle-breaker.
+ *
+ * `hostFilePath` (GH #235) names the `.scrml` whose emitted HTML will CARRY the
+ * returned `<script src>` tags, when that is NOT `entryFilePath` itself. MPA
+ * shell composition needs exactly that split: it emits the SHELL's dependency
+ * scripts (walk `entryFilePath`'s import graph) into a CHILD page's document
+ * (resolve them relative to the child's dist dir). Defaults to `entryFilePath`,
+ * the own-document case, which stays byte-identical to pre-#235 behaviour.
  */
 function computeDependencyClientScripts(
   entryFilePath: string,
   importGraph: Map<string, { imports: Array<{ source?: string; absSource: string }> }> | null,
   outputBaseDir: string | null,
+  hostFilePath?: string,
 ): string[] {
   if (!importGraph || !entryFilePath) return [];
 
@@ -359,8 +367,14 @@ function computeDependencyClientScripts(
       .replace(/\\/g, "/")
       .replace(/^pages(?:\/|$)/, "");
 
-  // Dist dir of the entry HTML — `<script src>` paths are relative to it.
-  const entryDistDir = outputBaseDir ? dirname(toDistRel(entryFilePath)) : "";
+  // Dist dir of the HOST HTML — `<script src>` paths are relative to it. That
+  // is the entry's own dist dir in the own-document case, and the composed
+  // CHILD page's dist dir when a shell's deps are emitted into a route page
+  // (GH #235). Anchoring on the HOST — rather than prefixing the entry's answer
+  // with the composition's `upToRoot` — keeps the result correct for a shell
+  // that does not sit at the dist root, which `upToRoot` assumes.
+  const hostPath = hostFilePath ?? entryFilePath;
+  const entryDistDir = outputBaseDir ? dirname(toDistRel(hostPath)) : "";
 
   const ordered: string[] = []; // absolute .scrml dep paths, deps-first
   const done = new Set<string>();
@@ -2637,18 +2651,25 @@ export function runCG(input: CgInput): CgOutput {
           const pageBodyRaw = pageBodyMatch[1];
 
           // Strip the trailing `<script>` tags that the envelope emitted
-          // for this page's own client.js / runtime — we'll re-append a
-          // composed script set (shell's app.client.js + page's
-          // client.js) below.
-          const pageBodyStripped = pageBodyRaw
-            .replace(
-              /\s*<script(?:\s+type="module")?\s+src="[^"]*\.client\.js"><\/script>\s*$/,
-              "",
-            )
-            .replace(
-              /\s*<script(?:\s+type="module")?\s+src="[^"]*"><\/script>\s*$/,
-              "",
-            );
+          // for this page's own runtime / dependencies / client.js — we
+          // re-append a composed script set below.
+          //
+          // GH #235 follow-on: this must strip the WHOLE trailing RUN, which is
+          // what the `(...)+\s*$` repeated group does — the same form the
+          // shell-side strip above already uses. The previous shape was two
+          // single-tag strips, which handled exactly the two-tag envelope
+          // `[runtime][page.client.js]`. A page with its OWN cross-file `.scrml`
+          // dep emits THREE (`[runtime][dep.client.js][page.client.js]`), so one
+          // tag survived — the RUNTIME tag, at the page's own un-prefixed path.
+          // The composition then appended its own runtime tag, and the composed
+          // document carried two: at dist root, the identical URL twice (the
+          // second classic <script> dies on `Identifier '_scrml_state' has
+          // already been declared`); from a nested route dir, a leading tag whose
+          // relative path 404s. Pre-existing, surfaced by the #235 reproducer.
+          const pageBodyStripped = pageBodyRaw.replace(
+            /(\s*<script(?:\s+type="module")?\s+src="[^"]*"><\/script>)+\s*$/,
+            "",
+          );
 
           // navigate-wave1c — the ONE-LANDMARK invariant across files (SPEC
           // §20.8.1 case 3 / §40.8). The shell's outlet took the `<main>`
@@ -2761,7 +2782,39 @@ export function runCG(input: CgInput): CgOutput {
             : 0;
           const upToRoot = depth > 0 ? "../".repeat(depth) : "";
 
+          // GH #235 — the composed document rebuilds its ENTIRE script set from
+          // scratch (the page's original tags were stripped above), so every
+          // `<script>` a route page needs has to be re-derived HERE. Pre-fix
+          // this emitted only the two BUNDLES and silently dropped both
+          // dependency sets: the shell's `app.client.js` opens with
+          // `const { rolePath } = _scrml_modules["models/auth.client.js"]`, the
+          // registering `models/auth.client.js` was never loaded on a child
+          // page, and every route except the shell's own died at the top of the
+          // bundle IIFE with `Cannot destructure property 'rolePath' of
+          // '_scrml_modules[...]' as it is undefined` — client boot dead
+          // app-wide. `dist/app.html` worked because the shell goes through the
+          // OWN-document path (~:2229), where the deps ARE emitted.
+          //
+          // Ordering is the contract, not mere presence: classic `<script>` eval
+          // is sequential, so each dependency's `_scrml_modules[...] = {...}`
+          // footer must run BEFORE the bundle whose top-level destructure reads
+          // it. Hence deps-before-bundle, twice, in this order:
+          //
+          //   shell deps -> shell bundle -> page deps -> page bundle
+          //
+          // The relative order of the two BUNDLES is unchanged from pre-#235 —
+          // this is purely additive.
           const scriptParts: string[] = [];
+          const seenScriptSrc = new Set<string>();
+          const pushScript = (src: string): void => {
+            // A dep shared by the shell and the page must load ONCE. Both sets
+            // resolve against the SAME host dist dir, so a shared dep yields an
+            // identical src string and this compares exactly. The kept
+            // occurrence is the earlier one, which still precedes both bundles.
+            if (seenScriptSrc.has(src)) return;
+            seenScriptSrc.add(src);
+            scriptParts.push(`<script${scriptModuleTypeAttr} src="${src}"></script>`);
+          };
           // Use the existing closing-script lines from the page's
           // original envelope — the runtime placeholder is per-file but
           // identical across files (substituted in the same post-pass
@@ -2769,9 +2822,16 @@ export function runCG(input: CgInput): CgOutput {
           // is what we strip-and-readd) or take the entry's. We use the
           // page's existing runtime tag with the relative-up prefix.
           if (entryOutput?.clientJs && entryBase) {
-            scriptParts.push(
-              `<script${scriptModuleTypeAttr} src="${upToRoot}${entryBase}.client.js"></script>`,
-            );
+            // The SHELL's transitive deps, resolved against THIS page's dist dir.
+            for (const depSrc of computeDependencyClientScripts(
+              entryFilePath,
+              importGraphInput,
+              cgOutputBaseDir,
+              filePath,
+            )) {
+              pushScript(depSrc);
+            }
+            pushScript(`${upToRoot}${entryBase}.client.js`);
           }
           // Re-add the page's own client.js (was stripped above). basename
           // (win32-aware, matches the asset-naming sites) — not a hand-rolled
@@ -2779,9 +2839,15 @@ export function runCG(input: CgInput): CgOutput {
           // literal `\` in a POSIX filename.
           const pageBase = basename(filePath, ".scrml");
           if (output.clientJs) {
-            scriptParts.push(
-              `<script${scriptModuleTypeAttr} src="${pageBase}.client.js"></script>`,
-            );
+            // The PAGE's own transitive deps — dropped by the same omission.
+            for (const depSrc of computeDependencyClientScripts(
+              filePath,
+              importGraphInput,
+              cgOutputBaseDir,
+            )) {
+              pushScript(depSrc);
+            }
+            pushScript(`${pageBase}.client.js`);
           }
 
           // Find the runtime <script src=...> in the original pageHtml.
