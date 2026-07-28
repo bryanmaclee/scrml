@@ -1,4 +1,82 @@
 <!-- ============================================================= -->
+<!-- S294 WRAP (Peter/Windows) — prepended 2026-07-28.              -->
+<!-- S293 (Peter) + all prior UNCHANGED below.                      -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 294 (Peter · Windows) — WRAP
+
+**Date:** 2026-07-28. `/boot` Profile A. `main` at **`2e03da56`**, coherence 0/0 both repos, tree clean
+(bar this wrap + the drained inbox notes). Delta-log **[849]-[856]**. **THREE PRs landed + one live
+investigation.** This carries the irreducible.
+
+## 🎯 THE HEADLINE — three landed arcs, all adversarially reviewed; the reviews caught real defects
+
+| PR | What |
+|---|---|
+| #224 `7437a2de` | **`E-STMT-MISSING-SEMICOLON` (+ every `[TAB]` diagnostic) regains `:line:col` in `build`/`dev`.** Root cause was NOT the gap's "attach the span" (span was already attached) — it was `collectErrors` (api.js) lifting `bsSpan→span` but never `tabSpan→span`. Class-wide fix. |
+| #226 `20691202` | **nested-`<each>` inner bindings reading the OUTER loop var reconcile on same-key outer replace.** `emit-each.ts` injects an enclosing-ctx `_scrml_resolve_item` prelude (text/attr/if/class:/handler). |
+| #227 `2e03da56` | **#225 — form-control `value=` writes `.value` inside `<match>`/`<engine>` arms.** flogenceP cross-PA hand-off; verified in-lane + landed; issue CLOSED. |
+
+**The through-line: reproduce-first + adversarial review earned their cost repeatedly.**
+- The **gap's fix DIRECTION was wrong on BOTH gaps I filed myself** (E-STMT: span already attached; nested-each "workaround D": the "can't see outer var" premise was stale — S153 fixed visibility — but reproducing it surfaced a REAL adjacent reconcile bug). [[feedback-gap-report-fix-direction-can-be-wrong]] reconfirmed ×2.
+- The **nested-each S239 review caught TWO real defects in my first cut** (both fixed + guarded before land): a same-name-alias `let` double-declaration → `E-CODEGEN-INVALID-LOGIC` (regression of valid code); and a `\b<name>\b` gate matching a property read `s.g` as the outer var `g`. I'd independently found #1 before the review returned; the review confirmed it + found #2. [[feedback-verify-the-bug-class-not-just-reported-instance]] reconfirmed.
+
+## 🔴 THE NEXT PA'S PICKUP
+
+- **#228 (flogenceP hidden-drawer chat reconcile) — filed NOT-REPRODUCED, replied, OWED a live async-turn trace.**
+  Gap `g-each-hidden-drawer-live-reconcile-flogence-228`. I DROVE THE LIVE COCKPIT (opera-browser-cli, `:3001`,
+  current-ish build): drilled a drawer + tested all 3 paths via direct `_scrml_reactive_set` — **ALL RECONCILE**
+  (value binding, **dirty-then-clear**, thread-`<each>` reassign). So #228 is NOT a reconcile-primitive bug; if
+  real+current its trigger is the ASYNC path (`loadNodeThread`/`converseNode`/`chatTick` setInterval). Replied to
+  flogenceP (their inbox, committed+pushed) with 2 asks: does it persist on the current build? / a live async-turn
+  trace. **Owed:** flogenceP's answer → then pin. NO fabricated fix without a repro (R26).
+- **`<each>` audit (flogenceP) result:** 3 of 4 documented workarounds are already fixed (hidden-text S158·guarded;
+  bind:value-in-each S286/#175; expr-form-handler S212) → flogenceP's workarounds are STALE/retire-able. The 4th
+  yielded #226. Flipped `g-each-item-hidden-text-stale-flogence` open→resolved (its owed live-repro came back
+  negative at flogenceP S37).
+- **Follow-up gaps filed (open):** `g-tab-error-messages-self-prefix-code` (LOW — several TABError messages still
+  self-prefix their code → doubled in all formatters; de-dupe in the shared formatters).
+
+## ⚠️ OWN MISS (recorded, not smoothed) — a mis-attribution I corrected mid-session
+
+Found the #225 fix's edits uncommitted in my working tree, recognized them as unauthored, stashed them, and
+reported to Peter as **"a review agent overstepped."** WRONG — the inbox note (`…-i225-…-authored-verified-held.md`)
+revealed a deliberate **flogenceP→scrml cross-PA hand-off**. Corrected the record immediately + reframed as normal
+Peter-lane adopter work. **Lesson:** unexpected changes in the shared per-clone working tree may be a legitimate
+cross-clone hand-off — CHECK `incoming/` for provenance before attributing to an agent (pa-base v2.5 per-clone
+reality). My nested-each PR #226 stayed correctly isolated from the #225 edits throughout (that part was right).
+Also caught a **false-positive** in the #228 live probe (shape mismatch — probed `body`/`display`; the each renders
+`turn.prompt`/`turn.reply`) by reading the `<each>` source before believing my own "doesn't reconcile" signal.
+
+## ✅ GATE
+
+- Cloud `gate` + `windows` GREEN on all 3 merges (the authority). Conformance **1303/0** throughout.
+- Full unit tier **16994-16996 pass / 0-2 fail** across runs (the 2 = documented parallel-run flakes outside the
+  change surfaces — `value-indexed-subscribers` passes 19/0 in isolation). Browser tier: the documented ~172-fail
+  Windows-env baseline (verified IDENTICAL with/without each change — my changes added 0 regressions; Linux gate clean).
+- FACTS + gap-counts `--check` PASS (regen rode each PR).
+
+## 🧷 HOUSEKEEPING
+
+- **Inbox:** drained 2 flogenceP notes (i225 handled, #228 replied) → `read/`. RediLedger S11 note RETAINED in
+  `incoming/` (bryan's lane — bytes-tier + `_{}` Qs).
+- **flogence (upstream `bryanmaclee/flogence`) local clone DELETED by Peter** this session (per my rec — it was a
+  redundant upstream clone; flogenceP has `upstream` remote for syncing). flogenceP (`pjoliver11/flogenceP`) = Peter's
+  active fork, the single each-source-of-truth now. NOT a scrml/scrml-support-style tandem — fork/upstream of one project.
+- **Worktrees:** none created this session (all work on feature branches, no isolation needed).
+- **Maps:** internal edits to existing `emit-each.ts`/`emit-html.ts`/`emit-variant-guard.ts`/`binding-registry.ts`/
+  `api.js`/`ast-builder.js` (new functions, no new surface files) → unchanged-with-note (the S286/S288/S289 precedent).
+  `project-mapper` not run.
+
+## Tags
+#session-294-peter #three-prs #estmt-line-col-tabspan #nested-each-outer-var-reconcile #i225-formcontrol-value-in-arms
+#gap-direction-wrong-x2 #s239-review-caught-2-defects #each-audit-3of4-workarounds-stale #228-driven-live-not-reproduced
+#mis-attribution-corrected #flogence-upstream-deleted #reproduce-first-earned-its-cost
+
+---
+
+<!-- ============================================================= -->
 <!-- S293 WRAP (Peter/Windows) — prepended 2026-07-28.              -->
 <!-- S292 (bryan) + all prior UNCHANGED below.                      -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->
