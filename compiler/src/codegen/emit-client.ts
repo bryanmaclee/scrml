@@ -917,8 +917,14 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
           // C10 (§55.10 L12): Level-1 inline override emission. When ANY
           // validator on this cell carries a non-null `inlineOverride`, the
           // emitted code calls `_scrml_messages_register_inline` from the
-          // `messages` chunk. Tree-shaken when no inline overrides exist
-          // and (future, C11) no `<errors of=>` element appears.
+          // `messages` chunk. Tree-shaken when no inline overrides exist.
+          //
+          // The SECOND trigger — a `<errors of=.../>` element, which references
+          // `_scrml_message_for` from the same chunk — is NOT decided here. It
+          // is a POST-EMIT reference gate (GH #234; see
+          // POST_EMIT_HELPER_CHUNK_GATES below), because `<errors>` wiring is
+          // minted from the binding registry at emit time, not from a walkable
+          // AST shape this pre-emit walker can see.
           for (const v of (node as any).validators as any[]) {
             if (v && typeof v.inlineOverride === "string") {
               chunks.add("messages");
@@ -2130,14 +2136,43 @@ export function generateClientJs(ctx: CompileContext): string {
   // shares the identical root cause (same PRECG presence-walker, same deferred-
   // arm lowering) and is covered defensively — the reference gate makes it a
   // no-op for every build that does not actually emit a `_scrml_reset(` call.
+  //
+  // GH #234 (2026-07-28) — `<errors of=.../>` extends the SAME table with a
+  // REFERENCE-form entry. The C11 errors-element wiring (emit-event-wiring.ts)
+  // never CALLS `_scrml_message_for` directly: it captures it as a VALUE behind
+  // a typeof guard —
+  //   `const messageForFn_x = (typeof _scrml_message_for === "function") ? ... : stub;`
+  // — so a call-form (`_scrml_message_for(`) entry would not have matched. The
+  // `messages` chunk that DEFINES it was gated only on a state-decl validator
+  // carrying an inline override (see the `state-decl` case above, whose comment
+  // still described the `<errors of=>` trigger as "future, C11"), so an
+  // `<errors>` page with no inline override shipped the reference with no
+  // definition.
+  //
+  // Why the typeof guard did not save it: `_scrml_message_for` is a
+  // CELL_SCOPE_ACCESSOR, so the post-hoc chunk-namespace rename
+  // (cell-accessor-rename.ts) rewrites BOTH occurrences — including the one
+  // inside `typeof` — to `_scrml_cs_message_for`, and the chunk prologue ALWAYS
+  // defines that wrapper. The guard therefore always took the "true" branch and
+  // the ReferenceError fired inside the wrapper body, at the top of
+  // `_scrml_boot` — aborting boot before ANY event handler bound (adopter
+  // symptom: a login form that issues zero network requests while every server
+  // route is green).
+  //
+  // Entries match as SUBSTRINGS: a trailing `(` pins a call site, a bare name
+  // also catches a value / `typeof` reference. This is exact for the bare-name
+  // entry either way — `_scrml_cs_message_for` does NOT contain
+  // `_scrml_message_for` as a substring, and this scan runs BEFORE the rename
+  // pass (which happens at bundle assembly in index.ts).
   const POST_EMIT_HELPER_CHUNK_GATES: Array<[string, string]> = [
     ["_scrml_structural_eq(", "equality"],
     ["_scrml_reset(", "reset"],
+    ["_scrml_message_for", "messages"],
   ];
-  for (const [helperCall, chunkName] of POST_EMIT_HELPER_CHUNK_GATES) {
+  for (const [helperRef, chunkName] of POST_EMIT_HELPER_CHUNK_GATES) {
     if (ctx.usedRuntimeChunks.has(chunkName)) continue;
     for (const _ln of lines) {
-      if (typeof _ln === "string" && _ln.includes(helperCall)) {
+      if (typeof _ln === "string" && _ln.includes(helperRef)) {
         ctx.usedRuntimeChunks.add(chunkName);
         break;
       }
