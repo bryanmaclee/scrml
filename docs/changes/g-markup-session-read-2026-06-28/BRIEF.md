@@ -7,15 +7,15 @@ Gap: g-markup-session-read-undeclared (LOW, gate-1-ruled-markup-legal S228) → 
 
 # TASK — g-markup-session-read-undeclared (LOW, change-id: g-markup-session-read-2026-06-28)
 
-A `@session` read in **markup context** fires `E-STATE-UNDECLARED`, even though a `@session` read in **logic context** resolves fine. After the S224 Ryan #15 fix window-anchored the `@session` projection to a singleton, markup lost the ability to read it. **The user RULED (S228) that markup IS a legal read locus for `@session`** (consistent with the §51.0.A engine-singleton ambient-read precedent: a component reads an engine auto-cell via `@cellName` in markup; `@session` is the same shape). Wire `@session` into markup symbol-resolution so the markup read resolves and emits correctly.
+A `@session` read in **markup context** fires `E-STATE-UNDECLARED`, even though a `@session` read in **logic context** resolves fine. After the S224 the adopter #15 fix window-anchored the `@session` projection to a singleton, markup lost the ability to read it. **The user RULED (S228) that markup IS a legal read locus for `@session`** (consistent with the §51.0.A engine-singleton ambient-read precedent: a component reads an engine auto-cell via `@cellName` in markup; `@session` is the same shape). Wire `@session` into markup symbol-resolution so the markup read resolves and emits correctly.
 
 ## THE FIRE SITE (confirmed by PA)
 `compiler/src/type-system.ts` ~lines 6473-6510 — the read-side `E-STATE-UNDECLARED` walker (S192 "bug-12-vkill, post-CE relocation"). Strips `@` → `atBase`; exempts `@.`/`@_`/`typeRegistry`/`knownFnNames`; resolves via `scopeChain.lookup(@name) ?? scopeChain.lookup(atBase)`; a miss fires `E-STATE-UNDECLARED` at ~6501. `@session` misses (not a registered cell/loop-local/import). The §51.0.A engine auto-cell does NOT fire because it IS registered in the scopeChain as a StateCellRecord; `@session` (a window-scoped projection) was never given equivalent ambient recognition.
 
 ## PHASE 0 — SURVEY FIRST
-Nuance: `route-inference.ts:450-451` documents `session` as a **server-only resource (§20.5)**, but the gap concerns a separate **client-visible window-scoped `@session` projection** (S224 Ryan #15 singleton). Survey + report:
+Nuance: `route-inference.ts:450-451` documents `session` as a **server-only resource (§20.5)**, but the gap concerns a separate **client-visible window-scoped `@session` projection** (S224 the adopter #15 singleton). Survey + report:
 1. Reproduce the asymmetry (markup fires / logic resolves); find the EXACT path that resolves a LOGIC `@session` read today (the path markup must mirror).
-2. Locate the S224 Ryan #15 `@session` window-scoped projection; understand what session fields it exposes to the client.
+2. Locate the S224 the adopter #15 `@session` window-scoped projection; understand what session fields it exposes to the client.
 3. SECURITY GUARD (STOP condition): confirm the window-scoped projection markup would read is CLIENT-SAFE, not the server-only `session` object. If wiring markup `@session` would leak server-only data into client markup/HTML, STOP and report — do not suppress the error (would regress the protect=/server-only guarantee; needs a design ruling despite gate-1).
 
 ## THE FIX (if Phase 0 clean)

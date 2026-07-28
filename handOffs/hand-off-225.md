@@ -1,6 +1,6 @@
 # scrml — Session 220 (CLOSE)
 
-**Date:** 2026-06-25. **Profile:** A — FULL. **The external-adopter battery session.** Booted clean; ingested **Ryan's (rjantz3) 10-finding Cheese-Craft auth-app battery + 4 flogence cockpit findings** → ran **4 sPA lanes** (each-codegen · `<endpoint>` · render · auth-wall) → dispatched **2 HIGH codegen fixes** → **EVERY adopter HIGH fixed, verified, and closed on GitHub.** Closed at **HIGH 0.**
+**Date:** 2026-06-25. **Profile:** A — FULL. **The external-adopter battery session.** Booted clean; ingested **the adopter's (an adopter) 10-finding Adopter-B auth-app battery + 4 flogence cockpit findings** → ran **4 sPA lanes** (each-codegen · `<endpoint>` · render · auth-wall) → dispatched **2 HIGH codegen fixes** → **EVERY adopter HIGH fixed, verified, and closed on GitHub.** Closed at **HIGH 0.**
 
 > **Mechanical state → the delta-log + the digest.** This hand-off carries the IRREDUCIBLE (narrative · open threads · recovered anomalies). The fine-grained stream is `handOffs/delta-log.md` [75]–[88] (S220). The board/counts: see below + `bun scripts/state.ts`.
 
@@ -16,7 +16,7 @@ The S219 digest-boot was BROKEN on first use (`SQLITE_CANTOPEN` — CWD path bug
 
 ## 🎯 Design narrative (IRREDUCIBLE)
 - **The orchestra worked.** 4 sPA lanes (user-fired) + 2 PA-dispatched HIGH codegen fixes, all landed by the PA via S67 file-delta, with hand-reconciliation where surfaces collided. The S219 primary-goal directive (finish-the-project / orchestrate-don't-grind / default-GO / recovery-is-the-4th-irreducible) drove the whole session — adopter bug → verify (S138/S215) → just-go.
-- **Ryan's battery told one story:** *you cannot build a working login on v0.7.0.* #02→#03 was ONE precedence fix (protect= must not override explicit `<page auth=optional>`). All 10 verified by an independent agent (matched Ryan exactly), filed, fixed across ss19+ss20, closed on GitHub with SHAs.
+- **the adopter's battery told one story:** *you cannot build a working login on v0.7.0.* #02→#03 was ONE precedence fix (protect= must not override explicit `<page auth=optional>`). All 10 verified by an independent agent (matched the adopter exactly), filed, fixed across ss19+ss20, closed on GitHub with SHAs.
 - **`<endpoint>` (§61) is Implemented** (ss18 W2-W5) AND its **canonical arm form now works** (the endpoint-arm reachability fix — §61.2's `<Variant : fn()>` private-handler no longer tree-shakes). The deferred `raw` server-fn stays gated on a witnessed untypeable case.
 - **option-A ratified** for the flogence transport (JSON-RPC `method`-string ⇄ `accepts=` variant-tag = a configurable discriminator field; the limit-primitives-correct generalization, NOT a JSON-RPC mode).
 
@@ -27,10 +27,10 @@ The S219 digest-boot was BROKEN on first use (`SQLITE_CANTOPEN` — CWD path bug
 - **stale-tracking flip (nominal-9):** the Nominal currency-verify caught nominal-9 (engine opener effect=) was already BUILT (flipped resolved) AND that my nominal-3 "looks built" hypothesis was WRONG (the fire is native-parser-only). Verify-before-claim earned both.
 
 ## Board @ close
-**HIGH 0 · MED 24 · LOW 17 · Nom 7** · v0.7.0. Suite **25223/0/214**. **Coherence: pushed clean** (the wrap push is the last commit; mid-session push of the 13 was 0/0). GH: Ryan #5–#11/#14 CLOSED (SHAs), #13 closed (working-as-intended), #12 open (diagnosed). Worktrees: ONLY main (21 spent pruned). No deputy (retired S219).
+**HIGH 0 · MED 24 · LOW 17 · Nom 7** · v0.7.0. Suite **25223/0/214**. **Coherence: pushed clean** (the wrap push is the last commit; mid-session push of the 13 was 0/0). GH: the adopter #5–#11/#14 CLOSED (SHAs), #13 closed (working-as-intended), #12 open (diagnosed). Worktrees: ONLY main (21 spent pruned). No deputy (retired S219).
 
 ## pa.md directives in force
 R1–R5 · `---` · Profile A · **S219 PRIMARY-GOAL** · **S219 flogence digest-boot** (FIXED; measure next boot) · S88/S99/S126 path-discipline · S136 BRIEF · S138 R26 · S147 coherence (S205 merge-before-push RETIRED — deputy gone) · S215 adversarial-verify · S217 per-user (bryan) · wrap 8-step (full PA-maintenance). New memory: `feedback_pa_filedelta_exclude_pa_shared_docs` + `feedback_parallel_dispatch_shared_scratchpad_race`.
 
 ## Tags
-#session-220 #close #ryan-cheese-craft-battery-closed #flogence-findings #4-spa-lanes #all-high-closed #endpoint-implemented #option-a-ratified #filedelta-clobber-lesson #digest-boot-fixed
+#session-220 #close #adopter-b-battery-closed #flogence-findings #4-spa-lanes #all-high-closed #endpoint-implemented #option-a-ratified #filedelta-clobber-lesson #digest-boot-fixed

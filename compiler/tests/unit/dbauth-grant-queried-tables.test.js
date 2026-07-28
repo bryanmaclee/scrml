@@ -1,7 +1,7 @@
 /**
  * §14.8.11 — the bounded role must be granted on tables `?{}` TOUCHES, not only on
  * db-authoritative ones. [[g-dbauth-migrate-no-grants-for-unmarked-identity-table]],
- * RediLedger S11, bryan RULED direction (b) at S292.
+ * Adopter-A S11, bryan RULED direction (b) at S292.
  *
  * THE ASYMMETRY THIS PINS. The grant is emitted per-TABLE (only for `db-authoritative`
  * ones); the `SET LOCAL ROLE scrml_app` drop is emitted per-QUERY in any request scope.

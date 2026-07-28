@@ -26,7 +26,7 @@ STAGE:  V1 = scrml-LANGUAGE 1.0 (compilers decoupled). Critical path = language 
         user-voice S286 + [[feedback_freeze_timing_relaxed]].]**
         In flight: the language/compiler SPLIT (mitosis) + Road-B impl#2
         (compiler/self-host-v2/). Adopter-driven threads: flogence 100%-scrml (standalone-tool §64 +
-        W5b in-process db library); **RediLedger DB-authoritative security tier (greenlit S286; reads-first
+        W5b in-process db library); **Adopter-A DB-authoritative security tier (greenlit S286; reads-first
         phasing; Milestone-1 codegen build = next arc; plan: scrml-support/docs/deep-dives/db-authoritative-
         security-PHASING-PLAN-2026-07-25.md).**
 SCOPE:  large. **Derived figures live in `docs/FACTS.md` (generated; `bun scripts/facts.ts --check`

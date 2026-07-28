@@ -3,7 +3,7 @@
  * in markup AND logic (S228 user ruling; §51.0.A engine-singleton precedent).
  *
  * Background (Phase 0 survey, 2026-06-28):
- *   - The S224 Ryan #15 fix window-anchored the `@session` auth projection to a
+ *   - The S224 the adopter #15 fix window-anchored the `@session` auth projection to a
  *     singleton (`var session = window._scrml_session_projection ?? (...)` in
  *     emit-client.ts, emitted only when auth middleware is configured).
  *   - A `@session` read fired E-STATE-UNDECLARED in BOTH markup AND logic (NOT

@@ -1,6 +1,6 @@
-# ss46 — fn-purity accepts `window.location` reads (Ryan #17) — VERIFY-FIRST · MED
+# ss46 — fn-purity accepts `window.location` reads (the adopter #17) — VERIFY-FIRST · MED
 
-**Currency:** scoped S224 (PA) @ HEAD `9ad78593` / 2026-06-27. **FIREABLE** (but SEQUENCE vs other type-system.ts lanes — see parallel-safety). Source = **GitHub issue #17** (rjantz3, v0.7.0). **MED** — a soundness hole in the purity contract: `fn` is the determinism guarantee (§48.3/§48.11) and the rest of the compiler may rely on it; this lets a non-deterministic body be `fn`, and `I-FN-PROMOTABLE` actively *steers* adopters into mislabeling.
+**Currency:** scoped S224 (PA) @ HEAD `9ad78593` / 2026-06-27. **FIREABLE** (but SEQUENCE vs other type-system.ts lanes — see parallel-safety). Source = **GitHub issue #17** (an adopter, v0.7.0). **MED** — a soundness hole in the purity contract: `fn` is the determinism guarantee (§48.3/§48.11) and the rest of the compiler may rely on it; this lets a non-deterministic body be `fn`, and `I-FN-PROMOTABLE` actively *steers* adopters into mislabeling.
 
 **Authority (READ FIRST, Rule 4):** `gh issue view 17 --json title,body` (repro) + SPEC §48.3.3 (the `fn` body constraints / non-determinism prohibition) + §48.11 (`fn` = pure) + §33 (deprecated `pure`) + the existing E-FN-004 non-determinism check + the I-FN-PROMOTABLE lint. The bug: a `fn` whose body reads `window.location` (external, mutable browser state) compiles with NO `E-FN` error, and `I-FN-PROMOTABLE` recommends promoting such a `function` to `fn`. `window.location.search` is non-deterministic — a zero-arg `fn` returns different values across calls (after navigation), breaking referential transparency. Note: the PRIMER §6 already names `Date.now()`/`Math.random()` as non-determinism that E-FN-004 catches — `window.location` (+ `document.*` / `navigator.*` / other mutable browser globals) is the same class, currently UNcaught.
 
@@ -18,4 +18,4 @@
 3. **Tests** `[status=open]` — regression for both the reject (E-FN-004 on `window.location` in `fn`) and the lint-suppression (no I-FN-PROMOTABLE on such a `function`); plus the must-NOT-fire cases (pure-arg `URLSearchParams`, shadowed binding).
 
 ## Acceptance
-`fn getN() { ... window.location.search ... }` fires E-FN-004 (was clean); `function getN()` with the same body does NOT get I-FN-PROMOTABLE (was suggested); a genuinely-pure `function` (Ryan's `numOrAbsent`) STILL gets the suggestion; pure-arg `URLSearchParams(s)` + a user-shadowed `location` do NOT fire; full suite green + allowlist rebaselined if shifted.
+`fn getN() { ... window.location.search ... }` fires E-FN-004 (was clean); `function getN()` with the same body does NOT get I-FN-PROMOTABLE (was suggested); a genuinely-pure `function` (the adopter's `numOrAbsent`) STILL gets the suggestion; pure-arg `URLSearchParams(s)` + a user-shadowed `location` do NOT fire; full suite green + allowlist rebaselined if shifted.

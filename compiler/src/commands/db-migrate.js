@@ -407,7 +407,7 @@ async function runPgApply({ connectionString, desired, dryRun, allowDestructive,
         // BEFORE the apply, so an error's position in the output says nothing about
         // which statement failed — and Postgres's own message can point nowhere near
         // the cause (a truncated `CREATE TABLE` surfaces as `syntax error at or near
-        // ";"`). RediLedger burned a bisection cycle on that combination and
+        // ";"`). An adopter burned a bisection cycle on that combination and
         // disproved a wrong hypothesis by repro; echoing the statement is cheap and
         // pays for itself the next time an adopter reports here. (S5 signal.)
         try {

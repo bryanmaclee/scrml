@@ -6,7 +6,7 @@
  * P2 is the FIRST milestone that crosses the §14.8.10 invariant/policy firewall —
  * scrml begins emitting AUTHORIZATION. "Looks enforced and isn't" risk is DOUBLED
  * (a mis-hardened SECDEF is a CVE-2020-25695 privesc vector, WORSE than none), so
- * the negative test is the only real proof. On the RediLedger `invoices` shape (an
+ * the negative test is the only real proof. On the Adopter-A `invoices` shape (an
  * `immutable` column + a SECDEF `fn`), after `scrml db-migrate` applies:
  *   (1) bounded scrml_app direct UPDATE of an immutable column           → DENIED;
  *   (2) bounded scrml_app mutation of a locked column NOT via the SECDEF → DENIED;
@@ -44,7 +44,7 @@ const TENANT_B = "22222222-2222-2222-2222-222222222222";
 // making the ownership reassignment deterministic across re-runs (no residue clash).
 const OWNER_ROLE = `invoice_admin_${SUFFIX}`;
 
-// The RediLedger writes-authority shape: `status` + `amount` are immutable (only the
+// The Adopter-A writes-authority shape: `status` + `amount` are immutable (only the
 // SECDEF may void; the posted amount never changes); `memo` is freely mutable.
 const PROJECT_SRC = `<program db="postgres://placeholder">
   <schema>

@@ -2,7 +2,7 @@
  * Nested-function SQL server-escalation — g-sql-in-nested-function-client-leak.
  *
  * Filed: S225 (ss49 item 1), MED. Surfaced as an adjacent shape by the S224
- * Ryan #12 (`?{}`-in-arrow-body) agent.
+ * the adopter #12 (`?{}`-in-arrow-body) agent.
  *
  * Symptom (before fix): a nested `function q(v){ ?{…} }` declared INSIDE another
  * function did NOT participate in §12 server-placement inference. Codegen emits

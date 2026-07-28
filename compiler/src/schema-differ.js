@@ -339,7 +339,7 @@ function parseColumns(text) {
     // old `default\(([^)]+)\)` stopped at the FIRST `)`: `default(now())` captured
     // `now(`, which emitted an unbalanced `DEFAULT (now() )` that TRUNCATED the
     // whole CREATE TABLE and surfaced as a misleading "syntax error at or near ;"
-    // from Postgres. Blocked 7 of 10 tables in RediLedger's real schema (S4).
+    // from Postgres. Blocked most tables in a real adopter's schema (S4).
     const _defIdx = restStr.search(/\bdefault\s*\(/i);
     if (_defIdx !== -1) {
       const _defOpen = restStr.indexOf("(", _defIdx);
@@ -356,7 +356,7 @@ function parseColumns(text) {
     // production §39.5.5 declares, so every other shape — the dot-in-parens
     // form `references(owners.id)`, a spaced `references owners (id)`, a bare
     // `references owners.id` — fell through this regex, left `col.references`
-    // null, and emitted NO `REFERENCES` clause with NO diagnostic. RediLedger
+    // null, and emitted NO `REFERENCES` clause with NO diagnostic. An adopter
     // declared 34 foreign keys in a real 19-table ledger schema and got zero
     // rows in `pg_constraint`; an INSERT naming a non-existent parent was
     // accepted. Compile clean, apply clean, silent.
@@ -1588,7 +1588,7 @@ function isEffectivelyImmutable(col) {
  * IDENTIFIER, failing at apply with `column "US" does not exist`. That is the
  * SAME literal-as-identifier class the S288 `oneOf` fix addressed, in the sibling
  * path: the fix landed on the item list and MISSED `default()`, one function
- * away. RediLedger caught the incomplete fix (S4).
+ * away. An adopter caught the incomplete fix (S4).
  *
  * Anything that is NOT a scrml literal is passed through VERBATIM, and here that
  * is CORRECT rather than a fallback: a `default()` argument is legitimately a SQL

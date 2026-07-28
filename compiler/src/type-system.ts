@@ -7353,7 +7353,7 @@ const LOGIC_SCOPE_GLOBAL_ALLOWLIST: ReadonlySet<string> = new Set([
 // `knownFnNames` `@`-branch guards). Scoped to the exact reserved name(s): a
 // genuine `@typoCell` (not in this set) still fires E-STATE-UNDECLARED.
 const RESERVED_AMBIENT_PROJECTION_NAMES: ReadonlySet<string> = new Set([
-  // §20.5 / S224 Ryan #15 — the `@session` window-scoped auth projection
+  // §20.5 / S224 the adopter #15 — the `@session` window-scoped auth projection
   // (`var session` in emit-client.ts, hydrated via `fetch('/_scrml/session')`).
   // Distinct from the §20.5 SERVER-only bare `session` object — the client
   // projection is fed across the HTTP boundary and carries no server-only data.
@@ -24056,7 +24056,7 @@ function checkFnBodyProhibitions(
           }
         }
 
-        // E-FN-004 (extension, GitHub #17 — rjantz3 v0.7.0): a non-deterministic
+        // E-FN-004 (extension, GitHub #17 — adopter report, v0.7.0): a non-deterministic
         // READ of mutable BROWSER/GLOBAL state — `window.location`,
         // `window.innerWidth`, `document.cookie`, `navigator.userAgent`, etc.
         // (§48.3.4). These are property READS (not the call-shaped NON_DET_CALLS
