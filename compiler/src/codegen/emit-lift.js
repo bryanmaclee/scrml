@@ -367,6 +367,35 @@ function pushLiftAttrSet(lines, setStmt) {
   }
 }
 
+// S293 — a per-item `if=` conditional-display toggle whose predicate reads the
+// reconciled item must re-evaluate on a same-key reconcile: the per-item factory
+// does NOT rebuild a reused node, so the pre-fix "updater called once + @cell
+// subscription" left an item-reading predicate STALE (the factory-rebuilds-per-item
+// assumption in the S88 comment is false under reconcile). When a reconcile ctx is
+// active AND the predicate reads the item (iter var or an item-derived local), drive
+// the toggle from a live-keyed `_scrml_effect` (via maybeWrapLiftPerItemEffect —
+// re-resolves the item + replays locals; the effect ALSO auto-tracks any @cell reads
+// in the predicate, so cell reactivity is preserved). Returns true when it emitted
+// the reactive form; false → the caller emits the legacy updater + @cell-subscription
+// path (byte-identical to pre-fix; keeps the value-indexed @cell optimization for a
+// cell-only predicate). (g-lift-per-item-if-directive-not-reactive-on-reconcile.)
+function tryEmitLiftIfReactive(lines, elVar, exprJS, rawText) {
+  if (!currentLiftReconcileCtx()) return false;
+  if (computeItemDerivedReplay(exprJS, [], 'return;').length === 0) return false; // cell-only → legacy path
+  // Preserve the S103 value-indexed select-row optimization: a `@cell == item.field`
+  // predicate keeps its `_scrml_reactive_subscribe_when` O(2) path (firing only the
+  // OLD+NEW value buckets on a cell write, not O(N) over all rows). Routing it to the
+  // effect would auto-track the cell read → O(N) per write, regressing the deliberate
+  // opt. Its item-side reconcile-staleness (item.field stale after a same-key REPLACE)
+  // is a NARROWER deferred sub-gap noted on g-lift-per-item-if-directive. Only NON-
+  // value-indexed per-item predicates (e.g. `e.active is some`) route to the effect.
+  const refs = [...new Set((rawText.match(/@([A-Za-z_$][A-Za-z0-9_$.]*)/g) || []).map(r => r.replace(/^@/, "").split(".")[0]))];
+  const pred = detectPredicateShapeBind(rawText);
+  if (pred.matched && refs.length === 1 && refs[0] === pred.cellName) return false;
+  for (const l of maybeWrapLiftPerItemEffect([`${elVar}.style.display = (${exprJS}) ? "" : "none";`])) lines.push(l);
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Bug 73 (sibling-gap #2 of Bug 64) — Tier-0 per-item EVENT HANDLER live-keying.
 //
@@ -1080,6 +1109,7 @@ function emitSetAttrs(elVar, attrs, engineCtx = null) {
       // is captured by the per-item factory closure — no subscription needed
       // because the factory rebuilds per item.
       const exprJS = emitExprField(null, attr.value, liftExprCtx());
+      if (tryEmitLiftIfReactive(lines, elVar, exprJS, attr.value)) continue;
       const updaterVar = `_scrml_if_${genVar()}`;
       lines.push(`function ${updaterVar}() { ${elVar}.style.display = (${exprJS}) ? "" : "none"; }`);
       lines.push(`${updaterVar}();`);
@@ -1344,13 +1374,14 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         ? (val.name || "").replace(/^@/, "")
         : (val.raw || "");
       const exprJS = emitExprField(val.exprNode, raw, liftExprCtx());
+      const rawText = val.kind === "variable-ref" ? (val.name || "") : (val.raw || "");
+      if (tryEmitLiftIfReactive(lines, elVar, exprJS, rawText)) continue;
       const updaterVar = `_scrml_if_${genVar()}`;
       lines.push(`function ${updaterVar}() { ${elVar}.style.display = (${exprJS}) ? "" : "none"; }`);
       lines.push(`${updaterVar}();`);
       // Subscribe to each @-prefixed reactive var in the raw expression. The
       // for-loop iterable identifier is captured by the per-item factory
       // closure — not a reactive cell, no subscription needed.
-      const rawText = val.kind === "variable-ref" ? (val.name || "") : (val.raw || "");
       const refMatches = rawText.match(/@([A-Za-z_$][A-Za-z0-9_$.]*)/g) || [];
       const uniqueRefs = [...new Set(refMatches.map(r => r.replace(/^@/, "").split(".")[0]))];
       // S103 Phase 3 select-row chip-away — value-indexed dispatch (parity
