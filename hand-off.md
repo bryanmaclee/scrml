@@ -1,4 +1,154 @@
 <!-- ============================================================= -->
+<!-- S295 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-28.        -->
+<!-- S294 (Peter) + all prior UNCHANGED below.                      -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 295 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-07-28. `/boot` Profile A. `main` at **`3a1f431c`**, coherence 0/0 both repos, tree clean.
+**Six PRs merged** (#239 #240 #242 #244 #245 + the SPEC ratification) · **3 adopter issues CLOSED** ·
+**pa-base v2.5 → v2.7** (two amendments) · a **three-lane parallel arc** that held.
+Concurrent all session: **S296 on the XPS**, which landed #241/#243 into the same files.
+
+## 🔴 THE NEXT PA'S FIRST MOVE — bryan ruled it explicitly at close
+
+> *"next session, I want to start with going through, in detail, one by one, everything that is blocked by me."*
+
+**Do that FIRST, one item at a time, in detail.** Do not open a build arc, do not pick up a lane.
+The list below is the agenda. It is ordered by who is stuck, not by size.
+
+### The blocked list (bryan's, verbatim scope)
+
+1. **D-6 — `scrml:store` classification** → [[g-scrml-store-not-classified-server-only]] (HIGH).
+   An adopter's page dies app-wide at load; compile green, 0 errors 0 warnings. Two subsystems
+   disagree (`runtime-chunks.ts:143` vs `route-inference.ts:578`). Governing sentence EXISTS (§41.4).
+   NOT the S203 ruling — that was a harness artifact; here no server config can fix it. **Rec: classify.**
+2. **`E-IMPORT-007` triple-allocation** → [[g-e-import-007-triple-allocated-no-impl]] (MED).
+   Three meanings in SPEC, one implementation. Ruling 1 without this leaves §41.4 unimplemented.
+3. **RediLedger Q2 — `capabilities=` enforcement semantics + timing.** They are writing `fs-read`/
+   `fs-write` declarations NOW against an advisory-only checker (§23.5.6). Hard error on undeclared
+   access? Prefix/glob path matching? **Q1 is ANSWERED + LANDED this session (#239) — only Q2 + the
+   bytes tier remain.**
+4. **RediLedger bytes tier (BaaS-parity #4).** No gap id, no roadmap item, no SPEC section —
+   re-verified real. Their ask #3 (object access gated by the same pinned principal as the RLS moat)
+   is the one they structurally cannot close from user code.
+5. **Tier-1 `<each>` per-row `if=` semantics fork** (S293-peter → bryan). (a) reactive add/remove
+   keeping structural semantics vs (b) display-toggle like Tier-0 — (b) changes what `if=false` means
+   for `:nth-child`, sibling selectors, form submission of hidden controls. The two tiers currently
+   DISAGREE. Fieldman is holding their pin on it.
+6. **`E-PA-002` fire condition** — hard-failing a build on an absent `<db>` file bites CI / fresh
+   clone / headless. Lane 3 improved the MESSAGE and deliberately did not touch the GATE.
+7. **The published-history exposure** → S296's note (now in `read/`). **35 commits** carry the
+   third-party name in their MESSAGE, **23** in their diff; `433f9034` alone has 25 + 3 and the name
+   is in its SUBJECT, verified an ancestor of `origin/main`. `89db7981` scrubbed the WORKING TREE
+   only. The earlier `filter-repo` pass (`0801d988`) was a DIFFERENT privacy action (user-voice.md) —
+   nothing has ever rewritten this name out of history. Cost: a second filter-repo over 35+ commits
+   + a force-push to a PUBLIC repo, rewriting every SHA cited across changelog/hand-offs/delta-log/
+   gaps/PR bodies, and diverging every clone. **bryan said he would discuss with the owner.**
+8. **`master-list.md` generated-block re-leak** — shares an answer with (7). The one residual public
+   hit is INSIDE `@generated:recent-sessions`, derived from wrap-commit SUBJECT lines (source:
+   `258ff020`). **EMPIRICALLY CONFIRMED this session:** hand-edit → 0 hits; `state.ts --write` → 1 hit
+   restored, and `--check` then certifies the leaking version as current. The artifact was scrubbed,
+   its INPUT was not (`pa-base v2.4` generated-artifact class, new shape). Options: scrub the subject
+   (= 7), teach the generator a redaction map, or accept + record. **I chose accept-and-record for now
+   and left it REGENERATED rather than fighting the generator** — scrubbing a derived line while its
+   source commit subject is public is theatre. Revisit with (7).
+9. **npm publish** — steps 1–3 done and reversible (`171d5f23`); step 4 is irreversible and bryan's.
+   Verified: tarball installs clean under bun and compiles a stdlib-importing program; 7,060 files /
+   57.5 MB → 471 / 15.9 MB; leak audit clean on handOffs/voice/secrets/credentials.
+10. **#243 — the canonical example app's server tier reportedly 96% dangling** (S296). NOT verified by
+    me. It is the reference app and what the snippet-gate compiles. **Worth ranking first if it holds.**
+11. **Maps: repair or retire?** Refresh owed since S290; the scheduled `cloud-maps` job is FAILING;
+    and TWO lanes independently reported routing gaps → [[g-maps-error-map-missing-diagnostics-and-emit-client]].
+    Feeds the pa-base §5 losing-battle threshold deliberately, not as a chore.
+
+## 🎯 THE HEADLINE — a three-lane parallel arc, verified disjoint, zero collisions between lanes
+
+| PR | what |
+|---|---|
+| **#244** | GH **#234** `<errors>` demand-marks the messages chunk · GH **#235** child pages load the shell's transitive module `<script>`s · +a PRE-EXISTING double-runtime `<script>` bug found by the reproducer |
+| **#242** | GH **#237 FAIL-OPEN CLOSED** — `on mount` server calls get async scope (§13.2) · **D-5** server code emits the module consts it closes over |
+| **#240** | **F-2** `E-PA-002` leads with `scrml db-migrate` · **D-3** the whole `outline-*` family registered |
+| **#239** | **SPEC §23.2.4a** — multi-statement inline `_{}` slice RATIFIED, normative, with a compiled worked example |
+| **#245** | the nine deferred items filed |
+
+Lanes 1 and 2 verified **file-disjoint by set-intersection** across ~1,400 lines. The only collision
+came from OUTSIDE the partition — S296's #241 landing into `emit-server.ts` — resolved as a real
+3-way (union), with both sides' additions verified still LIVE (`_pathSep` ×3, `forEachIdentInExprNode`
+×2), not merely parsing.
+
+## 🧭 THE FINDINGS THAT OUTLAST THE FIXES
+
+1. **All three of my dispatch briefs named a wrong or self-contradicting locus.** Lane 1's would have
+   shipped an INCOMPLETE fix — `emit-client.ts` is the only layer covering both `embedRuntime:true`
+   and the shared-runtime union; my named file would have closed one path and left the other broken
+   WITH GREEN TESTS. Cause: I located loci by grepping SYMBOL NAMES, and a symbol appears wherever it
+   is mentioned, which grep cannot distinguish from where behaviour is decided. **Landed as
+   `pa-base v2.7`** — a PA-asserted locus is a HYPOTHESIS and shall be labelled one. All three were
+   harmless only because the briefs carried the verify instruction and the agents honoured it: the
+   safeguard held, not the accuracy.
+2. **The gap ledger drifts faster than it is reconciled.** THREE entries this session described stale
+   reality — D-4's original (wrong on both counts), D-4 again after #241 fixed it hours later, and
+   the E-SQL-002 neighbours. **The D-4 case is the instructive one: lane 1's widening applied with
+   ZERO git conflict** because #241 fixed the code and never touched the ledger. Two writers agreed
+   on the file and disagreed about reality; no gate can see that. pa-base §2's same-landing
+   supersession discipline is written for write-once docs and applies verbatim to the gap ledger —
+   it is not being followed there. **Candidate for the next base amendment.**
+3. **Adopter reports can be right about the symptom and wrong about the cause, and the cause is where
+   the work is.** #237: the plain-local/reactive-cell contrast was real, but the gate is SCOPE (a
+   module-scope sync IIFE), not the destination kind — the reactive path escaped only because it
+   self-wraps. #234: `index.ts` L495/528 are correct as they stand. D-4's own gap entry was wrong on
+   both counts. Reproduce-first earned its cost every time.
+4. **Third-party identity leaks are a WRITING-time problem, not a publishing-time one** — landed as
+   `pa-base v2.6`. Three reactive scrubs in one session (two of them third-party property), all found
+   only when the repo was packaged for a registry, all already public on a public forge throughout.
+
+## ⚠️ OWN MISSES — three, all caught by someone else or by a gate
+
+- **The privacy scrub left 9 residual hub hits** and S296 caught them. The pattern I missed: the
+  surname surviving as a FILESYSTEM PATH component (`/home/…/<surname>/<project>/…`) because my pass
+  replaced the project half and not the path half. **Worst instance was a `forcing-case:` line binding
+  the codename to the real name in one parenthetical** — that single line defeats the anonymization
+  for the whole corpus. Fixed this session (`9ea187f`, 9 → 0).
+- **I over-reached into `user-voice-scrml.md`**, editing bryan's own verbatim quotes (including a
+  direct quote) during the scrub. The ledger is append-only and verbatim BY CONTRACT and the hub is
+  private, so the edit was both a contract violation and unnecessary. Reverted before committing.
+- **I told bryan RediLedger was his own repo.** The fork's remote (`bryanmaclee/RediLedger`) misled
+  me; it is a fork of a third party's for-profit app. Corrected within the turn, but it briefly
+  reframed a confidentiality question as a non-issue.
+
+## ✅ GATE
+
+Cloud `gate` + `windows` GREEN on every merge (the authority). `tracking` red on exactly the
+documented 3 (serve-tool R26 flake + gitignored `bs.js`/`tab.js`) — **verified from the log on every
+PR, not inferred**. `ai-review` fails on App-install infra, not findings. All generated-doc gates
+(`facts.ts --check`, `state.ts --check`, `regen-spec-index --check`) PASS.
+
+**The pre-push generated-docs gate (#221) fired on me once and was right** — I regenerated FACTS for
+the SPEC change, then lane 3 touched `compiler/src` again. That is the exact sequence S292 got wrong
+three times in one session; the gate now catches it.
+
+## 🧷 CONCURRENT / HOUSEKEEPING
+
+- **S296 (XPS) live all session.** Landed #241 (D-4 server-emitter — the half lane 1 deliberately left
+  unbuilt) and #243. Sent 3 inbound notes, all drained. Partition worked: the only file collision was
+  `emit-server.ts`, resolved cleanly.
+- **Open gaps: HIGH 17 → 18** (nine filed, several closed). Open adopter issues **4 → 1** (only #228,
+  Peter's, awaiting flogenceP).
+- **Worktrees: 14** — the three lane worktrees are spent and can be cleaned; the nine persistent
+  `scrml-spa-ss*` and the `s251` tree are pre-existing.
+- **Maps NOT refreshed** (see blocked item 11). `project-mapper` not run.
+
+## Tags
+#session-295-bryan #three-lane-parallel-arc #gh237-fail-open-closed #gh234-messages-chunk
+#gh235-child-page-deps #spec-23-2-4a-multistatement-ratified #pa-base-v2.6-handle-only
+#pa-base-v2.7-locus-is-a-hypothesis #three-briefs-three-wrong-loci #privacy-scrub-x3
+#gap-ledger-drift #npm-publishable #s296-concurrent
+
+---
+
+<!-- ============================================================= -->
 <!-- S296 WRAP (bryan/bryan-XPS-8950, the XPS clone) — 2026-07-28. -->
 <!-- S294/S293/S292 + all prior UNCHANGED below.                    -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->
