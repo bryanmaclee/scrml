@@ -2,6 +2,33 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S294 (2026-07-28) — Peter · Windows — `<each>` audit (flogenceP), and a nested-each outer-var reconcile fix
+
+Peter asked to recheck `<each>` after flogenceP surfaced friction. Audited flogenceP's four `<each>`
+workarounds against main: **three are already fixed** (the workarounds are stale) — hidden-subtree text
+reconcile (S158, guarded), `bind:value`-in-each (S286/#175), expression-form event handler (S212). The
+fourth (flogenceP's "nested directive can't see the outer loop var") had a **stale premise** — S153 fixed
+visibility — but reproducing it surfaced a **real new reconcile bug**, which this arc fixes.
+
+- **Bug:** a binding inside a NESTED `<each>` reading the OUTER each's loop var — text `${g.name}`,
+  directive `class:hidden=(g.collapsed)`, or handler `onclick=fn(g.name)` — was **stale on a same-key
+  outer reconcile**. It read a create-time closure of the outer factory; on same-key outer replace the
+  outer factory isn't re-run (node reused, Bug64/S293), so the inner binding never saw the new outer item,
+  while the outer item's *own* bindings reconciled. Distinct from the resolved `g-nested-each-*` siblings
+  (S212/S218), which fix the inner *list/source* reconcile, not inner reads of the outer var's scalars.
+- **Fix (`emit-each.ts`):** `maybeWrapEachPerItemEffect` + `maybeWrapEachPerItemHandler` now emit a live
+  `_scrml_resolve_item` prelude for every enclosing reconcile-ctx iter var the body references (shared
+  `pickReferencedEnclosingCtxs`, walking `_eachReconcileCtxStack`). Additive — a body reading only its own
+  var is byte-identical. Executed-DOM regression test covers text + directive + handler (+ controls).
+- **The adversarial review earned its cost — it caught two real defects in the first cut** (both fixed +
+  guarded before land): a same-name nested alias emitted a double `let` → `E-CODEGEN-INVALID-LOGIC` (a
+  regression), fixed by a shadow guard; and the identifier gate matched a property read `s.g` as the outer
+  var `g`, fixed by a member-access-excluding `referencesFreeIdent`.
+
+Also flipped two mis-marked gaps to resolved (`g-each-item-hidden-text-stale-flogence` — the owed live
+repro came back negative at flogenceP S37; the new nested-each gap). flogenceP can retire its stale
+`@expandedMeta`/pre-filter `<each>` workarounds.
+
 ## S294 (2026-07-28) — Peter · Windows — `E-STMT-MISSING-SEMICOLON` (and every `[TAB]` diagnostic) regains `:line:col` in the build path
 
 Adopter Fieldman Obs 1: a `scrml build` printed `pages/portal.scrml E-STMT-MISSING-SEMICOLON: …` with **no
