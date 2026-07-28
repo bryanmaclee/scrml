@@ -59,7 +59,7 @@ Also caught a **false-positive** in the #228 live probe (shape mismatch — prob
 
 ## 🧷 HOUSEKEEPING
 
-- **Inbox:** drained 2 flogenceP notes (i225 handled, #228 replied) → `read/`. RediLedger S11 note RETAINED in
+- **Inbox:** drained 2 flogenceP notes (i225 handled, #228 replied) → `read/`. Adopter-A S11 note RETAINED in
   `incoming/` (bryan's lane — bytes-tier + `_{}` Qs).
 - **flogence (upstream `bryanmaclee/flogence`) local clone DELETED by Peter** this session (per my rec — it was a
   redundant upstream clone; flogenceP has `upstream` remote for syncing). flogenceP (`pjoliver11/flogenceP`) = Peter's
@@ -135,11 +135,11 @@ etc.). **Coordination flag:** 3 unmerged `fix/each-*` branches — `fix/each-mar
 ## 🤝 ADOPTERS
 
 - **Fieldman/assetManagement (Peter lane) — HANDLED.** A real `<each>` consumer holding pin #110 until
-  `<each>` settles; offered a headless-Firefox run-verify (~28 gates, the `<each>` analog of RediLedger's
+  `<each>` settles; offered a headless-Firefox run-verify (~28 gates, the `<each>` analog of Adopter-A's
   turnkey run). Reply in their inbox (`docs/INBOX-from-scrml-pa-2026-07-27-each-how-to-proceed.md`): the
   workaround map, the single "settled" signal to wait for, offer accepted. Send the settled signal when the
   `fix/each-*` branches land + a consolidated `<each>` reconcile pass (incl. Tier-1 if= once bryan rules).
-- **RediLedger S11 (bryan lane) — ROUTED, not acted on.** New inbox note (`…-1956-rediledger-…-content-
+- **Adopter-A S11 (bryan lane) — ROUTED, not acted on.** New inbox note (`…-1956-adopter-a-…-content-
   addressed-bytes-tier-ask`): a content-addressed bytes/storage tier ask (BaaS-parity #4) + 2 `_{}`
   contract Qs (Q1 multi-statement inline slice; Q2 `capabilities=` enforcement). Storage-tier roadmap +
   SPEC contract = bryan's. LEFT in `incoming/` + committed (his clone sees it on pull); flagged here.
@@ -156,7 +156,7 @@ optimization is a signal to preserve the opt, not to update the assertion.
 
 - **bryan landed fast all session** — main moved db879d01→…→83888ee3 under me; **five rebases** across the 3
   PRs, every conflict confined to generated `docs/FACTS.md`, resolved by REGENERATING not hand-merging.
-- **Inbox:** Fieldman note → drained to `read/` (handled). RediLedger S11 → LEFT in `incoming/` (bryan's).
+- **Inbox:** Fieldman note → drained to `read/` (handled). Adopter-A S11 → LEFT in `incoming/` (bryan's).
 - **Worktrees:** only main + the persistent `scrml-pinned` (app-pinned `9c950dfe`, not this session's) —
   nothing to clean.
 - **Maps:** internal edits to existing `emit-lift.js` (no new surface files) → unchanged-with-note (the
@@ -172,7 +172,7 @@ optimization is a signal to preserve the opt, not to update the assertion.
 ## Tags
 #session-293-peter #per-item-reconcile-family #item-derived-local #per-item-attributes #per-item-if-tier0
 #each-swept-sound #fieldman-workarounds-1-2-4-retired #tier1-if-routed-to-bryan #value-indexed-opt-preserved
-#finder-caught-holes-x3 #rediledger-s11-routed #three-prs
+#finder-caught-holes-x3 #adopter-a-s11-routed #three-prs
 
 ---
 
@@ -193,7 +193,7 @@ Changelog S292. This carries the irreducible.
 
 **Nothing is half-built.** Everything started this session landed. What remains is bryan's judgment:
 
-1. **RediLedger Q1 — is the multi-statement `_{}` inline slice a CONTRACT or an implementation
+1. **Adopter-A Q1 — is the multi-statement `_{}` inline slice a CONTRACT or an implementation
    accident?** §23.2.4a documents and illustrates a *single-expression* slice. Codegen also accepts
    multi-statement. They are building their bytes pipeline on the multi-statement form and asked us to
    rule it in or out. **Their framing is the FK lesson INVERTED and it is exactly right:** there, prose
@@ -204,7 +204,7 @@ Changelog S292. This carries the irreducible.
    I did **NOT** confirm the emitted lowering shape — my probe's fns had no callers and tree-shook, so
    the slice never reached the artifact. Their "spliced verbatim as the async-IIFE body" claim is
    **unverified by us**. Verify with a called fn before ruling.
-2. **RediLedger Q2 — `capabilities=` enforcement semantics + timing.** §23.5.6 is advisory-only today.
+2. **Adopter-A Q2 — `capabilities=` enforcement semantics + timing.** §23.5.6 is advisory-only today.
    When enforcement lands: is an undeclared access a hard error, and are path args prefix/glob matched?
    They are declaring `fs-read`/`fs-write` NOW and would rather write it correctly than migrate later.
 3. **The bytes tier (BaaS-parity #4)** — needs a roadmap slot. Their channel check was correct and I
@@ -220,7 +220,7 @@ Their S11 message is deliberately still in `handOffs/incoming/` — draining it 
 | #213 `d19d79ea` | the scrml.dev `orm-trap` article — **7 false compiler claims** corrected; `docs/website` put under the snippet-gate |
 | #215 `20ebbf0c` | **Wave-1c cross-chunk soft-nav** — both held HIGHs closed; adopter #27's last leg |
 | #216 `65892010` | gap closures + the new adopter HIGH + 2 inbox messages committed |
-| #217 `32ef5b52` | **db-migrate grants the tables `?{}` touches**, least-privilege — closes the RediLedger login-500 |
+| #217 `32ef5b52` | **db-migrate grants the tables `?{}` touches**, least-privilege — closes the Adopter-A login-500 |
 
 ## 🧭 THE FINDINGS THAT OUTLAST THE FIXES
 
@@ -306,9 +306,9 @@ at its prior commit.
 - **Worktree `agent-a2ed001a5de228134` RELEASED** — content verified on main FIRST, then removed;
   branches `feat/wave1c-nav-s290` and the S290-retained anchor `worktree-agent-a2ed001a5de228134`
   both deleted. Only the pre-existing `s251` tree and the nine persistent `scrml-spa-ss*` trees remain.
-- **Inbox:** the RediLedger db-migrate report drained to `read/` (closed — fixed + replied). The S11
+- **Inbox:** the Adopter-A db-migrate report drained to `read/` (closed — fixed + replied). The S11
   bytes-tier message deliberately RETAINED in `incoming/` pending the two rulings.
-- **Reply to RediLedger** committed + pushed on their `scrml-rewrite` (`acbcae4`), explicit pathspec.
+- **Reply to Adopter-A** committed + pushed on their `scrml-rewrite` (`acbcae4`), explicit pathspec.
   It states plainly what is NOT fixed and that their Q1 lowering claim is unverified by us.
 
 ## Tags
@@ -388,7 +388,7 @@ gap was never the contract, it was that nothing executed it.
    sentence before deciding whether you have a bug or a ruling.**
 2. **A fix's blast radius is measured in the SIBLING call sites of its class, not in the shapes
    inside the function you touched.** The `?{}` detector keyed on `interpolations >= 1`; the bare
-   identifier fell through the OTHER side of the same test. RediLedger handed this lesson back at
+   identifier fell through the OTHER side of the same test. Adopter-A handed this lesson back at
    S288 and it recurred immediately.
 3. **My own verification was hollow before it was real, twice — and both would have reported
    green.** A corpus sweep that scanned **zero** blocks (regex never matched) and a fixture whose
@@ -633,7 +633,7 @@ Mechanical stream: `handOffs/delta-log.md [795]-[805]`. Changelog S288. This car
 
 ## 🎯 THE HEADLINE — one adopter's reports drove the whole session; two fixes were compiler-WIDE classes
 
-Five PRs, all RediLedger-originated. Every one reproduced-or-refuted on the current baseline BEFORE
+Five PRs, all Adopter-A-originated. Every one reproduced-or-refuted on the current baseline BEFORE
 any change (bryan's opening instruction), every claim verified by EXECUTION rather than by reading
 emitted text.
 
@@ -647,7 +647,7 @@ emitted text.
 
 ## 🔴 THE NEXT PA'S FIRST MOVE — a HIGH that arrived AFTER the wrap PR merged
 
-**`g-schema-references-dot-form-emits-no-foreign-key` (HIGH, RediLedger S5).** Their turnkey run
+**`g-schema-references-dot-form-emits-no-foreign-key` (HIGH, Adopter-A S5).** Their turnkey run
 landed post-wrap. Two halves:
 
 **The good half — the verification we owed is DONE and PASSES.** `scrml db-migrate` against their
@@ -699,7 +699,7 @@ produces nothing. Same shape as the gate mismatch and the incomplete `default()`
 3. **The DDL negative test proves the floor exists; only the request path proves the app is standing
    on it.** The tier's own live-PG tests open a transaction and HAND-EXECUTE `set_config` before
    asserting — a faithful DDL+RLS test that passed the entire time the feature was dead. Tracked as
-   `g-dbauth-no-request-path-test`; RediLedger offered their harness, and per the S273 cloud-flake
+   `g-dbauth-no-request-path-test`; Adopter-A offered their harness, and per the S273 cloud-flake
    lesson it belongs in the live-PG-gated LOCAL tier executing the shipped handler, not driving a socket.
 
 ## ⚠️ OWN MISSES (both mine, both recorded rather than smoothed)
@@ -707,7 +707,7 @@ produces nothing. Same shape as the gate mismatch and the incomplete `default()`
 - **The FACTS gate caught a stale regen.** I regenerated after a rebase, then edited `db-migrate.js`
   without re-regenerating; cloud `gate` went red on exactly the S284 rule I had quoted earlier the
   same session. Pre-regen before pushing ANY PR touching `compiler/src`.
-- **A bare `git commit` in RediLedger's repo** swept three of THEIR pre-staged renames into my
+- **A bare `git commit` in Adopter-A's repo** swept three of THEIR pre-staged renames into my
   commit — the shared-index hazard the explicit-pathspec rule exists to prevent. Local-only, pure
   renames, repaired via `reset --soft` + re-commit with `-- <pathspec>`; their index restored
   byte-for-byte. **Always pathspec a sibling-repo commit.**
@@ -760,7 +760,7 @@ nested-closure uses as non-dead. Flagged because SPEC is this lane.
 - **`2026-07-22-2230-from-S282-to-XPS`** — LEFT in `incoming/`. This machine-family's own OUTBOUND to
   the XPS clone; the boot hook flags it every turn but it is not for this machine. Unchanged
   disposition since S284.
-- RediLedger ×2 (the S4 session-principal report, the S5 ack) — both drained to `read/`, both replied
+- Adopter-A ×2 (the S4 session-principal report, the S5 ack) — both drained to `read/`, both replied
   to; the reply is committed AND pushed on their `scrml-rewrite` (`d440deb`).
 
 ## ✅ GATE / MAPS
@@ -787,7 +787,7 @@ nested-closure uses as non-dead. Flagged because SPEC is this lane.
   this itself. Pick it up in the next incremental pass.
 
 ## Tags
-#session-288-bryan #rediledger-arc #5-prs #oneof-sql-literals #currentuser-binding #schema-tenant-registry #default-emission #e-schema-010-ruled #auto-immutable-pk-tenant #gate-mismatch-lesson #incomplete-fix-lesson #request-path-test-debt #facts-gate-caught-me #sibling-repo-pathspec-miss #four-rebases-peter-concurrent
+#session-288-bryan #adopter-a-arc #5-prs #oneof-sql-literals #currentuser-binding #schema-tenant-registry #default-emission #e-schema-010-ruled #auto-immutable-pk-tenant #gate-mismatch-lesson #incomplete-fix-lesson #request-path-test-debt #facts-gate-caught-me #sibling-repo-pathspec-miss #four-rebases-peter-concurrent
 
 ---
 
@@ -880,7 +880,7 @@ Each was the EXACT reported bug reached through a different binding form. **This
 **Date:** 2026-07-26. `/boot` Profile A. `main` at **`f8a138e9`**, both repos coherence 0/0, tree clean, no open PRs, CI gate green. Mechanical stream: `handOffs/delta-log.md [775]-[786]`. Changelog S287 (three entries). This carries the irreducible.
 
 ## 🎯 THE HEADLINE — the DB-authoritative security tier is COMPLETE for reads + writes
-From a bare `/boot`, the tier went from **nonexistent → M1 (emit) + M2 (apply) + P2 (write-authority)**, each: **deep-dive → bryan ruling → build → adversarial security review → independent PG16 verify → land via PR**. All three PG16-proven; **RediLedger run-verified invariant #1 in their real app** (Track-R slice 3a). Six PRs merged this session: #182 (board-hygiene), #183 (M1), #184 (M1 bookkeeping), #185 (M2), #186 (M2 bookkeeping), #188 (P2), #189 (P2 bookkeeping). ~~Peter's lane was quiet~~ — solo all session.
+From a bare `/boot`, the tier went from **nonexistent → M1 (emit) + M2 (apply) + P2 (write-authority)**, each: **deep-dive → bryan ruling → build → adversarial security review → independent PG16 verify → land via PR**. All three PG16-proven; **Adopter-A run-verified invariant #1 in their real app** (Track-R slice 3a). Six PRs merged this session: #182 (board-hygiene), #183 (M1), #184 (M1 bookkeeping), #185 (M2), #186 (M2 bookkeeping), #188 (P2), #189 (P2 bookkeeping). ~~Peter's lane was quiet~~ — solo all session.
 
 | Milestone | PR / SHA | What | Adversarial review |
 |---|---|---|---|
@@ -891,13 +891,13 @@ From a bare `/boot`, the tier went from **nonexistent → M1 (emit) + M2 (apply)
 **DDs (all in `scrml-support/docs/deep-dives/`, frontmatter carries the RULING):** `db-authoritative-security-design-2026-07-25` + `-PHASING-PLAN-` (M1 threshold), `db-authoritative-migration-apply-seam-2026-07-26` (M2, ruled deep-dive-it-first then your-recs), `db-authoritative-p2-writes-authority-2026-07-26` (P2, ruled S4-A + your-recs).
 
 ## 🔴 THE NATURAL NEXT ARC (bryan surfaced the options at wrap; his call at next boot)
-**My lean: the `db-migrate` CHECK-constraint fix** — `g-db-migrate-check-constraint-oneof-pattern` (MED, adopter-reported by RediLedger, well-bisected to `79cd79ce`). Three sub-bugs in `schema-differ.js`: (1) `oneOf([...])` emits unquoted barewords in the CHECK (`IN (income, expense)` not `IN ('income','expense')`); (2) a `oneOf`/`pattern` column trips the newline diff-parser → false `E-DBAUTH-NO-TENANT-COLUMN`; (3) `pattern(/…{n}…/)` brace fools the marker matcher (touches the brace-matcher P2 rewrote — **REPRODUCE all three on post-P2 `1c8aef79` FIRST**; #3 may have shifted). Non-gating for RediLedger (workaround in place) but blocks turnkey-from-source for real (CHECK-carrying) schemas — the highest-value small fix on the board. Scoped `schema-differ` fix.
+**My lean: the `db-migrate` CHECK-constraint fix** — `g-db-migrate-check-constraint-oneof-pattern` (MED, adopter-reported by Adopter-A, well-bisected to `79cd79ce`). Three sub-bugs in `schema-differ.js`: (1) `oneOf([...])` emits unquoted barewords in the CHECK (`IN (income, expense)` not `IN ('income','expense')`); (2) a `oneOf`/`pattern` column trips the newline diff-parser → false `E-DBAUTH-NO-TENANT-COLUMN`; (3) `pattern(/…{n}…/)` brace fools the marker matcher (touches the brace-matcher P2 rewrote — **REPRODUCE all three on post-P2 `1c8aef79` FIRST**; #3 may have shifted). Non-gating for Adopter-A (workaround in place) but blocks turnkey-from-source for real (CHECK-carrying) schemas — the highest-value small fix on the board. Scoped `schema-differ` fix.
 
-**Other queued (bryan's pick):** **P3 integrity** (double-entry balance / DEFERRED-constraint trigger + audit hash-chain — RediLedger's HC-5; needs a DD) · **caps-provenance** (`g-dbauth-p2-caps-provenance` MED — P2's `requires cap` SECDEFs are **fail-closed inert-deny** until a real session caps source is wired; couples to S8 live revocation) · **S9 decimal** money type + wire-codec seam · **M2 fast-follow** (build-`.sql` artifact · `scrml dev` auto-apply · S7-full) · **Wave-1c nav**.
+**Other queued (bryan's pick):** **P3 integrity** (double-entry balance / DEFERRED-constraint trigger + audit hash-chain — an adopter integrity requirement; needs a DD) · **caps-provenance** (`g-dbauth-p2-caps-provenance` MED — P2's `requires cap` SECDEFs are **fail-closed inert-deny** until a real session caps source is wired; couples to S8 live revocation) · **S9 decimal** money type + wire-codec seam · **M2 fast-follow** (build-`.sql` artifact · `scrml dev` auto-apply · S7-full) · **Wave-1c nav**.
 
 ## ⚠️ OPEN for the next PA's judgment
 - **`g-dbauth-p2-pk-tenant-not-auto-immutable` (LOW, design call for bryan)** — a db-authoritative table's PK + `tenant_id` are still UPDATE-grantable (fails-safe: cross-tenant blocked by RLS WITH CHECK, but within-tenant PK UPDATE succeeds). Auto-immutable-PK/tenant (safe default) vs author-explicit. Surface to bryan.
-- **The tier's threat-model honesty** (now in SPEC §14.8.11.2): the GUC principal (`scrml.tenant` + `scrml.principal.caps`) is **self-settable by a `scrml_app` with an injectable SQL channel** — the cap gate + tenant isolation are enforced against a *non-compromised* app (scrml's parameterized emission is the guard); the HARD authorities surviving app compromise are the immutable REVOKE + SECDEF-only-choke + NOBYPASSRLS. Do NOT let the tier be over-sold. RediLedger was told this explicitly.
+- **The tier's threat-model honesty** (now in SPEC §14.8.11.2): the GUC principal (`scrml.tenant` + `scrml.principal.caps`) is **self-settable by a `scrml_app` with an injectable SQL channel** — the cap gate + tenant isolation are enforced against a *non-compromised* app (scrml's parameterized emission is the guard); the HARD authorities surviving app compromise are the immutable REVOKE + SECDEF-only-choke + NOBYPASSRLS. Do NOT let the tier be over-sold. Adopter-A was told this explicitly.
 
 ## 🧭 ANOMALIES / LESSONS (reasoning, not state)
 1. **Adversarial-not-confirmatory earned its cost 3× this session** (M1 idempotency-wrap HIGH, M2 identifier-injection HIGH — both invisible to the happy-path acceptance test + my own read; P2 clean only after the review confirmed it). The independent break-it reviewer is MANDATORY for authorization/security emission; my own read is confirmation-biased.
@@ -910,14 +910,14 @@ From a bare `/boot`, the tier went from **nonexistent → M1 (emit) + M2 (apply)
 - **Retained worktrees (do NOT delete):** `worktree-agent-a2ed001a5de228134` [`feat/wave1c-nav`] — Wave-1c nav, unblocked by chunk-ns, unbuilt. Plus a pre-existing `s251` worktree (NOT this session's — left untouched; a stale-cleanup candidate for whoever owns it).
 
 ## 📥 INBOX
-- **`2026-07-22-2230-from-S282-to-XPS`** — LEFT in `incoming/` (this machine-family's outbound to the XPS clone; the boot hook keeps flagging it until XPS consumes it; not for this machine). All RediLedger inbound drained to `read/` + acked cross-repo (their `scrml-rewrite`).
+- **`2026-07-22-2230-from-S282-to-XPS`** — LEFT in `incoming/` (this machine-family's outbound to the XPS clone; the boot hook keeps flagging it until XPS consumes it; not for this machine). All Adopter-A inbound drained to `read/` + acked cross-repo (their `scrml-rewrite`).
 
 ## ✅ GATE / MAPS
 - Full suite: **21351 pass / 0 fail / ~20 skip** (measured on the P2 build; unchanged since — the #189 bookkeeping was docs-only). main is gate-green by every merge's cloud `gate` + pre-commit hook. The wrap-time local re-run neared the 300s timeout (the integration PG tests are slow run all-together) — not a failure. Generated docs (`FACTS.md`, `state.ts` §0) `--check` PASS.
 - Maps: refreshed at wrap (`project-mapper` incremental on the db-authoritative subsystem → watermark `f8a138e9`).
 
 ## Tags
-#session-287-bryan #db-authoritative-COMPLETE-reads+writes #m1-emit #m2-apply-dbmigrate #p2-writes-authority-secdef #3-adversarial-HIGHs-caught #rediledger-run-verified-invariant1 #check-constraint-bug-next #caps-provenance-open #solo
+#session-287-bryan #db-authoritative-COMPLETE-reads+writes #m1-emit #m2-apply-dbmigrate #p2-writes-authority-secdef #3-adversarial-HIGHs-caught #adopter-a-run-verified-invariant1 #check-constraint-bug-next #caps-provenance-open #solo
 
 ---
 
@@ -929,9 +929,9 @@ From a bare `/boot`, the tier went from **nonexistent → M1 (emit) + M2 (apply)
 
 # scrml — Session 286 (bryan · ASUS-Vivobook) — WRAP
 
-**Date:** 2026-07-25. `/boot` Profile A. `main` at **`1c5c2aee`** (PR #180 chunk-ns landing), CI `gate` GREEN, coherence 0/0. Two big arcs: **(1) the chunk-namespacing BUG-6 rename LANDED** (the boot-gating item), **(2) the RediLedger DB-authoritative security ask → DD → threshold ruled → full scope/phasing ruled → Milestone-1 P0 spike validated.** Mechanical stream in `handOffs/delta-log.md [767]+` (bryan-S286 section). Changelog S286. This carries the irreducible.
+**Date:** 2026-07-25. `/boot` Profile A. `main` at **`1c5c2aee`** (PR #180 chunk-ns landing), CI `gate` GREEN, coherence 0/0. Two big arcs: **(1) the chunk-namespacing BUG-6 rename LANDED** (the boot-gating item), **(2) the Adopter-A DB-authoritative security ask → DD → threshold ruled → full scope/phasing ruled → Milestone-1 P0 spike validated.** Mechanical stream in `handOffs/delta-log.md [767]+` (bryan-S286 section). Changelog S286. This carries the irreducible.
 
-## 🔴 THE NEXT PRIORITY — RediLedger DB-authoritative Milestone-1 codegen build
+## 🔴 THE NEXT PRIORITY — Adopter-A DB-authoritative Milestone-1 codegen build
 
 **bryan RULED "add the tier" + the full scope/phasing (all five to PA recs) + "kick off Milestone 1".** The P0 spike is DONE (mechanism empirically validated); the next step is the **codegen build**, NOT started.
 
@@ -945,8 +945,8 @@ From a bare `/boot`, the tier went from **nonexistent → M1 (emit) + M2 (apply)
 
 ## 🎬 WHAT LANDED / DECIDED
 - **PR #180 (`1c5c2aee`) — chunk-namespacing BUG-6 rename FINISHED + LANDED.** S283 campaign + S286 finish (agent `0cbfe5be`, 44 commits) reconciled onto Peter's main. **Closes #27**; **unblocks Wave-1c + ESM U4**. gzip holds 16 KB; anti-masking proven (`chunk-ns-intact-bundle-acceptance.test.js`).
-- **RediLedger DB-authoritative** — DD + threshold ruled (add-tier) + scope/phasing ruled (5 recs) + phasing plan + M1 P0 spike. **freeze-bar TIMING relaxed** (bryan: the freeze/split rush "jumped the gun"; profile + master-list reconciled this wrap).
-- **Replies sent (reply-on-resolve, adopted from flogence §4):** RediLedger ×2, flogence ×1 (Case-2 witness HOLD).
+- **Adopter-A DB-authoritative** — DD + threshold ruled (add-tier) + scope/phasing ruled (5 recs) + phasing plan + M1 P0 spike. **freeze-bar TIMING relaxed** (bryan: the freeze/split rush "jumped the gun"; profile + master-list reconciled this wrap).
+- **Replies sent (reply-on-resolve, adopted from flogence §4):** Adopter-A ×2, flogence ×1 (Case-2 witness HOLD).
 
 ## 🧭 ANOMALIES (recovered — reasoning)
 1. **Finish agent ENOTIMP crash + resume** — transient API error mid-Phase-4 after 34 WIP commits (green). SendMessage-resumed (first crash, transient → resumable); completed.
@@ -957,18 +957,18 @@ From a bare `/boot`, the tier went from **nonexistent → M1 (emit) + M2 (apply)
 
 ## 🧷 CONCURRENT / HELD
 - **Peter (S285/S286) adopter lane** — landed #171-#179 while I worked (delta `[763]-[766]`); his #175/#174 forced the reconcile. S286 number collides (2 machines; disambig by name).
-- **Retained worktree (do NOT delete):** `worktree-agent-a2ed001a5de228134` (Wave-1c — UNBLOCKED by the chunk-ns land, not yet built; the next execution arc after/alongside the RediLedger build) · local `feat/wave1c-nav` · `origin/evidence/u4-premise-falsified`.
+- **Retained worktree (do NOT delete):** `worktree-agent-a2ed001a5de228134` (Wave-1c — UNBLOCKED by the chunk-ns land, not yet built; the next execution arc after/alongside the Adopter-A build) · local `feat/wave1c-nav` · `origin/evidence/u4-premise-falsified`.
 - **Cleaned this wrap:** chunk-ns finish/rename/base worktrees (a4e2f7f2, a91ad13, bug6-base — landed via #180) + `finish/chunk-ns-bug6-rename`.
 
 ## 📥 INBOX
 - **XPS-outbound** — LEFT in `incoming/` (this machine's outbound to XPS; unconsumed; archiving denies XPS's boot from auto-flagging it). bryan didn't rule leave-vs-archive → defaulted LEAVE. The boot hook keeps flagging it until XPS consumes it.
-- **RediLedger + flogence** — REPLIED → moved to `read/` this wrap.
+- **Adopter-A + flogence** — REPLIED → moved to `read/` this wrap.
 
 ## 🗺️ Maps
 Refreshed this wrap (`project-mapper` incremental — chunk-ns + #171-#179 surface; stamp → `1c5c2aee`; was `e8fdd44c`).
 
 ## Tags
-#session-286-bryan #chunk-ns-LANDED-pr180 #adopter-27-closed #rediledger-db-authoritative-ruled #m1-p0-spike-validated #freeze-timing-relaxed #reply-on-resolve #stale-index-caught #wrap-conflation-corrected #peter-concurrent-171-179
+#session-286-bryan #chunk-ns-LANDED-pr180 #adopter-27-closed #adopter-a-db-authoritative-ruled #m1-p0-spike-validated #freeze-timing-relaxed #reply-on-resolve #stale-index-caught #wrap-conflation-corrected #peter-concurrent-171-179
 
 ---
 

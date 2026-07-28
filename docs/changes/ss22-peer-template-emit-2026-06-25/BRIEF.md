@@ -24,7 +24,7 @@ If ANY check fails: STOP, report, exit.
 ---
 
 ## Read FIRST — ss19 Group A peer-await prior art
-`emit-server.ts` peer-await threading landed in ss19 (`538df06d`; `docs/changes/ryan-cheese-craft-findings-2026-06-25/`). It applies a "#8" STATEMENT-LEVEL structured emit that awaits peer calls + rewrites `@cell` reads correctly. The gap: this pass fires on statement positions but NOT on TEMPLATE-INTERPOLATION positions.
+`emit-server.ts` peer-await threading landed in ss19 (`538df06d`; `(private — scrml-support/handOffs/adopter-confidential/)`). It applies a "#8" STATEMENT-LEVEL structured emit that awaits peer calls + rewrites `@cell` reads correctly. The gap: this pass fires on statement positions but NOT on TEMPLATE-INTERPOLATION positions.
 
 ## The gap (reproduce RED first — 3 shapes)
 Inside a `server function`:

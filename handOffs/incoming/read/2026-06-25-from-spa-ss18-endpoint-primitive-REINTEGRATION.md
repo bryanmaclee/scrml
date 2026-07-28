@@ -25,7 +25,7 @@ Each wave: full-suite pre-commit hook PASSED + independent sPA R26 (re-compile/r
 
 ## Re-integration mechanics (READ — base is stale vs current main)
 - spa/ss18 base = `45182694`; main has since advanced ~7 commits (all S219/S220 bookkeeping/ingest:
-  vPA-WRAP, boot bookkeeping, Ryan-battery ingest, …). Divergence vs main = `7  4`.
+  vPA-WRAP, boot bookkeeping, the adopter-battery ingest, …). Divergence vs main = `7  4`.
 - **None of the ~7 main commits touch any endpoint file** (verified: ast-builder.js, block-splitter.js,
   type-system.ts, emit-server.ts, SPEC.md, SPEC-INDEX.md, examples/ all untouched by main since base).
   So `spa/ss18` → main is a clean merge/cherry-pick on the endpoint surface.

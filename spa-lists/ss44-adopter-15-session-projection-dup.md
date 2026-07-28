@@ -1,6 +1,6 @@
-# ss44 — `_scrml_session` duplicate-declaration (Ryan #15) — VERIFY-FIRST · HIGH
+# ss44 — `_scrml_session` duplicate-declaration (the adopter #15) — VERIFY-FIRST · HIGH
 
-**Currency:** scoped S224 (PA) @ HEAD `9ad78593` / 2026-06-27. **FIREABLE.** Source = **GitHub issue #15** (rjantz3, v0.7.0 adopter — Cheese Craft port). **HIGH** — breaks any auth-gated page under a shell/layout `app.scrml` (a common real shape): the page goes blank/dead.
+**Currency:** scoped S224 (PA) @ HEAD `9ad78593` / 2026-06-27. **FIREABLE.** Source = **GitHub issue #15** (an adopter, v0.7.0 adopter — Adopter-B port). **HIGH** — breaks any auth-gated page under a shell/layout `app.scrml` (a common real shape): the page goes blank/dead.
 
 **Authority (READ FIRST, Rule 4):** `gh issue view 15 --json title,body` (full repro + trigger conditions) + SPEC §40 (app-shell/layout + middleware) + §52 (`@session` authority projection) + the auth-wall arc (#5-#14, already fixed). The bug: when `app.scrml` has shell markup it becomes the per-page layout → `app.client.js` loads on EVERY page and carries the compiler-generated `@session` projection as a **top-level `let _scrml_session = null;`** (NOT IIFE-wrapped); an auth-gated page (`auth="required"`/`protect=`) ALSO emits its own top-level `let _scrml_session = null;` in its `*.client.js` → both classic scripts load → `Identifier '_scrml_session' has already been declared` → the page never hydrates.
 

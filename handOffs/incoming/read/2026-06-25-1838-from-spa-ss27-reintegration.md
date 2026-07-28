@@ -43,7 +43,7 @@ Migration 5 in migrate.js: `bun scrml migrate --fix` strips the `server` keyword
 - DEFERRED per RULING A: broadcast/disconnect + SQL-escalated publishers that read a cell stay MANUAL payload-rewrite (§38.6.1).
 
 ## GH / verify-close note
-#1 + #2 are doc-currency (no GH issues). #4/#5 are PA-found/migrate-ergonomics (no Ryan GH issue). #3 stays open (parked).
+#1 + #2 are doc-currency (no GH issues). #4/#5 are PA-found/migrate-ergonomics (no the adopter GH issue). #3 stays open (parked).
 
 ## Environment (recurring, cross-session)
 The full-suite pre-commit hook runs slow (~130-205s) and intermittently OOM/varies under concurrent load (sibling flogence session + agents, 15GB box). Commits land on retry / after a memory window; the trucking flake (#3) + test-count variance are symptoms. Kept agent concurrency ≤2. NOT test failures; never `--no-verify`.

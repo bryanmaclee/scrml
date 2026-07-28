@@ -2,7 +2,7 @@
  * §20.5 / §14.8.10 / §14.8.11 — the `<schema>`-only app's session principal must
  * actually reach a request.
  *
- * REGRESSION LOCK for the two defects RediLedger's S4 behavioral run found, both of
+ * REGRESSION LOCK for the two defects Adopter-A's S4 behavioral run found, both of
  * which left the db-authoritative tier NON-FUNCTIONAL end-to-end for the exact app
  * shape it targets (a `<schema>`-only app — no `<db>` block), while every existing
  * test stayed green:
@@ -38,7 +38,7 @@
  * the tenant GUC carrying a session-pinned value) was PA-verified locally against
  * real PG16 through the emitted handler. A full login-over-HTTP → cookie →
  * per-user-read round trip is the stronger form and is tracked as a follow-on
- * (`g-dbauth-no-request-path-test`); RediLedger offered their harness for it.
+ * (`g-dbauth-no-request-path-test`); Adopter-A offered their harness for it.
  */
 import { describe, test, expect, afterAll } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "fs";

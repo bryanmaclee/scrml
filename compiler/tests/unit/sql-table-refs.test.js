@@ -80,7 +80,7 @@ describe("sql-table-refs — source-level collection", () => {
   });
 
   test("the reporting adopter's shape — an unmarked identity table IS collected", () => {
-    // RediLedger S11: `users` is deliberately not db-authoritative (§14.8.10 corollary),
+    // Adopter-A S11: `users` is deliberately not db-authoritative (§14.8.10 corollary),
     // and is read by authenticate(). It must appear so it can be granted.
     const src = `
       <schema>

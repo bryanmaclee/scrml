@@ -79,7 +79,7 @@ export interface TenantContext {
  * so DID engage: its per-request wrapper faithfully pinned
  * `set_config('scrml.tenant', null)` and dropped to the bounded role, and RLS
  * then matched nothing. Each half was internally consistent; the composition was
- * dead. Found by RediLedger's behavioral run (S4), not by any suite — the tier's
+ * dead. Found by an adopter's behavioral run (S4), not by any suite — the tier's
  * own tests hand-execute `set_config` inside a transaction and never issue a
  * request, so a session-sourced tenant failing to arrive is invisible to them.
  *

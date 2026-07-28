@@ -1737,7 +1737,7 @@ export function generateClientJs(ctx: CompileContext): string {
   if (authMiddlewareEntry) {
     const { loginRedirect } = authMiddlewareEntry;
 
-    // Issue #15 (rjantz3 v0.7.0): in a shell/layout app the entry's
+    // Issue #15 (adopter report, v0.7.0): in a shell/layout app the entry's
     // `app.client.js` is loaded as a classic <script> on EVERY composed page
     // (codegen/index.ts shell-composition). When a page is ITSELF auth-gated
     // its own `*.client.js` is ALSO a classic <script> on that page. Two

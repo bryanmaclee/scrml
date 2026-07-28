@@ -8964,7 +8964,7 @@ by construction. `scrml db-migrate --dry-run` shows the full SECDEF plan.
 
 **The atomic-milestone acceptance gate (the doubled negative test).** Because P2 emits AUTHORIZATION,
 the "looks enforced and isn't" risk is DOUBLED — the negative test is the only real proof. On the
-RediLedger `invoices` shape (an `immutable` column + a SECDEF `fn`), after `scrml db-migrate` applies
+Adopter-A `invoices` shape (an `immutable` column + a SECDEF `fn`), after `scrml db-migrate` applies
 as a non-superuser migrator against a real Postgres 16: **(1)** a bounded `scrml_app` direct `UPDATE`
 of an immutable column is DENIED; **(2)** a `scrml_app` mutation of a locked column NOT via the SECDEF
 is DENIED; **(3)** the SECDEF enforces the cap check — WITH `scrml.principal.caps` containing the cap it
@@ -25270,7 +25270,7 @@ fn buildSession(userId) {
 
 > E-FN-004: `fn` body calls `crypto.randomUUID()` at line N, which is non-deterministic. `fn` must be a pure function of its inputs. Generate the UUID outside `fn` and pass it as a parameter.
 
-**Mutable browser/global-state reads (extension — 2026-06-27, GitHub #17, rjantz3 v0.7.0).** The non-determinism rule is not limited to *calls*. A *read* of mutable browser/global state is equally non-deterministic: a zero-arg `fn` that reads it returns different values across calls (after navigation, a viewport resize, or a cookie / storage change), breaking referential transparency. The following global roots are gated — reading `‹root›.‹member›` inside a `fn` body is **E-FN-004**:
+**Mutable browser/global-state reads (extension — 2026-06-27, GitHub #17, an adopter v0.7.0).** The non-determinism rule is not limited to *calls*. A *read* of mutable browser/global state is equally non-deterministic: a zero-arg `fn` that reads it returns different values across calls (after navigation, a viewport resize, or a cookie / storage change), breaking referential transparency. The following global roots are gated — reading `‹root›.‹member›` inside a `fn` body is **E-FN-004**:
 
 | Root | Examples |
 |------|----------|

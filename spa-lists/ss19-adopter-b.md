@@ -1,18 +1,18 @@
-# sPA ss19 — ryan-cheese-craft (external-adopter auth-app battery)
+# sPA ss19 — adopter-b (external-adopter auth-app battery)
 
 **Launch:** `read spa.md ss19` · **Branch:** `spa/ss19` · **Worktree:** `../scrml-spa-ss19`
 
-**Fill:** provenance cluster (Ryan/rjantz3 ported a real auth'd app "Cheese Craft" to v0.7.0) · NEW S220 · **10 findings, all PA-CONFIRMED on HEAD `26ffea4e`** (S215 dual-verify, agent acf456cb) · GitHub issues **#5–#14**
+**Fill:** provenance cluster (an adopter ported a real auth'd app "Adopter-B" to v0.7.0) · NEW S220 · **10 findings, all PA-CONFIRMED on HEAD `26ffea4e`** (S215 dual-verify, agent acf456cb) · GitHub issues **#5–#14**
 
 ## Shared ingestion
-**READ FIRST:** `docs/changes/ryan-cheese-craft-findings-2026-06-25/` — `VERIFICATION.md` (PA verdict table + roots + repro paths) · `RYAN-ISSUES.md` (paste-ready issues + repro shapes) · `RYAN-VALIDATION.md` (Ryan's codegen evidence). Repros live at `/tmp/ryan-verify/` (regenerate from RYAN-ISSUES if cleared). The whole battery is the **auth'd-login app flow + the codegen that serves it** — *you cannot build a working login on v0.7.0 today.* The findings split into THREE groups by shared sub-ingestion; **the PA may fire groups as separate sub-dispatches.**
+**READ FIRST:** `(private — scrml-support/handOffs/adopter-confidential/)` — `VERIFICATION.md` (PA verdict table + roots + repro paths) · `RYAN-ISSUES.md` (paste-ready issues + repro shapes) · `RYAN-VALIDATION.md` (the adopter's codegen evidence). Repros live at `/tmp/ryan-verify/` (regenerate from RYAN-ISSUES if cleared). The whole battery is the **auth'd-login app flow + the codegen that serves it** — *you cannot build a working login on v0.7.0 today.* The findings split into THREE groups by shared sub-ingestion; **the PA may fire groups as separate sub-dispatches.**
 
 ## Core files
 `route-inference.ts` · `auth-graph.ts` · `codegen/emit-server.ts` · `codegen/emit-client.ts` · `codegen/emit-bindings.ts` · `codegen/emit-html.ts` · `commands/generate*` · `protect-analyzer.ts` · `schema-differ`(`parseSchemaBlock`)
 
 ## ⚠ Coordination
 - **Group B (render-codegen) OVERLAPS ss17** (each/markup-body codegen — emit-html / emit-each). ss17 is in-flight on 3 each gaps. **Do NOT dispatch Group B while ss17's worktree is live** — land ss17 first, then Group B (reconcile emit-html/emit-each by hand). flogence #1/#3 are the same family (filed separately, route to a post-ss17 each-codegen follow-on).
-- Group A item `g-pure-fn-rpc-async-unawaited` (#8) is **adjacent to Ryan PR#1 territory** (server-fn→server-fn peer lowering, S215/S217 `b2bf9959`). Cross-check the peer-call lowering already landed before re-fixing; the S215 F1/F3 defects were in this exact area — run the S215 adversarial gate.
+- Group A item `g-pure-fn-rpc-async-unawaited` (#8) is **adjacent to the adopter PR#1 territory** (server-fn→server-fn peer lowering, S215/S217 `b2bf9959`). Cross-check the peer-call lowering already landed before re-fixing; the S215 F1/F3 defects were in this exact area — run the S215 adversarial gate.
 
 ## Items
 

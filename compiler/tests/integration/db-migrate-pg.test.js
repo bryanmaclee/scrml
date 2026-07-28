@@ -43,7 +43,7 @@ const CLI = join(import.meta.dir, "..", "..", "src", "cli.js");
 const TENANT_A = "11111111-1111-1111-1111-111111111111";
 const TENANT_B = "22222222-2222-2222-2222-222222222222";
 
-// The RediLedger `invoices` shape — declared as a project the CLI parses from source.
+// The Adopter-A `invoices` shape — declared as a project the CLI parses from source.
 const PROJECT_SRC = `<program db="postgres://placeholder">
   <schema>
     invoices {

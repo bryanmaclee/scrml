@@ -364,7 +364,7 @@ function astUsesSessionWrite(node: unknown): boolean {
  * needs the same session infra, and it was not counted — so the `@currentUser`
  * resolver (`_scrml_current_user`) was never emitted for a `<schema>`-only app
  * whose per-user reads live in server functions, and the handler's binding would
- * dangle. Same miss as the handler-binding gap, one layer up. (RediLedger S4.)
+ * dangle. Same miss as the handler-binding gap, one layer up. (adopter report, S4.)
  *
  * Matches the node shape the parser actually produces — a `kind: "sql"` node with
  * a string `query` — and reuses the established `.includes("@currentUser")` text
@@ -1773,7 +1773,7 @@ export function generateServerJs(
   // §20.5 / §52 Fork-3 — a plain server `function` whose `?{}` reads
   // `@currentUser` needs the resolver exactly as a Pattern-C cell load does. This
   // was the missing third shape: without it the handler binds `_scrml_currentUser`
-  // to an unemitted `_scrml_current_user`. (RediLedger S4.)
+  // to an unemitted `_scrml_current_user`. (adopter report, S4.)
   const _anyFnCurrentUserQuery = _currentUserAmbient && fnNodes.some((f) => astSqlQueryUsesCurrentUser(f));
   const _needsSessionInfra = !!authMiddlewareEntry || _anyServerLoadGates || _anyCurrentUserQuery || _anyFnCurrentUserQuery || _anySessionBuiltin;
 
@@ -3590,7 +3590,7 @@ export function generateServerJs(
     // `_scrml_currentUser` with NO declaration anywhere in the module — a
     // ReferenceError on EVERY call, authenticated or anonymous, and therefore the
     // whole db-authoritative per-user read path was dead end-to-end. Found by
-    // RediLedger's behavioral run (real PG + real cookie sessions), NOT by any
+    // An adopter's behavioral run (real PG + real cookie sessions), NOT by any
     // suite: the tier's own tests hand-execute `set_config` inside a transaction
     // and never issue a request, so they cannot observe an unbound identity in a
     // route handler.

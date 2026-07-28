@@ -30,7 +30,7 @@ workarounds** we adopted when the reconciler couldn't yet do the native thing:
 **The offer:** when your `<each>` work settles, we have a non-trivial real app ready to **runtime-verify
 which of these workarounds the fixes actually retire** — real lists, real reorders/filters, a headless
 Firefox regression suite (`tools/gauntlet`, ~28 gates). If a downstream RUN-verify on messy real UI is
-useful to you the way RediLedger's turnkey `db-migrate` run is, we're a standing one for `<each>`. No
+useful to you the way Adopter-A's turnkey `db-migrate` run is, we're a standing one for `<each>`. No
 pull implied — we'll re-assess on our side when the `fix/each-*` branches merge to main and you signal
 `<each>` is settled/tagged.
 

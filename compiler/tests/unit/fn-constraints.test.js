@@ -409,7 +409,7 @@ describe("§4: E-FN-004 — non-deterministic calls inside fn", () => {
 
 // ---------------------------------------------------------------------------
 // §4b  E-FN-004 — mutable browser/global-state READS inside fn body
-//      (GitHub #17 — rjantz3 v0.7.0). A `fn` reading window.location /
+//      (GitHub #17 — an adopter v0.7.0). A `fn` reading window.location /
 //      document.cookie / navigator.* / window.innerWidth etc. is
 //      non-deterministic and must fire E-FN-004; a string-arg parse, a
 //      shadowed root, and the scrml:math surface must STAY pure.

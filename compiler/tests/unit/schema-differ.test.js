@@ -999,7 +999,7 @@ describe("schema-differ §15 (C17): ADD COLUMN with shared-core req", () => {
 
 // ==========================================================================
 // S288 — `oneOf`/`notIn` CHECK item lowering (g-db-migrate-check-constraint-
-// oneof-pattern, RediLedger-reported).
+// oneof-pattern, Adopter-A-reported).
 //
 // THE DEFECT: the item list was passed VERBATIM into the SQL `IN (…)` clause.
 // scrml's CANONICAL string quote is `"` (§5.1, §4.18.3) and `"` is SQL's
@@ -1142,7 +1142,7 @@ describe("S288 regression: a regex quantifier brace must not truncate a table bo
 // ==========================================================================
 // S288 wave 2 — the `default(...)` sibling path + the E-SCHEMA-010 ruling.
 //
-// RediLedger caught the S288 `oneOf` fix as INCOMPLETE: `default("US")` emitted
+// Adopter-A caught the S288 `oneOf` fix as INCOMPLETE: `default("US")` emitted
 // `DEFAULT ("US")` — the identical literal-as-identifier class, in the sibling
 // path, one function away. The blast-radius question the first pass never asked
 // was "this lowering injects a literal — where ELSE can that land?"
@@ -1151,7 +1151,7 @@ describe("S288 regression: a regex quantifier brace must not truncate a table bo
 // the FIRST `)`, so `default(now())` captured `now(` and emitted an unbalanced
 // `DEFAULT (now() )` that TRUNCATED the whole CREATE TABLE (surfacing as a
 // misleading Postgres "syntax error at or near ;"). It blocked 7 of 10 tables in
-// RediLedger's real schema.
+// Adopter-A's real schema.
 // ==========================================================================
 describe("S288 default(...) — balanced capture + SQL-literal lowering", () => {
   const ddlOf = (body, driver = "postgres") =>

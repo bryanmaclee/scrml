@@ -1,7 +1,7 @@
 # Cross-OS invariants — one scrml, every OS
 
 > **Status: working principle (Peter/Windows seat, S254-follow).** The compiler must produce
-> identical results on Linux (Bryan), macOS (Ryan), and Windows (Peter). This note states the
+> identical results on Linux (Bryan), macOS (the adopter), and Windows (Peter). This note states the
 > invariants that make that true *by construction* — not by branching on the host OS. The
 > **deploy/runtime-target** OS story (how `scrml build --target …` factors the *deployed app's*
 > runtime) is a separate, Bryan-owned decision and is explicitly out of scope here.

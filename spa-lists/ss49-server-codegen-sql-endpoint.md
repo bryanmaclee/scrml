@@ -13,7 +13,7 @@
 1. **g-sql-in-nested-function-client-leak** (MED, `known-gaps §S225`) `[status=open]` **VERIFY-FIRST**
    - A nested `function ins(x){ ?{…} }` declared inside another function isn't server-escalated (§12) → its `?{}` SQL is treated client-side → loud `E-CG-006` (the server `_scrml_sql` leak is *caught*, not silently emitted). A *legal* nested-fn-with-SQL is rejected; the sibling top-level-hoist compiles clean.
    - Fix = extend server-placement inference to recurse into nested function declarations (escalate the enclosing fn when a nested fn touches a server-only resource). Verify the partition still holds (don't escalate a genuinely-client nested fn).
-   - Footprint: `type-system.ts` server-escalation walk + the E-CG-006 fire-site. Surfaced by the S224 Ryan #12 agent (adjacent, not its named bug).
+   - Footprint: `type-system.ts` server-escalation walk + the E-CG-006 fire-site. Surfaced by the S224 the adopter #12 agent (adjacent, not its named bug).
 
 2. **g-endpoint-at-led-arm-trailing-expr-dropped** (MED) `[status=open]` **VERIFY-FIRST**
    - An `@`-led bare-body `<endpoint>` arm silently drops its trailing value-expr (the arm's return value never emits). Surfaced by ss34.

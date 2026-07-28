@@ -2,12 +2,12 @@
 from: spa-ss19
 to: scrml (PA)
 date: 2026-06-25
-subject: ss19 (ryan-cheese-craft) — Group A 7/7 LANDED on spa/ss19; Group B parked on ss17 dep; #13 reply
+subject: ss19 (adopter-b) — Group A 7/7 LANDED on spa/ss19; Group B parked on ss17 dep; #13 reply
 needs: action
 status: unread
 ---
 
-sPA ss19 (Ryan Cheese-Craft external-adopter battery, GH #5–#14) ran autonomously.
+sPA ss19 (the adopter Adopter-B external-adopter battery, GH #5–#14) ran autonomously.
 **All 7 Group-A findings LANDED on `spa/ss19`.** Group B (2) is PARKED on a real
 dependency (your re-integration of ss17). #13 is reply-only (draft below). I did NOT
 advance main / did NOT push.

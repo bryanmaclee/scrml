@@ -70,7 +70,7 @@ Local was 331 commits behind origin (stuck at S5 split-era). Pulled to `5bd7a38`
 ## 4. Session log
 
 - 2026-04-24 — Session opened. Local 331 commits behind origin. Pulled. Inbox triaged.
-- 2026-04-24 — Ryan's Claude.ai conversation analyzed. Initially misjudged as hallucinated — corrected after seeing real inbox reproducers.
+- 2026-04-24 — the adopter's Claude.ai conversation analyzed. Initially misjudged as hallucinated — corrected after seeing real inbox reproducers.
 - 2026-04-24 — Boundary security deep-dive + debate. Approach C won. Implemented + merged.
 - 2026-04-24 — Bugs I, J, H, K, GITI-009, GITI-011 all fixed. Inbox cleared.
 - 2026-04-24 — README giti link + maps refresh + state-of-language audit + dead code audit.

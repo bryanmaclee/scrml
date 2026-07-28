@@ -2256,7 +2256,7 @@ describe("buildPageRouteTree", () => {
 });
 
 // ---------------------------------------------------------------------------
-// GH issue #16 (rjantz3, v0.7.0, Windows) — route inference must be path-
+// GH issue #16 (an adopter, v0.7.0, Windows) — route inference must be path-
 // separator agnostic. `buildPageRouteTree` detected page files by searching
 // the absolute path for the literal "/routes/" / "/pages/" substrings (forward
 // slashes) and split relative paths on "/". On Windows the paths use "\" —
@@ -2271,9 +2271,9 @@ describe("buildPageRouteTree", () => {
 
 describe("buildPageRouteTree — Windows path separators (GH#16)", () => {
   test("backslash pages\\login.scrml infers /login (matches forward-slash)", () => {
-    const files = [makeFileAST("C:\\Users\\Ryan\\app\\pages\\login.scrml", [])];
+    const files = [makeFileAST("C:\\Users\\the adopter\\app\\pages\\login.scrml", [])];
     const pages = buildPageRouteTree(files);
-    const page = pages.get("C:\\Users\\Ryan\\app\\pages\\login.scrml");
+    const page = pages.get("C:\\Users\\the adopter\\app\\pages\\login.scrml");
     expect(page).toBeDefined();
     expect(page.urlPattern).toBe("/login");
     expect(page.params).toEqual([]);
@@ -2281,30 +2281,30 @@ describe("buildPageRouteTree — Windows path separators (GH#16)", () => {
   });
 
   test("backslash pages\\batches.scrml infers /batches", () => {
-    const files = [makeFileAST("C:\\Users\\Ryan\\app\\pages\\batches.scrml", [])];
+    const files = [makeFileAST("C:\\Users\\the adopter\\app\\pages\\batches.scrml", [])];
     const pages = buildPageRouteTree(files);
-    expect(pages.get("C:\\Users\\Ryan\\app\\pages\\batches.scrml").urlPattern).toBe("/batches");
+    expect(pages.get("C:\\Users\\the adopter\\app\\pages\\batches.scrml").urlPattern).toBe("/batches");
   });
 
   test("backslash pages\\users\\[id].scrml infers /users/:id with param", () => {
-    const files = [makeFileAST("C:\\Users\\Ryan\\app\\pages\\users\\[id].scrml", [])];
+    const files = [makeFileAST("C:\\Users\\the adopter\\app\\pages\\users\\[id].scrml", [])];
     const pages = buildPageRouteTree(files);
-    const page = pages.get("C:\\Users\\Ryan\\app\\pages\\users\\[id].scrml");
+    const page = pages.get("C:\\Users\\the adopter\\app\\pages\\users\\[id].scrml");
     expect(page.urlPattern).toBe("/users/:id");
     expect(page.params).toEqual(["id"]);
     expect(page.isCatchAll).toBe(false);
   });
 
   test("backslash pages\\index.scrml infers / (root)", () => {
-    const files = [makeFileAST("C:\\Users\\Ryan\\app\\pages\\index.scrml", [])];
+    const files = [makeFileAST("C:\\Users\\the adopter\\app\\pages\\index.scrml", [])];
     const pages = buildPageRouteTree(files);
-    expect(pages.get("C:\\Users\\Ryan\\app\\pages\\index.scrml").urlPattern).toBe("/");
+    expect(pages.get("C:\\Users\\the adopter\\app\\pages\\index.scrml").urlPattern).toBe("/");
   });
 
   test("backslash pages\\posts\\[...slug].scrml infers /posts/*slug catch-all", () => {
-    const files = [makeFileAST("C:\\Users\\Ryan\\app\\pages\\posts\\[...slug].scrml", [])];
+    const files = [makeFileAST("C:\\Users\\the adopter\\app\\pages\\posts\\[...slug].scrml", [])];
     const pages = buildPageRouteTree(files);
-    const page = pages.get("C:\\Users\\Ryan\\app\\pages\\posts\\[...slug].scrml");
+    const page = pages.get("C:\\Users\\the adopter\\app\\pages\\posts\\[...slug].scrml");
     expect(page.urlPattern).toBe("/posts/*slug");
     expect(page.params).toEqual(["slug"]);
     expect(page.isCatchAll).toBe(true);
@@ -2317,15 +2317,15 @@ describe("buildPageRouteTree — Windows path separators (GH#16)", () => {
   });
 
   test("mixed separators (app/pages\\login.scrml) still infer /login", () => {
-    const files = [makeFileAST("C:\\Users\\Ryan\\app/pages\\login.scrml", [])];
+    const files = [makeFileAST("C:\\Users\\the adopter\\app/pages\\login.scrml", [])];
     const pages = buildPageRouteTree(files);
-    expect(pages.get("C:\\Users\\Ryan\\app/pages\\login.scrml").urlPattern).toBe("/login");
+    expect(pages.get("C:\\Users\\the adopter\\app/pages\\login.scrml").urlPattern).toBe("/login");
   });
 
   test("mixed separators (app\\pages/users\\[id].scrml) infer /users/:id", () => {
-    const files = [makeFileAST("C:/Users/Ryan/app\\pages/users\\[id].scrml", [])];
+    const files = [makeFileAST("C:/Users/the adopter/app\\pages/users\\[id].scrml", [])];
     const pages = buildPageRouteTree(files);
-    expect(pages.get("C:/Users/Ryan/app\\pages/users\\[id].scrml").urlPattern).toBe("/users/:id");
+    expect(pages.get("C:/Users/the adopter/app\\pages/users\\[id].scrml").urlPattern).toBe("/users/:id");
   });
 
   test("UNC path \\\\server\\share\\app\\pages\\login.scrml infers /login", () => {

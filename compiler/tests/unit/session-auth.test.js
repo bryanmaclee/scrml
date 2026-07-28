@@ -675,7 +675,7 @@ describe("S16: CG client JS omits @session when no auth", () => {
 });
 
 // ---------------------------------------------------------------------------
-// S14b: Issue #15 (rjantz3, v0.7.0) — the @session reactive projection must not
+// S14b: Issue #15 (an adopter, v0.7.0) — the @session reactive projection must not
 // collide across the app-shell client and an auth-gated page client.
 //
 // In a shell/layout app, `app.client.js` is loaded as a classic <script> on
