@@ -2121,6 +2121,83 @@ function emitDestructureBindingLines(
  * `as (k, v)`, the two entry-struct field locals are re-derived from the freshly
  * resolved item INSIDE the effect, so `${k}` / `${v}` body references stay live.
  */
+/**
+ * g-nested-each-inner-binding-reads-outer-var-stale-on-reconcile (S294) —
+ * ENCLOSING-each live-keying. A binding inside a NESTED `<each>` may read the
+ * OUTER each's iter var (`${g.name}`, `class:hidden=(g.collapsed)`, or a handler
+ * `onclick=fn(g.id)`). That `g` is a CREATE-TIME closure of the outer factory;
+ * on a same-key OUTER reconcile the outer factory is not re-run (node reused,
+ * Bug64/S293), so the inner binding keeps reading the STALE outer object while
+ * the outer item's OWN bindings reconcile. Fix: for every ENCLOSING reconcile
+ * ctx (all stack entries below the current one) whose iter var / destructure
+ * name the body references, emit a live re-resolve prelude
+ * (`let <encVar> = _scrml_resolve_item(<encMount>, <encKey>); …`) — the enclosing
+ * mount + key locals are in scope inside the inner factory. Mirrors the current-
+ * ctx resolve at maybeWrapEachPerItemEffect / the Bug73 handler prelude.
+ *
+ * Additive: returns [] when the body references no enclosing iter var, so a
+ * non-nested each (or a nested body that reads only its OWN var) is byte-identical.
+ * `codeForScan` is the whitespace-joined body used ONLY for the free-identifier
+ * gate (string/regex literals blanked so `log("g")` never matches enclosing `g`).
+ */
+function pickReferencedEnclosingCtxs(
+  refs: (name: string) => boolean,
+): EachReconcileCtx[] {
+  const stack = _eachReconcileCtxStack;
+  if (stack.length < 2) return [];
+  // A name bound by a NEARER ctx SHADOWS a same-named enclosing var: the body's
+  // identifier resolves to the nearer binding, so re-resolving (and re-declaring
+  // with `let`) the enclosing one is both semantically wrong AND a redeclaration
+  // collision (`let row` twice → E-CODEGEN-INVALID-LOGIC). Seed the bound-name set
+  // with the CURRENT (top) ctx's names, then walk from the NEAREST enclosing ctx
+  // outward, skipping any whose iterVar / destructure name is already bound.
+  const cur = stack[stack.length - 1];
+  const bound = new Set<string>([cur.iterVar]);
+  if (cur.destructure) { bound.add(cur.destructure[0]); bound.add(cur.destructure[1]); }
+  const picked: EachReconcileCtx[] = [];
+  for (let i = stack.length - 2; i >= 0; i--) {
+    const enc = stack[i];
+    const names = [enc.iterVar, ...(enc.destructure ?? [])];
+    const shadowed = names.some((n) => bound.has(n));
+    if (!shadowed) {
+      const readsIter = refs(enc.iterVar);
+      const readsDestr = !!enc.destructure && (refs(enc.destructure[0]) || refs(enc.destructure[1]));
+      if (readsIter || readsDestr) picked.push(enc);
+    }
+    for (const n of names) bound.add(n); // this ctx now shadows even-outer same-named vars
+  }
+  return picked.reverse(); // outermost first (stable output; independent lets)
+}
+
+/**
+ * Does `blanked` (string/regex-literal-blanked code) read `name` as a FREE
+ * identifier — NOT a member-access property (`obj.name` / `obj?.name`)? The
+ * enclosing-var gate must exclude property positions: an inner body reading
+ * `s.g` (property `.g` of its OWN item `s`) must NOT be treated as reading an
+ * enclosing loop var `g` — doing so injected a spurious `_scrml_resolve_item`
+ * of the outer item (a wrong null-guard early-return + an unneeded outer-list
+ * subscription). `(?<![.\w$])` rejects a leading `.` (and mid-identifier
+ * positions); `(?![\w$])` closes the identifier. (S294 adversarial review #2.)
+ */
+function referencesFreeIdent(blanked: string, name: string): boolean {
+  if (!name) return false;
+  return new RegExp("(?<![.\\w$])" + _escapeForRegex(name) + "(?![\\w$])").test(blanked);
+}
+
+function enclosingResolvePreludeLines(codeForScan: string, indent: string): string[] {
+  const stack = _eachReconcileCtxStack;
+  if (stack.length < 2) return []; // no enclosing ctx → nothing to re-resolve
+  const blanked = blankStringAndRegexLiterals(codeForScan);
+  const refs = (name: string): boolean => referencesFreeIdent(blanked, name);
+  const out: string[] = [];
+  for (const enc of pickReferencedEnclosingCtxs(refs)) {
+    out.push(`${indent}let ${enc.iterVar} = _scrml_resolve_item(${enc.mountVar}, ${enc.keyVar});`);
+    out.push(`${indent}if (${enc.iterVar} === null) return;`);
+    for (const l of emitDestructureBindingLines(enc.destructure, enc.iterVar, indent)) out.push(l);
+  }
+  return out;
+}
+
 function maybeWrapEachPerItemEffect(bodyLines: string[], iterVarName: string, indent: string): string[] {
   const ctx = currentEachReconcileCtx();
   if (!ctx || ctx.iterVar !== iterVarName) return bodyLines;
@@ -2131,6 +2208,10 @@ function maybeWrapEachPerItemEffect(bodyLines: string[], iterVarName: string, in
   for (const l of emitDestructureBindingLines(ctx.destructure, ctx.iterVar, `${indent}  `)) {
     out.push(l);
   }
+  // Nested each: also re-resolve any ENCLOSING iter var the body reads, so an
+  // inner binding over the OUTER loop var stays live across a same-key outer
+  // reconcile (g-nested-each-inner-binding-reads-outer-var-stale-on-reconcile).
+  for (const l of enclosingResolvePreludeLines(bodyLines.join("\n"), `${indent}  `)) out.push(l);
   // Re-indent body lines +2 so the wrapped statement nests cleanly inside the
   // effect (the caller passes them at the binding's own indent).
   for (const l of bodyLines) out.push("  " + l);
@@ -2238,6 +2319,29 @@ export function iterScopeReferencedInHandler(handlerBody: string, iterVarName: s
  * fires when either destructure name appears, and the prelude re-derives them
  * from the freshly resolved item so the handler reads LIVE values at fire time.
  */
+/**
+ * Handler variant of enclosingResolvePreludeLines (S294) — a single inline
+ * prelude string re-resolving every ENCLOSING iter var the handler body reads,
+ * so a nested per-item handler over the OUTER loop var (`onclick=fn(g.id)`)
+ * hits the LIVE outer item at fire time rather than the create-time closure.
+ * Returns "" when no enclosing var is read (byte-identical to pre-fix).
+ */
+function enclosingResolvePreludeForHandler(handlerBody: string): string {
+  const blanked = blankStringAndRegexLiterals(handlerBody);
+  const refs = (name: string): boolean => referencesFreeIdent(blanked, name);
+  let out = "";
+  // Same shadow-safe selection as the display path (pickReferencedEnclosingCtxs):
+  // skip an enclosing var shadowed by a nearer ctx binding (avoids the `let`
+  // redeclaration collision + the wrong-scope re-resolve on same-name nesting).
+  for (const enc of pickReferencedEnclosingCtxs(refs)) {
+    out += `let ${enc.iterVar} = _scrml_resolve_item(${enc.mountVar}, ${enc.keyVar}); if (${enc.iterVar} === null) return;`;
+    if (enc.destructure) {
+      out += ` const ${enc.destructure[0]} = ${enc.iterVar}.key; const ${enc.destructure[1]} = ${enc.iterVar}.value;`;
+    }
+  }
+  return out;
+}
+
 function maybeWrapEachPerItemHandler(handlerBody: string, iterVarName: string): string {
   const ctx = currentEachReconcileCtx();
   if (!ctx || ctx.iterVar !== iterVarName) return handlerBody;
@@ -2246,12 +2350,21 @@ function maybeWrapEachPerItemHandler(handlerBody: string, iterVarName: string): 
     !!ctx.destructure &&
     (iterScopeReferencedInHandler(handlerBody, ctx.destructure[0]) ||
       iterScopeReferencedInHandler(handlerBody, ctx.destructure[1]));
-  if (!readsIter && !readsDestructure) return handlerBody;
-  const prelude = `let ${ctx.iterVar} = _scrml_resolve_item(${ctx.mountVar}, ${ctx.keyVar}); if (${ctx.iterVar} === null) return;`;
-  const destructurePrelude = ctx.destructure
-    ? ` const ${ctx.destructure[0]} = ${ctx.iterVar}.key; const ${ctx.destructure[1]} = ${ctx.iterVar}.value;`
-    : "";
-  return `${prelude}${destructurePrelude} ${handlerBody}`;
+  // Nested handler reading an ENCLOSING iter var needs the fire-time re-resolve
+  // too (g-nested-each-inner-binding-reads-outer-var-stale-on-reconcile, S294) —
+  // and may read ONLY the outer var (not its own), so gate on it independently.
+  const enclosingPrelude = enclosingResolvePreludeForHandler(handlerBody);
+  if (!readsIter && !readsDestructure && !enclosingPrelude) return handlerBody;
+  const prelude =
+    readsIter || readsDestructure
+      ? `let ${ctx.iterVar} = _scrml_resolve_item(${ctx.mountVar}, ${ctx.keyVar}); if (${ctx.iterVar} === null) return;`
+      : "";
+  const destructurePrelude =
+    ctx.destructure && (readsIter || readsDestructure)
+      ? ` const ${ctx.destructure[0]} = ${ctx.iterVar}.key; const ${ctx.destructure[1]} = ${ctx.iterVar}.value;`
+      : "";
+  const enc = enclosingPrelude ? `${enclosingPrelude} ` : "";
+  return `${prelude}${destructurePrelude}${prelude || destructurePrelude ? " " : ""}${enc}${handlerBody}`;
 }
 
 // ---------------------------------------------------------------------------
