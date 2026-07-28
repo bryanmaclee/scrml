@@ -3,7 +3,7 @@
   "description": "Reactive if= mount/unmount (§17.1). A click runs toggle() flipping @open false->true; the if=@open <p> mounts. ! is boolean negation (not = absence, E-TYPE-045). OQ1 NOTE: the whole-tree dom retains an impl#1-private <template> if-anchor (a counter-id wrapper); the anchored #panel assertion is impl-neutral by construction.",
   "language-version": "1.0",
   "spec": "§17.1",
-  "rationale": "§17.1 reactive if= on a markup element mounts/unmounts the subtree as its boolean cell flips. A user click drives the flip through the wired handler. The whole-tree dom exposes impl#1's <template> if-guard anchor (OQ1 brittleness data point); anchored mode asserts only on the author's #panel.",
+  "rationale": "§17.1 reactive if= on a markup element mounts/unmounts the subtree as its boolean cell flips. A user click drives the flip through the wired handler. The whole-tree dom exposes impl#1's <template> if-guard anchor (OQ1 brittleness data point); anchored mode asserts only on the author's #panel. The count:0-at-seed companion assertion lives in the sibling if-top-level-absent case (this case ends in the true/present state, so the false-state absence can only be pinned where @open stays false).",
   "expect": {
     "codes": [],
     "notCodes": [],

@@ -1,0 +1,18 @@
+{
+  "id": "each-per-item-if-reactive-flip-true-false",
+  "description": "Tier-1 <each> per-row if= REACTIVE unmount (SPEC §17.1) — THE half broken today. Both rows start on:true (visible). Clicking Alice's .hide maps @rows flipping id=1's on false; the per-item effect swaps her <li> for a comment placeholder in place, so her row is STRUCTURALLY removed (count 2 -> 1), Bob keeps his identity (keyed).",
+  "language-version": "1.0",
+  "spec": "§17.1",
+  "rationale": "§17.1 a per-row if= that flips true->false removes the element from the DOM. The create-time-only gate at emit-each.ts left the row present forever; the swap-in-place tracked node (element <-> comment, key transplanted) makes the flip observable. Survivor id=2 pins keyed reconcile through the swap.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": ".hide" }],
+    "state": { "rows": [{ "id": 1, "name": "Alice", "on": false }, { "id": 2, "name": "Bob", "on": true }] },
+    "domAnchored": [
+      { "selector": ".row", "count": 1 },
+      { "selector": "#list li.row[data-id=\"1\"]", "count": 0 },
+      { "selector": "#list li.row:first-child", "text": "Bob" }
+    ]
+  }
+}

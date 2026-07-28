@@ -1,0 +1,18 @@
+{
+  "id": "each-per-item-if-reactive-flip-false-true",
+  "description": "Tier-1 <each> per-row if= REACTIVE mount (SPEC §17.1). id=1 seeds on:false (absent at create — comment placeholder), id=2 visible. Clicking #show1 maps @rows flipping id=1's on true; the per-item effect swaps the comment back for the real <li> in place, so Alice's row appears (count 1 -> 2) in her keyed slot (before Bob).",
+  "language-version": "1.0",
+  "spec": "§17.1",
+  "rationale": "§17.1 a per-row if= that flips false->true mounts the element. The placeholder comment carried id=1's key, so the swapped-in <li> lands in the correct keyed position (first), proving the comment is a valid tracked node.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#show1" }],
+    "state": { "rows": [{ "id": 1, "name": "Alice", "on": true }, { "id": 2, "name": "Bob", "on": true }] },
+    "domAnchored": [
+      { "selector": ".row", "count": 2 },
+      { "selector": "#list li.row:first-child .nm", "text": "Alice" },
+      { "selector": "#list li.row:last-child .nm", "text": "Bob" }
+    ]
+  }
+}

@@ -1,0 +1,8 @@
+${
+    <open> = false
+    function toggle() {
+        @open = !@open
+    }
+}
+<button id="toggle" onclick=toggle()>Toggle</>
+<p id="panel" if=@open>Panel open</>

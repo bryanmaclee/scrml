@@ -1,0 +1,18 @@
+{
+  "id": "each-per-item-if-reactive-create-time-absence",
+  "description": "Tier-1 <each> per-row if= STRUCTURAL absence at CREATE time (SPEC §17.1). Two keyed rows; id=2 seeds on:false, so its <li> is NOT in the DOM at first paint (removed, not display:none). Pins the create-time absence half: the assertion whose absence let three divergent lowerings sit green — a false row leaves only a <!--scrml-if-row--> comment, so .row count is 1 not 2.",
+  "language-version": "1.0",
+  "spec": "§17.1",
+  "rationale": "§17.1 an if=false per-row element does not exist in the DOM. With no reactive input the create-time gate must already yield exactly one .row (Alice); Bob is absent. domAnchored COUNT (not whole-tree dom) because a false row now leaves a comment placeholder.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [],
+    "state": { "rows": [{ "id": 1, "name": "Alice", "on": true }, { "id": 2, "name": "Bob", "on": false }] },
+    "domAnchored": [
+      { "selector": ".row", "count": 1 },
+      { "selector": "#list li.row:first-child .nm", "text": "Alice" },
+      { "selector": "#list li.row[data-id=\"2\"]", "count": 0 }
+    ]
+  }
+}

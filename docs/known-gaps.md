@@ -560,6 +560,29 @@ any multi-root `<each>`).
 
 **Fix in flight (S281).** Design: root count is statically known at codegen — when exactly 1, emit today's `return _itemFrag.firstChild` **byte-identical** (the ~99% case, and the assertable safety gate); emit the fragment form only when > 1. The runtime `createFn` contract widens to `Node | DocumentFragment`, and the reconciler owns a node **group per key** (key stamped on every top-level node; `_childList`/`_clearAll`/`_insert`/`_remove`/`_replace` group-aware; LIS reorder over groups, moving a group's nodes together preserving intra-group order) across BOTH container modes — range (`nodeType === 8` comment fence, the #131 model) and element. Tier-0 lift fixed in the same landing per §10.8. SPEC §17.7.2 gains a minimal normative statement making the N-root grant explicit. No new §34 code. **PRESERVED deliberately:** create-time `if=` semantics (`emit-each.ts:860`) — a reused group does not gain/lose roots on later reconciles; that is a pre-existing limitation and is NOT fixed here. — `NEW S281 (adopter #141); HIGH; open — build in flight`
 
+### g-each-peritem-if-multiroot-deferred — a per-row `if=` on ONE OF SEVERAL roots of a MULTI-root `<each>` item keeps the create-time-only gate (a flip does not add/remove that root)
+<!-- @gap id=g-each-peritem-if-multiroot-deferred sev=LOW status=deferred -->
+**NEW S298 (spun out of the Tier-1 per-row-if reactive arc).** The SINGLE-root Tier-1 `<each>` per-row
+`if=` is now REACTIVE + STRUCTURAL (SPEC §17.1): the sole item root is emitted as a swap-in-place
+tracked node — EITHER the element (cond true) OR a `<!--scrml-if-row-->` COMMENT placeholder (cond
+false) — and a live-keyed per-item effect (`_scrml_ifrow_apply`, `runtime-template.js`) swaps one for
+the other in place, transplanting `_scrml_key`, so an in-place condition flip OR a same-key reconcile
+adds/removes the row. This resolves the "create-time `if=` on a per-item root is decided ONCE"
+limitation that [[g-each-multi-root-per-item-truncated]] preserved — **for the single-root shape only**.
+
+**Still DEFERRED (this gap):** when the if-gated element is one of SEVERAL roots of a multi-root item,
+the item becomes a `_scrml_group` with a static ordered array on the head node. A naive element↔comment
+swap would leave `_scrml_group[idx]` stale — a later reorder / delete would act on the wrong node
+(leak / mis-move). Patching the head's group array from the swap would need a member→head back-pointer,
+a reconcile-core change this focused arc deliberately avoids. So for that shape ONLY, codegen keeps the
+create-time `if(cond) _itemFrag.appendChild(...)` gate (decision (b)) and emits a
+`// W-EACH-PERITEM-IF-MULTIROOT-DEFERRED` code comment at the emit site (no §34 warning code minted —
+too heavy for this arc; a code comment is the signal). Detection is at the emit site: the reactive swap
+is gated on the item root being the SOLE non-whitespace top-level root of the each body
+(`emit-each.ts` renderTemplateChildToJs `isSoleItemRoot`); anything with 2+ structural roots takes the
+deferred path. Nested (non-item-root) `if=` children are likewise unchanged create-time (separate,
+out of scope). — `NEW S298; LOW; deferred (create-time gate + comment signal; single-root shape shipped reactive)`
+
 ### g-main-red-against-its-own-pre-commit-gate — `main` FAILS the documented pre-commit gate: an emitted `.server.js` carries an ESM `export`, which `node --check` rejects as CJS
 <!-- @gap id=g-main-red-against-its-own-pre-commit-gate sev=HIGH status=narrowed -->
 **S282 — DOES NOT REPRODUCE on the ASUS-Vivobook clone; almost certainly XPS-clone-local, not a tree property.** The failure was recorded on `bryan-XPS-8950`. On `bryan-maclee-ASUS-Vivobook` this session, at both `a0344d75` and `feddd6b4`:

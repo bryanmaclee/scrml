@@ -1,0 +1,14 @@
+{
+  "id": "reactive-if-top-level-absent",
+  "description": "Top-level reactive if= STRUCTURAL absence (§17.1) — the false-state companion to reactive-toggle-show. @open seeds false and no input flips it, so the if=@open <p id=\"panel\"> does NOT exist in the DOM (removed, not display:none). Pins #panel count 0, mirroring the Tier-1 each per-row if= create-time-absence assertion at top level.",
+  "language-version": "1.0",
+  "spec": "§17.1",
+  "rationale": "§17.1 an if=false element is absent from the DOM. With @open left false the panel must never materialize; a count:0 anchored assertion is impl-neutral (impl#1's private <template> if-anchor is not #panel).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [],
+    "state": { "open": false },
+    "domAnchored": [{ "selector": "#panel", "count": 0 }]
+  }
+}
