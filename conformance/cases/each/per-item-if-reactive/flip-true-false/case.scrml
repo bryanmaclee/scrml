@@ -1,0 +1,16 @@
+${
+    <rows> = [{ id: 1, name: "Alice", on: true }, { id: 2, name: "Bob", on: true }]
+    function hide(id: number) {
+        @rows = @rows.map(r => {
+            if (r.id == id) {
+                return { ...r, on: false }
+            }
+            return r
+        })
+    }
+}
+<ul id="list">
+    <each in=@rows key=@.id as it>
+        <li class="row" data-id=it.id if=it.on><button class="hide" onclick=hide(it.id)>${it.name}</button></li>
+    </each>
+</ul>

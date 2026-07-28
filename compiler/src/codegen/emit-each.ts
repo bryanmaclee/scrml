@@ -935,6 +935,14 @@ function renderTemplateChildToJs(
   // interpolation (inside an element) stays a bare text node — the common string
   // case, unchanged. See emitEachInterpExprToJs.
   isItemRoot: boolean = false,
+  // g-each-tier1-if-reactive-structural — true only when this item root is the
+  // SOLE structural (non-whitespace) top-level root of the each body. A per-row
+  // `if=` on the sole root is lowered to a REACTIVE structural swap (element ⇄
+  // comment placeholder, key transplanted); a per-row `if=` on ONE OF SEVERAL
+  // roots (multi-root group) is DEFERRED to the create-time gate (a naive swap
+  // would leave the head's static `_scrml_group` array stale — reorder/delete
+  // would act on the wrong node). See emit at ~1102 + docs/known-gaps.md.
+  isSoleItemRoot: boolean = false,
 ): void {
   if (!child || typeof child !== "object") return;
 
@@ -1100,7 +1108,42 @@ function renderTemplateChildToJs(
     // self-closing: no body.
 
     if (ifCond) {
-      lines.push(`${indent}if (${ifCond}) ${fragmentVar}.appendChild(${elVar});`);
+      if (isItemRoot && isSoleItemRoot) {
+        // g-each-tier1-if-reactive-structural (SPEC §17.1) — a per-row `if=` on
+        // the SOLE item root is REACTIVE + STRUCTURAL: the reconcile-tracked node
+        // is ALWAYS present — EITHER the element (cond true) OR a placeholder
+        // COMMENT (cond false). Exactly ONE node is appended (root-count stays 1),
+        // and a per-item effect swaps element⇄comment in place, transplanting
+        // `_scrml_key`, so an in-place condition flip OR a same-key reconcile
+        // adds/removes the row (was a create-time-only gate). The initial `_cur`
+        // is the correct node for the create-time condition; `_scrml_ifrow_apply`
+        // is a NO-OP while `_cur` already matches, so the synchronous first effect
+        // run inside createFn does NOT transplant a not-yet-assigned key.
+        const phVar = `_scrml_ph_${nextLocalId()}`;
+        const curVar = `_scrml_cur_${nextLocalId()}`;
+        lines.push(`${indent}const ${phVar} = document.createComment("scrml-if-row");`);
+        lines.push(`${indent}let ${curVar} = (${ifCond}) ? ${elVar} : ${phVar};`);
+        lines.push(`${indent}${fragmentVar}.appendChild(${curVar});`);
+        for (const _l of maybeWrapEachPerItemEffect(
+          [`${indent}${curVar} = _scrml_ifrow_apply(${curVar}, ${elVar}, ${phVar}, (${ifCond}));`],
+          iterVarName, indent,
+        )) lines.push(_l);
+      } else {
+        // DEFERRED — decision (b). A per-row `if=` that is NOT the sole item root
+        // (multi-root item ⇒ a `_scrml_group` with a static ordered array) keeps
+        // the create-time gate: a naive element⇄comment swap would leave the
+        // head's `_scrml_group[idx]` stale (reorder/delete would act on the wrong
+        // node → leak/mis-move), and a member→head back-pointer to patch it would
+        // be a reconcile-core change this arc deliberately avoids. Also the branch
+        // for a NESTED (non-item-root) `if=` child, which was — and stays —
+        // create-time (out of scope for the per-row-if reactive surface). The
+        // multi-root+per-row-if shape is a filed known gap
+        // (W-EACH-PERITEM-IF-MULTIROOT-DEFERRED, docs/known-gaps.md).
+        if (isItemRoot) {
+          lines.push(`${indent}// W-EACH-PERITEM-IF-MULTIROOT-DEFERRED: multi-root item + per-row if= — create-time gate (reactive swap would leave _scrml_group stale). See docs/known-gaps.md.`);
+        }
+        lines.push(`${indent}if (${ifCond}) ${fragmentVar}.appendChild(${elVar});`);
+      }
     } else {
       lines.push(`${indent}${fragmentVar}.appendChild(${elVar});`);
     }
@@ -2762,8 +2805,23 @@ function emitEachReconcileLines(
   // roots (rendered into `_itemFrag`), so isItemRoot=true: a standalone `${expr}`
   // here is the returned reconcile node and mounts markup-or-text (B).
   const templateLines: string[] = [];
+  // g-each-tier1-if-reactive-structural — the SOLE-structural-root discriminant
+  // for the reactive per-row `if=` swap. A structural root is any non-whitespace
+  // top-level child (element / logic / nested each): exactly the shapes that emit
+  // a top-level `_itemFrag.appendChild(` (whitespace-only text children return
+  // early in renderTemplateChildToJs and append nothing). When this is 1, the
+  // if-gated root IS the single reconcile-tracked node, so the element⇄comment
+  // swap maps cleanly onto the "discover the tracked node by _scrml_key" model.
+  // When it is >1 the item becomes a `_scrml_group`; the swap is DEFERRED to the
+  // create-time gate (see the emit site, decision (b)).
+  const _structuralRoots = (node.templateChildren as any[]).filter((c) => {
+    if (!c || typeof c !== "object") return false;
+    if (c.kind === "text") return !!String((c as any).value ?? (c as any).text ?? "").trim();
+    return true;
+  });
+  const _isSoleItemRoot = _structuralRoots.length === 1;
   for (const child of node.templateChildren) {
-    renderTemplateChildToJs(child, iterVarName, iterIdxName, "_itemFrag", templateLines, `${indent}    `, engineCtx, false, true);
+    renderTemplateChildToJs(child, iterVarName, iterIdxName, "_itemFrag", templateLines, `${indent}    `, engineCtx, false, true, _isSoleItemRoot);
   }
   for (const l of templateLines) lines.push(l);
   popEachReconcileCtx();
@@ -2789,12 +2847,17 @@ function emitEachReconcileLines(
   // top-level nodes as one keyed GROUP. Before this, roots 2..N were built and
   // wired and then silently dropped by `.firstChild`.
   //
-  // A create-time `if=` root (line ~860) is counted here even though it may not
-  // materialize at runtime — that is correct: the fragment simply carries
-  // however many nodes were actually appended, and a 1-node fragment behaves
-  // exactly like the single-Node return. `if=` remains a CREATE-TIME decision
-  // (a reused group does not gain/lose roots on later reconciles) — pre-existing,
-  // deliberately preserved.
+  // A per-row `if=` root is counted here as exactly ONE root regardless of the
+  // condition. For the SOLE-root shape the emit appends exactly one tracked node
+  // — EITHER the element OR a comment placeholder — and a per-item effect swaps
+  // them REACTIVELY in place (SPEC §17.1 structural: cond false ⇒ the element is
+  // absent, a comment stands in), so the root count is a stable 1 across every
+  // reconcile (the effect body contains no `_itemFrag.appendChild(`, so this
+  // scan is unaffected). For a MULTI-root item a per-row `if=` on one member is
+  // DEFERRED to the create-time `if(cond)appendChild` gate (decision (b)); that
+  // root is likewise counted once — the fragment simply carries whatever was
+  // actually appended, and a reused group does not gain/lose roots on later
+  // reconciles for that deferred shape.
   const _childIndent = `${indent}    `;
   const _rootCount = templateLines.reduce((n, l) => {
     if (!l.startsWith(_childIndent) || l[_childIndent.length] === " ") return n;

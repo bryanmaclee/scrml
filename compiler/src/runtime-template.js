@@ -2113,6 +2113,31 @@ function _scrml_resolve_item(container, key) {
 }
 
 /**
+ * Tier-1 <each> per-row \`if=\` STRUCTURAL reactivity (SPEC §17.1). For an
+ * if-gated per-item ROOT, the reconcile-tracked node is ALWAYS present: EITHER
+ * the real element (cond true) OR a placeholder COMMENT node (cond false). This
+ * swaps one for the other IN PLACE, transplanting \`_scrml_key\` (and, for a
+ * multi-root group member, \`_scrml_group_member\`) so the reconciler keeps
+ * discovering the tracked node by reading \`_scrml_key\` off the live DOM —
+ * keying / ordering / reorder / delete keep working with no reconcile-core
+ * change. Called from a per-item effect (\`maybeWrapEachPerItemEffect\`), so it
+ * re-fires on the item-field change AND every reconcile pass.
+ *
+ * NO-OP when \`cur\` already equals the wanted node — this is the FIRST-RUN
+ * guard: the effect runs once synchronously inside createFn BEFORE the
+ * reconciler has set \`_scrml_key\`, and there \`cur\` already matches the initial
+ * condition, so we must not transplant a not-yet-assigned key.
+ */
+function _scrml_ifrow_apply(cur, el, ph, on) {
+  const want = on ? el : ph;
+  if (cur === want) return cur;
+  want._scrml_key = cur._scrml_key;
+  if (cur._scrml_group_member) want._scrml_group_member = true;
+  if (cur.parentNode) cur.parentNode.replaceChild(want, cur);
+  return want;
+}
+
+/**
  * Compute the indices of the Longest Increasing Subsequence.
  * Used by reconcile_list to minimize DOM moves.
  * Ignores -1 values (new nodes with no old position).
