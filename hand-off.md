@@ -1,4 +1,148 @@
 <!-- ============================================================= -->
+<!-- S292 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-27.        -->
+<!-- S290 + S291-XPS + all prior UNCHANGED below.                   -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 292 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-07-27. `/boot` Profile A. `main` at **`08174f59`**, coherence 0/0 BOTH repos, tree
+clean. **Four PRs merged by me** (#213 #215 #216 #217); a CONCURRENT session (S293) landed #214 and
+#218 mid-arc. Cloud `gate` GREEN at HEAD. Open HIGHs **11 → 10**. Delta-log `[824]`-`[839]`.
+Changelog S292. This carries the irreducible.
+
+## 🔴 THE NEXT PA'S FIRST MOVE — three rulings are owed, and an adopter is waiting on two
+
+**Nothing is half-built.** Everything started this session landed. What remains is bryan's judgment:
+
+1. **RediLedger Q1 — is the multi-statement `_{}` inline slice a CONTRACT or an implementation
+   accident?** §23.2.4a documents and illustrates a *single-expression* slice. Codegen also accepts
+   multi-statement. They are building their bytes pipeline on the multi-statement form and asked us to
+   rule it in or out. **Their framing is the FK lesson INVERTED and it is exactly right:** there, prose
+   illustrated a form the grammar never admitted (17 sites, all ours) and they shipped 0 FKs; here a
+   form WORKS that the prose does not illustrate. Same defect class — documentation and contract
+   disagreeing — only less visible because it currently breaks in their favour.
+   **PARTIAL VERIFY, read this before ruling:** I confirmed both forms COMPILE CLEAN at `32ef5b52`.
+   I did **NOT** confirm the emitted lowering shape — my probe's fns had no callers and tree-shook, so
+   the slice never reached the artifact. Their "spliced verbatim as the async-IIFE body" claim is
+   **unverified by us**. Verify with a called fn before ruling.
+2. **RediLedger Q2 — `capabilities=` enforcement semantics + timing.** §23.5.6 is advisory-only today.
+   When enforcement lands: is an undeclared access a hard error, and are path args prefix/glob matched?
+   They are declaring `fs-read`/`fs-write` NOW and would rather write it correctly than migrate later.
+3. **The bytes tier (BaaS-parity #4)** — needs a roadmap slot. Their channel check was correct and I
+   re-verified it: **no gap id, no roadmap item, no SPEC section** for a blob/object/storage tier. That
+   absence is real, not a misread.
+
+Their S11 message is deliberately still in `handOffs/incoming/` — draining it would read as handled.
+
+## 🎯 THE HEADLINE — three arcs, and the through-line is that the gates caught what I could not
+
+| PR | What |
+|---|---|
+| #213 `d19d79ea` | the scrml.dev `orm-trap` article — **7 false compiler claims** corrected; `docs/website` put under the snippet-gate |
+| #215 `20ebbf0c` | **Wave-1c cross-chunk soft-nav** — both held HIGHs closed; adopter #27's last leg |
+| #216 `65892010` | gap closures + the new adopter HIGH + 2 inbox messages committed |
+| #217 `32ef5b52` | **db-migrate grants the tables `?{}` touches**, least-privilege — closes the RediLedger login-500 |
+
+## 🧭 THE FINDINGS THAT OUTLAST THE FIXES
+
+1. **bryan's Wave-1c premise was empirically wrong, and checking beat obeying.** He ruled the first
+   priority was re-deriving pieces 2+3 because the loader predated chunk-namespacing and "may carry
+   compensation it no longer needs." It does not. `_scrml_chunk_loading` is documented **in its own
+   comment** as boot-timing idempotency (an injected chunk runs after `DOMContentLoaded` already
+   fired); the branch has **zero** references to the namespacing surface; and the IIFE it wraps the
+   boot fn in IS the mechanism S290 verified as closing the lexical collision. A rebase had moved it
+   onto main and it was already current. **The instruction to re-derive was right even though its
+   premise was wrong** — re-deriving is what proved the premise wrong.
+2. **A green suite cannot see a code that has no catalog row.** `W-NAV-CHUNK-LOAD-FAILED` shipped
+   IMPLEMENTED with **zero** occurrences in SPEC.md — the S290 rebase resolved SPEC.md conflicts
+   main-side (correctly; the branch carried pre-ruling `E-OUTLET-AND-MAIN` text) and the cross-chunk
+   normative half went with it. No test asserts a code's *presence in the catalog*, so nothing failed.
+   Found by the S239 pass, not by tests.
+3. **A harness that cannot model the substrate passes on code that fails in production.** Neither
+   Wave-1c HIGH is observable from the browser suite (`g-nav-browser-harness-fidelity`): it evals
+   chunks in a throwaway environment and its `appendChild` override returns un-connected nodes. Both
+   reproduced instantly under `node:vm` with real classic-script `async=false` ordering. **This
+   landing routes AROUND that harness rather than fixing it** — the gap stays open and a double-boot
+   regression would still pass there.
+4. **"Grant what it touches" has to include HOW it touches.** My first cut of the grants fix emitted
+   blanket CRUD on every queried unmarked table — handing the bounded role **DELETE on the identity
+   table** that login merely reads, strictly more permissive than the db-authoritative path beside it.
+   My own S239 pass caught it pre-merge. Least privilege is now derived per reference.
+
+## ⚠️ OWN MISSES — four, all mine, all caught by a gate rather than by me
+
+- **THREE stale-FACTS gate failures in ONE session**, same root cause each time: regenerate, then edit
+  `compiler/src` again, then push. I wrote the operational note ("must fire after the LAST content
+  commit") one commit *before* violating it again. **This is not a memory problem, it is a missing
+  local gate** — `facts.ts --check` runs in cloud CI and nothing local refuses a push that would fail
+  it. **PROPOSED, NOT TAKEN (per-machine hook = bryan's call): add `facts.ts --check` to pre-push, or
+  auto-regen in pre-commit when `compiler/src`/`SPEC.md` is staged.** This is the single highest-value
+  chore on the board.
+- **A partial commit shipped green.** `git add -A <one-file>` staged only that file, so the grant
+  emission itself was missing — and the pre-commit gate PASSED, because `bun test` runs the WORKING
+  TREE, not the index. Caught only by `git show --stat`. **A green hook is not evidence the commit
+  contains the fix.**
+- **I nearly wrote off three live-PG failures as environmental.** Local PG auth had already bitten me
+  an hour earlier, so "the tests need a password" was the comfortable read. Stashing proved baseline
+  18/0 — they were mine: `queriedTables` referenced inside `runPgApply`, a *separate function* from
+  where I declared it → undefined identifier → apply threw → the single migration txn rolled back →
+  `relation "invoices" does not exist`. All 26 of my new tests called `diffSchema` DIRECTLY and were
+  structurally blind. **S288's lesson a third time.**
+- **Backticks in a comment terminated the runtime template literal.** `runtime-template.js` is a
+  template string; my `` `async=false` `` broke the module. Trivial, but it is the documented
+  `${}`/backtick collision class and it will recur.
+
+## 🧷 CONCURRENT — S293 is LIVE
+
+A sibling session landed **#214** and **#218** (`fix/item-derived-local-stale-per-item-effect-s293`,
+then per-item attribute bindings — Peter's queued lane). Both put my PRs BEHIND under `strict:true`.
+Rebased each; the `docs/FACTS.md` conflicts were **REGENERATED, never hand-merged** (S288 precedent for
+generated files). Full dbauth blast radius re-run on the moved base: 64/64. I registered `S292.md` on
+the board at boot — **board registration had lapsed since S255**, so S256–S291 are invisible there.
+
+## ✅ GATE
+
+- **Cloud `gate` GREEN at main HEAD** (`08174f59`) and on every merge — the authority.
+- Local `bun run test`: 29,273 tests, **36 fail**. The count matches the S277-recorded known set
+  exactly, and the failures are in the BROWSER tier which the cloud gate does not cover. ⚠️ **I did
+  not enumerate them** — my output capture truncated. The next PA should categorize before trusting
+  "known set" a fourth time; that phrase is doing a lot of unverified work.
+- `tracking` red on the documented 3 (serve-tool R26 flake + gitignored `bs.js`/`tab.js`) — verified
+  from the log, not inferred. `ai-review` fails on App-install infra (S255), not on findings.
+- Generated docs (`FACTS.md`, `state.ts` §0, SPEC-INDEX totals) all `--check` PASS.
+
+## 🗺️ MAPS — REFRESH OWED (recorded, not skipped)
+
+`project-mapper` was **NOT run**. Compiler source landed heavily (runtime-template, schema-differ,
+db-migrate, the new `sql-table-refs.js`, plus the sibling's two codegen fixes), so a refresh is
+genuinely owed. I held off firing agents all session per a standing instruction, and bryan did not
+rule on it when asked. **Surfaces a refresh must factor in:** `compiler/src/sql-table-refs.js` (NEW),
+`compiler/src/schema-differ.js` (the queried-table grant branch), `compiler/src/commands/db-migrate.js`
+(the scanner wiring + `runPgApply` signature), `compiler/src/runtime-template.js` (the chunk-loading
+depth counter + absolute-url keying), and the sibling's `emit-each`/for-lift changes. Map stamp remains
+at its prior commit.
+
+## 🧹 HOUSEKEEPING
+
+- **Worktree `agent-a2ed001a5de228134` RELEASED** — content verified on main FIRST, then removed;
+  branches `feat/wave1c-nav-s290` and the S290-retained anchor `worktree-agent-a2ed001a5de228134`
+  both deleted. Only the pre-existing `s251` tree and the nine persistent `scrml-spa-ss*` trees remain.
+- **Inbox:** the RediLedger db-migrate report drained to `read/` (closed — fixed + replied). The S11
+  bytes-tier message deliberately RETAINED in `incoming/` pending the two rulings.
+- **Reply to RediLedger** committed + pushed on their `scrml-rewrite` (`acbcae4`), explicit pathspec.
+  It states plainly what is NOT fixed and that their Q1 lowering claim is unverified by us.
+
+## Tags
+#session-292-bryan #4-prs #orm-trap-7-false-claims #e-sql-002-has-zero-fire-sites
+#website-under-snippet-gate #wave1c-landed-adopter-27-closed #premise-was-wrong-checking-beat-obeying
+#w-nav-chunk-load-failed-had-no-spec-row #vm-reproduction-browser-harness-cannot-see
+#dbauth-grants-queried-tables #least-privilege-caught-by-own-s239 #facts-gate-caught-me-3x
+#partial-commit-passed-green #nearly-wrote-off-my-own-regression #s293-concurrent #maps-owed
+
+---
+
+<!-- ============================================================= -->
 <!-- S290 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-27.       -->
 <!-- S291-XPS wrap + all prior UNCHANGED below.                     -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->
