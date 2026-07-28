@@ -2,6 +2,33 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S294 (2026-07-28) — Peter · Windows — `E-STMT-MISSING-SEMICOLON` (and every `[TAB]` diagnostic) regains `:line:col` in the build path
+
+Adopter Fieldman Obs 1: a `scrml build` printed `pages/portal.scrml E-STMT-MISSING-SEMICOLON: …` with **no
+`:line:col`** and a truncated message, while a sibling `E-PA-002` on the same build carried `pages/portal.scrml:23:3`
+— hard to locate in a 3600-line file. The filed gap said "attach the source span (mirror sibling span plumbing)."
+
+**Reproduced-and-re-derived first — the gap's direction was wrong.** The span was already attached: the CLI
+`compile` path renders `(line 4, col 17)` fine. The real root cause was the shared error-normalizer, not the
+diagnostic. `TABError` (`ast-builder.js`) stores its span on `this.tabSpan` (and bakes `(line X, col Y)` into
+`.message`), but `collectErrors` (`api.js`) lifted only `bsSpan → span` — so **every** `[TAB]`-stage error
+reached the `dev`/`build` formatters (which read `e.span?.line`) with `filePath` stamped but no `.span` → no
+location printed. Not E-STMT-specific.
+
+- **Fix A (`api.js`, class-wide)** — add the `tabSpan → span` lift beside the existing `bsSpan → span` one.
+  Restores `path:line:col` for **all** TABErrors in the build/dev formatters (verified on `E-SWITCH-FORBIDDEN`
+  too). One upstream spot fixes compile/dev/build alike.
+- **Fix B (`ast-builder.js`, instance)** — drop the redundant `E-STMT-MISSING-SEMICOLON:` self-prefix from the
+  message. The formatters already print `${code}: `; the self-prefix double-printed the code and, since
+  `build.js` slices the message to 120 chars, ate ~25 chars of budget → the "truncated" tail the adopter saw.
+
+Build path now: `portal.scrml:4:17 E-STMT-MISSING-SEMICOLON: Expected \`;\` or a newline …`. Regression test in
+`multistatement-line-call-drop.test.js §5` (asserts the resolvable span + the no-self-prefix message).
+Adversarial S239 review clean (5 hypotheses refuted against source, incl. the LSP diagnostic path — invariant
+because `.span` and `.tabSpan` hold identical values). **Scoped out, filed as follow-up:** several other
+TABError messages still self-prefix their code (`g-tab-error-messages-self-prefix-code`, LOW) — a broader
+message-convention cleanup, best fixed by de-duping a leading `${code}: ` in the shared formatters.
+
 ## S293 (2026-07-27/28) — Peter · Windows — the per-item reconcile family (text/attr/if), and a full `<each>` sweep
 
 Three PRs, one shape: in a Tier-0 reconciled `${for…lift}`, every per-item binding that reads the item was

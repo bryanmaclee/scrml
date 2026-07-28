@@ -984,6 +984,18 @@ export function compileScrml(options = {}) {
         if (!enriched.span && enriched.bsSpan) {
           enriched.span = enriched.bsSpan;
         }
+        // g-estmt-missing-semicolon-no-source-span (S294) — TABError
+        // (compiler/src/ast-builder.js) stores its source-span as `tabSpan`
+        // (the constructor bakes `(line X, col Y)` into `.message` for the
+        // compile-path formatter, but sets no `.span`). Without this lift a
+        // [TAB]-stage diagnostic reached dev.js / build.js with `filePath`
+        // stamped (below) but no `.span`, so those formatters printed the
+        // file with NO `:line:col` — every TABError, not just E-STMT — while
+        // sibling CGError/protect diagnostics (which carry `span`) showed it.
+        // Mirror the `bsSpan → span` lift above so line:col surfaces uniformly.
+        if (!enriched.span && enriched.tabSpan) {
+          enriched.span = enriched.tabSpan;
+        }
         if (filePath) {
           if (!enriched.filePath) enriched.filePath = filePath;
           if (enriched.span && typeof enriched.span === "object" && !enriched.span.file) {
