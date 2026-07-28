@@ -17069,7 +17069,7 @@ bodies — NOT `fn`/pure helpers, NOT `<cell>` initializers, NOT reactive bindin
 
 **Added 2026-06-23 (dpa-003, ratified S216 — Approach B + the `<api>`-proven OUT-typing hybrid).**
 
-The inline form splices an opaque ts/js expression in-process and reads its settled value into a
+The inline form splices an opaque ts/js **slice** in-process and reads its settled value into a
 scrml local:
 
 ```scrml
@@ -17102,6 +17102,55 @@ const out = await (async (prompt, path) => {
 ```
 
 This mirrors the `?{}` `case "sql"` lowering — the await is the boundary, not source vocabulary.
+
+**Slice body — single-expression OR multi-statement (both NORMATIVE).** The slice body is a
+**verbatim ts/js slice**, not restricted to a single expression. Two shapes are sanctioned, and the
+compiler discriminates between them:
+
+1. **Single-expression slice** — the body is one expression (the example above). Codegen **injects**
+   the `return`, wrapping the expression: `{ return (<expr>); }`.
+2. **Multi-statement slice** — the body is a statement sequence. Codegen splices it **verbatim** as
+   the async-IIFE body and injects NOTHING; the slice **SHALL** carry its own `return` to produce a
+   value. A multi-statement slice that never returns settles to `undefined`, which crosses the
+   §13180 boundary as `not` per §42.
+
+A multi-statement slice is the shape a real host pipeline needs — sequencing an acquire, a
+transform, and a durable write cannot be expressed as one expression. It is NOT an implementation
+accident: §23.2.4a's own **`E-FOREIGN-006`** crossing-shadow rule (below) fires on a slice that
+declares a top-level `const` / `let` / `var` / `function` / `class`, and those are *statements* — the
+diagnostic is only meaningful if a slice can contain them. §23.2.3 opacity says the same thing from
+the other side: the compiler never rewrites the interior, which is exactly what verbatim splicing of
+arbitrary statements means.
+
+**Worked example — multi-statement slice (its own `return` is load-bearing):**
+
+```scrml
+<program lang="ts" db="./app.db">
+  function storeBlob(bytes: string, root: string) {
+    const digest = _={ in: { bytes, root }
+      const hash = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+      const dir  = `${root}/${hash.slice(0,2)}`;
+      await Bun.write(`${dir}/${hash}.bin`, bytes);
+      return hash;
+    }=
+    return digest
+  }
+</program>
+```
+
+lowers to — note the slice arriving verbatim, with NO injected `return`:
+
+```js
+const digest = await (async (bytes, root) => { const hash = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+  const dir  = `${root}/${hash.slice(0,2)}`;
+  await Bun.write(`${dir}/${hash}.bin`, bytes);
+  return hash; })(bytes, root);
+```
+
+**Author obligation.** Because codegen injects no `return` for the multi-statement shape, forgetting
+one is not a compile error — the binding receives `undefined` → `not`. This is the documented cost of
+§23.2.3 opacity: the compiler does not read the slice interior and so cannot know a value was
+intended. Prefer the single-expression shape when the work fits in one expression.
 
 **Crossing-shadow (E-FOREIGN-006).** Because the `in:{}` crossing names become the async-IIFE
 PARAMETERS, a crossing name that the slice ALSO declares at its TOP LEVEL — as a `const`, `let`,
