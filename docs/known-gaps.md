@@ -31,8 +31,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 11 |
-| MED | 63 |
-| LOW | 37 |
+| MED | 67 |
+| LOW | 39 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -4119,3 +4119,51 @@ Author is still stopped, with a less useful message: `E-CHANNEL-008` explains th
 2. scrml-site independently reported a NEARBY discrepancy from their S287 probe — "a bad `tables=` value is refused as **E-PA-002**, not the documented E-PA-004." On current main it is refused as **neither**. Whether that is drift since S287 or a different probe shape is unresolved; both readings agree the documented code does not fire.
 
 **Owed:** re-probe every refusal the `orm-trap` article names (it lists E-PA-001/E-PA-006/E-PA-004/E-SQL-003 plus the bound-parameter guarantee) rather than fixing this row alone — the snippet-gate compiles the code samples but does not assert that a named diagnostic actually fires. Direction (wire E-PA-004 vs correct the prose vs retire the row) is bryan's, per the S292 `E-SQL-002` precedent where the ruling was correct-the-prose.
+
+## §S295b — deferred items from the three-lane adopter arc (2026-07-28)
+
+Filed by the PA from the lane reports. Each was surfaced while fixing something adjacent, none by an adopter hitting it in production.
+
+### g-scrml-store-not-classified-server-only — `scrml:store` is absent from `SERVER_ONLY_SCRML_MODULES`, so a client bundle importing it compiles clean and dies app-wide at load — `NEW S295 (dc adopter D-6, lane 2); HIGH; RULING-GATED`
+<!-- @gap id=g-scrml-store-not-classified-server-only sev=HIGH status=ruling-gated -->
+**Two subsystems disagree.** `codegen/runtime-chunks.ts:143` states verbatim *"Server-only stdlibs (store) are intentionally absent"*, but `route-inference.ts:578 SERVER_ONLY_SCRML_MODULES` does **not** contain `scrml:store`. So route inference never escalates, the client emitter still lowers the import, and no `stdlib-store` chunk exists to back it. **EXECUTED (bundle loaded, not grepped):** `TypeError: Cannot destructure property 'createStore' from null or undefined value` in BOTH shapes (module-scope use, and use inside a client fn) — `const _scrml_stdlib = {}` and nothing populates `.store`. Compile is green: 0 errors, 0 warnings.
+
+**Governing sentence EXISTS** — §41.4: *"`bun:` and `node:` imports SHALL be permitted ONLY in server-context scrml code… A `bun:`/`node:` import reaching client-emitted code is a compile error (E-IMPORT-007). The compiler's import-graph traversal SHALL classify import sites and fire E-IMPORT-007 on cross-context leaks."*
+
+**NOT covered by the S203 ruling** ([[known-gaps]]:1192, *"the compiler is not wrong to emit the server-binding"*) — that covered a harness artifact, a full-stack client mounted with no server running. Here **no server configuration can fix it**: a browser cannot resolve `bun:sqlite` and the registry entry is never populated. Do not let that entry be read as covering this.
+
+**Control:** with `scrml:fs` (a *classified* module) the boundary works correctly — the enclosing fn escalates, a `.server.js` is emitted, the stdlib call never reaches the client. The machinery is sound; only the classification is missing.
+
+**RULING 1 (bryan).** Add `"scrml:store"` to `SERVER_ONLY_SCRML_MODULES` — one line; `stdlib/store/kv.scrml` is the only stdlib file with a `bun:`/`node:` prefixed import, so the blast radius is exactly this module. Needs a companion **SPEC §12.2 Trigger 3 amendment** (see [[g-spec-12-2-trigger3-enumeration-stale]]). **Agent + PA recommendation: DO IT** — it makes two subsystems that already disagree agree, and matches the module's own documented intent. But it changes placement for existing apps (a client-called store fn gains a wire boundary), so it is a ruling, not a scoped fix.
+
+### g-e-import-007-triple-allocated-no-impl — `E-IMPORT-007` has three different meanings inside SPEC and only one implementation — `NEW S295 (lane 2); MED; RULING-GATED`
+<!-- @gap id=g-e-import-007-triple-allocated-no-impl sev=MED status=ruling-gated -->
+The code is allocated **three times in SPEC itself**: §34:15988 + §34:19189 = *"auto-gather closure exceeded 5000 files"* (the ONLY implemented meaning, at `api.js:937`, pinned by `conf-IMPORT-007.test.js`); §34:16869 = *"`import:host` declarations SHALL fire E-IMPORT-007"*; §41.4:22863 = *"runtime built-in import in client context"*. Implementing §41.4's general guarantee requires either **renumbering the auto-gather diagnostic** (breaks a landed conformance test) or **allocating a fresh code**. **RULING 2 (bryan).** Note the dependency: [[g-scrml-store-not-classified-server-only]] ruling 1 without this one closes `scrml:store` specifically and leaves §41.4's general guarantee unimplemented.
+
+### g-onmount-multistatement-bypasses-statement-codegen — a multi-statement `on mount` body reaches codegen as an `escape-hatch` and bypasses ALL statement-level codegen — `NEW S295 (lane 2, root of GH #237); MED; OPEN`
+<!-- @gap id=g-onmount-multistatement-bypasses-statement-codegen sev=MED status=open -->
+§6.7.1a mandates the `on mount` desugar to **a bare expression**, so a multi-statement body fails `safeParseExprToNode` and arrives as an `escape-hatch` with no statement list. GH #237's fix worked around this by restoring a statement view over the emitted TEXT (`splitEmittedStatements`), which is sound for the await case but does not generalise. **Verified PRE-EXISTING on main, not a regression:** `on mount { … !{ … } }` fails today with `E-CODEGEN-INVALID-LOGIC: Unexpected token … !{ | LoadError e`. Any construct the string rewriter cannot handle (`!{}`, `match`, `lift`) breaks inside a mount block. The real fix is parsing the mount body into statements, which **collides with §6.7.1a's normative "SHALL be desugared to a bare expression"** — a SPEC question, deliberately untouched by the lane.
+
+### g-module-scope-server-call-no-autoawait — a bare top-level `${}` server call has GH #237's identical fail-open defect, unfixed — `NEW S295 (lane 2); MED; RULING-GATED`
+<!-- @gap id=g-module-scope-server-call-no-autoawait sev=MED status=ruling-gated -->
+The twin of GH #237 (fixed at `88f9745e` for `on mount` only). A bare top-level `${}` statement calling a server fn emits with no `await` for the same module-scope-sync-IIFE reason. **Deliberately NOT fixed**, because the scoping differs in a way that changes the trade: a module-scope local **IS** referenced by later-emitted wiring (verified — `_scrml_render_value(el, u.type)` at DOMContentLoaded), so the async wrap needs `let`-hoisting, and a hoisted-but-unresolved local converts today's silent `undefined` render into a DOMContentLoaded `TypeError` that kills the rest of the wiring. **Ruling needed:** should a module-scope server call make the render reactive? Reporting the blast radius rather than forcing it.
+
+### g-label-for-registerlabels-silent-noop — `registerLabels()` is a silent no-op on any `formFor` build with no inline override, contradicting §41.14.7 Level-2 — `NEW S295 (lane 1); MED; OPEN`
+<!-- @gap id=g-label-for-registerlabels-silent-noop sev=MED status=open -->
+Same chunk and same class as GH #234, opposite outcome. `_scrml_label_for`'s `typeof` guard **works** (unlike the `_scrml_message_for` one — that symbol is renamed by `cell-accessor-rename.ts`, this one is not), so instead of throwing it falls back silently to the compile-time mechanical label. Net: the project-registered label tier of §41.14.7's resolution chain never fires and nothing says so. One more `POST_EMIT_HELPER_CHUNK_GATES` entry would close it; out of scope for the lane that found it.
+
+### g-e-pa-messages-deprecated-space-form — sibling `E-PA-*` messages hand adopters the deprecated `< db>` / `< schema>` space form — `NEW S295 (lane 3); LOW; OPEN`
+<!-- @gap id=g-e-pa-messages-deprecated-space-form sev=LOW status=open -->
+`W-WHITESPACE-001` deprecates the space form and it becomes `E-WHITESPACE-001` at P3, so a remedy string teaching it hands adopters a soon-to-be-rejected shape — the exact diagnostic-trust failure the message is trying to fix. `E-PA-002` was corrected at `a9044329` (and pinned with a negative assertion); **`E-PA-005` still says `< db>`**, same file. Sweep the `E-PA-*` family.
+
+### g-pa-createtablemap-per-file — a `<schema>` in file A does not satisfy a `<db>` in file B — `NEW S295 (lane 3); MED; OPEN`
+<!-- @gap id=g-pa-createtablemap-per-file sev=MED status=open -->
+`protect-analyzer`'s `createTableMap` is built per-file, so cross-file schema/db pairing fails. A plausible real trigger for the original adopter `E-PA-002` report (whose stated path — hand-duplicating the schema — turned out to be already fixed by F-SCHEMA-001). Separate defect from the message quality fixed at `a9044329`.
+
+### g-spec-12-2-trigger3-enumeration-stale — §12.2 Trigger 3's server-only module list omits modules the implementation already classifies — `NEW S295 (lane 2); LOW; OPEN`
+<!-- @gap id=g-spec-12-2-trigger3-enumeration-stale sev=LOW status=open -->
+§12.2 Trigger 3 enumerates `auth/db/redis/fs/process/cron/oauth`. The implementation's `SERVER_ONLY_SCRML_MODULES` **also** contains `crypto`, `data`, `http` — so the normative enumeration is stale independent of [[g-scrml-store-not-classified-server-only]]. Reconcile in the same amendment.
+
+### g-maps-error-map-missing-diagnostics-and-emit-client — the nav maps route diagnostics to a map that does not contain them, and no row names the file where chunk gates live — `NEW S295 (lanes 1+3, independently); MED; OPEN`
+<!-- @gap id=g-maps-error-map-missing-diagnostics-and-emit-client sev=MED status=open -->
+**Two lanes reported this independently.** (a) `primary.map.md` §Task-Shape Routing sends "diagnostic codes / error classes" to `error.map.md`, which has **zero hits** for `E-PA-002` or `TAILWIND` — both loci had to be found by grep. (b) The chunk/module-format and chunk-namespacing rows both point at `codegen/index.ts` and **neither names `codegen/emit-client.ts`, where `detectRuntimeChunks` and every post-emit chunk gate actually live** — the same blind spot that produced the PA's wrong fix-locus in the GH #234 brief. Suggested row: *runtime-chunk tree-shake gates / a `ReferenceError: _scrml_* is not defined` in a shipped bundle → `emit-client.ts` `detectRuntimeChunks` + `POST_EMIT_HELPER_CHUNK_GATES` + `runtime-chunks.ts` `CHUNK_DEPENDENCIES`* — which would route four historical bugs (6nz Bug P, Bug 57, GITI-036, GH #234). Compounding: the refresh has been owed since S290 and the scheduled `cloud-maps` job is failing. Feeds the pa-base §5 losing-battle threshold question.
