@@ -3590,6 +3590,39 @@ Surfaced by the S293 adversarial pass on [[g-lift-per-item-attribute-binding-not
 
 **TIER-1 `<each>` STILL OPEN — ROUTED to bryan (Peter ruled S293).** The Tier-1 path is NOT a display-toggle — it is a STRUCTURAL append-gate (`if (ifCond) fragment.appendChild(el)`, `emit-each.ts` ~907): a false predicate means the element is ABSENT from the DOM, not hidden. Making it reactive is a SEMANTICS FORK — (a) reactive append/remove keeping structural semantics (harder; touches each-reconcile node presence), vs (b) switch to display-toggle like Tier-0 (easier, unifies tiers, but changes what `if=false` means → affects `:nth-child`/`.children` counts/form submission). Freeze-adjacent structural-semantics decision → bryan's ruling before implementation. — `NEW S293 (Peter); MED; open (Tier-0 resolved · Tier-1 routed to bryan)`
 
+**TIER-1 RESOLVED S297/S298 — RULED (a), BUILT, LANDED (#251 `a745d35e`). Ledger flip landed S297.**
+The fork was resolved by the **governing-sentence gate**, not by weighing (a) against (b): **§17.1**
+(`SPEC.md:10908`, `:10914`) — *"The `if=` attribute is a structural boolean conditional… When `expr`
+evaluates to false, the element is NOT rendered. It does not exist in the DOM."* — and **§17.2**
+(`:11195`) — *"`show=` is distinct from `if=`: `show=` hides, `if=` removes."* Reverse direction
+searched (§17.1/§17.1.1/§17.2/§17.4/§17.4a/§17.4b/§17.6/§17.7/§10): **no sentence anywhere sanctions a
+display lowering for `if=`**; the only `display:none` sanction in SPEC is §17.2's, scoped to `show=`.
+§17.7 contains **zero** `if=` mentions, so no `<each>`-specific rule exists and §17.1 governs. **Option
+(b) was therefore never available** — it would make `if=` a synonym for `show=` and leave `show=` with
+no job; that is an amendment deleting a normative distinction, not a fix.
+
+⚠️ **The fork's premise was INVERTED, and this entry stated it backwards.** Tier-1 was the **conformant**
+tier all along (a structural append-gate); its only defect was that it was not *reactive*. **Tier-0
+for-lift is the non-conformant one** — it appends unconditionally and then toggles `style.display`, so
+the element exists in the DOM. Verified by compiling four shapes on `115e8b1b` and reading the emitted
+artifacts. Consequence: the three harms this entry listed as reasons to avoid (b) — `:nth-child`,
+sibling selectors, form submission of hidden controls — **Tier-0 inflicts today**. See
+[[g-if-dirty-path-ships-gated-content-visible-pre-hydration]] and
+`docs/changes/if-mount-unmount-phase2/SCOPING.md` for the wider `if=`-lowering class this belongs to.
+
+**Implementation (Peter, #251):** single-root item emits EITHER the element (true) OR a
+`<!--scrml-if-row-->` comment placeholder (false) — exactly one node, root-count stays 1 — and a
+live-keyed per-item effect (`_scrml_ifrow_apply`) swaps them in place, transplanting `_scrml_key` so
+keying/ordering/reorder/delete keep working with zero reconcile-core changes. **Multi-root deferred**
+→ [[g-each-peritem-if-multiroot-deferred]] (LOW).
+
+**Conformance — the merge-blocker was met.** New cases under
+`conformance/cases/each/per-item-if-reactive/` incl. **`create-time-absence`**, plus a NEW
+`conformance/cases/reactive/if-top-level-absent/`. That closes the hole that let three divergent `if=`
+lowerings coexist green: `reactive/toggle-show` is misnamed (it pins `if=` mount, cited §17.1) and
+asserted only `count: 1` after false→true — **§17.1's "does not exist in the DOM" half had no
+assertion anywhere**. It does now, at both loci. — `RESOLVED S297/S298`
+
 ### g-estmt-missing-semicolon-no-source-span — `E-STMT-MISSING-SEMICOLON` prints with no `:line:col` (and a truncated message), unlike its sibling diagnostics — `NEW S293 (Peter, adopter Fieldman Obs 1); MED; diagnostic-DX`
 <!-- @gap id=g-estmt-missing-semicolon-no-source-span sev=MED status=resolved -->
 Fieldman/assetManagement pin-bump test-build against `db879d01`: `E-STMT-MISSING-SEMICOLON` (same-line multi-statement, the correct hard error from #162 that replaced a silent drop) printed as `pages/portal.scrml E-STMT-MISSING-SEMICOLON: …` with **no `:line:col`** and the message truncated ("…separated only by whitespace — end the first"), while a sibling on the same build (`E-PA-002`) carried `pages/portal.scrml:23:3`. In a 3600-line file with several offending sites the missing span made them hard to locate (they iterated). The hard-error direction is CORRECT (keep it) — only the locator DX is the gap. Peter-lane (adopter-surfaced diagnostic-quality). — `NEW S293 (Peter); MED; open`
@@ -3648,7 +3681,18 @@ The set EXISTS and contains `scrml:auth` (`route-inference.ts:578`), but its onl
 1. **The normative claim at §12.2 Trigger 4 is FALSE.** It asserts *"Triggers 1, 2, 3, 5, 6, 7, and 8 cover every case the keyword previously communicated."* Trigger 3 does not fire, so this class is uncovered and the `server` keyword is **genuinely load-bearing**, not redundant.
 2. **"Deprecated" is therefore dangerous advice on this shape.** An adopter who reads the deprecation and deletes the keyword silently relocates auth logic AND its secrets to the browser — the docs-shaped-misconception class the Peter/Supabase incident is the standing reminder for.
 **Blocked a downstream arc:** scrml-site holds ~99 wiki pages with **31 `server function` uses across 11 pages**, including `getting-started` and `learn/server-boundary`. Source: `handOffs/incoming/read/2026-07-22-1700-scrml-site-to-scrml-server-keyword-deprecation-path.md`.
-**RULED (bryan, S280): option 1 — WIRE Trigger 3 as specified**, making `server` genuinely redundant for the stdlib-import class so the deprecation completes as designed. No replacement annotation; no permanent dual-status. Interim guidance relayed downstream: migrate only the sites where `W-DEPRECATED-SERVER-MODIFIER` actually fires (provably redundant); HOLD the trigger-free sites until this lands. NB `server fn` stays permanently non-deprecated for a PURE server-pinned helper (SPEC §48: *"`fn` is the canonical pure form (and `server fn` for server-side pure functions)"*) — a pure `fn` has no trigger to infer from. No hard-removal version is set; `server` stays warn-only until the fix lands and a §8 migration sweep is measured. <!-- @gap id=g-trigger-3-server-only-import-does-not-escalate sev=HIGH status=open -->
+**RULED (bryan, S280): option 1 — WIRE Trigger 3 as specified**, making `server` genuinely redundant for the stdlib-import class so the deprecation completes as designed. No replacement annotation; no permanent dual-status. Interim guidance relayed downstream: migrate only the sites where `W-DEPRECATED-SERVER-MODIFIER` actually fires (provably redundant); HOLD the trigger-free sites until this lands. NB `server fn` stays permanently non-deprecated for a PURE server-pinned helper (SPEC §48: *"`fn` is the canonical pure form (and `server fn` for server-side pure functions)"*) — a pure `fn` has no trigger to infer from. No hard-removal version is set; `server` stays warn-only until the fix lands and a §8 migration sweep is measured.
+
+**⚠️ S297 — SEVERITY UNDERSTATED; re-verified on `951ae120` and the failure splits into two classes, one of them silent.** This entry (and [[g-scrml-store-not-classified-server-only]], its symptom) both describe the defect as a bundle that *fails*. That is only half of it. Executed three structurally identical client-called programs, one stdlib each: **`scrml:fs`, `scrml:auth` and `scrml:store` ALL fail to escalate** — no `.server.js`, call present in the client bundle, 0 errors and 0 relevant warnings. The set is not consulted for escalation at all.
+
+What differs is the *consequence*, and it is decided by whether a client chunk happens to exist. The client chunk list is exactly `stdlib-auth` · `stdlib-crypto` · `stdlib-data` · `stdlib-host`:
+
+- **No chunk (`store`, `fs`)** → `TypeError` at load. **Loud — and this is the SAFE outcome.**
+- **Chunk exists (`auth`, `crypto`, `data`)** → the module **runs client-side, silently.**
+
+**Verified by reading the shipped artifact, not inferred:** the emitted `scrml-runtime.*.js` for a client program importing `scrml:auth` contains `_scrml_stdlib.auth = (function() { … })` carrying a real `hashPassword(password…)` implementation. **Password hashing ships into the browser bundle and executes there, with no diagnostic.** That is the confidentiality-adjacent case this entry names, now confirmed on current main rather than at S280 only.
+
+**Consequence for prioritisation:** the HIGH that has been tracked (`scrml:store`, D-6) is the **least** dangerous member of its own class — it was noticed precisely *because* it crashes. `auth`/`crypto`/`data` are the ones that need to lead. The S280 ruling (wire Trigger 3) is unchanged and still the fix; what changes is the rank and the reason. <!-- @gap id=g-trigger-3-server-only-import-does-not-escalate sev=HIGH status=open -->
 
 ### G-PROSE-CODE-COLOR-LIGHT-THEME-ONLY — the built-in typography layer emits a hardcoded light `code` colour with no dark handling — `NEW S280 (scrml-site wiki migration; PA-REPRODUCED); MED; adopter-visible`
 The built-in Tailwind/typography (`prose`) layer emits a hardcoded light-theme `code` colour and **no `prefers-color-scheme` handling at all**. On a dark site every fenced code example renders near-background-coloured — effectively invisible.
@@ -4200,9 +4244,23 @@ Filed by the PA from the lane reports. Each was surfaced while fixing something 
 
 **NOT covered by the S203 ruling** ([[known-gaps]]:1192, *"the compiler is not wrong to emit the server-binding"*) — that covered a harness artifact, a full-stack client mounted with no server running. Here **no server configuration can fix it**: a browser cannot resolve `bun:sqlite` and the registry entry is never populated. Do not let that entry be read as covering this.
 
-**Control:** with `scrml:fs` (a *classified* module) the boundary works correctly — the enclosing fn escalates, a `.server.js` is emitted, the stdlib call never reaches the client. The machinery is sound; only the classification is missing.
+~~**Control:** with `scrml:fs` (a *classified* module) the boundary works correctly — the enclosing fn escalates, a `.server.js` is emitted, the stdlib call never reaches the client. The machinery is sound; only the classification is missing.~~
 
-**RULING 1 (bryan).** Add `"scrml:store"` to `SERVER_ONLY_SCRML_MODULES` — one line; `stdlib/store/kv.scrml` is the only stdlib file with a `bun:`/`node:` prefixed import, so the blast radius is exactly this module. Needs a companion **SPEC §12.2 Trigger 3 amendment** (see [[g-spec-12-2-trigger3-enumeration-stale]]). **Agent + PA recommendation: DO IT** — it makes two subsystems that already disagree agree, and matches the module's own documented intent. But it changes placement for existing apps (a client-called store fn gains a wire boundary), so it is a ruling, not a scoped fix.
+⚠️ **THE CONTROL ABOVE IS FALSE — struck S297, disproved by execution on `951ae120`.** `scrml:fs` does **not** escalate. Compiled three structurally identical programs (a client-called `function` using one stdlib each):
+
+| module | in `SERVER_ONLY_SCRML_MODULES`? | escalates? | `.server.js` emitted | call present in client bundle |
+|---|---|---|---|---|
+| `scrml:fs` | **yes** | **NO** | none | yes |
+| `scrml:auth` | **yes** | **NO** | none | yes |
+| `scrml:store` | no | NO | none | yes |
+
+Zero errors, zero relevant warnings in all three. The `fs` client bundle carries `const { readFile } = _scrml_stdlib.fs;` at module scope. **No module in the set escalates — the set is not consulted for escalation at all**, because §12.2 Trigger 3 is unwired ([[g-trigger-3-server-only-import-does-not-escalate]], HIGH, RULED at S280, still open).
+
+**How the false control arose (worth keeping — it is the reusable part):** `fs` and `store` both ship to the client; only `store` *crashes*, because the client chunk list is exactly `stdlib-auth`/`stdlib-crypto`/`stdlib-data`/`stdlib-host` — `stdlib-fs` and `stdlib-store` do not exist. Someone compared the two, saw `fs` not crash, and read **absence of a crash as evidence of escalation**. It is not; `fs` fails differently, not less.
+
+⚠️ **RULING 1 AS WRITTEN IS A NO-OP — struck S297.** Adding `"scrml:store"` to `SERVER_ONLY_SCRML_MODULES` changes nothing while Trigger 3 does not read that set for escalation. The blast-radius claim in it *is* verified (`stdlib/store/kv.scrml` is the only stdlib file with a `bun:`/`node:` import — re-confirmed S297), and the line is still wanted — but **only as part of wiring Trigger 3**, not as a standalone fix.
+
+**REVISED DISPOSITION (S297, PA recommendation — bryan's ruling still owed).** This entry is a **symptom of [[g-trigger-3-server-only-import-does-not-escalate]]**, which is already RULED (S280: wire Trigger 3 as specified) and merely unbuilt. Fold this in: add `scrml:store` to the set as part of that arc so the wiring covers it, rather than landing a line that does nothing. **And re-rank:** within this class D-6 is the *least* dangerous member — it crashes loudly. `auth`/`crypto`/`data` have working client chunks and therefore run client-side **silently** (see the Trigger-3 entry for the verified `hashPassword` finding). The loud failure is the safe one. Companion SPEC §12.2 Trigger 3 amendment still applies ([[g-spec-12-2-trigger3-enumeration-stale]]).
 
 ### g-e-import-007-triple-allocated-no-impl — `E-IMPORT-007` has three different meanings inside SPEC and only one implementation — `NEW S295 (lane 2); MED; RULING-GATED`
 <!-- @gap id=g-e-import-007-triple-allocated-no-impl sev=MED status=ruling-gated -->
