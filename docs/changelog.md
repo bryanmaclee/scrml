@@ -5205,6 +5205,56 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-07-27 — S292 (bryan · ASUS-Vivobook): article currency, Wave-1c landed, and an adopter's login unbroken
+
+Four PRs. A concurrent session (S293) landed #214 and #218 alongside, so both of my later PRs were
+rebased over them — every `docs/FACTS.md` conflict resolved by REGENERATING rather than hand-merging.
+The through-line: every defect that mattered this session was caught by a gate, an adversarial pass, or
+an empirical check — and none by reading the code.
+
+- **#213 `d19d79ea` — the scrml.dev `orm-trap` article carried seven false compiler claims.**
+  scrml-site reported it as blocking. Every claim was re-verified by EXECUTING the compiler rather than
+  reading it. **`E-SQL-002` has zero fire sites** — `?{ SELEKT zzz FROM FROM }` compiles clean, and
+  §34 already annotated the code "Reserved / spec-ahead" while §8.1.1 carried a normative SHALL. Also
+  corrected: `scrml dev` does not apply migrations (no schema path in `dev.js`), the DB verb is
+  `db-migrate` not `migrate`, the transactions paragraph *understated* a shipped feature (§19.10.5
+  handler-scoped implicit transactions emit real `BEGIN DEFERRED`), and the GitHub link still said
+  `scrmlTS`. `E-PA-001` prose was deliberately left alone: it matches §34 and the COMPILER is what is
+  wrong, so writing the defect into public prose would enshrine it. **`docs/website` was not under the
+  snippet-gate** — the gate built at S280 precisely because the README flagship had never compiled,
+  with the published articles one directory outside it; added (98 files, gate now 110/110).
+  bryan ruled: correct the prose, do not build a SQL parser. The survey for that decision is banked in
+  `g-esql002-normatively-required-no-fire-site` so it is not re-derived.
+- **#215 `20ebbf0c` — Wave-1c cross-chunk soft-nav; adopter issue #27's last leg.** Both held HIGHs
+  closed. `g-nav-chunk-loading-flag-race` (a shared boolean a superseded nav could clear out from under
+  a live one → the newer route swapped in as DEAD unwired markup, permanently) became a depth counter;
+  `g-nav-chunk-basename-collision-key` (two routes in different directories both emit
+  `src="reports.client.js"`) now keys on the resolved absolute URL. **Both were reproduced before
+  either was touched**, under real classic-script `async=false` ordering via `node:vm` — neither is
+  observable from the browser suite, which per `g-nav-browser-harness-fidelity` cannot model the
+  substrate. The S239 pass then caught that **`W-NAV-CHUNK-LOAD-FAILED` was implemented with zero SPEC
+  occurrences**; §20.8.2/.6/.7 + §34 were re-derived against current SPEC and the §20.8 banner flipped
+  from blanket "Nominal" to an enumerated partial.
+- **#216 `65892010`** — closed both Wave-1c HIGHs, filed the new adopter HIGH, and committed two
+  RediLedger inbox messages that had arrived untracked (per `pa-base v2.5`, a drop is not delivered
+  until committed).
+- **#217 `32ef5b52` — `db-migrate` now grants the tables `?{}` touches, least-privilege.** GRANTs were
+  emitted per db-authoritative table while the `SET LOCAL ROLE scrml_app` drop is emitted per query in
+  any request scope — so once any table was db-authoritative, an unmarked table read at request time
+  ran as `scrml_app` with zero grants. §14.8.10's corollary *prescribes* leaving the identity table
+  unmarked, so the documented shape 500'd on login and then presented as "my seed data is wrong". bryan
+  ruled direction (b). The first cut over-granted blanket CRUD — handing the bounded role DELETE on the
+  identity table login merely reads — and the S239 self-review caught it pre-merge; privileges are now
+  derived per reference. Verified against the reporting adopter's real 20-table schema: `users` is the
+  one unmarked-and-queried table and derives exactly `["SELECT"]`, with zero undetermined queries.
+
+Open HIGHs 11 → 10. Cloud `gate` green at HEAD. Three rulings owed to RediLedger (multi-statement
+`_{}` slice contract-or-accident; `capabilities=` enforcement semantics; a roadmap slot for the
+content-addressed bytes tier). Maps refresh recorded as owed. The FACTS gate caught a stale regen
+three times in one session, which is a missing local gate rather than a memory failure — a pre-push
+`facts.ts --check` is proposed and awaiting bryan's nod.
+
+
 
 ### 2026-07-24 — S285 (Peter/AdiPDesk) — adopter #165: server call hoisted above a returning guard (silent destructive-write reorder) fixed via the control-anchors fold
 
