@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 10 |
-| MED | 62 |
-| LOW | 36 |
+| HIGH | 11 |
+| MED | 63 |
+| LOW | 37 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -4089,3 +4089,29 @@ So the miss is **narrower and sharper than the adopter's framing**: the collecto
 
 **Impact:** silent unstyled render — green compile, no warning, only visible in a browser. Same failure signature as the S212 parent (flogenceP: "the PA cards look squashed"). Reporter: flogenceP safelist comment (`src/app.scrml` ~L2896-2914), root-caused here.
 
+
+### g-channel-inside-page-never-fires — `E-CHANNEL-INSIDE-PAGE` is §34-catalogued but has ZERO fire sites; a `<channel>` inside a `<page>` compiles clean AND is wired program-scoped — `NEW S295 (scrml-site); HIGH; OPEN`
+<!-- @gap id=g-channel-inside-page-never-fires sev=HIGH status=open -->
+Reported by scrml-site's error-code probe harness (one minimal reproducer per §34 code, asserting each emits the code it documents — 30 of 34 fired; this was one of the misses). **Verified on `ed708cdf`: `grep -rl '"E-CHANNEL-INSIDE-PAGE"' compiler/src/` returns ZERO files.** The code is registered in §34 and documented on scrml.dev, and nothing emits it.
+
+**Worse than a missing lint — the channel is WIRED.** Their probe (`<channel name="chat">` declared inside a `<page>` body) builds exit 0 and reports `WebSocket channels: 1 channel(s) wired`. So an author who writes a per-page channel gets a working-*looking* app whose channel is actually **program-scoped**, with a WebSocket route whose lifetime does not match the page that appears to own it. That is a silent semantic mismatch, not a diagnostic gap — the same silent-acceptance class as the S290 cluster.
+
+**The stale precondition.** `symbol-table.ts` `walkValidateChannels` carries a docblock saying the code "will fire once `<page>` parser support lands in a later wave; the error code is registered in §34 now but no walker fires it yet (Wave 1 has no `<page>` parsing)." `<page>` parsing has since landed and is load-bearing (scrml-site runs ~99 `<page>` routes) — **the precondition was met without the walker being wired**, and the comment now reads as current when it is not. Cross-ref the B19 primer row (§13.7), which records the v0.3 direction reversal that retired `E-CHANNEL-INSIDE-PROGRAM` in favour of `E-CHANNEL-OUTSIDE-PROGRAM` (1 fire site, live) — `E-CHANNEL-INSIDE-PAGE` was left behind in that reshuffle.
+
+**Direction is a ruling, not a scoped fix:** wire the walker (reject per-page channels — the reversible direction, consistent with the S288/S290 reject-don't-widen precedents), OR ratify page-scoped channels as legal and give them page-matched lifetime, OR retire the code from §34. A governing-sentence pass over §38.1/§38.9 owes the answer before anyone implements. Reporter: scrml-site PA (2026-07-26 probe harness).
+
+### g-channel-008-shadowed-by-import-004 — `E-CHANNEL-008` is unreachable; the module layer rejects the duplicate-channel-import first with `E-IMPORT-004` — `NEW S295 (scrml-site); LOW; OPEN`
+<!-- @gap id=g-channel-008-shadowed-by-import-004 sev=LOW status=open -->
+Importing the same channel name from two source files (`import { chat as roomA } from "./a.scrml"` + `import { chat as roomB } from "./b.scrml"`) is rejected by the import layer as `E-IMPORT-004` before the channel-specific check runs; aliasing with `as` does not change it. The collision detector (`component-expander.ts:4340`) keys on `importedName` — exactly what the import layer has already rejected — so `E-CHANNEL-008` is structurally unreachable. It has a fire site in `compiler/src` (unlike [[g-channel-inside-page-never-fires]]); the site is just shadowed.
+
+Author is still stopped, with a less useful message: `E-CHANNEL-008` explains the WebSocket-route conflict, `E-IMPORT-004` explains only that two imports collide. **Options:** surface the channel-specific message when both would apply, or retire the code from §34 as unreachable — the same freeze-classifier question as the S249 `E-ATTR-012` drop-ruling, so cross-check that precedent before classifying this FIX rather than DROP ([[feedback_freeze_classifier_dropped_by_design]]). Reporter: scrml-site PA (2026-07-26 probe harness).
+
+### g-epa004-tables-nonexistent-no-fire-site — `E-PA-004` (`tables=` references a nonexistent table) does not fire, and the S292-corrected `orm-trap` article still asserts it does — `NEW S295 (bryan, verifying the scrml-site escalation); MED; OPEN`
+<!-- @gap id=g-epa004-tables-nonexistent-no-fire-site sev=MED status=open -->
+§34 row: `| E-PA-004 | §11.5 | tables= references nonexistent table | Error |` (SPEC.md:18808). **Empirically on `ed708cdf`: it does not fire.** Probe — a real SQLite db whose only table is `contacts`, declared `<db src="probe.db" tables="usrs">` inside `<program>` — **compiles clean, zero diagnostics.** (Confirmed the db file and its table list independently, so this is not a missing-file short-circuit.)
+
+**Two reasons this matters more than a missing diagnostic:**
+1. **A false public claim survived the correction pass that existed to remove false public claims.** `docs/website/pages/articles/orm-trap.scrml:102` — the S292-corrected article (#213 `d19d79ea`, which removed 7 verified-false claims) — still reads: *"**E-PA-004.** `<db tables="usrs">` where the table is misspelled or does not exist. The build prints the actual table list."* The correction pass enumerated the claims it had found rather than re-probing the whole refusal list, so this one rode through. This is the S288 RediLedger lesson recurring in the docs lane: *enumerating shapes inside a function is not the same as enumerating the functions a class of defect can inhabit* — here, enumerating the claims you already suspect is not the same as re-probing every claim of the same class.
+2. scrml-site independently reported a NEARBY discrepancy from their S287 probe — "a bad `tables=` value is refused as **E-PA-002**, not the documented E-PA-004." On current main it is refused as **neither**. Whether that is drift since S287 or a different probe shape is unresolved; both readings agree the documented code does not fire.
+
+**Owed:** re-probe every refusal the `orm-trap` article names (it lists E-PA-001/E-PA-006/E-PA-004/E-SQL-003 plus the bound-parameter guarantee) rather than fixing this row alone — the snippet-gate compiles the code samples but does not assert that a named diagnostic actually fires. Direction (wire E-PA-004 vs correct the prose vs retire the row) is bryan's, per the S292 `E-SQL-002` precedent where the ruling was correct-the-prose.
