@@ -4077,7 +4077,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       _missingSemiReported = true;
       errors.push(new TABError(
         "E-STMT-MISSING-SEMICOLON",
-        "E-STMT-MISSING-SEMICOLON: Expected `;` or a newline to end the statement. " +
+        // NOTE: the `message` must NOT self-prefix the code — the CLI formatters
+        // (dev/build/compile) already print `${code}: ${message}`. A self-prefix
+        // double-printed the code and, because build.js slices the message to 120
+        // chars, ate ~25 chars of budget and truncated the tail (adopter Fieldman
+        // Obs 1, S294). Kept as plain human text; the code is the formatter's job.
+        "Expected `;` or a newline to end the statement. " +
         "Two statements appear on one line separated only by whitespace — end the first " +
         "statement with a `;` or put them on separate lines.",
         spanOf(boundaryTok, boundaryTok),

@@ -346,3 +346,63 @@ describe("§3 word-form infix operators (or/and) after a grouping ) stay clean",
     expect(r.clientJs).toMatch(/let y = /);
   });
 });
+
+// -----------------------------------------------------------------------------
+// §5 — diagnostic DX (g-estmt-missing-semicolon-no-source-span, S294)
+// Adopter Fieldman Obs 1: in the BUILD path the diagnostic printed the file with
+// NO `:line:col` (sibling errors carried it) and a truncated message. Root cause:
+// TABError stores its span on `tabSpan`, and `collectErrors` (api.js) only lifted
+// `bsSpan → span` — so the dev/build formatters (which read `.span.line`) found
+// none. Fix lifts `tabSpan → span` too; the message no longer self-prefixes the
+// code (which had double-printed it and eaten build.js's 120-char slice budget).
+// -----------------------------------------------------------------------------
+describe("§5 E-STMT-MISSING-SEMICOLON diagnostic DX (span + message)", () => {
+  const firstEstmt = (r) =>
+    (r.errors || []).find((e) => e.code === "E-STMT-MISSING-SEMICOLON");
+
+  test("the error carries a resolvable source span (what dev/build read for :line:col)", () => {
+    const r = compile(`\${
+    function f() {
+        let log = []
+        let a = 0
+        if (a == 0) { log.push("A") log.push("B") }
+        return log.join(",")
+    }
+}
+<div>\${f()}</div>
+`);
+    const e = firstEstmt(r);
+    expect(e).toBeDefined();
+    // The span the dev.js / build.js formatters read to print `path:line:col`.
+    expect(e.span).toBeDefined();
+    expect(typeof e.span.line).toBe("number");
+    expect(e.span.line).toBeGreaterThan(0);
+    expect(typeof e.span.col).toBe("number");
+    expect(e.span.col).toBeGreaterThan(0);
+    // The boundary sits on the same-line run (`log.push("A") log.push("B")`),
+    // which is line 5 of the source above (1-based, `${` is line 1).
+    expect(e.span.line).toBe(5);
+  });
+
+  test("the message does NOT self-prefix the code (no doubling / no slice truncation)", () => {
+    const r = compile(`\${
+    function f() {
+        let log = []
+        if (true) { log.push("A") log.push("B") }
+        return log.join(",")
+    }
+}
+<div>\${f()}</div>
+`);
+    const e = firstEstmt(r);
+    expect(e).toBeDefined();
+    // Formatters print `${code}: ${message}` — a message that starts with the
+    // code re-prints it and wastes build.js's 120-char slice. The message must
+    // be plain human text.
+    expect(e.message.startsWith("E-STMT-MISSING-SEMICOLON")).toBe(false);
+    expect(e.message).toContain("Expected `;` or a newline");
+    // The full guidance tail must survive within build.js's 120-char slice now
+    // that the redundant 25-char code prefix is gone.
+    expect(e.message.slice(0, 120)).toContain("separated only by whitespace");
+  });
+});
