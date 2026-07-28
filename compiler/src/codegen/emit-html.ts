@@ -2891,12 +2891,32 @@ export function generateHtml(
             // attr-template binding so emitArmWireFunction wires it per-mount.
             if (registry && registry.currentArmContext != null) {
               const lowered = lowerAttrTemplateValue(String(val.value ?? ""));
+              // i225 — mirror the file-scope i174 fix for arm-body bindings.
+              // A reactive `value="${@cell}"` on a form control is the `.value`
+              // PROPERTY, not the `value` attribute (SPEC §5.5.4). The arm wire
+              // fn (emit-variant-guard.ts) only sees the lowered binding, not the
+              // markup node, so compute the form-control marker HERE where `tag`
+              // and the sibling `attrs` are in scope. Take the property path ONLY
+              // when `value=` is the SOLE `.value` writer — a sibling `bind:value`
+              // is the sanctioned two-way owner, so fall through to setAttribute
+              // rather than emit a second, competing `.value` writer (matches the
+              // `!hasBindValue` guard in emit-bindings.ts).
+              const directiveIsFormValue =
+                name === "value" &&
+                FORM_VALUE_ELEMENTS.has(String(tag).toLowerCase()) &&
+                !attrs.some(
+                  (a: any) =>
+                    a &&
+                    (a.name === "bind:value" ||
+                      a.name === "bind:valueAsNumber"),
+                );
               registry.addLogicBinding({
                 kind: "attr-template",
                 directiveSelector: `[data-scrml-attr-tpl-${name}="${tplId}"]`,
                 attrName: name,
                 directiveJsExpr: lowered.jsExpr,
                 directiveRefs: lowered.refs,
+                directiveIsFormValue,
               });
             }
           } else {
