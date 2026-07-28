@@ -3590,6 +3590,39 @@ Surfaced by the S293 adversarial pass on [[g-lift-per-item-attribute-binding-not
 
 **TIER-1 `<each>` STILL OPEN — ROUTED to bryan (Peter ruled S293).** The Tier-1 path is NOT a display-toggle — it is a STRUCTURAL append-gate (`if (ifCond) fragment.appendChild(el)`, `emit-each.ts` ~907): a false predicate means the element is ABSENT from the DOM, not hidden. Making it reactive is a SEMANTICS FORK — (a) reactive append/remove keeping structural semantics (harder; touches each-reconcile node presence), vs (b) switch to display-toggle like Tier-0 (easier, unifies tiers, but changes what `if=false` means → affects `:nth-child`/`.children` counts/form submission). Freeze-adjacent structural-semantics decision → bryan's ruling before implementation. — `NEW S293 (Peter); MED; open (Tier-0 resolved · Tier-1 routed to bryan)`
 
+**TIER-1 RESOLVED S297/S298 — RULED (a), BUILT, LANDED (#251 `a745d35e`). Ledger flip landed S297.**
+The fork was resolved by the **governing-sentence gate**, not by weighing (a) against (b): **§17.1**
+(`SPEC.md:10908`, `:10914`) — *"The `if=` attribute is a structural boolean conditional… When `expr`
+evaluates to false, the element is NOT rendered. It does not exist in the DOM."* — and **§17.2**
+(`:11195`) — *"`show=` is distinct from `if=`: `show=` hides, `if=` removes."* Reverse direction
+searched (§17.1/§17.1.1/§17.2/§17.4/§17.4a/§17.4b/§17.6/§17.7/§10): **no sentence anywhere sanctions a
+display lowering for `if=`**; the only `display:none` sanction in SPEC is §17.2's, scoped to `show=`.
+§17.7 contains **zero** `if=` mentions, so no `<each>`-specific rule exists and §17.1 governs. **Option
+(b) was therefore never available** — it would make `if=` a synonym for `show=` and leave `show=` with
+no job; that is an amendment deleting a normative distinction, not a fix.
+
+⚠️ **The fork's premise was INVERTED, and this entry stated it backwards.** Tier-1 was the **conformant**
+tier all along (a structural append-gate); its only defect was that it was not *reactive*. **Tier-0
+for-lift is the non-conformant one** — it appends unconditionally and then toggles `style.display`, so
+the element exists in the DOM. Verified by compiling four shapes on `115e8b1b` and reading the emitted
+artifacts. Consequence: the three harms this entry listed as reasons to avoid (b) — `:nth-child`,
+sibling selectors, form submission of hidden controls — **Tier-0 inflicts today**. See
+[[g-if-dirty-path-ships-gated-content-visible-pre-hydration]] and
+`docs/changes/if-mount-unmount-phase2/SCOPING.md` for the wider `if=`-lowering class this belongs to.
+
+**Implementation (Peter, #251):** single-root item emits EITHER the element (true) OR a
+`<!--scrml-if-row-->` comment placeholder (false) — exactly one node, root-count stays 1 — and a
+live-keyed per-item effect (`_scrml_ifrow_apply`) swaps them in place, transplanting `_scrml_key` so
+keying/ordering/reorder/delete keep working with zero reconcile-core changes. **Multi-root deferred**
+→ [[g-each-peritem-if-multiroot-deferred]] (LOW).
+
+**Conformance — the merge-blocker was met.** New cases under
+`conformance/cases/each/per-item-if-reactive/` incl. **`create-time-absence`**, plus a NEW
+`conformance/cases/reactive/if-top-level-absent/`. That closes the hole that let three divergent `if=`
+lowerings coexist green: `reactive/toggle-show` is misnamed (it pins `if=` mount, cited §17.1) and
+asserted only `count: 1` after false→true — **§17.1's "does not exist in the DOM" half had no
+assertion anywhere**. It does now, at both loci. — `RESOLVED S297/S298`
+
 ### g-estmt-missing-semicolon-no-source-span — `E-STMT-MISSING-SEMICOLON` prints with no `:line:col` (and a truncated message), unlike its sibling diagnostics — `NEW S293 (Peter, adopter Fieldman Obs 1); MED; diagnostic-DX`
 <!-- @gap id=g-estmt-missing-semicolon-no-source-span sev=MED status=resolved -->
 Fieldman/assetManagement pin-bump test-build against `db879d01`: `E-STMT-MISSING-SEMICOLON` (same-line multi-statement, the correct hard error from #162 that replaced a silent drop) printed as `pages/portal.scrml E-STMT-MISSING-SEMICOLON: …` with **no `:line:col`** and the message truncated ("…separated only by whitespace — end the first"), while a sibling on the same build (`E-PA-002`) carried `pages/portal.scrml:23:3`. In a 3600-line file with several offending sites the missing span made them hard to locate (they iterated). The hard-error direction is CORRECT (keep it) — only the locator DX is the gap. Peter-lane (adopter-surfaced diagnostic-quality). — `NEW S293 (Peter); MED; open`
