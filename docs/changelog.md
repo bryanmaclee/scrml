@@ -2,6 +2,96 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S296 (2026-07-28) — bryan · **XPS-8950** — D-4: server import specifiers emitted in the wrong coordinate space; the canonical example app's server tier was 96% dangling
+
+**`main` `6814b1d8`** · coherence 0/0 both repos · cloud `gate` + `windows` GREEN · one PR (#241).
+Concurrent with **LIVE S295-bryan on the ASUS** the entire session; nothing claimed in their lane.
+
+### Landed — #241 `6814b1d8`
+
+A `.scrml` under `pages/` importing another local `.scrml` emitted a server import specifier in
+**SOURCE** coordinate space. The dist tree strips a leading `pages/` segment (**SPEC §47.9.5,
+normative**), so the specifier overshot by exactly that segment at every depth: `dist/login.server.js`
+imported `../models/auth.server.js` while the artifact sat at `dist/models/auth.server.js`. Compile
+**exit 0, zero diagnostics**; the bundle died at runtime with `Cannot find module`.
+
+Root cause was an extension-only rewrite — `jsSource.replace(/\.scrml$/, ".server.js")` — that never
+re-based. Fixed by expressing both endpoints in post-strip dist space, mirroring `computeServedPath`
+(same file, L138) and `emit-client-esm.ts:306-311` over the same `stripPagesPrefix`.
+
+**A third site was needed and was PROVEN, not assumed.** With the emitter fixed but
+`emitValueOnlyServerJsForDanglingImports` left in source space, a const-only module server-imported
+from a `pages/` file emitted no artifact, died at runtime, and produced **no warning** — one broken
+shape traded for another. Both reversal sites now share one dist-keyed **forward** index; forward
+because the inverse is genuinely ambiguous (a dist `models/auth.server.js` could originate from
+`models/auth.scrml` *or* `pages/models/auth.scrml`).
+
+### The findings that outlast the fix
+
+1. ⭐ **This was never an adopter-only bug.** An on-disk resolution sweep of
+   `examples/23-trucking-dispatch` — the canonical multi-file example app — found **23 of its 24
+   server import specifiers DANGLING on `main`**, 0 after. 21k tests were structurally blind because
+   nothing asserts that an emitted specifier *resolves on disk*: `node --check` passes (a missing
+   FILE is not a syntax error) and the suite never executes the emitted server bundles.
+2. **`W-SERVER-IMPORT-UNEMITTED` existed to catch precisely this runtime `Cannot find module`, and
+   was structurally blind to it.** Its own comment named the blind spot — *"Works in SOURCE-path
+   space"* — which is the one space where this path is always self-consistent, so it could never see
+   a coordinate-space bug. The **S276 shape**: the oracle inherits the implementation's blind spot.
+   Proven in three states: baseline fires naming the source-space path · emitter-fix-only goes
+   **SILENT** · HEAD fires naming the dist-space path.
+3. **The governing-sentence gate changed the scoping, and killed my first reading.** I initially read
+   D-4 as a SPEC-vs-impl divergence (§47.9.2's formula is tree-preserving; §47.9.5 is *titled*
+   "preserve source tree"), which would have made it a RULING. Reading further refuted me: §47.9.5
+   carries an S100 amendment explicitly specifying the strip. Layout normative ⇒ the **specifier** is
+   the defect ⇒ a plain bug fix. The empirical-sufficiency illusion, caught by the gate: a clean
+   reproducer plus a compelling reframe, killed by the normative source.
+4. **`g-crossfile-dep-ref-pages-unstripped` (S265, MED, marked open) is STALE.** The adopter asked us
+   to *widen* it to cover `.server.js`; the correct action is the opposite — its client half is
+   already fixed (`computeDependencyClientScripts` routes both sides through `toDistRel`), verified
+   by execution at depth-1 and depth-2. Ledger action = flip to RESOLVED. Left to the concurrent
+   session (hot doc, they were mid-lane).
+
+### Verification
+
+PA-side S239 pass, re-run independently rather than taken from the dispatch report: reproducer
+depth-1 + depth-2 emit correct specifiers and `await import()` clean (both threw at baseline), control
+unchanged · `examples/22-multifile` (no `pages/`) **byte-identical** · `23-trucking-dispatch` 0 files
+added/removed, 20 changed, **every delta an import line** · gate-subset failure-**name sets identical**
+main-vs-branch (9 both sides), +38 tests all passing · **adjacent shape probed unprompted:** the strip
+lets `models/auth.scrml` and `pages/models/auth.scrml` collide on one dist key, and `E-CG-015` catches
+it as a hard error identically on both sides, so the ambiguity cannot reach the new index.
+
+### Misses, recorded
+
+- **I asserted a hook configuration I never probed.** My board recorded "Config B" from the S291
+  hand-off *narrative*; the dispatched agent found this clone has **no installed hooks at all**
+  (`core.hooksPath` unset, `.git/hooks` holds only `*.sample`, `scripts/git-hooks/` uninstalled). No
+  local gate ran on anything this session — the cloud `gate` was the sole authority. Verify state,
+  not narrative, missed at my own boot step.
+- **The FACTS gate caught a stale figure — the S292 trap, third session running.** Regenerated as the
+  LAST content commit, and I verified *all* generated gates rather than only the one that reddened.
+  S292's proposed local `facts --check` pre-push has still never been taken, and on this clone there
+  is no hook infrastructure to take it.
+- **Near-miss during review:** I diffed gate failure sets against a partially-written capture file and
+  nearly reported a false "4 tests improved" — caught only because the totals line was absent.
+
+### Concurrency
+
+Caught a cross-machine collision before it cost anything: S295's #238 lane-1 brief folded D-4 in and
+located it in `codegen/index.ts`. Wrong locus — D-4 is `emit-server.ts` + `api.js`, **file-disjoint
+from their lane**, which is the only reason landing under a live sibling was safe. Their brief's own
+escape hatch fires; an urgent note went out to drop the fold-in. Their #239/#240 landed mid-arc; the
+`docs/FACTS.md` rebase conflict was **REGENERATED, never hand-merged** (S288/S292 precedent), and the
+fix re-verified by execution on the rebased tree before the force-push.
+
+### Deferred (same class, filed not fixed)
+
+`emit-tool.ts:281` — the identical coordinate defect for the §64 `kind="tool"` / library artifact ·
+`api.js rewriteRelativeImportPaths` bare-`.js` skip (~L566), which rests on the same
+"mirrors the source tree" reasoning §47.9.5 falsifies. The `.server.js`/`.client.js` skip above it
+**is** still correct; its stale justification comment was corrected in this landing so the bug cannot
+be re-derived from it.
+
 ## S294 (2026-07-28) — Peter · Windows — #225: form-control `value=` writes `.value` inside `<match>`/`<engine>` arms (arm-wire path)
 
 Closes GH **#225** (filed by `pjoliver11`). A flogenceP S37 cross-PA hand-off: its dev-agent authored + adopter-verified the fix, dropped it into scrml's working tree, and asked the scrml PA to land it in-lane. Verified in-lane (reproduce-first both directions + S239 review + a runtime executed-DOM gate) and landed.
