@@ -17,8 +17,11 @@ set -e
 # Detect any release-tag push (refs/tags/v*) in the payload.
 PUSHING_RELEASE_TAG=0
 PUSHED_REFS=""
+HAS_UPDATE=0
 while read local_ref local_sha remote_ref remote_sha; do
   PUSHED_REFS="$PUSHED_REFS $local_ref"
+  # S292: a non-deletion ref means there is something to currency-check.
+  if [ "$local_sha" != "0000000000000000000000000000000000000000" ]; then HAS_UPDATE=1; fi
   case "$local_ref" in
     refs/tags/v*)
       PUSHING_RELEASE_TAG=1
@@ -67,6 +70,45 @@ if [ -f benchmarks/todomvc/app.scrml ]; then
             exit 1
         fi
     fi
+fi
+
+# 2.5 GENERATED-DOC CURRENCY (S292) — mirror the cloud `gate`'s CHEAP currency checks
+#     so a stale generated artifact is caught HERE instead of ~3 minutes later in CI.
+#
+#     WHY THIS EXISTS: at S292 the FACTS gate rejected three separate pushes in ONE
+#     session, every time for the same reason — regenerate, then edit compiler/src or
+#     SPEC.md again, then push. Nothing local refused the push, so the loop was always
+#     push -> wait for CI -> red -> regen -> push again. That is a MISSING GATE, not a
+#     memory failure. (bryan authorized this hook change at S292.)
+#
+#     SCOPE IS DELIBERATE — only the checks that are actually cheap. Measured here:
+#         bun scripts/facts.ts --check              200ms
+#         bun run scripts/regen-spec-index.ts --check 61ms
+#         bun scripts/snippet-gate.js            48,000ms   <-- NOT here, stays CI-only
+#     A hook that costs 48s per push gets bypassed, and a bypassed gate gets deleted
+#     (pa-base SS8, the cry-wolf failure mode). 261ms does not get bypassed.
+#
+#     Runs on EVERY push — including the feature-branch pushes the S254 relaxation
+#     exempts from the full suite, which are exactly the ones that were failing.
+#     Skipped when the payload is deletions only (nothing to check).
+if [ "$HAS_UPDATE" = "1" ]; then
+  echo ""
+  echo "--- generated-doc currency (mirrors the cloud gate; ~0.3s) ---"
+  CURRENCY_FAILED=0
+  if ! bun scripts/facts.ts --check; then CURRENCY_FAILED=1; fi
+  if ! bun run scripts/regen-spec-index.ts --check >/dev/null 2>&1; then
+    echo "  STALE  SPEC-INDEX totals (compiler/SPEC-INDEX.md)"
+    CURRENCY_FAILED=1
+  fi
+  if [ "$CURRENCY_FAILED" = "1" ]; then
+    echo ""
+    echo "X Generated docs are stale — push blocked (the cloud gate would reject this)."
+    echo "   Fix:  bun scripts/facts.ts --write && bun run scripts/regen-spec-index.ts"
+    echo "   Then amend or add a commit with the regenerated file(s)."
+    echo "   NOTE: regenerate AFTER your last content commit, not before it — regenerating"
+    echo "         early and then editing compiler/src again is what this gate exists to catch."
+    exit 1
+  fi
 fi
 
 # 3. Public snippet gate (ONLY on release-tag pushes — S101, re-pointed S280)
