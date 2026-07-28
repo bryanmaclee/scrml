@@ -3,7 +3,6 @@
   "version": "0.7.1",
   "description": "A complete compiler for the web.",
   "type": "module",
-  "private": true,
   "license": "MIT",
   "author": "Bryan Maclee",
   "homepage": "https://bryanmaclee.github.io/scrml/",
@@ -32,13 +31,22 @@
     "state-machine",
     "no-build"
   ],
-  "workspaces": ["compiler"],
   "engines": {
     "bun": ">=1.3.13"
   },
   "bin": {
     "scrml": "compiler/bin/scrml.js"
   },
+  "//files": "ALLOWLIST, not a denylist — anything new is excluded by default. stdlib/ is REQUIRED at runtime (module-resolver.js STDLIB_ROOT resolves ../../stdlib); compiler/{bin,src,native-parser,runtime} are the compiler itself. Deliberately excluded: compiler/tests (20M), self-host*, samples, SPEC.md/PIPELINE.md (docs live on scrml.dev), examples/ (12M — add later if wanted; widening a published surface is easy, narrowing it is not).",
+  "files": [
+    "compiler/bin/",
+    "compiler/src/",
+    "compiler/native-parser/",
+    "compiler/runtime/",
+    "stdlib/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "compile": "bun run compiler/src/cli.js compile",
     "pretest": "bash scripts/compile-test-samples.sh",
@@ -56,6 +64,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
+    "acorn": "^8.16.0",
+    "astring": "^1.9.0",
     "pg": "^8.22.0",
     "vscode-languageserver": "^9.0.1",
     "vscode-languageserver-textdocument": "^1.0.11"
