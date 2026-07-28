@@ -624,6 +624,20 @@ function emitArmWireFunction(
       if (refs.length > 0) {
         lines.push(`      _disposers.push(_scrml_effect(function() { el.classList.toggle(${JSON.stringify(className)}, !!(${jsExpr})); }));`);
       }
+    } else if (binding.directiveIsFormValue === true) {
+      // i225 — form-control `value="${…}"` inside an arm body is the `.value`
+      // PROPERTY, not the `value` attribute (SPEC §5.5.4). Emitting setAttribute
+      // writes only the DEFAULT value: once the user types, the property diverges
+      // and a reactive `@cell = ""` can never clear the field. Write the live
+      // property instead, guarded by an inequality test so re-assigning the
+      // identical string cannot reset the caret mid-typing. Mirrors the
+      // file-scope `isFormControlValue` block in emit-bindings.ts (i174); the
+      // `directiveIsFormValue` marker already encodes the tag ∈ {input,textarea,
+      // select} AND no-sibling-bind:value guard (computed at registration).
+      lines.push(`      { const _v = ${jsExpr}; if (el.value !== _v) el.value = _v; }`);
+      if (refs.length > 0) {
+        lines.push(`      _disposers.push(_scrml_effect(function() { const _v = ${jsExpr}; if (el.value !== _v) el.value = _v; }));`);
+      }
     } else {
       // attr-template — set the interpolated attribute value once, then subscribe.
       const attrName = binding.attrName as string;

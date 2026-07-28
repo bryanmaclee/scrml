@@ -429,6 +429,19 @@ export interface LogicBinding {
   directiveRefs?: string[];
 
   /**
+   * i225 — form-control `value` marker for arm-body `attr-template` bindings.
+   * True ONLY when this attr-template is a `value="${…}"` on a form control
+   * (<input>/<textarea>/<select>) with NO sibling `bind:value`/`bind:valueAsNumber`.
+   * When set, emit-variant-guard.ts writes the caret-safe `.value` PROPERTY
+   * (`{ const v = <expr>; if (el.value !== v) el.value = v; }`) instead of
+   * `setAttribute("value", …)` — mirroring the file-scope fix (i174) in
+   * emit-bindings.ts (`isFormControlValue`). Computed at registration in
+   * emit-html.ts where the element tag + sibling attrs are in scope (the arm
+   * wire fn only sees the pre-lowered binding, not the markup node).
+   */
+  directiveIsFormValue?: boolean;
+
+  /**
    * Family-A convergence (HALF 1, 2026-06-23) — `bind:*` directive fields,
    * registered ONLY when the bind: sits inside a `<match>` arm / `<engine>`
    * state-child body (the registry has an active arm context). Required when

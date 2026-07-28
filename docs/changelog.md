@@ -2,6 +2,14 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S294 (2026-07-28) — Peter · Windows — #225: form-control `value=` writes `.value` inside `<match>`/`<engine>` arms (arm-wire path)
+
+Closes GH **#225** (filed by `pjoliver11`). A flogenceP S37 cross-PA hand-off: its dev-agent authored + adopter-verified the fix, dropped it into scrml's working tree, and asked the scrml PA to land it in-lane. Verified in-lane (reproduce-first both directions + S239 review + a runtime executed-DOM gate) and landed.
+
+- **Bug:** i174/#174 (S286) made a reactive `value="${@cell}"` on `<input>/<textarea>/<select>` write the caret-safe `.value` **property** — but only on the **file-scope** template-attr path (`emit-bindings.ts`). A form control inside a `<match>` arm / `<engine>` state-arm takes the **arm-wire** path (`emit-variant-guard.ts` `emitArmWireFunction`), which still emitted `setAttribute("value", …)`. So the field couldn't be cleared/updated after the user typed (the attribute changed, the displayed property didn't). flogenceP's cockpit inputs are all inside arms.
+- **Fix:** at arm-body attr-template registration (`emit-html.ts`, where `tag` + sibling attrs are in scope) compute a `directiveIsFormValue` marker (`value` on a form control, no sibling `bind:value`), thread it via `LogicBinding.directiveIsFormValue`, and emit the caret-safe `{ const _v = <expr>; if (el.value !== _v) el.value = _v; }` in `emit-variant-guard.ts`. Mirrors i174; reuses the pre-existing `FORM_VALUE_ELEMENTS` set. The `!hasBindValue` guard keeps `bind:value` the sole `.value` owner (no competing writer).
+- **Verified:** reproduce-first confirmed both directions (`setAttribute` → `.value` on the fix). Class probed: input/textarea → property; `<div>`/non-value attr → setAttribute; sibling `bind:value` → defers (no double writer). Added an **executed-DOM** browser test driving the exact type-then-clear gesture flogenceP couldn't (a dirtied field clears on a reactive `@cell = ""`) — the runtime proof the emit-only unit test can't give. i81 file-scope path unaffected (59/0); conformance 1303/0.
+
 ## S294 (2026-07-28) — Peter · Windows — `<each>` audit (flogenceP), and a nested-each outer-var reconcile fix
 
 Peter asked to recheck `<each>` after flogenceP surfaced friction. Audited flogenceP's four `<each>`
