@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 12 |
-| MED | 71 |
+| MED | 73 |
 | LOW | 40 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -4399,6 +4399,30 @@ This is `pa-base` **v2.4 §8's hollow-gate class in a shape v2.4 does not name**
 **Context — how it surfaced.** Categorizing the 36-fail local baseline S292 flagged as unverified. Full split: **34** in `compiler/tests/browser/` (8 files; `tracking`, non-blocking — the standing characterization is accurate for these), **1** in the blocking gate's tier ([[g-gate-tier-unit-test-red-local-green-cloud]]), **1** here. So "36 known browser-tier failures" was wrong on two of thirty-six, and both wrong ones are CI-integrity issues rather than test debt.
 
 **Fix direction (not scoped):** decide per file whether it belongs in a covered subdirectory or in an explicit CI path list — do NOT simply add `compiler/tests/` wholesale to `gate`, which is what `ci.yml:26`'s own comment records was reverted at S253 for going red on the M6.x within-node backlog. The canary's own failure is that backlog. — `NEW S297; MED; open`
+
+### g-s34-catalog-wrong-meaning-class — five §34 rows DESCRIBE a different diagnostic than the code actually fires on; one is ruling-gated — `NEW S297 (§34 meaning-axis sweep); MED; freeze-gate integrity`
+<!-- @gap id=g-s34-catalog-wrong-meaning-class sev=MED status=open -->
+Authority: **`docs/audits/s34-meaning-axis-2026-07-28.md`** (baseline `main@ed2515e7`). The axis S260's audit did **not** cover — it scoped its TRIGGER-MISMATCH bucket explicitly as *"not fully mechanized … Treat as a FLOOR"* of 5 hand-confirmed rows. This sweep is that comparison.
+
+**Five WRONG-MEANING rows:** `W-PROGRAM-001` · `W-AUTH-001` · `E-COMPONENT-019` · `E-CG-001` · `E-PA-002`.
+
+⚠️ **`W-PROGRAM-001` is RULING-GATED — do not "fix" it into existence.** §34 `:899`, §4.12 `:748` and §4.12 `:891` all say the code flags *"an unnamed nested `<program>`"*. The **sole** fire site (`ast-builder.js` ~`:18967`) fires on `!hasProgramRoot` — *"No `<program>` root element found"*. **PA-verified independently S297.** These are near-opposite, and the three SPEC sites agree **with each other**, so internal cross-checking cannot catch it. Consequence: the documented nested-`<program>`-naming guarantee has **zero enforcement**. **Before implementing it, cross-check whether it was DROPPED BY DESIGN** — the `E-ATTR-012` shape (ratified-dropped S249, [[feedback_freeze_classifier_dropped_by_design]]): a non-firing code whose SPEC still reads SHALL may be a deliberate retirement with the row left behind. Implement-vs-drop is bryan's, not a scoped fix.
+
+**`W-AUTH-001` is a SECOND one-code-two-guarantees case** — structurally identical to the `E-IMPORT-007` defect fixed earlier the same session: `route-inference.ts:5330` reports auth-middleware auto-injection, a meaning documented nowhere in §34. **That shape has now appeared twice in one day**, which argues it is a class rather than two incidents.
+
+`E-PA-002` was found independently while working the S295 blocked list (its row says *"invalid `protect=` syntax"*; it fires on a missing `<db src=>` file **plus** unrecoverable `CREATE TABLE`) — the sweep confirmed it as briefed. Per-row proposed replacement text is in the report; **not applied here** — the corrections want a single ruling pass, not five drive-by edits.
+
+**Why this matters beyond tidiness:** §34 is the **freeze gate**. A row that misdescribes its own diagnostic means the gate is measuring something other than what it claims, and the language-1.0 coverage argument is built on that catalog. Also notable: `error.map.md` already carried the CORRECT implemented meaning for `E-PA-002` where §34 is wrong — **the nav map is currently a better meaning-oracle than the normative catalog.** — `NEW S297; MED; open`
+
+### g-s34-dead-section-xrefs — three families of §34 rows cite sections that do not exist; one names a subsystem with no normative section at all — `NEW S297 (§34 meaning-axis sweep); MED; freeze-gate integrity`
+<!-- @gap id=g-s34-dead-section-xrefs sev=MED status=open -->
+The cite-resolution half of the sweep was **exhaustive** (951 code↔section pairs / 367 distinct cites across all 803 codes), unlike the meaning half. Three families S260 missed:
+
+- **§28.2–§28.5** — 16 lifecycle / timeout codes cite subsections of §28 (Compiler Settings). Their real home is **§6.7.x** (lifecycle / cleanup / timers).
+- **§39.5.5** — `E-SCHEMA-011`, which **landed this very window**, carries a row asserting *"§39.5.5 declares exactly ONE production"* about a section that **does not exist**. A brand-new row citing a non-existent section is the drift class arriving faster than it is being fixed.
+- **§3.5 — `E-BPP-001`.** The cited section does not exist, and more seriously **the body pre-parser has no normative section anywhere in SPEC**. This is not a bad pointer; it is a subsystem that emits a diagnostic with no normative text behind it. Distinct disposition from the other two: those need re-pointing, this needs a ruling on whether BPP gets a section or the code gets retired.
+
+Also unreconciled: `error.map.md` documents **799** codes; the sweep's extraction yields **803**. The map documents its methodology carefully and warns against hand-rolled greps, so the discrepancy is worth resolving rather than assuming either side. — `NEW S297; MED; open`
 
 ### g-cloud-maps-ci-red-api-rejection — the scheduled `cloud-maps` job has failed 17/17 runs since 2026-07-17; the agent's real error is suppressed, so the maps rot silently — `NEW S297 (spun out of g-maps-error-map-missing-diagnostics-and-emit-client); MED; infra/CI`
 <!-- @gap id=g-cloud-maps-ci-red-api-rejection sev=MED status=open -->
