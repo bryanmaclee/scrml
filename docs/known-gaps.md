@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 14 |
-| MED | 77 |
+| HIGH | 16 |
+| MED | 80 |
 | LOW | 39 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -4512,6 +4512,14 @@ so **every parameter name is currently treated as a captured free variable.** Cl
 **This is a distinct mechanism from [[the S298 gap-counts drift]], not a duplicate of it.** That one was *staleness* — a true generator run too rarely, fixed by regenerating. This one is a *lossy parser*: the block can be freshly regenerated, `--check` can pass, and the number can still be wrong, because the input rows were dropped before counting. Both produce a confident number nobody can distinguish from a correct one. **Bearing on the open CI-gate fork:** adding `state.ts --check` to the `gate` would pin a count that is itself under-reporting — worth fixing first, or the gate certifies the wrong number.
 
 **Fix directions (not scoped):** (a) widen the enum to the statuses actually in use and normalise the vocabulary; (b) better — match `status=(\S+)` and **fail loudly** on an unknown value, so the ledger cannot silently grow a seventh status. (b) is the `pa-base` §8 shape: a gate whose blind spot is invisible is not a gate. Cheap either way; the audit one-liner is `grep -oE '@gap id=\S+ sev=[A-Z]+ status=[a-z-]+' docs/known-gaps.md | grep -vE 'status=(open|resolved|deferred|nominal|non-gap|forensic)$'`.
+
+**✅ RESOLVED S299 — direction (b), bryan-ruled.** `scripts/state.ts` now matches ANY `status=([a-z-]+)`, classifies it through two explicit sets (`GAP_STATUS_OPEN` / `GAP_STATUS_CLOSED`, plus nominal), and **throws** on a status neither set names, listing the offending ids. The ledger can no longer grow a seventh vocabulary word without someone deciding how it counts.
+
+**Author intent preserved, not normalised.** The 14 markers were NOT rewritten to a canonical enum — `ruling-gated` says something to a human reader that `open` does not, and those markers belong to whoever wrote them. Only the COUNTING semantics are decided in the script: `in-progress` · `narrowed` · `ruling-gated` count as open; `fixed` · `root-caused-elsewhere` count as closed.
+
+**Count correction on landing: HIGH 14 → 16, MED 77 → 80.** The two HIGHs that had been invisible are `g-async-stdlib-in-sync-callback-over-fires` (`in-progress`) and `g-main-red-against-its-own-pre-commit-gate` (`narrowed`).
+
+**The gate was PROVEN to bite before landing** (`pa-base` §8 unproven-gate rule — a gate that has never failed is indistinguishable from one that cannot fail): injected `status=totally-made-up` into a real marker, confirmed `state.ts` threw and named the id, restored, confirmed green. <!-- @gap id=g-gap-counts-silently-drops-unrecognised-status sev=MED status=resolved -->
 
 ### g-imported-server-fn-names-alias-blind — `buildImportedServerFnNames` keys on the IMPORTED name, so an `as`-aliased server-fn import is invisible to async classification — `NEW S299 (found while wiring Trigger 3); MED; open`
 <!-- @gap id=g-imported-server-fn-names-alias-blind sev=MED status=open -->

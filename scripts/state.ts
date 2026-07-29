@@ -37,13 +37,63 @@ function sh(cmd: string, args: string[]): { stdout: string; stderr: string; ok: 
 }
 
 // ── Gap counts (from @gap tokens) ──────────────────────────────────────────
+// Status vocabulary, partitioned by what it means for the COUNT.
+//
+// S299 — this used to be a closed alternation inside the token regex
+// (`status=(open|resolved|…)`), which meant a marker carrying any OTHER status did
+// not match the regex AT ALL: not miscounted, INVISIBLE. Fourteen such markers had
+// accumulated across six statuses the parser did not know, and TWO of them were
+// open HIGHs — so the §0 headline under-reported and nothing anywhere went red.
+// Found by arithmetic: a landing resolved two HIGH entries and the count moved
+// 12 → 11, because one of them had been `ruling-gated` and uncounted its whole life.
+//
+// The fix is deliberately NOT "widen the alternation". A closed list that silently
+// drops what it does not recognise fails the `pa-base` §8 gate test — a gate whose
+// blind spot is invisible is not a gate. So: match ANY status, classify it here,
+// and FAIL LOUDLY on one this table does not name. The ledger cannot grow a
+// seventh vocabulary word without someone deciding how it counts.
+//
+// Author intent is preserved rather than normalized — these statuses carry real
+// distinctions (`ruling-gated` ≠ `open` to the human reading the entry) and they
+// belong to whoever wrote them. Only the COUNTING semantics are decided here.
+const GAP_STATUS_OPEN = new Set([
+  "open",
+  "in-progress",   // being worked; still an open defect
+  "narrowed",      // scope reduced, remainder still open
+  "ruling-gated",  // blocked on a ruling; the defect is live
+]);
+const GAP_STATUS_CLOSED = new Set([
+  "resolved",
+  "fixed",                  // synonym of resolved in practice
+  "deferred",
+  "non-gap",
+  "forensic",
+  "root-caused-elsewhere",  // real, but tracked under another entry
+]);
+const GAP_STATUS_NOMINAL = new Set(["nominal"]);
+
 function gapCounts() {
   const text = readFileSync(`${ROOT}/docs/known-gaps.md`, "utf8");
-  const re = /<!--\s*@gap\s+id=(\S+)\s+sev=(HIGH|MED|LOW|NOMINAL)\s+status=(open|resolved|deferred|nominal|non-gap|forensic)\s*-->/g;
+  const re = /<!--\s*@gap\s+id=(\S+)\s+sev=(HIGH|MED|LOW|NOMINAL)\s+status=([a-z-]+)\s*-->/g;
   const tokens: { id: string; sev: string; status: string }[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) tokens.push({ id: m[1], sev: m[2], status: m[3] });
-  const openBy = (sev: string) => tokens.filter((t) => t.sev === sev && t.status === "open").length;
+
+  // Fail loudly on a status no partition claims. Silence here is what produced the
+  // under-count this replaced.
+  const unknown = tokens.filter(
+    (t) => !GAP_STATUS_OPEN.has(t.status) && !GAP_STATUS_CLOSED.has(t.status) && !GAP_STATUS_NOMINAL.has(t.status),
+  );
+  if (unknown.length > 0) {
+    const lines = unknown.map((t) => `    ${t.id}  status=${t.status}`).join("\n");
+    throw new Error(
+      `state.ts: ${unknown.length} @gap marker(s) carry a status this script does not classify:\n${lines}\n` +
+      `  Add it to GAP_STATUS_OPEN or GAP_STATUS_CLOSED in scripts/state.ts (deciding how it COUNTS),\n` +
+      `  or correct the marker. Refusing to emit a count that silently omits them.`,
+    );
+  }
+
+  const openBy = (sev: string) => tokens.filter((t) => t.sev === sev && GAP_STATUS_OPEN.has(t.status)).length;
   const high = openBy("HIGH");
   const med = openBy("MED");
   const low = openBy("LOW");
