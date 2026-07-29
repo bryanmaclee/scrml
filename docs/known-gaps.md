@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 11 |
+| HIGH | 14 |
 | MED | 77 |
 | LOW | 39 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -221,7 +221,7 @@ is now its own gap: `g-db-migrate-ignores-constraint-drift-on-existing-columns`.
 so `references t (c)`, `references t.c` and a bare `references` are caught too, with string and regex
 bodies blanked first so `default('see references')` cannot false-fire. — `RESOLVED S290` <!-- @gap id=g-schema-references-dot-form-emits-no-foreign-key sev=HIGH status=resolved -->
 
-### g-if-dirty-path-ships-gated-content-visible-pre-hydration — content behind a false `if=` ships in the initial HTML with no `display:none` and is visible until hydration (and permanently with JS off) — `NEW S297 (found while scoping if= Phase 2); MED; codegen/if-lowering`
+### g-if-dirty-path-ships-gated-content-visible-pre-hydration — content behind a false `if=` ships in the initial HTML with no `display:none` and is visible until hydration (and permanently with JS off) — `NEW S297 (found while scoping if= Phase 2); CONFIRMED INDEPENDENTLY by adopter GH #261 (2026-07-29); MED; codegen/if-lowering`
 <!-- @gap id=g-if-dirty-path-ships-gated-content-visible-pre-hydration sev=MED status=open -->
 `if=` compiles to two lowerings (see [[g-if-two-lowerings-display-vs-mount]] context in `docs/changes/if-mount-unmount-phase2/SCOPING.md`). On the **dirty** path — selected whenever the gated subtree contains anything dynamic, which a single `${…}` interpolation is enough to trigger — the element is emitted into the initial HTML **with no `style="display:none"`** and is hidden only once client JS boots.
 
@@ -4104,6 +4104,75 @@ Surfaced by flogence dogfood (S30, FSP-wire port; broke flogence's own `fsp-core
 ### g-failable-server-fn-array-return-not-promoted — a failable server fn with an ARRAY/collection return type (`! T[]`) is NOT server-promoted, so its value-position reactive write gets no auto-await + leaks SQL to the client
 <!-- @gap id=g-failable-server-fn-array-return-not-promoted sev=HIGH status=open -->
 **NEW S297 (Peter — root cause of flogenceP #228, see [[g-each-hidden-drawer-live-reconcile-flogence-228]]; bryan's auto-await/promotion lane).** A `function f(...) ! string { ?{…} }` is server-promoted (present in `*.server.js` routes, `await`ed at call sites via an RPC wrapper); flipping ONLY its return type to `! string[]` (single-variable control) REMOVES it from the server routes entirely — verified from artifacts (`converseNode`/`! string` present ×5; `loadNodeThread`/`! string[]` absent). Cascade: because the array fn never enters the promotion registries (`asyncRouteMap`/`asyncCalleeMap`), `scheduling.ts isPromiseReturningCallExpr` returns false → `emit-logic.ts` (~3318/3358, the value-position `@cell = call()!{}` auto-await classifier) sets `_autoAwait=false` → the write lowers to the eager, un-awaited `_scrml_reactive_set("cell", f(...))` with the `!{}` error arm mis-wired (the real set stranded as dead code inside the `__scrml_error` branch); the unpromoted `?{}` body also leaks `_scrml_sql.*` into the client → `E-CG-006`. Same family as [[g-inferred-async-call-value-position-no-autoawait]] (#237). Fix: include `! T[]`/collection-return failable fns in the §12.2-Trigger-1 promotion path (their `?{}` body is the escalation signal, return type must not gate it). — `NEW S297; HIGH; open`
+
+### g-validity-surface-addressed-two-ways-expression-vs-binding — `@form.isValid` emits a property read in expression position and a flat cell key in bindings; the property is permanently `undefined`, so a submit guard blocks forever — `NEW S299 (adopter GH #262); HIGH; open`
+<!-- @gap id=g-validity-surface-addressed-two-ways-expression-vs-binding sev=HIGH status=open -->
+**PA-REPRODUCED on `d5ae9a20`**, exactly as filed. The auto-synthesized §55 validity surface is addressed by **two emitters that disagree**:
+
+```
+:22   if (!_scrml_cs_reactive_get("f").isValid)                    // EXPRESSION → property read
+:109  if ((!_scrml_cs_reactive_get("f.isValid")))                  // BINDING    → flat cell key
+:44   _scrml_cs_derived_declare("f", () => ({ email: … }))         // the group projects FIELDS ONLY
+:50   _scrml_cs_derived_declare("f.isValid", …)                    // validity lives in a SIBLING flat cell
+```
+
+The group derived cell projects only the field VALUES; `isValid`/`errors`/`touched` are separate flat cells (`f.isValid`, `f.email.isValid`, …). So the property form is permanently `undefined`, `!undefined` is `true`, and `if (!@f.isValid) return` returns on **every** call.
+
+**Fails closed and completely silent** — the submit event fires, the delegated handler runs and calls `preventDefault()`, then returns at the guard: zero network requests, no console error, no page error. Visible symptom is only "the button does nothing". The adopter notes it was **masked by GH #234** (before that fix `_scrml_boot` aborted and no handler bound at all — identical symptom, different cause), so a symptom-level "login is broken" report would have been closed by #234 and stayed broken.
+
+**Blast radius:** any form using `@form.isValid` as a submit guard — the canonical Shape-2 form the PRIMER teaches and the reference app uses. Usability blocker, not a security hole.
+
+**Fix directions (adopter's, and (1) looks right):** (1) lower expression-position `@group.field` to the same flat-cell lookup the binding emitter uses, keeping ONE addressing rule; or (2) have the group derived cell also project the synthesized validation metadata. **Which emitter is canonical is a ruling** — the finding is that two of them disagree. Note also that the expression form reads a `derived_declare`d cell via `reactive_get`; worth checking that accessor pairing while fixing.
+
+### g-crossfile-module-const-dropped-from-client-bundle — a cross-file module's exported `const` is emitted nowhere and absent from the export table, while the fns closing over it DO cross → silent ReferenceError — `NEW S299 (adopter GH #263); HIGH; open`
+<!-- @gap id=g-crossfile-module-const-dropped-from-client-bundle sev=HIGH status=open -->
+**PA-REPRODUCED on `d5ae9a20` — byte-for-byte the emit the adopter filed.** 12 lines, 2 files, **0 errors 0 warnings**, and `node --check` passes:
+
+```js
+// dist/models/m.client.js — COMPLETE FILE
+(function() {
+function _scrml_greet_2() {
+  return GREETING;          // <-- never declared, never imported
+}
+_scrml_modules["models/m.client.js"] = { greet: _scrml_greet_2 };
+})();
+```
+
+`GREETING` appears **exactly once in the entire build**, as that undeclared reference. The export table carries `greet` but **no `GREETING`**, so even a consumer that wanted to import the const directly cannot reach it client-side. Note the blank lines where the declaration should be — the emitter appears to have a slot for it and emit nothing.
+
+**This is GH #237's sibling one level up.** The same-file (server-direction) version was fixed by `88f9745e`; same-file consts now reach both bundles. **Cross-file module consts still do not reach the client.** In the adopter's app a server fn also read the const, so it survived in `*.server.js` and was missing only from the client half — 3 use sites, 0 declarations → `ReferenceError` thrown from inside `on mount`, so the page never finishes mounting.
+
+**Newly exposed rather than newly introduced:** it became reachable only once `6814b1d8` (D-4) fixed cross-file import paths. This is the natural shape of a shared `models/` module — constants plus the pure helpers that use them.
+
+**Adopter workaround in use:** expose every client-reachable value as an `fn` accessor returning a literal. Fragile, and the same workaround the same-file version needed before `88f9745e`.
+
+### g-server-fn-argument-position-not-awaited-and-statement-dropped — a server-fn call in ARGUMENT position is never awaited, and with a preceding server call the whole statement is silently DROPPED — `NEW S299 (adopter GH #264); HIGH; open`
+<!-- @gap id=g-server-fn-argument-position-not-awaited-and-statement-dropped sev=HIGH status=open -->
+**PA-REPRODUCED on `d5ae9a20`, both cases.** `88f9745e` made `on mount` emit the §13.2 async scope and `await` a server-fn result assigned to a local. Positions that fix did not cover are still broken — and the compiler emits the async IIFE, names §13.2 in its own comment, then does not use it.
+
+**Case A — emitted, NOT awaited.** `tag` resolves to the async fetch shim `_scrml_fetch_tag_7` via the module-registry destructure at `:18`, and the call is bare:
+```js
+// §6.7.1a `on mount` — async scope for the server calls in this block (§13.2).
+(async () => {
+  _scrml_cs_reactive_set("msg", _scrml_eq_5("x", tag()));   // tag() is async. No await.
+})().catch(…);
+```
+`eq` therefore compares a **Promise**, never the string.
+
+**Case B — statement silently DROPPED.** Add an earlier server call and the second statement vanishes from the output entirely:
+```js
+(async () => {
+  (async () => _scrml_cs_reactive_set("n", await _scrml_fetch_serverRead_4()))().catch(…);
+})().catch(…);
+// the `@msg = eq("x", tag())` assignment is GONE; `_scrml_eq_5` is emitted and never called
+```
+**0 errors, 0 warnings** — no `W-DEAD-FUNCTION`, nothing.
+
+**Real-app consequences the adopter reports** (not from the repro): the same miss in an `else if` condition made `checkRole(user, rolePatron())` compare a Promise, so the comparison was always false and **the page redirected away on every load**; and in a template literal `Max-Age=${sessionTtlSeconds()}` produced `Max-Age=[object Promise]`, which browsers discard as an invalid cookie attribute — **silently downgrading a 7-day session cookie to session-only**. Note the adjacent `const user = await …` on the line above IS correctly awaited by the `88f9745e` fix: same block, same function, only the argument-position call is missed.
+
+**Family:** [[g-inferred-async-call-value-position-no-autoawait]] (#237) and [[g-failable-server-fn-array-return-not-promoted]] (#228). All three are the auto-await/promotion lane.
+
+**Fix direction (adopter's, and it reads right):** the CPS transform appears to handle assignment RHS only; it likely needs to hoist **any** server-fn call in the statement to an awaited temp first, regardless of position — argument, condition, template interpolation. **Case B deserves a separate look from the awaiting**: losing a statement outright once a preceding await split has happened is a different defect from failing to await, and a silently dropped statement is the worse of the two.
 
 ### G-SERVE-TOOL-TREESHAKES-MAIN-ONLY-IMPORT — a `<program kind="tool" serve=>` drops an import referenced only in `main()` → ReferenceError — `NEW S256; MED; open`
 Surfaced by flogence dogfood. In a serve= tool, an import used ONLY inside `function main` is tree-shaken out of the emitted import statement, then called at boot → `ReferenceError`. The serve= tree-shaker scans route-handler reachability but not the setup-`main` body for import liveness. Track-A (Unit 2) codegen; folds into Units 3-6. <!-- @gap id=g-serve-tool-treeshakes-main-only-import sev=MED status=open -->
