@@ -603,6 +603,21 @@ body, the swap is not applied — a naive element↔comment swap would mis-track
 — a code comment is the signal, mirroring Tier-1). Nested (non-item-root) `if=` children are likewise
 unchanged. — `NEW S298; LOW; deferred (display toggle + comment signal; single-root shape shipped structural)`
 
+### g-lift-tier0-if-inline-form-non-reconciled-display-toggle — the INLINE `${for…lift}` form's per-item `if=` stays a display toggle (§17.1: element present when false); only the RECONCILED block form was made structural
+<!-- @gap id=g-lift-tier0-if-inline-form-non-reconciled-display-toggle sev=MED status=open -->
+**NEW S297 — caught by the Tier-0 structural-if arc's class-probe (PA review), NOT the reported/fixed shape.**
+The Tier-0 structural-if fix (this arc, `emit-lift.js` `emitCreateElementFromMarkup`) covers the RECONCILED lift
+path — the block form `${ for (let x of @c) { lift <m if=…> } }`, which is bryan's exact flagged shape (his
+note: "`_scrml_effect` sets `style.display`" = the reconciled path). But the compact INLINE form
+`${ for x of @c lift <m if=…> }` compiles to a DIFFERENT lowering that does NOT emit `_scrml_reconcile_list`
+(verified by emit probe on `115e8b1b`+this arc: `reconcile_list=false`, `_scrml_ifrow_apply` absent), and its
+per-item `if=` stays `style.display = cond ? "" : "none"` → the element is PRESENT in the DOM when false, a
+§17.1 violation UNCHANGED by this arc (it routes through `emitSetAttrs`, deliberately left untouched). Two
+follow-on questions: (1) why the inline form does not keyed-reconcile over a reactive cell (possibly a broader
+inline-lift reconcile gap, not just `if=` — needs its own reproduce); (2) whether its `if=` should get a
+non-reconcile structural add/remove. **Filed so the §17.1 hole is not misrepresented as fully closed** — the
+reconciled/block form (the reported violation) IS fixed; this compact form is the residual. — `NEW S297; MED; open`
+
 ### g-lift-tier0-if-value-indexed-display-toggle-deferred — a sole-root Tier-0 for-lift `if=` whose predicate is a value-indexed `@cell == item.field` keeps the O(2) display toggle (hides, does not structurally remove)
 <!-- @gap id=g-lift-tier0-if-value-indexed-display-toggle-deferred sev=LOW status=deferred -->
 **NEW S298 (narrower sub-gap of the Tier-0 structural-if arc).** The sole-root Tier-0 for-lift per-item
