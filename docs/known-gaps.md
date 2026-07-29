@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 12 |
-| MED | 73 |
+| MED | 74 |
 | LOW | 40 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -4399,6 +4399,18 @@ This is `pa-base` **v2.4 §8's hollow-gate class in a shape v2.4 does not name**
 **Context — how it surfaced.** Categorizing the 36-fail local baseline S292 flagged as unverified. Full split: **34** in `compiler/tests/browser/` (8 files; `tracking`, non-blocking — the standing characterization is accurate for these), **1** in the blocking gate's tier ([[g-gate-tier-unit-test-red-local-green-cloud]]), **1** here. So "36 known browser-tier failures" was wrong on two of thirty-six, and both wrong ones are CI-integrity issues rather than test debt.
 
 **Fix direction (not scoped):** decide per file whether it belongs in a covered subdirectory or in an explicit CI path list — do NOT simply add `compiler/tests/` wholesale to `gate`, which is what `ci.yml:26`'s own comment records was reverted at S253 for going red on the M6.x within-node backlog. The canary's own failure is that backlog. — `NEW S297; MED; open`
+
+### g-dbauth-object-access-not-principal-gated — objects/blobs sit OUTSIDE the RLS moat, so a db-authoritative app has provably-isolated rows and application-code-protected files beside them — `NEW S297 (Adopter-A BaaS-parity #4, ask #3; slotted by bryan); MED; db-authoritative tier / roadmap`
+<!-- @gap id=g-dbauth-object-access-not-principal-gated sev=MED status=open -->
+**Scope: the INVARIANT only, deliberately NOT a storage API.** Adopter-A asked for a content-addressed bytes/object tier (BaaS-parity #4). They have **already built** their own `_{}` implementation and state they can **carry it indefinitely** — put/get/content-addressing/path conventions are theirs and are not asked for. **The one item they state they structurally cannot build is their ask #3: object access gated by the same pinned principal as the RLS moat.** Their framing: *"A file path is not RLS'd."*
+
+**The defect this names.** The S286-ratified DB-authoritative tier pins a per-request principal and lets Postgres RLS enforce isolation against **any** connection — that is the whole point of relocating the invariant into the DB. **Objects live outside that boundary.** So one app can hold rows that are provably tenant-isolated and files beside them protected only by application code. That is an **inconsistent trust boundary inside a single application**, inconsistent in the dangerous direction: the weaker half is the invisible one, and it is invisible precisely because it looks like ordinary file I/O.
+
+**Why this is an extension, not a new axiom.** S286 ratified that *"scrml WILL emit an opt-in DB-authoritative security tier that STACKS with §14.8.10 as defense-in-depth."* Principal-gated object access is that ratified axiom applied to a second object kind. It does **not** reopen the invariant-vs-policy firewall question and does not need a fresh threshold ruling.
+
+**Sequencing:** AFTER [[g-trigger-3-server-only-import-does-not-escalate]]. Not a dependency — different machinery — but Trigger 3 is already RULED (S280), unbuilt, confidentiality-adjacent, and closes two blocked items by construction, while this blocks no one today. The A1 per-request-principal machinery (`SET LOCAL` in a transaction) is what an object-access gate would key on, so the DB-authoritative foundations must stay stable underneath it.
+
+**Filed to stop the re-verification loop.** Independently confirmed ABSENT in three separate sessions (S292, S295, S297) — no gap id, no roadmap item, no SPEC section. A named entry ends that cycle. **This is a tracked, scoped, named item — NOT a build commitment.** — `NEW S297; MED; open`
 
 ### g-s34-catalog-wrong-meaning-class — five §34 rows DESCRIBE a different diagnostic than the code actually fires on; one is ruling-gated — `NEW S297 (§34 meaning-axis sweep); MED; freeze-gate integrity`
 <!-- @gap id=g-s34-catalog-wrong-meaning-class sev=MED status=open -->
