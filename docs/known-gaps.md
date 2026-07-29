@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 16 |
+| HIGH | 17 |
 | MED | 80 |
-| LOW | 39 |
+| LOW | 38 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -3708,7 +3708,7 @@ The A-unified fix (S279, #131) converted the STATIC top-level each mount to a co
 
 **Downgraded MED→LOW** on the falsified render claim + the narrow confirmed residue (a programmatic-only `.rows`-API defect that no known adopter hits). **Fix (if the `.rows` API ever bites):** Option A — extend the #131 comment-fence/sibling model to the nested runtime mount (createComment fence + insert `<option>`/`<tr>` as siblings into the row's real parent), removing the `<div>` and making `.rows` correct uniformly. Option B (context-detect + skip the div for "restricted parents") is REJECTED — "restricted parent" is not a clean category (select is fully tolerated; only the table `.rows` API is affected). **Deferred:** a shared-each-runtime change (SSR + nested-mount reconciler range-awareness) wanting a full S239 adversarial + regression sweep, disproportionate to a programmatic-only defect. Empirical witness + scripts: S298 (Peter). <!-- @gap id=g-nested-each-div-mount-in-restricted-parent sev=LOW status=open -->
 
-### G-EACH-ANCHOR-LOOKUP-FIRST-MATCH-DOCUMENT-WIDE — `_scrml_find_each_anchor` returns the first document-wide `scrml-each:N` fence; a duplicated each id collides — `NEW S279 (adversarial finder on the #131 fix); LOW; pre-existing behavior class`
+### G-EACH-ANCHOR-LOOKUP-FIRST-MATCH-DOCUMENT-WIDE — ROOT-CAUSED S299 to a component-expansion node-id COLLISION: two list components (or one instantiated twice) share an each id, so one panel renders the other's data and the other renders empty, with a green compile — `NEW S279 (adversarial finder on the #131 fix); ROOT-CAUSED + REPRODUCED S299; HIGH (was LOW); open`
 The fence anchor lookup (`runtime-template.js` `_scrml_find_each_anchor`) walks from `document` and returns the FIRST `<!--scrml-each:N-->` match, unscoped. If an each id ever appears twice in one document — a component containing an each instantiated >1×, or a soft-nav region swap that reuses the same id — every instance reconciles into the first fence and the rest stay empty. This is a PRE-EXISTING behavior class (the old `querySelector('[data-scrml-each-mount="each_N"]')` was also document-wide first-match), NOT a regression from the A-unified fix — flagged for parity with `_scrml_find_if_marker` (which scopes to `document.body` + accepts a passed scope for soft-nav rehydrate). Fix direction: mirror the `<if>` marker's scope parameter so each-instances resolve within their own subtree.
 
 **⚠️ S299 — RE-DERIVED FROM THE CODE. This entry's premise is STALE, and the real fix has a third part neither this entry nor the `if=` Phase-2 SCOPING names.** Both documents say `_scrml_find_each_anchor` has no scope parameter and should be given one. It already has one:
@@ -3729,7 +3729,42 @@ So the correct statement is three parts, not one:
 
 **Consequence for `if=` Phase 2:** the SCOPING doc calls this a prerequisite and says "close it first" — that stands, but it is **not** the one-line parity change the doc implies. It is caller-threading plus a cache-keying change in the reconcile path (`runtime-template.js` / `emit-each.ts`) that S293–S298 worked heavily. Re-estimate the arc accordingly, and re-read this entry rather than the SCOPING §6 OQ-2 text, which was written from the same stale premise.
 
-**Not reproduced** — this is a code-path read, and per the entry's own history the symptom is latent (the `if=` around an `<each>` is dirty today, so the each is permanently in the DOM). Reproduce the two-live-instances case before fixing. <!-- @gap id=g-each-anchor-lookup-first-match-document-wide sev=LOW status=open -->
+**Not reproduced** — this is a code-path read, and per the entry's own history the symptom is latent (the `if=` around an `<each>` is dirty today, so the each is permanently in the DOM). Reproduce the two-live-instances case before fixing.
+
+---
+
+## 🔴 S299 — REPRODUCED, AND THE ROOT IS NOT THE ANCHOR LOOKUP AT ALL. Severity LOW → HIGH.
+
+Reproduction was the instruction above, and it inverted the entry a second time. **This is a present, demonstrated data-correctness bug with a green compile — not a latent hazard.**
+
+**Reproducer** (0 errors, 0 warnings): one component containing an `<each>`, instantiated twice on a page with two different lists. **Executed** in happy-dom, not grepped:
+
+```
+panel 0: [B-one]     <-- renders the SECOND list's data
+panel 1: []          <-- empty
+```
+
+**Emit shows why** — the two instances share ONE each id:
+```
+4 × <!--scrml-each:01w3nf2n_6-->                      (2 instances × start+end fence)
+2 × _scrml_each_renderers["each_01w3nf2n_6"] = …      (second write CLOBBERS the first)
+2 × _scrml_find_each_anchor(document, "01w3nf2n_6")   (both resolve to the FIRST fence)
+```
+
+**And it is broader than re-instantiation.** Two *different* components (`PanelA`, `PanelB`), each with its own `<each>`, **also both get id `_6`**. Three instantiations all get `_6`. So the id counter **restarts per component-body expansion** — CE captures a component body as raw text and re-parses it (`component-expander.ts`; `_deepCloneAst`'s `out.id = ++counter.next` is the CHANNEL-inlining path, not this one), and each re-parse numbers from scratch.
+
+**Consequence: any page with two list components is wrong today.** Extremely common shape, zero diagnostics.
+
+**The root is a component-expansion node-id collision, not an anchor-resolution defect.** That matters because it changes what fixes it:
+
+- Scope-threading + cache-keying (this entry's corrected direction, and the `if=` Phase-2 SCOPING's prerequisite) fixes the ANCHOR resolution but **cannot** fix `_scrml_each_renderers[key]` second-write-wins. Both instances would still share one render fn.
+- The necessary fix is **unique ids per component expansion** — thread a shared node counter through CE's body re-parse. With distinct ids, distinct renderer keys and distinct fences fall out, and the document-wide first-match lookup stops mattering for this case.
+
+**Blast radius, bounded by probe:** attribute bindings use a SEPARATE sequence and do NOT collide (verified: two components' `if=` bindings emit `_scrml_attr_if_1` / `_2` correctly). So the exposure is confined to names derived from `node.id`. `<each>` is the confirmed victim; other `node.id`-derived emissions inside component bodies are **unprobed** and should be swept as part of the fix.
+
+**Third re-scope of this entry, and it has moved subsystems** — filed as an each-anchor scope parameter (LOW, latent), corrected to caller-threading + cache keying, now root-caused to the CE node counter. Each move came from going one level deeper empirically rather than accepting the previous framing. **Do not scope a fix from the paragraphs above this block** — they describe real secondary defects (the caller does pass `document`; the cache is id-keyed) but neither is the cause.
+
+**Held for a ruling:** threading a shared counter through CE's re-parse changes every `node.id`-derived emitted name inside expanded components, which is a foundational change to a subsystem neither the gap nor the `if=` SCOPING named. Not started. <!-- @gap id=g-each-anchor-lookup-first-match-document-wide sev=HIGH status=open -->
 
 ### G-NAVIGATE-SOFT-NAV-FULL-RELOAD — `navigate()` is spec-only; every cross-page navigation full-reloads (no client soft-nav / router) — `NEW S279 (GH issue #27, pjoliver11 adopter report, filed 2026-07-18); MED`
 `navigate()` / cross-`<page>` navigation currently triggers a full document reload rather than a client-side soft navigation — the SPA nav story is spec-ahead but the runtime router isn't wired, so an adopter clicking between pages sees a full white-flash reload each time. **Fix vehicle:** the ESM-chunks arc **Unit 4** (`import()` nav-time chunk loader) is the unblocker — it replaces the classic `createElement("script")` injection with `import()`'s per-call promise and lands the soft-nav router (also unblocks the held Wave-1c pieces 2+3, worktree `8fd5fd07`). Tracked against ESM U4, not a standalone dispatch. Triaged from the adopter-issue channel S279 (was untriaged since 07-18). **S279 UPDATE — cross-chunk soft-nav MUST ride MODULE SCOPE (esm), NOT classic.** The Wave-1c pieces-2+3 branch (classic-path `<script>`-injection cross-chunk loader) was rebased onto main + S277-drift-cleaned, but a PA adversarial review found + EMPIRICALLY CONFIRMED a **SEVERE collision blocker**: each-ids/cell-names/fn-names are assigned PER-FILE (every route chunk starts at `each_1`…) but `_scrml_each_renderers` + the cell store are SHARED classic globals. Two routes both with an `<each>` emit the SAME `scrml-each:N` + register `_scrml_each_renderers["each_N"]` at module top-level → under cross-chunk soft-nav (chunks coexist) route B's load CLOBBERS route A's registry → nav-back renders B's rows into A's fence. Guaranteed, session-durable. This is the exact shared-global collision the ESM arc dissolves via module scope. **bryan RULED (S279): Option B — defer Wave-1c-classic; fold cross-chunk nav into ESM U4** (the `import()` loader on the esm/module path, where chunks are module-scoped → no clobber). Wave-1c classic land REJECTED. The loader logic + flag-gate boot + S277-safe outlet + tests PORT to U4. **U4 REFERENCE:** `origin/worktree-agent-a2ed001a5de228134` (pre-rebase) + local `feat/wave1c-nav` (rebased onto df6d269c, S277-drift-fixed, conf-NAV E-OUTLET flipped) + `docs/changes/navigate-wave1c-cross-chunk/`. **U4 DESIGN CONSTRAINT — FIRST DISJUNCT FALSIFIED S280.** The constraint was written as "per-module chunk scope (esm) OR per-chunk id/cell namespacing". **The esm disjunct is FALSE** — module scope does not isolate the colliding state, because that state lives in the RUNTIME, which is a singleton ES module every chunk imports. Proven in a real browser; see [[g-esm-module-scope-does-not-isolate-chunk-state]]. **Only the SECOND disjunct is real: per-chunk id/cell namespacing, and it is module-format-agnostic** — so it also unblocks the held Wave-1c CLASSIC loader. bryan's S279 Option-B ruling relocated the blocker onto the esm path rather than removing it; U4 as scoped cannot be built and the dispatched agent correctly REFUSED. Also flagged (Finder A, MEDIUM): a lost-race nav still runs its chunk's module-init (pollutes globals); `_scrml_chunk_loading` is not nav-scoped. <!-- @gap id=g-navigate-soft-nav-full-reload sev=MED status=open -->
