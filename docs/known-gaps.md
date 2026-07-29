@@ -583,6 +583,55 @@ is gated on the item root being the SOLE non-whitespace top-level root of the ea
 deferred path. Nested (non-item-root) `if=` children are likewise unchanged create-time (separate,
 out of scope). — `NEW S298; LOW; deferred (create-time gate + comment signal; single-root shape shipped reactive)`
 
+### g-lift-tier0-if-multiroot-deferred — Tier-0 `${for…lift}` sibling: a per-item `if=` on ONE OF SEVERAL roots of a multi-root lift item keeps the display toggle (a flip hides, does not structurally remove)
+<!-- @gap id=g-lift-tier0-if-multiroot-deferred sev=LOW status=deferred -->
+**NEW S298 (Tier-0 for-lift sibling of [[g-each-peritem-if-multiroot-deferred]]).** The SINGLE-root
+Tier-0 `${for…lift}` per-item `if=` is now REACTIVE + STRUCTURAL (SPEC §17.1), mirroring the Tier-1
+`<each>` fix: the sole reconciled item root is emitted as a swap-in-place tracked node — EITHER the
+element (cond true) OR a `<!--scrml-if-row-->` COMMENT placeholder (cond false) — and a live-keyed
+per-item effect (`_scrml_ifrow_apply`, the SAME `runtime-template.js` helper Tier-1 uses) swaps one for
+the other in place, transplanting `_scrml_key`, so an in-place flip OR a same-key reconcile adds/removes
+the row. Was a display toggle (`elVar.style.display='none'` — element present, §17.1 violation flagged
+by bryan S297). Detection is at the emit site (`emit-lift.js` `emitCreateElementFromMarkup`): the swap
+is gated on the item root being the SOLE structural top-level root of the lift body
+(`buildLiftReconcileCtx` `soleRootMarkupNode`).
+
+**Still DEFERRED (this gap):** when the if-gated element is one of SEVERAL structural roots of the lift
+body, the swap is not applied — a naive element↔comment swap would mis-track the sibling roots (the same
+`_scrml_group` staleness the Tier-1 gap describes). That shape keeps the reactive display toggle + a
+`// W-LIFT-TIER0-IF-MULTIROOT-DEFERRED` code-comment signal at the emit site (no §34 warning code minted
+— a code comment is the signal, mirroring Tier-1). Nested (non-item-root) `if=` children are likewise
+unchanged. — `NEW S298; LOW; deferred (display toggle + comment signal; single-root shape shipped structural)`
+
+### g-lift-tier0-if-inline-form-non-reconciled-display-toggle — the INLINE `${for…lift}` form's per-item `if=` stays a display toggle (§17.1: element present when false); only the RECONCILED block form was made structural
+<!-- @gap id=g-lift-tier0-if-inline-form-non-reconciled-display-toggle sev=MED status=open -->
+**NEW S297 — caught by the Tier-0 structural-if arc's class-probe (PA review), NOT the reported/fixed shape.**
+The Tier-0 structural-if fix (this arc, `emit-lift.js` `emitCreateElementFromMarkup`) covers the RECONCILED lift
+path — the block form `${ for (let x of @c) { lift <m if=…> } }`, which is bryan's exact flagged shape (his
+note: "`_scrml_effect` sets `style.display`" = the reconciled path). But the compact INLINE form
+`${ for x of @c lift <m if=…> }` compiles to a DIFFERENT lowering that does NOT emit `_scrml_reconcile_list`
+(verified by emit probe on `115e8b1b`+this arc: `reconcile_list=false`, `_scrml_ifrow_apply` absent), and its
+per-item `if=` stays `style.display = cond ? "" : "none"` → the element is PRESENT in the DOM when false, a
+§17.1 violation UNCHANGED by this arc (it routes through `emitSetAttrs`, deliberately left untouched). Two
+follow-on questions: (1) why the inline form does not keyed-reconcile over a reactive cell (possibly a broader
+inline-lift reconcile gap, not just `if=` — needs its own reproduce); (2) whether its `if=` should get a
+non-reconcile structural add/remove. **Filed so the §17.1 hole is not misrepresented as fully closed** — the
+reconciled/block form (the reported violation) IS fixed; this compact form is the residual. — `NEW S297; MED; open`
+
+### g-lift-tier0-if-value-indexed-display-toggle-deferred — a sole-root Tier-0 for-lift `if=` whose predicate is a value-indexed `@cell == item.field` keeps the O(2) display toggle (hides, does not structurally remove)
+<!-- @gap id=g-lift-tier0-if-value-indexed-display-toggle-deferred sev=LOW status=deferred -->
+**NEW S298 (narrower sub-gap of the Tier-0 structural-if arc).** The sole-root Tier-0 for-lift per-item
+`if=` is now structural for item-reading (`r.on`) and plain-cell (`@show`) predicates. The ONE sole-root
+shape still on the display toggle is the S103 value-indexed select-row predicate (`@cell == item.field`,
+`detectPredicateShapeBind` match with a single `@`-ref === the cell): it keeps its
+`_scrml_reactive_subscribe_when` O(2)-per-write registration, because routing it through the per-item
+effect would auto-track the cell read → O(N) per write, regressing the deliberate select-row
+optimization (whose conformance is in the value-indexed-subscribers baseline). So for that predicate
+shape ONLY, codegen keeps `elVar.style.display` (§17.1 hide, not structural remove) + a
+`// W-LIFT-TIER0-IF-VALUE-INDEXED-DISPLAY-TOGGLE-DEFERRED` code-comment signal. This is the exact Tier-0
+analog of the narrower deferred sub-gap already noted in `tryEmitLiftIfReactive`'s S103 comment. Closing
+it needs a structural swap that preserves the value-indexed dispatch (a bounded follow-on). — `NEW S298; LOW; deferred (value-indexed shape keeps O(2) display toggle)`
+
 ### g-main-red-against-its-own-pre-commit-gate — `main` FAILS the documented pre-commit gate: an emitted `.server.js` carries an ESM `export`, which `node --check` rejects as CJS
 <!-- @gap id=g-main-red-against-its-own-pre-commit-gate sev=HIGH status=narrowed -->
 **S282 — DOES NOT REPRODUCE on the ASUS-Vivobook clone; almost certainly XPS-clone-local, not a tree property.** The failure was recorded on `bryan-XPS-8950`. On `bryan-maclee-ASUS-Vivobook` this session, at both `a0344d75` and `feddd6b4`:

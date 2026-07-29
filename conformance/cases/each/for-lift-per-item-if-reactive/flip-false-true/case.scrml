@@ -1,0 +1,17 @@
+${
+    <rows> = [{ id: 1, name: "Alice", on: false }, { id: 2, name: "Bob", on: true }]
+    function show(id: number) {
+        @rows = @rows.map(r => {
+            if (r.id == id) {
+                return { ...r, on: true }
+            }
+            return r
+        })
+    }
+}
+<ul id="list">${
+    for (let it of @rows) {
+        lift <li class="row" data-id=it.id if=it.on><span class="nm">${it.name}</span></li>
+    }
+}</ul>
+<button id="show1" onclick=show(1)>show1</button>

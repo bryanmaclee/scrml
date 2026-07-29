@@ -1,0 +1,18 @@
+{
+  "id": "for-lift-per-item-if-reactive-flip-true-false",
+  "description": "Tier-0 ${for…lift} per-item if= REACTIVE unmount (SPEC §17.1) — THE half broken today (was a reactive display toggle: element hidden but STILL in the DOM). Both rows start on:true (visible). Clicking #hide1 maps @rows flipping id=1's on false; the per-item effect swaps Alice's <li> for a comment placeholder IN PLACE, so her row is STRUCTURALLY removed (count 2 -> 1), Bob keeps his identity (keyed).",
+  "language-version": "1.0",
+  "spec": "§17.1",
+  "rationale": "§17.1 a per-item if= that flips true->false removes the element from the DOM. The pre-fix Tier-0 lowering set style.display='none' (element present), violating §17.1; the swap-in-place tracked node (element <-> comment, key transplanted) makes the flip a real unmount. Survivor id=2 pins keyed reconcile through the swap.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#hide1" }],
+    "state": { "rows": [{ "id": 1, "name": "Alice", "on": false }, { "id": 2, "name": "Bob", "on": true }] },
+    "domAnchored": [
+      { "selector": ".row", "count": 1 },
+      { "selector": "#list li.row[data-id=\"1\"]", "count": 0 },
+      { "selector": "#list li.row:first-child .nm", "text": "Bob" }
+    ]
+  }
+}

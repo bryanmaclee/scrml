@@ -240,7 +240,36 @@ function scanItemDerivedLocals(body, newIterVar) {
 // top-level Tier-0 path) capture aliases uniformly. MUST be called BEFORE the ctx
 // is pushed (the scan reads the ancestor-only stack).
 export function buildLiftReconcileCtx(wrapperVar, keyVar, iterVar, body) {
-  return { wrapperVar, keyVar, iterVar, itemDerivedLocals: scanItemDerivedLocals(body, iterVar) };
+  // g-lift-tier0-if-reactive-structural — the SOLE-structural-root discriminant
+  // for the reactive per-item `if=` STRUCTURAL swap (SPEC §17.1), the Tier-0
+  // for-lift sibling of the Tier-1 <each> fix (emit-each.ts). A structural root
+  // is any top-level body child that RENDERS DOM — a `lift-expr` (markup / text
+  // interp), a nested `for-stmt` (inner list), or an `if-stmt` (conditional
+  // block). Bare logic (assignments / let-decls) render nothing. When exactly
+  // ONE structural root exists AND it is a MARKUP lift-expr, that markup node IS
+  // the single reconcile-tracked item root: a per-item `if=` on it lowers to the
+  // element⇄comment swap (mirroring Tier-1's isSoleItemRoot). With >1 structural
+  // root the item is a multi-node group; a naive swap would leave sibling roots
+  // mis-tracked, so a per-item `if=` on one of them is DEFERRED to the display
+  // toggle (see emit at ~1378 + docs/known-gaps.md). Node identity (not a param)
+  // carries the discriminant to emitCreateElementFromMarkup — the same node
+  // object flows through emitLiftExpr(child.expr.node) into the emit site.
+  const _structuralRoots = (Array.isArray(body) ? body : []).filter(
+    (c) => c && (c.kind === "lift-expr" || c.kind === "for-stmt" || c.kind === "if-stmt"),
+  );
+  const _rootMarkupNodes = _structuralRoots
+    .filter((c) => c.kind === "lift-expr" && c.expr && c.expr.kind === "markup" && c.expr.node)
+    .map((c) => c.expr.node);
+  const soleRootMarkupNode =
+    _structuralRoots.length === 1 && _rootMarkupNodes.length === 1 ? _rootMarkupNodes[0] : null;
+  return {
+    wrapperVar,
+    keyVar,
+    iterVar,
+    itemDerivedLocals: scanItemDerivedLocals(body, iterVar),
+    soleRootMarkupNode,
+    itemRootMarkupNodes: _rootMarkupNodes,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1329,6 +1358,13 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
   const elVar = genVar(`lift_el`);
   lines.push(`const ${elVar} = document.createElement(${JSON.stringify(tag)});`);
 
+  // g-lift-tier0-if-reactive-structural — the node this factory RETURNS. Normally
+  // the element itself; for a SOLE reconciled item root carrying a per-item `if=`
+  // it becomes the element⇄comment tracked var (`_scrml_cur_*`), so the factory
+  // mounts EITHER the element (cond true) OR a placeholder comment (cond false) —
+  // the §17.1 structural swap. Set only inside the AST `if=` branch below.
+  let _returnVar = elVar;
+
   // Emit setAttribute calls
   for (const attr of attrs) {
     if (!attr) continue;
@@ -1375,6 +1411,45 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         : (val.raw || "");
       const exprJS = emitExprField(val.exprNode, raw, liftExprCtx());
       const rawText = val.kind === "variable-ref" ? (val.name || "") : (val.raw || "");
+      // g-lift-tier0-if-reactive-structural (SPEC §17.1) — Tier-0 for-lift sibling
+      // of the Tier-1 <each> fix. A per-item `if=` on the SOLE reconciled item
+      // root is REACTIVE + STRUCTURAL, not a display toggle: the reconcile-tracked
+      // node is ALWAYS present — EITHER the element (cond true) OR a `<!--scrml-if-
+      // row-->` COMMENT placeholder (cond false). The factory returns that ONE
+      // tracked node (`_returnVar`), so root-count stays 1, and a live-keyed
+      // per-item effect swaps element⇄comment IN PLACE via `_scrml_ifrow_apply`
+      // (runtime-template.js — the SAME helper Tier-1 uses), transplanting
+      // `_scrml_key` so keying / reorder / delete keep working with zero reconcile-
+      // core change. First-run safe: the helper is a no-op while `_cur` already
+      // matches the create-time condition (before the reconciler assigns a key).
+      {
+        const _ctx = currentLiftReconcileCtx();
+        const _isSoleItemRoot = !!(_ctx && _ctx.soleRootMarkupNode === node);
+        // Preserve the S103 value-indexed select-row optimization: a
+        // `@cell == item.field` predicate keeps its `_scrml_reactive_subscribe_when`
+        // O(2) legacy path (routing it to the effect would auto-track the cell →
+        // O(N) per write). Its §17.1 structural-remove is a NARROWER deferred sub-
+        // gap (g-lift-tier0-if-value-indexed-display-toggle-deferred) — the row
+        // still hides rather than unmounts. Non-value-indexed sole-root predicates
+        // (item-reading `r.on` OR plain `@show`) take the structural swap.
+        const _refs = [...new Set((rawText.match(/@([A-Za-z_$][A-Za-z0-9_$.]*)/g) || []).map(r => r.replace(/^@/, "").split(".")[0]))];
+        const _pred = detectPredicateShapeBind(rawText);
+        const _isValueIndexed = _pred.matched && _refs.length === 1 && _refs[0] === _pred.cellName;
+        if (_isSoleItemRoot && !_isValueIndexed) {
+          const phVar = `_scrml_ph_${genVar()}`;
+          const curVar = `_scrml_cur_${genVar()}`;
+          lines.push(`const ${phVar} = document.createComment("scrml-if-row");`);
+          lines.push(`let ${curVar} = (${exprJS}) ? ${elVar} : ${phVar};`);
+          for (const l of maybeWrapLiftPerItemEffect([`${curVar} = _scrml_ifrow_apply(${curVar}, ${elVar}, ${phVar}, (${exprJS}));`])) lines.push(l);
+          _returnVar = curVar;
+          continue;
+        }
+        if (_isSoleItemRoot && _isValueIndexed) {
+          lines.push(`// W-LIFT-TIER0-IF-VALUE-INDEXED-DISPLAY-TOGGLE-DEFERRED: sole-root value-indexed if= keeps the O(2) display toggle (structural remove would regress the S103 select-row opt). See docs/known-gaps.md.`);
+        } else if (_ctx && Array.isArray(_ctx.itemRootMarkupNodes) && _ctx.itemRootMarkupNodes.includes(node)) {
+          lines.push(`// W-LIFT-TIER0-IF-MULTIROOT-DEFERRED: multi-root item + per-item if= — display toggle (a structural swap would mis-track the sibling roots). See docs/known-gaps.md.`);
+        }
+      }
       if (tryEmitLiftIfReactive(lines, elVar, exprJS, rawText)) continue;
       const updaterVar = `_scrml_if_${genVar()}`;
       lines.push(`function ${updaterVar}() { ${elVar}.style.display = (${exprJS}) ? "" : "none"; }`);
@@ -1754,7 +1829,11 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
     }
   }
 
-  return elVar;
+  // Normally `elVar`; for a SOLE reconciled item root with a per-item `if=` this
+  // is the element⇄comment tracked var so the factory mounts the §17.1 structural
+  // node (see the `if=` branch above). Byte-identical to the prior `return elVar`
+  // for every shape that does NOT take the structural swap.
+  return _returnVar;
 }
 
 // ---------------------------------------------------------------------------
