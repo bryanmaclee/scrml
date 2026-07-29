@@ -4412,6 +4412,22 @@ Authority: **`docs/audits/s34-meaning-axis-2026-07-28.md`** (baseline `main@ed25
 
 `E-PA-002` was found independently while working the S295 blocked list (its row says *"invalid `protect=` syntax"*; it fires on a missing `<db src=>` file **plus** unrecoverable `CREATE TABLE`) — the sweep confirmed it as briefed. Per-row proposed replacement text is in the report; **not applied here** — the corrections want a single ruling pass, not five drive-by edits.
 
+**⚑ S297 DROP-CHECK on `W-PROGRAM-001` — RESOLVED, and it INVERTS the framing. Read this before correcting any of the five.**
+bryan ruled on this code at **S42**, verbatim: *"1 for now. I want to pin this issure for further discussion later"* — and the entire discussion behind it (224 of 229 warn-only samples firing, ~98%; path-based suppression under `samples/compilation-tests/`; the parked "is that directory fragment territory?" question) is about **files with no `<program>` root**. That is the **implementation's** meaning. A live pin exists at `docs/pinned-discussions/w-program-001-warning-scope.md` (opened 2026-04-25, still reading *"No compiler change authorized"*).
+
+So this is **NOT** the `E-ATTR-012` dropped-by-design shape — that was a real rule deliberately retired with its row left behind. **Here it is the reverse: the IMPLEMENTED meaning is the live, ruled-on one, and the §34/§4.12 "unnamed nested `<program>`" prose is the ORPHAN** — absent from user-voice, changelog, design-insights and the pin. Nothing indicates that guarantee was ever wanted, decided, or built.
+
+**Disposition: neither drop nor implement — CORRECT THE PROSE** to describe the diagnostic we actually have and already ruled on. The nested-`<program>`-naming guarantee would be a separate feature needing its own code, and nothing suggests demand. **This also means the finding is less alarming than the sweep framed it:** the "guarantee with zero enforcement" was never a decided guarantee, only prose that drifted in.
+
+**⚠️ CONSEQUENCE FOR THE OTHER FOUR — do not assume the prose is the survivor.** The natural reading of a WRONG-MEANING row is "the prose is right, the code is wrong/missing." `W-PROGRAM-001` is the opposite. **Each remaining code needs a decision-record check FIRST** (user-voice · changelog · design-insights · `docs/pinned-discussions/`), or the correction pass risks enshrining prose that drifted in — precisely what §34 already did here. S297 triage of that record, by presence:
+
+| code | user-voice | changelog | pinned | read |
+|---|---|---|---|---|
+| `E-CG-001` | 5 | 2 | — | Substantial + RECENT (S245 acorn-exact protected-field egress scan, fail-closed). Implemented meaning is clearly live → **same disposition as `W-PROGRAM-001`: correct the prose.** |
+| `E-PA-002` | 0 | 7 | — | Changelog-only, but the implemented meaning is demonstrably live — an adopter hit it this window and lane 3 improved its message deliberately without touching the gate. → **correct the prose.** |
+| `W-AUTH-001` | 3 | 3 | — | Has a record but **no pin of its own** (an earlier PA note claiming a pin was wrong — the hit is a *mention inside* the `W-PROGRAM-001` pin). Which meaning the record discusses is **NOT yet established** — check before writing a row. |
+| `E-COMPONENT-019` | 0 | 0 | — | **ZERO decision record anywhere.** Neither meaning is attested. The genuine outlier: correcting it needs a fresh code+SPEC read and may need a ruling rather than a correction. |
+
 **Why this matters beyond tidiness:** §34 is the **freeze gate**. A row that misdescribes its own diagnostic means the gate is measuring something other than what it claims, and the language-1.0 coverage argument is built on that catalog. Also notable: `error.map.md` already carried the CORRECT implemented meaning for `E-PA-002` where §34 is wrong — **the nav map is currently a better meaning-oracle than the normative catalog.** — `NEW S297; MED; open`
 
 ### g-s34-dead-section-xrefs — three families of §34 rows cite sections that do not exist; one names a subsystem with no normative section at all — `NEW S297 (§34 meaning-axis sweep); MED; freeze-gate integrity`
