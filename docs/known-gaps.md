@@ -143,6 +143,17 @@ The reason (d) was not simply taken: the role-drop may be deliberate defence-in-
 
 Adopter-flagged S297 (they observed the parent read as resolved-symptom-plus-open-policy in one entry and suggested the split; their queries do not hit the scanner's undetermined set today, and they accept the warning as the contract if one ever does). Widen-vs-limit shape → **R2 minimum**, bryan rules. — `NEW S297; MED; open`
 
+**⚑ RULED S297 — DEFERRED DELIBERATELY, with a named re-trigger. This is a disposition, not a backlog item.**
+**Re-trigger:** a second adopter hits a grant-shaped failure, **OR** the grant scanner's undetermined-set warning fires in real adopter code. Until one of those, the conservative behavior stands (everything wrapped) and this is not open work.
+
+Reasoning, recorded so it is not re-litigated:
+1. **(b) removed the pain.** Nobody is blocked — Adopter-A's harnesses pass (17/17 + 11/11), their workaround is deleted, `users` carries exactly `SELECT`. Ruling (d) now would re-architect a boundary that currently works with no failing case driving it.
+2. **The undetermined-case rule IS the content, and there is ZERO field data on it.** The grant scanner is deliberately not a SQL parser — a CTE, a subquery in FROM/JOIN position, LATERAL, EXECUTE, or a dynamic table identifier makes a query undetermined and emits a warning naming it (Adopter-A explicitly endorsed that all-or-nothing design: *"a partial answer really is indistinguishable from a complete one"*). **Adopter-A confirmed none of their queries hit that limit today.** Ruling a security default with no instance of the case it governs produces a rule nobody can evaluate.
+3. **Deferral is the reversible direction.** It keeps everything wrapped. Taking (d) relaxes a security envelope on reasoning rather than evidence — and this same session produced a worked example of that failing (`if=`'s display lowering: defensible when written, wrong for three months, found only by execution).
+4. **The thing to avoid was SILENCE, not deferral.** This spent five sessions buried inside a resolved parent entry. An explicit deferral with a re-trigger is a durable answer; "still open" is not.
+
+**If the re-trigger fires, the decision is NOT "stop wrapping" — it is the undetermined-case rule.** Wrap-when-undetermined keeps (b)'s behavior exactly where it matters most; don't-wrap-when-undetermined opens a hole precisely where the compiler admits it cannot see. That is the fork. — `DEFERRED S297 (re-trigger named)`
+
 ### G-SPA-RUNTIME-GZIP-BUDGET-KNIFE-EDGE — the 16 KB SPA-runtime gzip budget is at ~127 B margin on base, independent of any in-flight arc — `NEW S282; HIGH; open (a bryan decision, not a bug)`
 Surfaced while scoping the BUG-6 accessor-rename (`docs/changes/chunk-namespacing/BUG6-RENAME-SCOPING.md` §6). `v0-3-x-spa-tree-shake-phase-b.test.js:145` asserts the assembled SPA runtime is `< 16 * 1024` gzip. **Agent-measured on the test's own `SPA_COUNTER` fixture at base `e8fdd44c`: 16,257 B — 127 B under the 16,384 budget, with no chunk-namespacing changes present.** (Scoping measurement; the execution session re-measures as its step 1, R26-style — do not treat 127 B as verified-final.)
 
