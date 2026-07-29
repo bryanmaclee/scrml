@@ -1,4 +1,82 @@
 <!-- ============================================================= -->
+<!-- S298 WRAP (Peter/Windows) — prepended 2026-07-29.              -->
+<!-- S297 (bryan) + S297 (Peter) + S295/S296 + all prior UNCHANGED below. -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 298 (Peter · Windows) — WRAP
+
+**Date:** 2026-07-29. `/boot` Profile A. `main` at **`ed2515e7`** (+ this wrap PR), coherence 0/0.
+**Ledger-hygiene session — NO compiler source changed.** Two PRs merged (#257 · #258), one in-flight
+(#259), two findings routed to bryan. Reproduce-first earned its cost twice. Delta-log **[869]-[877]**.
+
+## 🎯 WHAT LANDED
+
+| PR | What |
+|---|---|
+| #258 `ed2515e7` | **`g-nested-each-div-mount-in-restricted-parent` (S279, MED) EMPIRICALLY FALSIFIED → re-characterized + downgraded LOW.** Real headless Chrome AND Firefox witness: nested `<each>` under `<select>`/`<tbody>` renders FINE both engines (options selectable + `.options`=3; `<tr>`s `display:table-row`, cells visible; AX subtree identical to control, div = ignored `role=none`). ONLY real defect = `tbody.rows`/`table.rows` DOM API reads 0 (programmatic-only). Fence-model fix kept as Option A, deferred. |
+| #257 `5ae29dc0` | **Fixed stale `@generated:gap-counts` §0 rollup** (HIGH 10→11, MED 70→71 drift). Pure regen. |
+| #259 (in-flight) | Relabel 6 `NEW S298`→`NEW S297` (git-blame-confirmed S297 #251/#255 mislabels). No sev/status change. |
+
+## 🔴 THE NEXT PA'S PICKUP — what's routed + what's owed
+
+1. **TWO findings routed to bryan, awaiting his ruling (both his lane, both notes in his `scrml-support`
+   inbox, committed+pushed):**
+   - **Braceless `for/lift` grammar fork** (`…0318…`): `for (…) lift <m>` without `{}` silently emits
+     broken code — the parenless `for x of @c lift` emits **`for (const it of of)`**, `node --check`-valid
+     JS that ReferenceErrors at runtime (dead page, 0 errors). SPEC §17.4 sanctions only parens+braces.
+     Reject-vs-support = his grammar-surface call. My rec: reject with a diagnostic. **This was the S297
+     each-queue residual gap `g-lift-tier0-if-inline-form-non-reconciled-display-toggle` — reproduce-first
+     showed its "make if= structural" framing treats a symptom.**
+   - **Gap-counts gate gremlin** (`…0547…`): `state.ts --check` isn't in CI + `cloud-maps` auto-regen is
+     dead (his S295 #11) → the §0 rollup drifts ungated (his S295 finding #2, root-caused). Naive gate
+     fails (CI shallow clone can't reproduce git-history-derived `recent-sessions`). Fix = gap-counts-scoped
+     `--check` or `fetch-depth:0` — his CI-infra call.
+2. **#259 relabels — in-flight at wrap** (CI running; needs Peter's merge-approval, classifier-gated like
+   #257/#258). If it didn't land, it's a trivial re-fire.
+3. **Remaining Peter-lane each queue** (post lane-filter): `nested-each-div-mount` DONE (falsified);
+   `each-body-let-alias` + `forEach-lift-codegen-rejection` are **bryan-lane** (their gaps say
+   "support-or-reject"). So the each-queue is largely drained of clean Peter-lane items — next adopter
+   bug or bryan's rulings drive the next pickup.
+
+## 🧭 THE FINDINGS THAT OUTLAST
+
+- **Reproduce-first + a FAITHFUL oracle earned it, twice.** The nested-each gap's "renders empty" was
+  wrong on every dimension but a narrow API read — and happy-dom was an UNFAITHFUL oracle (claimed
+  `.options`=3 but empty innerText, no `.rows`), so only real Chrome+Firefox could witness it. Without the
+  real-browser pass I'd have built a shared-runtime fence rewrite for a mostly-nonexistent defect.
+  [[feedback-gap-report-fix-direction-can-be-wrong]] reconfirmed (the gap direction was wrong AGAIN).
+- **Lane discipline — Peter corrected me mid-session ("keep in our lane").** A pickup that resolves to
+  "support-or-reject a form" or "amend §X" is bryan's grammar/freeze lane even when reproduce-first is what
+  reveals it. New durable: [[feedback-stay-in-adopter-lane-not-grammar-decisions]]. Pre-filter pickups for
+  that shape.
+- **Generated-doc drift is real and ungated here.** The §0 gap-counts block drifted (incl. off my own S297
+  wrap not regenerating after filing the #228 HIGH), and `state.ts --check` is absent from CI while
+  `cloud-maps` (the auto-regen) is dead. The S295 "ledger drifts faster than reconciled" finding, now
+  root-caused. A wrap MUST regen after any gap-marker edit (this wrap did).
+
+## ✅ GATE / HOUSEKEEPING
+
+- No compiler source touched → cloud `gate` is authority on the doc PRs; #257/#258 both green (`gate` +
+  `windows`; `tracking` = the documented non-required flake). `state.ts --check` + `facts.ts --check` green
+  on `main`. Gap counts: **HIGH 11 · MED 70 · LOW 40**.
+- **Worktrees:** none created this session; only main + persistent `scrml-pinned` (`9c950dfe`). Clean.
+- **Maps:** docs-only session, no code landed → **maps unchanged** (`project-mapper` not run).
+- **Inbox:** flogenceP retirement note (`…1729…workaround-retirement`) drained → `read/` at boot. Sent 2
+  notes to bryan's inbox this session.
+- **Concurrency:** SOLO at boot; bryan's #254 (docs/gaps) left open from S297-bryan, and his
+  `docs/ci-coverage-gaps-s297` branch force-updated mid-session (he may be active) — disjoint from my
+  docs edits (different files/gaps). No collision.
+
+## Tags
+#session-298-peter #ledger-hygiene #reproduce-first-falsified-a-gap #real-browser-witness-chrome-firefox
+#happy-dom-unfaithful-oracle #nested-each-div-mount-downgraded-low #gap-counts-drift-fixed
+#braceless-for-lift-routed-to-bryan #gate-gremlin-routed-to-bryan #keep-in-our-lane #two-prs-merged-one-inflight
+
+---
+
+
+<!-- ============================================================= -->
 <!-- S297 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-29.        -->
 <!-- S297-Peter + S295/S296 + all prior UNCHANGED below.            -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->
