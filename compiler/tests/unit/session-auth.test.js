@@ -323,24 +323,28 @@ describe("S8b: RI auto-escalates auth for protect= fields", () => {
     expect(result.routeMap.authMiddleware.size).toBe(0);
   });
 
-  test("W-AUTH-001 warning emitted on auto-escalation", () => {
+  // S299 CODE SPLIT: this fire was `W-AUTH-001` until S299, which §52.11 defines
+  // as an unrelated guarantee (`<var server>` with no detectable initial load,
+  // fired from type-system.ts). Fresh code allocated per the S297 E-IMPORT-007
+  // ruling — additive is inert, renumbering the documented one is not.
+  test("W-AUTH-MIDDLEWARE-AUTO-INJECTED warning emitted on auto-escalation", () => {
     const file = makeFileAST("/test/app.scrml", []);
     const pa = makeProtectAnalysis("/test/app.scrml", "users", ["password_hash"]);
     const result = runRI({ files: [file], protectAnalysis: pa });
-    const warning = result.errors.find(e => e.code === "W-AUTH-001");
+    const warning = result.errors.find(e => e.code === "W-AUTH-MIDDLEWARE-AUTO-INJECTED");
     expect(warning).toBeDefined();
     expect(warning.severity).toBe("warning");
     expect(warning.message).toContain("protect=");
     expect(warning.message).toContain("auto-injected");
   });
 
-  test("no W-AUTH-001 when explicit auth= is present", () => {
+  test("no W-AUTH-MIDDLEWARE-AUTO-INJECTED when explicit auth= is present", () => {
     const file = makeFileAST("/test/app.scrml", [], {
       authConfig: { auth: "required", loginRedirect: "/login", csrf: "auto", sessionExpiry: "1h" },
     });
     const pa = makeProtectAnalysis("/test/app.scrml", "users", ["password_hash"]);
     const result = runRI({ files: [file], protectAnalysis: pa });
-    const warning = result.errors.find(e => e.code === "W-AUTH-001");
+    const warning = result.errors.find(e => e.code === "W-AUTH-MIDDLEWARE-AUTO-INJECTED");
     expect(warning).toBeUndefined();
   });
 
@@ -360,7 +364,7 @@ describe("S8b: RI auto-escalates auth for protect= fields", () => {
 //
 // An EXPLICIT auth= declaration (on <program> OR <page>) MUST win over the
 // protect= auto-escalation in Step 8b. Before the fix, a file with protect=
-// fields was unconditionally escalated to auth="required" + W-AUTH-001 unless
+// fields was unconditionally escalated to auth="required" + W-AUTH-MIDDLEWARE-AUTO-INJECTED unless
 // it was registered in Step 8a (which only handles <program auth="required">).
 // That wrongly overrode <page auth="optional"|"none"> (and <program> non-
 // required modes), force-installing _scrml_auth_check on e.g. a login page's
@@ -386,25 +390,25 @@ describe("S8c: RI auth precedence — explicit auth= wins over protect= escalati
 
   // --- program-level auth= (carried on authConfig) ---
 
-  test("<program auth=\"optional\"> + protect= — NOT escalated, no W-AUTH-001", () => {
+  test("<program auth=\"optional\"> + protect= — NOT escalated, no W-AUTH-MIDDLEWARE-AUTO-INJECTED", () => {
     const file = makeFileAST(FP, [], {
       authConfig: { auth: "optional", loginRedirect: "/login", csrf: "off", sessionExpiry: "1h" },
     });
     const result = runRI({ files: [file], protectAnalysis: pa() });
     expect(result.routeMap.authMiddleware.has(FP)).toBe(false);
-    expect(result.errors.find(e => e.code === "W-AUTH-001")).toBeUndefined();
+    expect(result.errors.find(e => e.code === "W-AUTH-MIDDLEWARE-AUTO-INJECTED")).toBeUndefined();
   });
 
-  test("<program auth=\"none\"> + protect= — NOT escalated, no W-AUTH-001", () => {
+  test("<program auth=\"none\"> + protect= — NOT escalated, no W-AUTH-MIDDLEWARE-AUTO-INJECTED", () => {
     const file = makeFileAST(FP, [], {
       authConfig: { auth: "none", loginRedirect: "/login", csrf: "off", sessionExpiry: "1h" },
     });
     const result = runRI({ files: [file], protectAnalysis: pa() });
     expect(result.routeMap.authMiddleware.has(FP)).toBe(false);
-    expect(result.errors.find(e => e.code === "W-AUTH-001")).toBeUndefined();
+    expect(result.errors.find(e => e.code === "W-AUTH-MIDDLEWARE-AUTO-INJECTED")).toBeUndefined();
   });
 
-  test("<program auth=\"required\"> + protect= — gated (8a), no W-AUTH-001", () => {
+  test("<program auth=\"required\"> + protect= — gated (8a), no W-AUTH-MIDDLEWARE-AUTO-INJECTED", () => {
     const file = makeFileAST(FP, [], {
       authConfig: { auth: "required", loginRedirect: "/signin", csrf: "off", sessionExpiry: "2h" },
     });
@@ -414,26 +418,26 @@ describe("S8c: RI auth precedence — explicit auth= wins over protect= escalati
     expect(mw.auth).toBe("required");
     expect(mw.loginRedirect).toBe("/signin"); // program's own settings, not escalation defaults
     expect(mw.autoEscalated).toBeUndefined();
-    expect(result.errors.find(e => e.code === "W-AUTH-001")).toBeUndefined();
+    expect(result.errors.find(e => e.code === "W-AUTH-MIDDLEWARE-AUTO-INJECTED")).toBeUndefined();
   });
 
   // --- page-level auth= (read directly from the <page> markup node) ---
 
-  test("<page auth=\"optional\"> + protect= — NOT escalated, no W-AUTH-001 (#6/#7)", () => {
+  test("<page auth=\"optional\"> + protect= — NOT escalated, no W-AUTH-MIDDLEWARE-AUTO-INJECTED (#6/#7)", () => {
     const file = makeFileAST(FP, [pageNode([authAttr("optional")])]);
     const result = runRI({ files: [file], protectAnalysis: pa() });
     expect(result.routeMap.authMiddleware.has(FP)).toBe(false);
-    expect(result.errors.find(e => e.code === "W-AUTH-001")).toBeUndefined();
+    expect(result.errors.find(e => e.code === "W-AUTH-MIDDLEWARE-AUTO-INJECTED")).toBeUndefined();
   });
 
-  test("<page auth=\"none\"> + protect= — NOT escalated, no W-AUTH-001", () => {
+  test("<page auth=\"none\"> + protect= — NOT escalated, no W-AUTH-MIDDLEWARE-AUTO-INJECTED", () => {
     const file = makeFileAST(FP, [pageNode([authAttr("none")])]);
     const result = runRI({ files: [file], protectAnalysis: pa() });
     expect(result.routeMap.authMiddleware.has(FP)).toBe(false);
-    expect(result.errors.find(e => e.code === "W-AUTH-001")).toBeUndefined();
+    expect(result.errors.find(e => e.code === "W-AUTH-MIDDLEWARE-AUTO-INJECTED")).toBeUndefined();
   });
 
-  test("<page auth=\"required\"> + protect= — gated, no W-AUTH-001 (explicit)", () => {
+  test("<page auth=\"required\"> + protect= — gated, no W-AUTH-MIDDLEWARE-AUTO-INJECTED (explicit)", () => {
     const file = makeFileAST(FP, [pageNode([authAttr("required")])]);
     const result = runRI({ files: [file], protectAnalysis: pa() });
     const mw = result.routeMap.authMiddleware.get(FP);
@@ -441,8 +445,8 @@ describe("S8c: RI auth precedence — explicit auth= wins over protect= escalati
     expect(mw.auth).toBe("required");
     // Explicit page-level declaration — NOT an auto-escalation.
     expect(mw.autoEscalated).toBeUndefined();
-    // No W-AUTH-001: the page HAS an explicit auth= attribute.
-    expect(result.errors.find(e => e.code === "W-AUTH-001")).toBeUndefined();
+    // No W-AUTH-MIDDLEWARE-AUTO-INJECTED: the page HAS an explicit auth= attribute.
+    expect(result.errors.find(e => e.code === "W-AUTH-MIDDLEWARE-AUTO-INJECTED")).toBeUndefined();
   });
 
   test("<page auth=\"required\" loginRedirect=> + protect= — page's loginRedirect honoured", () => {
@@ -454,16 +458,16 @@ describe("S8c: RI auth precedence — explicit auth= wins over protect= escalati
     expect(mw.csrf).toBe("off");
   });
 
-  // --- absent auth= (the case W-AUTH-001 is actually meant for) ---
+  // --- absent auth= (the case W-AUTH-MIDDLEWARE-AUTO-INJECTED is actually meant for) ---
 
-  test("absent auth= + protect= — STILL auto-escalates + W-AUTH-001 (preserved)", () => {
+  test("absent auth= + protect= — STILL auto-escalates + W-AUTH-MIDDLEWARE-AUTO-INJECTED (preserved)", () => {
     const file = makeFileAST(FP, []);
     const result = runRI({ files: [file], protectAnalysis: pa() });
     const mw = result.routeMap.authMiddleware.get(FP);
     expect(mw).toBeDefined();
     expect(mw.auth).toBe("required");
     expect(mw.autoEscalated).toBe(true);
-    expect(result.errors.find(e => e.code === "W-AUTH-001")).toBeDefined();
+    expect(result.errors.find(e => e.code === "W-AUTH-MIDDLEWARE-AUTO-INJECTED")).toBeDefined();
   });
 
   // --- sanity: explicit non-required auth= WITHOUT protect= ---
@@ -472,7 +476,7 @@ describe("S8c: RI auth precedence — explicit auth= wins over protect= escalati
     const file = makeFileAST(FP, [pageNode([authAttr("optional")])]);
     const result = runRI({ files: [file], protectAnalysis: null });
     expect(result.routeMap.authMiddleware.has(FP)).toBe(false);
-    expect(result.errors.find(e => e.code === "W-AUTH-001")).toBeUndefined();
+    expect(result.errors.find(e => e.code === "W-AUTH-MIDDLEWARE-AUTO-INJECTED")).toBeUndefined();
   });
 });
 

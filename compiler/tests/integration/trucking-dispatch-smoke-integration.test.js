@@ -375,7 +375,8 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     // the explicit page-level declaration: optional/none pages keep their mode
     // (no escalation), required pages stay gated (authMiddleware still
     // registered, same values — `autoEscalated` has no downstream reader), and
-    // W-AUTH-001 fires ONLY when no declaration exists anywhere. None remain in
+    // The auth-injection warning (S299: `W-AUTH-MIDDLEWARE-AUTO-INJECTED`, split out
+    // of `W-AUTH-001` — see §34) fires ONLY when no declaration exists anywhere. None remain in
     // this corpus, so the code is REMOVED from the baseline (a 0-count entry
     // would trip the "no UNEXPECTED codes" inverse). Aggregate 59 -> 39.
     "W-AUTH-LOGIN-MISSING": 1,

@@ -5587,13 +5587,13 @@ export function runRI(input: RIInput): RIOutput {
       // overrode the adopter's choice and force-installed `_scrml_auth_check` on
       // (e.g.) a login page's own RPC, which then 302'd to /login — making the
       // page permanently unauthenticatable. Consult the explicit declaration and
-      // honour it; the W-AUTH-001 "no explicit auth=" warning is truthful ONLY
+      // honour it; the W-AUTH-MIDDLEWARE-AUTO-INJECTED warning is truthful ONLY
       // when no declaration exists.
       const explicit = explicitAuthByFile.get(filePath) ?? null;
 
       if (explicit && (explicit.auth === "optional" || explicit.auth === "none")) {
         // Explicit non-required mode. Do NOT escalate to auth="required" and do
-        // NOT fire W-AUTH-001 — the page keeps its declared mode. protect= still
+        // NOT fire W-AUTH-MIDDLEWARE-AUTO-INJECTED — the page keeps its declared mode. protect= still
         // strips the column from client serialization via the protect-analyzer
         // (independent of authMiddleware), so the sensitive field never reaches
         // the client regardless of the auth mode.
@@ -5604,7 +5604,7 @@ export function runRI(input: RIInput): RIOutput {
         // Explicit page-level auth="required" (program-level "required" already
         // returned above via the 8a .has() guard). Register the gate from the
         // page's own settings so the protected page stays gated, but do NOT fire
-        // W-AUTH-001 — the auth= IS explicit. csrf defaults to "auto" (sensitive
+        // W-AUTH-MIDDLEWARE-AUTO-INJECTED — the auth= IS explicit. csrf defaults to "auto" (sensitive
         // protect= fields present) and sessionExpiry to "1h" (<page> carries no
         // sessionExpiry= attribute).
         authMiddleware.set(filePath, {
@@ -5630,10 +5630,24 @@ export function runRI(input: RIInput): RIOutput {
         sessionSecure: true,
         autoEscalated: true,
       });
+      // S299 — CODE SPLIT. This fire previously used `W-AUTH-001`, which §34:19015
+      // and §52.11 define as an entirely different guarantee ("`<var server>` has
+      // no detectable initial load pattern", fired at `type-system.ts`). One code,
+      // two unrelated meanings, and only one of them documented — structurally
+      // identical to the `E-IMPORT-007` defect ruled at S297, which is why that
+      // ruling's shape applies here: **allocate a fresh code rather than renumber
+      // the documented diagnostic**, because additive is `inert` for existing
+      // source whereas renumbering is `semantics-changed` on a code adopters may
+      // key on. `W-AUTH-001` keeps the §34/§52.11 meaning; this — the undocumented
+      // one — moves. Named rather than numbered (`W-AUTH-003` is free but sits in
+      // a gap below a used `W-AUTH-004`, and a skipped number is a retired-code
+      // risk); the family already uses semantic names (`W-AUTH-PAGE-INFERRED`,
+      // `W-AUTH-LOGIN-MISSING`, `W-AUTH-RUNTIME-FALLBACK`). §34 row lands with
+      // this rename (Rule 4 — the fire already exists).
       errors.push({
-        code: "W-AUTH-001",
+        code: "W-AUTH-MIDDLEWARE-AUTO-INJECTED",
         message:
-          `W-AUTH-001: File has protect= fields but no explicit auth= attribute. ` +
+          `W-AUTH-MIDDLEWARE-AUTO-INJECTED: File has protect= fields but no explicit auth= attribute. ` +
           `Auth middleware auto-injected (auth="required", csrf="auto"). ` +
           `Add <program auth="required"> to control auth settings explicitly.`,
         severity: "warning",
