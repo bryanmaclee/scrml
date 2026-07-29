@@ -573,7 +573,7 @@ any multi-root `<each>`).
 
 ### g-each-peritem-if-multiroot-deferred — a per-row `if=` on ONE OF SEVERAL roots of a MULTI-root `<each>` item keeps the create-time-only gate (a flip does not add/remove that root)
 <!-- @gap id=g-each-peritem-if-multiroot-deferred sev=LOW status=deferred -->
-**NEW S298 (spun out of the Tier-1 per-row-if reactive arc).** The SINGLE-root Tier-1 `<each>` per-row
+**NEW S297 (spun out of the Tier-1 per-row-if reactive arc).** The SINGLE-root Tier-1 `<each>` per-row
 `if=` is now REACTIVE + STRUCTURAL (SPEC §17.1): the sole item root is emitted as a swap-in-place
 tracked node — EITHER the element (cond true) OR a `<!--scrml-if-row-->` COMMENT placeholder (cond
 false) — and a live-keyed per-item effect (`_scrml_ifrow_apply`, `runtime-template.js`) swaps one for
@@ -592,11 +592,11 @@ too heavy for this arc; a code comment is the signal). Detection is at the emit 
 is gated on the item root being the SOLE non-whitespace top-level root of the each body
 (`emit-each.ts` renderTemplateChildToJs `isSoleItemRoot`); anything with 2+ structural roots takes the
 deferred path. Nested (non-item-root) `if=` children are likewise unchanged create-time (separate,
-out of scope). — `NEW S298; LOW; deferred (create-time gate + comment signal; single-root shape shipped reactive)`
+out of scope). — `NEW S297; LOW; deferred (create-time gate + comment signal; single-root shape shipped reactive)`
 
 ### g-lift-tier0-if-multiroot-deferred — Tier-0 `${for…lift}` sibling: a per-item `if=` on ONE OF SEVERAL roots of a multi-root lift item keeps the display toggle (a flip hides, does not structurally remove)
 <!-- @gap id=g-lift-tier0-if-multiroot-deferred sev=LOW status=deferred -->
-**NEW S298 (Tier-0 for-lift sibling of [[g-each-peritem-if-multiroot-deferred]]).** The SINGLE-root
+**NEW S297 (Tier-0 for-lift sibling of [[g-each-peritem-if-multiroot-deferred]]).** The SINGLE-root
 Tier-0 `${for…lift}` per-item `if=` is now REACTIVE + STRUCTURAL (SPEC §17.1), mirroring the Tier-1
 `<each>` fix: the sole reconciled item root is emitted as a swap-in-place tracked node — EITHER the
 element (cond true) OR a `<!--scrml-if-row-->` COMMENT placeholder (cond false) — and a live-keyed
@@ -612,7 +612,7 @@ body, the swap is not applied — a naive element↔comment swap would mis-track
 `_scrml_group` staleness the Tier-1 gap describes). That shape keeps the reactive display toggle + a
 `// W-LIFT-TIER0-IF-MULTIROOT-DEFERRED` code-comment signal at the emit site (no §34 warning code minted
 — a code comment is the signal, mirroring Tier-1). Nested (non-item-root) `if=` children are likewise
-unchanged. — `NEW S298; LOW; deferred (display toggle + comment signal; single-root shape shipped structural)`
+unchanged. — `NEW S297; LOW; deferred (display toggle + comment signal; single-root shape shipped structural)`
 
 ### g-lift-tier0-if-inline-form-non-reconciled-display-toggle — the INLINE `${for…lift}` form's per-item `if=` stays a display toggle (§17.1: element present when false); only the RECONCILED block form was made structural
 <!-- @gap id=g-lift-tier0-if-inline-form-non-reconciled-display-toggle sev=MED status=open -->
@@ -631,7 +631,7 @@ reconciled/block form (the reported violation) IS fixed; this compact form is th
 
 ### g-lift-tier0-if-value-indexed-display-toggle-deferred — a sole-root Tier-0 for-lift `if=` whose predicate is a value-indexed `@cell == item.field` keeps the O(2) display toggle (hides, does not structurally remove)
 <!-- @gap id=g-lift-tier0-if-value-indexed-display-toggle-deferred sev=LOW status=deferred -->
-**NEW S298 (narrower sub-gap of the Tier-0 structural-if arc).** The sole-root Tier-0 for-lift per-item
+**NEW S297 (narrower sub-gap of the Tier-0 structural-if arc).** The sole-root Tier-0 for-lift per-item
 `if=` is now structural for item-reading (`r.on`) and plain-cell (`@show`) predicates. The ONE sole-root
 shape still on the display toggle is the S103 value-indexed select-row predicate (`@cell == item.field`,
 `detectPredicateShapeBind` match with a single `@`-ref === the cell): it keeps its
@@ -641,7 +641,7 @@ optimization (whose conformance is in the value-indexed-subscribers baseline). S
 shape ONLY, codegen keeps `elVar.style.display` (§17.1 hide, not structural remove) + a
 `// W-LIFT-TIER0-IF-VALUE-INDEXED-DISPLAY-TOGGLE-DEFERRED` code-comment signal. This is the exact Tier-0
 analog of the narrower deferred sub-gap already noted in `tryEmitLiftIfReactive`'s S103 comment. Closing
-it needs a structural swap that preserves the value-indexed dispatch (a bounded follow-on). — `NEW S298; LOW; deferred (value-indexed shape keeps O(2) display toggle)`
+it needs a structural swap that preserves the value-indexed dispatch (a bounded follow-on). — `NEW S297; LOW; deferred (value-indexed shape keeps O(2) display toggle)`
 
 ### g-main-red-against-its-own-pre-commit-gate — `main` FAILS the documented pre-commit gate: an emitted `.server.js` carries an ESM `export`, which `node --check` rejects as CJS
 <!-- @gap id=g-main-red-against-its-own-pre-commit-gate sev=HIGH status=narrowed -->
