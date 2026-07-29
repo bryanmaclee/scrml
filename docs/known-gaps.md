@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 12 |
-| MED | 73 |
+| MED | 74 |
 | LOW | 40 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -142,6 +142,17 @@ The parent gap offered four directions; bryan ruled **(b)** (grant what `?{}` to
 The reason (d) was not simply taken: the role-drop may be deliberate defence-in-depth, because **a dynamic query's table set is not always statically known**. That is the policy question, and it is real — the grant scanner is explicitly not a SQL parser (a CTE, a subquery in FROM/JOIN position, LATERAL, EXECUTE, or a dynamic table identifier makes the query undetermined and emits a warning naming it; all-or-nothing by design, since a partial answer is indistinguishable from a complete one). So (d) cannot be decided by "just don't wrap unmarked reads" — it needs a rule for what happens when we cannot tell which tables a query touches.
 
 Adopter-flagged S297 (they observed the parent read as resolved-symptom-plus-open-policy in one entry and suggested the split; their queries do not hit the scanner's undetermined set today, and they accept the warning as the contract if one ever does). Widen-vs-limit shape → **R2 minimum**, bryan rules. — `NEW S297; MED; open`
+
+**⚑ RULED S297 — DEFERRED DELIBERATELY, with a named re-trigger. This is a disposition, not a backlog item.**
+**Re-trigger:** a second adopter hits a grant-shaped failure, **OR** the grant scanner's undetermined-set warning fires in real adopter code. Until one of those, the conservative behavior stands (everything wrapped) and this is not open work.
+
+Reasoning, recorded so it is not re-litigated:
+1. **(b) removed the pain.** Nobody is blocked — Adopter-A's harnesses pass (17/17 + 11/11), their workaround is deleted, `users` carries exactly `SELECT`. Ruling (d) now would re-architect a boundary that currently works with no failing case driving it.
+2. **The undetermined-case rule IS the content, and there is ZERO field data on it.** The grant scanner is deliberately not a SQL parser — a CTE, a subquery in FROM/JOIN position, LATERAL, EXECUTE, or a dynamic table identifier makes a query undetermined and emits a warning naming it (Adopter-A explicitly endorsed that all-or-nothing design: *"a partial answer really is indistinguishable from a complete one"*). **Adopter-A confirmed none of their queries hit that limit today.** Ruling a security default with no instance of the case it governs produces a rule nobody can evaluate.
+3. **Deferral is the reversible direction.** It keeps everything wrapped. Taking (d) relaxes a security envelope on reasoning rather than evidence — and this same session produced a worked example of that failing (`if=`'s display lowering: defensible when written, wrong for three months, found only by execution).
+4. **The thing to avoid was SILENCE, not deferral.** This spent five sessions buried inside a resolved parent entry. An explicit deferral with a re-trigger is a durable answer; "still open" is not.
+
+**If the re-trigger fires, the decision is NOT "stop wrapping" — it is the undetermined-case rule.** Wrap-when-undetermined keeps (b)'s behavior exactly where it matters most; don't-wrap-when-undetermined opens a hole precisely where the compiler admits it cannot see. That is the fork. — `DEFERRED S297 (re-trigger named)`
 
 ### G-SPA-RUNTIME-GZIP-BUDGET-KNIFE-EDGE — the 16 KB SPA-runtime gzip budget is at ~127 B margin on base, independent of any in-flight arc — `NEW S282; HIGH; open (a bryan decision, not a bug)`
 Surfaced while scoping the BUG-6 accessor-rename (`docs/changes/chunk-namespacing/BUG6-RENAME-SCOPING.md` §6). `v0-3-x-spa-tree-shake-phase-b.test.js:145` asserts the assembled SPA runtime is `< 16 * 1024` gzip. **Agent-measured on the test's own `SPA_COUNTER` fixture at base `e8fdd44c`: 16,257 B — 127 B under the 16,384 budget, with no chunk-namespacing changes present.** (Scoping measurement; the execution session re-measures as its step 1, R26-style — do not treat 127 B as verified-final.)
@@ -4400,6 +4411,18 @@ This is `pa-base` **v2.4 §8's hollow-gate class in a shape v2.4 does not name**
 
 **Fix direction (not scoped):** decide per file whether it belongs in a covered subdirectory or in an explicit CI path list — do NOT simply add `compiler/tests/` wholesale to `gate`, which is what `ci.yml:26`'s own comment records was reverted at S253 for going red on the M6.x within-node backlog. The canary's own failure is that backlog. — `NEW S297; MED; open`
 
+### g-dbauth-object-access-not-principal-gated — objects/blobs sit OUTSIDE the RLS moat, so a db-authoritative app has provably-isolated rows and application-code-protected files beside them — `NEW S297 (Adopter-A BaaS-parity #4, ask #3; slotted by bryan); MED; db-authoritative tier / roadmap`
+<!-- @gap id=g-dbauth-object-access-not-principal-gated sev=MED status=open -->
+**Scope: the INVARIANT only, deliberately NOT a storage API.** Adopter-A asked for a content-addressed bytes/object tier (BaaS-parity #4). They have **already built** their own `_{}` implementation and state they can **carry it indefinitely** — put/get/content-addressing/path conventions are theirs and are not asked for. **The one item they state they structurally cannot build is their ask #3: object access gated by the same pinned principal as the RLS moat.** Their framing: *"A file path is not RLS'd."*
+
+**The defect this names.** The S286-ratified DB-authoritative tier pins a per-request principal and lets Postgres RLS enforce isolation against **any** connection — that is the whole point of relocating the invariant into the DB. **Objects live outside that boundary.** So one app can hold rows that are provably tenant-isolated and files beside them protected only by application code. That is an **inconsistent trust boundary inside a single application**, inconsistent in the dangerous direction: the weaker half is the invisible one, and it is invisible precisely because it looks like ordinary file I/O.
+
+**Why this is an extension, not a new axiom.** S286 ratified that *"scrml WILL emit an opt-in DB-authoritative security tier that STACKS with §14.8.10 as defense-in-depth."* Principal-gated object access is that ratified axiom applied to a second object kind. It does **not** reopen the invariant-vs-policy firewall question and does not need a fresh threshold ruling.
+
+**Sequencing:** AFTER [[g-trigger-3-server-only-import-does-not-escalate]]. Not a dependency — different machinery — but Trigger 3 is already RULED (S280), unbuilt, confidentiality-adjacent, and closes two blocked items by construction, while this blocks no one today. The A1 per-request-principal machinery (`SET LOCAL` in a transaction) is what an object-access gate would key on, so the DB-authoritative foundations must stay stable underneath it.
+
+**Filed to stop the re-verification loop.** Independently confirmed ABSENT in three separate sessions (S292, S295, S297) — no gap id, no roadmap item, no SPEC section. A named entry ends that cycle. **This is a tracked, scoped, named item — NOT a build commitment.** — `NEW S297; MED; open`
+
 ### g-s34-catalog-wrong-meaning-class — five §34 rows DESCRIBE a different diagnostic than the code actually fires on; one is ruling-gated — `NEW S297 (§34 meaning-axis sweep); MED; freeze-gate integrity`
 <!-- @gap id=g-s34-catalog-wrong-meaning-class sev=MED status=open -->
 Authority: **`docs/audits/s34-meaning-axis-2026-07-28.md`** (baseline `main@ed2515e7`). The axis S260's audit did **not** cover — it scoped its TRIGGER-MISMATCH bucket explicitly as *"not fully mechanized … Treat as a FLOOR"* of 5 hand-confirmed rows. This sweep is that comparison.
@@ -4437,6 +4460,9 @@ The cite-resolution half of the sweep was **exhaustive** (951 code↔section pai
 - **§28.2–§28.5** — 16 lifecycle / timeout codes cite subsections of §28 (Compiler Settings). Their real home is **§6.7.x** (lifecycle / cleanup / timers).
 - **§39.5.5** — `E-SCHEMA-011`, which **landed this very window**, carries a row asserting *"§39.5.5 declares exactly ONE production"* about a section that **does not exist**. A brand-new row citing a non-existent section is the drift class arriving faster than it is being fixed.
 - **§3.5 — `E-BPP-001`.** The cited section does not exist, and more seriously **the body pre-parser has no normative section anywhere in SPEC**. This is not a bad pointer; it is a subsystem that emits a diagnostic with no normative text behind it. Distinct disposition from the other two: those need re-pointing, this needs a ruling on whether BPP gets a section or the code gets retired.
+  **⚑ S297 — RETIRE was RULED then WITHDRAWN on the fire-status check. `E-BPP-001` IS LIVE.** The PA recommended retiring it *conditional on a liveness check it had not yet run*; bryan ruled retire; the check then falsified the premise before execution. It **fires** at `compiler/src/body-pre-parser.ts:231` on a `function`/`fn` body that cannot be parsed. Nothing in `compiler/tests/` or `conformance/` pins it, but it emits. **Retiring it would silence a real condition** — an unparseable body would go quiet. Not executed.
+  **REVISED PROPOSAL (bryan's call, still owed): RECLASSIFY, do not retire.** The code is correct; the defect is that §34 — a **language** catalog — carries a **compiler-implementation** diagnostic. The BPP is impl#1 internals, not language contract, and under §62's own framing (*a compiler is scrml iff it passes the conformance suite for the version it declares*) impl#2 has no business being bound to reproduce a pre-parser's internal error. So: keep the code firing, mark it an implementation diagnostic rather than a conformance-visible language code, and **drop the `§3.5` cite rather than authoring a section to justify a row** — which is the exact drift `W-PROGRAM-001` demonstrated. Small, reversible, fixes the real thing.
+  **Durable lesson (this is the reusable part):** a retire-vs-keep recommendation is only as good as the liveness check behind it, and "the SPEC has no section for it" says nothing about whether the code fires. Two independent signals, and only one of them was checked when the recommendation was made.
 
 Also unreconciled: `error.map.md` documents **799** codes; the sweep's extraction yields **803**. The map documents its methodology carefully and warns against hand-rolled greps, so the discrepancy is worth resolving rather than assuming either side. — `NEW S297; MED; open`
 

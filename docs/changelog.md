@@ -5399,6 +5399,57 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-07-28/29 — S297 (bryan · ASUS): the `if=` conformance class, the §34 freeze-gate audit, and a settling pass
+
+Opened on bryan's standing instruction to work the blocked list one item at a time. Eight PRs merged
+(#247 #249 #250 #252 #253 #254 #265 #266) plus the wrap, concurrent with Peter all session.
+
+**The headline — `if=` compiles to two lowerings, and 68% of the flagship takes the non-conformant one.**
+What arrived as a "Tier-1 `<each>` `if=` semantics fork" was dissolved by the governing-sentence gate:
+§17.1 says a false `if=` element *"does not exist in the DOM"* and §17.2 says *"`show=` hides, `if=`
+removes"*, and a reverse search of nine sections found **no sentence anywhere sanctioning a display
+lowering for `if=`**. So the fork's option (b) was never available. The premise was also inverted —
+Tier-1 was the conformant tier; Tier-0 for-lift was the violator. The deeper finding: `isCleanIfNode`
+selects between a conformant `<template>`+marker mount/unmount and a non-conformant `style.display`
+toggle, and **a single `${…}` interpolation is enough to flip it**. Measured on
+`examples/23-trucking-dispatch`: 101 dirty / 48 clean. A second defect fell out — the dirty path emits
+into initial HTML with no `display:none`, so gated content is visible until hydration.
+
+**§34, the freeze gate, misdescribes its own diagnostics.** Three defects surfaced independently while
+working other items (`E-IMPORT-007` carrying two guarantees with one implemented; `E-PA-002`'s row
+describing a `protect=` syntax error for a diagnostic about a missing DB file; an `api.js:506` fire-site
+line that was really `:943`). A dispatched meaning-axis sweep then found 5 wrong-meaning rows and 3
+dead-xref families — including `E-BPP-001`, whose cited §3.5 does not exist because the body pre-parser
+has no normative section anywhere.
+
+**The gap ledger drifted four separate times in one session**, three of them caught by someone else and
+two by the adopter reading our ledger.
+
+- **#247** — maps refresh `c700c435`→`115e8b1b` (39 commits, owed since S290 and skipped three times);
+  closes the diagnostics/`emit-client` routing gap; **scrubbed the third-party identity from 11 mentions
+  across 5 map files force-tracked into a public repo**.
+- **#249** — three adopter-flagged ledger defects: a 5-session-stale HIGH whose fix had merged, the
+  unruled direction (d) split out, and composite `unique(a, b)` given its own id after living as prose
+  inside a RESOLVED parent since S288.
+- **#250** — `if=` Phase-2 scoping doc with all five OQs ruled; filed the pre-hydration visibility gap.
+- **#252** — corrected D-6's false control and no-op ruling; recorded that the Trigger-3 class splits into
+  a LOUD failure (safe) and a SILENT one (`auth`/`crypto`/`data` run client-side — verified that the
+  shipped runtime carries a real `hashPassword`).
+- **#253** — SPEC: allocated `E-IMPORT-010` for §41.4; fixed two wrong code references (one of them a
+  §21.3.1 self-contradiction 17 lines apart) and a wrong fire-site line.
+- **#254** — categorized the 36-fail local baseline S292 flagged as unverified: 34 browser-tier, **1
+  inside the blocking gate's own scope** (local red / cloud green), **1 run by no CI job at all**.
+- **#265** — landed the §34 meaning-axis audit + filed the wrong-meaning and dead-xref classes.
+- **#266** — `W-PROGRAM-001` drop-check: the implemented meaning is the live ruled-on one (S42) and the
+  SPEC prose is the orphan, so the correction direction is the reverse of the natural reading.
+
+**Settled by ruling:** Adopter-A Q2 → `capabilities=` is kind-scoped, no path granularity (replied and
+pushed to their branch) · bytes tier → slotted, scoped to the principal-gate invariant, not a storage API
+· dbauth direction (d) → deferred with a named re-trigger · `E-PA-002` fire condition → no change needed.
+
+**Gate:** cloud `gate` + `windows` GREEN on every merge. `tracking` red is now the *categorized* set
+rather than an assumed one. All generated-doc gates PASS.
+
 ## S295 (2026-07-28) — bryan · ASUS-Vivobook — a three-lane parallel adopter arc, two pa-base amendments, and three privacy scrubs
 
 **Six PRs.** Three concurrent lanes verified file-disjoint before dispatch, plus a SPEC ratification and the deferred-item filing.
