@@ -2,6 +2,16 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S297 (2026-07-28/29) — Peter · Windows — the `<each>` conformance/reactivity arc: nested markup-fn interp mounts, and per-row `if=` goes structural (§17.1) across Tier-1 and Tier-0
+
+Three each PRs, all reproduce-first → satellite-implemented → S239 adversarially reviewed → conformance-pinned; concurrent with a live sibling session (S297-bryan) the whole time, cleanly lane-partitioned. Also root-caused flogenceP #228 and handed it to bryan's lane.
+
+- **#248 `b6e3665c`** — a standalone `<each>` interpolation whose value is a **markup-returning fn call** (`<li>${badge(it)}</li>`) now MOUNTS the returned DOM instead of stringifying it to `[object HTMLSpanElement]` (Pillar 1 §1.4/§7.4). Same-file markup-fn detection via a local AST scan; the discriminant is markup-return, not DOM position (correcting the gap's framing). The S239 review caught a latent collector over-wrap (a string-returning fn with markup in an argument would have regressed `<option>`/`<textarea>`); hardened to positional detection.
+- **#251 `a745d35e`** — **Tier-1 `<each>` per-row `if=` is now reactive AND structural** (§17.1: `if=false` removes the element from the DOM, not `display:none`). Swap-in-place tracked node — element ⇄ `<!--scrml-if-row-->` comment placeholder, `_scrml_key` transplanted via the new `_scrml_ifrow_apply` runtime helper — with zero change to the reconcile core. Multi-root items deferred with a filed gap. Implements bryan's S297 ruling; 5 new conformance cases pin the absence half.
+- **#255 `ede13e66`** — **Tier-0 `${for…lift}` per-item `if=` structural**, the sibling of #251 reusing `_scrml_ifrow_apply`. Closes the §17.1 hole in the prior S293/#222 fix (which made the toggle reactive inside a non-conformant `display:none` lowering). Multi-root + the S103 value-indexed select-row shape deferred (gaps). A PA class-probe caught that only the reconciled *block* form is covered — the compact *inline* `${for…lift}` form remains a display-toggle, filed as an open residual gap.
+- **flogenceP GH #228 root-caused + routed** — NOT a reconcile bug (the async-continuation hypothesis was empirically disproven). It's a **failable server fn with an array return (`! T[]`) that isn't server-promoted**, so its value-position reactive write gets no auto-await and emits mis-wired — the #237 auto-await family, bryan's lane. Filed HIGH `g-failable-server-fn-array-return-not-promoted`.
+- Cloud `gate` + `windows` green on all three merges. Conformance 752 → 756.
+
 ## S296 (2026-07-28) — bryan · **XPS-8950** — D-4: server import specifiers emitted in the wrong coordinate space; the canonical example app's server tier was 96% dangling
 
 **`main` `6814b1d8`** · coherence 0/0 both repos · cloud `gate` + `windows` GREEN · one PR (#241).

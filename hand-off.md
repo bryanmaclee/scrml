@@ -1,4 +1,87 @@
 <!-- ============================================================= -->
+<!-- S297 WRAP (Peter/Windows) — prepended 2026-07-29.              -->
+<!-- S295/S296 (bryan) + all prior UNCHANGED below.                 -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 297 (Peter · Windows) — WRAP
+
+**Date:** 2026-07-28/29. `/boot` Profile A. `main` at **`ede13e66`** (+ this wrap PR), coherence 0/0.
+**THREE each PRs landed** (#248 · #251 · #255), **all reproduce-first → satellite-implemented → S239
+adversarially reviewed → conformance-pinned.** #228 root-caused + routed to bryan. **Concurrent with
+LIVE S297-bryan (ASUS) the entire session** (lane-partitioned, disjoint). This carries the irreducible.
+
+## 🎯 WHAT LANDED — the `<each>` conformance/reactivity arc
+
+| PR | What |
+|---|---|
+| #248 `b6e3665c` | **nested `<each>` interp of a markup-RETURNING fn call MOUNTS** (was `[object HTMLSpanElement]`). Same-file markup-fn AST scan; discriminant is markup-return, NOT position. S239 caught + I hardened a latent collector over-wrap (positional detection). |
+| #251 `a745d35e` | **Tier-1 `<each>` per-row `if=` REACTIVE + STRUCTURAL** (§17.1 removes, not `display:none`). Swap-in-place tracked node (element ⇄ `<!--scrml-if-row-->` comment, `_scrml_key` transplanted via `_scrml_ifrow_apply`); ZERO reconcile-core change. Implements bryan's ruling. |
+| #255 `ede13e66` | **Tier-0 `${for…lift}` per-item `if=` structural** (sibling of #251; reuses `_scrml_ifrow_apply`). Closes the §17.1 hole in my own S293/#222 fix (bryan flagged it). |
+
+**Multi-root + value-indexed sub-cases DEFERRED** (signal comments + gaps) in both #251/#255 — never
+silently shipped. **`_scrml_ifrow_apply`** (runtime-template.js) is the shared swap primitive.
+
+## 🔴 THE NEXT PA'S PICKUP
+
+1. **#228 → bryan (auto-await lane), NOT each.** ROOT-CAUSED this session: my "async-continuation flush
+   miss" hypothesis was **DISPROVEN** (post-await reactive writes DO reconcile). Real cause: a **failable
+   server fn with an array return (`! T[]`) is NOT server-promoted** → value-position write gets no
+   auto-await → mis-wired emission. Filed HIGH `g-failable-server-fn-array-return-not-promoted`; #228 gap
+   reclassified `status=root-caused-elsewhere`. Bryan inbox note pushed (`scrml-support …0040…`). **Honest
+   caveat:** exact SILENT symptom NOT reproduced (minimal `! T[]` repros E-CG-006 at compile); the silent
+   path needs the real `loadNodeThread` body (SQL behind a helper). flogenceP replied — keep W1/W2/W3 held.
+2. **Inline `${for…lift}` if= residual (`g-lift-tier0-if-inline-form-non-reconciled-display-toggle`, MED
+   open)** — my class-probe caught it: the compact INLINE for-lift form does NOT emit `_scrml_reconcile_list`
+   and its `if=` stays a display-toggle (§17.1 still violated). #255 fixed only the reconciled BLOCK form
+   (bryan's flagged shape). Two open Qs in the gap: (1) why the inline form doesn't keyed-reconcile at all;
+   (2) whether its `if=` needs a non-reconcile structural add/remove. **Each-lane follow-on.**
+3. **Remaining each queue** (from S297 boot ranking, Peter-lane): #3 nested-each-div-mount-in-restricted-
+   parent · #5 each-body-let-alias · #7 forEach-lift-codegen-rejection · plus the multi-root/value-indexed
+   Tier-0/Tier-1 deferred sub-cases if bryan wants them widened.
+
+## 🧭 THE FINDINGS THAT OUTLAST THE FIXES
+
+- **Reproduce-first + S239 earned their cost every arc.** #248's S239 caught a real latent collector
+  over-wrap (string-returning fn with markup in an ARG position → restricted-parent regression). My own
+  class-probe caught #1's gap-framing being wrong (discriminant is markup-return not position) AND #255's
+  inline-form scope gap (conformance was green on the block form only — the verify-the-CLASS trap, live).
+- **#228 is the empirical-sufficiency lesson again:** a compelling hypothesis (async flush) disproven by
+  actually reproducing; the real cause was upstream (promotion) and in a different lane.
+- **Two gap fix-directions were wrong-as-filed** and reproduce-first corrected them ([[feedback-gap-report-fix-direction-can-be-wrong]] reconfirmed): #1's "nested position" framing; #228's "reconcile primitive" framing.
+
+## 🧷 CONCURRENCY — S297-bryan LIVE all session (clean partition)
+
+bryan booted S297 on the ASUS (same number, disambiguate by name), landed #249/#250/#252/#253 (gaps +
+if-phase2 scoping + E-IMPORT-010). **Lane partition bryan ratified + I honored:** bryan = `emit-html.ts`
++ `emit-event-wiring.ts` + the `if=` clean/dirty split + gap ledger + auto-await/promotion; **me =
+`emit-each.ts` / `emit-lift.js` / `emit-ssr-render.ts` / `runtime-template.js`.** File-disjoint; every
+one of my rebases (×4) conflicted ONLY on generated `docs/FACTS.md`, resolved by REGENERATING not
+hand-merging (S288/S292/S296 precedent). bryan RULED my Tier-1 nudge mid-session (structural-reactive).
+
+## ✅ GATE / HOUSEKEEPING
+
+- Cloud `gate` + `windows` GREEN on all 3 merges (authority). Conformance **752→756** (9 new runtime
+  cases across the arc). `tracking`/`ai-review` red = the documented non-required flakes (self-host
+  bs.js/tab.js + §64 tool / App-install infra) — verified from logs, not assumed.
+- **Worktrees:** three agent worktrees created + released this session; two dirs left orphaned on disk
+  (Windows file-lock on `.scrml-sessions.db`/test artifacts — `git worktree prune` ran, git sees them
+  gone; the dirs are gitignored, harmless — a `rm -rf` after the locks release will clear them).
+- **flogenceP note** (`incoming/2026-07-28-1729-…-workaround-retirement`) — READ + absorbed (5 workarounds
+  retired via my #175/#226; W1/W2/W3 held behind #228), NOT committed (scrml `main` protected; content
+  captured here). flogenceP reply committed to `../flogenceP` local (not pushed).
+- **Maps:** internal edits to existing `emit-each.ts`/`emit-lift.js`/`runtime-template.js` (new fns/helper,
+  no new surface files) → unchanged-with-note (S286/S288/S289 precedent). `project-mapper` not run.
+
+## Tags
+#session-297-peter #each-conformance-arc #three-prs #nested-markup-fn-interp-mounts
+#tier1-each-if-structural #tier0-forlift-if-structural #scrml-ifrow-apply-swap-in-place
+#228-rootcaused-array-return-not-promoted #hypothesis-disproven-by-reproduce #inline-form-residual-caught
+#s239-caught-collector-overwrap #verify-the-class-caught-scope-gap #s297-bryan-concurrent-lane-partition
+
+---
+
+<!-- ============================================================= -->
 <!-- S295 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-28.        -->
 <!-- S294 (Peter) + all prior UNCHANGED below.                      -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->
