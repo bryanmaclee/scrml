@@ -157,6 +157,23 @@ parameter** (`(root || document)`) and `_scrml_find_each_anchor` does not. That 
 [[g-each-anchor-lookup-first-match-document-wide]] (LOW) proposes — and under mount/unmount that LOW
 becomes load-bearing. Close it first.
 
+> **⚠️ S299 CORRECTION — the sentence above is WRONG on the mechanism, and the prerequisite is bigger
+> than it implies.** Re-derived from the code, not from this doc's own premise:
+> `_scrml_find_each_anchor(root, id)` **already takes and honours a scope parameter**
+> (`createTreeWalker(root || _doc, …)`, `runtime-template.js:2036`). The parity this doc asks for
+> already exists. What is actually wrong is (2) the sole caller — `emit-each.ts:3372` — passes
+> `document` literally, so the capability is unused; and (3) a module-level `_scrml_each_anchor_cache`
+> keyed by **`id` alone** is consulted **before** `root`, which *defeats* a scope parameter outright:
+> with the same each id live in two subtrees, the first resolution is returned for every scope until
+> that node disconnects.
+>
+> So the prerequisite is **caller-threading plus a cache-keying change** in the reconcile path
+> (`runtime-template.js` / `emit-each.ts`) that S293–S298 worked heavily — not the one-line parity fix
+> §6 OQ-2 describes. **Re-estimate this arc's size before dispatching**, and read
+> [[g-each-anchor-lookup-first-match-document-wide]] (corrected S299) rather than this paragraph.
+> Threading the scope without fixing the cache would pass a single-instance test and still resolve
+> cross-scope — a fix that looks right and is not.
+
 **OQ-3 → MEASURED, and the measurement substantially lowers the risk.** 101 sites change *lowering*,
 but absent-vs-hidden is only *observable* in three places, and the corpus barely uses them:
 
