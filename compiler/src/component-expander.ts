@@ -2547,10 +2547,63 @@ function expandComponentNode(
     return [node];
   }
 
+  // ---------------------------------------------------------------------------
+  // S299 — PER-EXPANSION NODE-ID FRESHNESS.
+  //
+  // `def.nodes` is the registry's parsed component body, SHARED by every
+  // instantiation, and its ids come from `parseComponentBody` →
+  // `reparseSynthesizedFile`, which numbers from a counter of its own starting at
+  // zero. Two consequences, both reproduced (green compile, 0 warnings):
+  //
+  //   - the SAME component instantiated twice reused one set of ids, and
+  //   - two DIFFERENT components each got their own from-scratch parse, so both
+  //     started at the same low numbers and collided with each other.
+  //
+  // Anything downstream keyed on `node.id` therefore collided. Measured on
+  // `<each>`: two list components emitted ONE fence id, so
+  // `_scrml_each_renderers[key]` was second-write-wins and every
+  // `_scrml_find_each_anchor` resolved to the first fence — executed result was
+  // panel 0 rendering panel 1's data and panel 1 rendering empty.
+  //
+  // Cloning here fixes both `def.nodes` cases at once, because every expansion
+  // draws from the FILE-level `counter` (seeded past `maxExistingId`), so ids are
+  // unique across instantiations AND across components. Spans are preserved by the
+  // cloner, so diagnostics still point at the definition site.
+  //
+  // SCOPE — what this does NOT cover (adversarial review, S299; do not read the
+  // paragraph above as "all duplicate ids are gone"):
+  //   - `def.defChildren` (just below) is `.map()`ped but non-CSS entries are
+  //     returned BY REFERENCE and CSS entries get a shallow spread that keeps the
+  //     id, so the same objects are spliced into every instantiation. Measured
+  //     post-CE duplicate-id sweep over 877 corpus files: 28 files → 16 (12 fully
+  //     closed, 4 reduced, 0 newly broken). Residual families are defChildren-CSS,
+  //     `${children}`/slot-fill, channel-inline, and for/match. The duplicated
+  //     kinds are only `text`/`li`/`p`/`logic` — **zero `each-block`** — so nothing
+  //     id-DERIVED collides there today. Tracked, not fixed here.
+  //   - Native markup-value ids live in a deliberate high band
+  //     (`translate-expr.js` `{ next: 900_000_000 }`, so they "can never collide
+  //     with a sibling FileAST node id"). Cloning a body RENUMBERS them down into
+  //     the per-file range. Harmless — one monotone counter seeded above
+  //     `maxExistingId`, and that same comment states the embedded id is not
+  //     load-bearing for codegen — but the invariant moved, so it is stated here
+  //     rather than discovered later.
+  //
+  // The cross-FILE half of id collision was already closed independently by
+  // `chunk-namespace.ts` (S280/S282), which prefixes every id-derived token with a
+  // hash of the source path (`scrml-each:00png1dk_36`). This fix closes the
+  // within-file half; the two compose.
+  //
+  // NB the duplicate-prop diagnostic below deliberately keeps reading
+  // `def.nodes[0].attrs` (not the clone): it is a statement about the DEFINITION,
+  // not about this instance, it touches no ids, and reading the original is now
+  // strictly MORE correct — it is immune to prop substitution.
+  // ---------------------------------------------------------------------------
+  const freshDefNodes = _deepCloneAst(def.nodes, counter) as MarkupNode[];
+
   // Primary root node (attrs/class/children merging applies to this one)
-  const defNode = def.nodes[0];
+  const defNode = freshDefNodes[0];
   // Secondary root nodes (prop substitution only, emitted as siblings)
-  const extraDefNodes = def.nodes.slice(1);
+  const extraDefNodes = freshDefNodes.slice(1);
 
   // Build a props map from the caller's attribute values
   // Each caller attr (non-class) becomes a named prop: attr.name → string value
@@ -4510,19 +4563,78 @@ function _cloneChannelDecl(
   return clone as MarkupNode;
 }
 
-function _deepCloneAst(node: any, counter: NodeCounter): any {
+/**
+ * Structure-preserving AST deep clone that re-ids every `id` key from `counter`.
+ *
+ * MEMOIZED (S299, adversarial-review recommendation 1). The `memo` is what makes
+ * this clone structurally FAITHFUL rather than merely deep, and it buys three
+ * things at once:
+ *
+ *   1. **Preserves intentional aliasing.** `ast-builder.js` builds a markup node's
+ *      `templateChildren` from the SAME objects as its `bodyChildren`, and
+ *      `emit-each.ts` documents that sharing. Walking the two keys independently
+ *      gave the aliased subtree TWO different id sets — measured: `bodyIds=[26,27,28]`
+ *      vs `templateIds=[29,30,31]` where the base shared `[3,4,5]`. For a nested
+ *      `<each>` in a component body that means two fence ids where there must be
+ *      one. Unreachable today (that shape hits a pre-existing
+ *      `E-CODEGEN-INVALID-LOGIC`), so it is a latent hazard rather than a live
+ *      defect — but it is the first thing to re-check when that gap is fixed, and
+ *      the memo removes it now instead of leaving a trap.
+ *   2. **Cycle safety, free.** The entry is memoized BEFORE recursing, so a cyclic
+ *      graph terminates. (Corpus audit: 0 cycles in 877 files — so this is
+ *      insurance, not a fix.)
+ *   3. Fewer allocations on shared subtrees.
+ *
+ * The memo is PER TOP-LEVEL CALL (default argument). It must never be shared
+ * across expansions — a shared memo would hand instantiation #2 instantiation #1's
+ * clones and defeat the entire point of cloning.
+ */
+function _deepCloneAst(node: any, counter: NodeCounter, memo: Map<any, any> = new Map()): any {
   if (node === null || node === undefined) return node;
-  if (Array.isArray(node)) {
-    return node.map((e) => _deepCloneAst(e, counter));
-  }
   if (typeof node !== "object") return node;
+
+  // S299 — LOUD on a non-plain object, rather than guessing.
+  //
+  // The `Object.keys` walk below would silently flatten a Map/Set/Date to `{}`,
+  // losing the value with no error. The first cut of this guard passed such
+  // objects through BY REFERENCE instead — but the adversarial review made the
+  // right call that this only trades one silent failure for another: a shared
+  // MUTABLE Map between the registry and every expansion is precisely the
+  // cross-instantiation leak this cloner exists to prevent, and by-reference is
+  // just as silent as flattening. Neither is distinguishable from correct.
+  //
+  // Verified unreachable today: 0 non-plain objects across 877 corpus files /
+  // 94,119 objects. `RegistryEntry.snippetProps` IS a Map but is a sibling field
+  // on the registry entry, never inside `def.nodes`, so the cloner never sees it.
+  // So the cost of being loud is nil and the payoff is that if this ever becomes
+  // reachable we find out at the call site instead of debugging a state leak.
+  if (node instanceof Map || node instanceof Set || node instanceof Date || node instanceof RegExp) {
+    throw new Error(
+      `_deepCloneAst: refusing to clone a non-plain object (${node.constructor?.name ?? "unknown"}). ` +
+      `Cloning it would flatten it to {}; sharing it by reference would leak mutable state across ` +
+      `component instantiations. Decide explicitly: give this field a real copy, or move it off the ` +
+      `AST node onto the registry entry (as snippetProps already is).`,
+    );
+  }
+
+  const hit = memo.get(node);
+  if (hit !== undefined) return hit;
+
+  if (Array.isArray(node)) {
+    const arr: any[] = [];
+    memo.set(node, arr);
+    for (const e of node) arr.push(_deepCloneAst(e, counter, memo));
+    return arr;
+  }
+
   const out: any = {};
+  memo.set(node, out);
   for (const key of Object.keys(node)) {
     if (key === "id") {
       out.id = ++counter.next;
       continue;
     }
-    out[key] = _deepCloneAst(node[key], counter);
+    out[key] = _deepCloneAst(node[key], counter, memo);
   }
   return out;
 }
