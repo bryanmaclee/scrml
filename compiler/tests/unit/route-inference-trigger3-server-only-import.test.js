@@ -25,7 +25,10 @@
  *   §1  POSITIVE — keyword-less fn calling a `scrml:auth` binding escalates server.
  *   §2  POSITIVE — `scrml:store` escalates (D-6, closed by construction).
  *   §3  GUARD    — `scrml:data` (client-safe) does NOT escalate. The 72-site class.
- *   §4  GUARD    — `scrml:oauth` / `scrml:http` (client-safe) do NOT escalate.
+ *   §4  GUARD    — `scrml:http` (client-safe) does NOT escalate.
+ *   §8  EVASION  — lambda / nested fn / bare callback / indirect alias (S299 review).
+ *   §9  CRED     — `scrml:oauth` escalates via the CREDENTIAL limb, not host reach.
+ *   §10 OVER-FIRE— a function-level shadow of an imported name must NOT escalate.
  *   §5  ALIASING — `import { hashPassword as hp }` escalates on the LOCAL name.
  *   §6  GUARD    — importing without calling does NOT escalate.
  *   §7  SHAPE    — the reason is `server-only-resource` carrying the module
@@ -151,14 +154,7 @@ describe("Trigger 3 §3 — scrml:data stays CLIENT", () => {
 // §4 — GUARD: the other two client-safe removals
 // ---------------------------------------------------------------------------
 
-describe("Trigger 3 §4 — oauth / http stay CLIENT", () => {
-  test("`scrml:oauth` does NOT escalate (PKCE runs in the browser by design)", () => {
-    expect(ESCALATION_SERVER_ONLY_MODULES.has("scrml:oauth")).toBe(false);
-    const fileAST = parseFileAST(programCalling("scrml:oauth", "generateVerifier", "generateVerifier()"));
-    const route = routeForFn(runRIClean(fileAST), "useIt", fileAST);
-    expect(isServerEscalated(route)).toBe(false);
-  });
-
+describe("Trigger 3 §4 — http stays CLIENT", () => {
   test("`scrml:http` does NOT escalate (fetch is browser-native)", () => {
     expect(ESCALATION_SERVER_ONLY_MODULES.has("scrml:http")).toBe(false);
     const fileAST = parseFileAST(programCalling("scrml:http", "get", "get('/x')"));
@@ -213,6 +209,119 @@ describe("Trigger 3 §6 — import alone is not a trigger", () => {
     const fileAST = parseFileAST(source);
     const route = routeForFn(runRIClean(fileAST), "useIt", fileAST);
     expect(isServerEscalated(route)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §8 — EVASION: the four shapes the S299 adversarial review proved leaked
+//
+// The first cut of this trigger matched CALLS in `callees`, which is built by
+// `forEachCallInExprNode` — and that walker returns at `case "lambda"` and cannot
+// see into a block-body closure at all. Each shape below compiled exit 0 with NO
+// `.server.js`, the secret in the client bundle and a real `Bun.password.hash`
+// argon2id implementation in the browser runtime. These are regression pins on a
+// confidentiality boundary: a failure here is a secret shipped to a browser.
+// ---------------------------------------------------------------------------
+
+describe("Trigger 3 §8 — evasion shapes (S299 adversarial review)", () => {
+  function escalatesFor(bodyStmts, mod = "scrml:auth", binding = "hashPassword") {
+    const source = `<program>
+  <page>
+    \${
+        import { ${binding} } from '${mod}'
+        <out> = ""
+        function useIt() {
+${bodyStmts}
+        }
+    }
+    <button onclick=useIt()>Go</button>
+    <p>\${@out}</p>
+  </>
+</program>`;
+    const fileAST = parseFileAST(source);
+    const route = routeForFn(runRIClean(fileAST), "useIt", fileAST);
+    return isServerEscalated(route);
+  }
+
+  test("a call inside a LAMBDA body escalates (`.map(p => hashPassword(p))`)", () => {
+    expect(escalatesFor(`            let all = ["P"].map(p => hashPassword(p))
+            return all[0]`)).toBe(true);
+  });
+
+  test("a call inside a NESTED function declaration escalates", () => {
+    expect(escalatesFor(`            function inner(p) { return hashPassword(p) }
+            return inner("P")`)).toBe(true);
+  });
+
+  test("a BARE callback reference escalates (no call node at all)", () => {
+    expect(escalatesFor(`            return ["P"].map(hashPassword)`)).toBe(true);
+  });
+
+  test("an INDIRECT alias of a sync binding escalates (`let f = join`)", () => {
+    expect(escalatesFor(`            let f = join
+            return f("a", "b")`, "scrml:path", "join")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §9 — scrml:oauth is server-only by the CREDENTIAL limb, not host reach
+//
+// oauth has ZERO Bun./process./node: reaches and was wrongly cleared as
+// client-safe by a host-reach-only criterion. It transmits `client_secret` in the
+// token-exchange body and its own module header reads "SERVER-SIDE ONLY".
+// ---------------------------------------------------------------------------
+
+describe("Trigger 3 §9 — scrml:oauth (credential limb)", () => {
+  test("`scrml:oauth` IS in the escalation set", () => {
+    expect(ESCALATION_SERVER_ONLY_MODULES.has("scrml:oauth")).toBe(true);
+  });
+
+  test("a fn building a github config with a client secret escalates", () => {
+    const fileAST = parseFileAST(
+      programCalling("scrml:oauth", "githubConfig", 'githubConfig("id", "SECRET", "/cb")'),
+    );
+    const route = routeForFn(runRIClean(fileAST), "useIt", fileAST);
+    expect(isServerEscalated(route)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §10 — OVER-FIRE guard: a function-level shadow of an imported name
+//
+// The binding map is file-scoped. A parameter or body-local named after an
+// import cannot refer to that import anywhere in the function, so it must NOT
+// escalate. Before the fix this relocated the function to the server and its
+// fetch stub JSON-serialized a callback argument, silently dropping it.
+//
+// NB `FunctionDeclNode.params` is TYPED `string[]` but the builder emits
+// `[{name}]`; the first cut of the shadow check compared against objects and
+// silently never matched. This test is what catches that regression.
+// ---------------------------------------------------------------------------
+
+describe("Trigger 3 §10 — shadowing must not over-fire", () => {
+  test("a PARAMETER shadowing an imported name does not escalate its function", () => {
+    const source = `<program>
+  <page>
+    \${
+        import { hashPassword } from 'scrml:auth'
+        <out> = ""
+        function applyIt(hashPassword, v) {
+            return hashPassword(v)
+        }
+        function realUse(p) {
+            return hashPassword(p)
+        }
+    }
+    <button onclick=applyIt()>Go</button>
+    <p>\${@out}</p>
+  </>
+</program>`;
+    const fileAST = parseFileAST(source);
+    const routeMap = runRIClean(fileAST);
+    // shadowed → client
+    expect(isServerEscalated(routeForFn(routeMap, "applyIt", fileAST))).toBe(false);
+    // genuine use in the same file → still escalates
+    expect(isServerEscalated(routeForFn(routeMap, "realUse", fileAST))).toBe(true);
   });
 });
 
