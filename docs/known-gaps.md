@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 11 |
-| MED | 70 |
+| HIGH | 12 |
+| MED | 71 |
 | LOW | 40 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -4373,6 +4373,32 @@ Same chunk and same class as GH #234, opposite outcome. `_scrml_label_for`'s `ty
 
 **RESOLVED S297 (bryan), PR #247 (`127a564c`).** Both halves closed in the `c700c435`→`115e8b1b` refresh. **(a)** `error.map.md` gains a HOW-TO-LOOK-UP-A-DIAGNOSTIC procedure + a **prefix-keyed** family table so an unnamed code still routes; `E-PA-*` → `protect-analyzer.ts` (sole fire site) and the `W-TAILWIND-*` family → `tailwind-classes.js` (sole fire site, wired from `api.js`'s lint pre-pass) — both previously zero-hit. **(b)** Row added and PA-verified against source line-by-line: a shipped-bundle `ReferenceError: _scrml_* is not defined` / runtime-chunk tree-shake gate → `emit-client.ts` `detectRuntimeChunks` (`:273`) + `POST_EMIT_HELPER_CHUNK_GATES` (`:2167`) + `runtime-chunks.ts` `CHUNK_DEPENDENCIES` (`:384`) + **`applyChunkDependencies` (`:392`)** — the closure fn was ADDED to this entry's suggested row, because a fix touches it and not only the table. The two chunk rows that pointed at `codegen/index.ts` were split so `index.ts` retains only what it owns. All four historical bugs re-route correctly (6nz Bug P `d570341d` → clause 3; Bug 57 `e4859a5f` → clause 1; GITI-036 #59 → clause 2; GH #234 #244 → clause 2). Also landed the `domain.map.md` "Coordinate space: SOURCE vs DIST" section whose absence made S296's D-4 agent report the maps "not load-bearing".
 **The `cloud-maps` half is NOT closed and is spun out** → [[g-cloud-maps-ci-red-api-rejection]]. Diagnosed, not fixed: Stage 2 (`claude-code-action@v1`) fails as an **API-level rejection of the first request** — 1 turn, ~0.6s, **$0**, zero permission denials, after a clean init — i.e. credential/entitlement/quota on `ANTHROPIC_API_KEY`, NOT a mapper fault, not repo content, not `--max-turns` exhaustion. Corroborated: the 2026-07-16 run lasted 12m31s (the agent genuinely ran); every run from 07-17 on lasts 35–60s; `cloud-maps.yml` last changed 2026-07-16 12:31, i.e. AFTER the last good run, so the workflow file is not the regression. `show_full_output: false` suppresses the agent's real error text — flip it to `true` (or add `--debug`) on one `workflow_dispatch` to confirm. Off the required-checks list, so it blocks no merge; its only cost is **silent map staleness**, which is precisely how this watermark stranded 39 commits across three sessions. — `RESOLVED S297 (bryan)`
+
+### g-gate-tier-unit-test-red-local-green-cloud — a unit test INSIDE the blocking `gate`'s own scope fails locally while the cloud gate is green — `NEW S297 (categorizing the 36-fail baseline S292 flagged); HIGH; infra/CI`
+<!-- @gap id=g-gate-tier-unit-test-red-local-green-cloud sev=HIGH status=open -->
+`compiler/tests/unit/esm-script-tag-module-format.test.js` → *"§4 per-route chunk EXECUTES as a module (the S265 'emitted ≠ runs' trap) > NEGATIVE control: the RAW payload loaded as a module throws ReferenceError (DOA if only marked)"* **fails locally** on `4dc74bdf`, while the cloud **`gate` is GREEN on the same content**.
+
+**This is inside the blocking gate's scope, not the tracking tier.** `.github/workflows/ci.yml:56` (job `gate`, no `continue-on-error`) runs `bun test compiler/tests/unit compiler/tests/conformance` **with no exclusions**. So local and cloud disagree about a tier that gates every merge.
+
+**Why it was invisible:** it has been absorbed into the "36 known failures" figure, which has been characterized since S277 as *"the failures are in the BROWSER tier which the cloud gate does not cover."* That characterization is **false for this one** — see the categorization in [[g-ci-does-not-run-root-level-test-files]]. **S292 explicitly warned about exactly this**: *"I did not enumerate them — the next PA should categorize before trusting 'known set' a fourth time; that phrase is doing a lot of unverified work."* It was.
+
+**Not diagnosed — only located.** Either (a) it is environment-dependent and genuinely passes on the CI runner (Bun version / module-resolution difference — plausible, since the test loads an emitted payload **as a module** and asserts it *throws*, so a negative control inverts on any environment that resolves what local does not), or (b) the gate is not actually executing this file despite its command implying it. **(b) would be the serious one** — a blocking gate whose real scope is narrower than its command reads. Distinguish before fixing: re-run the gate job with the file named explicitly and compare.
+
+⚠️ Filed HIGH not because the test matters most, but because **a blocking gate that disagrees with local on its own tier is a gate-integrity question** (`pa-base` v2.4 §8 — a gate's entire value is its capacity to go red). — `NEW S297; HIGH; open`
+
+### g-ci-does-not-run-root-level-test-files — 13 of the 14 test files at `compiler/tests/` root are executed by NO workflow, and a step NAME claims to cover one of them — `NEW S297 (categorizing the 36-fail baseline); MED; infra/CI`
+<!-- @gap id=g-ci-does-not-run-root-level-test-files sev=MED status=open -->
+The three CI jobs run only these paths: `gate` → `compiler/tests/unit` + `compiler/tests/conformance`; `tracking` → `compiler/tests/{integration,lsp,commands}` + `compiler/tests/browser` + **the single file** `compiler/tests/parser-conformance-within-node.test.js`; `windows` → unit + conformance.
+
+**Nothing runs the other 13 files sitting at `compiler/tests/` root**, including `parser-conformance-canary.test.js` (**currently failing**), `parser-conformance-corpus.test.js`, `parser-conformance.test.js`, `parser-conformance-{lexer,markup,expr,stmt,parse-file,collect-hoisted,each-contextual-sigil}.test.js`, and the three `native-*.test.js`.
+
+**⚠️ The load-bearing part — a step LABEL that overstates its scope.** `ci.yml:82` names the step **"Within-node parser-parity + canary"**, but `:83` runs `bun test compiler/tests/parser-conformance-within-node.test.js` — that one file. **The canary is named in the label and absent from the command.** Anyone auditing "is the canary covered?" reads the step name and correctly concludes yes; it is not.
+
+This is `pa-base` **v2.4 §8's hollow-gate class in a shape v2.4 does not name**: not an absorbed escape hatch, not an unproven gate, not a non-deterministic input — **the gate's own LABEL is wrong about what it gates.** Detection is cheap and worth generalizing: diff every workflow step's *name* against its *command*. **Candidate for a base amendment** alongside the ledger-drift class this session raised.
+
+**Context — how it surfaced.** Categorizing the 36-fail local baseline S292 flagged as unverified. Full split: **34** in `compiler/tests/browser/` (8 files; `tracking`, non-blocking — the standing characterization is accurate for these), **1** in the blocking gate's tier ([[g-gate-tier-unit-test-red-local-green-cloud]]), **1** here. So "36 known browser-tier failures" was wrong on two of thirty-six, and both wrong ones are CI-integrity issues rather than test debt.
+
+**Fix direction (not scoped):** decide per file whether it belongs in a covered subdirectory or in an explicit CI path list — do NOT simply add `compiler/tests/` wholesale to `gate`, which is what `ci.yml:26`'s own comment records was reverted at S253 for going red on the M6.x within-node backlog. The canary's own failure is that backlog. — `NEW S297; MED; open`
 
 ### g-cloud-maps-ci-red-api-rejection — the scheduled `cloud-maps` job has failed 17/17 runs since 2026-07-17; the agent's real error is suppressed, so the maps rot silently — `NEW S297 (spun out of g-maps-error-map-missing-diagnostics-and-emit-client); MED; infra/CI`
 <!-- @gap id=g-cloud-maps-ci-red-api-rejection sev=MED status=open -->
