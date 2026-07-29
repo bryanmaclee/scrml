@@ -608,6 +608,77 @@ export function isServerOnlyScrmlModuleSource(source: string): boolean {
 }
 
 /**
+ * §12.2 Trigger 3 — the ESCALATION server-only module set (S299, bryan-ratified).
+ *
+ * DELIBERATELY DISTINCT from `SERVER_ONLY_SCRML_MODULES` above, and the distinction
+ * is the whole point. That set feeds the STDLIB-EXPORT-SEED async fail-closed
+ * backstop (api.js), where OVER-inclusion is SAFE — defaulting an unresolvable
+ * re-export to async costs nothing. Escalation INVERTS that safety:
+ *
+ *   under-inclusion → a server-only module ships to the browser (a silent leak)
+ *   over-inclusion  → correct CLIENT code is wrongly relocated to the server
+ *
+ * so the two sets cannot be the same set, and reusing the async one for placement
+ * was measured (S299) to server-escalate 72 corpus import sites that are correct
+ * client code today — `scrml:data` alone (`sortBy`/`schemaFor`/`tableFor`) is 72 of
+ * the 116 server-only-module imports in the corpus, and ships a REAL client
+ * implementation in the runtime bundle.
+ *
+ * MEMBERSHIP CRITERION (normative, §12.2 Trigger 3) — a module is escalation-
+ * server-only if EITHER limb holds:
+ *
+ *   (a) HOST REACH — its implementation reaches a host API that does not exist in
+ *       a browser: `Bun.*`, `process.*`, or an import of `bun` / `bun:*` /
+ *       `node:*`. Note the BARE `bun` specifier (no colon) — `scrml:redis` is
+ *       reached only that way and a `bun:`-only scan misses it.
+ *   (b) CREDENTIAL HANDLING — it accepts or transmits a secret that must not
+ *       reach a client, even with no host reach at all.
+ *
+ * Limb (b) was added at S299 AFTER the adversarial review falsified a
+ * host-reach-only criterion: `scrml:oauth` has ZERO host reaches and was cleared
+ * as client-safe on that basis, yet it puts `client_secret` in the token-exchange
+ * body (`stdlib/oauth/index.scrml` ×3) and its own module header reads
+ * "SERVER-SIDE ONLY … do not call from client-side reactive code". A derived list
+ * is only as good as the property it derives from; the criterion was the defect,
+ * not the list. Keep BOTH limbs with the list — a hand-maintained derived list
+ * rots silently (the `docs/FACTS.md` lesson).
+ *
+ * Derived from BOTH the `stdlib/<mod>/**.scrml` sources AND the shipped
+ * `compiler/runtime/stdlib/<mod>.js` shims.
+ *
+ * NOT members, each verified client-safe against BOTH limbs — do not "fix" these
+ * back in without re-running the derivation:
+ *   scrml:data — pure transforms + compile-time type-as-argument primitives
+ *   scrml:http — fetch wrappers; `fetch` is browser-native, and the module takes
+ *                no credential of its own
+ */
+export const ESCALATION_SERVER_ONLY_MODULES = new Set<string>([
+  "scrml:auth",    // (a) Bun.password (argon2id)
+  "scrml:crypto",  // (a) Bun.CryptoHasher, Bun.password
+  "scrml:cron",    // (a) Bun.cron
+  "scrml:fs",      // (a) node:fs
+  "scrml:process", // (a) process.{argv,cwd,env,exit,platform,memoryUsage}
+  "scrml:redis",   // (a) `import { redis, RedisClient } from "bun"` — BARE, no colon
+  "scrml:store",   // (a) bun:sqlite — closes D-6 by construction
+  "scrml:path",    // (a) node:path
+  "scrml:mcp",     // (a) node:fs / node:path / node:url (host surface is in the .js shim)
+  "scrml:oauth",   // (b) transmits `client_secret`; module header says SERVER-SIDE ONLY
+]);
+
+/**
+ * True when `source` is an ESCALATION server-only `scrml:*` module import —
+ * the bare module (`scrml:auth`) OR any submodule (`scrml:auth/jwt`), since a
+ * submodule of a server-only module is itself server-only.
+ */
+export function isEscalationServerOnlyModule(source: string): boolean {
+  if (ESCALATION_SERVER_ONLY_MODULES.has(source)) return true;
+  for (const m of ESCALATION_SERVER_ONLY_MODULES) {
+    if (source.startsWith(m + "/")) return true;
+  }
+  return false;
+}
+
+/**
  * Check a bare-expr string for server-only resource access patterns.
  * Returns the first matching resourceType, or null if none match.
  */
@@ -3239,6 +3310,173 @@ function buildPerFileImportedServerNamespaces(files: FileAST[]): Map<string, Set
   return result;
 }
 
+/**
+ * §12.2 Trigger 3 (S299) — per-file map of LOCAL binding name → the escalation
+ * server-only module it was imported from.
+ *
+ * Keyed on `specifiers[].local`, NOT on `names`. For `import { hashPassword as hp }
+ * from 'scrml:auth'` the AST records `names: ["hashPassword"]` (the IMPORTED name)
+ * and `specifiers: [{imported:"hashPassword", local:"hp"}]` — and the body calls
+ * `hp()`. Matching callees against `names` would therefore MISS every aliased
+ * import, which on an escalation path is a silent client leak. `names` is used only
+ * as the fallback for the default-import form, which populates no specifiers.
+ *
+ * (Note for a later pass, deliberately NOT changed here: the sibling
+ * `buildImportedServerFnNames` keys on `names` and so carries this same aliasing
+ * blind spot. Its consequence is different — it feeds async classification, where a
+ * miss means a missing `await`, not a leak — so it is a separate fix with a
+ * separate blast radius. Filed rather than folded in.)
+ */
+function buildPerFileEscalationServerOnlyBindings(
+  files: FileAST[],
+): Map<string, Map<string, string>> {
+  const result = new Map<string, Map<string, string>>();
+  for (const fileAST of files) {
+    const imports: ImportDeclNode[] =
+      fileAST.imports ?? ((fileAST as any).ast ? (fileAST as any).ast.imports : []) ?? [];
+    const bindings = new Map<string, string>();
+    for (const node of imports) {
+      if (!node || node.kind !== "import-decl" || !node.source) continue;
+      const source = node.source.replace(/^['"]|['"]$/g, "");
+      if (!isEscalationServerOnlyModule(source)) continue;
+      const specs: any[] = (node as any).specifiers ?? [];
+      if (specs.length > 0) {
+        for (const s of specs) {
+          const local = s && typeof s.local === "string" ? s.local : null;
+          if (local) bindings.set(local, source);
+        }
+      } else {
+        // Default / namespace form — no specifiers; `names[0]` IS the local binding.
+        for (const name of node.names ?? []) {
+          if (typeof name === "string") bindings.set(name, source);
+        }
+      }
+    }
+    result.set(fileAST.filePath, bindings);
+  }
+  return result;
+}
+
+/**
+ * §12.2 Trigger 3 (S299) — collect the escalation-server-only MODULES a function
+ * body reaches, by ANY reference to an imported binding, at ANY depth.
+ *
+ * WHY THIS IS A SEPARATE WALK AND NOT `callees`. The shared call-graph path
+ * (`exprNodeCollectCallees` → `forEachCallInExprNode`) returns at `case "lambda"`
+ * and never descends, and a block-body closure is an opaque `escape-hatch` it
+ * cannot see into at all. The S299 adversarial review proved that is an EVASION:
+ *
+ *     let all = ["PEPPER"].map(p => hashPassword(p))     // scrml:auth
+ *
+ * compiled exit 0 with NO `.server.js`, the secret in the client bundle and a
+ * real `Bun.password.hash` argon2id implementation in the browser runtime — the
+ * precise leak Trigger 3 exists to close. Same for a nested `function` decl.
+ *
+ * The shared walker MUST NOT be widened to fix it: the note at the D4 dead-warn
+ * gate below is explicit that `forEachCallInExprNode` also drives Step 5c
+ * caller-context propagation and E-ROUTE-001, so broadening it would silently
+ * change placement. So this mirrors the two existing precedents that hit the same
+ * wall — `logicReferencedFnNames` (dead-code reachability) and `emit-server.ts`'s
+ * peer-emission walk ("descends through everything … raw escape-hatch callees are
+ * recovered with `extractCalleeNames`").
+ *
+ * REFERENCE, NOT CALL. Matching only CALLS leaves `["x"].map(hashPassword)` and
+ * `let f = hashPassword; f(x)` leaking (both verified). On a confidentiality
+ * boundary the fail-closed choice is right: any reference to a server-only
+ * binding escalates. Over-firing relocates a function to the server (a
+ * correctness cost); under-firing ships secrets to a browser.
+ *
+ * SHADOWING. A name bound at FUNCTION level (a parameter or a body-level local)
+ * cannot refer to the import anywhere in that function, so it is excluded — this
+ * also closes the over-fire the review found, where a parameter named after an
+ * import relocated its function and JSON-serialized a callback argument. Residual,
+ * accepted and named: a name shadowed ONLY inside a nested lambda still fires
+ * (over-fire, never a leak).
+ */
+function collectServerOnlyBindingModules(
+  fnNode: FunctionDeclNode,
+  bindings: Map<string, string>,
+): Set<string> {
+  const found = new Set<string>();
+  if (bindings.size === 0) return found;
+
+  const body: LogicStatement[] = Array.isArray(fnNode.body) ? fnNode.body : [];
+
+  // Function-level shadow set: params + body-level locals.
+  //
+  // `FunctionDeclNode.params` is TYPED `string[]` but the ast-builder actually
+  // produces `[{name}]` objects — verified by dumping a real parse at S299. A
+  // plain `new Set(fnNode.params)` therefore holds OBJECTS and every `.has(name)`
+  // silently returns false, which is exactly how the first cut of this shadow
+  // check did nothing at all. Normalize both shapes. (The identical latent bug
+  // lives in `buildClosureCapturesForFunction` — filed as
+  // `g-fn-params-typed-string-actually-objects`, NOT fixed here: it feeds
+  // capture-taint, a different blast radius.)
+  const shadowed = new Set<string>();
+  for (const p of (fnNode.params ?? []) as unknown[]) {
+    if (typeof p === "string") shadowed.add(p);
+    else if (p && typeof p === "object" && typeof (p as any).name === "string") {
+      shadowed.add((p as any).name);
+    }
+  }
+  for (const n of collectLocalNames(body)) shadowed.add(n);
+
+  const live = new Map<string, string>();
+  for (const [local, mod] of bindings) {
+    if (!shadowed.has(local)) live.set(local, mod);
+  }
+  if (live.size === 0) return found;
+
+  // Word-boundary scan for a raw text run (escape-hatch bodies — a block-body
+  // closure's calls live only in `.raw`). May match inside a string literal in
+  // that raw text; that is an over-fire, never a leak, and is the correct
+  // direction to err on this boundary.
+  const scanRaw = (raw: string): void => {
+    for (const [local, mod] of live) {
+      if (found.has(mod)) continue;
+      const re = new RegExp(`\\b${local.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
+      if (re.test(raw)) found.add(mod);
+    }
+  };
+
+  const seen = new Set<unknown>();
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    if (seen.has(node)) return;
+    seen.add(node);
+
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child);
+      return;
+    }
+
+    const n = node as Record<string, unknown>;
+    const kind = typeof n.kind === "string" ? (n.kind as string) : null;
+
+    // A string LITERAL is not a reference — do not let its text match.
+    if (kind === "lit") return;
+
+    if (kind === "ident" && typeof n.name === "string") {
+      const mod = live.get(n.name);
+      if (mod !== undefined) found.add(mod);
+      return;
+    }
+
+    if (kind === "escape-hatch" && typeof n.raw === "string") {
+      scanRaw(n.raw);
+      // fall through — an escape-hatch may still carry structured children
+    }
+
+    for (const key of Object.keys(n)) {
+      if (key === "span" || key === "_scope" || key === "_record") continue;
+      walk(n[key]);
+    }
+  };
+
+  walk(body);
+  return found;
+}
+
 // ---------------------------------------------------------------------------
 // Closure capture analysis
 // ---------------------------------------------------------------------------
@@ -3736,6 +3974,11 @@ export function runRI(input: RIInput): RIOutput {
   // ------------------------------------------------------------------
   const perFileImportedServerNamespaces = buildPerFileImportedServerNamespaces(files);
 
+  // §12.2 Trigger 3 (S299) — filePath → (local binding name → escalation
+  // server-only module). Consumed in the per-function scan below to build the
+  // `server-only-import` direct trigger.
+  const perFileEscalationServerOnlyBindings = buildPerFileEscalationServerOnlyBindings(files);
+
   // ------------------------------------------------------------------
   // Step 2d: Bug-5 follow-on to C18 (§38.4) — per-file channel-cell
   // ownership maps. Used in Step 6 (E-RI-002 fire arm) to skip the
@@ -3897,11 +4140,70 @@ export function runRI(input: RIInput): RIOutput {
         handleTriggers.push({ kind: "middleware-handle", span: fnNode.span });
       }
 
+      // -------------------------------------------------------------
+      // Trigger 3 (S299): the function calls a binding imported from an
+      // ESCALATION server-only stdlib module. Per §12.2:7145 importing such a
+      // module "escalates the importing function" — the function that USES the
+      // binding, since an import is file-scoped and cannot itself escalate.
+      //
+      // Direct trigger by construction: Step 4 below is direct-only (calling a
+      // server function is deliberately NOT a trigger — the call lowers to a
+      // fetch stub), so an import-derived reason MUST land here in
+      // `directTriggers` or it can never place the function. That is precisely
+      // why the pre-S299 compiler did not escalate on this class:
+      // `ESCALATION_SERVER_ONLY_MODULES`' predecessor set was consulted only by
+      // the CPS-eligibility / async-classification predicates
+      // (`hasServerCallInInit`, `controlFlowContainsServerTrigger`), which answer
+      // "does this statement contain a server call" — never by the PLACEMENT
+      // decision, whose `EscalationReason` union had no variant able to carry it.
+      //
+      // DEPTH + REFERENCE, not `callees`. `collectServerOnlyBindingModules` walks
+      // the whole body — into lambda bodies, nested function declarations and
+      // escape-hatch raw text — and matches ANY reference to the binding, not just
+      // a call. The S299 adversarial review proved the `callees`-and-calls-only
+      // version this replaced was evadable four ways, each shipping the module and
+      // its secrets to the browser at exit 0 (`.map(p => hashPassword(p))`, a
+      // nested `function` decl, a bare callback reference, and `let f = env`).
+      //
+      // REASON KIND — deliberately `server-only-resource`, NOT a new variant.
+      // §12.2 Trigger 1 is "accesses a resource not accessible from the client",
+      // which a server-only module import IS, and two existing consumers already
+      // encode that expectation:
+      //   - `emit-server.ts isBodyOnlyEscalation` (§12.6 library mode) gates on
+      //     EVERY reason being `server-only-resource`, and its own docstring names
+      //     this exact shape ("a plain `export function` importing e.g. `scrml:fs`
+      //     satisfies all three and is suppressed"). A fresh kind would fail that
+      //     `.every()` and silently re-attach an HTTP wrapper §12.6 says to drop.
+      //   - `describeServerTrigger` renders it as "the server-only resource
+      //     `scrml:auth`" with no change, and sorts `explicit-annotation` last —
+      //     so `W-DEPRECATED-SERVER-MODIFIER` now correctly reports the keyword as
+      //     redundant for this class, which IS the S280 ruling's stated purpose.
+      // `resourceType` carries the module specifier, so nothing is lost for
+      // diagnostics and the union stays small.
+      // -------------------------------------------------------------
+      const importTriggers: EscalationReason[] = [];
+      {
+        const _bindings = perFileEscalationServerOnlyBindings.get(filePath);
+        if (_bindings && _bindings.size > 0) {
+          // One reason per MODULE, not per reference site — a body touching three
+          // `scrml:auth` helpers is one escalation fact, and duplicate reasons
+          // would bloat every downstream `.every()` / message path.
+          for (const _module of collectServerOnlyBindingModules(fnNode, _bindings)) {
+            importTriggers.push({
+              kind: "server-only-resource",
+              resourceType: _module,
+              span: fnNode.span,
+            });
+          }
+        }
+      }
+
       const directTriggers: EscalationReason[] = [
         ...explicitTriggers,
         ...bodyTriggers,
         ...channelTriggers,
         ...handleTriggers,
+        ...importTriggers,
       ];
 
       // Build closure captures for this function.
@@ -3938,6 +4240,8 @@ export function runRI(input: RIInput): RIOutput {
   //   - access to protect= fields
   //   - access to session object
   //   - access to server-only resources (Bun.file, Bun.env, fs.*, etc.)
+  //   - §12.2 Trigger 3 (S299): a CALL to a binding imported from an escalation
+  //     server-only stdlib module (`ESCALATION_SERVER_ONLY_MODULES`)
   // Calling a server function is NOT a trigger. The caller stays client-side
   // and uses a fetch stub at codegen time (§12 escalation rules, RI spec header).
   // ------------------------------------------------------------------

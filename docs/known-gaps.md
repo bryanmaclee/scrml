@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 12 |
-| MED | 74 |
-| LOW | 40 |
+| HIGH | 11 |
+| MED | 77 |
+| LOW | 39 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -3761,7 +3761,38 @@ What differs is the *consequence*, and it is decided by whether a client chunk h
 
 **Verified by reading the shipped artifact, not inferred:** the emitted `scrml-runtime.*.js` for a client program importing `scrml:auth` contains `_scrml_stdlib.auth = (function() { … })` carrying a real `hashPassword(password…)` implementation. **Password hashing ships into the browser bundle and executes there, with no diagnostic.** That is the confidentiality-adjacent case this entry names, now confirmed on current main rather than at S280 only.
 
-**Consequence for prioritisation:** the HIGH that has been tracked (`scrml:store`, D-6) is the **least** dangerous member of its own class — it was noticed precisely *because* it crashes. `auth`/`crypto`/`data` are the ones that need to lead. The S280 ruling (wire Trigger 3) is unchanged and still the fix; what changes is the rank and the reason. <!-- @gap id=g-trigger-3-server-only-import-does-not-escalate sev=HIGH status=open -->
+**Consequence for prioritisation:** the HIGH that has been tracked (`scrml:store`, D-6) is the **least** dangerous member of its own class — it was noticed precisely *because* it crashes. `auth`/`crypto`/`data` are the ones that need to lead. The S280 ruling (wire Trigger 3) is unchanged and still the fix; what changes is the rank and the reason.
+
+**✅ RESOLVED S299** (`trigger-3-server-only-import-escalation`). Trigger 3 is wired. Verified by execution, before and after, on the same reproducer: `.server.js` absent → emitted; the secret literal in the client bundle → gone; `Bun.password.hash` reachable client-side → not emitted.
+
+**Two corrections to this entry's own framing, both found by tracing rather than reading:**
+
+1. **The locus was wrong.** This entry says the set's "only consumer is `isServerOnlyScrmlModuleSource`". There were **two** — the second, `isServerOnlyImportSource` → `buildImportedServerFnNames`, *is* route-inference machinery. The real hole was narrower and further down: `directTriggers` (`route-inference.ts`) is assembled from exactly four sources (explicit / body / channel / handle), and `EscalationReason` had no variant able to carry an import-derived trigger. Trigger 3 was not unwired so much as **unrepresentable**. Reasoning from this entry's stated locus would have produced a fix in the wrong function.
+
+2. **The set could not be used as-is, and this entry did not say so.** `SERVER_ONLY_SCRML_MODULES` feeds an async fail-closed backstop where over-inclusion is SAFE; escalation inverts that safety. Wiring it directly was measured to escalate **72 corpus import sites of correct client code** (`scrml:data` = 72 of the corpus's 116 server-only-module imports, and it ships a real client implementation). A second, narrower `ESCALATION_SERVER_ONLY_MODULES` was derived mechanically from the criterion *"reaches a host API that does not exist in a browser"*, cross-checked against BOTH the `stdlib/**.scrml` sources and the shipped `compiler/runtime/stdlib/*.js` shims (they agree on every module), and **bryan-ratified S299**: `auth · crypto · cron · fs · mcp · path · process · redis · store`. Removed as client-safe: `data` · `http` · `oauth`. SPEC §12.2 Trigger 3 amended in the same landing with the criterion stated **above** the list, so the list stops rotting.
+
+**Direction-of-change: newly-rejecting, measured not assumed.** R26 over 34 example targets: diagnostics **byte-identical** before and after. The corpus never exercised the failing class — every corpus site importing a server-only module *also* has a `?{}` SQL trigger in the same body, so it was already escalated. That is why 21k tests were blind to it, and it is the same structural blindness S296 recorded for D-4. The one real behavioural cost, named rather than discovered later: a function whose ONLY trigger is the import **and** which writes a reactive cell from that call now escalates and therefore hits `E-CPS-NONIDEM-NO-STORAGE` (§19.9.6) — it previously compiled clean *and leaked*. The return-shape (`return hashPassword(…)` + a separate client writer) escalates cleanly. Even in the erroring shape the secret is out of the client bundle.
+
+**⚠️ THE FIRST S299 CUT DID NOT CLOSE THIS, AND THIS ENTRY SAID IT DID.** The adversarial review (run after the first cut was already committed) proved the trigger evadable **four ways**, each compiling exit 0 with no `.server.js`, the secret in the client bundle and `Bun.password.hash` in the browser runtime:
+
+| shape | why it evaded |
+|---|---|
+| `["p"].map(p => hashPassword(p))` | `forEachCallInExprNode` returns at `case "lambda"` and never descends |
+| a nested `function` declaration | same walker; the inner body's calls never reach the outer `callees` |
+| `["p"].map(hashPassword)` | a bare value reference is not a call node at all |
+| `let f = join; f(a,b)` | indirect alias; `callees` records only `call.callee` idents |
+
+The first cut matched **calls in `callees`**, and `callees` is the shared call-graph path — which `route-inference.ts` itself documents MUST NOT be widened, because it also drives Step 5c caller-context propagation and E-ROUTE-001. So the fix is a **separate Trigger-3-only deep walk** (`collectServerOnlyBindingModules`), mirroring the two precedents that hit the same wall: `logicReferencedFnNames` for dead-code reachability and `emit-server.ts`'s peer-emission walk. It descends into lambda bodies, nested function declarations and escape-hatch raw text, and matches **any reference**, not just calls — fail-closed is the correct direction on a confidentiality boundary.
+
+**Also corrected: `scrml:oauth` was wrongly excluded, and the CRITERION was the defect.** Membership was derived from *"reaches a host API the browser lacks."* `scrml:oauth` has zero host reaches — and transmits `client_secret` at three sites, with a module header reading *"SERVER-SIDE ONLY."* A clean compile shipped a real client secret to the browser. The criterion now has a second limb (**credential handling**), and `scrml:oauth` is a member.
+
+**Also found, filed not fixed:** `FunctionDeclNode.params` is typed `string[]` but the builder emits `[{name}]` — see [[g-fn-params-typed-string-actually-objects]]. The first shadow-exclusion attempt compared against objects and silently never matched.
+
+**✅ RESOLVED S299 (second cut).** All four evasion shapes now escalate with no secret in the client bundle; the over-fire guard (a parameter shadowing an imported name) stays client; `scrml:data` stays client. Pinned by 18 tests including §8 (all four evasion shapes), §9 (the credential limb) and §10 (the over-fire guard).
+
+**The lesson, since it recurred inside one session:** the first cut verified the *direct-call* shape and this entry was marked RESOLVED on it. That is the S288 finding an adopter handed back to us verbatim — *enumerating shapes inside a function is not the same as enumerating the functions a class of defect can inhabit.* A gap marked RESOLVED stops being hunted, which makes a premature RESOLVED worse than an open one.
+
+**NOT closed by this landing:** `E-IMPORT-010` (§41.4, `bun:`/`node:` reaching client-emitted code) is a *distinct* guarantee and still has no fire site — see [[g-e-import-007-triple-allocated-no-impl]]. Trigger 3 removes the dominant path to that leak but is not the diagnostic. <!-- @gap id=g-trigger-3-server-only-import-does-not-escalate sev=HIGH status=resolved -->
 
 ### G-PROSE-CODE-COLOR-LIGHT-THEME-ONLY — the built-in typography layer emits a hardcoded light `code` colour with no dark handling — `NEW S280 (scrml-site wiki migration; PA-REPRODUCED); MED; adopter-visible`
 The built-in Tailwind/typography (`prose`) layer emits a hardcoded light-theme `code` colour and **no `prefers-color-scheme` handling at all**. On a dark site every fenced code example renders near-background-coloured — effectively invisible.
@@ -4309,8 +4340,7 @@ Author is still stopped, with a less useful message: `E-CHANNEL-008` explains th
 
 Filed by the PA from the lane reports. Each was surfaced while fixing something adjacent, none by an adopter hitting it in production.
 
-### g-scrml-store-not-classified-server-only — `scrml:store` is absent from `SERVER_ONLY_SCRML_MODULES`, so a client bundle importing it compiles clean and dies app-wide at load — `NEW S295 (dc adopter D-6, lane 2); HIGH; RULING-GATED`
-<!-- @gap id=g-scrml-store-not-classified-server-only sev=HIGH status=ruling-gated -->
+### g-scrml-store-not-classified-server-only — `scrml:store` is absent from the escalation set, so a client bundle importing it compiles clean and dies app-wide at load — `NEW S295 (adopter D-6, lane 2); HIGH; RESOLVED S299`
 **Two subsystems disagree.** `codegen/runtime-chunks.ts:143` states verbatim *"Server-only stdlibs (store) are intentionally absent"*, but `route-inference.ts:578 SERVER_ONLY_SCRML_MODULES` does **not** contain `scrml:store`. So route inference never escalates, the client emitter still lowers the import, and no `stdlib-store` chunk exists to back it. **EXECUTED (bundle loaded, not grepped):** `TypeError: Cannot destructure property 'createStore' from null or undefined value` in BOTH shapes (module-scope use, and use inside a client fn) — `const _scrml_stdlib = {}` and nothing populates `.store`. Compile is green: 0 errors, 0 warnings.
 
 **Governing sentence EXISTS** — §41.4: *"`bun:` and `node:` imports SHALL be permitted ONLY in server-context scrml code… A `bun:`/`node:` import reaching client-emitted code is a compile error (E-IMPORT-007). The compiler's import-graph traversal SHALL classify import sites and fire E-IMPORT-007 on cross-context leaks."*
@@ -4334,6 +4364,12 @@ Zero errors, zero relevant warnings in all three. The `fs` client bundle carries
 ⚠️ **RULING 1 AS WRITTEN IS A NO-OP — struck S297.** Adding `"scrml:store"` to `SERVER_ONLY_SCRML_MODULES` changes nothing while Trigger 3 does not read that set for escalation. The blast-radius claim in it *is* verified (`stdlib/store/kv.scrml` is the only stdlib file with a `bun:`/`node:` import — re-confirmed S297), and the line is still wanted — but **only as part of wiring Trigger 3**, not as a standalone fix.
 
 **REVISED DISPOSITION (S297, PA recommendation — bryan's ruling still owed).** This entry is a **symptom of [[g-trigger-3-server-only-import-does-not-escalate]]**, which is already RULED (S280: wire Trigger 3 as specified) and merely unbuilt. Fold this in: add `scrml:store` to the set as part of that arc so the wiring covers it, rather than landing a line that does nothing. **And re-rank:** within this class D-6 is the *least* dangerous member — it crashes loudly. `auth`/`crypto`/`data` have working client chunks and therefore run client-side **silently** (see the Trigger-3 entry for the verified `hashPassword` finding). The loud failure is the safe one. Companion SPEC §12.2 Trigger 3 amendment still applies ([[g-spec-12-2-trigger3-enumeration-stale]]).
+
+**✅ RESOLVED S299 — closed BY CONSTRUCTION by the Trigger-3 landing, exactly as the S297 disposition predicted.** `scrml:store` is a member of the new `ESCALATION_SERVER_ONLY_MODULES`, so a function calling `createStore` now escalates. Verified by execution on the same shape: `.server.js` emitted, and `bun:sqlite` + `createStore` both at **0 occurrences** in the client bundle AND in the emitted runtime — where before the `bun:sqlite` reach was what killed the page app-wide at load with a green compile.
+
+Note this closes without the standalone `SERVER_ONLY_SCRML_MODULES` line the struck Ruling 1 proposed — that line would still be a no-op, because the escalation path reads the *new* set. The S297 call to fold it into the Trigger-3 arc rather than land it alone was correct.
+
+**⚠️ CORRECTION — the first S299 cut's evidence for this claim was FALSIFIABLE and was falsified.** The paragraph above cited *"`bun:sqlite` + `createStore` both at 0 occurrences in the client bundle"*, measured on a **direct-call** reproducer only. The adversarial review reproduced `createStore` in a client bundle through a lambda (`["k"].map(k => createStore(k))`) against that same cut. The claim was true of the shape tested and false of the class. Closed for real by the second cut's deep walk — re-verified across all four evasion shapes, `bun:sqlite` and `createStore` at 0 in the client bundle and the runtime in each. See the correction block in [[g-trigger-3-server-only-import-does-not-escalate]]. <!-- @gap id=g-scrml-store-not-classified-server-only sev=HIGH status=resolved -->
 
 ### g-e-import-007-triple-allocated-no-impl — `E-IMPORT-007` has three different meanings inside SPEC and only one implementation — `NEW S295 (lane 2); MED; RULING-GATED`
 <!-- @gap id=g-e-import-007-triple-allocated-no-impl sev=MED status=ruling-gated -->
@@ -4374,9 +4410,47 @@ Same chunk and same class as GH #234, opposite outcome. `_scrml_label_for`'s `ty
 <!-- @gap id=g-pa-createtablemap-per-file sev=MED status=open -->
 `protect-analyzer`'s `createTableMap` is built per-file, so cross-file schema/db pairing fails. A plausible real trigger for the original adopter `E-PA-002` report (whose stated path — hand-duplicating the schema — turned out to be already fixed by F-SCHEMA-001). Separate defect from the message quality fixed at `a9044329`.
 
-### g-spec-12-2-trigger3-enumeration-stale — §12.2 Trigger 3's server-only module list omits modules the implementation already classifies — `NEW S295 (lane 2); LOW; OPEN`
-<!-- @gap id=g-spec-12-2-trigger3-enumeration-stale sev=LOW status=open -->
+### g-spec-12-2-trigger3-enumeration-stale — §12.2 Trigger 3's server-only module list omits modules the implementation already classifies — `NEW S295 (lane 2); LOW; RESOLVED S299`
+<!-- @gap id=g-spec-12-2-trigger3-enumeration-stale sev=LOW status=resolved -->
 §12.2 Trigger 3 enumerates `auth/db/redis/fs/process/cron/oauth`. The implementation's `SERVER_ONLY_SCRML_MODULES` **also** contains `crypto`, `data`, `http` — so the normative enumeration is stale independent of [[g-scrml-store-not-classified-server-only]]. Reconcile in the same amendment.
+
+**✅ RESOLVED S299**, in the Trigger-3 landing as this entry asked. The enumeration was stale in **both** directions, not just the one filed here: it also listed **`scrml:db`, which is not a stdlib module at all**, and `scrml:oauth`, which the S299 derivation shows is client-safe (PKCE exists so the flow CAN run in a browser). The amendment replaces the list with `auth · crypto · cron · fs · mcp · path · process · redis · store` and — the durable half — states the **membership criterion normatively ABOVE the list** (*"reaches a host API that does not exist in a browser"*), so the list is an evaluation of a rule rather than an independent authority. This entry existed because a hand-maintained derived list rotted silently; restating the list without the criterion would only reset the clock. Same class as the `docs/FACTS.md` and SPEC-INDEX-totals lessons.
+
+### g-fn-params-typed-string-actually-objects — `FunctionDeclNode.params` is typed `string[]` but the builder emits `[{name}]`, so every `params.has(name)` check silently never matches — `NEW S299 (found while wiring Trigger 3); MED; open`
+<!-- @gap id=g-fn-params-typed-string-actually-objects sev=MED status=open -->
+`compiler/src/types/ast.ts` declares `FunctionDeclNode.params: string[]`. The ast-builder actually produces objects — verified by dumping a real parse: `PARAMS applyIt [{"name":"hashPassword"},{"name":"v"}]`. Any consumer that builds `new Set(fnNode.params)` and then asks `.has(someName)` is comparing a string against objects, so it **always returns false** and the check silently does nothing. TypeScript cannot catch it because the declared type is a lie.
+
+**Known live consumer:** `route-inference.ts buildClosureCapturesForFunction` —
+```ts
+const params = new Set(fnNode.params ?? []);
+…
+if (!params.has(name) && !localNames.has(name)) captures.add(name);
+```
+so **every parameter name is currently treated as a captured free variable.** Closure captures feed Step 5b capture-taint, which feeds server placement, so the consequence is over-tainting → potentially over-escalating. Not a leak (over-escalation is the safe direction), which is presumably why it has never been noticed.
+
+**Found by writing the same bug.** The S299 Trigger-3 shadow-exclusion copied this exact idiom and silently did nothing; the over-fire it was meant to prevent still reproduced, and chasing why surfaced the type/reality drift. Fixed locally in Trigger 3 by normalizing both shapes; **NOT fixed at the source** — correcting the declared type or the builder touches capture-taint and therefore placement, a materially wider blast radius than a security landing should carry.
+
+**Fix directions (not scoped):** correct the `params` type to match reality and fix each consumer, OR normalize in the builder so the declared type becomes true. Audit first — `grep -n "\.params" compiler/src/*.ts` — since any other `.has`/`.includes` against `params` has the same silent failure. **Reproduce before fixing:** confirm the capture-taint over-firing has an observable placement consequence, rather than assuming from the code path.
+
+### g-gap-counts-silently-drops-unrecognised-status — the §0 rollup regex accepts a fixed status enum and silently discards every marker outside it, under-reporting open HIGHs — `NEW S299; MED; open`
+<!-- @gap id=g-gap-counts-silently-drops-unrecognised-status sev=MED status=open -->
+`scripts/state.ts:42` matches gap markers with `status=(open|resolved|deferred|nominal|non-gap|forensic)`. A marker whose status is outside that enum **does not match the regex at all** — it is not miscounted, it is invisible. The ledger currently uses **14 such markers** across 6 statuses the generator does not know: `fixed` (8), `ruling-gated` (2), `narrowed` (2), `root-caused-elsewhere` (1), `in-progress` (1).
+
+**Two of them are open HIGHs**, so the §0 headline under-reports HIGH by at least 2: `g-async-stdlib-in-sync-callback-over-fires` (`status=in-progress`) and `g-main-red-against-its-own-pre-commit-gate` (`status=narrowed`).
+
+**Found by arithmetic, not by inspection.** The S299 Trigger-3 landing resolved two HIGH entries and the count moved 12 → **11**, not 10. Chasing the missing decrement found `g-scrml-store-not-classified-server-only` had been `status=ruling-gated` and therefore uncounted for its whole life.
+
+**This is a distinct mechanism from [[the S298 gap-counts drift]], not a duplicate of it.** That one was *staleness* — a true generator run too rarely, fixed by regenerating. This one is a *lossy parser*: the block can be freshly regenerated, `--check` can pass, and the number can still be wrong, because the input rows were dropped before counting. Both produce a confident number nobody can distinguish from a correct one. **Bearing on the open CI-gate fork:** adding `state.ts --check` to the `gate` would pin a count that is itself under-reporting — worth fixing first, or the gate certifies the wrong number.
+
+**Fix directions (not scoped):** (a) widen the enum to the statuses actually in use and normalise the vocabulary; (b) better — match `status=(\S+)` and **fail loudly** on an unknown value, so the ledger cannot silently grow a seventh status. (b) is the `pa-base` §8 shape: a gate whose blind spot is invisible is not a gate. Cheap either way; the audit one-liner is `grep -oE '@gap id=\S+ sev=[A-Z]+ status=[a-z-]+' docs/known-gaps.md | grep -vE 'status=(open|resolved|deferred|nominal|non-gap|forensic)$'`.
+
+### g-imported-server-fn-names-alias-blind — `buildImportedServerFnNames` keys on the IMPORTED name, so an `as`-aliased server-fn import is invisible to async classification — `NEW S299 (found while wiring Trigger 3); MED; open`
+<!-- @gap id=g-imported-server-fn-names-alias-blind sev=MED status=open -->
+`route-inference.ts buildImportedServerFnNames` collects `node.names`, which the AST populates with the **imported** name. For `import { hashPassword as hp } from 'scrml:auth'` that is `["hashPassword"]`, while the body calls `hp()`. The resulting `importedServerFnNames` set is then matched against callee names at four sites (`hasServerCallInInit`, `controlFlowContainsServerTrigger`, and two `let/const`-init scans) — so **every aliased import misses**. The AST does carry the right data: `specifiers: [{imported, local}]`.
+
+**Found by NOT reusing it.** The S299 Trigger-3 binding map deliberately keys on `specifiers[].local` and pins the aliased case (`route-inference-trigger3-server-only-import.test.js` §5); writing that test is what surfaced the sibling's blind spot.
+
+**Consequence is DIFFERENT from Trigger 3's, which is why it was filed rather than folded in.** These four sites feed CPS-eligibility / async classification, so a miss means a **missing `await`** (a `Promise` where a value was expected — the #264 family shape), not a client leak. Different blast radius, different verification surface, and folding it into a security landing would have widened that landing's review surface for no security gain. Not yet reproduced end-to-end — the read is from the code path, so **reproduce before fixing** (an aliased import of a server fn, awaited in a value position, and check the emit for the missing `await`).
 
 ### g-maps-error-map-missing-diagnostics-and-emit-client — the nav maps route diagnostics to a map that does not contain them, and no row names the file where chunk gates live — `NEW S295 (lanes 1+3, independently); MED; RESOLVED S297`
 <!-- @gap id=g-maps-error-map-missing-diagnostics-and-emit-client sev=MED status=resolved -->
