@@ -173,6 +173,14 @@ becomes load-bearing. Close it first.
 > [[g-each-anchor-lookup-first-match-document-wide]] (corrected S299) rather than this paragraph.
 > Threading the scope without fixing the cache would pass a single-instance test and still resolve
 > cross-scope — a fix that looks right and is not.
+>
+> **⚠️ S299, SECOND CORRECTION — reproduced, and the root is neither the scope nor the cache.** The each id
+> **collides across component expansions**: two different list components, or one instantiated twice, all
+> receive the same `node.id`, so the renderer map is second-write-wins and every fence resolves to the first.
+> Executed: panel 0 renders panel 1's data, panel 1 renders empty, 0 errors 0 warnings. CE re-parses a
+> component body from raw text and numbers nodes from scratch each time. **The prerequisite is therefore a
+> component-expansion node-counter fix, in a subsystem this document never named** — scope/cache changes
+> cannot fix the renderer-key clobber. Severity raised LOW → HIGH. HELD for a ruling; not started.
 
 **OQ-3 → MEASURED, and the measurement substantially lowers the risk.** 101 sites change *lowering*,
 but absent-vs-hidden is only *observable* in three places, and the corpus barely uses them:
