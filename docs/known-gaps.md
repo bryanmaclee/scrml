@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 11 |
-| MED | 70 |
+| HIGH | 12 |
+| MED | 74 |
 | LOW | 40 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -142,6 +142,17 @@ The parent gap offered four directions; bryan ruled **(b)** (grant what `?{}` to
 The reason (d) was not simply taken: the role-drop may be deliberate defence-in-depth, because **a dynamic query's table set is not always statically known**. That is the policy question, and it is real — the grant scanner is explicitly not a SQL parser (a CTE, a subquery in FROM/JOIN position, LATERAL, EXECUTE, or a dynamic table identifier makes the query undetermined and emits a warning naming it; all-or-nothing by design, since a partial answer is indistinguishable from a complete one). So (d) cannot be decided by "just don't wrap unmarked reads" — it needs a rule for what happens when we cannot tell which tables a query touches.
 
 Adopter-flagged S297 (they observed the parent read as resolved-symptom-plus-open-policy in one entry and suggested the split; their queries do not hit the scanner's undetermined set today, and they accept the warning as the contract if one ever does). Widen-vs-limit shape → **R2 minimum**, bryan rules. — `NEW S297; MED; open`
+
+**⚑ RULED S297 — DEFERRED DELIBERATELY, with a named re-trigger. This is a disposition, not a backlog item.**
+**Re-trigger:** a second adopter hits a grant-shaped failure, **OR** the grant scanner's undetermined-set warning fires in real adopter code. Until one of those, the conservative behavior stands (everything wrapped) and this is not open work.
+
+Reasoning, recorded so it is not re-litigated:
+1. **(b) removed the pain.** Nobody is blocked — Adopter-A's harnesses pass (17/17 + 11/11), their workaround is deleted, `users` carries exactly `SELECT`. Ruling (d) now would re-architect a boundary that currently works with no failing case driving it.
+2. **The undetermined-case rule IS the content, and there is ZERO field data on it.** The grant scanner is deliberately not a SQL parser — a CTE, a subquery in FROM/JOIN position, LATERAL, EXECUTE, or a dynamic table identifier makes a query undetermined and emits a warning naming it (Adopter-A explicitly endorsed that all-or-nothing design: *"a partial answer really is indistinguishable from a complete one"*). **Adopter-A confirmed none of their queries hit that limit today.** Ruling a security default with no instance of the case it governs produces a rule nobody can evaluate.
+3. **Deferral is the reversible direction.** It keeps everything wrapped. Taking (d) relaxes a security envelope on reasoning rather than evidence — and this same session produced a worked example of that failing (`if=`'s display lowering: defensible when written, wrong for three months, found only by execution).
+4. **The thing to avoid was SILENCE, not deferral.** This spent five sessions buried inside a resolved parent entry. An explicit deferral with a re-trigger is a durable answer; "still open" is not.
+
+**If the re-trigger fires, the decision is NOT "stop wrapping" — it is the undetermined-case rule.** Wrap-when-undetermined keeps (b)'s behavior exactly where it matters most; don't-wrap-when-undetermined opens a hole precisely where the compiler admits it cannot see. That is the fork. — `DEFERRED S297 (re-trigger named)`
 
 ### G-SPA-RUNTIME-GZIP-BUDGET-KNIFE-EDGE — the 16 KB SPA-runtime gzip budget is at ~127 B margin on base, independent of any in-flight arc — `NEW S282; HIGH; open (a bryan decision, not a bug)`
 Surfaced while scoping the BUG-6 accessor-rename (`docs/changes/chunk-namespacing/BUG6-RENAME-SCOPING.md` §6). `v0-3-x-spa-tree-shake-phase-b.test.js:145` asserts the assembled SPA runtime is `< 16 * 1024` gzip. **Agent-measured on the test's own `SPA_COUNTER` fixture at base `e8fdd44c`: 16,257 B — 127 B under the 16,384 budget, with no chunk-namespacing changes present.** (Scoping measurement; the execution session re-measures as its step 1, R26-style — do not treat 127 B as verified-final.)
@@ -4373,6 +4384,87 @@ Same chunk and same class as GH #234, opposite outcome. `_scrml_label_for`'s `ty
 
 **RESOLVED S297 (bryan), PR #247 (`127a564c`).** Both halves closed in the `c700c435`→`115e8b1b` refresh. **(a)** `error.map.md` gains a HOW-TO-LOOK-UP-A-DIAGNOSTIC procedure + a **prefix-keyed** family table so an unnamed code still routes; `E-PA-*` → `protect-analyzer.ts` (sole fire site) and the `W-TAILWIND-*` family → `tailwind-classes.js` (sole fire site, wired from `api.js`'s lint pre-pass) — both previously zero-hit. **(b)** Row added and PA-verified against source line-by-line: a shipped-bundle `ReferenceError: _scrml_* is not defined` / runtime-chunk tree-shake gate → `emit-client.ts` `detectRuntimeChunks` (`:273`) + `POST_EMIT_HELPER_CHUNK_GATES` (`:2167`) + `runtime-chunks.ts` `CHUNK_DEPENDENCIES` (`:384`) + **`applyChunkDependencies` (`:392`)** — the closure fn was ADDED to this entry's suggested row, because a fix touches it and not only the table. The two chunk rows that pointed at `codegen/index.ts` were split so `index.ts` retains only what it owns. All four historical bugs re-route correctly (6nz Bug P `d570341d` → clause 3; Bug 57 `e4859a5f` → clause 1; GITI-036 #59 → clause 2; GH #234 #244 → clause 2). Also landed the `domain.map.md` "Coordinate space: SOURCE vs DIST" section whose absence made S296's D-4 agent report the maps "not load-bearing".
 **The `cloud-maps` half is NOT closed and is spun out** → [[g-cloud-maps-ci-red-api-rejection]]. Diagnosed, not fixed: Stage 2 (`claude-code-action@v1`) fails as an **API-level rejection of the first request** — 1 turn, ~0.6s, **$0**, zero permission denials, after a clean init — i.e. credential/entitlement/quota on `ANTHROPIC_API_KEY`, NOT a mapper fault, not repo content, not `--max-turns` exhaustion. Corroborated: the 2026-07-16 run lasted 12m31s (the agent genuinely ran); every run from 07-17 on lasts 35–60s; `cloud-maps.yml` last changed 2026-07-16 12:31, i.e. AFTER the last good run, so the workflow file is not the regression. `show_full_output: false` suppresses the agent's real error text — flip it to `true` (or add `--debug`) on one `workflow_dispatch` to confirm. Off the required-checks list, so it blocks no merge; its only cost is **silent map staleness**, which is precisely how this watermark stranded 39 commits across three sessions. — `RESOLVED S297 (bryan)`
+
+### g-gate-tier-unit-test-red-local-green-cloud — a unit test INSIDE the blocking `gate`'s own scope fails locally while the cloud gate is green — `NEW S297 (categorizing the 36-fail baseline S292 flagged); HIGH; infra/CI`
+<!-- @gap id=g-gate-tier-unit-test-red-local-green-cloud sev=HIGH status=open -->
+`compiler/tests/unit/esm-script-tag-module-format.test.js` → *"§4 per-route chunk EXECUTES as a module (the S265 'emitted ≠ runs' trap) > NEGATIVE control: the RAW payload loaded as a module throws ReferenceError (DOA if only marked)"* **fails locally** on `4dc74bdf`, while the cloud **`gate` is GREEN on the same content**.
+
+**This is inside the blocking gate's scope, not the tracking tier.** `.github/workflows/ci.yml:56` (job `gate`, no `continue-on-error`) runs `bun test compiler/tests/unit compiler/tests/conformance` **with no exclusions**. So local and cloud disagree about a tier that gates every merge.
+
+**Why it was invisible:** it has been absorbed into the "36 known failures" figure, which has been characterized since S277 as *"the failures are in the BROWSER tier which the cloud gate does not cover."* That characterization is **false for this one** — see the categorization in [[g-ci-does-not-run-root-level-test-files]]. **S292 explicitly warned about exactly this**: *"I did not enumerate them — the next PA should categorize before trusting 'known set' a fourth time; that phrase is doing a lot of unverified work."* It was.
+
+**Not diagnosed — only located.** Either (a) it is environment-dependent and genuinely passes on the CI runner (Bun version / module-resolution difference — plausible, since the test loads an emitted payload **as a module** and asserts it *throws*, so a negative control inverts on any environment that resolves what local does not), or (b) the gate is not actually executing this file despite its command implying it. **(b) would be the serious one** — a blocking gate whose real scope is narrower than its command reads. Distinguish before fixing: re-run the gate job with the file named explicitly and compare.
+
+⚠️ Filed HIGH not because the test matters most, but because **a blocking gate that disagrees with local on its own tier is a gate-integrity question** (`pa-base` v2.4 §8 — a gate's entire value is its capacity to go red). — `NEW S297; HIGH; open`
+
+### g-ci-does-not-run-root-level-test-files — 13 of the 14 test files at `compiler/tests/` root are executed by NO workflow, and a step NAME claims to cover one of them — `NEW S297 (categorizing the 36-fail baseline); MED; infra/CI`
+<!-- @gap id=g-ci-does-not-run-root-level-test-files sev=MED status=open -->
+The three CI jobs run only these paths: `gate` → `compiler/tests/unit` + `compiler/tests/conformance`; `tracking` → `compiler/tests/{integration,lsp,commands}` + `compiler/tests/browser` + **the single file** `compiler/tests/parser-conformance-within-node.test.js`; `windows` → unit + conformance.
+
+**Nothing runs the other 13 files sitting at `compiler/tests/` root**, including `parser-conformance-canary.test.js` (**currently failing**), `parser-conformance-corpus.test.js`, `parser-conformance.test.js`, `parser-conformance-{lexer,markup,expr,stmt,parse-file,collect-hoisted,each-contextual-sigil}.test.js`, and the three `native-*.test.js`.
+
+**⚠️ The load-bearing part — a step LABEL that overstates its scope.** `ci.yml:82` names the step **"Within-node parser-parity + canary"**, but `:83` runs `bun test compiler/tests/parser-conformance-within-node.test.js` — that one file. **The canary is named in the label and absent from the command.** Anyone auditing "is the canary covered?" reads the step name and correctly concludes yes; it is not.
+
+This is `pa-base` **v2.4 §8's hollow-gate class in a shape v2.4 does not name**: not an absorbed escape hatch, not an unproven gate, not a non-deterministic input — **the gate's own LABEL is wrong about what it gates.** Detection is cheap and worth generalizing: diff every workflow step's *name* against its *command*. **Candidate for a base amendment** alongside the ledger-drift class this session raised.
+
+**Context — how it surfaced.** Categorizing the 36-fail local baseline S292 flagged as unverified. Full split: **34** in `compiler/tests/browser/` (8 files; `tracking`, non-blocking — the standing characterization is accurate for these), **1** in the blocking gate's tier ([[g-gate-tier-unit-test-red-local-green-cloud]]), **1** here. So "36 known browser-tier failures" was wrong on two of thirty-six, and both wrong ones are CI-integrity issues rather than test debt.
+
+**Fix direction (not scoped):** decide per file whether it belongs in a covered subdirectory or in an explicit CI path list — do NOT simply add `compiler/tests/` wholesale to `gate`, which is what `ci.yml:26`'s own comment records was reverted at S253 for going red on the M6.x within-node backlog. The canary's own failure is that backlog. — `NEW S297; MED; open`
+
+### g-dbauth-object-access-not-principal-gated — objects/blobs sit OUTSIDE the RLS moat, so a db-authoritative app has provably-isolated rows and application-code-protected files beside them — `NEW S297 (Adopter-A BaaS-parity #4, ask #3; slotted by bryan); MED; db-authoritative tier / roadmap`
+<!-- @gap id=g-dbauth-object-access-not-principal-gated sev=MED status=open -->
+**Scope: the INVARIANT only, deliberately NOT a storage API.** Adopter-A asked for a content-addressed bytes/object tier (BaaS-parity #4). They have **already built** their own `_{}` implementation and state they can **carry it indefinitely** — put/get/content-addressing/path conventions are theirs and are not asked for. **The one item they state they structurally cannot build is their ask #3: object access gated by the same pinned principal as the RLS moat.** Their framing: *"A file path is not RLS'd."*
+
+**The defect this names.** The S286-ratified DB-authoritative tier pins a per-request principal and lets Postgres RLS enforce isolation against **any** connection — that is the whole point of relocating the invariant into the DB. **Objects live outside that boundary.** So one app can hold rows that are provably tenant-isolated and files beside them protected only by application code. That is an **inconsistent trust boundary inside a single application**, inconsistent in the dangerous direction: the weaker half is the invisible one, and it is invisible precisely because it looks like ordinary file I/O.
+
+**Why this is an extension, not a new axiom.** S286 ratified that *"scrml WILL emit an opt-in DB-authoritative security tier that STACKS with §14.8.10 as defense-in-depth."* Principal-gated object access is that ratified axiom applied to a second object kind. It does **not** reopen the invariant-vs-policy firewall question and does not need a fresh threshold ruling.
+
+**Sequencing:** AFTER [[g-trigger-3-server-only-import-does-not-escalate]]. Not a dependency — different machinery — but Trigger 3 is already RULED (S280), unbuilt, confidentiality-adjacent, and closes two blocked items by construction, while this blocks no one today. The A1 per-request-principal machinery (`SET LOCAL` in a transaction) is what an object-access gate would key on, so the DB-authoritative foundations must stay stable underneath it.
+
+**Filed to stop the re-verification loop.** Independently confirmed ABSENT in three separate sessions (S292, S295, S297) — no gap id, no roadmap item, no SPEC section. A named entry ends that cycle. **This is a tracked, scoped, named item — NOT a build commitment.** — `NEW S297; MED; open`
+
+### g-s34-catalog-wrong-meaning-class — five §34 rows DESCRIBE a different diagnostic than the code actually fires on; one is ruling-gated — `NEW S297 (§34 meaning-axis sweep); MED; freeze-gate integrity`
+<!-- @gap id=g-s34-catalog-wrong-meaning-class sev=MED status=open -->
+Authority: **`docs/audits/s34-meaning-axis-2026-07-28.md`** (baseline `main@ed2515e7`). The axis S260's audit did **not** cover — it scoped its TRIGGER-MISMATCH bucket explicitly as *"not fully mechanized … Treat as a FLOOR"* of 5 hand-confirmed rows. This sweep is that comparison.
+
+**Five WRONG-MEANING rows:** `W-PROGRAM-001` · `W-AUTH-001` · `E-COMPONENT-019` · `E-CG-001` · `E-PA-002`.
+
+⚠️ **`W-PROGRAM-001` is RULING-GATED — do not "fix" it into existence.** §34 `:899`, §4.12 `:748` and §4.12 `:891` all say the code flags *"an unnamed nested `<program>`"*. The **sole** fire site (`ast-builder.js` ~`:18967`) fires on `!hasProgramRoot` — *"No `<program>` root element found"*. **PA-verified independently S297.** These are near-opposite, and the three SPEC sites agree **with each other**, so internal cross-checking cannot catch it. Consequence: the documented nested-`<program>`-naming guarantee has **zero enforcement**. **Before implementing it, cross-check whether it was DROPPED BY DESIGN** — the `E-ATTR-012` shape (ratified-dropped S249, [[feedback_freeze_classifier_dropped_by_design]]): a non-firing code whose SPEC still reads SHALL may be a deliberate retirement with the row left behind. Implement-vs-drop is bryan's, not a scoped fix.
+
+**`W-AUTH-001` is a SECOND one-code-two-guarantees case** — structurally identical to the `E-IMPORT-007` defect fixed earlier the same session: `route-inference.ts:5330` reports auth-middleware auto-injection, a meaning documented nowhere in §34. **That shape has now appeared twice in one day**, which argues it is a class rather than two incidents.
+
+`E-PA-002` was found independently while working the S295 blocked list (its row says *"invalid `protect=` syntax"*; it fires on a missing `<db src=>` file **plus** unrecoverable `CREATE TABLE`) — the sweep confirmed it as briefed. Per-row proposed replacement text is in the report; **not applied here** — the corrections want a single ruling pass, not five drive-by edits.
+
+**⚑ S297 DROP-CHECK on `W-PROGRAM-001` — RESOLVED, and it INVERTS the framing. Read this before correcting any of the five.**
+bryan ruled on this code at **S42**, verbatim: *"1 for now. I want to pin this issure for further discussion later"* — and the entire discussion behind it (224 of 229 warn-only samples firing, ~98%; path-based suppression under `samples/compilation-tests/`; the parked "is that directory fragment territory?" question) is about **files with no `<program>` root**. That is the **implementation's** meaning. A live pin exists at `docs/pinned-discussions/w-program-001-warning-scope.md` (opened 2026-04-25, still reading *"No compiler change authorized"*).
+
+So this is **NOT** the `E-ATTR-012` dropped-by-design shape — that was a real rule deliberately retired with its row left behind. **Here it is the reverse: the IMPLEMENTED meaning is the live, ruled-on one, and the §34/§4.12 "unnamed nested `<program>`" prose is the ORPHAN** — absent from user-voice, changelog, design-insights and the pin. Nothing indicates that guarantee was ever wanted, decided, or built.
+
+**Disposition: neither drop nor implement — CORRECT THE PROSE** to describe the diagnostic we actually have and already ruled on. The nested-`<program>`-naming guarantee would be a separate feature needing its own code, and nothing suggests demand. **This also means the finding is less alarming than the sweep framed it:** the "guarantee with zero enforcement" was never a decided guarantee, only prose that drifted in.
+
+**⚠️ CONSEQUENCE FOR THE OTHER FOUR — do not assume the prose is the survivor.** The natural reading of a WRONG-MEANING row is "the prose is right, the code is wrong/missing." `W-PROGRAM-001` is the opposite. **Each remaining code needs a decision-record check FIRST** (user-voice · changelog · design-insights · `docs/pinned-discussions/`), or the correction pass risks enshrining prose that drifted in — precisely what §34 already did here. S297 triage of that record, by presence:
+
+| code | user-voice | changelog | pinned | read |
+|---|---|---|---|---|
+| `E-CG-001` | 5 | 2 | — | Substantial + RECENT (S245 acorn-exact protected-field egress scan, fail-closed). Implemented meaning is clearly live → **same disposition as `W-PROGRAM-001`: correct the prose.** |
+| `E-PA-002` | 0 | 7 | — | Changelog-only, but the implemented meaning is demonstrably live — an adopter hit it this window and lane 3 improved its message deliberately without touching the gate. → **correct the prose.** |
+| `W-AUTH-001` | 3 | 3 | — | Has a record but **no pin of its own** (an earlier PA note claiming a pin was wrong — the hit is a *mention inside* the `W-PROGRAM-001` pin). Which meaning the record discusses is **NOT yet established** — check before writing a row. |
+| `E-COMPONENT-019` | 0 | 0 | — | **ZERO decision record anywhere.** Neither meaning is attested. The genuine outlier: correcting it needs a fresh code+SPEC read and may need a ruling rather than a correction. |
+
+**Why this matters beyond tidiness:** §34 is the **freeze gate**. A row that misdescribes its own diagnostic means the gate is measuring something other than what it claims, and the language-1.0 coverage argument is built on that catalog. Also notable: `error.map.md` already carried the CORRECT implemented meaning for `E-PA-002` where §34 is wrong — **the nav map is currently a better meaning-oracle than the normative catalog.** — `NEW S297; MED; open`
+
+### g-s34-dead-section-xrefs — three families of §34 rows cite sections that do not exist; one names a subsystem with no normative section at all — `NEW S297 (§34 meaning-axis sweep); MED; freeze-gate integrity`
+<!-- @gap id=g-s34-dead-section-xrefs sev=MED status=open -->
+The cite-resolution half of the sweep was **exhaustive** (951 code↔section pairs / 367 distinct cites across all 803 codes), unlike the meaning half. Three families S260 missed:
+
+- **§28.2–§28.5** — 16 lifecycle / timeout codes cite subsections of §28 (Compiler Settings). Their real home is **§6.7.x** (lifecycle / cleanup / timers).
+- **§39.5.5** — `E-SCHEMA-011`, which **landed this very window**, carries a row asserting *"§39.5.5 declares exactly ONE production"* about a section that **does not exist**. A brand-new row citing a non-existent section is the drift class arriving faster than it is being fixed.
+- **§3.5 — `E-BPP-001`.** The cited section does not exist, and more seriously **the body pre-parser has no normative section anywhere in SPEC**. This is not a bad pointer; it is a subsystem that emits a diagnostic with no normative text behind it. Distinct disposition from the other two: those need re-pointing, this needs a ruling on whether BPP gets a section or the code gets retired.
+  **⚑ S297 — RETIRE was RULED then WITHDRAWN on the fire-status check. `E-BPP-001` IS LIVE.** The PA recommended retiring it *conditional on a liveness check it had not yet run*; bryan ruled retire; the check then falsified the premise before execution. It **fires** at `compiler/src/body-pre-parser.ts:231` on a `function`/`fn` body that cannot be parsed. Nothing in `compiler/tests/` or `conformance/` pins it, but it emits. **Retiring it would silence a real condition** — an unparseable body would go quiet. Not executed.
+  **REVISED PROPOSAL (bryan's call, still owed): RECLASSIFY, do not retire.** The code is correct; the defect is that §34 — a **language** catalog — carries a **compiler-implementation** diagnostic. The BPP is impl#1 internals, not language contract, and under §62's own framing (*a compiler is scrml iff it passes the conformance suite for the version it declares*) impl#2 has no business being bound to reproduce a pre-parser's internal error. So: keep the code firing, mark it an implementation diagnostic rather than a conformance-visible language code, and **drop the `§3.5` cite rather than authoring a section to justify a row** — which is the exact drift `W-PROGRAM-001` demonstrated. Small, reversible, fixes the real thing.
+  **Durable lesson (this is the reusable part):** a retire-vs-keep recommendation is only as good as the liveness check behind it, and "the SPEC has no section for it" says nothing about whether the code fires. Two independent signals, and only one of them was checked when the recommendation was made.
+
+Also unreconciled: `error.map.md` documents **799** codes; the sweep's extraction yields **803**. The map documents its methodology carefully and warns against hand-rolled greps, so the discrepancy is worth resolving rather than assuming either side. — `NEW S297; MED; open`
 
 ### g-cloud-maps-ci-red-api-rejection — the scheduled `cloud-maps` job has failed 17/17 runs since 2026-07-17; the agent's real error is suppressed, so the maps rot silently — `NEW S297 (spun out of g-maps-error-map-missing-diagnostics-and-emit-client); MED; infra/CI`
 <!-- @gap id=g-cloud-maps-ci-red-api-rejection sev=MED status=open -->

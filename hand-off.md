@@ -1,4 +1,116 @@
 <!-- ============================================================= -->
+<!-- S297 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-29.        -->
+<!-- S297-Peter + S295/S296 + all prior UNCHANGED below.            -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 297 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-07-28/29. `/boot` Profile A. **8 PRs merged by me** (#247 #249 #250 #252 #253 #254 #265 #266)
++ the wrap. Concurrent with **S297/S298-Peter** all session (they merged #248 #251 #255 #256 #257 #258).
+Mechanical stream = the delta-log; this carries the irreducible.
+
+## 🔴 THE NEXT PA'S FIRST MOVE
+
+bryan closed the session with: *"the coming sessions can be go-go-go."* **Everything below is settled
+or explicitly dispositioned — the queue is execution, not deliberation.**
+
+**Order, ratified S297:**
+1. **Trigger-3 arc** — RULED at S280, unbuilt. **Highest value on the board.** Closes D-6
+   ([[g-scrml-store-not-classified-server-only]]) *by construction* and is what must fire the newly
+   allocated `E-IMPORT-010`. ⚠️ **And it is confidentiality-adjacent — VERIFIED this session that
+   `scrml:auth` ships a real `hashPassword` implementation into the browser bundle and executes there,
+   with no diagnostic.**
+2. **§34 correction pass** — audit landed (`docs/audits/s34-meaning-axis-2026-07-28.md`), per-code
+   dispositions recorded in [[g-s34-catalog-wrong-meaning-class]]. **One unknown left: `W-AUTH-001`'s
+   decision record** (~2 min read). Do that FIRST or the pass risks enshrining drifted prose.
+3. **`if=` Phase 2** — RULED (i), scoped (`docs/changes/if-mount-unmount-phase2/SCOPING.md`), all five
+   OQs answered. Held ONLY on S297-Peter's write-set (`emit-ssr-render.ts` / `runtime-template.js`).
+
+## 🎯 THE HEADLINE — `if=` has two lowerings, and 68% of the flagship takes the wrong one
+
+Started as blocked-item 5 (a "Tier-1 `<each>` `if=` semantics fork"). The **governing-sentence gate
+dissolved the fork and inverted its premise.**
+
+- **§17.1** `:10908`/`:10914` — *"structural boolean conditional… the element is NOT rendered. It does
+  not exist in the DOM."* **§17.2** `:11195` — *"`show=` hides, `if=` removes."* Reverse-searched nine
+  sections: **no sentence anywhere sanctions a display lowering for `if=`.** §17.7 has ZERO `if=`
+  mentions, so §17.1 governs. **Option (b) was never available** — it makes `if=` a synonym for `show=`.
+- **Tier-1 was the CONFORMANT tier**; Tier-0 for-lift was the violator. The entry stated it backwards.
+- **The real finding:** `isCleanIfNode` picks between two lowerings, and **a single `${…}` interpolation
+  flips `if=` from *removes* to *hides*.* Measured on `examples/23-trucking-dispatch`: **101 dirty / 48
+  clean — 68% non-conformant.**
+- **Second defect:** the dirty path emits into initial HTML with **no `display:none`** → gated content is
+  visible until hydration, permanently with JS off. Claim deliberately scoped DOWN in the gap: `if=` was
+  never a confidentiality boundary, interpolated *values* are client-filled — what ships is the static
+  skeleton. Correctness + FOUC, **not** a §14.8.9 breach.
+
+**Peter built both tiers off this** (#251 Tier-1, #255 Tier-0), with `create-time-absence` conformance.
+**PA-verified by recompiling the morning's reproducer:** `style.display` 1→0, structural placeholder
+0→4, and **`show=` UNCHANGED** — the fix did not collapse the §17.2 distinction. **Phase 2 (standalone
+dirty `if=`) is still open** — do not read "each `if=` fixed" as "`if=` fixed."
+
+## 🧭 FINDINGS THAT OUTLAST THE FIXES
+
+1. **The gap ledger drifts faster than it is reconciled — FOUR instances in one session** (S295 nominated
+   this class on three). A 5-session-stale HIGH whose fix had merged; an id-less defect carried as prose
+   inside a RESOLVED parent since S288; D-6's false control + no-op ruling; and a Tier-1 entry reading
+   "routed to bryan" while the fix sat on main. **Three of the four were caught by someone else — two by
+   the ADOPTER reading our ledger.** `pa-base` §2 same-landing supersession applies here verbatim and is
+   not being followed. **Base-amendment candidate, ratified S297.**
+2. **A gate's LABEL can overstate its scope** — `ci.yml:82` is named *"Within-node parser-parity + canary"*
+   and runs only `parser-conformance-within-node.test.js`. The canary is in the name and absent from the
+   command. That is `pa-base` v2.4 §8's hollow-gate class **in a shape v2.4 does not name**. Cheap
+   detection: diff every workflow step's name against its command. **Base-amendment candidate, ratified.**
+3. **§34 — the freeze gate — misdescribes its own diagnostics.** THREE defects found independently before
+   the sweep even ran (`E-IMPORT-007` double-allocation, `E-PA-002` wrong meaning, an `api.js:506` fire-site
+   line that was really `:943`), then the sweep found 5 wrong-meaning rows + 3 dead-xref families.
+   **`error.map.md` is currently a BETTER meaning-oracle than the normative catalog.**
+4. **A "known failure set" phrase was doing unverified work — S292 said so and was right.** Categorized the
+   36: **34** browser-tier (accurate), **1 inside the BLOCKING gate's own scope** (local red / cloud green),
+   **1 run by no CI job at all**. 13 of 14 root-level test files are unrun by any workflow.
+5. **The correction direction cannot be assumed.** `W-PROGRAM-001`'s drop-check found the IMPLEMENTED
+   meaning is the live ruled-on one (S42) and the **SPEC prose is the orphan** — so "prose right, code
+   wrong" is exactly backwards there. Each remaining §34 row now needs a decision-record check first.
+
+## ⚠️ OWN MISSES — recorded, not smoothed
+
+- **I dispatched the §34 sweep WITHOUT `isolation: "worktree"`** while pasting the F4 block into the prompt.
+  The agent landed in the MAIN checkout, mid-flight on my branch, caught it via that F4 block, and
+  self-provisioned. Leak check after: main clean, 0/0, nothing on my branch. **The safeguard held; the
+  accuracy did not.**
+- **`git checkout --ours <file>` during a rebase replaced the WHOLE FILE**, silently discarding both of my
+  new gap entries while leaving a clean tree and green gates. Caught only by grepping for the two `@gap id=`
+  markers. Redone by restoring the conflict and resolving **only the hunk**, then regenerating counts.
+- **I recommended retiring `E-BPP-001` conditional on a liveness check I had not run.** bryan ruled retire;
+  the check then falsified the premise (it FIRES at `body-pre-parser.ts:231`). **Not executed.** Revised
+  proposal — reclassify as an implementation diagnostic, drop the §3.5 cite — **still owed a ruling.**
+- **Two wrong context estimates.** bryan corrected both. He tracks it; I should not guess.
+- Also corrected mid-session: I told bryan `W-AUTH-001` had a pinned discussion. It does not.
+
+## ✅ RULINGS BANKED THIS SESSION (all recorded in-entry; do not re-litigate)
+
+`if=` → **(i) finish Phase 2**, (iii) dropped outright · `E-IMPORT-007` → **(B) allocate fresh**
+(`E-IMPORT-010` NAMED+RESERVED, §34 row lands with the fire) · Adopter-A Q2 → **kind-scoped, no path
+granularity** (replied + pushed) · bytes tier → **slotted, scoped to the principal-gate INVARIANT, not a
+storage API** · dbauth direction (d) → **DEFERRED with a named re-trigger** · `E-PA-002` fire condition →
+**no change** (fires on absent-file AND unrecoverable schema; verified by execution) · D-6 → **folds into
+Trigger 3, re-ranked below auth/crypto/data** · inbound third-party mail → **private hub, never public scrml**.
+
+## 🧷 STATE
+
+- **`E-BPP-001` reclassify-vs-retire** is the ONE ruling left open from the settling pass.
+- **Worktrees: 3 agent-* remain** (`a1a9a797…`, `a5834663…`, `a8b2da40…`) — **pre-existing, NOT this
+  session's**; mine (`agent-s34meaning`) was removed + branch deleted. Retained, not cleaned, deliberately.
+- **Maps: REFRESHED this session** (`c700c435`→`115e8b1b`, 39 commits, 12 of 13 files; `auth.map.md`
+  honestly left at its old stamp). Now a few commits behind again — normal.
+- **`cloud-maps` CI: red 17/17 since 2026-07-17**, diagnosed as an API-level rejection of the first request.
+  One command to confirm (flip `show_full_output`, one `workflow_dispatch`) — ratified to do next session.
+- **Privacy:** the map set carried the third-party name (11 mentions, 5 files, force-tracked into a PUBLIC
+  repo) — scrubbed, 0 remaining. Residual: `hand-off.md` 4, `master-list.md` 1 (the `258ff020`
+  generated-block twin). **Ratified: accept + record; scrubbing a derived line while its source commit
+  subject is public is theatre.**
+<!-- ============================================================= -->
 <!-- S297 WRAP (Peter/Windows) — prepended 2026-07-29.              -->
 <!-- S295/S296 (bryan) + all prior UNCHANGED below.                 -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->
