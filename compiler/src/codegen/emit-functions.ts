@@ -997,6 +997,9 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         cpsOptsBase: {
           declaredNames: new Set<string>(),
           insideFunctionBody: true,
+          // Bug 61 / GH #262 — synth-cell keys for expression-position
+          // `@<compound>.<synthProp>` collapse inside CPS (failable/async) bodies.
+          ...(ctx.synthCellKeys && ctx.synthCellKeys.size > 0 ? { synthCellKeys: ctx.synthCellKeys } : {}),
           ...(machineBindings ? { machineBindings } : {}),
           ...(engineBindings ? { engineBindings } : {}),
           ...(mapVarNames.size > 0 ? { mapVarNames } : {}),
@@ -1046,6 +1049,9 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     const cpsOpts: any = {
       declaredNames: new Set<string>(),
       insideFunctionBody: true,
+      // Bug 61 / GH #262 — synth-cell keys for expression-position
+      // `@<compound>.<synthProp>` collapse inside CPS (failable/async) bodies.
+      ...(ctx.synthCellKeys && ctx.synthCellKeys.size > 0 ? { synthCellKeys: ctx.synthCellKeys } : {}),
       ...(machineBindings ? { machineBindings } : {}),
       ...(engineBindings ? { engineBindings } : {}),
       ...(mapVarNames.size > 0 ? { mapVarNames } : {}),
@@ -1288,6 +1294,12 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         boundary: "client" as const,
         declaredNames: new Set<string>(),
         insideFunctionBody: true,
+        // Bug 61 / GH #262 — the `fn` shorthand + return-typed `function` branch
+        // BYPASSES scheduleStatements (emitFnShortcutBody instead), so it needs
+        // synth-cell keys threaded here too, else an expression-position
+        // `@<compound>.<synthProp>` read in a `fn`/return-typed body falls through
+        // to member access on the compound VALUE (`get("f").isValid` → undefined).
+        ...(ctx.synthCellKeys && ctx.synthCellKeys.size > 0 ? { synthCellKeys: ctx.synthCellKeys } : {}),
         // Seam-A Gap 2 — await a call to a transitively-async local client peer.
         ...(_clientPeerAwaitNames.size > 0 ? { clientAsyncFnNames: _clientPeerAwaitNames, syncPeerCalls: _clientSyncPeerCalls } : {}),
         // Seam-A finding-4 — the stdlib classifier so a bare `const r =
@@ -1366,7 +1378,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       // S89 §13.2 Sub-Phase B Step 3 — thread calleeMap + exportRegistry so
       // the auto-await classifier inside scheduleStatements covers stdlib
       // Promise<T> callees alongside server functions.
-      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings, engineBindings, engineVarNames, enginesWithHooks, _returnTypeAnnotation, name, enginesWithOnTimeout, enginesWithIdleWatchdog, enginesWithInternalRules, enginesWithHistory, enginesWithMessageArms, engineMessageVariants, _calleeMap, _exportRegistry, mapVarNames, orderedMapVarNames, setVarNames, _localMap, _localSet, _localOrdered, _clientPeerAwaitNames, _clientSyncPeerCalls, _fnIsAsync);
+      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings, engineBindings, engineVarNames, enginesWithHooks, _returnTypeAnnotation, name, enginesWithOnTimeout, enginesWithIdleWatchdog, enginesWithInternalRules, enginesWithHistory, enginesWithMessageArms, engineMessageVariants, _calleeMap, _exportRegistry, mapVarNames, orderedMapVarNames, setVarNames, _localMap, _localSet, _localOrdered, _clientPeerAwaitNames, _clientSyncPeerCalls, _fnIsAsync, ctx.synthCellKeys);
       for (const line of scheduled) {
         lines.push(`  ${line}`);
       }
