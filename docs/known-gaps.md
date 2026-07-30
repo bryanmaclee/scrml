@@ -30,11 +30,23 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 18 |
-| MED | 88 |
-| LOW | 39 |
+| HIGH | 19 |
+| MED | 89 |
+| LOW | 40 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-server-cell-init-leaks-const-to-client-reactive-wiring — a §52 server-authority cell init ships its value (and referenced consts) to the CLIENT bundle — `NEW S300-peter; HIGH; open (confirmed by execution on main; routed to bryan)`
+
+A §52 server-authority cell (`<x server> = <value>`) has its initializer emitted into the CLIENT reactive wiring: `<_apiKey server> = SECRET` (a plain module const) emits `const SECRET = "…"` **and** `_scrml_cs_reactive_set("_apiKey", SECRET)` + `_scrml_cs_init_set(…)` into `index.client.js` on `main` (`1b978fe8`, verified by compile). The whole point of `server` is server authority — the client must never receive the cell's init value. Root cause: `emit-reactive-wiring.ts:496` prunes server-side statements via `isServerOnlyNode`, which classifies SQL/`?{}`/env/meta inits as server-only but does NOT classify a `state-decl` with `isServer === true`. Same predicate gap the #263 client-reachability gate hit (fixed locally there by pruning `state-decl && isServer`). CAVEAT: the minimal repro also trips `E-AUTH-005` (server cell needs a server context) — needs confirmation in a fully server-contexted app to finalize severity, but the client emit is real regardless. Fix direction: teach the reactive-wiring server prune (and/or `isServerOnlyNode`, weighing blast radius) to treat `isServer===true` state-decls as server-only. bryan's reactive-wiring/route-classification lane (routed `…0730…`). <!-- @gap id=g-server-cell-init-leaks-const-to-client-reactive-wiring sev=HIGH status=open -->
+
+### g-263-typeannotated-export-const-not-collapsed-client — a type-annotated `export const X: T = v` referenced by client code stays undeclared client-side (ReferenceError, not a leak) — `NEW S300-peter; MED; open (a deliberate fail-closed residual of #263)`
+
+The #263 fix (`emitReferencedModuleExportConstLines`, emit-client.ts) under-emits a type-annotated module `export const` (`export const X: string = "hi"`) referenced by client code: `stripExportDeclInit`'s annotation/init split is unsafe on the space-tokenized raw (where `=>`/`->` become `= >`/`- >`), so the candidate is skipped fail-closed — the common annotated case still ReferenceErrors client-side. Under-emit (never a leak), so the confidentiality property holds. Also unwired: a direct cross-file `import { CONST }` used in the importer (not via a closing fn) — pre-existing, separate. Fix: robustify the annotation split (or parse the decl to an AST rather than regex the raw). <!-- @gap id=g-263-typeannotated-export-const-not-collapsed-client sev=MED status=open -->
+
+### g-263-lambda-body-only-export-const-not-emitted-client — an export const referenced ONLY inside a lambda body in a client fn under-emits — `NEW S300-peter; LOW; open (deliberate fail-closed residual of #263)`
+
+The #263 client-reachability gate collects references via `forEachIdentInExprNode`, which does not descend into `() => …` lambda bodies, so a module `export const` referenced ONLY inside a lambda in a client fn is not seen and stays undeclared client-side (ReferenceError, not a leak). Fix: descend into lambda/arrow bodies in the reachability walk. <!-- @gap id=g-263-lambda-body-only-export-const-not-emitted-client sev=LOW status=open -->
 
 ### G-ESQL006-PREPARE-EMITS-RUNTIME-THROW-NO-COMPILE-DIAGNOSTIC — `.prepare()` is refused in the ARTIFACT but never reported to the developer — `NEW S292; MED; open`
 Found verifying the scrml.dev `orm-trap` article by execution. `?{`SELECT username FROM users`}.prepare()`
