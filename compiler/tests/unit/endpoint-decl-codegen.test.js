@@ -41,6 +41,11 @@ import { join } from "path";
 import { compileScrml } from "../../src/api.js";
 
 const TMP = mkdtempSync(join(tmpdir(), "endpoint-codegen-"));
+// scrml emits ES modules. `node --check` picks the module kind from the nearest package.json, and
+// there is none above os.tmpdir(), so it would parse an ESM artifact under CommonJS rules and
+// report `export` as a SyntaxError — a red gate for a reason no change caused. Declare the module
+// type the artifacts are actually emitted in.
+writeFileSync(join(TMP, "package.json"), '{"type":"module"}\n');
 
 // ---- helpers --------------------------------------------------------------
 let _seq = 0;

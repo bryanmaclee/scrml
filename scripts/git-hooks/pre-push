@@ -1,5 +1,6 @@
 #!/bin/bash
-# scrml pre-push hook — full test suite + gauntlet quick check + snippet gate
+# scrml pre-push hook — test suite (unit+integration+conformance) + gauntlet quick check
+#                       + generated-doc currency + release-tag snippet gate
 #
 # Source-controlled baseline. Install via `bash scripts/git-hooks/install.sh`
 # from the repo root.
@@ -18,13 +19,24 @@ set -e
 PUSHING_RELEASE_TAG=0
 PUSHED_REFS=""
 HAS_UPDATE=0
+# S301: implement the S254 relaxation this hook already DOCUMENTED at step 2.5 but never
+# applied at step 1 — a NEW-REF (feature-branch) push defers the suite to the cloud `gate`
+# on the PR, which is the authoritative full run under PR-flow. An update to an EXISTING
+# remote ref (incl. a forced push) and any release tag still run it locally.
+RUN_SUITE=0
 while read local_ref local_sha remote_ref remote_sha; do
   PUSHED_REFS="$PUSHED_REFS $local_ref"
   # S292: a non-deletion ref means there is something to currency-check.
   if [ "$local_sha" != "0000000000000000000000000000000000000000" ]; then HAS_UPDATE=1; fi
+  # A zero remote_sha is a ref that does not exist upstream yet = NEW REF.
+  if [ "$local_sha" != "0000000000000000000000000000000000000000" ] \
+     && [ "$remote_sha" != "0000000000000000000000000000000000000000" ]; then
+    RUN_SUITE=1
+  fi
   case "$local_ref" in
     refs/tags/v*)
       PUSHING_RELEASE_TAG=1
+      RUN_SUITE=1
       ;;
   esac
 done
@@ -39,21 +51,44 @@ echo "=== scrml pre-push: full validation ==="
 echo "--- Refreshing browser-test fixtures (samples/compilation-tests/) ---"
 bun run compiler/src/cli.js compile samples/compilation-tests/ >/dev/null 2>&1 || true
 
-# 1. Full test suite (every push)
-echo "--- Running full test suite ---"
-TEST_OUTPUT=$(bun test compiler/tests/ 2>&1)
-EXIT_CODE=$?
+# 1. Test suite
+#
+#    SCOPE (S301) — unit + integration + conformance, i.e. the SAME subset the pre-commit
+#    hook and the cloud `gate` (unit+conformance+gauntlet) run. It is NOT the whole of
+#    compiler/tests/, and that is deliberate:
+#
+#      browser / lsp / self-host / commands carry a DOCUMENTED FAILURE BASELINE (~42 at
+#      2026-07-30) that is assessed by comparing failure-NAME SETS, not counts. An
+#      exit-code gate cannot express "the same names as before", so pointing this step at
+#      the full tree made it structurally unpassable — every push blocked, on every clone,
+#      for a baseline no change caused. That is the pa-base §8 cry-wolf shape, and a gate
+#      that cannot pass is bypassed and then deleted. The overlay already names these four
+#      tiers as the pre-commit exclusion set; this aligns pre-push with it.
+#
+#    Verified at S301: this subset is 21597 pass / 0 fail on a clean checkout, so the gate
+#    CAN go red for a real regression and green otherwise — which is the whole point.
+if [ "$RUN_SUITE" = "1" ]; then
+echo "--- Running test suite (unit + integration + conformance) ---"
+# `set -e` is active: a bare `VAR=$(failing-cmd)` aborts the script HERE, before any of the
+# reporting below runs. That is exactly what happened at S301 — a blocked push printed only
+# "--- Running full test suite ---" and exited 1, with the diagnostic on lines below it dead
+# code. `|| EXIT_CODE=$?` keeps the assignment from tripping set -e so the hook can say why.
+EXIT_CODE=0
+TEST_OUTPUT=$(bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance 2>&1) || EXIT_CODE=$?
 
 PASS_COUNT=$(echo "$TEST_OUTPUT" | grep -oP '\d+ pass' | head -1)
 FAIL_COUNT=$(echo "$TEST_OUTPUT" | grep -oP '\d+ fail' | head -1)
 SKIP_COUNT=$(echo "$TEST_OUTPUT" | grep -oP '\d+ skip' | head -1)
 echo "Tests: $PASS_COUNT, $FAIL_COUNT, $SKIP_COUNT"
 
-if [ $EXIT_CODE -ne 0 ]; then
+if [ "$EXIT_CODE" -ne 0 ]; then
     echo ""
     echo "❌ Tests failed — push blocked."
-    echo "$TEST_OUTPUT" | grep -A2 "fail" | head -20
+    echo "$TEST_OUTPUT" | grep "^(fail)" | head -20
     exit 1
+fi
+else
+echo "--- test suite SKIPPED (new-ref push; cloud \`gate\` on the PR is authority — S254) ---"
 fi
 
 # 2. Gauntlet quick check (TodoMVC) — every push

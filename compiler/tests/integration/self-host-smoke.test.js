@@ -655,6 +655,17 @@ describe("Self-host: block-splitter parity", () => {
   const bsDistPath = resolve(projectRoot, "compiler/self-host/dist/bs.js");
 
   test("compiled bs.js exists", () => {
+    // Same class as the tab.js guard below: `compiler/self-host/dist/` is gitignored, so this
+    // artifact is never tracked and a fresh clone/CI checkout cannot have it. Every sibling test
+    // in this block already skips when it is absent; this one hard-asserted.
+    // Caught by CI, not locally — this machine happened to have a bs.js generated 2026-07-22, so
+    // the local run passed while `tracking` went red. Fixing tab.js alone was an incomplete fix
+    // (pa-base §8 / S288: enumerating shapes inside a function is not the same as enumerating the
+    // functions a class of defect can inhabit).
+    if (!existsSync(bsDistPath)) {
+      console.log("No compiled bs.js — compile with: bun compiler/bin/scrml.js compile compiler/self-host/bs.scrml -o compiler/self-host/dist/");
+      return;
+    }
     expect(existsSync(bsDistPath)).toBe(true);
   });
 
@@ -725,6 +736,17 @@ describe("Self-host: tokenizer parity", () => {
   const tabDistPath = resolve(projectRoot, "compiler/self-host/dist/tab.js");
 
   test("compiled tab.js exists", () => {
+    // `compiler/self-host/dist/` is gitignored, so this artifact is never tracked and a fresh
+    // clone/worktree cannot have it — an ENV-GAP, not a regression. Every sibling test in this
+    // block already skips when it is absent (see below); this one hard-asserted, which made a
+    // clean checkout fail the pre-commit gate for a reason no change caused. Matches the
+    // skip-and-say-how pattern used by "compiled output assessment" above.
+    // NB as of 2026-07-30 the artifact cannot be regenerated either: compiling tab.scrml fails
+    // at stage CG on the §22 `^{ … }` meta-block at tab.scrml:142 (filed as a gap).
+    if (!existsSync(tabDistPath)) {
+      console.log("No compiled tab.js — compile with: bun compiler/bin/scrml.js compile compiler/self-host/tab.scrml -o compiler/self-host/dist/");
+      return;
+    }
     expect(existsSync(tabDistPath)).toBe(true);
   });
 
