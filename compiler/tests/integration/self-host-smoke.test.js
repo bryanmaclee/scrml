@@ -655,6 +655,17 @@ describe("Self-host: block-splitter parity", () => {
   const bsDistPath = resolve(projectRoot, "compiler/self-host/dist/bs.js");
 
   test("compiled bs.js exists", () => {
+    // Same class as the tab.js guard below: `compiler/self-host/dist/` is gitignored, so this
+    // artifact is never tracked and a fresh clone/CI checkout cannot have it. Every sibling test
+    // in this block already skips when it is absent; this one hard-asserted.
+    // Caught by CI, not locally — this machine happened to have a bs.js generated 2026-07-22, so
+    // the local run passed while `tracking` went red. Fixing tab.js alone was an incomplete fix
+    // (pa-base §8 / S288: enumerating shapes inside a function is not the same as enumerating the
+    // functions a class of defect can inhabit).
+    if (!existsSync(bsDistPath)) {
+      console.log("No compiled bs.js — compile with: bun compiler/bin/scrml.js compile compiler/self-host/bs.scrml -o compiler/self-host/dist/");
+      return;
+    }
     expect(existsSync(bsDistPath)).toBe(true);
   });
 
