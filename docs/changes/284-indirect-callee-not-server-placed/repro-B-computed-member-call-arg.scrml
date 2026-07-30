@@ -1,0 +1,40 @@
+// #284 Symptom B reverse-verify — bare computed member as a CALL ARGUMENT.
+// Adopter claim: `out.push(caps[j])` trips E-ROUTE-001; binding to a local first works.
+// Both shapes below, in two sibling functions, one file.
+
+<program db="./i284.db">
+
+  <db src="./i284.db" tables="entries">
+
+    ${
+      // SHAPE 1 — the reported-failing form: computed member DIRECTLY as a call arg.
+      function capsDirect(caps) {
+        const out = []
+        let j = 0
+        while (j < caps.length) {
+          if (!out.includes(caps[j])) out.push(caps[j])
+          j = j + 1
+        }
+        return out
+      }
+
+      // SHAPE 2 — the adopter's documented workaround: bind to a local first.
+      function capsLocalBind(caps) {
+        const out = []
+        let j = 0
+        while (j < caps.length) {
+          const cap = caps[j]
+          if (!out.includes(cap)) out.push(cap)
+          j = j + 1
+        }
+        return out
+      }
+    }
+
+  </>
+
+  <page>
+    <div>caps</div>
+  </page>
+
+</program>

@@ -1,0 +1,52 @@
+// #284 Symptom A reverse-verify — does a server-fn body containing computed-member
+// access lose the trace to its helper, so the helper defaults to the CLIENT bundle
+// and the server route handler ships WITHOUT the logic?
+//
+// `groupByJob` has NO trigger of its own. Its ONLY caller is `loadAdjustEntries`,
+// which IS server-escalated (Trigger 1, `?{}`). Per §12.2 Trigger 5 (caller-context
+// propagation) it SHALL escalate to server by inheritance.
+// The caller's body ALSO performs computed-member access (rows[0], out[k]).
+
+<program db="./i284.db">
+
+  <db src="./i284.db" tables="entries">
+
+    ${
+      <mode> = "day"
+      <result> = ""
+
+      // Helper: no ?{}, no server-only import, no protected field. Trigger 5 only.
+      function groupByJob(rows) {
+        const out = {}
+        let i = 0
+        while (i < rows.length) {
+          const r = rows[i]
+          const k = r.job
+          out[k] = r.amount
+          i = i + 1
+        }
+        return out
+      }
+
+      // Server-escalated via ?{}. Body carries computed-member access.
+      function loadAdjustEntries(which) {
+        const rows = ?{`SELECT id, job, amount FROM entries`}.all()
+        const first = rows[0]
+        return groupByJob(rows)
+      }
+
+      // Client-side caller — gives loadAdjustEntries a fetch stub to be emitted for.
+      function go() {
+        const grouped = loadAdjustEntries(@mode)
+        @result = "ok"
+      }
+    }
+
+  </>
+
+  <page>
+    <button onclick=go()>load</button>
+    <div>${@result}</div>
+  </page>
+
+</program>

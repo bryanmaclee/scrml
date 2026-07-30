@@ -1,0 +1,55 @@
+// #284 Symptom A, variant 3 — the OTHER reading of E-ROUTE-001: "unresolvable
+// CALLEE". The server call is reached THROUGH a computed member, so route
+// analysis cannot name the callee statically.
+
+<program db="./i284.db">
+
+  <db src="./i284.db" tables="entries">
+
+    ${
+      <mode> = "day"
+      <result> = ""
+
+      function groupByJob(rows) {
+        const out = {}
+        let i = 0
+        while (i < rows.length) {
+          const r = rows[i]
+          out[r.job] = r.amount
+          i = i + 1
+        }
+        return out
+      }
+
+      function groupByDay(rows) {
+        const out = {}
+        let i = 0
+        while (i < rows.length) {
+          const r = rows[i]
+          out[r.day] = r.amount
+          i = i + 1
+        }
+        return out
+      }
+
+      function loadAdjustEntries(which) {
+        const rows = ?{`SELECT id, job, amount FROM entries`}.all()
+        const picked0 = groupByJob
+        const picked = picked0
+        return picked(rows)
+      }
+
+      function go() {
+        const grouped = loadAdjustEntries(@mode)
+        @result = "ok"
+      }
+    }
+
+  </>
+
+  <page>
+    <button onclick=go()>load</button>
+    <div>${@result}</div>
+  </page>
+
+</program>
