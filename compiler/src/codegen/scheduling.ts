@@ -788,7 +788,7 @@ function collectReassignedNames(body: ASTNode[] | undefined, sink: Set<string>):
  * @param {CGError[]} [errors]
  * @returns {string[]}
  */
-export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: RouteMap, depGraph: DepGraph, filePath: string, errors: CGError[] = [], machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null, engineBindings?: Map<string, { varName: string; forType: string; tableName: string }> | null, engineVarNames?: Set<string> | null, enginesWithHooks?: Set<string> | null, returnTypeAnnotation?: string | null, enclosingFnName?: string | null, enginesWithOnTimeout?: Set<string> | null, enginesWithIdleWatchdog?: Set<string> | null, enginesWithInternalRules?: Set<string> | null, enginesWithHistory?: Set<string> | null, enginesWithMessageArms?: Set<string> | null, engineMessageVariants?: Map<string, Set<string>> | null, calleeMap?: CalleeImportMap | null, exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>> | null, mapVarNames?: Set<string> | null, orderedMapVarNames?: Set<string> | null, setVarNames?: Set<string> | null, localMapVarNames?: Set<string> | null, localSetVarNames?: Set<string> | null, localOrderedMapVarNames?: Set<string> | null, clientAsyncFnNames?: Set<string> | null, syncPeerCalls?: Array<{ name: string; span: unknown }> | null, clientAsyncBody?: boolean): string[] {
+export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: RouteMap, depGraph: DepGraph, filePath: string, errors: CGError[] = [], machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null, engineBindings?: Map<string, { varName: string; forType: string; tableName: string }> | null, engineVarNames?: Set<string> | null, enginesWithHooks?: Set<string> | null, returnTypeAnnotation?: string | null, enclosingFnName?: string | null, enginesWithOnTimeout?: Set<string> | null, enginesWithIdleWatchdog?: Set<string> | null, enginesWithInternalRules?: Set<string> | null, enginesWithHistory?: Set<string> | null, enginesWithMessageArms?: Set<string> | null, engineMessageVariants?: Map<string, Set<string>> | null, calleeMap?: CalleeImportMap | null, exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>> | null, mapVarNames?: Set<string> | null, orderedMapVarNames?: Set<string> | null, setVarNames?: Set<string> | null, localMapVarNames?: Set<string> | null, localSetVarNames?: Set<string> | null, localOrderedMapVarNames?: Set<string> | null, clientAsyncFnNames?: Set<string> | null, syncPeerCalls?: Array<{ name: string; span: unknown }> | null, clientAsyncBody?: boolean, synthCellKeys?: Set<string> | null): string[] {
   const lines: string[] = [];
   // Track declared names so tilde-decl can detect reassignment vs first declaration
   const declaredNames = new Set<string>();
@@ -859,6 +859,16 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     ...(nodeListContainsTildeRef(body)
         ? { tildeContext: { var: null as string | null, mode: "single" as "single" | "array" } }
         : {}),
+    // Bug 61 / GH #262 — thread the §55 synth-cell key set into scheduled
+    // function bodies so `emitMember` collapses an EXPRESSION-position
+    // `@<compound>.<synthProp>` read (`if (!@f.isValid)`, `@f.errors` as a
+    // call arg, `@f.email.isValid`) to the dotted synth cell
+    // (`_scrml_reactive_get("f.isValid")`) — matching the binding/event-wiring
+    // paths that already got this at Bug 61. Without it a function-body read
+    // fell through to member access on the compound VALUE object
+    // (`_scrml_reactive_get("f").isValid` → `undefined`), so a submit guard
+    // `if (!@f.isValid) return` returned on every call (fails closed, silent).
+    ...(synthCellKeys && synthCellKeys.size > 0 ? { synthCellKeys } : {}),
   };
 
   // Only use complex scheduling (Promise.all) for functions with actual server calls.

@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 16 |
-| MED | 81 |
+| HIGH | 15 |
+| MED | 82 |
 | LOW | 38 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -4181,8 +4181,8 @@ Surfaced by flogence dogfood (S30, FSP-wire port; broke flogence's own `fsp-core
 <!-- @gap id=g-failable-server-fn-array-return-not-promoted sev=HIGH status=open -->
 **NEW S297 (Peter — root cause of flogenceP #228, see [[g-each-hidden-drawer-live-reconcile-flogence-228]]; bryan's auto-await/promotion lane).** A `function f(...) ! string { ?{…} }` is server-promoted (present in `*.server.js` routes, `await`ed at call sites via an RPC wrapper); flipping ONLY its return type to `! string[]` (single-variable control) REMOVES it from the server routes entirely — verified from artifacts (`converseNode`/`! string` present ×5; `loadNodeThread`/`! string[]` absent). Cascade: because the array fn never enters the promotion registries (`asyncRouteMap`/`asyncCalleeMap`), `scheduling.ts isPromiseReturningCallExpr` returns false → `emit-logic.ts` (~3318/3358, the value-position `@cell = call()!{}` auto-await classifier) sets `_autoAwait=false` → the write lowers to the eager, un-awaited `_scrml_reactive_set("cell", f(...))` with the `!{}` error arm mis-wired (the real set stranded as dead code inside the `__scrml_error` branch); the unpromoted `?{}` body also leaks `_scrml_sql.*` into the client → `E-CG-006`. Same family as [[g-inferred-async-call-value-position-no-autoawait]] (#237). Fix: include `! T[]`/collection-return failable fns in the §12.2-Trigger-1 promotion path (their `?{}` body is the escalation signal, return type must not gate it). — `NEW S297; HIGH; open`
 
-### g-validity-surface-addressed-two-ways-expression-vs-binding — `@form.isValid` emits a property read in expression position and a flat cell key in bindings; the property is permanently `undefined`, so a submit guard blocks forever — `NEW S299 (adopter GH #262); HIGH; open`
-<!-- @gap id=g-validity-surface-addressed-two-ways-expression-vs-binding sev=HIGH status=open -->
+### g-validity-surface-addressed-two-ways-expression-vs-binding — `@form.isValid` emits a property read in expression position and a flat cell key in bindings; the property is permanently `undefined`, so a submit guard blocks forever — `NEW S299 (adopter GH #262); HIGH; RESOLVED S299`
+<!-- @gap id=g-validity-surface-addressed-two-ways-expression-vs-binding sev=HIGH status=resolved -->
 **PA-REPRODUCED on `d5ae9a20`**, exactly as filed. The auto-synthesized §55 validity surface is addressed by **two emitters that disagree**:
 
 ```
@@ -4199,6 +4199,19 @@ The group derived cell projects only the field VALUES; `isValid`/`errors`/`touch
 **Blast radius:** any form using `@form.isValid` as a submit guard — the canonical Shape-2 form the PRIMER teaches and the reference app uses. Usability blocker, not a security hole.
 
 **Fix directions (adopter's, and (1) looks right):** (1) lower expression-position `@group.field` to the same flat-cell lookup the binding emitter uses, keeping ONE addressing rule; or (2) have the group derived cell also project the synthesized validation metadata. **Which emitter is canonical is a ruling** — the finding is that two of them disagree. Note also that the expression form reads a `derived_declare`d cell via `reactive_get`; worth checking that accessor pairing while fixing.
+
+**RESOLVED S299 (Peter) — approach (1), no ruling needed.** The canonical addressing was already decided at Bug 61 (S140): expression-position `@<compound>.<synthProp>` collapses to the dotted synth cell `_scrml_reactive_get("f.isValid")` via `emitMember` (emit-expr.ts), gated by `ctx.synthCellKeys.has(dotted)`. The two emitters did NOT disagree by design — the collapse simply never received `synthCellKeys` in the function-body emit contexts. Fix: thread `ctx.synthCellKeys` into (a) `scheduleStatements`→`emitOpts` (plain `function` bodies), (b) the two CPS opts (failable/async bodies), and (c) `fnOpts` (the `fn`-shorthand + return-typed `function` branch that bypasses scheduleStatements — caught by adversarial under-fire review of the first cut). Covers compound-level + per-field, all four synth props, and every function-shaped body. Over-fire guard (a plain cell with a synth-named field) preserved by the membership gate. Regression: `compiler/tests/unit/i262-synth-read-in-function-body.test.js` (codes-half; runtime-half proven by construction — the emitted accessor+key are byte-identical to the already-working binding path). **Residual (distinct root cause, filed separately):** [[g-synth-read-in-statement-bodied-on-mount-not-collapsed]].
+
+### g-synth-read-in-statement-bodied-on-mount-not-collapsed — a §55 synth read (`@f.isValid`) inside a STATEMENT-bodied `on mount { if (…) … }` emits member access on the compound value, not the dotted cell — `NEW S299 (Peter, adversarial-review spinoff of GH #262); MED; open`
+<!-- @gap id=g-synth-read-in-statement-bodied-on-mount-not-collapsed sev=MED status=open -->
+**PA-REPRODUCED on `d0763cff`.** Same symptom class as GH #262 (synth read → member access on the compound VALUE → `undefined`, fails closed, silent) but a **DISTINCT root cause** — not the `synthCellKeys`-threading defect the #262 fix closed. `on mount { … }` desugars to a single `bare-expr` whose `exprNode = safeParseExprToNode(body)` (ast-builder.js:9800); when the body is a STATEMENT (`if`/`for`/`while`/`match`) it does not parse as an expression, so the `bare-expr` `exprNode` fast path (emit-logic.ts:~1590) is skipped and the body is lowered by the **raw-string heuristic rewriter** (emit-logic.ts:~1588), which never routes reads through `emitMember` and so performs no synth collapse.
+
+```
+on mount { if (@f.isValid) { logIt() } }   →   if (_scrml_cs_reactive_get("f").isValid) { … }   // LEAK
+on mount { logIt(@f.isValid) }             →   _scrml_logIt(_scrml_cs_reactive_get("f.isValid"))  // OK (exprNode fast path)
+```
+
+**Fix direction (unverified — reproduce + re-derive first):** route statement-bodied `on mount` (and, generally, any statement-bodied `bare-expr` string fallback) through the structured AST/`emitMember` path rather than the raw-string rewriter, OR teach that fallback to apply the synth collapse. Threading `synthCellKeys` alone will NOT fix it — the fallback doesn't reach `emitMember`. **Severity MED not HIGH:** narrower than the #262 submit-guard (a statement-bodied mount block reading a synth prop), and `on mount` synth reads are a rarer shape than form submit guards. Lower-confidence sibling flagged by the same review: library/server-boundary `fn` bodies (`emit-library-shared.ts:~609`, `emit-server.ts:~1211`) build `emitFnShortcutBody` opts without `synthCellKeys` — but §55 synth cells are client-reactive, so reachability is doubtful (confirm before acting).
 
 ### g-crossfile-module-const-dropped-from-client-bundle — a cross-file module's exported `const` is emitted nowhere and absent from the export table, while the fns closing over it DO cross → silent ReferenceError — `NEW S299 (adopter GH #263); HIGH; open`
 <!-- @gap id=g-crossfile-module-const-dropped-from-client-bundle sev=HIGH status=open -->
