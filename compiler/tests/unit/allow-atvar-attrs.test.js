@@ -323,7 +323,11 @@ describe("§7: multiple @-prefixed attributes on same element", () => {
     expect(out.html).toContain('title="y"');
   });
 
-  test("if=@visible + show=@count — both reactive (Phase 1)", () => {
+  // Phase 2 finish (S301) — both are still reactive, but they lower DIFFERENTLY
+  // now, which is the §17.2 contract: "show= hides, if= removes". `if=` becomes a
+  // template + marker mount controller; `show=` keeps its display placeholder,
+  // emitted INSIDE the template so it binds when the subtree mounts.
+  test("if=@visible + show=@count — if= mounts, show= toggles display", () => {
     const node = makeMarkupNode("div", [
       varRefAttr("if", "@visible"),
       varRefAttr("show", "@count"),
@@ -332,7 +336,8 @@ describe("§7: multiple @-prefixed attributes on same element", () => {
     ]);
     const result = compile(node);
     const out = result.outputs.get("/test/app.scrml");
-    expect(out.html).toContain("data-scrml-bind-if=");
+    expect(out.html).not.toContain("data-scrml-bind-if=");
+    expect(out.html).toContain("scrml-if-marker:");
     expect(out.html).toContain("data-scrml-bind-show=");
     // Neither is a literal HTML attribute
     expect(out.html).not.toContain('show="count"');

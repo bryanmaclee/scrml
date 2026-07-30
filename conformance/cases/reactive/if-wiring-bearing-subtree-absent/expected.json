@@ -1,0 +1,19 @@
+{
+  "id": "reactive-if-wiring-bearing-subtree-absent",
+  "description": "§17.1 structural absence for an if= subtree that CARRIES WIRING — an interpolation, an event handler on the if= element itself, and a bind:value input. This is the shape that used to lower to `data-scrml-bind-if` -> `style.display` instead of mount/unmount: any one dynamic descendant flipped `if=` from removes to hides, and 101 of 149 if= sites in the flagship app took that path. @open seeds false and nothing flips it, so #panel, #lbl and #field must all have count 0 — the element does not exist in the DOM, it is not merely hidden. Companion to reactive-if-top-level-absent, which pins the same claim for a subtree with nothing dynamic in it; the two together are the whole discriminator that used to decide `if=` semantics.",
+  "language-version": "1.0",
+  "spec": "§17.1",
+  "rationale": "§17.1: \"When `expr` evaluates to false, the element is NOT rendered. It does not exist in the DOM.\" §17.2 draws the contrast: \"`show=` hides, `if=` removes\". No sentence anywhere in SPEC sanctions a display lowering for `if=` — the only `display:none` sanction is §17.2's, scoped to `show=`. The absence claim is therefore independent of what the subtree contains, and asserting it on the wiring-bearing shape is what closes the hole: before this case, §17.1's \"does not exist in the DOM\" had no assertion anywhere in the corpus, which is exactly why two divergent lowerings coexisted green.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [],
+    "state": { "open": false, "label": "alpha", "typed": "" },
+    "domAnchored": [
+      { "selector": "#panel", "count": 0 },
+      { "selector": "#lbl", "count": 0 },
+      { "selector": "#field", "count": 0 },
+      { "selector": "#toggle", "count": 1 }
+    ]
+  }
+}

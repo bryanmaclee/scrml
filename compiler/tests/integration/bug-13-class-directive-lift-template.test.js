@@ -154,7 +154,8 @@ describe("Bug 13: top-level (non-lift) class:NAME emission still uses marker pat
     const { errors, clientJs: __cjRaw } = compileSource("toplevel-varref", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
     // Top-level wiring uses the marker attribute + querySelector lookup
-    expect(clientJs).toMatch(/document\.querySelector\('\[data-scrml-class-active=/);
+    // §17.1 Phase 2 (S301): root-scoped acquire inside `_scrml_bind_rewire`.
+    expect(clientJs).toMatch(/\(root \|\| document\)\.querySelector\('\[data-scrml-class-active=/);
     expect(clientJs).toMatch(/classList\.toggle\("active"/);
     // And no literal class:* setAttribute anywhere
     expect(clientJs).not.toMatch(/setAttribute\(\s*"class:/);
@@ -168,7 +169,7 @@ describe("Bug 13: top-level (non-lift) class:NAME emission still uses marker pat
 `;
     const { errors, clientJs: __cjRaw } = compileSource("toplevel-parens", src); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(errors).toEqual([]);
-    expect(clientJs).toMatch(/document\.querySelector\('\[data-scrml-class-hot=/);
+    expect(clientJs).toMatch(/\(root \|\| document\)\.querySelector\('\[data-scrml-class-hot=/);
     expect(clientJs).toMatch(/_scrml_reactive_get\("count"\)/);
     expect(clientJs).not.toMatch(/setAttribute\(\s*"class:/);
   });

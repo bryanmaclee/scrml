@@ -137,19 +137,29 @@ describe("§1: clean-subtree if= emits template + marker (N1-N3)", () => {
   });
 });
 
-describe("§1: non-clean if= falls back to display-toggle (N4-N9)", () => {
-  test("N4: if= on element with onclick child falls back", () => {
+// Phase 2 finish (S301) — these six cases were the DISPLAY-TOGGLE FALLBACK set.
+// They pinned `if=` lowering to `style.display` whenever the subtree carried
+// anything dynamic, which SPEC §17.1 (`:10914`, "It does not exist in the DOM")
+// forbids and §17.2 (`:11195`, "show= hides, if= removes") contrasts explicitly.
+// The gate is gone: EVERY `if=` on a lowercase tag lowers to template+marker
+// mount/unmount, and the subtree's own wiring is re-bound on mount. The one
+// remaining exclusion is a CAPITAL-initial tag (component use-site — its own arc).
+describe("§1: every if= lowers to mount/unmount, whatever the subtree carries (N4-N9)", () => {
+  test("N4: if= on element with onclick child mounts/unmounts", () => {
     const inner = makeMarkupNode("button", [eventAttr("onclick", "handle")], []);
     const node = makeMarkupNode("div", [varRefAttr("if", "@visible")], [inner]);
     const registry = new BindingRegistry();
     const html = generateHtml([node], [], false, registry, null);
-    // Fallback path emits data-scrml-bind-if; no <template>+marker.
-    expect(html).toContain("data-scrml-bind-if=");
-    expect(html).not.toContain("<template");
-    expect(html).not.toContain("scrml-if-marker:");
+    expect(html).not.toContain("data-scrml-bind-if=");
+    expect(html).toContain("<template");
+    expect(html).toContain("scrml-if-marker:");
+    // The event placeholder rides INSIDE the template, so the handler is wired
+    // when the subtree mounts, not while it is inert template content.
+    const tplContent = html.match(/<template id="[^"]+">(.*?)<\/template>/s)[1];
+    expect(tplContent).toContain("data-scrml-bind-onclick=");
   });
 
-  test("N5: if= on uppercase tag (component) falls back", () => {
+  test("N5: if= on uppercase tag (component) still falls back — component arc", () => {
     const node = makeMarkupNode("MyComp", [varRefAttr("if", "@x")], [
       { kind: "text", value: "hi", span: span(0) }
     ]);
@@ -159,7 +169,7 @@ describe("§1: non-clean if= falls back to display-toggle (N4-N9)", () => {
     expect(html).not.toContain("<template");
   });
 
-  test("N6: if= on element with bind:value falls back", () => {
+  test("N6: if= on element with bind:value mounts/unmounts", () => {
     const node = makeMarkupNode("input",
       [
         varRefAttr("if", "@visible"),
@@ -170,11 +180,12 @@ describe("§1: non-clean if= falls back to display-toggle (N4-N9)", () => {
     );
     const registry = new BindingRegistry();
     const html = generateHtml([node], [], false, registry, null);
-    expect(html).toContain("data-scrml-bind-if=");
-    expect(html).not.toContain("<template");
+    expect(html).not.toContain("data-scrml-bind-if=");
+    expect(html).toContain("<template");
+    expect(html).toContain("scrml-if-marker:");
   });
 
-  test("N7: if= on element with reactive interpolation in child attribute falls back", () => {
+  test("N7: if= on element with reactive interpolation in child attribute mounts/unmounts", () => {
     const inner = makeMarkupNode("span",
       [{ name: "class", value: { kind: "string-literal", value: "${@count}-class" }, span: span(0) }],
       [],
@@ -182,11 +193,11 @@ describe("§1: non-clean if= falls back to display-toggle (N4-N9)", () => {
     const node = makeMarkupNode("div", [varRefAttr("if", "@visible")], [inner]);
     const registry = new BindingRegistry();
     const html = generateHtml([node], [], false, registry, null);
-    expect(html).toContain("data-scrml-bind-if=");
-    expect(html).not.toContain("<template");
+    expect(html).not.toContain("data-scrml-bind-if=");
+    expect(html).toContain("<template");
   });
 
-  test("N8: transition:fade on if= element falls back", () => {
+  test("N8: transition:fade on if= element mounts/unmounts and keeps the transition", () => {
     const node = makeMarkupNode("p",
       [varRefAttr("if", "@visible"),
        { name: "transition:fade", value: { kind: "absent" }, span: span(0) }],
@@ -194,11 +205,18 @@ describe("§1: non-clean if= falls back to display-toggle (N4-N9)", () => {
     );
     const registry = new BindingRegistry();
     const html = generateHtml([node], [], false, registry, null);
-    expect(html).toContain("data-scrml-bind-if=");
-    expect(html).not.toContain("<template");
+    expect(html).not.toContain("data-scrml-bind-if=");
+    expect(html).toContain("<template");
+    // §17.4 — the transition is carried on the mount binding so the controller
+    // adds the enter class on mount and defers removal until the exit animation
+    // ends. `if=` still REMOVES (§17.1); it just animates on the way out.
+    const binding = registry.logicBindings.find(b => b.isMountToggle);
+    expect(binding).toBeDefined();
+    expect(binding.transitionEnter).toBe("fade");
+    expect(binding.transitionExit).toBe("fade");
   });
 
-  test("N9: if= with show= on same element falls back (show is not wiring-free)", () => {
+  test("N9: if= with show= on the same element — if mounts, show still toggles display", () => {
     const node = makeMarkupNode("div",
       [varRefAttr("if", "@a"),
        varRefAttr("show", "@b")],
@@ -206,8 +224,12 @@ describe("§1: non-clean if= falls back to display-toggle (N4-N9)", () => {
     );
     const registry = new BindingRegistry();
     const html = generateHtml([node], [], false, registry, null);
-    expect(html).toContain("data-scrml-bind-if=");
-    expect(html).not.toContain("<template");
+    expect(html).not.toContain("data-scrml-bind-if=");
+    expect(html).toContain("<template");
+    // §17.2 stays intact: `show=` keeps its display lowering, INSIDE the template,
+    // so a mounted-but-hidden element is expressible and the two compose.
+    const tplContent = html.match(/<template id="[^"]+">(.*?)<\/template>/s)[1];
+    expect(tplContent).toContain("data-scrml-bind-show=");
   });
 });
 
@@ -251,17 +273,18 @@ describe("§2: clean-subtree if= registers an isMountToggle binding (N12-N14)", 
     expect(binding.dotPath).toBe("user.loggedIn");
   });
 
-  test("N15: non-clean if= binding has isConditionalDisplay (regression — fallback path)", () => {
+  test("N15: a wiring-bearing if= registers isMountToggle, NOT isConditionalDisplay", () => {
     const inner = makeMarkupNode("button", [eventAttr("onclick", "handle")], []);
     const node = makeMarkupNode("div", [varRefAttr("if", "@visible")], [inner]);
     const registry = new BindingRegistry();
     generateHtml([node], [], false, registry, null);
+    // `isConditionalDisplay` is now reachable ONLY from `show=`-adjacent shapes and
+    // capital-tag components — never from a lowercase `if=` (SPEC §17.1).
     const fallback = registry.logicBindings.find(b => b.isConditionalDisplay);
-    expect(fallback).toBeDefined();
-    expect(fallback.varName).toBe("visible");
-    // No mount-toggle binding emitted on the fallback path.
+    expect(fallback).toBeUndefined();
     const mount = registry.logicBindings.find(b => b.isMountToggle);
-    expect(mount).toBeUndefined();
+    expect(mount).toBeDefined();
+    expect(mount.varName).toBe("visible");
   });
 });
 
@@ -325,14 +348,18 @@ describe("§3: clean-subtree if= emits mount/unmount controller (N16-N20)", () =
     expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_mr_[A-Za-z0-9_]+ = null;\s*\n\s*_scrml_ms_[A-Za-z0-9_]+ = null;/);
   });
 
-  test("N21: non-clean if= still emits el.style.display (regression — fallback path)", () => {
+  test("N21: a wiring-bearing if= emits a mount controller and NO el.style.display", () => {
     const inner = makeMarkupNode("button", [eventAttr("onclick", "handle")], []);
     const node = makeMarkupNode("div", [varRefAttr("if", "@visible")], [inner]);
     const result = compile(node);
     const out = result.outputs.get("/test/app.scrml");
-    expect(foldChunkNamespacing(out.clientJs)).toContain("el.style.display");
-    // And NOT a mount controller.
-    expect(foldChunkNamespacing(out.clientJs)).not.toContain("_scrml_mount_template");
+    const js = foldChunkNamespacing(out.clientJs);
+    expect(js).toContain("_scrml_mount_template");
+    // The display lowering is gone from the `if=` path entirely — this is the
+    // assertion that the two divergent lowerings collapsed into one.
+    expect(js).not.toContain("el.style.display");
+    // And the mounted subtree gets its wiring re-bound (the whole point).
+    expect(js).toContain("_scrml_mount_wire(");
   });
 });
 

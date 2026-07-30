@@ -198,35 +198,36 @@ describe("g-if-chain-branch-null §2 — runtime: hidden branches over null cell
   }
 
   const txt = (id) => { const el = document.querySelector(`#${id}`); return el ? el.textContent : null; };
-  const disp = (id) => {
-    const el = document.querySelector(`#${id}`);
-    const w = el && el.closest("[data-scrml-chain-branch]");
-    return w ? w.style.display : null;
-  };
+  // §17.1.1 Phase 2 (S301) — a chain branch is now MOUNTED or ABSENT; the
+  // per-branch `[data-scrml-chain-branch]` display wrapper is gone (a hidden
+  // wrapper EXISTS in the DOM, which §17.1.1's "only one span exists in the DOM at
+  // any time" forbids). `disp()` therefore becomes a presence probe: 1 = this
+  // branch is the active one, 0 = it does not exist.
+  const present = (id) => document.querySelectorAll(`#${id}`).length;
 
-  test("(1) else active (z present), b0/b1 hidden over null x/y — NO crash, else renders", () => {
+  test("(1) else active (z present), b0/b1 ABSENT over null x/y — NO crash, else renders", () => {
     const { threw, crashErrs } = mount(() => globalThis.__set__("z", { c: "C", meta: { deep: "D" } }));
     expect(threw).toBeNull();
     expect(crashErrs).toEqual([]);
-    expect(disp("sz")).toBe("");           // else visible
+    expect(present("sz")).toBe(1);         // else is the active branch
     expect(txt("sz")).toBe("z: C");
     expect(txt("sznest")).toBe("nested: D");
-    expect(disp("sx")).toBe("none");       // b0 hidden
-    expect(txt("sx")).toBe("x: ");         // gated → empty, no crash
-    expect(disp("sy")).toBe("none");       // b1 hidden
-    expect(txt("sy")).toBe("y: ");
+    // The inactive branches over NULL cells are not in the DOM at all, so their
+    // interpolations cannot even be reached — the crash window is closed
+    // structurally, not by emptiness.
+    expect(present("sx")).toBe(0);
+    expect(present("sy")).toBe(0);
   });
 
-  test("(2) b0 active (x present), b1/else hidden over null y/z — NO crash, b0 renders", () => {
+  test("(2) b0 active (x present), b1/else ABSENT over null y/z — NO crash, b0 renders", () => {
     const { threw, crashErrs } = mount(() => globalThis.__set__("x", { a: "A" }));
     expect(threw).toBeNull();
     expect(crashErrs).toEqual([]);
-    expect(disp("sx")).toBe("");
+    expect(present("sx")).toBe(1);
     expect(txt("sx")).toBe("x: A");
-    expect(disp("sy")).toBe("none");
-    expect(disp("sz")).toBe("none");
-    expect(txt("sz")).toBe("z: ");         // hidden else over null z — gated, no crash
-    expect(txt("sznest")).toBe("nested: ");
+    expect(present("sy")).toBe(0);
+    expect(present("sz")).toBe(0);
+    expect(present("sznest")).toBe(0);
   });
 
   test("(3) flip b0 -> else: x null + z present re-renders the else, no crash", () => {
@@ -242,8 +243,9 @@ describe("g-if-chain-branch-null §2 — runtime: hidden branches over null cell
     console.error = origErr;
     expect(threw).toBeNull();
     expect(errs.filter((e) => /TypeError|Cannot read|of null|of undefined/i.test(e))).toEqual([]);
-    expect(disp("sx")).toBe("none");
-    expect(disp("sz")).toBe("");
+    // The outgoing branch LEAVES the DOM; the incoming one mounts and renders.
+    expect(present("sx")).toBe(0);
+    expect(present("sz")).toBe(1);
     expect(txt("sz")).toBe("z: C2");
     expect(txt("sznest")).toBe("nested: D2");
   });
@@ -251,9 +253,9 @@ describe("g-if-chain-branch-null §2 — runtime: hidden branches over null cell
   test("(4) flip else -> b1: y present (x still null) activates the else-if branch", () => {
     mount(() => globalThis.__set__("z", { c: "C", meta: { deep: "D" } }));
     globalThis.__set__("y", { b: "B" });
-    expect(disp("sy")).toBe("");
+    expect(present("sy")).toBe(1);
     expect(txt("sy")).toBe("y: B");
-    expect(disp("sz")).toBe("none");       // else now hidden
+    expect(present("sz")).toBe(0);        // the else is REMOVED, not hidden
   });
 
   test("(adversarial) b0 -> else -> b1 -> else flip-flop, nested field, no crash throughout", () => {
@@ -268,17 +270,21 @@ describe("g-if-chain-branch-null §2 — runtime: hidden branches over null cell
       // -> else (x null, z present).
       globalThis.__set__("z", { c: "Z1", meta: { deep: "DEEP1" } });
       globalThis.__set__("x", null);
-      expect(disp("sz")).toBe("");
+      expect(present("sz")).toBe(1);
+      expect(present("sx")).toBe(0);
       expect(txt("sz")).toBe("z: Z1");
       expect(txt("sznest")).toBe("nested: DEEP1");
       // -> b1 (y present, x null).
       globalThis.__set__("y", { b: "Y1" });
-      expect(disp("sy")).toBe("");
+      expect(present("sy")).toBe(1);
+      expect(present("sz")).toBe(0);
       expect(txt("sy")).toBe("y: Y1");
-      // -> back to else (y null again; z still present, updated).
+      // -> back to else (y null again; z still present, updated). A REMOUNT must
+      // re-read the current cell, not resurrect the first mount's text.
       globalThis.__set__("z", { c: "Z2", meta: { deep: "DEEP2" } });
       globalThis.__set__("y", null);
-      expect(disp("sz")).toBe("");
+      expect(present("sz")).toBe(1);
+      expect(present("sy")).toBe(0);
       expect(txt("sz")).toBe("z: Z2");
       expect(txt("sznest")).toBe("nested: DEEP2");
     } catch (e) { threw = e; }
@@ -289,7 +295,8 @@ describe("g-if-chain-branch-null §2 — runtime: hidden branches over null cell
 
   test("(regression) the standalone single-`if=` and `show=` still work", () => {
     mount(() => globalThis.__set__("x", { a: "A" }));
-    // single-if (`#ssingle`) is visible (x present) and rendered.
+    // single-if (`#ssingle`) is MOUNTED (x present) and rendered.
+    expect(present("ssingle")).toBe(1);
     expect(txt("ssingle")).toBe("single: A");
     // show= (`#smsg`) is hidden (@vis false) — its display-toggle div is
     // display:none — but its inner effect is NOT gated, so it still renders the

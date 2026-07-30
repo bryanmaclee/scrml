@@ -257,7 +257,17 @@ describe("runtime size", () => {
     expect(minimal.length).toBeLessThan(SCRML_RUNTIME.length * 0.30);
   });
 
-  test("RUNTIME_CHUNK_ORDER has 30 chunks", () => {
+  test("RUNTIME_CHUNK_ORDER has 31 chunks", () => {
+    // 31 chunks post-§17.1 if= Phase 2 (S301): 'ifmount' SPLIT OUT of the
+    // always-included 'scope' chunk. It holds _scrml_create_scope /
+    // _scrml_find_if_marker / _scrml_mount_template / _scrml_unmount_scope /
+    // _scrml_self_scope / _scrml_mount_wire — the §17.1 mount/unmount runtime,
+    // which every page paid for regardless of whether it used `if=`. Activated by
+    // detectRuntimeChunks (an `if`/`else-if`/`else` attribute, or an `if-chain`
+    // node) AND by the POST-EMIT `_scrml_find_if_marker(` gate. The mount-scope
+    // FLAG (_scrml_active_mount_scope) deliberately stays in 'scope' — every page's
+    // _scrml_region_track reads it.
+    //
     // 30 chunks post-§52.8 (ssr-b-substrate): 'ssr' chunk added for the SSR
     // pre-render seed (_scrml_ssr_seed_apply + _scrml_ssr_seeded). Activated by a
     // POST-EMIT `_scrml_ssr_` scan (emit-client.ts) when a server-authority cell
@@ -307,6 +317,6 @@ describe("runtime size", () => {
     //   18 chunks post-C13: 'engine' chunk for §51.0.F + §51.0.G engine
     //   state-machine runtime hooks.
     //   17 chunks post-C10: 'messages' chunk for §55.10.
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(30);
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(31);
   });
 });

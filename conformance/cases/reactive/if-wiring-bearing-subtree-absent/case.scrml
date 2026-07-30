@@ -1,0 +1,13 @@
+${
+    <open> = false
+    <label> = "alpha"
+    <typed> = ""
+    function toggle() {
+        @open = !@open
+    }
+}
+<button id="toggle" onclick=toggle()>Toggle</>
+<div id="panel" if=@open onclick=toggle()>
+    <span id="lbl">${@label}</>
+    <input id="field" type="text" bind:value=@typed/>
+</div>

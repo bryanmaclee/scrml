@@ -269,7 +269,11 @@ describe("§i81.3 — coexistence: multiple placeholders on ONE element", () => 
     expect(client).toContain("addEventListener");
   });
 
-  test("if= + class= on one element: the directive and the value attr coexist", () => {
+  // Phase 2 finish (S301): the `if=` half is now a template+marker mount, so the
+  // two no longer share the element's attribute list — the class placeholder rides
+  // on the element INSIDE the template and binds when the subtree mounts. The
+  // coexistence claim still holds: both bindings are emitted, neither is dropped.
+  test("if= + class= on one element: the class value attr rides inside the if= template", () => {
     const src = `<program>
       <show> = true
       <mode> = "a"
@@ -278,9 +282,9 @@ describe("§i81.3 — coexistence: multiple placeholders on ONE element", () => 
     const r = compile(src);
     expect(r.errors).toEqual([]);
     const html = emittedHtml(r);
-    const div = html.match(/<div[^>]*>/)?.[0] ?? "";
-    expect(div).toMatch(/data-scrml-bind-if="[^"]+"/);
-    expect(div).toMatch(/data-scrml-bind-attr-class="[^"]+"/);
+    expect(html).not.toContain("data-scrml-bind-if");
+    expect(html).toMatch(/<template id="[^"]+"><div[^>]*data-scrml-bind-attr-class="[^"]+"/);
+    expect(html).toMatch(/<\/template><!--scrml-if-marker:/);
   });
 
   test("two distinct value attrs on one element each get their own placeholder", () => {
@@ -1006,18 +1010,36 @@ describe("§i81.12 — Axiom ① writer-ownership conflict (E-ATTR-WRITER-CONFLI
     expect(emittedHtml(r)).not.toContain("data-scrml-bind-attr-class");
   });
 
-  test("style: style=(expr) + if= is a conflict (subsumes the old F3)", () => {
+  test("style: style=(expr) + show= is a conflict (show= writes style.display)", () => {
+    const src = `<program>
+      <open> = false
+      <theme> = "color: red"
+      <div show=@open style=(@theme)>panel</div>
+    </program>`;
+    const r = compile(src);
+    const e = hasWriterConflict(r);
+    expect(e).toBeTruthy();
+    expect(e.message).toContain("style=");
+    expect(e.message).toContain("show=");
+    expect(emittedHtml(r)).not.toContain("data-scrml-bind-attr-style");
+  });
+
+  // Phase 2 finish (S301) — the `if=` half of this rule RETIRED with the display
+  // lowering it described. Under §17.1 `if=` inserts/removes the node and writes
+  // no style, so `style=(expr)` is the sole style writer and the pair is legal.
+  // The old assertion (conflict) was true only while `if=` wrote el.style.display.
+  test("style: style=(expr) + if= is NO LONGER a conflict — if= writes no style", () => {
     const src = `<program>
       <open> = false
       <theme> = "color: red"
       <div if=@open style=(@theme)>panel</div>
     </program>`;
     const r = compile(src);
-    const e = hasWriterConflict(r);
-    expect(e).toBeTruthy();
-    expect(e.message).toContain("style=");
-    expect(e.message).toContain("if=");
-    expect(emittedHtml(r)).not.toContain("data-scrml-bind-attr-style");
+    expect(hasWriterConflict(r)).toBeFalsy();
+    // The style binding is EMITTED (it owns the surface) and rides inside the
+    // if= template, so it binds when the subtree mounts.
+    expect(emittedHtml(r)).toContain("data-scrml-bind-attr-style");
+    expect(emittedHtml(r)).not.toContain("data-scrml-bind-if");
   });
 
   test(".value: value=(expr) + bind:value= is a conflict on a form control", () => {

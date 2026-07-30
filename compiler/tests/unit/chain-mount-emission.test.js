@@ -142,25 +142,30 @@ describe("§1: all-clean chain HTML emission (N1-N5)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §2  HTML emission — all-dirty chains (today's behavior preserved) (N6-N8)
+// §2  HTML emission — a WIRING-BEARING chain mounts too (Phase 2 finish, S301)
+//
+// These three used to pin the per-branch display-toggle wrapper. §17.1.1
+// (SPEC.md:7533) says "only one span EXISTS in the DOM at any time" — a hidden
+// wrapper exists, so the fallback violated the chain's own normative sentence,
+// exactly as the standalone dirty path violated §17.1's. Both fell to the same
+// discriminator (`isCleanIfNode` via `isCleanChainBranch`).
 // ---------------------------------------------------------------------------
 
-describe("§2: all-dirty chain HTML emission preserves today's per-branch wrapper (N6-N8)", () => {
-  test("N6: all-dirty chain (reactive interp) keeps per-branch wrapper, no templates", () => {
+describe("§2: a chain whose branches carry wiring mounts them (N6-N8)", () => {
+  test("N6: interpolation-bearing chain emits templates + markers, NO wrapper, NO display:none", () => {
     const { html } = compileToHtml(`<program>
       <p if=@show>Status: \${@status}</>
       <p else>Pending: \${@pending}</>
     </>`);
-    // Per-branch wrapper retained for dirty branches.
-    expect(html).toContain('data-scrml-chain-branch="');
-    // No <template> emission for dirty branches.
-    expect(html).not.toContain("<template");
-    expect(html).not.toContain("scrml-if-marker");
-    // Inline display:none preserved (display-toggle initial state).
-    expect(html).toContain('style="display:none"');
+    expect((html.match(/<template id="[^"]+">/g) ?? []).length).toBe(2);
+    expect((html.match(/<!--scrml-if-marker:[^-]+-->/g) ?? []).length).toBe(2);
+    // The per-branch wrapper only ever existed to give the display toggle
+    // something to hide.
+    expect(html).not.toContain('data-scrml-chain-branch="');
+    expect(html).not.toContain('style="display:none"');
   });
 
-  test("N7: all-dirty chain still has the chain wrapper", () => {
+  test("N7: a wiring-bearing chain still has the single chain wrapper", () => {
     const { html } = compileToHtml(`<program>
       <p if=@show>\${@status}</>
       <p else>\${@pending}</>
@@ -168,68 +173,69 @@ describe("§2: all-dirty chain HTML emission preserves today's per-branch wrappe
     expect(html).toMatch(/<div data-scrml-if-chain="[^"]+">/);
   });
 
-  test("N8: all-dirty chain branches retain their dirty content (reactive logic placeholder)", () => {
+  test("N8: branch content survives the move INTO the template (interp placeholder intact)", () => {
     const { html } = compileToHtml(`<program>
       <p if=@show>X: \${@status}</>
       <p else>Y</>
     </>`);
-    // Reactive logic placeholder for the dirty branch's interp.
-    expect(html).toMatch(/data-scrml-logic="/);
+    // The reactive interp placeholder rides inside the template, so it binds when
+    // the branch mounts (via _scrml_mount_wire) rather than at boot.
+    expect(html).toMatch(/<template id="[^"]+"><p>X: <span data-scrml-logic="/);
   });
 });
 
 // ---------------------------------------------------------------------------
-// §3  HTML emission — mixed-cleanliness chains (N9-N12)
+// §3  HTML emission — MIXED branches all take the same path (N9-N12)
+//
+// The pre-S301 shape dispatched per branch: a wiring-free branch mounted, a
+// wiring-bearing one hid. That made `if=` remove and `else-if=` hide IN THE SAME
+// CHAIN — a difference an adopter's CSS and `:nth-child` can see, decided by
+// whether they happened to put an interpolation in one arm.
 // ---------------------------------------------------------------------------
 
-describe("§3: mixed-cleanliness chain HTML emission — per-branch dispatch (N9-N12)", () => {
-  test("N9: clean-if + dirty-else — clean gets <template>, dirty gets per-branch wrapper", () => {
+describe("§3: mixed-wiring chains — every branch mounts (N9-N12)", () => {
+  test("N9: wiring-free if + event-bearing else — BOTH get template+marker", () => {
     const { html } = compileToHtml(`<program>
       <h2 if=@editMode>Edit</>
       <button else onclick={@cancel}>Cancel</>
     </>`);
-    // Clean if-branch: 1 template, 1 marker.
-    expect((html.match(/<template id="[^"]+">/g) ?? []).length).toBe(1);
-    expect((html.match(/<!--scrml-if-marker:[^-]+-->/g) ?? []).length).toBe(1);
-    // Dirty else-branch: 1 per-branch wrapper.
-    expect((html.match(/<div data-scrml-chain-branch="[^"]+"/g) ?? []).length).toBe(1);
+    expect((html.match(/<template id="[^"]+">/g) ?? []).length).toBe(2);
+    expect((html.match(/<!--scrml-if-marker:[^-]+-->/g) ?? []).length).toBe(2);
+    expect(html).not.toContain('data-scrml-chain-branch="');
   });
 
-  test("N10: dirty-if + clean-else — dirty gets per-branch wrapper, clean gets <template>", () => {
+  test("N10: event-bearing if + wiring-free else — BOTH get template+marker", () => {
     const { html } = compileToHtml(`<program>
       <button if=@show onclick={@cancel}>Click</>
       <h2 else>Done</>
     </>`);
-    // 1 template + 1 marker for the clean else-branch.
-    expect((html.match(/<template id="[^"]+">/g) ?? []).length).toBe(1);
-    expect((html.match(/<!--scrml-if-marker:[^-]+-->/g) ?? []).length).toBe(1);
-    // 1 per-branch wrapper for the dirty if-branch.
-    expect((html.match(/<div data-scrml-chain-branch="[^"]+"/g) ?? []).length).toBe(1);
+    expect((html.match(/<template id="[^"]+">/g) ?? []).length).toBe(2);
+    expect((html.match(/<!--scrml-if-marker:[^-]+-->/g) ?? []).length).toBe(2);
+    expect(html).not.toContain('data-scrml-chain-branch="');
   });
 
-  test("N11: 3-branch mixed (clean / clean / dirty) emits 2 templates + 1 wrapper", () => {
+  test("N11: 3-branch mixed emits 3 templates + 3 markers and no wrapper", () => {
     const { html } = compileToHtml(`<program>
       <p if=@a>A</>
       <p else-if=@b>B</>
       <button else onclick={@cancel}>C</>
     </>`);
-    expect((html.match(/<template id="[^"]+">/g) ?? []).length).toBe(2);
-    expect((html.match(/<!--scrml-if-marker:[^-]+-->/g) ?? []).length).toBe(2);
-    expect((html.match(/<div data-scrml-chain-branch="[^"]+"/g) ?? []).length).toBe(1);
+    expect((html.match(/<template id="[^"]+">/g) ?? []).length).toBe(3);
+    expect((html.match(/<!--scrml-if-marker:[^-]+-->/g) ?? []).length).toBe(3);
+    expect(html).not.toContain('data-scrml-chain-branch="');
   });
 
-  test("N12: mixed-cleanliness — all branches still inside the single chain wrapper", () => {
+  test("N12: every branch's template+marker sits inside the single chain wrapper", () => {
     const { html } = compileToHtml(`<program>
       <h2 if=@editMode>Edit</>
       <button else onclick={@cancel}>Cancel</>
     </>`);
-    const wrapperMatch = html.match(/<div data-scrml-if-chain="[^"]+">([\s\S]*?)<\/div>$/m);
-    // The inner content should include both the <template> and the per-branch wrapper.
-    // Note: there's a nested </div> from the dirty branch wrapper — match the OUTER chain wrapper.
-    // Use a broader match: any chain wrapper has both shapes inside.
-    expect(html).toContain('data-scrml-if-chain="');
-    expect(html).toContain('<template');
-    expect(html).toContain('data-scrml-chain-branch="');
+    // With no per-branch wrapper there is no nested </div>, so the chain wrapper's
+    // own span is unambiguous and can be matched exactly.
+    const inner = html.match(/<div data-scrml-if-chain="[^"]+">([\s\S]*?)<\/div>/);
+    expect(inner).not.toBeNull();
+    expect((inner[1].match(/<template id="/g) ?? []).length).toBe(2);
+    expect((inner[1].match(/scrml-if-marker:/g) ?? []).length).toBe(2);
   });
 });
 
@@ -264,17 +270,24 @@ describe("§4: registry LogicBinding shape per chain branch (N13-N17)", () => {
     expect(elseB.markerId).toMatch(/^_scrml_scrml_chain_marker_/);
   });
 
-  test("N15: dirty branch registers if-chain-branch with branchMode=display + NO templateId/markerId", () => {
+  test("N15: a wiring-bearing branch ALSO registers branchMode=mount + templateId/markerId", () => {
+    // Pre-S301 this asserted `branchMode: "display"` and the ABSENCE of a
+    // templateId/markerId. `branchMode` is retained in the binding shape (the
+    // controller still switches on it) but only ever carries "mount" now.
     const { registry } = compileToHtml(`<program>
-      <p if=@show>\${@status}</>
-      <p else>fallback</>
+      <p if=@show>Status: \${@status}</>
+      <p else>Pending: \${@pending}</>
     </>`);
-    const branches = registry.logicBindings.filter((b) => b.kind === "if-chain-branch");
-    expect(branches.length).toBe(1);
-    const branch = branches[0];
-    expect(branch.branchMode).toBe("display");
-    expect(branch.templateId).toBeUndefined();
-    expect(branch.markerId).toBeUndefined();
+    const branch = registry.logicBindings.find((b) => b.kind === "if-chain-branch");
+    expect(branch).toBeDefined();
+    expect(branch.branchMode).toBe("mount");
+    expect(branch.templateId).toBeDefined();
+    expect(branch.markerId).toBeDefined();
+    // No binding anywhere in the chain falls back to display mode.
+    const display = registry.logicBindings.filter(
+      (b) => (b.kind === "if-chain-branch" || b.kind === "if-chain-else") && b.branchMode === "display",
+    );
+    expect(display).toEqual([]);
   });
 
   test("N16: chainId is the same across all branches in one chain", () => {
@@ -356,38 +369,31 @@ describe("§5: client JS controller for all-clean chains (N18-N22)", () => {
 // §6  Client JS controller shape — all-dirty (N23-N25)
 // ---------------------------------------------------------------------------
 
-describe("§6: client JS controller for all-dirty chains (N23-N25)", () => {
-  // Both branches contain reactive interpolation (`${@var}`) — making both
-  // dirty per the cleanliness gate. This is the "today's behavior preserved"
-  // case from deep-dive §3 ("All-dirty: 2 (`quiz-app:136`, `api-dashboard:176`)").
-  test("N23: all-dirty chain controller resolves per-branch wrapper via querySelector", () => {
-    const { clientJs } = compileFull(`<program>
+describe("§6: client JS controller for a wiring-bearing chain (N23-N25)", () => {
+  const DIRTY = `<program>
       <p if=@show>Status: \${@status}</>
       <p else>Pending: \${@pending}</>
-    </>`);
-    // navigate-wave1b M1: the chain controller lives in `_scrml_nav_rewire(root)`
-    // (re-invocable on soft nav), so the wrapper query is `(root || document)`-scoped.
-    expect(clientJs).toMatch(/\(root \|\| document\)\.querySelector\('\[data-scrml-chain-branch="[^"]+"\]'\)/);
+    </>`;
+
+  test("N23: the controller resolves each branch through _scrml_find_if_marker", () => {
+    const { clientJs } = compileFull(DIRTY);
+    expect(clientJs).toContain("_scrml_find_if_marker(");
+    // The per-branch wrapper querySelector is gone with the wrapper itself.
+    expect(clientJs).not.toContain("data-scrml-chain-branch=");
   });
 
-  test("N24: all-dirty chain controller does NOT call _scrml_mount_template / _scrml_unmount_scope", () => {
-    const { clientJs } = compileFull(`<program>
-      <p if=@show>Status: \${@status}</>
-      <p else>Pending: \${@pending}</>
-    </>`);
-    const chainBlock = clientJs.match(/\/\/ if-chain:[\s\S]*?\n  \}/)?.[0] ?? "";
-    expect(chainBlock).not.toContain("_scrml_mount_template");
-    expect(chainBlock).not.toContain("_scrml_unmount_scope");
+  test("N24: the controller DOES call _scrml_mount_template / _scrml_unmount_scope", () => {
+    const { clientJs } = compileFull(DIRTY);
+    expect(clientJs).toContain("_scrml_mount_template(");
+    expect(clientJs).toContain("_scrml_unmount_scope(");
+    // …and re-binds the mounted branch's own wiring.
+    expect(clientJs).toContain("_scrml_mount_wire(");
   });
 
-  test("N25: all-dirty chain controller sets wrapper.style.display = '' / 'none'", () => {
-    const { clientJs } = compileFull(`<program>
-      <p if=@show>Status: \${@status}</>
-      <p else>Pending: \${@pending}</>
-    </>`);
-    const chainBlock = clientJs.match(/\/\/ if-chain:[\s\S]*?\n  \}/)?.[0] ?? "";
-    expect(chainBlock).toMatch(/\.style\.display = "none";/);
-    expect(chainBlock).toMatch(/\.style\.display = "";/);
+  test("N25: the controller NEVER toggles wrapper.style.display", () => {
+    const { clientJs } = compileFull(DIRTY);
+    expect(clientJs).not.toContain("_wrapper.style.display");
+    expect(clientJs).not.toContain('style.display = "none"');
   });
 });
 
@@ -395,42 +401,30 @@ describe("§6: client JS controller for all-dirty chains (N23-N25)", () => {
 // §7  Client JS controller shape — mixed-cleanliness (N26-N28)
 // ---------------------------------------------------------------------------
 
-describe("§7: client JS controller for mixed-cleanliness chains (N26-N28)", () => {
-  test("N26: mixed chain — clean branch case mounts; dirty case toggles wrapper", () => {
-    const { clientJs } = compileFull(`<program>
+describe("§7: client JS controller for a mixed-wiring chain (N26-N28)", () => {
+  const MIXED = `<program>
       <h2 if=@editMode>Edit</>
       <button else onclick={@cancel}>Cancel</>
-    </>`);
-    const chainBlock = clientJs.match(/\/\/ if-chain:[\s\S]*?\n  \}/)?.[0] ?? "";
-    expect(chainBlock).toContain("_scrml_mount_template(");
-    expect(chainBlock).toContain("_scrml_unmount_scope(");
-    expect(chainBlock).toMatch(/\.style\.display = "";/);
-    expect(chainBlock).toMatch(/\.style\.display = "none";/);
+    </>`;
+
+  test("N26: BOTH branches take the mount arm — one uniform dispatch", () => {
+    const { clientJs } = compileFull(MIXED);
+    const mounts = (clientJs.match(/_scrml_mount_template\(/g) ?? []).length;
+    expect(mounts).toBe(2);
+    expect(clientJs).not.toContain("_wrapper.style.display");
   });
 
-  test("N27: mixed chain — querySelector for dirty wrapper + per-branch root/scope for clean", () => {
-    const { clientJs } = compileFull(`<program>
-      <h2 if=@editMode>Edit</>
-      <button else onclick={@cancel}>Cancel</>
-    </>`);
-    const chainBlock = clientJs.match(/\/\/ if-chain:[\s\S]*?\n  \}/)?.[0] ?? "";
-    expect(chainBlock).toMatch(/_scrml_chain__scrml_if_chain_1_b0_root = null;/);
-    expect(chainBlock).toMatch(/_scrml_chain__scrml_if_chain_1_else_wrapper =/);
+  test("N27: each branch gets its own root + scope local, and no wrapper lookup", () => {
+    const { clientJs } = compileFull(MIXED);
+    expect((clientJs.match(/_scrml_chain_[A-Za-z0-9_]+_root/g) ?? []).length).toBeGreaterThan(1);
+    expect((clientJs.match(/_scrml_chain_[A-Za-z0-9_]+_scope/g) ?? []).length).toBeGreaterThan(1);
+    expect(clientJs).not.toContain("_wrapper = (root || document).querySelector");
   });
 
-  test("N28: mixed chain — both dispatch arms (mount + display) appear in the same switch", () => {
-    const { clientJs } = compileFull(`<program>
-      <p if=@a>A</>
-      <p else-if=@b>B</>
-      <button else onclick={@cancel}>C</>
-    </>`);
-    const chainBlock = clientJs.match(/\/\/ if-chain:[\s\S]*?\n  \}/)?.[0] ?? "";
-    // Two clean branches: should mount via templates.
-    const mountCount = (chainBlock.match(/_scrml_mount_template\(/g) ?? []).length;
-    expect(mountCount).toBe(2);
-    // One dirty branch: should toggle display.
-    const displayToggleCount = (chainBlock.match(/\.style\.display = "";/g) ?? []).length;
-    expect(displayToggleCount).toBe(1);
+  test("N28: the activate switch has ONLY mount arms (no display arm survives)", () => {
+    const { clientJs } = compileFull(MIXED);
+    expect(clientJs).toContain("_scrml_create_scope();");
+    expect(clientJs).not.toMatch(/_wrapper\.style\.display = "";/);
   });
 });
 

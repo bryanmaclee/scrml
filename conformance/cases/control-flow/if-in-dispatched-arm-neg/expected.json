@@ -1,0 +1,12 @@
+{
+  "id": "control-flow-if-in-dispatched-arm-neg",
+  "description": "E-IF-IN-DISPATCHED-ARM — an `if=` inside a `<match>` block-form arm body is REFUSED at compile time. ⚠️ THIS CASE PINS A TEMPORARY IMPLEMENTATION RESTRICTION, NOT A LANGUAGE RULE. SPEC places no limit on where `if=` may appear; the refusal exists only because a dispatched arm body is injected with `innerHTML` and wired by a per-arm wire function that cannot see into the `<template>` §17.1 `if=` emits, so the gated subtree would render empty or never appear with NO runtime error. WHEN [[g-if-mount-inside-dispatched-arm-body]] LANDS, THIS CASE INVERTS — it must become a positive runtime case asserting the gated subtree mounts and its `${…}` binds. DO NOT DELETE IT AT THAT POINT: flip `codes` to `[]`, move E-IF-IN-DISPATCHED-ARM into `notCodes`, and add the runtime half. Deleting it would lose the only pin on the composition that broke silently at S301.",
+  "language-version": "1.0",
+  "spec": "§34",
+  "rationale": "§34 E-IF-IN-DISPATCHED-ARM. Measured at S301 against a clean baseline, all with zero diagnostics before the guard existed: arm-is-INITIAL rendered the element but its interpolation was permanently dead (baseline `R:L` → `R:CHANGED`, post-Phase-2 `R:` → `R:`); arm-reached-LATER produced count 0 where baseline produced the content; an `<engine>` state child behaved like the LATER case. Refusing the composition is strictly better than emitting a subtree that silently renders nothing, and it is reversible — the follow-on removes the guard rather than amending it.",
+  "expect": {
+    "codes": ["E-IF-IN-DISPATCHED-ARM"],
+    "notCodes": [],
+    "severity": { "E-IF-IN-DISPATCHED-ARM": "error" }
+  }
+}

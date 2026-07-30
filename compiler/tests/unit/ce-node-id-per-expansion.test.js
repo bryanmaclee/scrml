@@ -194,10 +194,17 @@ describe("CE node ids §4 — attribute bindings stay unique", () => {
   </>
 </program>`);
     expect(out.errors).toEqual([]);
-    const attrIds = [...new Set(
-      [...out.html.matchAll(/data-scrml-bind-if="([^"]+)"/g)].map((m) => m[1]),
+    // Phase 2 finish (S301): `if=` lowers to template+marker (§17.1), so the
+    // per-expansion id surface is the MARKER id rather than a `data-scrml-bind-if`
+    // placeholder. The guard is unchanged in substance — two expansions, two ids.
+    const markerIds = [...new Set(
+      [...out.html.matchAll(/scrml-if-marker:([A-Za-z0-9_]+)/g)].map((m) => m[1]),
     )];
-    expect(attrIds.length).toBe(2);
+    expect(markerIds.length).toBe(2);
+    const templateIds = [...new Set(
+      [...out.html.matchAll(/<template id="([^"]+)"/g)].map((m) => m[1]),
+    )];
+    expect(templateIds.length).toBe(2);
   });
 });
 

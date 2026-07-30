@@ -985,10 +985,39 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
             // but uses _scrml_register_cleanup — already in 'scope' (always included)
           }
         }
+        // §17.1 ifmount — an `if=` (or a chain-construction `else-if=`/`else`)
+        // attribute means emit-event-wiring will emit a conditional controller
+        // that calls _scrml_find_if_marker / _scrml_mount_template. Runs
+        // unconditionally (NOT under the hasChunkedMarkupTag flag, which only
+        // proves the absence of specific TAGS, not of an attribute).
+        // The POST_EMIT `_scrml_find_if_marker(` gate backs this up.
+        {
+          const condAttrs: any[] = node.attributes ?? node.attrs ?? [];
+          for (const a of condAttrs) {
+            const n: string = a?.name ?? "";
+            if (n === "if" || n === "else-if" || n === "else") {
+              chunks.add("ifmount");
+              break;
+            }
+          }
+        }
         // Check for reactive for-loop (iterable is @varName) — within children
         if (Array.isArray(node.children)) {
           walkNodes(node.children);
         }
+        break;
+      }
+
+      // §17.1.1 if-chain — the chain controller mounts clean branches and
+      // display-toggles dirty ones; both resolve their marker through
+      // _scrml_find_if_marker. Branch elements live under `branches[].element`
+      // + `elseBranch`, which the generic child walk below does not reach.
+      case "if-chain": {
+        chunks.add("ifmount");
+        for (const br of (node as any).branches ?? []) {
+          if (br?.element) walkNodes([br.element]);
+        }
+        if ((node as any).elseBranch) walkNodes([(node as any).elseBranch]);
         break;
       }
 
@@ -1991,9 +2020,27 @@ export function generateClientJs(ctx: CompileContext): string {
     for (const line of engineOpenerEffectLines) lines.push(line);
   }
 
-  // Emit ref= and bind:/class: directive wiring
+  // Emit ref= and bind:/class: directive wiring.
+  //
+  // §17.1 Phase 2 (S301) — wrapped in a ROOT-SCOPED, RE-INVOKABLE function.
+  // emitBindings acquires each element with `(root || document).querySelector`, so
+  // calling it with `document` (immediately below) is the original boot emission
+  // and calling it with a just-mounted `if=` subtree binds THAT subtree. Without
+  // this, an `<input bind:value=@x>` inside an `if=` was wired once at boot against
+  // a document that could not see it (the subtree lives in an inert <template>) and
+  // then never again — a silent typed-input loss the moment `if=` stopped being a
+  // display toggle. Deliberately NOT registered as a soft-nav rehydrator: the
+  // rehydrator would re-attach listeners to elements that still carry the ones from
+  // boot. Its effects go through `_scrml_mount_track`, a no-op outside a mount.
   const bindingLines = clientStage(ctx, "emit-bindings", () => emitBindings(ctx));
-  for (const line of bindingLines) lines.push(line);
+  if (bindingLines.length > 0) {
+    lines.push("// --- ref= / bind: / class: wiring; re-invoked per if= mount with the mounted root ---");
+    lines.push("function _scrml_bind_rewire(root) {");
+    for (const line of bindingLines) lines.push(line);
+    lines.push("}");
+    lines.push("_scrml_bind_rewire(document);");
+    lines.push("");
+  }
 
   // Emit event handler wiring and reactive display wiring
   const eventLines = clientStage(ctx, "emit-event-wiring", () => emitEventWiring(ctx, fnNameMap));
@@ -2168,6 +2215,14 @@ export function generateClientJs(ctx: CompileContext): string {
     ["_scrml_structural_eq(", "equality"],
     ["_scrml_reset(", "reset"],
     ["_scrml_message_for", "messages"],
+    // §17.1 if= mount/unmount. `_scrml_find_if_marker(` is the ONE token every
+    // emitted conditional controller carries — standalone `if=` AND `if-chain`,
+    // mount-mode AND display-mode branches (emit-event-wiring.ts:1475 / :1981) —
+    // so it gates the whole family without enumerating them. Belt-and-braces with
+    // the pre-emit AST walk above: this scan sees the emitted text, so it also
+    // covers a controller minted from the binding registry rather than a walkable
+    // AST shape.
+    ["_scrml_find_if_marker(", "ifmount"],
   ];
   for (const [helperRef, chunkName] of POST_EMIT_HELPER_CHUNK_GATES) {
     if (ctx.usedRuntimeChunks.has(chunkName)) continue;

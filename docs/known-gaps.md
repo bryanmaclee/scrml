@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 15 |
 | MED | 85 |
-| LOW | 38 |
+| LOW | 39 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -4901,3 +4901,53 @@ The session is minted and persisted correctly; every reader looks for it in an e
 **Adjacent twin, same root shape, lower severity (folded here deliberately, per the reporter):** `<program sessionExpiry="7d">` reaches only the program unit, so the login unit that actually issues the `Set-Cookie` uses the 1h default and the declaration is **inert with no warning** — `app.server.js` `_scrml_session_max_age = 604800` vs `login.server.js` `= 3600`. §20.5 anticipates the mechanism (*"a login page carries no `sessionExpiry=` … so the 1h default governs there"*). Resolved by (1); left live and made dangerous by (2).
 
 **Lane note:** adopter bugs are Peter's standing footprint, but `emit-server.ts` is also the surface of his open **#264**, and he is currently live on **#263** (`emit-client.ts`). Partition before dispatching. — `NEW S301 (bryan, from adopter GH #282); HIGH; open`
+
+### G-IF-MOUNT-INSIDE-DISPATCHED-ARM-BODY — `if=` inside a `<match>` arm / `<engine>` state child cannot mount; guarded by `E-IF-IN-DISPATCHED-ARM` until this lands — `NEW S301 (bryan); HIGH; open`
+
+A dispatched arm body (`<match>` block-form arm, §18.0.1; `<engine>` state child, §51.0.B) is emitted as an HTML STRING, injected with `innerHTML` on dispatch, then wired by a per-arm wire fn doing `_root.querySelector(...)`. A §17.1 `if=` inside such a body puts its subtree in a `<template>`, and BOTH halves fail: the wire fn cannot see into `<template>` content, so the subtree's `${…}` effects and arm-scoped bindings are never created; and the `if=` controller lives in `_scrml_nav_rewire`, which ran at boot against a document that did not yet contain the arm, so `_scrml_find_if_marker` returned null and no controller exists.
+
+**Executed at S301 against a clean `1b978fe8` baseline, zero diagnostics in every cell:**
+
+| scenario | baseline | post-Phase-2 |
+|---|---|---|
+| match, arm is the INITIAL variant | `#gated=1`, `"R:L"` → `"R:CHANGED"` (live) | `#gated=1`, `"R:"` → `"R:"` (mounted but permanently dead) |
+| match, arm reached LATER | `#gated=1`, `"R:L"` | **`#gated=0`** — content never appears |
+| `<engine>` state child, reached later | `#gated=1`, `"R:L"` | **`#gated=0`** |
+| `<engine>` INITIAL state child | — | `#gated=1`, `"I:"` — statically emitted, still dead |
+
+**ORDER-DEPENDENCE — record this, it cost time to find.** The INITIAL-arm cell is NOT stable. It renders the element only because the dispatcher's `DOMContentLoaded` listener happens to register before `_scrml_boot`'s, so the marker exists when `_scrml_nav_rewire(document)` runs. Any change to boot ordering flips that cell to `#gated=0` without touching this code.
+
+**GUARDED, NOT LEFT SILENT.** `E-IF-IN-DISPATCHED-ARM` (§34) refuses the composition at compile time — `emit-html.ts:refuseConditionalInDispatchedArm`, two call sites (the `if=` mount gate and the `if-chain` block), firing on `registry.currentArmContext`. Migration measured at ZERO before landing: 2163 `.scrml` across `samples/ examples/ stdlib/ conformance/ docs/ benchmarks/ compiler/tests/`, instrumenting that exact predicate, with 359 `if=` emission sites in 114 files and 237 arm-context pushes proving both sides were exercised. **This gap's fix DELETES the guard** — it is not amended. Delete `refuseConditionalInDispatchedArm` + its two call sites + the §34 row, and invert `conformance/cases/control-flow/if-in-dispatched-arm-neg` (flip `codes` to `[]`, move the code to `notCodes`, add the runtime half — do NOT delete the case).
+
+**THE DESIGN — build this, do not re-derive it.**
+1. Split the emitted wiring in `emit-event-wiring.ts` into `_scrml_if_controllers(root, armWire)` (ONLY the `if=` / if-chain controller blocks) and `_scrml_nav_rewire(root)` (everything else, calling `_scrml_if_controllers(root)` at the end). Boot and soft-nav behaviour is then unchanged by construction.
+2. `_scrml_if_controllers` RETURNS a composite disposer. The arm wire fn (`emit-variant-guard.ts:emitArmWireFunction`) pushes `_scrml_if_controllers(_root, thunk)`'s disposer into its existing `_disposers` array, so the dispatcher's `_dispose()` before the next `innerHTML` drains it.
+3. `_scrml_mount_wire(root, scopeId, rewire)` gains a fourth `armWire` parameter; on mount it calls `armWire(selfScope)` and `_scrml_mount_track`s the disposer it returns. The thunk is `function (r) { return <wireFnName>(r, ...payloadArgs); }` — the arm's OWN wire fn re-invoked against the mounted node, which is the only scope holding the payload args. Recursion terminates because the mounted root does not contain its own marker.
+
+**THE TRAP — verbatim, because both halves look green.** The obvious fix, calling `_scrml_nav_rewire(_mount)` from the dispatcher, is wrong TWICE: (a) it re-runs `nonDelegatedRewire`, whose blanket `querySelectorAll('[data-scrml-bind-<event>]')` is NOT filtered by `engineArm`, so it DOUBLE-ATTACHES non-delegable handlers the arm wire fn already bound — and the two are different function objects, so `addEventListener` does not dedupe them; and (b) it leaks a whole controller per dispatch, because the previous controller is region-tracked only via `_scrml_region_track(_scrml_ifa_X, …)`, which registers nothing outside an outlet or a mount scope, so nothing drains it and it keeps `_scrml_mr_X` pointing at a node `innerHTML` already wiped. Neither shows up in a test that only checks the content renders.
+
+**Detection is free:** `binding-registry.ts:592` already stamps `engineArm` on every logic binding added inside an arm, and `currentArmContext` is already exposed. <!-- @gap id=g-if-mount-inside-dispatched-arm-body sev=HIGH status=open -->
+
+### ✅ RESOLVED S301 — G-DISPATCHED-MOUNT-INSIDE-IF-NEVER-RENDERS — a `<match>`/`<engine>` INSIDE an `if=` subtree never renders — `NEW+RESOLVED S301 (bryan); HIGH`
+
+The inverse nesting of [[g-if-mount-inside-dispatched-arm-body]], and a SEPARATE regression. A `<match>` / `<engine>` mount anchor inside a §17.1 `if=` subtree sits in a `<template>` at boot. The dispatcher resolves its mount with a module-level `document.querySelector('[data-scrml-match-mount="…"]')` and returns early when it is absent — and NOTHING re-dispatches when the `if=` later mounts. So the dispatched block renders nothing, forever, with no diagnostic.
+
+**Measured, not inferred.** Reading the emitted artifacts (a dispatched mount anchor appearing INSIDE an `if=` `<template>`): **133 `if=` templates inspected across the flagship corpus + the 12-source wide set → 1 hit**, `examples/23-trucking-dispatch/pages/driver/hos.html` (`data-scrml-engine-mount`). Confirmed a REGRESSION: on `1b978fe8` that file's guarding `if=` was display-toggled, the engine mount stayed in the live DOM, and the dispatcher found it. An earlier AST-walk estimate said 2; the second (`samples/admin-panel.scrml`) is a FALSE POSITIVE — a `match (…) { … }` STATEMENT inside `${…}`, lowered inline via `lift`, not a dispatcher.
+
+**Executed behaviour (both orders):** with the gate false at seed then flipped true, `#gate=1` but `#body=0`; with the gate TRUE at seed, still `#body=0`. So it is not an ordering artifact — a dispatched mount inside an `if=` simply never renders.
+
+**This is also why "hoist the `if=` outside the `<match>`" is NOT a valid workaround** for the sibling gap, and why `E-IF-IN-DISPATCHED-ARM`'s message says so explicitly instead of recommending it.
+
+## ✅ RESOLVED S301 — bryan ruled FIX, not migrate. Dispatcher remount registry, mirroring S153.
+
+**The ruling was "do not migrate `hos.scrml`"** — editing a shipped reference example to accommodate a codegen regression inverts what that example is for.
+
+**Built exactly as S153 did it for `<each>`.** Each dispatcher registers a remount thunk keyed by its mount id (`_scrml_register_dispatch_remount(id, fn)`), and `_scrml_mount_wire` walks a freshly mounted subtree calling them (`_scrml_remount_dispatch(root)`) alongside the `_scrml_remount_each` it already called. BOTH dispatcher shapes register — Shape A (subscribe) re-reads its cell, Shape B (effect) re-evaluates its accessor, because a mount is not a dep change and Shape B would not re-fire on its own either. Item-scoped mode is excluded (no module-scope mount; the each factory dispatches per item). The registration is `typeof`-guarded because the registry lives in the tree-shakeable `ifmount` chunk: a page with a `<match>` and no `if=` ships neither the chunk nor any cost.
+
+**REPEATED DISPATCH IS SAFE, and that is the load-bearing detail** — it is what keeps this clear of the trap documented on the sibling gap. The dispatcher disposes the previous arm's wiring (`if (<disposeVar>) <disposeVar>()`) BEFORE re-rendering, so a remount tears down and rebuilds rather than layering. Asserted, not assumed: a non-delegable handler fires exactly ONCE after 5 open/close cycles (a double-attach would give 6, and `addEventListener` cannot dedupe the arm wire fn's per-invocation closures), and the live effect population is FLAT across 4 cycles.
+
+**ACCEPTANCE WAS THE REAL PAGE, EXECUTED** (`compiler/tests/browser/flagship-hos-engine-under-if.browser.test.js`, 7 tests) — it compiles the whole flagship app, resolves the page's cross-file module graph transitively, boots the shipped `hos.client.js`, and drives the page's own `if=(@loaded && @currentDriver)` guard. The HOS badge renders at seed-false→true and after close/reopen, shows the SERVER-authoritative status (`On duty`) rather than the `initial=` arm (`Off duty`) — which a remount dispatching on a stale variant would have got wrong — stays live across a status change, and never duplicates across 4 cycles. Plus `if-mount-dispatched-mount.browser.test.js` (12 tests) for the synthetic matrix + the runtime contract. **Both proven to bite:** reverting the one-line `_scrml_remount_dispatch(root)` call fails 11 of 19.
+
+**⚠️ THE ARTIFACT SCAN STAYS AT 1, AND THAT IS CORRECT.** The scan that found this — "a dispatched mount anchor inside an `if=` `<template>`" — reports **1 of 133 templates both before and after**, because it detects the SHAPE, which is legitimate and unchanged; the fix makes the shape WORK rather than eliminating it. The 1→0 target in the dispatch brief was mis-specified. Execution is the evidence, which is why the acceptance test is the page rather than a grep.
+
+**Residual, stated not implied:** `if=` on an `<engine>`/`<match>` element ITSELF appears to be ignored (the structural-element emitter does not route it through the §17.1 mount gate) — noticed while building the self-inclusive-walk fixture, NOT investigated, NOT in scope here. And the self-inclusive branch of `_scrml_remount_dispatch` is DEFENSIVE: no scrml source shape currently puts the anchor ON the mounted root, because the anchor is always a generated child `<div>`. It is pinned at the helper's own contract so the claim is not overstated. <!-- @gap id=g-dispatched-mount-inside-if-never-renders sev=HIGH status=resolved -->

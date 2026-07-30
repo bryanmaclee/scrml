@@ -1342,6 +1342,43 @@ export function emitVariantGuardedRender(
     dispatcherLines.push(`})();`);
   }
 
+  // §17.1 — register a REMOUNT thunk keyed by this dispatcher's mount id.
+  //
+  // The dispatcher resolves its mount ONCE (`document.querySelector`) and returns
+  // early when it is absent. Inside an `if=` subtree the mount begins life in a
+  // `<template>`, so that lookup finds nothing and — before this — nothing ever
+  // re-dispatched when the subtree mounted: the block stayed empty forever, with
+  // no diagnostic. Measured at S301 in our own flagship app
+  // (`examples/23-trucking-dispatch/pages/driver/hos.scrml`, an `<engine>` under
+  // an `if=`), and a REGRESSION: pre-Phase-2 that `if=` display-toggled, so the
+  // mount stayed in the live DOM and the initial `querySelector` found it.
+  //
+  // `_scrml_mount_wire` walks a freshly mounted subtree and calls these. Mirrors
+  // S153's `_scrml_each_renderers` / `_scrml_remount_each` exactly.
+  //
+  // Repeating a dispatch is SAFE and that is not accidental: the dispatcher
+  // disposes the previous arm's wiring (`if (<disposeVar>) <disposeVar>()`)
+  // before re-rendering, so a remount tears down and rebuilds rather than
+  // layering. That is what keeps this clear of the double-attach / leaked-wiring
+  // trap that makes the naive "re-run the whole rewire" approach wrong.
+  //
+  // BOTH dispatcher shapes register: Shape A (subscribe) re-reads its cell, Shape
+  // B (effect) re-evaluates its accessor — a mount is not a dep change, so Shape
+  // B would not re-fire on its own either. Item-scoped mode is excluded: it has no
+  // module-scope mount (the each factory dispatches per item explicitly).
+  //
+  // `typeof`-guarded because the registry lives in the tree-shakeable `ifmount`
+  // chunk: a page with a `<match>` but no `if=` needs no remount and ships none.
+  if (!itemScoped) {
+    const currentVariantExpr = subscribeName !== null
+      ? `_scrml_reactive_get(${JSON.stringify(subscribeName)})${subPath}`
+      : variantExprAccessor();
+    dispatcherLines.push(
+      `if (typeof _scrml_register_dispatch_remount === "function") ` +
+      `_scrml_register_dispatch_remount(${JSON.stringify(idPrefix)}, function() { ${dispatchFnName}(${currentVariantExpr}); });`,
+    );
+  }
+
   const dispatcherJs = dispatcherLines.join("\n");
 
   // Combine renderFns + wireFns into a single block, ordered render-then-wire

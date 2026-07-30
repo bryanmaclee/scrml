@@ -98,11 +98,18 @@ function emitReactiveBoolAttr(
 // reactive `value=` would silently stop applying. See emitValueAttrApply.
 const FORM_VALUE_ELEMENTS = new Set(["input", "textarea", "select"]);
 
-// i81 — directives that own an element's inline `style`. `if=`/`show=` write
+// i81 — directives that own an element's inline `style`. `show=` writes
 // `el.style.display`; `transition:`/`in:`/`out:` animate `opacity`. A reactive
 // `style=` on the SAME element does `setAttribute("style", …)`, which replaces
 // the WHOLE attribute and destroys whatever they wrote.
-const STYLE_OWNING_DIRECTIVES = ["if", "show"];
+//
+// `if=` was a member of this set until Phase 2 finished (S301) and is NOT one any
+// more: under §17.1 mount/unmount, `if=` writes no style at all — it inserts and
+// removes the node. So `<div if=@open style=(@theme)>` has exactly ONE style
+// writer and is legal, where it used to be `E-ATTR-WRITER-CONFLICT`. That
+// diagnostic was a true consequence of the retired display lowering, not of the
+// authored source, so it retires with it. `show=` stays — `show=` still hides.
+const STYLE_OWNING_DIRECTIVES = ["show"];
 
 /**
  * i81 (S239 finding 8) — is this ELEMENT one whose attributes are real DOM
@@ -640,13 +647,6 @@ function isSoleBareExprBranch(stmts: any): boolean {
   return Array.isArray(stmts) && stmts.length === 1 && !!stmts[0] && stmts[0].kind === "bare-expr";
 }
 
-function isCleanIfSubtree(children: any[]): boolean {
-  for (const child of children ?? []) {
-    if (!isCleanIfNode(child)) return false;
-  }
-  return true;
-}
-
 /**
  * Returns true if an attribute is "wiring-free" — does not require any
  * compile-time-emitted runtime wiring (event listeners, reactive
@@ -727,10 +727,12 @@ function stripChainBranchAttrs(node: any): any {
  *
  * Returns true if the branch element compiles to clean HTML — lowercase tag,
  * no wiring-bearing attributes (after stripping if/else-if/else), and a
- * wholly-clean descendant tree per `isCleanIfSubtree`. Clean branches go
- * through the per-branch template+marker mount/unmount path. Dirty branches
- * stay inline-with-display-toggle wrapped in a per-branch wrapper inside the
- * chain wrapper (pre-Phase-2g shape, retained as the dirty-fallback shape).
+ * wholly-clean descendant tree.
+ *
+ * NO LONGER DECIDES SEMANTICS (Phase 2 finish, S301). Every chain branch takes the
+ * template+marker mount/unmount path; this predicate survives as the honest
+ * "does this branch carry wiring?" question. `isCleanIfSubtree` — its former
+ * companion for the standalone `if=` gate — was deleted with that gate.
  */
 function isCleanChainBranch(branchElement: any): boolean {
   if (!branchElement || typeof branchElement !== "object") return true;
@@ -738,6 +740,79 @@ function isCleanChainBranch(branchElement: any): boolean {
   if (branchElement.kind !== "markup") return false;
   const stripped = stripChainBranchAttrs(branchElement);
   return isCleanIfNode(stripped);
+}
+
+// ===========================================================================
+// TEMPORARY GUARD — `E-IF-IN-DISPATCHED-ARM` (S301).
+// DELETE THIS FUNCTION AND ITS TWO CALL SITES when
+// [[g-if-mount-inside-dispatched-arm-body]] lands. It is the whole guard.
+//
+// A `<match>` block-form arm body and an `<engine>` state-child body are emitted
+// as HTML STRINGS and injected with `innerHTML` on dispatch, then wired by a
+// per-arm wire fn that does `_root.querySelector(...)`. A §17.1 `if=` inside such
+// a body puts its subtree in a `<template>`, and BOTH halves then fail:
+//
+//   - the arm's wire fn cannot see into `<template>` content, so the subtree's
+//     `${…}` effects and arm-scoped bindings are never created; and
+//   - the `if=` controller lives in `_scrml_nav_rewire`, which ran at boot against
+//     a document that did not yet contain the arm, so `_scrml_find_if_marker`
+//     returned null and no controller exists at all.
+//
+// Executed at S301 against a clean baseline:
+//   arm is the INITIAL variant — baseline "R:L" -> "R:CHANGED" (live);
+//                                post-Phase-2 "R:" -> "R:" (mounted but dead)
+//   arm reached LATER          — baseline present; post-Phase-2 ABSENT
+//   engine state child         — same as the LATER case
+// All with zero diagnostics, which is why this refuses at compile time. The
+// INITIAL cell is not even stable — it depends on the dispatcher's
+// DOMContentLoaded listener registering before `_scrml_boot`'s.
+//
+// Fires on `registry.currentArmContext`, the stack `binding-registry.ts:592`
+// already uses to stamp `engineArm`. ONE predicate covers `<match>` AND
+// `<engine>` because `emit-variant-guard` pushes that context for both — which is
+// also why the code is named for the DISPATCH, not for either construct.
+//
+// Migration measured at ZERO before landing: 2163 `.scrml` across
+// samples/ examples/ stdlib/ conformance/ docs/ benchmarks/ compiler/tests/,
+// instrumenting this exact predicate — 0 hits, with 359 `if=` emission sites in
+// 114 files and 237 arm-context pushes proving both sides were exercised.
+// ===========================================================================
+function refuseConditionalInDispatchedArm(
+  registry: any,
+  node: any,
+  form: string,
+  errors: CGError[] | undefined,
+): boolean {
+  const armId: string | null = registry ? (registry.currentArmContext ?? null) : null;
+  if (armId == null) return false;
+  const parts = String(armId).split(":");
+  const engineVar = parts[0] ?? "?";
+  const armTag = parts[1] ?? String(armId);
+  if (errors) {
+    errors.push(new CGError(
+      "E-IF-IN-DISPATCHED-ARM",
+      `E-IF-IN-DISPATCHED-ARM: ${form === "if=" ? "an" : "a"} \`${form}\` cannot yet appear ` +
+      `inside the body of a dispatched arm — here, the \`<${armTag}>\` arm of the ` +
+      `\`${engineVar}\` dispatcher. Per §17.1 ` +
+      `\`if=\` mounts and unmounts its subtree through a \`<template>\`, but an arm body ` +
+      `is injected with \`innerHTML\` on dispatch and wired by a per-arm wire function ` +
+      `that cannot see into \`<template>\` content — so the gated subtree would render ` +
+      `nothing, or vanish entirely, with NO error at runtime. Refusing at compile time ` +
+      `instead of emitting that.\n\n` +
+      `  Fix: express the condition as ARM STRUCTURE instead of an \`if=\` inside an arm — ` +
+      `give the enum a variant for the gated state and let the arm dispatch decide it, ` +
+      `e.g. \`<match for=Phase on=@phase> <Hidden>…</> <Ready>…</> </match>\`.\n` +
+      `  NOTE: hoisting the \`if=\` to WRAP the whole \`<match>\`/\`<engine>\` does NOT ` +
+      `work either — the dispatcher then cannot find its mount inside the template. That ` +
+      `is a separate defect: [[g-dispatched-mount-inside-if-never-renders]].\n\n` +
+      `  This restriction is TEMPORARY — it lasts only until the arm-dispatch path re-runs ` +
+      `the conditional controllers against the freshly injected arm root. See ` +
+      `[[g-if-mount-inside-dispatched-arm-body]]. It is not a language rule; SPEC places ` +
+      `no such limit on where \`if=\` may appear.`,
+      node?.span ?? { file: "", start: 0, end: 0, line: 0, col: 0 },
+    ));
+  }
+  return true;
 }
 
 // §35 Input state type elements that emit no HTML — handled by emit-reactive-wiring.js
@@ -1247,17 +1322,24 @@ export function generateHtml(
   }
   const boundaryStack: ActiveBoundary[] = [];
 
-  // ss20 item-1 (g-if-guard-inner-effect-not-gated) — the active `if=` DISPLAY-
-  // TOGGLE guard stack. When the markup walker enters a standalone `if=` element
-  // that fell through to the display-toggle path (NOT the clean-subtree
-  // mount/unmount path, which returns early above; NOT `show=`, which keeps
-  // running its inner effects), it pushes the if='s guard fields here before
-  // recursing into children. A `${...}` interpolation descendant stamps the
-  // top-of-stack onto its LogicBinding as `ifGuard` so emit-event-wiring gates
-  // the inner interpolation effect on the SAME predicate the toggle uses — the
-  // effect body short-circuits while the guard is false, preventing a
-  // `null.field` crash on mount when the guarded cell starts absent. Popped on
-  // the way out. Empty stack → no enclosing if= guard.
+  // ss20 item-1 (g-if-guard-inner-effect-not-gated) — the active `if=` guard
+  // stack. When the markup walker enters an `if=` element (or an if-CHAIN branch)
+  // it pushes the predicate here before recursing into children. A `${...}`
+  // interpolation descendant stamps the top-of-stack onto its LogicBinding as
+  // `ifGuard`, and emit-event-wiring gates the inner interpolation effect on the
+  // SAME predicate, lowered by the SAME helper, so the two stay in lockstep. The
+  // effect body short-circuits while the guard is false, so it can never evaluate
+  // `@cell.field` with `@cell` absent. `show=` is NEVER pushed — Vue v-show keeps
+  // running its inner effects. Popped on the way out; empty stack → no guard.
+  //
+  // STILL LOAD-BEARING UNDER MOUNT/UNMOUNT (§17.1 Phase 2, S301) — do not assume
+  // absence makes it redundant. On a true→false flip the descendant effects and
+  // the if= controller's own effect are all live subscribers of the same cell;
+  // the descendants can run BEFORE the controller unmounts them, i.e. with the
+  // predicate already false and the node still attached. Measured: without the
+  // guard, `<div if=(@cell is some)>${@cell.batch_number}</div>` logs three
+  // `TypeError: null is not an object` effect errors per flip — the exact defect
+  // ss20 was filed for, resurfacing at teardown instead of at mount.
   interface IfDisplayGuard {
     condExpr?: string;
     condExprNode?: any;
@@ -1275,6 +1357,36 @@ export function generateHtml(
     chainGuard?: { own?: any; priors?: any[] };
   }
   const ifGuardStack: IfDisplayGuard[] = [];
+
+  /**
+   * Push the `if=` predicate of `attrValue` onto `ifGuardStack`, returning whether
+   * a frame was pushed (the caller pops iff true). ONE derivation shared by both
+   * `if=` walk sites — the mount/unmount emission below and the generic markup
+   * walk further down — so the guard a descendant effect gets can never diverge
+   * between them. Mirrors the three attr-value kinds the mount gate accepts.
+   */
+  const pushIfGuard = (attrValue: any): boolean => {
+    if (!attrValue) return false;
+    if (attrValue.kind === "expr") {
+      ifGuardStack.push({ condExpr: attrValue.raw, condExprNode: attrValue.exprNode, refs: attrValue.refs });
+      return true;
+    }
+    if (attrValue.kind === "call-ref") {
+      const condRaw = `${attrValue.name}(${(attrValue.args ?? []).join(", ")})`;
+      const condRefs = (attrValue.args ?? [])
+        .filter((a: any) => typeof a === "string" && a.startsWith("@"))
+        .map((a: any) => a.replace(/^@/, "").split(/[.[(]/)[0]);
+      ifGuardStack.push({ condExpr: condRaw, refs: condRefs });
+      return true;
+    }
+    if (attrValue.kind === "variable-ref") {
+      const ifVarName = (attrValue.name ?? "").replace(/^@/, "");
+      const ifBaseVar = ifVarName.split(".")[0];
+      ifGuardStack.push({ varName: ifBaseVar, ...(ifVarName.includes(".") ? { dotPath: ifVarName } : {}) });
+      return true;
+    }
+    return false;
+  };
 
   // ss15 item-2 (S214) -- enclosing-markup-element tag stack. The logic-node
   // branch keys on the immediate parent tag to decide render-slot vs effect:
@@ -1468,34 +1580,40 @@ export function generateHtml(
       return;
     }
 
-    // §17.1.1: if-chain — Phase 2g (mount/unmount per branch)
+    // §17.1.1: if-chain — EVERY branch mounts/unmounts (Phase 2 finish, S301).
     //
-    // Approach A + W-keep-chain-only + per-branch mixed-cleanliness dispatch:
+    // §17.1.1 (SPEC.md:7533): "only one span exists in the DOM at any time" —
+    // EXISTS, not "is visible". A display-toggled branch exists in the DOM while
+    // hidden, so the pre-S301 dirty-branch fallback violated the chain's own
+    // normative sentence exactly as the standalone dirty path violated §17.1's.
+    // Both were the same discriminator (`isCleanIfNode`, reached here through
+    // `isCleanChainBranch`) and both are gone.
+    //
     //   - Single chain wrapper `<div data-scrml-if-chain="N">` retained for
     //     adopter CSS targeting.
-    //   - Per-branch dispatch:
-    //     * Clean branch (no events / no reactive interp / no nested wiring):
-    //       emit `<template id=...><inner></template><!--scrml-if-marker:...-->`.
-    //       Per-branch wrapper DROPPED — the controller mounts/unmounts the
-    //       template into the chain wrapper directly. Honors §17.1.1 line 7533
-    //       ("only one span exists in the DOM at any time") for clean branches.
-    //     * Dirty branch (has events, bind:, transitions, components, reactive
-    //       interp, etc): retain pre-Phase-2g per-branch wrapper
-    //       `<div data-scrml-chain-branch="K" style="display:none"><inner></div>`.
-    //       Controller toggles `display` for these (today's display-toggle
-    //       behavior, scoped per branch).
-    //   - Strip-precursor (`stripChainBranchAttrs`) applies in BOTH paths to
-    //     prevent if=/else-if=/else leakage and to prevent the inner element
-    //     from re-triggering the standalone if= early-out gate at lines 575-603.
-    //   - The chain controller in emit-event-wiring.ts reads the per-branch
-    //     `branchMode` field and dispatches mount/unmount vs display-toggle
-    //     per branch on the active-branch transition.
+    //   - EVERY branch (and the else) emits
+    //     `<template id=...><inner></template><!--scrml-if-marker:...-->`. The
+    //     per-branch `<div data-scrml-chain-branch="K" style="display:none">`
+    //     wrapper is GONE — it only ever existed to give the display toggle
+    //     something to hide, and clean branches already dropped it.
+    //   - Strip-precursor (`stripChainBranchAttrs`) prevents if=/else-if=/else
+    //     leakage and stops the inner element re-triggering the standalone if=
+    //     gate above.
+    //   - The `chainGuard` push is now needed on EVERY branch, not just the
+    //     display-mode ones: a branch's descendant `${…}` effects and the chain
+    //     controller are all subscribers of the same cells, so a descendant can
+    //     run after the predicate flips but before the controller unmounts it.
+    //     Same teardown race as the standalone path — see `ifGuardStack`.
+    //   - `isCleanChainBranch` is retained (it is the honest name for "this
+    //     branch carries no wiring") but no longer decides SEMANTICS.
     //
     // Reuses Phase 2c B1 helpers (_scrml_create_scope, _scrml_mount_template,
     // _scrml_unmount_scope, _scrml_find_if_marker) verbatim. No new runtime
     // helpers. No spec amendment. See deep-dive
     // `docs/deep-dives/phase-2g-chain-mount-strategy-2026-04-29.md` §9.
     if (node.kind === "if-chain") {
+      // TEMPORARY (E-IF-IN-DISPATCHED-ARM) — remove with the guard.
+      if (refuseConditionalInDispatchedArm(registry, node, "if/else-if/else chain", errors)) return;
       const chainId = genVar("if_chain");
       parts.push(`<div data-scrml-if-chain="${chainId}">`);
 
@@ -1513,94 +1631,58 @@ export function generateHtml(
       for (let bIdx = 0; bIdx < (node.branches?.length ?? 0); bIdx++) {
         const branch = node.branches[bIdx];
         const branchId = `${chainId}_b${bIdx}`;
-        const isClean = isCleanChainBranch(branch.element);
         const stripped = stripChainBranchAttrs(branch.element);
 
-        if (isClean) {
-          // Clean branch: <template> + <!--scrml-if-marker:...-->
-          const templateId = genVar("scrml_chain_tpl");
-          const markerId = genVar("scrml_chain_marker");
-          parts.push(`<template id="${templateId}">`);
-          emitNode(stripped);
-          parts.push(`</template>`);
-          parts.push(`<!--scrml-if-marker:${markerId}-->`);
-          if (registry) {
-            registry.addLogicBinding({
-              kind: "if-chain-branch",
-              chainId,
-              branchId,
-              branchIndex: bIdx,
-              branchMode: "mount",
-              templateId,
-              markerId,
-              condition: branch.condition,
-              refs: branch.condition?.refs ?? (branch.condition?.name ? [branch.condition.name.replace(/^@/, "")] : []),
-            });
-          }
-        } else {
-          // Dirty branch: per-branch wrapper retained, display-toggle.
-          parts.push(`<div data-scrml-chain-branch="${branchId}" style="display:none">`);
-          // ss21 item-3 — gate descendant interpolation effects on this branch's
-          // visibility (all PRIOR positive conditions false AND own condition
-          // true). Lockstep with the chain controller's `_next === branchId`.
-          ifGuardStack.push({ chainGuard: { own: branch.condition, priors: _chainPositiveConds.slice(0, bIdx) } });
-          emitNode(stripped);
-          ifGuardStack.pop();
-          parts.push(`</div>`);
-          if (registry) {
-            registry.addLogicBinding({
-              kind: "if-chain-branch",
-              chainId,
-              branchId,
-              branchIndex: bIdx,
-              branchMode: "display",
-              condition: branch.condition,
-              refs: branch.condition?.refs ?? (branch.condition?.name ? [branch.condition.name.replace(/^@/, "")] : []),
-            });
-          }
+        const templateId = genVar("scrml_chain_tpl");
+        const markerId = genVar("scrml_chain_marker");
+        parts.push(`<template id="${templateId}">`);
+        // ss21 item-3 — gate descendant interpolation effects on this branch's
+        // visibility (all PRIOR positive conditions false AND own condition true).
+        // Lockstep with the chain controller's `_next === branchId`.
+        ifGuardStack.push({ chainGuard: { own: branch.condition, priors: _chainPositiveConds.slice(0, bIdx) } });
+        emitNode(stripped);
+        ifGuardStack.pop();
+        parts.push(`</template>`);
+        parts.push(`<!--scrml-if-marker:${markerId}-->`);
+        if (registry) {
+          registry.addLogicBinding({
+            kind: "if-chain-branch",
+            chainId,
+            branchId,
+            branchIndex: bIdx,
+            branchMode: "mount",
+            templateId,
+            markerId,
+            condition: branch.condition,
+            refs: branch.condition?.refs ?? (branch.condition?.name ? [branch.condition.name.replace(/^@/, "")] : []),
+          });
         }
       }
 
       if (node.elseBranch) {
         const elseId = `${chainId}_else`;
-        const isClean = isCleanChainBranch(node.elseBranch);
         const stripped = stripChainBranchAttrs(node.elseBranch);
 
-        if (isClean) {
-          const templateId = genVar("scrml_chain_tpl");
-          const markerId = genVar("scrml_chain_marker");
-          parts.push(`<template id="${templateId}">`);
-          emitNode(stripped);
-          parts.push(`</template>`);
-          parts.push(`<!--scrml-if-marker:${markerId}-->`);
-          if (registry) {
-            registry.addLogicBinding({
-              kind: "if-chain-else",
-              chainId,
-              branchId: elseId,
-              branchMode: "mount",
-              templateId,
-              markerId,
-            });
-          }
-        } else {
-          parts.push(`<div data-scrml-chain-branch="${elseId}" style="display:none">`);
-          // ss21 item-3 — the else is visible iff NO positive branch matched.
-          // Gate its descendant interpolation effects on all positive conditions
-          // false (own undefined). Lockstep with the chain controller's
-          // `_next === elseId` fall-through.
-          ifGuardStack.push({ chainGuard: { priors: _chainPositiveConds } });
-          emitNode(stripped);
-          ifGuardStack.pop();
-          parts.push(`</div>`);
-          if (registry) {
-            registry.addLogicBinding({
-              kind: "if-chain-else",
-              chainId,
-              branchId: elseId,
-              branchMode: "display",
-            });
-          }
+        const templateId = genVar("scrml_chain_tpl");
+        const markerId = genVar("scrml_chain_marker");
+        parts.push(`<template id="${templateId}">`);
+        // ss21 item-3 — the else is visible iff NO positive branch matched. Gate
+        // its descendant interpolation effects on all positive conditions false
+        // (own undefined). Lockstep with the controller's `_next === elseId`.
+        ifGuardStack.push({ chainGuard: { priors: _chainPositiveConds } });
+        emitNode(stripped);
+        ifGuardStack.pop();
+        parts.push(`</template>`);
+        parts.push(`<!--scrml-if-marker:${markerId}-->`);
+        if (registry) {
+          registry.addLogicBinding({
+            kind: "if-chain-else",
+            chainId,
+            branchId: elseId,
+            branchMode: "mount",
+            templateId,
+            markerId,
+          });
         }
       }
 
@@ -2478,21 +2560,31 @@ export function generateHtml(
       }
 
       // ---------------------------------------------------------------------
-      // Phase 2c (LIVE): if/show split mount/unmount path for clean subtrees.
+      // §17.1 if= → mount/unmount. THE ONLY LOWERING for `if=` (Phase 2 finish,
+      // S301).
       //
-      // Per SPEC §17.1 if= is DOM existence, not visibility — the element is
-      // not rendered when the condition is false. Clean-subtree if= elements
-      // (lowercase tag, all attributes wiring-free, all descendants in
-      // {text, comment, markup} with the same constraints recursively) compile
-      // to a <template id="..."> wrapping the inner element + a
-      // <!--scrml-if-marker:N--> placeholder comment. emit-event-wiring then
-      // emits a controller that calls _scrml_mount_template on truthy and
-      // _scrml_unmount_scope on falsy (LIFO scope teardown per §6.7.2).
+      // Per SPEC §17.1 (`SPEC.md:10908`, `:10914`) if= is DOM EXISTENCE, not
+      // visibility: "When `expr` evaluates to false, the element is NOT rendered.
+      // It does not exist in the DOM." §17.2 (`:11195`) states the contrast
+      // outright — "`show=` hides, `if=` removes". No sentence anywhere in SPEC
+      // sanctions a display lowering for `if=`; the only `display:none` sanction
+      // is §17.2's, scoped to `show=`.
       //
-      // Non-clean subtrees (events, binds, transitions, components, nested
-      // reactive content, expr attributes, …) fall through to the legacy
-      // display-toggle path below. Phase 2d-2h will progressively widen the
-      // cleanliness gate.
+      // An `if=` element compiles to a <template id="..."> wrapping it + a
+      // <!--scrml-if-marker:N--> placeholder comment. emit-event-wiring emits a
+      // controller that calls _scrml_mount_template on truthy and
+      // _scrml_unmount_scope on falsy (LIFO scope teardown per §6.7.2), and
+      // _scrml_mount_wire to bind the mounted subtree's own wiring.
+      //
+      // HISTORY — read this before narrowing the gate again. Phase 1 (2026-04-29)
+      // routed BOTH `if=` and `show=` to display-toggle. Phase 2c added this path
+      // but gated it on `isCleanIfNode`, i.e. "contains nothing dynamic at all",
+      // so a SINGLE `${…}` interpolation flipped `if=` from removes to hides. That
+      // gate left 68% of `if=` in the flagship app (101 of 149 sites) on the
+      // non-conformant lowering, and 76 of those 101 were dirty solely because of
+      // an interpolation. `isCleanIfNode` is retained — `isCleanChainBranch` still
+      // uses it for §17.1.1 chain branches — but it no longer decides `if=`
+      // SEMANTICS, only which chain-branch shape is emitted.
       //
       // Approach B1 (template + marker comment) was locked by the user in
       // S49 after a 5-phase deep-dive. Alternatives B4 (DOM-keep + scope-swap)
@@ -2500,44 +2592,62 @@ export function generateHtml(
       // §17.1 verbatim, cross-ecosystem dev expectation, stale-DOM event
       // delegation hazard, and Svelte 5 PR sveltejs/svelte#603 (separating
       // unmount from destroy) grounds. See deep-dive §3, §8, §10.
+      //
+      // Still excluded: a CAPITAL-initial tag. That is a component use-site, whose
+      // own emission path owns its mount lifecycle; `if=` on it is a separate arc.
       // ---------------------------------------------------------------------
       const ifAttrCheck = attrs.find((a: any) => a.name === "if");
       if (
         ifAttrCheck &&
         ifAttrCheck.value &&
         (ifAttrCheck.value.kind === "variable-ref" || ifAttrCheck.value.kind === "expr" || ifAttrCheck.value.kind === "call-ref") &&
-        !/^[A-Z]/.test(tag) &&
-        attrs.every((a: any) => attrIsWiringFree(a, "if")) &&
-        isCleanIfSubtree(children)
+        !/^[A-Z]/.test(tag)
       ) {
+        // TEMPORARY (E-IF-IN-DISPATCHED-ARM) — remove with the guard.
+        if (refuseConditionalInDispatchedArm(registry, node, "if=", errors)) return;
         const ifVal = ifAttrCheck.value;
         const templateId = genVar("scrml_tpl");
         const markerId = genVar("if_marker");
         parts.push(`<template id="${templateId}">`);
         const innerNode = { ...node, attributes: attrs.filter((a: any) => a.name !== "if"), attrs: attrs.filter((a: any) => a.name !== "if") };
+        // Guard the descendant `${…}` effects on this predicate — see
+        // `pushIfGuard` / the `ifGuardStack` comment for why mount/unmount does
+        // NOT make this redundant (the teardown race on a true→false flip).
+        const ifGuardPushed = pushIfGuard(ifVal);
         emitNode(innerNode);
+        if (ifGuardPushed) ifGuardStack.pop();
         parts.push(`</template>`);
         parts.push(`<!--scrml-if-marker:${markerId}-->`);
         if (registry) {
+          // §17.4 transition directives on the `if=` element itself. Under the
+          // retired display lowering these animated a visibility flip; the mount
+          // controller applies the enter class on mount and defers the REMOVAL
+          // until the exit animation ends, so `if=` still removes and still
+          // animates. `attrIsWiringFree` rejects `transition:`/`in:`/`out:`, so
+          // pre-Phase-2 these elements could never reach this path at all.
+          const transitionFields = {
+            ...(transitionEnter ? { transitionEnter } : {}),
+            ...(transitionExit ? { transitionExit } : {}),
+          };
           if (ifVal.kind === "variable-ref") {
             const ifVarName = (ifVal.name ?? "").replace(/^@/, "");
             const ifBaseVar = ifVarName.split(".")[0];
             const hasDotPath = ifVarName.includes(".");
-            registry.addLogicBinding({ placeholderId: markerId, expr: `@${ifVarName}`, isMountToggle: true, templateId, markerId, varName: ifBaseVar, ...(hasDotPath ? { dotPath: ifVarName } : {}) } as any);
+            registry.addLogicBinding({ placeholderId: markerId, expr: `@${ifVarName}`, isMountToggle: true, templateId, markerId, varName: ifBaseVar, ...(hasDotPath ? { dotPath: ifVarName } : {}), ...transitionFields } as any);
           } else if (ifVal.kind === "call-ref") {
-            // g-attr-if-fn-display-not-mount (S191): a bare-call clean-subtree
-            // condition gets the SAME mount/unmount controller as if=(fn())/if=@var
-            // (not the display-toggle fallback) so `if=fn()` ≡ `if=(fn())`. Build
-            // a raw condExpr from the call (the fn name is mangled by the
-            // whole-buffer post-pass; `_scrml_effect` dynamic-tracks the cells it
-            // reads). Mirrors the call-ref attr-value branch below (~1761).
+            // g-attr-if-fn-display-not-mount (S191): a bare-call condition gets
+            // the SAME mount/unmount controller as if=(fn())/if=@var so
+            // `if=fn()` ≡ `if=(fn())`. Build a raw condExpr from the call (the fn
+            // name is mangled by the whole-buffer post-pass; `_scrml_effect`
+            // dynamic-tracks the cells it reads). Mirrors the call-ref attr-value
+            // branch below (~1761).
             const condRaw = `${ifVal.name}(${(ifVal.args ?? []).join(", ")})`;
             const condRefs = (ifVal.args ?? [])
               .filter((a: any) => typeof a === "string" && a.startsWith("@"))
               .map((a: any) => a.replace(/^@/, "").split(/[.[(]/)[0]);
-            registry.addLogicBinding({ placeholderId: markerId, expr: condRaw, isMountToggle: true, templateId, markerId, condExpr: condRaw, refs: condRefs } as any);
+            registry.addLogicBinding({ placeholderId: markerId, expr: condRaw, isMountToggle: true, templateId, markerId, condExpr: condRaw, refs: condRefs, ...transitionFields } as any);
           } else {
-            registry.addLogicBinding({ placeholderId: markerId, expr: ifVal.raw, isMountToggle: true, templateId, markerId, condExpr: ifVal.raw, condExprNode: ifVal.exprNode, refs: ifVal.refs } as any);
+            registry.addLogicBinding({ placeholderId: markerId, expr: ifVal.raw, isMountToggle: true, templateId, markerId, condExpr: ifVal.raw, condExprNode: ifVal.exprNode, refs: ifVal.refs, ...transitionFields } as any);
           }
         }
         return;
@@ -2925,10 +3035,12 @@ export function generateHtml(
         } else if (val.kind === "variable-ref") {
           const varName: string = val.name ?? "";
           if (varName.startsWith("@") && (name === "if" || name === "show")) {
-            // §17.1 / §17.2: if=@var / show=@var — reactive conditional binding.
-            // The @-prefix marks the variable as reactive.
-            // if=  → mount/unmount semantics (Phase 2 work; today: display-toggle)
-            // show= → display-toggle semantics (Vue v-show)
+            // §17.2: show=@var — reactive visibility binding (Vue v-show), a
+            // display toggle. `if=@var` does NOT reach here any more: the §17.1
+            // mount/unmount gate above returns early for every lowercase-tag
+            // `if=`, so the only `if=` that lands in this branch is one on a
+            // CAPITAL-initial component tag, whose own emission path owns its
+            // mount lifecycle. `show=` hides, `if=` removes (SPEC.md:11195).
             const placeholderId = genVar(`attr_${name}`);
             const dataAttr = name === "show" ? "data-scrml-bind-show" : "data-scrml-bind-if";
             parts.push(` ${dataAttr}="${placeholderId}"`);
@@ -3408,34 +3520,15 @@ export function generateHtml(
       // default-logic body (<program>/<page>/<channel> -> mount effect, no
       // render slot) or inside a real markup element (-> markup-interpolation,
       // renders). See the logic-node branch below + DEFAULT_LOGIC_MODE_TAGS.
-      // ss20 item-1 — if this generic markup element carries an `if=` attr it
-      // took the display-toggle path (the clean-subtree mount/unmount path
-      // returns early above; if-chain branches have `if=` stripped before they
-      // reach here). Push its guard so descendant `${...}` interpolation effects
-      // gate on the SAME predicate as the toggle. `show=` is NOT pushed (Vue
-      // v-show keeps running its inner effects).
-      let _ifGuardPushed = false;
+      // ss20 item-1 — if this generic markup element carries an `if=` attr, push
+      // its guard so descendant `${...}` interpolation effects short-circuit on
+      // the SAME predicate. Reaching HERE with an `if=` means the mount/unmount
+      // emission above declined it (a CAPITAL-initial component tag, or an attr
+      // value kind it does not accept); if-chain branches have `if=` stripped
+      // before they arrive. `show=` is NOT pushed (Vue v-show keeps running its
+      // inner effects). The mount path pushes the same guard via `pushIfGuard`.
       const _ifGuardAttr = attrs.find((a: any) => a.name === "if");
-      if (_ifGuardAttr && _ifGuardAttr.value) {
-        const _gv = _ifGuardAttr.value;
-        if (_gv.kind === "expr") {
-          ifGuardStack.push({ condExpr: _gv.raw, condExprNode: _gv.exprNode, refs: _gv.refs });
-          _ifGuardPushed = true;
-        } else if (_gv.kind === "call-ref") {
-          const _condRaw = `${_gv.name}(${(_gv.args ?? []).join(", ")})`;
-          const _condRefs = (_gv.args ?? [])
-            .filter((a: any) => typeof a === "string" && a.startsWith("@"))
-            .map((a: any) => a.replace(/^@/, "").split(/[.[(]/)[0]);
-          ifGuardStack.push({ condExpr: _condRaw, refs: _condRefs });
-          _ifGuardPushed = true;
-        } else if (_gv.kind === "variable-ref") {
-          const _ifVarName = (_gv.name ?? "").replace(/^@/, "");
-          const _ifBaseVar = _ifVarName.split(".")[0];
-          const _hasDotPath = _ifVarName.includes(".");
-          ifGuardStack.push({ varName: _ifBaseVar, ...(_hasDotPath ? { dotPath: _ifVarName } : {}) });
-          _ifGuardPushed = true;
-        }
-      }
+      const _ifGuardPushed = pushIfGuard(_ifGuardAttr?.value);
       markupParentStack.push(tag);
       for (const child of children) {
         emitNode(child);

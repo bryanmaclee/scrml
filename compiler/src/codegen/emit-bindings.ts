@@ -445,7 +445,7 @@ export interface BindDirectiveBodyOpts {
   /**
    * Element-acquisition expression builder. Given the `[data-scrml-...]`
    * selector, returns the JS expression that yields the DOM element.
-   *   - file-scope (default): `document.querySelector('${sel}')`
+   *   - file-scope (default): `(root || document).querySelector('${sel}')`
    *   - arm wire fn:          `_root.querySelector('${sel}')`
    */
   acquire: (selector: string) => string;
@@ -726,8 +726,31 @@ export function emitBindings(ctx: CompileContext): string[] {
       if (rAttr.value && rAttr.value.kind === "variable-ref") {
         const refVarName = (rAttr.value.name ?? "").replace(/^@/, "");
         const encodedRefName = encodingCtx ? encodingCtx.encode(refVarName) : refVarName;
+        const refElemId = genVar(`ref_elem_${(mkNode.tag as string) ?? "el"}`);
+        // GUARDED, and it must stay guarded. `emitBindings`' output is a
+        // root-scoped `_scrml_bind_rewire(root)` that is re-invoked with a
+        // freshly-mounted `if=` subtree as its scope (§17.1). Every OTHER ref= on
+        // the page fails to resolve in that scope, so an unguarded
+        // `_scrml_reactive_set(name, querySelector(...))` would store `null` over
+        // a perfectly good element on every mount anywhere in the file — and when
+        // the predicate is true at boot the mount runs inside
+        // `_scrml_nav_rewire(document)` during `_scrml_boot`, so the ref would be
+        // absent before first paint. Same `if (el)` shape as every other block here.
         lines.push(`// ref=@${refVarName}`);
-        lines.push(`_scrml_reactive_set(${JSON.stringify(encodedRefName)}, document.querySelector('[data-scrml-ref="${refVarName}"]'));`);
+        lines.push(`{`);
+        lines.push(`  const ${refElemId} = (root || document).querySelector('[data-scrml-ref="${refVarName}"]');`);
+        lines.push(`  if (${refElemId}) {`);
+        lines.push(`    _scrml_reactive_set(${JSON.stringify(encodedRefName)}, ${refElemId});`);
+        // A ref= INSIDE an if= subtree must not outlive the subtree: after unmount
+        // the node is detached, and an adopter writing through a stale ref mutates
+        // a node that is not in the document. Reset to absence (§42.9 `not` → null)
+        // when THIS mount's scope tears down, and only if the cell still holds THIS
+        // element (a remount that already replaced it must win). `_scrml_mount_track`
+        // is a no-op outside a mount, so a top-level ref= registers nothing and
+        // persists exactly as before.
+        lines.push(`    _scrml_mount_track(function() { if (_scrml_reactive_get(${JSON.stringify(encodedRefName)}) === ${refElemId}) _scrml_reactive_set(${JSON.stringify(encodedRefName)}, null); });`);
+        lines.push(`  }`);
+        lines.push(`}`);
         lines.push("");
       }
     }
@@ -756,8 +779,13 @@ export function emitBindings(ctx: CompileContext): string[] {
         // options (document.querySelector acquire + bare file-scope `_scrml_effect`)
         // reproduce the pre-extraction emission byte-for-byte.
         for (const _bindLine of emitBindDirectiveBody(bAttr, mkNode, {
-          acquire: (sel) => `document.querySelector('${sel}')`,
-          wrapEffect: (effectCall) => effectCall,
+          acquire: (sel) => `(root || document).querySelector('${sel}')`,
+          // §17.1 — the whole emitBindings output is a root-scoped
+          // `_scrml_bind_rewire(root)` re-invoked when an `if=` subtree mounts, so
+          // the effect it creates must be owned by that mount's scope. Outside a
+          // mount `_scrml_mount_track` is the identity, so the boot emission is
+          // behaviourally unchanged.
+          wrapEffect: (effectCall) => `_scrml_mount_track(${effectCall})`,
           enumVarMap,
           reactiveTypeMap,
           encodingCtx,
@@ -796,10 +824,10 @@ export function emitBindings(ctx: CompileContext): string[] {
             const cVarName = rawName.replace(/^@/, "");
             lines.push(`// class:${cClassName}=@${cVarName}`);
             lines.push(`{`);
-            lines.push(`  const ${cElemId} = document.querySelector('${classSelector}');`);
+            lines.push(`  const ${cElemId} = (root || document).querySelector('${classSelector}');`);
             lines.push(`  if (${cElemId}) {`);
             lines.push(`    if (_scrml_reactive_get(${JSON.stringify(cVarName)})) { ${cElemId}.classList.add(${JSON.stringify(cClassName)}); }`);
-            lines.push(`    _scrml_effect(() => { ${cElemId}.classList.toggle(${JSON.stringify(cClassName)}, !!_scrml_reactive_get(${JSON.stringify(cVarName)})); });`);
+            lines.push(`    _scrml_mount_track(_scrml_effect(() => { ${cElemId}.classList.toggle(${JSON.stringify(cClassName)}, !!_scrml_reactive_get(${JSON.stringify(cVarName)})); }));`);
             lines.push(`  }`);
             lines.push(`}`);
           } else {
@@ -814,10 +842,10 @@ export function emitBindings(ctx: CompileContext): string[] {
               : `_scrml_reactive_get(${JSON.stringify(rootKey)})`;
             lines.push(`// class:${cClassName}=${rawName}`);
             lines.push(`{`);
-            lines.push(`  const ${cElemId} = document.querySelector('${classSelector}');`);
+            lines.push(`  const ${cElemId} = (root || document).querySelector('${classSelector}');`);
             lines.push(`  if (${cElemId}) {`);
             lines.push(`    if (${readExpr}) { ${cElemId}.classList.add(${JSON.stringify(cClassName)}); }`);
-            lines.push(`    _scrml_effect(() => { ${cElemId}.classList.toggle(${JSON.stringify(cClassName)}, !!(${readExpr})); });`);
+            lines.push(`    _scrml_mount_track(_scrml_effect(() => { ${cElemId}.classList.toggle(${JSON.stringify(cClassName)}, !!(${readExpr})); }));`);
             lines.push(`  }`);
             lines.push(`}`);
           }
@@ -850,12 +878,12 @@ export function emitBindings(ctx: CompileContext): string[] {
           }) as string;
           lines.push(`// class:${cClassName}=${rawExpr}`);
           lines.push(`{`);
-          lines.push(`  const ${cElemId} = document.querySelector('${classSelector}');`);
+          lines.push(`  const ${cElemId} = (root || document).querySelector('${classSelector}');`);
           lines.push(`  if (${cElemId}) {`);
           lines.push(`    if (${rewrittenExpr}) { ${cElemId}.classList.add(${JSON.stringify(cClassName)}); }`);
           // Auto-tracking effect handles all reactive dependencies automatically
           if (exprRefs.length > 0) {
-            lines.push(`    _scrml_effect(() => { ${cElemId}.classList.toggle(${JSON.stringify(cClassName)}, !!(${rewrittenExpr})); });`);
+            lines.push(`    _scrml_mount_track(_scrml_effect(() => { ${cElemId}.classList.toggle(${JSON.stringify(cClassName)}, !!(${rewrittenExpr})); }));`);
           } else {
             lines.push(`    // No reactive refs — class toggled once at mount based on initial expression value`);
           }
@@ -879,11 +907,11 @@ export function emitBindings(ctx: CompileContext): string[] {
           }
           lines.push(`// class:${cClassName}=${callExpr}`);
           lines.push(`{`);
-          lines.push(`  const ${cElemId} = document.querySelector('${classSelector}');`);
+          lines.push(`  const ${cElemId} = (root || document).querySelector('${classSelector}');`);
           lines.push(`  if (${cElemId}) {`);
           lines.push(`    if (${rewrittenCall}) { ${cElemId}.classList.add(${JSON.stringify(cClassName)}); }`);
           if (callRefs.length > 0) {
-            lines.push(`    _scrml_effect(() => { ${cElemId}.classList.toggle(${JSON.stringify(cClassName)}, !!(${rewrittenCall})); });`);
+            lines.push(`    _scrml_mount_track(_scrml_effect(() => { ${cElemId}.classList.toggle(${JSON.stringify(cClassName)}, !!(${rewrittenCall})); }));`);
           } else {
             lines.push(`    // No reactive refs in call args — class toggled once at mount`);
           }
@@ -936,20 +964,20 @@ export function emitBindings(ctx: CompileContext): string[] {
 
         lines.push(`// template-attr ${attrName}="${rawValue}"`);
         lines.push(`{`);
-        lines.push(`  const ${tplElemId} = document.querySelector('${tplSelector}');`);
+        lines.push(`  const ${tplElemId} = (root || document).querySelector('${tplSelector}');`);
         lines.push(`  if (${tplElemId}) {`);
         if (isFormControlValue) {
           const vVar = genVar("tpl_val");
           lines.push(`    { const ${vVar} = ${jsExpr}; if (${tplElemId}.value !== ${vVar}) ${tplElemId}.value = ${vVar}; }`);
           // Auto-tracking effect handles all reactive dependencies automatically
           if (reactiveVars.size > 0) {
-            lines.push(`    _scrml_effect(() => { const ${vVar} = ${jsExpr}; if (${tplElemId}.value !== ${vVar}) ${tplElemId}.value = ${vVar}; });`);
+            lines.push(`    _scrml_mount_track(_scrml_effect(() => { const ${vVar} = ${jsExpr}; if (${tplElemId}.value !== ${vVar}) ${tplElemId}.value = ${vVar}; }));`);
           }
         } else {
           lines.push(`    ${tplElemId}.setAttribute(${JSON.stringify(attrName)}, ${jsExpr});`);
           // Auto-tracking effect handles all reactive dependencies automatically
           if (reactiveVars.size > 0) {
-            lines.push(`    _scrml_effect(() => { ${tplElemId}.setAttribute(${JSON.stringify(attrName)}, ${jsExpr}); });`);
+            lines.push(`    _scrml_mount_track(_scrml_effect(() => { ${tplElemId}.setAttribute(${JSON.stringify(attrName)}, ${jsExpr}); }));`);
           }
         }
         lines.push(`  }`);
@@ -1034,7 +1062,7 @@ export function emitBindings(ctx: CompileContext): string[] {
       `// render-by-tag bind:${dispatch.flavour}=@${cellName} (cell=${cellName}, tag=${renderSpecTag})`,
     );
     lines.push(`{`);
-    lines.push(`  const ${elemId} = document.querySelector('${selector}');`);
+    lines.push(`  const ${elemId} = (root || document).querySelector('${selector}');`);
     lines.push(`  if (${elemId}) {`);
 
     // Initial DOM read — synchronise the rendered element with the cell's
@@ -1068,16 +1096,16 @@ export function emitBindings(ctx: CompileContext): string[] {
     // Reactive effect — keep the DOM element in sync when the cell is
     // written from anywhere (including programmatic writes from logic).
     if (dispatch.flavour === "value") {
-      lines.push(`    _scrml_effect(() => { ${elemId}.value = ${readExpr}; });`);
+      lines.push(`    _scrml_mount_track(_scrml_effect(() => { ${elemId}.value = ${readExpr}; }));`);
     } else if (dispatch.flavour === "checked") {
-      lines.push(`    _scrml_effect(() => { ${elemId}.checked = ${readExpr}; });`);
+      lines.push(`    _scrml_mount_track(_scrml_effect(() => { ${elemId}.checked = ${readExpr}; }));`);
     } else if (dispatch.flavour === "group") {
       lines.push(
-        `    _scrml_effect(() => { ${elemId}.checked = (${readExpr} === ${elemId}.value); });`,
+        `    _scrml_mount_track(_scrml_effect(() => { ${elemId}.checked = (${readExpr} === ${elemId}.value); }));`,
       );
     } else if (dispatch.flavour === "files") {
       lines.push(
-        `    _scrml_effect(() => { /* files are read-only from DOM — effect tracks @${cellName} */ ${readExpr}; });`,
+        `    _scrml_mount_track(_scrml_effect(() => { /* files are read-only from DOM — effect tracks @${cellName} */ ${readExpr}; }));`,
       );
     }
 

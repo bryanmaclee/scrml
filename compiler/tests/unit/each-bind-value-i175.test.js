@@ -144,7 +144,10 @@ describe("each bind:value i175 §3 — top-level path unchanged", () => {
     expect(errors).toEqual([]);
     // Standard file-scope shape: document.querySelector acquire + bare effect.
     expect(clientJs).toContain('.value = _scrml_cs_reactive_get("name");');
-    expect(clientJs).toMatch(/document\.querySelector\('\[data-scrml-bind-value[^']*'\)/);
+    // §17.1 Phase 2 (S301): emitBindings' output is wrapped in a root-scoped
+    // `_scrml_bind_rewire(root)` so an `if=` mount can re-bind it, hence
+    // `(root || document).querySelector` rather than a bare `document.`.
+    expect(clientJs).toMatch(/\(root \|\| document\)\.querySelector\('\[data-scrml-bind-value[^']*'\)/);
     // The each-only live-keying must not leak into the default path.
     expect(clientJs).not.toContain("_scrml_resolve_item");
     // No each-bind deferred/warning noise for a plain top-level bind.
