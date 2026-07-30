@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 15 |
-| MED | 85 |
+| HIGH | 17 |
+| MED | 86 |
 | LOW | 39 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -4951,3 +4951,47 @@ The inverse nesting of [[g-if-mount-inside-dispatched-arm-body]], and a SEPARATE
 **⚠️ THE ARTIFACT SCAN STAYS AT 1, AND THAT IS CORRECT.** The scan that found this — "a dispatched mount anchor inside an `if=` `<template>`" — reports **1 of 133 templates both before and after**, because it detects the SHAPE, which is legitimate and unchanged; the fix makes the shape WORK rather than eliminating it. The 1→0 target in the dispatch brief was mis-specified. Execution is the evidence, which is why the acceptance test is the page rather than a grep.
 
 **Residual, stated not implied:** `if=` on an `<engine>`/`<match>` element ITSELF appears to be ignored (the structural-element emitter does not route it through the §17.1 mount gate) — noticed while building the self-inclusive-walk fixture, NOT investigated, NOT in scope here. And the self-inclusive branch of `_scrml_remount_dispatch` is DEFENSIVE: no scrml source shape currently puts the anchor ON the mounted root, because the anchor is always a generated child `<div>`. It is pinned at the helper's own contract so the claim is not overstated. <!-- @gap id=g-dispatched-mount-inside-if-never-renders sev=HIGH status=resolved -->
+<!-- @gap id=g-bare-variant-mask-leaks-into-string-literals sev=HIGH status=open -->
+**The bare-variant placeholder mask leaks into ordinary STRING LITERALS — silent data corruption of a plain string state cell, on `main` today.** Surfaced S301 by the adversarial pass on the cross-module-await landing, verified against `origin/main` and **NOT** introduced by it.
+
+Minimal reproducer:
+```scrml
+<top>: string = "/a/.Beta"
+```
+emits
+```js
+_scrml_cs_reactive_set("top", "/a/__scrml_bare_variant_Beta__");
+```
+The bare-variant preprocessor masks `.Beta` inside a **string literal**, where it is not a variant at all, and the mask is never unmasked. No error, no lint, clean compile — the cell simply holds a corrupted value at runtime. Any string containing `.` followed by an uppercase-initial word is exposed: paths (`"/a/.Beta"`), file names, regex sources, sentence text (`"see .Note below"`).
+
+**Locus:** the `preprocessForAcorn` mask/unmask pair (`compiler/src/expression-parser.ts`; the variable-length-lookbehind bare-variant regex introduced at S69/B20 — see `docs/PA-SCRML-PRIMER.md` §13.7 B20 specifics, which documents the lookbehind as excluding member access but says nothing about string-literal interiors). **PA-located, VERIFY** — established from emitted output, not traced.
+
+**Measured breadth:** the same source is corrupted in **five** independent positions of one file — value attribute, attribute template literal, text interpolation, top-level `class:`, and the state initializer above. The only position that was correct on `main` was the `<each>`-body `class:` arm, and *only* because it skipped the structured emitter — a correctness island by accident, which is why closing [[g-class-attr-expr-not-lowered]] made that arm start masking too. **That is not a regression in the fix; it is this defect becoming visible in one more place.**
+
+**Why it survived:** it needs a string literal containing `.` + an uppercase-initial word, and the corpus barely has one. Same structural blindness as the S299 component-body-`<each>` and the S301 `if=`-in-match-arm cases. — `NEW S301 (bryan, via S239 on the cross-module-await diff); HIGH; open`
+
+<!-- @gap id=g-each-body-class-named-iter-var-reads-cell-not-binding sev=HIGH status=open -->
+**An `<each>`-body `class:` with a NAMED iteration variable reads a reactive CELL instead of the loop binding — wrong value, or `undefined`, silently.** Surfaced S301 by the adversarial pass; verified identical on `origin/main` and on the fixed tree, so it is **pre-existing and NOT introduced** by [[g-class-attr-expr-not-lowered]]'s fix.
+
+```scrml
+<each in=@rows as row>
+    <li class:done=${row.state == .Done}>…</li>
+</each>
+```
+emits `_scrml_cs_reactive_get("row")` — a lookup of a state cell named `row`, which does not exist — rather than the per-item loop binding `row`. Per SPEC §17.7.3 `as name` binds a **local**, not registered state (`item` and `@.` are aliases; the bound name needs no `@` sigil precisely because it is not a cell). So the emitted read is wrong by construction.
+
+Note the anonymous form (`@.`) is correct, and the value-attribute arm is correct for both forms — this is specific to `class:` + `as name`. **Locus:** the `class:` branch of `renderTemplateAttrToJs` in `compiler/src/codegen/emit-each.ts` (the same two arms that [[g-class-attr-expr-not-lowered]] repointed to `lowerEachExpr`); the iteration-variable substitution is not applied to the named form. **PA-located, VERIFY.**
+
+Fails silently: `_scrml_cs_reactive_get` on an unregistered name yields absence rather than throwing, so the class simply never toggles. — `NEW S301 (bryan, via S239 on the cross-module-await diff); HIGH; open`
+
+<!-- @gap id=g-crossmodule-async-in-markup-position-not-awaited sev=MED status=open -->
+**A cross-module async import consumed directly in MARKUP position is still not awaited — the peer-await set is threaded into function bodies only.** Surfaced S301 by the adversarial pass; verified identical on both trees.
+
+```scrml
+<p>${ fetchStatus(@url).status }</p>
+```
+still emits the call bare, so the interpolation reads a field off a Promise and renders `undefined`. The [[g-inferred-async-call-value-position-no-autoawait]] fix closes the **function-body** value positions (reactive write, binary expr, return, consumer-of-consumer, field-access-off-const, and the async combinators); markup interpolation is a separate emit path that the widened set never reaches.
+
+**Severity is MED, not HIGH, deliberately** — and the distinction is worth keeping: this is the *same silent-`undefined` class*, but the reviewer recorded it as an unchanged gap rather than a HIGH, and inflating it would misrank it against the two genuine HIGHs filed alongside it. It also fails visibly on the page (a rendered `undefined`) rather than corrupting stored state.
+
+**Do not assume value position is now universally covered** — that is the specific wrong conclusion the closing of [[g-inferred-async-call-value-position-no-autoawait]] invites, and this entry exists to block it. **Locus:** the markup interpolation emit path (`emit-html.ts` / `emit-expr.ts` logic-binding lowering) does not consult `ctx.clientAsyncFnNames`. **PA-located, VERIFY.** — `NEW S301 (bryan, via S239 on the cross-module-await diff); MED; open`
