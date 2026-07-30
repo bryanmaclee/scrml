@@ -172,6 +172,14 @@ export interface EmitLogicOpts {
    */
   serverFnNames?: Set<string> | null;
   /**
+   * #284: names of LOCAL ALIAS bindings that resolve to a sibling server-fn PEER
+   * through a first-class reference (`const p = groupByJob; … p(rows)` / a
+   * dispatch table). Forwarded to `EmitExprContext.serverFnPeerAliasNames` so
+   * `emit-expr.ts:emitCall` `await`-lowers the indirect call exactly like a direct
+   * peer call. NULL/empty → no indirect-peer aliases. Sibling to `serverFnNames`.
+   */
+  serverFnPeerAliasNames?: Set<string> | null;
+  /**
    * Seam-A colorless-async Gap 2 (GITI-037): names of LOCAL CLIENT peer fns that
    * are transitively async. Forwarded to `EmitExprContext.clientAsyncFnNames` so
    * `emit-expr.ts:emitCall` awaits a plain-ident call to one in `mode:"client"`.
@@ -824,6 +832,9 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
     // Issue #1 (parent scrmlTS) — sibling server-fn names so emit-expr lowers an
     // in-process server-fn → server-fn call to `await <name>(...)`.
     serverFnNames: opts.serverFnNames ?? null,
+    // #284 — indirect-peer alias names so emit-expr awaits `p(rows)` where
+    // `const p = groupByJob` (or a dispatch table) resolves p to a peer.
+    serverFnPeerAliasNames: opts.serverFnPeerAliasNames ?? null,
     // Seam-A Gap 2 — forward the client async-peer set so emit-expr awaits a
     // client-mode call to a transitively-async local peer.
     clientAsyncFnNames: opts.clientAsyncFnNames ?? null,
@@ -2725,6 +2736,10 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // call inside an if condition/body lowers to `await <peer>()` instead
         // of a bare unawaited Promise (completes the b2bf9959 threading).
         serverFnNames: opts.serverFnNames,
+        // #284 — thread the indirect-peer alias set so an aliased peer call
+        // (`if (check(rows))` where `const check = isAllowed`) inside an if
+        // condition/body awaits (else an always-truthy Promise → auth bypass).
+        serverFnPeerAliasNames: opts.serverFnPeerAliasNames,
         syncPeerCalls: opts.syncPeerCalls,
         // i87 §13.2 — thread the auto-await classifier inputs so a CLIENT ->
         // server-fn fetch call (`const x = fn()` / `res = fn()`) inside the
@@ -2767,6 +2782,8 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       return emitForStmt(node, {
         // ss19 #8 — peer-call threading (see if-stmt dispatch above).
         serverFnNames: opts.serverFnNames,
+        // #284 — indirect-peer alias set (see if-stmt dispatch above).
+        serverFnPeerAliasNames: opts.serverFnPeerAliasNames,
         syncPeerCalls: opts.syncPeerCalls,
         // i87 §13.2 — auto-await classifier inputs for a client->server-fn fetch
         // call inside the loop body (see if-stmt dispatch above).
@@ -2798,12 +2815,12 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path
       // when the enclosing fn is server-bound.
-      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
+      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, serverFnPeerAliasNames: opts.serverFnPeerAliasNames, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
 
     case "do-while-stmt":
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path.
-      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
+      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, serverFnPeerAliasNames: opts.serverFnPeerAliasNames, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
 
     case "break-stmt":
       return emitBreakStmt(node);

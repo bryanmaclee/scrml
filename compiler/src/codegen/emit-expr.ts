@@ -459,6 +459,19 @@ export interface EmitExprContext {
    */
   serverFnNames?: Set<string> | null;
   /**
+   * #284 — names of LOCAL ALIAS bindings (in a server-fn body) that resolve to a
+   * sibling server-fn PEER through a FIRST-CLASS REFERENCE: `const p = groupByJob;
+   * … p(rows)` (multi-hop) or a dispatch table `const p = t[which]`. In `mode ===
+   * "server"`, `emitCall` lowers `p(...)` to `await p(...)` exactly as it does for
+   * a direct peer name — the alias IS a declared local (so the `declaredNames`
+   * shadow guard is bypassed for it), and the resolver that built this set was
+   * already shadow-aware. A peer is async: without the await the body ships an
+   * unawaited Promise (`[object Promise]`; a boolean guard on an always-truthy
+   * Promise is an auth bypass). NULL/empty → no indirect-peer aliases in scope.
+   * Threaded from `EmitLogicOpts.serverFnPeerAliasNames` via `_makeExprCtx`.
+   */
+  serverFnPeerAliasNames?: Set<string> | null;
+  /**
    * Seam-A colorless-async Gap 2 (GITI-037) — names of LOCAL CLIENT peer fns that
    * are async (transitively reach a stdlib-async / server call). In `mode ===
    * "client"`, `emitCall` lowers a plain-ident call to one of these to
@@ -1462,14 +1475,21 @@ function receiverNeedsParens(node: ExprNode): boolean {
 function isAwaitedPeerCall(node: ExprNode, ctx: EmitExprContext): boolean {
   if (node.kind !== "call") return false;
   const call = node as CallExpr;
+  if (call.callee.kind !== "ident" || typeof (call.callee as { name?: unknown }).name !== "string") {
+    return false;
+  }
+  const _nm = (call.callee as { name: string }).name;
+  const _directPeer =
+    ctx.serverFnNames != null &&
+    ctx.serverFnNames.has(_nm) &&
+    !(ctx.declaredNames != null && ctx.declaredNames.has(_nm));
+  // #284 — an indirect-peer alias is a declared local, so the shadow guard does
+  // not apply (mirrors the emitCall branch).
+  const _aliasPeer = ctx.serverFnPeerAliasNames != null && ctx.serverFnPeerAliasNames.has(_nm);
   return (
     ctx.mode === "server" &&
     !call.optional &&
-    call.callee.kind === "ident" &&
-    typeof (call.callee as { name?: unknown }).name === "string" &&
-    ctx.serverFnNames != null &&
-    ctx.serverFnNames.has((call.callee as { name: string }).name) &&
-    !(ctx.declaredNames != null && ctx.declaredNames.has((call.callee as { name: string }).name)) &&
+    (_directPeer || _aliasPeer) &&
     ctx.peerAwaitable !== false
   );
 }
@@ -2981,9 +3001,18 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     !node.optional &&
     node.callee.kind === "ident" &&
     typeof node.callee.name === "string" &&
-    ctx.serverFnNames != null &&
-    ctx.serverFnNames.has(node.callee.name) &&
-    !(ctx.declaredNames != null && ctx.declaredNames.has(node.callee.name))
+    (
+      // Direct sibling-peer call: `nextOrder()` where `nextOrder` is a peer and
+      // is NOT shadowed by a local of the same name.
+      (ctx.serverFnNames != null &&
+        ctx.serverFnNames.has(node.callee.name) &&
+        !(ctx.declaredNames != null && ctx.declaredNames.has(node.callee.name)))
+      // #284 — INDIRECT peer call through a first-class-reference alias. The alias
+      // IS itself a declared local, so the `declaredNames` shadow guard does NOT
+      // apply; the resolver that built this set was already shadow-aware.
+      || (ctx.serverFnPeerAliasNames != null &&
+        ctx.serverFnPeerAliasNames.has(node.callee.name))
+    )
   ) {
     // The peer is async, so it must be `await`ed — but ONLY where `await` is
     // valid. `ctx.peerAwaitable === false` marks a non-awaitable position (a
