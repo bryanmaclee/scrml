@@ -2,6 +2,73 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S301 — 2026-07-30 (bryan · ASUS-Vivobook) — the local gates were absent, then wrong, then proven; and a board triaged rather than ground
+
+**8 PRs merged** (#278 #279 #280 #281 #286 #287 #288 #289). `main` `aef79aa9`, coherence 0/0 both repos.
+
+**The gates.** `.git/hooks` held only `.sample` files — the PA contract asserted "Config B, local-rich" for this machine and that was false, so nothing local had gated anything. Installing the source-controlled hook exposed that it could neither pass (it ran the browser tier's documented ~42-fail baseline, which is assessed by failure-NAME SET and cannot be expressed by an exit code) nor explain itself (`set -e` plus a bare `TEST_OUTPUT=$(bun test …)` aborted before its own diagnostic). It also documented the S254 relaxation at step 2.5 and never applied it at step 1. All three fixed; all four states proven via the hook's stdin protocol. Separately, five `node --check` harnesses were parsing scrml's ESM artifacts under CommonJS rules (no `package.json` above `os.tmpdir()`), which is why a clean checkout failed the gate: **21588 pass / 9 fail → 21602 / 0**.
+
+**`if=` Phase 2 (#289)** — `if=` now REMOVES from the DOM per §17.1 instead of `display:none`; ~2/3 of `if=` in the flagship app took the non-conformant path. Extends to if-chain branches (baseline left all three in the DOM at once, itself a §17.1.1 violation). The S239 adversarial pass returned **DO-NOT-LAND with three blockers**, none visible to a green 21601-test run: `ref=@x` clobbered to null page-wide on every mount, an `<each>` inside an `if=` leaking one effect per row per toggle across 16 attested flagship sites, and `if=` inside a `<match>` arm silently losing content. A **fourth** regression surfaced only because the workaround was compiled rather than asserted. Two things the brief could not have known: a latent #262-class bug in the pre-existing *clean* path that routing 101 more sites through would have amplified, and a 16KB runtime budget with **185 bytes** of headroom against a 1917-byte cost — forcing a gated `ifmount` chunk that now ships every `if=`-free page ~1.9 KB lighter.
+
+**Also landed:** the pgnotify LISTEN case-split (#281 — a camelCase `<channel watches=>` delivered zero rows silently; quoted rather than normalized, because normalizing merges case-distinct names and trades silent zero-rows for silent wrong-rows); the missing `E-CHANNEL-INSIDE-PAGE` fire site (#286 — catalogued in §34 with zero fire sites, and the S239 pass found the *message* was the real defect for route files); and cross-module async await plus each-body `class:` lowering (#287 — the `class:` bug is silent-and-DOA on main, not "loud and closed").
+
+**Ledger.** HIGH 15→17, MED 85→87, LOW 38→39 — larger and more truthful: 2 closed as verifiably stale, 1 re-severitized on an expired premise (a tenant realtime leak whose "not live yet" note expired when §38.13 landed), 6 newly filed from real evidence, 3 re-characterized because their stated mechanism was wrong. `pa-base v2.8` adds the locus-or-recorded-search filing requirement, distilled from the measurement that 46 of 114 open MED/LOW named no source file at all.
+
+**Adopter.** #282 filed HIGH (a login mints a session no other page can resolve; §20.5 forbids it verbatim; #262 had been masking it). #274 Wall 1 answered from the spec rather than ruled — `?{}` results *are* typed via §14.8 generated table types, but those types do not leak outside the enclosing `<db>` lexical scope, which is where the adopter's shared helper sits.
+
+
+
+### 2026-07-28/29 — S297 (bryan · ASUS): the `if=` conformance class, the §34 freeze-gate audit, and a settling pass
+
+Opened on bryan's standing instruction to work the blocked list one item at a time. Eight PRs merged
+(#247 #249 #250 #252 #253 #254 #265 #266) plus the wrap, concurrent with Peter all session.
+
+**The headline — `if=` compiles to two lowerings, and 68% of the flagship takes the non-conformant one.**
+What arrived as a "Tier-1 `<each>` `if=` semantics fork" was dissolved by the governing-sentence gate:
+§17.1 says a false `if=` element *"does not exist in the DOM"* and §17.2 says *"`show=` hides, `if=`
+removes"*, and a reverse search of nine sections found **no sentence anywhere sanctioning a display
+lowering for `if=`**. So the fork's option (b) was never available. The premise was also inverted —
+Tier-1 was the conformant tier; Tier-0 for-lift was the violator. The deeper finding: `isCleanIfNode`
+selects between a conformant `<template>`+marker mount/unmount and a non-conformant `style.display`
+toggle, and **a single `${…}` interpolation is enough to flip it**. Measured on
+`examples/23-trucking-dispatch`: 101 dirty / 48 clean. A second defect fell out — the dirty path emits
+into initial HTML with no `display:none`, so gated content is visible until hydration.
+
+**§34, the freeze gate, misdescribes its own diagnostics.** Three defects surfaced independently while
+working other items (`E-IMPORT-007` carrying two guarantees with one implemented; `E-PA-002`'s row
+describing a `protect=` syntax error for a diagnostic about a missing DB file; an `api.js:506` fire-site
+line that was really `:943`). A dispatched meaning-axis sweep then found 5 wrong-meaning rows and 3
+dead-xref families — including `E-BPP-001`, whose cited §3.5 does not exist because the body pre-parser
+has no normative section anywhere.
+
+**The gap ledger drifted four separate times in one session**, three of them caught by someone else and
+two by the adopter reading our ledger.
+
+- **#247** — maps refresh `c700c435`→`115e8b1b` (39 commits, owed since S290 and skipped three times);
+  closes the diagnostics/`emit-client` routing gap; **scrubbed the third-party identity from 11 mentions
+  across 5 map files force-tracked into a public repo**.
+- **#249** — three adopter-flagged ledger defects: a 5-session-stale HIGH whose fix had merged, the
+  unruled direction (d) split out, and composite `unique(a, b)` given its own id after living as prose
+  inside a RESOLVED parent since S288.
+- **#250** — `if=` Phase-2 scoping doc with all five OQs ruled; filed the pre-hydration visibility gap.
+- **#252** — corrected D-6's false control and no-op ruling; recorded that the Trigger-3 class splits into
+  a LOUD failure (safe) and a SILENT one (`auth`/`crypto`/`data` run client-side — verified that the
+  shipped runtime carries a real `hashPassword`).
+- **#253** — SPEC: allocated `E-IMPORT-010` for §41.4; fixed two wrong code references (one of them a
+  §21.3.1 self-contradiction 17 lines apart) and a wrong fire-site line.
+- **#254** — categorized the 36-fail local baseline S292 flagged as unverified: 34 browser-tier, **1
+  inside the blocking gate's own scope** (local red / cloud green), **1 run by no CI job at all**.
+- **#265** — landed the §34 meaning-axis audit + filed the wrong-meaning and dead-xref classes.
+- **#266** — `W-PROGRAM-001` drop-check: the implemented meaning is the live ruled-on one (S42) and the
+  SPEC prose is the orphan, so the correction direction is the reverse of the natural reading.
+
+**Settled by ruling:** Adopter-A Q2 → `capabilities=` is kind-scoped, no path granularity (replied and
+pushed to their branch) · bytes tier → slotted, scoped to the principal-gate invariant, not a storage API
+· dbauth direction (d) → deferred with a named re-trigger · `E-PA-002` fire condition → no change needed.
+
+**Gate:** cloud `gate` + `windows` GREEN on every merge. `tracking` red is now the *categorized* set
+rather than an assumed one. All generated-doc gates PASS.
+
 ## S301 (2026-07-30) — `if=` Phase 2 finished: one lowering, and it is the §17.1 one
 
 `if=` had compiled to **two different lowerings with different DOM semantics**, chosen silently at
@@ -5531,57 +5598,6 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 ---
 
 ## Recently Landed
-
-### 2026-07-28/29 — S297 (bryan · ASUS): the `if=` conformance class, the §34 freeze-gate audit, and a settling pass
-
-Opened on bryan's standing instruction to work the blocked list one item at a time. Eight PRs merged
-(#247 #249 #250 #252 #253 #254 #265 #266) plus the wrap, concurrent with Peter all session.
-
-**The headline — `if=` compiles to two lowerings, and 68% of the flagship takes the non-conformant one.**
-What arrived as a "Tier-1 `<each>` `if=` semantics fork" was dissolved by the governing-sentence gate:
-§17.1 says a false `if=` element *"does not exist in the DOM"* and §17.2 says *"`show=` hides, `if=`
-removes"*, and a reverse search of nine sections found **no sentence anywhere sanctioning a display
-lowering for `if=`**. So the fork's option (b) was never available. The premise was also inverted —
-Tier-1 was the conformant tier; Tier-0 for-lift was the violator. The deeper finding: `isCleanIfNode`
-selects between a conformant `<template>`+marker mount/unmount and a non-conformant `style.display`
-toggle, and **a single `${…}` interpolation is enough to flip it**. Measured on
-`examples/23-trucking-dispatch`: 101 dirty / 48 clean. A second defect fell out — the dirty path emits
-into initial HTML with no `display:none`, so gated content is visible until hydration.
-
-**§34, the freeze gate, misdescribes its own diagnostics.** Three defects surfaced independently while
-working other items (`E-IMPORT-007` carrying two guarantees with one implemented; `E-PA-002`'s row
-describing a `protect=` syntax error for a diagnostic about a missing DB file; an `api.js:506` fire-site
-line that was really `:943`). A dispatched meaning-axis sweep then found 5 wrong-meaning rows and 3
-dead-xref families — including `E-BPP-001`, whose cited §3.5 does not exist because the body pre-parser
-has no normative section anywhere.
-
-**The gap ledger drifted four separate times in one session**, three of them caught by someone else and
-two by the adopter reading our ledger.
-
-- **#247** — maps refresh `c700c435`→`115e8b1b` (39 commits, owed since S290 and skipped three times);
-  closes the diagnostics/`emit-client` routing gap; **scrubbed the third-party identity from 11 mentions
-  across 5 map files force-tracked into a public repo**.
-- **#249** — three adopter-flagged ledger defects: a 5-session-stale HIGH whose fix had merged, the
-  unruled direction (d) split out, and composite `unique(a, b)` given its own id after living as prose
-  inside a RESOLVED parent since S288.
-- **#250** — `if=` Phase-2 scoping doc with all five OQs ruled; filed the pre-hydration visibility gap.
-- **#252** — corrected D-6's false control and no-op ruling; recorded that the Trigger-3 class splits into
-  a LOUD failure (safe) and a SILENT one (`auth`/`crypto`/`data` run client-side — verified that the
-  shipped runtime carries a real `hashPassword`).
-- **#253** — SPEC: allocated `E-IMPORT-010` for §41.4; fixed two wrong code references (one of them a
-  §21.3.1 self-contradiction 17 lines apart) and a wrong fire-site line.
-- **#254** — categorized the 36-fail local baseline S292 flagged as unverified: 34 browser-tier, **1
-  inside the blocking gate's own scope** (local red / cloud green), **1 run by no CI job at all**.
-- **#265** — landed the §34 meaning-axis audit + filed the wrong-meaning and dead-xref classes.
-- **#266** — `W-PROGRAM-001` drop-check: the implemented meaning is the live ruled-on one (S42) and the
-  SPEC prose is the orphan, so the correction direction is the reverse of the natural reading.
-
-**Settled by ruling:** Adopter-A Q2 → `capabilities=` is kind-scoped, no path granularity (replied and
-pushed to their branch) · bytes tier → slotted, scoped to the principal-gate invariant, not a storage API
-· dbauth direction (d) → deferred with a named re-trigger · `E-PA-002` fire condition → no change needed.
-
-**Gate:** cloud `gate` + `windows` GREEN on every merge. `tracking` red is now the *categorized* set
-rather than an assumed one. All generated-doc gates PASS.
 
 ## S295 (2026-07-28) — bryan · ASUS-Vivobook — a three-lane parallel adopter arc, two pa-base amendments, and three privacy scrubs
 
