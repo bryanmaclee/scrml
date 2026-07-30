@@ -250,3 +250,80 @@ describe("Bug 61 — per-field 3-segment @compound.field.<synthProp> also collap
     expect(clientJs).toMatch(/_scrml_derived_declare\("form\.name\.isValid"/);
   });
 });
+
+// -------------------------------------------------------------------------
+// g-synth-read-in-statement-bodied-on-mount-not-collapsed (S299, the #262
+// residual) — a §55 synth-surface read inside a STATEMENT-bodied
+// `on mount { … }` bypassed the emitMember collapse.
+//
+// ROOT CAUSE / LOCUS: a statement-bodied `on mount { if (@form.isValid) {…} }`
+// desugars (ast-builder.js §6.7.1a) to a bare-expr whose exprNode is a
+// ParseError ESCAPE-HATCH carrying the raw body — `if` is a statement, not an
+// expression, so safeParseExprToNode cannot produce a real if-node. emit-logic's
+// exprNode fast path routes it to emit-expr's `emitEscapeHatch`, whose generic
+// `rewriteExpr(node.raw)` regex captures ONLY the `@root` ident and leaves the
+// member chain → `_scrml_reactive_get("form").isValid` (member access on the
+// COMPOUND value → undefined → the mount `if` never fires). The EXPRESSION-bodied
+// (`on mount { note(@form.isValid) }`) and binding (`disabled=!@form.isValid`)
+// cases parse to real call/member nodes and collapse via emitMember — hence they
+// were already correct. Threading synthCellKeys (the #262 fix) is necessary but
+// NOT sufficient: the escape-hatch never reaches emitMember. FIX: emitEscapeHatch
+// runs the SAME synth-surface collapse (guarded by ctx.synthCellKeys, S140
+// over-fire guard preserved) on the raw string BEFORE the generic rewrite.
+// -------------------------------------------------------------------------
+const STMT_ON_MOUNT_SRC = `<program>
+<form>
+    <name req length(>=2)> = <input type="text"/>
+</>
+<c> = { isValid: false }
+<msg> = ""
+\${
+    on mount {
+        if (@form.isValid) { @msg = "ok" }
+        if (@form.name.isValid) { @msg = "field" }
+        if (@c.isValid) { @msg = "plain" }
+    }
+}
+<p>\${@msg}</p>
+</program>
+`;
+
+describe("S299 — statement-bodied `on mount` synth read collapses to the dotted cell", () => {
+  let result;
+  let clientJs;
+
+  beforeAll(() => {
+    result = compile("s299-stmt-on-mount.scrml", STMT_ON_MOUNT_SRC);
+    const out = getOutput(result);
+    clientJs = foldChunkNamespacing(foldChunkNamespacing(out?.clientJs ?? ""));
+  });
+
+  test("compiles cleanly (no fatal errors)", () => {
+    const errs = (result.errors || []).filter(e => e && e.severity !== "warning");
+    expect(errs).toEqual([]);
+  });
+
+  test("codes-half: the read targets ARE declared (compound + per-field synth cells)", () => {
+    expect(clientJs).toMatch(/_scrml_derived_declare\("form\.isValid"/);
+    expect(clientJs).toMatch(/_scrml_derived_declare\("form\.name\.isValid"/);
+  });
+
+  test("the on-mount `if (@form.isValid)` reads the dotted synth cell, NOT member-access on the value", () => {
+    // Post-fix: `if (_scrml_reactive_get("form.isValid"))`.
+    expect(clientJs).toMatch(/if\s*\(\s*_scrml_reactive_get\("form\.isValid"\)\s*\)/);
+    // Pre-fix bug signature (S299): member access on the compound value.
+    expect(clientJs).not.toMatch(/_scrml_reactive_get\("form"\)\.isValid/);
+  });
+
+  test("the on-mount per-field `if (@form.name.isValid)` also collapses", () => {
+    expect(clientJs).toMatch(/if\s*\(\s*_scrml_reactive_get\("form\.name\.isValid"\)\s*\)/);
+    expect(clientJs).not.toMatch(/_scrml_reactive_get\("form"\)\.name\.isValid/);
+  });
+
+  test("OVER-FIRE GUARD: a plain cell `@c.isValid` in the SAME statement body stays member access", () => {
+    // c is a plain cell whose value carries a field literally named `isValid`;
+    // c.isValid is NOT a registered synth cell, so the collapse must NOT fire.
+    expect(clientJs).toMatch(/_scrml_reactive_get\("c"\)\.isValid/);
+    expect(clientJs).not.toMatch(/_scrml_reactive_get\("c\.isValid"\)/);
+  });
+});
