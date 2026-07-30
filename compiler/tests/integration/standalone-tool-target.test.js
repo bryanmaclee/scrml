@@ -262,10 +262,15 @@ describe("§64 tool target — R26 (compile → parse → RUN)", () => {
     const dir = mkdtempSync(join(tmpdir(), "scrml-tool-r26-srv-"));
     const dist = join(dir, "dist");
     mkdirSync(dist, { recursive: true });
-    const port = 8700 + Math.floor(Math.random() * 300);
+    // Bind port 0 (OS-assigned free port) and print the actual port. Two flake
+    // sources are eliminated: a hardcoded `8700 + random(300)` port can collide
+    // with another process (bind fails → the harness exits and the fetch never
+    // connects), and a fixed `Bun.sleep(700)` races a slow subprocess start under
+    // CI load. The tool reports its real port on stdout; the test reads it, then
+    // polls the endpoint until it answers.
     const src = `<program kind="tool" lang="ts">
     function main(args: string[]) {
-        _={ Bun.serve({ port: ${port}, fetch(req) { return new Response("scrml-tool-ok") } }) }=
+        _={ const _srv = Bun.serve({ port: 0, fetch(req) { return new Response("scrml-tool-ok") } }); console.log("SCRML_TOOL_PORT=" + _srv.port) }=
     }
 </program>`;
     writeFileSync(join(dir, "wire.scrml"), src);
@@ -276,12 +281,56 @@ describe("§64 tool target — R26 (compile → parse → RUN)", () => {
 
     const proc = Bun.spawn({ cmd: ["bun", "wire.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
     try {
-      await Bun.sleep(700);
-      // The invoke-only harness must NOT have exited — Bun.serve's handle keeps
-      // the event loop alive (§64.3 "declines to force it down").
-      expect(proc.killed).toBe(false);
-      const res = await fetch(`http://localhost:${port}/`);
-      expect(await res.text()).toBe("scrml-tool-ok");
+      // Read stdout until the tool reports its port (proves the server started),
+      // bounded so a dead subprocess can't hang the test.
+      const reader = proc.stdout.getReader();
+      const dec = new TextDecoder();
+      let out = "";
+      let port = null;
+      const deadline = Date.now() + 10000;
+      try {
+        while (Date.now() < deadline && proc.exitCode === null) {
+          const chunk = await Promise.race([
+            reader.read(),
+            Bun.sleep(200).then(() => "TICK"),
+          ]);
+          if (chunk === "TICK") continue;
+          if (chunk.done) break;
+          out += dec.decode(chunk.value, { stream: true });
+          const m = out.match(/SCRML_TOOL_PORT=(\d+)/);
+          if (m) { port = Number(m[1]); break; }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      if (port === null) {
+        proc.kill();
+        const err = await new Response(proc.stderr).text().catch(() => "");
+        throw new Error(
+          `tool did not report its port within 10s (exitCode=${proc.exitCode}); ` +
+          `stdout=${JSON.stringify(out)}; stderr=${err}`,
+        );
+      }
+      // §64.3: the invoke-only harness must NOT have exited — Bun.serve's handle
+      // keeps the event loop alive ("declines to force it down"). `proc.killed`
+      // only flips on an explicit .kill(), so it never detects a self-exit;
+      // `exitCode === null` is the real "still running" signal.
+      expect(proc.exitCode).toBe(null);
+      // Poll the endpoint until it answers (the port is bound by the time it was
+      // printed, but connect can lag a tick under load).
+      let body = null;
+      const fetchDeadline = Date.now() + 5000;
+      while (Date.now() < fetchDeadline) {
+        try {
+          const res = await fetch(`http://localhost:${port}/`);
+          body = await res.text();
+          break;
+        } catch {
+          await Bun.sleep(50);
+        }
+      }
+      expect(body).toBe("scrml-tool-ok");
+      expect(proc.exitCode).toBe(null); // still alive after serving
     } finally {
       proc.kill();
       try { rmSync(dir, { recursive: true }); } catch {}
