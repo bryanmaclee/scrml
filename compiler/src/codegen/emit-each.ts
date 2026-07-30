@@ -1700,14 +1700,39 @@ function renderTemplateAttrToJs(
     //   call-ref isOk()      → `isOk()` (args rewritten)
     //   expr (@.n == 1)      → the raw expr (rewritten)
     //   string-literal "x"   → degenerate; treat as a constant truthy string
+    //
+    // g-class-attr-expr-not-lowered (`<each>`-body arm) — the `variable-ref` and
+    // `expr` arms use `lowerEachExpr`, NOT the bare `rewriteIterValueExpr`. The
+    // bare form does the ITER-SCOPE rewrite only (`@.done` → `<iterVar>.done`); it
+    // does NOT lower scrml OPERATORS, so a §42 absence predicate reached the client
+    // JS RAW — `classList.toggle("done", !!(_scrml_each_item.done is some))` →
+    // E-CODEGEN-INVALID-LOGIC "Unexpected token". Loud-and-closed, but it made an
+    // `<each>`-body `class:` with any scrml operator uncompilable.
+    //
+    // This restores PARITY with the value-attribute arms below (:~1915 / :~1922),
+    // which have always used `lowerEachExpr` — the identical expression in the
+    // identical `<each>` body compiled green as `data-done=${@.done is some}` and
+    // failed as `class:done=${@.done is some}`. The top-level `class:` path lowers
+    // correctly too (it routes through the structured emitter), so this arm was the
+    // ONLY place the two disagreed.
+    //
+    // Strictly additive: `lowerEachExpr` calls `rewriteIterValueExpr` FIRST and only
+    // routes through the structured emitter (parseExprToNode → emitExprField) when
+    // the text actually carries a §42 predicate (`is some`/`is not`/`is given`/
+    // `not`) or a bare `.Variant`. Absent those it returns the bare-form result
+    // unchanged, so every already-working `class:` condition stays byte-identical.
+    //
+    // `call-ref` deliberately keeps `rewriteIterValueExpr`: it is symmetric with the
+    // value-attr `call-ref` arm (:~1929), which also uses the bare form. Changing
+    // both is a separate axis (`serializeCallArgs` vs `serializeCallArgsLowered`).
     let cond: string;
     if (valKind === "variable-ref") {
-      cond = rewriteIterValueExpr(String(val.name ?? ""), iterVarName);
+      cond = lowerEachExpr(String(val.name ?? ""), iterVarName);
     } else if (valKind === "call-ref") {
       cond = `${String(val.name ?? "")}(${serializeCallArgs(val, iterVarName)})`;
       cond = rewriteIterValueExpr(cond, iterVarName);
     } else if (valKind === "expr") {
-      cond = rewriteIterValueExpr(String(val.raw ?? ""), iterVarName);
+      cond = lowerEachExpr(String(val.raw ?? ""), iterVarName);
     } else if (valKind === "string-literal") {
       cond = JSON.stringify(String(val.value ?? ""));
     } else {

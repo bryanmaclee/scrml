@@ -8,6 +8,10 @@ import { scheduleStatements, buildCalleeImportMap } from "./scheduling.js";
 // + the shared no-silent-leak structural detectors / diagnostics (S239).
 import { computeAsyncFnNames, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, asyncStdlibSyncCallbackError, aliasedAsyncCallError } from "./emit-library-shared.ts";
 import { buildMachineBindingsMap } from "./emit-reactive-wiring.js";
+// The ONE stdlib-async predicate (Q5 `<repo>/stdlib/` carve-out + `isAsync`). Used
+// to subtract the vendor-async imports the stdlib auto-await classifier already
+// owns from the client peer-await set — see `_stdlibOwnedImport` below.
+import { isPromiseReturningStdlibFn } from "../module-resolver.js";
 // A1c C16 — §53.9.1/§53.4.3 client-side function-param boundary check (Locus 3).
 import { parsePredicateAnnotation, emitRuntimeCheck } from "./emit-predicates.ts";
 import { returnTypeAllowsAbsence } from "./wire-format.ts";
@@ -1200,17 +1204,48 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     _exportRegistry,
     _serverFnNames,
   );
-  // The PEER-AWAIT set is the async set restricted to LOCAL client fn names. The
-  // coloring set (`_clientAsyncFnNames`) also carries the seed's IMPORTED names
-  // (a `safeCallAsync` / cross-lib async import) so a fn calling one is colored —
-  // but those imports are awaited by the stdlib auto-await classifier (or the
-  // guarded-expr `!{}` auto-await), NOT the client-peer branch. Including them
-  // here would double-await a `safeCallAsync(...) !{}` (`await await …`).
+  // The PEER-AWAIT set is the coloring set restricted to the names NO OTHER
+  // auto-await surface owns. `computeAsyncFnNames` returns exactly
+  // `seed ∪ {local async fn names}`, so the set partitions cleanly into:
+  //
+  //   (a) LOCAL client fn names — the GITI-037 same-file fixpoint. Awaited HERE;
+  //       nothing else knows about them.
+  //   (b) a `scrml:` VENDOR async import (`safeCallAsync`, `scrml:http`'s `get`, …).
+  //       OWNED by the stdlib auto-await classifier — `isPromiseReturningStdlibFn`,
+  //       consulted by the statement-level `injectPromiseAwait` (scheduling.ts) and
+  //       the guarded-expr `_autoAwait` (emit-logic.ts). EXCLUDED here: awaiting a
+  //       `safeCallAsync(...) !{}` on both surfaces yields `await await …`.
+  //   (c) a USER `.scrml` module's inferred-async export (`asyncExportNamesOf`
+  //       reached it through a `./lib.scrml` import). Awaited HERE — see below.
+  //
+  // The (b) exclusion predicate is the SAME classifier those surfaces use, so
+  // "owned elsewhere" and "skipped here" cannot drift: they are one predicate.
+  //
+  // (c) IS THE HOLE THIS CLOSES. It was previously lumped with (b) on the claim
+  // that every imported name is covered by the stdlib classifier or the `!{}`
+  // auto-await. Both halves are false for a user `.scrml` export:
+  // `isPromiseReturningCallExpr` classifies server fns + stdlib `isAsync` exports
+  // ONLY (the Q5 `<repo>/stdlib/` carve-out gates `isPromiseReturningStdlibFn`),
+  // and the guarded-expr `_autoAwait` DELEGATES to that same predicate rather than
+  // being an independent surface. So a cross-module `const r = fetchStatus(u)`
+  // emitted BARE and handed back a Promise (`r.status` → `undefined`, SILENT), and
+  // a `fetchStatus(u) !{}` wired its `__scrml_error` arm against a Promise (always
+  // falsy → the recovery arm was dead code). Same-module callers were already
+  // correct via (a), which is why the hole read as closed.
   const _localFnNames = new Set<string>(
     _clientFns.map((f) => f.name as string).filter((n): n is string => typeof n === "string"),
   );
+  // (b) — is this cross-import name already owned by the stdlib auto-await
+  // classifier? Resolves the local binding to its source module and asks the ONE
+  // stdlib-async predicate. A user `.scrml` source fails the `<repo>/stdlib/`
+  // carve-out, so it stays in the peer set; a `scrml:` vendor async is dropped.
+  const _stdlibOwnedImport = (n: string): boolean => {
+    if (!_exportRegistry || _exportRegistry.size === 0) return false;
+    const src = _calleeMap?.get(n);
+    return !!src && isPromiseReturningStdlibFn(n, src, _exportRegistry);
+  };
   const _clientPeerAwaitNames = new Set<string>(
-    [..._clientAsyncFnNames].filter((n) => _localFnNames.has(n)),
+    [..._clientAsyncFnNames].filter((n) => _localFnNames.has(n) || !_stdlibOwnedImport(n)),
   );
   // Fail-closed (axis-i) — a client async-peer call the compiler emits BARE in a
   // non-awaitable position (sync callback / param default). Drained after the loop.
