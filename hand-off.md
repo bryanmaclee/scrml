@@ -1,4 +1,103 @@
 <!-- ============================================================= -->
+<!-- S301 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-30.        -->
+<!-- S299 (bryan) + S299 (Peter) + S298 + all prior UNCHANGED below.-->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 301 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-07-30. `/boot` Profile A. **8 PRs merged** (#278 #279 #280 #281 #286 #287 #288 #289);
+`main` `aef79aa9`. Mechanical stream = delta-log **[897]–[915]**; this carries the irreducible.
+
+## 🔴 THE NEXT PA'S FIRST MOVE
+
+**#282 — a login mints a session no other page can resolve.** Filed HIGH, PA-triaged, **NOT
+dispatched** because `emit-server.ts` is contested with Peter's open #264 and he is live on #263.
+Partition first. §20.5 already forbids it verbatim, so it is a fix and not a ruling; **take fix
+direction (1)** (hoist `_anySessionWrite` to the whole program) — (2) leaves the `sessionExpiry`
+twin live and converts it into a silent 1-hour logout the moment the store split is fixed.
+
+Then: **#274 Wall 2** (Peter's), and the three open rulings below.
+
+## 🎯 THE HEADLINE — the gates were absent, then wrong, then proven
+
+`.git/hooks` held only `.sample` files. The contract's `{{git_hook_fills}}` asserted "Config B,
+local-rich" for this machine; that was **false**, and nothing local had gated anything. Installing
+the source-controlled hook then exposed that it **could neither pass nor explain itself** — it ran
+the browser tier's ~42-fail baseline (assessed by failure-NAME SET, which an exit code cannot
+express) and `set -e` killed it before its own diagnostic. It also *documented* the S254 relaxation
+at step 2.5 and never applied it at step 1.
+
+**A gate you cannot observe failing is not a gate.** All four states are now proven via the hook's
+stdin protocol, and the pre-commit subset went 21588/**9 fail** → 21602/**0**.
+
+## 🧭 FINDINGS THAT OUTLAST THE FIXES
+
+1. **Verification beat building, three times.** The SSR "opportunity" would have shipped a
+   capability with **zero possible consumers** (0 of 23 `<each>` blocks blocked by `if=` alone).
+   The S280-era HIGH cohort was **13% already-fixed, and 2 of the 3 live entries described the
+   WRONG MECHANISM** — a fix built from that text would have hit a ghost. The `if=` migration risk
+   was overstated by two orders of magnitude by its own site count.
+2. **The board's problem was filing, not volume.** 46 of 114 open MED/LOW named no source file. An
+   entry nobody can start is an entry nobody closes → the list grows monotonically while everyone
+   works hard. `pa-base v2.8` now requires a locus **or** the recorded search. **But the criterion
+   I measured with was itself broken** — ~25 of those 46 DO name a locus in prose, so the real
+   defect is a missing MACHINE-READABLE field. **Amendment owed and unruled.**
+3. **The adversarial gate returned DO-NOT-LAND on the biggest change, and a FOURTH defect appeared
+   only because the workaround was COMPILED rather than asserted.** Three blockers invisible to a
+   green 21601-test run; then, verifying the workaround, a `<match>` mount anchor inside an `if=`
+   that never rendered — on the flagship page.
+4. **The agent refused my acceptance metric, correctly.** I specified a scan count `1 → 0`. That
+   scan detects the SHAPE, not the defect; driving it to 0 required migrating `hos.scrml`, the exact
+   thing the ruling forbade. **A metric satisfiable only by doing the forbidden thing is a
+   mis-specified metric.** It delivered execution on the real page instead.
+5. **Corpus blindness is now a measured pattern, not an anecdote.** Zero corpus files put an
+   `<each>` in a component body (S299), zero put `if=` in a match arm (S301), zero exercise a
+   multi-page login (#282), zero carry a string literal with `.` + an uppercase word. Four HIGH
+   defects, all invisible to a green suite, all for the same reason.
+
+## ⚠️ OWN MISSES — recorded, not smoothed
+
+- **THE LANDING NEARLY LOST DATA.** A wholesale `git checkout` of agent files onto a moved `main`
+  **clobbered #287's `class:` fix and #286's gap entry**. The gate caught the code (because #287
+  shipped a test that bites); **nothing would have caught the ledger clobber** — a silently deleted
+  gap entry has no test. I skipped the branch-base check on files I had personally watched two
+  other agents touch. Fixed by real 3-way merges verified **by content**, not exit code.
+- **Diagnosed a push stall as "transport" and wrote it into the board.** It was interactive browser
+  auth (GCM + `credentialStore=cache`). bryan supplied the fact; board corrected.
+- **Called `.forEach` out of the async-combinator set.** It is in it. The agent checked.
+- **Claimed §17.1's absence had "no assertion anywhere".** The Tier-1 `<each>` family pins it 4×.
+- **Fixed `tab.js` and missed its `bs.js` twin one function away** — the S288 shape, caught by CI.
+- **Said "three pre-existing HIGHs"; two were HIGH.** Filed at honest severities instead.
+
+## ✅ RULINGS BANKED (do not re-litigate)
+
+pre-push → **fix the shared hook** (not a per-machine relax) · unit 2 SSR → **(a) verify-only + file
+the arc**, ordered by measured blocking power with `if=` LAST · **locus-or-recorded-search is a
+filing requirement** (`pa-base v2.8`) · if-chain extension → **TAKE IT** · tenant realtime leak →
+**MED→HIGH** · `if=` Phase 2 blocker 3 → **guard now, split next** · direction B → **FIX, do not
+migrate the flagship** · **`any` is a HARD NO** (verbatim).
+
+## 🧷 STATE / OPEN
+
+- **Three rulings open:** the `locus:`-as-structured-field amendment · **#274 Q2** (how do you type a
+  helper that must live outside the `<db>` block? — now load-bearing *because* `any` is refused) ·
+  `E-BPP-001` reclassify-vs-retire (S297 leftover).
+- **Gap counts HIGH 15→17 · MED 85→87 · LOW 38→39** — larger and MORE TRUTHFUL: 2 closed as
+  verifiably stale, 1 re-severitized on an expired premise, 6 newly filed from real evidence, 3
+  re-characterized because their stated mechanism was wrong.
+- **Guarded, not fixed:** `g-if-mount-inside-dispatched-arm-body` (open, `E-IF-IN-DISPATCHED-ARM`
+  guards it; revert `2fbe6520` whole when the split lands). Its gap carries the design **and the
+  two-part trap verbatim** — `_scrml_nav_rewire(_mount)` from the dispatcher double-attaches
+  non-delegable handlers AND leaks a controller per dispatch, and neither shows up in a test that
+  only checks content renders.
+- **graphify: DEFERRED** — `uv` absent; a toolchain install was not taken unasked. Protocol + test
+  set intact.
+- **Peter is LIVE** (S300, Windows): #263 on `fix/263-…` (#283 open), #264 next, #274 Wall 2 parked
+  on a repro. His #274 Wall-1 answer was delivered to his inbox this session.
+- **Worktrees: 5** — retained (4 are this session's landed agents, forensic; 1 pre-existing
+  `scrml-pinned`). Nothing uncommitted in them.
+<!-- ============================================================= -->
 <!-- S299 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-30.        -->
 <!-- S298-Peter + S297 (both) + all prior UNCHANGED below.          -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->
