@@ -1,0 +1,12 @@
+{
+  "id": "channel-sibling-of-page",
+  "description": "§38.1 — the CANONICAL v0.3 channel placement when `<page>` declarations are present: the `<channel>` is a CHILD of `<program>` and a SIBLING of the `<page>` (Insight 30, S87). Channel state stays reachable from inside the `<page>` via canonical `@` access. This is the shape E-CHANNEL-INSIDE-PAGE tells authors to move TO, so it is pinned as an inversion guard: if it ever fires a placement code, the channel-in-page fix has inverted the rule.",
+  "language-version": "1.0",
+  "spec": "§38.1, §38.2",
+  "rationale": "§38.1: \"A `.scrml` file's `<program>` element MAY contain zero or more `<channel>` declarations alongside its `<page>` declarations and other body content. Channel state lives at the file scope established by `<program>` and is reachable from inside any `<page>` via canonical `@` access.\" Neither placement code fires.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CHANNEL-INSIDE-PAGE", "E-CHANNEL-OUTSIDE-PROGRAM"],
+    "notCodePrefixes": ["E-CHANNEL-"]
+  }
+}

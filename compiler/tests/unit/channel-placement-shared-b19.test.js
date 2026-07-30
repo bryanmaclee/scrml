@@ -25,11 +25,15 @@
  * Engine-parity rationale per §21.8 / B14 (cross-file `<engine>` admits
  * the same module-file file-top placement). Coverage in §B19.11.
  *
+ * **E-CHANNEL-INSIDE-PAGE — LIVE (wired S299).** This header previously listed
+ * the fire-site as deferred "for the wave that lands `<page>` parser support".
+ * That precondition was met long ago while the note still read as current, so
+ * the §34-catalogued code sat with ZERO fire sites and a page-nested channel
+ * compiled clean AND was wired program-scoped. `walkChannelPlacement` now
+ * carries a `pageDepth` counter and fires the code — coverage in §B19.12,
+ * regression guards in §B19.13. See g-channel-inside-page-never-fires.
+ *
  * **Out of scope (deferred to later waves):**
- *   - E-CHANNEL-INSIDE-PAGE — `<channel>` inside `<page>` fire-site. Wave 1
- *     does not tokenize `<page>` as a structural element; that fire-site is
- *     filed for the wave that lands `<page>` parser support. The error code
- *     is registered in §34 now.
  *   - V5-strict access validation inside channel body (B3 owns `@cellName`).
  *   - Cross-scope channel-cell visibility (B1 PASS 1 + B3 PASS 3 cover).
  *   - Channel attribute shape errors (E-CHANNEL-001/-005/-007 — codegen).
@@ -48,6 +52,10 @@
  *   §B19.9 — span attached on the offending node
  *   §B19.10 — channel inside `<program>` + cross-scope `@cellName` access (B3 intact)
  *   §B19.11 — S87 Insight 30: module-file `<channel>` dispensation (PURE-CHANNEL-FILE)
+ *   §B19.12 — E-CHANNEL-INSIDE-PAGE fires on a `<channel>` with a `<page>` ancestor
+ *             (incl. the route-file shape: top-level `<page>`, no `<program>`)
+ *   §B19.13 — regression guards: canonical sibling shape, PURE-CHANNEL-FILE
+ *             dispensation, and E-CHANNEL-OUTSIDE-PROGRAM all undisturbed
  */
 
 import { describe, test, expect } from "bun:test";
@@ -472,5 +480,301 @@ describe("§B19.11 module-file `<channel>` dispensation (PURE-CHANNEL-FILE, S87 
     const { sym } = compileSym(source);
     expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
     expect(errorsByCode(sym, "E-CHANNEL-SHARED-MODIFIER").length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §B19.12 — E-CHANNEL-INSIDE-PAGE (wired S299; g-channel-inside-page-never-fires)
+// ---------------------------------------------------------------------------
+//
+// The code was §34/§38.9-catalogued at severity Error with ZERO fire sites, so
+// a `<channel>` nested in a `<page>` compiled clean AND was wired
+// program-scoped — silent acceptance of a shape three SHALL sentences forbid:
+//   - §38 preamble  (SPEC.md:20659) "Channels SHALL NOT live inside `<page>`
+//     (channels are app-scope, not per-route)."
+//   - §38.1 inv. 1  (SPEC.md:20701) "A `<channel>` inside `<page>` SHALL emit
+//     `E-CHANNEL-INSIDE-PAGE` — channels are app-scope shared-state vehicles,
+//     not per-route declarations."
+//   - §38.2 normat. (SPEC.md:20747) same sentence, normative-statement list.
+//
+// NOTE on `<page>` attrs: the allowed set is exactly `{ db, auth, csrf,
+// ratelimit }` — `route=` fires E-PAGE-ROUTE-ATTR-FORBIDDEN in TAB (routes are
+// derived from file path), so these fixtures use bare `<page>`.
+
+describe("§B19.12 <channel> inside <page> fires E-CHANNEL-INSIDE-PAGE", () => {
+  test("`<channel>` direct child of `<page>` inside `<program>` — fires", () => {
+    const source = `<program>
+<page>
+<channel name="chat" topic="lobby">
+\${ <messages> = [] }
+</>
+<h1>Chat</h1>
+</page>
+</program>`;
+    const { sym } = compileSym(source);
+    const fires = errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE");
+    expect(fires).toHaveLength(1);
+    expect(fires[0].severity).toBe("error");
+  });
+
+  test("`<channel>` DEEPLY nested inside `<page>` (below intermediate markup) — fires", () => {
+    // pageDepth is an ANCESTOR count, not a direct-child check.
+    const source = `<program>
+<page>
+<div>
+<section>
+<channel name="deep">
+\${ <m> = [] }
+</>
+</section>
+</div>
+</page>
+</program>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(1);
+  });
+
+  test("ROUTE-FILE shape: top-level `<page>` with NO `<program>` anywhere — still fires", () => {
+    // The real adopter shape, and the one most likely to be missed. Route files
+    // open with a top-level `<page>` and contain no `<program>` at all (see
+    // examples/23-trucking-dispatch/pages/driver/messages.scrml:20), so
+    // `fileHasProgram === false` here. The inside-page fire is UNCONDITIONAL on
+    // that flag by design: the PURE-CHANNEL-FILE dispensation is a FILE-TOP
+    // dispensation, and this channel is nested inside `<page>`, not at file top.
+    // If this fire were gated on `fileHasProgram` the way OUTSIDE-PROGRAM is,
+    // the whole route-file corpus would silently keep the pre-fix behaviour.
+    const source = `<page auth="required">
+<channel name="chat">
+\${ <messages> = [] }
+</>
+<p>hi</p>
+</page>`;
+    const { sym } = compileSym(source, "pages/driver/messages.scrml");
+    expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(1);
+    expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
+  });
+
+  test("MUTUAL EXCLUSION — page-nested channel reports INSIDE-PAGE only, not OUTSIDE-PROGRAM", () => {
+    // One placement mistake gets ONE diagnostic. Here the `<page>` sits at file
+    // top (no `<program>` ancestor) in a file that DOES contain a `<program>`,
+    // so the pre-fix walker would have fired E-CHANNEL-OUTSIDE-PROGRAM. The
+    // more-specific inside-page code supersedes it — its message already names
+    // the canonical placement, so both codes would be redundant.
+    const source = `<page>
+<channel name="chat">
+\${ <messages> = [] }
+</>
+</page>
+<program>
+\${ <draft> = "" }
+</program>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(1);
+    expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
+  });
+
+  test("two page-nested channels fire independently, one diagnostic each", () => {
+    const source = `<program>
+<page>
+<channel name="a">
+\${ <x> = 0 }
+</>
+</page>
+<page>
+<channel name="b">
+\${ <y> = 0 }
+</>
+</page>
+</program>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(2);
+  });
+
+  test("message names the canonical placement + cross-references §38.1 (in-`<program>` shape)", () => {
+    const source = `<program>
+<page>
+<channel name="chat">
+\${ <messages> = [] }
+</>
+</page>
+</program>`;
+    const { sym } = compileSym(source);
+    const [fire] = errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE");
+    expect(fire).toBeDefined();
+    // Code prefix, so the message is greppable by code.
+    expect(fire.message).toContain("E-CHANNEL-INSIDE-PAGE");
+    // Names the offending channel.
+    expect(fire.message).toContain('name="chat"');
+    // Names the canonical placement: child of <program>, sibling of <page>.
+    expect(fire.message).toContain("<program>");
+    expect(fire.message).toContain("SIBLING");
+    // Cross-references the governing section (brief requirement).
+    expect(fire.message).toContain("§38.1");
+    // This file HAS a <program>, so the fix is local — it must NOT claim the
+    // fix crosses files.
+    expect(fire.message).not.toContain("crosses files");
+  });
+
+  test("ROUTE-FILE message is ACTIONABLE: says the fix crosses files, gives both remedies", () => {
+    // The remediation-accuracy contract. A route file has no `<program>`, so
+    // "move it to be a child of `<program>`, sibling of the `<page>`
+    // declarations" is unactionable here: there is no `<program>` to be a child
+    // of, the `<page>` has no siblings, and the fix necessarily edits ANOTHER
+    // file. Asserting the message says so, because this is the dominant
+    // multi-page shape and the population the original probe came from.
+    const source = `<page auth="required">
+<channel name="chat">
+\${ <messages> = [] }
+</>
+</page>`;
+    const { sym } = compileSym(source, "pages/chat.scrml");
+    const [fire] = errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE");
+    expect(fire).toBeDefined();
+    // Makes the file-crossing explicit rather than implying a local move.
+    expect(fire.message).toContain("no `<program>`");
+    expect(fire.message).toContain("crosses files");
+    // Remedy (a): the entry file's <program>.
+    expect(fire.message).toContain("entry file");
+    // Remedy (b): PURE-CHANNEL-FILE + a concrete mount snippet.
+    expect(fire.message).toContain("§38.12.6");
+    expect(fire.message).toContain("import {");
+    expect(fire.message).toContain("/>");
+    // Must NOT repeat the in-<program> claim that no use-site change is needed —
+    // that is false when the declaration moves to another file.
+    expect(fire.message).not.toContain("the use sites do not change");
+  });
+
+  test("ROUTE-FILE mount snippet uses the ACTUAL channel name, kebab-cased alias", () => {
+    // Guard against a templated snippet that hardcodes one example name: the
+    // suggestion has to be copy-pasteable for THIS channel. Kebab names are not
+    // identifiers, so the alias is camel-cased — matching the real consumer
+    // shape `import { "driver-events" as driverEvents }` in
+    // examples/23-trucking-dispatch/pages/driver/messages.scrml:25.
+    const source = `<page>
+<channel name="driver-events">
+\${ <driverEvents> = [] }
+</>
+</page>`;
+    const { sym } = compileSym(source, "pages/driver/messages.scrml");
+    const [fire] = errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE");
+    expect(fire.message).toContain('import { "driver-events" as driverEvents }');
+    expect(fire.message).toContain("'./channels/driver-events.scrml'");
+    expect(fire.message).toContain("<driverEvents/>");
+    // The literal from the other test must not leak in as a hardcoded template.
+    expect(fire.message).not.toContain("chatChannel");
+  });
+
+  test("span is attached on the offending `<channel>` node", () => {
+    const source = `<program>
+<page>
+<channel name="chat">
+\${ <messages> = [] }
+</>
+</page>
+</program>`;
+    const { sym } = compileSym(source);
+    const [fire] = errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE");
+    expect(fire.span).toBeDefined();
+    // Line 3 is the `<channel>` opener — not line 1, which would mean the span
+    // fell back to the file-anchored default.
+    expect(fire.span.line).toBe(3);
+  });
+
+  test("channel with no `name=` attr still fires with the generic label", () => {
+    const source = `<program>
+<page>
+<channel>
+\${ <m> = [] }
+</>
+</page>
+</program>`;
+    const { sym } = compileSym(source);
+    const fires = errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE");
+    expect(fires).toHaveLength(1);
+    expect(fires[0].message).toContain("`<channel>`");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §B19.13 — regression guards for the shapes E-CHANNEL-INSIDE-PAGE must NOT
+//           disturb. The pure-channel-file dispensation is the easiest of
+//           these to break, so it is asserted against BOTH codes.
+// ---------------------------------------------------------------------------
+
+describe("§B19.13 E-CHANNEL-INSIDE-PAGE does not disturb canonical shapes", () => {
+  test("CANONICAL: `<channel>` as SIBLING of `<page>` inside `<program>` — no fire", () => {
+    // The shape the diagnostic's message tells authors to move TO. If this ever
+    // fires, the fix has inverted the rule.
+    const source = `<program>
+<channel name="chat" topic="lobby">
+\${ <messages> = [] }
+</>
+<page>
+<h1>Chat</h1>
+</page>
+</program>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(0);
+    expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
+  });
+
+  test("DISPENSATION REGRESSION: PURE-CHANNEL-FILE fires NEITHER placement code", () => {
+    // §38.12.6 / Insight 30 — file-top `<channel>` in a file with no
+    // `<program>` anywhere is CANONICAL. The inside-page fire is unconditional
+    // on fileHasProgram, so this guard proves it is nonetheless page-gated and
+    // did not leak into the dispensed shape.
+    const source = `<channel name="only">
+\${ <m> = [] }
+</>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(0);
+    expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
+  });
+
+  test("DISPENSATION REGRESSION: `export <channel>` module file fires NEITHER code", () => {
+    // The trucking-dispatch cross-file shape (CHX exporter side).
+    const source = `export <channel name="dispatch-board">
+\${
+  <boardEvents> = []
+  server function publishBoardEvent(eventType) {
+    @boardEvents = [...@boardEvents, { type: eventType }]
+  }
+}
+</>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(0);
+    expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
+  });
+
+  test("OUTSIDE-PROGRAM REGRESSION: file-top channel + `<program>` sibling still fires, alone", () => {
+    // No `<page>` involved: E-CHANNEL-OUTSIDE-PROGRAM behaviour is unchanged
+    // and the new code stays silent.
+    const source = `<channel name="chat">
+\${ <messages> = [] }
+</>
+<program>
+\${ <draft> = "" }
+</program>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(1);
+    expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(0);
+  });
+
+  test("a `<page>` with NO channel in it fires nothing (pageDepth alone is inert)", () => {
+    const source = `<program>
+<channel name="chat">
+\${ <messages> = [] }
+</>
+<page>
+\${ <draft> = "" }
+<h1>Page</h1>
+</page>
+<page>
+<h2>Other</h2>
+</page>
+</program>`;
+    const { sym } = compileSym(source);
+    expect(errorsByCode(sym, "E-CHANNEL-INSIDE-PAGE")).toHaveLength(0);
+    expect(errorsByCode(sym, "E-CHANNEL-OUTSIDE-PROGRAM")).toHaveLength(0);
   });
 });

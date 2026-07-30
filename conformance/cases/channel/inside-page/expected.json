@@ -1,0 +1,12 @@
+{
+  "id": "channel-inside-page",
+  "description": "§38.1 — a `<channel>` nested inside a `<page>` fires E-CHANNEL-INSIDE-PAGE. Channels are app-scope shared-state vehicles that live as SIBLINGS of `<page>` declarations inside `<program>`, never nested inside an individual `<page>`. Regression pin for g-channel-inside-page-never-fires: the code was §34/§38.9-catalogued at severity Error with ZERO fire sites, so this shape compiled CLEAN and the channel was still wired PROGRAM-scoped — a WebSocket route whose lifetime did not match the page that appeared to own it. Contrast `channel/sibling-of-page` (the canonical shape this diagnostic points authors to) and `channel/outside-program` (the other placement violation).",
+  "language-version": "1.0",
+  "spec": "§38.1, §38.2, §38.9, §40",
+  "rationale": "§38.1 invariant 1 and the §38.2 normative list both state: \"A `<channel>` inside `<page>` SHALL emit E-CHANNEL-INSIDE-PAGE — channels are app-scope shared-state vehicles, not per-route declarations.\" The §38 chapter preamble and §40 program-shape section state the prohibition directly: \"Channels SHALL NOT live inside `<page>`.\" No runtime half: the source is REJECTED at compile time, so there is no program to execute.",
+  "expect": {
+    "codes": ["E-CHANNEL-INSIDE-PAGE"],
+    "severity": { "E-CHANNEL-INSIDE-PAGE": "error" },
+    "notCodes": ["E-CHANNEL-OUTSIDE-PROGRAM"]
+  }
+}
