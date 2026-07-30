@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 20 |
-| MED | 89 |
+| HIGH | 21 |
+| MED | 93 |
 | LOW | 40 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -234,7 +234,24 @@ so `references t (c)`, `references t.c` and a bare `references` are caught too, 
 bodies blanked first so `default('see references')` cannot false-fire. — `RESOLVED S290` <!-- @gap id=g-schema-references-dot-form-emits-no-foreign-key sev=HIGH status=resolved -->
 
 ### g-if-dirty-path-ships-gated-content-visible-pre-hydration — content behind a false `if=` ships in the initial HTML with no `display:none` and is visible until hydration (and permanently with JS off) — `NEW S297 (found while scoping if= Phase 2); CONFIRMED INDEPENDENTLY by adopter GH #261 (2026-07-29); MED; codegen/if-lowering`
-<!-- @gap id=g-if-dirty-path-ships-gated-content-visible-pre-hydration sev=MED status=open -->
+
+**✅ RESOLVED S302 — verified by EXECUTION in real headless Chrome with JavaScript DISABLED** (strictly
+worse than "before hydration", so an absence there is an absence pre-hydration). `if=` now lowers to an
+inert `<template>` + marker; the gated element is in the HTML BYTES but **not in the DOM** and never
+painted. Confirmed across **27 shapes** — the adopter's verbatim repro, all five condition spellings,
+interpolated/handler/`bind:`/`<each>` dirty bodies, nested `if=`, `if=`+`show=` together, if/else-if/else
+chains (all three branches, including the initially-TRUE one), `<tr>`/`<option>` foster-parent contexts,
+components, and Tier-0 `${ if … lift }`. Flagship recheck: `data-scrml-bind-if` **0**, `scrml-if-marker`
+**149**, `display:none` in HTML **0**, 0 unpaired markers — reproducing the #289 101→0 / 48→149 claim
+independently. Closed by **#289** (`cdf4f4de`), which this entry predicted.
+
+⚠️ **A byte-grep CANNOT verify this fix.** The markup is still present inside the inert `<template>`, so
+the adopter's own recipe (`grep -o '<div class="secret">'`) still exits 0 — it cannot distinguish the fix
+from the bug. The correct check is `document.querySelector('.secret') === null`.
+
+**Residuals split out rather than folded in as prose** (which is the mistake this entry's own Disposition
+paragraph was written to avoid): [[g-if-on-structural-element-silently-ignored]] ·
+[[g-show-false-flashes-pre-hydration]] · [[g-if-on-propped-component-rejected-contradicting-17-1]].<!-- @gap id=g-if-dirty-path-ships-gated-content-visible-pre-hydration sev=MED status=resolved -->
 `if=` compiles to two lowerings (see [[g-if-two-lowerings-display-vs-mount]] context in `docs/changes/if-mount-unmount-phase2/SCOPING.md`). On the **dirty** path — selected whenever the gated subtree contains anything dynamic, which a single `${…}` interpolation is enough to trigger — the element is emitted into the initial HTML **with no `style="display:none"`** and is hidden only once client JS boots.
 
 **Verified by execution on `115e8b1b`** with the predicate FALSE at compile time:
@@ -895,6 +912,19 @@ So: **1.3% incidence (1/78), live on real corpus code but not in an adopter app.
 ## §S265 — gaps filed S265 (2026-07-18, Peter)
 
 ### g-nested-flatpage-runtime-bare-ref — a NON-shell nested flat `<page>` (e.g. `pages/customer/loads.scrml` → `dist/customer/loads.html`) emits its `scrml-runtime.<hash>.js` `<script>` as a BARE ref with no `../` prefix → resolves to `dist/customer/scrml-runtime.<hash>.js` (nonexistent) → 404, page runtime never loads. The MPA shell-composition path DOES apply `upToRoot` to the runtime ref (`index.ts:~1971`); the flat-page path does not. PRE-EXISTING (reproduces with content-hashing OFF) — surfaced by the #82 S239 review, orthogonal to it. NOT currently biting `pjoliver11/assetManagement` (its `pages/*.scrml` are single-segment → land at dist root after the `pages/` strip, so the bare ref resolves). Bites any adopter with genuinely nested (multi-segment) flat routes. Fix = apply the `upToRoot` prefix to the runtime `<script>` on the flat-page emit path too. — `NEW S265 (#82 review); MED; open`
+
+**⚠️ SCOPING CLAIM CORRECTED S302 — this gap IS biting, in our own flagship, and the "not currently
+biting" reasoning is wrong.** The entry argues single-segment `pages/` routes are safe because the
+`pages/` strip lands them at dist root. True — but **`<channel>` shells are not under `pages/`, are never
+stripped, and land at dist depth 1**, where the bare ref 404s. Measured on `examples/23-trucking-dispatch`
+compiled whole: **4 of 169 `<script src>` refs dangle**, all channel shells
+(`channels/{dispatch-board,customer-events,driver-events,load-events}.html -> scrml-runtime.<hash>.js`).
+The contrast proves it is emitter-specific, not depth-specific: `dispatch/board.html` — a PAGE at the
+**same depth** — correctly emits `../scrml-runtime.<hash>.js`. With the runtime 404'd those shells are
+dead, and their chunk calls `_scrml_reactive_set`/`_scrml_init_set`. Now pinned as the documented
+allowlist in `compiler/tests/integration/corpus-emitted-specifier-resolution.test.js` §2, so the count
+cannot drift silently in either direction. **Re-scope the fix to cover every non-`pages/` artifact
+directory, not only "genuinely nested multi-segment flat routes".**
 
 ### g-crossfile-dep-ref-pages-unstripped — `computeDependencyClientScripts` (`index.ts:~314-381`) computes cross-file dependency `<script src>` refs in the UN-stripped `pages/` coordinate space, while the actual artifacts land in the STRIPPED space (S100 `pages/`-prefix strip). When a page under `pages/` imports a `.scrml` dep across the strip boundary, the emitted ref carries an extra `../` and points above dist root → 404. PRE-EXISTING (reproduces with content-hashing OFF); the #82 hash-rewrite correctly leaves the already-non-resolving ref untouched (no regression). NOT biting assetManagement (same single-segment-pages reason as the sibling gap). Fix = compute dep refs in the same stripped space `pathFor` uses. — `NEW S265 (#82 review); MED; open`. **WIDENED S292 (GH #235 lane, empirically re-verified on `19bb27be`):** the entry as written is wrong on two counts. (a) The CLIENT half it names is **already RESOLVED** — `toDistRel` inside `computeDependencyClientScripts` applies the `pages/` strip to BOTH sides (landed S280), and a genuinely nested route now emits a resolving `../models/fmt.client.js`. (b) The **single-segment `pages/` case the entry marks safe DOES break** — not on the client `<script src>` axis, but on the **server-side ESM import** axis, which is a SECOND emitter with NO shared coordinate computation: `emit-server.ts:~1886` rewrites the raw AUTHOR specifier (`jsSource = stmt.source.replace(/\.scrml$/, ".server.js")`) and never converts to dist coordinates. Reproducer (verified): `pages/login.scrml` importing `'../models/session.scrml'` (both carrying server content) emits `dist/login.server.js` + `dist/models/session.server.js`, and `login.server.js` line 4 reads `import { currentRole } from "../models/session.server.js"` — which from `dist/` walks to `<parent-of-dist>/models/session.server.js` and dies at RUNTIME with `Cannot find module` (green compile, `node --check` passes — a missing FILE, not a syntax error; same class as `g-pure-module-server-emit`). This is the shape that hard-blocked the `dc` adopter port. Fix (server side) = resolve `stmt.source` against `dirname(filePath)`, map BOTH endpoints through the same `pages/`-stripping dist projection `pathFor` uses, and re-add the ES-relative `./` prefix; `fileAST._outputBaseDir` (set at `index.ts:~1755`) carries the base the projection needs. NOT fixed in the #235 lane: the two emitters share no code, so per that dispatch's scoping only the gap widening was in scope. Sibling `g-nested-flatpage-runtime-bare-ref` re-verified STILL OPEN on the same run (a nested flat `<page>` with no shell emits a bare `scrml-runtime.<hash>.js`).
 
@@ -5222,3 +5252,209 @@ setter; presence in the bundle text is NOT sufficient evidence for this class).
 **Loci — TRACED.** `compiler/src/codegen/collect.ts:569` + the `state-decl` branch `:587`-`:590` (the
 predicate gap) · `compiler/src/codegen/emit-reactive-wiring.ts:496` (the consumer). Same-file
 counter-examples that DO check the flag: `collect.ts:670`, `:713`.
+
+<!-- @gap id=g-crossfile-export-const-not-destructured-by-importer sev=HIGH status=open -->
+### G-CROSSFILE-EXPORT-CONST-NOT-DESTRUCTURED-BY-IMPORTER — an imported `export const` is omitted from the importer's destructure and referenced FREE → `ReferenceError` inside the handler, fails OPEN for authorization — `NEW S302; HIGH; open`
+
+**Live residual of GH #263.** PR #283 (`d139d775`) landed the **definition** side; the **consumption**
+side was not covered. Reproduced independently on current `main` before being reported, because it
+contradicts a fix that had just merged.
+
+**Module side — CORRECT (the #263 fix holds):**
+```js
+// models/auth.client.js
+const CAP_PER_DIEM = "per_diem";
+_scrml_modules["models/auth.client.js"] = { CAP_PER_DIEM: CAP_PER_DIEM, defaultCaps: …, can: … };
+```
+
+**Consumer side — BROKEN.** Source imports `{ defaultCaps, can, CAP_PER_DIEM }`; emitted page:
+```js
+const { defaultCaps, can } = _scrml_modules["models/auth.client.js"];   // CAP_PER_DIEM omitted
+_scrml_cs_reactive_set("allowed", can(defaultCaps(), CAP_PER_DIEM));    // free reference
+```
+`CAP_PER_DIEM` occurs **once** in the whole page bundle, at the use site, with **zero** bindings
+(verified by grep for every `const|let|var` and destructure form). Guaranteed `ReferenceError`.
+**Compile exit 0, zero diagnostics.** The value is sitting in the registry object; the importer just
+never pulls it out.
+
+**Two distinct sub-shapes — do NOT assume one patch covers both:**
+1. **const IS closed over by an exported fn** → module registers it, consumer omits it. *Consumer-side.*
+2. **const referenced ONLY by the importing page**, closed over by no exported fn → dropped from the
+   module bundle entirely as well, i.e. the original #263 symptom surviving in a sub-shape #283's
+   reachability gate does not reach. *Both sides.*
+
+**Not `pages/`-specific** — reproduced with the importer at project root and no `pages/` directory
+anywhere, so it is NOT the S296 coordinate-space family.
+
+**Why HIGH — it fails OPEN.** The `ReferenceError` fires **inside an event handler**, so the page
+survives and the cell retains its previous value. The tested fixture failed CLOSED (`@allowed` stays
+`false`); the mirror spelling does not:
+```scrml
+@denied = not can(caps, CAP_PER_DIEM)     // handler dies → @denied stays false → NOT denied
+```
+For an RBAC capability matrix — the exact shape adopter GH #285 is about — that is the wrong direction,
+and it is silent.
+
+**⚠️ It contradicts live adopter guidance.** #285's closing note tells the adopter they *"can drop the
+hand-duplicated capability matrix across the flat pages and re-import `../models/auth.scrml` as the
+single source of truth."* Correct on the import-resolution axis it was closed on; acting on it with
+`export const` capability names converts a visible drift hazard into a silent authorization failure.
+**A warning was posted on #285 and the routing note sent to the adopter lane.** Interim workaround given:
+export **functions** rather than constants, since function bindings destructure correctly today.
+
+**Locus — PA-located, VERIFY.** The observable contract above is what was proven; the pass that builds
+the importer destructure was NOT traced. Do not scope a fix from a locus this entry does not state.
+Reproducer: `docs/changes/284-indirect-callee-not-server-placed/` sits next door; this one is minimal
+enough to rebuild from the snippets above in two files.
+
+---
+
+<!-- @gap id=g-if-on-structural-element-silently-ignored sev=MED status=open -->
+### G-IF-ON-STRUCTURAL-ELEMENT-SILENTLY-IGNORED — `if=` on `<engine>` / `<match>` / `<each>` generates ZERO code; on `<engine>` the initial arm is permanently visible — `NEW S302; MED; open`
+
+S301 recorded this as a stated-not-implied residual inside
+[[g-dispatched-mount-inside-if-never-renders]] — *"appears to be ignored … NOT investigated."* **Now
+investigated**, and split out under its own id rather than left as prose in a RESOLVED entry.
+
+`<engine for=Light initial=Red if=@shown>` with `@shown = false` emits:
+```html
+<div data-scrml-engine-mount="…"><div id="e-red">ENGINE-RED-STATIC</div></div>
+```
+No `<template>`, no marker, no `display:none`. Real Chrome with JS **off**: in the DOM,
+`display:block`, painted. Real Chrome with JS **on**: **still there** — so on `<engine>` this is a
+*permanent* visible leak, not a pre-hydration flash. The predicate generates **zero** code: the only
+references to `shown` in the client bundle are its own declaration. Compile exit 0, no diagnostic.
+
+`<match if=…>` and `<each if=…>` share the root cause but produce **no static leak** — the gate is
+simply ignored and the content renders unconditionally post-hydration.
+
+**Root cause — the §17.1 mount gate lives in `emit-html.ts` (~`:2600`) behind a lowercase-tag test, and
+`<engine>`/`<match>`/`<each>` never reach it** — they are claimed by their own emitters, and
+`emit-engine.ts` / `emit-match.ts` contain **no handling of `if` at all**. **NOT introduced by #289**:
+`git show --stat cdf4f4de` touches `emit-html.ts` / `emit-variant-guard.ts` / `runtime-chunks.ts` /
+`runtime-template.js`; neither structural emitter is in that diff.
+
+**Migration MEASURED: 0.** A multi-line-tolerant scan over **2,174 `.scrml`** files across
+`samples examples stdlib conformance docs benchmarks compiler/tests` found **zero** instances of `if=`
+on `<engine|match|each|channel|slot>`. Zero corpus footprint — a latent adopter trap, not a live
+regression, which is why MED and not HIGH.
+
+**Fix direction is a ruling, not obvious:** route structural elements through the §17.1 mount gate, or
+**reject** `if=` on them with a diagnostic. §17.1 (`SPEC.md:10927`) says `if=` *"MAY appear on any HTML
+element or component"* — `<engine>` is neither (§4.15 scrml-defined structural element), so rejecting is
+defensible and is the reversible direction (pa-base §8: narrowing has a migration path, widening does
+not). **Silently ignoring it is the one option that is clearly wrong.**
+
+**Loci — PA-located, VERIFY.** `compiler/src/codegen/emit-html.ts` ~`:2600` (the gate, and its
+lowercase-tag guard) · `emit-engine.ts` / `emit-match.ts` (the emitters that bypass it).
+
+---
+
+<!-- @gap id=g-show-false-flashes-pre-hydration sev=MED status=open -->
+### G-SHOW-FALSE-FLASHES-PRE-HYDRATION — `show=false` content is VISIBLE until JS runs; §17.2 promises a `display:none` toggle that does not exist pre-hydration — `NEW S302; MED; open`
+
+**The identical symptom adopter GH #261 filed, on the sibling attribute — and it had no gap id at all**
+(grep of `docs/known-gaps.md` for show/flash/FOUC/pre-hydration: nothing).
+
+`<div show=@shown>` with `@shown = false` emits `<div data-scrml-bind-show="…">CONTENT</div>` with **no**
+`style="display:none"`. Real Chrome, JS disabled: visible, `display:block`, present in `body.innerText`.
+Post-hydration it correctly becomes `display:none`.
+
+**Governing sentence — §17.2 (`SPEC.md:11203`):** *"When `expr` evaluates to false, the element is
+hidden. The compiler generates a CSS `display: none` toggle."* A toggle that does not exist until JS
+runs does not satisfy that for the initial paint. Outcome (1), sentence FOUND → conformance restoration,
+**not** an amendment.
+
+**Why this matters more now than it did last week.** #289 made `if=` structurally correct, and the
+natural advice to anyone who wants gated content *in* the DOM is "use `show=`". That advice currently
+routes an adopter from a fixed defect straight into an unfixed one — and #261's reporter noticed the
+original because they were on mobile over a slow network, i.e. exactly the person who will notice this.
+
+**Fix is trivially available, unlike the `if=` case:** emit the inline `style="display:none"` when the
+predicate is statically falsy at compile time (or unconditionally) and let the existing controller clear
+it. `if=` needed a whole lowering; this needs one attribute.
+
+**Locus — PA-located, VERIFY.** The `show=` binding emit path in `compiler/src/codegen/emit-html.ts`
+(the `data-scrml-bind-show` producer). Not traced.
+
+---
+
+<!-- @gap id=g-tool-artifact-import-specifier-dangles sev=MED status=open -->
+### G-TOOL-ARTIFACT-IMPORT-SPECIFIER-DANGLES — a §64 `kind="tool"` artifact emits a SOURCE-space import specifier; `bun <emitted>.js` dies with `Cannot find module` on a green compile — `NEW S302; MED; open`
+
+**Both siblings S296 explicitly DEFERRED are live, and they compose.** S296 fixed `.server.js`
+specifiers into post-strip dist space and recorded two untouched paths; this is both of them in one
+failure.
+
+`pages/mytool.scrml` (`<program kind="tool">`) importing `../models/lib.scrml`:
+
+| step | result |
+|---|---|
+| compile | **exit 0**, zero relevant diagnostics |
+| `node --check mytool.js` | **PASS** (a missing FILE is not a syntax error) |
+| layout | `mytool.js` at dist root; target at `models/lib.js` |
+| emitted specifier | `import { greet } from "../models/lib.js";` |
+| `bun ./mytool.js` | `Cannot find module '../models/lib.js'` |
+
+Not an artifact of `--output-dir` (identical with the default). The exact S296 signature: green compile,
+`node --check` clean, dies at runtime.
+
+**Root cause — TRACED, two siblings composing:**
+1. `emit-tool.ts` `buildImportHeader` (~`:281`) does an extension-only
+   `source.replace(/\.scrml$/, ".js")` → a **source-space** specifier. *(Sibling A, origin.)*
+2. `api.js:2810`/`:3119` call `rewriteRelativeImportPaths(...)`; `emittedScrmlSources` contains
+   `models/lib.scrml`, so the **bare-`.js` skip fires** and returns the specifier verbatim.
+   *(Sibling B, proximate cause.)*
+
+Proven by invoking the rewriter directly on the real inputs:
+```
+WITH emittedScrmlSources={lib} : ../models/lib.js      <- bare-.js SKIP fires
+WITH emittedScrmlSources=null  : ../fx3/models/lib.js  <- relocation path
+```
+**Neither branch applies `stripPagesPrefix`** — so disabling the skip would NOT fix it. This needs the
+`distRelativeServerSpecifier` treatment S296 gave `.server.js`. Now guarded against regression by
+`compiler/tests/integration/corpus-emitted-specifier-resolution.test.js` §1 (which sweeps ALL emitted
+`.js`, not just `.server.js`).
+
+---
+
+<!-- @gap id=g-client-bundle-no-relative-path-rewrite sev=MED status=open -->
+### G-CLIENT-BUNDLE-NO-RELATIVE-PATH-REWRITE — client bundles get no specifier rewrite and no vendored-file copy; a top-level `import` lands in a CLASSIC script and is DOA on load — `NEW S302; MED; open`
+
+`pages/sub/foo.scrml` importing a vendored `./util.js` emits `sub/foo.client.js` carrying
+`import { vendored } from "./util.js"` with (a) the vendored file **never copied to dist**, and (b) a
+top-level `import` in a bundle loaded via a **classic** `<script src>`:
+
+```
+classic-script parse THREW: SyntaxError: Unexpected token '{'. import call expects one or two arguments.
+```
+
+DOA on load, compile exit 0, zero diagnostics. **`api.js` states the cause outright:** *"Client JS does
+not currently get GITI-009 relative-path rewrites (no existing test asserts that contract for client
+output)."* — i.e. the absence of the test IS the recorded reason the contract does not hold. That
+inversion is the point of the entry.
+
+Two defects, likely separable: the missing rewrite/copy, and emitting ESM syntax into a classic-script
+artifact (which is a module-format question, not a path question).
+
+---
+
+<!-- @gap id=g-happydom-foster-parents-template-in-table-context sev=MED status=open -->
+### G-HAPPYDOM-FOSTER-PARENTS-TEMPLATE-IN-TABLE-CONTEXT — our browser-test harness gets table-context `<template>` WRONG, so `if=` inside `<tbody>` reads as a live leak when it is not — `NEW S302; MED; open`
+
+**A harness-fidelity defect that produced a false positive during the #261 verification, caught only by
+re-running in real Chrome.** happy-dom does not implement the HTML Standard's "in table" / "in table
+body" → `template` → "in head" insertion-mode rule, so it **foster-parents a `<tr>` out of its
+`<template>`**. Under happy-dom the row reports in-DOM with its text in `body.textContent`; under real
+Chrome it is correctly absent. Isolated: `<div><template>` behaves correctly, `<tbody><template>` does
+not.
+
+**Consequence, and why it is filed rather than noted:** any future `if=` / `show=` / structural-lowering
+work validated **only** in the happy-dom browser tier will assert table-context conditionals against a
+parser that gets them wrong — in the direction that manufactures phantom leaks (wasting a session) and,
+symmetrically, could mask a real one. This is the **S276/S296 "the oracle inherits the implementation's
+assumption"** shape with the oracle being a third-party DOM rather than our own code.
+
+**Disposition:** do not attempt to fix happy-dom. Record the boundary — table-context structural
+assertions need a real-browser check — and prefer the real-Chrome path for any conditional-lowering
+verification. Sibling of [[g-nav-browser-harness-fidelity]].
