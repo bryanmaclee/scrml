@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 15 |
-| MED | 85 |
+| MED | 86 |
 | LOW | 38 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -4759,3 +4759,26 @@ Sites: `compiler/tests/integration/endpoint-conformance-integration.test.js` · 
 **Found via a harness, not a dogfood run:** `self-host-smoke.test.js` §C asserted `compiler/self-host/dist/tab.js` exists. That path is **gitignored** (`.gitignore:2:dist/`), so it is never tracked and a fresh clone cannot have it, while every *sibling* test in the same describe block already skipped when absent — one test diverged from its own block and hard-failed the pre-commit gate on a clean checkout. Harness aligned to the file's own skip-and-say-how precedent at S301; **the compile defect itself is untouched and is what this gap tracks.**
 
 **Scope note:** `compiler/self-host/` is the OLD self-host line — B4, DEFERRED post-v1.0.0 per S66; the live second implementation is `compiler/self-host-v2/`. So this is not V1-blocking, but it does mean the §C tokenizer-parity assertions (`tokenizeBlock`/`tokenizeAttributes`/…) have been **silently skipping**, i.e. parity is unverified rather than verified — a coverage claim that does not hold. Decide alongside the deferred-self-host disposition: fix the CG defect, or retire §C with the line. — `NEW S301 (bryan); MED; open`
+
+<!-- @gap id=g-ssr-each-row-template-subset-blocks-all-prerender sev=MED status=open -->
+**The SSR each-block prerender path emits NOTHING in the canonical app — its row-template subset is narrower than any real list row.** `buildSsrEachRenderers` (`compiler/src/codegen/emit-ssr-render.ts`) prerenders individual **top-level `<each in=@seededCell>`** blocks whose row template sits inside a supported subset. Four classes throw `SsrUnsupported`; the caller catches and returns `null` (`:370-373`), dropping *that block* from prerender while the page proceeds. Measured on `examples/23-trucking-dispatch` (36 files, 23 `<each>` blocks) at `95bb2704`:
+
+| | count |
+|---|---|
+| iterate `@cell` — candidates by the `in=` gate | 19 / 23 |
+| carry a **non-literal attribute value** (`:172`, `attr=(…)` / interpolated attr) | **20** |
+| carry **non-field-read interpolation** (call / ternary / method — `:148`, `:258`) | **16** |
+| carry `if=` / `show=` / `else` / `else-if` (`:213-221`) | 16 |
+| **blocked by `if=` ALONE** | **0** |
+| SSR each-renderers actually emitted (`_scrml_ssr_render_each_*`) | **0** |
+
+**So the capability is implemented, tested, and dead in practice.** Its only references are its own module, `emit-server.ts` (the consumer), and one integration test (`compiler/tests/integration/ssr-a-terminus.test.js`) — no corpus artifact exercises it. A real list row interpolates a call or ternary (`${transitionVerb(target)}`, `${entry.at == "" ? "" : …}`) and sets a computed attribute (`selected=(d.id == currentDriverId)`, `class="… ${driverStatusClasses(…)}"`), and either one alone excludes the block.
+
+**Ordered by MEASURED blocking power** — this is the arc, and the order matters because the obvious-looking item is worthless first:
+1. **non-literal attribute values (20/23)** — the binding constraint. Nothing prerenders until this widens.
+2. **non-field-read interpolation (16/23)** — calls / ternaries / method calls in a row template.
+3. **`if=` support (0 marginal)** — every block carrying it is already excluded by 1 or 2, so this unlocks **zero** on its own.
+
+**Provenance — this is why item 3 is last.** The `if=` Phase-2 SCOPING doc's OQ-1 ruled SSR "IN, as unit 2 with its own acceptance gate, not a follow-on that can slip," reasoning that client and SSR "cannot safely diverge" or they produce a hydration mismatch. **That premise was falsified at S301:** SSR renders no gated content at all, so there was nothing to diverge from. bryan then ruled **(a) verify-only** for unit 2 (a regression guard folded into unit 1's gate as item 7) and filed this arc — because building `if=` SSR support would have shipped a capability with no consumer. **Keep the ordering when this is picked up; re-deriving it costs a session and the site count overstates the value of item 3 by construction.**
+
+**Widening caution (pa-base §8):** items 1–2 are `newly-accepting` on the SSR path — SSR would begin evaluating expressions server-side that it currently declines, which introduces a hydration-mismatch surface that does not exist today. §52.15.5's auth-scoped auto-omit exists precisely because server and client values diverge; expect to need the same discipline per widening, and treat each item as its own gate rather than one bulk relaxation. *(Classification above is regex-based over crudely-extracted blocks — counts ±; the direction is not sensitive to that.)* — `NEW S301 (bryan); MED; open`

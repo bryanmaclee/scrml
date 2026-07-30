@@ -154,6 +154,19 @@ post-fix clean-marker target.
 6. **R26 empirical:** recompile real sources on the post-fix baseline and **diff artifacts**, confirming
    no unintended `semantics-changed` beyond the intended one. `grep`-clean is NOT the check; a
    green suite is NOT the check.
+7. **SSR exclusion regression guard (this IS unit 2 — bryan ruled (a) at S301, verify-only).** You are
+   still forbidden from editing `emit-ssr-render.ts`; this is an assertion about your blast radius, and
+   it is the one thing this change could plausibly break. On the post-fix baseline:
+   ```sh
+   # per-block SSR exclusion must still hold — the count must stay at ZERO
+   grep -rho "_scrml_ssr_render_each_[A-Za-z0-9_]*" "$OUT" | sort -u | wc -l   # 0 before, must be 0 after
+   ```
+   **Why this is load-bearing:** SSR throws `SsrUnsupported` on `if=` (`emit-ssr-render.ts:213-221`)
+   and the caller returns `null` (`:370-373`), dropping that block from prerender. If your change moves
+   what the `if=` path emits in a way the exclusion keys off, blocks could silently **start** (or stop)
+   prerendering — a `semantics-changed` with **no diagnostic and no test coverage**. A non-zero count
+   after your change is not a win, it is a finding: STOP and report it rather than accepting it.
+   Add a test pinning the exclusion so it cannot regress silently later.
 
 ## 7. Out of scope — do not touch
 

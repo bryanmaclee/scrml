@@ -150,17 +150,38 @@ state alone. They cannot safely diverge.
 > The "they cannot safely diverge / hydration mismatch" reasoning does not apply, because SSR emits
 > nothing for these subtrees to mismatch against.
 >
-> **This does not delete unit 2 — it changes its content**, and the choice is a ruling, not a scoping
-> detail:
-> - **(a) verify-only** — assert the per-block exclusion still holds after unit 1 (a regression guard),
->   and file the opportunity below. Small.
-> - **(b) take the opportunity** — the clean `<template>` form is inert first-paint content, so
->   `if=false` could now legitimately SSR as *absent*, which is exactly what §17.1 guarantees. That
->   would be SSR gaining `if=` support rather than mirroring a client change — a bigger, genuinely
->   new capability, and a widening-shaped decision that wants its own gate.
+> **This does not delete unit 2 — it changes its content**, and the choice was a ruling:
+> - **(a) verify-only** — assert the per-block exclusion still holds after unit 1 (a regression guard).
+> - **(b) take the opportunity** — SSR gains `if=` support, so `if=false` SSRs as *absent* per §17.1.
 >
-> **HELD for bryan.** Unit 1 (client) is unaffected and is briefed at
-> `BRIEF-unit1-client.md`, which forbids touching `emit-ssr-render.ts`.
+> ### ✅ RULED (bryan, S301): **(a) now, and file the arc.**
+>
+> **The measurement is what decided it.** Flagship app, 36 files, 23 `<each>` blocks:
+>
+> | | count |
+> |---|---|
+> | iterate `@cell` (candidates by the `in=` gate) | 19 / 23 |
+> | carry a **non-literal attribute value** | 20 |
+> | carry **non-field-read interpolation** (call / ternary / method) | 16 |
+> | carry `if=` | 16 |
+> | **blocked by `if=` ALONE — i.e. what (b) would unlock** | **0** |
+> | SSR each-renderers actually emitted (`_scrml_ssr_render_each_*`) | **0** |
+>
+> `if=` is **never the binding constraint** — every block carrying it also carries an attribute or
+> interpolation blocker. (b) would have shipped a capability with **no consumer**, and `if=` is the
+> smallest and least valuable piece of a multi-part widening. *(Classification is regex-based over
+> crudely-extracted blocks — counts ±; the direction is not sensitive to that.)*
+>
+> **Consequences of the ruling:**
+> 1. **Unit 2 collapses to a regression assertion** — no separate build. Folded into unit 1's
+>    acceptance gate as item **7** (`BRIEF-unit1-client.md`): the per-block SSR exclusion must still
+>    hold after unit 1, and the emitted-renderer count must stay at 0. This is the one thing unit 1
+>    could plausibly break, and it is a `semantics-changed` class no diagnostic catches.
+> 2. **The real arc is filed separately** — an SSR row-template subset widening, ordered by measured
+>    blocking power (non-literal attrs 20 → non-field-read interpolation 16 → `if=` 0 marginal):
+>    [[g-ssr-each-row-template-subset-blocks-all-prerender]].
+>
+> Unit 1 (client) is unaffected and still forbids touching `emit-ssr-render.ts`.
 
 **OQ-2 → PREREQUISITE, and the probe sharpened what the prerequisite is.** I compiled an `<each>`
 inside an `if=` on `0d78278c` and read the artifact. My stated hypothesis ("orphan or double-register")
