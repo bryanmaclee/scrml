@@ -717,7 +717,99 @@ export function emitExpr(node: ExprNode, ctx: EmitExprContext): string {
 export function emitExprField(exprNode: ExprNode | null | undefined, fallbackStr: string, ctx: EmitExprContext): string {
   if (exprNode) return emitExpr(exprNode, ctx);
   if (ctx.mode === "server") return rewriteServerExpr(fallbackStr);
-  return rewriteExprWithDerived(fallbackStr, ctx.derivedNames ?? null);
+  // g-synth-read-in-statement-bodied-on-mount-not-collapsed (S299, #262 residual)
+  // — collapse §55 synth-surface reads in the RAW-STRING statement fallback to the
+  // SAME dotted synth cell the AST path (emitMember) emits, BEFORE the generic
+  // `@ident` rewrite. A statement-bodied `on mount { if (@f.isValid) {…} }` does
+  // NOT parse to a single ExprNode, so it lands here; rewriteExprWithDerived's
+  // `@ident` regex captures ONLY the root ident and leaves the member chain →
+  // `_scrml_reactive_get("f").isValid` (member access on the COMPOUND value, which
+  // has no `isValid` key → undefined). Threading synthCellKeys (the #262 fix) is
+  // necessary but not sufficient here because this fallback never reaches
+  // emitMember; this pre-pass reproduces emitMember's collapse on the raw text.
+  const collapsed =
+    ctx.synthCellKeys && ctx.synthCellKeys.size > 0
+      ? collapseSynthSurfaceRefsInRaw(fallbackStr, ctx.synthCellKeys)
+      : fallbackStr;
+  return rewriteExprWithDerived(collapsed, ctx.derivedNames ?? null);
+}
+
+/**
+ * g-synth-read-in-statement-bodied-on-mount-not-collapsed (S299) — raw-string
+ * synth-surface collapse for `emitExprField`'s client statement fallback.
+ *
+ * Reproduces `emitMember`'s Bug-61 collapse (see its comment) on a raw string:
+ * an `@<compound>[.field].<synthProp>` read whose dotted key is a REGISTERED
+ * synth cell collapses to `_scrml_reactive_get("<dotted>")` (the universal
+ * accessor — auto-delegates to the derived cache for the derived rollups, reads
+ * `_scrml_state` for the reactive synth cells), matching what the AST path emits
+ * for the SAME source in binding / expression position.
+ *
+ * Guards mirror emitMember EXACTLY:
+ *  - collapse ONLY when the leaf segment is a synth property (isValid / errors /
+ *    touched / submitted) AND the dotted key is in `synthCellKeys` — the S140
+ *    over-fire guard (a plain cell with a field literally named `isValid` stays
+ *    member access, because its dotted key is NOT a registered synth cell);
+ *  - optional (`@f?.isValid`) / computed (`@f["isValid"]`) segments are not
+ *    matched (the chain regex is static `.ident` only), matching emitMember's
+ *    `!node.optional` gate — those fall through to the generic member-access
+ *    rewrite unchanged.
+ *
+ * String-literal-aware (mirrors rewriteReactiveRefs' segment scan): `@` chains
+ * inside string / template literals are left for the existing passes. A
+ * synth-surface read INSIDE a template-literal interpolation is therefore not
+ * collapsed by this pre-pass (a pre-existing limitation shared with the generic
+ * raw-string `@ident` rewriter, which also skips backtick spans).
+ */
+function collapseSynthSurfaceRefsInRaw(raw: string, synthCellKeys: Set<string>): string {
+  if (!raw || raw.indexOf("@") === -1) return raw;
+  // Match `@root.seg(.seg)*` — at least one `.seg` (a bare `@root` cannot carry a
+  // synth leaf, so it is left to the generic rewrite). Whitespace around the dots
+  // is tolerated: the escape-hatch `raw` is a RE-SERIALIZED token stream that
+  // spaces member chains (`@f . isValid`), not the original source text.
+  const CHAIN = /@[A-Za-z_$][A-Za-z0-9_$]*(?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)+/g;
+  const rewriteSeg = (seg: string): string =>
+    seg.replace(CHAIN, (m) => {
+      const segs = m.slice(1).split(/\s*\.\s*/);
+      // Collapse at the EARLIEST (innermost-from-root) synth property whose dotted
+      // key is registered — identical to emitMember, which collapses at the
+      // receiver member (`@f.errors.length` → `_scrml_reactive_get("f.errors").length`).
+      for (let k = 1; k < segs.length; k++) {
+        if (!SYNTH_PROPERTY_NAMES.has(segs[k] as any)) continue;
+        const dotted = segs.slice(0, k + 1).join(".");
+        if (synthCellKeys.has(dotted)) {
+          const rest = segs.slice(k + 1);
+          const tail = rest.length ? "." + rest.join(".") : "";
+          return `_scrml_reactive_get(${JSON.stringify(dotted)})${tail}`;
+        }
+      }
+      return m;
+    });
+
+  const out: string[] = [];
+  let inString: string | null = null;
+  let i = 0;
+  let segStart = 0;
+  while (i < raw.length) {
+    const ch = raw[i];
+    if (inString === null) {
+      if (ch === '"' || ch === "'" || ch === '`') {
+        out.push(rewriteSeg(raw.slice(segStart, i)));
+        inString = ch;
+        segStart = i;
+      }
+    } else if (ch === '\\') {
+      i++;
+    } else if (ch === inString) {
+      out.push(raw.slice(segStart, i + 1));
+      inString = null;
+      segStart = i + 1;
+    }
+    i++;
+  }
+  const remaining = raw.slice(segStart);
+  out.push(inString === null ? rewriteSeg(remaining) : remaining);
+  return out.join("");
 }
 
 // ---------------------------------------------------------------------------
@@ -3484,7 +3576,24 @@ function emitEscapeHatch(node: EscapeHatchExpr, ctx: EmitExprContext): string {
       ? rewriteServerExprArrowBody(node.raw, ctx.dbVar)
       : rewriteServerExpr(node.raw, ctx.dbVar);
   }
+  // g-synth-read-in-statement-bodied-on-mount-not-collapsed (S299, #262 residual)
+  // — the ACTUAL locus. A STATEMENT-bodied `on mount { if (@f.isValid) {…} }`
+  // desugars (ast-builder.js §6.7.1a) to a bare-expr whose exprNode is a
+  // ParseError escape-hatch carrying the raw body (`if` is a statement, not an
+  // expression, so safeParseExprToNode falls back to escape-hatch). emit-logic's
+  // exprNode fast path routes it straight here, and the generic `rewriteExpr`
+  // below lowers `@f.isValid` → `_scrml_reactive_get("f").isValid` (member access
+  // on the COMPOUND value, no `isValid` key → undefined → the mount `if` never
+  // fires). The AST path (emitMember) collapses the SAME read to the dotted synth
+  // cell for the EXPRESSION-bodied / binding cases, which parse to real
+  // call/member nodes. Reproduce that collapse on the raw string here so the
+  // statement-context read agrees. Guarded on synthCellKeys (the S140 over-fire
+  // guard lives inside the helper).
+  const raw =
+    ctx.synthCellKeys && ctx.synthCellKeys.size > 0
+      ? collapseSynthSurfaceRefsInRaw(node.raw, ctx.synthCellKeys)
+      : node.raw;
   return isArrowOrFn
-    ? rewriteExprArrowBody(node.raw, ctx.errors)
-    : rewriteExpr(node.raw, ctx.errors);
+    ? rewriteExprArrowBody(raw, ctx.errors)
+    : rewriteExpr(raw, ctx.errors);
 }
