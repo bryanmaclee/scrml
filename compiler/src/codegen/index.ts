@@ -56,7 +56,7 @@ import { enableSrcmapProvenance, disableSrcmapProvenance } from "./srcmap-proven
 import { escapeHtmlAttr } from "./utils.ts";
 import { generateHtml, augmentHtmlForChunks } from "./emit-html.ts";
 import { generateCss } from "./emit-css.ts";
-import { generateServerJs } from "./emit-server.ts";
+import { generateServerJs, astUsesSessionWrite } from "./emit-server.ts";
 import { setBatchLoopHoists, setBatchInListCap } from "./emit-control-flow.ts";
 import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-machines.ts";
 import { generateClientJs } from "./emit-client.js";
@@ -1654,6 +1654,22 @@ export function runCG(input: CgInput): CgOutput {
     };
     for (const f of files) if (isToolProgram(f)) visitDeps(f);
   }
+
+  // §20.5 (#282) — session establishment (`session.set` / `session.destroy`) is a
+  // PROGRAM property, not a per-unit one. The durable path-keyed session store must
+  // be emitted for EVERY server unit in a program whenever ANY unit writes the
+  // session, so a cookie minted by the login unit resolves in the read-only units'
+  // read middleware (SPEC §20.5: the READ middleware and the WRITE path SHALL
+  // consult the SAME durable store). Computing it per-unit made the writer emit the
+  // durable store while readers emitted a fresh in-memory Map on a differently-named
+  // global — the session was never visible to readers. Pre-scan ALL compilation
+  // units once here and stash the program-wide verdict on each fileAST; emit-server
+  // reads `_programAnySessionWrite` (falling back to its own per-unit scan only for
+  // direct single-file callers that never set it). A truly session-less program
+  // (no unit writes) keeps false → the read-only middleware's in-memory Map, so no
+  // unrequested on-disk store / startup I/O is introduced.
+  const _programAnySessionWrite = files.some((f) => astUsesSessionWrite(f));
+  for (const f of files) (f as any)._programAnySessionWrite = _programAnySessionWrite;
 
   // Process each file
   // D6 — the reset below is EXCEPTION-SAFE by construction. A throw anywhere

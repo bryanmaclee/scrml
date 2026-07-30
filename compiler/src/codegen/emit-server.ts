@@ -430,7 +430,7 @@ function astUsesSessionBuiltin(node: unknown): boolean {
  * a read-only-auth / `@currentUser` / serverLoad app that never establishes a
  * session keeps the prior in-memory behavior (no unrequested on-disk SQLite).
  */
-function astUsesSessionWrite(node: unknown): boolean {
+export function astUsesSessionWrite(node: unknown): boolean {
   return astSessionMemberMatch(node, ["set", "destroy"]);
 }
 
@@ -1967,7 +1967,23 @@ export function generateServerJs(
   // (`session.set` / `session.destroy`) gets the RULED-durable on-disk store; a
   // read-only-auth / `@currentUser` / serverLoad app that never writes keeps the
   // prior in-memory Map (no unrequested file / startup I/O / durability change).
-  const _anySessionWrite = astUsesSessionWrite(fileAST);
+  //
+  // §20.5 (#282) — session-write is a PROGRAM property, not a per-unit one. The
+  // store choice MUST be uniform across every server unit in one program: the
+  // WRITE unit (a login page's `session.set`) mints a cookie the READ-only units'
+  // middleware must resolve, and it can only do so if BOTH emit the SAME durable
+  // path-keyed store (`__scrml_session_stores[_scrml_session_db_path]`). Computing
+  // this per-unit made the login page emit the durable store while every read-only
+  // page emitted a fresh in-memory Map on a differently-named global → readers
+  // never saw the minted session (SPEC §20.5: the READ middleware and the WRITE
+  // path SHALL consult the SAME durable store). The driver (codegen/index.ts)
+  // pre-scans ALL compilation units and stashes the program-wide verdict here; the
+  // per-unit fallback (`??`) preserves the legacy behavior for direct single-file
+  // callers (unit tests) that never set the flag.
+  const _programAnySessionWrite = (fileAST as any)._programAnySessionWrite;
+  const _anySessionWrite = (typeof _programAnySessionWrite === "boolean")
+    ? _programAnySessionWrite
+    : astUsesSessionWrite(fileAST);
   // §20.5 / §52 Fork-3 — a plain server `function` whose `?{}` reads
   // `@currentUser` needs the resolver exactly as a Pattern-C cell load does. This
   // was the missing third shape: without it the handler binds `_scrml_currentUser`
