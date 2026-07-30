@@ -1,4 +1,88 @@
 <!-- ============================================================= -->
+<!-- S299 WRAP (Peter/Windows) — prepended 2026-07-29.              -->
+<!-- S298 (Peter) + S297 (bryan/Peter) + S295/S296 + all prior UNCHANGED below. -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ⚠ SUCCESSOR to a still-in-flight S299-bryan (ASUS): if bryan wraps his -->
+<!--   S299, his hand-off prepend + delta-log will 3-way with this one (disjoint  -->
+<!--   footprint; hand-off.md hunk-only resolve, delta-log append-both). Standard.  -->
+<!-- ============================================================= -->
+
+# scrml — Session 299 (Peter · Windows) — WRAP
+
+**Date:** 2026-07-29. `/boot` Profile A. `main` at **`11bd0691`** (#275 merged), coherence 0/0 both repos.
+**One adopter HIGH landed (#262 → PR #275).** Successor to LIVE **S299-bryan** (ASUS, still in-flight —
+his board reads like a wrap but he continued past it and landed #273; no S299-bryan hand-off fold / delta
+entries yet). Disjoint footprint. Delta-log **[878]-[881]**. This carries the irreducible.
+
+## 🎯 WHAT LANDED — #262 `11bd0691` (PR #275)
+
+**`@form.isValid` as a submit guard fails closed and silently.** `if (!@f.isValid) return` in a
+`function` emitted `_scrml_reactive_get("f").isValid` — member access on the compound VALUE (field
+values only, no `isValid`) → `undefined` → `!undefined` → **returns on every call**; the form can
+never submit (submit fires, handler runs, preventDefault, returns; zero network, no error). The SAME
+surface in binding position (`disabled=!@f.isValid`) already read the correct dotted cell.
+
+**Root cause = Bug 61 (S140) recurring.** Its `emitMember` collapse of `@<compound>.<synthProp>` →
+dotted synth cell is gated on `ctx.synthCellKeys.has(dotted)`; that set was threaded into the
+binding/event-wiring emitters but **not into the contexts that emit `function` bodies**. The set was
+always correct (the binding path proved it holds `f.isValid`) — the two emitters didn't disagree by
+design, one just lacked the key set. Fix threads `ctx.synthCellKeys` into all three function-body
+paths: `scheduleStatements`→emitOpts (plain), the two CPS opts (failable/async), and `fnOpts`
+(`fn`-shorthand + return-typed — bypasses scheduleStatements). Covers compound + per-field, all 4
+synth props, every function-shaped body; S140 over-fire guard preserved (membership-gated).
+
+## 🧭 THE FINDINGS THAT OUTLAST
+
+- **The S239 adversarial pass caught a real gap in the FIRST cut — [[feedback-verify-the-bug-class-not-just-reported-instance]] AGAIN.** My first cut fixed plain + CPS bodies and passed the reported
+  repro + a 5-shape class probe green. The under-fire reviewer **proved** the `fn`-shorthand /
+  return-typed branch (`emitFnShortcutBody`, bypasses `scheduleStatements`) STILL leaked. A green gate
+  on the reported instance would have shipped incomplete. The over-fire reviewer separately confirmed
+  no regression (the S140 membership gate + byte-identical `collectSynthCellKeys`/`emit-synth-surface`
+  filters mean the set never authorizes an undeclared key). **Run the adversarial pass on EVERY codegen
+  fix — it is not ceremony.**
+- **Stayed in adopter lane.** #262's gap said "which emitter is canonical is a ruling" — but Bug 61
+  already canonicalized the dotted-cell form and the runtime confirms it; the fix is pure codegen
+  consistency (make expression match the already-working binding emit), no grammar/spec ruling.
+  [[feedback-stay-in-adopter-lane-not-grammar-decisions]] — this did NOT drift into bryan's lane.
+- **Reproduced the reviewer's finding before implementing its fix** ([[feedback-gap-report-fix-direction-can-be-wrong]] discipline) — the `fnOpts` gap was real, confirmed on the CLI first.
+
+## 🔴 THE NEXT PA'S PICKUP (Peter-lane)
+
+1. **#263** (adopter HIGH, open) — a cross-file module's exported `const` dropped from the client
+   bundle entirely (declared nowhere, absent from the export table, while fns closing over it DO cross)
+   → silent `ReferenceError`. emit-client / module-export-table. Disjoint from bryan's if=Phase2.
+2. **#264** (adopter HIGH, open) — on-mount server-fn call in ARGUMENT position not awaited + an earlier
+   server-call statement silently DROPPED (§13.2 async scope created-not-used). emit-server/on-mount —
+   **nearer bryan's recent emit-server work; check the board before picking.**
+3. **`g-synth-read-in-statement-bodied-on-mount-not-collapsed` (MED, NEW this session)** — the #262
+   residual; DISTINCT root cause (raw-string statement rewriter never reaches `emitMember`), needs its
+   own fix, not `synthCellKeys` threading.
+
+## ✅ GATE / HOUSEKEEPING
+
+- Cloud `gate` + `windows` GREEN on #275 (authority). `tracking`/`ai-review` red = documented flakes
+  (§64 serve-tool R26 + ai-review `tsconfig` infra abort), verified from logs. Full local
+  unit+integration+conformance: **21596 pass, zero new failures** vs baseline (6 baseline verified
+  identical on clean main; a 7th `F-BUILD-002` is a Windows `node --check` spawn-timeout flake — 7/7 in
+  isolation). Gap counts regen'd to machine-truth **HIGH 15 · MED 82 · LOW 38** (board's HIGH 17 was a
+  pre-regen session figure). FACTS + gap-counts `--check` green, rode #275.
+- **Worktrees:** none created; only main + persistent `scrml-pinned` (`9c950dfe`). Clean.
+- **Maps:** internal edits to existing `scheduling.ts`/`emit-functions.ts` (threaded an existing arg,
+  no new surface files) → **maps unchanged** (S286/S288/S297 precedent); `project-mapper` not run.
+- **Inbox:** none unread. **Committed a pre-existing untracked note** (`incoming/read/…1729…flogence…DONE…`)
+  for per-clone hygiene (processed/DONE long ago; was sitting untracked).
+- **Concurrency:** successor to LIVE S299-bryan; registered S299-peter board + updated it with the
+  landing (pushed). Only the WRAP was the deferred item — Peter directed it explicitly.
+
+## Tags
+#session-299-peter #adopter-262 #synth-read-function-body-member-access #bug-61-recurring
+#synthcellkeys-threading #fails-closed-silent-submit-guard #s239-caught-fnopts-gap-in-first-cut
+#verify-the-class #on-mount-statement-residual-filed #stayed-in-adopter-lane #successor-to-live-s299-bryan
+
+---
+
+
+<!-- ============================================================= -->
 <!-- S298 WRAP (Peter/Windows) — prepended 2026-07-29.              -->
 <!-- S297 (bryan) + S297 (Peter) + S295/S296 + all prior UNCHANGED below. -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->
