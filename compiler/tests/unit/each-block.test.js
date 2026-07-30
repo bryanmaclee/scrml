@@ -810,3 +810,114 @@ type Card:struct = { id: int }
     expect(clientJs).not.toContain('advance("Active")');
   });
 });
+
+// ---------------------------------------------------------------------------
+// g-class-attr-expr-not-lowered — an `<each>`-BODY `class:NAME=${expr}` whose
+// condition carries a scrml OPERATOR must be lowered, not shipped raw.
+//
+// Scope is narrower than the ledger title: `<each>`-body-only. The top-level
+// `class:` path already lowered correctly and is the reference implementation.
+//
+// Root cause was an asymmetry between two arms of ONE function ~200 lines apart
+// in emit-each.ts `renderTemplateAttrToJs`:
+//   class:     branch → `rewriteIterValueExpr`  — iter-scope rewrite ONLY
+//   value-attr branch → `lowerEachExpr`         — scope rewrite + OPERATOR lowering
+// So the IDENTICAL expression in the IDENTICAL `<each>` body compiled green as
+// `data-done=${@.done is some}` and failed as `class:done=${@.done is some}`:
+//   error [E-CODEGEN-INVALID-LOGIC]: Unexpected token
+//       ...ne", !!(_scrml_each_item.done is some)); }); con...
+//
+// Fails LOUD and CLOSED (no artifacts written), so the pin is: green compile +
+// the lowered form present + the raw operator absent. Controls below hold the
+// two directions the fix must NOT move: the top-level `class:` path and the
+// value-attribute arm that already worked.
+// ---------------------------------------------------------------------------
+describe("g-class-attr-expr-not-lowered — <each>-body class: operator lowering", () => {
+  const ROW_HEADER = `type Row:struct = { id: number, done: (not to timestamp) }
+<rows>: Row[] = []`;
+
+  test("`is some` in an <each>-body class: lowers (was E-CODEGEN-INVALID-LOGIC)", () => {
+    const src = `${ROW_HEADER}
+<ul>
+    <each in=@rows key=@.id>
+        <li class:done=\${@.done is some}>\${@.id}</li>
+    </each>
+</ul>`;
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "gcae-is-some");
+    const clientJs = foldChunkNamespacing(__cjRaw);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
+    // The §42 `is some` predicate is lowered to the presence check...
+    expect(clientJs).toMatch(/classList\.toggle\("done", !!\(.*!== null && .*!== undefined.*\)\)/);
+    // ...and the raw scrml operator does NOT reach the emitted JS. This is the
+    // exact byte sequence the parse gate choked on.
+    expect(clientJs).not.toMatch(/\bis\s+some\b/);
+  });
+
+  test("`is not` in an <each>-body class: lowers (the absence half of the family)", () => {
+    const src = `${ROW_HEADER}
+<ul>
+    <each in=@rows key=@.id>
+        <li class:pending=\${@.done is not}>\${@.id}</li>
+    </each>
+</ul>`;
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "gcae-is-not");
+    const clientJs = foldChunkNamespacing(__cjRaw);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
+    expect(clientJs).toMatch(/classList\.toggle\("pending", !!\(.*=== null \|\| .*=== undefined.*\)\)/);
+    expect(clientJs).not.toMatch(/\bis\s+not\b/);
+  });
+
+  test("the class: arm now matches the value-attr arm on the SAME expression (parity)", () => {
+    // The asymmetry made this pair disagree: `data-done` compiled, `class:done`
+    // did not. Both must now lower the predicate identically.
+    const src = `${ROW_HEADER}
+<ul>
+    <each in=@rows key=@.id>
+        <li class:done=\${@.done is some} data-done=\${@.done is some}>\${@.id}</li>
+    </each>
+</ul>`;
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "gcae-parity");
+    const clientJs = foldChunkNamespacing(__cjRaw);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
+    expect(clientJs).toMatch(/classList\.toggle\("done", !!\(.*!== null && .*!== undefined.*\)\)/);
+    expect(clientJs).toMatch(/setAttribute\("data-done", String\(.*!== null && .*!== undefined.*\)\)/);
+    expect(clientJs).not.toMatch(/\bis\s+some\b/);
+  });
+
+  test("REGRESSION — a top-level class: with the same predicate still lowers", () => {
+    // The top-level path was already correct and must not move. (Different
+    // emitter: the `_scrml_class_elem_*` / querySelector wiring, not the
+    // per-item factory.)
+    const src = `<stamp>: (not to timestamp) = not
+<div class:done=\${@stamp is some}>hello</div>
+<div class:pending=\${@stamp is not}>bye</div>`;
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "gcae-toplevel");
+    const clientJs = foldChunkNamespacing(__cjRaw);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
+    expect(clientJs).toMatch(/classList\.toggle\("done", !!\(.*!== null && .*!== undefined.*\)\)/);
+    expect(clientJs).toMatch(/classList\.toggle\("pending", !!\(.*=== null \|\| .*=== undefined.*\)\)/);
+    // The top-level path emits a source-echo provenance comment
+    // (`// class:done=@stamp is some`) which legitimately contains the raw
+    // operator text. Strip line comments so the negative assertion tests
+    // EXECUTABLE code only — the raw operator must not reach a code position.
+    const codeOnly = clientJs.replace(/^\s*\/\/.*$/gm, "");
+    expect(codeOnly).not.toMatch(/\bis\s+(?:some|not)\b/);
+  });
+
+  test("REGRESSION — an operator-FREE <each>-body class: is unchanged (additive)", () => {
+    // `lowerEachExpr` returns `rewriteIterValueExpr`'s result verbatim when no
+    // §42 predicate / bare `.Variant` is present, so the common case must stay
+    // exactly the plain iter-scope member read.
+    const src = `type Card:struct = { id: number, active: bool }
+<cards>: Card[] = []
+<ul>
+    <each in=@cards key=@.id>
+        <li class:on=\${@.active}>\${@.id}</li>
+    </each>
+</ul>`;
+    const { errors, clientJs: __cjRaw } = compileToOutputs(src, "gcae-plain");
+    const clientJs = foldChunkNamespacing(__cjRaw);
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toHaveLength(0);
+    expect(clientJs).toMatch(/classList\.toggle\("on", !!\(_scrml_each_item\.active\)\)/);
+  });
+});

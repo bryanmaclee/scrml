@@ -1097,6 +1097,22 @@ function emitUnary(node: UnaryExpr, ctx: EmitExprContext): string {
     if (unaryArgNeedsParens(node.argument)) {
       arg = `(${arg})`;
     }
+    // AWAIT IDEMPOTENCY — an `await` whose operand ALREADY serialized with a
+    // leading `await` must not stack a second one (`await await httpGet(…)`).
+    // The two awaits come from different owners and neither can see the other:
+    // this node is a SOURCE `await` (a user-written `async function` body — §19.9.8
+    // forbids it, but the stdlib modules still carry the shape, e.g.
+    // `stdlib/oauth/index.scrml` `export async function getUserInfo`), while the
+    // inner `await` was injected by a compiler auto-await surface (the client
+    // peer-await branch / the stdlib classifier) which sees only the CALL node and
+    // has no parent pointer to notice it is already an await operand.
+    //
+    // `await await p` is not a wrong-VALUE bug (an extra microtask tick, same
+    // result), so it ships green through the parse gate and every test — but it is
+    // unreadable emitted JS, and readability is a hard output requirement. Caught
+    // by an R26 artifact diff of `stdlib/oauth`, NOT by the suite. Textual, but on
+    // a form this emitter fully owns: `arg` is our own serialization one line up.
+    if (node.op === "await" && /^await\b/.test(arg)) return arg;
     // typeof, void, delete, await need a space before the operand
     const needsSpace = node.op === "typeof" || node.op === "void" ||
                        node.op === "delete" || node.op === "await";
