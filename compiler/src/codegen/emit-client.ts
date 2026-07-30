@@ -1,7 +1,7 @@
 import { SCRML_RUNTIME } from "../runtime-template.js";
 import { relative, basename } from "path";
 import { toPosix } from "../path-canonical.js";
-import { exprNodeContainsCall } from "../expression-parser.ts";
+import { exprNodeContainsCall, parseExprToNode, forEachIdentInExprNode } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
 import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies } from "./runtime-chunks.ts";
@@ -9,6 +9,8 @@ import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, type RequestBodyCell } from "./reactive-deps.ts";
 import { CGError } from "./errors.ts";
 import { escapeRegex } from "./utils.ts";
+import { getNodes, isServerOnlyNode } from "./collect.ts";
+import { emitLogicNode } from "./emit-logic.ts";
 import { rewriteCodeSegments } from "./code-segments.ts";
 import { scanClientEgress } from "./egress-field-scan.ts";
 import { emitFunctions } from "./emit-functions.ts";
@@ -206,6 +208,230 @@ function buildModuleRegistryFooter(
     `_scrml_modules[${JSON.stringify(key)}] = { ${pairs.join(", ")} };`,
     "",
   ];
+}
+
+/**
+ * GH #263 (adopter report) — emit a module-level `export const` / `export let`
+ * VALUE binding into the CLIENT bundle when client-reachable code closes over it.
+ *
+ * THE BUG. A cross-file `.scrml` module's exported top-level value const was
+ * DROPPED from that module's `.client.js` entirely — never declared, absent from
+ * the registry footer — while the exported `fn`s that CLOSE OVER it were still
+ * emitted client-side. The emitted client fn then referenced an undeclared
+ * binding (`return GREETING;` with no `const GREETING`), a silent runtime
+ * `ReferenceError` — zero compile errors, zero warnings, passes `node --check`.
+ *
+ * WHY. `export const X = …` parses to an `export-decl` node (exportKind:"const")
+ * with NO companion `const-decl` (unlike `export fn` → function-decl and
+ * `export type` → type-decl, both of which ARE synthesized). `emitLogicNode`
+ * has no `export-decl` case (falls to `default: return ""`), so the top-level
+ * logic walker (emit-reactive-wiring) emits nothing for it. A PLAIN (non-export)
+ * `const X` emits fine via that same walker — the divergence is purely the
+ * export-decl shape. Server-side the symmetric value already ships via the
+ * module-value-export path; the client had no equivalent.
+ *
+ * This is the direct CLIENT analogue of emit-server's D-5
+ * `emitReferencedModuleConstLines` (commit 88f9745e, GH #242): it ADDS a
+ * client-side declaration for a value binding client code already references —
+ * it moves nothing out of any other bundle.
+ *
+ * CONFIDENTIALITY (§14.8, non-regression). The gate is "referenced by the
+ * ALREADY-EMITTED client body" (`emittedLines`, which by the call site includes
+ * every emitted fn body). A const used ONLY by server code never appears in the
+ * client body — a `server fn` lowers to a fetch STUB on the client that does not
+ * name the const — so it is NOT emitted here. This is strictly MORE confidential
+ * than the pre-fix behaviour for export consts (which was: never emit), and it
+ * never widens what reaches the client.
+ *
+ * FAIL-CLOSED FILTERS (mirror of the D-5 server pass):
+ *   - markup-component consts (`export const Card = <div>…`) and `?{}`-init
+ *     consts are not runtime values — skipped by initializer shape.
+ *   - already declared in the emitted body — no double declaration.
+ *   - NOT referenced by the emitted client body — client-only reachability gate.
+ *   - the initializer's free identifiers must ALL resolve at client module scope
+ *     (an earlier-emitted export const, something already declared in the bundle,
+ *     or a host global). An unresolvable initializer is SKIPPED, not guessed —
+ *     emitting it would convert a call-time ReferenceError into a module-LOAD
+ *     crash (a strictly worse failure).
+ *
+ * DEFERRED. `export var` (routed to nothing — vanishingly rare at module scope)
+ * and non-literal-but-resolvable transitive chains beyond a single pass are not
+ * covered; they fail closed (skipped), never mis-emitted.
+ */
+function emitReferencedModuleExportConstLines(
+  ctx: CompileContext,
+  emittedLines: string[],
+): string[] {
+  const fileAST = ctx.fileAST as any;
+  const filePath: string = fileAST?.filePath ?? ctx.filePath ?? "";
+
+  // Collect top-level `export const` / `export let` VALUE bindings from logic
+  // bodies. `export var` is intentionally excluded (see DEFERRED above).
+  const candidates: Array<{ kind: "const" | "let"; name: string; init: string; span: any }> = [];
+  const walk = (nodeList: any[]): void => {
+    for (const node of (Array.isArray(nodeList) ? nodeList : [])) {
+      if (!node || typeof node !== "object") continue;
+      if (node.kind === "logic" && Array.isArray(node.body)) {
+        for (const stmt of node.body) {
+          if (
+            stmt && typeof stmt === "object" &&
+            stmt.kind === "export-decl" &&
+            (stmt.exportKind === "const" || stmt.exportKind === "let") &&
+            typeof stmt.exportedName === "string" && stmt.exportedName
+          ) {
+            const init = stripExportDeclInit(stmt.raw, stmt.exportKind, stmt.exportedName);
+            if (init != null) {
+              candidates.push({ kind: stmt.exportKind, name: stmt.exportedName, init, span: stmt.span });
+            }
+          }
+        }
+      }
+      if (Array.isArray(node.children)) walk(node.children);
+    }
+  };
+  walk(getNodes(fileAST));
+  if (candidates.length === 0) return [];
+
+  const assembledBody = emittedLines.join("\n");
+  const isDeclared = (name: string): boolean =>
+    new RegExp(
+      `^\\s*(?:export\\s+)?(?:async\\s+)?(?:function\\*?|const|let|var)\\s+${escapeRegex(name)}\\b`,
+      "m",
+    ).test(assembledBody);
+  const isReferenced = (name: string, body: string): boolean =>
+    new RegExp(`(?<![.$\\w])${escapeRegex(name)}(?![$\\w])`).test(body);
+
+  // Host globals a module-value initializer may legitimately reach for. Kept
+  // small on purpose — anything not here (and not another emitted export const)
+  // makes the candidate unresolvable and therefore skipped (the fail-closed
+  // direction). Mirror of the D-5 server set.
+  const HOST_GLOBALS = new Set<string>([
+    "Math", "JSON", "Date", "Object", "Array", "String", "Number", "Boolean",
+    "RegExp", "Map", "Set", "BigInt", "Symbol", "Infinity", "NaN", "globalThis",
+  ]);
+
+  // Parse each candidate once: initializer ExprNode + the free identifiers it
+  // reads. A candidate is `valid:false` (never emitted) when its init is markup /
+  // SQL / references a reactive `@cell` / fails to parse — all fail-closed.
+  interface Cand {
+    kind: "const" | "let";
+    name: string;
+    init: string;
+    initExpr: any;
+    freeIdents: Set<string>;
+    valid: boolean;
+  }
+  const byName = new Map<string, Cand>();
+  for (const c of candidates) {
+    if (byName.has(c.name)) continue; // first declaration wins (source order)
+    const initTrim = c.init.trim();
+    let valid = !(initTrim.startsWith("<") || initTrim.includes("?{"));
+    let initExpr: any = null;
+    const freeIdents = new Set<string>();
+    if (valid) {
+      try {
+        initExpr = parseExprToNode(c.init, filePath, (c.span?.start as number) ?? 0);
+      } catch {
+        valid = false;
+      }
+      if (!initExpr) valid = false;
+      if (valid) {
+        forEachIdentInExprNode(initExpr, (id: any) => {
+          const n: string = typeof id?.name === "string" ? id.name : "";
+          if (!n) return;
+          if (n.startsWith("@")) { valid = false; return; } // reactive cell — not client module scope
+          freeIdents.add(n);
+        });
+      }
+    }
+    byName.set(c.name, { kind: c.kind, name: c.name, init: c.init, initExpr, freeIdents, valid });
+  }
+
+  // CONFIDENTIALITY GATE + TRANSITIVE REACHABILITY. Seed with the export consts
+  // the emitted client body DIRECTLY references, then close over intra-candidate
+  // initializer references: if a reachable const's initializer reads another
+  // export const, that one is reachable too (its value already flows into a
+  // client-visible binding, so it is no less confidential). A const the client
+  // never reaches — directly or transitively — is never emitted.
+  const reachable = new Set<string>();
+  const queue: string[] = [];
+  for (const [name, cand] of byName) {
+    if (cand.valid && !isDeclared(name) && isReferenced(name, assembledBody)) {
+      reachable.add(name);
+      queue.push(name);
+    }
+  }
+  while (queue.length > 0) {
+    const cand = byName.get(queue.shift()!)!;
+    for (const dep of cand.freeIdents) {
+      if (byName.has(dep) && byName.get(dep)!.valid && !reachable.has(dep)) {
+        reachable.add(dep);
+        queue.push(dep);
+      }
+    }
+  }
+  if (reachable.size === 0) return [];
+
+  // Fixpoint emission in dependency order: repeatedly emit any reachable
+  // candidate not yet emitted whose free identifiers are ALL satisfied — a host
+  // global, already declared in the emitted body, or an already-emitted export
+  // const. This yields a topological order and resolves transitive const→const
+  // chains. Any reachable candidate still unemittable after fixpoint (an
+  // unresolvable free ident, or a const cycle) is SKIPPED fail-closed rather
+  // than emitting a declaration that would crash at module load.
+  const available = new Set<string>();
+  const emittedNames = new Set<string>();
+  const emitted: string[] = [];
+  let progress = true;
+  while (progress) {
+    progress = false;
+    for (const [name, cand] of byName) {
+      if (!reachable.has(name) || emittedNames.has(name)) continue;
+      let satisfied = true;
+      for (const dep of cand.freeIdents) {
+        if (dep === name) continue; // self-name (e.g. a recursive closure `() => X`) — the binding is in scope by call time
+        if (HOST_GLOBALS.has(dep) || isDeclared(dep) || available.has(dep)) continue;
+        satisfied = false;
+        break;
+      }
+      if (!satisfied) continue;
+      const code = emitLogicNode(
+        { kind: cand.kind === "const" ? "const-decl" : "let-decl", name, init: cand.init, initExpr: cand.initExpr },
+        { boundary: "client", insideFunctionBody: false, declaredNames: new Set<string>(available) },
+      );
+      emittedNames.add(name);
+      progress = true;
+      if (!code) continue;
+      emitted.push(code);
+      available.add(name);
+    }
+  }
+  if (emitted.length === 0) return [];
+  const out: string[] = [];
+  out.push("");
+  out.push("// --- module-level export values the client bundle closes over (GH #263) ---");
+  for (const l of emitted) out.push(l);
+  return out;
+}
+
+/**
+ * Strip the `export <kind> <name>` (+ optional `: Type`) prefix from an
+ * export-decl's raw text, returning the initializer source. Returns `null` when
+ * the raw does not match the simple `export const/let NAME = <init>` shape
+ * (fail-closed — the caller skips the candidate).
+ */
+function stripExportDeclInit(
+  raw: unknown,
+  kind: string,
+  name: string,
+): string | null {
+  if (typeof raw !== "string") return null;
+  const m = raw.match(
+    new RegExp(`^\\s*export\\s+${kind}\\s+${escapeRegex(name)}\\s*(?::[^=]*)?=\\s*([\\s\\S]+)$`),
+  );
+  if (!m) return null;
+  const init = m[1].trim();
+  return init.length > 0 ? init : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1882,6 +2108,15 @@ export function generateClientJs(ctx: CompileContext): string {
   // Emit fetch stubs, CPS wrappers, and client-boundary function bodies
   const { lines: fnLines, fnNameMap } = clientStage(ctx, "emit-functions", () => emitFunctions(ctx));
   for (const line of fnLines) lines.push(line);
+
+  // GH #263 — emit module-level `export const`/`export let` VALUE bindings that
+  // client-reachable code (the fn bodies emitted just above) closes over. Runs
+  // BEFORE the registry footer so a directly-imported export const, once
+  // declared here, is picked up by the footer's `declaredBinding` probe and
+  // registered too. Gated on reference-in-emitted-body (§14.8 confidentiality) —
+  // a server-only const is not named by any client fn body and so stays out.
+  const moduleExportConstLines = clientStage(ctx, "emit-module-export-consts", () => emitReferencedModuleExportConstLines(ctx, lines));
+  for (const line of moduleExportConstLines) lines.push(line);
 
   // known-gaps-#6 (S152) — cross-file module registry footer (Approach B,
   // §21.3). Emitted AFTER all fn/enum/const decls so every exported binding is
