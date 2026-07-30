@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 15 |
-| MED | 84 |
+| MED | 85 |
 | LOW | 38 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -4745,3 +4745,17 @@ The scheduled `cloud-maps` workflow keeps `.claude/maps/` current automatically.
 **Blocker on confirming it:** `show_full_output: false` suppresses the agent's actual error text. **Next step is one command** — flip it to `true` (or add `--debug` to `claude_args`) and fire a single `workflow_dispatch`. Not done at S297: `.github/` was outside the dispatched agent's write footprint, and a CI-credential change is an operator decision.
 
 **Why this is worth fixing rather than retiring the job:** it feeds the pa-base §5 losing-battle threshold question from the wrong side — the maps discipline has never actually run with working automation, so a "maps aren't load-bearing" verdict measured under a silently-broken refresh would be measuring the outage, not the tool. — `NEW S297 (bryan); MED; open`
+
+<!-- @gap id=g-node-check-oracle-cjs-parses-esm-artifacts sev=MED status=resolved -->
+**Five `node --check` harnesses parsed scrml's ESM artifacts under CommonJS rules, so a clean checkout failed the pre-commit gate for a reason no change caused.** The harnesses wrote emitted `.js` into `mkdtempSync(join(tmpdir(), …))`. `node --check` picks the module kind from the *nearest* `package.json`, and there is none above `os.tmpdir()` — so an artifact containing `export const __ri_route_endpoint_3 = …` was parsed as CJS and reported `SyntaxError: Unexpected token 'export'`. The contradiction was visible in one harness's own header, which asserted **both** "`export const X = Object.freeze(…)`" **and** "node --check clean".
+
+**The oracle was the wrong half, not the emit.** scrml's runtime target is Bun (SPEC §1), which executes ESM `.js` without a `type` declaration; `node --check` was only ever a cheap syntax oracle. No `package.json` or `.mjs` is emitted into `dist/`, so nothing about the artifact is wrong for the supported target. Fixed by writing `{"type":"module"}` into each harness's temp root (covers `<name>.dist/` subdirs — node walks up), preserving the real emitted filenames rather than renaming to `.mjs`, which several assertions derive from the compiler's own output paths. **Bite proven** per pa-base §8's unproven-gate rule: valid ESM → exit 0, `export const bad = ;` → exit 1.
+
+Sites: `compiler/tests/integration/endpoint-conformance-integration.test.js` · `…/export-enum-library-emit.test.js` · `compiler/tests/unit/endpoint-private-arm-reachability.test.js` · `…/endpoint-decl-codegen.test.js`. Class is the S276/S296 **"the oracle inherits the implementation's assumption"** shape, and the §8 **non-deterministic-input** gate shape (red for reasons no change caused → gets bypassed → gets deleted). — `NEW S301 (bryan); MED; resolved`
+
+<!-- @gap id=g-selfhost-tab-scrml-cg-meta-block-unexpected-token sev=MED status=open -->
+**`compiler/self-host/tab.scrml` does not compile on main — stage CG rejects a §22 `^{ … }` meta-block.** `bun compiler/bin/scrml.js compile compiler/self-host/tab.scrml -o compiler/self-host/dist/` fails with a codegen error (`Unexpected token`, `--> compiler/self-host/tab.scrml:142:16`) pointing at `let payload = ^{ JSON.stringify({ name, type… }` — the compiler's own "this is a compiler defect (codegen produced malformed output)" message, so it is self-classified as a defect rather than a source error. No artifacts written.
+
+**Found via a harness, not a dogfood run:** `self-host-smoke.test.js` §C asserted `compiler/self-host/dist/tab.js` exists. That path is **gitignored** (`.gitignore:2:dist/`), so it is never tracked and a fresh clone cannot have it, while every *sibling* test in the same describe block already skipped when absent — one test diverged from its own block and hard-failed the pre-commit gate on a clean checkout. Harness aligned to the file's own skip-and-say-how precedent at S301; **the compile defect itself is untouched and is what this gap tracks.**
+
+**Scope note:** `compiler/self-host/` is the OLD self-host line — B4, DEFERRED post-v1.0.0 per S66; the live second implementation is `compiler/self-host-v2/`. So this is not V1-blocking, but it does mean the §C tokenizer-parity assertions (`tokenizeBlock`/`tokenizeAttributes`/…) have been **silently skipping**, i.e. parity is unverified rather than verified — a coverage claim that does not hold. Decide alongside the deferred-self-host disposition: fix the CG defect, or retire §C with the line. — `NEW S301 (bryan); MED; open`

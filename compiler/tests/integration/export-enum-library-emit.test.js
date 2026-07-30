@@ -32,6 +32,12 @@ let TMP;
 
 beforeAll(() => {
   TMP = mkdtempSync(join(tmpdir(), "enum-lib-emit-"));
+  // scrml's library mode emits ES modules (`export const X = Object.freeze(…)` — asserted below).
+  // `node --check` picks the module kind from the nearest package.json, and there is none above
+  // os.tmpdir(), so it would parse an ESM artifact under CommonJS rules and report `export` as a
+  // SyntaxError. Declare the module type the artifacts are actually emitted in. Covers the
+  // `<name>.dist/` subdirs too — node walks up from the file to find this.
+  writeFileSync(join(TMP, "package.json"), '{"type":"module"}\n');
 });
 
 afterAll(() => {
