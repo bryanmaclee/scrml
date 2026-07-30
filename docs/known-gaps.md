@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 14 |
+| HIGH | 15 |
 | MED | 85 |
 | LOW | 38 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -4841,3 +4841,26 @@ Sites: `compiler/tests/integration/endpoint-conformance-integration.test.js` · 
 **Provenance — this is why item 3 is last.** The `if=` Phase-2 SCOPING doc's OQ-1 ruled SSR "IN, as unit 2 with its own acceptance gate, not a follow-on that can slip," reasoning that client and SSR "cannot safely diverge" or they produce a hydration mismatch. **That premise was falsified at S301:** SSR renders no gated content at all, so there was nothing to diverge from. bryan then ruled **(a) verify-only** for unit 2 (a regression guard folded into unit 1's gate as item 7) and filed this arc — because building `if=` SSR support would have shipped a capability with no consumer. **Keep the ordering when this is picked up; re-deriving it costs a session and the site count overstates the value of item 3 by construction.**
 
 **Widening caution (pa-base §8):** items 1–2 are `newly-accepting` on the SSR path — SSR would begin evaluating expressions server-side that it currently declines, which introduces a hydration-mismatch surface that does not exist today. §52.15.5's auth-scoped auto-omit exists precisely because server and client values diverge; expect to need the same discipline per widening, and treat each item as its own gate rather than one bulk relaxation. *(Classification above is regex-based over crudely-extracted blocks — counts ±; the direction is not sensitive to that.)* — `NEW S301 (bryan); MED; open`
+
+<!-- @gap id=g-session-store-split-across-compilation-units sev=HIGH status=open -->
+**A login mints a session no other page can resolve — `session` WRITE and READ get DIFFERENT stores, on differently-named globals.** Adopter-reported (GH **#282**, DanceCard), verified against `46feaaa2` and `5bdf1158`, scrml `0.7.1`. **PA-triaged S301; not yet dispatched.**
+
+`compiler/src/codegen/emit-server.ts` picks the session store on `_anySessionWrite`, which is computed **per COMPILATION UNIT, not per program**. In a composed multi-page app the login page holds the only `session.set(…)`, so the unit that WRITES gets the durable SQLite store while every unit that only READS gets a fresh in-memory `Map` — and the two cache globals **differ by name**, `__scrml_session_stores` (plural, path-keyed) vs `__scrml_session_store` (singular Map), so they cannot coincide even within one process. The `else` branch's own comment says *"no `session.set`/`.destroy` in this app"* — **"in this app" IS the scope error**, stated in the source.
+
+The session is minted and persisted correctly; every reader looks for it in an empty Map. `session.isAuth` is false forever, `session.userId` is `null`, and there is **no error, no warning, and a clean compile** — the authed page's `POST /_scrml/__ri_route_loadMe_3` resolves `null` and bounces back to `/login`. Every individual layer looks correct.
+
+**Rule-4 gate — outcome (1), sentence FOUND.** SPEC **§20.5** already forbids this, in the durable-store paragraph: *"The READ middleware and the WRITE path SHALL consult the SAME durable store (**a login that mints a cookie the middleware cannot resolve is a defect**)."* So this is a **bug fix / conformance restoration, NOT a ruling** — the compiler is not doing what §20.5 already says.
+
+**Why it went unhit until now, and why that is the alarming part.** A single-file app puts write and read in ONE unit, so the predicate picks durable for both. Reproducing it needs the login on one page and the authed page on another — **the ordinary shape of any app with a login screen, and the shape composed-MPA output produces by default.** Our corpus is single-file-heavy, which is exactly the structural blindness that let it live.
+
+**[[g-synth-read-in-statement-bodied-on-mount-not-collapsed]] / GH #262 was MASKING it.** While the `@form.isValid` submit guard never passed, control never reached the session write, so the store split downstream was unreachable and untested. It surfaced within hours of #262 closing (`3a295dff`). This is the **sibling-fix-unmask** shape our own verify-before-claim doctrine names (pa-base §8, "a symptom inadvertently closed — or here, revealed — by a sibling fix"); it is the second instance this session.
+
+**Fix direction — PA recommends (1), and the choice has a consequence.** The reporter offers two:
+1. **Hoist `_anySessionWrite` to the whole compiled program** rather than the unit. Matches what the `else` comment already claims, and **also fixes the adjacent twin below**.
+2. Emit the durable store whenever the unit references `session.*` at all — narrower, sufficient for the store split alone.
+
+**(1).** Option (2) leaves the twin live and thereby converts it into **a silent 1-hour logout the moment the store split is fixed** — trading one silent failure for another, which is the precise trade this project has refused repeatedly.
+
+**Adjacent twin, same root shape, lower severity (folded here deliberately, per the reporter):** `<program sessionExpiry="7d">` reaches only the program unit, so the login unit that actually issues the `Set-Cookie` uses the 1h default and the declaration is **inert with no warning** — `app.server.js` `_scrml_session_max_age = 604800` vs `login.server.js` `= 3600`. §20.5 anticipates the mechanism (*"a login page carries no `sessionExpiry=` … so the 1h default governs there"*). Resolved by (1); left live and made dangerous by (2).
+
+**Lane note:** adopter bugs are Peter's standing footprint, but `emit-server.ts` is also the surface of his open **#264**, and he is currently live on **#263** (`emit-client.ts`). Partition before dispatching. — `NEW S301 (bryan, from adopter GH #282); HIGH; open`
