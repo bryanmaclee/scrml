@@ -2,6 +2,75 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S301 (2026-07-30) — `if=` Phase 2 finished: one lowering, and it is the §17.1 one
+
+`if=` had compiled to **two different lowerings with different DOM semantics**, chosen silently at
+compile time by `isCleanIfNode`: `<template>` + marker mount/unmount when the subtree contained
+nothing dynamic, and `data-scrml-bind-if` → `el.style.display` for everything else. A single `${…}`
+interpolation flipped it from *removes* to *hides*. §17.1 (`SPEC.md:10914`) says "When `expr`
+evaluates to false, the element is NOT rendered. **It does not exist in the DOM**"; §17.2 (`:11195`)
+states the contrast outright — "`show=` hides, `if=` removes". Measured on the flagship app: **101 of
+149 `if=` sites (68%) took the non-conformant path**, 76 of them because of one interpolation.
+
+Every `if=` on a lowercase tag now mounts/unmounts. Flagship corpus, HTML only:
+`data-scrml-bind-if` **101 → 0**, `scrml-if-marker` **48 → 149**. `show=` is untouched.
+
+**⚠️ ADOPTER-VISIBLE DOM CHANGES — read before upgrading.**
+
+1. **A false `if=` element is no longer in the DOM at all.** It used to be present with
+   `style="display:none"`. `document.querySelector` on it now returns `null`, CSS structural
+   selectors (`:nth-child`, `:first-child`, sibling combinators `+`/`~`) see different neighbours,
+   `.children.length` differs, and a form control inside a false `if=` no longer submits. Measured on
+   our corpus: 0 structural-pseudo-class hits, 1 sibling combinator, 1 form control — but that is OUR
+   corpus, and the check is a heuristic. Audit CSS that targets siblings of a conditional element.
+2. **`<div data-scrml-chain-branch="…" style="display:none">` is GONE.** `if=`/`else-if=`/`else`
+   chains previously wrapped a wiring-bearing branch in that per-branch div and toggled its display;
+   wiring-free branches already had no wrapper. Every branch now emits `<template>` + marker and only
+   the active one exists. **Adopter CSS or JS selecting `[data-scrml-chain-branch]` will silently
+   stop matching.** The chain's own `<div data-scrml-if-chain="…">` wrapper is unchanged. This also
+   fixed a second live defect: on the old path a chain left **all** branches in the DOM at once,
+   which §17.1.1 ("only one span exists in the DOM at any time") forbids.
+3. **`if=` + `style=(expr)` is no longer `E-ATTR-WRITER-CONFLICT`.** That rule existed because `if=`
+   wrote `el.style.display`; it writes no style now, so the pair is legal. `show=` + `style=(expr)`
+   still conflicts.
+4. **Pre-hydration**: content behind a false `if=` no longer ships visible in the initial HTML. It
+   ships as inert `<template>` content, so it never renders — with JS disabled or a failed bundle it
+   stays absent rather than appearing. (`if=` is still **not** a confidentiality boundary — that is
+   `protect=` / §14.8.9 / `<auth>`. The static skeleton is still in the HTML bytes.)
+
+**Runtime got smaller for pages that do not use `if=`.** The §17.1 mount runtime moved out of the
+always-included `scope` chunk into a new tree-shakeable `ifmount` chunk (double-gated: a pre-emit AST
+walk on `if`/`else-if`/`else`/`if-chain`, plus a post-emit `_scrml_find_if_marker(` scan). An
+`if=`-free page ships ~1.9 KB gzip less. This was forced, not cosmetic: the SPA shared-runtime budget
+had 185 bytes of headroom.
+
+**Also fixed on the way through**, each found by executing the emitted bundle rather than reading it:
+a mount-path condition lowering that dropped `synthCellKeys`/`derivedNames` (the GH #262/#275 defect
+class, latent in a second location, which would have broken `if=@form.isValid`); `bind:`/`class:`/
+`ref=` wiring never re-binding for a mounted subtree (it was emitted boot-only and `document`-scoped
+— silent typed-input loss); an unguarded `ref=` write that blanked every other `ref=` on the page on
+any mount; `<each>` inside an `if=` leaking one live effect per row per toggle cycle; and a teardown
+race where a subtree's `${…}` effects could run after the predicate went false but before the
+controller unmounted them (three `TypeError: null is not an object` per flip).
+
+5. **`if=` inside a `<match>` arm / `<engine>` state child is now a COMPILE ERROR**,
+   `E-IF-IN-DISPATCHED-ARM` (§34). Arm bodies are injected as `innerHTML` on dispatch and wired by a
+   per-arm wire fn that cannot see into the `<template>` a §17.1 `if=` emits, so the gated subtree
+   would render empty or never appear **with no runtime error**. Refusing beats emitting that.
+   Measured migration: **zero** across 2163 corpus files. **This restriction is TEMPORARY** — the fix
+   deletes the guard rather than amending it ([[g-if-mount-inside-dispatched-arm-body]]). Workaround:
+   express the condition as arm structure (a variant for the gated state). Hoisting the `if=` to wrap
+   the whole `<match>`/`<engine>` is **not** a workaround — see the known issue below.
+
+**Also fixed: a `<match>`/`<engine>` INSIDE an `if=` now renders.** The inverse nesting of the guarded
+case, and a regression caught during this arc: the dispatcher resolves its mount once, at module
+level, and returned early when the mount was inside an `if=` template, with nothing re-dispatching
+when the subtree later mounted — the block stayed empty forever, no diagnostic. One instance in our
+own flagship app (`examples/23-trucking-dispatch/pages/driver/hos.scrml`, an `<engine>` under
+`if=(@loaded && @currentDriver)`). Fixed by a dispatcher remount registry mirroring the `<each>`
+machinery from S153; the acceptance test boots that page and asserts the badge renders, is
+server-authoritative, stays live, and never duplicates.
+
 ## S299 (2026-07-29/30) — bryan · ASUS-Vivobook — Trigger 3 wired, a CE node-id collision root-caused, and the adversarial gate catching four leaks in our own landing
 
 Eight PRs. The session's substance was §12.2 Trigger 3 — spec'd since forever, ruled at S280, never

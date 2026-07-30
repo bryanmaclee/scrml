@@ -1,0 +1,19 @@
+{
+  "id": "control-flow-if-chain-inactive-branches-absent",
+  "description": "§17.1.1 if/else-if/else chain — ONLY the active branch exists in the DOM. Each branch here carries a ${@label} interpolation, which is the shape that used to force the per-branch display-toggle fallback (`<div data-scrml-chain-branch=\"K\" style=\"display:none\">`): a hidden wrapper EXISTS in the DOM, so it violated §17.1.1's own sentence. @step seeds 1, so #one is present with its interpolation rendered and #two / #rest have count 0. A click advances to step 2 and the presence moves: #two present, #one and #rest count 0 — proving both that the outgoing branch is REMOVED (not re-hidden) and that the incoming branch's interpolation is bound at mount time.",
+  "language-version": "1.0",
+  "spec": "§17.1.1",
+  "rationale": "§17.1.1: \"only one span exists in the DOM at any time\" — EXISTS, not \"is visible\". A display-toggled branch exists while hidden, so a chain that hid its non-active branches was non-conformant for the same reason a display-toggled standalone `if=` was (§17.1 / §17.2). Both were decided by one predicate (isCleanIfNode, reached for chains through isCleanChainBranch); pinning the chain here stops the two constructs drifting apart again, which is observable to adopter CSS (`:nth-child`, sibling combinators) and to `.children` counts.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#go" }],
+    "state": { "step": 2 },
+    "domAnchored": [
+      { "selector": "#two", "count": 1 },
+      { "selector": "#two", "text": "TWO: alpha" },
+      { "selector": "#one", "count": 0 },
+      { "selector": "#rest", "count": 0 }
+    ]
+  }
+}

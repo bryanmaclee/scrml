@@ -27,7 +27,14 @@
  *                 compiler/src/runtime-validators.js
  *   derived       _scrml_derived_declare/subscribe/get, flush
  *   lift          _scrml_lift
- *   scope         _scrml_cleanup_registry, _scrml_register_cleanup, _scrml_destroy_scope
+ *   scope         _scrml_cleanup_registry, _scrml_register_cleanup, _scrml_destroy_scope,
+ *                 _scrml_active_mount_scope (the if= mount scope FLAG stays here —
+ *                 _scrml_region_track reads it on every page; the mount FUNCTIONS
+ *                 are in 'ifmount')
+ *   ifmount       §17.1 if= mount/unmount — _scrml_create_scope,
+ *                 _scrml_find_if_marker, _scrml_mount_template,
+ *                 _scrml_unmount_scope, _scrml_self_scope, _scrml_mount_wire.
+ *                 Tree-shaken on a page with no `if=` / `if-chain`.
  *   timers        _scrml_timer_start/stop/pause/resume/stop_scope_timers
  *   animation     _scrml_animation_frame, _scrml_cancel_animation_frames, animationFrame
  *   reconciliation _scrml_reconcile_list, _scrml_lis
@@ -118,6 +125,7 @@ export const RUNTIME_CHUNK_ORDER = [
   'derived',
   'lift',
   'scope',
+  'ifmount',
   'timers',
   'animation',
   'reconciliation',
@@ -193,6 +201,17 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   validators:     "§55.1 Validator predicate runtime catalog (chunk: 'validators')",
   derived:        '§6.6 Derived reactive runtime',
   scope:          '§6.7.3 Scope-aware cleanup registry',
+  // §17.1 if= mount/unmount runtime — `_scrml_create_scope`,
+  // `_scrml_find_if_marker`, `_scrml_mount_template`, `_scrml_unmount_scope`,
+  // `_scrml_self_scope`, `_scrml_mount_wire`. Gated because a page with no `if=`
+  // and no `<match>`/`if-chain` never references any of them, and this block was
+  // previously inside the ALWAYS-included `scope` chunk — every if=-free page paid
+  // for it. Activated by `detectRuntimeChunks` (an `if`/`else-if`/`else` attribute
+  // or an `if-chain` node) AND by the POST-EMIT `_scrml_find_if_marker(` gate,
+  // which every emitted controller — standalone AND chain, mount-mode AND
+  // display-mode — contains. `_scrml_active_mount_scope` deliberately stays in
+  // `scope`: `_scrml_region_track` reads it on every page.
+  ifmount:        "§17.1 if= mount/unmount runtime (chunk: 'ifmount')",
   timers:         '§6.7.5 / §6.7.6 Timer and Poll runtime',
   animation:      '§6.7.7 animationFrame runtime',
   // Section marker covers BOTH §40.9.7 tier-1 idle-prefetch (A-4.3) AND

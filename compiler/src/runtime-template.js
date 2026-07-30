@@ -1349,20 +1349,33 @@ function _scrml_destroy_scope(scopeId) {
   _scrml_cancel_animation_frames(scopeId);
 }
 
+// The if= mount scope currently being wired, or null outside a mount. Lives in
+// the always-included 'scope' chunk (not 'ifmount') because _scrml_region_track
+// and _scrml_mount_track read it and must never touch an undeclared binding on an
+// if=-free page.
+let _scrml_active_mount_scope = null;
+
+/**
+ * Register an effect disposer against the if= mount currently being wired, if
+ * any. OUTSIDE a mount this is a no-op returning its argument, so a page with no
+ * \`if=\` behaves exactly as before. Used by the bind:/class:/ref= wiring, which is
+ * re-run scoped to a freshly mounted subtree and must not leak an effect per
+ * toggle. Distinct from _scrml_region_track: that one ALSO has an outlet-region
+ * fallback, which would make a soft nav dispose boot-time bind effects that are
+ * never re-created.
+ */
+function _scrml_mount_track(dispose) {
+  if (_scrml_active_mount_scope) _scrml_register_cleanup(dispose, _scrml_active_mount_scope);
+  return dispose;
+}
+
 // ---------------------------------------------------------------------------
-// §6.7.2 / §17.1 if= mount/unmount runtime (Phase 2 of if/show split)
+// §17.1 if= mount/unmount runtime (chunk: 'ifmount')
 //
-// _scrml_create_scope:        fresh scopeId for a mount cycle
-// _scrml_mount_template:      clone <template id="..."> content, insert before
-//                             a marker comment, return the mounted root node
-// _scrml_unmount_scope:       destroy scope (LIFO cleanup, stop timers, cancel
-//                             rAF) AND remove the mounted root from the DOM
-//
-// On each false → true transition of an if= condition, a fresh scope is
-// created and the template is cloned and mounted. On each true → false,
-// the scope is destroyed and the DOM nodes are removed. This satisfies
-// SPEC §6.7.2 (scope-as-lifecycle-boundary, depth-first teardown, LIFO
-// cleanup, remount re-runs bare expressions).
+// On each false -> true transition of an if= condition a fresh scope is created
+// and the <template> is cloned and mounted; on true -> false the scope is
+// destroyed and the nodes are removed. Satisfies §6.7.2 (scope-as-lifecycle-
+// boundary, depth-first teardown, LIFO cleanup, remount re-runs bare exprs).
 // ---------------------------------------------------------------------------
 
 let _scrml_scope_counter = 0;
@@ -1383,7 +1396,13 @@ function _scrml_find_if_marker(markerId, scope) {
   // M1 Phase 2/3 — search within scope (default document.body). A soft-nav
   // rehydrate passes the swapped outlet root so a re-invoked if= controller finds
   // the NEW region's marker, never a same-id marker elsewhere.
-  const rootNode = (scope && (scope.nodeType === 1 || scope.nodeType === 11)) ? scope : document.body;
+  //
+  // Phase 2 (dirty path): the scope may be a SELF-INCLUSIVE wrapper produced by
+  // _scrml_self_scope (see _scrml_mount_wire). Unwrap to the real node — a
+  // TreeWalker needs an actual Node, and the wrapper only exists so that
+  // \`querySelector\` also matches the wrapped element itself.
+  const unwrapped = (scope && scope._scrml_scope_node) ? scope._scrml_scope_node : scope;
+  const rootNode = (unwrapped && (unwrapped.nodeType === 1 || unwrapped.nodeType === 11)) ? unwrapped : document.body;
   if (!rootNode) return null;
   const needle = "scrml-if-marker:" + markerId;
   const walker = document.createTreeWalker(rootNode, NodeFilter.SHOW_COMMENT);
@@ -1431,6 +1450,111 @@ function _scrml_mount_template(markerId, templateId, scope) {
 function _scrml_unmount_scope(root, scopeId) {
   if (scopeId) _scrml_destroy_scope(scopeId);
   if (root && root.parentNode) root.parentNode.removeChild(root);
+}
+
+/**
+ * Wrap an element as a SELF-INCLUSIVE query scope: querySelector /
+ * querySelectorAll consider the element itself as well as its descendants.
+ * Needed because the emitted wiring blocks say \`(root || document).querySelector\`
+ * and the wiring that a mounted if= subtree carries is frequently ON the if=
+ * element itself. Carries \`_scrml_scope_node\` so helpers that need a real Node
+ * (_scrml_find_if_marker) unwrap, and \`nodeType\` so element-vs-document tests pass.
+ */
+function _scrml_self_scope(el) {
+  if (!el || el.nodeType !== 1) return el;
+  return {
+    _scrml_scope_node: el,
+    nodeType: el.nodeType,
+    querySelector: function (sel) {
+      if (typeof el.matches === "function" && el.matches(sel)) return el;
+      return el.querySelector(sel);
+    },
+    querySelectorAll: function (sel) {
+      const out = [];
+      if (typeof el.matches === "function" && el.matches(sel)) out.push(el);
+      const rest = el.querySelectorAll(sel);
+      for (let i = 0; i < rest.length; i++) out.push(rest[i]);
+      return out;
+    },
+  };
+}
+
+/**
+ * §18.0.1 / §51.0.B — dispatched-mount remount registry.
+ *
+ * A \`<match>\` block-form / \`<engine>\` dispatcher resolves its mount ONCE, with a
+ * module-level \`document.querySelector('[data-scrml-*-mount="id"]')\`, and returns
+ * early when it is absent. Inside a §17.1 \`if=\` subtree the mount starts life in a
+ * \`<template>\`, so that lookup finds nothing — and nothing re-dispatched when the
+ * subtree later mounted, leaving the block permanently empty with no diagnostic.
+ *
+ * Same shape S153 solved for \`<each>\` (\`_scrml_each_renderers\` +
+ * \`_scrml_remount_each\`), and solved the same way: each dispatcher registers a
+ * thunk that re-dispatches on the CURRENT variant, and a freshly mounted subtree
+ * is walked for mount anchors. Re-dispatch is safe to repeat because the
+ * dispatcher disposes the previous arm's wiring before re-rendering — it tears
+ * down and rebuilds rather than layering, so no handler double-attaches and no
+ * per-dispatch wiring leaks.
+ */
+const _scrml_dispatch_remounts = {};
+
+function _scrml_register_dispatch_remount(mountId, fn) {
+  if (mountId) _scrml_dispatch_remounts[mountId] = fn;
+}
+
+/**
+ * Re-dispatch every registered mount anchor inside (or AT) \`root\`.
+ *
+ * SELF-INCLUSIVE by construction: \`<div if=@x data-scrml-engine-mount="…">\` puts
+ * the anchor ON the mounted root, and \`querySelectorAll\` never matches its own
+ * root — the same blind spot that made \`_scrml_self_scope\` necessary for the
+ * mount-time re-bind.
+ */
+function _scrml_remount_dispatch(root) {
+  if (!root) return;
+  const sel = "[data-scrml-match-mount],[data-scrml-engine-mount]";
+  const seen = {};
+  const fire = function (el) {
+    if (!el || typeof el.getAttribute !== "function") return;
+    const id = el.getAttribute("data-scrml-match-mount") || el.getAttribute("data-scrml-engine-mount");
+    if (!id || seen[id]) return;
+    seen[id] = true;
+    const fn = _scrml_dispatch_remounts[id];
+    if (typeof fn === "function") fn();
+  };
+  if (typeof root.matches === "function" && root.matches(sel)) fire(root);
+  if (typeof root.querySelectorAll === "function") {
+    const found = root.querySelectorAll(sel);
+    for (let i = 0; i < found.length; i++) fire(found[i]);
+  }
+}
+
+/**
+ * Bind a freshly mounted if= subtree: re-invoke the emitting file's own
+ * root-scoped wiring against the mounted node, then re-render any <each> fences
+ * it contains. While _scrml_active_mount_scope is set, effect disposers routed
+ * through _scrml_region_track become §6.7.3 cleanups of THIS mount's scope, so
+ * _scrml_unmount_scope drains them LIFO and a toggle cycle leaks nothing. Nesting
+ * is depth-first: an inner if= saves/restores the outer scope, so the outer
+ * unmount owns the inner teardown.
+ *
+ * @param {Element|null} root — the node _scrml_mount_template returned
+ * @param {string} scopeId — this mount cycle's scope (owns the teardown)
+ * @param {function} rewire — the emitting file's own _scrml_nav_rewire(root)
+ */
+function _scrml_mount_wire(root, scopeId, rewire) {
+  if (!root) return;
+  const prevScope = _scrml_active_mount_scope;
+  _scrml_active_mount_scope = scopeId || null;
+  try {
+    if (typeof rewire === "function") rewire(_scrml_self_scope(root));
+    if (typeof _scrml_remount_each === "function") _scrml_remount_each(root);
+    _scrml_remount_dispatch(root);
+  } catch (e) {
+    if (typeof console !== "undefined") console.error("scrml if= mount wiring error:", e);
+  } finally {
+    _scrml_active_mount_scope = prevScope;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -4077,6 +4201,12 @@ var _scrml_region_cleanups = [];
 // the closest() check and are left untracked so they persist. Returns the
 // disposer unchanged.
 function _scrml_region_track(el, dispose) {
+  // Inside an if= mount pass the disposer belongs to THAT mount's scope, not the
+  // outlet region — the subtree is removed on the next false transition.
+  if (_scrml_active_mount_scope) {
+    _scrml_register_cleanup(dispose, _scrml_active_mount_scope);
+    return dispose;
+  }
   if (el && typeof el.closest === "function" && el.closest("[data-scrml-outlet]")) {
     _scrml_region_cleanups.push(dispose);
   }

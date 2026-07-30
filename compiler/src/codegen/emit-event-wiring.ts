@@ -492,6 +492,39 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     return null;
   }
 
+  // §17.1 Phase 2 — lower an `if=` MOUNT/UNMOUNT predicate to its JS condition
+  // string. Delegates to `computeDisplayToggleCondition` so the mount controller
+  // and the display toggle lower a condition IDENTICALLY.
+  //
+  // Before Phase 2 these two were separate code paths and had silently diverged:
+  // the mount controller called `emitExprField(node, raw, { mode: "client" })`
+  // with NEITHER `derivedNames` NOR `synthCellKeys`, so `if=@form.isValid` on a
+  // mount-path element lowered to a member read on the compound VALUE
+  // (`undefined` → falsy → never mounts) instead of the dotted synth cell — the
+  // GH #262 / #275 defect class, in a second location. Phase 2 routes ~2/3 more
+  // `if=` sites through this controller, so the two lowerings must be one.
+  //
+  // The one thing the mount path needs that the display path does not: §6.7.7
+  // `if=<#id>.loading` lowers (TAB) to varName `_scrml_input_<id>_` with a
+  // dotPath; when `<id>` names a `<request>`, that must route to the reactive
+  // `_scrml_request_<id>` object (the deep-reactive Proxy `_scrml_effect`
+  // auto-tracks), NOT a nonexistent reactive cell named `_scrml_input_<id>_`.
+  function computeMountToggleCondition(
+    b: { condExpr?: string; condExprNode?: any; refs?: string[]; varName?: string; dotPath?: string },
+  ): string | undefined {
+    if (!b.condExpr && b.varName) {
+      const condVarName = b.varName;
+      const reqRefMatch = condVarName.match(/^_scrml_input_([A-Za-z_$][A-Za-z0-9_$]*)_$/);
+      if (reqRefMatch && requestIds.has(reqRefMatch[1])) {
+        const reqId = reqRefMatch[1];
+        const tail = b.dotPath ? b.dotPath.slice(condVarName.length + 1) : "";
+        return tail ? `(_scrml_request_${reqId}.${tail})` : `(_scrml_request_${reqId})`;
+      }
+    }
+    const lowered = computeDisplayToggleCondition(b);
+    return lowered ? lowered.conditionCode : undefined;
+  }
+
   // ss21 item-3 (g-if-chain-branch-display-null-interp) — lower a SINGLE
   // if-chain branch condition to its JS condCode string. Extracted verbatim
   // from the §17.1.1 chain cascade below so the cascade's `_next` selection AND
@@ -1395,47 +1428,36 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       }
 
       // -----------------------------------------------------------------
-      // Phase 2b: if= mount/unmount (clean-subtree path)
+      // §17.1 if= mount/unmount controller.
       //
       // The HTML emitter produced a <template id="TID"> wrapping the
       // would-be element + a <!--scrml-if-marker:MID--> placeholder
       // comment. The controller below watches the condition and calls
       // _scrml_mount_template / _scrml_unmount_scope on each transition.
+      //
+      // Phase 2b landed this for CLEAN subtrees only (nothing dynamic inside);
+      // Phase 2 (S301) routes EVERY `if=` here, so the mount step now also
+      // re-binds the subtree's own wiring — `_scrml_mount_wire` re-invokes this
+      // file's `_scrml_nav_rewire` scoped to the just-mounted node, and hands it
+      // the mount scope so the effects it creates are torn down on unmount. A
+      // clean subtree produces no bindings, so its wiring pass is a no-op and
+      // the emitted shape stays a superset of Phase 2b's.
       // -----------------------------------------------------------------
       if (binding.isMountToggle && binding.templateId && binding.markerId) {
         const tid = binding.templateId;
         const mid = binding.markerId;
         const suffix = (placeholderId || mid).replace(/[^a-zA-Z0-9_]/g, "_");
 
-        // Build the condition expression (same shape as the display-toggle path).
-        let conditionCode: string | undefined;
-        if (binding.condExpr) {
-          const compiled = emitExprField(binding.condExprNode, binding.condExpr, { mode: "client" });
-          conditionCode = `(${compiled})`;
-        } else if (binding.varName) {
-          const condVarName = binding.varName;
-          // §6.7.7 — `if=<#id>.loading` lowers (TAB) to varName `_scrml_input_<id>_`
-          // with dotPath `_scrml_input_<id>_.loading`. When <id> names a `<request>`,
-          // route to the reactive `_scrml_request_<id>` object (the deep-reactive
-          // Proxy the `_scrml_effect` controller auto-tracks), NOT a nonexistent
-          // reactive cell named `_scrml_input_<id>_`. Non-request ids fall through
-          // to the §36 input-state registry below (handled by the dotPath form on a
-          // genuine input ref is itself non-reactive by design — §36.6 — but the
-          // mount toggle never fires for those since the registry value is stable).
-          const reqRefMatch = condVarName.match(/^_scrml_input_([A-Za-z_$][A-Za-z0-9_$]*)_$/);
-          if (reqRefMatch && requestIds.has(reqRefMatch[1])) {
-            const reqId = reqRefMatch[1];
-            const tail = binding.dotPath ? binding.dotPath.slice(condVarName.length + 1) : "";
-            conditionCode = tail ? `(_scrml_request_${reqId}.${tail})` : `(_scrml_request_${reqId})`;
-          } else {
-            const encodedCondVar = encodingCtx && encodingCtx.enabled ? encodingCtx.encode(condVarName) : condVarName;
-            if (binding.dotPath) {
-              conditionCode = `(_scrml_reactive_get(${JSON.stringify(encodedCondVar)}).${binding.dotPath.slice(condVarName.length + 1)})`;
-            } else {
-              conditionCode = `_scrml_reactive_get(${JSON.stringify(encodedCondVar)})`;
-            }
-          }
-        }
+        // Condition lowering is SHARED with the display toggle — see
+        // computeMountToggleCondition for why that sharing is load-bearing.
+        const conditionCode: string | undefined = computeMountToggleCondition(binding);
+
+        // §17.4 transitions on an `if=`. Under display-toggle these animated a
+        // visibility flip; under mount/unmount the enter class goes on the freshly
+        // mounted node and the exit class delays the REMOVAL until animationend,
+        // so `if=` still removes (§17.1) and still animates on the way out.
+        const enterClass = binding.transitionEnter ? `"scrml-enter-${binding.transitionEnter}"` : null;
+        const exitClass = binding.transitionExit ? `"scrml-exit-${binding.transitionExit}"` : null;
 
         if (conditionCode) {
           // M1 Phase 3 (navigate-wave1b) — the if= mount/unmount controller is a
@@ -1455,15 +1477,73 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           reactiveRewire.push(`        var _scrml_ifa_${suffix} = _scrml_ifm_${suffix}.parentElement || null;`);
           reactiveRewire.push(`        let _scrml_mr_${suffix} = null;`);
           reactiveRewire.push(`        let _scrml_ms_${suffix} = null;`);
+          if (exitClass) {
+            // At most ONE outgoing node may be in flight — see _scrml_if_unmount_.
+            reactiveRewire.push(`        let _scrml_pend_${suffix} = null;`);
+            reactiveRewire.push(`        function _scrml_if_endexit_${suffix}() {`);
+            reactiveRewire.push(`          if (_scrml_pend_${suffix} === null) return;`);
+            reactiveRewire.push(`          const _p = _scrml_pend_${suffix};`);
+            reactiveRewire.push(`          _scrml_pend_${suffix} = null;`);
+            reactiveRewire.push(`          if (_p.timer !== null && typeof clearTimeout === "function") clearTimeout(_p.timer);`);
+            reactiveRewire.push(`          _scrml_unmount_scope(_p.node, _p.scope);`);
+            reactiveRewire.push(`        }`);
+          }
           reactiveRewire.push(`        function _scrml_if_mount_${suffix}() {`);
+          if (exitClass) {
+            reactiveRewire.push(`          _scrml_if_endexit_${suffix}();`);
+          }
           reactiveRewire.push(`          _scrml_ms_${suffix} = _scrml_create_scope();`);
           reactiveRewire.push(`          _scrml_mr_${suffix} = _scrml_mount_template(${JSON.stringify(mid)}, ${JSON.stringify(tid)}, (root || document));`);
+          // Bind the mounted subtree: its listeners, `${…}` effects, reactive
+          // attrs, nested if= controllers and <each> renderers were emitted as
+          // root-scoped blocks in _scrml_nav_rewire and matched nothing while the
+          // subtree sat inside its inert <template>.
+          reactiveRewire.push(`          if (_scrml_mr_${suffix} && typeof _scrml_mount_wire === "function") _scrml_mount_wire(_scrml_mr_${suffix}, _scrml_ms_${suffix}, _scrml_if_rewire);`);
+          if (enterClass) {
+            reactiveRewire.push(`          if (_scrml_mr_${suffix}) {`);
+            reactiveRewire.push(`            const _scrml_en_${suffix} = _scrml_mr_${suffix};`);
+            reactiveRewire.push(`            _scrml_en_${suffix}.classList.add(${enterClass});`);
+            reactiveRewire.push(`            _scrml_en_${suffix}.addEventListener("animationend", function _scrml_ae() { _scrml_en_${suffix}.classList.remove(${enterClass}); _scrml_en_${suffix}.removeEventListener("animationend", _scrml_ae); }, { once: true });`);
+            reactiveRewire.push(`          }`);
+          }
           reactiveRewire.push(`        }`);
           reactiveRewire.push(`        function _scrml_if_unmount_${suffix}() {`);
           reactiveRewire.push(`          if (_scrml_mr_${suffix} !== null) {`);
-          reactiveRewire.push(`            _scrml_unmount_scope(_scrml_mr_${suffix}, _scrml_ms_${suffix});`);
-          reactiveRewire.push(`            _scrml_mr_${suffix} = null;`);
-          reactiveRewire.push(`            _scrml_ms_${suffix} = null;`);
+          if (exitClass) {
+            // §17.4 exit transition, with the two failure modes a naive
+            // "defer the removal to animationend" has, both closed:
+            //
+            //   STRANDING. Detaching `_mr_`/`_ms_` lets a re-true transition mount
+            //   a fresh node while the old one is still animating out. Without a
+            //   single-pending-exit slot, false->true->false at speed leaves N
+            //   copies on screen simultaneously. `_scrml_if_endexit_` finalises any
+            //   in-flight exit before EITHER a new exit or a new mount, so at most
+            //   one outgoing node exists at a time.
+            //
+            //   NEVER REMOVED. If `animationend` never fires — the exit class
+            //   matches no animation because an adopter overrode the CSS, or the
+            //   element is display:none, or the tab was backgrounded — the node
+            //   stays in the DOM FOREVER and VISIBLE, which violates §17.1
+            //   outright ("It does not exist in the DOM"). The display lowering
+            //   this replaced had the same reliance but had already set
+            //   display:none, so the failure was invisible. A backstop timer at
+            //   2x the longest injected transition (300ms, runtime-template.js
+            //   :3535-3544) guarantees removal; `animationend` still wins the race
+            //   in the normal case and clears the timer.
+            reactiveRewire.push(`            _scrml_if_endexit_${suffix}();`);
+            reactiveRewire.push(`            const _scrml_ex_${suffix} = _scrml_mr_${suffix};`);
+            reactiveRewire.push(`            const _scrml_exs_${suffix} = _scrml_ms_${suffix};`);
+            reactiveRewire.push(`            _scrml_mr_${suffix} = null;`);
+            reactiveRewire.push(`            _scrml_ms_${suffix} = null;`);
+            reactiveRewire.push(`            _scrml_ex_${suffix}.classList.add(${exitClass});`);
+            reactiveRewire.push(`            _scrml_pend_${suffix} = { node: _scrml_ex_${suffix}, scope: _scrml_exs_${suffix}, timer: null };`);
+            reactiveRewire.push(`            _scrml_ex_${suffix}.addEventListener("animationend", function _scrml_ae() { _scrml_ex_${suffix}.removeEventListener("animationend", _scrml_ae); _scrml_if_endexit_${suffix}(); }, { once: true });`);
+            reactiveRewire.push(`            if (typeof setTimeout === "function") _scrml_pend_${suffix}.timer = setTimeout(_scrml_if_endexit_${suffix}, 600);`);
+          } else {
+            reactiveRewire.push(`            _scrml_unmount_scope(_scrml_mr_${suffix}, _scrml_ms_${suffix});`);
+            reactiveRewire.push(`            _scrml_mr_${suffix} = null;`);
+            reactiveRewire.push(`            _scrml_ms_${suffix} = null;`);
+          }
           reactiveRewire.push(`          }`);
           reactiveRewire.push(`        }`);
           reactiveRewire.push(`        if (${conditionCode}) _scrml_if_mount_${suffix}();`);
@@ -1474,7 +1554,8 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           reactiveRewire.push(`            if (_scrml_mr_${suffix} !== null) _scrml_if_unmount_${suffix}();`);
           reactiveRewire.push(`          }`);
           reactiveRewire.push(`        });`);
-          reactiveRewire.push(`        if (typeof _scrml_region_track === "function") _scrml_region_track(_scrml_ifa_${suffix}, function() { _scrml_if_unmount_${suffix}(); _scrml_ifd_${suffix}(); });`);
+          const drainExit = exitClass ? ` _scrml_if_endexit_${suffix}();` : "";
+          reactiveRewire.push(`        if (typeof _scrml_region_track === "function") _scrml_region_track(_scrml_ifa_${suffix}, function() { _scrml_if_unmount_${suffix}();${drainExit} _scrml_ifd_${suffix}(); });`);
           reactiveRewire.push(`      }`);
           reactiveRewire.push(`    }`);
         }
@@ -1562,11 +1643,16 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         continue;
       }
 
-      // Conditional display (if=) — toggle element visibility
-      // Visibility toggle (show=) — same display-toggle codegen, different selector
-      // With optional transition:fade/slide/fly, in:fade, out:slide directives
-      // Phase 1 (2026-04-29): both flags route to display-toggle. Phase 2 will
-      // split isConditionalDisplay (if=) off to mount/unmount codegen.
+      // Visibility toggle (show=) — §17.2 display-toggle codegen, with optional
+      // transition:fade/slide/fly, in:fade, out:slide directives.
+      //
+      // Phase 1 (2026-04-29) routed BOTH `if=` and `show=` here. Phase 2 finished
+      // at S301: `isConditionalDisplay` (`if=`) now goes to the §17.1 mount/unmount
+      // controller above in every case, so this block is `show=`'s. The
+      // `isConditionalDisplay` limb is retained ONLY for the residual `if=` shapes
+      // the mount gate declines — a CAPITAL-initial component tag, whose mount
+      // lifecycle its own emission path owns. Do NOT re-widen it: `show=` hides,
+      // `if=` removes (§17.2, SPEC.md:11195), and that is the whole distinction.
       if (binding.isConditionalDisplay || binding.isVisibilityToggle) {
         const hasTransition = binding.transitionEnter || binding.transitionExit;
         const dataAttr = binding.isVisibilityToggle ? "data-scrml-bind-show" : "data-scrml-bind-if";
@@ -2001,6 +2087,10 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         if (branch.branchMode === "mount") {
           reactiveRewire.push(`              _scrml_chain_${branchSlug}_scope = _scrml_create_scope();`);
           reactiveRewire.push(`              _scrml_chain_${branchSlug}_root = _scrml_mount_template(${JSON.stringify(branch.markerId)}, ${JSON.stringify(branch.templateId)}, (root || document));`);
+          // §17.1.1 Phase 2 — a chain branch may now carry wiring (events, `${…}`,
+          // bind:, a nested if=, an `<each>`), so the branch needs the same
+          // mount-time rebind + scoped teardown the standalone `if=` gets.
+          reactiveRewire.push(`              if (_scrml_chain_${branchSlug}_root && typeof _scrml_mount_wire === "function") _scrml_mount_wire(_scrml_chain_${branchSlug}_root, _scrml_chain_${branchSlug}_scope, _scrml_if_rewire);`);
         } else {
           reactiveRewire.push(`              if (_scrml_chain_${branchSlug}_wrapper) _scrml_chain_${branchSlug}_wrapper.style.display = "";`);
         }
@@ -2050,6 +2140,16 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     lines.push("  }");
     lines.push("  _scrml_nav_rewire(document);");
     lines.push('  if (typeof _scrml_register_rehydrator === "function") _scrml_register_rehydrator(_scrml_nav_rewire);');
+    // §17.1 — everything an `if=` subtree needs re-bound on mount. TWO root-scoped
+    // wiring passes exist per file and a mount needs both: `_scrml_nav_rewire`
+    // (non-delegable handlers, `${…}` display effects, reactive attrs, nested
+    // conditional controllers) and `_scrml_bind_rewire` (ref= / bind: / class:,
+    // emitted upstream by emit-bindings and NOT a soft-nav rehydrator). The
+    // `typeof` guard covers a file with no bind directives at all.
+    lines.push("  function _scrml_if_rewire(root) {");
+    lines.push("    _scrml_nav_rewire(root);");
+    lines.push('    if (typeof _scrml_bind_rewire === "function") _scrml_bind_rewire(root);');
+    lines.push("  }");
   }
 
   // Close `function _scrml_boot()` + the boot dispatch + the IIFE (navigate-wave1c

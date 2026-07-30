@@ -134,11 +134,18 @@ describe("TodoMVC E2E Browser Test", () => {
     expect(input.getAttribute("placeholder")).toBe("What needs to be done?");
   });
 
-  // §10 Filters section present
-  test("filters section has All/Active/Completed links", () => {
-    const filters = document.querySelector(".filters");
-    expect(filters).not.toBeNull();
-    const links = filters.querySelectorAll("a");
-    expect(links.length).toBeGreaterThanOrEqual(3);
+  // §10 Filters section — §17.1 Phase 2 (S301). The filters live inside
+  // `<footer class="footer" if=@todos.length>`, and this suite loads the page with
+  // zero todos, so per §17.1 the footer (and everything in it) is NOT in the DOM.
+  // The markup is still SHIPPED — as `<template>` content, asserted in §2 against
+  // the HTML text — so the structural claim is unchanged; only its DOM presence
+  // is now conditional, which is what `if=` means.
+  test("filters section is absent from the DOM while the list is empty (§17.1)", () => {
+    expect(document.querySelectorAll(".filters").length).toBe(0);
+    // …and its markup is present in the shipped HTML, inside the if= template.
+    expect(html).toContain('class="filters"');
+    expect(html).toContain('href="#/active"');
+    expect(html).toContain('href="#/completed"');
+    expect(html).not.toContain("data-scrml-bind-if");
   });
 });

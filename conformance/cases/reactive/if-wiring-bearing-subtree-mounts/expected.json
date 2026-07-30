@@ -1,0 +1,21 @@
+{
+  "id": "reactive-if-wiring-bearing-subtree-mounts",
+  "description": "§17.1 the PRESENT half for a wiring-bearing if= subtree, and the part absence alone cannot prove: after the flip the subtree must not only exist, its OWN wiring must be live. A click flips @open false->true; #panel mounts, the ${@label} interpolation renders \"alpha\" (so the descendant display effect was bound at mount time, not at boot when the subtree was inert <template> content), and typing into the bind:value input writes @typed (so the two-way binding was re-bound too — that wiring is emitted once at file scope against a document that cannot see into a <template>, and would otherwise be permanently dead for a mounted subtree).",
+  "language-version": "1.0",
+  "spec": "§17.1",
+  "rationale": "§17.1 a true if= renders the element. §5.4 bind:value is two-way on a form control. Under mount/unmount the subtree's wiring is created per mount cycle rather than once at boot, so this case is the one that fails if the mount path forgets to re-bind: absence tests pass either way, and an emit-shape test cannot tell a bound listener from an unbound one.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [
+      { "click": "#toggle" },
+      { "input": "#field", "value": "typed-after-mount" }
+    ],
+    "state": { "open": true, "typed": "typed-after-mount" },
+    "domAnchored": [
+      { "selector": "#panel", "count": 1 },
+      { "selector": "#lbl", "count": 1, "text": "alpha" },
+      { "selector": "#field", "count": 1, "value": "typed-after-mount" }
+    ]
+  }
+}

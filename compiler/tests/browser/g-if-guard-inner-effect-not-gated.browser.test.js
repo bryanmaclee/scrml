@@ -1,28 +1,29 @@
 /**
- * g-if-guard-inner-effect-not-gated.browser.test.js — ss20 item-1 (HIGH).
+ * g-if-guard-inner-effect-not-gated.browser.test.js — ss20 item-1 (HIGH),
+ * SUPERSEDED IN MECHANISM by §17.1 if= Phase 2 (S301); the CONTRACT it defends is
+ * unchanged and still asserted here.
  *
- * Bug (g-if-guard-inner-effect-not-gated): an `if=(@cell is some)` element that
- * falls through to the DISPLAY-TOGGLE path (non-clean subtree — it has reactive
- * `${@cell.field}` interpolation children) correctly toggles `style.display`
- * while `@cell` is null, BUT the inner interpolation effects for `${@cell.field}`
- * were emitted UNGATED and fired on mount with `@cell === null` →
- * `null.batch_number` TypeError crashed the whole mount.
+ * ORIGINAL BUG. An `if=(@cell is some)` element whose subtree carried
+ * `${@cell.field}` interpolations fell through to the DISPLAY-TOGGLE path: the
+ * element stayed in the DOM with `style.display = "none"`, and its inner
+ * interpolation effects fired on mount with `@cell === null` →
+ * `null.batch_number` TypeError, crashing the whole mount.
  *
- * Fix (emit-html.ts + emit-event-wiring.ts): emit-html pushes the enclosing
- * `if=`'s guard fields onto an `ifGuardStack` while walking the display-toggle
- * subtree and stamps the top of that stack onto each descendant interpolation
- * LogicBinding as `ifGuard`. emit-event-wiring lowers that guard via the SAME
- * shared `computeDisplayToggleCondition` helper the toggle uses (lockstep) and
- * gates the inner effect on it: the initial render is `if (guard) {…}` and the
- * effect body short-circuits `if (!(guard)) return;`. The guard reads its own
- * reactive cell INSIDE the effect, so a false→true flip re-runs the effect (deps
- * are re-tracked each run) and renders the real values.
+ * ORIGINAL FIX (ss20). emit-html pushed the enclosing `if=`'s predicate onto an
+ * `ifGuardStack` and stamped it on each descendant interpolation binding as
+ * `ifGuard`; emit-event-wiring gated the inner effect on it.
+ *
+ * WHAT CHANGED. Phase 2 removed the display-toggle path for `if=` entirely: a
+ * false `if=` subtree is not in the DOM (§17.1, SPEC.md:10914), so there is no
+ * element to hide and NO inner effect to gate — the crash window is closed
+ * STRUCTURALLY rather than by a predicate guard. This file therefore asserts the
+ * contract (no crash while the cell is null; correct render on every flip)
+ * against the mount/unmount shape. The `ifGuard` machinery itself stays live for
+ * §17.1.1 chain branches that lower to display mode, which is a separate arc.
  *
  * Scope guards verified here:
- *   - `show=` (Vue v-show) is NEVER gated — its inner effects keep running even
- *     while the element is hidden (regression assertion).
- *   - The clean-subtree mount/unmount path is untouched (it never emits inner
- *     effects while absent — out of scope; not exercised here).
+ *   - `show=` (Vue v-show) is NEVER gated and NEVER removed — its element stays
+ *     in the DOM, hidden, with its inner effects still running (§17.2).
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
@@ -81,21 +82,31 @@ describe("g-if-guard-inner-effect §1 — codegen gates inner effects on the tog
     expect(compileCase().errors).toEqual([]);
   });
 
-  test("each guarded inner effect short-circuits on the SAME predicate as the toggle (lockstep)", () => {
-    const clientJs = foldChunkNamespacing(compileCase().clientJs);
-    // The display-toggle predicate for `@cell is some`.
-    const toggle = /el\.style\.display = \(\(_scrml_reactive_get\("cell"\) !== null && _scrml_reactive_get\("cell"\) !== undefined\)\) \? "" : "none";/;
-    expect(toggle.test(clientJs)).toBe(true);
-    // Each cell interpolation effect is gated with `if (!(<same predicate>)) return;`.
+  test("the predicate drives MOUNT/UNMOUNT, and the inner effects keep the lockstep guard", () => {
+    const { clientJs: rawJs, html } = compileCase();
+    const clientJs = foldChunkNamespacing(rawJs);
+    // Same `@cell is some` lowering, now driving mount/unmount instead of display.
+    expect(clientJs).toMatch(/if \(\(\(_scrml_reactive_get\("cell"\) !== null && _scrml_reactive_get\("cell"\) !== undefined\)\)\) _scrml_if_mount_/);
+    expect(clientJs).toContain("_scrml_mount_template");
+    // The display lowering is GONE from the `if=` path.
+    expect(clientJs).not.toMatch(/el\.style\.display = \(\(_scrml_reactive_get\("cell"\)/);
+    // The `if=` element is NOT in the shipped HTML — it is template content.
+    expect(html).not.toContain("data-scrml-bind-if");
+    expect(html).toMatch(/<template id="[^"]+"><div id="guarded"/);
+    // AND the ss20 guard is STILL emitted on every descendant interpolation, with
+    // the identical predicate. Absence alone is not sufficient: on a true->false
+    // flip the descendant effects and the controller effect are all live
+    // subscribers of `@cell`, and a descendant can run before the controller
+    // unmounts it — i.e. predicate already false, node still attached. Measured
+    // without the guard: three `TypeError: null is not an object` effect errors
+    // per flip. Guard and toggle share ONE lowering, so they cannot drift.
     for (const field of ["batch_number", "recipe_name"]) {
       const re = new RegExp(
         `_scrml_effect\\(function\\(\\) \\{ if \\(!\\(\\(\\(_scrml_reactive_get\\("cell"\\) !== null && _scrml_reactive_get\\("cell"\\) !== undefined\\)\\)\\)\\) return; _scrml_render_value\\(el, _scrml_reactive_get\\("cell"\\)\\.${field}\\);`,
       );
       expect(re.test(clientJs)).toBe(true);
     }
-    // The initial (non-effect) render is also gated so it never reads null.field.
-    expect(/if \(\(\(_scrml_reactive_get\("cell"\) !== null && _scrml_reactive_get\("cell"\) !== undefined\)\)\) \{ _scrml_render_value\(el, _scrml_reactive_get\("cell"\)\.batch_number\); \}/.test(clientJs)).toBe(true);
-    // Nested chain is gated as a unit (guard protects the whole `.meta.deep` walk).
+    // The nested chain is guarded as a unit (the whole `.meta.deep` walk).
     expect(/if \(!\(.*\)\) return; _scrml_render_value\(el, _scrml_reactive_get\("cell"\)\.meta\.deep\);/.test(clientJs)).toBe(true);
   });
 
@@ -149,18 +160,19 @@ describe("g-if-guard-inner-effect §2 — runtime: no crash on null mount, rende
     expect(crashErrs).toEqual([]);
   });
 
-  test("(2) inner content is empty while @cell is null, and the div is hidden", () => {
+  test("(2) while @cell is null the whole subtree is ABSENT from the DOM (§17.1)", () => {
     mount();
-    expect(guardedSpan(0).textContent).toBe("");
-    expect(guardedSpan(1).textContent).toBe("");
-    expect(guardedSpan(2).textContent).toBe("");
-    expect(document.querySelector("#guarded").style.display).toBe("none");
+    // Strictly stronger than the pre-Phase-2 assertion (hidden div + empty spans):
+    // there is no element and no interpolation slot at all, so nothing can read
+    // `null.field` in the first place.
+    expect(document.querySelectorAll("#guarded").length).toBe(0);
+    expect(document.querySelectorAll("#guarded [data-scrml-logic]").length).toBe(0);
   });
 
   test("(3) setting @cell to a real object renders all (incl. nested) field values", () => {
     mount();
     globalThis.__set__("cell", { batch_number: 7, recipe_name: "Gouda", meta: { deep: "DEEP" } });
-    expect(document.querySelector("#guarded").style.display).toBe("");
+    expect(document.querySelectorAll("#guarded").length).toBe(1);
     expect(guardedSpan(0).textContent).toBe("7");
     expect(guardedSpan(1).textContent).toBe("Gouda");
     expect(guardedSpan(2).textContent).toBe("DEEP");
@@ -179,7 +191,7 @@ describe("g-if-guard-inner-effect §2 — runtime: no crash on null mount, rende
     console.error = origErr;
     expect(threw).toBeNull();
     expect(errs.filter((e) => /TypeError|Cannot read|of null|of undefined/i.test(e))).toEqual([]);
-    expect(document.querySelector("#guarded").style.display).toBe("none");
+    expect(document.querySelectorAll("#guarded").length).toBe(0);
   });
 
   test("(adversarial) null→obj→null→obj flip-flop re-renders each time, no crash", () => {
@@ -190,10 +202,10 @@ describe("g-if-guard-inner-effect §2 — runtime: no crash on null mount, rende
     globalThis.__set__("cell", { batch_number: 1, recipe_name: "A", meta: { deep: "d1" } });
     expect(guardedSpan(0).textContent).toBe("1");
     globalThis.__set__("cell", null);
-    expect(document.querySelector("#guarded").style.display).toBe("none");
+    expect(document.querySelectorAll("#guarded").length).toBe(0);
     globalThis.__set__("cell", { batch_number: 2, recipe_name: "B", meta: { deep: "d2" } });
     console.error = origErr;
-    expect(document.querySelector("#guarded").style.display).toBe("");
+    expect(document.querySelectorAll("#guarded").length).toBe(1);
     expect(guardedSpan(0).textContent).toBe("2");
     expect(guardedSpan(1).textContent).toBe("B");
     expect(guardedSpan(2).textContent).toBe("d2");

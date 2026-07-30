@@ -1389,7 +1389,17 @@ function renderTemplateChildToJs(
     // below). _scrml_resolve_item already exists in runtime-template.js — no runtime
     // change. Null/mismatched ctx (defensive) emits the byte-identical S212 shape.
     const _outerCtx = currentEachReconcileCtx();
-    lines.push(`${indent}_scrml_effect(() => {`);
+    // §17.1 — a per-item effect must be owned by the enclosing if= mount, or an
+    // <each> inside an if= leaks ONE LIVE EFFECT PER ROW PER TOGGLE CYCLE:
+    // `_scrml_mount_wire` calls `_scrml_remount_each`, which re-invokes the
+    // renderer and re-creates these, while `_scrml_unmount_scope` drains nothing
+    // for them (they were bare `_scrml_effect(...)` — no region-track, no cleanup
+    // registration). Measured over 0-4 open/close cycles before this wrap:
+    // 1 item -> 1,2,3,4,5 · 2 items -> 1,3,5,7,9 · 5 items -> 1,6,11,16,21. Each
+    // leaked effect retains its detached row node and re-runs on every data
+    // change. `_scrml_mount_track` is the IDENTITY outside a mount, so an <each>
+    // on a page with no if= registers nothing and behaves exactly as before.
+    lines.push(`${indent}_scrml_mount_track(_scrml_effect(() => {`);
     if (_outerCtx && _outerCtx.iterVar === iterVarName) {
       lines.push(`${indent}  let ${_outerCtx.iterVar} = _scrml_resolve_item(${_outerCtx.mountVar}, ${_outerCtx.keyVar});`);
       lines.push(`${indent}  if (${_outerCtx.iterVar} === null) return;`);
@@ -1401,7 +1411,7 @@ function renderTemplateChildToJs(
     for (const l of emitEachReconcileLines(innerNode, innerIterVar, innerIdxName, innerMountVar, innerItemsVar, `${indent}  `, engineCtx)) {
       lines.push(l);
     }
-    lines.push(`${indent}});`);
+    lines.push(`${indent}}));`);
     return;
   }
 
@@ -2484,7 +2494,17 @@ function maybeWrapEachPerItemEffect(bodyLines: string[], iterVarName: string, in
   const ctx = currentEachReconcileCtx();
   if (!ctx || ctx.iterVar !== iterVarName) return bodyLines;
   const out: string[] = [];
-  out.push(`${indent}_scrml_effect(() => {`);
+  // §17.1 — a per-item effect must be owned by the enclosing if= mount, or an
+  // <each> inside an if= leaks ONE LIVE EFFECT PER ROW PER TOGGLE CYCLE:
+  // `_scrml_mount_wire` calls `_scrml_remount_each`, which re-invokes the
+  // renderer and re-creates these, while `_scrml_unmount_scope` drains nothing
+  // for them (they were bare `_scrml_effect(...)` — no region-track, no cleanup
+  // registration). Measured over 0-4 open/close cycles before this wrap:
+  // 1 item -> 1,2,3,4,5 · 2 items -> 1,3,5,7,9 · 5 items -> 1,6,11,16,21. Each
+  // leaked effect retains its detached row node and re-runs on every data
+  // change. `_scrml_mount_track` is the IDENTITY outside a mount, so an <each>
+  // on a page with no if= registers nothing and behaves exactly as before.
+  out.push(`${indent}_scrml_mount_track(_scrml_effect(() => {`);
   out.push(`${indent}  let ${ctx.iterVar} = _scrml_resolve_item(${ctx.mountVar}, ${ctx.keyVar});`);
   out.push(`${indent}  if (${ctx.iterVar} === null) return;`);
   for (const l of emitDestructureBindingLines(ctx.destructure, ctx.iterVar, `${indent}  `)) {
@@ -2497,7 +2517,7 @@ function maybeWrapEachPerItemEffect(bodyLines: string[], iterVarName: string, in
   // Re-indent body lines +2 so the wrapped statement nests cleanly inside the
   // effect (the caller passes them at the binding's own indent).
   for (const l of bodyLines) out.push("  " + l);
-  out.push(`${indent}});`);
+  out.push(`${indent}}));`);
   return out;
 }
 
@@ -3084,12 +3104,22 @@ export function emitNestedEachFromMarkup(
   // enclosing-scope source (`row.cells`, no `@cell`) tracks no reactive dep and
   // the effect simply runs once (byte-equivalent behavior to the pre-fix IIFE).
   // The empty-guard `return` short-circuits only this effect callback.
-  lines.push(`${indent}_scrml_effect(() => {`);
+  // §17.1 — a per-item effect must be owned by the enclosing if= mount, or an
+  // <each> inside an if= leaks ONE LIVE EFFECT PER ROW PER TOGGLE CYCLE:
+  // `_scrml_mount_wire` calls `_scrml_remount_each`, which re-invokes the
+  // renderer and re-creates these, while `_scrml_unmount_scope` drains nothing
+  // for them (they were bare `_scrml_effect(...)` — no region-track, no cleanup
+  // registration). Measured over 0-4 open/close cycles before this wrap:
+  // 1 item -> 1,2,3,4,5 · 2 items -> 1,3,5,7,9 · 5 items -> 1,6,11,16,21. Each
+  // leaked effect retains its detached row node and re-runs on every data
+  // change. `_scrml_mount_track` is the IDENTITY outside a mount, so an <each>
+  // on a page with no if= registers nothing and behaves exactly as before.
+  lines.push(`${indent}_scrml_mount_track(_scrml_effect(() => {`);
   lines.push(`${indent}  const ${innerItemsVar} = ${innerItemsExpr};`);
   for (const l of emitEachReconcileLines(eachBlock, innerIterVar, innerIdxName, innerMountVar, innerItemsVar, `${indent}  `, engineCtx)) {
     lines.push(l);
   }
-  lines.push(`${indent}});`);
+  lines.push(`${indent}}));`);
   return lines;
 }
 

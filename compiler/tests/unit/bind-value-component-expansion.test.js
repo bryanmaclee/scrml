@@ -152,7 +152,8 @@ describe("Bug 2c — bind:value HTML serialization in expanded component bodies"
     expect(clientJs).not.toBeNull();
     // The bind:value contract requires:
     // 1. A querySelector against the data-scrml-bind-value placeholder
-    expect(clientJs).toMatch(/document\.querySelector\(['"]\[data-scrml-bind-value="[^"]+"\]['"]\)/);
+    // §17.1 Phase 2 (S301): root-scoped acquire inside `_scrml_bind_rewire`.
+    expect(clientJs).toMatch(/\(root \|\| document\)\.querySelector\(['"]\[data-scrml-bind-value="[^"]+"\]['"]\)/);
     // 2. An input-event listener that writes back to the reactive cell
     expect(clientJs).toMatch(/addEventListener\(["']input["']/);
     expect(clientJs).toMatch(/_scrml_reactive_set\(["']firstName["']/);

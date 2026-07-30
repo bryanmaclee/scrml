@@ -1,0 +1,11 @@
+${
+    <step> = 1
+    <label> = "alpha"
+    function advance() {
+        @step = @step + 1
+    }
+}
+<button id="go" onclick=advance()>Advance</>
+<p id="one" if=(@step == 1)>ONE: ${@label}</>
+<p id="two" else-if=(@step == 2)>TWO: ${@label}</>
+<p id="rest" else>REST: ${@label}</>

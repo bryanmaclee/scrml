@@ -18,12 +18,18 @@
  *
  * Coverage:
  *   §1  Registry binding shape — if=fn() / show=fn() register an
- *       isConditionalDisplay / isVisibilityToggle logic binding (NOT an event
- *       binding); reactive @-arg refs are extracted.
+ *       isMountToggle / isVisibilityToggle logic binding (NOT an event binding);
+ *       reactive @-arg refs are extracted.
  *   §2  Client JS — if=fn() emits a `_scrml_effect`-wrapped conditional calling
  *       the fn; `addEventListener("if"` is ABSENT.
  *   §3  Controls / regressions — if=(fn()), if=@count still conditionals;
  *       onclick=fn() STILL event-binds (the `else` path untouched).
+ *
+ * Phase 2 finish (S301): `if=` no longer has a display-toggle fallback. Every
+ * `if=` — call-ref, paren-expr, varref — lowers to §17.1 template+marker
+ * mount/unmount, so the `if=` cases below assert `isMountToggle` +
+ * `_scrml_mount_template` where they used to assert `isConditionalDisplay` +
+ * `el.style.display`. `show=` (§17.2) keeps the display lowering and is unchanged.
  */
 
 import { describe, test, expect, beforeEach } from "bun:test";
@@ -112,15 +118,15 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("§1: if=fn() / show=fn() register a reactive conditional (not an event binding)", () => {
-  test("S1: if=isVisible() registers an isConditionalDisplay logic binding", () => {
-    // Inner onclick keeps the subtree non-clean so it lands on the fallback
-    // display-toggle logic-binding path (the same path if=@var fallback uses).
+  test("S1: if=isVisible() registers an isMountToggle logic binding", () => {
+    // The inner onclick used to force the display-toggle fallback; since Phase 2
+    // it does not — the handler simply rides inside the mounted template.
     const inner = makeMarkupNode("button", [callRefAttr("onclick", "handle")], []);
     const node = makeMarkupNode("div", [callRefAttr("if", "isVisible")], [inner]);
     const registry = new BindingRegistry();
     generateHtml([node], [], false, registry, null);
 
-    const binding = registry.logicBindings.find(b => b.isConditionalDisplay);
+    const binding = registry.logicBindings.find(b => b.isMountToggle);
     expect(binding).toBeDefined();
     expect(binding.condExpr).toBe("isVisible()");
     // It is NOT routed through addEventBinding for the if= attr.
@@ -148,7 +154,7 @@ describe("§1: if=fn() / show=fn() register a reactive conditional (not an event
     const registry = new BindingRegistry();
     generateHtml([node], [], false, registry, null);
 
-    const binding = registry.logicBindings.find(b => b.isConditionalDisplay);
+    const binding = registry.logicBindings.find(b => b.isMountToggle);
     expect(binding).toBeDefined();
     expect(binding.condExpr).toBe("check(@x, 5)");
     // The reactive arg @x is surfaced as a bare-name ref.
@@ -163,7 +169,7 @@ describe("§1: if=fn() / show=fn() register a reactive conditional (not an event
     const registry = new BindingRegistry();
     generateHtml([node], [], false, registry, null);
 
-    const binding = registry.logicBindings.find(b => b.isConditionalDisplay);
+    const binding = registry.logicBindings.find(b => b.isMountToggle);
     expect(binding.condExpr).toBe("isVisible()");
     expect(Array.isArray(binding.refs)).toBe(true);
     expect(binding.refs.length).toBe(0);
@@ -175,13 +181,14 @@ describe("§1: if=fn() / show=fn() register a reactive conditional (not an event
 // ---------------------------------------------------------------------------
 
 describe("§2: if=fn() emits a reactive conditional in client JS", () => {
-  test("S5: if=isVisible() emits data-scrml-bind-if and NO addEventListener(\"if\")", () => {
+  test("S5: if=isVisible() emits template+marker and NO addEventListener(\"if\")", () => {
     const inner = makeMarkupNode("button", [callRefAttr("onclick", "handle")], []);
     const node = makeMarkupNode("div", [callRefAttr("if", "isVisible")], [inner]);
     const result = compile([node]);
     const out = result.outputs.get("/test/app.scrml");
 
-    expect(out.html).toContain("data-scrml-bind-if=");
+    expect(out.html).not.toContain("data-scrml-bind-if=");
+    expect(out.html).toContain("scrml-if-marker:");
     // The bug signature MUST be gone.
     expect(foldChunkNamespacing(out.clientJs)).not.toContain('addEventListener("if"');
   });
@@ -195,8 +202,9 @@ describe("§2: if=fn() emits a reactive conditional in client JS", () => {
     // Reactive effect present and the call site is inside it.
     expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_effect(");
     expect(foldChunkNamespacing(out.clientJs)).toMatch(/_scrml_effect\(function\(\)[\s\S]*isVisible\(\)/);
-    // Display-toggle conditional (the fallback if= path) drives el.style.display.
-    expect(foldChunkNamespacing(out.clientJs)).toContain("el.style.display");
+    // §17.1 — the conditional drives mount/unmount, never el.style.display.
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_mount_template");
+    expect(foldChunkNamespacing(out.clientJs)).not.toContain("el.style.display");
   });
 
   test("S7: show=isVisible() emits a display-toggle conditional (not event-bound)", () => {
@@ -238,7 +246,7 @@ describe("§3: controls — paren/varref conditionals unchanged; onclick still e
 
     expect(foldChunkNamespacing(out.clientJs)).not.toContain('addEventListener("if"');
     expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_effect(");
-    expect(foldChunkNamespacing(out.clientJs)).toContain("el.style.display");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_mount_template");
   });
 
   test("S10: CONTROL if=@count (varref) still emits a conditional", () => {
@@ -248,7 +256,7 @@ describe("§3: controls — paren/varref conditionals unchanged; onclick still e
     const out = result.outputs.get("/test/app.scrml");
 
     expect(foldChunkNamespacing(out.clientJs)).not.toContain('addEventListener("if"');
-    expect(foldChunkNamespacing(out.clientJs)).toContain("el.style.display");
+    expect(foldChunkNamespacing(out.clientJs)).toContain("_scrml_mount_template");
     expect(foldChunkNamespacing(out.clientJs)).toContain('_scrml_reactive_get("count")');
   });
 

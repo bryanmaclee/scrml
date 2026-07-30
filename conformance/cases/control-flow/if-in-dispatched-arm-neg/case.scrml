@@ -1,0 +1,14 @@
+${
+    type Phase:enum = { Idle, Ready }
+    <phase>: Phase = .Ready
+    <label> = "L"
+    <gateOn> = true
+}
+<match for=Phase on=@phase>
+    <Idle>
+        <p id="idle">idle</p>
+    </>
+    <Ready>
+        <div id="gated" if=@gateOn>R:${@label}</div>
+    </>
+</match>

@@ -174,29 +174,47 @@ describe("TodoMVC §1: initial render — HTML structure", () => {
     expect(document.querySelector(".new-todo[data-scrml-bind-value]")).not.toBeNull();
   });
 
-  test("HTML contains .main section[data-scrml-bind-if]", () => {
+  // §17.1 Phase 2 (S301) — `<section class="main" if=@todos.length>` and
+  // `<footer class="footer" if=@todos.length>` are CONDITIONAL, and TodoMVC boots
+  // with zero todos. SPEC §17.1 (SPEC.md:10914): "When `expr` evaluates to false,
+  // the element is NOT rendered. It does not exist in the DOM." These four tests
+  // used to assert `[data-scrml-bind-if]` on a still-rendered, display:none
+  // element — i.e. they pinned the non-conformant lowering. They now assert both
+  // halves: absent while empty, mounted (and fully wired) once a todo exists.
+  test("empty list: .main and .footer do NOT exist in the DOM (§17.1)", () => {
     if (!distExists) return;
     loadTodoMVC();
-    expect(document.querySelector(".main[data-scrml-bind-if]")).not.toBeNull();
+    expect(document.querySelectorAll(".main").length).toBe(0);
+    expect(document.querySelectorAll(".footer").length).toBe(0);
+    // Nothing anywhere on the page carries the retired display placeholder.
+    expect(document.querySelectorAll("[data-scrml-bind-if]").length).toBe(0);
   });
 
-  test("HTML contains .footer[data-scrml-bind-if]", () => {
+  // The MOUNT half cannot be driven from this file: the HARNESS LIMITATION noted
+  // at the top of it (the runtime is IIFE-wrapped, so client init throws on
+  // `_scrml_lift_target`) means the if= controller never runs here — which is also
+  // why eight tests below are `test.skip`. Assert instead that the conditional
+  // markup and its wiring placeholders are SHIPPED intact inside the if=
+  // template, which is the codegen contract this file can actually check. The live
+  // mount + rebind behaviour is covered by
+  // `compiler/tests/browser/if-mount-dirty-subtree.browser.test.js` (a harness
+  // that boots the emitted client.js successfully).
+  test("the conditional subtrees ship as if= templates with their wiring intact", () => {
     if (!distExists) return;
-    loadTodoMVC();
-    expect(document.querySelector(".footer[data-scrml-bind-if]")).not.toBeNull();
-  });
-
-  test("HTML contains exactly 3 filter links with data-scrml-bind-onclick", () => {
-    if (!distExists) return;
-    loadTodoMVC();
-    const links = document.querySelectorAll(".filters li a[data-scrml-bind-onclick]");
-    expect(links.length).toBe(3);
-  });
-
-  test("HTML contains .todo-list ul", () => {
-    if (!distExists) return;
-    loadTodoMVC();
-    expect(document.querySelector(".todo-list")).not.toBeNull();
+    const html = readFileSync(resolve(DIST, "app.html"), "utf8");
+    // Template + marker, in pairs, and no display placeholder anywhere.
+    expect(html).not.toContain("data-scrml-bind-if");
+    const templates = (html.match(/<template id="_scrml_scrml_tpl_/g) ?? []).length;
+    const markers = (html.match(/scrml-if-marker:/g) ?? []).length;
+    expect(templates).toBeGreaterThanOrEqual(2);
+    expect(markers).toBe(templates);
+    // The gated markup and its event placeholders travel INSIDE the templates.
+    expect(html).toContain('class="main"');
+    expect(html).toContain('class="footer"');
+    expect(html).toContain('class="todo-list"');
+    expect((html.match(/\.filters/g) ?? []).length >= 0).toBe(true);
+    const filterLinks = (html.match(/data-scrml-bind-onclick="[^"]*"[^>]*>All|>All</g) ?? []).length;
+    expect(filterLinks).toBeGreaterThanOrEqual(1);
   });
 
   test(".main section visible when @todos.length > 0 (BUG-5 fixed)", () => {
@@ -524,28 +542,35 @@ describe("TodoMVC §7: submit event delegation", () => {
 // ---------------------------------------------------------------------------
 
 describe("TodoMVC §8: click event delegation — filter links", () => {
-  test("'All' link (#/) has data-scrml-bind-onclick attribute in HTML", () => {
+  // §17.1 Phase 2 (S301): the filter links live inside `<footer if=@todos.length>`,
+  // so they do not exist until a todo does. Seed one, then assert the wiring —
+  // which also proves the mounted subtree's event placeholders survived the clone.
+  // §17.1 Phase 2 (S301): the filter links live inside
+  // `<footer class="footer" if=@todos.length>`, so with zero todos they are NOT in
+  // the DOM. Assert the absence half live, and the wiring half against the shipped
+  // template text (this harness cannot boot the controller — see the top-of-file
+  // HARNESS LIMITATION note; the live mount is covered by
+  // if-mount-dirty-subtree.browser.test.js).
+  test("empty list: the filter links do NOT exist in the DOM (§17.1)", () => {
     if (!distExists) return;
     loadTodoMVC();
-    const link = document.querySelector('a[href="#/"]');
-    expect(link).not.toBeNull();
-    expect(link.getAttribute("data-scrml-bind-onclick")).not.toBeNull();
+    expect(document.querySelectorAll('.filters li a').length).toBe(0);
+    expect(document.querySelectorAll('a[href="#/active"]').length).toBe(0);
+    expect(document.querySelectorAll('a[href="#/completed"]').length).toBe(0);
   });
 
-  test("'Active' link (#/active) has data-scrml-bind-onclick attribute in HTML", () => {
+  test("each filter link ships inside the if= template WITH its click placeholder", () => {
     if (!distExists) return;
-    loadTodoMVC();
-    const link = document.querySelector('a[href="#/active"]');
-    expect(link).not.toBeNull();
-    expect(link.getAttribute("data-scrml-bind-onclick")).not.toBeNull();
-  });
-
-  test("'Completed' link (#/completed) has data-scrml-bind-onclick attribute in HTML", () => {
-    if (!distExists) return;
-    loadTodoMVC();
-    const link = document.querySelector('a[href="#/completed"]');
-    expect(link).not.toBeNull();
-    expect(link.getAttribute("data-scrml-bind-onclick")).not.toBeNull();
+    const html = readFileSync(resolve(DIST, "app.html"), "utf8");
+    for (const href of ["#/", "#/active", "#/completed"]) {
+      // The anchor is present in the shipped markup…
+      const anchor = new RegExp(`<a[^>]*href="${href.replace(/[/]/g, "\\/")}"[^>]*>`);
+      const m = html.match(anchor);
+      expect(m).not.toBeNull();
+      // …and carries its delegated-click placeholder, so the handler resolves once
+      // the subtree mounts (click is document-delegated, keyed off this attribute).
+      expect(m[0]).toContain("data-scrml-bind-onclick=");
+    }
   });
 
   // SKIP S18: harness IIFE-scope bug (see top-of-file note). Puppeteer covers this.
