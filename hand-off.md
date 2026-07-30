@@ -73,6 +73,46 @@ so this mirrors the two precedents that hit the same wall.
    green-compile data-correctness bug survived, and why base-vs-fix output is byte-identical
    corpus-wide. Same structural blindness S296 recorded for D-4.
 
+## 🗺️ MAPS — the refresh answered the repair-or-retire question, and the answer is "cut, don't retire"
+
+Watermark `115e8b1b` → `d0763cff`, 8 files. But the useful output was the assessment I asked for, blunt:
+
+**Load-bearing score on this session's four loci: 0/4, with one NEGATIVE.** No map named
+`SERVER_ONLY_SCRML_MODULES`, the escalation machinery, `escalationReasons` consumers, the CE expansion
+seam, or `_deepCloneAst`. Worse, `domain.map.md:37` stated Trigger 3's behaviour **as if it existed**
+("importing a server-tagged stdlib module escalates the importing function") when it was ruled-S280 and
+unbuilt — not merely unhelpful, **wrong in the direction that would have stopped the work.**
+
+**Three structural reasons, only the third fixable by writing better maps:** (1) ~40% of the map mass is
+changelog-shaped and duplicates `docs/changelog.md`, which is better at it; (2) each refresh documents
+the arc that just closed, so the next session is uncovered **by construction** — one session behind is
+operationally identical to absent; (3) grep is genuinely competitive here — 232k lines, one language,
+rigorous naming. A row only earns its place in three cases: you can't guess the search term from the
+symptom · many hits with a non-obvious winner · **a PROHIBITION or invariant, which grep cannot find at
+all.** The maps carried almost none of the third, which is the highest-value kind.
+
+**The strongest single example, from this session:** the two-set distinction
+(`ESCALATION_SERVER_ONLY_MODULES` ≠ `SERVER_ONLY_SCRML_MODULES`). The wrong answer is **invisible to
+grep** — grep finds the async set and it looks correct. I found the 72-site over-escalation empirically.
+A prohibition row would have saved a real, measured wrong turn. Those three rows now exist.
+
+**Do NOT retire yet, and the reason is procedural:** the disciplined-use precondition has never been
+met — `cloud-maps` red 17/17 for two weeks, and both recent refreshes were hand-dispatched after the
+watermark stranded (39 commits, then 13). **Retiring now would measure the outage, not the tool.**
+Ranked: decide `cloud-maps` this week (one `workflow_dispatch` with `show_full_output`) · wire a
+mechanical code→`file:line` index into CI beside `state.ts`
+([[g-generated-code-index-unreferenced-stale-and-cross-repo]], filed) · delete the changelog-shaped
+mass · keep and grow exactly two things, the symptom→locus routing table and a prohibitions list ·
+re-measure after ~4 weeks of the reduced set with working automation.
+
+**And a false RESOLVED, found by measurement:** `g-maps-error-map-missing-diagnostics-and-emit-client`
+was closed at S297 on a CLAIM generalised from two data points. Measured: §34 has 185 code prefixes,
+the family table names 67 — **118 have no row**, including the `W-AUTH-*` I needed this session and
+grepped for. **Reopened as `narrowed`.** A false coverage claim is worse than an absent one: it stops
+the reader running the grep that works. **Third base-amendment candidate of the session** (S297 raised
+two): a map/gap assertion that is not measurable cannot be trusted, and one that is not trusted will
+not be consulted — a `pa-base` §8 hollow-gate shape, not a map-quality problem.
+
 ## ⚠️ OWN MISSES — recorded, not smoothed
 
 - **Reported a whole gate class unavailable** after checking one command. Above.
