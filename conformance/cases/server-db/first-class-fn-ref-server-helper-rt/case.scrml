@@ -1,0 +1,22 @@
+<program db="./app.db">
+${
+    <total> = 0
+    function sumAmounts(rows) {
+        let s = 0
+        let i = 0
+        while (i < rows.length) { s = s + rows[i].amount; i = i + 1 }
+        return s
+    }
+    function loadTotal() {
+        const rows = ?{`SELECT id, amount FROM sales`}.all()
+        const picker0 = sumAmounts
+        const picker = picker0
+        return picker(rows)
+    }
+    function onLoad() {
+        @total = loadTotal()
+    }
+}
+<button id="load" onclick=onLoad()>Total</>
+<p if=@total id="g">${@total}</>
+</program>

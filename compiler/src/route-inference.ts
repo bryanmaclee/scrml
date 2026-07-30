@@ -74,6 +74,7 @@ import type {
 import type { ProtectAnalysis } from "./protect-analyzer.ts";
 import { exprNodeCollectCallees, emitStringFromTree, forEachIdentInExprNode } from "./expression-parser.ts";
 import type { ExprNode } from "./types/ast.ts";
+import { resolveIndirectCallees, indirectResolvedCallees, fnParamNameSet } from "./indirect-callee-resolver.ts";
 // Type-only import — `monotonicity-analyzer.ts` imports `CPSSplit` from this
 // module, so a value import would form a runtime cycle. `import type` is
 // erased at compile time and is cycle-safe.
@@ -4474,228 +4475,12 @@ export function runRI(input: RIInput): RIOutput {
     }
   }
 
-  const MAX_CALLER_CTX_ITER = analysisMap.size + 1;
-  let callerCtxChanged = true;
-  let callerCtxIter = 0;
-
-  while (callerCtxChanged && callerCtxIter < MAX_CALLER_CTX_ITER) {
-    callerCtxChanged = false;
-    callerCtxIter++;
-
-    for (const [fnNodeId, record] of analysisMap) {
-      // Already server-classified — no propagation needed.
-      if (resolvedServerFnIds.has(fnNodeId)) continue;
-
-      // §12.4 E-ROUTE-002 — a client-pinned function (direct DOM access) is NEVER
-      // promoted server-side by caller-context inheritance. THIS is the soundness
-      // fix: previously a DOM helper called only from a server fn escalated here
-      // (Trigger 5) and its `document.*` code was emitted into the server bundle.
-      // It now stays client; the offending server caller fires E-ROUTE-002 below.
-      if (clientPinnedFnIds.has(fnNodeId)) continue;
-
-      // §39.3: handle() escape hatch is middleware, not server. Skip.
-      if ((record.fnNode as any).isHandleEscapeHatch === true) continue;
-
-      const callers = inverseCallerMap.get(fnNodeId);
-      if (!callers || callers.size === 0) continue;
-
-      // Classify callers. Skip self-references (cycles) — a function calling
-      // itself doesn't add information for propagation.
-      let serverCallerCount = 0;
-      let clientCallerCount = 0;
-      for (const callerId of callers) {
-        if (callerId === fnNodeId) continue; // self-reference
-        if (resolvedServerFnIds.has(callerId)) {
-          serverCallerCount++;
-        } else {
-          clientCallerCount++;
-        }
-      }
-
-      // No non-self callers → cycle-only or self-only → skip.
-      if (serverCallerCount === 0 && clientCallerCount === 0) continue;
-
-      // ANY client caller → stay AMBIENT (current behavior preserved).
-      if (clientCallerCount > 0) continue;
-
-      // ALL non-self callers are server-classified → promote.
-      const propagatedReason: EscalationReason = {
-        kind: "server-only-resource",
-        resourceType: "caller-context-propagation",
-        span: record.fnNode.span,
-      };
-
-      record.directTriggers.push(propagatedReason);
-      resolvedServerFnIds.add(fnNodeId);
-
-      const existing = escalationResults.get(fnNodeId);
-      if (existing) {
-        existing.allReasons.push(propagatedReason);
-        existing.deduped = deduplicateReasons(existing.allReasons);
-      } else {
-        escalationResults.set(fnNodeId, {
-          allReasons: [propagatedReason],
-          deduped: [propagatedReason],
-        });
-      }
-
-      callerCtxChanged = true;
-    }
-  }
-
-  // ------------------------------------------------------------------
-  // Step 5c-bis: §12.4 E-ROUTE-002 — server→client-only call-graph reject.
-  //
-  // With every server classification settled (Steps 5 / 5b / 5c) and the
-  // client-pinned set fixed, walk each server-classified function's STATIC CALL
-  // GRAPH. If it reaches a client-pinned function — directly or transitively —
-  // that is the §12.4 violation: a server-executing function cannot call a
-  // function route analysis places exclusively on the client (a server context
-  // has no `document`/`window`). Emit E-ROUTE-002 naming (a) the server fn,
-  // (b) the client-only callee, (c) the call chain (§12.4).
-  //
-  // Reporting (S263 review #7): dedup per (SERVER-ROOT fn, client callee) — each
-  // BFS is one server root and reports each client-pinned callee it reaches ONCE
-  // (shortest chain). Two distinct server fns leaking to the SAME client fn each
-  // get their own E-ROUTE-002 (no cross-root global dedup that would hide one).
-  //
-  // Callee resolution (S263 review #3/#4): route-inference has NO precise
-  // import-aware callee resolver — `fnNameToNodeIds` is name-keyed and GLOBAL
-  // across files (as are the 5b/5c escalation passes). For a HARD ERROR we
-  // resolve a call ONLY to SAME-FILE function-decls (a bare call binds to the
-  // same-file declaration with certainty). We DELIBERATELY do NOT fall back to
-  // the global set: a coincidental same-name client-pinned fn in ANOTHER file is
-  // NOT the target of this call, and firing on it rejects valid code (#3). If a
-  // same-file name is itself ambiguous (a client-pinned candidate alongside a
-  // non-pinned one — e.g. a nested + top-level same-name), we do NOT fire and
-  // traverse the non-pinned candidates. We fire ONLY when the call UNAMBIGUOUSLY
-  // resolves, same-file, to client-pinned function(s).
-  //
-  // RESIDUAL (S263 review #4, DOCUMENTED — see §12.4): a genuine CROSS-FILE
-  // server -> client-only leak whose callee is reached by a name with no
-  // same-file binding is NOT caught. Catching it would require firing on a
-  // globally-ambiguous cross-file name, which reintroduces #3's false positive —
-  // and no-false-positives is the priority. This narrow miss awaits a precise
-  // import-aware resolver; a V1 limitation.
-  // ------------------------------------------------------------------
-  if (clientPinnedFnIds.size > 0) {
-    for (const [serverFnId, serverRecord] of analysisMap) {
-      if (!resolvedServerFnIds.has(serverFnId)) continue;
-      // handle() middleware is server-executing but is its own boundary; it
-      // still cannot call client-only code, so it participates as a server root.
-      const serverName = serverRecord.fnNode.name ?? "<anonymous>";
-
-      // BFS over the callee graph, tracking the name-path for the chain message.
-      const visited = new Set<string>([serverFnId]);
-      const reported = new Set<string>(); // client-pinned ids reported in THIS bfs
-      const queue: Array<{ id: string; path: string[] }> = [
-        { id: serverFnId, path: [serverName] },
-      ];
-      while (queue.length > 0) {
-        const { id, path } = queue.shift()!;
-        const rec = analysisMap.get(id);
-        if (!rec) continue;
-        const callerFile = rec.filePath;
-        for (const calleeName of rec.callees) {
-          const globalIds = fnNameToNodeIds.get(calleeName);
-          if (!globalIds || globalIds.length === 0) continue;
-          // SAME-FILE resolution ONLY — no global cross-file fallback (#3). A
-          // call with no same-file binding is import/undefined; treat as
-          // uncertain and skip (the #4 documented residual).
-          const resolved = globalIds.filter(
-            (cid) => analysisMap.get(cid)?.filePath === callerFile,
-          );
-          if (resolved.length === 0) continue;
-          const chain = [...path, calleeName];
-
-          // UNAMBIGUOUS client-pinned target: every resolved candidate is
-          // client-pinned. (A single same-file resolution is the common case.)
-          const allPinned =
-            resolved.length > 0 &&
-            resolved.every((cid) => clientPinnedFnIds.has(cid));
-
-          if (allPinned) {
-            const target = resolved.find((cid) => !reported.has(cid));
-            for (const cid of resolved) visited.add(cid); // client leaves
-            if (target === undefined) continue; // already reported in this bfs
-            reported.add(target);
-            const pin = analysisMap.get(target)?.clientPin;
-            const accessDesc = pin
-              ? `it accesses the client-only global \`${pin.resource}\``
-              : "it is client-only";
-            const chainStr = chain.join(" -> ");
-            const ro02 = new RIError(
-              "E-ROUTE-002",
-              `E-ROUTE-002: Server-escalated function \`${serverName}\` calls the ` +
-              `client-only function \`${calleeName}\` (${accessDesc}), which route ` +
-              `analysis places exclusively on the client. A server function runs in ` +
-              `the Bun process, where the client-only referent does not exist, so this ` +
-              `call cannot execute server-side. Call chain: ${chainStr}. ` +
-              `Fix by one of: extract the shared logic into a pure \`fn\` (§33) with no ` +
-              `client or server classification and call that from both sides; duplicate ` +
-              `the needed logic inside \`${serverName}\`; or re-evaluate whether ` +
-              `\`${calleeName}\` is genuinely client-only (§12.4).`,
-              serverRecord.fnNode.span,
-            );
-            ro02.severity = "error";
-            errors.push(ro02);
-            continue;
-          }
-
-          // Not unambiguous: traverse the NON-pinned candidates for transitivity
-          // (a client-pinned candidate is a client leaf; on ambiguity we do NOT
-          // fire — see the resolution note above).
-          for (const calleeId of resolved) {
-            if (clientPinnedFnIds.has(calleeId)) continue;
-            if (visited.has(calleeId)) continue;
-            visited.add(calleeId);
-            queue.push({ id: calleeId, path: chain });
-          }
-        }
-      }
-    }
-  }
-
-  // ------------------------------------------------------------------
-  // Step 5d: Insight 26 Batch 1 D4+D5 (2026-05-08) — emit deprecation +
-  // dead-function diagnostics.
-  //
-  // D4: W-DEAD-FUNCTION fires for a function with NO callers (anywhere
-  //     in the project) AND NOT exported AND NOT explicitly server-
-  //     annotated AND whose name does not appear as an identifier in any
-  //     markup attribute value or any bare-expr text outside its own body.
-  //
-  // D5: W-DEPRECATED-SERVER-MODIFIER fires for a function with `isServer`
-  //     === true AND at least one OTHER (non-explicit-annotation)
-  //     escalation reason. The keyword is redundant in this case;
-  //     the function would still be classified server even without it.
-  // ------------------------------------------------------------------
-
-  // Build the set of exported function names (per file) — exporting a
-  // function makes it potentially-callable from outside the project, so
-  // it is never "dead" by RI's body-callee analysis alone.
-  // CE wraps FileAST in `.ast`; unit tests pass bare FileAST. Try both.
-  // §64 — a `kind="tool"` program's `main` is the entry point invoked by the
-  // codegen-emitted harness (`main(process.argv.slice(2))`), not by any in-source
-  // caller — so RI's caller analysis sees it as "dead." Collect each tool file's
-  // `main` node so D4 never false-fires W-DEAD-FUNCTION on it. (Helper fns called
-  // by main already have callers via inverseCallerMap, so only `main` needs this.)
-  const toolMainFnNodes = new Set<unknown>();
-  for (const fileAST of files) {
-    if (isToolProgram(fileAST)) {
-      const m = findToolMainFn(fileAST);
-      if (m) toolMainFnNodes.add(m);
-    }
-  }
-
-  const exportedFnNames = new Set<string>();
-  for (const fileAST of files) {
-    const exps = (fileAST.exports ?? ((fileAST as any).ast ? (fileAST as any).ast.exports : [])) as
-      Array<{ exportedName: string | null }>;
-    for (const exp of exps ?? []) {
-      if (exp && exp.exportedName) exportedFnNames.add(exp.exportedName);
-    }
-  }
+  // #284 (FIX B) — the markup-referenced-name set is built HERE (relocated up
+  // from the D4 W-DEAD prep below) so the Step 5c indirect-caller escalation can
+  // consult it: a helper used in CLIENT markup (`<p>${fmt(@x)}</p>`) must NOT be
+  // relocated server-side by a NEW indirect-call edge — that would turn a
+  // synchronous render into a blanking async fetch. Same set the D4 gate uses
+  // (one source of truth; the D4 gate logic is byte-identical).
 
   // Build the set of identifier-like tokens that appear ANYWHERE in the
   // project's markup attribute values, raw markup text, or bare-expr text
@@ -4903,6 +4688,304 @@ export function runRI(input: RIInput): RIOutput {
     const nodes = fileAST.nodes ?? ((fileAST as any).ast ? (fileAST as any).ast.nodes : []) ?? [];
     for (const top of nodes) walkMarkupContext(top);
   }
+
+  // #284 — SEPARATE, precise augmentation for INDIRECT callees reached through a
+  // first-class reference (`const p = groupByJob; p(rows)` / a dispatch table).
+  // The shared `record.callees` / `inverseCallerMap` above record ONLY a direct
+  // `call.callee` ident — and MUST NOT be widened (they also drive E-ROUTE-001 and
+  // the D4 W-DEAD gate; S299 measured widening = 72-site over-escalation). Instead
+  // we LOCALLY resolve each body's indirect calls to their real callee(s) and feed
+  // those edges through THIS separate map, consulted ONLY by the Step 5c
+  // caller-context fixed-point below. These edges are ESCALATION-ONLY (FIX A):
+  // a SERVER indirect caller adds server-promotion pressure, but a CLIENT indirect
+  // caller is IGNORED for placement — a client that indirect-calls a server helper
+  // reaches it via the fetch stub, so the edge must NEVER demote a directly-server-
+  // called helper to client (that would 500 the server caller). A DEAD value
+  // reference is not a call, so it creates NO edge (repro3-dead / caseD stay
+  // correct). Resolution is SAME-FILE (a bare indirect call binds to a same-file
+  // decl), mirroring the 5c-bis same-file resolution precedent.
+  const indirectInverseCallerMap = new Map<string, Set<string>>();
+  for (const [callerFnNodeId, callerRecord] of analysisMap) {
+    const _paramNames = fnParamNameSet((callerRecord.fnNode as any).params);
+    const _res = resolveIndirectCallees(callerRecord.fnNode.body, _paramNames);
+    const _resolved = indirectResolvedCallees(_res);
+    if (_resolved.size === 0) continue;
+    for (const calleeName of _resolved) {
+      const calleeFnIds = fnNameToNodeIds.get(calleeName);
+      if (!calleeFnIds) continue;
+      // SAME-FILE only: a coincidental same-name fn in another file is not this
+      // call's target. Fall back to the global set ONLY when no same-file binding
+      // exists (mirrors how the direct map resolves cross-file references).
+      const _sameFile = calleeFnIds.filter(
+        (cid) => analysisMap.get(cid)?.filePath === callerRecord.filePath,
+      );
+      const _targets = _sameFile.length > 0 ? _sameFile : calleeFnIds;
+      for (const calleeFnId of _targets) {
+        if (calleeFnId === callerFnNodeId) continue; // self-reference adds nothing
+        if (!indirectInverseCallerMap.has(calleeFnId)) indirectInverseCallerMap.set(calleeFnId, new Set());
+        indirectInverseCallerMap.get(calleeFnId)!.add(callerFnNodeId);
+      }
+    }
+  }
+
+  const MAX_CALLER_CTX_ITER = analysisMap.size + 1;
+  let callerCtxChanged = true;
+  let callerCtxIter = 0;
+
+  while (callerCtxChanged && callerCtxIter < MAX_CALLER_CTX_ITER) {
+    callerCtxChanged = false;
+    callerCtxIter++;
+
+    for (const [fnNodeId, record] of analysisMap) {
+      // Already server-classified — no propagation needed.
+      if (resolvedServerFnIds.has(fnNodeId)) continue;
+
+      // §12.4 E-ROUTE-002 — a client-pinned function (direct DOM access) is NEVER
+      // promoted server-side by caller-context inheritance. THIS is the soundness
+      // fix: previously a DOM helper called only from a server fn escalated here
+      // (Trigger 5) and its `document.*` code was emitted into the server bundle.
+      // It now stays client; the offending server caller fires E-ROUTE-002 below.
+      if (clientPinnedFnIds.has(fnNodeId)) continue;
+
+      // §39.3: handle() escape hatch is middleware, not server. Skip.
+      if ((record.fnNode as any).isHandleEscapeHatch === true) continue;
+
+      // #284 — the DIRECT caller counting is BASELINE-IDENTICAL (from
+      // `inverseCallerMap` only): a direct client caller keeps the fn ambient, a
+      // direct server caller adds promotion pressure. The SEPARATE indirect-callee
+      // map contributes ONLY server-escalation pressure and NEVER demotion:
+      //
+      //   FIX A — an INDIRECT edge is ESCALATION-ONLY. A CLIENT fn that indirect-
+      //   calls a helper (`const p = helper; p(3)`) can reach a server helper via
+      //   the fetch stub — it does NOT require client placement — so a client
+      //   indirect caller is IGNORED for placement (counting it as a client caller
+      //   would DEMOTE a directly-server-called helper to client → the server
+      //   caller then references an undefined symbol → 500, a regression). Only
+      //   SERVER-classified indirect callers add promotion pressure.
+      //
+      //   FIX B — a helper referenced from CLIENT MARKUP (`<p>${fmt(@x)}</p>`,
+      //   captured in `markupReferencedNames`, built above) must NOT be relocated
+      //   server-side by a NEW indirect edge — that turns a synchronous render into
+      //   a blanking async fetch. Such a helper is EXCLUDED from indirect
+      //   escalation (its DIRECT-server-call escalation, if any, is baseline and
+      //   left intact). The server-indirect call to a markup helper then remains
+      //   the original #284 residual for that narrow shape (a fail-closed
+      //   diagnostic track), rather than a silent dual-placement miscompile.
+      const directCallers = inverseCallerMap.get(fnNodeId);
+      let directServerCount = 0;
+      let directClientCount = 0;
+      if (directCallers) {
+        for (const callerId of directCallers) {
+          if (callerId === fnNodeId) continue; // self-reference
+          if (resolvedServerFnIds.has(callerId)) directServerCount++;
+          else directClientCount++;
+        }
+      }
+
+      // FIX A + B: server-classified INDIRECT callers add escalation pressure —
+      // UNLESS this helper is markup-referenced (FIX B: keep it client-rendered).
+      let indirectServerCount = 0;
+      const _fnNameForMarkup = record.fnNode.name;
+      const _isMarkupReferenced =
+        typeof _fnNameForMarkup === "string" && markupReferencedNames.has(_fnNameForMarkup);
+      if (!_isMarkupReferenced) {
+        const indirectCallers = indirectInverseCallerMap.get(fnNodeId);
+        if (indirectCallers) {
+          for (const callerId of indirectCallers) {
+            if (callerId === fnNodeId) continue; // self-reference
+            if (resolvedServerFnIds.has(callerId)) indirectServerCount++;
+            // Client indirect callers are IGNORED (FIX A — no demotion).
+          }
+        }
+      }
+
+      // No promotion/demotion signal at all → skip.
+      if (directServerCount === 0 && directClientCount === 0 && indirectServerCount === 0) continue;
+
+      // ANY DIRECT client caller → stay AMBIENT (baseline behavior preserved;
+      // indirect client callers never reach here — they were not counted).
+      if (directClientCount > 0) continue;
+
+      // No direct client caller AND (a direct OR indirect server caller) → promote.
+      if (directServerCount === 0 && indirectServerCount === 0) continue;
+      const propagatedReason: EscalationReason = {
+        kind: "server-only-resource",
+        resourceType: "caller-context-propagation",
+        span: record.fnNode.span,
+      };
+
+      record.directTriggers.push(propagatedReason);
+      resolvedServerFnIds.add(fnNodeId);
+
+      const existing = escalationResults.get(fnNodeId);
+      if (existing) {
+        existing.allReasons.push(propagatedReason);
+        existing.deduped = deduplicateReasons(existing.allReasons);
+      } else {
+        escalationResults.set(fnNodeId, {
+          allReasons: [propagatedReason],
+          deduped: [propagatedReason],
+        });
+      }
+
+      callerCtxChanged = true;
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Step 5c-bis: §12.4 E-ROUTE-002 — server→client-only call-graph reject.
+  //
+  // With every server classification settled (Steps 5 / 5b / 5c) and the
+  // client-pinned set fixed, walk each server-classified function's STATIC CALL
+  // GRAPH. If it reaches a client-pinned function — directly or transitively —
+  // that is the §12.4 violation: a server-executing function cannot call a
+  // function route analysis places exclusively on the client (a server context
+  // has no `document`/`window`). Emit E-ROUTE-002 naming (a) the server fn,
+  // (b) the client-only callee, (c) the call chain (§12.4).
+  //
+  // Reporting (S263 review #7): dedup per (SERVER-ROOT fn, client callee) — each
+  // BFS is one server root and reports each client-pinned callee it reaches ONCE
+  // (shortest chain). Two distinct server fns leaking to the SAME client fn each
+  // get their own E-ROUTE-002 (no cross-root global dedup that would hide one).
+  //
+  // Callee resolution (S263 review #3/#4): route-inference has NO precise
+  // import-aware callee resolver — `fnNameToNodeIds` is name-keyed and GLOBAL
+  // across files (as are the 5b/5c escalation passes). For a HARD ERROR we
+  // resolve a call ONLY to SAME-FILE function-decls (a bare call binds to the
+  // same-file declaration with certainty). We DELIBERATELY do NOT fall back to
+  // the global set: a coincidental same-name client-pinned fn in ANOTHER file is
+  // NOT the target of this call, and firing on it rejects valid code (#3). If a
+  // same-file name is itself ambiguous (a client-pinned candidate alongside a
+  // non-pinned one — e.g. a nested + top-level same-name), we do NOT fire and
+  // traverse the non-pinned candidates. We fire ONLY when the call UNAMBIGUOUSLY
+  // resolves, same-file, to client-pinned function(s).
+  //
+  // RESIDUAL (S263 review #4, DOCUMENTED — see §12.4): a genuine CROSS-FILE
+  // server -> client-only leak whose callee is reached by a name with no
+  // same-file binding is NOT caught. Catching it would require firing on a
+  // globally-ambiguous cross-file name, which reintroduces #3's false positive —
+  // and no-false-positives is the priority. This narrow miss awaits a precise
+  // import-aware resolver; a V1 limitation.
+  // ------------------------------------------------------------------
+  if (clientPinnedFnIds.size > 0) {
+    for (const [serverFnId, serverRecord] of analysisMap) {
+      if (!resolvedServerFnIds.has(serverFnId)) continue;
+      // handle() middleware is server-executing but is its own boundary; it
+      // still cannot call client-only code, so it participates as a server root.
+      const serverName = serverRecord.fnNode.name ?? "<anonymous>";
+
+      // BFS over the callee graph, tracking the name-path for the chain message.
+      const visited = new Set<string>([serverFnId]);
+      const reported = new Set<string>(); // client-pinned ids reported in THIS bfs
+      const queue: Array<{ id: string; path: string[] }> = [
+        { id: serverFnId, path: [serverName] },
+      ];
+      while (queue.length > 0) {
+        const { id, path } = queue.shift()!;
+        const rec = analysisMap.get(id);
+        if (!rec) continue;
+        const callerFile = rec.filePath;
+        for (const calleeName of rec.callees) {
+          const globalIds = fnNameToNodeIds.get(calleeName);
+          if (!globalIds || globalIds.length === 0) continue;
+          // SAME-FILE resolution ONLY — no global cross-file fallback (#3). A
+          // call with no same-file binding is import/undefined; treat as
+          // uncertain and skip (the #4 documented residual).
+          const resolved = globalIds.filter(
+            (cid) => analysisMap.get(cid)?.filePath === callerFile,
+          );
+          if (resolved.length === 0) continue;
+          const chain = [...path, calleeName];
+
+          // UNAMBIGUOUS client-pinned target: every resolved candidate is
+          // client-pinned. (A single same-file resolution is the common case.)
+          const allPinned =
+            resolved.length > 0 &&
+            resolved.every((cid) => clientPinnedFnIds.has(cid));
+
+          if (allPinned) {
+            const target = resolved.find((cid) => !reported.has(cid));
+            for (const cid of resolved) visited.add(cid); // client leaves
+            if (target === undefined) continue; // already reported in this bfs
+            reported.add(target);
+            const pin = analysisMap.get(target)?.clientPin;
+            const accessDesc = pin
+              ? `it accesses the client-only global \`${pin.resource}\``
+              : "it is client-only";
+            const chainStr = chain.join(" -> ");
+            const ro02 = new RIError(
+              "E-ROUTE-002",
+              `E-ROUTE-002: Server-escalated function \`${serverName}\` calls the ` +
+              `client-only function \`${calleeName}\` (${accessDesc}), which route ` +
+              `analysis places exclusively on the client. A server function runs in ` +
+              `the Bun process, where the client-only referent does not exist, so this ` +
+              `call cannot execute server-side. Call chain: ${chainStr}. ` +
+              `Fix by one of: extract the shared logic into a pure \`fn\` (§33) with no ` +
+              `client or server classification and call that from both sides; duplicate ` +
+              `the needed logic inside \`${serverName}\`; or re-evaluate whether ` +
+              `\`${calleeName}\` is genuinely client-only (§12.4).`,
+              serverRecord.fnNode.span,
+            );
+            ro02.severity = "error";
+            errors.push(ro02);
+            continue;
+          }
+
+          // Not unambiguous: traverse the NON-pinned candidates for transitivity
+          // (a client-pinned candidate is a client leaf; on ambiguity we do NOT
+          // fire — see the resolution note above).
+          for (const calleeId of resolved) {
+            if (clientPinnedFnIds.has(calleeId)) continue;
+            if (visited.has(calleeId)) continue;
+            visited.add(calleeId);
+            queue.push({ id: calleeId, path: chain });
+          }
+        }
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Step 5d: Insight 26 Batch 1 D4+D5 (2026-05-08) — emit deprecation +
+  // dead-function diagnostics.
+  //
+  // D4: W-DEAD-FUNCTION fires for a function with NO callers (anywhere
+  //     in the project) AND NOT exported AND NOT explicitly server-
+  //     annotated AND whose name does not appear as an identifier in any
+  //     markup attribute value or any bare-expr text outside its own body.
+  //
+  // D5: W-DEPRECATED-SERVER-MODIFIER fires for a function with `isServer`
+  //     === true AND at least one OTHER (non-explicit-annotation)
+  //     escalation reason. The keyword is redundant in this case;
+  //     the function would still be classified server even without it.
+  // ------------------------------------------------------------------
+
+  // Build the set of exported function names (per file) — exporting a
+  // function makes it potentially-callable from outside the project, so
+  // it is never "dead" by RI's body-callee analysis alone.
+  // CE wraps FileAST in `.ast`; unit tests pass bare FileAST. Try both.
+  // §64 — a `kind="tool"` program's `main` is the entry point invoked by the
+  // codegen-emitted harness (`main(process.argv.slice(2))`), not by any in-source
+  // caller — so RI's caller analysis sees it as "dead." Collect each tool file's
+  // `main` node so D4 never false-fires W-DEAD-FUNCTION on it. (Helper fns called
+  // by main already have callers via inverseCallerMap, so only `main` needs this.)
+  const toolMainFnNodes = new Set<unknown>();
+  for (const fileAST of files) {
+    if (isToolProgram(fileAST)) {
+      const m = findToolMainFn(fileAST);
+      if (m) toolMainFnNodes.add(m);
+    }
+  }
+
+  const exportedFnNames = new Set<string>();
+  for (const fileAST of files) {
+    const exps = (fileAST.exports ?? ((fileAST as any).ast ? (fileAST as any).ast.exports : [])) as
+      Array<{ exportedName: string | null }>;
+    for (const exp of exps ?? []) {
+      if (exp && exp.exportedName) exportedFnNames.add(exp.exportedName);
+    }
+  }
+
 
   // ------------------------------------------------------------------
   // §61 <endpoint> private-arm reachability seed

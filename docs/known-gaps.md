@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 21 |
-| MED | 93 |
+| HIGH | 20 |
+| MED | 94 |
 | LOW | 40 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -5040,8 +5040,47 @@ still emits the call bare, so the interpolation reads a field off a Promise and 
 
 ## §S302 — gaps filed S302 (2026-07-30, bryan; adopter issue #284 reverse-verify)
 
-<!-- @gap id=g-indirect-callee-never-server-placed-server-referenceerror sev=HIGH status=open -->
-### G-INDIRECT-CALLEE-NEVER-SERVER-PLACED-SERVER-REFERENCEERROR — a callee reached by a first-class reference is never server-placed; its body ships to the CLIENT and the server handler throws `ReferenceError` — `NEW S302; HIGH; open`
+<!-- @gap id=g-sql-param-interpolation-peer-call-not-awaited sev=MED status=open -->
+### G-SQL-PARAM-INTERPOLATION-PEER-CALL-NOT-AWAITED — a server-fn peer called inside a `?{}` SQL-param interpolation is not await-lowered → the query binds a Promise — `NEW S303; MED; open`
+
+Surfaced by the S303 #284 adversarial review (round 2, await-soundness lens). A sibling server-fn ("peer")
+call inside a `?{}` SQL parameter interpolation is emitted BARE (unawaited):
+```
+const rows = ?{`SELECT id FROM entries WHERE amount > ${threshold(rows)}`}.all()
+// emits: await _scrml_sql`... amount > ${threshold(rows)}`   — outer awaited, ${threshold(rows)} NOT
+```
+so the query binds a `Promise` instead of the value (`amount > [object Promise]` → `[]`). **PRE-EXISTING and
+shared with DIRECT peers** — the reviewer confirmed the direct-peer form `${threshold(rows)}` has the same
+gap, so it is NOT introduced by the #284 fix (the fix's alias path merely inherits it). Fail-open in an
+auth-adjacent position (`WHERE tenant_id = ${resolveTenant(rows)}`). Locus: the SQL-param interpolation emit
+path (emit-logic `taggedFromParams` / emit-expr server template lit) does not run the peer-await lowering
+that `emitCall` applies elsewhere. Not fixed in the #284 PR (out of scope — it is a direct-peer bug too).
+
+---
+
+<!-- @gap id=g-indirect-callee-never-server-placed-server-referenceerror sev=HIGH status=resolved -->
+### G-INDIRECT-CALLEE-NEVER-SERVER-PLACED-SERVER-REFERENCEERROR — a callee reached by a first-class reference is never server-placed; its body ships to the CLIENT and the server handler throws `ReferenceError` — `NEW S302; HIGH; RESOLVED S303`
+
+> **✅ RESOLVED S303 (Peter), PR #297 — the RESOLVABLE core.** Fixed by **local static resolution of
+> indirect callees** (`compiler/src/indirect-callee-resolver.ts`, new): a multi-hop alias
+> (`const p0=fn; const p=p0; p(x)`) or an object-literal dispatch table (`const t={k:fn}; t[which](x)`)
+> is resolved per-function-body to its real callee(s) and treated EXACTLY like a direct call — for
+> placement (Step 5c), in-process peer emission, AND await-lowering. Verified by EXECUTION (A4 two-hop +
+> A3 dispatch = HTTP 200 correct; the reported `ReferenceError` 500 is gone). Conformance:
+> `server-db/first-class-fn-ref-server-helper-rt` (runtime, real-engine — PASS on fix / FAIL on baseline).
+> **Two S239 rounds refuted earlier cuts** (a ref-edge approach: demotion-leak + fail-open
+> unawaited-Promise auth-bypass + shadow FP; then the alias cut: a client indirect-call demotion + a
+> markup-helper relocation + a file-wide await FP) — all fixed at the root: indirect edges are
+> **escalation-only** (a client indirect-caller never demotes), **markup-referenced helpers are excluded**
+> from indirect escalation (kept client-rendered), and the peer-alias set is **per-function-body**. Corpus
+> over-escalation MEASURED **zero** (detector positive-control-validated; 62-file sweep).
+>
+> **RESIDUALS — fail CLOSED (500 = the original behavior, never silently wrong), routed to the §12.4
+> diagnostic bryan holds ([[g-e-route-001-severity-contradicts-12-4-and-one-limb-never-fires]]; note sent
+> S303):** (a) a genuinely-DYNAMIC indirect callee (value from a param / call result / array); (b) a
+> helper used in client markup AND server-indirect-called (needs dual placement — architectural); (c)
+> `let q=peer; q(x); q=other` (reassign→unresolved; the call before the reassign loses its await).
+> **PRE-EXISTING, out of #284 scope:** [[g-sql-param-interpolation-peer-call-not-awaited]].
 
 Surfaced reverse-verifying adopter GH **#284**. **The adopter's own attribution is wrong** — see
 [[g-e-route-001-severity-contradicts-12-4-and-one-limb-never-fires]] for the diagnostic half — but the

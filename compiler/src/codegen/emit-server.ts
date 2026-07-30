@@ -20,6 +20,7 @@ import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRelative, basename as _pathBasename, sep as _pathSep } from "node:path";
 import { parseExprToNode, forEachIdentInExprNode } from "../expression-parser.ts";
+import { resolveIndirectCallees, indirectResolvedCallees, aliasNamesResolvingTo, fnParamNameSet } from "../indirect-callee-resolver.ts";
 import { extractCalleeNames, buildCalleeImportMap } from "./scheduling.ts";
 import { isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
@@ -2798,6 +2799,19 @@ export function generateServerJs(
   // program that never composes server fns is byte-unchanged.
   const _peerCallableInfo = new Map<string, { fnNode: any; paramNames: string[] }>();
   const _serverFnPeerNames = new Set<string>();
+  // #284 (FIX C) — PER-FUNCTION-BODY alias names that resolve to a peer via a
+  // first-class reference (`const p = groupByJob; p(rows)` / a dispatch table).
+  // Threaded to emit-expr so it `await`-lowers `p(rows)` (a peer is async — an
+  // unawaited call ships `[object Promise]`, and a boolean guard on an always-
+  // truthy Promise is an auth bypass). Keyed by the server-fn AST node so each
+  // body sees ONLY its own aliases: a name that is a peer-alias in fn A but an
+  // unrelated local in fn B (`const apply = (n)=>n*2`) must NOT be await-lowered
+  // in B — a file-wide union would mis-treat B's local as a peer and fire a FALSE
+  // E-SERVER-FN-IN-SYNC-CALLBACK. Shadow-aware by construction (the resolver
+  // excludes params / body-locals that shadow a file-level fn).
+  const _peerAliasByFn = new Map<any, Set<string>>();
+  const _EMPTY_PEER_ALIASES: Set<string> = new Set<string>();
+  const _peerAliasesFor = (fn: any): Set<string> => _peerAliasByFn.get(fn) ?? _EMPTY_PEER_ALIASES;
   // Issue #1 — bare-peer-call sites recorded by emit-expr during body emission
   // (a peer call in a non-awaitable position). Diagnosed AFTER all bodies are
   // emitted. Threaded into every server-mode emit context below.
@@ -2994,6 +3008,27 @@ export function generateServerJs(
     if (_needsMountHydrate) {
       for (const _cd of _mhCallableDecls) _walk((_cd as any).initExpr);
     }
+
+    // #284 — EMISSION + AWAIT for a peer reached through a FIRST-CLASS REFERENCE.
+    // The structured/raw scans above only discover a peer called by its DIRECT
+    // name; a peer reached via `const p = groupByJob; p(rows)` (or a dispatch
+    // table) is invisible to them, so the peer callable would never be emitted and
+    // emit-expr's `await p(rows)` would reference an undefined symbol. Resolve each
+    // server-fn body's indirect callees LOCALLY (the same resolver route-inference
+    // used to ESCALATE them, so placement and emission agree), add every resolved
+    // PEER to `_calledPeerNames` (→ its `async function` is emitted below), and
+    // record the alias names so emit-expr awaits the call. Same-file peers only —
+    // a peer is a same-file server fn by construction.
+    for (const { fnNode: _sfn } of serverFns) {
+      const _res = resolveIndirectCallees(_sfn?.body, fnParamNameSet(_sfn?.params));
+      // EMISSION (`_calledPeerNames`) is file-wide: a peer is emitted if ANY body
+      // indirect-calls it. AWAIT (`_peerAliasByFn`) is PER-BODY (FIX C).
+      for (const _c of indirectResolvedCallees(_res)) {
+        if (_serverFnPeerNames.has(_c)) _calledPeerNames.add(_c);
+      }
+      const _aliases = aliasNamesResolvingTo(_res, _serverFnPeerNames);
+      if (_aliases.size > 0 && _sfn) _peerAliasByFn.set(_sfn, _aliases);
+    }
   }
 
   for (const { fnNode, route } of serverFns) {
@@ -3063,6 +3098,7 @@ export function generateServerJs(
         insideFunctionBody: true,
         // Issue #1: resolve sibling server-fn calls to in-process peer callables.
         serverFnNames: _serverFnPeerNames,
+        serverFnPeerAliasNames: _peerAliasesFor(fnNode),
         syncPeerCalls: _syncPeerCalls,
         // Issue #26: auto-await Promise-returning stdlib import calls.
         asyncCalleeMap: _asyncCalleeMap,
@@ -3459,6 +3495,7 @@ export function generateServerJs(
         insideFunctionBody: true,
         // Issue #1: resolve sibling server-fn calls to in-process peer callables.
         serverFnNames: _serverFnPeerNames,
+        serverFnPeerAliasNames: _peerAliasesFor(fnNode),
         syncPeerCalls: _syncPeerCalls,
         foreignCrossingErrors: _foreignCrossingErrors,
         // Issue #26: auto-await Promise-returning stdlib import calls.
@@ -3483,7 +3520,7 @@ export function generateServerJs(
               // would otherwise produce `/_* sql-ref:N *_/` from the SQL-placeholder
               // ExprNode that safeParseExprToNode preprocesses `?{}` into.
               if (stmt.sqlNode && stmt.sqlNode.kind === "sql") {
-                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", channelOwnedCells: _channelOwnedCells, serverFnNames: _serverFnPeerNames, syncPeerCalls: _syncPeerCalls })) ?? "";
+                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", channelOwnedCells: _channelOwnedCells, serverFnNames: _serverFnPeerNames, serverFnPeerAliasNames: _peerAliasesFor(fnNode), syncPeerCalls: _syncPeerCalls })) ?? "";
                 const sqlExpr = sqlStmt.replace(/;\s*$/, "");
                 lines.push(`    const _scrml_cps_return = ${sqlExpr};`);
                 continue;
@@ -3492,7 +3529,7 @@ export function generateServerJs(
               // The literal string "undefined" used as a fallback default would interpolate
               // the JS `undefined` keyword into compiled output, which is forbidden in scrml-
               // semantics output (OQ-5(a) ratified S90 → use "null" instead).
-              const initExpr = emitExprField(stmt.initExpr, stmt.init ?? "null", { mode: "server", serverFnNames: _serverFnPeerNames, syncPeerCalls: _syncPeerCalls });
+              const initExpr = emitExprField(stmt.initExpr, stmt.init ?? "null", { mode: "server", serverFnNames: _serverFnPeerNames, serverFnPeerAliasNames: _peerAliasesFor(fnNode), syncPeerCalls: _syncPeerCalls });
               lines.push(`    const _scrml_cps_return = ${initExpr};`);
               continue;
             }
@@ -3637,6 +3674,7 @@ export function generateServerJs(
         insideFunctionBody: true,
         // Issue #1: resolve sibling server-fn calls to in-process peer callables.
         serverFnNames: _serverFnPeerNames,
+        serverFnPeerAliasNames: _peerAliasesFor(fnNode),
         syncPeerCalls: _syncPeerCalls,
         foreignCrossingErrors: _foreignCrossingErrorsNonCsrf,
         // Issue #26: auto-await Promise-returning stdlib import calls.
@@ -3697,7 +3735,7 @@ export function generateServerJs(
               // the useBaselineCsrf=true CPS site above. Route SQL-init reactive
               // decls through emit-logic case "sql" via the structured sqlNode.
               if (stmt.sqlNode && stmt.sqlNode.kind === "sql") {
-                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", channelOwnedCells: _channelOwnedCellsNonCsrf, serverFnNames: _serverFnPeerNames, syncPeerCalls: _syncPeerCalls })) ?? "";
+                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", channelOwnedCells: _channelOwnedCellsNonCsrf, serverFnNames: _serverFnPeerNames, serverFnPeerAliasNames: _peerAliasesFor(fnNode), syncPeerCalls: _syncPeerCalls })) ?? "";
                 const sqlExpr = sqlStmt.replace(/;\s*$/, "");
                 lines.push(`    const _scrml_cps_return = ${sqlExpr};`);
                 continue;
@@ -3706,7 +3744,7 @@ export function generateServerJs(
               // The literal string "undefined" used as a fallback default would interpolate
               // the JS `undefined` keyword into compiled output, which is forbidden in scrml-
               // semantics output (OQ-5(a) ratified S90 → use "null" instead).
-              const initExpr = emitExprField(stmt.initExpr, stmt.init ?? "null", { mode: "server", serverFnNames: _serverFnPeerNames, syncPeerCalls: _syncPeerCalls });
+              const initExpr = emitExprField(stmt.initExpr, stmt.init ?? "null", { mode: "server", serverFnNames: _serverFnPeerNames, serverFnPeerAliasNames: _peerAliasesFor(fnNode), syncPeerCalls: _syncPeerCalls });
               lines.push(`    const _scrml_cps_return = ${initExpr};`);
               continue;
             }
@@ -3892,6 +3930,9 @@ export function generateServerJs(
       const expr = emitExprField(null, bodyRaw, {
         mode: "server",
         serverFnNames: _serverFnPeerNames,
+        // #284 (FIX C): an <endpoint> arm body is a single value-expression, not a
+        // server-fn body with local aliases — no per-body peer aliases apply.
+        serverFnPeerAliasNames: _EMPTY_PEER_ALIASES,
         syncPeerCalls: _syncPeerCalls,
       } as unknown as EmitExprContext);
       // §61.10 — a multi-statement bare body is NOT yet lowered (a future wave).
@@ -4143,6 +4184,7 @@ export function generateServerJs(
         declaredNames: new Set<string>(_peerInfo.paramNames),
         insideFunctionBody: true,
         serverFnNames: _serverFnPeerNames,
+        serverFnPeerAliasNames: _peerAliasesFor(_peerInfo.fnNode),
         syncPeerCalls: _syncPeerCalls,
         // Issue #26: auto-await Promise-returning stdlib import calls.
         asyncCalleeMap: _asyncCalleeMap,
@@ -4706,6 +4748,7 @@ export function generateServerJs(
         insideFunctionBody: true,
         // Issue #1: resolve sibling server-fn calls to in-process peer callables.
         serverFnNames: _serverFnPeerNames,
+        serverFnPeerAliasNames: _peerAliasesFor(fnNode),
         syncPeerCalls: _syncPeerCalls,
         // Issue #26: auto-await Promise-returning stdlib import calls.
         asyncCalleeMap: _asyncCalleeMap,
