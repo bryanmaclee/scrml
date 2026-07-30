@@ -5,6 +5,8 @@
  * Asserts the EMITTED artifacts (the test env has NO live Postgres):
  *   (i)   the Postgres trigger + function DDL install string;
  *   (ii)  the LISTEN-bridge server JS (dedicated pg connection, LISTEN, re-SELECT, publish);
+ *   (ii-b) the NOTIFY target and the LISTEN target resolve to the SAME Postgres
+ *         channel for a name that is not already lowercase (g-pgnotify-listen-case-split);
  *   (iii) the client `__change` branch dispatching the three <onchange> arms + binding row/key;
  *   (iv)  node --check parse-proof of the emitted server + client JS;
  *   (v)   a mock-SQL notification test: simulate {op:INSERT,key} -> re-SELECT + publish fire;
@@ -163,7 +165,10 @@ describe("§38.13.7 (ii) LISTEN bridge server JS", () => {
     // dedicated pg connection + LISTEN
     expect(s).toContain('import("pg")');
     expect(s).toContain("new _PgClient({ connectionString: _SCRML_WATCHES_CONN })");
-    expect(s).toContain('_client.query("LISTEN scrml_orders_feed")');
+    // The channel name is double-quoted so Postgres does not case-fold it (see the
+    // g-pgnotify-listen-case-split describe block below). For an all-lowercase name
+    // the quoted form is semantically identical to the old bare `LISTEN scrml_x`.
+    expect(s).toContain('_client.query("LISTEN \\"scrml_orders_feed\\"")');
     // re-SELECT by PK (parameterized), variant map, publish frame
     expect(s).toContain('_scrml_sql.unsafe("SELECT * FROM \\"orders\\" WHERE \\"id\\" = $1", [_p.key])');
     expect(s).toContain('_p.op === "INSERT" ? "Inserted" : "Updated"');
@@ -181,6 +186,112 @@ describe("§38.13.7 (ii) LISTEN bridge server JS", () => {
     expect(rr.client.includes("pg_notify")).toBe(false);
     expect(rr.client.includes("LISTEN")).toBe(false);
     expect(rr.client.includes("_scrml_sql")).toBe(false);
+    rr.cleanup();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// (ii-b) g-pgnotify-listen-case-split — the NOTIFY target and the LISTEN target
+// must name the SAME Postgres channel for a channel name that is NOT already
+// all-lowercase. Postgres preserves the case of a string LITERAL (what the
+// trigger's `pg_notify('…')` carries) but folds an UNQUOTED IDENTIFIER (what
+// `LISTEN <name>` takes) to lower case, so a camelCase `<channel name>` used to
+// notify `scrml_ordersFeed` and listen on `scrml_ordersfeed` — zero rows, no
+// error (both a listener-less NOTIFY and an un-notified LISTEN are legal PG
+// no-ops). Every pre-existing fixture is lowercase-kebab, where the fold is a
+// no-op, which is exactly why 21k green tests never saw it: a lowercase-only
+// test proves nothing here.
+// ---------------------------------------------------------------------------
+
+/** camelCase `<channel name>` — the case the fold used to break. */
+const SAMPLE_CAMEL = `<program db="postgres://localhost/app">
+  <schema>
+    orders {
+      id: integer primary key
+      status: text
+      total: real
+    }
+  </schema>
+  <channel name="ordersFeed" watches=orders>
+      <onchange>
+          <Inserted(row) : { @orders = [...@orders, row] }>
+          <Updated(row) : { @orders = @orders.map(r => r.id == row.id ? row : r) }>
+          <Deleted(key) : { @orders = @orders.filter(r => r.id != key) }>
+      </onchange>
+  </channel>
+</program>`;
+
+/**
+ * Pull the NOTIFY target and the LISTEN target out of emitted server JS and
+ * resolve each to the channel name **Postgres will actually use**, applying PG's
+ * own rule: a quoted identifier keeps its case, a bare identifier folds to lower.
+ * Asserting on the RESOLVED pair (rather than on a literal snapshot) is what makes
+ * this a test of the invariant — un-quote the LISTEN and it fails by construction.
+ */
+function resolveNotifyAndListenTargets(serverJs) {
+  const notify = /pg_notify\('([^']+)'/.exec(serverJs);
+  const listen = /_client\.query\("LISTEN (.*?)"\)\)/.exec(serverJs);
+  if (!notify || !listen) return { notifyTarget: null, listenTarget: null, listenIsQuoted: null };
+  // Undo the JS-string-literal escaping to recover the SQL text PG receives.
+  const listenSql = listen[1].replace(/\\"/g, '"');
+  const listenIsQuoted = listenSql.startsWith('"') && listenSql.endsWith('"');
+  return {
+    notifyTarget: notify[1], // a SQL string literal — case preserved by PG
+    listenTarget: listenIsQuoted ? listenSql.slice(1, -1) : listenSql.toLowerCase(), // PG folds a bare ident
+    listenIsQuoted,
+  };
+}
+
+describe("§38.13.7 (ii-b) NOTIFY/LISTEN name the same PG channel for a camelCase <channel name>", () => {
+  test("camelCase: the resolved NOTIFY channel and the resolved LISTEN channel are EQUAL", () => {
+    const rr = compileToDir(SAMPLE_CAMEL);
+    expect(rr.errors).toEqual([]);
+    const { notifyTarget, listenTarget, listenIsQuoted } = resolveNotifyAndListenTargets(rr.server);
+    // Both sites were found at all (guards a silent regex miss passing as equal).
+    expect(notifyTarget).toBe("scrml_ordersFeed");
+    expect(listenIsQuoted).toBe(true);
+    expect(listenTarget).toBe(notifyTarget);
+    rr.cleanup();
+  });
+
+  test("camelCase: the author's casing survives — no lower-folded variant is emitted anywhere", () => {
+    const rr = compileToDir(SAMPLE_CAMEL);
+    // Quoting (not lower-casing) was the chosen direction: the wire channel name
+    // stays the name the author wrote, and two case-distinct channel names stay
+    // distinct instead of merging into one feed.
+    expect(rr.server).toContain("pg_notify('scrml_ordersFeed'");
+    expect(rr.server).toContain('_client.query("LISTEN \\"scrml_ordersFeed\\"")');
+    expect(rr.server.includes("scrml_ordersfeed")).toBe(false);
+    rr.cleanup();
+  });
+
+  test("camelCase: the LISTEN target IS buildWatchesTriggerDDL's returned notifyChannel (threaded, not rebuilt)", () => {
+    // The split-key-pair root cause: the LISTEN site rebuilt `scrml_${ident}` by
+    // hand while the DDL builder already returned the value. Pin the threading.
+    const returned = buildWatchesTriggerDDL("ordersFeed", "orders", "id").notifyChannel;
+    expect(returned).toBe("scrml_ordersFeed");
+    const boot = emitChannelWatchesServerBoot(
+      astWithSynth(SAMPLE_CAMEL).chans, "postgres://localhost/app", [], "app.scrml",
+    ).join("\n");
+    const { listenTarget } = resolveNotifyAndListenTargets(boot);
+    expect(listenTarget).toBe(returned);
+  });
+
+  test("regression — the all-lowercase name still agrees (the fold was a no-op there)", () => {
+    const rr = compileToDir(SAMPLE);
+    const { notifyTarget, listenTarget } = resolveNotifyAndListenTargets(rr.server);
+    expect(notifyTarget).toBe("scrml_orders_feed");
+    expect(listenTarget).toBe(notifyTarget);
+    rr.cleanup();
+  });
+
+  test("an UPPERCASE-containing name that is not camelCase also agrees (e.g. SCREAMING_SNAKE)", () => {
+    const rr = compileToDir(SAMPLE_CAMEL.replace('name="ordersFeed"', 'name="ORDERS_FEED"'));
+    expect(rr.errors).toEqual([]);
+    const { notifyTarget, listenTarget, listenIsQuoted } = resolveNotifyAndListenTargets(rr.server);
+    expect(notifyTarget).toBe("scrml_ORDERS_FEED");
+    expect(listenIsQuoted).toBe(true);
+    expect(listenTarget).toBe(notifyTarget);
     rr.cleanup();
   });
 });

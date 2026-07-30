@@ -876,7 +876,17 @@ export function emitChannelServerJs(node: any, errors: CGError[], filePath: stri
 // in client output. Postgres-only; gated on a resolved `_rowChangeSynth` + PK.
 // ---------------------------------------------------------------------------
 
-/** Sanitise an identifier into a safe lowercase SQL/JS identifier segment. */
+/**
+ * Sanitise an identifier into a safe SQL/JS identifier segment.
+ *
+ * **Case is PRESERVED** — the author's `<channel name>` casing survives into the
+ * emitted names, which is what lets the NOTIFY channel carry the name the author
+ * wrote. (This docstring previously claimed "lowercase"; it never lowercased, and
+ * the false claim is what made the `LISTEN` case-fold below look harmless. Do not
+ * "restore" a `.toLowerCase()` here: two channel names differing only in case are
+ * distinct scrml channels, and folding them would merge their feeds — one topic
+ * receiving another feed's rows, which is worse than the bug this replaced.)
+ */
 function sqlSafeIdent(name: string): string {
   const s = String(name ?? "").replace(/[^A-Za-z0-9_]/g, "_");
   return (/^[0-9]/.test(s) ? "_" + s : s) || "ch";
@@ -890,6 +900,15 @@ function sqlSafeIdent(name: string): string {
  * `CREATE OR REPLACE FUNCTION` + `json_build_object` set the floor at **PG 9.4+**.
  * The trigger `pg_notify`s only the primary key (Postgres NOTIFY caps at 8000
  * bytes); the listener re-SELECTs the full row (§38.13.7).
+ *
+ * The returned `notifyChannel` is the **single source of truth** for the feed's
+ * Postgres channel name and MUST be threaded to the `LISTEN` site rather than
+ * rebuilt there (`emitChannelWatchesServerBoot` does exactly that). Rebuilding it
+ * is what produced [[g-pgnotify-listen-case-split]]: this function bakes the name
+ * into a `pg_notify('…')` STRING LITERAL, where Postgres preserves case exactly,
+ * while `LISTEN <bare ident>` folds to lower case — so a camelCase channel name
+ * notified `scrml_ordersFeed` and listened on `scrml_ordersfeed` and the feed
+ * silently delivered nothing. The `LISTEN` side now double-quotes this value.
  */
 export function buildWatchesTriggerDDL(
   safeName: string,
@@ -953,18 +972,26 @@ export function emitChannelWatchesServerBoot(
   lines.push("const _SCRML_WATCHES_RECONNECT_MS = 2000;");
   lines.push("");
 
+  // ONE derivation per feed, consumed by BOTH the trigger-install block (1) and
+  // the LISTEN bridge (2). Deriving the names once — and in particular taking the
+  // NOTIFY channel name from `buildWatchesTriggerDDL`'s RETURN rather than
+  // rebuilding it at the LISTEN site — is what keeps the NOTIFY/LISTEN pair from
+  // drifting. Two independent derivations of one key is the split-key-pair shape
+  // ([[g-split-key-pair-class]]) that produced [[g-pgnotify-listen-case-split]].
+  const derived = feeds.map((node) => {
+    const { safeName, topic } = extractChannelAttrs(node, projectReconnectDefault);
+    const synth = node._rowChangeSynth;
+    const ident = sqlSafeIdent(safeName);
+    return { synth, topic, ident, ddl: buildWatchesTriggerDDL(ident, synth.table, synth.pkColumn) };
+  });
+
   // (1) Trigger install — one function + trigger pair per feed, idempotent.
   lines.push("async function _scrml_watches_install_triggers() {");
   lines.push("  try {");
-  for (const node of feeds) {
-    const { name, safeName, topic } = extractChannelAttrs(node, projectReconnectDefault);
-    void name; void topic;
-    const synth = node._rowChangeSynth;
-    const ident = sqlSafeIdent(safeName);
-    const { fnDDL, dropTrigDDL, createTrigDDL } = buildWatchesTriggerDDL(ident, synth.table, synth.pkColumn);
-    lines.push(`    await _scrml_sql.unsafe(${JSON.stringify(fnDDL)});`);
-    lines.push(`    await _scrml_sql.unsafe(${JSON.stringify(dropTrigDDL)});`);
-    lines.push(`    await _scrml_sql.unsafe(${JSON.stringify(createTrigDDL)});`);
+  for (const { ddl } of derived) {
+    lines.push(`    await _scrml_sql.unsafe(${JSON.stringify(ddl.fnDDL)});`);
+    lines.push(`    await _scrml_sql.unsafe(${JSON.stringify(ddl.dropTrigDDL)});`);
+    lines.push(`    await _scrml_sql.unsafe(${JSON.stringify(ddl.createTrigDDL)});`);
   }
   lines.push("  } catch (_e) {");
   lines.push('    console.error("[scrml] watches= trigger install failed:", _e && _e.message);');
@@ -974,13 +1001,12 @@ export function emitChannelWatchesServerBoot(
 
   // (2) Per-feed LISTEN bridge (dedicated pg session connection).
   const listenFnNames: string[] = [];
-  for (const node of feeds) {
-    const { safeName, topic } = extractChannelAttrs(node, projectReconnectDefault);
-    const synth = node._rowChangeSynth;
-    const ident = sqlSafeIdent(safeName);
+  for (const { synth, topic, ident, ddl } of derived) {
     const listenFn = `_scrml_watches_listen_${ident}`;
     listenFnNames.push(listenFn);
-    const notifyChannel = `scrml_${ident}`;
+    // THREADED, never rebuilt — this is the exact string the trigger's
+    // `pg_notify('…')` literal carries (see buildWatchesTriggerDDL).
+    const notifyChannel = ddl.notifyChannel;
     const qT = pgQuoteIdent(synth.table);
     const qPk = pgQuoteIdent(synth.pkColumn);
     lines.push(`// LISTEN bridge for <channel watches=${JSON.stringify(synth.table)}> topic ${JSON.stringify(topic)}`);
@@ -1021,7 +1047,16 @@ export function emitChannelWatchesServerBoot(
     lines.push(`        _server.publish(${JSON.stringify(topic)}, JSON.stringify({ __type: "__change", op: _variant, row: ${_rowExpr} }));`);
     lines.push(`      } catch (_e) {}`);
     lines.push(`    });`);
-    lines.push(`    _client.connect().then(() => _client.query(${JSON.stringify(`LISTEN ${notifyChannel}`)})).catch(_retry);`);
+    // The channel name MUST be double-quoted here. `pg_notify('scrml_ordersFeed')`
+    // (a string literal, in the trigger body) preserves case exactly, but `LISTEN`
+    // is a statement taking an IDENTIFIER, and Postgres folds an unquoted identifier
+    // to lower case — so a bare `LISTEN scrml_ordersFeed` subscribes to
+    // `scrml_ordersfeed` and never hears the NOTIFY ([[g-pgnotify-listen-case-split]]).
+    // Quoting (rather than lower-casing both sides) keeps the wire channel name equal
+    // to the name the author wrote, and keeps two case-distinct channel names distinct.
+    // For an already-lowercase name the quoted form is semantically identical to the
+    // old bare form, so no deployed lowercase feed changes behaviour.
+    lines.push(`    _client.connect().then(() => _client.query(${JSON.stringify(`LISTEN ${pgQuoteIdent(notifyChannel)}`)})).catch(_retry);`);
     lines.push(`  }).catch((_e) => {`);
     lines.push(`    console.error("[scrml] realtime watches= feed needs the 'pg' package (Bun.SQL has no LISTEN API):", _e && _e.message);`);
     lines.push(`  });`);
