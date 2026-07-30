@@ -1,6 +1,9 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-07-28T16:40:00Z  commit: 115e8b1b
+# updated: 2026-07-30T07:41:02Z  commit: d0763cff
+# NOTE (S299): TARGETED — external deps RE-VERIFIED unchanged (no manifest diff this window). Added:
+# the `escalationReasons` producer/consumer graph, the §12.2 Trigger-3 loci, and the component-expand
+# row. Everything else carries its `115e8b1b` walk.
 
 ## MANIFEST SHAPE CHANGED THIS WINDOW — read this first
 
@@ -55,8 +58,9 @@ entirely first-party. The only manifest movement is the hoist + de-workspacing a
 | Parse (live) | ast-builder.js, expression-parser.ts | type-system.ts, symbol-table.ts, codegen. **`expression-parser.ts` now also exports `forEachIdentInExprNode`**, consumed by `emit-server.ts`'s D-5 module-const resolvability check. |
 | Parse (native, canary) | native-parser/*.js (paired w/ *.scrml) | native-walker/*, native-parser-canary/within-node-classifier.ts, lsp/handlers.js. ZERO diff this window. |
 | Tag-canonicalize (Stage 3.055 TC) | tag-canonicalizer.ts | landmark-tag.ts + api.js |
-| Component expand | component-expander.ts | validators/post-ce-invariant.ts, attribute-interpolation.ts, attribute-allowlist.ts |
-| Protect / route infer | protect-analyzer.ts, route-inference.ts | codegen/protect-egress.ts, codegen/egress-field-scan.ts (E-CG-001). **protect-analyzer.ts is the SOLE `E-PA-*` fire site (7 codes); `E-PA-002`'s message now leads with the `<schema>` + `scrml db-migrate` remedy (S292).** |
+| Component expand | component-expander.ts | validators/post-ce-invariant.ts, attribute-interpolation.ts, attribute-allowlist.ts. **Every downstream consumer that keys on `node.id` depends on this stage's per-expansion clone (S299)** — `codegen/emit-each.ts` (fence ids / `_scrml_each_renderers`), `codegen/chunk-namespace.ts` (id-derived tokens). `_deepCloneAst` is INTERNAL (not exported); its two callers are `expandComponentNode` (:2601) and `_cloneChannelDecl` (:4552). |
+| Protect / route infer | protect-analyzer.ts, route-inference.ts | codegen/protect-egress.ts, codegen/egress-field-scan.ts (E-CG-001). **protect-analyzer.ts is the SOLE `E-PA-*` fire site (7 codes); `E-PA-002`'s message leads with the `<schema>` + `scrml db-migrate` remedy (S292).** |
+| **§12.2 Trigger 3 — server-only import escalates (NEW, S299)** | **route-inference.ts** — `ESCALATION_SERVER_ONLY_MODULES` (:655) / `isEscalationServerOnlyModule` (:673) / `buildPerFileEscalationServerOnlyBindings` (:3330) / `collectServerOnlyBindingModules` (:3396) -> `importTriggers` -> `directTriggers` (:4184) | `RouteInfo.escalationReasons` -> `codegen/emit-server.ts`. **DO NOT confuse `ESCALATION_SERVER_ONLY_MODULES` with the pre-existing `SERVER_ONLY_SCRML_MODULES` (:578) two hundred lines above it** — that one feeds the `api.js` STDLIB-EXPORT-SEED async backstop, where over-inclusion is safe; escalation inverts that. See domain.map.md. |
 | Type check | type-system.ts, meta-checker.ts | dependency-graph.ts, auth-graph.ts |
 | Schema declaration checks | gauntlet-phase1-checks.js | `E-SCHEMA-010` (via `findNonLiteralSetItems`) + **NEW `E-SCHEMA-011`** (via `parseColumns`'s `malformedReferences` + `referencesHint`) — both helpers live in schema-differ.js |
 | Reachability / batch | reachability-solver.ts, batch-planner.ts, cps-batch-planner.ts | codegen |
@@ -191,6 +195,24 @@ db-authoritative.ts — are unaffected).
 | semdiff.ts | emit-identity Tier-0 compare; `canonicalizeChunkNamespaceToken` neutralizes per-path tokens. |
 | expression-parser.ts | `parseExprToNode`, `exprNodeCollectCallees`, **`forEachIdentInExprNode` (consumed by D-5)**. |
 
+## `escalationReasons` — the placement value that crosses the RI -> codegen seam (NEW section, S299)
+
+The complete producer/consumer set at this HEAD. It is SHORT, which is the point: an
+`EscalationReason` variant is a cross-module contract, not a local enum, and adding one touches every
+row below.
+
+| Role | Site | What it does |
+|---|---|---|
+| TYPE | `route-inference.ts:262` (`RouteInfo.escalationReasons: EscalationReason[]`) + the header contract at `:14` (*"empty if client"*) | the union. Kinds in use: `explicit-annotation`, `server-only-resource`, `protected-field`, `session-access`, `channel-*`, `middleware-handle`. |
+| PRODUCER | `route-inference.ts:5512` (`escalationReasons: deduped`) | the main per-function assembly, deduped. |
+| PRODUCER | `route-inference.ts:5230` | the middleware-handle arm (`_handleEsc?.deduped ?? [{kind:"middleware-handle"}]`). |
+| CONSUMER | **`codegen/emit-server.ts:727`** (`isBodyOnlyEscalation`; the `escalationReasons` read is :728) | §12.6 library mode. **Gates on EVERY reason being `server-only-resource`** — the `.every()` that makes a NEW reason kind a breaking change: a fresh kind fails it and silently re-attaches an HTTP wrapper §12.6 says to drop. `:1777` carries the comment recording that expectation. |
+| CONSUMER | `describeServerTrigger` (message rendering) | renders `server-only-resource` as "the server-only resource `<resourceType>`"; sorts `explicit-annotation` last, which is what makes `W-DEPRECATED-SERVER-MODIFIER` report a redundant `server` keyword correctly. |
+
+**This is why S299's Trigger 3 reuses `server-only-resource` with `resourceType` = the module
+specifier instead of adding a variant.** If you are about to add an `EscalationReason` kind, the
+`.every()` at `emit-server.ts:727` is the thing to check first.
+
 ## Colorless-async (Seam-A / Phase-2 combinators, GITI-037/GITI-038) — unchanged this window
 A plain (non-`?{}`) function calling a Promise-returning host primitive — directly, transitively, or
 as a returned closure — is compiler-classified `async` and auto-awaited; there is no `async`/`await`
@@ -207,7 +229,11 @@ fail-OPEN. The sibling reactive-cell destination (`@you = loadMe(1)`) was alread
 
 ## Defense-in-depth: stdlib async classification (api.js STDLIB-EXPORT-SEED)
 A server-only `scrml:*` re-export whose `{kind, isAsync}` cannot be resolved FAILS CLOSED (defaults
-to async). Unchanged.
+to async). Mechanism unchanged. **What CHANGED at S299 is what may be reused from it: nothing.**
+This backstop is driven by `route-inference.ts`'s `SERVER_ONLY_SCRML_MODULES` (:578), a set tuned for
+a decision where OVER-inclusion is free. §12.2 Trigger 3 placement is driven by the separate
+`ESCALATION_SERVER_ONLY_MODULES` (:655). Two sets, two safe-error directions, one file — see the
+Trigger-3 row in the pipeline table and domain.map.md's section.
 
 ## stdlib module pairing (compiler/runtime/stdlib/*.js <-> stdlib/*/index.scrml)
 21 modules: auth, compiler, cron, crypto, data, format, fs, host, http, math, mcp, oauth (+5
@@ -215,8 +241,31 @@ provider sub-modules), path, process, random, redis, regex, router, store, test,
 BOTH a canonical `.scrml` source and a JS host shim. Unchanged this window — but `stdlib/` is now
 part of the PUBLISHED package surface.
 
+**Client-safety classification of those 21 (S299, §12.2 Trigger 3 — derived from BOTH the
+`stdlib/<mod>/**.scrml` sources AND the shipped `compiler/runtime/stdlib/<mod>.js` shims):**
+
+| Escalation-server-only (10) | Why |
+|---|---|
+| `scrml:auth` | `Bun.password` (argon2id) |
+| `scrml:crypto` | `Bun.CryptoHasher`, `Bun.password` |
+| `scrml:cron` | `Bun.cron` |
+| `scrml:fs` | `node:fs` |
+| `scrml:process` | `process.{argv,cwd,env,exit,platform,memoryUsage}` |
+| `scrml:redis` | `import { redis, RedisClient } from "bun"` — **BARE `bun`, no colon** |
+| `scrml:store` | `bun:sqlite` |
+| `scrml:path` | `node:path` |
+| `scrml:mcp` | `node:fs` / `node:path` / `node:url` (the host surface is in the `.js` shim, not the `.scrml`) |
+| `scrml:oauth` | **no host reach at all** — transmits `client_secret`; module header says SERVER-SIDE ONLY |
+
+**Verified NOT members** against both limbs — do not "fix" these back in without re-running the
+derivation: `scrml:data` (pure transforms + compile-time type-as-argument primitives; 72 of the
+corpus's 116 server-only-module import sites and it ships a real client implementation) and
+`scrml:http` (fetch wrappers; `fetch` is browser-native and the module takes no credential of its
+own). **A hand-maintained derived list rots silently** — that is the `docs/FACTS.md` lesson, and it
+is why the two membership limbs are recorded next to the list in the source.
+
 ## Tags
-#scrml #map #dependencies #module-graph #stdlib #chunk-namespace #cell-accessor-rename #detect-runtime-chunks #post-emit-chunk-gates #runtime-chunks #chunk-dependencies #fnv1a #semdiff #pipeline #bun #acorn #sql-lex #tenant-egress #tenant-floor #theme-reset #content-hash #colorless-async #async-combinators #on-mount #gh237 #scheduling #writer-ownership #bind-value #i225 #directive-is-form-value #batch-hoist #session-establishment #outlet #one-landmark #shell-composition #esm-chunks #module-format #each-fence #dist-space #source-space #d4 #d5 #forward-index #server-import-unemitted #dbauth #db-migrate #sql-table-refs #queried-table-grants #quoteIdent #sql-ident #navigate-wave1c #chunk-loading-depth-counter #tailwind-outline #e-schema-011 #npm-publishable #no-workspaces
+#scrml #map #dependencies #trigger-3 #escalation-server-only #two-set-distinction #escalation-reasons #is-body-only-escalation #stdlib-client-safety #node-id-freshness #module-graph #stdlib #chunk-namespace #cell-accessor-rename #detect-runtime-chunks #post-emit-chunk-gates #runtime-chunks #chunk-dependencies #fnv1a #semdiff #pipeline #bun #acorn #sql-lex #tenant-egress #tenant-floor #theme-reset #content-hash #colorless-async #async-combinators #on-mount #gh237 #scheduling #writer-ownership #bind-value #i225 #directive-is-form-value #batch-hoist #session-establishment #outlet #one-landmark #shell-composition #esm-chunks #module-format #each-fence #dist-space #source-space #d4 #d5 #forward-index #server-import-unemitted #dbauth #db-migrate #sql-table-refs #queried-table-grants #quoteIdent #sql-ident #navigate-wave1c #chunk-loading-depth-counter #tailwind-outline #e-schema-011 #npm-publishable #no-workspaces
 
 ## Links
 - [primary.map.md](./primary.map.md)

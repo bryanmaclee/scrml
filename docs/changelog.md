@@ -2,6 +2,51 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S299 (2026-07-29/30) — bryan · ASUS-Vivobook — Trigger 3 wired, a CE node-id collision root-caused, and the adversarial gate catching four leaks in our own landing
+
+Eight PRs. The session's substance was §12.2 Trigger 3 — spec'd since forever, ruled at S280, never
+wired — plus two ledger-integrity fixes and a green-compile data-correctness bug found by reproducing
+a "latent LOW" that turned out to be neither.
+
+The headline is a process one. The mandated S239 adversarial pass was reported unavailable and was
+not: `/code-review ultra` is user-triggered-only, but `/security-review` was reachable all along. Run
+on the Trigger-3 landing, it found **four confidentiality evasions in a fix already reported green** —
+a call inside a lambda, a nested `function` declaration, a bare callback reference, and an indirect
+alias, each compiling exit 0 with the caller's secret in the client bundle and a real `Bun.password.hash`
+argon2id implementation in the browser runtime. The root was matching CALLS in `callees`, whose walker
+returns at `case "lambda"`. Fixed with a Trigger-3-only deep walk, because the shared call-graph path
+must not be widened (it also drives Step 5c caller-context propagation and E-ROUTE-001).
+
+- **#268 — §12.2 Trigger 3 wired.** A server-only stdlib import now escalates the function that uses
+  it. Closes `g-trigger-3-server-only-import-does-not-escalate` (HIGH) and, by construction, D-6
+  `g-scrml-store-not-classified-server-only` (HIGH) and `g-spec-12-2-trigger3-enumeration-stale` (LOW).
+  A second, narrower `ESCALATION_SERVER_ONLY_MODULES` was derived rather than reusing the async set —
+  reusing it was measured to escalate 72 corpus import sites of correct client code. The membership
+  criterion gained a second limb (**credential handling**) after `scrml:oauth`, which has zero host
+  reaches, was found shipping `client_secret` to the browser.
+- **#273 — per-expansion node ids in the component expander.** A component containing an `<each>`,
+  instantiated twice, rendered the wrong list in one panel and nothing in the other, with a green
+  compile. Root: the registry's parsed body is shared and its ids come from a re-parse numbering from
+  zero, so instantiations — and two *different* components — collided. The adversarial pass changed
+  the fix before landing (memoized cloner to preserve `bodyChildren`/`templateChildren` aliasing; a
+  loud throw instead of by-reference pass-through).
+- **#270 — `W-AUTH-MIDDLEWARE-AUTO-INJECTED` allocated**, splitting `W-AUTH-001`'s undocumented
+  second meaning out per the S297 `E-IMPORT-007` precedent; and the §0 gap-counts parser made
+  fail-loud after it was found **silently dropping 14 markers, two of them open HIGHs** — a closed
+  status alternation meant unrecognised statuses did not match at all. Found by arithmetic.
+- **#269 — the four adopter issues triaged** (#261/#262/#263/#264), all PA-reproduced first.
+- **#271 / #272 — the `if=` Phase-2 prerequisite corrected twice**, ending root-caused into the
+  component expander, a subsystem neither the gap nor the scoping doc had named.
+- **#259 / #260 — S298-Peter's inherited PRs merged**, #260 via a hunk-only three-way on `hand-off.md`.
+
+**Concurrency note:** S299-Peter ran as a successor on Windows during this session and wrapped first (`3a295dff`, #276) — their block sits directly below this one, and **#262 was landed by them** (#275) shortly after this session triaged it. Gap counts below are as of this session's own landings.
+
+Gap counts moved HIGH 12→17, MED 74→81, LOW 40→38 — up, because the session made three adopter bugs
+real, surfaced two HIGHs the counter had been hiding, and raised one on evidence.
+
+Tests: 21,620 pass / 0 fail (unit + integration + conformance). Browser tier 34 fail = the documented
+pre-existing baseline, compared as failure-name SETS rather than counts. Cloud `gate` + `windows`
+green on every merge.
 ## S299 (2026-07-29) — Peter · Windows — adopter #262: `@form.isValid` in a function body silently blocked every form submit
 
 Single-arc session, successor to a live S299-bryan (disjoint footprint). Adopter GH #262 (DanceCard): the canonical Shape-2 form's submit guard `if (!@f.isValid) return` **fails closed and completely silently** — it emitted member access on the compound value object (`_scrml_reactive_get("f").isValid`), which projects field values only and has no `isValid`, so the read was `undefined`, `!undefined` was `true`, and the guard returned on every call. The form could never be submitted; the submit event fired, the handler ran, `preventDefault`, then returned — zero network, no console error. The **same** surface in binding position (`disabled=!@f.isValid`) already read the correct dotted synth cell.

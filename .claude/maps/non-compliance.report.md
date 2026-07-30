@@ -1,267 +1,250 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-07-28T17:35:00Z  commit: 115e8b1b
-# scan mode: INCREMENTAL_UPDATE (S297 map refresh over the `c700c435` -> `115e8b1b` window, 39 commits,
-#            carrying forward three sessions of owed landings: S292, S295, S296)
+# generated: 2026-07-30T07:41:02Z  commit: d0763cff
+# scan mode: INCREMENTAL_UPDATE (S299 map refresh over `115e8b1b` -> `d0763cff`, 13 commits, one session)
 
 Docs/specs/maps that do NOT match current code. Findings live here rather than being returned
-inline, because inline findings go stale unread.
+inline, because inline findings go stale unread. **Every CARRIED finding below was re-executed at
+this HEAD this pass — none is copied forward on trust.**
 
 ## NEW at this HEAD
 
-### N1. The MAP SET itself carried the third-party adopter identity the repo just scrubbed — FIXED THIS PASS
-`89db7981` ("chore(privacy): anonymize third-party adopter identity across the public tree")
-sanitized 47 files, moved 9 inbound correspondence files out of the public tree into
-`scrml-support/handOffs/adopter-confidential/`, and renamed 5 `spa-lists/` files. **`.claude/maps/`
-was not in that sweep** — and the maps ARE force-tracked (`git add -f`), so they publish with the
-repo. At scan start, 11 mentions of the named application survived across five map files:
-`primary.map.md` (4), `migrations.map.md` (4), `domain.map.md` (1), `schema.map.md` (1),
-`structure.map.md` (1).
-**Reason:** privacy / operator-directive violation, not doc drift.
-**Disposition:** SCRUBBED in every map rewritten this pass. Engineering rationale preserved verbatim
-throughout — only the identity was replaced ("an adopter" / "the adopter" / "adopter report").
-**Standing rule for future map passes: a map generation must not reintroduce it.** The adopter's
-bug reports stay, sanitized; the applications, their owner and their engineering artifacts do not.
+### N1. `g-maps-error-map-missing-diagnostics-and-emit-client` is marked RESOLVED; **half of it is**
+`docs/known-gaps.md:4619` carries `status=resolved` with a S297 closure note. Re-audited at
+`d0763cff`:
 
-### N2. STILL LEAKING — `hand-off.md` and `master-list.md` carry the scrubbed identity
-Two tracked files in the PUBLIC tree still name the application (`hand-off.md` at 3 sites: an open
-Q2 item, a BaaS-parity item, and a provenance note; `master-list.md` at 1 site, in a landed-commit
-line). **This is outside this refresh's write footprint** (`.claude/maps/` only), so it is reported,
-not fixed.
-**Reason:** incomplete privacy scrub in the public tree.
-**Suggested disposition:** same treatment as the 47 files in `89db7981` — neutral codename in
-`hand-off.md`'s two live items, and either sanitize or leave the `master-list.md` commit-title echo
-depending on whether the commit subject itself was rewritten upstream (it was not — `258ff020`'s
-subject still names it in git history, which cannot be rewritten on a pushed public branch; that is
-a separate, irreducible exposure worth an explicit operator decision rather than a silent carry).
+- **The `emit-client.ts` half (b) IS closed.** Re-verified by grep, not by reading the closure note:
+  `detectRuntimeChunks` :273, `POST_EMIT_HELPER_CHUNK_GATES` :2167, `runtime-chunks.ts`
+  `CHUNK_DEPENDENCIES` :384, `applyChunkDependencies` :392. Every line number in primary.map.md's row
+  still lands on its symbol. No action.
+- **The diagnostic-routing half (a) was closed with a CLAIM, not a measurement.** S297 added the two
+  family rows the two reporting lanes had needed (`E-PA-*`, `*-TAILWIND-*`) and then generalised:
+  error.map.md asserted its family table is *"keyed by PREFIX, so a code this map does not name
+  individually is still routed by its family."* **Mechanically re-derived at `d0763cff`: §34 carries
+  185 distinct code prefixes; the family table names 67. 118 have no row** — including `W-AUTH-*`,
+  `W-CG-*`, `W-IMPORT-*`, `W-STATE-*`, `E-RI-*`, `E-DG-*`, `E-PROTECT-*`, `I-AUTH-*`, `I-MATCH-*`.
 
-### N3. `cloud-maps` CI has failed **17 of 17 runs**, and prior map generations described it wrongly
-The scheduled nav-map regeneration workflow has failed every run since its first `workflow_dispatch`
-on 2026-07-15: **3 `workflow_dispatch` runs and all 14 daily schedules** through 2026-07-28. Meanwhile `build.map.md` and
-`infra.map.md` both described it as *"exists on branch `feat/cloud-maps-beachhead`, NOT merged into
-main, needs the `scrml-maps-bot` GitHub App + `MAPS_APP_ID`/`MAPS_APP_PRIVATE_KEY`"*. **Every clause
-of that was false at this HEAD:** it merged at `1971a87d` (2026-07-14), the App-token approach was
-replaced by the fine-grained `MAPS_PAT` at `b5ec120b`, and it is on a daily cron.
-**Reason:** map-vs-reality drift on the very automation that was supposed to keep the maps current —
-the compounding failure the `g-maps-*` gap called out.
-**Disposition:** both maps CORRECTED this pass; the full step list, design constraints and failure
-analysis now live in build.map.md. The failure cause itself is reported in the refresh summary and
-in build.map.md: agent errors on turn 1 after ~0.55-0.60s at **$0 cost** with zero permission
-denials, i.e. an API-level rejection of the first request (credential/entitlement/quota on
-`ANTHROPIC_API_KEY`), NOT a mapper-agent or repo-content fault. The workflow file has not changed
-since 2026-07-16 12:31, which is AFTER the last long-running (12m31s) run, so the workflow is not
-the regression. `show_full_output: false` suppresses the actual error text — flipping it (or adding
-`--debug` to `claude_args`) on one `workflow_dispatch` run is the one-line diagnostic.
-**Not fixed here:** `.github/` is outside this refresh's write footprint.
+**This session was the live proof.** The `W-AUTH-001` -> `W-AUTH-MIDDLEWARE-AUTO-INJECTED` split
+required both fire sites (`type-system.ts:10820` and `route-inference.ts:5648`). Neither code nor the
+`W-AUTH-*` prefix had any row in error.map.md; both loci were found by grep — **the exact failure the
+gap was filed for, recurring after the gap was marked resolved.**
 
-### N4. `docs/changes/navigate-wave1c-cross-chunk/` is no longer aspirational — the prior flag is RETIRED
-Prior reports listed this archive under "Aspirational-content inventory" with the line
-*"`W-NAV-CHUNK-LOAD-FAILED` has ZERO occurrences in `compiler/src/` and no §34 row. Any doc naming
-that code describes planned work."* **Both halves are now false.** The code fires from
-`runtime-template.js`'s `_scrml_nav_chunk_failed` (:2660-2667), §34 carries its row (`SPEC.md`
-:18912), and §20.8.2/§20.8.7 are amended to require the behaviour. error.map.md's "NOT implemented —
-do not add" note has been retired accordingly.
-**Reason:** resolved. Listed so the retraction is explicit and the old note is not re-propagated.
+**Reason:** map-vs-reality drift, self-inflicted — a false coverage claim is worse than an absent one
+because it stops the reader from running the grep that would work.
+**Fixed this pass:** claim withdrawn and replaced with the measured 67/185 figure; a `W-AUTH-*` row
+added naming BOTH owners and both files; lookup step 0 now routes to `error.generated.md`; step 1
+tells the reader to skip to grep rather than infer from an adjacent family. Residual (118 prefixes
+routed only via grep) is now STATED in the map instead of papered over.
+**Suggested disposition:** REOPEN the gap entry as `status=narrowed` with the half-closed split
+recorded, or file a successor. It is currently `resolved` and it is not.
 
-### N5. NEW aspirational-content entry — `docs/changes/navigate-wave1c-piece1-landmark/`
-A second parked navigate-wave1c archive sits beside the (now-built) cross-chunk one. Not
-content-verified this pass.
-**Reason:** uncertain — a dispatch archive whose sibling has since shipped is exactly the shape that
-gets misread as current.
-**What to check:** whether piece-1 landed under a different commit subject, or is genuinely still
-parked. `docs/changes/**` is excluded from content-mapping by scope, so this is a heads-up only.
+### N2. Four mechanical map indexes are stale, out-of-repo-generated, and were un-referenced
+`.claude/maps/` contains `error.generated.md` (353 E-codes -> `file:line`), `structure.generated.md`
+(155 files / 1128 exported symbols), `dependencies.generated.md` (488 local import edges) and
+`test.generated.md`. Three problems, all measured:
+1. **All four are stamped `2026-06-25 16:27`** — ~5 weeks and ~50 commits stale at this HEAD. Drift
+   is demonstrable: `error.generated.md` puts `E-PA-002` at `protect-analyzer.ts:790`; the emit is at
+   `:828`. `structure.generated.md` reports 155 `compiler/src` files; there are 188.
+2. **`error.generated.md` is E-codes ONLY** — zero `W-*`, zero `I-*`. A warning lookup there returns
+   nothing and looks like proof the code does not exist. That is a silent-wrong-answer shape.
+3. **No curated map referenced any of them** until this pass — four indexes sitting unused beside the
+   prose maps that route around them.
+**Reason:** stale generated artifact + a routing omission.
+**Fixed this pass (routing only):** primary.map.md and error.map.md now route to them WITH the
+staleness and the E-only limitation stated. **Not fixed:** the staleness itself.
+**Suggested disposition:** they are `@generated by flogence/scripts/mapgen.ts` — **an out-of-repo
+script this project's CI does not run.** Decide one of: (a) wire `mapgen.ts` into `cloud-maps` Stage
+1 alongside `state.ts` (deterministic, zero AI cost, and it would keep working while Stage 2 is red);
+(b) widen it to emit `W-`/`I-` codes and then wire it; (c) delete all four rather than ship indexes
+nobody regenerates. **Option (a)+(b) is the recommendation** — a mechanical code->`file:line` index
+is the single highest-value artifact in this whole map set for a grep-first agent, and it is the one
+piece that does not need an LLM to produce.
 
-## CARRIED — spec/doc vs code
+### N3. Two maps now exceed the project-mapper 300-content-line guideline
+`domain.map.md` 498 lines, `error.map.md` 453, `primary.map.md` 352, `build.map.md` 307. The mapper
+contract says "No map exceeds 300 content lines. Introduce grouping before hitting that limit."
+**Reason:** accumulated per-window narrative. The growth is real content, not padding — but the
+contract's own remedy (grouping) has not been applied for several windows.
+**Suggested disposition:** at the next FULL refresh, split `domain.map.md`'s three security-tier
+sections (§14.8.9/.10/.11) into a `security.map.md`, and move error.map.md's per-window "new fire
+sites" narrative into `docs/changelog.md` (which is already the authority for it) leaving only the
+routing tables. Not done here: an incremental pass should not restructure the map set.
 
-### C1. SPEC §52.15.5 still describes the retired `<div data-scrml-each-mount>`
-`compiler/SPEC.md:32121` says an omitted auth-scoped cell means "its `<div data-scrml-each-mount>`
-is left empty". Since `df6d269c` the top-level `<each>` mount is a comment fence
-`<!--scrml-each:N--><!--/scrml-each:N-->`; no `<div data-scrml-each-mount>` is emitted for a
-top-level each at all. **Re-verified at this HEAD — still present, single site.** The §52.15.5
-BEHAVIOUR is unchanged and correct (the fence is left unfilled); only the descriptive noun is stale.
-**Reason:** grep-mismatch (a normative doc naming an emitted shape the compiler no longer produces).
-**Suggested disposition:** update in place to "its each-mount fence is left unfilled". One clause; no
-ruling needed.
+## CARRIED — re-executed at this HEAD, all still true
 
-### C2. Nine live `W-LINT-*` codes have no §34 row — **re-verified at this HEAD, still open**
-`compiler/src/lint-ghost-patterns.js` carries **26 `code:` emit sites across 23 distinct codes**:
-`W-LINT-001..008` + `010..024`. §34 catalogs `W-LINT-001..008` + `010..015` (14). So
-**`W-LINT-016` … `W-LINT-024` — exactly nine — are live-but-uncatalogued.** The count of codes the
-compiler can EMIT therefore exceeds the §34 catalog total (799) by at least nine.
-**Correction to a plausible mis-read:** `W-LINT-009` is NOT a live code. A naive
-`grep -o "W-LINT-0[0-9]+"` finds it at :868, but that hit is the COMMENT *"(No separate entry for
-W-LINT-009 — W-LINT-004 subsumes it.)"*. Grep on `code:\s*"W-LINT-` to enumerate emit sites, not on
-the bare code string. The absence of `009` from §34 is correct, not a gap.
-**Reason:** spec-vs-impl gap.
-**Disposition:** catalog the nine, or rule them internal-only. Whichever is chosen, the §34 total
-should carry a footnote saying it counts the catalog, not the implementation.
+### C1. `hand-off.md` and `master-list.md` still carry the scrubbed third-party adopter identity
+Re-counted at `d0763cff`: **`hand-off.md` 3 sites, `master-list.md` 1 site**, unchanged from the
+S297 report. `.claude/maps/` is CLEAN (0 sites) and stayed clean through this pass.
+**Reason:** incomplete privacy scrub in the public tree (`89db7981` covered 47 files, not these two).
+**Suggested disposition:** unchanged from S297 — neutral codename in `hand-off.md`'s live items; the
+`master-list.md` echo is a commit TITLE that git history cannot rewrite on a pushed public branch,
+which is an irreducible exposure deserving an explicit operator decision rather than a silent carry.
 
-### C3. `compiler/SPEC-INDEX.md` — the bloat half RESOLVED, the CURRENCY half still open
-`0d95c364` (S290) did real work here: the ~72 KB inline amendment history (45% of a file that is a
-mandatory full-read at every Profile-A PA boot, none of it current truth) was **dereffed** to
-`scrml-support/archive/spec-index-changelog.md`, and the totals line became an `@generated` block
-regenerated by `scripts/regen-spec-index.ts` and gated by `--check` in CI `gate` + the pre-push
-currency hook. It now reads a correct `Total lines: 36,641 | Total sections: 65 + appendices`.
-**What is still open:** the top-of-file `> Last updated:` banner still reads **2026-07-20 (S273)**
-and narrates only the §14.8.10 tenant-floor landing. And `grep -c` for
-`db-authoritative|SECURITY DEFINER|RLS` across the whole file returns **0** — the entire §14.8.11
-tier (three normative sections, ~410 lines) has no Quick-Lookup entry and no Sections-table mention,
-five sessions after it landed. A dev agent searching the navigation index by topic for "RLS",
-"SECURITY DEFINER" or "db-migrate" finds nothing.
-**Reason:** currency gap — an omission, not a contradiction (the section-14 line range still
-numerically covers §14.8.11's location, so the index is not factually WRONG).
+### C2. `cloud-maps` CI — still red, unchanged, `.github/` untouched this window
+No workflow file changed between `115e8b1b` and `d0763cff`, so the 17/17 failure analysis in
+build.map.md stands verbatim: an API-level rejection of the first request (1 turn, ~0.6s, $0, zero
+permission denials), not a mapper fault. **The cost is now measurable across two windows:** this
+refresh, like the last one, was PA-dispatched by hand.
+**Suggested disposition:** the one-line diagnostic is still outstanding — flip `show_full_output:
+true` (or add `--debug`) and fire one `workflow_dispatch`. Tracked as
+`g-cloud-maps-ci-red-api-rejection` (MED, open).
+
+### C3. SPEC §52.15.5 still describes the retired `<div data-scrml-each-mount>`
+Re-grepped: exactly **1 site** in `compiler/SPEC.md`. Since `df6d269c` a top-level `<each>` mounts as
+a comment fence; no such `<div>` is emitted. The §52.15.5 BEHAVIOUR is correct — only the noun is
+stale. **Newly relevant this window:** §17.1 added a SECOND comment-node shape to that surface
+(`<!--scrml-if-row-->`), so a reader reconciling the spec's prose against emitted DOM now has two
+mismatches to trip over instead of one.
+**Suggested disposition:** one clause — "its each-mount fence is left unfilled". No ruling needed.
+
+### C4. Nine live `W-LINT-*` codes have no §34 row
+Re-enumerated at this HEAD by `grep -oE 'code:\s*"W-LINT-[0-9]+"'`: **23 distinct live codes**
+(`W-LINT-001..008` + `010..024`) in `compiler/src/lint-ghost-patterns.js`. §34 catalogs 14
+(`001..008` + `010..015`). **`W-LINT-016`..`024` — exactly nine — are live-but-uncatalogued**, so the
+count of codes the compiler can EMIT exceeds the §34 total (800) by at least nine.
+**Standing correction:** `W-LINT-009` is NOT live — the `:868` hit is the comment *"(No separate
+entry for W-LINT-009 — W-LINT-004 subsumes it.)"*. Grep on `code:\s*"W-LINT-`, not the bare string.
+**Suggested disposition:** catalog the nine or rule them internal-only; either way footnote the §34
+total as counting the CATALOG, not the implementation.
+
+### C5. `compiler/SPEC-INDEX.md` — the generated half is current, the AUTHORED half is not
+The `@generated` totals block tracked this window correctly (`36,641` -> `36,657`, CI-gated). But
+re-checked at this HEAD: `grep -c` for `db-authoritative|SECURITY DEFINER|RLS` across the whole file
+still returns **0**, and the top banner still reads **"Last updated: 2026-07-20 (S273)"**, narrating
+only the §14.8.10 tenant floor. Six sessions after §14.8.11 landed, a dev agent searching the
+navigation index by topic for "RLS", "SECURITY DEFINER" or "db-migrate" finds nothing.
+**Reason:** currency gap (omission, not contradiction — the section-14 line range still numerically
+covers §14.8.11).
 **Suggested disposition:** append Quick-Lookup rows for DB-authoritative / RLS / SECURITY DEFINER /
-db-migrate → §14.8.11, and either refresh the banner to the current HEAD's landings or retarget it
-to single-most-recent-session and accept that older deltas rotate out (bryan's call, not this map's).
-No `SPEC.md` change needed.
+db-migrate -> §14.8.11, and either refresh the banner or retarget it to single-most-recent-session.
+**Note the shape:** the generated half of this file is gated and stayed current; the authored half is
+ungated and rotted. That is an argument for widening the generator, not for another manual edit.
 
-### C4. `docs/tutorial.md` hardcodes `v0.7.0` at four sites while `package.json` is `0.7.1`
-Re-verified: :9, :646, :1039, :1121. `docs/FACTS.md` derives `compiler version` mechanically under a
-CI `--check` gate, so this is a hardcoded figure that has a generated authority.
-**Reason:** content-heuristic (a derived figure hardcoded in public content).
-**Suggested disposition:** replace the version labels with a FACTS.md reference. **Note the tutorial
-is NOT under the snippet gate as prose** — the S292 corpus widening covers `docs/website`, and even
-there it gates only that a page COMPILES, never that its prose is true.
+### C6. `docs/tutorial.md` hardcodes `v0.7.0` at four sites while `package.json` is `0.7.1`
+Re-counted: **4 sites**, unchanged. `docs/FACTS.md` derives `compiler version` mechanically under a
+CI `--check` gate, so this is a hardcoded figure that already has a generated authority.
+**Suggested disposition:** replace with a FACTS.md reference. The tutorial is NOT under the snippet
+gate as prose — even the widened `docs/website` corpus gates only that a page COMPILES.
 
-### C5. `compiler/native-parser/` parity — UNCONFIRMED, with one CONFIRMED gap
-`git diff --name-only c700c435..115e8b1b -- compiler/native-parser/` returns **0 files**. Zero diff
-across this window, and none was owed: every landing is emit-time, runtime, CLI or
-diagnostic-message, none of it parsing/AST-shape.
-- **Confirmed gap (unchanged):** `E-SCRIPT-001`. `parse-markup.js:983-995` carries an explicit
-  `<style>` → `E-STYLE-001` mirror and has NO `<script>` counterpart.
-- **Out of layer, no obligation this window:** D-4/D-5 coordinate space, the runtime-chunk gates,
-  navigate-wave1c, the per-item reconcile family, i225, the Tailwind `outline-*` registrations, the
-  queried-table grants — none of it touches the parser layer.
-- **Genuinely unconfirmed:** GITI-038/039 parity; `E-SCHEMA-011` (schema-column parsing is
-  `schema-differ.js`'s own line-based scan, not the native parser, so probably no obligation — but
-  that has not been executed).
-Do not upgrade to "drifted" without executing the native path; do not downgrade to "fine" on the
-grounds that nothing changed.
+### C7. `compiler/native-parser/` parity — zero diff, none owed, one CONFIRMED standing gap
+`git diff --name-only 115e8b1b..d0763cff -- compiler/native-parser/` returns **0 files**, and no
+parity was owed: this window's landings are placement inference (`route-inference.ts`), component
+expansion, emit-time (`emit-each`/`emit-lift`), runtime (`runtime-template.js`) and a build script.
+None touches the parsing/AST-shape layer.
+- **Confirmed standing gap:** `E-SCRIPT-001` has **0 occurrences** in `parse-markup.js`, which
+  carries an explicit `<style>` -> `E-STYLE-001` mirror and no `<script>` counterpart.
+- Do not upgrade to "drifted" without executing the native path; do not downgrade to "fine" on the
+  grounds that nothing changed.
 
 ## OPEN — code defects filed at this HEAD
 
-`docs/known-gaps.md` is the authority; these are cited for map-set completeness only, not re-derived.
+`docs/known-gaps.md` is the authority. Cited for map-set completeness only.
 
-**The map-routing gap this refresh was dispatched to close:**
-- `g-maps-error-map-missing-diagnostics-and-emit-client` (MED, was OPEN) — **BOTH HALVES ADDRESSED
-  THIS PASS.** (a) error.map.md now opens with an explicit lookup procedure and its family table
-  routes `E-PA-*` → protect-analyzer.ts and `*-TAILWIND-*` → tailwind-classes.js, with wiring,
-  suppression knob and stream (`lintDiagnostics[]`, not `errors[]`) spelled out. (b) primary.map.md's
-  Task-Shape Routing gained a runtime-chunk row naming `emit-client.ts` `detectRuntimeChunks` +
-  `POST_EMIT_HELPER_CHUNK_GATES` + `runtime-chunks.ts` `CHUNK_DEPENDENCIES`, and the two rows that
-  wrongly pointed chunk work at `codegen/index.ts` were corrected. structure.map.md,
-  dependencies.map.md and domain.map.md each carry the same locus. **The gap entry itself is not
-  edited by this pass** (`docs/` is outside the write footprint) — the PA should close it.
+**Filed BY this session's own work, and both are the honest kind (a fix that names its own residual):**
+- `g-fn-params-typed-string-actually-objects` — `FunctionDeclNode.params` is typed `string[]` but the
+  ast-builder produces `[{name}]` objects, so `new Set(fnNode.params).has(name)` silently returns
+  false forever. Fixed in `collectServerOnlyBindingModules`; **the identical latent bug remains in
+  `buildClosureCapturesForFunction`**, which feeds capture-taint — a different blast radius, filed
+  rather than folded in.
+- The `buildImportedServerFnNames` aliasing blind spot — it keys on `names` (the IMPORTED name) not
+  `specifiers[].local`, so every `import { x as y }` is missed. On the Trigger-3 path that would be a
+  client leak; on ITS path (async classification) it is a missing `await`. Separate fix, separate
+  blast radius, deliberately not folded in.
 
-**Carried, not re-verified this pass** (unrelated to this window's surfaces):
-- `g-composition-strip-eats-last-dep-script` (HIGH) — **likely superseded by GH #235**, which
-  replaced `codegen/index.ts`'s two `$`-anchored single-tag strips with one repeated-group
-  `(…)+\s*$` regex for exactly this failure. **Verify and close, or re-scope.**
-- `g-runtime-script-tag-not-depth-prefixed` (HIGH) — the runtime tag emits at depth 0. GH #235
-  rebuilt the composed script set including a depth-prefixed runtime tag, so this may also be
-  superseded. **Verify.**
-- `g-uptoroot-vs-distrel-anchor-mismatch` (MED) — two composition path-anchoring functions disagree
-  when the entry is not at the output base. **This is the same COORDINATE-SPACE class as D-4**
-  (see domain.map.md's new section); GH #235's `hostFilePath` parameter explicitly anchors on the
-  HOST rather than prefixing with `upToRoot` "for a shell that does not sit at the dist root, which
-  `upToRoot` assumes". **Verify whether that closes it.**
-- `g-item-derived-local-stale-in-per-item-effect-paths` — filed S288, appears **RESOLVED S293** by
-  `computeItemDerivedReplay` + its browser regression lock. **Verify and close.**
-- `g-nested-each-inner-binding-reads-outer-var-stale-on-reconcile` — appears **RESOLVED S294**.
-- `g-schema-predicate-arg-parse-edges` (MED), `g-dbauth-p2-caps-provenance` (MED),
-  `g-dbauth-secdef-owner-crud-all-tables` (LOW), `g-dbauth-no-request-path-test` (MED),
-  `g-dbauth-docs-no-do-not-mark-users-example` (LOW), `g-match-nofor-block-form-skips-exhaustiveness`
-  (MED), `g-tailwind-class-scan-skips-engine-non-initial-arms` (MED, filed `ed708cdf` this window).
-
-**Nine further items were filed this window** by `3a1f431c` ("file the nine deferred items from the
-three-lane adopter arc"). Not enumerated here — `docs/known-gaps.md` is the authority and it is
-current.
+**Gate-integrity items, unchanged and still open:**
+- `g-gate-tier-unit-test-red-local-green-cloud` (HIGH) — a unit test inside the BLOCKING gate's own
+  scope fails locally while cloud `gate` is green on the same content.
+- `g-ci-does-not-run-root-level-test-files` (MED) — 13 of 14 root-level `compiler/tests/` files are
+  executed by no workflow, and `ci.yml:82`'s step NAME claims canary coverage its `:83` command does
+  not provide.
+- `g-cloud-maps-ci-red-api-rejection` (MED) — see C2.
 
 ## RESOLVED since the prior report
 
-- **The §34 catalog count advanced 795 → 799**, `comm` set-diff verified, +4/-0: `E-SCHEMA-011`,
-  `W-SCHEMA-CONSTRAINT-TIGHTENED`, `W-SCHEMA-CONSTRAINT-DRIFT-UNAPPLIED`, `W-NAV-CHUNK-LOAD-FAILED`.
-  All four have live fire sites, verified by grep. See error.map.md.
-- **`W-SERVER-IMPORT-UNEMITTED` is no longer blind to the class it exists to catch** (D-4, S296).
-  Both `api.js` reversal sites route through the dist-keyed forward index.
-- **`g-dbauth-migrate-no-grants-for-unmarked-identity-table`** (was HIGH) — closed S292 by the
-  queried-table grant branch. The residual (a query shape the bounded scanner cannot resolve) is
-  REPORTED to the operator, not silently skipped.
-- **`g-db-migrate-ignores-constraint-drift-on-existing-columns`** — closed S290; §38.6.2 rows 6/7/8
-  restored, with the §38.6.3 SQLite withheld-plan reporting fix beside it.
-- **The `references` silent-drop** — closed S290 as `E-SCHEMA-011`. An adopter had declared 34
-  foreign keys and gotten zero rows in `pg_constraint`, with no diagnostic.
-- **`g-estmt-missing-semicolon-no-source-span`** — closed S294 by the `tabSpan → span` lift in
-  `api.js`'s `collectErrors`; every TABError regains `:line:col` in the build/dev path.
-- **The `outline-*` Tailwind false-fire** (D-3) — closed. A typo-detector that cries wolf on a real
-  utility teaches adopters to ignore it, which is why this was a diagnostic BUG and not a gap.
-- **`E-PA-002`'s remedy** now leads with `<schema>` + `scrml db-migrate` instead of teaching adopters
-  to hand-write DDL against `bun:sqlite`.
-- **SPEC-INDEX bloat** — 45% of a mandatory-full-read file dereffed; totals now generated + CI-gated.
-- **Local pre-push now mirrors the cloud gate's cheap currency checks** (~261ms) — the S292 loop of
-  three CI-rejected pushes in one session was a MISSING GATE, not a memory failure. Deliberately
-  excludes `snippet-gate.js` (~48s): a hook that expensive gets bypassed, and a bypassed gate gets
-  deleted.
+- **The §34 catalog advanced 799 -> 800**, `comm` set-diff verified, +1/-0:
+  `W-AUTH-MIDDLEWARE-AUTO-INJECTED`. It is a SPLIT, not new behaviour — the fire already existed
+  under `W-AUTH-001`.
+- **`g-gap-counts-silently-drops-unrecognised-status`** (`docs/known-gaps.md:4621`) — closed, and
+  closed the right way: the gate was PROVEN to bite before landing (`status=totally-made-up` injected
+  into a real marker, `state.ts` threw and named the id, restored, confirmed green). That satisfies
+  `pa-base` §8's unproven-gate rule. Verified independently this pass: all 488 live `@gap` markers
+  use vocabulary the three status sets name, so the ledger is currently consistent with the parser.
+- **`g-trigger-3-server-only-import-does-not-escalate`** — closed by the S299 landing. Note for
+  anyone reading older docs: Trigger 3 was **RULED at S280 and BUILT at S299**; any doc dated between
+  those two that describes it as live behaviour was wrong at the time it was written.
+- **The `<each>` node-id collision** — closed for the `each-block` kind. The residual duplicate-id
+  families (defChildren-CSS, slot-fill, channel-inline, for/match) are REDUCED (28 files -> 16), not
+  eliminated, and the surviving kinds are `text`/`li`/`p`/`logic` only. Read the closure that way.
 
 ## Aspirational-content inventory (correctly located, flagged so no one mistakes it for shipped)
 
 Under `docs/changes/**`, the per-dispatch archive, excluded from content-mapping by scope. Listed
 only because they describe work that does NOT exist at this HEAD:
-- `docs/changes/esm-chunks/U4-BRIEF.md` + `progress.md` — U4/U5/U6 (cross-chunk navigation ON ESM, a
-  module-capable browser-test harness, the default-flip) are NOT built. `classic` is still the
-  default and the only conformance-tested format. **Note the sharpened distinction: cross-chunk
-  navigation IS built for CLASSIC (navigate-wave1c) — the esm variant is not.**
+- `docs/changes/esm-chunks/U4-BRIEF.md` + `progress.md` — U4/U5/U6 not built; `classic` is still the
+  default and the only conformance-tested format. Cross-chunk navigation IS built for CLASSIC.
 - `docs/changes/chunk-namespacing/{BRIEF,SCOPING}.md` — scoping for unbuilt work.
-- `docs/changes/navigate-wave1c-piece1-landmark/` — see N5; unverified.
-- `docs/changes/marketing-claim-gate/SCOPING.md` — U3+ of that arc is not built; `scripts/claim-gate.js`
-  exists but is deliberately NOT CI-wired (measure-mode). Only `snippet-gate.js`, `facts.ts --check`
-  and now `regen-spec-index.ts --check` are required checks.
-- **RETIRED from this list:** `docs/changes/navigate-wave1c-cross-chunk/` — that work IS built. See N4.
-- **RETIRED from this list:** the `db-authoritative-{m1,m2,p2}` archives — that work IS built.
+- `docs/changes/navigate-wave1c-piece1-landmark/` — still unverified (carried from S297 N5).
+- `docs/changes/marketing-claim-gate/SCOPING.md` — U3+ not built; `scripts/claim-gate.js` exists but
+  is deliberately NOT CI-wired.
+- **NEW this window, and correctly labelled:** `docs/changes/if-mount-unmount-phase2/SCOPING.md`
+  describes Phase-2 work that is **not built** — Phase 2's prerequisite was re-diagnosed twice in one
+  session (`c1a9fde7` then `6271e693`) and root-caused to the CE node-id collision, which is now
+  fixed, so this doc's PREMISE has changed under it. Scoping-doc, correctly located, but read the two
+  commits before treating any of its scoping as current.
+- `docs/changes/maps-refresh-s297-2026-07-28/BRIEF.md` — NEW, the archived dispatch prompt for the
+  PREVIOUS map refresh. Historical by construction; do not read it as a spec for this one.
+
+## Compliant — new docs this window, checked
+
+- `docs/audits/s34-meaning-axis-2026-07-28.md` — frontmatter `status: current`, `last-reviewed`
+  present, `baseline: main@ed2515e7` named, and it OPENS by correcting three of its own dispatch
+  brief's structural claims against the file. Correctly located, current, exemplary shape.
+- `handOffs/incoming/read/2026-07-29-flogence-to-scrml-*.md` — inbound correspondence in the
+  `handOffs/` tree, which is excluded from content-mapping by scope.
 
 ## Uncertain — needs human review
 
 ### `docs/language-inspiration-audit-2026-06-06.md`, `docs/lin.md`, `docs/external-js.md`, root `gaunt.md` / `DESIGN.md` / `NERDME.md` / `scrmlFormula.md`
-**Reason:** all unmodified since 2026-06-22 or earlier, while SPEC.md has since gained the entire
-§14.8.11 DB-authoritative tier plus this window's §23.2.4a / §38.6.2 / §39.5.5 / §20.8.2 amendments.
-Not content-verified this pass — a full identifier cross-check of these seven files was out of scope
-for an incremental refresh, as it was at the prior two stamps. **This has now been deferred three
-passes running; it should either be scheduled or explicitly ruled out of scope.**
-**What to check:** grep each for backticked identifiers against `compiler/src/`; specifically whether
-any describes a security/auth/DB model predating §14.8.9-§14.8.11, or a path/coordinate model
-predating the §47.9.5 dist-space clarification.
+**Reason:** all unmodified since 2026-06-22 or earlier while SPEC.md has gained §14.8.11, §23.2.4a,
+§38.6.2, §39.5.5, §20.8.2 and now §17.1. Not content-verified this pass.
+**This has now been deferred FOUR passes running** (S290, S292, S297, S299). At four, "deferred" is
+no longer an honest label — it is either scheduled or it is out of scope. Recommend ruling it out of
+scope explicitly rather than carrying it a fifth time.
+**What to check if scheduled:** grep each for backticked identifiers against `compiler/src/`;
+specifically whether any describes a security/auth/DB model predating §14.8.9-§14.8.11, or a
+path/coordinate model predating the §47.9.5 dist-space clarification.
 
 ### `docs/website/`
-**Reason:** `docs/known-gaps.md` carries `g-docs-website-retained-as-test-fixture` — the site is
-retained as a compile fixture after a wiki migration. **This window it was added to the snippet
-gate** (98 `.scrml` files, all compiling), which raises the stakes: a compile-gated directory reads
-as endorsed content. Whether its authored PROSE is current is a separate question from whether it
-compiles — and S292 corrected seven false claims in prose on a page that compiled fine.
-**What to check:** confirm with bryan whether `docs/website/` is authoritative content or a fixture,
-now that it is gated.
+**Reason:** carried from S297 and unchanged — retained as a compile fixture
+(`g-docs-website-retained-as-test-fixture`) while ALSO being under the snippet gate (98 `.scrml`
+files). A compile-gated directory reads as endorsed content, and compiling proves nothing about
+prose.
+**What to check:** confirm with bryan whether `docs/website/` is authoritative content or a fixture.
 
 ## Map currency at this stamp
 
 | map | stamp | status |
 |---|---|---|
-| primary · structure · dependencies · error · test | `115e8b1b` | **FULL rewrite this pass**, re-verified against source |
-| schema · migrations · domain · build · config · infra | `115e8b1b` | **TARGETED corrections this pass** — each map's own header states exactly what was and was not re-walked |
-| auth | `df2ac831` | **deliberately older.** No auth/session/JWT/OAuth/protect-floor surface changed this window. The one adjacent item — `E-PA-002`'s message — is a diagnostic-quality change mapped in error.map.md + structure.map.md, matching the pre-existing precedent that the §14.8.10/§14.8.11 principal machinery is mapped in domain/dependencies rather than auth. |
-| non-compliance | `115e8b1b` | this file |
+| primary · error · structure · test · domain · dependencies · build | `d0763cff` | re-walked this pass against source |
+| non-compliance | `d0763cff` | this file — every carried finding re-executed, not copied |
+| schema · migrations · config · infra | `115e8b1b` | **deliberately older.** No `ast.ts` / DB / env-var / workflow surface changed this window |
+| auth | `df2ac831` | **deliberately older.** The two auth-adjacent facts this window (the `W-AUTH-001` split; `scrml:auth`/`scrml:oauth` in the escalation set) are catalog and placement facts respectively, mapped in error/dependencies — see primary.map.md's Map Index row for the reasoning |
+| `*.generated.md` × 4 | `2026-06-25` | **stale, out-of-repo-generated, now at least ROUTED.** See N2 |
 
 An honest older stamp beats a false "verified at HEAD". Every row above is a decision.
 
 ## Tags
-#non-compliance #project-mapper #cleanup #scrml #privacy-scrub #adopter-identity #cloud-maps-failing #ci-red #spec-index-currency #each-fence #native-parser-parity #w-lint-uncatalogued #facts-gate #snippet-gate #known-gaps #catalog-count-audit #maps-routing-gap #d4 #coordinate-space #navigate-wave1c #w-nav-chunk-load-failed #e-schema-011 #tutorial-version-hardcode
+#non-compliance #project-mapper #cleanup #scrml #maps-routing-gap #prefix-coverage-audit #generated-indexes #mapgen-stale #privacy-scrub #adopter-identity #cloud-maps-failing #ci-red #spec-index-currency #each-fence #if-row-comment #native-parser-parity #w-lint-uncatalogued #catalog-count-audit #w-auth-001-split #trigger-3 #node-id-freshness #gap-status-parser #proven-gate #map-size-budget
 
 ## Links
 - [primary.map.md](./primary.map.md)
 - [error.map.md](./error.map.md)
 - [structure.map.md](./structure.map.md)
 - [domain.map.md](./domain.map.md)
-- [migrations.map.md](./migrations.map.md)
-- [build.map.md](./build.map.md)
-- [infra.map.md](./infra.map.md)
+- [dependencies.map.md](./dependencies.map.md)
 - [test.map.md](./test.map.md)
+- [build.map.md](./build.map.md)
+- [migrations.map.md](./migrations.map.md)
+- [infra.map.md](./infra.map.md)
 - [master-list.md](../../master-list.md)
 - [pa.md](../../pa.md)

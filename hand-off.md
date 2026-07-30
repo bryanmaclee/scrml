@@ -1,4 +1,152 @@
 <!-- ============================================================= -->
+<!-- S299 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-30.        -->
+<!-- S298-Peter + S297 (both) + all prior UNCHANGED below.          -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 299 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-07-29/30. `/boot` Profile A. **8 PRs merged** (#259 #260 Peter's inherited · #268 #269
+#270 #271 #272 #273); my last landing was `d0763cff`. Mechanical stream = delta-log **[882]–[896]**
+(renumbered at wrap — S299-Peter took [878]–[881] concurrently); this carries the irreducible.
+
+> **⚠️ CONCURRENCY — this wrap landed on a MOVED main.** S299-Peter booted as my successor while I was
+> still live, wrapped at **`3a295dff`** (#276), and **S300-Peter is LIVE as I write this**. Their board
+> correctly flagged that I "never folded a wrap block into hand-off — may still be LIVE." Consequences
+> already folded into the text below rather than left to rot: **#262 is LANDED, not open** (their #275
+> `11bd0691`), a **new adopter issue #274** arrived untriaged, and **Peter's write-set is NOT free** —
+> see the corrected first-move note.
+
+## 🔴 THE NEXT PA'S FIRST MOVE
+
+**`if=` Phase 2 — its prerequisite is CLOSED.** It is the next brief, and bryan ruled the **graphify
+trial runs on it** (protocol in `active-sessions/S299-bryan.md`; prep done, trial NOT run).
+
+⚠️ **The "Peter's write-set is free" half of this is now FALSE** — it was true when I wrote it and
+expired within the hour. **S300-Peter is LIVE** and their declared pickup is #263 / #264 / #274, which
+their own board flags as "near bryan's recent emit-server work; check the board before picking."
+`if=` Phase 2's likely surface is `emit-ssr-render.ts` + `runtime-template.js`. **Read
+`active-sessions/S300-peter.md` and partition by write-footprint BEFORE dispatching** — do not assume
+the lane is clear because this hand-off once said so.
+
+Then, in order: the three open rulings below.
+
+## 🎯 THE HEADLINE — the adversarial gate caught four confidentiality leaks in my own landing
+
+I reported the S239 gate as **unrunnable**. It was not. `/code-review ultra` is genuinely
+user-triggered-only, but **`/security-review` was available the whole time**. I treated the command the
+contract *names* as the requirement, when the requirement is **an independent adversarial pass** — the
+contract even says "or finder fan-out". bryan pushed back with one question and the gate then found
+four leaks that confirmatory verification had passed clean, in work I had already reported green:
+
+| shape | why it evaded |
+|---|---|
+| `["p"].map(p => hashPassword(p))` | `forEachCallInExprNode` returns at `case "lambda"` |
+| nested `function` declaration | inner calls never reach the outer `callees` |
+| `["p"].map(hashPassword)` | bare value reference — no call node at all |
+| `let f = join; f(a,b)` | indirect alias — `callees` records only `call.callee` |
+
+Each compiled **exit 0** with the secret in the client bundle and `Bun.password.hash` argon2id in the
+browser runtime. Fixed with a Trigger-3-ONLY deep walk — the shared call-graph path **must not** be
+widened (`route-inference.ts` says so explicitly: it also drives Step 5c propagation + E-ROUTE-001),
+so this mirrors the two precedents that hit the same wall.
+
+## 🧭 FINDINGS THAT OUTLAST THE FIXES
+
+1. **The membership CRITERION was the defect, not the list.** `scrml:oauth` has ZERO host reaches and
+   transmits `client_secret` at three sites; its own header reads *"SERVER-SIDE ONLY."* A
+   host-reach-only criterion cleared it. SPEC §12.2 now carries a second limb — **credential
+   handling**. A derived list is only ever as good as the property it derives from.
+2. **Premature RESOLVED is worse than open.** The first cut verified the DIRECT-CALL shape and I marked
+   two HIGH gaps RESOLVED on it, citing *"createStore at 0 occurrences in the client bundle"* — the
+   review reproduced `createStore` client-side through a lambda against that same cut. True of the
+   shape tested, false of the class. **The S288 lesson an adopter handed back to us, recurring inside
+   one session.** A gap marked RESOLVED stops being hunted.
+3. **One failure mode, four times in one session:** stopping at the first plausible answer. The gap
+   entry's "only one consumer" (there were two) · my `bun:`-only scan missing bare `bun` · the
+   "unavailable" gate · the each-anchor framing. Every time the fix was to actually enumerate.
+4. **A parser can drop input silently and report a confident number.** The §0 gap-counts regex used a
+   closed `status=(…)` alternation, so 14 markers — two of them open HIGHs — did not match AT ALL.
+   Not miscounted, invisible. **Found by arithmetic**, not inspection: a landing resolved two HIGHs and
+   the count moved 12→11. Distinct mechanism from S298's staleness.
+5. **Zero of 877 corpus files define a component whose body contains an `<each>`.** That is why a
+   green-compile data-correctness bug survived, and why base-vs-fix output is byte-identical
+   corpus-wide. Same structural blindness S296 recorded for D-4.
+
+## 🗺️ MAPS — the refresh answered the repair-or-retire question, and the answer is "cut, don't retire"
+
+Watermark `115e8b1b` → `d0763cff`, 8 files. But the useful output was the assessment I asked for, blunt:
+
+**Load-bearing score on this session's four loci: 0/4, with one NEGATIVE.** No map named
+`SERVER_ONLY_SCRML_MODULES`, the escalation machinery, `escalationReasons` consumers, the CE expansion
+seam, or `_deepCloneAst`. Worse, `domain.map.md:37` stated Trigger 3's behaviour **as if it existed**
+("importing a server-tagged stdlib module escalates the importing function") when it was ruled-S280 and
+unbuilt — not merely unhelpful, **wrong in the direction that would have stopped the work.**
+
+**Three structural reasons, only the third fixable by writing better maps:** (1) ~40% of the map mass is
+changelog-shaped and duplicates `docs/changelog.md`, which is better at it; (2) each refresh documents
+the arc that just closed, so the next session is uncovered **by construction** — one session behind is
+operationally identical to absent; (3) grep is genuinely competitive here — 232k lines, one language,
+rigorous naming. A row only earns its place in three cases: you can't guess the search term from the
+symptom · many hits with a non-obvious winner · **a PROHIBITION or invariant, which grep cannot find at
+all.** The maps carried almost none of the third, which is the highest-value kind.
+
+**The strongest single example, from this session:** the two-set distinction
+(`ESCALATION_SERVER_ONLY_MODULES` ≠ `SERVER_ONLY_SCRML_MODULES`). The wrong answer is **invisible to
+grep** — grep finds the async set and it looks correct. I found the 72-site over-escalation empirically.
+A prohibition row would have saved a real, measured wrong turn. Those three rows now exist.
+
+**Do NOT retire yet, and the reason is procedural:** the disciplined-use precondition has never been
+met — `cloud-maps` red 17/17 for two weeks, and both recent refreshes were hand-dispatched after the
+watermark stranded (39 commits, then 13). **Retiring now would measure the outage, not the tool.**
+Ranked: decide `cloud-maps` this week (one `workflow_dispatch` with `show_full_output`) · wire a
+mechanical code→`file:line` index into CI beside `state.ts`
+([[g-generated-code-index-unreferenced-stale-and-cross-repo]], filed) · delete the changelog-shaped
+mass · keep and grow exactly two things, the symptom→locus routing table and a prohibitions list ·
+re-measure after ~4 weeks of the reduced set with working automation.
+
+**And a false RESOLVED, found by measurement:** `g-maps-error-map-missing-diagnostics-and-emit-client`
+was closed at S297 on a CLAIM generalised from two data points. Measured: §34 has 185 code prefixes,
+the family table names 67 — **118 have no row**, including the `W-AUTH-*` I needed this session and
+grepped for. **Reopened as `narrowed`.** A false coverage claim is worse than an absent one: it stops
+the reader running the grep that works. **Third base-amendment candidate of the session** (S297 raised
+two): a map/gap assertion that is not measurable cannot be trusted, and one that is not trusted will
+not be consulted — a `pa-base` §8 hollow-gate shape, not a map-quality problem.
+
+## ⚠️ OWN MISSES — recorded, not smoothed
+
+- **Reported a whole gate class unavailable** after checking one command. Above.
+- **Marked two HIGHs RESOLVED on evidence covering one shape**, and one claim was directly falsifiable.
+- **Inferred OLD from UNTRACKED** on `undefined/probe.png` — flogence checked the mtime (created
+  *during* this session). Moved to scratchpad, preserved; unattributed by both of us.
+- **Wrote the same latent bug I later filed:** the shadow-exclusion copied `new Set(fnNode.params)`
+  from existing code and silently did nothing, because `params` is typed `string[]` but the builder
+  emits `[{name}]`. Filed `g-fn-params-typed-string-actually-objects` — `buildClosureCapturesForFunction`
+  has it too, so every parameter is currently treated as a capture.
+- **First cut of the Map/Set guard passed non-plain objects by reference** — the review correctly
+  called that trading one silent failure for another. I had argued fail-loud for `state.ts` an hour
+  earlier and not applied it to my own cloner.
+
+## ✅ RULINGS BANKED (do not re-litigate)
+
+braceless `for/lift` → **reject** (governing sentence + zero measured migration) · escalation set →
+**bryan's ratified list + oauth added** on the credential limb · `W-AUTH-001` → **fresh code**, named
+not numbered · gap-counts parser → **fail-loud, direction (b)** · graphify → **trial on the next
+brief** · CE node counter → **fix it** (landed).
+
+## 🧷 STATE / OPEN
+
+- **Three rulings open:** graphify `.scrml` grammar (cost-or-decline; my lean and flogence's is *not
+  now* — we already ship a real parser, so a hand-maintained grammar is the same rot class) ·
+  CI-gate fork (the **under-count half is FIXED**; the git-history `recent-sessions` half remains) ·
+  `E-BPP-001` reclassify-vs-retire (S297 leftover).
+- **Worktrees: 14, none mine** — 3 `agent-*` pre-existing (S297 retained deliberately), 9
+  `scrml-spa-ss*`, the `s251` tree. Retained again; nothing of this session's is uncommitted.
+- **`cloud-maps` CI red every day since 2026-07-17** — three consecutive scheduled failures confirmed
+  at boot. Half of the gap-counts systemic hole; still unfixed.
+- **New `windows` flake shape** — `(unnamed)` beforeEach/afterEach hook timeout, passed on re-run of
+  the identical commit. NOT the documented `tracking` set. Recorded on #272, not filed.
+- `undefined/probe.png` salvaged to the session scratchpad.
 <!-- S299 WRAP (Peter/Windows) — prepended 2026-07-29.              -->
 <!-- S298 (Peter) + S297 (bryan/Peter) + S295/S296 + all prior UNCHANGED below. -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->
