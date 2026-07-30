@@ -1,6 +1,9 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-07-28T17:28:00Z  commit: 115e8b1b
+# updated: 2026-07-30T07:41:02Z  commit: d0763cff
+# NOTE (S299): TARGETED — two NEW sections added (§12.2 Trigger 3 escalation; node identity as a
+# codegen contract) and the §12.2 boundary paragraph corrected. Nothing else re-walked; the rest of
+# this map carries its `115e8b1b` verification.
 
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
 
@@ -34,7 +37,7 @@ open gaps" paragraph); the rest was not re-walked then either.
 **CSS — the §65 scrml-native model — Wave-1 EMISSION LANDED.** Deletes cascade specificity. `<theme>` + `<defaults>` are structural elements (NOT HTML). `:where()`-flat emission, the `@layer reset, global;` order, `<theme>` token → `:root` custom-property lowering via a `@`-sigil use-site syntax, and the §65.6 runtime theme-switch reflection are implemented. Diagnostic: `E-THEME-TOKEN-UNKNOWN`.
 **Realtime — §38.13 `<channel watches=table>`** — a change-feed-over-external-DB-writes primitive, distinct from the general §38 WebSocket `<channel>`. Front-end recognition + `RowChange` synthesis (`channel-watches.ts`) + Postgres trigger DDL install + the bundled-`pg` LISTEN bridge + client `__change` frame dispatch are all landed. `<onchange>` is the client-side handler element.
 **Auth / BaaS** — `scrml:auth` stdlib module: magic-link / email-verify / password-reset flows + HS256 JWT + JWKS RS256 verification + `generatePassword`. §20.5 session-establishment (`session.set`/`.destroy`/`.userId`/`.role`/`.get`/`.isAuth`) is the write half of the session model; `session.set("tenantId", t)` is also the §14.8.10 tenant-key establishment point AND the identity source the §14.8.11 DB-authoritative A1 wrapper's `_scrml_active_tenant`/`_scrml_active_caps` resolvers read. See auth.map.md.
-**Server/client boundary** — inferred, not annotated: importing a server-tagged stdlib module (or DB/crypto/host access) escalates the importing function to server-only (§12.2); referencing `session` also escalates (§20.5). `E-CG-001` is the fail-closed backstop that blocks any protected DB column from reaching the emitted client bundle (acorn-exact scan, §14.8.9). **§12.2 Trigger 6 clarified S288 (#195/#200, Peter):** a first-class function reference (not a call) keeps a function reachable, and reachability descends into nested closure bodies — closes a `W-DEAD-FUNCTION` false-positive class; no placement change. See error.map.md.
+**Server/client boundary** — inferred, not annotated: a function that REFERENCES a binding imported from a server-only stdlib module (or performs DB/crypto/host access) escalates to server-only (§12.2 Triggers 1+3 — **Trigger 3 was RULED at S280 and only BUILT at S299; any doc dated between those describing it as live was wrong**); referencing `session` also escalates (§20.5). Note the precise subject: **an import is FILE-scoped and cannot itself escalate anything** — the unit of escalation is the FUNCTION that uses the binding. `E-CG-001` is the fail-closed backstop that blocks any protected DB column from reaching the emitted client bundle (acorn-exact scan, §14.8.9). **§12.2 Trigger 6 clarified S288 (#195/#200, Peter):** a first-class function reference (not a call) keeps a function reachable, and reachability descends into nested closure bodies — closes a `W-DEAD-FUNCTION` false-positive class; no placement change. See error.map.md.
 **Colorless async — §13.1/§13.2, ratified S258, Seam-A LANDED.** scrml source has no `async`/`await` keywords; the compiler infers async-ness by tracing calls to Promise-returning host primitives. See dependencies.map.md for the landed unit breakdown.
 **Writer-ownership Axiom ① — §5.5.3/§5.5.4 (#81).** A physical DOM surface has AT MOST ONE wholesale reactive writer; a contending second writer fires `E-ATTR-WRITER-CONFLICT` naming both sites.
 **Typed API surfaces** — `<api>` (§60, typed EXTERNAL API consumption) vs `<endpoint>` (§61, typed INBOUND endpoint — the serve-side mirror).
@@ -274,6 +277,99 @@ normalize to `/` — never on a hardcoded backslash, because on POSIX a literal 
 filename character. Same rationale `stripPagesPrefix` documents. This is exactly the class the
 non-blocking `windows` CI job exists to surface.
 
+## §12.2 Trigger 3 — a server-only stdlib import escalates its USER (NEW section, S299)
+
+**The concept.** Placement is inferred. A function whose body reaches a stdlib module that cannot
+run in a browser must be relocated to the server, or the module — and whatever secret it handles —
+ships to the client. This is a **CONFIDENTIALITY boundary**, and every design choice below follows
+from which direction is safe to be wrong in.
+
+**Two server-only module sets exist, in ONE file, and they are deliberately different.** This is the
+single most important fact in this section, because conflating them is the mistake the S299 arc had
+to correct mid-flight.
+
+| Set | Feeds | Direction that is SAFE to be wrong |
+|---|---|---|
+| `SERVER_ONLY_SCRML_MODULES` (`route-inference.ts:578`) | the async fail-closed backstop (`api.js` STDLIB-EXPORT-SEED) | **OVER-inclusion.** Defaulting an unresolvable re-export to async costs nothing. |
+| `ESCALATION_SERVER_ONLY_MODULES` (`route-inference.ts:655`) | **PLACEMENT** | **NEITHER, symmetrically-badly.** Under-include -> a server-only module ships to the browser (silent leak). Over-include -> correct CLIENT code is relocated to the server (a correctness/latency cost). |
+
+Reusing the async set for placement was MEASURED at S299 to escalate **72** corpus import sites that
+are correct client code today; `scrml:data` alone (`sortBy`/`schemaFor`/`tableFor`) is 72 of the 116
+server-only-module imports in the corpus and ships a real client implementation in the runtime
+bundle. The sets cannot be unified.
+
+**Membership is TWO-limbed, and the second limb is the one that gets forgotten.** A module is
+escalation-server-only if EITHER: **(a) HOST REACH** — its implementation touches `Bun.*`,
+`process.*`, or imports `bun` / `bun:*` / `node:*` (note the BARE `bun` specifier with no colon —
+`scrml:redis` is reached only that way, and a `bun:`-only scan misses it); **or (b) CREDENTIAL
+HANDLING** — it accepts or transmits a secret that must not reach a client, *even with zero host
+reach*. Limb (b) exists because a host-reach-only criterion was FALSIFIED in review: `scrml:oauth`
+has zero host reaches and was cleared as client-safe on that basis, while putting `client_secret` in
+its token-exchange body three times and carrying a module header that reads "SERVER-SIDE ONLY". **A
+derived list is only as good as the property it derives from** — the criterion was the defect, not
+the list, which is why both limbs are recorded beside the ten members rather than only the members.
+
+**Reference, not call. Depth, not top level.** Escalation fires on ANY REFERENCE to an imported
+binding, at ANY depth — inside a lambda body, inside a nested `function` declaration, inside
+escape-hatch raw text. Matching only top-level CALLS was proven evadable four ways, each shipping
+the module and its secrets to the browser at exit 0: `["PEPPER"].map(p => hashPassword(p))`, a
+nested `function` decl, a bare callback reference `["x"].map(hashPassword)`, and
+`let f = hashPassword; f(x)`. On a confidentiality boundary, over-firing costs a relocation and
+under-firing costs a leak, so the fail-closed choice is the right one.
+
+**Trigger 3 emits NO diagnostic — that is by design, and it is a debugging trap worth stating.** A
+function silently moving to the server is the SUCCESS path. "My function vanished from the client
+bundle and there are zero errors and zero warnings" is the expected shape, not a bug report.
+
+**It reuses the EXISTING `server-only-resource` reason kind rather than adding an
+`EscalationReason` variant.** §12.2 Trigger 1 is "accesses a resource not accessible from the
+client", which a server-only module import IS. Two live consumers already encode that expectation:
+`emit-server.ts`'s `isBodyOnlyEscalation` (§12.6 library mode) gates on EVERY reason being
+`server-only-resource` — a fresh kind fails that `.every()` and silently re-attaches an HTTP wrapper
+§12.6 says to drop — and `describeServerTrigger` renders it verbatim, so
+`W-DEPRECATED-SERVER-MODIFIER` correctly reports an explicit `server` keyword as redundant for this
+class. `resourceType` carries the module specifier, so nothing is lost for diagnostics and the union
+stays small.
+
+**Accepted residual, named rather than hidden:** a binding shadowed ONLY inside a nested lambda
+still fires (an over-fire, never a leak), and a word-boundary scan of escape-hatch raw text can match
+inside a string literal in that text (same direction).
+
+## Node identity is a CODEGEN CONTRACT, not a debugging convenience (NEW section, S299)
+
+`node.id` on an AST node is not incidental. Codegen DERIVES emitted tokens from it — an `<each>`
+fence comment (`<!--scrml-each:N-->`), the `_scrml_each_renderers[key]` registry key, the
+`_scrml_find_each_anchor` lookup, chunk-namespace tokens. **Two nodes sharing an id therefore share
+an emitted identity, and the second write wins.**
+
+**The failure mode has no diagnostic and no visible symptom until runtime.** The S299 instance:
+`component-expander.ts` expanded from `def.nodes` — the registry's SHARED parsed body, whose ids
+come from a per-component parse that numbers from ZERO. So the same component instantiated twice
+reused one id set, AND two different components each started at the same low numbers and collided
+with each other. Two list components emitted ONE fence id; every anchor lookup resolved to the
+first fence; the executed result was panel 0 rendering panel 1's data and panel 1 rendering empty.
+**Compile: exit 0, zero errors, zero warnings.** Fixed by deep-cloning per expansion from the
+FILE-level `NodeCounter`.
+
+**The invariant, stated so it can be checked:** within one FileAST after component expansion, every
+node id is unique. Across files, `chunk-namespace.ts` (S280/S282) prefixes every id-derived token
+with a hash of the source path, so the two halves compose — but the cross-file namespace does NOT
+save you from a within-file collision, and vice versa.
+
+**Not fully restored at this HEAD, and the gap is specific.** A post-fix duplicate-id sweep over 877
+corpus files went 28 files -> 16 (12 closed, 4 reduced, 0 newly broken). The residual families are
+`def.defChildren` (returned by reference / shallow-spread with the id kept), `${children}`/slot-fill,
+channel-inline, and for/match. The duplicated kinds there are only `text`/`li`/`p`/`logic` —
+**zero `each-block`** — so nothing id-DERIVED collides today. Read that as "the live blast radius is
+closed", not "duplicate ids are gone".
+
+**One invariant deliberately MOVED:** native markup-value ids live in a high band
+(`translate-expr.js` `{ next: 900_000_000 }`, chosen so they "can never collide with a sibling
+FileAST node id"). Cloning a component body renumbers them DOWN into the per-file range. Harmless —
+one monotone counter seeded above `maxExistingId`, and that comment itself states the embedded id is
+not load-bearing for codegen — but the guarantee is no longer what the comment claims, so do not
+rely on the band.
+
 ## Runtime-chunk tree-shaking — a two-phase decision (§47.5, GH #234 / Bug 57 / GITI-036 class)
 
 The client runtime ships as CHUNKS, and a chunk is included only if something proves it is needed.
@@ -340,6 +436,8 @@ with no diagnostic and no hard-nav fallback.
 
 ## Business Invariants (language axioms, not app rules)
 - `null`/`undefined` do not exist in scrml source, in ANY position (§42). Absence is `not`.
+- **A server-only stdlib module never reaches the client bundle (§12.2 Trigger 3, S299)** — enforced by REFERENCE at any depth, fail-closed; the escalation set is separate from the async-classification set precisely because the two have opposite safe-error directions.
+- **Within one FileAST after component expansion, every `node.id` is unique (S299).** Codegen derives emitted identity from it; a collision is a green compile with wrong rendered output.
 - Specificity is deleted under §65: an unconditional same-property overlap on a provably-shared element is a COMPILE ERROR (E-STYLE-CONFLICT), never a silent cascade pick.
 - A protected DB column can never reach the client bundle — fail-closed, acorn-exact (E-CG-001, §14.8.9).
 - A row of tenant A never reaches a request whose ambient tenant is B (§14.8.10) — a FLOOR (isolation invariant only), not a policy engine; the ambient tenant is CONSUMED from `session`, never derived by the compiler.
@@ -386,7 +484,7 @@ Diagnostic emission — every pipeline stage emits `{code, message, severity, sp
 A returned function-expression closure (`return function name(){…}`, GITI-038) — owns its own body's scope/type/async analysis independent of its enclosing factory (`ReturnStmtNode.fnExprNode`, see schema.map.md).
 
 ## Tags
-#scrml #map #domain #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins
+#scrml #map #domain #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins
 
 ## Links
 - [primary.map.md](./primary.map.md)

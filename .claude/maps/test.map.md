@@ -1,6 +1,6 @@
 # test.map.md
 # project: scrml
-# updated: 2026-07-28T17:22:00Z  commit: 115e8b1b
+# updated: 2026-07-30T07:41:02Z  commit: d0763cff
 
 ## Test Framework
 Runner: `bun:test` (Bun's built-in test runner, no separate package dep)
@@ -11,30 +11,53 @@ Coverage: `bun test compiler/tests/ --coverage`
 Browser DOM: happy-dom / @happy-dom/global-registrator (compiler/tests/browser/)
 E2E: Playwright (`@playwright/test`), separate config at e2e/playwright.config.ts, NOT part of `bun test`
 
-## Test Categories (compiler/tests/, **1278** `*.test.js` total)
+## Test Categories (compiler/tests/, **1281** `*.test.js` total)
 
-Fresh recursive `git ls-files` recount this pass, all 9 categories individually re-verified; agrees
-with `docs/FACTS.md` (`test files | 1,278`). **Net +20 across this window (`c700c435` ->
-`115e8b1b`), all additions, zero deletions.** The prior map generation carried **1255** at its own
-stamp and its own header flagged that figure as already stale by +3 — both are now superseded.
+Fresh recursive `git ls-files` recount at `d0763cff`, all 9 categories individually re-verified;
+agrees with `docs/FACTS.md` (`test files | 1,281`). **Net +3 across this window (`115e8b1b` ->
+`d0763cff`), all additions, zero deletions.**
 
 | Category | Glob | Count | Delta this window |
 |---|---|---|---|
-| Unit | `compiler/tests/unit/**/*.test.js` | **849** | **+9** |
-| Integration | `compiler/tests/integration/**/*.test.js` | **184** | **+3** |
-| Conformance | `compiler/tests/conformance/**/*.test.js` | **125** | **+1** |
-| Browser | `compiler/tests/browser/**/*.test.js` | **81** | **+7** |
+| Unit | `compiler/tests/unit/**/*.test.js` | **851** | **+2** |
+| Integration | `compiler/tests/integration/**/*.test.js` | 184 | — (1 file EDITED) |
+| Conformance | `compiler/tests/conformance/**/*.test.js` | 125 | — |
+| Browser | `compiler/tests/browser/**/*.test.js` | **82** | **+1** |
 | LSP | `compiler/tests/lsp/**/*.test.js` | 11 | — |
 | Commands | `compiler/tests/commands/**/*.test.js` | 8 | — |
 | Self-host | `compiler/tests/self-host/**/*.test.js` | 4 | — |
 | e2e-render-map | `compiler/tests/e2e-render-map/` | 2 | — |
 | Parser-conformance + native-* | top-level `compiler/tests/{parser-conformance*,native-*}.test.js` | 14 | — |
 
-**Browser is where this window's weight landed (+7 of 20)** — the arc was dominated by
-client-runtime and reconcile defects that a compile-time assertion cannot catch. That is the
-`execute-don't-grep` discipline showing up in the corpus shape, not an accident.
+**The top-level `conformance/` corpus moved much more than `compiler/tests/` did this window: 747 ->
+756 cases (+9).** All nine are §17.1 per-item `if=` cases in two mirrored families (Tier-1 `<each>`
+and Tier-0 `${for…lift}`) plus one top-level `if` case — see "Conformance corpus" below.
 
-## The 20 new files, by landing
+## The 3 new test files this window (`115e8b1b` -> `d0763cff`)
+
+- `unit/route-inference-trigger3-server-only-import.test.js` (366 lines) — §12.2 Trigger 3. The
+  load-bearing half is the **EVASION battery**, not the happy path: `["PEPPER"].map(p =>
+  hashPassword(p))`, a nested `function` declaration, a bare callback REFERENCE (`.map(hashPassword)`),
+  and `let f = env; f(x)` each compiled exit 0 with NO `.server.js` and the secret in the client
+  bundle before the fix. Also locks the two-set distinction (a `scrml:data` / `scrml:http` import
+  must NOT escalate) and the shadowing carve-out (a parameter named after an import must not relocate
+  its function).
+- `unit/ce-node-id-per-expansion.test.js` (219 lines) — component-expander node-id freshness. Covers
+  BOTH collision shapes (same component twice; two different components each parsed from zero) and
+  the `bodyChildren`/`templateChildren` aliasing the `_deepCloneAst` memo preserves.
+- `browser/g-each-peritem-nested-markup-fn-call.browser.test.js` (186 lines) — the #161 follow-on.
+  Browser tier because the failure was a RENDERED string (`[object HTMLSpanElement]`), and because the
+  negative half — a string-returning call must NOT get wrapped in a `<span>` — is only observable in a
+  restricted parent.
+
+**Two existing files were EDITED with no count delta, and both are re-baselines you must read before
+touching:** `unit/session-auth.test.js` (8 assertions renamed `W-AUTH-001` ->
+`W-AUTH-MIDDLEWARE-AUTO-INJECTED`) and `integration/trucking-dispatch-smoke-integration.test.js`
+(whose `W-AUTH-001 = 20` corpus baseline is now split across two codes — its header comment carries
+the arithmetic). `conformance/cases/reactive/toggle-show/expected.json` also changed: a top-level
+`if` now UNMOUNTS structurally rather than toggling `display`, so its expectation moved.
+
+## The 20 new files of the PRIOR window (`c700c435` -> `115e8b1b`), by landing
 
 **Runtime chunks / client boot (GH #234, GH #235, navigate-wave1c)**
 - `browser/errors-element-messages-chunk-gh234.browser.test.js` — an `<errors of=…/>` page with NO
@@ -151,7 +174,7 @@ compiler/tests/fixtures/ — 8 shared fixture files
 compiler/tests/helpers/ — 3 shared test-helper modules
 compiler/tests/commands/migrate-program-shape-fixtures/ — `scrml migrate` (source-codemod, NOT `db-migrate`) fixture set
 samples/compilation-tests/ — 12 fixture dirs compiled by `scripts/compile-test-samples.sh` (`bun run pretest`) before the suite; dist/ is gitignored. **These go STALE** — a browser-test triage starts by recompiling them, before comparing anything.
-conformance/cases/ + conformance/adapters/ — the D3 corpus (**747 cases**, +1 this window) + per-impl adapters
+conformance/cases/ + conformance/adapters/ — the D3 corpus (**756 cases**, **+9 this window**) + per-impl adapters. The nine: `each/per-item-if-reactive/{create-time-absence,flip-false-true,flip-true-false,reorder-toggled}` (Tier-1 `<each>`) and `each/for-lift-per-item-if-reactive/{same four}` (Tier-0 `${for…lift}`) plus `reactive/if-top-level-absent`. **The two families are deliberately MIRRORED case-for-case** — the two tiers have separate emit paths (`emit-each.ts` vs `emit-lift.js`) that share one runtime helper (`_scrml_ifrow_apply`), so a fix landing in one tier and not the other is the expected failure mode and the corpus is shaped to catch it.
 docs/tutorial-snippets/ + docs/readme-snippets/ + docs/website/ — the public snippet corpus; REAL programs under a compile gate, functioning as a public-surface regression corpus
 
 ## Pattern
@@ -171,6 +194,19 @@ module formats: assert the CLASSIC output is byte-unchanged AND assert the esm s
 
 **DOM-shape assertions.** Any test asserting a top-level `<each>` renders must look for the comment
 fence `<!--scrml-each:N-->` / `<!--/scrml-each:N-->` and rows as SIBLINGS between the anchors.
+**NEW this window: an `if=`-gated per-item root may be a `<!--scrml-if-row-->` COMMENT rather than an
+absent node** — the reconcile-tracked node is always present, so a test asserting "the row is gone"
+must assert the ELEMENT is gone, not that the child count dropped.
+
+**A duplicate-node-id bug is invisible to every single-component test.** The S299 component-expander
+defect needed TWO instantiations (or two different components) in ONE file to reproduce; each
+component tested alone was green. If you are testing anything keyed on `node.id` — each fences,
+`_scrml_each_renderers`, chunk-namespace tokens — instantiate at least twice in the same file.
+
+**An escalation/placement test must assert the ARTIFACT, not the diagnostic.** §12.2 Trigger 3 emits
+NO code, so `result.errors`/`result.warnings` are both empty on success AND on failure. The
+assertions that actually discriminate are: does a `.server.js` exist, and is the identifier absent
+from the client bundle. The Trigger-3 evasion battery is built that way — copy its shape.
 
 **Byte-identity anti-regression.** Several landings this window are gated on "emits byte-identically
 when the feature is not used" (D-5's client bundle, the `on mount` wrap without a server call, a
@@ -183,7 +219,7 @@ stale), then compare the WHOLE suite rather than an isolated file — happy-dom 
 between files, so a single-file run can be green while the suite is red, and vice versa.
 
 ## Tags
-#scrml #map #test #bun-test #happy-dom #playwright #conformance #stdlib-tests #lsp-tests #ci-gate #esm-chunks #module-format #each-fence #snippet-gate #facts-gate #spec-index-gate #colorless-async #dbauth #db-migrate #live-pg-skip-graceful #acceptance-gate #browser-suite #reconcile-replace #gh234 #gh235 #gh237 #d4 #d5 #i225 #navigate-wave1c #sql-table-refs #tailwind-outline #e-pa-002 #lint-diagnostics-stream #execute-dont-grep
+#scrml #map #test #bun-test #happy-dom #playwright #conformance #stdlib-tests #lsp-tests #ci-gate #esm-chunks #module-format #each-fence #snippet-gate #facts-gate #spec-index-gate #colorless-async #dbauth #db-migrate #live-pg-skip-graceful #acceptance-gate #browser-suite #reconcile-replace #gh234 #gh235 #gh237 #d4 #d5 #i225 #navigate-wave1c #sql-table-refs #tailwind-outline #e-pa-002 #lint-diagnostics-stream #execute-dont-grep #trigger-3 #escalation-server-only #evasion-battery #node-id-freshness #per-item-if #ifrow-apply #conformance-mirrored-tiers #w-auth-middleware-auto-injected
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -1,6 +1,9 @@
 # build.map.md
 # project: scrml
-# updated: 2026-07-28T17:10:00Z  commit: 115e8b1b
+# updated: 2026-07-30T07:41:02Z  commit: d0763cff
+# NOTE (S299): TARGETED — `scripts/state.ts`'s gap-status contract (a NEW hard-fail surface in
+# cloud-maps Stage 1). No package.json script, CLI flag, workflow or Dockerfile changed this window;
+# those sections carry their `115e8b1b` walk.
 
 ## Development Commands (root package.json scripts)
 compile — `bun run compiler/src/cli.js compile`
@@ -198,7 +201,8 @@ needs OIDC even with an API key).
 
 **Steps.** checkout (token `secrets.MAPS_PAT`, `fetch-depth: 0`) → setup-bun → `bun install
 --frozen-lockfile` → **Stage 1** `bun scripts/state.ts --write` (deterministic @generated rollup,
-zero AI cost) → **Stage 1b** `bun scripts/threads.ts --check && bun scripts/threads.ts`
+zero AI cost — **and, as of S299, a HARD-FAIL surface: see "Gap-status vocabulary" below**) →
+**Stage 1b** `bun scripts/threads.ts --check && bun scripts/threads.ts`
 (`continue-on-error: true`) → **Stage 2** `anthropics/claude-code-action@v1` running the
 `project-mapper` subagent in FULL_COLD_START mode (`--permission-mode acceptEdits --max-turns 40`)
 → **Stage 3** if `git status --porcelain -- .claude/maps master-list.md` is non-empty: branch
@@ -250,6 +254,38 @@ print the rejection verbatim. **Not done here — this refresh's write-footprint
 why the watermark sat at `c700c435` while three sessions of landings accumulated. Until `cloud-maps`
 is green, every map refresh is a manual PA action.
 
+## Gap-status vocabulary — `scripts/state.ts` now THROWS on an unknown status (CHANGED S299)
+
+`scripts/state.ts` parses `<!-- @gap id=… sev=… status=… -->` markers out of `docs/known-gaps.md`
+to generate the §0 counts rollup. It runs in `cloud-maps` **Stage 1** and via `bun scripts/state.ts
+--write` locally.
+
+**What changed and why it matters to anyone editing `known-gaps.md`.** The status was previously a
+CLOSED alternation *inside the regex* (`status=(open|resolved|deferred|nominal|non-gap|forensic)`).
+A marker carrying any other status therefore **did not match the regex at all — not miscounted,
+INVISIBLE.** Fourteen such markers had accumulated across six unrecognised statuses, **two of them
+open HIGHs**, so the published headline under-reported and nothing anywhere went red. It surfaced by
+ARITHMETIC: a landing resolved two HIGH entries and the count moved 12 -> 11.
+
+**The fix is deliberately not "widen the alternation".** The regex now matches ANY
+`status=([a-z-]+)` and classification happens in three named sets:
+
+| Set | Members | Counts as |
+|---|---|---|
+| `GAP_STATUS_OPEN` | `open`, `in-progress`, `narrowed`, `ruling-gated` | OPEN |
+| `GAP_STATUS_CLOSED` | `resolved`, `fixed`, `deferred`, `non-gap`, `forensic`, `root-caused-elsewhere` | CLOSED |
+| `GAP_STATUS_NOMINAL` | `nominal` | NOMINAL |
+
+**A status in none of the three THROWS.** That is the gate: the ledger cannot grow a seventh
+vocabulary word without someone deciding how it counts. **Practical consequence — introducing a new
+`status=` string in `docs/known-gaps.md` will break CI Stage 1 by design.** Add it to the right set
+in `scripts/state.ts` in the same commit.
+
+Author intent is preserved rather than normalized — `ruling-gated` is not rewritten to `open`,
+because the distinction is real to a human reading the entry. Only the COUNTING semantics are
+decided in the script. (Design rationale: a closed list that silently drops what it does not
+recognise fails the `pa-base` §8 gate test — a gate whose blind spot is invisible is not a gate.)
+
 ## Git Hooks (source-controlled, `.git/hooks/pre-commit` + `pre-push`; install via `scripts/git-hooks/install.sh`)
 pre-commit — runs `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail` (~2min, excludes browser/e2e/self-host); warns (non-blocking) on direct commits to `main`.
 pre-push — full test suite (`bun test compiler/tests/`) + gauntlet quick check; refreshes samples/compilation-tests/ fixtures first; the public snippet gate ONLY on a `refs/tags/v*` release-tag push; and **NEW S292, step 2.5 — a GENERATED-DOC CURRENCY gate** that mirrors the cloud gate's CHEAP checks so a stale generated artifact is caught locally instead of ~3 minutes later in CI. Runs `bun scripts/facts.ts --check` (~200ms) + `bun run scripts/regen-spec-index.ts --check` (~61ms) on EVERY non-deletion push, including the feature-branch pushes the S254 relaxation exempts from the full suite (exactly the ones that were failing). **`bun scripts/snippet-gate.js` is deliberately NOT in this hook — it costs ~48s**, and a hook that expensive gets bypassed, and a bypassed gate gets deleted. 261ms does not get bypassed. Skipped entirely when the push payload is deletions only. Failure message names the fix (`bun scripts/facts.ts --write && bun run scripts/regen-spec-index.ts`) and warns to regenerate AFTER the last content commit, not before — regenerating early and then editing `compiler/src` again is the exact loop this gate exists to catch (three rejected pushes in one S292 session).
@@ -258,7 +294,7 @@ pre-push — full test suite (`bun test compiler/tests/`) + gauntlet quick check
 None. No Dockerfile / docker-compose in this repo — see infra.map.md.
 
 ## Tags
-#scrml #map #build #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist
+#scrml #map #build #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist
 
 ## Links
 - [primary.map.md](./primary.map.md)
