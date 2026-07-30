@@ -1,4 +1,47 @@
 <!-- ============================================================= -->
+<!-- S300 WRAP (Peter/Windows) — prepended 2026-07-30.              -->
+<!-- S301 (bryan) + all prior UNCHANGED below. (Numbers collide     -->
+<!-- across machines — disambiguate by NAME. S300-peter is AFTER    -->
+<!-- S301-bryan chronologically; bryan wrapped S301 mid-session.)   -->
+<!-- ============================================================= -->
+
+# scrml — Session 300 (Peter · Windows) — WRAP
+
+**Date:** 2026-07-30. `/boot` Profile A. `main` at **`3b86a252`**, coherence **0/0** both repos. Delta-log **[916]–[925]**.
+**Four Peter-lane adopter wins:** #263 + MED(#291) **LANDED** · #285 **CLOSED-as-fixed** · #282 **fix built, S239 in-flight, land-authorized**. Solo at boot; concurrent with LIVE S301-bryan most of the session (he wrapped mid-way → main went stable).
+
+## 🔴 THE NEXT PA'S PICKUP (Peter-lane)
+
+1. **#282 — LAND IT.** Fix is built + PA-verified on branch `fix/282-program-wide-session-store` (`75e34088`, worktree retained). Its S239 review was IN-FLIGHT at wrap; **Peter pre-authorized the land** ("land it when it comes in"). Next: absorb the S239 verdict → rebase onto current main → PR → merge. If the review found a leak/break, iterate (don't ship). §20.5 session-store cross-unit unification.
+2. **Braceless `for/lift` → build the REJECT diagnostic.** Bryan **RULED reject** (my option 1) — governing sentence found (§17.4a/§17.4b `**Syntax:**` lines; the §17.4:11227 `E-CONTROL-FLOW-IN-MARKUP` precedent applies to the sibling shape). "The build is yours." formB (`for it of @rows lift`) emits `for (const it of of)` — `node --check`-valid, dies at module-eval. Emit the diagnostic + a repro matrix. (Inbox note drained → `read/`.)
+3. **#274 Wall-2** (Peter-lane) — `E-CODEGEN-INVALID-LOGIC` on the two-leading-const-server-call + guard-return + reassigned-let-write shape. Gated on a STANDALONE repro (the whole-program version didn't reduce). Wall-1 routed to bryan.
+4. **assetManagement latest-migration** (Peter-lane, BLOCKED on bryan) — the app has 13 unrelated new-gate errors on latest (`E-TENANT-WRITE` §14.8.10, `E-ROUTE-001` ×20, …); once migrated, drop the 4-file hand-duplicated cap matrix and re-import `../models/auth.scrml` (the #285 dangle IS fixed — verified). Peter waiting on bryan for other things first.
+
+## 🧭 FINDINGS THAT OUTLAST
+
+- **A string/regex reachability gate is confidentiality-UNSAFE by construction across a trust boundary** ([917]). The #263 first cut copied emit-server D-5's string-blind `isReferenced` — harmless server-side (over-emit = dead code), a §14.8 LEAK client-side (server const value crosses when its name collides with fetch-stub params `body`/`path`/`method` — zero contrivance — or appears in a client string). The **denylist** ("walk all, prune known-server") is fragile — every un-pruned server-emission path is a leak (we found TWO: fetch-stub text, then §52 server cells). A trust-boundary gate must be an **allowlist** / precise-by-construction (real IdentExpr nodes only). S239 caught both leaks pre-merge — [[feedback-verify-the-bug-class-not-just-reported-instance]] earning its cost twice in one fix.
+- **A CONFIRMED pre-existing §14.8 leak on `main`** ([919], routed to bryan): a §52 server-authority cell init (`<x server> = SECRET`) ships the const VALUE + `_scrml_cs_reactive_set` to the CLIENT via emit-reactive-wiring.ts:496 (shared `isServerOnlyNode` misses `isServer` state-decls). Filed as a HIGH gap. bryan's classification lane.
+- **Reproduce-first (R26) closed #285 with NO fix** ([921]) — flat-page `../models` imports resolve on latest; the dangle was the pinned-build era, fixed by D-4/#241/#25. Same payoff shape as S296/S298. **Confirm-on-latest before building.**
+- **CI runs ONLY on code-touching commits** ([923]) — `ci.yml` push-`paths-ignore`s docs; a docs-only/empty/reopen commit gets ZERO check-runs → strict-mode gate never reports → unmergeable. Fold generated-doc regen INTO the code commit. **⚠ this wrap PR is docs-only — watch its merge (may need to ride a code commit or the next-session pickup).**
+- **PA-asserted locus is a hypothesis** (pa-base v2.7, twice): #263's true discriminant was export-vs-plain-const (not same-vs-cross-file); the MED's true locus was `emitEscapeHatch` (emit-expr.ts), one hop past my emit-logic guess. Both corrected by the agent tracing/reproducing.
+
+## ✅ GATE / HOUSEKEEPING
+
+- **Landed:** #263 (`d139d775`, PR #283) · MED (`ebb6ca6f`, PR #291). Each: reproduce-first → satellite → **S239 adversarial pass** → PA-verified by execution → cloud `gate`+`windows` green → merge. #285 closed with an on-latest verification comment.
+- **Suite:** each fix's cloud `gate` GREEN (authority); local full unit+integration+conformance rode at ~21600+ pass, 5 baseline fails (self-host stale-dist ×3, CSRF B5, throwing-subscriber), 0 new. `tracking`/`ai-review` red = documented non-blocking flakes.
+- **Worktrees:** #263 + MED removed (landed); **`agent-aceab4d19d2629db6` (#282) RETAINED** (in-flight). Only main + `scrml-pinned` otherwise.
+- **Maps:** internal edits to existing emit-client/emit-expr/emit-server (new fns, no new surface files) → **unchanged** (S286/S288/S297 precedent); `project-mapper` not run.
+- **Config:** ran `/doctor` — setup healthy; **enabled auto mode as the default** (`~/.claude/settings.json`, backup `.bak`). Version current (2.1.220 = latest).
+- **Routed to bryan (scrml-support inbox):** #264 (auto-await/CPS), #274 Wall-1 (type-system E-EQ-001), reactive-wiring §14.8 leak.
+
+## Tags
+#session-300-peter #263-cross-file-export-const-client #two-s239-leaks-caught #ast-precise-14-8-gate
+#med-synth-statement-on-mount #285-closed-reproduce-first-already-fixed #282-session-store-unify-inflight
+#preexisting-reactive-wiring-leak-routed #ci-only-code-touching-commits #strict-mode-merge-race #auto-mode-enabled
+
+---
+
+<!-- ============================================================= -->
 <!-- S301 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-30.        -->
 <!-- S299 (bryan) + S299 (Peter) + S298 + all prior UNCHANGED below.-->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->
