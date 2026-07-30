@@ -9374,9 +9374,18 @@ function walkValidateResetTargets(
 // in the file — the PURE-CHANNEL-FILE shape per §38.12.6) is canonical
 // placement and DOES NOT fire `E-CHANNEL-OUTSIDE-PROGRAM`. Engine-parity
 // rationale per §21.8 / B14 (cross-file `<engine>` import from module file).
-// The `<channel>` inside `<page>` fire-site (`E-CHANNEL-INSIDE-PAGE`) is filed
-// for the wave that adds `<page>` parser support — `<page>` is not
-// tokenized as a structural element in Wave 1 so it cannot be checked here.
+// **`E-CHANNEL-INSIDE-PAGE` is LIVE (wired S299).** The Wave-1 note that used
+// to sit here said this fire-site was "filed for the wave that adds `<page>`
+// parser support". That precondition was met long ago and the note went stale
+// while reading as current: `<page>` IS tokenized as a structural block
+// (`block-splitter.js` structural-block names) and TAB builds it as
+// `kind: "markup", tag: "page"` (`ast-builder.js`, `<page>` attr-allowlist
+// branch). Because nothing re-checked the note, `E-CHANNEL-INSIDE-PAGE` sat
+// §34-catalogued with ZERO fire sites, so a `<channel>` nested in a `<page>`
+// compiled clean AND was wired program-scoped — silent acceptance of a shape
+// three SHALL sentences forbid (§38 preamble, §38.1 invariant 1, §38.2).
+// `walkChannelPlacement` now carries a `pageDepth` counter alongside
+// `programDepth` and fires the code. See g-channel-inside-page-never-fires.
 //
 //   §38.1 (v0.3, post-Wave 1; S87 Insight 30 refinement) — channels live
 //   INSIDE `<program>` when the file has a `<program>`; module-file
@@ -9411,14 +9420,21 @@ function walkValidateResetTargets(
 //      as `fileHasProgram`.
 //
 //   1. `walkChannelPlacement` — walk markup tree carrying a
-//      `programDepth` counter (count of `<program>` ancestors) AND the
-//      `fileHasProgram` boolean. A `<channel>` at programDepth === 0
-//      fires `E-CHANNEL-OUTSIDE-PROGRAM` IFF `fileHasProgram === true`
-//      (genuine canonical-violation shape). When `fileHasProgram ===
-//      false` (module-file / PURE-CHANNEL-FILE shape), file-top
-//      `<channel>` is canonical and the walker is silent. A `<channel>`
-//      at programDepth >= 1 is always allowed. (v0.3 reversal + S87
-//      Insight 30 — see Wave 1 dispatch + §38.1 v0.3.) The walker
+//      `programDepth` counter (count of `<program>` ancestors), a
+//      `pageDepth` counter (count of `<page>` ancestors) AND the
+//      `fileHasProgram` boolean. Two mutually-exclusive fires, checked
+//      most-specific-first:
+//        (a) `<channel>` at pageDepth >= 1 fires `E-CHANNEL-INSIDE-PAGE`
+//            (unconditional — the PURE-CHANNEL-FILE dispensation is
+//            file-top-only and does not reach a page-nested channel);
+//        (b) else `<channel>` at programDepth === 0 fires
+//            `E-CHANNEL-OUTSIDE-PROGRAM` IFF `fileHasProgram === true`
+//            (genuine canonical-violation shape). When `fileHasProgram ===
+//            false` (module-file / PURE-CHANNEL-FILE shape), file-top
+//            `<channel>` is canonical and the walker is silent.
+//      A `<channel>` at programDepth >= 1 / pageDepth === 0 is the
+//      canonical v0.3 placement and is always allowed. (v0.3 reversal +
+//      S87 Insight 30 — see Wave 1 dispatch + §38.1 v0.3.) The walker
 //      descends into `node.children` (markup children) and `node.body`
 //      (logic blocks; channels never appear inside logic, but recursion
 //      is cheap).
@@ -9451,10 +9467,13 @@ function walkValidateResetTargets(
  * top in a MODULE FILE (no `<program>` element anywhere — PURE-CHANNEL-FILE
  * per §38.12.6) is canonical and DOES NOT fire. Engine-parity per §21.8 /
  * B14. The pre-scan `hasProgramElement(ast.nodes)` computes this signal
- * once and threads it through the walker. `<channel>` inside `<page>` will
- * fire `E-CHANNEL-INSIDE-PAGE` once `<page>` parser support lands in a
- * later wave; the error code is registered in §34 now but no walker fires
- * it yet (Wave 1 has no `<page>` parsing).
+ * once and threads it through the walker.
+ *
+ * **`<channel>` inside `<page>` fires `E-CHANNEL-INSIDE-PAGE` (live, S299).**
+ * `<page>` is parsed today, so the walker checks it directly via a `pageDepth`
+ * counter — see `walkChannelPlacement`. The dispensation above does NOT reach
+ * this shape: it admits a `<channel>` at FILE TOP in a program-less module
+ * file, and a channel nested inside `<page>` is not at file top.
  */
 function walkValidateChannels(
   ast: any,
@@ -9472,6 +9491,7 @@ function walkValidateChannels(
   walkChannelPlacement(
     ast.nodes,
     /*programDepth*/ 0,
+    /*pageDepth*/ 0,
     fileHasProgram,
     errors,
     filePath,
@@ -9923,11 +9943,19 @@ function _hasProgramElementInner(nodes: any, visited: WeakSet<object>): boolean 
  * shape). Engine-parity rationale per §21.8 / B14 — `<engine>` already
  * accepts module-file top-level placement; channels reuse that precedent.
  *
- * **`<page>` inside-fire deferred.** A `<channel>` inside `<page>` would
- * fire `E-CHANNEL-INSIDE-PAGE`. The error code is registered in §34 now
- * (Wave 1) but `<page>` is not yet tokenized as a structural element —
- * the walker for that fire-site is filed for the wave that adds `<page>`
- * parser support.
+ * **`<page>` inside-fire — LIVE (wired S299).** `pageDepth` is the count of
+ * `<page>` ancestors traversed to reach the current node. A `<channel>` at
+ * `pageDepth >= 1` fires `E-CHANNEL-INSIDE-PAGE` (§38.1 invariant 1, §38.2,
+ * §38 preamble: "Channels SHALL NOT live inside `<page>`"). This supersedes
+ * the Wave-1 note that deferred the fire-site pending `<page>` parser support
+ * — `<page>` has been parsed as a structural markup element since well before
+ * S299, so the deferral no longer applies.
+ *
+ * The two placement codes are mutually exclusive, most-specific-first: a
+ * `<channel>` with a `<page>` ancestor reports E-CHANNEL-INSIDE-PAGE only,
+ * never both codes for one node. The inside-page fire is unconditional on
+ * `fileHasProgram` — the PURE-CHANNEL-FILE dispensation is a FILE-TOP
+ * dispensation and does not reach a channel nested inside `<page>`.
  *
  * `component-def` nodes are component declarations whose `defChildren`
  * array holds sibling logic-body nodes (per B17 finding). Channel
@@ -9947,6 +9975,7 @@ function _hasProgramElementInner(nodes: any, visited: WeakSet<object>): boolean 
 function walkChannelPlacement(
   nodes: any,
   programDepth: number,
+  pageDepth: number,
   fileHasProgram: boolean,
   errors: SYMDiagnostic[],
   filePath: string,
@@ -9955,7 +9984,7 @@ function walkChannelPlacement(
   if (!nodes) return;
   if (Array.isArray(nodes)) {
     for (const n of nodes) {
-      walkChannelPlacement(n, programDepth, fileHasProgram, errors, filePath, visited);
+      walkChannelPlacement(n, programDepth, pageDepth, fileHasProgram, errors, filePath, visited);
     }
     return;
   }
@@ -9964,50 +9993,56 @@ function walkChannelPlacement(
   visited.add(nodes);
 
   const node = nodes as any;
+  const tag = node.kind === "markup" ? (node.tag ?? "") : "";
+  const isChannelMarkup = tag === "channel";
 
-  // Fire E-CHANNEL-OUTSIDE-PROGRAM if a `<channel>` markup is reached at
-  // programDepth === 0 (i.e. no `<program>` ancestor) AND the file has a
-  // `<program>` element somewhere else (canonical-violation shape).
-  // Insight 30 (S87) dispensation: when the file has NO `<program>`
-  // anywhere, file-top `<channel>` is canonical (PURE-CHANNEL-FILE per
-  // §38.12.6) — silent. Engine-parity per §21.8 / B14.
-  if (
-    node.kind === "markup" &&
-    (node.tag ?? "") === "channel" &&
-    programDepth === 0 &&
-    fileHasProgram
-  ) {
+  // Placement diagnostics for a `<channel>` markup node. The two codes are
+  // MUTUALLY EXCLUSIVE and ordered most-specific-first: a channel nested
+  // inside a `<page>` reports E-CHANNEL-INSIDE-PAGE ONLY — never both codes
+  // for one node. The inside-page message already names the canonical
+  // placement (sibling of `<page>`, inside `<program>`), so also firing
+  // E-CHANNEL-OUTSIDE-PROGRAM would be two diagnostics for one mistake.
+  if (isChannelMarkup && pageDepth >= 1) {
+    // §38.1 invariant 1 + §38.2 normative: "A `<channel>` inside `<page>`
+    // SHALL emit `E-CHANNEL-INSIDE-PAGE`" — channels are app-scope
+    // shared-state vehicles, not per-route declarations.
+    //
+    // Deliberately UNCONDITIONAL on `fileHasProgram`. The PURE-CHANNEL-FILE
+    // dispensation (§38.12.6 / Insight 30) admits a `<channel>` at FILE TOP
+    // in a program-less module file, and it dispenses only
+    // E-CHANNEL-OUTSIDE-PROGRAM. A channel nested inside `<page>` is not at
+    // file top, so the dispensation does not reach it.
+    fireChannelInsidePage(node, fileHasProgram, errors, filePath);
+  } else if (isChannelMarkup && programDepth === 0 && fileHasProgram) {
+    // Fire E-CHANNEL-OUTSIDE-PROGRAM if a `<channel>` markup is reached at
+    // programDepth === 0 (i.e. no `<program>` ancestor) AND the file has a
+    // `<program>` element somewhere else (canonical-violation shape).
+    // Insight 30 (S87) dispensation: when the file has NO `<program>`
+    // anywhere, file-top `<channel>` is canonical (PURE-CHANNEL-FILE per
+    // §38.12.6) — silent. Engine-parity per §21.8 / B14.
     fireChannelOutsideProgram(node, errors, filePath);
   }
 
-  // Compute child-side depth: increment ONLY when descending through a
-  // `<program>` markup node. Non-program markup, component-def, etc. do
-  // not change `programDepth` — only the `<program>` ancestor signal
-  // matters for v0.3 placement.
-  const isProgramMarkup =
-    node.kind === "markup" && (node.tag ?? "") === "program";
-  const childDepth = isProgramMarkup ? programDepth + 1 : programDepth;
+  // Compute child-side depths. `programDepth` increments ONLY when descending
+  // through a `<program>` markup node; `pageDepth` ONLY through a `<page>`.
+  // Other markup and component-def are neutral for both — only the
+  // `<program>` / `<page>` ancestor signals matter for v0.3 placement.
+  const childProgramDepth = tag === "program" ? programDepth + 1 : programDepth;
+  const childPageDepth = tag === "page" ? pageDepth + 1 : pageDepth;
 
-  if (Array.isArray(node.children)) {
-    walkChannelPlacement(node.children, childDepth, fileHasProgram, errors, filePath, visited);
-  }
-  if (Array.isArray(node.body)) {
-    walkChannelPlacement(node.body, childDepth, fileHasProgram, errors, filePath, visited);
-  }
-  if (Array.isArray(node.defChildren)) {
-    walkChannelPlacement(node.defChildren, childDepth, fileHasProgram, errors, filePath, visited);
-  }
-  if (Array.isArray(node.consequent)) {
-    walkChannelPlacement(node.consequent, childDepth, fileHasProgram, errors, filePath, visited);
-  }
-  if (Array.isArray(node.alternate)) {
-    walkChannelPlacement(node.alternate, childDepth, fileHasProgram, errors, filePath, visited);
-  }
+  const descend = (kids: any) =>
+    walkChannelPlacement(
+      kids, childProgramDepth, childPageDepth, fileHasProgram, errors, filePath, visited,
+    );
+
+  if (Array.isArray(node.children)) descend(node.children);
+  if (Array.isArray(node.body)) descend(node.body);
+  if (Array.isArray(node.defChildren)) descend(node.defChildren);
+  if (Array.isArray(node.consequent)) descend(node.consequent);
+  if (Array.isArray(node.alternate)) descend(node.alternate);
   if (Array.isArray(node.arms)) {
     for (const arm of node.arms) {
-      if (arm && Array.isArray(arm.body)) {
-        walkChannelPlacement(arm.body, childDepth, fileHasProgram, errors, filePath, visited);
-      }
+      if (arm && Array.isArray(arm.body)) descend(arm.body);
     }
   }
 }
@@ -10073,6 +10108,135 @@ function walkSharedModifier(
 }
 
 /**
+ * Span for a channel-placement diagnostic, with a file-anchored fallback for
+ * ASTs built without spans (raw test fixtures).
+ */
+function channelSpanOf(channelNode: any, filePath: string): SYMDiagnostic["span"] {
+  return channelNode.span ?? {
+    file: filePath, start: 0, end: 0, line: 1, col: 1,
+  };
+}
+
+/**
+ * Best-effort label for a `<channel>` node: names the channel when its `name=`
+ * attribute resolves to a static string literal (§38.11 requires it to be one),
+ * else a generic `` `<channel>` `` placeholder. Shared by both placement
+ * diagnostics so their messages address the channel identically.
+ */
+function channelLabelOf(channelNode: any): string {
+  const name = channelNameOf(channelNode);
+  return name === null ? "`<channel>`" : `\`<channel name="${name}">\``;
+}
+
+/**
+ * The channel's static `name=` value, or `null` when it is absent or not a
+ * static string literal. §38.11 requires the attribute to be a static literal,
+ * so the non-literal case is already someone else's diagnostic (E-CHANNEL-007).
+ */
+function channelNameOf(channelNode: any): string | null {
+  const attrs: any[] = channelNode.attrs ?? channelNode.attributes ?? [];
+  const nameAttr = attrs.find?.((a: any) => a && a.name === "name");
+  if (!nameAttr) return null;
+  const v = nameAttr.value;
+  if (typeof v === "string") return v;
+  if (v && typeof v === "object" && v.kind === "string-literal" && typeof v.value === "string") {
+    return v.value;
+  }
+  return null;
+}
+
+/**
+ * Mount alias for a channel name in the suggested import snippet: kebab-case
+ * channel names are not identifiers, so `"driver-events"` becomes
+ * `driverEvents` — matching the real consumer shape in
+ * `examples/23-trucking-dispatch/pages/driver/messages.scrml`. Falls back to a
+ * generic identifier when the name yields nothing usable.
+ */
+function channelMountAliasOf(name: string): string {
+  const camel = name
+    .replace(/[^A-Za-z0-9]+(.)?/g, (_m, c) => (c ? String(c).toUpperCase() : ""))
+    .replace(/^[0-9]+/, "");
+  if (camel === "") return "myChannel";
+  return camel.charAt(0).toLowerCase() + camel.slice(1);
+}
+
+/**
+ * Fire `E-CHANNEL-INSIDE-PAGE` per §38.1 + §38.2 + §34.
+ *
+ * Triggered when a `<channel>` markup element is reached with a `<page>`
+ * ancestor (`pageDepth >= 1`). §38.1 invariant 1 and the §38.2 normative list
+ * both say: "A `<channel>` inside `<page>` SHALL emit `E-CHANNEL-INSIDE-PAGE`
+ * — channels are app-scope shared-state vehicles, not per-route declarations."
+ * The §38 chapter preamble states the same rule directly: "Channels SHALL NOT
+ * live inside `<page>`."
+ *
+ * The message explains the semantic stake (the pre-fix behaviour was silent
+ * acceptance: the channel compiled clean and was wired PROGRAM-scoped, giving
+ * a WebSocket route whose lifetime did not match the page that appeared to own
+ * it — g-channel-inside-page-never-fires) and then names an ACTIONABLE remedy.
+ *
+ * **The remedy is shape-dependent, so the message branches on `fileHasProgram`.**
+ * A single "move it to be a child of `<program>`" instruction is wrong for the
+ * dominant multi-page shape — a ROUTE FILE (`pages/chat.scrml`) is a top-level
+ * `<page>` with NO `<program>` in the file at all. For that file there is no
+ * `<program>` to become a child of, the `<page>` has no siblings to sit beside,
+ * and the fix necessarily edits a DIFFERENT file. So:
+ *   - `fileHasProgram === true`  — the in-`<program>` shape: the fix is local,
+ *     move the decl up out of the `<page>`.
+ *   - `fileHasProgram === false` — the route-file shape: the fix is CROSS-FILE
+ *     and the message says so explicitly, with the import + mount snippet.
+ * Both branches name the PURE-CHANNEL-FILE alternative (§38.12.6), which is the
+ * pattern `examples/23-trucking-dispatch/channels/*.scrml` demonstrates
+ * end-to-end.
+ */
+function fireChannelInsidePage(
+  channelNode: any,
+  fileHasProgram: boolean,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  const channelLabel = channelLabelOf(channelNode);
+  // Snippet identifiers track the ACTUAL channel name so the suggested import
+  // is copy-pasteable; a generic placeholder only when `name=` is absent or
+  // non-literal (§38.11 / E-CHANNEL-007 territory).
+  const rawName = channelNameOf(channelNode);
+  const snippetName = rawName ?? "my-channel";
+  const snippetAlias = channelMountAliasOf(snippetName);
+
+  // Shared preamble: what is wrong, and why a per-page channel cannot work.
+  const preamble =
+    `E-CHANNEL-INSIDE-PAGE: ${channelLabel} is declared inside a ` +
+    `\`<page>\`. Channels are app-scope shared-state vehicles, not ` +
+    `per-route declarations — the emitted WebSocket route is program-scoped, ` +
+    `so its lifetime would not match the page that appears to own it. `;
+
+  const remedy = fileHasProgram
+    ? // This file HAS a `<program>`: the fix is local to this file.
+      `Fix: move the \`<channel>\` declaration OUT of the \`<page>\` to be a ` +
+      `direct child of \`<program>\` — a SIBLING of the \`<page>\` ` +
+      `declarations. Channel state stays reachable from inside any ` +
+      `\`<page>\` via canonical \`@\` access, so the use sites do not change. ` +
+      `Alternatively, move the declaration into its own PURE-CHANNEL-FILE ` +
+      `module (SPEC §38.12.6) and mount it where it is used.`
+    : // ROUTE FILE: no `<program>` here, so the fix CROSSES FILES. Say so.
+      `This file has no \`<program>\`, so the fix crosses files — moving the ` +
+      `declaration within this file cannot resolve it. Either (a) move the ` +
+      `\`<channel>\` into your entry file's \`<program>\` body, as a SIBLING ` +
+      `of the \`<page>\` declarations; or (b) put it in its own ` +
+      `PURE-CHANNEL-FILE module (SPEC §38.12.6) and mount it here, e.g. ` +
+      `\`\${ import { "${snippetName}" as ${snippetAlias} } from ` +
+      `'./channels/${snippetName}.scrml' }\` then \`<${snippetAlias}/>\`. ` +
+      `See examples/23-trucking-dispatch/channels/ for the end-to-end pattern.`;
+
+  errors.push({
+    code: "E-CHANNEL-INSIDE-PAGE",
+    message: `${preamble}${remedy} (SPEC §38.1 + §38.2 + §34.)`,
+    span: channelSpanOf(channelNode, filePath),
+    severity: "error",
+  });
+}
+
+/**
  * Fire `E-CHANNEL-OUTSIDE-PROGRAM` per §38.1 + §34 (v0.3 direction).
  *
  * Triggered when a `<channel>` markup element is reached at programDepth
@@ -10091,24 +10255,8 @@ function fireChannelOutsideProgram(
   errors: SYMDiagnostic[],
   filePath: string,
 ): void {
-  const span: SYMDiagnostic["span"] = channelNode.span ?? {
-    file: filePath, start: 0, end: 0, line: 1, col: 1,
-  };
-
-  // Best-effort: extract the channel name from the `name=` attribute when it
-  // is a simple static string literal. Avoids over-engineering for the
-  // common case; falls back to a generic placeholder otherwise.
-  const attrs: any[] = channelNode.attrs ?? channelNode.attributes ?? [];
-  const nameAttr = attrs.find?.((a: any) => a && a.name === "name");
-  let channelLabel = "`<channel>`";
-  if (nameAttr) {
-    const v = nameAttr.value;
-    if (typeof v === "string") {
-      channelLabel = `\`<channel name="${v}">\``;
-    } else if (v && typeof v === "object" && v.kind === "string-literal" && typeof v.value === "string") {
-      channelLabel = `\`<channel name="${v.value}">\``;
-    }
-  }
+  const span = channelSpanOf(channelNode, filePath);
+  const channelLabel = channelLabelOf(channelNode);
 
   errors.push({
     code: "E-CHANNEL-OUTSIDE-PROGRAM",

@@ -12,7 +12,10 @@
                 E-CHANNEL-INSIDE-PAGE
             </h1>
             <p class="text-lg text-slate-600 mt-2">
-                &lt;channel&gt; placed inside a &lt;page&gt; body. &lt;channel&gt; must sit at &lt;program&gt; root.
+                &lt;channel&gt; declared inside a &lt;page&gt; body. Channels are app-scope, not
+                per-route: declare one in the entry file's &lt;program&gt; body, as a sibling of
+                the &lt;page&gt; declarations &mdash; or, from a route file that has no
+                &lt;program&gt; of its own, put it in a pure-channel-file module and mount it.
             </p>
             <div class="flex gap-3 mt-4 text-xs">
                 <span class="px-2 py-1 bg-rose-50 text-rose-700 rounded font-semibold">
