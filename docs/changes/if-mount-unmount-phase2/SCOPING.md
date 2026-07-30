@@ -138,6 +138,30 @@ implementing agent to confirm or refute, and report which.
 and SSR does not mirror it, the two disagree and produce a hydration mismatch — worse than either
 state alone. They cannot safely diverge.
 
+> **⚠️ S301 — THE PREMISE ABOVE IS FALSIFIED. Re-derived from the code on `db159a51`, not inherited.**
+> SSR does not render `if=` at all today, so there is **no divergence for the client change to
+> create**:
+> - `emit-ssr-render.ts:213-221` — `attrsToParts()` **throws `SsrUnsupported`** on `if`, `show`,
+>   `else`, `else-if` (also `bind`, any `:`-directive, any `@`-prefixed attr).
+> - `emit-ssr-render.ts:370-373` — the caller **catches `SsrUnsupported` and returns `null`**, so the
+>   affected block is simply **excluded from prerender per-block** and the rest of the page proceeds.
+>
+> So a subtree carrying `if=` is absent from the SSR seed regardless of which lowering the client uses.
+> The "they cannot safely diverge / hydration mismatch" reasoning does not apply, because SSR emits
+> nothing for these subtrees to mismatch against.
+>
+> **This does not delete unit 2 — it changes its content**, and the choice is a ruling, not a scoping
+> detail:
+> - **(a) verify-only** — assert the per-block exclusion still holds after unit 1 (a regression guard),
+>   and file the opportunity below. Small.
+> - **(b) take the opportunity** — the clean `<template>` form is inert first-paint content, so
+>   `if=false` could now legitimately SSR as *absent*, which is exactly what §17.1 guarantees. That
+>   would be SSR gaining `if=` support rather than mirroring a client change — a bigger, genuinely
+>   new capability, and a widening-shaped decision that wants its own gate.
+>
+> **HELD for bryan.** Unit 1 (client) is unaffected and is briefed at
+> `BRIEF-unit1-client.md`, which forbids touching `emit-ssr-render.ts`.
+
 **OQ-2 → PREREQUISITE, and the probe sharpened what the prerequisite is.** I compiled an `<each>`
 inside an `if=` on `0d78278c` and read the artifact. My stated hypothesis ("orphan or double-register")
 was **partly wrong** and is corrected here:
@@ -228,6 +252,17 @@ Not idle time — OQ-2's probe and OQ-3's measurement are read-only and are alre
 1. Every shape in §2's table emits `<template>` + marker; **zero** `data-scrml-bind-if` in the corpus.
 2. Re-run §3's measurement: `data-scrml-bind-if` count → **0**; `scrml-if-marker` count → 149 on
    `examples/23-trucking-dispatch`.
+   > **S301 — the measurement SCOPE must be pinned or this gate misreads.** §3's counts are
+   > **HTML-only**. The attribute name also appears in the emitted `.client.js`, so an unscoped
+   > `grep -r` over the dist directory returns **202**, not 101, and reads as a regression that is
+   > not there. Re-measured on `db159a51`: **101 dirty / 48 clean, byte-identical to the `115e8b1b`
+   > baseline** (no drift). Use exactly:
+   > ```sh
+   > grep -ro "data-scrml-bind-if" --include="*.html" "$OUT" | wc -l   # 101 → must become 0
+   > grep -ro "scrml-if-marker"    --include="*.html" "$OUT" | wc -l   #  48 → must become 149
+   > ```
+   > This is the `docs/FACTS.md` lesson applied to a gate: a derived number without its command rots
+   > silently, and here it rots in the direction of a false alarm.
 3. §4 reproducer: predicate false → gated content **absent** from initial HTML.
 4. **Conformance case pinning the ABSENCE half.** `conformance/cases/reactive/toggle-show/` is
    misnamed (it pins `if=` mount, cited §17.1) and asserts only `count: 1` after false→true.
