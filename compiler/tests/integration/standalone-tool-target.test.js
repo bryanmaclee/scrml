@@ -268,9 +268,13 @@ describe("§64 tool target — R26 (compile → parse → RUN)", () => {
     // connects), and a fixed `Bun.sleep(700)` races a slow subprocess start under
     // CI load. The tool reports its real port on stdout; the test reads it, then
     // polls the endpoint until it answers.
+    // Bind the loopback IPv4 explicitly and fetch `127.0.0.1` (below), not
+    // `localhost`. On Linux CI `localhost` resolves to IPv6 `::1` first, while
+    // the server listens on IPv4 — the connect is refused and the fetch never
+    // succeeds (this, not timing, is why the test failed only in CI).
     const src = `<program kind="tool" lang="ts">
     function main(args: string[]) {
-        _={ const _srv = Bun.serve({ port: 0, fetch(req) { return new Response("scrml-tool-ok") } }); console.log("SCRML_TOOL_PORT=" + _srv.port) }=
+        _={ const _srv = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch(req) { return new Response("scrml-tool-ok") } }); console.log("SCRML_TOOL_PORT=" + _srv.port) }=
     }
 </program>`;
     writeFileSync(join(dir, "wire.scrml"), src);
@@ -322,7 +326,7 @@ describe("§64 tool target — R26 (compile → parse → RUN)", () => {
       const fetchDeadline = Date.now() + 5000;
       while (Date.now() < fetchDeadline) {
         try {
-          const res = await fetch(`http://localhost:${port}/`);
+          const res = await fetch(`http://127.0.0.1:${port}/`);
           body = await res.text();
           break;
         } catch {
