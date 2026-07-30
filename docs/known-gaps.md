@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 17 |
-| MED | 86 |
+| HIGH | 18 |
+| MED | 88 |
 | LOW | 39 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -4995,3 +4995,141 @@ still emits the call bare, so the interpolation reads a field off a Promise and 
 **Severity is MED, not HIGH, deliberately** — and the distinction is worth keeping: this is the *same silent-`undefined` class*, but the reviewer recorded it as an unchanged gap rather than a HIGH, and inflating it would misrank it against the two genuine HIGHs filed alongside it. It also fails visibly on the page (a rendered `undefined`) rather than corrupting stored state.
 
 **Do not assume value position is now universally covered** — that is the specific wrong conclusion the closing of [[g-inferred-async-call-value-position-no-autoawait]] invites, and this entry exists to block it. **Locus:** the markup interpolation emit path (`emit-html.ts` / `emit-expr.ts` logic-binding lowering) does not consult `ctx.clientAsyncFnNames`. **PA-located, VERIFY.** — `NEW S301 (bryan, via S239 on the cross-module-await diff); MED; open`
+
+## §S302 — gaps filed S302 (2026-07-30, bryan; adopter issue #284 reverse-verify)
+
+<!-- @gap id=g-indirect-callee-never-server-placed-server-referenceerror sev=HIGH status=open -->
+### G-INDIRECT-CALLEE-NEVER-SERVER-PLACED-SERVER-REFERENCEERROR — a callee reached by a first-class reference is never server-placed; its body ships to the CLIENT and the server handler throws `ReferenceError` — `NEW S302; HIGH; open`
+
+Surfaced reverse-verifying adopter GH **#284**. **The adopter's own attribution is wrong** — see
+[[g-e-route-001-severity-contradicts-12-4-and-one-limb-never-fires]] for the diagnostic half — but the
+underlying defect is real and **more severe than reported**: not a silent fallback, a 500.
+
+**Reproduced and EXECUTED on `ff57597f`, RE-VERIFIED on `ebb6ca6f`** (after #283 landed +410 lines in `emit-client.ts` — the adjacent surface; control still places correctly, failure still 500s) (not grepped — the emitted server handler was invoked):
+
+```
+THREW: ReferenceError: groupByJob is not defined
+```
+
+When a server-escalated function reaches a callee through a **first-class function reference** rather
+than a direct call, the callee is never server-placed. Its body is emitted into the **client** bundle
+under a mangled name (`_scrml_groupByJob_6`), while the server handler references the **unmangled**
+name, which it never defines. Compile is **exit 0, zero errors**.
+
+Two shapes, both reproduced:
+- computed dispatch — `const handlers = { job: groupByJob }; const picked = handlers[which]; picked(rows)`
+- **plain alias, no computed member anywhere** — `const p = groupByJob; p(rows)`
+
+**The alias case is the decisive one.** It carries no computed-member access in the dispatch path at
+all, and it fails identically — so computed-member access is NOT the discriminant. The E-ROUTE-001
+warnings that do fire in both repros are about unrelated lines *inside the helper bodies*
+(`out[r.job] = r.amount`); the developer sees a warning pointing at the wrong place while the actual
+defect is silent.
+
+**Root cause — TRACED, not searched.** `exprNodeCollectCallees`
+(`compiler/src/expression-parser.ts:4126`) delegates to `forEachCallInExprNode` (`:4138`) and pushes a
+name only when `call.callee.kind === "ident"`. A bare identifier reference is an `IdentExpr` that is
+never a `call.callee`, and `forEachCallInExprNode` returns at `case "ident"` (`:4154`), so the
+reference yields **zero callee edges**. §12.2 **Trigger 5** (caller-context propagation) therefore
+never sees a server→helper edge and the helper is not escalated. `route-inference.ts:1019`
+(`extractCalleesFromNode`) is the RI-side consumer; `:57` already documents the limitation out loud —
+*"No full alias tracking (DC-011 accepted limitation — direct patterns only)."*
+
+**The two walks disagree, and that is the bug's signature.** The *reachability* walk DOES count a
+first-class reference — §12.2 Trigger 6 states it normatively (*"a bare function reference keeps it
+reachable and un-tree-shakeable"*) — which is exactly why the body survives into the client bundle
+instead of being tree-shaken away. Placement and reachability read the same source and reach opposite
+conclusions.
+
+**This is the S299 evasion class on the PLACEMENT axis.** S299 found the identical shape
+(*"bare callback reference — no call node at all"*) on the confidentiality axis, fixed it with a
+**Trigger-3-ONLY deep walk**, and *deliberately declined* to widen the shared call-graph path because
+that path also drives Step 5c propagation and E-ROUTE-001. That carve-out was recorded and correct at
+the time; this entry is its bill. **Any fix must re-derive the over-escalation risk the S299 note
+names — do not simply widen `exprNodeCollectCallees`**, which is precisely what S299 measured as
+unsafe for the shared path.
+
+**Governing-sentence gate — outcome (1), sentence FOUND.** SPEC **§12.4**: *"A function that the
+compiler cannot fully analyze for route placement SHALL be a compile error (E-ROUTE-001)."* The
+compiler cannot analyze `picked(rows)` and emits nothing. Conformance restoration, not an amendment.
+
+**Corpus blindness (the S301 pattern, 5th instance).** No corpus file dispatches a server helper
+through a first-class reference — which is why 21k tests are green over a shape that 500s in
+production.
+
+**Loci — PA-located, VERIFY before scoping a fix.** `compiler/src/expression-parser.ts:4126` /
+`:4138` (the callee-collection primitive, traced) · `compiler/src/route-inference.ts:1019` +
+Step 5c (the placement consumer, located-not-traced).
+
+---
+
+<!-- @gap id=g-e-route-001-severity-contradicts-12-4-and-one-limb-never-fires sev=MED status=open -->
+### G-E-ROUTE-001-SEVERITY-CONTRADICTS-12-4-AND-ONE-LIMB-NEVER-FIRES — the SPEC mandates an error, the catalog and the impl say warning, and the limb that matters has no fire site — `NEW S302; MED; open`
+
+Two defects in one code, both surfaced reverse-verifying GH **#284**.
+
+**(a) SPEC self-contradiction.** §12.4 (`SPEC.md:7179`) states: *"A function that the compiler cannot
+fully analyze for route placement **SHALL be a compile error** (E-ROUTE-001)."* The §34 catalog row
+(`SPEC.md:18885`) classifies it **Warning**, and the implementation emits `severity: "warning"`
+(`compiler/src/route-inference.ts:1584`). One of the two is wrong; a freeze-gate catalog that
+contradicts its own normative section is the §34-rot class S297 measured.
+
+**Migration MEASURED for promoting it to Error** (pa-base §8 — a newly-rejecting change owes a
+measured migration, and assumed-zero is not measured-zero): **5 of 1,020 corpus files, 10 total
+fires** — `gauntlet-teams/round2/team-4/app.scrml` (1), `gauntlet-teams/team-1/app.scrml` (2),
+`gauntlet-teams/team-4/app.scrml` (1), `self-host-gauntlet/r2/team-alpha/block-splitter.scrml` (3),
+`self-host-gauntlet/r2/team-beta/block-splitter.scrml` (3). **Zero in `examples/` (0 of 71), zero in
+`samples/` (0 of 877).** Every hit is an archived gauntlet artifact.
+
+**(b) The limb that matters has NO fire site.** `route-inference.ts:51` documents the code as
+*"unresolvable callee (variable-stored function ref, computed member)"* — two limbs. There is exactly
+**one** `code: "E-ROUTE-001"` in the source (`:1577`), and it is the computed-member limb.
+**A variable-stored function reference fires nothing at all.** The doc comment is a coverage claim
+that does not hold — the same shape as the false `error.map.md` coverage claim reopened at S299.
+
+**The consequence that decides the ruling: promoting the severity would NOT have caught the adopter's
+bug.** The dangerous shape ([[g-indirect-callee-never-server-placed-server-referenceerror]]) emits no
+E-ROUTE-001 whatsoever. Severity and soundness are orthogonal here — treating (a) as the fix for #284
+would ship a louder gate over the wrong condition and close the issue while the 500 stays live.
+
+**RULING OWED (bryan):** reconcile §12.4 vs the §34 row — promote the code to Error (migration is
+measured, tiny, and confined to archived artifacts), or amend §12.4 down to Warning. Then, separately,
+decide whether the missing unresolvable-callee limb becomes a fire site or the doc comment is
+corrected to stop claiming it.
+
+**Loci — TRACED.** `compiler/src/route-inference.ts:1577` (sole fire site) · `:51` (the false
+two-limb doc comment) · `compiler/SPEC.md:7179` (§12.4 SHALL) · `compiler/SPEC.md:18885` (§34 row).
+
+---
+
+<!-- @gap id=g-e-route-001-local-bind-workaround-defeats-check-without-reducing-risk sev=MED status=open -->
+### G-E-ROUTE-001-LOCAL-BIND-WORKAROUND-DEFEATS-CHECK-WITHOUT-REDUCING-RISK — the documented workaround silences the diagnostic while leaving the exposure identical — `NEW S302; MED; open`
+
+GH **#284** Symptom B. **REPRODUCES on `ff57597f` and `ebb6ca6f`.** `out.push(caps[j])` fires E-ROUTE-001;
+`const cap = caps[j]` followed by `out.push(cap)` fires nothing. The adopter reports this local-bind
+idiom as *pervasive* across their codebase — every "computed member into a call arg" carries it.
+
+**Mechanism — TRACED.** `COMPUTED_MEMBER_REGEX` (`compiler/src/route-inference.ts:1002`) is tested at
+exactly one site, `:1570`, inside the **`bare-expr`** branch, which `return`s without recursing
+(`:1589` — *"Don't recurse into bare-expr text."*). `const cap = caps[j]` is a **`const-decl`** node;
+its branch (`:1592`-`:1593`) never runs the check. So the workaround works by an accident of
+**node kind**, not by any reduction in risk. *(A second `let-decl`/`const-decl` branch exists at
+`:2163`; whether it is on this walker's path is **located-not-traced** — check it before scoping.)*
+
+**Why that is a soundness inversion, not just an ergonomic wart.** The diagnostic's own message states
+its purpose: *"If this accesses a protected field via a computed key, it will not be detected by route
+inference."* `const cap = caps[j]` has **identical** protected-field exposure to `out.push(caps[j])`
+and is silent. The check therefore fires on a proxy for the risk (which node kind holds the
+expression) rather than on the risk, and the documented remedy is to move the expression into the
+node kind that is not inspected. An adopter following our own error message makes the program no
+safer and the compiler quieter — a gate whose escape hatch is its own recommended fix (pa-base §8,
+the absorbed escape hatch).
+
+**Fix direction is a ruling, not obvious.** Either (a) run the check on `const-decl` / `let-decl`
+initializers too — which will raise the fire rate and owes its own measured migration, and note the
+current corpus rate is 10 fires across 1,020 files so headroom exists; or (b) accept that the check
+cannot see through a local bind and correct the message to stop recommending an idiom that defeats
+it. **Do not do both halves silently** — (a) is newly-rejecting.
+
+**Loci — TRACED.** `compiler/src/route-inference.ts:1002` (regex) · `:1570`-`:1589` (sole fire site,
+`bare-expr`-scoped, non-recursing) · `:1592`-`:1593` (the `const-decl`/`let-decl` branch that skips it).

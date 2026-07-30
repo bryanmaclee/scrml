@@ -1,0 +1,47 @@
+// #284 Symptom A, variant 2 — the shape the adopter ACTUALLY describes:
+// "A PURE helper called only from here defaults to the CLIENT bundle."
+// Same as A but the helper is `fn` (pure, §48) rather than `function`.
+// §12.4: "A function that has no client or server classification — a pure
+// function per §32 — MAY be called from both server-escalated and client-only
+// functions without restriction."
+
+<program db="./i284.db">
+
+  <db src="./i284.db" tables="entries">
+
+    ${
+      <mode> = "day"
+      <result> = ""
+
+      fn groupByJob(rows) {
+        const out = {}
+        let i = 0
+        while (i < rows.length) {
+          const r = rows[i]
+          const k = r.job
+          out[k] = r.amount
+          i = i + 1
+        }
+        return out
+      }
+
+      function loadAdjustEntries(which) {
+        const rows = ?{`SELECT id, job, amount FROM entries`}.all()
+        const first = rows[0]
+        return groupByJob(rows)
+      }
+
+      function go() {
+        const grouped = loadAdjustEntries(@mode)
+        @result = "ok"
+      }
+    }
+
+  </>
+
+  <page>
+    <button onclick=go()>load</button>
+    <div>${@result}</div>
+  </page>
+
+</program>
