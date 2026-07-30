@@ -264,6 +264,77 @@ describe("GH #263 §4 — same-file plain const closed over by a local fn (no do
   });
 });
 
+describe("GH #263 §6 — §52 server-authority cell init must NOT leak a server-only const to the client", () => {
+  // S239 re-review residual leak: a `<x server> = <server-only const>` cell
+  // (`state-decl` with `isServer === true`) put the const's VALUE into
+  // `.client.js`. Its initializer is resolved SERVER-side (the client receives
+  // only a hydration seed), so `collectClientReferencedIdents` must PRUNE the
+  // server-authority state-decl exactly as it prunes a server fn body.
+  const NAME = "servercell";
+  let dir;
+  beforeEach(() => {
+    dir = setupDir(NAME);
+    writeFileSync(join(dir, "models", "m.scrml"), `${OPEN}
+    export const SECRET = "LEAKCANARY-servercell"
+
+    <cfg server> = SECRET
+
+    export fn ping() -> string {
+        return "pong"
+    }
+${CLOSE}
+`);
+    writeFileSync(join(dir, "index.scrml"), importerPage("ping", "ping()"));
+  });
+  afterEach(() => teardownDir(NAME));
+
+  test("the SECRET value is absent from every .client.js (server cell init does not cross)", () => {
+    const c = compileDir(join(dir, "index.scrml"));
+    const m = c.out("m.scrml");
+    const idx = c.out("index.scrml");
+    expect(m).not.toBeNull();
+    // The security-critical invariant — the value must NEVER reach the client.
+    // (A `<x server>` cell in a bare module also fires the orthogonal, pre-
+    // existing E-AUTH-005 "needs a server context"; that diagnostic is not the
+    // subject of this test — the leak is, and it occurred DESPITE the error.)
+    expect(m.clientJs).not.toMatch(/LEAKCANARY-servercell/);
+    expect(idx.clientJs).not.toMatch(/LEAKCANARY-servercell/);
+    expect(() => new vm.Script(m.clientJs)).not.toThrow();
+  });
+});
+
+describe("GH #263 §7 — a CLIENT cell init referencing an export const STILL reaches the client (no over-prune)", () => {
+  // The dual of §6: a plain (non-server) cell `<cfg> = GREETING` DOES ship its
+  // initializer to the client, so the export const it reads MUST still be
+  // emitted client-side. Guards against pruning too aggressively.
+  const NAME = "clientcell";
+  let dir;
+  beforeEach(() => {
+    dir = setupDir(NAME);
+    writeFileSync(join(dir, "models", "m.scrml"), `${OPEN}
+    export const GREETING = "hello-client-cell"
+
+    <cfg> = GREETING
+
+    export fn read() -> string {
+        return GREETING
+    }
+${CLOSE}
+`);
+    writeFileSync(join(dir, "index.scrml"), importerPage("read", "read()"));
+  });
+  afterEach(() => teardownDir(NAME));
+
+  test("GREETING is declared client-side (client cell init reaches the client)", () => {
+    const c = compileDir(join(dir, "index.scrml"));
+    expect(c.errors).toEqual([]);
+    const m = c.out("m.scrml");
+    expect(m).not.toBeNull();
+    expect(m.clientJs).toMatch(/^\s*const GREETING = "hello-client-cell";/m);
+    expect(() => new vm.Script(m.clientJs)).not.toThrow();
+  });
+});
+
 describe("GH #263 §5 — parse-defect shapes fail closed (valid JS, never invalid/double)", () => {
   // Each nasty shape sits next to a clean `export const GREETING` reached by a
   // client fn. The clean sibling must still reach the client; the nasty shape

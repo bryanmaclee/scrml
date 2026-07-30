@@ -339,6 +339,15 @@ function collectClientReferencedIdents(ctx: CompileContext): Set<string> {
     }
     // A candidate export const/let: skip (transitive closure owns its init).
     if (node.kind === "export-decl") return;
+    // §52 server-authority cell (`<x server> = …`, a `state-decl` with
+    // `isServer === true`): its initializer is resolved SERVER-side (the client
+    // only receives a hydration seed, never the init expression), so refs in it
+    // do NOT cross to the client bundle. Prune — mirror of the server-fn prune.
+    // (isServerOnlyNode MISSES this: it classifies SQL/`?{}`/env/meta inits, not
+    // a server-authority cell with a plain-value init. Confirmed via AST dump:
+    // `<cfg server> = SECRET` → {kind:"state-decl", isServer:true, initExpr:…}.
+    // A CLIENT cell (`isServer` falsy) DOES ship its init and is NOT pruned.)
+    if (node.kind === "state-decl" && node.isServer === true) return;
     // Server-only statement (SQL / env / server-context meta): prune subtree.
     if (isServerOnlyNode(node)) return;
 
