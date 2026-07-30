@@ -1,0 +1,30 @@
+// The real adopter shape: §52 server-authority cell in a FULL server context,
+// modelled on examples/18-state-authority.scrml. The cell is seeded on mount
+// from a server fn — the sanctioned Pattern B (§52.6.5) — and its declared
+// initial value is a SECRET the client must never see.
+<program db="./tasks.db">
+
+  <db src="./tasks.db" tables="tasks">
+    ${
+      const API_SECRET = "LEAKCANARY-canonical"
+
+      <apiKey server> = API_SECRET
+      <tasks server>  = []
+      <draftTitle>    = ""
+
+      function loadTasks() {
+        return ?{`SELECT id, title, completed, position FROM tasks ORDER BY position`}.all()
+      }
+
+      on mount {
+        @tasks = loadTasks()
+      }
+    }
+  </>
+
+  <page>
+    <input bind:value=@draftTitle/>
+    <div>${@draftTitle}</div>
+  </page>
+
+</program>

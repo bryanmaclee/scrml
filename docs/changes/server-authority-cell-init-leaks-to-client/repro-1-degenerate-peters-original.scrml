@@ -1,0 +1,8 @@
+// Peter's minimal repro, verbatim — expected to trip E-AUTH-005 (degenerate)
+<program db="sqlite:./app.db">
+${
+    const SECRET = "LEAKCANARY-plain"
+    <_apiKey server> = SECRET
+}
+<p>hi</p>
+</program>

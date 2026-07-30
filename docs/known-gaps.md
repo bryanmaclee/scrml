@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 19 |
+| HIGH | 20 |
 | MED | 89 |
 | LOW | 40 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -5145,3 +5145,80 @@ it. **Do not do both halves silently** — (a) is newly-rejecting.
 
 **Loci — TRACED.** `compiler/src/route-inference.ts:1002` (regex) · `:1570`-`:1589` (sole fire site,
 `bare-expr`-scoped, non-recursing) · `:1592`-`:1593` (the `const-decl`/`let-decl` branch that skips it).
+
+<!-- @gap id=g-server-authority-cell-init-leaks-to-client sev=HIGH status=open -->
+### G-SERVER-AUTHORITY-CELL-INIT-LEAKS-TO-CLIENT — a `<x server>` cell's initializer VALUE ships to the browser and executes there, on a clean compile — `NEW S302; HIGH; open`
+
+**Found by Peter (S300) via the S239 pass on his #263 fix; the leak is on `main` and is INDEPENDENT of
+#263.** He routed it to bryan's classification lane with an explicit, honest caveat — his minimal repro
+also tripped `E-AUTH-005`, so it was degenerate, and he could not verify whether the leak survives in a
+fully server-contexted app. **That check has now been run, and it resolves the caveat in the worse
+direction.** Severity is HIGH, not provisional.
+
+**A §52 server-authority cell (`<x server> = SECRET`) emits its initializer value into the CLIENT
+bundle and sets the cell client-side.** The entire point of `server` authority is that the client never
+holds the value.
+
+**Verified on the canonical shape, not the degenerate one.** The fixture is modelled directly on our own
+`examples/18-state-authority.scrml` (Pattern B, §52.6.5 — cell seeded on mount from a server fn), in a
+real `<db>` context:
+
+```scrml
+const API_SECRET = "LEAKCANARY-canonical"
+<apiKey server> = API_SECRET
+<tasks server>  = []
+on mount { @tasks = loadTasks() }
+```
+
+Emitted `*.client.js`:
+
+```js
+const API_SECRET = "LEAKCANARY-canonical";
+_scrml_cs_reactive_set("apiKey", API_SECRET);
+_scrml_cs_init_set("apiKey", () => API_SECRET);
+```
+
+**PROVEN BY EXECUTION, not by grep.** The client bundle is IIFE-scoped, so presence in the text is not
+proof of reachability. Spying the runtime setter the chunk wrappers delegate to and executing the
+bundle under a DOM yields:
+
+```
+>>> reactive SETs that EXECUTED in the client runtime:
+    00jd18be$apiKey = "LEAKCANARY-canonical"
+```
+
+The secret is live in the browser's reactive store, not dead emitted text.
+
+**Two corrections to the routed report, both moving severity UP:**
+1. **`E-AUTH-005` does not fire at all** on current `main` — not on the degenerate repro, not on the
+   canonical one. It was the stated reason for hedging the severity, and it does not hold.
+2. **The canonical shape compiles with ZERO errors.** Three warnings fire (`W-AUTH-001` ×2,
+   `E-DG-002`) and **not one of them concerns confidentiality** — they are about initial-load detection
+   and an unused variable. Peter's degenerate repro at least drew attention to itself; the real shape is
+   quieter.
+
+**Root cause — TRACED.** `emit-reactive-wiring.ts:496` suppresses top-level statements from client
+output via `isServerOnlyNode(stmt)`. That predicate (`compiler/src/codegen/collect.ts:569`) classifies
+a `state-decl` as server-only only when its init matches `SQL_SIGIL_PATTERN` or `ENV_PATTERN`
+(`:587`-`:590`); **it never inspects `n.isServer`.** So a §52 server-authority cell with a plain-value
+init is not server-only by this predicate and its init is emitted into the client reactive wiring.
+
+**The knowledge exists in the same file and this predicate does not use it** — `collect.ts:670` and
+`:713` both test `child.kind === "state-decl" && child.isServer === true`. This is not a missing
+concept; it is one predicate out of step with its own module.
+
+**Fix caution — the predicate is shared broadly.** `isServerOnlyNode` is consumed by
+`emit-reactive-wiring.ts:496`, `emit-library.ts:888` and `:1013`, and recursively by itself (`:637`).
+Teaching it `isServer` changes client suppression AND library emission at once. Peter did the local
+analogue on the client-reachability side in #263 rather than widening the shared predicate, and that
+instinct matches the S299 precedent (a shared-path widening was *measured* to over-escalate 72 corpus
+sites). **Measure the blast radius before widening; a local prune at the reactive-wiring site may be
+the correct scope.**
+
+**Reproducers:** `docs/changes/server-authority-cell-init-leaks-to-client/` — Peter's original
+degenerate repro, the canonical server-contexted one, and `prove-by-execution.mjs` (spies the runtime
+setter; presence in the bundle text is NOT sufficient evidence for this class).
+
+**Loci — TRACED.** `compiler/src/codegen/collect.ts:569` + the `state-decl` branch `:587`-`:590` (the
+predicate gap) · `compiler/src/codegen/emit-reactive-wiring.ts:496` (the consumer). Same-file
+counter-examples that DO check the flag: `collect.ts:670`, `:713`.
