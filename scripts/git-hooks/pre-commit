@@ -14,7 +14,7 @@ if [ "$BRANCH" = "main" ]; then
 fi
 
 echo "Running tests (unit + integration + conformance, excluding browser)..."
-if ! bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail 2>&1; then
+if ! bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance compiler/tests/*.test.js --bail 2>&1; then
   echo "✗ Tests failed. Fix before committing." >&2
   exit 1
 fi

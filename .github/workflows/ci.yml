@@ -54,6 +54,19 @@ jobs:
         run: bun run pretest
       - name: Gate suite (unit + conformance — reproducibly green from source)
         run: bun test compiler/tests/unit compiler/tests/conformance
+      # S302: the 14 ROOT-LEVEL test files (parser-conformance-*, native-*) were run by
+      # NO workflow at all — 13 of 14 had no runner anywhere, and the 14th
+      # (parser-conformance-within-node) ran only in `tracking`, which is
+      # continue-on-error:true. They are also outside the pre-commit hook's
+      # unit/integration/conformance scope. A 38-failure native-parity regression
+      # therefore passed pre-commit AND this required gate, surfacing solely as a red
+      # `tracking` — the job we routinely (and correctly) read as the documented
+      # browser/serve-tool baseline. A gate that is correctly non-blocking and
+      # habitually red is where a real regression hides.
+      # Deterministic (no dist / browser / network deps) and ~16s. Green at wiring
+      # time: 6394 tests, 0 fail. See g-parity-canary-outside-every-blocking-gate.
+      - name: Root-level parser/native conformance (S302 — previously ungated)
+        run: bun test compiler/tests/*.test.js
       - name: Gauntlet quick check (TodoMVC compiles + emitted JS parses)
         run: |
           bun run compiler/src/cli.js compile benchmarks/todomvc/app.scrml --convert-legacy-css
