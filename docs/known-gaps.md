@@ -538,6 +538,44 @@ Adopter-A's native-iOS client (reused, re-pointed at the scrml backend for the l
 > pinned. The 19th did not — and finding out why surfaced a §51.5 soundness hole rather than a
 > coverage hole.
 
+### g-machine-keyword-retirement-carries-three-subsystems — `<machine>` is not a keyword alias for `<engine>`; retiring the word also retires replay / audit / auto-property-tests unless they are re-based first
+<!-- @gap id=g-machine-keyword-retirement-carries-three-subsystems sev=MED status=open locus=compiler/SPEC.md:18839 -->
+
+**bryan RULED S305:** *"`<machine>` is deprecated long before V1 (still not there) — there is no reason
+whatsoever to tie up the word machine. fix the spec."* The intent is unambiguous and this entry does not
+question it. It records what the ruling's SCOPE turns out to be, because the PA's briefing that produced
+it was incomplete.
+
+**The PA briefed `<machine>` as "the deprecated predecessor to `<engine>`."** True, and incomplete.
+SPEC:18839 states verbatim that the unified purity contract *"preserves the `<machine>` subsystem's
+replay (§51.14), audit (§51.11), and auto-property-test (§51.13) guarantees"* — three surfaces
+`<engine>` does not obviously carry, plus §51.9 derived projections with `given` guards and §51.3.2
+rule-payload bindings / `self.<field>` struct guards. The word is a subsystem entry point, not an alias.
+
+**MEASURED, and it shrinks the problem sharply:** `replay(@light, @log)` against an **`<engine>`**-declared
+cell compiles CLEAN — no `E-REPLAY-001`. So the §51.14 replay target check (`machineBoundReactives`,
+`type-system.ts:23263`) already admits engine cells, and replay is NOT keyword-bound despite the prose at
+:18839. The `audit @log` clause is parsed from `rulesRaw` (`type-system.ts:5966`), which engine-decls also
+carry, so it plausibly follows — **parsing was observed, wiring was NOT verified.** §51.13 property-tests
+(`emit-machine-property-tests.ts`) were not probed.
+
+**Conformance ripple, from this session's own landings:** of the codes pinned at S305, `E-ENGINE-004` and
+`E-ENGINE-010` **SURVIVE** — they fire from a type-level `transitions {}` block (§51.2), which is not the
+`<machine>` keyword. `E-ENGINE-003` · `-005` · `-013` · `-015` · `-016` · `-017` · `-018` and the three
+`E-REPLAY-*` are legacy-declaration-surface and retire with it, taking ~20 conformance cases.
+
+**The open half (a ruling, not a fix):** do §51.11 audit and §51.13 property-tests **die** with the keyword,
+or **re-base onto `<engine>`** the way §51.14 replay already has? Recommendation: **re-base** — replay
+demonstrably needed no keyword, both others hang off the same `rulesRaw`/auto-declared-cell plumbing, and
+killing working guarantees to free a word is a worse trade than moving them. That is a measurement away
+from certain, not an argument.
+
+**Why this was filed instead of amended:** writing "`<machine>` is removed" into normative SPEC while two
+of its three carried subsystems have unverified dispositions is exactly the S302 failure — two false
+normative sentences authored in one session and retracted hours later. The §1 governing-sentence gate binds
+the PA when it is WRITING a sentence, not only when consuming one.
+
+
 ### g-e-type-042-unreachable-duplicate-of-e-eq-002 — two catalogued Error codes claim the same `== not` trigger; the later-stage one can never fire
 <!-- @gap id=g-e-type-042-unreachable-duplicate-of-e-eq-002 sev=LOW status=resolved -->
 
