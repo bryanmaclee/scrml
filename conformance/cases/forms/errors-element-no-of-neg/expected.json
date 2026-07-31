@@ -1,0 +1,13 @@
+{
+  "id": "forms-errors-element-no-of-neg",
+  "description": "The same element carrying `of=@signup.name`, a validator-bearing compound field. Isolates the missing attribute from the element.",
+  "language-version": "1.0",
+  "spec": "§55.8",
+  "rationale": "§55.8 — `<errors of=expr/>` renders the validation errors OF a named cell or compound. Without `of=` the element names no subject, so there is no error list to render and nothing the compiler could default to — a bare `<errors/>` would render silently empty, which is the worst outcome for a diagnostic surface.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ERRORS-001"
+    ]
+  }
+}

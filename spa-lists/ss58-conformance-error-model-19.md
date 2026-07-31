@@ -33,15 +33,15 @@ live in `compiler/src` (`type-system.ts` + `codegen/emit-html.ts` + `dependency-
 `cps-batch-planner.ts`) for the exact trigger. Harness-clean (compile-time; the value-error path).
 
 **error model §19 (the `!`/`?`/`<render>`/`<errors>` contract):**
-7. **E-ERROR-003** (codes) `[status=pending]` — `?` propagation in a non-`!` function (§19.5.4; `type-system.ts:9709`). Pos + neg (`?` in a `!`-declared fn → silent).
-8. **E-ERROR-004** (codes) `[status=pending]` — `?` applied to a non-failable callee (§19.5.4; `type-system.ts:9718`). Pos + neg (`?` on a failable call → silent).
-9. **E-ERRORS-001** (codes) `[status=pending]` — an `<errors>` element error (`codegen/emit-html.ts:1320`). Grep the exact trigger; pos + neg.
-10. **E-ERRORS-002** (codes) `[status=pending]` — an `<errors>` unrecognized value shape ("Got an unrecognized value shape", `codegen/emit-html.ts:1369`). Pos + neg.
-11. **E-RENDER-NO-CLAUSE** (codes) `[status=pending]` — a `<render>` with no clause (`type-system.ts:9008`). Pos + neg.
-12. **E-RENDER-NO-OF** (codes) `[status=pending]` — a `<render>` with no `of=` (`type-system.ts:8970`). Pos + neg.
-13. **E-RENDER-NOT-ENUM** (codes) `[status=pending]` — a `<render>` subject that is not an enum (`type-system.ts:9023`). Pos + neg.
+7. **E-ERROR-003** (codes) `[status=done S305]` — `?` propagation in a non-`!` function (§19.5.4; `type-system.ts:9709`). Pos + neg (`?` in a `!`-declared fn → silent).
+8. **E-ERROR-004** (codes) `[status=done S305]` — `?` applied to a non-failable callee (§19.5.4; `type-system.ts:9718`). Pos + neg (`?` on a failable call → silent).
+9. **E-ERRORS-001** (codes) `[status=done S305]` — an `<errors>` element error (`codegen/emit-html.ts:1320`). Grep the exact trigger; pos + neg.
+10. **E-ERRORS-002** (codes) `[status=done S305]` — an `<errors>` unrecognized value shape ("Got an unrecognized value shape", `codegen/emit-html.ts:1369`). Pos + neg.
+11. **E-RENDER-NO-CLAUSE** (codes) `[status=done S305]` — a `<render>` with no clause (`type-system.ts:9008`). Pos + neg.
+12. **E-RENDER-NO-OF** (codes) `[status=done S305]` — a `<render>` with no `of=` (`type-system.ts:8970`). Pos + neg.
+13. **E-RENDER-NOT-ENUM** (codes) `[status=done S305]` — a `<render>` subject that is not an enum (`type-system.ts:9023`). Pos + neg.
 14. **E-MU-001** (codes) `[status=pending]` — a variable declared but never used before its scope closes (must-use; `type-system.ts:18373`). Pos + neg (a used variable → silent).
-15. **E-LIFT-001** (codes) `[status=pending]` — two independent operations in the same logic block both have `lift` (`dependency-graph.ts:3666`). Pos + neg (a single lift → silent).
+15. **E-LIFT-001** (codes) `[status=BLOCKED-PENDING-SHAPE — see S305 note]` — two independent operations in the same logic block both have `lift` (`dependency-graph.ts:3666`). Pos + neg (a single lift → silent).
 
 **CPS §19.9 idempotency (5 codes):**
 16. **E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH** (codes) `[status=pending]` — an idempotency-store driver mismatch (`api.js:1852`). Pos + neg.
@@ -52,3 +52,38 @@ live in `compiler/src` (`type-system.ts` + `codegen/emit-html.ts` + `dependency-
 
 **Wave-2 DoD:** all 14 error-model/CPS codes pinned (codes-half; reject pos + clean neg per code); run.ts
 green; divergences ESCALATED. The `!`/`<render>`/`<errors>`/CPS diagnostic edge moves to conformance-covered.
+
+## S305 — Wave-2 partial (bryan, 2026-07-31)
+
+**7 of 14 tier-1 codes pinned** — `E-ERROR-003` / `E-ERROR-004` (§19.5.4 propagate) ·
+`E-ERRORS-001` / `E-ERRORS-002` (§55.8 `<errors of=>`) · `E-RENDER-NO-OF` /
+`E-RENDER-NOT-ENUM` / `E-RENDER-NO-CLAUSE` (§19.15.3). 14 cases; suite 811 → 825. Each
+probed by EXECUTION first; measured — every pos emits exactly its target code, every neg
+emits ZERO errors. The three `<render>` codes share ONE legal control neg, so each is
+isolated against a common baseline.
+
+**NOTE — `E-ERRORS-001/002` are catalogued at §55.8, not §19.** The list groups them with
+the error model; §34 places them on the `<errors>` VALIDATOR surface. The cases cite §55.8
+(the catalog), not the list's grouping.
+
+### `E-LIFT-001` — RECORDED SEARCH, no shape found (not a dead-code claim)
+
+Three shapes probed, none fired: (1) two `for … lift` loops over the same reactive in one
+logic block; (2) two server-fn calls each followed by a `lift`, no `<schema>` — masked by
+`E-SQL-004`; (3) the same with a `<schema>` + `db=` so the SQL resolves — silent.
+
+Trigger read live at `dependency-graph.ts:3759-3774`: it needs **≥2 lift-bearing DG nodes
+with NO `awaits` path between them in either direction**. Shapes (2)/(3) plausibly fail
+because CPS batching serializes the two server calls into exactly such a path. **What is
+NOT established:** whether an independent-lift shape is authorable at all. Do NOT record
+this as source-unreachable on this evidence — that is the S261 over-claim. Next step is to
+construct two genuinely unordered lift-bearing operations (distinct reactive sources, no
+shared dependency) and re-probe, or to instrument `liftNodes`/`awaitsAdj` directly.
+
+### Remaining tier-1 on this list (6)
+
+`E-MU-001` (must-use; the `mustUseTracker` at `type-system.ts:18652` — the source construct
+that MARKS a binding must-use was not identified this pass) · the five `E-CPS-*` codes
+(idempotency-store driver/import, multibatch machine-crossing/reorder, non-idem-no-storage)
+— these need the A9/Ext-1 body-split + `scrmlconfig` idempotency-store surface set up, which
+is a materially bigger authoring setup than the rest of this list and deserves its own pass.

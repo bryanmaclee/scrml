@@ -1,0 +1,16 @@
+{
+  "id": "forms-errors-element-no-of-pos",
+  "description": "A bare `<errors/>` carries no `of=`. Per §55.8 the subject attribute is required, so E-ERRORS-001 fires (§34: Error).",
+  "language-version": "1.0",
+  "spec": "§55.8",
+  "rationale": "§55.8 — `<errors of=expr/>` renders the validation errors OF a named cell or compound. Without `of=` the element names no subject, so there is no error list to render and nothing the compiler could default to — a bare `<errors/>` would render silently empty, which is the worst outcome for a diagnostic surface.",
+  "expect": {
+    "codes": [
+      "E-ERRORS-001"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-ERRORS-001": "error"
+    }
+  }
+}

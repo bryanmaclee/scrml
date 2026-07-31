@@ -1,0 +1,13 @@
+{
+  "id": "error-propagate-non-failable-callee-neg",
+  "description": "The same `?` applied to `risky()`, which IS declared `! -> LoadError`. Isolates the callee's failability from the operator.",
+  "language-version": "1.0",
+  "spec": "§19.5.4",
+  "rationale": "§19.5.4 — `?` is the propagate operator for a FAILABLE call. Applied to a callee that cannot fail it propagates nothing, so it is dead syntax that reads as error handling — the most misleading shape available, because it tells a reader the call has a failure mode when its type says it does not.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ERROR-004"
+    ]
+  }
+}

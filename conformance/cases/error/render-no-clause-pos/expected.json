@@ -1,0 +1,16 @@
+{
+  "id": "error-render-no-clause-pos",
+  "description": "`<render of=@phase/>` names an enum whose variants declare NO `renders` clauses. Per §19.15.3 E-RENDER-NO-CLAUSE fires (§34: Error).",
+  "language-version": "1.0",
+  "spec": "§19.15.3",
+  "rationale": "§19.15.3 — `<render>` displays a value THROUGH its variants' `renders` clauses (§19.2). An enum declaring no `renders` clause supplies no markup for any variant, so the element has nothing to render — and because the failure is total rather than per-variant, it is caught at the element rather than discovered as a blank region at runtime.",
+  "expect": {
+    "codes": [
+      "E-RENDER-NO-CLAUSE"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-RENDER-NO-CLAUSE": "error"
+    }
+  }
+}

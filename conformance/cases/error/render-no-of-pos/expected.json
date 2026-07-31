@@ -1,0 +1,16 @@
+{
+  "id": "error-render-no-of-pos",
+  "description": "A bare `<render/>` carries no `of=`. Per §19.15.3 the subject is required and E-RENDER-NO-OF fires (§34: Error).",
+  "language-version": "1.0",
+  "spec": "§19.15.3",
+  "rationale": "§19.15.3 — `<render of=expr/>` displays an enum value through its variants' `renders` clauses. Without `of=` the element names no subject and selects no variant, so there is no clause to dispatch to.",
+  "expect": {
+    "codes": [
+      "E-RENDER-NO-OF"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-RENDER-NO-OF": "error"
+    }
+  }
+}

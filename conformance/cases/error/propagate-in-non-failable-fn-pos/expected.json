@@ -1,0 +1,16 @@
+{
+  "id": "error-propagate-in-non-failable-fn-pos",
+  "description": "`risky()?` appears inside `caller()`, which is NOT declared failable. Per §19.5.4 there is no `!` boundary to propagate to, so E-ERROR-003 fires (§34: Error).",
+  "language-version": "1.0",
+  "spec": "§19.5.4",
+  "rationale": "§19.5.4 — `?` propagates a failure to the ENCLOSING function's `!` boundary. A function not declared `!` has no such boundary, so there is nowhere for the propagated error to go; the `?` would silently discard a failure mode the callee's type declares. Rejecting it is what keeps the `!` signature an honest summary of a function's failure surface.",
+  "expect": {
+    "codes": [
+      "E-ERROR-003"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-ERROR-003": "error"
+    }
+  }
+}

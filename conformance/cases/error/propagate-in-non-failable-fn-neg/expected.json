@@ -1,0 +1,13 @@
+{
+  "id": "error-propagate-in-non-failable-fn-neg",
+  "description": "The identical body inside a `caller()! -> LoadError` declaration. Same call, same `?`, only the enclosing signature differs — so the code keys on the boundary's absence, not on `?` itself.",
+  "language-version": "1.0",
+  "spec": "§19.5.4",
+  "rationale": "§19.5.4 — `?` propagates a failure to the ENCLOSING function's `!` boundary. A function not declared `!` has no such boundary, so there is nowhere for the propagated error to go; the `?` would silently discard a failure mode the callee's type declares. Rejecting it is what keeps the `!` signature an honest summary of a function's failure surface.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ERROR-003"
+    ]
+  }
+}
