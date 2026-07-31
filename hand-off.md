@@ -17,10 +17,11 @@ A server-placed fn reaching a helper via a **first-class reference** (multi-hop 
 
 ## 🔴 THE NEXT PA'S PICKUP (Peter-lane)
 
-1. **#264** — on-mount server-fn in ARGUMENT position not awaited + earlier server-call stmt dropped (§13.2). emit-server. **bryan handed me `emit-server.ts` WHOLESALE** (dissolves the #264/#282 contention) — the **ack is still OWED to him**.
+0. **⭐ TOP — alias peer in a `?{}`/template interpolation not await-lowered (fail-OPEN).** A #284 alias-await RESIDUAL: `serverFnPeerAliasNames` lowering reaches every position EXCEPT the template-literal / SQL interpolation emit path → `const p = fn; ?{`…${p()}…`}` emits bare `${p()}` → binds a Promise → silent-wrong SQL. **Fail-OPEN ⟹ outranks the #284 fail-closed residuals.** Direct-peer interpolation IS awaited (proven fix-vs-pre-fix; the original "pre-existing" filing was WRONG, corrected via **PR #300**, delta [954]). **Fix locus:** thread `serverFnPeerAliasNames` into emit-logic `taggedFromParams` + emit-expr server template-literal lowering. Corpus-absent → deliberately NOT hotfixed at wrap tail (codegen-at-tail is how the two refuted cuts' defects slipped). Gap `g-sql-param-interpolation-peer-call-not-awaited`.
+1. **#264** — on-mount server-fn in ARGUMENT position not awaited + earlier server-call stmt dropped (§13.2). emit-server. **bryan handed me `emit-server.ts` WHOLESALE** (dissolves the #264/#282 contention) — **ack now DELIVERED** (scrml-support `2350`, folds in the alias-interp residual since it lives in his emit lane).
 2. **#274 Wall-2** — `E-CODEGEN` on the two-leading-const-server-call + guard-return + reassigned-let shape. Gated on a STANDALONE repro (the whole-program version didn't reduce). #274 Q2 (`any` refused → how to type a helper outside `<db>`) is bryan's ruling.
 3. **Braceless `for/lift` reject-diagnostic** — bryan RULED reject; "the build is yours." formB emits `for(const it of of)` (node-check-valid, dies at eval). Emit the diagnostic + repro matrix.
-4. **#284 residuals** — if bryan builds the §12.4 fail-closed diagnostic (note sent), wire the dynamic/markup+server-indirect/reassign cases through it.
+4. **#284 residuals (fail-closed)** — if bryan builds the §12.4 fail-closed diagnostic (note sent), wire the dynamic/markup+server-indirect/reassign cases through it.
 
 ## 🧭 FINDINGS THAT OUTLAST
 
@@ -38,16 +39,16 @@ A server-placed fn reaching a helper via a **first-class reference** (multi-hop 
 ## ✅ GATE / HOUSEKEEPING
 
 - **Landed:** #284 core (`94d3d6ee`, PR #297) · §64 de-flake (`4f5f8f23`, PR #298). Each: reproduce-first → satellite (worktree) → **S239 adversarial** (2 rounds on #284) → PA-verified by EXECUTION → cloud `gate`+`windows` GREEN → merge. #284 issue closed with scope+residuals comment.
-- **Gaps:** `g-indirect-callee-never-server-placed-...` → **RESOLVED S303**; new MED `g-sql-param-interpolation-peer-call-not-awaited`. FACTS + gap-counts regen'd (rode #297; `gate` green ⟹ `--check` passing). Net HIGH −1, MED +1.
-- **Worktrees:** baseline measurement worktree removed; build-satellite worktree (`agent-a1a5d57009c5dbf99`) retained (forensic, landed) + `scrml-pinned`.
+- **Gaps:** `g-indirect-callee-never-server-placed-...` → **RESOLVED S303**; new MED `g-sql-param-interpolation-peer-call-not-awaited` — **CORRECTED at wrap tail (PR #300):** it's a #284 alias-await residual (fail-OPEN), NOT pre-existing/direct (direct interpolation await proven working fix-vs-pre-fix). FACTS + gap-counts regen'd (rode #297; `gate` green ⟹ `--check` passing). Net HIGH −1, MED +1.
+- **Worktrees:** ALL session worktrees removed at wrap 6b — baseline measurement wt · `scrml-pre284` (pre-#284 proof, done) · build-satellite `agent-a1a5d57009c5dbf99` (verified byte-identical modulo CRLF to landed #297, then removed). Only main + persistent `scrml-pinned` remain.
 - **Maps:** new `indirect-callee-resolver.ts` + internal route-inference/emit edits; **`project-mapper` not run** (S299 precedent — maps one-session-behind by construction, grep-competitive; symptom→locus captured in the gap + changelog).
-- **bryan inbox (scrml-support):** §12.4 diagnostic residual (`2115`) · ai-review root-cause + §64 fix (`2330`). Both pushed.
+- **bryan inbox (scrml-support):** §12.4 diagnostic residual (`2115`) · ai-review root-cause + §64 fix (`2330`) · emit-surface wholesale-edit ACK + corrected alias-interp residual (`2350`). All pushed.
 - **⚠ OPEN inbox threads — routed, un-dispositioned (need bryan/design):** rediledger DB-authoritative verb-grant ask (`1545` — append-only/no-delete/no-insert markers; the DB-auth arc, SPEC/design lane) · flogence ASK-1 transitive footprint `calls[]` (bryan claimed "the flogence oracle ask" at S302 — HIS lane). Moved to `read/` (absorbed), carried here as open.
 
 ## Tags
 #session-303-peter #284-first-class-ref-server-placement #two-s239-rounds-refuted #indirect-callee-resolver
 #await-lowering-fail-open-caught #64-not-a-flake-loopback-fetch #tracking-red-by-design #ai-review-apikey-not-model
-#emit-server-wholesale-ack-owed #measurement-harness-disaster #verify-the-class
+#emit-surface-wholesale-ack-delivered #measurement-harness-disaster #verify-the-class #gap-provenance-corrected-fail-open-alias-interp
 
 ---
 
