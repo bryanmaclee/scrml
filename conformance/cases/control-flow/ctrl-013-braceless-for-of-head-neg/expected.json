@@ -1,0 +1,12 @@
+{
+  "id": "ctrl-013-braceless-for-of-head-neg",
+  "description": "§17.4a — the canonical parenthesized Tier-0 loop head `for (x of @items) { lift <li>${x}</> }` does NOT fire E-FOR-UNPARENTHESIZED-HEAD. Twinned with ctrl-013-braceless-for-of-head-pos: same loop, same body, the ONLY difference is the parentheses around the head — which isolates the trigger to the missing parentheses. This is the exact form the diagnostic's own message recommends. W-PROGRAM-001 co-fires incidentally (no `<program>` shell); not asserted.",
+  "language-version": "1.0",
+  "spec": "§17.4, §17.4a",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§34 E-FOR-UNPARENTHESIZED-HEAD 'Does NOT fire' list, first entry: the canonical parenthesized `for (x of @items) { ... }` head SHALL NOT be rejected. §17.4a makes this the required loop-head syntax, so it must compile silently. Also asserts E-CTRL-011 does not fire (the head uses `of`, not `in`).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-FOR-UNPARENTHESIZED-HEAD", "E-CTRL-011"]
+  }
+}

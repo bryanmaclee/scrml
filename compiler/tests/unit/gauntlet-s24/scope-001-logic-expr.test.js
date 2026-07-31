@@ -485,7 +485,7 @@ describe("S24 §2a slice 2 — if / return / match-subject coverage", () => {
     const src = `<program>
 \${
   function gen() {
-    for x of [1, 2, 3] {
+    for (x of [1, 2, 3]) {
       lift undeclaredLiftValue
     }
   }

@@ -8448,13 +8448,33 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
         }
       } else {
-        // scrml-style: for variable in iterable
+        // Braceless (unparenthesized) head: `for variable <sep> iterable`.
+        // The legacy scrml English form is spelled with `in`
+        // (`for item in @items { ... }`, value-iteration). A braceless `of`
+        // is NOT handled here: without consuming `of`, collectExpr mis-reads
+        // the iterable as the bare token `of` → `for (const x of of)`, which
+        // passes `node --check` but throws `ReferenceError: of` at module-eval.
+        // §17.4a/§17.4b: an `of` loop head MUST be parenthesized —
+        // `for (x of iterable) { ... }`. Reject the braceless `of` form
+        // (E-FOR-UNPARENTHESIZED-HEAD) and recover by consuming `of` + collecting
+        // the real iterable, so no broken loop is emitted and downstream analysis
+        // does not cascade. The `in` legacy form is left unchanged.
         if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
           variable = consume().text;
         }
-        // Consume `in` keyword
         if (peek().kind === "KEYWORD" && peek().text === "in") {
-          consume();
+          consume(); // legacy scrml English form — value-iteration, unchanged
+        } else if (peek().kind === "KEYWORD" && peek().text === "of") {
+          const varDesc = typeof variable === "string" ? variable : "x";
+          errors.push(new TABError(
+            "E-FOR-UNPARENTHESIZED-HEAD",
+            "E-FOR-UNPARENTHESIZED-HEAD: a `for … of` loop head must be parenthesized — " +
+            "write `for (" + varDesc + " of <iterable>) { ... }` (§17.4a). A braceless " +
+            "`for " + varDesc + " of <iterable>` is not valid scrml; without the parentheses " +
+            "the iterable is mis-read and the loop ships broken.",
+            tokenSpan(startTok, filePath),
+          ));
+          consume(); // recover: consume `of` so the iterable collects correctly
         }
         const { expr: iterExpr } = collectExpr("{");
         iterable = iterExpr.trim();
@@ -10461,12 +10481,30 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         }
       }
     } else {
-      // scrml-style: for variable in iterable
+      // Braceless (unparenthesized) head: `for variable <sep> iterable` — the
+      // for-as-expression twin of the statement-parser branch. The legacy scrml
+      // English form is spelled with `in`; a braceless `of` is NOT consumed here,
+      // so collectExpr mis-reads the iterable as the bare token `of` →
+      // `for (const x of of)` (valid to `node --check`, ReferenceError at eval).
+      // §17.4a/§17.4b mandate a parenthesized `of` head. Reject the braceless `of`
+      // form and recover by consuming `of` + collecting the real iterable. The
+      // `in` legacy form is left unchanged.
       if (peek().kind === 'IDENT' || peek().kind === 'KEYWORD') {
         variable = consume().text;
       }
       if (peek().kind === 'KEYWORD' && peek().text === 'in') {
-        consume();
+        consume(); // legacy scrml English form — value-iteration, unchanged
+      } else if (peek().kind === 'KEYWORD' && peek().text === 'of') {
+        const varDesc = typeof variable === 'string' ? variable : 'x';
+        errors.push(new TABError(
+          'E-FOR-UNPARENTHESIZED-HEAD',
+          'E-FOR-UNPARENTHESIZED-HEAD: a `for … of` loop head must be parenthesized — ' +
+          'write `for (' + varDesc + ' of <iterable>) { ... }` (§17.4a). A braceless ' +
+          '`for ' + varDesc + ' of <iterable>` is not valid scrml; without the parentheses ' +
+          'the iterable is mis-read and the loop ships broken.',
+          tokenSpan(startTok, filePath),
+        ));
+        consume(); // recover: consume `of` so the iterable collects correctly
       }
       const { expr: iterRaw } = collectExpr('{');
       iterable = iterRaw.trim();
@@ -12738,13 +12776,33 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
         }
       } else {
-        // scrml-style: for variable in iterable
+        // Braceless (unparenthesized) head: `for variable <sep> iterable`.
+        // The legacy scrml English form is spelled with `in`
+        // (`for item in @items { ... }`, value-iteration). A braceless `of`
+        // is NOT handled here: without consuming `of`, collectExpr mis-reads
+        // the iterable as the bare token `of` → `for (const x of of)`, which
+        // passes `node --check` but throws `ReferenceError: of` at module-eval.
+        // §17.4a/§17.4b: an `of` loop head MUST be parenthesized —
+        // `for (x of iterable) { ... }`. Reject the braceless `of` form
+        // (E-FOR-UNPARENTHESIZED-HEAD) and recover by consuming `of` + collecting
+        // the real iterable, so no broken loop is emitted and downstream analysis
+        // does not cascade. The `in` legacy form is left unchanged.
         if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
           variable = consume().text;
         }
-        // Consume `in` keyword
         if (peek().kind === "KEYWORD" && peek().text === "in") {
-          consume();
+          consume(); // legacy scrml English form — value-iteration, unchanged
+        } else if (peek().kind === "KEYWORD" && peek().text === "of") {
+          const varDesc = typeof variable === "string" ? variable : "x";
+          errors.push(new TABError(
+            "E-FOR-UNPARENTHESIZED-HEAD",
+            "E-FOR-UNPARENTHESIZED-HEAD: a `for … of` loop head must be parenthesized — " +
+            "write `for (" + varDesc + " of <iterable>) { ... }` (§17.4a). A braceless " +
+            "`for " + varDesc + " of <iterable>` is not valid scrml; without the parentheses " +
+            "the iterable is mis-read and the loop ships broken.",
+            tokenSpan(startTok, filePath),
+          ));
+          consume(); // recover: consume `of` so the iterable collects correctly
         }
         const { expr: iterExpr } = collectExpr("{");
         iterable = iterExpr.trim();
