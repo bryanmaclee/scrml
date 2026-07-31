@@ -5074,30 +5074,43 @@ worked; the EMISSION was call-based and missed the raw call). Over-collection is
 the established emission invariant. Adversarially verified: multi-hop alias, shadowed param, reassigned
 alias (dropped), uncalled alias — all correct; conformance 763/0.
 
-<!-- @gap id=g-dispatch-table-call-not-awaited-or-emitted sev=MED status=open -->
-### G-DISPATCH-TABLE-CALL-NOT-AWAITED-OR-EMITTED — a peer reached through an object-literal DISPATCH TABLE (`const t = {k: peer}; t[k]()`) is not await-lowered or emitted ANYWHERE (not interpolation-specific) — `NEW S304; MED; open`
+<!-- @gap id=g-dispatch-table-call-not-awaited-or-emitted sev=MED status=resolved -->
+### G-DISPATCH-TABLE-CALL-NOT-AWAITED-OR-EMITTED — a PEER reached through an object-literal DISPATCH TABLE (`const t = {k: peer}; t[k]()`) is not await-lowered or emitted → RESOLVED S304 — `NEW S304; MED; RESOLVED S304 (PR #305)`
 
-Surfaced by the S304 `verify-the-bug-class` sweep while fixing the alias-in-interpolation gap above. A peer
-reached through a **computed / static member of a dispatch table** — `const t = { a: nextOrder }; t["a"]()`
-or `t[which]()` — is emitted **bare (unawaited)** in EVERY position tested: `return`, `const`-assign, template
-literal, AND SQL `?{}` param (compiled + inspected on `main`):
-```
-const t = {a: nextOrder};
-return t["a"]();                 // ← bare, should be `return await t["a"]();`
-const msg = `order #${t["a"]()} ready`;   // ← bare
-```
-So unlike the alias gap above (which was interpolation-specific), this is a **general #284 await + emission
-residual for the dispatch-table shape** — the alias (bare-ident) call is awaited via `serverFnPeerAliasNames`,
-but a computed-member callee `t[k]()` never matches the bare-name alias set, so `emitCall`'s `_aliasPeer`
-lowering can't fire. #284 server-PLACES the dispatch-referenced helper (no ReferenceError for a plain sync
-helper — that's what the `first-class-fn-ref-server-helper-rt` conformance case proves) but never wired the
-dispatch shape into the async await-lowering or the peer emission. **Fail-OPEN** where the peer is otherwise
-emitted (binds a Promise), **fail-CLOSED** (ReferenceError) where the dispatch call is the sole reference to
-an async `server function` peer. **Fix locus (separate cycle):** `emit-expr.ts:emitCall` must recognize a
-computed/static member call whose object resolves (per the #284 resolver's `tableBindings`) to a peer set and
-await it; and `emit-server.ts` must emit those targets. Different locus + edge cases (dynamic key where only
-SOME members are peers; static-key resolution) than the alias fix — kept OUT of PR #303 scope so it gets its
-own reproduce → fix → S239 pass. Repro: `scratchpad/repro-dispatch-*.mjs`.
+> **RESOLVED S304** (PR #305, branch `fix/dispatch-table-peer-await-emit`). A peer reached through a
+> **computed / static member of a dispatch table** — `const t = { a: nextOrder }; t["a"]()` / `t.a()` /
+> `t[which]()` — was emitted **bare** because the callee is a member/index expr (no bare ident), so it never
+> matched the bare-name peer/alias await path. Confirmed by RUNNING it: `${t["a"]()}` in a template →
+> `[object Promise]` (fail-OPEN); in a SQL param → a bound Promise that broke the INSERT (fail-CLOSED); and as
+> sole referencer, the peer callable was never emitted → ReferenceError. (The `return`/assign positions were
+> only accidentally saved by the async-IIFE return-flattening — fragile, so the fix is at `emitCall`, uniform
+> across positions.) **Fix:** `emit-expr.ts:emitCall` awaits a call whose callee's OBJECT ident is a
+> peer-bearing dispatch table (`serverFnPeerDispatchObjs`, threaded like `serverFnPeerAliasNames`); the
+> resolver exposes `tableBindings` + `dispatchTableNamesWithPeers` / `dispatchTablePeerMembers`; `emit-server`
+> adds the table's peer members to `_calledPeerNames` (a `{ k: peer }` references the peer as a value, so it
+> must be emitted regardless of call). Awaiting a member that resolves to a SYNC value is a harmless no-op, so
+> the conservative table-level await is sound. Verified: `peer-call-in-template-interp-awaited.test.js` 11/0
+> (incl. a live round-trip); adversarial — static/dot/dynamic key, return/assign/template/SQL positions,
+> sole-referencer emission, shadowed table (not treated as dispatch), reassigned table (dropped), two-peer
+> mixed table (dynamic key resolves to any member) — all correct; conformance 769/0.
+
+<!-- @gap id=g-dispatch-table-plain-helper-member-not-server-placed sev=MED status=open -->
+### G-DISPATCH-TABLE-PLAIN-HELPER-MEMBER-NOT-SERVER-PLACED — a PLAIN (non-`server function`) helper reached ONLY through a direct dispatch call `t[k]()` is not server-PLACED → ReferenceError — `NEW S304; MED; open`
+
+Found while resolving the dispatch-await gap above (S304). A **plain helper** (an ordinary `function foo`,
+not a `server function` peer) that is a dispatch-table member reached ONLY via a direct dispatch call — never
+by a direct call or an intermediate-alias call — is not server-PLACED, so the emitted `const t = { …: foo }`
+references an undefined `foo` → ReferenceError. Root: route-inference's placement (like the peer emission the
+S304 fix just added) resolves indirect callees from STRUCTURED `call` nodes (`indirectResolvedCallees`), and a
+direct dispatch call `t[k]()` has a member/index callee that is absent from `calledNames`. The S304 fix
+handles PEER (server-fn) members — a peer is server-placed by construction, and its emission is now wired — but
+a PLAIN helper's PLACEMENT lives in route-inference, whose escalation counting is over-escalation-sensitive
+(the S299 D4 / W-DEAD gate), so widening it is a separate, higher-blast-radius change. **Fail-CLOSED** (a 500,
+not silent). Pre-existing: on `main` the same shape already 500s (the peer wasn't emitted either), the S304
+fix strictly improved it (the peer half now works; the plain-helper half remains). Repro: the `mixedDynamic`
+case in `scratchpad/repro-dispatch-adversarial.mjs` (a `{ a: peer, b: plainHelper }` table, dynamic key).
+**Fix locus (separate cycle):** teach route-inference to resolve a direct dispatch call `t[k]()` to the table's
+member set for placement (via the resolver's now-exposed `tableBindings`), guarded to not over-escalate.
 
 ---
 
@@ -5128,8 +5141,10 @@ own reproduce → fix → S239 pass. Repro: `scratchpad/repro-dispatch-*.mjs`.
 > unawaited (fail-open) AND, as sole referencer, unemitted (fail-closed 500); the template-literal form was
 > already awaited. Fixed at the `taggedFromParams` detection gate + an alias-aware raw-text emission recovery.
 > A SEPARATE broader residual was found doing so: [[g-dispatch-table-call-not-awaited-or-emitted]] — a
-> dispatch-table call `t[k]()` is unawaited/unemitted in EVERY position (not interpolation-specific), filed
-> for its own cycle.
+> dispatch-table call `t[k]()` is unawaited/unemitted in EVERY position (not interpolation-specific), taken in
+> its own cycle → **RESOLVED S304 (PR #305)**. That fix in turn surfaced
+> [[g-dispatch-table-plain-helper-member-not-server-placed]] (a PLAIN-helper dispatch member's PLACEMENT, a
+> route-inference concern — still open, fail-closed).
 
 Surfaced reverse-verifying adopter GH **#284**. **The adopter's own attribution is wrong** — see
 [[g-e-route-001-severity-contradicts-12-4-and-one-limb-never-fires]] for the diagnostic half — but the

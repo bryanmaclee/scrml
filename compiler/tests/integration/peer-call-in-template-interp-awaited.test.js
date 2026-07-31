@@ -401,4 +401,93 @@ describe("ss22 #4 — peer call / @cell inside a ${} interpolation", () => {
     expect(ord).toBe(1);
     expect(String(ord)).not.toContain("[object Promise]");
   });
+
+  // ── #284 DISPATCH-TABLE residual (S304): a peer reached through a direct
+  // dispatch call `const t = { k: peer }; t[k]()` / `t.k()`. The callee is a
+  // member/index expr (NOT a bare ident), so it never matched the bare-name peer/
+  // alias await path → emitted bare in EVERY position: `[object Promise]` in a
+  // template, a bound Promise breaking a SQL param, and (as sole referencer) the
+  // peer callable was never emitted. Fix: emit-expr awaits a call whose callee's
+  // object ident is a peer-bearing dispatch table (serverFnPeerDispatchObjs), and
+  // emit-server emits the table's peer members.
+  const DISPATCH_SRC = `
+<program>
+
+<db src="./items.db" tables="items">
+
+  \${
+    server function nextOrder() {
+      const row = ?{\`SELECT COALESCE(MAX(ord),0)+1 AS n FROM items\`}.get()
+      return row.n
+    }
+
+    // SOLE referencer of nextOrder, via a static-key dispatch call in a SQL param.
+    server function dispatchSql(name) {
+      const t = { a: nextOrder }
+      ?{\`INSERT INTO items (ord, name) VALUES (\${t["a"]()}, \${name})\`}.run()
+      const back = ?{\`SELECT ord FROM items WHERE name = \${name}\`}.get()
+      return back.ord
+    }
+
+    // dynamic-key dispatch inside a template literal.
+    server function dispatchTemplate(which) {
+      const t = { a: nextOrder }
+      return \`ord \${t[which]()}\`
+    }
+  }
+
+  <div>D</div>
+
+</>
+
+</program>
+`;
+
+  test("(#284 dispatch) SQL ?{} param: ${t[\"a\"]()} lowers to ${await t[\"a\"]()}", () => {
+    const { errors, serverJsPath } = compileToFiles(DISPATCH_SRC, "disp-sql", SEED);
+    expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
+    const js = readFileSync(serverJsPath, "utf-8");
+    expect(js).toContain('VALUES (${await t["a"]()}, ${name})');
+    expect(js).not.toContain('VALUES (${t["a"]()}, ${name})'); // RED: bare dispatch
+    // The peer callable MUST be emitted for the awaited reference to resolve, even
+    // though `nextOrder` is reached ONLY through the dispatch table (sole ref).
+    expect(js).toMatch(/async function nextOrder\(\) \{/);
+    assertValidJs(js);
+  });
+
+  test("(#284 dispatch) template literal: ${t[which]()} lowers to ${await t[which]()}", () => {
+    const { errors, serverJsPath } = compileToFiles(DISPATCH_SRC, "disp-tmpl", SEED);
+    expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
+    const js = readFileSync(serverJsPath, "utf-8");
+    expect(js).toContain("`ord ${await t[which]()}`");
+    expect(js).not.toContain("`ord ${t[which]()}`"); // RED: bare dispatch → [object Promise]
+    assertValidJs(js);
+  });
+
+  test("(#284 dispatch) runtime: a dispatch peer in a SQL param binds the AWAITED value, not a Promise", async () => {
+    if (typeof globalThis.document !== "undefined") return; // happy-dom pollution guard
+    const { errors, serverJsPath, tmpDir } = compileToFiles(DISPATCH_SRC, "disp-rt", SEED);
+    expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
+    const absDbPath = resolve(tmpDir, "items.db");
+    const mod = await patchAndImport(serverJsPath, absDbPath);
+    const route = Object.values(mod).find(
+      (v) => v && typeof v === "object" && typeof v.path === "string" && v.path.includes("dispatchSql"),
+    );
+    expect(route).toBeDefined();
+    const TOKEN = "ss22-csrf-token";
+    const mkReq = (path, body) =>
+      new Request(`http://localhost${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": TOKEN, "Cookie": `scrml_csrf=${TOKEN}` },
+        body: JSON.stringify(body ?? {}),
+      });
+    const r = await route.handler(mkReq(route.path, { name: "widget" }));
+    expect(r.status).toBe(200);
+    const ord = await r.json();
+    // Awaited dispatch value (1 on an empty table) round-trips; a bound Promise
+    // would have broken the INSERT (a NOT NULL / type error) or stored a garbage
+    // ord — and the peer callable would be undefined (ReferenceError) if unemitted.
+    expect(ord).toBe(1);
+    expect(String(ord)).not.toContain("[object Promise]");
+  });
 });

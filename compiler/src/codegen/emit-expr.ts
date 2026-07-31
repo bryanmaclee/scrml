@@ -472,6 +472,19 @@ export interface EmitExprContext {
    */
   serverFnPeerAliasNames?: Set<string> | null;
   /**
+   * #284 dispatch-table sibling — object-literal names (`const t = { k: peer }`)
+   * whose members include ≥1 peer, so a DIRECT dispatch call `t[k](...)` /
+   * `t.k(...)` must be await-lowered. The callee of such a call is a member/index
+   * expr, not a bare ident, so it never matched `serverFnPeerAliasNames`; a bare
+   * `t[k]()` therefore leaked an unawaited Promise (`[object Promise]` in a
+   * template, a bound-Promise INSERT in a SQL param). `emitCall` awaits a call
+   * whose callee's OBJECT ident is in this set (awaiting a member that resolves to
+   * a SYNC value is a harmless no-op, so the conservative table-level test is
+   * sound). Threaded from `EmitLogicOpts.serverFnPeerDispatchObjs` via
+   * `_makeExprCtx`. NULL/empty → no peer-bearing dispatch tables in scope.
+   */
+  serverFnPeerDispatchObjs?: Set<string> | null;
+  /**
    * Seam-A colorless-async Gap 2 (GITI-037) — names of LOCAL CLIENT peer fns that
    * are async (transitively reach a stdlib-async / server call). In `mode ===
    * "client"`, `emitCall` lowers a plain-ident call to one of these to
@@ -1472,9 +1485,35 @@ function receiverNeedsParens(node: ExprNode): boolean {
  * `await peer().found` mis-parses as `await (peer().found)`, awaiting the wrong
  * thing → silent-wrong, the receiver-position sibling of the bare-call bug).
  */
+/**
+ * #284 dispatch-table await — is `node` a DIRECT dispatch call `t[k](...)` /
+ * `t.k(...)` whose table `t` is a peer-bearing dispatch object (server mode)?
+ * The callee is a member/index expr (NOT a bare ident), so it is invisible to
+ * the `serverFnPeerAliasNames` bare-name path; the resolved member is (possibly)
+ * an async peer, so a bare emission leaks a Promise. Returns whether the call has
+ * this shape — the caller adds the `peerAwaitable` position check (mirrors the
+ * bare-peer split). Optional-chained callees are excluded (their own lowering).
+ */
+function isDispatchPeerCall(node: ExprNode, ctx: EmitExprContext): boolean {
+  if (node.kind !== "call") return false;
+  const call = node as CallExpr;
+  if (call.optional) return false;
+  if (ctx.mode !== "server") return false;
+  if (ctx.serverFnPeerDispatchObjs == null || ctx.serverFnPeerDispatchObjs.size === 0) return false;
+  const callee = call.callee;
+  let obj: ExprNode | null = null;
+  if (callee.kind === "member" && !(callee as MemberExpr).optional) obj = (callee as MemberExpr).object;
+  else if (callee.kind === "index" && !(callee as IndexExpr).optional) obj = (callee as IndexExpr).object;
+  if (obj == null || obj.kind !== "ident" || typeof (obj as { name?: unknown }).name !== "string") return false;
+  return ctx.serverFnPeerDispatchObjs.has((obj as { name: string }).name);
+}
+
 function isAwaitedPeerCall(node: ExprNode, ctx: EmitExprContext): boolean {
   if (node.kind !== "call") return false;
   const call = node as CallExpr;
+  // #284 dispatch-table: a member/index callee on a peer-bearing dispatch table
+  // is awaited exactly like a bare peer (subject to the same position guard).
+  if (isDispatchPeerCall(node, ctx)) return ctx.peerAwaitable !== false;
   if (call.callee.kind !== "ident" || typeof (call.callee as { name?: unknown }).name !== "string") {
     return false;
   }
@@ -3026,6 +3065,23 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     // false` so emitReceiver can wrap an await form used as a receiver.)
     if (ctx.peerAwaitable === false) {
       if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name, span: node.span });
+      return `${callee}(${args})`;
+    }
+    return `await ${callee}(${args})`;
+  }
+
+  // #284 dispatch-table await — a DIRECT dispatch call `t[k](...)` / `t.k(...)`
+  // on a peer-bearing dispatch table. The callee is a member/index expr, not a
+  // bare ident, so the branch above (which keys on `node.callee.kind === "ident"`)
+  // never fired and the async peer member leaked an unawaited Promise (`[object
+  // Promise]` interpolated into a template, a bound Promise breaking a SQL param).
+  // Await it exactly as the bare-peer path does, honouring the same non-awaitable
+  // position guard (`peerAwaitable === false` → bare + record the fail-closed
+  // site; the object ident stands in as the callee name in the diagnostic).
+  if (isDispatchPeerCall(node, ctx)) {
+    if (ctx.peerAwaitable === false) {
+      const _objName = ((node.callee as MemberExpr | IndexExpr).object as { name?: string }).name;
+      if (ctx.syncPeerCalls && typeof _objName === "string") ctx.syncPeerCalls.push({ name: _objName, span: node.span });
       return `${callee}(${args})`;
     }
     return `await ${callee}(${args})`;
