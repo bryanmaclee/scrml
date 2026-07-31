@@ -1,4 +1,98 @@
 <!-- ============================================================= -->
+<!-- S309 WRAP (Peter/Windows) — prepended 2026-07-31.              -->
+<!-- Same boot that authored the S308 recovery block below.         -->
+<!-- S308 + all prior UNCHANGED below. Disambiguate by NAME.         -->
+<!-- ============================================================= -->
+
+# scrml — Session 309 (Peter · Windows) — WRAP
+
+**Date:** 2026-07-31. `/boot` Profile A (booted as the S308-recovery boot; see the S308 block below).
+`main` at **`1cda91bb`**, coherence **0/0** both repos, trees clean. Delta-log **[1003]–[1005]**. Three
+landings, all cloud gate+windows GREEN: **#327** (S308 recovery continuity), **#329** (braceless
+`for/lift` reject), **#330** (destructuring follow-up). Started by recovering the S308 interrupted
+session, then took the top Peter-lane pickup (braceless `for/lift`) to full closure.
+
+## 🎯 THE HEADLINE — the braceless `for/lift` reject, and how MEASUREMENT (not the ruling) set the scope
+
+bryan RULED **reject** the braceless `for/lift` (§17.4a/§17.4b `**Syntax:**` mandate a parenthesized head;
+"the build is yours"). The reported bug (formB `for it of @rows lift`) emitted **`for (const x of of)`** —
+`node --check`-valid, `ReferenceError` at module-eval (exit-0 compile → dead page). The braceless-head
+parse branch consumed only the legacy English `in`, never `of`, so `collectExpr` read the iterable as the
+bare token `of`.
+
+**The scope was set by grep, not by the ruling.** A blanket "reject all braceless heads" would have broken
+the corpus: the braceless English form `for item in @items { ... }` is an INTENTIONAL, widely-used sugar
+(value-iteration; used across unit tests + the self-host **parity** harness). Measuring first (zero
+legitimate braceless-head loops in `.scrml`; braceless-`in` used in ~5 tests) scoped the reject to the
+proven-broken braceless **`of`** — leaving the `in` sugar and parity untouched. **`E-FOR-UNPARENTHESIZED-HEAD`**
+(§34 Error) fires + RECOVERS by consuming `of` and collecting the real iterable (no broken emit, no cascade).
+
+**#329 (`7173f31d`)** — the reject across all three for-parser copies + SPEC §17.4 note + §34 row + conformance
+`ctrl-013` pos/neg (843→845) + unit test. **#330 (`1cda91bb`)** — the destructuring follow-up: a destructure
+LHS (`for [a,b] of xs`) bypassed the reject (the branch only read IDENT/KEYWORD vars); now consumes the
+pattern via `parseDestructurePattern()` before the of/in check, in all three copies.
+
+## 🧭 FINDINGS THAT OUTLAST
+
+- **[1003] — the S239 adversarial pass caught a REAL blocker on #329, and my own repro had masked it.** My
+  first cut patched 2 of 3 for-parser copies; my probe tested a braceless *body* (`lift it`, no braces),
+  which routes elsewhere, so it reported clean. The reviewer constructed `const names = for item of @items
+  { lift item }` (a braced body via the **for-as-expression** copy) and proved a residual `of of`. A green
+  21k-suite would have shipped it. Patched the third copy, regression-tested. **The adversarial loop is not
+  ceremony — and "I ran a repro" is not the same as "I ran the repro that exercises every reachable copy."**
+- **[1004] — the cloud `gate` runs MORE `--check` steps than FACTS + state.** #329's gate went RED on
+  `regen-spec-index.ts --check` (SPEC.md grew 11 lines → SPEC-INDEX totals stale); I'd regenerated FACTS +
+  state but not SPEC-INDEX. Root-caused from the gate log (all 18,689 tests passed; `windows` green; the
+  failure was one non-test step). **After ANY SPEC.md edit, regen SPEC-INDEX too.** Banked to memory
+  [[scrml-regen-scripts-crlf-broken-on-windows]] — which also carries the SECOND finding: that regen script
+  is LF-only and fails on this Windows CRLF checkout (strip CR first; line-math is CRLF-invariant so output
+  equals CI's). Sibling to the render-map regen being Windows-broken ([999]).
+- **Measure the legal surface before writing a REJECT.** A reject's #1 risk is over-firing on a legal form.
+  The grep that found zero corpus braceless heads AND the test-grep that found braceless-`in` in the parity
+  harness together set a scope that is corpus-safe by construction — not by hope.
+
+## 🔴 THE NEXT PA'S PICKUP (Peter-lane)
+
+1. **#228** (held) — reactive bindings in an initially-hidden nested-`<each>` don't reconcile live (flogence
+   async-trace / broader S10 gap). **The sole open adopter issue** and the top remaining Peter-lane item;
+   needs a flogence trace / design, not a quick codegen fix.
+2. **Gap** `g-onmount-direct-reactive-server-write-unawaited-on-escape-hatch-string-path` (MED, contrived,
+   from S306) — the spaced escape-hatch fail-open half (the fallback-hardening half closed by #326).
+3. **Gap** `g-destructure-pattern-object-object-in-for-comprehension-emit` (LOW, PRE-EXISTING, filed S309) —
+   the for-comprehension copy `String()`-coerces a destructure pattern to `[object Object]` in emit; the
+   canonical paren form has the identical bug, so it's a comprehension-lowering fix, not a braceless one.
+
+## ✅ GATE / HOUSEKEEPING
+
+- **Landed (cloud gate+windows GREEN):** #327 (`c6ed00b5`) · #329 (`7173f31d`) · #330 (`1cda91bb`). Each:
+  reproduce-first → build → **S239 adversarial** → full local + cloud gate → merge.
+- **Conformance 843 → 845** (`ctrl-013` pos/neg). New unit test `for-unparenthesized-head-reject.test.js`
+  13/13. Local full unit+integration suite GREEN (exit 0, verified). FACTS + state + spec-index `--check`
+  all green (spec-index confirmed current via a forced-LF copy — see the memory note).
+- **Adopter issues: 1 open (#228, held).** #264 + residual fully closed (S308).
+- **Gaps:** filed 2 (`g-braceless-for-of-destructuring-head` → RESOLVED same session by #330;
+  `g-destructure-pattern-object-object-in-for-comprehension-emit` LOW pre-existing, open).
+- **Worktrees:** main + persistent `scrml-pinned` only; all three session branches pruned. **Maps NOT run** —
+  the arc touched `ast-builder.js` internals (parse branches) + SPEC/tests/conformance, no new surface files
+  (S299/S304 precedent; grep-competitive).
+- **⚠ Recovery caveat (shoot-straight):** this whole session ran as the S308-recovery boot; I did NOT
+  register an S309 active-sessions board at boot (the /boot became a recovery). Registering one at wrap.
+
+## ⚠️ OWN MISSES — recorded, not smoothed
+
+- **Shipped #329's first cut with a masked blocker** — my repro tested a braceless body, not the
+  for-as-expression braced-body copy the S239 pass exposed. Fixed, but the miss was trusting a narrow repro.
+- **Missed the SPEC-INDEX regen** → #329's cloud gate went red on a pure docs-currency step, costing a
+  cycle. FACTS + state were regenerated; SPEC-INDEX was not. Now a memory rule.
+
+## Tags
+#session-309-peter #braceless-for-of-reject #E-FOR-UNPARENTHESIZED-HEAD #measure-scope-before-rejecting
+#s239-caught-blocker-for-as-expr-copy #gate-red-stale-spec-index #regen-scripts-crlf-broken-on-windows
+#destructuring-follow-up-closes-the-class #s308-recovery
+
+---
+
+<!-- ============================================================= -->
 <!-- S308 WRAP (Peter/Windows) — prepended 2026-07-31.              -->
 <!-- RECOVERY: authored by the S309 boot after S308's terminal was  -->
 <!-- closed mid-session (post-landing, pre-wrap). S306 + all prior   -->
