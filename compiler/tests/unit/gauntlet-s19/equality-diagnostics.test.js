@@ -158,6 +158,37 @@ describe("S19 gauntlet Phase 3 — equality & null-token diagnostics (Batch 1)",
   });
 
   // ----------------------------------------------------------------
+  // A6b — #274 residual: the E-EQ-001 message must NAME which operand carries
+  // which type and WHERE it got it (annotation vs inferred initializer, + the
+  // declaration line), so an adopter reading `number` vs `string` is not sent
+  // bisecting for the source binding.
+  // ----------------------------------------------------------------
+  test("A6b: E-EQ-001 names the offending operand + its type origin (#274 polish)", () => {
+    const src = `\${
+    let baseNum = 0
+    let label:string = "hi"
+    if (baseNum == label) {
+        let _bad = 1
+    }
+}
+<program>
+    <p>bad</>
+</>`;
+    const { errors } = compileWholeScrml(src, "a6b-operand-detail");
+    const eq = errors.find((e) => e.code === "E-EQ-001");
+    expect(eq).toBeTruthy();
+    // Names both operands.
+    expect(eq.message).toContain("`baseNum`");
+    expect(eq.message).toContain("`label`");
+    // Names each type's ORIGIN: inferred initializer vs the `: string` annotation.
+    expect(eq.message).toContain("inferred from its initializer");
+    expect(eq.message).toContain("declared `: string`");
+    // Cites the declaration line of each operand (baseNum @ line 2, label @ line 3
+    // of the `${…}` block source above).
+    expect(eq.message).toMatch(/at line \d+/);
+  });
+
+  // ----------------------------------------------------------------
   // A7 — `==` on `asIs` → W-EQ-001 (§45)
   // ----------------------------------------------------------------
   test("A7: `==` on asIs value → W-EQ-001 (warning)", () => {
