@@ -1,0 +1,13 @@
+{
+  "id": "server-db-server-fn-in-sync-callback-neg",
+  "description": "The identical program with the peer call hoisted from the `.sort` comparator into a `for` loop \u2014 the restructuring the diagnostic itself prescribes. The loop body is the server function's async body, so the await goes in. Same peer, same call, same server function; only the POSITION changes, which is exactly the condition the code keys on. NOTE: both halves also emit `E-PA-002` (protect-analyzer). That is a CONSTANT of the borrowed `<db src= protect= tables=>` fixture shape \u2014 the already-landed sibling case `auth/auth-async-stdlib-sync-callback-neg` emits it too \u2014 so it is inherited, not introduced here, and the codes-half superset check leaves this case precise about its own target. Worth a look on its own terms though: E-PA-002 reads \"invalid `protect=` syntax\" against a `protect=\"password_hash\"` that looks well-formed.",
+  "language-version": "1.0",
+  "spec": "\u00a713.2",
+  "rationale": "\u00a713.2 \u2014 scrml has no source `await` (\u00a713.1), so the compiler auto-awaits a peer server-fn call wherever an `await` can be inserted. A synchronous callback body is exactly where it cannot: the callback must RETURN a value to its caller (`.sort` needs a number, `.some` a boolean), and a Promise is always truthy \u2014 so a bare emission would make every comparison succeed. The failure is silent and data-dependent, which is why \u00a749 makes it FAIL-CLOSED at compile time rather than a runtime surprise. The `for`-loop form is the sanctioned restructuring: the loop body IS the server function's async body, so the await goes in.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-SERVER-FN-IN-SYNC-CALLBACK"
+    ]
+  }
+}

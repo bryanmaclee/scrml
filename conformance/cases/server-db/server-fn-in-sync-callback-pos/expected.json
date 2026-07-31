@@ -1,0 +1,16 @@
+{
+  "id": "server-db-server-fn-in-sync-callback-pos",
+  "description": "A peer server-fn (`lookupOne`, escalated by its own `?{}`) is called inside a synchronous `.sort` comparator within another server function. Per \u00a713.2 the compiler cannot insert `await` in a sync callback, so the bare emission would return an always-truthy Promise into the comparator. E-SERVER-FN-IN-SYNC-CALLBACK fires (\u00a734: Error), fail-closed. This code was LIVE but UNCATALOGUED until S305 added its \u00a734 row \u2014 the sibling E-ASYNC-STDLIB-IN-SYNC-CALLBACK named it in prose while it had no row of its own, so the freeze gate could neither pin nor honestly defer it. NOTE: both halves also emit `E-PA-002` (protect-analyzer). That is a CONSTANT of the borrowed `<db src= protect= tables=>` fixture shape \u2014 the already-landed sibling case `auth/auth-async-stdlib-sync-callback-neg` emits it too \u2014 so it is inherited, not introduced here, and the codes-half superset check leaves this case precise about its own target. Worth a look on its own terms though: E-PA-002 reads \"invalid `protect=` syntax\" against a `protect=\"password_hash\"` that looks well-formed.",
+  "language-version": "1.0",
+  "spec": "\u00a713.2",
+  "rationale": "\u00a713.2 \u2014 scrml has no source `await` (\u00a713.1), so the compiler auto-awaits a peer server-fn call wherever an `await` can be inserted. A synchronous callback body is exactly where it cannot: the callback must RETURN a value to its caller (`.sort` needs a number, `.some` a boolean), and a Promise is always truthy \u2014 so a bare emission would make every comparison succeed. The failure is silent and data-dependent, which is why \u00a749 makes it FAIL-CLOSED at compile time rather than a runtime surprise. The `for`-loop form is the sanctioned restructuring: the loop body IS the server function's async body, so the await goes in.",
+  "expect": {
+    "codes": [
+      "E-SERVER-FN-IN-SYNC-CALLBACK"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-SERVER-FN-IN-SYNC-CALLBACK": "error"
+    }
+  }
+}
