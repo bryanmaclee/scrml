@@ -193,4 +193,55 @@ describe("S19 gauntlet Phase 3 — equality & null-token diagnostics (Batch 1)",
     const { errors } = compileWholeScrml(src, "a8-fn-field");
     expect(codes(errors)).toContain("E-EQ-003");
   });
+
+  // ----------------------------------------------------------------
+  // A9 — #274 Wall-1: local bindings are PER-FUNCTION. A numeric `h` in one
+  // function must NOT retype a same-named string `h` in another function
+  // (the binding collector flattened all functions into one name-keyed map →
+  // last-writer-wins → a FALSE E-EQ-001 on the string `h`'s `== ""`). This was
+  // an adopter blocker (they had to use globally-unique local names).
+  // ----------------------------------------------------------------
+  test("A9: same-named locals in different functions do NOT unify (no false E-EQ-001)", () => {
+    const src = `\${
+    function submit() {
+        let h = ""
+        if (h == "") {
+            let _ok = 1
+        }
+        return h
+    }
+    function mono(name) {
+        let h = 0
+        return h
+    }
+}
+<program>
+    <p>ok</>
+</>`;
+    const { errors } = compileWholeScrml(src, "a9-cross-fn-noflip");
+    // The string `h` in submit() compared to "" is same-type — no error.
+    expect(codes(errors)).not.toContain("E-EQ-001");
+  });
+
+  test("A9b: a genuine number-vs-string in the SAME function STILL fires E-EQ-001", () => {
+    const src = `\${
+    function clean() {
+        let s = ""
+        if (s == "") { let _ok = 1 }
+        return s
+    }
+    function bug() {
+        let s = 0
+        if (s == "") { let _bad = 1 }
+        return s
+    }
+}
+<program>
+    <p>x</>
+</>`;
+    const { errors } = compileWholeScrml(src, "a9b-samefn-fires");
+    // bug()'s `let s = 0` compared to "" is a real cross-type error — still caught,
+    // and it must fire despite clean() having a legitimate string `s == ""`.
+    expect(codes(errors)).toContain("E-EQ-001");
+  });
 });

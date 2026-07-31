@@ -5209,6 +5209,33 @@ alias (dropped), uncalled alias — all correct; conformance 763/0.
 
 ---
 
+<!-- @gap id=g-274-wall1-eq-check-unifies-same-named-locals-across-functions sev=HIGH status=resolved -->
+### G-274-WALL1-EQ-CHECK-UNIFIES-SAME-NAMED-LOCALS-ACROSS-FUNCTIONS — the E-EQ-001 binding collector keyed locals by NAME globally, so a numeric `let h=0` in one function retyped a string `let h=""` in another → a FALSE E-EQ-001 → RESOLVED S305 — `NEW S305; HIGH; RESOLVED S305 (PR #312)`
+
+> **RESOLVED S305** (adopter GH **#274 Wall-1**, PR #312). The gauntlet eq-check's `collectBindings` built a
+> **single flat `Map<name, type>` across the whole file** — every `let`/`const` in every function wrote the
+> same key, last-writer-wins. So a numeric `let h = 0` in `function mono()` silently retyped a string
+> `let h = ""` in `function submit()`, and `submit`'s legitimate `h == ""` then fired a **false**
+> `E-EQ-001: cannot compare number with string`. **The adopter had to give every numeric local a globally-
+> unique name** (`macc`/`mstr`/`mi`) to avoid poisoning string locals elsewhere — a real scaling blocker on a
+> large file.
+>
+> **Provenance correction (a `verify-the-bug-class` case):** #274 filed this as *"whole-program inference
+> infers `baseNum`'s result as `number`"* and *"the `: string` return annotation is ignored."* Both are
+> mechanically impossible — the eq-check's `classifyOperand` returns "unknown" for ANY call (`baseNum(x)`) and
+> types operands ONLY from a *literal initializer* or a *type annotation*. Proven: `let n = 0; n != ""` fires;
+> `base(x) != ""` and `let b = base(x); b != ""` do not. The real trigger is a literal-init numeric local whose
+> NAME collides with a string local in another function — which the adopter later diagnosed himself and
+> documented in the `monoIdx` workaround comment. No call-return inference or annotation handling is involved.
+>
+> **Fix:** local bindings are now **per-function**. `collectBindings` scope-STOPS at nested function/lambda/
+> component scopes (`isFnScopeNode`); `walkAst` collects each function's own locals and merges them over the
+> enclosing scope (locals shadow) while walking its body, so a comparison resolves `h` in its OWN function.
+> **Precision preserved:** a genuine `let h=0; h==""` in the SAME function still fires; shadowing is correct
+> (a real bug in `f` fires while a legit `h==""` in sibling `g` does not). Verified:
+> `equality-diagnostics.test.js` +A9/A9b (10/0), conformance 769/0, unit 17205/0, adopter file clean.
+> Closes #274 (Wall-1 + Wall-2 both resolved; Q1/Q2 answered — there is no inference flip).
+
 <!-- @gap id=g-274-wall2-sql-reassign-to-existing-let-duplicate-const sev=MED status=resolved -->
 ### G-274-WALL2-SQL-REASSIGN-TO-EXISTING-LET-DUPLICATE-CONST — a bare SQL-init reassignment to an already-declared `let` (`let w = 0; w = ?{...}.run()`) emitted a duplicate `const w` → E-CODEGEN-INVALID-LOGIC → RESOLVED S305 — `NEW S305; MED; RESOLVED S305 (PR #309)`
 
