@@ -1,7 +1,7 @@
 # primary.map.md
 # project: scrml
-# updated: 2026-07-31T03:18:23Z  commit: f96e6f30
-# NOTE (S302 pass): INCREMENTAL over `d0763cff` -> `f96e6f30` — **27 commits, four sessions**
+# updated: 2026-07-31T03:18:23Z  commit: fe14c9b2
+# NOTE (S302 pass): INCREMENTAL over `d0763cff` -> `fe14c9b2` — **27 commits, four sessions**
 # (S300·Peter, S301·bryan, S302·bryan, S303·Peter). Re-walked: primary, domain, error, structure,
 # test, dependencies, build, schema, non-compliance. NOT re-walked: config, infra, migrations, auth
 # (no surface in this window touched them; each keeps its own honest stamp in the Map Index).
@@ -26,7 +26,7 @@ CI:         GitHub Actions — three workflows on `main`: `ci.yml` (gate/trackin
 `docs/FACTS.md` is GENERATED (`bun scripts/facts.ts --write`) and CI-gated (`--check` in `gate`). It
 is the authority for published counts (compiler LOC, test files, SPEC lines, conformance cases,
 stdlib modules, CLI verbs, LSP capabilities, gated snippets). **Do not hardcode any of those figures
-in a doc — cite FACTS.md.** At this HEAD: `live compiler source` **235,187** lines / 187 files;
+in a doc — cite FACTS.md.** At this HEAD: `live compiler source` **235,334** lines / 187 files;
 `test files` **1,294**; `specification lines` **36,767**; `conformance cases` **769**. stdlib modules
 (21), CLI verbs (11), LSP capabilities (7) unchanged.
 
@@ -60,7 +60,7 @@ reconciled count — **801 at this HEAD** (+1: `E-IF-IN-DISPATCHED-ARM`) — wit
 | 7 | **The shared call-graph walk (`exprNodeCollectCallees` / `forEachCallInExprNode`) must NOT be widened** without re-deriving the S299 measurement: widening it escalated **72 corpus sites** that are correct client code today. Both S299's Trigger-3 walk and S303's indirect resolver were built as SEPARATE local walks for exactly this reason. | dependencies.map.md |
 | 8 | **An INDIRECT callee edge is ESCALATION-ONLY (FIX A, `route-inference.ts:4758`).** A SERVER indirect caller adds promotion pressure; a CLIENT indirect caller is IGNORED. Counting client indirect callers DEMOTES a directly-server-called helper to client → the server caller references an undefined symbol → 500. | dependencies.map.md |
 | 9 | **A MARKUP-referenced helper is EXCLUDED from indirect escalation (FIX B, `:4766`)** — relocating it turns a synchronous render into a blanking async fetch. | dependencies.map.md |
-| 10 | **`route-inference.ts` holds TWO server-only stdlib module sets and they must not be merged.** `SERVER_ONLY_SCRML_MODULES` (:578) feeds ASYNC classification (over-inclusion free). `ESCALATION_SERVER_ONLY_MODULES` (:655) feeds PLACEMENT (under-include = client leak; over-include = wrong relocation). | dependencies.map.md |
+| 10 | **`route-inference.ts` holds TWO server-only stdlib module sets and they must not be merged.** `SERVER_ONLY_SCRML_MODULES` (:579) feeds ASYNC classification (over-inclusion free). `ESCALATION_SERVER_ONLY_MODULES` (:656) feeds PLACEMENT (under-include = client leak; over-include = wrong relocation). | dependencies.map.md |
 | 11 | **`node.id` is a codegen contract.** Emitted `<each>` fence comments, `_scrml_each_renderers` keys and chunk-namespace tokens are DERIVED from it; a duplicate id is a green compile with wrong rendered output and zero diagnostics. Component expansion clones per instantiation; `chunk-namespace.ts` covers the cross-file half; **neither saves you from the other's failure.** | domain.map.md |
 | 12 | **The dist tree is NOT a mirror of the source tree (§47.9.5).** Any code relating two files must pick ONE coordinate space and stay in it; reversal from dist back to source needs a FORWARD INDEX because the inverse is ambiguous. A path oracle written in the implementation's own coordinate space proves nothing. | domain.map.md |
 | 13 | **A protected DB column can never reach the client bundle (E-CG-001, §14.8.9), fail-closed and acorn-exact.** The new client-side `export const` emitter (`emitReferencedModuleExportConstLines`, `emit-client.ts`) is admitted only through an AST-PRECISE reference set built from `IdentExpr` nodes with two PRUNED subtrees — never a text/regex match, so a name in a fetch stub, a string literal or a comment can never widen it. | dependencies.map.md |
@@ -76,15 +76,15 @@ reconciled count — **801 at this HEAD** (+1: `E-IF-IN-DISPATCHED-ARM`) — wit
 
 | Map | Stamp | Contents |
 |---|---|---|
-| **primary.map.md** | **`f96e6f30`** | this file — fingerprint, INVARIANTS, routing, key facts |
-| **domain.map.md** | **`f96e6f30`** | NEW section: **§17.1.2 `if=` on the three structural elements** (four prohibitions + the runtime mount contract). Business Invariants extended |
-| **error.map.md** | **`f96e6f30`** | **801** §34 codes (+1 `E-IF-IN-DISPATCHED-ARM`); new `E-IF-*` family row; `E-CHANNEL-INSIDE-PAGE` fire site now LIVE; the §34 row's own "two call sites" is stale (three). Per-window changelog sections DELETED |
-| **structure.map.md** | **`f96e6f30`** | new file `indirect-callee-resolver.ts`; the `ast-builder.js` named-regex opener reconstruction row (the window's highest-value locus); counts re-derived; window narratives stripped |
-| **test.map.md** | **`f96e6f30`** | 1294 recounted; the root-level-gate hole; the 13 new files + 13 new conformance cases; the `-rt` runtime-case convention and why an `if=true` case is deliberately DOM-indistinguishable |
-| **dependencies.map.md** | **`f96e6f30`** | the `ifRaw`/`ifCond` FIVE-consumer pipeline (+ mirrors); `indirect-callee-resolver.ts` graph edges; `serverFnPeerAliasNames` threading; the client `export const` gate |
-| **build.map.md** | **`f96e6f30`** | the new `gate` root-level test step; pre-commit + pre-push scope changes and the `set -e` trap |
-| **schema.map.md** | **`f96e6f30`** | `ifRaw`/`ifCond` node fields on `engine-decl`/`match-block`/`each-block` + the ABSENT-not-null parity-canary convention |
-| **non-compliance.report.md** | **`f96e6f30`** | re-verified at this HEAD |
+| **primary.map.md** | **`fe14c9b2`** | this file — fingerprint, INVARIANTS, routing, key facts |
+| **domain.map.md** | **`fe14c9b2`** | NEW section: **§17.1.2 `if=` on the three structural elements** (four prohibitions + the runtime mount contract). Business Invariants extended |
+| **error.map.md** | **`fe14c9b2`** | **801** §34 codes (+1 `E-IF-IN-DISPATCHED-ARM`); new `E-IF-*` family row; `E-CHANNEL-INSIDE-PAGE` fire site now LIVE; the §34 row's own "two call sites" is stale (three). Per-window changelog sections DELETED |
+| **structure.map.md** | **`fe14c9b2`** | new file `indirect-callee-resolver.ts`; the `ast-builder.js` named-regex opener reconstruction row (the window's highest-value locus); counts re-derived; window narratives stripped |
+| **test.map.md** | **`fe14c9b2`** | 1294 recounted; the root-level-gate hole; the 13 new files + 13 new conformance cases; the `-rt` runtime-case convention and why an `if=true` case is deliberately DOM-indistinguishable |
+| **dependencies.map.md** | **`fe14c9b2`** | the `ifRaw`/`ifCond` FIVE-consumer pipeline (+ mirrors); `indirect-callee-resolver.ts` graph edges; `serverFnPeerAliasNames` threading; the client `export const` gate |
+| **build.map.md** | **`fe14c9b2`** | the new `gate` root-level test step; pre-commit + pre-push scope changes and the `set -e` trap |
+| **schema.map.md** | **`fe14c9b2`** | `ifRaw`/`ifCond` node fields on `engine-decl`/`match-block`/`each-block` + the ABSENT-not-null parity-canary convention |
+| **non-compliance.report.md** | **`fe14c9b2`** | re-verified at this HEAD |
 | migrations.map.md | `115e8b1b` | **deliberately older.** No DB/migration surface touched in two windows |
 | config.map.md | `115e8b1b` | **deliberately older.** No env var, `compilerSettings` knob or CI secret changed |
 | infra.map.md | `115e8b1b` | **deliberately older.** `.github/workflows/` gained ONE step (mapped in build.map.md); cloud-maps status unchanged (still red) |
@@ -106,8 +106,8 @@ An honest older stamp beats a false "verified at HEAD".
 | **`if=` on a structural element · a gated `<engine>` losing state · an `<each>` gate that leaves rows behind · a gate inside an arm or a row template** | **domain.map.md "§17.1.2"** (all four prohibitions + the LIVE-SPAN unmount contract) → `emit-html.ts` `emitGatedStructural` (:1498) / `emitIfMountGate` (:1421) / `isGateableIfValue` (:1472); `runtime-template.js` `_scrml_mount_template` (:1429) / `_scrml_unmount_scope` (:1468) / `_scrml_mount_wire` (:1599) / `_scrml_remount_each_fence` (:1639). |
 | **a `W-`/`E-DG-002` on a cell that IS read — but only by a structural `if=`** | `dependency-graph.ts` `creditFromAttrValue` (:2559), called for `ifCond` at :2930. **`ifRaw` is deliberately NOT in the raw-scan lists** — a private `/@ident/` scan over-credits (reads inside string literals) and under-credits (misses an `if=fn()` call-ref's `fnTransitiveReads`). |
 | **a structural `if=` predicate resolving against the wrong scope (`if=item.ok` on an `<each>`)** | `type-system.ts` `visitStructuralIfAttr` (:12688) → `visitAttr`. **Called BEFORE `scopeChain.push("each:…")` deliberately** — the opener predicate is evaluated OUTSIDE the per-item scope. |
-| **"why did my function move to the server / vanish from the client bundle, with no error?"** | **A PLACEMENT question, not a diagnostic one — §12 emits no code for it.** domain.map.md "§12.2 Trigger 3" + `route-inference.ts` `ESCALATION_SERVER_ONLY_MODULES` (:655) / `collectServerOnlyBindingModules` (:3396). Since S303 also check the INDIRECT path: `indirect-callee-resolver.ts` + `indirectInverseCallerMap` (:4707). |
-| **a helper reached through an alias or a dispatch table (`const p = fn; p(x)`) that is not awaited / not server-placed** | `compiler/src/indirect-callee-resolver.ts` (`resolveIndirectCallees`, `indirectResolvedCallees`, `aliasNamesResolvingTo`, `fnParamNameSet`) + `route-inference.ts:4692-4729`. For the await-lowering half: `serverFnPeerAliasNames` threaded into `EmitExprContext` (`emit-expr.ts:473`, consumed :1488 / :3013). **Invariants 6-9 above apply — read them before widening anything.** |
+| **"why did my function move to the server / vanish from the client bundle, with no error?"** | **A PLACEMENT question, not a diagnostic one — §12 emits no code for it.** domain.map.md "§12.2 Trigger 3" + `route-inference.ts` `ESCALATION_SERVER_ONLY_MODULES` (:656) / `collectServerOnlyBindingModules` (:3397). Since S303 also check the INDIRECT path: `indirect-callee-resolver.ts` + `indirectInverseCallerMap` (:4707). |
+| **a helper reached through an alias or a dispatch table (`const p = fn; p(x)`) that is not awaited / not server-placed** | `compiler/src/indirect-callee-resolver.ts` — `resolveIndirectCallees` / `indirectResolvedCallees` / `aliasNamesResolvingTo` / `fnParamNameSet` for the ALIAS shape, and `dispatchTableNamesWithPeers` / `dispatchTablePeerMembers` for the OBJECT-LITERAL DISPATCH-TABLE shape (`t[k](...)` has a member callee, so it never appears in `calledNames`) — plus `route-inference.ts:4692-4729` and `emit-server.ts:3043`. For the await-lowering half: `serverFnPeerAliasNames` threaded into `EmitExprContext` (`emit-expr.ts:473`, consumed :1488 / :3013). **Invariants 6-9 above apply — read them before widening anything.** |
 | **adding / changing a server-only stdlib module classification** | `route-inference.ts` — **and get the SET right** (invariant 10). dependencies.map.md carries the 21-module classification table. |
 | **adding an `EscalationReason` kind / touching `escalationReasons`** | dependencies.map.md's `escalationReasons` table. **Check `codegen/emit-server.ts:727` (`isBodyOnlyEscalation`) FIRST** — it gates on EVERY reason being `server-only-resource`, so a new kind fails that `.every()` and silently re-attaches an HTTP wrapper §12.6 says to drop. |
 | **a `ReferenceError: _scrml_* is not defined` in a shipped bundle · runtime-chunk tree-shake gates** | `codegen/emit-client.ts` — `detectRuntimeChunks` (:273, PRE-EMIT AST walk) + `POST_EMIT_HELPER_CHUNK_GATES` (POST-EMIT reference scan) — AND `codegen/runtime-chunks.ts` `CHUNK_DEPENDENCIES` / `applyChunkDependencies`. **NOT `codegen/index.ts`.** Post-emit entries match as SUBSTRINGS and the scan runs BEFORE `cell-accessor-rename.ts`'s `_scrml_cs_` rename. |

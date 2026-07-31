@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrml
-# updated: 2026-07-31T03:18:23Z  commit: f96e6f30
+# updated: 2026-07-31T03:18:23Z  commit: fe14c9b2
 # NOTE (S302 pass): catalog re-derived at this HEAD (800 -> 801). The per-window "THIS window /
 # Prior window / Earlier windows" landing narratives are DELETED — ~120 lines duplicating
 # `docs/changelog.md`, which is better at it. Codes that changed keep a row where the row carries a
@@ -17,7 +17,7 @@ so both loci had to be found by grep. Both families now have rows below.
 **MEASURED COVERAGE — read this before trusting the family table (corrected S299).** The prior
 generation of this preamble claimed the table is "keyed by PREFIX, so a code this map does not name
 individually is still routed by its family." **That claim is false for most of the catalog and is
-withdrawn.** Mechanically re-derived at `f96e6f30`: §34 carries **186 distinct code prefixes**
+withdrawn.** Mechanically re-derived at `fe14c9b2`: §34 carries **186 distinct code prefixes**
 (`E-CG`, `W-AUTH`, `I-TENANT`, …); the family table below names **68**. The other **118 prefixes
 have no row** — among them `W-AUTH-*`, `W-CG-*`, `W-IMPORT-*`, `W-STATE-*`, `E-RI-*`, `E-DG-*`,
 `E-PROTECT-*`, `I-AUTH-*`, `I-MATCH-*`. A lookup for one of those falls through to step 2, and the
@@ -56,7 +56,7 @@ row now exists AND it fires; the prior "NOT implemented — do not add" note her
 
 ## Diagnostic Catalog (SPEC §34, `compiler/SPEC.md` §34 through §35)
 
-**801 distinct diagnostic codes** cataloged in §34 at `f96e6f30` — re-extracted this pass with the
+**801 distinct diagnostic codes** cataloged in §34 at `fe14c9b2` — re-extracted this pass with the
 UTF-8-safe `awk -F'|'` field-split methodology, `comm` set-diff-verified against the 800 baseline at
 `d0763cff`. **+1, zero removed.** §34 spans `SPEC.md` :18843 (`## 34. Error Codes`) to :19687
 (`## 35.`) at this HEAD.
@@ -91,7 +91,7 @@ part of the catalog and are included.
 | `f8a138e9..c700c435` | 793 -> 795 | +2: `E-SCHEMA-010`, `E-MATCH-INVALID-ARM` |
 | `c700c435..115e8b1b` | 795 -> 799 | +4: `E-SCHEMA-011`, `W-SCHEMA-CONSTRAINT-TIGHTENED`, `W-SCHEMA-CONSTRAINT-DRIFT-UNAPPLIED`, `W-NAV-CHUNK-LOAD-FAILED` |
 | `115e8b1b..d0763cff` | 799 -> 800 | +1 `W-AUTH-MIDDLEWARE-AUTO-INJECTED` (a SPLIT out of `W-AUTH-001`; the fire already existed) |
-| **`d0763cff..f96e6f30` (THIS pass)** | **800 -> 801** | **+1, zero removed: `E-IF-IN-DISPATCHED-ARM` (S301, §17.1/§17.1.1/§18.0.1/§51.0.B)** |
+| **`d0763cff..fe14c9b2` (THIS pass)** | **800 -> 801** | **+1, zero removed: `E-IF-IN-DISPATCHED-ARM` (S301, §17.1/§17.1.1/§18.0.1/§51.0.B)** |
 
 ### Standing catalog-vs-impl facts
 

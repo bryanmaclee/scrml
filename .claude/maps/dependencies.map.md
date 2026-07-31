@@ -1,6 +1,6 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-07-31T03:18:23Z  commit: f96e6f30
+# updated: 2026-07-31T03:18:23Z  commit: fe14c9b2
 # NOTE (S302 pass): TARGETED — external deps RE-VERIFIED unchanged (no manifest diff in this window).
 # Added: the `ifRaw`/`ifCond` five-consumer chain, the indirect-callee-resolver edges, and the
 # `serverFnPeerAliasNames` thread. Everything else carries its prior walk.
@@ -59,7 +59,7 @@ entirely first-party. The only manifest movement is the hoist + de-workspacing a
 | Tag-canonicalize (Stage 3.055 TC) | tag-canonicalizer.ts | landmark-tag.ts + api.js |
 | Component expand | component-expander.ts | validators/post-ce-invariant.ts, attribute-interpolation.ts, attribute-allowlist.ts. **Every downstream consumer that keys on `node.id` depends on this stage's per-expansion clone (S299)** — `codegen/emit-each.ts` (fence ids / `_scrml_each_renderers`), `codegen/chunk-namespace.ts` (id-derived tokens). `_deepCloneAst` is INTERNAL (not exported); its two callers are `expandComponentNode` (:2601) and `_cloneChannelDecl` (:4552). |
 | Protect / route infer | protect-analyzer.ts, route-inference.ts | codegen/protect-egress.ts, codegen/egress-field-scan.ts (E-CG-001). **protect-analyzer.ts is the SOLE `E-PA-*` fire site (7 codes); `E-PA-002`'s message leads with the `<schema>` + `scrml db-migrate` remedy (S292).** |
-| **§12.2 Trigger 3 — server-only import escalates (NEW, S299)** | **route-inference.ts** — `ESCALATION_SERVER_ONLY_MODULES` (:655) / `isEscalationServerOnlyModule` (:673) / `buildPerFileEscalationServerOnlyBindings` (:3330) / `collectServerOnlyBindingModules` (:3396) -> `importTriggers` -> `directTriggers` (:4184) | `RouteInfo.escalationReasons` -> `codegen/emit-server.ts`. **DO NOT confuse `ESCALATION_SERVER_ONLY_MODULES` with the pre-existing `SERVER_ONLY_SCRML_MODULES` (:578) two hundred lines above it** — that one feeds the `api.js` STDLIB-EXPORT-SEED async backstop, where over-inclusion is safe; escalation inverts that. See domain.map.md. |
+| **§12.2 Trigger 3 — server-only import escalates (NEW, S299)** | **route-inference.ts** — `ESCALATION_SERVER_ONLY_MODULES` (:656) / `isEscalationServerOnlyModule` (:674) / `buildPerFileEscalationServerOnlyBindings` (:3331) / `collectServerOnlyBindingModules` (:3397) -> `importTriggers` -> `directTriggers` (:4184) | `RouteInfo.escalationReasons` -> `codegen/emit-server.ts`. **DO NOT confuse `ESCALATION_SERVER_ONLY_MODULES` with the pre-existing `SERVER_ONLY_SCRML_MODULES` (:579) two hundred lines above it** — that one feeds the `api.js` STDLIB-EXPORT-SEED async backstop, where over-inclusion is safe; escalation inverts that. See domain.map.md. |
 | Type check | type-system.ts, meta-checker.ts | dependency-graph.ts, auth-graph.ts. **`visitStructuralIfAttr` (:12688) must run BEFORE the `each:` scope push** — see the §17.1.2 chain below. |
 | **Indirect callee resolution (#284, S303)** | **indirect-callee-resolver.ts** (NEW) | route-inference.ts `indirectInverseCallerMap` (:4707) → Step 5c only; `aliasNamesResolvingTo` → `serverFnPeerAliasNames` → emit-server/emit-logic/emit-control-flow/emit-expr. **`inverseCallerMap` must stay byte-identical.** See below. |
 | Schema declaration checks | gauntlet-phase1-checks.js | `E-SCHEMA-010` (via `findNonLiteralSetItems`) + **NEW `E-SCHEMA-011`** (via `parseColumns`'s `malformedReferences` + `referencesHint`) — both helpers live in schema-differ.js |
@@ -106,7 +106,7 @@ attribute later means walking this exact list.
 | 3 | **Scope check** | `type-system.ts` `visitStructuralIfAttr` (:12688) → `visitAttr` | **Called BEFORE `scopeChain.push("each:…")`.** The opener predicate is evaluated OUTSIDE the per-item scope, so `if=item.ok` must NOT resolve against the row binding — reordering these two lines silently makes a wrong predicate compile clean. |
 | 4 | **Reader credit (DG)** | `dependency-graph.ts` `creditFromAttrValue` (:2559), called for `ifCond` at :2930 | **`ifRaw` is deliberately NOT in the raw-scan lists** (:2964 / :3020 / :3088 carry that note). A private `/@ident/` scan over the raw text diverges in BOTH directions: it reads inside string literals (over-credit) and misses an `if=fn()` call-ref's `fnTransitiveReads` (under-credit). Without this consumer, a cell read ONLY by a structural gate false-fires `E-DG-002`. |
 | 5 | **Emit** | `codegen/emit-html.ts` `emitGatedStructural` (:1498) → `emitIfMountGate` (:1421); kind test `isGateableIfValue` (:1472) | The sole `if=` lowering; the `E-IF-IN-DISPATCHED-ARM` guard fires here too (:1508). No `ifCond` field ⇒ byte-identical to the pre-§17.1.2 emitter. |
-| — | **Native mirrors** | `native-parser/collect-hoisted.js` `readStructuralIfAttr` (:421); `native-parser/parse-file.js` (:762 match, :1081 each, `stripSourceTextFromValue` :1681) | A landing that adds an AST FIELD to a structural node owes these. An emit-time / runtime / CLI / message-only landing does not. |
+| — | **Native mirrors** | `native-parser/collect-hoisted.js` `readStructuralIfAttr` (:420); `native-parser/parse-file.js` (:762 match, :1081 each, `stripSourceTextFromValue` :1681) | A landing that adds an AST FIELD to a structural node owes these. An emit-time / runtime / CLI / message-only landing does not. |
 
 **Field-shape invariant:** `ifRaw` and `ifCond` are **ABSENT, not null**, when the opener has no
 `if=`. The within-node parser-parity canary compares FIELD SETS; null-stamping every
@@ -122,10 +122,12 @@ what enforces §17.1.2.1's render-vs-lifecycle split structurally rather than by
 
 | Producer | Consumer | The rule |
 |---|---|---|
-| `indirect-callee-resolver.ts` — `resolveIndirectCallees` / `indirectResolvedCallees` / `aliasNamesResolvingTo` / `fnParamNameSet` | `route-inference.ts` (import :77) → `indirectInverseCallerMap` (:4707) → the Step 5c caller-context fixed point (:4774-4810) | **`inverseCallerMap` (:4466) stays BYTE-IDENTICAL** — it also drives `E-ROUTE-001` and the D4 `W-DEAD-FUNCTION` gate, and the S299 measurement of widening the shared walk was **72 corpus sites** of over-escalation. Indirect edges therefore get their own map, consulted by exactly one caller. |
+| `indirect-callee-resolver.ts` — `resolveIndirectCallees` / `indirectResolvedCallees` / `aliasNamesResolvingTo` / `fnParamNameSet` / `dispatchTableNamesWithPeers` / `dispatchTablePeerMembers` | `route-inference.ts` (import :77) → `indirectInverseCallerMap` (:4707) → the Step 5c caller-context fixed point (:4774-4810) | **`inverseCallerMap` (:4466) stays BYTE-IDENTICAL** — it also drives `E-ROUTE-001` and the D4 `W-DEAD-FUNCTION` gate, and the S299 measurement of widening the shared walk was **72 corpus sites** of over-escalation. Indirect edges therefore get their own map, consulted by exactly one caller. |
 | `indirectInverseCallerMap` | Step 5c placement | **ESCALATION-ONLY (FIX A, :4758).** SERVER indirect caller ⇒ promotion pressure. CLIENT indirect caller ⇒ **IGNORED** — counting it demotes a directly-server-called helper to client, and the server caller then references an undefined symbol → 500. |
 | `markupReferencedNames` | the same fixed point (:4766) | **FIX B — a helper referenced from CLIENT MARKUP is EXCLUDED from indirect escalation.** Relocating it turns a synchronous render into a blanking async fetch. Its DIRECT-server-call escalation, if any, is baseline and left intact. |
 | `aliasNamesResolvingTo` → `EmitLogicOpts.serverFnPeerAliasNames` | `emit-server.ts` → `emit-logic.ts` → `emit-control-flow.ts` (`_makeExprCtx`) → `emit-expr.ts` `EmitExprContext.serverFnPeerAliasNames` (:473), consumed :1488 + :3013 | The await-lowering half: `alias(...)` is awaited like the peer it aliases. NULL/empty ⇒ byte-identical pre-fix emission — every threading site is written that way, so a file with no alias peers is unaffected. |
+
+| `dispatchTableNamesWithPeers` / `dispatchTablePeerMembers` (`IndirectResolution.tableBindings`) | `codegen/emit-server.ts:3043` / `:3045` | **A DIRECT dispatch call `t[k](...)` / `t.k(...)` has a MEMBER/INDEX callee, not a bare ident, so it is absent from `calledNames` entirely** — the alias path cannot see it. Two exports because they answer two different questions: `…NamesWithPeers` gates AWAIT-lowering (conservative: the table has ≥1 peer member; over-awaiting a sync value is a no-op, under-awaiting leaks a Promise), `…PeerMembers` gates EMISSION (a `{k: peer}` entry references the peer as a VALUE, so the callable must exist even if `t[k]()` is never called — otherwise a bare `ReferenceError`). Reassigned tables are dropped before either runs. |
 
 Resolution is **SAME-FILE first**, falling back to the global name set only when no same-file binding
 exists (mirrors the 5c-bis precedent). A DEAD value reference is not a call and creates **no** edge.
@@ -271,9 +273,9 @@ fail-OPEN. The sibling reactive-cell destination (`@you = loadMe(1)`) was alread
 ## Defense-in-depth: stdlib async classification (api.js STDLIB-EXPORT-SEED)
 A server-only `scrml:*` re-export whose `{kind, isAsync}` cannot be resolved FAILS CLOSED (defaults
 to async). Mechanism unchanged. **What CHANGED at S299 is what may be reused from it: nothing.**
-This backstop is driven by `route-inference.ts`'s `SERVER_ONLY_SCRML_MODULES` (:578), a set tuned for
+This backstop is driven by `route-inference.ts`'s `SERVER_ONLY_SCRML_MODULES` (:579), a set tuned for
 a decision where OVER-inclusion is free. §12.2 Trigger 3 placement is driven by the separate
-`ESCALATION_SERVER_ONLY_MODULES` (:655). Two sets, two safe-error directions, one file — see the
+`ESCALATION_SERVER_ONLY_MODULES` (:656). Two sets, two safe-error directions, one file — see the
 Trigger-3 row in the pipeline table and domain.map.md's section.
 
 ## stdlib module pairing (compiler/runtime/stdlib/*.js <-> stdlib/*/index.scrml)

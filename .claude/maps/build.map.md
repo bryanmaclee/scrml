@@ -1,9 +1,10 @@
 # build.map.md
 # project: scrml
-# updated: 2026-07-30T07:41:02Z  commit: d0763cff
-# NOTE (S299): TARGETED — `scripts/state.ts`'s gap-status contract (a NEW hard-fail surface in
-# cloud-maps Stage 1). No package.json script, CLI flag, workflow or Dockerfile changed this window;
-# those sections carry their `115e8b1b` walk.
+# updated: 2026-07-31T03:18:23Z  commit: fe14c9b2
+# NOTE (S302 pass): TARGETED — the LOCAL AND CI GATE SURFACE, which is the only build-side thing that
+# moved: `ci.yml` `gate` gained a step, `pre-commit` gained a path, and `pre-push` changed SCOPE and
+# TRIGGER. No package.json script, CLI flag or Dockerfile changed; those sections carry their prior
+# walk. The new section "Gate topology — the two failure modes" carries the rules.
 
 ## Development Commands (root package.json scripts)
 compile — `bun run compiler/src/cli.js compile`
@@ -172,7 +173,7 @@ Implementation: `compiler/src/api.js` (`contentHashAssets` option), `compiler/sr
 ## CI/CD Pipeline  [.github/workflows/ci.yml]
 Three jobs, "gate-layering" model (types → pre-commit fast subset → CI-here → PA judgment):
 
-**gate** — BLOCKING (the merge-gate), **7 steps** (was 6; the SPEC-INDEX totals check is NEW this window). checkout → setup-bun → `bun install --frozen-lockfile` → `bun run pretest` → `bun test compiler/tests/unit compiler/tests/conformance` (reproducibly-green-from-source core) → gauntlet quick check (compile benchmarks/todomvc/app.scrml, `node --check` the emitted client.js) → `bun scripts/snippet-gate.js` → `bun scripts/facts.ts --check` → **`bun run scripts/regen-spec-index.ts --check`**.
+**gate** — BLOCKING (the merge-gate), **8 steps** (the root-level test step is NEW this window). checkout → setup-bun → `bun install --frozen-lockfile` → `bun run pretest` → `bun test compiler/tests/unit compiler/tests/conformance` (reproducibly-green-from-source core) → **`bun test compiler/tests/*.test.js` (NEW, `b7dda491`)** → gauntlet quick check (compile benchmarks/todomvc/app.scrml, `node --check` the emitted client.js) → `bun scripts/snippet-gate.js` → `bun scripts/facts.ts --check` → `bun run scripts/regen-spec-index.ts --check`.
 Triggers: push (paths-ignore: **.md, handOffs/**, docs/**) and pull_request. `concurrency: group ci-${{ref}}, cancel-in-progress: true`.
 
 **tracking** — NON-BLOCKING (`continue-on-error: true`). integration + lsp + commands tests (**incl. `commands/db-migrate.test.js`, S287**), browser tests, and the parser-conformance-within-node.test.js M6.x native-parser-migration backlog. Same checkout/install/pretest steps as gate.
@@ -181,7 +182,36 @@ Triggers: push (paths-ignore: **.md, handOffs/**, docs/**) and pull_request. `co
 
 Rationale banner in the workflow (S253): `gate` is the guaranteed-green-from-source core only — no self-host/within-node backlog noise.
 
-**`.github/workflows/ci.yml` DID change this window** — `gate` gained the SPEC-INDEX totals step (`0d95c364`). Everything else is unchanged: the window's new tests run within the existing unit/integration/conformance/browser tiers, gated the same way as everything else. The live-PG DB-authoritative integration tests remain `tracking`-tier and skip-graceful when Postgres is unreachable.
+**`.github/workflows/ci.yml` changed this window** — `gate` gained the root-level test step (`b7dda491`). Everything else is unchanged; the live-PG DB-authoritative integration tests remain `tracking`-tier and skip-graceful when Postgres is unreachable.
+
+## Gate topology — the two failure modes, and why they pull in opposite directions
+
+**Read this before adding a test tier to a gate, or removing one.** Both rules below were violated in
+this repo, one of them for the whole life of the root-level test files.
+
+**FAILURE MODE 1 — a tier that NOTHING blocking runs.** The 14 root-level `compiler/tests/*.test.js`
+(parser-conformance-\*, native-\*) had **no runner at all** for 13 of them; the 14th
+(`parser-conformance-within-node`) ran only in `tracking`, which is `continue-on-error: true`. They
+were also outside the pre-commit hook's unit/integration/conformance scope. **Measured cost: a
+38-failure native-parity regression passed pre-commit AND the required `gate`**, surfacing solely as
+a red `tracking` — the job everyone (correctly) reads as the documented browser/serve-tool baseline.
+**The transferable rule: a gate that is correctly non-blocking and habitually red is where a real
+regression hides.** Fixed at `b7dda491` by wiring the files into `gate` AND `pre-commit`; they are
+deterministic (no dist / browser / network deps) and cost ~16s; green at wiring time at 6394 tests /
+0 fail. Gap: `g-parity-canary-outside-every-blocking-gate`.
+
+**FAILURE MODE 2 — a blocking tier pointed at a tree with a DOCUMENTED FAILURE BASELINE.** pre-push
+used to run the WHOLE of `compiler/tests/`. browser / lsp / self-host / commands carry a documented
+baseline of **~42 failures (2026-07-30)** that is assessed by comparing failure-NAME SETS, not counts.
+**An exit-code gate cannot express "the same names as before"**, so that scope made the hook
+structurally unpassable — every push blocked, on every clone, for a baseline no change caused. That
+is the `pa-base` §8 cry-wolf shape: a gate that cannot pass is bypassed, and a bypassed gate gets
+deleted. Fixed at S301 by narrowing pre-push to the same unit+integration+conformance subset
+pre-commit and `gate` use (verified 21597 pass / 0 fail on a clean checkout — so it CAN go red for a
+real regression and green otherwise, which is the whole point).
+
+The two rules are in tension and both are load-bearing: **widen a blocking gate only over a subset
+that is reproducibly green from source; never leave a tier whose only runner is non-blocking.**
 
 ## CI/CD Pipeline  [.github/workflows/advisory-review.yml]
 **ai-review** job — non-blocking second-opinion AI `/code-review` on every code PR (deliberately NOT in branch-protection required checks; comments only, never fails the PR).
@@ -287,14 +317,18 @@ decided in the script. (Design rationale: a closed list that silently drops what
 recognise fails the `pa-base` §8 gate test — a gate whose blind spot is invisible is not a gate.)
 
 ## Git Hooks (source-controlled, `.git/hooks/pre-commit` + `pre-push`; install via `scripts/git-hooks/install.sh`)
-pre-commit — runs `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail` (~2min, excludes browser/e2e/self-host); warns (non-blocking) on direct commits to `main`.
-pre-push — full test suite (`bun test compiler/tests/`) + gauntlet quick check; refreshes samples/compilation-tests/ fixtures first; the public snippet gate ONLY on a `refs/tags/v*` release-tag push; and **NEW S292, step 2.5 — a GENERATED-DOC CURRENCY gate** that mirrors the cloud gate's CHEAP checks so a stale generated artifact is caught locally instead of ~3 minutes later in CI. Runs `bun scripts/facts.ts --check` (~200ms) + `bun run scripts/regen-spec-index.ts --check` (~61ms) on EVERY non-deletion push, including the feature-branch pushes the S254 relaxation exempts from the full suite (exactly the ones that were failing). **`bun scripts/snippet-gate.js` is deliberately NOT in this hook — it costs ~48s**, and a hook that expensive gets bypassed, and a bypassed gate gets deleted. 261ms does not get bypassed. Skipped entirely when the push payload is deletions only. Failure message names the fix (`bun scripts/facts.ts --write && bun run scripts/regen-spec-index.ts`) and warns to regenerate AFTER the last content commit, not before — regenerating early and then editing `compiler/src` again is the exact loop this gate exists to catch (three rejected pushes in one S292 session).
+pre-commit — runs `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance **compiler/tests/*.test.js** --bail` (~2min; the last path is NEW this window — see "Gate topology" above; still excludes browser/e2e/self-host/lsp/commands); warns (non-blocking) on direct commits to `main`.
+pre-push — **SCOPE AND TRIGGER BOTH CHANGED THIS WINDOW.**
+  - **Scope:** `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance` — **NOT** the whole of `compiler/tests/`. See "Gate topology" FAILURE MODE 2.
+  - **Trigger:** the suite is **SKIPPED on a NEW-REF push** (`remote_sha` all-zero = the ref does not exist upstream yet); the cloud `gate` on the PR is the authority for a feature branch (implements the S254 relaxation this hook had DOCUMENTED at step 2.5 but never applied at step 1). It DOES run on an update to an existing remote ref (including a force-push) and on any `refs/tags/v*`.
+  - **`set -e` trap, worth knowing before editing this hook:** a bare `VAR=$(failing-cmd)` aborts the script THERE, before any reporting runs — an S301 blocked push printed only the banner and exited 1 with the diagnostic below it as dead code. `TEST_OUTPUT=$(…) || EXIT_CODE=$?` is load-bearing, not style. The failure summary greps `"^(fail)"`, not `-A2 "fail"`.
+  - Also: gauntlet quick check; refreshes samples/compilation-tests/ fixtures first; the public snippet gate ONLY on a `refs/tags/v*` release-tag push; and **NEW S292, step 2.5 — a GENERATED-DOC CURRENCY gate** that mirrors the cloud gate's CHEAP checks so a stale generated artifact is caught locally instead of ~3 minutes later in CI. Runs `bun scripts/facts.ts --check` (~200ms) + `bun run scripts/regen-spec-index.ts --check` (~61ms) on EVERY non-deletion push, including the feature-branch pushes the S254 relaxation exempts from the full suite (exactly the ones that were failing). **`bun scripts/snippet-gate.js` is deliberately NOT in this hook — it costs ~48s**, and a hook that expensive gets bypassed, and a bypassed gate gets deleted. 261ms does not get bypassed. Skipped entirely when the push payload is deletions only. Failure message names the fix (`bun scripts/facts.ts --write && bun run scripts/regen-spec-index.ts`) and warns to regenerate AFTER the last content commit, not before — regenerating early and then editing `compiler/src` again is the exact loop this gate exists to catch (three rejected pushes in one S292 session).
 
 ## Docker
 None. No Dockerfile / docker-compose in this repo — see infra.map.md.
 
 ## Tags
-#scrml #map #build #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist
+#scrml #map #build #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist #gate-topology #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #failure-name-sets #cry-wolf #new-ref-push-skip #set-e-trap #pre-push-scope #b7dda491
 
 ## Links
 - [primary.map.md](./primary.map.md)

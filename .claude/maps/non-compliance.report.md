@@ -1,13 +1,52 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-07-30T07:41:02Z  commit: d0763cff
-# scan mode: INCREMENTAL_UPDATE (S299 map refresh over `115e8b1b` -> `d0763cff`, 13 commits, one session)
+# generated: 2026-07-31T03:18:23Z  commit: fe14c9b2
+# scan mode: INCREMENTAL_UPDATE (S302 map refresh over `d0763cff` -> `fe14c9b2`, 27 commits, four sessions)
 
 Docs/specs/maps that do NOT match current code. Findings live here rather than being returned
 inline, because inline findings go stale unread. **Every CARRIED finding below was re-executed at
 this HEAD this pass — none is copied forward on trust.**
 
-## NEW at this HEAD
+## NEW at this HEAD (S302 pass)
+
+### S302-N1. `hand-off.md:318` instructs a revert against a SHA that is not in this repository
+> "Guarded, not fixed: `g-if-mount-inside-dispatched-arm-body` (open, `E-IF-IN-DISPATCHED-ARM`
+> guards it; **revert `2fbe6520` whole** when the split lands)."
+
+`git cat-file -t 2fbe6520` → **`fatal: Not a valid object name 2fbe6520`**. It is a pre-squash branch
+SHA; the merge landed under a different one. An agent following that instruction gets a hard failure
+and no obvious next step.
+**Reason:** grep-mismatch — an identifier the doc names that the repository does not contain.
+**Suggested disposition:** UPDATE to name the revert by SYMBOL — `refuseConditionalInDispatchedArm`
+(`compiler/src/codegen/emit-html.ts:780`) plus its **three** call sites (`:1508` structural, `:1737`
+chain, `:2727` markup) — and to name the conformance case that must INVERT rather than be deleted
+(`conformance/cases/control-flow/if-in-dispatched-arm-neg/`, whose own `description` already carries
+the flip procedure). Mapped in error.map.md's standing catalog-vs-impl facts and domain.map.md §17.1.2.
+
+### S302-N2. SPEC §34's `E-IF-IN-DISPATCHED-ARM` row is stale by one call site
+The row (`SPEC.md:19265`) ends *"emitted at `compiler/src/codegen/emit-html.ts:refuseConditionalIn
+DispatchedArm`, **two call sites**"*. There are **three** at this HEAD — S302 added the structural
+one at `:1508` and did not update the row. §17.1.2.2 in the same amendment correctly says the guard
+fires "on markup and on all three structural elements alike", so the SPEC contradicts itself by one
+number.
+**Reason:** spec-vs-impl drift, self-inflicted in the same landing.
+**Suggested disposition:** UPDATE the §34 parenthetical to "three call sites". Low severity for a
+reader looking for the fire site; load-bearing for whoever plans the revert, because the guard comes
+out at three sites or not at all.
+
+### S302-N3. §17.1.2's own reject-list is spec-ahead of enforcement — but DECLARED, so this is a
+### tracked gap rather than a non-compliant doc
+Recorded here only so a future scan does not re-flag it as drift. §17.1.2 states "Every other
+scrml-defined structural element SHALL REJECT `if=`" and then, in an inset block, states exactly
+which four do not (`<channel>`/`<errors>` emit only `W-ATTR-001` and ignore it; `<onTimeout>`/
+`<onIdle>` ignore it with zero diagnostics), naming
+`g-if-reject-unenforced-on-structural-declaration-elements`. **A SHALL that documents its own
+enforcement gap is the compliant shape**, not the non-compliant one. Same for the noted `W-ATTR-001`
+false-fire on `<auth if=>` (`g-w-attr-001-false-on-auth-if-gate-is-applied`) — a diagnostic that
+contradicts the emit it describes, filed rather than hidden.
+**Suggested disposition:** none. Do not re-flag.
+
+## Carried from the S299 pass
 
 ### N1. `g-maps-error-map-missing-diagnostics-and-emit-client` is marked RESOLVED; **half of it is**
 `docs/known-gaps.md:4619` carries `status=resolved` with a S297 closure note. Re-audited at
@@ -221,6 +260,19 @@ files). A compile-gated directory reads as endorsed content, and compiling prove
 prose.
 **What to check:** confirm with bryan whether `docs/website/` is authoritative content or a fixture.
 
+## Map currency notes added this pass
+
+- **The per-window landing narratives were DELETED from `primary.map.md`, `error.map.md` and
+  `test.map.md`.** S299 measured ~40% of map content as duplicating `docs/changelog.md`. primary lost
+  ~154 of 352 lines (44%), error lost ~143 of 453 (32%), test lost ~80. What replaced them:
+  primary's **INVARIANTS AND PROHIBITIONS** table (18 rows), domain's §17.1.2 section (5
+  prohibitions), build's "Gate topology — the two failure modes", and three new coverage-shape rules
+  in test. **This is a deliberate change of what these maps are FOR** — history is
+  `docs/changelog.md` + `handOffs/delta-log.md`; the maps carry rules a grep cannot find.
+- **`structure.map.md` is being converted off `+N`-line diff-stat framing.** A row that says "+314
+  this window" dates within one session and `git diff --stat` answers it better. Conversion is
+  partial: rows this window touched were rewritten, rows it did not still carry the old framing.
+
 ## Map currency at this stamp
 
 | map | stamp | status |
@@ -234,7 +286,7 @@ prose.
 An honest older stamp beats a false "verified at HEAD". Every row above is a decision.
 
 ## Tags
-#non-compliance #project-mapper #cleanup #scrml #maps-routing-gap #prefix-coverage-audit #generated-indexes #mapgen-stale #privacy-scrub #adopter-identity #cloud-maps-failing #ci-red #spec-index-currency #each-fence #if-row-comment #native-parser-parity #w-lint-uncatalogued #catalog-count-audit #w-auth-001-split #trigger-3 #node-id-freshness #gap-status-parser #proven-gate #map-size-budget
+#non-compliance #project-mapper #revert-sha-not-in-history #spec-call-site-drift #structural-if #§17.1.2 #declared-enforcement-gap #changelog-dereferenced #cleanup #scrml #maps-routing-gap #prefix-coverage-audit #generated-indexes #mapgen-stale #privacy-scrub #adopter-identity #cloud-maps-failing #ci-red #spec-index-currency #each-fence #if-row-comment #native-parser-parity #w-lint-uncatalogued #catalog-count-audit #w-auth-001-split #trigger-3 #node-id-freshness #gap-status-parser #proven-gate #map-size-budget
 
 ## Links
 - [primary.map.md](./primary.map.md)

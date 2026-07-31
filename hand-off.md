@@ -315,7 +315,7 @@ migrate the flagship** · **`any` is a HARD NO** (verbatim).
   verifiably stale, 1 re-severitized on an expired premise, 6 newly filed from real evidence, 3
   re-characterized because their stated mechanism was wrong.
 - **Guarded, not fixed:** `g-if-mount-inside-dispatched-arm-body` (open, `E-IF-IN-DISPATCHED-ARM`
-  guards it; revert `2fbe6520` whole when the split lands). Its gap carries the design **and the
+  guards it; revert the `E-IF-IN-DISPATCHED-ARM` guard **as a unit** when the split lands — now THREE call sites in `emit-html.ts` (`:1508`, `:1737`, `:2727`), not two). Its gap carries the design **and the
   two-part trap verbatim** — `_scrml_nav_rewire(_mount)` from the dispatcher double-attaches
   non-delegable handlers AND leaks a controller per dispatch, and neither shows up in a test that
   only checks content renders.

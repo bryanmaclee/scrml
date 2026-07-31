@@ -1,15 +1,49 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-07-28T16:55:00Z  commit: 115e8b1b
+# updated: 2026-07-31T03:18:23Z  commit: fe14c9b2
+# NOTE (S302 pass): ONE addition — the `ifRaw`/`ifCond` fields on the three structural node kinds,
+# and the fact that TWO of those three kinds have NO interface in `ast.ts` at all. Everything else
+# carries its `115e8b1b` walk.
 
 The compiler's "schema" is its own AST, not an application data model. Root catalog:
 `compiler/src/types/ast.ts` (2104 lines, 114 exported interfaces/types, ~91 distinct `kind` discriminants — unchanged since fbb4d9fd/df2ac831; this window's schema-differ.js changes below added NO ast.ts shape, same as the S287 DB-authoritative tier before it). Read that file directly for the exhaustive list; this map groups it and calls out the load-bearing shapes.
 
-**Currency (S297, `c700c435` -> `115e8b1b`):** re-verified this pass. `types/ast.ts` gained NO new
-shape this window either — every landing works through existing node kinds. THREE additions below
-are codegen-internal / schema-differ-internal shapes, not `ast.ts` types: the §38.6.2
-constraint-drift record, the D-5 module-const candidate filter's reliance on
-`ConstDeclNode`/`LetDeclNode.initExpr`, and `LogicBinding.directiveIsFormValue`.
+**Currency:** `types/ast.ts` has gained NO new shape for four windows — every landing works through
+existing node kinds, or through codegen-internal / schema-differ-internal shapes that are NOT
+`ast.ts` types (the §38.6.2 constraint-drift record, the D-5 module-const candidate filter's reliance
+on `ConstDeclNode`/`LetDeclNode.initExpr`, `LogicBinding.directiveIsFormValue`, and the S302
+`ifRaw`/`ifCond` pair below).
+
+## §17.1.2 — `ifRaw` / `ifCond` on the three structural node kinds (S302)
+
+**`engine-decl` / `match-block` / `each-block` carry NO `attrs` array.** They are not
+`kind:"markup"`; `ast-builder.js` reconstructs each opener by regexing NAMED attributes out of the
+header text, and an attribute nobody regexes for has nowhere to live. `if=` is therefore stored as a
+PAIR of bare node fields, not as an attribute:
+
+- **`ifRaw: string`** — the VERBATIM condition source (a raw slice, same shape as `inExprRaw` /
+  `keyExprRaw` / `onExprRaw` / `armsRaw`).
+- **`ifCond: AttrValue`** — the §5.2-PARSED attribute value: `{kind:"variable-ref"|"call-ref"|"expr",
+  …}` plus `span`, `refs`, and (after `attrvalue-exprnode-walker.ts`) `exprNode`. **Byte-for-byte the
+  object `<div if=…>` produces**, because `captureStructuralIfAttr` re-parses a synthetic opener
+  through the same `tokenizeAttributes`+`parseAttributes` pipeline rather than classifying the value
+  itself. That identity is what lets all four `if=` hosts share one lowering.
+
+**ABSENT, not null, when the opener has no `if=`.** Both keys are omitted entirely — deliberately
+NOT the null-when-absent convention the sibling opener fields use. The within-node parser-parity
+canary compares FIELD SETS, and null-stamping every engine/match/each in the corpus registers as a
+divergence at the ~2 nested-engine positions where live emits `text`/`comment` and native emits an
+`engine-decl`, growing the allowlist for a field neither side disagrees about. Precedent on this same
+node family: `engine-decl.bodyChildren`. Every consumer tests truthiness, so absent and null are
+indistinguishable to them — the distinction exists only for the canary.
+
+**The precise diagnostic anchor is `ifCond.span`; no separate attribute-NAME span is stamped.**
+
+**Typing note worth knowing:** `engine-decl` is the only one of the three with an interface in
+`types/ast.ts` (`EngineDeclNode` [910]). **`each-block` and `match-block` have NO `ast.ts` interface
+at all** — they are ad-hoc object literals built in `ast-builder.js` (`:16230` and `:15276`/`:17447`).
+A pass expecting a typed node for them finds nothing, and a field added to either is invisible to
+`tsc`. Same class as `<outlet>` and the DB-authoritative shapes below.
 
 ## Root pipeline types
 ### FileAST  [types/ast.ts:1551]
@@ -36,7 +70,7 @@ Discriminated union over ~91 `kind` string literals — the single node-shape sw
 
 **Declarations** — LetDeclNode [447], ConstDeclNode [462] (**both carry `initExpr?: ExprNode`, the STRUCTURED initializer — D-5 (S293) depends on it: `emit-server.ts`'s `emitReferencedModuleConstLines` SKIPS any candidate with no `initExpr`, and walks the ones that have it via `forEachIdentInExprNode` to prove every free identifier resolves at server module scope. A `const X = compute()` whose `compute` is not in the server bundle is skipped rather than emitted — a module-load ReferenceError is strictly worse than the call-time one, and the honest answer for that shape is a diagnostic, not a guess**), TildeDeclNode [480] (`~` linear-adjacent decl), LinDeclNode [492] (§35 linear types), ReactiveDeclNode [503] (the `@cell` declaration — carries `matchExpr` side-field for engine-adjacent typing), ImportDeclNode [1247] / ImportSpecifier [1235], UseDeclNode [1265] (`use foreign:` sidecar), ExportDeclNode [1279], TypeDeclNode [1298].
 
-**State machine** — EngineDeclNode [910] (`kind:"engine-decl"`; engineName, governedType `for=`, rulesRaw + bodyChildren walkable body, sourceVar, varName/varNameOverride, initialVariant, plus acceptsType/subsetVariants/inlineMatchArmArrows annotations added across S154-S172).
+**State machine** — EngineDeclNode [910] (`kind:"engine-decl"`; **plus the optional `ifRaw`/`ifCond` §17.1.2 render gate, present only when the opener carried `if=` — see above**; engineName, governedType `for=`, rulesRaw + bodyChildren walkable body, sourceVar, varName/varNameOverride, initialVariant, plus acceptsType/subsetVariants/inlineMatchArmArrows annotations added across S154-S172).
 
 **Control flow (statement)** — IfStmtNode [995], ForStmtNode [1044], WhileStmtNode [1062], ReturnStmtNode [1071] (carries `fnExprNode` — see the GITI-038 callout below), ThrowStmtNode [1085], SwitchStmtNode [1092], TryStmtNode [1101], MatchStmtNode [1120], MatchArmInlineNode [1138], BareExprNode [1156].
 
@@ -246,7 +280,7 @@ No `SessionDeclNode` exists — `session` is a reserved server-scope BUILTIN ide
 FunctionType [type-system.ts:423], MapType [:318] (with `.set?: boolean` for §59.12 value-native Set), PredicatedType [:468] (with `subsetVariants`), the `<fn-return>` over-approximation sentinel (`FN_RETURN_TYPE_NAME`, :754). NO `AnyType`/`null` member exists — `any` and `null` are not scrml types (§14.1.1 / null-does-not-exist axiom).
 
 ## Tags
-#scrml #map #schema #ast #types #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column #auto-immutable #is-effectively-immutable #e-schema-010 #lowering-functions #sql-literal-lowering #tenant-context-union #resolved-gaps #e-schema-011 #column-constraint-drift #references-hint #same-default-text #d5 #init-expr #logic-binding #directive-is-form-value #i225 #each-reconcile-ctx
+#scrml #map #schema #ast #types #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column #auto-immutable #is-effectively-immutable #e-schema-010 #lowering-functions #sql-literal-lowering #tenant-context-union #resolved-gaps #e-schema-011 #column-constraint-drift #references-hint #same-default-text #d5 #init-expr #logic-binding #directive-is-form-value #i225 #each-reconcile-ctx #if-cond #if-raw #structural-if #§17.1.2 #absent-not-null #parity-canary #field-set-comparison #untyped-structural-nodes #each-block #match-block #attr-value-identity
 
 ## Links
 - [primary.map.md](./primary.map.md)
