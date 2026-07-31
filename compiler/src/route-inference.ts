@@ -4708,7 +4708,16 @@ export function runRI(input: RIInput): RIOutput {
   for (const [callerFnNodeId, callerRecord] of analysisMap) {
     const _paramNames = fnParamNameSet((callerRecord.fnNode as any).params);
     const _res = resolveIndirectCallees(callerRecord.fnNode.body, _paramNames);
-    const _resolved = indirectResolvedCallees(_res);
+    const _resolved = new Set(indirectResolvedCallees(_res));
+    // #284 dispatch-table placement — a DIRECT dispatch call `t["k"](...)` /
+    // `t[dyn](...)` reaches its target through a member/index callee that
+    // `indirectResolvedCallees` (structured ident-call only) cannot see, so the
+    // target helper had no caller edge → route-inference dead-code-dropped it →
+    // the emitted `const t = { …: helper }` / `t[k]()` referenced an undefined
+    // name (ReferenceError). Feed the dispatch-resolved member(s) through the SAME
+    // escalation-only edge as the alias case (server caller promotes; client
+    // caller ignored). A reassigned table resolves to nothing (see the resolver).
+    for (const _d of _res.dispatchCalledTargets) _resolved.add(_d);
     if (_resolved.size === 0) continue;
     for (const calleeName of _resolved) {
       const calleeFnIds = fnNameToNodeIds.get(calleeName);

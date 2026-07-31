@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 21 |
-| MED | 100 |
+| MED | 99 |
 | LOW | 41 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -5094,23 +5094,27 @@ alias (dropped), uncalled alias — all correct; conformance 763/0.
 > sole-referencer emission, shadowed table (not treated as dispatch), reassigned table (dropped), two-peer
 > mixed table (dynamic key resolves to any member) — all correct; conformance 769/0.
 
-<!-- @gap id=g-dispatch-table-plain-helper-member-not-server-placed sev=MED status=open -->
-### G-DISPATCH-TABLE-PLAIN-HELPER-MEMBER-NOT-SERVER-PLACED — a PLAIN (non-`server function`) helper reached ONLY through a direct dispatch call `t[k]()` is not server-PLACED → ReferenceError — `NEW S304; MED; open`
+<!-- @gap id=g-dispatch-table-plain-helper-member-not-server-placed sev=MED status=resolved -->
+### G-DISPATCH-TABLE-PLAIN-HELPER-MEMBER-NOT-SERVER-PLACED — a PLAIN (non-`server function`) helper reached ONLY through a direct dispatch call `t[k]()` is not server-PLACED → RESOLVED S305 — `NEW S304; MED; RESOLVED S305 (PR #307)`
 
-Found while resolving the dispatch-await gap above (S304). A **plain helper** (an ordinary `function foo`,
-not a `server function` peer) that is a dispatch-table member reached ONLY via a direct dispatch call — never
-by a direct call or an intermediate-alias call — is not server-PLACED, so the emitted `const t = { …: foo }`
-references an undefined `foo` → ReferenceError. Root: route-inference's placement (like the peer emission the
-S304 fix just added) resolves indirect callees from STRUCTURED `call` nodes (`indirectResolvedCallees`), and a
-direct dispatch call `t[k]()` has a member/index callee that is absent from `calledNames`. The S304 fix
-handles PEER (server-fn) members — a peer is server-placed by construction, and its emission is now wired — but
-a PLAIN helper's PLACEMENT lives in route-inference, whose escalation counting is over-escalation-sensitive
-(the S299 D4 / W-DEAD gate), so widening it is a separate, higher-blast-radius change. **Fail-CLOSED** (a 500,
-not silent). Pre-existing: on `main` the same shape already 500s (the peer wasn't emitted either), the S304
-fix strictly improved it (the peer half now works; the plain-helper half remains). Repro: the `mixedDynamic`
-case in `scratchpad/repro-dispatch-adversarial.mjs` (a `{ a: peer, b: plainHelper }` table, dynamic key).
-**Fix locus (separate cycle):** teach route-inference to resolve a direct dispatch call `t[k]()` to the table's
-member set for placement (via the resolver's now-exposed `tableBindings`), guarded to not over-escalate.
+> **RESOLVED S305** (PR #307, branch `fix/dispatch-plain-helper-placement`). A **plain helper** (`function
+> foo`, not a `server function`) reached ONLY via a direct dispatch call — never by a direct or
+> intermediate-alias call — had no caller edge in route-inference, so it was dead-code-dropped (present in
+> NEITHER bundle) → the emitted `const t = { …: foo }` / `t[k]()` referenced an undefined name (fail-CLOSED
+> 500). Root: route-inference's `indirectInverseCallerMap` is fed from `indirectResolvedCallees` (STRUCTURED
+> ident-call only); a `t[k]()` member/index callee is invisible — and when the dispatch call sits inside a
+> template / SQL `?{}` interpolation it is doubly hidden (interpolations aren't decomposed to AST). **Fix:** the
+> resolver exposes `dispatchCalledTargets` — the free-identifier targets of every direct dispatch call, from
+> BOTH structured call nodes (static key → the member; dynamic → the whole member set) AND a template/SQL
+> raw-text scan (`obj[…](` / `obj.key(`, trailing `(` required so a bare member READ does not escalate).
+> route-inference unions those into the SAME escalation-only indirect edge as the alias case (server caller
+> promotes, client caller ignored; a `clientPinnedFnId` / DOM helper is still never promoted — it fires
+> E-ROUTE-002). **Over-escalation measured ZERO:** the flagship `examples/23-trucking-dispatch` server emit is
+> byte-identical main-vs-branch (380 fns, same hash), the corpus is dispatch-table-absent, conformance 769/0,
+> unit green, `inverseCallerMap` (the D4 W-DEAD gate) untouched. Verified:
+> `peer-call-in-template-interp-awaited.test.js` 13/0 (static/dynamic key, structured + template-embedded,
+> live round-trip). This closes the #284 first-class-reference class end-to-end (direct · alias · dispatch,
+> across await · emission · placement).
 
 ---
 
@@ -5144,7 +5148,8 @@ member set for placement (via the resolver's now-exposed `tableBindings`), guard
 > dispatch-table call `t[k]()` is unawaited/unemitted in EVERY position (not interpolation-specific), taken in
 > its own cycle → **RESOLVED S304 (PR #305)**. That fix in turn surfaced
 > [[g-dispatch-table-plain-helper-member-not-server-placed]] (a PLAIN-helper dispatch member's PLACEMENT, a
-> route-inference concern — still open, fail-closed).
+> route-inference concern) → **RESOLVED S305 (PR #307)**. The #284 first-class-reference class is now closed
+> end-to-end (direct · alias · dispatch × await · emission · placement).
 
 Surfaced reverse-verifying adopter GH **#284**. **The adopter's own attribution is wrong** — see
 [[g-e-route-001-severity-contradicts-12-4-and-one-limb-never-fires]] for the diagnostic half — but the
