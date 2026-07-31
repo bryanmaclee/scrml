@@ -1,3 +1,4 @@
+import { parse as acornParse } from "acorn";
 import { genVar } from "./var-counter.ts";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
 import { exprNodeCollectCallees } from "../expression-parser.ts";
@@ -657,11 +658,125 @@ export function liftEmittedStatementAwaits(
   routeMap: RouteMap,
   filePath: string,
 ): string {
+  const serverFnNames = new Set<string>();
+  for (const [, route] of routeMap.functions) {
+    if (route.boundary === "server" && route.functionName) serverFnNames.add(route.functionName as string);
+  }
+  if (serverFnNames.size === 0 || !code) return code;
+  // GH #264 — an AST pass (acorn) injects `await` at every server-fn call site in
+  // an await-legal position, position-invariantly per §13.2. On a parse failure
+  // (a malformed body — the bundle is already broken) fall back to the GH #237
+  // whole-statement text pass so no body loses the awaits #237 already gave it.
+  const viaAst = injectServerCallAwaitsViaAst(code, serverFnNames);
+  if (viaAst !== null) return viaAst;
   return splitEmittedStatements(code)
     .map((stmt) => liftOneEmittedStatement(stmt, routeMap, filePath))
     .join("");
 }
 
+/**
+ * GH #237 + #264 — apply the §13.2 auto-await to already-EMITTED (pre-mangle)
+ * mount-body JS about to run inside the compiler-generated `(async () => {…})`
+ * scope (§6.7.1a). SPEC §13.2: the compiler SHALL insert `await` at EVERY call
+ * site where a server-generated fetch call is made — position-invariantly.
+ *
+ * The mount body is valid JS text, so this parses it with acorn (wrapped in an
+ * async arrow so a top-level `await`/`return` parses) and walks the real AST: an
+ * `await` is injected before each server-fn CALL in an await-LEGAL position. A
+ * position is await-legal UNLESS it is inside a SYNC function/arrow/method/
+ * accessor BODY, or inside ANY formal-PARAMETER list (a callback's params forbid
+ * `await` even when the callback is async). Modelling scopes with the parser —
+ * not flat-text heuristics — is what makes the syntax-error class (an `await` in
+ * a sync callback / a param list) unreachable: acorn knows a method body, getter,
+ * class method, arrow, `function`, or param default is a scope, which the text
+ * scanner repeatedly did not (GH #264 adversarial rounds 1–5 each found another).
+ *
+ * Skipped (each keeps a correct/parallel path intact):
+ *   - MEMBER calls (`obj.fn()`) — the route name binds a free identifier only.
+ *   - already-`await`ed calls.
+ *   - the DIRECT value of a `_scrml_reactive_set(cell, stub())` — emit-client's
+ *     own IIFE pass owns that lift; a call one level deeper (an argument, a
+ *     condition, a `${…}` interpolation) is NOT the direct value and IS awaited.
+ *
+ * Returns null when acorn cannot parse the body (the caller then uses the #237
+ * text fallback).
+ */
+export function injectServerCallAwaitsViaAst(code: string, serverFnNames: Set<string>): string | null {
+  if (!code || serverFnNames.size === 0) return code;
+  const PREFIX = "(async () => {\n";
+  let program: any;
+  try {
+    program = acornParse(PREFIX + code + "\n})", { ecmaVersion: "latest" });
+  } catch {
+    return null;
+  }
+  const REACTIVE_WRAPPERS = new Set(["_scrml_reactive_set", "_scrml_cs_reactive_set"]);
+  const P = PREFIX.length;
+  const insertAt: number[] = [];
+
+  const isFn = (n: any): boolean =>
+    !!n && (n.type === "FunctionDeclaration" || n.type === "FunctionExpression" || n.type === "ArrowFunctionExpression");
+
+  const visit = (node: any, awaitLegal: boolean, parent: any): void => {
+    if (!node || typeof node !== "object") return;
+    if (isFn(node)) {
+      // Formal parameters forbid `await` in EVERY case (sync AND async).
+      for (const prm of (node.params || [])) visit(prm, false, node);
+      // The body is await-legal only when the callback is itself async.
+      visit(node.body, node.async === true, node);
+      return;
+    }
+    // A class field initializer runs in the (sync) instance/static-init context —
+    // `await` is illegal there. A COMPUTED key, though, is evaluated in the
+    // enclosing scope, so it keeps the inherited await-legality.
+    if (node.type === "PropertyDefinition") {
+      if (node.computed && node.key) visit(node.key, awaitLegal, node);
+      if (node.value) visit(node.value, false, node);
+      return;
+    }
+    // A `static { … }` block is a sync initializer — `await` is illegal.
+    if (node.type === "StaticBlock") {
+      for (const s of (node.body || [])) visit(s, false, node);
+      return;
+    }
+    if (node.type === "CallExpression") {
+      const callee = node.callee;
+      if (awaitLegal && callee && callee.type === "Identifier" && serverFnNames.has(callee.name)) {
+        const alreadyAwaited = !!parent && parent.type === "AwaitExpression";
+        const directReactive =
+          !!parent && parent.type === "CallExpression" &&
+          parent.callee && parent.callee.type === "Identifier" &&
+          REACTIVE_WRAPPERS.has(parent.callee.name) &&
+          Array.isArray(parent.arguments) && parent.arguments[1] === node;
+        if (!alreadyAwaited && !directReactive) insertAt.push(node.start - P);
+      }
+      visit(node.callee, awaitLegal, node);
+      for (const a of (node.arguments || [])) visit(a, awaitLegal, node);
+      return;
+    }
+    for (const key of Object.keys(node)) {
+      if (key === "start" || key === "end" || key === "type") continue;
+      const child = (node as any)[key];
+      if (Array.isArray(child)) { for (const c of child) visit(c, awaitLegal, node); }
+      else if (child && typeof child === "object" && typeof child.type === "string") visit(child, awaitLegal, node);
+    }
+  };
+  // Start await-illegal at the module top; the wrapper `(async () => …)` flips
+  // its own body await-legal, so the mount body is walked as await-legal.
+  visit(program, false, null);
+
+  if (insertAt.length === 0) return code;
+  insertAt.sort((a, b) => a - b);
+  let out = "";
+  let cursor = 0;
+  for (const pos of insertAt) {
+    if (pos < 0 || pos > code.length) continue;
+    out += code.slice(cursor, pos) + "await ";
+    cursor = pos;
+  }
+  out += code.slice(cursor);
+  return out;
+}
 /** Per-statement arm of `liftEmittedStatementAwaits`. */
 function liftOneEmittedStatement(stmt: string, routeMap: RouteMap, filePath: string): string {
   const trimmed = stmt.trim();

@@ -336,6 +336,32 @@ function leadingTagName(expr) {
 }
 
 /**
+ * GH #264 Defect 2 — the ExprNode for an `on mount { … }` body, or `undefined`
+ * when the body is MULTI-statement.
+ *
+ * `safeParseExprToNode` parses exactly ONE expression. A multi-statement mount
+ * body whose first statement is itself a complete expression (`@n = server()\n
+ * @msg = …`) yields a node covering ONLY statement 1; emit-logic's `bare-expr`
+ * fast-path (`if (node.exprNode) return emitExpr(node.exprNode)`) then emits
+ * ONLY that node and every following statement is silently dropped with ZERO
+ * diagnostics. The §237 mount-await machinery (`liftEmittedStatementAwaits`) is
+ * built on the assumption that a multi-statement body arrives WITHOUT an
+ * exprNode and is lowered through the string path (`node.expr` = full body) —
+ * true only when statement 1 fails to parse as an expression. When the parse
+ * did NOT consume the whole body, drop the truncated node so the string path
+ * lowers ALL statements. A single-expression body (span reaches the trimmed
+ * end) and an escape-hatch (span covers the full `expr` by construction) both
+ * keep their node → byte-identical emit. `parse` is the caller's closure-scoped
+ * `safeParseExprToNode` (spans are body-relative when called with startOffset 0).
+ */
+export function mountBodyExprNode(body, parse) {
+  const node = parse(body, 0);
+  if (!node || !node.span || typeof node.span.end !== "number") return node;
+  // Non-whitespace after the parsed span = an un-consumed trailing statement.
+  return body.slice(node.span.end).trim() ? undefined : node;
+}
+
+/**
  * Module-level safe expression parser — wraps parseExprToNode in try/catch.
  * Returns undefined on failure. Used by parseAttributes (module-level scope)
  * and other module-level helpers that need ExprNode but lack access to the
@@ -9955,7 +9981,23 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // and NEVER renders its return into the DOM, in ANY enclosing context
       // (including a `<program db=>` / `<db>` state-block body). emit-html keys
       // on this flag to skip the render-slot + addLogicBinding unconditionally.
-      return { id: ++counter.next, kind: "bare-expr", expr: body, exprNode: safeParseExprToNode(body, 0), _onMountEffect: true, span: spanOf(startTok, peek()) };
+      //
+      // GH #264 Defect 2 (silent statement drop) — `safeParseExprToNode` parses
+      // exactly ONE expression. A MULTI-statement mount body whose first
+      // statement is itself a complete expression (`@n = serverRead()\n@msg = …`)
+      // yields a node covering ONLY statement 1, and emit-logic's `exprNode`
+      // fast-path (`case "bare-expr"` — `if (node.exprNode) return …`) then emits
+      // ONLY that node: every following statement is silently dropped with ZERO
+      // diagnostics. The §237 mount-await machinery (`liftEmittedStatementAwaits`)
+      // is built on the ASSUMPTION that a multi-statement body arrives WITHOUT an
+      // exprNode and is lowered through the string path (`node.expr` = full body,
+      // `splitEmittedStatements` restoring the statement view) — an assumption
+      // that only holds when the first statement fails to parse as an expression.
+      // When the parse did NOT consume the whole body, drop the (truncated)
+      // exprNode so the string path lowers ALL statements. A single-expression
+      // body (span reaches the end) and an escape-hatch (span spans the full
+      // `expr` by construction) both keep their node — byte-identical emit.
+      return { id: ++counter.next, kind: "bare-expr", expr: body, exprNode: mountBodyExprNode(body, safeParseExprToNode), _onMountEffect: true, span: spanOf(startTok, peek()) };
     }
 
     // §6.7.1b: ON DISMOUNT — `on dismount { body }` desugars to cleanup(() => { body })
@@ -13522,7 +13564,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       consume();                  // consume '{'
       const { body, span: bodySpan } = collectBracedBody();
       // _onMountEffect (S217) — see the parseOneStatement on-mount site above.
-      nodes.push({ id: ++counter.next, kind: "bare-expr", expr: body, exprNode: safeParseExprToNode(body, 0), _onMountEffect: true, span: spanOf(startTok, peek()) });
+      // GH #264 Defect 2 — drop the exprNode for a multi-statement body so the
+      // string path lowers ALL statements (see mountBodyExprNode).
+      nodes.push({ id: ++counter.next, kind: "bare-expr", expr: body, exprNode: mountBodyExprNode(body, safeParseExprToNode), _onMountEffect: true, span: spanOf(startTok, peek()) });
       continue;
     }
 
