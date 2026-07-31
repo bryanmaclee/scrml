@@ -9493,7 +9493,16 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // decl nodes, never on a bare tilde-decl (emit-logic.ts:1902-1906).
         const _sqlInitTilde = tryConsumeSqlInit();
         if (_sqlInitTilde) {
-          return { id: ++counter.next, kind: "const-decl", name, init: "", sqlNode: _sqlInitTilde, span: spanOf(startTok, peek()) };
+          // Tag `_bareAssign`: this const-decl came from a KEYWORDLESS bare
+          // assignment `name = ?{...}` (the tilde-decl form), NOT a real `const`
+          // keyword. When `name` was already declared (`let w = 0; w = ?{...}`)
+          // emit-logic must emit a REASSIGNMENT (`w = await …`), not a second
+          // `const w = …` (a duplicate-declaration → E-CODEGEN-INVALID-LOGIC).
+          // The non-SQL bare assignment already reassigns via the tilde-decl arm's
+          // declaredNames check (#274 Wall-2); this tag lets the const-decl SQL arm
+          // mirror it. A FRESH bare assignment (name not yet declared) still emits
+          // `const name = …`, matching the tilde-decl fresh-declaration semantics.
+          return { id: ++counter.next, kind: "const-decl", name, init: "", sqlNode: _sqlInitTilde, _bareAssign: true, span: spanOf(startTok, peek()) };
         }
         const { expr, span } = collectExpr();
         return { id: ++counter.next, kind: "tilde-decl", name, init: expr, initExpr: safeParseExprToNode(expr, spanOf(startTok, peek())?.start ?? 0), span: spanOf(startTok, peek()) };

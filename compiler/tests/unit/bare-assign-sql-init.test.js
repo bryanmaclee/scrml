@@ -255,4 +255,56 @@ describe("§5 E2E — server-fn conformance shape (bare result = ?{})", () => {
       expect(clientJs).not.toMatch(/sql-ref:-?\d+/);
     }
   });
+
+  // §6 (#274 Wall-2) — a bare-assign SQL init to an ALREADY-DECLARED `let` is a
+  // REASSIGNMENT, not a re-declaration. Pre-fix it emitted a second `const w =
+  // await …` alongside the `let w = 0` → "Identifier 'w' has already been
+  // declared" → E-CODEGEN-INVALID-LOGIC (the write phase aborted). The
+  // `_bareAssign` tag + emit-logic's declaredNames reassignment check now emit
+  // `w = await …`. A FRESH bare-assign SQL (no prior decl) still emits `const`.
+  test("§6 bare-assign SQL to a pre-declared let emits a reassignment, not a duplicate const", () => {
+    const src = `<program>
+<db src="./app.db" tables="assets">
+  \${
+    server function fleetCanManage(token) { return token == "admin" }
+    server function saveAssetRow(token, rec) {
+      const canMng = fleetCanManage(token)
+      let w = 0
+      if (rec.id == 0 && !canMng) return 0 - 3
+      w = ?{\`INSERT OR REPLACE INTO assets (id, unit) VALUES (\${rec.id}, \${rec.unit})\`}.run()
+      return rec.id
+    }
+  }
+  <div>x</div>
+</>
+</program>`;
+    const { errors, serverJs } = compileSource(src, "wall2-reassign");
+    // The pre-fix failure: the write phase aborts with E-CODEGEN-INVALID-LOGIC.
+    expect(errors.filter(e => e.code === "E-CODEGEN-INVALID-LOGIC")).toEqual([]);
+    expect(errors.filter(e => e.severity === "error" || e.fatal)).toEqual([]);
+    expect(serverJs).toBeTruthy();
+    // The reassignment emits `w = await _scrml_sql…`, NOT a second `const w`.
+    expect(serverJs).toMatch(/\bw = await _scrml_sql`INSERT OR REPLACE/);
+    expect(serverJs).not.toMatch(/const w = await _scrml_sql/);
+    // And the pre-declared `let w = 0` is still present exactly once.
+    expect(serverJs).toContain("let w = 0");
+  });
+
+  test("§6b a FRESH bare-assign SQL (no prior decl) still emits a `const` declaration", () => {
+    const src = `<program>
+<db src="./app.db" tables="assets">
+  \${
+    server function countAssets() {
+      fresh = ?{\`SELECT COUNT(*) AS c FROM assets\`}.get()
+      return fresh.c
+    }
+  }
+  <div>x</div>
+</>
+</program>`;
+    const { errors, serverJs } = compileSource(src, "wall2-fresh");
+    expect(errors.filter(e => e.severity === "error" || e.fatal)).toEqual([]);
+    // Fresh bare-assign keeps the tilde-decl fresh-declaration semantics: `const`.
+    expect(serverJs).toMatch(/const fresh = \(await _scrml_sql`SELECT COUNT/);
+  });
 });
