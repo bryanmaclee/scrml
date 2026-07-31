@@ -353,7 +353,9 @@ describe("§64 tool target — R26 (compile → parse → RUN)", () => {
       proc.kill();
       try { rmSync(dir, { recursive: true }); } catch {}
     }
-  });
+  }, 30000); // raise above the internal port-read (10s) + fetch-poll (5s) deadlines
+             // so the diagnostic path can report, instead of bun's 5s test-timeout
+             // preempting it.
 });
 
 
