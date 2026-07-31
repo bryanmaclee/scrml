@@ -44,11 +44,11 @@ live in `compiler/src` (`type-system.ts` + `codegen/emit-html.ts` + `dependency-
 15. **E-LIFT-001** (codes) `[status=BLOCKED-PENDING-SHAPE — see S305 note]` — two independent operations in the same logic block both have `lift` (`dependency-graph.ts:3666`). Pos + neg (a single lift → silent).
 
 **CPS §19.9 idempotency (5 codes):**
-16. **E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH** (codes) `[status=pending]` — an idempotency-store driver mismatch (`api.js:1852`). Pos + neg.
-17. **E-CPS-IDEMPOTENCY-STORE-MISSING-IMPORT** (codes) `[status=pending]` — the idempotency store's import is missing (`api.js:1862`). Pos + neg.
+16. **E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH** (codes) `[status=done S305]` — an idempotency-store driver mismatch (`api.js:1852`). Pos + neg.
+17. **E-CPS-IDEMPOTENCY-STORE-MISSING-IMPORT** (codes) `[status=done S305]` — the idempotency store's import is missing (`api.js:1862`). Pos + neg.
 18. **E-CPS-MULTIBATCH-MACHINE-CROSSING** (codes) `[status=pending]` — a multi-batch CPS machine crossing (`cps-batch-planner.ts:85`). Pos + neg.
 19. **E-CPS-MULTIBATCH-REORDER** (codes) `[status=pending]` — a multi-batch CPS reorder violation (`cps-batch-planner.ts:84`). Pos + neg.
-20. **E-CPS-NONIDEM-NO-STORAGE** (codes) `[status=pending]` — a CPS-eligible non-idempotent function with no storage (`api.js:1874`). Pos + neg.
+20. **E-CPS-NONIDEM-NO-STORAGE** (codes) `[status=done S305]` — a CPS-eligible non-idempotent function with no storage (`api.js:1874`). Pos + neg.
 
 **Wave-2 DoD:** all 14 error-model/CPS codes pinned (codes-half; reject pos + clean neg per code); run.ts
 green; divergences ESCALATED. The `!`/`<render>`/`<errors>`/CPS diagnostic edge moves to conformance-covered.
@@ -119,3 +119,43 @@ binding suppresses it; `_`-prefix is the documented opt-out.
 **Honest yield note:** this pass authored ONE code from a six-code cluster. The searches are the
 deliverable — five codes now carry evidence instead of a `[status=pending]` marker, and two of
 them turned into filed gaps.
+
+## S305 third pass — the CPS / idempotency arc
+
+**3 of the 5 `E-CPS-*` codes pinned** (6 cases; suite 835 → 841). `E-CPS-NONIDEM-NO-STORAGE`
+(§19.9.6) · `E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH` · `E-CPS-IDEMPOTENCY-STORE-MISSING-IMPORT`
+(both §39.2.6). These are the codes that needed the whole surface stood up, and the setup is the
+part worth keeping:
+
+### The three preconditions, in order — miss any one and every code reads as dead
+
+1. **CPS-ELIGIBILITY needs a client/server INTERLEAVE.** `route-inference.ts:5386` gates on
+   `findReactiveAssignment(body) !== null`. A function that is wholly server (e.g. a `?{}` inside an
+   `if`) is simply escalated whole — **`[MC] 0 CPS function(s) classified`** — and NO `E-CPS-*` code
+   can fire. The working shape is client-write → server statement → client-write.
+2. **The batch must be NON-MONOTONE** for the three store codes. `set n = n + 1` qualifies (the RHS
+   references the column it assigns — `monotonicity-analyzer.ts:176`). A plain SELECT or an
+   INSERT-without-readback is MONOTONE and fires nothing.
+3. **Then the store attribute decides which of the three fires** (`api.js:1938-1968`, priority order):
+   explicit-driver mismatch vs `db=` → DRIVER-MISMATCH · `"redis"` with no `scrml:redis` in the module
+   graph → MISSING-IMPORT · resolves to `"none"` → NONIDEM-NO-STORAGE.
+
+**Diagnostic tip for the next probe:** run `compileScrml({verbose:true})` and read the `[MC]` line —
+it reports the CPS-function count and the per-verdict split, which tells you immediately WHICH
+precondition you are failing instead of leaving you guessing at an empty code set.
+
+### Recorded searches — the two multibatch codes (NOT dead-code claims)
+
+- **`E-CPS-MULTIBATCH-REORDER`** — has TWO reject paths. (a) `cps-batch-planner.ts:163`, a genuine
+  body-DG CYCLE; the code's own comment concedes that would mean two straight-line statements
+  mutually depend, so it reads defensive. (b) `:426`, an `invalidates` (SQL-row-identity) edge
+  crossing a batch boundary — this one IS the designed trigger. Two shapes probed (insert→client→
+  select on one table; select→client-derived-value→insert on one table). **Both produced ONE batch**,
+  so no boundary to cross: the **server-biased topological sort hoists the server statements adjacent**
+  and the coalescer merges them, which is the optimisation working as designed. Forcing two batches
+  needs a dependency the sort cannot reorder around — that is the next thing to construct, not a
+  conclusion that the code is dead.
+- **`E-CPS-MULTIBATCH-MACHINE-CROSSING`** — `detectMachineCrossing` (`:470`) explicitly SKIPS an
+  `.advance()` with no batch, and a machine cell is a client-tier reactive, so both advances must be
+  SERVER-tier statements in DIFFERENT batches. Not probed to a conclusion; it inherits the same
+  two-batch problem above. Locus known, reachability NOT established.

@@ -1,0 +1,16 @@
+{
+  "id": "server-db-cps-idempotency-store-missing-import-pos",
+  "description": "`idempotency-store=\"redis\"` with no `scrml:redis` import in the module graph. Per §39.2.6 E-CPS-IDEMPOTENCY-STORE-MISSING-IMPORT fires (§34: Error).",
+  "language-version": "1.0",
+  "spec": "§39.2.6",
+  "rationale": "§39.2.6 — `idempotency-store=\"redis\"` selects a backend whose runtime symbols arrive through the `scrml:redis` import. With no such import anywhere in the module graph the declaration names a store the emitted code cannot reach, and the failure would otherwise surface as a missing runtime symbol on the first non-monotone retry. Module-graph presence is statically decidable, so it is checked.",
+  "expect": {
+    "codes": [
+      "E-CPS-IDEMPOTENCY-STORE-MISSING-IMPORT"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-CPS-IDEMPOTENCY-STORE-MISSING-IMPORT": "error"
+    }
+  }
+}

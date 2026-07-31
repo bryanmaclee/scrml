@@ -1,0 +1,15 @@
+<status> = ""
+<program db="sqlite:./app.db" idempotency-store="postgres">
+<schema>
+  counters { id: integer primary key, n: integer }
+</>
+${
+    function bump() {
+        @status = "loading"
+        ?{ update counters set n = n + 1 where id = 1 }
+        @status = "done"
+    }
+}
+<p id="s">${@status}</p>
+<button id="b" onclick=bump()>go</button>
+</program>

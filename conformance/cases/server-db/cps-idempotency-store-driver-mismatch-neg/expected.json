@@ -1,0 +1,13 @@
+{
+  "id": "server-db-cps-idempotency-store-driver-mismatch-neg",
+  "description": "The identical program with `idempotency-store=\"sqlite\"`, matching `db=`. Isolates the driver agreement from the attribute itself.",
+  "language-version": "1.0",
+  "spec": "§39.2.6",
+  "rationale": "§39.2.6 — the idempotency store is a real table in a real database. Naming a driver that differs from the closest-ancestor `db=` asks the compiler to write keys to a connection the app does not have; `\"auto\"` exists precisely so the author does not have to restate the driver. The mismatch is decidable from two attributes, so it is a compile error rather than a connection failure at first retry.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH"
+    ]
+  }
+}

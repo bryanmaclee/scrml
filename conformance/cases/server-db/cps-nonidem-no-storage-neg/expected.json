@@ -1,0 +1,13 @@
+{
+  "id": "server-db-cps-nonidem-no-storage-neg",
+  "description": "The identical body with `idempotency-store=\"sqlite\"`, matching the `db=` driver — a backend resolves, so the non-monotone batch is admissible. Only the store attribute differs.",
+  "language-version": "1.0",
+  "spec": "§19.9.6",
+  "rationale": "§19.9.6 — a CPS body-split turns one function into SEVERAL server requests, so any batch that is not monotone can be applied twice by a retry. scrml's answer is a Stripe-style idempotency key, which needs somewhere to live. With `idempotency-store=\"none\"` there is nowhere, so the compiler refuses at compile time rather than shipping a double-charge that only appears under a retry — the §49 no-silent-bad-output posture. The three escapes it names are all real: match the `db=` driver, import `scrml:redis`, or assert `.idempotent()` if the batch is monotone-by-construction.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CPS-NONIDEM-NO-STORAGE"
+    ]
+  }
+}
