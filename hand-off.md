@@ -1,4 +1,53 @@
 <!-- ============================================================= -->
+<!-- S306 WRAP (Peter/Windows) — prepended 2026-07-31.              -->
+<!-- S305-bryan + S304-Peter + S302 + all prior UNCHANGED below.    -->
+<!-- Disambiguate by NAME.                                          -->
+<!-- ============================================================= -->
+
+# scrml — Session 306 (Peter · Windows) — WRAP
+
+**Date:** 2026-07-31. `/boot` Profile A, successor to S305-bryan (disjoint Peter-lane). `main` at **`854a6a9b`**, coherence **0/0** both repos. Delta-log **[996]–[1000]**. Three landings, all cloud gate+windows GREEN: **#264** (PR #323), **E-EQ-001 polish** (PR #324), **statusline** (PR #322). This carries the irreducible; the mechanical stream is delta [996]-[1000].
+
+## 🎯 THE HEADLINE — #264 became a design lesson: text-scanning can't model JS scopes; six adversarial rounds forced the AST rewrite
+
+**#264 (adopter DanceCard) — `on mount` server-fn calls now awaited in EVERY position, and multi-statement mount bodies no longer silently drop statements.** Two §13.2/§6.7.1a defects #237 missed: (1) fail-OPEN — a server call in an ARGUMENT / CONDITION / template-INTERPOLATION was un-awaited (Promise bound: `==` always false, the patron page redirected away every load, a cookie became `[object Promise]`); (2) silent DROP — a multi-statement mount body whose stmt-1 is a complete expression dropped every following statement, zero diagnostics. **The over-emit sweep caught the FLAGSHIP `23-trucking-dispatch` silently dropping its own `sendLocationPing()` on mount.**
+
+**The durable methodology point (delta [997]):** my first cut hand-scanned the emitted JS text to inject `await` at nested call sites. The S239 adversarial pass found a reachable, zero-diagnostic silent-broken-bundle path in SIX consecutive rounds — regex-literal injection, arrow-suppression leak, `function`-param-brace, operator-first ASI splits, param defaults, object/class methods — each fix opening the next hole, because JS has many ways to create a sync scope and flat text can't model them. **The right move was to stop patching and change tools: parse the mount body with acorn and walk the AST** (`injectServerCallAwaitsViaAst`), where await-illegality is a small closed node set (Function/Arrow params+sync bodies, `PropertyDefinition` value, `StaticBlock`). Round-6 verdict: syntax-error class CLOSED. **A green 21.8k-test suite would have shipped all six defects — the adversarial loop is not ceremony.**
+
+## 🔴 THE NEXT PA'S PICKUP (Peter-lane)
+
+1. **Braceless `for/lift` reject-diagnostic** — bryan RULED reject; "the build is yours." formB emits `for(const it of of)` (node-check-valid, dies at eval). Emit the diagnostic + repro matrix. (Carried since S300; still open.)
+2. **#264 residual — harden the acorn-parse-FAILURE fallback** (round-6 note 1): `liftEmittedStatementAwaits` still falls back to the retired flat-text scanner (which carried the rounds 1–5 bugs) on an acorn parse failure. Unreachable for valid emitted JS, but the strictly-safer choice is to return the body UNCHANGED (never inject). Cheap belt-and-suspenders; would let the dead text-scanner functions be deleted.
+3. **#228** (held) — reactive bindings in an initially-hidden nested-`<each>` don't reconcile live (flogence async-trace / broader S10 gap).
+4. **Gap** `g-onmount-direct-reactive-server-write-unawaited-on-escape-hatch-string-path` (MED) — a direct `@n = serverFn()` on the degenerate SPACED escape-hatch path isn't awaited (emit-client's matcher misses the spaced form); contrived (needs a parse-failing mount body); fix = make emit-client's matcher spaced-tolerant OR have the AST pass await it.
+
+## 🧭 FINDINGS THAT OUTLAST
+
+- **[997] — six-round text-scanner → acorn is the load-bearing lesson.** When an adversarial pass finds a NEW reachable defect every round in the SAME approach, the approach is the problem. Parsing beat heuristics decisively; the AST models scopes the text scanner kept mis-guessing.
+- **[999] — the render-map full regenerator is BROKEN on Peter's Windows host** (`generate-baseline.js` → `HARNESS-ERROR ×449`, garbage baseline). Do NOT run it on Windows; update the specific stale line surgically. A real regen needs a working (Linux/CI?) render harness.
+- **Over-emit measurement is how you find the bug you weren't looking for.** The 66/68 byte-diff sweep for #264 surfaced the flagship's own dropped-`sendLocationPing()` mount statement — a latent data-loss bug nobody had reported.
+
+## ⚠️ OWN MISSES — recorded, not smoothed
+
+- **The #264 first cut was a text scanner I defended across three rounds** before conceding the approach was wrong and rewriting on acorn. Each round I fixed the specific hole rather than questioning the tool; the pivot should have come at round 3, not round 6.
+- **Ran the render-map full regen expecting a clean 1-line diff; it produced an 8,109-line garbage diff** (HARNESS-ERROR ×449) — caught before committing, reverted, updated surgically. A generated-artifact regen must have its output diff-inspected before it rides a commit.
+
+## ✅ GATE / HOUSEKEEPING
+
+- **Landed (all cloud gate+windows GREEN):** #323 (#264, `c69a32f9`) · #324 (E-EQ-001, `854a6a9b`) · #322 (statusline, `e4dd5756`). `ai-review`/`tracking` red on every code PR = the documented non-blocking infra flakes (the `ANTHROPIC_API_KEY` secret is bryan's; tracking red-by-design) — verified, not regressions.
+- **Full local gate: 21849 pass / 6 pre-existing baseline** (corpus-specifier §2 pinned set · self-host smoke ×3 · csrf B5 · throwing-subscriber) — **PROVEN identical on main by stashing the fix.** One transient `R24-Bug-31` Windows `node --check` spawn flake seen once, gone on re-run (the test has no `on mount` → my code never touches it).
+- **FACTS + gap-counts regenerated**, `--check` green, squashed into the code commits (the gate-flow lesson).
+- **Adopter issues 2 → 1 open** (#264 closed; #228 held). #274 stays closed (this was its diagnostic residual).
+- **Worktrees:** main + persistent `scrml-pinned` only; three session branches pruned. **Maps NOT run** — #264/#E-EQ touched internal loci (scheduling.ts/ast-builder.js/gauntlet-phase3-eq-checks.js), no new surface files (S299/S304 precedent; grep-competitive).
+- **Statusline** now committed to the repo (`.claude/statusline.mjs` + `settings.json`, force-added past the `.claude/` gitignore) — orange bar (COLOR 208), syncs to every machine on pull.
+
+## Tags
+#session-306-peter #264-onmount-await-and-drop-CLOSED #text-scanner-to-acorn-six-rounds #flagship-dropped-sendLocationPing
+#e-eq-001-operand-detail-274-residual #render-map-regen-broken-on-windows #over-emit-finds-the-unreported-bug #statusline-committed
+
+---
+
+<!-- ============================================================= -->
 <!-- S305 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-31.        -->
 <!-- S302 + S303-Peter + S301 + all prior UNCHANGED below.          -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->

@@ -2,6 +2,24 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S306 — 2026-07-31 (Peter · Windows) — adopter #264 closed (on-mount await + statement-drop), via an acorn rewrite after six adversarial rounds; the E-EQ-001 diagnostic polish
+
+Three landings, all cloud-gate + windows green.
+
+**#264 (PR #323) — `on mount` server-fn calls are now awaited in every position, and multi-statement mount bodies no longer silently drop statements.** Two §13.2/§6.7.1a defects the earlier #237 fix did not cover:
+
+- **Fail-open — nested calls un-awaited.** A server-fn call in a function ARGUMENT (`eq("x", tag())`), an `if`/`while` CONDITION (`!checkRole(u, role())`), or a template INTERPOLATION (`` `Max-Age=${ttl()}` ``) was left bare, binding a pending Promise. Proven at runtime: the `==` is always false, an auth guard never denies (the adopter's patron page redirected away on every load), a cookie attribute became `[object Promise]` (silently downgrading a 7-day session cookie).
+- **Silent drop.** A multi-statement mount body whose first statement is a complete expression yielded a truncated single-expression node, and codegen emitted only statement 1 — every following statement vanished with zero diagnostics. Reproduces with no server call at all: the over-emit sweep found the flagship `examples/23-trucking-dispatch/.../load-detail.scrml` silently dropping `sendLocationPing()` on mount, and a samples dashboard dropping two loader calls.
+
+The mount-await injection was rebuilt as an **acorn AST walk** (`injectServerCallAwaitsViaAst`): the emitted mount body is valid JS, so it's parsed and walked to inject `await` only at server-fn call sites in genuinely await-legal positions — never inside a sync function/arrow/method/accessor body, a formal-parameter list, or a class-field/static-init context. This replaced a first-cut flat-text scanner after six S239 adversarial rounds each exposed another silent broken-bundle path (regex-literal injection, arrow-suppression leak, `function`-param-brace, operator-first ASI splits, param defaults, object/class methods) — conclusive evidence that flat text cannot model JS scopes. Over-emit: 66/68 corpus files byte-identical (the 2 changed are both correct statement-drop restorations).
+
+**E-EQ-001 diagnostic polish (PR #324) — the #274 residual.** The cross-type equality diagnostic (§45) named only the two primitive types (`cannot compare number with string`), sending an adopter bisecting to find which binding was inferred as which type and where. It now names each operand and its type origin: `` cannot compare `baseNum` (`number`, inferred from its initializer at line 3) with `label` (`string`, declared `: string` at line 4) using `==` ``. A literal operand degrades gracefully; the #274 Wall-1 per-function binding scoping is preserved. Message-only — E-EQ-001's reject behavior is unchanged.
+
+**Per-repo status line (PR #322).** A committed `.claude/statusline.mjs` (+ `settings.json`) — an orange bar (256-color 208) of the repo name · branch · model · context/5h/weekly gauges, overriding the global statusline for this repo only so a glance tells you which repository a terminal is in.
+
+- **Gaps:** filed `g-onmount-direct-reactive-server-write-unawaited-on-escape-hatch-string-path` (MED — a contrived fail-open on the degenerate spaced escape-hatch path + a note to harden #264's acorn-parse-failure fallback).
+- **Note:** the `e2e-render-map` full regenerator is broken on Windows (`HARNESS-ERROR ×449`); the one stale baseline message line was updated surgically.
+
 ## S304 — 2026-07-31 (Peter · Windows) — the #284 first-class-reference class closed end-to-end, and adopter #274 closed (both walls)
 
 Five reproduce-first codegen/gauntlet fixes, all cloud-gate + windows green. This closes two adopter fronts.
