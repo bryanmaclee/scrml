@@ -1,6 +1,6 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-07-31T03:18:23Z  commit: f96e6f30
+# updated: 2026-07-31T03:18:23Z  commit: fe14c9b2
 # NOTE (S302 pass): TARGETED — ONE new section (**§17.1.2 `if=` on the three structural elements**,
 # four prohibitions + the runtime mount contract) and four new Business Invariants. Nothing else
 # re-walked; the rest of this map carries its prior verification. The per-window "currency note"

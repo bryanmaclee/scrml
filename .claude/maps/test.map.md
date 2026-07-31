@@ -1,6 +1,6 @@
 # test.map.md
 # project: scrml
-# updated: 2026-07-31T03:18:23Z  commit: f96e6f30
+# updated: 2026-07-31T03:18:23Z  commit: fe14c9b2
 # NOTE (S302 pass): counts re-derived; the "new test files this window / prior window" inventories
 # (~80 lines re-telling `docs/changelog.md`) are DELETED. What replaces them is a section on the
 # gate hole this window found, and three new coverage-shape rules. A per-file inventory is what
@@ -17,7 +17,7 @@ E2E: Playwright (`@playwright/test`), separate config at e2e/playwright.config.t
 
 ## Test Categories (compiler/tests/, **1294** `*.test.js` total)
 
-Fresh recursive `git ls-files` recount at `f96e6f30`, all 9 categories individually re-verified;
+Fresh recursive `git ls-files` recount at `fe14c9b2`, all 9 categories individually re-verified;
 agrees with `docs/FACTS.md` (`test files | 1,294`). Net **+13** across this window, all additions.
 
 | Category | Glob | Count | **Which gate runs it** |
