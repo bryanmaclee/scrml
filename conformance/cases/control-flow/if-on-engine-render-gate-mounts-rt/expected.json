@@ -1,0 +1,19 @@
+{
+  "id": "control-flow-if-on-engine-render-gate-mounts-rt",
+  "description": "§17.1.2.1 — a false -> true `if=` flip on an `<engine>` renders the CURRENT variant, never `initial=`. Input order is load-bearing: #to-on transitions Off -> On WHILE the gate is false, then #reveal opens it. Because §17.1.2.1 withholds only the RENDERING, the engine really is at .On by the time it mounts, so #arm-on must be present and #arm-off absent. An implementation that gated the engine's construction — deferring it to first mount, or re-initialising on mount — would render the `initial=` arm here and fail on #arm-off, which is exactly the state-destroying reading §17.1.2.1 forbids. Companion to control-flow-if-on-engine-render-gate-absent-rt, which pins the same source with the reveal removed. Scope honesty: against the PRE-widening baseline (which ignored `if=` outright and therefore rendered everything) this case's DOM half is deliberately indistinguishable — `if=true` MUST look exactly like no `if=` at all, and that non-perturbation is itself the claim; the discrimination against that baseline is carried by the codes half (`E-DG-002` fired there, because the dependency graph never saw the predicate) and by the absent-rt companion.",
+  "language-version": "1.0",
+  "spec": "§17.1.2.1",
+  "rationale": "§17.1.2.1: transitions \"continue to occur, only their rendering is withheld\", and the boot-only opener `effect=` \"fires ONCE at module-init and is NOT re-fired when `expr` transitions false->true\". Both statements only hold if the engine's state at mount time is the state it transitioned to while hidden — i.e. the mount renders the current variant, not the `initial=` seed. §17.1's \"it does not exist in the DOM\" governs the withheld arm; §51.0.D governs which arm the dispatcher renders once the mount exists.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-DG-002"],
+    "input": [{ "click": "#to-on" }, { "click": "#reveal" }],
+    "state": { "mode": "On", "ticks": 1, "shown": true },
+    "domAnchored": [
+      { "selector": "#arm-on", "count": 1 },
+      { "selector": "#arm-off", "count": 0 },
+      { "selector": "[data-scrml-engine-mount]", "count": 1 },
+      { "selector": "#cell", "text": "Mode: On" }
+    ]
+  }
+}

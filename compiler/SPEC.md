@@ -10924,7 +10924,9 @@ The `if=` attribute is a structural boolean conditional.
 - When `expr` evaluates to false, the element is NOT rendered. It does not exist in the DOM.
 - `if=` is sugar over `${ if(expr) { lift <element>...</element> } }`.
 - `expr` SHALL be a condition expression (per Section 5 quoting rules). **A *bare unquoted* `if=` condition is atomic-only** (§5.2): an identifier reference (`@var` / `obj.prop`), a call (`fn()`), or a prefix-`!` negation. **An operator condition — any binary or ternary operator (`>= > < <= == != && || + - * /` or `?:`) — SHALL be parenthesized (`if=(@n >= 3)`) or quoted (`if="@n >= 3"`).** A bare operator in an unquoted `if=` is compile error `E-ATTR-UNQUOTED-OPERATOR` (§5.2, §34). The same atomic-only-when-bare rule applies to `show=` (§17.2) and `else-if=` (§17.1.1).
-- `if=expr` MAY appear on any HTML element or component. It SHALL NOT appear on a state object opener.
+- `if=expr` MAY appear on any HTML element, on a component, or on one of the three scrml-defined
+  structural elements enumerated in §17.1.2 (`<engine>`, `<match>`, `<each>`). It SHALL NOT appear
+  on a state object opener, nor on any other scrml-defined structural element (§17.1.2).
 
 **Worked example:**
 ```scrml
@@ -11188,6 +11190,113 @@ condition counts as a consumption. The compiler SHALL enforce that a `lin` varia
 condition is not referenced in any other branch (standard linear branching rule, §34.4).
 
 **Interaction with iteration (§17.4):** An `if=` chain MAY appear inside a `for` loop body.
+
+---
+
+### 17.1.2 `if=` on scrml-defined structural elements
+
+**Added 2026-07-30 (S302). AMENDMENT — this is a WIDENING, not a clarification.** Before this
+subsection, §17.1 admitted `if=` on "any HTML element or component" only. `<engine>` / `<match>` /
+`<each>` are scrml-defined structural elements (§4.15), so the attribute was *outside* the sanctioned
+surface — and the implementation neither honored nor rejected it: `if=` on those three generated **zero
+code**, silently. On `<engine>` the `initial=` arm therefore rendered unconditionally and stayed visible
+permanently. Ratified by the language owner on the consistency argument: a first-class,
+compiler-supported element that cannot take a directive every HTML element takes is the asymmetry that
+reads as toy-status, not as discipline.
+
+`if=` SHALL be honored on exactly three structural elements:
+
+| element | `if=` admitted | §17.1 semantics apply to |
+|---|---|---|
+| `<engine>` (§51.0) | YES | the engine's **mount subtree** (the rendered arm) |
+| `<match>` (§18.0.1) | YES | the dispatched arm output |
+| `<each>` (§17.7) | YES | the whole iterated list, including `<empty>` |
+
+**Every other scrml-defined structural element SHALL REJECT `if=`** — `<onTransition>`,
+`<onTimeout>`, `<onIdle>`, `<errors>`, `<channel>`, `<page>`. Those are declarations and lifecycle
+hooks, not rendered subtrees; a structural conditional on them has no defined meaning. The widening is
+exactly three elements wide and SHALL NOT be generalized to the registry.
+
+> **Enforcement status (measured S302, stated because the SHALL above is not yet uniformly enforced).**
+> `<page if=>` IS rejected (`E-PAGE-INVALID-ATTR`) — conformant. `<channel>` and `<errors>` emit only a
+> `W-ATTR-001` advisory and ignore the attribute; `<onTimeout>` and `<onIdle>` ignore it with **zero**
+> diagnostics. Those four are spec-ahead of enforcement; the diagnostic lands with the impl per the
+> named-codes-land-with-impl rule (§34). Tracked as
+> [[g-if-reject-unenforced-on-structural-declaration-elements]].
+>
+> **`<auth>` is deliberately NOT in the reject list.** It is a `kind:"markup"` node, takes the ordinary
+> markup `if=` path, and gates its subtree correctly today — verified by execution (a real
+> `scrml-if-marker` and `<template>` are emitted). Rejecting it would be a narrowing of working,
+> meaningful behaviour. NOTE the compiler nonetheless emits `W-ATTR-001` claiming `if=` *"is not
+> recognized on `<auth>`"* and *"has no compile-time effect"* — **that warning is false**; the gate IS
+> applied. A diagnostic contradicting the emit it describes is its own defect, tracked as
+> [[g-w-attr-001-false-on-auth-if-gate-is-applied]].
+
+#### 17.1.2.1 Render-gating, not lifecycle-gating (the load-bearing rule)
+
+**`if=` on these three gates the element's RENDERED OUTPUT. It does not gate the element's declaration,
+its state, or its lifecycle.** Concretely, for `<engine if=expr>`:
+
+- The engine's auto-declared variable (§51.0.C) is declared and readable **regardless** of `expr`.
+  Other code — including other files that mount the singleton via `<EngineName/>` (§51.0.D) — reads
+  `@<var>` unconditionally.
+- `rule=` contract enforcement (§51.0.F), `effect=` (§51.0.H), `<onTransition>` (§51.0.H),
+  `<onTimeout>` (§51.0.M) and `<onIdle>` (§51.0.R) remain **live** while `expr` is false. Transitions
+  continue to occur; only their rendering is withheld.
+- The boot-only opener `effect=` (§51.0.H Form 3) fires **once at module-init** as always, and is NOT
+  re-fired when `expr` transitions false→true.
+
+**Rationale, stated because the alternative is the tempting one.** Tying an engine's lifecycle to a
+render predicate would make `if=` a state-destroying operator and would break the §51.0.A singleton
+invariant — a cross-file `<EngineName/>` mount would observe a different engine depending on an
+unrelated page's conditional. The engine is the application's state; `if=` is a rendering directive.
+They compose; they do not nest.
+
+For `<each if=expr>`: the iterated collection is not read and no rows are reconciled while `expr` is
+false; the keyed reconciler state is rebuilt on re-entry. For `<match if=expr>`: no arm is dispatched.
+Neither carries independent state, so the render/lifecycle distinction is vacuous for them and is
+stated only for `<engine>`.
+
+#### 17.1.2.2 Composition
+
+- **`else` / `else-if=` (§17.1.1) and `show=` (§17.2) composition with these three is NOMINAL —
+  specified, NOT yet implemented.** Measured S302, identical before and after the `if=` widening, so
+  this is a pre-existing gap rather than a regression it introduced: an `else` sibling following a
+  gated structural element fires **`E-CTRL-001`** (the chain detector recognizes only `kind:"markup"`
+  nodes as chain members); `else-if=` and `show=` on a structural element are silently dropped. The
+  normative intent is that all three compose under the ordinary chain rules and that `show=` hides
+  while `if=` removes; the wiring is owed. Tracked as
+  [[g-structural-element-if-chain-and-show-composition-nominal]]. **Do not read this clause as
+  describing shipped behaviour.**
+- `if=` INSIDE a dispatched arm body (a `<match>` arm, an `<engine>` state-child) is a **separate and
+  REJECTED** surface — `E-IF-IN-DISPATCHED-ARM` fires, on markup and on all three structural elements
+  alike. This subsection widens `if=` ON the structural element, not inside its arms.
+
+#### 17.1.2.3 Position carve-out — NOT inside an `<each>` row template
+
+**`if=` on a structural element positioned INSIDE an `<each>` row template is NOT honored, and this
+subsection's SHALL does not reach there.** Stated as a carve-out rather than left implicit because the
+failure is silent and it fails in the DANGEROUS direction.
+
+Measured S302:
+
+| position | behaviour |
+|---|---|
+| structural element in ordinary markup | gated correctly, reactively — the §17.1.2 surface |
+| markup `if=` on the ROW-ROOT of an `<each>` row | gated correctly (`_scrml_ifrow_apply`) |
+| markup `if=` on a NON-ROOT element inside a row template | emits nothing — fails **CLOSED** (never renders) |
+| **structural `if=` inside a row template** | emits nothing — fails **OPEN** (**never gated**) |
+
+The last two rows are the point: markup and structural are **not** consistent here, they fail in
+opposite directions. A fail-CLOSED miss is loud — the author sees content missing immediately. A
+fail-OPEN miss silently ships content the author wrote a predicate to withhold, and is invisible during
+development whenever that predicate is usually true.
+
+This is an inherited limitation of §17.1's row-template lowering, not a defect introduced by the §17.1.2
+widening — a per-row mount capability for non-root hosts is the deferred `W-EACH-PERITEM-IF-*` family
+(§17.7). The durable fix is ONE diagnostic covering markup and structural positions together; until it
+lands, an author placing a conditional inside a row template gets no signal on either path. Tracked as
+[[g-structural-if-inside-each-row-template-fails-open]].
 
 ---
 

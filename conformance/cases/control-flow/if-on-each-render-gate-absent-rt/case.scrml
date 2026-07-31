@@ -1,0 +1,14 @@
+${
+    <items> = [{ id: 1, label: "one" }, { id: 2, label: "two" }]
+    <shown> = false
+    function clear() { @items = [] }
+}
+<button id="clear" onclick=clear()>Clear</>
+<ul id="list">
+    <each in=@items key=@.id as item if=@shown>
+        <li class="row">${item.label}</li>
+        <empty>
+            <li id="none">No items.</li>
+        </empty>
+    </each>
+</ul>

@@ -1432,11 +1432,29 @@ function _scrml_mount_template(markerId, templateId, scope) {
   const tpl = document.getElementById(templateId);
   if (!tpl || !(tpl.content instanceof DocumentFragment)) return null;
   const fragment = tpl.content.cloneNode(true);
-  // The mounted root is the first element child of the cloned fragment.
-  // The compile-time emitter is responsible for wrapping the if= element
-  // as the sole element child of the <template>.
-  const root = fragment.firstElementChild;
+  // The mounted root is normally the first (and only) element child of the
+  // cloned fragment — the shape an \`if=\` on an HTML element or a component
+  // produces.
+  //
+  // §17.1.2 RELAXATION. A gated \`<each>\` has no element to wrap: its mount is a
+  // COMMENT FENCE (\`<!--scrml-each:ID-->…<!--/scrml-each:ID-->\`), and an element
+  // wrapper is not available to it — \`<each>\` is legal directly inside \`<ul>\`,
+  // \`<tbody>\` and \`<select>\`, where a wrapper \`<div>\` is invalid HTML the parser
+  // would foster-parent out. So the contract widens from "exactly one element
+  // child" to "one or more top-level nodes": every top-level node of the clone is
+  // recorded on the returned handle as \`_scrml_if_range\`, and
+  // \`_scrml_unmount_scope\` removes the whole recorded range instead of a single
+  // element. For the single-element case the range is not recorded at all and
+  // behaviour is byte-identical to before.
+  const inserted = [];
+  for (let n = fragment.firstChild; n; n = n.nextSibling) inserted.push(n);
+  const root = fragment.firstElementChild || inserted[0] || null;
   marker.parentNode.insertBefore(fragment, marker);
+  // Record the range only when the handle alone does not describe the mount:
+  // a non-element handle never does, and neither does a multi-node clone.
+  if (root && (inserted.length > 1 || root.nodeType !== 1)) {
+    root._scrml_if_range = inserted;
+  }
   return root;
 }
 
@@ -1449,7 +1467,43 @@ function _scrml_mount_template(markerId, templateId, scope) {
  */
 function _scrml_unmount_scope(root, scopeId) {
   if (scopeId) _scrml_destroy_scope(scopeId);
-  if (root && root.parentNode) root.parentNode.removeChild(root);
+  if (!root) return;
+  // §17.1.2 — a multi-node / comment-fence mount (a gated \`<each>\`) records its
+  // inserted range on the handle. Removing only the handle would strand the rest.
+  //
+  // The range is removed as a LIVE SPAN — first recorded node through last
+  // recorded node, walking siblings AT REMOVAL TIME — not as the recorded node
+  // list. MEASURED, not theorised: a gated \`<each>\`'s recorded range is exactly
+  // its two fence comments, and the renderer inserts every row BETWEEN them
+  // AFTER the mount. Removing the recorded list alone left all rows (and the
+  // \`<empty>\` fallback) in the DOM, and four open/close cycles accumulated 12
+  // rows where 2 belong. The fences are by construction the first and last nodes
+  // of the mount, and the renderer only ever writes between them, so the span
+  // covers exactly this mount's output and nothing else.
+  const range = root._scrml_if_range;
+  if (range && range.length > 0) {
+    const first = range[0];
+    const last = range[range.length - 1];
+    const parent = first && first.parentNode;
+    if (parent) {
+      let n = first;
+      while (n) {
+        const next = (n === last) ? null : n.nextSibling;
+        parent.removeChild(n);
+        n = next;
+      }
+    }
+    // Anything that drifted out of the span (a node re-parented by adopter code)
+    // is still removed individually — the span walk is the common path, this is
+    // the backstop.
+    for (let i = 0; i < range.length; i++) {
+      const r = range[i];
+      if (r && r.parentNode) r.parentNode.removeChild(r);
+    }
+    root._scrml_if_range = null;
+    return;
+  }
+  if (root.parentNode) root.parentNode.removeChild(root);
 }
 
 /**
@@ -1547,14 +1601,48 @@ function _scrml_mount_wire(root, scopeId, rewire) {
   const prevScope = _scrml_active_mount_scope;
   _scrml_active_mount_scope = scopeId || null;
   try {
-    if (typeof rewire === "function") rewire(_scrml_self_scope(root));
-    if (typeof _scrml_remount_each === "function") _scrml_remount_each(root);
-    _scrml_remount_dispatch(root);
+    // §17.1.2 — a mount whose top level is not a single element (a gated
+    // \`<each>\`'s comment fence) is bound NODE BY NODE across its recorded range.
+    // Widening the scope to the shared parent instead would re-bind SIBLING
+    // wiring that was never unmounted, double-attaching handlers; and a
+    // TreeWalker rooted at a fence comment never returns that comment (a
+    // TreeWalker excludes its own root), so \`_scrml_remount_each\` cannot see a
+    // top-level fence at all. Hence the explicit per-node pass.
+    const nodes = root._scrml_if_range || [root];
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i];
+      if (!n) continue;
+      if (n.nodeType === 1) {
+        if (typeof rewire === "function") rewire(_scrml_self_scope(n));
+        if (typeof _scrml_remount_each === "function") _scrml_remount_each(n);
+        _scrml_remount_dispatch(n);
+      } else if (n.nodeType === 8) {
+        _scrml_remount_each_fence(n);
+      }
+    }
   } catch (e) {
     if (typeof console !== "undefined") console.error("scrml if= mount wiring error:", e);
   } finally {
     _scrml_active_mount_scope = prevScope;
   }
+}
+
+/**
+ * §17.1.2 — re-render the \`<each>\` a TOP-LEVEL fence comment anchors.
+ *
+ * \`_scrml_remount_each\` walks a subtree for fence anchors, which covers every
+ * fence NESTED inside a freshly mounted element. A gated \`<each>\` puts its start
+ * fence at the top level of the mounted range, where a subtree walk cannot reach
+ * it. Same registry (\`_scrml_each_renderers\`), same re-invocation contract, same
+ * idempotence — only the lookup differs.
+ */
+function _scrml_remount_each_fence(node) {
+  if (!node || node.nodeType !== 8) return;
+  const d = String(node.data || "").trim();
+  if (d.indexOf("scrml-each:") !== 0) return;
+  if (typeof _scrml_each_renderers === "undefined") return;
+  const fn = _scrml_each_renderers["each_" + d.slice("scrml-each:".length)];
+  if (typeof fn === "function") fn();
 }
 
 // ---------------------------------------------------------------------------

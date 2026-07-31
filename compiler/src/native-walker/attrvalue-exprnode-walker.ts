@@ -195,6 +195,20 @@ export function populateNativeAttrValueExprNodes(
       }
     }
 
+    // SPEC §17.1.2 — the `if=` render gate on `<engine>` / `<match>` / `<each>`.
+    // Those three carry NO `attrs` array (the block splitter raw-captures them
+    // and each builder rebuilds the opener from named fields), so the loop above
+    // reaches nothing on them and the predicate's `exprNode` stayed unset. That
+    // is the SAME class of gap this whole walker exists to close, one node family
+    // further in: without it the native pipeline hands codegen a gate condition
+    // with no parsed expression, so `if=@x.field` / `if=fn(.Variant)` fall back to
+    // the string path — and the within-node canary reports it as a MISSING-FIELD
+    // (`ifCond.exprNode`) plus an EXTRA-FIELD (`ifCond.sourceText`, which
+    // `populateAttrValueExprNode` normalises away).
+    if (cur.ifCond !== null && cur.ifCond !== undefined && typeof cur.ifCond === "object") {
+      populateAttrValueExprNode(cur.ifCond, fp, errs);
+    }
+
     // Descend every object/array field so nested children / body / lift-expr
     // markup subtrees are reached. The raw native-block escape hatches are NOT
     // descended (their PascalCase-`kind` blocks are the engine walker's source;

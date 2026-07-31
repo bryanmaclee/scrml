@@ -1,0 +1,23 @@
+{
+  "id": "control-flow-if-on-each-render-gate-unmounts-rt",
+  "description": "§17.1.2 — a gated `<each>` that HAS rendered must remove its ROWS, not merely its mount, when the condition goes false again. Four full reveal/hide cycles, terminating on hide: li.row must be 0. Terminating on hide is what makes this discriminating in a single end-of-run snapshot — a stranded-row implementation shows 2 after one cycle and 8 after four, and the pre-widening implementation (which ignored `if=` entirely) shows 2 throughout. This is the one place the §17.1 lowering needed widening: `<each>` mounts a COMMENT FENCE PAIR rather than an element (an element wrapper is invalid directly inside `<ul>`/`<tbody>`/`<select>`), and the renderer inserts rows BETWEEN those fences AFTER the mount, so an unmount that removes only the nodes recorded at mount time strands every row. Measured on this exact shape in real headless Chrome before the fix: 2 rows survived the first hide, and four cycles accumulated 12 rows where 2 belong.",
+  "language-version": "1.0",
+  "spec": "§17.1.2",
+  "rationale": "§17.1: \"When `expr` evaluates to false, the element is NOT rendered. It does not exist in the DOM.\" For `<each>` the rendered element IS the row set, and §17.1.2's table scopes the gate to \"the whole iterated list, including `<empty>`\". §17.1.2.1 states the re-entry contract — \"the keyed reconciler state is rebuilt on re-entry\" — which a surviving stale row set would violate by definition. §17.2's \"`show=` hides, `if=` removes\" rules out satisfying this by visibility.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-DG-002"],
+    "input": [
+      { "click": "#reveal" }, { "click": "#hide" },
+      { "click": "#reveal" }, { "click": "#hide" },
+      { "click": "#reveal" }, { "click": "#hide" },
+      { "click": "#reveal" }, { "click": "#hide" }
+    ],
+    "state": { "shown": false },
+    "domAnchored": [
+      { "selector": "#list li.row", "count": 0 },
+      { "selector": "#list li", "count": 0 },
+      { "selector": "#reveal", "count": 1 }
+    ]
+  }
+}

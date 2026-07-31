@@ -1,0 +1,21 @@
+${
+    type Mode:enum = { Off, On }
+    <shown> = false
+    <ticks> = 0
+    function toOn() { @mode = .On }
+    function reveal() { @shown = true }
+}
+<engine for=Mode initial=.Off if=@shown>
+    <Off rule=.On>
+        <onTransition to=.On>${ @ticks = @ticks + 1 }</>
+        <p id="arm-off">OFF</>
+    </>
+    <On rule=.Off>
+        <p id="arm-on">ON</>
+    </>
+</>
+<program>
+<button id="to-on" onclick=toOn()>On</>
+<button id="reveal" onclick=reveal()>Reveal</>
+<p id="cell">Mode: ${@mode}</>
+</program>

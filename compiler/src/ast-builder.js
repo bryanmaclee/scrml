@@ -2664,6 +2664,155 @@ function contextLabel(ctx) {
 // ---------------------------------------------------------------------------
 
 /**
+ * §17.1.2 — capture an `if=` predicate from a scrml-defined STRUCTURAL element
+ * opener (`<engine>` / `<match>` / `<each>`).
+ *
+ * WHY THIS EXISTS. Those three elements are not `kind: "markup"`. The block
+ * splitter raw-captures them and `buildBlock` reconstructs each one by regexing
+ * NAMED attributes out of the opener header (`for=`, `initial=`, `on=`, `in=`,
+ * `key=`, `as`, …). An attribute nobody regexes for is silently DISCARDED — the
+ * node has no `attrs` array to hold it. That is exactly what happened to `if=`:
+ * it parsed, vanished, and the compile stayed green while the element rendered
+ * unconditionally and permanently. §17.1.2 (S302) widens §17.1 to admit `if=` on
+ * these three, so the attribute now has to survive the opener parse.
+ *
+ * WHY IT RE-PARSES A SYNTHETIC OPENER. `if=`'s value grammar is §5.2's, shared
+ * with every HTML element: `@var` / `obj.prop` -> `variable-ref`, `fn()` ->
+ * `call-ref`, a parenthesized or quoted condition -> `expr` (with `refs` and an
+ * `exprNode`). Re-implementing that classification here would be a SECOND `if=`
+ * grammar — the precise defect #289 existed to remove. So the raw value is spliced
+ * into a synthetic one-attribute opener and pushed through the SAME
+ * `tokenizeAttributes` + `parseAttributes` pipeline a markup opener uses. The
+ * value object returned is byte-for-byte the shape `<div if=…>` produces, which is
+ * what lets codegen route all four hosts through one lowering.
+ *
+ * Token offsets are rebased so the synthetic `<x ` prefix (3 chars) lands the `if`
+ * token on its real absolute offset; a diagnostic raised on the condition therefore
+ * points into the real source, not into the synthetic string.
+ *
+ * @param {string} header — the opener text AFTER the tag keyword, trailing `/`/`>`
+ *   already stripped (i.e. exactly what each structural builder computes for its
+ *   own attribute regexes). The caller's opener-end finder has already excluded
+ *   everything past the opener's closing `>`.
+ * @param {number} absStart — absolute byte offset of `header[0]` in the file.
+ * @param {number} line — 1-based line of `header[0]`.
+ * @param {number} col — 1-based column of `header[0]`.
+ * @param {string} filePath
+ * @param {TABError[]} errors — real errors from the condition's own parse are
+ *   KEPT (an `E-ATTR-UNQUOTED-OPERATOR` on `if=@n >= 3` must still fire).
+ * @returns {{ raw: string, value: AttrValue, span: Span } | null}
+ */
+function captureStructuralIfAttr(header, absStart, line, col, filePath, errors) {
+  if (typeof header !== "string" || header.length === 0) return null;
+
+  // Mask `${…}` interpolation bodies and quoted strings before the NAME search,
+  // so the word `if` inside an engine opener's `effect=${ if (…) … }` body, or
+  // inside any attribute string, can never be mistaken for the opener's own
+  // `if=`. Mirrors the `serverFlagBare` scan's masking, and preserves length so
+  // every index computed on the mask is valid on the original.
+  const masked = header
+    .replace(/\$\{[\s\S]*?\}/g, (m) => " ".repeat(m.length))
+    .replace(/"[^"]*"/g, (m) => " ".repeat(m.length))
+    .replace(/'[^']*'/g, (m) => " ".repeat(m.length));
+
+  // Standalone-token `if=`. The leading `(^|\s)` is load-bearing: it keeps
+  // `else-if=` (§17.1.1) and any `…if=`-suffixed attribute out.
+  const nm = masked.match(/(^|\s)if\s*=/);
+  if (!nm) return null;
+  const nameStart = nm.index + nm[1].length;
+  let i = nm.index + nm[0].length;
+  while (i < header.length && /\s/.test(header[i])) i++;
+
+  // Depth-aware value capture, stopping at the next standalone attribute
+  // boundary (whitespace + ident + `=`). Same scanner shape as `<each>`'s
+  // `_captureAttrValue`. No `>` case is needed — `header` is already truncated
+  // at the opener's closing `>` by the caller's opener-end finder.
+  let depth = 0, parenDepth = 0, bracketDepth = 0;
+  let inDQ = false, inSQ = false;
+  let end = header.length;
+  for (let j = i; j < header.length; j++) {
+    const c = header[j];
+    if (inDQ) { if (c === '"') inDQ = false; else if (c === "\\") j++; continue; }
+    if (inSQ) { if (c === "'") inSQ = false; else if (c === "\\") j++; continue; }
+    if (c === '"') { inDQ = true; continue; }
+    if (c === "'") { inSQ = true; continue; }
+    if (c === "{") { depth++; continue; }
+    if (c === "}") { if (depth > 0) depth--; continue; }
+    if (c === "(") { parenDepth++; continue; }
+    if (c === ")") { if (parenDepth > 0) parenDepth--; continue; }
+    if (c === "[") { bracketDepth++; continue; }
+    if (c === "]") { if (bracketDepth > 0) bracketDepth--; continue; }
+    if (depth === 0 && parenDepth === 0 && bracketDepth === 0 && /\s/.test(c)) {
+      let k = j;
+      while (k < header.length && /\s/.test(header[k])) k++;
+      if (k < header.length && /[A-Za-z_$]/.test(header[k])) {
+        let l = k;
+        while (l < header.length && /[A-Za-z0-9_$:.-]/.test(header[l])) l++;
+        let m2 = l;
+        while (m2 < header.length && /\s/.test(header[m2])) m2++;
+        if (header[m2] === "=") { end = j; break; }
+      }
+    }
+  }
+  const raw = header.slice(i, end).trim();
+  if (raw === "") return null;
+
+  // Synthetic one-attribute opener. `<x ` is 3 chars, so rebasing the token
+  // stream by (absolute offset of `if`) - 3 puts both the attribute name and its
+  // value on their true file offsets.
+  const synthetic = `<x ${header.slice(nameStart, end)}>`;
+  const synthAbs = absStart + nameStart - 3;
+  // Line/col of `header[nameStart]`. The synthetic has no newlines before the
+  // attribute, so only the column needs the -3 rebase.
+  const before = header.slice(0, nameStart);
+  const nlCount = (before.match(/\n/g) || []).length;
+  const lastNl = before.lastIndexOf("\n");
+  const synthLine = line + nlCount;
+  const synthCol = (nlCount > 0 ? (nameStart - lastNl - 1) + 1 : col + nameStart) - 3;
+
+  let attrs = [];
+  try {
+    const toks = tokenizeAttributes(synthetic, synthAbs, synthLine, Math.max(1, synthCol), "markup");
+    attrs = parseAttributes(toks, filePath, Array.isArray(errors) ? errors : [], false, "x");
+  } catch (_e) {
+    return null;
+  }
+  const ifAttr = attrs.find((a) => a && a.name === "if");
+  if (!ifAttr || !ifAttr.value) return null;
+  return { raw, value: ifAttr.value, span: ifAttr.span };
+}
+
+/**
+ * §17.1.2 — locate a structural element's opener `header` slice inside its raw
+ * block and return the absolute (offset, line, col) of `header[0]`.
+ *
+ * Each structural builder derives `header` by trimming and slicing `block.raw`,
+ * which loses the offsets `captureStructuralIfAttr` needs to keep diagnostics
+ * anchored in real source. `indexOf` recovers them: `header` begins immediately
+ * after the tag keyword, so its first occurrence in the raw block IS its
+ * position. Falls back to the block's own span when the slice cannot be located
+ * (a caller that reshaped the header beyond a plain slice) — an approximate
+ * caret beats a thrown builder.
+ */
+function structuralHeaderAnchor(block, header) {
+  const raw = (block && typeof block.raw === "string") ? block.raw : "";
+  const span = (block && block.span) || {};
+  const start = typeof span.start === "number" ? span.start : 0;
+  const line = typeof span.line === "number" ? span.line : 1;
+  const col = typeof span.col === "number" ? span.col : 1;
+  const off = (header && raw) ? raw.indexOf(header) : -1;
+  if (off < 0) return { absStart: start, line, col };
+  const before = raw.slice(0, off);
+  const nl = (before.match(/\n/g) || []).length;
+  const lastNl = before.lastIndexOf("\n");
+  return {
+    absStart: start + off,
+    line: line + nl,
+    col: nl > 0 ? (off - lastNl) : col + off,
+  };
+}
+
+/**
  * Parse the attribute token stream produced by tokenizeAttributes() into
  * AttrNode[].
  *
@@ -14916,6 +15065,15 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         const M_IDENT = /[A-Za-z_$][A-Za-z0-9_$]*/;
         const forMatchAttr = header.match(new RegExp(`\\bfor\\s*=\\s*(${M_IDENT.source})\\b`));
 
+        // §17.1.2 — `if=` on the `<match>` opener gates the DISPATCHED ARM
+        // OUTPUT: while the condition is false no arm is dispatched at all.
+        // `<match>` carries no independent state, so render-gating and
+        // lifecycle-gating coincide here (§17.1.2.1).
+        const _matchIfAnchor = structuralHeaderAnchor(block, header);
+        const _matchIf = captureStructuralIfAttr(
+          header, _matchIfAnchor.absStart, _matchIfAnchor.line, _matchIfAnchor.col, filePath, errors,
+        );
+
         // `on=expr` capture: takes everything after `on=` up to the next
         // standalone attribute boundary OR end of header. Conservative —
         // full expression parsing defers to Phase 2 (routes through the
@@ -15113,6 +15271,9 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           armsRaw,       // raw body text — Phase 2's match-statechild-parser produces MatchArmEntry[]
           bodyChildren,  // Phase 3 — walkable arm-body AST mirroring block.children (additive; engine-decl precedent)
           armBodyChildren, // g-formfor-in-match-arm (S177) — walkable per-arm bodies for the expansion passes (undefined when no bare-body arms)
+          // §17.1.2 — `if=` render gate; ABSENT (not null) when there is no
+          // `if=`. See the `<each>` node's stamp for why omission, not null.
+          ...(_matchIf ? { ifRaw: _matchIf.raw, ifCond: _matchIf.value } : {}),
           span,
           openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
         };
@@ -15859,6 +16020,15 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         let ofExprRaw = _captureAttrValue(header, "of");
         let keyExprRaw = _captureAttrValue(header, "key");
 
+        // §17.1.2 — `if=` on the `<each>` opener gates the WHOLE iterated list,
+        // including the `<empty>` fallback. Captured through the shared markup
+        // attribute pipeline so the condition grammar is §5.2's, identical to
+        // `<div if=…>`. `null` when absent.
+        const _eachIfAnchor = structuralHeaderAnchor(block, header);
+        const _eachIf = captureStructuralIfAttr(
+          header, _eachIfAnchor.absStart, _eachIfAnchor.line, _eachIfAnchor.col, filePath, errors,
+        );
+
         // `as name` — whitespace-separated bareword (no `=` between `as`
         // and the variable name) per HU-1 Q6 canonical form
         // (`<each in=@items as item>`). Capture the next bareword
@@ -16071,6 +16241,24 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           templateChildren,  // bodyChildren minus the <empty> sub-element (the per-item template)
           emptyChild,        // the <empty> sub-element node, or null when absent
           bodyRaw,           // raw body text fallback (matches match-block.armsRaw shape)
+          // §17.1.2 — `if=` render gate. `ifRaw` is the verbatim condition source,
+          // `ifCond` the §5.2-parsed attribute VALUE (the same object
+          // `<div if=…>` produces). The precise diagnostic anchor is
+          // `ifCond.span`; no separate attribute-name span is stamped.
+          //
+          // ABSENT, not null, when the opener carries no `if=` — the three keys
+          // are omitted entirely. Deliberate, and NOT the null-when-absent shape
+          // the sibling opener fields use: the within-node parser-parity canary
+          // compares FIELD SETS, and a null-stamped key on every engine/match/each
+          // in the corpus shows up as a divergence on the ~2 nested-engine
+          // positions where live emits `text`/`comment` and native emits an
+          // `engine-decl`. Omitting keeps that pre-existing (already-allowlisted)
+          // divergence at its measured size instead of growing the allowlist to
+          // absorb a field neither side is actually disagreeing about. Precedent
+          // on this very node family: engine-decl's own `bodyChildren` is
+          // undefined-when-absent for the same reason. Every consumer tests
+          // truthiness, so absent and null are indistinguishable to them.
+          ...(_eachIf ? { ifRaw: _eachIf.raw, ifCond: _eachIf.value } : {}),
           span,
           openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
         };
@@ -16615,6 +16803,24 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // mis-matches (mirrors the `historyAttr` regex tightening landed
         // S70 post-A5-3-SHIP for the SPEC §51.0.N `.Variant.history` shape).
         const pinnedMatch = /(?:^|\s)pinned(?=\s|>|\/|$)/.test(header);
+        // §17.1.2 — `if=` on the `<engine>` opener gates the engine's MOUNT
+        // SUBTREE (the rendered arm) and NOTHING else. §17.1.2.1 is explicit
+        // that this is render-gating, not lifecycle-gating: the auto-declared
+        // engine variable (§51.0.C) is still declared and readable, `rule=`
+        // enforcement, `effect=`, `<onTransition>`, `<onTimeout>` and
+        // `<onIdle>` all stay live while the condition is false, and the
+        // boot-only opener `effect=` still fires once at module-init. Nothing
+        // downstream of this capture reads `ifCond` except the HTML emitter,
+        // which is what keeps the split honest — the JS substrate emitters
+        // never see it.
+        //
+        // The condition is captured from the masked header, so an `if (…)`
+        // written inside this engine's own `effect=${ … }` body cannot be
+        // mistaken for an opener `if=`.
+        const _engineIfAnchor = structuralHeaderAnchor(block, header);
+        const _engineIf = captureStructuralIfAttr(
+          header, _engineIfAnchor.absStart, _engineIfAnchor.line, _engineIfAnchor.col, filePath, errors,
+        );
         // §51.0.H Form 3 (S148, Insight 33 Fork C1) — `effect=${...}` on the
         // ENGINE OPENER (NOT a state-child): the boot-only init effect, the
         // effect of the implicit init→`initial=` transition (Elm init+Cmd).
@@ -17078,6 +17284,17 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // LEGACY-SYNTAX (SYM PASS 11/B15). `engineName` alone cannot discriminate
           // because the state-engine form back-fills an auto-derived engineName.
           hadNameAttr: nameMatch !== null,
+          // §17.1.2 — `if=` render gate on the engine's MOUNT SUBTREE. Read by
+          // exactly one consumer: `emit-html.ts`'s engine-decl branch, which
+          // wraps the mount slot in the §17.1 `<template>` + `scrml-if-marker`
+          // lowering. Deliberately NOT lifted onto `engineMeta`: the JS
+          // substrate emitters (transition table, `effect=`, `<onTransition>`,
+          // `<onTimeout>`, `<onIdle>`) must never be able to consult it, which
+          // is how §17.1.2.1's render-vs-lifecycle split is enforced
+          // structurally rather than by discipline.
+          // ABSENT (not null) when there is no `if=` — see the `<each>` node's
+          // stamp for the parser-parity reason.
+          ...(_engineIf ? { ifRaw: _engineIf.raw, ifCond: _engineIf.value } : {}),
           span,
         };
       }
@@ -17137,6 +17354,14 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // Bareword-ident regex — reused for `for=Type`.
         const M_IDENT = /[A-Za-z_$][A-Za-z0-9_$]*/;
         const forMatchAttr = header.match(new RegExp(`\\bfor\\s*=\\s*(${M_IDENT.source})\\b`));
+
+        // §17.1.2 — `if=` render gate. Mirrors the markup-context match-block
+        // branch above; BOTH constructors must carry the field, or the same
+        // source compiles differently depending on which one claimed it.
+        const _matchIfAnchor = structuralHeaderAnchor(block, header);
+        const _matchIf = captureStructuralIfAttr(
+          header, _matchIfAnchor.absStart, _matchIfAnchor.line, _matchIfAnchor.col, filePath, errors,
+        );
 
         // `on=expr` capture: takes everything after `on=` up to the next
         // standalone attribute boundary (whitespace + ident + `=`) OR the
@@ -17217,6 +17442,9 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           forType,       // bareword type name (REQUIRED per §18.0.1; SYM PASS validates)
           onExprRaw,     // raw text of on= attribute (Phase 2 parses via ExprNode pipeline)
           armsRaw,       // raw body text — Phase 2's match-statechild-parser produces MatchArmEntry[]
+          // §17.1.2 — `if=` render gate; ABSENT (not null) when there is no
+          // `if=`. See the `<each>` node's stamp for why omission, not null.
+          ...(_matchIf ? { ifRaw: _matchIf.raw, ifCond: _matchIf.value } : {}),
           span,
           openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
         };

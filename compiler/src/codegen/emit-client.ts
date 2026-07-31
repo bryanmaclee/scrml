@@ -1149,6 +1149,24 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
     }
   }
 
+  /**
+   * §17.1.2 — `ifmount` gate for the three scrml-defined structural elements.
+   *
+   * `<engine>` / `<match>` / `<each>` are not `kind:"markup"` and carry no
+   * `attrs` array, so the `if`/`else-if`/`else` attribute scan in the markup case
+   * cannot see their `if=`. Their condition lives on the node itself as `ifCond`
+   * (see ast-builder `captureStructuralIfAttr`). Without this gate the emitted
+   * mount controller calls `_scrml_find_if_marker` / `_scrml_mount_template`
+   * against a runtime that tree-shook the whole `ifmount` chunk away — a green,
+   * `node --check`-clean compile whose bundle dies at load. That failure class
+   * (Bug 57, GITI-036, 6nz Bug P, GH #234) is the highest-blast-radius defect in
+   * this compiler, which is why the POST-EMIT `_scrml_find_if_marker(` reference
+   * scan backs this up rather than replacing it.
+   */
+  function addIfMountChunkForStructural(node: any): void {
+    if ((node as any).ifCond) chunks.add("ifmount");
+  }
+
   function detectFromNode(node: any): void {
     const kind: string = node.kind ?? "";
 
@@ -1474,6 +1492,7 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
       case "each-block": {
         chunks.add("reconciliation"); // _scrml_reconcile_list + _scrml_lis
         chunks.add("deep_reactive");  // _scrml_effect_static dispatcher
+        addIfMountChunkForStructural(node);
         // The each-block node carries its walkable AST in bodyChildren /
         // templateChildren / emptyChild — NOT in `children`/`body` — so the
         // outer walkNodes/walkBody recursion does not descend into it. Recurse
@@ -1529,6 +1548,7 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
       // emission gate exactly.
       case "engine-decl": {
         chunks.add("engine");
+        addIfMountChunkForStructural(node);
         // C14: derived engine (non-legacy `<machine>` keyword) needs the
         // `derived` chunk. Mirror the gate used by
         // `isC14DerivedEngineDecl` (`derivedExpr != null` AND
@@ -1570,6 +1590,7 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
       // present (every non-empty each emits the `_scrml_reconcile_list` call +
       // the `_scrml_effect_static` registration), mirroring the each-block case.
       case "match-block": {
+        addIfMountChunkForStructural(node);
         const armsRaw = (node as any).armsRaw;
         if (typeof armsRaw === "string" && /<\s*each\b/.test(armsRaw)) {
           chunks.add("reconciliation"); // _scrml_reconcile_list + _scrml_remount_each + _scrml_each_renderers

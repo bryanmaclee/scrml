@@ -1,0 +1,21 @@
+{
+  "id": "control-flow-if-on-engine-render-gate-absent-rt",
+  "description": "§17.1.2 + §17.1.2.1 — `if=` on an `<engine>` gates its RENDERED OUTPUT and nothing else. `@shown` seeds false and nothing flips it, so neither variant arm may exist in the DOM: before this widening the attribute generated ZERO code, so the `initial=` arm rendered unconditionally and stayed visible PERMANENTLY on a clean exit-0 compile. The discriminating half is what happens WHILE the gate is false: clicking #to-on takes a real Off -> On transition, so the auto-declared engine cell must read On (§51.0.C — the declaration is not gated) and <onTransition to=.On> must have fired exactly once (§51.0.H — lifecycle is not gated), while #arm-off and #arm-on both stay at count 0. An implementation that gated the engine's LIFECYCLE instead of its RENDER passes the two count-0 assertions and fails both state assertions.",
+  "language-version": "1.0",
+  "spec": "§17.1.2.1",
+  "rationale": "§17.1.2 admits `if=` on `<engine>` and scopes §17.1 semantics to \"the engine's mount subtree (the rendered arm)\". §17.1 fixes what that means: \"When `expr` evaluates to false, the element is NOT rendered. It does not exist in the DOM.\" §17.1.2.1 then fixes what it does NOT mean: the auto-declared engine variable (§51.0.C) \"is declared and readable REGARDLESS of `expr`\", and `rule=` enforcement, `effect=`, `<onTransition>`, `<onTimeout>` and `<onIdle>` \"remain LIVE while `expr` is false — transitions continue to occur, only their rendering is withheld\". The stated reason is that tying an engine's lifecycle to a render predicate would make `if=` state-destroying and break the §51.0.A singleton invariant, since a cross-file `<EngineName/>` mount (§51.0.D) would observe a different engine depending on an unrelated page's conditional.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-DG-002"],
+    "input": [{ "click": "#to-on" }],
+    "state": { "mode": "On", "ticks": 1, "shown": false },
+    "domAnchored": [
+      { "selector": "#arm-off", "count": 0 },
+      { "selector": "#arm-on", "count": 0 },
+      { "selector": "[data-scrml-engine-mount]", "count": 0 },
+      { "selector": "#to-on", "count": 1 },
+      { "selector": "#cell", "text": "Mode: On" },
+      { "selector": "#ticks", "text": "Ticks: 1" }
+    ]
+  }
+}
