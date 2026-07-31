@@ -1,4 +1,136 @@
 <!-- ============================================================= -->
+<!-- S305 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-31.        -->
+<!-- S302 + S303-Peter + S301 + all prior UNCHANGED below.          -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 305 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-07-31. `/boot` Profile A. **9 PRs merged** (#310 #311 #314 #315 #316 #317 #318 #319
+#320). `main` at the #320 merge. Conformance **769 → 843**. Mechanical stream = delta-log
+**[973]–[994]**; this carries the irreducible.
+
+> **⚠️ CONCURRENCY — S304-Peter was live at boot and wrapped mid-session.** He merged #307, #309,
+> #312, #313 (closing adopter **#274, both walls**). Every one of my landings after his rebased over
+> him. One known-gaps conflict, resolved by regeneration + verified BY CONTENT (both sides intact).
+
+## 🔴 THE NEXT PA'S FIRST MOVE
+
+**The `<machine>` retirement IMPLEMENTATION arc.** The SPEC amendment landed (#320); the impl did not,
+deliberately — Rule 4 keeps the §34 rows with their implementation. That arc must land, in ONE unit:
+
+1. Remove the `<machine>` keyword; `E-DEPRECATED-001` fires; **free the word `machine`**.
+2. **Re-base** §51.11 `audit` + §51.13 property-tests onto `<engine>` (bryan RULED re-base, not retire).
+   §51.14 replay **already works on engine cells** — verified by execution, no work needed.
+3. Retire the legacy-only diagnostics **and their ~20 conformance cases**: `E-ENGINE-003` `-005`
+   `-013` `-015` `-016` `-017` `-018` + the three `E-REPLAY-*`.
+4. **`E-ENGINE-004` and `E-ENGINE-010` SURVIVE** — they fire from a type-level `transitions {}` block
+   (§51.2), which is not the keyword. Do not retire their cases.
+
+Gap: `g-machine-keyword-retirement-carries-three-subsystems` (open, carries the full scope).
+
+## 🎯 THE HEADLINE — the freeze campaign stopped being an authoring backlog
+
+Campaign **133 → 170 of 196** tier-1 codes pinned; open **57 → 23**. But the number that matters is the
+SHAPE of what remains, and it is no longer volume:
+
+- **~5 are RETIRED** and only need striking from the lists (#311).
+- **~7 are BLOCKED/parked** — `E-ENGINE-001` · `E-MW-006` · `E-FN-007` · `E-STATE-COMPLETE` ·
+  `E-TILDE-001/002` · `E-TYPE-042`.
+- **~6 carry recorded searches** needing one focused probe each.
+- **~5 need real construction** — the two multibatch `E-CPS-*` + ss66's SQL/schema four.
+
+**So the remaining freeze work is dispositions and two hard reachability constructions, not authoring.**
+Do not re-derive this; it is banked in `spa-lists/CAMPAIGN-tier1-freeze.md`.
+
+## 🧭 FINDINGS THAT OUTLAST THE FIXES
+
+1. **A green 28k-test suite was structurally blind to three separate dead/holed diagnostics**, each
+   found the same way — by trying to make the code fire and failing. `E-ENGINE-001` (a legacy
+   `<machine>` illegal transition is unguarded in BOTH directions — no compile code, no runtime `-RT`,
+   the transitions table emitted DEAD, both §51.5 SHALLs violated). `E-MW-006` (structurally dead —
+   and the flag it keys on also gates emit-server/emit-functions/RI, so a nested `handle()` is
+   **silently never woven as middleware**). `E-TYPE-042` (an unreachable duplicate of `E-EQ-002`).
+   In all three, every existing test hand-builds the input and calls the emitter directly — the
+   pa-base §8 synthesized-input class, three times in one session.
+2. **Two probe patterns that silently conflate opposite dispositions.** (a) A retired §34 row is
+   `| ~~CODE~~ |`, so a probe matching `^| CODE |` returns NO-ROW — the identical answer it gives for
+   a genuinely UNCATALOGUED code; that inflated the freeze denominator by 5. (b) `grep "\"CODE\""`
+   misses single-quoted pushes; it reported ZERO push sites for three LIVE `E-MW` codes and I was one
+   step from filing "three dead codes." **A census returning zero needs a second pattern before the
+   zero is believed.**
+3. **The unlock for the hardest cluster was a diagnostic, not a better guess.** Nothing in the
+   `E-CPS-*` family fires unless a function is CPS-eligible, and `compileScrml({verbose:true})` prints
+   `[MC] N CPS function(s) classified` — which names WHICH of three preconditions you are failing
+   instead of leaving an empty code-set to interpret.
+4. **Rule 4 applies to memory as much as to a derived doc.** I nearly filed `E-EQ-002`'s `is not not`
+   hint as "not scrml" on a memory-corroborated instinct; SPEC:24260 normatively specifies the form.
+   The governing-sentence check refuted my own claim.
+5. **The `<machine>` ruling was made on MY incomplete briefing.** I called it "the deprecated
+   predecessor to `<engine>`"; SPEC:18839 says it carries replay + audit + property-tests. I filed the
+   correction rather than writing "removed" into normative text with two subsystem dispositions
+   unverified — the §1 gate binds the PA when AUTHORING, not only when consuming (the S302 lesson).
+
+## ⚠️ OWN MISSES — recorded, not smoothed
+
+- **Mis-briefed bryan on `<machine>`**, and he ruled on it (finding 5). Corrected before any SPEC text.
+- **Nearly filed a phantom "three dead codes"** off a double-quote-only census (finding 2b).
+- **Nearly filed `E-EQ-002`'s hint as invalid** — SPEC refuted it (finding 4).
+- **Claimed "zero corpus `< machine>`" from a pattern that would have missed the canonical spaced form.**
+  Re-verified with a space-tolerant pattern: the conclusion held, the method did not.
+- **Lost a commit message to zsh** evaluating backticks out of a `-m` string — the documented reason
+  `-F` is the rule. Re-authored.
+- **A commit "timed out" and had landed** — verify git STATE, not the exit code. Recurring.
+- **CWD slipped into `scrml-support`** twice after sibling-repo work; caught before any main-side write.
+
+## ✅ RULINGS DELIVERED (mine — do not re-litigate)
+
+`E-TYPE-042` **RETIRE** (zero surviving unique trigger; `=== not` is E-EQ-004's, measured) ·
+`E-SERVER-FN-IN-SYNC-CALLBACK` **CATALOGUE + PIN** (live, verified; was uncatalogued while its sibling
+named it in prose) · `E-MW-006` fix direction **(b)** re-derive the §39.3.2 shape rather than trust a
+flag it does not own (option (a) would change what four consumers see) · `E-EQ-001`+`E-EQ-002` **ONE
+arc** (same file, same golden baseline regen) · `E-BPP-001` **KEEP** (liveness re-verified; S297's
+withdrawal was correct).
+
+## 🧷 STATE / OPEN
+
+- **Adopter issues 3 → 2.** #274 CLOSED by Peter (both walls). Open: **#264** (Peter), **#228** (held).
+  **#274's Q2/Q3 were never answered to the adopter** — the answer is banked below; worth a closing
+  comment.
+- **Gate: GREEN.** Cloud `gate` passed on **all 9 PRs**; `main` push runs no CI on docs/SPEC-only
+  commits by design (S300 [923]), so the per-PR gate IS the record. Local, verified by TIER rather
+  than by count-match (the S301 lesson): **gated subset (unit+integration+conformance) 21,832 pass /
+  0 fail** · **browser 48 fail** = the documented ~50 baseline (S303 [952]) · **root-level 0 fail** —
+  the #304 gate is holding. Full `bun run test` 29,453 pass / 49 fail, all 49 outside the gated tier.
+  Conformance **843/843**.
+- **Gaps HIGH 22 · MED 101 · LOW 42 · Nominal 7.** 10 filed this session.
+- **⛔ Owed by bryan (1 + 1 standing):** the **`ai-review` secret** (still red on every code PR;
+  root-caused by Peter to `ANTHROPIC_API_KEY` / org access — an advisory reviewer has been dead for
+  days). Plus: whether to fix `g-legacy-machine-transition-guard-never-emitted` is now **MOOT** — the
+  surface is being removed.
+- **#274 Q2/Q3 ANSWERED (banked):** annotate the **binding**, not the return — `let b: string =
+  helper(x)` is honored (clean when right, `E-EQ-001` when wrong; both measured). `asIs` is the
+  sanctioned escape hatch (§14.1.1 verbatim; `E-TYPE-ANY-FORBIDDEN` already points there) and degrades
+  to `W-EQ-001` — loud and greppable, which is the whole difference from `any`. **But for #274 it
+  would have been a placebo:** the false-fire was the flat cross-function binding map (Peter's #312),
+  not the helper's type, and the shape now compiles clean with NO annotation.
+- **Worktrees: 14, none mine** (I created zero — PA-direct all session). 9 persistent `scrml-spa-ss*`
+  lineups + 3 S297-retained `agent-*` + `s251`. All CLEAN (0 uncommitted, dry-run verified). The three
+  `agent-*` are 8 sessions stale and are dead weight per pa-base §7, but I did not create them and
+  deletion is irreversible — **left for their owner, surfaced here with the measurement.**
+- **Maps UNCHANGED, legitimately** — every one of my 9 landings is `src-files=0` (verified per-commit).
+  Watermark stays `fe14c9b2`.
+- **Contract:** `pa-base v2.8 → v2.9` — the locus requirement now demands a MACHINE-READABLE field
+  (bryan-confirmed). giti's vendored copy is now **six** versions behind.
+
+## Tags
+#session-305-bryan #freeze-campaign-133-to-170 #machine-keyword-retired-1.0 #re-base-not-retire
+#three-dead-diagnostics-past-a-green-suite #retired-vs-uncatalogued-probe-trap #census-zero-needs-a-second-pattern
+#cps-verbose-MC-line-is-the-unlock #rule4-applies-to-memory #pa-base-v2.9-machine-readable-locus
+
+---
+
+<!-- ============================================================= -->
 <!-- S304 WRAP (Peter/Windows) — prepended 2026-07-31.              -->
 <!-- Continuation of S303 (same boot). bryan's S302 + all prior     -->
 <!-- UNCHANGED below. Disambiguate by NAME.                         -->
