@@ -18927,7 +18927,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | W-TAILWIND-UNRECOGNIZED-CLASS | §26.5, §34 | A class-name token inside a `class="..."` attribute does NOT resolve via the embedded Tailwind utility registry. The class produces no CSS. Three legitimate causes: (a) the class is misspelled (`flexx` vs `flex`); (b) the class is a Tailwind arbitrary-value class whose particular utility prefix is not yet supported by the embedded engine (`grid-cols-[auto_1fr_auto]`); (c) the class is a custom user-defined CSS class declared elsewhere (acknowledged false-positive at floor level). Workaround for arbitrary-value classes: drop a `#{}` CSS shim block. **FLOOR fix** (S108 dogfood Bug 1) — emits the lint so adopters surface compile-time friction instead of silent runtime layout breakage; the full fix (actually emitting CSS for arbitrary-value classes plus a safelist mechanism to distinguish custom user classes from misspellings) is deferred. **Fires:** emitted by the lint pre-pass at `compiler/src/tailwind-classes.js` (`findUnrecognizedClasses`) wired through `compiler/src/api.js` ahead of Stage 2 (BS). Suppress per-project via `compilerSettings.lintTailwindUnrecognizedClass = "off"` (cross-ref §28). | Info |
 | W-CASE-001 | §15.15.4 | A user-declared state-type or component name is lowercase and shadows a built-in HTML element name. Resolution still succeeds (the user declaration takes precedence). Phase P1 of state-as-primary unification (2026-04-30). **Fires (P1.E):** emitted by NR (Stage 3.05) — see `compiler/src/name-resolver.ts`. | Warning |
 | W-WHITESPACE-001 | §15.15.5 | A `< identifier>` opener uses whitespace between `<` and the identifier. The canonical form is no-space (`<identifier>`); the with-space form is deprecated and becomes E-WHITESPACE-001 only at a future MAJOR language-version event (unscheduled per §63.7). Migration via `scrml-migrate`. Phase P1 of state-as-primary unification (2026-04-30). **Fires (P1.E):** emitted by NR (Stage 3.05) — see `compiler/src/name-resolver.ts`. | Warning |
-| W-DEPRECATED-001 | §51.3.2 | The `<machine>` keyword is deprecated; use the canonical `<engine>` keyword. Both forms continue to compile in P1; `<machine>` becomes E-DEPRECATED-001 only at a future MAJOR language-version event (unscheduled per §63.7). Phase P1 of state-as-primary unification (2026-04-30). **Fires (P1):** emitted by TAB (`compiler/src/ast-builder.js` engine-decl path) — the keyword distinction is decided at TAB time, NR is not required for this diagnostic. | Warning |
+| W-DEPRECATED-001 | §51.3.2 | The `<machine>` keyword is deprecated; use the canonical `<engine>` keyword. **`<machine>` is REMOVED BEFORE 1.0 (2026-07-31 ruling, §63.7) — `E-DEPRECATED-001` fires at 1.0, and the word `machine` returns to authors as an ordinary identifier.** This is not a §63.3(2) MAJOR-boundary removal: the keyword has never been in a released contract (§62.2), the codemod is verified-landed (`scrml migrate`), and corpus migration is measured zero. The three subsystems it fronted (§51.14 replay — already engine-compatible, verified; §51.11 audit; §51.13 property-tests) RE-BASE onto `<engine>` rather than retiring with it. Both forms still compile until that arc lands. Phase P1 of state-as-primary unification (2026-04-30). **Fires (P1):** emitted by TAB (`compiler/src/ast-builder.js` engine-decl path) — the keyword distinction is decided at TAB time, NR is not required for this diagnostic. | Warning |
 | W-DEPRECATED-SERVER-MODIFIER | §12.2, §52.10 | The `server` modifier on a function declaration (`server function name() { ... }`) is redundant — the function body's escalation triggers (§12.2 T1/T2/T3/T7) and/or the reserved-name `handle()` recognition (T8) and/or caller-context propagation (T5) already classify the function as server-side. The keyword is deprecated as of v0.next per Insight 26 (2026-05-08); remove from new code. The keyword fires this warning ONLY when at least one other trigger would escalate the function regardless. The keyword on its own (no other trigger, no caller-context evidence) does NOT fire this warning during the deprecation window — that case preserves in-progress development. **Fires:** emitted by RI (`compiler/src/route-inference.ts` Step 5d, D5) for any explicitly-`server`-annotated function whose escalation reasons include at least one non-explicit-annotation entry (T1/T2/T3 body content, T7 channel-cell-write/broadcast, or T8 the reserved `handle()` name — added 2026-06-10, change-id `server-keyword-eliminate-2026-06-10` D2), OR whose call-graph caller set is non-empty and consists entirely of server-classified callers. The `<var server>` cell-authority attribute (§52.4, §6.1.5) is NOT affected. | Warning |
 | E-DEPRECATED-SERVER-MODIFIER | §12.2, §52.10 | The `server` modifier on a function declaration is removed. Use a plain `function` declaration; route inference (§12.2) will classify the function based on its body content and call graph. Deprecation cycle endpoint: this code activates after the W-DEPRECATED-SERVER-MODIFIER deprecation window, when the parser stops accepting `server function` syntax. Mirrors the `<machine>` → `<engine>` deprecation cycle (W-DEPRECATED-001 → E-DEPRECATED-001). | Error |
 | W-DEAD-FUNCTION | §12.2 | A function is declared but called from neither a server-classified context nor a client-classified context, is not exported, is not server-annotated, and is not referenced from markup. The function will be tree-shaken from the output. Remove the declaration if intended dead, or wire it up to a caller. RI does not yet track all markup reference patterns; if the diagnostic is a false positive, exporting the function or adding an explicit caller suppresses it. **Fires:** emitted by RI (`compiler/src/route-inference.ts` Step 5d, D4) at the function's declaration site. Added 2026-05-08 (Insight 26 Batch 1) as the in-vacuum complement to caller-context propagation (Trigger 5). | Warning |
@@ -28404,7 +28404,31 @@ type-level blocks, audit clause, temporal transitions, replay primitive, three-s
 cross-check) remains authoritative for those topics. Where §51.0 (this section) and
 the legacy content disagree on surface syntax, §51.0 is authoritative for new code:
 
-- **`<engine>` is canonical.** `<machine>` is deprecated; emits `W-DEPRECATED-001` (§34).
+> **⚑ `<machine>` IS REMOVED BEFORE 1.0 (2026-07-31 ruling; §63.7).** The keyword does not
+> ship in language-1.0 and the word `machine` returns to authors as an ordinary identifier.
+> The three subsystems the keyword has been the entry point for are **RE-BASED onto
+> `<engine>`, not retired with it** (ruling: re-base):
+>
+> - **§51.14 replay** — already works. `replay(@target, @log)` against an `<engine>`-declared
+>   cell resolves and compiles clean; the target check admits an engine's auto-declared cell,
+>   so replay was never keyword-bound. Verified by execution 2026-07-31. §51.14's prose is
+>   re-based: read "machine-bound reactive" as "a reactive governed by an `<engine>` (or, until
+>   the keyword is gone, a legacy `<machine>`)".
+> - **§51.11 `audit @varName`** — re-based onto the `<engine>` body. The clause is read from the
+>   declaration's rules body, which an engine declaration also carries.
+> - **§51.13 auto-generated property tests** — re-based onto `<engine>`; the transition table
+>   the generator consumes is the engine's, and `--emit-machine-tests` keeps its name only as a
+>   CLI spelling.
+>
+> **Nominal (spec-ahead, Rule 4):** the keyword's REMOVAL and the two re-basings above land WITH
+> their implementation; `E-DEPRECATED-001` and the retirement of the legacy-only diagnostics
+> (`E-ENGINE-003` / `-005` / `-013` / `-015` / `-016` / `-017` / `-018`, whose triggers are the
+> `< machine>` DECLARATION surface) land in that same arc. **`E-ENGINE-004` and `E-ENGINE-010`
+> are NOT in that set** — they fire from a type-level `transitions {}` block (§51.2), which is
+> not the keyword and survives it. Until the arc lands, both keywords compile as described below.
+
+- **`<engine>` is canonical.** `<machine>` is deprecated and REMOVED BEFORE 1.0 (above); emits
+  `W-DEPRECATED-001` (§34).
   Both keywords compile today; `W-DEPRECATED-001` is reserved to promote to
   `E-DEPRECATED-001` only at a future MAJOR language-version event (unscheduled per §63.7).
 - **`rule=` on state-children is the v0.next surface for transitions.** The legacy
@@ -36079,10 +36103,23 @@ deliberate version-event, never pre-armed at 1.0.
 
 Applying the machine to the existing corpus:
 
-- **The three floating-scheduled forms** — `W-DEPRECATED-001` (`<machine>` → `<engine>`,
-  §51.3.2), `W-WHITESPACE-001` (`< id>` → `<id>`, §15.15.5), `W-CPS-NEEDS-FAILABLE`
-  (§19.9.5) — are reclassified **SOFT-DEPRECATED, unscheduled.** Their dead pre-1.0 labels
-  ("in P3", "v0.next+1 = v0.3.0") are struck; their reserved-Es remain named, unfired.
+- **`W-DEPRECATED-001` (`<machine>` → `<engine>`, §51.3.2) — REMOVED BEFORE 1.0 (2026-07-31
+  ruling).** The `<machine>` keyword does NOT ship in language-1.0; the word `machine` is
+  released back to authors as an ordinary identifier. **This is not a Stage-3 removal and
+  §63.3(2) ("remove only at a MAJOR") does not bind it.** That rule protects authors of a
+  RELEASED contract, and per §62.2 the conformance corpus IS the versioned contract with 1.0
+  as its first version — `<machine>` has never been in a released language version, so
+  striking it is not *removing a form from the language*, it is *deciding what 1.0 contains*.
+  Carrying a form nobody may yet depend on into a permanent freeze, and reserving a common
+  word for it forever, is the cost the permanent-soft posture was never meant to impose.
+  §63.4's hard gate is satisfied independently: the `<machine>` → `<engine>` codemod is
+  **verified-landed** (`scrml migrate` rewrites the opener in one pass; verified by execution
+  2026-07-31). Corpus migration is **measured zero** — no `.scrml` under `samples/`,
+  `examples/`, `stdlib/` or `docs/` declares one. `E-DEPRECATED-001` fires at 1.0.
+- **The two remaining floating-scheduled forms** — `W-WHITESPACE-001` (`< id>` → `<id>`,
+  §15.15.5) and `W-CPS-NEEDS-FAILABLE` (§19.9.5) — are reclassified **SOFT-DEPRECATED,
+  unscheduled.** Their dead pre-1.0 labels ("in P3", "v0.next+1 = v0.3.0") are struck; their
+  reserved-Es remain named, unfired.
 - **`W-DEPRECATED-SERVER-MODIFIER` (`g-server-keyword-drift`) + `W-STATE-BLOCK-BARE-WRITE-DECL`:**
   SOFT, **gate-blocked** (no verified-landed codemod → cannot schedule, §63.4).
 - **The arrow/placement/const-@/pure family** (`W-LIFECYCLE-LEGACY-ARROW`,
