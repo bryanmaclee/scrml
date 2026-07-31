@@ -1,4 +1,52 @@
 <!-- ============================================================= -->
+<!-- S304 WRAP (Peter/Windows) — prepended 2026-07-31.              -->
+<!-- Continuation of S303 (same boot). bryan's S302 + all prior     -->
+<!-- UNCHANGED below. Disambiguate by NAME.                         -->
+<!-- ============================================================= -->
+
+# scrml — Session 304 (Peter · Windows) — WRAP
+
+**Date:** 2026-07-31 (continuation of the S303 boot). `main` at **`6b773833`**. Delta-log **[954]–[980]** (my entries; interleaved with bryan's on the shared stream). **5 code PRs merged, all cloud-gate + windows GREEN, each reproduce-first → root-cause → adversarial-verify → land:** #303 #305 #307 #309 #312.
+
+## 🎯 THE HEADLINE — two adopter fronts fully closed
+
+1. **The #284 first-class-reference class is CLOSED END-TO-END** — direct · **alias** · **dispatch**, across **await · emission · placement**. Three PRs: #303 (alias peer in a `?{}`/template interp — await + emission), #305 (dispatch `t[k]()` peer — await + emission at `emitCall`), #307 (dispatch **plain-helper** *placement* — route-inference escalation, over-escalation **measured zero** on the flagship corpus, byte-identical emit).
+2. **Adopter GH #274 CLOSED — both walls.** #309 (Wall-2): a bare SQL-init reassignment to an existing `let` (`let w=0; w=?{...}`) emitted a duplicate `const w` → E-CODEGEN-INVALID-LOGIC; reduced from the adopter's "two-const+guard-return" framing to a one-liner. #312 (Wall-1): **a `verify-the-bug-class` win** — the reported cause (*"whole-program infers `baseNum` as number; `:string` annotation ignored"*) was **mechanically impossible** (the eq-check types operands ONLY from literal-init/annotation, NEVER calls — proven). The real bug: `collectBindings` used ONE flat name→type map file-wide, so a numeric `let h=0` in one fn retyped a string `let h=""` in another (last-writer-wins) → false E-EQ-001. The adopter had diagnosed it himself (the `monoIdx` unique-name workaround). Fixed with per-function scoped bindings.
+
+## 🔴 THE NEXT PA'S PICKUP (Peter-lane)
+
+1. **#264** — on-mount server-fn in ARGUMENT position not awaited + an earlier server-call statement silently dropped (§13.2 data-loss). emit-server; bryan handed me `emit-server.ts` wholesale for this lane.
+2. **Braceless `for/lift` reject-diagnostic** — bryan RULED reject; "the build is yours." formB emits `for(const it of of)` (node-check-valid, dies at eval). Emit the diagnostic + repro matrix.
+3. **#274 Wall-2/Wall-1 residual polish (optional):** the E-EQ-001 diagnostic could name WHICH operand is the number + its declaration site (so a future adopter isn't sent on a 15-cycle bisect). Safe, deferred — I proposed it and Peter chose "pin the real bug first" (now done).
+
+## 🧭 FINDINGS THAT OUTLAST
+
+- **`verify-the-bug-class` extends to a reporter's CAUSAL model, not just their repro.** #274 Wall-1's stated mechanism was impossible to produce (the eq-check can't type a call); chasing `baseNum` would have chased a ghost. Proving the mechanism (`let n=0; n!=""` fires; `base(x)!=""` does not) found the real cross-function-unification bug. [[feedback-verify-the-bug-class-not-just-reported-instance]].
+- **Codegen-PR gate flow (cost a cycle each time until internalized):** a `compiler/src` change shifts FACTS.md's LOC → run BOTH `facts.ts --write` AND `state.ts --write`; a docs-only follow-up push does NOT re-trigger the `push` gate (`on.push` paths-ignore) → squash the regen INTO the code commit. ALSO: the FACTS **test-file count** is transient-sensitive — regen on a CLEAN tree (a stray `_tmp*/_repro*` under `compiler/tests` inflates it). [[scrml-codegen-pr-gate-flow-facts-and-paths-ignore]].
+- **Route-inference changes MUST measure over-escalation** (S299 D4/W-DEAD). #307 did it right: flagship `examples/23-trucking-dispatch` server emit byte-identical main-vs-branch (380 fns, same hash); corpus dispatch-absent; `inverseCallerMap` untouched.
+- **Rebase-race with a concurrently-active bryan is normal at land-time.** Every PR this session rebased 1–3× (delta-log only, renumber my entry after his max); `--auto` squash-merge wins once gate+windows pass and the branch is up-to-date.
+
+## ⚠️ OWN MISSES — recorded, not smoothed
+
+- **The #274 Wall-2 fix briefly landed as a commit on LOCAL main** (forgot to branch first). Caught before anything reached origin/main; moved to a feature branch, reset local main, went through PR #309 normally. Origin was never dirty — but the guard (branch BEFORE editing) failed.
+- **The alias-interp gap was mischaracterized THREE times** before I ran it (v1 "pre-existing", v2 "fail-open SQL-only, template fine", v3-correct only after execution). Emit-shape inspection is not verification — RUN every consuming position. (Now a landed lesson.)
+
+## ✅ GATE / HOUSEKEEPING
+
+- **Landed (all gate+windows GREEN):** #303 #305 #307 #309 #312. Gaps: `g-sql-param-interpolation-peer-call-not-awaited` (alias) · `g-dispatch-table-call-not-awaited-or-emitted` · `g-dispatch-table-plain-helper-member-not-server-placed` · `g-274-wall2-…` · `g-274-wall1-…` → ALL RESOLVED. FACTS + gap-counts regen'd each PR (`--check` green ⟹ merged).
+- **#274 CLOSED on GitHub** (Wall-1 comment + Wall-2 comment posted; issue auto-closed on #312 merge).
+- **Worktrees:** clean (main + persistent `scrml-pinned`). Merged session branches pruned (`fix/274-wall1-…`, `fix/dispatch-plain-helper-…`; earlier ones deleted on merge).
+- **Maps:** significant code landed (`indirect-callee-resolver`, `route-inference`, `emit-expr/logic/server`, `gauntlet-phase3-eq-checks`, `ast-builder`) — `project-mapper` **not run** (S299 precedent: maps are one-session-behind by construction, grep-competitive; symptom→locus captured in gaps + changelog). Next boot: refresh if a maps-dependent task is picked.
+- **bryan:** courtesy note sent (scrml-support) — I modified `gauntlet-phase3-eq-checks.js` (his traditional type-system lane) for #274 Wall-1.
+
+## Tags
+#session-304-peter #284-class-closed-end-to-end #alias-dispatch-await-emit-placement #274-both-walls-closed
+#verify-the-class-reporter-causal-model #eq-check-per-function-scope #over-escalation-measured-zero
+#codegen-pr-gate-flow #local-main-commit-slip-caught #rebase-race-with-bryan
+
+---
+
+<!-- ============================================================= -->
 <!-- S302 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-31.        -->
 <!-- S303-Peter + S301 + all prior UNCHANGED below.                 -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->
