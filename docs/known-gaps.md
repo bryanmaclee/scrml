@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 22 |
-| MED | 100 |
+| MED | 101 |
 | LOW | 42 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -537,6 +537,41 @@ Adopter-A's native-iOS client (reused, re-pointed at the scrml backend for the l
 > EXECUTION before authoring (S261's "gate fireable by execution, not by grep"). 18 fired and are now
 > pinned. The 19th did not — and finding out why surfaced a §51.5 soundness hole rather than a
 > coverage hole.
+
+### g-e-eq-001-message-names-types-not-the-operand — `E-EQ-001` reports the two TYPES but neither which operand carries which, nor where its type came from; the adopter paid ~15 bisect cycles for the difference
+<!-- @gap id=g-e-eq-001-message-names-types-not-the-operand sev=MED status=open -->
+
+**Locus:** `compiler/src/gauntlet-phase3-eq-checks.js:633` (the emit) + `:266` (`collectBindings`, which
+builds the binding record the message would need to draw on). Traced — both were read while sizing the
+change.
+
+**Routed by S304-Peter** (`handOffs/incoming/read/2026-07-31-0620-...eq-check-per-function-scope-heads-up.md`)
+as an optional follow-up in bryan's type-system-diagnostics lane, after his #274 Wall-1 fix (`6b773833`).
+
+Today: ``E-EQ-001: cannot compare `number` with `string` using `==` ... Convert one side explicitly``. It
+names neither the OFFENDING BINDING nor the PROVENANCE of its type. In a large file that is the whole
+diagnostic — the adopter on #274 ran a ~15-cycle bisect to find which local was the number. Per the S95
+rule, **a diagnostic that does not name its root cause is itself a diagnostic defect**, so this is filed
+as a gap rather than an enhancement.
+
+**Wanted:** `` ... `n` (declared `let n = 0` at L42) is `number`; `h` is `string` `` — the binding name
+plus whether its type came from an ANNOTATION or a LITERAL INIT.
+
+**Why it is a real arc, not a one-line edit — sized this session, not started:**
+1. `collectBindings` (`:266`) records `{primType, typeName, containsFnStruct, annot}` and **no decl
+   span**, so provenance must first be captured there and threaded through `classifyOperand`.
+2. The emit must pick the offending SIDE — `W-EQ-001` two branches above already does exactly this
+   (`left.name ?? "left"`), so there is a local pattern to mirror.
+3. **`compiler/tests/e2e-render-map/e2e-render-map-baseline.json:2119` asserts the FULL message text**,
+   so the change requires a golden-baseline regen + review — the step that makes this a reviewed arc.
+4. Conformance is NOT at risk: message text is explicit impl-freedom under D3 (the contract asserts
+   CODES and runtime effect, never message strings), so no case can break.
+
+**Deliberately not started at a session tail.** A compiler-source change whose verification includes a
+golden-baseline regen is the "codegen-at-tail" shape S303 named as how two refuted cuts' defects slipped
+in. It wants a clean run with the S239 pass, not a tail-end pass.
+
+**Direction-of-change: inert** — message text only; no program changes acceptance or behaviour.
 
 ### g-e-mw-006-cannot-fire-nested-handle-never-flagged — `E-MW-006` is structurally dead: the flag its detector keys on is set ONLY by the top-level parser, so a nested `handle()` is invisible to the check meant to catch it — and the middleware silently never runs
 <!-- @gap id=g-e-mw-006-cannot-fire-nested-handle-never-flagged sev=MED status=open -->
