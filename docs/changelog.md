@@ -2,6 +2,16 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S309 — 2026-07-31 (Peter · Windows) — the braceless `for … of` loop head is now rejected (`E-FOR-UNPARENTHESIZED-HEAD`)
+
+Two landings (PRs #329, #330), cloud-gate + windows green, same boot that authored the S308 recovery.
+
+**#329 — `E-FOR-UNPARENTHESIZED-HEAD` rejects a braceless (unparenthesized) `for … of` loop head.** bryan ruled reject (§17.4a/§17.4b mandate a parenthesized head). A braceless `for x of @items { … }` (or `for it of @rows lift …`) mis-parsed: the braceless-head parse branch consumed only the legacy English `in`, never `of`, so the iterable was read as the bare token `of` and codegen emitted `for (const x of of)` — valid to `node --check`, a `ReferenceError` at module-eval (exit-0 compile, dead page). Now fires `E-FOR-UNPARENTHESIZED-HEAD` (§34, Error) and recovers by consuming `of` and collecting the real iterable, in all three for-parser copies. The scope was set by measurement: the corpus has zero legitimate braceless-head loops, while the braceless English form `for item in @items { … }` is an intentional value-iteration sugar used across the tests and the self-host parity harness — so the reject targets only the proven-broken `of` form and leaves the `in` sugar untouched. SPEC §17.4 governing note + §34 catalog row; conformance `ctrl-013` pos/neg (843 → 845).
+
+**#330 — the reject also covers a destructuring braceless head.** `for [a,b] of @pairs { … }` / `for {a} of @items { … }` previously bypassed the reject (the braceless branch only read an ident variable) and emitted broken JS with no diagnostic. The branch now consumes a destructure pattern via `parseDestructurePattern()` before the `of`/`in` check, so the `of` is detected and rejected. Canonical `for (const [a,b] of @items) { … }` and the legacy braceless-`in` form are unchanged.
+
+Both PRs went through the S239 adversarial pass — which caught a real blocker on #329 (a residual `for (const item of of)` via the for-as-expression parser copy, masked by a too-narrow first repro) before it could ship. Filed `g-destructure-pattern-object-object-in-for-comprehension-emit` (LOW, pre-existing — a destructure pattern is `[object Object]`-coerced in the for-comprehension emit, on the canonical paren form too).
+
 ## S308 — 2026-07-31 (Peter · Windows) — #264 residual: the on-mount await pass now fails safe, and the retired flat-text scanner is deleted
 
 One landing (PR #326), cloud-gate + windows green. Bookkeeping completed by a recovery boot after the S308 terminal was closed mid-session (post-merge, pre-wrap) — no code was lost, only the continuity trail, reconstructed from the merge history.
