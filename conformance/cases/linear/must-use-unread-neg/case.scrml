@@ -1,0 +1,10 @@
+<program>
+${
+    function go() {
+        usedThing = 42
+        return usedThing
+    }
+}
+<p id="s">must-use</p>
+<button id="b" onclick=go()>go</button>
+</program>

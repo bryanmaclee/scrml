@@ -1,0 +1,13 @@
+{
+  "id": "linear-must-use-unread-neg",
+  "description": "The identical function RETURNING the binding it declared. Same declaration form, same scope — only the use is added, which is exactly the condition the code keys on.",
+  "language-version": "1.0",
+  "spec": "§35",
+  "rationale": "§35 — a must-use binding is one whose VALUE is the point of computing it; letting it fall out of scope unread is, with near-certainty, either a forgotten use or a dead computation. scrml makes that loud rather than silent, and gives an explicit opt-out (`_`-prefix) so the author can SAY \"computed for effect, value deliberately unused\" instead of leaving the reader to guess.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-MU-001"
+    ]
+  }
+}
