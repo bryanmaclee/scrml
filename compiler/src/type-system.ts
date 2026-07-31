@@ -5990,14 +5990,14 @@ function buildMachineRegistry(
     // for legacy `<machine>` symmetrically.) `legacyMachineKeyword` is set by the
     // parser (ast-builder.js) from `block.name === "machine"`.
     if (registry.has(name)) {
-      if (decl.legacyMachineKeyword === true) {
-        errors.push(new TSError(
-          "E-ENGINE-003",
-          `E-ENGINE-003: Duplicate machine name '${name}'. ` +
-          `A machine with this name is already declared in this file.`,
-          span,
-        ));
-      }
+      // S307 — E-ENGINE-003 RETIRED with the `<machine>` keyword (SPEC §63.7).
+      // It fired ONLY under `decl.legacyMachineKeyword === true`, which is the
+      // one genuinely keyword-gated trigger in the whole E-ENGINE family, so
+      // removing the keyword leaves it unreachable. The duplicate-declaration
+      // guarantee is unchanged: `E-ENGINE-VAR-DUPLICATE` (§51.0.C, SYM PASS
+      // 10.A) owns the surviving `<engine>` form, and S182's mutual-exclusivity
+      // (exactly one duplicate code per declaration) now holds trivially with
+      // only one code left.
       continue;
     }
 

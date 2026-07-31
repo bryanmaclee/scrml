@@ -6180,14 +6180,17 @@ function registerEngineDecl(
   // E-ENGINE-VAR-DUPLICATE. We check the file scope only — same-scope
   // semantics per §51.0.C. (Cross-scope name shadowing is captured by B2's
   // E-NAME-COLLIDES-STATE infrastructure on the OTHER side, not here.)
-  // S182 (Fix 2) — mutual exclusivity with the legacy `E-ENGINE-003` (type-
-  // system.ts buildMachineRegistry). `E-ENGINE-VAR-DUPLICATE` (§51.0.C) is the
-  // canonical §51.0 duplicate code and owns the `<engine>`-keyword form; the
-  // legacy `<machine>`-keyword form keeps `E-ENGINE-003` (which gates on
-  // `legacyMachineKeyword === true`). Skipping `E-ENGINE-VAR-DUPLICATE` for the
-  // legacy keyword here yields exactly ONE duplicate code per declaration for
-  // BOTH forms. (Registration still returns either way — a duplicate cell must
-  // not be re-registered regardless of which code fired.)
+  // S182 (Fix 2) — mutual exclusivity with the legacy `E-ENGINE-003`.
+  //
+  // S307 UPDATE: `E-ENGINE-003` is RETIRED with the `<machine>` keyword (SPEC
+  // §63.7), so `E-ENGINE-VAR-DUPLICATE` (§51.0.C) is now the ONLY duplicate
+  // code and S182's "exactly one per declaration" holds trivially. The skip is
+  // kept ONLY so a `<machine>` source — which already fails on
+  // `E-DEPRECATED-001` — does not also emit a second, redundant diagnostic
+  // about a keyword the author is being told to remove. It is unreachable in
+  // any compiling program and goes when `legacyMachineKeyword` itself does.
+  // (Registration still returns either way — a duplicate cell must not be
+  // re-registered regardless of which code fired.)
   const isLegacyMachine = engineDecl.legacyMachineKeyword === true;
   const existing = fileScope.stateCells.get(varName);
   if (existing != null && existing.engineMeta == null) {

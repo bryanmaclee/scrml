@@ -250,32 +250,14 @@ describe("§51.3 — MachineType registration in machine registry", () => {
 // §51.3-ERR-1: E-ENGINE-003 — duplicate machine name
 // ---------------------------------------------------------------------------
 
-describe("§51.3 — E-ENGINE-003: duplicate machine name", () => {
-  test("two machines with same name → E-ENGINE-003", () => {
-    const typeDecls = [makeTypeDecl("Status", "enum", "{ A\nB }")];
-    const typeRegistry = buildTypeRegistry(typeDecls, [], span());
-    const machines = [
-      makeMachineDecl("MyFlow", "Status", ".A => .B"),
-      makeMachineDecl("MyFlow", "Status", ".B => .A"),
-    ];
-    const errors = [];
-    buildMachineRegistry(machines, typeRegistry, errors, span());
-    expect(errors.some(e => e.code === "E-ENGINE-003")).toBe(true);
-  });
-
-  test("E-ENGINE-003 message names the duplicate", () => {
-    const typeDecls = [makeTypeDecl("Status", "enum", "{ A\nB }")];
-    const typeRegistry = buildTypeRegistry(typeDecls, [], span());
-    const machines = [
-      makeMachineDecl("DupFlow", "Status", ".A => .B"),
-      makeMachineDecl("DupFlow", "Status", ".B => .A"),
-    ];
-    const errors = [];
-    buildMachineRegistry(machines, typeRegistry, errors, span());
-    const err = errors.find(e => e.code === "E-ENGINE-003");
-    expect(err.message).toContain("DupFlow");
-  });
-
+describe("§51.3 — duplicate machine name: registration behaviour (E-ENGINE-003 retired S307)", () => {
+  // S307 — the two E-ENGINE-003-asserting tests here are RETIRED with the code
+  // (SPEC §63.7 / §51.8): it fired ONLY under `legacyMachineKeyword === true`,
+  // which `makeMachineDecl` sets by hand, so removing the `<machine>` keyword
+  // leaves it unreachable. `E-ENGINE-VAR-DUPLICATE` (§51.0.C) owns the surviving
+  // form. The registration-BEHAVIOUR test below is kept — it asserts that the
+  // first declaration wins and the second is not re-registered, which is still
+  // true and is independent of which duplicate code fires.
   test("first machine with duplicate name is registered; second is rejected", () => {
     const typeDecls = [makeTypeDecl("Status", "enum", "{ A\nB }")];
     const typeRegistry = buildTypeRegistry(typeDecls, [], span());

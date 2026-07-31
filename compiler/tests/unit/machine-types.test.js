@@ -71,19 +71,13 @@ describe("§51.3-a buildMachineRegistry — basic", () => {
 // §51.3-b: E-ENGINE-003 — duplicate machine name
 // ---------------------------------------------------------------------------
 
-describe("§51.3-b E-ENGINE-003: duplicate machine name", () => {
-  test("emits error for duplicate machine name", () => {
-    const typeDecls = [makeTypeDecl("Status", "enum", "{ A\nB }")];
-    const typeRegistry = buildTypeRegistry(typeDecls, [], span());
-    const machines = [
-      makeMachineDecl("Flow", "Status", ".A => .B"),
-      makeMachineDecl("Flow", "Status", ".B => .A"),
-    ];
-    const errors = [];
-    buildMachineRegistry(machines, typeRegistry, errors, span());
-    expect(errors.some(e => e.code === "E-ENGINE-003")).toBe(true);
-  });
-});
+// S307 — RETIRED with E-ENGINE-003 itself (SPEC §63.7 / §51.8). The code fired
+// ONLY under `legacyMachineKeyword === true`, which these helpers set by hand;
+// with the `<machine>` keyword removed it has no trigger. The surviving
+// duplicate-declaration guarantee is `E-ENGINE-VAR-DUPLICATE` (§51.0.C), pinned
+// by conformance/cases/engine/engine-var-duplicate-{pos,neg} and by
+// engine-effect-not-interpolated.test.js (which still asserts exactly one
+// duplicate code fires per declaration).
 
 // ---------------------------------------------------------------------------
 // §51.3-c: E-ENGINE-004 — unknown or invalid governed type
