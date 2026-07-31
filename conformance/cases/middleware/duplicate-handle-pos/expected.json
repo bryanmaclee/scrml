@@ -1,0 +1,16 @@
+{
+  "id": "middleware-duplicate-handle-pos",
+  "description": "Two top-level `handle(request, resolve)` definitions in one file. Per §40 at most one middleware handler exists per file, so E-MW-005 fires (§34: Error) on the second.",
+  "language-version": "1.0",
+  "spec": "§40",
+  "rationale": "§40 / §39.3.2 — `handle(request, resolve)` is the ONE middleware escape hatch per file: it receives the raw request and bypasses route inference. Two definitions give the pipeline no basis to choose, and picking by source order would make which middleware runs a function of declaration position rather than of anything the author stated.",
+  "expect": {
+    "codes": [
+      "E-MW-005"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-MW-005": "error"
+    }
+  }
+}

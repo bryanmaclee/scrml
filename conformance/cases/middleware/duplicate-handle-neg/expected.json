@@ -1,0 +1,13 @@
+{
+  "id": "middleware-duplicate-handle-neg",
+  "description": "A single `handle(request, resolve)` at file top level — the canonical §39.3.2 shape. Isolates the duplicate condition from the escape hatch itself.",
+  "language-version": "1.0",
+  "spec": "§40",
+  "rationale": "§40 / §39.3.2 — `handle(request, resolve)` is the ONE middleware escape hatch per file: it receives the raw request and bypasses route inference. Two definitions give the pipeline no basis to choose, and picking by source order would make which middleware runs a function of declaration position rather than of anything the author stated.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-MW-005"
+    ]
+  }
+}

@@ -46,13 +46,31 @@ core files as above (codes-only assertions; mirror `conformance/cases/endpoint/`
 > security/serialization floor). This list owns `E-ROUTE-001`, `E-RI-002`, and the `E-MW-*` middleware set.
 
 11. **E-ROUTE-001** (codes) `[status=pending]` — computed member access detected in a route expression (`route-inference.ts:1386`). Pos (`@x[computed]` in a route-inferred expr → E-ROUTE-001) + neg (a static member → silent).
-12. **E-RI-002** (codes) `[status=pending]` — a server-escalated function constraint (`route-inference.ts:4331`, "Server-escalated function …"). Grep the exact trigger; pos + neg.
-13. **E-MW-002** (codes) `[status=pending]` — a `ratelimit=` value not matching `N/unit` (unit ∈ sec/min/hour; `ast-builder.js:17855`). Pos + neg (a valid `10/min` → silent).
-14. **E-MW-005** (codes) `[status=pending]` — more than one `handle()` defined at file top level (`ast-builder.js:17874`). Pos + neg (a single `handle()` → silent).
-15. **E-MW-006** (codes) `[status=pending]` — `handle()` validation across top-level logic blocks (`ast-builder.js:17873`). Pos + neg.
+12. **E-RI-002** (codes) `[status=done S305]` — a server-escalated function constraint (`route-inference.ts:4331`, "Server-escalated function …"). Grep the exact trigger; pos + neg.
+13. **E-MW-002** (codes) `[status=done S305]` — a `ratelimit=` value not matching `N/unit` (unit ∈ sec/min/hour; `ast-builder.js:17855`). Pos + neg (a valid `10/min` → silent).
+14. **E-MW-005** (codes) `[status=done S305]` — more than one `handle()` defined at file top level (`ast-builder.js:17874`). Pos + neg (a single `handle()` → silent).
+15. **E-MW-006** (codes) `[status=BLOCKED — structurally dead, see g-e-mw-006-cannot-fire-nested-handle-never-flagged]` — `handle()` validation across top-level logic blocks (`ast-builder.js:17873`). Pos + neg.
 
 **Direction-B runtime note (endpoint §61):** the endpoint request→response RUNTIME half is a Direction-B
 hole (`DIRECTION-B-runtime.md` item 1) — it needs the `serverStub` path. It is authored in **ss67** (the
 serverdb-runtime list), NOT here. This list stays codes-only for §60/§61 diagnostics.
 
 **Wave-2 DoD:** the 5 route/middleware codes pinned (codes-only); run.ts green; divergences ESCALATED.
+
+## S305 (bryan, 2026-07-31)
+
+**3 of 4 remaining tier-1 codes pinned.** `E-MW-002` (§40 `ratelimit=` unit vocabulary) ·
+`E-MW-005` (§40 duplicate `handle()`) · `E-RI-002` (§12.2 a server-escalated fn writing a
+client reactive cell). 6 cases.
+
+**Authoring note that cost time — the §39.3.2 SIGNATURE is load-bearing.** `handle()` is
+recognized by RESERVED NAME **plus** shape: exactly two params named `request` and `resolve`
+(`ast-builder.js:12309`). A plain `function handle(req)` is NOT the escape hatch and fires
+nothing, which reads identically to a dead code. Author the full signature.
+
+**`E-MW-006` is BLOCKED — structurally dead.** `isHandleEscapeHatch` is computed only by the
+TOP-LEVEL declaration parser, so a nested `handle(request, resolve)` carries `undefined`, and
+`findNestedHandles` fires on exactly that flag. Proven by dumping the AST for both placements.
+Worse than un-pinnable: the same flag gates emit-server / emit-functions / RI Trigger 8, so a
+nested handler is **silently not woven as middleware at all**. Filed MED
+`g-e-mw-006-cannot-fire-nested-handle-never-flagged`. Do not re-attempt authoring it.

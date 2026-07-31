@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 22 |
-| MED | 99 |
+| MED | 100 |
 | LOW | 42 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -537,6 +537,48 @@ Adopter-A's native-iOS client (reused, re-pointed at the scrml backend for the l
 > EXECUTION before authoring (S261's "gate fireable by execution, not by grep"). 18 fired and are now
 > pinned. The 19th did not — and finding out why surfaced a §51.5 soundness hole rather than a
 > coverage hole.
+
+### g-e-mw-006-cannot-fire-nested-handle-never-flagged — `E-MW-006` is structurally dead: the flag its detector keys on is set ONLY by the top-level parser, so a nested `handle()` is invisible to the check meant to catch it — and the middleware silently never runs
+<!-- @gap id=g-e-mw-006-cannot-fire-nested-handle-never-flagged sev=MED status=open -->
+
+**Locus:** `compiler/src/ast-builder.js:12309` (where `isHandleEscapeHatch` is computed) vs `:18649`
+`findNestedHandles` (where `E-MW-006` is pushed). Traced, not merely located — the two were compared by
+dumping the AST for both shapes.
+
+**Governing sentence (§34, quoted).** `E-MW-006` — *"`handle()` defined outside file top-level `${ }`
+logic context (e.g., inside a function body or nested…)"*, severity **Error**. §40/§39.3.2 place the
+middleware escape hatch at file top level.
+
+**Measured — the same signature, two placements:**
+
+```
+top level:              fn handle(request, resolve)  isHandleEscapeHatch=true
+nested inside outer():  fn handle(request, resolve)  isHandleEscapeHatch=undefined
+```
+
+`isHandleEscapeHatch` is computed in the TOP-LEVEL declaration parser only. `findNestedHandles`
+recurses into function bodies and fires on `stmt.isHandleEscapeHatch` — which is `undefined` for every
+nested declaration. **The detector and the flag disagree about which parse path sets it, so the branch
+is unreachable and `E-MW-006` can never fire.** A compile of the nested shape emits zero diagnostics.
+
+**Consequence is silent, not merely missing.** Because the flag is also what `emit-server.ts:1818`
+(`fnNodes.find(fn => fn.isHandleEscapeHatch)`), `emit-functions.ts:1179/1258` and RI Trigger 8
+(`route-inference.ts:4140`) key on, a nested `handle(request, resolve)` is **not woven as middleware at
+all**. The author writes a request handler, it never runs, and nothing says so — the diagnostic designed
+to catch exactly this mistake is the one that cannot fire.
+
+**Not a security hole:** the handler is dropped, not mis-privileged. Filed MED on that basis.
+
+**Fix direction (not yet ruled):** either set the flag on nested `function-decl`s too and let
+`findNestedHandles` fire as designed, or have `findNestedHandles` re-derive the §39.3.2 shape (name
+`handle` + exactly `request`, `resolve`) instead of trusting a flag it does not own. The second is
+narrower and cannot perturb the four downstream consumers above, which is why it is worth a look first.
+
+**Direction-of-change:** **newly-rejecting** (a nested `handle()` that compiles today would fail).
+Corpus migration **measured zero** — no `.scrml` in the repo declares a nested `handle(request, resolve)`.
+
+**Campaign consequence:** `E-MW-006` is NOT authorable; ss63 records it BLOCKED. Its siblings
+`E-MW-002` and `E-MW-005` fire correctly and are pinned this session.
 
 ### g-e-server-fn-in-sync-callback-uncatalogued — a LIVE diagnostic with its own push site carries no §34 catalog row, so the freeze gate cannot pin it
 <!-- @gap id=g-e-server-fn-in-sync-callback-uncatalogued sev=LOW status=open -->

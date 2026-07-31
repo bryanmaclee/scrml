@@ -1,0 +1,13 @@
+{
+  "id": "server-db-sql-row-contract-mismatch-neg",
+  "description": "The identical program with `Card` declaring exactly the projected fields `{id, name}`. Only the contract's width differs, which is the bite proof for the width-subtype rule.",
+  "language-version": "1.0",
+  "spec": "§14.8.8",
+  "rationale": "§14.8.8 — when a SQL projection row is passed to a prop carrying a `:struct` contract, the row must satisfy that contract by WIDTH: every field the contract declares must be projected. A missing column is not a runtime `undefined` to be discovered in the UI — the SELECT list is statically known, so the mismatch is decidable at compile time and is reported against the SELECT rather than the render.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-SQL-ROW-CONTRACT-MISMATCH"
+    ]
+  }
+}

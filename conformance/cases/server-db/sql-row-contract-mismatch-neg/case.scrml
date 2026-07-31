@@ -1,0 +1,16 @@
+${ type Card:struct = { id: int, name: string } }
+${ const Row = <li props={ item: Card }>${item.name}</li> }
+<program db="sqlite:./app.db">
+<schema>
+  users { id: integer primary key, name: text, email: text }
+</>
+${
+    const rows = ?{ select id, name from users }
+}
+<ul>
+  <each in=rows as u>
+    <Row item=u/>
+  </each>
+</ul>
+<p id="s">rows</p>
+</program>
