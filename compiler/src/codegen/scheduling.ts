@@ -438,220 +438,28 @@ export function injectPromiseAwait(
 }
 
 /**
- * GH #237 (§13.2 + §6.7.1a) — a string/comment-aware scan of ALREADY-EMITTED JS
- * that reports (a) every depth-0 statement boundary and (b) every depth-0
- * `{ … }` block group. Both consumers below (`splitEmittedStatements` and the
- * control-flow recursion in `liftEmittedStatementAwaits`) need the same notion
- * of "top level", so the scanner is written once.
+ * GH #237 + #264 (§13.2 + §6.7.1a) — apply the §13.2 auto-await to already-EMITTED
+ * JS that is about to be placed inside a compiler-generated `async` scope.
  *
- * Modes tracked: code · `'`/`"` strings · template literals (incl. re-entrant
- * `${ … }` interpolation) · `//` and block comments. `(`/`[`/`{` all raise the
- * same depth counter — a statement boundary is only recognised at depth 0, so a
- * `;` inside a `for(;;)` header or an object literal never splits.
+ * `on mount { … }` is desugared to a SINGLE `bare-expr` whose `expr` is the raw
+ * body text (SPEC §6.7.1a: "SHALL be desugared to a bare expression before the TAB
+ * pass completes"), and a multi-statement body fails `safeParseExprToNode`, so
+ * codegen receives an `escape-hatch` node and lowers the whole block through the
+ * string pipeline (`rewriteExpr`) — there is no statement list to hand
+ * `scheduleStatements`. `injectServerCallAwaitsViaAst` parses the emitted text with
+ * acorn and walks the REAL AST, injecting `await` before every server-fn call in an
+ * await-legal position, position-invariantly per §13.2. Modelling JS scopes with the
+ * parser — not flat-text heuristics — is what makes the syntax-error class (an
+ * `await` in a sync callback or a param list) unreachable; the GH #264 adversarial
+ * rounds 1–5 each found another scope the retired flat-text scanner mis-modelled.
  *
- * Returns depth-0 statement END indices (EXCLUSIVE — index one past the `;` or
- * the closing `}`), and the depth-0 brace-group spans as `[openIdx, closeIdx]`.
- */
-function scanEmittedCode(code: string): { stmtEnds: number[]; braceGroups: Array<[number, number]> } {
-  const stmtEnds: number[] = [];
-  const braceGroups: Array<[number, number]> = [];
-  let depth = 0;
-  let mode: "code" | "sq" | "dq" | "tpl" | "line" | "block" = "code";
-  // Depth at which each still-open template-literal `${` interpolation started.
-  const tplStack: number[] = [];
-  let braceOpen = -1;
-  // Per-`{` "is this a BLOCK?" stack. A depth-0 `}` only ends a statement when
-  // it closes a block — `const o = { a: 1 };` must stay ONE statement, and its
-  // closing brace is an object literal in expression position, not a block.
-  const braceIsBlock: boolean[] = [];
-  let i = 0;
-  while (i < code.length) {
-    const c = code[i];
-    const c2 = code[i + 1];
-    if (mode === "sq" || mode === "dq" || mode === "tpl") {
-      if (c === "\\") { i += 2; continue; }
-      if (mode === "sq" && c === "'") mode = "code";
-      else if (mode === "dq" && c === '"') mode = "code";
-      else if (mode === "tpl" && c === "`") mode = "code";
-      else if (mode === "tpl" && c === "$" && c2 === "{") {
-        tplStack.push(depth);
-        depth++;
-        mode = "code";
-        i += 2;
-        continue;
-      }
-      i++;
-      continue;
-    }
-    if (mode === "line") {
-      if (c === "\n") mode = "code";
-      i++;
-      continue;
-    }
-    if (mode === "block") {
-      if (c === "*" && c2 === "/") { mode = "code"; i += 2; continue; }
-      i++;
-      continue;
-    }
-    // mode === "code"
-    if (c === "/" && c2 === "/") { mode = "line"; i += 2; continue; }
-    if (c === "/" && c2 === "*") { mode = "block"; i += 2; continue; }
-    if (c === "'") { mode = "sq"; i++; continue; }
-    if (c === '"') { mode = "dq"; i++; continue; }
-    if (c === "`") { mode = "tpl"; i++; continue; }
-    if (c === "(" || c === "[") { depth++; i++; continue; }
-    if (c === "{") {
-      const isBlock = precedesBlockBrace(code, i);
-      braceIsBlock.push(isBlock);
-      if (depth === 0 && isBlock) braceOpen = i;
-      depth++;
-      i++;
-      continue;
-    }
-    if (c === ")" || c === "]") { depth = Math.max(0, depth - 1); i++; continue; }
-    if (c === "}") {
-      depth = Math.max(0, depth - 1);
-      // Closing a template-literal interpolation returns to template mode.
-      if (tplStack.length > 0 && tplStack[tplStack.length - 1] === depth) {
-        tplStack.pop();
-        mode = "tpl";
-        i++;
-        continue;
-      }
-      const wasBlock = braceIsBlock.pop() ?? true;
-      i++;
-      if (depth === 0 && wasBlock) {
-        if (braceOpen >= 0) { braceGroups.push([braceOpen, i - 1]); braceOpen = -1; }
-        // `} else {` / `} catch {` / `} while (…)` continue the SAME statement.
-        if (!continuesEmittedStatement(code, i)) stmtEnds.push(i);
-      }
-      continue;
-    }
-    if (c === ";" && depth === 0) { stmtEnds.push(i + 1); i++; continue; }
-    i++;
-  }
-  if (stmtEnds.length === 0 || stmtEnds[stmtEnds.length - 1] < code.length) {
-    if (code.slice(stmtEnds.length ? stmtEnds[stmtEnds.length - 1] : 0).trim()) {
-      stmtEnds.push(code.length);
-    }
-  }
-  return { stmtEnds, braceGroups };
-}
-
-/**
- * True when the `{` at `braceIdx` opens a BLOCK rather than an object literal.
+ * On an acorn parse FAILURE the emitted body is already malformed (a separate
+ * compiler bug), so this returns it UNCHANGED — it never injects into text the
+ * parser cannot model. (The retired GH #237 flat-text fallback that once ran here
+ * carried those rounds 1–5 injection bugs and was deleted with the #264 residual.)
  *
- * A block brace follows a statement boundary (`;` / `}` / `{` / start), a
- * control-flow header's `)`, or one of the header-less block keywords. Anything
- * else — `=`, `(`, `,`, `:`, `=>` — puts the brace in EXPRESSION position, where
- * its closer must not be read as a statement end.
- */
-function precedesBlockBrace(code: string, braceIdx: number): boolean {
-  let j = braceIdx - 1;
-  while (j >= 0) {
-    const ch = code[j];
-    if (ch === " " || ch === "\t" || ch === "\r" || ch === "\n") { j--; continue; }
-    if (ch === "/" && j > 0 && code[j - 1] === "*") {
-      const start = code.lastIndexOf("/*", j - 2);
-      if (start < 0) return true;
-      j = start - 1;
-      continue;
-    }
-    break;
-  }
-  if (j < 0) return true;
-  const ch = code[j];
-  if (ch === ";" || ch === "}" || ch === "{" || ch === ")") return true;
-  if (/[A-Za-z0-9_$]/.test(ch)) {
-    let k = j;
-    while (k >= 0 && /[A-Za-z0-9_$]/.test(code[k])) k--;
-    const word = code.slice(k + 1, j + 1);
-    return word === "else" || word === "do" || word === "try" || word === "finally";
-  }
-  return false;
-}
-
-/** True when the text at `from` opens an `else`/`catch`/`finally`/`while` continuation clause. */
-function continuesEmittedStatement(code: string, from: number): boolean {
-  let j = from;
-  while (j < code.length) {
-    const ch = code[j];
-    if (ch === " " || ch === "\t" || ch === "\r" || ch === "\n") { j++; continue; }
-    if (ch === "/" && code[j + 1] === "/") {
-      const nl = code.indexOf("\n", j);
-      if (nl < 0) return false;
-      j = nl + 1;
-      continue;
-    }
-    if (ch === "/" && code[j + 1] === "*") {
-      const end = code.indexOf("*/", j);
-      if (end < 0) return false;
-      j = end + 2;
-      continue;
-    }
-    break;
-  }
-  return /^(?:else|catch|finally|while)\b/.test(code.slice(j));
-}
-
-/**
- * GH #237 — split already-EMITTED JS into its depth-0 statements. An
- * `if (…) { … } else { … }` stays ONE statement (the `else` continuation is
- * recognised), which is what lets the await recursion below descend into both
- * arms without ever handing a block-shaped statement to `injectPromiseAwait`.
- *
- * Exported for unit testing.
- */
-export function splitEmittedStatements(code: string): string[] {
-  const { stmtEnds } = scanEmittedCode(code);
-  const raw: string[] = [];
-  let start = 0;
-  for (const end of stmtEnds) {
-    raw.push(code.slice(start, end));
-    start = end;
-  }
-  if (start < code.length) raw.push(code.slice(start));
-  // A whitespace-only segment (the newline + indent that trails the last
-  // statement of a block body) carries no statement but MUST survive: the
-  // caller re-joins with `""` and relies on the concatenation being lossless.
-  // Fold it into its neighbour rather than dropping it.
-  const out: string[] = [];
-  for (const seg of raw) {
-    if (seg === "") continue;
-    if (!seg.trim() && out.length > 0) out[out.length - 1] += seg;
-    else out.push(seg);
-  }
-  return out;
-}
-
-/**
- * GH #237 (fail-open guard) — apply the §13.2 auto-await to already-EMITTED JS
- * that is about to be placed inside a compiler-generated `async` scope.
- *
- * WHY A TEXT PASS. `on mount { … }` is desugared to a SINGLE `bare-expr` whose
- * `expr` is the raw body text (SPEC §6.7.1a: "SHALL be desugared to a bare
- * expression before the TAB pass completes"), and a multi-statement body fails
- * `safeParseExprToNode`, so codegen receives an `escape-hatch` node and lowers
- * the whole block through the string pipeline (`rewriteExpr`). There is no
- * statement list to hand `scheduleStatements`. This walker restores the
- * statement view over the EMITTED text and then delegates every actual await
- * decision to `injectPromiseAwait` — the single source of truth. It adds NO
- * second await policy: the classifier, the fail-safe guard, and the four
- * accepted statement shapes are all `injectPromiseAwait`'s.
- *
- * Recursion: a control-flow statement (`if`/`else`/`for`/`while`/`do`/`switch`/
- * `try`) is NEVER passed to `injectPromiseAwait` (its case-4 fallback would
- * emit `await if (…) {…}`). Instead each depth-0 `{ … }` group is descended
- * into, so §13.2 stays POSITION-INVARIANT one block deep exactly as
- * `emitLogicBody` makes it for the AST path.
- *
- * Deliberately UNTOUCHED: any statement carrying an arrow / `function`
- * (`_scrml_init_set("c", () => serverFn())`, `el.onclick = () => serverFn()`).
- * A server call inside a SYNC callback is the fail-closed
- * `E-SERVER-FN-IN-SYNC-CALLBACK` surface — injecting `await` there would be a
- * syntax error, not a fix.
- *
- * Returns the rewritten code, or the input unchanged when nothing classified.
+ * Returns the rewritten code, or the input unchanged when nothing classified or the
+ * body does not parse.
  */
 export function liftEmittedStatementAwaits(
   code: string,
@@ -663,15 +471,13 @@ export function liftEmittedStatementAwaits(
     if (route.boundary === "server" && route.functionName) serverFnNames.add(route.functionName as string);
   }
   if (serverFnNames.size === 0 || !code) return code;
-  // GH #264 — an AST pass (acorn) injects `await` at every server-fn call site in
-  // an await-legal position, position-invariantly per §13.2. On a parse failure
-  // (a malformed body — the bundle is already broken) fall back to the GH #237
-  // whole-statement text pass so no body loses the awaits #237 already gave it.
+  // GH #264 — the AST pass models JS scopes exactly (see `injectServerCallAwaitsViaAst`).
+  // On an acorn parse FAILURE the emitted body is already malformed, so return it
+  // UNCHANGED rather than run a flat-text scanner over text the parser cannot model —
+  // never risk corrupting an unparseable body. (The retired GH #237 text fallback that
+  // once ran here carried the #264 rounds 1–5 injection bugs.)
   const viaAst = injectServerCallAwaitsViaAst(code, serverFnNames);
-  if (viaAst !== null) return viaAst;
-  return splitEmittedStatements(code)
-    .map((stmt) => liftOneEmittedStatement(stmt, routeMap, filePath))
-    .join("");
+  return viaAst !== null ? viaAst : code;
 }
 
 /**
@@ -698,8 +504,8 @@ export function liftEmittedStatementAwaits(
  *     own IIFE pass owns that lift; a call one level deeper (an argument, a
  *     condition, a `${…}` interpolation) is NOT the direct value and IS awaited.
  *
- * Returns null when acorn cannot parse the body (the caller then uses the #237
- * text fallback).
+ * Returns null when acorn cannot parse the body (the caller then returns the body
+ * unchanged — never injecting into text the parser cannot model).
  */
 export function injectServerCallAwaitsViaAst(code: string, serverFnNames: Set<string>): string | null {
   if (!code || serverFnNames.size === 0) return code;
@@ -775,43 +581,6 @@ export function injectServerCallAwaitsViaAst(code: string, serverFnNames: Set<st
     cursor = pos;
   }
   out += code.slice(cursor);
-  return out;
-}
-/** Per-statement arm of `liftEmittedStatementAwaits`. */
-function liftOneEmittedStatement(stmt: string, routeMap: RouteMap, filePath: string): string {
-  const trimmed = stmt.trim();
-  if (!trimmed) return stmt;
-  if (/^(?:if|else|for|while|do|switch|try|catch|finally)\b/.test(trimmed)) {
-    return recurseEmittedBraceGroups(stmt, routeMap, filePath);
-  }
-  // Sync-callback surface — see the header note.
-  if (trimmed.includes("=>") || /\bfunction\b/.test(trimmed)) return stmt;
-  // Preserve the leading whitespace/indent; `injectPromiseAwait`'s shape regexes
-  // tolerate it, but the emitted line reads better when it is restored verbatim.
-  const lead = stmt.slice(0, stmt.length - stmt.trimStart().length);
-  const trail = stmt.slice(stmt.trimEnd().length);
-  return lead + injectPromiseAwait(
-    stmt.trim(),
-    { kind: "__emitted-stmt", expr: stmt.trim() } as unknown as ASTNode,
-    routeMap,
-    filePath,
-    null,
-    null,
-  ) + trail;
-}
-
-/** Descend into every depth-0 `{ … }` group of a control-flow statement. */
-function recurseEmittedBraceGroups(stmt: string, routeMap: RouteMap, filePath: string): string {
-  const { braceGroups } = scanEmittedCode(stmt);
-  if (braceGroups.length === 0) return stmt;
-  let out = "";
-  let cursor = 0;
-  for (const [open, close] of braceGroups) {
-    out += stmt.slice(cursor, open + 1);
-    out += liftEmittedStatementAwaits(stmt.slice(open + 1, close), routeMap, filePath);
-    cursor = close;
-  }
-  out += stmt.slice(cursor);
   return out;
 }
 

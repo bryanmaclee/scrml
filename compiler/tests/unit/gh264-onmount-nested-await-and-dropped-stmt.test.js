@@ -254,12 +254,14 @@ describe("injectServerCallAwaitsViaAst — GH #264 Defect 1 (position-invariant 
       .toBe(`let o = { [await tag()]: 1 };`);
   });
 
-  test("R6: acorn parse failure returns null (the caller falls back to the #237 text pass)", () => {
+  test("R6: acorn parse failure returns null (the caller then returns the body unchanged)", () => {
     expect(injectServerCallAwaitsViaAst(`let x = (((`, serverFnNames)).toBeNull();
   });
 
-  test("R6: liftEmittedStatementAwaits is lossless on an unparseable body (fallback, no corruption)", () => {
-    // No server call → both the AST path (null) and the text fallback leave it be.
+  test("R6: liftEmittedStatementAwaits returns an unparseable body UNCHANGED (never injects)", () => {
+    // routeMap DOES carry server fns, so the pass runs; the body is unparseable →
+    // the AST pass returns null and liftEmittedStatementAwaits returns it verbatim
+    // (the retired GH #237 flat-text scanner that once ran here is deleted).
     const malformed = `let x = (((`;
     expect(liftEmittedStatementAwaits(malformed, routeMap, "f.scrml")).toBe(malformed);
   });

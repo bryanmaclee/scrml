@@ -9988,11 +9988,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // yields a node covering ONLY statement 1, and emit-logic's `exprNode`
       // fast-path (`case "bare-expr"` — `if (node.exprNode) return …`) then emits
       // ONLY that node: every following statement is silently dropped with ZERO
-      // diagnostics. The §237 mount-await machinery (`liftEmittedStatementAwaits`)
+      // diagnostics. The §237/§264 mount-await machinery (`liftEmittedStatementAwaits`)
       // is built on the ASSUMPTION that a multi-statement body arrives WITHOUT an
       // exprNode and is lowered through the string path (`node.expr` = full body,
-      // `splitEmittedStatements` restoring the statement view) — an assumption
-      // that only holds when the first statement fails to parse as an expression.
+      // then re-awaited by `liftEmittedStatementAwaits`'s acorn AST pass) — an
+      // assumption that only holds when the first statement fails to parse as an expression.
       // When the parse did NOT consume the whole body, drop the (truncated)
       // exprNode so the string path lowers ALL statements. A single-expression
       // body (span reaches the end) and an escape-hatch (span spans the full
