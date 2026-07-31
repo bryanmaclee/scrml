@@ -1,17 +1,16 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-07-30T07:41:02Z  commit: d0763cff
-# NOTE (S299): TARGETED — external deps RE-VERIFIED unchanged (no manifest diff this window). Added:
-# the `escalationReasons` producer/consumer graph, the §12.2 Trigger-3 loci, and the component-expand
-# row. Everything else carries its `115e8b1b` walk.
+# updated: 2026-07-31T03:18:23Z  commit: f96e6f30
+# NOTE (S302 pass): TARGETED — external deps RE-VERIFIED unchanged (no manifest diff in this window).
+# Added: the `ifRaw`/`ifCond` five-consumer chain, the indirect-callee-resolver edges, and the
+# `serverFnPeerAliasNames` thread. Everything else carries its prior walk.
 
-## MANIFEST SHAPE CHANGED THIS WINDOW — read this first
+## MANIFEST SHAPE — one manifest, allowlisted
 
-`171f5f23` ("make scrml publishable") **deleted `compiler/package.json`** and **removed
-`"workspaces": ["compiler"]`**. There is now exactly ONE manifest in the repo (root
-`package.json`, v0.7.1). `acorn` and `astring` were HOISTED from the deleted compiler manifest into
-the root `dependencies`; `"private": true` was dropped; a `files` ALLOWLIST was added. Any map, doc
-or brief still describing a `compiler/` workspace at v0.2.0 is stale.
+There is exactly ONE package manifest in the repo (root `package.json`, v0.7.1); `compiler/package.json`
+and `"workspaces": ["compiler"]` were deleted at `171f5f23`. `acorn` and `astring` live in the root
+`dependencies`; `"private": true` is gone; a `files` ALLOWLIST governs what publishes. Any doc still
+describing a `compiler/` workspace at v0.2.0 is stale.
 
 ## Runtime Dependencies — root package.json (v0.7.1, the SOLE manifest)
 @modelcontextprotocol/sdk@1.29.0 — MCP server SDK for the scrml MCP integration
@@ -56,12 +55,13 @@ entirely first-party. The only manifest movement is the hoist + de-workspacing a
 | CLI dispatch | cli.js | commands/{compile,dev,build,serve,migrate,db-migrate,promote,generate,init,introspect,semdiff}.js — **11 verbs** |
 | Split | block-splitter.js | ast-builder.js, native-parser/parse-file.js |
 | Parse (live) | ast-builder.js, expression-parser.ts | type-system.ts, symbol-table.ts, codegen. **`expression-parser.ts` now also exports `forEachIdentInExprNode`**, consumed by `emit-server.ts`'s D-5 module-const resolvability check. |
-| Parse (native, canary) | native-parser/*.js (paired w/ *.scrml) | native-walker/*, native-parser-canary/within-node-classifier.ts, lsp/handlers.js. ZERO diff this window. |
+| Parse (native, canary) | native-parser/*.js (paired w/ *.scrml) | native-walker/*, native-parser-canary/within-node-classifier.ts, lsp/handlers.js. **Parity obligation PAID this window** for `ifRaw`/`ifCond` — see the §17.1.2 chain below. |
 | Tag-canonicalize (Stage 3.055 TC) | tag-canonicalizer.ts | landmark-tag.ts + api.js |
 | Component expand | component-expander.ts | validators/post-ce-invariant.ts, attribute-interpolation.ts, attribute-allowlist.ts. **Every downstream consumer that keys on `node.id` depends on this stage's per-expansion clone (S299)** — `codegen/emit-each.ts` (fence ids / `_scrml_each_renderers`), `codegen/chunk-namespace.ts` (id-derived tokens). `_deepCloneAst` is INTERNAL (not exported); its two callers are `expandComponentNode` (:2601) and `_cloneChannelDecl` (:4552). |
 | Protect / route infer | protect-analyzer.ts, route-inference.ts | codegen/protect-egress.ts, codegen/egress-field-scan.ts (E-CG-001). **protect-analyzer.ts is the SOLE `E-PA-*` fire site (7 codes); `E-PA-002`'s message leads with the `<schema>` + `scrml db-migrate` remedy (S292).** |
 | **§12.2 Trigger 3 — server-only import escalates (NEW, S299)** | **route-inference.ts** — `ESCALATION_SERVER_ONLY_MODULES` (:655) / `isEscalationServerOnlyModule` (:673) / `buildPerFileEscalationServerOnlyBindings` (:3330) / `collectServerOnlyBindingModules` (:3396) -> `importTriggers` -> `directTriggers` (:4184) | `RouteInfo.escalationReasons` -> `codegen/emit-server.ts`. **DO NOT confuse `ESCALATION_SERVER_ONLY_MODULES` with the pre-existing `SERVER_ONLY_SCRML_MODULES` (:578) two hundred lines above it** — that one feeds the `api.js` STDLIB-EXPORT-SEED async backstop, where over-inclusion is safe; escalation inverts that. See domain.map.md. |
-| Type check | type-system.ts, meta-checker.ts | dependency-graph.ts, auth-graph.ts |
+| Type check | type-system.ts, meta-checker.ts | dependency-graph.ts, auth-graph.ts. **`visitStructuralIfAttr` (:12688) must run BEFORE the `each:` scope push** — see the §17.1.2 chain below. |
+| **Indirect callee resolution (#284, S303)** | **indirect-callee-resolver.ts** (NEW) | route-inference.ts `indirectInverseCallerMap` (:4707) → Step 5c only; `aliasNamesResolvingTo` → `serverFnPeerAliasNames` → emit-server/emit-logic/emit-control-flow/emit-expr. **`inverseCallerMap` must stay byte-identical.** See below. |
 | Schema declaration checks | gauntlet-phase1-checks.js | `E-SCHEMA-010` (via `findNonLiteralSetItems`) + **NEW `E-SCHEMA-011`** (via `parseColumns`'s `malformedReferences` + `referencesHint`) — both helpers live in schema-differ.js |
 | Reachability / batch | reachability-solver.ts, batch-planner.ts, cps-batch-planner.ts | codegen |
 | Name/symbol resolve | name-resolver.ts, symbol-table.ts | codegen. symbol-table.ts PASS 15.5 owns the `<outlet>` placement pass. |
@@ -70,6 +70,8 @@ entirely first-party. The only manifest movement is the hoist + de-workspacing a
 | **Coordinate space — SOURCE vs DIST (D-4, S296)** | **codegen/emit-server.ts** (`distRelativeServerSpecifier`, `isOutsideBase`, `distServerPathOf`) emits; **api.js** (`distServerKeyToSource` + `distDirOfSource` forward index, `serverImportTargetSource`) reverses; **codegen/emit-client-esm.ts** already computed client URLs in dist space | `checkServerImportInvariant` (`W-SERVER-IMPORT-UNEMITTED`) and `emitValueOnlyServerJsForDanglingImports` — BOTH reversal sites. See "Coordinate space" below. |
 | **§13.2 async scope for `on mount` (GH #237)** | **codegen/scheduling.ts** (`scanEmittedCode`, `precedesBlockBrace`, `continuesEmittedStatement`, `splitEmittedStatements`, `liftEmittedStatementAwaits`, `emittedCodeCallsServerFn` — all NEW this window) | **codegen/emit-reactive-wiring.ts:536-537** — the sole consumer. A `_onMountEffect` body that calls a server fn is wrapped in `(async () => { … })().catch(_scrml_error_boundary_log)` with the same `injectPromiseAwait` policy the two already-correct paths use. |
 | **D-5 server module-const closure** | **codegen/emit-server.ts** `emitReferencedModuleConstLines(fileAST, assembledBody)` | the assembled `.server.js` bundle, emitted AFTER the value exports and BEFORE `finalEmitted` is joined. ADDITIVE — the client bundle is byte-unchanged. |
+| **#263 CLIENT module-`export const` closure (S301) — the §14.8-gated sibling** | **codegen/emit-client.ts** `emitReferencedModuleExportConstLines` + `collectClientReferencedIdents` + `stripExportDeclInit` + `collectTopLevelReassignedNames` + `_fnNodeIsServerBoundary` | the `.client.js` bundle. **The reference set is built from AST `IdentExpr` nodes ONLY — never string-literal contents, comments or member-property keys — with TWO PRUNED subtrees (a server-boundary function body; a server-scoped cell's init).** The blocked first attempt matched by TEXT and would have shipped an `export const` used only inside a `server fn` (which lowers to a fetch stub that never names it) to the browser. A name appearing in a fetch stub / literal / comment can therefore never widen the set **by construction**, not by filtering. Fail-closed elsewhere too: `stripExportDeclInit` SKIPS multi-declarator and destructuring forms rather than guessing. |
+| **§17.1.2 structural `if=` (S302)** | **ast-builder.js** (capture) → **native-walker/attrvalue-exprnode-walker.ts** (exprNode) → **type-system.ts** (scope) → **dependency-graph.ts** (reader credit) → **codegen/emit-html.ts** (emit) | one attribute, five consumers, two native mirrors — the full table is below. |
 | **§14.8.11 queried-table grants (S292)** | **sql-table-refs.js** (NEW — `tableRefsInSql`/`sqlBodiesInSource`/`tableRefsInSource`) -> **commands/db-migrate.js** (`parseProjectSchema` returns `{queriedTables, queriedPrivileges, undeterminedSql}`; `runPgApply`'s signature widened to carry the first two) -> **schema-differ.js** `diffSchema(options.queriedTables, options.queriedPrivileges)` | the `GRANT <privs> ON <table> TO scrml_app` branch for NON-db-authoritative tables the app's `?{}` bodies touch. See migrations.map.md. |
 | DB-authoritative tier — §14.8.11/.1/.2 | schema-differ.js + codegen/db-authoritative.ts + codegen/sql-ident.ts + codegen/tenant-egress.ts + commands/db-migrate.js | codegen/index.ts wires `appDeclaresDbAuthoritative`/`wrapPrincipalTxn` into emit-server.ts's `generateServerJs`; emit-channel.ts imports `quoteIdent` (aliased `pgQuoteIdent`). See error.map.md / domain.map.md / schema.map.md / migrations.map.md. |
 | Confidentiality — tenant-row floor (§14.8.10) | codegen/tenant-egress.ts (`buildTenantContext` — two-arg since S288, unioning `<schema>`-declared tables; `resolveTenantScoping`, `classifyTenantWrite`, `detectTenantRawEgress`, `rewriteSelectAddTenantId`, `rewriteInsertAddTenantId`, `_scrml_active_tenant`/`_scrml_active_caps`) | codegen/emit-server.ts: E-TENANT-WRITE/AGG/RAW-EGRESS + I-TENANT-STRIP/ACROSS |
@@ -88,6 +90,45 @@ entirely first-party. The only manifest movement is the hoist + de-workspacing a
 | Content-hash asset naming | api.js pre-pass (`fnv1aHash`, gated on `contentHashAssets`) | build.js's `generateServerEntry` |
 | Validate emit | codegen/validate-emit.ts | final artifact sanity |
 | Meta-eval | meta-eval.ts | `^{}` meta-block execution |
+
+## `ifRaw` / `ifCond` — ONE attribute, FIVE consumers, TWO native mirrors (§17.1.2, S302)
+
+The most useful thing to know about a structural `if=` is not where it is emitted — it is that
+**every stage routes through the SAME function the markup `if=` path uses, deliberately, so a
+structural predicate and a markup predicate are structurally incapable of diverging.** A private
+re-implementation at any one of these is the defect this arc removed. Adding a second structural
+attribute later means walking this exact list.
+
+| # | Stage | Symbol | The rule |
+|---|---|---|---|
+| 1 | **Capture** | `ast-builder.js` `captureStructuralIfAttr` (:2705) + `structuralHeaderAnchor` (:2797) | Re-parses a SYNTHETIC `<x if=…>` opener through the SAME `tokenizeAttributes` + `parseAttributes` a markup opener uses. The value object is byte-for-byte what `<div if=…>` produces — that is what lets four hosts share one lowering. Offsets rebased −3 so diagnostics anchor in real source. |
+| 2 | **ExprNode** | `native-walker/attrvalue-exprnode-walker.ts:208` | Populates `ifCond.exprNode` (and strips native's extra `sourceText`). |
+| 3 | **Scope check** | `type-system.ts` `visitStructuralIfAttr` (:12688) → `visitAttr` | **Called BEFORE `scopeChain.push("each:…")`.** The opener predicate is evaluated OUTSIDE the per-item scope, so `if=item.ok` must NOT resolve against the row binding — reordering these two lines silently makes a wrong predicate compile clean. |
+| 4 | **Reader credit (DG)** | `dependency-graph.ts` `creditFromAttrValue` (:2559), called for `ifCond` at :2930 | **`ifRaw` is deliberately NOT in the raw-scan lists** (:2964 / :3020 / :3088 carry that note). A private `/@ident/` scan over the raw text diverges in BOTH directions: it reads inside string literals (over-credit) and misses an `if=fn()` call-ref's `fnTransitiveReads` (under-credit). Without this consumer, a cell read ONLY by a structural gate false-fires `E-DG-002`. |
+| 5 | **Emit** | `codegen/emit-html.ts` `emitGatedStructural` (:1498) → `emitIfMountGate` (:1421); kind test `isGateableIfValue` (:1472) | The sole `if=` lowering; the `E-IF-IN-DISPATCHED-ARM` guard fires here too (:1508). No `ifCond` field ⇒ byte-identical to the pre-§17.1.2 emitter. |
+| — | **Native mirrors** | `native-parser/collect-hoisted.js` `readStructuralIfAttr` (:421); `native-parser/parse-file.js` (:762 match, :1081 each, `stripSourceTextFromValue` :1681) | A landing that adds an AST FIELD to a structural node owes these. An emit-time / runtime / CLI / message-only landing does not. |
+
+**Field-shape invariant:** `ifRaw` and `ifCond` are **ABSENT, not null**, when the opener has no
+`if=`. The within-node parser-parity canary compares FIELD SETS; null-stamping every
+engine/match/each in the corpus surfaces as a divergence on the ~2 nested-engine positions where live
+emits `text`/`comment` and native emits an `engine-decl`, growing the allowlist for a field neither
+side actually disagrees about. Precedent on the same node family: `engine-decl.bodyChildren`.
+
+**`ifCond` lives on the AST NODE, not in `engineMeta`.** That placement is load-bearing: it puts the
+predicate out of reach of the JS-substrate emitters that build the engine's cell and rules, which is
+what enforces §17.1.2.1's render-vs-lifecycle split structurally rather than by convention.
+
+## Indirect callee resolution (#284, S303) — a SECOND call graph, on purpose
+
+| Producer | Consumer | The rule |
+|---|---|---|
+| `indirect-callee-resolver.ts` — `resolveIndirectCallees` / `indirectResolvedCallees` / `aliasNamesResolvingTo` / `fnParamNameSet` | `route-inference.ts` (import :77) → `indirectInverseCallerMap` (:4707) → the Step 5c caller-context fixed point (:4774-4810) | **`inverseCallerMap` (:4466) stays BYTE-IDENTICAL** — it also drives `E-ROUTE-001` and the D4 `W-DEAD-FUNCTION` gate, and the S299 measurement of widening the shared walk was **72 corpus sites** of over-escalation. Indirect edges therefore get their own map, consulted by exactly one caller. |
+| `indirectInverseCallerMap` | Step 5c placement | **ESCALATION-ONLY (FIX A, :4758).** SERVER indirect caller ⇒ promotion pressure. CLIENT indirect caller ⇒ **IGNORED** — counting it demotes a directly-server-called helper to client, and the server caller then references an undefined symbol → 500. |
+| `markupReferencedNames` | the same fixed point (:4766) | **FIX B — a helper referenced from CLIENT MARKUP is EXCLUDED from indirect escalation.** Relocating it turns a synchronous render into a blanking async fetch. Its DIRECT-server-call escalation, if any, is baseline and left intact. |
+| `aliasNamesResolvingTo` → `EmitLogicOpts.serverFnPeerAliasNames` | `emit-server.ts` → `emit-logic.ts` → `emit-control-flow.ts` (`_makeExprCtx`) → `emit-expr.ts` `EmitExprContext.serverFnPeerAliasNames` (:473), consumed :1488 + :3013 | The await-lowering half: `alias(...)` is awaited like the peer it aliases. NULL/empty ⇒ byte-identical pre-fix emission — every threading site is written that way, so a file with no alias peers is unaffected. |
+
+Resolution is **SAME-FILE first**, falling back to the global name set only when no same-file binding
+exists (mirrors the 5c-bis precedent). A DEAD value reference is not a call and creates **no** edge.
 
 ## Runtime-chunk gating — the tree-shake locus (READ BEFORE FIXING A BUNDLE ReferenceError)
 
@@ -265,7 +306,7 @@ own). **A hand-maintained derived list rots silently** — that is the `docs/FAC
 is why the two membership limbs are recorded next to the list in the source.
 
 ## Tags
-#scrml #map #dependencies #trigger-3 #escalation-server-only #two-set-distinction #escalation-reasons #is-body-only-escalation #stdlib-client-safety #node-id-freshness #module-graph #stdlib #chunk-namespace #cell-accessor-rename #detect-runtime-chunks #post-emit-chunk-gates #runtime-chunks #chunk-dependencies #fnv1a #semdiff #pipeline #bun #acorn #sql-lex #tenant-egress #tenant-floor #theme-reset #content-hash #colorless-async #async-combinators #on-mount #gh237 #scheduling #writer-ownership #bind-value #i225 #directive-is-form-value #batch-hoist #session-establishment #outlet #one-landmark #shell-composition #esm-chunks #module-format #each-fence #dist-space #source-space #d4 #d5 #forward-index #server-import-unemitted #dbauth #db-migrate #sql-table-refs #queried-table-grants #quoteIdent #sql-ident #navigate-wave1c #chunk-loading-depth-counter #tailwind-outline #e-schema-011 #npm-publishable #no-workspaces
+#scrml #map #dependencies #trigger-3 #escalation-server-only #two-set-distinction #escalation-reasons #is-body-only-escalation #stdlib-client-safety #node-id-freshness #module-graph #stdlib #chunk-namespace #cell-accessor-rename #detect-runtime-chunks #post-emit-chunk-gates #runtime-chunks #chunk-dependencies #fnv1a #semdiff #pipeline #bun #acorn #sql-lex #tenant-egress #tenant-floor #theme-reset #content-hash #colorless-async #async-combinators #on-mount #gh237 #scheduling #writer-ownership #bind-value #i225 #directive-is-form-value #batch-hoist #session-establishment #outlet #one-landmark #shell-composition #esm-chunks #module-format #each-fence #dist-space #source-space #d4 #d5 #forward-index #server-import-unemitted #dbauth #db-migrate #sql-table-refs #queried-table-grants #quoteIdent #sql-ident #navigate-wave1c #chunk-loading-depth-counter #tailwind-outline #e-schema-011 #npm-publishable #no-workspaces #structural-if #§17.1.2 #if-cond #if-raw #five-consumers #absent-not-null #parity-canary #credit-from-attr-value #e-dg-002-false-fire #visit-structural-if-attr #scope-push-order #indirect-callee-resolver #indirect-inverse-caller-map #inverse-caller-map-byte-identical #escalation-only #fix-a #fix-b #server-fn-peer-alias-names #export-const-client-gate #ident-expr-precise #pruned-subtrees
 
 ## Links
 - [primary.map.md](./primary.map.md)
