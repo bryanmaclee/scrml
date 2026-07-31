@@ -60,7 +60,7 @@ describe("S26 §51.13 phase 2 — guard coverage end-to-end", () => {
   const @allow: boolean = true
   function doClose() { @f = Flow.Closed }
 }
-< machine name=FlowMachine for=Flow>
+< engine name=FlowMachine for=Flow>
   .Open => .Closed given (@allow) [canClose]
 </>
 <button on:click={doClose()}>close</>
@@ -87,7 +87,7 @@ describe("S26 §51.13 phase 2 — guard coverage end-to-end", () => {
   const @canApprove: boolean = true
   function submit() { @order = Order.Review }
 }
-< machine name=OrderFlow for=Order>
+< engine name=OrderFlow for=Order>
   .Draft => .Review
   .Review => .Approved given (@canApprove) [approverOk]
   .Review => .Rejected
@@ -116,7 +116,7 @@ describe("S26 §51.13 phase 2 — guard coverage end-to-end", () => {
   const @allow: boolean = true
   function doClose() { @f = Flow.Closed }
 }
-< machine name=FlowMachine for=Flow>
+< engine name=FlowMachine for=Flow>
   .Open => .Closed given (@allow) [canClose]
 </>
 <button on:click={doClose()}>close</>

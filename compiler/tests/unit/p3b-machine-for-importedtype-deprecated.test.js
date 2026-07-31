@@ -1,7 +1,7 @@
 /**
  * P3.B — `<machine for=ImportedType>` (deprecated keyword) cross-file — Unit Tests
  *
- * The `<machine>` keyword is deprecated as of P1 (W-DEPRECATED-001 emitted at
+ * The `<machine>` keyword is deprecated as of P1 (E-DEPRECATED-001 emitted at
  * TAB time). Both `<machine>` and `<engine>` continue to compile in P1+; both
  * forms produce structurally identical engine-decl AST nodes (modulo the
  * legacyMachineKeyword flag).
@@ -14,7 +14,7 @@
  *
  * Coverage:
  *   §A — `<machine for=ImportedEnum>` compiles + emits exactly one
- *        W-DEPRECATED-001; cross-file type resolution succeeds (no E-ENGINE-004).
+ *        E-DEPRECATED-001; cross-file type resolution succeeds (no E-ENGINE-004).
  *   §B — `<machine for=ImportedStruct>` cross-file resolution + deprecation
  *        warning works.
  *
@@ -55,7 +55,7 @@ function realCompileErrors(result) {
 // ---------------------------------------------------------------------------
 
 describe("§A `<machine for=ImportedEnum>` (deprecated keyword) cross-file", () => {
-  test("compiles cleanly + emits exactly one W-DEPRECATED-001 + cross-file type resolution succeeds", () => {
+  test("compiles cleanly + emits exactly one E-DEPRECATED-001 + cross-file type resolution succeeds", () => {
     const ROOT = join(TMP, "a1");
     mkdirSync(ROOT, { recursive: true });
 
@@ -89,10 +89,11 @@ describe("§A `<machine for=ImportedEnum>` (deprecated keyword) cross-file", () 
     const errs = realCompileErrors(result);
     const e_machine_004 = errs.filter(e => e.code === "E-ENGINE-004");
     expect(e_machine_004).toEqual([]);
-    expect(errs).toEqual([]);
+    // S307: cross-file resolution still succeeds; the ONLY error is the keyword removal.
+    expect(errs.map(e => e.code)).toEqual(["E-DEPRECATED-001"]);
 
-    // Exactly one W-DEPRECATED-001 emitted in the warnings stream
-    const dep = (result.warnings || []).filter(w => w.code === "W-DEPRECATED-001");
+    // Exactly one E-DEPRECATED-001, in the fatal stream (S307)
+    const dep = (result.errors || []).filter(w => w.code === "E-DEPRECATED-001"); // S307: fatal stream
     expect(dep.length).toBe(1);
   });
 });
@@ -134,9 +135,10 @@ describe("§B `<machine for=ImportedStruct>` (deprecated keyword) cross-file", (
 
     const errs = realCompileErrors(result);
     expect(errs.filter(e => e.code === "E-ENGINE-004")).toEqual([]);
-    expect(errs).toEqual([]);
+    // S307: cross-file resolution still succeeds; the ONLY error is the keyword removal.
+    expect(errs.map(e => e.code)).toEqual(["E-DEPRECATED-001"]);
 
-    const dep = (result.warnings || []).filter(w => w.code === "W-DEPRECATED-001");
+    const dep = (result.errors || []).filter(w => w.code === "E-DEPRECATED-001"); // S307: fatal stream
     expect(dep.length).toBe(1);
   });
 });

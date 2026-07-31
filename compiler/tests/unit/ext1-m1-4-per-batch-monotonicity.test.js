@@ -54,7 +54,7 @@ function makeBareSql(query) {
   };
 }
 
-/** Build a bare-expr that's a `<machine>.advance(...)` call. */
+/** Build a bare-expr that's a `<engine>.advance(...)` call. */
 function makeAdvanceCall() {
   return {
     kind: "bare-expr",

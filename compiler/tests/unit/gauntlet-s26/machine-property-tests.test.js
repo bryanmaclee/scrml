@@ -57,7 +57,7 @@ describe("S26 §51.13 — auto-generated machine property tests", () => {
   type OrderStatus:enum = { Pending, Processing, Shipped }
   @status: OrderFlow = OrderStatus.Pending
 }
-< machine name=OrderFlow for=OrderStatus>
+< engine name=OrderFlow for=OrderStatus>
   .Pending => .Processing
   .Processing => .Shipped
 </>
@@ -75,7 +75,7 @@ describe("S26 §51.13 — auto-generated machine property tests", () => {
   type OrderStatus:enum = { Pending, Processing, Shipped }
   @status: OrderFlow = OrderStatus.Pending
 }
-< machine name=OrderFlow for=OrderStatus>
+< engine name=OrderFlow for=OrderStatus>
   .Pending => .Processing
   .Processing => .Shipped
 </>
@@ -106,7 +106,7 @@ describe("S26 §51.13 — auto-generated machine property tests", () => {
   type OrderStatus:enum = { Pending, Processing, Shipped }
   @status: OrderFlow = OrderStatus.Pending
 }
-< machine name=OrderFlow for=OrderStatus>
+< engine name=OrderFlow for=OrderStatus>
   .Pending => .Processing
   .Processing => .Shipped
 </>
@@ -148,7 +148,7 @@ describe("S26 §51.13 — auto-generated machine property tests", () => {
   @f: FlowMachine = Flow.Open
   const @allow: boolean = true
 }
-< machine name=FlowMachine for=Flow>
+< engine name=FlowMachine for=Flow>
   .Open => .Closed given (@allow)
 </>
 <p>x</>
@@ -173,7 +173,7 @@ describe("S26 §51.13 — auto-generated machine property tests", () => {
   type Fetch:enum = { Idle, Loading, Done }
   @fetch: FetchMachine = Fetch.Idle
 }
-< machine name=FetchMachine for=Fetch>
+< engine name=FetchMachine for=Fetch>
   .Idle => .Loading
   .Loading after 30s => .Done
 </>

@@ -73,7 +73,7 @@ describe("LSP L1 — buildHover", () => {
       "  type Tier:enum = { A, B }",
       "  @t: TierMachine = Tier.A",
       "}",
-      "< machine name=TierMachine for=Tier>",
+      "< engine name=TierMachine for=Tier>",
       "  Tier.A -> Tier.B : on bump",
       "</>",
       "</program>",

@@ -16,7 +16,7 @@ function diagnose(/* source */) {
 }
 
 describe("S32-008: §51.3.2 — empty machine body is legal when state-local transitions exist", () => {
-  test.skip("CONF-S32-008a: empty `< machine>` body does NOT emit E-ENGINE-005 when substates declare transitions", () => {
+  test.skip("CONF-S32-008a: empty `< engine>` body does NOT emit E-ENGINE-005 when substates declare transitions", () => {
     // Expected: §51.15.1 aggregated-derived mode. An empty body IS the marker;
     // E-ENGINE-005 SHALL NOT fire.
     const src = `
@@ -29,20 +29,20 @@ describe("S32-008: §51.3.2 — empty machine body is legal when state-local tra
               id: string
           </>
       </>
-      < machine name=SubmissionFlow for=Submission ></>
+      < engine name=SubmissionFlow for=Submission ></>
     `;
     const { errors } = diagnose(src);
     expect(errors.some((e) => e.code === "E-ENGINE-005")).toBe(false);
   });
 
-  test.skip("CONF-S32-008b: empty `< machine>` body STILL emits E-ENGINE-005 when governed type has NO state-local transitions", () => {
+  test.skip("CONF-S32-008b: empty `< engine>` body STILL emits E-ENGINE-005 when governed type has NO state-local transitions", () => {
     // Expected: the pre-S32 rule still applies in the no-state-local case.
     const src = `
       < enum Status>
           Active
           Archived
       </>
-      < machine name=StatusFlow for=Status ></>
+      < engine name=StatusFlow for=Status ></>
     `;
     const { errors } = diagnose(src);
     expect(errors.some((e) => e.code === "E-ENGINE-005")).toBe(true);
@@ -61,7 +61,7 @@ describe("S32-009: §51.15.2 — every state-local transition SHALL correspond t
           </>
           < Validated></>
       </>
-      < machine name=Flow for=Submission>
+      < engine name=Flow for=Submission>
           // machine body is non-empty (override mode), but omits Draft => Validated
           .Validated => .Archived
       </>
@@ -83,7 +83,7 @@ describe("S32-010: §51.15.2 — every substate-sourced machine edge SHALL corre
           < Draft></>
           < Validated></>
       </>
-      < machine name=Flow for=Submission>
+      < engine name=Flow for=Submission>
           .Draft => .Validated
       </>
     `;
@@ -103,7 +103,7 @@ describe("S32-011: §51.15.2 — temporal transitions exempt from cross-check", 
           < Draft></>
           < Expired></>
       </>
-      < machine name=Flow for=Submission>
+      < engine name=Flow for=Submission>
           after 30s => .Expired
       </>
     `;
@@ -121,7 +121,7 @@ describe("S32-012: §51.15.2 — wildcard transitions exempt from cross-check", 
           < Draft></>
           < Any></>
       </>
-      < machine name=Flow for=Submission>
+      < engine name=Flow for=Submission>
           * => .Any
       </>
     `;
@@ -142,7 +142,7 @@ describe("S32-013: §51.15.2 — guarded machine transitions DO require a state-
           < Draft></>
           < Validated></>
       </>
-      < machine name=Flow for=Submission>
+      < engine name=Flow for=Submission>
           .Draft => .Validated given (true)
       </>
     `;
@@ -157,7 +157,7 @@ describe("S32-014: §51.15.3 — state-local target SHALL be permitted by type-l
   test.skip("CONF-S32-014: state-local transition target not in type-level graph emits E-STATE-MACHINE-DIVERGENCE", () => {
     // Expected: §54.3 and §51.2 must agree. A transition to a target the
     // type-level graph forbids SHALL emit E-STATE-MACHINE-DIVERGENCE, even
-    // when no `< machine>` is declared.
+    // when no `< engine>` is declared.
     const src = `
       < enum SubmissionKind>
           Draft

@@ -57,7 +57,7 @@ describe("LSP L1 — extractAnalysisInfo (regression: canonical AST kinds)", () 
       "  type T:enum = { A, B }",
       "  @t: TM = T.A",
       "}",
-      "< machine name=TM for=T>",
+      "< engine name=TM for=T>",
       "  T.A -> T.B : on bump",
       "</>",
       "</program>",

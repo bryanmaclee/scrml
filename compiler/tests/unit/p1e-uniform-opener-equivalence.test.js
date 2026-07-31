@@ -65,20 +65,20 @@ describe("P1.E.A: uniform opener — engine + machine", () => {
     expect(ast.nodes[0].governedType).toBe("OrderStatus");
   });
 
-  test("`<machine name=Foo for=Bar>` (no-space) also produces engine-decl AST AND emits W-DEPRECATED-001", () => {
+  test("`<machine name=Foo for=Bar>` (no-space) also produces engine-decl AST AND emits E-DEPRECATED-001", () => {
     const bs = splitBlocks("test.scrml", "<machine name=AdminFlow for=OrderStatus>\n  .Pending => .Done\n</>");
     const tab = buildAST(bs);
     expect(tab.ast.nodes[0].kind).toBe("engine-decl");
     expect(tab.ast.nodes[0].engineName).toBe("AdminFlow");
     const codes = tab.errors.map(e => e.code);
-    expect(codes).toContain("W-DEPRECATED-001");
+    expect(codes).toContain("E-DEPRECATED-001");
   });
 
-  test("`< machine ...>` and `<machine ...>` both emit W-DEPRECATED-001", () => {
+  test("`< machine ...>` and `<machine ...>` both emit E-DEPRECATED-001", () => {
     const ws = buildAST(splitBlocks("test.scrml", "< machine name=Foo for=Bar>\n  .a => .b\n</>"));
     const ns = buildAST(splitBlocks("test.scrml", "<machine name=Foo for=Bar>\n  .a => .b\n</>"));
-    expect(ws.errors.some(e => e.code === "W-DEPRECATED-001")).toBe(true);
-    expect(ns.errors.some(e => e.code === "W-DEPRECATED-001")).toBe(true);
+    expect(ws.errors.some(e => e.code === "E-DEPRECATED-001")).toBe(true);
+    expect(ns.errors.some(e => e.code === "E-DEPRECATED-001")).toBe(true);
   });
 });
 

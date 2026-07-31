@@ -1,15 +1,15 @@
 /**
  * S25 gauntlet — §51.3.2 machine opener attribute form.
  *
- * The pre-S25 sentence form `< machine Name for Type>` was ratified for
+ * The pre-S25 sentence form `< engine Name for Type>` was ratified for
  * migration in S24 (radical-doubt debate 2026-04-17) and deferred to the
  * next §51 amendment. S25 executes the migration:
  *
- *   OLD: `< machine Name for Type>`
- *   NEW: `< machine name=Name for=Type>`
+ *   OLD: `< engine Name for Type>`
+ *   NEW: `< engine name=Name for=Type>`
  *
- *   OLD: `< machine Name for Type derived from @Source>`
- *   NEW: `< machine name=Name for=Type derived=@Source>`
+ *   OLD: `< engine Name for Type derived from @Source>`
+ *   NEW: `< engine name=Name for=Type derived=@Source>`
  *
  * Attribute values SHALL be bareword identifiers (not quoted strings).
  * The sentence form now fires E-ENGINE-020.
@@ -53,7 +53,7 @@ describe("S25 §51.3.2 — machine opener attribute form", () => {
   @light: Traffic = Color.Red
   function advance() { @light = Color.Green }
 }
-< machine name=Traffic for=Color>
+< engine name=Traffic for=Color>
   .Red => .Green
   .Green => .Blue
   .Blue => .Red
@@ -72,7 +72,7 @@ describe("S25 §51.3.2 — machine opener attribute form", () => {
   @state: M = S.A
   function go() { @state = S.B }
 }
-< machine for=S name=M>
+< engine for=S name=M>
   .A => .B
 </>
 <p>x</>
@@ -90,10 +90,10 @@ describe("S25 §51.3.2 — machine opener attribute form", () => {
   @order: OrderFlow = Order.Pending
   function ship() { @order = Order.Shipped }
 }
-< machine name=OrderFlow for=Order>
+< engine name=OrderFlow for=Order>
   .Pending => .Shipped
 </>
-< machine name=UI for=UIMode derived=@order>
+< engine name=UI for=UIMode derived=@order>
   .Pending => .Busy
   .Shipped => .Ready
 </>
@@ -111,7 +111,7 @@ describe("S25 §51.3.2 — machine opener attribute form", () => {
   @light: Traffic = Color.Red
   function advance() { @light = Color.Green }
 }
-< machine Traffic for Color>
+< engine Traffic for Color>
   .Red => .Green
 </>
 <p>x</>
@@ -132,10 +132,10 @@ describe("S25 §51.3.2 — machine opener attribute form", () => {
   @order: OrderFlow = Order.Pending
   function ship() { @order = Order.Shipped }
 }
-< machine OrderFlow for Order>
+< engine OrderFlow for Order>
   .Pending => .Shipped
 </>
-< machine UI for UIMode derived from @order>
+< engine UI for UIMode derived from @order>
   .Pending => .Busy
   .Shipped => .Ready
 </>
@@ -157,7 +157,7 @@ describe("S25 §51.3.2 — machine opener attribute form", () => {
   @state: M = S.A
   function go() { @state = S.B }
 }
-< machine name = M   for  =   S>
+< engine name = M   for  =   S>
   .A => .B
 </>
 <p>x</>

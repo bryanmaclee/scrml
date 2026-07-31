@@ -71,7 +71,7 @@ describe("S27 regression — unit-variant enum transition at runtime", () => {
   @log = []
   function step() { @order = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   audit @log
 </>
@@ -100,7 +100,7 @@ describe("S27 regression — unit-variant enum transition at runtime", () => {
     @order = S.C
   }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   .B => .C
   audit @log
@@ -128,7 +128,7 @@ describe("S27 regression — unit-variant enum transition at runtime", () => {
   @log = []
   function illegal() { @order = S.C }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   audit @log
 </>

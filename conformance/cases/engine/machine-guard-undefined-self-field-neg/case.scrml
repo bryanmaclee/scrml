@@ -1,6 +1,6 @@
 ${ type Doc:struct = { title: string, pages: int } }
 <program>
-< machine name=DocFlow for=Doc>
+< engine name=DocFlow for=Doc>
   .Draft => .Live given (self.pages == 1)
 </>
 <p id="s">struct-governed machine</p>

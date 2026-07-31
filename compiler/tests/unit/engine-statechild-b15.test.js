@@ -18,7 +18,7 @@
  *   - Derived engine: B15 skips initial= validation.
  *   - engineMeta.variants populated from typeDecls.
  *   - engineMeta.stateChildren populated by parser.
- *   - Legacy `<machine>` arrow-rule body skipped (no diagnostics).
+ *   - Legacy `<engine>` arrow-rule body skipped (no diagnostics).
  *
  * Source-of-truth: SPEC §51.0.B / §51.0.E / §51.0.F + §34 catalog rows
  * added by this dispatch.

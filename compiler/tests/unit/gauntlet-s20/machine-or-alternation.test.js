@@ -34,7 +34,7 @@ describe("Machine rule | alternation (§51.3)", () => {
   type S:enum = { Small, Big, Fire, Cape }
   @s: M = S.Small
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .Small => .Big | .Fire | .Cape
 </>
 <p>\${@s}</>`;
@@ -50,7 +50,7 @@ describe("Machine rule | alternation (§51.3)", () => {
   type S:enum = { Fire, Cape, Small }
   @s: M = S.Fire
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .Fire | .Cape => .Small
 </>
 <p>\${@s}</>`;
@@ -65,7 +65,7 @@ describe("Machine rule | alternation (§51.3)", () => {
   type S:enum = { A, B, C, D }
   @s: M = S.A
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A | .B => .C | .D
 </>
 <p>\${@s}</>`;
@@ -82,7 +82,7 @@ describe("Machine rule | alternation (§51.3)", () => {
   type MarioState:enum = { Small, Big, Fire, Cape }
   @state: MarioMachine = MarioState.Small
 }
-< machine name=MarioMachine for=MarioState>
+< engine name=MarioMachine for=MarioState>
   .Small        => .Big | .Fire | .Cape
   .Big          => .Fire | .Cape | .Small
   .Fire | .Cape => .Small
@@ -105,7 +105,7 @@ describe("Machine rule | alternation (§51.3)", () => {
   type S:enum = { A, B, C }
   @s: M = S.A
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   .A => .B | .C
 </>
@@ -120,7 +120,7 @@ describe("Machine rule | alternation (§51.3)", () => {
   type S:enum = { A, B }
   @s: M = S.A
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A | .A => .B
 </>
 <p>\${@s}</>`;
@@ -134,7 +134,7 @@ describe("Machine rule | alternation (§51.3)", () => {
   type S:enum = { A, B }
   @s: M = S.A
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
 </>
 <p>\${@s}</>`;
@@ -149,7 +149,7 @@ describe("Machine rule | alternation (§51.3)", () => {
   @s: M = S.A
   @allow = true
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B | .C given (@allow)
 </>
 <p>\${@s}</>`;

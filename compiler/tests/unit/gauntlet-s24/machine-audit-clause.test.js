@@ -58,7 +58,7 @@ describe("S24 §51.11 — audit clause parses + compiles cleanly", () => {
   @auditLog = []
   function step() { @order = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   .B => .C
   audit @auditLog
@@ -81,7 +81,7 @@ describe("S24 §51.11 — audit clause parses + compiles cleanly", () => {
   @order: M = S.A
   function step() { @order = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
 </>
 <p>x</>
@@ -99,7 +99,7 @@ describe("S24 §51.11 — E-ENGINE-019 validation", () => {
   type S:enum = { A, B }
   @order: M = S.A
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   audit @undeclaredAuditTarget
 </>
@@ -119,7 +119,7 @@ describe("S24 §51.11 — E-ENGINE-019 validation", () => {
   @first = []
   @second = []
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   audit @first
   audit @second
@@ -139,7 +139,7 @@ describe("S24 §51.11 — E-ENGINE-019 validation", () => {
   @order: M = S.A
   @log = []
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   audit @log
 </>
@@ -160,7 +160,7 @@ describe("S24 §51.11 — transition guard + audit ordering in generated JS", ()
   @log = []
   function step() { @order = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B given (true)
   audit @log
 </>

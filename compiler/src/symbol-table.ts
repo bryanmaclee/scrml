@@ -7261,9 +7261,9 @@ export function validateEngineStateChildrenAndRules(
         `state-child with its outgoing \`rule=\`: one of the three §51.0.F target-only ` +
         `forms — single-target (\`<Variant rule=.NextVariant/>\`), multi-target ` +
         `(\`<Variant rule=(.A | .B)/>\`), or wildcard (\`<Variant rule=*/>\`). ` +
-        `Whole-body arrow rules belong to the named/legacy \`<machine>\` surface ` +
-        `(§51.3) — declare \`<engine name=Name ${forClause}>\` (or the deprecated ` +
-        `\`<machine>\`) and bind a variable to it if you intend a machine.`,
+        `Whole-body arrow rules belong to the named/legacy declaration surface ` +
+        `(§51.3) — declare \`<engine name=Name ${forClause}>\` and bind a variable ` +
+        `to it if you intend that form.`,
         engineDecl,
         filePath,
         "error",
@@ -7329,7 +7329,7 @@ export function validateEngineStateChildrenAndRules(
           `E-ENGINE-RULE-LEGACY-SYNTAX: state-child \`<${sc.tag} rule=${r.raw}>\` uses the ` +
           `legacy event-arrow form. On \`<engine>\`, \`rule=\` must be one of the three §51.0.F ` +
           `target-only forms: single-target (\`rule=.NextVariant\`), multi-target (\`rule=(.A | .B)\`), ` +
-          `or wildcard (\`rule=*\`). Event-arrow rules belong to the deprecated \`<machine>\` syntax (§51.3).`,
+          `or wildcard (\`rule=*\`). Event-arrow rules belong to the named/legacy declaration form (§51.3).`,
           engineDecl,
           filePath,
           "error",

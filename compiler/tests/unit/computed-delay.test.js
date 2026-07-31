@@ -2,14 +2,14 @@
  * computed-delay.test.js — A5-5 unit tests for §51.12.3.1 computed-delay form
  *
  * Tests the lift on the literal-only constraint for `after` durations across
- * BOTH temporal surfaces (legacy `<machine>` arrow rules + new `<engine>`
+ * BOTH temporal surfaces (legacy `<engine>` arrow rules + new `<engine>`
  * `<onTimeout>` element). Per SPEC §51.12.3.1 (S67 amendment, 2026-05-07).
  *
  *   §A5-5.1  parseAfterDuration helper — discriminator behavior
  *   §A5-5.2  parseAfterDuration — unit multipliers (ms/s/m/h)
  *   §A5-5.3  parseAfterDuration — invalid duration rejection
- *   §A5-5.4  Legacy <machine>: literal-form preserves existing constant-fold path
- *   §A5-5.5  Legacy <machine>: computed-form emits IIFE-wrapped clamp+round
+ *   §A5-5.4  Legacy <engine>: literal-form preserves existing constant-fold path
+ *   §A5-5.5  Legacy <engine>: computed-form emits IIFE-wrapped clamp+round
  *   §A5-5.6  Engine <onTimeout>: literal-form emits {ms, target}
  *   §A5-5.7  Engine <onTimeout>: computed-form emits {msExpr, target}
  *   §A5-5.8  Computed-form rewrites @var reads through _scrml_reactive_get
@@ -29,7 +29,7 @@ import { unNamespaceEngineNames } from "../helpers/chunk-scope.js";
 /**
  * Compile the source through the full pipeline (BS→TAB→...→CG) and return the
  * client.js text. Mirrors the gauntlet-s26 test fixture pattern. Used for
- * legacy-<machine> end-to-end tests that need the typer's `machineRegistry`
+ * legacy-<engine> end-to-end tests that need the typer's `machineRegistry`
  * (built by the TS pass; not by SYM alone).
  */
 function compileToClientJs(source, suffix = "computed-delay") {
@@ -176,7 +176,7 @@ describe("A5-5 §A5-5.3 — invalid duration rejection", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §A5-5.4 — Legacy <machine>: literal-form retains constant-fold
+// §A5-5.4 — Legacy <engine>: literal-form retains constant-fold
 // ---------------------------------------------------------------------------
 
 describe("A5-5 §A5-5.4 — legacy machine literal preserves constant-fold", () => {
@@ -186,7 +186,7 @@ describe("A5-5 §A5-5.4 — legacy machine literal preserves constant-fold", () 
   type Phase:enum = { Loading, TimedOut }
   @phase: PhaseMachine = Phase.Loading
 }
-< machine name=PhaseMachine for=Phase>
+< engine name=PhaseMachine for=Phase>
   .Loading after 30s => .TimedOut
 </>
 </program>`;
@@ -213,7 +213,7 @@ describe("A5-5 §A5-5.4 — legacy machine literal preserves constant-fold", () 
   @phase: PhaseMachine = Phase.Idle
   function trigger() { @phase = Phase.Loading }
 }
-< machine name=PhaseMachine for=Phase>
+< engine name=PhaseMachine for=Phase>
   .Idle => .Loading
   .Loading after 30s => .TimedOut
 </>
@@ -227,24 +227,24 @@ describe("A5-5 §A5-5.4 — legacy machine literal preserves constant-fold", () 
 });
 
 // ---------------------------------------------------------------------------
-// §A5-5.5 — Legacy <machine>: computed-form emits IIFE
+// §A5-5.5 — Legacy <engine>: computed-form emits IIFE
 // ---------------------------------------------------------------------------
 
 describe("A5-5 §A5-5.5 — legacy machine computed form (helper-level coverage)", () => {
   // KNOWN LIMITATION (documented as scope adjustment, S77 dispatch):
-  // The legacy `<machine>` body parser at the block-splitter / ast-builder
+  // The legacy `<engine>` body parser at the block-splitter / ast-builder
   // level splits `${...}` expressions into separate children, so the rulesRaw
   // string fed to parseMachineRules has line-breaks where the `${expr}` was.
   // This breaks the `after ${expr}<unit>` syntax for the LEGACY machine form
   // even though the parseMachineRules regex + parseAfterDuration helper handle
   // the input correctly. Fixing requires touching the body-parser surface
-  // (block-splitter behavior on `${...}` inside `<machine>` body) — out of
+  // (block-splitter behavior on `${...}` inside `<engine>` body) — out of
   // scope for the S77 dispatch's per-rule codegen surface.
   //
   // The SPEC §51.12.3.1 amendment lists computed-delay as available on BOTH
   // surfaces. The engine `<onTimeout>` surface — which is the S67-recommended
   // form — works correctly (verified by computed-delay engine tests below
-  // + by engine-ontimeout-codegen.test.js). The legacy `<machine>` surface's
+  // + by engine-ontimeout-codegen.test.js). The legacy `<engine>` surface's
   // computed-delay is deferred to a follow-on dispatch.
   //
   // The helper code (parseAfterDuration + emitDurationLiteral + parseMachineRules
@@ -301,7 +301,7 @@ describe("A5-5 §A5-5.5 — legacy machine computed form (helper-level coverage)
 });
 
 // ---------------------------------------------------------------------------
-// §A5-5.5b — Legacy <machine>: computed-form NOW WORKS end-to-end (S77 closure)
+// §A5-5.5b — Legacy <engine>: computed-form NOW WORKS end-to-end (S77 closure)
 //
 // Closes the §A5-5.5 deferred limitation. The original block-splitter+ast-
 // builder bug was fragmenting `${...}` substrings into separate logic
@@ -312,7 +312,7 @@ describe("A5-5 §A5-5.5 — legacy machine computed form (helper-level coverage)
 // path produces correct codegen.
 // ---------------------------------------------------------------------------
 
-describe("A5-5 §A5-5.5b — legacy <machine> computed-form end-to-end (S77 fix)", () => {
+describe("A5-5 §A5-5.5b — legacy <engine> computed-form end-to-end (S77 fix)", () => {
   test("`.From after ${@d}ms => .To` rulesRaw is reconstructed without fragmenting", () => {
     const { splitBlocks } = require("../../src/block-splitter.js");
     const { buildAST } = require("../../src/ast-builder.js");
@@ -321,7 +321,7 @@ describe("A5-5 §A5-5.5b — legacy <machine> computed-form end-to-end (S77 fix)
   @phase: BackoffMachine = Phase.Connecting
   @backoffDelay = 500
 }
-<machine name=BackoffMachine for=Phase>
+<engine name=BackoffMachine for=Phase>
   .Connecting after \${@backoffDelay}ms => .Open
   .Open => .Closed
 </>`;
@@ -340,7 +340,7 @@ describe("A5-5 §A5-5.5b — legacy <machine> computed-form end-to-end (S77 fix)
   @phase: BackoffMachine = Phase.Connecting
   @backoffDelay = 500
 }
-<machine name=BackoffMachine for=Phase>
+<engine name=BackoffMachine for=Phase>
   .Connecting after \${@backoffDelay}ms => .Open
   .Open => .Closed
 </>`;
@@ -359,7 +359,7 @@ describe("A5-5 §A5-5.5b — legacy <machine> computed-form end-to-end (S77 fix)
   type Phase:enum = { Connecting, Open }
   @phase: M = Phase.Connecting
 }
-<machine name=M for=Phase>
+<engine name=M for=Phase>
   .Connecting after 500ms => .Open
 </>`;
     const { errors, clientJs } = compileToClientJs(src);
@@ -510,7 +510,7 @@ describe("A5-5 §A5-5.10 — wildcard-from rejection (E-ENGINE-021) — literal 
   type Phase:enum = { A, B, C }
   @phase: PhaseMachine = Phase.A
 }
-< machine name=PhaseMachine for=Phase>
+< engine name=PhaseMachine for=Phase>
   * after 30s => .C
 </>
 </program>`;
@@ -540,7 +540,7 @@ describe("A5-5 §A5-5.11 — chained re-arm payload (literal-only form)", () => 
   type Phase:enum = { A, B, C, D }
   @phase: PhaseMachine = Phase.A
 }
-< machine name=PhaseMachine for=Phase>
+< engine name=PhaseMachine for=Phase>
   .A after 1s => .B
   .B after 2s => .C
   .C after 3s => .D

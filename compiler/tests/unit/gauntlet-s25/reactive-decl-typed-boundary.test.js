@@ -64,7 +64,7 @@ describe("S25 §6 — untyped-then-typed state-decl boundary", () => {
   @x = 1
   @y: MM = M.A
 }
-< machine name=MM for=M>
+< engine name=MM for=M>
   .A => .B
 </>
 <p>x=\${@x} y=\${@y}</>
@@ -85,7 +85,7 @@ describe("S25 §6 — untyped-then-typed state-decl boundary", () => {
   @c = 2
   @d: MM = M.A
 }
-< machine name=MM for=M>
+< engine name=MM for=M>
   .A => .B
 </>
 <p>x</>
@@ -106,7 +106,7 @@ describe("S25 §6 — untyped-then-typed state-decl boundary", () => {
   @y: MM = M.A
   @x = 1
 }
-< machine name=MM for=M>
+< engine name=MM for=M>
   .A => .B
 </>
 <p>x=\${@x} y=\${@y}</>

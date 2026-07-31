@@ -19,7 +19,7 @@
  *   §C13.7  End-to-end: direct write to engine variable — codegen shape
  *   §C13.8  End-to-end: `.advance(.X)` — codegen shape
  *   §C13.9  End-to-end: multi-engine file — independent enforcement
- *   §C13.10 End-to-end: legacy <machine> path NOT regressed
+ *   §C13.10 End-to-end: legacy <engine> path NOT regressed
  *   §C13.11 End-to-end: chunk wiring — `engine` chunk in tree-shaken output
  *   §C13.12 End-to-end: non-engine var direct writes use bare reactive substrate
  *   §C13.13 End-to-end: wildcard rule= accepts any target
@@ -522,11 +522,11 @@ describe("C13 §C13.9 — multi-engine file: independent enforcement", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §C13.10 — Legacy <machine> path NOT regressed
+// §C13.10 — Legacy <engine> path NOT regressed
 // ---------------------------------------------------------------------------
 
-describe("C13 §C13.10 — legacy <machine> direct-write enforcement preserved", () => {
-  test("file containing ONLY a legacy <machine> does NOT trigger C13 helpers", () => {
+describe("C13 §C13.10 — legacy <engine> direct-write enforcement preserved", () => {
+  test("file containing ONLY a legacy <engine> does NOT trigger C13 helpers", () => {
     const src = `<program>
 \${
   type Status:enum = {
@@ -538,7 +538,7 @@ describe("C13 §C13.10 — legacy <machine> direct-write enforcement preserved",
     }
   }
 }
-< machine name=StatusMachine for=Status>
+< engine name=StatusMachine for=Status>
   .Idle => .Active
   .Active => .Idle
 </>
@@ -550,7 +550,7 @@ describe("C13 §C13.10 — legacy <machine> direct-write enforcement preserved",
     const js = generateClientJs(makeTestCtx(fileAST));
 
     // The C13 surface (write hook + .advance() + chunk helpers) is only for
-    // the new `<engine>` form. A pure-legacy `<machine>` file must not
+    // the new `<engine>` form. A pure-legacy `<engine>` file must not
     // emit any C13 helper calls (the helpers may still be in the runtime
     // chunk, but no compile-time code emits a call to them).
     expect(js).not.toContain('_scrml_engine_direct_set("status"');

@@ -61,7 +61,7 @@ describe("S26 §51.13 phase 3 — payload-bound rules end-to-end", () => {
   @cs: CannonMachine = CannonState.Idle
   function start() { @cs = CannonState.Charging(0) }
 }
-< machine name=CannonMachine for=CannonState>
+< engine name=CannonMachine for=CannonState>
   .Idle               => .Charging(level: l)
   .Charging(n)        => .Firing(shot: s)
   .Firing             => .Idle
@@ -92,7 +92,7 @@ describe("S26 §51.13 phase 3 — payload-bound rules end-to-end", () => {
   @cs: CannonMachine = CannonState.Idle
   function charge() { @cs = CannonState.Charging(0) }
 }
-< machine name=CannonMachine for=CannonState>
+< engine name=CannonMachine for=CannonState>
   .Idle               => .Charging(level: l)
   .Charging(n)        => .Ready given (n >= 50) [fullyCharged]
 </>
@@ -119,7 +119,7 @@ describe("S26 §51.13 phase 3 — payload-bound rules end-to-end", () => {
   @s: M = S.A(1)
   function go() { @s = S.B("x") }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A(k)  => .B(name: n)  given (k > 0) [positive]
   .B     => .C
 </>

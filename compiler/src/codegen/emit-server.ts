@@ -5614,7 +5614,7 @@ export function generateServerJs(
         "`session.destroy` / a `session.<field>` read) is available ONLY inside a web-app " +
         "server route handler — the request/response context the compiler wraps with the " +
         "session cookie. It is NOT available in an SSE `server function*`, an `<endpoint>` " +
-        "arm, a `<machine>` method, a serverLoad cell, an in-process server-fn helper called " +
+        "arm, an `<engine>` method, a serverLoad cell, an in-process server-fn helper called " +
         "by another server function, or a headless `kind=\"tool\"` program (bearer auth). " +
         "Move the `session.*` call into the server function that is the request entry point, " +
         "or return the value to that handler and call `session.set` there.",

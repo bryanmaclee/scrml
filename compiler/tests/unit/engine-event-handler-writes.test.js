@@ -7,7 +7,7 @@
  * (`<button onclick=${...}>`, `<input onchange=${...}>`, etc.).
  *
  * Pre-fix (Wave 2.4 close): `rewriteBlockBody` in `emit-control-flow.ts:964`
- * accepted only `machineBindings` (legacy `<machine>` surface) and lowered
+ * accepted only `machineBindings` (legacy `<engine>` surface) and lowered
  * `@engineVar = .X` inside event-handler bodies to a bare
  * `_scrml_reactive_set("name", value)`. This silently bypassed:
  *   - rule= runtime enforcement (§51.0.F)

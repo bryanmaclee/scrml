@@ -85,7 +85,7 @@ describe("S27 — effect-body reactive refs compile + run correctly", () => {
   @started = false
   function go() { @state = S.Running }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .Idle => .Running { @started = true }
 </>
 <p>x</>
@@ -112,7 +112,7 @@ describe("S27 — effect-body reactive refs compile + run correctly", () => {
   @trace = []
   function go() { @state = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B { @trace = @trace.concat(["hop"]) }
 </>
 <p>x</>
@@ -135,7 +135,7 @@ describe("S27 — effect-body reactive refs compile + run correctly", () => {
   @fired = 0
   function go() { @state = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B given (true) { @fired = @fired + 1 }
 </>
 <p>x</>
@@ -161,7 +161,7 @@ describe("S27 — effect-body reactive refs compile + run correctly", () => {
   @lastTo = ""
   function go() { @state = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B { @lastTo = event.to }
 </>
 <p>x</>
@@ -184,7 +184,7 @@ describe("S27 — effect-body reactive refs compile + run correctly", () => {
   function toB() { @state = S.B }
   function toC() { @state = S.C }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B { @count = @count + 10 }
   .B => .C { @count = @count + 100 }
 </>

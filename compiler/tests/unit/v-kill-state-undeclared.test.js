@@ -31,7 +31,7 @@
  * READ-side diagnostic deferred (V-kill §8 follow-up): firing
  * E-STATE-UNDECLARED on bare `@name` reads with no structural decl in scope
  * would surface false-positives across the engine corpus (`@ui` markup ref
- * vs `< machine name=UI ...>` register-as-`UI` mismatch — pre-existing
+ * vs `< engine name=UI ...>` register-as-`UI` mismatch — pre-existing
  * SYM-side engine var-name normalization issue, out of V-kill scope). The
  * primary V-kill safety win is the write-side fire; read-side is a normative
  * extension landed in a follow-up unit after engine var-name canonicalisation.

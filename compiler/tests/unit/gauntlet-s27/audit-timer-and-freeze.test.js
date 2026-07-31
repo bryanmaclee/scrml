@@ -86,7 +86,7 @@ describe("S27 §51.11 — timer-fired transitions audit", () => {
   @state: M = S.Idle
   @log = []
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .Idle after 10ms => .Done
   audit @log
 </>
@@ -117,7 +117,7 @@ describe("S27 §51.11 — timer-fired transitions audit", () => {
   @state: M = S.A
   @log = []
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A after 10ms => .B
   .B after 10ms => .C
   audit @log
@@ -146,7 +146,7 @@ describe("S27 §51.11 — timer-fired transitions audit", () => {
   @log = []
   function go() { @state = S.Running }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .Idle => .Running
   .Running after 10ms => .Done
   audit @log
@@ -181,7 +181,7 @@ describe("S27 §51.11.4 — audit entries are Object.freeze'd", () => {
   @log = []
   function step() { @state = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   audit @log
 </>
@@ -210,7 +210,7 @@ describe("S27 §51.11.4 — audit entries are Object.freeze'd", () => {
   @state: M = S.Idle
   @log = []
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .Idle after 10ms => .Done
   audit @log
 </>

@@ -18,7 +18,7 @@
  *   1. Modern form — basic single-target `rule=.X` — no E-ENGINE-005.
  *   2. Modern form — multi-target `rule=(.A | .B)` — no E-ENGINE-005.
  *   3. Modern form with `<onTransition>` body (B17 family) — no E-ENGINE-005.
- *   4. Legacy `<machine name= for=>` over arrow body — still parses; E-ENGINE-005
+ *   4. Legacy `<engine name= for=>` over arrow body — still parses; E-ENGINE-005
  *      regression-guard for empty legacy bodies still fires.
  *   5. `<engine>` keyword over LEGACY arrow body — still parses (§51.3.2 P1
  *      amendment; body-shape, not keyword, dispatches).
@@ -136,12 +136,12 @@ describe("S75 §51.0 modern <engine> form — no false-positive E-ENGINE-005", (
 // genuinely-empty legacy bodies
 // ---------------------------------------------------------------------------
 
-describe("S75 regression-guard: legacy <machine> + <engine>-keyword-over-legacy-body", () => {
-  test("legacy <machine name= for=> with arrow rules still parses cleanly", () => {
+describe("S75 regression-guard: legacy <engine> + <engine>-keyword-over-legacy-body", () => {
+  test("legacy <engine name= for=> with arrow rules still parses cleanly", () => {
     const source = `
 \${ type Phase:enum = { Idle, Loading, Done } }
 
-< machine name=PhaseM for=Phase >
+< engine name=PhaseM for=Phase >
 .Idle => .Loading
 .Loading => .Done
 .Done => .Idle

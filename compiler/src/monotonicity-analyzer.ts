@@ -602,7 +602,7 @@ export function analyzeMonotonicity(
       if (verdict === "machine-intrinsic") {
         diagnostics.push({
           code: "D-CPS-MACHINE-INTRINSIC-MONOTONE",
-          message: "CPS batch bounded by a `<machine>` `.advance(.X)` transition; intrinsic-monotone by §51 allowed-from-states guard.",
+          message: "CPS batch bounded by an `<engine>` `.advance(.X)` transition; intrinsic-monotone by §51 allowed-from-states guard.",
           functionNodeId: fnNodeId,
           batchIndex,
         });

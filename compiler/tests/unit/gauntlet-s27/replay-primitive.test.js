@@ -92,7 +92,7 @@ describe("S27 §51.14 — codegen: replay call site", () => {
   function go() { @order = S.B }
   function full() { replay(@order, @log) }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   audit @log
 </>
@@ -114,7 +114,7 @@ describe("S27 §51.14 — codegen: replay call site", () => {
   @log = []
   function seek(n: integer) { replay(@order, @log, n) }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   audit @log
 </>
@@ -134,7 +134,7 @@ describe("S27 §51.14 — codegen: replay call site", () => {
   @log = []
   function seekHalf() { replay(@order, @log, @log.length / 2) }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   audit @log
 </>
@@ -156,7 +156,7 @@ describe("S27 §51.14 — codegen: replay call site", () => {
   @log = []
   function go() { replay(@order, @log) }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .A
   audit @log
 </>
@@ -180,7 +180,7 @@ describe("S27 §51.14 — runtime behavior", () => {
   function step2() { @order = S.C }
   function full() { replay(@order, @log) }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   .B => .C
   audit @log
@@ -212,7 +212,7 @@ describe("S27 §51.14 — runtime behavior", () => {
   function advance() { @order = S.B; @order = S.C; @order = S.D }
   function seek(n: integer) { replay(@order, @log, n) }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   .B => .C
   .C => .D
@@ -249,7 +249,7 @@ describe("S27 §51.14 — runtime behavior", () => {
   function publish() { @post = S.Published }
   function rewind() { replay(@post, @log, 0) }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .Draft => .Published
   audit @log
 </>
@@ -274,7 +274,7 @@ describe("S27 §51.14 — runtime behavior", () => {
   @log = []
   function rewind() { replay(@order, @log, 0) }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   audit @log
 </>
@@ -301,7 +301,7 @@ describe("S27 §51.14 — runtime behavior", () => {
   function step() { @order = S.B }
   function badSeek(n: integer) { replay(@order, @log, n) }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   audit @log
 </>
@@ -331,7 +331,7 @@ describe("S27 §51.14 — runtime behavior", () => {
   }
   function rewind() { replay(@order, @log, 0) }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .Pending => .Processing
   .Processing => .Shipped
   .Shipped => .Delivered
@@ -362,7 +362,7 @@ describe("S27 §51.14 — runtime behavior", () => {
   function step2() { @order = S.C }
   function rewind() { replay(@order, @log, 0) }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   .B => .C
   audit @log
@@ -397,7 +397,7 @@ describe("S27 §51.14 — replay clears pending temporal timers", () => {
   @log = []
   function rewindToStart() { replay(@state, @log, 0) }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .Idle after 50ms => .Done
   audit @log
 </>

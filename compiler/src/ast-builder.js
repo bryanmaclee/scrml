@@ -16707,22 +16707,27 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       // `< machine Name for Type>` is rejected with E-ENGINE-020.
       //
       // P1 (2026-04-30, state-as-primary unification): canonical keyword is now
-      // `engine` (DD1 §6.6, design-insight `state-as-primary`). The legacy
-      // `machine` keyword continues to compile but emits W-DEPRECATED-001.
-      // Both forms produce a `engine-decl` AST node — the internal naming is
-      // not renamed in P1 to keep blast radius bounded; that rename moves with
-      // P3 when downstream stages consume the renamed shape uniformly.
+      // `engine` (DD1 §6.6, design-insight `state-as-primary`). Both forms
+      // produce an `engine-decl` AST node — the internal naming is not renamed
+      // to keep blast radius bounded.
+      //
+      // S307 (2026-07-31) — REMOVED BEFORE 1.0 (bryan ruling; SPEC §63.7, §51.0.L).
+      // `<machine>` does not ship in language-1.0 and `W-DEPRECATED-001` is
+      // replaced by the reserved `E-DEPRECATED-001`, which now fires. Per §63.5
+      // the form still PARSES identically — we keep building the `engine-decl`
+      // below so a `<machine>` source reports exactly one diagnostic naming the
+      // migration, rather than cascading secondary errors from an unbuilt node.
+      // The compile fails on the error; nothing downstream consumes the node.
       if (block.name === "machine" || block.name === "engine") {
         const isLegacyMachineKeyword = block.name === "machine";
         if (isLegacyMachineKeyword) {
           errors.push(new TABError(
-            "W-DEPRECATED-001",
-            `W-DEPRECATED-001: \`<machine>\` keyword is deprecated; use \`<engine>\` instead. ` +
-            `Both forms compile in P1; \`<machine>\` becomes E-DEPRECATED-001 in P3. ` +
-            `Migration: rename the keyword (the rest of the declaration is unchanged).`,
+            "E-DEPRECATED-001",
+            `E-DEPRECATED-001: the \`<machine>\` keyword has been removed; use \`<engine>\` instead. ` +
+            `The declaration is otherwise unchanged — only the keyword differs. ` +
+            `Migration: run \`bun scrml migrate <file>\`, which rewrites the opener in one pass.`,
             span,
           ));
-          errors[errors.length - 1].severity = "warning";
         }
         const keyword = block.name; // "machine" or "engine"
         const machineRaw = (block.raw || "").trim();
@@ -17093,8 +17098,8 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           }
           errors.push(new TABError(
             "E-ENGINE-020",
-            `E-ENGINE-020: \`< machine>\` opener uses the pre-S25 sentence form. ` +
-            `Use the attribute form: \`< machine name=${engineName || "MachineName"} for=${governedType || "TypeName"}${sourceVar ? ` derived=@${sourceVar}` : ""}>\`. ` +
+            `E-ENGINE-020: \`<engine>\` opener uses the pre-S25 sentence form. ` +
+            `Use the attribute form: \`<engine name=${engineName || "EngineName"} for=${governedType || "TypeName"}${sourceVar ? ` derived=@${sourceVar}` : ""}>\`. ` +
             `The attribute form aligns with the rest of scrml's declarative syntax (@x: Type, as Type, type Foo).`,
             span,
           ));

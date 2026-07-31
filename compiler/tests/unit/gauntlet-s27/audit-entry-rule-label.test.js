@@ -106,7 +106,7 @@ describe("S27 §51.11.4 — transition table embeds labels", () => {
   @log = []
   function step() { @order = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B given (@gate) [gateway]
   .B => .C
   audit @log
@@ -131,7 +131,7 @@ describe("S27 §51.11.4 — transition table embeds labels", () => {
   @log = []
   function step() { @order = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B given (@gate)
   audit @log
 </>
@@ -163,7 +163,7 @@ describe("S27 §51.11.4 — transition guard emits matched-key + audit-label", (
   @log = []
   function step() { @order = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   audit @log
 </>
@@ -187,7 +187,7 @@ describe("S27 §51.11.4 — transition guard emits matched-key + audit-label", (
   @log = []
   function step() { @order = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   audit @log
 </>
@@ -209,7 +209,7 @@ describe("S27 §51.11.4 — runtime entry shape", () => {
   @log = []
   function step() { @order = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   .B => .C
   audit @log
@@ -240,7 +240,7 @@ describe("S27 §51.11.4 — runtime entry shape", () => {
   @log = []
   function fail() { @order = S.Failed }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .Idle => .Running
   * => .Failed
   audit @log
@@ -264,7 +264,7 @@ describe("S27 §51.11.4 — runtime entry shape", () => {
   function anywhere() { @order = S.Anywhere }
   function special() { @order = S.Special }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .Start => .Special
   .Start => *
   audit @log
@@ -289,7 +289,7 @@ describe("S27 §51.11.4 — runtime entry shape", () => {
   @log = []
   function anyJump() { @order = S.C }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   * => *
   audit @log
@@ -317,7 +317,7 @@ describe("S27 §51.11.4 — runtime entry shape", () => {
   function submit() { @order = S.Submitted }
   function archive() { @order = S.Archived }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .Draft => .Submitted given (true) [readiness]
   .Submitted => .Archived
   audit @log
@@ -349,7 +349,7 @@ describe("S27 §51.11.4 — runtime entry shape", () => {
     @order = S.D
   }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   .B => .C
   .C => .D

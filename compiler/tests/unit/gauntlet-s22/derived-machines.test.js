@@ -1,7 +1,7 @@
 /**
  * derived-machines.test.js — S22 §51.9 (I): derived / projection machines.
  *
- * Slice 1 (type-system): parses `< machine name=UI for=UIMode derived=@order>`,
+ * Slice 1 (type-system): parses `< engine name=UI for=UIMode derived=@order>`,
  * registers the derived machine with isDerived/sourceVar/projectedVarName,
  * and validates exhaustiveness over the source enum's variants
  * (E-ENGINE-018). Runtime codegen lands in a follow-up slice — these tests
@@ -371,7 +371,7 @@ describe("§51.9 slice 2 — E-ENGINE-017 reject writes to projected vars", () =
     expect(errors[0].code).toBe("E-ENGINE-017");
     expect(errors[0].message).toContain("'@ui'");
     expect(errors[0].message).toContain("'@order'");
-    expect(errors[0].message).toContain("< machine UI>");
+    expect(errors[0].message).toContain("<engine UI>");
   });
 
   test("bare-expr `@ui = X` inside a function body fires E-ENGINE-017", () => {
@@ -412,7 +412,7 @@ describe("§51.9 slice 2 — E-ENGINE-017 reject writes to projected vars", () =
 
 describe("§51.9 slice 2 — end-to-end compilation", () => {
   test("full file compiles and emits projection function + derived registration", () => {
-    const source = `\${\n  type OrderState:enum = { Draft, Submitted, Paid, Shipping, Delivered, Cancelled, Refunded }\n  type UIMode:enum = { Editable, ReadOnly, Terminal }\n\n  @order: OrderMachine = OrderState.Draft\n}\n\n< machine name=OrderMachine for=OrderState>\n    .Draft => .Submitted\n</>\n\n< machine name=UI for=UIMode derived=@order>\n    .Draft => .Editable\n    .Submitted | .Paid | .Shipping => .ReadOnly\n    .Delivered | .Cancelled | .Refunded => .Terminal\n</>\n\n<program>\n    <p>ok</>\n</>\n`;
+    const source = `\${\n  type OrderState:enum = { Draft, Submitted, Paid, Shipping, Delivered, Cancelled, Refunded }\n  type UIMode:enum = { Editable, ReadOnly, Terminal }\n\n  @order: OrderMachine = OrderState.Draft\n}\n\n< engine name=OrderMachine for=OrderState>\n    .Draft => .Submitted\n</>\n\n< engine name=UI for=UIMode derived=@order>\n    .Draft => .Editable\n    .Submitted | .Paid | .Shipping => .ReadOnly\n    .Delivered | .Cancelled | .Refunded => .Terminal\n</>\n\n<program>\n    <p>ok</>\n</>\n`;
     const { fatalErrors, clientJs: __cjRaw } = compileSource(source, "end-to-end.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(fatalErrors).toEqual([]);
     expect(clientJs).toContain("function _scrml_project_UI(src)");
@@ -428,7 +428,7 @@ describe("§51.9 slice 2 — end-to-end compilation", () => {
     // checker sees them. The function-body assignment to @ui is the case we
     // actually care about — the user attempting to write through the
     // projected var from user code.
-    const source = `\${\n  type OrderState:enum = { Draft, Submitted }\n  type UIMode:enum = { Editable, ReadOnly }\n  @order: OrderMachine = OrderState.Draft\n}\n\n\${\n  function badWrite() { @ui = "Editable" }\n}\n\n< machine name=OrderMachine for=OrderState>\n    .Draft => .Submitted\n</>\n\n< machine name=UI for=UIMode derived=@order>\n    .Draft => .Editable\n    .Submitted => .ReadOnly\n</>\n\n<program><p>ok</></>\n`;
+    const source = `\${\n  type OrderState:enum = { Draft, Submitted }\n  type UIMode:enum = { Editable, ReadOnly }\n  @order: OrderMachine = OrderState.Draft\n}\n\n\${\n  function badWrite() { @ui = "Editable" }\n}\n\n< engine name=OrderMachine for=OrderState>\n    .Draft => .Submitted\n</>\n\n< engine name=UI for=UIMode derived=@order>\n    .Draft => .Editable\n    .Submitted => .ReadOnly\n</>\n\n<program><p>ok</></>\n`;
     const { errors } = compileSource(source, "write-rejected.scrml");
     const e = errors.find(e => e.code === "E-ENGINE-017");
     expect(e).toBeDefined();
@@ -453,22 +453,34 @@ describe("§51.9 follow-up — DOM read-wiring for projected vars", () => {
       "${",
       "  type OrderState:enum = { Draft, Submitted, Paid, Shipping, Delivered, Cancelled, Refunded }",
       "  type UIMode:enum = { Editable, ReadOnly, Terminal }",
-      "  @order: OrderMachine = OrderState.Draft",
       "}",
       "",
-      "< machine name=OrderMachine for=OrderState>",
-      "  .Draft => .Submitted",
-      "  .Submitted => .Paid",
-      "  .Paid => .Shipping",
-      "  .Shipping => .Delivered",
-      "  .Draft => .Cancelled",
-      "  .Paid => .Refunded",
+      // S307 — the UPSTREAM is migrated too, not just the projection. The
+      // legacy `@order: OrderMachine = …` binding initialises the cell in a
+      // `${}` block that codegen emits AFTER the derived engine's eager
+      // `_scrml_derived_get`, so the derivation ran against an undefined
+      // upstream and threw E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT. An engine's
+      // AUTO-DECLARED cell is initialised before derived engines evaluate —
+      // the shape conformance/cases/engine/derived-engine-match-qualified-lhs
+      // already proves green. `var=order` keeps the cell name this test drives.
+      "<engine for=OrderState var=order initial=.Draft>",
+      "  <Draft rule=(.Submitted | .Cancelled)/>",
+      "  <Submitted rule=.Paid/>",
+      "  <Paid rule=(.Shipping | .Refunded)/>",
+      "  <Shipping rule=.Delivered/>",
+      "  <Delivered/>",
+      "  <Cancelled/>",
+      "  <Refunded/>",
       "</>",
       "",
-      "< machine name=UI for=UIMode derived=@order>",
-      "  .Draft => .Editable",
-      "  .Submitted | .Paid | .Shipping => .ReadOnly",
-      "  .Delivered | .Cancelled | .Refunded => .Terminal",
+      "<engine for=UIMode var=ui derived=match @order {",
+      "  .Draft :> .Editable",
+      "  .Submitted | .Paid | .Shipping :> .ReadOnly",
+      "  .Delivered | .Cancelled | .Refunded :> .Terminal",
+      "}>",
+      "  <Editable/>",
+      "  <ReadOnly/>",
+      "  <Terminal/>",
       "</>",
       "",
       "<program>",
@@ -479,13 +491,17 @@ describe("§51.9 follow-up — DOM read-wiring for projected vars", () => {
     const { fatalErrors, errors, clientJs: __cjRaw } = compileSource(source, "dom-wiring.scrml"); const clientJs = foldChunkNamespacing(__cjRaw);
     expect(fatalErrors).toEqual([]);
     // The derived-fn wiring is present (regression guard from slice 2).
-    expect(clientJs).toContain('_scrml_derived_fns["ui"]');
+    expect(clientJs).toContain(`_scrml_derived_declare("ui"`);
     // The reactive display effect for ${@ui} MUST be emitted — the whole fix.
     // markup-value-in-expression-2026-06-17: the display routes through the
     // node-aware `_scrml_render_value(el, expr)` helper (was `el.textContent =`).
     expect(clientJs).toContain("_scrml_render_value(el, _scrml_reactive_get(\"ui\"))");
     expect(clientJs).toMatch(/_scrml_effect\(function\(\)\s*\{\s*_scrml_render_value\(el,\s*_scrml_reactive_get\("ui"\)\)/);
-    // No false-positive E-DG-002 on @order.
+    // No false-positive E-DG-002 on @order. (S307: this source is now the
+    // §51.0.J `derived=match` form, so the registration artifact is
+    // `_scrml_derived_declare("ui", …)` rather than §51.9's `_scrml_derived_fns`
+    // table — the REGRESSION GUARD here is the `_scrml_effect` wiring and the
+    // E-DG-002 suppression, both unchanged.)
     const falseDg = errors.find(e => e.code === "E-DG-002" && /@order/.test(e.message));
     expect(falseDg).toBeUndefined();
     // v024-3 regression — no false-positive E-DG-002 on the PROJECTED var @ui
@@ -503,22 +519,40 @@ describe("§51.9 follow-up — DOM read-wiring for projected vars", () => {
       "${",
       "  type OrderState:enum = { Draft, Submitted, Paid, Shipping, Delivered, Cancelled, Refunded }",
       "  type UIMode:enum = { Editable, ReadOnly, Terminal }",
-      "  @order: OrderMachine = OrderState.Draft",
       "}",
       "",
-      "< machine name=OrderMachine for=OrderState>",
-      "  .Draft => .Submitted",
-      "  .Submitted => .Paid",
-      "  .Paid => .Shipping",
-      "  .Shipping => .Delivered",
-      "  .Draft => .Cancelled",
-      "  .Paid => .Refunded",
+      // S307 — the UPSTREAM is migrated too, not just the projection. The
+      // legacy `@order: OrderMachine = …` binding initialises the cell in a
+      // `${}` block that codegen emits AFTER the derived engine's eager
+      // `_scrml_derived_get`, so the derivation ran against an undefined
+      // upstream and threw E-DERIVED-ENGINE-INITIAL-UNDEFINED-RT. An engine's
+      // AUTO-DECLARED cell is initialised before derived engines evaluate —
+      // the shape conformance/cases/engine/derived-engine-match-qualified-lhs
+      // already proves green. `var=order` keeps the cell name this test drives.
+      "<engine for=OrderState var=order initial=.Draft>",
+      "  <Draft rule=(.Submitted | .Cancelled)/>",
+      "  <Submitted rule=.Paid/>",
+      "  <Paid rule=(.Shipping | .Refunded)/>",
+      "  <Shipping rule=.Delivered/>",
+      "  <Delivered/>",
+      "  <Cancelled/>",
+      "  <Refunded/>",
       "</>",
       "",
-      "< machine name=UI for=UIMode derived=@order>",
-      "  .Draft => .Editable",
-      "  .Submitted | .Paid | .Shipping => .ReadOnly",
-      "  .Delivered | .Cancelled | .Refunded => .Terminal",
+      // S307 — migrated off the retired §51.9 projection form. Under `<engine>`
+      // a bare `derived=@x` is an IDENTITY projection (emit-engine.ts:3437) and
+      // the rules body is silently ignored, so the mapping must be expressed as
+      // the §51.0.J `derived=match` form. `var=ui` pins the cell name that
+      // §51.9's `name=UI` used to auto-declare (§51.0.C would give @uiMode),
+      // and §51.0.J requires a state-child per variant.
+      "<engine for=UIMode var=ui derived=match @order {",
+      "  .Draft :> .Editable",
+      "  .Submitted | .Paid | .Shipping :> .ReadOnly",
+      "  .Delivered | .Cancelled | .Refunded :> .Terminal",
+      "}>",
+      "  <Editable/>",
+      "  <ReadOnly/>",
+      "  <Terminal/>",
       "</>",
       "",
       "<program>",

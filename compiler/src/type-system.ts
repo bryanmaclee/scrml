@@ -2115,7 +2115,7 @@ function parseEnumBody(
           "E-ENGINE-010",
           "E-ENGINE-010: 'given' guard is not permitted in a type-level 'transitions {}' block. " +
           "Type-level transitions are structural rules only (VariantRef => VariantRef). " +
-          "Use a '< machine>' declaration to add contextual guards. " +
+          "Use an '<engine>' declaration to add contextual guards. " +
           (typeName ? "Enum: " + typeName + ". " : "") +
           "Rule: " + cleanRule,
           fileSpan,
@@ -2987,7 +2987,7 @@ function checkPredicateLiteral(
       "E-CONTRACT-003",
       "E-CONTRACT-003: Inline predicate references an external reactive variable. " +
         "Inline predicates must be stateless — they may only reference the incoming value. " +
-        "For constraints that depend on external state, use < machine>.",
+        "For constraints that depend on external state, use <engine>.",
       span,
     ));
     return null;
@@ -6219,7 +6219,7 @@ export function rejectWritesToDerivedVars(
     errors.push(new TSError(
       "E-ENGINE-017",
       `E-ENGINE-017: Cannot assign to '@${varName}' — it is a derived projection of ` +
-      `'@${machine.sourceVar}' (see < machine ${machine.name}>). Assign to the source instead.`,
+      `'@${machine.sourceVar}' (see <engine ${machine.name}>). Assign to the source instead.`,
       span,
     ));
   }
@@ -23301,21 +23301,21 @@ function processFile(
           if (!target) {
             errors.push(new TSError(
               "E-REPLAY-001",
-              `E-REPLAY-001: Replay target must be a machine-bound reactive variable (@name). ` +
+              `E-REPLAY-001: Replay target must be an engine-bound reactive variable (@name). ` +
               `The first argument to 'replay' accepts an '@'-prefixed reactive that is ` +
-              `governed by a < machine> declaration; the current argument is not an @-ref.`,
+              `governed by an <engine> declaration; the current argument is not an @-ref.`,
               span,
             ));
           } else if (!machineBoundReactives.has(target.name)) {
             const isDeclaredReactive = declaredReactives.has(target.name);
             errors.push(new TSError(
               "E-REPLAY-001",
-              `E-REPLAY-001: Replay target '@${target.name}' must be a machine-bound reactive variable. ` +
+              `E-REPLAY-001: Replay target '@${target.name}' must be an engine-bound reactive variable. ` +
               (isDeclaredReactive
-                ? `'@${target.name}' is declared but is not governed by a < machine> declaration. ` +
-                  `Attach a machine to this reactive or replay a different variable.`
+                ? `'@${target.name}' is declared but is not governed by an <engine> declaration. ` +
+                  `Attach an engine to this reactive or replay a different variable.`
                 : `No reactive variable named '@${target.name}' is declared in scope. ` +
-                  `Declare '@${target.name}: <MachineName> = <initial>' before the replay call.`),
+                  `Declare '@${target.name}: <EngineName> = <initial>' before the replay call.`),
               span,
             ));
           }

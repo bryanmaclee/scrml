@@ -20,7 +20,7 @@
  *      Pattern mirrors B20's `match-arm-block` payload-binding injection
  *      at `type-system.ts:5102-5125`.
  *   3. Structural-element body walk skip — `<onTimeout>`, `<onTransition>`,
- *      `<onIdle>`, nested `<engine>`, `<machine>` inside an arm body are
+ *      `<onIdle>`, nested `<engine>`, `<engine>` inside an arm body are
  *      filtered before TS descends, preserving their engine-grammar attrs
  *      from general-markup attribute resolution.
  *

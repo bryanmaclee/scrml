@@ -8,7 +8,7 @@
  * This collapsed into a single "line" that entered the payload branch
  * (because `(` was present), failed the identifier regex on
  * `Pending, Success` as the "name", and skipped. Result: zero registered
- * variants. Downstream, any `< machine for=Result>` referencing a variant
+ * variants. Downstream, any `< engine for=Result>` referencing a variant
  * by name fired E-ENGINE-004 "Valid variants: ." (empty list).
  *
  * Fix: split on `["\n", ","]` at top level — commas inside payload field
@@ -89,14 +89,14 @@ describe("S28 parseEnumBody — single-line payload enum", () => {
     expect(t.variants.map(v => v.name)).toEqual(["A", "B", "Payload", "C"]);
   });
 
-  test("end-to-end: single-line payload enum governed by `< machine>` compiles", () => {
+  test("end-to-end: single-line payload enum governed by `< engine>` compiles", () => {
     const src = `<program>
 \${
   type Result:enum = { Pending, Success(value: number), Failed(error: string) }
   @r: M = Result.Pending
   function finish() { @r = Result.Success(1) }
 }
-< machine name=M for=Result>
+< engine name=M for=Result>
   .Pending => .Success
   .Pending => .Failed
 </>

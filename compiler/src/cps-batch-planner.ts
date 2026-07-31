@@ -510,7 +510,7 @@ function detectMachineCrossing(
               `multi-batch CPS cannot split this body: '${receiver}.advance()' ` +
               `is called at statement ${first} (batch ${advances[a].batch}) and ` +
               `again at statement ${second} (batch ${advances[b].batch}). ` +
-              `A '<machine>' transition chain that crosses a server batch ` +
+              `A '<engine>' transition chain that crosses a server batch ` +
               `boundary cannot guarantee the §51 allowed-from-state guard — ` +
               `the intermediate state is not observable across two server ` +
               `requests. Keep all transitions of '${receiver}' in one server ` +

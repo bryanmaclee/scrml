@@ -82,7 +82,7 @@ describe("S27 — guarded wildcard rule fires its guard at runtime", () => {
   @state: M = S.Idle
   function panicFromIdle() { @state = S.Panic }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .Idle => .Running
   * => .Panic given (true) [emergency]
 </>
@@ -106,7 +106,7 @@ describe("S27 — guarded wildcard rule fires its guard at runtime", () => {
   @state: M = S.Safe
   function pullLever() { @state = S.Danger }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   * => .Danger given (false) [alarmCheck]
 </>
 <p>x</>
@@ -129,7 +129,7 @@ describe("S27 — guarded wildcard rule fires its guard at runtime", () => {
   function toA() { @state = S.A }
   function toB() { @state = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .Start => * given (false) [readyCheck]
 </>
 <p>x</>
@@ -154,7 +154,7 @@ describe("S27 — guarded wildcard rule fires its guard at runtime", () => {
   @state: M = S.A
   function go() { @state = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B given (true)  [exactOk]
   * => .B given (false)  [wildcardFail]
 </>
@@ -182,7 +182,7 @@ describe("S27 — guarded wildcard rule fires its guard at runtime", () => {
   @state: M = S.A
   function toDone() { @state = S.Done }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   * => .Done { console.log("reached done") }
 </>
@@ -217,7 +217,7 @@ describe("S27 — guarded wildcard rule fires its guard at runtime", () => {
   @state: M = S.Q
   function jump() { @state = S.S1 }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .Q => .R
   * => * given (false) [catchAll]
 </>

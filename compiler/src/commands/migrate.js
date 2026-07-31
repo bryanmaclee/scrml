@@ -91,6 +91,7 @@ import { splitBlocks } from "../block-splitter.js";
 import { buildAST } from "../ast-builder.js";
 import { parseMatchArms } from "../match-statechild-parser.ts";
 import { parseEngineStateChildren } from "../engine-statechild-parser.ts";
+import { autoDeriveEngineVarName } from "../engine-varname.ts";
 
 // ---------------------------------------------------------------------------
 // ANSI color helpers
@@ -215,6 +216,97 @@ export function applyMigrations(source) {
     }
   );
 
+  // Migration 2a — PROJECTION MACHINES (§51.9 → §51.0.J). MUST run before 2.
+  //
+  // S307. A blind `machine`→`engine` keyword swap is NOT semantics-preserving
+  // for the projection form. The two keywords lower differently:
+  //
+  //   `<machine … derived=@x>` + a `.A => .B` rules body
+  //        → emit-machines.ts builds `_scrml_project_<Name>(src)`, a real
+  //          MAPPING function compiled from those rules (cross-enum projection).
+  //   `<engine  … derived=@x>`
+  //        → emit-engine.ts:3437 "Identity projection: engine variant ===
+  //          upstream cell value" — and the rules body is SILENTLY DROPPED.
+  //
+  // So swapping the keyword alone converts a mapping into an identity
+  // projection with no diagnostic — the §8 `semantics-changed` class. The
+  // engine spelling for the same mapping is the §51.0.J `inline-match` form,
+  // so the projection body is lifted into `derived=match @x { … }` and the
+  // arm separator normalized `=>` → `:>` (canonical per §18.2; `=>` is itself
+  // deprecated via W-MATCH-ARROW-LEGACY).
+  //
+  // Conservative by construction: if the body yields no `.From => .To` arms,
+  // the declaration is left untouched and falls through to Migration 2's plain
+  // keyword swap — an empty/absent body has no mapping to lose.
+  result = result.replace(
+    /<(\s*)machine(\s+[^>]*?)\bderived=@([A-Za-z_$][\w$]*)([^>]*)>([\s\S]*?)<\/(?:machine)?>/g,
+    (match, ws, preAttrs, upstream, postAttrs, body) => {
+      // §51.9 projection bodies admit `|` alternation on the FROM side
+      // (`.Submitted | .Paid => .ReadOnly`), and §18 match arms admit the same
+      // shape, so the alternation carries across verbatim — only the separator
+      // changes. A body line the pattern cannot parse leaves `arms` short and,
+      // if NOTHING parses, the whole declaration is left untouched below rather
+      // than migrated lossily.
+      const armRe = /^\s*(\.[A-Za-z_$][\w$]*(?:\s*\|\s*\.[A-Za-z_$][\w$]*)*)\s*(?:=>|->|:>)\s*(\.[A-Za-z_$][\w$]*)\s*$/;
+      const arms = [];
+      let unparsed = 0;
+      for (const line of body.split("\n")) {
+        if (!line.trim()) continue;
+        const m = line.match(armRe);
+        if (m) arms.push(`${m[1].replace(/\s*\|\s*/g, " | ")} :> ${m[2]}`);
+        else unparsed++;
+      }
+      // Fail CLOSED: a body with any line we could not parse is left alone.
+      // Half-migrating a projection silently drops mappings — the exact
+      // data-loss this migration exists to prevent.
+      if (unparsed > 0) return match;
+      // No projection rules to preserve → let Migration 2 do the keyword swap.
+      if (arms.length === 0) return match;
+      machineCount++;
+      let attrs = `${preAttrs}${postAttrs}`.replace(/\s+/g, " ").trimEnd();
+      // §51.9 auto-declared the cell from `name=` (`name=UI` → `@ui`); §51.0.C
+      // derives it from `for=` instead (`for=UIMode` → `@uiMode`). Migrating
+      // without pinning it silently renames the cell and every `@ui` read
+      // becomes E-STATE-UNDECLARED. Pin it with an explicit `var=` — using the
+      // ONE shared derivation helper (S192 collapsed four divergent copies of
+      // this rule into `engine-varname.ts`; do not add a fifth).
+      // `name=` must be REPLACED, not merely supplemented: on a derived engine
+      // it marks the declaration as the legacy NAMED form, which does not
+      // auto-declare a cell at all — `name=UI var=ui` leaves `@ui` undeclared
+      // (measured), while `var=ui` alone resolves. Nothing binds the projected
+      // engine by name (a projection is read through its cell, not bound via
+      // `@x: MachineName`), so dropping `name=` here is safe; the SOURCE
+      // machine keeps its `name=` because it carries no `derived=` and so is
+      // never rewritten by this migration.
+      const nameAttr = attrs.match(/\bname=([A-Za-z_$][\w$]*)/);
+      if (nameAttr) {
+        const pinned = /\bvar=([A-Za-z_$][\w$]*)/.exec(attrs);
+        const cell = pinned ? pinned[1] : autoDeriveEngineVarName(nameAttr[1]);
+        attrs = attrs.replace(/\s*\bname=[A-Za-z_$][\w$]*/, "");
+        if (!pinned) attrs += ` var=${cell}`;
+      }
+      const indent = (body.match(/\n(\s*)\S/) || [null, "  "])[1];
+      // §51.0.J requires a state-child per variant of the engine's type — every
+      // normative example in that section declares them, and nothing there
+      // exempts derived engines (searched §51.0.J: no such sentence). A §51.9
+      // projection machine has NO state-children, so synthesize self-closing
+      // ones for each distinct projected-TO variant, in first-appearance order.
+      // If the target enum carries a variant this projection never produces,
+      // the author gets E-ENGINE-STATE-CHILD-MISSING naming exactly which one —
+      // loud and actionable, rather than a silently under-declared engine.
+      const targets = [];
+      for (const a of arms) {
+        const to = a.slice(a.indexOf(":>") + 2).trim();
+        if (!targets.includes(to)) targets.push(to);
+      }
+      return `<${ws}engine${attrs} derived=match @${upstream} {\n` +
+             arms.map(a => `${indent}${a}`).join("\n") +
+             `\n}>\n` +
+             targets.map(t => `${indent}<${t.slice(1)}/>`).join("\n") +
+             `\n</>`;
+    }
+  );
+
   // Migration 2: `<\s*machine` (opener) → `<\s*engine`
   //
   // Pattern matches `<` + optional whitespace + `machine` + (whitespace | `>` |
@@ -228,6 +320,16 @@ export function applyMigrations(source) {
       return `<${ws}engine${boundary}`;
     }
   );
+
+  // Migration 2b — the CLOSER. `</machine>` is a legal explicit closer, and the
+  // opener pattern above cannot reach it (`<` is followed by `/`, not by
+  // whitespace-or-`machine`). Rewriting openers alone leaves `<engine …>` paired
+  // with `</machine>`, which parses as a mismatched tag — E-CTX-001 plus a
+  // cascade. Measured: 7 files in-tree use the explicit closer form.
+  result = result.replace(/<\/(\s*)machine(\s*)>/g, (_m, ws, tail) => {
+    machineCount++;
+    return `</${ws}engine${tail}>`;
+  });
 
   // Migration 3: `pure` modifier (W-PURE-DEPRECATED) → drop it; `fn` is canonical.
   //

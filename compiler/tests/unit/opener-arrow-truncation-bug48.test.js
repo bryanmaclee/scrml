@@ -2,7 +2,7 @@
  * opener-arrow-truncation-bug48.test.js — S177 bug-48 (LOW).
  *
  * An inline `=>` arrow inside an `on=` (or any attribute) expression in a
- * `<match>` / `<engine>` / `<machine>` opener truncated the opener header. Three
+ * `<match>` / `<engine>` / `<engine>` opener truncated the opener header. Three
  * opener-end finders in ast-builder.js (`_findMatchOpenerEnd` x2, `_findOpenerEnd`
  * for machine/engine) tracked only brace + string depth — NOT paren/bracket
  * depth, which the FIXED `_findEachOpenerEnd` already has. So a `>` inside an
@@ -24,7 +24,7 @@
  * Coverage:
  *   §1 — `<match on=@nums.filter(c => c == 1)>` compiles clean + lowers correctly
  *   §2 — `<engine ... on=@nums.filter(c => c == 1)>` compiles clean
- *   §3 — `<machine ... on=@nums.filter(c => c == 1)>` compiles clean
+ *   §3 — `<engine ... on=@nums.filter(c => c == 1)>` compiles clean
  *   §4 — control: `<match on=@nums>` (no arrow) still lowers to reactive_get
  */
 
@@ -101,17 +101,17 @@ describe("§2 <engine> opener with inline `=>` arrow in on=", () => {
   });
 });
 
-describe("§3 <machine> opener with inline `=>` arrow in on=", () => {
-  test("`<machine ... on=@nums.filter(c => c == 1)>` compiles clean", () => {
+describe("§3 <engine> opener with inline `=>` arrow in on=", () => {
+  test("`<engine ... on=@nums.filter(c => c == 1)>` compiles clean", () => {
     const result = compile("ma.scrml", `<div>
     \${
         type Light:enum = { Red, Green }
         <nums>: list of int = []
     }
-    <machine for=Light initial=.Red on=@nums.filter(c => c == 1)>
+    <engine for=Light initial=.Red on=@nums.filter(c => c == 1)>
         <Red rule=.Green><p>red</p></>
         <Green><p>green</p></>
-    </machine>
+    </engine>
 </div>`);
     expect(fatalCodes(result)).not.toContain("E-CODEGEN-INVALID-LOGIC");
     expect(fatalCodes(result)).toEqual([]);

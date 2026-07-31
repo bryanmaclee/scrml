@@ -3,7 +3,7 @@
  * Consolidated test file for impl-engine-declarations.
  *
  * Covers:
- *   - < machine name=M for=MyEnum> produces engine-decl AST node
+ *   - < engine name=M for=MyEnum> produces engine-decl AST node
  *   - AST node has correct engineName, governedType, rulesRaw fields
  *   - Multiple rules all parsed correctly
  *   - Machine governing a struct type (§51.3.2 Amendment 1)
@@ -65,21 +65,21 @@ function makeTypeDecl(name, kind, raw) {
 }
 
 function makeMachineDecl(engineName, governedType, rulesRaw) {
-  // S182 (Fix 2) — these helpers model the LEGACY `<machine>`-keyword decl
-  // (the file is the §51.3 `< machine>` subsystem). E-ENGINE-003 is the legacy
+  // S182 (Fix 2) — these helpers model the LEGACY `<engine>`-keyword decl
+  // (the file is the §51.3 `< engine>` subsystem). E-ENGINE-003 is the legacy
   // duplicate-name code and now gates on `legacyMachineKeyword: true` (the
   // canonical `<engine>` form uses §51.0.C `E-ENGINE-VAR-DUPLICATE` instead).
   return { kind: "engine-decl", engineName, governedType, rulesRaw, legacyMachineKeyword: true, span: span() };
 }
 
 // ---------------------------------------------------------------------------
-// §51.3-AST-1: < machine name=M for=MyEnum> produces engine-decl AST node
+// §51.3-AST-1: < engine name=M for=MyEnum> produces engine-decl AST node
 // ---------------------------------------------------------------------------
 
 describe("§51.3 — engine-decl AST node production", () => {
-  test("< machine name=M for=MyEnum> produces kind: engine-decl", () => {
+  test("< engine name=M for=MyEnum> produces kind: engine-decl", () => {
     const src = `<program>
-< machine name=M for=MyEnum>
+< engine name=M for=MyEnum>
   .A => .B
 </>
 </program>`;
@@ -91,7 +91,7 @@ describe("§51.3 — engine-decl AST node production", () => {
 
   test("engine-decl node has correct engineName", () => {
     const src = `<program>
-< machine name=TrafficLight for=LightColor>
+< engine name=TrafficLight for=LightColor>
   .Red => .Green
 </>
 </program>`;
@@ -102,7 +102,7 @@ describe("§51.3 — engine-decl AST node production", () => {
 
   test("engine-decl node has correct governedType (forType)", () => {
     const src = `<program>
-< machine name=TrafficLight for=LightColor>
+< engine name=TrafficLight for=LightColor>
   .Red => .Green
 </>
 </program>`;
@@ -113,7 +113,7 @@ describe("§51.3 — engine-decl AST node production", () => {
 
   test("engine-decl rulesRaw contains all rule text", () => {
     const src = `<program>
-< machine name=Flow for=Status>
+< engine name=Flow for=Status>
   .Pending => .Active
   .Active => .Done
   .Active => .Cancelled
@@ -128,7 +128,7 @@ describe("§51.3 — engine-decl AST node production", () => {
 
   test("machine with multiple rules: all rules present in rulesRaw", () => {
     const src = `<program>
-< machine name=OrderFlow for=OrderStatus>
+< engine name=OrderFlow for=OrderStatus>
   .Pending    => .Processing
   .Processing => .Shipped
   .Shipped    => .Delivered
@@ -152,10 +152,10 @@ describe("§51.3 — engine-decl AST node production", () => {
 // ---------------------------------------------------------------------------
 
 describe("§51.3 — machine governing a struct type", () => {
-  test("< machine name=DateRange for=Booking> produces engine-decl node", () => {
+  test("< engine name=DateRange for=Booking> produces engine-decl node", () => {
     // Guard uses >= to avoid ambiguity: BS treats bare < as a tag opener
     const src = `<program>
-< machine name=DateRange for=Booking>
+< engine name=DateRange for=Booking>
   * => * given (self.nights >= 1)
 </>
 </program>`;
@@ -168,7 +168,7 @@ describe("§51.3 — machine governing a struct type", () => {
 
   test("struct-governing machine rulesRaw contains wildcard rule", () => {
     const src = `<program>
-< machine name=InvRange for=Inventory>
+< engine name=InvRange for=Inventory>
   * => * given (self.qty >= 0)
 </>
 </program>`;
