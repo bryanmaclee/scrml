@@ -3102,9 +3102,21 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           // Params with no peer call keep the text path verbatim (byte-identical),
           // so this is a no-op for every existing SQL-param shape (@cell rewriting
           // already runs in the text path's server reactive-ref pass).
+          // A param calls a peer if it references a DIRECT peer name
+          // (`serverFnNames`) OR a first-class ALIAS / dispatch-table binding that
+          // resolves to a peer (`serverFnPeerAliasNames`, #284). BOTH must route
+          // through the structured `emitExpr` path so `emitCall` awaits the (async)
+          // peer — the textual `rewriteServerExpr` path does not await. Scanning
+          // only `serverFnNames` left an aliased peer (`const p = nextOrder;
+          // ${p()}`) on the text path → an UNAWAITED Promise interpolated into the
+          // SQL (`ord > [object Promise]`) — a fail-OPEN #284 residual. The alias
+          // set is per-function-body resolved (shadow-aware, reassignment→dropped),
+          // so a local non-peer `p` is never in it.
           let _refsPeer = false;
-          if (_sqlExprCtx.serverFnNames && _sqlExprCtx.serverFnNames.size > 0) {
-            for (const _fn of _sqlExprCtx.serverFnNames) {
+          for (const _set of [_sqlExprCtx.serverFnNames, _sqlExprCtx.serverFnPeerAliasNames]) {
+            if (_refsPeer) break;
+            if (!_set || _set.size === 0) continue;
+            for (const _fn of _set) {
               if (new RegExp("\\b" + _fn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\(").test(p)) {
                 _refsPeer = true;
                 break;

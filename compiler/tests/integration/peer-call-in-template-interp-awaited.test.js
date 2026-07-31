@@ -317,4 +317,88 @@ describe("ss22 #4 — peer call / @cell inside a ${} interpolation", () => {
     expect(txt).toBe("order #1 ready");
     expect(String(txt)).not.toContain("[object Promise]");
   });
+
+  // ── #284 residual (S304): a peer reached through a first-class ALIAS
+  // (`const p = nextOrder; ${p()}`) inside a SQL `?{}` param was NOT awaited.
+  // The template-literal path already awaited aliases (emitServerTemplateLit
+  // threads the ctx straight through emitExpr), but taggedFromParams' peer
+  // detection scanned only the DIRECT peer set (serverFnNames) to decide whether
+  // to route a param through the awaiting emitExpr path — so an aliased peer
+  // missed the gate and fell to the textual (non-awaiting) rewriter, binding a
+  // Promise into the SQL. Fail-OPEN. Fix: the detection also scans
+  // serverFnPeerAliasNames (#284's per-body alias set).
+  const ALIAS_SQL_SRC = `
+<program>
+
+<db src="./items.db" tables="items">
+
+  \${
+    server function nextOrder() {
+      const row = ?{\`SELECT COALESCE(MAX(ord),0)+1 AS n FROM items\`}.get()
+      return row.n
+    }
+
+    server function insertAlias(name) {
+      const p = nextOrder
+      ?{\`INSERT INTO items (ord, name) VALUES (\${p()}, \${name})\`}.run()
+      const back = ?{\`SELECT ord FROM items WHERE name = \${name}\`}.get()
+      return back.ord
+    }
+  }
+
+  <div>Items</div>
+
+</>
+
+</program>
+`;
+
+  test("(#284) SQL ?{} param: ${aliasedPeer()} lowers to ${await peer()}", () => {
+    const { errors, serverJsPath } = compileToFiles(ALIAS_SQL_SRC, "alias-sql", SEED);
+    expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
+    const js = readFileSync(serverJsPath, "utf-8");
+
+    // GREEN: the aliased peer in the SQL param is awaited; plain `name` is not.
+    expect(js).toContain(
+      "await _scrml_sql`INSERT INTO items (ord, name) VALUES (${await p()}, ${name})`;",
+    );
+    // RED guard: the pre-fix bare (unawaited) aliased peer — a Promise bind.
+    expect(js).not.toContain("VALUES (${p()}, ${name})");
+
+    assertValidJs(js);
+  });
+
+  test("(#284) runtime: an aliased peer in a SQL param binds the AWAITED value, not a Promise", async () => {
+    if (typeof globalThis.document !== "undefined") return; // happy-dom pollution guard
+
+    const { errors, serverJsPath, tmpDir } = compileToFiles(ALIAS_SQL_SRC, "alias-sql-rt", SEED);
+    expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
+
+    const absDbPath = resolve(tmpDir, "items.db");
+    const mod = await patchAndImport(serverJsPath, absDbPath);
+    const route = Object.values(mod).find(
+      (v) => v && typeof v === "object" && typeof v.path === "string" && v.path.includes("insertAlias"),
+    );
+    expect(route).toBeDefined();
+
+    const TOKEN = "ss22-csrf-token";
+    const mkReq = (path, body) =>
+      new Request(`http://localhost${path}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": TOKEN,
+          "Cookie": `scrml_csrf=${TOKEN}`,
+        },
+        body: JSON.stringify(body ?? {}),
+      });
+
+    const r = await route.handler(mkReq(route.path, { name: "widget" }));
+    expect(r.status).toBe(200);
+    const ord = await r.json();
+    // The awaited alias value (next order #, 1 on an empty table) is what got
+    // bound + stored — a bound Promise would NOT round-trip to the integer 1.
+    expect(ord).toBe(1);
+    expect(String(ord)).not.toContain("[object Promise]");
+  });
 });
