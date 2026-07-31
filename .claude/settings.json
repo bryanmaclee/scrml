@@ -1,0 +1,7 @@
+{
+  "statusLine": {
+    "type": "command",
+    "command": "node \".claude/statusline.mjs\"",
+    "refreshInterval": 30
+  }
+}
