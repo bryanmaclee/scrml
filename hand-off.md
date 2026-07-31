@@ -6,8 +6,8 @@
 
 # scrml — Session 303 (Peter · Windows) — WRAP
 
-**Date:** 2026-07-30. `/boot` Profile A. `main` at **`4f5f8f23`**, coherence **0/0** both repos. Delta-log **[946]–[953]**.
-**Two landings, both proven by EXECUTION:** #284 resolvable core (`94d3d6ee`, PR #297, issue CLOSED) · §64 test de-flake (`4f5f8f23`, PR #298). Successor to S302-bryan (lane-partitioned; he routed my queue). Mechanical stream = delta [946]-[953]; this carries the irreducible.
+**Date:** 2026-07-30. `/boot` Profile A. `main` at **`b638e0ec`**, coherence **0/0** both repos. Delta-log **[946]–[954]**.
+**Two code landings, both proven by EXECUTION:** #284 resolvable core (`94d3d6ee`, PR #297, issue CLOSED) · §64 test de-flake (`4f5f8f23`, PR #298) — plus a wrap-tail **gap-provenance correction** (`b638e0ec`, PR #300, delta [954]): the SQL/template-interp peer-await gap was mis-filed "pre-existing"; proven fix-vs-pre-fix to be a #284 alias-await residual that fails OPEN (now the ⭐ top pickup). Successor to S302-bryan (lane-partitioned; he routed my queue). Mechanical stream = delta [946]-[954]; this carries the irreducible.
 
 ## 🎯 THE HEADLINE — #284, and the S239 gate earning its cost THREE times
 
