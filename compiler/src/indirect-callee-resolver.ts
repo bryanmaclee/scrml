@@ -68,6 +68,17 @@ export interface IndirectResolution {
    * await-lowering and peer emission. Reassigned tables are already dropped.
    */
   tableBindings: Map<string, { members: Set<string>; byKey: Map<string, Set<string>> }>;
+  /**
+   * The set of free-identifier names reached through a DIRECT dispatch CALL in
+   * this body — `t["k"](...)` / `t.k(...)` (a specific member) or `t[dyn](...)`
+   * (the whole member set). These callees have a member/index callee (absent from
+   * `calledNames`), so they are invisible to `indirectResolvedCallees`; a consumer
+   * (route-inference placement, emit-server emission) intersects this set with its
+   * own function/peer universe. Sibling to `indirectResolvedCallees` for the
+   * dispatch-call shape. Reassigned tables never enter `tableBindings`, so their
+   * members never appear here.
+   */
+  dispatchCalledTargets: Set<string>;
 }
 
 // Nested-scope node kinds we never descend into: their calls / decls belong to a
@@ -118,8 +129,9 @@ export function resolveIndirectCallees(
 ): IndirectResolution {
   const bindings = new Map<string, Set<string>>();
   const calledNames = new Set<string>();
+  const dispatchCalledTargets = new Set<string>();
   const stmts: any[] = Array.isArray(body) ? body : [];
-  if (stmts.length === 0) return { bindings, calledNames, tableBindings: new Map() };
+  if (stmts.length === 0) return { bindings, calledNames, tableBindings: new Map(), dispatchCalledTargets };
 
   // ---- Pass 1: shadow set (params + every body-local decl name) + reassigned.
   // A name declared twice, or ever assigned (`x = …`), is UNRESOLVED. The shadow
@@ -236,6 +248,56 @@ export function resolveIndirectCallees(
         && typeof node.callee.name === "string") {
       calledNames.add(node.callee.name);
     }
+    // Direct DISPATCH call `t["k"](...)` / `t.k(...)` / `t[dyn](...)` — the callee
+    // is a member/index expr, so the ident-call branch above never sees it. The
+    // `const t = { … }` decl precedes the call in source order (pre-order DFS), so
+    // `t` is already in `tableBindings`. Static string key → the specific member;
+    // any other key (dynamic / non-string) → the WHOLE member set (any could be
+    // the target). A reassigned table is absent from `tableBindings` (the
+    // `!reassigned` guard on processDecl), so it resolves to nothing here.
+    if (k === "call" && node.callee && (node.callee.kind === "index" || node.callee.kind === "member")) {
+      const _obj = node.callee.object;
+      if (_obj && _obj.kind === "ident" && typeof _obj.name === "string") {
+        const _tb = tableBindings.get(_obj.name);
+        if (_tb) {
+          let _targets: Set<string> | undefined;
+          if (node.callee.kind === "member" && typeof node.callee.property === "string") {
+            _targets = _tb.byKey.get(node.callee.property);
+          } else if (node.callee.kind === "index" && node.callee.index
+              && node.callee.index.kind === "lit" && node.callee.index.litType === "string") {
+            _targets = _tb.byKey.get(String(node.callee.index.value));
+          } else {
+            _targets = _tb.members; // dynamic / non-string key → whole member set
+          }
+          if (_targets) for (const _n of _targets) dispatchCalledTargets.add(_n);
+        }
+      }
+    }
+    // Dispatch call embedded in a TEMPLATE literal / SQL `?{}` raw text — a
+    // template's `${...}` interpolations are NOT decomposed into AST nodes, so a
+    // `t[k]()` there is invisible to the structured branch above. Its target
+    // helper would then have no caller edge → dead-code-dropped → ReferenceError
+    // at the emitted `t[k]()`. Scan the raw text for `obj[…](` / `obj.key(` where
+    // `obj` is a resolved table binding, and add the WHOLE member set (the key is
+    // not reliably parseable from raw text). The trailing `(` requirement means a
+    // bare member READ (`${t.a}`, `${t["a"]}`) does NOT escalate. The decl
+    // precedes the use in source order, so `tableBindings` is populated here.
+    if (
+      (k === "lit" && node.litType === "template" && typeof node.raw === "string" && node.raw.includes("${"))
+      || k === "sql"
+    ) {
+      const _raw = k === "sql"
+        ? (typeof node.query === "string" ? node.query : "") + " " + (typeof node.body === "string" ? node.body : "")
+        : node.raw;
+      if (typeof _raw === "string" && _raw.length > 0 && tableBindings.size > 0) {
+        for (const [_objName, _tb] of tableBindings) {
+          const _re = new RegExp(
+            "\\b" + _objName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*(\\[[^\\]]*\\]|\\.[A-Za-z_$][A-Za-z0-9_$]*)\\s*\\(",
+          );
+          if (_re.test(_raw)) for (const _m of _tb.members) dispatchCalledTargets.add(_m);
+        }
+      }
+    }
     for (const key of Object.keys(node)) {
       if (key === "span" || key === "id" || key === "_scope" || key === "_record") continue;
       pass2(node[key]);
@@ -247,7 +309,7 @@ export function resolveIndirectCallees(
   // building them, but a table member could have aliased one).
   for (const nm of reassigned) { bindings.delete(nm); tableBindings.delete(nm); }
 
-  return { bindings, calledNames, tableBindings };
+  return { bindings, calledNames, tableBindings, dispatchCalledTargets };
 }
 
 /**

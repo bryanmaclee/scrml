@@ -490,4 +490,62 @@ describe("ss22 #4 — peer call / @cell inside a ${} interpolation", () => {
     expect(ord).toBe(1);
     expect(String(ord)).not.toContain("[object Promise]");
   });
+
+  // ── #284 dispatch-table PLACEMENT (S305): a PLAIN helper (not a `server
+  // function`) reached ONLY via a direct dispatch call `t[k]()` was not server-
+  // PLACED — route-inference resolves indirect callees from STRUCTURED `call`
+  // nodes, and a `t[k]()` member/index callee is invisible, so the helper had no
+  // caller edge → dead-code-dropped → `doubleIt is not defined` at runtime. Fix:
+  // the resolver exposes `dispatchCalledTargets` (structured + template/SQL raw-
+  // text dispatch calls), fed through route-inference's escalation-only indirect
+  // map. The two-peer/dynamic-key and template-embedded shapes are covered.
+  const PLAIN_DISPATCH_SRC = `
+<program>
+
+  \${
+    function doubleIt(n) { return n * 2 }
+
+    // dynamic key, in a template interpolation — the resolver sees the call only
+    // via the raw-text scan (template interpolations are not decomposed to AST).
+    server function dispatchPlain(n, which) {
+      const t = { d: doubleIt }
+      return \`v \${t[which](n)}\`
+    }
+  }
+
+  <div>P</div>
+
+</program>
+`;
+
+  test("(#284 dispatch) a PLAIN helper reached only via dispatch is server-placed", () => {
+    const { errors, serverJsPath } = compileToFiles(PLAIN_DISPATCH_SRC, "plain-disp");
+    expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
+    const serverJs = readFileSync(serverJsPath, "utf-8");
+    // The plain helper must be emitted in the SERVER bundle — else the emitted
+    // `const t = { d: doubleIt }` / `t[which]()` references an undefined name.
+    expect(serverJs).toMatch(/function doubleIt\s*\(/);
+    assertValidJs(serverJs);
+  });
+
+  test("(#284 dispatch) runtime: a dispatch-only plain helper runs on the server", async () => {
+    if (typeof globalThis.document !== "undefined") return; // happy-dom pollution guard
+    const { errors, serverJsPath, tmpDir } = compileToFiles(PLAIN_DISPATCH_SRC, "plain-disp-rt");
+    expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
+    const mod = await patchAndImport(serverJsPath, resolve(tmpDir, "items.db"));
+    const route = Object.values(mod).find(
+      (v) => v && typeof v === "object" && typeof v.path === "string" && v.path.includes("dispatchPlain"),
+    );
+    expect(route).toBeDefined();
+    const TOKEN = "ss22-csrf-token";
+    const mkReq = (path, body) =>
+      new Request(`http://localhost${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": TOKEN, "Cookie": `scrml_csrf=${TOKEN}` },
+        body: JSON.stringify(body ?? {}),
+      });
+    const r = await route.handler(mkReq(route.path, { n: 21, which: "d" }));
+    expect(r.status).toBe(200);
+    expect(await r.json()).toBe("v 42");
+  });
 });
