@@ -245,6 +245,11 @@ function collectBindings(ast, structFnSet) {
     let primType = null;
     let typeName = null;
     let containsFnStruct = false;
+    // E-EQ-001 diagnostic polish (#274 residual) — record WHERE this binding got
+    // its type (an annotation vs an inferred literal) + its declaration span, so
+    // the cross-type message can name the offending operand and its origin line
+    // rather than sending the adopter on a bisect.
+    let typeSource = null;
 
     // Prefer declared type annotation.
     const classified = classifyTypeAnnotation(annot, structFnSet);
@@ -252,6 +257,7 @@ function collectBindings(ast, structFnSet) {
       primType = classified.primType;
       typeName = classified.typeName;
       containsFnStruct = classified.containsFnStruct;
+      typeSource = "annotation";
     }
 
     // Fall back to inference from literal initializer.
@@ -260,10 +266,11 @@ function collectBindings(ast, structFnSet) {
       if (litKind === "number" || litKind === "string" || litKind === "bool") {
         primType = litKind;
         typeName = litKind;
+        typeSource = "initializer";
       }
     }
 
-    out.set(name, { primType, typeName, containsFnStruct, annot });
+    out.set(name, { primType, typeName, containsFnStruct, annot, typeSource, declSpan: node.span ?? null });
   }
 
   function walk(nodes) {
@@ -629,9 +636,23 @@ function checkEqNode(eqNode, bindings, structFnSet, fallbackSpan, filePath, erro
   if (lt && rt && lt.primType && rt.primType &&
       lt.primType !== rt.primType &&
       lt.primType !== "asIs" && rt.primType !== "asIs") {
+    // #274 residual — name WHICH operand carries which type and WHERE it got it
+    // (an annotation vs an inferred initializer, + the declaration line), so an
+    // adopter reading `number` vs `string` isn't sent bisecting for the source.
+    const describeOperand = (operand, typeRec) => {
+      const t = typeRec.primType;
+      if (!operand || operand.kind !== "binding" || !operand.name) return `a \`${t}\` value`;
+      const line = typeRec.declSpan && typeof typeRec.declSpan.line === "number" ? typeRec.declSpan.line : null;
+      const origin = typeRec.typeSource === "annotation" && typeRec.annot
+        ? `declared \`: ${typeRec.annot}\``
+        : typeRec.typeSource === "initializer"
+          ? "inferred from its initializer"
+          : "declared";
+      return `\`${operand.name}\` (\`${t}\`, ${origin}${line !== null ? ` at line ${line}` : ""})`;
+    };
     errors.push(new GauntletPhase3Error(
       "E-EQ-001",
-      `E-EQ-001: cannot compare \`${lt.primType}\` with \`${rt.primType}\` using \`${eqNode.op}\` — scrml never coerces across types (§45). ` +
+      `E-EQ-001: cannot compare ${describeOperand(left, lt)} with ${describeOperand(right, rt)} using \`${eqNode.op}\` — scrml never coerces across types (§45). ` +
       `Convert one side explicitly (e.g. \`toString\`, \`toNumber\`) before comparing.`,
       span,
     ));
