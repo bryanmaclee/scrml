@@ -1,0 +1,22 @@
+<page auth="optional">
+  <db src="./app.db" protect="password_hash" tables="users">
+    ${
+      function lookupOne(h) {
+        const r = ?{`SELECT id FROM users WHERE password_hash = ${h}`}.all()
+        return r.length > 0
+      }
+
+      function loginServer(emailArg) {
+        const rows = ?{`SELECT password_hash FROM users WHERE email = ${emailArg}`}.all()
+        const ranked = []
+        for (const row of rows) {
+          if (lookupOne(row.password_hash)) { ranked.push(row) }
+        }
+        return { ranked }
+      }
+
+      function noop() { return }
+    }
+    <form onsubmit=noop()><button type="submit">x</button></form>
+  </>
+</page>

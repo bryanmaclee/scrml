@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 22 |
 | MED | 101 |
-| LOW | 44 |
+| LOW | 42 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -539,7 +539,9 @@ Adopter-A's native-iOS client (reused, re-pointed at the scrml backend for the l
 > coverage hole.
 
 ### g-e-type-042-unreachable-duplicate-of-e-eq-002 — two catalogued Error codes claim the same `== not` trigger; the later-stage one can never fire
-<!-- @gap id=g-e-type-042-unreachable-duplicate-of-e-eq-002 sev=LOW status=open -->
+<!-- @gap id=g-e-type-042-unreachable-duplicate-of-e-eq-002 sev=LOW status=resolved -->
+
+> **RULED + CLOSED S305 — RETIRE.** The open question was retire-vs-narrow, and narrowing turned out to have nothing to narrow TO: the row's one seemingly-unique claim (`=== not` / `!== not`) is owned by **E-EQ-004**, measured by execution — the `===` form is itself rejected before any absence check runs. With `== not` / `!= not` already owned by **E-EQ-002**, E-TYPE-042 has **zero** surviving unique trigger. §34 row struck through, S263 E-MARKUP precedent. The SHAPE remains rejected by the siblings with a correct message, so this is a catalogue correction, not a loss of coverage. Overturnable by finding a shape neither sibling catches.
 
 **Locus:** `compiler/src/gauntlet-phase3-eq-checks.js:582` (E-EQ-002, TS-stage) vs
 `compiler/src/codegen/rewrite.ts:1201` (E-TYPE-042, codegen-stage). Traced — the shadowing was
@@ -564,6 +566,8 @@ also claims `=== not` / `!== not`, which `E-EQ-004` may already own — worth ch
 ### g-e-eq-002-hint-suggests-the-double-negative-is-some-exists-to-avoid — the `!= not` fix-hint names `is not not` where §42.2.2a says `is some` exists precisely to avoid it
 <!-- @gap id=g-e-eq-002-hint-suggests-the-double-negative-is-some-exists-to-avoid sev=LOW status=open -->
 
+> **RULED S305 — bundle with [[g-e-eq-001-message-names-types-not-the-operand]]** (same file, same golden baseline regen). See that entry for the reasoning.
+
 **Locus:** `compiler/src/gauntlet-phase3-eq-checks.js:585` — `const replacement = eqNode.op === "==" ? "is not" : "is not not";`
 
 For `!= not` the diagnostic advises `is not not`. **That form IS valid** — SPEC:24260 normatively
@@ -577,6 +581,8 @@ to replace. One-word fix (`"is not not"` → `"is some"`); the `==` branch's `is
 
 ### g-e-eq-001-message-names-types-not-the-operand — `E-EQ-001` reports the two TYPES but neither which operand carries which, nor where its type came from; the adopter paid ~15 bisect cycles for the difference
 <!-- @gap id=g-e-eq-001-message-names-types-not-the-operand sev=MED status=open -->
+
+> **RULED S305 — BUNDLE with `g-e-eq-002-hint-suggests-the-double-negative-is-some-exists-to-avoid` into ONE message-quality arc.** Both live in `gauntlet-phase3-eq-checks.js`, and both require the SAME golden `e2e-render-map-baseline.json` regen (E-EQ-001 at `:2119`; E-EQ-002 appears twice). Doing them separately pays the regen twice and reviews the same golden file twice, for two edits a few lines apart. One arc, one regen, one review.
 
 **Locus:** `compiler/src/gauntlet-phase3-eq-checks.js:633` (the emit) + `:266` (`collectBindings`, which
 builds the binding record the message would need to draw on). Traced — both were read while sizing the
@@ -612,6 +618,8 @@ in. It wants a clean run with the S239 pass, not a tail-end pass.
 
 ### g-e-mw-006-cannot-fire-nested-handle-never-flagged — `E-MW-006` is structurally dead: the flag its detector keys on is set ONLY by the top-level parser, so a nested `handle()` is invisible to the check meant to catch it — and the middleware silently never runs
 <!-- @gap id=g-e-mw-006-cannot-fire-nested-handle-never-flagged sev=MED status=open -->
+
+> **FIX DIRECTION RULED S305 (the build is still open):** take option (b) — have `findNestedHandles` **re-derive the §39.3.2 shape** (name `handle` + exactly the params `request`, `resolve`) rather than trusting `isHandleEscapeHatch`, a flag it does not own. Reason: option (a), setting the flag on nested declarations, changes what all FOUR downstream consumers see (`emit-server.ts:1818`, `emit-functions.ts:1179/1258`, RI Trigger 8) — it would start weaving nested handlers as middleware, which is a behaviour change nobody asked for. Option (b) touches one walker and cannot perturb them. Narrower is reversible. The BUILD is compiler source and wants its own arc + the S239 pass.
 
 **Locus:** `compiler/src/ast-builder.js:12309` (where `isHandleEscapeHatch` is computed) vs `:18649`
 `findNestedHandles` (where `E-MW-006` is pushed). Traced, not merely located — the two were compared by
@@ -653,7 +661,9 @@ Corpus migration **measured zero** — no `.scrml` in the repo declares a nested
 `E-MW-002` and `E-MW-005` fire correctly and are pinned this session.
 
 ### g-e-server-fn-in-sync-callback-uncatalogued — a LIVE diagnostic with its own push site carries no §34 catalog row, so the freeze gate cannot pin it
-<!-- @gap id=g-e-server-fn-in-sync-callback-uncatalogued sev=LOW status=open -->
+<!-- @gap id=g-e-server-fn-in-sync-callback-uncatalogued sev=LOW status=resolved -->
+
+> **RULED + CLOSED S305 — CATALOGUE it.** The code is LIVE and reachable from source (verified by execution: a peer server-fn called inside a `.sort` comparator within a server function). §34 row added beside its sibling `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`, and the code is now PINNED (`conformance/cases/server-db/server-fn-in-sync-callback-{pos,neg}`). Retiring was the alternative and would have been wrong: this is a live FAIL-CLOSED diagnostic standing between an author and an always-truthy unawaited Promise in a comparator. Overturnable only by showing the shape is unreachable — it is not.
 
 **Locus:** `compiler/src/codegen/emit-server.ts:2860` — the sole push site. (Located, not traced: found
 by a code-census over `compiler/src`, not by following a compile to it.)
