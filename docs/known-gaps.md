@@ -541,6 +541,16 @@ Adopter-A's native-iOS client (reused, re-pointed at the scrml backend for the l
 ### g-machine-keyword-retirement-carries-three-subsystems — `<machine>` is not a keyword alias for `<engine>`; retiring the word also retires replay / audit / auto-property-tests unless they are re-based first
 <!-- @gap id=g-machine-keyword-retirement-carries-three-subsystems sev=MED status=open locus=compiler/SPEC.md:18839 -->
 
+> **RULED S305 — RE-BASE, and the SPEC amendment has LANDED.** bryan ruled the three carried
+> subsystems re-base onto `<engine>` rather than retiring with the keyword. SPEC amended at §63.7
+> (`<machine>` REMOVED BEFORE 1.0, with the reasoning that §63.3(2)'s MAJOR rule protects a RELEASED
+> contract and this keyword has never been in one), §51.0.L (the re-basing banner + the Nominal
+> boundary), and the §34 `W-DEPRECATED-001` row. §63.4's codemod hard-gate was verified by execution:
+> `scrml migrate` rewrites the opener in one pass. **This entry stays OPEN for the IMPLEMENTATION
+> arc** — the keyword removal, `E-DEPRECATED-001` firing, the audit/property-test re-basings, and
+> retiring the legacy-only diagnostics (+ their ~20 conformance cases) all land together, Rule 4.
+> `E-ENGINE-004` / `E-ENGINE-010` and their cases SURVIVE — type-level `transitions {}`, not the keyword.
+
 **bryan RULED S305:** *"`<machine>` is deprecated long before V1 (still not there) — there is no reason
 whatsoever to tie up the word machine. fix the spec."* The intent is unambiguous and this entry does not
 question it. It records what the ruling's SCOPE turns out to be, because the PA's briefing that produced
