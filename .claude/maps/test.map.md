@@ -1,6 +1,10 @@
 # test.map.md
 # project: scrml
-# updated: 2026-07-30T07:41:02Z  commit: d0763cff
+# updated: 2026-07-31T03:18:23Z  commit: f96e6f30
+# NOTE (S302 pass): counts re-derived; the "new test files this window / prior window" inventories
+# (~80 lines re-telling `docs/changelog.md`) are DELETED. What replaces them is a section on the
+# gate hole this window found, and three new coverage-shape rules. A per-file inventory is what
+# `git log --diff-filter=A -- compiler/tests` is for.
 
 ## Test Framework
 Runner: `bun:test` (Bun's built-in test runner, no separate package dep)
@@ -11,108 +15,54 @@ Coverage: `bun test compiler/tests/ --coverage`
 Browser DOM: happy-dom / @happy-dom/global-registrator (compiler/tests/browser/)
 E2E: Playwright (`@playwright/test`), separate config at e2e/playwright.config.ts, NOT part of `bun test`
 
-## Test Categories (compiler/tests/, **1281** `*.test.js` total)
+## Test Categories (compiler/tests/, **1294** `*.test.js` total)
 
-Fresh recursive `git ls-files` recount at `d0763cff`, all 9 categories individually re-verified;
-agrees with `docs/FACTS.md` (`test files | 1,281`). **Net +3 across this window (`115e8b1b` ->
-`d0763cff`), all additions, zero deletions.**
+Fresh recursive `git ls-files` recount at `f96e6f30`, all 9 categories individually re-verified;
+agrees with `docs/FACTS.md` (`test files | 1,294`). Net **+13** across this window, all additions.
 
-| Category | Glob | Count | Delta this window |
+| Category | Glob | Count | **Which gate runs it** |
 |---|---|---|---|
-| Unit | `compiler/tests/unit/**/*.test.js` | **851** | **+2** |
-| Integration | `compiler/tests/integration/**/*.test.js` | 184 | — (1 file EDITED) |
-| Conformance | `compiler/tests/conformance/**/*.test.js` | 125 | — |
-| Browser | `compiler/tests/browser/**/*.test.js` | **82** | **+1** |
-| LSP | `compiler/tests/lsp/**/*.test.js` | 11 | — |
-| Commands | `compiler/tests/commands/**/*.test.js` | 8 | — |
-| Self-host | `compiler/tests/self-host/**/*.test.js` | 4 | — |
-| e2e-render-map | `compiler/tests/e2e-render-map/` | 2 | — |
-| Parser-conformance + native-* | top-level `compiler/tests/{parser-conformance*,native-*}.test.js` | 14 | — |
+| Unit | `compiler/tests/unit/**/*.test.js` | **855** | `gate` (blocking) + pre-commit + pre-push |
+| Integration | `compiler/tests/integration/**/*.test.js` | **185** | `tracking` (non-blocking) + pre-commit + pre-push |
+| Conformance | `compiler/tests/conformance/**/*.test.js` | **126** | `gate` (blocking) + pre-commit + pre-push |
+| Browser | `compiler/tests/browser/**/*.test.js` | **89** | `tracking` only (non-blocking) |
+| LSP | `compiler/tests/lsp/**/*.test.js` | 11 | `tracking` only (non-blocking) |
+| Commands | `compiler/tests/commands/**/*.test.js` | 8 | `tracking` only (non-blocking) |
+| Self-host | `compiler/tests/self-host/**/*.test.js` | 4 | `tracking` only (non-blocking) |
+| e2e-render-map | `compiler/tests/e2e-render-map/` | 2 | `tracking` only (non-blocking) |
+| Parser-conformance + native-* | top-level `compiler/tests/*.test.js` | **14** | **`gate` (blocking) + pre-commit — BOTH NEW THIS WINDOW.** See the gate-hole section below. |
 
-**The top-level `conformance/` corpus moved much more than `compiler/tests/` did this window: 747 ->
-756 cases (+9).** All nine are §17.1 per-item `if=` cases in two mirrored families (Tier-1 `<each>`
-and Tier-0 `${for…lift}`) plus one top-level `if` case — see "Conformance corpus" below.
+The top-level `conformance/` corpus moved further: **756 -> 769 cases (+13)**.
 
-## The 3 new test files this window (`115e8b1b` -> `d0763cff`)
+## THE GATE HOLE THIS WINDOW FOUND — read before trusting "the suite is green"
 
-- `unit/route-inference-trigger3-server-only-import.test.js` (366 lines) — §12.2 Trigger 3. The
-  load-bearing half is the **EVASION battery**, not the happy path: `["PEPPER"].map(p =>
-  hashPassword(p))`, a nested `function` declaration, a bare callback REFERENCE (`.map(hashPassword)`),
-  and `let f = env; f(x)` each compiled exit 0 with NO `.server.js` and the secret in the client
-  bundle before the fix. Also locks the two-set distinction (a `scrml:data` / `scrml:http` import
-  must NOT escalate) and the shadowing carve-out (a parameter named after an import must not relocate
-  its function).
-- `unit/ce-node-id-per-expansion.test.js` (219 lines) — component-expander node-id freshness. Covers
-  BOTH collision shapes (same component twice; two different components each parsed from zero) and
-  the `bodyChildren`/`templateChildren` aliasing the `_deepCloneAst` memo preserves.
-- `browser/g-each-peritem-nested-markup-fn-call.browser.test.js` (186 lines) — the #161 follow-on.
-  Browser tier because the failure was a RENDERED string (`[object HTMLSpanElement]`), and because the
-  negative half — a string-returning call must NOT get wrapped in a `<span>` — is only observable in a
-  restricted parent.
+**The 14 root-level `compiler/tests/*.test.js` files were outside EVERY blocking check.** Thirteen
+had **no runner anywhere**; the fourteenth (`parser-conformance-within-node`) ran only in `tracking`,
+which is `continue-on-error: true`. They are also outside the pre-commit hook's
+unit/integration/conformance scope. Consequence, measured: **a 38-failure native-parity regression
+passed pre-commit AND the required `gate`**, and surfaced only as a red `tracking` — the job everyone
+correctly reads as the documented browser/serve-tool baseline.
 
-**Two existing files were EDITED with no count delta, and both are re-baselines you must read before
-touching:** `unit/session-auth.test.js` (8 assertions renamed `W-AUTH-001` ->
-`W-AUTH-MIDDLEWARE-AUTO-INJECTED`) and `integration/trucking-dispatch-smoke-integration.test.js`
-(whose `W-AUTH-001 = 20` corpus baseline is now split across two codes — its header comment carries
-the arithmetic). `conformance/cases/reactive/toggle-show/expected.json` also changed: a top-level
-`if` now UNMOUNTS structurally rather than toggling `display`, so its expectation moved.
+**The transferable rule: a gate that is correctly non-blocking and habitually red is where a real
+regression hides.** Two structural corollaries this repo now encodes:
 
-## The 20 new files of the PRIOR window (`c700c435` -> `115e8b1b`), by landing
+1. **A non-blocking tier must not be the SOLE runner of anything.** Fixed by adding
+   `bun test compiler/tests/*.test.js` to CI `gate` and to `scripts/git-hooks/pre-commit`. The files
+   are deterministic (no dist / browser / network deps) and cost ~16s; green at wiring time at
+   6394 tests / 0 fail.
+2. **A blocking tier must not be pointed at a tree carrying a documented failure baseline.** pre-push
+   used to run the WHOLE of `compiler/tests/`, where browser/lsp/self-host/commands carry ~42 known
+   failures assessed by comparing failure-NAME SETS, not counts. An exit-code gate cannot express
+   "the same names as before", so that scope made the hook structurally unpassable. See build.map.md
+   — the two corollaries pull in opposite directions and both are load-bearing.
 
-**Runtime chunks / client boot (GH #234, GH #235, navigate-wave1c)**
-- `browser/errors-element-messages-chunk-gh234.browser.test.js` — an `<errors of=…/>` page with NO
-  inline validator override must still ship the `messages` chunk. The regression lock for the
-  `POST_EMIT_HELPER_CHUNK_GATES` bare-name entry.
-- `integration/mpa-shell-child-dep-scripts-gh235.test.js` — a composed CHILD page carries the
-  SHELL's transitive module `<script>`s, deps-before-bundle, de-duplicated, and exactly ONE runtime tag.
-- `browser/browser-navigate-cross-chunk.test.js` + `conformance/conf-NAV-CROSS-CHUNK.test.js` +
-  `unit/navigate-cross-chunk-loader.test.js` — the cross-chunk soft-nav loader: absolute-url keying
-  (the `pages/reports` vs `pages/admin/reports` basename collision), deps-first ordering, the
-  timeout/error hard-nav fallback, and the `_scrml_chunk_loading` DEPTH-COUNTER behaviour under two
-  overlapping navigations.
+## What landed in the test suite this window — DEREFERENCED
 
-**Coordinate space + server closure (D-4, D-5)**
-- `unit/d4-dist-relative-server-specifier.test.js` — `distRelativeServerSpecifier` at every nesting
-  depth, plus the two verbatim fallbacks (no `outputBaseDir`, endpoint outside the base).
-- `integration/d4-server-import-dist-space.test.js` — the end-to-end shape: a `pages/` importer's
-  emitted specifier resolves inside `dist/`, and `W-SERVER-IMPORT-UNEMITTED` now SEES a dangling
-  target it was previously blind to.
-- `integration/d5-server-closes-over-module-const.test.js` — a module `const` referenced from a
-  server fn appears in `.server.js`; a client-only const does NOT (byte-identical emit); an
-  unresolvable initializer is SKIPPED, not guessed.
-
-**§13.2 `on mount` async scope (GH #237)**
-- `unit/gh237-emitted-statement-await.test.js` — `scanEmittedCode`/`splitEmittedStatements` against
-  the adversarial inputs: `for(;;)` headers, object literals in expression position, `} else {`
-  continuations, template literals with re-entrant `${}`, and comments containing braces.
-- `browser/gh237-onmount-server-fn-await.browser.test.js` — the fail-OPEN proof: an
-  `if (u is not) { redirect("/login") }` guard inside `on mount` must actually take its deny branch.
-
-**Per-item reconcile family (S293/S294) — all browser, all REPLACE-path**
-- `browser/g-item-derived-local-stale-in-per-item-effect-paths.browser.test.js`
-- `browser/g-lift-per-item-attribute-binding-not-reactive-on-reconcile.browser.test.js`
-- `browser/g-lift-per-item-if-directive-not-reactive-on-reconcile.browser.test.js`
-- `browser/g-nested-each-inner-binding-reads-outer-var-reconcile.browser.test.js`
-
-**Form-control `value=` in arm bodies (i225)**
-- `unit/variant-arm-value-property-i225.test.js` + `browser/variant-arm-value-property-i225.browser.test.js`
-  — the arm-wire path writes the `.value` PROPERTY, inequality-guarded (caret safety), and falls
-  through to `setAttribute` when a sibling `bind:value` owns the property.
-
-**DB-authoritative + diagnostics quality (S292)**
-- `unit/sql-table-refs.test.js` — the scanner's two-valued contract, including that each
-  `UNRESOLVABLE` shape lands in `undetermined` rather than yielding a false-empty `tables`.
-- `unit/dbauth-grant-queried-tables.test.js` — the `GRANT <exercised privs> ON <t> TO scrml_app`
-  branch: gated on ≥1 db-authoritative table, least-privilege (SELECT fallback), never CRUD-blanket.
-- `unit/e-pa-002-db-migrate-remedy.test.js` — `E-PA-002`'s message leads with the `<schema>` +
-  `scrml db-migrate` remedy.
-- `unit/tailwind-outline-family.test.js` — the `outline-*` registrations resolve and no longer
-  false-fire `W-TAILWIND-UNRECOGNIZED-CLASS`; v3 semantics for `outline-none` and bare `outline`;
-  `outline-hidden` deliberately absent.
-
-Modified without a count delta this window: `unit/state-block-event-wiring.test.js` (the boot
-dispatch changed from a bare `DOMContentLoaded` listener to the `_scrml_boot` IIFE, so the assertion
-had to follow) and the schema-differ/db-migrate unit suites.
+The prior generations of this map inventoried each new test file per window (~80 lines). **Deleted.**
+`git log --diff-filter=A --name-only d0763cff..HEAD -- compiler/tests` answers it faster and cannot go
+stale. For narrative, `docs/changelog.md`. The 13 additions cluster in two arcs: seven `if=`
+mount/structural browser tests + `unit/if-on-structural-elements.test.js` (§17.1.2), and three
+cross-file/cross-module emit tests plus a corpus emitted-specifier resolution guard.
 
 ## Coverage shapes worth knowing before writing a test here
 
@@ -131,6 +81,24 @@ the classic false-green.
 **A grep-hit in an `expected.json` is not an assertion.** A conformance case may MENTION an E-code in
 rationale prose without asserting it in `codes`/`notCodes`. Read the file before recording a code as
 covered.
+
+**A structural-`if=` POSITIVE case is deliberately DOM-indistinguishable from no-`if=` at all.**
+`if=true` MUST render exactly what an ungated element renders — that non-perturbation *is* the claim
+— so the `-mounts-rt` conformance cases cannot discriminate against the pre-widening baseline on
+their DOM half. The discrimination is carried by (a) the `codes` half (`notCodes: ["E-DG-002"]` —
+pre-widening the dependency graph never saw the predicate, so a cell read only there false-fired) and
+(b) the `-absent-rt` companion case. **Write structural-gate cases in mounts/absent PAIRS, and put a
+`notCodes` on the positive one**, or the positive case proves nothing.
+
+**A gated `<engine>` case must exercise a transition WHILE the gate is false.** `§17.1.2.1` says the
+engine "really is" at its current variant by the time it mounts. The case that pins this
+(`if-on-engine-render-gate-mounts-rt`) has LOAD-BEARING input order: transition first, reveal second.
+An implementation that gated the engine's CONSTRUCTION — deferring it to first mount or
+re-initialising on mount — renders the `initial=` arm and only that input order catches it.
+
+**A `-rt` suffix on a conformance case means it EXECUTES** (`input` + `state` + `domAnchored` in
+`expected.json`), not merely that it compiles. A compile-only case cannot see a mount/unmount defect;
+this window's whole `if=` family is `-rt` for that reason.
 
 **Emitted-text assertions are not execution proof.** A client-runtime feature verified by grepping
 the emitted bundle for a marker can be dead on arrival (a load-time `ReferenceError` aborts boot
@@ -158,23 +126,28 @@ gate only proves a page COMPILES, never that its PROSE is true.
 `compiler/SPEC-INDEX.md`'s generated totals block is stale.
 
 ## CI test-tier mapping (see build.map.md for the full workflow)
-`gate` (blocking): unit + conformance + the TodoMVC gauntlet compile-and-parse check + snippet-gate
-+ facts `--check` + **SPEC-INDEX totals `--check`**.
+`gate` (blocking): unit + conformance + **the 14 root-level `compiler/tests/*.test.js` (NEW)** + the
+TodoMVC gauntlet compile-and-parse check + snippet-gate + facts `--check` + SPEC-INDEX totals
+`--check`.
 `tracking` (non-blocking): integration + lsp + commands + browser + the parser-conformance-within-node
 M6.x backlog. The live-PG DB-authoritative integration tests run here, skip-graceful.
 `windows` (non-blocking): unit + conformance on windows-latest (surfaces OS-path-separator bugs the
 Linux gate can't see — and this window's D-4 work is squarely in that class, since
 `distRelativeServerSpecifier` and `isOutsideBase` split on the PLATFORM `sep` and normalize to `/`).
-Local pre-commit: unit + integration + conformance (`--bail`, ~2min).
-Local pre-push: the full `bun test compiler/tests/` run + gauntlet + fixture refresh + **the new
-~0.3s generated-doc currency gate** (+ snippet-gate on release-tag pushes only — it costs ~48s).
+Local pre-commit: unit + integration + conformance + **root-level `*.test.js` (NEW)** (`--bail`, ~2min).
+Local pre-push (**scope CHANGED this window**): unit + integration + conformance only — **NOT** the
+whole of `compiler/tests/` — and **skipped entirely on a NEW-REF push** (the cloud `gate` on the PR is
+authority, S254); it runs on an update to an existing remote ref and on any release tag. Plus
+gauntlet + fixture refresh + the ~0.3s generated-doc currency gate (+ snippet-gate on release-tag
+pushes only — it costs ~48s). Verified S301: that subset is 21597 pass / 0 fail on a clean checkout,
+so the gate CAN go red for a real regression and green otherwise — which is the whole point.
 
 ## Fixtures & Factories
 compiler/tests/fixtures/ — 8 shared fixture files
 compiler/tests/helpers/ — 3 shared test-helper modules
 compiler/tests/commands/migrate-program-shape-fixtures/ — `scrml migrate` (source-codemod, NOT `db-migrate`) fixture set
 samples/compilation-tests/ — 12 fixture dirs compiled by `scripts/compile-test-samples.sh` (`bun run pretest`) before the suite; dist/ is gitignored. **These go STALE** — a browser-test triage starts by recompiling them, before comparing anything.
-conformance/cases/ + conformance/adapters/ — the D3 corpus (**756 cases**, **+9 this window**) + per-impl adapters. The nine: `each/per-item-if-reactive/{create-time-absence,flip-false-true,flip-true-false,reorder-toggled}` (Tier-1 `<each>`) and `each/for-lift-per-item-if-reactive/{same four}` (Tier-0 `${for…lift}`) plus `reactive/if-top-level-absent`. **The two families are deliberately MIRRORED case-for-case** — the two tiers have separate emit paths (`emit-each.ts` vs `emit-lift.js`) that share one runtime helper (`_scrml_ifrow_apply`), so a fix landing in one tier and not the other is the expected failure mode and the corpus is shaped to catch it.
+conformance/cases/ + conformance/adapters/ — the D3 corpus (**769 cases**, **+13 this window**: 10 `control-flow/if-*` + 2 `reactive/if-wiring-bearing-subtree-*` + 2 `channel/*` + 1 `server-db/first-class-fn-ref-server-helper-rt`; net +13 with one prior case's expectation updated) + per-impl adapters. The nine: `each/per-item-if-reactive/{create-time-absence,flip-false-true,flip-true-false,reorder-toggled}` (Tier-1 `<each>`) and `each/for-lift-per-item-if-reactive/{same four}` (Tier-0 `${for…lift}`) plus `reactive/if-top-level-absent`. **The two families are deliberately MIRRORED case-for-case** — the two tiers have separate emit paths (`emit-each.ts` vs `emit-lift.js`) that share one runtime helper (`_scrml_ifrow_apply`), so a fix landing in one tier and not the other is the expected failure mode and the corpus is shaped to catch it.
 docs/tutorial-snippets/ + docs/readme-snippets/ + docs/website/ — the public snippet corpus; REAL programs under a compile gate, functioning as a public-surface regression corpus
 
 ## Pattern
@@ -219,7 +192,7 @@ stale), then compare the WHOLE suite rather than an isolated file — happy-dom 
 between files, so a single-file run can be green while the suite is red, and vice versa.
 
 ## Tags
-#scrml #map #test #bun-test #happy-dom #playwright #conformance #stdlib-tests #lsp-tests #ci-gate #esm-chunks #module-format #each-fence #snippet-gate #facts-gate #spec-index-gate #colorless-async #dbauth #db-migrate #live-pg-skip-graceful #acceptance-gate #browser-suite #reconcile-replace #gh234 #gh235 #gh237 #d4 #d5 #i225 #navigate-wave1c #sql-table-refs #tailwind-outline #e-pa-002 #lint-diagnostics-stream #execute-dont-grep #trigger-3 #escalation-server-only #evasion-battery #node-id-freshness #per-item-if #ifrow-apply #conformance-mirrored-tiers #w-auth-middleware-auto-injected
+#scrml #map #test #bun-test #happy-dom #playwright #conformance #stdlib-tests #lsp-tests #ci-gate #esm-chunks #module-format #each-fence #snippet-gate #facts-gate #spec-index-gate #colorless-async #dbauth #db-migrate #live-pg-skip-graceful #acceptance-gate #browser-suite #reconcile-replace #gh234 #gh235 #gh237 #d4 #d5 #i225 #navigate-wave1c #sql-table-refs #tailwind-outline #e-pa-002 #lint-diagnostics-stream #execute-dont-grep #trigger-3 #escalation-server-only #evasion-battery #node-id-freshness #per-item-if #ifrow-apply #conformance-mirrored-tiers #w-auth-middleware-auto-injected #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #cry-wolf #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #new-ref-push-skip #changelog-dereferenced
 
 ## Links
 - [primary.map.md](./primary.map.md)

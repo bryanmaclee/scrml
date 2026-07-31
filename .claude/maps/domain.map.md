@@ -1,24 +1,12 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-07-30T07:41:02Z  commit: d0763cff
-# NOTE (S299): TARGETED — two NEW sections added (§12.2 Trigger 3 escalation; node identity as a
-# codegen contract) and the §12.2 boundary paragraph corrected. Nothing else re-walked; the rest of
-# this map carries its `115e8b1b` verification.
+# updated: 2026-07-31T03:18:23Z  commit: f96e6f30
+# NOTE (S302 pass): TARGETED — ONE new section (**§17.1.2 `if=` on the three structural elements**,
+# four prohibitions + the runtime mount contract) and four new Business Invariants. Nothing else
+# re-walked; the rest of this map carries its prior verification. The per-window "currency note"
+# paragraphs previous passes accumulated here were DELETED — that is `docs/changelog.md`'s job.
 
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
-
-**Currency note (S297, `c700c435` -> `115e8b1b`):** this pass made THREE targeted changes and did
-NOT re-walk the rest of the file. (1) The third-party adopter's identity was scrubbed to match the
-`89db7981` privacy landing. (2) A NEW section — **"Coordinate space: SOURCE vs DIST"** — was added
-below the one-landmark section; it is a cross-cutting CLASS, not a bug, and no map row covered it,
-which is why an S296 dispatch found this map set "not load-bearing" for that arc. (3) A NEW section
-on **cross-chunk soft navigation (§20.8.2/§20.8.7)** was added, because navigate-wave1c moved that
-surface from "held/parked" to shipped. Everything else here is carried at its prior verification —
-see error.map.md / schema.map.md / migrations.map.md / dependencies.map.md for the fully re-verified
-account of what changed this window.
-
-**PRIOR currency note (S288/S289):** two targeted corrections (the M1 mechanism note + the "Known
-open gaps" paragraph); the rest was not re-walked then either.
 
 ## Core Concepts (by SPEC section)
 
@@ -370,6 +358,109 @@ one monotone counter seeded above `maxExistingId`, and that comment itself state
 not load-bearing for codegen — but the guarantee is no longer what the comment claims, so do not
 rely on the band.
 
+## §17.1.2 — `if=` on `<engine>` / `<match>` / `<each>` (NEW section, S302). A FENCED widening.
+
+`if=` is honored on exactly THREE scrml-defined structural elements. Before S302 it *parsed* on them,
+was DISCARDED at AST-build, and the element rendered unconditionally and permanently — green compile,
+zero diagnostics. On an `<engine>` that meant the `initial=` arm rendered forever. The widening was
+ratified on the consistency argument: a first-class compiler-supported element that cannot take a
+directive every HTML element takes reads as toy-status, not as discipline.
+
+**PROHIBITION 1 — the widening is exactly three elements wide and SHALL NOT be generalized to the
+registry.** `<onTransition>` / `<onTimeout>` / `<onIdle>` / `<errors>` / `<channel>` / `<page>` are
+declarations and lifecycle hooks, not rendered subtrees; a structural conditional on them has no
+defined meaning and SHALL be rejected. **Enforcement is PARTIAL at this HEAD and §17.1.2 says so
+rather than asserting a SHALL the impl does not keep:** `<page if=>` rejects
+(`E-PAGE-INVALID-ATTR`) — conformant; `<channel>` and `<errors>` emit only a `W-ATTR-001` advisory
+and ignore the attribute; `<onTimeout>` and `<onIdle>` ignore it with **zero** diagnostics. Tracked
+as `g-if-reject-unenforced-on-structural-declaration-elements`. **`<auth>` is deliberately NOT on the
+reject list** — it is a `kind:"markup"` node, takes the ordinary markup path, and gates its subtree
+correctly (verified by execution: a real `scrml-if-marker` + `<template>` are emitted). The
+`W-ATTR-001` the compiler nonetheless emits for `<auth if=>` — claiming the attribute "has no
+compile-time effect" — is **FALSE**; that is its own defect
+(`g-w-attr-001-false-on-auth-if-gate-is-applied`).
+
+**PROHIBITION 2 — `if=` gates RENDERED OUTPUT, never the element's declaration, state or lifecycle
+(§17.1.2.1, the load-bearing rule).** For `<engine if=expr>`:
+- the auto-declared engine variable (§51.0.C) is declared and readable **regardless** of `expr` —
+  including from other files that mount the singleton via `<EngineName/>` (§51.0.D);
+- `rule=` contract enforcement (§51.0.F), `effect=` (§51.0.H), `<onTransition>`, `<onTimeout>`
+  (§51.0.M) and `<onIdle>` (§51.0.R) remain **LIVE** while `expr` is false. Transitions continue to
+  occur; only their rendering is withheld;
+- the boot-only opener `effect=` (§51.0.H Form 3) fires **once at module-init** and is NOT re-fired
+  on a false→true flip.
+
+Tying an engine's lifecycle to a render predicate would make `if=` a state-destroying operator and
+break the §51.0.A singleton invariant — a cross-file `<EngineName/>` mount would observe a different
+engine depending on an unrelated page's conditional. **This is enforced STRUCTURALLY, not merely
+documented:** `ifCond` lives on the AST node, where the JS-substrate emitters that build the engine's
+cell and rules cannot reach it at all. For `<each if=>` the collection is not read and no rows are
+reconciled while false (reconciler state rebuilds on re-entry); for `<match if=>` no arm dispatches.
+Neither carries independent state, so the distinction is vacuous for them.
+
+**PROHIBITION 3 — a structural `if=` INSIDE an `<each>` row template is NOT honored and fails OPEN
+(§17.1.2.3).** Four positions, and markup vs structural fail in OPPOSITE directions:
+
+| position | behaviour |
+|---|---|
+| structural element in ordinary markup | gated correctly, reactively — the §17.1.2 surface |
+| markup `if=` on the ROW-ROOT of an `<each>` row | gated correctly (`_scrml_ifrow_apply`) |
+| markup `if=` on a NON-ROOT element inside a row template | emits nothing — fails **CLOSED** (never renders) |
+| **structural `if=` inside a row template** | emits nothing — fails **OPEN** (**never gated**) |
+
+A fail-CLOSED miss is loud: the author sees content missing immediately. A fail-OPEN miss silently
+ships content the author wrote a predicate to withhold, and is invisible during development whenever
+that predicate is usually true. Inherited from §17.1's row-template lowering, NOT introduced by the
+widening; the durable fix is ONE diagnostic covering both positions
+(`g-structural-if-inside-each-row-template-fails-open`).
+
+**PROHIBITION 4 — `E-IF-IN-DISPATCHED-ARM` still guards ARM BODIES, and the guard must be reverted
+as a UNIT, not eroded.** An `if=` INSIDE a dispatched arm (a `<match>` block-form arm, an `<engine>`
+state-child) is a **separate and REJECTED** surface — the arm body is injected with `innerHTML` on
+dispatch and wired by a per-arm wire function that cannot see into a `<template>`. Omitting the guard
+on the new structural path was a measured **REGRESSION**, not a missing nicety: a
+`<each … if=@shown>` inside a `<match>` arm rendered 2 rows on main and 0 on the branch after one arm
+round-trip, with `@shown` never changing and no diagnostic — working code went silently blank.
+Refusing **DROPS** the element rather than emitting it ungated; emitting ungated would silently
+ignore the author's predicate, which is the §17.1.2 defect the whole arc removed. Guard:
+`refuseConditionalInDispatchedArm` (`emit-html.ts:780`), **THREE** call sites — `:1508` structural,
+`:1737` if/else-if/else chain, `:2727` markup. **The revert SHA `2fbe6520` named in `hand-off.md` is
+NOT in this repo's history** (`git cat-file -t 2fbe6520` → *Not a valid object name*); revert by
+symbol, in lockstep across all three call sites.
+
+**PROHIBITION 5 — ONE `if=` lowering, and no second one.** `if=` used to have TWO lowerings with
+different DOM semantics — a `<template>`+marker for a "clean" subtree, a `display` toggle for
+anything carrying wiring — chosen silently by a purity test, so a single `${…}` flipped the attribute
+between *removes* and *hides*. #289 (S301) deleted the second. `emitIfMountGate`
+(`emit-html.ts:1421`) is now the sole lowering and all FOUR hosts call it; `isGateableIfValue`
+(:1472) mirrors the markup kind test so a value shape the markup path ignores is ignored identically
+on a structural element; `emitGatedStructural` (:1498) is the structural adapter (no `ifCond` field ⇒
+byte-identical to the pre-§17.1.2 emitter). Hand-rolling the wrap at a new host is exactly how the
+divergence grows back.
+
+**The runtime mount contract WIDENED — and the unmount is a LIVE SPAN, not a node list.**
+`_scrml_mount_template` (`runtime-template.js:1429`) went from "exactly one element child" to "one or
+more top-level nodes", because a gated `<each>` has no element to wrap: its mount is a COMMENT FENCE
+(`<!--scrml-each:ID-->…<!--/scrml-each:ID-->`), and an element wrapper is not available to it —
+`<each>` is legal directly inside `<ul>`, `<tbody>` and `<select>`, where a wrapper `<div>` is invalid
+HTML the parser would foster-parent out. The clone's top-level nodes are recorded on the returned
+handle as `_scrml_if_range` (recorded ONLY when the handle alone does not describe the mount, so the
+single-element case is byte-identical to before).
+
+`_scrml_unmount_scope` (:1468) then removes **first recorded node through last recorded node, walking
+siblings AT REMOVAL TIME** — *not* the recorded list. MEASURED, not theorised: a gated `<each>`'s
+recorded range is exactly its two fence comments, and the renderer inserts every row BETWEEN them
+AFTER the mount, so removing the recorded list alone left all rows (and the `<empty>` fallback) in the
+DOM and **four open/close cycles accumulated 12 rows where 2 belong**. A per-node backstop still
+removes anything an adopter re-parented out of the span.
+
+`_scrml_mount_wire` (:1599) binds a multi-node mount **node by node** across the recorded range.
+Widening to the shared parent instead would re-bind SIBLING wiring that was never unmounted
+(double-attached handlers), and a `TreeWalker` rooted at a fence comment never returns that comment
+(a TreeWalker excludes its own root) — so `_scrml_remount_each` cannot see a TOP-LEVEL fence at all.
+That is why `_scrml_remount_each_fence` (:1639) exists as a separate lookup: same
+`_scrml_each_renderers` registry, same idempotence, different reach.
+
 ## Runtime-chunk tree-shaking — a two-phase decision (§47.5, GH #234 / Bug 57 / GITI-036 class)
 
 The client runtime ships as CHUNKS, and a chunk is included only if something proves it is needed.
@@ -435,6 +526,10 @@ rehydrator, and the newer nav still swapped, producing correct SSR markup that w
 with no diagnostic and no hard-nav fallback.
 
 ## Business Invariants (language axioms, not app rules)
+- **`if=` on a scrml-defined structural element is admitted on exactly THREE (`<engine>`/`<match>`/`<each>`) and SHALL NOT be generalized to the registry (§17.1.2).**
+- **`if=` gates RENDER, never LIFECYCLE (§17.1.2.1)** — a gated `<engine>`'s cell, `rule=`, `effect=` and timers stay live; only the rendering is withheld. The alternative reading is state-destroying and breaks the §51.0.A singleton invariant.
+- **A structural `if=` inside an `<each>` row template fails OPEN (§17.1.2.3)** — carved out explicitly because markup fails CLOSED in the same position and the two are therefore inconsistent in the dangerous direction.
+- **One `if=` lowering serves all four hosts** — the second (display-toggle) lowering was deleted at #289 because a purity test chose between *removes* and *hides* silently.
 - `null`/`undefined` do not exist in scrml source, in ANY position (§42). Absence is `not`.
 - **A server-only stdlib module never reaches the client bundle (§12.2 Trigger 3, S299)** — enforced by REFERENCE at any depth, fail-closed; the escalation set is separate from the async-classification set precisely because the two have opposite safe-error directions.
 - **Within one FileAST after component expansion, every `node.id` is unique (S299).** Codegen derives emitted identity from it; a collision is a green compile with wrong rendered output.
@@ -484,7 +579,7 @@ Diagnostic emission — every pipeline stage emits `{code, message, severity, sp
 A returned function-expression closure (`return function name(){…}`, GITI-038) — owns its own body's scope/type/async analysis independent of its enclosing factory (`ReturnStmtNode.fnExprNode`, see schema.map.md).
 
 ## Tags
-#scrml #map #domain #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins
+#scrml #map #domain #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth
 
 ## Links
 - [primary.map.md](./primary.map.md)
