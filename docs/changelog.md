@@ -5636,6 +5636,42 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-07-31 — S305 (bryan): the freeze campaign stops being an authoring backlog; `<machine>` retired from 1.0
+
+Nine PRs. The tier-1 conformance campaign moved **133 → 170 of 196** codes pinned (conformance suite
+**769 → 843**, +74 cases) — but the durable result is that what remains is no longer authoring volume:
+of 23 open, ~5 are retired-and-unstruck, ~7 blocked/parked, ~6 carry recorded searches, and ~5 need real
+construction. Three separate dead-or-holed diagnostics were found the same way — by trying to make each
+one fire and failing — every one of them invisible to a green 28,295-test suite because its existing
+tests hand-build the input and call the emitter directly.
+
+- **#310** — pinned 28 tier-1 codes across ss56 (engine contract, 21 of 22) + ss58 (error model, 7).
+  Found `E-ENGINE-001` **source-unreachable because of a §51.5 soundness hole**: a legacy `<machine>`
+  illegal transition emits a plain reactive write, so neither the compile-time code nor the runtime
+  `-RT` fires and the transitions table is emitted dead. Canonical `<engine>` verified sound.
+- **#311** — corrected the freeze denominator: 5 "open" codes are retired. The mechanism is the durable
+  part — a retired §34 row is `| ~~CODE~~ |`, so a probe matching `^| CODE |` returns NO-ROW, the same
+  answer it gives for a genuinely uncatalogued code.
+- **#314** — 4 more codes; found `E-MW-006` **structurally dead**, and worse: the flag it keys on also
+  gates emit-server/emit-functions/RI, so a nested `handle()` is silently never woven as middleware.
+- **#315 / #319** — filed the `E-EQ-001` operand-naming defect and the `<machine>` retirement scope,
+  each **sized and deliberately not started** at a session tail.
+- **#316** — pinned `E-MU-001`; filed `E-TYPE-042` as an unreachable duplicate of `E-EQ-002`.
+- **#317** — the CPS/idempotency arc: 3 of 5 `E-CPS-*` codes, plus the three preconditions that make
+  them reachable at all (client/server interleave → non-monotone batch → store attribute).
+- **#318** — cleared five rulings: retire `E-TYPE-042`, catalogue **and pin** the live-but-uncatalogued
+  `E-SERVER-FN-IN-SYNC-CALLBACK`, `E-MW-006` fix direction, bundle the two `E-EQ-*` message fixes, keep
+  `E-BPP-001`.
+- **#320** — **`<machine>` retired from language-1.0** (bryan RULED). §63.3(2)'s "remove only at a
+  MAJOR" protects a *released* contract, and 1.0 is the first — so striking it is deciding what 1.0
+  contains, not removing a form from the language. Codemod gate satisfied by execution. The three
+  subsystems it fronted **re-base onto `<engine>`** rather than retiring with it; §51.14 replay was
+  verified to work on engine cells already.
+
+Also: `pa-base v2.8 → v2.9` — the locus filing requirement now demands a machine-readable field, after
+the measurement that motivated it turned out to be the thing its own omission broke (~25 of 46 "missing"
+loci were present in prose, invisible to the probe).
+
 ### 2026-07-30/31 — S302 (bryan): `if=` on the three structural elements, a §14.8 leak escalated, and a gate hole that let a 38-failure regression through
 
 Six PRs. The session opened on an adopter reverse-verify that inverted its own report and closed on
