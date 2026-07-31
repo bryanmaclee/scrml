@@ -273,6 +273,15 @@ function collectBindings(ast, structFnSet) {
       if (n.kind === "let-decl" || n.kind === "const-decl" || n.kind === "state-decl") {
         recordBinding(n);
       }
+      // SCOPE-STOP (#274 Wall-1): do NOT descend into a nested FUNCTION scope. A
+      // `let h = 0` inside `function mono()` is a DIFFERENT binding from a
+      // `let h = ""` inside `function submit()` — flattening them here made a
+      // numeric local in one function silently retype a string local of the SAME
+      // NAME in another (last-writer-wins), producing a FALSE `E-EQ-001` on the
+      // other's `h == ""`. walkAst now collects each function's locals separately
+      // and merges them over the enclosing scope. Control-flow bodies (if/for/
+      // while/match) are the SAME scope and are still descended.
+      if (isFnScopeNode(n)) continue;
       if (Array.isArray(n.body))       walk(n.body);
       if (Array.isArray(n.children))   walk(n.children);
       if (Array.isArray(n.then))       walk(n.then);
@@ -286,6 +295,18 @@ function collectBindings(ast, structFnSet) {
   }
   walk(topNodes);
   return out;
+}
+
+// A node that introduces its OWN local variable scope. `let`/`const` locals
+// inside it belong to that scope, not the enclosing one (mirrors the resolver's
+// `isNestedScope` and the type-system's function-frame model). Used by both the
+// binding collector (scope-stop) and walkAst (per-function scoped bindings).
+const FN_SCOPE_KINDS = new Set(["function-decl", "component-def", "lambda"]);
+function isFnScopeNode(n) {
+  if (!n || typeof n !== "object") return false;
+  if (FN_SCOPE_KINDS.has(n.kind)) return true;
+  return n.kind === "escape-hatch" &&
+    (n.nativeKind === "ArrowFunctionExpression" || n.nativeKind === "FunctionExpression");
 }
 
 // ---------------------------------------------------------------------------
@@ -719,11 +740,17 @@ function walkAst(ast, bindings, structFnSet, filePath, errors) {
   if (!ast) return;
   const topNodes = ast.nodes ?? [];
 
+  // #274 Wall-1 — the bindings scope currently in effect. Starts at the MODULE
+  // scope (`bindings`, collected scope-stopped) and is swapped to a per-function
+  // merged scope while walking inside a function body (see `walk`), so a local's
+  // type is resolved in its own function, never unified across functions by name.
+  let activeBindings = bindings;
+
   function inspectExprNode(exprNode, fallbackSpan) {
     if (!exprNode) return;
     // Sub-shape (a): equality-operand null + cross-type / asIs / fn-struct.
     forEachEqualityBinary(exprNode, (eqNode) => {
-      checkEqNode(eqNode, bindings, structFnSet, fallbackSpan, filePath, errors);
+      checkEqNode(eqNode, activeBindings, structFnSet, fallbackSpan, filePath, errors);
     });
     // Sub-shape (b): bare-null literal in value position (W3.1, F-NULL-003).
     forEachLitNull(exprNode, (litNode) => {
@@ -798,6 +825,22 @@ function walkAst(ast, bindings, structFnSet, filePath, errors) {
     for (const n of nodes) {
       if (!n || typeof n !== "object") continue;
 
+      // #274 Wall-1 — entering a FUNCTION scope: resolve equality operands against
+      // THIS function's own locals (shadowing the enclosing scope), so a `let h`
+      // here is never confused with a `let h` in a sibling function. Collect the
+      // function's scope-local bindings, merge them over the parent scope (locals
+      // win), and use that merged map for everything inside — then restore.
+      const enteredFnScope = isFnScopeNode(n);
+      const savedBindings = activeBindings;
+      if (enteredFnScope) {
+        const local = collectBindings({ nodes: Array.isArray(n.body) ? n.body : [] }, structFnSet);
+        if (local.size > 0) {
+          const merged = new Map(savedBindings);
+          for (const [k, v] of local) merged.set(k, v);
+          activeBindings = merged;
+        }
+      }
+
       // Every AST node shape that carries a parsed expression tree.
       if (n.condExpr)  inspectExprNode(n.condExpr,  n.span);
       if (n.initExpr)  inspectExprNode(n.initExpr,  n.span);
@@ -818,6 +861,8 @@ function walkAst(ast, bindings, structFnSet, filePath, errors) {
       if (Array.isArray(n.arms)) {
         for (const arm of n.arms) if (arm && Array.isArray(arm.body)) walk(arm.body);
       }
+
+      if (enteredFnScope) activeBindings = savedBindings; // restore parent scope
     }
   }
   walk(topNodes);
