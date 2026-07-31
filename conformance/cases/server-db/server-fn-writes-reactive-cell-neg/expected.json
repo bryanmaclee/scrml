@@ -1,0 +1,13 @@
+{
+  "id": "server-db-server-fn-writes-reactive-cell-neg",
+  "description": "The same server-escalated function RETURNING the value instead of assigning it. Same query, same escalation — only the reactive write is removed, which is the condition the code keys on.",
+  "language-version": "1.0",
+  "spec": "§12.2",
+  "rationale": "§12.2 — reactive state is CLIENT-side. A function that touches a server resource auto-escalates to the server (§12), and a server function has no client-reactive referent to write: the assignment would compile to a store update on a process that holds no store. Rejecting it is what keeps the inferred split honest — the alternative is a write that silently does nothing on the tier it actually runs on. §51.0.E (`server=@source`) and §38.4 (a channel cell) are the sanctioned ways to move server-owned values to the client.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-RI-002"
+    ]
+  }
+}

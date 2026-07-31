@@ -1,0 +1,14 @@
+<count> = 0
+<program db="sqlite:./app.db">
+<schema>
+  items { id: integer primary key, name: text }
+</>
+${
+    function loadCount() {
+        const rows = ?{ select id from items }
+        return rows.length
+    }
+}
+<p id="s">${@count}</p>
+<button id="b" onclick=loadCount()>go</button>
+</program>

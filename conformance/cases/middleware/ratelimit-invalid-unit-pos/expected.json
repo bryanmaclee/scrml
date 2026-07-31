@@ -1,0 +1,16 @@
+{
+  "id": "middleware-ratelimit-invalid-unit-pos",
+  "description": "`<program ratelimit=\"100/fortnight\">` uses a unit outside {sec, min, hour}. Per §40 the value must match `N/unit`, so E-MW-002 fires (§34: Error).",
+  "language-version": "1.0",
+  "spec": "§40",
+  "rationale": "§40 — `ratelimit=` declares a request budget the compiler wires into the middleware pipeline. Its value is a fixed `N/unit` grammar with unit ∈ {sec, min, hour}; an unrecognized unit cannot be lowered to a window, and the only alternatives to rejecting it are to guess a window or to drop the limit — the second silently removes a protection the author asked for.",
+  "expect": {
+    "codes": [
+      "E-MW-002"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-MW-002": "error"
+    }
+  }
+}

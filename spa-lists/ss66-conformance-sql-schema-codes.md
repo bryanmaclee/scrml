@@ -64,10 +64,25 @@ each code live in `compiler/src` for the exact trigger + reachability.
 16. **E-SQL-006** (codes) `[status=probe — landed-note: NOT compile-pinnable]` — `.prepare()` is removed in Bun.SQL — use `.all()/.get()/.run()` or bare `?{}` (§44.3; `codegen/rewrite.ts:362`). ss66 found it fires only via direct `rewriteSqlRefs()`; `compile()` emits a runtime-throwing IIFE. Probe; if still unreachable → known-gap.
 17. **E-SQL-008** (codes) `[status=probe — landed-note: E-CTX-003 fires first]` — an unterminated `?{}` SQL diagnostic (`ast-builder.js:351`). ss66 found unbalanced `?{` trips `E-CTX-003` first. Probe for an isolable trigger; else known-gap.
 18. **E-SQL-009** (codes) `[status=pending]` — an emit-tool SQL error (`codegen/emit-tool.ts:906`). Grep the exact trigger + reachability; pos + neg or known-gap.
-19. **E-SQL-ROW-CONTRACT-MISMATCH** (codes) `[status=pending]` — a SQL projection row passed to a prop mismatches the prop's row contract (`type-system.ts:13090`). Pos + neg (matching row shape → silent). (This one IS compile-time type-checked — likely authorable.)
+19. **E-SQL-ROW-CONTRACT-MISMATCH** (codes) `[status=done S305]` — a SQL projection row passed to a prop mismatches the prop's row contract (`type-system.ts:13090`). Pos + neg (matching row shape → silent). (This one IS compile-time type-checked — likely authorable.)
 20. **E-SCHEMA-004** (codes) `[status=probe — landed-note: GAP zero-emission]` — a schema column error (`gauntlet-phase1-checks.js:781`, "column …"). ss66 found E-SCHEMA-004..009 have zero emission on the string-compile path. Probe; if still zero → known-gap.
 21. **E-CG-006** (codes) `[status=pending]` — a non-client-boundary node found in a client-boundary function body (`codegen/scheduling.ts:462`). Pos (a server-only stmt in a client-boundary fn → E-CG-006) + neg. (Codegen-soundness on the client/server split — verify it's V1-path, not an OFF-V1 codegen invariant.)
 22. **E-BATCH-001** (codes) `[status=probe — landed-note: needs hand-built AST]` — a SQL batch-planner error (`batch-planner.ts:89` union). ss66 found `transaction{}` mis-parses to `E-SCOPE-001`; E-BATCH-001 needs a hand-built AST → `runBatchPlanner`. Probe; if unreachable via `compile(source)` → known-gap. (TIER-SPLIT tier-1 server family; the brief omitted it — added here for coverage.)
 
 **Wave-2 DoD:** the 7 codes each PROBED for compile-path reachability; the authorable ones pinned; the
 unreachable/GAP ones handed to the PA as known-gap entries (NOT forced). run.ts green; divergences ESCALATED.
+
+## S305 (bryan, 2026-07-31)
+
+**`E-SQL-ROW-CONTRACT-MISMATCH` pinned** (2 cases) — the list's "likely authorable" read was right.
+
+**The shape constraint is the finding.** The projection must reach the prop **DIRECTLY**: binding
+it to a typed cell first (`<users>: Card[] = []`) erases the projection type, `unwrapSqlProjectionRow`
+returns null, and the bounded rule NO-OPS silently. The case therefore binds `const rows = ?{…}` and
+iterates that. A first attempt through a typed cell fired nothing and looked exactly like an
+unreachable code — worth knowing before anyone re-probes it.
+
+**Still open on this list (5), and 4 carry prior landed-notes worth trusting enough to re-probe
+cheaply, not re-derive:** `E-SQL-006` (fires only via direct `rewriteSqlRefs()`) · `E-SQL-008`
+(`E-CTX-003` fires first) · `E-SCHEMA-004` (zero emission on the string-compile path) ·
+`E-BATCH-001` (needs a hand-built AST) · `E-CG-006` (not probed this pass — no claim either way).

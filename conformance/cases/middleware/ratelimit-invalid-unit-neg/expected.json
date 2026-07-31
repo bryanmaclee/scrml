@@ -1,0 +1,13 @@
+{
+  "id": "middleware-ratelimit-invalid-unit-neg",
+  "description": "The same attribute with `100/min`, a canonical unit. Isolates the unit vocabulary from the attribute itself.",
+  "language-version": "1.0",
+  "spec": "§40",
+  "rationale": "§40 — `ratelimit=` declares a request budget the compiler wires into the middleware pipeline. Its value is a fixed `N/unit` grammar with unit ∈ {sec, min, hour}; an unrecognized unit cannot be lowered to a window, and the only alternatives to rejecting it are to guess a window or to drop the limit — the second silently removes a protection the author asked for.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-MW-002"
+    ]
+  }
+}

@@ -1,0 +1,5 @@
+${ function handle(request, resolve) { return resolve(request) } }
+${ function handle(request, resolve) { return resolve(request) } }
+<program>
+<p id="s">middleware</p>
+</program>

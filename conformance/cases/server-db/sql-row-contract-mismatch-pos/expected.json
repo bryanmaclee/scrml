@@ -1,0 +1,16 @@
+{
+  "id": "server-db-sql-row-contract-mismatch-pos",
+  "description": "`select id, name` is passed to a prop whose contract `Card` also declares `email`. Per §14.8.8 the projection does not satisfy the contract's width, so E-SQL-ROW-CONTRACT-MISMATCH fires (§34: Error) naming the unprojected field. NOTE: the projection must reach the prop DIRECTLY — routing it through a typed cell (`<users>: Card[]`) erases the projection type and the bounded rule no-ops, which is why this case binds `const rows = ?{…}` and iterates it.",
+  "language-version": "1.0",
+  "spec": "§14.8.8",
+  "rationale": "§14.8.8 — when a SQL projection row is passed to a prop carrying a `:struct` contract, the row must satisfy that contract by WIDTH: every field the contract declares must be projected. A missing column is not a runtime `undefined` to be discovered in the UI — the SELECT list is statically known, so the mismatch is decidable at compile time and is reported against the SELECT rather than the render.",
+  "expect": {
+    "codes": [
+      "E-SQL-ROW-CONTRACT-MISMATCH"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-SQL-ROW-CONTRACT-MISMATCH": "error"
+    }
+  }
+}
