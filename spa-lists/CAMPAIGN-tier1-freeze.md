@@ -73,3 +73,46 @@ carry `[tier-1?]` in their list — reclassifiable to tier-2 at case-time.
 `../../scrml-support/docs/audits/v1-conformance-coverage-2026-07-15/` — TIER-SPLIT.md (the bar + family
 tiering) · FINDINGS.md (class definitions + the security-trio top finding) · DIRECTION-B-runtime.md (the
 4 runtime holes) · candidate-holes.txt + cluster{1..4}-*.txt (the 450 candidates).
+
+
+---
+
+## S305 accounting correction — the denominator was inflated by 5 retired codes
+
+Measured with a fresh oracle that parses `expect.codes` / `expect.notCodes` out of every
+`expected.json` (never greps prose — the S261 grep-match≠assertion lesson) rather than reading list
+markers, which S248 established run ahead of reality.
+
+**Progress this session:** 133 → **161 of 196** tier-1 codes positively pinned (ss56 +21, ss58 +7);
+open 57 → 32. Conformance suite 769 → **825**.
+
+**Correction — 5 of the remaining 32 are NOT holes.** They were retired and the lists were never
+updated, so every session that reads the manifest inherits an inflated freeze distance:
+
+| code | list | disposition |
+|---|---|---|
+| `E-MARKUP-002` · `E-MARKUP-003` · `E-MARKUP-VALUE-UNCLOSED` | ss77 | **RETIRED S263** — §34 rows struck through |
+| `E-STATE-004` | ss59 | **RETIRED S263** — dead `validateMarkupAttributes`, never fired |
+| `W-SSR-PRERENDER-UNSCOPED` | ss60 | **RETIRED S274** → `I-SSR-AUTH-SCOPED-CLIENT-HYDRATED` (0 push sites, no §34 row) |
+
+> **Why this was missed until now:** the §34 rows for retired codes are written
+> `| ~~E-MARKUP-003~~ | …`, so a catalog probe matching `^| <CODE> |` reports **NO-ROW** — the same
+> answer it gives for a genuinely uncatalogued code. Retired and never-catalogued are opposite
+> dispositions that a naive row lookup renders identical. Match `~~<CODE>~~` too, or read the row.
+
+**4 more are blocked/parked, not authorable:** `E-ENGINE-001` (S305 — source-unreachable, see
+`g-legacy-machine-transition-guard-never-emitted`) · `E-FN-007` + `E-STATE-COMPLETE` (ss70 —
+source-unreachable/parser-gated) · `E-TILDE-001/002` (S274 — parked-legit).
+
+**So the real remaining authorable tier-1 is ≈22, not 32**, concentrated in **ss58 (6)** ·
+**ss66 (6)** · **ss63 (4)** · `E-TYPE-042` / `E-TYPE-071` (ss69) · `E-STATE-005` (ss59) ·
+`E-CONTRACT-004-WARN` (ss57) · `E-SERVER-FN-IN-SYNC-CALLBACK` (ss67, and see below).
+
+**Lists now closed in fact:** ss61 · ss62 · ss68 · ss71 · ss72 · ss73 · ss74 · ss56 (bar the blocked
+code) · ss77 and ss60 and ss75 once their retired/parked entries are struck.
+
+**One code needs a §34 row before it can be pinned.** `E-SERVER-FN-IN-SYNC-CALLBACK` is LIVE — its own
+push site at `compiler/src/codegen/emit-server.ts:2860` — but carries **no §34 catalog row**. It is
+NOT a rename of `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`, which has separate push sites
+(`emit-library-shared.ts:268,304`) and IS pinned (`conformance/cases/auth/auth-async-stdlib-sync-callback-neg`).
+That hypothesis was checked and refuted. Filed: `g-e-server-fn-in-sync-callback-uncatalogued`.
