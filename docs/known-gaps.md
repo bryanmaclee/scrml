@@ -5040,36 +5040,64 @@ still emits the call bare, so the interpolation reads a field off a Promise and 
 
 ## §S302 — gaps filed S302 (2026-07-30, bryan; adopter issue #284 reverse-verify)
 
-<!-- @gap id=g-sql-param-interpolation-peer-call-not-awaited sev=MED status=open -->
-### G-SQL-PARAM-INTERPOLATION-ALIAS-PEER-CALL-NOT-AWAITED — a server-fn peer reached through a first-class ALIAS inside a `?{}` SQL / template-literal interpolation is not await-lowered → the query binds a Promise (fail-OPEN) — `NEW S303; MED; open`
+<!-- @gap id=g-sql-param-interpolation-peer-call-not-awaited sev=MED status=resolved -->
+### G-SQL-PARAM-INTERPOLATION-ALIAS-PEER-CALL-NOT-AWAITED — a server-fn peer reached through a first-class ALIAS inside a `?{}` SQL / template-literal interpolation was not await-lowered AND (as sole referencer) not emitted → RESOLVED S304 — `NEW S303; MED; RESOLVED S304 (PR #303)`
 
-> **⚠ CORRECTED S303 (was mis-filed as pre-existing).** The original filing claimed the DIRECT peer form
-> `${threshold(rows)}` in a SQL param is also unawaited and therefore this is pre-existing / not a #284
-> regression. That is **WRONG**, proven by execution:
-> - **DIRECT** peer in interpolation is awaited: `peer-call-in-template-interp-awaited.test.js` passes
->   **6/0** on BOTH `e74edd4b` (pre-#284) and current `main`, and the emit is byte-identical —
->   `const msg = \`order #${await nextOrder()} ready\`;` and `\`... VALUES (${await nextOrder()}, ${name})\``.
-> - **ALIAS** peer in interpolation is NOT awaited (compiled + inspected on `main`):
->   ```
->   const p = nextOrder
->   const rows = ?{`SELECT id FROM items WHERE ord > ${p()}`}.all()
->   // emits: await _scrml_sql`... WHERE ord > ${p()}`   — the ALIAS p() is BARE, unawaited
->   ```
-> So this is a **#284 alias-await RESIDUAL**, not pre-existing: the fix's `serverFnPeerAliasNames`
-> await-lowering reaches every position (`if`/assign/while/ternary/return/argument — S239-verified) EXCEPT
-> the template-literal / SQL `?{}` interpolation emit path. The round-2 reviewer compared alias-vs-direct on
-> the already-#284 build and both looked unawaited *for the alias*, which read as "pre-existing"; the correct
-> comparison (fix vs pre-fix) shows the direct case always worked. **The `verify-the-bug-class` discipline
-> extends to gap-provenance: a "pre-existing" claim must be checked fix-vs-pre-fix, not by symptom similarity.**
+> **RESOLVED S304** (PR #303, branch `fix/alias-peer-interpolation-await`). Landed by teaching the SQL-param
+> peer-detection gate (`emit-logic.ts:taggedFromParams`) about the alias set (`serverFnPeerAliasNames`, not
+> just `serverFnNames`), and by adding an alias-aware raw-text EMISSION recovery in the #284 block of
+> `emit-server.ts`. Proven by execution: `peer-call-in-template-interp-awaited.test.js` 8/0 including a live
+> round-trip that binds the AWAITED integer (not a Promise) and requires the peer callable to be emitted.
 
-**Fail-OPEN** (silent wrong SQL / value — `WHERE ord > [object Promise]` → `[]`), the exact class the #284
-S239 pass hunts — so this residual is HIGHER-priority than #284's other (fail-CLOSED, 500) residuals and is
-the **top next-session Peter-lane item**. **Locus of the fix:** thread `serverFnPeerAliasNames` into the
-interpolation emit path (emit-logic `taggedFromParams` and emit-expr's server template-literal lowering) so
-an aliased-peer call there gets the same `await` lowering `emitCall`/`isAwaitedPeerCall` apply elsewhere —
-a targeted extension of the #284 threading, NOT a rush (deferred from the S303 wrap deliberately; codegen at
-a session tail is how the earlier cuts' defects slipped). **Corpus-absent** (no file aliases-then-interpolates
-a peer) → likelihood is low, which is why it stays MED despite the fail-open severity.
+> **⚠ CORRECTED TWICE — the honest provenance (a `verify-the-bug-class` case study on my own filing):**
+> - **v1 (original, WRONG):** "pre-existing / direct peers unawaited too." Refuted fix-vs-pre-fix — the DIRECT
+>   peer form is awaited byte-identically on `e74edd4b` and `main`.
+> - **v2 (S303 correction, PARTIALLY WRONG):** "an alias-await residual, fail-OPEN, SQL-param only, template
+>   already fine." This was **emit-shape inspection only — never RUN.** Running it (S304) revealed the full,
+>   different truth below. Lesson re-driven: [[feedback-verify-the-bug-class-not-just-reported-instance]] —
+>   emit-shape is not verification; run every consuming position.
+> - **v3 (S304, RUN + proven):** the class had **TWO** defects, and its failure mode is BOTH open and closed:
+>   1. **AWAIT** — a SQL `?{}` param `${p()}` (aliased peer) was emitted bare; the template-literal path was
+>      ALREADY correct (`emitServerTemplateLit` threads the ctx through `emitExpr`). Bare `${p()}` binds a
+>      **Promise** into the SQL when the peer is otherwise emitted → **fail-OPEN** (silent-wrong).
+>   2. **EMISSION** — when a peer is reached ONLY via an alias called inside an interpolation (no structured
+>      `call` node anywhere — `resolveIndirectCallees.calledNames` sees only structured calls), the peer
+>      callable was never added to `_calledPeerNames` → `nextOrder is not defined` at runtime → **fail-CLOSED
+>      (500)**. This bit BOTH the SQL and template forms, so the S303 "template already fine" claim was wrong
+>      for the sole-referencer case (the await was fine there; the emission was not).
+
+**Fix loci (both landed S304):** (1) `emit-logic.ts:taggedFromParams` — the `_refsPeer` detection scans
+`serverFnPeerAliasNames` in addition to `serverFnNames`, routing an aliased param through the awaiting
+`emitExpr` path. (2) `emit-server.ts` #284 block — an alias-aware raw-text scan of each body's `sql`/`lit`-
+template nodes adds the resolved peer target to `_calledPeerNames` (the AWAIT is binding-based and already
+worked; the EMISSION was call-based and missed the raw call). Over-collection is harmless (dead async fn),
+the established emission invariant. Adversarially verified: multi-hop alias, shadowed param, reassigned
+alias (dropped), uncalled alias — all correct; conformance 763/0.
+
+<!-- @gap id=g-dispatch-table-call-not-awaited-or-emitted sev=MED status=open -->
+### G-DISPATCH-TABLE-CALL-NOT-AWAITED-OR-EMITTED — a peer reached through an object-literal DISPATCH TABLE (`const t = {k: peer}; t[k]()`) is not await-lowered or emitted ANYWHERE (not interpolation-specific) — `NEW S304; MED; open`
+
+Surfaced by the S304 `verify-the-bug-class` sweep while fixing the alias-in-interpolation gap above. A peer
+reached through a **computed / static member of a dispatch table** — `const t = { a: nextOrder }; t["a"]()`
+or `t[which]()` — is emitted **bare (unawaited)** in EVERY position tested: `return`, `const`-assign, template
+literal, AND SQL `?{}` param (compiled + inspected on `main`):
+```
+const t = {a: nextOrder};
+return t["a"]();                 // ← bare, should be `return await t["a"]();`
+const msg = `order #${t["a"]()} ready`;   // ← bare
+```
+So unlike the alias gap above (which was interpolation-specific), this is a **general #284 await + emission
+residual for the dispatch-table shape** — the alias (bare-ident) call is awaited via `serverFnPeerAliasNames`,
+but a computed-member callee `t[k]()` never matches the bare-name alias set, so `emitCall`'s `_aliasPeer`
+lowering can't fire. #284 server-PLACES the dispatch-referenced helper (no ReferenceError for a plain sync
+helper — that's what the `first-class-fn-ref-server-helper-rt` conformance case proves) but never wired the
+dispatch shape into the async await-lowering or the peer emission. **Fail-OPEN** where the peer is otherwise
+emitted (binds a Promise), **fail-CLOSED** (ReferenceError) where the dispatch call is the sole reference to
+an async `server function` peer. **Fix locus (separate cycle):** `emit-expr.ts:emitCall` must recognize a
+computed/static member call whose object resolves (per the #284 resolver's `tableBindings`) to a peer set and
+await it; and `emit-server.ts` must emit those targets. Different locus + edge cases (dynamic key where only
+SOME members are peers; static-key resolution) than the alias fix — kept OUT of PR #303 scope so it gets its
+own reproduce → fix → S239 pass. Repro: `scratchpad/repro-dispatch-*.mjs`.
 
 ---
 
@@ -5095,10 +5123,13 @@ a peer) → likelihood is low, which is why it stays MED despite the fail-open s
 > S303):** (a) a genuinely-DYNAMIC indirect callee (value from a param / call result / array); (b) a
 > helper used in client markup AND server-indirect-called (needs dual placement — architectural); (c)
 > `let q=peer; q(x); q=other` (reassign→unresolved; the call before the reassign loses its await).
-> **#284 alias-await RESIDUAL (fail-OPEN, top next-session item; originally mis-filed as pre-existing —
-> CORRECTED S303):** [[g-sql-param-interpolation-peer-call-not-awaited]] — an aliased peer call inside a
-> template / SQL `?{}` interpolation is not await-lowered (direct peers there ARE awaited). Unlike the
-> fail-closed residuals above, this one fails open (binds a Promise).
+> **#284 alias-in-interpolation residual → RESOLVED S304** (PR #303):
+> [[g-sql-param-interpolation-peer-call-not-awaited]] — an aliased peer inside a SQL `?{}` param was both
+> unawaited (fail-open) AND, as sole referencer, unemitted (fail-closed 500); the template-literal form was
+> already awaited. Fixed at the `taggedFromParams` detection gate + an alias-aware raw-text emission recovery.
+> A SEPARATE broader residual was found doing so: [[g-dispatch-table-call-not-awaited-or-emitted]] — a
+> dispatch-table call `t[k]()` is unawaited/unemitted in EVERY position (not interpolation-specific), filed
+> for its own cycle.
 
 Surfaced reverse-verifying adopter GH **#284**. **The adopter's own attribution is wrong** — see
 [[g-e-route-001-severity-contradicts-12-4-and-one-limb-never-fires]] for the diagnostic half — but the

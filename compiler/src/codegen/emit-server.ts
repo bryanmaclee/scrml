@@ -3028,6 +3028,43 @@ export function generateServerJs(
       }
       const _aliases = aliasNamesResolvingTo(_res, _serverFnPeerNames);
       if (_aliases.size > 0 && _sfn) _peerAliasByFn.set(_sfn, _aliases);
+
+      // #284 residual (S304) — EMISSION for a peer reached through an ALIAS that
+      // is called ONLY inside a SQL `?{}` param or template-literal interpolation
+      // (`const p = nextOrder; ?{`… ${p()} …`}`). `resolveIndirectCallees`'
+      // `calledNames` sees only STRUCTURED `call` nodes, so a `p()` embedded in a
+      // `sql` / `lit`-template raw text is invisible → `indirectResolvedCallees`
+      // omits the target and the peer callable is never emitted. emit-expr STILL
+      // lowers the interpolation to `await p()` (the AWAIT is binding-based via
+      // `_peerAliasByFn`, above) → a dangling ReferenceError at runtime. The
+      // direct-peer sibling of this recovery is the `lit`/`sql` raw scan in the
+      // generic `_walk` above, but it keeps only DIRECT peer names; here we
+      // resolve the recovered callee through THIS body's alias bindings. Over-
+      // collection is harmless (an emitted-but-uncalled `async function` is dead
+      // code — the established emission invariant); under-collection crashes.
+      if (_res.bindings.size > 0) {
+        const _rawAliasCallees = new Set<string>();
+        const _collectRawCallees = (n: any): void => {
+          if (!n || typeof n !== "object") return;
+          if (Array.isArray(n)) { for (const c of n) _collectRawCallees(c); return; }
+          if (n.kind === "lit" && n.litType === "template" && typeof n.raw === "string" && n.raw.includes("${")) {
+            for (const c of extractCalleeNames(n.raw)) _rawAliasCallees.add(c);
+          }
+          if (n.kind === "sql") {
+            const _sqlRaw = (typeof n.query === "string" ? n.query : "") + " " + (typeof n.body === "string" ? n.body : "");
+            for (const c of extractCalleeNames(_sqlRaw)) _rawAliasCallees.add(c);
+          }
+          for (const key of Object.keys(n)) {
+            if (key === "span" || key === "id" || key === "_scope" || key === "_record") continue;
+            _collectRawCallees(n[key]);
+          }
+        };
+        for (const _stmt of (_sfn?.body ?? [])) _collectRawCallees(_stmt);
+        for (const _name of _rawAliasCallees) {
+          const _targets = _res.bindings.get(_name);
+          if (_targets) for (const _t of _targets) if (_serverFnPeerNames.has(_t)) _calledPeerNames.add(_t);
+        }
+      }
     }
   }
 
