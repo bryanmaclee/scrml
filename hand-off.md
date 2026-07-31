@@ -1,4 +1,66 @@
 <!-- ============================================================= -->
+<!-- S308 WRAP (Peter/Windows) — prepended 2026-07-31.              -->
+<!-- RECOVERY: authored by the S309 boot after S308's terminal was  -->
+<!-- closed mid-session (post-landing, pre-wrap). S306 + all prior   -->
+<!-- UNCHANGED below. Disambiguate by NAME.                          -->
+<!-- ============================================================= -->
+
+# scrml — Session 308 (Peter · Windows) — WRAP
+
+**Date:** 2026-07-31. `/boot` Profile A, successor to S307-bryan (disjoint lanes). **This block was
+authored by a RECOVERY boot (S309):** the S308 terminal was closed AFTER its one landing merged but
+BEFORE the wrap ran — so no work was lost, only the continuity trail, reconstructed here from reflog +
+PR #326. `main` at **`cb713274`**, coherence **0/0** both repos, trees clean. Delta-log **[1001]–[1002]**.
+
+## 🎯 THE HEADLINE — #264 residual CLOSED: the acorn pass now fails SAFE, and the retired text scanner is deleted
+
+**#264 fallback hardening (PR #326, `cb713274`).** The GH #264 `injectServerCallAwaitsViaAst` models JS
+scopes exactly via acorn. On an acorn **PARSE FAILURE**, `liftEmittedStatementAwaits` still fell back to
+the flat-text statement scanner whose scope-modeling bugs the six #264 adversarial rounds 1–5 kept
+surfacing. A parse failure means the emitted `(async () => {…})` IIFE is itself malformed (a **separate**
+compiler bug), so the strictly-safer choice is to return the body **UNCHANGED** — never inject into text
+the parser cannot model. The now-dead flat-text scanner was **deleted** (`scanEmittedCode`,
+`precedesBlockBrace`, `continuesEmittedStatement`, `splitEmittedStatements`, `liftOneEmittedStatement`,
+`recurseEmittedBraceGroups` — −224 LOC, grep-verified no other caller; the shared `injectPromiseAwait`
+source-of-truth retained). **Inert on all valid programs by construction** — only the parse-failure branch
+changed. This clears the fallback-hardening half of the S306-filed gap; the contrived spaced-escape-hatch
+fail-open half of that same gap remains open (see pickup #4).
+
+## 🔴 THE NEXT PA'S PICKUP (Peter-lane) — unchanged from S306 minus the residual
+
+1. **Braceless `for/lift` reject-diagnostic** — bryan RULED reject; "the build is yours." formB emits
+   `for(const it of of)` (node-check-valid, dies at eval). Emit the diagnostic + repro matrix. (Carried
+   since S300; still open — the top Peter-lane item now that #264 is fully closed.)
+2. **#228** (held) — reactive bindings in an initially-hidden nested-`<each>` don't reconcile live
+   (flogence async-trace / broader S10 gap). The sole open adopter issue.
+3. **Gap** `g-onmount-direct-reactive-server-write-unawaited-on-escape-hatch-string-path` (MED) — the
+   fallback-hardening half is now DONE (PR #326); the remaining half is the contrived direct `@n =
+   serverFn()` on the SPACED escape-hatch path not being awaited (needs a parse-failing mount body). Fix =
+   make emit-client's matcher spaced-tolerant OR have the AST pass await it.
+
+## ✅ GATE / HOUSEKEEPING
+
+- **Landed (cloud gate + windows GREEN, merged before the interruption):** PR #326 (`cb713274`). FACTS
+  regenerated in-commit (`--check` re-verified GREEN this boot). Local gated subset **21844 pass / 6
+  pre-existing baseline** (0 new) per the PR; S239 adversarial CLEAN (parse-equivalence argument:
+  acorn-fails ⟺ the shipped IIFE is malformed, so the deleted scanner bought nothing).
+- **Adopter issues: 1 open (#228, held).** #264 and its residual are now fully closed.
+- **Worktrees:** main + persistent `scrml-pinned` only — the residual branch auto-deleted on merge; nothing
+  to prune. **Maps NOT run** — the residual touched `scheduling.ts` / `ast-builder.js` internals + two test
+  files, no new surface (S299/S304 precedent; grep-competitive).
+- **⚠ Recovery caveat (shoot-straight):** I did NOT re-run the full local suite this boot — the work was
+  already merged with a green cloud gate (authority) and the PR records 21844/6. If you want the local
+  21.8k re-run for belt-and-suspenders, say so.
+- **`ai-review`/`tracking` red** on the code PR = the documented non-blocking infra flakes (bryan's
+  `ANTHROPIC_API_KEY` secret; `tracking` red-by-design) — not regressions.
+
+## Tags
+#session-308-peter #264-residual-closed #acorn-parse-failure-returns-unchanged #dead-text-scanner-deleted
+#interrupted-session-recovery #reconstructed-from-reflog-and-pr326
+
+---
+
+<!-- ============================================================= -->
 <!-- S306 WRAP (Peter/Windows) — prepended 2026-07-31.              -->
 <!-- S305-bryan + S304-Peter + S302 + all prior UNCHANGED below.    -->
 <!-- Disambiguate by NAME.                                          -->
