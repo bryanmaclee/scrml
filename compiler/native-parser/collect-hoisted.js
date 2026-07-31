@@ -391,6 +391,63 @@ export function isEngineBlock(block) {
     return block.name === "engine" || block.name === "machine";
 }
 
+// readStructuralIfAttr — SPEC §17.1.2. Read the `if=` RENDER GATE off a
+// structural opener (`<engine>` / `<match>` / `<each>`) and return live's
+// `{ ifRaw, ifCond }` pair, or all-null when the attribute is absent.
+//
+// WHY THE THREE FIELDS EXIST AT ALL. §17.1.2 (S302) widened §17.1 to admit `if=`
+// on those three. They are not `kind:"markup"` nodes and carry no `attrs` array,
+// so live's `buildBlock` had nowhere to put the predicate and silently dropped
+// it — the construct rendered unconditionally and permanently on a clean compile.
+// Live now captures it via `captureStructuralIfAttr` (ast-builder.js). Native
+// already has the parsed attribute in hand, so the mirror is a read, not a parse.
+//
+// PARITY SHAPE, not merely presence. The within-node canary compares FIELD sets,
+// so `ifCond` must carry the same AttrValue object live produces:
+//   `if=@shown`      -> { kind: "variable-ref", name: "@shown", exprNode, span }
+//   `if=(@n >= 3)`   -> { kind: "expr", raw, refs, exprNode, span }
+//   `if=ready()`     -> { kind: "call-ref", name, args, argExprNodes, span }
+// `exprNode` is filled by `populateNativeAttrValueExprNodes` after this returns
+// (the same pass the live pipeline's api.js runs), so it is deliberately NOT
+// synthesized here.
+//
+// `ifRaw` is the VERBATIM condition source — span-sliced, exactly as
+// `readOnExprRaw` does for `on=` — because live's `ifRaw` is a raw source slice
+// too, and the DG / diagnostics read it as author text.
+//
+// A bare `if` with no `=` (`value.kind === "absent"`) yields all-null: live's
+// capture requires an `=`, so an all-null here is the matching shape.
+export function readStructuralIfAttr(attrs, source) {
+    const NONE = { ifRaw: null, ifCond: null };
+    if (!Array.isArray(attrs)) return NONE;
+    for (const attr of attrs) {
+        if (attr === undefined || attr === null) continue;
+        if (attr.name !== "if") continue;
+        const value = attr.value;
+        if (value === undefined || value === null) return NONE;
+        if (value.kind === "absent") return NONE;
+        let raw = null;
+        const span = value.span;
+        if (span !== undefined && span !== null
+            && typeof span.start === "number" && typeof span.end === "number"
+            && typeof source === "string"
+            && span.start >= 0 && span.end <= source.length
+            && span.start <= span.end) {
+            raw = source.slice(span.start, span.end);
+        }
+        // Span unavailable — fall back to the typed payload, mirroring
+        // `readOnExprRaw`'s tail.
+        if (raw === null) {
+            if (value.kind === "variable-ref" && typeof value.name === "string") raw = value.name;
+            else if (value.kind === "expr" && typeof value.raw === "string") raw = value.raw;
+            else if (value.kind === "string-literal" && typeof value.value === "string") raw = value.value;
+        }
+        if (raw === null) return NONE;
+        return { ifRaw: raw, ifCond: value };
+    }
+    return NONE;
+}
+
 export function synthEngineDecl(block, stamp, source) {
     const attrs = Array.isArray(block.attrs) ? block.attrs : [];
 
@@ -406,6 +463,8 @@ export function synthEngineDecl(block, stamp, source) {
     const sourceVar = readSourceVar(attrs);
     const initialVariant = readInitial(attrs);
     const pinned = hasBareAttr(attrs, "pinned");
+    // §17.1.2 — the `if=` render gate (see `readStructuralIfAttr`).
+    const _structuralIf = readStructuralIfAttr(attrs, source);
 
     // §51.0.C — resolve varName.
     let varName = "";
@@ -461,6 +520,13 @@ export function synthEngineDecl(block, stamp, source) {
         // form; SYM PASS 11/B15 reads this to scope E-ENGINE-RULE-LEGACY-SYNTAX
         // (whole-body arrow fire-site) to the no-`name=` state-engine form only.
         hadNameAttr: legacyName !== null,
+        // §17.1.2 — the `if=` render gate on the engine opener (see
+        // `readStructuralIfAttr`). Gates the engine's MOUNT SUBTREE only; the
+        // declaration, `rule=` enforcement and the lifecycle hooks stay live.
+        // ABSENT (not null) when there is no `if=` — mirrors live's omission.
+        ...(_structuralIf.ifRaw !== null
+            ? { ifRaw: _structuralIf.ifRaw, ifCond: _structuralIf.ifCond }
+            : {}),
         span: block.span,
         // M6.6.b.2 — native-walker bridge. Stamp the source native engine
         // Markup block + the full file source so symbol-table's PASS 11

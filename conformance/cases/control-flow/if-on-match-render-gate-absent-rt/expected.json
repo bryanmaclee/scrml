@@ -1,0 +1,19 @@
+{
+  "id": "control-flow-if-on-match-render-gate-absent-rt",
+  "description": "§17.1.2 — `if=` on a block-form `<match>` gates the DISPATCHED ARM OUTPUT: while the condition is false no arm is dispatched at all. `@shown` seeds false and nothing flips it, so #arm-loading and #arm-ready must both be count 0 and the `data-scrml-match-mount` slot must not exist either. Before this widening the attribute generated ZERO code and the mount slot dispatched normally. The subject cell is driven anyway (#ready flips @phase to .Ready) to show that the gate withholds the DISPATCH, not the subject: @phase must still read Ready. `<match>` carries no independent state, so the §17.1.2.1 render-vs-lifecycle distinction is vacuous here — the whole claim is the absence.",
+  "language-version": "1.0",
+  "spec": "§17.1.2",
+  "rationale": "§17.1.2's table admits `if=` on `<match>` (§18.0.1) and scopes §17.1 semantics to \"the dispatched arm output\". §17.1: \"When `expr` evaluates to false, the element is NOT rendered. It does not exist in the DOM.\" §17.2 draws the contrast — \"`show=` hides, `if=` removes\" — so a `display:none` lowering would not satisfy this case; the count-0 assertions are on DOM existence, and the arm markup legitimately remains in the emitted BYTES inside the inert `<template>` the §17.1 lowering produces.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-DG-002"],
+    "input": [{ "click": "#ready" }],
+    "state": { "phase": "Ready", "shown": false },
+    "domAnchored": [
+      { "selector": "#arm-loading", "count": 0 },
+      { "selector": "#arm-ready", "count": 0 },
+      { "selector": "[data-scrml-match-mount]", "count": 0 },
+      { "selector": "#subject", "text": "Phase: Ready" }
+    ]
+  }
+}

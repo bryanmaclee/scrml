@@ -1388,6 +1388,127 @@ export function generateHtml(
     return false;
   };
 
+  /**
+   * §17.1 / §17.1.2 — THE `if=` lowering. One implementation, four hosts.
+   *
+   * Emits `<template id="TID">` + whatever `emitInner` pushes + `</template>` +
+   * `<!--scrml-if-marker:MID-->`, and registers the mount-toggle LogicBinding
+   * that `emit-event-wiring.ts` turns into the mount/unmount controller.
+   *
+   * WHY IT IS FACTORED. `if=` used to have TWO lowerings with different DOM
+   * semantics (`<template>`+marker for a "clean" subtree, a `display` toggle for
+   * anything carrying wiring) chosen silently by a purity test; #289 deleted the
+   * second because a single `${…}` flipped the attribute between *removes* and
+   * *hides*. §17.1.2 adds three more hosts — `<engine>`, `<match>`, `<each>` —
+   * and hand-rolling the wrap at each one is how the same divergence grows back.
+   * Every host calls THIS.
+   *
+   * The `ifGuard` frame pushed around `emitInner` reaches the `${…}`
+   * interpolations THIS `generateHtml` invocation registers. It deliberately does
+   * NOT reach an `<engine>` arm body, a `<match>` arm body, or an `<each>` item
+   * template: those are emitted by separate `generateHtml` calls with their own
+   * guard stacks. That is sound for the structural hosts because their content
+   * only ever renders through a dispatcher/renderer that early-returns on an
+   * absent mount (`if (!_mount) return;`), and a `<template>`'s content is not in
+   * the document tree, so no such mount can be found while the gate is false.
+   *
+   * @param ifVal — the `if=` attribute VALUE (variable-ref | call-ref | expr).
+   * @param emitInner — pushes the gated HTML onto `parts`.
+   * @param transitions — §17.4 `transition:`/`in:`/`out:` classes, when the host
+   *   admits them (markup only today; the structural openers carry no transition
+   *   attributes).
+   */
+  const emitIfMountGate = (
+    ifVal: any,
+    emitInner: () => void,
+    transitions?: { enter?: string | null; exit?: string | null },
+  ): void => {
+    const templateId = genVar("scrml_tpl");
+    const markerId = genVar("if_marker");
+    parts.push(`<template id="${templateId}">`);
+    // Guard the descendant `${…}` effects on this predicate — see `pushIfGuard` /
+    // the `ifGuardStack` comment for why mount/unmount does NOT make this
+    // redundant (the teardown race on a true→false flip).
+    const ifGuardPushed = pushIfGuard(ifVal);
+    emitInner();
+    if (ifGuardPushed) ifGuardStack.pop();
+    parts.push(`</template>`);
+    parts.push(`<!--scrml-if-marker:${markerId}-->`);
+    if (!registry) return;
+    // §17.4 transition directives on the `if=` element itself. Under the retired
+    // display lowering these animated a visibility flip; the mount controller
+    // applies the enter class on mount and defers the REMOVAL until the exit
+    // animation ends, so `if=` still removes and still animates.
+    const transitionFields = {
+      ...(transitions?.enter ? { transitionEnter: transitions.enter } : {}),
+      ...(transitions?.exit ? { transitionExit: transitions.exit } : {}),
+    };
+    if (ifVal.kind === "variable-ref") {
+      const ifVarName = (ifVal.name ?? "").replace(/^@/, "");
+      const ifBaseVar = ifVarName.split(".")[0];
+      const hasDotPath = ifVarName.includes(".");
+      registry.addLogicBinding({ placeholderId: markerId, expr: `@${ifVarName}`, isMountToggle: true, templateId, markerId, varName: ifBaseVar, ...(hasDotPath ? { dotPath: ifVarName } : {}), ...transitionFields } as any);
+    } else if (ifVal.kind === "call-ref") {
+      // g-attr-if-fn-display-not-mount (S191): a bare-call condition gets the
+      // SAME mount/unmount controller as if=(fn())/if=@var so `if=fn()` ≡
+      // `if=(fn())`. Build a raw condExpr from the call (the fn name is mangled
+      // by the whole-buffer post-pass; `_scrml_effect` dynamic-tracks the cells
+      // it reads).
+      const condRaw = `${ifVal.name}(${(ifVal.args ?? []).join(", ")})`;
+      const condRefs = (ifVal.args ?? [])
+        .filter((a: any) => typeof a === "string" && a.startsWith("@"))
+        .map((a: any) => a.replace(/^@/, "").split(/[.[(]/)[0]);
+      registry.addLogicBinding({ placeholderId: markerId, expr: condRaw, isMountToggle: true, templateId, markerId, condExpr: condRaw, refs: condRefs, ...transitionFields } as any);
+    } else {
+      registry.addLogicBinding({ placeholderId: markerId, expr: ifVal.raw, isMountToggle: true, templateId, markerId, condExpr: ifVal.raw, condExprNode: ifVal.exprNode, refs: ifVal.refs, ...transitionFields } as any);
+    }
+  };
+
+  /**
+   * §17.1.2 — is this `if=` attribute VALUE one the mount gate accepts?
+   * Mirrors the markup gate's own kind test, so a shape the markup path would
+   * ignore is ignored identically on a structural element.
+   */
+  const isGateableIfValue = (v: any): boolean =>
+    !!v && (v.kind === "variable-ref" || v.kind === "expr" || v.kind === "call-ref");
+
+  /**
+   * §17.1.2 — push a structural element's already-built mount HTML, wrapped in
+   * the §17.1 gate when its opener carried `if=`.
+   *
+   * `<engine>` / `<match>` / `<each>` each build their mount HTML through their
+   * own emitter (which also registers the arm/item bindings) and hand back a
+   * string. This routes that string through `emitIfMountGate` — the SAME lowering
+   * a `<div if=…>` gets — or pushes it bare when there is no `if=`. A node with
+   * no `ifCond` field takes a byte-identical path to the pre-§17.1.2 emitter.
+   *
+   * The three openers carry no `transition:`/`in:`/`out:` attributes (their
+   * builders never capture them), so no transition classes are threaded.
+   *
+   * E-IF-IN-DISPATCHED-ARM APPLIES HERE TOO, and the omission was a REGRESSION,
+   * not merely a missing check. A `<match>`/`<engine>` arm body is injected with
+   * `innerHTML` on dispatch and wired by a per-arm wire function that cannot see
+   * into `<template>` content — the exact reason `2fbe6520` refuses the markup
+   * `if=` in that position. Measured before this guard was wired: a
+   * `<each … if=@shown>` inside a `<match>` arm rendered 2 rows on main and 0 on
+   * this branch after an arm round-trip, with `@shown` never changing and no
+   * diagnostic. Working code went silently blank. The guard also makes §17.1.2.2's
+   * sentence — that the in-arm surface is "currently-rejected" — true again.
+   */
+  const emitGatedStructural = (node: any, html: string): void => {
+    const ifVal = (node as any).ifCond;
+    if (!isGateableIfValue(ifVal)) {
+      parts.push(html);
+      return;
+    }
+    // TEMPORARY (E-IF-IN-DISPATCHED-ARM) — remove with the guard, in lockstep
+    // with the markup call site (~:2712). Refusing DROPS the element rather than
+    // emitting an ungated one: emitting ungated would silently ignore the
+    // author's predicate, which is the §17.1.2 defect this whole arc removed.
+    if (refuseConditionalInDispatchedArm(registry, node, "if=", errors)) return;
+    emitIfMountGate(ifVal, () => { parts.push(html); });
+  };
+
   // ss15 item-2 (S214) -- enclosing-markup-element tag stack. The logic-node
   // branch keys on the immediate parent tag to decide render-slot vs effect:
   // an empty stack means file top-level (a default-logic root); a top-of-stack
@@ -2599,57 +2720,19 @@ export function generateHtml(
       const ifAttrCheck = attrs.find((a: any) => a.name === "if");
       if (
         ifAttrCheck &&
-        ifAttrCheck.value &&
-        (ifAttrCheck.value.kind === "variable-ref" || ifAttrCheck.value.kind === "expr" || ifAttrCheck.value.kind === "call-ref") &&
+        isGateableIfValue(ifAttrCheck.value) &&
         !/^[A-Z]/.test(tag)
       ) {
         // TEMPORARY (E-IF-IN-DISPATCHED-ARM) — remove with the guard.
         if (refuseConditionalInDispatchedArm(registry, node, "if=", errors)) return;
-        const ifVal = ifAttrCheck.value;
-        const templateId = genVar("scrml_tpl");
-        const markerId = genVar("if_marker");
-        parts.push(`<template id="${templateId}">`);
         const innerNode = { ...node, attributes: attrs.filter((a: any) => a.name !== "if"), attrs: attrs.filter((a: any) => a.name !== "if") };
-        // Guard the descendant `${…}` effects on this predicate — see
-        // `pushIfGuard` / the `ifGuardStack` comment for why mount/unmount does
-        // NOT make this redundant (the teardown race on a true→false flip).
-        const ifGuardPushed = pushIfGuard(ifVal);
-        emitNode(innerNode);
-        if (ifGuardPushed) ifGuardStack.pop();
-        parts.push(`</template>`);
-        parts.push(`<!--scrml-if-marker:${markerId}-->`);
-        if (registry) {
-          // §17.4 transition directives on the `if=` element itself. Under the
-          // retired display lowering these animated a visibility flip; the mount
-          // controller applies the enter class on mount and defers the REMOVAL
-          // until the exit animation ends, so `if=` still removes and still
-          // animates. `attrIsWiringFree` rejects `transition:`/`in:`/`out:`, so
-          // pre-Phase-2 these elements could never reach this path at all.
-          const transitionFields = {
-            ...(transitionEnter ? { transitionEnter } : {}),
-            ...(transitionExit ? { transitionExit } : {}),
-          };
-          if (ifVal.kind === "variable-ref") {
-            const ifVarName = (ifVal.name ?? "").replace(/^@/, "");
-            const ifBaseVar = ifVarName.split(".")[0];
-            const hasDotPath = ifVarName.includes(".");
-            registry.addLogicBinding({ placeholderId: markerId, expr: `@${ifVarName}`, isMountToggle: true, templateId, markerId, varName: ifBaseVar, ...(hasDotPath ? { dotPath: ifVarName } : {}), ...transitionFields } as any);
-          } else if (ifVal.kind === "call-ref") {
-            // g-attr-if-fn-display-not-mount (S191): a bare-call condition gets
-            // the SAME mount/unmount controller as if=(fn())/if=@var so
-            // `if=fn()` ≡ `if=(fn())`. Build a raw condExpr from the call (the fn
-            // name is mangled by the whole-buffer post-pass; `_scrml_effect`
-            // dynamic-tracks the cells it reads). Mirrors the call-ref attr-value
-            // branch below (~1761).
-            const condRaw = `${ifVal.name}(${(ifVal.args ?? []).join(", ")})`;
-            const condRefs = (ifVal.args ?? [])
-              .filter((a: any) => typeof a === "string" && a.startsWith("@"))
-              .map((a: any) => a.replace(/^@/, "").split(/[.[(]/)[0]);
-            registry.addLogicBinding({ placeholderId: markerId, expr: condRaw, isMountToggle: true, templateId, markerId, condExpr: condRaw, refs: condRefs, ...transitionFields } as any);
-          } else {
-            registry.addLogicBinding({ placeholderId: markerId, expr: ifVal.raw, isMountToggle: true, templateId, markerId, condExpr: ifVal.raw, condExprNode: ifVal.exprNode, refs: ifVal.refs, ...transitionFields } as any);
-          }
-        }
+        // `attrIsWiringFree` rejects `transition:`/`in:`/`out:`, so pre-Phase-2
+        // these elements could never reach this path at all.
+        emitIfMountGate(
+          ifAttrCheck.value,
+          () => emitNode(innerNode),
+          { enter: transitionEnter, exit: transitionExit },
+        );
         return;
       }
 
@@ -3835,7 +3918,20 @@ export function generateHtml(
         : null;
       if (liveCtx) {
         const html = emitEngineMountHtml(node, liveCtx);
-        if (html) parts.push(html);
+        // §17.1.2 — `if=` gates the engine's MOUNT SUBTREE. The `<div
+        // data-scrml-engine-mount>` slot moves inside the inert `<template>`, so
+        // the dispatcher's `document.querySelector('[data-scrml-engine-mount=…]')`
+        // finds nothing and returns early — no arm renders while the condition is
+        // false. Everything else about the engine is untouched: the auto-declared
+        // cell is still set at module-init, the transition table still enforces
+        // `rule=`, `<onTransition>` / `<onTimeout>` / `<onIdle>` still fire, and
+        // the boot-only opener `effect=` still runs once. On false→true the
+        // controller's `_scrml_mount_wire` → `_scrml_remount_dispatch` re-fires
+        // the dispatcher on the CURRENT variant, so the engine renders wherever
+        // it had transitioned to while hidden — not back at `initial=`. That is
+        // §17.1.2.1's render-vs-lifecycle split, made of parts that already
+        // existed.
+        if (html) emitGatedStructural(node, html);
       }
       return;
     }
@@ -3868,7 +3964,11 @@ export function generateHtml(
         : null;
       if (liveCtx) {
         const html = emitMatchMountHtml(node, liveCtx);
-        if (html) parts.push(html);
+        // §17.1.2 — `if=` gates the dispatched arm output. Same mechanism as the
+        // engine above: the mount slot goes inert inside the `<template>`, the
+        // dispatcher's mount lookup fails, no arm is dispatched. `<match>` carries
+        // no independent state, so render-gating and lifecycle-gating coincide.
+        if (html) emitGatedStructural(node, html);
       }
       return;
     }
@@ -3894,7 +3994,14 @@ export function generateHtml(
         : null;
       if (liveCtx) {
         const html = emitEachMountHtml(node, liveCtx);
-        if (html) parts.push(html);
+        // §17.1.2 — `if=` gates the WHOLE iterated list, `<empty>` included. The
+        // `<each>` mount is a COMMENT FENCE, not an element, so this is the one
+        // host that exercises `_scrml_mount_template`'s node-RANGE contract (see
+        // that helper). `_scrml_find_each_anchor` cannot see a fence inside an
+        // inert `<template>`, so the renderer early-returns and reconciles
+        // nothing; on false→true `_scrml_mount_wire` → `_scrml_remount_each_fence`
+        // re-invokes the registered renderer against the now-present fence.
+        if (html) emitGatedStructural(node, html);
       }
       return;
     }

@@ -1,0 +1,17 @@
+${
+    type Phase:enum = { Loading, Ready }
+    <phase>: Phase = .Loading
+    <shown> = false
+    function ready() { @phase = Phase.Ready }
+    function reveal() { @shown = true }
+}
+<button id="ready" onclick=ready()>Ready</>
+<button id="reveal" onclick=reveal()>Reveal</>
+<match for=Phase on=@phase if=@shown>
+    <Loading>
+        <p id="arm-loading">Loading</p>
+    </>
+    <Ready>
+        <p id="arm-ready">Ready</p>
+    </>
+</match>

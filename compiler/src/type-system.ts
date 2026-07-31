@@ -12267,6 +12267,11 @@ function annotateNodes(
       // E-SCOPE-001 walker anyway.)
       // ------------------------------------------------------------------
       case "each-block": {
+        // §17.1.2 — the opener `if=` decides whether the list renders AT ALL, so
+        // it is evaluated outside the per-item scope. Check it BEFORE the push
+        // below binds `as name`, or `if=item.ok` would resolve against the row
+        // variable and ship a runtime `Cannot read properties of undefined`.
+        visitStructuralIfAttr(n);
         scopeChain.push(`each:${nodeKey(n)}`);
         const asName = (n as Record<string, unknown>).asName;
         if (typeof asName === "string" && asName.length > 0) {
@@ -12352,6 +12357,11 @@ function annotateNodes(
       // Bare-identifier refs (`${msg}`) are TS territory and require the
       // body-walk re-enablement landing here.
       case "engine-decl": {
+        // §17.1.2 — scope-check the opener `if=` render gate (see
+        // `visitStructuralIfAttr`). Deliberately outside any arm scope: the gate
+        // decides whether the engine's mount subtree renders, and reads nothing
+        // an arm binds.
+        visitStructuralIfAttr(n);
         // §18.2 / §51.0.J / §34 — W-MATCH-ARROW-LEGACY (S171). A derived engine
         // `<engine for=T derived=match @VAR { .A => .X  _ -> .Y }>` is a match-
         // shaped construct whose arms join the `:>` arm-separator deprecation.
@@ -12467,6 +12477,9 @@ function annotateNodes(
       // variant's bindings (extracted from `armsRaw` via parseMatchArms — both
       // the SPACE form bareword attrs and the PAREN `payloadBindingsRaw`).
       case "match-block": {
+        // §17.1.2 — scope-check the opener `if=` render gate (see
+        // `visitStructuralIfAttr`).
+        visitStructuralIfAttr(n);
         // §18.0.1 / §34 (ss42 item-2) — route the markup-match `on=@cell` read
         // through the read-side E-STATE-UNDECLARED walker. The match-block node
         // carries its `on=` as RAW TEXT (`onExprRaw`); codegen (emit-match.ts
@@ -12637,6 +12650,54 @@ function annotateNodes(
       scope = scope.parent;
     }
     return false;
+  }
+
+  /**
+   * §17.1.2 — scope-check the `if=` predicate on a scrml-defined STRUCTURAL
+   * element (`<engine>` / `<match>` / `<each>`).
+   *
+   * WHY A SEPARATE ENTRY POINT. Those three nodes carry no `attrs` array — the
+   * block splitter raw-captures them and the AST builder reconstructs each from
+   * named opener regexes — so the markup walk's `for (const attr of n.attrs)`
+   * loop (:9147) reaches nothing on them. `captureStructuralIfAttr` gives the
+   * predicate a home on the node (`ifCond`), and this routes it to the
+   * SAME `visitAttr` a markup `if=` gets. Without it the predicate was accepted
+   * unchecked, which is strictly worse than being ignored:
+   *
+   *   `if=@nosuchcell`  markup: E-SCOPE-001 · structural (pre-fix): 0 errors,
+   *                     construct silently never renders
+   *   `if=true`         markup: E-SCOPE-001 · structural (pre-fix): 0 errors,
+   *                     `<each … if=true>` renders 0 rows
+   *   `if="yes"`        markup: E-SCOPE-001 · structural (pre-fix): 0 errors, and
+   *                     `yes is not defined` throws out of the mount controller —
+   *                     an uncaught throw at boot kills the WHOLE page
+   *   `if=item.ok`      the `<each>` row variable is NOT in scope on the opener
+   *                     (the predicate is evaluated to decide whether the list
+   *                     renders at all) — pre-fix: 0 errors, then
+   *                     `Cannot read properties of undefined` at runtime
+   *
+   * CALL IT BEFORE ANY SCOPE PUSH. For `<each>` in particular the opener
+   * condition is evaluated OUTSIDE the per-item scope, so this must run before
+   * `scopeChain.push("each:…")` binds `as name` — otherwise `if=item.ok` would
+   * resolve against the row binding and the fourth row above would stay silent.
+   *
+   * The synthetic attr wrapper is deliberate: reusing `visitAttr` verbatim is
+   * what guarantees a structural predicate and a markup predicate can never
+   * diverge in what they accept.
+   */
+  function visitStructuralIfAttr(n: ASTNodeLike): void {
+    const ifCond = (n as Record<string, unknown>).ifCond;
+    if (!ifCond || typeof ifCond !== "object") return;
+    visitAttr(
+      {
+        name: "if",
+        value: ifCond as ASTNodeLike,
+        // `visitAttr` prefers `value.span` (the precise condition anchor); this
+        // node-level span is only its fallback.
+        span: n.span as Span,
+      } as ASTNodeLike,
+      n,
+    );
   }
 
   function visitAttr(attr: ASTNodeLike, parent: ASTNodeLike): void {

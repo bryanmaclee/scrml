@@ -73,7 +73,7 @@
 // in their headers).
 
 import { parseMarkupTrace, liftBareBlocks, parseLogicBodyBestEffort } from "./parse-markup.js";
-import { collectHoisted, isEngineBlock, synthEngineDecl } from "./collect-hoisted.js";
+import { collectHoisted, isEngineBlock, synthEngineDecl, readStructuralIfAttr } from "./collect-hoisted.js";
 import { translateStmtList } from "./translate-stmt.js";
 import { isStateBlock } from "./parse-state-body.js";
 import { isVoidElementName } from "./tag-frame.js";
@@ -747,6 +747,9 @@ function synthMatchBlockNode(block, idGen, source) {
     // here does not contribute to the deep-kind sequence.
     const bodyChildren = Array.isArray(block.children) ? block.children : [];
 
+    // §17.1.2 — the `if=` render gate (see `readStructuralIfAttr`).
+    const _if = readStructuralIfAttr(attrs, source);
+
     return {
         id: stampId(idGen),
         kind: "match-block",
@@ -754,6 +757,9 @@ function synthMatchBlockNode(block, idGen, source) {
         onExprRaw,
         armsRaw,
         bodyChildren,
+        // ABSENT (not null) when the opener carries no `if=` — mirrors live's
+        // omission, which keeps the within-node canary's field sets equal.
+        ...(_if.ifRaw !== null ? { ifRaw: _if.ifRaw, ifCond: _if.ifCond } : {}),
         span: block.span !== undefined ? block.span : null,
         // A `< match` opener (space after `<`) is classified TagKind.StateOpener
         // by the native opener scanner; `<match>` is ScrmlStructural. Mirrors
@@ -1053,6 +1059,10 @@ function synthEachBlockNode(block, idGen, source, errors) {
 
     const bodyRaw = collectEachBodyRaw(block, source);
 
+    // §17.1.2 — the `if=` render gate (see `readStructuralIfAttr`). On `<each>`
+    // it gates the WHOLE iterated list, `<empty>` included.
+    const _if = readStructuralIfAttr(attrs, source);
+
     return {
         id: stampId(idGen),
         kind: "each-block",
@@ -1066,6 +1076,9 @@ function synthEachBlockNode(block, idGen, source, errors) {
         templateChildren,
         emptyChild,
         bodyRaw,
+        // ABSENT (not null) when the opener carries no `if=` — mirrors live's
+        // omission, which keeps the within-node canary's field sets equal.
+        ...(_if.ifRaw !== null ? { ifRaw: _if.ifRaw, ifCond: _if.ifCond } : {}),
         span: block.span !== undefined ? block.span : null,
         // A `< each` opener (space after `<`) is classified TagKind.StateOpener;
         // `<each>` is ScrmlStructural. Mirrors the match/engine/state stamp.
@@ -1586,6 +1599,26 @@ function stripSourceTextFromAttrs(attrs) {
     return changed ? out : attrs;
 }
 
+// stripSourceTextFromValue — SPEC §17.1.2 sibling of `stripSourceTextFromAttrs`
+// for an attr VALUE that does not live in an `attrs` array.
+//
+// `<engine>` / `<match>` / `<each>` carry their `if=` render-gate predicate as a
+// bare `ifCond` field (they have no `attrs` array at all — the whole reason
+// §17.1.2 needed a dedicated capture). The array-shaped strip above therefore
+// never reaches it, and the native-only `sourceText` debt leaked into the
+// FileAST as an EXTRA-FIELD against live. Same clone-never-mutate discipline:
+// the value object is SHARED with the raw native block stream.
+function stripSourceTextFromValue(value) {
+    if (value === null || value === undefined || typeof value !== "object") return value;
+    if (Object.prototype.hasOwnProperty.call(value, "sourceText") === false) return value;
+    const out = {};
+    for (const k of Object.keys(value)) {
+        if (k === "sourceText") continue;
+        out[k] = value[k];
+    }
+    return out;
+}
+
 // normalizeNode — calculation (mutates the translated node in place; the node
 // was freshly synthesized by the synth* builders, so in-place is safe for
 // everything EXCEPT attrs[].value, which is shared — handled via clone above).
@@ -1640,6 +1673,13 @@ function normalizeNode(node, filePath, inExprContext) {
     // Path-agnostic (live carries no sourceText on either path).
     if (MARKUP_ATTR_KINDS.has(kind) && Array.isArray(node.attrs)) {
         node.attrs = stripSourceTextFromAttrs(node.attrs);
+    }
+    // (F.2) SPEC §17.1.2 — the same strip for the `if=` render gate on the three
+    // structural elements. Their predicate is a bare `ifCond` field rather than
+    // an `attrs` entry, so (F) cannot see it. Unconditional on kind: only those
+    // three nodes ever carry `ifCond`.
+    if (node.ifCond !== null && node.ifCond !== undefined && typeof node.ifCond === "object") {
+        node.ifCond = stripSourceTextFromValue(node.ifCond);
     }
 }
 

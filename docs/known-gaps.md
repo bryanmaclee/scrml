@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 20 |
-| MED | 94 |
-| LOW | 40 |
+| HIGH | 21 |
+| MED | 99 |
+| LOW | 41 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -5385,16 +5385,33 @@ references to `shown` in the client bundle are its own declaration. Compile exit
 `<match if=…>` and `<each if=…>` share the root cause but produce **no static leak** — the gate is
 simply ignored and the content renders unconditionally post-hydration.
 
-**Root cause — the §17.1 mount gate lives in `emit-html.ts` (~`:2600`) behind a lowercase-tag test, and
-`<engine>`/`<match>`/`<each>` never reach it** — they are claimed by their own emitters, and
-`emit-engine.ts` / `emit-match.ts` contain **no handling of `if` at all**. **NOT introduced by #289**:
+**Root cause — my locus was REFINED by the implementing agent, and the refinement is the whole fix.**
+I said the §17.1 mount gate at `emit-html.ts:~2600` was bypassed by a lowercase-tag test. That test
+exists (`:2604`) but excludes **component use-sites**, not these three. The three are excluded one level
+up by AST **kind** — `emitNode` dispatches `markup` at `:1693` (the branch containing the gate) and
+`engine-decl`/`match-block`/`each-block` at `:3822`/`:3861`/`:3887` as siblings that `return` before any
+attribute handling. **And the real root cause is a stage earlier still, in the AST builder:** those three
+node kinds carry **no `attributes` array at all** — the block splitter raw-captures them and `buildBlock`
+reconstructs each opener from NAMED regexes (`for=`, `initial=`, `on=`, `in=`, `key=`, `as`, `accepts=`,
+`pinned`, `effect=`), so an attribute nobody regexes for is **discarded at parse time with nowhere to
+live**. Routing codegen alone would have fixed nothing; the predicate was already gone. This is exactly
+why `pa-base` v2.7 requires a PA locus to be labelled a hypothesis. **NOT introduced by #289**:
 `git show --stat cdf4f4de` touches `emit-html.ts` / `emit-variant-guard.ts` / `runtime-chunks.ts` /
 `runtime-template.js`; neither structural emitter is in that diff.
 
-**Migration MEASURED: 0.** A multi-line-tolerant scan over **2,174 `.scrml`** files across
-`samples examples stdlib conformance docs benchmarks compiler/tests` found **zero** instances of `if=`
-on `<engine|match|each|channel|slot>`. Zero corpus footprint — a latent adopter trap, not a live
-regression, which is why MED and not HIGH.
+**Migration MEASURED: 0 — re-derived twice, and the second derivation is the one to cite.** My
+scan read 2,174 `.scrml` files; the implementing agent instrumented the **compiler's own capture
+predicate** over **2,273** files (the corpus grew) with 0 parse failures, and published COVERAGE
+alongside the zero — because a zero without coverage cannot be distinguished from "nothing reached the
+parser":
+
+| node kind | nodes reached | carrying `if=` |
+|---|---|---|
+| `engine-decl` | 159 | **0** |
+| `match-block` | 49 | **0** |
+| `each-block` | 105 | **0** |
+
+Zero corpus footprint — a latent adopter trap, not a live regression, which is why MED and not HIGH.
 
 **Fix direction is a ruling, not obvious:** route structural elements through the §17.1 mount gate, or
 **reject** `if=` on them with a diagnostic. §17.1 (`SPEC.md:10927`) says `if=` *"MAY appear on any HTML
@@ -5515,3 +5532,221 @@ assumption"** shape with the oracle being a third-party DOM rather than our own 
 **Disposition:** do not attempt to fix happy-dom. Record the boundary — table-context structural
 assertions need a real-browser check — and prefer the real-Chrome path for any conditional-lowering
 verification. Sibling of [[g-nav-browser-harness-fidelity]].
+
+<!-- @gap id=g-structural-element-if-chain-and-show-composition-nominal sev=MED status=open -->
+### G-STRUCTURAL-ELEMENT-IF-CHAIN-AND-SHOW-COMPOSITION-NOMINAL — `else` / `else-if=` / `show=` do NOT compose with `if=` on `<engine>` / `<match>` / `<each>`; §17.1.2.2 asserts they do — `NEW S302; MED; open`
+
+**Filed against my own SPEC text, hours after writing it.** §17.1.2.2 (S302) states *"`else` / `else-if=`
+compose with all three, under the ordinary chain rules"* and *"`show=` composes."* **Neither holds.**
+Measured, and **identical before and after** the `if=` structural widening, so this is pre-existing and
+not a regression that landing introduced:
+
+| shape | actual |
+|---|---|
+| `<each … if=@a>` then `<p else>` | **`E-CTRL-001`** — *"`else` has no preceding `if=` element at the same level"* |
+| `else-if=` ON a structural element | silently dropped (`E-DG-002` on its cell) |
+| `show=` alongside `if=` on `<engine>` | silently dropped (`E-DG-002`) |
+
+Root: the if-chain detector recognizes only `kind:"markup"` nodes as chain members, and
+`engine-decl` / `match-block` / `each-block` are sibling AST kinds.
+
+**The process failure is the point of this entry.** I authored §17.1.2.2 as normative text asserting
+behaviour I had **not measured** — the exact class `pa-base` §1's governing-sentence gate exists to
+prevent, committed while *writing* the governing sentence rather than while consuming one. The
+implementing agent measured it and reported the contradiction rather than quietly implementing around
+it. §17.1.2.2 is now explicitly marked NOMINAL with the measurement inline; without that, the next
+reader would have taken a SHALL-shaped sentence as shipped behaviour.
+
+---
+
+<!-- @gap id=g-if-reject-unenforced-on-structural-declaration-elements sev=MED status=open -->
+### G-IF-REJECT-UNENFORCED-ON-STRUCTURAL-DECLARATION-ELEMENTS — §17.1.2's `SHALL REJECT` list is unenforced on four elements, two of them with zero diagnostics — `NEW S302; MED; open`
+
+§17.1.2 (S302) says every scrml-defined structural element other than the three widened ones SHALL
+reject `if=`. Measured on base AND HEAD:
+
+| element | actual |
+|---|---|
+| `<page if=>` | **rejected** — `E-PAGE-INVALID-ATTR`. Conformant. |
+| `<channel if=>` · `<errors if=>` | `W-ATTR-001` advisory only; attribute ignored |
+| `<onTimeout if=>` · `<onIdle if=>` | **silently ignored, ZERO diagnostics** |
+
+The last row is the same silent-ignore that the `if=`-on-structural-elements work existed to remove,
+surviving on a neighbouring surface. Spec-ahead of enforcement; the diagnostic lands with the impl per
+the named-codes-land-with-impl rule (§34) — deliberately NOT invented during the widening dispatch,
+which was scoped to make `if=` work rather than to allocate codes.
+
+---
+
+<!-- @gap id=g-w-attr-001-false-on-auth-if-gate-is-applied sev=MED status=open -->
+### G-W-ATTR-001-FALSE-ON-AUTH-IF-GATE-IS-APPLIED — the compiler warns that `if=` on `<auth>` "has no compile-time effect" while simultaneously applying the full §17.1 gate — `NEW S302; MED; open`
+
+`<auth role="Admin" if=@shown>` emits:
+
+```
+warning [W-ATTR-001]: Attribute `if=` is not recognized on `<auth>`. It is currently forwarded to the
+rendered HTML as-is and has no compile-time effect.
+```
+
+and the emitted HTML contains `<template id="_scrml_scrml_tpl_1"><auth role="Admin">` plus a real
+`scrml-if-marker`. **The gate IS applied. The warning is false in both of its claims** — the attribute
+is not forwarded as-is, and it has a substantial compile-time effect.
+
+`<auth>` is a `kind:"markup"` node, so it takes the ordinary markup `if=` path and gates its subtree
+correctly; only the attribute REGISTRY (which drives `W-ATTR-001`) does not know `if=` is universal on
+markup elements. **A diagnostic that contradicts the emit it describes is worse than no diagnostic** —
+it invites an author to delete a working guard, or to hand-roll a second one alongside it.
+
+This also corrected my own §17.1.2 draft, which listed `<auth>` as SHALL-reject on the assumption that
+every scrml-defined element behaved alike. It does not, and rejecting it would have been a narrowing of
+working, meaningful behaviour. **Verified by execution before the SPEC was corrected**, not inferred
+from the agent's report.
+
+**Locus — PA-located, VERIFY.** `compiler/src/attribute-registry.js` (the per-element attribute schema
+that drives `W-ATTR-001`; §24/§4.15 registry work has historically required updating it — see the S64
+amendment note in the PRIMER). Not traced.
+
+---
+
+<!-- @gap id=g-bare-ontransition-no-to-or-from-compiles-clean-and-never-fires sev=LOW status=open -->
+### G-BARE-ONTRANSITION-NO-TO-OR-FROM-COMPILES-CLEAN-AND-NEVER-FIRES — `<onTransition>` with neither `to=` nor `from=` is a silent no-op — `NEW S302; LOW; open`
+
+Surfaced incidentally while verifying the §17.1.2.1 engine-lifecycle rule: an `<onTransition>` carrying
+neither `to=` nor `from=`, placed in an engine body, **compiles clean and never fires** — on base and on
+HEAD. The canonical shape is `<onTransition to=.X>` inside a state-child.
+
+`E-ONTRANSITION-NO-TARGET` (§34, added S74 — *"`<onTransition>` with neither `to=` nor `from=`"*)
+describes exactly this condition, so this is a catalogued code that does not fire on its own stated
+trigger — the same shape as the E-ROUTE-001 missing-limb finding earlier this session, and as
+`E-PA-001`. **LOW**, because the shape is unlikely and fails visibly (the effect just never runs) rather
+than silently corrupting state.
+
+Found the honest way: the reviewing agent's first `<onTransition>` assertion failed, and rather than
+calling it a defect in the change under test, it ran the UNGATED control first — which also showed
+zero, proving the assertion was wrong rather than the code. Worth recording as a method, not just a bug.
+
+<!-- @gap id=g-gated-structural-each-still-ssr-prerenders-rows sev=MED status=open -->
+### G-GATED-STRUCTURAL-EACH-STILL-SSR-PRERENDERS-ROWS — a gated `<each>` bakes its rows into the `<template>` and ships them to every viewer — `NEW S302; MED; open`
+
+Found by the S239 adversarial pass on the `if=`-on-structural-elements landing. **Not a regression** —
+before the widening those rows rendered *visibly*; now they render *inside an inert `<template>`* — but
+it is a real hole in the new feature and it needs saying out loud before an adopter assumes otherwise.
+
+`buildOneRenderer` / `buildSsrEachRenderers` (`compiler/src/codegen/emit-ssr-render.ts:337`, `:382`)
+never consult `ifCond`. `_scrml_ssr_fill_mount` does a first-occurrence
+`html.replace('<!--scrml-each:ID-->', …)`, and for a gated each the first occurrence is the fence
+**inside the `<template>`**. Verified by executing the compiler's own emitted helpers against its own
+emitted HTML:
+
+```html
+<ul><template id="_scrml_scrml_tpl_1"><!--scrml-each:00suieaw_10-->
+  <li data-scrml-key="1" class="row">alice</li>
+  <li data-scrml-key="2" class="row">bob-SECRET</li>
+<!--/scrml-each:00suieaw_10--></template><!--scrml-if-marker:_scrml_if_marker_2--></ul>
+```
+
+So **`if=@canSee` on a server-authority `<each>` is NOT a confidentiality boundary** — every row reaches
+the client in the page source — and nothing warns.
+
+**This is consistent with the standing scoping, not a contradiction of it.** S297 ruled explicitly that
+`if=` "was never a confidentiality boundary"; §14.8.9/§14.8.10 own server→client redaction, and the
+§52.15.5 auth-scoped SSR auto-omit is the mechanism that actually withholds. The defect is that the new
+`if=`-on-`<each>` surface makes the *wrong* reading newly tempting: an author who writes
+`<each if=@isAdmin>` over server rows will reasonably believe the rows are withheld. **Owed: a SPEC
+sentence in §17.1.2 stating that `if=` gates RENDER, never EGRESS, with a pointer to §14.8.9/§14.8.10.**
+
+The runtime half is clean and was checked separately: the SSR-prefilled 4-node range (fence, li, li,
+fence) mounts to exactly 2 rows, unmounts to 0, no accumulation and no over-removal across 3 toggles.
+
+**Loci — TRACED by the reviewer.** `compiler/src/codegen/emit-ssr-render.ts:337` / `:382` (renderers
+that ignore `ifCond`) · `_scrml_ssr_fill_mount` (the first-occurrence replace).
+
+<!-- @gap id=g-parity-canary-outside-every-blocking-gate sev=HIGH status=open -->
+### G-PARITY-CANARY-OUTSIDE-EVERY-BLOCKING-GATE — a 38-failure native-parser regression passes pre-commit AND the only required cloud check, surfacing solely in a job we have trained ourselves to dismiss — `NEW S302; HIGH; open`
+
+**Measured on a live example this session**, not hypothesised. The `if=`-on-structural-elements branch
+carried **38 real failures** in `compiler/tests/parser-conformance-within-node.test.js`
+(`MISSING-FIELD` 30588 → 30882, exactly 98 structural nodes × 3 new AST fields). Trace where that
+regression would have been caught:
+
+| gate | covers it? | why |
+|---|---|---|
+| **pre-commit hook** | **NO** | `scripts/git-hooks/pre-commit:17` runs `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail`. The canary lives at `compiler/tests/` **ROOT**, outside all three. |
+| **cloud `gate`** (the ONLY required check) | **NO** | `gh api …/branches/main/protection` → required contexts = **`["gate"]`**, and `gate` is unit+conformance+gauntlet. |
+| **cloud `tracking`** | red, but **`continue-on-error: true`** | `ci.yml:82-83` runs it under the job the file itself labels *"tracking"*. Non-blocking by construction. |
+
+So the regression's ONLY signal is a red `tracking` — **and I dismissed `tracking` as the documented
+`§64 serve-tool R26` flake twice today**, on PRs #292 and #296. I verified from logs both times, which
+is the discipline working; but the habit is the hazard. **This is `pa-base` §8's cry-wolf shape in its
+most dangerous form: not a gate that gets bypassed, but a gate that is CORRECTLY non-blocking and
+routinely-red, so a genuine regression arrives wearing the costume of a known flake.**
+
+**Five commits went through green** on this branch before the adversarial pass caught it by running the
+canary explicitly. Nothing in the normal loop would have.
+
+**This sharpens S297 finding #4** (*"13 of 14 root-level test files are unrun by any workflow"*) with a
+worked example, and composes with S297 finding #2 (*a gate's LABEL can overstate its scope*): here the
+label is honest — it says "tracking" — and the failure is that honest non-blocking status plus habitual
+redness equals invisibility.
+
+**Fix direction is a RULING, and the obvious one is wrong.** Simply promoting `tracking` to required
+would be the §8 retrofit-onto-a-non-compliant-backlog error — it carries the documented ~42-fail browser
+baseline and the §64 serve-tool flake, so it would be instantly and permanently red. Candidate shapes,
+none free: **(a)** split the canary out of `tracking` into its own REQUIRED check with its own
+zero-fail contract (it was 1016/0 on main, i.e. it already has one); **(b)** add
+`compiler/tests/parser-conformance-*.test.js` to the pre-commit scope; **(c)** a failure-NAME-SET
+assertion for `tracking` rather than an exit code — the same shape S301 had to build for pre-push,
+because a name-set is what a "documented baseline" actually is and an exit code cannot express it.
+**(a) is the cheapest and most honest** — the canary is genuinely green-or-broken, so it does not belong
+in a job whose contract is "tracked, not gated".
+
+**Loci — TRACED.** `scripts/git-hooks/pre-commit:17` (hook scope) · `.github/workflows/ci.yml:70`
+(`continue-on-error: true`) + `:82-83` (the canary step inside `tracking`) · branch-protection required
+contexts = `["gate"]`.
+
+**Credit where due:** the implementing agent surfaced the pre-commit half of this while correcting the
+reviewer's claim that the branch "cannot commit through the hook" — it can, which is the actual
+problem. The required-check half is mine, found verifying their correction rather than accepting it.
+
+<!-- @gap id=g-structural-if-inside-each-row-template-fails-open sev=MED status=open -->
+### G-STRUCTURAL-IF-INSIDE-EACH-ROW-TEMPLATE-FAILS-OPEN — a gated `<each>`/`<match>` inside an `<each>` row template silently ships the content it was told to withhold — `NEW S302; MED; open`
+
+Found by the S239 re-review of the `if=`-on-structural-elements landing, which **refuted the
+implementing agent's own parity claim** — that structural behaviour here is *"CONSISTENT with markup,
+not a structural-specific hole."* It is not consistent. Both are broken, **in opposite directions**:
+
+| position | @`shown=false` | @`shown=true` | direction |
+|---|---|---|---|
+| markup `if=` on the ROW-ROOT | 0 | 2 | ✅ correct, reactive |
+| markup `if=` on a NON-ROOT element in the row | 0 | **0** | ❌ fails **CLOSED** — never renders |
+| **`<each … if=@shown>` inside a row** | **2** | 2 | ❌ fails **OPEN** |
+| **`<match … if=@shown>` inside a row** | **1** | 1 | ❌ fails **OPEN** |
+| structural `if=` in ordinary markup (control) | 0 | 2 | ✅ correct |
+
+**The direction is the whole finding.** Fail-CLOSED is loud — content is missing and the developer sees
+it. Fail-OPEN silently ships content the author wrote a predicate to hide, and is invisible in
+development whenever that predicate is usually true. "Consistent with markup" reads as *equally bad*; it
+is **worse**, and it is the reason this is not deferrable behind a doc note alone.
+
+**The landing removed the last signal in this position.** Zero errors, zero warnings — and because the
+same change routed structural predicates through the DG credit path (parity with markup), `E-DG-002` no
+longer fires on the predicate's cell either. `grep -c shown <out>.client.js` shows the cell is only ever
+`set`, never read.
+
+**NOT a regression** — on `origin/main` the same source also renders ungated, because the feature does
+not exist there. That is why the re-review returned LAND rather than DO-NOT-LAND. But the widening makes
+the wrong reading newly reachable: an author who writes `<each if=@isAdmin>` inside a row template now
+has every reason to believe it works, because it works everywhere else.
+
+**SPEC carve-out landed with the code, not after it** — §17.1.2.3 states the position explicitly rather
+than leaving a fresh `SHALL` unenforced on day one. The wording is the implementing agent's, not mine:
+my proposed *"top-level only"* was **false** (structural `if=` nested in ordinary markup works fine);
+the real boundary is the `<each>` row template.
+
+**Fix direction:** ONE diagnostic covering markup **and** structural positions together — the deferred
+`W-EACH-PERITEM-IF-*` family (§17.7) widened to non-root hosts. Do not fix the structural half alone;
+that would leave the markup fail-closed case signal-less and split one rule across two mechanisms.
+
+**Consequence, LOW, same locus:** the `ifmount` runtime chunk gate keys on AST `ifCond` PRESENCE, not on
+whether a gate was actually emitted, so this shape ships ~12.7 KB of dead runtime (94,267 B vs 81,598 B
+control) with zero `scrml-if-marker` in the HTML.

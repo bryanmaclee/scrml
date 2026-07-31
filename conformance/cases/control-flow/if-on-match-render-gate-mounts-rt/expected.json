@@ -1,0 +1,18 @@
+{
+  "id": "control-flow-if-on-match-render-gate-mounts-rt",
+  "description": "§17.1.2 — a false -> true `if=` flip on a `<match>` dispatches the arm matching the CURRENT subject. Input order is load-bearing: #ready moves @phase to .Ready WHILE the gate is false, then #reveal opens it, so the arm that appears must be #arm-ready and #arm-loading must be absent. The §18.0.1 dispatcher resolves its mount ONCE at module level and returns early when it is missing, so an implementation that does not re-dispatch on mount leaves the block permanently EMPTY here — a green compile with a blank region and no diagnostic. Companion to control-flow-if-on-match-render-gate-absent-rt, which pins the same source with the reveal removed. Scope honesty: against the PRE-widening baseline (which ignored `if=` outright) this case's DOM half is deliberately indistinguishable — `if=true` MUST look exactly like no `if=` at all — so its discrimination against that baseline rides on the codes half and on the absent-rt companion; what it discriminates against on its own is a mount-once dispatcher that never re-fires.",
+  "language-version": "1.0",
+  "spec": "§17.1.2",
+  "rationale": "§17.1.2 scopes §17.1 to \"the dispatched arm output\" for `<match>`, and §17.1 makes the true case ordinary rendering. Which arm renders is §18.0.1's dispatch rule over the current subject — the gate changes WHETHER the block renders, never WHICH arm it selects.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-DG-002"],
+    "input": [{ "click": "#ready" }, { "click": "#reveal" }],
+    "state": { "phase": "Ready", "shown": true },
+    "domAnchored": [
+      { "selector": "#arm-ready", "count": 1 },
+      { "selector": "#arm-loading", "count": 0 },
+      { "selector": "[data-scrml-match-mount]", "count": 1 }
+    ]
+  }
+}

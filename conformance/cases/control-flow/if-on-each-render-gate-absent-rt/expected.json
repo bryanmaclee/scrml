@@ -1,0 +1,19 @@
+{
+  "id": "control-flow-if-on-each-render-gate-absent-rt",
+  "description": "§17.1.2 — `if=` on an `<each>` gates THE WHOLE ITERATED LIST, `<empty>` INCLUDED. `@shown` seeds false and nothing flips it, so li.row must be count 0. #clear then empties the collection, which is the discriminating step: the `<empty>` fallback is the branch an implementation that gated only the ROW render would still emit, so #none must ALSO be count 0. Before this widening `if=` generated ZERO code here and the list rendered unconditionally. `<each>` is the one host with no element to wrap — its mount is a COMMENT FENCE, because an element wrapper is invalid directly inside `<ul>`/`<tbody>`/`<select>` — so the whole `#list` must contain no `li` of either kind.",
+  "language-version": "1.0",
+  "spec": "§17.1.2",
+  "rationale": "§17.1.2's table admits `if=` on `<each>` (§17.7) and scopes §17.1 semantics to \"the whole iterated list, INCLUDING `<empty>`\". §17.1.2.1 adds: \"For `<each if=expr>`: the iterated collection is not read and no rows are reconciled while `expr` is false; the keyed reconciler state is rebuilt on re-entry.\" §17.1 governs the absence itself — \"It does not exist in the DOM\" — and §17.2's \"`show=` hides, `if=` removes\" rules out a visibility lowering.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-DG-002"],
+    "input": [{ "click": "#clear" }],
+    "state": { "shown": false },
+    "domAnchored": [
+      { "selector": "#list li.row", "count": 0 },
+      { "selector": "#none", "count": 0 },
+      { "selector": "#list li", "count": 0 },
+      { "selector": "#list", "count": 1 }
+    ]
+  }
+}
