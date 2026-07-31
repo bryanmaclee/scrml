@@ -321,17 +321,31 @@ describe("§64 tool target — R26 (compile → parse → RUN)", () => {
       // `exitCode === null` is the real "still running" signal.
       expect(proc.exitCode).toBe(null);
       // Poll the endpoint until it answers (the port is bound by the time it was
-      // printed, but connect can lag a tick under load).
+      // printed, but connect can lag a tick under load). Capture the last error
+      // and process state so a CI-only failure explains itself.
       let body = null;
+      let lastErr = "";
       const fetchDeadline = Date.now() + 5000;
       while (Date.now() < fetchDeadline) {
         try {
           const res = await fetch(`http://127.0.0.1:${port}/`);
           body = await res.text();
           break;
-        } catch {
+        } catch (e) {
+          lastErr = String(e && e.message ? e.message : e);
           await Bun.sleep(50);
         }
+      }
+      if (body === null) {
+        const stillAlive = proc.exitCode === null;
+        proc.kill();
+        const err = await new Response(proc.stderr).text().catch(() => "");
+        throw new Error(
+          `fetch to 127.0.0.1:${port} never succeeded in 5s ` +
+          `(exitCode-at-timeout=${stillAlive ? "null(alive)" : proc.exitCode}); ` +
+          `lastFetchError=${JSON.stringify(lastErr)}; ` +
+          `toolStdout=${JSON.stringify(out)}; toolStderr=${JSON.stringify(err)}`,
+        );
       }
       expect(body).toBe("scrml-tool-ok");
       expect(proc.exitCode).toBe(null); // still alive after serving
