@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 22 |
 | MED | 99 |
-| LOW | 41 |
+| LOW | 42 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -537,6 +537,29 @@ Adopter-A's native-iOS client (reused, re-pointed at the scrml backend for the l
 > EXECUTION before authoring (S261's "gate fireable by execution, not by grep"). 18 fired and are now
 > pinned. The 19th did not — and finding out why surfaced a §51.5 soundness hole rather than a
 > coverage hole.
+
+### g-e-server-fn-in-sync-callback-uncatalogued — a LIVE diagnostic with its own push site carries no §34 catalog row, so the freeze gate cannot pin it
+<!-- @gap id=g-e-server-fn-in-sync-callback-uncatalogued sev=LOW status=open -->
+
+**Locus:** `compiler/src/codegen/emit-server.ts:2860` — the sole push site. (Located, not traced: found
+by a code-census over `compiler/src`, not by following a compile to it.)
+
+`E-SERVER-FN-IN-SYNC-CALLBACK` fires from real source but has **no row in §34**. §34 is the catalog the
+conformance contract references, and the freeze bar is "the suite pins every CLAIMED surface" — a code
+with no catalog row claims nothing, so it can neither be pinned nor honestly deferred. It is carried as
+tier-1 on `spa-lists/ss67`.
+
+**NOT a rename — checked and refuted.** The plausible reading was that it had been renamed to
+`E-ASYNC-STDLIB-IN-SYNC-CALLBACK` (§13.2, catalogued). It has not: that code has its own separate push
+sites at `emit-library-shared.ts:268,304` and is already pinned by
+`conformance/cases/auth/auth-async-stdlib-sync-callback-neg`. Two distinct live codes, one catalogued.
+
+**Disposition needed (a ruling, not a fix):** add the §34 row and pin it, or retire the code the way
+S263 retired the E-MARKUP family. Cheap either way; it is filed LOW because nothing miscompiles — the
+diagnostic works, it is simply undocumented.
+
+**Related:** the S260 §34-vs-impl audit measured **21 uncatalogued codes**; this is one of them
+surfacing through the campaign rather than through that audit's backlog.
 
 ### g-legacy-machine-transition-guard-never-emitted — a legacy `< machine>` illegal transition is unguarded in BOTH directions: no compile-time E-ENGINE-001, no runtime E-ENGINE-001-RT, and the emitted transitions table is dead
 <!-- @gap id=g-legacy-machine-transition-guard-never-emitted sev=HIGH status=open -->
