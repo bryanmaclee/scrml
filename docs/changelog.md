@@ -2,6 +2,14 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S308 — 2026-07-31 (Peter · Windows) — #264 residual: the on-mount await pass now fails safe, and the retired flat-text scanner is deleted
+
+One landing (PR #326), cloud-gate + windows green. Bookkeeping completed by a recovery boot after the S308 terminal was closed mid-session (post-merge, pre-wrap) — no code was lost, only the continuity trail, reconstructed from the merge history.
+
+**#264 residual (PR #326) — the acorn on-mount await pass returns an unparseable body unchanged instead of falling back to the retired flat-text scanner.** The GH #264 fix (`injectServerCallAwaitsViaAst`) parses the emitted mount body with acorn and walks the real AST, modelling JS scopes exactly. On an acorn *parse failure*, the older code fell back to a flat-text statement scanner — the same scope-blind approach whose bugs the six #264 adversarial rounds kept exposing. But a parse failure means the emitted `(async () => {…})` IIFE is itself malformed (a separate compiler defect), so injecting `await` into text the parser can't model can only make things worse. The parse-failure branch now returns the code **unchanged**, and the dead flat-text scanner (`scanEmittedCode`, `precedesBlockBrace`, `continuesEmittedStatement`, `splitEmittedStatements`, `liftOneEmittedStatement`, `recurseEmittedBraceGroups`) is **deleted** (−224 LOC; the shared `injectPromiseAwait` await-source retained). Inert on every valid program by construction — only the parse-failure path differs. Verified: `examples/23-trucking-dispatch` byte-identical branch-vs-main; gated subset 21,844 pass / 6 pre-existing baseline (0 new); S239 adversarial clean. FACTS regenerated for the LOC delta.
+
+This closes the fallback-hardening follow-up noted at S306; the contrived spaced-escape-hatch fail-open half of `g-onmount-direct-reactive-server-write-unawaited-on-escape-hatch-string-path` remains open. Adopter issues: 1 open (#228, held) — #264 and its residual are now fully closed.
+
 ## S306 — 2026-07-31 (Peter · Windows) — adopter #264 closed (on-mount await + statement-drop), via an acorn rewrite after six adversarial rounds; the E-EQ-001 diagnostic polish
 
 Three landings, all cloud-gate + windows green.
