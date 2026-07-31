@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 21 |
-| MED | 99 |
+| MED | 100 |
 | LOW | 41 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -5781,3 +5781,48 @@ that would leave the markup fail-closed case signal-less and split one rule acro
 **Consequence, LOW, same locus:** the `ifmount` runtime chunk gate keys on AST `ifCond` PRESENCE, not on
 whether a gate was actually emitted, so this shape ships ~12.7 KB of dead runtime (94,267 B vs 81,598 B
 control) with zero `scrml-if-marker` in the HTML.
+
+<!-- @gap id=g-native-parser-drops-last-export-in-hoist-scan sev=MED status=open -->
+### G-NATIVE-PARSER-DROPS-LAST-EXPORT-IN-HOIST-SCAN — the native hoist scanner captures 4 of `jwt.scrml`'s 5 top-level exports — `NEW S302; MED; open`
+
+Surfaced by running the 14 root-level test files by hand — **files that no workflow executes** (see
+[[g-parity-canary-outside-every-blocking-gate]]). Measured directly, not inferred from the test:
+
+```
+classifyDivergence(stdlib/auth/jwt.scrml)
+  class      : DIFF-hoist-count   explained: false
+  liveHoist  : {"imports":2,"exports":5,…}   ← correct: 5 source exports
+  nativeHoist: {"imports":2,"exports":4,…}   ← drops one
+```
+
+`stdlib/auth/jwt.scrml` declares five top-level exports — `export type JwtError:enum` (:24),
+`export async function signJwt` (:70), `export async function verifyJwt` (:119),
+`export function decodeJwt` (:185), `export function verifyJwtJwks` (:234). Native captures four,
+dropping **`verifyJwtJwks`** — the LAST one in the file. `async` is not the discriminant
+(`decodeJwt` is also a plain `export function` and IS captured); position is the visible correlate,
+but **whether "last export" is the actual rule is UNVERIFIED** — one file is one data point, and the
+obvious next step is a synthetic sweep varying export count and trailing content.
+
+**The live half of this divergence is FIXED.** The test's original note (`baas-auth-flows-jwks`,
+2026-07-06) recorded BOTH pipelines undercounting — `live=1 AND native=4` — and flagged a follow-up.
+Live now returns 5. So the muddy "both < 5" state is gone and this is the clean exports-axis case that
+note wanted: live matches source, native undercounts.
+
+**Why it stayed invisible, which is the more portable half:** the assertion pinning it
+(`liveHoist.exports === 1`) went stale the moment live was fixed, and sat **red and unseen** because
+`compiler/tests/parser-conformance-canary.test.js` is run by no workflow and is outside the pre-commit
+hook's `unit`/`integration`/`conformance` scope. A test that pins a real defect is worth nothing if
+nothing runs it — and a *stale* assertion in an unrun file is worse than none, because it will be read
+as coverage. Both gates extended this session so this cannot recur.
+
+**The test now pins the defect deliberately:** `nativeHoist.exports === 4`. When the native drop is
+fixed that assertion FAILS, and that failure is the signal to retire the divergence — not a regression.
+
+**Impact scope:** impl#2 / native-parser line, not the shipping TS compiler. A dropped export in the
+hoist scan means the native parser's module surface disagrees with live for any file where the shape
+recurs — directly load-bearing for the conformance-driven self-host gate, since parity IS the contract.
+
+**Loci — PA-located, VERIFY.** `compiler/native-parser/collect-hoisted.js` (the hoist scan). **NOT
+traced** — I measured the outcome, not the path. NB this file was edited in the same session by the
+`if=`-structural landing; the divergence is **pre-existing** (confirmed by running the test at that
+landing's parent `6ed4180c` — same single failure), so do not attribute it there.
