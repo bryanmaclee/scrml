@@ -1,0 +1,13 @@
+{
+  "id": "engine-replay-log-not-reactive-neg",
+  "description": "The same call passing `@slog`, a declared reactive attached as the machine's `audit` target. Isolates the log-shape condition.",
+  "language-version": "1.0",
+  "spec": "§51.14",
+  "rationale": "§51.14 — the second argument to `replay` is the audit LOG: a reactive array carrying §51.11 transition entries. A non-reactive second argument carries no entries to replay, so the call is rejected rather than replaying an empty or ill-shaped sequence.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-REPLAY-002"
+    ]
+  }
+}

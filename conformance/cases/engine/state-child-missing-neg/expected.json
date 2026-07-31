@@ -1,0 +1,13 @@
+{
+  "id": "engine-state-child-missing-neg",
+  "description": "The same three-variant enum with a state-child for EVERY variant. Isolates exhaustiveness from engine shape — the pos/neg pair differs only by the presence of the `<Loading>` arm.",
+  "language-version": "1.0",
+  "spec": "§51.0.E",
+  "rationale": "§51.0.E — an engine is EXHAUSTIVE over its `for=` enum: every variant needs a state-child, or the engine has a reachable state with no UI. This is the engine-tier form of the same guarantee `<match for=T>` enforces at Tier 1 (E-MATCH-NOT-EXHAUSTIVE) — the north-star property that every reachable state has a rendering, checked structurally rather than discovered in production.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ENGINE-STATE-CHILD-MISSING"
+    ]
+  }
+}

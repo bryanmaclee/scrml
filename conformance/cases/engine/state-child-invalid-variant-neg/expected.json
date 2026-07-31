@@ -1,0 +1,13 @@
+{
+  "id": "engine-state-child-invalid-variant-neg",
+  "description": "The same engine whose every state-child tag names a declared variant. Isolates tag-membership from the state-child form.",
+  "language-version": "1.0",
+  "spec": "§51.0.B",
+  "rationale": "§51.0.B — an engine's state-children are tagged by VARIANT: `<Idle>` is the arm rendered while the engine sits in `.Idle`. A tag naming no declared variant describes an arm that can never be entered, which is a typo in every realistic case and dead markup in the rest.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ENGINE-STATE-CHILD-INVALID-VARIANT"
+    ]
+  }
+}

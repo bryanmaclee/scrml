@@ -1,0 +1,13 @@
+{
+  "id": "engine-machine-duplicate-name-neg",
+  "description": "Two `< machine>` declarations with DISTINCT names. The near-miss of the pos case: same shape, two machines, one file — only the name collision is removed, so E-ENGINE-003 must stay silent.",
+  "language-version": "1.0",
+  "spec": "§51.3",
+  "rationale": "§51.3 — a `< machine name=N>` declaration names a machine within the file; two declarations sharing a name are ambiguous (a write to the governed reactive could not resolve which rule set governs it). E-ENGINE-003 is the LEGACY `<machine>`-keyword duplicate code; the canonical `<engine>` form uses §51.0.C E-ENGINE-VAR-DUPLICATE instead, so exactly one duplicate code fires per declaration form.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ENGINE-003"
+    ]
+  }
+}

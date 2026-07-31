@@ -1,0 +1,19 @@
+${ type Light:enum = { Red, Green } }
+${ type Mood:enum  = { Calm, Tense } }
+<program>
+< machine name=Signal for=Light>
+  .Red => .Green
+  .Green => .Red
+  audit @slog
+</>
+< machine name=Feeling for=Mood>
+  .Calm => .Tense
+  .Tense => .Calm
+</>
+<sig>: Signal = .Red
+<mood>: Feeling = .Calm
+<slog> = []
+${ function r() { replay(@mood, @slog) } }
+<p id="s">${@sig} ${@mood} ${@slog.length}</p>
+<button id="b" onclick=r()>replay</button>
+</program>

@@ -1,0 +1,7 @@
+${ type Doc:struct = { title: string, pages: int } }
+<program>
+< machine name=DocFlow for=Doc>
+  .Draft => .Live given (self.nosuchfield == 1)
+</>
+<p id="s">struct-governed machine</p>
+</program>

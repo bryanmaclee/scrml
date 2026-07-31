@@ -1,0 +1,16 @@
+{
+  "id": "engine-initial-cell-type-pos",
+  "description": "`initial=@seed` hydrates from a cell annotated `int`, which is neither the `for=` enum nor a `string` variant name. Per §51.0.E E-ENGINE-INITIAL-CELL-TYPE fires (§34: Error).",
+  "language-version": "1.0",
+  "spec": "§51.0.E",
+  "rationale": "§51.0.E — an `initial=@cell` source must carry either a `for=` enum value or a `string` holding a variant NAME (the canonical persisted-status case). A cell of any other concrete type cannot name a variant, so the engine could not resolve a starting state from it. An UNTYPED cell passes conservatively — the check fires only on a concrete, clearly-incompatible annotation.",
+  "expect": {
+    "codes": [
+      "E-ENGINE-INITIAL-CELL-TYPE"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-ENGINE-INITIAL-CELL-TYPE": "error"
+    }
+  }
+}

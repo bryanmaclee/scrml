@@ -1,0 +1,13 @@
+{
+  "id": "engine-derived-machine-no-projection-rules-neg",
+  "description": "The same derived machine carrying a complete projection (`.Red => .Off`, `.Green => .On`). Only the rule body differs from the pos case.",
+  "language-version": "1.0",
+  "spec": "§51.9",
+  "rationale": "§51.9 — a DERIVED machine projects a source machine's variants onto its own enum. A derived declaration with an empty body declares a projection that maps nothing, so the projected variable has no defined value for any source state. The empty body is rejected rather than defaulted, because there is no non-arbitrary choice of target variant.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ENGINE-005"
+    ]
+  }
+}

@@ -1,0 +1,5 @@
+${ import { helper } from './lib.scrml' }
+<program>
+<helper/>
+<p id="s">cross-file mount</p>
+</program>

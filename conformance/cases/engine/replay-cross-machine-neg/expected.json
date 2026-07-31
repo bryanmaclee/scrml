@@ -1,0 +1,13 @@
+{
+  "id": "engine-replay-cross-machine-neg",
+  "description": "The same two machines where the replay target is `@sig` — the reactive governed by the log's OWN machine. Isolates the cross-machine condition from replay itself.",
+  "language-version": "1.0",
+  "spec": "§51.14.6",
+  "rationale": "§51.14.6 — when the log IS some machine M's `audit` target, its entries carry M's variant names. Replaying them into a reactive governed by a DIFFERENT machine would commit variant names that need not exist in the target's enum, producing nonsensical state through a path that bypasses the ordinary write guard. A hand-built (non-audit) log is deliberately left alone — the check fires only when the log's owning machine is known.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-REPLAY-003"
+    ]
+  }
+}

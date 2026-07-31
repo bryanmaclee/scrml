@@ -1,0 +1,13 @@
+{
+  "id": "engine-initial-cell-type-neg",
+  "description": "The same engine hydrating from a `string`-annotated cell — the §51.0.E-sanctioned persisted-status shape. Isolates the type mismatch from the hydration form.",
+  "language-version": "1.0",
+  "spec": "§51.0.E",
+  "rationale": "§51.0.E — an `initial=@cell` source must carry either a `for=` enum value or a `string` holding a variant NAME (the canonical persisted-status case). A cell of any other concrete type cannot name a variant, so the engine could not resolve a starting state from it. An UNTYPED cell passes conservatively — the check fires only on a concrete, clearly-incompatible annotation.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ENGINE-INITIAL-CELL-TYPE"
+    ]
+  }
+}

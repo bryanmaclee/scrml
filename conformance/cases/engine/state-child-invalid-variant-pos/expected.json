@@ -1,0 +1,16 @@
+{
+  "id": "engine-state-child-invalid-variant-pos",
+  "description": "An engine declares a `<Nope>` state-child, which `Phase` does not carry as a variant. Per §51.0.B the arm tag must name a declared variant, so E-ENGINE-STATE-CHILD-INVALID-VARIANT fires (§34: Error). Pins the POSITIVE edge — previously only absence-asserted.",
+  "language-version": "1.0",
+  "spec": "§51.0.B",
+  "rationale": "§51.0.B — an engine's state-children are tagged by VARIANT: `<Idle>` is the arm rendered while the engine sits in `.Idle`. A tag naming no declared variant describes an arm that can never be entered, which is a typo in every realistic case and dead markup in the rest.",
+  "expect": {
+    "codes": [
+      "E-ENGINE-STATE-CHILD-INVALID-VARIANT"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-ENGINE-STATE-CHILD-INVALID-VARIANT": "error"
+    }
+  }
+}

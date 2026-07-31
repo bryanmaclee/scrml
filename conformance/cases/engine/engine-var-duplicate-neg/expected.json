@@ -1,0 +1,13 @@
+{
+  "id": "engine-engine-var-duplicate-neg",
+  "description": "The same two engines where the second carries `var=` to name its own cell. Proves the code keys on the NAME collision, not on declaring two engines over one type — which §51.0.C explicitly permits via the override.",
+  "language-version": "1.0",
+  "spec": "§51.0.C",
+  "rationale": "§51.0.C — the first `<engine for=T>` in a scope AUTO-DECLARES the cell `@t` (lowercase-leading-run of the type name). A second engine over the same type would auto-declare the same name, and since §51.0.A makes an engine a singleton keyed by that variable, the two declarations would silently contend for one cell. `var=` exists precisely to disambiguate, so the collision is rejected rather than resolved by declaration order.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ENGINE-VAR-DUPLICATE"
+    ]
+  }
+}

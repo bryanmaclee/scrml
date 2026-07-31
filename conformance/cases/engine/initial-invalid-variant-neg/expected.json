@@ -1,0 +1,13 @@
+{
+  "id": "engine-initial-invalid-variant-neg",
+  "description": "The same engine with `initial=.Idle`, a declared variant. Isolates the variant-membership condition.",
+  "language-version": "1.0",
+  "spec": "§51.0.E",
+  "rationale": "§51.0.E — `initial=` names the variant the engine mounts in. A name absent from the `for=` enum cannot be mounted, and because `initial=` is resolved at construction the failure would otherwise surface as a runtime throw on first paint. Rejecting at compile time is the §51.0.E contract.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ENGINE-INITIAL-INVALID-VARIANT"
+    ]
+  }
+}

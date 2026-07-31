@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 21 |
-| MED | 99 |
+| HIGH | 22 |
+| MED | 100 |
 | LOW | 41 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -528,6 +528,74 @@ Adopter-A's native-iOS client (reused, re-pointed at the scrml backend for the l
 > carries an inline `@gap` token in its final cell. This basis reproduced the canonical S170 hand-count
 > HIGH 0 · MED 9 · LOW 18 · Nominal 9 exactly (the S170 baseline) — the LIVE count is the generated table
 > above, which moves as gaps are filed/closed (S174 filed 4 → MED 11 · LOW 20).
+
+---
+
+## §S305 — gaps filed S305 (2026-07-31, bryan; surfaced by the ss56 engine-contract conformance authoring)
+
+> Context: the freeze-campaign ss56 Wave-2 authoring pass probed all 19 open tier-1 engine codes by
+> EXECUTION before authoring (S261's "gate fireable by execution, not by grep"). 18 fired and are now
+> pinned. The 19th did not — and finding out why surfaced a §51.5 soundness hole rather than a
+> coverage hole.
+
+### g-legacy-machine-transition-guard-never-emitted — a legacy `< machine>` illegal transition is unguarded in BOTH directions: no compile-time E-ENGINE-001, no runtime E-ENGINE-001-RT, and the emitted transitions table is dead
+<!-- @gap id=g-legacy-machine-transition-guard-never-emitted sev=HIGH status=open -->
+
+**Locus:** `compiler/src/codegen/emit-logic.ts:1460` + `compiler/src/codegen/emit-control-flow.ts:1853`
+— the two `emitTransitionGuard(...)` call sites, each gated on a machine-bindings lookup that is not
+populated for a legacy `< machine>` + `<var>: MachineName = .Variant` declaration written in real
+source. (Located, NOT traced: the reachability was established by diffing the EMITTED write against the
+`<engine>` control, not by following the binding map's construction — the map's producer is the next
+thing to read.)
+
+**Governing sentences (§51.5, quoted).** §51.5.1: *"if no transition rule covers `From => To`, the
+compiler SHALL emit E-ENGINE-001 as a compile error and halt compilation."* §51.5.2: *"the compiler
+SHALL emit a runtime transition guard in the generated output"* … *"If no rule matches, throws a
+runtime transition error (E-ENGINE-001-RT)."* Both are unconditional SHALLs.
+
+**Measured.** Source: a `< machine name=Signal for=Light>` with rules `.Red => .Green` / `.Green =>
+.Red`, a `<sig>: Signal = .Red` cell, and a handler writing `@sig = .Yellow` — a target NO rule covers.
+
+```
+emitted handler (case.client.js):
+  "_scrml_attr_onclick_2": function(event) { _scrml_cs_reactive_set("sig", "Yellow"); },
+emitted table:
+  const __scrml_transitions_Signal = { …  }      ← emitted, and never read
+occurrences of "E-ENGINE-001-RT" in all emitted output: 0
+diagnostics: zero E-* (only W-DEPRECATED-001 / W-WHITESPACE-001 / W-DG-002 noise)
+```
+
+So the illegal transition **silently succeeds**, leaving the machine in a variant its own rule set says
+is unreachable. `classifyTransition` (`emit-machines.ts:404`) would classify it `illegal` correctly —
+it is simply never called on this path, so the `_machineCodegenErrors` buffer (drained at
+`codegen/index.ts:3056`, so the drain is NOT the defect) never receives the push.
+
+**Scope — the canonical surface is SOUND; this is legacy-`<machine>`-only.** The `<engine>` control
+(same enum, same illegal target, write outside any state-child) emits
+`_scrml_cs_engine_direct_set("light", "Yellow", __scrml_engine_…_transitions)` — the runtime guard
+consults the table as §51.0.F promises; and a write INSIDE a state-child is rejected at compile time by
+`E-ENGINE-INVALID-TRANSITION` (pinned by `conformance/cases/engine/rule-violation-{pos,neg}`). Do not
+read this entry as "engines don't enforce rule=" — they do.
+
+**Why 21k tests are blind to it.** Every existing E-ENGINE-001 test hand-builds a `machineBindings` map
+and calls `rewriteBlockBody` / `emitTransitionGuard` DIRECTLY (`machine-guards-integration.test.js`,
+`machine-codegen.test.js`, the `gauntlet-s26/s27/s28` sets); none compiles scrml source. They assert the
+guard's INTERNALS, which are correct, while the path from source to that guard is severed. The pa-base
+§8 synthesized-input class, exactly. Corpus reinforces it: **zero `.scrml` files anywhere in the repo
+declare a `< machine>`** — only emitted `dist/` runtime comments mention it.
+
+**Freeze relevance.** §63.7 makes the 1.0 disposition of `<machine>` **permanent-soft** (deprecated, no
+scheduled removal), so the surface ships in language-1.0 and its transition contract is part of that
+contract. A state machine whose declared rule set is silently unenforced is a soundness violation, not
+an ergonomic one — hence HIGH, on a surface with zero corpus adoption.
+
+**Direction-of-change if fixed:** **newly-rejecting** (a program that compiled will fail), which is the
+recoverable direction — and the migration is **measured zero** (no corpus `< machine>` source).
+
+**Campaign consequence.** `E-ENGINE-001` is **source-unreachable** and therefore NOT authorable as a
+conformance case today — the same classification ss70 reached for `E-FN-007` / `E-STATE-COMPLETE`
+([[g-fn-state-diagnostics-source-unreachable]]). It is the ONE ss56 tier-1 code left unpinned; the
+other 18 landed this session. Pinning it requires the fix, not a case.
 
 ---
 

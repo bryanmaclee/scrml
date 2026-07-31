@@ -1,0 +1,16 @@
+{
+  "id": "engine-ontransition-no-target-pos",
+  "description": "An `<onTransition>` inside a state-child carries neither `to=` nor `from=`. Per §51.0.H the element must name an edge, so E-ONTRANSITION-NO-TARGET fires (§34: Error).",
+  "language-version": "1.0",
+  "spec": "§51.0.H",
+  "rationale": "§51.0.H — `<onTransition>` runs an effect on a specific EDGE, selected by `from=` and/or `to=`. With neither attribute the element selects no edge, so its body could never be attributed to a transition; the compiler cannot pick a default without inventing an edge the author did not declare.",
+  "expect": {
+    "codes": [
+      "E-ONTRANSITION-NO-TARGET"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-ONTRANSITION-NO-TARGET": "error"
+    }
+  }
+}

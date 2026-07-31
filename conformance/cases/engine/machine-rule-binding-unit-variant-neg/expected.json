@@ -1,0 +1,13 @@
+{
+  "id": "engine-machine-rule-binding-unit-variant-neg",
+  "description": "The same rule binding on `.Done`, which DOES declare a payload field. Proves the code keys on the variant's payload-bearing-ness, not on the binding syntax.",
+  "language-version": "1.0",
+  "spec": "§51.3.2",
+  "rationale": "§51.3.2 — a machine rule may destructure the payload of the variant it names. A unit variant carries no payload, so a binding group on it names fields that do not exist. Rejecting it is the same contract §51.0.B.1 enforces for engine state-children (E-ENGINE-PAYLOAD-ON-UNIT-VARIANT): a binding is a claim about the variant's shape, and the claim is checkable.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ENGINE-015"
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "engine-replay-target-not-machine-bound-neg",
+  "description": "The same call passing `@sig`, a machine-bound reactive. Isolates the target-shape condition from the `replay` builtin.",
+  "language-version": "1.0",
+  "spec": "§51.14",
+  "rationale": "§51.14 — `replay(@target, @log)` re-applies recorded transition entries to a machine-governed reactive. The first argument must be an `@`-ref to a machine-bound reactive, because replay commits VARIANT values through that machine's rule set; a non-reactive first argument has no variant domain to replay into.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-REPLAY-001"
+    ]
+  }
+}

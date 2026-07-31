@@ -1,0 +1,13 @@
+{
+  "id": "engine-derived-machine-write-neg",
+  "description": "The identical function writing to `@sig`, the SOURCE machine's variable, which is writable. Proves the code keys on derived-ness, not on writing a machine-bound variable.",
+  "language-version": "1.0",
+  "spec": "§51.9",
+  "rationale": "§51.9 — a derived variable is a PROJECTION of its source: its value is a pure function of the source machine's current variant, recomputed on every source change. A write to it would be clobbered by the next projection, so the write is rejected rather than silently lost. This is the machine-surface twin of L21 (E-DERIVED-VALUE-MUTATE) for derived reactive cells — a derived value is read-only from the author's side.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ENGINE-017"
+    ]
+  }
+}

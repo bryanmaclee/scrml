@@ -1,0 +1,10 @@
+${ type Light:enum = { Red, Green } }
+<program>
+< machine name=Signal for=Light>
+  .Red => .Green
+</>
+< machine name=Backup for=Light>
+  .Green => .Red
+</>
+<p id="s">two machines, two names</p>
+</program>

@@ -1,0 +1,13 @@
+{
+  "id": "engine-derived-machine-unprojected-variant-neg",
+  "description": "The same projection covering EVERY source variant. Isolates totality from the projection mechanism.",
+  "language-version": "1.0",
+  "spec": "§51.9",
+  "rationale": "§51.9 — a projection must be TOTAL over the source enum: every source variant needs a rule, or the projected variable has no defined value while the source sits in the uncovered variant. This is the projection-surface form of the exhaustiveness guarantee `<match>`/`<engine>` enforce structurally — a partial projection is a hole that only appears once the source reaches the missing state.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ENGINE-018"
+    ]
+  }
+}

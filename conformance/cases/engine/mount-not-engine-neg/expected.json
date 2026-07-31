@@ -1,0 +1,13 @@
+{
+  "id": "engine-mount-not-engine-neg",
+  "description": "The same import graph where the mounted name is a COMPONENT, whose instantiation is the sanctioned non-engine use of a self-closing imported tag. Proves the code keys on the export CATEGORY, not on self-closing an imported tag.",
+  "language-version": "1.0",
+  "spec": "§51.0.D",
+  "rationale": "§51.0.D + §21.8 — a self-closing `<EngineName/>` tag is the CROSS-FILE ENGINE MOUNT form: it mounts the singleton of an exported `<engine>` declaration. When the imported name resolves to some other export kind, the tag is not a mount at all, and silently forwarding it as an unknown HTML element would leave the author with a page that renders nothing and reports nothing.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ENGINE-MOUNT-NOT-ENGINE"
+    ]
+  }
+}

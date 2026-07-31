@@ -1,0 +1,16 @@
+{
+  "id": "engine-mount-not-engine-pos",
+  "description": "`<helper/>` mounts an imported name whose source export is a `function`, not an engine. Per §51.0.D the cross-file mount form requires an engine binding, so E-ENGINE-MOUNT-NOT-ENGINE fires (§34: Error). Uses the `files` multi-file convention — `lib.scrml` is the aux import fixture.",
+  "language-version": "1.0",
+  "spec": "§51.0.D",
+  "rationale": "§51.0.D + §21.8 — a self-closing `<EngineName/>` tag is the CROSS-FILE ENGINE MOUNT form: it mounts the singleton of an exported `<engine>` declaration. When the imported name resolves to some other export kind, the tag is not a mount at all, and silently forwarding it as an unknown HTML element would leave the author with a page that renders nothing and reports nothing.",
+  "expect": {
+    "codes": [
+      "E-ENGINE-MOUNT-NOT-ENGINE"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-ENGINE-MOUNT-NOT-ENGINE": "error"
+    }
+  }
+}

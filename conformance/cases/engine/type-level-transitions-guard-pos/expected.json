@@ -1,0 +1,16 @@
+{
+  "id": "engine-type-level-transitions-guard-pos",
+  "description": "A type-level `transitions {}` rule carries a `given (...)` guard. Per §51.2 type-level transitions are structural only, so the guard is rejected with E-ENGINE-010 (§34: Error) and the rule is parsed with the guard discarded.",
+  "language-version": "1.0",
+  "spec": "§51.2",
+  "rationale": "§51.2 — a type-level `transitions {}` block carries STRUCTURAL rules only (VariantRef => VariantRef). A `given` guard is contextual: it reads state outside the type, so it cannot belong to a declaration that travels with the type itself. Guards live on a `< machine>` declaration, which has a scope to evaluate them in.",
+  "expect": {
+    "codes": [
+      "E-ENGINE-010"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-ENGINE-010": "error"
+    }
+  }
+}

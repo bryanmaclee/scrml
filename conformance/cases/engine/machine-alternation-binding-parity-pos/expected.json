@@ -1,0 +1,16 @@
+{
+  "id": "engine-machine-alternation-binding-parity-pos",
+  "description": "A rule alternates `.A(x) | .B` on the from side — one alternative binds, the other does not. Per §51.3.2 the binding sets must match across alternatives, so the mismatch is rejected with E-ENGINE-016 (§34: Error).",
+  "language-version": "1.0",
+  "spec": "§51.3.2",
+  "rationale": "§51.3.2 — `|` alternation expands one rule line into several. If the alternatives on a side bind different name sets, the expanded rules would put different names in scope depending on which alternative matched, so the rule body could not be written against a stable binding set. Either every alternative on a side binds the same names, or none bind.",
+  "expect": {
+    "codes": [
+      "E-ENGINE-016"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-ENGINE-016": "error"
+    }
+  }
+}

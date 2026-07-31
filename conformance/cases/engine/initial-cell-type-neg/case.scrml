@@ -1,0 +1,9 @@
+${ type Phase:enum = { Idle, Done } }
+<seed>: string = "Idle"
+<engine for=Phase initial=@seed>
+  <Idle rule=.Done></>
+  <Done rule=.Idle></>
+</>
+<program>
+<p id="s">initial from a typed cell</p>
+</program>

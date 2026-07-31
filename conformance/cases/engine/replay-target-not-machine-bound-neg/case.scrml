@@ -1,0 +1,13 @@
+${ type Light:enum = { Red, Green } }
+<program>
+< machine name=Signal for=Light>
+  .Red => .Green
+  .Green => .Red
+  audit @slog
+</>
+<sig>: Signal = .Red
+<slog> = []
+${ function r() { replay(@sig, @slog) } }
+<p id="s">${@sig} ${@slog.length}</p>
+<button id="b" onclick=r()>replay</button>
+</program>

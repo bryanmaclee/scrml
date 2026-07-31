@@ -1,0 +1,16 @@
+{
+  "id": "engine-replay-cross-machine-pos",
+  "description": "`replay(@mood, @slog)` replays `Signal`'s audit log into `@mood`, governed by `Feeling`. Per §51.14.6 the cross-machine replay is rejected with E-REPLAY-003 (§34: Error).",
+  "language-version": "1.0",
+  "spec": "§51.14.6",
+  "rationale": "§51.14.6 — when the log IS some machine M's `audit` target, its entries carry M's variant names. Replaying them into a reactive governed by a DIFFERENT machine would commit variant names that need not exist in the target's enum, producing nonsensical state through a path that bypasses the ordinary write guard. A hand-built (non-audit) log is deliberately left alone — the check fires only when the log's owning machine is known.",
+  "expect": {
+    "codes": [
+      "E-REPLAY-003"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-REPLAY-003": "error"
+    }
+  }
+}
