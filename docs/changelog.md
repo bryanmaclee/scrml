@@ -28,6 +28,15 @@ Peter-lane adopter session, concurrent with a live S301-bryan for most of it (la
 
 
 
+### 2026-07-30 — S303 (Peter · Windows): #284 first-class-reference server placement (resolvable core), and a §64 CI-test de-flake
+
+Closed the **resolvable core** of adopter **#284** (PR #297, `94d3d6ee`): a server-placed function that reached a helper through a *first-class reference* — a multi-hop alias (`const p = groupByJob; p(rows)`) or an object-literal dispatch table (`{ job: groupByJob }[which](rows)`) — left the helper client-placed, so the server handler threw `ReferenceError` at request time (an executed 500, not the silent client-drop the issue attributed to computed-member access). The fix resolves the indirect callee **locally per function body** and treats it exactly like a direct call for placement, in-process peer emission, and await-lowering. Two earlier cuts were caught and killed by the adversarial review before the sound one landed — including a fail-open unawaited-Promise auth-bypass that was *worse* than the bug it replaced. Corpus over-escalation measured zero. Residuals (a genuinely dynamic callee, a markup-used + server-indirect helper, a reassigned-before-call alias) fail **closed** and are routed to a §12.4 diagnostic being coordinated separately.
+
+- **#284 resolvable core** (`94d3d6ee`, PR #297) — new `compiler/src/indirect-callee-resolver.ts`; route-inference Step 5c + emit peer/await. Shared callee path byte-identical. Conformance `server-db/first-class-fn-ref-server-helper-rt` (runtime) pins it. Issue closed.
+- **§64 `Bun.serve` invoke-only liveness test de-flaked** (`4f5f8f23`, PR #298) — it was a consistent CI-only failure (subprocess loopback fetch never connects on the runner), not a flake. Now asserts §64.3's actual contract (the harness stays alive / doesn't drain the event loop) instead of the CI-fragile HTTP round-trip; also fixes `proc.killed` (never detected a self-exit) → `proc.exitCode`.
+- **Gaps:** `g-indirect-callee-never-server-placed-server-referenceerror` → RESOLVED; new MED `g-sql-param-interpolation-peer-call-not-awaited` (pre-existing, affects direct peers too).
+- **CI health (findings, not code):** `tracking` is a non-blocking `continue-on-error` bucket that aggregates known-failing tiers (browser real-fails, self-host-smoke, M6.x) — red by design, only `gate`/`windows` gate merges; `ai-review`'s red is an `ANTHROPIC_API_KEY`/org-access issue in the review action, not the diff. Both routed to bryan.
+
 ### 2026-07-28/29 — S297 (bryan · ASUS): the `if=` conformance class, the §34 freeze-gate audit, and a settling pass
 
 Opened on bryan's standing instruction to work the blocked list one item at a time. Eight PRs merged
