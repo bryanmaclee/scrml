@@ -1,4 +1,135 @@
 <!-- ============================================================= -->
+<!-- S302 WRAP (bryan/ASUS-Vivobook) — prepended 2026-07-31.        -->
+<!-- S303-Peter + S301 + all prior UNCHANGED below.                 -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 302 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-07-30/31. `/boot` Profile A. **6 PRs merged** (#292 #295 #296 #302 #304 + a FACTS
+regen). `main` `b7dda491`. Suite **28127 pass / 0 fail** across 1195 files. Mechanical stream =
+delta-log **[955]–[965]**; this carries the irreducible.
+
+> **⚠️ CONCURRENCY — S303-Peter was LIVE the whole session and is still landing.** He merged #297
+> (#284 core), #298, #299, #300, #301, #303 and **has PR #305 OPEN — CLAIMED, do not touch.** Every
+> one of my landings rebased over his. He also routed me two notes at his wrap; both are folded below.
+
+## 🔴 THE NEXT PA'S FIRST MOVE
+
+**The `?{}`/template-interpolation alias-peer await residual — it FAILS OPEN, and it is bryan's lane.**
+Peter found it, mischaracterized it as pre-existing, then **proved himself wrong at his wrap and
+corrected it** (PR #300, docs-only). A *direct* peer in an interpolation IS awaited (byte-identical
+pre/post-#284); an *alias* peer emits **bare**, binding a `Promise` into SQL → silent-wrong query.
+His `serverFnPeerAliasNames` lowering reaches every position except the template-literal / SQL
+interpolation path.
+
+**Fix locus (his, and he labelled it):** thread `serverFnPeerAliasNames` into `emit-logic`'s
+`taggedFromParams` and `emit-expr`'s server template-literal lowering. Corpus-absent, which is why he
+did **not** hotfix it at wrap tail — "codegen-at-tail is exactly how the two refuted cuts' defects
+slipped in." Gap `g-sql-param-interpolation-peer-call-not-awaited`. **He offered to take it next
+session unless bryan wants it** — decide, don't let it sit.
+
+## 🎯 THE HEADLINE — a gate that is correctly non-blocking and habitually red is where a real regression hides
+
+The `if=` arc's adversarial pass found 38 native-parity failures. Tracing where they'd have been
+caught: **pre-commit — no** (the canary is at `compiler/tests/` ROOT, outside its unit/integration/
+conformance scope). **The required cloud check — no** (branch protection requires exactly `["gate"]`).
+**`tracking` — red, but `continue-on-error: true`.**
+
+So the only signal was a red `tracking`, **which I had dismissed as the documented §64 flake twice
+that same day.** I verified from logs both times — the discipline held — but that is precisely the
+hazard: not a gate that gets bypassed, a gate that is *correctly* non-blocking and *routinely* red, so
+a genuine regression arrives wearing a known flake's costume. Five commits went through green.
+
+**Closed (#304):** `gate` + pre-commit now both run `compiler/tests/*.test.js`. Bite proven
+(corrupt→red, restore→green) and the new step **confirmed executing** in CI — 6394 tests / 14.95s —
+not merely "the job was green." **Did NOT promote `tracking`**: it carries the browser tier's ~50-fail
+baseline, so it would be instantly and permanently red — the §8 cry-wolf retrofit that gets bypassed
+then deleted.
+
+## 🧭 FINDINGS THAT OUTLAST THE FIXES
+
+1. **The governing-sentence gate has no AUTHORING half.** I wrote §17.1.2 asserting `else`/`else-if=`/
+   `show=` compose with the three (they do not) and that `<auth>` rejects `if=` (it does not). Neither
+   measured. `pa-base` §1 is written for *consuming* a normative sentence — quote it or record the
+   search — and says nothing about the risk when you are the one WRITING it. **Base-amendment
+   candidate.** Both corrected; gaps filed against my own text.
+2. **Verification beat building, four times.** #284's reported symptom did not reproduce (the real bug
+   was an indirect callee, and worse — a 500, not a silent fallback). #261 was already closed by #289.
+   #285's import dangle did not reproduce. The §14.8 leak's "degenerate" caveat dissolved under the
+   canonical shape. **In every case the cheap move was to reproduce, and in every case the report's
+   framing was wrong in a way that would have misdirected the fix.**
+3. **A diagnostic can contradict its own emit.** `W-ATTR-001` on `<auth if=>` says the attribute *"is
+   not recognized"* and *"has no compile-time effect"* while the compiler applies the full §17.1 gate.
+   Both claims false. That invites an author to delete a working guard.
+4. **Two files named `handOffs/delta-log.md`, two repos, overlapping sequence numbers.** I collided
+   with Peter's `[916]`-`[926]` in the morning and again at `[946]`-`[954]` in the evening. Nothing
+   detects it. Root: the contract names ONE repo-relative path in a two-repo system — the same root
+   that made me miss `scrml-support`'s inbox at boot, where Peter's routed SECURITY note sat unread
+   for half the session.
+5. **Fail-OPEN vs fail-CLOSED is the axis that ranks these.** The re-review refuted the implementing
+   agent's "consistent with markup" claim on row-template gating by showing they fail in *opposite*
+   directions — markup closed (loud), structural open (silent). Same shape in Peter's residual, and in
+   the `export const` consumption bug (`@denied = not can(...)` leaves `@denied` false).
+
+## ⚠️ OWN MISSES — recorded, not smoothed
+
+- **Wrote two false normative sentences into the SPEC** and shipped them for hours (finding 1).
+- **Missed `scrml-support`'s inbox entirely at boot** — found Peter's routed security note only by
+  chasing his delta-log.
+- **Appended six delta entries to the wrong repo's delta-log**, colliding with his sequence. Reverted,
+  re-authored.
+- **My blast-radius hypothesis was wrong** on the `if=` review — I flagged the runtime mount-contract
+  widening as riskiest; it was the safest part (1 of 213 corpus templates is even multi-node). The
+  damage was at the pipeline's two ends.
+- **My locus was wrong** on `if=` — the attribute is discarded in the AST BUILDER (those node kinds
+  have no `attributes` array), so routing codegen alone would have fixed nothing.
+- **My proposed SPEC carve-out wording was false** — "top-level only"; the real boundary is the
+  `<each>` row template. The implementing agent corrected me.
+- **CWD slipped into `scrml-support`** and I tried to open a PR from there.
+- **Nearly quoted wrong gap counts** from a naive `grep status=open` (19/89/39 vs the generator's
+  21/93/40 — `GAP_STATUS_OPEN` also counts `in-progress`/`narrowed`/`ruling-gated`).
+- **Two commits "timed out" and had actually landed.** Verify git STATE, not the exit code — three
+  times this session.
+
+## ✅ RULINGS DELIVERED (mine, this session — do not re-litigate)
+
+- **RediLedger verb-grants → DERIVED from the program's own `?{}` usage, deny-by-default.** REJECTED
+  their preferred per-table marker: it is the exact *"forgettable declaration guarding a security
+  invariant"* shape §14.8.11.2 rejects two paragraphs above the emission they quoted. The machinery
+  already exists (`queriedPrivileges`, #217) and the tier bypasses it. Second half: an undetermined
+  `?{}` on a db-authoritative table becomes a **compile** error, not a runtime `permission denied`.
+  **Asked them for one input** — how many of their queries the bounded scanner cannot resolve.
+- **#284 diagnostic → allocate a FRESH code at Error; E-ROUTE-001 stays a Warning and gets widened.**
+  Forced by measurement: widening takes E-ROUTE-001 from 5 files/10 fires to **32 files/73 fires**,
+  and the new population is our own flagship — widened+promoted would fail `23-trucking-dispatch` in
+  32 files. Two codes, two severities, both honest; dissolves the §12.4-vs-§34 contradiction without
+  amending §12.4 down.
+- **`if=` on all three (bryan-RULED) landed as an AMENDMENT, not a fix** — §17.1.2 fences it at exactly
+  three; §17.1.2.1 rules render-gating NOT lifecycle-gating (an engine's cell/rule=/effect=/timers stay
+  live while gated).
+
+## 🧷 STATE / OPEN
+
+- **Adopter issues 8 → 3.** Closed: #284 #285 #261 #282 #263. Open: **#274** (Q2 still owed a ruling),
+  **#264** (Peter), **#228** (held).
+- **Gap counts HIGH 21 · MED 99 · LOW 41.** **11 filed this session, five against my own work/text.**
+- **⛔ Rulings owed by bryan (4):** `locus:`-as-a-structured-field amendment to `pa-base v2.8` ·
+  **#274 Q2** (typing a helper outside the `<db>` block — load-bearing *because* `any` is a hard no
+  **from day one**, bryan S302) · `E-BPP-001` reclassify-vs-retire · **whether to take Peter's
+  fail-OPEN interpolation residual or let him.**
+- **⛔ Needs bryan's hands, not a ruling:** the **`ai-review` check has been red on every code PR** —
+  Peter root-caused it to the `ANTHROPIC_API_KEY` repo secret / org access, NOT the model or the diff
+  (init succeeds, `is_error:true` at 240ms, $0 cost). Non-blocking but it means an advisory reviewer
+  has been silently dead. Note in `scrml-support/handOffs/incoming/…2330…ai-review…`.
+- **Worktrees: 14** — mine removed (landed). 3 pre-existing `agent-*` (S297-retained), 9 persistent
+  `scrml-spa-ss*` lineups, `s251`. Nothing uncommitted.
+- **flogence ORACLE ASK #1 answered** — their cited substrate is the wrong one of two; `calls[]`
+  projected from the call-only walker would inherit #284's blind spot, and **their own acceptance
+  criteria would go green on a broken build** (their repro calls directly; I gave them an alias case).
+  Sequenced behind #284's fix. Ball is theirs.
+
+<!-- ============================================================= -->
 <!-- S303 WRAP (Peter/Windows) — prepended 2026-07-30.              -->
 <!-- S300-Peter + bryan's #289/#292/#295/#296 (delta [926]-[945])   -->
 <!-- + all prior UNCHANGED below. Disambiguate by NAME.             -->

@@ -5619,6 +5619,46 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-07-30/31 — S302 (bryan): `if=` on the three structural elements, a §14.8 leak escalated, and a gate hole that let a 38-failure regression through
+
+Six PRs. The session opened on an adopter reverse-verify that inverted its own report and closed on
+sealing a CI hole that had been letting real regressions past every blocking gate. Peter (S303) was
+live throughout; every landing here rebased over his.
+
+- **#292 `3b86a252` — adopter #284 reverse-verified; the attribution was wrong and the bug was worse.**
+  Computed-member access in a server-fn body does NOT break placement (built it twice, `function` and
+  pure `fn`). The real defect is an **indirect callee**: a first-class reference — a dispatch table or
+  **a plain alias with no computed member anywhere** — leaves the callee unplaced, its body shipping to
+  the client while the server handler references a name it never defines. Executed, not grepped:
+  `ReferenceError` — a 500, not a silent fallback. Traced to `exprNodeCollectCallees` recording only
+  call nodes while the reachability walk counts bare references (§12.2 Trigger 6). Routed to Peter,
+  who landed the core as #297.
+- **#295 `4d20da96` — a routed §14.8 leak confirmed and escalated.** Peter flagged that
+  `<x server> = SECRET` ships the init value to the client, honestly caveating that his repro was
+  degenerate and unverified in a real app. It survives the **canonical §52 shape** (modelled on our own
+  `examples/18-state-authority.scrml`) with **zero errors** — three warnings fire, none about
+  confidentiality — and `E-AUTH-005` does not fire at all. Proven by executing the bundle: the secret
+  is live in the browser reactive store. Root: `isServerOnlyNode` never inspects `n.isServer`, while
+  two other functions in the same file do.
+- **#296 `e74edd4b` — a corpus emitted-specifier resolution guard, plus the #261 verdict.** #261 was
+  closed by construction by #289, verified across 27 shapes in real Chrome with JS disabled; the
+  adopter was told their byte-grep recipe cannot verify the fix. S296 built the right oracle and scoped
+  it to `.server.js` in synthetic fixtures, so the blind spot had *moved* rather than closed; the new
+  guard generalizes it to all emitted `.js` and HTML `<script src>` over a real corpus app, with the
+  known-broken set as a documented allowlist rather than a retrofit hard gate.
+- **#302 `08531c07` — `if=` works on `<engine>` / `<match>` / `<each>`** (bryan-RULED). Landed as a SPEC
+  **amendment** (§17.1 + new §17.1.2), not smuggled in as a fix, because it is a widening. §17.1.2.1
+  rules it **render-gating, not lifecycle-gating**: with the gate false an engine's cell, `rule=`,
+  `effect=` and timers stay live. Two adversarial rounds — the first returned DO-NOT-LAND with three
+  blockers including a predicate that killed page boot on a green compile.
+- **#304 `b7dda491` — gated the 14 root-level test files.** 13 had **no runner in any workflow**; the
+  14th ran only in a `continue-on-error` job, and branch protection requires exactly one check. Running
+  them by hand surfaced a real, pre-existing native-parser defect that had been failing invisibly.
+  Both `gate` and the pre-commit hook extended; bite proven.
+
+Suite at close: **28,127 pass / 0 fail** across 1,195 files. Adopter issues **8 open → 3**. Eleven gaps
+filed, five of them against this session's own work or its own SPEC text.
+
 ## S295 (2026-07-28) — bryan · ASUS-Vivobook — a three-lane parallel adopter arc, two pa-base amendments, and three privacy scrubs
 
 **Six PRs.** Three concurrent lanes verified file-disjoint before dispatch, plus a SPEC ratification and the deferred-item filing.
