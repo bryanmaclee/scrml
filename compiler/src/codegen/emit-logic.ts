@@ -1906,6 +1906,27 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         const tildeRhs = emitExprField(node.initExpr, init, _makeExprCtx(opts));
         return `${node.name} = ${tildeRhs};`;
       }
+      // #274 Wall-2 — the SQL-init sibling of the tilde-decl reassignment above. A
+      // keywordless bare assignment `w = ?{...}.run()` parses as a `_bareAssign`
+      // const-decl carrying a sqlNode (ast-builder.js ~9496). When `w` was already
+      // declared (`let w = 0; … w = ?{...}`), emitting `const w = await …` (the
+      // plain const-decl SQL arm below) RE-DECLARES `w` → the emitted JS fails to
+      // parse → E-CODEGEN-INVALID-LOGIC. Detect the reassignment (checked BEFORE
+      // the `declaredNames.add` below, mirroring the tilde-decl arm) and emit an
+      // assignment. A FRESH bare assignment (name not yet declared) falls through
+      // to the const-decl SQL arm → `const name = await …` (the tilde-decl fresh-
+      // declaration semantics). Server-only, like every `_scrml_sql` emission.
+      if (
+        (node as any)._bareAssign && node.sqlNode && node.sqlNode.kind === "sql"
+        && typeof node.name === "string" && opts.declaredNames?.has(node.name)
+      ) {
+        if (opts.boundary === "server") {
+          const sqlStmt = emitLogicNode(node.sqlNode, opts);
+          const sqlExpr = sqlStmt.replace(/;\s*$/, "");
+          return `${node.name} = ${sqlExpr};`;
+        }
+        return `${node.name} = null; // SQL-init reassignment for ${node.name} — client cannot evaluate _scrml_sql (E-CG-006); use a server-side function.`;
+      }
       // For tilde-decl with reactive deps: emit as derived reactive (auto-updates)
       // Phase 4d: ExprNode-first reactive dep extraction, string fallback
       if (node.kind === "tilde-decl" && typeof node.name === "string") {

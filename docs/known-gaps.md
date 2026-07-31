@@ -5118,6 +5118,26 @@ alias (dropped), uncalled alias — all correct; conformance 763/0.
 
 ---
 
+<!-- @gap id=g-274-wall2-sql-reassign-to-existing-let-duplicate-const sev=MED status=resolved -->
+### G-274-WALL2-SQL-REASSIGN-TO-EXISTING-LET-DUPLICATE-CONST — a bare SQL-init reassignment to an already-declared `let` (`let w = 0; w = ?{...}.run()`) emitted a duplicate `const w` → E-CODEGEN-INVALID-LOGIC → RESOLVED S305 — `NEW S305; MED; RESOLVED S305 (PR #309)`
+
+> **RESOLVED S305** (adopter GH **#274 Wall-2**, PR #309). A keywordless bare assignment whose RHS is a SQL
+> `?{}` — `w = ?{`INSERT …`}.run()` — where `w` was already declared (`let w = 0`) emitted a SECOND
+> declaration `const w = await _scrml_sql…` alongside the `let w = 0`, so the generated server.js failed to
+> parse (`Identifier 'w' has already been declared`) and the compile aborted with the generic
+> E-CODEGEN-INVALID-LOGIC (no artifacts written). The adopter framed it as "two leading `const` server calls +
+> guard-return + reassigned-`let`", but the **minimal trigger reduces to just `let w = 0; w = ?{...}`** — the
+> guard-return and leading consts are incidental (a non-SQL reassignment `w = 5` and a fresh `let w2 = ?{...}`
+> both compiled clean). **Root:** a bare `name = expr` in a fn body is a *tilde-decl* (scrml's implicit-decl
+> form); the D-SFN-2 fix special-cased `name = ?{...}` to emit a **const-decl** (to reuse the tested const-decl
+> SQL arm) — but a const-decl ALWAYS emits `const name`, dropping the tilde-decl's `declaredNames` reassignment
+> awareness. **Fix:** tag the bare-assign SQL node `_bareAssign` (ast-builder ~9496); emit-logic emits a
+> reassignment (`w = await …`) when the name is already declared (checked before the `declaredNames.add`,
+> mirroring the non-SQL tilde-decl arm), and keeps `const name = await …` for a FRESH bare-assign. Verified:
+> `bare-assign-sql-init.test.js` 8/0 (incl. the reassignment + the fresh-still-const cases); conformance 769/0;
+> unit green. Answers #274 Q4: the gated-destructive-write shape now lowers cleanly. (Wall-1 — the E-EQ-001
+> whole-program type-inference flip — is a SEPARATE type-system issue, routed to bryan.)
+
 <!-- @gap id=g-indirect-callee-never-server-placed-server-referenceerror sev=HIGH status=resolved -->
 ### G-INDIRECT-CALLEE-NEVER-SERVER-PLACED-SERVER-REFERENCEERROR — a callee reached by a first-class reference is never server-placed; its body ships to the CLIENT and the server handler throws `ReferenceError` — `NEW S302; HIGH; RESOLVED S303`
 
