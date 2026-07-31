@@ -1,0 +1,16 @@
+{
+  "id": "linear-must-use-unread-pos",
+  "description": "A fresh `~`-form binding (`unusedThing = 42`, a bare assignment introducing a new local) falls out of scope never read. Per §35 E-MU-001 fires (§34: Error), naming the binding and offering the `_`-prefix suppression.",
+  "language-version": "1.0",
+  "spec": "§35",
+  "rationale": "§35 — a must-use binding is one whose VALUE is the point of computing it; letting it fall out of scope unread is, with near-certainty, either a forgotten use or a dead computation. scrml makes that loud rather than silent, and gives an explicit opt-out (`_`-prefix) so the author can SAY \"computed for effect, value deliberately unused\" instead of leaving the reader to guess.",
+  "expect": {
+    "codes": [
+      "E-MU-001"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-MU-001": "error"
+    }
+  }
+}

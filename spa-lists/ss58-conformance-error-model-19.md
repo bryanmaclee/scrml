@@ -87,3 +87,35 @@ that MARKS a binding must-use was not identified this pass) · the five `E-CPS-*
 (idempotency-store driver/import, multibatch machine-crossing/reorder, non-idem-no-storage)
 — these need the A9/Ext-1 body-split + `scrmlconfig` idempotency-store surface set up, which
 is a materially bigger authoring setup than the rest of this list and deserves its own pass.
+
+## S305 second pass — `E-MU-001` pinned; five recorded searches
+
+**`E-MU-001` PINNED** (§35, 2 cases). Trigger is a **fresh `~`-form binding** — a bare
+`name = expr` inside a logic block where `name` is not already a local (`type-system.ts:17819`
+only calls `mustUseTracker.declare()` for those). A `let`/`const` does NOT register. Reading the
+binding suppresses it; `_`-prefix is the documented opt-out.
+
+### Recorded searches (probed, did not fire — NOT dead-code claims except where stated)
+
+- **`E-TYPE-042`** — SHADOWED, and this one IS a claim: `== not` fires **`E-EQ-002`**
+  (`gauntlet-phase3-eq-checks.js:582`, TS-stage, fatal, `return`s) so the codegen-stage duplicate
+  at `rewrite.ts:1201` is unreachable. Filed `g-e-type-042-unreachable-duplicate-of-e-eq-002` —
+  needs a RETIRE-or-narrow ruling, like the S261 E-MARKUP reconciliation. **Not authorable.**
+- **`E-TYPE-071`** — `render foo(...)` outside a component body probed in two positions (a
+  `function` body; a markup `${ }` interpolation); neither fired. `rewriteRenderKeyword`
+  (`rewrite.ts:2401`) appears not to be reached on those paths. Locus known, reachability NOT
+  established — do not call it dead on this evidence.
+- **`E-STATE-005`** — HTML-element-name collision on a STATE TYPE. Probed `type Button:struct`
+  and `type Button:state`; neither fired (the second may not even be a live type kind). The
+  registrar is `type-system.ts:5823`; which surface still reaches it was not identified.
+- **`E-CONTRACT-004-WARN`** — probed the §53.11 shape directly (`<username>: string(length(<=10))
+  = <input type="text" maxlength="20"/>`, declared-vs-shape-derived conflict). Neither pos nor
+  neg emitted anything, suggesting the shape-derived attribute is not being produced at all on
+  this path — which would be a separate defect from the warning. Worth one focused probe.
+- **`E-CG-006`** — NOT probed this pass. No claim either way. It needs a CPS client wrapper
+  containing a server-only node (`scheduling.ts:892`), i.e. the body-split setup the five
+  `E-CPS-*` codes also want. Bundle them.
+
+**Honest yield note:** this pass authored ONE code from a six-code cluster. The searches are the
+deliverable — five codes now carry evidence instead of a `[status=pending]` marker, and two of
+them turned into filed gaps.

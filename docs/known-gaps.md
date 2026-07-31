@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 22 |
 | MED | 101 |
-| LOW | 42 |
+| LOW | 44 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -537,6 +537,43 @@ Adopter-A's native-iOS client (reused, re-pointed at the scrml backend for the l
 > EXECUTION before authoring (S261's "gate fireable by execution, not by grep"). 18 fired and are now
 > pinned. The 19th did not — and finding out why surfaced a §51.5 soundness hole rather than a
 > coverage hole.
+
+### g-e-type-042-unreachable-duplicate-of-e-eq-002 — two catalogued Error codes claim the same `== not` trigger; the later-stage one can never fire
+<!-- @gap id=g-e-type-042-unreachable-duplicate-of-e-eq-002 sev=LOW status=open -->
+
+**Locus:** `compiler/src/gauntlet-phase3-eq-checks.js:582` (E-EQ-002, TS-stage) vs
+`compiler/src/codegen/rewrite.ts:1201` (E-TYPE-042, codegen-stage). Traced — the shadowing was
+established by compiling the shape and observing which code arrives.
+
+Both §34 rows describe the SAME source shape. `E-EQ-002` (§45): ``\`== not\` / \`!= not\```.
+`E-TYPE-042` (§17.6, §45): ``\`== not\` / \`!= not\` / \`=== not\` / \`!== not\```. Measured on
+`if (@user == not)`: **`E-EQ-002` fires; `E-TYPE-042` does not.** E-EQ-002 runs at the earlier
+gauntlet-phase3 stage and `return`s, and it is fatal, so the codegen-stage duplicate is never reached.
+
+So `E-TYPE-042` is a **catalogued, tier-1-classified Error that cannot fire from source** — the same
+class the S261 E-MARKUP reconciliation resolved by RETIRING the shadowed member.
+
+**Not a behaviour defect:** the shape IS rejected, by the sibling code, with a correct message. The
+defect is that §34 claims two surfaces where one exists, which is a freeze-gate problem: the campaign
+carries `E-TYPE-042` as an authorable tier-1 hole and it is not authorable.
+
+**Disposition needed (a ruling, not a fix):** retire `E-TYPE-042` as S263 retired the E-MARKUP
+duplicates, or narrow one row so the two triggers are genuinely disjoint (E-TYPE-042's row uniquely
+also claims `=== not` / `!== not`, which `E-EQ-004` may already own — worth checking before retiring).
+
+### g-e-eq-002-hint-suggests-the-double-negative-is-some-exists-to-avoid — the `!= not` fix-hint names `is not not` where §42.2.2a says `is some` exists precisely to avoid it
+<!-- @gap id=g-e-eq-002-hint-suggests-the-double-negative-is-some-exists-to-avoid sev=LOW status=open -->
+
+**Locus:** `compiler/src/gauntlet-phase3-eq-checks.js:585` — `const replacement = eqNode.op === "==" ? "is not" : "is not not";`
+
+For `!= not` the diagnostic advises `is not not`. **That form IS valid** — SPEC:24260 normatively
+specifies it ("The `is not not` double-negation pattern (presence check) SHALL compile to …"), so this
+is NOT an invalid-suggestion defect and was nearly mis-filed as one.
+
+The narrow point is guidance quality: §42.2.2a states verbatim that **"`is some` exists to avoid the
+double-negative"**. So the compiler's own hint steers authors to the form the SPEC introduced `is some`
+to replace. One-word fix (`"is not not"` → `"is some"`); the `==` branch's `is not` is already correct.
+
 
 ### g-e-eq-001-message-names-types-not-the-operand — `E-EQ-001` reports the two TYPES but neither which operand carries which, nor where its type came from; the adopter paid ~15 bisect cycles for the difference
 <!-- @gap id=g-e-eq-001-message-names-types-not-the-operand sev=MED status=open -->
