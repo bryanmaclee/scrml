@@ -1,4 +1,57 @@
 <!-- ============================================================= -->
+<!-- S303 WRAP (Peter/Windows) — prepended 2026-07-30.              -->
+<!-- S300-Peter + bryan's #289/#292/#295/#296 (delta [926]-[945])   -->
+<!-- + all prior UNCHANGED below. Disambiguate by NAME.             -->
+<!-- ============================================================= -->
+
+# scrml — Session 303 (Peter · Windows) — WRAP
+
+**Date:** 2026-07-30. `/boot` Profile A. `main` at **`4f5f8f23`**, coherence **0/0** both repos. Delta-log **[946]–[953]**.
+**Two landings, both proven by EXECUTION:** #284 resolvable core (`94d3d6ee`, PR #297, issue CLOSED) · §64 test de-flake (`4f5f8f23`, PR #298). Successor to S302-bryan (lane-partitioned; he routed my queue). Mechanical stream = delta [946]-[953]; this carries the irreducible.
+
+## 🎯 THE HEADLINE — #284, and the S239 gate earning its cost THREE times
+
+A server-placed fn reaching a helper via a **first-class reference** (multi-hop alias / dispatch table) left the helper client-placed → server `ReferenceError` 500. Fixed by **local static resolution of indirect callees** (`compiler/src/indirect-callee-resolver.ts`) — resolve the binding per-function-body, treat the indirect call like a direct call for placement + peer-emit + await-lower; shared `exprNodeCollectCallees`/`inverseCallerMap`/D4 byte-identical.
+
+**Two cuts were REFUTED by the adversarial pass before the sound one landed** ([[feedback-verify-the-bug-class-not-just-reported-instance]]): (cut 1, ref-edges) a fail-OPEN unawaited-Promise auth-bypass — WORSE than the 500 it replaced; (cut 2, alias-resolution) a client-indirect-call demotion + a markup-helper relocation + a file-wide await FP. All fixed at the root (escalation-only edges · markup guard · per-function await set). **My "HTTP 200" happy-path only tested `return picked(rows)` — masking every consuming-position bug.** Corpus over-escalation MEASURED zero (positive-control-validated).
+
+## 🔴 THE NEXT PA'S PICKUP (Peter-lane)
+
+1. **#264** — on-mount server-fn in ARGUMENT position not awaited + earlier server-call stmt dropped (§13.2). emit-server. **bryan handed me `emit-server.ts` WHOLESALE** (dissolves the #264/#282 contention) — the **ack is still OWED to him**.
+2. **#274 Wall-2** — `E-CODEGEN` on the two-leading-const-server-call + guard-return + reassigned-let shape. Gated on a STANDALONE repro (the whole-program version didn't reduce). #274 Q2 (`any` refused → how to type a helper outside `<db>`) is bryan's ruling.
+3. **Braceless `for/lift` reject-diagnostic** — bryan RULED reject; "the build is yours." formB emits `for(const it of of)` (node-check-valid, dies at eval). Emit the diagnostic + repro matrix.
+4. **#284 residuals** — if bryan builds the §12.4 fail-closed diagnostic (note sent), wire the dynamic/markup+server-indirect/reassign cases through it.
+
+## 🧭 FINDINGS THAT OUTLAST
+
+- **`tracking` is RED BY DESIGN — never a regression signal.** ci.yml `tracking` is `continue-on-error`, NON-BLOCKING, and deliberately buckets known-failing tiers (`browser` ~50 REAL fails · self-host-smoke dist · M6.x within-node). Fixing an individual test removes one failure but the CHECK stays red. Only `gate`(+`windows`) gate merges. Delta [952].
+- **Both "flake" labels were WRONG — §64 and ai-review were CONSISTENT failures.** §64 = a subprocess loopback-fetch that never connects on the runner (fixed by asserting the §64.3 liveness contract, dropping the fetch that tests Bun not scrml). ai-review = the `claude-code-action` failing at INIT ($0 cost, is_error) = `ANTHROPIC_API_KEY` invalid/expired or org-access — root-caused + routed to bryan (delta [953]). "Passes locally" is MISLEADING evidence for a Linux-CI-only issue.
+- **A monotonic-add fix cannot produce a de-escalation** — so any de-escalation in a measurement is proof the HARNESS is broken, not the fix (the ~5-attempt measurement disaster, delta [950]).
+
+## ⚠️ OWN MISSES — recorded, not smoothed
+
+- **Mislabeled §64 AND ai-review as "flakes"** (inherited hand-off labels + my misleading "passes-locally" evidence). Both deterministic. Corrected by CI evidence.
+- **Wrong "stale model ID" guess for ai-review** — `claude-sonnet-4-6` is valid; checked the authoritative catalog (should have first).
+- **The over-escalation measurement was a self-inflicted multi-hour disaster** — reused-output-dir harnesses + concurrent background sweeps corrupting each other. Fixed by unique-per-file dirs + one process; but a lot of Windows process-management time burned.
+- **Shipped cut 1 to my own happy-path as "verified 200"** — the S239 gate caught the fail-open auth-bypass I'd have shipped.
+
+## ✅ GATE / HOUSEKEEPING
+
+- **Landed:** #284 core (`94d3d6ee`, PR #297) · §64 de-flake (`4f5f8f23`, PR #298). Each: reproduce-first → satellite (worktree) → **S239 adversarial** (2 rounds on #284) → PA-verified by EXECUTION → cloud `gate`+`windows` GREEN → merge. #284 issue closed with scope+residuals comment.
+- **Gaps:** `g-indirect-callee-never-server-placed-...` → **RESOLVED S303**; new MED `g-sql-param-interpolation-peer-call-not-awaited`. FACTS + gap-counts regen'd (rode #297; `gate` green ⟹ `--check` passing). Net HIGH −1, MED +1.
+- **Worktrees:** baseline measurement worktree removed; build-satellite worktree (`agent-a1a5d57009c5dbf99`) retained (forensic, landed) + `scrml-pinned`.
+- **Maps:** new `indirect-callee-resolver.ts` + internal route-inference/emit edits; **`project-mapper` not run** (S299 precedent — maps one-session-behind by construction, grep-competitive; symptom→locus captured in the gap + changelog).
+- **bryan inbox (scrml-support):** §12.4 diagnostic residual (`2115`) · ai-review root-cause + §64 fix (`2330`). Both pushed.
+- **⚠ OPEN inbox threads — routed, un-dispositioned (need bryan/design):** rediledger DB-authoritative verb-grant ask (`1545` — append-only/no-delete/no-insert markers; the DB-auth arc, SPEC/design lane) · flogence ASK-1 transitive footprint `calls[]` (bryan claimed "the flogence oracle ask" at S302 — HIS lane). Moved to `read/` (absorbed), carried here as open.
+
+## Tags
+#session-303-peter #284-first-class-ref-server-placement #two-s239-rounds-refuted #indirect-callee-resolver
+#await-lowering-fail-open-caught #64-not-a-flake-loopback-fetch #tracking-red-by-design #ai-review-apikey-not-model
+#emit-server-wholesale-ack-owed #measurement-harness-disaster #verify-the-class
+
+---
+
+<!-- ============================================================= -->
 <!-- S300 WRAP (Peter/Windows) — prepended 2026-07-30.              -->
 <!-- S301 (bryan) + all prior UNCHANGED below. (Numbers collide     -->
 <!-- across machines — disambiguate by NAME. S300-peter is AFTER    -->
