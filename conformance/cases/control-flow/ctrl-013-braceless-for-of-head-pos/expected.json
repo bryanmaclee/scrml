@@ -1,0 +1,13 @@
+{
+  "id": "ctrl-013-braceless-for-of-head-pos",
+  "description": "§17.4a (S308) — a braceless (unparenthesized) `for x of @items { ... }` loop head, written without the parentheses the canonical `for (x of @items) { ... }` form requires, fires E-FOR-UNPARENTHESIZED-HEAD. The braceless-head parse branch consumes only the legacy English `in` form; a braceless `of` is not consumed, so `collectExpr` mis-reads the iterable as the bare token `of` and codegen would emit `for (const x of of)` (valid to `node --check`, a `ReferenceError` at module-eval). Reject + recover: fires ONCE per offending head, then recovers by consuming `of` and collecting the real iterable so no broken loop is emitted. Wrapped in a `${ ... }` logic block, so E-CONTROL-FLOW-IN-MARKUP (which fires on bare markup control-flow and requires a parenthesized `(...){` head) does NOT co-fire. W-PROGRAM-001 co-fires incidentally (no `<program>` shell); not asserted.",
+  "language-version": "1.0",
+  "spec": "§17.4, §17.4a",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§34 E-FOR-UNPARENTHESIZED-HEAD: a braceless `for … of` loop head SHALL be rejected. §17.4a `**Syntax:**` mandates the parenthesized head `for (let x of collection) { ... }`; without the parentheses the iterable is mis-read as the bare token `of` and the loop ships broken. Reject + recover: the head is parsed as if parenthesized so no broken loop reaches the output. §34 registers the code at severity Error and partitions it into result.errors.",
+  "expect": {
+    "codes": ["E-FOR-UNPARENTHESIZED-HEAD"],
+    "notCodes": ["E-CONTROL-FLOW-IN-MARKUP", "E-CTRL-011"],
+    "severity": { "E-FOR-UNPARENTHESIZED-HEAD": "error" }
+  }
+}

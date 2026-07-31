@@ -32,13 +32,17 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 22 |
 | MED | 102 |
-| LOW | 42 |
+| LOW | 43 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
 ### g-onmount-direct-reactive-server-write-unawaited-on-escape-hatch-string-path — a DIRECT `@cell = serverFn()` reactive write in an `on mount` body that lowers through the SPACED escape-hatch path is not awaited — `NEW S306-peter; MED; open (fail-open, contrived trigger; pre-existing emit-client limitation surfaced by #264)`
 
 The GH #264 mount-await pass (`injectServerCallAwaitsViaAst`, `scheduling.ts`) deliberately SKIPS a server call that is the direct value of a `_scrml_reactive_set(cell, stub())` — that lift is owned by emit-client's own auto-await IIFE pass (`emit-client.ts`), which matches the **un-spaced** `_scrml_reactive_set(name, stub(args))` shape. When a mount body fails to tokenize cleanly and lowers through the SPACED escape-hatch path (e.g. an unbalanced-paren regex in the body → `_scrml_reactive_set("n", serverRead ( ))`), emit-client's matcher misses the spaced form, so neither pass awaits it → a bare Promise bound into the cell (fail-OPEN, §13.2). Requires a parse-failing mount body, so it is contrived; the common multi-statement case (Case B) emits the un-spaced form and IS awaited correctly. Found by the S306 S239 adversarial pass (round 1, finding 3); judged out-of-scope for the #264 landing. Fix direction: make emit-client's reactive-server matcher tolerant of the spaced-token form, OR have the #264 AST pass await the direct value when it detects a shape emit-client will not match. **Related (round-6 note 1, belt-and-suspenders):** `liftEmittedStatementAwaits`'s acorn-parse-FAILURE fallback still runs the retired flat-text scanner (which carried the rounds 1–5 syntax-error bugs); it is unreachable for valid emitted JS, but the strictly-safer choice is to have the fallback return the body unchanged (never inject) rather than run the discredited scanner. <!-- @gap id=g-onmount-direct-reactive-server-write-unawaited-on-escape-hatch-string-path sev=MED status=open -->
+
+### g-braceless-for-of-destructuring-head-not-rejected — a DESTRUCTURING braceless `of` head (`for [a,b] of xs` / `for {a} of xs`) bypasses E-FOR-UNPARENTHESIZED-HEAD — `NEW S308-peter; LOW; open (contrived, corpus-absent; found by the E-FOR-UNPARENTHESIZED-HEAD S239 pass)`
+
+The S308 `E-FOR-UNPARENTHESIZED-HEAD` reject (§17.4a) fires on the ident-var braceless head `for x of @items` across all three parser copies, but the braceless-head branch only reads an IDENT/KEYWORD variable — a destructuring LHS (`[a,b]` / `{a}`) is not consumed, so the `of`-detection never triggers. `for [a,b] of @pairs { ... }` emits `for (const item of [a, b])` (@pairs silently dropped; `node --check` passes); `for {a} of @items { ... }` emits `for (const item of )` (a hard syntax-error bundle, `node --check` FAILS) — both with NO diagnostic. Doubly-malformed (destructuring AND braceless — never a supported spelling; zero corpus/conformance uses), so LOW. Fix direction: mirror the paren branch's `parseDestructurePattern()` consumption in the braceless branch before the `of` check, so a destructuring braceless head is also rejected. Found by the S308 E-FOR-UNPARENTHESIZED-HEAD S239 adversarial pass (finding 2). <!-- @gap id=g-braceless-for-of-destructuring-head-not-rejected sev=LOW status=open -->
 
 ### g-server-cell-init-leaks-const-to-client-reactive-wiring — a §52 server-authority cell init ships its value (and referenced consts) to the CLIENT bundle — `NEW S300-peter; HIGH; open (confirmed by execution on main; routed to bryan)`
 

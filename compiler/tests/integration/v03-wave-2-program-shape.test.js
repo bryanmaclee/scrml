@@ -235,7 +235,7 @@ describe("v0.3 W2b §4 — W-PROGRAM-REDUNDANT-LOGIC", () => {
   test("does NOT fire when ${...} body mixes decls with non-decl logic", () => {
     // A `for` loop inside the ${...} body is "real work" — wrapping is not
     // redundant per brief §4.3.3 edge case.
-    const src = "<program>${ <count> = 0; for x of @items { @count = @count + 1 } }</program>";
+    const src = "<program>${ <count> = 0; for (x of @items) { @count = @count + 1 } }</program>";
     const { errors } = compile(src);
     const hits = errorsByCode(errors, "W-PROGRAM-REDUNDANT-LOGIC");
     expect(hits.length).toBe(0);
