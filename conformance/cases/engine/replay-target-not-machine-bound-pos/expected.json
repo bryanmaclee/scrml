@@ -1,0 +1,16 @@
+{
+  "id": "engine-replay-target-not-machine-bound-pos",
+  "description": "`replay(42, @slog)` passes a numeric literal where §51.14 requires an `@`-ref machine-bound reactive. E-REPLAY-001 fires (§34: Error).",
+  "language-version": "1.0",
+  "spec": "§51.14",
+  "rationale": "§51.14 — `replay(@target, @log)` re-applies recorded transition entries to a machine-governed reactive. The first argument must be an `@`-ref to a machine-bound reactive, because replay commits VARIANT values through that machine's rule set; a non-reactive first argument has no variant domain to replay into.",
+  "expect": {
+    "codes": [
+      "E-REPLAY-001"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-REPLAY-001": "error"
+    }
+  }
+}

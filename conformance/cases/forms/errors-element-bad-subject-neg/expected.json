@@ -1,0 +1,13 @@
+{
+  "id": "forms-errors-element-bad-subject-neg",
+  "description": "The same element with `of=@signup.name`. Isolates the subject SHAPE from the presence of `of=` — the E-ERRORS-001 sibling case covers the missing-attribute half.",
+  "language-version": "1.0",
+  "spec": "§55.8",
+  "rationale": "§55.8 — the `of=` subject must resolve to a cell carrying an auto-synthesized validity surface (§55.5/§55.6). A bare string literal resolves to no such surface, so the element cannot produce an error list; the shape is unrecognized rather than empty, and saying so beats rendering nothing.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ERRORS-002"
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "engine-rule-invalid-variant-pos",
+  "description": "A state-child declares `rule=.Nope`, a variant `Phase` does not carry. Per §51.0.F the target must be a variant of the engine's `for=` enum, so E-ENGINE-RULE-INVALID-VARIANT fires (§34: Error). Pins the POSITIVE edge — the corpus previously asserted only this code's ABSENCE.",
+  "language-version": "1.0",
+  "spec": "§51.0.F",
+  "rationale": "§51.0.F — `rule=` declares the set of variants a state-child may transition TO. A target absent from the `for=` enum names no reachable state, so the rule is a contract that can never be satisfied; rejecting it at compile time is what keeps `rule=` a checkable contract rather than documentation.",
+  "expect": {
+    "codes": [
+      "E-ENGINE-RULE-INVALID-VARIANT"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-ENGINE-RULE-INVALID-VARIANT": "error"
+    }
+  }
+}

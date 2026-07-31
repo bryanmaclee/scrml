@@ -1,0 +1,13 @@
+{
+  "id": "engine-rule-invalid-variant-neg",
+  "description": "The same engine with every `rule=` target naming a declared variant. Isolates target-membership from the `rule=` attribute.",
+  "language-version": "1.0",
+  "spec": "§51.0.F",
+  "rationale": "§51.0.F — `rule=` declares the set of variants a state-child may transition TO. A target absent from the `for=` enum names no reachable state, so the rule is a contract that can never be satisfied; rejecting it at compile time is what keeps `rule=` a checkable contract rather than documentation.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ENGINE-RULE-INVALID-VARIANT"
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "id": "engine-machine-guard-undefined-self-field-pos",
+  "description": "A struct-governing machine's guard references `self.nosuchfield`, absent from `Doc`. Per §51.3 the reference is rejected with E-ENGINE-013 (§34: Error), which names the valid fields.",
+  "language-version": "1.0",
+  "spec": "§51.3",
+  "rationale": "§51.3 — a struct-governing machine's `given` guard addresses the governed value's fields through `self.`. A `self.<field>` reference naming a field the struct does not declare can never evaluate meaningfully, so it is a compile error rather than a runtime undefined read — the guard decides whether a transition is permitted, and a guard that silently reads absent is a transition contract that silently changes shape.",
+  "expect": {
+    "codes": [
+      "E-ENGINE-013"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-ENGINE-013": "error"
+    }
+  }
+}

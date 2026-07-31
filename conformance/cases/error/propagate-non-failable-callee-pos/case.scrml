@@ -1,0 +1,9 @@
+${
+    type LoadError:enum = { Empty }
+    function plain() { return 1 }
+    function caller()! -> LoadError { const r = plain()?; return r }
+}
+<program>
+<p id="s">propagate</p>
+<button id="b" onclick=caller()>go</button>
+</program>

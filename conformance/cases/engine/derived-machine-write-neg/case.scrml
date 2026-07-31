@@ -1,0 +1,16 @@
+${ type Light:enum = { Red, Green } }
+${ type Lamp:enum  = { Off, On } }
+<program>
+< machine name=Signal for=Light>
+  .Red => .Green
+  .Green => .Red
+</>
+<sig>: Signal = .Red
+< machine name=Proj for=Lamp derived=@sig>
+  .Red => .Off
+  .Green => .On
+</>
+${ function touch() { @sig = .Green } }
+<p id="s">${@sig}</p>
+<button id="b" onclick=touch()>touch</button>
+</program>

@@ -1,0 +1,13 @@
+${
+    type Phase:enum = {
+        Idle
+        Loading
+
+        transitions {
+            .Idle => .Loading given (1 == 1)
+        }
+    }
+}
+<program>
+<p id="s">type-level transitions</p>
+</program>

@@ -1,0 +1,16 @@
+{
+  "id": "engine-transitions-unknown-variant-pos",
+  "description": "A type-level `transitions {}` rule targets `.Nonexistent`, which `Phase` does not declare. Per §51.2 the rule references an unknown variant and is rejected with E-ENGINE-004 (§34: Error).",
+  "language-version": "1.0",
+  "spec": "§51.2",
+  "rationale": "§51.2 — a type-level `transitions {}` block declares structural rules over the enum's OWN variants. A rule naming a variant the enum does not declare cannot ever match, so it is rejected rather than silently ignored: an unmatchable rule is indistinguishable from a typo, and silently dropping it would leave the author believing a transition is permitted when no rule covers it.",
+  "expect": {
+    "codes": [
+      "E-ENGINE-004"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-ENGINE-004": "error"
+    }
+  }
+}

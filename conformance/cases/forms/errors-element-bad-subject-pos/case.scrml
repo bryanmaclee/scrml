@@ -1,0 +1,7 @@
+<signup>
+    <name req> = <input type="text"/>
+</>
+<program>
+<errors of="literal"/>
+<p id="s">${@signup.name}</p>
+</program>

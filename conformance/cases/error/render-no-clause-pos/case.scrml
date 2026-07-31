@@ -1,0 +1,6 @@
+${ type Phase:enum = { Idle, Done } }
+<phase>: Phase = .Idle
+<program>
+<render of=@phase/>
+<p id="s">render subject</p>
+</program>

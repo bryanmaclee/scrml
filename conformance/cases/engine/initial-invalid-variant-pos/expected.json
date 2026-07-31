@@ -1,0 +1,16 @@
+{
+  "id": "engine-initial-invalid-variant-pos",
+  "description": "`<engine for=Phase initial=.Nope>` names a variant `Phase` does not declare. Per §51.0.E E-ENGINE-INITIAL-INVALID-VARIANT fires (§34: Error).",
+  "language-version": "1.0",
+  "spec": "§51.0.E",
+  "rationale": "§51.0.E — `initial=` names the variant the engine mounts in. A name absent from the `for=` enum cannot be mounted, and because `initial=` is resolved at construction the failure would otherwise surface as a runtime throw on first paint. Rejecting at compile time is the §51.0.E contract.",
+  "expect": {
+    "codes": [
+      "E-ENGINE-INITIAL-INVALID-VARIANT"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-ENGINE-INITIAL-INVALID-VARIANT": "error"
+    }
+  }
+}

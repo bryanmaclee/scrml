@@ -1,0 +1,9 @@
+${ type Phase:enum = { Idle, Done } }
+<engine for=Phase initial=.Idle>
+  <Idle rule=.Done></>
+  <Done rule=.Idle></>
+  <Nope rule=.Idle></>
+</>
+<program>
+<p id="s">state-child tag</p>
+</program>

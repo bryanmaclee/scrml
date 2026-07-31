@@ -1,0 +1,16 @@
+{
+  "id": "engine-derived-machine-write-pos",
+  "description": "An assignment targets `@proj`, the auto-declared variable of a `derived=` machine. Per §51.9 a projected variable is read-only and the write is rejected with E-ENGINE-017 (§34: Error).",
+  "language-version": "1.0",
+  "spec": "§51.9",
+  "rationale": "§51.9 — a derived variable is a PROJECTION of its source: its value is a pure function of the source machine's current variant, recomputed on every source change. A write to it would be clobbered by the next projection, so the write is rejected rather than silently lost. This is the machine-surface twin of L21 (E-DERIVED-VALUE-MUTATE) for derived reactive cells — a derived value is read-only from the author's side.",
+  "expect": {
+    "codes": [
+      "E-ENGINE-017"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-ENGINE-017": "error"
+    }
+  }
+}

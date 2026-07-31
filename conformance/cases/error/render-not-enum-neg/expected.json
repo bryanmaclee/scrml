@@ -1,0 +1,13 @@
+{
+  "id": "error-render-not-enum-neg",
+  "description": "The shared legal control — `<render of=@phase/>` over an enum with `renders` clauses. Isolates the subject's TYPE from the element's other two failure modes.",
+  "language-version": "1.0",
+  "spec": "§19.15.3",
+  "rationale": "§19.15.3 — `<render>` dispatches on VARIANT: it picks the `renders` clause of whichever variant the subject currently holds. A non-enum subject has no variants, so there is no dispatch to perform — the element is only meaningful over a sum type.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-RENDER-NOT-ENUM"
+    ]
+  }
+}

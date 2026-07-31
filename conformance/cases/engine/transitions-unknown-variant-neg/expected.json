@@ -1,0 +1,13 @@
+{
+  "id": "engine-transitions-unknown-variant-neg",
+  "description": "The same `transitions {}` block with every rule naming a DECLARED variant. Isolates the unknown-variant condition — the block shape, arrow form and rule count are unchanged.",
+  "language-version": "1.0",
+  "spec": "§51.2",
+  "rationale": "§51.2 — a type-level `transitions {}` block declares structural rules over the enum's OWN variants. A rule naming a variant the enum does not declare cannot ever match, so it is rejected rather than silently ignored: an unmatchable rule is indistinguishable from a typo, and silently dropping it would leave the author believing a transition is permitted when no rule covers it.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ENGINE-004"
+    ]
+  }
+}

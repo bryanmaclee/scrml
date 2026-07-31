@@ -1,0 +1,13 @@
+{
+  "id": "engine-machine-guard-undefined-self-field-neg",
+  "description": "The same guard reading `self.pages`, a DECLARED field of `Doc`. Isolates the undefined-field condition from the guard mechanism itself.",
+  "language-version": "1.0",
+  "spec": "§51.3",
+  "rationale": "§51.3 — a struct-governing machine's `given` guard addresses the governed value's fields through `self.`. A `self.<field>` reference naming a field the struct does not declare can never evaluate meaningfully, so it is a compile error rather than a runtime undefined read — the guard decides whether a transition is permitted, and a guard that silently reads absent is a transition contract that silently changes shape.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-ENGINE-013"
+    ]
+  }
+}

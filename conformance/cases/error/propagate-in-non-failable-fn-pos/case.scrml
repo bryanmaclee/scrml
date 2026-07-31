@@ -1,0 +1,9 @@
+${
+    type LoadError:enum = { Empty }
+    function risky()! -> LoadError { fail LoadError::Empty }
+    function caller() { const r = risky()?; return r }
+}
+<program>
+<p id="s">propagate</p>
+<button id="b" onclick=caller()>go</button>
+</program>

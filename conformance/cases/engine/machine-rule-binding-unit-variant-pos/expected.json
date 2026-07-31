@@ -1,0 +1,16 @@
+{
+  "id": "engine-machine-rule-binding-unit-variant-pos",
+  "description": "A machine rule binds a payload on `.Idle`, a unit variant. Per §51.3.2 there is nothing to destructure and the binding is rejected with E-ENGINE-015 (§34: Error).",
+  "language-version": "1.0",
+  "spec": "§51.3.2",
+  "rationale": "§51.3.2 — a machine rule may destructure the payload of the variant it names. A unit variant carries no payload, so a binding group on it names fields that do not exist. Rejecting it is the same contract §51.0.B.1 enforces for engine state-children (E-ENGINE-PAYLOAD-ON-UNIT-VARIANT): a binding is a claim about the variant's shape, and the claim is checkable.",
+  "expect": {
+    "codes": [
+      "E-ENGINE-015"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-ENGINE-015": "error"
+    }
+  }
+}

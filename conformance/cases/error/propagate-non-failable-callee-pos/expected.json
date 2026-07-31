@@ -1,0 +1,16 @@
+{
+  "id": "error-propagate-non-failable-callee-pos",
+  "description": "`plain()?` applies `?` to a callee with no `!` in its signature. Per §19.5.4 the operator requires a failable callee, so E-ERROR-004 fires (§34: Error).",
+  "language-version": "1.0",
+  "spec": "§19.5.4",
+  "rationale": "§19.5.4 — `?` is the propagate operator for a FAILABLE call. Applied to a callee that cannot fail it propagates nothing, so it is dead syntax that reads as error handling — the most misleading shape available, because it tells a reader the call has a failure mode when its type says it does not.",
+  "expect": {
+    "codes": [
+      "E-ERROR-004"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-ERROR-004": "error"
+    }
+  }
+}

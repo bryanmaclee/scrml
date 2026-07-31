@@ -1,0 +1,16 @@
+{
+  "id": "error-render-not-enum-pos",
+  "description": "`<render of=@count/>` names an integer cell. Per §19.15.3 the subject must be enum-typed, so E-RENDER-NOT-ENUM fires (§34: Error).",
+  "language-version": "1.0",
+  "spec": "§19.15.3",
+  "rationale": "§19.15.3 — `<render>` dispatches on VARIANT: it picks the `renders` clause of whichever variant the subject currently holds. A non-enum subject has no variants, so there is no dispatch to perform — the element is only meaningful over a sum type.",
+  "expect": {
+    "codes": [
+      "E-RENDER-NOT-ENUM"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-RENDER-NOT-ENUM": "error"
+    }
+  }
+}

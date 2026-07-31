@@ -1,0 +1,12 @@
+${ type Phase:enum = { Idle, Done } }
+<engine for=Phase initial=.Idle>
+  <Idle rule=.Done>
+    <onTransition>
+      ${ log("edge") }
+    </>
+  </>
+  <Done rule=.Idle></>
+</>
+<program>
+<p id="s">onTransition target</p>
+</program>

@@ -1,0 +1,13 @@
+{
+  "id": "error-render-no-of-neg",
+  "description": "`<render of=@phase/>` over an enum whose every variant carries a `renders` clause — the fully-legal shape, shared with the NOT-ENUM and NO-CLAUSE negs so the three codes are isolated against one common control.",
+  "language-version": "1.0",
+  "spec": "§19.15.3",
+  "rationale": "§19.15.3 — `<render of=expr/>` displays an enum value through its variants' `renders` clauses. Without `of=` the element names no subject and selects no variant, so there is no clause to dispatch to.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-RENDER-NO-OF"
+    ]
+  }
+}

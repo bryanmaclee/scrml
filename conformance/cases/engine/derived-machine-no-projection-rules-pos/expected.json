@@ -1,0 +1,16 @@
+{
+  "id": "engine-derived-machine-no-projection-rules-pos",
+  "description": "A `derived=@sig` machine declares no projection rules. Per \u00a751.9 a derived machine must map source variants onto its own enum, so the empty projection is rejected with E-ENGINE-005 (\u00a734: Error). NOTE: this source also emits E-ENGINE-STATE-CHILD-MISSING as cascade noise from the empty body; the codes-half is a SUPERSET check so the case stays precise about E-ENGINE-005. The -neg twin (same declaration WITH projection rules) emits zero errors, which is what proves the cascade is a consequence of the rejected empty body and not a false-fire on a legal derived declaration.",
+  "language-version": "1.0",
+  "spec": "\u00a751.9",
+  "rationale": "\u00a751.9 \u2014 a DERIVED machine projects a source machine's variants onto its own enum. A derived declaration with an empty body declares a projection that maps nothing, so the projected variable has no defined value for any source state. The empty body is rejected rather than defaulted, because there is no non-arbitrary choice of target variant.",
+  "expect": {
+    "codes": [
+      "E-ENGINE-005"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-ENGINE-005": "error"
+    }
+  }
+}

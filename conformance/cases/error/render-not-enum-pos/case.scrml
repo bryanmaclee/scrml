@@ -1,0 +1,6 @@
+${ type Phase:enum = { Idle, Done } }
+<count> = 0
+<program>
+<render of=@count/>
+<p id="s">${@count}</p>
+</program>

@@ -1,0 +1,16 @@
+{
+  "id": "engine-initial-cell-undeclared-pos",
+  "description": "`<engine for=Phase initial=@nosuchcell>` names a cell declared nowhere in scope. Per §51.0.E the hydration source must be a declared cell, so E-ENGINE-INITIAL-CELL-UNDECLARED fires (§34: Error).",
+  "language-version": "1.0",
+  "spec": "§51.0.E",
+  "rationale": "§51.0.E — `initial=@cell` hydrates the engine's starting variant from a cell resolved at engine-construction (a server-loaded column, a `localStorage` read). If the named cell does not exist, the engine has no starting variant at all, so the reference is rejected at compile time rather than producing an engine that mounts in an undefined state.",
+  "expect": {
+    "codes": [
+      "E-ENGINE-INITIAL-CELL-UNDECLARED"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-ENGINE-INITIAL-CELL-UNDECLARED": "error"
+    }
+  }
+}

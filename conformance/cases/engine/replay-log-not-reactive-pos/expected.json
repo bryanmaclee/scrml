@@ -1,0 +1,16 @@
+{
+  "id": "engine-replay-log-not-reactive-pos",
+  "description": "`replay(@sig, 42)` passes a numeric literal where §51.14 requires an `@`-ref reactive array. E-REPLAY-002 fires (§34: Error).",
+  "language-version": "1.0",
+  "spec": "§51.14",
+  "rationale": "§51.14 — the second argument to `replay` is the audit LOG: a reactive array carrying §51.11 transition entries. A non-reactive second argument carries no entries to replay, so the call is rejected rather than replaying an empty or ill-shaped sequence.",
+  "expect": {
+    "codes": [
+      "E-REPLAY-002"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-REPLAY-002": "error"
+    }
+  }
+}

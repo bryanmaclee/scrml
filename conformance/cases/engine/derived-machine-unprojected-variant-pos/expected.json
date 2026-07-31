@@ -1,0 +1,16 @@
+{
+  "id": "engine-derived-machine-unprojected-variant-pos",
+  "description": "A `derived=` machine projects `.Red` but not `.Yellow` or `.Green` of the source enum. Per §51.9 every source variant must be mapped, so E-ENGINE-018 fires (§34: Error) — once per unprojected variant.",
+  "language-version": "1.0",
+  "spec": "§51.9",
+  "rationale": "§51.9 — a projection must be TOTAL over the source enum: every source variant needs a rule, or the projected variable has no defined value while the source sits in the uncovered variant. This is the projection-surface form of the exhaustiveness guarantee `<match>`/`<engine>` enforce structurally — a partial projection is a hole that only appears once the source reaches the missing state.",
+  "expect": {
+    "codes": [
+      "E-ENGINE-018"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-ENGINE-018": "error"
+    }
+  }
+}
