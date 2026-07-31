@@ -2116,7 +2116,7 @@
           "E-EQ-001"
         ],
         "compileErrorMessages": [
-          "E-EQ-001: cannot compare `number` with `bool` using `==` — scrml never coerces across types (§45). Convert one side explicitly (e.g. `toString`, `toNumber`) before comparing."
+          "E-EQ-001: cannot compare `n` (`number`, inferred from its initializer at line 3) with `b` (`bool`, inferred from its initializer at line 4) using `==` — scrml never coerces across types (§45). Convert one side explicitly (e.g. `toString`, `toNumber`) before comparing."
         ]
       }
     },
