@@ -1,0 +1,13 @@
+{
+  "id": "server-db-cps-idempotency-store-missing-import-neg",
+  "description": "The identical program WITH `import { get } from 'scrml:redis'`. Only the import is added — which is exactly the condition the code keys on, and it also proves the redis backend is otherwise admissible against a `sqlite` `db=` (redis is not driver-matched, unlike the SQL backends).",
+  "language-version": "1.0",
+  "spec": "§39.2.6",
+  "rationale": "§39.2.6 — `idempotency-store=\"redis\"` selects a backend whose runtime symbols arrive through the `scrml:redis` import. With no such import anywhere in the module graph the declaration names a store the emitted code cannot reach, and the failure would otherwise surface as a missing runtime symbol on the first non-monotone retry. Module-graph presence is statically decidable, so it is checked.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CPS-IDEMPOTENCY-STORE-MISSING-IMPORT"
+    ]
+  }
+}

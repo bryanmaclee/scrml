@@ -1,0 +1,16 @@
+{
+  "id": "server-db-cps-idempotency-store-driver-mismatch-pos",
+  "description": "`idempotency-store=\"postgres\"` against `db=\"sqlite:./app.db\"`. Per §39.2.6 the explicit store driver must match the `db=` driver, so E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH fires (§34: Error). It takes priority over the other two store diagnostics — an explicit-attribute contradiction is reported before a resolution outcome.",
+  "language-version": "1.0",
+  "spec": "§39.2.6",
+  "rationale": "§39.2.6 — the idempotency store is a real table in a real database. Naming a driver that differs from the closest-ancestor `db=` asks the compiler to write keys to a connection the app does not have; `\"auto\"` exists precisely so the author does not have to restate the driver. The mismatch is decidable from two attributes, so it is a compile error rather than a connection failure at first retry.",
+  "expect": {
+    "codes": [
+      "E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH": "error"
+    }
+  }
+}

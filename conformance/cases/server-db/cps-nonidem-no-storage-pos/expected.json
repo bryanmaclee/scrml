@@ -1,0 +1,16 @@
+{
+  "id": "server-db-cps-nonidem-no-storage-pos",
+  "description": "A CPS-split `bump()` whose server batch is NON-monotone (`set n = n + 1` reads the column it assigns, so re-running it advances the counter again) under `idempotency-store=\"none\"`. Per §19.9.6 there is no key storage for the retry envelope, so E-CPS-NONIDEM-NO-STORAGE fires (§34: Error). The client/server INTERLEAVE is load-bearing: route-inference only builds a `cpsSplit` for a body containing a reactive assignment, so a wholly-server function is never CPS-eligible and this code cannot fire on one.",
+  "language-version": "1.0",
+  "spec": "§19.9.6",
+  "rationale": "§19.9.6 — a CPS body-split turns one function into SEVERAL server requests, so any batch that is not monotone can be applied twice by a retry. scrml's answer is a Stripe-style idempotency key, which needs somewhere to live. With `idempotency-store=\"none\"` there is nowhere, so the compiler refuses at compile time rather than shipping a double-charge that only appears under a retry — the §49 no-silent-bad-output posture. The three escapes it names are all real: match the `db=` driver, import `scrml:redis`, or assert `.idempotent()` if the batch is monotone-by-construction.",
+  "expect": {
+    "codes": [
+      "E-CPS-NONIDEM-NO-STORAGE"
+    ],
+    "notCodes": [],
+    "severity": {
+      "E-CPS-NONIDEM-NO-STORAGE": "error"
+    }
+  }
+}
