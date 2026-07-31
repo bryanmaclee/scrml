@@ -2,6 +2,23 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S304 — 2026-07-31 (Peter · Windows) — the #284 first-class-reference class closed end-to-end, and adopter #274 closed (both walls)
+
+Five reproduce-first codegen/gauntlet fixes, all cloud-gate + windows green. This closes two adopter fronts.
+
+**The #284 first-class-reference class is now complete — direct · alias · dispatch, across await · emission · placement.** A server-placed function reaching a helper through a first-class reference (an alias, or an object-literal dispatch table) is now handled everywhere it's consumed:
+
+- **#303** — an aliased peer inside a `?{}`/template interpolation (`const p = fn; ?{`… ${p()} …`}`) is now both **await-lowered** and **emitted**. Running it (not just inspecting emit-shape) revealed two defects: the SQL-param path wasn't awaited (fail-open Promise-bind), and a sole-referencer alias was never emitted (fail-closed ReferenceError). The template-literal path was already awaited.
+- **#305** — a **dispatch-table** peer call `t["a"]()` / `t[which]()` is now awaited at `emitCall` (its callee is a member/index expr, so it never matched the bare-name peer path) and its peer members emitted. `[object Promise]` in templates and bound-Promise INSERT failures in SQL params are gone.
+- **#307** — a **plain (non-`server function`) helper** reached only via a dispatch call is now server-**placed** (route-inference had no caller edge → dead-code-dropped → ReferenceError). Over-escalation **measured zero**: the flagship `examples/23-trucking-dispatch` server emit is byte-identical main-vs-branch (380 functions, same hash), the corpus is dispatch-table-absent, and the D4 W-DEAD `inverseCallerMap` is untouched.
+
+**Adopter GH #274 closed — both walls.**
+
+- **#309 (Wall-2)** — a bare SQL-init reassignment to an already-declared `let` (`let w = 0; … w = ?{`INSERT …`}.run()`) emitted a duplicate `const w = await …` beside the `let`, so the server.js failed to parse (`Identifier 'w' has already been declared`) → E-CODEGEN-INVALID-LOGIC. Reduced from the adopter's "two leading consts + guard-return" framing to a one-line trigger. Fix: a bare SQL-init reassignment to an in-scope name emits an assignment, not a re-declaration.
+- **#312 (Wall-1)** — a `verify-the-bug-class` correction. The report blamed whole-program inference ("`baseNum` inferred as `number`; the `: string` annotation ignored"), but the `E-EQ-001` check types operands **only** from a literal initializer or annotation — **never a call** — so `baseNum(x)` could never be the number operand (proven). The real bug: `collectBindings` used one flat name→type map for the whole file, so a numeric `let h = 0` in one function silently retyped a string `let h = ""` in another (last-writer-wins) → a false `E-EQ-001`. The adopter had diagnosed the collision himself and worked around it with globally-unique local names. Fix: **per-function scoped bindings** — a `let h` in one function is no longer the same binding as a `let h` in another; same-function true positives still fire.
+
+- **Gaps:** `g-sql-param-interpolation-peer-call-not-awaited`, `g-dispatch-table-call-not-awaited-or-emitted`, `g-dispatch-table-plain-helper-member-not-server-placed`, `g-274-wall2-sql-reassign-to-existing-let-duplicate-const`, `g-274-wall1-eq-check-unifies-same-named-locals-across-functions` → all RESOLVED.
+
 ## S300 — 2026-07-30 (Peter · Windows) — four adopter fixes: cross-file export const → client, statement-body synth reads, a Windows import confirmed fixed, and session-store unification
 
 Peter-lane adopter session, concurrent with a live S301-bryan for most of it (lane-partitioned, disjoint). Two fixes landed, one issue closed as already-fixed, one fix built and land-authorized. Every fix went reproduce-first → satellite → **S239 adversarial pass** → PA-verified by execution → cloud gate.
