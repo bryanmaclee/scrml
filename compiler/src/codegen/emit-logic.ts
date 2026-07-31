@@ -178,7 +178,14 @@ export interface EmitLogicOpts {
    * `emit-expr.ts:emitCall` `await`-lowers the indirect call exactly like a direct
    * peer call. NULL/empty → no indirect-peer aliases. Sibling to `serverFnNames`.
    */
-  serverFnPeerAliasNames?: Set<string> | null;
+  serverFnPeerAliasNames?: Set<string> | null; serverFnPeerDispatchObjs?: Set<string> | null;
+  /**
+   * #284 dispatch-table sibling: names of LOCAL object-literal DISPATCH TABLES
+   * (`const t = { k: peer }`) with ≥1 peer member, so a DIRECT dispatch call
+   * `t[k](...)` / `t.k(...)` is await-lowered. Forwarded to
+   * `EmitExprContext.serverFnPeerDispatchObjs`. NULL/empty → none in scope.
+   */
+  serverFnPeerDispatchObjs?: Set<string> | null;
   /**
    * Seam-A colorless-async Gap 2 (GITI-037): names of LOCAL CLIENT peer fns that
    * are transitively async. Forwarded to `EmitExprContext.clientAsyncFnNames` so
@@ -835,6 +842,9 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
     // #284 — indirect-peer alias names so emit-expr awaits `p(rows)` where
     // `const p = groupByJob` (or a dispatch table) resolves p to a peer.
     serverFnPeerAliasNames: opts.serverFnPeerAliasNames ?? null,
+    // #284 dispatch-table — object names of peer-bearing dispatch tables so
+    // emit-expr awaits a direct `t[k]()` / `t.k()` call.
+    serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs ?? null,
     // Seam-A Gap 2 — forward the client async-peer set so emit-expr awaits a
     // client-mode call to a transitively-async local peer.
     clientAsyncFnNames: opts.clientAsyncFnNames ?? null,
@@ -2739,7 +2749,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // #284 — thread the indirect-peer alias set so an aliased peer call
         // (`if (check(rows))` where `const check = isAllowed`) inside an if
         // condition/body awaits (else an always-truthy Promise → auth bypass).
-        serverFnPeerAliasNames: opts.serverFnPeerAliasNames,
+        serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs,
         syncPeerCalls: opts.syncPeerCalls,
         // i87 §13.2 — thread the auto-await classifier inputs so a CLIENT ->
         // server-fn fetch call (`const x = fn()` / `res = fn()`) inside the
@@ -2783,7 +2793,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // ss19 #8 — peer-call threading (see if-stmt dispatch above).
         serverFnNames: opts.serverFnNames,
         // #284 — indirect-peer alias set (see if-stmt dispatch above).
-        serverFnPeerAliasNames: opts.serverFnPeerAliasNames,
+        serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs,
         syncPeerCalls: opts.syncPeerCalls,
         // i87 §13.2 — auto-await classifier inputs for a client->server-fn fetch
         // call inside the loop body (see if-stmt dispatch above).
@@ -2815,12 +2825,12 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path
       // when the enclosing fn is server-bound.
-      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, serverFnPeerAliasNames: opts.serverFnPeerAliasNames, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
+      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
 
     case "do-while-stmt":
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path.
-      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, serverFnPeerAliasNames: opts.serverFnPeerAliasNames, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
+      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
 
     case "break-stmt":
       return emitBreakStmt(node);
@@ -3118,6 +3128,21 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
             if (!_set || _set.size === 0) continue;
             for (const _fn of _set) {
               if (new RegExp("\\b" + _fn.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\(").test(p)) {
+                _refsPeer = true;
+                break;
+              }
+            }
+          }
+          // #284 dispatch-table — a DIRECT dispatch call `t[k]()` / `t.k()` has a
+          // member/index callee (no bare name), so the name-scan above never
+          // matches it. Route the param through `emitExpr` if it references a
+          // peer-bearing dispatch object (`serverFnPeerDispatchObjs`) followed by
+          // an index/member access — `emitExpr`'s dispatch branch then awaits the
+          // actual `t[k]()` call. Over-routing (`t.length` with no call) is a
+          // no-op on the structured path, so a loose `obj[` / `obj.` test is sound.
+          if (!_refsPeer && _sqlExprCtx.serverFnPeerDispatchObjs && _sqlExprCtx.serverFnPeerDispatchObjs.size > 0) {
+            for (const _obj of _sqlExprCtx.serverFnPeerDispatchObjs) {
+              if (new RegExp("\\b" + _obj.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*[\\[.]").test(p)) {
                 _refsPeer = true;
                 break;
               }

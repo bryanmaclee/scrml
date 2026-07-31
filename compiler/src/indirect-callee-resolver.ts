@@ -59,6 +59,15 @@ export interface IndirectResolution {
    * to get the aliases actually invoked as indirect calls.
    */
   calledNames: Set<string>;
+  /**
+   * Object-literal DISPATCH TABLE bindings: `const t = { k: F, … }` → t maps to a
+   * member set (for computed access `t[dyn]`) + a per-static-key map (`t.k` /
+   * `t["k"]`). Exposed so a consumer can resolve a DIRECT dispatch call
+   * `t[k](...)` / `t.k(...)` (whose callee is a member/index expr, not a bare
+   * ident, so it is absent from `calledNames`) to its peer target(s) — for both
+   * await-lowering and peer emission. Reassigned tables are already dropped.
+   */
+  tableBindings: Map<string, { members: Set<string>; byKey: Map<string, Set<string>> }>;
 }
 
 // Nested-scope node kinds we never descend into: their calls / decls belong to a
@@ -110,7 +119,7 @@ export function resolveIndirectCallees(
   const bindings = new Map<string, Set<string>>();
   const calledNames = new Set<string>();
   const stmts: any[] = Array.isArray(body) ? body : [];
-  if (stmts.length === 0) return { bindings, calledNames };
+  if (stmts.length === 0) return { bindings, calledNames, tableBindings: new Map() };
 
   // ---- Pass 1: shadow set (params + every body-local decl name) + reassigned.
   // A name declared twice, or ever assigned (`x = …`), is UNRESOLVED. The shadow
@@ -238,7 +247,7 @@ export function resolveIndirectCallees(
   // building them, but a table member could have aliased one).
   for (const nm of reassigned) { bindings.delete(nm); tableBindings.delete(nm); }
 
-  return { bindings, calledNames };
+  return { bindings, calledNames, tableBindings };
 }
 
 /**
@@ -268,6 +277,48 @@ export function aliasNamesResolvingTo(
   for (const [alias, names] of res.bindings) {
     for (const n of names) {
       if (targetNames.has(n)) { out.add(alias); break; }
+    }
+  }
+  return out;
+}
+
+/**
+ * The set of DISPATCH-TABLE object names in this body that have at least one
+ * member resolving to a member of `targetNames` (the peer names). A DIRECT
+ * dispatch call `t[k](...)` / `t.k(...)` on such a table must be await-lowered:
+ * awaiting a member that resolves to a SYNC value is a harmless no-op, so the
+ * conservative "the table has ≥1 peer member" test is sound for the await
+ * decision (over-awaiting never corrupts; under-awaiting leaks a Promise). Emit-
+ * side keys the await on the callee's OBJECT ident being in this set.
+ */
+export function dispatchTableNamesWithPeers(
+  res: IndirectResolution,
+  targetNames: Set<string>,
+): Set<string> {
+  const out = new Set<string>();
+  for (const [name, tb] of res.tableBindings) {
+    for (const m of tb.members) {
+      if (targetNames.has(m)) { out.add(name); break; }
+    }
+  }
+  return out;
+}
+
+/**
+ * Every peer (member of `targetNames`) that appears as a value in ANY dispatch
+ * table in this body — for EMISSION. A `const t = { k: peer }` REFERENCES the
+ * peer as a value, so the peer callable must be emitted whether or not `t[k]()`
+ * is ever called (the bare `{ k: peer }` reference would otherwise be a
+ * ReferenceError). Mirrors `indirectResolvedCallees` but for table members.
+ */
+export function dispatchTablePeerMembers(
+  res: IndirectResolution,
+  targetNames: Set<string>,
+): Set<string> {
+  const out = new Set<string>();
+  for (const tb of res.tableBindings.values()) {
+    for (const m of tb.members) {
+      if (targetNames.has(m)) out.add(m);
     }
   }
   return out;
