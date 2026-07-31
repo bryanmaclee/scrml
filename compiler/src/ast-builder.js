@@ -8459,7 +8459,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // (E-FOR-UNPARENTHESIZED-HEAD) and recover by consuming `of` + collecting
         // the real iterable, so no broken loop is emitted and downstream analysis
         // does not cascade. The `in` legacy form is left unchanged.
-        if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
+        if (peek().kind === "PUNCT" && (peek().text === "[" || peek().text === "{")) {
+          // Destructuring LHS in a braceless head (`for [a,b] of xs`): consume the
+          // pattern so the `of` after it is detected and rejected below — otherwise
+          // it falls through to collectExpr and the iterable is mis-read.
+          variable = parseDestructurePattern();
+        } else if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
           variable = consume().text;
         }
         if (peek().kind === "KEYWORD" && peek().text === "in") {
@@ -10489,7 +10494,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // §17.4a/§17.4b mandate a parenthesized `of` head. Reject the braceless `of`
       // form and recover by consuming `of` + collecting the real iterable. The
       // `in` legacy form is left unchanged.
-      if (peek().kind === 'IDENT' || peek().kind === 'KEYWORD') {
+      if (peek().kind === 'PUNCT' && (peek().text === '[' || peek().text === '{')) {
+        // Destructuring LHS in a braceless head (`for [a,b] of xs`): consume the
+        // pattern so the `of` after it is detected and rejected below — otherwise
+        // it falls through to collectExpr and the iterable is mis-read.
+        variable = parseDestructurePattern();
+      } else if (peek().kind === 'IDENT' || peek().kind === 'KEYWORD') {
         variable = consume().text;
       }
       if (peek().kind === 'KEYWORD' && peek().text === 'in') {
@@ -12787,7 +12797,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // (E-FOR-UNPARENTHESIZED-HEAD) and recover by consuming `of` + collecting
         // the real iterable, so no broken loop is emitted and downstream analysis
         // does not cascade. The `in` legacy form is left unchanged.
-        if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
+        if (peek().kind === "PUNCT" && (peek().text === "[" || peek().text === "{")) {
+          // Destructuring LHS in a braceless head (`for [a,b] of xs`): consume the
+          // pattern so the `of` after it is detected and rejected below — otherwise
+          // it falls through to collectExpr and the iterable is mis-read.
+          variable = parseDestructurePattern();
+        } else if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
           variable = consume().text;
         }
         if (peek().kind === "KEYWORD" && peek().text === "in") {

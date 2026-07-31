@@ -69,6 +69,33 @@ describe("E-FOR-UNPARENTHESIZED-HEAD — fires on a braceless `for … of` head"
     expect(/of\s+of\b/.test(allEmittedJs(r))).toBe(false);
   });
 
+  test("braceless `of` with an ARRAY-destructure head fires (destructuring follow-up)", () => {
+    // `for [a,b] of @items { ... }` — the braceless branch now consumes the
+    // destructure pattern so the `of` is detected; before, it fell through to
+    // collectExpr and emitted `for (const item of [a, b])` (@items dropped).
+    const r = compile(W(`<ul>\${\n  for [a, b] of @items { lift <li>\${a}</> }\n}</>`));
+    expect(fuphErrors(r).length).toBe(1);
+    expect(/of\s+of\b|of\s*\[/.test(allEmittedJs(r))).toBe(false);
+  });
+
+  test("braceless `of` with an OBJECT-destructure head fires", () => {
+    // `for {a} of @items { ... }` previously emitted `for (const item of )` — a
+    // hard syntax-error bundle with no diagnostic.
+    const r = compile(W(`<ul>\${\n  for {a} of @items { lift <li>\${a}</> }\n}</>`));
+    expect(fuphErrors(r).length).toBe(1);
+    expect(/of\s+of\b|of\s*\)/.test(allEmittedJs(r))).toBe(false);
+  });
+
+  test("braceless `of` with a destructure head in a for-AS-EXPRESSION fires", () => {
+    // The comprehension copy (parseOneForStmt). NB: emit shape is not asserted —
+    // destructuring in a for-comprehension has a PRE-EXISTING `[object Object]`
+    // pattern-coercion bug (present on the canonical paren form too; filed as
+    // g-destructure-pattern-object-object-in-for-comprehension-emit). The reject
+    // gates it regardless, so nothing broken ships.
+    const r = compile(W(`\${\n  const xs = for [a] of @items { lift a }\n}\n<p>ok</>`));
+    expect(fuphErrors(r).length).toBe(1);
+  });
+
   test("the message steers to the parenthesized head + cites §17.4a", () => {
     const e = fuphErrors(compile(W(`\${\n  for x of @items { log(x) }\n}\n<p>ok</>`)));
     expect(e.length).toBe(1);
@@ -90,6 +117,10 @@ describe("E-FOR-UNPARENTHESIZED-HEAD — does NOT false-fire on legitimate forms
 
   test("legacy braceless English `for item in @items { lift ... }` is clean (unchanged)", () => {
     expect(fuphErrors(compile(W(`<ul>\${\n  for item in @items { lift <li>\${item}</> }\n}</>`))).length).toBe(0);
+  });
+
+  test("canonical parenthesized destructure `for (const [a,b] of @items)` is clean", () => {
+    expect(fuphErrors(compile(W(`<ul>\${\n  for (const [a, b] of @items) { lift <li>\${a}</> }\n}</>`))).length).toBe(0);
   });
 
   test("prose starting with `for` does not over-fire", () => {
