@@ -1,9 +1,28 @@
 ---
 status: current
-last-reviewed: 2026-07-31
+last-reviewed: 2026-08-01
 ---
 
 # `<machine>` keyword retirement — the IMPLEMENTATION arc
+
+> **✅ COMPLETE — PR #328 (removal + codemod) · PR #332 (the loud holes) · closeout.**
+> Verified END-TO-END on merged `main`: a `< machine>` source is REJECTED
+> (`E-DEPRECATED-001`), `scrml migrate` rewrites opener + `</machine>` closer + the §51.9
+> projection body into §51.0.J `derived=match … { }` with `var=` and state-children, and the
+> migrated output COMPILES CLEAN. Gap `g-machine-keyword-retirement-carries-three-subsystems`
+> RESOLVED.
+>
+> **What the arc actually cost, vs its briefing.** It was briefed as removing a deprecated
+> spelling. It was four subsystem divergences, ~60 test files, a codemod that had to be taught
+> three separate rewrites, and a bookkeeping bug the arc's own gap-filing surfaced. The single
+> most valuable output was not the removal — it was discovering that a naive `machine`→`engine`
+> swap **silently changes program behaviour**, which the §63.4 codemod gate had been treating as
+> satisfied. Everything else followed from measuring that.
+>
+> **Still open, deliberately (filed, not fixed here):**
+> `g-audit-clause-silent-noop-on-modern-engine` · `g-machine-tests-modern-engine-vacuous` ·
+> `g-e-engine-34-emit-line-citations-stale`. The first two are one arc — a §51-era subsystem
+> wired to `machine.rules` that was never re-pointed at the state-child metadata.
 
 **Session:** S307 (bryan) · **Ruling authority:** bryan S305 (*"`<machine>` is deprecated long before V1
 … there is no reason whatsoever to tie up the word machine. fix the spec."*) + bryan S305 (*"re-base"*)
