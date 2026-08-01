@@ -502,3 +502,63 @@ describe("regression: existing for-stmt behavior unchanged", () => {
     expect(result).toBe('let y = "hello";');
   });
 });
+
+// ---------------------------------------------------------------------------
+// §8: destructuring LHS in a for-as-expression head
+// (g-destructure-pattern-object-object-in-for-comprehension-emit, S310)
+// ---------------------------------------------------------------------------
+//
+// The for-AS-EXPRESSION emit (`_emitForExprAsArray`, ~emit-logic.ts:4309) took
+// `forExpr.variable ?? forExpr.name ?? "item"` — when the LHS is a destructuring
+// pattern (`for (const {a} of @items)` / `for (const [x] of …)`) that variable is
+// a DestructurePattern OBJECT, so `${varName}` String()-coerced it to
+// `for (const [object Object] of …)` — a hard `node --check` failure. The
+// statement/render for-copies already rendered the pattern via
+// nameOrPatternText; the for-as-expression copy did not. The canonical
+// parenthesized form emits the identical broken JS pre-fix (not braceless-specific).
+
+describe("for-as-expression with a destructuring LHS renders the pattern (not [object Object])", () => {
+  const objPattern = {
+    kind: "destructure-object",
+    properties: [{ kind: "name", fieldName: "a", bindName: "a" }],
+  };
+  const arrPattern = {
+    kind: "destructure-array",
+    elements: [{ kind: "name", name: "x" }],
+  };
+
+  test("object pattern `{a}` renders as `for (const { a } of …)`", () => {
+    const node = {
+      kind: "const-decl",
+      name: "names",
+      init: "",
+      forExpr: makeForExpr({ variable: objPattern, iterable: "items", body: [makeLiftExpr("a")] }),
+    };
+    const result = emitLogicNode(node, {});
+    expect(result).not.toContain("[object Object]");
+    expect(result).toMatch(/for \(const \{ a \} of items\)/);
+  });
+
+  test("array pattern `[x]` renders as `for (const [x] of …)`", () => {
+    const node = {
+      kind: "const-decl",
+      name: "xs",
+      init: "",
+      forExpr: makeForExpr({ variable: arrPattern, iterable: "items", body: [makeLiftExpr("x")] }),
+    };
+    const result = emitLogicNode(node, {});
+    expect(result).not.toContain("[object Object]");
+    expect(result).toMatch(/for \(const \[x\] of items\)/);
+  });
+
+  test("plain-string variable is unchanged (regression guard)", () => {
+    const node = {
+      kind: "const-decl",
+      name: "names",
+      init: "",
+      forExpr: makeForExpr({ variable: "item", iterable: "items", body: [makeLiftExpr("item . a")] }),
+    };
+    const result = emitLogicNode(node, {});
+    expect(result).toMatch(/for \(const item of items\)/);
+  });
+});
