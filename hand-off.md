@@ -1,4 +1,44 @@
 <!-- ============================================================= -->
+<!-- S311 (cont.) — MED triage + aM S67 deploy repros, prepended 2026-08-01. -->
+<!-- Same S311 boot, continued POST-WRAP at Peter's request.           -->
+<!-- The S311 WRAP block + all prior UNCHANGED below.                  -->
+<!-- ============================================================= -->
+
+# scrml — Session 311 (cont.) — MED triage + aM S67 deploy repros pulled
+
+**Date:** 2026-08-01. Post-wrap continuation on warm context (Peter: "grab something else" → MED triage →
+aM deploy pull). Lands via the **S311-cont PR**; pre was `628a984d` (#347). Coherence 0/0. Delta-log **[1028]–[1033]**.
+
+## 🎯 MED-tier triage (the "is our lane dry?" follow-up)
+Satellite classified all **101 open MED → 32 Peter-lane**, 69 not. Top picks verified reproduce-first:
+- **`g-class-attr-expr-not-lowered`** — closed in the S311 wrap (phantom, fixed by #287).
+- **`g-db-migrate-check-constraint-oneof-pattern`** — a DUPLICATE-MARKER bookkeeping bug (resolved id double-counted open); a 1-marker cleanup, **deferred** (not touched this cont.).
+- **`g-reactive-write-member-server-call-no-autoawait` (MED) — VERIFIED LIVE.** `@cell = serverFn().field` emits `await X().field` = `await (X().field)` = **await undefined** (await MIS-SCOPED, not "bare unawaited" — the entry's mechanism drifted; verify-the-class again). Silent-wrong-value. Fix = parenthesize. Warm autoawait lane.
+- **`g-sqlref-direct-call-arg-unresolved` (MED) — VERIFIED LIVE.** `ident(?{…}.all())` emits `null /* sql-ref unresolved */.all()` → runtime crash on a green compile. Fix reaches AST SQLNode construction (deeper).
+
+## 🎯 aM S67 deploy — 3 scrml findings pulled (read-only from aM hand-off + memory)
+1. **`is some` on a fetched-data member → silent stale client build** → tied to **`g-request-data-is-some-misroute`**, **BUMPED MED→HIGH**. aM's "nothing clean to report" used the plain-member minimal form (compiles); the **request-ref-member** form reproduces (PA on `d949f06c`: `E-CODEGEN-INVALID-LOGIC`, no `.client.js` → the client bundle left STALE while the server route wrote). Build-integrity ⇒ HIGH. **Peter-lane.**
+2. **mount `<request>` no re-fire on SPA soft-nav** → NEW **`g-onmount-request-no-refire-on-soft-nav`** (MED). **bryan-lane** (soft-nav remount §6.7.2/§17.3/§20.8). Routed to bryan.
+3. **static markup in `if=` conditional no-hydrate on drill-in** → NEW **`g-static-markup-no-hydrate-in-if-conditional-spa-drillin`** (MED, NOT re-verified on latest). **bryan-lane** (SSR/hydration). Routed to bryan.
+- Also surfaced: aM's `docs/scrml-workaround-audit-s61.md` (6.5 KB) — a fuller aM-scrml-workaround catalog; a future triage pass (display:contents / unique-local-names / reassigned-let / multi-`<request>` mount #264).
+
+## 🔴 NEXT PA'S PICKUP (Peter-lane, verified & collision-clean)
+1. **`g-request-data-is-some-misroute` (now HIGH)** — reproducible, adopter-hit, build-integrity. **Top pick.**
+2. **`g-reactive-write-member-server-call-no-autoawait` (MED)** — verified live; targeted parenthesize fix.
+3. **`g-sqlref-direct-call-arg-unresolved` (MED)** — verified live; deeper AST fix.
+- Bryan-gated: the escape-hatch (c) §6.7.1a ruling; the two soft-nav/hydration items ②/③ above.
+- Collision to avoid: `g-crossfile-module-const` (stranded `wip/263-…-s239-blocked`).
+
+## ✅ GATE / HOUSEKEEPING
+- Docs-only (ledger + continuity + a bryan note). **HIGH 21 · MED 106 · LOW 45 · Nominal 7.** state.ts --check green. Maps unchanged. bryan inbox +1 (soft-nav mount-refire + static-hydrate); escape-hatch §6.7.1a seed still open.
+
+## Tags
+#session-311-cont #med-triage-32-of-101 #am-s67-deploy-repros #is-some-request-ref-bumped-HIGH
+#reactive-write-member-autoawait-live #sqlref-arg-live #softnav-mount-refire-filed #static-markup-hydrate-filed #bryan-routed
+
+---
+
+<!-- ============================================================= -->
 <!-- S311 WRAP (Peter/Windows·P-TECH1) — prepended 2026-08-01.       -->
 <!-- S310 + bryan's S307/S305 + all prior UNCHANGED below.           -->
 <!-- Disambiguate by NAME (numbers collide across machines).         -->
