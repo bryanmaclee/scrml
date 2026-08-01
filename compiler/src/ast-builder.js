@@ -3672,6 +3672,66 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     return i < tokens.length ? tokens[i++] : peek();
   }
 
+  // Consume a failable ERROR-type annotation (the type after `!` / `! ->`) in
+  // FULL — a generic (`! Map<…>`), paren/union (`! (A | B)`, `! A | B`), array
+  // (`! T[]`, `! Map<…>[]`), or a nested combination. Returns the base type NAME
+  // (the leading IDENT, or `undefined` for an anonymous paren/union) so
+  // `errorType` stays a clean name for type-system.ts, exactly as the #333
+  // single-IDENT+`[]` consumer did (`! string[]` → `"string"`).
+  //
+  // Pre-#333 the single-IDENT consumer left the `<…>` / `(…)` / `| B` tail
+  // unconsumed, so the `{` body-brace check failed, the fn parsed with an EMPTY
+  // body, route-inference never saw its `?{}` SQL, it was not server-escalated →
+  // E-CG-006 (client SQL leak) + no auto-await (GH #228 class; g-failable-bare-
+  // return-type-generic-paren-not-consumed).
+  //
+  // BOUNDED to exactly one type EXPRESSION — an atom (IDENT with optional
+  // balanced `<…>` generics, OR a balanced `(…)` group) + trailing `[]` array
+  // suffixes, chained by `| ` / `& ` — and STOPS. It does NOT run until a
+  // fn-decl-head stop token: a failable function may be BODY-LESS (no `{`), so a
+  // "consume until `{`/`route`/… or EOF" reader would swallow the *following*
+  // declaration/statement (S310 S239 finding — silent AST corruption on valid
+  // `fn a() ! -> Err  \n  fn b(){…}`). A type expression is self-delimiting.
+  function consumeErrorTypeAnnotation() {
+    // Consume one balanced group opened by `open`/closed by `close` (`<>` or
+    // `()`). Counts bracket CHARACTERS within a token: the lexer merges a run of
+    // `>` into a single `>>` / `>>>` token, so a nested generic `Map<K, L<V>>`
+    // closes two angle levels on one token — a single-char `t === ">"` test would
+    // never balance and over-run to EOF.
+    const consumeBalanced = (open, close) => {
+      const isRun = (txt, ch) => txt.length > 0 && [...txt].every((c) => c === ch);
+      let depth = 0;
+      do {
+        if (peek().kind === "EOF") break;
+        const t = peek().text;
+        if (isRun(t, open)) depth += t.length;
+        else if (isRun(t, close)) depth -= t.length;
+        consume();
+      } while (depth > 0);
+    };
+    // Consume one type atom: `(…)` group OR IDENT (+ optional `<…>` generic),
+    // then any trailing `[]` array suffixes.
+    const consumeAtom = () => {
+      if (peek().text === "(") {
+        consumeBalanced("(", ")");
+      } else if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
+        consume();                                    // the type name
+        if (peek().text === "<") consumeBalanced("<", ">");
+      } else {
+        return;                                       // not a type atom
+      }
+      while (peek().text === "[" && peek(1)?.text === "]") { consume(); consume(); }
+    };
+    const baseName = (peek().kind === "IDENT" || peek().kind === "KEYWORD") ? peek().text : undefined;
+    consumeAtom();
+    // Union / intersection chain: `( "|" | "&" ) atom` repeated.
+    while (peek().text === "|" || peek().text === "&") {
+      consume();                                      // the `|` / `&`
+      consumeAtom();                                  // the right-hand atom
+    }
+    return baseName;
+  }
+
   function spanOf(startTok, endTok) {
     return {
       file: filePath,
@@ -9383,11 +9443,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (peek().text === "-" && peek(1)?.text === ">") {
           consume(); // consume `-`
           consume(); // consume `>`
-          if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
-            errorType = consume().text;
-            // Consume any trailing array suffixes (`! -> T[]`, `T[][]`, …) — the
-            // same GH #228 fix as the bare form, for the normative arrow form.
-            while (peek().text === "[" && peek(1)?.text === "]") { consume(); consume(); }
+          if (peek().kind === "IDENT" || peek().kind === "KEYWORD" || peek().text === "(") {
+            // Consume the FULL error type — generic (`! -> Map<…>`), paren/union
+            // (`! -> (A | B)`), array (`! -> T[]`, `T[][]`), or a plain IDENT —
+            // via the depth-tracked consumer, not a single IDENT + `[]` (GH #228
+            // class; g-failable-bare-return-type-generic-paren-not-consumed).
+            errorType = consumeErrorTypeAnnotation();
           }
         }
       }
@@ -12242,11 +12303,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // `! -> ErrorType` arrow form (SPEC §19.4.1 normative grammar).
           consume(); // consume `-`
           consume(); // consume `>`
-          if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
-            errorType = consume().text;
-            // Consume any trailing array suffixes (`! -> T[]`, `T[][]`, …) — the
-            // same GH #228 fix as the bare form, for the normative arrow form.
-            while (peek().text === "[" && peek(1)?.text === "]") { consume(); consume(); }
+          if (peek().kind === "IDENT" || peek().kind === "KEYWORD" || peek().text === "(") {
+            // Consume the FULL error type — generic (`! -> Map<…>`), paren/union
+            // (`! -> (A | B)`), array (`! -> T[]`, `T[][]`), or a plain IDENT —
+            // via the depth-tracked consumer, not a single IDENT + `[]` (GH #228
+            // class; g-failable-bare-return-type-generic-paren-not-consumed).
+            errorType = consumeErrorTypeAnnotation();
           }
         } else if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
           // `! ErrorType` bare form (SPEC §41.14 examples; widely adopted).
@@ -12267,20 +12329,30 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             next1Text === ";" ||                                                // bare statement end
             !next1 || next1.kind === "EOF"
           );
-          // A failable ARRAY return type `! T[]` / `! T[][]` (`! string[]`,
-          // `! Contact[]`): a `[]` after the type name is a type continuation,
-          // NOT a non-type signal. Without this the type name is left
-          // unconsumed, the `[` `]` `{` dangle, the body-brace check below
-          // fails, and the function parses with an EMPTY body — so
+          // A failable ARRAY / GENERIC / UNION return type — `! T[]`, `! T[][]`,
+          // `! Map<…>`, `! Map<…>[]`, `! A | B`: the token after the type name
+          // (`[]`, `<…>`, `| &`) is a TYPE continuation, not a non-type signal.
+          // Without consuming the full type the tail dangles, the `{` body-brace
+          // check below fails, the fn parses with an EMPTY body — so
           // route-inference never sees its `?{}` SQL, the fn is not
           // server-escalated, its query leaks to the client (E-CG-006), and its
-          // value-position call gets no auto-await (GH #228 real root cause).
-          const next1IsArraySuffix = next1Text === "[" && peek(2)?.text === "]";
-          if (!tokIsAttrKw && (next1IsContinuation || next1IsArraySuffix)) {
-            errorType = consume().text;
-            // Consume any trailing array suffixes (`T[]`, `T[][]`, …).
-            while (peek().text === "[" && peek(1)?.text === "]") { consume(); consume(); }
+          // value-position call gets no auto-await (GH #228 class).
+          const next1IsTypeCont = (
+            (next1Text === "[" && peek(2)?.text === "]") ||                     // T[] array
+            next1Text === "<" ||                                                // Map<…> generic
+            next1Text === "|" || next1Text === "&"                              // A | B union/intersection
+          );
+          if (!tokIsAttrKw && (next1IsContinuation || next1IsTypeCont)) {
+            // Consume the FULL type (generic / union / array / nested), not just
+            // a single IDENT + `[]`, keeping `errorType` = the base type name.
+            errorType = consumeErrorTypeAnnotation();
           }
+        } else if (peek().text === "(") {
+          // `! (A | B)` paren/union error type: leads with `(`, so it matches
+          // neither the arrow nor the bare-IDENT form. Consume the full paren
+          // type; `errorType` stays undefined (no single name → type-system
+          // falls back to "Error"). Same GH #228 empty-body class otherwise.
+          errorType = consumeErrorTypeAnnotation();
         }
       }
 
@@ -12548,11 +12620,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (peek().text === "-" && peek(1)?.text === ">") {
           consume(); // consume `-`
           consume(); // consume `>`
-          if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
-            errorType = consume().text;
-            // Consume any trailing array suffixes (`! -> T[]`, `T[][]`, …) — the
-            // same GH #228 fix as the bare form, for the normative arrow form.
-            while (peek().text === "[" && peek(1)?.text === "]") { consume(); consume(); }
+          if (peek().kind === "IDENT" || peek().kind === "KEYWORD" || peek().text === "(") {
+            // Consume the FULL error type — generic (`! -> Map<…>`), paren/union
+            // (`! -> (A | B)`), array (`! -> T[]`, `T[][]`), or a plain IDENT —
+            // via the depth-tracked consumer, not a single IDENT + `[]` (GH #228
+            // class; g-failable-bare-return-type-generic-paren-not-consumed).
+            errorType = consumeErrorTypeAnnotation();
           }
         } else if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
           const tokText = peek().text;
@@ -12568,20 +12641,30 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             next1Text === ";" ||
             !next1 || next1.kind === "EOF"
           );
-          // A failable ARRAY return type `! T[]` / `! T[][]` (`! string[]`,
-          // `! Contact[]`): a `[]` after the type name is a type continuation,
-          // NOT a non-type signal. Without this the type name is left
-          // unconsumed, the `[` `]` `{` dangle, the body-brace check below
-          // fails, and the function parses with an EMPTY body — so
+          // A failable ARRAY / GENERIC / UNION return type — `! T[]`, `! T[][]`,
+          // `! Map<…>`, `! Map<…>[]`, `! A | B`: the token after the type name
+          // (`[]`, `<…>`, `| &`) is a TYPE continuation, not a non-type signal.
+          // Without consuming the full type the tail dangles, the `{` body-brace
+          // check below fails, the fn parses with an EMPTY body — so
           // route-inference never sees its `?{}` SQL, the fn is not
           // server-escalated, its query leaks to the client (E-CG-006), and its
-          // value-position call gets no auto-await (GH #228 real root cause).
-          const next1IsArraySuffix = next1Text === "[" && peek(2)?.text === "]";
-          if (!tokIsAttrKw && (next1IsContinuation || next1IsArraySuffix)) {
-            errorType = consume().text;
-            // Consume any trailing array suffixes (`T[]`, `T[][]`, …).
-            while (peek().text === "[" && peek(1)?.text === "]") { consume(); consume(); }
+          // value-position call gets no auto-await (GH #228 class).
+          const next1IsTypeCont = (
+            (next1Text === "[" && peek(2)?.text === "]") ||                     // T[] array
+            next1Text === "<" ||                                                // Map<…> generic
+            next1Text === "|" || next1Text === "&"                              // A | B union/intersection
+          );
+          if (!tokIsAttrKw && (next1IsContinuation || next1IsTypeCont)) {
+            // Consume the FULL type (generic / union / array / nested), not just
+            // a single IDENT + `[]`, keeping `errorType` = the base type name.
+            errorType = consumeErrorTypeAnnotation();
           }
+        } else if (peek().text === "(") {
+          // `! (A | B)` paren/union error type: leads with `(`, so it matches
+          // neither the arrow nor the bare-IDENT form. Consume the full paren
+          // type; `errorType` stays undefined (no single name → type-system
+          // falls back to "Error"). Same GH #228 empty-body class otherwise.
+          errorType = consumeErrorTypeAnnotation();
         }
       }
 
