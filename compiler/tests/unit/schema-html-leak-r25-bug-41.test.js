@@ -28,10 +28,10 @@
  *     by upstream passes (schemaFor walker / migration diff / seed runner)
  *     and never belongs in the HTML render-tree.
  *
- * `<db>` / `<engine>` / `<machine>` are NOT in the exclusion set:
+ * `<db>` / `<engine>` / `<engine>` are NOT in the exclusion set:
  *   - `<db>` bodies are canonically `${ ... }` logic contexts (declarations
  *     only — no DOM emission by the markup-walker).
- *   - `<engine>` / `<machine>` route upstream to `engine-decl` AST shape; the
+ *   - `<engine>` / `<engine>` route upstream to `engine-decl` AST shape; the
  *     state-kind branch never sees them.
  *
  * Coverage:

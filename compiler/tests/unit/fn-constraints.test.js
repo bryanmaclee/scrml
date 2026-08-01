@@ -1250,7 +1250,7 @@ describe("§11: E-FN-008 — lift targeting outer scope", () => {
 //       `pure`-modifier declaration (gated on `isPure` alone) — `pure fn`,
 //       `pure function`, `pure server function`. SUPERSEDES W-PURE-REDUNDANT
 //       (the redundant-pure case is now just deprecated-pure). Warning,
-//       not error — mirrors W-DEPRECATED-001 (`<machine>`->`<engine>`).
+//       not error — mirrors W-DEPRECATED-001 (`<engine>`->`<engine>`).
 // ---------------------------------------------------------------------------
 
 describe("§12: W-PURE-DEPRECATED — the `pure` modifier is deprecated", () => {

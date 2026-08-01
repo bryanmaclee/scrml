@@ -60,7 +60,7 @@ function codes(items) {
 describe("GCP3 null-coverage — consistent E-SYNTAX-042 (W3)", () => {
 
   // ===============================================================
-  // F-NULL-001 — files containing <machine> reject null comparisons
+  // F-NULL-001 — files containing <engine> reject null comparisons
   // in client-fn bodies. The pre-W3 detector already rejected this
   // path; we lock in regression coverage so a future walker change
   // doesn't accidentally lose it.
@@ -97,7 +97,7 @@ describe("GCP3 null-coverage — consistent E-SYNTAX-042 (W3)", () => {
       expect(codes(errors)).toContain("E-SYNTAX-042");
     });
 
-    test("client function body in file with <machine> still rejects `== null`", () => {
+    test("client function body in file with <engine> still rejects `== null`", () => {
       const src = `<program>
 \${
   type Status = "idle" | "active"
@@ -108,16 +108,16 @@ describe("GCP3 null-coverage — consistent E-SYNTAX-042 (W3)", () => {
   @x = "ready"
   @s: Status = Status.idle
 }
-<machine for=Status>
+<engine for=Status>
   Status.idle <- Status.active = action {}
-</machine>
+</engine>
 <div>\${@x} \${@s}</div>
 </program>`;
       const { errors } = compileWholeScrml(src, "fnull1-machine-present");
       expect(codes(errors)).toContain("E-SYNTAX-042");
     });
 
-    test("client function body in file WITHOUT <machine> also rejects `== null` (no asymmetry)", () => {
+    test("client function body in file WITHOUT <engine> also rejects `== null` (no asymmetry)", () => {
       const src = `<program>
 \${
   function check(target) {

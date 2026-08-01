@@ -326,7 +326,7 @@ describe("S28 elision — runtime parity with audit log", () => {
   @log = []
   function finish() { @order = S.Done }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   * => .Done
   audit @log
@@ -356,7 +356,7 @@ describe("S28 elision — runtime parity with audit log", () => {
   @log = []
   function finish() { @order = S.Done }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   * => .Done [reachedDone]
   audit @log
@@ -381,7 +381,7 @@ describe("S28 elision — runtime parity with audit log", () => {
   @trace = []
   function finish() { @order = S.Done }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   * => .Done { @trace = @trace.concat(["done"]) }
 </>
@@ -407,7 +407,7 @@ describe("S28 elision — runtime parity with audit log", () => {
   @log = []
   function finish() { @order = S.Done }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B given (true)
   * => .Done
   audit @log

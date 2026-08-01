@@ -27,7 +27,7 @@
  *            through the same read-side walker, so an undeclared `on=` read fires
  *            (a GENERAL match-`on=` gap, the broadest slice).
  *   item 3 — `W-ENGINE-INITIAL-MISSING` (a §51.0.E STATE-engine nudge) no longer
- *            misfires on the §51.3 machine surfaces (named machine / `<machine>`
+ *            misfires on the §51.3 machine surfaces (named machine / `<engine>`
  *            keyword), which have zero state-children and no `initial=` concept.
  *
  * Harness: compileScrml on REAL source (mirrors v-kill-readside-undeclared.test.js).
@@ -232,12 +232,12 @@ describe("ss42 item-3 — W-ENGINE-INITIAL-MISSING no longer misfires on §51.3 
     expect(diagsByCode(result, "W-ENGINE-INITIAL-MISSING").length).toBe(0);
   });
 
-  test("Case 9 — `<machine>` keyword named form does NOT fire W-ENGINE-INITIAL-MISSING", () => {
+  test("Case 9 — `<engine>` keyword named form does NOT fire W-ENGINE-INITIAL-MISSING", () => {
     const source = `type Phase:enum = { Idle, Running, Done }
-< machine name=PM for=Phase>
+< engine name=PM for=Phase>
   .Idle => .Running
   .Running => .Done
-</machine>
+</engine>
 <phase>: PM = Phase.Idle
 <app>
   <match for=Phase on=@phase>

@@ -37,7 +37,7 @@ function makeBareSql(query) {
   };
 }
 
-/** Build a bare-expr that's a `<machine>.advance(...)` call. */
+/** Build a bare-expr that's a `<engine>.advance(...)` call. */
 function makeAdvanceCall() {
   return {
     kind: "bare-expr",
@@ -186,7 +186,7 @@ describe("§19.9.6 (d) — DELETE batches", () => {
 // §19.9.6 (f) — Machine-intrinsic
 // ---------------------------------------------------------------------------
 
-describe("§19.9.6 (f) — `<machine>.advance()` is machine-intrinsic", () => {
+describe("§19.9.6 (f) — `<engine>.advance()` is machine-intrinsic", () => {
   test("single .advance() call → machine-intrinsic", () => {
     const fn = makeFn([makeAdvanceCall()]);
     const cps = makeCpsSplit(1);

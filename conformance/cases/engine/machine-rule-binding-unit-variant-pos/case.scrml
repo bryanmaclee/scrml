@@ -1,6 +1,6 @@
 ${ type Phase:enum = { Idle, Done(count: int) } }
 <program>
-< machine name=Flow for=Phase>
+< engine name=Flow for=Phase>
   .Idle(n) => .Done
 </>
 <p id="s">machine rule bindings</p>

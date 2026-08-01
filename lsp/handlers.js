@@ -1173,7 +1173,7 @@ const KEYWORD_DOCS = {
   "lin": "**lin** -- Linear type declaration.\n\nA `lin` variable must be consumed exactly once before scope exit. Cannot be used in loops.",
   // v0.2.0 keyword surface — scrml structural elements + modifiers + sentinels
   "engine": "**engine** -- Tier-2 state machine declaration (`<engine for=Type initial=.Variant>`).\n\nSingleton-by-design; one declaration mounts the singleton. Auto-declares a variable matching the lowercased type name. State-children declare legal transitions via `rule=`. See SPEC §51.0.",
-  "machine": "**machine** -- Deprecated alias for `<engine>` (W-DEPRECATED-001).\n\n`bun scrml migrate` auto-rewrites to `<engine>`. Hard-removal scheduled for v0.3.0.",
+  "machine": "**machine** -- REMOVED. Use `<engine>` (E-DEPRECATED-001).\n\nThe `<machine>` keyword does not ship in language-1.0 (SPEC §63.7); the declaration is otherwise unchanged. Run `bun scrml migrate <file>` to rewrite the opener.",
   "errors": "**<errors of=expr/>** -- First-class element rendering validator errors for a cell or rollup.\n\n`of=@signup.name` renders errors for one field; `of=@signup` renders the compound rollup. `all` attribute toggles full-array vs first-error rendering. See SPEC §55.8.",
   "onTransition": "**<onTransition from=.A to=.B>** -- Cross-state effect handler inside `<engine>`.\n\nExactly one of `to=` or `from=` MUST appear. Body runs on transition. See SPEC §51.0.H.",
   "onTimeout": "**<onTimeout after=DURATION to=.Variant [name=IDENT]/>** -- Per-state time-driven transition.\n\nSelf-closing. Inside an engine state-child only. Reset on re-entry. Optional `name=` makes the timer addressable for `cancelTimer(\"name\")`. See SPEC §51.0.M.",

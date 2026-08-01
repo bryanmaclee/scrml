@@ -5470,7 +5470,7 @@ describe("F7.a — `<db>` / `<schema>` lifecycle-keyword state recognition", () 
 //
 // The front-half synthStateNode unit added the `TagKind.StateOpener` path to
 // `isStateBlock`: a `< Ident ...>` space-after-`<` opener is a state block.
-// That path indiscriminately caught `< engine ...>` / `< machine ...>`
+// That path indiscriminately caught `< engine ...>` / `< engine ...>`
 // space-form openers — which carry `TagKind.StateOpener` exactly like
 // `< db>` — and `mapOneBlock` (which checks `isStateBlock` BEFORE
 // `isEngineBlock`) then routed them to `synthStateNode`, emitting a spurious
@@ -5496,9 +5496,9 @@ describe("F7.a — M5 P4-1 engine-vs-state recognition correctness", () => {
         expect(isStateBlock(engine)).toBe(false);
     });
 
-    test("REGRESSION — a space-form `< machine>` (TagKind.StateOpener) is NOT a state block", () => {
-        const blocks = parseMarkup(`< machine for=Door></machine>`);
-        const machine = blocks.find(b => b.kind === "Markup" && b.name === "machine");
+    test("REGRESSION — a space-form `< engine>` (TagKind.StateOpener) is NOT a state block", () => {
+        const blocks = parseMarkup(`< engine for=Door></engine>`);
+        const machine = blocks.find(b => b.kind === "Markup" && b.name === "engine");
         expect(machine).toBeDefined();
         expect(machine.tagKind).toBe("StateOpener");
         expect(isStateBlock(machine)).toBe(false);

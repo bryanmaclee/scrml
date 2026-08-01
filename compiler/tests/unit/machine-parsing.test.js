@@ -1,7 +1,7 @@
 /**
  * §51.3 Machine Declaration Parsing — AST Builder Unit Tests
  *
- * Tests that `< machine MachineName for TypeName { rules } />` produces
+ * Tests that `< engine MachineName for TypeName { rules } />` produces
  * kind: "engine-decl" AST nodes with correct engineName, governedType,
  * and rulesRaw fields.
  */
@@ -35,9 +35,9 @@ function findMachineDecls(result) {
 }
 
 describe("§51.3 engine-decl parsing", () => {
-  test("< machine> produces engine-decl AST node", () => {
+  test("< engine> produces engine-decl AST node", () => {
     const source = `<program>
-< machine name=UserFlow for=Column>
+< engine name=UserFlow for=Column>
     .Todo => .InProgress
     .InProgress => .Done
 </>
@@ -52,7 +52,7 @@ describe("§51.3 engine-decl parsing", () => {
 
   test("rulesRaw contains the transition rules text", () => {
     const source = `<program>
-< machine name=Flow for=Status>
+< engine name=Flow for=Status>
     .A => .B
     .B => .C
 </>
@@ -66,7 +66,7 @@ describe("§51.3 engine-decl parsing", () => {
 
   test("machine with guards in rules", () => {
     const source = `<program>
-< machine name=AdminFlow for=Column>
+< engine name=AdminFlow for=Column>
     .Done => .Todo given @isAdmin
 </>
 </program>`;
@@ -78,10 +78,10 @@ describe("§51.3 engine-decl parsing", () => {
 
   test("multiple machines produce multiple engine-decl nodes", () => {
     const source = `<program>
-< machine name=UserFlow for=Status>
+< engine name=UserFlow for=Status>
     .A => .B
 </>
-< machine name=AdminFlow for=Status>
+< engine name=AdminFlow for=Status>
     .A => .B
     .B => .A
 </>

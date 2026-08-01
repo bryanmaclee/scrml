@@ -5,7 +5,7 @@
  * machine-bound reactive:
  *   - non-@-ref argument
  *   - @-ref naming an undeclared reactive
- *   - @-ref naming a declared reactive without a < machine> binding
+ *   - @-ref naming a declared reactive without a < engine> binding
  *
  * E-REPLAY-002 fires when the second argument is not a reactive:
  *   - non-@-ref argument
@@ -42,7 +42,7 @@ function compile(source) {
   }
 }
 
-describe("S27 §51.14 — E-REPLAY-001 (target must be machine-bound)", () => {
+describe("S27 §51.14 — E-REPLAY-001 (target must be engine-bound)", () => {
   test("non-machine-bound reactive → E-REPLAY-001 with 'not governed' message", () => {
     const src = `<program>
 \${
@@ -52,7 +52,7 @@ describe("S27 §51.14 — E-REPLAY-001 (target must be machine-bound)", () => {
   @log = []
   function bad() { replay(@plain, @log) }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   audit @log
 </>
@@ -63,7 +63,7 @@ describe("S27 §51.14 — E-REPLAY-001 (target must be machine-bound)", () => {
     const r001 = errors.filter(e => e.code === "E-REPLAY-001");
     expect(r001).toHaveLength(1);
     expect(r001[0].message).toContain("'@plain'");
-    expect(r001[0].message).toContain("not governed by a < machine> declaration");
+    expect(r001[0].message).toContain("not governed by an <engine> declaration");
   });
 
   test("undeclared target → E-REPLAY-001 with 'not declared in scope' message", () => {
@@ -74,7 +74,7 @@ describe("S27 §51.14 — E-REPLAY-001 (target must be machine-bound)", () => {
   @log = []
   function bad() { replay(@ghost, @log) }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   audit @log
 </>
@@ -98,7 +98,7 @@ describe("S27 §51.14 — E-REPLAY-002 (log must be a declared reactive)", () =>
   @log = []
   function bad() { replay(@order, @missingLog) }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   audit @log
 </>
@@ -122,7 +122,7 @@ describe("S27 §51.14 — well-formed replay calls produce no errors", () => {
   @log = []
   function good() { replay(@order, @log) }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   audit @log
 </>
@@ -142,7 +142,7 @@ describe("S27 §51.14 — well-formed replay calls produce no errors", () => {
   @log = []
   function good() { replay(@order, @log, 0) }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   audit @log
 </>
@@ -165,7 +165,7 @@ describe("S27 §51.14 — well-formed replay calls produce no errors", () => {
   @synthLog = []
   function rewindToFirst() { replay(@order, @synthLog) }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
 </>
 <p>x</>
@@ -185,7 +185,7 @@ describe("S27 §51.14 — well-formed replay calls produce no errors", () => {
   @log = []
   function rewind() { replay(@order, @log) }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   audit @log
 </>
@@ -211,11 +211,11 @@ describe("S27 §51.14 — well-formed replay calls produce no errors", () => {
   @logOne = []
   function cross() { replay(@two, @logOne) }
 }
-< machine name=M1 for=S>
+< engine name=M1 for=S>
   .A => .B
   audit @logOne
 </>
-< machine name=M2 for=T>
+< engine name=M2 for=T>
   .X => .Y
 </>
 <p>x</>
@@ -245,7 +245,7 @@ describe("S27 §51.14 — multiple replay call sites validate independently", ()
     replay(@plain, @log)
   }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   audit @log
 </>

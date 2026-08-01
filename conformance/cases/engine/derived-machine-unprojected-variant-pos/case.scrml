@@ -1,12 +1,12 @@
 ${ type Light:enum = { Red, Yellow, Green } }
 ${ type Lamp:enum  = { Off, On } }
 <program>
-< machine name=Signal for=Light>
+< engine name=Signal for=Light>
   .Red => .Green
   .Green => .Red
 </>
 <sig>: Signal = .Red
-< machine name=Proj for=Lamp derived=@sig>
+< engine name=Proj for=Lamp derived=@sig>
   .Red => .Off
 </>
 <p id="s">${@sig}</p>

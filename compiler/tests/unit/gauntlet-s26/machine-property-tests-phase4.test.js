@@ -63,7 +63,7 @@ describe("S26 §51.13 phase 4 — wildcards end-to-end", () => {
   @s: M = S.Idle
   function start() { @s = S.Running }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .Idle => .Running
   .Running => .Done
   * => .Failed
@@ -91,7 +91,7 @@ describe("S26 §51.13 phase 4 — wildcards end-to-end", () => {
   @s: M = S.A
   function start() { @s = S.C }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .C
   .C => *
 </>
@@ -121,7 +121,7 @@ describe("S26 §51.13 phase 4 — wildcards end-to-end", () => {
   @s: M = S.A
   function start() { @s = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   * => .B
 </>
@@ -146,7 +146,7 @@ describe("S26 §51.13 phase 4 — wildcards end-to-end", () => {
   const @ok: boolean = true
   function go() { @s = S.Panic }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .Normal => .Special
   * => .Panic given (@ok) [emergency]
 </>
@@ -172,7 +172,7 @@ describe("S26 §51.13 phase 4 — wildcards end-to-end", () => {
   @s: M = S.Idle
   function boom() { @s = S.Failed }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .Idle => .Running
   * => .Failed
 </>

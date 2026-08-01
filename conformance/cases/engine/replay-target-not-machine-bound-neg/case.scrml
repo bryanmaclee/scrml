@@ -1,6 +1,6 @@
 ${ type Light:enum = { Red, Green } }
 <program>
-< machine name=Signal for=Light>
+< engine name=Signal for=Light>
   .Red => .Green
   .Green => .Red
   audit @slog

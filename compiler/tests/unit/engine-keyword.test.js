@@ -5,15 +5,15 @@
  *
  * Spec references:
  *   §15.15 (unified state-type registry; 'engine' is a built-in lifecycle category)
- *   §34 (W-DEPRECATED-001 catalog entry)
+ *   §34 (E-DEPRECATED-001 catalog entry)
  *   §51.3 (state machine declarations; pre-existing tests use the legacy keyword)
  *
  * Invariants:
  *   - `< engine name=N for=T>` parses identically to `< machine name=N for=T>`.
  *     Both produce kind: "engine-decl" AST nodes with the same engineName,
  *     governedType, rulesRaw, sourceVar (in P1; internal kind rename is P3).
- *   - `< machine ...>` continues to compile but emits W-DEPRECATED-001 (severity
- *     'warning'). `< engine ...>` does NOT emit W-DEPRECATED-001.
+ *   - `< machine ...>` continues to compile but emits E-DEPRECATED-001 (severity
+ *     'warning'). `< engine ...>` does NOT emit E-DEPRECATED-001.
  *   - The `for=`, `name=`, and `derived=@var` attributes work identically under
  *     both keywords (no re-parsing of attribute syntax).
  *   - The `HealthMachine` / `MarioMachine` user identifiers (the value of
@@ -73,27 +73,27 @@ describe("P1 engine keyword — equivalence with deprecated machine keyword", ()
     expect(decl.rulesRaw).toContain(".Confirmed => .Shipped");
   });
 
-  test("< engine ...> emits NO W-DEPRECATED-001 warning", () => {
+  test("< engine ...> emits NO E-DEPRECATED-001 warning", () => {
     const src = `<program>
 < engine name=Foo for=Bar>
   .X => .Y
 </>
 </program>`;
     const result = parseSnippet(src);
-    const warnings = (result.errors || []).filter(e => e.code === "W-DEPRECATED-001");
+    const warnings = (result.errors || []).filter(e => e.code === "E-DEPRECATED-001");
     expect(warnings.length).toBe(0);
   });
 
-  test("< machine ...> emits W-DEPRECATED-001 (severity warning)", () => {
+  test("< machine ...> emits E-DEPRECATED-001 (severity warning)", () => {
     const src = `<program>
 < machine name=Foo for=Bar>
   .X => .Y
 </>
 </program>`;
     const result = parseSnippet(src);
-    const warnings = (result.errors || []).filter(e => e.code === "W-DEPRECATED-001");
+    const warnings = (result.errors || []).filter(e => e.code === "E-DEPRECATED-001");
     expect(warnings.length).toBe(1);
-    expect(warnings[0].severity).toBe("warning");
+    expect(warnings[0].severity).not.toBe("warning"); // S307: now fatal
     expect(warnings[0].message).toContain("<machine>");
     expect(warnings[0].message).toContain("<engine>");
   });
@@ -112,7 +112,7 @@ describe("P1 engine keyword — equivalence with deprecated machine keyword", ()
     expect(decls[0].governedType).toBe("Bar");
   });
 
-  test("< engine ...> and < machine ...> produce structurally identical engine-decl nodes (modulo W-DEPRECATED-001)", () => {
+  test("< engine ...> and < machine ...> produce structurally identical engine-decl nodes (modulo E-DEPRECATED-001)", () => {
     const engineSrc = `<program>
 < engine name=Same for=T>
   .A => .B
@@ -150,7 +150,7 @@ describe("P1 engine keyword — equivalence with deprecated machine keyword", ()
     expect(decls[0].engineName).toBe("HealthEngine");
   });
 
-  test("multiple < machine ...> openers each emit W-DEPRECATED-001 once", () => {
+  test("multiple < machine ...> openers each emit E-DEPRECATED-001 once", () => {
     const src = `<program>
 < machine name=A for=T1>
   .X => .Y
@@ -160,9 +160,9 @@ describe("P1 engine keyword — equivalence with deprecated machine keyword", ()
 </>
 </program>`;
     const result = parseSnippet(src);
-    const warnings = (result.errors || []).filter(e => e.code === "W-DEPRECATED-001");
+    const warnings = (result.errors || []).filter(e => e.code === "E-DEPRECATED-001");
     expect(warnings.length).toBe(2);
-    for (const w of warnings) expect(w.severity).toBe("warning");
+    for (const w of warnings) expect(w.severity).not.toBe("warning"); // S307: now fatal
   });
 
   test("user identifier with 'Machine' suffix is preserved under engine keyword (HealthMachine identifier survives)", () => {

@@ -152,7 +152,7 @@ describe("S28 slice 2 — payload-variant literal RHS elision (Cat 2.d)", () => 
   @log = []
   function finish() { @r = Result.Success(42) }
 }
-< machine name=M for=Result>
+< engine name=M for=Result>
   .Pending => .Success
   .Pending => .Failed
   * => .Success
@@ -184,7 +184,7 @@ describe("S28 slice 2 — payload-variant literal RHS elision (Cat 2.d)", () => 
   @log = []
   function finish() { @r = Result.Success(99) }
 }
-< machine name=M for=Result>
+< engine name=M for=Result>
   * => .Success
   audit @log
 </>
@@ -259,7 +259,7 @@ describe("S28 slice 3 — trivially-illegal transitions (Cat 2.f, §51.5.1)", ()
   @order: M = S.A
   function bad() { @order = S.Quantum }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
 </>
 <p>x</>
@@ -281,7 +281,7 @@ describe("S28 slice 3 — trivially-illegal transitions (Cat 2.f, §51.5.1)", ()
   function good() { @order = S.B }
   function bad() { @order = S.Quantum }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
 </>
 <p>x</>
@@ -300,7 +300,7 @@ describe("S28 slice 3 — trivially-illegal transitions (Cat 2.f, §51.5.1)", ()
   @order: M = S.A
   function any() { @order = S.Quantum }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   * => *
 </>
@@ -319,7 +319,7 @@ describe("S28 slice 3 — trivially-illegal transitions (Cat 2.f, §51.5.1)", ()
   function compute(): S { return S.A }
   function step() { @order = compute() }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
 </>
 <p>x</>
@@ -383,7 +383,7 @@ describe("S28 slice 4 — --no-elide debug knob", () => {
   @order: M = S.A
   function finish() { @order = S.Done }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   * => .Done
 </>
 <p>x</>

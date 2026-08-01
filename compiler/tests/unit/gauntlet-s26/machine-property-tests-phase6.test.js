@@ -62,11 +62,11 @@ describe("S26 §51.13 phase 6 — derived/projection machines end-to-end", () =>
   type UIMode:enum = { Editable, ReadOnly }
   @order: OrderMachine = Order.Draft
 }
-< machine name=OrderMachine for=Order>
+< engine name=OrderMachine for=Order>
   .Draft => .Submitted
   .Submitted => .Done
 </>
-< machine name=UI for=UIMode derived=@order>
+< engine name=UI for=UIMode derived=@order>
   .Draft                => .Editable
   .Submitted | .Done    => .ReadOnly
 </>
@@ -102,10 +102,10 @@ describe("S26 §51.13 phase 6 — derived/projection machines end-to-end", () =>
   @order: OrderMachine = Order.Draft
   function submit() { @order = Order.Approved }
 }
-< machine name=OrderMachine for=Order>
+< engine name=OrderMachine for=Order>
   .Draft => .Approved
 </>
-< machine name=UI for=UIMode derived=@order>
+< engine name=UI for=UIMode derived=@order>
   .Draft     => .Editable
   .Approved  => .ReadOnly
 </>
@@ -131,7 +131,7 @@ describe("S26 §51.13 phase 6 — derived/projection machines end-to-end", () =>
   type UIMode:enum = { Editable, ReadOnly, Terminal }
   @order: OrderMachine = OrderState.Draft
 }
-< machine name=OrderMachine for=OrderState>
+< engine name=OrderMachine for=OrderState>
   .Draft => .Submitted
   .Submitted => .Paid
   .Paid => .Shipping
@@ -139,7 +139,7 @@ describe("S26 §51.13 phase 6 — derived/projection machines end-to-end", () =>
   .Submitted => .Cancelled
   .Delivered => .Refunded
 </>
-< machine name=UI for=UIMode derived=@order>
+< engine name=UI for=UIMode derived=@order>
   .Draft                                  => .Editable
   .Submitted | .Paid | .Shipping          => .ReadOnly
   .Delivered | .Cancelled | .Refunded     => .Terminal

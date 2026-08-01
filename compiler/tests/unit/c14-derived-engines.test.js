@@ -9,7 +9,7 @@
  *   §C14.3  emitDerivedEngineSubstrate — section structure (declare/subscribe/forced-get)
  *   §C14.4  emitDerivedEngineSubstrate — initial-undefined throw inside closure
  *   §C14.5  emitDerivedEngineSubstrateForFile — orchestration + mount marker
- *   §C14.6  Discrimination: legacy <machine derived=@x> SKIPPED
+ *   §C14.6  Discrimination: legacy <engine derived=@x> SKIPPED
  *   §C14.7  Discrimination: non-derived engine SKIPPED (C12 territory)
  *   §C14.8  End-to-end: derived engine emits expected client JS shape
  *   §C14.9  End-to-end: derived + non-derived engines coexist (no name collisions)
@@ -151,7 +151,7 @@ describe("C14 §C14.0 — isC14DerivedEngineDecl gating", () => {
     expect(isC14DerivedEngineDecl(engineDeclNode({ derivedExpr: null }))).toBe(false);
   });
 
-  test("legacy <machine> keyword → out of scope (emit-machines.ts owns it)", () => {
+  test("legacy <engine> keyword → out of scope (emit-machines.ts owns it)", () => {
     const node = engineDeclNode({}, { legacyMachineKeyword: true });
     expect(isC14DerivedEngineDecl(node)).toBe(false);
   });
@@ -191,7 +191,7 @@ describe("C14 §C14.1 — collectC14DerivedEngineDecls discovery walker", () => 
     expect(out[0]._record.engineMeta.varName).toBe("health");
   });
 
-  test("filters out legacy <machine> derived decls", () => {
+  test("filters out legacy <engine> derived decls", () => {
     const newDerived = engineDeclNode();
     const legacyDerived = engineDeclNode({ varName: "ui" }, { legacyMachineKeyword: true });
     const fileAST = { machineDecls: [newDerived, legacyDerived] };
@@ -319,10 +319,10 @@ describe("C14 §C14.5 — emitDerivedEngineSubstrateForFile orchestration", () =
 });
 
 // ---------------------------------------------------------------------------
-// §C14.6 — Discrimination: legacy <machine derived=@x> SKIPPED
+// §C14.6 — Discrimination: legacy <engine derived=@x> SKIPPED
 // ---------------------------------------------------------------------------
 
-describe("C14 §C14.6 — legacy <machine derived=@x> NOT emitted by C14", () => {
+describe("C14 §C14.6 — legacy <engine derived=@x> NOT emitted by C14", () => {
   test("collectC14DerivedEngineDecls returns 0 for legacy machine forms", () => {
     const legacy = engineDeclNode({}, { legacyMachineKeyword: true });
     const fileAST = { machineDecls: [legacy] };
@@ -720,18 +720,18 @@ describe("C14 §C14.13 — initial-undefined throw fires at engine-init time", (
 // ---------------------------------------------------------------------------
 
 describe("C14 §C14.14 — A1b/B16 compile-time rejections still fire (no regression)", () => {
-  test("legacy <machine derived=@x>: C14 produces no derived substrate", () => {
+  test("`<engine derived=@x>`: C14 emits the §51.0.J identity substrate (S307 — the legacy-keyword skip is gone)", () => {
     const src = `<program>
 \${
   type Phase:enum = { Idle, Loading }
   type Health:enum = { Idle, Loading }
   @order: Phase = Phase.Idle
 }
-< machine name=OrderMachine for=Phase>
+< engine name=OrderMachine for=Phase>
   .Idle => .Loading
   .Loading => .Idle
 </>
-< machine name=UI for=Health derived=@order>
+< engine name=UI for=Health derived=@order>
   .Idle => .Idle
   .Loading => .Loading
 </>
@@ -746,9 +746,16 @@ describe("C14 §C14.14 — A1b/B16 compile-time rejections still fire (no regres
     };
     const js = generateClientJs(makeTestCtx(fileAST));
 
-    // Legacy <machine> uses emit-machines.ts wiring; C14 substrate must NOT emit.
-    expect(js).not.toContain("// --- derived engine substrate (compiler-generated, §51.0.J) ---");
-    expect(js).not.toContain('_scrml_derived_declare("ui", () => {');
+    // S307 — INVERTED, because the discrimination this pinned is gone.
+    //
+    // C14's skip was gated on `legacyMachineKeyword !== true`
+    // (emit-engine.ts): a `<machine derived=@x>` routed to emit-machines.ts's
+    // §51.9 projection wiring, a `<engine derived=@x>` to the §51.0.J
+    // substrate. With the keyword REMOVED (SPEC §63.7) only the `<engine>`
+    // spelling exists, so `derived=@x` is unambiguously the §51.0.J identity
+    // projection and the substrate SHALL emit. Asserting the old skip would
+    // now pin the keyword's behaviour on a keyword that no longer exists.
+    expect(js).toContain("// --- derived engine substrate (compiler-generated, §51.0.J) ---");
   });
 });
 

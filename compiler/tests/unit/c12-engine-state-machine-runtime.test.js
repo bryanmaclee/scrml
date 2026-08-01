@@ -19,7 +19,7 @@
  *   §C12.13 End-to-end: W-ENGINE-INITIAL-MISSING fallback to first state-child
  *   §C12.14 End-to-end: multiple engines in one file — independent tables/cells
  *   §C12.15 Discrimination: derived engines SKIPPED (C14 territory)
- *   §C12.16 Discrimination: legacy <machine> arrow-rule body SKIPPED
+ *   §C12.16 Discrimination: legacy <engine> arrow-rule body SKIPPED
  *   §C12.17 No engines → emitEngineSubstrate returns []
  *
  * SCOPE: per BRIEF — variant cell + transition table + initial-state wiring
@@ -142,7 +142,7 @@ describe("C12 §C12.0 — isC12EngineDecl gating", () => {
     expect(isC12EngineDecl({ kind: "engine-decl", _record: {} })).toBe(false);
   });
 
-  test("engine-decl with empty stateChildren → out of scope (legacy <machine>)", () => {
+  test("engine-decl with empty stateChildren → out of scope (legacy <engine>)", () => {
     const node = engineDeclNode({ stateChildren: [] });
     expect(isC12EngineDecl(node)).toBe(false);
   });
@@ -520,7 +520,7 @@ describe("C12 §C12.15 — derived engines SKIPPED (C14 owns derived emission)",
   });
 });
 
-describe("C12 §C12.16 — legacy <machine> arrow-rule body SKIPPED", () => {
+describe("C12 §C12.16 — legacy <engine> arrow-rule body SKIPPED", () => {
   test("legacy arrow-rule engine body produces NO C12 substrate (B15 leaves stateChildren empty)", () => {
     const src = `<program>
 \${

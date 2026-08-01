@@ -1,12 +1,12 @@
 ${ type Light:enum = { Red, Green } }
 ${ type Mood:enum  = { Calm, Tense } }
 <program>
-< machine name=Signal for=Light>
+< engine name=Signal for=Light>
   .Red => .Green
   .Green => .Red
   audit @slog
 </>
-< machine name=Feeling for=Mood>
+< engine name=Feeling for=Mood>
   .Calm => .Tense
   .Tense => .Calm
 </>

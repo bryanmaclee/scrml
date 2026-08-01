@@ -112,8 +112,14 @@ describe("§A engine for=LocalType — non-exported same-file types", () => {
   });
 });
 
-describe("§B legacy `<machine for=LocalType>` continues to compile + emit W-DEPRECATED-001", () => {
-  test("`<machine for=LocalEnum>` (deprecated keyword) still works with same-file type", () => {
+// S307 — the keyword is REMOVED (SPEC §63.7). These tests previously asserted
+// `<machine>` compiled CLEANLY; it now fails with E-DEPRECATED-001. The coverage
+// they actually carry — same-file type resolution reaching the decl, and the
+// `legacyMachineKeyword` flag being set — is orthogonal to the keyword's
+// legality and is PRESERVED: the parse still succeeds (§63.5), so the only real
+// error is the removal itself.
+describe("§B removed `<machine for=LocalType>` still PARSES, and E-DEPRECATED-001 is its only error", () => {
+  test("`<machine for=LocalEnum>` (removed keyword) still resolves the same-file type", () => {
     const src = `\${
   type LegacyStatus:enum = { A B }
 }
@@ -122,9 +128,9 @@ describe("§B legacy `<machine for=LocalType>` continues to compile + emit W-DEP
   .A => .B
 </>`;
     const tab = build(src);
-    // Only W-DEPRECATED-001 expected; no real errors
-    expect(realErrors(tab.errors)).toEqual([]);
-    const dep = (tab.errors || []).filter(e => e.code === "W-DEPRECATED-001");
+    // S307: the removal error IS a real error now — it must be the ONLY one.
+    expect(realErrors(tab.errors).map(e => e.code)).toEqual(["E-DEPRECATED-001"]);
+    const dep = (tab.errors || []).filter(e => e.code === "E-DEPRECATED-001");
     expect(dep.length).toBe(1);
 
     const md = tab.ast.machineDecls.find(m => m.engineName === "LegacyFlow");
@@ -133,7 +139,7 @@ describe("§B legacy `<machine for=LocalType>` continues to compile + emit W-DEP
     expect(md.legacyMachineKeyword).toBe(true);
   });
 
-  test("`<machine for=LocalStruct>` (deprecated keyword) still works", () => {
+  test("`<machine for=LocalStruct>` (removed keyword) still resolves the same-file struct", () => {
     const src = `\${
   type LegacyShape:struct = { x: number, y: number }
 }
@@ -142,8 +148,8 @@ describe("§B legacy `<machine for=LocalType>` continues to compile + emit W-DEP
   .Initial => .Final given (self.x > 0)
 </>`;
     const tab = build(src);
-    expect(realErrors(tab.errors)).toEqual([]);
-    const dep = (tab.errors || []).filter(e => e.code === "W-DEPRECATED-001");
+    expect(realErrors(tab.errors).map(e => e.code)).toEqual(["E-DEPRECATED-001"]); // S307
+    const dep = (tab.errors || []).filter(e => e.code === "E-DEPRECATED-001");
     expect(dep.length).toBe(1);
 
     const md = tab.ast.machineDecls.find(m => m.engineName === "LegacyShapeFlow");

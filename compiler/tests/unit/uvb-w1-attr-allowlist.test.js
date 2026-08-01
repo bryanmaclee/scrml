@@ -11,7 +11,7 @@
  *   §4  Recognized name + unrecognized value (auth=role:X) → W-ATTR-002
  *   §5  Plain HTML element (not in registry) → no warning
  *   §6  Open-prefix attrs (bind:, on:, data-, aria-) → no warning
- *   §7  Per-element coverage: <page>, <channel>, <machine>
+ *   §7  Per-element coverage: <page>, <channel>, <engine>
  */
 
 import { describe, test, expect } from "bun:test";
@@ -84,10 +84,10 @@ describe("VP-1 §1: recognized attributes pass silently", () => {
     expect(codes(warnings)).not.toContain("W-ATTR-001");
   });
 
-  test("<machine name=\"X\" for=\"@v\"> emits no warning", () => {
+  test("<engine name=\"X\" for=\"@v\"> emits no warning", () => {
     const src = `<program>
-<machine name="X" for="@v">
-</machine>
+<engine name="X" for="@v">
+</engine>
 </program>`;
     const { warnings } = compile(src);
     expect(codes(warnings)).not.toContain("W-ATTR-001");

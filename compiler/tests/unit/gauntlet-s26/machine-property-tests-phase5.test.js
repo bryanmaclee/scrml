@@ -59,7 +59,7 @@ describe("S26 §51.13 phase 5 — temporal rules end-to-end", () => {
   @fetch: FetchMachine = Fetch.Idle
   function start() { @fetch = Fetch.Loading }
 }
-< machine name=FetchMachine for=Fetch>
+< engine name=FetchMachine for=Fetch>
   .Idle => .Loading
   .Loading after 30s => .TimedOut
   .Loading => .Done
@@ -85,7 +85,7 @@ describe("S26 §51.13 phase 5 — temporal rules end-to-end", () => {
   @s: M = S.A
   function go() { @s = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
   .B after 500ms => .C
   .C after 2s => .D
@@ -108,7 +108,7 @@ describe("S26 §51.13 phase 5 — temporal rules end-to-end", () => {
   const @allow: boolean = true
   function begin() { @s = S.Working }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .Idle => .Working
   .Working after 30s => .Timeout given (@allow) [timeoutAllowed]
 </>
@@ -131,7 +131,7 @@ describe("S26 §51.13 phase 5 — temporal rules end-to-end", () => {
   @s: M = S.A
   function go() { @s = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A after 10s => .B
 </>
 <button on:click={go()}>go</>
@@ -153,7 +153,7 @@ describe("S26 §51.13 phase 5 — temporal rules end-to-end", () => {
   @s: M = S.A
   function go() { @s = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
 </>
 <button on:click={go()}>go</>
@@ -173,7 +173,7 @@ describe("S26 §51.13 phase 5 — temporal rules end-to-end", () => {
   @s: M = S.Idle
   function go() { @s = S.Working }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .Idle => .Working
   .Working after 1s => .Done
 </>

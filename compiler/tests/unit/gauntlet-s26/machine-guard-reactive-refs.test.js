@@ -70,7 +70,7 @@ describe("S26 bug A — machine guard @reactive refs rewritten to _scrml_reactiv
   @allow: boolean = true
   function doClose() { @f = Flow.Closed }
 }
-< machine name=FlowMachine for=Flow>
+< engine name=FlowMachine for=Flow>
   .Open => .Closed given (@allow) [canClose]
 </>
 <button on:click={doClose()}>close</>
@@ -96,7 +96,7 @@ describe("S26 bug A — machine guard @reactive refs rewritten to _scrml_reactiv
   @b: boolean = true
   function doClose() { @f = Flow.Closed }
 }
-< machine name=FlowMachine for=Flow>
+< engine name=FlowMachine for=Flow>
   .Open => .Closed given (@a && @b) [both]
 </>
 <button on:click={doClose()}>close</>
@@ -117,7 +117,7 @@ describe("S26 bug A — machine guard @reactive refs rewritten to _scrml_reactiv
   @count: number = 5
   function doClose() { @f = Flow.Closed }
 }
-< machine name=FlowMachine for=Flow>
+< engine name=FlowMachine for=Flow>
   .Open => .Closed given (@count > 3) [threshold]
 </>
 <button on:click={doClose()}>close</>
@@ -135,7 +135,7 @@ describe("S26 bug A — machine guard @reactive refs rewritten to _scrml_reactiv
   @f: FlowMachine = Flow.Open
   function doClose() { @f = Flow.Closed }
 }
-< machine name=FlowMachine for=Flow>
+< engine name=FlowMachine for=Flow>
   .Open => .Closed given (true) [always]
 </>
 <button on:click={doClose()}>close</>
@@ -157,7 +157,7 @@ describe("S26 bug A — machine guard @reactive refs rewritten to _scrml_reactiv
   @allow: boolean = true
   function doClose() { @f = Flow.Closed }
 }
-< machine name=FlowMachine for=Flow>
+< engine name=FlowMachine for=Flow>
   .Open => .Closed given (@allow) [canClose]
 </>
 <button on:click={doClose()}>close</>

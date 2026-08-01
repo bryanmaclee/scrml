@@ -672,16 +672,16 @@ function stripIdleRawOffset(entries) {
 }
 
 describe("M6.6.b.3 walker — walkIsLegacyArrowRulesBody", () => {
-  test("legacy <machine> body with arrow grammar → legacy=true", () => {
+  test("legacy <engine> body with arrow grammar → legacy=true", () => {
     // SPEC §51.0.K legacy form: event-arrow grammar produces NO PascalCase
     // state-child openers; legacy parser fires the arrow-rule classifier.
     // Native walker mirrors via the no-PascalCase + `=>` heuristic.
     const src = `<program>
       type Color = .Red | .Blue;
-      <machine for=Color>
+      <engine for=Color>
         click => .Blue
         reset => .Red
-      </machine>
+      </engine>
     </program>`;
     const { legacy, native } = dualWalkLegacyArrow(src);
 

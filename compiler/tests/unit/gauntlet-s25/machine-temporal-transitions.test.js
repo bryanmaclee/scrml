@@ -56,7 +56,7 @@ describe("S25 §51.12 — temporal machine transitions", () => {
   @fetch: FetchMachine = Fetch.Idle
   function start() { @fetch = Fetch.Loading }
 }
-< machine name=FetchMachine for=Fetch>
+< engine name=FetchMachine for=Fetch>
   .Idle => .Loading
   .Loading after 30s => .TimedOut
   .Loading => .Done
@@ -91,7 +91,7 @@ describe("S25 §51.12 — temporal machine transitions", () => {
   @state: M = S.A
   function go() { @state = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A ${c.decl} => .B
 </>
 <p>x</>
@@ -110,7 +110,7 @@ describe("S25 §51.12 — temporal machine transitions", () => {
   @state: M = S.A
   function go() { @state = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   * after 5s => .B
 </>
 <p>x</>
@@ -136,7 +136,7 @@ describe("S25 §51.12 — temporal machine transitions", () => {
   @state: M = S.A
   function go() { @state = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A after 1s => .B
   .A after 2s => .C
 </>
@@ -157,7 +157,7 @@ describe("S25 §51.12 — temporal machine transitions", () => {
   @fetch: FetchMachine = Fetch.Idle
   function start() { @fetch = Fetch.Loading }
 }
-< machine name=FetchMachine for=Fetch>
+< engine name=FetchMachine for=Fetch>
   .Idle => .Loading
   .Loading => .Done
   .Loading => .Failed
@@ -179,7 +179,7 @@ describe("S25 §51.12 — temporal machine transitions", () => {
   type Fetch:enum = { Loading, TimedOut }
   @fetch: FetchMachine = Fetch.Loading
 }
-< machine name=FetchMachine for=Fetch>
+< engine name=FetchMachine for=Fetch>
   .Loading after 30s => .TimedOut
 </>
 <p>x</>
@@ -200,7 +200,7 @@ describe("S25 §51.12 — temporal machine transitions", () => {
   @state: M = S.A
   function go() { @state = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A after 0.5s => .B
 </>
 <p>x</>
@@ -218,7 +218,7 @@ describe("S25 §51.12 — temporal machine transitions", () => {
   @state: M = S.A
   function go() { @state = S.B }
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .A => .B
 </>
 <p>x</>

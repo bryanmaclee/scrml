@@ -291,7 +291,7 @@ describe("F3 §7 — machineDecls engine synthesis", () => {
   });
 
   test("legacy `name=NAME` is the variable name (back-compat)", () => {
-    const e = nativeSurface("<machine for=Foo name=duty></machine>").machineDecls[0];
+    const e = nativeSurface("<machine for=Foo name=duty></engine>").machineDecls[0];
     expect(e.varName).toBe("duty");
     expect(e.varNameOverride).toBe(null);
   });
@@ -333,7 +333,7 @@ describe("F3 §7 — machineDecls engine synthesis", () => {
 
   test("`<machine>` sets legacyMachineKeyword; `<engine>` does not", () => {
     expect(
-      nativeSurface("<machine for=Foo></machine>").machineDecls[0].legacyMachineKeyword,
+      nativeSurface("<machine for=Foo></engine>").machineDecls[0].legacyMachineKeyword,
     ).toBe(true);
     expect(
       nativeSurface("<engine for=Foo></engine>").machineDecls[0].legacyMachineKeyword,

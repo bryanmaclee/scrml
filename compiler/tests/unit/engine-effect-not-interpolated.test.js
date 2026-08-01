@@ -12,7 +12,7 @@
  * Fix 2 — E-ENGINE-VAR-DUPLICATE / E-ENGINE-003 mutual exclusivity (§51.0.C):
  *   a duplicate engine var previously fired BOTH codes. They are now mutually
  *   exclusive: the canonical `<engine>` form yields E-ENGINE-VAR-DUPLICATE
- *   only; the legacy `<machine>` form yields E-ENGINE-003 only. Exactly one
+ *   only; the legacy `<engine>` form yields E-ENGINE-003 only. Exactly one
  *   duplicate code per declaration, per form.
  */
 
@@ -186,26 +186,10 @@ describe("S182 Fix 2 — duplicate-engine-var mutual exclusivity", () => {
     expect(dupCount).toBe(1);
   });
 
-  test("duplicate legacy <machine> name → E-ENGINE-003 only (NOT E-ENGINE-VAR-DUPLICATE)", () => {
-    const src = `type Light:enum = { Red, Green }
-
-<program>
-    <machine name=light for=Light initial=.Red>
-        <Red rule=.Green : "red">
-        <Green rule=.Red : "green">
-    </>
-    <machine name=light for=Light initial=.Green>
-        <Red rule=.Green : "red2">
-        <Green rule=.Red : "green2">
-    </>
-</program>`;
-    const { result } = compileSrcToTmp(src);
-    const errs = errorCodes(result);
-    expect(errs).toContain("E-ENGINE-003");
-    expect(errs).not.toContain("E-ENGINE-VAR-DUPLICATE");
-    const dupCount = errs.filter(
-      (c) => c === "E-ENGINE-VAR-DUPLICATE" || c === "E-ENGINE-003",
-    ).length;
-    expect(dupCount).toBe(1);
-  });
+  // S307 — the legacy half of this pair is RETIRED with the `<machine>` keyword.
+  // E-ENGINE-003 fired only when `decl.legacyMachineKeyword === true`
+  // (type-system.ts, S182 Fix 2), so with the keyword removed it has no trigger
+  // and the mutual-exclusivity design collapses to a single code. The surviving
+  // guarantee — a duplicate engine variable is rejected exactly once — is the
+  // test above (E-ENGINE-VAR-DUPLICATE), which still asserts `dupCount === 1`.
 });

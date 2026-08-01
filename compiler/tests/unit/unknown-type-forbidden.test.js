@@ -300,13 +300,13 @@ describe("E-TYPE-UNKNOWN-NAME — map-key interaction", () => {
 // ---------------------------------------------------------------------------
 
 describe("E-TYPE-UNKNOWN-NAME — machine-typed state cell exempt", () => {
-  test("`@state: M` where `< machine name=M for=S>` does NOT fire (machine lives in machineRegistry)", () => {
+  test("`@state: M` where `< engine name=M for=S>` does NOT fire (machine lives in machineRegistry)", () => {
     const res = compile(`<ul>
 \${ type S:enum = { Idle, Run } }
 \${
   @state: M = S.Idle
 }
-< machine name=M for=S>
+< engine name=M for=S>
   .Idle => .Run
 </ machine>
 <li>x</li>

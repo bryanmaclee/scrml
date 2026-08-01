@@ -13,7 +13,7 @@
  * whole-body arrow form, steering the adopter to the canonical state-child
  * `rule=` shape. The fire is PRECISELY scoped to the `<engine>`-keyword
  * state-engine form:
- *   - `<machine>` keyword (legacy machine surface) is EXEMPT (W-DEPRECATED-001).
+ *   - `<engine>` keyword (legacy machine surface) is EXEMPT (W-DEPRECATED-001).
  *   - `<engine name=X for=T>` (§51.3.2 named-machine) is EXEMPT.
  *   - derived engines (§51.0.J / §51.9 projection bodies) are EXEMPT.
  *
@@ -95,10 +95,10 @@ describe("6nz B2 — whole-body arrow form on the <engine> state-engine keyword"
     expect(errorsByCode(sym.errors, LEGACY)).toEqual([]);
   });
 
-  test("EXEMPT — legacy `<machine name=X for=T>` keyword arrow body", () => {
+  test("EXEMPT — legacy `<engine name=X for=T>` keyword arrow body", () => {
     const src = [
       "${ type Phase:enum = { A, B } }",
-      "<machine name=PhaseMachine for=Phase>",
+      "<engine name=PhaseMachine for=Phase>",
       "    .A => .B",
       "    .B => .A",
       "</>",

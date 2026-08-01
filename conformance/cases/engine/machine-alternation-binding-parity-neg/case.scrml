@@ -1,6 +1,6 @@
 ${ type Phase:enum = { A(x: int), B(x: int), C } }
 <program>
-< machine name=Flow for=Phase>
+< engine name=Flow for=Phase>
   .A(x) | .B(x) => .C
 </>
 <p id="s">alternation bindings</p>
