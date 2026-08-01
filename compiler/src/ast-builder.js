@@ -9385,6 +9385,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           consume(); // consume `>`
           if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
             errorType = consume().text;
+            // Consume any trailing array suffixes (`! -> T[]`, `T[][]`, …) — the
+            // same GH #228 fix as the bare form, for the normative arrow form.
+            while (peek().text === "[" && peek(1)?.text === "]") { consume(); consume(); }
           }
         }
       }
@@ -12241,6 +12244,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           consume(); // consume `>`
           if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
             errorType = consume().text;
+            // Consume any trailing array suffixes (`! -> T[]`, `T[][]`, …) — the
+            // same GH #228 fix as the bare form, for the normative arrow form.
+            while (peek().text === "[" && peek(1)?.text === "]") { consume(); consume(); }
           }
         } else if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
           // `! ErrorType` bare form (SPEC §41.14 examples; widely adopted).
@@ -12261,8 +12267,19 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             next1Text === ";" ||                                                // bare statement end
             !next1 || next1.kind === "EOF"
           );
-          if (!tokIsAttrKw && next1IsContinuation) {
+          // A failable ARRAY return type `! T[]` / `! T[][]` (`! string[]`,
+          // `! Contact[]`): a `[]` after the type name is a type continuation,
+          // NOT a non-type signal. Without this the type name is left
+          // unconsumed, the `[` `]` `{` dangle, the body-brace check below
+          // fails, and the function parses with an EMPTY body — so
+          // route-inference never sees its `?{}` SQL, the fn is not
+          // server-escalated, its query leaks to the client (E-CG-006), and its
+          // value-position call gets no auto-await (GH #228 real root cause).
+          const next1IsArraySuffix = next1Text === "[" && peek(2)?.text === "]";
+          if (!tokIsAttrKw && (next1IsContinuation || next1IsArraySuffix)) {
             errorType = consume().text;
+            // Consume any trailing array suffixes (`T[]`, `T[][]`, …).
+            while (peek().text === "[" && peek(1)?.text === "]") { consume(); consume(); }
           }
         }
       }
@@ -12533,6 +12550,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           consume(); // consume `>`
           if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
             errorType = consume().text;
+            // Consume any trailing array suffixes (`! -> T[]`, `T[][]`, …) — the
+            // same GH #228 fix as the bare form, for the normative arrow form.
+            while (peek().text === "[" && peek(1)?.text === "]") { consume(); consume(); }
           }
         } else if (peek().kind === "IDENT" || peek().kind === "KEYWORD") {
           const tokText = peek().text;
@@ -12548,8 +12568,19 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             next1Text === ";" ||
             !next1 || next1.kind === "EOF"
           );
-          if (!tokIsAttrKw && next1IsContinuation) {
+          // A failable ARRAY return type `! T[]` / `! T[][]` (`! string[]`,
+          // `! Contact[]`): a `[]` after the type name is a type continuation,
+          // NOT a non-type signal. Without this the type name is left
+          // unconsumed, the `[` `]` `{` dangle, the body-brace check below
+          // fails, and the function parses with an EMPTY body — so
+          // route-inference never sees its `?{}` SQL, the fn is not
+          // server-escalated, its query leaks to the client (E-CG-006), and its
+          // value-position call gets no auto-await (GH #228 real root cause).
+          const next1IsArraySuffix = next1Text === "[" && peek(2)?.text === "]";
+          if (!tokIsAttrKw && (next1IsContinuation || next1IsArraySuffix)) {
             errorType = consume().text;
+            // Consume any trailing array suffixes (`T[]`, `T[][]`, …).
+            while (peek().text === "[" && peek(1)?.text === "]") { consume(); consume(); }
           }
         }
       }
