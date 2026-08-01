@@ -2,6 +2,16 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S309 (cont.) — 2026-08-01 (Peter · Windows) — adopter #228 closed: a failable array-return server fn (`! T[]`) parsed with an empty body
+
+One landing (PR #333), cloud-gate + windows green. Closes GitHub adopter issue #228 — the last open adopter issue.
+
+**#228 was not a reconcile bug; it was a parser bug.** The issue was filed as "reactive bindings inside a hidden nested-`<each>` don't reconcile live." They do — that path works and is guarded by a test. The real defect was in the *thread-refresh server function's return type*: a failable server fn with an **array return type** — `function f() ! string[]` (or `! Contact[]`, `! -> string[]`, nested `! T[][]`) — parsed with an **empty body**. The `! Type` return-type parser never consumed the `[]` array suffix, so the type name was left unconsumed and the `[` `]` `{` dangled, the body-brace check failed, and the function compiled with zero statements. With an empty body the compiler never saw the function's `?{}` SQL, so it was never server-promoted: its query leaked into the client bundle (`E-CG-006`) and its value-position reactive write got no auto-await. Every downstream symptom followed from that.
+
+The discriminator is razor-clean: **failable AND array** breaks; failable-scalar (`! string`), failable-struct (`! Contact`), and non-failable array all worked. The fix consumes trailing `[]` suffixes after both the bare and the arrow `! Type` return-type parse (all parser copies). Verified: `! T[]`, `! -> T[]`, `! Contact[]`, and nested `! T[][]` all now server-promote (server route + awaited fetch), with zero client SQL leak and no `E-CG-006`.
+
+Root-caused by reproducing live and instrumenting route-inference — which corrected the prior session's own root-cause (S297 had hypothesized a promotion-registry gate). Filed one low-priority follow-up: a bare `! Map<…>[]` / `! (A|B)` complex error type is still incompletely consumed (same empty-body class, exotic).
+
 ## S309 — 2026-07-31 (Peter · Windows) — the braceless `for … of` loop head is now rejected (`E-FOR-UNPARENTHESIZED-HEAD`)
 
 Two landings (PRs #329, #330), cloud-gate + windows green, same boot that authored the S308 recovery.

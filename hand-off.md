@@ -1,4 +1,58 @@
 <!-- ============================================================= -->
+<!-- S309 (cont.) — #228 arc, prepended 2026-08-01.                 -->
+<!-- Same S309 boot, continued AFTER the wrap block below at the     -->
+<!-- operator's request ("grab something else"). S309 WRAP + all     -->
+<!-- prior UNCHANGED below.                                          -->
+<!-- ============================================================= -->
+
+# scrml — Session 309 (cont.) — GH #228 closed
+
+**Date:** 2026-08-01. `main` at **`03442b20`**, coherence 0/0 both repos, trees clean. Delta **[1006]**.
+Picked up #228 (the sole open adopter issue) post-wrap; landed PR **#333**, closed the GitHub issue.
+
+## 🎯 #228 — a 3-layer verify-the-bug-class win: "reconcile bug" → "not promoted" → a PARSE bug
+
+#228 was filed as "reactive bindings in a hidden nested-`<each>` don't reconcile." That's a **ghost** —
+the reconcile paths work (I proved it in S297; guarded by `g-each-item-hidden-subtree-text-reconcile`).
+S297 then root-caused it to "`! T[]` not server-promoted" but **wrongly hypothesized a §12.2 promotion
+gate** and routed a promotion fix to bryan. The **actual** root (this arc): reproduced live, instrumented
+`route-inference.walkBodyForTriggers` → the failable-array fn's body arrived **EMPTY** (`stmts=0`). A
+**parse bug** — the bare/arrow `! Type` return-type parse (`ast-builder.js`) never consumed a `[]` array
+suffix, so `! string[]` left the type-name unconsumed and `[` `]` `{` dangled → empty body → no `?{}`
+seen → not server-escalated → `E-CG-006` (SQL to client) + no auto-await. Everything downstream followed
+from the parser dropping the body. Fixed: consume trailing `[]` after the bare AND arrow `! Type` (all
+parser copies). **The lesson (again): reproduce and INSTRUMENT — the reported cause, and even the prior
+session's own root-cause, were both wrong about the mechanism.**
+
+## 🔴 THE NEXT PA'S PICKUP (Peter-lane) — the queue is nearly dry
+
+- **Adopter issues: 0 open.** #228 was the last one.
+- `g-onmount-direct-reactive-server-write-unawaited-on-escape-hatch-string-path` (MED, contrived, S306).
+- `g-failable-bare-return-type-generic-paren-not-consumed` (LOW, pre-existing, filed this arc — a bare
+  `! Map<…>[]` / `! (A|B)` is still single-IDENT-consumed → same empty-body class). Fix = reuse the
+  `:`/`->` consume-until-`{` logic for the bare `! Type`.
+- **Open for bryan (§19 ruling, non-blocking):** `!` names the ERROR type (an enum) yet the compiler
+  silently accepts a non-enum there (`! string[]`); adopters read `!` as a RETURN type. Diagnostic?
+
+## ✅ GATE / HOUSEKEEPING
+
+- **Landed:** PR #333 (`03442b20`), cloud `gate`+`windows` GREEN (authority). Unit test
+  `failable-array-return-server-promotion.test.js` (6); conformance 845/845; 356/0 failable/error/route.
+- **The 24-vs-23 full-suite fail count is NOT a regression** — root-caused, not waved: the diff is a
+  STATIC no-op for every source in the repo (only `! IDENT []` sequences change; grep found ZERO outside
+  the new test), so the ±1 is integration-tier flakiness (that tier is outside the cloud gate). A
+  confirming full re-run was in flight at write-time.
+- **S239 clean** (surfaced+fixed the arrow-form variant). **Maps NOT run** (ast-builder parse internals).
+- **bryan noted twice** (scrml-support inbox): taking-#228, then the CORRECTION (parser not promotion;
+  S297's root-cause was wrong). **Gaps resolved: 2; filed: 1 LOW.**
+
+## Tags
+#session-309-cont #228-closed #failable-array-return-empty-body-parse-bug #verify-the-bug-class-3-layers
+#s297-root-cause-was-wrong #instrument-dont-hypothesize #adopter-issues-zero-open
+
+---
+
+<!-- ============================================================= -->
 <!-- S309 WRAP (Peter/Windows) — prepended 2026-07-31.              -->
 <!-- Same boot that authored the S308 recovery block below.         -->
 <!-- S308 + all prior UNCHANGED below. Disambiguate by NAME.         -->
