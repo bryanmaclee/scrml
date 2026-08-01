@@ -31,8 +31,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 21 |
-| MED | 102 |
-| LOW | 44 |
+| MED | 103 |
+| LOW | 45 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -550,8 +550,31 @@ Adopter-A's native-iOS client (reused, re-pointed at the scrml backend for the l
 > pinned. The 19th did not — and finding out why surfaced a §51.5 soundness hole rather than a
 > coverage hole.
 
-### g-machine-keyword-retirement-carries-three-subsystems — `<machine>` is not a keyword alias for `<engine>`; retiring the word also retires replay / audit / auto-property-tests unless they are re-based first
-<!-- @gap id=g-machine-keyword-retirement-carries-three-subsystems sev=MED status=open locus=compiler/SPEC.md:18839 -->
+### g-machine-keyword-retirement-carries-three-subsystems — `<machine>` is not a keyword alias for `<engine>` — it also selects `derived=` semantics — `RESOLVED S307 (PR #328 + #332)`
+<!-- @gap id=g-machine-keyword-retirement-carries-three-subsystems sev=MED status=resolved locus=compiler/src/ast-builder.js:16609 -->
+
+> **✅ RESOLVED S307 (2026-07-31)** — PR #328 (removal + codemod) + PR #332 (the loud holes).
+> Verified END-TO-END on merged `main`, not on the branch: a `< machine>` source is REJECTED
+> (`E-DEPRECATED-001`), `scrml migrate` rewrites opener + `</machine>` closer + the §51.9
+> projection body into §51.0.J `derived=match … { }` with `var=` and state-children, and the
+> migrated output COMPILES CLEAN.
+>
+> **The entry's own premise was half wrong, and that is the durable part.** It recorded that the
+> keyword fronts three subsystems which would retire with it unless re-based. Measured:
+> - **§51.14 replay** — never keyword-bound (already true when filed).
+> - **§51.11 audit** and **§51.13 property-tests** — survive because the legacy arrow-rules BODY
+>   survives under `<engine>`; the keyword was never what carried them. Neither needed a re-base.
+>   Both are, however, silent no-ops in the *state-child* body — a per-FORM hole the entry did not
+>   anticipate, now made loud (`E-ENGINE-AUDIT-UNSUPPORTED-BODY`; `test.skip` instead of a
+>   vacuously-green assertion) and tracked for the real port as
+>   `g-audit-clause-silent-noop-on-modern-engine` + `g-machine-tests-modern-engine-vacuous`.
+> - **A fourth carrier nobody had listed:** the keyword also selected `derived=` SEMANTICS
+>   (mapping projection vs identity projection). That, not the three subsystems, was the thing a
+>   naive keyword swap would have broken silently — and it is why the codemod had to be taught.
+>
+> Six of the seven diagnostics this entry expected to retire are BODY-bound and still fire; only
+> `E-ENGINE-003` was keyword-gated. Full measured partition:
+> `docs/changes/machine-keyword-retirement/SCOPE.md`.
 
 > **RULED S305 — RE-BASE, and the SPEC amendment has LANDED.** bryan ruled the three carried
 > subsystems re-base onto `<engine>` rather than retiring with the keyword. SPEC amended at §63.7

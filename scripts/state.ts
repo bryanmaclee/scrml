@@ -72,12 +72,23 @@ const GAP_STATUS_CLOSED = new Set([
 ]);
 const GAP_STATUS_NOMINAL = new Set(["nominal"]);
 
+/**
+ * Parse every `@gap` marker out of a known-gaps document.
+ *
+ * EXPORTED so the silent-drop guard below is TESTABLE. A gate that cannot be
+ * exercised is the `pa-base` §8 "unproven gate" — indistinguishable from one
+ * that cannot fail — and this one guards a count the freeze campaign reads.
+ *
+ * Throws on a marker that claims a real `id=` but does not parse, rather than
+ * returning a total that silently omits it.
+ */
+export function parseGapMarkers(text: string): { id: string; sev: string; status: string }[] {
+  return gapMarkersFrom(text);
+}
+
 function gapCounts() {
   const text = readFileSync(`${ROOT}/docs/known-gaps.md`, "utf8");
-  const re = /<!--\s*@gap\s+id=(\S+)\s+sev=(HIGH|MED|LOW|NOMINAL)\s+status=([a-z-]+)\s*-->/g;
-  const tokens: { id: string; sev: string; status: string }[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) tokens.push({ id: m[1], sev: m[2], status: m[3] });
+  const tokens = gapMarkersFrom(text);
 
   // Fail loudly on a status no partition claims. Silence here is what produced the
   // under-count this replaced.
@@ -93,6 +104,66 @@ function gapCounts() {
     );
   }
 
+  return gapCountsFromTokens(tokens);
+}
+
+function gapMarkersFrom(text: string) {
+  // S307 — parse the marker as an ATTRIBUTE BAG, not a fixed field order.
+  //
+  // The prior regex required `status=` to be followed immediately by `-->`, so
+  // ANY marker carrying an extra attribute was silently dropped from the count.
+  // `pa-base v2.9` then made `locus=` a REQUIRED field on this very marker, so
+  // every entry filed under the new rule became invisible to the rollup — and
+  // invisible in the direction that under-reports open defects. Measured at the
+  // moment of the fix: 3 markers dropped, 2 of them OPEN.
+  //
+  // That is the same silent-drop class the unknown-status guard below was added
+  // for (S299, 14 markers incl. two open HIGHs); it was hardened against an
+  // unrecognised STATUS but not against an unparsed MARKER. Both guards now exist.
+  const markerRe = /<!--\s*@gap\s+([^>]*?)\s*-->/g;
+  const tokens: { id: string; sev: string; status: string }[] = [];
+  const malformed: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = markerRe.exec(text)) !== null) {
+    const attrs = new Map<string, string>();
+    for (const pair of m[1].trim().split(/\s+/)) {
+      const eq = pair.indexOf("=");
+      if (eq > 0) attrs.set(pair.slice(0, eq), pair.slice(eq + 1));
+    }
+    const id = attrs.get("id");
+    const sev = attrs.get("sev");
+    const status = attrs.get("status");
+    // A marker with no `id=`, or whose id is an angle-bracket PLACEHOLDER
+    // (`id=<stable-id>`), is the doc's own FORMAT EXAMPLE — not an entry. Only a
+    // marker claiming a real id is held to the full shape; otherwise the guard
+    // would fire on this file's own documentation of the marker syntax.
+    if (!id || id.startsWith("<")) continue;
+    if (!sev || !status || !/^(HIGH|MED|LOW|NOMINAL)$/.test(sev)) {
+      malformed.push(m[0]);
+      continue;
+    }
+    tokens.push({ id, sev, status });
+  }
+
+  // Fail loudly on a marker that exists but does not parse. A dropped marker is
+  // strictly worse than an unknown status: the entry vanishes from the count
+  // with nothing to indicate it was ever there.
+  const markerCount = (text.match(/<!--\s*@gap\s+id=(?!<)/g) || []).length;
+  if (malformed.length > 0 || tokens.length !== markerCount) {
+    const lines = malformed.map((t) => `    ${t}`).join("\n");
+    throw new Error(
+      `state.ts: ${markerCount - tokens.length} @gap marker(s) did not parse and would be ` +
+      `SILENTLY OMITTED from the counts:\n${lines}\n` +
+      `  Every marker needs id=, sev=(HIGH|MED|LOW|NOMINAL) and status=; other attributes\n` +
+      `  (e.g. the pa-base v2.9 locus=) are allowed in any order. Refusing to emit a count\n` +
+      `  that omits them.`,
+    );
+  }
+
+  return tokens;
+}
+
+function gapCountsFromTokens(tokens: { id: string; sev: string; status: string }[]) {
   const openBy = (sev: string) => tokens.filter((t) => t.sev === sev && GAP_STATUS_OPEN.has(t.status)).length;
   const high = openBy("HIGH");
   const med = openBy("MED");
@@ -566,13 +637,20 @@ function main() {
 }
 
 // ── dispatch ──────────────────────────────────────────────────────────────────
-const argv = process.argv.slice(2);
-if (argv.includes("--write")) {
-  process.exit(runWrite());
-} else if (argv.includes("--check")) {
-  process.exit(runCheck());
-} else if (argv.includes("--digest")) {
-  process.exit(runDigest());
-} else {
-  main();
+// S307 — gated on `import.meta.main` so this module can be IMPORTED without
+// running the CLI. Before the guard, importing it (to test `parseGapMarkers`)
+// executed `main()` and its git subprocesses at import time. A gate that cannot
+// be exercised from a test is the pa-base §8 "unproven gate"; making the parser
+// importable is what lets its silent-drop guard be pinned.
+if (import.meta.main) {
+  const argv = process.argv.slice(2);
+  if (argv.includes("--write")) {
+    process.exit(runWrite());
+  } else if (argv.includes("--check")) {
+    process.exit(runCheck());
+  } else if (argv.includes("--digest")) {
+    process.exit(runDigest());
+  } else {
+    main();
+  }
 }
