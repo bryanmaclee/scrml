@@ -31,10 +31,26 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 21 |
-| MED | 103 |
+| MED | 106 |
 | LOW | 44 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-required-slot-not-filled-unchecked — an unfilled REQUIRED component slot is not rejected at the call site; the guarantee named by the retired `E-COMPONENT-002` has no owner — `NEW S310-bryan; MED; open (behaviour re-filed when the phantom row was struck)`
+
+`E-COMPONENT-002` claimed *"Required slot not filled at call site"* but existed ONLY as a §34 index row: no normative definition in §16.2 or anywhere in SPEC, and no emitter. It was struck S310 as an index-only phantom (`docs/changes/s34-catalog-truthfulness/`). **The row is gone; the GUARANTEE is not covered.** Searched §16.2, §16 entire, §15, and every live `E-COMPONENT-*` emitter (`010/011/012/013/014/019/020/021/030/031/033/034/035`) — none rejects an unfilled required slot. Distinct from its struck siblings, which WERE duplicates of live codes. Filing so the idea is not deleted along with the row: either specify + implement the check, or rule that slots are never "required" and record that as the answer. <!-- @gap id=g-required-slot-not-filled-unchecked sev=MED status=open locus=searched:compiler/src/component-expander.ts,§16.2,§16,§15 -->
+
+### g-slot-fill-unknown-slot-name-unchecked — a `slot=` fill naming a slot the target component does not declare is not rejected; the guarantee named by the retired `E-COMPONENT-004` has no owner — `NEW S310-bryan; MED; open (behaviour re-filed when the phantom row was struck)`
+
+`E-COMPONENT-004` claimed *"Slot fill names a slot that does not exist in target component"* but existed ONLY as a §34 index row — no normative definition, no emitter — and was struck S310. The nearest sibling `E-COMPONENT-023` (a `slot="name"` fill targeting a prop not declared `snippet`-typed) is **itself unfireable**, so it cannot be cited as covering this. Searched §16.4, §16.5, §16 entire and the live `E-COMPONENT-*` emitters — no owner. A misspelled slot name therefore fills nothing, silently. <!-- @gap id=g-slot-fill-unknown-slot-name-unchecked sev=MED status=open locus=searched:compiler/src/component-expander.ts,§16.4,§16.5 -->
+
+### g-s34-prefreeze-shipped-features-with-dead-error-contracts — 77 of the 102 unfireable §34 codes sit in sections conformance ALREADY exercises: shipped surfaces whose declared failure modes cannot fire — `NEW S310-bryan; MED; open (the freeze-blocking partition of the catalog-truthfulness arc)`
+
+Partition computed, not judged: a section is treated as SHIPPED-AND-EXERCISED if conformance already pins at least one code in it. On that test **77 of the remaining 102** unfireable codes belong to exercised sections — i.e. the feature works and adopters reach it, but the error contract it advertises is not real. The other ~25 sit in sections with zero pinned codes, where the whole surface is unexercised and the dead code is a smaller lie.
+
+Largest clusters: **§6** ×14 (lifecycle) · **§23** ×8 (foreign/WASM) · **§41** ×8 (use/import + the `parseVariant` trio) · **§40** ×6 (program/middleware) · **§15/§16** ×9 (components/slots) · **§50** ×4 (assignment-as-expression) · **§39** ×4 (schema). The sharpest single case is **`parseVariant`** (§41.13, SHIPPED S65, adopter-facing): all three declared failure modes — `E-PARSEVARIANT-DISCRIMINATOR-MISSING`, `-UNKNOWN-VARIANT`, `-INVALID-PAYLOAD` — have no emitter, so a boundary-parse primitive documents error handling it cannot perform.
+
+**Caveat on the 77:** it includes ~6 NOMINAL-HOME codes (honest spec-ahead rows such as `E-WASM-002/003`, `E-FOREIGN-011/012`, `E-IMPORT-008`, `E-STATE-FIELD-MISSING`) whose sections are exercised for other reasons; genuine blocking count is ≈71. The discriminator is a proxy for "shipped", not a proof of it — verify per family before scoping a wave. <!-- @gap id=g-s34-prefreeze-shipped-features-with-dead-error-contracts sev=MED status=open locus=scripts/s34-census.ts -->
 
 ### g-s34-catalogued-codes-cannot-fire — 65 §34 codes whose normative home carries a `SHALL` have NO emitter anywhere; the catalogue claims diagnostics the compiler does not have — `NEW S310-bryan; MED; open (freeze-blocking — §62.2 makes the corpus the contract, so an unfireable catalogued code is a false claim in it)`
 
