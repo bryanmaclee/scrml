@@ -1,4 +1,123 @@
 <!-- ============================================================= -->
+<!-- S307 WRAP (bryan/ASUS-Vivobook) — prepended 2026-08-01.        -->
+<!-- S305 + S304-Peter + all prior UNCHANGED below.                 -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 307 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-07-31/08-01. `/boot` Profile A. **4 PRs merged** (#328 #332 #335 #336).
+`main` at the #336 merge. Mechanical stream = delta-log **[1007]–[1014]**; this carries the irreducible.
+
+> **⚠️ CONCURRENCY — Peter was live the whole session** and landed #326 #327 #329 #330 #331 #333 #334.
+> Every one of my PRs rebased over him (PR #328 rebased **three times**). One of those rebases cost me
+> a LOST UPDATE — see OWN MISSES.
+
+## 🔴 THE NEXT PA'S FIRST MOVE
+
+**The §34 catalog sweep — make every catalogued code fire, or strike it.** Nine dead/phantom codes
+found across S305 and S307, every one by *trying to make it fire*: `E-ENGINE-001`, `E-MW-006`,
+`E-TYPE-042` (S305) and `E-ENGINE-006/-007/-008/-009/-011/-012` (S307, which existed in `SPEC.md`
+and NOWHERE else). Since §62.2 makes the conformance corpus the versioned contract, a catalogued
+code that cannot fire is a **false claim in the contract about to be frozen** — and it inflates the
+freeze denominator. This is the highest-value freeze work I can see, and it is mechanical:
+for each §34 code, construct a fire attempt; fires → pin it; cannot → strike it with the recorded search.
+
+**Second:** `g-e-engine-34-emit-line-citations-stale` needs a one-line RULING from bryan —
+strip the line numbers, or generate + `--check`-gate them (both cheap; picking is his).
+
+## 🎯 THE ARC — `<machine>` retired, and both subsystems it fronted ported
+
+Four PRs, one arc. `<machine>` does not ship in language-1.0; `E-DEPRECATED-001` fires; the word is
+released to authors. Verified END-TO-END on merged main, not on a branch.
+
+**The briefing was wrong four times, always in the direction of "smaller than it is".** It was
+briefed as a deprecated *spelling*. Measured, the keyword SELECTED BETWEEN TWO SUBSYSTEMS:
+
+1. **Diagnostics** — 9 of 10 "legacy-only" codes are BODY-bound and still fire. Only `E-ENGINE-003`
+   was keyword-gated. **The briefed plan would have deleted ~20 conformance cases covering nine live
+   codes, mid-freeze-campaign.**
+2. **`derived=` semantics** — `<machine derived=@x>` + a rules body compiles a real MAPPING function;
+   `<engine derived=@x>` is an IDENTITY projection that silently drops the body. A textual keyword
+   swap changed behaviour with NO diagnostic, so the §63.4 codemod gate was satisfied *textually* but
+   not *semantically*. **This is the finding that justified the whole arc.**
+3. **Cell declaration** — `name=` on a derived engine suppresses the auto-declared cell entirely.
+4. **Init ordering** — the legacy `@x: SomeMachine` binding initialises AFTER the derived engine's
+   eager read.
+
+bryan's question — *"does `derived=@x` offer machine anything the engine form doesn't, or does it just
+happen to fire code that works?"* — was the turn. Answer: **a spelling, not a capability**;
+`derived=match` covers it. That settled the ruling and scoped the codemod.
+
+## 🧭 FINDINGS THAT OUTLAST THE FIXES
+
+1. **A cost estimate can be accurate about difficulty and still point the wrong way.**
+   `g-machine-tests-modern-engine-vacuous` said "NOT a trivial re-wire — the machinery keys off
+   `m.rules`". True, and precisely why NOT to re-point it: feed it a PROJECTION instead. Machinery
+   untouched, every legacy path byte-identical. Read a gap's difficulty claim as a claim about the
+   OBVIOUS approach, not about the problem.
+2. **"Emitted ≠ runs" caught a third time.** The audit registration was emitted, greppable, and
+   compiled clean — and the log stayed empty, because the write path is the chunk-scope wrapper and I
+   had registered a raw cell NAME into a namespaced key space. Only executing a transition found it.
+   (S265 theme-switch, S268 component-root, now this.)
+3. **An isolation assertion pays for itself immediately.** The first runtime failure LOOKED like the
+   port. Asserting the transition ITSELF committed showed the harness never wired the click. Without
+   it I'd have debugged the wrong layer.
+4. **A contract change silently broke its own detector.** `pa-base v2.9` mandated `locus=` on the
+   `@gap` marker; `state.ts`'s parser required `status=` to be followed immediately by `-->`, so every
+   entry filed under the new rule **vanished from the counts** — 3 dropped, 2 OPEN. Found by
+   ARITHMETIC (resolving a MED gap didn't move the MED count), not by a failing test. Same class as
+   S299, which guarded an unknown STATUS but not an unparsed MARKER.
+5. **A make-it-loud placeholder should live exactly one arc.** `E-ENGINE-AUDIT-UNSUPPORTED-BODY` was
+   added in #332 and retired in #336 when the port made the form work. That is the shape.
+
+## ⚠️ OWN MISSES — recorded, not smoothed
+
+- **I caused a LOST UPDATE.** Resolved a `known-gaps.md` rebase conflict with wholesale
+  `git checkout --theirs`, reverting Peter's #228 work (a HIGH resolution + a new LOW entry + a status
+  change). Caught by ARITHMETIC — HIGH read 22 when his close should have made it 21 — then rebuilt
+  from HIS file and re-applied my three edits. Exactly the pa-base §7 blind-clobber the OCC rule names.
+  **A generated COUNT is what exposed it; nothing else would have.**
+- **Ran a scrml-source transform over `.js` test files** and corrupted a test TITLE into a multi-line
+  string (unparseable file). Restored from origin and re-did it surgically.
+- **Blanket-swept 58 test files, then had to revert 4** that intentionally exercised the keyword.
+  Also over-reached with a global regex that broke tests whose sources legitimately still used the
+  legacy form (16/5 → 14/7); reverted and went surgical.
+- **Three hollow oracles in a row** while probing `audit` — a `diff` on missing files, content-hash
+  noise, and zsh word-splitting — each producing a confident WRONG verdict until made fail-closed.
+- **A `*/` inside a JSDoc** (`rule=*` followed by a slash) terminated the comment and broke the build;
+  and a **backtick in a runtime comment** terminated the runtime's enclosing template literal.
+- **Two commits "timed out" and had landed.** Verify git STATE, not the exit code. Recurring.
+
+## 🧷 STATE / OPEN
+
+- **Gate: GREEN.** Cloud `gate` passed on all 4 PRs. Local by TIER: **gated subset 26,884 pass / 0 fail**
+  · **conformance 843/843** · **browser 48 fail = the documented ~50 baseline** — verified by
+  NAME-SET diff against main's own tracking run (identical, zero new), not by count.
+- **Gaps HIGH 21 · MED 101 · LOW 45 · Nominal 7.** Three resolved
+  (`g-machine-keyword-retirement-…`, `g-machine-tests-modern-engine-vacuous`,
+  `g-audit-clause-silent-noop-on-modern-engine`); one filed
+  (`g-e-engine-34-emit-line-citations-stale`, LOW, needs a ruling).
+- **Contract:** `pa-base` unchanged this session (v2.9). The `state.ts` parser fix is the scrml-side
+  consequence of v2.9, not a base change.
+- **⛔ Owed by bryan (1 ruling + 1 hands):** the `g-e-engine-34-…` fix direction · the **`ai-review`
+  secret** (`ANTHROPIC_API_KEY` / org access) — **failed on all four PRs today**, still dead.
+- **Worktrees: 3, none mine** (I created zero — PA-direct all session). `s251` removed (merged, 0 ahead).
+  The three `agent-*` are **RETAINED DELIBERATELY**: each carries UNMERGED commits (6 / 3 / 4 ahead of
+  main) so deletion would destroy work. Not mine; surfaced with the measurement rather than guessed at.
+- **Maps: NOT refreshed, and code landed** — watermark stays `fe14c9b2`. Per the S299/S304 precedent
+  (maps are one-session-behind by construction; symptom→locus captured in gaps + changelog). **Next
+  boot: refresh before any maps-dependent dispatch.**
+
+## Tags
+#session-307-bryan #machine-keyword-removed-1.0 #codemod-taught-projection-rewrite
+#four-briefing-corrections #derived-is-a-spelling-not-a-capability #emitted-not-runs-third-time
+#locus-broke-its-own-detector #lost-update-caught-by-arithmetic #placeholder-lives-one-arc
+#51-13-projection-not-rewire #51-11-audit-ported
+
+---
+
+<!-- ============================================================= -->
 <!-- S309 (cont.) — #228 arc, prepended 2026-08-01.                 -->
 <!-- Same S309 boot, continued AFTER the wrap block below at the     -->
 <!-- operator's request ("grab something else"). S309 WRAP + all     -->
