@@ -1,4 +1,98 @@
 <!-- ============================================================= -->
+<!-- S310 WRAP (Peter/Windows) — prepended 2026-08-01.              -->
+<!-- bryan's S307 + S305 + all prior UNCHANGED below.               -->
+<!-- Disambiguate by NAME (numbers collide across machines).        -->
+<!-- ============================================================= -->
+
+# scrml — Session 310 (Peter · Windows) — WRAP
+
+**Date:** 2026-08-01. `/boot` Profile A. `main` at **`580fbac6`**, coherence **0/0** both repos,
+trees clean. Delta-log **[1015]–[1020]**. **Three codegen landings, all cloud gate+windows GREEN,
+each reproduce-first → root-cause → S239-adversarial → PR → auto-merge-on-green:** **#338**
+(failable generic/paren error-type empty-body), **#339** (on-mount spaced escape-hatch fail-open),
+**#341** (destructure-in-comprehension broken bundle). Started as SOLO successor to bryan's S307
+(he'd just landed #336/#337 — the `<machine>` retirement + §51 port); rebase-race handled once (#338).
+
+## 🎯 THE HEADLINE — the S239 adversarial pass earned its cost THREE times, on three separate fixes
+
+A green 20k-test suite would have shipped a real defect in EACH of the three landings; the mandatory
+PA-side S239 pass caught all three BEFORE merge. This is the session's durable point ([1019]):
+
+- **#338 (`! Map<…>`/`! (A|B)` empty-body → E-CG-006 SQL leak):** the fix (a bounded type-expression
+  consumer) had TWO caught defects — (1) my first cut was UNBOUNDED (consume-until-fn-head-token) and
+  over-ran a BODY-LESS failable fn, swallowing the next declaration (reviewer-found, run-proven);
+  (2) the lexer merges `>>`/`>>>` into ONE token, so single-char angle-balancing over-ran a nested
+  generic `Map<K,List<V>>` to EOF (I caught this proactively). Banked to memory
+  [[scrml-lexer-merges-gt-runs-single-token]] — flags a LATENT sibling bug in the `:`/`->` return-type
+  consumer (same single-char `>` test).
+- **#339 (on-mount spaced escape-hatch fail-open):** the S239 pass confirmed byte-identity on clean
+  paths via a REVERTED-COMPILER diff, and surfaced TWO PRE-EXISTING escape-hatch bugs (below).
+- **#341 (destructure comprehension):** S239 verified 16 pattern shapes + proved the one "break"
+  (pattern + header-string iterable) is UNREACHABLE from the real parser.
+
+## 🧭 FINDINGS THAT OUTLAST — the escape-hatch is REGEX-LITERAL-BLIND (a shared root + a design fork)
+
+**[1018] — the on-mount escape-hatch string-lowering mis-tokenizes regex literals.** Chasing #339 I
+found the escape-hatch string pipeline mis-counts a regex literal's `(` as an open paren (regex-vs-
+division blindness), which is the SHARED ROOT under THREE gaps: my #339 fail-open (spaced tokens),
+plus two I filed — `g-onmount-escape-hatch-multi-write-emits-assignment-to-call` (needs an INVALID
+regex `/a(b/`; contrived) and `g-onmount-escape-hatch-failable-arm-emits-literal-bang-brace` (triggers
+on a VALID capture-group regex `/(\w+)/` + a `!{}` arm → emits literal `!{` = invalid JS; NOT
+contrived). Both MED, both reproduce with #339 reverted. **THE FORK (needs a decision before build):**
+(a) teach the escape-hatch tokenizer to recognize regex literals — the proper fix, but regex-vs-division
+tokenization is a known-hard problem; or (b) DIAGNOSE/reject a mount body the tokenizer cannot cleanly
+split (changes behavior on valid source). Not started — flagged for whoever takes it (arguably a
+tokenizer/emit-lane decision worth bryan's input).
+
+## 🔴 THE NEXT PA'S PICKUP — the quick-win queue is CLEARED; what remains needs TRIAGE
+
+**Peter-lane quick wins are done** (0 adopter issues; the 3 named gaps closed). The remaining
+front-of-queue is MURKY HIGH — do NOT blind-pick (verify live + unclaimed FIRST):
+- `g-class-attr-expr-not-lowered` (HIGH, exact locus emit-each.ts:1706) — **may already be fixed** by
+  #287 ("each-body `class:` lowering" per changelog); verify it's still live before taking.
+- `g-crossfile-module-const-dropped-from-client-bundle` (HIGH) — **IN-FLIGHT** (branches
+  `fix/263-cross-file-module-const-client` + `wip/263-…-s239-blocked`); lane-collision risk.
+- `g-server-cell-init-leaks-const-to-client-reactive-wiring` (HIGH) + `g-spa-runtime-gzip-budget-knife-edge`
+  (HIGH) — explicitly **bryan's reactive-wiring / spa-runtime lane**.
+- `g-legacy-machine-transition-guard-never-emitted` (HIGH) — likely **MOOT** post-#337 (`<machine>` retired).
+- The escape-hatch regex-blind design fork (above) — the meatiest Peter-lane-adjacent item.
+
+## ✅ GATE / HOUSEKEEPING
+
+- **Landed (all cloud gate+windows GREEN):** #338 (`3fa7f02c`) · #339 (`67ce023c`) · #341 (`580fbac6`).
+  `tracking`/`ai-review` red on every code PR = the documented non-required flakes (browser ~99-fail
+  env-whitespace baseline; the dead `ANTHROPIC_API_KEY` secret) — root-caused, not waved.
+- **Conformance 843/843** (down from 845 = bryan's #337 `<machine>` case retirement, not mine).
+  New unit tests: `failable-generic-paren-return-server-promotion.test.js` (21) ·
+  `onmount-spaced-escape-hatch-reactive-server-await.test.js` (4) · `for-as-expression.test.js` §8 (3).
+  Blast-radius suites all 0-fail (parser 2840/0 · emit/mount 2005/0 · for/lift 652/0).
+- **Full local unit+integration 20146/16** — the 16 are the known Windows-local baseline (CSRF·self-host
+  smoke·self-host-v2 lexer-slice timeouts under load·EBUSY temp-dir teardowns·43s validate-emit gate);
+  ZERO on any changed surface, confirmed by clean blast-radius runs. FACTS/state regen squashed into each
+  code commit; `--check` green on main.
+- **Gaps this session: 3 RESOLVED** (generic-paren-error-type · onmount-spaced-escape-hatch ·
+  destructure-comprehension) + **2 FILED** (the two escape-hatch MEDs) + 2 filed under #338
+  (native-parser-lag LOW, unterminated-generic NOMINAL).
+- **Worktrees:** main + `scrml-pinned` only. **Maps NOT run** — all landings are codegen internals
+  (ast-builder/emit-client/emit-logic parse+emit branches), no new surface files (S299/S304 precedent).
+- **Board:** `active-sessions/S310-peter.md` finalized + pushed (scrml-support).
+
+## ⚠️ OWN MISSES — recorded, not smoothed
+
+- **#338's first cut was UNBOUNDED** and would have swallowed a following declaration (body-less failable
+  fn); caught by the S239 reviewer, not my own repro. The fix is only correct because the adversarial
+  pass ran — "I ran a repro" ≠ "I ran the repro that exercises the failure."
+- **Nearly under-classified the `!{}`-arm escape-hatch gap as contrived** ("needs an invalid regex")
+  before measuring — a VALID capture-group regex triggers it. Measure the trigger surface, don't assume.
+
+## Tags
+#session-310-peter #s239-earned-its-cost-thrice #failable-generic-paren-empty-body #gt-run-single-token-lex
+#onmount-spaced-escape-hatch-fail-open #escape-hatch-regex-literal-blind #destructure-comprehension-object-object
+#quick-win-queue-cleared #next-is-murky-HIGH-triage
+
+---
+
+<!-- ============================================================= -->
 <!-- S307 WRAP (bryan/ASUS-Vivobook) — prepended 2026-08-01.        -->
 <!-- S305 + S304-Peter + all prior UNCHANGED below.                 -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->
