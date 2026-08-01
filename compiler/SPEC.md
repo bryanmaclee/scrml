@@ -19225,7 +19225,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-ENGINE-EFFECT-NOT-INTERPOLATED | §51.0.B, §51.0.H | `effect=` (engine opener Form 3 OR state-child Form 1) is a §7 logic-context block, so the `${...}` form is REQUIRED. A bare value (`effect=load()`) or unbalanced/empty braces was previously captured as null and SILENTLY tree-shaken — the effect never ran. The bare single-expression sugar that a plain event handler permits (`onclick=load()`, §5.2.3) does NOT extend to `effect=`. Resolution: wrap the body in `${...}` — `effect=${ load() }`. (Catalog addition S182 — dog-food round 2; Option B reject-with-diagnostic, user-ratified.) | Error |
 | E-ONTRANSITION-NO-TARGET | §51.0.H | An `<onTransition>` element appears with neither `to=.Variant` nor `from=.Variant`. The handler has no trigger (per the §51.0.H attribute table, exactly one of `to=` / `from=` MUST appear — `to=` fires when leaving toward `.Variant`; `from=` fires when arriving from `.Variant`). Add `to=.Variant` (outgoing) or `from=.Variant` (incoming). (Catalog addition S74 — A1b B17.3.) | Error |
 | E-ENGINE-VAR-DUPLICATE | §51.0.C | Separate declaration of the engine's auto-declared variable (e.g., `<marioState> = .Small` while `<engine for=MarioState ...>` also exists in scope). The engine OWNS its variable; use `var=` on the engine to override the auto-derived name. | Error |
-| E-ENGINE-AUDIT-UNSUPPORTED-BODY | §51.11 | An `audit @var` clause (§51.11) appears in a **state-child** engine body, where it has NO EFFECT. The clause is read from the legacy arrow-rules body (`<engine name=N for=T>` with `.From => .To` rules); in the §51.0 state-child form it is parsed as body text and dropped, so no audit entries are ever recorded. **Measured (S307):** a state-child body with `audit @x` emits ZERO audit-push sites and, before this code, ZERO diagnostics — the author believed they had an audit log and had none. Rejecting is the reversible direction (migration: declare the engine in the named/legacy form §51.3.2, or drop the clause); accepting-and-ignoring is not. Corpus migration measured zero. Porting the clause onto the state-child rule graph is `g-audit-clause-silent-noop-on-modern-engine`. **Fires:** SYM PASS 11 (`compiler/src/symbol-table.ts`, `validateEngineStateChildrenAndRules`). | Error |
+| ~~E-ENGINE-AUDIT-UNSUPPORTED-BODY~~ | §51.11 | **RETIRED S307 — superseded by the PORT.** It existed for exactly one arc as the make-it-loud placeholder: `audit` in a state-child body was a silent no-op, and rejecting it was the reversible direction while the port was unbuilt. The clause now WORKS in that body (the target is registered as a chunk-scope closure and the runtime records the §51.11.4 entry on every committed transition, verified by executing a transition), so a code that rejects it would now reject a working form. |  — |
 | W-ENGINE-INITIAL-MISSING | §51.0.E | `initial=` omitted on a non-derived `<engine>`. Compiler defaults to the first state-child's variant. Add `initial=.Variant` to silence the warning. | Warning |
 | E-DERIVED-ENGINE-NO-RULES | §51.0.J | `rule=` declared on a state-child of a derived engine (`<engine derived=...>`). Transitions are determined by the source expression, not authored. Remove `rule=`. | Error |
 | E-DERIVED-ENGINE-NO-INITIAL | §51.0.J, §51.0.E | `initial=` declared on a derived engine. Initial value computed from `derived=expr` at engine-init time; remove `initial=`. | Error |
@@ -30489,15 +30489,15 @@ and most production machines don't want the overhead.
 
 #### 51.11.2 Syntax
 
-> **⚑ FORM RESTRICTION (S307, normative).** The audit clause is read from the
-> **arrow-rules body**. It is NOT supported in the §51.0 **state-child** body
-> (`<Variant rule=.Other/>`), where it is parsed as body text and silently
-> dropped — measured: zero audit-push sites emitted. That silence is now
-> **`E-ENGINE-AUDIT-UNSUPPORTED-BODY`** (§34) rather than a no-op, because an
-> author who writes `audit` and receives no log has a fail-OPEN outcome with
-> nothing to signal it. Porting the clause onto the state-child rule graph is
-> tracked (`g-audit-clause-silent-noop-on-modern-engine`); until then the
-> named/legacy form (§51.3.2) is the supported way to declare an audit log.
+> **⚑ PORTED TO THE STATE-CHILD BODY (S307, normative).** The audit clause is
+> read from BOTH engine body forms: the arrow-rules body and the §51.0
+> state-child body (`<Variant rule=.Other/>`). It was previously a SILENT no-op
+> in the state-child form — zero audit sites emitted, zero diagnostics — which
+> meant an author who wrote `audit` received no log and nothing to signal it.
+> Both forms now record the same §51.11.4 entry, so a consumer reading an audit
+> log cannot tell which surface produced it. (The interim
+> `E-ENGINE-AUDIT-UNSUPPORTED-BODY`, which rejected the clause while the port
+> was unbuilt, is RETIRED with this change.)
 
 
 ```

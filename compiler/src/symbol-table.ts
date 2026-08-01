@@ -7288,24 +7288,17 @@ export function validateEngineStateChildrenAndRules(
   // write — so the shape most likely to hit this is the canonical one.
   // Rejecting is the reversible direction (a migration exists: use the named
   // form, or drop the clause); accepting-and-ignoring is not.
+  // S307 — §51.11 audit, PORTED to the state-child form.
+  //
+  // This clause used to be a silent no-op here (parsed as body text, dropped),
+  // then briefly an error (`E-ENGINE-AUDIT-UNSUPPORTED-BODY`, the make-it-loud
+  // placeholder). It now WORKS: the target is recorded on engineMeta, codegen
+  // registers it in `_scrml_engine_audit_targets`, and the runtime pushes the
+  // §51.11.4 entry on every committed transition — the same tuple the legacy
+  // arrow-rules body records, so a consumer cannot tell the surfaces apart.
   const auditInStateChildBody = /(?:^|\n)[ \t]*audit[ \t]+@([A-Za-z_$][\w$]*)/.exec(rulesRaw || "");
-  if (auditInStateChildBody) {
-    const target = auditInStateChildBody[1];
-    fireB15Diagnostic(
-      errors,
-      "E-ENGINE-AUDIT-UNSUPPORTED-BODY",
-      `E-ENGINE-AUDIT-UNSUPPORTED-BODY: \`audit @${target}\` appears in a state-child ` +
-      `engine body, where it has NO EFFECT — no audit entries are ever recorded. ` +
-      `The §51.11 audit clause is read from the legacy arrow-rules body ` +
-      `(\`<engine name=N for=T>\` with \`.From => .To\` rules); in the §51.0 state-child ` +
-      `form (\`<Variant rule=.Other/>\`) it is parsed as body text and dropped. ` +
-      `Either declare this engine in the named/legacy form (§51.3.2) if you need the ` +
-      `audit log, or remove the clause. Porting the clause onto the state-child rule ` +
-      `graph is tracked as \`g-audit-clause-silent-noop-on-modern-engine\`.`,
-      engineDecl,
-      filePath,
-      "error",
-    );
+  if (auditInStateChildBody && engineDecl?._record?.engineMeta) {
+    engineDecl._record.engineMeta.auditTarget = auditInStateChildBody[1];
   }
 
   // Step 4 — exhaustiveness + invalid state-child tag validation. Only

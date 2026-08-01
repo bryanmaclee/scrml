@@ -67,7 +67,7 @@ import { resolveModulePath, isPromiseReturningStdlibFn } from "../module-resolve
 import { BindingRegistry } from "./binding-registry.ts";
 import { analyzeAll } from "./analyze.ts";
 import { generateTestJs } from "./emit-test.ts";
-import { generateMachineTestJs } from "./emit-machine-property-tests.ts";
+import { generateMachineTestJs, projectStateChildRules } from "./emit-machine-property-tests.ts";
 import { generateWorkerJs } from "./emit-worker.ts";
 import { appendSourceMappingUrl } from "./source-map.ts";
 import { buildSourceMap } from "./build-source-map.ts";
@@ -487,6 +487,7 @@ function isCrossFileLinked(
  * the runtime must offer every one of them.
  */
 const CELL_SCOPE_ACCESSORS = [
+  "_scrml_engine_audit_register",
   "_scrml_reactive_get",
   "_scrml_reactive_set",
   "_scrml_init_set",
@@ -2350,8 +2351,28 @@ export function runCG(input: CgInput): CgOutput {
           }
         }
         walkForMachineInitials(nodes);
+        // S307 §51.13 port — a MODERN `<engine>` keeps its transitions in
+        // state-children, not in a rules body, so the registry entry has an
+        // empty `rules` and the generator emitted a vacuous artifact. Project
+        // the state-child graph into the same shape and hand it alongside;
+        // the generator substitutes it only where `rules` is empty, so every
+        // legacy path is byte-identical.
+        const stateChildRules = new Map<string, any[]>();
+        // Mirror emit-engine.ts's resolution order — the decls are stamped on
+        // `fileAST.machineDecls` by the hoist pass, but fall back to `ast.` for
+        // the shapes where only the inner AST carries them.
+        const engineDecls = ((fileAST as any).machineDecls
+          ?? (fileAST as any).ast?.machineDecls
+          ?? []) as any[];
+        for (const d of engineDecls) {
+          const meta = d?._record?.engineMeta;
+          const key = d?.engineName ?? meta?.varName;
+          if (!key || !meta?.stateChildren) continue;
+          const projected = projectStateChildRules(meta.stateChildren);
+          if (projected.length > 0) stateChildRules.set(key, projected);
+        }
         machineTestJs = codegenStage("emit-machine-tests", () =>
-          generateMachineTestJs(filePath, machineRegistry ?? null, initialVariants)
+          generateMachineTestJs(filePath, machineRegistry ?? null, initialVariants, stateChildRules)
         );
       }
 

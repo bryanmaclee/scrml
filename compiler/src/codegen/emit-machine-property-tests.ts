@@ -485,12 +485,64 @@ function buildGuardResultsMap(
 }
 
 /**
+ * §51.13 port (S307) — project a MODERN `<engine>`'s state-children into the
+ * `TransitionRule[]` shape this generator's machinery already consumes.
+ *
+ * The gap (`g-machine-tests-modern-engine-vacuous`) read as "NOT a trivial
+ * re-wire, the whole collectVariants/reachableVariants/resolveRule machinery
+ * keys off the `m.rules` shape". That is true and it is the reason NOT to
+ * re-point the machinery: the cheaper and far less risky move is to FEED it.
+ * A state-child `rule=` graph and an arrow-rules body express the same
+ * `(from, to)` relation, so the port is a projection, not a rewrite — the
+ * machinery is untouched and every existing legacy path keeps its behaviour.
+ *
+ * Rule forms map per §51.0.F (openers written without their closing slash here,
+ * because a literal `rule=*` followed by a slash would end this comment):
+ *   `rule=.B`         → one rule  A→B
+ *   `rule=(.B | .C)`  → two rules A→B, A→C
+ *   `rule=*`          → A→`*` (the machinery already treats `*` as the wildcard
+ *                       sentinel — the same encoding the legacy `* => *`
+ *                       struct-guard form produces)
+ *   no `rule=` at all → no outgoing rules; A is terminal, which is exactly what
+ *                       `reachableVariants` needs to see.
+ * `legacy-arrow` / `parse-error` forms are SKIPPED — they already carry their
+ * own diagnostic (E-ENGINE-RULE-LEGACY-SYNTAX / B15), and inventing transitions
+ * from an unparseable rule would generate assertions about a graph the author
+ * never wrote.
+ */
+export function projectStateChildRules(
+  stateChildren: { tag: string; rule: { kind: string; target?: string; targets?: string[] } }[] | null | undefined,
+): TransitionRule[] {
+  if (!Array.isArray(stateChildren)) return [];
+  const rules: TransitionRule[] = [];
+  for (const sc of stateChildren) {
+    if (!sc || typeof sc.tag !== "string" || !sc.rule) continue;
+    const r = sc.rule;
+    if (r.kind === "single" && typeof r.target === "string") {
+      rules.push({ from: sc.tag, to: r.target } as TransitionRule);
+    } else if (r.kind === "multi" && Array.isArray(r.targets)) {
+      for (const t of r.targets) rules.push({ from: sc.tag, to: t } as TransitionRule);
+    } else if (r.kind === "wildcard") {
+      rules.push({ from: sc.tag, to: "*" } as TransitionRule);
+    }
+    // "absent" → terminal; "legacy-arrow"/"parse-error" → diagnosed elsewhere.
+  }
+  return rules;
+}
+
+/**
  * Generate the machine property-test JS for a file.
+ *
+ * `stateChildRules` (S307) maps a machine NAME to the projection above. A
+ * machine whose own `rules` are empty — the modern `<engine>` state-child form —
+ * is generated from its projection instead, so the canonical engine surface
+ * stops emitting a vacuous artifact. Optional: omitted, behaviour is unchanged.
  */
 export function generateMachineTestJs(
   filePath: string,
   machineRegistry: Map<string, MachineLike> | null | undefined,
   initialVariants: Map<string, string>,
+  stateChildRules?: Map<string, TransitionRule[]> | null,
 ): string | null {
   if (!machineRegistry || machineRegistry.size === 0) return null;
 
@@ -499,7 +551,17 @@ export function generateMachineTestJs(
   const skipNotes: string[] = [];
   const emittedBlocks: string[][] = [];
 
-  for (const [name, machine] of machineRegistry) {
+  for (const [name, machineRaw] of machineRegistry) {
+    // S307 — a machine with no rules of its own may be a MODERN `<engine>`,
+    // whose transitions live in state-children. Substitute the projection so
+    // the rest of this function is identical for both surfaces.
+    let machine = machineRaw;
+    if ((!machine.rules || machine.rules.length === 0) && stateChildRules) {
+      const projected = stateChildRules.get(name);
+      if (projected && projected.length > 0) {
+        machine = { ...machineRaw, rules: projected } as MachineLike;
+      }
+    }
     if (!machine.rules || machine.rules.length === 0) {
       skipNotes.push(`// Skipped ${name}: empty rule set.`);
       continue;

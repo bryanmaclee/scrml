@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 21 |
-| MED | 103 |
+| MED | 101 |
 | LOW | 45 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -1316,7 +1316,29 @@ Reuses `rewriteTemplateAttrValue` from `codegen/rewrite.ts` — the same helper 
 **Follow-up filed, NOT taken:** reachability Component-2 still under-counts interpolated-attr reads because no `MarkupReadDGNode` is emitted — same read locus, one-line close, but it changes reachability output and lands in the `chunk-namespacing` arc's blast radius, so it wants its own dispatch. Also observed: the plain-string attr-value branch credits every `@x` in the raw string rather than only `${}`-enclosed ones — the exact over-credit the negative control forbids; no live producer found, possibly dead legacy, untouched. <!-- @gap id=g-dg-class-attr-interp-not-consumed sev=MED status=resolved -->
 
 ### g-audit-clause-silent-noop-on-modern-engine — §51.11 `audit @var` does nothing in a state-child engine body; only the legacy arrow-rules body wires it — `NEW S307; MED; open`
-Measured S307 by diff-oracle on the emitted client JS: `<engine …> <Red rule=.Green/> … audit @slog </>` emits **ZERO** `§51.11 audit log push` sites, while the same clause in the legacy arrow-rules body (`<engine name=N for=T>` + `.From => .To`) emits **one**. So audit is not dead — it is wired for ONE body form only, and the form it does not serve is the canonical §51.0 one the tier ladder and `bun scrml promote` steer authors toward. Before S307 this was also **silent** (zero diagnostics), i.e. the author asked for an audit log, received none, and had nothing to tell them — fail-OPEN. **Made loud, not fixed, at S307:** `E-ENGINE-AUDIT-UNSUPPORTED-BODY` (§34, Error) now rejects the clause in a state-child body, and §51.11.2 carries the normative form restriction; corpus migration measured zero (0 authored `.scrml` use `audit`). **The real fix, still open:** read the clause from the state-child body and wire it onto the state-child `rule=` transition graph, so the modern form carries the §51.11 guarantee. Sibling of `g-machine-tests-modern-engine-vacuous` — the SAME root shape (a §51-era subsystem wired to `machine.rules` and never re-pointed at the state-child metadata), and the two should be scoped together. Surfaced while scoping the `<machine>` keyword retirement, which is what made it matter: with the keyword gone, `<engine>` is the only spelling. <!-- @gap id=g-audit-clause-silent-noop-on-modern-engine sev=MED status=open locus=compiler/src/codegen/emit-machines.ts:733 -->
+Measured S307 by diff-oracle on the emitted client JS: `<engine …> <Red rule=.Green/> … audit @slog </>` emits **ZERO** `§51.11 audit log push` sites, while the same clause in the legacy arrow-rules body (`<engine name=N for=T>` + `.From => .To`) emits **one**. So audit is not dead — it is wired for ONE body form only, and the form it does not serve is the canonical §51.0 one the tier ladder and `bun scrml promote` steer authors toward. Before S307 this was also **silent** (zero diagnostics), i.e. the author asked for an audit log, received none, and had nothing to tell them — fail-OPEN. **Made loud, not fixed, at S307:** `E-ENGINE-AUDIT-UNSUPPORTED-BODY` (§34, Error) now rejects the clause in a state-child body, and §51.11.2 carries the normative form restriction; corpus migration measured zero (0 authored `.scrml` use `audit`). **The real fix, still open:** read the clause from the state-child body and wire it onto the state-child `rule=` transition graph, so the modern form carries the §51.11 guarantee. Sibling of `g-machine-tests-modern-engine-vacuous` — the SAME root shape (a §51-era subsystem wired to `machine.rules` and never re-pointed at the state-child metadata), and the two should be scoped together. Surfaced while scoping the `<machine>` keyword retirement, which is what made it matter: with the keyword gone, `<engine>` is the only spelling. <!-- @gap id=g-audit-clause-silent-noop-on-modern-engine sev=MED status=resolved locus=compiler/src/codegen/emit-engine.ts:2063 -->
+
+> **✅ RESOLVED S307 — ported, and the interim error retired with it.** `audit @x` now works
+> in the §51.0 state-child body: the target is registered as a CLOSURE built inside the chunk
+> scope, and the runtime records the §51.11.4 entry on every committed transition — the same
+> tuple the arrow-rules body records, so a consumer cannot tell the surfaces apart.
+>
+> **Two design points worth keeping.** (1) The registration is a REGISTRY, not a 9th positional
+> argument to `_scrml_engine_direct_set`/`_advance`: those are called from nine emit sites across
+> five codegen modules, and one site forgetting the argument would silently record nothing —
+> reintroducing the very fail-open being closed. (2) It registers a CLOSURE rather than a cell
+> NAME, because the write path is the chunk-scope wrapper: a raw name made the runtime look up
+> `<ns>$light` against a `light` entry and write the wrong key space.
+>
+> **The second point was found ONLY by executing a transition.** The registration was emitted and
+> greppable, the compile was clean, and the audit log stayed empty — the S265/S268 'emitted ≠
+> runs' trap. The test drives the real `_scrml_engine_direct_set` in happy-dom and reads the cell
+> back; an isolation assertion on the transition itself is what showed the first failure was the
+> harness, not the port.
+>
+> `E-ENGINE-AUDIT-UNSUPPORTED-BODY` — the make-it-loud placeholder that rejected the clause while
+> this was unbuilt — is RETIRED (§34 struck, conformance pair removed, §51.11.2 flipped from a
+> FORM RESTRICTION to PORTED). It existed for exactly one arc, which is what a placeholder should do.
 
 ### g-e-engine-34-emit-line-citations-stale — the §34 E-ENGINE family's "emitted at `<file>:<line>`" annotations are systematically stale — `NEW S307; LOW; open`
 The S78 audit annotated each §34 E-ENGINE row with a fire-site line number; SPEC.md and the compiler have both grown since and **none were maintained**. Measured S307: `E-ENGINE-014` cites `type-system.ts:2592` (actual **6759**), `E-ENGINE-019` cites `2053, 8488` (actual **5974, 23231**); the six never-implemented rows struck at S307 cited `§51.5 line 22245`-style prose anchors ~7,800 lines off (line 22245 is inside §40 Middleware). A reader following any of these lands somewhere unrelated and cannot tell a stale pointer from a moved fire site. Same rot class as the `SCOPE:` LOC figure that `docs/FACTS.md` exists to kill (S280) and the SPEC-INDEX totals that ran 3,140 lines stale (S290): **a derived number in a hand-maintained doc rots silently and nothing fails.** Two candidate fixes, both cheap, and the choice is a ruling: (a) **strip** the line numbers and keep only the file (a file path is stable enough to navigate and cannot go subtly wrong), or (b) **generate** the annotations from a fire-site scan and `--check`-gate them like FACTS/SPEC-INDEX. Not done here because it is a whole-catalog sweep, not part of the keyword retirement. <!-- @gap id=g-e-engine-34-emit-line-citations-stale sev=LOW status=open locus=compiler/SPEC.md:19402 -->
@@ -1336,7 +1358,27 @@ Surfaced by the GITI-033 fix-round adversarial review (Finding #2), confirmed as
 
 ### G-MACHINE-TESTS-MODERN-ENGINE-VACUOUS — `--emit-machine-tests` (§51.13) emits a vacuous "no qualifying machines" test for the modern `<engine>` state-child `rule=` form — the generator reads the legacy `machine.rules` structure the modern form doesn't populate — `NEW S241; MED; open`
 
-The `--emit-machine-tests` flag (§51.13, `emit-machine-property-tests.ts`) emits a `<base>.machine.test.js` that is **runnable standalone** (imports only `bun:test`, zero scrml deps — verified: copied out-of-tree, `1 pass`) but is **vacuous for the modern `<engine>` state-child `rule=` form** — the non-deprecated canonical engine surface. The generator gates on `machine.rules` (`emit-machine-property-tests.ts:503` — `if (!machine.rules || machine.rules.length === 0)` → `// Skipped <var>: empty rule set.` → a bare `test("no qualifying machines", () => expect(true).toBe(true))`). Modern `<engine>` state-child `rule=` transitions populate a DIFFERENT structure (state-child metadata) that the generator never reads, so `machine.rules` is empty and NO real property tests are generated. **Verified 3-for-3 on modern engines** (`engine-modern-001-basic`, `engine-011-internal-rule`, `engine-009-hierarchy-basic` — all emit the vacuous skip despite full `Idle→Loading→Done`-style rule graphs); `machine-basic` too. The generator IS live for the legacy `<machine>`/transitions-block arrow-rule form that `parseMachineRules` populates (the `gauntlet-s26/machine-property-tests*` suite exercises that and passes). **The suite does NOT cover modern-engine machine-test emission**, so the vacuous output is a SILENT gap (no failing test guards it). **Surfaced S241** during the PA-side investigation of flogence's "compiler-as-oracle" ledger ask #2 (machine-tests as a consumable gate). **Impact:** the `<machine>`→`<engine>` migration left `--emit-machine-tests` un-ported to the modern surface; "every scrml repo has a free author-written-tests-not-required contract" does NOT hold for modern engines. Ties to V1/freeze (machine-tests as a conformance-relevant surface, §51.13) + the flogence oracle loop. **Fix (not scoped yet):** re-point the generator at the modern state-child `rule=` graph (build `m.rules` from the engine state-child metadata + `governedTypeVariants`), + add suite coverage that a modern engine emits non-vacuous property tests. NOT a trivial re-wire (the whole `collectVariants`/`reachableVariants`/`resolveRule` machinery keys off the `m.rules` shape). <!-- @gap id=g-machine-tests-modern-engine-vacuous sev=MED status=open -->
+The `--emit-machine-tests` flag (§51.13, `emit-machine-property-tests.ts`) emits a `<base>.machine.test.js` that is **runnable standalone** (imports only `bun:test`, zero scrml deps — verified: copied out-of-tree, `1 pass`) but is **vacuous for the modern `<engine>` state-child `rule=` form** — the non-deprecated canonical engine surface. The generator gates on `machine.rules` (`emit-machine-property-tests.ts:503` — `if (!machine.rules || machine.rules.length === 0)` → `// Skipped <var>: empty rule set.` → a bare `test("no qualifying machines", () => expect(true).toBe(true))`). Modern `<engine>` state-child `rule=` transitions populate a DIFFERENT structure (state-child metadata) that the generator never reads, so `machine.rules` is empty and NO real property tests are generated. **Verified 3-for-3 on modern engines** (`engine-modern-001-basic`, `engine-011-internal-rule`, `engine-009-hierarchy-basic` — all emit the vacuous skip despite full `Idle→Loading→Done`-style rule graphs); `machine-basic` too. The generator IS live for the legacy `<machine>`/transitions-block arrow-rule form that `parseMachineRules` populates (the `gauntlet-s26/machine-property-tests*` suite exercises that and passes). **The suite does NOT cover modern-engine machine-test emission**, so the vacuous output is a SILENT gap (no failing test guards it). **Surfaced S241** during the PA-side investigation of flogence's "compiler-as-oracle" ledger ask #2 (machine-tests as a consumable gate). **Impact:** the `<machine>`→`<engine>` migration left `--emit-machine-tests` un-ported to the modern surface; "every scrml repo has a free author-written-tests-not-required contract" does NOT hold for modern engines. Ties to V1/freeze (machine-tests as a conformance-relevant surface, §51.13) + the flogence oracle loop. **Fix (not scoped yet):** re-point the generator at the modern state-child `rule=` graph (build `m.rules` from the engine state-child metadata + `governedTypeVariants`), + add suite coverage that a modern engine emits non-vacuous property tests. NOT a trivial re-wire (the whole `collectVariants`/`reachableVariants`/`resolveRule` machinery keys off the `m.rules` shape). <!-- @gap id=g-machine-tests-modern-engine-vacuous sev=MED status=resolved locus=compiler/src/codegen/emit-machine-property-tests.ts:510 -->
+
+> **✅ RESOLVED S307.** A modern `<engine>` now emits REAL property tests. Verified by
+> EXECUTION, not by inspecting the emit: a three-variant engine with a multi-target rule
+> generates 9 assertions (3 declared-succeeds + 6 undeclared-rejected) whose transition table
+> matches its state-child graph exactly, and the artifact was copied OUT OF TREE and run
+> standalone — **9 pass / 0 fail**.
+>
+> **The entry's own cost estimate was the thing to re-examine.** It read "NOT a trivial re-wire
+> (the whole `collectVariants`/`reachableVariants`/`resolveRule` machinery keys off the
+> `m.rules` shape)" — true, and precisely the reason NOT to re-point that machinery. A
+> state-child `rule=` graph and an arrow-rules body express the same `(from, to)` relation, so
+> the port is a PROJECTION into the shape the machinery already consumes. The machinery is
+> untouched; every legacy path is byte-identical; the substitution happens only where `rules`
+> is empty and only when a projection is supplied (opt-in, so no legacy drift).
+>
+> Multi-target fans out per target; `rule=*` uses the `*` sentinel the machinery already
+> understands; a state-child with no `rule=` is correctly terminal; `legacy-arrow` and
+> `parse-error` forms are SKIPPED rather than invented, since they carry their own diagnostic
+> and synthesising transitions from them would assert a graph the author never wrote.
+> 8 unit tests pin the projection, including that the un-projected path still skips.
 
 ## §interim (2026-07-06, untracked S241-adjacent) — design-ruled items (NOT drift; SPEC-pending)
 
