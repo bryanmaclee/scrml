@@ -2051,6 +2051,32 @@ export function emitEngineSubstrate(fileAST: any, errors?: import("./errors.ts")
     // A5-6 §51.0.R (S77) — per-engine `<onIdle>` watchdog config const.
     // Sibling to timers table; emitted only when engine declares `<onIdle>`.
     const idleLines = emitEngineIdleWatchdog(meta);
+    // §51.11 audit — S307 port to the state-child form. Registers the target
+    // cell in the runtime's `_scrml_engine_audit_targets` map; the runtime
+    // pushes the §51.11.4 entry itself on every committed transition.
+    //
+    // Keys go through `_scrml_key`: the write path is the chunk-scope wrapper
+    // `_scrml_cs_engine_direct_set`, which namespaces the cell key before the
+    // runtime sees it. Registering the RAW name made the runtime look up
+    // `<ns>$light` against a `light` entry and find nothing — the registration
+    // was emitted, and the log stayed empty. Only executing a transition caught
+    // that; grepping the bundle for the registration passes either way.
+    //
+    // A REGISTRY rather than a 9th positional argument to
+    // `_scrml_engine_direct_set`/`_advance`: those are called from nine emit
+    // sites across five codegen modules, and one site forgetting the argument
+    // would silently record nothing — reintroducing the fail-open this port
+    // closes. Tree-shaken: emitted only when the engine declares `audit`.
+    const auditLines = (meta as any).auditTarget
+      ? [
+          `// §51.11 audit target for engine ${meta.varName}: ${meta.forType}`,
+          `_scrml_engine_audit_register(${JSON.stringify(meta.varName)}, function (__f, __t) {`,
+          `  _scrml_reactive_set(${JSON.stringify((meta as any).auditTarget)}, (_scrml_reactive_get(${JSON.stringify((meta as any).auditTarget)}) || []).concat([`,
+          `    Object.freeze({ from: __f, to: __t, at: Date.now(), rule: __f + ":" + __t, label: null }),`,
+          `  ]));`,
+          `});`,
+        ]
+      : [];
     // A5-7 Wave 2.3 §51.0.N (Bug #3) — per-engine HISTORY MAP const + synth-
     // cell inits. The map is read-only metadata (Object.freeze); emitted
     // alongside the other tables BEFORE the cell init so the runtime helper
@@ -2073,6 +2099,7 @@ export function emitEngineSubstrate(fileAST: any, errors?: import("./errors.ts")
       internalTableLines.length === 0 &&
       timersLines.length === 0 &&
       idleLines.length === 0 &&
+      auditLines.length === 0 &&
       historyMapLines.length === 0 &&
       historyCellLines.length === 0 &&
       msgArmLines.length === 0 &&
@@ -2087,6 +2114,9 @@ export function emitEngineSubstrate(fileAST: any, errors?: import("./errors.ts")
     for (const l of msgArmLines) lines.push(l);
     for (const l of cellLines) lines.push(l);
     for (const l of historyCellLines) lines.push(l);
+    // AFTER the cell inits: the audit target is a reactive cell, and the
+    // registration must not precede its declaration.
+    for (const l of auditLines) lines.push(l);
     // §51.0.D mount-position marker. The engine renders at its declaration
     // position. C12 deliberately does NOT emit body markup — state-child
     // bodies are RAW TEXT today (per engine-statechild-parser.ts) and a

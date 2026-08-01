@@ -487,6 +487,7 @@ function isCrossFileLinked(
  * the runtime must offer every one of them.
  */
 const CELL_SCOPE_ACCESSORS = [
+  "_scrml_engine_audit_register",
   "_scrml_reactive_get",
   "_scrml_reactive_set",
   "_scrml_init_set",

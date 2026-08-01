@@ -4901,6 +4901,37 @@ function _scrml_engine_variant_tag(value) {
 // non-history-form writes don't accidentally restore.
 const _scrml_engine_pending_history_restore = {};
 
+// §51.11 audit — S307 port to the modern <engine>.
+//
+// Registered per-engine at module init instead of threaded as a 9th positional
+// parameter through _scrml_engine_direct_set / _scrml_engine_advance. Those
+// helpers are called from NINE emit sites across five codegen modules, and a
+// site that forgot the new argument would silently record no audit entries —
+// reintroducing the exact fail-open this port exists to close. A registry the
+// runtime reads itself has no such failure mode: one emit site, one read.
+//
+// NB this file is embedded in a template literal, so no backticks below.
+//
+// Tree-shaken by construction: codegen emits a registration ONLY for an engine
+// that declares an audit clause, so an app without one carries an empty object.
+const _scrml_engine_audit_targets = {};
+
+// Registration takes a CLOSURE, not a cell name. The recorder is built inside
+// the chunk scope, so its reactive get/set are the chunk-namespaced wrappers and
+// the audit cell resolves in the same key space as every other cell. Passing a
+// raw NAME instead looked correct and silently wrote/read the wrong key space —
+// the registration was emitted, the log stayed empty, and only executing a
+// transition surfaced it.
+function _scrml_engine_audit_register(varName, recorder) {
+  _scrml_engine_audit_targets[varName] = recorder;
+}
+
+function _scrml_engine_audit_push(varName, fromTag, toTag) {
+  const recorder = _scrml_engine_audit_targets[varName];
+  if (typeof recorder !== "function") return;
+  recorder(fromTag, toTag);
+}
+
 // A5-7 Wave 2.3 (§51.0.N, Bug #3) — Capture the inner-engine variant into
 // the synth history cell on an external outer-exit. Called by both
 // _scrml_engine_advance and _scrml_engine_direct_set in the EXTERNAL branch
@@ -5044,6 +5075,7 @@ function _scrml_engine_advance(varName, target, table, timersTable, idleEntry, i
   // S95 Bug 2 — timersTable is keyed by tag (state-child names map directly).
   if (timersTable != null) _scrml_engine_clear_state_timers(varName, currentTag, timersTable);
   _scrml_reactive_set(varName, target);
+  _scrml_engine_audit_push(varName, currentTag, targetTag);
   // Arm timers for the INCOMING state-child. Re-entering the same state-child
   // (current === target) re-arms a fresh timer per §51.12.4 reset semantics.
   if (timersTable != null) _scrml_engine_arm_state_timers(varName, targetTag, timersTable, table);
@@ -5102,6 +5134,7 @@ function _scrml_engine_direct_set(varName, target, table, timersTable, idleEntry
   }
   if (timersTable != null) _scrml_engine_clear_state_timers(varName, currentTag, timersTable);
   _scrml_reactive_set(varName, target);
+  _scrml_engine_audit_push(varName, currentTag, targetTag);
   if (timersTable != null) _scrml_engine_arm_state_timers(varName, targetTag, timersTable, table);
   if (idleEntry != null) _scrml_engine_reset_idle_watchdog(varName, idleEntry, table);
   return true;
