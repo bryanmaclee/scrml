@@ -112,14 +112,33 @@ home rather than codegen. The agent SHALL report whether that held, was refined,
 
 Ordered by guarantee-value, not by count.
 
-- **W1 — §6.7 lifecycle `cleanup()` core** (`E-LIFECYCLE-001/002/004/005`). The four with quoted SHALLs
-  and a real silent footgun. Smallest coherent slice that closes a normative obligation.
+- **W1 — §6.7 lifecycle `cleanup()` core** (`E-LIFECYCLE-001/002/004/005`). Smallest coherent slice that
+  closes a normative obligation.
+  **CORRECTION (S310, after this doc first landed):** an earlier revision said "the four with quoted
+  SHALLs." Only **three** are — `-001`, `-004`, `-005` (SPEC:3773/3852/3856). **`E-LIFECYCLE-002` has NO
+  `SHALL` sentence**; it is specified by a worked example (SPEC:3796, 5058), a summary-table row
+  (SPEC:4870) and an error-message line (SPEC:5065). It stays in W1 on COHERENCE, not on its own
+  normative force: `E-LIFECYCLE-004`'s catalog row states verbatim *"Same family as E-LIFECYCLE-002 but
+  covers non-call non-function shapes"*, so building `-004` while leaving `-002` dead ships half a
+  family. That is a weaker justification than the other three and should be stated as such.
 - **W2 — §6.7 lifecycle remainder** (`E-LIFECYCLE-006/007/011/014/016/019..022` + the 9 `W-LIFECYCLE-*`).
 - **W3 — the rest of BUILD-ARC** (44 codes across ~30 families: `E-ASSIGN-*` ×4, `E-HTML-*` ×3,
   `E-SCHEMA-007..009`, `E-USE-003/004/006`, `E-TYPE-027/028/072`, `E-COMPONENT-001/022/023`, …).
   Re-run the oracle at W3 start — W1/W2 will have moved the population.
-- **W0 (parallel, cheap) — the 6 ORPHAN-INDEX rows** (`E-PROTECT-002`, `E-COMPONENT-002..005`,
-  `W-PROTECT-001`): no normative home anywhere, strike per the S307 precedent with the recorded search.
+- **W0 (parallel, cheap) — the 6 ORPHAN-INDEX rows.** No normative home anywhere. **Coverage-checked
+  S310** so the strike deletes a dead row, never a live idea:
+
+  | phantom | claims | disposition |
+  |---|---|---|
+  | `E-COMPONENT-003` | multiple `${...}` spreads in one component body | **duplicate of LIVE `E-COMPONENT-020`** (§15.14/§16.4, same trigger) → strike |
+  | `E-COMPONENT-005` | caller provides children, component has no spread | **duplicate of LIVE `E-COMPONENT-021`** (§16.4, same trigger) → strike |
+  | `E-PROTECT-002` | protected field access may run client-side | §11 is **"Reserved — Folded"**; `protect=` moved to §52/§14.8.9. Superseded by LIVE `E-PROTECT-004` (§14.8.9 protect-floor) → strike as fold-orphan |
+  | `W-PROTECT-001` | fn touches protected field, not `server`-annotated | same §11 fold-orphan; §12.2 inference + §14.8.9 own this now → strike |
+  | `E-COMPONENT-002` | required slot not filled at call site | **NO live coverage found** → strike the row, but FILE the behaviour as a gap |
+  | `E-COMPONENT-004` | slot fill names a nonexistent slot | nearest sibling `E-COMPONENT-023` is itself unfireable → strike the row, FILE the behaviour |
+
+  So: 4 clean strikes (2 duplicates of live codes, 2 orphans of a folded section) + 2 strikes that owe a
+  filed gap. Each row gets the recorded search per pa-base §2.
 
 **Each wave lands its §34 rows WITH its implementation** (Rule 4). A wave that builds the emitter but
 leaves the row unpinned has not closed its slice — the conformance case is the merge-blocker.
@@ -134,11 +153,27 @@ leaves the row unpinned has not closed its slice — the conformance case is the
    (pa-base §8): source that compiles today starts failing. Assumed-zero is not measured-zero.
 5. Full S239 adversarial pass before merge.
 
-## Open — needs a bryan ruling
+## HOME-NO-SHALL (29) — the bucket is partly a DETECTOR ARTIFACT, not a disposition
 
-**The 29 HOME-NO-SHALL codes.** They have a normative home but no `SHALL`/`MUST`, so the "file the build
-arc" ruling does not obviously reach them. Strike them, downgrade the prose to non-normative, or build
-them anyway? Not blocking W0–W2.
+I originally offered this as one ruling (strike / downgrade / build the 29). **That framing was wrong**,
+and `E-LIFECYCLE-002` is the proof: it sits in this bucket purely because the SHALL detector is
+line-scoped, while it is plainly a member of a SHALL-bearing family. The 65/29 split is therefore
+APPROXIMATE — the boundary is an artifact of how the probe reads, not a property of the codes.
+
+Reading the 29, they are mostly the SAME families as BUILD-ARC:
+
+| cluster | codes | note |
+|---|---|---|
+| §6.7 lifecycle | `E-LIFECYCLE-002`, `E-LIFECYCLE-013`, `W-LIFECYCLE-005`, `W-LIFECYCLE-009` | belong with W1/W2 |
+| §11 fold-orphan | `E-PROTECT-001` | same dissolved section as the W0 protect phantoms |
+| §41.13 parseVariant | `E-PARSEVARIANT-DISCRIMINATOR-MISSING`, `-UNKNOWN-VARIANT`, `-INVALID-PAYLOAD` | a SHIPPED feature (S65) whose boundary-parse errors never got emitters |
+| §40 program/middleware | `E-PROG-001/002/005`, `E-MW-004` | one subsystem |
+| §15/§16 component/type | `E-TYPE-070/073`, `E-COMPONENT-024` | one subsystem |
+| singletons | the remaining ~12 | per-code reads |
+
+**So this is not a separate ruling.** Fold them into the same per-family waves and decide with the
+family, which is the unit the evidence actually supports. The one genuinely distinct sub-question is the
+parseVariant trio: a shipped, adopter-facing primitive whose declared failure modes cannot fire.
 
 ## Honest caveats
 
