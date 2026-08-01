@@ -2,6 +2,16 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S310 — 2026-08-01 (Peter · Windows) — on-mount direct reactive-server write on the SPACED escape-hatch path is now awaited (fail-open closed)
+
+One landing. Closes `g-onmount-direct-reactive-server-write-unawaited-on-escape-hatch-string-path` (MED) — the remaining half of a S306-filed gap (its fallback-hardening half was closed by S308/#326).
+
+**A direct `@cell = serverFn()` reactive write in an `on mount` body could bind a bare Promise into the cell (fail-open, §13.2).** The `on mount` await machinery splits the work: the AST pass (`injectServerCallAwaitsViaAst`) deliberately skips the *direct value* of a `_scrml_reactive_set(cell, stub())`, leaving that lift to emit-client's own await-IIFE matcher. But that matcher required the **tight** `stub(` form. When a mount body fails to tokenize cleanly — reproduced with a paren-bearing regex, `const re = /a(b/` — it lowers through the escape-hatch string pipeline, which emits the call **spaced**: `_scrml_reactive_set("n", _scrml_fetch_tag_3 ( ))`. The tight matcher missed the spaced form, so neither pass awaited it — a pending Promise was written into the cell.
+
+The fix makes emit-client's matcher whitespace-tolerant: it matches the mangled callee, skips whitespace, then requires `(` (a `callOpen` index), rather than requiring the callee and `(` to be adjacent. It is strictly more-tolerant — it awaits more call shapes, never fewer — and the reconstruction re-emits the call tight (`${mangledName}(${args})`), so the common un-spaced path is byte-identical. The prefix-match boundary is safe: a longer mangled name leaves a non-`(` character after the prefix and is correctly skipped.
+
+This one was filed by the S306 adversarial pass on *reasoning* alone (judged out-of-scope at the time); it was reproduced **empirically** this session before the fix — a string with an unbalanced paren does not trigger it, only a regex, which is the tokenization-breaking shape. New unit test `onmount-spaced-escape-hatch-reactive-server-await.test.js` (4 cases); emit/mount/auto-await blast radius 2005/0; the #264 suite 39/39.
+
 ## S310 — 2026-08-01 (Peter · Windows) — failable server fn with a GENERIC / PAREN / UNION error type parsed with an empty body (the #228 class, one type-shape deeper)
 
 One landing, cloud-gate + windows green. Closes `g-failable-bare-return-type-generic-paren-not-consumed` (LOW) — the follow-up the GH #228 S239 pass filed.

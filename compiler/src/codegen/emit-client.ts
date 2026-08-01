@@ -2907,7 +2907,6 @@ export function generateClientJs(ctx: CompileContext): string {
       if (!/^_scrml_(fetch|cps)_/.test(mangledName)) continue;
       // Match _scrml_reactive_set("NAME", <mangledName>( ... );) at statement level.
       // Body args may themselves contain `(`; count parens to find the matching close.
-      const callPrefix = `${mangledName}(`;
       const setHead = "_scrml_reactive_set(";
       let i = 0;
       const parts: string[] = [];
@@ -2935,15 +2934,29 @@ export function generateClientJs(ctx: CompileContext): string {
         // Skip whitespace after the comma.
         let valStart = j + 1;
         while (valStart < clientCode.length && /\s/.test(clientCode[valStart])) valStart++;
-        // Value must begin with the mangled fetch-stub call.
-        if (clientCode.slice(valStart, valStart + callPrefix.length) !== callPrefix) {
+        // Value must begin with the mangled fetch-stub call. Tolerate whitespace
+        // between the callee and its `(`: the escape-hatch string lowering can emit
+        // a spaced `stub ( )` (e.g. a mount body carrying a paren-bearing regex that
+        // breaks clean tokenization), which the old tight `stub(` match missed — so
+        // the DIRECT reactive-set value went un-awaited (a bare Promise bound into
+        // the cell, fail-OPEN §13.2; g-onmount-...-escape-hatch-string-path). The
+        // AST pass (injectServerCallAwaitsViaAst) deliberately SKIPS this direct
+        // value expecting THIS matcher to lift it, so a miss here is the only guard.
+        if (clientCode.slice(valStart, valStart + mangledName.length) !== mangledName) {
+          parts.push(clientCode.slice(i, setIdx + setHead.length));
+          i = setIdx + setHead.length;
+          continue;
+        }
+        let callOpen = valStart + mangledName.length;
+        while (callOpen < clientCode.length && /\s/.test(clientCode[callOpen])) callOpen++;
+        if (clientCode[callOpen] !== "(") {
           parts.push(clientCode.slice(i, setIdx + setHead.length));
           i = setIdx + setHead.length;
           continue;
         }
         // Walk through the call args to find its matching `)`.
         let cdepth = 1;
-        let k = valStart + callPrefix.length;
+        let k = callOpen + 1;
         while (k < clientCode.length && cdepth > 0) {
           if (clientCode[k] === "(") cdepth++;
           else if (clientCode[k] === ")") cdepth--;
@@ -2974,7 +2987,7 @@ export function generateClientJs(ctx: CompileContext): string {
         // Preserve the trailing `;` only if the source had one (statement context).
         const hadTrailingSemi = clientCode[stmtEnd] === ";";
         if (hadTrailingSemi) stmtEnd++;
-        const args = clientCode.slice(valStart + callPrefix.length, k);
+        const args = clientCode.slice(callOpen + 1, k);
 
         // ss41 (g-auto-await-error-arm-dead-promise-check) — restore the `!{}`
         // error arm for a reactive-server assignment. A `@cell = serverFn() !{ ... }`
