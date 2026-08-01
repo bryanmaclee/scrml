@@ -31,10 +31,20 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 21 |
-| MED | 102 |
+| MED | 103 |
 | LOW | 44 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-s34-catalogued-codes-cannot-fire — 65 §34 codes whose normative home carries a `SHALL` have NO emitter anywhere; the catalogue claims diagnostics the compiler does not have — `NEW S310-bryan; MED; open (freeze-blocking — §62.2 makes the corpus the contract, so an unfireable catalogued code is a false claim in it)`
+
+`bun scripts/s34-census.ts` (committed with this entry — **re-run it, do not re-derive**) measures all **804** §34 rows: 28 STRUCK · 335 PINNED by conformance · 320 live-with-emitter-but-unpinned · 13 honestly declared spec-ahead · **108 FALSE-CLAIM** (no emitter anywhere AND the row promises a live diagnostic). Those 108 triage into **65 BUILD-ARC** (normative home carries a `SHALL`/`MUST`) · 29 HOME-NO-SHALL · 6 ORPHAN-INDEX (§34-only phantom rows, the S307 `E-ENGINE-006..012` class) · 8 NOMINAL-HOME (honest, reclassify).
+
+§34 declares itself *"a reference index… the authoritative definition is in the referenced section"*, so the claim is normative and it is unmet. Verbatim: **SPEC:3773** *"The compiler SHALL emit E-LIFECYCLE-001 if a `cleanup()` call, a `<timer>`, or a `<poll>` appears outside any element scope"*; **SPEC:3852/3856** the same for `-004`/`-005`; **SPEC:4195** for `-011`. Same class as S305's `E-ENGINE-001` ("both §51.5 SHALLs violated"), NOT catalog hygiene.
+
+**Headline family — §6.7 lifecycle: 35 catalogued, 8 built.** Only `E-LIFECYCLE-009/010/012/015/017/018` + `W-LIFECYCLE-002/007` have emitters; the other 21 are a third of the whole BUILD-ARC set, from one S84 "catalog addition" wave that outran its build. Load-bearing member: `E-LIFECYCLE-002` — `cleanup(closeConnection())` invokes eagerly and registers the RETURN VALUE as the teardown handler, silently leaking the resource the call was meant to release.
+
+**Ruling (bryan, S310): file the build arc** — preserve the guarantee rather than strike-and-amend. Waves + DoD + the traced locus: `docs/changes/s34-catalog-truthfulness/SCOPING.md`. Every wave is **newly-rejecting** (pa-base §8), so each owes a MEASURED corpus migration before landing. **Open for bryan:** the 29 HOME-NO-SHALL codes are not obviously covered by the ruling — strike, downgrade, or build? <!-- @gap id=g-s34-catalogued-codes-cannot-fire sev=MED status=open locus=compiler/src/type-system.ts -->
 
 ### g-onmount-direct-reactive-server-write-unawaited-on-escape-hatch-string-path — a DIRECT `@cell = serverFn()` reactive write in an `on mount` body that lowers through the SPACED escape-hatch path is not awaited — `NEW S306-peter; MED; RESOLVED S310-peter`
 
