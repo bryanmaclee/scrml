@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../../src/api.js";
-import { generateMachineTestJs } from "../../../src/codegen/emit-machine-property-tests.ts";
+import { generateMachineTestJs, projectStateChildRules } from "../../../src/codegen/emit-machine-property-tests.ts";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let tmpCounter = 0;
@@ -300,5 +300,70 @@ describe("S307 — generated artifact never reports a hollow PASS", () => {
     const out = generateMachineTestJs("/x/y.scrml", registry, new Map([["M", "A"]]));
     expect(out).toContain('"declared .A => .B succeeds"');
     expect(out).not.toContain("test.skip(");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S307 — §51.13 PORT: the modern <engine> state-child graph projects into rules.
+// ---------------------------------------------------------------------------
+
+describe("S307 — projectStateChildRules (§51.13 port to the state-child form)", () => {
+  test("single-target rule= becomes one transition", () => {
+    expect(projectStateChildRules([
+      { tag: "Idle", rule: { kind: "single", target: "Loading" } },
+    ])).toEqual([{ from: "Idle", to: "Loading" }]);
+  });
+
+  test("multi-target fans out to one rule per target", () => {
+    expect(projectStateChildRules([
+      { tag: "Loading", rule: { kind: "multi", targets: ["Done", "Idle"] } },
+    ])).toEqual([
+      { from: "Loading", to: "Done" },
+      { from: "Loading", to: "Idle" },
+    ]);
+  });
+
+  test("wildcard uses the `*` sentinel the machinery already understands", () => {
+    expect(projectStateChildRules([
+      { tag: "Any", rule: { kind: "wildcard" } },
+    ])).toEqual([{ from: "Any", to: "*" }]);
+  });
+
+  test("a state-child with no rule= is terminal — contributes no transitions", () => {
+    expect(projectStateChildRules([
+      { tag: "Done", rule: { kind: "absent" } },
+    ])).toEqual([]);
+  });
+
+  test("unparseable / legacy-arrow rules are SKIPPED, not invented", () => {
+    // Those already carry their own diagnostic (E-ENGINE-RULE-LEGACY-SYNTAX /
+    // B15 parse-error). Synthesising transitions from them would generate
+    // assertions about a graph the author never wrote.
+    expect(projectStateChildRules([
+      { tag: "A", rule: { kind: "legacy-arrow", raw: "evt -> B" } },
+      { tag: "B", rule: { kind: "parse-error", raw: "???", reason: "x" } },
+    ])).toEqual([]);
+  });
+
+  test("tolerates absent input", () => {
+    expect(projectStateChildRules(null)).toEqual([]);
+    expect(projectStateChildRules(undefined)).toEqual([]);
+  });
+
+  test("a modern engine emits REAL assertions once projected", () => {
+    const registry = new Map([["phase", { name: "phase", governedTypeName: "Phase", rules: [] }]]);
+    const projected = new Map([["phase", projectStateChildRules([
+      { tag: "Idle", rule: { kind: "single", target: "Loading" } },
+      { tag: "Loading", rule: { kind: "single", target: "Idle" } },
+    ])]]);
+    const out = generateMachineTestJs("/x/y.scrml", registry, new Map([["phase", "Idle"]]), projected);
+    expect(out).toContain('"declared .Idle => .Loading succeeds"');
+    expect(out).not.toContain("test.skip(");
+  });
+
+  test("WITHOUT the projection the same registry still skips (opt-in; no legacy drift)", () => {
+    const registry = new Map([["phase", { name: "phase", governedTypeName: "Phase", rules: [] }]]);
+    const out = generateMachineTestJs("/x/y.scrml", registry, new Map());
+    expect(out).toContain("test.skip(");
   });
 });

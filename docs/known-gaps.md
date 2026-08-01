@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 21 |
-| MED | 103 |
+| MED | 102 |
 | LOW | 45 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -1336,7 +1336,27 @@ Surfaced by the GITI-033 fix-round adversarial review (Finding #2), confirmed as
 
 ### G-MACHINE-TESTS-MODERN-ENGINE-VACUOUS — `--emit-machine-tests` (§51.13) emits a vacuous "no qualifying machines" test for the modern `<engine>` state-child `rule=` form — the generator reads the legacy `machine.rules` structure the modern form doesn't populate — `NEW S241; MED; open`
 
-The `--emit-machine-tests` flag (§51.13, `emit-machine-property-tests.ts`) emits a `<base>.machine.test.js` that is **runnable standalone** (imports only `bun:test`, zero scrml deps — verified: copied out-of-tree, `1 pass`) but is **vacuous for the modern `<engine>` state-child `rule=` form** — the non-deprecated canonical engine surface. The generator gates on `machine.rules` (`emit-machine-property-tests.ts:503` — `if (!machine.rules || machine.rules.length === 0)` → `// Skipped <var>: empty rule set.` → a bare `test("no qualifying machines", () => expect(true).toBe(true))`). Modern `<engine>` state-child `rule=` transitions populate a DIFFERENT structure (state-child metadata) that the generator never reads, so `machine.rules` is empty and NO real property tests are generated. **Verified 3-for-3 on modern engines** (`engine-modern-001-basic`, `engine-011-internal-rule`, `engine-009-hierarchy-basic` — all emit the vacuous skip despite full `Idle→Loading→Done`-style rule graphs); `machine-basic` too. The generator IS live for the legacy `<machine>`/transitions-block arrow-rule form that `parseMachineRules` populates (the `gauntlet-s26/machine-property-tests*` suite exercises that and passes). **The suite does NOT cover modern-engine machine-test emission**, so the vacuous output is a SILENT gap (no failing test guards it). **Surfaced S241** during the PA-side investigation of flogence's "compiler-as-oracle" ledger ask #2 (machine-tests as a consumable gate). **Impact:** the `<machine>`→`<engine>` migration left `--emit-machine-tests` un-ported to the modern surface; "every scrml repo has a free author-written-tests-not-required contract" does NOT hold for modern engines. Ties to V1/freeze (machine-tests as a conformance-relevant surface, §51.13) + the flogence oracle loop. **Fix (not scoped yet):** re-point the generator at the modern state-child `rule=` graph (build `m.rules` from the engine state-child metadata + `governedTypeVariants`), + add suite coverage that a modern engine emits non-vacuous property tests. NOT a trivial re-wire (the whole `collectVariants`/`reachableVariants`/`resolveRule` machinery keys off the `m.rules` shape). <!-- @gap id=g-machine-tests-modern-engine-vacuous sev=MED status=open -->
+The `--emit-machine-tests` flag (§51.13, `emit-machine-property-tests.ts`) emits a `<base>.machine.test.js` that is **runnable standalone** (imports only `bun:test`, zero scrml deps — verified: copied out-of-tree, `1 pass`) but is **vacuous for the modern `<engine>` state-child `rule=` form** — the non-deprecated canonical engine surface. The generator gates on `machine.rules` (`emit-machine-property-tests.ts:503` — `if (!machine.rules || machine.rules.length === 0)` → `// Skipped <var>: empty rule set.` → a bare `test("no qualifying machines", () => expect(true).toBe(true))`). Modern `<engine>` state-child `rule=` transitions populate a DIFFERENT structure (state-child metadata) that the generator never reads, so `machine.rules` is empty and NO real property tests are generated. **Verified 3-for-3 on modern engines** (`engine-modern-001-basic`, `engine-011-internal-rule`, `engine-009-hierarchy-basic` — all emit the vacuous skip despite full `Idle→Loading→Done`-style rule graphs); `machine-basic` too. The generator IS live for the legacy `<machine>`/transitions-block arrow-rule form that `parseMachineRules` populates (the `gauntlet-s26/machine-property-tests*` suite exercises that and passes). **The suite does NOT cover modern-engine machine-test emission**, so the vacuous output is a SILENT gap (no failing test guards it). **Surfaced S241** during the PA-side investigation of flogence's "compiler-as-oracle" ledger ask #2 (machine-tests as a consumable gate). **Impact:** the `<machine>`→`<engine>` migration left `--emit-machine-tests` un-ported to the modern surface; "every scrml repo has a free author-written-tests-not-required contract" does NOT hold for modern engines. Ties to V1/freeze (machine-tests as a conformance-relevant surface, §51.13) + the flogence oracle loop. **Fix (not scoped yet):** re-point the generator at the modern state-child `rule=` graph (build `m.rules` from the engine state-child metadata + `governedTypeVariants`), + add suite coverage that a modern engine emits non-vacuous property tests. NOT a trivial re-wire (the whole `collectVariants`/`reachableVariants`/`resolveRule` machinery keys off the `m.rules` shape). <!-- @gap id=g-machine-tests-modern-engine-vacuous sev=MED status=resolved locus=compiler/src/codegen/emit-machine-property-tests.ts:510 -->
+
+> **✅ RESOLVED S307.** A modern `<engine>` now emits REAL property tests. Verified by
+> EXECUTION, not by inspecting the emit: a three-variant engine with a multi-target rule
+> generates 9 assertions (3 declared-succeeds + 6 undeclared-rejected) whose transition table
+> matches its state-child graph exactly, and the artifact was copied OUT OF TREE and run
+> standalone — **9 pass / 0 fail**.
+>
+> **The entry's own cost estimate was the thing to re-examine.** It read "NOT a trivial re-wire
+> (the whole `collectVariants`/`reachableVariants`/`resolveRule` machinery keys off the
+> `m.rules` shape)" — true, and precisely the reason NOT to re-point that machinery. A
+> state-child `rule=` graph and an arrow-rules body express the same `(from, to)` relation, so
+> the port is a PROJECTION into the shape the machinery already consumes. The machinery is
+> untouched; every legacy path is byte-identical; the substitution happens only where `rules`
+> is empty and only when a projection is supplied (opt-in, so no legacy drift).
+>
+> Multi-target fans out per target; `rule=*` uses the `*` sentinel the machinery already
+> understands; a state-child with no `rule=` is correctly terminal; `legacy-arrow` and
+> `parse-error` forms are SKIPPED rather than invented, since they carry their own diagnostic
+> and synthesising transitions from them would assert a graph the author never wrote.
+> 8 unit tests pin the projection, including that the un-projected path still skips.
 
 ## §interim (2026-07-06, untracked S241-adjacent) — design-ruled items (NOT drift; SPEC-pending)
 
