@@ -34,16 +34,24 @@
  * docs/FACTS.md exists.
  *
  * Usage:  bun scripts/s34-census.ts [--full] [--json]
+ *         bun scripts/s34-census.ts --check-new [--base <ref>]   # §34.0 gate, DIFF-SCOPED
  */
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, dirname } from "node:path";
+import { execFileSync } from "node:child_process";
 
 const ROOT = join(dirname(new URL(import.meta.url).pathname), "..");
 const SPEC = join(ROOT, "compiler/SPEC.md");
-const argv = new Set(process.argv.slice(2));
+const rawArgv = process.argv.slice(2);
+const argv = new Set(rawArgv);
 const FULL = argv.has("--full");
 const JSON_OUT = argv.has("--json");
+const CHECK_NEW = argv.has("--check-new");
+const BASE_REF = (() => {
+  const i = rawArgv.indexOf("--base");
+  return i >= 0 && rawArgv[i + 1] ? rawArgv[i + 1] : "origin/main";
+})();
 
 const specLines = readFileSync(SPEC, "utf8").split("\n");
 
@@ -184,6 +192,65 @@ function evidence(r: Row): Ev {
     : shalls.length ? "BUILD-ARC"
     : "HOME-NO-SHALL";
   return { row: r, homes, shalls, nominal, disp };
+}
+
+// -- §34.0 gate: NEW/TOUCHED rows only, never the legacy corpus ---------------------------------
+// A gate that is instantly red for reasons no change caused gets bypassed, then deleted (pa-base §8),
+// so this reads a DIFF and is silent on every pre-existing row.
+if (CHECK_NEW) {
+  // Diff against the MERGE BASE with a two-dot diff, so the WORKING TREE is included.
+  // `git diff base...HEAD` (three-dot) compares COMMITTED HEAD only and silently ignores uncommitted
+  // edits — which made the first cut of this gate hollow: it reported PASS on a deliberately bad row.
+  // Caught by the bite proof, which is the entire reason §8 requires one.
+  let mergeBase = BASE_REF;
+  try {
+    mergeBase = execFileSync("git", ["merge-base", BASE_REF, "HEAD"], { cwd: ROOT, encoding: "utf8" }).trim();
+  } catch { /* detached / shallow clone — fall back to the ref itself */ }
+
+  let diff = "";
+  try {
+    diff = execFileSync("git", ["diff", "-U0", mergeBase, "--", "compiler/SPEC.md"],
+      { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  } catch (e) {
+    console.error(`§34.0 gate: cannot diff against '${BASE_REF}' (merge-base ${mergeBase}) — ${(e as Error).message}`);
+    process.exit(2);
+  }
+
+  const EMITTER = /emitted at|emitter:|`(?:compiler|scripts|lsp|stdlib)\/[A-Za-z0-9_./-]+`|\((?:compiler|scripts)\/[A-Za-z0-9_./-]+:\d+\)/i;
+  const offenders: { code: string; why: string }[] = [];
+  let added = 0;
+
+  for (const line of diff.split("\n")) {
+    if (!line.startsWith("+") || line.startsWith("+++")) continue;
+    const row = line.slice(1);
+    if (!row.startsWith("|")) continue;
+    const cells = row.split("|");
+    if (cells.length < 3) continue;
+    const first = cells[1].trim();
+    if (!first || /^-+$/.test(first) || /^code$/i.test(first)) continue;
+    const struck = first.includes("~~");
+    const code = first.replace(/~~/g, "").replace(/\*\*/g, "").replace(/`/g, "").trim();
+    if (!/^[EWI]-[A-Z0-9-]+$/.test(code)) continue;
+    added++;
+    if (struck) continue;                       // (3) retirement row
+    if (DECLARED_AHEAD.test(row)) continue;     // (2) honest spec-ahead declaration
+    if (EMITTER.test(row)) continue;            // (1) emitter provenance note
+    offenders.push({ code, why: "no emitter provenance note, no spec-ahead declaration, not struck" });
+  }
+
+  if (!added) { console.log(`§34.0 gate: no new/changed §34 rows vs ${BASE_REF} — PASS`); process.exit(0); }
+  if (offenders.length) {
+    console.error(`§34.0 gate FAILED — ${offenders.length} of ${added} new/changed §34 row(s) are unverifiable claims:\n`);
+    for (const o of offenders) console.error(`  ${o.code} — ${o.why}`);
+    console.error(`\nEvery NEW row SHALL carry ONE of (SPEC §34.0):`);
+    console.error(`  1. an emitter provenance note — e.g. (… emitted at \`compiler/src/foo.ts:123\`.)`);
+    console.error(`  2. an explicit spec-ahead declaration — Reserved / Nominal / spec-ahead / not yet emitted`);
+    console.error(`  3. strikethrough ~~CODE~~ + a retirement note`);
+    console.error(`\nOutcome 2 is a first-class answer: if the emitter does not exist yet, SAY SO.`);
+    process.exit(1);
+  }
+  console.log(`§34.0 gate: ${added} new/changed §34 row(s), all well-formed — PASS`);
+  process.exit(0);
 }
 
 const buckets = new Map<Bucket, Row[]>();
