@@ -2,6 +2,14 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S311 — 2026-08-01 (Peter · Windows) — escape-hatch fork routed to bryan; a phantom HIGH retired; ledger corrected
+
+Docs-only session. No compiler code changed — the substantive fix is a SPEC ruling owed by bryan.
+
+- **#345 (`d949f06c`)** — known-gaps ledger correction. A S311 diagnostic (reproduce-first) corrected the S310 attribution of the on-mount escape-hatch gap cluster: **not** "regex-literal-blind" — the `!{}`-arm gap fails with no regex, the multi-write gap needs invalid source, and both **fail closed** with zero corpus impact. True root = the single-bare-expression `on mount` desugar (`mountBodyExprNode` → the `rewrite.ts` string pipeline) = the tracked `g-onmount-multistatement-bypasses-statement-codegen` (S295, GH #237). Both MEDs reframed as facets; multi-write **MED→LOW**; loci added. Rebased over bryan's concurrent §34 arc (a 3-way on the generated gap-counts block, regenerated from merged markers — no lost update).
+- **`g-class-attr-expr-not-lowered` (HIGH) RESOLVED** — reproduce-first verify confirmed #287 (`4e354e4d`) already lowers each-body `class:` operators across the whole class (`is some`/`is not`/`is .Variant`), `node --check` PARSE-OK; the entry was stale-open. **HIGH 21→20.**
+- **Escape-hatch fix routed to bryan** — the right fix (option c: route the mount body through statement/AST codegen, the #264 pivot) is newly-accepting; whether it is a bug-fix or a widening hinges on §6.7.1a's "SHALL be desugared to a bare expression". Seeded to bryan's inbox for a ruling; if toward-the-contract, the build is Peter's.
+
 ## S310 — 2026-08-01 (Peter · Windows) — a destructuring LHS in a `for`-comprehension emitted `for (const [object Object] of …)` (broken bundle)
 
 One landing. Closes `g-destructure-pattern-object-object-in-for-comprehension-emit` (LOW).
