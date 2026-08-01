@@ -570,8 +570,23 @@ export function generateMachineTestJs(
     lines.push(``);
   }
   if (emittedBlocks.length === 0) {
+    // S307 — this used to emit `test("no qualifying machines", () => {
+    // expect(true).toBe(true); })`: a PASSING assertion that verifies nothing.
+    // It is the pa-base §8 hollow-gate shape, and it is worse here than usual
+    // because the artifact is AUTO-GENERATED and lands in an adopter's suite as
+    // a green tick. It reports green for the canonical modern `<engine>` state-
+    // child `rule=` form (`g-machine-tests-modern-engine-vacuous`), so the
+    // shape most likely to hit it is the one we tell people to write.
+    //
+    // A SKIP is honest — it reports as skipped, not passed — and it names why.
+    // The real fix (re-pointing the generator at the state-child rule graph) is
+    // that gap, not this: this only stops the false green.
+    const why = skipNotes.length > 0
+      ? skipNotes.map((n) => n.replace(/^\/\/\s*/, "")).join(" | ")
+      : "no machine in this file had a rule set the generator can read";
     lines.push(`describe(${JSON.stringify(`[generated] ${fileName}`)}, () => {`);
-    lines.push(`  test("no qualifying machines", () => { expect(true).toBe(true); });`);
+    lines.push(`  // Deliberately SKIPPED, not passed: there is nothing to assert here.`);
+    lines.push(`  test.skip(${JSON.stringify(`no qualifying engines — ${why}`)}, () => {});`);
     lines.push(`});`);
     lines.push(``);
     return lines.join("\n");

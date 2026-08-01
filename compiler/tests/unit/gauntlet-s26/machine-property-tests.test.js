@@ -263,3 +263,42 @@ describe("S26 §51.13 — generateMachineTestJs unit contract", () => {
     expect(out).toContain('"declared .A => .B succeeds"');
   });
 });
+
+// ---------------------------------------------------------------------------
+// S307 — the no-qualifying-engines artifact must SKIP, never falsely PASS.
+// ---------------------------------------------------------------------------
+
+describe("S307 — generated artifact never reports a hollow PASS", () => {
+  // A registry whose machine has NO readable rule set is the modern `<engine>`
+  // state-child shape as the generator currently sees it
+  // (g-machine-tests-modern-engine-vacuous). It used to emit
+  // `test("no qualifying machines", () => expect(true).toBe(true))` — a PASSING
+  // assertion that verifies nothing, auto-generated into an adopter's suite.
+  const emptyRuleRegistry = new Map([["M", { name: "M", governedTypeName: "T", rules: [] }]]);
+
+  test("emits test.skip, NOT a passing assertion", () => {
+    const out = generateMachineTestJs("/x/y.scrml", emptyRuleRegistry, new Map());
+    expect(out).not.toBeNull();
+    expect(out).toContain("test.skip(");
+    // The specific hollow-gate shape must be gone.
+    expect(out).not.toContain("expect(true).toBe(true)");
+  });
+
+  test("the skip names WHY it skipped (not a bare marker)", () => {
+    const out = generateMachineTestJs("/x/y.scrml", emptyRuleRegistry, new Map());
+    expect(out).toContain("no qualifying engines");
+    // The per-machine skip note is carried into the test name so the reason
+    // survives into the test runner's output, not just a file comment.
+    expect(out).toMatch(/test\.skip\("no qualifying engines — .+"/);
+  });
+
+  test("a machine WITH rules still emits real assertions (no regression)", () => {
+    const registry = new Map([["M", {
+      name: "M", governedTypeName: "T",
+      rules: [{ from: "A", to: "B" }],
+    }]]);
+    const out = generateMachineTestJs("/x/y.scrml", registry, new Map([["M", "A"]]));
+    expect(out).toContain('"declared .A => .B succeeds"');
+    expect(out).not.toContain("test.skip(");
+  });
+});
