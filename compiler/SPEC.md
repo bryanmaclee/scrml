@@ -18854,6 +18854,34 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 
 *This section is a reference index. Each error code is defined normatively in the section that introduces it. This section provides a single lookup point. The authoritative definition — including full normative statements, error message text, and worked examples — is in the referenced section.*
 
+### 34.0 Row well-formedness — every NEW row states where it fires, or that it does not
+
+Because §62.2 makes the conformance corpus the versioned contract, a catalogued code that cannot fire
+is a **false claim inside that contract**, and it inflates the freeze denominator besides. Every NEW or
+TOUCHED row in this catalog SHALL therefore carry exactly one of:
+
+1. an **emitter provenance note** — the source path (optionally `:line`) where the code is pushed, e.g.
+   `(Catalog addition S78 audit; emitted at `compiler/src/batch-planner.ts:552`.)`; or
+2. an explicit **spec-ahead declaration** — `Reserved`, `Nominal`, `spec-ahead`, `not yet emitted`, or
+   `lands with the impl` — which is an honest statement that no emitter exists yet; or
+3. **strikethrough** (`~~CODE~~`) plus a retirement note, for a row being withdrawn.
+
+**Why this specific form.** It is the discriminator the catalog already proved, not a new invention: at
+the time this rule landed, **131** rows carried an emitter note and **0 of 108** unfireable rows did —
+perfect separation in both directions. A provenance note is free to write when the code is real and
+impossible to write when it is not, so the requirement cannot be satisfied by a code that does not
+exist. Outcome (2) is a first-class answer, not a loophole: declaring spec-ahead status is honest and
+costs nothing, and it is what the §63 deprecation lifecycle already requires of a reserved code.
+
+**Binding scope — NEW and TOUCHED rows only.** This SHALL NOT be retrofitted as a hard gate over the
+pre-existing catalog: a gate that is instantly red for reasons no change caused is bypassed, then
+deleted. The legacy population drains through ordinary verification sweeps
+(`docs/changes/s34-catalog-truthfulness/`). Detection for the existing corpus is a RATIO, not an
+inspection — `bun scripts/s34-census.ts` reports it; `--check-new` enforces this rule against a diff.
+
+**This is an editorial well-formedness rule, not a language rule.** It changes no program's meaning and
+no program's acceptance status (direction-of-change: inert), so it is not a §62 version event.
+
 | Code | Section | Trigger | Severity |
 |---|---|---|---|
 | E-CTX-001 | §3.2 | Wrong closer for context type | Error |

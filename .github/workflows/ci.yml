@@ -46,7 +46,11 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 — the §34.0 row-provenance gate diffs against the PR base SHA, and a shallow
+      # clone has no common ancestry, so merge-base fails and the gate cannot resolve what is NEW.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
       - name: Install deps
         run: bun install --frozen-lockfile
@@ -77,6 +81,11 @@ jobs:
         run: bun scripts/facts.ts --check
       - name: SPEC-INDEX totals gate (the navigation map's own counts still match SPEC.md)
         run: bun run scripts/regen-spec-index.ts --check
+      # SPEC §34.0 — a NEW catalog row must state where it fires, or honestly declare it does not yet.
+      # DIFF-SCOPED: silent on the legacy corpus by construction (pa-base §8 — a gate that is instantly
+      # red for reasons no change caused gets bypassed, then deleted).
+      - name: §34.0 row-provenance gate (new error-code rows state where they fire)
+        run: bun scripts/s34-census.ts --check-new --base ${{ github.event.pull_request.base.sha || 'HEAD~1' }}
 
   tracking:
     runs-on: ubuntu-latest
