@@ -1,4 +1,91 @@
 <!-- ============================================================= -->
+<!-- S311 WRAP (Peter/Windows·P-TECH1) — prepended 2026-08-01.       -->
+<!-- S310 + bryan's S307/S305 + all prior UNCHANGED below.           -->
+<!-- Disambiguate by NAME (numbers collide across machines).         -->
+<!-- ============================================================= -->
+
+# scrml — Session 311 (Peter · Windows/P-TECH1) — WRAP
+
+**Date:** 2026-08-01. `/boot` Profile A (full canon read). Pre-wrap `main` `d949f06c` (#345); this
+wrap lands on top. Coherence 0/0 both repos, trees clean. Delta-log **[1021]–[1027]**. **Docs-only
+session** (no compiler code changed → maps unchanged). bryan concurrently active (§34 catalog arc;
+#343/#344/#346 all merged). Adopter app `assetManagement` **stable** (Peter, at wrap).
+
+## 🎯 THE HEADLINE — the escape-hatch fork: diagnosed, mis-attribution corrected, routed to bryan
+
+Peter picked the escape-hatch design fork (S310 [1018]). A diagnostic satellite (reproduce-first +
+loci + corpus + governing SPEC) MATERIALLY CORRECTED the S310 framing:
+- **NOT regex-literal-blind** (verify-the-CLASS, [[verify-the-bug-class-not-just-reported-instance]]).
+  Differential repros: the `!{}`-arm gap fails with **no regex at all**; the multi-write gap needs an
+  **invalid** regex and **fails CLOSED**.
+- **Both fail CLOSED** (`E-CODEGEN-INVALID-LOGIC`; no silent breakage), **zero corpus impact** (19 real
+  `on mount` blocks; 0 multi-statement-with-decl/regex/`!{}`).
+- **TRUE root** = the single-bare-expression mount desugar (`mountBodyExprNode` `ast-builder.js:357` →
+  `rewrite.ts:2763` string pipeline) = the already-tracked **`g-onmount-multistatement-bypasses-statement-codegen`**
+  (S295, root of GH #237), whose entry already flags the §6.7.1a SPEC question.
+
+## 🧭 THE FORK (bryan-gated) — the fix hinges on a §6.7.1a ruling
+
+Right fix = **(c) route the mount body through the real statement/AST codegen path** (the #264 pivot:
+`scheduleStatements` → `injectServerCallAwaitsViaAst`) — dissolves the whole cluster + closes S295/GH#237.
+But (c) makes multi-statement `!{}` mount bodies **compile** = **newly-accepting** (pa-base §8).
+Bug-fix (toward-the-contract → ship) vs widening (R2) hinges on §6.7.1a L3726 *"SHALL be desugared to a
+bare expression"* (singular) VS the grammar `on-mount-stmt ::= … logic-content` + §7.2 (*all valid JS*).
+**I lean toward-the-contract** but did NOT build a newly-accepting change on an ambiguous SHALL (the
+S305/S307 hazard). **SEEDED to bryan** — corrected the stale S310 seed IN-PLACE (it was already
+committed+pushed with the old regex-blind framing):
+`scrml-support/handOffs/incoming/2026-08-01-1200-peter-to-bryan-escape-hatch-regex-blind-fork.md`.
+**If bryan rules (c) toward-the-contract, the build is mine** (adopter-codegen lane).
+
+## ✅ A PHANTOM HIGH RETIRED (reverse-verify win)
+
+`g-class-attr-expr-not-lowered` (HIGH) — **verified DEAD** on `d949f06c`. #287 (`4e354e4d`, the S301
+landing, "lower scrml operators in each-body `class:`") already made the fix; the entry was stale-open.
+Reproduce-first across the whole class (`is some` / `is not` / `is .Variant`): emitted `classList.toggle`
+lowers correctly, `node --check` PARSE-OK, zero raw operators. **HIGH 21→20.**
+
+## 🔴 THE NEXT PA'S PICKUP — the clean-live queue is DRY
+
+Collision sweep at wrap — no clean live Peter-lane build remains:
+- **escape-hatch (c)** — bryan-gated (his §6.7.1a ruling). If ruled toward-the-contract → mine.
+- `g-crossfile-module-const-dropped-from-client-bundle` (HIGH) — **COLLISION**: stranded
+  `fix/263-cross-file-module-export-const-client` + `wip/263-cross-file-module-const-client-s239-blocked`
+  (a prior attempt the S239 gate BLOCKED, S263-era). Investigate WHY it blocked before reviving.
+- `g-legacy-machine-transition-guard-never-emitted` (HIGH) — **bryan-lane** (`<machine>` retirement
+  closeout; likely moot post-#337).
+- **Adopter issues: 0.** `assetManagement` stable.
+- **8 stale s263-era origin branches** (`fix/s263-*`, `spec/s263-bookkeeping`, `wrap/s263`, the two `263`s,
+  `feat/machine-keyword-retirement`, `docs/machine-arc-closeout`) — never pruned; likely bryan's, deletion
+  irreversible → surfaced for his cleanup, NOT touched.
+
+## ⚠️ ANOMALY (recorded) — concurrent bryan + a hot-file rebase
+
+Booted registering S311-peter SOLO (no S311-bryan board), but bryan was concurrently live: his §34 arc
+landed #343/#344/#346 between my boot and my merge, touching `known-gaps.md`. My #345 merge hit a conflict
+→ rebased on `origin/main` → the ONLY conflict was the `@generated` gap-counts block (both sides regen'd it)
+→ resolved by **regenerating from the merged markers** (never hand-merge a generated block — the S307
+lost-update guard). Prose entries were disjoint (his §34 vs my escape-hatch) → no lost update. **Lesson:**
+a solo-registered boot can still have a live sibling; the board is visibility, not authority — branch
+protection + the rebase caught it.
+
+## ✅ GATE / HOUSEKEEPING
+
+- **Gate:** cloud `gate` GREEN on #345 (authority). Docs-only session — no compiler surface touched; local
+  full-suite not re-run (nothing to regress). `state.ts --check` GREEN.
+- **Counts:** HIGH **20** · MED 105 · LOW 45 · Nominal 7.
+- **Worktrees:** main + `scrml-pinned` only (the diagnostic agent was non-isolation → no worktree).
+- **Maps NOT run** — docs-only, zero code surface (S299/S304 precedent). Watermark stays `fe14c9b2`.
+- **Board:** `S311-peter.md` finalized + pushed (scrml-support). **user-voice:** +1 Peter durable
+  ("verify no collisions before picking").
+
+## Tags
+#session-311-peter #escape-hatch-fork-routed-to-bryan #not-regex-blind-verify-the-class
+#onmount-single-bare-expr-desugar-root #s295-gh237 #6.7.1a-ruling-seeded #class-attr-phantom-HIGH-retired
+#reverse-verify-win #concurrent-bryan-gapcounts-rebase #lane-dry
+
+---
+
+<!-- ============================================================= -->
 <!-- S310 WRAP (Peter/Windows) — prepended 2026-08-01.              -->
 <!-- bryan's S307 + S305 + all prior UNCHANGED below.               -->
 <!-- Disambiguate by NAME (numbers collide across machines).        -->
