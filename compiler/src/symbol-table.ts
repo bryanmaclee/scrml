@@ -7275,6 +7275,39 @@ export function validateEngineStateChildrenAndRules(
     return;
   }
 
+  // S307 — `audit @x` in a STATE-CHILD body is a SILENT NO-OP. Make it loud.
+  //
+  // Measured: `<engine …> <Red rule=.Green/> … audit @slog </>` emits ZERO
+  // audit-push sites and ZERO diagnostics — the clause is parsed as body text
+  // and dropped. The same clause in the legacy arrow-rules body DOES wire
+  // (`audit-push=1`), so this is a per-form hole, not a dead feature.
+  //
+  // It is the dangerous direction: the author believes they have an audit log
+  // and has none, with nothing to tell them. That fails OPEN, and after the
+  // `<machine>` removal the state-child form is the one we tell people to
+  // write — so the shape most likely to hit this is the canonical one.
+  // Rejecting is the reversible direction (a migration exists: use the named
+  // form, or drop the clause); accepting-and-ignoring is not.
+  const auditInStateChildBody = /(?:^|\n)[ \t]*audit[ \t]+@([A-Za-z_$][\w$]*)/.exec(rulesRaw || "");
+  if (auditInStateChildBody) {
+    const target = auditInStateChildBody[1];
+    fireB15Diagnostic(
+      errors,
+      "E-ENGINE-AUDIT-UNSUPPORTED-BODY",
+      `E-ENGINE-AUDIT-UNSUPPORTED-BODY: \`audit @${target}\` appears in a state-child ` +
+      `engine body, where it has NO EFFECT — no audit entries are ever recorded. ` +
+      `The §51.11 audit clause is read from the legacy arrow-rules body ` +
+      `(\`<engine name=N for=T>\` with \`.From => .To\` rules); in the §51.0 state-child ` +
+      `form (\`<Variant rule=.Other/>\`) it is parsed as body text and dropped. ` +
+      `Either declare this engine in the named/legacy form (§51.3.2) if you need the ` +
+      `audit log, or remove the clause. Porting the clause onto the state-child rule ` +
+      `graph is tracked as \`g-audit-clause-silent-noop-on-modern-engine\`.`,
+      engineDecl,
+      filePath,
+      "error",
+    );
+  }
+
   // Step 4 — exhaustiveness + invalid state-child tag validation. Only
   // run when we have a known variant set (variants resolved from
   // typeDecls).

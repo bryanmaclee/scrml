@@ -1,0 +1,10 @@
+${ type Light:enum = { Red, Green } }
+<program>
+<engine for=Light initial=.Red>
+  <Red rule=.Green></>
+  <Green rule=.Red></>
+  audit @slog
+</>
+<slog> = []
+<p id="s">${@light} ${@slog.length}</p>
+</program>
