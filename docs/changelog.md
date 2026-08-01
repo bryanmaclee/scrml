@@ -2,6 +2,18 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S310 — 2026-08-01 (Peter · Windows) — failable server fn with a GENERIC / PAREN / UNION error type parsed with an empty body (the #228 class, one type-shape deeper)
+
+One landing, cloud-gate + windows green. Closes `g-failable-bare-return-type-generic-paren-not-consumed` (LOW) — the follow-up the GH #228 S239 pass filed.
+
+**The #228 fix taught the `! Type` parser to consume `[]`; it still read the type NAME as a single IDENT.** So a failable server fn whose error type is a **generic** (`function f() ! Map<string, int>`), a **paren/union** (`! (A | B)`, `! A | B`), or their array (`! Map<…>[]`) left the `<…>` / `(…)` / `| B` tail unconsumed → the `{` body-brace check failed → the function parsed with an **empty body** → route-inference never saw its `?{}` SQL → it was not server-promoted → its query leaked into the client bundle (`E-CG-006`) and its value-position write got no auto-await. Reproduced razor-clean on HEAD: `! Map<…>` and `! Map<…>[]` fired `E-CG-006` and leaked SQL; `! (A|B)` was silently not-promoted; the #333 `! string[]` control stayed clean.
+
+The fix is a single shared depth-tracked helper, `consumeErrorTypeAnnotation()`, used at all five `!`-error-type sites (the three arrow forms — `function` ×2 + the `fn` short-form — plus the two bare forms) and a new paren-leading branch. It consumes exactly **one bounded type expression** — an atom (an IDENT with an optional balanced `<…>` generic, or a balanced `(…)` group) plus trailing `[]` suffixes, chained by `|`/`&` — and returns the base type *name*, so `errorType` stays a clean name for the type system (`! string[]` → `"string"`, preserving the #333 contract). All compound forms now server-promote with no client SQL leak and no `E-CG-006`.
+
+**The S239 adversarial pass caught two real defects in the build before it landed** — a green 20k-test suite would have shipped both. (1) The first cut consumed *until a function-head stop token*, which over-ran a **body-less** failable function (`fn a() ! -> Err` with no `{`) and silently swallowed the following declaration; bounded to a self-delimiting type expression. (2) The lexer merges a run of `>` into one `>>`/`>>>` token, so single-char angle-balancing over-ran a **nested** generic (`Map<K, List<V>>`) to EOF; `consumeBalanced` now counts bracket characters per token. Both are covered by regression guards in the new unit test (`failable-generic-paren-return-server-promotion.test.js`, 21 cases). Static no-op for the corpus — only compound error-type heads change, and none exist outside the new test.
+
+Scoped to `ast-builder.js`, matching the #333 precedent. Filed two follow-ups: the opt-in native parser (`--parser=scrml-native`) lags the same class (it never got even the `! T[]` fix), and an *unterminated* generic error type (`! Map<string {`) still empty-bodies via run-to-EOF instead of emitting a diagnostic (a malformed-input nominal, not a regression, not a leak vector).
+
 ## S309 (cont.) — 2026-08-01 (Peter · Windows) — adopter #228 closed: a failable array-return server fn (`! T[]`) parsed with an empty body
 
 One landing (PR #333), cloud-gate + windows green. Closes GitHub adopter issue #228 — the last open adopter issue.
