@@ -5682,6 +5682,52 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-01 — S307: `<machine>` retired from 1.0, and both subsystems it fronted ported
+
+The `<machine>` keyword does not ship in language-1.0. `E-DEPRECATED-001` fires, the word returns to
+authors, and `scrml migrate` performs a **semantics-preserving** rewrite. Four PRs; verified
+end-to-end on merged `main` rather than on a branch.
+
+The keyword was briefed as a deprecated *spelling*. Measured, it selected between two subsystems, and
+the briefing was wrong four times — always in the direction of "smaller than it is". The
+load-bearing one: **`<machine derived=@x>` + a rules body compiles a real mapping function, while
+`<engine derived=@x>` is an identity projection that silently drops the body.** A textual keyword
+swap therefore changed behaviour with no diagnostic, which meant §63.4's codemod gate was satisfied
+*textually* but not *semantically*. That is what turned a one-line removal into an arc.
+
+- **#328 — removal + codemod.** `W-DEPRECATED-001` → `E-DEPRECATED-001` (Error); per §63.5 the form
+  still PARSES so a `<machine>` source reports exactly ONE diagnostic naming the migration rather
+  than a cascade. `scrml migrate` taught three rewrites: the opener, the `</machine>` closer (the
+  opener pattern cannot reach it — `<` is followed by `/`), and the §51.9 projection body into
+  §51.0.J `derived=match … { }` with `var=` and synthesized state-children. **Fails closed**: any
+  body line it cannot parse leaves the declaration untouched rather than half-migrating it.
+  9 of 10 "legacy-only" diagnostics turned out BODY-bound and still fire, so 18 conformance cases
+  **migrated** rather than retiring; only `E-ENGINE-003` was keyword-gated.
+- **#332 — the two silent holes made loud.** `audit` in a state-child body and the auto-generated
+  property test that emitted `expect(true).toBe(true)` — a passing assertion that verified nothing,
+  generated into an adopter's suite as a green tick.
+- **#335 — closeout, plus a counting bug it exposed.** `pa-base v2.9` had just mandated `locus=` on
+  the `@gap` marker; `state.ts`'s parser required `status=` to be followed immediately by `-->`, so
+  **every entry filed under the new rule vanished from the counts** (3 dropped, 2 open). Found by
+  arithmetic — resolving a gap didn't move the count — not by a failing test. Parser is now an
+  attribute bag with a fail-loud guard, exported and testable.
+- **#336 — the ports.** §51.13 property tests now generate for the canonical state-child form; §51.11
+  `audit` now records there. Both gaps closed.
+
+**§34 made truthful:** `E-DEPRECATED-001` gains its row (it had none — named in prose with no fire
+site), `W-DEPRECATED-001` and `E-ENGINE-003` retired, and six phantom codes struck
+(`E-ENGINE-006/-007/-008/-009/-011/-012` existed in `SPEC.md` and nowhere else).
+
+**Two lessons worth carrying.** A gap's cost estimate can be accurate about the difficulty and still
+point the wrong way — §51.13's "NOT a trivial re-wire" was true, and exactly why the machinery should
+be *fed* a projection rather than re-pointed. And "emitted ≠ runs" caught a third time: the audit
+registration was emitted, greppable and compiling clean while the log stayed empty, because a raw
+cell name had been registered into a chunk-namespaced key space.
+
+Gated tier **26,884 pass / 0 fail** · conformance **843/843** · browser 48 fail = the documented
+baseline, verified by failure-NAME-SET diff against main rather than by count. Gaps
+**HIGH 21 · MED 101 · LOW 45** — three resolved, one filed.
+
 ### 2026-07-31 — S305 (bryan): the freeze campaign stops being an authoring backlog; `<machine>` retired from 1.0
 
 Nine PRs. The tier-1 conformance campaign moved **133 → 170 of 196** codes pinned (conformance suite
