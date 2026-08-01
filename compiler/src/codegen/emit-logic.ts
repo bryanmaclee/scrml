@@ -4306,7 +4306,18 @@ function emitForExprDecl(name: string, forExpr: any, keyword: "let" | "const", o
 
   // Parse iterable and variable from the forExpr node
   let iterable: string = forExpr.iterable ?? forExpr.collection ?? "[]";
-  let varName: string = forExpr.variable ?? forExpr.name ?? "item";
+  // A destructuring LHS (`for (const {a} of …)` / `for (const [x] of …)`) arrives
+  // as a DestructurePattern OBJECT; render it back to JS source text rather than
+  // letting `${varName}` String()-coerce it to `[object Object]` (a hard
+  // `node --check` failure). Mirror _emitForStmtWithTilde (~L4090) — the
+  // statement/render for-copies already do this; the for-AS-EXPRESSION copy did
+  // not. g-destructure-pattern-object-object-in-for-comprehension-emit.
+  let varName: string;
+  if (isDestructurePattern(forExpr.variable)) {
+    varName = nameOrPatternText(forExpr.variable);
+  } else {
+    varName = (typeof forExpr.variable === "string" && forExpr.variable) || forExpr.name || "item";
+  }
 
   // Handle for-of form stored as "( let x of iterable )" — extract parts
   if (typeof iterable === "string") {

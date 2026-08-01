@@ -2,6 +2,14 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S310 — 2026-08-01 (Peter · Windows) — a destructuring LHS in a `for`-comprehension emitted `for (const [object Object] of …)` (broken bundle)
+
+One landing. Closes `g-destructure-pattern-object-object-in-for-comprehension-emit` (LOW).
+
+**`const names = for (const {a} of @items) { lift a }` emitted `for (const [object Object] of …)`** — a hard `node --check` failure. The for-as-expression emit (`_emitForExprAsArray`, emit-logic.ts) took `forExpr.variable ?? forExpr.name ?? "item"`; when the loop LHS is a destructuring pattern, `forExpr.variable` is a `DestructurePattern` **object**, which survives `??` and gets `String()`-coerced to `[object Object]`. Both object `{a}` and array `[x]` patterns broke; the canonical parenthesized form emits the identical broken JS (not braceless-specific).
+
+The fix mirrors the sibling for-copies (`_emitForStmtWithTilde`, the statement/render/for-lift paths already do this): `isDestructurePattern(forExpr.variable) ? nameOrPatternText(forExpr.variable) : …` — both helpers already imported. Now emits `for (const { a } of …)` / `for (const [x] of …)`. New `for-as-expression.test.js` §8 (object + array + plain-string regression); for/lift/destructure/emit-logic blast radius 652/0; conformance 843/843.
+
 ## S310 — 2026-08-01 (Peter · Windows) — on-mount direct reactive-server write on the SPACED escape-hatch path is now awaited (fail-open closed)
 
 One landing. Closes `g-onmount-direct-reactive-server-write-unawaited-on-escape-hatch-string-path` (MED) — the remaining half of a S306-filed gap (its fallback-hardening half was closed by S308/#326).
