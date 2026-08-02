@@ -1,0 +1,12 @@
+{
+  "id": "lifecycle-cleanup-error-call-expression",
+  "description": "§6.7.3 — the `cleanup()` argument is a CALL expression (`cleanup(closeConnection())`) rather than a function expression. The call is evaluated AT REGISTRATION, so the resource is released eagerly at mount and the call's return value is registered as the teardown callback. Verified pre-fix by compiling and reading the emitted client bundle: `_scrml_register_cleanup(_scrml_closeConnection_1());` — exit 0, zero diagnostics.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/cleanup-registration-diagnostics.test.js",
+  "spec": "§6.7.3",
+  "rationale": "§6.7.3 normative: the `cleanup()` argument must be a function expression, not a call expression; passing a call invokes it eagerly and stores the return value. Resolution: pass the function itself (`cleanup(teardown)`) or wrap it (`cleanup(() => { teardown() })`).",
+  "expect": {
+    "codes": ["E-LIFECYCLE-002"],
+    "notCodes": ["E-LIFECYCLE-001", "E-LIFECYCLE-004"]
+  }
+}

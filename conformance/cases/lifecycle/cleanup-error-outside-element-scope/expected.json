@@ -1,0 +1,12 @@
+{
+  "id": "lifecycle-cleanup-error-outside-element-scope",
+  "description": "§6.7.2 — a `cleanup()` call at file level, outside any element scope. There is no scope to tear down, so the registered callback would never run. The argument itself is VALID (a function reference), which is what isolates this case to the scope rule rather than the argument rule.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/cleanup-registration-diagnostics.test.js",
+  "spec": "§6.7.2",
+  "rationale": "§6.7.2 normative: `cleanup()` is only valid inside an element scope — the logic body of a markup tag. Mirrors E-LIFECYCLE-017's treatment of `animationFrame()` (§6.7.9). Resolution: move the call inside a markup tag's logic body.",
+  "expect": {
+    "codes": ["E-LIFECYCLE-001"],
+    "notCodes": ["E-LIFECYCLE-002", "E-LIFECYCLE-004"]
+  }
+}

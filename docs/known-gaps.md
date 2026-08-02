@@ -32,9 +32,13 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 20 |
 | MED | 107 |
-| LOW | 45 |
+| LOW | 46 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-cleanup-keyword-shadowed-by-user-function-not-diagnosed — a user-defined `function cleanup()` silently shadows the reserved `cleanup` builtin; calls to it are parsed as the builtin and now misreport — `NEW S310-bryan; LOW; open (pre-existing; surfaced by the S310 cleanup() diagnostics)`
+
+`cleanup` is a reserved KEYWORD (`compiler/src/tokenizer.ts`), so `cleanup(...)` ALWAYS parses as the §6.7.3 builtin registration regardless of any user declaration in scope. A source file may nonetheless declare `function cleanup() { ... }` — no `E-NAME-COLLIDES-RESERVED` fires for it — and the subsequent `cleanup()` call is then read as a builtin registration with an EMPTY callback rather than as a call to the user's function. **Pre-existing**: before S310 that emitted `_scrml_register_cleanup()` with no argument, silently. After S310 it emits `E-LIFECYCLE-004` ("requires one function argument"), which is technically true of the builtin but MISLEADING for this shape — the author's real error is naming a function after a reserved word. Strictly better than the prior silence, so not a regression. Surfaced by the S310 adversarial pass (`cl-shadow` probe), not by a report. Fix direction: fire `E-NAME-COLLIDES-RESERVED` on a declaration whose name is a reserved keyword, which would pre-empt the confusing lifecycle message. Verify first whether other reserved keywords (`reset`, `navigate`, `upload`) have the same hole — likely a family, not a singleton. <!-- @gap id=g-cleanup-keyword-shadowed-by-user-function-not-diagnosed sev=LOW status=open locus=compiler/src/tokenizer.ts -->
 
 ### g-onmount-request-no-refire-on-soft-nav — a mount `<request>` (and `on mount` bare-expression effects) do not re-fire when SPA soft-nav enters a view; a mount-fired paint/init silently no-ops on navigation — `NEW S311-peter (aM S67 adopter witness); MED; open (bryan-lane — soft-nav remount lifecycle)`
 <!-- @gap id=g-onmount-request-no-refire-on-soft-nav sev=MED status=open locus=searched:compiler/runtime/runtime-template.js,emit-reactive-wiring.ts,§6.7.2,§17.3,§20.8 -->

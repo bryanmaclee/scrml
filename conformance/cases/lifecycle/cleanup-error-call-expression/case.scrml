@@ -1,0 +1,12 @@
+// §6.7.3 — cleanup() argument is a CALL expression. Invoking at registration time closes the
+// resource eagerly at mount and registers the RETURN VALUE as the teardown callback.
+<program>
+  <div>
+    ${
+      function closeConnection() {
+        return 1
+      }
+      cleanup(closeConnection())
+    }
+  </div>
+</program>

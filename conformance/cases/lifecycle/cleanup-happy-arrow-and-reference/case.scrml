@@ -1,0 +1,13 @@
+// §6.7.3 — the two LEGITIMATE forms: an arrow expression and a bare function reference.
+// Neither may fire any E-LIFECYCLE diagnostic.
+<program>
+  <div>
+    ${
+      function teardown() {
+        return 1
+      }
+      cleanup(() => { teardown() })
+      cleanup(teardown)
+    }
+  </div>
+</program>
