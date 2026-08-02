@@ -61,6 +61,13 @@ const GAP_STATUS_OPEN = new Set([
   "in-progress",   // being worked; still an open defect
   "narrowed",      // scope reduced, remainder still open
   "ruling-gated",  // blocked on a ruling; the defect is live
+  // S313: the ledger's own status legend (docs/known-gaps.md, header) defines `partial-impl` —
+  // "some sub-units shipped, others pending" — but the classifier did not know it, so the first
+  // marker to use the machine field with that value threw here. Counts as OPEN: a half-built
+  // guarantee is a live gap. The throw was CORRECT (the S307 fail-loud guard doing its job, refusing
+  // to emit a count that silently omits an entry); the fix is to teach the script a value the ledger
+  // already sanctions, not to downgrade the marker to fit the script.
+  "partial-impl",
 ]);
 const GAP_STATUS_CLOSED = new Set([
   "resolved",

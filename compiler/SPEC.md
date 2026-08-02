@@ -13861,7 +13861,7 @@ function quickCheck(value)! {
 
 The `!` modifier on a function signature declares that the function is **failable** -- it can produce either a success value or an error value.
 
-- `!` with `-> ErrorType` declares the specific error enum type that this function can produce. The function's return type is implicitly `SuccessType | ErrorType`, where `SuccessType` is inferred from the function's return expressions.
+- `!` with `-> ErrorType` declares the specific error type that this function can produce — an error **enum** for the variant-bearing surface, or a scalar non-enum type per §19.4.4.1. The function's return type is implicitly `SuccessType | ErrorType`, where `SuccessType` is inferred from the function's return expressions.
 - `!` without `-> ErrorType` uses a built-in default error enum: `Error`, which has a single variant `Error::Generic(message: string)`.
 - The return type of a `!` function is a **tagged union** of the success type and the error type. The compiler tracks both branches.
 
@@ -13879,10 +13879,50 @@ Failing to handle the result of a `!` function call in any of these ways SHALL b
 #### 19.4.4 Normative Statements
 
 - The `!` modifier SHALL appear after the parameter list and before the optional error-type annotation in a function declaration.
-- The error type annotation after `!` MAY be declared with the arrow form (`! -> ErrorType`) or the bare form (`! ErrorType`) — the two forms are EQUIVALENT; both declare the function's error enum type explicitly (S137 amendment).
+- The error type annotation after `!` MAY be declared with the arrow form (`! -> ErrorType`) or the bare form (`! ErrorType`) — the two forms are EQUIVALENT; both declare the function's error type explicitly (S137 amendment). That type is an error **enum** for the variant-bearing surface, or a scalar non-enum type per §19.4.4.1.
 - A function with `!` SHALL accept `fail` statements in its body. A function without `!` SHALL NOT accept `fail` statements (E-ERROR-001).
 - The caller of a `!` function SHALL handle the result via match, `?`, `!{}`, or `<errorBoundary>`. An unhandled `!` function call SHALL be a compile error (E-ERROR-002).
 - The `!` modifier SHALL be part of the function's type signature. It is visible to the type system and participates in type checking.
+
+##### 19.4.4.1 The error type MAY be a non-enum scalar (S313 ruling)
+
+The statements above and §19.3 describe the error type as an **enum**, and for the variant-bearing
+surface — `fail Enum::Variant(...)`, variant-matching `!{ | ::Variant :> … }` arms — it must be one.
+But scrml also admits, and its own corpus teaches, a **scalar non-enum** error type:
+
+```scrml
+// SANCTIONED — the error value is a plain `string`; the call site uses a CATCH-ALL arm.
+function fetchItems() ! string {
+    return ?{`SELECT id, name FROM items ORDER BY name`}.all()
+}
+
+const rows = fetchItems() !{ | err :> { @phase = .Failed("Couldn't load items."); return } }
+```
+
+- The error type after `!` MAY be an **enum type** or a **scalar non-enum type** (e.g. `string`).
+- When it is a scalar non-enum type, the error value is an ordinary value of that type. It has no
+  variants, so §19.3's `fail-stmt` production — which requires `enum-type ('.' | '::') variant-name` —
+  is **inapplicable**, and a variant-matching `!{}` arm is likewise unavailable. Such a function
+  surfaces failure to a **catch-all** handler arm (`| err :> …`), which binds the error value whole.
+- The error type after `!` SHALL NOT be an **array or other compound type** (`! string[]`,
+  `! (A, B)`). A compound error type has no coherent variant-matching *or* catch-all story, and it is
+  the shape that produced the #228 empty-body parse defect. This is **`E-ERROR-011`**
+  (*Reserved / spec-ahead — no emitter yet; the §34 row lands WITH the implementation, per §34.0
+  outcome 2 and the named-codes-land-with-impl rule*).
+
+**Why this is a ratification and not a widening.** §62.2 makes the conformance corpus the versioned
+contract, and the scalar form is already **in** it: five conformance cases pin
+`server function persistSignup(…) ! string` (`form-for/formfor-{submit-collects-values,
+onsubmit-signature,validity-bug58-clean,valid-enables-submit,typing-errors}`) and the flagship
+`examples/29-engine-vs-flags.scrml:79` both uses it and TEACHES it in a comment. Reading the
+enum-only sentences strictly would have made the compiler reject the contract it is measured against
+and a documented example — so this subsection records what the language already is, and confines the
+*new restriction* to the compound form.
+
+**Direction of change (pa-base §8).** The scalar clause is **inert** — no program's meaning or
+acceptance status changes; it removes a contradiction between the prose and the corpus. The compound
+clause is **newly-rejecting**, and its migration is **measured at zero**: a corpus sweep of every
+`.scrml` outside `node_modules`/`dist` finds **0** array or compound `!` error types.
 - `server` and `!` modifiers MAY coexist: `server function loadUser(id)! -> UserError { ... }` (arrow form) or `server function loadUser(id)! UserError { ... }` (bare form).
 - `pure` (§33) and `!` modifiers MAY coexist: `pure function validate(x)! -> ValidationError { ... }`. A `pure` failable function SHALL NOT have side effects but MAY produce error values.
 
