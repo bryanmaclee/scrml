@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 22 |
-| MED | 108 |
+| MED | 107 |
 | LOW | 47 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -59,7 +59,16 @@ Compiler source → owes the S239 adversarial pass. **Locus TRACED, not searched
 **S314 UPDATE — the emit-time association EXISTS; the DISCRIMINATOR is the defect.** Established by compiling three shapes and reading the emitted branch, not by re-reading: (A) a shell-level `<timer>` → `_scrml_register_cleanup` (beforeunload, CORRECT); (B) a `<timer>` in a route file → `_scrml_register_cleanup` (**the defect, reproduced**); (C) a `<timer>` lexically inside `<outlet>…</outlet>` → `_scrml_region_cleanups` (**the mechanism works**). `classifyMarkupNodes` (`emit-reactive-wiring.ts:1091`) already stamps `_outletResident` and `:1273` already routes region-resident timers correctly — but `insideOutlet` means *lexical descendant of an `<outlet>` node in THIS file's AST*, and real route content is never that (the outlet is a shell slot; the route is a separate file). **So the fix is a PREDICATE correction on existing machinery, not new machinery** — the leave-edge is likely SMALLER than the S313 scoping assumed; the enter-edge (restart-on-return, §20.8.8 step 3) is genuinely unbuilt. Direction-of-change: **`semantics-changed`** (pa-base §8, the silent class) — ships as a fix because §6.7.2 + §20.8.8 pre-exist as governing sentences. Second false comment found: `emit-reactive-wiring.ts:1271-72` asserts *"the leak is closed"*; it is not. Full re-scope: `docs/changes/route-region-teardown/SCOPING.md` §"VERIFIED S314".
 
 ### g-page-keepalive-attr-spec-vs-spec-conflict — `<page keep-alive>` is sanctioned by a normative MAY in §20.8.4 and REJECTED by the normative "exactly four" attribute set in §4.15/§40; the form does not compile, and SPEC's own status note claims it is "recognized and validated" — `NEW S314-bryan; MED; open (SPEC-vs-SPEC — a RULING for bryan, not a fix; blocks conformance CN-10, which is the only case distinguishing ratified Pole C from Pole A)`
-<!-- @gap id=g-page-keepalive-attr-spec-vs-spec-conflict sev=MED status=open locus=compiler/SPEC.md:1094 prov=spec:§20.8.4 -->
+<!-- @gap id=g-page-keepalive-attr-spec-vs-spec-conflict sev=MED status=resolved locus=compiler/SPEC.md:1094 prov=ruling:user-voice-S314 -->
+> **✅ RULED + LANDED S314 — bryan: *"accept the 5fth attribute"*.** Option (a): `keep-alive` admitted, the set stays **CLOSED at five**. Landed together: `PAGE_ALLOWED_ATTRS` (`ast-builder.js`) + registration on the `<page>` surface in `attribute-registry.js` (so no incidental `W-ATTR-001`) + SPEC §4.15 / §40.8 / §34 / the §20.8 status note + **two conformance cases**.
+>
+> **Direction-of-change: newly-accepting TOWARD the contract** (pa-base §8) — §20.8.4 already declared the form legal, so this is conformance restoration, not a widening; §4.15's four-set was the stale sentence. **Migration measured zero across BOTH surfaces** — every `.scrml` (0 uses) AND the test suite (the `E-PAGE-INVALID-ATTR` tests use `name=` / `route=` / `title=`, all still rejected). Sweeping only `.scrml` was the recorded S313 miss and is why the suite was swept explicitly.
+>
+> **⭐ This UNBLOCKED CN-10, which is now AUTHORED** — `conformance/cases/route-region/cn10-keepalive-reentry`, codes-half with `runtime-half-pending: true` and a `runtime-half-ref` naming the two builds owed (§20.8.4's cache, and the route-region edges). **The judge's standing warning is discharged:** CN-10 is the only case separating ratified Pole C from Pole A, and it can no longer decay unobserved. The harness marker that made this possible already existed (`conformance/run.ts:46`).
+>
+> **Bite proven both ways** (pa-base v2.4 — an unproven gate is indistinguishable from one that cannot fail): reverting the allowlist to four turned **exactly** the two new cases red and nothing else (850/852); restoring returned 852/852.
+>
+> The **third false status claim** is corrected in the same landing — §15735 said keep-alive *"is recognized and validated"*; it now is, and the sentence records that it was false for the entire window it existed.
 
 Probed on `e80b692e`: `<page keep-alive>` fires `E-PAGE-INVALID-ATTR` (plus a `W-ATTR-001` that contradicts it on the same line — one says forwarded-as-is, the other rejects the file).
 

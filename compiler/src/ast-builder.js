@@ -18924,8 +18924,8 @@ export function buildAST(bsOutput, tokenizerOverrides) {
   // SPEC §4.15, §40.8, §34 catalog rows:
   //   - E-PAGE-ROUTE-ATTR-FORBIDDEN — `<page route="...">` (doubly forbidden;
   //     routes are filesystem-inferred per §47.9.2).
-  //   - E-PAGE-INVALID-ATTR — any `<page>` attribute outside {db, auth, csrf,
-  //     ratelimit}.
+  //   - E-PAGE-INVALID-ATTR — any `<page>` attribute outside
+  //     {db, auth, csrf, ratelimit, keep-alive}.
   //   - W-PROGRAM-REDUNDANT-LOGIC — `<program>` (or `<page>`) body wraps top-
   //     level declarations in an unnecessary `${...}` logic block. v0.3 emits
   //     this as a warning; v0.4 will escalate to error per Q5 deprecation.
@@ -18933,7 +18933,19 @@ export function buildAST(bsOutput, tokenizerOverrides) {
   // Walker fires post-AST-build over `programNode`/`<page>` direct children.
   // ---------------------------------------------------------------------------
   {
-    const PAGE_ALLOWED_ATTRS = new Set(["db", "auth", "csrf", "ratelimit"]);
+    // §4.15 / §40.8 per-route attribute set. FIVE as of S314 — `keep-alive`
+    // admitted by bryan's ruling (user-voice S314, "accept the 5fth attribute").
+    // provenance: dd:page-helper-element-design-2026-05-12 · supersedes: the
+    // four-set enumeration. The DD's rule is an APP-WIDE-vs-PER-ROUTE partition,
+    // not a designed bound — the original four were the OUTPUT of a classification
+    // run over the <program> attribute surface as it stood 2026-05-12, and
+    // `keep-alive` (§20.8.4) did not exist yet. It is per-route by construction:
+    // §20.8.4 says a ROUTE opts in, and §20.8.8 Pole C keys the region by
+    // (route, params). §20.8.4 already declared the form legal, so admitting it is
+    // newly-accepting TOWARD the contract (pa-base §8) — a conformance fix, not a
+    // widening. The set stays CLOSED and enumerated on purpose: "is this attribute
+    // per-route?" is a judgment call that drifts; a list is mechanically checkable.
+    const PAGE_ALLOWED_ATTRS = new Set(["db", "auth", "csrf", "ratelimit", "keep-alive"]);
 
     // App-wide attributes belong on <program>. Used in diagnostic hinting.
     const APP_WIDE_ATTRS = new Set([
@@ -19011,7 +19023,7 @@ export function buildAST(bsOutput, tokenizerOverrides) {
             } else if (NESTED_PROGRAM_ATTRS.has(name)) {
               hint = `\`${name}=\` is a nested-program attribute (worker / sidecar — see SPEC §43); it has no meaning on \`<page>\`.`;
             } else {
-              hint = `The allowed \`<page>\` attribute set is exactly \`{ db, auth, csrf, ratelimit }\` (per-route concerns). ` +
+              hint = `The allowed \`<page>\` attribute set is exactly \`{ db, auth, csrf, ratelimit, keep-alive }\` (per-route concerns). ` +
                 `App-wide concerns belong on \`<program>\`; per-element metadata belongs on markup elements inside the page body.`;
             }
             errors.push(new TABError(

@@ -1,0 +1,12 @@
+<program>
+
+  <h1>Shell</h1>
+  <outlet/>
+
+  <page keep-alive>
+    <ticks> = 0
+    <timer interval=1000>${ @ticks = @ticks + 1 }</timer>
+    <p>ticks ${@ticks}</p>
+  </page>
+
+</program>
