@@ -1,0 +1,19 @@
+{
+  "id": "request-data-is-some-if-attr-rt",
+  "description": "§6.7.7 / §42.2.4 — a `<request>`-ref member as an `is`-predicate LHS in an `if=` ATTRIBUTE (`if=<#userReq>.data is some`). Regression pin for g-request-data-is-some-misroute (S312, adopter assetManagement S67): pre-fix this miscompiled to `_scrml_input_state_registry.get(\"userReq\").(data !== null && ...)` — E-CODEGEN-INVALID-LOGIC, NO client bundle written, a stale client silently shipped. Codes-half: the `is some` presence check on a request-ref member must compile (no E-CODEGEN-INVALID-LOGIC). Runtime-half: on a 2xx settle `<#userReq>.data is some` becomes true so #who mounts and reads the name, while `<#userReq>.error is some` stays false so #err never enters the DOM. Twin of request-settle-success-rt, using the `is some` presence form on the attribute path (the text-interpolation path was already correct).",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§42.2.4: `<lhs> is some` lowers to a presence check over the WHOLE lhs; the `<#id>` request-ref sigil is a valid lhs base and its member (`.data`) must route to the reactive `_scrml_request_<id>` object (§6.7.7), not the §36 input-state registry which a request never populates. The attribute path must lower this IDENTICALLY to the `${...}` text-interpolation path.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "notCodePrefixes": ["E-TYPE-", "E-RI-"],
+    "input": [{ "wait": "settle" }],
+    "serverStub": { "loadUser": { "id": 7, "name": "Ada" } },
+    "state": { "userData": { "id": 7, "name": "Ada" } },
+    "domAnchored": [
+      { "selector": "#who", "text": "Ada" },
+      { "selector": "#err", "count": 0 }
+    ]
+  }
+}
