@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 23 |
-| MED | 111 |
+| MED | 112 |
 | LOW | 47 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -122,7 +122,21 @@ DD §0.3 then enumerates the entire `<program>` attribute surface **as it stood 
 **Disposition options for the pre-V1 call:** (i) **Nominal-label** — state the boundary in §20.8.4 ("the cache is SQL-server-load-scoped; `<request>` results are not cached") and accept it for 1.0; (ii) **extend** keep-alive to `<request>` — needs an invalidation story that is NOT the Postgres-trigger one, since an HTTP endpoint gives no change signal, so it would be TTL- or focus-revalidate-based and §20.8.4 explicitly rejects author TTLs (*"Invalidation SHALL be compiler-derived, not an author TTL"*); (iii) **strike the ambiguity** by narrowing §20.8.4's opening sentence to say "server-load payload" everywhere it currently reads as general. **(i) is the cheap honest answer and (ii) collides with a normative SHALL** — worth knowing before the freeze conversation, not during it.
 
 ### g-timer-poll-body-emitted-at-module-scope-and-clobbers-reset — a `<timer>`/`<poll>` body's statements are ALSO emitted at module scope: the body runs once at load before any tick, AND it overwrites the cell's `reset()` initializer so `reset()` INCREMENTS instead of resetting — `NEW S314-bryan (surfaced scoping U1b); HIGH; open (silent wrong output on TWO documented primitives)`
-<!-- @gap id=g-timer-poll-body-emitted-at-module-scope-and-clobbers-reset sev=HIGH status=open locus=compiler/src/codegen/collect.ts:205 prov=spec:§6.7.5 -->
+<!-- @gap id=g-assignment-emits-init-set-inverting-reset sev=HIGH status=open locus=compiler/src/codegen/emit-logic.ts prov=spec:§6.8 -->
+> **⚠️ S314 RE-SCOPED AND SPLIT — the original filing conflated TWO independent defects and over-claimed the corpus.** Everything below the split marker is the ORIGINAL text, retained for provenance; read this block first.
+>
+> **DEFECT 1 (this entry) — an ASSIGNMENT emits `_scrml_init_set`, inverting `reset()`. NOT timer-specific.**
+> Proven on a fixture with **no timer at all**: `<ticks> = 0` then a top-level `${ @ticks = @ticks + 1 }` emits `init_set("ticks", () => 0)` AND `init_set("ticks", () => get("ticks") + 1)`. `_scrml_init_fns[name] = fn` is last-write-wins (`runtime-template.js:661`) and `_scrml_reset` calls it (`:1146+`), so **`reset(@ticks)` evaluates `current + 1` — it INCREMENTS.** The decl-shaped `init_set` lowering is being applied to assignment statements; an assignment is not a re-declaration.
+>
+> **Precise boundary (measured, not assumed):** the cell must have **no `default=`** — `_scrml_reset` checks `_scrml_default_fns` FIRST and returns, so a `default=` cell is shielded (verified: `<a default=0>` resets to 0 correctly while its sibling `<b>` does not) — AND the assignment must be in **top-level logic**, not inside a `function` body (verified: `examples/02-counter.scrml` assigns inside `increment()`/`decrement()` and emits exactly ONE correct `init_set`; `reset(@count)` works there).
+>
+> **Corpus exposure: ONE file emits the clobber — `examples/08-chat.scrml` (`messages`, from the top-level seed block at :94) — and ZERO files observe it**, because nothing calls `reset(@messages)` (the only reset there is `reset(@draft)`). So fixing it is a **non-zero artifact diff with zero behavioural change** in the corpus. Measured by compiling all 17 reset-calling files with a CLEAN output dir per compile and diffing duplicate `init_set` keys.
+>
+> ⚠️ **Two of my own measurements were wrong before this one, both over-stating.** A source regex counted `examples/02-counter.scrml` + `docs/website/pages/getting-started.scrml` as exposed — they are not, the assignments are inside functions. Then an artifact scan reported 20 clobbered cells across 12 files — that scanner reused one output directory across compiles and was grepping accumulated artifacts. The real answer is one file. **HIGH stands on the silent-wrong-output class, not on the count** (§6.8's primitive does the opposite of its name); zero corpus coverage is why it survived, the S299 shape.
+>
+> **DEFECT 2 — split out to [[g-timer-poll-body-runs-once-at-module-init]].** Different root (`collect.ts:205` descent), different fix, and it carries a live design fork the reset fix does not.
+> ---
+> *(original S314 filing follows)*
 **Root cause:** `collectTopLevelLogicStatements` (`collect.ts:205`) descends into `node.children` for EVERY node, so a `<timer>`/`<poll>` body is collected as top-level logic AND emitted again inside the timer callback. Pre-existing; found while tracing U1b, not by U1a. For `<request>` the same descent is the DESIGNED canonical-form fetch and emits once — the defect is specific to the tick-driven tags.
 
 **Emitted verbatim** for `<ticks> = 0` + `<timer interval=1000>${ @ticks = @ticks + 1 }</timer>` + a `reset(@ticks)` call, on `080127ba`:
@@ -141,6 +155,23 @@ DD §0.3 then enumerates the entire `<program>` attribute surface **as it stood 
 **Why it survived:** the corpus has no file that both writes a cell from a `<timer>`/`<poll>` body and calls `reset()` on that cell, so nothing exercises consequence 2; and consequence 1 is invisible unless the body is observably side-effecting at load. Same shape as the S299 component-id bug — a real defect with zero corpus coverage.
 
 **Blocks U1b** (`docs/changes/route-region-teardown/SCOPING-EDGE2.md`): those statements sit at a source position INSIDE the timer node's own span, so a positional merge has no defined position for them. Fix band **S**, but `semantics-changed` with a genuinely NON-zero corpus diff — unlike U1a, this one moves real output. Fix this BEFORE U1b.
+
+### g-timer-poll-body-runs-once-at-module-init — a `<timer>`/`<poll>` body executes once at load, before any tick; §6.7.5/§6.7.6 say it executes ON each tick — `NEW S314-bryan (split from the reset gap); MED; open (carries a DESIGN FORK for `<poll>`)`
+<!-- @gap id=g-timer-poll-body-runs-once-at-module-init sev=MED status=open locus=compiler/src/codegen/collect.ts:205 prov=ruling:user-voice-S314 -->
+> **✅ FORK RULED S314 — bryan: (b).** Remove the module-init run, AND amend §6.7.6 to specify an **immediate first tick for `<poll>`**, leaving `<timer>` strict (first execution one interval after arming). **The SPEC half is LANDED**; the impl is the remaining work.
+>
+> **The two land TOGETHER or not at all.** Removing the defect without the amendment is a visible regression for every `<poll>` — §6.7.6's own worked example (`<poll id="serverTime" interval=10000>`) would render nothing for ten seconds. The defect was accidentally supplying first-tick-ish behaviour the spec was silent on; that is the S313 "a bug fix is not automatically inert" shape.
+>
+> **Amendment specifies three things the fork did not:** the immediate tick runs through the SAME tick path (inheriting §6.7.5 async queuing, error handling, `<#id>.tickCount`) rather than being a special-cased pre-run · it is **gated by `running=`** (a `<poll running=false>` has not armed, so no immediate tick) · it fires **once per arming, NOT per resume** — a `running` false→true transition resumes the interval only. That last one is a **PA sub-choice**, stated explicitly in the SPEC so it is reversible on evidence: firing on every resume would turn a boolean write into a fetch trigger, a side effect at a distance.
+>
+> **Impl scope:** stop `collect.ts:205` descending into tick-tag children (the module-init leak) + add the immediate first tick for `<poll>` only + conformance pinning BOTH halves and the `<timer>`-stays-strict asymmetry. **Corpus: 13 tick-tag declarations with a `${}` body across 7 files; 1 file has `<poll>`.** `<timer>` files lose a load-time execution (`semantics-changed`, intended); `<poll>` behaviour is approximately preserved but now specified and correctly scoped — the current run happens at module scope in the top-level logic stream, which is also what clobbers `reset()` (see [[g-assignment-emits-init-set-inverting-reset]]).
+>
+> **Sequencing:** HELD until the reset() fix lands — that agent is live on the decl-vs-assignment lowering and this touches adjacent emit paths (ingestion-disjoint invariant, pa-base §7).
+`collectTopLevelLogicStatements` (`collect.ts:205`) descends into `node.children` for EVERY node, so a tick-tag body is collected as top-level logic AND emitted inside the callback — it runs once at module init, then on each tick. §6.7.5: *"The timer body (the `${}` logic block) executes on each interval tick."* §6.7.6: *"The poll body is a `${}` logic block that executes on each tick."* **Neither specifies a run at load**, so removing it is conformance restoration. For `<request>` the same descent is the DESIGNED canonical-form fetch and emits once — the defect is specific to the tick-driven tags.
+
+**Corpus: 13 tick-tag declarations WITH a `${}` body across 7 files** (only 1 file has `<poll>`). Unlike the reset defect this one IS behaviourally observable — those 7 lose a load-time execution.
+
+**⚑ DESIGN FORK, and it is why this is split from the reset fix.** Strict conformance means a `<poll interval=10000>` waits a full 10s before its FIRST fetch — §6.7.6's own worked example is `<poll id="serverTime" interval=10000>`, a clock that would show nothing for ten seconds. The current buggy load-time run is accidentally providing the behaviour most polling UIs want. So: **(a)** remove it — strict §6.7.6, poll waits one interval; **(b)** remove it and AMEND §6.7.6 to specify an immediate first tick for `<poll>` (leaving `<timer>` strict); **(c)** remove it for `<timer>` only and rule `<poll>` separately. **This is the S313 "a bug fix is not automatically inert" shape — the leak can be fixed by making the form work or by rejecting it, and choosing is a language decision.** Route to bryan before building.
 
 ### g-region-bodies-emit-in-bucket-order-not-declaration-order — §20.8.8 step 3 requires region bodies to run in DECLARATION order; emission is by BUCKET, so the violation is live at initial load with no navigation — `NEW S314-bryan (surfaced scoping Edge 2); MED; open`
 <!-- @gap id=g-region-bodies-emit-in-bucket-order-not-declaration-order sev=MED status=open locus=compiler/src/codegen/emit-reactive-wiring.ts:849 prov=spec:§20.8.8 -->
