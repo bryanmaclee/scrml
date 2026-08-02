@@ -847,18 +847,64 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   }
 
   // Single-pass classification of markup nodes (replaces 5 independent AST walks)
-  const { lifecycleNodes, inputStateNodes, requestNodes, apiDeclNodes, timeoutNodes, bindPropsWirings } =
+  const { lifecycleNodes, inputStateNodes, requestNodes, apiDeclNodes, timeoutNodes, bindPropsWirings, regionOrderedNodes } =
     classifyMarkupNodes(getNodes(fileAST));
 
-  // Step 5: Generate <timer> and <poll> lifecycle initialization (§6.7.5, §6.7.6)
-  if (lifecycleNodes.length > 0) {
-    lines.push("");
-    lines.push("// --- lifecycle initialization (compiler-generated) ---");
-    for (const lcNode of lifecycleNodes) {
-      const lcLines = emitLifecycleNode(lcNode, errors, fileAST.filePath ?? "");
-      for (const l of lcLines) lines.push(l);
+  // Steps 5 + 5c are ONE source-ordered pass — §20.8.8 step 3.
+  //
+  // "Bodies associated with the region run in declaration order." `<timer>`,
+  // `<poll>` and `<request>` are three of the six construct kinds §6.7.2.1
+  // associates with an element scope or route region, so their EMITTED order
+  // must follow their DECLARED order. Emitting them as two sequential bucket
+  // passes could not express that: every `<timer>` preceded every `<request>`
+  // regardless of authoring, so a `<timer>` declared SECOND ran before a
+  // `<request>` declared FIRST. (§20.8.8(6) makes the first rendering of route
+  // content a `route-enter`, so this clause binds a page that never navigates —
+  // at module init the emitted order IS the run order.)
+  //
+  // DELIBERATELY NOT WIDENED: `<keyboard>`/`<mouse>`/`<gamepad>` (Step 5b),
+  // `<channel>` (Step 5.5) and `<timeout>` (Step 5d) are NOT in §6.7.2.1's set.
+  // They keep their own passes, their own relative order, and their own emitted
+  // text. Reordering them would be a semantics change with no clause behind it.
+  //
+  // WHERE the merged block lands: at the slot of whichever in-set bucket emitted
+  // FIRST under the legacy bucket ordering — the lifecycle slot when the file
+  // declares any `<timer>`/`<poll>`, the request slot otherwise. SPEC constrains
+  // the in-set bodies relative to EACH OTHER and says nothing about their
+  // position relative to the out-of-set kinds, so this rule is chosen to hold
+  // the out-of-set neighbours still: a file declaring only ONE of the two in-set
+  // kinds emits byte-identically to the pre-fix output, and only a file that
+  // actually interleaves them moves.
+  const regionWiringAtLifecycleSlot = lifecycleNodes.length > 0;
+  // Deep-walked api-decl set (classifyMarkupNodes descends into <program>/
+  // <page>/engine bodies) — getNodes() top-level-only missed a wrapped <api>.
+  // §60.4 — `<request api="endpointName">` (typed external API) resolves here.
+  const apiEndpoints: Map<string, ApiEndpointForEmit> =
+    requestNodes.length > 0 ? buildApiEndpointRegistry(apiDeclNodes) : new Map();
+  const emitRegionOrderedWiring = (): void => {
+    let previousKind: RegionBodyKind | null = null;
+    for (const { kind, node } of regionOrderedNodes) {
+      // One section header per contiguous RUN of the same kind, so a file that
+      // declares only timers or only requests reads exactly as it did before.
+      if (kind !== previousKind) {
+        lines.push("");
+        lines.push(
+          kind === "lifecycle"
+            // Step 5: <timer> / <poll> lifecycle initialization (§6.7.5, §6.7.6)
+            ? "// --- lifecycle initialization (compiler-generated) ---"
+            // Step 5c: <request> single-shot async fetch initialization (§6.7.7)
+            : "// --- request async fetch initialization (§6.7.7, compiler-generated) ---",
+        );
+        previousKind = kind;
+      }
+      const emitted = kind === "lifecycle"
+        ? emitLifecycleNode(node, errors, fileAST.filePath ?? "")
+        : emitRequestNode(node, errors, fileAST.filePath ?? "", apiEndpoints);
+      for (const l of emitted) lines.push(l);
     }
-  }
+  };
+
+  if (regionWiringAtLifecycleSlot) emitRegionOrderedWiring();
 
   // Step 5b: Generate <keyboard>, <mouse>, <gamepad> input state initialization (§35)
   if (inputStateNodes.length > 0) {
@@ -887,20 +933,11 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     }
   }
 
-  // Step 5c: Generate <request> single-shot async fetch initialization (§6.7.7).
-  // §60.4 — also handles `<request api="endpointName">` (typed external API);
-  // the endpoint registry is built once from the file's `<api>` decls.
-  if (requestNodes.length > 0) {
-    // Deep-walked api-decl set (classifyMarkupNodes descends into <program>/
-    // <page>/engine bodies) — getNodes() top-level-only missed a wrapped <api>.
-    const apiEndpoints = buildApiEndpointRegistry(apiDeclNodes);
-    lines.push("");
-    lines.push("// --- request async fetch initialization (§6.7.7, compiler-generated) ---");
-    for (const rqNode of requestNodes) {
-      const rqLines = emitRequestNode(rqNode, errors, fileAST.filePath ?? "", apiEndpoints);
-      for (const l of rqLines) lines.push(l);
-    }
-  }
+  // Step 5c: <request> initialization is emitted by the merged source-ordered
+  // pass above (see the §20.8.8 step 3 note at Step 5). It runs HERE — after
+  // input-state and channel — when the file declares no `<timer>`/`<poll>`,
+  // which reproduces the legacy bucket position exactly.
+  if (!regionWiringAtLifecycleSlot) emitRegionOrderedWiring();
 
   // Step 5d: Generate <timeout> single-shot timer initialization (§6.7.8)
   if (timeoutNodes.length > 0) {
@@ -1059,6 +1096,23 @@ export function fileHasOutlet(fileAST: any): boolean {
 // Single-pass markup classification (replaces 5 independent AST walks)
 // ---------------------------------------------------------------------------
 
+/**
+ * §6.7.2.1 associates six construct kinds with the nearest enclosing element
+ * scope OR route region: `${}` logic blocks, `on mount` bodies, `<request>`,
+ * `<timer>`, `<poll>` and `cleanup()` registrations. THREE of those six are
+ * classified by this walk — `<timer>`/`<poll>` (`"lifecycle"`) and `<request>`
+ * (`"request"`) — and §20.8.8 step 3 requires them to run in DECLARATION order.
+ *
+ * `<keyboard>`/`<mouse>`/`<gamepad>`, `<channel>` and `<timeout>` are NOT in
+ * §6.7.2.1's set and are deliberately absent from this ordering.
+ */
+type RegionBodyKind = "lifecycle" | "request";
+
+interface RegionOrderedWiring {
+  kind: RegionBodyKind;
+  node: any;
+}
+
 interface WiringCollections {
   lifecycleNodes: any[];
   inputStateNodes: any[];
@@ -1066,6 +1120,14 @@ interface WiringCollections {
   apiDeclNodes: any[];
   timeoutNodes: any[];
   bindPropsWirings: BindPropsWiring[];
+  /**
+   * The §6.7.2.1 region-associated bodies this walk classifies, in SOURCE
+   * (declaration) order — the interleaving of `lifecycleNodes` and
+   * `requestNodes` that the per-bucket arrays cannot express. The walk below is
+   * a pre-order DFS, and a markup node is pushed BEFORE its children are
+   * visited, so push order is source order.
+   */
+  regionOrderedNodes: RegionOrderedWiring[];
 }
 
 /**
@@ -1086,6 +1148,7 @@ function classifyMarkupNodes(nodes: any[]): WiringCollections {
     apiDeclNodes: [],
     timeoutNodes: [],
     bindPropsWirings: [],
+    regionOrderedNodes: [],
   };
 
   function visit(nodeList: any[], insideOutlet = false): void {
@@ -1135,6 +1198,7 @@ function classifyMarkupNodes(nodes: any[]): WiringCollections {
         if (tag === "timer" || tag === "poll") {
           if (insideOutlet) node._outletResident = true;
           result.lifecycleNodes.push(node);
+          result.regionOrderedNodes.push({ kind: "lifecycle", node });
         } else if (tag === "keyboard" || tag === "mouse" || tag === "gamepad") {
           // navigate-wave1b #7 — an <keyboard>/<mouse>/<gamepad> lexically inside the
           // outlet is region-resident: its GLOBAL document/window listeners must be
@@ -1146,6 +1210,7 @@ function classifyMarkupNodes(nodes: any[]): WiringCollections {
           result.inputStateNodes.push(node);
         } else if (tag === "request") {
           result.requestNodes.push(node);
+          result.regionOrderedNodes.push({ kind: "request", node });
         } else if (tag === "timeout") {
           result.timeoutNodes.push(node);
         }
