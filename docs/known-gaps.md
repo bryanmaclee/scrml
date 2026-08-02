@@ -30,11 +30,40 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 20 |
-| MED | 107 |
+| HIGH | 21 |
+| MED | 108 |
 | LOW | 46 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-session-not-rewritten-inside-sql-interpolation — `session.*` inside a `?{}` SQL template interpolation is not rewritten; bare `session` reaches the server emit and the route 500s on every call — `NEW S313-bryan (adopter dc/DanceCard, GH #357); HIGH; open (build-integrity + silent at compile; PA-REPRODUCED on 16783d6d)`
+<!-- @gap id=g-session-not-rewritten-inside-sql-interpolation sev=HIGH status=open locus=compiler/src/codegen/rewrite.ts:436 -->
+
+Adopter **dc / DanceCard** (a third adopter alongside aM and RediLedger), filed against `a4a4d55f`. **PA-REPRODUCED on `16783d6d`** — not taken on report.
+
+`session.*` lowers to `_scrml_req._scrml_sess.*` in ordinary expression position, but the rewrite does not reach the expression children of a `?{}` SQL template's interpolations. The bare identifier survives into `.server.js`, which binds no such name, so the handler closes over a free variable → `ReferenceError: session is not defined` → **HTTP 500 on every call**. Reproduced with both positions in the SAME function, one line apart:
+
+```
+168:    if (!_scrml_req._scrml_sess.isAuth) {                                    ✅ rewritten
+171:    return (await _scrml_sql`SELECT id, email FROM users WHERE id = ${session.userId}`)[0] ?? null;   ❌ bare
+```
+
+dc reports 2 of 2 interpolated sites bare and 2 of 2 ordinary sites rewritten in their real slice (`loadMe`, `checkInto`).
+
+**Why HIGH.** Compile exits 0 with zero diagnostics and `node --check` passes — the emit is syntactically valid, the identifier simply does not exist at runtime, so only an actual request finds it. Build-integrity + silent-at-compile on a session/auth surface, adopter-witnessed: the same basis on which `g-request-data-is-some-misroute` was bumped MED→HIGH at S311.
+
+**⚠️ ONE ADOPTER CLAIM DELIBERATELY NOT PROPAGATED — it is UNVERIFIED.** dc argues the failure direction "is luck, not design": with the guard rewritten and the query bare it fails CLOSED (a loud 500 for an authenticated user), but a variant where only the GUARD is interpolated would throw before the auth check and **fail OPEN**. I did not construct that variant, and on the face of it a bare `ReferenceError` in the guard still aborts the request with a 500 rather than granting access — so the fail-open shape is a hypothesis, not a finding. Recorded because it would raise severity further if true; **verify it before citing it** (S302: a reverse-verify falsified a reporter's own attribution).
+
+**Fix direction (dc's, and it matches the code):** a traversal gap, not a semantics question — the session lowering walks expression nodes but not the interpolation children of a SQL template. Those are ordinary expressions and want the same visitor. Locus `compiler/src/codegen/rewrite.ts:436` (`rewriteSqlRefs`, the text-rewrite SQL path) is PA-located-not-traced (pa-base §5) — confirm the pass boundary before scoping. **Lane: Peter** (adopter/codegen). On landing, close GH #357 with the SHA.
+
+### g-263-direct-cross-file-const-import-not-emitted-client — an exported `const` imported DIRECTLY by another unit never reaches the client bundle or the export table — `NEW S313-bryan (adopter, GH #358); MED; open (a known-but-unfiled #263 residual, now adopter-witnessed)`
+<!-- @gap id=g-263-direct-cross-file-const-import-not-emitted-client sev=MED status=open locus=compiler/src/codegen/emit-client.ts -->
+
+GH #358. **Not new information — it was already recorded in prose and never filed**: [[g-263-typeannotated-export-const-not-collapsed-client]] ends with *"Also unwired: a direct cross-file `import { CONST }` used in the importer (not via a closing fn) — pre-existing, separate."* The adopter report is the witness that promotes that sentence to its own entry.
+
+`emitReferencedModuleExportConstLines` (emit-client.ts) collapses a module `export const` into the client bundle when it is reached through a closing function, but a DIRECT `import { CONST }` used in the importing unit is not seen, so the binding stays undeclared client-side → ReferenceError. **Under-emit, never a leak** — the #263 confidentiality property is unaffected; this is a completeness gap in the same family as [[g-263-lambda-body-only-export-const-not-emitted-client]] (LOW) and the type-annotated sibling (MED).
+
+**NOT PA-reproduced this session** (filed from the issue + the existing prose record; the sibling entries were reproduced when they were filed). Reproduce before scoping — the family has already had one entry whose stated mechanism was wrong. **Lane: Peter** (adopter/codegen). On landing, close GH #358 with the SHA.
 
 ### g-lsp-commands-selfhost-tiers-have-no-failure-name-set-assertion — three excluded test tiers still carry a documented failure baseline with NO mechanical assertion; a regression in them is invisible — `NEW S313-bryan; LOW; open (the measured residual of the Q6 browser-tier work)`
 <!-- @gap id=g-lsp-commands-selfhost-tiers-have-no-failure-name-set-assertion sev=LOW status=open locus=scripts/browser-baseline.ts -->
