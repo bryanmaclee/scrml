@@ -1,0 +1,11 @@
+{
+  "id": "components-missing-required-slot-clean",
+  "description": "§16.2 clean neg — filling a required snippet prop via a `slot=\"header\"` child at the call site SHALL NOT fire E-COMPONENT-010.",
+  "language-version": "1.0",
+  "spec": "§16.2",
+  "rationale": "§16.5: a `slot=\"name\"` child desugars to a snippet prop assignment, so `<h3 slot=\"header\">` satisfies the required `header: snippet` declaration and the §16.2 requirement is met.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-COMPONENT-010"]
+  }
+}

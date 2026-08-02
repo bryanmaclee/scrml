@@ -1,0 +1,10 @@
+{
+  "id": "components-missing-required-slot-reject",
+  "description": "§16.2 — a required SNIPPET prop (a required slot) omitted at the call site SHALL fire E-COMPONENT-010. `Card` declares `header: snippet` with no `?`; the use site `<Card title=\"Order Summary\"/>` omits it. Reject (pos) half of the required-SLOT pin; clean neg is components/missing-required-slot-clean. Distinct from components/missing-required-prop-reject, which pins the VALUE-prop instance of the same code — §16.7 states 010/011 apply to snippet props exactly as to value props, and this case is what pins that sentence.",
+  "language-version": "1.0",
+  "spec": "§16.2",
+  "rationale": "§16.2, verbatim, on the worked example's `header: snippet` declaration: '`header` is required. Omitting it at the call site is E-COMPONENT-010.' §16.7 reinforces it: 'E-COMPONENT-010 (missing required prop) and E-COMPONENT-011 (extra undeclared prop) from §15.10 apply to snippet props exactly as they apply to value props.' `header` carries no `?` and no default, so omitting it is a hard error.",
+  "expect": {
+    "codes": ["E-COMPONENT-010"]
+  }
+}
