@@ -67,7 +67,7 @@ You don't. scrml has first-class form handling: `bind:value` on `<input>` wires 
 
 ### "I need redux / zustand / recoil / jotai"
 
-You don't. scrml's `@variable` reactive system is the state primitive. `const @derived = ...` replaces selectors. `<machine>` replaces state-machine libraries (XState).
+You don't. scrml's `@variable` reactive system is the state primitive. `const @derived = ...` replaces selectors. `<engine>` replaces state-machine libraries (XState). (`<machine>` was the old keyword; REMOVED at S307.)
 
 ### "I need tailwindcss"
 
@@ -79,7 +79,7 @@ You don't. scrml's `?{ SELECT ... FROM users }` is compile-time-typed SQL with s
 
 ### "I need a test runner (jest, vitest)"
 
-`scrml:test` (early). For the compiler itself, scrmlTS uses `bun test` directly — works on any `.test.js` file. Auto-property tests emit from `<machine>` declarations (§51.13).
+`scrml:test` (early). For the compiler itself, scrmlTS uses `bun test` directly — works on any `.test.js` file. Auto-property tests emit from `<engine>` declarations (§51.13) — ported off the removed `<machine>` keyword at S307.
 
 ### "I need JSON Schema / OpenAPI"
 

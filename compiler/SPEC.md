@@ -10516,7 +10516,7 @@ component name and source path; only then file a friction report.
 ### 15.15 Unified State-Type Registry and Name Resolution
 
 **Added:** 2026-04-30 — Phase P1 of the state-as-primary architectural unification (DD1 deep-dive `state-as-primary-unification-2026-04-30.md`; ratified by Approach A debate, score 93/110).
-**Status (P3-FOLLOW, 2026-05-02):** NR is the authoritative source for state-type / component routing. The implementation lives in `compiler/src/name-resolver.ts`; the wiring is post-MOD in `compiler/src/api.js`. The W-CASE-001 / W-WHITESPACE-001 diagnostics fire from NR; W-DEPRECATED-001 continues to fire from TAB (the keyword distinction is settled at TAB time). Downstream stages (CE, MOD, TS, validators, codegen, LSP) all route on NR's `resolvedKind` / `resolvedCategory` per §15.15.6.
+**Status (P3-FOLLOW, 2026-05-02):** NR is the authoritative source for state-type / component routing. The implementation lives in `compiler/src/name-resolver.ts`; the wiring is post-MOD in `compiler/src/api.js`. The W-CASE-001 / W-WHITESPACE-001 diagnostics fire from NR; **E-DEPRECATED-001 (Error) fires from TAB** — the keyword distinction is settled at TAB time. (W-DEPRECATED-001 is RETIRED; `<machine>` was REMOVED at S307, so the warning has no trigger. §63.7.) Downstream stages (CE, MOD, TS, validators, codegen, LSP) all route on NR's `resolvedKind` / `resolvedCategory` per §15.15.6.
 
 This section is the authoritative reference for tag-name resolution. All `<identifier ...>` openers — whether the identifier names an HTML element, a built-in scrml lifecycle state-type, a user-declared state type, or a component reference — resolve through the same lookup at the Name Resolution stage (NR, Stage 3.05; see PIPELINE.md).
 
@@ -10620,7 +10620,7 @@ For VP-2 (post-CE invariant, residual-component detection), the predicate also i
 - §15.6, §15.8, §15.12: Component-side amendments removing the case-rule SHALL.
 - §24: HTML element registry source.
 - PIPELINE.md Stage 3.05 (NR): contract.
-- §51 (`engine`): the canonical name for the state-machine lifecycle type as of P1; `machine` continues to compile but emits W-DEPRECATED-001.
+- §51 (`engine`): the canonical name for the state-machine lifecycle type as of P1. **`machine` NO LONGER COMPILES** — the keyword was REMOVED before 1.0 (S307) and fires `E-DEPRECATED-001` (Error); it still PARSES per §63.5 so the report is one diagnostic rather than a cascade. `W-DEPRECATED-001` is RETIRED. See §51.0.L / §63.7.
 
 ---
 
@@ -18584,7 +18584,7 @@ The following compiler settings are defined in this version. Settings are specif
 | *`lint.lifecycle-candidate`* | `warn` / `off` | `warn` | (v0.next) Suppression for `W-LIFECYCLE-CANDIDATE` (booleans-as-lifecycle pattern detected — suggest engine). Default `warn`. May be set `off` per-project for prototype phases. |
 | *`lint.match-rule-inert`* | `warn` / `off` | `warn` | (v0.next) Suppression for `W-MATCH-RULE-INERT` (`rule=` annotation on a `<match>` block-form arm — annotation-only at Tier 1; engine `<engine>` is required for active rules). Default `warn`. |
 | *`lint.engine-initial-missing`* | `warn` / `off` | `warn` | (v0.next) Suppression for `W-ENGINE-INITIAL-MISSING` (`<engine for=T>` declared without `initial=`; compiler defaults to first variant). Default `warn`. |
-| *`lint.deprecated-machine`* | `warn` / `off` | `warn` | (v0.next) Suppression for `W-DEPRECATED-001` (`<machine>` keyword — `<engine>` is canonical post-v0.next). Default `warn`; teams in mid-migration may set `off` temporarily. |
+| ~~*`lint.deprecated-machine`*~~ | — | — | **RETIRED S314.** It suppressed `W-DEPRECATED-001`, which was itself retired at S307 when `<machine>` was REMOVED. The successor `E-DEPRECATED-001` is an **Error** and is not lint-suppressible by design. The setting was never wired in `compiler/src/` (zero references), so this row documented a control that did not exist even while the warning was live. |
 | `lint.tailwind-unrecognized-class` | `warn` / `off` | `warn` | (S108) Suppression for `W-TAILWIND-UNRECOGNIZED-CLASS` (an info-level lint fired by the FLOOR fix for dogfood Bug 1 on any `class="..."` token that does not resolve via the embedded Tailwind registry). Default `warn`. Adopters using extensive custom CSS class names (acknowledged false-positive surface at floor level) may set `off` until the full fix lands. Compiler-API alias: `compilerSettings.lintTailwindUnrecognizedClass`. |
 
 Additional settings will be defined as features are specified.
