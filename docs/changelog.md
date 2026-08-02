@@ -135,6 +135,37 @@ Peter-lane adopter session, concurrent with a live S301-bryan for most of it (la
 
 
 
+### 2026-08-02 — S310 (bryan): the §34 catalog-truthfulness arc, a provenance gate that proved its own bite, and lifecycle W1
+
+Opened the **§34 catalog-truthfulness arc** — per §62.2 the conformance corpus IS the versioned
+contract, so a catalogued diagnostic that cannot fire is a false claim inside it. S305/S307 found nine
+such codes by hand; `scripts/s34-census.ts` now makes the population computable (804 rows → 34 struck ·
+338 pinned · 320 live-unpinned · 14 declared-ahead · 3 runtime-surfaced · **95 unfireable**, opened at
+108). Largest finding: the §6.7 lifecycle family is **35 catalogued, 8 built**, and the claim is
+normative rather than index hygiene (verbatim SHALLs at SPEC:3773/3852/3856/4195).
+
+A third mechanism surfaced that neither bryan nor the PA had named: **section dissolved, codes
+orphaned** — §11 is "Reserved — Folded", its content moved to §6/§52/§14.8.9, its codes left pointing
+into the hole. bryan's own theory (rows minted cheap, prose deferred) was tested against the data and
+largely confirmed *but shown to be historical*: false-claim rate is 28% pre-S100 and **0% since S260**,
+and 87% of catalogued codes have a real emitter.
+
+- **#340** — census oracle + the arc filed (waves, DoD, traced locus, quoted governing sentences).
+- **#343** — SPEC **§34.0**: a NEW/TOUCHED §34 row must carry emitter provenance, an explicit spec-ahead declaration, or strikethrough+retirement — the discriminator the catalog already proved (131 rows cite an emitter; **0 of 108** unfireable rows do). Diff-scoped CI gate. **Its first cut was hollow** (a three-dot diff ignored the working tree and passed a malformed row); caught only by the mandated bite proof, then confirmed *executing* in CI rather than merely green.
+- **#346** — W0: six index-only phantom rows struck, coverage-checked first. Two duplicates of live codes, two fold-orphans, two with no coverage → rows struck and the guarantees re-filed.
+- **#352** — retraction: `E-PARSEVARIANT-*` were reported as the pre-freeze arc's sharpest case and are **fully implemented** as runtime `::ParseError::` variants. New RUNTIME-SURFACED bucket (trap T6).
+- **#353** — **lifecycle W1: `E-LIFECYCLE-001/002/004` now fire.** `cleanup(closeConnection())` was proven in emitted output to release the resource eagerly at mount and register its return value as teardown. Migration measured; three false-positive guards. Conformance **845 → 848**.
+- **#355** — 100 stale line-citations stripped across 92 §34 rows, catalog-wide.
+- **#351** — both Anthropic-billed CI legs killed on bryan's ruling (a cost decision, not a broken secret). Nothing lost: the mandatory S239 pass is PA-side and local. Consequence recorded — nav-maps no longer refresh on a schedule.
+- **Adopter (RediLedger)** — **return-leg channel gap** accepted and fixed: rulings addressed to them had landed only in scrml's hand-off, twice, costing a three-day block on an input they already had. Clone path now a tabled node plus a RETURN-LEG rule.
+
+**Stopped deliberately:** the §19 `!`-non-enum diagnostic (bryan ruled "diagnostic") is a
+**spec-vs-corpus conflict** — `! string` is pinned by three landed conformance cases and taught in a
+flagship example, so the contract sanctions what SPEC:13806 forbids. Filed with three options.
+
+Gate GREEN on every PR; gated tier **18,716 pass / 0 fail / 50 skip**; conformance **848/848**.
+Gaps HIGH 20 · MED 108 · LOW 45. Concurrent with S310/S311/S312-peter throughout.
+
 ### 2026-07-30 — S303 (Peter · Windows): #284 first-class-reference server placement (resolvable core), and a §64 CI-test de-flake
 
 Closed the **resolvable core** of adopter **#284** (PR #297, `94d3d6ee`): a server-placed function that reached a helper through a *first-class reference* — a multi-hop alias (`const p = groupByJob; p(rows)`) or an object-literal dispatch table (`{ job: groupByJob }[which](rows)`) — left the helper client-placed, so the server handler threw `ReferenceError` at request time (an executed 500, not the silent client-drop the issue attributed to computed-member access). The fix resolves the indirect callee **locally per function body** and treats it exactly like a direct call for placement, in-process peer emission, and await-lowering. Two earlier cuts were caught and killed by the adversarial review before the sound one landed — including a fail-open unawaited-Promise auth-bypass that was *worse* than the bug it replaced. Corpus over-escalation measured zero. Residuals (a genuinely dynamic callee, a markup-used + server-indirect helper, a reassigned-before-call alias) fail **closed** and are routed to a §12.4 diagnostic being coordinated separately.
