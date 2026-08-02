@@ -1,0 +1,8 @@
+// §6.7.3 — cleanup() argument is a non-function value (a literal).
+<program>
+  <div>
+    ${
+      cleanup(42)
+    }
+  </div>
+</program>

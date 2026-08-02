@@ -1,0 +1,13 @@
+{
+  "id": "lifecycle-cleanup-happy-arrow-and-reference",
+  "description": "§6.7.3 — the two LEGITIMATE cleanup() forms in one file: an arrow expression `cleanup(() => { teardown() })` and a bare function reference `cleanup(teardown)`. This is the FALSE-POSITIVE guard for the S310 diagnostics: the checks are newly-rejecting, so the shapes adopters actually write must stay clean.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/cleanup-registration-diagnostics.test.js",
+  "spec": "§6.7.3",
+  "rationale": "§6.7.3 sanctions both the arrow form and the function-reference form. The S310 checker is deliberately conservative — it fires only on shapes that CANNOT be functions (`lit`/`array`/`object`) plus the explicit call-expression case — because a false positive breaks working adopter code while a missed case merely preserves prior behaviour.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-LIFECYCLE-"]
+  }
+}

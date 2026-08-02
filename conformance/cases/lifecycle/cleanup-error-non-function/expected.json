@@ -1,0 +1,12 @@
+{
+  "id": "lifecycle-cleanup-error-non-function",
+  "description": "§6.7.3 — the `cleanup()` argument is a non-function value (an integer literal). Same family as E-LIFECYCLE-002 but covering non-call non-function shapes (bare values, object literals).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/cleanup-registration-diagnostics.test.js",
+  "spec": "§6.7.3",
+  "rationale": "§6.7.3 normative + §34: `cleanup()` requires one function argument; a literal, array or object cannot be invoked at teardown. Resolution: pass an arrow function or a function reference.",
+  "expect": {
+    "codes": ["E-LIFECYCLE-004"],
+    "notCodes": ["E-LIFECYCLE-002"]
+  }
+}

@@ -18785,6 +18785,90 @@ function checkAnimationFrame(nodes: ASTNodeLike[], errors: TSError[], filePath: 
   walk(nodes, false);
 }
 
+/**
+ * §6.7.2 / §6.7.3 `cleanup()` diagnostics — the sibling of checkAnimationFrame above.
+ *
+ * - E-LIFECYCLE-002: the argument is a CALL expression (§6.7.3). This is the load-bearing one and it
+ *   is silent today: `cleanup(closeConnection())` compiles exit 0 and emits
+ *   `_scrml_register_cleanup(_scrml_closeConnection_1())` — the resource is closed EAGERLY at mount and
+ *   the call's RETURN VALUE is registered as the teardown callback. Verified by executing the compiler
+ *   and reading the emitted client bundle, not by inspection.
+ * - E-LIFECYCLE-004: the argument is a non-call, non-function shape — a literal, array or object
+ *   (§34: "bare values, object literals, etc.") — or absent entirely.
+ * - E-LIFECYCLE-001: `cleanup()` outside any element scope (§6.7.2), mirroring E-LIFECYCLE-017's
+ *   treatment of `animationFrame()`.
+ *
+ * DELIBERATELY CONSERVATIVE — this is a NEWLY-REJECTING change (pa-base §8), so it fires only on
+ * shapes that CANNOT be functions. `lambda` (the arrow form), `ident`, and `member` are all accepted
+ * without inspection, exactly as checkAnimationFrame accepts them: a false positive here breaks
+ * working adopter code, while a missed case merely preserves today's behaviour.
+ */
+function checkCleanupRegistration(nodes: ASTNodeLike[], errors: TSError[], filePath: string): void {
+  const mkSpan = (node: ASTNodeLike): Span =>
+    (node.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+
+  /** Definitely-not-a-function shapes only. Anything that COULD be a function returns "ok". */
+  const NON_FUNCTION_KINDS = new Set(["lit", "array", "object"]);
+  const classify = (node: ASTNodeLike): "call" | "nonfn" | "missing" | "ok" => {
+    const cb = (node as Record<string, unknown>).callbackExpr as { kind?: string } | undefined;
+    const raw = ((node as Record<string, unknown>).callback as string | undefined) ?? "";
+    if (!cb) return raw.trim() === "" ? "missing" : "ok"; // unparsed → accept (fail-open)
+    if (cb.kind === "call") return "call";
+    if (cb.kind && NON_FUNCTION_KINDS.has(cb.kind)) return "nonfn";
+    return "ok";
+  };
+
+  const walk = (body: ASTNodeLike[] | undefined, inElementScope: boolean): void => {
+    if (!Array.isArray(body)) return;
+    for (const node of body) {
+      if (!node || typeof node !== "object") continue;
+      const k = node.kind;
+      if (k === "markup") {
+        walk(node.children as ASTNodeLike[] | undefined, true);
+        continue;
+      }
+      if (k === "cleanup-registration") {
+        const c = classify(node);
+        if (c === "call") {
+          errors.push(new TSError(
+            "E-LIFECYCLE-002",
+            `E-LIFECYCLE-002: \`cleanup()\` argument must be a function expression, not a call expression (§6.7.3). ` +
+            `Writing \`cleanup(teardown())\` INVOKES \`teardown\` immediately and registers its return value as the ` +
+            `teardown callback — so the work runs at mount instead of at unmount. ` +
+            `Resolution: pass the function itself — \`cleanup(teardown)\` — or wrap it — \`cleanup(() => { teardown() })\`.`,
+            mkSpan(node),
+          ));
+        } else if (c === "nonfn" || c === "missing") {
+          errors.push(new TSError(
+            "E-LIFECYCLE-004",
+            `E-LIFECYCLE-004: \`cleanup()\` requires one function argument (§6.7.3). ` +
+            (c === "missing"
+              ? "Called with no argument."
+              : "Called with a non-function value (a literal, array or object).") +
+            ` Resolution: pass an arrow function or a function reference — \`cleanup(() => { teardown() })\`.`,
+            mkSpan(node),
+          ));
+        } else if (!inElementScope) {
+          errors.push(new TSError(
+            "E-LIFECYCLE-001",
+            `E-LIFECYCLE-001: \`cleanup()\` is only valid inside an element scope (§6.7.2). ` +
+            `At file level there is no scope to tear down, so the callback would never run. ` +
+            `Resolution: move the call into the logic body of a markup tag (e.g. inside \`<program>\` or another element).`,
+            mkSpan(node),
+          ));
+        }
+        continue;
+      }
+      for (const key of ["body", "children", "consequent", "alternate", "thenBody", "elseBody", "cases"]) {
+        const v = (node as Record<string, unknown>)[key];
+        if (Array.isArray(v)) walk(v as ASTNodeLike[], inElementScope);
+      }
+    }
+  };
+
+  walk(nodes, false);
+}
+
 function checkLoopControl(
   nodes: ASTNodeLike[],
   errors: TSError[],
@@ -23402,6 +23486,7 @@ function processFile(
   // TS-I: §6.7.9 animationFrame diagnostics (E-LIFECYCLE-015 / E-LIFECYCLE-017).
   if (allNodes.length > 0) {
     checkAnimationFrame(allNodes, errors, filePath);
+    checkCleanupRegistration(allNodes, errors, filePath);
   }
 
   // TS-J: §42.10 — harvest prefix-`not`-as-negation (E-TYPE-045). Every ExprNode
