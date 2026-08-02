@@ -1,9 +1,12 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-07-31T03:18:23Z  commit: fe14c9b2
-# NOTE (S302 pass): TARGETED — external deps RE-VERIFIED unchanged (no manifest diff in this window).
-# Added: the `ifRaw`/`ifCond` five-consumer chain, the indirect-callee-resolver edges, and the
-# `serverFnPeerAliasNames` thread. Everything else carries its prior walk.
+# updated: 2026-08-02T18:40:00Z  commit: e80b692e
+# NOTE (S313 pass): INCREMENTAL over `fe14c9b2` -> `e80b692e` (67 commits, five sessions). TARGETED —
+# external deps RE-VERIFIED unchanged (`git diff fe14c9b2..HEAD -- package.json` is EMPTY). Added: the
+# **module-init vs soft-nav-rehydrator producer chain** (the highest-value routing correction this
+# pass), the §51.11 audit-registry edge, the §51.13 state-child projection edge, and
+# `dispatchCalledTargets`. **CORRECTED: the `codegen/scheduling.ts` row — six of the eight GH #237
+# helpers it named no longer exist.** Everything else carries its prior walk.
 
 ## MANIFEST SHAPE — one manifest, allowlisted
 
@@ -38,15 +41,17 @@ default**. `stdlib/` is REQUIRED at runtime (`module-resolver.js`'s `STDLIB_ROOT
 vscode-textmate, vscode-oniguruma — bundled TextMate-grammar test harness (tokenize.js / regression-scan.js); not part of the compiler pre-commit gate, needs its own `npm i`.
 
 ## CI-only External Actions (not npm deps — GitHub Actions)
-actions/checkout@v4, oven-sh/setup-bun@v2, anthropics/claude-code-action@v1 — see build.map.md / infra.map.md. **`ANTHROPIC_API_KEY` IS now set** (the daily `cloud-maps` run passes it), which retires the older "unset today" note; `MAPS_PAT` (a fine-grained PAT) is the checkout/PR identity for `cloud-maps.yml`.
+actions/checkout@v4, oven-sh/setup-bun@v2 — the only actions any AUTO-TRIGGERED workflow now uses. **`anthropics/claude-code-action@v1` is no longer reachable on any automatic trigger (S310, #351):** `cloud-maps.yml`'s Stage 2 (the project-mapper leg) was DELETED outright, and `advisory-review.yml` was demoted to `workflow_dispatch`-only. It remains referenced ONLY in that manual-fire job, which is the sole consumer of `ANTHROPIC_API_KEY`. **This was a COST decision, not a broken secret** — treat any map/doc line saying "the key IS set and the daily run passes it" as retired. `MAPS_PAT` (a fine-grained PAT) is still the checkout/PR identity for `cloud-maps.yml`'s surviving deterministic stages.
 
 ## Runtime Engine
 bun>=1.3.13 — required; no Node support (Bun-specific APIs used throughout: Bun.serve, bun:sqlite, Bun.$, Bun.SQL, Bun.hash). The DB-authoritative tier depends on `Bun.SQL`'s transaction API (`sql.begin`) and `bun:sqlite`'s `Database` for the `scrml db-migrate` apply loop — both already-bundled.
 
-**Zero NEW external dependency this window.** Every landing (`sql-table-refs.js`, the D-4 dist-space
-re-basing, the D-5 module-const emission, the §13.2 `on mount` async scope, the navigate-wave1c
-cross-chunk loader, the per-item reconcile family, the `outline-*` Tailwind registrations) is
-entirely first-party. The only manifest movement is the hoist + de-workspacing above.
+**Zero NEW external dependency this window, and zero manifest diff at all** (`git diff
+fe14c9b2..HEAD -- package.json` is empty). One INTERNAL edge is new and worth knowing:
+**`codegen/scheduling.ts` now imports `acorn` directly** (`import { parse as acornParse } from
+"acorn"`) — the GH #264 rewrite models emitted-JS scopes with the real parser instead of a flat-text
+scanner. `acorn` was already a root runtime dependency (the E-CG-001 egress scan, escape-hatch
+parsing, cell-accessor-rename), so this widens the internal consumer set, not the dependency set.
 
 ## Internal Module Graph — compiler pipeline (compiler/src/api.js is the spine)
 
@@ -68,7 +73,7 @@ entirely first-party. The only manifest movement is the hoist + de-workspacing a
 | Codegen dispatch | code-generator.js (= codegen/index.ts) | codegen/emit-*.ts. Also the `E-DBAUTH-SQLITE` compile-time gate (`annotateDbScopes`) and the §40.8.2 shell composition. **NOT the runtime-chunk gates — those are emit-client.ts.** |
 | **Runtime-chunk tree-shake gates** | **codegen/emit-client.ts** (`detectRuntimeChunks` :273 pre-emit AST walk; `POST_EMIT_HELPER_CHUNK_GATES` :2167 post-emit reference scan) + **codegen/runtime-chunks.ts** (`CHUNK_DEPENDENCIES` :384, closed over at the END of `detectRuntimeChunks`) + compute-pgo-flags.ts (the `reset`/`equality`/for-stmt PGO inputs `detectRuntimeChunks` reads) | `ctx.usedRuntimeChunks` -> the assembled runtime slice. **This is the locus for any `ReferenceError: _scrml_* is not defined` in a shipped bundle.** See "Runtime-chunk gating" below. |
 | **Coordinate space — SOURCE vs DIST (D-4, S296)** | **codegen/emit-server.ts** (`distRelativeServerSpecifier`, `isOutsideBase`, `distServerPathOf`) emits; **api.js** (`distServerKeyToSource` + `distDirOfSource` forward index, `serverImportTargetSource`) reverses; **codegen/emit-client-esm.ts** already computed client URLs in dist space | `checkServerImportInvariant` (`W-SERVER-IMPORT-UNEMITTED`) and `emitValueOnlyServerJsForDanglingImports` — BOTH reversal sites. See "Coordinate space" below. |
-| **§13.2 async scope for `on mount` (GH #237)** | **codegen/scheduling.ts** (`scanEmittedCode`, `precedesBlockBrace`, `continuesEmittedStatement`, `splitEmittedStatements`, `liftEmittedStatementAwaits`, `emittedCodeCallsServerFn` — all NEW this window) | **codegen/emit-reactive-wiring.ts:536-537** — the sole consumer. A `_onMountEffect` body that calls a server fn is wrapped in `(async () => { … })().catch(_scrml_error_boundary_log)` with the same `injectPromiseAwait` policy the two already-correct paths use. |
+| **§13.2 async scope for `on mount` (GH #237 -> #264)** | **codegen/scheduling.ts** — `liftEmittedStatementAwaits` (:464) + `emittedCodeCallsServerFn` (:592) + **`injectServerCallAwaitsViaAst` (:510, acorn)**. **CORRECTION: `scanEmittedCode` / `precedesBlockBrace` / `continuesEmittedStatement` / `splitEmittedStatements` / `liftOneEmittedStatement` / `recurseEmittedBraceGroups` were DELETED** at #323/#326 — a prior generation of this map listed them as the landing surface. | **codegen/emit-reactive-wiring.ts:536-537** — still the sole consumer. A `_onMountEffect` body calling a server fn is wrapped in `(async () => { … })().catch(_scrml_error_boundary_log)`. The await injection is now AST-driven: await-legality is decided by acorn scope kind (a sync fn/arrow/method/accessor body, ANY formal-parameter list, a `PropertyDefinition` value and a `StaticBlock` are all illegal), and an acorn parse failure returns the body UNCHANGED rather than falling back to text. **The DIRECT value of `_scrml_reactive_set(cell, stub())` is deliberately SKIPPED here** — `emit-client.ts`'s own IIFE matcher (:2907+) owns that lift, and a miss there is unguarded (that is exactly what #339 fixed: a SPACED `stub ( )` from the escape-hatch string lowering slipped the tight `stub(` match and bound a bare Promise into the cell). |
 | **D-5 server module-const closure** | **codegen/emit-server.ts** `emitReferencedModuleConstLines(fileAST, assembledBody)` | the assembled `.server.js` bundle, emitted AFTER the value exports and BEFORE `finalEmitted` is joined. ADDITIVE — the client bundle is byte-unchanged. |
 | **#263 CLIENT module-`export const` closure (S301) — the §14.8-gated sibling** | **codegen/emit-client.ts** `emitReferencedModuleExportConstLines` + `collectClientReferencedIdents` + `stripExportDeclInit` + `collectTopLevelReassignedNames` + `_fnNodeIsServerBoundary` | the `.client.js` bundle. **The reference set is built from AST `IdentExpr` nodes ONLY — never string-literal contents, comments or member-property keys — with TWO PRUNED subtrees (a server-boundary function body; a server-scoped cell's init).** The blocked first attempt matched by TEXT and would have shipped an `export const` used only inside a `server fn` (which lowers to a fetch stub that never names it) to the browser. A name appearing in a fetch stub / literal / comment can therefore never widen the set **by construction**, not by filtering. Fail-closed elsewhere too: `stripExportDeclInit` SKIPS multi-declarator and destructuring forms rather than guessing. |
 | **§17.1.2 structural `if=` (S302)** | **ast-builder.js** (capture) → **native-walker/attrvalue-exprnode-walker.ts** (exprNode) → **type-system.ts** (scope) → **dependency-graph.ts** (reader credit) → **codegen/emit-html.ts** (emit) | one attribute, five consumers, two native mirrors — the full table is below. |
@@ -76,7 +81,9 @@ entirely first-party. The only manifest movement is the hoist + de-workspacing a
 | DB-authoritative tier — §14.8.11/.1/.2 | schema-differ.js + codegen/db-authoritative.ts + codegen/sql-ident.ts + codegen/tenant-egress.ts + commands/db-migrate.js | codegen/index.ts wires `appDeclaresDbAuthoritative`/`wrapPrincipalTxn` into emit-server.ts's `generateServerJs`; emit-channel.ts imports `quoteIdent` (aliased `pgQuoteIdent`). See error.map.md / domain.map.md / schema.map.md / migrations.map.md. |
 | Confidentiality — tenant-row floor (§14.8.10) | codegen/tenant-egress.ts (`buildTenantContext` — two-arg since S288, unioning `<schema>`-declared tables; `resolveTenantScoping`, `classifyTenantWrite`, `detectTenantRawEgress`, `rewriteSelectAddTenantId`, `rewriteInsertAddTenantId`, `_scrml_active_tenant`/`_scrml_active_caps`) | codegen/emit-server.ts: E-TENANT-WRITE/AGG/RAW-EGRESS + I-TENANT-STRIP/ACROSS |
 | Client Router — landmark + shell composition (§20.8.1.1/§40.8.2) | codegen/emit-html.ts (`treeHasAuthorMain`) + codegen/index.ts (`findOutletMarkedOpenTag`/`findBareMainOpenTag`, `retagOpenTag`, `findMatchingCloseIdx`, **`computeDependencyClientScripts` — 4-arg since GH #235**) | TWO STAGES, one invariant, communicating ONLY through the emitted `data-scrml-outlet` marker. |
-| **Client Router — cross-chunk soft nav (navigate-wave1c, §20.8.2/§20.8.7)** | **runtime-template.js** (`_scrml_nav_client_chunks`, `_scrml_nav_missing_chunks`, `_scrml_nav_load_chunks`, `_scrml_nav_chunk_failed`, `_SCRML_NAV_CHUNK_TIMEOUT_MS`, the `_scrml_chunk_loading` DEPTH COUNTER) + **codegen/emit-event-wiring.ts** (the IIFE + `_scrml_boot` boot dispatch) + **codegen/emit-variant-guard.ts** (the same eager-vs-DCL dispatch for engine/match arm wiring) | `W-NAV-CHUNK-LOAD-FAILED` (now IMPLEMENTED and cataloged — see error.map.md). |
+| **Client Router — cross-chunk soft nav (navigate-wave1c, §20.8.2/§20.8.7)** | **runtime-template.js** (`_scrml_nav_client_chunks`, `_scrml_nav_missing_chunks`, `_scrml_nav_load_chunks`, `_scrml_nav_chunk_failed`, `_SCRML_NAV_CHUNK_TIMEOUT_MS`, the `_scrml_chunk_loading` DEPTH COUNTER) + **codegen/emit-event-wiring.ts** (the IIFE + `_scrml_boot` boot dispatch) + **codegen/emit-variant-guard.ts** (the same eager-vs-DCL dispatch for engine/match arm wiring) | `W-NAV-CHUNK-LOAD-FAILED` (IMPLEMENTED and cataloged — see error.map.md). **For WHAT re-runs on a nav and what does not, read the module-init/rehydrator table below — it is a different question from what LOADS the chunk.** |
+| **§51.11 engine `audit` (S307 port onto `<engine>`)** | **codegen/emit-engine.ts** (`emitEngineSubstrate`, :2054 — emits `_scrml_engine_audit_register(varName, closure)` AFTER the cell inits) + **codegen/index.ts** (`_scrml_engine_audit_register` added to `CELL_SCOPE_ACCESSORS`, :490) | **runtime-template.js** `_scrml_engine_audit_targets` (:4914) / `_scrml_engine_audit_push` (:4936), called from `_scrml_engine_advance` (:5078) + `_scrml_engine_direct_set` (:5137). **A REGISTRY, not a 9th positional argument** — those two helpers are called from nine emit sites across five codegen modules and a site that forgot the argument would silently record nothing. The registration takes a CLOSURE, not a cell NAME, because the write path is the chunk-scope wrapper and a raw name resolves in the wrong key space (emitted fine, log stayed empty, only a live transition caught it). |
+| **§51.13 auto property tests on the modern `<engine>` (S307)** | **codegen/emit-machine-property-tests.ts** `projectStateChildRules(stateChildren)` (:487) | **codegen/index.ts** (:2354-2375) builds a `name -> TransitionRule[]` map off `fileAST.machineDecls ?? ast.machineDecls` and passes it as `generateMachineTestJs`'s 4th arg. The generator substitutes it **only where `machine.rules` is empty**, so every legacy path is byte-identical. FEEDING the existing machinery rather than re-pointing it was the deliberate choice — `collectVariants`/`reachableVariants`/`resolveRule` all key off the `rules` shape. |
 | SSR auth-scoped omission + SQL-interp classifier (§52.15.5) | codegen/sql-lex.ts | imported by codegen/collect.ts AND codegen/rewrite.ts so they CANNOT diverge |
 | Colorless-async classification | codegen/emit-library-shared.ts, codegen/scheduling.ts, codegen/emit-expr.ts | emit-library.ts, emit-server.ts, emit-tool.ts, emit-logic.ts, emit-control-flow.ts, emit-functions.ts |
 | Batch-hoist / server-call fencing (§19.9.9.2) | codegen/emit-server.ts + codegen/scheduling.ts | full control-transfer set + filler-distance across control-flow guards |
@@ -127,10 +134,49 @@ what enforces §17.1.2.1's render-vs-lifecycle split structurally rather than by
 | `markupReferencedNames` | the same fixed point (:4766) | **FIX B — a helper referenced from CLIENT MARKUP is EXCLUDED from indirect escalation.** Relocating it turns a synchronous render into a blanking async fetch. Its DIRECT-server-call escalation, if any, is baseline and left intact. |
 | `aliasNamesResolvingTo` → `EmitLogicOpts.serverFnPeerAliasNames` | `emit-server.ts` → `emit-logic.ts` → `emit-control-flow.ts` (`_makeExprCtx`) → `emit-expr.ts` `EmitExprContext.serverFnPeerAliasNames` (:473), consumed :1488 + :3013 | The await-lowering half: `alias(...)` is awaited like the peer it aliases. NULL/empty ⇒ byte-identical pre-fix emission — every threading site is written that way, so a file with no alias peers is unaffected. |
 
+| **`IndirectResolution.dispatchCalledTargets` (NEW, :71)** | route-inference placement + emit-server emission, each intersecting it with its own function/peer universe | The names reached through a DIRECT dispatch CALL — `t["k"](…)` / `t.k(…)` resolve to that member, `t[dyn](…)` to the WHOLE member set (any could be the target). **Plus a RAW-TEXT scan for a dispatch call inside a template literal or a `?{}` SQL body:** a template's `${…}` is never decomposed into AST nodes, so a `t[k]()` there was invisible, its target got no caller edge, was dead-code-dropped, and the emitted call threw `ReferenceError`. The trailing `(` requirement keeps a bare member READ (`${t.a}`) from escalating. Reassigned tables never enter `tableBindings`, so they resolve to nothing. |
 | `dispatchTableNamesWithPeers` / `dispatchTablePeerMembers` (`IndirectResolution.tableBindings`) | `codegen/emit-server.ts:3043` / `:3045` | **A DIRECT dispatch call `t[k](...)` / `t.k(...)` has a MEMBER/INDEX callee, not a bare ident, so it is absent from `calledNames` entirely** — the alias path cannot see it. Two exports because they answer two different questions: `…NamesWithPeers` gates AWAIT-lowering (conservative: the table has ≥1 peer member; over-awaiting a sync value is a no-op, under-awaiting leaks a Promise), `…PeerMembers` gates EMISSION (a `{k: peer}` entry references the peer as a VALUE, so the callable must exist even if `t[k]()` is never called — otherwise a bare `ReferenceError`). Reassigned tables are dropped before either runs. |
 
 Resolution is **SAME-FILE first**, falling back to the global name set only when no same-file binding
 exists (mirrors the 5c-bis precedent). A DEAD value reference is not a call and creates **no** edge.
+
+## Module-init vs the soft-nav rehydrator — WHO emits what, and what re-runs on a nav
+
+**The routing question the prior generation of this map could not answer.** A dev agent asking
+"where is per-chunk module-init emission produced, and what owns the boundary between it and the
+registered rehydrator?" was routed to `codegen/index.ts` + `runtime-template.js`. **Both are wrong
+loci.** The producers are `emit-client.ts` (assembly), `emit-reactive-wiring.ts` (the lifecycle
+bodies) and `emit-event-wiring.ts` (the boundary itself).
+
+| What | Emitted by | Where it LANDS in the chunk | Re-runs on a soft nav? |
+|---|---|---|---|
+| cell inits, `<match>`/`<each>` dispatchers, engine substrate + hydration + opener `effect=` | `emit-client.ts` `generateClientJs` `lines[]` | **module-init** (script eval) | **NO** |
+| `<timer>` / `<poll>` `_scrml_timer_start(...)` | `emit-reactive-wiring.ts:1250` (via `emitReactiveWiring`, called at `emit-client.ts:2355`) | **module-init** | **NO — starts once, ever** |
+| `<keyboard>`/`<mouse>`/`<gamepad>`, `<request>`, `<timeout>`, `_bindProps` | `emit-reactive-wiring.ts` (`classifyMarkupNodes` :1081) | **module-init** | **NO** |
+| desugared `on mount { … }` | `emit-reactive-wiring.ts:536` (`_onMountEffect`) | **module-init**, inside a generated `(async () => {…})().catch(...)` when it calls a server fn | **NO** |
+| `ref=` / `bind:` / `class:` wiring (`_scrml_bind_rewire`) | `emit-client.ts:2464-2470` | **module-init**, as a re-invokable root-scoped fn | **NO — deliberately NOT registered as a rehydrator** (it would re-attach listeners to elements that still carry boot's) |
+| delegated `click`/`submit` document listeners | `emit-event-wiring.ts` (inline, inside `_scrml_boot`) | inside `_scrml_boot` | **N/A — they survive a swap on their own** |
+| **non-delegable handlers + reactive DISPLAY binding** | `emit-event-wiring.ts` accumulators `nonDelegatedRewire` (:1021) + `reactiveRewire` (:1032) | **`_scrml_nav_rewire(root)` at :2165**, inside `_scrml_boot` | **YES — this is the entire rehydrator** |
+| §20.8.3 link-boost | `emit-client.ts:2497-2503`, gated on `fileHasOutlet` | module scope, its own `DOMContentLoaded` handler registered AFTER the author's | N/A (delegated on `document`) |
+
+**The boundary is emission ORDER, not a structure.** `emit-event-wiring.ts:715-716` pushes
+`(function() {` + `function _scrml_boot() {`; `:2186-2193` closes them and emits the dispatch
+(`_scrml_chunk_loading` truthy ⇒ boot NOW; else defer to `DOMContentLoaded`). So everything
+`emit-client.ts` pushed BEFORE its `emitEventWiring(...)` call at `:2475` is module-init, and
+everything that call returns is inside the boot fn. Nothing marks the seam.
+
+**Registration:** `_scrml_register_rehydrator` (`runtime-template.js:2629`) → `_scrml_rehydrators`
+(:2628) → replayed by `_scrml_rehydrate_region(root)` (:3098), which `_scrml_nav_apply_html` (:2996)
+calls at :3032 AFTER `_scrml_teardown_region(liveOutlet)` at :3026.
+
+**The emit-time region↔resource association EXISTS and is LEXICAL** — `emit-reactive-wiring.ts`
+`classifyMarkupNodes` carries an `insideOutlet` flag and stamps `node._outletResident` (:1105 for
+`<timer>`/`<poll>`, :1114 for input-state), which routes the teardown into `_scrml_region_cleanups`
+(:1273-1277 / :1310) instead of the boot-once `_scrml_register_cleanup`. **It never fires for route
+content, because route content is in a different FILE from the shell that owns the `<outlet>` and is
+therefore never lexically inside one.** `fileHasOutlet(fileAST)` (:1042) discriminates SHELL files
+and is likewise insufficient for the single-file `<page>` form. Read this before scoping
+`g-route-timer-poll-not-stopped-on-soft-nav`: the machinery is right, the granularity is wrong.
 
 ## Runtime-chunk gating — the tree-shake locus (READ BEFORE FIXING A BUNDLE ReferenceError)
 
@@ -308,7 +354,7 @@ own). **A hand-maintained derived list rots silently** — that is the `docs/FAC
 is why the two membership limbs are recorded next to the list in the source.
 
 ## Tags
-#scrml #map #dependencies #trigger-3 #escalation-server-only #two-set-distinction #escalation-reasons #is-body-only-escalation #stdlib-client-safety #node-id-freshness #module-graph #stdlib #chunk-namespace #cell-accessor-rename #detect-runtime-chunks #post-emit-chunk-gates #runtime-chunks #chunk-dependencies #fnv1a #semdiff #pipeline #bun #acorn #sql-lex #tenant-egress #tenant-floor #theme-reset #content-hash #colorless-async #async-combinators #on-mount #gh237 #scheduling #writer-ownership #bind-value #i225 #directive-is-form-value #batch-hoist #session-establishment #outlet #one-landmark #shell-composition #esm-chunks #module-format #each-fence #dist-space #source-space #d4 #d5 #forward-index #server-import-unemitted #dbauth #db-migrate #sql-table-refs #queried-table-grants #quoteIdent #sql-ident #navigate-wave1c #chunk-loading-depth-counter #tailwind-outline #e-schema-011 #npm-publishable #no-workspaces #structural-if #§17.1.2 #if-cond #if-raw #five-consumers #absent-not-null #parity-canary #credit-from-attr-value #e-dg-002-false-fire #visit-structural-if-attr #scope-push-order #indirect-callee-resolver #indirect-inverse-caller-map #inverse-caller-map-byte-identical #escalation-only #fix-a #fix-b #server-fn-peer-alias-names #export-const-client-gate #ident-expr-precise #pruned-subtrees
+#scrml #map #dependencies #trigger-3 #escalation-server-only #two-set-distinction #escalation-reasons #is-body-only-escalation #stdlib-client-safety #node-id-freshness #module-graph #stdlib #chunk-namespace #cell-accessor-rename #detect-runtime-chunks #post-emit-chunk-gates #runtime-chunks #chunk-dependencies #fnv1a #semdiff #pipeline #bun #acorn #sql-lex #tenant-egress #tenant-floor #theme-reset #content-hash #colorless-async #async-combinators #on-mount #gh237 #scheduling #writer-ownership #bind-value #i225 #directive-is-form-value #batch-hoist #session-establishment #outlet #one-landmark #shell-composition #esm-chunks #module-format #each-fence #dist-space #source-space #d4 #d5 #forward-index #server-import-unemitted #dbauth #db-migrate #sql-table-refs #queried-table-grants #quoteIdent #sql-ident #navigate-wave1c #chunk-loading-depth-counter #tailwind-outline #e-schema-011 #npm-publishable #no-workspaces #structural-if #§17.1.2 #if-cond #if-raw #five-consumers #absent-not-null #parity-canary #credit-from-attr-value #e-dg-002-false-fire #visit-structural-if-attr #scope-push-order #indirect-callee-resolver #indirect-inverse-caller-map #inverse-caller-map-byte-identical #escalation-only #fix-a #fix-b #server-fn-peer-alias-names #export-const-client-gate #ident-expr-precise #pruned-subtrees #module-init #rehydrator-boundary #scrml-nav-rewire #scrml-boot #register-rehydrator #outlet-resident #region-cleanups #route-region #emit-reactive-wiring #no-route-splitter #inject-server-call-awaits-via-ast #acorn-scope-model #scheduling-rewrite #reactive-set-direct-value-lift #engine-audit #audit-registry #cell-scope-accessors #project-state-child-rules #dispatch-called-targets #template-dispatch-scan #ai-legs-killed #cost-decision
 
 ## Links
 - [primary.map.md](./primary.map.md)

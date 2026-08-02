@@ -1,17 +1,18 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-07-31T03:18:23Z  commit: fe14c9b2
-# NOTE (S302 pass): TARGETED — ONE new section (**§17.1.2 `if=` on the three structural elements**,
-# four prohibitions + the runtime mount contract) and four new Business Invariants. Nothing else
-# re-walked; the rest of this map carries its prior verification. The per-window "currency note"
-# paragraphs previous passes accumulated here were DELETED — that is `docs/changelog.md`'s job.
+# updated: 2026-08-02T18:40:00Z  commit: e80b692e
+# NOTE (S313 pass): INCREMENTAL over `fe14c9b2` -> `e80b692e` (67 commits, five sessions). TARGETED —
+# FOUR new sections (**the route region as a third lifecycle owner**, **`<machine>` removed**,
+# **§19.4.4.1 enum-only**, **§6.7.1a bare-expression**) and six new Business Invariants. Nothing else
+# re-walked; the rest of this map carries its prior verification. Per-window history stays in
+# `docs/changelog.md` + `handOffs/delta-log.md`.
 
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
 
 ## Core Concepts (by SPEC section)
 
 **Reactivity** — `@cell` reactive declarations (§6, V5-strict access model); a cell auto-subscribes every read site. Value-native maps/sets (§59) give `@cell:[K]V` / `set[K]` first-class reactive collection types. §6.6.9: server-fn / client-cell read — "THE SPLIT" — a server function reading a client cell gets an explicit CPS-marshal boundary (E-REACTIVE-003 + W-SERVER-DERIVED-MARSHAL) instead of a silent value smuggle.
-**State machines** — `<engine for=Type>` (§51) governs variant-graph progression via `rule=`/`initial=`/`<onTransition>`/`<onTimeout>`/`<onIdle>`; `<engine server=@source>` gives server-authoritative hydration (§52.4.4). Sibling: §54 nested substates. 44 E-ENGINE-* diagnostic codes (largest single family — see error.map.md).
+**State machines** — `<engine for=Type>` (§51) governs variant-graph progression via `rule=`/`initial=`/`<onTransition>`/`<onTimeout>`/`<onIdle>`; `<engine server=@source>` gives server-authoritative hydration (§52.4.4). Sibling: §54 nested substates. E-ENGINE-* is the largest single family (see error.map.md). **`<machine>` is GONE as of S307 — see "The `<machine>` keyword is REMOVED" below.**
 **Client Router / soft navigation — §20.8, LANDED (Wave-1a soft-nav + Wave-1c PR-1 composition).** `<program>` is the persistent application shell (single-file `<page>` children or multi-file `pages/*.scrml`); it MAY contain exactly one `<outlet>` — the region into which the current route's SSR-fetched content swaps on navigation. §20.8.3 link-boost (a delegated document-level `click` listener in `compiler/src/runtime-template.js`, boot-wired only on an app with an `<outlet>`) intercepts internal same-origin cross-page `<a href>` clicks and routes them through the soft-nav engine instead of a full reload; `hard` opts a specific link out. See "The one-landmark invariant" below for the §20.8.1.1 / §40.8.2 emission + composition contract.
 **Standalone tools — §64** — `<program kind="tool">` compiles to a CLI-style module with one `function main(args)` entry (E-TOOL-001..006). `<program kind="tool" serve=PORT>` emits a compiler-owned `Bun.serve` harness hosting the tool's `<endpoint>`/SSE routes headlessly (no CSRF, no cookie-session, no SSR); cookie-session `auth=` on a `serve=` tool is fail-closed rejected (E-TOOL-SERVE-AUTH-UNSUPPORTED). `<foreign lang="ts">` (§23.6) gives a library file its own foreign-language declaration.
 **Pattern matching / enums** — `match`/`is` over closed enum unions (§18); shorthand `.Variant` forms (§14.5); exhaustiveness is a compile error, not a runtime default. E-TYPE-082 fail-arity ruling for enum-variant construction payload arity. **§18.0.1 block-form arm validity (NEW S288, #192):** a tag opener at a block-form `<match>` arm position that is neither a variant-named arm nor the wildcard `<_>` catch-all is `E-MATCH-INVALID-ARM` (the Ghost-Pattern `<when is="…">` an LLM/framework-refugee reaches for) — see error.map.md. A KNOWN residual: a no-`for=` block-form `<match on=@cell>` still skips exhaustiveness entirely (`g-match-nofor-block-form-skips-exhaustiveness`, MED, open, flagged for bryan — a SPEC/impl divergence, not yet reconciled).
@@ -525,11 +526,187 @@ on a `DOMContentLoaded` that had already fired — so it never booted, never reg
 rehydrator, and the newer nav still swapped, producing correct SSR markup that was completely inert,
 with no diagnostic and no hard-nav fallback.
 
+## The route region is a THIRD lifecycle owner (§6.7.2.1 / §20.8.8, ratified S313 — Pole C)
+
+**Read this before touching soft navigation, `<outlet>`, or anything that "runs when a route loads".**
+
+**The false sentence that was struck.** §6.7.2 used to say the `<program>` scope "destroys once (on
+page unload **or navigation**)". That was false under soft navigation and contradicted §20.8.1's
+"boots once and stays live across soft navigations". All three deliberation poles agreed it had to
+go. §6.7.2 now says plainly: **a soft navigation SHALL NOT mount or destroy any scope.**
+
+**Scopes are of exactly TWO kinds, and the outlet region is NEITHER.** A lifecycle **scope** is the
+`<program>` root or an `if=`-conditional element. **Scopes have no identity beyond their position in
+the element tree**, and the memoryless-remount requirement — re-run all bare expressions, re-start
+all `<timer>`/`<poll>` exactly as if mounting for the first time — **binds scopes only.** The region
+governed by an `<outlet>` is a **route region**, whose **identity is the committed `(route, params)`
+pair**. *Identity is the discriminating axis*: it is what makes `keep-alive` (§20.8.4) expressible
+without carving an exception into a normative SHALL.
+
+**Lifecycle edges SHALL be produced by exactly three events and no others:** document load/unload
+(the `<program>` scope), an `if=` transition (a conditional scope), and a **committed** soft
+navigation (a route region). A route region nests as the OUTERMOST lifecycle owner inside the
+`<outlet>`; `if=` scopes in route content are its children and destroy depth-first at route-leave.
+
+**The §20.8.8 edge contract, in the order it must hold:**
+1. **Commit gate.** A navigation that fails, aborts, or is superseded before commit emits **NO
+   lifecycle edge whatsoever**, and the live region stays fully live through the in-flight window.
+2. **`route-leave`** fires after step 1 (Fetch) commits and **before** step 2 (Swap) — while the
+   outgoing DOM is still ATTACHED. Order: dispose region display effects/subscriptions → stop
+   `<timer>`/`<poll>` → abort in-flight `<request>`s → destroy `if=` scopes depth-first under §6.7.2's
+   four steps → run author `cleanup()` **LIFO** → cancel pending `animationFrame()`. Steps 4 and 5
+   SHALL observe live, attached DOM.
+3. **`route-enter`** fires after step 4 (Hydrate/Adopt) — after SSR re-seed AND after `each`
+   re-materialisation — and **before** step 5 (Transition), so enter-time paint is captured inside
+   the View Transition instead of flashing after it.
+4. Notification is **pre-order**; disposal is **post-order**.
+5. **Ownership:** cells declared in route content are region-owned and re-seed from the incoming
+   payload; cells declared in the shell are program-owned and survive the swap with author mutations
+   intact.
+6. **Initial load IS a `route-enter`.** Region bodies run exactly once on first paint — never zero,
+   never twice.
+
+**Spec-ahead, and it says so.** §20.8.8 is marked Nominal: the compiler wiring lands with the impl
+(`docs/changes/route-region-teardown/`, `g-route-timer-poll-not-stopped-on-soft-nav`, HIGH/open) and
+conformance CN-1..CN-10 land with it. **Two codes are NAMED but carry no §34 row at all** —
+`W-ROUTE-REQUEST-DUPLICATES-SERVER-LOAD` (§20.8.7) and `E-ERROR-011` (§19.4.4.1) — because §34.0
+outcome 2 plus the named-codes-land-with-impl rule puts the row in the same landing as the emitter.
+**Do not grep §34 for them and conclude they do not exist; grep the prose section.**
+
+**The ruling knowingly ships a footgun and therefore OWES a v1 diagnostic.** Pole C's failure mode is
+redundant work (a double fetch, a duplicated analytics event, a re-POST on back/forward) — loud on
+the bill, silent in the UI. The rejected alternative pays **staleness**, which is silent-wrong-UI and
+is the failure that actually occurred in the field. Choosing a knowingly-undiagnosable-by-default
+failure mode is what makes `W-ROUTE-REQUEST-DUPLICATES-SERVER-LOAD` an obligation rather than a
+nice-to-have.
+
+**WHAT THE IMPLEMENTATION ACTUALLY DOES TODAY — verify against this, not against the contract.**
+- `_scrml_destroy_scope` (`runtime-template.js:1339`) performs the §6.7.2 four steps and is reachable
+  **ONLY** through `_scrml_unmount_scope` (:1469) — the `if=` path. The navigation path never calls
+  it.
+- `_scrml_nav_apply_html` (:2996) calls `_scrml_teardown_region(liveOutlet)` (:3026), which drains
+  **only** `_scrml_region_cleanups` (:3122). Its doc-comment (:3114) claims it tears down "timers";
+  that is true only for a `<timer>` **lexically inside the shell's `<outlet>` element**, and false for
+  every route-chunk timer.
+- **Why: the association is made at EMIT time and it is LEXICAL.**
+  `codegen/emit-reactive-wiring.ts` `classifyMarkupNodes` (:1081) stamps `node._outletResident` when
+  a `<timer>`/`<poll>` (:1105) or `<keyboard>`/`<mouse>`/`<gamepad>` (:1114) sits inside an
+  `<outlet>` **in the same file**. Route content is in a different file from the shell, so the flag
+  is never set and the stop lands on the boot-once `_scrml_register_cleanup` (beforeunload) path.
+- **A route timer therefore starts exactly ONCE, at chunk module-init, and is never stopped OR
+  restarted by navigation.** Beyond the leak, that also fails §20.8.8 step 3 (route-enter re-runs
+  region-associated bodies), which is why the leave-edge and enter-edge halves are one arc.
+- **A runtime-only fix cannot work.** `_scrml_timer_start(scopeId, timerId, ms, bodyFn)` takes no
+  element and `<timer>` emits no DOM node, so `_scrml_teardown_region` — which holds only the outlet
+  element — cannot discover which scope ids belong to the outgoing route. DOM query is impossible;
+  `_scrml_region_track`'s `el.closest("[data-scrml-outlet]")` pattern does not transfer; and a
+  boot-time snapshot ("scopes present after shell wiring are shell scopes") is REJECTED as fragile —
+  an `if=` inside the shell can register a timer later and would be misclassified, i.e. a shell timer
+  silently killed by a navigation, which is worse than the leak.
+- **An active-region flag wrapped around the rehydrator loop captures NOTHING** — the timer already
+  ran, at module-init, before any rehydrator. See structure.map.md's execution-boundary section and
+  dependencies.map.md's module-init table for the exact producer chain.
+
+## The `<machine>` keyword is REMOVED (§63.7 / §51.0.L, ruled S305, landed S307)
+
+**`<machine>` is not a deprecated alias any more. It does not compile.** `E-DEPRECATED-001` (Error)
+fires from `ast-builder.js:16839`; `W-DEPRECATED-001` is a §34 tombstone. Any doc presenting it as
+"deprecated but still compiles / hard-removal at v0.3.0" is stale — `docs/PA-SCRML-PRIMER.md`,
+`compiler/PIPELINE.md` and `compiler/SPEC-INDEX.md`'s authored half all still do.
+
+**Three properties of the removal worth carrying:**
+
+1. **It still PARSES (§63.5).** The builder accepts `block.name === "machine"`, pushes the one
+   diagnostic, and BUILDS the `engine-decl` anyway, so a `<machine>` source reports exactly ONE error
+   naming the migration instead of a cascade of secondary errors from an unbuilt node. Nothing
+   downstream consumes the node — the compile fails on the error.
+2. **It is NOT a §63.3(2) MAJOR-boundary removal.** The keyword was never in a released contract
+   (§62.2), the codemod is verified-landed, and corpus migration measured ZERO. That is the standing
+   template for removing a pre-1.0 form.
+3. **The codemod is the load-bearing half, and a blind keyword swap would have been a silent
+   semantics change.** `<machine … derived=@x>` + a `.A => .B` body compiles to a real MAPPING
+   function; `<engine … derived=@x>` is an IDENTITY projection **that drops the rules body with no
+   diagnostic**. `commands/migrate.js` Migration 2a therefore lifts the body into §51.0.J
+   `derived=match @x { … }`, normalizes `=>` → `:>`, replaces `name=` with an explicit `var=` (on a
+   derived engine `name=` marks the legacy NAMED form, which auto-declares no cell), and synthesizes
+   a state-child per projected-TO variant. **It fails CLOSED — any unparseable body line leaves the
+   declaration untouched** rather than half-migrating it. Migration 2b rewrites the `</machine>`
+   CLOSER, without which the opener swap alone yields a mismatched tag.
+
+**Both subsystems the keyword fronted were PORTED onto `<engine>`, not retired.**
+- **§51.11 `audit`** — `emit-engine.ts` registers a per-engine recorder CLOSURE into the runtime's
+  `_scrml_engine_audit_targets`; the runtime pushes the §51.11.4 entry on every committed transition.
+  The make-it-loud placeholder `E-ENGINE-AUDIT-UNSUPPORTED-BODY` existed for exactly one arc and is
+  now a tombstone — a code rejecting the clause would reject a working form.
+- **§51.13 auto-generated property tests** — `projectStateChildRules` maps a modern `<engine>`'s
+  state-child `rule=` graph into the `TransitionRule[]` shape the generator already consumed. The
+  vacuous `test("no qualifying machines", () => expect(true).toBe(true))` is now `test.skip(...)`.
+  **That artifact is AUTO-GENERATED into an adopter's suite, which is why a false green there is
+  worse than usual — and it fired precisely for the canonical form we tell people to write.**
+
+## §19.4.4.1 — a failable function's error type SHALL be an ENUM (ruled S313)
+
+`fn f() ! E` : **`E` SHALL be an enum type** — a `:enum` declaration, or the built-in default `Error`
+enum when the annotation is omitted (§19.4.2). A non-enum error type is **`E-ERROR-011`**, covering
+scalar (`! string`), array (`! string[]`), generic (`! Map<K,V>`) and paren/union (`! (A|B)`) forms
+**uniformly — they fail for one reason, not several**. Reserved / spec-ahead: no emitter yet, and per
+§34.0 outcome 2 the §34 row lands WITH the implementation.
+
+**Why the requirement is load-bearing rather than ceremony:** only a VARIANT can carry a `renders`
+clause (§19.2), and that clause is what lets the compiler statically prove every error reachable
+inside an `<errorBoundary>` is displayable (`E-ERROR-005`, §19.6.6). A non-enum error type has no
+variants, carries no `renders`, and such a function sits **silently outside** the display guarantee.
+Verified by execution at S313: inside an `<errorBoundary>` with no `fallback`, a `! LoadError` whose
+variant lacks `renders` fires `E-ERROR-005`; a `! string` in the identical position compiles clean.
+
+**Two process facts this ruling is now the worked example of:**
+- **The corpus migrated FIRST, so the rejection lands inert.** Six sites carried a non-enum error
+  type; all six were migrated at S313 *before* any rejection was specified (five
+  `conformance/cases/form-for/formfor-*`, where `! string` was incidental, plus
+  `examples/29-engine-vs-flags.scrml`, which additionally TAUGHT the wrong form in a comment and now
+  teaches why the enum is required). Conformance held at 850/850 across the migration. **Per §62.2
+  the corpus IS the versioned contract, so that migration — not the SPEC sentence — is what moved
+  it.**
+- **It carries the first `provenance:` field in SPEC (pa-base v2.10 Rule 4b).** The provenance block
+  explicitly SUPERSEDES a PA-authored scalar/compound split that had no design provenance and
+  sanctioned the very form the recorded 2026-04-04 reasoning condemns. *A parser defect (`! string[]`
+  broke #228) is not a language-design reason* — and that was invisible until it had to be written
+  down.
+
+## §6.7.1a — "bare expression" is a LIFECYCLE CATEGORY, not an arity limit (clarified, PR #359)
+
+`on mount { body }` desugars into the §17.3 bare-expression-at-mount position. **"Bare expression"
+there names the §7.3 lifecycle category** (executes at initial render, as against `function`/`fn`,
+which execute only when called) — it does **NOT** constrain `body` to a single expression. `body` is
+`logic-content` (§7.2), and **any construct valid in a `${ }` logic context SHALL be valid in an
+`on mount { }` body**; `on mount` is sugar for that position and adds no restriction of its own.
+
+**The sugar-equivalence SHALL is NOT met by impl #1, and §6.7.1a says so in place rather than
+asserting it.** Measured on `a4a4d55f`: multi-statement bodies, `const`/`function` declarations, `@`
+writes and `match` all lower correctly; **`lift`, markup-as-expression, `?{}` and a `!{}` error arm
+each fail with `E-CODEGEN-INVALID-LOGIC`.** All four fail CLOSED — nothing broken ships. Tracked at
+`g-onmount-multistatement-bypasses-statement-codegen` (the gap's NAME predates the measurement; the
+real discriminator is the §7.2 extension set, not statement count). Direction of change: clarifying —
+when the gap closes those programs become newly ACCEPTED, a conformance restoration rather than a
+widening, so it is not a §62 version event.
+
+**Adjacent implementation fact worth knowing before touching the mount path:** a multi-statement
+mount body is lowered through the STRING pipeline, not a statement list, because
+`safeParseExprToNode` parses exactly one expression. `ast-builder.js`'s `mountBodyExprNode` (:355)
+drops a TRUNCATED parse so all statements survive — before it, a body whose first statement happened
+to parse had **every following statement silently dropped, with zero diagnostics** (GH #264 Defect 2).
+
 ## Business Invariants (language axioms, not app rules)
 - **`if=` on a scrml-defined structural element is admitted on exactly THREE (`<engine>`/`<match>`/`<each>`) and SHALL NOT be generalized to the registry (§17.1.2).**
 - **`if=` gates RENDER, never LIFECYCLE (§17.1.2.1)** — a gated `<engine>`'s cell, `rule=`, `effect=` and timers stay live; only the rendering is withheld. The alternative reading is state-destroying and breaks the §51.0.A singleton invariant.
 - **A structural `if=` inside an `<each>` row template fails OPEN (§17.1.2.3)** — carved out explicitly because markup fails CLOSED in the same position and the two are therefore inconsistent in the dangerous direction.
 - **One `if=` lowering serves all four hosts** — the second (display-toggle) lowering was deleted at #289 because a purity test chose between *removes* and *hides* silently.
+- **A soft navigation SHALL NOT mount or destroy any SCOPE (§6.7.2).** Lifecycle edges come from exactly three events: document load/unload, an `if=` transition, and a COMMITTED soft navigation. An aborted or superseded navigation emits NO edge at all.
+- **The `<outlet>` region is NOT a scope — it is a route region identified by `(route, params)` (§6.7.2.1).** Scopes are positional and memoryless; the region has identity, which is what makes `keep-alive` expressible without an exception to a SHALL.
+- **A body associated with a route region runs on EVERY route-enter INCLUDING THE FIRST — never zero times, never twice — and its `cleanup()` runs on the matching route-leave, LIFO, against still-attached DOM (§20.8.8).**
+- **A failable function's error type SHALL be an ENUM (§19.4.4.1)** — because only a variant can carry `renders`, and without `renders` the function sits silently outside the `<errorBoundary>` display guarantee that `E-ERROR-005` enforces.
+- **`<machine>` does not compile (§63.7).** `E-DEPRECATED-001`, Error. It still PARSES so the report is one diagnostic rather than a cascade; the two subsystems it fronted (§51.11 audit, §51.13 property tests) were PORTED onto `<engine>`, not retired.
+- **A NEW or TOUCHED §34 catalog row SHALL state where it fires, or honestly declare that it does not (§34.0)** — a catalogued code that cannot fire is a false claim inside the §62.2 versioned contract. Diff-scoped by construction; never retrofitted as a hard gate over the legacy corpus.
 - `null`/`undefined` do not exist in scrml source, in ANY position (§42). Absence is `not`.
 - **A server-only stdlib module never reaches the client bundle (§12.2 Trigger 3, S299)** — enforced by REFERENCE at any depth, fail-closed; the escalation set is separate from the async-classification set precisely because the two have opposite safe-error directions.
 - **Within one FileAST after component expansion, every `node.id` is unique (S299).** Codegen derives emitted identity from it; a collision is a green compile with wrong rendered output.
@@ -565,6 +742,8 @@ with no diagnostic and no hard-nav fallback.
 `RowChange` — synthesized per §38.13 watched-table row mutation (INSERT/UPDATE/DELETE), dispatched client-side via the `__change` frame to `<onchange>` handlers.
 Engine variant transition — an `<engine>` cell's `rule=`-governed state change, optionally observed via `<onTransition>`/`<onTimeout>`/`<onIdle>`.
 Soft navigation — a route swap into the `[data-scrml-outlet]` region (fetch → swap → hydrate → transition), NOT a shell re-boot (§20.8.2).
+**`route-leave` / `route-enter`** — the two REGION lifecycle edges (§20.8.8, ratified S313). Emitted only for a COMMITTED navigation; `route-leave` between Fetch and Swap against attached DOM, `route-enter` between Hydrate/Adopt and Transition. Spec-ahead: the compiler wiring lands with the impl.
+Engine transition AUDIT entry — `_scrml_engine_audit_push(varName, from, to)` appends a frozen `{from, to, at, rule, label}` record to the engine's `audit` cell on every COMMITTED transition (§51.11.4, ported onto `<engine>` at S307).
 Shell composition — a BUILD-time (not runtime) event: each `pages/*.scrml` route body is spliced into the shell's slot (§40.8.2).
 Theme-switch reflection — a `<theme for=@cell>` binding re-runs a `_scrml_effect` on every `@cell` change (§65.6).
 Diagnostic emission — every pipeline stage emits `{code, message, severity, span}` records partitioned into `result.errors`/`result.warnings` (see error.map.md).
@@ -579,7 +758,7 @@ Diagnostic emission — every pipeline stage emits `{code, message, severity, sp
 A returned function-expression closure (`return function name(){…}`, GITI-038) — owns its own body's scope/type/async analysis independent of its enclosing factory (`ReturnStmtNode.fnExprNode`, see schema.map.md).
 
 ## Tags
-#scrml #map #domain #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth
+#scrml #map #domain #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth #route-region #§6.7.2.1 #§20.8.8 #pole-c #third-lifecycle-owner #route-leave #route-enter #commit-gate #keep-alive #outlet-resident #region-cleanups #module-init #rehydrator-boundary #machine-retired #e-deprecated-001 #§63.7 #projection-codemod #engine-audit #§51.11 #§51.13 #property-tests #enum-only #§19.4.4.1 #e-error-011 #renders-clause #e-error-005 #corpus-first-migration #provenance-field #§34.0 #named-codes-land-with-impl #§6.7.1a #bare-expression-category #sugar-equivalence #mount-body-expr-node
 
 ## Links
 - [primary.map.md](./primary.map.md)

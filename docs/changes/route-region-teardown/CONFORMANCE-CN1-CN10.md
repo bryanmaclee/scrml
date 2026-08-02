@@ -19,6 +19,62 @@ distinguishes the ratified ruling from Pole A. It is specified in full below so 
 quietly ship without it; if the conformance harness gains a Nominal/expected-fail marker before the impl
 lands, author CN-10 under it immediately.
 
+## ⛔ CN-10 IS BLOCKED — and not on this arc (S314, established by compilation)
+
+**`<page keep-alive>` does not compile.** Probed on `e80b692e`:
+
+```
+error [E-PAGE-INVALID-ATTR]: `<page keep-alive=…>` — keep-alive is not in the per-route attribute
+set. The allowed `<page>` attribute set is exactly { db, auth, csrf, ratelimit }.
+warning [W-ATTR-001]: Attribute `keep-alive=` is not recognized on `<page>`. It is currently
+forwarded to the rendered HTML as-is and has no compile-time effect.
+```
+
+(The two diagnostics also contradict each other on the same line — one says forwarded-as-is, the other
+rejects the file. Worth a separate note; not the blocker.)
+
+**So CN-10 cannot be authored in ANY form today — not even codes-half.** The harness DOES carry a
+`"runtime-half-pending": true` marker (`conformance/run.ts:46`), which would otherwise be the exact
+vehicle for a case whose behaviour is unbuilt. It does not help here: the codes half would have to
+assert `E-PAGE-INVALID-ATTR`, **pinning the OPPOSITE of the ruling** into the versioned contract.
+
+### The blocker is a SPEC-vs-SPEC conflict — a ruling, not a fix
+
+Governing sentences, quoted (Rule 4 gate):
+
+- **§20.8.4** (`SPEC.md:15802`) — *"A route MAY opt into **`keep-alive`** (`<page keep-alive>`)."*
+- **§4.15** (`SPEC.md:1094`) — *"The allowed attribute set on `<page>` is exactly the four PER-ROUTE
+  concerns — `db=`, `auth=`, `csrf=`, `ratelimit=` — and any other attribute fires
+  `E-PAGE-INVALID-ATTR`."*
+- **§40** (`SPEC.md:22697`) restates the four-attribute set; **§34** (`SPEC.md:19449`) catalogues the
+  code against that set.
+
+Three normative sentences say the set is closed at four; one normative MAY sanctions a fifth. Per Rule 4
+a normative-source conflict is **surfaced as a deliberation point, never papered over** — and per
+pa-base §8 the resolution direction is the asymmetric one: admitting `keep-alive` is **newly-accepting**,
+a one-way door. This is the S310/S313 **Q4 shape** (spec-vs-corpus conflict filed with options rather
+than built). **Route to bryan; do NOT let a dev agent decide it.**
+
+### ⚠️ THIRD false status claim on this same machinery
+
+`SPEC.md:15735` asserts keep-alive *"the attribute is **recognized and validated**, but there is NO
+runtime cache and no §52/§38 invalidation wiring."* **The first clause is false — it is REJECTED.**
+That makes three, all on the soft-nav region machinery, all asserting more is done than is:
+
+1. `_scrml_teardown_region`'s doc-comment claims it tears down timers (S313).
+2. `emit-reactive-wiring.ts:1271-72` claims *"the leak is closed"* (S314 — see SCOPING.md).
+3. **§15735 claims `keep-alive` is recognized and validated (S314 — here).**
+
+A reader auditing §20.8 from the documents alone would conclude the region lifecycle is substantially
+built. It is not. Correct all three in their respective landings.
+
+### Disposition
+
+- **CN-1..CN-9** — authorable with the impl arc, unaffected by this. Proceed.
+- **CN-10** — blocked on the ruling above. **The judge's standing warning now has a named owner and a
+  named precondition instead of a silent decay path**, which is the point of recording it here. Until it
+  is authored, the ratified Pole C is not distinguished from Pole A by the corpus.
+
 ## The set (verbatim assertions from the artifact §8)
 
 | # | Case | Assertion | Pins |

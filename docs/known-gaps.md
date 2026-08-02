@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 22 |
-| MED | 108 |
+| MED | 109 |
 | LOW | 46 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -55,6 +55,21 @@ Surfaced by the `dpa-018` deep-dive's own source-read, **not by its ruling** —
 - **(ii) COUPLE TO THE RULING** — firing author `cleanup()` LIFO at that moment is a lifecycle-contract commitment and waits on the `dpa-018` ratification.
 
 Compiler source → owes the S239 adversarial pass. **Locus TRACED, not searched.**
+
+**S314 UPDATE — the emit-time association EXISTS; the DISCRIMINATOR is the defect.** Established by compiling three shapes and reading the emitted branch, not by re-reading: (A) a shell-level `<timer>` → `_scrml_register_cleanup` (beforeunload, CORRECT); (B) a `<timer>` in a route file → `_scrml_register_cleanup` (**the defect, reproduced**); (C) a `<timer>` lexically inside `<outlet>…</outlet>` → `_scrml_region_cleanups` (**the mechanism works**). `classifyMarkupNodes` (`emit-reactive-wiring.ts:1091`) already stamps `_outletResident` and `:1273` already routes region-resident timers correctly — but `insideOutlet` means *lexical descendant of an `<outlet>` node in THIS file's AST*, and real route content is never that (the outlet is a shell slot; the route is a separate file). **So the fix is a PREDICATE correction on existing machinery, not new machinery** — the leave-edge is likely SMALLER than the S313 scoping assumed; the enter-edge (restart-on-return, §20.8.8 step 3) is genuinely unbuilt. Direction-of-change: **`semantics-changed`** (pa-base §8, the silent class) — ships as a fix because §6.7.2 + §20.8.8 pre-exist as governing sentences. Second false comment found: `emit-reactive-wiring.ts:1271-72` asserts *"the leak is closed"*; it is not. Full re-scope: `docs/changes/route-region-teardown/SCOPING.md` §"VERIFIED S314".
+
+### g-page-keepalive-attr-spec-vs-spec-conflict — `<page keep-alive>` is sanctioned by a normative MAY in §20.8.4 and REJECTED by the normative "exactly four" attribute set in §4.15/§40; the form does not compile, and SPEC's own status note claims it is "recognized and validated" — `NEW S314-bryan; MED; open (SPEC-vs-SPEC — a RULING for bryan, not a fix; blocks conformance CN-10, which is the only case distinguishing ratified Pole C from Pole A)`
+<!-- @gap id=g-page-keepalive-attr-spec-vs-spec-conflict sev=MED status=open locus=compiler/SPEC.md:1094 prov=spec:§20.8.4 -->
+
+Probed on `e80b692e`: `<page keep-alive>` fires `E-PAGE-INVALID-ATTR` (plus a `W-ATTR-001` that contradicts it on the same line — one says forwarded-as-is, the other rejects the file).
+
+**The conflict, quoted (Rule 4 governing-sentence gate):**
+- **§20.8.4** (`SPEC.md:15802`) — *"A route MAY opt into **`keep-alive`** (`<page keep-alive>`)."*
+- **§4.15** (`SPEC.md:1094`) — *"The allowed attribute set on `<page>` is exactly the four PER-ROUTE concerns — `db=`, `auth=`, `csrf=`, `ratelimit=` — and any other attribute fires `E-PAGE-INVALID-ATTR`."* Restated at §40 (`:22697`); catalogued against the four-set at §34 (`:19449`).
+
+Three normative sentences close the set at four; one normative MAY sanctions a fifth. Per Rule 4 this is surfaced as a deliberation point, not resolved by the PA — and the resolution is **asymmetric**: admitting the attribute is **newly-accepting** (pa-base §8, a one-way door), whereas striking the §20.8.4 clause is reversible. Same shape as the S310/S313 Q4 spec-vs-corpus conflict, which was filed with options rather than built.
+
+**Consequence:** CN-10 cannot be authored in ANY form, including codes-half under the harness's existing `"runtime-half-pending"` marker (`conformance/run.ts:46`) — the codes half would have to assert `E-PAGE-INVALID-ATTR`, pinning the OPPOSITE of the ratified ruling into the versioned contract. The judge's standing warning (*"if it is never authored, the ruling silently becomes A"*) therefore has a named precondition rather than a silent decay path. **THIRD false status claim on this machinery:** `SPEC.md:15735` says keep-alive *"is recognized and validated"* — it is rejected. See `docs/changes/route-region-teardown/CONFORMANCE-CN1-CN10.md`.
 
 ### g-session-not-rewritten-inside-sql-interpolation — `session.*` inside a `?{}` SQL template interpolation is not rewritten; bare `session` reaches the server emit and the route 500s on every call — `NEW S313-bryan (adopter dc/DanceCard, GH #357); HIGH; open (build-integrity + silent at compile; PA-REPRODUCED on 16783d6d)`
 <!-- @gap id=g-session-not-rewritten-inside-sql-interpolation sev=HIGH status=open locus=compiler/src/codegen/rewrite.ts:436 -->

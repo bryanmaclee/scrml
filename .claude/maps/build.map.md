@@ -1,10 +1,11 @@
 # build.map.md
 # project: scrml
-# updated: 2026-07-31T03:18:23Z  commit: fe14c9b2
-# NOTE (S302 pass): TARGETED — the LOCAL AND CI GATE SURFACE, which is the only build-side thing that
-# moved: `ci.yml` `gate` gained a step, `pre-commit` gained a path, and `pre-push` changed SCOPE and
-# TRIGGER. No package.json script, CLI flag or Dockerfile changed; those sections carry their prior
-# walk. The new section "Gate topology — the two failure modes" carries the rules.
+# updated: 2026-08-02T18:40:00Z  commit: e80b692e
+# NOTE (S313 pass): INCREMENTAL over `fe14c9b2` -> `e80b692e` (67 commits, five sessions). TARGETED —
+# **all three workflows changed and TWO AI legs were KILLED.** No package.json script, CLI flag or
+# Dockerfile changed; those sections carry their prior walk. **The single line a reader most needs:
+# `cloud-maps` NO LONGER REFRESHES THE MAPS ON A SCHEDULE — map refresh is PA-at-wrap only. A map
+# stamp is now as old as the last wrap, and nothing will move it for you.**
 
 ## Development Commands (root package.json scripts)
 compile — `bun run compiler/src/cli.js compile`
@@ -153,6 +154,34 @@ written rots silently.
 - **`scripts/claim-gate.js`** — the fenced-block (C1) half: extracts ```scrml fences from a declared
   PUBLIC_SURFACE, compiles + ghost-pattern-lints each, `// gate: skip` opt-OUT. **Not wired into CI**
   (measure-mode only).
+- **`scripts/browser-baseline.ts` — NEW (S313, #361). GATE, in BOTH `gate` and `tracking`.** Three
+  modes mirroring `facts.ts`/`state.ts` exactly: bare = PRINT the tier's current failure set,
+  `--write` = record the baseline (idempotent), `--check` = diff and exit 1 on ANY difference.
+  **It asserts the failure NAME SET — not the exit code, and not the count.** The premise it removes:
+  the browser tier always exits 1 against a documented ~48-failure baseline, so an exit-code gate
+  could not express "the same failures as before", every blocking gate excluded the tier, and a
+  genuinely new browser failure was therefore INVISIBLE — `pa-base` §8's "a gate that has never
+  failed is indistinguishable from a gate that CANNOT fail", in its purest form. The key is
+  `<suite> > <test name>` and nothing else; **timings, pass/fail COUNTS, file paths and ordering are
+  deliberately stripped** as non-deterministic or uninformative. **BIDIRECTIONAL by design:** a name
+  JOINING is a regression; a name LEAVING means the baseline is STALE (prune it in the commit that
+  fixes the test) — a baseline nobody prunes re-acquires the blind spot it was built to remove.
+  **Scar worth keeping:** the `(fail)` regex is deliberately NOT line-anchored, because a failing
+  test whose assertion dumps a happy-dom object emits the marker MID-LINE and the anchored first cut
+  silently under-counted by exactly one — which would have been the precise hollow gate the script
+  exists to prevent. Baseline artifact: `compiler/tests/browser/FAILURE-BASELINE.json` (48 names + 2
+  env-exclusions, `recordedAt` 2026-08-02). **Scope is the browser tier only** — lsp / commands /
+  self-host have no name-set assertion (`g-lsp-commands-selfhost-tiers-have-no-failure-name-set-assertion`,
+  LOW). **Deliberately NOT in pre-push:** local environments vary far more than CI, and it was
+  exactly a local environment difference that made the first recorded baseline wrong.
+- **`scripts/s34-census.ts` — NEW (S310). GATE (`--check-new`), and the §34 oracle otherwise.**
+  `bun scripts/s34-census.ts [--full] [--json]` classifies every catalogued diagnostic into
+  STRUCK / PINNED / IMPL-SITES / DECLARED-AHEAD / RUNTIME-SURFACED / FALSE-CLAIM;
+  `--check-new --base <ref>` enforces **SPEC §34.0** against a DIFF, never the legacy corpus.
+  **No hardcoded line numbers — §34's range is derived from the headings every run**, explicitly
+  because a baked line number in a maintained artifact rots silently and nothing fails (the 3,140-line
+  stale SPEC-INDEX and the ~9x-wrong LOC figure are the two precedents, and are why `docs/FACTS.md`
+  exists). See error.map.md for the buckets and the traps it defeats.
 
 ## Content-addressed build assets + cache headers (S265, adopter #82, PR #96)
 
@@ -170,19 +199,21 @@ extension: `<base>.client.js` → `<base>.client.<hash>.js`, `<base>.css` → `<
 Implementation: `compiler/src/api.js` (`contentHashAssets` option), `compiler/src/commands/build.js`
 (`generateServerEntry`), `compiler/src/commands/dev.js` (`devCacheHeaders`).
 
-## CI/CD Pipeline  [.github/workflows/ci.yml]
+## CI/CD Pipeline  [.github/workflows/ci.yml] — CHANGED THIS WINDOW
 Three jobs, "gate-layering" model (types → pre-commit fast subset → CI-here → PA judgment):
 
-**gate** — BLOCKING (the merge-gate), **8 steps** (the root-level test step is NEW this window). checkout → setup-bun → `bun install --frozen-lockfile` → `bun run pretest` → `bun test compiler/tests/unit compiler/tests/conformance` (reproducibly-green-from-source core) → **`bun test compiler/tests/*.test.js` (NEW, `b7dda491`)** → gauntlet quick check (compile benchmarks/todomvc/app.scrml, `node --check` the emitted client.js) → `bun scripts/snippet-gate.js` → `bun scripts/facts.ts --check` → `bun run scripts/regen-spec-index.ts --check`.
+**gate** — BLOCKING (the merge-gate), **12 steps** (+2 this window). checkout **(`fetch-depth: 0`, NEW)** → setup-bun → `bun install --frozen-lockfile` → `bun run pretest` → `bun test compiler/tests/unit compiler/tests/conformance` → `bun test compiler/tests/*.test.js` (the S302 root-level step) → gauntlet quick check (compile `benchmarks/todomvc/app.scrml`, `node --check` the emitted client.js) → **`bun scripts/browser-baseline.ts --check` (NEW, S313 — bryan RULED promote)** → `bun scripts/snippet-gate.js` → `bun scripts/facts.ts --check` → `bun run scripts/regen-spec-index.ts --check` → **`bun scripts/s34-census.ts --check-new --base ${{ github.event.pull_request.base.sha || 'HEAD~1' }}` (NEW, the SPEC §34.0 row-provenance gate)**.
 Triggers: push (paths-ignore: **.md, handOffs/**, docs/**) and pull_request. `concurrency: group ci-${{ref}}, cancel-in-progress: true`.
 
-**tracking** — NON-BLOCKING (`continue-on-error: true`). integration + lsp + commands tests (**incl. `commands/db-migrate.test.js`, S287**), browser tests, and the parser-conformance-within-node.test.js M6.x native-parser-migration backlog. Same checkout/install/pretest steps as gate.
+Two placement facts that are deliberate, not incidental:
+- **`fetch-depth: 0` exists FOR the §34.0 gate** — it diffs against the PR base SHA, and a shallow clone has no common ancestry, so merge-base fails and the gate cannot resolve what is NEW.
+- **The browser gate sits AFTER the gauntlet step**, which compiles the TodoMVC benchmark and therefore materialises `benchmarks/todomvc/dist`. That makes `browser-baseline.ts`'s two env-exclusions moot IN THIS JOB (the pair passes here) — they still matter in `tracking`, which never builds it. Both sides of the comparison are filtered, so the check is correct either way.
 
-**windows** — NON-BLOCKING (`continue-on-error: true`), `runs-on: windows-latest`. Runs unit + conformance only.
+**tracking** — NON-BLOCKING (`continue-on-error: true`). integration + lsp + commands tests (incl. `commands/db-migrate.test.js`) → **`bun scripts/browser-baseline.ts --check` (REPLACES the raw `bun test compiler/tests/browser`)** → the parser-conformance-within-node M6.x backlog. **The replacement fixed a second-order bug worth knowing: a FAILED step HALTS the job, and the browser step was permanently red, so `Within-node parser-parity + canary` — the step after it — reports `skipped` on run 30742472551 and had therefore NEVER RUN.** That is the S302 class (13 of 14 root-level files run by no workflow) recurring one job over: the tier was useless in both directions at once *and* it was silently eating the steps behind it.
 
-Rationale banner in the workflow (S253): `gate` is the guaranteed-green-from-source core only — no self-host/within-node backlog noise.
+**windows** — NON-BLOCKING (`continue-on-error: true`), `runs-on: windows-latest`. unit + conformance only.
 
-**`.github/workflows/ci.yml` changed this window** — `gate` gained the root-level test step (`b7dda491`). Everything else is unchanged; the live-PG DB-authoritative integration tests remain `tracking`-tier and skip-graceful when Postgres is unreachable.
+Rationale banner in the workflow (S253): `gate` is the guaranteed-green-from-source core only — no self-host/within-node backlog noise. The live-PG DB-authoritative integration tests remain `tracking`-tier and skip-graceful.
 
 ## Gate topology — the two failure modes, and why they pull in opposite directions
 
@@ -210,79 +241,75 @@ deleted. Fixed at S301 by narrowing pre-push to the same unit+integration+confor
 pre-commit and `gate` use (verified 21597 pass / 0 fail on a clean checkout — so it CAN go red for a
 real regression and green otherwise, which is the whole point).
 
-The two rules are in tension and both are load-bearing: **widen a blocking gate only over a subset
-that is reproducibly green from source; never leave a tier whose only runner is non-blocking.**
+**FAILURE MODE 2 IS NOW HALF-SOLVED, and the solution is the general one.** S313 (`#361`, bryan RULED
+promote) resolved the tension for the browser tier by **gating on the wrong thing less**: not the
+COUNT (which says nothing about WHICH test broke) and not the exit code (permanently 1), but the
+**failure NAME SET** — a condition an exit-code gate CAN carry, because `--check` exits 0 while the
+set is unchanged and 1 the moment a name joins or leaves it. The tier is now in the BLOCKING `gate`.
+**The shape generalizes and is deliberately not yet applied:** lsp / commands / self-host carry their
+own baselines and have no name-set assertion (`g-lsp-commands-selfhost-tiers-have-no-failure-name-set-assertion`,
+LOW). Extending it is mechanical once this is proven in anger.
 
-## CI/CD Pipeline  [.github/workflows/advisory-review.yml]
-**ai-review** job — non-blocking second-opinion AI `/code-review` on every code PR (deliberately NOT in branch-protection required checks; comments only, never fails the PR).
-Triggers: `pull_request` (opened/synchronize/ready_for_review/reopened), paths-filtered to `compiler/**`, `stdlib/**`, `lsp/**`. `concurrency: group ai-review-${{pr#}}, cancel-in-progress: true`.
-Runs `anthropics/claude-code-action@v1` with the packaged `/code-review` skill against the PR diff. Needs the `ANTHROPIC_API_KEY` repo secret. **CORRECTION vs. prior map generations: that secret IS set** — the daily `cloud-maps` run passes it (`anthropic_api_key: ***` in the run log). Any "unset today, so a run errors at the auth step" note is stale.
+The two original rules remain in tension and both are load-bearing: **widen a blocking gate only over
+a subset that is reproducibly green from source OR name-set-assertable; never leave a tier whose only
+runner is non-blocking.**
 
-## CI/CD Pipeline  [.github/workflows/cloud-maps.yml] — MERGED, SCHEDULED, and FAILING
+## CI/CD Pipeline  [.github/workflows/advisory-review.yml] — **DISABLED THIS WINDOW (#351)**
+**`workflow_dispatch` ONLY**, with a required `pr` input. The `pull_request:` trigger and its paths
+filter are GONE; the workflow name now reads `AI Code Review (advisory — DISABLED, manual fire only)`.
+**Read the reason correctly: the missing `ANTHROPIC_API_KEY` is a COST decision by bryan, not a broken
+secret.** A check that is always red is the `pa-base` §8 cry-wolf shape — it gets ignored, and then a
+real failure gets ignored with it; this one had already been logged as a known non-regression in three
+consecutive session hand-offs, and that tax is what was removed.
+**What is NOT lost:** the MANDATORY adversarial pass (S239) is PA-side and local, and always was — the
+contract requires it precisely because a dev-agent cannot invoke the review in-agent. THIS job was
+explicitly advisory (S255), a SECOND opinion stacked on the PA's. Removing it deletes duplication, not
+coverage; the gap it originally closed (human-authored PRs the PA never dispatched) is now covered by
+the PA reviewing those PRs directly.
+**To reinstate:** set the `ANTHROPIC_API_KEY` repo secret and restore the `pull_request:` trigger.
+**Any map or doc line saying "that secret IS set — the daily cloud-maps run passes it" is RETIRED**;
+`cloud-maps` no longer passes it at all.
 
-**CORRECTION vs. prior map generations.** This workflow is NOT on an unmerged branch and does NOT
-need a `scrml-maps-bot` GitHub App. It landed on `main` at `1971a87d` (2026-07-14), was retooled to a
-fine-grained PAT at `b5ec120b`, and last changed at `752574d9` (2026-07-16). It is live.
+## CI/CD Pipeline  [.github/workflows/cloud-maps.yml] — **STAGE 2 DELETED; NO SCHEDULED MAP REFRESH**
+
+**The single most consequential build-side fact this window, and it is a silent one.**
 
 **name:** `cloud-maps` · **job:** `regen` · **triggers:** `workflow_dispatch` + `schedule` cron
 `17 9 * * *` (daily ~09:17 UTC) · **concurrency:** group `cloud-maps`, `cancel-in-progress: false` ·
-**permissions:** `contents: write`, `pull-requests: write`, `id-token: write` (claude-code-action
-needs OIDC even with an API key).
+**permissions:** `contents: write`, `pull-requests: write` (**`id-token: write` was DROPPED — it
+existed solely for the removed claude-code-action OIDC**).
 
-**Steps.** checkout (token `secrets.MAPS_PAT`, `fetch-depth: 0`) → setup-bun → `bun install
---frozen-lockfile` → **Stage 1** `bun scripts/state.ts --write` (deterministic @generated rollup,
-zero AI cost — **and, as of S299, a HARD-FAIL surface: see "Gap-status vocabulary" below**) →
-**Stage 1b** `bun scripts/threads.ts --check && bun scripts/threads.ts`
-(`continue-on-error: true`) → **Stage 2** `anthropics/claude-code-action@v1` running the
-`project-mapper` subagent in FULL_COLD_START mode (`--permission-mode acceptEdits --max-turns 40`)
-→ **Stage 3** if `git status --porcelain -- .claude/maps master-list.md` is non-empty: branch
-`maps/regen-<run_id>`, `git add -f .claude/maps master-list.md` (the `-f` is load-bearing — `.claude/`
-is gitignored and the maps are force-tracked), commit, push, `gh pr create --base main`,
-`gh pr merge --squash --auto --delete-branch`.
+**Steps NOW.** checkout (token `secrets.MAPS_PAT`, `fetch-depth: 0`) → setup-bun → `bun install
+--frozen-lockfile` → **Stage 1** `bun scripts/state.ts --write` (deterministic `@generated` rollup,
+zero AI cost, and a HARD-FAIL surface — see "Gap-status vocabulary" below) → **Stage 1b**
+`bun scripts/threads.ts --check && bun scripts/threads.ts` (`continue-on-error: true`) →
+~~Stage 2 (project-mapper agent)~~ **REMOVED 2026-08-01 (#351)** → **Stage 3** if
+`git status --porcelain -- .claude/maps master-list.md` is non-empty: branch `maps/regen-<run_id>`,
+`git add -f .claude/maps master-list.md` (the `-f` is load-bearing — `.claude/` is gitignored and the
+maps are force-tracked), commit, push, `gh pr create --base main`, `gh pr merge --squash --auto
+--delete-branch`.
 
-**Design constraints worth not re-litigating:** it NEVER pushes to protected `main` — it opens a PR
-and enables auto-merge, so `ci.yml`'s `gate` runs on it (that workflow's `pull_request:` trigger has
-no path filter, so it fires on docs-only PRs) and auto-merge stamps it on green. The PAT (not
-`GITHUB_TOKEN`) is required because a PR opened by `GITHUB_TOKEN` does not cascade events, so `gate`
-would never fire and auto-merge would wait forever. Fine-grained PATs expire (≤1 yr) — `MAPS_PAT`
-must be renewed or the bot goes dark.
+**CONSEQUENCE, STATED PLAINLY: nav-maps are NO LONGER refreshed on a schedule.** That reverts to the
+PA at wrap (the contract's wrap step 6c), which is where it lived before this workflow existed.
+**A reader who assumes a nightly refresh will trust a stale stamp.** Stages 1/1b remain deterministic
+and free, so the `@generated` state rollup keeps drifting-checked — the map set does not.
 
-### STATUS AT THIS HEAD: **FAILING — every scheduled run, ~14 days running.**
+**Why it was deleted rather than left red.** Stage 2 was the only Anthropic-billed step here, and
+bryan ruled the cloud AI spend off. Leaving it erroring would have been the cry-wolf shape again; it
+was already costing real time (an S310 boot spent part of itself root-causing this workflow's red
+run). **The prior generation of this map spent ~35 lines diagnosing that red as a probable
+credential/entitlement condition on `ANTHROPIC_API_KEY` — that analysis is now MOOT and has been
+deleted, not carried.** The 17/17-failure history and its `1 turn / ~0.6s / $0 / is_error:true`
+signature are in `docs/changelog.md` if anyone needs them.
 
-Verified via `gh run list --workflow=cloud-maps.yml`: **17 of 17 recorded runs failed** — 3 `workflow_dispatch`
-and 14 scheduled — from 2026-07-15 through the 2026-07-28 09:09 UTC schedule.
+**To reinstate:** restore an `anthropics/claude-code-action@v1` step with the project-mapper
+FULL_COLD_START prompt and set the `ANTHROPIC_API_KEY` repo secret.
 
-**The signature changed on 2026-07-17, and the change is the diagnosis.** The 2026-07-16 run lasted
-**12m31s** — the agent genuinely ran and the job failed downstream. Every run from 2026-07-17 onward
-lasts **35-60s wall**, of which the agent accounts for **~0.55-0.60s**:
-
-```
-"type": "result", "subtype": "success", "is_error": true,
-"duration_ms": 594, "num_turns": 1, "total_cost_usd": 0, "permission_denials_count": 0
-##[error] Claude result reported subtype success with is_error:true
-##[error] Action failed with error: Claude execution failed: result is_error:true
-```
-
-**Read that shape literally: one turn, ~0.6 seconds, ZERO cost, zero permission denials.** The
-session initializes fine (`"model": "claude-opus-5[1m]"`) and then errors before consuming a single
-billable token. That is an **API-level rejection of the very first request** — a credential /
-entitlement / quota condition on `ANTHROPIC_API_KEY`, not a mapper-agent fault, not a repo-content
-fault, and not `--max-turns 40` exhaustion (that would burn minutes and dollars, as the 07-16 run
-did). Stages 1 and 1b pass; Stage 3 never runs.
-
-**Corroborating negatives:** `cloud-maps.yml` has not changed since 2026-07-16 12:31, which is AFTER
-the last long-running run — so the workflow file is not the regression. The only repo-side change
-between the 07-16 and 07-17 runs is `752574d9`, whose Stage 1b is `continue-on-error: true` and
-therefore cannot fail the job.
-
-**The one-line diagnostic that would confirm it:** the action is configured `show_full_output:
-false`, so the agent's actual error TEXT is suppressed ("full output hidden for security"). Setting
-`show_full_output: true` (or adding `--debug` to `claude_args`) on one `workflow_dispatch` run would
-print the rejection verbatim. **Not done here — this refresh's write-footprint excludes `.github/`.**
-
-**Consequence for map currency:** the maps have had NO automated refresh since 2026-07-16, which is
-why the watermark sat at `c700c435` while three sessions of landings accumulated. Until `cloud-maps`
-is green, every map refresh is a manual PA action.
+**Design constraints still worth not re-litigating:** it NEVER pushes to protected `main` — it opens
+a PR and enables auto-merge, so `ci.yml`'s `gate` runs on it and auto-merge stamps it on green. The
+PAT (not `GITHUB_TOKEN`) is required because a PR opened by `GITHUB_TOKEN` does not cascade events, so
+`gate` would never fire and auto-merge would wait forever. Fine-grained PATs expire (≤1 yr) —
+`MAPS_PAT` must be renewed or the bot goes dark.
 
 ## Gap-status vocabulary — `scripts/state.ts` now THROWS on an unknown status (CHANGED S299)
 
@@ -290,19 +317,37 @@ is green, every map refresh is a manual PA action.
 to generate the §0 counts rollup. It runs in `cloud-maps` **Stage 1** and via `bun scripts/state.ts
 --write` locally.
 
-**What changed and why it matters to anyone editing `known-gaps.md`.** The status was previously a
-CLOSED alternation *inside the regex* (`status=(open|resolved|deferred|nominal|non-gap|forensic)`).
-A marker carrying any other status therefore **did not match the regex at all — not miscounted,
+**TWO silent-drop guards now exist, and the second one is new this window.**
+
+**Guard 1 (S299) — an unrecognised STATUS.** The status was previously a CLOSED alternation *inside
+the regex*, so a marker carrying any other status **did not match at all — not miscounted,
 INVISIBLE.** Fourteen such markers had accumulated across six unrecognised statuses, **two of them
-open HIGHs**, so the published headline under-reported and nothing anywhere went red. It surfaced by
-ARITHMETIC: a landing resolved two HIGH entries and the count moved 12 -> 11.
+open HIGHs**. Surfaced by ARITHMETIC: a landing resolved two HIGH entries and the count moved 12 → 11.
+
+**Guard 2 (S307, #335) — an unparsed MARKER.** The regex also required `status=` to be followed
+IMMEDIATELY by `-->`, so **any marker carrying an extra attribute was silently dropped** — and
+`pa-base v2.9` had just made `locus=` a REQUIRED field on this exact marker, so every entry filed
+under the new rule became invisible, in the direction that under-reports open defects. Measured at
+the fix: **3 markers dropped, 2 of them OPEN.** The parser (`gapMarkersFrom`) is now an ATTRIBUTE BAG
+— any order, any extra attribute (`locus=`, and `prov=` as of S313) — it SKIPS the doc's own
+`id=<placeholder>` format example so the guard cannot fire on the documentation of its own syntax,
+and it **THROWS naming the offenders** when the parsed count disagrees with the marker count.
+`parseGapMarkers` is EXPORTED and the CLI dispatch is gated on `import.meta.main`, **specifically so
+the guard is testable** — a gate that cannot be exercised from a test is the `pa-base` §8 unproven
+gate, indistinguishable from one that cannot fail (`compiler/tests/unit/gap-marker-parser-s307.test.js`).
+
+**The guard has since fired on its author, correctly.** At S313 a marker used `status=partial-impl` —
+a value `docs/known-gaps.md`'s own header legend already defines ("some sub-units shipped, others
+pending") but the classifier did not know. **The throw was right**; the fix was to teach the script a
+value the ledger sanctions (added to `GAP_STATUS_OPEN` — a half-built guarantee is a live gap), not to
+downgrade the marker to fit the script.
 
 **The fix is deliberately not "widen the alternation".** The regex now matches ANY
 `status=([a-z-]+)` and classification happens in three named sets:
 
 | Set | Members | Counts as |
 |---|---|---|
-| `GAP_STATUS_OPEN` | `open`, `in-progress`, `narrowed`, `ruling-gated` | OPEN |
+| `GAP_STATUS_OPEN` | `open`, `in-progress`, `narrowed`, `ruling-gated`, **`partial-impl` (S313)** | OPEN |
 | `GAP_STATUS_CLOSED` | `resolved`, `fixed`, `deferred`, `non-gap`, `forensic`, `root-caused-elsewhere` | CLOSED |
 | `GAP_STATUS_NOMINAL` | `nominal` | NOMINAL |
 
@@ -321,6 +366,11 @@ pre-commit — runs `bun test compiler/tests/unit compiler/tests/integration com
 pre-push — **SCOPE AND TRIGGER BOTH CHANGED THIS WINDOW.**
   - **Scope:** `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance` — **NOT** the whole of `compiler/tests/`. See "Gate topology" FAILURE MODE 2.
   - **Trigger:** the suite is **SKIPPED on a NEW-REF push** (`remote_sha` all-zero = the ref does not exist upstream yet); the cloud `gate` on the PR is the authority for a feature branch (implements the S254 relaxation this hook had DOCUMENTED at step 2.5 but never applied at step 1). It DOES run on an update to an existing remote ref (including a force-push) and on any `refs/tags/v*`.
+  - **STALE COMMENT, added this window and superseded within it:** the hook's step-2 banner now says
+    the browser NAME-SET check "runs in CI `tracking` today" and that requiring it in the blocking
+    `gate` "is bryan's to make — NOT taken unilaterally". **Bryan ruled promote in the same window and
+    `ci.yml`'s `gate` runs it.** The hook's own SCOPE is unchanged and still correct; only that
+    narration is stale. `browser-baseline.ts` is deliberately NOT run by this hook.
   - **`set -e` trap, worth knowing before editing this hook:** a bare `VAR=$(failing-cmd)` aborts the script THERE, before any reporting runs — an S301 blocked push printed only the banner and exited 1 with the diagnostic below it as dead code. `TEST_OUTPUT=$(…) || EXIT_CODE=$?` is load-bearing, not style. The failure summary greps `"^(fail)"`, not `-A2 "fail"`.
   - Also: gauntlet quick check; refreshes samples/compilation-tests/ fixtures first; the public snippet gate ONLY on a `refs/tags/v*` release-tag push; and **NEW S292, step 2.5 — a GENERATED-DOC CURRENCY gate** that mirrors the cloud gate's CHEAP checks so a stale generated artifact is caught locally instead of ~3 minutes later in CI. Runs `bun scripts/facts.ts --check` (~200ms) + `bun run scripts/regen-spec-index.ts --check` (~61ms) on EVERY non-deletion push, including the feature-branch pushes the S254 relaxation exempts from the full suite (exactly the ones that were failing). **`bun scripts/snippet-gate.js` is deliberately NOT in this hook — it costs ~48s**, and a hook that expensive gets bypassed, and a bypassed gate gets deleted. 261ms does not get bypassed. Skipped entirely when the push payload is deletions only. Failure message names the fix (`bun scripts/facts.ts --write && bun run scripts/regen-spec-index.ts`) and warns to regenerate AFTER the last content commit, not before — regenerating early and then editing `compiler/src` again is the exact loop this gate exists to catch (three rejected pushes in one S292 session).
 
@@ -328,7 +378,7 @@ pre-push — **SCOPE AND TRIGGER BOTH CHANGED THIS WINDOW.**
 None. No Dockerfile / docker-compose in this repo — see infra.map.md.
 
 ## Tags
-#scrml #map #build #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist #gate-topology #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #failure-name-sets #cry-wolf #new-ref-push-skip #set-e-trap #pre-push-scope #b7dda491
+#scrml #map #build #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist #gate-topology #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #failure-name-sets #cry-wolf #new-ref-push-skip #set-e-trap #pre-push-scope #b7dda491 #browser-baseline #failure-name-set #bidirectional-baseline #s34-census #§34.0 #row-provenance #fetch-depth-0 #diff-scoped-gate #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #no-scheduled-map-refresh #advisory-review-disabled #skipped-step-behind-red-step #gap-attribute-bag #locus-attr #partial-impl #proven-gate #import-meta-main
 
 ## Links
 - [primary.map.md](./primary.map.md)

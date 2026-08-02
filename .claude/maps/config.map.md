@@ -1,10 +1,14 @@
 # config.map.md
 # project: scrml
-# updated: 2026-07-28T17:18:00Z  commit: 115e8b1b
+# updated: 2026-08-02T18:40:00Z  commit: e80b692e
+# NOTE (S313 pass): INCREMENTAL over `fe14c9b2` -> `e80b692e`. Re-walked for ONE reason — the CI
+# secret surface changed materially (both Anthropic-billed legs were killed at #351), and the prior
+# stamp's `ANTHROPIC_API_KEY` row asserted the opposite of what is true now. The compiler-side env-var
+# set is UNCHANGED and was re-verified by re-enumerating `process.env.*` / `Bun.env.*` at this HEAD.
 
 No `.env.example` or `.env.template` in the repo. No `.env*` files were read (per config-map policy, `.env*` files other than `.env.example`/`.env.template` are never read by this mapper).
 
-**Re-verified at `115e8b1b` (S297)** by re-enumerating every `process.env.*` / `Bun.env.*` reference across `compiler/src`, `lsp`, `scripts` and `e2e`. The compiler-side set is UNCHANGED this window. Two additions below are the CI-secret names and a compile-time settings knob family that is NOT an env var.
+**Re-verified at `e80b692e` (S313)** by re-enumerating every `process.env.*` / `Bun.env.*` reference across `compiler/src`, `lsp`, `scripts` and `e2e`. **The compiler-side set is UNCHANGED across five sessions** — every landing in this window was compiler source, spec, CI or docs; none introduced or removed a configuration key. The CI-secret table at the bottom is the only part of this map that moved.
 
 ## Environment Variables (referenced directly in compiler/src / lsp / scripts / e2e source)
 
@@ -57,13 +61,20 @@ Per-file allowlist of native-parser-vs-live-pipeline within-node divergence coun
 ## CI Secrets (GitHub Actions repo secrets, NOT env vars in source — names only)
 | Secret | Consumed by | Status |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | `advisory-review.yml` (`ai-review`) + `cloud-maps.yml` Stage 2 | **IS set.** Prior map generations said "unset today" — that is STALE; the cloud-maps run log shows it passed as `***`. It is nonetheless the most probable locus of the cloud-maps failure (a 1-turn, ~0.6s, $0, `is_error:true` result is an API-level rejection of the first request). See build.map.md. |
+| `ANTHROPIC_API_KEY` | **`advisory-review.yml` ONLY, and that workflow is `workflow_dispatch`-only as of #351. `cloud-maps.yml` no longer references it at all — Stage 2 was DELETED.** | **CHANGED — treat as UNSET / not-required.** bryan ruled the cloud AI spend OFF; **the absence is a COST decision, not a broken secret**, and both consuming legs were removed rather than left permanently red (the `pa-base` §8 cry-wolf shape). **Every prior map generation's "IS set — the daily cloud-maps run passes it" note is RETIRED**, as is the credential/entitlement diagnosis of the old cloud-maps red. To reinstate either leg: set the secret AND restore the trigger/step. See build.map.md. |
 | `MAPS_PAT` | `cloud-maps.yml` checkout token + `GH_TOKEN` for the PR/auto-merge step | Set. A fine-grained PAT (Contents R/W + Pull-requests R/W). Required INSTEAD of `GITHUB_TOKEN` because a `GITHUB_TOKEN`-opened PR does not cascade events and `gate` would never fire. **Expires (≤1 yr) — renew or the bot goes dark.** |
+
+`cloud-maps.yml` also DROPPED its `id-token: write` permission — it existed solely for the removed
+claude-code-action's OIDC.
+
+**Operational consequence that belongs in a config map, not just a build map: nothing on a schedule
+consumes an AI credential in this repo any more, and nothing on a schedule refreshes `.claude/maps/`.
+A map stamp is now exactly as old as the last PA wrap.**
 
 No secret VALUE appears anywhere in this map set.
 
 ## Tags
-#scrml #map #config #environment #env-vars #bunfig #allowlist #ci-secrets #compiler-settings #lint-knobs #maps-pat #anthropic-api-key #nav-chunk-timeout
+#scrml #map #config #environment #env-vars #bunfig #allowlist #ci-secrets #compiler-settings #lint-knobs #maps-pat #anthropic-api-key #nav-chunk-timeout #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #advisory-review-disabled #no-scheduled-map-refresh #env-surface-unchanged
 
 ## Links
 - [primary.map.md](./primary.map.md)
