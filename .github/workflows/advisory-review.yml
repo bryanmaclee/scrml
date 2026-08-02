@@ -15,18 +15,31 @@
 # only bites commit-producing jobs; this pushes nothing). NOTE: scrml is a PUBLIC repo — fork PRs from
 # external contributors get no secrets, so this won't run on them (same-repo branches only: bryan + Peter).
 
-name: AI Code Review (advisory)
+# ⛔ DISABLED 2026-08-01 (S310) — MANUAL-FIRE ONLY. bryan ruled the cloud AI spend off; the missing
+# `ANTHROPIC_API_KEY` is a COST decision, not a broken secret, so this must not auto-run and must not
+# sit permanently red. A check that is always red is the pa-base §8 cry-wolf shape — it gets ignored,
+# and then a real failure gets ignored with it. It had already been logged as a known non-regression in
+# three consecutive session hand-offs, which is the tax being removed here.
+#
+# WHAT IS NOT LOST: the MANDATORY adversarial pass (S239) is PA-side and local, and always was — the
+# contract requires it precisely because a dev-agent cannot invoke the review in-agent. THIS job was
+# explicitly advisory (S255), i.e. a SECOND opinion stacked on the PA's. Removing it deletes duplication,
+# not coverage. The gap it originally closed — human-authored PRs the PA never dispatched — is now
+# covered by the PA reviewing those PRs directly.
+#
+# TO REINSTATE: set the `ANTHROPIC_API_KEY` repo secret and restore the `pull_request:` trigger below.
+
+name: AI Code Review (advisory — DISABLED, manual fire only)
 
 on:
-  pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
-    paths:                                  # skip docs-only / bookkeeping PRs → save tokens
-      - "compiler/**"
-      - "stdlib/**"
-      - "lsp/**"
+  workflow_dispatch:        # S310: was `pull_request:` — see the banner above (cost decision)
+    inputs:
+      pr:
+        description: "PR number to review (requires ANTHROPIC_API_KEY to be set)"
+        required: true
 
-concurrency:                                # cancel a superseded review when a new commit is pushed
-  group: ai-review-${{ github.event.pull_request.number }}
+concurrency:
+  group: ai-review-${{ github.event.inputs.pr }}
   cancel-in-progress: true
 
 jobs:
@@ -48,6 +61,6 @@ jobs:
           # Install the packaged /code-review skill and run it on this PR's diff
           plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
           plugins: "code-review@claude-code-plugins"
-          prompt: "/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+          prompt: "/code-review:code-review ${{ github.repository }}/pull/${{ github.event.inputs.pr }}"
           use_sticky_comment: true   # one updating PR comment instead of a new one per push
           claude_args: "--model claude-sonnet-4-6 --max-turns 15"
