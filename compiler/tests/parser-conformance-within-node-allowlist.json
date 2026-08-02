@@ -1,5 +1,5 @@
 {
-  "__NOTE__": "S286 baseline-regen (chunk-ns finish): 17 fixtures' native-vs-reference residuals were regenerated to the current merged-tree counts. This canary classifies PARSED FileASTs (splitBlocks+buildAST vs nativeParseFile) BEFORE codegen, so the BUG-6 chunk-namespacing rename cannot affect it — verified byte-identical to fe1ad047 (parser, native-parser, allowlist, and all fixtures unchanged on the rename branch). The drift is main's pre-existing #162-class ast-builder change (E-STMT-MISSING-SEMICOLON) accumulating against the base-era allowlist; the native (self-host) parser has not tracked it (B4 self-host is deferred post-v1.0.0 per pa.md). This key is metadata; the per-fixture gate keys off the corpus relpaths and ignores it (allowlist hygiene tolerates it as one non-corpus entry).",
+  "__NOTE__": "S286 baseline-regen (chunk-ns finish): 17 fixtures' native-vs-reference residuals were regenerated to the current merged-tree counts. This canary classifies PARSED FileASTs (splitBlocks+buildAST vs nativeParseFile) BEFORE codegen, so the BUG-6 chunk-namespacing rename cannot affect it \u2014 verified byte-identical to fe1ad047 (parser, native-parser, allowlist, and all fixtures unchanged on the rename branch). The drift is main's pre-existing #162-class ast-builder change (E-STMT-MISSING-SEMICOLON) accumulating against the base-era allowlist; the native (self-host) parser has not tracked it (B4 self-host is deferred post-v1.0.0 per pa.md). This key is metadata; the per-fixture gate keys off the corpus relpaths and ignores it (allowlist hygiene tolerates it as one non-corpus entry).",
   "compiler/self-host/ast.scrml": {
     "COUNT-LENGTH": 27,
     "EXTRA-FIELD": 382,
@@ -595,12 +595,12 @@
     "SPAN-COORD": 806
   },
   "examples/29-engine-vs-flags.scrml": {
-    "COUNT-LENGTH": 13,
-    "EXTRA-FIELD": 109,
+    "COUNT-LENGTH": 14,
+    "EXTRA-FIELD": 110,
     "FIELD-SHAPE": 33,
     "KIND-NAME": 21,
-    "MISSING-FIELD": 84,
-    "SPAN-COORD": 62
+    "MISSING-FIELD": 85,
+    "SPAN-COORD": 64
   },
   "examples/30-validated-form.scrml": {
     "COUNT-LENGTH": 2,
