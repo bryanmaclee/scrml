@@ -1,0 +1,6 @@
+<program>
+const Card = <div props={ title: string, header: snippet }>
+    <div>${render header()}</div>
+</div>
+<Card title="Order Summary" />
+</program>
