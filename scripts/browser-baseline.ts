@@ -67,13 +67,48 @@ const FAIL_MARKER = /\(fail\)\s+(.+?)\s+\[[\d.]+\s*m?s\]/g;
 /** bun's own summary line, e.g. ` 48 fail`. The cross-check oracle. */
 const SUMMARY_FAIL = /^\s*(\d+)\s+fail\s*$/m;
 
+interface EnvExclusion {
+  name: string;
+  reason: string;
+}
+
 interface Baseline {
   _comment: string;
   tier: string;
   recordedAt: string;
   count: number;
   failures: string[];
+  envExcluded: EnvExclusion[];
 }
+
+// ENVIRONMENT-DEPENDENT TESTS — excluded from BOTH sides of the comparison.
+//
+// Caught the honest way: the first baseline was recorded locally and went RED on its very first CI
+// run, reporting two "NEW FAILURES" that were nothing of the kind. Both read gitignored
+// `benchmarks/todomvc/dist/`, which exists on a machine where the benchmark has been built and not in
+// a fresh checkout — so the recorded set encoded ENVIRONMENT state, not REPO state. That is precisely
+// the pa-base §8 non-deterministic-input mode this script's own header warns about, committed by the
+// script's own author on the first try. A gate that reddens for reasons no commit caused gets
+// bypassed and then deleted, so the exclusion is the correct trade — and per §8 it belongs INSIDE the
+// artifact, where a later reader sees a decision rather than an oversight.
+//
+// GUARD AGAINST THE OTHER §8 MODE (the absorbed escape hatch): this list is the escape hatch, and an
+// escape hatch under sustained pressure absorbs the whole surface one defensible exemption at a time.
+// So it is (a) named per-entry with a reason, (b) COUNTED on every run — the skip-rate is printed
+// beside the asserted count so growth is visible, and (c) deliberately not pattern-based: adding an
+// entry costs a line of justification, which is the friction that keeps it small.
+const ENV_EXCLUDED: EnvExclusion[] = [
+  {
+    name: "TodoMVC §0: SKIP — dist not compiled > benchmarks/todomvc/dist/app.html must exist",
+    reason:
+      "reads gitignored benchmarks/todomvc/dist/ — absent in a fresh checkout, present only where the benchmark has been built. Environment state, not repo state.",
+  },
+  {
+    name: "TodoMVC §1: initial render — HTML structure > dist files exist (app.html, app.client.js)",
+    reason:
+      "same gitignored benchmarks/todomvc/dist/ dependency as the §0 guard above; fails in CI and passes on a machine that has built the benchmark.",
+  },
+];
 
 function runTier(): {
   names: string[];
@@ -131,6 +166,7 @@ function writeBaseline(names: string[], stamp: string): void {
     recordedAt: stamp,
     count: names.length,
     failures: names,
+    envExcluded: ENV_EXCLUDED,
   };
   writeFileSync(BASELINE_PATH, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 }
@@ -180,14 +216,24 @@ function main(): void {
   }
 
   const baseline = readBaseline();
-  const known = new Set(baseline.failures);
-  const current = new Set(names);
+  const excluded = new Set(ENV_EXCLUDED.map((e) => e.name));
 
-  const added = names.filter((n) => !known.has(n));
-  const fixed = baseline.failures.filter((n) => !current.has(n));
+  // Filter BOTH sides. Excluding only the observed side would make the comparison direction-dependent.
+  const known = new Set(baseline.failures.filter((n) => !excluded.has(n)));
+  const observed = names.filter((n) => !excluded.has(n));
+  const current = new Set(observed);
+  const skipped = names.length - observed.length;
+
+  const added = observed.filter((n) => !known.has(n));
+  const fixed = [...known].filter((n) => !current.has(n));
 
   if (added.length === 0 && fixed.length === 0) {
-    console.log(`  PASS — browser failure name set matches the baseline (${names.length}).\n`);
+    console.log(
+      `  PASS — browser failure name set matches the baseline ` +
+        `(${observed.length} asserted, ${skipped} of ${ENV_EXCLUDED.length} env-excluded observed).\n`,
+    );
+    // The skip-rate is printed on every PASS, not buried: an escape hatch that grows silently is the
+    // pa-base §8 absorbed-hatch mode, and detection of it is a RATIO, not an inspection.
     console.log("═".repeat(66) + "\n");
     return;
   }

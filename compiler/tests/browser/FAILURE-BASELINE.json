@@ -52,5 +52,15 @@
     "§51.0.S.3 same-state arm — effect runs, onIdle resets, onTransition does NOT fire > .Tick in .Playing resolving .Playing RUNS the effect (@score increments)",
     "§51.0.S.6 worked example — drag flow (happy-dom runtime) > .advance(.Drop(col)) from .Dragging runs the arm body effect (both payload planes) AND transitions to .Idle",
     "§51.0.S.6 worked example — drag flow (happy-dom runtime) > .advance(.Start(id)) transitions Idle → Dragging carrying the id payload"
+  ],
+  "envExcluded": [
+    {
+      "name": "TodoMVC §0: SKIP — dist not compiled > benchmarks/todomvc/dist/app.html must exist",
+      "reason": "reads gitignored benchmarks/todomvc/dist/ — absent in a fresh checkout, present only where the benchmark has been built. Environment state, not repo state."
+    },
+    {
+      "name": "TodoMVC §1: initial render — HTML structure > dist files exist (app.html, app.client.js)",
+      "reason": "same gitignored benchmarks/todomvc/dist/ dependency as the §0 guard above; fails in CI and passes on a machine that has built the benchmark."
+    }
   ]
 }
