@@ -3723,7 +3723,24 @@ SHALL be able to determine, without compiler introspection, which code runs when
 - `on mount { body }` SHALL NOT re-execute on reactive state changes.
 - A scope that remounts SHALL re-execute the `on mount` body.
 - Multiple `on mount {}` blocks in the same scope are valid and execute in source order.
-- `on mount { body }` SHALL be desugared to a bare expression before the TAB pass completes.
+- `on mount { body }` SHALL be desugared, before the TAB pass completes, into the **bare-expression-at-mount position** defined by §17.3 — `body` becomes render-time logic in the enclosing scope rather than a function body. "Bare expression" here names the **lifecycle category** of §7.3 (executes at initial render, as against `function` / `fn`, which execute only when called); it does **NOT** constrain `body` to a single expression. Per the grammar above, `body` is `logic-content` (§7.2).
+- Any construct valid in a `${ }` logic context (§7.2) SHALL be valid in an `on mount { }` body. `on mount` is sugar for that position (see this section's opening sentence) and adds no restriction of its own.
+
+> **Implementation status (2026-08-02, S313).** The sugar-equivalence statement above is **NOT yet met
+> by impl #1**. A mount body is currently lowered by a string-rewriting pipeline that handles plain
+> JavaScript and the `@` sigil, but none of the other §7.2 extensions. Measured on `a4a4d55f`:
+> multi-statement bodies, `const` / `function` declarations, `@` writes and `match` all lower
+> correctly; **`lift`, markup-as-expression, and `?{}` each fail with `E-CODEGEN-INVALID-LOGIC`**, as
+> does a `!{}` error arm (§19). All four fail CLOSED — nothing broken ships. The fix routes the mount
+> body through the same statement/AST codegen path a `function` body uses, tracked at
+> `g-onmount-multistatement-bypasses-statement-codegen` (that gap's name predates this measurement —
+> the discriminator is the §7.2 extension set, not statement count).
+>
+> **Direction of change (pa-base §8).** This amendment is **clarifying**: it changes no program's
+> meaning and no program's acceptance status under impl #1 today. When the implementation gap closes,
+> the affected programs become newly-**accepted** — a *conformance restoration* rather than a
+> widening, because this section's opening sentence already declares `on mount` to be sugar for the
+> §17.3 position. It is therefore not a §62 version event.
 
 **Worked example:**
 
