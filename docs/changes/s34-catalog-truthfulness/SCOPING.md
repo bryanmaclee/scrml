@@ -172,8 +172,15 @@ Reading the 29, they are mostly the SAME families as BUILD-ARC:
 | singletons | the remaining ~12 | per-code reads |
 
 **So this is not a separate ruling.** Fold them into the same per-family waves and decide with the
-family, which is the unit the evidence actually supports. The one genuinely distinct sub-question is the
-parseVariant trio: a shipped, adopter-facing primitive whose declared failure modes cannot fire.
+family, which is the unit the evidence actually supports.
+
+> **RETRACTED (S310, same session):** an earlier revision closed this section by naming the parseVariant
+> trio "a shipped, adopter-facing primitive whose declared failure modes cannot fire." **False.** Those
+> three codes are RUNTIME-SURFACED — their own §34 rows say `Runtime:` and §41.13 says *"Emitted via …
+> (runtime)"* — and the runtime implements them (`compiler/runtime/stdlib/data.js:588-590`). The census
+> could not see them because a runtime carries the VARIANT NAME, not the E-code string. Fixed as trap T6
+> with a RUNTIME-SURFACED bucket; FALSE-CLAIM 102 → 99. **The premise was checked before the arc was
+> built, not after** — but it was published to the ledger first, which is the part worth not repeating.
 
 ## Honest caveats
 
