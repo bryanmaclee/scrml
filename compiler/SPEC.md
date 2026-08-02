@@ -4177,7 +4177,7 @@ to become un-paused without a reactive variable. The compiler SHALL emit W-LIFEC
 
 - A `<timer>` instance starts when its enclosing scope mounts (or when added to the DOM
   via `if=`).
-- The timer body (the `${}` logic block) executes on each interval tick.
+- The timer body (the `${}` logic block) executes on each interval tick. **The first execution is one interval after arming — a `<timer>` does NOT fire immediately.** This is the deliberate asymmetry with `<poll>`, which DOES fire an immediate first tick (§6.7.6): a poll promises freshness, a timer promises periodicity. *(Stated explicitly S314 — the sentence was previously silent on the first execution, and that silence was being filled by a defect.)*
 - If the `running` attribute is present and evaluates to `false`, the timer is paused.
   It does not fire while paused. When `running` transitions to `true`, the timer resumes.
   The interval restarts from the moment of resumption (it does not fire immediately on
@@ -4295,6 +4295,31 @@ poll-body    ::= '$' '{' logic-content '}'
 
 The `interval` attribute is required (same constraints as `<timer>`). The poll body is
 a `${}` logic block that executes on each tick.
+
+**A `<poll>` SHALL fire its first tick IMMEDIATELY on arming, not after one interval.** This is the
+one place `<poll>` diverges from `<timer>`, and the divergence is deliberate: a `<poll>` exists to keep
+a value fresh, so a poll that renders nothing for a full interval is a footgun — the worked example
+directly below would leave `@serverTime` empty for ten seconds. A `<timer>` makes no such promise and
+its first execution SHALL remain one interval after arming (§6.7.5).
+
+- The immediate tick SHALL run through the same tick path as every later tick — it therefore inherits
+  the §6.7.5 async tick queuing, the same error handling, and the same `<#id>.tickCount` accounting.
+  It is a tick, not a special-cased pre-run.
+- **Gated by `running=`.** A `<poll running=false>` (or a reactive `running=@cell` false at arming)
+  SHALL NOT fire the immediate tick; arming has not occurred.
+- **Once per arming, not once per resume.** A `running` transition false→true resumes the interval and
+  SHALL NOT re-fire an immediate tick. *(Sub-choice, S314 — the alternative, firing on every resume,
+  turns a boolean write into a fetch trigger, which is a side effect at a distance. Stated explicitly
+  so it can be reversed on evidence rather than discovered.)*
+
+> **Provenance (pa-base v2.10 Rule 4b):** `ruling:` user-voice **S314** (bryan, option **(b)** of the
+> fork filed in `g-timer-poll-body-runs-once-at-module-init`) · `spec:` §6.7.6's own worked example
+> `<poll id="serverTime" interval=10000>`, which the un-amended sentence leaves blank for ten seconds.
+> **supersedes:** nothing — this SPECIFIES behaviour §6.7.6 was silent on. The silence was masked by a
+> defect (`collect.ts:205` emitted the body at module init, accidentally producing a first-tick-ish
+> run), so removing the defect without this amendment would have been a visible regression for every
+> `<poll>`. That is the S313 "a bug fix is not automatically inert" shape: the fix and the amendment
+> land together or not at all.
 
 ```scrml
 <poll id="serverTime" interval=10000>
