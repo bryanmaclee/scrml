@@ -561,7 +561,7 @@ gap: g-sql-row-protect-leak (LOW; NEW S175; deferred T1/T2/T3; design-track — 
 
 ## [dpa-018] deep-dive — soft-nav and the lifecycle model: does an `<outlet>` swap mount/destroy anything?
 
-`status: banked` · banked S313-bryan (2026-08-02) · **bryan RULED "DD it"** (verbatim, S313) after Peter routed the adopter finding.
+`status: running` · banked S313-bryan (2026-08-02) · **bryan RULED "DD it"** (verbatim, S313) after Peter routed the adopter finding. · dPA picked up 2026-08-02 (3-pole live poll fired from a flogence-rooted boot — typed roster live, no persona injection needed).
 gaps: `g-onmount-request-no-refire-on-soft-nav` (MED; adopter aM S67 witness) · sibling `g-static-markup-no-hydrate-in-if-conditional-spa-drillin` (MED; verify-on-latest first, NOT part of this DD)
 
 ### Scope-lock (COMPLETE framing)

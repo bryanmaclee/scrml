@@ -13861,7 +13861,7 @@ function quickCheck(value)! {
 
 The `!` modifier on a function signature declares that the function is **failable** -- it can produce either a success value or an error value.
 
-- `!` with `-> ErrorType` declares the specific error type that this function can produce — an error **enum** for the variant-bearing surface, or a scalar non-enum type per §19.4.4.1. The function's return type is implicitly `SuccessType | ErrorType`, where `SuccessType` is inferred from the function's return expressions.
+- `!` with `-> ErrorType` declares the specific error type that this function can produce — an error **enum**. (A scalar non-enum form is described at §19.4.4.1, which is **CONTESTED** — bryan ruled enum-only at S313; do not read it as a sanction.) The function's return type is implicitly `SuccessType | ErrorType`, where `SuccessType` is inferred from the function's return expressions.
 - `!` without `-> ErrorType` uses a built-in default error enum: `Error`, which has a single variant `Error::Generic(message: string)`.
 - The return type of a `!` function is a **tagged union** of the success type and the error type. The compiler tracks both branches.
 
@@ -13884,7 +13884,41 @@ Failing to handle the result of a `!` function call in any of these ways SHALL b
 - The caller of a `!` function SHALL handle the result via match, `?`, `!{}`, or `<errorBoundary>`. An unhandled `!` function call SHALL be a compile error (E-ERROR-002).
 - The `!` modifier SHALL be part of the function's type signature. It is visible to the type system and participates in type checking.
 
-##### 19.4.4.1 The error type MAY be a non-enum scalar (S313 ruling)
+##### 19.4.4.1 The error type MAY be a non-enum scalar — ⛔ CONTESTED, SUPERSEDED IN DIRECTION (S313)
+
+> **⛔ THIS ENTIRE SUBSECTION IS CONTESTED AND DOES NOT BIND AN IMPLEMENTATION. bryan RULED
+> ENUM-ONLY (S313, option (i)) after the design provenance was found.** It is retained in place rather
+> than deleted because the corpus still teaches the scalar form and a reader needs to know why that is
+> now a migration target, not a sanction. Do not cite it as current truth.
+>
+> **What the provenance says.** The error-type-is-an-enum requirement is NOT arbitrary and NOT
+> unreasoned. `scrml-support/design-insights.md` (the 2026-04-04 error-system debate, Approaches
+> A/B/C/D) records it verbatim: *"When error types carry their own rendering logic as a first-class
+> declared property … the compiler can enforce that every error reachable inside an `<errorBoundary>`
+> either has a `renders` clause or is covered by the boundary's `fallback`. This makes the 'errors are
+> handled in UI' guarantee as strong as the 'errors are handled in logic' guarantee"* — described there
+> as *"the scrml-specific design contribution worth generalizing."*
+>
+> **Enums are required because a VARIANT can carry a `renders` clause (§19.2).** A scalar has no
+> variants, so it can carry none, so `E-ERROR-005` (§19.6.6) has nothing to check.
+>
+> **Proven by execution (S313), not argued.** Inside an `<errorBoundary>` with no `fallback`:
+> a `! LoadError` whose variant lacks `renders` fires **`E-ERROR-005`**; a `! string` in the identical
+> position **compiles clean**. The scalar form silently sits OUTSIDE the display guarantee.
+>
+> **So this subsection sanctioned the form the design reasoning condemns, and rejected a form nobody
+> reasoned about.** The scalar/compound split it is built on was authored by the PA at S310 as one of
+> three filed options; it has **no design provenance**. The only position with provenance is
+> **enum-only**, which subsumes both halves — and `E-ERROR-011` (below) therefore likely dissolves
+> rather than ships, since "must be an enum" already covers `! string[]`.
+>
+> **Owed:** the enum-only migration — 5 conformance cases (`form-for/formfor-{submit-collects-values,
+> onsubmit-signature,validity-bug58-clean,valid-enables-submit,typing-errors}`) + the flagship
+> `examples/29-engine-vs-flags.scrml:79`, which both uses the form and TEACHES it in a comment. That is
+> a §62.2 contract change (the corpus IS the contract), so it lands as its own reviewed arc, not as an
+> edit to this banner.
+
+##### 19.4.4.1 (retained text — CONTESTED, see the banner above)
 
 The statements above and §19.3 describe the error type as an **enum**, and for the variant-bearing
 surface — `fail Enum::Variant(...)`, variant-matching `!{ | ::Variant :> … }` arms — it must be one.
