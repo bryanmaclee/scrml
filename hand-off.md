@@ -1,4 +1,112 @@
 <!-- ============================================================= -->
+<!-- S310 WRAP (bryan/ASUS-Vivobook) — prepended 2026-08-02.        -->
+<!-- S307 + S309 + all prior UNCHANGED below.                       -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 310 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-08-01/02. `/boot` Profile A. **10 PRs merged** (#340 #343 #344 #346 #351 #352 #353
+#354 #355 + a direct delivery into RediLedger). Mechanical stream = delta-log **[1041]–[1055]**.
+
+> **⚠️ CONCURRENCY — Peter was live the entire session** (S310/S311/S312-peter), landing #338 #339
+> #341 #342 #349 + board work. Two of my PRs rebased over him on `docs/known-gaps.md`; both conflicts
+> were resolved by **ARITHMETIC** (I predicted the post-merge counts and verified I got exactly them),
+> never by picking a side — which is where S307's lost update came from.
+
+## 🔴 THE NEXT PA'S FIRST MOVE
+
+**Two rulings are owed by bryan**, and one of them supersedes a ruling he already gave:
+
+1. **Q4 is a spec-vs-corpus CONFLICT, not a fix** (`g-failable-error-type-non-enum-spec-vs-corpus-conflict`).
+   He ruled "diagnostic"; the migration measurement contradicted the premise. SPEC:13806 says the `!`
+   signature declares an error ENUM (a SHALL) — but `! string` is pinned by **three landed conformance
+   cases** and taught by a comment in flagship `examples/29-engine-vs-flags.scrml`. §62.2 makes the
+   corpus the contract, so the contract sanctions what the SPEC forbids. Three options filed in the
+   gap. **Do not build before he picks.**
+2. **Q1 revision, un-ruled:** (a)-as-DISPOSITION — every one of the ~74 freeze-blocking codes gets
+   build / strike / Nominal-label before freeze, only the guarantee-bearing ones get BUILT. He asked
+   "what are the reasons not to take a?"; the answer was that I had framed (a) as "build all 74" when
+   truthfulness only requires DISPOSING of all 74.
+
+**Then Q5 and Q6, both NOT STARTED** (he ruled my rec on each): spec+impl the two slot guarantees
+(`g-required-slot-not-filled-unchecked`, `g-slot-fill-unknown-slot-name-unchecked`), and convert the
+browser baseline into a name-set assertion that can actually go red.
+
+## 🎯 THE ARC — §34 catalog truthfulness
+
+Per §62.2 the conformance corpus IS the versioned contract, so a catalogued code that cannot fire is a
+**false claim inside it** and inflates the freeze denominator. S305/S307 found nine by hand;
+`scripts/s34-census.ts` makes the population computable.
+
+**Final: 804 rows → 34 struck · 338 pinned · 320 live-unpinned · 14 declared-ahead · 3 runtime-surfaced
+· 95 FALSE-CLAIM** (opened at 108).
+
+Landed under it: census oracle + arc (#340) · SPEC **§34.0** provenance rule + proven-biting diff-scoped
+CI gate (#343) · W0, six phantoms struck coverage-checked first (#346) · the RUNTIME-SURFACED
+correction (#352) · Q3, 100 stale line-citations stripped catalog-wide (#355) · **lifecycle W1 —
+`E-LIFECYCLE-001/002/004` now fire** (#353, conformance 845→848).
+
+## 🧭 FINDINGS THAT OUTLAST THE FIXES
+
+1. **A THIRD mechanism: section DISSOLVED, codes orphaned.** §11 is "Reserved — Folded"; content moved
+   to §6/§52/§14.8.9 and its codes were left pointing into the hole. Distinct from both mechanisms
+   bryan and I had named. Nobody was careless — a section moved and the index did not follow.
+2. **bryan's mechanism theory is right and HISTORICAL.** False-claim rate: S<100 **28%** · S100-199 3%
+   · S200-259 2% · **S260+ 0%**. Countermeasure visible in the data: 131 rows cite an emitter, **0 of
+   108** false claims do. "Impled minimally" overstates it — **87%** of catalogued codes have a real
+   emitter. This reframes the arc as a one-time drain, not an ongoing leak.
+3. **A gate that has never failed is indistinguishable from one that cannot.** §34.0's first cut used a
+   three-dot diff and passed a deliberately malformed row; only the mandated bite proof caught it. Then
+   it had to be confirmed EXECUTING in CI, not merely green. It has since caught a real defect in my
+   own bulk sweep — 1 flagged of 92 touched rows.
+4. **The depth-of-survey discount, twice.** W1 looked like "make `cleanup()` real"; `cleanup()` was
+   already fully wired and `checkAnimationFrame` already implemented the identical checks for the
+   sibling builtin. The fix was a mirror, not infrastructure.
+5. **Verify the premise before the WRITE-UP, not just before the build.** parseVariant died correctly
+   on a premise check — but "the sharpest single case" had already been published to the gap ledger.
+   A wrong claim in a ledger outlives the conversation that produced it.
+
+## ⚠️ OWN MISSES — recorded, not smoothed
+
+- **My census was wrong FOUR times, always overstating how broken things are.** (i) too-narrow tree
+  scope → **17 false dead-code claims** averted by widening; (ii) Nominal attribution wrong in BOTH
+  directions; (iii) the hollow gate; (iv) **trap T6** — runtime-surfaced codes read as dead, which
+  killed the parseVariant claim after publication.
+- **Asserted RediLedger was not cloned here** from a search covering only `~/scrmlMaster` at depth 2.
+  It is at `~/rJantz/RediLedger` (branch `scrml-rewrite`). Correction kept IN the adopter message.
+- **`git checkout - -- .` at wrap-time DISCARDED the uncommitted hand-off / changelog / delta-log.**
+  Recoverable only because they were authored programmatically and re-appliable. Never run a
+  path-scoped checkout against another ref with uncommitted work in the tree.
+- **`git add -A` swept an unread adopter inbox message into a feature commit.**
+- **Regenerated FACTS before the last content commit** — the pre-push gate caught it.
+- **Estimated context at ~90% when it was 48%** and offered a wrap — the documented S297 anti-pattern.
+- **Backticks in `git commit -m`** evaluated by zsh and lost the message (the reason `-F` exists).
+
+## 🧷 STATE / OPEN
+
+- **Gate GREEN** on every PR. Gated tier **18,716 pass / 0 fail / 50 skip**; conformance **848/848**.
+- **Gaps HIGH 20 · MED 108 · LOW 45 · Nominal 7.**
+- **⛔ Owed by bryan:** the Q4 fork (3 options filed) · the Q1 revision. The `ai-review` secret is
+  CLOSED as a cost decision, not a bug.
+- **CI: both Anthropic-billed legs dead.** Consequence — **nav-maps no longer refresh on a schedule**;
+  that reverts to PA-at-wrap, and maps are still owed a refresh (watermark `fe14c9b2`).
+- **Adopter (RediLedger):** return-leg gap accepted and fixed; clone path tabled in the overlay + a
+  RETURN-LEG rule (scrml-support `7d498ee`). Their 0-of-10 input unblocks the compile-error half.
+- **Worktrees: 3 `agent-*`, none mine** (zero dispatches — PA-direct all session). Each carries UNMERGED
+  commits; deleting would destroy work. Retained deliberately, again.
+- **Concurrency note:** the `@generated` gap-counts block conflicts on EVERY concurrent PR touching
+  `known-gaps.md`. Correct resolution is ALWAYS "regenerate from the markers", never "pick a side".
+
+## Tags
+#session-310-bryan #s34-catalog-truthfulness #census-oracle #spec-34-0-provenance-rule
+#hollow-gate-caught-by-bite-proof #third-mechanism-section-dissolved #theory-tested-and-historical
+#runtime-surfaced-trap-t6 #lifecycle-w1-cleanup-fires #billed-ci-legs-killed
+#adopter-return-leg-fixed #q4-is-a-conflict-not-a-fix #census-wrong-four-times
+
+---
+
+<!-- ============================================================= -->
 <!-- S312 WRAP (Peter/Windows·P-TECH1) — prepended 2026-08-02.        -->
 <!-- S311(cont) + S311 + bryan's S307/S305 + all prior UNCHANGED below.-->
 <!-- Disambiguate by NAME (numbers collide across machines).          -->
