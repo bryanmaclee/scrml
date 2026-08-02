@@ -5757,6 +5757,47 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-02 — S313 (bryan): the language-authority boundary, a provenance rule, and the route-region lifecycle ratified
+
+Eighteen PRs, solo, PA-direct. Four operator rulings were given and **three were stopped or inverted at
+the measurement** — and the durable output of the session is the mechanism bryan designed in response
+rather than any single fix.
+
+- **`pa-base v2.10` — Rule 4b: every language-surface change states WHY in a recorded `provenance:` field.**
+  The load-bearing limb is citing the provenance of the rule you are **changing**, not only of your change.
+  Ten kinds descending in authority; `rationale:` (a stated, undeliberated reason) replaces the incoherent
+  `none:` after bryan's objection — *"how can a new section have no provenance? then why did we write it?"*
+  `rationale:` is **testable** where `none` never was: the motivating case's real reason, *"it is the shape
+  that broke #228"*, dies on contact, because a parser defect is not a language-design reason.
+- **The language-authority boundary encoded** (`pa-profile-pjoliver11.md`): Peter supplies **compute**, never
+  language authority — as a **review floor, not a pre-approval gate**. The trap named: a bug fix is not
+  automatically inert, because a leak can be fixed by making a form work **or** by rejecting it.
+- **SPEC §6.7.1a** — "bare expression" is the §7.3 **lifecycle category**, not an arity limit; plus a
+  sugar-equivalence SHALL. Measurement killed two premises of the routed seed; the real failing class is
+  three of §7.2's four extensions (`lift`, markup-as-expression, `?{}`) plus `!{}`.
+- **SPEC §19.4.4.1 — the error type SHALL be an enum**, ruled on **found** provenance (2026-04-04 debate: a
+  variant carries `renders`, which is what makes the `<errorBoundary>` guarantee enforceable) and settled by
+  execution. The six-site corpus migration landed **first**, so the rejection lands inert; conformance held
+  **850/850** across it.
+- **`dpa-018` ratified — Pole C.** The `<outlet>` swap boundary is a **route region, not a scope**, keyed by
+  `(route, params)`. §6.7.2's false *"or navigation"* struck · NEW §6.7.2.1 (third lifecycle owner + closure
+  clause) · §20.8.1 exclusion clause · NEW §20.8.8 edge contract · `W-ROUTE-REQUEST-DUPLICATES-SERVER-LOAD`
+  as a v1 obligation. Design-insight promoted CANDIDATE → RATIFIED.
+- **Q6 — the browser tier is assertable.** A failure NAME-SET gate, bite-proven both directions, promoted
+  into the blocking `gate`. It also unskipped a `tracking` step that had **never run**, because the
+  permanently-red browser step halted the job; `tracking` is now green.
+- **Q5 resolved as stale** — both slot guarantees already fire; the real gap was the missing conformance
+  **pin** of the snippet instance (848 → 850).
+- **★ `g-route-timer-poll-not-stopped-on-soft-nav` (HIGH)** filed, PA-verified by source trace: a route
+  `<timer>`/`<poll>` fires against detached DOM for the rest of the session and author `cleanup()` never
+  runs. The authorised build was **stopped after tracing disproved its own banked design** — timers are
+  emitted at chunk module-init, not inside the rehydrator.
+- Two adopter issues (#357 dc/DanceCard, HIGH, PA-reproduced; #358) triaged; #357's routing corrected to
+  bryan-lane.
+
+Gaps HIGH 22 · MED 108 · LOW 46 · Nominal 7. Conformance 850/850. Cloud `gate` GREEN.
+
+
 ### 2026-08-01 — S307: `<machine>` retired from 1.0, and both subsystems it fronted ported
 
 The `<machine>` keyword does not ship in language-1.0. `E-DEPRECATED-001` fires, the word returns to

@@ -1,4 +1,122 @@
 <!-- ============================================================= -->
+<!-- S313 WRAP (bryan/ASUS-Vivobook) — prepended 2026-08-02.        -->
+<!-- S310 + S312 + all prior UNCHANGED below.                       -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 313 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-08-02. `/boot` Profile A. **18 PRs merged** (#359 #360 #361 #362 #363 #365 #366 #367
+#368 #369 #370 #371 #372 #373 + 4 scrml-support direct pushes). Mechanical stream = delta-log
+**[1056]–[1088]**. **Solo** — zero dispatches, zero worktrees created, PA-direct throughout.
+
+## 🔴 THE NEXT PA'S FIRST MOVE
+
+**The route-region impl — and READ THE CORRECTED BRIEF FIRST, not the superseded design inside it.**
+`docs/changes/route-region-teardown/SCOPING.md` opens with a ⛔ TRACED section that invalidates the
+design below it. The short version: `<timer>`/`<poll>` are emitted at **chunk module-init**, NOT inside
+the registered rehydrator (`_scrml_nav_rewire` carries non-delegable handlers + reactive display only),
+so the obvious "active-region flag around the rehydrator" **captures nothing**. Consequences: the
+leave-edge and enter-edge fixes are **ONE arc**, not two; a route timer never *restarts* on re-entry
+either (which §20.8.8 step 3 now requires); and `fileHasOutlet` is an insufficient discriminator because
+the single-file `<page>` form puts shell and routes in one file. **bryan will fire `/code-review` on it**
+— he took that gate himself when told it was the blocker.
+
+**Second: CN-1..CN-10** (`docs/changes/route-region-teardown/CONFORMANCE-CN1-CN10.md`) land WITH that
+impl. **CN-10 carries a standing warning that must not be lost: if it is never authored, the ruling
+silently becomes Pole A.** The §8.1 do-not-author list is banked too — in particular **B-3's proposed
+`_scrml_nav_rewire` chain-seeding fix MUST NOT be built** (the judge rates it the riskiest item any pole
+proposed; not building it is a saving, not a deferral).
+
+## 🎯 THE ARCS
+
+**1 — the on-mount fork → SPEC §6.7.1a.** bryan refused to rule on one relayed option (*"I will not
+rule without atleast seeing my options"*) and flagged "toward-the-contract" as ambiguous — both correct.
+Measurement then killed **two premises** of the routed seed: it is NOT about statement count
+(multi-statement mount bodies already compile and are in the corpus), and `match` does NOT break. Real
+discriminator: **§7.2 names four scrml extensions and THREE fail inside a mount body** (`lift`,
+markup-as-expression, `?{}`) plus `!{}`. "Bare expression" clarified as the §7.3 **lifecycle category**,
+not an arity limit. Build is Peter's.
+
+**2 — Q5 was STALE; the pin was the real work.** Both slot guarantees already fire (`E-COMPONENT-010`,
+`-033`) and SPEC was never silent (§16.2:10620 says it verbatim). The one thing owed was the conformance
+PIN of the **snippet** instance — landed, 848→850, bite proven.
+
+**3 — Q6: the browser tier is assertable.** `scripts/browser-baseline.ts --check` gates the failure NAME
+SET, bidirectional, bite-proven both ways, **promoted into the blocking `gate`**. Side effect worth more
+than the feature: `tracking`'s within-node parity step had **never run** (the always-red browser step
+halted the job) — it now runs, and `tracking` is green.
+
+**4 — Q4 re-ruled ENUM-ONLY, then migrated.** See FINDINGS. Corpus migrated FIRST so the rejection lands
+inert; conformance held 850/850 across it.
+
+**5 — `dpa-018` ratified (Pole C).** The `<outlet>` swap boundary is a **route region, not a scope** —
+keyed by `(route, params)`, edges route-leave/route-enter. Landed: §6.7.2's false *"or navigation"*
+struck · NEW §6.7.2.1 (third owner + the closure clause) · bullet-1 re-association · §20.8.1 exclusion
+clause · NEW §20.8.8 edge contract · `W-ROUTE-REQUEST-DUPLICATES-SERVER-LOAD` as a **v1 obligation**.
+
+## 🧭 FINDINGS THAT OUTLAST
+
+1. **A bug fix is NOT automatically inert — the session's central lesson.** A leak or crash can be fixed
+   by making a form **work** or by **rejecting** it, and choosing between those is a language decision
+   every time. `#333`/`#338` closed a real `E-CG-006` confidentiality leak by making `! T[]` / `! Map<…>`
+   / `! (A|B)` parse; rejecting them was the other resolution, nobody reviewed the choice as a language
+   decision, and it collided with bryan's Q4 ruling. **A review gap on us, not a fault of Peter's.**
+2. **The provenance that mattered existed and was never read.** Q4's compound rejection had none — but
+   the ENUM requirement had provenance since 2026-04-04, and it says a variant carries `renders`, which
+   is what makes the `<errorBoundary>` guarantee enforceable. **Proven by execution:** `! LoadError` with
+   an uncovered variant fires `E-ERROR-005`; **`! string` compiles clean.** So the amendment sanctioned
+   the form the reasoning condemns. Rule 4b exists because of this.
+3. **A stated reason can be falsified; an absent one cannot.** `rationale: "it is the shape that broke
+   #228"` dies on contact — a parser defect is not a language-design reason. Invisible unstated, obvious
+   stated. That is the whole mechanism Rule 4b buys.
+4. **"Measured zero" is only as good as the surface swept.** My migration measurement covered every
+   `.scrml` and **not the test suite**, where two regression suites asserted the forms I was forbidding.
+5. **Disprove the locus before building on it.** The banked route-region design was a hypothesis; one
+   trace killed it. Stopping cost nothing; building would have cost a review cycle and a revert.
+
+## ⚠️ OWN MISSES — recorded, not smoothed
+
+- **Relayed a fork from a seed with its framing intact** and presented one option. bryan caught both.
+- **Mis-routed adopter #357 to Peter** on an over-broad reading of the lane, and told him a
+  newly-accepting four-construct change "does not need an R2" — handing language surface to compute.
+- **Built a hollow oracle**: `/^\(fail\)/` under-counted by one because bun interleaves a `(fail)`
+  marker mid-line into a happy-dom dump. It printed a plausible number and would have passed forever.
+  **Worse: I first read the 47-vs-48 delta as a flaky TEST and ran the tier three more times.** The flake
+  was in my instrument. Fixed by cross-checking against bun's own reported count.
+- **My first browser baseline encoded ENVIRONMENT state** (gitignored `benchmarks/todomvc/dist`), caught
+  only by its own first CI run — the exact non-deterministic-input mode my own header warned about.
+- **Ran the wrong pre-commit scope twice**, then mis-read the result as a flake. The hook also covers
+  `compiler/tests/*.test.js` (the S302 root-level files).
+- **Two commits "timed out" and had landed.** Verify git STATE, not the exit code. Recurring, again.
+
+## 🧷 STATE / OPEN
+
+- **Cloud `gate` GREEN at HEAD.** Conformance **850/850**. Gaps **HIGH 22 · MED 108 · LOW 46 · Nominal 7**.
+- **Contract:** `pa-base v2.9 → v2.10` (Rule 4b) + the `pa-profile-pjoliver11.md` language-authority
+  boundary (review floor, not pre-approval) + the scrml `{{provenance_fills}}` slot.
+- **⛔ Owed by bryan:** public acknowledgement of adopter **#357 / #358** (both triaged, neither landed;
+  #357 is HIGH and PA-reproduced, and is **bryan-lane**, not Peter's). Firing `/code-review` on the
+  route-region build when it exists.
+- **Owed to Peter:** three inbox messages delivered (the on-mount ruling + re-scope · the adopter triage
+  · the correction). He should DROP #357 and keep #358.
+- **Maps STILL owed** — watermark `fe14c9b2`, stale since S305. `project-mapper` is an agent dispatch and
+  agent dispatch was unavailable this session; **not skipped silently, genuinely blocked.**
+- **Worktrees: 13 — none mine.** Main + 9 persistent `scrml-spa-ss*` + 3 `agent-*` carrying UNMERGED
+  commits. Deleting would destroy work. Retained deliberately, as at S307/S310.
+- **`E-ERROR-011` and `W-ROUTE-REQUEST-DUPLICATES-SERVER-LOAD`** are NAMED and Reserved/spec-ahead; their
+  §34 rows land WITH their emitters (Rule 4 / §34.0 outcome 2).
+
+## Tags
+#session-313-bryan #language-authority-boundary #review-floor-not-pre-approval #pa-base-v2-10-rule-4b
+#provenance-field #rationale-is-testable-none-is-not #enum-only-ruled-on-found-provenance
+#corpus-migrated-first-so-rejection-lands-inert #dpa-018-pole-c-ratified #route-region-third-owner
+#browser-name-set-gate-promoted #tracking-green-first-time #hollow-oracle-in-my-own-instrument
+#disproved-the-locus-before-building
+
+---
+
+<!-- ============================================================= -->
 <!-- S310 WRAP (bryan/ASUS-Vivobook) — prepended 2026-08-02.        -->
 <!-- S307 + S309 + all prior UNCHANGED below.                       -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->
