@@ -31,10 +31,14 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 20 |
-| MED | 107 |
+| MED | 108 |
 | LOW | 45 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-failable-error-type-non-enum-spec-vs-corpus-conflict — SPEC:13806 says the `!` signature declares an error ENUM, but three landed conformance cases and a flagship example pin `! string` — `NEW S310-bryan; MED; open (needs a RULING, not a fix — the corpus IS the contract per §62.2)`
+
+bryan RULED "diagnostic" for the §19 `!`-non-enum question (an adopter reads `!` as a RETURN type; `! string[]` compiles silently and was the proximate cause of the #228 empty-body parse bug). **The build was STOPPED at the migration measurement, which contradicted the premise.** Governing sentence, verbatim (SPEC:13806): *"`fail` SHALL produce a value of the error enum type declared in the function's `!` signature. The variant specified in the `fail` statement SHALL be a valid variant of that error enum."* So a non-enum in the `!` position violates a normative SHALL. **But the corpus disagrees:** `examples/29-engine-vs-flags.scrml:79` uses `function fetchItems() ! string` and its own comment TEACHES the form (*"`! string` declares it can fail"*), and **three landed conformance cases pin it** — `form-for/formfor-submit-collects-values`, `formfor-onsubmit-signature`, `formfor-validity-bug58-clean` (all `server function persistSignup(...) ! string`). Per §62.2 the conformance corpus IS the versioned contract, so the contract currently SANCTIONS the form the SPEC forbids. Firing an Error would break three cases and a documented example — a non-zero measured migration, which pa-base §8 makes a separate RULING rather than a unilateral migration. **The fork is genuinely bryan's:** (a) SPEC wins — fire the diagnostic, migrate the 3 cases + the example to a real error enum; (b) corpus wins — amend §19.4 to admit a non-enum error type and drop the SHALL; (c) narrow — fire only on ARRAY/compound non-enum forms (`! string[]`, the shape that actually broke #228) and leave bare `! string` sanctioned. Not built either way pending the ruling. <!-- @gap id=g-failable-error-type-non-enum-spec-vs-corpus-conflict sev=MED status=open locus=compiler/src/type-system.ts -->
 
 ### g-cleanup-keyword-shadowed-by-user-function-not-diagnosed — a user-defined `function cleanup()` silently shadows the reserved `cleanup` builtin; calls to it are parsed as the builtin and now misreport — `NEW S310-bryan; LOW; open (pre-existing; surfaced by the S310 cleanup() diagnostics)`
 
