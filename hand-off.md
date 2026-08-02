@@ -1,4 +1,75 @@
 <!-- ============================================================= -->
+<!-- S312 WRAP (Peter/Windows·P-TECH1) — prepended 2026-08-02.        -->
+<!-- S311(cont) + S311 + bryan's S307/S305 + all prior UNCHANGED below.-->
+<!-- Disambiguate by NAME (numbers collide across machines).          -->
+<!-- ============================================================= -->
+
+# scrml — Session 312 (Peter · Windows/P-TECH1) — WRAP
+
+**Date:** 2026-08-02. `/boot` Profile A. Boot `main` `b6e43cc6` (#348) → landed **#349** (`5f2e418c`).
+Coherence **0/0** both repos, trees clean. Delta-log **[1034]–[1040]**. **One codegen landing**, cloud
+`gate`+`windows` GREEN. Took the top Peter-lane HIGH from the S311-cont queue (verified collision-clean).
+
+## 🎯 THE HEADLINE — `g-request-data-is-some-misroute` (HIGH) resolved; the root was PARSE-layer, not routing
+
+The adopter-witnessed gap (aM S67: "server compiled, client stayed stale, no error"). Reproduced on
+HEAD first: `<div if=${<#profile>.data is some}>` → `_scrml_input_state_registry.get("profile").(data
+!== null && …)` = **E-CODEGEN-INVALID-LOGIC, NO `.client.js` written** → stale client. A differential
+set the scope precisely: the `${…}` **text-interp** path is CORRECT; only the **`if=` attribute** path broke.
+
+**verify-the-class win** ([[verify-the-bug-class-not-just-reported-instance]]): the ledger's prior fix
+hypothesis ("route through request-state + preserve the member") was **wrong on the mechanism**. The true
+root is a **parser** defect: `if=` keeps the raw `<#id>` sigil (unlike `${}`, which TAB pre-lowers to
+`__scrml_input_id__`), so `scanLhsLeft` — the `is`-predicate LHS scanner, running BEFORE `<#id>`
+normalization — read the sigil's own `>` as a chain terminator, fragmenting `<#r>.data is some` to a bare
+`.data` LHS → acorn ParseError → escape-hatch (`shouldSkipExprParse` skips `<`-leading) → string fallback
+that both mis-routed AND mangled.
+
+**Fix (2 files, surgical):** (1) `scanLhsLeft` recognizes a tight `<#ident>` as an is-predicate LHS base
+(`matchInputStateSigilLeft`; a real `>` like `a > b.c is some` is unaffected); (2) the if=/show=/if-chain
+toggle helpers re-parse the escape-hatch `<#`-condition via the now sigil-aware parser + thread
+`requestIds`, so the attribute path lowers **identically to the text-interp path**.
+
+## ⚠️ THE S239 PASS EARNED ITS COST (again) — a regression in the first cut
+
+My first cut widened `shouldSkipExprParse` GLOBALLY, rerouting ALL `<#…>` attr exprs onto the structured
+path — but only if= threaded `requestIds`, so **`disabled=`/`value=`/`class=` request-ref reads silently
+mis-routed** to the §36 registry → `undefined.loading` runtime TypeError on a GREEN build. The adversarial
+satellite CONFIRMED it (byte-diff vs baseline). I reverted the global change for the surgical reparse; the
+re-review returned **SAFE TO LAND**. A green 20k suite would have shipped it.
+
+## 🔴 NEXT PA'S PICKUP (Peter-lane)
+1. **`g-reactive-write-member-server-call-no-autoawait`** (MED) — verified LIVE S311c; targeted parenthesize fix.
+2. **`g-sqlref-direct-call-arg-unresolved`** (MED) — verified LIVE S311c; deeper AST-SQLNode fix.
+3. **`g-request-is-some-in-value-bool-class-attr`** (MED, NEW this session) — the sibling: `is some` on a
+   request-ref member in a `disabled=`/`value=`/`class=` attribute still E-CODEGEN-INVALID-LOGIC (pre-existing,
+   LOUD). Fix = apply the SAME reparse+requestIds pattern to `emit-bindings.ts:383,874` (re-parse the
+   escape-hatch too, not just null) + value/bool/class conformance. Clean follow-on to this arc.
+- **Bryan-gated:** escape-hatch (c) §6.7.1a ruling; the two soft-nav/hydration items (his inbox).
+- **Collision:** `g-crossfile-module-const` (stranded `wip/263-…-s239-blocked`).
+
+## ✅ GATE / HOUSEKEEPING
+- **Landed:** #349 (`5f2e418c`), cloud `gate`+`windows` GREEN (authority). `ai-review`/`tracking` red = the
+  documented non-required flakes (dead `ANTHROPIC_API_KEY` secret; tracking red-by-design).
+- **Gate red ONCE first — root-caused, not waved:** FACTS regen'd too EARLY (before the final source reshape),
+  so committed LOC `235,982` lagged actual `235,997` → CI `facts --check` STALE. **Lesson: regen is the LAST
+  step, after ALL source edits.** Amended + re-pushed; gate green.
+- **Tests:** conformance **844/844** (+`lifecycle/request-data-is-some-if-attr-rt`, codes+runtime settle);
+  unit `request-ref-is-some-if-attr-misroute.test.js` (8). Full local unit+integration **20509 pass / 10 fail**
+  = the known Windows baseline/flake (CSRF · self-host smoke ×3 · self-host-v2/EBUSY/esm timeouts · a
+  `node --check` spawn flake proven 24/0 isolated) — ZERO on the changed surface.
+- **Counts:** HIGH **21→20** · MED **106→107** (sibling filed) · LOW 45 · Nominal 7.
+- **Maps:** NOT run — parser + emit-event-wiring internals, no new surface files (S299/S304 precedent).
+  Watermark stays `fe14c9b2`.
+- **Board:** `S312-peter.md` pushed (scrml-support). **Memory:** updated the regen-ordering lesson.
+
+## Tags
+#session-312-peter #request-is-some-if-attr-resolved #root-was-parse-layer-not-routing #verify-the-class
+#s239-caught-first-cut-regression #regen-must-be-last-step #high-21-to-20 #sibling-value-attr-filed
+
+---
+
+<!-- ============================================================= -->
 <!-- S311 (cont.) — MED triage + aM S67 deploy repros, prepended 2026-08-01. -->
 <!-- Same S311 boot, continued POST-WRAP at Peter's request.           -->
 <!-- The S311 WRAP block + all prior UNCHANGED below.                  -->
