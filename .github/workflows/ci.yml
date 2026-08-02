@@ -143,6 +143,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - name: Install deps
+        # S314 — skip puppeteer's chrome-headless-shell download. This job runs ONLY
+        # unit + conformance (no browser tier), so the browser is never used here; the
+        # download was pure cost AND a flake source. Witnessed on PR #382: `ECONNRESET`
+        # in the postinstall failed `Install deps` before a single test ran, while a
+        # sibling run of IDENTICAL content passed. A job whose whole purpose is to
+        # surface OS-path regressions reading red for a network hiccup destroys the
+        # signal it exists to give. `gate` still downloads it — the browser NAME-SET
+        # assertion needs a real browser.
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"
         run: bun install --frozen-lockfile
       - name: Unit + conformance on Windows (catches `\` vs `/` OS-path bugs — #25/#26 class)
         run: bun test compiler/tests/unit compiler/tests/conformance
