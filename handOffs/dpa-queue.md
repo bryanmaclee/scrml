@@ -593,6 +593,49 @@ gaps: `g-onmount-request-no-refire-on-soft-nav` (MED; adopter aM S67 witness) ·
 - **B — the swap is NOT a lifecycle event.** The shell is permanent and route content is re-rendered markup; mount effects fire once per document load. Amend §6.7.2 to strike "or navigation" and fence remount to `if=`. Consequence: the adopter's finding is working-as-intended and adopters need an explicit navigation hook — which must then be specified, or the gap simply moves. → `qwik-resumability-expert` (what legitimately survives vs re-executes; resumability is the strongest statement of "do not re-run what you do not have to").
 - **C — navigation is a THIRD lifecycle, separately named.** Neither mount nor destroy; a distinct route-enter/route-leave contract, so §6.7.2 and §20.8 both stay true without bending. Cost: a third concept in a language whose pillar is *fewer* primitives (limit-primitives-not-godify). → `solid-js-signals-expert` (ownership/disposal — who owns an effect and when is it disposed is exactly the question underneath all three poles).
 
+**⚑ LATE ADDITION (bryan, S313, after the run started — may have missed this dPA pass; if so it is a
+second round, and it is worth one) — POLE D: an `<app>` wrapper.**
+
+> *"would an `<app></app>` wrapper solve anything? either as an outer shell or a distiction"*
+
+**The structural case, and it is stronger than the other three:** the contradiction exists because
+`<program>` is carrying at least five jobs at once — persistent application shell (§20.8.1),
+compilation/execution unit, routing root (§40.8), nestable shared-nothing execution boundary (§4.12.1
+-§4.12.8), and lifecycle scope root (§6.7.2). Jobs 1 and 5 are the two in direct conflict: one says
+"stays live across soft navigations", the other says "destroys on navigation". **`<app>` splits them:**
+`<app>` = the persistent shell (job 1), `<program>` = the route-scoped unit that mounts and destroys
+(job 5). Both existing normative sentences then become TRUE AS WRITTEN — no amendment needed to either.
+
+**And it dissolves the taxonomy hole rather than patching it.** Poles A/B/C all have to invent or deny
+a lifecycle event for the `<outlet>` swap, because §6.7.2's taxonomy has only two scope kinds
+(`<program>` root · `if=`-conditional) and the swap is neither. Under D the swap simply **mounts a
+`<program>`** — a scope kind that already exists — so §6.7.2's existing remount sentence (*"A scope that
+remounts SHALL re-run all bare expressions and re-start all `<timer>` and `<poll>` instances"*) ANSWERS
+the adopter's question by inheritance instead of by new rule. That is the scrml-shaped resolution:
+*provability falls out of the language's natural shape, not separate ceremony* (§2 pillar 6).
+
+**It is a SPLIT, not a new god-primitive** — the limit-primitives-not-godify axiom argues FOR it, not
+against: `<program>` is the overloaded primitive and sharpening it is the move the axiom prescribes.
+
+**Costs / open questions the DD must weigh, honestly:**
+- **Migration.** Every existing app uses `<program>` as the shell. MITIGATABLE to zero: a top-level
+  `<program>` with `<page>` children or a `pages/` dir already IS the app shell, so the compiler can
+  SYNTHESIZE the `<app>` wrapper and make it opt-in for explicitness. The DD should test that claim, not
+  assume it.
+- **A third nesting level.** §4.12.7 already bounds `<program>` nesting depth; `<app>` sits above it.
+  Verify no collision with §4.12.1 shared-nothing or §43 nested-execution semantics.
+- **Engine singletons (§51.0.A).** If a route `<program>` now destroys, engines declared inside one are
+  destroyed with it — probably correct and desirable, and `<app>` finally gives app-lifetime engines a
+  principled home. But it IS a semantics change for any engine currently declared at what is today the
+  shell, and that must be measured, not asserted.
+- **Naming.** `<app>` vs reusing `<program>` at the outer level with a distinguishing attribute. The
+  keyword-collision principle (§65.9) applies; `<app>` is currently UNUSED — 0 corpus occurrences, not an
+  HTML element (verified S313).
+
+→ Assign to whichever expert best argues structural decomposition; `solid-js-signals-expert` (ownership
+and disposal — who owns an effect, when is it disposed) is the natural fit, and `nextjs-rsc-app-router-expert`
+holds the direct real-world analogue in the layout-vs-page split, which is exactly this shape shipped.
+
 **Experts (ALL THREE ALREADY EXIST in the roster — no forge needed):** `nextjs-rsc-app-router-expert` · `qwik-resumability-expert` · `solid-js-signals-expert`. Pipeline: `debate-curator` + `debate-judge` (global).
 ⚠ **Boot rooted in `flogence/`** so the typed roster is live — dpa-017 was fired from a scrml-rooted session and had to inject verbatim personas into `general-purpose` agents instead.
 
