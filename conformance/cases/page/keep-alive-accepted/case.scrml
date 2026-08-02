@@ -1,0 +1,11 @@
+<program>
+
+  <h1>Shell</h1>
+  <outlet/>
+
+  <page keep-alive>
+    <rows>: string[] = []
+    <p>${@rows.length} rows</p>
+  </page>
+
+</program>

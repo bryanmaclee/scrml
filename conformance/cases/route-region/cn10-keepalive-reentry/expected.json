@@ -1,0 +1,14 @@
+{
+  "id": "route-region-cn10-keepalive-reentry",
+  "description": "CN-10 — the ONLY case distinguishing the ratified Pole C route-region model from Pole A. §20.8.4 keep-alive re-entry: enter the route, dwell, leave, re-enter within TTL; there SHALL be no cold re-fetch, the `<timer>` SHALL resume AT PHASE rather than restart at 0, and pre-leave region cell values SHALL be intact. CODES HALF ONLY. The judge's standing warning on this case was: \"Author it now, mark Nominal — if it is never authored, the ruling silently becomes A.\" It was unauthorable in ANY form until S314 because `<page keep-alive>` did not compile (E-PAGE-INVALID-ATTR), so the codes half would have asserted the OPPOSITE of the ruling. bryan's S314 ruling admitting the fifth attribute unblocked it; this pins the authoring surface now and names the two builds the behavioural half waits on, so the ruling can no longer decay into Pole A unobserved.",
+  "language-version": "1.0",
+  "spec": "§20.8.4, §20.8.8, §6.7.2.1",
+  "rationale": "§20.8.4: \"A route MAY opt into `keep-alive` (`<page keep-alive>`). A kept-alive route's server-load payload is cached client-side, keyed by route + params, and returning reuses the cache under a stale-while-revalidate policy.\" §20.8.8 (ratified Pole C, S313) makes the route region a third lifecycle owner keyed by `(route, params)`, which is precisely what makes keep-alive expressible without carving an exception into §6.7.2's memoryless-remount SHALL. The declaration compiles clean today; the cache and the at-phase timer resume do not exist yet.",
+  "runtime-half-pending": true,
+  "runtime-half-ref": "TWO builds owed, both open: (1) §20.8.4 keep-alive runtime cache + §52/§38 invalidation wiring — still Nominal, no cache exists; (2) the route-region leave/enter edges (`g-route-timer-poll-not-stopped-on-soft-nav`, HIGH) — a route `<timer>` is neither stopped on leave nor restarted on re-entry, so 'resumes at phase' has nothing to resume. Authoring the runtime half before BOTH land would add a permanently-red case (pa-base §8 cry-wolf).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-PAGE-INVALID-ATTR", "E-OUTLET-DUPLICATE", "E-OUTLET-OUTSIDE-SHELL", "W-ATTR-001"],
+    "notCodePrefixes": ["E-PAGE-", "E-OUTLET-"]
+  }
+}

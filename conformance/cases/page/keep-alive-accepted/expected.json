@@ -1,0 +1,12 @@
+{
+  "id": "page-keep-alive-accepted",
+  "description": "§4.15 / §40.8 / §20.8.4 — `keep-alive` is the FIFTH member of the `<page>` per-route attribute set (S314). It compiles clean: no `E-PAGE-INVALID-ATTR`, and no incidental `W-ATTR-001` (the attribute is registered on the `<page>` surface, not merely tolerated). Pinned because this is a NEWLY-ACCEPTING surface — the form was REJECTED until S314, so without a case the acceptance is unprotected and a future tightening of the attribute set would silently re-break it.",
+  "language-version": "1.0",
+  "spec": "§4.15, §40.8, §20.8.4",
+  "rationale": "§40.8: \"The five per-route attributes are `db=`, `auth=`, `csrf=`, `ratelimit=`, `keep-alive` (§20.8.4); any other attribute on `<page>` fires `E-PAGE-INVALID-ATTR`.\" §20.8.4: \"A route MAY opt into `keep-alive` (`<page keep-alive>`).\" The AUTHORING surface is what this case pins; the §20.8.4 runtime cache remains Nominal and is pinned separately by route-region-cn10-keepalive-reentry.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-PAGE-INVALID-ATTR", "E-PAGE-ROUTE-ATTR-FORBIDDEN", "W-ATTR-001"],
+    "notCodePrefixes": ["E-PAGE-"]
+  }
+}

@@ -231,6 +231,13 @@ ELEMENT_ATTR_REGISTRY.set("page", {
       supportsInterpolation: false,
       allowedValues: ["true", "false"],
     })],
+    // §20.8.4 (S314) — `<page keep-alive>` route-payload cache opt-in. BARE
+    // attribute (no value); registered so it is recognized and fires no
+    // incidental W-ATTR-001. Admitted to the §4.15 per-route set by bryan's
+    // S314 ruling; provenance: dd:page-helper-element-design-2026-05-12.
+    // NOTE: the §20.8.4 runtime cache + §52/§38 invalidation are still
+    // Nominal — this registers the AUTHORING surface only.
+    ["keep-alive",    attrSpec({ supportsInterpolation: false })],
     ["title",         attrSpec({ supportsInterpolation: true })],
     ["class",         attrSpec({ supportsInterpolation: true })],
     ["id",            attrSpec({ supportsInterpolation: true })],
