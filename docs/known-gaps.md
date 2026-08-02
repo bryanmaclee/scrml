@@ -32,9 +32,18 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 20 |
 | MED | 107 |
-| LOW | 45 |
+| LOW | 46 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-lsp-commands-selfhost-tiers-have-no-failure-name-set-assertion — three excluded test tiers still carry a documented failure baseline with NO mechanical assertion; a regression in them is invisible — `NEW S313-bryan; LOW; open (the measured residual of the Q6 browser-tier work)`
+<!-- @gap id=g-lsp-commands-selfhost-tiers-have-no-failure-name-set-assertion sev=LOW status=open locus=scripts/browser-baseline.ts -->
+
+Q6 (bryan, S310) closed the BROWSER tier: `scripts/browser-baseline.ts --check` asserts the failure NAME SET, exits 0 while the set is unchanged and 1 the moment a name joins or leaves it. **`lsp`, `commands` and `self-host` were named alongside `browser` in the same exclusion set** (`scripts/git-hooks/pre-push`, and the overlay's pre-commit exclusion list) and each carries its own documented baseline — none has an assertion. So for those three the original condition still holds exactly: always-failing is indistinguishable from newly-regressed.
+
+Filed rather than silently scoped away — a fix that covers one of four named tiers and does not say so reads as full coverage (pa-base §8, "no silent caps"). LOW because the shape is proven and the extension is mechanical (the script is tier-parameterised in everything but a constant), not because the exposure is small.
+
+**Do NOT extend by copy-paste before reading `FAIL_MARKER`'s comment.** The browser parser needed a non-line-anchored regex plus a cross-check against bun's own reported failure count, because bun interleaves `(fail)` markers into test output mid-line; the first cut silently under-counted by one and looked perfectly healthy. Any sibling tier that dumps large objects on failure will hit the same thing.
 
 ### g-onmount-in-markup-position-silently-emits-source-text — an `on mount { … }` nested inside markup is emitted as LITERAL SOURCE TEXT into the HTML with zero diagnostics, and its body is never wired — `NEW S313-bryan; MED; open (fail-OPEN and silent — the worst class; zero corpus impact, measured)`
 <!-- @gap id=g-onmount-in-markup-position-silently-emits-source-text sev=MED status=open locus=searched:compiler/src/ast-builder.js:339-357,block-splitter,§6.7.1a,§4.15 -->
