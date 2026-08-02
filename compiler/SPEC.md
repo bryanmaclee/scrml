@@ -13920,9 +13920,23 @@ and a documented example — so this subsection records what the language alread
 *new restriction* to the compound form.
 
 **Direction of change (pa-base §8).** The scalar clause is **inert** — no program's meaning or
-acceptance status changes; it removes a contradiction between the prose and the corpus. The compound
-clause is **newly-rejecting**, and its migration is **measured at zero**: a corpus sweep of every
-`.scrml` outside `node_modules`/`dist` finds **0** array or compound `!` error types.
+acceptance status changes; it removes a contradiction between the prose and the corpus.
+
+> **⛔ THE COMPOUND CLAUSE IS CONTESTED — do NOT build `E-ERROR-011` on this text alone (S313).**
+> Its migration was first reported as "measured at zero" on a sweep of every `.scrml` outside
+> `node_modules`/`dist`. **That sweep was incomplete: it did not cover the test suite.** All three
+> forbidden shapes — `! string[]`, `! Map<string, int>`, `! (A | B)` — **compile clean today**
+> (verified by execution), and two landed regression suites assert that they do:
+> `compiler/tests/unit/failable-array-return-server-promotion.test.js` and
+> `…/failable-generic-paren-return-server-promotion.test.js`.
+>
+> Those suites exist because each shape was an adopter-reported **confidentiality leak**: the error-type
+> parse did not consume the `[]` / `<…>` / `(…)` tail, so the function parsed with an EMPTY body, was
+> never server-promoted, and its `?{}` SQL shipped to the client (`E-CG-006`). The fixes resolved the
+> leak by making the form **parse**. Rejecting the form is the other available resolution of the same
+> defect, and choosing between them is a language decision that has not been made with this fact in
+> hand. Until it is, this clause is **spec-ahead and contested**: the scalar clause above stands, the
+> compound prohibition does not bind an implementation, and `E-ERROR-011` stays unbuilt.
 - `server` and `!` modifiers MAY coexist: `server function loadUser(id)! -> UserError { ... }` (arrow form) or `server function loadUser(id)! UserError { ... }` (bare form).
 - `pure` (§33) and `!` modifiers MAY coexist: `pure function validate(x)! -> ValidationError { ... }`. A `pure` failable function SHALL NOT have side effects but MAY produce error values.
 
