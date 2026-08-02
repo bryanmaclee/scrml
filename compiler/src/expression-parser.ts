@@ -1050,6 +1050,24 @@ function findMatchingOpenLeft(s: string, end: number, open: string, close: strin
 }
 
 /**
+ * If `s[end]` is the `>` closing a TIGHT `<#ident>` request/input-state-ref
+ * sigil, return the byte index of the opening `<`; otherwise -1. Tight form
+ * only (no interior whitespace), mirroring the `<#id>` sigil regex used by
+ * `parseExpression` (`/<#([A-Za-z_$][A-Za-z0-9_$]*)>/`). A greater-than `>`
+ * (`a > b`) has no matching `<#` immediately to its left and returns -1.
+ */
+function matchInputStateSigilLeft(s: string, end: number): number {
+  if (s[end] !== ">") return -1;
+  let j = end - 1;
+  const identEnd = j;
+  while (j >= 0 && /[A-Za-z0-9_$]/.test(s[j])) j--;
+  if (j === identEnd) return -1;                 // no ident chars before `>`
+  if (!/[A-Za-z_$]/.test(s[j + 1])) return -1;   // ident must start with letter/_/$
+  if (s[j] !== "#" || s[j - 1] !== "<") return -1;
+  return j - 1;                                   // index of the opening `<`
+}
+
+/**
  * Scan leftward from `isStart` (the index of the `i` of the `is` keyword)
  * to find the LHS predicate-target extent. Returns the byte index of the
  * start of the LHS (inclusive), or -1 if no valid LHS is found.
@@ -1159,6 +1177,20 @@ function scanLhsLeft(s: string, isStart: number): number {
       if (scan >= 0 && s[scan] === "@") {
         chainStart = scan;
       }
+      expecting = "after-base";
+    } else if (c === ">") {
+      // g-request-data-is-some-misroute (S312) — the `<#id>` request/input-state
+      // ref sigil as an `is`-predicate LHS base. `rewriteIsPredicates` runs on the
+      // RAW string BEFORE `parseExpression` normalizes `<#id>` → `__scrml_input_id__`
+      // (see line ~502), so the sigil's own `>` reaches this scanner. Without this
+      // case the `>` reads as a chain terminator, fragmenting `<#r>.data is some`
+      // to a bare `.data` LHS → `<#r>.__scrml_is_some__(.data)` → acorn ParseError
+      // → escape-hatch → the string fallback that BOTH mis-routes the ref and
+      // mangles the member. Recognize a tight `<#ident>` ending here and take it as
+      // the BASE (identical downstream to an `@?Ident` base).
+      const sigilStart = matchInputStateSigilLeft(s, pos);
+      if (sigilStart === -1) break;
+      chainStart = sigilStart;
       expecting = "after-base";
     } else {
       // Not a continuation char (binary operator, comma, semicolon, `{`, etc.)

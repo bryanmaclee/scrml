@@ -474,9 +474,27 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     b: { condExpr?: string; condExprNode?: any; refs?: string[]; varName?: string; dotPath?: string },
   ): { conditionCode: string; subscribeVars: string[] } | null {
     if (b.condExpr) {
+      // g-request-data-is-some-misroute (S312) — a `<request>`-ref member as an
+      // `is`-predicate LHS in an `if=`/`show=` ATTRIBUTE (`if=<#r>.data is some`)
+      // reaches here with condExprNode an ESCAPE-HATCH: `shouldSkipExprParse` skips
+      // any `<`-leading expr (HTML-fragment guard), so the attribute parser never
+      // built a structured node. The escape-hatch → string fallback both mis-routes
+      // the ref (§36 registry) AND mangles the `is some` LHS (→ E-CODEGEN-INVALID-
+      // LOGIC, stale client). Re-parse the raw with the (now sigil-aware) parser to
+      // get a real node, then emit via the SAME structured path the `${...}` text-
+      // interpolation uses. Scoped to `<#`-bearing exprs so every other escape-hatch
+      // condition keeps its existing string lowering byte-identical.
+      let condNode = b.condExprNode as ExprNode | undefined;
+      if ((!condNode || (condNode as any).kind === "escape-hatch") && typeof b.condExpr === "string" && b.condExpr.includes("<#")) {
+        try {
+          const reparsed = parseExprToNode(b.condExpr, "<if-request-ref>", 0) as ExprNode | null;
+          if (reparsed && (reparsed as any).kind !== "escape-hatch") condNode = reparsed;
+        } catch { /* keep the original node → string fallback (unchanged) */ }
+      }
       // Bug 61 — thread synthCellKeys + derivedNames so `if=@form.isValid`
-      // conditional-display reads route to the dotted synth cell.
-      const compiled = emitExprField(b.condExprNode, b.condExpr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys });
+      // conditional-display reads route to the dotted synth cell. `requestIds` routes
+      // a reparsed `<#r>` ref to the reactive `_scrml_request_<r>` object (§6.7.7).
+      const compiled = emitExprField(condNode, b.condExpr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys, requestIds });
       return { conditionCode: `(${compiled})`, subscribeVars: b.refs ?? [] };
     } else if (b.varName) {
       const condVarName = b.varName;
@@ -548,20 +566,30 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         mode: "client",
         derivedNames: ctx.derivedNames,
         synthCellKeys: ctx.synthCellKeys,
+        requestIds,
       });
     } else if (condition.raw) {
       let condNode = (condition.exprNode ?? null) as ExprNode | null;
-      if (!condNode) {
+      // g-request-data-is-some-misroute (S312) — re-parse when there is no node OR
+      // the node is an escape-hatch (`shouldSkipExprParse` skips `<#…>`-leading exprs)
+      // AND the raw carries a `<#` request/input-state sigil, so an `else-if=<#r>.data
+      // is some` chain branch lowers via the structured path (request-state routed)
+      // instead of the mis-routing/mangling string fallback. Other escape-hatches keep
+      // their existing string lowering.
+      const needsReparse = !condNode || (condNode as any).kind === "escape-hatch";
+      if (needsReparse && (!condNode || (typeof condition.raw === "string" && condition.raw.includes("<#")))) {
         try {
-          condNode = parseExprToNode(condition.raw, "<if-chain-branch>", 0) as ExprNode | null;
+          const reparsed = parseExprToNode(condition.raw, "<if-chain-branch>", 0) as ExprNode | null;
+          if (reparsed && (!condNode || (reparsed as any).kind !== "escape-hatch")) condNode = reparsed;
         } catch {
-          condNode = null;
+          /* keep the original node → string fallback (unchanged) */
         }
       }
       return emitExprField(condNode, condition.raw, {
         mode: "client",
         derivedNames: ctx.derivedNames,
         synthCellKeys: ctx.synthCellKeys,
+        requestIds,
       });
     } else if (condition.name) {
       const varName = condition.name.replace(/^@/, "");
