@@ -1,5 +1,11 @@
 # Route-region teardown — the unblocked half of `g-route-timer-poll-not-stopped-on-soft-nav`
 
+> **⛔ S314-BUILD OUTCOME: the arc does NOT split.** The build dispatch fired, implemented the
+> leave-edge discriminator, executed it, and **reverted it** — the leave edge alone converts the leak
+> into a silent staleness regression, and the enter edge is the STOP-IF-BIGGER shape. Only the
+> comment corrections landed. **Read "⛔ MEASURED S314-BUILD" before scoping anything from the
+> sections above it.**
+
 **Status:** `scoping` · **Authorized S313** (bryan: *"ratify C. build the unblocked half"*)
 **provenance:** `dd:soft-nav-outlet-lifecycle-model-2026-08-02` · `ruling:` user-voice S313 (Pole C ratified)
 **Gap:** `g-route-timer-poll-not-stopped-on-soft-nav` (HIGH, PA-verified by source trace)
@@ -152,10 +158,18 @@ also carries a tracked note as **S313-N6**.
 
 ### Re-split sizing (supersedes the S313 "treat prior sizing as void")
 
-- **Leave-edge — probably SMALLER than banked.** A discriminator change plus tests, not a codegen
-  restructure. The single-file `<page>` form still needs the `<page>`-ancestry test S313 predicted,
-  because `fileHasOutlet` is a SHELL discriminator and file-level granularity cannot separate shell
-  from route there.
+> **⚠️ SUPERSEDED S314-BUILD on the leave-edge bullet — read "⛔ MEASURED S314-BUILD" below.** The
+> "probably SMALLER" estimate is correct about the CODE (the predicate flip is ~3 lines and it
+> produces the required A/B/C differential) and wrong about the DELIVERABLE: executed, the flip makes
+> route timers dead on arrival, dead on re-entry, and in the single-file form kills every page at the
+> first nav. The leave edge is not a standalone landing.
+
+- **Leave-edge — ~~probably SMALLER than banked~~ NOT SEPARABLE.** A discriminator change plus tests,
+  not a codegen restructure. The single-file `<page>` form still needs the `<page>`-ancestry test S313
+  predicted, because `fileHasOutlet` is a SHELL discriminator and file-level granularity cannot
+  separate shell from route there. **(The ancestry test was built and verified S314; it is
+  `insideRegion || tag === "outlet" || tag === "page"`, and it matches the predicate
+  `collectShellCellNames` in the same file already uses.)**
 - **Enter-edge (restart-on-return, §20.8.8 step 3) — genuinely UNBUILT.** `:1271-72` explicitly defers
   it: *"Restart-on-return for the region timer rides §20.8.4 fresh-per-visit re-hydrate — a bounded
   follow-on."* No code implements it.
@@ -165,13 +179,141 @@ also carries a tracked note as **S313-N6**.
   unpinned** (CN-10 is the only case distinguishing C from Pole A). Keep them together on that ground,
   which is weaker than the one banked — say so rather than inheriting the stronger claim.
 
-### NOT proven — the build's first task
+### ~~NOT proven — the build's first task~~ → RESOLVED, see the S314-BUILD section below
 
-That flipping the discriminator is **sufficient**. Verified: the mechanism exists (C) and its predicate
-misses route content (B). NOT verified: that a route-content resource routed into
-`_scrml_region_cleanups` is actually drained on the swap for a resource created at **chunk module-init**
-rather than inside a rehydrator. Establish that FIRST — it is the same shape as the hypothesis S313
-disproved, and it is cheap to check.
+~~That flipping the discriminator is **sufficient**.~~ The module-init-drain gate **PASSES** (a
+module-init-registered region cleanup IS drained on the swap), but flipping the discriminator is
+**NOT sufficient** and must not be landed alone. Measured by execution — see
+"⛔ MEASURED S314-BUILD" below.
+
+## ⛔ MEASURED S314-BUILD — the arc does NOT split; the leave edge alone is a REGRESSION
+
+**provenance:** empirical, by executing the emitted bundle in happy-dom on base `de2f2b24`
+(WORKTREE `agent-a5461872fd68eaac3`). Every claim here is an execution result, not a source read.
+**Outcome: the brief's ⛔ STOP-IF-BIGGER fired. The predicate flip was built, measured, and REVERTED.**
+What landed is the comment-correction half only.
+
+### 1. The FIRST TASK gate — PASSES
+
+A resource created at chunk MODULE-INIT and routed into `_scrml_region_cleanups` **is** drained on the
+swap. `_scrml_teardown_region` is a plain drain of a global array; it does not care when the push
+happened. Two confirmations: the emitted case-C push sits at module-init (before any `_scrml_boot`),
+and `browser-navigate-soft-nav.test.js -t "outlet-resident"` is green at HEAD (2 live timers → 1).
+**The approach is not invalidated on this axis.** It fails on three others.
+
+### 2. The A/B/C differential, and the flip that produces it
+
+Predicate: `insideOutlet || tag === "outlet"` → `insideRegion || tag === "outlet" || tag === "page"`.
+`<page>` is `kind:"markup" tag:"page"` in BOTH forms — the multi-file route file's ROOT node and the
+single-file form's `<program>` child — so one ancestry test covers both, exactly as §40.8 describes
+the two shapes.
+
+**Corroboration nobody had noticed:** `collectShellCellNames` (`emit-reactive-wiring.ts:~1004`,
+navigate-wave1b #5) **already decides the same shell-vs-region question for CELLS using precisely
+`<outlet>` OR `<page>`.** The two walks in the same file disagree, and the cell walk is the one that
+matches §6.7.2.1. So the predicate is not a guess — it is the file's own established answer.
+
+| # | shape | before | after the flip | required |
+|---|---|---|---|---|
+| A | `<timer>` at shell top level | `_scrml_register_cleanup` | `_scrml_register_cleanup` | HELD |
+| B | `<timer>` in `pages/reports.scrml` | `_scrml_register_cleanup` | `_scrml_region_cleanups` | FLIPPED |
+| C | `<timer>` lexically inside `<outlet>` | `_scrml_region_cleanups` | `_scrml_region_cleanups` | HELD |
+
+The emit side does exactly what the brief asked for. **Then it was executed, and the runtime says no.**
+
+### 3. Three measured reasons the flip cannot land alone
+
+**(a) Route timers become DEAD ON ARRIVAL — the incoming chunk is drained by the outgoing teardown.**
+`_scrml_nav_load_chunks` injects and EXECUTES the target route's chunk, and only then calls
+`onDone` → `runSwap` → `swap` → `_scrml_teardown_region(liveOutlet)`. The incoming route's
+module-init has therefore already pushed its own timer-stop into `_scrml_region_cleanups` when the
+OUTGOING region's drain runs, so the drain kills the timer of the route being entered.
+
+Executed (shell + `pages/reports.scrml` with a 20 ms `<timer>` + `pages/about.scrml`):
+
+```
+                      HEAD (leak)                     WITH THE FLIP
+AT/reports            rtick ticking, scope_6 LIVE     scope_6 GONE — killed on arrival
+AT/about   (leave)    rtick DELTA 6  <- the leak      rtick DELTA 0
+RE-ENTER              rtick DELTA 5                   rtick DELTA 0
+shell timer           DELTA 6 / 7 (alive)             DELTA 6 / 7 (alive)   <- case A holds
+```
+
+This is the "emitted ≠ runs" trap in its exact recorded form. A grep of the emitted text shows case B
+taking the region branch and reads as FIXED; the bundle ships a dead route timer, silently.
+
+**(b) Nothing restarts a route timer on RE-ENTRY.** `_scrml_nav_missing_chunks` derives `have` from
+the LIVE document's `script[src]` set, so an already-loaded chunk is never re-injected and its
+module-init never re-runs. Measured: `loaded` is unchanged across the return nav; `rtick` DELTA 0.
+The only replay hook that exists — `_scrml_rehydrators`, replayed by `_scrml_rehydrate_region` —
+contains `_scrml_nav_rewire` only (non-delegable handlers + reactive display binding); `<timer>`,
+`<poll>`, `<request>` and `on mount` are not in it.
+
+**(c) The single-file `<page>` form drains every page at once.** Compiled a `<program>` with two
+`<page>` children: BOTH pages' `_scrml_timer_start` calls emit at the SAME module-init in ONE chunk,
+so with the flip both register into `_scrml_region_cleanups` and the FIRST navigation drains both —
+including the page being entered. Per-`<page>` identity would be needed at both edges, and it does
+not exist at runtime (there is no SSR marker naming which `<page>` a document rendered).
+
+### 4. Why this is not "land (a)'s fix and accept (b)"
+
+Fixing (a) is genuinely bounded — stage pushes made while `_scrml_chunk_loading > 0` into a pending
+list and promote it after the drain (that counter already exists and already means exactly "a route
+chunk is being injected + executed"; the eager-boot branch it drives is proven by the green
+cross-chunk suite). But even with (a) fixed, (b) stands, and (b) is the disqualifier:
+
+- **Today** a route `<timer>`/`<poll>` runs forever. It leaks CPU and closures while you are away, but
+  it works on **every** visit.
+- **With the leave edge alone** it works on the **FIRST visit only** and is dead on every revisit —
+  silently, with no diagnostic. A route `<poll>` that renders live data would show a frozen value
+  forever after the first return.
+
+That is pa-base §8's `semantics-changed` class turning a resource leak into **staleness** — and
+§20.8.8's own ratification rationale names staleness as the failure mode Pole C was chosen to AVOID
+("silent-wrong-UI and … the failure that actually occurred in the field"). Landing the leave edge
+alone would manufacture the exact failure the ruling rejected. It also reproduces the shape this
+document already warned about: *"landing half a teardown … would be a worse state than today, because
+it would LOOK closed."*
+
+**So the CN-set argument is not the surviving reason the two edges are one arc — it is the weak one.
+The strong reason is that the leave edge alone is a silent functional regression.**
+
+### 5. Edge 2 IS the STOP-IF-BIGGER shape — evidence
+
+§20.8.8 step 3 requires *bodies associated with the region* to run *on every route-enter*, *in
+declaration order*. That set is not just timers: it is `${}` bare expressions, `on mount`,
+`<request>`, `<timer>`, `<poll>`, and `cleanup()` registrations (§6.7.2.1 bullet 1). Satisfying it
+requires every one of those emission sites — `emit-reactive-wiring.ts`, `emit-client.ts`'s
+module-init `lines[]`, and `emit-logic.ts`'s `cleanup-registration` case (`:3654`, which today lowers
+unconditionally to `_scrml_register_cleanup` and has no notion of region) — to funnel through ONE
+ordered per-region registry that the router can replay. That is the "move route-content lifecycle
+bodies out of module-init into a registered region-wiring function" the brief named as the stop
+condition. A per-resource additive re-registration does not avoid it, because *declaration order
+across the whole body set* is exactly what a single ordered registry is.
+
+Second, independent prerequisite: **route identity has no runtime representation.** §6.7.2.1 keys a
+region on the committed `(route, params)` pair. A chunk key is a workable proxy for the multi-file
+form only; the single-file form (3c) has none at all, and nothing in the emitted SSR document names
+the entered `<page>`. Minting that key is a design decision about the ratified identity, not an
+implementation detail.
+
+### 6. What the next dispatch should be scoped as
+
+One arc, and it starts at the enter edge, not the leave edge:
+
+1. Mint a route-region identity that both codegen and the router can compute, covering the
+   single-file `<page>` form (needs an SSR marker) — this is a design question, not a coding task.
+2. An ordered per-region registry that region-associated bodies register into at emit time, replayed
+   at route-enter, with the initial load counting as enter #1 (§20.8.8 step 6 — never zero, never
+   twice).
+3. The leave edge: the predicate widening (§3 above — the code is trivial and verified), plus the
+   `_scrml_chunk_loading` staging fix for (a), plus `cleanup()` LIFO, `<request>` abort and
+   `animationFrame` cancellation.
+4. CN-1..CN-9 land with it. **CN-4 can only be authored once the fix exists** — authored today it is
+   permanently red, which is the cry-wolf shape `CONFORMANCE-CN1-CN10.md` rules out.
+
+**Do NOT re-scope the leave edge as a standalone deliverable.** It has now been built and measured
+twice under that framing; both times the measurement said no.
 
 ### CN-10 is blocked — and NOT on this arc
 

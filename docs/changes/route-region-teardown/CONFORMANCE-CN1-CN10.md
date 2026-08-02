@@ -61,12 +61,27 @@ than built). **Route to bryan; do NOT let a dev agent decide it.**
 runtime cache and no §52/§38 invalidation wiring."* **The first clause is false — it is REJECTED.**
 That makes three, all on the soft-nav region machinery, all asserting more is done than is:
 
-1. `_scrml_teardown_region`'s doc-comment claims it tears down timers (S313).
-2. `emit-reactive-wiring.ts:1271-72` claims *"the leak is closed"* (S314 — see SCOPING.md).
-3. **§15735 claims `keep-alive` is recognized and validated (S314 — here).**
+1. ~~`_scrml_teardown_region`'s doc-comment claims it tears down timers (S313).~~ **CORRECTED
+   S314-BUILD** — the comment now names its exactly-two producers, states that the timers clause holds
+   only for a lexically outlet-resident timer, and names which §20.8.8 step-2 sub-steps it does NOT
+   perform.
+2. ~~`emit-reactive-wiring.ts:1271-72` claims *"the leak is closed"*.~~ **CORRECTED S314-BUILD** —
+   replaced with the branch's real scope plus the route-ENTER gap; the sibling `<keyboard>`/`<mouse>`/
+   `<gamepad>` comment carries the same caveat, and `classifyMarkupNodes`'s `insideOutlet` now records
+   why widening it alone must not land.
+3. **§15735 claims `keep-alive` is recognized and validated — STILL OPEN.** It rides the CN-10 ruling
+   below (correcting it is a SPEC edit on the same sentence the ruling will rewrite).
 
 A reader auditing §20.8 from the documents alone would conclude the region lifecycle is substantially
-built. It is not. Correct all three in their respective landings.
+built. It is not.
+
+## Status of CN-1..CN-9 after the S314 build dispatch — STILL NOT AUTHORABLE
+
+The "authorable with the impl arc" disposition below assumed the impl was landing. **It did not** —
+the build dispatch measured the leave edge as a silent regression and stopped (SCOPING.md,
+"⛔ MEASURED S314-BUILD"). CN-4's contract is *fail-before / pass-after*; with no fix it can only
+fail, which is the permanently-red cry-wolf shape this document already rules out. **CN-1..CN-9 land
+with the impl, unchanged.** Nothing about their specs is invalidated by the build finding.
 
 ### Disposition
 
