@@ -2,6 +2,12 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S312 — 2026-08-02 (Peter · Windows) — `if=<#r>.data is some` on a request-ref no longer ships a stale client (HIGH)
+
+Resolved the adopter-witnessed HIGH `g-request-data-is-some-misroute`: a `<request>`-ref member used as an `is some` presence check in an `if=`/`show=`/if-chain **attribute** (`<div if=${<#r>.data is some}>`) miscompiled to invalid JS (`E-CODEGEN-INVALID-LOGIC`), which writes no `.client.js` — leaving a **stale client bundle** on a green server build (assetManagement S67 real-deploy: "server compiled, client stayed stale, no error"). The root cause was **parse-layer, not emit routing** (correcting the prior ledger hypothesis): the `is`-predicate LHS scanner read the `<#id>` sigil's `>` as a chain terminator and fragmented the expression. The `${…}` text-interpolation form was always correct; only the attribute path broke.
+
+- **#349** (`5f2e418c`) — `expression-parser.scanLhsLeft` now recognizes the `<#ident>` request/input-state sigil as an `is`-predicate LHS base; the `if=`/`show=`/if-chain toggle helpers re-parse the escape-hatch `<#`-condition and thread `requestIds`, so the attribute path lowers identically to the text-interpolation path (`_scrml_request_<id>.data`). Pinned by conformance `lifecycle/request-data-is-some-if-attr-rt` (codes + runtime settle) + unit `request-ref-is-some-if-attr-misroute.test.js`. A PA-side S239 adversarial pass caught and reverted a regression in the first cut (a global parse-skip change had silently mis-routed `disabled=`/`value=`/`class=` request-ref reads). **HIGH 21→20.** Filed the sibling `g-request-is-some-in-value-bool-class-attr` (the same class in value/bool/class attributes; pre-existing/loud) as MED.
+
 ## S311 — 2026-08-01 (Peter · Windows) — escape-hatch fork routed to bryan; a phantom HIGH retired; ledger corrected
 
 Docs-only session. No compiler code changed — the substantive fix is a SPEC ruling owed by bryan.
