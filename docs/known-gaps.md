@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 22 |
-| MED | 110 |
+| MED | 111 |
 | LOW | 47 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -108,6 +108,18 @@ DD §0.3 then enumerates the entire `<program>` attribute surface **as it stood 
 **§8 classification of the fix:** admitting the attribute is newly-accepting, but **toward the contract, not beyond it** — §20.8.4 (`SPEC.md:15802`) is a pre-existing normative sentence declaring the form legal, which per pa-base §8's split makes it a **bug fix**, and §4.15's sentence the stale one.
 
 **PA recommendation (bryan rules):** admit `keep-alive` → a closed set of **five**, and amend §4.15 / §40 / §34 together. **Deliberately NOT recommending "replace the enumeration with the principle"** — a closed set is mechanically checkable and *"is this attribute per-route?"* is a judgment call that drifts; that is the limit-primitives instinct and it argues for keeping the set closed. The real fork is narrow: **(a) admit it → five**, or **(b) strike §20.8.4's `<page keep-alive>` clause** and express keep-alive elsewhere or not at all. Whichever way it goes, one of the two normative sentences must be amended and the amendment carries `provenance: dd:page-helper-element-design-2026-05-12 · supersedes:` the four-set enumeration.
+
+### g-no-caching-for-per-visit-expensive-request-work — `keep-alive` is SQL-server-load-only, so v1 has NO caching answer for expensive per-visit HTTP work in a `<request>` — `NEW S314-bryan (surfaced expounding Edge-2 fork 4); MED; open (PRE-V1 FOLLOW — owes a disposition before the language freeze, not a deferral to v1.next)`
+<!-- @gap id=g-no-caching-for-per-visit-expensive-request-work sev=MED status=open locus=compiler/SPEC.md:15802 prov=spec:§20.8.4 -->
+**⚑ PRE-V1 FOLLOW (bryan, S314).** This is a MODEL gap, not a bug — nothing is broken, a capability is absent. It is marked pre-V1 because a capability boundary nobody wrote down is discovered by an adopter, and §62.5's 1.0-final gate is *"the corpus is the agreed surface"*. It owes a **disposition** before freeze — build, strike, or Nominal-label with the boundary stated — per the S310 Q1 (a)-as-DISPOSITION framing (*every freeze-relevant item gets disposed; only the guarantee-bearing ones get BUILT*). It does NOT owe a build.
+
+**Established from the mechanism, not the summary sentence.** §20.8.4 reads as a general route-payload cache in its first line, but every mechanism it specifies is a DATABASE mechanism: keyed by *"only-the-params that reach SQL"*; each sub-payload's table read-set derived at build time via `extractSelectProjection()`; invalidation by *"one Postgres `AFTER INSERT/UPDATE/DELETE` trigger per read table"*; a non-Postgres substrate falls back to focus-revalidate; a multi-database route is *"push-coherent only for its Postgres reads"*.
+
+**A `<request>` (§6.7.7 / §60) is an HTTP fetch. It has no table read-set and no trigger, so it cannot participate in that cache at all** — and §6.7.2.1's *"a body associated with a route region SHALL run on every route-enter, including the first"* applies to it unconditionally. The two clauses are orthogonal and consistent; there is no contradiction and no carve-out is needed. **What is absent is the capability:** an adopter with a genuinely expensive per-visit HTTP call has exactly one v1 remedy — restructure so the data arrives via the server load (§20.8.7 remedy (a)) — and no caching option if that restructure is not available (a third-party endpoint, an endpoint the app does not own, a §60 `<api>` boundary).
+
+**Related and already fixed in the same landing:** §20.8.7's `W-ROUTE-REQUEST-DUPLICATES-SERVER-LOAD` entry offered keep-alive as remedy **(b)** joined to (a) by *"or"* — an alternative. It is not one: applying (b) alone caches the server load while the `<request>` keeps firing every enter, so the duplication the warning names survives and the two halves can disagree. Corrected to a follow-on framing before the emitter exists, so the wrong guidance never reaches a terminal.
+
+**Disposition options for the pre-V1 call:** (i) **Nominal-label** — state the boundary in §20.8.4 ("the cache is SQL-server-load-scoped; `<request>` results are not cached") and accept it for 1.0; (ii) **extend** keep-alive to `<request>` — needs an invalidation story that is NOT the Postgres-trigger one, since an HTTP endpoint gives no change signal, so it would be TTL- or focus-revalidate-based and §20.8.4 explicitly rejects author TTLs (*"Invalidation SHALL be compiler-derived, not an author TTL"*); (iii) **strike the ambiguity** by narrowing §20.8.4's opening sentence to say "server-load payload" everywhere it currently reads as general. **(i) is the cheap honest answer and (ii) collides with a normative SHALL** — worth knowing before the freeze conversation, not during it.
 
 ### g-region-bodies-emit-in-bucket-order-not-declaration-order — §20.8.8 step 3 requires region bodies to run in DECLARATION order; emission is by BUCKET, so the violation is live at initial load with no navigation — `NEW S314-bryan (surfaced scoping Edge 2); MED; open`
 <!-- @gap id=g-region-bodies-emit-in-bucket-order-not-declaration-order sev=MED status=open locus=compiler/src/codegen/emit-reactive-wiring.ts:849 prov=spec:§20.8.8 -->
