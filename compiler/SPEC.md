@@ -3762,11 +3762,46 @@ Every element in the scrml program tree that is conditionally rendered (via `if=
 §17.1) creates a **lifecycle scope**. When an `if=` condition transitions from false to true,
 the scope **mounts**. When it transitions from true to false, the scope **destroys**.
 
-The `<program>` root element (§SS-program) is a permanent scope. It mounts once (on page
-load) and destroys once (on page unload or navigation).
+The `<program>` root element (§SS-program) is a permanent scope for the lifetime of the document.
+It SHALL mount exactly once, when the document loads, and destroy exactly once, when the document
+unloads. A **hard** navigation destroys the `<program>` scope by document unload and is not a distinct
+case. **A soft navigation (§20.8) SHALL NOT mount or destroy any scope.**
 
-- Every `${}` logic block, `<timer>`, `<poll>`, and `cleanup()` registration is associated
-  with the nearest enclosing element scope at compile time.
+> **Amended S313** (ratified Pole C). The prior sentence read *"destroys once (on page unload or
+> navigation)"*, which was **false under soft navigation** and contradicted §20.8.1's *"boots once and
+> stays live across soft navigations"* — all three deliberation poles agreed it had to go.
+> **Provenance (pa-base v2.10 Rule 4b):** `ruling:` user-voice S313 ("ratify C") ·
+> `debate:` `scrml-support/docs/debates/soft-nav-outlet-lifecycle-model-2026-08-02.md` (Pole C, 77.75/95).
+
+##### 6.7.2.1 Scope taxonomy — and the third lifecycle owner
+
+Lifecycle **scopes** are of exactly two kinds: the `<program>` root (§6.7.2) and `if=`-conditional
+elements (§17.1). **Scopes have no identity beyond their position in the element tree**, and the
+memoryless-remount requirement of this clause — that a re-mounting scope re-run all bare expressions and
+re-start all `<timer>` and `<poll>` instances exactly as if mounting for the first time — **binds scopes
+only.**
+
+The region governed by an `<outlet>` (§20.8.1) is **NOT a scope.** It is a **route region**, governed by
+§20.8.8, whose edges are **route-leave** and **route-enter** and whose **identity** is the committed
+`(route, params)` pair. A route region nests as the outermost lifecycle owner inside the `<outlet>`;
+`if=` scopes declared in route content are its children and destroy depth-first under the unchanged four
+steps of this clause at route-leave.
+
+**Lifecycle edges SHALL be produced by exactly three events and no others:** document load/unload (the
+`<program>` scope), an `if=` condition transition (a conditional scope), and a **committed** soft
+navigation (a route region).
+
+> **Why identity is the discriminating axis.** A scope is positional and memoryless by construction; a
+> route region is identified by `(route, params)`, which is what makes `keep-alive` (§20.8.4) expressible
+> without carving an exception into a normative SHALL. That is the whole reason the region is not modelled
+> as a scope.
+
+- Every `${}` logic block, `on mount` body, `<request>`, `<timer>`, `<poll>`, and `cleanup()`
+  registration is associated **at compile time** with the nearest enclosing element scope **or route
+  region** (§6.7.2.1). A body associated with a route region SHALL run on **every route-enter, including
+  the first**, and its registered `cleanup()` SHALL run on the matching **route-leave**. §6.7.1a's unity
+  is preserved without exception: `on mount`, bare lifecycle expressions and `<request>` remain one
+  mechanism, differing only in which owner the compiler binds them to. *(Amended S313 — ratified Pole C.)*
 - When a scope destroys, all associated lifecycle resources are torn down in the following
   canonical order:
   1. All `when` effects registered in that scope are unregistered (no further executions
@@ -15708,6 +15743,14 @@ scrml owns whole-stack routing (§12). §20.8 extends that ownership to *client*
 - A `<program>` is the **persistent application shell** in BOTH the single-file (`<page>` children) and multi-file (`pages/*.scrml`) forms. It boots once and stays live across soft navigations. Splitting an app into `pages/` SHALL NOT drop the shell.
 - The shell MAY contain exactly one **`<outlet>`** element — the region into which the current route's content renders. Route content is swapped into `<outlet>`; the rest of the shell (`<nav>`, `<footer>`, the client runtime) persists across navigations.
 - V1 supports **one flat `<outlet>`** per shell. Nested layouts (multiple / nested outlets, Remix-style) are v1.next.
+- **The `<program>` scope comprises every element of the `<program>` tree OUTSIDE `<outlet>`.** Route
+  content rendered into an `<outlet>` is **NOT** part of the `<program>` scope: it is a **route region**
+  (§6.7.2.1, §20.8.8) whose lifecycle edges are route-enter and route-leave. A soft navigation SHALL NOT
+  destroy, re-mount or re-boot the `<program>` scope, and SHALL NOT re-run any lifecycle body declared in
+  the shell. Splitting an application into route files SHALL NOT drop the shell. *(Added S313 — ratified
+  Pole C. The "boots once and stays live" sentence above is literally TRUE under the ruling and stands
+  verbatim; this addition exists because an author reading "persistent application shell" has no other
+  way to learn that route content is excluded.)*
 - More than one `<outlet>` in a shell SHALL be **E-OUTLET-DUPLICATE**; an `<outlet>` outside a `<program>` shell SHALL be **E-OUTLET-OUTSIDE-SHELL**. A multi-page project (`pages/` present) whose shell declares no `<outlet>` SHALL emit **W-OUTLET-ABSENT-SOFT-NAV-DISABLED** and fall back to hard navigation.
 
 ##### 20.8.1.1 The one-landmark invariant (marker, not tag) — IMPLEMENTED
@@ -15779,6 +15822,57 @@ The shell runtime SHALL NOT be re-booted. Client-side rendering of the route (du
 - Soft navigation SHALL NOT re-boot the shell runtime and SHALL preserve SSR-first (links work with JS off).
 - A soft navigation to a route whose client chunk(s) are NOT present SHALL load them before hydrating, in the fetched document's script order, keyed on resolved absolute URL; a chunk load failure or timeout SHALL fall back to a hard navigation rather than swapping unwired markup. A chunk loaded this way SHALL boot immediately rather than waiting for `DOMContentLoaded` (which has already fired on the live document and will not fire again), and concurrent in-flight navigations SHALL NOT disarm one another's boot.
 
+#### 20.8.8 Route region lifecycle (the edge contract)
+
+**NEW S313 — ratified Pole C.** **Provenance (pa-base v2.10 Rule 4b):** `ruling:` user-voice S313
+("ratify C") · `debate:` `scrml-support/docs/debates/soft-nav-outlet-lifecycle-model-2026-08-02.md`
+(Pole C 77.75/95 · A 62.75 · B 51.75).
+
+> **Numbering note.** The ruling drafted this as "§20.8.3"; that number is already **Link-boost**. It
+> lands at §20.8.8 rather than renumbering a shipped section and invalidating live cross-references.
+
+**Nominal / spec-ahead:** the edge contract below is normative; the compiler wiring lands with the impl
+(see `docs/changes/route-region-teardown/SCOPING.md` and
+`g-route-timer-poll-not-stopped-on-soft-nav`). Conformance CN-1..CN-10 pin it and land with that impl.
+
+1. **Commit gate.** `route-leave` and `route-enter` SHALL be emitted only for a **committed** navigation.
+   A navigation that fails, is aborted, or is superseded before commit SHALL emit **no lifecycle edge
+   whatsoever**, and the live route region SHALL remain fully live throughout the in-flight window — its
+   handlers fire, its `<timer>`/`<poll>` continue, its cells accept writes.
+
+2. **`route-leave`** fires after §20.8.2 step 1 (Fetch) commits and **before** step 2 (Swap) — i.e. while
+   the outgoing route's DOM is still attached. Order within the edge:
+   1. region-scoped reactive display effects and subscriptions are disposed;
+   2. `<timer>` and `<poll>` instances declared in the region are **stopped**;
+   3. in-flight `<request>`s issued by the region are **aborted**;
+   4. `if=` scopes inside the region destroy **depth-first** under §6.7.2's four steps;
+   5. author `cleanup()` registrations in the region run **LIFO**;
+   6. pending `animationFrame()` callbacks in the region are cancelled.
+
+   Steps 4 and 5 SHALL observe **live, attached DOM**.
+
+3. **`route-enter`** fires after §20.8.2 step 4 (Hydrate/Adopt) — specifically **after SSR re-seed and
+   after `each` re-materialisation** — and **before** step 5 (Transition), so that any paint caused by
+   enter-time author code is captured inside the View Transition rather than flashing after it. Bodies
+   associated with the region run in declaration order.
+
+4. **Notification is pre-order; disposal is post-order.**
+
+5. **Ownership.** Cells declared in route content are **region-owned** and re-seed from the incoming
+   payload; cells declared in the shell are **program-owned** and SHALL survive the swap with author
+   mutations intact.
+
+6. **Initial load.** The first rendering of route content into the `<outlet>` on document load IS a
+   `route-enter`. Region-associated bodies therefore run **exactly once** on initial load — never zero
+   times, never twice.
+
+**The ruling knowingly ships a footgun, and therefore owes a diagnostic (v1, not nice-to-have).** Under
+this contract the failure mode is redundant work — a double fetch, a duplicated analytics event, a
+re-POST on back/forward — which is loud on the bill and silent in the UI. The alternative pays
+**staleness**, which is silent-wrong-UI and is the failure that actually occurred in the field. Choosing
+a knowingly-undiagnosable-by-default failure mode obligates the diagnostic:
+**`W-ROUTE-REQUEST-DUPLICATES-SERVER-LOAD`** — see §20.8.7.
+
 #### 20.8.7 Error / Warning Codes (NAMED; §34 rows land WITH the impl per Rule 4 / §38.13·§23.5 precedent)
 
 - **E-OUTLET-DUPLICATE** — more than one `<outlet>` in a shell (V1 flat-outlet). Error.
@@ -15788,6 +15882,7 @@ The shell runtime SHALL NOT be re-booted. Client-side rendering of the route (du
 - **W-KEEPALIVE-UNRESOLVABLE-READSET** — a `keep-alive` sub-load whose SQL read-set is not statically resolvable; that sub-load's cache is disabled (fail-closed). Info.
 - **W-KEEPALIVE-NO-REALTIME-SUBSTRATE** — `keep-alive` on a non-Postgres (or multi-DB non-PG) read; falls back to focus-revalidation. Info.
 - **W-NAV-CHUNK-LOAD-FAILED** — a cross-chunk soft navigation could not load a route's client chunk (network error, or the `_SCRML_NAV_CHUNK_TIMEOUT_MS` budget elapsed); the runtime fell back to a hard navigation rather than swapping in unwired markup. Info. (navigate-wave1c, IMPLEMENTED — emitted by `_scrml_nav_chunk_failed` in the runtime. A failure arriving AFTER a newer navigation superseded this one bails silently: the newer nav owns the outcome, last-nav-wins per §20.8.5.)
+- **W-ROUTE-REQUEST-DUPLICATES-SERVER-LOAD** — a route-region `<request>` targets an endpoint whose payload the compiler can determine is already delivered by that route's §20.8.2 step-1 server load. Warning. **v1 OBLIGATION, not nice-to-have (S313, ratified Pole C):** the ruling knowingly chooses redundant work over staleness as its failure mode, and a knowingly-undiagnosable-by-default failure mode obligates the diagnostic. The message steers to (a) reading the server-load payload directly, or (b) `<page keep-alive>` (§20.8.4) where the work is genuinely per-visit but expensive. scrml can build this because `<request>` is compiler-known. *(NAMED / spec-ahead — no emitter yet; the §34 row lands WITH the impl per Rule 4 and §34.0 outcome 2.)*
 - **W-NAV-001** — (existing, §20.3) a client `.Hard` where server escalation is not possible.
 - **E-NAV-NO-PATH** — `navigate(...)` called with no path argument (a bare `.Hard` / `.Soft` navigation-type modifier is not a destination). Error. (navigate-wave1b, IMPLEMENTED — fired by the type-system `checkNavigateCall` pass.)
 - **W-NAV-SOFT-SERVER** — an explicit `navigate(path, .Soft)` in a **server-escalated** context. Soft navigation requires a browser; the compiler does the server (hard-redirect) behavior instead (§20.3). Info. (navigate-wave1b — code RESERVED / behavior implemented; the lint emission is a bounded follow-on: firing it needs the navigate call site's server/client placement threaded into the diagnostic pass, OR a reliable codegen→diagnostics channel from `emit-expr` where `ctx.mode` is known — the type-system's `checkNavigateCall` walk lacks per-function placement and codegen's `EmitExprContext.errors` is not reliably drained.)
