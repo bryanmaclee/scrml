@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 22 |
-| MED | 109 |
+| MED | 110 |
 | LOW | 47 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -108,6 +108,16 @@ DD §0.3 then enumerates the entire `<program>` attribute surface **as it stood 
 **§8 classification of the fix:** admitting the attribute is newly-accepting, but **toward the contract, not beyond it** — §20.8.4 (`SPEC.md:15802`) is a pre-existing normative sentence declaring the form legal, which per pa-base §8's split makes it a **bug fix**, and §4.15's sentence the stale one.
 
 **PA recommendation (bryan rules):** admit `keep-alive` → a closed set of **five**, and amend §4.15 / §40 / §34 together. **Deliberately NOT recommending "replace the enumeration with the principle"** — a closed set is mechanically checkable and *"is this attribute per-route?"* is a judgment call that drifts; that is the limit-primitives instinct and it argues for keeping the set closed. The real fork is narrow: **(a) admit it → five**, or **(b) strike §20.8.4's `<page keep-alive>` clause** and express keep-alive elsewhere or not at all. Whichever way it goes, one of the two normative sentences must be amended and the amendment carries `provenance: dd:page-helper-element-design-2026-05-12 · supersedes:` the four-set enumeration.
+
+### g-region-bodies-emit-in-bucket-order-not-declaration-order — §20.8.8 step 3 requires region bodies to run in DECLARATION order; emission is by BUCKET, so the violation is live at initial load with no navigation — `NEW S314-bryan (surfaced scoping Edge 2); MED; open`
+<!-- @gap id=g-region-bodies-emit-in-bucket-order-not-declaration-order sev=MED status=open locus=compiler/src/codegen/emit-reactive-wiring.ts:849 prov=spec:§20.8.8 -->
+§20.8.8 step 3: *"Bodies associated with the region run in **declaration order**."* §20.8.8(6): *"The first rendering of route content into the `<outlet>` on document load **IS a `route-enter`**. Region-associated bodies therefore run **exactly once** on initial load."* Together those bind ordering on a path that ships today — **no navigation required for the violation to be live.**
+
+**Proven by compilation, not reading.** Source order `<request first>` → `<timer>` → `<request third>` emits as: timer at `order.client.js:28`, both requests at `:34+`. The body declared SECOND runs before both bodies declared around it.
+
+**Cause:** `emitReactiveWiring` (`emit-reactive-wiring.ts:849-900`) emits in five sequential BUCKET passes — Step 5 lifecycle, 5b input-state, 5.5 channel, 5c request. Within a bucket the walk is source-ordered; across buckets, every `<timer>` precedes every `<request>` regardless of authoring. §6.7.2.1 bullet 1 puts `${}` bare expressions, `on mount`, `<request>`, `<timer>`, `<poll>` and `cleanup()` all in scope, and those are emitted by three different emitters.
+
+**Filed separately from the route-region arc on purpose:** it was surfaced while scoping Edge 2 and the arc would have inherited it, but it is true independent of navigation, fixable independent of the region machinery, and testable at initial load with zero nav infrastructure. Scoped as **U1** in `docs/changes/route-region-teardown/SCOPING-EDGE2.md`, where the recommendation is that it lands STANDALONE ahead of the arc. Direction-of-change is `semantics-changed` (§8 silent class — reordering side-effecting bodies changes observable behaviour), so it owes a real-input recompile + artifact diff whenever it lands.
 
 ### g-region-predicate-divergence-cells-vs-lifecycle — two region walks in ONE file use DIFFERENT predicates, and the lifecycle one is the wrong half — `NEW S314-bryan (surfaced by the route-region build); MED; open`
 <!-- @gap id=g-region-predicate-divergence-cells-vs-lifecycle sev=MED status=open locus=compiler/src/codegen/emit-reactive-wiring.ts prov=spec:§6.7.2.1 -->
