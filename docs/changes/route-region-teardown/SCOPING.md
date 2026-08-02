@@ -48,7 +48,45 @@ holding the departed route's closures. Author `cleanup()` in route content never
 
 **Therefore the region↔scope association must be established at EMIT time.**
 
-## Recommended design (verify before building — this is a PA hypothesis, not a trace)
+## ⛔ TRACED S313 — the design below was a HYPOTHESIS and it is WRONG. Read this first.
+
+The banked design proposed "a route chunk registers its own region teardown, mirroring how it already
+registers a rehydrator." **Tracing the rehydrator invalidates it.**
+
+`emit-event-wiring.ts:2162-2170` emits `_scrml_nav_rewire(root)` and registers it via
+`_scrml_register_rehydrator`. Its body is **non-delegable handlers + reactive display binding only**
+(`nonDelegatedRewire` + `reactiveRewire`). **`<timer>` / `<poll>` are NOT in it** — they are emitted by
+`emit-reactive-wiring.ts:~1250` as `_scrml_timer_start(...)` at **chunk module-init**, outside any
+rehydrator.
+
+**Consequences, and they change the fix:**
+
+1. **An "active-region flag wrapped around the rehydrator loop" would capture NOTHING.** That is the
+   obvious runtime-only design and it is a dead end — the timer has already started, at module-init,
+   before any rehydrator runs.
+2. **The defect is bigger than "teardown forgot to call `_scrml_destroy_scope`."** A route's `<timer>`
+   starts exactly ONCE, when its chunk first loads, and is thereafter never started, stopped, or
+   restarted by the navigation path at all. So beyond the leak, a route timer does **not** restart on
+   re-entry — which §20.8.8 step 3 now requires (route-enter re-runs region-associated bodies).
+3. **Therefore the leave-edge fix and the enter-edge re-association are the SAME arc, not two.** The
+   region↔resource association has to be established at emit time for both; splitting them would land a
+   teardown for resources whose creation is still bound to the wrong owner.
+
+**What must be re-derived before building (do NOT scope from the section below):**
+- Where `emit-reactive-wiring` can learn a node is route content. `fileHasOutlet(fileAST)`
+  (`emit-reactive-wiring.ts:1042`) discriminates SHELL files, but the **single-file `<page>` form** puts
+  shell and routes in ONE file, so file-level granularity is insufficient there — a `<page>`-ancestry
+  test is likely required.
+- Whether route-content lifecycle bodies should move INTO a registered region-wiring function (making
+  creation and teardown symmetric) rather than staying at module-init. That is the shape §20.8.8 step 3
+  implies, and it is a larger codegen change than the banked design assumed.
+
+**Estimate impact:** this is no longer a contained runtime patch plus a small emit marker. Treat prior
+sizing as void. The **verification list below stands unchanged and is still correct** — in particular the
+shell-timer non-regression test, which is now MORE important, because the fix necessarily touches where
+timers are created and not only where they are destroyed.
+
+## Superseded design (retained for provenance — DO NOT BUILD FROM THIS)
 
 Mirror the mechanism the soft-nav engine already uses for rehydration: a route chunk registers its
 rehydrator into `_scrml_rehydrators`; it should equally register **its own region teardown**.
