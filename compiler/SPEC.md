@@ -13886,6 +13886,18 @@ Failing to handle the result of a `!` function call in any of these ways SHALL b
 
 ##### 19.4.4.1 The error type MAY be a non-enum scalar — ⛔ CONTESTED, SUPERSEDED IN DIRECTION (S313)
 
+> **Provenance (pa-base v2.10 Rule 4b):**
+> `ruling:` user-voice S313 — *"i, mark it contested"* (enum-only)
+> · `insight:` `scrml-support/design-insights.md` → *scrml Error System — Approach A/B/C/D, 2026-04-04*
+> (the reason error types are enums: a VARIANT can carry a `renders` clause, which is what makes the
+> `<errorBoundary>` display guarantee enforceable — `E-ERROR-005`, §19.6.6)
+> · `corpus:` `conformance/cases/form-for/formfor-*` ×5 pin `! string` — a `corpus:`-vs-`insight:`
+> DISAGREEMENT, which is the whole reason this subsection is contested rather than settled
+> · **supersedes** `rationale:` *"`! string[]` is the shape that broke #228"* — the S310-authored
+> scalar/compound split. **That rationale does not survive being written down: a parser defect is not a
+> language-design reason.** It is retained here as the worked example of why Rule 4b requires the reason
+> in the open — the non-sequitur was invisible while it stayed unstated, and obvious the moment it did not.
+>
 > **⛔ THIS ENTIRE SUBSECTION IS CONTESTED AND DOES NOT BIND AN IMPLEMENTATION. bryan RULED
 > ENUM-ONLY (S313, option (i)) after the design provenance was found.** It is retained in place rather
 > than deleted because the corpus still teaches the scalar form and a reader needs to know why that is
