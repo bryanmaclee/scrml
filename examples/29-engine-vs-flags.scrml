@@ -72,11 +72,20 @@
         Failed(message: string)     // failure — payload carries the message
     }
 
-    // The failable fetch (§19). `! string` declares it can fail; the `?{}` SQL
+    // The error type is an ENUM, and that is load-bearing — not ceremony.
+    // Only a VARIANT can carry a `renders` clause (§19.2), and that is what lets
+    // the compiler prove every error reachable inside an `<errorBoundary>` is
+    // displayable (E-ERROR-005, §19.6.6). A scalar error type has no variants,
+    // so it silently sits outside that guarantee.
+    type LoadError:enum = {
+        Unavailable(detail: string)
+    }
+
+    // The failable fetch (§19). `! LoadError` declares it can fail; the `?{}` SQL
     // escalates it to the server via §12 inference. The call-site `!{}` routes
     // the failure INTO the .Failed phase variant — errors are STATES, not a
     // separate `<hasError>` boolean.
-    function fetchItems() ! string {
+    function fetchItems() ! LoadError {
         return ?{`SELECT id, name FROM items ORDER BY name`}.all()
     }
 

@@ -1,13 +1,17 @@
 ${
   import { formFor } from 'scrml:data'
 
+  type SignupError:enum = {
+    Rejected(reason: string)
+  }
+
   type Signup:struct = {
     name:  string req length(>=2)
     email: string req pattern(/^[^@]+@[^@]+$/)
     agree: boolean req
   }
 
-  server function persistSignup(values: Signup) ! string {
+  server function persistSignup(values: Signup) ! SignupError {
     return "ok"
   }
 }

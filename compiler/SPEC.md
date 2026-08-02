@@ -13861,7 +13861,7 @@ function quickCheck(value)! {
 
 The `!` modifier on a function signature declares that the function is **failable** -- it can produce either a success value or an error value.
 
-- `!` with `-> ErrorType` declares the specific error type that this function can produce — an error **enum**. (A scalar non-enum form is described at §19.4.4.1, which is **CONTESTED** — bryan ruled enum-only at S313; do not read it as a sanction.) The function's return type is implicitly `SuccessType | ErrorType`, where `SuccessType` is inferred from the function's return expressions.
+- `!` with `-> ErrorType` declares the specific error type that this function can produce — an error **enum** — see §19.4.4.1, which states the requirement normatively and records why it is load-bearing. The function's return type is implicitly `SuccessType | ErrorType`, where `SuccessType` is inferred from the function's return expressions.
 - `!` without `-> ErrorType` uses a built-in default error enum: `Error`, which has a single variant `Error::Generic(message: string)`.
 - The return type of a `!` function is a **tagged union** of the success type and the error type. The compiler tracks both branches.
 
@@ -13879,110 +13879,50 @@ Failing to handle the result of a `!` function call in any of these ways SHALL b
 #### 19.4.4 Normative Statements
 
 - The `!` modifier SHALL appear after the parameter list and before the optional error-type annotation in a function declaration.
-- The error type annotation after `!` MAY be declared with the arrow form (`! -> ErrorType`) or the bare form (`! ErrorType`) — the two forms are EQUIVALENT; both declare the function's error type explicitly (S137 amendment). That type is an error **enum** for the variant-bearing surface, or a scalar non-enum type per §19.4.4.1.
+- The error type annotation after `!` MAY be declared with the arrow form (`! -> ErrorType`) or the bare form (`! ErrorType`) — the two forms are EQUIVALENT; both declare the function's error type explicitly (S137 amendment). That type SHALL be an enum (§19.4.4.1).
 - A function with `!` SHALL accept `fail` statements in its body. A function without `!` SHALL NOT accept `fail` statements (E-ERROR-001).
 - The caller of a `!` function SHALL handle the result via match, `?`, `!{}`, or `<errorBoundary>`. An unhandled `!` function call SHALL be a compile error (E-ERROR-002).
 - The `!` modifier SHALL be part of the function's type signature. It is visible to the type system and participates in type checking.
 
-##### 19.4.4.1 The error type MAY be a non-enum scalar — ⛔ CONTESTED, SUPERSEDED IN DIRECTION (S313)
+##### 19.4.4.1 The error type SHALL be an enum
 
 > **Provenance (pa-base v2.10 Rule 4b):**
-> `ruling:` user-voice S313 — *"i, mark it contested"* (enum-only)
-> · `insight:` `scrml-support/design-insights.md` → *scrml Error System — Approach A/B/C/D, 2026-04-04*
-> (the reason error types are enums: a VARIANT can carry a `renders` clause, which is what makes the
-> `<errorBoundary>` display guarantee enforceable — `E-ERROR-005`, §19.6.6)
-> · `corpus:` `conformance/cases/form-for/formfor-*` ×5 pin `! string` — a `corpus:`-vs-`insight:`
-> DISAGREEMENT, which is the whole reason this subsection is contested rather than settled
-> · **supersedes** `rationale:` *"`! string[]` is the shape that broke #228"* — the S310-authored
-> scalar/compound split. **That rationale does not survive being written down: a parser defect is not a
-> language-design reason.** It is retained here as the worked example of why Rule 4b requires the reason
-> in the open — the non-sequitur was invisible while it stayed unstated, and obvious the moment it did not.
->
-> **⛔ THIS ENTIRE SUBSECTION IS CONTESTED AND DOES NOT BIND AN IMPLEMENTATION. bryan RULED
-> ENUM-ONLY (S313, option (i)) after the design provenance was found.** It is retained in place rather
-> than deleted because the corpus still teaches the scalar form and a reader needs to know why that is
-> now a migration target, not a sanction. Do not cite it as current truth.
->
-> **What the provenance says.** The error-type-is-an-enum requirement is NOT arbitrary and NOT
-> unreasoned. `scrml-support/design-insights.md` (the 2026-04-04 error-system debate, Approaches
-> A/B/C/D) records it verbatim: *"When error types carry their own rendering logic as a first-class
-> declared property … the compiler can enforce that every error reachable inside an `<errorBoundary>`
-> either has a `renders` clause or is covered by the boundary's `fallback`. This makes the 'errors are
-> handled in UI' guarantee as strong as the 'errors are handled in logic' guarantee"* — described there
-> as *"the scrml-specific design contribution worth generalizing."*
->
-> **Enums are required because a VARIANT can carry a `renders` clause (§19.2).** A scalar has no
-> variants, so it can carry none, so `E-ERROR-005` (§19.6.6) has nothing to check.
->
-> **Proven by execution (S313), not argued.** Inside an `<errorBoundary>` with no `fallback`:
-> a `! LoadError` whose variant lacks `renders` fires **`E-ERROR-005`**; a `! string` in the identical
-> position **compiles clean**. The scalar form silently sits OUTSIDE the display guarantee.
->
-> **So this subsection sanctioned the form the design reasoning condemns, and rejected a form nobody
-> reasoned about.** The scalar/compound split it is built on was authored by the PA at S310 as one of
-> three filed options; it has **no design provenance**. The only position with provenance is
-> **enum-only**, which subsumes both halves — and `E-ERROR-011` (below) therefore likely dissolves
-> rather than ships, since "must be an enum" already covers `! string[]`.
->
-> **Owed:** the enum-only migration — 5 conformance cases (`form-for/formfor-{submit-collects-values,
-> onsubmit-signature,validity-bug58-clean,valid-enables-submit,typing-errors}`) + the flagship
-> `examples/29-engine-vs-flags.scrml:79`, which both uses the form and TEACHES it in a comment. That is
-> a §62.2 contract change (the corpus IS the contract), so it lands as its own reviewed arc, not as an
-> edit to this banner.
+> `ruling:` user-voice S313 — enum-only, and the migration authorized ("lets do the enum-only migration")
+> · `insight:` `scrml-support/design-insights.md` → *scrml Error System — Approaches A/B/C/D, 2026-04-04*
+> · **supersedes** `rationale:` *"`! string[]` is the shape that broke #228"* — a PA-authored S313
+> scalar/compound split with no design provenance, which sanctioned the very form the recorded reasoning
+> condemns. Retained in the S313 changelog as the worked example of why a reason must be written down: a
+> parser defect is not a language-design reason, and that was invisible until stated.
 
-##### 19.4.4.1 (retained text — CONTESTED, see the banner above)
+- The error type after `!` **SHALL be an enum type** — a `:enum` declaration, or the built-in default
+  `Error` enum when the annotation is omitted (§19.4.2).
+- A **non-enum** error type SHALL be **`E-ERROR-011`**. This covers scalar (`! string`), array
+  (`! string[]`), generic (`! Map<string, int>`), and paren/union (`! (A | B)`) forms uniformly — they
+  fail for one reason, not several. *(Reserved / spec-ahead — no emitter yet; the §34 row lands WITH the
+  implementation, per §34.0 outcome 2 and the named-codes-land-with-impl rule. `E-ERROR-011` was named
+  at S313 for the narrower "compound" rule and is REDEFINED here to the general one before ever being
+  emitted — safe precisely because it never shipped.)*
 
-The statements above and §19.3 describe the error type as an **enum**, and for the variant-bearing
-surface — `fail Enum::Variant(...)`, variant-matching `!{ | ::Variant :> … }` arms — it must be one.
-But scrml also admits, and its own corpus teaches, a **scalar non-enum** error type:
+**Why an enum, specifically — the requirement is load-bearing, not ceremony.** Only a **variant** can
+carry a `renders` clause (§19.2), and that clause is what lets the compiler statically prove every error
+reachable inside an `<errorBoundary>` is displayable — `E-ERROR-005` (§19.6.6). A non-enum error type
+has no variants, so it can carry no `renders`, and `E-ERROR-005` has nothing to check: such a function
+sits **silently outside** the display guarantee. Verified by execution (S313): inside an
+`<errorBoundary>` with no `fallback`, a `! LoadError` whose variant lacks `renders` fires
+`E-ERROR-005`; a `! string` in the identical position compiles clean. The 2026-04-04 debate named this
+guarantee *"the scrml-specific design contribution worth generalizing"* — making the "errors are handled
+in UI" guarantee as strong as the "errors are handled in logic" one.
 
-```scrml
-// SANCTIONED — the error value is a plain `string`; the call site uses a CATCH-ALL arm.
-function fetchItems() ! string {
-    return ?{`SELECT id, name FROM items ORDER BY name`}.all()
-}
+**Direction of change (pa-base §8): newly-rejecting — and the migration is MEASURED and ALREADY
+LANDED, ahead of the diagnostic.** Six sites carried a non-enum error type; all six were migrated to a
+real error enum at S313 *before* any rejection was specified, so landing `E-ERROR-011` breaks nothing:
+the five `conformance/cases/form-for/formfor-*` cases (where `! string` was incidental — they pin
+`formFor`, not the error type) and `examples/29-engine-vs-flags.scrml`, which additionally **taught** the
+wrong form in a comment and now teaches why the enum is required. Conformance held at 850/850 across the
+migration, confirming it was inert. Per §62.2 the corpus IS the versioned contract, so this migration —
+not the SPEC sentence — is what actually moved it.
 
-const rows = fetchItems() !{ | err :> { @phase = .Failed("Couldn't load items."); return } }
-```
 
-- The error type after `!` MAY be an **enum type** or a **scalar non-enum type** (e.g. `string`).
-- When it is a scalar non-enum type, the error value is an ordinary value of that type. It has no
-  variants, so §19.3's `fail-stmt` production — which requires `enum-type ('.' | '::') variant-name` —
-  is **inapplicable**, and a variant-matching `!{}` arm is likewise unavailable. Such a function
-  surfaces failure to a **catch-all** handler arm (`| err :> …`), which binds the error value whole.
-- The error type after `!` SHALL NOT be an **array or other compound type** (`! string[]`,
-  `! (A, B)`). A compound error type has no coherent variant-matching *or* catch-all story, and it is
-  the shape that produced the #228 empty-body parse defect. This is **`E-ERROR-011`**
-  (*Reserved / spec-ahead — no emitter yet; the §34 row lands WITH the implementation, per §34.0
-  outcome 2 and the named-codes-land-with-impl rule*).
-
-**Why this is a ratification and not a widening.** §62.2 makes the conformance corpus the versioned
-contract, and the scalar form is already **in** it: five conformance cases pin
-`server function persistSignup(…) ! string` (`form-for/formfor-{submit-collects-values,
-onsubmit-signature,validity-bug58-clean,valid-enables-submit,typing-errors}`) and the flagship
-`examples/29-engine-vs-flags.scrml:79` both uses it and TEACHES it in a comment. Reading the
-enum-only sentences strictly would have made the compiler reject the contract it is measured against
-and a documented example — so this subsection records what the language already is, and confines the
-*new restriction* to the compound form.
-
-**Direction of change (pa-base §8).** The scalar clause is **inert** — no program's meaning or
-acceptance status changes; it removes a contradiction between the prose and the corpus.
-
-> **⛔ THE COMPOUND CLAUSE IS CONTESTED — do NOT build `E-ERROR-011` on this text alone (S313).**
-> Its migration was first reported as "measured at zero" on a sweep of every `.scrml` outside
-> `node_modules`/`dist`. **That sweep was incomplete: it did not cover the test suite.** All three
-> forbidden shapes — `! string[]`, `! Map<string, int>`, `! (A | B)` — **compile clean today**
-> (verified by execution), and two landed regression suites assert that they do:
-> `compiler/tests/unit/failable-array-return-server-promotion.test.js` and
-> `…/failable-generic-paren-return-server-promotion.test.js`.
->
-> Those suites exist because each shape was an adopter-reported **confidentiality leak**: the error-type
-> parse did not consume the `[]` / `<…>` / `(…)` tail, so the function parsed with an EMPTY body, was
-> never server-promoted, and its `?{}` SQL shipped to the client (`E-CG-006`). The fixes resolved the
-> leak by making the form **parse**. Rejecting the form is the other available resolution of the same
-> defect, and choosing between them is a language decision that has not been made with this fact in
-> hand. Until it is, this clause is **spec-ahead and contested**: the scalar clause above stands, the
-> compound prohibition does not bind an implementation, and `E-ERROR-011` stays unbuilt.
 - `server` and `!` modifiers MAY coexist: `server function loadUser(id)! -> UserError { ... }` (arrow form) or `server function loadUser(id)! UserError { ... }` (bare form).
 - `pure` (§33) and `!` modifiers MAY coexist: `pure function validate(x)! -> ValidationError { ... }`. A `pure` failable function SHALL NOT have side effects but MAY produce error values.
 
