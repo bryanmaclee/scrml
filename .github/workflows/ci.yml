@@ -75,6 +75,21 @@ jobs:
         run: |
           bun run compiler/src/cli.js compile benchmarks/todomvc/app.scrml --convert-legacy-css
           node --check benchmarks/todomvc/dist/app.client.js
+      # S313 (bryan RULED promote): the browser tier is now assertable by its failure NAME SET, so it
+      # belongs in the BLOCKING gate rather than in continue-on-error `tracking`. Before this the tier
+      # was excluded from every blocking gate precisely because an exit code cannot express "the same
+      # failures as before" — it always exits 1. `--check` exits 0 while the set is unchanged and 1 the
+      # moment a name joins or leaves it, which is a condition a gate CAN carry.
+      #
+      # Placement is deliberate: this sits AFTER the gauntlet step, which compiles the TodoMVC
+      # benchmark and therefore materialises benchmarks/todomvc/dist. That makes the script's two
+      # env-exclusions moot IN THIS JOB (the pair passes here) — they still matter in `tracking`, which
+      # never builds it. The check is correct either way; both sides of the comparison are filtered.
+      #
+      # NOT added to pre-push: local environments vary far more than CI, and it was exactly a local
+      # environment difference that made the first recorded baseline wrong.
+      - name: Browser tier failure NAME-SET gate (S313 — a regression here now blocks)
+        run: bun scripts/browser-baseline.ts --check
       - name: Snippet gate (every public-cited .scrml still compiles)
         run: bun scripts/snippet-gate.js
       - name: Facts gate (published figures still match the repo)
