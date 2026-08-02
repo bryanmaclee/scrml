@@ -99,8 +99,19 @@ jobs:
         run: bun run pretest
       - name: integration + lsp + commands (promotion candidates — integration needs self-host-smoke dist-guarded)
         run: bun test compiler/tests/integration compiler/tests/lsp compiler/tests/commands
-      - name: Browser tests (real fails + env-whitespace — tracking)
-        run: bun test compiler/tests/browser
+      # S313 (bryan's Q6) — assert the browser tier's failure NAME SET, not its exit code.
+      #
+      # The tier always exits 1 (a documented ~48-failure baseline), so `bun test compiler/tests/browser`
+      # was PERMANENTLY red — which made it useless in both directions at once: a real regression was
+      # invisible (red either way), and because a failed step HALTS the job, every step after it was
+      # skipped. That second effect was verified, not assumed: on run 30742472551 the within-node
+      # parity step below reports `skipped`, and had therefore never run at all — the S302 class
+      # (13 of 14 root-level test files run by no workflow) recurring one job over.
+      #
+      # The name-set check exits 0 while the failure set is UNCHANGED and 1 the moment a name joins or
+      # leaves it, so this step now carries information and the steps after it execute.
+      - name: Browser tier — failure NAME-SET assertion (not exit code)
+        run: bun scripts/browser-baseline.ts --check
       - name: Within-node parser-parity + canary (M6.x native-parser migration backlog — tracking)
         run: bun test compiler/tests/parser-conformance-within-node.test.js
 

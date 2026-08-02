@@ -67,6 +67,16 @@ bun run compiler/src/cli.js compile samples/compilation-tests/ >/dev/null 2>&1 |
 #
 #    Verified at S301: this subset is 21597 pass / 0 fail on a clean checkout, so the gate
 #    CAN go red for a real regression and green otherwise — which is the whole point.
+#
+#    S313 UPDATE — the premise above ("an exit-code gate cannot express 'the same names as
+#    before'") is now only half true. `bun scripts/browser-baseline.ts --check` expresses
+#    exactly that for the BROWSER tier: it exits 0 while the failure NAME SET is unchanged
+#    and 1 the moment a name joins or leaves it, so the tier is assertable without being
+#    structurally unpassable. It runs in CI `tracking` today. Adding it HERE, or requiring
+#    it in the blocking `gate`, is a deliberate promotion decision and is bryan's to make —
+#    NOT taken unilaterally, because promoting a whole always-red job is the cry-wolf
+#    retrofit S302 explicitly ruled out. lsp / commands / self-host still have no name-set
+#    assertion; extending the same shape to them is mechanical once this is proven in anger.
 if [ "$RUN_SUITE" = "1" ]; then
 echo "--- Running test suite (unit + integration + conformance) ---"
 # `set -e` is active: a bare `VAR=$(failing-cmd)` aborts the script HERE, before any of the
