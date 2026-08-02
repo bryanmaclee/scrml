@@ -27,6 +27,11 @@
  *  T5 (S261) a code named in an expected.json `description`/`rationale` is NOT pinned. Only
  *            `expect.codes` is a positive pin; `expect.notCodes` asserts ABSENCE and does not prove
  *            the code can fire.
+ *  T6 (S310) RUNTIME-SURFACED codes — implemented as a runtime VALUE (an enum variant) rather than a
+ *            diagnostic PUSH, so the E-code string appears in NO emitter even though the feature is
+ *            fully built. Caught the hard way: all three E-PARSEVARIANT-* were classified FALSE-CLAIM
+ *            and written up as the pre-freeze arc's sharpest case before the runtime was checked and
+ *            found to implement them. See the RUNTIME_SURFACED note below.
  *
  * NO HARDCODED LINE NUMBERS. §34's range is derived from the headings every run. A baked line number
  * in a maintained artifact rots silently and nothing fails — the defect class behind the 3,140-line
@@ -96,7 +101,25 @@ function nominalByRefs(refs: string): string[] {
 const DECLARED_AHEAD =
   /\bnot yet emitted\b|\breserved\b|\bnominal\b|spec-ahead|lands? with (?:the )?impl|no fire site|excluded from the freeze|deprecation cycle endpoint|activates after|\bplanned\b|not implemented|never implemented/i;
 
-type Row = { code: string; struck: boolean; severity: string; line: number; native: boolean; refs: string; declared: boolean };
+/**
+ * T6 (S310) — RUNTIME-SURFACED codes. A code whose implementation is a runtime VALUE (an enum variant
+ * a program receives) rather than a compiler diagnostic PUSH will never appear as its own token in any
+ * emitter, because the runtime carries the VARIANT NAME, not the E-code string. Scanning for the token
+ * therefore reports "no emitter" for a fully-implemented feature.
+ *
+ * Witnessed immediately: all three `E-PARSEVARIANT-*` codes were classified FALSE-CLAIM and written up
+ * as the pre-freeze arc's sharpest case — "a boundary-parse primitive documenting error handling it
+ * cannot perform." It performs it. `compiler/runtime/stdlib/data.js:588-590` produces
+ * MissingDiscriminator / UnknownVariant / InvalidPayload and `stdlib/data/parse.scrml:46` declares the
+ * ParseError enum. The claim was false and an arc was nearly built on it.
+ *
+ * The rows self-describe ("Runtime: …", "Surfaced via `::ParseError::…`"), so the class is detectable —
+ * but detection here only means "do not call this a dead diagnostic". Whether the runtime actually
+ * produces the variant is a SEPARATE check this census cannot make.
+ */
+const RUNTIME_SURFACED = /\bRuntime:|Surfaced via|surfaces? (?:via|as) `?::|\(runtime\)/i;
+
+type Row = { code: string; struck: boolean; severity: string; line: number; native: boolean; refs: string; declared: boolean; runtime: boolean };
 const rows: Row[] = [];
 const idx = new Map<string, Row>();
 for (let i = SEC34_START - 1; i < SEC34_END && i < specLines.length; i++) {
@@ -114,7 +137,7 @@ for (let i = SEC34_START - 1; i < SEC34_END && i < specLines.length; i++) {
   const r: Row = {
     code, struck, severity: cells[cells.length - 2]?.trim() ?? "", line: i + 1,
     native: NATIVE_START > 0 && i + 1 >= NATIVE_START, refs: (cells[2] ?? "").trim(),
-    declared: DECLARED_AHEAD.test(raw),
+    declared: DECLARED_AHEAD.test(raw), runtime: RUNTIME_SURFACED.test(raw),
   };
   idx.set(code, r); rows.push(r);
 }
@@ -163,12 +186,13 @@ for (const rootRel of SCAN) {
 }
 
 // -- classify ------------------------------------------------------------------------------------
-type Bucket = "STRUCK" | "PINNED" | "IMPL-SITES" | "DECLARED-AHEAD" | "FALSE-CLAIM";
+type Bucket = "STRUCK" | "PINNED" | "IMPL-SITES" | "DECLARED-AHEAD" | "RUNTIME-SURFACED" | "FALSE-CLAIM";
 const bucketOf = (r: Row): Bucket =>
   r.struck ? "STRUCK"
   : pinned.has(r.code) ? "PINNED"
   : (implHits.get(r.code) ?? 0) > 0 ? "IMPL-SITES"
   : r.declared ? "DECLARED-AHEAD"
+  : r.runtime ? "RUNTIME-SURFACED"   // T6 — implemented as a runtime VALUE, not a diagnostic push
   : "FALSE-CLAIM";
 
 const SHALL = /\b(SHALL|MUST)\b/;
@@ -277,6 +301,7 @@ console.log(`| STRUCK | ${n("STRUCK")} | already retired — must NOT enter any 
 console.log(`| PINNED | ${n("PINNED")} | a conformance case positively asserts it fires |`);
 console.log(`| IMPL-SITES | ${n("IMPL-SITES")} | live + unpinned + has an emitter — fire-attempt work |`);
 console.log(`| DECLARED-AHEAD | ${n("DECLARED-AHEAD")} | no emitter, row declares reserved/Nominal — honest |`);
+console.log(`| RUNTIME-SURFACED | ${n("RUNTIME-SURFACED")} | row says it surfaces at RUNTIME as a value — verify the runtime separately, NOT a dead diagnostic |`);
 console.log(`| FALSE-CLAIM | ${n("FALSE-CLAIM")} | no emitter AND the row promises a live diagnostic |`);
 console.log(`\n## FALSE-CLAIM dispositions\n`);
 console.log(`| disposition | count |`);
