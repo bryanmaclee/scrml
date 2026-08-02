@@ -30,11 +30,31 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 21 |
+| HIGH | 22 |
 | MED | 108 |
 | LOW | 46 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-route-timer-poll-not-stopped-on-soft-nav — a route-content `<timer>`/`<poll>` is NEVER stopped on soft navigation and fires against detached DOM for the rest of the session; author `cleanup()` never runs — `NEW S313-bryan (surfaced by the dpa-018 source-read); HIGH; open (PA-VERIFIED BY SOURCE TRACE on 8d54bdae — live at HEAD, INDEPENDENT of the pending ruling)`
+<!-- @gap id=g-route-timer-poll-not-stopped-on-soft-nav sev=HIGH status=open locus=compiler/src/runtime-template.js:3026 prov=dd:soft-nav-outlet-lifecycle-model-2026-08-02 -->
+
+Surfaced by the `dpa-018` deep-dive's own source-read, **not by its ruling** — it is live at HEAD and true under every pole, so it does not wait on ratification. **PA-verified by tracing the call graph, not taken on the dPA's report** (the dPA is a deliberation runner, explicitly not a source authority):
+
+- `_scrml_destroy_scope` (`runtime-template.js:1339`) performs the §6.7.2 four-step teardown — unregisters `when` effects, **stops `<timer>`/`<poll>`** (~:1772), fires author `cleanup()` LIFO, **cancels pending `animationFrame()`** (~:1821).
+- It is reachable **ONLY** via `_scrml_unmount_scope` (`:1469`) — the `if=` mount/unmount path.
+- `_scrml_nav_apply_html` (`:2996`) calls **`_scrml_teardown_region(liveOutlet)`** (`:3026`), **never** `_scrml_destroy_scope`.
+- `_scrml_teardown_region` (`:3122`) drains **only** `_scrml_region_cleanups` — display-effect disposers.
+
+**Consequence:** a `<timer>`/`<poll>` declared in route content starts at chunk module-init and is never stopped by a soft nav. It keeps firing against **detached DOM for the remainder of the session**, compounding with every route visited; an author's `cleanup()` in route content never fires at all. Compile is clean and no diagnostic exists — only a running session shows it, and only after navigating.
+
+**HIGH:** unbounded resource leak + silent, on the shipped soft-nav path (§20.8 is IMPLEMENTED, not Nominal), reachable by any adopter who puts a `<timer>` on a route. Same silent/fail-open class the project has repeatedly found most expensive.
+
+**THE FIX SPLITS, and the first half is UNBLOCKED (all three poles prescribe it — zero ratification dependency):**
+- **(i) SHIP NOW** — on route-leave: stop route-content `<timer>`/`<poll>`, abort in-flight region `<request>`s, cancel pending `animationFrame()`. No pole disputes this; it restores teardown the §6.7.2 contract already describes to a path that simply never got wired.
+- **(ii) COUPLE TO THE RULING** — firing author `cleanup()` LIFO at that moment is a lifecycle-contract commitment and waits on the `dpa-018` ratification.
+
+Compiler source → owes the S239 adversarial pass. **Locus TRACED, not searched.**
 
 ### g-session-not-rewritten-inside-sql-interpolation — `session.*` inside a `?{}` SQL template interpolation is not rewritten; bare `session` reaches the server emit and the route 500s on every call — `NEW S313-bryan (adopter dc/DanceCard, GH #357); HIGH; open (build-integrity + silent at compile; PA-REPRODUCED on 16783d6d)`
 <!-- @gap id=g-session-not-rewritten-inside-sql-interpolation sev=HIGH status=open locus=compiler/src/codegen/rewrite.ts:436 -->
