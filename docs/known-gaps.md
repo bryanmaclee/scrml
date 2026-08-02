@@ -31,8 +31,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 22 |
-| MED | 109 |
-| LOW | 46 |
+| MED | 108 |
+| LOW | 47 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -5387,7 +5387,11 @@ Fixed in the S299 refresh: the claim is withdrawn and replaced with the measured
 ⚠️ Filed HIGH not because the test matters most, but because **a blocking gate that disagrees with local on its own tier is a gate-integrity question** (`pa-base` v2.4 §8 — a gate's entire value is its capacity to go red). — `NEW S297; HIGH; open`
 
 ### g-ci-does-not-run-root-level-test-files — 13 of the 14 test files at `compiler/tests/` root are executed by NO workflow, and a step NAME claims to cover one of them — `NEW S297 (categorizing the 36-fail baseline); MED; infra/CI`
-<!-- @gap id=g-ci-does-not-run-root-level-test-files sev=MED status=open -->
+<!-- @gap id=g-ci-does-not-run-root-level-test-files sev=LOW status=open locus=.github/workflows/ci.yml:130 prov=spec:S302-ci-hole-closure -->
+> **⚠️ S314 CORRECTION — THE BODY BELOW IS FALSE AND WAS DISPATCH-HAZARDOUS.** *"Nothing runs the other 13 files"* has been untrue since **S302** (`b7dda491`): the **blocking `gate`** job runs `bun test compiler/tests/*.test.js` at `ci.yml:73` — step *"Root-level parser/native conformance (S302 — previously ungated)"* — covering all **14** root files including `parser-conformance-canary.test.js`. **As written this entry would have sent someone to fix a closed hole.** Verified by reading the workflow, not the ledger.
+>
+> **The surviving residual is cosmetic and is now the whole entry:** the `tracking` job's step at `ci.yml:130` is still labelled *"Within-node parser-parity + canary"* while `:131` runs only `parser-conformance-within-node.test.js`. The canary IS gated — at `:73`, in a different job — so the label overstates *that step's* scope without leaving anything uncovered. **Re-severitized MED → LOW.**
+
 The three CI jobs run only these paths: `gate` → `compiler/tests/unit` + `compiler/tests/conformance`; `tracking` → `compiler/tests/{integration,lsp,commands}` + `compiler/tests/browser` + **the single file** `compiler/tests/parser-conformance-within-node.test.js`; `windows` → unit + conformance.
 
 **Nothing runs the other 13 files sitting at `compiler/tests/` root**, including `parser-conformance-canary.test.js` (**currently failing**), `parser-conformance-corpus.test.js`, `parser-conformance.test.js`, `parser-conformance-{lexer,markup,expr,stmt,parse-file,collect-hoisted,each-contextual-sigil}.test.js`, and the three `native-*.test.js`.
@@ -5455,8 +5459,18 @@ The cite-resolution half of the sweep was **exhaustive** (951 code↔section pai
 
 Also unreconciled: `error.map.md` documents **799** codes; the sweep's extraction yields **803**. The map documents its methodology carefully and warns against hand-rolled greps, so the discrepancy is worth resolving rather than assuming either side. — `NEW S297; MED; open`
 
+### g-nav-maps-have-no-scheduled-refresh — `.claude/maps/` has NO automated refresh of any kind; staleness is silent and has already mis-routed a dispatch — `NEW S314-bryan (successor to g-cloud-maps-ci-red-api-rejection, resolved-by-removal); MED; open`
+<!-- @gap id=g-nav-maps-have-no-scheduled-refresh sev=MED status=open locus=.github/workflows/cloud-maps.yml:65 prov=ruling:user-voice-S310-billed-ci-legs -->
+S310 killed both Anthropic-billed CI legs as a cost decision (#351). The workflow states the consequence plainly at `cloud-maps.yml:65` — *"nav-maps are NO LONGER refreshed on a schedule. That reverts to the PA at wrap"* — but PA-at-wrap is a **best-effort** step that has now failed twice for structural reasons: S313 could not run `project-mapper` at all (agent dispatch unavailable) and recorded it as genuinely blocked, and S305-S313 let the watermark drift **67 commits**.
+
+**The cost is measured, not hypothetical.** At S314 the stale map set **routed to the wrong file**: nothing in it referenced `emit-reactive-wiring.ts`, and `structure.map.md` described `codegen/index.ts` as owning chunk-namespace wiring, so `index.ts` read like the module-init home when the actual emitter is `emit-client.ts generateClientJs()`. A dispatch scoped from that map would have burned a cycle. This is exactly the failure the pa-base §5 currency-check exists to catch — *"a stale map is worse than no map"* — and the check only works if someone runs it.
+
+**Not proposing reinstating the billed leg** (that decision stands). The open question is what replaces it: a cheap non-agent staleness ASSERTION (compare the map watermark against `HEAD`, warn or fail past N commits) would restore the signal at zero API cost, and `bun scripts/state.ts --check` **already computes exactly this** — it printed *"maps: 67 commits behind HEAD … [WARN-only — not gated]"* at this session's boot. Promoting that existing WARN to a gate, or surfacing it in the wrap checklist as a hard step, is the cheap fix. **Operator decision — a gate that fails for reasons no change caused is the §8 cry-wolf shape, so the threshold matters.**
+
 ### g-cloud-maps-ci-red-api-rejection — the scheduled `cloud-maps` job has failed 17/17 runs since 2026-07-17; the agent's real error is suppressed, so the maps rot silently — `NEW S297 (spun out of g-maps-error-map-missing-diagnostics-and-emit-client); MED; infra/CI`
-<!-- @gap id=g-cloud-maps-ci-red-api-rejection sev=MED status=open -->
+<!-- @gap id=g-cloud-maps-ci-red-api-rejection sev=MED status=resolved locus=.github/workflows/cloud-maps.yml:65 prov=ruling:user-voice-S310-billed-ci-legs -->
+> **✅ RESOLVED S314 — resolved-by-REMOVAL, not by fix.** The `claude-code-action@v1` Stage 2 this entry diagnoses **no longer exists**: both Anthropic-billed CI legs were killed at **S310 (#351)** as a cost decision, and `cloud-maps.yml` records it in place — *"id-token dropped S310 — it existed solely for the removed claude-code-action Stage 2"* (`:37`) and the reinstatement recipe at `:69-70`. The S297 diagnosis was never wrong; its subject was deleted. **Successor filed: [[g-nav-maps-have-no-scheduled-refresh]]** — the consequence the workflow itself states at `:65` (*"nav-maps are NO LONGER refreshed on a schedule"*) now has a ledger entry instead of living only in a comment.
+
 The scheduled `cloud-maps` workflow keeps `.claude/maps/` current automatically. It has been **red on every run since 2026-07-17 (17/17)**, and because it is **not** on the required-checks list it blocks no merge — so nothing surfaced it. Its only cost is **silent map staleness**, and that cost is now measured: the watermark stranded at `c700c435` for **39 commits across three sessions** (S290/S292/S296 each recorded the refresh as "owed" and none ran it), and S296's D-4 dispatch reported the maps **"not load-bearing"** as a direct consequence.
 
 **Diagnosed at S297, not fixed.** Stage 1/1b pass; **Stage 2 (`anthropics/claude-code-action@v1`) fails and Stage 3 never runs**. The failure signature is an **API-level rejection of the very first request**, not a mapper-agent fault: `"is_error": true, "num_turns": 1, "duration_ms": 594, "total_cost_usd": 0, "permission_denials_count": 0`, after a clean init reporting `"model": "claude-opus-5[1m]"`. One turn, ~0.6s, **$0 spent**, zero permission denials ⇒ credential / entitlement / quota on `ANTHROPIC_API_KEY`. It is NOT `--max-turns 40` exhaustion (which would burn minutes and dollars), NOT repo content, NOT the workflow file: the 2026-07-16 run lasted **12m31s** (the agent genuinely ran), every run from 07-17 on lasts 35–60s wall, and `cloud-maps.yml` last changed 2026-07-16 12:31 — **after** the last good run.
