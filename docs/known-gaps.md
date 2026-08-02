@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 22 |
-| MED | 107 |
+| MED | 109 |
 | LOW | 47 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -55,6 +55,21 @@ Surfaced by the `dpa-018` deep-dive's own source-read, **not by its ruling** —
 - **(ii) COUPLE TO THE RULING** — firing author `cleanup()` LIFO at that moment is a lifecycle-contract commitment and waits on the `dpa-018` ratification.
 
 Compiler source → owes the S239 adversarial pass. **Locus TRACED, not searched.**
+
+**S314-BUILD UPDATE (MEASURED, by execution) — the predicate flip is CORRECT and landing it ALONE is a REGRESSION.** The dispatched build made the flip, executed it, and **reverted it**. Emit behaved exactly as scoped (A held, B flipped, C held). Runtime did not:
+
+| | HEAD (leak) | with the flip |
+|---|---|---|
+| arrive at `/reports` | `scope_6` LIVE, ticking | **`scope_6` GONE — dead on arrival** |
+| leave (the leak) | route-tick delta **6** | delta 0 |
+| **re-enter** | delta **5** | **delta 0 — still dead** |
+| shell timer | alive | alive (non-regression HELD) |
+
+Three causes: **(a)** `_scrml_nav_load_chunks` runs the INCOMING chunk before `_scrml_teardown_region`, so the outgoing drain kills the timer of the route being ENTERED (bounded — stage pushes while `_scrml_chunk_loading > 0`); **(b) the disqualifier** — `_scrml_nav_missing_chunks` keys `have` off the live document's `script[src]`, so an already-loaded chunk is never re-injected and `_scrml_rehydrators` holds only `_scrml_nav_rewire`; **(c)** the single-file `<page>` form emits every page at one module-init, so the first nav drains the page being entered.
+
+**Why (b) disqualifies the split:** today a route `<timer>`/`<poll>` leaks but WORKS on every visit. With the leave edge alone it works on the FIRST VISIT ONLY, silently — converting a resource leak into **staleness**, which is the precise failure §20.8.8's ratification rationale says Pole C was chosen to avoid (*"silent-wrong-UI … the failure that actually occurred in the field"*). **So the arc does not split — and the CN-set argument was the WEAK reason; the strong one is that the leave edge alone is a functional regression.**
+
+**⛔ Edge 2 is STOP-IF-BIGGER — a bryan scoping decision, not a build.** §20.8.8 step 3 requires region bodies to re-run **in declaration order**, and §6.7.2.1 bullet 1 scopes that to `${}` bare expressions, `on mount`, `<request>`, `<timer>`, `<poll>` AND `cleanup()`. One ORDERED registry is the only way to get declaration order, which forces `emit-reactive-wiring.ts` + `emit-client.ts`'s module-init `lines[]` + `emit-logic.ts` `cleanup-registration` (which lowers unconditionally to `_scrml_register_cleanup` with no notion of region) to funnel through it. Second, independent prerequisite: **route identity has no runtime representation** — the chunk key proxies the multi-file form only, and nothing in the emitted SSR document names the entered `<page>`. **Landed from the build: the comment corrections only** (no behaviour change, verified by filtering the diff to non-comment lines: empty). The verified ~3-line predicate flip is recorded in `SCOPING.md` and deliberately NOT landed.
 
 **S314 UPDATE — the emit-time association EXISTS; the DISCRIMINATOR is the defect.** Established by compiling three shapes and reading the emitted branch, not by re-reading: (A) a shell-level `<timer>` → `_scrml_register_cleanup` (beforeunload, CORRECT); (B) a `<timer>` in a route file → `_scrml_register_cleanup` (**the defect, reproduced**); (C) a `<timer>` lexically inside `<outlet>…</outlet>` → `_scrml_region_cleanups` (**the mechanism works**). `classifyMarkupNodes` (`emit-reactive-wiring.ts:1091`) already stamps `_outletResident` and `:1273` already routes region-resident timers correctly — but `insideOutlet` means *lexical descendant of an `<outlet>` node in THIS file's AST*, and real route content is never that (the outlet is a shell slot; the route is a separate file). **So the fix is a PREDICATE correction on existing machinery, not new machinery** — the leave-edge is likely SMALLER than the S313 scoping assumed; the enter-edge (restart-on-return, §20.8.8 step 3) is genuinely unbuilt. Direction-of-change: **`semantics-changed`** (pa-base §8, the silent class) — ships as a fix because §6.7.2 + §20.8.8 pre-exist as governing sentences. Second false comment found: `emit-reactive-wiring.ts:1271-72` asserts *"the leak is closed"*; it is not. Full re-scope: `docs/changes/route-region-teardown/SCOPING.md` §"VERIFIED S314".
 
@@ -93,6 +108,20 @@ DD §0.3 then enumerates the entire `<program>` attribute surface **as it stood 
 **§8 classification of the fix:** admitting the attribute is newly-accepting, but **toward the contract, not beyond it** — §20.8.4 (`SPEC.md:15802`) is a pre-existing normative sentence declaring the form legal, which per pa-base §8's split makes it a **bug fix**, and §4.15's sentence the stale one.
 
 **PA recommendation (bryan rules):** admit `keep-alive` → a closed set of **five**, and amend §4.15 / §40 / §34 together. **Deliberately NOT recommending "replace the enumeration with the principle"** — a closed set is mechanically checkable and *"is this attribute per-route?"* is a judgment call that drifts; that is the limit-primitives instinct and it argues for keeping the set closed. The real fork is narrow: **(a) admit it → five**, or **(b) strike §20.8.4's `<page keep-alive>` clause** and express keep-alive elsewhere or not at all. Whichever way it goes, one of the two normative sentences must be amended and the amendment carries `provenance: dd:page-helper-element-design-2026-05-12 · supersedes:` the four-set enumeration.
+
+### g-region-predicate-divergence-cells-vs-lifecycle — two region walks in ONE file use DIFFERENT predicates, and the lifecycle one is the wrong half — `NEW S314-bryan (surfaced by the route-region build); MED; open`
+<!-- @gap id=g-region-predicate-divergence-cells-vs-lifecycle sev=MED status=open locus=compiler/src/codegen/emit-reactive-wiring.ts prov=spec:§6.7.2.1 -->
+`collectShellCellNames` and `classifyMarkupNodes` live in the SAME file and both decide "is this node region-resident?" — with **different predicates**. The CELL walk uses `<outlet>` **OR** `<page>`; the LIFECYCLE walk (`insideOutlet`, `:1091`) uses `<outlet>` **only**. They silently diverged, and **the cell walk is the one that matches §6.7.2.1** — which makes it the answer to the region-predicate question rather than a second bug.
+
+`<page>` is `kind:"markup" tag:"page"` in BOTH the multi-file and single-file forms, so ONE ancestry test covers both — the S313 scoping guessed a `<page>`-ancestry test would be needed and it was right, but the file had already answered it in the neighbouring walk. **This is a navigation-surface defect as much as a code one:** no map row records that the two walks disagree, and a row saying so would have handed the build the predicate for free (recorded in the maps feedback).
+
+Filed separately from `g-route-timer-poll-not-stopped-on-soft-nav` because it is true independent of that arc's outcome: two walks answering the same question differently in one file is a defect whichever predicate wins.
+
+### g-region-request-discard-not-abort — §20.8.8 step 2.3 says a region `<request>` is ABORTED on route-leave; the implementation discards the response instead — `NEW S314-bryan (surfaced by the route-region build); MED; open`
+<!-- @gap id=g-region-request-discard-not-abort sev=MED status=open locus=searched:compiler/src/runtime-template.js,compiler/src/codegen/emit-reactive-wiring.ts prov=spec:§20.8.8 -->
+§20.8.8 step 2.3 specifies that an in-flight region `<request>` is **aborted** at route-leave. The implementation sets `_mounted = false` and **discards the response when it arrives** — the network request still completes. Functionally similar for the UI, materially different for the server, for metered APIs, and for a request with side effects. A true abort needs an `AbortController` threaded through the request runtime; there is none today.
+
+Not a blocker for the leave-edge arc (discarding is safe), but the SPEC sentence says abort and the compiler does not, which is the plain shape of a spec-vs-impl gap. Locus recorded as a SEARCH rather than a trace — the discard is observed behaviour; the exact registration site was not traced.
 
 ### g-session-not-rewritten-inside-sql-interpolation — `session.*` inside a `?{}` SQL template interpolation is not rewritten; bare `session` reaches the server emit and the route 500s on every call — `NEW S313-bryan (adopter dc/DanceCard, GH #357); HIGH; open (build-integrity + silent at compile; PA-REPRODUCED on 16783d6d)`
 <!-- @gap id=g-session-not-rewritten-inside-sql-interpolation sev=HIGH status=open locus=compiler/src/codegen/rewrite.ts:436 -->

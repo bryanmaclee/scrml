@@ -1099,6 +1099,37 @@ function classifyMarkupNodes(nodes: any[]): WiringCollections {
         // region, so its cleanup routes into _scrml_region_cleanups (torn down on
         // soft nav), not the boot-once beforeunload path. A shell-level timer
         // (outside the outlet) keeps the module-init path untouched.
+        //
+        // SCOPE OF THIS PREDICATE — read before "fixing" it (S314, traced by
+        // execution). `insideOutlet` means "a lexical descendant of an <outlet>
+        // node in THIS file's AST". Real route content is never that: the
+        // <outlet> is a slot in the SHELL file and the route body lives in its
+        // own `pages/*.scrml`, which the router fills at navigation time. So
+        // this flag covers a degenerate authoring shape and MISSES the case that
+        // actually occurs — that is `g-route-timer-poll-not-stopped-on-soft-nav`
+        // (HIGH, open).
+        //
+        // Note the divergence from `collectShellCellNames` above, which decides
+        // the SAME shell-vs-region question for cells and treats BOTH <outlet>
+        // and <page> as region boundaries. The two walks disagree, and the
+        // cell walk is the one that matches §6.7.2.1.
+        //
+        // Widening this predicate to `|| tag === "page"` is NOT sufficient on its
+        // own and MUST NOT be landed alone — measured S314, three ways:
+        //   1. A route chunk's module-init runs INSIDE the injection window of
+        //      the same navigation that is about to tear down the OUTGOING
+        //      region (`_scrml_nav_load_chunks` -> onDone -> swap ->
+        //      `_scrml_teardown_region`), so the INCOMING route's timer is
+        //      registered and then immediately drained. Route timers become dead
+        //      on arrival.
+        //   2. A chunk that is already loaded is never re-injected
+        //      (`_scrml_nav_missing_chunks` keys on the live document's script
+        //      set), so nothing restarts a route timer on RE-ENTRY. §20.8.8
+        //      step 3 is unbuilt.
+        //   3. In the single-file <page> form every page's timer starts at the
+        //      same module-init in ONE chunk, so the first navigation drains the
+        //      timers of every page including the one being entered.
+        // See `docs/changes/route-region-teardown/SCOPING.md` for the traces.
         const childInsideOutlet = insideOutlet || tag === "outlet";
 
         if (tag === "timer" || tag === "poll") {
@@ -1265,11 +1296,24 @@ function emitLifecycleNode(node: any, errors: CGError[], filePath: string): stri
 
   // navigate-wave1b M1 Phase 4 — an OUTLET-RESIDENT <timer>/<poll> belongs to the
   // swappable region: route its stop into `_scrml_region_cleanups` so a soft nav
-  // AWAY tears it down (`_scrml_teardown_region` drains it), closing the leak
-  // where the old route's timer keeps ticking against detached cells. A
-  // SHELL-level timer keeps the boot-once `_scrml_register_cleanup` (beforeunload)
-  // path so it survives navigation. (Restart-on-return for the region timer rides
-  // §20.8.4 fresh-per-visit re-hydrate — a bounded follow-on; the leak is closed.)
+  // AWAY tears it down (`_scrml_teardown_region` drains it). A SHELL-level timer
+  // keeps the boot-once `_scrml_register_cleanup` (beforeunload) path so it
+  // survives navigation.
+  //
+  // SCOPE (corrected S314 — the previous wording said "the leak is closed", which
+  // is true of THIS BRANCH and over-claims the CLASS). What is closed is the leak
+  // for a <timer>/<poll> written LEXICALLY INSIDE `<outlet>`, which is a
+  // degenerate authoring shape. Route content lives in a different file from the
+  // shell that owns the <outlet>, so `_outletResident` is essentially never set
+  // for it and a real route timer still takes the `else` branch below and leaks
+  // across a soft nav — `g-route-timer-poll-not-stopped-on-soft-nav` (HIGH, open).
+  // See the SCOPE note on `classifyMarkupNodes`'s `insideOutlet` for why widening
+  // the predicate alone does not fix it.
+  //
+  // Restart-on-return is likewise NOT covered here. The start above runs at chunk
+  // MODULE-INIT and nothing re-runs it on a later navigation, so §20.8.8 step 3
+  // (route-enter re-runs region-associated bodies) is unbuilt even for the
+  // outlet-resident subset.
   if (node && node._outletResident) {
     lines.push(`if (typeof _scrml_region_cleanups !== "undefined") { _scrml_region_cleanups.push(() => _scrml_timer_stop(${scopeVar}, ${timerVar})); } else { _scrml_register_cleanup(() => _scrml_timer_stop(${scopeVar}, ${timerVar})); }`);
   } else {
@@ -1306,6 +1350,9 @@ function emitInputStateNode(node: any, errors: CGError[], filePath: string): str
   // `_scrml_region_cleanups` (drained by _scrml_teardown_region on a soft-nav swap)
   // so its global document/window listeners are removed, not leaked; a SHELL-level
   // handler keeps the boot-once `_scrml_register_cleanup` (beforeunload) path.
+  // Same SCOPE caveat as the <timer> branch above (S314): `_outletResident` means
+  // LEXICALLY inside `<outlet>`, so a handler declared in a `pages/*.scrml` route
+  // file is not covered and still leaks its global listeners across a soft nav.
   const registerDestroy = (destroyCall: string): string =>
     (node && node._outletResident)
       ? `if (typeof _scrml_region_cleanups !== "undefined") { _scrml_region_cleanups.push(() => ${destroyCall}); } else { _scrml_register_cleanup(() => ${destroyCall}); }`

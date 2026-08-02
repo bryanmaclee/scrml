@@ -3119,6 +3119,24 @@ function _scrml_rehydrate_region(root) {
 // list stops the old region's reactivity so it neither leaks subscriptions nor
 // double-updates. Shell-level cells + delegated listeners live OUTSIDE the outlet
 // and never registered, so they stay live.
+//
+// WHAT ACTUALLY REACHES THIS LIST — the paragraph above is accurate about what the
+// function drains and silent about how little arrives (corrected S314, tracked as
+// S313-N6). Exactly two producers register here:
+//   * _scrml_region_track(el, dispose) — a display effect whose element resolves
+//     closest("[data-scrml-outlet]") at runtime. This one DOES cover swapped-in
+//     route markup, because the element is inside the live outlet.
+//   * codegen's _outletResident branch (emit-reactive-wiring.ts) — a
+//     <timer>/<poll>/<keyboard>/<mouse>/<gamepad> written LEXICALLY inside an
+//     <outlet> element in its own source file.
+// The "timers" clause is therefore TRUE but narrow. A <timer> declared in a
+// pages/ route file is not lexically inside the shell's <outlet>, never gets the
+// flag, and registers on the boot-once beforeunload path instead — so it is NOT
+// torn down here and keeps ticking after the swap.
+// [[g-route-timer-poll-not-stopped-on-soft-nav]] (HIGH, open) ·
+// docs/changes/route-region-teardown/. SPEC 20.8.8 steps 2.2-2.6 (stop timers,
+// abort in-flight <request>s, destroy inner if= scopes, run author cleanup() LIFO,
+// cancel animationFrame) are NOT performed here — this drain is step 2.1 only.
 function _scrml_teardown_region(root) {
   if (typeof _scrml_region_cleanups === "undefined") return;
   var list = _scrml_region_cleanups;
