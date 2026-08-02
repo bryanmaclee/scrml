@@ -31,8 +31,8 @@
 // `DriverStatus` is imported from schema.scrml (the enum decl) and threaded
 // through the shared `match` helpers — no local re-declaration.
 //
-// FRICTION (F-NULL-001 — see FRICTION.md): file with a `<engine>` block (or
-// `<engine>` deprecated alias)
+// FRICTION (F-NULL-001 — see FRICTION.md): a file with an `<engine>` block
+// (the removed `<machine>` alias behaved identically here)
 // + `null` literals/comparisons in client-fn bodies fires E-SYNTAX-042 in
 // GCP3 even though identical patterns compile clean elsewhere. Workaround:
 // use `is some`/`is not` for absence checks instead of `== null`/`!= null`,

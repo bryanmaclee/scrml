@@ -306,7 +306,7 @@ Total lines: 37,026 | Total sections: 65 + appendices
 - derived engines / `derived=expr` (L20) → §51.0.J (~20067+)
 - E-DERIVED-ENGINE-NO-RULES / -NO-INITIAL / -NO-WRITE / -INITIAL-ABSENT / -CIRCULAR → §51.0.J (~20098+)  (-INITIAL-ABSENT renamed S90 from -INITIAL-UNDEFINED per M-7C-D-12 Track 4 / OQ-6; line shifted +7 by §12.5.1 wire-format amendment)
 - components vs engines (Move 20) / E-COMPONENT-ENGINE-SCOPE → §51.0.K (~20108+) + §15.13.5 (7960+) (D4)
-- `<engine>` keyword vs legacy `<machine>` deprecation → §51.0.L (~20129+) + W-DEPRECATED-001 (§34)
+- `<engine>` keyword; `<machine>` REMOVED before 1.0 (S305/S307 — `E-DEPRECATED-001`, Error; still PARSES per §63.5 for a single non-cascading diagnostic; `W-DEPRECATED-001` + `E-ENGINE-003` RETIRED) → §51.0.L (~20129+) + §63.7 + E-DEPRECATED-001 (§34)
 - Machine Cohesion footnote (S67 — singleton invariant articulated; nested engines permitted in composite state-children) → §51.0.K
 - `<onTimeout after= to=>` element (S67 — engine temporal surface; rides §51.12 runtime) → §51.0.M
 - `history` attribute on composite state-children (S67 — Insight 23 #2; tree-shakeable synth cell; shallow-only) → §51.0.N + E-HISTORY-NO-INNER-ENGINE (§34)

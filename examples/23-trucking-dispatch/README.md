@@ -31,8 +31,9 @@ The app exercises:
 - **`<program auth="required">`** — global gate.
 - **`<channel>`** × 4 — real-time per-channel pub/sub (dispatch-board,
   driver-events, load-events, customer-events).
-- **`<machine>`** × 1 — driver HOS state machine (off-duty / on-duty /
-  driving / sleeper-berth).
+- **`<engine>`** × 1 — driver HOS state machine (off-duty / on-duty /
+  driving / sleeper-berth). (Read `<machine>` before S307; the keyword is
+  REMOVED and no `.scrml` in this tree uses it.)
 - **`lin` tokens** × 3 — single-use idempotency keys for acceptance
   (rate confirmation), BOL submission, and invoice payment.
 - **Multi-file imports** per §21 (helper fns only — see F-COMPONENT-001).
@@ -302,5 +303,5 @@ of the entire 6-milestone exercise.
 - [Multi-file precedent](../22-multifile/) — closest precedent for §21 imports
 - [Lin token reference](../19-lin-token.scrml) — canonical `lin` pattern
 - [Channel reference](../15-channel-chat.scrml) — `<channel>` reference
-- [State machine reference](../14-mario-state-machine.scrml) — `<machine>` reference
+- [State machine reference](../14-mario-state-machine.scrml) — `<engine>` reference
 - [Compiler SPEC.md](../../compiler/SPEC.md) — §21 imports, §35 lin, §38 channels, §39 schema, §44 SQL

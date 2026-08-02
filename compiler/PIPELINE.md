@@ -708,8 +708,10 @@ is wired into `compiler/src/api.js` between MOD (Stage 3.1) and CE (Stage
 3.2). The `resolvedKind` / `resolvedCategory` advisory fields ARE populated
 on every `MarkupNode`, `StateNode`, `StateConstructorDefNode`, and
 `MachineDeclNode`. The `W-CASE-001` and `W-WHITESPACE-001` warnings ARE
-emitted from NR. `W-DEPRECATED-001` continues to be emitted from TAB (the
-`<machine>`-vs-`<engine>` keyword distinction is decided at TAB time).
+emitted from NR. **`E-DEPRECATED-001` (Error) is emitted from TAB** — the
+`<machine>`-vs-`<engine>` keyword distinction is decided at TAB time.
+(`W-DEPRECATED-001` was RETIRED at S307 when `<machine>` was REMOVED; the
+keyword no longer compiles, so the warning had no trigger. §63.7.)
 
 **P3-FOLLOW changes:**
 - Downstream stages (CE Phase 1, type-system §35 attribute validation,
@@ -768,8 +770,11 @@ emitted from NR. `W-DEPRECATED-001` continues to be emitted from TAB (the
   - Downstream stages route on `resolvedKind` / `resolvedCategory` (NR-
     authoritative). The legacy `isComponent` boolean is retained as a
     derived backcompat field but is no longer the routing signal.
-  - The `< machine>` opener (deprecated) and `<machine>` no-space opener
-    both resolve to `resolvedCategory: 'engine'`. The internal AST shape
+  - The `< machine>` opener and `<machine>` no-space opener both resolve to
+    `resolvedCategory: 'engine'`. **The keyword is REMOVED (S307) and fires
+    `E-DEPRECATED-001` at TAB; it still PARSES per §63.5 so the report is one
+    diagnostic rather than a cascade — which is why this resolution path is
+    still live.** The internal AST shape
     is `kind: "engine-decl"` with field `engineName` (renamed from the
     P1 `kind: "machine-decl"` / `machineName` in S53 by `ast-shape-rename`).
   - **Auto-declared engine variable (v0.next, SPEC §51.0.C):** for every
