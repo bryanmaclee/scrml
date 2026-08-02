@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 22 |
+| HIGH | 23 |
 | MED | 111 |
 | LOW | 47 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -120,6 +120,27 @@ DD §0.3 then enumerates the entire `<program>` attribute surface **as it stood 
 **Related and already fixed in the same landing:** §20.8.7's `W-ROUTE-REQUEST-DUPLICATES-SERVER-LOAD` entry offered keep-alive as remedy **(b)** joined to (a) by *"or"* — an alternative. It is not one: applying (b) alone caches the server load while the `<request>` keeps firing every enter, so the duplication the warning names survives and the two halves can disagree. Corrected to a follow-on framing before the emitter exists, so the wrong guidance never reaches a terminal.
 
 **Disposition options for the pre-V1 call:** (i) **Nominal-label** — state the boundary in §20.8.4 ("the cache is SQL-server-load-scoped; `<request>` results are not cached") and accept it for 1.0; (ii) **extend** keep-alive to `<request>` — needs an invalidation story that is NOT the Postgres-trigger one, since an HTTP endpoint gives no change signal, so it would be TTL- or focus-revalidate-based and §20.8.4 explicitly rejects author TTLs (*"Invalidation SHALL be compiler-derived, not an author TTL"*); (iii) **strike the ambiguity** by narrowing §20.8.4's opening sentence to say "server-load payload" everywhere it currently reads as general. **(i) is the cheap honest answer and (ii) collides with a normative SHALL** — worth knowing before the freeze conversation, not during it.
+
+### g-timer-poll-body-emitted-at-module-scope-and-clobbers-reset — a `<timer>`/`<poll>` body's statements are ALSO emitted at module scope: the body runs once at load before any tick, AND it overwrites the cell's `reset()` initializer so `reset()` INCREMENTS instead of resetting — `NEW S314-bryan (surfaced scoping U1b); HIGH; open (silent wrong output on TWO documented primitives)`
+<!-- @gap id=g-timer-poll-body-emitted-at-module-scope-and-clobbers-reset sev=HIGH status=open locus=compiler/src/codegen/collect.ts:205 prov=spec:§6.7.5 -->
+**Root cause:** `collectTopLevelLogicStatements` (`collect.ts:205`) descends into `node.children` for EVERY node, so a `<timer>`/`<poll>` body is collected as top-level logic AND emitted again inside the timer callback. Pre-existing; found while tracing U1b, not by U1a. For `<request>` the same descent is the DESIGNED canonical-form fetch and emits once — the defect is specific to the tick-driven tags.
+
+**Emitted verbatim** for `<ticks> = 0` + `<timer interval=1000>${ @ticks = @ticks + 1 }</timer>` + a `reset(@ticks)` call, on `080127ba`:
+
+```js
+:24  _scrml_cs_init_set("ticks", () => 0);                                  // the declared initial — correct
+:26  _scrml_cs_init_set("ticks", () => _scrml_cs_reactive_get("ticks") + 1); // module-scope LEAK — clobbers it
+:32  _scrml_cs_init_set("ticks", () => _scrml_cs_reactive_get("ticks") + 1); // inside the callback — re-clobbers every tick
+```
+
+**THREE distinct wrong behaviours from the one root:**
+1. **The body runs once at module init, before the first tick.** §6.7.5: *"The timer body … executes on each interval tick"*; §6.7.6 says the same for `<poll>`. A load-time execution is not a tick.
+2. **`reset()` is inverted on any cell the body writes.** `_scrml_init_set` is plain last-write-wins (`runtime-template.js:661-663`) and `_scrml_reset` calls `_scrml_init_fns[name]()` (`:1146+`). The declared `() => 0` is overwritten by the body's own expression, so **`reset(@ticks)` evaluates `current + 1` — it INCREMENTS.** §6.8's reset primitive does the opposite of its name.
+3. **The clobber repeats on every tick**, so anything that restored the initializer is broken again on the next interval.
+
+**Why it survived:** the corpus has no file that both writes a cell from a `<timer>`/`<poll>` body and calls `reset()` on that cell, so nothing exercises consequence 2; and consequence 1 is invisible unless the body is observably side-effecting at load. Same shape as the S299 component-id bug — a real defect with zero corpus coverage.
+
+**Blocks U1b** (`docs/changes/route-region-teardown/SCOPING-EDGE2.md`): those statements sit at a source position INSIDE the timer node's own span, so a positional merge has no defined position for them. Fix band **S**, but `semantics-changed` with a genuinely NON-zero corpus diff — unlike U1a, this one moves real output. Fix this BEFORE U1b.
 
 ### g-region-bodies-emit-in-bucket-order-not-declaration-order — §20.8.8 step 3 requires region bodies to run in DECLARATION order; emission is by BUCKET, so the violation is live at initial load with no navigation — `NEW S314-bryan (surfaced scoping Edge 2); MED; open`
 <!-- @gap id=g-region-bodies-emit-in-bucket-order-not-declaration-order sev=MED status=open locus=compiler/src/codegen/emit-reactive-wiring.ts:849 prov=spec:§20.8.8 -->
