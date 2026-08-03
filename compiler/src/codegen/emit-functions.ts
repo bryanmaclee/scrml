@@ -1247,6 +1247,13 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   const _clientPeerAwaitNames = new Set<string>(
     [..._clientAsyncFnNames].filter((n) => _localFnNames.has(n) || !_stdlibOwnedImport(n)),
   );
+  // g-crossmodule-async-in-markup-position-not-awaited (S317) — the markup
+  // interpolation emitter (emit-event-wiring.ts) lowers `<p>${ fetchStatus(@url) }</p>`
+  // on a SEPARATE path that never received this peer-await set, so a cross-module
+  // inferred-async CLIENT import consumed in markup value position emitted bare and
+  // rendered `undefined` (a field read off a Promise). Stash the set on ctx here;
+  // emitFunctions runs before emitEventWiring on the same ctx (emit-client.ts).
+  (ctx as unknown as { _clientPeerAwaitNames?: Set<string> })._clientPeerAwaitNames = _clientPeerAwaitNames;
   // Fail-closed (axis-i) — a client async-peer call the compiler emits BARE in a
   // non-awaitable position (sync callback / param default). Drained after the loop.
   const _clientSyncPeerCalls: Array<{ name: string; span: unknown }> = [];

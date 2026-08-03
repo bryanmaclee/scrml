@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 23 |
-| MED | 106 |
+| MED | 105 |
 | LOW | 47 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -5735,7 +5735,7 @@ Note the anonymous form (`@.`) is correct, and the value-attribute arm is correc
 
 Fails silently: `_scrml_cs_reactive_get` on an unregistered name yields absence rather than throwing, so the class simply never toggles. — `NEW S301 (bryan, via S239 on the cross-module-await diff); HIGH; open`
 
-<!-- @gap id=g-crossmodule-async-in-markup-position-not-awaited sev=MED status=open -->
+<!-- @gap id=g-crossmodule-async-in-markup-position-not-awaited sev=MED status=resolved -->
 **A cross-module async import consumed directly in MARKUP position is still not awaited — the peer-await set is threaded into function bodies only.** Surfaced S301 by the adversarial pass; verified identical on both trees.
 
 ```scrml
@@ -5745,7 +5745,9 @@ still emits the call bare, so the interpolation reads a field off a Promise and 
 
 **Severity is MED, not HIGH, deliberately** — and the distinction is worth keeping: this is the *same silent-`undefined` class*, but the reviewer recorded it as an unchanged gap rather than a HIGH, and inflating it would misrank it against the two genuine HIGHs filed alongside it. It also fails visibly on the page (a rendered `undefined`) rather than corrupting stored state.
 
-**Do not assume value position is now universally covered** — that is the specific wrong conclusion the closing of [[g-inferred-async-call-value-position-no-autoawait]] invites, and this entry exists to block it. **Locus:** the markup interpolation emit path (`emit-html.ts` / `emit-expr.ts` logic-binding lowering) does not consult `ctx.clientAsyncFnNames`. **PA-located, VERIFY.** — `NEW S301 (bryan, via S239 on the cross-module-await diff); MED; open`
+**Do not assume value position is now universally covered** — that is the specific wrong conclusion the closing of [[g-inferred-async-call-value-position-no-autoawait]] invites, and this entry exists to block it. **Locus:** the markup interpolation emit path (`emit-html.ts` / `emit-expr.ts` logic-binding lowering) does not consult `ctx.clientAsyncFnNames`. **PA-located, VERIFY.** — `NEW S301 (bryan, via S239 on the cross-module-await diff); MED; RESOLVED S317`
+
+**RESOLVED S317** (`fix/crossmodule-async-markup`). **Locus VERIFIED corrected:** the seam is `emit-event-wiring.ts` (the reactive-display + one-shot interpolation lowering), NOT `emit-html.ts`/`emit-expr.ts` per se — the markup path calls the shared `emitExprField`→`emitExpr` emitter but (a) built its ctx WITHOUT `clientAsyncFnNames`, and (b) chose its async wrapper by a server-fn-only predicate (`exprUsesServerFn`). Fix: `emitFunctions` stashes its peer-await set `_clientPeerAwaitNames` on `ctx` (runs before `emitEventWiring`); `emitEventWiring` reads it as `clientAsyncFnNames`, threads it into the interpolation `emitExprField` ctx (so emit-expr injects the inner `(await fetchStatus(...))`), and routes the client-async case through the existing nested-`async`-IIFE shape **without an OUTER await** (the inner await is already injected → no `await await`). **The wrap decision DIFFS the emit with vs without the set** (`usesClientAsync = rewrittenExpr !== emitWithoutSet`) rather than a `NAME(` textual predicate — the S239 adversarial pass caught that a predicate MISSES a client-async fn passed as a bare combinator callback (`@items.map(fetchStatus)` → emit-expr lowers to `await _scrml_mapAsync(...)`), which would strand an UNWRAPPED `await` in the sync effect → whole-bundle SyntaxError. The diff is exact (true IFF the client-async lowering emitted an await needing an async context). Covers BOTH the reactive (`@var`) and no-`@`-ref one-shot branches. **Byte-identical** for the server-fn and normal-sync cases, and for any page with no cross-module async import (empty set → predicate never fires). Verified by EXECUTION (per [[feedback-verify-the-bug-class-not-just-reported-instance]]): the emitted async-IIFE render resolves `.status` to `200` (the awaited value); the pre-fix bare shape rendered `undefined`. Regression test `crossmodule-async-markup-position-autoawait.test.js` bites (reactive + one-shot + sync-import negative + runtime). **NOTE (out of scope, pre-existing):** the interpolation body is ALSO emitted as a discarded top-level module-init statement (`fetchStatus(@url).status;`) — a bare un-awaited eval that renders nothing; present pre-fix, a separate concern.
 
 ## §S302 — gaps filed S302 (2026-07-30, bryan; adopter issue #284 reverse-verify)
 

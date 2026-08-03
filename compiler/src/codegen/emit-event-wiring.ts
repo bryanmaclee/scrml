@@ -615,6 +615,13 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   }
 
   const serverFnNames = buildServerFnNames(fnNameMap);
+  // g-crossmodule-async-in-markup-position-not-awaited (S317) — the peer-await set
+  // stashed by emitFunctions (cross-module inferred-async CLIENT imports + local
+  // async client fns, minus stdlib-owned imports). Drives await-injection for a
+  // markup interpolation like `<p>${ fetchStatus(@url) }</p>`.
+  const clientAsyncFnNames =
+    ((ctx as unknown as { _clientPeerAwaitNames?: Set<string> })._clientPeerAwaitNames) ??
+    new Set<string>();
   const lines: string[] = [];
 
   const hasEvents = eventBindings && eventBindings.length > 0;
@@ -1878,7 +1885,18 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       // effect-wrapped path; `requestIds` (in engineExprCtxExtras) routes the
       // `<#id>` ref to `_scrml_request_<id>` instead of the §36 input-state registry.
       if (varRefs.length > 0 || binding.hasRequestRef) {
-        let rewrittenExpr = emitExprField(binding.exprNode, expr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys, ...engineExprCtxExtras });
+        const _exprCtxNoAsync = { mode: "client" as const, derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys, ...engineExprCtxExtras };
+        let rewrittenExpr = emitExprField(binding.exprNode, expr, { ..._exprCtxNoAsync, clientAsyncFnNames });
+        // g-crossmodule-async-in-markup-position-not-awaited (S317) — did threading
+        // the peer-await set inject an `await`? Decide by DIFFING the emit with vs
+        // without the set, NOT by a `NAME(` textual predicate. The predicate misses
+        // a client-async fn passed as a bare combinator callback
+        // (`@items.map(fetchStatus)` → emit-expr lowers to `await _scrml_mapAsync(...)`),
+        // which would strand an UNWRAPPED `await` in the sync effect → SyntaxError,
+        // killing the whole bundle. The diff is exact: it is true IFF the client-async
+        // lowering actually emitted an await that now needs an async context.
+        const usesClientAsync = clientAsyncFnNames.size > 0 &&
+          rewrittenExpr !== emitExprField(binding.exprNode, expr, _exprCtxNoAsync);
 
         // When encoding is active, replace _scrml_reactive_get("name") with encoded names
         if (encodingCtx && encodingCtx.enabled) {
@@ -1892,7 +1910,9 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
 
         // If the reactive expression ALSO contains a server fn, wrap in async
         // so the Promise is awaited (mixed case: @var + serverFn()). The effect
-        // re-runs on @var change; each re-run re-fires the server call.
+        // re-runs on @var change; each re-run re-fires the server call. Takes
+        // precedence over usesClientAsync (server fns need the OUTER await; a
+        // client-async call already carries its own inner await).
         const needsAsync = exprUsesServerFn(expr, serverFnNames);
 
         // ss20 item-1 — when this interpolation sits inside an `if=` display-
@@ -1925,6 +1945,19 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         const dispBody: string[] = [];
         if (needsAsync) {
           const asyncRun = `(async () => { try { el.textContent = await (${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })();`;
+          if (_guardCond) {
+            dispBody.push(`if (${_guardCond}) { ${asyncRun} }`);
+            dispBody.push(...regionEffectLines(`if (!(${_guardCond})) return; ${asyncRun}`));
+          } else {
+            dispBody.push(asyncRun);
+            dispBody.push(...regionEffectLines(`${asyncRun}`));
+          }
+        } else if (usesClientAsync) {
+          // Client-async: rewrittenExpr already carries the inner await; run the
+          // node-aware render inside an async IIFE (no OUTER await → no `await
+          // await`). The outer sync effect still tracks @-deps and re-invokes the
+          // IIFE on change, re-firing the async call.
+          const asyncRun = `(async () => { try { _scrml_render_value(el, ${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })();`;
           if (_guardCond) {
             dispBody.push(`if (${_guardCond}) { ${asyncRun} }`);
             dispBody.push(...regionEffectLines(`if (!(${_guardCond})) return; ${asyncRun}`));
@@ -1984,13 +2017,26 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         const standaloneTildeRegex = /(^|[\s,(;{=])~(?=\s|$|[,;)}\]])/;
         if (standaloneTildeRegex.test(expr)) continue;
 
-        const rewrittenExpr = emitExprField(binding.exprNode, expr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys });
+        const _oneShotCtxNoAsync = { mode: "client" as const, derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys };
+        const rewrittenExpr = emitExprField(binding.exprNode, expr, { ..._oneShotCtxNoAsync, clientAsyncFnNames });
         // markup-as-value (§1.4/§7.4 Pillar 1): node-aware one-shot display.
         // A markup-typed value renders into el; a string/primitive keeps the
         // byte-identical textContent path via _scrml_render_value (core chunk).
         // Static one-shot (no effect) — inline only; a swapped region gets this
         // value server-rendered in its SSR HTML (rebind=false).
-        pushRebindableDisplay(placeholderId, [`_scrml_render_value(el, ${rewrittenExpr});`], false);
+        // g-crossmodule-async-in-markup-position-not-awaited (S317) — a no-`@`-ref
+        // interpolation calling a cross-module inferred-async CLIENT fn
+        // (`${ fetchStatus("/x").status }` OR `${ [..].map(fetchStatus) }`):
+        // rewrittenExpr carries an injected await, so run the render in an async
+        // IIFE (no outer await → no `await await`). Decide by DIFFING the emit with
+        // vs without the set (exact — a `NAME(` predicate misses the bare-callback
+        // form and would strand an unwrapped `await` → SyntaxError).
+        const oneShotUsesClientAsync = clientAsyncFnNames.size > 0 &&
+          rewrittenExpr !== emitExprField(binding.exprNode, expr, _oneShotCtxNoAsync);
+        const oneShotRender = oneShotUsesClientAsync
+          ? `(async () => { try { _scrml_render_value(el, ${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })();`
+          : `_scrml_render_value(el, ${rewrittenExpr});`;
+        pushRebindableDisplay(placeholderId, [oneShotRender], false);
       }
     }
   }
