@@ -1,0 +1,14 @@
+{
+  "id": "lifecycle-onmount-error-arm-recovery-rt",
+  "description": "§6.7.1a — an `!{}` error-arm inside an `on mount { }` body lowers through the real statement codegen (the same path a `function` body gets), not the string rewriter. `let r = risky() !{ | ::Boom :> \"caught\" }` — risky() fails with LoadError.Boom; the `:>` recovery arm runs at mount and binds r = \"caught\"; the two following statements (`@status = r`, `@ran = true`) also run (proving the whole multi-statement body lowered, not just statement 1). Pre-fix this body hit E-CODEGEN-INVALID-LOGIC (the string rewriter cannot lower `!{}`). No input — the boot/mount shape.",
+  "language-version": "1.0",
+  "spec": "§6.7.1a",
+  "rationale": "§6.7.1a — `on mount { body }` is sugar for the bare-expression-at-mount pattern; its body MUST lower with the same statement codegen a `function` body uses. An `!{}` guarded call therefore recovers into its binding and subsequent statements execute — exactly as inside a function. The recovery value \"caught\" (from the ::Boom arm) is r, written into @status; @ran flips true.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "input": [],
+    "state": { "status": "caught", "ran": true },
+    "domAnchored": [{ "selector": "#status", "text": "caught" }]
+  }
+}

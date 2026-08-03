@@ -1,0 +1,13 @@
+{
+  "id": "lifecycle-onmount-markup-as-value-rt",
+  "description": "§6.7.1a — a markup-as-value assignment inside an `on mount { }` body lowers through the real statement codegen. `@label = <span id=\"mv\">hi</>` — pre-fix this hit E-CODEGEN-INVALID-LOGIC (the string rewriter re-emitted the markup as source text `< span > hi < / >`, invalid JS). Post-fix the markup lowers to a real DOM node built by document.createElement, and the following `@ran = true` also runs. No input — the boot/mount shape.",
+  "language-version": "1.0",
+  "spec": "§6.7.1a",
+  "rationale": "§6.7.1a sugar-equivalence — markup-as-value (Pillar 1 §1.4/§7.4) inside `on mount` lowers exactly as inside a `function` body: the `<span>` expression becomes a constructed DOM node assigned to @label, and subsequent statements execute (@ran = true).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "input": [],
+    "state": { "ran": true }
+  }
+}

@@ -5988,6 +5988,39 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     }
   }
 
+  // (c) §6.7.1a — collect an `on mount { body }` body BOTH ways from ONE token
+  // range: the token-rejoin STRING (`collectBracedBody`, which the existing
+  // string-path emit consumes — kept verbatim for byte-identical output on
+  // currently-passing bodies) AND a parsed STATEMENT-NODE list (`parseRecursiveBody`,
+  // the same real-statement parse a `function` body gets). Called AFTER the
+  // opening `{` is consumed. The cursor is saved and restored so the second
+  // parse re-reads the identical token range; scratch-parse diagnostics are
+  // dropped (the string-path / emitLogicNode path remains the diagnostic
+  // authority for the mount body, so a passing plain-JS body's diagnostics are
+  // unchanged). `_mountBodyNodes` is consumed by emit-logic's bare-expr handler,
+  // which routes a mount body containing a scrml extension (markup-as-value,
+  // `!{}` error arms, `match`) through the real statement codegen instead of the
+  // string rewriter that cannot lower them (E-CODEGEN-INVALID-LOGIC / silent drop).
+  function collectMountBody() {
+    const startCursor = i;
+    const errLen = errors.length;
+    const { body, span } = collectBracedBody();
+    const endCursor = i;
+    i = startCursor;
+    let bodyNodes = null;
+    try {
+      bodyNodes = parseRecursiveBody();
+    } catch (_e) {
+      bodyNodes = null;
+    }
+    // Force the cursor past the collected body (the string parse is the
+    // authority on where the body ends) and drop any scratch-parse diagnostics.
+    i = endCursor;
+    if (errors.length > errLen) errors.length = errLen;
+    const nodes = Array.isArray(bodyNodes) ? bodyNodes : null;
+    return { body, span, bodyNodes: nodes };
+  }
+
   function _parseRecursiveBodyInner() {
     const stmts = [];
     while (true) {
@@ -10064,7 +10097,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       const startTok = consume(); // consume 'on'
       consume();                  // consume 'mount'
       consume();                  // consume '{'
-      const { body, span: bodySpan } = collectBracedBody();
+      const { body, span: bodySpan, bodyNodes: _mountBodyNodes } = collectMountBody();
       // _onMountEffect (S217, g-onmount-async): a desugared `on mount {}` is a
       // fire-and-forget mount effect per SPEC §6.7.1a — it runs ONCE at mount
       // and NEVER renders its return into the DOM, in ANY enclosing context
@@ -10086,7 +10119,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // exprNode so the string path lowers ALL statements. A single-expression
       // body (span reaches the end) and an escape-hatch (span spans the full
       // `expr` by construction) both keep their node — byte-identical emit.
-      return { id: ++counter.next, kind: "bare-expr", expr: body, exprNode: mountBodyExprNode(body, safeParseExprToNode), _onMountEffect: true, span: spanOf(startTok, peek()) };
+      return { id: ++counter.next, kind: "bare-expr", expr: body, exprNode: mountBodyExprNode(body, safeParseExprToNode), _mountBodyNodes, _onMountEffect: true, span: spanOf(startTok, peek()) };
     }
 
     // §6.7.1b: ON DISMOUNT — `on dismount { body }` desugars to cleanup(() => { body })
@@ -13749,11 +13782,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       const startTok = consume(); // consume 'on'
       consume();                  // consume 'mount'
       consume();                  // consume '{'
-      const { body, span: bodySpan } = collectBracedBody();
+      const { body, span: bodySpan, bodyNodes: _mountBodyNodes } = collectMountBody();
       // _onMountEffect (S217) — see the parseOneStatement on-mount site above.
       // GH #264 Defect 2 — drop the exprNode for a multi-statement body so the
-      // string path lowers ALL statements (see mountBodyExprNode).
-      nodes.push({ id: ++counter.next, kind: "bare-expr", expr: body, exprNode: mountBodyExprNode(body, safeParseExprToNode), _onMountEffect: true, span: spanOf(startTok, peek()) });
+      // string path lowers ALL statements (see mountBodyExprNode). `_mountBodyNodes`
+      // carries the parsed statement list for the (c) real-codegen reroute.
+      nodes.push({ id: ++counter.next, kind: "bare-expr", expr: body, exprNode: mountBodyExprNode(body, safeParseExprToNode), _mountBodyNodes, _onMountEffect: true, span: spanOf(startTok, peek()) });
       continue;
     }
 

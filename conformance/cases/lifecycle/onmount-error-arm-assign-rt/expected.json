@@ -1,0 +1,14 @@
+{
+  "id": "lifecycle-onmount-error-arm-assign-rt",
+  "description": "§6.7.1a — the reactive-assign form `@status = risky() !{ | ::Boom :> \"caught\" }` inside an `on mount { }` body. Pre-fix this form COMPILED but SILENTLY DROPPED the `!{}` arm (the string rewriter emitted `_scrml_reactive_set(\"status\", risky())`, discarding the handler) — a silent error-handling loss, worse than the loud E-CODEGEN failure of the `let` form. The fix routes the mount body through the real statement codegen, so the recovery arm executes and \"caught\" (not the raw {__scrml_error} envelope) lands in @status. No input — the boot/mount shape.",
+  "language-version": "1.0",
+  "spec": "§6.7.1a",
+  "rationale": "§6.7.1a sugar-equivalence — the `@cell = call() !{...}` recovery-into-cell contract (§19.4.3) must hold inside `on mount` exactly as inside a `function`. risky() fails Boom; the ::Boom recovery arm produces \"caught\", which is the value written to @status. A dropped arm would leave the raw error envelope (or the un-recovered call) in the cell — the regression this pins against.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "input": [],
+    "state": { "status": "caught" },
+    "domAnchored": [{ "selector": "#status", "text": "caught" }]
+  }
+}

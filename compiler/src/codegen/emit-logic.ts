@@ -1582,6 +1582,43 @@ function _ensureBoundary(opts: EmitLogicOpts, context: string): EmitLogicOpts {
   return opts;
 }
 
+// (c) §6.7.1a — recursively detect a `markup-value` leaf anywhere in a parsed
+// statement node (markup-as-value in expression position). Mirrors emit-each's
+// exprNodeHasMarkupValue but walks the whole statement node (init / initExpr /
+// arms), skipping `span` to bound the walk.
+function _mountNodeHasMarkupValue(node: any): boolean {
+  if (node === null || node === undefined || typeof node !== "object") return false;
+  if (node.kind === "markup-value") return true;
+  for (const key of Object.keys(node)) {
+    if (key === "span") continue;
+    const v = (node as Record<string, unknown>)[key];
+    if (Array.isArray(v)) {
+      for (const item of v) if (_mountNodeHasMarkupValue(item)) return true;
+    } else if (v && typeof v === "object") {
+      if (_mountNodeHasMarkupValue(v)) return true;
+    }
+  }
+  return false;
+}
+
+// (c) §6.7.1a — a desugared `on mount { }` body needs the REAL statement codegen
+// (not the string rewriter) when it contains a scrml extension the rewriter
+// cannot lower: an `!{}` error-arm (parsed to a `guarded-expr`), a `match`
+// statement, or a markup-as-value. For any other body (plain JS, a bare
+// `@x = v`, a single-expression fast-path) the current string / fast-path emit
+// is kept verbatim — so currently-passing bodies stay byte-identical.
+function mountBodyNeedsStructuredLowering(nodes: any[]): boolean {
+  if (!Array.isArray(nodes)) return false;
+  return nodes.some(
+    (n: any) =>
+      n &&
+      (n.kind === "guarded-expr" ||
+        n.kind === "match-stmt" ||
+        n.kind === "match-expr" ||
+        _mountNodeHasMarkupValue(n)),
+  );
+}
+
 export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "client" }): string {
   if (!node || typeof node !== "object") return "";
 
@@ -1607,6 +1644,41 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // In lift context, emit-lift handles them for tag reconstruction.
       return "";
     case "bare-expr": {
+      // (c) §6.7.1a — route an `on mount { }` body containing a scrml extension
+      // (`!{}` error arms, `match`, markup-as-value) through the REAL per-statement
+      // codegen (the same `emitLogicBody` → `emitLogicNode` path a `function`
+      // body's statements take), instead of the string rewriter that cannot lower
+      // them (E-CODEGEN-INVALID-LOGIC, or a silently-dropped `!{}` arm on the
+      // `@x = fn() !{}` assign form). `_mountBodyNodes` is the parsed statement
+      // list attached at the mount desugar site (ast-builder.js `collectMountBody`).
+      //
+      // Byte-identity guard: reroute ONLY when the body BOTH needs structured
+      // lowering AND is not a clean single-expression fast-path (a real,
+      // non-escape-hatch `exprNode` — e.g. a single `match` or `@x = v`, which
+      // compiles today and must stay byte-identical). A plain-JS multi-statement
+      // body (`loadUsers()\nloadOrders()`) is never flagged (no extension node),
+      // so it keeps the exact string-path emit below. Every body that IS rerouted
+      // fails or silently drops today, so there is no passing emit to preserve.
+      const _mountBodyNodes = (node as any)._mountBodyNodes;
+      const _cleanFastPath = node.exprNode && (node.exprNode as any).kind !== "escape-hatch";
+      if (
+        (node as any)._onMountEffect &&
+        Array.isArray(_mountBodyNodes) &&
+        !_cleanFastPath &&
+        mountBodyNeedsStructuredLowering(_mountBodyNodes)
+      ) {
+        // Terminate each statement so an expression-statement emit (e.g. a
+        // `match` lowered to `(function(){…})()`) cannot ASI-glue onto the next
+        // file-scope IIFE (the event-wiring block) as a call — mirroring the
+        // string path below, which appends `;` to every split statement. A block
+        // (`}`) or already-terminated (`;`) statement needs no extra terminator.
+        return emitLogicBody(_mountBodyNodes, opts)
+          .map((s: string) => {
+            const t = s.trimEnd();
+            return t.endsWith(";") || t.endsWith("}") ? s : s + ";";
+          })
+          .join("\n");
+      }
       // Phase 3 fast path: when exprNode is present, skip all string heuristics
       if (node.exprNode) {
         // §32 — orphan `~` accumulator at statement position.

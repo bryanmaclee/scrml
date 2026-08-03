@@ -1,0 +1,20 @@
+${
+    type LoadError:enum = { Boom }
+
+    function risky()! -> LoadError {
+        fail LoadError.Boom
+    }
+
+    <status> = "init"
+    <ran> = false
+}
+<program>
+    on mount {
+        let r = risky() !{
+            | ::Boom :> "caught"
+        }
+        @status = r
+        @ran = true
+    }
+    <p id="status">${@status}</p>
+</program>

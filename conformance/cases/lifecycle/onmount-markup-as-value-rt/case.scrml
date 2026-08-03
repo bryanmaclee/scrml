@@ -1,0 +1,11 @@
+${
+    <label> = "init"
+    <ran> = false
+}
+<program>
+    on mount {
+        @label = <span id="mv">hi</>
+        @ran = true
+    }
+    <div id="host">${@label}</div>
+</program>

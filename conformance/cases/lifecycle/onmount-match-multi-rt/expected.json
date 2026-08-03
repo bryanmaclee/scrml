@@ -1,0 +1,14 @@
+{
+  "id": "lifecycle-onmount-match-multi-rt",
+  "description": "§6.7.1a — a multi-statement `on mount { }` body containing a `match` statement lowers through the real statement codegen. `@x = 2` then `match @x { 2 -> {...} _ -> {...} }` — pre-fix the multi-statement body fell to the string rewriter, which cannot lower `match` (E-CODEGEN-INVALID-LOGIC). Post-fix both statements run at mount: @x = 2, the match selects the `2` arm and writes @label = \"two\". A single-statement `match` mount body already compiled (fast-path) and is unchanged; this pins the multi-statement case that rode along on the fix. No input — the boot/mount shape.",
+  "language-version": "1.0",
+  "spec": "§6.7.1a",
+  "rationale": "§6.7.1a sugar-equivalence — a `match` statement inside `on mount` lowers exactly as inside a `function` body. With @x set to 2, the match dispatches the literal-2 arm, writing @label = \"two\"; the wildcard arm is not taken.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "input": [],
+    "state": { "x": 2, "label": "two" },
+    "domAnchored": [{ "selector": "#out", "text": "two" }]
+  }
+}

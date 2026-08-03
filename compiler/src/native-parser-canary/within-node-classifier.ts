@@ -188,6 +188,16 @@ const STRIP_KEYS: ReadonlySet<string> = new Set([
                               // pipeline-internal codegen-support field, NOT a
                               // semantic divergence (both routes emit the same
                               // mount-effect call).
+  "_mountBodyNodes",          // (c) §6.7.1a — LIVE-only parsed statement list for
+                              // an `on mount {}` bare-expr, attached alongside
+                              // the token-rejoin `expr` string by collectMountBody.
+                              // emit-logic routes a mount body carrying a scrml
+                              // extension (`!{}` / `match` / markup-as-value)
+                              // through the real statement codegen via these
+                              // nodes. Same live-only codegen-support metadata
+                              // class as _onMountEffect above; the native parser
+                              // lowers on-mount through its own route and never
+                              // carries this field, NOT a semantic divergence.
   "_onLifecycleLift",         // S217 (GITI-029) — LIVE-only diagnostic marker on
                               // a synthetic ${...} that liftBareDeclarations
                               // built for a comment-flushed `on mount {}` text
