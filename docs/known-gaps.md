@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 23 |
-| MED | 107 |
+| MED | 106 |
 | LOW | 47 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -6260,8 +6260,8 @@ it. `if=` needed a whole lowering; this needs one attribute.
 
 ---
 
-<!-- @gap id=g-tool-artifact-import-specifier-dangles sev=MED status=open -->
-### G-TOOL-ARTIFACT-IMPORT-SPECIFIER-DANGLES — a §64 `kind="tool"` artifact emits a SOURCE-space import specifier; `bun <emitted>.js` dies with `Cannot find module` on a green compile — `NEW S302; MED; open`
+<!-- @gap id=g-tool-artifact-import-specifier-dangles sev=MED status=resolved -->
+### G-TOOL-ARTIFACT-IMPORT-SPECIFIER-DANGLES — a §64 `kind="tool"` artifact emits a SOURCE-space import specifier; `bun <emitted>.js` dies with `Cannot find module` on a green compile — `NEW S302; MED; RESOLVED S317`
 
 **Both siblings S296 explicitly DEFERRED are live, and they compose.** S296 fixed `.server.js`
 specifiers into post-strip dist space and recorded two untouched paths; this is both of them in one
@@ -6296,6 +6296,19 @@ WITH emittedScrmlSources=null  : ../fx3/models/lib.js  <- relocation path
 `distRelativeServerSpecifier` treatment S296 gave `.server.js`. Now guarded against regression by
 `compiler/tests/integration/corpus-emitted-specifier-resolution.test.js` §1 (which sweeps ALL emitted
 `.js`, not just `.server.js`).
+
+**RESOLVED S317** (`fix/tool-artifact-import-specifier`): generalized `emit-server.ts`
+`distRelativeServerSpecifier` → **`distRelativeLocalSpecifier(spec, importer, outputBaseDir, targetExt)`**
+(server behavior byte-identical via a thin wrapper), and replaced the buggy bare-`.js` VERBATIM skip in
+`api.js rewriteRelativeImportPaths` (Sibling B) with a dist-space re-base: for a scrml-emitted library
+`.js`, express both endpoints in post-strip dist space and take the relative path (`.js` extension).
+Threaded `cgOutputBaseDir` (= `fileAST._outputBaseDir`) into the rewriter's 6 call sites. On a project
+with no `pages/` segment the two spaces coincide → **byte-identical emit** (proven: root-level tool
+non-regression). Verified end-to-end (`pages/mytool.scrml` importing `../models/lib.scrml` → emits
+`./models/lib.js`, `bun mytool.js` runs); trucking-dispatch §1 sweep = 62 specifiers, 0 dangling. New
+regression test `g-tool-artifact-import-specifier-dangles.test.js` (bites: pre-fix `../models/lib.js`,
+post-fix `./models/lib.js`). **Sibling gap `g-client-bundle-no-relative-path-rewrite` (below) is a
+DISTINCT client-bundle case — NOT covered here.**
 
 ---
 

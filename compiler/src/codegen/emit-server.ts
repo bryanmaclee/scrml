@@ -166,14 +166,15 @@ function isOutsideBase(rel: string): boolean {
   return norm === ".." || norm.startsWith("../");
 }
 
-// D-4: the DIST-relative path of the `.server.js` artifact a source file emits,
-// as a `/`-separated path relative to `outputBaseDir`. Mirrors api.js `pathFor`
-// EXACTLY — the `pages/` strip applies to the DIRNAME only, the basename is
-// untouched — so `pages/customer/home.scrml` maps to `customer/home.server.js`,
-// while a root-level `pages.scrml` keeps its name.
-function distServerPathOf(relSource: string): string {
+// D-4: the DIST-relative path of the artifact a source file emits (extension
+// per `targetExt` — `.server.js` for the server half, `.js` for a §64 tool /
+// library main module), as a `/`-separated path relative to `outputBaseDir`.
+// Mirrors api.js `pathFor` EXACTLY — the `pages/` strip applies to the DIRNAME
+// only, the basename is untouched — so `pages/customer/home.scrml` maps to
+// `customer/home<targetExt>`, while a root-level `pages.scrml` keeps its name.
+function distLocalPathOf(relSource: string, targetExt: string): string {
   const dir = stripPagesPrefix(_pathDirname(relSource));
-  const file = _pathBasename(relSource, ".scrml") + ".server.js";
+  const file = _pathBasename(relSource, ".scrml") + targetExt;
   return dir === "." || dir === "" ? file : dir + "/" + file;
 }
 
@@ -214,12 +215,13 @@ function distServerPathOf(relSource: string): string {
  * reversal sites there (`checkServerImportInvariant` and
  * `emitValueOnlyServerJsForDanglingImports`) route through a dist-keyed index.
  */
-export function distRelativeServerSpecifier(
+export function distRelativeLocalSpecifier(
   sourceSpecifier: string,
   importerFilePath: string,
   outputBaseDir: string | null | undefined,
+  targetExt: string,
 ): string {
-  const verbatim = sourceSpecifier.replace(/\.scrml$/, ".server.js");
+  const verbatim = sourceSpecifier.replace(/\.scrml$/, targetExt);
   if (!outputBaseDir || !importerFilePath) return verbatim;
 
   const importerRel = _pathRelative(outputBaseDir, importerFilePath);
@@ -228,11 +230,22 @@ export function distRelativeServerSpecifier(
   if (isOutsideBase(importerRel) || isOutsideBase(targetRel)) return verbatim;
 
   const fromDir = stripPagesPrefix(_pathDirname(importerRel));
-  const toPath = distServerPathOf(targetRel);
+  const toPath = distLocalPathOf(targetRel, targetExt);
   const rel = _pathRelative(fromDir, toPath).split(_pathSep).join("/");
   // A relative ES specifier MUST start with `./` or `../`; a bare
   // `models/auth.server.js` would be a BARE specifier (node_modules lookup).
   return rel.startsWith(".") ? rel : "./" + rel;
+}
+
+// D-4 (S296) server-half wrapper — the `.server.js` instance of the general
+// dist-space re-basing above. Preserved as a named export because api.js's
+// reversal logic and emit-server both key on the server extension.
+export function distRelativeServerSpecifier(
+  sourceSpecifier: string,
+  importerFilePath: string,
+  outputBaseDir: string | null | undefined,
+): string {
+  return distRelativeLocalSpecifier(sourceSpecifier, importerFilePath, outputBaseDir, ".server.js");
 }
 
 // g-pure-module-server-emit (S207): conservative identifier-reference check.
