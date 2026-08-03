@@ -921,9 +921,20 @@ function emitModuleValueExportLines(
       if (kind === "const") {
         if (isAlreadyDeclared(name)) continue;
         const raw: string = String(stmt.raw ?? "");
-        const m = raw.match(/^\s*export\s+const\s+\w+\s*=\s*([\s\S]+)$/);
-        if (!m) continue;
-        const init = m[1].trim();
+        // g-263 — a type-ANNOTATED value export carries a build-time clean init
+        // (`valueInit`, split from its `: TYPE` annotation). The raw regex below is
+        // annotation-blind (a leading `: TYPE` between the name and `=` defeats
+        // `const \w+ \s* =`), so prefer the AST field; fall back to the regex for
+        // the unannotated legacy shape (byte-identical). A server-only-init
+        // annotated const has no `valueInit` and a raw with no `=` → skipped here.
+        let init: string | null = (typeof (stmt as any).valueInit === "string")
+          ? String((stmt as any).valueInit).trim()
+          : null;
+        if (init == null) {
+          const m = raw.match(/^\s*export\s+const\s+\w+\s*=\s*([\s\S]+)$/);
+          if (!m) continue;
+          init = m[1].trim();
+        }
         if (!init) continue;
         // A markup-valued const is a COMPONENT (resolved at markup-mount time),
         // not a runtime JS value — skip it. No scrml VALUE expression begins

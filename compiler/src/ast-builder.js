@@ -11191,6 +11191,110 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         prefixParts.push(consume().text);
       }
 
+      // g-263-typeannotated-export-const-not-collapsed-client — type-ANNOTATED
+      // VALUE export (`export const/let NAME : TYPE = INIT`). The generic
+      // collectExpr() path below reads the WHOLE `const NAME : TYPE = INIT` as one
+      // expression and TRUNCATES `raw` at an arrow/union glyph INSIDE the annotation
+      // (`: () => T` / `: () -> T` → raw stops at `=>`/`- >`; `: A | B` → stops at
+      // `|`), leaving the initializer AND the annotation tail dangling as bogus
+      // sibling statements (E-STMT-MISSING-SEMICOLON / E-MU-001). Even for a SIMPLE
+      // annotation (`: string`) — where raw survives whole — the downstream
+      // init-extractors (emit-client `stripExportDeclInit`, emit-server's raw
+      // regex) fail-closed on the leading `:` and DROP the const from BOTH bundles
+      // (the reported client under-emit). The REGULAR const/let-decl parser
+      // (ast-builder.js ~8002 / ~5600) already handles all these shapes correctly
+      // because it splits the annotation with the bracket-aware
+      // `collectTypeAnnotation()` BEFORE collecting the init. Mirror it here and
+      // attach a clean init string + parsed initExpr onto the export-decl
+      // (`valueInit` / `valueInitExpr`) so value consumers read the AST, not a
+      // fragile raw regex. Only the ANNOTATED plain-named form is intercepted; every
+      // other export shape (unannotated const/let, destructuring, re-export, fn,
+      // type, …) falls through UNCHANGED (byte-identical) to the generic path.
+      {
+        const _vkTok = peek();
+        const _isConstLet = _vkTok.kind === "KEYWORD" && (_vkTok.text === "const" || _vkTok.text === "let");
+        const _nameTok2 = peek(1);
+        const _hasPlainName = !!_nameTok2 && (_nameTok2.kind === "IDENT" || _nameTok2.kind === "KEYWORD");
+        const _hasAnnotation = peek(2)?.text === ":";
+        if (_isConstLet && _hasPlainName && _hasAnnotation) {
+          const _valKind = consume().text;             // const | let
+          const _valName = consume().text;             // NAME
+          const _valTypeAnn = collectTypeAnnotation(); // consumes `: TYPE` (bracket-aware)
+          let _valueInit = null;
+          let _valueInitExpr = null;
+          let _valueServerOnlyInit = false;
+          if (peek().text === "=" && peek(1)?.text !== "=") {
+            consume(); // `=`
+            // Server-only initializers (`?{…}` SQL / `_={…}` foreign) are NOT client
+            // values — consume them so no tokens dangle, but leave valueInit unset so
+            // the client never emits them (leak-safe; mirrors the const-decl hooks
+            // at ~8066 / ~8071). raw omits the init too, so `stripExportDeclInit`
+            // returns null (fail-closed skip) for these on the client.
+            const _sqlInit = tryConsumeSqlInit();
+            const _foreignInit = _sqlInit ? null : tryConsumeForeignInit();
+            if (_sqlInit || _foreignInit) {
+              _valueServerOnlyInit = true;
+            } else {
+              const { expr: _iexpr } = collectExpr();
+              _valueInit = _iexpr;
+              _valueInitExpr = safeParseExprToNode(_iexpr, spanOf(startTok, peek())?.start ?? 0);
+            }
+          } else if (peek().text !== "=" && peek().kind !== "EOF") {
+            // The annotation collector stopped on a token it does NOT recognize as
+            // part of a scrml type — the ONLY such shape is an angle-bracket generic
+            // (`: Record<K,V>` / `: Array<T>`), which scrml's type grammar (§7.5)
+            // does not have (collectTypeAnnotation breaks at a top-level `<`, S152).
+            // The remainder (`< K , V > = <init>`) is NOT a sibling statement, but we
+            // have already consumed the name+`Record`, so we cannot re-run the
+            // generic collectExpr the pre-fix path used (starting it at the bare `<`
+            // opens MARKUP mode and vacuums every following sibling to EOF). RESYNC
+            // at the token level instead: skip the malformed generic tail
+            // bracket-aware to the decl's own depth-0 `=`, then consume+DISCARD its
+            // initializer (valueInit stays null → fail-closed skip on the client; an
+            // unsupported-generic annotated const is not emitted, matching pre-fix).
+            // Stop at a statement boundary (`}`/EOF/next decl keyword) if there is no
+            // `=`, so a no-init annotated export never over-consumes either.
+            let _rd = 0; // running bracket depth across ( ) [ ] { } < >
+            const _DECL_STOP = new Set(["export", "const", "let", "function", "fn", "type", "import", "return", "server"]);
+            while (peek().kind !== "EOF") {
+              const _t = peek();
+              if (_rd === 0 && _t.text === "=" && peek(1)?.text !== "=") break; // the init `=`
+              if (_rd === 0 && (_t.text === "}" || (_t.kind === "KEYWORD" && _DECL_STOP.has(_t.text)))) break; // no-init boundary
+              if (_t.text === "(" || _t.text === "[" || _t.text === "{" || _t.text === "<") _rd++;
+              else if (_t.text === ")" || _t.text === "]" || _t.text === "}" || _t.text === ">") { if (_rd > 0) _rd--; }
+              consume();
+            }
+            if (peek().text === "=" && peek(1)?.text !== "=") {
+              consume(); // `=`
+              collectExpr(); // consume + discard the init so nothing dangles
+            }
+          }
+          const _valRawStr = "export "
+            + (prefixParts.length > 0 ? prefixParts.join(" ") + " " : "")
+            + _valKind + " " + _valName
+            + (_valTypeAnn ? " : " + _valTypeAnn : "")
+            + (_valueInit != null ? " = " + _valueInit : "");
+          nodes.push({
+            id: ++counter.next,
+            kind: "export-decl",
+            raw: _valRawStr,
+            span: spanOf(startTok, peek()),
+            exportedName: _valName,
+            exportKind: _valKind,
+            reExportSource: null,
+            isReExportAll: false,
+            renames: null,
+            isPure,
+            isServer,
+            ...(_valTypeAnn ? { typeAnnotation: _valTypeAnn } : {}),
+            ...(_valueInit != null ? { valueInit: _valueInit } : {}),
+            ...(_valueInitExpr ? { valueInitExpr: _valueInitExpr } : {}),
+            ...(_valueServerOnlyInit ? { valueServerOnlyInit: true } : {}),
+          });
+          continue;
+        }
+      }
+
       // ANOMALY-2-FIX (S99): capture token cursor BEFORE collectExpr so we
       // can later slice the consumed tokens and re-parse them as a function-
       // decl with full params + body. The source-text-slice approach is
