@@ -11286,10 +11286,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             renames: null,
             isPure,
             isServer,
-            ...(_valTypeAnn ? { typeAnnotation: _valTypeAnn } : {}),
+            // g-263-typeannotated (S315): attach ONLY the fields emit consumes —
+            // the clean init string + its parsed ExprNode. `typeAnnotation` and
+            // `valueServerOnlyInit` were set-never-read (dead) AND, being
+            // native-parser-absent on an export-decl, tripped the within-node
+            // parity gate (typeAnnotation is a widely-used field elsewhere, so it
+            // must NOT be global-stripped). valueInit/valueInitExpr are stripped
+            // as LIVE-only in within-node-classifier's STRIP_KEYS.
             ...(_valueInit != null ? { valueInit: _valueInit } : {}),
             ...(_valueInitExpr ? { valueInitExpr: _valueInitExpr } : {}),
-            ...(_valueServerOnlyInit ? { valueServerOnlyInit: true } : {}),
           });
           continue;
         }
