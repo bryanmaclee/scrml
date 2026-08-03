@@ -79,6 +79,37 @@ function isFunctionDecl(stmt: ASTNode): boolean {
   return stmt.kind === "function-decl";
 }
 
+/**
+ * g-serve-tool-treeshakes-main-only-import (S256) — the extra IMPORT-liveness
+ * reachability root for a `serve=` tool's S207 local-`.scrml` import prune.
+ *
+ * That prune (emit-server.ts:generateServerJs) decides which deferred local
+ * `.scrml` imports survive by scanning the ASSEMBLED ROUTE body for each import's
+ * local name. But a serve= tool's composing `main`/setup + helper bodies are
+ * emitted SEPARATELY (below, appended after the headless module), so an import
+ * referenced ONLY there is invisible to that scan → dropped → boot-time
+ * `ReferenceError`. Return the SOURCE text of every NON-import top-level statement
+ * (main / helpers / bindings / routes) as an extra reachability root the prune
+ * unions in. Source-token granularity matches the prune's own conservative
+ * identifier check; import lines are EXCLUDED so an import can never keep itself
+ * alive (a genuinely-dead import still drops — a headless tool has no client, so a
+ * never-referenced import is truly dead).
+ */
+function collectServeImportReachabilitySrc(fileAST: ASTNode): string {
+  const sourceText = (fileAST._sourceText ?? null) as string | null;
+  if (!sourceText) return "";
+  const parts: string[] = [];
+  for (const s of collectTopLevelStatements(fileAST)) {
+    const k = (s as { kind?: string }).kind;
+    if (k === "import-decl" || k === "use-decl") continue;
+    const sp = (s as { span?: { start?: number; end?: number } }).span;
+    if (sp && typeof sp.start === "number" && typeof sp.end === "number" && sp.end > sp.start) {
+      parts.push(sourceText.slice(sp.start, sp.end));
+    }
+  }
+  return parts.join("\n");
+}
+
 /** Format ONE tool function-declaration parameter: strip its `:Type`, keep a
  *  `= default` and a `...rest` prefix. Falls back to paramSignature for
  *  structured (destructured) params. */
@@ -565,6 +596,13 @@ function generateServeHarnessToolJs(
   asyncImportedNames?: Set<string>,
 ): string {
   const cgErrors = (errors ?? []) as never[];
+  // g-serve-tool-treeshakes-main-only-import (S256) — stash the composing-body
+  // import reachability BEFORE emitting the headless module: its S207 local-`.scrml`
+  // import prune runs INSIDE `generateHeadlessServerJs` and reads this field so an
+  // import referenced only in `main`/a setup helper (emitted separately below)
+  // survives the route-body-only liveness scan.
+  (fileAST as { _serveImportReachabilityExtra?: string })._serveImportReachabilityExtra =
+    collectServeImportReachabilitySrc(fileAST);
   // 1. The headless server module — the full §61/§37 route/fetch/ws surface. The
   //    §39 middleware config (`cors=`/`log=`/…) is the REAL config codegen/index.ts
   //    threads from `fileAST.middlewareConfig` (compute-program-config, §39.2); a

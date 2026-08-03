@@ -16,7 +16,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
-import { writeFileSync, mkdtempSync } from "fs";
+import { writeFileSync, mkdtempSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import * as acorn from "acorn";
@@ -28,6 +28,25 @@ function compileTool(src) {
   const p = join(TMP, `t-${_seq++}.scrml`);
   writeFileSync(p, src);
   const r = compileScrml({ inputFiles: [p], write: false, outputDir: join(TMP, "out") });
+  let toolJs = "";
+  for (const [, e] of (r.outputs ?? new Map())) {
+    if (e && typeof e.toolJs === "string") toolJs += e.toolJs;
+  }
+  return { codes: (r.errors ?? []).map((e) => e.code), toolJs };
+}
+
+// Multi-file variant — for a serve= tool that IMPORTS a sibling `.scrml` module
+// (S256 FIX 7: a main-only local-`.scrml` import must survive the liveness scan).
+function compileToolFiles(files) {
+  const dir = join(TMP, `mf-${_seq++}`);
+  mkdirSync(dir, { recursive: true });
+  const paths = [];
+  for (const [name, src] of Object.entries(files)) {
+    const p = join(dir, name);
+    writeFileSync(p, src);
+    paths.push(p);
+  }
+  const r = compileScrml({ inputFiles: paths, write: false, outputDir: join(dir, "out") });
   let toolJs = "";
   for (const [, e] of (r.outputs ?? new Map())) {
     if (e && typeof e.toolJs === "string") toolJs += e.toolJs;
@@ -311,5 +330,107 @@ describe("FIX 6 — serve-tool cors= emits from the REAL middleware config (no s
     expect(toolJs).toContain("_scrml_cors_options_route");
     expect(toolJs).toContain("function _scrml_cors_headers()");
     expect(toolJs).toContain("'Access-Control-Allow-Origin': \"*\"");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S256 (flogence dogfood) — two serve=tool under-emit siblings, each a silent
+// boot-time ReferenceError at runtime (clean compile). Both FAIL against pre-fix
+// source and PASS post-fix.
+//   FIX 7 — g-serve-tool-treeshakes-main-only-import: the S207 local-`.scrml`
+//     import prune scanned only the assembled ROUTE body, so an import referenced
+//     ONLY from the composing `function main` (emitted separately) looked dead and
+//     was tree-shaken → `main` called a free var at boot. The fix unions the
+//     composing-body source into the prune's liveness scan.
+//   FIX 8 — g-serve-tool-peer-callable-drops-module-let: the module value-export
+//     path was `const`-only, so an `export let` was NEVER emitted as a runtime
+//     binding. A serve= tool's in-process PEER CALLABLE (an Issue-#1 server-fn→
+//     server-fn callee) that closed over it referenced an undefined symbol. The
+//     fix emits `export let`/`export var` alongside `export const`.
+// ---------------------------------------------------------------------------
+describe("FIX 7 — a serve= tool import used ONLY in `main` is not tree-shaken (S256)", () => {
+  test("a local `.scrml` import referenced only in function main survives the liveness scan", () => {
+    const util = "${\n  export fn greet(name: string) -> string { return name }\n}\n";
+    const tool =
+      '<program kind="tool" serve=7878>\n' +
+      "${\n" +
+      "  import { greet } from './util.scrml'\n" +
+      "  " + ENUM + "\n" +
+      "  function main(args: string[]) { log(greet(\"boot\")) }\n" +
+      "}\n" +
+      EP + "\n" +
+      "</program>\n";
+    const { codes, toolJs } = compileToolFiles({ "util.scrml": util, "tool.scrml": tool });
+    expect(codes).toEqual([]);
+    // `greet` is referenced by the emitted `main` body, so its import MUST be kept
+    // (pre-fix it was pruned as route-body-dead → a boot `ReferenceError`).
+    expect(toolJs).toMatch(/import\s*\{[^}]*\bgreet\b[^}]*\}\s*from/);
+    expect(toolJs).toContain('greet("boot")');
+    expect(() => parsesAsModule(toolJs)).not.toThrow();
+  });
+
+  test("a serve= tool import referenced NOWHERE is still pruned (no over-emit regression)", () => {
+    const util = "${\n  export fn greet(name: string) -> string { return name }\n}\n";
+    const tool =
+      '<program kind="tool" serve=7878>\n' +
+      "${\n" +
+      "  import { greet } from './util.scrml'\n" +
+      "  " + ENUM + "\n" +
+      "  function main(args: string[]) { log(\"boot\") }\n" +   // greet unused everywhere
+      "}\n" +
+      EP + "\n" +
+      "</program>\n";
+    const { toolJs } = compileToolFiles({ "util.scrml": util, "tool.scrml": tool });
+    // A genuinely-dead import (headless tool = no client) still drops.
+    expect(toolJs).not.toMatch(/import\s*\{[^}]*\bgreet\b[^}]*\}\s*from/);
+  });
+});
+
+describe("FIX 8 — a serve= tool `export let` closed over by an in-process peer callable is EMITTED (S256)", () => {
+  test("the module-level `export let` a peer callable closes over is declared (no ReferenceError)", () => {
+    const src =
+      '<program kind="tool" serve=7878>\n' +
+      "${\n" +
+      "  " + ENUM + "\n" +
+      "  export let COUNTER = 41\n" +
+      // `bump` is a simple server fn → the Issue-#1 in-process peer callable; it
+      // CLOSES OVER the module-level `export let COUNTER`. `compute` (the route-
+      // reachable server fn the endpoint arm calls) invokes the peer.
+      "  server function bump() { return COUNTER + 1 }\n" +
+      "  server function compute() { let v = bump()\n    return v }\n" +
+      "}\n" +
+      '<endpoint path="/fsp" method="POST" accepts=FspMethod>\n' +
+      "  <FleetStatus            : { jsonrpc: \"2.0\", result: { n: compute() } }>\n" +
+      "  <Dispatch(prompt, proj) : { jsonrpc: \"2.0\", result: { prompt: prompt, project: proj } }>\n" +
+      "</endpoint>\n" +
+      "</program>\n";
+    const { codes, toolJs } = compileTool(src);
+    expect(codes).toEqual([]);
+    // The peer callable rides on the headless module and references COUNTER.
+    expect(toolJs).toMatch(/async function bump\(\)/);
+    // The `export let` MUST be declared (pre-fix the const-only value-export path
+    // dropped it → the peer's `COUNTER` reference was a free var at runtime).
+    expect(toolJs).toMatch(/\bexport let COUNTER = 41;/);
+    expect(() => parsesAsModule(toolJs)).not.toThrow();
+  });
+
+  test("the FIX-2 `const` sibling stays green (no regression in the const path)", () => {
+    const src =
+      '<program kind="tool" serve=7878>\n' +
+      "${\n" +
+      "  export const GREETING = \"hi\"\n" +
+      "  " + ENUM + "\n" +
+      "  server function bump() { return GREETING }\n" +
+      "  server function compute() { let v = bump()\n    return v }\n" +
+      "}\n" +
+      '<endpoint path="/fsp" method="POST" accepts=FspMethod>\n' +
+      "  <FleetStatus            : { jsonrpc: \"2.0\", result: { g: compute() } }>\n" +
+      "  <Dispatch(prompt, proj) : { jsonrpc: \"2.0\", result: { prompt: prompt, project: proj } }>\n" +
+      "</endpoint>\n" +
+      "</program>\n";
+    const { codes, toolJs } = compileTool(src);
+    expect(codes).toEqual([]);
+    expect(toolJs).toMatch(/\bexport const GREETING = "hi";/);
+    expect(() => parsesAsModule(toolJs)).not.toThrow();
   });
 });
