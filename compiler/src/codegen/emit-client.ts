@@ -307,17 +307,86 @@ function _fnNodeIsServerBoundary(node: any, filePath: string, routeMap: any): bo
 function collectClientReferencedIdents(ctx: CompileContext): Set<string> {
   const fileAST = ctx.fileAST as any;
   const filePath: string = fileAST?.filePath ?? ctx.filePath ?? "";
-  const routeMap = ctx.routeMap;
+  return collectClientReferencedIdentsForAST(fileAST, filePath, ctx.routeMap);
+}
+
+/**
+ * #358 — the AST-level core of `collectClientReferencedIdents`, decoupled from
+ * `CompileContext` so `runCG` can compute the CLIENT-referenced identifier set
+ * for EVERY file in the compile unit up front (the cross-file reachability seed
+ * for a directly-imported export const). Confidentiality contract is identical
+ * to the ctx wrapper: server-boundary fn bodies + `isServerOnlyNode` statements
+ * are pruned, so a server-only value's identifier never enters the returned set.
+ *
+ * `opts.deep` (cross-file seed ONLY — never the same-file #263 gate, which stays
+ * byte-identical) additionally:
+ *   - descends into `() => …` lambda bodies (`forEachIdentInExprNode` treats a
+ *     lambda as a scope boundary and stops — the documented fail-closed gap), and
+ *   - parses a `_onMountEffect` bare-expr's RAW multi-statement body string (which
+ *     carries NO `exprNode` because `mountBodyExprNode` returns undefined for a
+ *     >1-statement body) into per-statement ExprNodes.
+ * Both are needed because the IMPORTER commonly reads a directly-imported const
+ * inside `on mount { … }`. The extra reach stays within CLIENT code (the prunes
+ * run first), so it cannot pull a server-only identifier across.
+ */
+export function collectClientReferencedIdentsForAST(
+  fileAST: any,
+  filePath: string,
+  routeMap: any,
+  opts?: { deep?: boolean },
+): Set<string> {
   const refs = new Set<string>();
+  const deep = opts?.deep === true;
+
+  const addName = (n: unknown): void => {
+    if (typeof n === "string" && n && !n.startsWith("@")) refs.add(n);
+  };
 
   const collectFromExprNode = (expr: any): void => {
     if (!expr || typeof expr !== "object" || typeof expr.kind !== "string") return;
     try {
-      forEachIdentInExprNode(expr, (id: any) => {
-        const n: string = typeof id?.name === "string" ? id.name : "";
-        if (n && !n.startsWith("@")) refs.add(n);
-      });
+      forEachIdentInExprNode(expr, (id: any) => addName(id?.name));
     } catch { /* defensive — a malformed ExprNode never widens the client set */ }
+    // #358 (deep) — `forEachIdentInExprNode` stops at lambda scope boundaries, so
+    // a const read INSIDE a client-side `() => …` is invisible to it. A generic
+    // structural descent over the ExprNode graph picks up every real `ident` node
+    // (member `.property` is a plain string, so no property-name false positives),
+    // including those inside lambda bodies. Local/param references it also gathers
+    // are harmless — they simply never match an export-const candidate name.
+    if (deep) collectIdentNamesDeep(expr);
+  };
+
+  const collectIdentNamesDeep = (n: any): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const x of n) collectIdentNamesDeep(x); return; }
+    if (n.kind === "ident") addName(n.name);
+    for (const k of Object.keys(n)) {
+      if (k === "span" || k === "kind" || k === "name") continue;
+      const v = n[k];
+      if (v && typeof v === "object") collectIdentNamesDeep(v);
+    }
+  };
+
+  // #358 (deep) — parse a raw `on mount {…}` / `on dismount {…}` body string into
+  // its per-statement ExprNodes and collect. Iteratively consumes statements the
+  // way `mountBodyExprNode` detects them (parse → advance past the parsed span),
+  // so a multi-statement body (which carries no `exprNode`) is fully walked. Any
+  // parse failure just stops — fail-closed (under-emit), never a leak.
+  const collectFromRawBody = (raw: unknown): void => {
+    if (typeof raw !== "string" || !raw.trim()) return;
+    let rest = raw;
+    let guard = 0;
+    while (rest.trim() && guard++ < 256) {
+      let node: any = null;
+      try { node = parseExprToNode(rest, filePath, 0); } catch { return; }
+      if (!node || !node.span || typeof node.span.end !== "number" || node.span.end <= 0) {
+        // Single-expression body or unparseable remainder — collect what we have.
+        if (node) { collectFromExprNode(node); }
+        return;
+      }
+      collectFromExprNode(node);
+      rest = rest.slice(node.span.end);
+    }
   };
 
   // ExprNode-valued fields that carry USER identifier references across the
@@ -352,6 +421,14 @@ function collectClientReferencedIdents(ctx: CompileContext): Set<string> {
     if (isServerOnlyNode(node)) return;
 
     for (const f of EXPR_NODE_FIELDS) collectFromExprNode(node[f]);
+
+    // #358 (deep) — a multi-statement `on mount`/`on dismount` effect keeps only a
+    // raw `expr` STRING (no usable `exprNode`); parse + collect it so a const the
+    // importer reads inside `on mount { … }` is seen.
+    if (deep && node.kind === "bare-expr" && node._onMountEffect === true &&
+        !node.exprNode && typeof node.expr === "string") {
+      collectFromRawBody(node.expr);
+    }
 
     // Markup attribute values (onclick=/if=/bind:/props) carry ExprNodes too.
     if (Array.isArray(node.attrs)) {
@@ -544,6 +621,21 @@ function emitReferencedModuleExportConstLines(
   // wiring). A server-only const's name is never in here (see the function doc).
   const clientRefs = collectClientReferencedIdents(ctx);
 
+  // #358 — CROSS-FILE reachability seed. The same value const may be read NOT by
+  // a fn in THIS module, but by another compilation unit that imports it directly
+  // (`import { X } from './this.scrml'` + a client read of `X`). Such a `X` is
+  // absent from THIS file's `clientRefs` (nothing in-file references it), so the
+  // per-file gate under-emitted it — the const never reached this module's
+  // `.client.js` nor its `_scrml_modules` footer, and the importer read a free
+  // variable → ReferenceError. `runCG` precomputes, per module, the set of its
+  // export names that some OTHER file READS in its CLIENT code (via the identical
+  // `collectClientReferencedIdentsForAST` prune — a server-only import never
+  // enters the set), and threads it as `crossFileClientReads`. Union it into the
+  // seed so a directly-imported+client-read const is client-reachable, WITHOUT
+  // widening to server-only consts (under-emit direction preserved, §14.8).
+  const crossFileReads =
+    ctx.crossFileClientReads?.get(toPosix(filePath)) ?? null;
+
   // ---- 3. Transitive reachability closure. --------------------------------
   // Seed with candidates the client body DIRECTLY references, then close over
   // intra-candidate initializer refs: a reachable const whose init reads another
@@ -554,7 +646,10 @@ function emitReferencedModuleExportConstLines(
   const reachable = new Set<string>();
   const queue: string[] = [];
   for (const [name, cand] of byName) {
-    if (emittable(cand) && clientRefs.has(name)) { reachable.add(name); queue.push(name); }
+    if (emittable(cand) && (clientRefs.has(name) || crossFileReads?.has(name))) {
+      reachable.add(name);
+      queue.push(name);
+    }
   }
   while (queue.length > 0) {
     const cand = byName.get(queue.shift()!)!;
@@ -1970,8 +2065,23 @@ export function generateClientJs(ctx: CompileContext): string {
         // iff the dep's footer actually omitted it (mirror `declaredBinding` /
         // check membership in the registered set), not re-derive component-ness.
         const depExports = absSource !== null ? (ctx.exportRegistry?.get(absSource) ?? null) : null;
+        // #358 — a directly-imported+client-read export const is registered by the
+        // dep's footer (its client binding), so it MUST survive the destructure —
+        // even when it carries a mis-tag of `category:"user-component"` (an all-caps
+        // value const like `DIRECT` is name-classified a component by NR, exactly
+        // the drift the coupling note above predicted). `crossFileClientReads[dep]`
+        // is the ground-truth set of the dep's export names that get a client
+        // binding via cross-file reachability (computed by the SAME seed the dep's
+        // footer registration is driven by), so keeping a specifier that is a member
+        // of it can NEVER drift from what the footer actually emits. A TRUE static
+        // component is never in that set → still dropped (no dead `undefined`
+        // destructure, no page-killing `const { X } = undefined` on a stripped dep).
+        const depCrossReads = absSource !== null ? (ctx.crossFileClientReads?.get(absSource) ?? null) : null;
         const valueLocal = depExports
-          ? keptLocal.filter((s) => !exportIsUserComponent(depExports.get(s.imported) as any))
+          ? keptLocal.filter((s) =>
+              !exportIsUserComponent(depExports.get(s.imported) as any) ||
+              depCrossReads?.has(s.imported) === true,
+            )
           : keptLocal;
         if (valueLocal.length === 0) continue; // every binding is a static component — no client value to read
         const destructuredLocal = valueLocal
