@@ -328,18 +328,44 @@ function collectClientReferencedIdents(ctx: CompileContext): Set<string> {
  * Both are needed because the IMPORTER commonly reads a directly-imported const
  * inside `on mount { … }`. The extra reach stays within CLIENT code (the prunes
  * run first), so it cannot pull a server-only identifier across.
+ *
+ * `opts.boundOut` (deep cross-file seed ONLY) is populated with every client-side
+ * BINDING name (each loop vars, lambda params, local `let`/`const`/`fn` decls +
+ * params). The precompute requires an import read to be UNSHADOWED by any such
+ * binding before cross-marking it — closing the scope-blindness leak (a
+ * server-only export whose NAME collides with a client loop var / param must NOT
+ * be pulled to the client). See the guard comment at the binding-collection site.
  */
 export function collectClientReferencedIdentsForAST(
   fileAST: any,
   filePath: string,
   routeMap: any,
-  opts?: { deep?: boolean },
+  opts?: { deep?: boolean; boundOut?: Set<string> },
 ): Set<string> {
   const refs = new Set<string>();
   const deep = opts?.deep === true;
+  const boundOut = opts?.boundOut ?? null;
 
   const addName = (n: unknown): void => {
     if (typeof n === "string" && n && !n.startsWith("@")) refs.add(n);
+  };
+
+  // #358 — collect every client-side binding name reachable through a binding
+  // target field (a bare string loop-var / decl name, a `{name}` param, an array
+  // of such, or a nested destructure pattern). Over-collection is SAFE here: an
+  // extra name in `boundOut` only ever suppresses a cross-mark (under-emit), which
+  // is the tolerated direction; the leak direction is the one we must never take.
+  const collectBindingsInto = (x: any, out: Set<string>): void => {
+    if (x == null) return;
+    if (typeof x === "string") { if (x && !x.startsWith("@")) out.add(x); return; }
+    if (Array.isArray(x)) { for (const el of x) collectBindingsInto(el, out); return; }
+    if (typeof x === "object") {
+      collectBindingsInto(x.name, out);
+      for (const k of ["elements", "properties", "props", "value", "values",
+                       "argument", "left", "fields", "entries", "items", "params"]) {
+        if (x[k] != null && typeof x[k] === "object") collectBindingsInto(x[k], out);
+      }
+    }
   };
 
   const collectFromExprNode = (expr: any): void => {
@@ -360,6 +386,10 @@ export function collectClientReferencedIdentsForAST(
     if (!n || typeof n !== "object") return;
     if (Array.isArray(n)) { for (const x of n) collectIdentNamesDeep(x); return; }
     if (n.kind === "ident") addName(n.name);
+    // #358 — a lambda inside client code introduces param bindings; record them so
+    // a `() => useX` / `x => …` param named like an import shadows (and thus does
+    // NOT cross-mark) that import (the scope-blindness guard, in the ExprNode path).
+    if (n.kind === "lambda" && boundOut) collectBindingsInto(n.params, boundOut);
     for (const k of Object.keys(n)) {
       if (k === "span" || k === "kind" || k === "name") continue;
       const v = n[k];
@@ -419,6 +449,26 @@ export function collectClientReferencedIdentsForAST(
     if (node.kind === "state-decl" && node.isServer === true) return;
     // Server-only statement (SQL / env / server-context meta): prune subtree.
     if (isServerOnlyNode(node)) return;
+
+    // #358 (deep, boundOut) — SCOPE-BLINDNESS GUARD. `refs` is a flat bag of every
+    // identifier NAME in the importer's client code; it cannot tell a read of the
+    // IMPORT binding `X` apart from a read of a shadowing client-side binding named
+    // `X` (an `<each ... as X>` loop var, a lambda param, a local). Marking a
+    // server-only export cross-reachable off such a shadow would EMIT its value to
+    // the client = a §14.8 confidentiality LEAK (strictly worse than the #263
+    // under-emit this pass fixes). So we ALSO collect every client-side BINDING
+    // name; the precompute then requires `refs.has(local) && !bound.has(local)` —
+    // if the importer binds that name anywhere in client code, we conservatively
+    // do NOT cross-mark it (fail toward under-emit; a leak is never acceptable,
+    // an under-emit is). The prunes above run first, so a SERVER-side binding is
+    // never collected (it cannot shadow a client import read anyway).
+    if (boundOut) {
+      if (node.kind === "each-block") { collectBindingsInto(node.asName, boundOut); collectBindingsInto(node.asNames, boundOut); }
+      else if (node.kind === "for-stmt") { collectBindingsInto(node.variable, boundOut); }
+      else if (node.kind === "let-decl" || node.kind === "const-decl" ||
+               node.kind === "tilde-decl" || node.kind === "lin-decl") { collectBindingsInto(node.name, boundOut); }
+      else if (node.kind === "function-decl") { collectBindingsInto(node.name, boundOut); collectBindingsInto(node.params, boundOut); }
+    }
 
     for (const f of EXPR_NODE_FIELDS) collectFromExprNode(node[f]);
 

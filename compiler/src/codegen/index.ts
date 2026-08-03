@@ -1215,7 +1215,16 @@ export function runCG(input: CgInput): CgOutput {
       if (!entry || !Array.isArray(entry.imports) || entry.imports.length === 0) continue;
       // `deep:true` — descend lambda bodies + parse raw `on mount` bodies so a
       // directly-imported const the importer reads there is seen (see the helper).
-      const clientRefs = collectClientReferencedIdentsForAST(fileAST, fp, safeRouteMap, { deep: true });
+      // `boundOut` captures every client-side binding name (each loop vars, lambda
+      // params, locals) so a read that is actually a SHADOW of the imported name —
+      // not a read of the import binding — cannot cross-mark it. Without this,
+      // `refs` is scope-blind and a server-only export whose NAME collides with a
+      // client `<each as X>` / lambda param / local would LEAK to the client. The
+      // asymmetry is deliberate: excluding a genuinely-imported name that is ALSO
+      // locally re-bound is a tolerable UNDER-emit; a leak is never tolerable.
+      const clientBound = new Set<string>();
+      const clientRefs = collectClientReferencedIdentsForAST(
+        fileAST, fp, safeRouteMap, { deep: true, boundOut: clientBound });
       if (clientRefs.size === 0) continue;
       for (const imp of entry.imports) {
         const absSource = (imp as any).absSource as string | undefined;
@@ -1228,8 +1237,11 @@ export function runCG(input: CgInput): CgOutput {
             : ((imp as any).names ?? []).map((n: string) => ({ imported: n, local: n }));
         for (const s of specs) {
           // The importer reads the LOCAL name in its client code; the dependency
-          // registers under the EXPORTED (imported) name.
-          if (s && typeof s.local === "string" && clientRefs.has(s.local)) {
+          // registers under the EXPORTED (imported) name. Require the read to be
+          // UNSHADOWED by any client-side binding of the local name (else it is a
+          // loop-var / param / local of the same name, not a read of the import).
+          if (s && typeof s.local === "string" &&
+              clientRefs.has(s.local) && !clientBound.has(s.local)) {
             let set = crossFileClientReads.get(absSource);
             if (!set) { set = new Set<string>(); crossFileClientReads.set(absSource, set); }
             set.add(s.imported);

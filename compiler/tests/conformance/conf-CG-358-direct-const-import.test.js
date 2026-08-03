@@ -79,6 +79,59 @@ function compileEntry(entry) {
   };
 }
 
+/** Eval a `models.client.js` bundle in isolation; return its `_scrml_modules`
+ *  registry entry (the object the importer destructures). `document` is left
+ *  undefined so any boot early-returns; only the top-level footer runs. */
+function evalModelsRegistry(modelsJs) {
+  const ctx = vm.createContext({
+    _scrml_modules: {},
+    _scrml_reactive_set: () => {}, _scrml_reactive_get: () => undefined, _scrml_init_set: () => {},
+    _scrml_effect: () => ({}), _scrml_render_value: () => {}, _scrml_region_track: () => {},
+    _scrml_register_rehydrator: () => {},
+  });
+  vm.runInContext(modelsJs, ctx, { filename: "models.client.js" });
+  return ctx._scrml_modules["models.client.js"];
+}
+
+// A server-only exported const (NON-foldable initializer, so a leaked client decl
+// would be verbatim + greppable) + a legitimately client-read sibling. The canary
+// substring `LEAK-CANARY-358` must never appear in any `.client.js`.
+const SHADOW_MODULE = `export const SECRET = ["LEAK", "CANARY", "358"].join("-")
+export const SHOWN = "shown-client-value"
+`;
+// Two scope-shadow entries: SECRET/loc is read ONLY server-side (a `server fn`
+// stub), while an UNRELATED client \`<each ... as SECRET/loc>\` reuses the same
+// name as its loop var. A scope-blind cross-file seed would mis-read the loop-var
+// read as an import read and LEAK the server-only value. `${OPEN}rows${CLOSE}` etc.
+const shadowEntryEach = `<program>
+import { SECRET, SHOWN } from './models.scrml'
+${OPEN} @a = ""
+   @rows = ["x", "y"] ${CLOSE}
+server fn stash() -> string {
+    return SECRET
+}
+on mount {
+    @a = SHOWN
+}
+<ul><each in=@rows as SECRET><li>${OPEN}SECRET${CLOSE}</li></each></ul>
+<div><p>${OPEN}@a${CLOSE}</p></div>
+</program>
+`;
+const shadowEntryAlias = `<program>
+import { SECRET as loc, SHOWN } from './models.scrml'
+${OPEN} @a = ""
+   @rows = ["x", "y"] ${CLOSE}
+server fn stash() -> string {
+    return loc
+}
+on mount {
+    @a = SHOWN
+}
+<ul><each in=@rows as loc><li>${OPEN}loc${CLOSE}</li></each></ul>
+<div><p>${OPEN}@a${CLOSE}</p></div>
+</program>
+`;
+
 // The discriminator module: DIRECT (only ever DIRECTLY imported) + CLOSED_OVER
 // (only reached via the crossing fn `reader`). Both are all-caps value consts.
 const DISCRIMINATOR_MODULE = `export const DIRECT = "direct-import-only"
@@ -253,3 +306,60 @@ describe("CONF-CG-358 — runtime-half: the shipped bundles resolve DIRECT + CLO
     expect(lastFor("b")).toBe("closed-over-by-a-crossing-fn");
   });
 });
+
+// ---------------------------------------------------------------------------
+// SCOPE-SHADOW no-leak regression pins (both halves) — the leak an S239 pass
+// found in the first cut: `crossFileClientReads` was scope-BLIND, so a
+// server-only export whose NAME collided with a client `<each ... as X>` loop
+// var / alias local was mis-marked client-reachable and its value SHIPPED. The
+// fix requires the import read to be UNSHADOWED by any client-side binding.
+// ---------------------------------------------------------------------------
+const SHADOW_VECTORS = [
+  { label: "each-var shadow (import name reused as a client loop var)", entry: shadowEntryEach },
+  { label: "alias shadow (import { SECRET as loc } + client `<each as loc>`)", entry: shadowEntryAlias },
+];
+for (const { label, entry } of SHADOW_VECTORS) {
+  describe(`CONF-CG-358 — NO-LEAK on scope shadow: ${label}`, () => {
+    const NAME = "cg358-shadow-" + label.replace(/\W+/g, "_").slice(0, 20);
+    let dir;
+    beforeEach(() => {
+      dir = setupDir(NAME);
+      writeFileSync(join(dir, "models.scrml"), SHADOW_MODULE);
+      writeFileSync(join(dir, "index.scrml"), entry);
+    });
+    afterEach(() => teardownDir(NAME));
+
+    test("codes-half: the server-only value + its export-table entry are ABSENT from every .client.js", () => {
+      const c = compileEntry(join(dir, "index.scrml"));
+      expect(c.errors).toEqual([]);
+      const m = c.out("models.scrml");
+      const idx = c.out("index.scrml");
+      expect(m).not.toBeNull();
+      const canary = /LEAK-CANARY-358|\["LEAK"/;
+      // The value must NEVER reach any client bundle (the leak this pins).
+      expect(m.clientJs).not.toMatch(canary);
+      expect(idx.clientJs).not.toMatch(canary);
+      // No `const SECRET = …` decl and no `SECRET:` export-table entry.
+      expect(m.clientJs).not.toMatch(/\bconst SECRET\b/);
+      expect(m.clientJs).not.toMatch(/\bSECRET:/);
+      // The export table matches the pre-fix shape for a server-only const: ONLY
+      // the legitimately client-read sibling is registered.
+      expect(m.clientJs).toMatch(/_scrml_modules\["models\.client\.js"\] = \{ SHOWN: SHOWN \};/);
+      // The value IS present server-side (it is legitimately a server value).
+      expect(m.serverJs ?? "").toMatch(/LEAK-CANARY-358|\["LEAK"/);
+      expect(() => new vm.Script(m.clientJs)).not.toThrow();
+    });
+
+    test("runtime-half: the shipped models.client.js registry exposes SHOWN but NOT SECRET", () => {
+      const c = compileEntry(join(dir, "index.scrml"));
+      expect(c.errors).toEqual([]);
+      const reg = evalModelsRegistry(c.out("models.scrml").clientJs);
+      expect(reg).toBeDefined();
+      // The client-read sibling resolves to its value...
+      expect(reg.SHOWN).toBe("shown-client-value");
+      // ...and the server-only secret is NOT a client binding at all.
+      expect("SECRET" in reg).toBe(false);
+      expect(reg.SECRET).toBeUndefined();
+    });
+  });
+}
