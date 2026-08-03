@@ -48,8 +48,10 @@
  *   - state-constructor-def body (constructor-bound markup for user-state
  *     elements)
  *   - function-decl.body (function bodies CAN contain lift-exprs)
- *   - engine-decl arms (state-machine arm bodies contain markup that
- *     emit-engine renders at runtime)
+ *   - engine-decl per-state bodies (each `<Variant>…</>` state-child body
+ *     contains markup that emit-engine renders at runtime; the walkable
+ *     bodies live in `bodyChildren` — only the INITIAL state is in static
+ *     HTML, so non-initial states are reachable ONLY here)
  *   - match-block arm bodies (the MARKUP block-form `<match>` — walkable
  *     markup lives in `bodyChildren` + `armBodyChildren`, NOT children/body)
  *   - each-block per-item body (the MARKUP block-form `<each>` — walkable
@@ -188,12 +190,36 @@ function visitNode(node: LooseNode, out: Set<string>): void {
     return;
   }
 
-  // Engine declarations carry arm bodies. Each arm is a markup-bearing
-  // body that emit-engine renders at runtime via innerHTML; classes
+  // Engine declarations carry per-state markup bodies. emit-engine renders
+  // each state-child's body at runtime via innerHTML on transition; classes
   // inside MUST be scanned.
+  //
+  // The walkable per-state markup lives in **`bodyChildren`** — the Phase A10
+  // (S78) additive ASTNode[] that mirrors the engine block's children (each
+  // state-child `<Variant>…</>` built through the same `buildBlock` entry as
+  // top-level markup, its `class`-bearing descendants intact). This is the
+  // SAME `bodyChildren` canonical walkable representation the `match-block` /
+  // `each-block` branches below consume — NOT `children` / `body` (which the
+  // engine-decl node never populates as arrays), and NOT the parser-held raw
+  // text `rulesRaw`.
+  //
+  // Why this is load-bearing (g-tailwind-class-scan-skips-engine-non-initial-
+  // arms): ONLY the engine's INITIAL state is materialized into the static
+  // HTML at module init (PRIMER §7), so the ordinary HTML scan picks up its
+  // classes. Every NON-INITIAL state-child body is emitted as runtime-render
+  // JS, never static HTML — so without walking `bodyChildren` here a utility
+  // class used only inside a non-initial arm (or anything nested beneath one,
+  // e.g. an `<each>` in a `.Busy` state) gets no CSS rule (silent unstyled
+  // render). Recursion is uniform via `walk`, so nested block-forms inside a
+  // state body fall out automatically. Class collection is additive, so
+  // walking the state-child structural children (text / `<onTimeout>` /
+  // `<onTransition>` siblings) is harmless.
   if (node.kind === "engine-decl") {
-    // Engine-decl shape: `arms?: Array<{ body?: ASTNode[] }>` and/or
-    // `children?` containing arm nodes. Walk both defensively.
+    const bodyChildren = (node as Record<string, unknown>).bodyChildren;
+    if (Array.isArray(bodyChildren)) walk(bodyChildren as LooseNode[], out);
+    // Legacy / defensive: some historical shapes carried arm bodies under
+    // `arms[].body` / `arms[].children` or directly on `children` / `body`.
+    // Walk them too (additive; no-op when absent, as on the A10 shape).
     const arms = (node as Record<string, unknown>).arms;
     if (Array.isArray(arms)) {
       for (const arm of arms as LooseNode[]) {

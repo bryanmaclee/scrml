@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 23 |
-| MED | 111 |
+| MED | 110 |
 | LOW | 47 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -5229,8 +5229,8 @@ The `@log = "midway"` write the adopter placed BETWEEN the two calls is moved AF
 
 ## §S295 — gaps filed S295 (2026-07-28, flogenceP per-workaround retirement pass)
 
-### g-tailwind-class-scan-skips-engine-non-initial-arms — the Tailwind class collector reaches an `<engine>`'s INITIAL state-child body but NOT the non-initial ones, so a utility class used only in a non-initial arm gets NO CSS rule — `NEW S295 (bryan, flogenceP workaround-retirement pass); MED; OPEN`
-<!-- @gap id=g-tailwind-class-scan-skips-engine-non-initial-arms sev=MED status=open -->
+### g-tailwind-class-scan-skips-engine-non-initial-arms — the Tailwind class collector reaches an `<engine>`'s INITIAL state-child body but NOT the non-initial ones, so a utility class used only in a non-initial arm gets NO CSS rule — `NEW S295 (bryan, flogenceP workaround-retirement pass); MED; RESOLVED S312 (peter — engine-decl branch walks bodyChildren)`
+<!-- @gap id=g-tailwind-class-scan-skips-engine-non-initial-arms sev=MED status=resolved -->
 Residual of [[g-tailwind-class-scan-skips-markup-block-bodies]] (RESOLVED S212, `a648b34b`). That fix added `match-block` + `each-block` branches to `collect-class-names.ts visitNode` and its closing note said the fix mirrored "the existing `engine-decl` arm branch" and that "flogence's hoisted-safelist workaround now removable." **Both halves of that claim are partly wrong**, and the adopter's surviving safelist is the evidence: flogenceP reduced but could not delete its hoist, recording that "engine bodies are a THIRD block-form the S212 scan doesn't yet descend into."
 
 **Empirically established on `d22ffc25`** (two minimal repros, `scratchpad/wa/w7-engine-class.scrml` + `w7-nested.scrml`, compiled via `bun compiler/bin/scrml.js compile`, CSS rules counted in the emitted `.css`):
@@ -5249,9 +5249,11 @@ So the miss is **narrower and sharper than the adopter's framing**: the collecto
 
 **Not covered by this gap (by design):** classes returned dynamically from helper fns (`satelliteStateColor(...)` → `"text-…-400"`). The scanner never sees those at any depth — documented, `W-TAILWIND-001`, out of scope. A safelist remains the correct answer for that class.
 
-**Fix direction:** the `engine-decl` branch in `compiler/src/codegen/collect-class-names.ts` (~L194) walks `arms[].body`, `arms[].children`, `node.children`, `node.body`. Non-initial state-child bodies are not reachable through any of those — the engine's state-child bodies are parser-held as raw text (`engine-decl.rulesRaw`; PRIMER §13.7 B15: "bodies are raw text today", the same precondition that defers compile-time `E-ENGINE-INVALID-TRANSITION`). The fix therefore needs the walkable state-child body the engine state-child parser produces (`EngineStateChildEntry.bodyRaw` → parsed children), not another field guess. Verify the bite before/after per the pa-base §8 unproven-gate rule: the two repros above go from NO to YES on the non-initial rows.
+**Fix direction:** the `engine-decl` branch in `compiler/src/codegen/collect-class-names.ts` (~L194) walks `arms[].body`, `arms[].children`, `node.children`, `node.body`. Non-initial state-child bodies are not reachable through any of those.
 
 **Impact:** silent unstyled render — green compile, no warning, only visible in a browser. Same failure signature as the S212 parent (flogenceP: "the PA cards look squashed"). Reporter: flogenceP safelist comment (`src/app.scrml` ~L2896-2914), root-caused here.
+
+**RESOLVED S312 (peter, branch `fix/g-tailwind-engine-arms`).** ROOT corrected vs the fix-direction guess above: the engine's per-state markup is NOT `bodyRaw`-only on the current tree — the Phase A10 (S78, `a648b34b`-era) change stopped discarding engine body children and attaches them as **`engine-decl.bodyChildren`**, a fully-walkable `ASTNode[]` that mirrors the engine block's children (each `<Variant>…</>` state-child built through the same `buildBlock` entry as top-level markup, every `class`-bearing descendant intact). This is the SAME canonical walkable field the `match-block` / `each-block` branches already consume — so the fix is a one-branch mirror, NOT a transient re-parse of `rulesRaw` and NOT a new AST field (so the root-level within-node parser-parity gate is untouched — parity-neutral, no `STRIP_KEYS` entry needed). Confirmed on `7b5c02a2`: the AST collector reached NONE of the state-children (`collectClassNamesFromAst` → `[]` on the repro) — the INITIAL arm's classes emitted ONLY via the separate static-HTML scan (`scanClassesFromHtml`, emit-engine materializes the initial state into module-init HTML per PRIMER §7); every non-initial state-child body reached nothing. Fix: the `engine-decl` branch now `walk`s `node.bodyChildren` (legacy `arms[]`/`children`/`body` walks retained defensively). Nested block-forms (`<each>` / `<match>` inside a non-initial state) fall out via uniform `walk` recursion. Repro table above now all-YES on the non-initial + nested rows; `gap-2`-outside + `rounded-full`-initial unchanged; `examples/22-multifile` + no-engine output byte-identical. +1 value-asserting integration test (`compiler/tests/integration/g-tailwind-engine-arm-scan.test.js`, 3/3; 2/3 fail against pre-fix source). flogenceP's surviving hoisted-safelist (the utility classes; the dynamic-helper-fn `satelliteStateColor(...)` classes remain correctly safelisted, `W-TAILWIND-001`, out of scope) is now removable.
 
 
 ### g-channel-inside-page-never-fires — `E-CHANNEL-INSIDE-PAGE` is §34-catalogued but has ZERO fire sites; a `<channel>` inside a `<page>` compiles clean AND is wired program-scoped — `NEW S295 (scrml-site); HIGH; RESOLVED S299`
