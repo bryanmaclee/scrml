@@ -59,7 +59,7 @@ import { generateCss } from "./emit-css.ts";
 import { generateServerJs, astUsesSessionWrite } from "./emit-server.ts";
 import { setBatchLoopHoists, setBatchInListCap } from "./emit-control-flow.ts";
 import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-machines.ts";
-import { generateClientJs } from "./emit-client.js";
+import { generateClientJs, collectClientReferencedIdentsForAST } from "./emit-client.js";
 import { generateLibraryJs } from "./emit-library.ts";
 import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
@@ -1194,6 +1194,63 @@ export function runCG(input: CgInput): CgOutput {
   const safeRouteMap: CgRouteMap = routeMap ?? { functions: new Map() };
   const safeDepGraph: CgDepGraph = depGraph ?? { nodes: new Map(), edges: [] };
 
+  // #358 — precompute the CROSS-FILE client-read export set ONCE for the whole
+  // compile unit. For every file, collect the identifiers its CLIENT code reads
+  // (the SAME confidentiality-safe prune the per-file #263 gate uses — server-fn
+  // bodies + `isServerOnlyNode` statements excluded), then, for each direct
+  // `.scrml` import edge, record which of the dependency's export names are read
+  // client-side by this importer. The exporter consumes this to make a
+  // directly-imported+client-read const client-reachable (emit + `_scrml_modules`
+  // registration); the importer consumes it to keep such a const in its
+  // destructure even when NR mis-tags an all-caps value const as a component.
+  // Keyed by the dependency's POSIX absolute path (`imp.absSource`), matching the
+  // `toPosix(filePath)` lookup on the exporter side. Empty when no importGraph is
+  // threaded (harnesses) — both sides then take the pre-#358 path unchanged.
+  const crossFileClientReads = new Map<string, Set<string>>();
+  if (importGraphInput) {
+    for (const fileAST of files) {
+      const fp = (fileAST as any)?.filePath as string | undefined;
+      if (!fp) continue;
+      const entry = importGraphInput.get(fp);
+      if (!entry || !Array.isArray(entry.imports) || entry.imports.length === 0) continue;
+      // `deep:true` — descend lambda bodies + parse raw `on mount` bodies so a
+      // directly-imported const the importer reads there is seen (see the helper).
+      // `boundOut` captures every client-side binding name (each loop vars, lambda
+      // params, locals) so a read that is actually a SHADOW of the imported name —
+      // not a read of the import binding — cannot cross-mark it. Without this,
+      // `refs` is scope-blind and a server-only export whose NAME collides with a
+      // client `<each as X>` / lambda param / local would LEAK to the client. The
+      // asymmetry is deliberate: excluding a genuinely-imported name that is ALSO
+      // locally re-bound is a tolerable UNDER-emit; a leak is never tolerable.
+      const clientBound = new Set<string>();
+      const clientRefs = collectClientReferencedIdentsForAST(
+        fileAST, fp, safeRouteMap, { deep: true, boundOut: clientBound });
+      if (clientRefs.size === 0) continue;
+      for (const imp of entry.imports) {
+        const absSource = (imp as any).absSource as string | undefined;
+        if (!absSource) continue;
+        // Prefer specifiers (carry `imported`/`local` so aliases resolve); fall
+        // back to `names` (local === imported for the un-aliased form).
+        const specs: Array<{ imported: string; local: string }> =
+          Array.isArray((imp as any).specifiers) && (imp as any).specifiers.length > 0
+            ? (imp as any).specifiers
+            : ((imp as any).names ?? []).map((n: string) => ({ imported: n, local: n }));
+        for (const s of specs) {
+          // The importer reads the LOCAL name in its client code; the dependency
+          // registers under the EXPORTED (imported) name. Require the read to be
+          // UNSHADOWED by any client-side binding of the local name (else it is a
+          // loop-var / param / local of the same name, not a read of the import).
+          if (s && typeof s.local === "string" &&
+              clientRefs.has(s.local) && !clientBound.has(s.local)) {
+            let set = crossFileClientReads.get(absSource);
+            if (!set) { set = new Set<string>(); crossFileClientReads.set(absSource, set); }
+            set.add(s.imported);
+          }
+        }
+      }
+    }
+  }
+
   // §8.10 Tier 2 — register LoopHoist map keyed by for-stmt node id so
   // emit-control-flow can rewrite matched loops at emission time.
   if (batchPlan && Array.isArray((batchPlan as any).loopHoists) && (batchPlan as any).loopHoists.length > 0) {
@@ -1964,6 +2021,10 @@ export function runCG(input: CgInput): CgOutput {
         // identical dist-relative registry key on both the exporter + importer
         // sides. outputBaseDir is computed below from the compile-unit source set.
         importGraph: importGraphInput,
+        // #358 — compile-unit-wide cross-file client-read export set (shared ref
+        // across every per-file ctx). Exporter uses it to make a directly-imported
+        // const client-reachable; importer uses it to keep it in the destructure.
+        crossFileClientReads,
         outputBaseDir: cgOutputBaseDir,
         // A-2.1 — propagate Stage 7.6 ReachabilityRecord per-file; A-4 codegen
         // will consume per-entry-point per-role ChunkPlans. Empty until A-2.2+.

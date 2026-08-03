@@ -307,17 +307,116 @@ function _fnNodeIsServerBoundary(node: any, filePath: string, routeMap: any): bo
 function collectClientReferencedIdents(ctx: CompileContext): Set<string> {
   const fileAST = ctx.fileAST as any;
   const filePath: string = fileAST?.filePath ?? ctx.filePath ?? "";
-  const routeMap = ctx.routeMap;
+  return collectClientReferencedIdentsForAST(fileAST, filePath, ctx.routeMap);
+}
+
+/**
+ * #358 — the AST-level core of `collectClientReferencedIdents`, decoupled from
+ * `CompileContext` so `runCG` can compute the CLIENT-referenced identifier set
+ * for EVERY file in the compile unit up front (the cross-file reachability seed
+ * for a directly-imported export const). Confidentiality contract is identical
+ * to the ctx wrapper: server-boundary fn bodies + `isServerOnlyNode` statements
+ * are pruned, so a server-only value's identifier never enters the returned set.
+ *
+ * `opts.deep` (cross-file seed ONLY — never the same-file #263 gate, which stays
+ * byte-identical) additionally:
+ *   - descends into `() => …` lambda bodies (`forEachIdentInExprNode` treats a
+ *     lambda as a scope boundary and stops — the documented fail-closed gap), and
+ *   - parses a `_onMountEffect` bare-expr's RAW multi-statement body string (which
+ *     carries NO `exprNode` because `mountBodyExprNode` returns undefined for a
+ *     >1-statement body) into per-statement ExprNodes.
+ * Both are needed because the IMPORTER commonly reads a directly-imported const
+ * inside `on mount { … }`. The extra reach stays within CLIENT code (the prunes
+ * run first), so it cannot pull a server-only identifier across.
+ *
+ * `opts.boundOut` (deep cross-file seed ONLY) is populated with every client-side
+ * BINDING name (each loop vars, lambda params, local `let`/`const`/`fn` decls +
+ * params). The precompute requires an import read to be UNSHADOWED by any such
+ * binding before cross-marking it — closing the scope-blindness leak (a
+ * server-only export whose NAME collides with a client loop var / param must NOT
+ * be pulled to the client). See the guard comment at the binding-collection site.
+ */
+export function collectClientReferencedIdentsForAST(
+  fileAST: any,
+  filePath: string,
+  routeMap: any,
+  opts?: { deep?: boolean; boundOut?: Set<string> },
+): Set<string> {
   const refs = new Set<string>();
+  const deep = opts?.deep === true;
+  const boundOut = opts?.boundOut ?? null;
+
+  const addName = (n: unknown): void => {
+    if (typeof n === "string" && n && !n.startsWith("@")) refs.add(n);
+  };
+
+  // #358 — collect every client-side binding name reachable through a binding
+  // target field (a bare string loop-var / decl name, a `{name}` param, an array
+  // of such, or a nested destructure pattern). Over-collection is SAFE here: an
+  // extra name in `boundOut` only ever suppresses a cross-mark (under-emit), which
+  // is the tolerated direction; the leak direction is the one we must never take.
+  const collectBindingsInto = (x: any, out: Set<string>): void => {
+    if (x == null) return;
+    if (typeof x === "string") { if (x && !x.startsWith("@")) out.add(x); return; }
+    if (Array.isArray(x)) { for (const el of x) collectBindingsInto(el, out); return; }
+    if (typeof x === "object") {
+      collectBindingsInto(x.name, out);
+      for (const k of ["elements", "properties", "props", "value", "values",
+                       "argument", "left", "fields", "entries", "items", "params"]) {
+        if (x[k] != null && typeof x[k] === "object") collectBindingsInto(x[k], out);
+      }
+    }
+  };
 
   const collectFromExprNode = (expr: any): void => {
     if (!expr || typeof expr !== "object" || typeof expr.kind !== "string") return;
     try {
-      forEachIdentInExprNode(expr, (id: any) => {
-        const n: string = typeof id?.name === "string" ? id.name : "";
-        if (n && !n.startsWith("@")) refs.add(n);
-      });
+      forEachIdentInExprNode(expr, (id: any) => addName(id?.name));
     } catch { /* defensive — a malformed ExprNode never widens the client set */ }
+    // #358 (deep) — `forEachIdentInExprNode` stops at lambda scope boundaries, so
+    // a const read INSIDE a client-side `() => …` is invisible to it. A generic
+    // structural descent over the ExprNode graph picks up every real `ident` node
+    // (member `.property` is a plain string, so no property-name false positives),
+    // including those inside lambda bodies. Local/param references it also gathers
+    // are harmless — they simply never match an export-const candidate name.
+    if (deep) collectIdentNamesDeep(expr);
+  };
+
+  const collectIdentNamesDeep = (n: any): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const x of n) collectIdentNamesDeep(x); return; }
+    if (n.kind === "ident") addName(n.name);
+    // #358 — a lambda inside client code introduces param bindings; record them so
+    // a `() => useX` / `x => …` param named like an import shadows (and thus does
+    // NOT cross-mark) that import (the scope-blindness guard, in the ExprNode path).
+    if (n.kind === "lambda" && boundOut) collectBindingsInto(n.params, boundOut);
+    for (const k of Object.keys(n)) {
+      if (k === "span" || k === "kind" || k === "name") continue;
+      const v = n[k];
+      if (v && typeof v === "object") collectIdentNamesDeep(v);
+    }
+  };
+
+  // #358 (deep) — parse a raw `on mount {…}` / `on dismount {…}` body string into
+  // its per-statement ExprNodes and collect. Iteratively consumes statements the
+  // way `mountBodyExprNode` detects them (parse → advance past the parsed span),
+  // so a multi-statement body (which carries no `exprNode`) is fully walked. Any
+  // parse failure just stops — fail-closed (under-emit), never a leak.
+  const collectFromRawBody = (raw: unknown): void => {
+    if (typeof raw !== "string" || !raw.trim()) return;
+    let rest = raw;
+    let guard = 0;
+    while (rest.trim() && guard++ < 256) {
+      let node: any = null;
+      try { node = parseExprToNode(rest, filePath, 0); } catch { return; }
+      if (!node || !node.span || typeof node.span.end !== "number" || node.span.end <= 0) {
+        // Single-expression body or unparseable remainder — collect what we have.
+        if (node) { collectFromExprNode(node); }
+        return;
+      }
+      collectFromExprNode(node);
+      rest = rest.slice(node.span.end);
+    }
   };
 
   // ExprNode-valued fields that carry USER identifier references across the
@@ -351,7 +450,35 @@ function collectClientReferencedIdents(ctx: CompileContext): Set<string> {
     // Server-only statement (SQL / env / server-context meta): prune subtree.
     if (isServerOnlyNode(node)) return;
 
+    // #358 (deep, boundOut) — SCOPE-BLINDNESS GUARD. `refs` is a flat bag of every
+    // identifier NAME in the importer's client code; it cannot tell a read of the
+    // IMPORT binding `X` apart from a read of a shadowing client-side binding named
+    // `X` (an `<each ... as X>` loop var, a lambda param, a local). Marking a
+    // server-only export cross-reachable off such a shadow would EMIT its value to
+    // the client = a §14.8 confidentiality LEAK (strictly worse than the #263
+    // under-emit this pass fixes). So we ALSO collect every client-side BINDING
+    // name; the precompute then requires `refs.has(local) && !bound.has(local)` —
+    // if the importer binds that name anywhere in client code, we conservatively
+    // do NOT cross-mark it (fail toward under-emit; a leak is never acceptable,
+    // an under-emit is). The prunes above run first, so a SERVER-side binding is
+    // never collected (it cannot shadow a client import read anyway).
+    if (boundOut) {
+      if (node.kind === "each-block") { collectBindingsInto(node.asName, boundOut); collectBindingsInto(node.asNames, boundOut); }
+      else if (node.kind === "for-stmt") { collectBindingsInto(node.variable, boundOut); }
+      else if (node.kind === "let-decl" || node.kind === "const-decl" ||
+               node.kind === "tilde-decl" || node.kind === "lin-decl") { collectBindingsInto(node.name, boundOut); }
+      else if (node.kind === "function-decl") { collectBindingsInto(node.name, boundOut); collectBindingsInto(node.params, boundOut); }
+    }
+
     for (const f of EXPR_NODE_FIELDS) collectFromExprNode(node[f]);
+
+    // #358 (deep) — a multi-statement `on mount`/`on dismount` effect keeps only a
+    // raw `expr` STRING (no usable `exprNode`); parse + collect it so a const the
+    // importer reads inside `on mount { … }` is seen.
+    if (deep && node.kind === "bare-expr" && node._onMountEffect === true &&
+        !node.exprNode && typeof node.expr === "string") {
+      collectFromRawBody(node.expr);
+    }
 
     // Markup attribute values (onclick=/if=/bind:/props) carry ExprNodes too.
     if (Array.isArray(node.attrs)) {
@@ -544,6 +671,21 @@ function emitReferencedModuleExportConstLines(
   // wiring). A server-only const's name is never in here (see the function doc).
   const clientRefs = collectClientReferencedIdents(ctx);
 
+  // #358 — CROSS-FILE reachability seed. The same value const may be read NOT by
+  // a fn in THIS module, but by another compilation unit that imports it directly
+  // (`import { X } from './this.scrml'` + a client read of `X`). Such a `X` is
+  // absent from THIS file's `clientRefs` (nothing in-file references it), so the
+  // per-file gate under-emitted it — the const never reached this module's
+  // `.client.js` nor its `_scrml_modules` footer, and the importer read a free
+  // variable → ReferenceError. `runCG` precomputes, per module, the set of its
+  // export names that some OTHER file READS in its CLIENT code (via the identical
+  // `collectClientReferencedIdentsForAST` prune — a server-only import never
+  // enters the set), and threads it as `crossFileClientReads`. Union it into the
+  // seed so a directly-imported+client-read const is client-reachable, WITHOUT
+  // widening to server-only consts (under-emit direction preserved, §14.8).
+  const crossFileReads =
+    ctx.crossFileClientReads?.get(toPosix(filePath)) ?? null;
+
   // ---- 3. Transitive reachability closure. --------------------------------
   // Seed with candidates the client body DIRECTLY references, then close over
   // intra-candidate initializer refs: a reachable const whose init reads another
@@ -554,7 +696,10 @@ function emitReferencedModuleExportConstLines(
   const reachable = new Set<string>();
   const queue: string[] = [];
   for (const [name, cand] of byName) {
-    if (emittable(cand) && clientRefs.has(name)) { reachable.add(name); queue.push(name); }
+    if (emittable(cand) && (clientRefs.has(name) || crossFileReads?.has(name))) {
+      reachable.add(name);
+      queue.push(name);
+    }
   }
   while (queue.length > 0) {
     const cand = byName.get(queue.shift()!)!;
@@ -1970,8 +2115,23 @@ export function generateClientJs(ctx: CompileContext): string {
         // iff the dep's footer actually omitted it (mirror `declaredBinding` /
         // check membership in the registered set), not re-derive component-ness.
         const depExports = absSource !== null ? (ctx.exportRegistry?.get(absSource) ?? null) : null;
+        // #358 — a directly-imported+client-read export const is registered by the
+        // dep's footer (its client binding), so it MUST survive the destructure —
+        // even when it carries a mis-tag of `category:"user-component"` (an all-caps
+        // value const like `DIRECT` is name-classified a component by NR, exactly
+        // the drift the coupling note above predicted). `crossFileClientReads[dep]`
+        // is the ground-truth set of the dep's export names that get a client
+        // binding via cross-file reachability (computed by the SAME seed the dep's
+        // footer registration is driven by), so keeping a specifier that is a member
+        // of it can NEVER drift from what the footer actually emits. A TRUE static
+        // component is never in that set → still dropped (no dead `undefined`
+        // destructure, no page-killing `const { X } = undefined` on a stripped dep).
+        const depCrossReads = absSource !== null ? (ctx.crossFileClientReads?.get(absSource) ?? null) : null;
         const valueLocal = depExports
-          ? keptLocal.filter((s) => !exportIsUserComponent(depExports.get(s.imported) as any))
+          ? keptLocal.filter((s) =>
+              !exportIsUserComponent(depExports.get(s.imported) as any) ||
+              depCrossReads?.has(s.imported) === true,
+            )
           : keptLocal;
         if (valueLocal.length === 0) continue; // every binding is a static component — no client value to read
         const destructuredLocal = valueLocal

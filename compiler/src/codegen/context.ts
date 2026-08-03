@@ -102,6 +102,21 @@ export interface CompileContext {
    */
   importGraph?: Map<string, { imports: Array<{ names: string[]; specifiers?: Array<{ imported: string; local: string }>; absSource: string }> }> | null;
   /**
+   * #358 — cross-file client-reachability seed for directly-imported export
+   * consts. Keyed by a module's POSIX absolute path; the value is the set of that
+   * module's EXPORT names that are READ in the CLIENT code of some OTHER file in
+   * the compile unit that imports them directly (`import { X } from './M.scrml'`
+   * + a client read of `X`). Computed ONCE by `runCG` via
+   * `collectClientReferencedIdentsForAST` (the same confidentiality-safe prune the
+   * per-file #263 gate uses — a server-only import never enters the set), so both
+   * the EXPORTER (make `X` client-reachable → emit + register it) and the IMPORTER
+   * (keep `X` in the `_scrml_modules` destructure even when NR mis-tags the
+   * all-caps const as a component) route off ONE ground-truth signal and can never
+   * drift. Null for test harnesses / single-file compiles with no cross-file
+   * imports — both sides then behave exactly as before (byte-identity preserved).
+   */
+  crossFileClientReads?: Map<string, Set<string>> | null;
+  /**
    * known-gaps-#6 (S152) — the dist-output base directory, computed in api.js
    * via `computeOutputBaseDir(sourcePaths)` and threaded into codegen so the
    * exporter footer + importer read derive the SAME dist-relative
@@ -251,6 +266,9 @@ export function makeCompileContext(partial: Partial<CompileContext> & { fileAST:
     // cross-file _scrml_modules lowering. Default null/basename-fallback for
     // harnesses that bypass MOD / the write phase.
     importGraph: partial.importGraph ?? null,
+    // #358 — cross-file client-read export names. Default null (no cross-file
+    // seed) so single-file / harness compiles keep the pre-#358 code path.
+    crossFileClientReads: partial.crossFileClientReads ?? null,
     outputBaseDir: partial.outputBaseDir ?? null,
     // A-2.1 — Reachability Solver record. Defaults to a fresh empty record
     // so downstream consumers (A-4 codegen wave) can read the shape without
