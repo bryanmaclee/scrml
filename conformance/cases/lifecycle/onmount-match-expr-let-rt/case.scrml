@@ -1,0 +1,14 @@
+${
+    <n> = 2
+    <label> = "init"
+}
+<program>
+    on mount {
+        let y = match @n {
+            2 -> "two"
+            _ -> "other"
+        }
+        @label = y
+    }
+    <p id="out">${@label}</p>
+</program>

@@ -1,0 +1,14 @@
+{
+  "id": "lifecycle-onmount-error-arm-assign-drop-rt",
+  "description": "§6.7.1a — the SILENT-DROP guard. `@status = risky() !{ | _ e -> { @flag = \"arm-ran\" } }` (reactive-assign binding + a `-> { }` BLOCK arm) is the one `!{}` mount shape that COMPILED on baseline bc51b610 yet SILENTLY DROPPED the arm — the string rewriter emitted `_scrml_reactive_set(\"status\", risky())` and discarded the `!{}` block entirely, so the arm's side effect (@flag = \"arm-ran\") never ran and @flag stayed \"none\". No E-CODEGEN, no diagnostic — a silent error-handling loss. Post-fix the mount body routes through the real statement codegen and the arm's block runs at mount. No input — the boot/mount shape.",
+  "language-version": "1.0",
+  "spec": "§6.7.1a",
+  "rationale": "§6.7.1a sugar-equivalence — a `!{}` handler inside `on mount` must execute exactly as inside a `function` body; it must not be silently discarded. risky() fails; the wildcard block arm runs, writing @flag = \"arm-ran\". The pin catches the specific silent-drop regression (arm dropped ⇒ @flag stays \"none\").",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "input": [],
+    "state": { "flag": "arm-ran" },
+    "domAnchored": [{ "selector": "#f", "text": "arm-ran" }]
+  }
+}

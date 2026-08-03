@@ -1582,41 +1582,46 @@ function _ensureBoundary(opts: EmitLogicOpts, context: string): EmitLogicOpts {
   return opts;
 }
 
-// (c) §6.7.1a — recursively detect a `markup-value` leaf anywhere in a parsed
-// statement node (markup-as-value in expression position). Mirrors emit-each's
-// exprNodeHasMarkupValue but walks the whole statement node (init / initExpr /
-// arms), skipping `span` to bound the walk.
-function _mountNodeHasMarkupValue(node: any): boolean {
+// (c) §6.7.1a — the scrml-extension node kinds the string rewriter cannot lower:
+// an `!{}` error arm (`guarded-expr`), a statement-position `match` (`match-stmt`),
+// an expression-position `match` (`match-expr` — nested under an assign/let/return),
+// or a markup-as-value (`markup-value`).
+const _MOUNT_STRUCTURED_KINDS = new Set([
+  "guarded-expr",
+  "match-stmt",
+  "match-expr",
+  "markup-value",
+]);
+
+// (c) §6.7.1a — recursively detect ANY of the extension kinds ANYWHERE in a parsed
+// statement node. The recursion (not a top-level-kind allowlist) is load-bearing:
+// an expression-position match (`let y = match n {…}`, `@x = match @k {…}`) parses
+// to a `match-expr` NESTED under the let/assign, never a top-level node — a
+// top-level check would miss it (S313 review #2). Mirrors emit-each's
+// exprNodeHasMarkupValue; skips `span` to bound the walk.
+function _mountNodeNeedsStructured(node: any): boolean {
   if (node === null || node === undefined || typeof node !== "object") return false;
-  if (node.kind === "markup-value") return true;
+  if (typeof node.kind === "string" && _MOUNT_STRUCTURED_KINDS.has(node.kind)) return true;
   for (const key of Object.keys(node)) {
     if (key === "span") continue;
     const v = (node as Record<string, unknown>)[key];
     if (Array.isArray(v)) {
-      for (const item of v) if (_mountNodeHasMarkupValue(item)) return true;
+      for (const item of v) if (_mountNodeNeedsStructured(item)) return true;
     } else if (v && typeof v === "object") {
-      if (_mountNodeHasMarkupValue(v)) return true;
+      if (_mountNodeNeedsStructured(v)) return true;
     }
   }
   return false;
 }
 
 // (c) §6.7.1a — a desugared `on mount { }` body needs the REAL statement codegen
-// (not the string rewriter) when it contains a scrml extension the rewriter
-// cannot lower: an `!{}` error-arm (parsed to a `guarded-expr`), a `match`
-// statement, or a markup-as-value. For any other body (plain JS, a bare
-// `@x = v`, a single-expression fast-path) the current string / fast-path emit
-// is kept verbatim — so currently-passing bodies stay byte-identical.
+// (not the string rewriter) when ANY of its statements contains a scrml extension
+// the rewriter cannot lower. For any other body (plain JS, a bare `@x = v`, a
+// clean single-expression fast-path) the current string / fast-path emit is kept
+// verbatim — so currently-passing bodies stay byte-identical.
 function mountBodyNeedsStructuredLowering(nodes: any[]): boolean {
   if (!Array.isArray(nodes)) return false;
-  return nodes.some(
-    (n: any) =>
-      n &&
-      (n.kind === "guarded-expr" ||
-        n.kind === "match-stmt" ||
-        n.kind === "match-expr" ||
-        _mountNodeHasMarkupValue(n)),
-  );
+  return nodes.some((n: any) => _mountNodeNeedsStructured(n));
 }
 
 export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "client" }): string {
@@ -1652,19 +1657,29 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // `@x = fn() !{}` assign form). `_mountBodyNodes` is the parsed statement
       // list attached at the mount desugar site (ast-builder.js `collectMountBody`).
       //
-      // Byte-identity guard: reroute ONLY when the body BOTH needs structured
-      // lowering AND is not a clean single-expression fast-path (a real,
-      // non-escape-hatch `exprNode` — e.g. a single `match` or `@x = v`, which
-      // compiles today and must stay byte-identical). A plain-JS multi-statement
-      // body (`loadUsers()\nloadOrders()`) is never flagged (no extension node),
-      // so it keeps the exact string-path emit below. Every body that IS rerouted
-      // fails or silently drops today, so there is no passing emit to preserve.
+      // Byte-identity guard: reroute ONLY when the body needs structured lowering
+      // AND the non-reroute path would MIS-lower it. The single case the current
+      // path handles correctly WITHOUT reroute is a SINGLE-statement body that is a
+      // clean (non-escape-hatch) fast-path expression — e.g. `@x = v`, a single
+      // statement-position `match`, or a single `@x = match @k {…}` (all lowered
+      // whole by emitExpr today, and must stay byte-identical). Everything else
+      // that needs structured lowering is rerouted:
+      //   - a MULTI-statement body, even when statement 1 parses as a clean
+      //     exprNode — the fast path emits ONLY statement 1 and silently DROPS the
+      //     tail (S313 review #3: `match {…}` then `@x = 5`); and
+      //   - a single statement whose exprNode is an escape-hatch / absent
+      //     (markup-as-value, `let … !{}`, `let y = match n {…}` — S313 review #2).
+      // A plain-JS body is never flagged (pre-screen leaves `_mountBodyNodes` null,
+      // or the walk finds no extension), so it keeps the exact string-path emit
+      // below. Every body that IS rerouted fails or silently drops today, so there
+      // is no passing emit to preserve.
       const _mountBodyNodes = (node as any)._mountBodyNodes;
       const _cleanFastPath = node.exprNode && (node.exprNode as any).kind !== "escape-hatch";
+      const _isMultiStatement = Array.isArray(_mountBodyNodes) && _mountBodyNodes.length > 1;
       if (
         (node as any)._onMountEffect &&
         Array.isArray(_mountBodyNodes) &&
-        !_cleanFastPath &&
+        (_isMultiStatement || !_cleanFastPath) &&
         mountBodyNeedsStructuredLowering(_mountBodyNodes)
       ) {
         // Terminate each statement so an expression-statement emit (e.g. a

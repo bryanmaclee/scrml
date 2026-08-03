@@ -1,0 +1,14 @@
+${
+    <x> = 1
+    <label> = "init"
+}
+<program>
+    on mount {
+        match @x {
+            1 -> { @label = "one" }
+            _ -> { @label = "other" }
+        }
+        @x = 5
+    }
+    <p id="out">${@label}</p>
+</program>

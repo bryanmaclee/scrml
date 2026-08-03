@@ -1,0 +1,14 @@
+{
+  "id": "lifecycle-onmount-match-first-rt",
+  "description": "§6.7.1a — a multi-statement `on mount { }` body whose EXTENSION is the FIRST statement: `match @x { … }` then `@x = 5`. Because statement 1 (the match) parses as a clean leading exprNode, the fast path emitted ONLY the match and SILENTLY DROPPED the trailing `@x = 5` (S313 review #3). The reroute must fire for any multi-statement body that needs structured lowering, not only when statement 1 fails to parse. Post-fix both statements run at mount: @x = 1 selects the `1` arm (@label = \"one\"), then @x = 5. No input — the boot/mount shape.",
+  "language-version": "1.0",
+  "spec": "§6.7.1a",
+  "rationale": "§6.7.1a sugar-equivalence — every statement of an `on mount` body must lower, regardless of order. With @x = 1 the match writes @label = \"one\"; the following `@x = 5` also executes (a dropped tail would leave @x = 1). Pinned on both cells so the tail-drop regression is caught.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "input": [],
+    "state": { "label": "one", "x": 5 },
+    "domAnchored": [{ "selector": "#out", "text": "one" }]
+  }
+}

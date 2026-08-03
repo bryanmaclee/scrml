@@ -1,0 +1,14 @@
+{
+  "id": "lifecycle-onmount-error-arm-wildcard-block-rt",
+  "description": "§6.7.1a — the WILDCARD block arm `| _ e -> { … }` of an `!{}` inside an `on mount { }` body (behaviorally distinct from the `:>` recovery arm: a block arm runs side-effecting statements, produces no recovery value). `let r = risky() !{ | _ e -> { @status = \"caught-wild\" } }` — pre-fix bc51b610 fails E-CODEGEN-INVALID-LOGIC; post-fix the mount body routes through the real statement codegen and the wildcard arm's body runs at mount, writing @status. No input — the boot/mount shape.",
+  "language-version": "1.0",
+  "spec": "§6.7.1a",
+  "rationale": "§6.7.1a sugar-equivalence — a `!{}` wildcard block arm inside `on mount` lowers exactly as inside a `function` body. risky() fails; the `| _ e -> { … }` arm matches any error and runs its block, setting @status = \"caught-wild\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "input": [],
+    "state": { "status": "caught-wild" },
+    "domAnchored": [{ "selector": "#s", "text": "caught-wild" }]
+  }
+}

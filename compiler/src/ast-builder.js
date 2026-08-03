@@ -5988,37 +5988,66 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     }
   }
 
-  // (c) §6.7.1a — collect an `on mount { body }` body BOTH ways from ONE token
-  // range: the token-rejoin STRING (`collectBracedBody`, which the existing
-  // string-path emit consumes — kept verbatim for byte-identical output on
-  // currently-passing bodies) AND a parsed STATEMENT-NODE list (`parseRecursiveBody`,
-  // the same real-statement parse a `function` body gets). Called AFTER the
-  // opening `{` is consumed. The cursor is saved and restored so the second
-  // parse re-reads the identical token range; scratch-parse diagnostics are
-  // dropped (the string-path / emitLogicNode path remains the diagnostic
-  // authority for the mount body, so a passing plain-JS body's diagnostics are
-  // unchanged). `_mountBodyNodes` is consumed by emit-logic's bare-expr handler,
-  // which routes a mount body containing a scrml extension (markup-as-value,
-  // `!{}` error arms, `match`) through the real statement codegen instead of the
-  // string rewriter that cannot lower them (E-CODEGEN-INVALID-LOGIC / silent drop).
+  // (c) §6.7.1a — cheap TEXTUAL pre-screen: does an `on mount {}` body MIGHT-carry
+  // a scrml extension the string rewriter cannot lower — an `!{}` error arm, a
+  // `match`, or a markup-as-value (`<tag`)? Only such bodies are parsed into a
+  // statement list below; a plain-JS body short-circuits to NO parse, so it
+  // consumes ZERO parser state and its downstream node ids (each-markers, meta
+  // scopes) stay byte-identical to baseline. Conservative by construction: a
+  // false POSITIVE only triggers an isolated no-op parse (harmless — see
+  // collectMountBody's isolation); a false NEGATIVE is impossible for the three
+  // constructs (each has an unmistakable textual marker).
+  function mountBodyMightNeedStructuredLowering(body) {
+    if (typeof body !== "string" || body.length === 0) return false;
+    return /!\s*\{/.test(body) || /\bmatch\b/.test(body) || /<\s*[A-Za-z]/.test(body);
+  }
+
+  // (c) §6.7.1a — collect an `on mount { body }` body BOTH ways: the token-rejoin
+  // STRING (`collectBracedBody`, which the existing string-path emit consumes —
+  // kept verbatim for byte-identical output on currently-passing bodies) AND,
+  // ONLY when the pre-screen flags a possible scrml extension, a parsed
+  // STATEMENT-NODE list (`parseRecursiveBody` — the SAME real-statement parse a
+  // `function` body gets, including its guarded-expr `!{}` wrapping). Called AFTER
+  // the opening `{` is consumed.
+  //
+  // The node parse re-reads the SAME body tokens (cursor reset to the body start)
+  // and then RESTORES every accumulator it mutates — cursor `i`, `errors`, and the
+  // shared monotonic node-id `counter.next` — so the main parse observes NO
+  // side-effect (the S313 review's #1 blocker: the earlier scratch parse leaked
+  // `counter.next`, permanently shifting every downstream node's id — each-markers,
+  // meta scopes — and breaking hydration parity). Audited: parseRecursiveBody /
+  // parseOneStatement push nothing to `childBlocks`, and their body-scope flags
+  // (`_nestedBlockDepth`, `_multiScrutineeArity`, `_inMarkupValueParse`) are each
+  // try/finally-balanced, so those need no restore. A plain body never reaches this
+  // parse at all (pre-screen), so it consumes ZERO parser state. `_mountBodyNodes`
+  // is consumed by emit-logic's bare-expr handler, which routes a mount body
+  // containing a scrml extension (`!{}` / `match` / markup-as-value) through the
+  // real statement codegen instead of the string rewriter that cannot lower them
+  // (E-CODEGEN-INVALID-LOGIC / silent `!{}` drop).
   function collectMountBody() {
     const startCursor = i;
-    const errLen = errors.length;
     const { body, span } = collectBracedBody();
     const endCursor = i;
-    i = startCursor;
     let bodyNodes = null;
-    try {
-      bodyNodes = parseRecursiveBody();
-    } catch (_e) {
-      bodyNodes = null;
+    if (mountBodyMightNeedStructuredLowering(body)) {
+      const savedErrLen = errors.length;
+      const savedCounterNext = counter.next;
+      i = startCursor;
+      try {
+        const parsed = parseRecursiveBody();
+        bodyNodes = Array.isArray(parsed) ? parsed : null;
+      } catch (_e) {
+        bodyNodes = null;
+      }
+      // Restore ALL mutated accumulators so the main parse is unaffected: cursor
+      // to just-past the collected body (collectBracedBody is the authority on the
+      // body end), any scratch diagnostics dropped, and the node-id counter rolled
+      // back so downstream node ids are byte-identical to baseline.
+      i = endCursor;
+      if (errors.length > savedErrLen) errors.length = savedErrLen;
+      counter.next = savedCounterNext;
     }
-    // Force the cursor past the collected body (the string parse is the
-    // authority on where the body ends) and drop any scratch-parse diagnostics.
-    i = endCursor;
-    if (errors.length > errLen) errors.length = errLen;
-    const nodes = Array.isArray(bodyNodes) ? bodyNodes : null;
-    return { body, span, bodyNodes: nodes };
+    return { body, span, bodyNodes };
   }
 
   function _parseRecursiveBodyInner() {

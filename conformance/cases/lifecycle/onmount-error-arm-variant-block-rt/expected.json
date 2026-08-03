@@ -1,0 +1,14 @@
+{
+  "id": "lifecycle-onmount-error-arm-variant-block-rt",
+  "description": "§6.7.1a — the VARIANT-BIND block arm `| ::Boom e -> { … }` of an `!{}` inside an `on mount { }` body (matches a named error variant and binds `e`; behaviorally distinct from both the wildcard `| _ e -> { … }` and the `:>` recovery forms). `let r = risky() !{ | ::Boom e -> { @status = \"caught-var\" } }` — pre-fix bc51b610 fails E-CODEGEN-INVALID-LOGIC; post-fix the arm's block runs at mount. No input — the boot/mount shape.",
+  "language-version": "1.0",
+  "spec": "§6.7.1a",
+  "rationale": "§6.7.1a sugar-equivalence — a `!{}` variant-bind block arm inside `on mount` lowers exactly as inside a `function` body. risky() fails with LoadError.Boom; the `| ::Boom e -> { … }` arm matches that variant and runs its block, setting @status = \"caught-var\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "input": [],
+    "state": { "status": "caught-var" },
+    "domAnchored": [{ "selector": "#s", "text": "caught-var" }]
+  }
+}

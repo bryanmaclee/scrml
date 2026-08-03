@@ -1,0 +1,14 @@
+${
+    type LoadError:enum = { Boom }
+    function risky()! -> LoadError { fail LoadError.Boom }
+    <status> = "init"
+    <flag> = "none"
+}
+<program>
+    on mount {
+        @status = risky() !{
+            | _ e -> { @flag = "arm-ran" }
+        }
+    }
+    <p id="f">${@flag}</p>
+</program>

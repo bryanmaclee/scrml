@@ -1,0 +1,14 @@
+{
+  "id": "lifecycle-onmount-match-expr-let-rt",
+  "description": "§6.7.1a — an EXPRESSION-position `match` inside an `on mount { }` body: `let y = match @n { … }`. The match parses to a `match-expr` NESTED under the `let`, never a top-level statement, so detection must recurse into the statement node (S313 review #2 — a top-level-kind check misses it). Pre-fix bc51b610 fails E-CODEGEN-INVALID-LOGIC; post-fix @n = 2 selects the `2` arm, y = \"two\", and @label = y. No input — the boot/mount shape.",
+  "language-version": "1.0",
+  "spec": "§6.7.1a",
+  "rationale": "§6.7.1a sugar-equivalence — an expression-position `match` (a `match-expr` bound by a `let`) inside `on mount` lowers exactly as inside a `function` body. With @n = 2 the literal-2 arm is selected, so y = \"two\" and @label = \"two\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "input": [],
+    "state": { "label": "two" },
+    "domAnchored": [{ "selector": "#out", "text": "two" }]
+  }
+}
