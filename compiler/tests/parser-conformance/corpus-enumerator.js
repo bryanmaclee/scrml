@@ -75,7 +75,14 @@ export function enumerateScrmlCorpus() {
       out.push({
         source: src.name,
         path: f,
-        relpath: relative(REPO_ROOT, f),
+        // Normalize to POSIX separators so `relpath` matches the forward-slash
+        // allowlist keys on EVERY OS. `path.relative` returns backslash-
+        // separated paths on Windows, which never matched the committed
+        // (Linux-generated) allowlist — the within-node parity gate reported
+        // every fixture as fully over-budget on a Windows checkout. No-op on
+        // Linux CI (already forward-slash). (g-subparse-span-not-rebased —
+        // cross-OS canary, Peter's Windows-portability lane.)
+        relpath: relative(REPO_ROOT, f).replaceAll("\\", "/"),
       });
     }
   }
@@ -92,7 +99,7 @@ export function enumerateBenchCorpus() {
   return out.map((f) => ({
     source: "bench",
     path: f,
-    relpath: relative(REPO_ROOT, f),
+    relpath: relative(REPO_ROOT, f).replaceAll("\\", "/"),
   }));
 }
 

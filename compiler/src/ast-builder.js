@@ -15299,6 +15299,79 @@ const _STATE_FORM_LIFECYCLE = new Set([
   "db", "schema", "engine", "machine",
 ]);
 
+/**
+ * g-subparse-span-not-rebased — rebase a sub-parsed subtree's spans from
+ * substring-local byte offsets to FILE coordinates.
+ *
+ * The two `<match>`-arm / `<each>`-body walkable subtrees are produced by
+ * re-slicing raw body text and re-running the block-splitter + `buildAST` on
+ * it (armBodyChildren / each bodyChildren). `buildAST` takes no base-offset, so
+ * every node in the result carries `span.start/end` measured from byte 0 of the
+ * body substring, and `line/col` that are body-local (or, for BS text children,
+ * unreliably inherited from the parent). Any diagnostic anchored to such a node
+ * (`E-STATE-UNDECLARED`, `E-OUTLET-AND-MAIN`, …) then reports ~L1 instead of the
+ * real source line — the whole bug.
+ *
+ * `deltaOffset` is the file byte-offset of the substring's byte 0. Add it to
+ * every `start`/`end`, then RE-DERIVE `line`/`col` from the rebased absolute
+ * `start` against the enclosing block's own raw text (`block.raw` at
+ * `block.span.start`, whose `line`/`col` ARE reliable). We recompute rather than
+ * shift line/col because line numbers do not compose by addition and the
+ * body-local line/col cannot be trusted (see above). Mirrors the established
+ * `parseThemeBody(raw, baseOffset, baseLine, baseCol)` rebasing (exemplar C) and
+ * the local `_shiftSpans` offset-only precedent, extended to line/col.
+ *
+ * Deep-walks EVERY span-bearing object (children AND ExprNode fields like
+ * `valueExpr`/`conditionExpr` where the mislocating `@name` IdentExpr lives),
+ * guarding a shared span object against a double-shift via `seen`. Safe to walk
+ * generically: the subtree is a fresh sub-parse, so every span in it is
+ * body-local — there are no already-absolute cross-references yet (SYM has not
+ * run).
+ */
+function _rebaseSubparseSpans(nodes, deltaOffset, block) {
+  if (!Array.isArray(nodes) || !Number.isFinite(deltaOffset) || deltaOffset === 0) return;
+  if (!block || !block.span || typeof block.span.start !== "number") return;
+  const anchorStart = block.span.start;
+  const anchorLine = typeof block.span.line === "number" ? block.span.line : 1;
+  const anchorCol = typeof block.span.col === "number" ? block.span.col : 1;
+  const raw = typeof block.raw === "string" ? block.raw : "";
+  const seen = new Set();
+  // Map an absolute file offset to {line,col}, positioned relative to the
+  // block's own raw window. Returns null when the offset falls outside that
+  // window (defensive — then we shift start/end only and leave line/col).
+  function lineColFor(absStart) {
+    const local = absStart - anchorStart;
+    if (local < 0 || local > raw.length) return null;
+    let nl = 0;
+    let lastNlPos = -1;
+    for (let i = 0; i < local; i++) {
+      if (raw.charCodeAt(i) === 10 /* \n */) { nl++; lastNlPos = i; }
+    }
+    if (nl === 0) return { line: anchorLine, col: anchorCol + local };
+    return { line: anchorLine + nl, col: local - lastNlPos };
+  }
+  function visit(n) {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const el of n) visit(el); return; }
+    const sp = n.span;
+    if (sp && typeof sp.start === "number" && typeof sp.end === "number") {
+      const newStart = sp.start + deltaOffset;
+      const newEnd = sp.end + deltaOffset;
+      const lc = lineColFor(newStart);
+      n.span = lc
+        ? { ...sp, start: newStart, end: newEnd, line: lc.line, col: lc.col }
+        : { ...sp, start: newStart, end: newEnd };
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const v = n[k];
+      if (v && typeof v === "object") visit(v);
+    }
+  }
+  for (const n of nodes) visit(n);
+}
+
 function buildBlock(block, filePath, parentContextKind, counter, errors, parentStateName = null) {
   // Uniform-opener normalization: rewrite block.type when the BS classification
   // is the wrong half of the markup/state split for this lifecycle keyword. The
@@ -15480,9 +15553,17 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // they parse cleanly (bare-body form). For Phase 1, concatenate the
         // raw text of those children into armsRaw — Phase 2 will re-tokenize.
         let armsRaw = "";
+        // g-subparse-span-not-rebased — track the FILE byte-offset of armsRaw's
+        // byte 0 so per-arm re-parsed subtrees can be rebased to file coords.
+        // In the children path it is the first contributing child's span.start
+        // (block.children are BS-produced, file-absolute spans).
+        let _armsRawFileStart = -1;
         if (Array.isArray(block.children)) {
           for (const child of block.children) {
             if (child && typeof child === "object" && typeof child.raw === "string") {
+              if (_armsRawFileStart < 0 && child.span && typeof child.span.start === "number") {
+                _armsRawFileStart = child.span.start;
+              }
               armsRaw += child.raw;
             }
           }
@@ -15492,6 +15573,18 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         if (!armsRaw && firstLineEnd >= 0) {
           armsRaw = matchRaw.slice(firstLineEnd + 1);
           armsRaw = armsRaw.replace(/<\s*\/\s*(?:match)?\s*>\s*$/, "");
+          // matchRaw is a TRIMMED block.raw; its byte 0 maps to block.span.start
+          // plus block.raw's own leading whitespace.
+          if (typeof block?.span?.start === "number" && typeof block.raw === "string") {
+            const _matchRawLead = block.raw.length - block.raw.trimStart().length;
+            _armsRawFileStart = block.span.start + _matchRawLead + firstLineEnd + 1;
+          }
+        }
+        // `armsRaw.trim()` drops leading whitespace — advance the file offset by
+        // the amount trimmed so it still points at armsRaw's (trimmed) byte 0,
+        // which is the coordinate frame parseMatchArms measures arm offsets in.
+        if (_armsRawFileStart >= 0) {
+          _armsRawFileStart += armsRaw.length - armsRaw.trimStart().length;
         }
         armsRaw = armsRaw.trim();
 
@@ -15599,6 +15692,13 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
               const reTab = buildAST(reBs);
               if (reTab && reTab.ast && Array.isArray(reTab.ast.nodes)) armNodes = reTab.ast.nodes;
             } catch (_e) { armNodes = []; }
+            // g-subparse-span-not-rebased — armNodes carry body-local spans; add
+            // the arm body's file offset (armsRaw's file start + the body's
+            // offset within armsRaw) so diagnostics inside the arm report the
+            // real source line, not ~L1.
+            if (typeof arm.bodyContentStart === "number" && _armsRawFileStart >= 0) {
+              _rebaseSubparseSpans(armNodes, _armsRawFileStart + arm.bodyContentStart, block);
+            }
             wrappers.push({
               id: ++counter.next,
               kind: "markup",
@@ -16521,9 +16621,16 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // First, pull the raw body text from block.children (BS raw-body
         // capture concatenates the body into a single text child).
         let _bodyRawForReparse = "";
+        // g-subparse-span-not-rebased — file byte-offset of _bodyRawForReparse's
+        // byte 0 (the first contributing BS child's file-absolute span.start).
+        // The <each> body is NOT trimmed, so this needs no trim adjustment.
+        let _bodyRawFileStart = -1;
         if (Array.isArray(block.children)) {
           for (const child of block.children) {
             if (child && typeof child === "object" && typeof child.raw === "string") {
+              if (_bodyRawFileStart < 0 && child.span && typeof child.span.start === "number") {
+                _bodyRawFileStart = child.span.start;
+              }
               _bodyRawForReparse += child.raw;
             }
           }
@@ -16542,6 +16649,13 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
             if (subNode) bodyChildren.push(subNode);
           }
           // _subErrors intentionally discarded — see comment block above.
+          // g-subparse-span-not-rebased — subNodes carry body-local spans; rebase
+          // to file coords so diagnostics inside the <each> body report the real
+          // line. templateChildren/emptyChild below are filtered VIEWS of these
+          // same node objects, so rebasing bodyChildren once covers them too.
+          if (_bodyRawFileStart >= 0) {
+            _rebaseSubparseSpans(bodyChildren, _bodyRawFileStart, block);
+          }
         }
 
         // Identify the optional <empty> sub-element. Per HU-1 Q4 ratification,
