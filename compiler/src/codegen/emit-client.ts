@@ -613,7 +613,17 @@ function emitReferencedModuleExportConstLines(
           ) {
             const kind = stmt.exportKind as "const" | "let";
             const name = stmt.exportedName as string;
-            const init = stripExportDeclInit(stmt.raw, kind, name);
+            // g-263 — a type-ANNOTATED value export carries a build-time clean init
+            // (`valueInit`, split from its `: TYPE` annotation by the same
+            // bracket-aware collectTypeAnnotation the regular const-decl uses). Its
+            // `raw` cannot be regex-split (arrow/union annotations truncate raw, and
+            // a `:`-annotation fails `stripExportDeclInit` closed). Prefer the AST
+            // field; fall back to the raw-strip for the unannotated legacy shape
+            // (byte-identical). A server-only-init annotated const has no `valueInit`
+            // and a raw with no `=`, so it stays absent (leak-safe, under-emit).
+            const init = (typeof (stmt as any).valueInit === "string")
+              ? (stmt as any).valueInit as string
+              : stripExportDeclInit(stmt.raw, kind, name);
             let valid = init != null;
             let initExpr: any = null;
             const freeIdents = new Set<string>();

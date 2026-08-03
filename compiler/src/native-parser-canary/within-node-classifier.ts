@@ -193,6 +193,16 @@ const STRIP_KEYS: ReadonlySet<string> = new Set([
                               // built for a comment-flushed `on mount {}` text
                               // run. Same live-only lift-origin metadata class
                               // as _bareDeclLift / _atWriteLift / _tildeBearingLift.
+  "valueInit",                // g-263-typeannotated (S315) — LIVE-only clean init
+                              // string attached to an annotated `export const/let`
+                              // export-decl so the client+server #263 emit consumes
+                              // it instead of raw-regexing the space-tokenized raw.
+                              // The native parser does NOT attach it (it builds the
+                              // export-decl from the raw slice); a live-pipeline-
+                              // internal codegen-support field, NOT a semantic
+                              // divergence (both routes emit the same const).
+  "valueInitExpr",            // companion parsed init ExprNode for the above —
+                              // same live-only codegen-support metadata class.
 ]);
 
 // ---------------------------------------------------------------------------
