@@ -177,6 +177,14 @@ export interface MatchArmEntry {
   spanEnd: number;
   // Local byte offset of the arm-opener `<` (for arm-targeted diagnostics).
   openerStart: number;
+  /** g-subparse-span-not-rebased — local byte offset (within armsRaw) of the
+   *  FIRST non-whitespace char of `bodyRaw` (which is `.trim()`ed). Only set
+   *  for `"bare-body"` arms (the only form whose body is re-parsed into a
+   *  walkable subtree by ast-builder's `armBodyChildren`). The ast-builder adds
+   *  armsRaw's own file offset to this to rebase the re-parsed subtree's spans
+   *  from body-local to file coordinates, so a diagnostic fired inside a match
+   *  arm reports the real source line. Absent for self-closing / shorthand. */
+  bodyContentStart?: number;
 }
 
 export interface MatchParseDiagnostic {
@@ -762,7 +770,10 @@ export function parseMatchArms(armsRaw: string): MatchParseResult {
       pos = len;
       continue;
     }
-    const bodyRaw = armsRaw.slice(pos, closer.contentEnd).trim();
+    const _bodySlice = armsRaw.slice(pos, closer.contentEnd);
+    const _bodyLead = _bodySlice.length - _bodySlice.trimStart().length;
+    const bodyContentStart = pos + _bodyLead; // first non-ws char of the trimmed body
+    const bodyRaw = _bodySlice.trim();
     pos = closer.closerEnd;
     arms.push({
       variantName,
@@ -774,6 +785,7 @@ export function parseMatchArms(armsRaw: string): MatchParseResult {
       spanStart: armOpenerStart,
       spanEnd: pos,
       openerStart: armOpenerStart,
+      bodyContentStart,
     });
   }
 

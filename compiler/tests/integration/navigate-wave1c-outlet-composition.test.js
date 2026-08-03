@@ -653,7 +653,7 @@ describe("§10 — `<main>` / `<outlet>` inside match arms + engine state-childr
   // the degenerate-span defect ship: all of these reported L1:C1 (the
   // `<program>` open tag) while passing a green suite.
 
-  test("a `<main>` in a NON-INITIAL match block-form arm fires E-OUTLET-AND-MAIN once, at the match", () => {
+  test("a `<main>` in a NON-INITIAL match block-form arm fires E-OUTLET-AND-MAIN once, on the `<main>` itself", () => {
     // The zero-landmark case in its purest form: arm `<B>` does not render on
     // first paint, but emit's total walk saw its `<main>` and demoted the slot,
     // so the composed document carried NO landmark at all. Verified pre-fix:
@@ -665,11 +665,11 @@ describe("§10 — `<main>` / `<outlet>` inside match arms + engine state-childr
     });
     const d = diagsOf(errors, "E-OUTLET-AND-MAIN");
     expect(d).toHaveLength(1);
-    // L7 is the `<match>` opener. The `<main>` itself is at L12, but a
-    // match-arm subtree is sub-parsed and its spans are never rebased to file
-    // coordinates, so the pass falls back to the nearest enclosing node with a
-    // real span. L7 puts the author on the right construct; L1 did not.
-    expect(d[0].span.line).toBe(7);
+    // L12 is the `<main>` itself. Since g-subparse-span-not-rebased, match-arm
+    // sub-parse spans are rebased to file coordinates, so the diagnostic points
+    // at the EXACT offending element instead of falling back to the enclosing
+    // `<match>` (the old interim behavior reported L7; pre-mitigation it was L1).
+    expect(d[0].span.line).toBe(12);
   });
 
   test("a `<main>` in an ENGINE STATE-CHILD fires E-OUTLET-AND-MAIN once, on the `<main>` itself", () => {
@@ -700,7 +700,10 @@ describe("§10 — `<main>` / `<outlet>` inside match arms + engine state-childr
     });
     const d = diagsOf(errors, "E-OUTLET-DUPLICATE");
     expect(d).toHaveLength(1);
-    expect(d[0].span.line).toBe(7);
+    // L9 is the second `<outlet/>` (in arm `<A>`) itself — g-subparse-span-not-
+    // rebased makes the match-arm span file-accurate, so the diagnostic lands on
+    // the offending outlet, not the enclosing `<match>` (the old interim L7).
+    expect(d[0].span.line).toBe(9);
   });
 
   test("a SECOND `<outlet>` in an engine state-child counts toward E-OUTLET-DUPLICATE, exactly once", () => {
