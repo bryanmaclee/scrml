@@ -39,7 +39,7 @@ import { runAuthGraph } from "./auth-graph.ts";
 import { serializeChunksManifest } from "./codegen/route-splitter.ts";
 import { buildMcpDescriptors } from "./codegen/mcp-descriptors.ts";
 import { runCG } from "./code-generator.js";
-import { generateValueOnlyServerJs } from "./codegen/emit-server.ts";
+import { generateValueOnlyServerJs, distRelativeLocalSpecifier } from "./codegen/emit-server.ts";
 import { validateEmittedArtifacts } from "./codegen/validate-emit.ts";
 import { detectSqlInConciseArrowBody } from "./codegen/detect-sql-in-arrow.ts";
 import { fnv1aHash } from "./codegen/fnv1a-hash.ts";
@@ -534,7 +534,7 @@ export function bundleStdlibForRun(names, outputDir, log, diagnostics) {
  * @param {string} outputDir — absolute path of the output directory
  * @returns {string} — JS code with rewritten import paths
  */
-export function rewriteRelativeImportPaths(jsCode, sourceFilePath, outputDir, emittedScrmlSources = null) {
+export function rewriteRelativeImportPaths(jsCode, sourceFilePath, outputDir, emittedScrmlSources = null, outputBaseDir = null) {
   if (!jsCode || !sourceFilePath || !outputDir) return jsCode;
   const sourceDir = dirname(resolve(sourceFilePath));
   const outDir = resolve(outputDir);
@@ -559,20 +559,35 @@ export function rewriteRelativeImportPaths(jsCode, sourceFilePath, outputDir, em
       }
       // Resolve the import path from the source file's directory
       const absImportPath = resolve(sourceDir, relPath);
-      // F-COMPILE-001 Option A: a scrml-emitted library module (`<base>.js`)
-      // mirrors the source tree at the SAME relative position as its `.scrml`
-      // source, so the source-relative specifier is ALREADY correct for the
-      // output tree and must NOT be relocated — the same rationale as the
-      // `.server.js`/`.client.js` skip above, generalized to a bare-`.js`
-      // library module (the §64 standalone-tool import case: `import { fn }
-      // from "./lib.js"`). Skip ONLY when the `.js` corresponds to a `.scrml`
-      // source THIS build actually compiled (`emittedScrmlSources`) — NOT any
-      // filesystem basename coincidence. A genuinely vendored `./util.js` next
-      // to an unrelated, uncompiled `./util.scrml` still relocates correctly.
+      // A scrml-emitted library module (`<base>.js`) — the §64 standalone-tool /
+      // library-to-library import case (`import { fn } from "./lib.js"`). Detect
+      // it in SOURCE space: the `.js` corresponds to a `.scrml` source THIS build
+      // actually compiled (`emittedScrmlSources`) — NOT a filesystem basename
+      // coincidence (a genuinely vendored `./util.js` next to an unrelated,
+      // uncompiled `./util.scrml` still relocates via the generic branch below).
+      //
+      // g-tool-artifact-import-specifier-dangles (S317): the OLD code returned
+      // the source-space specifier VERBATIM here on the false premise that a
+      // `<base>.js` sits at its source-relative position in dist. That is the
+      // SAME assumption S296 already debunked for `.server.js`: the dist tree
+      // strips a leading `pages/` segment (SPEC §47.9.5), so a `pages/mytool.scrml`
+      // tool lands at `dist/mytool.js` and its source-space `../models/lib.js`
+      // overshoots dist by one segment → green compile, `Cannot find module` at
+      // runtime. Fix: re-base to DIST space via the SAME `distRelativeLocalSpecifier`
+      // S296 gave the server half (here with the `.js` extension). On a project
+      // with no `pages/` segment the two spaces coincide → byte-identical emit.
+      // Falls back to the verbatim skip when no `outputBaseDir` is threaded
+      // (legacy single-file callers with no dist tree to re-base against).
       if (
         emittedScrmlSources &&
         emittedScrmlSources.has(absImportPath.replace(/\.js$/, ".scrml"))
       ) {
+        if (outputBaseDir) {
+          const distSpec = distRelativeLocalSpecifier(
+            relPath.replace(/\.js$/, ".scrml"), sourceFilePath, outputBaseDir, ".js",
+          );
+          return `${prefix}${quote}${distSpec}${quote}${semi}`;
+        }
         return match;
       }
       // Compute the relative path from the output directory. This becomes an
@@ -2807,12 +2822,12 @@ export function compileScrml(options = {}) {
         const base = basename(filePath, ".scrml");
         // §64 — standalone-tool module (kind="tool"): a single runnable `<base>.js`.
         if (output.toolJs) {
-          let s = rewriteRelativeImportPaths(output.toolJs, filePath, outputDir, emittedScrmlSources);
+          let s = rewriteRelativeImportPaths(output.toolJs, filePath, outputDir, emittedScrmlSources, cgOutputBaseDir);
           s = rewriteStdlibImports(s, outputDir, outputDir, bundledStdlib);
           pushArtifact(filePath, `${base}.js`, s);
         }
         if (output.serverJs) {
-          let s = rewriteRelativeImportPaths(output.serverJs, filePath, outputDir, emittedScrmlSources);
+          let s = rewriteRelativeImportPaths(output.serverJs, filePath, outputDir, emittedScrmlSources, cgOutputBaseDir);
           s = rewriteStdlibImports(s, outputDir, outputDir, bundledStdlib);
           pushArtifact(filePath, `${base}.server.js`, s);
         }
@@ -2824,7 +2839,7 @@ export function compileScrml(options = {}) {
         // carry `libraryJs`; pure library-mode outputs never carry `clientJs` —
         // so this is byte-identical for both.
         if (output.libraryJs) {
-          let s = rewriteRelativeImportPaths(output.libraryJs, filePath, outputDir, emittedScrmlSources);
+          let s = rewriteRelativeImportPaths(output.libraryJs, filePath, outputDir, emittedScrmlSources, cgOutputBaseDir);
           s = rewriteStdlibImports(s, outputDir, outputDir, bundledStdlib);
           pushArtifact(filePath, `${base}.js`, s);
         }
@@ -3116,13 +3131,13 @@ export function compileScrml(options = {}) {
         // (NO html / client / CSRF / server-route split). Written and returned.
         if (output.toolJs) {
           const { targetDir } = pathFor(filePath, ".js");
-          let s = rewriteRelativeImportPaths(output.toolJs, filePath, outputDir, emittedScrmlSources);
+          let s = rewriteRelativeImportPaths(output.toolJs, filePath, outputDir, emittedScrmlSources, cgOutputBaseDir);
           s = rewriteStdlibImports(s, targetDir, outputDir, bundledStdlib);
           if (writeOutput(filePath, ".js", s)) fileCount++;
         }
         if (output.serverJs) {
           const { targetDir } = pathFor(filePath, ".server.js");
-          let s = rewriteRelativeImportPaths(output.serverJs, filePath, outputDir, emittedScrmlSources);
+          let s = rewriteRelativeImportPaths(output.serverJs, filePath, outputDir, emittedScrmlSources, cgOutputBaseDir);
           s = rewriteStdlibImports(s, targetDir, outputDir, bundledStdlib);
           if (writeOutput(filePath, ".server.js", s)) fileCount++;
         }
@@ -3134,7 +3149,7 @@ export function compileScrml(options = {}) {
         // outputs carry only one, so both are byte-identical.
         if (output.libraryJs) {
           const { targetDir } = pathFor(filePath, ".js");
-          let s = rewriteRelativeImportPaths(output.libraryJs, filePath, outputDir, emittedScrmlSources);
+          let s = rewriteRelativeImportPaths(output.libraryJs, filePath, outputDir, emittedScrmlSources, cgOutputBaseDir);
           s = rewriteStdlibImports(s, targetDir, outputDir, bundledStdlib);
           if (writeOutput(filePath, ".js", s)) fileCount++;
         }
