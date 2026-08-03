@@ -184,3 +184,51 @@ describe("R26 — FIX 2: a top-level const referenced by an endpoint arm flows l
     expect(await res.json()).toEqual({ msg: "hello-from-const" });
   });
 });
+
+// S256 (flogence dogfood) — g-serve-tool-peer-callable-drops-module-let: a
+// module-level `export let` closed over by an in-process PEER CALLABLE (an
+// Issue-#1 server-fn→server-fn callee) flows LIVE through the booted route.
+// Pre-fix the const-only value-export path dropped the `export let`, so the peer's
+// closure reference was a boot-time `ReferenceError` (silent at compile).
+describe("R26 — FIX (S256): a peer-callable-closed `export let` flows live", () => {
+  let srv3 = null;
+  beforeAll(async () => {
+    const src =
+      "<program kind=\"tool\" serve=${0}>\n" +
+      "${\n" +
+      "  export let BASE = 41\n" +
+      "  type M:enum = { Ping }\n" +
+      "  server function bump() { return BASE + 1 }\n" +
+      "  server function compute() { let v = bump()\n    return v }\n" +
+      "}\n" +
+      "<endpoint path=\"/n\" method=\"POST\" accepts=M>\n" +
+      "  <Ping : { n: compute() }>\n" +
+      "</endpoint>\n" +
+      "</program>\n";
+    const { toolJs } = compile(src);
+    const f = join(TMP, `serve-exportlet-${_seq++}.mjs`);
+    writeFileSync(f, toolJs);
+    const mod = await import(f);
+    srv3 = globalThis._scrml_active_server;
+    void mod;
+  });
+  afterAll(() => { if (srv3) srv3.stop(true); });
+
+  test("POST /n → 200 (the peer read the closed-over `export let` without a ReferenceError)", async () => {
+    const res = await srv3.fetch(new Request(`http://localhost/n`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tag: "Ping" }),
+    }));
+    // Pre-fix `export let BASE` was dropped → the peer `bump`'s `return BASE + 1`
+    // was a `ReferenceError` at request time → a 500. Post-fix the binding is
+    // emitted, so the peer runs and the arm resolves → 200 with the `n` field.
+    // (The value itself serializes as `{}` here: a server-fn/async-peer call in an
+    // <endpoint> ARM position is not auto-awaited — an orthogonal arm-await
+    // limitation, NOT this binding-liveness fix. The 200 + `n` presence is the
+    // no-ReferenceError signal.)
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(Object.prototype.hasOwnProperty.call(body, "n")).toBe(true);
+  });
+});

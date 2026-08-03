@@ -916,9 +916,21 @@ function emitModuleValueExportLines(
       const name: string = stmt.exportedName;
       if (!name) continue;
 
-      // Value constant. The export-decl carries no paired const-decl / initExpr,
-      // only `raw` (tokenized source). Split off the initializer and lower it.
-      if (kind === "const") {
+      // Value binding — `export const`, PLUS `export let` / `export var`. The
+      // export-decl carries no paired const-decl / initExpr, only `raw` (tokenized
+      // source). Split off the initializer and lower it.
+      //
+      // g-serve-tool-peer-callable-drops-module-let (S256): the pre-fix branch was
+      // `const`-ONLY, so `export let` (a MUTABLE module-level binding) was NEVER
+      // emitted as a runtime value here — it fell through to the `skip` below. In a
+      // serve= tool a `<endpoint>` arm that referenced it fired E-SCOPE-001, but an
+      // in-process PEER CALLABLE (or `main`) that closed over it slipped past that
+      // check and hit a SILENT boot/route `ReferenceError: <name> is not defined`.
+      // A mutable module-level `export let` is a runtime binding exactly like
+      // `export const`, so emit it with its own keyword (mirrors the `const` shape;
+      // the browser client still fetches any retained route). `export var` is folded
+      // in for completeness (same lowering).
+      if (kind === "const" || kind === "let" || kind === "var") {
         if (isAlreadyDeclared(name)) continue;
         const raw: string = String(stmt.raw ?? "");
         // g-263 — a type-ANNOTATED value export carries a build-time clean init
@@ -931,7 +943,7 @@ function emitModuleValueExportLines(
           ? String((stmt as any).valueInit).trim()
           : null;
         if (init == null) {
-          const m = raw.match(/^\s*export\s+const\s+\w+\s*=\s*([\s\S]+)$/);
+          const m = raw.match(/^\s*export\s+(?:const|let|var)\s+\w+\s*=\s*([\s\S]+)$/);
           if (!m) continue;
           init = m[1].trim();
         }
@@ -944,7 +956,8 @@ function emitModuleValueExportLines(
         if (init.includes("?{")) continue;
         const initNode = parseExprToNode(init, filePath, 0);
         const lowered = emitExprField(initNode, init, { mode: "server" });
-        constLines.push(`export const ${name} = ${lowered};`);
+        const _kw = kind === "var" ? "var" : (kind === "let" ? "let" : "const");
+        constLines.push(`export ${_kw} ${name} = ${lowered};`);
         continue;
       }
 
@@ -5390,7 +5403,19 @@ export function generateServerJs(
     // but exclude it for clarity). Imports themselves were deferred, so the
     // assembled finalEmitted contains no local-`.scrml` import line yet — any
     // occurrence of a local name is a genuine reference.
-    const scanBody = finalEmitted.split(LOCAL_SERVER_IMPORT_SENTINEL).join("");
+    // g-serve-tool-treeshakes-main-only-import (S256): in a `kind="tool" serve=`
+    // program the composing `main`/setup + helper bodies are emitted SEPARATELY
+    // (emit-tool.ts, appended AFTER this module), so they are NOT in `finalEmitted`.
+    // An import referenced ONLY from `main`/a setup helper therefore looked dead to
+    // this route-body-only scan and was tree-shaken → boot-time ReferenceError.
+    // emit-tool stashes the SOURCE of every non-import top-level statement on the
+    // fileAST as an extra reachability root; union it into the scan so a main-only
+    // (or helper-only) import survives. Undefined for the web-app path → byte-
+    // identical there. The stash excludes import lines, so an import can't keep
+    // itself alive; a genuinely-unreferenced import still drops.
+    const _serveReachExtra = String((fileAST as { _serveImportReachabilityExtra?: string })?._serveImportReachabilityExtra ?? "");
+    const scanBody = finalEmitted.split(LOCAL_SERVER_IMPORT_SENTINEL).join("")
+      + (_serveReachExtra ? "\n" + _serveReachExtra : "");
     const survivingLines: string[] = [];
     for (const imp of deferredLocalImports) {
       const keptSpecs = imp.specs.filter((s) => localServerImportNameUsed(scanBody, s.local));
