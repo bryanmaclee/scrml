@@ -1,4 +1,49 @@
 <!-- ============================================================= -->
+<!-- S317 WRAP (peter/P-Tech1) — prepended 2026-08-03.              -->
+<!-- S313/S314/S315/S316 + all prior UNCHANGED below.               -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 317 (peter · P-Tech1 Windows) — WRAP
+
+**Date:** 2026-08-03. `/boot` Profile A. **3 PRs merged** (#389 #390 #391) — all MED gaps.
+**Mechanical stream = delta-log [1097]–[1104]. Full pickup state = the board
+`scrml-support/handOffs/active-sessions/S317-peter.md`.** This block is the irreducible narrative;
+the board + delta-log carry counts/status. main `27adae9e`, coherence 0/0 both repos.
+
+## Landed (all S239-cleared; two S239 catches pre-land)
+- **#389 g-subparse-span-not-rebased** — rebase sub-parse (`<match>`-arm / `<each>`) spans to file
+  coords + re-derive line/col; SPAN-COORD parity −1470; fixed the within-node gate being dead on
+  Windows (enumerator backslash relpaths). S239 caught the outlet-in-match-arm diagnostic interaction.
+- **#390 g-tool-artifact-import-specifier-dangles** — re-base a §64 tool/library `.scrml` import to
+  dist space (`distRelativeLocalSpecifier`, the S296 mechanism generalized). Byte-identical for no-`pages/`.
+- **#391 g-crossmodule-async-in-markup** — await a cross-module async import in a markup interpolation;
+  **S239 caught a page-breaking SyntaxError** (async fn as a bare combinator callback) → fixed with an
+  emit-diff wrap decision (decide off the injector's actual output, not a re-derived predicate).
+
+## Open threads / next PA's judgment
+- **On-mount (c) build** — worktree `.claude/worktrees/onmount-c` @ `ba72eaa0` RETAINED (parked).
+  bryan's S316 RULING (mount-body `@x=v` SHALL NOT emit `_scrml_init_set`) is in hand, but the build is
+  **merge-blocked on bryan's A79** (the `_bareAtWrite` decl-vs-assignment fix), which **never landed this
+  session** (0 open PRs all session). When A79 lands: verify its `_bareAtWrite` stamping reaches the
+  rerouted mount-body nodes (bryan's stated hypothesis), then finish + language-surface review.
+- **S316-bryan read LIVE on the board all session** (no wrap entry). Successor-mode throughout; my
+  write-footprint was disjoint (diagnostics/spans, tool specifiers, markup async — never A79 init_set or
+  route-region). If S316 is actually crashed, its board LIVE marker is stale.
+- **Follow-up gaps to FILE** (surfaced by S239, all pre-existing / out-of-scope this session):
+  (a) pure-fn cross-dir library-to-library import emits a raw `.scrml` specifier (unresolvable);
+  (b) `serve=`-tool → pure-lib import dangles; (c) the discarded bare async top-level module-init
+  statement (`fetchStatus(@url).status;`); (d) corpus §2 `<script src>` Windows backslash-path artifact.
+- **flogenceP Ask #7** (`get_style_provenance`) — UN-ROUTED, bryan's language-surface lane. A note was
+  dropped to bryan this wrap (`scrml-support/handOffs/incoming/`); the original ask sits in
+  `scrml/handOffs/incoming/`. Peter runs the flogenceP fork; a flogenceP work-flow is being defined with bryan.
+
+## Environment (P-Tech1) — see [[ptech1-scrml-gate-baseline]]
+No local git hook (cloud gate is authority). Gate has a ~6-fail Windows-local baseline (Linux-green) +
+a CWD artifact (run from repo ROOT, not `compiler/`). Pre-existing `s19` stash is a bare-`git stash pop`
+trap. Test suite this session: full unit+integration+conformance from root = 21981 pass / 6 fail (all baseline).
+
+<!-- ============================================================= -->
 <!-- S313 WRAP (bryan/ASUS-Vivobook) — prepended 2026-08-02.        -->
 <!-- S310 + S312 + all prior UNCHANGED below.                       -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->
