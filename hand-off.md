@@ -1,4 +1,62 @@
 <!-- ============================================================= -->
+<!-- S318 WRAP (peter/P-Tech1) — prepended 2026-08-04.              -->
+<!-- S313/S314/S315/S316/S317 + all prior UNCHANGED below.          -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 318 (peter · P-Tech1 Windows) — WRAP
+
+**Date:** 2026-08-04. `/boot` Profile A. **2 PRs merged** (#393 #394). **Mechanical stream =
+delta-log [1105]–[1109]. Full pickup state = the board
+`scrml-support/handOffs/active-sessions/S318-peter.md`.** main `c6dde7f1`, coherence 0/0 both repos.
+
+## Landed
+- **#393 flogenceP Ask #7 re-delivery** — the full `get_style_provenance` note was committed
+  only-locally at S315 (S290 per-clone trap; Peter caught it in the routing note) → never reached
+  bryan. Re-delivered to `handOffs/incoming/` via docs-only PR, gate green, merged. **Delivery only**
+  — the 4 rulings + scheduling are bryan's language-surface lane.
+- **#394 g-match-arm-server-call-no-autoawait** — a server call in a client value-form `match` arm
+  shipped a bare unawaited Promise + the fn wasn't `async` → arm value silently a Promise. Fix:
+  precedence-correct `(await fn()).x` wrap + async-coloring. **R26 corrected the filed mechanism**
+  (statement tilde-temp, not sync IIFE). Corpus sweep 1056 files → **0 emit changes**. A79-disjoint.
+  New conformance test (CODES+RUNTIME). S239 clean (over-color guard held).
+
+## 🔴 THE NEXT PA'S FIRST MOVE — a verified HIGH is queued
+
+**`g-fn-shorthand-tail-match-emits-degenerate-body` (HIGH, filed S318).** A tail-expr fn-shorthand
+whose body is a `match` (`fn pick(k:int) -> bool = match k { 1 :> getFlag().ok  _ :> false }`) emits
+a **degenerate** `function _scrml_pick(k){ 1; }` — the ENTIRE match collapses to the first arm's TEST
+literal, arm results dropped, returns `undefined`, silently (0 errors). **PA-VERIFIED on main** →
+pre-existing, not a regression; a distinct lowering bug (NOT await). In-lane codegen, verified,
+scoped — the strongest next-pick. Confirm severity vs whether the tail-`= match` shorthand is
+spec-sanctioned (§ for fn-shorthand tail expressions).
+
+## Open threads / next PA's judgment
+- **On-mount (c) build** — worktree `.claude/worktrees/onmount-c` @ `ba72eaa0` RETAINED (parked).
+  Ruling in hand (bryan S316: mount-body `@x=v` SHALL NOT emit `_scrml_init_set`); **still
+  merge-blocked on bryan's A79** (never landed across S316/S317/S318 — A79 is local-only on bryan's
+  clone, held pending a fix round + his `/code-review`). When A79 lands: verify `_bareAtWrite` reaches
+  the rerouted mount-body nodes, then finish + language-surface review.
+- **S316-bryan STILL reads LIVE on the board** (no wrap entry across three successor sessions). If
+  actually crashed, the LIVE marker is stale. Successor-mode was correct all session; my
+  write-footprint (match-arm auto-await in emit-control-flow/emit-logic-`emitMatchExprDecl`/scheduling)
+  is disjoint from A79 (`_emitInitThunkSidecar`/`_bareAtWrite`) — clean 3-way expected if A79 lands.
+- **4 MED auto-await siblings filed** (candidates, same class as #394): `g-match-value-position-…`
+  (the genuine sync-IIFE interpolation position) · `g-match-block-arm-…` (block-body arm bypasses
+  `armResultLine`) · `g-given-block-…` · `g-if-value-cascade-…`. `!{}` guarded-expr is already clean.
+- **flogenceP Ask #7** now delivered (#393) — bryan can rule the 4 forks when he picks it up. A
+  peter→bryan note (delivery confirmation + the HIGH degenerate-emit flag) dropped to
+  `scrml-support/handOffs/incoming/` this wrap.
+
+## Environment (P-Tech1) — see [[ptech1-scrml-gate-baseline]]
+No local git hook (cloud gate is authority). Full unit+integration+conformance from repo ROOT:
+**21981 pass / 6 fail** — all Windows-local baseline (self-host-smoke ×3 + csrf B5 + 2 corpus/timeout
+flakes); the cloud `windows` job is GREEN, confirming environment-only. Agent worktree pruned from
+git metadata; **leftover dir `.claude/worktrees/agent-a92d5e7841f95443a` is "device busy"** (a
+lingering test-runner handle) — untracked, harmless, will free (rm at next boot if it persists).
+**Maps OWED** (codegen landed in emit-*; project-mapper not run — consistent with S313–S317).
+
+<!-- ============================================================= -->
 <!-- S317 WRAP (peter/P-Tech1) — prepended 2026-08-03.              -->
 <!-- S313/S314/S315/S316 + all prior UNCHANGED below.               -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->
