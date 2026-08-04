@@ -32,9 +32,15 @@ Item format + drain protocol: `scrml-support/dpa-scrml.md` + the design DD
 | dpa-014 | **RATIFIED** S223 — W4 chunk model = ship B-conditional | "ratify W4" |
 | dpa-015 | **RATIFIED** S227 — markup-lease Q2-collapse; CONDITIONAL on 2 §40.9 facts (PA-to-verify); BUILD = `conflictsWith` query | "1, ratify it" |
 | dpa-016 | **DEFERRED** S225 — maps-vs-flogence; gate not met | S225 drain |
+| dpa-018 | **RATIFIED + LANDED S313** — soft-nav `<outlet>` swap is a **route REGION, not a scope**, keyed by `(route, params)`. §6.7.2's false *"or navigation"* STRUCK · NEW §6.7.2.1 (third lifecycle owner + closure clause) · §20.8.1 exclusion clause · NEW §20.8.8 edge contract · `W-ROUTE-REQUEST-DUPLICATES-SERVER-LOAD` as a v1 obligation. **ROUND 2 (2026-08-04) tested Pole D (`<app>` wrapper) and REJECTED it on mechanism** (weighted C 8.78 / D 1.73; four verified normative collisions) — **C stands UNMODIFIED, nothing to un-land.** Survives of D: the NAME only (a "shell region" defined term, recommended, prose-only). Round-2 artifact: `scrml-support/docs/debates/soft-nav-outlet-lifecycle-pole-d-round2-2026-08-04.md`. **Residual = the route-region IMPL + CN-1..CN-10** (`docs/changes/route-region-teardown/`), and a SEPARABLE spec-hygiene ticket the round-2 dPA surfaced (§20.8.8/§6.7.2 pin a TOTAL order where only ~2 of ~15 orderable pairs have a stated correctness reason — over-specification, not a Pole-D question). | **RATIFIED** S313 (build pending) |
+| dpa-019 | **BANKED S319** — Ask #7 sid identity (R3 debate). From the S316 queue Q1; unrun because that queue is not in the dPA drain path. | S319 bank |
+| dpa-020 | **BANKED S319** — auto-await choke point vs irreducibly-heterogeneous positions (R2 DD). **Gates the `markup-autoawait-all-emitters` brief.** | S319 bank |
+| dpa-021 | **BANKED S319** — GH #357 direction-B accessor-shape hazard (R2 narrow). **Gates the `gh357-session-sql-interpolation` brief.** | S319 bank |
 | dpa-017 | **RATIFIED S230 2026-06-28** (user "go with your recos") — HYBRID: **B (origin-keyed structural redaction at the compiler-emitted egress sink) = load-bearing FLOOR** · A (same provenance map, static-prove) = demoted DX LAYER, **DEFERRED** · field-level **`reveal("col")`** = sole declassification · dynamic-SQL strip-all+lint · raw/FFI egress fail-closed. PA-verified the stale-cite flag, then authored **SPEC §14.8.9** (Nominal/spec-ahead) + fixed §14.8.7's stale `E-ROUTE-003` cite + minted **E-PROTECT-004 + I-PROTECT-STRIP-001** (§34, land-with-impl) + landed the insight + SPEC-INDEX regen. **Residual = the FLOOR BUILD** → `docs/changes/g-sql-row-protect-leak-2026-06-28/RULING.md` (sPA-slot-able; OQ-1 descriptor-lifetime first). | **RATIFIED** (build pending) |
 
-**Genuinely-open (PA action needed):** dpa-010 · dpa-011 (advisory, meta/flogence-domain — ratify-or-defer). **dpa-017 RATIFIED S230** (HYBRID B-floor; SPEC §14.8.9 + codes + insight landed) → residual is the **FLOOR BUILD** (slot to an sPA). **Everything else is ratified / routed / deferred → the residual is BUILDS, not gates.** Highest-leverage residual builds = **the protect-leak floor** (`docs/changes/g-sql-row-protect-leak-2026-06-28/RULING.md`) + **`g-tier1-ssr-prerender`** (its SSR boundary MUST apply the same §14.8.9 egress filter — they compose; survey-scoped S229, ruling-gated; the §52 write-back was RETRACTED S194, NOT the residual).
+**⚠ DRAIN-PATH RULE (S319).** The dPA drains **THIS file**. A deliberation banked anywhere else does not exist to it. Witnessed S316→S319: seven conclusions were rung-assigned into `scrml-support/docs/deep-dives/S316-DELIBERATION-QUEUE.md` and the hand-off recorded *"the dPA is RUNNING on Q1/Q2/Q3"* — it was not and never had been; the dPA drained the dpa-018 Pole-D conditional (which IS in this file) instead, and the three deliberations sat unrun across two sessions while every build that depended on them stayed held. **Same shape as the review-floor and `gh issue list` misses: an obligation named in one place, a probe reading another.** Bank deliberations HERE; a separate rung-assignment doc is a companion, never the carrier.
+
+**Genuinely-open (PA action needed):** dpa-019 · dpa-020 · dpa-021 (banked S319, **UNRUN — fire the dPA**) · dpa-010 · dpa-011 (advisory, meta/flogence-domain — ratify-or-defer). **dpa-017 RATIFIED S230** (HYBRID B-floor; SPEC §14.8.9 + codes + insight landed) → residual is the **FLOOR BUILD** (slot to an sPA). **Everything else is ratified / routed / deferred → the residual is BUILDS, not gates.** Highest-leverage residual builds = **the protect-leak floor** (`docs/changes/g-sql-row-protect-leak-2026-06-28/RULING.md`) + **`g-tier1-ssr-prerender`** (its SSR boundary MUST apply the same §14.8.9 egress filter — they compose; survey-scoped S229, ruling-gated; the §52 write-back was RETRACTED S194, NOT the residual).
 
 ---
 
@@ -652,3 +658,133 @@ holds the direct real-world analogue in the layout-vs-page split, which is exact
 `g-onmount-request-no-refire-on-soft-nav` → **SPEC** (the spec contradicted *itself*; the adopter did nothing wrong). Bump MED→HIGH once §20.8.3 is ratified.
 
 **10 conformance cases** (CN-1..CN-9 blocking · **CN-10 Nominal must be authored NOW** — deferring it is the mechanism by which this ruling silently becomes Pole A). Artifact §8.1 lists which pole-proposed cases become *wrong* under the ruling. **OQ-3 is the only open question that can invert the ruling, and the error is ASYMMETRIC:** ruling C then cutting `keep-alive` leaves a harmless extra noun; ruling A then shipping `keep-alive` requires breaking a normative SHALL you just wrote. 3 experts live-polled + judge. Routes to scrml PA. RUN-not-RATIFY honored.
+
+### ROUND 2 (dPA, 2026-08-04 — ADVISORY, NOT ratified) — Pole D (`<app>` wrapper)
+
+`status: complete` (round 2) · **trigger: bryan's own conditional bank** — *"may have missed this dPA pass; if so it is a second round, and it is worth one."* **Condition VERIFIED, not assumed:** the round-1 artifact contains **0 occurrences** of "Pole D" or `<app>` (artifact written 08:58; the late addition appended to this queue at 09:59). Fired from a flogence-rooted boot; typed roster live, no persona injection.
+
+**`scrml-support/docs/debates/soft-nav-outlet-lifecycle-pole-d-round2-2026-08-04.md`** · **POLE D REJECTED on mechanism** (weighted **C 8.78 / D 1.73**). Landed Pole C stands **unmodified**. D's headline claim — *"a split, not a new primitive; both sentences true with NO amendment, by inheritance"* — is **false on four verified normative collisions**: (1) ★ **§51.0.D** engine-singleton identity (*"the SAME singleton across all use-sites in all importing files"*) becomes false by construction when route content is a `<program>` — **and this holds even with a completely empty shell**, which is exactly what the corpus has; (2) **§40.8 cardinality-1** (*"exactly ONCE, in the entry file"*) is **repealed**, not generalized; (3) **`E-PROG-003`** makes parent-scope reads a hard **Error**, so D's cell-ownership story is not merely unwritten but *actively contradicted*; (4) ★ **§40.8 `<channel>` app-scope** — channels are *"app-scope shared-state vehicles, not per-route declarations"*, so a per-route `<program>` makes every channel per-route. **Collisions (1) and (4) were found by the dPA's own source-read, not by any expert — including the decisive one.**
+
+**Structural finding:** **§43.2 enumerates exactly FOUR** nested-`<program>` shapes (Web Worker · Foreign Sidecar · WASM Module · Server Endpoint) — **all cross-execution-context boundaries, none a same-tree UI region.** So there is no existing kind to inherit from at all; every behavior D needs must be authored from scratch under an old keyword. The **inheritance audit** independently found **4 of 5 §20.8.8 clauses are NOT free under D**. `<app>` ruled **"mostly costume"**: `<program>` sheds job 1 and only job 1.
+
+**Both stated flip-conditions CLOSED by dPA verification:** no permeable nesting mode exists or is planned (§43.3 is flatly shared-nothing; **zero** hits for any isolation variant) · the corpus question resolves against D for a *subtle* reason — **both multi-file apps declare ZERO shell cells** (0% exercised), which naively *meets* the condition, but the real collision is §51.0.D (corpus-independent) and §20.8.8 clause 5 has already committed the spec to the pattern.
+
+**WHAT SURVIVES OF D = the NAME only** (not the mechanism): (a) **recommended** — a defined term ("shell region") naming the shell side of `<program>` in §6.7.2.1; prose only, **zero migration cost**; (b) **optional** — `<app>` as a **validated non-scope-forming marker** (forms no scope, no isolation boundary, explicitly not a `<program>`, not subject to §43). Keyword verified free: **0 corpus occurrences**, not an HTML element.
+
+**★ SEPARABLE finding, independent of D — §20.8.8/§6.7.2 pin a TOTAL order** (no "MAY reorder" language) when only ~2 of ~15 orderable pairs have a stated correctness reason. Over-specification taxing every implementer + 1–2 conformance cases. **Not a Pole-D question — file as its own spec-hygiene ticket** (OQ-3).
+
+**⚠ TWO FRAMING FLAGS FOR THE PA:** (i) **the CURRENT STATUS table above never lists dpa-018 and reads as if C were still advisory — it is RATIFIED AND LANDED** (§20.8.8 *"NEW S313 — ratified Pole C"* · §20.8.1 amended · §6.7.2's "or navigation" struck · §6.7.2.1 added · §20.8.7 already carries an S314 correction). Round 2 was therefore framed as *"does D justify UN-LANDING ratified spec?"*, with sunk cost explicitly disallowed as an argument for C. (ii) **bryan both ratified C and proposed D in the same session (S313) and the ordering is not recoverable** — if D came after the ratification it may have been a v1.next thought rather than a challenge. The dPA ran it either way (pre-authorized), but that call is the user's.
+
+**6 OQs** — **OQ-1 and OQ-2 can narrowly invert.** OQ-1: the corpus is **too young** to test the ambient-read collision, and **the dPA flags its own panel's 3–0 unanimity as insufficient adversarial pressure** — a stronger pro-D case would have argued *deferral*, not defeat. OQ-2: the **strongest form of D was never argued** (`<app>` as the literal subject of §20.8.8's ownership clause with zero `<program>` nesting) — cheap to check; the dPA declines to guess project design. Staged insight CANDIDATE in artifact §10 (*"auditing a split-don't-amend claim requires walking EVERY already-enforced invariant on the reused keyword"*); `design-insights.md` NOT touched. 3 experts live-polled + judge. Routes to scrml PA. **RUN-not-RATIFY honored — NOT flipped to ratified.**
+
+---
+
+## [dpa-019] debate — Ask #7 `get_style_provenance`: what IDENTITY survives a value-only source rewrite AND round-trips across compiles?
+
+`status: banked` · banked **S319-bryan (2026-08-04)** · **origin: the S316 deliberation queue Q1** (`scrml-support/docs/deep-dives/S316-DELIBERATION-QUEUE.md`), banked here because the S316 queue is **NOT in the dPA's drain path** — it sat unrun while the dPA drained the dpa-018 Pole-D conditional instead. **Rung: R3 (debate).** The S316 PA rung-assigned this itself as *"the weakest thing I did this session."*
+
+### Why this is R3 and not a ruling
+
+The S316 PA ruled the relayed fork's **three options all wrong** and substituted a fourth of its own design. The **destructive half is measurement and stands** (see Grounding). The **constructive half — "a structural path address, with the byte span as payload" — is a phrase written once, never designed, never costed, never checked against a second consumer.** It is being sent to debate, not to build.
+
+### Scope-lock (COMPLETE framing)
+
+**Question:** For an adopter tool that reads a scrml compile artifact, rewrites source VALUES, and re-compiles — **what node identity is stable enough to survive its own apply-back AND to be correlated across two separate compiles, at an emit cost worth paying?**
+
+**Grounding facts — PA-VERIFIED at S319, do NOT re-derive:**
+- `BaseNode.id` is `++counter.next` (`compiler/src/ast-builder.js`, ~40 sites), and `compiler/src/types/ast.ts:205-206` documents it verbatim as *"Unique numeric ID **within the compilation unit**."* Compile-local by construction.
+- `Span.start` is a byte offset into the source. A value-only rewrite that changes a literal's LENGTH shifts every subsequent span. Compile-local under the consumer's own workload.
+- **A structural-address abstraction DOES NOT EXIST in `compiler/src` today.** S319 ran the search the S316 queue admits it never ran (`structural.?path|nodePath|pathTo|addressOf|stableId|nodeAddress|treePath` across `compiler/src`): the only hits are `emit-ssr-render.ts:127 pathToRead` (a state-cell read-path string), `route-inference.ts filePathToUrlPattern` (filesystem→URL), and one comment. **Nothing addresses an AST node.** So EVERY pole here is net-new machinery, and the DD must cost it as such.
+- **`compiler/src/srcmap-provenance.ts` DOES NOT EXIST** — the adopter's own scoping named it as an existing seam. Their "not a new pass" estimate is optimistic by at least one module.
+
+**Poles:**
+- **A — structural path address** (the S316 PA's invented option; span as payload). Must answer: what IS the path? Document-order indices break under sibling insertion; a named-anchor scheme needs names that do not exist in the grammar.
+- **B — content hash of the subtree.** Stable under position change, unstable under the very value edits the consumer performs. Does hashing a *shape-only* projection (values elided) recover it?
+- **C — a stable author-assigned anchor.** Explicit, cheap to resolve, but adds author-visible surface for a tooling concern — weigh against limit-primitives.
+- **D — ★ NO stable identity is possible, and the consumer's loop must re-resolve each compile.** **The S316 PA never seriously considered this and flagged it as possibly correct.** It makes the sidecar a per-compile artifact the consumer re-reads — cheaper than every other pole, and it matches how `token-set.json` already behaves. **Do NOT let the panel treat D as the null option; it is a real pole with a shipped in-repo precedent.**
+
+**In scope:** the identity question; the emit cost of each pole; whether the sidecar is per-compile or cross-compile; the second-consumer question folded in from S316 Q4 (one shared address primitive vs two facets — the limit-primitives axiom cuts BOTH ways and the S316 ruling picked one direction on a two-consumer count taken from the adopter's own note).
+
+**Out of scope:** the `get_style_provenance` surface syntax; the dev-only gate (S316 Fork 3 — settled by the verified `<program mcp>` precedent); non-promotion (S316 Fork 4 — already answered by dpa-010's *"dock is NAVIGATION, never the GATE"*).
+
+**⚠ A PREMISE THE DD MUST CHECK, NOT INHERIT:** the S316 ruling asserts a structural path survives the consumer's apply-back *because apply-back is value-only* — **and states plainly that it never read their apply-back implementation.** That is a premise about someone else's code held on their description of it. Verify it or mark the whole pole conditional.
+
+### Expert / forge list
+A language-server / incremental-compilation voice (stable node identity across edits is the LSP's core problem — document versions + position mapping) · a source-map / codemod voice (jscodeshift / Babel: what survives a print-parse round-trip) · a content-addressing voice (reuse the §47 / §58 Merkle framing already in-repo).
+
+### What-counts-as-an-answer
+A recommended pole with its **emit cost stated in modules-to-build** (given that nothing exists today), an explicit verdict on whether the sidecar is per-compile or cross-compile, and a stated answer on the one-vs-two-facet question. NOT a spec draft.
+
+### Report-back
+§3 — one-liner + artifact path + staged insight CANDIDATE + a `(dpa:)` breadcrumb. Do NOT ratify. Artifact → `scrml-support/docs/debates/`. Routes to scrml PA.
+
+---
+
+## [dpa-020] deep-dive — is position-invariant auto-await implementable at ONE choke point, or is the position set irreducibly heterogeneous?
+
+`status: banked` · banked **S319-bryan (2026-08-04)** · **origin: the S316 deliberation queue Q2**, same non-drain reason as dpa-019. **Rung: R2 (DD).** **This gates whether the staged `markup-autoawait-all-emitters` brief is framed correctly — do not fire that brief before this lands.**
+
+### Scope-lock (COMPLETE framing)
+
+**Question:** The auto-await gap family reads as *"one bug being fixed one position at a time."* **Is that diagnosis true?** Can a single decision point decide await-insertion for every position, or do the positions each require a structurally different async context, making the one-at-a-time drain correct-but-unfinished?
+
+**The governing sentence — PA-VERIFIED verbatim at S319, SPEC §13.2 Normative statements:**
+> *"The compiler SHALL insert `await` at **every call site** where a server-generated fetch call is made."*
+> *"The compiler SHALL wrap **any function containing at least one server call** in an `async` function in generated code."*
+
+Both are position-INVARIANT on their face. Every open entry below is an instance of the compiler not meeting them at some specific position.
+
+**The population — PA-ENUMERATED from `docs/known-gaps.md` at S319 (do NOT re-derive):**
+- `g-markup-autoawait-misses-attr-and-each-body` — **HIGH**, open (`locus=compiler/src/codegen/emit-event-wiring.ts`)
+- `g-reactive-write-member-server-call-no-autoawait` — MED, open
+- `g-match-value-position-server-call-no-autoawait` — MED, open
+- `g-match-block-arm-server-call-no-autoawait` — MED, open
+- `g-given-block-server-call-no-autoawait` — MED, open
+- `g-if-value-cascade-server-call-no-autoawait` — MED, open
+- `g-ternary-init-server-call-await-misbind` — LOW, open
+- adjacent, in-progress, DIFFERENT direction (over-fire not under-fire): `g-async-stdlib-in-sync-callback-over-fires` — HIGH
+- **recently RESOLVED, and the most informative evidence in the set:** `g-match-arm-server-call-no-autoawait` (#394) · `g-crossmodule-async-in-markup` (#391) · `g-onmount-direct-reactive-server-write-unawaited-on-escape-hatch-string-path`
+
+**The load-bearing signal, and why it is not just a backlog:** #391 fixed one position and its review pass found TWO more; #394 fixed one and filed FIVE more. **Six new positions from two PRs.** Discovery rate is not slowing.
+
+**The competing explanation the DD MUST test (the S316 PA never did):** the positions may be genuinely heterogeneous — a markup attribute setter, a sync effect callback, a statement tilde-temp and a match arm may each need a *different* async context by construction. **If so there is no choke point to build**, the drain is correct, and the only defect is the framing.
+
+**In scope:** read the actual emit sites for the enumerated positions; determine what async context each needs; determine whether #391 and #394 had to do structurally DIFFERENT things or the same thing twice; a build/don't-build recommendation with cost.
+
+**Out of scope:** building anything. The over-fire sibling (`g-async-stdlib-in-sync-callback-over-fires`) has its own S279 ruling and is a separate direction.
+
+**⚑ Method note:** this is the shape where an architectural diagnosis was inferred from a **gap-list shape** rather than from source. The DD's first move is to READ THE EMIT SITES. A verdict reached without doing that is worth nothing here.
+
+### What-counts-as-an-answer
+Either (a) *"yes, one choke point — here is the decision point, here is what it costs, here is which of the 7 open entries it closes,"* or (b) *"no, irreducibly heterogeneous — here are the N distinct async contexts and why,"* in which case the `markup-autoawait-all-emitters` brief keeps its enumerate-the-class scope but LOSES its shared-fix framing. A partial answer ("k of 7 share a choke point") is a legitimate and likely outcome — say so with the partition.
+
+### Report-back
+§3 — one-liner + artifact path + staged insight CANDIDATE + a `(dpa:)` breadcrumb. Do NOT ratify. Artifact → `scrml-support/docs/deep-dives/`. Routes to scrml PA.
+
+---
+
+## [dpa-021] deep-dive (NARROW) — GH #357 direction B: can ONE `session` binding serve both the member and the index form?
+
+`status: banked` · banked **S319-bryan (2026-08-04)** · **origin: the S316 deliberation queue Q3**, same non-drain reason. **Rung: R2 narrow.** **Gates the staged `gh357-session-sql-interpolation` brief.**
+
+### Scope-lock (COMPLETE framing)
+
+**Question:** bryan RULED **direction B** at S316 — bind `session` in the server handler prologue the way `route` already is. The reasoning holds and the ruling is not being reopened. **The open question is whether B is implementable without a silent regression**, and it was pushed into the dispatch brief as *"the agent's problem." That is the decision, not a detail.**
+
+**The hazard, stated by the S316 PA in its own words:** `session[expr]` currently lowers to `_scrml_sess.get(expr)`. A naive prologue binding flattens that to a raw property read — **a `semantics-changed` silent regression** (pa-base §8's most dangerous class: same source, different behavior, no diagnostic delta).
+
+**Grounding — PA-VERIFIED at S316, carried forward:**
+- GH #357 was **re-reproduced BY EXECUTION** on `09d17541`: `ReferenceError: session is not defined` from the real emitted handler.
+- **The recorded locus was WRONG** — the gap said `rewriteSqlRefs` *"walks expression nodes but not the interpolation children"*; there are **no expression children at that layer.** Real path: `rewrite.ts:387` captures `?{}` interpolations as raw TEXT; the server rewrite is `rewriteServerAtRef` (`:2831`), a regex over **`@name` only**; `session` is **sigil-less** and structurally invisible to it.
+- **Blast radius measured: `session` is the SOLE affected ambient.** `route` is also sigil-less but is genuinely BOUND in the prologue — which is precisely why B is the shape being copied.
+- ⚠️ **`node --check` PASSES on the broken artifact** (a free variable is legal JS). Any verification of this fix that stops at a static check is worthless — it must EXECUTE.
+
+**In scope:** whether one prologue binding can serve `session.member` AND `session[expr]` without changing what the index form means; if not, what the minimal shape is that preserves both (a bound object with a `get`-equivalent? a two-form lowering?); and whether B survives if it cannot.
+
+**Out of scope:** re-litigating A-vs-B (ruled). The broader ambient-binding question for other sigil-less names (there are none affected — measured).
+
+### What-counts-as-an-answer
+A yes/no on the one-binding question with the lowering sketched, OR a named alternative shape that keeps B's direction. Must state how the answer will be VERIFIED BY EXECUTION, not by `node --check`. Small — this is a narrow DD, not a debate.
+
+### Report-back
+§3 — one-liner + artifact path + a `(dpa:)` breadcrumb. Do NOT ratify. Artifact → `scrml-support/docs/deep-dives/`. Routes to scrml PA.

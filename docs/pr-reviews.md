@@ -35,6 +35,60 @@ predate the rule and are out of scope by construction rather than by exemption.
 
 ## Log
 
+<!-- @review pr=396 verdict=finding by=S319-bryan date=2026-08-04 probe=route-attr-semantics-diff-main-vs-branch-by-execution note=sse-author-route-conformance-restoration-undersold -->
+<!-- @review pr=397 verdict=carve-out by=S319-bryan date=2026-08-04 probe=own-wrap-continuity-docs-only -->
+
+### #396 — `fn … = <expr>` rejection · verdict `finding` (not a defect — an UNDER-SOLD conformance restoration)
+
+**The PR does two independent things and only names one.** The titled fix (reject the unsanctioned
+`= <expr>` fn body → `E-FN-EQUALS-BODY`) is clean. Riding with it, mentioned only as a parenthetical
+inside a code comment, is a **second behavior change on existing code**: the return-type consumers now
+break at a `route=`/`method=` attribute, so an author-declared route is no longer swallowed.
+
+**Probed by EXECUTION, main vs branch, not by reading the diff:**
+
+| probe | main | branch |
+|---|---|---|
+| plain `function f() -> T route="/api/user"` | **no route registered** | `/api/user` registered |
+| plain `function f() route="/api/ping"` (no return type) | `/api/ping` | `/api/ping` (unchanged) |
+| **`server function* f() -> T route="/sse/feed"`** | **`path: "/_scrml/__ri_route_feed_1"`** | **`path: "/sse/feed"`** |
+| return-type shapes (lifecycle · map · enum-subset · refinement) | — | `client.js` **byte-identical**, 0 errors both sides |
+| recovery after a rejected `= match` body | — | exactly ONE error, correct line/col, no cascade |
+
+**The third row is the finding.** SPEC §37.3 / §12.3 say verbatim that the compiler *"SHALL mount the
+SSE handler at the author-declared path"* and *"SHALL honor it in **application (browser) mode**."*
+**Main violates that SHALL** whenever the SSE generator also carries a return type — the author's
+`route="/sse/feed"` is silently replaced by a compiler-internal hash. A foreign `EventSource`
+subscriber, for whom the author path IS the contract (the §12.3 BYOB carve-out), connects to
+`/sse/feed` and gets a 404. Silent, adopter-facing, and this PR fixes it.
+
+So the route half is **newly-accepting toward the contract** (pa-base §8) — a governing sentence
+already said the form is legal and the implementation was holding the door shut. It ships as a fix;
+blocking it would freeze an implementation defect into the language.
+
+**Verified independently, not taken from the PR:** the migration measurement (zero corpus files combine
+a return type with `route=`) — confirmed. The break-set completeness — the fn attribute loop at
+`ast-builder.js:12554` accepts **exactly** `route` and `method`, so hardcoding those two is complete,
+not a partial fix. The `=`-break regression surface — every legal return-type form probed is
+byte-identical.
+
+**Recorded, not blocking:**
+1. The route restoration deserves to be a headline with a **conformance pin** (`server function*` +
+   return type + `route=` → author path), not a comment aside. Currently nothing pins it.
+2. The zero-corpus measurement is true but **the corpus-is-artifact kernel applies** — the corpus may be
+   empty *because* the combination silently dropped the route. Same shape as the S66 canonical example.
+   Measured-zero here is weaker evidence than it looks; the SHALL is what carries the decision.
+3. **Separate, pre-existing, NOT this PR's:** a plain `function route=` (non-generator, non-`handle()`)
+   mounts a route in application mode, while §12.3's carve-out is explicitly **NARROW** to
+   `server function*` SSE + `handle()`. This PR does not introduce it (main already does it for the
+   no-return-type case) but it deserves its own question.
+
+**Rebase note (S319):** the branch was rebased onto `663f31b8` to clear a `known-gaps.md` conflict in the
+`@generated` counts block. Resolved by **regeneration**, then verified by arithmetic — HIGH 23−1=22 (his
+HIGH resolved), LOW 47+1=48 (his filed residual), MED 109 unchanged — matching the prediction exactly.
+The rebase also folded in a `master-list.md` `@generated:recent-sessions` regen, because `state.ts
+--check` was FAILING on main (S316's own wrap step 6d missed it).
+
 <!-- @review pr=395 verdict=carve-out by=S316-bryan date=2026-08-04 probe=docs-only-continuity -->
 <!-- @review pr=394 verdict=clean by=S316-bryan date=2026-08-04 probe=await-precedence-overharvest-syntax -->
 <!-- @review pr=393 verdict=carve-out by=S316-bryan date=2026-08-04 probe=inbox-delivery-only -->
