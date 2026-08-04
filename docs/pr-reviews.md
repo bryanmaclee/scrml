@@ -35,6 +35,10 @@ predate the rule and are out of scope by construction rather than by exemption.
 
 ## Log
 
+<!-- @review pr=402 verdict=carve-out by=S320-peter date=2026-08-04 probe=continuity-docs-only-changelog-handoff-deltalog-no-code-path -->
+<!-- @review pr=401 verdict=carve-out by=S320-peter date=2026-08-04 probe=known-gaps-rescope-docs-only-VERIFIED-scheduling.ts:974-isControlFlowBoundary-opaque-boundary-anchor-holds -->
+<!-- @review pr=400 verdict=carve-out by=S320-peter date=2026-08-04 probe=known-gaps-filing-docs-only-VERIFIED-conformance-run.ts-ExpectedCase-has-no-emitted-content-assertion-key -->
+<!-- @review pr=399 verdict=carve-out by=S320-peter date=2026-08-04 probe=known-gaps-spec-hygiene-teardown-ordering-docs-only-dpa-surfaced-self-caveated-unverified -->
 <!-- @review pr=398 verdict=carve-out by=S319-bryan date=2026-08-04 probe=own-dpa-banks-and-review-record-docs-only -->
 <!-- @review pr=396 verdict=finding by=S319-bryan date=2026-08-04 probe=route-attr-semantics-diff-main-vs-branch-by-execution note=sse-author-route-conformance-restoration-undersold -->
 <!-- @review pr=397 verdict=carve-out by=S319-bryan date=2026-08-04 probe=own-wrap-continuity-docs-only -->
