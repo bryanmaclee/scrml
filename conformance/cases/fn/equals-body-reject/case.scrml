@@ -1,0 +1,5 @@
+fn pick(k: int) -> bool = match k {
+  1 :> true
+  _ :> false
+}
+<page><main><p>${ pick(1) }</p></main></page>

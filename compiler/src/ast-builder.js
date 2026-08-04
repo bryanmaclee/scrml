@@ -3742,6 +3742,52 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     };
   }
 
+  // g-fn-shorthand-tail-match / E-FN-EQUALS-BODY — the `fn|function <name>(args) [-> T] = <expr>`
+  // expression-body form is NOT sanctioned scrml. §48.2 admits ONLY a `{ … }` block body; the
+  // `=>`-arrow sibling `fn(args) => expr` is already rejected as E-FN-ARROW-BODY (§48.2.1, ruling A).
+  // Pre-fix this `=` form silently MISPARSED: the return-type consumer swallowed `= <expr>`, and a
+  // trailing control-flow tail's `{` was misread as the body brace, so `fn f = match k { 1 :> … }`
+  // emitted a degenerate `function f(k){ 1; }` — arm results dropped, returns `undefined`, 0 errors
+  // (HIGH silent-wrong-output). The return-type consumers now BREAK at a depth-0 bare `=` (it can
+  // never appear in a type annotation), leaving `peek()` on the `=` here. `errors`/`TABError`/
+  // `tokenSpan`/`filePath`/`peek`/`consume` are all in `parseLogicBody` scope. Recovers by skipping
+  // the `= <expr>` RHS with bracket-depth tracking so the file yields ONE clean fatal error, no cascade.
+  function rejectFnEqualsBody() {
+    const eqTok = peek(); // caller guarantees a bare PUNCT `=`
+    errors.push(new TABError(
+      "E-FN-EQUALS-BODY",
+      `E-FN-EQUALS-BODY: an \`= <expr>\` expression body is not a valid \`fn\`/\`function\` form — ` +
+      `a \`{ … }\` block body is required (§48.2). Use \`<name>(args) { return <expr> }\` (a block ` +
+      `body implicitly returns its tail expression, so \`{ <expr> }\` works too). The \`=>\`-arrow ` +
+      `sibling is E-FN-ARROW-BODY.`,
+      tokenSpan(eqTok, filePath),
+    ));
+    // Recover: consume `= <expr>` up to a depth-0 top-level boundary (next decl / markup / EOF),
+    // tracking (){}[] AND markup angle-depth so a `< b` comparison inside the RHS is not mistaken
+    // for a markup open-tag. A `<` opens markup-depth ONLY when it looks like a tag opener
+    // (`<Ident`/`</`); a `<` in operator position (`a < b`) is consumed as a comparison.
+    consume(); // consume `=`
+    let d = 0;      // (){}[]
+    let mk = 0;     // markup <…>
+    while (peek().kind !== "EOF") {
+      const t = peek().text;
+      if (t === "(" || t === "[" || t === "{") { d++; consume(); continue; }
+      if (t === ")" || t === "]" || t === "}") { if (d === 0 && mk === 0) break; if (d > 0) d--; consume(); continue; }
+      if (t === "<" && d === 0) {
+        const nx = peek(1);
+        const looksLikeTag = nx && ((nx.kind === "IDENT") || (nx.kind === "PUNCT" && nx.text === "/"));
+        if (looksLikeTag && mk === 0) break; // a top-level markup element begins the next construct
+        if (looksLikeTag) mk++;              // nested markup value inside the RHS
+        consume(); continue;                 // otherwise `<` is a comparison operator
+      }
+      if (t === ">" && mk > 0) { mk--; consume(); continue; }
+      if (d === 0 && mk === 0 &&
+          (t === "fn" || t === "function" || t === "server" || t === "export" ||
+           t === "type" || t === "let" || t === "const" || t === "import" || t === "enum")) break;
+      consume();
+    }
+  }
+
   /**
    * Phase 1: safely parse an expression string to ExprNode.
    * Never throws — returns undefined on failure.
@@ -9216,6 +9262,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
           else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
           else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
+          else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
           else _retToks.push(consume().text);
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
@@ -9248,6 +9296,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
           else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
           else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
+          else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
           else _retToks.push(consume().text);
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
@@ -9256,6 +9306,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       if (peek().text === "{") {
         consume(); // consume `{`
         body = parseRecursiveBody();
+      } else if (peek().kind === "PUNCT" && peek().text === "=") {
+        rejectFnEqualsBody(); // E-FN-EQUALS-BODY — `= <expr>` expression body is not a valid fn/function form (§48.2)
       }
       return {
         id: ++counter.next,
@@ -9493,6 +9545,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
           else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
           else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
+          else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
           else _retToks.push(consume().text);
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
@@ -9524,6 +9578,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
           else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
           else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
+          else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
           else _retToks.push(consume().text);
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
@@ -9532,6 +9588,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       if (peek().text === "{") {
         consume(); // consume `{`
         body = parseRecursiveBody();
+      } else if (peek().kind === "PUNCT" && peek().text === "=") {
+        rejectFnEqualsBody(); // E-FN-EQUALS-BODY — `= <expr>` expression body is not a valid fn/function form (§48.2)
       }
 
       return {
@@ -11563,13 +11621,19 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               ? { kind: "EOF", text: "", span: { start: lastTok.span?.end ?? 0, end: lastTok.span?.end ?? 0, line: lastTok.span?.line ?? 1, col: lastTok.span?.col ?? 1 } }
               : { kind: "EOF", text: "", span: { start: 0, end: 0, line: 1, col: 1 } };
             subToks = subToks.concat([eofTok]);
+            // Capture the re-parse errors instead of discarding them, so the ONE fatal
+            // syntax error the outer export parse cannot see — E-FN-EQUALS-BODY, the
+            // unsanctioned `export fn NAME() = <expr>` shorthand — is surfaced. Every
+            // OTHER re-parse error stays suppressed (the "must not double-emit" intent):
+            // the outer parse of the export statement re-reports those.
+            const _subErrors = [];
             const subNodes = parseLogicBody(
               subToks,
               filePath,
               [],
               parentBlock,
               counter,
-              [],            // throw-away errors — duplicate-parse must not double-emit
+              _subErrors,    // captured — only E-FN-EQUALS-BODY is surfaced below (others suppressed)
               blockContext,
             );
             const innerFn = Array.isArray(subNodes)
@@ -11583,6 +11647,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               synthHasReturnType = !!innerFn.hasReturnType;
               synthReturnTypeAnnotation = innerFn.returnTypeAnnotation;
             }
+            // Surface ONLY the E-FN-EQUALS-BODY fatal from the re-parse (an
+            // `export fn NAME() = <expr>` shorthand) — otherwise the export path
+            // swallows it into a silent empty exported function. All other
+            // re-parse errors stay suppressed (the outer parse re-reports them).
+            const _eqBodyErr = _subErrors.find((e) => e && e.code === "E-FN-EQUALS-BODY");
+            if (_eqBodyErr) errors.push(_eqBodyErr);
           }
         } catch (_synthErr) {
           // Fall back to empty params/body on re-parse failure — preserves
@@ -12512,6 +12582,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
           else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
           else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
+          else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
           else _retToks.push(consume().text);
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
@@ -12544,6 +12616,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
           else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
           else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
+          else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
           else _retToks.push(consume().text);
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
@@ -12567,6 +12641,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       if (peek().text === "{") {
         consume(); // consume `{`
         body = parseRecursiveBody();
+      } else if (peek().kind === "PUNCT" && peek().text === "=") {
+        rejectFnEqualsBody(); // E-FN-EQUALS-BODY — `= <expr>` expression body is not a valid fn/function form (§48.2)
       }
 
       nodes.push({
@@ -12822,6 +12898,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
           else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
           else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
+          else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
           else _retToks.push(consume().text);
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
@@ -12854,6 +12932,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           }
           else if (_t === "{") { braceDepth++; _retToks.push(consume().text); }
           else if (_t === "}" && braceDepth > 0) { braceDepth--; _retToks.push(consume().text); }
+          else if ((_t === "route" || _t === "method") && peek(1)?.text === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // a route=/method= attribute follows the return type — stop so the attribute loop captures it (also closes the pre-existing silent route-drop when a return type is also present)
+          else if (_t === "=" && angleDepth === 0 && parenDepth === 0 && braceDepth === 0) break; // bare `=` can't be in a return type — the unsupported `= <expr>` fn body (→ E-FN-EQUALS-BODY at the body check)
           else _retToks.push(consume().text);
         }
         returnTypeAnnotation = _retToks.join(" ").trim();
@@ -12862,6 +12942,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       if (peek().text === "{") {
         consume(); // consume `{`
         body = parseRecursiveBody();
+      } else if (peek().kind === "PUNCT" && peek().text === "=") {
+        rejectFnEqualsBody(); // E-FN-EQUALS-BODY — `= <expr>` expression body is not a valid fn/function form (§48.2)
       }
 
       nodes.push({

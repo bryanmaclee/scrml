@@ -19321,6 +19321,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-FN-009 | §48.5.4 | Reactive `@variable` captured as live subscription inside `fn` body (Nominal — deferred, see §48.5.4) | Error |
 | W-FN-001 | §48.3.2 | `asIs`-typed value in DOM-mutation position inside `fn` body (probable violation) | Warning |
 | E-FN-ARROW-BODY | §48.2.1 | The `fn` keyword is followed by a parenthesized param list and an arrow `=>` body (e.g. `arr.map(fn(n) => n * 2)`). This mixes the two canonical anonymous-callable forms — the BLOCK-body anonymous `fn` (`fn(args) { return expr }`, §48.2.1) and the plain inline lambda (`args => expr`) — and is NOT a sanctioned scrml form. Pre-fix the shape fell through the codegen `fn`→`function` string-rewrite and emitted invalid JS `function(args) => …`, mis-framed as E-CODEGEN-INVALID-LOGIC. Resolution: use `args => expr` for an inline lambda, or `fn(args) { return expr }` for a named-style anonymous function. Detected at parse (the acorn-rejection path — `detectFnKeywordArrowBody`, `compiler/src/expression-parser.ts`; surfaced via `fnArrowDiagnostic` in `compiler/src/ast-builder.js`). (Added 2026-06-30 — g-fn-shortform-arrow-reject; ruling A — the form is not sanctioned.) | Error |
+| E-FN-EQUALS-BODY | §48.2 | A `fn`/`function` declaration is written with an `=` EXPRESSION body — `fn <name>(args) [-> T] = <expr>` (e.g. `fn pick(k) -> bool = match k { 1 :> true  _ :> false }`). §48.2's grammar admits exactly one body form, the `{ … }` block (`fn-body ::= '{' fn-statement* '}'`); the `= <expr>` shorthand is NOT a sanctioned scrml form. The sibling `=>`-arrow shorthand is E-FN-ARROW-BODY (§48.2.1). Pre-fix the shape SILENTLY MISCOMPILED: the `-> T` / `: T` return-type consumer swallowed `= <expr>` and a trailing control-flow tail's `{` was misread as the body brace, so `= match k {…}` emitted a degenerate body (arm test literals as bare statements, arm results dropped, the fn returning `undefined`, zero diagnostics); the `= if …` variant instead reached E-CODEGEN-INVALID-LOGIC. Resolution: use the block body `fn <name>(args) { return <expr> }`, or the implicit tail return `fn <name>(args) { <expr> }` (a block body returns its tail expression). Detected at parse — the return-type consumers break at a depth-0 bare `=` and the four decl-body sites fire `rejectFnEqualsBody` (`compiler/src/ast-builder.js`). (Added 2026-08-04 — g-fn-shorthand-tail-match-emits-degenerate-body; ruling A — the form is not sanctioned, sibling of E-FN-ARROW-BODY.) | Error |
 | E-LOOP-001 | §49.9 | `break` outside any loop | Error |
 | E-LOOP-002 | §49.9 | `continue` outside any loop | Error |
 | E-LOOP-003 | §49.9 | `break label` — label not found or not a loop | Error |
@@ -25533,6 +25534,17 @@ fn-statement    ::= let-decl | const-decl | lin-decl | if-stmt | match-expr
 - Inside a `?{}` SQL context.
 - Inside a `_{}` foreign code context.
 - As a markup expression (a `fn` cannot be used where markup content is expected).
+
+**No `=` expression body (2026-08-04).** A `fn`/`function` body is a `{ … }` block and ONLY a
+`{ … }` block (`fn-body ::= '{' fn-statement* '}'` above). The `=`-shorthand form
+`fn <name>(args) [-> T] = <expr>` is **NOT a sanctioned scrml shape** and SHALL be rejected at parse
+with **E-FN-EQUALS-BODY** (§34) — the sibling of the `=>`-arrow reject E-FN-ARROW-BODY (§48.2.1). A
+one-expression function is written as a block body: `fn f(args) { return <expr> }`, or `fn f(args) {
+<expr> }` (a block body implicitly returns its tail expression — the same tail-return the block form
+already provides, so the shorthand adds no expressive power). This holds at every `fn`/`function` decl
+site — top-level and nested (`${ }`-scoped). (Before the reject, the shorthand silently miscompiled:
+`fn pick(k) -> bool = match k {…}` emitted a degenerate body that dropped the arm results and returned
+`undefined` with zero diagnostics — g-fn-shorthand-tail-match-emits-degenerate-body.)
 
 #### 48.2.1 Anonymous `fn` Expressions
 
