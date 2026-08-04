@@ -35,6 +35,9 @@ predate the rule and are out of scope by construction rather than by exemption.
 
 ## Log
 
+<!-- @review pr=395 verdict=carve-out by=S316-bryan date=2026-08-04 probe=docs-only-continuity -->
+<!-- @review pr=394 verdict=clean by=S316-bryan date=2026-08-04 probe=await-precedence-overharvest-syntax -->
+<!-- @review pr=393 verdict=carve-out by=S316-bryan date=2026-08-04 probe=inbox-delivery-only -->
 <!-- @review pr=391 verdict=finding by=S316-bryan date=2026-08-03 probe=adjacent-markup-positions note=autoawait-incomplete-attr-and-each-body -->
 <!-- @review pr=390 verdict=clean by=S316-bryan date=2026-08-03 probe=import-resolution-executed -->
 <!-- @review pr=389 verdict=clean by=S316-bryan date=2026-08-03 probe=span-rebase-vs-prefix-baseline -->
@@ -63,6 +66,34 @@ predate the rule and are out of scope by construction rather than by exemption.
   already met and `export let` bought only cross-module mutable sharing. **bryan RULED reject (S316).**
   Revert that half; the main-only import tree-shaking half is a clean under-emit fix and stays.
 - **#392** — continuity/changelog/delta-log only, no code path → carve-out.
+- **#393 / #395** — inbox delivery and continuity respectively; **verified 0 files under
+  `compiler/src`** → carve-out.
+- **#394** — **clean on all three sharp axes.** (a) *Await precedence:* emits
+  `(await _scrml_fetch_getFlag_2()).ok` — the await wraps the CALL node, not the member expression;
+  the precedence-wrong `await (getFlag().ok)` was the stated hazard and it is avoided. (b) *Part-B
+  over-harvest:* the async-marking pass now harvests callee idents from match-arm RESULT strings, so I
+  probed a fn whose arm result is a **string literal merely mentioning `getFlag()`** — it stayed a
+  plain `function` while the real caller became `async`. Literals genuinely pre-stripped; no
+  over-colouring. (c) *Stranded await:* `node --check` clean on all three artifacts. Also worth
+  crediting: the PR **R26-corrected its own filed mechanism** (the gap claimed a "sync IIFE where
+  await is illegal"; the const-init form actually lowers to a statement tilde-temp where it is legal),
+  swept 1019 corpus files for byte-diffs (zero changed), and filed 5 sibling residuals rather than
+  dropping them.
+
+  **But the review's real finding is the SHAPE OF THE BOARD, not a defect in #394.** The auto-await
+  residual family now runs to ~23 entries, **9 of them open** (2 HIGH, 6 MED, 1 LOW):
+  `g-inferred-async-call-value-position-no-autoawait` · `g-markup-autoawait-misses-attr-and-each-body`
+  · `g-server-fn-argument-position-not-awaited-and-statement-dropped` ·
+  `g-match-value-position-…` · `g-match-block-arm-…` · `g-given-block-…` · `g-if-value-cascade-…` ·
+  `g-reactive-write-member-…` · `g-ternary-init-server-call-await-misbind`.
+
+  Every one is *"auto-await misses position X."* **§13.2 mandates POSITION-INVARIANT auto-await** —
+  the very sentence #394 cites — yet the implementation is being drained one position at a time, and
+  the discovery rate is not slowing: #391 fixed one position and the S239 pass found two more; #394
+  fixed one and filed five more. **Six new positions surfaced from two PRs.** That is the signature of
+  an await decision made independently at each emit site instead of once at a choke point, and it is
+  worth a design look before the next position is patched. Not a criticism of either PR — both fixed
+  what they claimed, cleanly.
 - **#389** — probed span rebasing against the **pre-#389 baseline** (a worktree at `5aeb656a`, which
   predates it), with an undeclared read at a known line in five contexts. Baseline: match-arm read
   reported **line 1** (true 10), `<each>`-body read reported **line 1** (true 19). Post-fix: **10** and
