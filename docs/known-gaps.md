@@ -31,10 +31,29 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 22 |
-| MED | 110 |
+| MED | 111 |
 | LOW | 49 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-conformance-cannot-assert-emitted-route-path — the conformance harness has NO assertion for emitted artifact content, so the entire author-declared-path guarantee class (§12.3 · §37.3 · §61.7) is structurally unpinnable — freeze-relevant — `NEW S319-bryan (surfaced by the S239 review of #396); MED; open`
+<!-- @gap id=g-conformance-cannot-assert-emitted-route-path sev=MED status=open locus=conformance/run.ts prov=spec:§37.3 -->
+
+**The freeze bar is "pin every CLAIMED surface." This is a claimed surface that the harness cannot express.**
+
+**PA-VERIFIED at S319 — the harness's complete `expect` vocabulary** (`conformance/run.ts`, the `ExpectedCase` interface): `codes` · `notCodes` · `notCodePrefixes` · `severity` · `input` · `dom` · `domAnchored` · `state` · `serverStub` · `serverDb` · `sqlEngine` · `ssr` · `firstPaint` · `stdout`. **There is no key that asserts the CONTENT of an emitted artifact.** A case can say which diagnostics fired and what the DOM/state/first-paint look like; it cannot say *"the emitted route record's `path:` is `/sse/feed` and not `/_scrml/__ri_route_feed_1`."*
+
+**What that leaves unpinnable — a class, not one case.** Every guarantee whose observable is a *path in emitted output*:
+- §37.3 / §12.3 — an author-declared `route=` on a `server function*` SSE generator SHALL mount at the author path (the §12.3 foreign-facing BYOB carve-out; a non-scrml `EventSource` client has no compiler-generated caller, so the author path IS the contract).
+- §61.7 — `<endpoint path=>` *"SHALL honor the author-declared `path=` as the mounted handler path."*
+- §12.6 — the library-mode route-handler RETENTION rule (`route=` as a retention signal).
+- §20.8.1.1 / §47.9.5-adjacent emitted-specifier rules, whose S296 failure mode was precisely *compile exit 0 + `node --check` clean + runtime `Cannot find module`*.
+
+**Corroborating evidence that this is a real hole, not a theoretical one:** the S296 dangling-specifier bug (23 of 24 server imports broken in the canonical multi-file example, on main, invisible to 21k tests) had exactly this shape — *"nothing asserts that an emitted specifier resolves on disk."* Same blind spot, different guarantee. And the existing `protect/sse-yield-strip` case documents the limitation in its own description rather than working around it.
+
+**Resolutions, in increasing cost:** (a) a unit-level guard for the one restoration (cheap, narrow, does not close the class) — **deliberately NOT built at S319; the harness question should be ruled before a workaround sets a pattern**; (b) an `emit` / `artifacts` assertion key on the harness (`{ file, contains, notContains }`), which closes the whole class and is the honest fix; (c) leave it and accept that these surfaces ship unpinned into 1.0, which contradicts the stated freeze bar.
+
+**Bounded scope note:** this is about ASSERTING emitted content, not about executing it. The runtime half (`firstPaint`/`dom`/`state`) already exists and works; the missing piece is the static artifact-shape assertion.
 
 ### g-lifecycle-teardown-order-overspecified — §6.7.2's four-step and §20.8.8's six-step teardown sequences are written as TOTAL orders with no "MAY reorder" language, while only ~2 of ~15 orderable pairs have a stated correctness reason — `NEW S319-bryan (surfaced by the dpa-018 ROUND-2 dPA as an explicitly SEPARABLE item, §7.4); LOW; open`
 <!-- @gap id=g-lifecycle-teardown-order-overspecified sev=LOW status=open locus=compiler/SPEC.md:§20.8.8 prov=debate:soft-nav-outlet-lifecycle-pole-d-round2-2026-08-04 -->
@@ -1648,7 +1667,7 @@ Two separable items, both surfaced by the S239 adversarial pass on **#396** (`94
 | main | `"/_scrml/__ri_route_feed_1"` — author route **silently dropped** |
 | #396 | `"/sse/feed"` — honored |
 
-The trigger is the *combination* of a return type with `route=`; without a return type the author path was already honored, which is why this went unnoticed. Real adopter consequence: a foreign `EventSource` subscriber — for whom the author path IS the contract per the §12.3 BYOB carve-out — connects to `/sse/feed` and gets a 404, silently. **Nothing pins this.** A conformance case (`server function*` + return type + `route=` → author path in the route record) is owed; without it the restoration can silently regress, exactly as it silently broke.
+The trigger is the *combination* of a return type with `route=`; without a return type the author path was already honored, which is why this went unnoticed. Real adopter consequence: a foreign `EventSource` subscriber — for whom the author path IS the contract per the §12.3 BYOB carve-out — connects to `/sse/feed` and gets a 404, silently. **Nothing pins this** — and S319 established WHY it cannot currently be pinned: see [[g-conformance-cannot-assert-emitted-route-path]]. Verified at both levels: #396's own unit test guards only the **no-false-fire** direction (*"`server function … -> T route= method= { block }` compiles clean"*), never that the author path is honored; and the single `route=`-bearing conformance case (`protect/sse-yield-strip`) asserts codes only, its own description conceding *"the emitted SSE frame bytes are not asserted."* The restoration can therefore silently regress exactly as it silently broke.
 
 **(2) The plain-`function route=` sibling may exceed the carve-out.** §12.3's carve-out is explicitly and repeatedly marked **NARROW** — *"this carves out only the author-declared `route=` on a `server function*` SSE / `handle()`"* — yet a plain (non-generator) `function f() route="/api/ping"` mounts a route in application mode on **main today**, verified by execution. #396 does not introduce this; it only makes the return-type case consistent with the no-return-type case that already worked. **The question is whether the implementation is broader than the carve-out sanctions**, and it is a Rule-4 question (governing sentence vs impl), not a bug report. Note §12.6 (`:7363`) does treat *"carrying an explicit `route=` / method declaration"* as a property of a **function** generally in library mode, which cuts the other way — so this genuinely needs adjudication rather than a fix.
 
