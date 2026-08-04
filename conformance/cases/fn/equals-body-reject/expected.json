@@ -1,0 +1,12 @@
+{
+  "id": "fn-equals-body-reject",
+  "description": "§48.2 — a `fn`/`function` declaration with an `=` EXPRESSION body (`fn pick(k) -> bool = match k {…}`) is NOT a sanctioned scrml shape and SHALL fire E-FN-EQUALS-BODY at parse. The grammar admits exactly one body form: a `{ … }` block (`fn-body ::= '{' fn-statement* '}'`). Sibling of the `=>`-arrow reject (E-FN-ARROW-BODY, §48.2.1). Regression guard: pre-fix the `-> T = <expr>` return-type consumer swallowed `bool = match k` and the match's `{` was misread as the body brace, so the match arms parsed as loose statements — arm TEST literals emitted as bare `1;`, arm RESULTS dropped, the fn returning `undefined` with ZERO diagnostics (HIGH silent-wrong-output); the `= if` variant instead reached E-CODEGEN-INVALID-LOGIC.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/g-fn-equals-body-reject.test.js",
+  "spec": "§48.2",
+  "rationale": "§48.2: `fn-body ::= '{' fn-statement* '}'` — the block body is the only sanctioned body form. A one-expression function is written `fn f(args) { return <expr> }`, or `fn f(args) { <expr> }` (a block body implicitly returns its tail expression). The `= <expr>` form is unsanctioned and is rejected at parse with E-FN-EQUALS-BODY, which steers to the block form and cross-references the `=>`-arrow sibling E-FN-ARROW-BODY.",
+  "expect": {
+    "codes": ["E-FN-EQUALS-BODY"],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"]
+  }
+}
