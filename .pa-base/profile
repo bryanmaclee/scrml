@@ -43,6 +43,13 @@ GATE:   tests-as-gate (stable infra) + runtime-verify (codegen) + types (always-
     (cloud `gate` on the PR is authority); release-tag/forced pushes still run FULL `bun run test`. NEVER --no-verify without authz.
   - CLOUD `gate` (PR-flow, S254): the required GitHub CI check (`unit+conformance+gauntlet`) — GREEN gates the PR merge.
     Boot pulls status: `gh run list --branch main --limit 3` + `gh pr list`. This REPLACES the retired commit-lock main-authority check.
+  - REVIEW-FLOOR probe (S316, MANDATORY at boot 0.6, both profiles): `bun scripts/review-debt.ts`.
+    `gh pr list` reports OPEN PRs; the S313 review floor binds MERGED ones, and nothing computed the difference —
+    so the obligation was invisible to the session that incurred it and to every session after. Cost of the hole:
+    EIGHT PRs merged in one day, zero reviews on all eight (#385-#392), one day after the floor was ratified;
+    found only because bryan asked. The probe diffs merged-since-epoch against the `@review` markers in
+    `docs/pr-reviews.md`. DETECTION not control — never blocks a merge, deliberately NOT in CI (§8 cry-wolf).
+    PA STATES THE OWED COUNT in the boot report. Watch the carve-out rate: →100% = the floor is decorative.
   - ADOPTER-ISSUE channel (S262, MANDATORY at boot 0.6, both profiles): `gh issue list --repo bryanmaclee/scrml --state open`.
     GitHub issues = the adopter->compiler bug route (pjoliver11/assetManagement, the real-world shakedown app, files
     version-stamped reproducers here). NOT the handOffs/incoming/ inbox — a SECOND inbound channel. Un-named by the contract

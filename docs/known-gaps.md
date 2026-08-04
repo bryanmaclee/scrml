@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 24 |
-| MED | 108 |
+| HIGH | 23 |
+| MED | 109 |
 | LOW | 47 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -197,8 +197,69 @@ Filed separately from `g-route-timer-poll-not-stopped-on-soft-nav` because it is
 
 Not a blocker for the leave-edge arc (discarding is safe), but the SPEC sentence says abort and the compiler does not, which is the plain shape of a spec-vs-impl gap. Locus recorded as a SEARCH rather than a trace — the discard is observed behaviour; the exact registration site was not traced.
 
+### g-markup-autoawait-misses-attr-and-each-body — the #391 markup autoawait covers ONLY the top-level text interpolation; an attribute-value binding and an `<each>` body still emit the async call BARE → a Promise field read renders `undefined`, silently — `NEW S316-bryan (S239 review of #391); HIGH; open`
+<!-- @gap id=g-markup-autoawait-misses-attr-and-each-body sev=HIGH status=open locus=compiler/src/codegen/emit-event-wiring.ts prov=corpus:probed-four-markup-positions-S316 -->
+
+**Found by the S239 adversarial pass on #391** (`27adae9e`), which fixed
+`g-crossmodule-async-in-markup-position-not-awaited` for one markup position only. Probed all four
+positions an interpolated cross-module inferred-async call can inhabit; **only the first is awaited:**
+
+| source position | emitter | emitted marker | status |
+|---|---|---|---|
+| `<p>${ fetchStatus(@url).status }</p>` | `emit-event-wiring.ts:1889` text path | `_scrml_logic_2` | `(await fetchStatus(…))` ✅ (the fix) |
+| `<div title=${ fetchStatus(@url).status }>` | `emit-event-wiring.ts:1665` value-attr path | `_scrml_attr_title_3` | **BARE** ❌ |
+| the same inside a `<match>` arm body | **`emit-variant-guard.ts:569`** arm renderer | `_scrml_logic_4` | **BARE** ❌ |
+| the same inside an `<each>` body | `emit-each.ts` | *(none emitted)* | **UNTESTED — must be probed** |
+
+⚠️ **Attribution corrected S316 (self-correction).** The first cut of this entry credited the second
+bare site to an `<each>` body and recorded the `<match>` arm as "no call site emitted". **Backwards.**
+`_scrml_logic_4` resolves inside `_scrml_match_match_…_wire_A`, i.e. the **`<match>` arm** renderer in
+`emit-variant-guard.ts` — a THIRD emitter, distinct from the two in `emit-event-wiring.ts`. The
+`<each>` position emitted nothing because the probe's `@items` was an **empty array**, so no each mount
+was generated at all: that position is **untested, not clean**, and whoever takes this must probe it
+with a non-empty collection. The finding itself (the fix is incomplete; two confirmed bare sites)
+stands — only the position labels were wrong.
+
+Both bare sites reproduce the ORIGINAL symptom through a different door: the interpolation reads
+`.status` off a **Promise**, renders `undefined`, **compile exit 0, zero diagnostics**. Reproducer: a
+cross-module `export function fetchStatus(url) { return get(url) }` over `scrml:http` (inferred async),
+consumed in each position. **The attribute path is a distinct emitter** (`_scrml_w` setAttribute
+wrapper) from the text path (`_scrml_render_value`), which is why threading the peer-await set into the
+one did not reach the other.
+
+**Class, not instance (S288):** *a fix verified thoroughly inside too small a surface is still
+incomplete — enumerating shapes inside a function is not the same as enumerating the functions a class
+of defect can inhabit.* Whoever takes this should enumerate **every** markup lowering that emits a call
+expression, not just the two named above. Sibling: [[g-inferred-async-call-value-position-no-autoawait]].
+
+### g-nested-each-in-match-arm-drops-diagnostics — an `<each>` nested inside a `<match>` arm silently drops diagnostics that fire in either construct alone — `NEW S316-bryan (S239 review of #389); MED; open`
+<!-- @gap id=g-nested-each-in-match-arm-drops-diagnostics sev=MED status=open locus=searched:compiler/src/ast-builder.js-subparse,armBodyChildren,bodyChildren prov=corpus:probed-five-contexts-S316 -->
+
+**PRE-EXISTING — verified NOT a #389 regression** (reproduces identically on `5aeb656a`, which predates
+it). Surfaced by the S239 pass on #389 while probing span rebasing across five contexts. An
+`E-STATE-UNDECLARED`-triggering read fires correctly at top level, in a `<match>` arm, in an `<each>`
+body, and in an `<engine>` state-child — but produces **NO DIAGNOSTIC AT ALL** when the `<each>` is
+nested **inside** a `<match>` arm:
+
+```scrml
+<match for=Phase on=@phase>
+  <B>
+    <each in=@items>
+      <p : @nestedEachInMatchUndeclared>   <!-- silently accepted; no diagnostic, either side of #389 -->
+    </each>
+  </>
+</>
+```
+
+Both constructs re-parse their bodies by re-running `splitBlocks`+`buildAST` on a substring
+(`armBodyChildren` / `bodyChildren`); the composition of the two appears to lose the inner walk. **Not a
+span bug** — #389 fixed the positions and this is a coverage hole one level up. Severity MED, not HIGH:
+it silently *drops a diagnostic* (fails toward accepting bad source) rather than miscompiling, and the
+nesting is not a common shape — but it is the exact shape a match-heavy adopter file grows into, and the
+loss is invisible.
+
 ### g-session-not-rewritten-inside-sql-interpolation — `session.*` inside a `?{}` SQL template interpolation is not rewritten; bare `session` reaches the server emit and the route 500s on every call — `NEW S313-bryan (adopter dc/DanceCard, GH #357); HIGH; open (build-integrity + silent at compile; PA-REPRODUCED on 16783d6d)`
-<!-- @gap id=g-session-not-rewritten-inside-sql-interpolation sev=HIGH status=open locus=compiler/src/codegen/rewrite.ts:436 -->
+<!-- @gap id=g-session-not-rewritten-inside-sql-interpolation sev=HIGH status=open locus=compiler/src/codegen/rewrite.ts:387,2831 prov=spec:§20.5.15427 -->
 
 Adopter **dc / DanceCard** (a third adopter alongside aM and RediLedger), filed against `a4a4d55f`. **PA-REPRODUCED on `16783d6d`** — not taken on report.
 
@@ -215,7 +276,34 @@ dc reports 2 of 2 interpolated sites bare and 2 of 2 ordinary sites rewritten in
 
 **⚠️ ONE ADOPTER CLAIM DELIBERATELY NOT PROPAGATED — it is UNVERIFIED.** dc argues the failure direction "is luck, not design": with the guard rewritten and the query bare it fails CLOSED (a loud 500 for an authenticated user), but a variant where only the GUARD is interpolated would throw before the auth check and **fail OPEN**. I did not construct that variant, and on the face of it a bare `ReferenceError` in the guard still aborts the request with a 500 rather than granting access — so the fail-open shape is a hypothesis, not a finding. Recorded because it would raise severity further if true; **verify it before citing it** (S302: a reverse-verify falsified a reporter's own attribution).
 
-**Fix direction (dc's, and it matches the code):** a traversal gap, not a semantics question — the session lowering walks expression nodes but not the interpolation children of a SQL template. Those are ordinary expressions and want the same visitor. Locus `compiler/src/codegen/rewrite.ts:436` (`rewriteSqlRefs`, the text-rewrite SQL path) is PA-located-not-traced (pa-base §5) — confirm the pass boundary before scoping. **⚑ LANE CORRECTED S313 — this is NOT automatically Peter's.** It was routed to Peter on an over-broad reading of "adopter bugs = Peter's lane". `pa-profile-pjoliver11.md` scopes that lane by RATIONALE to **`assetManagement`** — *"the adopter app is a real-world scrml shakedown whose findings are meant to reach a fixer who is NOT bryan"*. This is **dc / DanceCard**, a third adopter that did not exist when the lane was ratified (S262), on a **session/auth** surface, rated HIGH, heading into freeze — which reads as bryan's tier-1 work, not as the "naturally disjoint" codegen footprint the lane describes. Correction sent to Peter. **Open contract question for bryan: does the lane key on the ADOPTER or on the SURFACE?** With three adopters live, "adopter bugs = Peter" no longer partitions cleanly. On landing, close GH #357 with the SHA.
+**Fix direction (dc's, and it matches the code):** a traversal gap, not a semantics question — the session lowering walks expression nodes but not the interpolation children of a SQL template. Those are ordinary expressions and want the same visitor. ~~Locus `compiler/src/codegen/rewrite.ts:436` (`rewriteSqlRefs`, the text-rewrite SQL path) is PA-located-not-traced (pa-base §5) — confirm the pass boundary before scoping.~~
+
+**⚑ LOCUS CORRECTED S316 — the recorded one was wrong, and its stated mechanism does not exist.** The
+entry said `rewriteSqlRefs` "walks expression nodes but not the interpolation children". **There are no
+expression children at that layer.** TRACED: `rewrite.ts:387` captures `?{}` interpolations as **raw
+TEXT** (`params.push(interp.expr)`) into a `string[]` for `buildTaggedTemplate`; the server rewrite
+applied to those strings is `rewriteServerAtRef` (`rewrite.ts:2831`), a regex over **`@name` only**;
+`session` is **sigil-less** and therefore structurally invisible to it; and the `session.*` →
+`_scrml_req._scrml_sess.*` lowering lives ONLY in the AST emitter (`emit-expr.ts:2278` member / `:2419`
+index), which interpolation text never reaches. Unlike `route` — also sigil-less but genuinely BOUND in
+the handler prologue (`const route = {…}`) — `session` has **no emitted binding**, so the survivor is a
+free variable. **Blast radius MEASURED (one probe, four interpolated ambients):** `@currentUser.id` →
+`_scrml_currentUser.id` ✅ · `@uid` → `_scrml_body["uid"]` ✅ · `route.query.id` bare-but-bound ✅ ·
+`session.userId` bare-and-unbound ❌. **`session` is the sole affected ambient.**
+
+**RE-REPRODUCED BY EXECUTION on `09d17541` (S316)** — not by reading. An authenticated request through
+the real emitted handler throws `ReferenceError: session is not defined`. Note `node --check` PASSES on
+the broken artifact (a free variable is legal JS), so a static check reports it fixed. Two harness traps
+that produce a false PASS: the route is wrapped by `_scrml_session_cookie_wrap`, which **re-derives**
+`_scrml_sess` and silently overwrites an injected one (you get `200`/`null` from the `isAuth`
+early-return, never reaching the SQL line); and the session store must be seeded **before** importing
+the module.
+
+**bryan RULED direction B (S316):** bind `session` in the server handler prologue the way `route`
+already is — kill the class by construction rather than adding a fourth lowering site. Load-bearing
+constraint: `session[expr]` currently lowers to `_scrml_sess.get(expr)`, and a naive binding flattens
+that to a raw property read (a `semantics-changed` silent regression). Brief:
+`docs/changes/gh357-session-sql-interpolation/BRIEF.md`. **⚑ LANE CORRECTED S313 — this is NOT automatically Peter's.** It was routed to Peter on an over-broad reading of "adopter bugs = Peter's lane". `pa-profile-pjoliver11.md` scopes that lane by RATIONALE to **`assetManagement`** — *"the adopter app is a real-world scrml shakedown whose findings are meant to reach a fixer who is NOT bryan"*. This is **dc / DanceCard**, a third adopter that did not exist when the lane was ratified (S262), on a **session/auth** surface, rated HIGH, heading into freeze — which reads as bryan's tier-1 work, not as the "naturally disjoint" codegen footprint the lane describes. Correction sent to Peter. **Open contract question for bryan: does the lane key on the ADOPTER or on the SURFACE?** With three adopters live, "adopter bugs = Peter" no longer partitions cleanly. On landing, close GH #357 with the SHA.
 
 ### g-263-direct-cross-file-const-import-not-emitted-client — an exported `const` imported DIRECTLY by another unit never reaches the client bundle or the export table — `NEW S313-bryan (adopter, GH #358); MED; open (a known-but-unfiled #263 residual, now adopter-witnessed)`
 <!-- @gap id=g-263-direct-cross-file-const-import-not-emitted-client sev=MED status=open locus=compiler/src/codegen/emit-client.ts -->
@@ -5004,7 +5092,19 @@ on mount { logIt(@f.isValid) }             →   _scrml_logIt(_scrml_cs_reactive
 **Fix direction (unverified — reproduce + re-derive first):** route statement-bodied `on mount` (and, generally, any statement-bodied `bare-expr` string fallback) through the structured AST/`emitMember` path rather than the raw-string rewriter, OR teach that fallback to apply the synth collapse. Threading `synthCellKeys` alone will NOT fix it — the fallback doesn't reach `emitMember`. **Severity MED not HIGH:** narrower than the #262 submit-guard (a statement-bodied mount block reading a synth prop), and `on mount` synth reads are a rarer shape than form submit guards. Lower-confidence sibling flagged by the same review: library/server-boundary `fn` bodies (`emit-library-shared.ts:~609`, `emit-server.ts:~1211`) build `emitFnShortcutBody` opts without `synthCellKeys` — but §55 synth cells are client-reactive, so reachability is doubtful (confirm before acting).
 
 ### g-crossfile-module-const-dropped-from-client-bundle — a cross-file module's exported `const` is emitted nowhere and absent from the export table, while the fns closing over it DO cross → silent ReferenceError — `NEW S299 (adopter GH #263); HIGH; open`
-<!-- @gap id=g-crossfile-module-const-dropped-from-client-bundle sev=HIGH status=open -->
+<!-- @gap id=g-crossfile-module-const-dropped-from-client-bundle sev=HIGH status=resolved locus=compiler/src/codegen/emit-client.ts prov=corpus:verified-by-recompile-S316 -->
+**✅ RESOLVED — verified by recompile at S316 on `09d17541`.** The module-side symptom is gone: a
+cross-file module's exported `const` IS now declared in its `.client.js` AND carried in the
+`_scrml_modules` export table, for both the closed-over-by-an-exported-fn shape and the
+referenced-only-by-the-importing-page shape. The `GREETING`-appears-once-as-an-undeclared-reference
+emit above no longer reproduces. Definition side landed at `d139d775` (#283); the consumption-side
+residual — the importer omitting it from its destructure — was the separately-filed
+[[g-crossfile-export-const-not-destructured-by-importer]], closed by **`a0f2f18b` (#385)**, whose
+commit body names this exact failure ("the importer destructured without it and read a free
+[variable]"). Both halves verified together in one two-file probe; zero free references remain and
+`node --check` is clean on both artifacts. **Caveat on scope:** the probe did not include the adopter's
+extra condition (a server fn ALSO reading the const, so it survived in `.server.js`); the client-side
+symptom both entries describe is what was verified gone.
 **PA-REPRODUCED on `d5ae9a20` — byte-for-byte the emit the adopter filed.** 12 lines, 2 files, **0 errors 0 warnings**, and `node --check` passes:
 
 ```js
@@ -6136,7 +6236,7 @@ setter; presence in the bundle text is NOT sufficient evidence for this class).
 predicate gap) · `compiler/src/codegen/emit-reactive-wiring.ts:496` (the consumer). Same-file
 counter-examples that DO check the flag: `collect.ts:670`, `:713`.
 
-<!-- @gap id=g-crossfile-export-const-not-destructured-by-importer sev=HIGH status=open -->
+<!-- @gap id=g-crossfile-export-const-not-destructured-by-importer sev=HIGH status=resolved locus=compiler/src/codegen/emit-client.ts prov=corpus:verified-by-recompile-S316 -->
 ### G-CROSSFILE-EXPORT-CONST-NOT-DESTRUCTURED-BY-IMPORTER — an imported `export const` is omitted from the importer's destructure and referenced FREE → `ReferenceError` inside the handler, fails OPEN for authorization — `NEW S302; HIGH; open`
 
 **Live residual of GH #263.** PR #283 (`d139d775`) landed the **definition** side; the **consumption**
@@ -6165,6 +6265,26 @@ never pulls it out.
 2. **const referenced ONLY by the importing page**, closed over by no exported fn → dropped from the
    module bundle entirely as well, i.e. the original #263 symptom surviving in a sub-shape #283's
    reachability gate does not reach. *Both sides.*
+
+**✅ RESOLVED — verified by recompile at S316 on `09d17541`.** Closed by **`a0f2f18b` (#385)**, whose
+own commit body names this exact failure ("the importer destructured without it and read a free
+[variable]") and which rewrote `emitReferencedModuleExportConstLines` reachability from "read by a
+node in THIS module" to "read by ANY client compilation unit", plus the `_scrml_modules` importer
+destructure. **BOTH sub-shapes verified**, two files, compile exit 0:
+
+```js
+// models/auth.client.js — module side
+const CAP_PER_DIEM = "per_diem";      // sub-shape 1 — closed over by an exported fn
+const CAP_ONLY_PAGE = "only_page";    // sub-shape 2 — referenced ONLY by the importing page
+_scrml_modules["models/auth.client.js"] = { CAP_PER_DIEM: …, CAP_ONLY_PAGE: …, defaultCaps: …, can: … };
+
+// index.client.js:18 — consumer side, BOTH now destructured (the reported defect was their omission)
+const { defaultCaps, can, CAP_PER_DIEM, CAP_ONLY_PAGE } = _scrml_modules["models/auth.client.js"];
+```
+
+Zero free references remain; `node --check` clean on both artifacts. The stated reproducer no longer
+reproduces. Reproducer retained at `docs/changes/gh357-session-sql-interpolation/` sibling scratch —
+re-derive from the block above if it is needed again.
 
 **Not `pages/`-specific** — reproduced with the importer at project root and no `pages/` directory
 anywhere, so it is NOT the S296 coordinate-space family.
