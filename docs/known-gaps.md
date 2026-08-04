@@ -204,12 +204,21 @@ Not a blocker for the leave-edge arc (discarding is safe), but the SPEC sentence
 `g-crossmodule-async-in-markup-position-not-awaited` for one markup position only. Probed all four
 positions an interpolated cross-module inferred-async call can inhabit; **only the first is awaited:**
 
-| source position | emitted marker | status |
-|---|---|---|
-| `<p>${ fetchStatus(@url).status }</p>` | `_scrml_logic_2` | `(await fetchStatus(…))` ✅ (the fix) |
-| `<div title=${ fetchStatus(@url).status }>` | `_scrml_attr_title_3` | **BARE** ❌ |
-| the same interpolation inside an `<each>` body | `_scrml_logic_4` | **BARE** ❌ |
-| the same inside a `<match>` arm body | *(no call site emitted)* | unresolved — re-derive |
+| source position | emitter | emitted marker | status |
+|---|---|---|---|
+| `<p>${ fetchStatus(@url).status }</p>` | `emit-event-wiring.ts:1889` text path | `_scrml_logic_2` | `(await fetchStatus(…))` ✅ (the fix) |
+| `<div title=${ fetchStatus(@url).status }>` | `emit-event-wiring.ts:1665` value-attr path | `_scrml_attr_title_3` | **BARE** ❌ |
+| the same inside a `<match>` arm body | **`emit-variant-guard.ts:569`** arm renderer | `_scrml_logic_4` | **BARE** ❌ |
+| the same inside an `<each>` body | `emit-each.ts` | *(none emitted)* | **UNTESTED — must be probed** |
+
+⚠️ **Attribution corrected S316 (self-correction).** The first cut of this entry credited the second
+bare site to an `<each>` body and recorded the `<match>` arm as "no call site emitted". **Backwards.**
+`_scrml_logic_4` resolves inside `_scrml_match_match_…_wire_A`, i.e. the **`<match>` arm** renderer in
+`emit-variant-guard.ts` — a THIRD emitter, distinct from the two in `emit-event-wiring.ts`. The
+`<each>` position emitted nothing because the probe's `@items` was an **empty array**, so no each mount
+was generated at all: that position is **untested, not clean**, and whoever takes this must probe it
+with a non-empty collection. The finding itself (the fix is incomplete; two confirmed bare sites)
+stands — only the position labels were wrong.
 
 Both bare sites reproduce the ORIGINAL symptom through a different door: the interpolation reads
 `.status` off a **Promise**, renders `undefined`, **compile exit 0, zero diagnostics**. Reproducer: a

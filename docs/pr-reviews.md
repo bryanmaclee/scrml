@@ -79,12 +79,16 @@ predate the rule and are out of scope by construction rather than by exemption.
 - **#391** — **FINDING: the fix is incomplete.** Probed the four markup positions an interpolated
   cross-module async call can inhabit. Only the top-level text interpolation is awaited:
 
-  | source position | emitted marker | status |
+  | source position | emitter | status |
   |---|---|---|
-  | `<p>${ fetchStatus(@url).status }</p>` | `_scrml_logic_2` | `(await fetchStatus(…))` ✅ |
-  | `<div title=${ fetchStatus(@url).status }>` | `_scrml_attr_title_3` | **BARE** ❌ |
-  | inside an `<each>` body | `_scrml_logic_4` | **BARE** ❌ |
-  | inside a `<match>` arm body | *(no call site emitted)* | unresolved |
+  | `<p>${ fetchStatus(@url).status }</p>` | `emit-event-wiring.ts:1889` | `(await …)` ✅ |
+  | `<div title=${ … }>` | `emit-event-wiring.ts:1665` | **BARE** ❌ |
+  | inside a `<match>` arm body | `emit-variant-guard.ts:569` | **BARE** ❌ |
+  | inside an `<each>` body | `emit-each.ts` | **UNTESTED** (probe used an empty collection) |
+
+  *(Attribution corrected in-session: the second bare site is the `<match>` arm renderer — a THIRD
+  emitter — not the `<each>` body, and the `<each>` position was never actually exercised. The finding
+  stands; the labels were wrong.)*
 
   Both bare sites reproduce the ORIGINAL symptom by a different door — a field read off a Promise
   renders `undefined`, silently, compile exit 0. This is the S288 shape: *a fix verified thoroughly
