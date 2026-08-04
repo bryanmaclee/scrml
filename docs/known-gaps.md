@@ -197,6 +197,58 @@ Filed separately from `g-route-timer-poll-not-stopped-on-soft-nav` because it is
 
 Not a blocker for the leave-edge arc (discarding is safe), but the SPEC sentence says abort and the compiler does not, which is the plain shape of a spec-vs-impl gap. Locus recorded as a SEARCH rather than a trace — the discard is observed behaviour; the exact registration site was not traced.
 
+### g-markup-autoawait-misses-attr-and-each-body — the #391 markup autoawait covers ONLY the top-level text interpolation; an attribute-value binding and an `<each>` body still emit the async call BARE → a Promise field read renders `undefined`, silently — `NEW S316-bryan (S239 review of #391); HIGH; open`
+<!-- @gap id=g-markup-autoawait-misses-attr-and-each-body sev=HIGH status=open locus=compiler/src/codegen/emit-event-wiring.ts prov=corpus:probed-four-markup-positions-S316 -->
+
+**Found by the S239 adversarial pass on #391** (`27adae9e`), which fixed
+`g-crossmodule-async-in-markup-position-not-awaited` for one markup position only. Probed all four
+positions an interpolated cross-module inferred-async call can inhabit; **only the first is awaited:**
+
+| source position | emitted marker | status |
+|---|---|---|
+| `<p>${ fetchStatus(@url).status }</p>` | `_scrml_logic_2` | `(await fetchStatus(…))` ✅ (the fix) |
+| `<div title=${ fetchStatus(@url).status }>` | `_scrml_attr_title_3` | **BARE** ❌ |
+| the same interpolation inside an `<each>` body | `_scrml_logic_4` | **BARE** ❌ |
+| the same inside a `<match>` arm body | *(no call site emitted)* | unresolved — re-derive |
+
+Both bare sites reproduce the ORIGINAL symptom through a different door: the interpolation reads
+`.status` off a **Promise**, renders `undefined`, **compile exit 0, zero diagnostics**. Reproducer: a
+cross-module `export function fetchStatus(url) { return get(url) }` over `scrml:http` (inferred async),
+consumed in each position. **The attribute path is a distinct emitter** (`_scrml_w` setAttribute
+wrapper) from the text path (`_scrml_render_value`), which is why threading the peer-await set into the
+one did not reach the other.
+
+**Class, not instance (S288):** *a fix verified thoroughly inside too small a surface is still
+incomplete — enumerating shapes inside a function is not the same as enumerating the functions a class
+of defect can inhabit.* Whoever takes this should enumerate **every** markup lowering that emits a call
+expression, not just the two named above. Sibling: [[g-inferred-async-call-value-position-no-autoawait]].
+
+### g-nested-each-in-match-arm-drops-diagnostics — an `<each>` nested inside a `<match>` arm silently drops diagnostics that fire in either construct alone — `NEW S316-bryan (S239 review of #389); MED; open`
+<!-- @gap id=g-nested-each-in-match-arm-drops-diagnostics sev=MED status=open locus=searched:compiler/src/ast-builder.js-subparse,armBodyChildren,bodyChildren prov=corpus:probed-five-contexts-S316 -->
+
+**PRE-EXISTING — verified NOT a #389 regression** (reproduces identically on `5aeb656a`, which predates
+it). Surfaced by the S239 pass on #389 while probing span rebasing across five contexts. An
+`E-STATE-UNDECLARED`-triggering read fires correctly at top level, in a `<match>` arm, in an `<each>`
+body, and in an `<engine>` state-child — but produces **NO DIAGNOSTIC AT ALL** when the `<each>` is
+nested **inside** a `<match>` arm:
+
+```scrml
+<match for=Phase on=@phase>
+  <B>
+    <each in=@items>
+      <p : @nestedEachInMatchUndeclared>   <!-- silently accepted; no diagnostic, either side of #389 -->
+    </each>
+  </>
+</>
+```
+
+Both constructs re-parse their bodies by re-running `splitBlocks`+`buildAST` on a substring
+(`armBodyChildren` / `bodyChildren`); the composition of the two appears to lose the inner walk. **Not a
+span bug** — #389 fixed the positions and this is a coverage hole one level up. Severity MED, not HIGH:
+it silently *drops a diagnostic* (fails toward accepting bad source) rather than miscompiling, and the
+nesting is not a common shape — but it is the exact shape a match-heavy adopter file grows into, and the
+loss is invisible.
+
 ### g-session-not-rewritten-inside-sql-interpolation — `session.*` inside a `?{}` SQL template interpolation is not rewritten; bare `session` reaches the server emit and the route 500s on every call — `NEW S313-bryan (adopter dc/DanceCard, GH #357); HIGH; open (build-integrity + silent at compile; PA-REPRODUCED on 16783d6d)`
 <!-- @gap id=g-session-not-rewritten-inside-sql-interpolation sev=HIGH status=open locus=compiler/src/codegen/rewrite.ts:387,2831 prov=spec:§20.5.15427 -->
 

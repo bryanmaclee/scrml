@@ -35,6 +35,9 @@ predate the rule and are out of scope by construction rather than by exemption.
 
 ## Log
 
+<!-- @review pr=391 verdict=finding by=S316-bryan date=2026-08-03 probe=adjacent-markup-positions note=autoawait-incomplete-attr-and-each-body -->
+<!-- @review pr=390 verdict=clean by=S316-bryan date=2026-08-03 probe=import-resolution-executed -->
+<!-- @review pr=389 verdict=clean by=S316-bryan date=2026-08-03 probe=span-rebase-vs-prefix-baseline -->
 <!-- @review pr=392 verdict=carve-out by=S316-bryan date=2026-08-03 probe=docs-only-continuity -->
 <!-- @review pr=388 verdict=finding by=S316-bryan date=2026-08-03 probe=direction-of-change note=export-let-newly-accepting-REJECTED -->
 <!-- @review pr=387 verdict=clean by=S316-bryan date=2026-08-03 probe=tailwind-over-emission -->
@@ -60,3 +63,32 @@ predate the rule and are out of scope by construction rather than by exemption.
   already met and `export let` bought only cross-module mutable sharing. **bryan RULED reject (S316).**
   Revert that half; the main-only import tree-shaking half is a clean under-emit fix and stays.
 - **#392** — continuity/changelog/delta-log only, no code path → carve-out.
+- **#389** — probed span rebasing against the **pre-#389 baseline** (a worktree at `5aeb656a`, which
+  predates it), with an undeclared read at a known line in five contexts. Baseline: match-arm read
+  reported **line 1** (true 10), `<each>`-body read reported **line 1** (true 19). Post-fix: **10** and
+  **19**. Control (top-level, line 7) unshifted both sides — **no double-rebase**. Engine state-child
+  arms reported correctly on BOTH sides, so #389 neither fixed nor broke them (an earlier read of mine
+  that it "broadened coverage there" was wrong). **Clean — does exactly what it claims.** Surfaced a
+  separate PRE-EXISTING bug, filed: [[g-nested-each-in-match-arm-drops-diagnostics]].
+- **#390** — probed the S296 over-correction axis: a `kind="tool"` under `pages/` (the shape it fixes,
+  where dist strips the leading segment) AND one NOT under `pages/` (where there is nothing to strip
+  and a naive re-base would overshoot the other way). Both emit `./models/lib.js` against an artifact
+  at `./models/lib.js`. **Verified BY EXECUTION** — both tools imported and ran (`hi a` / `hi b`),
+  which is the required standard for this class: S296's signature is compile exit 0 + `node --check`
+  clean + runtime `Cannot find module`. **Clean.**
+- **#391** — **FINDING: the fix is incomplete.** Probed the four markup positions an interpolated
+  cross-module async call can inhabit. Only the top-level text interpolation is awaited:
+
+  | source position | emitted marker | status |
+  |---|---|---|
+  | `<p>${ fetchStatus(@url).status }</p>` | `_scrml_logic_2` | `(await fetchStatus(…))` ✅ |
+  | `<div title=${ fetchStatus(@url).status }>` | `_scrml_attr_title_3` | **BARE** ❌ |
+  | inside an `<each>` body | `_scrml_logic_4` | **BARE** ❌ |
+  | inside a `<match>` arm body | *(no call site emitted)* | unresolved |
+
+  Both bare sites reproduce the ORIGINAL symptom by a different door — a field read off a Promise
+  renders `undefined`, silently, compile exit 0. This is the S288 shape: *a fix verified thoroughly
+  inside too small a surface is still incomplete — enumerating shapes inside a function is not the same
+  as enumerating the functions a class of defect can inhabit.* The PR's own test carries a sync
+  negative control (good practice) but only exercises the one position it fixed. Filed:
+  [[g-markup-autoawait-misses-attr-and-each-body]].
