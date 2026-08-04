@@ -1,8 +1,60 @@
 <!-- ============================================================= -->
-<!-- S316 WRAP (bryan/ASUS-Vivobook) — prepended 2026-08-04.        -->
-<!-- S313 + S310 + S312 + all prior UNCHANGED below.                -->
-<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- S319 WRAP (peter/P-Tech1 Windows) — prepended 2026-08-04.       -->
+<!-- S316-bryan + all prior UNCHANGED below.                         -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)       -->
 <!-- ============================================================= -->
+
+# scrml — Session 319 (peter · P-Tech1 Windows) — WRAP
+
+**Date:** 2026-08-04. `/boot` Profile A. **2 PRs merged** (#396 #401). **Mechanical stream =
+delta-log [1120]–[1123].** main `e6d4c479`, coherence **0/0** both repos. Concurrent with
+S319-bryan all session (disjoint surface; bryan = deliberation/gaps/review, me = codegen).
+
+## Landed
+- **#396 `g-fn-shorthand-tail-match-emits-degenerate-body` (HIGH → resolved)** — the
+  `fn/function … [-> T] = <expr>` expression-body form is **not sanctioned** (§48.2 admits only a
+  `{ … }` block; ruling A, the `=`-sibling of `E-FN-ARROW-BODY`). Was a **silent** miscompile: the
+  return-type consumer swallowed `= match k`, the match `{` was read as the body brace → degenerate
+  body returning `undefined`. Now a clean parse-time **E-FN-EQUALS-BODY** at every decl site
+  (top-level + nested + **export**, whose re-parse was swallowing the error). **S239 caught + fixed a
+  route= regression** pre-land (typed routed endpoints false-fired) which also closed a pre-existing
+  silent route-drop. §34 row + §48.2 note + conformance pin + unit (17 cases). Conf 852→853.
+- **#401 auto-await re-scope (docs-only)** — see the next-pick below.
+
+## 🔴 THE NEXT PA'S FIRST MOVE — the CPS-scheduler auto-await arc (fresh context)
+
+The S318 "4 MED auto-await siblings" were **reproduced and re-scoped** (#401); the filings were
+partly wrong. **The shared root — now root-caused, not inferred:** the CPS async scheduler lists
+`given`/`if`/`match` bodies as opaque `isControlFlowBoundary` (`scheduling.ts:988`) and **never
+descends**, so a server call nested inside escapes the #87 await-injection → bare Promise → silent
+wrong value. This is exactly the choke point **delta [1117]/[1119] Q2** flagged. Filed root gaps:
+- **`g-cps-scheduler-opaque-boundary-hides-nested-server-calls`** (MED) — the shared root; START HERE.
+- **`g-given-block-server-call-no-autoawait`** (MED) — the ONE clean auto-await case; TARGET FIRST
+  (enclosing fn already async; `given` body emits `const r = _scrml_fetch_getFlag().ok` bare).
+  Note `parenthesizeAwaitServerCallsInExpr` is EXPRESSION-only (wraps in an async arrow) — a `given`
+  *statement* body needs statement-aware injection, OR make the scheduler recurse (delicate).
+  **R26 runtime proof required** (execute the emitted fn with a stubbed async fetch → resolves true).
+- **`g-block-body-value-position-mislowers`** (MED) — supersedes the mis-filed `g-match-block-arm`;
+  a block-body VALUE arm (`match k { 1 :> { 42 } … }`) emits invalid JS even with NO server call;
+  the if-value decl form assigns to a dead inner tilde var (`x` always null). A DIFFERENT bug.
+- **`g-hash87-member-read-await-misparen`** (MED) — the #87 path emits `await f().ok` (binds `.ok`,
+  not the call) on the plain-fn baseline too; same shape #394 fixed for match arms.
+- **`g-match-value-position-server-call-no-autoawait`** — the HARD one: a markup render slot is not
+  async → bare is by-design under #394's legality model. Needs a **§13.2 render-async RULING (bryan's
+  lane)** before any code, NOT a mechanical injection.
+
+## Open threads / next PA's judgment
+- **Maps OWED** (project-mapper not run — an agent dispatch, deferred; consistent with S313–S318).
+  #396 touched `compiler/src/ast-builder.js` (parser); a maps refresh is owed for the fn-decl surface.
+- **1 LOW residual from #396:** anonymous `let f = fn(x) = expr` still routes to E-CODEGEN
+  (`g-fn-anon-expr-equals-body-emits-invalid-js`) — expression-parser path, out of the #396 scope.
+- **bryan's #396 review** filed `g-sse-author-route-unpinned-and-plain-fn-route-exceeds-carveout`
+  (MED) — the route= restoration inside #396 is unpinned + the plain-`function route=` may exceed
+  the §12.3 carve-out (a Rule-4 governing-sentence question). His lane.
+- **Env (P-Tech1):** see [[ptech1-scrml-gate-baseline]]. Full unit **17341/0**; integration baseline
+  fails are csrf B5 + self-host-smoke ×3 + corpus-§2 + Postgres/server-boot co-run flakes (pass in
+  isolation) — all Windows-local, cloud green. New memory: [[scrml-fn-decl-parse-sites-topology]].
+
 
 # scrml — Session 316 (bryan · ASUS-Vivobook) — WRAP
 
