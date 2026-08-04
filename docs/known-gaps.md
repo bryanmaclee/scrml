@@ -32,9 +32,20 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 22 |
 | MED | 110 |
-| LOW | 48 |
+| LOW | 49 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-lifecycle-teardown-order-overspecified — §6.7.2's four-step and §20.8.8's six-step teardown sequences are written as TOTAL orders with no "MAY reorder" language, while only ~2 of ~15 orderable pairs have a stated correctness reason — `NEW S319-bryan (surfaced by the dpa-018 ROUND-2 dPA as an explicitly SEPARABLE item, §7.4); LOW; open`
+<!-- @gap id=g-lifecycle-teardown-order-overspecified sev=LOW status=open locus=compiler/SPEC.md:§20.8.8 prov=debate:soft-nav-outlet-lifecycle-pole-d-round2-2026-08-04 -->
+
+**Filed separately ON PURPOSE.** The dpa-018 round-2 panel surfaced this while adjudicating Pole D and explicitly ruled it **not a Pole-D question** — *"D does not touch ordering at all. It should be filed as its own spec-hygiene ticket against §20.8.8, not folded into this round's verdict. It survives regardless of how the D question lands."* Recorded here so it does not ride out with the round-2 verdict.
+
+**The finding (dPA-verified against the spec text):** §6.7.2's four-step teardown (`when` effects unregistered → `<timer>`/`<poll>` stopped → author `cleanup()` LIFO → pending `animationFrame()` cancelled) and §20.8.8's six-step edge contract are both written as **unqualified sequential lists** — a genuine total order — yet only a couple of the ~15 orderable pairs carry a stated correctness reason (abort-before-dispose; `if=` depth-first). The rest are pinned by prose position alone.
+
+**Why it costs something:** the freeze bar requires a conformance case per claimed surface, so pinning unfalsifiable orderings **taxes every implementer to match a guarantee nobody has shown is observable** — and impl#2 (native / Road-B) pays it directly. Estimated 1–2 conformance cases either way.
+
+**Two honest resolutions, both cheap:** (a) add "MAY reorder" / "the observable order is unspecified except where noted" to the steps with no stated reason, and pin only the ones that DO have one; or (b) supply the missing correctness reasons, if they exist and were simply never written down. **This is a Rule-4 question (does the normative text mean what its FORM implies?), not a bug** — and it is PA-unverified against the source: the dPA is a deliberation runner, not a source authority, so the ~15-pair count should be re-derived before acting.
 
 ### g-route-timer-poll-not-stopped-on-soft-nav — a route-content `<timer>`/`<poll>` is NEVER stopped on soft navigation and fires against detached DOM for the rest of the session; author `cleanup()` never runs — `NEW S313-bryan (surfaced by the dpa-018 source-read); HIGH; open (PA-VERIFIED BY SOURCE TRACE on 8d54bdae — live at HEAD, INDEPENDENT of the pending ruling)`
 <!-- @gap id=g-route-timer-poll-not-stopped-on-soft-nav sev=HIGH status=open locus=compiler/src/runtime-template.js:3026 prov=dd:soft-nav-outlet-lifecycle-model-2026-08-02 -->

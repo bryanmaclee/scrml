@@ -35,6 +35,7 @@ predate the rule and are out of scope by construction rather than by exemption.
 
 ## Log
 
+<!-- @review pr=398 verdict=carve-out by=S319-bryan date=2026-08-04 probe=own-dpa-banks-and-review-record-docs-only -->
 <!-- @review pr=396 verdict=finding by=S319-bryan date=2026-08-04 probe=route-attr-semantics-diff-main-vs-branch-by-execution note=sse-author-route-conformance-restoration-undersold -->
 <!-- @review pr=397 verdict=carve-out by=S319-bryan date=2026-08-04 probe=own-wrap-continuity-docs-only -->
 
