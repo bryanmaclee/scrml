@@ -2,6 +2,14 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S318 — 2026-08-04 (Peter · Windows) — Ask #7 note re-delivered + a match-arm auto-await conformance fix
+
+Two landings. First closed a cross-clone delivery gap; second restored §13.2 position-invariant auto-await for a `match`-arm position, each verified by execution and a PA-side adversarial (S239) pass. The fix's sibling sweep also surfaced a pre-existing HIGH lowering bug (now filed).
+
+- **#393 — flogenceP Ask #7 re-delivery:** the full `get_style_provenance` reactivation note had been committed only locally at S315 (write + commit, no push — the per-clone trap) and never reached the maintainer's clone. Re-delivered to `handOffs/incoming/` via a docs-only PR. Delivery only — the design rulings inside remain the language owner's call.
+- **#394 — `g-match-arm-server-call-no-autoawait`:** a server call inside a client value-form `match` arm (`const label = match k { 1 :> getFlag().ok … }`) was emitted un-awaited and the enclosing function was not marked `async`, so the arm value silently became a Promise (a field read off it → `undefined`). The match-arm result now auto-awaits with a precedence-correct `(await fn()).field` wrap and the enclosing function is coloured `async`. Inert across the entire corpus (0 emit changes) — only the bug shape changes. A new conformance test pins both the emitted `await`/`async` and the runtime resolution.
+- **Filed during the fix's sibling sweep** (recorded, not fixed here): a **HIGH** — a tail-expression fn-shorthand whose body is a `match` (`fn f -> T = match …`) emits a degenerate body that drops the entire match and returns `undefined` (pre-existing, verified on `main`); plus four MED auto-await siblings (interpolation/value position, block-body arm, `given` block, `if`-as-value cascade).
+
 ## S317 — 2026-08-03 (Peter · Windows) — three MED gaps: sub-parse diagnostic lines, §64 tool import specifiers, cross-module async in markup
 
 Three adopter-DX / codegen-completeness fixes, each verified by execution and cleared by a PA-side adversarial (S239) pass — two of which caught a real defect before land.
