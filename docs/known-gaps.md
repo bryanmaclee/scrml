@@ -30,11 +30,32 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 22 |
+| HIGH | 23 |
 | MED | 114 |
 | LOW | 49 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-session-ambient-unlowered-trust-boundary-inversion — `@session.<field>` lowers to `_scrml_body["session"].<field>`, so a CLIENT-SUPPLIED request-body field is read as identity and written to identity columns — compile exit 0, zero diagnostics — `NEW S319-bryan (routed OUT-OF-SCOPE by the dpa-021 DD; PA-VERIFIED BY EMISSION, not taken on the dPA's report); HIGH; open`
+<!-- @gap id=g-session-ambient-unlowered-trust-boundary-inversion sev=HIGH status=open locus=compiler/src/codegen/rewrite.ts:2833 prov=dd:gh357-session-binding-accessor-shape-2026-08-04 -->
+
+**A trust-boundary INVERSION, not a leak.** `rewriteServerAtRef` (`compiler/src/codegen/rewrite.ts:2833`) special-cases only `currentUser` among the ambients, so `@session` falls through to the generic `@name` → request-body rewrite.
+
+**PA-VERIFIED BY EMISSION at S319** (the dPA is a deliberation runner, explicitly not a source authority — this was re-derived independently). Source:
+
+```scrml
+function saveNote(body: string) {
+    ?{ insert into notes (sid, body) values (${@session.userId}, ${body}) }
+}
+```
+
+emits `_scrml_body["session"].userId` into the server handler. **`_scrml_body` is the deserialized client request body.** So the identity written to the `sid` column is whatever the caller POSTed: `{"session":{"userId":"victim"}}` attributes the row to `victim`. The compiler reports **0 errors** and there is no diagnostic for it.
+
+**Why it survived:** the guarding conformance case (`conformance/cases/reactive/server-fn-ambient-identity-clean`) is **GREEN** — but it asserts the *absence of a code* (`E-REACTIVE-003`) and **never inspects the artifact**. That is precisely the class filed as [[g-conformance-cannot-assert-emitted-route-path]]: the harness has no way to assert emitted content, so a case can be green while the emitted bundle is wrong. **Two independent S319 findings converging on one root cause** — the dPA cited commit `0fecca8e` (that gap's landing) as corroboration for this one.
+
+**Scope + relationship to GH #357.** Distinct defect, same file, adjacent line. **Direction B (bind `session` in the server prologue, ruled S316) does NOT fix this** — B addresses `session` reaching the emit *unbound* inside a `?{}`; this is `@session` being bound to *the wrong thing*. Both must be handled or the fix for one masks the other.
+
+**Severity note (bryan's call).** Filed HIGH on the same basis as the other silent-confidentiality items. An argument exists for CRITICAL — it is remotely reachable, requires no special conditions, produces no diagnostic, and inverts an identity guarantee the compiler claims to own (§20.5 / §52) — but severity on a security surface is a ruling, not a PA classification, so it is filed at HIGH and flagged rather than escalated unilaterally. **Blast radius is NOT yet measured** — the emission was proven on one shape; the corpus sweep for `@session` uses is owed before any fix is scoped.
 
 ### g-conformance-cannot-assert-emitted-route-path — the conformance harness has NO assertion for emitted artifact content, so the entire author-declared-path guarantee class (§12.3 · §37.3 · §61.7) is structurally unpinnable — freeze-relevant — `NEW S319-bryan (surfaced by the S239 review of #396); MED; open`
 <!-- @gap id=g-conformance-cannot-assert-emitted-route-path sev=MED status=open locus=conformance/run.ts prov=spec:§37.3 -->
