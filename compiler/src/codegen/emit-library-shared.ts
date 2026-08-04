@@ -55,14 +55,27 @@ export function bodyHasForeignOrSql(node: unknown): boolean {
  * `{kind:"call", callee:{kind:"ident", name:"foo"}}`. A METHOD call (`x.foo()`,
  * a `member` callee) is NOT a peer-fn call and is skipped.
  *
- * STRUCTURAL ONLY (S259 colorless-async-boundaries [4]) — NEVER a source-text
- * scan. The prior `extractCalleeNames(.raw)` recovery over a block-body lambda /
- * template `.raw` used the over-matching `\bname\s*\(` regex (matches a call-shaped
- * token in a string/comment) → false-positive coloring. Dropped: a call buried in
- * a RAW verbatim body is NOT a coloring signal; that shape is bucket (c)
- * (fail-closed, structurally detected) or bucket (a) (an array-method callback
- * routed to the async combinator), never a raw text-scan for coloring.
+ * STRUCTURAL ONLY (S259 colorless-async-boundaries [4]) for every structured node —
+ * NEVER a source-text scan. The prior `extractCalleeNames(.raw)` recovery over a
+ * block-body lambda / template `.raw` used the over-matching `\bname\s*\(` regex
+ * (matches a call-shaped token in a string/comment) → false-positive coloring.
+ * Dropped: a call buried in a RAW verbatim body is NOT a coloring signal; that shape
+ * is bucket (c) (fail-closed, structurally detected) or bucket (a) (an array-method
+ * callback routed to the async combinator), never a raw text-scan for coloring.
+ *
+ * NARROW EXCEPTION (g-match-arm-server-call-no-autoawait) — a value-form `match`
+ * arm carries its RESULT as a raw expression STRING (the ast-builder does not
+ * structure the arm-result tail), so a server/async call there has NO structured
+ * `call` node to walk. Those specific arm strings ARE text-scanned (string literals
+ * pre-stripped to avoid the S239 over-match), so §13.2 auto-await colouring reaches
+ * a call the structural walk cannot see. Scoped to match-arm result strings only.
  */
+/** Strip string/template/regex-ish literal CONTENTS so a call-shaped token inside a
+ *  `"…"`/`'…'`/backtick literal is not mis-read as a callee (S239 over-match guard). */
+function _stripStringLiterals(s: string): string {
+  return s.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`/g, '""');
+}
+
 function collectCalleeIdents(node: unknown, out: Set<string>, guardNestedFnValues = false): void {
   if (!node || typeof node !== "object") return;
   if (Array.isArray(node)) { for (const c of node) collectCalleeIdents(c, out, guardNestedFnValues); return; }
@@ -80,6 +93,27 @@ function collectCalleeIdents(node: unknown, out: Set<string>, guardNestedFnValue
     if (typeof n.name === "string") out.add(n.name);
     const callee = n.callee as ASTNode | undefined;
     if (callee && callee.kind === "ident" && typeof callee.name === "string") out.add(callee.name);
+  }
+  // g-match-arm-server-call-no-autoawait (§13.2 / §19.9.3) — a value-form match
+  // arm frequently carries its RESULT as a raw expression STRING (`match-arm-inline`
+  // `result`, or the whole `test :> result` text on a `bare-expr` arm `expr`) whose
+  // call is INVISIBLE to the structural `call`-node walk above — the string field is
+  // skipped by the generic recursion. Harvest callee idents from those arm strings
+  // so a server/async call buried in a match arm colours the enclosing fn `async`
+  // (its emitted arm result is auto-awaited by emitMatchExprDecl →
+  // parenthesizeAwaitServerCallsInExpr). String LITERALS are stripped first so a
+  // call-shaped token inside a `"…"` pattern/result is not a false coloring signal
+  // (the S239 text-scan over-match guard). Structured arm bodies (match-arm-block)
+  // are already covered by the generic recursion into their `.body` statement array.
+  if (n.kind === "match-expr" || n.kind === "match-stmt") {
+    const arms = Array.isArray((n as ASTNode).body) ? ((n as ASTNode).body as ASTNode[]) : [];
+    for (const arm of arms) {
+      if (!arm || typeof arm !== "object") continue;
+      const s = typeof (arm as ASTNode).result === "string" && (arm as ASTNode).result
+        ? ((arm as ASTNode).result as string)
+        : (typeof (arm as ASTNode).expr === "string" ? ((arm as ASTNode).expr as string) : "");
+      if (s) for (const c of extractCalleeNames(_stripStringLiterals(s))) out.add(c);
+    }
   }
   for (const key of Object.keys(n)) {
     if (key === "span") continue;

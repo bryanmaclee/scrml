@@ -4355,6 +4355,37 @@ function emitForExprDecl(name: string, forExpr: any, keyword: "let" | "const", o
 // ---------------------------------------------------------------------------
 
 /**
+ * g-match-arm-server-call-no-autoawait (§13.2 / §19.9.3) — parenthesize-await any
+ * server-fn call inside an already-emitted (pre-name-mangle) match-arm result
+ * expression. Delegates the AST-correct wrap to `scheduling.ts`
+ * (`parenthesizeAwaitServerCallsInExpr`).
+ *
+ * Await-legality gate: fires ONLY when the enclosing body is a real `async` scope
+ * — a client fn coloured async (`clientAsyncBody`) or a server-boundary body.
+ * A markup/render context (`${ match … }` in a slot) is NOT an async fn, so
+ * awaiting there would be a SyntaxError; those emit BARE, matching the #87
+ * statement-level injector's legality model. Server fn names derive from the
+ * threaded route classifier; absent it (test harness / no imports) this is a no-op.
+ */
+function _awaitMatchArmServerCalls(rhs: string, opts: EmitLogicOpts): string {
+  const routeMap = (opts as any).asyncRouteMap;
+  if (!routeMap || !routeMap.functions) return rhs;
+  const awaitLegal = (opts as any).clientAsyncBody === true || opts.boundary === "server";
+  if (!awaitLegal) return rhs;
+  const serverFnNames = new Set<string>();
+  for (const [, route] of routeMap.functions as Map<string, { boundary?: string; functionName?: string }>) {
+    if (route.boundary === "server" && route.functionName) serverFnNames.add(route.functionName);
+  }
+  if (serverFnNames.size === 0) return rhs;
+  try {
+    const sched = require("./scheduling.js");
+    return sched.parenthesizeAwaitServerCallsInExpr(rhs, serverFnNames);
+  } catch (_e) {
+    return rhs;
+  }
+}
+
+/**
  * Emit a match-as-expression declaration. Pre-declares a tilde variable,
  * emits the match arms as if/else-if blocks with lift assigning to that
  * variable, then assigns the result to the declared name.
@@ -4473,8 +4504,18 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
     // returns from the ENCLOSING (always `!`, per NS-1) function, so it does NOT
     // assign to the tilde var; the `return` exits the function directly. The
     // pre-fix path emitted `tildeVar = fail "V"(args)` -> E-CODEGEN-INVALID-LOGIC.
-    const armResultLine = (a: MatchArm): string =>
-      a.failExpr ? `  ${emitFailExpr(a.failExpr as FailExprLike, opts)}` : `  ${tildeVar} = ${emitExprField(null, a.result, _makeExprCtx(opts))};`;
+    const armResultLine = (a: MatchArm): string => {
+      if (a.failExpr) return `  ${emitFailExpr(a.failExpr as FailExprLike, opts)}`;
+      // g-match-arm-server-call-no-autoawait (§13.2 / §19.9.3) — a server call in
+      // this value-form match arm re-emits from a raw expression string, a path the
+      // #87 statement-level auto-await never reached, so it shipped a BARE unawaited
+      // Promise (a field read off it → `undefined`, silent-wrong). Parenthesize-await
+      // the server call(s) here; the enclosing fn is coloured `async` in parallel by
+      // the match-arm callee harvest in collectCalleeIdents (emit-library-shared.ts),
+      // so the `await` is always legal.
+      const rhs = _awaitMatchArmServerCalls(emitExprField(null, a.result, _makeExprCtx(opts)), opts);
+      return `  ${tildeVar} = ${rhs};`;
+    };
 
     // Raw result: assign rewritten expression to tilde var (or re-fail).
     if (arm.kind === "wildcard") {
