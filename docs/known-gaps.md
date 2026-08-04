@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 23 |
-| MED | 105 |
+| HIGH | 24 |
+| MED | 108 |
 | LOW | 47 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -1522,7 +1522,24 @@ So: **1.3% incidence (1/78), live on real corpus code but not in an adopter app.
 <!-- @gap id=g-reactive-write-member-server-call-no-autoawait sev=MED status=open -->
 
 ### g-match-arm-server-call-no-autoawait — a server call inside a CLIENT `match` arm (`const label = match k { 1 :> getFlag().ok  _ :> false }`) emits a bare unawaited Promise; the enclosing client fn is not `async` → `label` holds a Promise. A client `match` lowers to a SYNCHRONOUS IIFE (value-return), where `await` is illegal, so #87's statement-level await-injection can't apply. §19.9.3 names match arms a CPS-eligible position → conformance gap. Fix = lower the arm's IIFE to an ASYNC IIFE and `await` it (mark the enclosing fn async), OR CPS-split. Distinct mechanism from #87. Sweep siblings when fixing: ternary arms, `!{}` guarded-expr handler bodies, `<each>`-in-logic lift bodies, `given` blocks. — `NEW S267 (#87 review); MED; open`
-<!-- @gap id=g-match-arm-server-call-no-autoawait sev=MED status=open -->
+
+**✅ RESOLVED S318-peter — verified by execution + a 1056-file corpus sweep (0 emit changes) + adversarial probes (over-color guard holds; multi-arm + nested-arg awaited).** R26 CORRECTION to the filed mechanism: the `const label = match …` DECL form does NOT lower to a sync IIFE — it lowers to a **statement-form tilde-temp + if-chain**, so `await` IS legal. The real defect was that the server-call rewrite ran on the arm-result string but the #87 await-injection + enclosing-fn async-marking never reached it. Fix (three seams): `scheduling.ts` new `parenthesizeAwaitServerCallsInExpr` (precedence-correct `(await fn()).x` wrap, distinct from #87's bare-prefix); `emit-logic.ts` `emitMatchExprDecl` awaits the arm RHS (gated on an async body); `emit-library-shared.ts` `collectCalleeIdents` harvests match-arm-result-string callees so the fn colors `async`. Direction: semantics-changed TOWARD the §13.2/§19.9.3 contract, **zero corpus footprint**. A79-disjoint (`emitMatchExprDecl` region only). Conformance: `conf-CTRL-match-arm-server-autoawait.test.js` (CODES + RUNTIME). Residuals split out below rather than folded as prose (the [[g-schema-composite-unique-emits-nothing]] lesson). — `RESOLVED S318-peter`
+<!-- @gap id=g-match-arm-server-call-no-autoawait sev=MED status=resolved -->
+
+### g-match-value-position-server-call-no-autoawait — a server call in a client `match` used in an INTERPOLATION / value position (`<p>${ match k { 1 :> getFlag().ok  _ :> false } }</p>`) lowers via the `emitMatchExpr` SYNC IIFE (not the tilde-temp decl path), where `await` is illegal — so it ships a bare unawaited Promise — `NEW S318-peter (sibling sweep of g-match-arm-server-call-no-autoawait); MED; open (the R26-corrected "sync IIFE" position — genuinely needs the IIFE made async+awaited, or CPS-split)`
+<!-- @gap id=g-match-value-position-server-call-no-autoawait sev=MED status=open -->
+
+### g-match-block-arm-server-call-no-autoawait — a server call in a BLOCK-body value arm (`match k { 1 => { getFlag().ok } … }`) stays bare: the structured-body arm path in `emitMatchExprDecl` bypasses `armResultLine` (where the S318 auto-await was added), so the raw-result fix does not reach it — `NEW S318-peter (residual of g-match-arm-server-call-no-autoawait); MED; open`
+<!-- @gap id=g-match-block-arm-server-call-no-autoawait sev=MED status=open -->
+
+### g-fn-shorthand-tail-match-emits-degenerate-body — a tail-expression fn-shorthand whose body is a `match` (`fn pick(k: int) -> bool = match k { 1 :> getFlag().ok  _ :> false }`) emits a DEGENERATE body `function _scrml_pick(k) { 1; }` — the entire match collapses to the first arm's TEST literal, the arm results are dropped, and the fn returns `undefined`, silently (0 errors) — `NEW S318-peter (found in the g-match-arm-server-call-no-autoawait sibling sweep; PA-VERIFIED on main AND worktree — pre-existing, NOT a regression); HIGH; open (silent wrong output on the fn-shorthand `= match` form; NOT an await bug — a distinct lowering defect; confirm severity vs whether the tail-match shorthand is spec-sanctioned)`
+<!-- @gap id=g-fn-shorthand-tail-match-emits-degenerate-body sev=HIGH status=open -->
+
+### g-given-block-server-call-no-autoawait — a server call in a `given` block body ships bare-unawaited (fn colored async, body not awaited); same auto-await class as the match-arm gap, different emit path — `NEW S318-peter (sibling sweep); MED; open (probe was agent-reported; PA to re-confirm valid `given` syntax before fix)`
+<!-- @gap id=g-given-block-server-call-no-autoawait sev=MED status=open -->
+
+### g-if-value-cascade-server-call-no-autoawait — a server call in an `if`-as-value cascade branch (`const x = if k==1 { getFlag().ok } else { false }`, `emitIfValueExpr`) ships bare-unawaited; auto-await class sibling — `NEW S318-peter (sibling sweep); MED; open`
+<!-- @gap id=g-if-value-cascade-server-call-no-autoawait sev=MED status=open -->
 
 ### g-ternary-init-server-call-await-misbind — `const x = @flag ? serverFn() : []` emits `const x = await _scrml_reactive_get("flag") ? _scrml_fetch_serverFn_N() : []` — the `await` binds the CONDITION, not the server call; `serverFn()` is never awaited, so `x` holds a Promise. Silent wrong-value, pre-existing on main. `extractInitExpr` splices `await` before a ternary without parenthesizing. Fix = parenthesize non-trivial init exprs before prefixing `await`, or inject `await` at the actual server-call sub-expression. — `NEW S267 (#87 review); LOW; open`
 <!-- @gap id=g-ternary-init-server-call-await-misbind sev=LOW status=open -->

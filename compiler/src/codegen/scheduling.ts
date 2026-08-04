@@ -585,6 +585,105 @@ export function injectServerCallAwaitsViaAst(code: string, serverFnNames: Set<st
 }
 
 /**
+ * g-match-arm-server-call-no-autoawait (§13.2 position-invariant auto-await /
+ * §19.9.3 match arms are a CPS-eligible position) — parenthesize-await every
+ * server-fn CALL inside an already-EMITTED (pre-name-mangle) EXPRESSION string,
+ * position-invariantly.
+ *
+ * Distinct from `injectServerCallAwaitsViaAst`, which BARE-prefixes `await ` at a
+ * call's start in STATEMENT context: that is correct for `const r = fn()` (no
+ * trailing access) but WRONG for a call used as a RECEIVER — `fn().ok` bare-
+ * prefixed is `await fn().ok` === `await (fn().ok)`, which reads `.ok` off the
+ * PENDING Promise (→ `undefined`) and then awaits that. This helper instead wraps
+ * the CALL node itself in grouping parens — `fn().ok` → `(await fn()).ok` — so the
+ * `.ok`/`[i]`/`(…)` tail reads the RESOLVED value. (`await` is an await-expression,
+ * unary precedence, looser than member/index/call — hence the wrap; the same
+ * reason emit-expr paren-wraps `(await peer()).field`.)
+ *
+ * The value-form `match`-decl arm lowering (emit-logic.ts:emitMatchExprDecl) re-
+ * emits each arm result from a raw expression STRING, a path the #87 statement-
+ * level `injectPromiseAwait` never reached; this restores §13.2 for that position.
+ *
+ * Await-legality is modelled with the real parser (a sync callback body / any
+ * formal-parameter list is await-illegal), mirroring `injectServerCallAwaitsViaAst`.
+ * Returns the input UNCHANGED when it does not parse as an expression (a non-JS
+ * scrml fragment) or when nothing classifies — never injects into text acorn
+ * cannot model.
+ */
+export function parenthesizeAwaitServerCallsInExpr(exprCode: string, serverFnNames: Set<string>): string {
+  if (!exprCode || serverFnNames.size === 0) return exprCode;
+  // Wrap in an async arrow returning the expression so a top-level `await` in an
+  // EXPRESSION position parses (and the arrow body is await-legal).
+  const PREFIX = "(async () => (\n";
+  const SUFFIX = "\n))";
+  let program: any;
+  try {
+    program = acornParse(PREFIX + exprCode + SUFFIX, { ecmaVersion: "latest" });
+  } catch {
+    return exprCode;
+  }
+  const P = PREFIX.length;
+  const isFn = (n: any): boolean =>
+    !!n && (n.type === "FunctionDeclaration" || n.type === "FunctionExpression" || n.type === "ArrowFunctionExpression");
+
+  // Each entry marks a call node's [start,end) span (in `exprCode` coords) to wrap
+  // as `(await <call>)`.
+  const wraps: Array<{ start: number; end: number }> = [];
+  const visit = (node: any, awaitLegal: boolean, parent: any): void => {
+    if (!node || typeof node !== "object") return;
+    if (isFn(node)) {
+      for (const prm of (node.params || [])) visit(prm, false, node);
+      visit(node.body, node.async === true, node);
+      return;
+    }
+    if (node.type === "PropertyDefinition") {
+      if (node.computed && node.key) visit(node.key, awaitLegal, node);
+      if (node.value) visit(node.value, false, node);
+      return;
+    }
+    if (node.type === "StaticBlock") {
+      for (const s of (node.body || [])) visit(s, false, node);
+      return;
+    }
+    if (node.type === "CallExpression") {
+      const callee = node.callee;
+      if (awaitLegal && callee && callee.type === "Identifier" && serverFnNames.has(callee.name)) {
+        const alreadyAwaited = !!parent && parent.type === "AwaitExpression";
+        if (!alreadyAwaited) wraps.push({ start: node.start - P, end: node.end - P });
+      }
+      visit(node.callee, awaitLegal, node);
+      for (const a of (node.arguments || [])) visit(a, awaitLegal, node);
+      return;
+    }
+    for (const key of Object.keys(node)) {
+      if (key === "start" || key === "end" || key === "type") continue;
+      const child = (node as any)[key];
+      if (Array.isArray(child)) { for (const c of child) visit(c, awaitLegal, node); }
+      else if (child && typeof child === "object" && typeof child.type === "string") visit(child, awaitLegal, node);
+    }
+  };
+  visit(program, false, null);
+  if (wraps.length === 0) return exprCode;
+
+  // Translate each wrap into two point-insertions: `(await ` at the call start and
+  // `)` at the call end. Apply right-to-left (descending pos) so earlier offsets
+  // stay valid; at a shared position a close (`)`) applies before an open so a
+  // nested call's parens stay balanced.
+  type Ins = { pos: number; text: string; open: boolean };
+  const ins: Ins[] = [];
+  for (const w of wraps) {
+    if (w.start < 0 || w.end > exprCode.length || w.start >= w.end) continue;
+    ins.push({ pos: w.start, text: "(await ", open: true });
+    ins.push({ pos: w.end, text: ")", open: false });
+  }
+  if (ins.length === 0) return exprCode;
+  ins.sort((a, b) => (b.pos - a.pos) || (a.open === b.open ? 0 : a.open ? 1 : -1));
+  let out = exprCode;
+  for (const e of ins) out = out.slice(0, e.pos) + e.text + out.slice(e.pos);
+  return out;
+}
+
+/**
  * GH #237 — does `code` (already-EMITTED JS, pre-name-mangle) call at least one
  * `boundary: "server"` function from `routeMap`? Gates the async-scope lift so a
  * block with no server call emits BYTE-IDENTICALLY to before the fix.
