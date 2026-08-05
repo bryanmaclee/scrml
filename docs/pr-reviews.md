@@ -35,6 +35,12 @@ predate the rule and are out of scope by construction rather than by exemption.
 
 ## Log
 
+<!-- @review pr=429 verdict=finding by=S322-bryan date=2026-08-05 probe=S239-across-3-fix-rounds-8-findings-one-build-breaking-all-fixed-plus-2-independent-post-hoc-lenses-then-wide-corpus-re-measure-on-the-REBASED-tree-1878-sources-7254-artifacts-syntax-delta-0-under-effective-script-AND-module-goggles-artifact-diffs-2-of-7254-both-on-sources-that-fail-to-compile-on-every-revision note=u1-emitcall-root-fix-lands-not-claiming-the-bug-class -->
+<!-- @review pr=428 verdict=finding by=S322-bryan date=2026-08-05 probe=two-independent-adversarial-lenses-hollow-gate-and-arithmetic-found-9-defects-in-the-gate-itself-incl-node-check-blind-to-top-level-await-and-no-vacuity-floor-on-the-syntax-half-ALL-routed-back-as-a-fix-round-and-re-proven-PA-re-executed-the-H1-goggle-bite-and-the-bun-vs-node-vm-Script-divergence-rather-than-inheriting-them note=the-gate-built-to-kill-hollow-gates-shipped-hollow-and-the-floor-caught-it -->
+<!-- @review pr=427 verdict=carve-out by=S322-bryan date=2026-08-05 probe=docs-only-changelog-handoff-deltalog-no-code-path-peters-wrap-continuity -->
+<!-- @review pr=426 verdict=carve-out by=S322-bryan date=2026-08-05 probe=docs-only-BRIEF-and-gap-banner-SUBSTANTIATED-the-newly-accepting-code-VERIFIED-NOT-on-main-ba72eaa0-is-not-an-ancestor-and-lives-only-on-origin-feat-onmount-c-build note=deferral-recorded-without-landing-the-surface-change -->
+<!-- @review pr=425 verdict=carve-out by=S322-bryan date=2026-08-05 probe=docs-only-single-file-pr-reviews-md-peters-independent-drain-of-419-420-421-422-which-collided-with-my-424-he-merged-first -->
+<!-- @review pr=424 verdict=carve-out by=S322-bryan date=2026-08-05 probe=docs-only-known-gaps-plus-inbox-drain-no-code-path-own-gap-filings-rescoped-after-the-425-collision -->
 <!-- @review pr=422 verdict=carve-out by=S322-peter date=2026-08-05 probe=file-list-diff-docs-only-hand-off+delta-log+master-list-regen-no-compiler-src-no-SPEC-no-conformance-U1-round3-wrap-addendum -->
 <!-- @review pr=421 verdict=carve-out by=S322-peter date=2026-08-05 probe=file-list-diff-docs-only-continuity-maps-regen+pr-reviews+changelog+hand-off+delta-log+master-list+inbox-no-compiler-src-own-S321-wrap -->
 <!-- @review pr=420 verdict=carve-out by=S322-peter date=2026-08-05 probe=file-list-diff-docs-only-changelog+hand-off+delta-log-no-compiler-src-S319-wrap-continuity -->
@@ -53,6 +59,43 @@ predate the rule and are out of scope by construction rather than by exemption.
 <!-- @review pr=406 verdict=carve-out by=S319-bryan date=2026-08-05 probe=continuity-docs-only -->
 <!-- @review pr=404 verdict=carve-out by=S319-bryan date=2026-08-05 probe=own-gap-filings-and-retractions-docs-only -->
 <!-- @review pr=403 verdict=carve-out by=S319-bryan date=2026-08-05 probe=review-ledger-records-docs-only -->
+
+### S322 — the gate built to kill hollow gates shipped hollow, and the floor is what caught it
+
+Two code-bearing PRs this session, both `finding`, and the finding on the *review tool* is the one
+worth reading.
+
+**#428 — the harness.** Built to replace a script class that has now measured a fraction of its
+population three times (`artifact-diff.mjs` 8 of 115 · `u1-corpus-emit.sh` 329 of 1818 · that script's
+`node --check` half inheriting the same population). Two independent adversarial lenses — one attacking
+the mechanism, one the arithmetic — found **nine defects in the new gate**, four of which could produce
+a false green on the very question it was built to answer. The load-bearing one:
+
+> `node --check` on a `.js` resolves by module-syntax auto-detection, so a **top-level stranded
+> `await` passes** — while the compiler emits `<script src=…>` with no `type="module"`, where it is a
+> hard `SyntaxError` and the bundle is dead on arrival.
+
+That is the auto-await work's *own dominant failure mode*, and every prior measurement in the arc ran
+under the blindness. Worse, the obvious in-process fix is also broken: **bun's `vm.Script` does not
+reject a top-level await either**, so goggles written under the parent runtime could not fail at all.
+Both re-executed PA-side rather than inherited from the report. All nine routed back as a fix round and
+re-proven with bites.
+
+**#429 — U1.** Three fix rounds (8 findings, one build-breaking) plus the two post-hoc lenses, then a
+wide-corpus re-measure **on the rebased tree against current main**: 1878 sources, 7254 artifacts,
+syntax delta 0 under *effective, script and module* goggles, 2 artifact diffs both on sources that fail
+to compile on every revision. It lands **explicitly not claiming its bug class** — the harness measures
+142 bare client server-fn call sites in cleanly-compiling sources, delta 0, and that number is now
+produced by the gate itself rather than by a one-off script.
+
+**#426 got a real check despite being docs-only.** It records a *deferral* of a newly-accepting change,
+so the thing worth verifying is that the change did not quietly ride along: `ba72eaa0` is **not** an
+ancestor of main and lives only on `origin/feat/onmount-c-build`. Confirmed.
+
+**The carve-out rate reads 57% and is still the wrong denominator** — see the S319 note below, which
+stands. Four of the six drained here are continuity/gap/tracking PRs with no code path by construction;
+both code-bearing PRs got the full pass and both produced findings. The code-bearing-only refinement
+that note recommends is **still not built**, and this session is a second data point for it.
 
 ### ⚠ S319 — the carve-out rate crossed the probe's own alarm (57%), and the answer is that the DENOMINATOR is wrong
 
