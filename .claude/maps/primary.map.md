@@ -1,17 +1,22 @@
 # primary.map.md
 # project: scrml
-# updated: 2026-08-04T20:30:00Z  commit: b929b9c9
-# NOTE (S320 INCREMENTAL pass): over `e80b692e` -> `b929b9c9` — **31 commits, six sessions**
-# (S313-cont/S314-bryan-crash/S315/S316-bryan/S317-peter/S318-peter/S319-peter/S320-peter). 18
-# `compiler/src` files + SPEC.md touched across 15 landed PRs (#376 #378 #379 #381 #382 #384 #385
-# #386 #387 #388 #389 #390 #391 #394 #396). Re-walked: primary, domain, dependencies, error, structure,
-# test, build, non-compliance. NOT re-walked: schema, migrations, auth, config, infra (zero diff in
+# updated: 2026-08-05T00:00:00Z  commit: 15e5e070
+# NOTE (S321 INCREMENTAL pass): over `b929b9c9` -> `15e5e070` — **~19 commits, three session-windows**
+# (the S320 continuation/tail + S319 + S321-peter — session numbers collide across clones per
+# `hand-off.md`'s own disambiguation note; this pass reconciles all of it into ONE maps stamp). 7
+# `compiler/src` files + SPEC.md touched across 4 landed PRs (#405 #416 #417 #418 — #414/#415 are
+# review/process PRs with no source diff). Re-walked: primary, domain, dependencies, error, structure,
+# test, non-compliance. NOT re-walked: schema, migrations, auth, config, infra, build (zero diff in
 # their surfaces this window — each keeps its own honest stamp in the Map Index).
 #
-# **Held OUT of this pass on purpose:** PR #405 (the CPS auto-await choke-point consolidation,
-# `s320-cps-autoawait-choke-point` branch) is verified but **NOT merged to `main`** — bryan must rule
-# on the fix locus (his `emitCall` root-fix vs #405's injector consolidation) before it lands. This
-# pass maps `main` @ `b929b9c9` only; do not read anything below as describing #405's state.
+# **CORRECTION — the prior pass's headline finding is now WRONG and is fixed throughout this map set.**
+# PR #405 (the CPS auto-await choke-point consolidation) was reported "HELD, unmerged, pending bryan's
+# ruling" at the `b929b9c9` stamp. **It has since LANDED** (`649d6fce`, merged S319 after bryan's `go,
+# your recs` delegation — see `hand-off.md`'s S321 top block) and was reviewed clean at `bbd77bec`
+# (#413). Every "#405 HELD" sentence this map set carried — in this file, dependencies.map.md,
+# domain.map.md, error.map.md, structure.map.md — is corrected this pass. Two further landings this
+# window: `W-IF-IN-EACH` (§17.1, #416, GH adopter #409) and the reset init-thunk reassignment skip
+# (§6.8, #417, HIGH).
 #
 # Per-window landing narratives stay DELETED (S302 ruling). **History lives in `docs/changelog.md` +
 # `handOffs/delta-log.md`.** What earns space here is rules a grep cannot find.
@@ -21,7 +26,7 @@ Language:   TypeScript / JavaScript (mixed) + scrml itself (self-hosting stdlib 
 Framework:  Custom compiler pipeline (no web framework) — Bun-native
 Runtime:    Bun >=1.3.13 (no Node support; Bun-specific APIs throughout — `Bun.serve`, `bun:sqlite`, `Bun.$`, `Bun.SQL`, `Bun.hash`)
 Type:       CLI compiler + language toolchain (single-file full-stack web-language compiler, with LSP + editor-tooling + MCP surfaces)
-Size:       `compiler/src/` **187 files / 237,162 lines** (FACTS.md, mechanically derived — grew this window without a file-count change). `compiler/tests/` **1,314** `*.test.js`. Conformance **853** cases.
+Size:       `compiler/src/` **187 files / 237,399 lines** (FACTS.md, mechanically derived — grew this window without a file-count change). `compiler/tests/` **1,319** `*.test.js`. Conformance **855** cases.
 Version:    v0.7.1 (root package.json — the SOLE manifest; not a workspace monorepo, `files`-allowlisted, publishable). **Zero manifest diff this window.**
 CI:         GitHub Actions — three workflows on `main`. `gate` is unchanged at **12 steps** this window. `windows` job gained one line: `PUPPETEER_SKIP_DOWNLOAD: "true"` on `bun install` (that job runs unit+conformance only, never the browser tier — the puppeteer postinstall download was pure cost and a flake source, witnessed on PR #382). `advisory-review` stays DISABLED (manual fire only); `cloud-maps` Stage 2 stays DELETED (no scheduled map refresh — see the S313 warning below, still true).
 
@@ -35,8 +40,8 @@ non-trivial.
 
 ## Derived-figure authority
 `docs/FACTS.md` is GENERATED (`bun scripts/facts.ts --write`) and CI-gated (`--check` in `gate`). It
-is the authority for published counts. At this HEAD: `live compiler source` **237,162** lines / 187
-files; `test files` **1,314**; `specification lines` **37,065**; `conformance cases` **853**. stdlib
+is the authority for published counts. At this HEAD: `live compiler source` **237,399** lines / 187
+files; `test files` **1,319**; `specification lines` **37,066**; `conformance cases` **855**. stdlib
 modules (21), CLI verbs (11), LSP capabilities (7) unchanged.
 
 Second generated authority: `compiler/SPEC-INDEX.md`'s totals block, gated by `--check` in CI `gate`
@@ -44,10 +49,10 @@ AND the local pre-push hook. **Only the totals are gated — the AUTHORED half i
 rotted further this window** (non-compliance.report.md C5, carried, not re-derived this pass).
 
 **FACTS.md deliberately does NOT publish a §34 diagnostic-code total.** error.map.md carries the
-reconciled count — **805 at this HEAD (+1: `E-FN-EQUALS-BODY`)** — re-derived by the same table-column
-methodology error.map.md documents (its own oracle, `bun scripts/s34-census.ts`, **errors on this
-Windows clone** — `ENOENT` on a malformed leading-backslash path; not chased, use the manual
-methodology instead; filed as a new gap candidate, see non-compliance.report.md).
+reconciled count — **806 at this HEAD (+1: `W-IF-IN-EACH`)** — re-derived by the same table-column
+methodology error.map.md documents (its own oracle, `bun scripts/s34-census.ts`, **still errors on this
+Windows clone** — `ENOENT` on a malformed leading-backslash path, unchanged since the prior pass, not
+re-chased; use the manual methodology instead; see non-compliance.report.md).
 
 ---
 
@@ -94,6 +99,9 @@ methodology instead; filed as a new gap candidate, see non-compliance.report.md)
 | **32** | **A cross-module ASYNC import consumed inside a markup interpolation now gets awaited (`g-crossmodule-async-in-markup-position-not-awaited`, #391) — but the wrap decision is made off the injector's OWN EMITTED OUTPUT, not a re-derived predicate**, after an S239 catch surfaced a page-breaking SyntaxError from an async fn used as a bare combinator callback. | domain.map.md · dependencies.map.md |
 | **33** | **A sub-parse's diagnostic span (a `<match>`-arm or `<each>` sub-parse) is now REBASED to file coordinates (`_rebaseSubparseSpans`, ast-builder.js, #389)** — before this, a diagnostic inside a sub-parsed region reported the sub-parse's OWN line/col, not the file's, and the within-node parser-parity gate was silently dead on Windows (enumerator backslash relpaths) as a downstream symptom. | error.map.md · structure.map.md |
 | **34** | **`export let` / `export var` are now emitted as runtime VALUE bindings alongside `export const` (`emit-server.ts` `emitModuleValueExportLines`, #388)** — before this fix, a mutable module-level `export let` closed over by an in-process PEER CALLABLE (not a direct `<endpoint>` reference) silently fell through to nothing, producing a boot/route `ReferenceError` with no diagnostic. The companion fix in the same PR widens a `serve=` tool's dead-import scan to union a `main`/setup-only reachability root, so an import used ONLY from `main` survives tree-shaking. | dependencies.map.md |
+| **35** | **The §13.2 CPS auto-await choke-point is CONSOLIDATED (PR #405, `649d6fce`, LANDED — corrects the prior pass's "HELD" status).** `injectPromiseAwait` (the old per-statement string-regex pass) is RETIRED. ONE shared AST walker now backs all three auto-await entry points (on-mount, every client fn-body statement, match-arm expressions), and — the part that actually changes program behavior — auto-await now DESCENDS into `given`/match-block/`try` bodies that were previously opaque `isControlFlowBoundary` nodes to the scheduler. Closes the `g-cps-scheduler-opaque-boundary-hides-nested-server-calls` family. | dependencies.map.md · structure.map.md |
+| **36** | **A per-row `if=` on a NESTED (non-item-root) element inside `<each>` is a CREATE-TIME append gate, not reactive on a same-key reconcile — the compiler now WARNS (`W-IF-IN-EACH`, §17.1, #416, GH adopter #409) when the condition references the iteration item.** Only the row's SOLE item-root `if=` is reactively swapped today; the reactive fix for the nested case is DEFERRED and routed to bryan. | domain.map.md · error.map.md |
+| **37** | **A top-level `@name = expr` REASSIGNMENT of a structurally-declared (`<name>`) cell SHALL NOT re-register the cell's reset init-thunk (§6.8, #417, HIGH) — the runtime's thunk registry is last-write-wins, so a naive re-registration inverted `reset()`.** `collectStructuralDeclNames` (reactive-deps.ts, NEW) distinguishes a genuine reassignment (skip) from an IMPLICIT `@`-declaration (keep — an SSE/channel bind must still re-establish on reset). Residual, out of scope: `g-implicit-cell-double-write-clobbers-reset-init` (MED, NEW — a double-write of an IMPLICITLY-declared cell still clobbers; needs emission-order tracking). | domain.map.md |
 
 ---
 
@@ -101,18 +109,18 @@ methodology instead; filed as a new gap candidate, see non-compliance.report.md)
 
 | Map | Stamp | Contents |
 |---|---|---|
-| **primary.map.md** | **`b929b9c9`** | this file — fingerprint, 34 INVARIANTS (7 new), routing, key facts |
-| **domain.map.md** | **`b929b9c9`** | NEW: `E-FN-EQUALS-BODY` concept note; `keep-alive` fifth `<page>` attribute + the (a)-then-(b) follow-on correction; `<timer>`/`<poll>` first-tick asymmetry; crossmodule-async-in-markup. `<machine>`-removal doc drift RESOLVED (#376) |
-| **dependencies.map.md** | **`b929b9c9`** | NEW: `parenthesizeAwaitServerCallsInExpr` (match-arm auto-await); `distRelativeServerSpecifier` → `distRelativeLocalSpecifier` generalization (#390); `crossFileClientReads` context field (#358 series); `export let`/`var` + serve-tool reachability fix (#388) |
-| **error.map.md** | **`b929b9c9`** | **805** §34 codes (+1, `E-FN-EQUALS-BODY`); sub-parse span rebase (#389) fixed the within-node gate's Windows dead-canary symptom; conformance 850→853 |
-| **structure.map.md** | **`b929b9c9`** | counts re-derived (187 files / 237,162 lines, unchanged file count); span-rebase note cross-referenced |
-| **test.map.md** | **`b929b9c9`** | 1,314 test files (+10); 853 conformance cases (+3); new conformance pins for #389/#391/#394/#396 |
-| **build.map.md** | **`b929b9c9`** | `windows` job: `PUPPETEER_SKIP_DOWNLOAD` env added; `scripts/review-debt.ts` (NEW, S316) — a PR review-floor tracker, boot-wired, NOT CI-blocking |
-| **non-compliance.report.md** | **`b929b9c9`** | S313-N1 (`<machine>` doc drift) RESOLVED by #376, re-verified; new uncertain entry for `docs/changes/onmount-c-build/BRIEF.md` (untracked, live dispatch brief for parked work) |
+| **primary.map.md** | **`15e5e070`** | this file — fingerprint, 37 INVARIANTS (3 new), routing, key facts |
+| **domain.map.md** | **`15e5e070`** | NEW: `W-IF-IN-EACH` nested per-row `if=` non-reactivity (§17.1, #416); the reset init-thunk reassignment skip (§6.8, #417). `#405 HELD` framing CORRECTED to landed throughout |
+| **dependencies.map.md** | **`15e5e070`** | `scheduling.ts` rewritten: `injectPromiseAwait` RETIRED, ONE shared `collectAwaitSites`/`applyAwaitSites` walker now backs all three auto-await sites (#405, LANDED); `collectStructuralDeclNames` (§6.8, #417); `W-IF-IN-EACH` detection helpers (§17.1, #416) |
+| **error.map.md** | **`15e5e070`** | **806** §34 codes (+1, `W-IF-IN-EACH`); `#405 HELD` framing corrected; `g-given-block`/`g-hash87`/`g-ternary-init` auto-await gaps RESOLVED by #405 |
+| **structure.map.md** | **`15e5e070`** | counts re-derived (187 files / 237,399 lines, unchanged file count); `scheduling.ts` bullet rewritten for the #405 landing; 3 new per-file bullets (reactive-deps.ts, emit-logic.ts §6.8, emit-each.ts §17.1) |
+| **test.map.md** | **`15e5e070`** | 1,319 test files (+5: unit +4, conformance +1); 855 top-level conformance cases (+2); new coverage for #405/#416/#417 |
+| build.map.md | `b929b9c9` | **deliberately older.** Zero CI/build-surface diff this window (`git diff b929b9c9..HEAD -- .github/ package.json scripts/` is empty) |
+| **non-compliance.report.md** | **`15e5e070`** | `#405 HELD` staleness (this map set's own prior-pass claim) is the headline finding this pass; carried findings re-verified where touched |
 | config.map.md | `e80b692e` | **deliberately older.** Zero env-surface diff this window |
-| infra.map.md | `e80b692e` | **deliberately older.** Zero infra diff this window (the one CI line change is in build.map.md's CI section, not infra's deploy-target surface) |
-| schema.map.md | `fe14c9b2` | **deliberately older.** `compiler/src/types/` has ZERO diff across four windows now |
-| migrations.map.md | `115e8b1b` | **deliberately older.** No DB/migration surface touched in four windows |
+| infra.map.md | `e80b692e` | **deliberately older.** Zero infra diff this window |
+| schema.map.md | `fe14c9b2` | **deliberately older.** `compiler/src/types/` has ZERO diff across five windows now |
+| migrations.map.md | `115e8b1b` | **deliberately older.** No DB/migration surface touched in five windows |
 | auth.map.md | `df2ac831` | **deliberately older.** Correct at its stamp for JWT/OAuth/protect-floor/CSRF/§20.5 session |
 | api.map.md | absent | no REST/GraphQL/gRPC surface owned by this repo — the compiler EMITS API routes for generated apps |
 | state.map.md | absent | no redux/zustand/jotai — not a frontend app |
@@ -133,7 +141,9 @@ An honest older stamp beats a false "verified at HEAD".
 | **`<page keep-alive>` — what it actually does today** | **NOTHING at runtime yet.** The attribute is admitted (parses, validates, five-member `E-PAGE-INVALID-ATTR` set) but there is no cache and no invalidation wiring — Nominal/spec-ahead. See domain.map.md invariant 29. |
 | **a server call inside a value-form `match` arm that isn't awaited** | **`scheduling.ts` `parenthesizeAwaitServerCallsInExpr` (NEW #394)** — parenthesize-wraps the call (`(await fn()).field`), not a bare prefix. Consumed by `emit-logic.ts`'s value-form match-arm lowering. See dependencies.map.md invariant 31. |
 | **a diagnostic code — ANY code, any prefix** | **error.map.md**, starting at "HOW TO LOOK UP A DIAGNOSTIC CODE". `bun scripts/s34-census.ts` **currently ERRORS on this Windows clone** (`ENOENT`, malformed path) — fall to error.map.md's family table, then `grep -rn "<CODE>" compiler/src/`. |
-| **the CPS auto-await choke point / `given`/`if`/`match` scheduler boundary** | **Do NOT build on this without reading `hand-off.md`'s S320 top block first.** PR #405 (the consolidation) is HELD, unmerged, pending bryan's ruling on the fix locus. Nothing in `.claude/maps/` describes #405's state — only `main` @ `b929b9c9`, where `scheduling.ts`'s `isControlFlowBoundary` still treats `given`/`if`/`match` bodies as opaque (unchanged this window). |
+| **the CPS auto-await choke point / `given`/`if`/`match` scheduler boundary** | **LANDED (PR #405, `649d6fce`) — corrects the prior pass's "HELD" status.** `scheduling.ts`'s `isControlFlowBoundary` no longer fences the fn-body auto-await walker out of `given`/match-block/`try` bodies; `injectPromiseAwait` is retired in favor of the shared `collectAwaitSites`/`applyAwaitSites` walker. See dependencies.map.md's "§13.2 CPS auto-await CHOKE-POINT" row for the mechanism and which gaps it closed. |
+| **a per-row `if=` on a NESTED element inside `<each>` that silently goes stale** | **`W-IF-IN-EACH` now WARNS at compile (§17.1, #416, GH adopter #409).** The gate is still create-time-only — the WARNING shipped, not the reactive fix (DEFERRED, routed to bryan). See domain.map.md. |
+| **`reset(@cell)` restoring the wrong value after a top-level reassignment** | **FIXED (§6.8, #417, HIGH).** `_emitInitThunkSidecar` now skips the reset init-thunk for a reassignment of a structurally-declared cell (`collectStructuralDeclNames`). An implicitly-declared cell written TWICE at top level still has a residual gap — `g-implicit-cell-double-write-clobbers-reset-init` (MED, open). See domain.map.md. |
 | **build commands / CI stages / a gate decision** | build.map.md. `gate` unchanged at 12 steps; `windows` job now skips the puppeteer download. |
 | **types / interfaces / AST node shapes** | schema.map.md (stamp `fe14c9b2` — zero diff across four windows) |
 | **environment variables / config keys / CI secrets** | config.map.md (stamp `e80b692e` — zero diff this window) |
@@ -144,16 +154,17 @@ An honest older stamp beats a false "verified at HEAD".
 ## Key Facts
 
 - Entry point: `compiler/bin/scrml.js` -> `compiler/src/cli.js` dispatches to `commands/*.js` (11 subcommands); the pipeline is `compileScrml()` in `compiler/src/api.js` (block-split -> AST-build -> type-check -> codegen).
-- **This window's PR count (15) is much larger than its invariant count (7 new).** Most landings were narrow codegen-completeness fixes (`export const`/`let`/`var` client/server gating, tool-import re-basing, span rebasing) that widen an existing mechanism rather than add a new one — read the invariants table before assuming a large commit count implies large conceptual surface.
-- **The maps-refresh cadence failed for FOUR consecutive sessions before this pass ran** (S317, S318, S319, S320 each recorded "Maps OWED" and deferred the agent dispatch). `cloud-maps` has no scheduled leg to catch this — see the currency warning above. If this pattern repeats, the standing recommendation (non-compliance.report.md S313-N4) — a deterministic non-AI map-currency check in `cloud-maps` Stage 1 — gets stronger with each deferred window.
-- **PR #405 (CPS auto-await consolidation) is verified, gate-green, and deliberately UNMERGED.** Do not build further auto-await work and do not merge it until bryan rules on the fix locus (his `emitCall` root-fix vs #405's injector consolidation) — see `hand-off.md` S320 top block.
+- **This window's headline is a CORRECTION, not a new feature.** The prior pass reported PR #405 "HELD, unmerged" — it landed in the interim (`649d6fce`) and this pass propagates that fact through every map that carried the stale claim. The two genuinely new landings (`W-IF-IN-EACH` #416, the reset-init-thunk skip #417) are each a single focused fix, not a restructuring.
+- **The maps-refresh cadence caught up at the prior pass, then slipped again for the S320-tail + S319 + S321 window before this pass ran.** `cloud-maps` still has no scheduled leg to catch this — see the currency warning above. The standing recommendation (non-compliance.report.md S313-N4) — a deterministic non-AI map-currency check in `cloud-maps` Stage 1 — remains unactioned and gets another data point supporting it.
+- **PR #405 (CPS auto-await consolidation) is LANDED (`649d6fce`) — the prior pass's "verified, gate-green, deliberately UNMERGED" note is stale and is retracted.** Bryan delegated the fix-locus ruling ("go, your recs") and the consolidation-not-root-fix approach landed; reviewed clean at `bbd77bec` (#413).
 - **SPEC.md is the sole normative source.** PIPELINE.md documents stage internals. Any doc contradicting SPEC.md is non-compliant per pa.md Rule 4.
 - **`.claude/` is gitignored; `.claude/maps/` and `.claude/agents/project-mapper.md` are FORCE-tracked.** Staging a map refresh requires `git add -f`.
 - **These maps have no CI gate of their own and no scheduled refresh.** Any generation that asserts completeness is a hypothesis until re-derived.
-- **`bun scripts/s34-census.ts` is currently BROKEN on this Windows clone** (`ENOENT` on a leading-backslash path when invoked from `compiler/`-relative cwd) — a new finding this pass, not previously recorded. Use the manual §34 table-column methodology (error.map.md) until fixed. Candidate for a fresh gap filing.
+- **`bun scripts/s34-census.ts` is STILL BROKEN on this Windows clone** (`ENOENT` on a leading-backslash path when invoked from `compiler/`-relative cwd) — unchanged since the prior pass, not re-chased this window. Use the manual §34 table-column methodology (error.map.md) until fixed.
+- **New this pass:** `W-IF-IN-EACH` (§17.1, #416) and the reset init-thunk reassignment skip (§6.8, #417) — see invariants 36/37 and domain.map.md.
 
 ## Tags
-#scrml #map #primary #index #compiler #bun #invariants #prohibitions #module-init #rehydrator-boundary #route-region #machine-retired #e-deprecated-001 #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #match-arm-autoawait #parenthesize-await-server-calls #scheduling-ts #crossmodule-async-markup #s239-catch #subparse-span-rebase #within-node-gate-windows-fix #export-let-var-emission #serve-tool-reachability #dist-relative-local-specifier #coordinate-space #§47.9.5 #cps-choke-point #pr-405-held #auto-await #puppeteer-skip-download #windows-ci #review-debt-script #s34-census-broken #no-scheduled-map-refresh #maps-owed-four-sessions #changelog-dereferenced
+#scrml #map #primary #index #compiler #bun #invariants #prohibitions #module-init #rehydrator-boundary #route-region #machine-retired #e-deprecated-001 #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #match-arm-autoawait #parenthesize-await-server-calls #scheduling-ts #crossmodule-async-markup #s239-catch #subparse-span-rebase #within-node-gate-windows-fix #export-let-var-emission #serve-tool-reachability #dist-relative-local-specifier #coordinate-space #§47.9.5 #cps-choke-point #auto-await #puppeteer-skip-download #windows-ci #review-debt-script #s34-census-broken #no-scheduled-map-refresh #changelog-dereferenced #pr-405-landed #cps-choke-point-landed #inject-promise-await-retired #w-if-in-each #each-nested-if-not-reactive #reset-init-thunk-reassignment #collect-structural-decl-names #§6.8 #§17.1 #correction-pass #g-implicit-cell-double-write-clobbers-reset-init
 
 ## Links
 - [domain.map.md](./domain.map.md)
