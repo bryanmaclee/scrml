@@ -1,4 +1,112 @@
 <!-- ============================================================= -->
+<!-- S319 WRAP (bryan/ASUS-Vivobook) — prepended 2026-08-05.        -->
+<!-- S316 + S317 + S318 + all prior UNCHANGED below.                -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 319 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-08-04/05. `/boot` Profile A FULL. **8 PRs merged · ZERO compiler source shipped.**
+Mechanical stream = delta-log **[1135]–[1147]**. Concurrent: Peter ran S319/S320/S321-peter and landed
+**#401–#418** throughout; every conflict was generated-file only and resolved by REGENERATION + arithmetic.
+
+## 🔴 THE NEXT PA'S FIRST MOVE — TWO AGENTS ARE STILL LIVE. DO NOT RECLAIM THEIR WORKTREES.
+
+1. **The U1 fix round** — `worktree-agent-a9c144ab82648e947`, branch `worktree-agent-a9c144ab82648e947`.
+   F1's ROOT fix is committed (`a9a4133d` — the client match IIFE goes async when an arm body actually
+   emitted an await). F4 was in progress; **round 3 was queued to it at wrap and it has NOT been seen
+   yet.** Read its `docs/changes/u1-emitcall-client-serverfn-await/progress.md` FIRST — it is the
+   crash-recovery anchor and it is good.
+2. **The frozen review checkout** — `scratchpad/u1-frozen`, detached at `0c677fa3`. Created because I
+   routed a fix round to a branch three reviewers were still reading (see MISSES). Reclaimable once the
+   arc closes; harmless meanwhile.
+
+**U1 IS NOT LANDING AND SHOULD NOT LAND YET.** Three adversarial lenses returned **eight** findings, one
+build-breaking. All are in delta-log [1143]/[1144] and in the round-2 / round-3 messages on the agent's
+transcript.
+
+## 🎯 THE ARCS
+
+**1 — dpa-019/020/021: banked, drained, RATIFIED.** The S316 rung-assignment had been banked in a
+deep-dive, **not in the file the dPA drains**, so three deliberations sat unrun for two sessions while
+every dependent build stayed held. Re-banked with premises verified rather than inherited; bryan ratified
+all three; insights landed `[S319/dpa-019|020|021]`; the S316 queue is marked superseded.
+
+**2 — the hold paid for itself.** dpa-020 returned **DO NOT DISPATCH the staged `markup-autoawait-all-emitters`
+brief as written** — it mandates a threading pattern that cannot fix the server-fn case at all. That brief
+was staged and would have been fired. dpa-019 ranked the origin ruling's INVENTED pole **last of four** and
+resolved by falsifying the premise all four poles were ranked against. dpa-021 upgraded #357 from
+`semantics-changed` to a **confidentiality break**.
+
+**3 — U1 dispatched, and the S239 gate earned its cost three times over.** See "OPEN" below.
+
+**4 — the contract re-alignment** (bryan: *"spend the rest of our available ctx re-aligning the PA system"*).
+`pa-base v2.10 → v2.13`, `overlay v2 → v2.2`, `pa-core v1 → v2`, plus the personal layer. Full list in
+delta-log [1146]. The load-bearing ones: the **DRIVE LOOP** + **FORK RULE** (bryan's effort/power heuristic
+demoted to an explicit TIEBREAK behind four structural discriminators, because it keys on what a PA
+estimates worst), **obligation-and-probe-must-resolve-to-the-same-artifact** (promoted on its FOURTH
+instance), and **overlay Rule 6 — state-primacy at INTAKE**.
+
+## 🧭 FINDINGS THAT OUTLAST
+
+1. **A verification gate can measure the wrong POPULATION and read as clean.** U1's harness: 329 sources /
+   708 bundles, byte-identical, `node --check` failures = baseline. A reviewer's: **1816 / 4162 → 2 differ**,
+   both top-level `samples/*.scrml` the glob never reached, and `node --check` base 44 → head **46**. The
+   gate was not wrong; it was **blind** — the corpus definition excluded the only two files in the repo that
+   exercise the defect.
+2. **Byte-identity can be the fix being SUPPRESSED.** The GITI-001 absorb discards U1's own inline `await`
+   at `@cell = serverFn()` — the position that dominates real code — so §13.2 position-invariance is
+   undelivered exactly where it matters, and the reassuring differential was partly evidence of that.
+3. **A swallowed parse error amplifies one defect into two.** `renameCellAccessors` returns a non-parsing
+   body UNCHANGED, so the chunk-cell-scope prologue vanishes: 58 `_scrml_cs_*` refs → **0**, every cell back
+   to an un-namespaced global, exit 0. Filed HIGH separately; fires for ANY future unparseable body.
+4. **A whole-program map keyed by `filePath::span` loses the file when you drop the key.** `serverFnNames`
+   is built program-wide with no filter, so a server fn in one file poisons a same-named client fn in
+   another. Zero corpus incidence — and trucking-dispatch has `getCurrentUser` ×19, `refresh` ×18. One
+   boundary flip from firing.
+5. **A stated reason survives; an inherited one launders.** Two facts I stamped **PA-VERIFIED** were wrong,
+   both inherited from a predecessor's artifacts (see MISSES).
+
+## ⚠️ OWN MISSES — recorded, not smoothed
+
+- **Reported a config gate as a ROLE limitation.** Said *"I don't have dispatch authority"*; the PA contract
+  plainly grants it. It was a session flag — which turned out to be a **server-delivered experiment payload**,
+  not a user setting, so deleting it locally is not durable. Fixed by a standing authorization on file. **Cost:
+  I had already begun U1 PA-direct**, the exact shape the contract routes to an agent.
+- **Stamped two inherited claims PA-VERIFIED.** `srcmap-provenance.ts` "does not exist" — it does, 186 LOC,
+  one directory from where I searched. This is the miss S316 recorded about ITSELF one session earlier.
+- **A `head -20` silently truncated a gap enumeration** — short by three, two of them HIGHs, and the number
+  reached a ratified brief.
+- **Reviewed a MOVING REF.** Routed a fix round to a branch three reviewers were still reading. Caught by a
+  reviewer, not by me → `pa-base v2.13`.
+- **Nearly reported catastrophic work loss.** 16 worktrees "gone", a SHA "unreachable" — **I was querying
+  scrml-support.** A persisted `cd`. Nothing was wrong. → `pa-base v2.12` §6.
+- **Relayed an agent's safety claim upward as verified** ("the host-coloring precondition HELD"). The
+  adversarial pass falsified it.
+
+## 🧷 STATE / OPEN
+
+- **Gaps HIGH 20 · MED 112 · LOW 49 · Nominal 7.** Gate GREEN at HEAD. Review debt: see `review-debt.ts`.
+- **⛔ Owed by bryan:** whether U1's remaining scope stays in one arc · public ack of adopter **#357** (still
+  open, HIGH, bryan-lane) · the U1-vs-#405 architecture relationship now that #405 landed (U1 is the root
+  fix the merged U3 does not deliver).
+- **Ruled this session, recorded with reasoning so they can be overturned:** `@session` severity **stays
+  HIGH** (no CRITICAL tier exists; blast radius measured at one corpus use — ours) · `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`
+  on `setTimeout` is a **FALSE POSITIVE, not a legitimate tightening** (I nearly ruled the opposite off a
+  measured-zero corpus that contains no `setTimeout(` at all — the corpus-is-artifact trap).
+- **Maps:** refreshed by Peter at S320 (`b929b9c9`). This session shipped zero compiler source.
+- **Worktrees: 18.** Two are ACTIVE (above). The rest are pre-existing `spa/ss*` + agent worktrees carrying
+  unmerged commits, retained deliberately as at S307/S310/S313.
+
+## Tags
+#session-319-bryan #dpa-019-020-021-ratified #the-hold-paid-for-itself #u1-do-not-land
+#gate-measured-the-wrong-population #byte-identity-was-suppression #swallowed-parse-error-amplifier
+#cross-file-servername-collision #inherited-claim-stamped-pa-verified #reviewed-a-moving-ref
+#cwd-slip-nearly-reported-work-loss #drive-loop #fork-rule #state-primacy-at-intake
+
+---
+
+<!-- ============================================================= -->
 <!-- S320 WRAP (peter/P-Tech1 Windows) — prepended 2026-08-04.       -->
 <!-- S319 + all prior UNCHANGED below. Mechanical stream = delta-log -->
 <!-- [1124]–[1134]. Disambiguate sessions by NAME (numbers collide). -->

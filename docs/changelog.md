@@ -5816,6 +5816,34 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-05 — S319 (bryan): three deliberations ratified, a contract re-alignment, and a codegen fix the gate said was clean
+
+Eight PRs merged and **zero compiler source shipped** — the correct outcome, because every adversarial
+pass on the one code change surfaced more defects. The session's durable output is contract, not code.
+
+- **dpa-019/020/021 banked, drained and RATIFIED.** The S316 rung-assignment had been banked in a
+  deep-dive rather than the file the dPA drains, so three deliberations sat unrun for two sessions while
+  every dependent build stayed held. Re-banked with premises verified rather than inherited. **The hold
+  paid for itself on its first full application:** dpa-020 returned *do not dispatch* the staged
+  `markup-autoawait-all-emitters` brief — it mandates a threading pattern that cannot fix the server-fn
+  case at all — dpa-019 ranked the origin ruling's invented pole last of four and falsified the premise
+  all four poles were ranked against, and dpa-021 upgraded GH #357 from `semantics-changed` to a
+  confidentiality break.
+- **#396 merged, and the review found it under-sells itself** — riding with the titled parser fix is a
+  restoration of §37.3/§12.3's SHALL that an author-declared `route=` on a `server function*` be honored.
+  Main was emitting a compiler-internal hash where the author wrote the path, so a foreign `EventSource`
+  subscriber 404s, silently.
+- **U1 (dpa-020's root fix) built and NOT landed.** Three parallel adversarial lenses returned eight
+  findings including a build-breaking stranded `await` in client match-arm sync IIFEs, a newly-rejecting
+  false positive on `setTimeout(() => serverFn(), n)`, and a cross-file server-fn name collision. Still
+  in a fix round at wrap.
+- **Three HIGH/MED gaps filed:** the `@session` trust-boundary inversion (a client-supplied request-body
+  field read as identity), the `renameCellAccessors` swallowed-parse-error amplifier (58 `_scrml_cs_*`
+  references to zero, exit 0), and the conformance harness's inability to assert emitted artifact content.
+- **Contract re-alignment:** `pa-base v2.10 → v2.13`, `overlay v2 → v2.2`, `pa-core v1 → v2`, plus the
+  personal layer — the drive loop, the fork rule, obligation/probe co-location, and state-primacy at
+  intake. See `scrml-support/pa-base.md` changelog.
+
 ### 2026-08-02 — S313 (bryan): the language-authority boundary, a provenance rule, and the route-region lifecycle ratified
 
 Eighteen PRs, solo, PA-direct. Four operator rulings were given and **three were stopped or inverted at
