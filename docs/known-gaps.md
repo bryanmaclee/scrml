@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 22 |
+| HIGH | 20 |
 | MED | 114 |
 | LOW | 49 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -5911,7 +5911,7 @@ The inverse nesting of [[g-if-mount-inside-dispatched-arm-body]], and a SEPARATE
 **⚠️ THE ARTIFACT SCAN STAYS AT 1, AND THAT IS CORRECT.** The scan that found this — "a dispatched mount anchor inside an `if=` `<template>`" — reports **1 of 133 templates both before and after**, because it detects the SHAPE, which is legitimate and unchanged; the fix makes the shape WORK rather than eliminating it. The 1→0 target in the dispatch brief was mis-specified. Execution is the evidence, which is why the acceptance test is the page rather than a grep.
 
 **Residual, stated not implied:** `if=` on an `<engine>`/`<match>` element ITSELF appears to be ignored (the structural-element emitter does not route it through the §17.1 mount gate) — noticed while building the self-inclusive-walk fixture, NOT investigated, NOT in scope here. And the self-inclusive branch of `_scrml_remount_dispatch` is DEFENSIVE: no scrml source shape currently puts the anchor ON the mounted root, because the anchor is always a generated child `<div>`. It is pinned at the helper's own contract so the claim is not overstated. <!-- @gap id=g-dispatched-mount-inside-if-never-renders sev=HIGH status=resolved -->
-<!-- @gap id=g-bare-variant-mask-leaks-into-string-literals sev=HIGH status=open -->
+<!-- @gap id=g-bare-variant-mask-leaks-into-string-literals sev=HIGH status=resolved -->
 **The bare-variant placeholder mask leaks into ordinary STRING LITERALS — silent data corruption of a plain string state cell, on `main` today.** Surfaced S301 by the adversarial pass on the cross-module-await landing, verified against `origin/main` and **NOT** introduced by it.
 
 Minimal reproducer:
@@ -5930,7 +5930,9 @@ The bare-variant preprocessor masks `.Beta` inside a **string literal**, where i
 
 **Why it survived:** it needs a string literal containing `.` + an uppercase-initial word, and the corpus barely has one. Same structural blindness as the S299 component-body-`<each>` and the S301 `if=`-in-match-arm cases. — `NEW S301 (bryan, via S239 on the cross-module-await diff); HIGH; open`
 
-<!-- @gap id=g-each-body-class-named-iter-var-reads-cell-not-binding sev=HIGH status=open -->
+**RESOLVED S320-peter (fence fix).** ⚠️ TANGLE NOTE: this marker's NAME (`…each-body-class-named-iter-var-reads-cell-not-binding`) does not match its BODY — the body above describes the bare-variant-mask string-literal leak, the SAME root as the sibling [[g-bare-variant-mask-leaks-into-string-literals]] marker (a double-filing). Both are closed by routing the `preprocessForAcorn` mask through `rewriteCodeSegments` (the each-body `class:` arm was one of the five manifestation positions, now fenced at the root; PA-verified by execution). If a GENUINELY DISTINCT each-body "iter var reads cell not binding" scoping bug exists under this name, it was never actually described here and must be RE-FILED on fresh evidence — do not assume it is covered.
+
+<!-- @gap id=g-each-body-class-named-iter-var-reads-cell-not-binding sev=HIGH status=resolved -->
 **An `<each>`-body `class:` with a NAMED iteration variable reads a reactive CELL instead of the loop binding — wrong value, or `undefined`, silently.** Surfaced S301 by the adversarial pass; verified identical on `origin/main` and on the fixed tree, so it is **pre-existing and NOT introduced** by [[g-class-attr-expr-not-lowered]]'s fix.
 
 ```scrml
