@@ -1,11 +1,14 @@
 # error.map.md
 # project: scrml
-# updated: 2026-08-02T18:40:00Z  commit: e80b692e
-# NOTE (S313 pass): INCREMENTAL over `fe14c9b2` -> `e80b692e` (67 commits, five sessions). Catalog
-# re-derived at this HEAD (801 -> 804). **The biggest change to this map is that the catalog now has
-# a MACHINE ORACLE — `bun scripts/s34-census.ts` — and a normative well-formedness rule, SPEC §34.0.
-# Read the new preamble step 0 before trusting any prose table here, including this one.**
-# Per-window landing narratives stay DELETED (`docs/changelog.md` owns history).
+# updated: 2026-08-04T20:30:00Z  commit: b929b9c9
+# NOTE (S320 INCREMENTAL pass): over `e80b692e` -> `b929b9c9` (31 commits, six sessions). Catalog
+# re-derived at this HEAD (804 -> 805, +1: `E-FN-EQUALS-BODY`, zero removed, tombstone count
+# unchanged). **`bun scripts/s34-census.ts` is BROKEN on this Windows clone this pass** — it uses
+# `new URL(import.meta.url).pathname` instead of `fileURLToPath()` (unlike `scripts/facts.ts`, which
+# does it correctly), so on Windows the resulting path carries a malformed leading backslash before
+# the drive letter and every read `ENOENT`s. Re-derived by the manual table-column methodology below
+# instead. Filed as a new finding — see non-compliance.report.md. Per-window landing narratives stay
+# DELETED (`docs/changelog.md` owns history).
 
 ## HOW TO LOOK UP A DIAGNOSTIC CODE (read this first)
 
@@ -71,17 +74,17 @@ row now exists AND it fires; the prior "NOT implemented — do not add" note her
 
 ## Diagnostic Catalog (SPEC §34, `compiler/SPEC.md` §34 through §35)
 
-**804 distinct diagnostic codes** cataloged in §34 at `e80b692e` — re-extracted this pass with the
-UTF-8-safe `awk -F'|'` field-split methodology, `comm` set-diff-verified against the 801 baseline at
-`fe14c9b2`. **+3, zero removed.** §34 spans `SPEC.md` :19005 (`## 34. Error Codes`) to :19881
-(`## 35.`) at this HEAD.
+**805 distinct diagnostic codes** cataloged in §34 at `b929b9c9` — re-extracted this pass with the
+UTF-8-safe `awk -F'|'` field-split methodology (table-column extraction, not a whole-section grep —
+see the Count methodology note below), `comm` set-diff-verified against the 804 baseline at
+`e80b692e`. **+1 (`E-FN-EQUALS-BODY`, #396), zero removed.** §34's range shifts release-to-release —
+derive it from the `## 34. Error Codes` / `## 35.` headings, never a baked line number.
 
-**Cross-check against the census.** `bun scripts/s34-census.ts` reports **804 rows** over the same
-derived range, which is the first time these two independently-derived figures have been comparable —
-use the disagreement, if one ever appears, as the signal. Note the census counts an `H-` row too
-(`H-LIFECYCLE-001`); the 804 above is `[EWI]`-only, and the two happen to coincide because three
-`[EWI]` codes were added while the `H-` row was already inside both ranges. **Do not treat the
-agreement as a proof of method — re-derive both.**
+**Cross-check against the census — UNAVAILABLE this pass.** `bun scripts/s34-census.ts` `ENOENT`s on
+this Windows clone (see the header note); the prior pass's 804-vs-804 agreement cannot be re-verified
+by the oracle this window. Manually re-derived: **806 EWIH rows total (805 `[EWI]` + 1 `H-LIFECYCLE-
+001`, unchanged)**, matching the +1 delta exactly. **Do not treat the manual figure as a permanent
+substitute for the oracle — fix the path bug and re-cross-check.**
 
 ### Count methodology (re-derivable; do NOT hand-roll it with a bare grep)
 
@@ -115,6 +118,7 @@ part of the catalog and are included.
 | `115e8b1b..d0763cff` | 799 -> 800 | +1 `W-AUTH-MIDDLEWARE-AUTO-INJECTED` (a SPLIT out of `W-AUTH-001`; the fire already existed) |
 | `d0763cff..fe14c9b2` | 800 -> 801 | +1 `E-IF-IN-DISPATCHED-ARM` (S301) |
 | **`fe14c9b2..e80b692e` (THIS pass)** | **801 -> 804** | **+3, zero removed:** `E-FOR-UNPARENTHESIZED-HEAD` (§17.4a — `ast-builder.js:8535` / `:12927`, rejects a braceless `for … of` head INCLUDING a destructuring one); `E-SERVER-FN-IN-SYNC-CALLBACK` (**pre-existing FIRE, newly CATALOGUED** at S305 — `emit-server.ts:2860`); `E-ENGINE-AUDIT-UNSUPPORTED-BODY` (added AND retired inside the same window — the §51.11 make-it-loud placeholder, struck by the port). **The +3 count is NOT the interesting number this window — see the two rows below it.** |
+| **`e80b692e..b929b9c9` (THIS pass)** | **804 -> 805** | **+1, zero removed:** `E-FN-EQUALS-BODY` (§48.2 — `ast-builder.js:3755` `rejectFnEqualsBody`, four decl-body call sites + the export re-parse; rejects the `fn/function … = <expr>` shorthand, sibling of `E-FN-ARROW-BODY`). Tombstone count unchanged. |
 | **`fe14c9b2..e80b692e` — TOMBSTONES** | **18 -> 34 struck** | **+16 newly struck**, which the code TOTAL does not show (the count methodology deliberately strips `~~`): six phantom `E-ENGINE-*` (003/006/007/008/009/011/012 — seven rows, one of which was already struck), four `E-COMPONENT-*` (002-005), `E-PROTECT-002`, `W-PROTECT-001`, `E-TYPE-042`, `W-DEPRECATED-001`, `E-ENGINE-AUDIT-UNSUPPORTED-BODY`. **A struck row still counts in the 804 — read the tombstone bucket, not the total, to answer "what got withdrawn".** |
 | **`fe14c9b2..e80b692e` — CITATIONS** | **103 -> 5** `file:line` citations inside §34 | Q3 ruling: **strip the stale `:line`, keep the file path.** A baked line number in a maintained artifact rots silently and nothing fails — the same defect class as the 3,140-line stale SPEC-INDEX (S290) and the ~9x-wrong LOC figure (S280), which is why `docs/FACTS.md` exists. |
 
@@ -205,6 +209,21 @@ rule puts the row in the landing that adds the emitter. **Grep the prose section
    — do not add" and treated any doc naming it as describing planned work. **That is no longer
    true at this HEAD**: navigate-wave1c landed, the code fires from `runtime-template.js`'s
    `_scrml_nav_chunk_failed`, and §34 carries its row. See "New fire sites this window" below.
+10. **NEW — `E-FN-EQUALS-BODY` (§48.2, #396).** Rejects a `fn`/`function` `= <expr>` expression body
+    (sibling of `E-FN-ARROW-BODY`, §48.2.1). Before the reject the shape SILENTLY MISCOMPILED a
+    `match`-tail body to a degenerate function returning `undefined` with zero diagnostics. Fire site:
+    `ast-builder.js:3755` (`rejectFnEqualsBody`), FOUR decl-body call sites (`:9310`/`:9592`/`:12645`/
+    `:12946`) plus the `export` re-parse (`:11625-11654`), which used to SWALLOW this exact error and
+    now surfaces it (and only it) from its sub-parse. See domain.map.md.
+11. **NEW — `bun scripts/s34-census.ts` is BROKEN on Windows this pass.** Its `ROOT` is derived from
+    `new URL(import.meta.url).pathname` directly; `scripts/facts.ts` uses the correct
+    `fileURLToPath(import.meta.url)` pattern one file over, and this script does not — on Windows
+    `new URL(...).pathname` yields a leading-slash path (`/C:/...`), which `join()` then turns into a
+    malformed leading-backslash path that `ENOENT`s on every read. **Sibling of the exact platform-path
+    class this repo already documents elsewhere** (`isOutsideBase`/`distRelativeServerSpecifier`'s
+    platform-separator discipline, domain.map.md's "Coordinate space" section) — the fix is a one-line
+    swap to `fileURLToPath`. Filed as a new gap candidate; see non-compliance.report.md and
+    primary.map.md's Key Facts.
 
 ## Diagnostic stream partition (how severity routes)
 `W-` prefix + `severity:"info"|"warning"` -> `result.warnings` (non-fatal, CLI exit unchanged).
@@ -223,6 +242,15 @@ on `W-LINT-*` / `W-TAILWIND-*` must read that array (or the CLI's `[LINT]` outpu
 reached `dev.js`/`build.js` with `filePath` stamped but no `:line:col`, while sibling
 CGError/protect diagnostics (which carry `span`) showed it. Closes
 `g-estmt-missing-semicolon-no-source-span`.
+
+**Sub-parse span rebasing (`ast-builder.js` `_rebaseSubparseSpans`, NEW #389).** A diagnostic raised
+INSIDE a sub-parsed region (a `<match>`-arm or `<each>` body re-parsed as its own mini-source) used to
+report the SUB-PARSE's own line/col, not the file's — before the fix, a diagnostic pointing at line 3
+of a 400-line file was routine and load-bearing tooling read it literally. The rebase walks the
+sub-parsed node tree, recomputes `line`/`col` against the FILE's absolute offset, and was verified to
+fix a DOWNSTREAM symptom nobody had connected to it: the within-node parser-parity gate was silently
+dead on Windows because its span-comparison assertions never matched (enumerator backslash relpaths
+compounding the un-rebased span mismatch). SPAN-COORD parity improved by −1470 mismatches corpus-wide.
 
 ## Diagnostic families by feature area — THE ROUTING TABLE
 
@@ -254,7 +282,7 @@ Keyed by PREFIX. A code not named individually below is still routed by its fami
 | **Auth WARNINGS — two DIFFERENT owners, do not merge with the row above** | **`W-AUTH-001`** · **`W-AUTH-MIDDLEWARE-AUTO-INJECTED`** · W-AUTH-PAGE-INFERRED / W-AUTH-LOGIN-MISSING / W-AUTH-RUNTIME-FALLBACK | 5+ | **`W-AUTH-001` -> `compiler/src/type-system.ts:10820`** — §52.11 ONLY: a `<var server>` with no detectable initial load. **`W-AUTH-MIDDLEWARE-AUTO-INJECTED` -> `compiler/src/route-inference.ts:5648` (Step 8b)** — §40.1.1/§12.2: `protect=` fields present with NO explicit `auth=` on `<program>` or any `<page>`, so auth middleware is auto-injected. **SPLIT AT S299** — these were ONE code with two unrelated meanings and only the §52.11 one documented. See "Code split" below. |
 | Session (§20.5) | E-SCOPE-012 / E-SESSION-* | 4 | type-system.ts, codegen/emit-expr.ts, emit-server.ts |
 | Error handling (`!{}`/fail) | E-ERROR-* | 9 | emit-logic.ts, type-system.ts (E-ERROR-010 at type-system.ts:9853) |
-| Functions | E-FN-* | 9 (E-FN-009 Nominal/deferred — zero fire site) | type-system.ts (§48.5) |
+| Functions | E-FN-* | 10 (+1 `E-FN-EQUALS-BODY`, NEW #396; E-FN-009 Nominal/deferred — zero fire site) | type-system.ts (§48.5); **`E-FN-EQUALS-BODY` / `E-FN-ARROW-BODY` fire from `ast-builder.js`, not type-system.ts** — a parse-time reject, not a type-check |
 | Route inference (client/server boundary) | E-ROUTE-* / E-RI-* / **W-DEAD-FUNCTION** / W-DEPRECATED-SERVER-MODIFIER | — | route-inference.ts (§12.4 E-ROUTE-002/005; §12.2 Trigger 6 `W-DEAD-FUNCTION`; §38.4 E-RI-002). **§12.2 Trigger 3 (S299) produces NO diagnostic** — it silently RELOCATES a function to the server. If you are looking for "why did my function move / why is there no `.server.js`", that is a PLACEMENT question, not a diagnostic one: see the Trigger-3 section below and domain.map.md. |
 | **Server-import cross-file invariant** | **W-SERVER-IMPORT-UNEMITTED** + W-SERVER-* | 2 | **`compiler/src/api.js` `checkServerImportInvariant`** — runs on the COMPILE, before the write gate. **Reverses the emitted specifier in DIST space via `serverImportTargetSource` since D-4 (S296); a source-space reversal made this guard blind to the exact class it exists to catch.** See dependencies.map.md's "Coordinate space" section. |
 | Markup / element name | E-MARKUP-001 | 1 live | name-resolver.ts (§4.1 gate) + html-elements.js |
@@ -373,7 +401,7 @@ dependencies.map.md's "Runtime-chunk gating" section.
 For the full per-session diagnostic-change narrative (S148 onward), see `docs/changelog.md`.
 
 ## Tags
-#scrml #map #error #diagnostics #routing #semdiff #css65 #diagnostic-partition #result-warnings #lint-diagnostics #tab-span-lift #outlet #tenant-floor #ssr-auth-scoped #sql-lex #sql-table-refs #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued #dbauth #e-dbauth-sqlite #e-dbauth-no-tenant-column #w-dbauth-marker-nearmiss #w-schema-destructive-drop #db-migrate #rls #secdef #e-cg-018 #w-each-bind-item-field-deferred #e-schema-010 #e-schema-011 #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #w-nav-chunk-load-failed #navigate-wave1c #e-match-invalid-arm #e-if-in-dispatched-arm #structural-if #§17.1.2 #three-call-sites #revert-by-symbol #e-channel-inside-page #cataloged-but-unwired #listen-quoting #changelog-dereferenced #ghost-pattern #w-dead-function #e-pa-002 #protect-analyzer #tailwind #w-tailwind-unrecognized-class #e-tailwind-001 #outline-family #w-server-import-unemitted #dist-space #d4 #on-mount #gh237 #gh234 #messages-chunk #w-auth-001-split #w-auth-middleware-auto-injected #code-split #trigger-3 #escalation-server-only #route-inference #prefix-coverage-audit #error-generated-index #not-a-diagnostic #w-lift-tier0 #ifrow-apply #§34.0 #row-provenance #s34-census #census-buckets #false-claim #declared-ahead #runtime-surfaced #struck-tombstone #line-citation-strip #e-deprecated-001 #machine-retired #w-deprecated-001-retired #e-lifecycle-001 #e-lifecycle-002 #e-lifecycle-004 #cleanup-diagnostics #e-for-unparenthesized-head #e-server-fn-in-sync-callback #e-mw-006-dead #e-error-011 #w-route-request-duplicates-server-load #named-codes-land-with-impl #w-lint-uncatalogued-eight #generated-index-unmaintained
+#scrml #map #error #diagnostics #routing #semdiff #css65 #diagnostic-partition #result-warnings #lint-diagnostics #tab-span-lift #outlet #tenant-floor #ssr-auth-scoped #sql-lex #sql-table-refs #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued #dbauth #e-dbauth-sqlite #e-dbauth-no-tenant-column #w-dbauth-marker-nearmiss #w-schema-destructive-drop #db-migrate #rls #secdef #e-cg-018 #w-each-bind-item-field-deferred #e-schema-010 #e-schema-011 #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #w-nav-chunk-load-failed #navigate-wave1c #e-match-invalid-arm #e-if-in-dispatched-arm #structural-if #§17.1.2 #three-call-sites #revert-by-symbol #e-channel-inside-page #cataloged-but-unwired #listen-quoting #changelog-dereferenced #ghost-pattern #w-dead-function #e-pa-002 #protect-analyzer #tailwind #w-tailwind-unrecognized-class #e-tailwind-001 #outline-family #w-server-import-unemitted #dist-space #d4 #on-mount #gh237 #gh234 #messages-chunk #w-auth-001-split #w-auth-middleware-auto-injected #code-split #trigger-3 #escalation-server-only #route-inference #prefix-coverage-audit #error-generated-index #not-a-diagnostic #w-lift-tier0 #ifrow-apply #§34.0 #row-provenance #s34-census #census-buckets #false-claim #declared-ahead #runtime-surfaced #struck-tombstone #line-citation-strip #e-deprecated-001 #machine-retired #w-deprecated-001-retired #e-lifecycle-001 #e-lifecycle-002 #e-lifecycle-004 #cleanup-diagnostics #e-for-unparenthesized-head #e-server-fn-in-sync-callback #e-mw-006-dead #e-error-011 #w-route-request-duplicates-server-load #named-codes-land-with-impl #w-lint-uncatalogued-eight #generated-index-unmaintained #e-fn-equals-body #fn-decl-parse-sites #subparse-span-rebase #within-node-gate-windows-fix #s34-census-broken #fileURLToPath-vs-pathname #pr-405-held
 
 ## Links
 - [primary.map.md](./primary.map.md)
