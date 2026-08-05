@@ -133,6 +133,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `78683e35` — wrap(s319): three deliberations ratified, a contract re-alignment, and a gate that measured the wrong population (#420) — **pushed**
 - `663f31b8` — wrap(s316): crash recovery, five rulings, and a review floor that had never run (#397) — **pushed**
 - `115e8b1b` — wrap(S295): hand-off + changelog — three-lane arc, pa-base v2.6/v2.7, three privacy scrubs (#246) — **pushed**
 - `04477cb1` — wrap(S292): hand-off + changelog + master-list §0 + delta-log [824]-[839] + inbox drain (#220) — **pushed**
@@ -140,7 +141,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `258ff020` — wrap(S288) addendum: file the FK HIGH (root-caused) + RediLedger's turnkey PASS (#204) — **pushed**
 - `89fe9748` — wrap(S287): hand-off + delta-log [786] + maps refresh (DB-authoritative tier) (#190) — **pushed**
 - `7ae6a055` — wrap(S286): adopter form-binding pair closed — #174 + #175 landed, hand-off/changelog/gap-counts (#179) — **pushed**
-- `cd658984` — wrap(S285): changelog + hand-off addendum — 4 adopter/gap PRs (#167 #171 #172 #173) (#176) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core

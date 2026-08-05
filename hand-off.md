@@ -10,7 +10,36 @@
 Mechanical stream = delta-log **[1135]–[1147]**. Concurrent: Peter ran S319/S320/S321-peter and landed
 **#401–#418** throughout; every conflict was generated-file only and resolved by REGENERATION + arithmetic.
 
-## 🔴 THE NEXT PA'S FIRST MOVE — TWO AGENTS ARE STILL LIVE. DO NOT RECLAIM THEIR WORKTREES.
+## ⚑ ADDENDUM (post-wrap, 2026-08-05) — U1 ROUND 3 RETURNED. Read this before the section below it.
+
+The U1 agent finished AFTER the wrap was landed, so the "round 3 queued and NOT yet consumed" line below
+is **superseded**. Current truth:
+
+- **Branch `worktree-agent-a9c144ab82648e947` @ `09e4d08c`. FIVE defects fixed and verified** — F1
+  (build-breaking strand, ROOT fix, also closes `g-match-block-arm-server-call-no-autoawait`), F2, F4
+  (root was the `emit-logic.ts` dispatch hop, not the five call sites), F5 (cross-file name collision,
+  filtered in BOTH builders), F7. Gated suite 22045/0. **F1 and F4 were cross-checked against each
+  other** — normalizing the threading did not re-open F1.
+- **IT STILL MUST NOT LAND.** The agent says so itself: the **wide-corpus harness was NOT built**, and
+  the 708-bundle corpus contains zero instances of every shape found in rounds 2–3. Re-verifying on it
+  would be another false green. **Building that harness is the gate on landing and the first move.**
+- **RULED (PA, fork rule) — F3's hard error on a CONSUMING user HOF STANDS.** The agent pushed back and
+  was right: `setTimeout` DISCARDS its callback's return (a genuine false positive, fixed) while
+  `run(() => loadRows().length)` CONSUMES it (base silently returned `undefined`). Two shapes that look
+  identical and are not. All three structural rows agree. **Owed with the fix:** the diagnostic still
+  reports under the *stdlib* code with combinator-shaped message text, for a user-defined server fn.
+- **Still open, recorded in the agent's `progress.md`, none built:** the absorb-discards-its-own-await
+  sequencing question (**filed for decision — fixing it re-opens the `.catch` hole round 1 closed; a real
+  §13.2-vs-§19.6 design call**) · the `rewriteCodeSegments` fence · the `.catch` client-fn-body test · the
+  never-invoked-lambda fixture · F8 param-default. **Structural root: three disagreeing client-mode "is
+  this async?" predicates — F2 fixed two, the drain stays blind.**
+- **The agent retracted two of its own round-1 claims on the record**, and both land on me: the
+  strand-impossible argument (which I relayed upward as verified) and the byte-identity number (partly
+  achieved by the absorb suppressing its own fix).
+
+`scratchpad/u1-frozen` @ `0c677fa3` is now reclaimable — its review is complete.
+
+## 🔴 THE NEXT PA'S FIRST MOVE — TWO AGENTS WERE LIVE AT WRAP. DO NOT RECLAIM THEIR WORKTREES.
 
 1. **The U1 fix round** — `worktree-agent-a9c144ab82648e947`, branch `worktree-agent-a9c144ab82648e947`.
    F1's ROOT fix is committed (`a9a4133d` — the client match IIFE goes async when an arm body actually
