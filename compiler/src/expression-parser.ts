@@ -1601,9 +1601,33 @@ function preprocessForAcorn(
   // OR with a bare variant) is meaningless in scrml — the canonical absence
   // check is `is .Variant` (§42), not `|`. So including `|` does not lose
   // expressivity for valid scrml programs.
-  s = s.replace(
-    /(?<![A-Za-z0-9_$\)\]"'`|]\s*)\.\s*([A-Z][A-Za-z0-9_]*)/g,
-    '__scrml_bare_variant_$1__'
+  //
+  // GITI-017/S125 class (g-bare-variant-mask-leaks-into-string-literals,
+  // 2026-08-04): this substitution PREVIOUSLY ran as a bare global
+  // `s.replace(...)` over the WHOLE string with NO literal/comment fence — the
+  // identical unfenced-text-pass bug the sibling `not`-lowering directly below
+  // (:1623) already fixed via rewriteCodeSegments. A `.Uppercase` word after a
+  // non-word char INSIDE a string literal (`<path> = "/a/.Beta"`,
+  // `"(.Beta)"`, regex sources, prose) matched the code-position pattern and was
+  // masked to `__scrml_bare_variant_Beta__`; the unmask pass (:2247+) walks
+  // Identifier AST nodes, so a placeholder buried inside parsed STRING content is
+  // unreachable and LEAKED verbatim into the emitted runtime string (silent
+  // data corruption). Whether a given interior escaped was pure lookbehind
+  // accident (`.Note` preceded by `e` excluded as member-access; `.Beta`
+  // preceded by `/` not excluded). Routing through rewriteCodeSegments applies
+  // the mask to CODE regions only; string/regex/comment interiors pass through
+  // verbatim. Match-arm alternation is UNAFFECTED: preprocessMatchExprs (above,
+  // :1511) has already lifted arms into quoted STRING args of
+  // `__scrml_match__(subject, "arm", …)`, so those arms were never masked here
+  // (the negation class excluded `"`/`|`) and remain string interiors the fence
+  // skips — rewriteMatchExpr re-parses them downstream exactly as before. The
+  // negation class is kept unchanged for genuine CODE-position member-access
+  // exclusion (`obj.Prop`, `f().Variant`).
+  s = rewriteCodeSegments(s, (code) =>
+    code.replace(
+      /(?<![A-Za-z0-9_$\)\]"'`|]\s*)\.\s*([A-Z][A-Za-z0-9_]*)/g,
+      '__scrml_bare_variant_$1__'
+    )
   );
 
   // §45.7 + §42 `not`-keyword lowering — boolean-negation forms.
