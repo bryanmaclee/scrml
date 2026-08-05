@@ -1,18 +1,34 @@
 <!-- ============================================================= -->
 <!-- S320 WRAP (peter/P-Tech1 Windows) — prepended 2026-08-04.       -->
 <!-- S319 + all prior UNCHANGED below. Mechanical stream = delta-log -->
-<!-- [1124]–[1129]. Disambiguate sessions by NAME (numbers collide). -->
+<!-- [1124]–[1134]. Disambiguate sessions by NAME (numbers collide). -->
 <!-- ============================================================= -->
 
 # scrml — Session 320 (peter · P-Tech1 Windows) — WRAP
 
-**Date:** 2026-08-04. `/boot` Profile A. **1 PR merged (#403).** Mechanical stream = delta-log
-**[1124]–[1129].** main advanced by this continuity PR; coherence **0/0** both repos.
+**Date:** 2026-08-04. `/boot` Profile A. **5 PRs merged (#403 #406 #407 #408 #410); #405 HELD.**
+Mechanical stream = delta-log **[1124]–[1134].** main `123d9ed3`, coherence **0/0** both repos.
+(The [1129] "wrap" was premature — the session continued with the operator: maps + two HIGHs.)
 
 ## Landed
 - **#403 review-debt drain (docs-only)** — #399–#402 carve-out, but the #400/#401 structural anchors
-  verified against source, not rubber-stamped. Probe 0 OWED; carve-out rate 50% (HIGH — honest
-  work-mix signal).
+  verified against source, not rubber-stamped. Probe 0 OWED; carve-out rate 50% (HIGH — honest signal).
+- **#406 continuity** (the [1129] premature-wrap docs).
+- **#407 maps refresh** — `.claude/maps/` to HEAD (was stale at S314); mapped MAIN-only (#405 HELD).
+  Surfaced `scripts/s34-census.ts` Windows path bug + the `domain.map.md` 868-vs-300-line breach.
+- **#408 `g-runtime-script-tag-not-depth-prefixed` (HIGH)** — shell-less nested page emitted a BARE
+  runtime `<script src>` → 404 → DOA silently. Depth-prefixed the own-document tag (mirrors the ESM
+  path); composed pages don't double-prefix. Flipped `corpus-emitted-specifier §2` green. S239 clean.
+- **#410 `g-bare-variant-mask-leaks-into-string-literals` (HIGH)** — `"/a/.Beta"` leaked the mask
+  placeholder into the runtime string (silent corruption). Fenced the mask through `rewriteCodeSegments`
+  (the GITI-017/S125 class); alternation unaffected. S239 clean. Resolved a tangled/mis-named marker pair.
+
+## MED pool explored, nothing built (see [1133])
+Clean in-lane HIGH well is dry. Dropped to MEDs: `g-markup-value-attr-interp-string-brace` repro
+didn't cleanly isolate; **`g-each-body-let-alias-silently-dropped` REPRODUCED** (a `let` alias in an
+each body silently drops → empty row) but it's a sibling of the bryan-routed block-body-value class AND
+"should `let` in an each interp work or error?" is a spec/design call — deliberately NOT built. Repro
+lesson: `<each>` needs `in=@x as it` (bare `<each @items>` silently skips render).
 
 ## 🔴 THE NEXT PA'S FIRST MOVE — bryan must rule on the #405 architecture BEFORE any more auto-await work
 

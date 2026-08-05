@@ -2,9 +2,13 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-## S320 — 2026-08-04 (Peter · Windows) — review debt drained; the auto-await choke-point CORE built + verified but HELD for an architecture ruling
+## S320 — 2026-08-04 (Peter · Windows) — review debt drained; the auto-await CORE built-but-HELD; two HIGH silent-failure codegen bugs fixed
 
-Drained the review-floor debt and carried the CPS auto-await choke-point from deliberation through a built, verified fix — then held it when a concurrent deliberation from bryan's lane surfaced a more-fundamental architecture.
+Drained the review-floor debt and carried the CPS auto-await choke-point from deliberation through a built, verified fix — then held it when a concurrent deliberation from bryan's lane surfaced a more-fundamental architecture. The session then continued: a maps refresh and two fresh in-lane HIGH silent-failure codegen fixes.
+
+- **#407 maps refresh (landed)** — `.claude/maps/` incremental to HEAD (watermark was stale at S314); mapped `main`-only (#405 called out HELD). Surfaced `scripts/s34-census.ts` Windows path bug + the `domain.map.md` size-budget breach (868 vs 300 lines).
+- **#408 `g-runtime-script-tag-not-depth-prefixed` (HIGH, landed)** — a shell-less nested page emitted a **bare** runtime `<script src>` → 404 → page booted **DOA, silently**. Fixed by depth-prefixing the own-document tag (mirrors the ESM path), scoped so composed pages don't double-prefix. Flipped `corpus-emitted-specifier §2` green (4 `channels/*.html` dangling runtime tags now resolve).
+- **#410 `g-bare-variant-mask-leaks-into-string-literals` (HIGH, landed)** — `<path> = "/a/.Beta"` silently compiled to `"/a/__scrml_bare_variant_Beta__"` (mask placeholder leaked into the runtime string). Fixed by fencing the bare-variant mask through `rewriteCodeSegments` (the GITI-017/S125 class the sibling `not`-lowering already fixed); match-arm alternation unaffected.
 
 - **#403 review-debt drain (landed, docs-only)** — recorded carve-out on #399–#402 (all docs-only), but substantiated the two load-bearing structural anchors against source rather than rubber-stamping (`scheduling.ts:974` opaque-boundary; `conformance/run.ts` has no emitted-content assertion). Probe → 0 OWED. Carve-out rate 50% (flagged HIGH — an honest docs/gaps-heavy work-mix signal).
 - **dpa-020 auto-await choke-point (RUN, ratified verdict)** — fired the dPA satellite; verdict **(c) PARTITION: 4 of 7 positions share ONE choke-point injector**. PA independently verified the premise. *(Later found bryan's S319 dPA had run it too — an uncommitted per-clone-trap casualty; verdicts converge on BUILD/partition/AST, diverge on fix locus.)*
