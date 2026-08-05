@@ -1,9 +1,22 @@
+> # ✅ DONE — S321-peter, PR #417 (`260a8455`)
+>
+> Fixed `g-assignment-emits-init-set-inverting-reset` (HIGH). NOT via the proposed
+> `resolveBareAtWriteTargets` flat-name-set (never landed on this clone). Simpler
+> route: `_emitInitThunkSidecar` (emit-logic.ts) skips the reset init-thunk for a
+> `structuralForm:false` plain reassignment whose cell has a `<name>` structural
+> decl (`collectStructuralDeclNames`) — safe-by-construction (implicit `@`-decls
+> like SSE binds keep their thunk), per-node so the compound collision this brief
+> feared cannot occur. S239 caught + fixed F1 (control-flow-body under-skip, module
+> fallback); F2 (implicit double-write) filed as a pre-existing MED sibling.
+> Pinned: 2 RT conformance cases (proven fail-pre / pass-post) + unit
+> `assignment-init-set-reset-inversion.test.js`.
+
 # BRIEF — fix round: `resolveBareAtWriteTargets` uses a FLAT, UNSCOPED name set
 
 change-id: `assignment-init-set-scope-fix`
 authored: 2026-08-03 (S316-bryan) · agent: `scrml-js-codegen-engineer` (iso worktree, opus, bg)
 gap: `g-assignment-emits-init-set-inverting-reset` (HIGH, `docs/known-gaps.md:125`)
-DONE-PROBE: bun test compiler/tests/unit/reset-init-set-inversion-s314.test.js compiler/tests/conformance/conf-RESET-INIT-AFTER-ASSIGNMENT.test.js
+DONE-PROBE: bun test compiler/tests/unit/assignment-init-set-reset-inversion.test.js
 probe-intent: green, WITH a new case pinning the compound-child name-collision shape below. The
 existing 19 tests already pass on the broken build — they are blind to this defect, which is the
 whole reason the probe needs the new case.
