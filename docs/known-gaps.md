@@ -31,10 +31,47 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 20 |
-| MED | 112 |
+| MED | 113 |
 | LOW | 49 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-gap-markers-duplicate-id-conflicting-status-double-counted — one ledger entry may carry TWO `@gap` markers with conflicting `status=`, and `state.ts` counts markers not entries, so the entry is counted twice — `--check` passes — `NEW S322-bryan (surfaced while substantiating #419's count delta during the review-floor drain); MED; open`
+<!-- @gap id=g-gap-markers-duplicate-id-conflicting-status-double-counted sev=MED status=open locus=scripts/state.ts prov=rationale:the-counter-has-a-fail-loud-guard-for-an-unknown-status-but-none-for-a-duplicated-id-so-the-same-entry-can-be-both-open-and-resolved -->
+
+**Measured, not inferred.** 585 `@gap` markers resolve to **583 unique ids**. The two duplicates each
+carry *conflicting* status, both `sev=MED`:
+
+| id | markers |
+|---|---|
+| `g-gap-counts-silently-drops-unrecognised-status` | `status=open` (leading, `:5685`) + `status=resolved` (trailing, `:5702`) |
+| `g-db-migrate-check-constraint-oneof-pattern` | `status=resolved` + `status=open` |
+
+`scripts/state.ts` tokenizes **markers**, not entries, and classifies each independently — so each of
+these is counted once as open and once as closed. **Open MED is inflated by exactly 2: the §0 rollup
+reports 112, the true figure is 110.** HIGH, LOW and Nominal are unaffected (both duplicates are MED).
+
+**Why nothing caught it.** `--check` compares the generated block against a fresh tokenize of the same
+input, so it is a *faithful render of a lossy read* — the gate cannot disagree with itself. This is the
+sibling of [[g-gap-counts-silently-drops-unrecognised-status]], which the S299 fix closed by making an
+**unknown status** throw. That guard was the right shape and it works; it simply does not cover a
+**duplicated id**, because both markers here are individually well-formed.
+
+**Root cause is the marker-placement inconsistency the overlay already documents** — some entries carry
+the marker LEADING, some TRAILING (`pa-scrml-overlay.md`, `{{defect_ledger_fills}}`: *"match on the
+heading, not on marker adjacency"*). An entry resolved by a session that appends a trailing marker,
+without striking a leading one it did not notice, lands in exactly this state. The inconsistency is
+tolerated by design; the double-count is not.
+
+**Fix direction (not scoped, not a ruling).** Mirror the existing fail-loud precedent: `state.ts`
+should **throw on a duplicated `@gap id=`**, naming the id and both statuses, so the ledger cannot
+silently hold an entry in two states. That is the `pa-base` §8 shape and it is the same one-guard
+change the S299 fix already proved out here. Deciding which marker WINS is a data question per entry
+and should not be automated. **Prove the bite before landing** — inject a duplicate, confirm the throw
+names it, restore, confirm green.
+
+**Cheap audit one-liner:**
+`grep -oE '@gap id=[^ ]+' docs/known-gaps.md | sort | uniq -d`
 
 ### g-rename-cell-accessors-swallows-parse-error-and-silently-un-namespaces-the-chunk — a non-parsing emitted body makes `renameCellAccessors` return it UNCHANGED instead of erroring, so `addCellScopePrologue` emits nothing and every cell silently reverts to an un-namespaced global — compiler exit 0 — `NEW S319-bryan (surfaced by the S239 adversarial pass on the U1 delta, regression lens); HIGH; open`
 <!-- @gap id=g-rename-cell-accessors-swallows-parse-error-and-silently-un-namespaces-the-chunk sev=HIGH status=open locus=compiler/src/codegen/cell-accessor-rename.ts prov=rationale:a-swallowed-parse-error-converts-one-codegen-defect-into-two-independent-silent-failures -->
