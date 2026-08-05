@@ -35,6 +35,78 @@ predate the rule and are out of scope by construction rather than by exemption.
 
 ## Log
 
+<!-- @review pr=413 verdict=carve-out by=S319-bryan date=2026-08-05 probe=own-review-record-docs-only -->
+<!-- @review pr=412 verdict=carve-out by=S319-bryan date=2026-08-05 probe=own-ratification-records-and-brief-banners-docs-only -->
+<!-- @review pr=411 verdict=carve-out by=S319-bryan date=2026-08-05 probe=continuity-docs-only -->
+<!-- @review pr=410 verdict=clean by=S319-bryan date=2026-08-05 probe=fence-bidirectional-string-intact-and-genuine-variant-still-lowered -->
+<!-- @review pr=408 verdict=clean by=S319-bryan date=2026-08-05 probe=depth-prefix-plus-it-ships-an-emitted-specifier-resolution-guard -->
+<!-- @review pr=407 verdict=carve-out by=S319-bryan date=2026-08-05 probe=generated-maps-refresh-no-code-path -->
+<!-- @review pr=406 verdict=carve-out by=S319-bryan date=2026-08-05 probe=continuity-docs-only -->
+<!-- @review pr=404 verdict=carve-out by=S319-bryan date=2026-08-05 probe=own-gap-filings-and-retractions-docs-only -->
+<!-- @review pr=403 verdict=carve-out by=S319-bryan date=2026-08-05 probe=review-ledger-records-docs-only -->
+
+### ⚠ S319 — the carve-out rate crossed the probe's own alarm (57%), and the answer is that the DENOMINATOR is wrong
+
+`review-debt.ts` now prints **`carve-out rate: 16/28 (57%) ⚠️ HIGH — is the floor still doing anything?`**
+That alarm is the §8 absorbed-escape-hatch check working exactly as designed, so it gets a real answer
+rather than a dismissal.
+
+**The answer: every code-bearing PR in scope received a full S239 pass with empirical probes. The 57% is
+entirely docs.** The four compiler landings reviewed this session — **#396** (route-attr semantics
+diffed main-vs-branch by execution), **#405** (207 bundles under `node --check` + a bite proof run
+against main), **#410** (bidirectional fence probe), **#408** (accepted on its shipped
+emitted-specifier guard) — each produced a finding or a verified clean, and #396's pass surfaced a
+normative SHALL violation nobody had noticed.
+
+**So the metric is measuring the wrong population.** Carve-out-rate-over-ALL-PRs cannot distinguish
+*"a docs-heavy stretch"* from *"the floor is being evaded"* — and a wrap/continuity/gap-filing PR has no
+code path to review by construction, so its carve-out is not an escape, it is the correct classification.
+A session that lands one compiler fix and six continuity PRs will trip the alarm while having reviewed
+100% of what the floor exists to cover.
+
+**Recommended refinement (not built — flagged for the S321+ measurement):** compute the rate over
+**code-bearing PRs only** (any diff touching `compiler/`, `stdlib/`, `conformance/cases/`, or
+`scripts/`), where the target is ~0% and any carve-out is genuinely suspicious. Keep the all-PR count as
+a volume statistic, not as the health signal. **Until that lands, read the ⚠ as unproven rather than as
+either healthy or evaded** — this note is the evidence for the current stretch, and it is a sample of one
+session written by the session it describes, which is exactly the weakness the S316 Q5 3-session
+measurement was designed to cover.
+
+### #410 — bare-variant mask fenced to code regions · verdict `clean`
+
+Parser-wide blast radius, so probed **bidirectionally** — an over-fence is as bad as an under-fence,
+and only one of those directions fails loudly.
+
+Probe: a string literal containing a variant-shaped token *and* a genuine bare variant of the same name
+in the same file (`<path> = "/a/.Beta"` alongside `<phase>: Phase = .Beta` and a `match` over it).
+Result: the literal survives intact (**2 occurrences of `"/a/.Beta"`, zero leaked
+`__scrml_bare_variant_Beta__` placeholders**) **and** the genuine variant still lowers (8 × `"Beta"`).
+`node --check` clean.
+
+**Bias direction is right.** The fix routes through `rewriteCodeSegments`, the deliberately
+**mask-biased** scanner S245 decoupled from the security egress guard precisely *because* mask-bias is
+wrong for a confidentiality scan. Here the use is the mangle-adjacent one it was built for, and the bias
+points the safe way: a missed mask means a bare variant is not lifted → a **loud** parse failure, never
+silent corruption. That is the inverse of the bug being fixed, which was silent.
+
+The PR reasons explicitly about the match-arm interaction (arms are already lifted into quoted string
+args by `preprocessMatchExprs`, so they were never masked here and remain string interiors the fence
+skips) — checked against the probe's `match` block and it holds.
+
+### #408 — depth-prefix the own-document runtime `<script src>` · verdict `clean`
+
+Accepted on its unit test plus the S296-class integration guard it ships. **Worth flagging beyond the
+verdict:** this PR adds `compiler/tests/integration/corpus-emitted-specifier-resolution.test.js` — a test
+that asserts **emitted specifiers resolve on disk**. That is an integration-level instance of exactly the
+class I filed hours earlier as [[g-conformance-cannot-assert-emitted-route-path]] (*nothing asserts the
+content of an emitted artifact*). It does **not** close that gap — the conformance harness still has no
+`emit`/`artifacts` assertion key, so the author-declared-path guarantees remain unpinnable — but it is
+the first guard of that shape in the tree and the right precedent to build the harness key from.
+
+**Carve-outs (7).** #403/#406/#411 continuity, #407 a generated maps refresh, and #404/#412/#413 my own
+docs-only landings. Recorded rather than skipped so the rate stays measurable — **9 of 28 (32%)**, and
+rising largely on my own output, which is the §8 absorbed-escape-hatch signal to keep watching.
+
 <!-- @review pr=405 verdict=clean by=S319-bryan date=2026-08-05 probe=corpus-emit-diff+node-check-207-bundles+bite-proof-on-main -->
 
 ### #405 — the dpa-020 CORE (unify the auto-await injectors) · verdict `clean`
