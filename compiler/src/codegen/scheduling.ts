@@ -378,6 +378,42 @@ export function extractInitExpr(stmt: ASTNode): string {
  * Returns the rewritten code, or the input unchanged when nothing classified or the
  * body does not parse.
  */
+/**
+ * U1 (dpa-020) — the file's SERVER-boundary function names, for the CLIENT-mode
+ * call-site auto-await in emit-expr (`isClientServerFnCall`).
+ *
+ * Same one-line derivation the injectors in this module each do inline; named
+ * here because U1's consumer is an EMITTER context rather than a post-pass over
+ * emitted text, and the two must agree on membership. Kept module-local: this is
+ * a threading detail, not a new public seam.
+ */
+function _clientServerFnNames(routeMap: RouteMap, filePath: string): Set<string> {
+  const names = new Set<string>();
+  for (const [id, route] of routeMap.functions) {
+    // F5 (S239 round 3) — FILTER ON THE OWNING FILE. `runRI` builds ONE routeMap
+    // across the whole resolved import graph, and `FunctionRoute` carries no
+    // `filePath` field — the file lives ONLY in the map KEY (`<filePath>::<start>`).
+    // Iterating with the key dropped put a server-boundary `save` from `lib.scrml`
+    // into the set used to emit `app.scrml`, where `save` may be a purely local,
+    // purely SYNCHRONOUS client fn: the call then gained a spurious `await` (which
+    // would unwrap a thenable-shaped return), and its sync-callback form hard-failed
+    // with a false `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` — with renaming the local fn as
+    // the only user workaround.
+    //
+    // `declaredNames` does NOT cover this: a TOP-LEVEL client fn name is never in it
+    // (both `scheduleStatements` and the emit-functions loop seed it empty and fill
+    // it only as body statements declare). So the shadow guard cannot see the
+    // collision — the filter is the root fix.
+    //
+    // Corpus incidence is zero today, which is NOT reassurance: `examples/23-
+    // trucking-dispatch` declares `getCurrentUser` 19x, `refresh` 18x and
+    // `getSessionToken` 17x across files — one boundary flip from firing.
+    if (!id.startsWith(`${filePath}::`)) continue;
+    if (route.boundary === "server" && route.functionName) names.add(route.functionName as string);
+  }
+  return names;
+}
+
 export function liftEmittedStatementAwaits(
   code: string,
   routeMap: RouteMap,
@@ -787,6 +823,25 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
         : {}),
     // Seam-A finding-4 — gate the client-mode stdlib await on an async fn body.
     ...(clientAsyncBody ? { clientAsyncBody: true } : {}),
+    // U1 (dpa-020) — the file's SERVER-boundary fn names, so emit-expr's
+    // `isClientServerFnCall` can `await` a client→server RPC AT ITS CALL SITE
+    // (§13.2 is position-invariant) instead of relying on the statement-level
+    // injector below, which only ever reached statement position — leaving
+    // receiver-tail (`loadRows().length`) and nested-argument (`pick(loadRows())`)
+    // positions bare, silently handing back a pending Promise.
+    //
+    // `scheduleStatements` is called from exactly ONE site (emit-functions.ts,
+    // the CLIENT plain-`function` body loop — server-boundary fns `continue`
+    // before it), and `emitOpts` sets no `boundary`, so `_makeExprCtx` resolves
+    // `mode: "client"` here. Derived from `routeMap` locally, the same way this
+    // module's other server-fn scans do — no new parameter.
+    //
+    // Threaded ONLY when `clientAsyncBody` (i.e. the host carries `async`), so
+    // the set is absent exactly where an `await` would be stranded. That makes
+    // the threading a second, independent expression of the same gate
+    // `isClientServerFnCall` applies — belt and braces on the one failure mode
+    // (a stranded `await` is a whole-bundle SyntaxError, not a local defect).
+    ...(clientAsyncBody ? { serverFnNames: _clientServerFnNames(routeMap, filePath) } : {}),
     // §32 — a function body is its own tilde scope (SPEC §32.4). Pre-scan
     // for `~` references and set up a per-body tildeContext so bare-expr /
     // value-lift statements capture into the generated tilde var and consume

@@ -1190,7 +1190,16 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // is async — its call lowers to an awaited fetch stub), replacing the second,
   // non-transitive top-level-only hasServerCallees scan.
   const _serverFnNames = new Set<string>();
-  for (const [, route] of routeMap.functions) {
+  for (const [_id, route] of routeMap.functions) {
+    // F5 (S239 round 3) — same cross-file collision as scheduling.ts's
+    // `_clientServerFnNames`: `routeMap` spans the WHOLE resolved import graph and
+    // the owning file lives only in the map KEY, so an unfiltered walk pulled another
+    // file's server-fn names into THIS file's client emission. Filtering here fixes
+    // both consumers at once: the U1 call-site await (threaded into `fnOpts`) AND the
+    // `callsServerFn` async-coloring seed below — which must agree, since U1's gate
+    // (`clientAsyncBody`) is derived from that very coloring. Letting them disagree
+    // is precisely how a stranded `await` gets built.
+    if (!_id.startsWith(`${filePath}::`)) continue;
     if (route.boundary === "server" && route.functionName) _serverFnNames.add(route.functionName as string);
   }
   const _clientAsyncSeed = new Set<string>();
@@ -1351,6 +1360,24 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         ...(_calleeMap ? { asyncCalleeMap: _calleeMap } : {}),
         ...(_exportRegistry ? { asyncExportRegistry: _exportRegistry } : {}),
         ...(_fnIsAsync ? { clientAsyncBody: true } : {}),
+        // U1 (dpa-020) — the server-fn names, so emit-expr's `isClientServerFnCall`
+        // awaits a client→server RPC at its call site (§13.2 is position-invariant).
+        // THIS path matters most: `fn`-shorthand and return-typed `function` bodies
+        // bypass `scheduleStatements` entirely (emitFnShortcutBody instead), so the
+        // statement-level `injectServerCallAwaits` post-pass NEVER saw them — a
+        // return-typed `function` calling a server fn emitted a bare, unawaited
+        // Promise with zero diagnostics (probe u1p3).
+        //
+        // Gated on `_fnIsAsync` — the SAME boolean that puts `async` on this
+        // function's signature two lines above (`asyncPrefix`). Absent it, the set is
+        // not threaded and emission is byte-identical to today, so the await can
+        // never land in a sync host.
+        //
+        // NOT `serverFnPeerAliasNames`/`serverFnPeerDispatchObjs`: those are the
+        // SERVER in-process peer-callable surfaces (`emitCall`'s server branch), and
+        // the client's indirect/dispatch server-call shapes are a separate,
+        // unverified question — deliberately out of U1's scope.
+        ...(_fnIsAsync && _serverFnNames.size > 0 ? { serverFnNames: _serverFnNames } : {}),
         ...(machineBindings ? { machineBindings } : {}),
         ...(engineBindings ? { engineBindings } : {}),
         ...(mapVarNames.size > 0 ? { mapVarNames } : {}),

@@ -2824,6 +2824,14 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // call inside an if condition/body lowers to `await <peer>()` instead
         // of a bare unawaited Promise (completes the b2bf9959 threading).
         serverFnNames: opts.serverFnNames,
+        // F4 (S239 round 2) ROOT — the host-async flag must travel WITH
+        // `serverFnNames`. This dispatch hop forwarded the name set but not the
+        // flag, so U1's own gate failed one block deep and
+        // `if flag { @count = loadRows().length }` stayed byte-identical to base
+        // (still `.length` off a pending Promise, still silent). The five
+        // emit-control-flow forwarding sites were the SYMPTOM; this hop is where
+        // the flag was actually dropped.
+        clientAsyncBody: (opts as { clientAsyncBody?: boolean }).clientAsyncBody,
         // #284 — thread the indirect-peer alias set so an aliased peer call
         // (`if (check(rows))` where `const check = isAllowed`) inside an if
         // condition/body awaits (else an always-truthy Promise → auth bypass).
@@ -2870,6 +2878,9 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       return emitForStmt(node, {
         // ss19 #8 — peer-call threading (see if-stmt dispatch above).
         serverFnNames: opts.serverFnNames,
+        // F4 (S239 round 2) ROOT — host-async flag travels with serverFnNames
+        // (see the if-stmt dispatch above for the full reasoning).
+        clientAsyncBody: (opts as { clientAsyncBody?: boolean }).clientAsyncBody,
         // #284 — indirect-peer alias set (see if-stmt dispatch above).
         serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs,
         syncPeerCalls: opts.syncPeerCalls,
@@ -3201,7 +3212,18 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           // set is per-function-body resolved (shadow-aware, reassignment→dropped),
           // so a local non-peer `p` is never in it.
           let _refsPeer = false;
-          for (const _set of [_sqlExprCtx.serverFnNames, _sqlExprCtx.serverFnPeerAliasNames]) {
+          // F7 (S239 round 3) — EXPLICIT mode guard. This is the last read of
+          // `serverFnNames` that did not state which mode it meant. U1 populates that
+          // field in CLIENT mode too (where it names fetch-stub targets, not
+          // in-process peers), and this scan's whole purpose is routing a SQL param to
+          // the peer-await path. It was already unreachable in client mode — `?{}` SQL
+          // escalates its function to the server boundary — but that argument lives in
+          // a DIFFERENT file's escalation table. State it locally so the next reader
+          // does not have to re-derive it cross-file.
+          const _sqlPeerSets = _sqlExprCtx.mode === "server"
+            ? [_sqlExprCtx.serverFnNames, _sqlExprCtx.serverFnPeerAliasNames]
+            : [];
+          for (const _set of _sqlPeerSets) {
             if (_refsPeer) break;
             if (!_set || _set.size === 0) continue;
             for (const _fn of _set) {

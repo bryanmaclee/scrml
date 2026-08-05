@@ -379,6 +379,7 @@ function detectHistoryFormFromString(rhs: string): { isHistoryForm: boolean; str
  */
 function _asyncAwaitBodyOpts(opts: any): {
   asyncRouteMap?: any; asyncCalleeMap?: any; asyncExportRegistry?: any; asyncFilePath?: any; awaitNestedPromises?: boolean;
+  clientAsyncBody?: boolean;
 } {
   // Gate on `asyncRouteMap` ALONE. asyncFilePath / asyncCalleeMap /
   // asyncExportRegistry are CLASSIFIER INPUTS (stdlib-Promise resolution), NOT
@@ -394,6 +395,14 @@ function _asyncAwaitBodyOpts(opts: any): {
     asyncCalleeMap: opts.asyncCalleeMap ?? null,
     asyncExportRegistry: opts.asyncExportRegistry ?? null,
     awaitNestedPromises: true,
+    // U1 FIX ROUND (F4) — forward the host-async flag into the loop/branch body.
+    // These paths already forwarded `serverFnNames` but NOT `clientAsyncBody`, so
+    // U1's own gate failed one block deep: `if flag { @count = loadRows().length }`
+    // stayed byte-identical to base — still `.length` off a pending Promise, still
+    // silent. Safe here because the emitted HOST for an if/for/while body IS the
+    // enclosing async function (unlike the match arm, which interposes its own
+    // IIFE — see the F1 fix at the match lowering).
+    ...(opts.clientAsyncBody ? { clientAsyncBody: true } : {}),
   };
 }
 
@@ -469,6 +478,9 @@ function _emitIfStmtInner(node: any, opts: IfOpts = {}): string {
     scopeVar: opts.scopeVar ?? null,
     // ss19 #8 — peer-call threading into the if/else body (see IfOpts).
     ...(opts.serverFnNames ? { serverFnNames: opts.serverFnNames } : {}),
+    // U1 FIX ROUND (F4) — the host-async flag must travel WITH serverFnNames, or
+    // U1's gate fails inside the branch body and the await is silently skipped.
+    ...(opts.clientAsyncBody ? { clientAsyncBody: true } : {}),
     // #284 — indirect-peer alias set into the if/else body.
     ...(opts.serverFnPeerAliasNames ? { serverFnPeerAliasNames: opts.serverFnPeerAliasNames } : {}), ...(opts.serverFnPeerDispatchObjs ? { serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs } : {}),
     ...(opts.syncPeerCalls ? { syncPeerCalls: opts.syncPeerCalls } : {}),
@@ -612,7 +624,7 @@ function _emitForStmtInner(
       lines.push(`for (${init}; ${cond}; ${update}) {`);
 
       const body: any[] = node.body ?? [];
-      for (const code of emitLogicBody(body, { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+      for (const code of emitLogicBody(body, { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, /* U1 F4 — host-async flag travels with serverFnNames */ ...(opts?.clientAsyncBody ? { clientAsyncBody: true } : {}), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
         lines.push(`  ${code}`);
       }
       lines.push(`}`);
@@ -2224,7 +2236,9 @@ export function emitMatchExpr(node: any, opts?: any): string {
   // `async` and `await`ed. The enclosing server-handler IIFE is itself async,
   // so an awaited inner async IIFE is well-formed. Client mode keeps the plain
   // synchronous IIFE (no `await` ever appears in client arm bodies).
-  iifeLines.push(_matchMode === "server" ? `await (async function() {` : `(function() {`);
+  // U1 FIX ROUND (F1) — the header is decided AFTER the arm bodies are emitted;
+  // this is a placeholder, overwritten below. See the block at the `})()` close.
+  iifeLines.push(`/*__scrml_match_iife_header__*/`);
   iifeLines.push(`  const ${tmpVar} = ${header};`);
   if (needsTagNormalization) {
     iifeLines.push(`  ${emitMatchTagDiscriminator(tmpVar, tagVar, failableMatch)}`);
@@ -2328,7 +2342,79 @@ export function emitMatchExpr(node: any, opts?: any): string {
   }
 
   iifeLines.push(`})()`);
+
+  // U1 FIX ROUND (F1) — CHOOSE THE IIFE HEADER FROM THE EMITTED BODY.
+  //
+  // The client match lowered to a SYNC IIFE unconditionally, and `:2250` hands the
+  // arm body the enclosing function's FULL `opts`. Once U1 threaded `serverFnNames`
+  // + `clientAsyncBody` into a client fn body, an arm body could emit `await` INTO
+  // that sync host — `E-CODEGEN-INVALID-LOGIC`, and under `--no-validate-emit` a
+  // whole-bundle SyntaxError. The comment at `_asyncAwaitBodyOpts` (:377-378) had
+  // already fenced the older injector off this exact path; U1 re-opened the door,
+  // so the door is now fixed rather than fenced again.
+  //
+  // WHY THE DECISION IS MADE OFF THE EMITTED OUTPUT, not a re-derived predicate:
+  // the same discipline the crossmodule-async-in-markup fix uses (#391). The arm
+  // body is emitted by `emitLogicBody`, whose await decisions depend on ctx state
+  // this function does not model; any predicate re-derived here could disagree
+  // with what was actually emitted, and a disagreement in the unsafe direction is
+  // a build break. Reading the real bytes cannot disagree with itself.
+  //
+  // FAIL-SAFE DIRECTION: a false POSITIVE makes the IIFE `await (async …)()`
+  // needlessly — still valid JS, and it sequences a body that genuinely awaits.
+  // A false NEGATIVE is a stranded `await` = broken bundle. So the scan
+  // deliberately errs toward async (any `await` token in code position counts,
+  // including one already inside a nested async fn).
+  //
+  // An `await` in a client arm body implies U1's branch fired, which requires
+  // `clientAsyncBody === true`, which means the ENCLOSING function carries
+  // `async` — so the outer `await` on the IIFE is legal. A match inside a SYNC
+  // callback never reaches here: `emitLambda` sets `peerAwaitable = false`, so
+  // `emitCall` emits bare and the body has no `await` → the IIFE stays sync and
+  // emission is byte-identical to pre-U1.
+  const _bodyHasAwait = iifeLines
+    .slice(1)
+    .some((l) => /\bawait\b/.test(_stripStringLiteralsForAwaitScan(l)));
+  iifeLines[0] = (_matchMode === "server" || _bodyHasAwait)
+    ? `await (async function() {`
+    : `(function() {`;
   return iifeLines.join("\n");
+}
+
+/**
+ * U1 FIX ROUND (F1) — blank out string/template/regex-ish literal CONTENT so the
+ * `await`-token scan above cannot be fooled by the word appearing inside emitted
+ * user text (a label, a message, a class name). Structure is preserved; only the
+ * characters between quotes are replaced with spaces, so offsets stay stable and
+ * a literal containing `await` can never make a sync match IIFE go async.
+ */
+function _stripStringLiteralsForAwaitScan(line: string): string {
+  let out = "";
+  let quote: string | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quote === null) {
+      if (ch === '"' || ch === "'" || ch === "`") {
+        quote = ch;
+        out += ch;
+      } else {
+        out += ch;
+      }
+    } else {
+      if (ch === "\\") {
+        out += "  ";
+        i++;
+        continue;
+      }
+      if (ch === quote) {
+        quote = null;
+        out += ch;
+      } else {
+        out += " ";
+      }
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
