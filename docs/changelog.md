@@ -2,6 +2,14 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S320 — 2026-08-04 (Peter · Windows) — review debt drained; the auto-await choke-point CORE built + verified but HELD for an architecture ruling
+
+Drained the review-floor debt and carried the CPS auto-await choke-point from deliberation through a built, verified fix — then held it when a concurrent deliberation from bryan's lane surfaced a more-fundamental architecture.
+
+- **#403 review-debt drain (landed, docs-only)** — recorded carve-out on #399–#402 (all docs-only), but substantiated the two load-bearing structural anchors against source rather than rubber-stamping (`scheduling.ts:974` opaque-boundary; `conformance/run.ts` has no emitted-content assertion). Probe → 0 OWED. Carve-out rate 50% (flagged HIGH — an honest docs/gaps-heavy work-mix signal).
+- **dpa-020 auto-await choke-point (RUN, ratified verdict)** — fired the dPA satellite; verdict **(c) PARTITION: 4 of 7 positions share ONE choke-point injector**. PA independently verified the premise. *(Later found bryan's S319 dPA had run it too — an uncommitted per-clone-trap casualty; verdicts converge on BUILD/partition/AST, diverge on fix locus.)*
+- **CPS auto-await choke-point CORE (BUILT + verified + S239-clean — HELD, PR #405 not merged)** — unified the AST await-injectors into one descend + paren-correct pass over all client fn bodies; retired the string-regex `injectPromiseAwait`. 101/0 auto-await invariant cluster, 6/6 new conformance (codes+runtime), corpus 948/948 (benign const→let ×7), gate GREEN. Would close g-given-block / g-hash87 / g-ternary-init / g-cps-scheduler-opaque-boundary. **HELD** pending bryan's ruling: his concurrent dpa-020 recommends an emit-time `emitCall` root-fix that *retires* the post-hoc injectors this PR consolidates. Routed to bryan (choke-point design is his lane).
+
 ## S319 — 2026-08-04 (Peter · Windows) — the `fn … = <expr>` shorthand rejected (HIGH), and the auto-await family root-caused to one scheduler choke point
 
 A HIGH silent-miscompile closed, and the four "auto-await sibling" gaps reproduced and re-scoped to a single root cause — turning delta [1117]'s inferred "one bug, fixed one position at a time" into an evidenced diagnosis.

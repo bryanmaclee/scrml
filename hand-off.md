@@ -1,4 +1,60 @@
 <!-- ============================================================= -->
+<!-- S320 WRAP (peter/P-Tech1 Windows) — prepended 2026-08-04.       -->
+<!-- S319 + all prior UNCHANGED below. Mechanical stream = delta-log -->
+<!-- [1124]–[1129]. Disambiguate sessions by NAME (numbers collide). -->
+<!-- ============================================================= -->
+
+# scrml — Session 320 (peter · P-Tech1 Windows) — WRAP
+
+**Date:** 2026-08-04. `/boot` Profile A. **1 PR merged (#403).** Mechanical stream = delta-log
+**[1124]–[1129].** main advanced by this continuity PR; coherence **0/0** both repos.
+
+## Landed
+- **#403 review-debt drain (docs-only)** — #399–#402 carve-out, but the #400/#401 structural anchors
+  verified against source, not rubber-stamped. Probe 0 OWED; carve-out rate 50% (HIGH — honest
+  work-mix signal).
+
+## 🔴 THE NEXT PA'S FIRST MOVE — bryan must rule on the #405 architecture BEFORE any more auto-await work
+
+The CPS auto-await choke-point CORE is **BUILT, verified, S239-clean, gate-GREEN — but HELD** (PR
+#405, auto-merge OFF). Do **not** build further auto-await, and do **not** merge #405, until bryan
+rules. Why it's held:
+
+- **dpa-020 was run TWICE** (the S290 per-clone trap): bryan's S319 dPA drained it
+  (`scrml-support/docs/deep-dives/autoawait-choke-point-vs-heterogeneous-2026-08-04.md`) but the
+  artifact was uncommitted at my boot, so I re-fired it
+  (`…/auto-await-choke-point-dpa-020-2026-08-04.md`). Both surfaced only at my wrap pull.
+- **The verdicts converge** (BUILD · a PARTITION not heterogeneity · the injector must be AST-based ·
+  the same gap family) **but diverge on the fix LOCUS:**
+  - **bryan (root-fix):** `emit-expr.ts emitCall` lacks a `mode==="client" && ctx.serverFnNames`
+    branch; the client server-call is renamed by a whole-buffer regex post-pass so the emitter
+    doesn't know it's a server call → 5 post-hoc injectors retrofit the `await`. Fix = add the branch
+    + thread `serverFnNames` (~25 sites) + **retire the post-hoc injectors** (*"do not build another
+    injector"*). ~2-3 days; dominant risk = stranded `await` → whole-bundle SyntaxError.
+  - **me (#405, consolidation):** unified the two AST injectors into one descend+paren
+    `injectFnBodyServerCallAwaits` over all client fn bodies; retired string-regex `injectPromiseAwait`.
+    Verified 101/0 invariant cluster + 6/6 new conformance + corpus 948/948; acorn scope-modelled so it
+    **cannot** strand an await. Closes g-given-block / g-hash87 / g-ternary-init / g-cps-scheduler-opaque-boundary.
+- **My #405 invests MORE in the post-hoc approach bryan's root-cause says to dismantle**, and this is
+  his lane. **Routed to bryan** for the call (accept #405 as a verified interim / supersede with the
+  emitCall root-fix / fold) — see `scrml-support/handOffs/incoming/S320-peter-to-bryan-dpa020-architecture-reconcile.md`.
+  Peter ruled at S320: hold, route to bryan.
+
+## Also routed to bryan (his lane)
+- **§13.2 render-async RULING** — gates `g-match-value-position` (markup render slot is not an async
+  scope; async-render vs CPS-split is a design decision).
+- **`g-block-body-value-position-mislowers`** — the mis-filed #4/#6 are ONE structural lowering bug,
+  not auto-await; needs its own ticket. Both in `…/S320-peter-to-bryan-autoawait-followups.md`.
+
+## Open / owed
+- **#405 HELD** — the single most important next-boot item (bryan's ruling gates the whole auto-await
+  track). If bryan supersedes, the 6 conformance cases in #405 remain valid (they pin behavior either
+  architecture must satisfy).
+- **Maps OWED** (project-mapper deferred — agent dispatch; no code on main this session beyond #403
+  docs). Consistent with S313–S319.
+- **#357** adopter issue still OPEN (bryan-lane, public ack owed).
+
+<!-- ============================================================= -->
 <!-- S319 WRAP (peter/P-Tech1 Windows) — prepended 2026-08-04.       -->
 <!-- S316-bryan + all prior UNCHANGED below.                         -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)       -->
