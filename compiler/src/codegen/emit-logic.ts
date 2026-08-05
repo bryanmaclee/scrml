@@ -4579,33 +4579,19 @@ export function emitLogicBody(nodes: any[], opts: EmitLogicOpts = {}): string[] 
   // Track declared names so tilde-decl can distinguish first declaration from reassignment.
   const declaredNames = opts.declaredNames ?? new Set<string>();
 
-  // i87 §13.2 (position-invariant auto-await) — inject `await` into a nested
-  // statement whose call is a statically-known Promise<T>-returning server-fn /
-  // stdlib-async callee. Gated on `awaitNestedPromises` (set only by the
-  // control-flow body-opts) + the classifier inputs, so it fires exactly in
-  // if/else/for/while/do-while bodies and nowhere else. `injectPromiseAwait`
-  // is a no-op for statement-shape / non-Promise nodes, so a nested `if`/`for`
-  // wrapper passes through untouched while its own body is descended separately.
-  const _injectAwait =
-    opts.awaitNestedPromises && opts.asyncRouteMap
-      ? (node: any, code: string): string => {
-          if (!code) return code;
-          try {
-            const sched = require("./scheduling.js");
-            return sched.injectPromiseAwait(
-              code,
-              node,
-              opts.asyncRouteMap,
-              opts.asyncFilePath ?? "",
-              opts.asyncCalleeMap ?? null,
-              opts.asyncExportRegistry ?? null,
-            );
-          } catch (_e) {
-            // Classifier failure is non-fatal — fall back to no-auto-await.
-            return code;
-          }
-        }
-      : (_node: any, code: string): string => code;
+  // S320 §13.2 CPS auto-await CHOKE-POINT — nested-body auto-await is NO LONGER
+  // injected here. The pre-S320 per-node `injectPromiseAwait` (a) BARE-prefixed a
+  // member-read receiver (`fn().ok` → `await fn().ok`, the g-hash87 misparen) and
+  // (b) fired only in if/else/for/while/do-while bodies (never given/match-block/
+  // try). Both are now closed by the ONE unified descend + paren-correct AST
+  // injector in `scheduleStatements` (`injectFnBodyServerCallAwaits`), which runs
+  // over each top-level fn-body statement's whole emitted block — arbitrary nesting
+  // included. Keeping a bare-prefix here would pre-await the receiver call, and the
+  // choke-point's already-awaited guard would then leave the misparen in place, so
+  // this MUST stay identity. (Non-scheduleStatements callers — `fn`-shorthand /
+  // return-typed bodies — never set `asyncRouteMap`, so this was already inert for
+  // them pre-S320; their nested-await gap is unchanged and out of this scope.)
+  const _injectAwait = (_node: any, code: string): string => code;
 
   // Pre-scan: does `~` appear in any expression in this sequence?
   const tildeUsed = nodeListContainsTildeRef(nodes);

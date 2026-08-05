@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 20 |
-| MED | 114 |
+| MED | 111 |
 | LOW | 49 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -1698,7 +1698,7 @@ The trigger is the *combination* of a return type with `route=`; without a retur
 <!-- @gap id=g-fn-anon-expr-equals-body-emits-invalid-js sev=LOW status=open -->
 
 ### g-given-block-server-call-no-autoawait — a server call in a `given` block body ships bare-unawaited (fn colored async, body not awaited); same auto-await class as the match-arm gap, different emit path — `NEW S318-peter (sibling sweep); MED; open (probe was agent-reported; PA to re-confirm valid `given` syntax before fix)`
-<!-- @gap id=g-given-block-server-call-no-autoawait sev=MED status=open -->
+<!-- @gap id=g-given-block-server-call-no-autoawait sev=MED status=resolved -->
 
 ### g-if-value-cascade-server-call-no-autoawait — a server call in an `if`-as-value cascade branch (`const x = if k==1 { getFlag().ok } else { false }`, `emitIfValueExpr`) ships bare-unawaited; auto-await class sibling — `NEW S318-peter (sibling sweep); MED; open`
 <!-- @gap id=g-if-value-cascade-server-call-no-autoawait sev=MED status=open -->
@@ -1713,16 +1713,19 @@ The trigger is the *combination* of a return type with `route=`; without a retur
 Also noted (separate, pre-existing, affects the WORKING plain-fn path too): the #87 injector emits `const r = await getFlag().ok` — `await` binds the `.ok` read, not the call (mis-parenthesized), the exact shape #394 fixed for match arms. Filed as `g-hash87-member-read-await-misparen` below.
 
 ### g-cps-scheduler-opaque-boundary-hides-nested-server-calls — the CPS async scheduler treats `given`/`if`/`match`/`try`/loop bodies as opaque `isControlFlowBoundary` nodes (`scheduling.ts:974-995`) and never descends into them, so a server call nested inside such a body escapes the #87 statement-level await-injection and ships a bare unawaited Promise (silent wrong value). The shared ROOT of `g-given-block` (and the await angle of the others). Fix options: (a) recurse the scheduler into these bodies — delicate; or (b) statement-aware post-hoc await injection at each body-emit site. — `NEW S319-peter (root-caused the S318 auto-await siblings); MED; open (locus scheduling.ts:988 + emit-logic.ts:3294 given-guard)`
-<!-- @gap id=g-cps-scheduler-opaque-boundary-hides-nested-server-calls sev=MED status=open -->
+<!-- @gap id=g-cps-scheduler-opaque-boundary-hides-nested-server-calls sev=MED status=resolved -->
 
 ### g-block-body-value-position-mislowers — a BLOCK-body (`{ expr }`) used as a VALUE position mis-lowers: a match block-body value arm (`match k { 1 :> { 42 } _ :> 0 }`) and an `if`-as-value with block branches (`const x = if k==1 { a } else { b }`, decl or markup) either emit invalid JS (E-CODEGEN-INVALID-LOGIC) or assign the value to a dead inner tilde var so the result is always `null`. The structured-body path in `emitMatchExprDecl` (and the if-value decl path) emit the block's statements without lifting the tail expression to the enclosing tilde/result var. Supersedes the mis-filed `g-match-block-arm-server-call-no-autoawait` (which is THIS bug, not an await bug). LOUD (invalid JS) in the match-arm case, SILENT (`null`) in the if-decl case. — `NEW S319-peter (found reproducing the S318 auto-await siblings); MED; open (locus emit-logic.ts:emitMatchExprDecl structured-body arm ~4472 + the if-value decl lowering)`
 <!-- @gap id=g-block-body-value-position-mislowers sev=MED status=open -->
 
 ### g-hash87-member-read-await-misparen — the #87 statement-level auto-await injector emits `const r = await getFlag().ok` for a server call with a member read — `await` binds the `.ok` read (`await (f().ok)`), not the call, so `.ok` reads off the Promise → `undefined`. Same mis-parenthesization #394 fixed for value-form match arms (`(await f()).ok`), but on the PLAIN fn-body statement path. Pre-existing on main, affects the "working" baseline. Fix = parenthesize the awaited call before the member read at the #87 injection site. — `NEW S319-peter (surfaced reproducing g-given-block's baseline); MED; open (locus the #87 injectServerCallAwaits path, scheduling.ts)`
-<!-- @gap id=g-hash87-member-read-await-misparen sev=MED status=open -->
+<!-- @gap id=g-hash87-member-read-await-misparen sev=MED status=resolved -->
 
 ### g-ternary-init-server-call-await-misbind — `const x = @flag ? serverFn() : []` emits `const x = await _scrml_reactive_get("flag") ? _scrml_fetch_serverFn_N() : []` — the `await` binds the CONDITION, not the server call; `serverFn()` is never awaited, so `x` holds a Promise. Silent wrong-value, pre-existing on main. `extractInitExpr` splices `await` before a ternary without parenthesizing. Fix = parenthesize non-trivial init exprs before prefixing `await`, or inject `await` at the actual server-call sub-expression. — `NEW S267 (#87 review); LOW; open`
-<!-- @gap id=g-ternary-init-server-call-await-misbind sev=LOW status=open -->
+<!-- @gap id=g-ternary-init-server-call-await-misbind sev=LOW status=resolved -->
+
+### g-s320-autoawait-stale-injectpromiseawait-comments — after S320 unified the auto-await injectors and retired `injectPromiseAwait`, ~6 in-code comments still reference it as the live mechanism (`emit-control-flow.ts:235,372` · `emit-functions.ts:1215` · `emit-logic.ts:439` · `emit-reactive-wiring.ts:514,530`). Each now describes a deleted function. Precise correction needs live-vs-changed tracing — the `asyncRouteMap`/classifier plumbing is NOT dead (still read by the guarded-expr `!{}` path, `emit-logic.ts:3417/4371`); only `emitLogicBody`'s per-node injection was neutered to identity. So a comment sweep must distinguish "emitLogicBody no longer injects" from "the opts threading is still live for guarded-expr" — deliberately NOT rushed into the S320 landing PR (zero functional risk; imprecise comment edits are their own currency error, cf. the S313 false-comment over-correction). — `NEW S320-peter (S239 review of the choke-point CORE); LOW; open (locus the 6 comment sites above)`
+<!-- @gap id=g-s320-autoawait-stale-injectpromiseawait-comments sev=LOW status=open -->
 
 ---
 

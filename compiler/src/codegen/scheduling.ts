@@ -343,99 +343,16 @@ export function extractInitExpr(stmt: ASTNode): string {
   return "null";
 }
 
-/**
- * i87 §13.2 — inject `await` into an already-emitted statement whose call
- * expression is a statically-known `Promise<T>`-returning server-fn / stdlib-
- * async callee. Single source of truth for the auto-await lowering, shared by
- * `scheduleStatements` (top-level statement positions) AND `emitLogicBody`
- * (nested control-flow statement positions — if/else/for/while/do-while bodies).
- *
- * §13.2 is POSITION-INVARIANT: a server call written `const x = fn()` at the
- * top of a function body and the identical call one block deep inside an `if`
- * MUST both emit `await` and force the enclosing fn `async`. Before i87 only
- * the top-level const-decl form got it; nested + reassign forms silently
- * emitted a bare unawaited Promise (every `if (res.error)` guard after → dead).
- *
- * The `await` is injected on the INITIALIZER / RHS, never as a whole-statement
- * prefix — `await let x = …` / `await res = …` are both syntax errors. The
- * accepted emitted-code shapes and where the `await` lands:
- *   - `let/const NAME = RHS;`  → reconstructed as `const NAME = await <init>;`
- *     from the AST (mirrors the pre-i87 top-level decl branch exactly).
- *   - emitted code that is ITSELF a `let/const X = RHS;` (a §32 tilde single-
- *     line lowered from a non-decl node) → `let/const X = await RHS;`.
- *   - `return RHS;`            → `return await RHS;`.
- *   - `LHS = RHS;` (reassign / tilde-decl / lin-decl / bare-expr assign; i87
- *     case C) → `LHS = await RHS;`.
- *   - anything else (a bare call statement) → `await <code>;`.
- *
- * A no-op when the statement is not a Promise-returning call (statement-shape
- * nodes — if/for/while/match/guarded-expr — carry no direct callee on
- * `exprNode`/`initExpr`, so the classifier returns false and the code is
- * returned unchanged: this is what keeps nested `if`/`for` wrappers un-awaited
- * while their leaf statements are descended into separately).
- */
-export function injectPromiseAwait(
-  code: string,
-  stmt: ASTNode,
-  routeMap: RouteMap,
-  filePath: string,
-  calleeMap: CalleeImportMap | null,
-  // Same shape as isPromiseReturningCallExpr's exportRegistry, referenced via
-  // Parameters<> so this stays a pure passthrough type (never a routing read on
-  // the value shape — keeps the P3-FOLLOW migration-hygiene budget intact).
-  exportRegistry: Parameters<typeof isPromiseReturningCallExpr>[4],
-): string {
-  if (!code) return code;
-  if (!isPromiseReturningCallExpr(stmt, routeMap, filePath, calleeMap, exportRegistry)) return code;
-
-  // i87 fail-safe — do NOT touch a statement whose emitted code is a REACTIVE /
-  // DERIVED / ENGINE runtime sink (or an already-async IIFE). A reactive-cell
-  // server-call write (`@cell = serverFn()` → `_scrml_reactive_set("cell",
-  // serverFn())`) is owned by the emit-client auto-await pass (emit-client.ts),
-  // which rewrites it to a self-contained `(async () => _scrml_reactive_set(
-  // "cell", await serverFn()))().catch(…)` — awaiting the fetch INSIDE its own
-  // async IIFE (so the enclosing handler stays sync). Prepending our `await`
-  // here both duplicates that and lands an illegal `await` in the sync handler.
-  // The classifier fires on these (the server callee sits as a nested arg), so
-  // this guard — not the classifier — is what fences them out.
-  if (/^\s*(?:await\s+)?(?:\(async\b|_scrml_reactive_set\b|_scrml_derived_\w*|_scrml_default_set\b|_scrml_init_set\b|_scrml_engine_\w*)/.test(code)) {
-    return code;
-  }
-
-  const kind = (stmt as ASTNode).kind;
-  // let-decl / const-decl: reconstruct `const NAME = await <init>;` from the
-  // AST. Mirrors the pre-i87 top-level decl branch (which always emitted
-  // `const`, even for a `let-decl`); kept identical to avoid churning existing
-  // top-level output.
-  if (kind === "let-decl" || kind === "const-decl") {
-    const name = (stmt as ASTNode).name as string || genVar("tmp");
-    return `const ${name} = await ${extractInitExpr(stmt as ASTNode)};`;
-  }
-
-  // Non-decl / emitted-code forms — inject after the binding `=` / `return`.
-  const _awaitTail = (s: string): string => (s.startsWith("await ") ? s : `await ${s}`);
-
-  // (1) Emitted code that is itself a let/const declaration (§32 tilde single-
-  // line). The await belongs on the initializer, not the decl keyword.
-  const declMatch = code.match(/^(\s*(?:let|const)\s+[A-Za-z_$][\w$]*\s*=\s*)(.+?)(;?)$/s);
-  if (declMatch) return `${declMatch[1]}${_awaitTail(declMatch[2])}${declMatch[3]}`;
-
-  // (2) return-stmt: `return RHS;` → `return await RHS;`.
-  const returnMatch = code.match(/^(\s*return\s+)(.+?)(;?)$/s);
-  if (returnMatch) return `${returnMatch[1]}${_awaitTail(returnMatch[2])}${returnMatch[3]}`;
-
-  // (3) assignment (reassign / tilde-decl / lin-decl / bare-expr assign; i87
-  // case C): `LHS = RHS;` → `LHS = await RHS;` (await on the RHS, never a
-  // whole-statement prefix). LHS is an lvalue (ident with optional `.member` /
-  // `[index]` tails); the optional compound operator (`+=`, `*=`, `??=`, …) is
-  // preserved so `x += fn()` → `x += await fn()`. The trailing `(?![=<>])`
-  // guard rejects the comparison / arrow forms (`==`, `=>`, `>=`).
-  const assignMatch = code.match(/^(\s*[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*|\[[^\]]*\])*\s*(?:\*\*|<<|>>>?|&&|\|\||\?\?|[-+*/%&|^])?=\s*)(?![=<>])(.+?)(;?)$/s);
-  if (assignMatch) return `${assignMatch[1]}${_awaitTail(assignMatch[2])}${assignMatch[3]}`;
-
-  // (4) fallback — a bare call statement.
-  return `await ${code.replace(/;$/, "")};`;
-}
+// S320 — `injectPromiseAwait` (the per-statement string-regex auto-await pass)
+// is RETIRED. Its two callers (the `scheduleStatements` single-statement path and
+// `emitLogicBody`'s nested-body `_injectAwait`) both now route through the ONE
+// unified descend-into-control-flow + paren-correct AST injector
+// `injectFnBodyServerCallAwaits` (below). The string pass MIS-PARENED a receiver-
+// tail call (`fn().ok` → `await fn().ok`), fenced nested descent to if/for/while
+// (never given/match-block/try), and force-rewrote a `let` decl to `const`; the
+// AST injector fixes all three. `isPromiseReturningCallExpr` / `extractInitExpr`
+// live on — the former for the emit-logic guarded-expr classifier, the latter for
+// the Promise.all batch path.
 
 /**
  * GH #237 + #264 (§13.2 + §6.7.1a) — apply the §13.2 auto-await to already-EMITTED
@@ -481,31 +398,181 @@ export function liftEmittedStatementAwaits(
 }
 
 /**
- * GH #237 + #264 — apply the §13.2 auto-await to already-EMITTED (pre-mangle)
- * mount-body JS about to run inside the compiler-generated `(async () => {…})`
- * scope (§6.7.1a). SPEC §13.2: the compiler SHALL insert `await` at EVERY call
- * site where a server-generated fetch call is made — position-invariantly.
+ * S320 §13.2 CPS auto-await CHOKE-POINT — the ONE descend-into-control-flow +
+ * paren-correct AST injector, shared by every already-EMITTED-JS auto-await path:
+ *   - `injectServerCallAwaitsViaAst`   (statement ctx, on-mount body)
+ *   - `injectFnBodyServerCallAwaits`   (statement ctx, ALL client fn bodies)
+ *   - `parenthesizeAwaitServerCallsInExpr` (expression ctx, value-form match arm)
  *
- * The mount body is valid JS text, so this parses it with acorn (wrapped in an
- * async arrow so a top-level `await`/`return` parses) and walks the real AST: an
- * `await` is injected before each server-fn CALL in an await-LEGAL position. A
- * position is await-legal UNLESS it is inside a SYNC function/arrow/method/
- * accessor BODY, or inside ANY formal-PARAMETER list (a callback's params forbid
- * `await` even when the callback is async). Modelling scopes with the parser —
- * not flat-text heuristics — is what makes the syntax-error class (an `await` in
- * a sync callback / a param list) unreachable: acorn knows a method body, getter,
- * class method, arrow, `function`, or param default is a scope, which the text
- * scanner repeatedly did not (GH #264 adversarial rounds 1–5 each found another).
+ * Before S320 these were three ~95%-identical acorn walkers differing only in
+ * (a) injection SHAPE — bare `await ` prefix vs `(await …)` wrap — and (b) the
+ * parse-wrapper (statement `(async () => {…})` vs expression `(async () => (…))`).
+ * The bare-prefix shape MIS-PARENS a call used as a receiver: `fn().ok`
+ * bare-prefixed is `await fn().ok` === `await (fn().ok)`, which reads `.ok` off
+ * the PENDING Promise (→ `undefined`). The unified injector is PAREN-CORRECT:
  *
- * Skipped (each keeps a correct/parallel path intact):
- *   - MEMBER calls (`obj.fn()`) — the route name binds a free identifier only.
- *   - already-`await`ed calls.
- *   - the DIRECT value of a `_scrml_reactive_set(cell, stub())` — emit-client's
- *     own IIFE pass owns that lift; a call one level deeper (an argument, a
- *     condition, a `${…}` interpolation) is NOT the direct value and IS awaited.
+ *   - a call with a TIGHT TAIL (it is the object of a member/index access, or the
+ *     callee of a further call, or a tagged-template tag) is WRAPPED —
+ *     `fn().ok` → `(await fn()).ok` — so the tail reads the RESOLVED value.
+ *   - a call with NO tight tail (`const r = fn()`, `x = fn()`, `return fn()`,
+ *     `cond ? fn() : y`, a bare call) gets a BARE prefix — `await fn()` — which is
+ *     byte-identical to the pre-S320 output on that (dominant) case, so the whole
+ *     existing test/corpus surface that pins `= await fn(` stays unchanged.
  *
- * Returns null when acorn cannot parse the body (the caller then returns the body
- * unchanged — never injecting into text the parser cannot model).
+ * Await-legality is modelled with the real parser: a position is await-legal
+ * UNLESS inside a SYNC function/arrow/method/accessor body, a class-field
+ * initializer, a `static{}` block, or ANY formal-parameter list (a callback's
+ * params forbid `await` even when the callback is async). This is the GH #264
+ * scope correctness (adversarial rounds 1–5) and is preserved verbatim.
+ */
+
+/** A callee is a §13.2 Promise<T> call site: server fn or stdlib async export. */
+type PromiseCalleePred = (name: string) => boolean;
+
+/** How to fence reactive/derived/engine runtime sinks (whose value the
+ *  emit-client IIFE pass owns — INVARIANT 2, do NOT double-await). */
+type ReactiveSkipMode = "arg1" | "sink" | "none";
+
+const _REACTIVE_ARG1_WRAPPERS = new Set(["_scrml_reactive_set", "_scrml_cs_reactive_set"]);
+/** Broader sink family — a server call as ANY argument of one of these is owned
+ *  by the emit-client lift (fn-body parity with the retired whole-statement
+ *  guard `^(?:_scrml_reactive_set|_scrml_derived_*|_scrml_default_set|…)`). */
+const _SINK_CALLEE_RE = /^_scrml_(?:reactive_set|cs_reactive_set|derived_|default_set|init_set|engine_)/;
+
+/** A collected auto-await site in ORIGINAL (pre-prefix) string coordinates. */
+type AwaitSite = { start: number; end: number; wrap: boolean };
+
+const _isFnNode = (n: any): boolean =>
+  !!n && (n.type === "FunctionDeclaration" || n.type === "FunctionExpression" || n.type === "ArrowFunctionExpression");
+
+/**
+ * Shared walker — collect every await-injection site in a parsed program.
+ * `P` is the parse-wrapper prefix length (subtracted to return original coords).
+ * `alwaysWrap` forces the wrap shape (expression ctx, where a wrap is always safe
+ * and byte-preserves the pre-S320 match-arm output).
+ */
+function collectAwaitSites(
+  program: any,
+  P: number,
+  isPromiseCallee: PromiseCalleePred,
+  reactiveSkip: ReactiveSkipMode,
+  alwaysWrap: boolean,
+): AwaitSite[] {
+  const sites: AwaitSite[] = [];
+
+  // A server call is fenced from injection (emit-client owns the lift) when:
+  //   - "arg1": it is the DIRECT value (arg[1]) of `_scrml_(cs_)reactive_set`
+  //     (on-mount contract — a call one level deeper IS still awaited).
+  //   - "sink": it sits ANYWHERE beneath a reactive/derived/engine sink-family
+  //     call (fn-body contract — the retired whole-statement guard skipped the
+  //     entire sink statement; `insideSink` replicates that at any depth).
+  const isSkippedReactiveValue = (node: any, parent: any, insideSink: boolean): boolean => {
+    if (reactiveSkip === "none") return false;
+    if (reactiveSkip === "sink") return insideSink;
+    // "arg1"
+    if (!parent || parent.type !== "CallExpression") return false;
+    if (!parent.callee || parent.callee.type !== "Identifier") return false;
+    return _REACTIVE_ARG1_WRAPPERS.has(parent.callee.name) &&
+      Array.isArray(parent.arguments) && parent.arguments[1] === node;
+  };
+
+  const needsWrap = (node: any, parent: any): boolean => {
+    if (alwaysWrap) return true;
+    if (!parent) return false;
+    // A tight tail binds tighter than `await`, so the bare prefix would capture
+    // it: `.member` / `[index]` receiver, further-call callee, or template tag.
+    return (
+      (parent.type === "MemberExpression" && parent.object === node) ||
+      (parent.type === "CallExpression" && parent.callee === node) ||
+      (parent.type === "TaggedTemplateExpression" && parent.tag === node)
+    );
+  };
+
+  const visit = (node: any, awaitLegal: boolean, parent: any, insideSink: boolean): void => {
+    if (!node || typeof node !== "object") return;
+    if (_isFnNode(node)) {
+      // Formal parameters forbid `await` in EVERY case (sync AND async).
+      for (const prm of (node.params || [])) visit(prm, false, node, insideSink);
+      // The body is await-legal only when the callback is itself async.
+      visit(node.body, node.async === true, node, insideSink);
+      return;
+    }
+    // A class field initializer runs in the (sync) instance/static-init context —
+    // `await` is illegal there. A COMPUTED key, though, is evaluated in the
+    // enclosing scope, so it keeps the inherited await-legality.
+    if (node.type === "PropertyDefinition") {
+      if (node.computed && node.key) visit(node.key, awaitLegal, node, insideSink);
+      if (node.value) visit(node.value, false, node, insideSink);
+      return;
+    }
+    // A `static { … }` block is a sync initializer — `await` is illegal.
+    if (node.type === "StaticBlock") {
+      for (const s of (node.body || [])) visit(s, false, node, insideSink);
+      return;
+    }
+    if (node.type === "CallExpression") {
+      const callee = node.callee;
+      if (awaitLegal && callee && callee.type === "Identifier" && isPromiseCallee(callee.name)) {
+        const alreadyAwaited = !!parent && parent.type === "AwaitExpression";
+        if (!alreadyAwaited && !isSkippedReactiveValue(node, parent, insideSink)) {
+          sites.push({ start: node.start - P, end: node.end - P, wrap: needsWrap(node, parent) });
+        }
+      }
+      // "sink" mode — arguments of a sink-family call become emit-client-owned.
+      const childInsideSink = insideSink ||
+        (reactiveSkip === "sink" && !!callee && callee.type === "Identifier" && _SINK_CALLEE_RE.test(callee.name));
+      visit(node.callee, awaitLegal, node, insideSink);
+      for (const a of (node.arguments || [])) visit(a, awaitLegal, node, childInsideSink);
+      return;
+    }
+    for (const key of Object.keys(node)) {
+      if (key === "start" || key === "end" || key === "type") continue;
+      const child = (node as any)[key];
+      if (Array.isArray(child)) { for (const c of child) visit(c, awaitLegal, node, insideSink); }
+      else if (child && typeof child === "object" && typeof child.type === "string") visit(child, awaitLegal, node, insideSink);
+    }
+  };
+  // Start await-illegal at the module top; the wrapper `(async () => …)` flips
+  // its own body await-legal, so the emitted body is walked as await-legal.
+  visit(program, false, null, false);
+  return sites;
+}
+
+/**
+ * Apply collected sites to `text`. A wrapped site becomes `(await <call>)`; a
+ * bare site becomes `await <call>`. Insertions apply right-to-left (descending
+ * pos) so earlier offsets stay valid; at a shared position a close (`)`) applies
+ * before an open so nested-call parens stay balanced.
+ */
+function applyAwaitSites(text: string, sites: AwaitSite[]): string {
+  if (sites.length === 0) return text;
+  type Ins = { pos: number; text: string; open: boolean };
+  const ins: Ins[] = [];
+  for (const s of sites) {
+    if (s.start < 0 || s.end > text.length || s.start >= s.end) continue;
+    if (s.wrap) {
+      ins.push({ pos: s.start, text: "(await ", open: true });
+      ins.push({ pos: s.end, text: ")", open: false });
+    } else {
+      ins.push({ pos: s.start, text: "await ", open: true });
+    }
+  }
+  if (ins.length === 0) return text;
+  ins.sort((a, b) => (b.pos - a.pos) || (a.open === b.open ? 0 : a.open ? 1 : -1));
+  let out = text;
+  for (const e of ins) out = out.slice(0, e.pos) + e.text + out.slice(e.pos);
+  return out;
+}
+
+/**
+ * GH #237 + #264 (§6.7.1a on-mount) — auto-await already-EMITTED (pre-mangle)
+ * STATEMENT-context JS about to run inside a compiler-generated `(async () => {…})`
+ * scope. Returns null when acorn cannot parse the body (caller keeps it unchanged
+ * — never injecting into text the parser cannot model).
+ *
+ * Skips the DIRECT value of `_scrml_reactive_set(cell, stub())` (arg1) — emit-
+ * client's IIFE pass owns that lift; a call one level deeper (an argument, a
+ * condition, a `${…}`) is NOT the direct value and IS awaited.
  */
 export function injectServerCallAwaitsViaAst(code: string, serverFnNames: Set<string>): string | null {
   if (!code || serverFnNames.size === 0) return code;
@@ -516,104 +583,46 @@ export function injectServerCallAwaitsViaAst(code: string, serverFnNames: Set<st
   } catch {
     return null;
   }
-  const REACTIVE_WRAPPERS = new Set(["_scrml_reactive_set", "_scrml_cs_reactive_set"]);
-  const P = PREFIX.length;
-  const insertAt: number[] = [];
-
-  const isFn = (n: any): boolean =>
-    !!n && (n.type === "FunctionDeclaration" || n.type === "FunctionExpression" || n.type === "ArrowFunctionExpression");
-
-  const visit = (node: any, awaitLegal: boolean, parent: any): void => {
-    if (!node || typeof node !== "object") return;
-    if (isFn(node)) {
-      // Formal parameters forbid `await` in EVERY case (sync AND async).
-      for (const prm of (node.params || [])) visit(prm, false, node);
-      // The body is await-legal only when the callback is itself async.
-      visit(node.body, node.async === true, node);
-      return;
-    }
-    // A class field initializer runs in the (sync) instance/static-init context —
-    // `await` is illegal there. A COMPUTED key, though, is evaluated in the
-    // enclosing scope, so it keeps the inherited await-legality.
-    if (node.type === "PropertyDefinition") {
-      if (node.computed && node.key) visit(node.key, awaitLegal, node);
-      if (node.value) visit(node.value, false, node);
-      return;
-    }
-    // A `static { … }` block is a sync initializer — `await` is illegal.
-    if (node.type === "StaticBlock") {
-      for (const s of (node.body || [])) visit(s, false, node);
-      return;
-    }
-    if (node.type === "CallExpression") {
-      const callee = node.callee;
-      if (awaitLegal && callee && callee.type === "Identifier" && serverFnNames.has(callee.name)) {
-        const alreadyAwaited = !!parent && parent.type === "AwaitExpression";
-        const directReactive =
-          !!parent && parent.type === "CallExpression" &&
-          parent.callee && parent.callee.type === "Identifier" &&
-          REACTIVE_WRAPPERS.has(parent.callee.name) &&
-          Array.isArray(parent.arguments) && parent.arguments[1] === node;
-        if (!alreadyAwaited && !directReactive) insertAt.push(node.start - P);
-      }
-      visit(node.callee, awaitLegal, node);
-      for (const a of (node.arguments || [])) visit(a, awaitLegal, node);
-      return;
-    }
-    for (const key of Object.keys(node)) {
-      if (key === "start" || key === "end" || key === "type") continue;
-      const child = (node as any)[key];
-      if (Array.isArray(child)) { for (const c of child) visit(c, awaitLegal, node); }
-      else if (child && typeof child === "object" && typeof child.type === "string") visit(child, awaitLegal, node);
-    }
-  };
-  // Start await-illegal at the module top; the wrapper `(async () => …)` flips
-  // its own body await-legal, so the mount body is walked as await-legal.
-  visit(program, false, null);
-
-  if (insertAt.length === 0) return code;
-  insertAt.sort((a, b) => a - b);
-  let out = "";
-  let cursor = 0;
-  for (const pos of insertAt) {
-    if (pos < 0 || pos > code.length) continue;
-    out += code.slice(cursor, pos) + "await ";
-    cursor = pos;
-  }
-  out += code.slice(cursor);
-  return out;
+  const sites = collectAwaitSites(program, PREFIX.length, (n) => serverFnNames.has(n), "arg1", false);
+  return applyAwaitSites(code, sites);
 }
 
 /**
- * g-match-arm-server-call-no-autoawait (§13.2 position-invariant auto-await /
- * §19.9.3 match arms are a CPS-eligible position) — parenthesize-await every
- * server-fn CALL inside an already-EMITTED (pre-name-mangle) EXPRESSION string,
- * position-invariantly.
+ * S320 §13.2 choke-point — auto-await already-EMITTED (pre-mangle) STATEMENT-
+ * context JS for a CLIENT FUNCTION BODY. Same descend + paren-correct + scope
+ * model as `injectServerCallAwaitsViaAst`, but (a) takes the broader §13.2.1
+ * Promise-callee predicate (server fns AND stdlib `Promise<T>` exports), and
+ * (b) uses the "sink" reactive-skip so a server call anywhere inside a reactive/
+ * derived/engine runtime-sink call is left to the emit-client lift (INVARIANT 2).
  *
- * Distinct from `injectServerCallAwaitsViaAst`, which BARE-prefixes `await ` at a
- * call's start in STATEMENT context: that is correct for `const r = fn()` (no
- * trailing access) but WRONG for a call used as a RECEIVER — `fn().ok` bare-
- * prefixed is `await fn().ok` === `await (fn().ok)`, which reads `.ok` off the
- * PENDING Promise (→ `undefined`) and then awaits that. This helper instead wraps
- * the CALL node itself in grouping parens — `fn().ok` → `(await fn()).ok` — so the
- * `.ok`/`[i]`/`(…)` tail reads the RESOLVED value. (`await` is an await-expression,
- * unary precedence, looser than member/index/call — hence the wrap; the same
- * reason emit-expr paren-wraps `(await peer()).field`.)
- *
- * The value-form `match`-decl arm lowering (emit-logic.ts:emitMatchExprDecl) re-
- * emits each arm result from a raw expression STRING, a path the #87 statement-
- * level `injectPromiseAwait` never reached; this restores §13.2 for that position.
- *
- * Await-legality is modelled with the real parser (a sync callback body / any
- * formal-parameter list is await-illegal), mirroring `injectServerCallAwaitsViaAst`.
- * Returns the input UNCHANGED when it does not parse as an expression (a non-JS
- * scrml fragment) or when nothing classifies — never injects into text acorn
- * cannot model.
+ * This descends into if/else/for/while/do-while AND given/match-block/try bodies
+ * uniformly — closing `g-given-block` and the CPS-opaque-boundary root, which the
+ * pre-S320 per-statement string injection (fenced by control-flow-boundary shape)
+ * never reached. On an acorn parse failure the body is returned UNCHANGED.
+ */
+export function injectFnBodyServerCallAwaits(code: string, isPromiseCallee: PromiseCalleePred): string {
+  if (!code) return code;
+  const PREFIX = "(async () => {\n";
+  let program: any;
+  try {
+    program = acornParse(PREFIX + code + "\n})", { ecmaVersion: "latest" });
+  } catch {
+    return code;
+  }
+  const sites = collectAwaitSites(program, PREFIX.length, isPromiseCallee, "sink", false);
+  return applyAwaitSites(code, sites);
+}
+
+/**
+ * g-match-arm-server-call-no-autoawait (§13.2 / §19.9.3) — auto-await every
+ * server-fn CALL inside an already-EMITTED (pre-mangle) EXPRESSION string (the
+ * value-form `match`-decl arm, re-emitted from a raw expression via
+ * emit-logic.ts:emitMatchExprDecl). Expression context, so `alwaysWrap` — a wrap
+ * is always safe there and byte-preserves the pre-S320 `(await fn()).ok` output.
+ * Returns the input UNCHANGED when it does not parse or nothing classifies.
  */
 export function parenthesizeAwaitServerCallsInExpr(exprCode: string, serverFnNames: Set<string>): string {
   if (!exprCode || serverFnNames.size === 0) return exprCode;
-  // Wrap in an async arrow returning the expression so a top-level `await` in an
-  // EXPRESSION position parses (and the arrow body is await-legal).
   const PREFIX = "(async () => (\n";
   const SUFFIX = "\n))";
   let program: any;
@@ -622,65 +631,8 @@ export function parenthesizeAwaitServerCallsInExpr(exprCode: string, serverFnNam
   } catch {
     return exprCode;
   }
-  const P = PREFIX.length;
-  const isFn = (n: any): boolean =>
-    !!n && (n.type === "FunctionDeclaration" || n.type === "FunctionExpression" || n.type === "ArrowFunctionExpression");
-
-  // Each entry marks a call node's [start,end) span (in `exprCode` coords) to wrap
-  // as `(await <call>)`.
-  const wraps: Array<{ start: number; end: number }> = [];
-  const visit = (node: any, awaitLegal: boolean, parent: any): void => {
-    if (!node || typeof node !== "object") return;
-    if (isFn(node)) {
-      for (const prm of (node.params || [])) visit(prm, false, node);
-      visit(node.body, node.async === true, node);
-      return;
-    }
-    if (node.type === "PropertyDefinition") {
-      if (node.computed && node.key) visit(node.key, awaitLegal, node);
-      if (node.value) visit(node.value, false, node);
-      return;
-    }
-    if (node.type === "StaticBlock") {
-      for (const s of (node.body || [])) visit(s, false, node);
-      return;
-    }
-    if (node.type === "CallExpression") {
-      const callee = node.callee;
-      if (awaitLegal && callee && callee.type === "Identifier" && serverFnNames.has(callee.name)) {
-        const alreadyAwaited = !!parent && parent.type === "AwaitExpression";
-        if (!alreadyAwaited) wraps.push({ start: node.start - P, end: node.end - P });
-      }
-      visit(node.callee, awaitLegal, node);
-      for (const a of (node.arguments || [])) visit(a, awaitLegal, node);
-      return;
-    }
-    for (const key of Object.keys(node)) {
-      if (key === "start" || key === "end" || key === "type") continue;
-      const child = (node as any)[key];
-      if (Array.isArray(child)) { for (const c of child) visit(c, awaitLegal, node); }
-      else if (child && typeof child === "object" && typeof child.type === "string") visit(child, awaitLegal, node);
-    }
-  };
-  visit(program, false, null);
-  if (wraps.length === 0) return exprCode;
-
-  // Translate each wrap into two point-insertions: `(await ` at the call start and
-  // `)` at the call end. Apply right-to-left (descending pos) so earlier offsets
-  // stay valid; at a shared position a close (`)`) applies before an open so a
-  // nested call's parens stay balanced.
-  type Ins = { pos: number; text: string; open: boolean };
-  const ins: Ins[] = [];
-  for (const w of wraps) {
-    if (w.start < 0 || w.end > exprCode.length || w.start >= w.end) continue;
-    ins.push({ pos: w.start, text: "(await ", open: true });
-    ins.push({ pos: w.end, text: ")", open: false });
-  }
-  if (ins.length === 0) return exprCode;
-  ins.sort((a, b) => (b.pos - a.pos) || (a.open === b.open ? 0 : a.open ? 1 : -1));
-  let out = exprCode;
-  for (const e of ins) out = out.slice(0, e.pos) + e.text + out.slice(e.pos);
-  return out;
+  const sites = collectAwaitSites(program, PREFIX.length, (n) => serverFnNames.has(n), "none", true);
+  return applyAwaitSites(exprCode, sites);
 }
 
 /**
@@ -864,6 +816,46 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
   // logic (which assumes the depGraph has dependency edges between server-fn
   // call sites). Pre-S89 behavior preserved exactly: only actual server-fn
   // fetch call sites trigger Promise.all coalescing.
+  // S320 §13.2 CPS auto-await CHOKE-POINT — the ONE unified descend-into-control-
+  // flow + paren-correct injector, run over EVERY emitted client-fn-body statement
+  // (both the sequential path below and the grouping single-statement path). It
+  // replaces the pre-S320 per-statement string-regex `injectPromiseAwait`, which
+  // (a) MIS-PARENED a member-read receiver (`fn().ok` → `await fn().ok`) and
+  // (b) never descended into given/match-block/try bodies (only the classifier's
+  // if/for/while shapes) — so a server call one block deep in a `given` emitted
+  // BARE. `injectFnBodyServerCallAwaits` parses the emitted JS and descends every
+  // control-flow body uniformly, wrapping only receiver-tail calls.
+  //
+  // Candidate callee names (server fns + stdlib Promise<T> exports) are resolved
+  // once here; the predicate is a Set lookup, and a cheap substring pre-check
+  // skips the acorn parse for any statement that mentions no candidate.
+  const _candidateNames = new Set<string>();
+  for (const [, route] of routeMap.functions) {
+    if (route.boundary === "server" && route.functionName) _candidateNames.add(route.functionName as string);
+  }
+  if (calleeMap && exportRegistry && calleeMap.size > 0 && exportRegistry.size > 0) {
+    for (const [localName, sourceModule] of calleeMap) {
+      if (isPromiseReturningStdlibFn(localName, sourceModule, exportRegistry)) _candidateNames.add(localName);
+    }
+  }
+  const _isPromiseCallee: (name: string) => boolean = (n) => _candidateNames.has(n);
+  // INVARIANT 2 — a statement whose emitted code IS a reactive / derived / init /
+  // engine runtime sink (or an already-async IIFE) is owned by emit-client's own
+  // auto-await lift; leave it untouched (the retired `injectPromiseAwait` had the
+  // identical whole-statement guard). Nested sink calls are fenced inside the AST
+  // core via the "sink" reactive-skip mode.
+  const _isReactiveSinkStmt = (code: string): boolean =>
+    /^\s*(?:await\s+)?(?:\(async\b|_scrml_reactive_set\b|_scrml_cs_reactive_set\b|_scrml_derived_\w*|_scrml_default_set\b|_scrml_init_set\b|_scrml_engine_\w*)/.test(code);
+  const _autoAwaitFnBody = (code: string): string => {
+    if (!code || _candidateNames.size === 0) return code;
+    if (_isReactiveSinkStmt(code)) return code;
+    // Fast path — no candidate callee name present ⇒ no possible injection.
+    let mentionsCandidate = false;
+    for (const n of _candidateNames) { if (code.includes(n)) { mentionsCandidate = true; break; } }
+    if (!mentionsCandidate) return code;
+    return injectFnBodyServerCallAwaits(code, _isPromiseCallee);
+  };
+
   const fnHasServerCalls = hasServerCallees(fnNode, routeMap, filePath, null, null);
   if (!fnHasServerCalls || !depGraph || !depGraph.nodes || depGraph.nodes.size === 0) {
     // No server calls or no dependency graph info — emit sequentially
@@ -881,7 +873,10 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
         continue;
       }
       const code = emitLogicNode(stmt, emitOpts);
-      if (code) lines.push(code);
+      // S320 — the sequential path previously injected NO await at all; a server
+      // call nested in a `given`/`if`/`try` here (fnHasServerCalls false because
+      // the narrow classifier does not descend into `given`/`try`) emitted bare.
+      if (code) lines.push(_autoAwaitFnBody(code));
     }
     return lines;
   }
@@ -1193,12 +1188,12 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
       }
       const code = emitLogicNode(stmt, emitOpts);
       if (code) {
-        // S89 §13.2 Sub-Phase B Step 3 — extended classifier covers both
-        // server functions AND stdlib Promise<T> functions per Q1 BROAD.
-        // i87 — the await-injection (incl. the assign-form `res = await …`
-        // case C) is centralized in `injectPromiseAwait`, shared with the
-        // nested-body path in emitLogicBody so §13.2 is position-invariant.
-        lines.push(injectPromiseAwait(code, stmt as ASTNode, routeMap, filePath, calleeMap ?? null, exportRegistry ?? null));
+        // S320 §13.2 CPS auto-await choke-point — the unified descend + paren-
+        // correct AST injector (see `_autoAwaitFnBody` above) replaces the retired
+        // per-statement string-regex `injectPromiseAwait`: it paren-wraps a member-
+        // read receiver (`fn().ok` → `(await fn()).ok`, the #87/g-hash87 misparen)
+        // and descends into given/match-block/try bodies the old classifier fenced.
+        lines.push(_autoAwaitFnBody(code));
       }
     }
 
