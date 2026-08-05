@@ -35,6 +35,9 @@ predate the rule and are out of scope by construction rather than by exemption.
 
 ## Log
 
+<!-- @review pr=417 verdict=finding by=S321-peter date=2026-08-05 probe=S239-adversarial-pass-on-own-codegen-PR-found-F1-control-flow-body-under-skip-HIGH-fixed-module-fallback-plus-F2-implicit-double-write-preexisting-filed-runtime-conformance-proven-fail-prefix-pass-postfix note=reset-init-thunk-clobber-fix-hardened-pre-land -->
+<!-- @review pr=416 verdict=finding by=S321-peter date=2026-08-05 probe=S239-adversarial-pass-on-own-codegen-PR-found-3-precision-defects-2FP-string-literal-1FN-destructure-ALL-fixed-and-pinned-behaviour-preserving-warning-only note=w-if-in-each-precision-hardened-pre-land -->
+<!-- @review pr=415 verdict=carve-out by=S321-peter date=2026-08-05 probe=own-review-floor-record-docs-only-single-pr-reviews-line -->
 <!-- @review pr=414 verdict=carve-out by=S321-peter date=2026-08-05 probe=docs-only-known-gaps+review-ledger-no-code-path-13-drain-entries-wellformed-severity-ruling-advisory -->
 <!-- @review pr=413 verdict=carve-out by=S319-bryan date=2026-08-05 probe=own-review-record-docs-only -->
 <!-- @review pr=412 verdict=carve-out by=S319-bryan date=2026-08-05 probe=own-ratification-records-and-brief-banners-docs-only -->
