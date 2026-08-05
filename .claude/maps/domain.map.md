@@ -1,12 +1,13 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-08-02T18:40:00Z  commit: e80b692e
-# NOTE (S313 pass): INCREMENTAL over `fe14c9b2` -> `e80b692e` (67 commits, five sessions). TARGETED —
-# FOUR new sections (**the route region as a third lifecycle owner**, **`<machine>` removed**,
-# **§19.4.4.1 enum-only**, **§6.7.1a bare-expression**) and six new Business Invariants. Nothing else
-# re-walked; the rest of this map carries its prior verification. Per-window history stays in
-# `docs/changelog.md` + `handOffs/delta-log.md`.
-
+# updated: 2026-08-04T20:30:00Z  commit: b929b9c9
+# NOTE (S320 INCREMENTAL pass): over `e80b692e` -> `b929b9c9` (31 commits, six sessions). TARGETED —
+# THREE new sections (`keep-alive` fifth `<page>` attribute + the `<timer>`/`<poll>` first-tick
+# asymmetry, crossmodule-async-in-markup, `E-FN-EQUALS-BODY` fn-shorthand reject) and three new
+# Business Invariants. The `<machine>`-removal DOC drift flagged at the prior pass (S313-N1) is now
+# RESOLVED (#376 fixed all four docs) — see non-compliance.report.md. Everything else below carries
+# its prior verification; history stays in `docs/changelog.md` + `handOffs/delta-log.md`. **PR #405
+# (CPS auto-await consolidation) is HELD, unmerged — nothing below describes its state.**
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
 
 ## Core Concepts (by SPEC section)
@@ -607,6 +608,62 @@ nice-to-have.
   ran, at module-init, before any rehydrator. See structure.map.md's execution-boundary section and
   dependencies.map.md's module-init table for the exact producer chain.
 
+## `<page keep-alive>` — the FIFTH per-route attribute (§4.15/§40.8/§20.8.4, ruled S314, #378)
+
+`<page>`'s per-route attribute set widened from four to five: `db=`, `auth=`, `csrf=`, `ratelimit=`,
+**`keep-alive`** (a bareword, no value). Before S314 it fired `E-PAGE-INVALID-ATTR`; the SPEC's own
+four-set enumeration (§0.3, `dd:page-helper-element-design-2026-05-12`) was a CLASSIFICATION of the
+`<program>`/`<page>` attribute surface as it stood at authoring time, not a designed bound — the DD's
+governing rule is an app-wide-vs-per-route PARTITION, and `keep-alive` is per-route by construction
+(§20.8.4: a route opts in; §20.8.8 keys the region by `(route, params)`). Admitting it is a
+CONFORMANCE FIX ("newly-accepting toward the contract"), not a widening decision.
+
+**Read this before assuming `keep-alive` caches anything.** Only the AUTHORING surface is admitted at
+this HEAD — the attribute is recognized (`attribute-registry.js`) and validated
+(`ast-builder.js` `validatePageAttrs`) — but **there is still NO runtime cache and NO §52/§38
+invalidation wiring**. §20.8.4's design (once built) is SQL-server-load-scoped: keyed by only the
+params that reach SQL, each sub-payload's table read-set derived via `extractSelectProjection()`,
+invalidated by one Postgres `AFTER INSERT/UPDATE/DELETE` trigger per read table.
+
+**`W-ROUTE-REQUEST-DUPLICATES-SERVER-LOAD`'s guidance was corrected in the same window it was named.**
+The message steers to (a) reading the server-load payload directly, and — where that work is
+genuinely per-visit but expensive — **(a) followed by (b) `<page keep-alive>`. (b) is a follow-on to
+(a), never an alternative.** §20.8.4's cache does NOT cover a `<request>` (an HTTP fetch, §6.7.7/§60,
+with no table read-set and no trigger), so an adopter who applies (b) alone still has the `<request>`
+firing on every route-enter per §6.7.2.1 — now over a cached server load — and the two halves can
+disagree. Both codes remain NAMED / spec-ahead — no emitter yet; the §34 row lands with the impl.
+
+## `<timer>` / `<poll>` — the first-tick asymmetry is now normative (§6.7.5/§6.7.6, S314)
+
+A `<timer>`'s first execution is **one interval AFTER arming** — it does not fire immediately. A
+`<poll>`'s first execution **fires IMMEDIATELY on arming** — the deliberate divergence, because a
+`<poll>` exists to keep a value fresh (the §6.7.6 worked example, `<poll interval=10000>` fetching
+`@serverTime`, would otherwise render nothing for a full 10s) while a `<timer>` makes no such promise.
+Both amendments state behavior the SPEC was previously SILENT on, and the silence was masked by a
+`collect.ts:205` defect that accidentally emitted the poll body at module-init (an accidental
+first-tick-ish run) — removing the defect without the amendment would have been a visible regression
+for every `<poll>` in the field. The S313 "a bug fix is not automatically inert" shape, restated: the
+fix and the amendment landed together.
+
+Two sub-rules worth carrying: the immediate poll tick runs through the SAME tick path as every later
+tick (inherits async queuing, error handling, `<#id>.tickCount` accounting — not a special-cased
+pre-run); and it is **gated by `running=`** and fires **once per ARMING, not once per resume** (a
+`running` false→true transition resumes the interval without re-firing the immediate tick — the
+alternative turns a boolean write into a fetch trigger, a side effect at a distance).
+
+## A cross-module ASYNC import consumed in a markup interpolation is now awaited (#391)
+
+`g-crossmodule-async-in-markup-position-not-awaited`: a cross-file import classified `async`
+(colorless-async, §13.1/§13.2) and read directly inside a markup `${…}` interpolation previously
+shipped as a bare unawaited Promise in that position — the interpolation rendered `[object Promise]`
+or similar, silently. Fixed in `emit-client.ts`/`emit-reactive-wiring.ts`. **The wrap decision is made
+off the injector's OWN EMITTED OUTPUT, not a re-derived predicate** — an S239 catch during the same PR
+surfaced a page-breaking SyntaxError from an earlier version of the fix (an async fn used as a bare
+combinator callback), which is why the landed shape decides off actual emitted text rather than
+re-inferring async-ness a second time at a different stage. See dependencies.map.md's
+Colorless-async section for the producer/consumer chain.
+
+
 ## The `<machine>` keyword is REMOVED (§63.7 / §51.0.L, ruled S305, landed S307)
 
 **`<machine>` is not a deprecated alias any more. It does not compile.** `E-DEPRECATED-001` (Error)
@@ -696,6 +753,42 @@ mount body is lowered through the STRING pipeline, not a statement list, because
 drops a TRUNCATED parse so all statements survive — before it, a body whose first statement happened
 to parse had **every following statement silently dropped, with zero diagnostics** (GH #264 Defect 2).
 
+## A `fn`/`function` body admits exactly ONE shape — `E-FN-EQUALS-BODY` (§48.2, NEW, #396)
+
+`fn`/`function` bodies are `{ … }` blocks ONLY. The `=`-expression shorthand —
+`fn <name>(args) [-> T] = <expr>`, e.g. `fn pick(k:int) -> bool = match k { 1 :> true  _ :> false }`
+— is **NOT a sanctioned scrml form** and is rejected at parse with `E-FN-EQUALS-BODY`, the sibling of
+the `=>`-arrow reject `E-FN-ARROW-BODY` (§48.2.1). Fix: a block body (`fn f(args) { return <expr> }`)
+or the implicit tail-return form (`fn f(args) { <expr> }` — a block body already returns its tail
+expression, so the shorthand added no expressive power the block form lacks).
+
+**Before the reject, the shape SILENTLY MISCOMPILED, and the mechanism is worth knowing beyond this
+one code.** The `-> T` / `: T` return-type consumer breaks at a depth-0 bare `=` (the same consumer
+that handles `route=` and other trailing attributes), so it swallowed `= match k {…}` whole and the
+match's own `{` was misread as the FUNCTION body brace — the entire match collapsed to
+`function _scrml_pick(k){ 1; }` (the first arm's TEST literal as a bare statement, every arm RESULT
+dropped, the function returning `undefined`), with **zero diagnostics**. `= if …` tail forms instead
+hit `E-CODEGEN-INVALID-LOGIC` (a different, louder failure, which is why only the `match`-tail shape
+went undetected long enough to reach a filed gap).
+
+**Topology: `rejectFnEqualsBody` (`ast-builder.js:3755`) fires at FOUR duplicated decl-body call
+sites** (`:9310` / `:9592` / `:12645` / `:12946` — the same four-site duplication `E-FN-ARROW-BODY`
+already lives at) **plus a FIFTH site that behaves differently on purpose: the `export` re-parse**
+(`:11625-11654`). Before this fix, that re-parse SWALLOWED every sub-error from its inner parse
+(including this one) — an exported form of the shorthand compiled to a silently-empty exported
+function rather than reporting anything. The fix surfaces ONLY `E-FN-EQUALS-BODY` from the sub-parse
+(other sub-errors stay suppressed, deliberately — widening what the re-parse surfaces is a separate,
+unscoped change), so an exported form now gets the same diagnostic a top-level one does. **Any future
+fn-decl parse fix owes all five sites, not the four `rejectFnEqualsBody` call sites alone** — see the
+`scrml-fn-decl-parse-sites-topology` memory note for the general shape (route= trailing-attribute
+over-consumption at the same consumer is a documented sibling risk).
+
+**One residual, explicitly out of this fix's scope:** an ANONYMOUS `let f = fn(x) = expr` still routes
+to `E-CODEGEN-INVALID-LOGIC` rather than `E-FN-EQUALS-BODY` — a different parse path
+(`expression-parser.ts`, not `ast-builder.js`'s decl-body sites) — tracked as
+`g-fn-anon-expr-equals-body-emits-invalid-js` (LOW, open).
+
+
 ## Business Invariants (language axioms, not app rules)
 - **`if=` on a scrml-defined structural element is admitted on exactly THREE (`<engine>`/`<match>`/`<each>`) and SHALL NOT be generalized to the registry (§17.1.2).**
 - **`if=` gates RENDER, never LIFECYCLE (§17.1.2.1)** — a gated `<engine>`'s cell, `rule=`, `effect=` and timers stay live; only the rendering is withheld. The alternative reading is state-destroying and breaks the §51.0.A singleton invariant.
@@ -738,6 +831,9 @@ to parse had **every following statement silently dropped, with zero diagnostics
 - `session.set("csrfToken", …)` is a reserved-key write and is rejected at compile time when literal (§20.5.1).
 - LIVE-vs-INERT identity for a `?{}` `${}` interpolation is decided by ONE shared lexer (§52.15.5, `codegen/sql-lex.ts`).
 
+- **A `fn`/`function` body admits exactly ONE shape, `{ … }` — the `=`-expression shorthand SHALL be rejected (§48.2, `E-FN-EQUALS-BODY`).** Sibling of the `=>`-arrow reject `E-FN-ARROW-BODY`. Pre-reject, the shape silently miscompiled a `match`-tail body to a degenerate function returning `undefined`.
+- **`<page>` admits a FIFTH per-route attribute, `keep-alive` (§4.15/§20.8.4)** — but only the authoring surface is wired; there is no runtime cache or invalidation yet. `<page keep-alive>` is a follow-on to reading the server-load payload directly, never an alternative to it.
+- **A `<poll>` fires its first tick IMMEDIATELY on arming; a `<timer>` does not (§6.7.5/§6.7.6)** — the deliberate asymmetry (freshness vs periodicity), gated once-per-arming, not once-per-resume.
 ## Domain Events (compiler-pipeline analogs)
 `RowChange` — synthesized per §38.13 watched-table row mutation (INSERT/UPDATE/DELETE), dispatched client-side via the `__change` frame to `<onchange>` handlers.
 Engine variant transition — an `<engine>` cell's `rule=`-governed state change, optionally observed via `<onTransition>`/`<onTimeout>`/`<onIdle>`.
@@ -758,7 +854,7 @@ Diagnostic emission — every pipeline stage emits `{code, message, severity, sp
 A returned function-expression closure (`return function name(){…}`, GITI-038) — owns its own body's scope/type/async analysis independent of its enclosing factory (`ReturnStmtNode.fnExprNode`, see schema.map.md).
 
 ## Tags
-#scrml #map #domain #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth #route-region #§6.7.2.1 #§20.8.8 #pole-c #third-lifecycle-owner #route-leave #route-enter #commit-gate #keep-alive #outlet-resident #region-cleanups #module-init #rehydrator-boundary #machine-retired #e-deprecated-001 #§63.7 #projection-codemod #engine-audit #§51.11 #§51.13 #property-tests #enum-only #§19.4.4.1 #e-error-011 #renders-clause #e-error-005 #corpus-first-migration #provenance-field #§34.0 #named-codes-land-with-impl #§6.7.1a #bare-expression-category #sugar-equivalence #mount-body-expr-node
+#scrml #map #domain #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth #route-region #§6.7.2.1 #§20.8.8 #pole-c #third-lifecycle-owner #route-leave #route-enter #commit-gate #keep-alive #outlet-resident #region-cleanups #module-init #rehydrator-boundary #machine-retired #e-deprecated-001 #§63.7 #projection-codemod #engine-audit #§51.11 #§51.13 #property-tests #enum-only #§19.4.4.1 #e-error-011 #renders-clause #e-error-005 #corpus-first-migration #provenance-field #§34.0 #named-codes-land-with-impl #§6.7.1a #bare-expression-category #sugar-equivalence #mount-body-expr-node #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #crossmodule-async-markup #s239-catch #pr-405-held
 
 ## Links
 - [primary.map.md](./primary.map.md)

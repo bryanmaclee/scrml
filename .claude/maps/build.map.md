@@ -1,11 +1,12 @@
 # build.map.md
 # project: scrml
-# updated: 2026-08-02T18:40:00Z  commit: e80b692e
-# NOTE (S313 pass): INCREMENTAL over `fe14c9b2` -> `e80b692e` (67 commits, five sessions). TARGETED —
-# **all three workflows changed and TWO AI legs were KILLED.** No package.json script, CLI flag or
-# Dockerfile changed; those sections carry their prior walk. **The single line a reader most needs:
-# `cloud-maps` NO LONGER REFRESHES THE MAPS ON A SCHEDULE — map refresh is PA-at-wrap only. A map
-# stamp is now as old as the last wrap, and nothing will move it for you.**
+# updated: 2026-08-04T20:30:00Z  commit: b929b9c9
+# NOTE (S320 INCREMENTAL pass): over `e80b692e` -> `b929b9c9` (31 commits, six sessions). TARGETED —
+# ONE workflow line changed (`windows` job's `PUPPETEER_SKIP_DOWNLOAD`) and ONE new PA-side script
+# (`scripts/review-debt.ts`, NOT a CI gate). No package.json script, CLI flag or Dockerfile changed;
+# those sections carry their prior walk. **The single line a reader most needs still holds:
+# `cloud-maps` NO LONGER REFRESHES THE MAPS ON A SCHEDULE — this window itself sat 31 commits / six
+# sessions before a manual pass caught it (S317/S318/S319/S320 each deferred the dispatch in a row).**
 
 ## Development Commands (root package.json scripts)
 compile — `bun run compiler/src/cli.js compile`
@@ -183,6 +184,18 @@ written rots silently.
   stale SPEC-INDEX and the ~9x-wrong LOC figure are the two precedents, and are why `docs/FACTS.md`
   exists). See error.map.md for the buckets and the traps it defeats.
 
+## PR review-floor tracker — `scripts/review-debt.ts` (NEW, S316) — NOT a CI gate
+
+Built after the review floor (pa.md's mandatory-review contract) was measured at a **0% execution
+rate** the day after ratification: boot reads `gh pr list` (**open** PRs only), while the review floor
+binds **merged** PRs, and nothing computed the difference — eight PRs merged unreviewed and the debt
+was invisible to the session that incurred it and every session after (a second instance of the S262
+"a contract can name an obligation with no probe that reads it" class). `scripts/review-debt.ts`
+drains merged-but-unreviewed PRs against `docs/pr-reviews.md`, and is wired into **PA boot step 0.6**
+— it is bookkeeping for the PA operating loop, **not a CI step**, and does not appear in `ci.yml`.
+First drain (S316) found a real incomplete fix (#391). Standing measurement, per S319: the review
+floor's execution rate over a 3-session window is itself the thing being tracked.
+
 ## Content-addressed build assets + cache headers (S265, adopter #82, PR #96)
 
 **Naming (build path only).** `scrml build` → `compileScrml({ contentHashAssets: true })`. The
@@ -211,7 +224,7 @@ Two placement facts that are deliberate, not incidental:
 
 **tracking** — NON-BLOCKING (`continue-on-error: true`). integration + lsp + commands tests (incl. `commands/db-migrate.test.js`) → **`bun scripts/browser-baseline.ts --check` (REPLACES the raw `bun test compiler/tests/browser`)** → the parser-conformance-within-node M6.x backlog. **The replacement fixed a second-order bug worth knowing: a FAILED step HALTS the job, and the browser step was permanently red, so `Within-node parser-parity + canary` — the step after it — reports `skipped` on run 30742472551 and had therefore NEVER RUN.** That is the S302 class (13 of 14 root-level files run by no workflow) recurring one job over: the tier was useless in both directions at once *and* it was silently eating the steps behind it.
 
-**windows** — NON-BLOCKING (`continue-on-error: true`), `runs-on: windows-latest`. unit + conformance only.
+**windows** — NON-BLOCKING (`continue-on-error: true`), `runs-on: windows-latest`. unit + conformance only. **NEW this pass:** the `Install deps` step now sets `PUPPETEER_SKIP_DOWNLOAD: "true"` before `bun install --frozen-lockfile` — this job never touches the browser tier, so the puppeteer postinstall download was pure cost AND a flake source (PR #382 witnessed an `ECONNRESET` failing `Install deps` before a single test ran, on IDENTICAL content that passed on a sibling run). **`gate` still downloads it — the browser NAME-SET assertion needs a real browser.**
 
 Rationale banner in the workflow (S253): `gate` is the guaranteed-green-from-source core only — no self-host/within-node backlog noise. The live-PG DB-authoritative integration tests remain `tracking`-tier and skip-graceful.
 
@@ -378,7 +391,7 @@ pre-push — **SCOPE AND TRIGGER BOTH CHANGED THIS WINDOW.**
 None. No Dockerfile / docker-compose in this repo — see infra.map.md.
 
 ## Tags
-#scrml #map #build #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist #gate-topology #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #failure-name-sets #cry-wolf #new-ref-push-skip #set-e-trap #pre-push-scope #b7dda491 #browser-baseline #failure-name-set #bidirectional-baseline #s34-census #§34.0 #row-provenance #fetch-depth-0 #diff-scoped-gate #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #no-scheduled-map-refresh #advisory-review-disabled #skipped-step-behind-red-step #gap-attribute-bag #locus-attr #partial-impl #proven-gate #import-meta-main
+#scrml #map #build #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist #gate-topology #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #failure-name-sets #cry-wolf #new-ref-push-skip #set-e-trap #pre-push-scope #b7dda491 #browser-baseline #failure-name-set #bidirectional-baseline #s34-census #§34.0 #row-provenance #fetch-depth-0 #diff-scoped-gate #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #no-scheduled-map-refresh #advisory-review-disabled #skipped-step-behind-red-step #gap-attribute-bag #locus-attr #partial-impl #proven-gate #import-meta-main #review-debt-script #pr-reviews-md #puppeteer-skip-download #windows-ci-flake #boot-step-0.6
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -1,11 +1,11 @@
 # test.map.md
 # project: scrml
-# updated: 2026-08-02T18:40:00Z  commit: e80b692e
-# NOTE (S313 pass): INCREMENTAL over `fe14c9b2` -> `e80b692e` (67 commits, five sessions). Counts
-# re-derived by `git ls-files`. **The structural change this window: the BROWSER TIER IS NOW
-# ASSERTABLE and is in the BLOCKING gate** — a whole tier moved from "permanently red, therefore
-# information-free" to "gated on its failure NAME SET". Per-window test inventories stay DELETED;
-# `git log --diff-filter=A --name-only fe14c9b2..HEAD -- compiler/tests` answers that faster.
+# updated: 2026-08-04T20:30:00Z  commit: b929b9c9
+# NOTE (S320 INCREMENTAL pass): over `e80b692e` -> `b929b9c9` (31 commits, six sessions). Counts
+# re-derived by `git ls-files`. **No gate-topology change this window** (the S313 browser-tier
+# name-set promotion carries forward unchanged) — this pass is COUNTS + new conformance pins for
+# #389/#391/#394/#396. Per-window test inventories stay DELETED;
+# `git log --diff-filter=A --name-only e80b692e..HEAD -- compiler/tests` answers that faster.
 
 ## Test Framework
 Runner: `bun:test` (Bun's built-in test runner, no separate package dep)
@@ -17,27 +17,29 @@ Browser DOM: happy-dom / @happy-dom/global-registrator (compiler/tests/browser/)
 Browser tier ASSERTION: `bun scripts/browser-baseline.ts --check` (**not** `bun test compiler/tests/browser`)
 E2E: Playwright (`@playwright/test`), separate config at e2e/playwright.config.ts, NOT part of `bun test`
 
-## Test Categories (compiler/tests/, **1304** `*.test.js` total)
+## Test Categories (compiler/tests/, **1314** `*.test.js` total)
 
-Fresh recursive `git ls-files` recount at `e80b692e`, all 9 categories individually re-verified;
-agrees with `docs/FACTS.md` (`test files | 1,304`), **which is the citable authority — do not
-hardcode a competing number.** Net **+10** across this window.
+Fresh recursive `git ls-files` recount at `b929b9c9`, all 9 categories individually re-verified;
+agrees with `docs/FACTS.md` (`test files | 1,314`), **which is the citable authority — do not
+hardcode a competing number.** Net **+10** this pass (unit +3, integration +3, conformance +4;
+browser/lsp/commands/self-host/e2e-render-map/top-level all unchanged).
 
 | Category | Glob | Count | **Which gate runs it** |
 |---|---|---|---|
-| Unit | `compiler/tests/unit/**/*.test.js` | **864** | `gate` (blocking) + pre-commit + pre-push |
-| Integration | `compiler/tests/integration/**/*.test.js` | **186** | `tracking` (non-blocking) + pre-commit + pre-push |
-| Conformance | `compiler/tests/conformance/**/*.test.js` | 126 | `gate` (blocking) + pre-commit + pre-push |
-| Browser | `compiler/tests/browser/**/*.test.js` | 89 | **`gate` (BLOCKING) + `tracking` — via the NAME-SET check, NEW this window** |
+| Unit | `compiler/tests/unit/**/*.test.js` | **867** | `gate` (blocking) + pre-commit + pre-push |
+| Integration | `compiler/tests/integration/**/*.test.js` | **189** | `tracking` (non-blocking) + pre-commit + pre-push |
+| Conformance | `compiler/tests/conformance/**/*.test.js` | **130** | `gate` (blocking) + pre-commit + pre-push |
+| Browser | `compiler/tests/browser/**/*.test.js` | 89 (unchanged) | `gate` (BLOCKING) + `tracking` — via the NAME-SET check |
 | LSP | `compiler/tests/lsp/**/*.test.js` | 11 | `tracking` only (non-blocking) |
 | Commands | `compiler/tests/commands/**/*.test.js` | 8 | `tracking` only (non-blocking) |
 | Self-host | `compiler/tests/self-host/**/*.test.js` | 4 | `tracking` only (non-blocking) |
 | e2e-render-map | `compiler/tests/e2e-render-map/` | 2 | `tracking` only (non-blocking) |
 | Parser-conformance + native-* | top-level `compiler/tests/*.test.js` | 14 | `gate` (blocking) + pre-commit (since S302) |
 
-The top-level `conformance/` corpus moved further: **769 -> 850 cases (+81)** — the tier-1 freeze
-campaign (ss56/ss58/ss63/ss66) plus the lifecycle, control-flow, error and engine families. ~170 of
-the 287 files this window changed are conformance case data.
+The top-level `conformance/` corpus moved further: **850 -> 853 cases (+3)** — pins for
+`g-subparse-span-not-rebased` (#389), `g-crossmodule-async-in-markup-position-not-awaited` (#391),
+`g-match-arm-server-call-no-autoawait` (#394, CODES+RUNTIME), and
+`g-fn-shorthand-tail-match-emits-degenerate-body` (#396, 17 unit cases + the conformance pin).
 
 ## THE BROWSER TIER IS NOW GATED — and the mechanism generalizes
 
@@ -141,6 +143,13 @@ rewrite leaves the whole declaration untouched on any unparseable body line, bec
 projection silently drops mappings. Fixtures live in
 `compiler/tests/commands/migrate-program-shape-fixtures/`.
 
+**A re-parse that SWALLOWS sub-errors needs its own positive test, not just the happy path (NEW,
+#396).** `ast-builder.js`'s `export` re-parse used to suppress every sub-error from its inner parse —
+a top-level `E-FN-EQUALS-BODY` test would NOT have caught the exported form silently compiling to an
+empty function. The fix's test coverage therefore pins BOTH shapes (top-level decl-body AND `export`)
+at each of the four+one call sites, not one representative site — a lesson worth generalizing to any
+future fix at a re-parse boundary.
+
 ## §14.8.11 DB-authoritative tier — live-Postgres skip-graceful pattern
 
 The three integration tests (`db-authoritative-pg`, `db-authoritative-p2-pg`, `db-migrate-pg`) and
@@ -196,7 +205,7 @@ allowlist. **Adding a FIELD to a structural AST node grows this if the native mi
 samples/compilation-tests/ — 12 fixture dirs compiled by `scripts/compile-test-samples.sh`
 (`bun run pretest`) before the suite; dist/ is gitignored. **These go STALE** — a browser-test triage
 starts by recompiling them, before comparing anything.
-conformance/cases/ + conformance/adapters/ — the D3 corpus (**850 cases**) + per-impl adapters.
+conformance/cases/ + conformance/adapters/ — the D3 corpus (**853 cases**) + per-impl adapters.
 docs/tutorial-snippets/ + docs/readme-snippets/ + docs/website/ — the public snippet corpus; REAL
 programs under a compile gate.
 
@@ -240,7 +249,7 @@ between files, so a single-file run can be green while the suite is red, and vic
 `bun scripts/browser-baseline.ts` and diff NAMES**, which is the comparison a human was doing by hand.
 
 ## Tags
-#scrml #map #test #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority
+#scrml #map #test #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-853
 
 ## Links
 - [primary.map.md](./primary.map.md)
