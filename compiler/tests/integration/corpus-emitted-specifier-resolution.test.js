@@ -100,24 +100,18 @@ const dangling = (specs) =>
 /**
  * KNOWN-BROKEN, pinned to a gap. Every entry here is a real runtime failure.
  *
- * [[g-nested-flatpage-runtime-bare-ref]] — a `<channel>` shell emits a BARE
- * runtime ref (`scrml-runtime.<hash>.js`) while living at dist depth 1, so it
- * 404s. The contrast is the proof it is emitter-specific rather than
- * depth-specific: `dispatch/board.html` — a PAGE at the same depth — correctly
- * emits `../scrml-runtime.<hash>.js`. With the runtime 404'd these shells are
- * dead, and their chunk calls `_scrml_reactive_set` / `_scrml_init_set`.
- *
- * NB the gap entry's scoping claim is WRONG and is corrected in known-gaps: it
- * argues single-segment `pages/` routes are safe because the strip lands them at
- * dist root. Channels are NOT under `pages/`, are never stripped, and therefore
- * break at depth 1.
+ * NOW EMPTY — g-runtime-script-tag-not-depth-prefixed
+ * (a.k.a. [[g-nested-flatpage-runtime-bare-ref]]) is CLOSED. The own-document
+ * HTML emit path now applies the same dist-root `../`-per-subdir prefix to the
+ * runtime `<script src>` that the composition re-add and the ESM chunk path
+ * already applied (`codegen/index.ts`, the doc-envelope runtime tag). The four
+ * `channels/*.html` shells — NOT under `pages/`, never `pages/`-stripped, so at
+ * dist depth 1 — previously emitted a BARE `scrml-runtime.<hash>.js` and 404'd;
+ * they now emit `../scrml-runtime.<hash>.js` and resolve. Per §8 of this file's
+ * header (shrink the set when the gap closes), the allowlist is drained to zero,
+ * turning §2 into a hard "no dangling runtime ref anywhere" gate.
  */
-const KNOWN_DANGLING_SCRIPT_SRC = [
-  "channels/customer-events.html -> scrml-runtime",
-  "channels/dispatch-board.html -> scrml-runtime",
-  "channels/driver-events.html -> scrml-runtime",
-  "channels/load-events.html -> scrml-runtime",
-];
+const KNOWN_DANGLING_SCRIPT_SRC = [];
 
 /** Hashes are content-addressed (§47) and move with any source edit — compare hash-free. */
 const stripHash = (s) => s.replace(/scrml-runtime\.[a-z0-9]+\.js/g, "scrml-runtime");

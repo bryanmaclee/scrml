@@ -2308,7 +2308,31 @@ export function runCG(input: CgInput): CgOutput {
         if (clientJs && !embedRuntime) {
           // v0.3.x SPA tree-shake Phase B 3.3 — placeholder; runCG
           // substitutes the final hashed filename in a post-pass.
-          docParts.push(`<script${scriptModuleTypeAttr} src="${RUNTIME_FILENAME_PLACEHOLDER}"></script>`);
+          //
+          // g-runtime-script-tag-not-depth-prefixed (HIGH) — the runtime is
+          // written ONCE at the dist root (`dist/scrml-runtime.<hash>.js`,
+          // api.js `writeFileSync(join(outputDir, runtimeFilename))`), so a
+          // nested own-document page (`dist/a/b/deep.html`) must reach it with a
+          // `../`-per-subdir prefix. Pre-fix this pushed the BARE placeholder,
+          // and the post-pass substitution (~:3122) is a plain string replace
+          // that cannot add a prefix — so every nested shell-less page 404'd the
+          // runtime and booted DOA with zero diagnostics. Depth-0 pages keep the
+          // bare form (empty prefix). This mirrors the ESM chunk path's runtime
+          // URL (emit-client-esm.ts `resolveUrl(runtimePlaceholder)`) and the
+          // per-page COMPOSITION `upToRoot` (~:2875) — same relative-to-dist-root
+          // derivation, anchored at `cgOutputBaseDir` (the real dist WRITE root
+          // per api.js `pathFor`) rather than the entry dir, since the
+          // own-document path has no shell entry to anchor on.
+          const ownPageRelDir = cgOutputBaseDir
+            ? relative(cgOutputBaseDir, dirname(filePath))
+                .replace(/\\/g, "/")
+                .replace(/^pages(?:\/|$)/, "")
+            : "";
+          const ownDepth = ownPageRelDir
+            ? ownPageRelDir.split("/").filter(Boolean).length
+            : 0;
+          const ownUpToRoot = ownDepth > 0 ? "../".repeat(ownDepth) : "";
+          docParts.push(`<script${scriptModuleTypeAttr} src="${ownUpToRoot}${RUNTIME_FILENAME_PLACEHOLDER}"></script>`);
         }
         if (clientJs) {
           // known-gaps-#6 (S152, Approach B) — emit the transitive `.scrml`
@@ -2970,7 +2994,18 @@ export function runCG(input: CgInput): CgOutput {
               if (src.startsWith("/") || /^https?:/.test(src)) {
                 runtimeTagRewritten = runtimeMatch[0];
               } else {
-                runtimeTagRewritten = `<script${scriptModuleTypeAttr} src="${upToRoot}${src.replace(/^\.\//, "")}"></script>`;
+                // Strip ANY leading relative prefix (`./`, or one-or-more `../`)
+                // the own-document path already baked in, then apply THIS page's
+                // composition `upToRoot`. Own-document now emits a depth prefix
+                // for nested pages (g-runtime-script-tag-not-depth-prefixed), so
+                // a bare `src.replace(/^\.\//, "")` would leave that prefix in
+                // place and stack a second `upToRoot` on top → `../../../../`
+                // (double-prefix, the dominant regression risk). Normalizing to
+                // the bare placeholder here makes the composed result invariant
+                // to whatever the own-document path emitted — SINGLE prefix,
+                // byte-identical to pre-fix composed output.
+                const bareSrc = src.replace(/^(?:\.\.?\/)+/, "");
+                runtimeTagRewritten = `<script${scriptModuleTypeAttr} src="${upToRoot}${bareSrc}"></script>`;
               }
             }
           }
