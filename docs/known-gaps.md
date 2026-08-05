@@ -30,11 +30,154 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 20 |
-| MED | 112 |
+| HIGH | 22 |
+| MED | 115 |
 | LOW | 49 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-reset-writes-pending-promise-when-init-thunk-calls-a-server-fn — `reset(@cell)` on a cell whose init expression calls a server fn stores an unawaited Promise into the cell — compile exit 0, silent wrong value — `NEW S322-bryan (PA-reproduced on a shipped example); HIGH; open`
+<!-- @gap id=g-reset-writes-pending-promise-when-init-thunk-calls-a-server-fn sev=HIGH status=open locus=compiler/src/runtime-template.js:1168 prov=rationale:the-reset-path-re-invokes-the-init-thunk-but-unlike-the-declaration-path-it-never-awaits-the-result -->
+
+**Reproduced, not relayed.** `compiler/src/runtime-template.js:1168`:
+
+```js
+_scrml_reactive_set(name, _scrml_init_fns[name]());
+```
+
+No `await`. When the cell's init expression calls a server fn, the registered thunk returns a Promise,
+and `reset(@cell)` writes that Promise into the cell. Every downstream read — interpolation, `<each>`,
+a derived cell — then sees a Promise instead of the value. Compile exit 0, zero diagnostics.
+
+**Verified on a SHIPPED example.** `examples/03-contact-book.scrml` compiles clean and emits:
+
+```js
+_scrml_cs_init_set("contacts", () => _scrml_fetch_loadContacts_11(…))
+```
+
+with `_scrml_reset` present in the same bundle. **Attribution correction:** a relayed report named
+`examples/08-chat.scrml` as a second instance; it is NOT — that source does not carry the shape. Swept
+both rather than propagating the pair (`pa-base` §8, sweep multiple sources — attribution may be wrong).
+
+**Why it is HIGH and not MED.** It is the §13.2 auto-await class landing on a path nothing in that arc
+touched. The declaration path awaits (the codegen injectors cover it); the *runtime reset* path
+re-invokes the same thunk and does not. So a cell can be correct at mount and wrong after `reset()` —
+which is exactly the shape an adopter reads as "reset is broken" rather than "async is broken."
+
+**Not scoped, not dispatched.** The obvious fix (await inside `_scrml_reset`) makes `_scrml_reset`
+async, which changes every call site — that is the same §13.2-vs-§19.6 shape as the S322 absorb ruling
+and should be decided WITH it, not separately. **Reproduce before fixing.**
+
+### g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources — the auto-await arc's motivating bug class is still live at ~150 call sites across cleanly-compiling corpus sources — `NEW S322-bryan (measured by the wide-corpus harness + an independent reviewer sweep); HIGH; open`
+<!-- @gap id=g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources sev=HIGH status=open locus=searched:compiler/src/codegen/emit-expr.ts,emit-client.ts,scheduling.ts,emit-functions.ts prov=dd:autoawait-choke-point-vs-heterogeneous-2026-08-04 -->
+
+**The measurement that motivates this entry is the one that corrected an earlier false conclusion.**
+The U1 wide-corpus run reported zero output difference on every cleanly-compiling source, and the
+authoring agent read that as *"the corpus contains no compiling exemplar of the shape."* An independent
+review refuted the reason while confirming the premise: the corpus **does** contain compiling
+exemplars, and the fix simply does not reach them.
+
+Two independent counts, different rules, same conclusion:
+
+| measurement | bare (unawaited) `_scrml_fetch_*` sites in cleanly-compiling sources | delta base→head |
+|---|---|---|
+| independent reviewer sweep | 49 bare of 148, across 70 sources | **0** |
+| the harness's own metric | 150 bare of 472, across 103 sources (wider corpus, looser rule) | **0** |
+
+Four are unambiguous instances of the target bug in sources that compile cleanly on every revision:
+
+- `examples/19-lin-token.scrml:107` — `const ticket = _scrml_fetch_mintTicket_12(…)` in an **async**
+  host, value consumed by `redeem(ticket, …)`, while the sibling call on the next line **is** awaited
+- `samples/compilation-tests/gauntlet-r10-rails-blog.scrml:331,334` — a pending Promise written into a
+  cell and then rendered
+- `examples/17-schema-migrations.scrml:100` — `for (const n of _scrml_fetch_listNotes_13())`
+- `samples/.../phase1-function-with-sql-002.scrml:55` — `await (_scrml_fetch_loadUsers_3().length)`,
+  verbatim the precedence bug `isAwaitedClientServerFnCall`'s own doc-comment cites as its reason to exist
+
+**Why the entry exists rather than a note on U1.** The shapes reached by the landed work are the ones
+its own tests define. The shapes NOT reached use different emitter paths — the CPS / failable-fn
+wrapper, module top-level init, and the markup-interpolation lift. **A changelog line reading "closes
+the auto-await family" would be false**, and this entry is the artifact that stops the next session
+inheriting that premise.
+
+**Direction (not a ruling).** The dpa-020 verdict named the structural root: three disagreeing
+"is this name async in client mode?" predicates (`isClientServerFnCall` includes client server fns,
+`combinatorIsAsyncName` now includes them, the drain's `isAsyncName` still excludes them). Unifying
+those is the real follow-on. **The 150-site count is now produced by the harness itself**, so any
+future change to this class has a measurable before/after rather than an argument.
+
+### g-compiler-writes-unverifiable-client-bundle-to-disk-under-e-cg-001 — the §14.8.9 confidentiality backstop correctly refuses to certify an unparseable bundle, and the compiler writes it anyway — `NEW S322-bryan; MED; open`
+<!-- @gap id=g-compiler-writes-unverifiable-client-bundle-to-disk-under-e-cg-001 sev=MED status=open locus=searched:compiler/src/codegen/emit-client.ts,compiler/src/api.js prov=rationale:a-security-backstop-that-fails-closed-in-its-verdict-but-not-in-its-side-effect-still-ships-the-artifact-it-refused-to-certify -->
+
+Observed while attributing a transient diagnostic during the U1 review. At the U1 round-1 tip, a
+stranded `await` made a client bundle unparseable and `E-CG-001` fired:
+
+> could not verify the client JS bundle for protected-field egress — the emitted client JavaScript did
+> not parse … The §14.8.9 confidentiality backstop fails CLOSED: an unverifiable bundle is treated as a
+> potential leak. This indicates a compiler defect (malformed client emit).
+
+**The verdict half is exactly right** — refusing to certify what it cannot parse is the backstop
+working. The gap is the **side-effect half**: the unverifiable bundle was still written to disk. A
+build that emits an artifact its own confidentiality gate declined to clear is one `--force`-shaped
+habit away from shipping it.
+
+Related but distinct from the general partial-emission property (1207 of 1878 sources compile OK while
+1878 emit *something*) — that one is broad and pre-existing; this one lands on a security path and is
+worth deciding on its own terms.
+
+### g-stdlib-module-resolver-emits-import-meta-into-a-classic-script-bundle — a cleanly-compiling stdlib source emits a browser-DOA client bundle — `NEW S322-bryan (surfaced only by the dual-goggle fix + the stdlib corpus widening); MED; open`
+<!-- @gap id=g-stdlib-module-resolver-emits-import-meta-into-a-classic-script-bundle sev=MED status=open locus=stdlib/compiler/module-resolver.scrml prov=rationale:the-emitted-bundle-uses-a-module-only-construct-while-the-emitted-html-loads-it-as-a-classic-script -->
+
+```
+stdlib/compiler/module-resolver.scrml :: module-resolver.client.js
+    Cannot use 'import.meta' outside a module
+```
+
+The source **compiles cleanly**; the bundle cannot load. Identical on every revision under test, so it
+is neither a regression nor tied to the auto-await work.
+
+**It was invisible to every prior gate on two counts at once:** `node --check` on a `.js` resolves by
+module-syntax auto-detection and accepts `import.meta`, and `stdlib/` sat outside the corpus roots
+entirely. It appears now because the dual-goggle checker parses each artifact under the goggle the
+emitted HTML actually loads it under, and because `stdlib/` was added to the default roots. That is the
+gate earning its cost on its first real run.
+
+### g-gap-markers-duplicate-id-conflicting-status-double-counted — one ledger entry may carry TWO `@gap` markers with conflicting `status=`, and `state.ts` counts markers not entries, so the entry is counted twice — `--check` passes — `NEW S322-bryan (surfaced while substantiating #419's count delta during the review-floor drain); MED; open`
+<!-- @gap id=g-gap-markers-duplicate-id-conflicting-status-double-counted sev=MED status=open locus=scripts/state.ts prov=rationale:the-counter-has-a-fail-loud-guard-for-an-unknown-status-but-none-for-a-duplicated-id-so-the-same-entry-can-be-both-open-and-resolved -->
+
+**Measured, not inferred.** 585 `@gap` markers resolve to **583 unique ids**. The two duplicates each
+carry *conflicting* status, both `sev=MED`:
+
+| id | markers |
+|---|---|
+| `g-gap-counts-silently-drops-unrecognised-status` | `status=open` (leading, `:5685`) + `status=resolved` (trailing, `:5702`) |
+| `g-db-migrate-check-constraint-oneof-pattern` | `status=resolved` + `status=open` |
+
+`scripts/state.ts` tokenizes **markers**, not entries, and classifies each independently — so each of
+these is counted once as open and once as closed. **Open MED is inflated by exactly 2: the §0 rollup
+reports 112, the true figure is 110.** HIGH, LOW and Nominal are unaffected (both duplicates are MED).
+
+**Why nothing caught it.** `--check` compares the generated block against a fresh tokenize of the same
+input, so it is a *faithful render of a lossy read* — the gate cannot disagree with itself. This is the
+sibling of [[g-gap-counts-silently-drops-unrecognised-status]], which the S299 fix closed by making an
+**unknown status** throw. That guard was the right shape and it works; it simply does not cover a
+**duplicated id**, because both markers here are individually well-formed.
+
+**Root cause is the marker-placement inconsistency the overlay already documents** — some entries carry
+the marker LEADING, some TRAILING (`pa-scrml-overlay.md`, `{{defect_ledger_fills}}`: *"match on the
+heading, not on marker adjacency"*). An entry resolved by a session that appends a trailing marker,
+without striking a leading one it did not notice, lands in exactly this state. The inconsistency is
+tolerated by design; the double-count is not.
+
+**Fix direction (not scoped, not a ruling).** Mirror the existing fail-loud precedent: `state.ts`
+should **throw on a duplicated `@gap id=`**, naming the id and both statuses, so the ledger cannot
+silently hold an entry in two states. That is the `pa-base` §8 shape and it is the same one-guard
+change the S299 fix already proved out here. Deciding which marker WINS is a data question per entry
+and should not be automated. **Prove the bite before landing** — inject a duplicate, confirm the throw
+names it, restore, confirm green.
+
+**Cheap audit one-liner:**
+`grep -oE '@gap id=[^ ]+' docs/known-gaps.md | sort | uniq -d`
 
 ### g-rename-cell-accessors-swallows-parse-error-and-silently-un-namespaces-the-chunk — a non-parsing emitted body makes `renameCellAccessors` return it UNCHANGED instead of erroring, so `addCellScopePrologue` emits nothing and every cell silently reverts to an un-namespaced global — compiler exit 0 — `NEW S319-bryan (surfaced by the S239 adversarial pass on the U1 delta, regression lens); HIGH; open`
 <!-- @gap id=g-rename-cell-accessors-swallows-parse-error-and-silently-un-namespaces-the-chunk sev=HIGH status=open locus=compiler/src/codegen/cell-accessor-rename.ts prov=rationale:a-swallowed-parse-error-converts-one-codegen-defect-into-two-independent-silent-failures -->
