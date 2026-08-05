@@ -1,0 +1,9 @@
+${
+    <ticks> = 0
+    @ticks = @ticks + 1
+    function doReset() {
+        reset(@ticks)
+    }
+}
+<button id="rs" onclick=doReset()>reset</>
+<p id="t">T: ${@ticks}</>

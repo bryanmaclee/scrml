@@ -90,6 +90,17 @@ function _wrapDeepReactive(rewrittenExpr: string, rawExpr: string, initExpr?: an
 export interface EmitLogicOpts {
   derivedNames?: Set<string> | null;
   /**
+   * g-assignment-emits-init-set-inverting-reset (§6.8) — file-level set of cell
+   * names that carry a `<name>` STRUCTURAL declaration (`structuralForm:true`),
+   * via `collectStructuralDeclNames(fileAST)`. `_emitInitThunkSidecar` uses it to
+   * skip the reset init-thunk for a `@name = expr` REASSIGNMENT of such a cell
+   * (which would otherwise clobber the decl's init-thunk, last-write-wins). A
+   * `@name =` that is NOT in this set is an implicit declaration (SSE/channel
+   * bind) and keeps its thunk. Top-level only (sidecars never fire in-function),
+   * so it does not need the deep recursive propagation `derivedNames` gets.
+   */
+  structuralDeclNames?: Set<string> | null;
+  /**
    * Bug 61 — dotted synth-cell keys (`collectSynthCellKeys(fileAST)`). Threaded
    * into EmitExprContext via `_makeExprCtx` so `emitMember` can route
    * `@<compound>.<synthProp>` reads to the dotted synth cell. Sibling to
@@ -964,6 +975,19 @@ function _emitDefaultSidecar(node: any, qualifiedName: string, opts: EmitLogicOp
   return `_scrml_default_set(${JSON.stringify(encodedName)}, () => ${wrappedDefault});`;
 }
 
+// g-assignment-emits-init-set-inverting-reset (§6.8) — the file's structural
+// (`<name>`) cell-decl names, set once per file before its top-level logic emit.
+// A module-level fallback (codegen is synchronous + single-threaded, mirroring
+// `_eachBindSupportCtx`) so the reset-init-thunk reassignment guard also fires
+// for a reassignment nested in a TOP-LEVEL control-flow body (`if`/`for`/
+// `while`) — those bodies re-emit through a hand-picked opts that does not carry
+// `structuralDeclNames`, so opts alone under-skips (S239 F1). The set is
+// file-immutable, so a module fallback cannot disagree with the opts value.
+let _structuralDeclNamesForFile: Set<string> | null = null;
+export function setStructuralDeclNamesForFile(s: Set<string> | null): void {
+  _structuralDeclNamesForFile = s;
+}
+
 /**
  * C5 — Emit the `_scrml_init_set("name", () => <initExpr>);` sidecar for a
  * Shape 1 / Shape 2 state-decl that does NOT carry a `defaultExpr`.
@@ -1014,6 +1038,39 @@ function _emitInitThunkSidecar(node: any, qualifiedName: string, opts: EmitLogic
   // thunk for `_scrml_reset`, and a reassignment expression is not the
   // canonical init).
   if (opts.insideFunctionBody) return null;
+  // g-assignment-emits-init-set-inverting-reset (§6.8, HIGH) — an ASSIGNMENT is
+  // NOT a declaration and must NOT register a reset init-thunk. The ast-builder
+  // emits a `state-decl` node for BOTH `<name> = expr` (a declaration,
+  // `structuralForm: true`) AND `@name = expr` (a reassignment of an
+  // already-declared cell, `structuralForm: false`, `shape: "plain"`). Because
+  // the runtime's `_scrml_init_fns[name]` is last-write-wins
+  // (runtime-template.js) and `_scrml_reset` calls it, a TOP-LEVEL reassignment
+  // (e.g. `${ @ticks = @ticks + 1 }`) that reached this sidecar would OVERWRITE
+  // the decl's init-thunk with the assignment expression — so `reset(@ticks)`
+  // would re-run `current + 1` (INCREMENT) instead of restoring the declared
+  // initial. Only manifests at top level (the `insideFunctionBody` skip above
+  // already covers in-function reassignments) and only for a no-`default=` cell
+  // (`_scrml_reset` prefers a `_scrml_default_fns` entry).
+  //
+  // SAFE-BY-CONSTRUCTION discriminator: skip ONLY when the cell has a genuine
+  // `<name>` STRUCTURAL declaration elsewhere in the file (`structuralDeclNames`,
+  // the `structuralForm:true` set). A sigil-form (`@name =`) write to such a cell
+  // is a reassignment. A `@name = expr` that is the cell's FIRST/only appearance
+  // is an IMPLICIT declaration (e.g. an SSE/channel bind `@latest = ticks()`), is
+  // NOT in the structural set, and correctly KEEPS its init-thunk — reset must
+  // re-establish that binding. A `structuralForm:false` DERIVED-const decl
+  // (`const <x> = expr`) is a genuine declaration caught by the derived skip
+  // below. Erring toward keeping the thunk (skip only a proven reassignment)
+  // means no implicit-decl form ever loses its reset behaviour.
+  const _structuralDeclNames = opts.structuralDeclNames ?? _structuralDeclNamesForFile;
+  if (
+    (node as any).structuralForm === false &&
+    (node as any).shape === "plain" &&
+    (node as any).isConst !== true &&
+    !!_structuralDeclNames?.has(node.name)
+  ) {
+    return null;
+  }
   // Skip if defaultExpr present — _scrml_reset prefers default over init.
   if (node.defaultExpr) return null;
   // Skip derived (E-DERIVED-WRITE territory).
