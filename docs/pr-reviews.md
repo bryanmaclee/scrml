@@ -35,6 +35,7 @@ predate the rule and are out of scope by construction rather than by exemption.
 
 ## Log
 
+<!-- @review pr=414 verdict=carve-out by=S321-peter date=2026-08-05 probe=docs-only-known-gaps+review-ledger-no-code-path-13-drain-entries-wellformed-severity-ruling-advisory -->
 <!-- @review pr=413 verdict=carve-out by=S319-bryan date=2026-08-05 probe=own-review-record-docs-only -->
 <!-- @review pr=412 verdict=carve-out by=S319-bryan date=2026-08-05 probe=own-ratification-records-and-brief-banners-docs-only -->
 <!-- @review pr=411 verdict=carve-out by=S319-bryan date=2026-08-05 probe=continuity-docs-only -->
