@@ -35,6 +35,7 @@ predate the rule and are out of scope by construction rather than by exemption.
 
 ## Log
 
+<!-- @review pr=430 verdict=carve-out by=S322-bryan date=2026-08-05 probe=own-review-floor-drain-docs-only-single-file-pr-reviews-md-no-code-path -->
 <!-- @review pr=429 verdict=finding by=S322-bryan date=2026-08-05 probe=S239-across-3-fix-rounds-8-findings-one-build-breaking-all-fixed-plus-2-independent-post-hoc-lenses-then-wide-corpus-re-measure-on-the-REBASED-tree-1878-sources-7254-artifacts-syntax-delta-0-under-effective-script-AND-module-goggles-artifact-diffs-2-of-7254-both-on-sources-that-fail-to-compile-on-every-revision note=u1-emitcall-root-fix-lands-not-claiming-the-bug-class -->
 <!-- @review pr=428 verdict=finding by=S322-bryan date=2026-08-05 probe=two-independent-adversarial-lenses-hollow-gate-and-arithmetic-found-9-defects-in-the-gate-itself-incl-node-check-blind-to-top-level-await-and-no-vacuity-floor-on-the-syntax-half-ALL-routed-back-as-a-fix-round-and-re-proven-PA-re-executed-the-H1-goggle-bite-and-the-bun-vs-node-vm-Script-divergence-rather-than-inheriting-them note=the-gate-built-to-kill-hollow-gates-shipped-hollow-and-the-floor-caught-it -->
 <!-- @review pr=427 verdict=carve-out by=S322-bryan date=2026-08-05 probe=docs-only-changelog-handoff-deltalog-no-code-path-peters-wrap-continuity -->
