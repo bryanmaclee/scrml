@@ -35,6 +35,50 @@ predate the rule and are out of scope by construction rather than by exemption.
 
 ## Log
 
+<!-- @review pr=405 verdict=clean by=S319-bryan date=2026-08-05 probe=corpus-emit-diff+node-check-207-bundles+bite-proof-on-main -->
+
+### #405 — the dpa-020 CORE (unify the auto-await injectors) · verdict `clean`
+
+Codegen landing that **retires a pass** (`injectPromiseAwait`, the per-statement string-regex auto-await)
+in favour of one AST descend + paren-correct injector. Retiring a pass carries regression risk in the
+opposite direction from a normal fix — something previously awaited going bare — so the pass was probed
+for both.
+
+| probe | result |
+|---|---|
+| emit differential, all 32 `examples/` | **zero** output differences |
+| `node --check`, every emitted bundle (examples + 60 samples) | **207 bundles, 0 syntax failures** |
+| reactive/engine sink fence survived the retirement | yes — as AST-aware `isSkippedReactiveValue` + `insideSink` + `awaitIllegal`, replacing a regex prefix |
+| **bite proof — the new conformance test run against MAIN** | **0 pass / 6 fail** (branch: 6 pass / 0 fail) |
+
+**The `node --check` sweep is dpa-020's own mandated gate**, because the verdict named the dominant risk
+as *"a stranded `await` is a WHOLE-BUNDLE SyntaxError"* (`peerAwaitable` defaults to awaitable). 207
+bundles clean says that risk does not materialise on the corpus.
+
+**Zero emit change is the expected result, not a weak one:** the injector is deliberately byte-identical
+on the no-tail call (`await fn()`) and only diverges on a receiver-tail (`(await fn()).ok`), a ternary
+init, and `given`/match-block/`try` nesting — none of which the corpus exercises. That is precisely why
+all three defects were silent.
+
+**★ The bite proof is what carries this review.** My own hand-written probes repeatedly failed to reach
+the changed paths — twice from invalid scrml on my part (`given v = expr` is not a rebind; markup inside
+a function body), once from dead-code shaking. Rather than infer from a green suite, I ran the PR's new
+conformance test against **main's** compiler: **all six assertions fail there and all six pass on the
+branch.** That proves the three defects are real and live, and that the fix closes both the CODES and
+RUNTIME halves of each. **Stated plainly because it matters: the fix's correctness here is established by
+the PR's own executable test proving its bite, not by reproducers I constructed.**
+
+**Rebase (S319):** conflicted on `dpa-queue.md` (2 regions) + `known-gaps.md` + `FACTS.md` after #412.
+Generated blocks resolved by **regeneration**, verified by arithmetic — MED 114−3=111 (the three MED gaps
+this PR resolves), LOW 49−1+1=49 (one resolved, one filed), HIGH 20 unchanged — matching the prediction
+exactly. The three resolved gaps are the same three the bite proof exercised. `dpa-queue.md` resolved to
+HEAD, which already carried both Peter's S320 re-run note and the S319 ratification.
+
+**Not blocking, recorded:** #405 is dpa-020's **U3** (merge the injectors), not **U1** (the missing
+`emitCall` client-server-fn branch). The ratified verdict names the post-emit rename as the bug generator
+and U1 as the root fix, so the family is narrowed here, not closed — a bare unawaited server call is
+still observable in a hand-probe. U1 remains open work.
+
 <!-- @review pr=402 verdict=carve-out by=S320-peter date=2026-08-04 probe=continuity-docs-only-changelog-handoff-deltalog-no-code-path -->
 <!-- @review pr=401 verdict=carve-out by=S320-peter date=2026-08-04 probe=known-gaps-rescope-docs-only-VERIFIED-scheduling.ts:974-isControlFlowBoundary-opaque-boundary-anchor-holds -->
 <!-- @review pr=400 verdict=carve-out by=S320-peter date=2026-08-04 probe=known-gaps-filing-docs-only-VERIFIED-conformance-run.ts-ExpectedCase-has-no-emitted-content-assertion-key -->
