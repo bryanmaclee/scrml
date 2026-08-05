@@ -85,7 +85,7 @@ import {
 import { renameCellAccessors, CS_PREFIX } from "./cell-accessor-rename.ts";
 
 import { EncodingContext } from "./type-encoding.ts";
-import { collectDerivedVarNames, collectReactiveVarNames, collectSynthCellKeys, stampCompoundDeepSetTargets } from "./reactive-deps.ts";
+import { collectDerivedVarNames, collectReactiveVarNames, collectStructuralDeclNames, collectSynthCellKeys, stampCompoundDeepSetTargets } from "./reactive-deps.ts";
 import { collectTopLevelLogicStatements, containsSql, getNodes } from "./collect.ts";
 import type { CompileContext } from "./context.ts";
 import type { ReachabilityRecord } from "../types/reachability.ts";
@@ -1927,6 +1927,7 @@ export function runCG(input: CgInput): CgOutput {
           errors,
           registry: new BindingRegistry(),
           derivedNames: collectDerivedVarNames(fileAST),
+          structuralDeclNames: collectStructuralDeclNames(fileAST),
           synthCellKeys: collectSynthCellKeys(fileAST),
           analysis: analysis ?? null,
           reachabilityRecord: reachabilityRecordInput,
@@ -2010,6 +2011,7 @@ export function runCG(input: CgInput): CgOutput {
         errors,
         registry,
         derivedNames: collectDerivedVarNames(fileAST),
+        structuralDeclNames: collectStructuralDeclNames(fileAST),
         synthCellKeys: collectSynthCellKeys(fileAST),
         analysis: analysis ?? null,
         usedRuntimeChunks: new Set(['core', 'scope', 'errors', 'transitions']),
@@ -2508,6 +2510,7 @@ export function runCG(input: CgInput): CgOutput {
           errors,
           registry: new BindingRegistry(),
           derivedNames: collectDerivedVarNames(fileAST),
+          structuralDeclNames: collectStructuralDeclNames(fileAST),
           synthCellKeys: collectSynthCellKeys(fileAST),
           analysis: analysis ?? null,
           reachabilityRecord: reachabilityRecordInput,

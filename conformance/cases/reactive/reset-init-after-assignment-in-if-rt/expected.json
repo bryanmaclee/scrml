@@ -1,0 +1,14 @@
+{
+  "id": "reactive-reset-init-after-assignment-in-if-rt",
+  "description": "§6.8 g-assignment-emits-init-set-inverting-reset (RT, control-flow body): a no-`default=` cell `<ticks> = 0` reassigned `@ticks = @ticks + 1` inside a TOP-LEVEL `if (true) { }` body (module-init drives ticks 0->1). reset(@ticks) must restore the declared init (0). A control-flow body is NOT a function body, so its reassignment reaches the reset-init-thunk sidecar; the fix's structural-decl guard reaches it via a module-level fallback. Pre-fix and pre-F1-fix the nested reassignment clobbered the thunk and reset re-incremented to 2.",
+  "language-version": "1.0",
+  "spec": "§6.8.1",
+  "rationale": "§6.8.1: reset(@cell) re-evaluates the cell's declared INIT when `default=` is absent; a reassignment (even nested in a top-level if/for/while body) is not a re-declaration and must not register an init-thunk.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#rs" }],
+    "state": { "ticks": 0 },
+    "domAnchored": [{ "selector": "#t", "text": "T: 0" }]
+  }
+}

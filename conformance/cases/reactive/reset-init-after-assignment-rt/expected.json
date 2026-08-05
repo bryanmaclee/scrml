@@ -1,0 +1,14 @@
+{
+  "id": "reactive-reset-init-after-assignment-rt",
+  "description": "§6.8 g-assignment-emits-init-set-inverting-reset (RT): a no-`default=` cell `<ticks> = 0` with a TOP-LEVEL reassignment `@ticks = @ticks + 1` (module-init drives ticks 0->1). reset(@ticks) must re-evaluate the DECLARED init (0), not the reassignment expression. Pre-fix the reassignment clobbered the decl's init-thunk last-write-wins, so reset re-ran `@ticks + 1` and INCREMENTED to 2; the fix restores 0.",
+  "language-version": "1.0",
+  "spec": "§6.8.1",
+  "rationale": "§6.8.1: when `default=` is absent, reset(@cell) re-evaluates the cell's INIT expression. A reassignment is not a re-declaration, so it must not register an init-thunk; reset restores the declared initial (0), never the assignment's `current + 1`.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#rs" }],
+    "state": { "ticks": 0 },
+    "domAnchored": [{ "selector": "#t", "text": "T: 0" }]
+  }
+}

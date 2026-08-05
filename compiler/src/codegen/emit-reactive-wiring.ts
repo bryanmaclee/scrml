@@ -1,6 +1,6 @@
 import { genVar } from "./var-counter.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
-import { emitLogicNode, nodeListContainsTildeRef } from "./emit-logic.js";
+import { emitLogicNode, nodeListContainsTildeRef, setStructuralDeclNamesForFile } from "./emit-logic.js";
 import { CGError } from "./errors.ts";
 import {
   collectTopLevelLogicStatements,
@@ -12,7 +12,7 @@ import {
   collectServerAuthorityTypes,
   serverVarDeclLoadKind,
 } from "./collect.ts";
-import { collectDerivedVarNames, buildFunctionBodyRegistry, collectReactiveVarNames, type FunctionBodyRegistry } from "./reactive-deps.ts";
+import { collectDerivedVarNames, buildFunctionBodyRegistry, collectReactiveVarNames, collectStructuralDeclNames, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelClientJs, parseChannelReconnect } from "./emit-channel.ts";
 import { emitInitialLoad, emitUnifiedMountHydrate, emitServerAuthorityLoad, emitDeclRhsSqlLoad } from "./emit-sync.ts";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
@@ -272,6 +272,14 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   const lines: string[] = [];
 
   const derivedNames = collectDerivedVarNames(fileAST);
+  // g-assignment-emits-init-set-inverting-reset (§6.8) — structurally-declared
+  // (`<name>`) cell names, so _emitInitThunkSidecar can skip a reset init-thunk
+  // for a `@name =` REASSIGNMENT of such a cell (see emit-logic.ts).
+  const structuralDeclNames = collectStructuralDeclNames(fileAST);
+  // Publish to the module-level fallback so _emitInitThunkSidecar's reassignment
+  // guard fires for a reassignment nested in a top-level control-flow body (whose
+  // hand-picked opts do not carry structuralDeclNames — S239 F1). File-immutable.
+  setStructuralDeclNamesForFile(structuralDeclNames);
   // Bug 61 — dotted synth-cell keys for compound parents in this file. Read
   // from the CompileContext (populated in index.ts via collectSynthCellKeys);
   // threaded into emitOpts so `@<compound>.<synthProp>` reads in top-level logic
@@ -347,8 +355,8 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   // still route. Only spread when non-empty to keep emitOpts lean.
   const synthCellKeysSpread = synthCellKeys.size > 0 ? { synthCellKeys } : {};
   const emitOpts: { derivedNames?: Set<string>; synthCellKeys?: Set<string>; encodingCtx?: typeof encodingCtx; machineBindings?: typeof machineBindings; engineBindings?: typeof engineBindings; mapVarNames?: Set<string>; setVarNames?: Set<string>; requestIds?: Set<string>; orderedMapVarNames?: Set<string>; engineVarNames?: Set<string>; enginesWithHooks?: Set<string>; enginesWithOnTimeout?: Set<string>; enginesWithIdleWatchdog?: Set<string>; enginesWithInternalRules?: Set<string>; enginesWithHistory?: Set<string>; enginesWithMessageArms?: Set<string>; engineMessageVariants?: Map<string, Set<string>>; fnBodyRegistry?: FunctionBodyRegistry; typeRegistry?: Map<string, any> | null; errors?: typeof errors } = derivedNames.size > 0
-    ? { derivedNames, ...synthCellKeysSpread, encodingCtx, fnBodyRegistry, errors, ...(typeRegistry ? { typeRegistry } : {}), ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(mapVarNames.size > 0 ? { mapVarNames } : {}), ...(setVarNames.size > 0 ? { setVarNames } : {}), ...(requestIds.size > 0 ? { requestIds } : {}), ...(orderedMapVarNames.size > 0 ? { orderedMapVarNames } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}), ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}), ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}), ...(enginesWithIdleWatchdog.size > 0 ? { enginesWithIdleWatchdog } : {}), ...(enginesWithInternalRules.size > 0 ? { enginesWithInternalRules } : {}), ...(enginesWithHistory.size > 0 ? { enginesWithHistory } : {}), ...(enginesWithMessageArms.size > 0 ? { enginesWithMessageArms } : {}), ...(engineMessageVariants.size > 0 ? { engineMessageVariants } : {}) }
-    : { ...synthCellKeysSpread, encodingCtx, fnBodyRegistry, errors, ...(typeRegistry ? { typeRegistry } : {}), ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(mapVarNames.size > 0 ? { mapVarNames } : {}), ...(setVarNames.size > 0 ? { setVarNames } : {}), ...(requestIds.size > 0 ? { requestIds } : {}), ...(orderedMapVarNames.size > 0 ? { orderedMapVarNames } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}), ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}), ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}), ...(enginesWithIdleWatchdog.size > 0 ? { enginesWithIdleWatchdog } : {}), ...(enginesWithInternalRules.size > 0 ? { enginesWithInternalRules } : {}), ...(enginesWithHistory.size > 0 ? { enginesWithHistory } : {}), ...(enginesWithMessageArms.size > 0 ? { enginesWithMessageArms } : {}), ...(engineMessageVariants.size > 0 ? { engineMessageVariants } : {}) };
+    ? { derivedNames, ...(structuralDeclNames.size > 0 ? { structuralDeclNames } : {}), ...synthCellKeysSpread, encodingCtx, fnBodyRegistry, errors, ...(typeRegistry ? { typeRegistry } : {}), ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(mapVarNames.size > 0 ? { mapVarNames } : {}), ...(setVarNames.size > 0 ? { setVarNames } : {}), ...(requestIds.size > 0 ? { requestIds } : {}), ...(orderedMapVarNames.size > 0 ? { orderedMapVarNames } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}), ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}), ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}), ...(enginesWithIdleWatchdog.size > 0 ? { enginesWithIdleWatchdog } : {}), ...(enginesWithInternalRules.size > 0 ? { enginesWithInternalRules } : {}), ...(enginesWithHistory.size > 0 ? { enginesWithHistory } : {}), ...(enginesWithMessageArms.size > 0 ? { enginesWithMessageArms } : {}), ...(engineMessageVariants.size > 0 ? { engineMessageVariants } : {}) }
+    : { ...(structuralDeclNames.size > 0 ? { structuralDeclNames } : {}), ...synthCellKeysSpread, encodingCtx, fnBodyRegistry, errors, ...(typeRegistry ? { typeRegistry } : {}), ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(mapVarNames.size > 0 ? { mapVarNames } : {}), ...(setVarNames.size > 0 ? { setVarNames } : {}), ...(requestIds.size > 0 ? { requestIds } : {}), ...(orderedMapVarNames.size > 0 ? { orderedMapVarNames } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}), ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}), ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}), ...(enginesWithIdleWatchdog.size > 0 ? { enginesWithIdleWatchdog } : {}), ...(enginesWithInternalRules.size > 0 ? { enginesWithInternalRules } : {}), ...(enginesWithHistory.size > 0 ? { enginesWithHistory } : {}), ...(enginesWithMessageArms.size > 0 ? { enginesWithMessageArms } : {}), ...(engineMessageVariants.size > 0 ? { engineMessageVariants } : {}) };
 
   // Step 4a: Generate transition lookup tables for enums with transitions{} and machines (§51.5).
   // These must be emitted BEFORE top-level logic statements because state-decl

@@ -295,6 +295,68 @@ export function collectDerivedVarNames(fileAST: Record<string, unknown>): Set<st
 }
 
 // ---------------------------------------------------------------------------
+// collectStructuralDeclNames (§6.8 — g-assignment-emits-init-set-inverting-reset)
+// ---------------------------------------------------------------------------
+
+/**
+ * Walks logic blocks for STRUCTURAL cell declarations — `state-decl` nodes with
+ * `structuralForm === true` (the `<name> = expr` angle-bracket form) — and
+ * returns their names.
+ *
+ * Used by `emit-logic.ts` `_emitInitThunkSidecar` to tell a `@name = expr`
+ * REASSIGNMENT (name IS in this set → skip the reset init-thunk, which would
+ * otherwise clobber the decl's thunk last-write-wins) from an IMPLICIT `@`-form
+ * declaration (name NOT in this set, e.g. an SSE/channel bind `@latest =
+ * ticks()` → keep the thunk). The ast-builder marks `<name>` decls
+ * `structuralForm:true` and both `@name =` reassignments and `const`/derived
+ * decls `structuralForm:false` (ast-builder.js: the Phase A1a Step 4 @-form and
+ * the derived-const paths), so the true-set is exactly the genuine reassignment
+ * TARGETS.
+ *
+ * @param fileAST
+ * @returns set of structurally-declared cell names (without @ prefix)
+ */
+export function collectStructuralDeclNames(fileAST: Record<string, unknown>): Set<string> {
+  const names = new Set<string>();
+  const nodes = getNodes(fileAST);
+
+  function visit(nodeList: unknown[]): void {
+    if (!Array.isArray(nodeList)) return;
+    for (const node of nodeList) {
+      if (!node || typeof node !== "object") continue;
+      const n = node as ASTNode;
+      if (n.kind === "state-decl" && (n as any).structuralForm === true && n.name) {
+        names.add(n.name as string);
+      }
+      if (n.kind === "logic" && Array.isArray(n.body)) {
+        visit(n.body as unknown[]);
+      }
+      if (Array.isArray(n.children)) {
+        visit(n.children as unknown[]);
+      }
+      if (n.kind === "match-stmt" && Array.isArray((n as any).body)) {
+        visit((n as any).body as unknown[]);
+      }
+      if (n.kind === "if-stmt") {
+        if (Array.isArray((n as any).consequent)) visit((n as any).consequent as unknown[]);
+        if (Array.isArray((n as any).alternate)) visit((n as any).alternate as unknown[]);
+      }
+      if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray((n as any).body)) {
+        visit((n as any).body as unknown[]);
+      }
+      if (n.kind === "try-stmt") {
+        if (Array.isArray((n as any).body)) visit((n as any).body as unknown[]);
+        if ((n as any).catchNode && Array.isArray((n as any).catchNode.body)) visit((n as any).catchNode.body as unknown[]);
+        if (Array.isArray((n as any).finallyBody)) visit((n as any).finallyBody as unknown[]);
+      }
+    }
+  }
+
+  visit(nodes as unknown[]);
+  return names;
+}
+
+// ---------------------------------------------------------------------------
 // collectMapVarNames (§59 — value-native maps, D4)
 // ---------------------------------------------------------------------------
 
