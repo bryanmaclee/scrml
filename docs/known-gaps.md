@@ -30,11 +30,22 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 19 |
+| HIGH | 20 |
 | MED | 112 |
 | LOW | 49 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-rename-cell-accessors-swallows-parse-error-and-silently-un-namespaces-the-chunk — a non-parsing emitted body makes `renameCellAccessors` return it UNCHANGED instead of erroring, so `addCellScopePrologue` emits nothing and every cell silently reverts to an un-namespaced global — compiler exit 0 — `NEW S319-bryan (surfaced by the S239 adversarial pass on the U1 delta, regression lens); HIGH; open`
+<!-- @gap id=g-rename-cell-accessors-swallows-parse-error-and-silently-un-namespaces-the-chunk sev=HIGH status=open locus=compiler/src/codegen/cell-accessor-rename.ts prov=rationale:a-swallowed-parse-error-converts-one-codegen-defect-into-two-independent-silent-failures -->
+
+**This is a failure AMPLIFIER, and it is independent of whatever produced the unparseable body.** Filed separately on purpose: it is not the U1 stranded-`await` defect, it is the mechanism that made that defect cost twice.
+
+**Observed (reviewer-reproduced on the U1 delta, PA-recorded not PA-re-derived — re-verify before fixing):** a stranded `await` made `samples/admin-panel.client.js` unparseable. `renameCellAccessors` (`compiler/src/codegen/cell-accessor-rename.ts`) responds to a body it cannot parse by **returning it unchanged rather than failing**, so `addCellScopePrologue` then emits nothing. The file went from **58 `_scrml_cs_*` references to 0**, the `// --- chunk cell scope (…) ---` prologue vanished entirely, and **every cell reverted to the un-namespaced global** — the exact collision class the chunk-namespacing arc (S282/S286, adopter #27) was built to close. **Compiler exit code 0, warnings only.**
+
+**Why it earns HIGH on its own.** Two independent failures stack behind ONE swallowed parse error, and the second is invisible: the bundle is already broken, so nobody looks past it — yet the un-namespacing is a *distinct* regression that would also fire for any FUTURE cause of an unparseable body, with no diagnostic on either. A pass that silently no-ops on malformed input converts a loud, fixable codegen bug into a quiet correctness regression in an unrelated subsystem.
+
+**Direction (not a ruling — needs the §8 classification done properly):** the pass should **fail closed** — if the body does not parse, that is a compiler defect and it should say so, rather than degrade to identity. Note the interaction: `validateEmit` already catches the unparseable bundle downstream, so the fix is arguably about ORDER and ATTRIBUTION (surface the namespacing failure at its own site) rather than about adding a second detector. **Not scoped, not dispatched.**
 
 ### g-session-ambient-unlowered-trust-boundary-inversion — `@session.<field>` lowers to `_scrml_body["session"].<field>`, so a CLIENT-SUPPLIED request-body field is read as identity and written to identity columns — compile exit 0, zero diagnostics — `NEW S319-bryan (routed OUT-OF-SCOPE by the dpa-021 DD; PA-VERIFIED BY EMISSION, not taken on the dPA's report); HIGH; open`
 <!-- @gap id=g-session-ambient-unlowered-trust-boundary-inversion sev=HIGH status=open locus=compiler/src/codegen/rewrite.ts:2833 prov=dd:gh357-session-binding-accessor-shape-2026-08-04 -->
