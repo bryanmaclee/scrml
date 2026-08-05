@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 23 |
+| HIGH | 22 |
 | MED | 114 |
 | LOW | 49 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -4848,7 +4848,7 @@ scrml-site migrated the 98-page wiki into its own repo (`6554ce7`) and asked whe
 > - **Bullet 1 — shell-less nested project: REPRODUCED, and it is the real class.** A two-file fixture (`pages/top.scrml` + `pages/a/b/deep.scrml`, no shell) compiles **fully green, zero diagnostics**, and `dist/a/b/deep.html` emits a bare `<script src="scrml-runtime.<hash>.js">` resolving to `dist/a/b/…` while the runtime sits at `dist/`. Only runtime tag on the page ⇒ **100% DOA**, and the shape is fully supported with no lint.
 > - **Bullet 2 — "shell-composed, 24 of 25 HTML files carry a dead bare runtime tag": STALE.** Closed as collateral of `ef8ff508` (#244): the whole-run strip now eats the bare tag and `index.ts:2858-2875` re-adds it with `upToRoot`. Current census is **4 of 25, not 24 of 25** — and those 4 arrive via bullet 1's mechanism, not bullet 2's: they are nested `channels/*.html` with **no `<page>` opener** (`// PURE-CHANNEL-FILE — §38.12.6`), so `index.ts:2640`'s `if (!hasPageOpener) continue;` skips composition and they fall through to the own-document path at `:2233`. **Honest blast radius: nobody navigates to `/channels/load-events`, so those 4 are inert byproducts.**
 > - **Restated live class:** *the own-document (non-composed) emit path at `index.ts:2233` never prefixes the runtime tag; reached by any nested file that is not a composed `<page>` — i.e. an entire shell-less `pages/` project, plus non-`<page>` nested files in a shell project.*
-> - **Fix-interaction warning:** `:2871` already applies `upToRoot` to whatever `src` it finds, so prefixing at `:2233` **without coordinating the two produces `../../`** on composed pages. <!-- @gap id=g-runtime-script-tag-not-depth-prefixed sev=HIGH status=open -->
+> - **Fix-interaction warning:** `:2871` already applies `upToRoot` to whatever `src` it finds, so prefixing at `:2233` **without coordinating the two produces `../../`** on composed pages. <!-- @gap id=g-runtime-script-tag-not-depth-prefixed sev=HIGH status=resolved -->
 
 ### G-UPTOROOT-VS-DISTREL-ANCHOR-MISMATCH — the composition `upToRoot` and the dist-relative path anchor differently and disagree when the entry is not at the output base — `NEW S280 (S239 finder B); MED`
 Two path derivations model the same dist layout from different anchors: `toDistRel` (`index.ts` `computeDependencyClientScripts`) uses `relative(outputBaseDir, …)` — which is what `pathFor`/`stripPagesPrefix` use, i.e. the REAL dist layout; the per-page composition `upToRoot` (`index.ts:2311`) uses `relative(dirname(entryFilePath), dirname(filePath))`. They coincide only when the entry sits at `outputBaseDir` or `outputBaseDir/pages`.
