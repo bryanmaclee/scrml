@@ -406,6 +406,18 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     // (info; the hydration mechanism works regardless — the cell IS server-owned).
     // Aggregate 73 -> 74.
     "W-ENGINE-SERVER-SOURCE-NOT-AUTHORITATIVE": 1,
+    // GH #409 (adopter assetManagement) — W-IF-IN-EACH, a NEW build warning: a
+    // per-row `if=` on a NESTED (non-item-root) element inside `<each>` is a
+    // create-time append gate, NOT reactive on a same-key reconcile (§17.1; only
+    // the SOLE-item-root `if=` is reactive). The reference app's list-rendered
+    // card components (driver-card / invoice-card / customer-card, inlined into
+    // per-row `<each>` bodies) carry many item-referencing nested `if=` status
+    // pills → 37 real create-time gates surface here across the emit-per-route
+    // chunks. These are genuine latent staleness sites (exactly the "same bug in
+    // a second form, no build-time signal" class the issue was filed on), not a
+    // regression; the reactive fix for the nested case is deferred (§17.1, routed
+    // to bryan). Aggregate 43 -> 80 (this warning did not exist before #409).
+    "W-IF-IN-EACH": 37,
     // g-interp-in-raw-content (ss11 item 1, SPEC §4.17): the new
     // W-INTERP-IN-RAW-CONTENT warning-lint fires on the three `${...}` interpolations
     // authored inside `<code>` raw-content bodies — these ship the LITERAL

@@ -918,6 +918,46 @@ function emitEachInterpExprToJs(
   }
 }
 
+// GH #409 — does a per-row `if=` condition reference the iteration item? Only an
+// item-referencing condition is the W-IF-IN-EACH footgun: its per-row truth value
+// depends on data that a same-key reconcile mutates, yet the nested `if=` gate is
+// create-time only. A condition rooted purely in OUTER state re-evaluates through
+// the each render fn's collection effect, so it is deliberately NOT warned.
+//
+// `itemNames` = every in-scope item binding: the `as X` iter var PLUS any
+// `as (k, v)` destructure names (a map/set entry destructure gives a synthetic
+// iter var that never appears in source, so the destructure names are the only
+// user-visible item handle — S239 FN-3). A match is `@.` (contextual item sigil)
+// or any item name as a STANDALONE identifier (not a `.member` suffix, not a
+// substring of a longer name). Quoted string literals are stripped FIRST so an
+// item-name-shaped WORD or an `@.` SUBSTRING inside a string does not false-fire
+// (S239 FP-1 / FP-2 — e.g. `if=(@label == "it works")`, `"user@.x.com"`).
+// GH #409 — the in-scope item binding names for the current each item body: the
+// `as X` iter var plus any `as (k, v)` destructure names (the reconcile ctx is
+// pushed for the item render, so it is live at the per-item `if=` site).
+function _eachItemBindingNames(iterVarName: string): string[] {
+  const rec = currentEachReconcileCtx();
+  const destr = rec && rec.iterVar === iterVarName ? rec.destructure : null;
+  return destr ? [iterVarName, destr[0], destr[1]] : [iterVarName];
+}
+
+function _eachIfCondReferencesItem(rawCond: string, itemNames: string[]): boolean {
+  if (!rawCond) return false;
+  // Strip "…" and '…' string literals (escape-aware) so their interiors are
+  // never scanned for item refs. Template literals are left intact — their
+  // `${…}` interiors legitimately reference state.
+  const code = rawCond
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''");
+  if (code.includes("@.")) return true;
+  for (const name of itemNames) {
+    if (!name) continue;
+    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`(^|[^\\w$.])${esc}(?![\\w$])`).test(code)) return true;
+  }
+  return false;
+}
+
 function renderTemplateChildToJs(
   child: any,
   iterVarName: string,
@@ -1047,13 +1087,15 @@ function renderTemplateChildToJs(
     // element, then gate its append on the lowered predicate below (the each
     // render-fn re-runs on collection change, so the conditional re-evaluates).
     let ifCond: string | null = null;
+    let ifRaw = "";        // GH #409 — pre-lowering condition text (item-ref detection)
+    let ifSpan: any = null; // GH #409 — span for the W-IF-IN-EACH warning
     for (const attr of attrs) {
       if (attr && String(attr.name ?? "") === "if") {
         const v = attr.value;
         const raw = v && v.kind === "expr" ? String(v.raw ?? "")
           : v && v.kind === "variable-ref" ? String(v.name ?? "")
           : v && v.kind === "string-literal" ? JSON.stringify(String(v.value ?? "")) : "";
-        if (raw) ifCond = lowerEachExpr(raw, iterVarName);
+        if (raw) { ifCond = lowerEachExpr(raw, iterVarName); ifRaw = raw; ifSpan = attr.span ?? null; }
         continue;                                 // conditional, not a setAttribute
       }
       renderTemplateAttrToJs(attr, iterVarName, _iterIdxName, elVar, lines, indent, engineCtx, child);
@@ -1141,6 +1183,31 @@ function renderTemplateChildToJs(
         // (W-EACH-PERITEM-IF-MULTIROOT-DEFERRED, docs/known-gaps.md).
         if (isItemRoot) {
           lines.push(`${indent}// W-EACH-PERITEM-IF-MULTIROOT-DEFERRED: multi-root item + per-row if= — create-time gate (reactive swap would leave _scrml_group stale). See docs/known-gaps.md.`);
+        } else if (_eachIfCondReferencesItem(ifRaw, _eachItemBindingNames(iterVarName))) {
+          // g-each-nested-peritem-if-not-reactive (GH #409, adopter assetManagement)
+          // — a per-row `if=` on a NESTED (non-item-root) element is a CREATE-TIME
+          // append gate: it is evaluated ONCE when the row is built and never
+          // re-runs on a same-key reconcile, so an ITEM-data-driven condition
+          // silently goes stale (the element is never re-added/removed). Only the
+          // SOLE-item-root `if=` is reactive today (§17.1). The sibling class/text
+          // bindings ARE reactive, which makes the frozen `if=` a silent footgun
+          // with no other build-time signal — surface it LOUDLY at compile.
+          // Scoped to item-referencing conditions: an outer-state-only `if=`
+          // re-evaluates through the each render fn's collection effect, so it is
+          // not this footgun. The reactive fix for the nested case is deferred
+          // §17.1 structural-reactivity design (see docs/known-gaps.md).
+          _eachBindSupportCtx?.errors?.push(new CGError(
+            "W-IF-IN-EACH",
+            `W-IF-IN-EACH: \`if=\` on a nested element inside \`<each>\` is evaluated ONCE when the ` +
+            `row is created and is NOT reactive — when the row's own data changes under the same key, ` +
+            `the element is never re-added or removed and silently goes stale. Only a per-row \`if=\` on ` +
+            `the each body's SOLE root element is reactive today (§17.1). For a per-row conditional, drive ` +
+            `visibility with a reactive \`class\` toggle instead (e.g. \`class=(cond ? "" : "hide")\` with a ` +
+            `\`.hide { display: none }\` rule). See SPEC §17.1.`,
+            ifSpan ?? { start: 0, end: 0 },
+            "warning",
+          ));
+          lines.push(`${indent}// each: nested per-row if= → create-time gate, NOT reactive (W-IF-IN-EACH, GH #409)`);
         }
         lines.push(`${indent}if (${ifCond}) ${fragmentVar}.appendChild(${elVar});`);
       }
