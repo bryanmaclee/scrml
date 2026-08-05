@@ -453,9 +453,17 @@ export interface EmitExprContext {
    * `emit-server.ts` (`async function <name>(<params>) { ... }`) and the
    * peer's async result is awaited. NULL/empty → no server-fn composition in
    * scope (calls lower to a bare invocation, the pre-fix behavior). Threaded
-   * from `EmitLogicOpts.serverFnNames` via `_makeExprCtx`. The CLIENT calls a
-   * server fn through the emit-functions.ts fetch stub instead, so this never
-   * fires for `mode === "client"`.
+   * from `EmitLogicOpts.serverFnNames` via `_makeExprCtx`.
+   *
+   * U1 (dpa-020) — this set is now ALSO populated in `mode === "client"`, where
+   * it names the file's SERVER-boundary fns so `emitCall` can `await` the RPC at
+   * its call site (`isClientServerFnCall`). The two modes read the same set for
+   * two different lowerings — server: an in-process peer callable; client: a
+   * fetch stub the post-emit rename installs — so EVERY consumer must state
+   * which mode it means. The existing ones all do (`isAwaitedPeerCall`,
+   * `isDispatchPeerCall`, `combinatorIsAsyncName` and the `emitCall` peer branch
+   * each guard `mode === "server"` explicitly); a NEW consumer that reads this
+   * field without a mode guard will silently change client output.
    */
   serverFnNames?: Set<string> | null;
   /**
@@ -1624,6 +1632,21 @@ function combinatorIsAsyncName(name: string, ctx: EmitExprContext): boolean {
   if (isStdlibAsyncCallee(name, ctx)) return true;
   if (ctx.mode === "server" && ctx.serverFnNames != null && ctx.serverFnNames.has(name)) return true;
   if (ctx.mode === "client" && ctx.clientAsyncFnNames != null && ctx.clientAsyncFnNames.has(name)) return true;
+  // U1 FIX ROUND (F2/F3) — the CLIENT server-fn surface. A client→server RPC is
+  // async exactly as a transitively-async client peer is, so the two lines above
+  // were asymmetric: `setTimeout(() => peer(), 100)` compiled and lowered, while
+  // the identical shape with a SERVER fn hard-errored
+  // `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` — a diagnostic whose own message text
+  // disclaims that shape ("Fire-and-forget scheduler callbacks … are handled
+  // automatically; this error is only for positions whose value is actually
+  // consumed"). The `KNOWN_DISCARD_HOF` carve-out and the async-combinator
+  // lowering could not see the callee as async, so neither carve-out fired.
+  //
+  // Measured against BASE this is NOT a widening: it makes shapes that U1 had
+  // started REJECTING compile again, and routes `.map(x => serverFn(x))` into the
+  // `await _scrml_mapAsync(…)` lowering that already exists for client peers.
+  // Scoped to this disjunct only.
+  if (ctx.mode === "client" && ctx.serverFnNames != null && ctx.serverFnNames.has(name)) return true;
   return false;
 }
 
@@ -1673,6 +1696,72 @@ function isAwaitedClientAsyncCall(node: ExprNode, ctx: EmitExprContext): boolean
 }
 
 /**
+ * U1 (dpa-020) — is this a CLIENT-mode call to a SERVER-boundary function?
+ *
+ * The shared gate for the client server-fn auto-await. `emitCall` consumes it to
+ * decide the `await` (honouring `peerAwaitable` itself, so it can fail closed);
+ * `isAwaitedClientServerFnCall` adds the position check for `emitReceiver`. ONE
+ * predicate, two consumers — the lowering and the receiver wrap cannot drift.
+ *
+ * §13.2 is POSITION-INVARIANT: `await` belongs at EVERY server-call site. At emit
+ * time the callee is still the user's name (`loadRows`); `emit-client.ts`'s
+ * whole-buffer `post-fn-name-mangle` rewrites it to the fetch stub
+ * (`_scrml_fetch_loadRows_4`) AFTER every emitter has run. So this branch must key
+ * on the SOURCE name via `ctx.serverFnNames`, not on the emitted stub name.
+ *
+ * ── The `clientAsyncBody` gate is what makes this safe ──────────────────────────
+ * A stranded `await` in a non-async host is a WHOLE-BUNDLE SyntaxError, so the
+ * branch fires ONLY inside a host the compiler has already coloured `async`.
+ * That gate is not an independent judgement — it is the SAME structural callee
+ * walk that decides the `async` keyword:
+ *
+ *   emit-functions.ts `_fnIsAsync` = `_clientAsyncFnNames.has(name)`
+ *     ← computeAsyncFnNames(..., _serverFnNames)      (emit-library-shared.ts)
+ *     ← `callsServerFn(callees)` seeds a client fn that structurally calls a
+ *        server fn as async
+ *     ← `collectCalleeIdents(fn.body, …)`
+ *
+ * and `clientAsyncBody` is threaded from that same `_fnIsAsync`. So:
+ *   walk SEES the server callee  → host is `async`  AND this branch may fire;
+ *   walk MISSES the server callee → host is sync    AND this branch cannot fire.
+ * The gate can only ever SUPPRESS an await (status quo, the pre-existing silent
+ * bug), never STRAND one. A shape the structural walk cannot see therefore
+ * degrades to today's behaviour instead of breaking the bundle.
+ *
+ * Not gated on `clientAsyncFnNames`: server fns are deliberately excluded from
+ * that set (`computeAsyncFnNames` uses `serverFnNames` as a seed TRIGGER and does
+ * not add it to the result), and widening it would widen `combinatorIsAsyncName`
+ * — a shared predicate this change must not touch.
+ */
+function isClientServerFnCall(node: ExprNode, ctx: EmitExprContext): boolean {
+  if (node.kind !== "call") return false;
+  const call = node as CallExpr;
+  if (call.optional) return false;
+  if (ctx.mode !== "client") return false;
+  // Host-async gate — see the derivation above.
+  if (ctx.clientAsyncBody !== true) return false;
+  if (call.callee.kind !== "ident" || typeof (call.callee as { name?: unknown }).name !== "string") {
+    return false;
+  }
+  const name = (call.callee as { name: string }).name;
+  if (ctx.serverFnNames == null || !ctx.serverFnNames.has(name)) return false;
+  // A local of the same name shadows the server fn — it is the local, not an RPC.
+  return !(ctx.declaredNames != null && ctx.declaredNames.has(name));
+}
+
+/**
+ * U1 (dpa-020) — mirror of `isAwaitedPeerCall` for the CLIENT server-fn surface.
+ * A server call used as a RECEIVER (`loadRows().length`) must be paren-wrapped
+ * `(await loadRows()).length`: `await` is an await-expression (unary precedence),
+ * LOOSER than member/index/call, so an unwrapped `await loadRows().length` reads
+ * `.length` off the pending Promise FIRST and awaits `undefined` — the exact
+ * silent-wrong shape §13.2 exists to prevent.
+ */
+function isAwaitedClientServerFnCall(node: ExprNode, ctx: EmitExprContext): boolean {
+  return isClientServerFnCall(node, ctx) && ctx.peerAwaitable !== false;
+}
+
+/**
  * Phase-2 colorless-async (F1 — S239 review) — does this call node lower to an
  * `await _scrml_<method>Async(...)` combinator form? Mirror of `isAwaitedPeerCall`
  * for the combinator surface: it must satisfy the EXACT gate `emitCall`'s
@@ -1712,10 +1801,13 @@ function emitReceiver(node: ExprNode, ctx: EmitExprContext): string {
   // CLIENT transitively-async peer form (`await middle(...)`) needs it too.
   // Phase-2 F1 — the awaited COMBINATOR form (`await _scrml_<m>Async(...)`) needs
   // the SAME wrap, else `hs.filter(cb).length` → `await (promise.length)`.
+  // U1 (dpa-020) — the CLIENT SERVER-FN form (`await loadRows()`) needs it too,
+  // else `loadRows().length` → `await (promise.length)` → `await undefined`.
   if (
     isAwaitedPeerCall(node, ctx) ||
     isAwaitedStdlibAsyncCall(node, ctx) ||
     isAwaitedClientAsyncCall(node, ctx) ||
+    isAwaitedClientServerFnCall(node, ctx) ||
     isAwaitedCombinatorCall(node, ctx)
   ) return `(${s})`;
   return receiverNeedsParens(node) ? `(${s})` : s;
@@ -3091,11 +3183,26 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   // peer branch above: a client fn calling a LOCAL CLIENT peer that is
   // transitively async (`clientAsyncFnNames`) must `await` it, else the peer's
   // Promise leaks (`const ok = middle(obj)` where `middle` awaits an async
-  // `leaf` yields `undefined`). A server-fn call from the client goes through
-  // the emit-functions fetch stub (already awaited), never here — the two sets
-  // are disjoint by construction (server fns are excluded from clientAsyncFnNames).
+  // `leaf` yields `undefined`). The two sets ARE disjoint (server fns are
+  // excluded from clientAsyncFnNames), so a SERVER-fn call never matches here —
+  // it is handled by the sibling U1 branch immediately below.
   // A local of the same name shadows the peer. peerAwaitable === false (sync
   // callback / param default) records the site for the fail-closed drain.
+  //
+  // CORRECTION (U1, dpa-020) — this comment previously claimed a client
+  // server-fn call "goes through the emit-functions fetch stub (already
+  // awaited), never here". The disjointness half is true; the "already awaited"
+  // half was FALSE and encoded the bug. The fetch stub is `async` but the CALL
+  // SITE is emitted bare: the stub NAME does not exist yet at emit time (the
+  // whole-buffer `post-fn-name-mangle` in emit-client.ts renames `loadRows` →
+  // `_scrml_fetch_loadRows_4` AFTER every emitter runs), so the emitter could
+  // not see it was emitting a server call. The `await` was instead retrofitted
+  // downstream by post-hoc string/AST injectors — which reach statement position
+  // only, and therefore MISS receiver-tail (`loadRows().length`), nested-argument
+  // (`pick(loadRows())`), and the whole `emitFnShortcutBody` path (a return-typed
+  // `function`, which bypasses scheduleStatements entirely). Each missed
+  // position is silent: a `.field` read off a pending Promise is `undefined`,
+  // exit 0, no diagnostic. That is the gap-per-position machine dpa-020 names.
   if (
     ctx.mode === "client" &&
     !node.optional &&
@@ -3107,6 +3214,38 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   ) {
     if (ctx.peerAwaitable === false) {
       if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name, span: node.span });
+      return `${callee}(${args})`;
+    }
+    return `await ${callee}(${args})`;
+  }
+
+  // U1 (dpa-020) — THE CLIENT SERVER-FN CALL. The sibling of the three await
+  // branches above, on the one async surface that had no emitter branch: a
+  // CLIENT-mode call to a SERVER-boundary fn. §13.2 requires `await` at EVERY
+  // such call site; awaiting HERE — in the emitter, at the choke point every
+  // position already flows through — replaces retrofitting it downstream per
+  // position, which is what manufactured one silent gap per position.
+  //
+  // `isClientServerFnCall` carries the gate (client mode + an `async` host via
+  // `clientAsyncBody` + unshadowed ident in `ctx.serverFnNames`); see its
+  // doc-comment for why that gate can only suppress an await, never strand one.
+  // `emitReceiver` consumes the SAME predicate so a receiver-position call is
+  // paren-wrapped `(await loadRows()).length` rather than mis-parsed.
+  //
+  // The emitted callee is still the SOURCE name; emit-client.ts's
+  // `post-fn-name-mangle` rewrites it to the fetch stub afterwards. Its regex
+  // matches a name followed by `(`, which `await loadRows()` still satisfies,
+  // so the rename lands on `await _scrml_fetch_loadRows_4()` as intended.
+  //
+  // FAIL-CLOSED — `peerAwaitable === false` marks a position where `await` is
+  // ILLEGAL (a synchronous `.map`/`.filter` callback body, or ANY parameter
+  // default, where `await` is illegal even inside an async fn). Emit bare and
+  // RECORD the site, exactly as the server-peer and client-peer branches do:
+  // a bare server call hands back an unawaited Promise, so the recorded site
+  // drives the fail-closed diagnostic rather than shipping a silent leak.
+  if (isClientServerFnCall(node, ctx)) {
+    if (ctx.peerAwaitable === false) {
+      if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name as string, span: node.span });
       return `${callee}(${args})`;
     }
     return `await ${callee}(${args})`;

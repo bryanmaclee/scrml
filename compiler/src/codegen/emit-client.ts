@@ -3112,6 +3112,26 @@ export function generateClientJs(ctx: CompileContext): string {
         // the cell, fail-OPEN §13.2; g-onmount-...-escape-hatch-string-path). The
         // AST pass (injectServerCallAwaitsViaAst) deliberately SKIPS this direct
         // value expecting THIS matcher to lift it, so a miss here is the only guard.
+        //
+        // U1 (dpa-020) — ABSORB an emitter-supplied `await`. emit-expr's
+        // `isClientServerFnCall` now awaits a client server call AT THE CALL SITE,
+        // so inside an async client fn this value arrives as `await <stub>(…)`
+        // rather than the bare `<stub>(…)` this matcher was written against.
+        // Without this skip the matcher missed, and the site silently LOST the
+        // `.catch(… → _scrml_error_boundary_log)` arm below — reintroducing the
+        // exact browser-level `unhandledrejection` silent drop that ss32-item-1
+        // added it to kill (the enclosing handler calls the fn WITHOUT a `.catch`).
+        // Consuming the prefix keeps THIS pass the owner of the reactive-set-RHS
+        // position and re-emits its canonical IIFE form, so output is
+        // BYTE-IDENTICAL to pre-U1 for this shape — which is exactly what U1's
+        // definition of done requires of the no-tail case. U1's gain is in the
+        // positions this pass never reached (receiver-tail, nested-argument, and
+        // the `emitFnShortcutBody` path).
+        if (clientCode.slice(valStart, valStart + 5) === "await" &&
+            /\s/.test(clientCode[valStart + 5] ?? "")) {
+          valStart += 5;
+          while (valStart < clientCode.length && /\s/.test(clientCode[valStart])) valStart++;
+        }
         if (clientCode.slice(valStart, valStart + mangledName.length) !== mangledName) {
           parts.push(clientCode.slice(i, setIdx + setHead.length));
           i = setIdx + setHead.length;
