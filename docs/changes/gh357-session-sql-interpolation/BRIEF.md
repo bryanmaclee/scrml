@@ -1,3 +1,25 @@
+> # ⚠ REVISE BEFORE DISPATCH — dpa-021 RATIFIED S319
+>
+> **Direction B stands; the stated FORM does not, and this brief is missing a BLOCKER.**
+>
+> 1. **One raw prologue binding CANNOT serve both accessor forms.** `session` is an object whose
+>    `.get()` reads an *inner* record, so a naive bind converts a method call into a raw property read at
+>    the wrong level — and with a request-controlled key that discloses the live session id and the full
+>    record **including `csrfToken`** at HTTP 200. The hazard is a **confidentiality break**, not
+>    `semantics-changed`. Use a **Proxy** binding.
+> 2. **BLOCKER absent from this brief:** `_anySessionBuiltin` matches AST `member`/`index` nodes, but a
+>    `?{}` carries its query as a **string** — an interpolation-only `session` use is structurally
+>    invisible, so a binding gated on today's detection **would never be emitted and #357 would stay
+>    open**. Fix precedent in the same file: `astSqlQueryUsesCurrentUser`.
+> 3. **KEEP the AST lowering.** Three security gates match the literal string `_scrml_req._scrml_sess.`;
+>    retiring it for a bare binding silently blinds all three.
+> 4. **B needs FOUR parts, not one.** Corrections: the hazard is BOTH forms (`session.<customKey>` too);
+>    corpus is 7 files / 2 real uses; the path is `compiler/src/codegen/rewrite.ts`.
+>
+> **Adjacent HIGH, NOT fixed by B — do not conflate:** `g-session-ambient-unlowered-trust-boundary-inversion`.
+
+---
+
 # BRIEF — GH #357: bind `session` in the server handler prologue (direction B)
 
 change-id: `gh357-session-sql-interpolation`

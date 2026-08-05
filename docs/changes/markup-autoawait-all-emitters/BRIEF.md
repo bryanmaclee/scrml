@@ -1,3 +1,24 @@
+> # ⛔ DO NOT DISPATCH AS WRITTEN — dpa-020 RATIFIED S319
+>
+> **This brief is WRONG on its central mechanism.** It targets Group B only and mandates the #391
+> `clientAsyncFnNames` threading pattern. Per the ratified `dpa-020` verdict, **threading will NOT fix
+> the server-fn case at all** — the branch it feeds *does not exist* for client server fns. As written
+> it buys the 4 markup sites for cross-module async imports and **leaves every server-fn shape bare in
+> the same four emitters**.
+>
+> **Root cause (ratified):** `emit-expr.ts` `emitCall` has four sibling auto-await branches and **no
+> `mode === "client" && ctx.serverFnNames` branch**; the client server-fn rename is a whole-buffer regex
+> post-pass that runs *after* every emitter, so at emit time the compiler cannot see it is emitting a
+> server call.
+>
+> **Re-author against the ratified 3-unit plan (U1/U2/U3)** in
+> `scrml-support/docs/deep-dives/autoawait-choke-point-vs-heterogeneous-2026-08-04.md`.
+> **Precondition, non-negotiable:** a stranded `await` is a whole-bundle SyntaxError — every sync host
+> must set `peerAwaitable: false` BEFORE U1 lands, gated by `node --check` per position.
+> **Do NOT widen `combinatorIsAsyncName` in U1** (§8 newly-rejecting under freeze).
+
+---
+
 # BRIEF — complete the markup autoawait: enumerate EVERY markup emitter, not the three I found
 
 change-id: `markup-autoawait-all-emitters`

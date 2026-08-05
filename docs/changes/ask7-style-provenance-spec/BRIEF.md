@@ -1,3 +1,23 @@
+> # ⛔ DO NOT DISPATCH AS WRITTEN — dpa-019 RATIFIED S319
+>
+> **This brief was authored on Pole A (a structural path address), which the ratified `dpa-019` verdict
+> REJECTS.** Pole A finished **last of four** (A 31.0 · D 40.5 · C 40.0 · B 34.0) and is disqualified on
+> FAILURE SHAPE before cost: a path/offset address fails **OPEN**, always dereferencing to *some* node,
+> so a consumer writing back to source cannot detect a stale address.
+>
+> **Also retracted:** this brief carries the claim that `srcmap-provenance.ts` does not exist. **It
+> exists** — `compiler/src/codegen/srcmap-provenance.ts`, 186 LOC, imported at two sites. That claim was
+> inherited and stamped "PA-VERIFIED" without being checked.
+>
+> **And the premise the whole fork rested on is false:** the consumer's apply-back is **not** value-only —
+> it is a runtime CSSOM patch with a hardcoded provenance map, and the only real source rewriter is
+> **structural**, which no path address survives.
+>
+> **Re-author against the ratified two-mechanism split:** D (per-compile re-resolve, ≈1 module) for
+> apply-back; C (opt-in author anchor) only if the Fork-2 primitive is built. **Sidecar = PER-COMPILE.**
+
+---
+
 # BRIEF — SPEC-write: `get_style_provenance` (Ask #7), with the 4 forks RULED
 
 change-id: `ask7-style-provenance-spec`
