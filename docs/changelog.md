@@ -2,7 +2,14 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-## S321 — 2026-08-05 (Peter · Windows) — two adopter/HIGH codegen fixes, both adversarially hardened; review floor drained
+## S322 — 2026-08-05 (Peter · Windows) — review floor drained to 0; a stranded built arc preserved, tracked, and deferred (no compiler source)
+
+A short continuity session: cleared the review-floor debt and resolved the one stranded local arc. No compiler source shipped — and that was the correct outcome, not a shortfall (the arc's fix already exists; the right move was to *not* land it yet).
+
+- **#425 review-floor drain (landed, docs-only)** — recorded the S239-floor markers for #419/#420/#421/#422 (the S319/S321 wrap+gaps PRs), all docs/continuity-only by file-list diff. Floor **0 OWED**. Carve-out rate 62% ⚠️ — noted as a docs-heavy work-mix signal, not evasion; the standing recommendation (from the S319 ledger note) is to compute the rate over *code-bearing* PRs only, where the target is ~0%.
+- **#426 on-mount-c preserve/track/defer (landed, docs-only)** — S315 had **built** option (c) (route the `on mount {}` body through real statement codegen) on branch `feat/onmount-c-build` @ `ba72eaa0`, with 10 conformance cases (both halves), but it never landed and sat as a dangling local worktree. Verified the target bug is **still live on main** (`@x = <span>hi</>` in a mount body → `E-CODEGEN-INVALID-LOGIC`). The fix is **`newly-accepting`** (bryan's language-surface review gates the merge) **and** rides the auto-await path the in-flight U1 rework is changing — so it was **deferred, not advanced**: branch pushed to origin (preserved), BRIEF committed with a `DONE-PROBE` (now a tracked OPEN thread), and gap `g-onmount-multistatement-bypasses-statement-codegen` annotated. Pick-up path (rebase → gate+conformance+within-node parity → S239 → PR routed to bryan) recorded in all three places. Adopter **#357** remains open (bryan-lane).
+
+
 
 Drained the review floor, then closed two silent-wrong-output codegen bugs. Each was root-caused by execution (not doc-reading), and the mandatory S239 adversarial pass found real defects in **both** before landing — none shipped. Both were proven fix-vs-pre-fix with discriminating runtime conformance cases, not symptom-matched.
 

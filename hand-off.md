@@ -1,4 +1,67 @@
 <!-- ============================================================= -->
+<!-- S322 WRAP (peter/P-Tech1) — prepended 2026-08-05.              -->
+<!-- S319 (bryan) + S321/S320 (peter) + all prior UNCHANGED below.  -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 322 (peter · P-Tech1 Windows) — WRAP
+
+**Date:** 2026-08-05. `/boot` Profile A FULL, **SOLO** (S319-bryan + all peter sessions wrapped).
+**2 PRs merged, both docs/continuity — ZERO compiler source shipped** (correct: A was a floor drain, B
+was resolved as a *deferral*, not a build). main `f5d970a7` → `0632a227`, coherence 0/0 both repos.
+
+## 🎯 WHAT LANDED
+- **A — #425 (`b7dad2b7`): review floor drained to 0 OWED.** #419/#420/#421/#422 recorded carve-outs
+  (all docs-only by file-list diff). Carve-out rate **62% ⚠️** — flagged NOT evasion; the fix is code
+  PRs, and the S319 ledger note already recommends computing the rate over *code-bearing* PRs only.
+- **B — #426 (`0632a227`): on-mount-c resolved as B2 (preserve + track + defer).** See below.
+
+## 🧭 THE ONE CARRY-FORWARD THAT NEEDS JUDGEMENT — on-mount-c (deferred, not dead)
+S315 **built** option (c) — route the `on mount {}` body through real statement codegen — on branch
+`feat/onmount-c-build` @ `ba72eaa0` (**now on origin**; 2 commits; touches `ast-builder.js` +
+`emit-logic.ts`; registers the within-node STRIP_KEY; **10 conformance cases both halves**). It is a
+disciplined deliverable and the **bug is confirmed LIVE on main** (I compiled the repro:
+`@x = <span>hi</>` in a mount body → `E-CODEGEN-INVALID-LOGIC`; #405/#417 did NOT obsolete it).
+
+**Why it was DEFERRED, not advanced to a PR** (S322 fork — Peter chose B2):
+1. It is **`newly-accepting`** → bryan's language-surface review gates the merge (Peter's hard
+   boundary). Cannot self-land; bryan not in-session.
+2. It routes the mount body through the **auto-await path U1 is actively reworking and that must-not-land**.
+   Advancing now = rebasing onto machinery about to change again. (Rebase itself is textually
+   low-conflict: branch edits `emit-logic.ts` at ~L1582/1607; #417's edits at ~L2506.)
+
+**PICK-UP when U1's auto-await rework settles** (recorded in 3 places — the BRIEF, the gap, the thread):
+rebase `feat/onmount-c-build` → full gate + conformance + within-node parity → **S239 adversarial pass**
+→ open a PR **routed to bryan** for the language-surface review. The tracked-thread `DONE-PROBE` flips
+DONE when the conformance cases land on main.
+
+## ⚠ CONCURRENT SIBLING — S322-bryan (ASUS) was LIVE, discovered mid-wrap
+Both booted against `f5d970a7` minutes apart; **both boards read "none live"** (the S243/§9 blind-boot
+hazard). We **both drained the review floor** — my **#425 merged first** (`b7dad2b7`), his **#424 is
+still OPEN** (`docs/s322-review-drain`) and now double-writes the #419-#422 markers. URGENT note in his
+inbox: on rebase, **drop the 4 dup markers, KEEP his unique gap-filing**
+(`g-gap-markers-duplicate-id-conflicting-status-double-counted` — real: two ledger entries carry two
+`@gap` markers each with conflicting status → open-MED over-counted by 2; true MED is 110, rollup 112).
+His gap-count "discrepancy" is RETRACTED (rollup HIGH 20 · MED 112 · LOW 49 is correct; his was a
+120s-timeout + naive grep). His U1 wide-corpus-harness (scripts/) is disjoint. **#357 + #409 stay his.**
+**Successor: re-read the active-sessions board early, not only at boot 0.5 — this hazard has now bitten twice.**
+
+## 🧷 STATE / OPEN
+- **Board:** my 0 open PRs besides this wrap (#427) · review debt 0 OWED from my side (bryan's #424 open) · gate GREEN.
+- **Adopter #357** still OPEN (`session.*` in `?{}` → dpa-021 CONFIDENTIALITY break) — **bryan-lane**,
+  lane-Q routed to him at S321; direction B noted. NOT taken.
+- **Open threads (6):** the 5 prior + the new `onmount-c-build`. `markup-autoawait-all-emitters` still
+  carries dpa-020's "do NOT dispatch as written" verdict (needs re-scope, not fire).
+- **U1 auto-await round** (bryan's): `worktree-agent-a9c144ab82648e947`, MUST-NOT-LAND until the
+  wide-corpus harness is built. Local to bryan's ASUS clone — nothing for a P-Tech1 boot to do.
+- **⚑ hand-off.md is 308KB — rotation is OVERDUE.** Next wrap should rotate to `handOffs/hand-off-<N>.md`
+  and start a fresh live file (the delta-log is the real per-session carrier; this fat file is dead weight).
+
+## Worktrees (6b)
+RETAINED: `.claude/worktrees/onmount-c` (deferred B, NOT landed — branch also on origin) · `scrml-pinned`
+(separate app-pinned checkout). No cleanup — nothing landed from a worktree this session.
+
+<!-- ============================================================= -->
 <!-- S319 WRAP (bryan/ASUS-Vivobook) — prepended 2026-08-05.        -->
 <!-- S316 + S317 + S318 + all prior UNCHANGED below.                -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->
