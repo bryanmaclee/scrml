@@ -136,6 +136,77 @@ instance), and **overlay Rule 6 — state-primacy at INTAKE**.
 ---
 
 <!-- ============================================================= -->
+<!-- S321 WRAP (peter/P-Tech1 Windows) — prepended 2026-08-05.       -->
+<!-- CONCURRENT with S319-bryan (block ABOVE). S320 + prior below.   -->
+<!-- Mechanical stream = delta-log [1152]–[1157]. Names, not numbers.-->
+<!-- ============================================================= -->
+
+# scrml — Session 321 (peter · P-Tech1 Windows) — WRAP
+
+**Date:** 2026-08-05. `/boot` Profile A. **4 PRs merged (#415 #416 #417 #418).**
+Mechanical stream = delta-log **[1152]–[1157]** (renumbered from [1135]–[1140] across two rebases over
+bryan's concurrent S319 wrap, which claimed [1135]–[1147]). main `15e5e070`, coherence **0/0** both repos.
+Directive arc: "review floor, then adopter issues" → "pick up another one" → "wrap".
+
+## Landed
+- **#415 review-floor drain** — #414 recorded (carve-out, substantiated). Probe 0 OWED.
+- **#416 `W-IF-IN-EACH` (GH adopter #409, assetManagement)** — a per-row `if=` on a NESTED
+  (non-item-root) element inside `<each>` is a create-time append gate, NOT reactive on same-key
+  reconcile (silent stale; sibling class/text bindings DO update). Shipped the **build warning**
+  (issue fallback #2); scoped to item-referencing conditions, string-literal-aware + destructure-aware.
+  **S239 found+fixed 3 precision defects** pre-land. Surfaced **37 real instances** in trucking (the
+  card components' nested item-`if=`, inlined into `<each>`) → baseline updated (validation, not
+  regression). #409 CLOSED. **Reactive fix DEFERRED → bryan** (§17.1 nested per-row-`if=` reactive
+  surface; the arc deliberately avoids the reconcile-core change).
+- **#417 `g-assignment-emits-init-set-inverting-reset` (HIGH)** — a top-level `@name = expr`
+  reassignment emitted the decl-shaped reset init-thunk → clobbered the decl's (last-write-wins) →
+  `reset(@cell)` INCREMENTED instead of restoring the initial. Fix: skip the init-thunk for a
+  `structuralForm:false` plain reassignment whose cell has a `<name>` structural decl
+  (`collectStructuralDeclNames`, new) — safe-by-construction (implicit `@`-decls / SSE binds keep
+  their thunk). Per-node → bryan's flagged FLAT-name-set compound collision can't occur; NOT via the
+  never-landed `resolveBareAtWriteTargets`. **S239 caught F1** (control-flow-body reassignment still
+  clobbered — hand-picked opts omit the set) → module-level `setStructuralDeclNamesForFile` fallback.
+  2 RT conformance cases PROVEN fail-pre/pass-post. Brief DONE-PROBE re-pointed (thread flipped done).
+- **#418 docs** — review records (#415/#416/#417) + assignment brief DONE banner.
+
+## Executable state (final)
+- **Gate:** every PR green (gate+tracking+windows). **Review floor:** 0 OWED (#418 recorded at wrap).
+- **Suites:** unit **17366/0** · conformance **855/855** (2 new RT reset cases) · integration green
+  (the only full-suite reds are Windows co-run TIMEOUT flakes — 0 assertion failures; each fix's
+  targeted suites all green). **Maps:** refreshed at wrap (see the wrap commit).
+- **thread-board:** 5 open / 24 done (`assignment-init-set-scope-fix` flipped done this session).
+
+## 🔴 ROUTED TO BRYAN (3 items — his lane; see handOffs/incoming/S321-peter-to-bryan-routed.md)
+1. **#409 reactive fix** — make a NESTED per-row `if=` inside `<each>` reactive (deferred §17.1
+   structural-reactivity; extend the `_scrml_ifrow_apply` swap to non-item-root children — the
+   reconcile-core change the per-row-`if=` arc avoided). The build warning ships NOW; this is the
+   real fix. 37 latent instances in trucking alone.
+2. **#357 lane contract Q** — the session did NOT take #357 (session-in-SQL). It is dispatch-ready
+   (dpa-021 ratified: Proxy prologue binding, 4 parts) BUT S313 flagged its lane as bryan-leaning
+   (session/auth surface · HIGH · freeze). Open contract Q bryan owes: **does Peter's lane key on the
+   ADOPTER or the SURFACE?** With ≥3 adopters live, "adopter bugs = Peter" no longer partitions.
+3. **F2 gap** `g-implicit-cell-double-write-clobbers-reset-init` (MED, filed) — an IMPLICITLY-declared
+   cell written twice at top level still clobbers its reset init (needs emission-ORDER tracking, a
+   larger change than the structural-set fix that closed the HIGH). Pre-existing.
+
+## ⚑ ABSORB NEXT BOOT
+- **bryan async-landed pa-base v2.11 / overlay v2.1** to scrml-support MID-SESSION (severity
+  vocabulary · review-floor DENOMINATOR change · dPA drain path). New doctrine — the boot read the
+  pre-landing versions; re-read at next boot. The denominator change likely addresses the 55% carve-
+  out HIGH flag the probe keeps printing.
+
+## RETAINED worktree (NOT mine, unlanded — do NOT prune)
+`.claude/worktrees/onmount-c` [`feat/onmount-c-build` @ `ba72eaa0`] — S315-peter's on-mount(c) build
+(`docs/changes/onmount-c-build/BRIEF.md`, untracked on this clone). Work never landed; its BRIEF has
+a STOP-AND-REPORT gating task (confirm the true failing set before building). Left for its owner.
+
+## Next-pick candidates (clean in-lane, unblocked)
+`e-markup-002-native-emit` (native-parser, parity-sensitive — run the within-node parity gate) ·
+`esm-chunks` (an arc, not a quick fix). `#357`/`ask7` = bryan-lane. `markup-autoawait-all-emitters`
+NEEDS A REWRITE (dpa-020 invalidated its brief — it mandates a threading pattern that can't fix the
+client-server-fn case). `assignment-init-set-scope-fix` DONE this session.
+
+<!-- ============================================================= -->
 <!-- S320 WRAP (peter/P-Tech1 Windows) — prepended 2026-08-04.       -->
 <!-- S319 + all prior UNCHANGED below. Mechanical stream = delta-log -->
 <!-- [1124]–[1134]. Disambiguate sessions by NAME (numbers collide). -->

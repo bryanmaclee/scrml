@@ -1,11 +1,11 @@
 # test.map.md
 # project: scrml
-# updated: 2026-08-04T20:30:00Z  commit: b929b9c9
-# NOTE (S320 INCREMENTAL pass): over `e80b692e` -> `b929b9c9` (31 commits, six sessions). Counts
-# re-derived by `git ls-files`. **No gate-topology change this window** (the S313 browser-tier
-# name-set promotion carries forward unchanged) — this pass is COUNTS + new conformance pins for
-# #389/#391/#394/#396. Per-window test inventories stay DELETED;
-# `git log --diff-filter=A --name-only e80b692e..HEAD -- compiler/tests` answers that faster.
+# updated: 2026-08-05T00:00:00Z  commit: 15e5e070
+# NOTE (S321 INCREMENTAL pass): over `b929b9c9` -> `15e5e070` (S320-tail + S319 + S321, ~19 commits).
+# Counts re-derived by `git ls-files`. **No gate-topology change this window** — this pass is COUNTS +
+# new unit/conformance coverage for #405 (CPS auto-await choke-point), #416 (`W-IF-IN-EACH`), #417
+# (reset init-thunk reassignment skip). Per-window test inventories stay DELETED;
+# `git log --diff-filter=A --name-only b929b9c9..HEAD -- compiler/tests conformance` answers that faster.
 
 ## Test Framework
 Runner: `bun:test` (Bun's built-in test runner, no separate package dep)
@@ -17,18 +17,19 @@ Browser DOM: happy-dom / @happy-dom/global-registrator (compiler/tests/browser/)
 Browser tier ASSERTION: `bun scripts/browser-baseline.ts --check` (**not** `bun test compiler/tests/browser`)
 E2E: Playwright (`@playwright/test`), separate config at e2e/playwright.config.ts, NOT part of `bun test`
 
-## Test Categories (compiler/tests/, **1314** `*.test.js` total)
+## Test Categories (compiler/tests/, **1319** `*.test.js` total)
 
-Fresh recursive `git ls-files` recount at `b929b9c9`, all 9 categories individually re-verified;
-agrees with `docs/FACTS.md` (`test files | 1,314`), **which is the citable authority — do not
-hardcode a competing number.** Net **+10** this pass (unit +3, integration +3, conformance +4;
-browser/lsp/commands/self-host/e2e-render-map/top-level all unchanged).
+Fresh recursive `git ls-files` recount at `15e5e070`, all 9 categories individually re-verified;
+agrees with `docs/FACTS.md` (`test files | 1,319`), **which is the citable authority — do not
+hardcode a competing number.** Net **+5** this pass (unit +4, conformance +1; integration files were
+MODIFIED not added — `corpus-emitted-specifier-resolution.test.js` / `trucking-dispatch-smoke-
+integration.test.js`; browser/lsp/commands/self-host/e2e-render-map/top-level all unchanged).
 
 | Category | Glob | Count | **Which gate runs it** |
 |---|---|---|---|
-| Unit | `compiler/tests/unit/**/*.test.js` | **867** | `gate` (blocking) + pre-commit + pre-push |
+| Unit | `compiler/tests/unit/**/*.test.js` | **871** | `gate` (blocking) + pre-commit + pre-push |
 | Integration | `compiler/tests/integration/**/*.test.js` | **189** | `tracking` (non-blocking) + pre-commit + pre-push |
-| Conformance | `compiler/tests/conformance/**/*.test.js` | **130** | `gate` (blocking) + pre-commit + pre-push |
+| Conformance | `compiler/tests/conformance/**/*.test.js` | **131** | `gate` (blocking) + pre-commit + pre-push |
 | Browser | `compiler/tests/browser/**/*.test.js` | 89 (unchanged) | `gate` (BLOCKING) + `tracking` — via the NAME-SET check |
 | LSP | `compiler/tests/lsp/**/*.test.js` | 11 | `tracking` only (non-blocking) |
 | Commands | `compiler/tests/commands/**/*.test.js` | 8 | `tracking` only (non-blocking) |
@@ -36,10 +37,16 @@ browser/lsp/commands/self-host/e2e-render-map/top-level all unchanged).
 | e2e-render-map | `compiler/tests/e2e-render-map/` | 2 | `tracking` only (non-blocking) |
 | Parser-conformance + native-* | top-level `compiler/tests/*.test.js` | 14 | `gate` (blocking) + pre-commit (since S302) |
 
-The top-level `conformance/` corpus moved further: **850 -> 853 cases (+3)** — pins for
-`g-subparse-span-not-rebased` (#389), `g-crossmodule-async-in-markup-position-not-awaited` (#391),
-`g-match-arm-server-call-no-autoawait` (#394, CODES+RUNTIME), and
-`g-fn-shorthand-tail-match-emits-degenerate-body` (#396, 17 unit cases + the conformance pin).
+**New this pass:** `compiler/tests/conformance/conf-CTRL-fnbody-autoawait-choke-point.test.js` (#405 —
+the CPS choke-point's own conformance-style coverage) · `compiler/tests/unit/assignment-init-set-
+reset-inversion.test.js` + `compiler/tests/unit/each-if-in-each-w409.test.js` + `compiler/tests/unit/
+bare-variant-string-literal-fence.test.js` + `compiler/tests/unit/runtime-script-tag-depth-prefix.test.js`
+(unit, #417/#416/#410/#408 respectively — the latter two landed in the S320 tail, folded in here since
+the prior pass's watermark predates them).
+
+The top-level `conformance/` corpus moved further: **853 -> 855 cases (+2)** — the two
+`reactive/reset-init-after-assignment[-in-if]-rt` RT pins (#417, `g-assignment-emits-init-set-
+inverting-reset`), each PROVEN to FAIL pre-fix (reset → 2) and PASS post-fix (reset → 0).
 
 ## THE BROWSER TIER IS NOW GATED — and the mechanism generalizes
 
@@ -150,6 +157,18 @@ empty function. The fix's test coverage therefore pins BOTH shapes (top-level de
 at each of the four+one call sites, not one representative site — a lesson worth generalizing to any
 future fix at a re-parse boundary.
 
+**A choke-point CONSOLIDATION needs a regression pin proving the OLD bug classes stay fixed, not just
+the new shape (#405).** `conf-CTRL-fnbody-autoawait-choke-point.test.js` exercises the unified
+`injectFnBodyServerCallAwaits` across if/for/while AND `given`/match-block/`try` bodies in one file —
+retiring `injectPromiseAwait` without this coverage would have re-opened `g-hash87-member-read-await-
+misparen`-class regressions silently, since the retired function's bare-prefix mis-paren and its
+scope-fencing were two INDEPENDENT defects a narrower test could miss one of.
+
+**A reset-init-thunk fix needs an RT case proving `reset()` actually restores the DECLARED value, not
+just that the fix compiles (#417).** `reactive/reset-init-after-assignment-rt` and its `-in-if`
+sibling assert the EXECUTED post-`reset()` value (0), not merely the absence of a diagnostic — a
+compile-only case cannot distinguish "clobbers the thunk" from "doesn't".
+
 ## §14.8.11 DB-authoritative tier — live-Postgres skip-graceful pattern
 
 The three integration tests (`db-authoritative-pg`, `db-authoritative-p2-pg`, `db-migrate-pg`) and
@@ -205,7 +224,7 @@ allowlist. **Adding a FIELD to a structural AST node grows this if the native mi
 samples/compilation-tests/ — 12 fixture dirs compiled by `scripts/compile-test-samples.sh`
 (`bun run pretest`) before the suite; dist/ is gitignored. **These go STALE** — a browser-test triage
 starts by recompiling them, before comparing anything.
-conformance/cases/ + conformance/adapters/ — the D3 corpus (**853 cases**) + per-impl adapters.
+conformance/cases/ + conformance/adapters/ — the D3 corpus (**855 cases**) + per-impl adapters.
 docs/tutorial-snippets/ + docs/readme-snippets/ + docs/website/ — the public snippet corpus; REAL
 programs under a compile gate.
 
@@ -249,7 +268,7 @@ between files, so a single-file run can be green while the suite is red, and vic
 `bun scripts/browser-baseline.ts` and diff NAMES**, which is the comparison a human was doing by hand.
 
 ## Tags
-#scrml #map #test #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-853
+#scrml #map #test #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #reset-init-thunk-reassignment #each-nested-if-not-reactive
 
 ## Links
 - [primary.map.md](./primary.map.md)

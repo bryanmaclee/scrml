@@ -1,13 +1,16 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-08-04T20:30:00Z  commit: b929b9c9
-# NOTE (S320 INCREMENTAL pass): over `e80b692e` -> `b929b9c9` (31 commits, six sessions). TARGETED —
-# THREE new sections (`keep-alive` fifth `<page>` attribute + the `<timer>`/`<poll>` first-tick
-# asymmetry, crossmodule-async-in-markup, `E-FN-EQUALS-BODY` fn-shorthand reject) and three new
-# Business Invariants. The `<machine>`-removal DOC drift flagged at the prior pass (S313-N1) is now
-# RESOLVED (#376 fixed all four docs) — see non-compliance.report.md. Everything else below carries
-# its prior verification; history stays in `docs/changelog.md` + `handOffs/delta-log.md`. **PR #405
-# (CPS auto-await consolidation) is HELD, unmerged — nothing below describes its state.**
+# updated: 2026-08-05T00:00:00Z  commit: 15e5e070
+# NOTE (S321 INCREMENTAL pass): over `b929b9c9` -> `15e5e070` (S320-tail + S319 + S321, ~19 commits).
+# **CORRECTION to the prior pass's framing: PR #405 (CPS auto-await consolidation) is NO LONGER HELD —
+# it LANDED at `649d6fce` (#405) and was reviewed clean at `bbd77bec` (#413).** Every "#405 HELD /
+# unmerged" statement this map carried is now stale and is corrected below (see "The `<machine>`
+# keyword" section's neighbor, the auto-await sections, and Business Invariants). TWO new sections
+# this pass: `W-IF-IN-EACH` (§17.1, #416) and the reset-init-thunk reassignment skip (§6.8, #417).
+# Also folded in, having landed in the S320 tail after the PRIOR pass's cutoff: `g-runtime-script-tag-
+# not-depth-prefixed` (#408) and `g-bare-variant-mask-leaks-into-string-literals` (#410) — both
+# already had domain-relevant detail captured in dependencies.map.md/error.map.md at the prior pass;
+# nothing further owed here. History stays in `docs/changelog.md` + `handOffs/delta-log.md`.
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
 
 ## Core Concepts (by SPEC section)
@@ -664,6 +667,68 @@ re-inferring async-ness a second time at a different stage. See dependencies.map
 Colorless-async section for the producer/consumer chain.
 
 
+## `W-IF-IN-EACH` — a nested per-row `if=` inside `<each>` is create-time-only, not reactive (§17.1, NEW #416, GH adopter #409)
+
+**The gap.** §17.1's per-row `if=` reactivity applies to exactly ONE position: the each body's SOLE
+structural item root, lowered via `_scrml_ifrow_apply` (the element⇄comment structural swap). A per-row
+`if=` on a NESTED (non-item-root) element inside the row is compiled to a plain CREATE-TIME append
+gate — evaluated once when the row is first built, never re-evaluated on a SAME-KEY reconcile. When the
+row's own item data later changes under that same key, the gated element is never re-added or removed
+and silently goes stale — while sibling `class`/`${…}` text bindings on the identical row DO update,
+which is what makes the frozen `if=` a footgun with no other build-time signal.
+
+**The fix ships a build WARNING, not the reactive fix.** `emit-each.ts`'s deferred nested-per-row-`if=`
+branch (inside `renderTemplateChildToJs`) now pushes `W-IF-IN-EACH` when the condition REFERENCES the
+iteration item — an outer-state-only condition re-evaluates through the each render fn's own collection
+effect and is not this footgun, so it is deliberately not warned. Two new helpers do the detection:
+`_eachIfCondReferencesItem(rawCond, itemNames)` strips quoted string-literal interiors FIRST (so an
+item-name-shaped word or an `@.`-substring inside a string literal cannot false-fire — the same
+string/comment-fencing lesson `g-bare-variant-mask-leaks-into-string-literals` already forced onto
+`preprocessForAcorn`) then matches `@.` or any item-binding name as a standalone identifier;
+`_eachItemBindingNames(iterVarName)` widens the match set to a `as (k, v)` destructure pair via the live
+each-reconcile context, not just the bare `as X` iter var. **The reactive fix is DEFERRED and ROUTED TO
+BRYAN** (§17.1 nested per-row-`if=` reactive-surface extension — it needs a per-child anchor + a
+reconcile-core interaction the original per-row-`if=` arc deliberately avoided). The warning surfaced
+**37 real instances** in the trucking example's card components (nested item-`if=`, inlined into
+`<each>`) — read as validation that the shape is common, not as a regression the warning introduced.
+
+**Resolution advice the diagnostic itself gives:** drive per-row visibility with a reactive `class`
+toggle instead (`class=(cond ? "" : "hide")` with a `.hide { display: none }` rule), or lift the `if=`
+to the row's sole item root where it IS reactive today.
+
+## Reset init-thunk no longer clobbers on a structural-cell reassignment (§6.8, NEW #417, HIGH)
+
+**The defect, `g-assignment-emits-init-set-inverting-reset`, now FIXED.** The ast-builder emits the
+same `state-decl` node SHAPE for both a genuine `<name> = expr` DECLARATION (`structuralForm:true`)
+and a later `@name = expr` REASSIGNMENT of that already-declared cell (`structuralForm:false`,
+`shape:"plain"`). Because the runtime's `_scrml_init_fns[name]` reset-thunk registry is LAST-WRITE-WINS
+and `_scrml_reset` calls it, a top-level reassignment reaching `_emitInitThunkSidecar` used to
+OVERWRITE the decl's init-thunk with the assignment's own expression — so `reset(@ticks)` after
+`${ @ticks = @ticks + 1 }` re-ran the INCREMENT instead of restoring the declared initial value. Silent
+wrong output on two documented primitives (originally surfaced as a `<timer>`/`<poll>` scoping defect,
+S314; re-scoped S321 as the general top-level-assignment case).
+
+**The fix, safe-by-construction.** `emit-logic.ts`'s `_emitInitThunkSidecar` now skips registering the
+reset init-thunk when a node is a `structuralForm:false` / `shape:"plain"` / non-const write AND its
+name is a member of `collectStructuralDeclNames(fileAST)` (`reactive-deps.ts`, NEW — walks logic bodies
+incl. `if`/`for`/`while`/`match`/`try` for `state-decl` nodes carrying `structuralForm:true`). A write
+NOT in that set is an IMPLICIT `@`-declaration (e.g. an SSE/channel bind `@latest = ticks()`) and
+correctly KEEPS its thunk — reset must still re-establish that binding. **S239 caught a control-flow
+gap (F1) before land:** a reassignment nested inside a TOP-LEVEL `if`/`for`/`while` body still clobbered,
+because that dispatch re-emits through a hand-picked `opts` object that omits `structuralDeclNames` —
+fixed with a module-level fallback, `setStructuralDeclNamesForFile` (emit-logic.ts), populated once per
+file by `emit-reactive-wiring.ts` (mirrors the existing `_eachBindSupportCtx` module-fallback pattern;
+file-immutable, so the fallback can never disagree with the opts value when both are present). Threaded
+through `codegen/index.ts`'s two `EmitLogicOpts` construction sites too.
+
+**Residual, explicitly out of this fix's scope — `g-implicit-cell-double-write-clobbers-reset-init`
+(MED, NEW).** An IMPLICITLY-declared cell (`@x = 0`, no `<x>`) written a SECOND time at top level
+(`@x = @x + 1`) still clobbers, because the static structural-decl set cannot distinguish the first
+implicit write (the decl, must keep its thunk) from a later one (a reassignment, should skip) — that
+needs emission-ORDER tracking, a larger change. Pre-existing; the S321 fix neither introduced nor
+worsened it. Rarity: an implicit `@`-declaration is unusual (adopters conventionally `<x>`-declare),
+double-writing one at top level rarer still.
+
 ## The `<machine>` keyword is REMOVED (§63.7 / §51.0.L, ruled S305, landed S307)
 
 **`<machine>` is not a deprecated alias any more. It does not compile.** `E-DEPRECATED-001` (Error)
@@ -834,6 +899,9 @@ to `E-CODEGEN-INVALID-LOGIC` rather than `E-FN-EQUALS-BODY` — a different pars
 - **A `fn`/`function` body admits exactly ONE shape, `{ … }` — the `=`-expression shorthand SHALL be rejected (§48.2, `E-FN-EQUALS-BODY`).** Sibling of the `=>`-arrow reject `E-FN-ARROW-BODY`. Pre-reject, the shape silently miscompiled a `match`-tail body to a degenerate function returning `undefined`.
 - **`<page>` admits a FIFTH per-route attribute, `keep-alive` (§4.15/§20.8.4)** — but only the authoring surface is wired; there is no runtime cache or invalidation yet. `<page keep-alive>` is a follow-on to reading the server-load payload directly, never an alternative to it.
 - **A `<poll>` fires its first tick IMMEDIATELY on arming; a `<timer>` does not (§6.7.5/§6.7.6)** — the deliberate asymmetry (freshness vs periodicity), gated once-per-arming, not once-per-resume.
+- **A per-row `if=` on a NESTED (non-item-root) element inside `<each>` is a CREATE-TIME append gate, NOT reactive on a same-key reconcile (§17.1)** — only the row's sole item-root `if=` reactively swaps. The compiler WARNS (`W-IF-IN-EACH`) when the condition references the item; the reactive fix itself remains open, routed to bryan.
+- **A top-level `@name = expr` REASSIGNMENT of a structurally-declared (`<name>`) cell SHALL NOT re-register the cell's reset init-thunk (§6.8)** — `_scrml_init_fns` is last-write-wins, so a naive re-registration inverts `reset()`. An IMPLICIT `@`-declared cell (no `<name>`) still keeps its thunk on write, by necessity (SSE/channel binds must re-establish on reset).
+
 ## Domain Events (compiler-pipeline analogs)
 `RowChange` — synthesized per §38.13 watched-table row mutation (INSERT/UPDATE/DELETE), dispatched client-side via the `__change` frame to `<onchange>` handlers.
 Engine variant transition — an `<engine>` cell's `rule=`-governed state change, optionally observed via `<onTransition>`/`<onTimeout>`/`<onIdle>`.
@@ -854,7 +922,7 @@ Diagnostic emission — every pipeline stage emits `{code, message, severity, sp
 A returned function-expression closure (`return function name(){…}`, GITI-038) — owns its own body's scope/type/async analysis independent of its enclosing factory (`ReturnStmtNode.fnExprNode`, see schema.map.md).
 
 ## Tags
-#scrml #map #domain #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth #route-region #§6.7.2.1 #§20.8.8 #pole-c #third-lifecycle-owner #route-leave #route-enter #commit-gate #keep-alive #outlet-resident #region-cleanups #module-init #rehydrator-boundary #machine-retired #e-deprecated-001 #§63.7 #projection-codemod #engine-audit #§51.11 #§51.13 #property-tests #enum-only #§19.4.4.1 #e-error-011 #renders-clause #e-error-005 #corpus-first-migration #provenance-field #§34.0 #named-codes-land-with-impl #§6.7.1a #bare-expression-category #sugar-equivalence #mount-body-expr-node #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #crossmodule-async-markup #s239-catch #pr-405-held
+#scrml #map #domain #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth #route-region #§6.7.2.1 #§20.8.8 #pole-c #third-lifecycle-owner #route-leave #route-enter #commit-gate #keep-alive #outlet-resident #region-cleanups #module-init #rehydrator-boundary #machine-retired #e-deprecated-001 #§63.7 #projection-codemod #engine-audit #§51.11 #§51.13 #property-tests #enum-only #§19.4.4.1 #e-error-011 #renders-clause #e-error-005 #corpus-first-migration #provenance-field #§34.0 #named-codes-land-with-impl #§6.7.1a #bare-expression-category #sugar-equivalence #mount-body-expr-node #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #crossmodule-async-markup #s239-catch #pr-405-landed #cps-choke-point-landed #w-if-in-each #each-nested-if-not-reactive #reset-init-thunk-reassignment #collect-structural-decl-names #§6.8 #g-implicit-cell-double-write-clobbers-reset-init
 
 ## Links
 - [primary.map.md](./primary.map.md)

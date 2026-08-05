@@ -133,7 +133,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `78683e35` — wrap(s319): three deliberations ratified, a contract re-alignment, and a gate that measured the wrong population (#420) — **pushed**
+- `ef43a7e4` — wrap(s319) addendum: U1 round 3 returned post-wrap — 5 defects fixed, still must not land (#422) — **pushed**
 - `663f31b8` — wrap(s316): crash recovery, five rulings, and a review floor that had never run (#397) — **pushed**
 - `115e8b1b` — wrap(S295): hand-off + changelog — three-lane arc, pa-base v2.6/v2.7, three privacy scrubs (#246) — **pushed**
 - `04477cb1` — wrap(S292): hand-off + changelog + master-list §0 + delta-log [824]-[839] + inbox drain (#220) — **pushed**

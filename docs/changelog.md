@@ -2,6 +2,15 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S321 — 2026-08-05 (Peter · Windows) — two adopter/HIGH codegen fixes, both adversarially hardened; review floor drained
+
+Drained the review floor, then closed two silent-wrong-output codegen bugs. Each was root-caused by execution (not doc-reading), and the mandatory S239 adversarial pass found real defects in **both** before landing — none shipped. Both were proven fix-vs-pre-fix with discriminating runtime conformance cases, not symptom-matched.
+
+- **#415 review-floor drain (landed, docs-only)** — recorded the S239 pass on #414 (the docs-only `@session`-severity ruling + 13-PR debt drain); carve-out, but the 13 drain entries verified well-formed and the `@session` corpus swept (all legal ambient reads). Probe → 0 OWED.
+- **#416 `W-IF-IN-EACH` (landed, GH adopter #409, assetManagement)** — a per-row `if=` on a **nested** (non-item-root) element inside `<each>` is a create-time append gate, **not reactive** on a same-key reconcile: an item-data-driven condition silently goes stale while sibling class/text bindings update. Only the SOLE-item-root `if=` is reactive today (§17.1). Shipped the **build warning** (the issue's fallback ask); the reactive fix is deferred §17.1 design (routed to bryan). The S239 pass found + fixed 3 precision defects (string-literal false-positives, an `as (k,v)` destructure false-negative). The warning immediately surfaced **37 real latent instances** in the trucking-dispatch reference app — the warning validating itself against a real app.
+- **#417 `g-assignment-emits-init-set-inverting-reset` (landed, HIGH)** — `reset(@cell)` was silently **incrementing** instead of resetting whenever a top-level `@name = expr` reassignment existed: the reassignment emitted the declaration-shaped reset init-thunk, which clobbered the declaration's (last-write-wins). Fixed by skipping the init-thunk for a reassignment of a structurally-declared cell (`collectStructuralDeclNames`) — safe-by-construction so implicit `@`-declarations (SSE binds) keep their reset behaviour. The S239 pass caught a control-flow-body miss (F1, fixed with a module-level fallback); a pre-existing implicit-double-write sibling (F2) was filed, not swept. Two runtime conformance cases, both proven to fail pre-fix and pass post-fix.
+- **#418 (landed, docs-only)** — review records for #415/#416/#417 (floor 0 OWED) + the `assignment-init-set-scope-fix` brief bannered DONE.
+
 ## S320 — 2026-08-04 (Peter · Windows) — review debt drained; the auto-await CORE built-but-HELD; two HIGH silent-failure codegen bugs fixed
 
 Drained the review-floor debt and carried the CPS auto-await choke-point from deliberation through a built, verified fix — then held it when a concurrent deliberation from bryan's lane surfaced a more-fundamental architecture. The session then continued: a maps refresh and two fresh in-lane HIGH silent-failure codegen fixes.

@@ -1,7 +1,7 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-08-04T20:30:00Z  commit: b929b9c9
-# scan mode: INCREMENTAL_UPDATE (S320 map refresh over `e80b692e` -> `b929b9c9`, 31 commits, six sessions)
+# generated: 2026-08-05T00:00:00Z  commit: 15e5e070
+# scan mode: INCREMENTAL_UPDATE (S321 map refresh over `b929b9c9` -> `15e5e070`, ~19 commits, S320-tail + S319 + S321)
 
 Docs/specs/maps that do NOT match current code. Findings live here rather than being returned
 inline, because inline findings go stale unread. **Every CARRIED finding below was re-executed at
@@ -28,10 +28,32 @@ flagged. Re-verified by grep at `b929b9c9`, not copied forward on trust:
 settings-table row is now struck with a retirement note (the setting was never wired — zero
 references in `compiler/src/` even while the warning it suppressed was live).
 
-## NEW at this HEAD (S320 pass)
+## RESOLVED this pass (S321)
+
+### S320-N-MAPS — RESOLVED. The maps' own "PR #405 HELD, unmerged" claim was stale and is now corrected.
+This is a finding about `.claude/maps/` itself, not a project doc — flagged here because the report's
+scope is "current truth only" and a stale map is exactly the failure mode this report exists to catch.
+At the `b929b9c9` stamp, `primary.map.md`, `dependencies.map.md`, `domain.map.md`, `error.map.md` and
+`structure.map.md` all stated PR #405 (the CPS auto-await choke-point consolidation) was "HELD,
+unmerged, pending bryan's ruling on the fix locus." **That was accurate at `b929b9c9` and became stale
+the moment #405 merged** (`649d6fce`, after bryan's `go, your recs` delegation per `hand-off.md`'s S321
+top block; reviewed clean at `bbd77bec`, #413) — three commits the maps-refresh cadence did not catch
+before this pass, because no map refresh ran between `b929b9c9` and this pass. **Re-verified against
+source, not copied forward:** `scheduling.ts`'s `injectPromiseAwait` is confirmed absent from the
+current tree (`git diff b929b9c9..15e5e070 -- compiler/src/codegen/scheduling.ts` shows the function
+deleted and replaced by `collectAwaitSites`/`applyAwaitSites`/`injectFnBodyServerCallAwaits`); three
+open gaps the consolidation was expected to close (`g-given-block-server-call-no-autoawait`,
+`g-hash87-member-read-await-misparen`, `g-ternary-init-server-call-await-misbind`) are confirmed
+`status=resolved` in `docs/known-gaps.md` at this HEAD.
+**Reason:** map-currency gap — the same root cause the S313-N4 successor gap
+(`g-nav-maps-have-no-scheduled-refresh`) already names; this is a fresh data point, not a new class.
+**Disposition:** fixed this pass in all five maps (header notes, invariant/routing-table rows, tags).
+No further action.
+
+## Carried from S320 pass — re-verified at this HEAD
 
 ### S320-N1. `scripts/s34-census.ts` is a broken TOOL, not a doc — but it breaks a claim this map
-### set makes about itself
+### set makes about itself. **RE-VERIFIED at `15e5e070`: still broken, not re-chased this window.**
 `bun scripts/s34-census.ts` `ENOENT`s on this Windows clone. Root cause: `ROOT = join(dirname(new
 URL(import.meta.url).pathname), "..")` (line 49) — `scripts/facts.ts` uses the correct
 `fileURLToPath(import.meta.url)` pattern one file over (line 31), and this script does not. On
@@ -50,7 +72,8 @@ fixed same-session; the census's own documentation claims "in-repo and current b
 which is false on Windows until this lands.
 
 ### S320-N2. `docs/changes/onmount-c-build/BRIEF.md` — untracked, correctly-scoped as a live dispatch
-### brief, NOT aspirational drift — flagged so it is not miscounted either way
+### brief, NOT aspirational drift — flagged so it is not miscounted either way. **RE-VERIFIED at
+### `15e5e070`: `git status --porcelain -uall` still shows it untracked, unchanged content.**
 Untracked in git (`git status --porcelain` shows `?? docs/changes/onmount-c-build/`), sitting under
 `docs/changes/` (the per-dispatch archive location, out-of-scope for content-mapping by the standing
 convention this report already carries for that directory). Content-checked: it is a task brief for
@@ -308,8 +331,9 @@ endorsed content, and compiling proves nothing about prose.
 
 | map | stamp | status |
 |---|---|---|
-| primary · domain · dependencies · error · structure · test · build | `b929b9c9` | re-walked this pass against source |
-| non-compliance | `b929b9c9` | this file — every carried finding re-executed, not copied |
+| primary · domain · dependencies · error · structure · test | `15e5e070` | re-walked this pass against source |
+| build | `b929b9c9` | **deliberately older.** Zero CI/build-surface diff this window (verified: `git diff b929b9c9..15e5e070 -- .github/ package.json scripts/` empty) |
+| non-compliance | `15e5e070` | this file — every carried finding re-executed, not copied |
 | config · infra | `e80b692e` | **deliberately older, RE-VERIFIED zero-diff this pass** (`git diff e80b692e..HEAD -- package.json .env.example Dockerfile docker-compose.yml` and `.github/workflows/` outside `ci.yml`'s one line, all empty) |
 | schema | `fe14c9b2` | **deliberately older.** `compiler/src/types/` has ZERO diff across FOUR windows now (re-verified this pass); no new FileAST node kind. `native-parser-canary/within-node-classifier.ts`'s two new `STRIP_KEYS` entries (`valueInit`/`valueInitExpr`, #386) are codegen-support metadata, not an AST shape change — mapped in dependencies.map.md |
 | migrations | `115e8b1b` | **deliberately older.** No DB/migration surface in four windows |
@@ -320,24 +344,22 @@ An honest older stamp beats a false "verified at HEAD". Every row above is a dec
 
 ## What changed about how these maps work, this pass
 
-- **The maps-refresh cadence failed for FOUR CONSECUTIVE SESSIONS before this pass ran.** S317, S318,
-  S319 and S320 each recorded "Maps OWED" in their wrap and deferred the project-mapper dispatch —
-  the exact drift pattern S313-N4 (below, carried) predicted when `cloud-maps` Stage 2 was deleted:
-  "the measured cost of the un-refreshed state is already two windows deep (27 commits, then 67)."
-  **It is now three windows deep, and the third is 31 commits over SIX sessions** (more sessions,
-  fewer commits per session than the S313 pass measured — codegen landings this window were smaller
-  and more numerous). The standing recommendation (a deterministic non-AI map-currency check in
-  `cloud-maps` Stage 1) gets a fourth data point supporting it.
-- **This pass's content is narrow and mechanical relative to S313's.** Fifteen PRs landed, but the
-  conceptual surface is SEVEN new invariants (primary.map.md), not a restructuring — most landings
-  widen an existing mechanism (`export const` client-gating, dist-space tool-import rebasing,
-  sub-parse span rebasing) rather than introduce a new one. Read this as a signal that the maps-drift
-  RISK does not scale linearly with elapsed sessions when the landings are narrow — but it is still a
-  risk, and the S320-N1 tooling finding (the census script) was found ONLY because this pass verified
-  a claim against source rather than trusting the prior stamp.
+- **The maps-refresh cadence caught up at the S320 pass (`b929b9c9`), then slipped again for the
+  S320-tail + S319 + S321 window before THIS pass ran.** Same drift pattern S313-N4 predicted. This
+  pass is a FIFTH data point supporting the standing recommendation (a deterministic non-AI
+  map-currency check in `cloud-maps` Stage 1): every gap between a landing and a maps refresh is a
+  window where a dev agent can read a stale claim and act on it — this window's own stale claim
+  (PR #405 "HELD, unmerged") was exactly that kind of actionable-but-wrong statement, not a cosmetic
+  one, which is the sharpest evidence yet for the recommendation.
+- **This pass's content is small in commit count (~19) but the headline finding is a CORRECTION, not
+  an addition.** A PA or dev agent reading `primary.map.md` at the `b929b9c9` stamp between #405's
+  merge and this pass would have been told not to build on or merge already-landed, reviewed-clean
+  work — the exact failure mode "current truth only" exists to prevent, now happening to the maps
+  themselves rather than to a project doc. The two genuinely new landings (`W-IF-IN-EACH` #416, the
+  reset-init-thunk skip #417) are each a narrow, well-scoped fix.
 
 ## Tags
-#non-compliance #project-mapper #cleanup #scrml #machine-retired #e-deprecated-001 #w-deprecated-001-retired #pa-scrml-primer-stale #pipeline-md-stale #spec-index-currency #external-js-stale #trucking-example-stale #mangled-sed-rewrite #gap-entry-body-false #resolved-by-deletion #no-scheduled-map-refresh #cloud-maps-stage2-deleted #generated-indexes #mapgen-unmaintainable #map-size-budget #domain-split-recommended #w-lint-uncatalogued-eight #s34-census #s34-census-broken #§34.0 #teardown-region-comment #outlet-resident #route-region #native-parser-parity #e-script-001 #privacy-scrub #adopter-identity #each-mount-noun #tutorial-version-hardcode #prose-gate-gap #pre-push-comment-stale #machine-doc-drift-resolved #pr-376 #fileURLToPath-vs-pathname #onmount-c-build-untracked #four-sessions-deferred #maps-owed #e-fn-equals-body #keep-alive #pr-405-held
+#non-compliance #project-mapper #cleanup #scrml #machine-retired #e-deprecated-001 #w-deprecated-001-retired #pa-scrml-primer-stale #pipeline-md-stale #spec-index-currency #external-js-stale #trucking-example-stale #mangled-sed-rewrite #gap-entry-body-false #resolved-by-deletion #no-scheduled-map-refresh #cloud-maps-stage2-deleted #generated-indexes #mapgen-unmaintainable #map-size-budget #domain-split-recommended #w-lint-uncatalogued-eight #s34-census #s34-census-broken #§34.0 #teardown-region-comment #outlet-resident #route-region #native-parser-parity #e-script-001 #privacy-scrub #adopter-identity #each-mount-noun #tutorial-version-hardcode #prose-gate-gap #pre-push-comment-stale #machine-doc-drift-resolved #pr-376 #fileURLToPath-vs-pathname #onmount-c-build-untracked #e-fn-equals-body #keep-alive #pr-405-landed #pr-405-held-stale-corrected #w-if-in-each #reset-init-thunk-reassignment #cps-choke-point-landed #map-self-staleness #maps-refresh-cadence
 
 ## Links
 - [primary.map.md](./primary.map.md)
