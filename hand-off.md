@@ -35,8 +35,19 @@ rebase `feat/onmount-c-build` → full gate + conformance + within-node parity �
 → open a PR **routed to bryan** for the language-surface review. The tracked-thread `DONE-PROBE` flips
 DONE when the conformance cases land on main.
 
+## ⚠ CONCURRENT SIBLING — S322-bryan (ASUS) was LIVE, discovered mid-wrap
+Both booted against `f5d970a7` minutes apart; **both boards read "none live"** (the S243/§9 blind-boot
+hazard). We **both drained the review floor** — my **#425 merged first** (`b7dad2b7`), his **#424 is
+still OPEN** (`docs/s322-review-drain`) and now double-writes the #419-#422 markers. URGENT note in his
+inbox: on rebase, **drop the 4 dup markers, KEEP his unique gap-filing**
+(`g-gap-markers-duplicate-id-conflicting-status-double-counted` — real: two ledger entries carry two
+`@gap` markers each with conflicting status → open-MED over-counted by 2; true MED is 110, rollup 112).
+His gap-count "discrepancy" is RETRACTED (rollup HIGH 20 · MED 112 · LOW 49 is correct; his was a
+120s-timeout + naive grep). His U1 wide-corpus-harness (scripts/) is disjoint. **#357 + #409 stay his.**
+**Successor: re-read the active-sessions board early, not only at boot 0.5 — this hazard has now bitten twice.**
+
 ## 🧷 STATE / OPEN
-- **Board:** 0 open PRs · review debt 0 OWED (the wrap PR will show OWED next boot — drain it) · gate GREEN.
+- **Board:** my 0 open PRs besides this wrap (#427) · review debt 0 OWED from my side (bryan's #424 open) · gate GREEN.
 - **Adopter #357** still OPEN (`session.*` in `?{}` → dpa-021 CONFIDENTIALITY break) — **bryan-lane**,
   lane-Q routed to him at S321; direction B noted. NOT taken.
 - **Open threads (6):** the 5 prior + the new `onmount-c-build`. `markup-autoawait-all-emitters` still
