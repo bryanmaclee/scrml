@@ -17,13 +17,35 @@ IDENTITY:
 
 STACK:  scrml — the working compiler (TS/JS impl#1 of the scrml language, Bun-run).
         Authoritative spec: compiler/SPEC.md · SPEC-INDEX.md · PIPELINE.md. Code<->spec drive each other.
-STAGE:  V1 = scrml-LANGUAGE 1.0 (compilers decoupled). Critical path = language frozen +
-        conformance-tested + impl#1(TS) conformant. FREEZE BAR = "do it right" / HIGH-coverage-first
-        (~220 of ~200-270 cases). Remaining V1 = conformance coverage-GROWTH + D1/D2/D4 labeling,
-        NOT big feature builds. **[S286 (2026-07-25): freeze-bar TIMING RELAXED — the "do-it-right"/
-        high-coverage QUALITY bar STANDS, but a serious adopter's foundational ask is NOT freeze-deferred
-        (get a real DD, not a defer). "NOT big feature builds" is superseded on the TIMING axis. See
-        user-voice S286 + [[feedback_freeze_timing_relaxed]].]**
+STAGE:  **⚑ THE FREEZE CAMPAIGN IS PAUSED (S322, 2026-08-05) — PAUSED, NOT ABANDONED.** Read this
+        before reasoning from anything else in this block. bryan, verbatim: *"I say we pause the freeze
+        campaign until I can feel truly satisfied with it, and until then. We could do some radical
+        re-examining."* And on the motivation: *"My motivation is to build the coolest freakin` language
+        in existence. I have no real goal other than that."*
+        **What that changes, operationally:** under a freeze motivation the first question about any
+        proposal is "does this widen the surface?" and the default answer is no. Under this one the first
+        question is "is this the best expression of the intent?" **and a widening can be the right
+        answer.** Work the second until told otherwise. Do NOT reflexively defer a design question to
+        protect a freeze date — there is no date.
+        **The structural argument (do not re-derive):** the tier-1 campaign is a **CONFORMANCE**
+        instrument, not a **DESIGN** instrument. Its denominator is coverage of what already EXISTS
+        (~196 tier-1 codes, 855 cases). Driving it to 100% proves the implementation matches the spec and
+        says NOTHING about whether the spec is the language we want. The auto-await axis is the proof:
+        fully spec'd (§13.2 normative), implemented, AND conformance-covered — and under-designed, which
+        took an adopter-driven arc plus a purpose-built instrument to see. A campaign at 100% would have
+        shipped it. bryan's stated reason: the push predates real adopters revealing real holes.
+        **The re-examination test (S322, checkable):** an under-designed axis shows as *a normative SHALL
+        delivered by RETROFIT rather than BY CONSTRUCTION.* §13.2's await mandate is delivered by
+        post-hoc injectors scanning emitted output for violations — retrofit. `<match>` exhaustiveness
+        holds because the arm set is checked at the declaration — by construction, and it has generated
+        no bug family. First DDs banked: **dpa-022** (markup is a state kind, not a value type) +
+        **dpa-023** (the async boundary as a `(not to T)` lifecycle). See user-voice S322 +
+        [[feedback_freeze_campaign_paused_language_quality]].
+        **Still true, and unchanged by the pause:** V1 = scrml-LANGUAGE 1.0 (compilers decoupled);
+        the QUALITY bar is "do it right" / high-coverage; the conformance suite is the language gate;
+        impl#1(TS) conformant. What is suspended is treating coverage-growth as the ONLY remaining work
+        and freeze-proximity as a reason to defer design. (S286 had already relaxed the TIMING axis;
+        S322 supersedes that note by reframing the motivation — [[feedback_freeze_timing_relaxed]].)
         In flight: the language/compiler SPLIT (mitosis) + Road-B impl#2
         (compiler/self-host-v2/). Adopter-driven threads: flogence 100%-scrml (standalone-tool §64 +
         W5b in-process db library); **Adopter-A DB-authoritative security tier (greenlit S286; reads-first
