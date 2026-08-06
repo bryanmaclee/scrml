@@ -381,3 +381,48 @@ The rebase also folded in a `master-list.md` `@generated:recent-sessions` regen,
   recommended computing the rate over **code-bearing PRs only** (any diff touching `compiler/`,
   `stdlib/`, `conformance/cases/`, `scripts/`). That refinement is STILL unbuilt. Until it is, read
   the ⚠ as UNPROVEN — neither healthy nor evaded.
+
+<!-- @review pr=444 verdict=clean by=S326-bryan date=2026-08-06 probe=de-escalation-rationale-verified-by-grep-at-fire-sites-three-csrf-publication-channels-all-exist -->
+
+- **#444** — **CLEAN.** Docs-only by enumerated file set (`docs/changes/authed-server-fn-bare-return/BRIEF.md`,
+  `docs/known-gaps.md`, `docs/pr-reviews.md`, `handOffs/dpa-queue.md`) — zero `compiler/`, `stdlib/`,
+  `conformance/cases/`, `scripts/`. **Reviewed as CLAIMS, not as a code path**, because the load-bearing
+  content is a **security de-escalation** (`g-session-get-reserved-key-read-disclosure`, HIGH → MED) and a
+  docs PR that lands a false durable claim is exactly the failure this floor exists to catch.
+
+  **The de-escalation rests on "the §40.2 token is already published same-origin through three
+  compiler-owned channels."** Verified by grep AT THE FIRE SITES rather than from the entry's prose:
+  1. `GET /_scrml/session` — route registered `emit-server.ts:2765`; client fetches it with
+     `credentials:'include'` at `emit-client.ts:2383`.
+  2. `<meta name="csrf-token">` — emitted into the first-paint document at `codegen/index.ts:2277`.
+  3. `scrml_csrf` cookie — set via `document.cookie` at `emit-client.ts:2455` (`Path=/; SameSite=Strict`)
+     and read back at `:2434`. Set through `document.cookie`, so **non-HttpOnly by construction** — the
+     entry's characterization is right for a structural reason stronger than the one it gives.
+
+  All three exist. The HIGH → MED is SOUND and the reasoning is recorded well enough to overrule cheaply.
+
+  **One precision limit, stated rather than smoothed:** I verified channel 1's route EXISTS and is
+  client-fetched; I did NOT verify the entry's stronger claim that it is *un-authenticated and
+  un-CSRF-gated*. The conclusion does not depend on it — channels 2 and 3 are each independently
+  sufficient (a meta tag in the served document and a non-HttpOnly cookie are same-origin-script-readable
+  by construction), so the de-escalation holds on two channels even if channel 1's gating claim is loose.
+
+<!-- @review pr=445 verdict=clean by=S326-bryan date=2026-08-06 probe=re-characterization-reproduced-by-execution-terse-vs-explicit-lift-emit-compared -->
+
+- **#445** — **CLEAN, verified by EXECUTION.** Docs-only (`docs/known-gaps.md`, +17/-0), a
+  re-characterization of `g-tier0-reactive-lift-mixed-text-interp-literal` that INVERTS the S281 model.
+  A re-characterization is a durable claim about live compiler behaviour, so it was reproduced rather
+  than read: compiled a two-arm probe (terse `lift <li>${n}px/` vs explicit `lift <li>${n}px</li>`) on
+  HEAD and diffed the emitted lowering.
+
+  Both halves of the claim hold exactly:
+  - terse form → `_scrml_lift_tn_9.textContent = ` + a template literal carrying a **spurious space**
+    (`${n} px`) — the defect, silent and adopter-visible;
+  - explicit close → `String((n) ?? "")` **plus a separate** `appendChild(document.createTextNode("px"))`
+    — correct, no space, exactly as the entry claims.
+
+  So the residual is the MIRROR of what S281 filed (right-glue, not left-glue), the scope really is
+  narrower than the original entry (terse form only), the stated workaround really works, and the S281
+  detection signature (`createTextNode("…${…")`) really is obsolete on this path. Deferral is justified
+  on blast radius; the fix direction it hands forward (thread the interp part's real span at
+  `ast-builder.js:4258` so the `:4231` adjacency test fires) is actionable.
