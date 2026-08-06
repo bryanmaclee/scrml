@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 24 |
-| MED | 117 |
+| HIGH | 25 |
+| MED | 119 |
 | LOW | 49 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -595,6 +595,45 @@ that to a raw property read (a `semantics-changed` silent regression). Brief:
 <!-- @gap id=g-session-context-scan-bare-form-sound sev=MED status=open locus=compiler/src/codegen/emit-server.ts:5799(E-SESSION-CONTEXT scan) prov=dpa-021:§6.1 route=bryan -->
 
 dpa-021 §6.1 asks the E-SESSION-CONTEXT scan to also build-block a bare `session` used in a `?{}` interpolation OUTSIDE a web-app route handler (SSE `server function*` / `<endpoint>` / headless), so Direction B "kills the class by construction" everywhere. The gh357 attempt widened the scan to string-match a bare `session.`/`session[` in the assembled `lines` — but that **deterministically** matches the compiler's OWN emitted comments (`// --- session.destroy() handler ---`) and generated auth guards (`if (!session.isAuth)`), build-blocking a clean §20.5 app (regressed CONF-SESSION-STORE-PROGRAM-UNIFY, green on main). **Reverted** (commit on this branch). A sound implementation keys on recorded lowering/emission SITES (as `_allowedSessionRanges` already does for the AST form), not a text scan of assembled output. The residual it targets is a PRE-EXISTING silent runtime free-var (unchanged from main); this is completeness, not a regression fix. Newly-rejecting → bryan's language-surface call on whether to build-block at all vs leave it a runtime concern.
+
+### g-embed-runtime-ships-mangled-runtime-identifiers — `--embed-runtime` ships a CORRUPTED runtime when a user fn name collides with a runtime identifier — `NEW S325-bryan (Limb 2 population count; EXECUTED); HIGH; open`
+<!-- @gap id=g-embed-runtime-ships-mangled-runtime-identifiers sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts:2923(post-fn-name-mangle)+compiler/src/codegen/index.ts:2128(runtime slice)+compiler/src/commands/compile.js:172(--embed-runtime) prov=rationale:measured-during-the-limb2-population-count -->
+
+The whole-buffer `post-fn-name-mangle` pass rewrites the assembled client buffer, and **138 of its rewrites (99 sources, 107 cleanly-compiling) land INSIDE the runtime text spliced at `runtimeInsertIndex`.** Colliding user fn names measured: `log` ×74 · `fn` ×33 · `label` ×19 · `tick` ×8 · `handle` ×2 · `computed` ×2.
+
+In the DEFAULT mode this is inert — `codegen/index.ts:2128` slices everything up to `// --- end scrml reactive runtime ---` off the front and the shared runtime is emitted separately (verified byte-identical with and without the pass). Under the supported **`--embed-runtime`** flag (`commands/compile.js:172`) the corrupted text SHIPS:
+
+```js
+function _scrml_replay(name, _scrml_log_1, endIdx) {   // parameter renamed
+  const n = (endIdx != null) ? endIdx : log.length;    // body NOT renamed
+```
+
+The parameter matched the lookahead (`log` followed by `,`); `log.length` did not (`.` is outside the `[(;,}\]\n)]` set). **This is Bug D's exact class, still open, reachable from a supported flag, triggered by a user fn named `log`.** Silent — no diagnostic, and no syntax error, so `node --check` passes it.
+
+**Reproduce (MEASURED, S325):** `bun compiler/src/cli.js compile samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-do-while-064.scrml -o <out> --embed-runtime`
+
+**Fix direction is NOT "patch the regex again"** — that is the fifth patch on a text heuristic (Bug D · Bug I · Bug Z · g-spread · PGO P3.A). The structural options are to mangle BEFORE the runtime is spliced, or to fence the runtime slot out of the rewrite the way `rewriteCodeSegments` already fences string literals. Related: [[g-mangler-empty-name-whole-buffer-insertion]], [[g-mangler-scope-blind-shorthand-key-rename]], and the Limb-2 scoping record below.
+
+### g-mangler-empty-name-whole-buffer-insertion — an EMPTY key in `fnNameMap` turns the alternation regex into a whole-buffer inserter — `NEW S325-bryan (Limb 2 population count); MED; open (currently masked by an upstream failure)`
+<!-- @gap id=g-mangler-empty-name-whole-buffer-insertion sev=MED status=open locus=compiler/src/codegen/emit-client.ts:2947(combinedRegex alternation) prov=rationale:measured-during-the-limb2-population-count -->
+
+`stdlib/cron/index.scrml` places `"" → _scrml_v_1` into `fnNameMap`. The alternation then reads `\b(…|)\b`, which matches **zero-width** at every word boundary satisfying the lookahead — injecting the name **781 times into one file** (MEASURED; it is the single largest rewrite bucket in the whole corpus count).
+
+Currently **masked**: that source already fails `E-CODEGEN-INVALID-LOGIC` from an upstream anonymous-fn defect, and the error text is itself the symptom (`...rml_v_1_scrml_v_1() { } 15 * * * * "`). **Any nameless fn that reaches `fnNameMap` re-arms it.** The guard is a non-empty-key check at map construction (`emit-functions.ts:604`), not a regex change.
+
+### g-mangler-scope-blind-shorthand-key-rename — the rewrite is scope-blind and its lookahead set is partial, so object-shorthand KEYS get renamed → silent `undefined` — `NEW S325-bryan (Limb 2 population count); MED; open`
+<!-- @gap id=g-mangler-scope-blind-shorthand-key-rename sev=MED status=open locus=compiler/src/codegen/emit-client.ts:2947(combinedRegex — no scope analysis, partial lookahead set) prov=rationale:measured-during-the-limb2-population-count -->
+
+The pass has no scope awareness: it rewrites a name wherever the regex matches, including PARAMETER declarations that shadow a top-level fn, and it rewrites only those references whose next character is in the partial lookahead set — so a shadowed binding is renamed inconsistently. `stdlib/data/validate.scrml` (top-level `fn min`/`fn max` + `function minLength(min, message)`) shows the shadow half.
+
+The **written-artifact** half is worse because it is silent (MEASURED in `stdlib/http/index.scrml`):
+
+```
+base:    const inner = wrapped || {_scrml_get_2, _scrml_post_3, _scrml_put_4, _scrml_del_5, _scrml_patch_6}
+deleted: const inner = wrapped || {get, post, put, del, patch}
+```
+
+Object-shorthand **KEY** names change, so `inner.get(...)` resolves to `undefined` — no syntax error, no diagnostic. Both sources currently fail compile upstream for unrelated reasons so neither is observable in a green build, but **the mechanism is not corpus-accidental**: any emitted object shorthand whose key matches a declared fn name hits it.
 
 ### g-authed-server-fn-route-returns-bare-value-not-response — a server-fn route handler in an auth- or protect-active unit returns a BARE VALUE, not a `Response`; both shipped hosts pass it straight to Bun, which rejects it — `NEW S325-bryan (found while measuring g-session-get-reserved-key-read-disclosure); HIGH; open`
 <!-- @gap id=g-authed-server-fn-route-returns-bare-value-not-response sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts:3488(useBaselineCsrf)+4085-4092(no-wrapper return)+4102(_egressRedact raw return) prov=rationale:measured-end-to-end-while-scoping-the-session-read-gap -->
