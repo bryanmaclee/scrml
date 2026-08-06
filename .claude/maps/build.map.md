@@ -1,12 +1,21 @@
 # build.map.md
 # project: scrml
-# updated: 2026-08-04T20:30:00Z  commit: b929b9c9
-# NOTE (S320 INCREMENTAL pass): over `e80b692e` -> `b929b9c9` (31 commits, six sessions). TARGETED —
-# ONE workflow line changed (`windows` job's `PUPPETEER_SKIP_DOWNLOAD`) and ONE new PA-side script
-# (`scripts/review-debt.ts`, NOT a CI gate). No package.json script, CLI flag or Dockerfile changed;
-# those sections carry their prior walk. **The single line a reader most needs still holds:
-# `cloud-maps` NO LONGER REFRESHES THE MAPS ON A SCHEDULE — this window itself sat 31 commits / six
-# sessions before a manual pass caught it (S317/S318/S319/S320 each deferred the dispatch in a row).**
+# updated: 2026-08-06T06:17:17-06:00  commit: a3a34d80
+# **SOURCE WALK IS AT `0d9d843d`; the stamp is `a3a34d80`, the true HEAD.** `a3a34d80` (the
+# S322-bryan wrap continuity commit) landed WHILE this pass ran and is DOCS-ONLY — verified
+# `git diff --name-only 0d9d843d..a3a34d80` = {docs/changelog.md, docs/pr-reviews.md, hand-off.md,
+# handOffs/delta-log.md}, ZERO diff under compiler/ scripts/ stdlib/ package.json .github/. Every
+# source claim below therefore holds at the stamp.
+# NOTE (S322/S324 INCREMENTAL pass): over `15e5e070` -> `a3a34d80` (23 commits, TWO session-windows
+# across two clones). **This map was DELIBERATELY older than the rest of the set at the last two
+# stamps; it is re-walked now because a NEW TOOL landed that a codegen task must know about.**
+# `git diff 15e5e070..HEAD -- .github/ package.json Dockerfile docker-compose.yml Makefile` is
+# **EMPTY** — zero CI, packaging, npm-script, CLI-flag or Docker change this window. The ONE addition
+# is `scripts/corpus-emit-differential.ts` + `scripts/corpus-check-goggles.js` (#428): the standing
+# **pre-land gate for any codegen change**, and like `review-debt.ts` it is **NOT wired into `ci.yml`**.
+# Everything else carries its prior walk. **The single line a reader most needs still holds:
+# `cloud-maps` NO LONGER REFRESHES THE MAPS ON A SCHEDULE — the window this pass reconciles ran 23
+# commits and two session-windows with no refresh, exactly as the last one did.**
 
 ## Development Commands (root package.json scripts)
 compile — `bun run compiler/src/cli.js compile`
@@ -195,6 +204,89 @@ drains merged-but-unreviewed PRs against `docs/pr-reviews.md`, and is wired into
 — it is bookkeeping for the PA operating loop, **not a CI step**, and does not appear in `ci.yml`.
 First drain (S316) found a real incomplete fix (#391). Standing measurement, per S319: the review
 floor's execution rate over a 3-session window is itself the thing being tracked.
+
+## Wide-corpus emit-differential + dual-goggle syntax gate — `scripts/corpus-emit-differential.ts` + `scripts/corpus-check-goggles.js` (NEW #428) — **NOT a CI gate; the STANDING PRE-LAND GATE for codegen**
+
+**Task-shape routing: any change under `compiler/src/codegen/` runs this, base-vs-head, before it
+lands.** It is not in `ci.yml`, not in `bun test`, not in a git hook. It is run by hand. (There was no
+routing row for this task shape until this pass, and the absence cost a dispatch.)
+
+```
+# capture one side (repeat for base and head, from two checkouts)
+bun scripts/corpus-emit-differential.ts capture \
+    --compiler-root /abs/path/to/a/scrml/checkout \
+    --label base-<sha> --work /scratch/base --manifest /scratch/base.manifest.json
+    [--roots examples,samples,conformance,stdlib,benchmarks]   # default; RECURSIVE
+    [--concurrency 10] [--expect-total 1878] [--reuse-artifacts] [--no-syntax-check]
+
+# compare
+bun scripts/corpus-emit-differential.ts diff \
+    --base /scratch/base.manifest.json --head /scratch/head.manifest.json
+    [--json /scratch/diff.json] [--allow-same-revision] [--allow-reuse-manifest]
+```
+
+**Population at this HEAD: 1878 `.scrml` sources / 7254 emitted artifacts.** The 453 deliberate
+exclusions are PRINTED with per-directory counts, so what is not measured is a visible decision rather
+than an invisible default (`docs/` illustrative snippets · `compiler/native-parser/` deliberately
+malformed fixtures · `handOffs/` session artifacts). `stdlib/` and `benchmarks/` were ADDED to the
+default roots after an adversarial review noted the original three covered 1818 of 2368 sources and
+excluded both shipped scrml and the most app-shaped programs in the tree.
+
+**Exit codes are three-valued and the third one is the whole design:**
+| verb | 0 | 1 | 2 |
+|---|---|---|---|
+| `capture` | manifest written, every self-check agreed | a self-check FAILED (enumeration disagreement, `--expect-total` mismatch, slug collision, unreadable artifact) | — |
+| `diff` | no differences at all | differences found | **NOT A VALID COMPARISON** — different roots, enumeration disagreement, same revision both sides, differing check contexts, a `--reuse-artifacts` manifest, or a VACUOUS run (zero artifacts compared / zero checkable artifacts checked) |
+
+**A capture NEVER exits non-zero merely because sources failed to compile — compile failure is DATA**
+(`HARD REQ 5`). Every defense in the tool is marked `HARD REQ n` at its own site so a future editor can
+see exactly what they would be removing.
+
+### The load-bearing fact: `node --check` is the WRONG instrument, and so is bun
+
+**`node --check` on a bare `.js` ACCEPTS a top-level stranded `await`** — Node resolves it by
+module-syntax auto-detection and happily parses it as a module, where TLA is legal:
+
+```
+$ printf 'const x = 1;\nawait fetch("/y");\n' > tla.js
+$ node --check tla.js ; echo $?            # -> 0   (PASSES)
+```
+
+**But the compiler emits `<script src="…client.js">` with NO `type="module"`.** Client bundles and the
+shared runtime load as **CLASSIC SCRIPTS**, where the same bytes are a fatal SyntaxError and the whole
+bundle is dead on arrival. **A gate built on `node --check` certifies bundles that cannot load** — and
+that is precisely the auto-await work's own dominant failure mode. `node --check` is not used here and
+**must not be reintroduced**.
+
+**And the obvious in-process fix would have been a THIRD hollow gate:** measured,
+`bun -e 'new (require("node:vm").Script)("await f();")'` does **not** throw, while the same line under
+`node` throws `SyntaxError`. **Bun's `vm.Script` does not reject a top-level `await`.** The parent is a
+Bun script; `corpus-check-goggles.js` is deliberately a separate **NODE** subprocess
+(`node --experimental-vm-modules corpus-check-goggles.js <jobs.json> <results.json>`), batched — one
+process, many files — so the correctness does not cost a spawn per artifact.
+
+Two further reasons the goggles are explicit rather than ambient: `node --check`'s verdict is a function
+of (content, extension, **nearest `package.json` `"type"` field**) — an input that lives OUTSIDE the
+artifact, so dropping a `package.json` above the output tree swings the same bytes between pass and
+fail; `vm.Script` / `vm.SourceTextModule` take source text and nothing else. And the EFFECTIVE goggle
+per artifact is derived from the emitted HTML's own `<script>` tag, not guessed.
+
+**It earned its cost on its first real run:**
+`g-stdlib-module-resolver-emits-import-meta-into-a-classic-script-bundle` (MED, open) — a cleanly
+compiling stdlib source emitting `Cannot use 'import.meta' outside a module`, invisible to every prior
+gate on TWO counts at once (wrong goggle AND `stdlib/` outside the corpus roots).
+
+### Why it is a repo tool and not another per-arc script
+
+The same defect had shipped **three times**, each time in a throwaway harness, each time leaving a gate
+that reported green while measuring a fraction of its population: `docs/changes/chunk-namespacing/
+artifact-diff.mjs` compared **8 of 115** files (a re-anchored `relative()` plus a `catch { continue }`
+that swallowed the throw); `scripts/u1-corpus-emit.sh` globbed TOP-LEVEL-ONLY in two directories,
+measured **329 of 1818**, and reported "708/708 byte-identical"; that same script's `node --check` half
+inherited the truncated population and reported base 2 / head 2 while an independent wide measurement of
+the same two revisions got base 44 / head 46. **`pa-base v2.13 §8` names this THE TRUNCATED PROBE: a
+truncated enumeration reads exactly like a complete one.** `scripts/u1-corpus-emit.sh` was deliberately
+EXCLUDED from the #429 landing — it is the gate this tool retired.
 
 ## Content-addressed build assets + cache headers (S265, adopter #82, PR #96)
 
@@ -391,7 +483,7 @@ pre-push — **SCOPE AND TRIGGER BOTH CHANGED THIS WINDOW.**
 None. No Dockerfile / docker-compose in this repo — see infra.map.md.
 
 ## Tags
-#scrml #map #build #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist #gate-topology #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #failure-name-sets #cry-wolf #new-ref-push-skip #set-e-trap #pre-push-scope #b7dda491 #browser-baseline #failure-name-set #bidirectional-baseline #s34-census #§34.0 #row-provenance #fetch-depth-0 #diff-scoped-gate #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #no-scheduled-map-refresh #advisory-review-disabled #skipped-step-behind-red-step #gap-attribute-bag #locus-attr #partial-impl #proven-gate #import-meta-main #review-debt-script #pr-reviews-md #puppeteer-skip-download #windows-ci-flake #boot-step-0.6
+#scrml #map #build #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist #gate-topology #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #failure-name-sets #cry-wolf #new-ref-push-skip #set-e-trap #pre-push-scope #b7dda491 #browser-baseline #failure-name-set #bidirectional-baseline #s34-census #§34.0 #row-provenance #fetch-depth-0 #diff-scoped-gate #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #no-scheduled-map-refresh #advisory-review-disabled #skipped-step-behind-red-step #gap-attribute-bag #locus-attr #partial-impl #proven-gate #import-meta-main #review-debt-script #pr-reviews-md #puppeteer-skip-download #windows-ci-flake #boot-step-0.6 #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #script-vs-module-goggle #node-check-blind-to-tla #bun-vm-script-blind #classic-script-no-type-module #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #453-exclusions-printed #exit-code-2-invalid-comparison #compile-failure-is-data #u1-corpus-emit-retired #import-meta-classic-script
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -31,10 +31,33 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 23 |
-| MED | 115 |
+| MED | 116 |
 | LOW | 49 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-s34-census-windows-only-url-pathname-breaks-the-one-command-catalog-probe — `scripts/s34-census.ts` fails on Windows via `new URL(import.meta.url).pathname`, and three consecutive maps passes told every reader the script was BROKEN outright — `NEW S322-bryan (surfaced by the wrap 6c maps pass running on a different clone); MED; open`
+<!-- @gap id=g-s34-census-windows-only-url-pathname-breaks-the-one-command-catalog-probe sev=MED status=open locus=scripts/s34-census.ts:49 prov=rationale:the-script-resolves-its-own-path-with-new-URL-import-meta-url-pathname-which-yields-a-leading-slash-drive-path-on-windows-while-the-sibling-script-one-file-over-uses-fileURLToPath-correctly -->
+
+**One line of code; three passes of wrong guidance.** `scripts/s34-census.ts:49` resolves its own path with
+`new URL(import.meta.url).pathname`, which on Windows yields a `/C:/…` form that does not open.
+`scripts/facts.ts:31` — one file over — uses `fileURLToPath` and is correct.
+
+**The cost was not the crash, it was the CONCLUSION.** Three consecutive `.claude/maps/` passes recorded
+that the census script *"is STILL BROKEN"* and routed readers to a manual fallback for the §34 catalog
+question. It is not broken; it is **Windows-only broken**. On this clone it runs and answers in one
+command: **806 rows · 1876 source files · 855 conformance cases**, bucketed `STRUCK 34 · PINNED 339 ·
+IMPL-SITES 321 · DECLARED-AHEAD 14 · RUNTIME-SURFACED 3 · FALSE-CLAIM 95`.
+
+**Why it survived three passes:** every one of them ran on the same clone. It was caught the first time a
+pass ran somewhere else. That is the cross-machine blind spot the contract already names for the inbox
+(`pa-base` §10, per-clone) showing up in a second channel — **a tool's brokenness can be a property of the
+machine that last looked at it**, and a maps note that says "broken" without saying "on what" propagates as
+fact.
+
+**Fix:** `fileURLToPath(import.meta.url)`, mirroring `facts.ts:31`. Trivial. **Prove the bite by running it
+on the Windows clone**, not by reading the diff — the whole defect class here is a claim that was never
+executed on the platform it described.
 
 ### g-drain-textscan-overfires-on-awaited-nested-arm-site — the fail-closed async drain's raw-TEXT scan is POSITION-BLIND, so it reports a leak against a nested `!{}` arm site that `emitArmBody`'s re-parse genuinely awaits — a FALSE POSITIVE on correct code — `NEW S322-bryan (Limb 1; the diagnostic is wrong, the emission is verified correct); MED; open`
 <!-- @gap id=g-drain-textscan-overfires-on-awaited-nested-arm-site sev=MED status=open locus=compiler/src/codegen/emit-library-shared.ts prov=rationale:the-drain-records-async-names-from-arm-handler-TEXT-and-cannot-distinguish-an-awaitable-site-from-a-non-awaitable-one -->
@@ -90,6 +113,8 @@ and should be decided WITH it, not separately. **Reproduce before fixing.**
 
 ### g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources — the auto-await arc's motivating bug class is still live at ~150 call sites across cleanly-compiling corpus sources — `NEW S322-bryan (measured by the wide-corpus harness + an independent reviewer sweep); HIGH; open`
 <!-- @gap id=g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources sev=HIGH status=open locus=searched:compiler/src/codegen/emit-expr.ts,emit-client.ts,scheduling.ts,emit-functions.ts prov=dd:autoawait-choke-point-vs-heterogeneous-2026-08-04 -->
+
+**⚑ THE ID BAKES A STALE FIGURE — 150 vs 142. Do NOT rename it; `scripts/threads.ts` and the review records key on the id.** The `150` is the harness's wider **pre-rebase** count (looser counting rule, wider corpus). The **landed** re-measure, on the rebased tree under the fixed dual-goggle gate, is **142 bare of 464 across 103 sources, delta 0 base→head** — that is the figure in the changelog, delta-log [1171], and #429/#442. An independent reviewer's third count, different rule again, was 49 of 148 across 70 sources. **All three agree on the only number that gates anything: the delta is ZERO.** Cite 142 when quoting the current surface.
 
 **The measurement that motivates this entry is the one that corrected an earlier false conclusion.**
 The U1 wide-corpus run reported zero output difference on every cleanly-compiling source, and the

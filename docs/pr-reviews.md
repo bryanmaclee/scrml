@@ -35,6 +35,9 @@ predate the rule and are out of scope by construction rather than by exemption.
 
 ## Log
 
+<!-- @review pr=442 verdict=finding by=S322-bryan date=2026-08-06 probe=THREE-adversarial-rounds-TWO-do-not-lands-round1-the-mitigation-blinded-the-drain-to-EVERY-block-error-arm-55-arms-in-17-files-incl-stdlib-auth-jwt-newly-accepting-and-undeclared-round2-rescoped-still-wrong-because-the-gate-is-ARM-granular-while-the-hazard-is-SITE-granular-worst-case-a-library-nested-arm-at-an-AWAITABLE-position-emitted-safeCallAsync-bare-so-the-error-arm-could-never-run-round3-measured-the-false-positive-population-FIRST-at-0-of-1878-and-REMOVED-the-mitigation-entirely-final-1878-sources-7254-artifacts-0-content-diffs-syntax-delta-0-under-all-three-goggles-bare-sites-142-to-142 note=limb1-unification-cleared-in-round-1-and-never-moved-what-failed-twice-was-a-mitigation-for-a-false-positive-the-change-itself-created -->
+<!-- @review pr=441 verdict=carve-out by=S322-bryan date=2026-08-06 probe=docs-only-changelog-pr-reviews-handoff-deltalog-no-code-path-peters-S324-wrap-continuity -->
+<!-- @review pr=436 verdict=carve-out by=S322-bryan date=2026-08-06 probe=docs-only-scoping-and-deltalog-no-code-path-own-async-subtraction-scope-plus-the-option-C-retirement-record -->
 <!-- @review pr=440 verdict=clean by=S324-peter date=2026-08-06 probe=execution-500-to-200-both-bugs+conformance-1443-0-fix-vs-prefix-fresh-process+store-invariant-probe-readonly-currentUser-stays-Map-not-durable+no-double-binding+zero-diagnostic-minted note=needsSessionInfra-widening-came-through-clean-unlike-the-357-vector-gap1-conformance-restoration-52.15.1 -->
 <!-- @review pr=439 verdict=carve-out by=S324-peter date=2026-08-06 probe=docs-only-own-S323-wrap-handoff+changelog+deltalog-no-code-path -->
 <!-- @review pr=438 verdict=carve-out by=S324-peter date=2026-08-06 probe=file-list-diff-docs-only-brief-archival-no-code-path -->

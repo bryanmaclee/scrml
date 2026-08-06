@@ -1,11 +1,19 @@
 # test.map.md
 # project: scrml
-# updated: 2026-08-05T00:00:00Z  commit: 15e5e070
-# NOTE (S321 INCREMENTAL pass): over `b929b9c9` -> `15e5e070` (S320-tail + S319 + S321, ~19 commits).
-# Counts re-derived by `git ls-files`. **No gate-topology change this window** — this pass is COUNTS +
-# new unit/conformance coverage for #405 (CPS auto-await choke-point), #416 (`W-IF-IN-EACH`), #417
-# (reset init-thunk reassignment skip). Per-window test inventories stay DELETED;
-# `git log --diff-filter=A --name-only b929b9c9..HEAD -- compiler/tests conformance` answers that faster.
+# updated: 2026-08-06T06:17:17-06:00  commit: a3a34d80
+# **SOURCE WALK IS AT `0d9d843d`; the stamp is `a3a34d80`, the true HEAD.** `a3a34d80` (the
+# S322-bryan wrap continuity commit) landed WHILE this pass ran and is DOCS-ONLY — verified
+# `git diff --name-only 0d9d843d..a3a34d80` = {docs/changelog.md, docs/pr-reviews.md, hand-off.md,
+# handOffs/delta-log.md}, ZERO diff under compiler/ scripts/ stdlib/ package.json .github/. Every
+# source claim below therefore holds at the stamp.
+# NOTE (S322/S324 INCREMENTAL pass): over `15e5e070` -> `a3a34d80` (23 commits, TWO session-windows
+# across two clones). Counts re-derived by `git ls-files`; agrees with `docs/FACTS.md` (1,323).
+# **No `bun test` gate-topology change this window — but a NEW PRE-LAND GATE exists that is NOT a
+# `bun test` tier at all:** `scripts/corpus-emit-differential.ts` + `corpus-check-goggles.js` (#428),
+# the standing wide-corpus emit-differential + dual-goggle syntax gate for ANY codegen change. It is
+# not in `ci.yml`, not in `bun test`, not in a hook — it is run BY HAND, base-vs-head, before landing.
+# See the new section below and build.map.md. Per-window test inventories stay DELETED;
+# `git log --diff-filter=A --name-only 15e5e070..HEAD -- compiler/tests conformance` answers that faster.
 
 ## Test Framework
 Runner: `bun:test` (Bun's built-in test runner, no separate package dep)
@@ -17,36 +25,46 @@ Browser DOM: happy-dom / @happy-dom/global-registrator (compiler/tests/browser/)
 Browser tier ASSERTION: `bun scripts/browser-baseline.ts --check` (**not** `bun test compiler/tests/browser`)
 E2E: Playwright (`@playwright/test`), separate config at e2e/playwright.config.ts, NOT part of `bun test`
 
-## Test Categories (compiler/tests/, **1319** `*.test.js` total)
+## Test Categories (compiler/tests/, **1323** `*.test.js` total)
 
-Fresh recursive `git ls-files` recount at `15e5e070`, all 9 categories individually re-verified;
-agrees with `docs/FACTS.md` (`test files | 1,319`), **which is the citable authority — do not
-hardcode a competing number.** Net **+5** this pass (unit +4, conformance +1; integration files were
-MODIFIED not added — `corpus-emitted-specifier-resolution.test.js` / `trucking-dispatch-smoke-
-integration.test.js`; browser/lsp/commands/self-host/e2e-render-map/top-level all unchanged).
+Fresh recursive `git ls-files` recount at `a3a34d80`, all 9 categories individually re-verified;
+agrees with `docs/FACTS.md` (`test files | 1,323`), **which is the citable authority — do not
+hardcode a competing number.** Net **+4** this pass (unit +1, integration +2, browser +1;
+conformance / lsp / commands / self-host / e2e-render-map / top-level all unchanged).
 
 | Category | Glob | Count | **Which gate runs it** |
 |---|---|---|---|
-| Unit | `compiler/tests/unit/**/*.test.js` | **871** | `gate` (blocking) + pre-commit + pre-push |
-| Integration | `compiler/tests/integration/**/*.test.js` | **189** | `tracking` (non-blocking) + pre-commit + pre-push |
-| Conformance | `compiler/tests/conformance/**/*.test.js` | **131** | `gate` (blocking) + pre-commit + pre-push |
-| Browser | `compiler/tests/browser/**/*.test.js` | 89 (unchanged) | `gate` (BLOCKING) + `tracking` — via the NAME-SET check |
+| Unit | `compiler/tests/unit/**/*.test.js` | **872** | `gate` (blocking) + pre-commit + pre-push |
+| Integration | `compiler/tests/integration/**/*.test.js` | **191** | `tracking` (non-blocking) + pre-commit + pre-push |
+| Conformance | `compiler/tests/conformance/**/*.test.js` | 131 (unchanged) | `gate` (blocking) + pre-commit + pre-push |
+| Browser | `compiler/tests/browser/**/*.test.js` | **90** | `gate` (BLOCKING) + `tracking` — via the NAME-SET check |
 | LSP | `compiler/tests/lsp/**/*.test.js` | 11 | `tracking` only (non-blocking) |
 | Commands | `compiler/tests/commands/**/*.test.js` | 8 | `tracking` only (non-blocking) |
 | Self-host | `compiler/tests/self-host/**/*.test.js` | 4 | `tracking` only (non-blocking) |
 | e2e-render-map | `compiler/tests/e2e-render-map/` | 2 | `tracking` only (non-blocking) |
 | Parser-conformance + native-* | top-level `compiler/tests/*.test.js` | 14 | `gate` (blocking) + pre-commit (since S302) |
 
-**New this pass:** `compiler/tests/conformance/conf-CTRL-fnbody-autoawait-choke-point.test.js` (#405 —
-the CPS choke-point's own conformance-style coverage) · `compiler/tests/unit/assignment-init-set-
-reset-inversion.test.js` + `compiler/tests/unit/each-if-in-each-w409.test.js` + `compiler/tests/unit/
-bare-variant-string-literal-fence.test.js` + `compiler/tests/unit/runtime-script-tag-depth-prefix.test.js`
-(unit, #417/#416/#410/#408 respectively — the latter two landed in the S320 tail, folded in here since
-the prior pass's watermark predates them).
+**New this pass — 4 files, and each one is worth knowing WHY it exists:**
 
-The top-level `conformance/` corpus moved further: **853 -> 855 cases (+2)** — the two
-`reactive/reset-init-after-assignment[-in-if]-rt` RT pins (#417, `g-assignment-emits-init-set-
-inverting-reset`), each PROVEN to FAIL pre-fix (reset → 2) and PASS post-fix (reset → 0).
+| File | Tier | What it pins |
+|---|---|---|
+| `unit/async-name-provider.test.js` | unit | #442 Limb 1 — the ONE async-name provider. **Its §5 is a SELF-RETIRING GUARD**: it asserts the `g-drain-textscan-overfires-on-awaited-nested-arm-site` false-positive diagnostic IS present **AND** that the emission it fires against IS correct. Fix the root and this test FAILS and tells you to delete it. |
+| `browser/browser-u1-client-server-fn-await.test.js` | browser | #429 U1 — the client server-fn call-site `await`, asserted at RUNTIME in the browser tier rather than by grepping emitted text (the S265 execute-don't-grep rule). |
+| `integration/gh357-session-sql-interpolation.test.js` | integration | #435 — `session.*` inside a `?{}` SQL interpolation resolves (500 -> 200), and the Proxy binding preserves BOTH accessor shapes (`.name` getter and `[expr]` -> `.get()`). |
+| `integration/emit-server-handler-dangling-refs.test.js` | integration | #440 — the `@currentUser` resolver gate (plain + SSE handlers) and the `<channel auth=>`-only `_scrml_auth_check`; includes the store-invariant probe (a read-only `@currentUser` program gets the in-memory Map, NOT the durable on-disk store). |
+
+**`compiler/tests/browser/FAILURE-BASELINE.json` is unchanged, and that is a CLAIM, not an omission** —
+the browser tier gained a test and it passes, so the failure NAME SET did not move.
+
+Two existing files were MODIFIED rather than added, and the modification is itself a fact worth
+carrying: `unit/error-handler-const-bind-r25-bug-49.test.js` and
+`integration/nested-error-handler-no-invalid-js.test.js` had an incidental blanket
+`errors.toHaveLength(0)` **NARROWED to exclude exactly one code** — the known-false-positive
+`E-ASYNC-STDLIB-IN-SYNC-CALLBACK` firing described in error.map.md. Every subject assertion is
+untouched, and any OTHER new diagnostic still fails them.
+
+The top-level `conformance/` corpus did **not** move this window — still **855** cases
+(`docs/FACTS.md` is the authority).
 
 ## THE BROWSER TIER IS NOW GATED — and the mechanism generalizes
 
@@ -267,8 +285,52 @@ stale), then compare the WHOLE suite rather than an isolated file — happy-dom 
 between files, so a single-file run can be green while the suite is red, and vice versa. **Then run
 `bun scripts/browser-baseline.ts` and diff NAMES**, which is the comparison a human was doing by hand.
 
+## THE PRE-LAND GATE FOR CODEGEN — `corpus-emit-differential` (NEW #428), and it is NOT `bun test`
+
+**If your task changes anything under `compiler/src/codegen/`, this is the gate.** It is not in
+`ci.yml`, not in `bun test`, not in any git hook — it is run BY HAND, base-vs-head, before landing.
+There was no routing row for this task shape before this pass and the absence cost a dispatch.
+
+```
+bun scripts/corpus-emit-differential.ts capture --compiler-root <abs checkout> \
+    --label base-<sha> --work /scratch/base --manifest /scratch/base.manifest.json
+bun scripts/corpus-emit-differential.ts capture --compiler-root <abs checkout> \
+    --label head-<sha> --work /scratch/head --manifest /scratch/head.manifest.json
+bun scripts/corpus-emit-differential.ts diff --base /scratch/base.manifest.json \
+    --head /scratch/head.manifest.json [--json /scratch/diff.json]
+```
+
+Default roots `examples,samples,conformance,stdlib,benchmarks` (RECURSIVE; the 453 deliberate
+exclusions are PRINTED with per-directory counts, so what is not measured is a visible decision rather
+than an invisible default). Population at this HEAD: **1878 sources / 7254 artifacts.** Reported:
+compile-failure delta, artifact-SET delta, artifact-CONTENT delta, syntax delta under three goggles,
+and the bare-server-fn-site count. **Exit codes are three-valued and the third one is the point:**
+0 = no differences; 1 = differences found; **2 = NOT A VALID COMPARISON** (different roots, an
+enumeration disagreement, the same revision on both sides, differing check contexts, a
+`--reuse-artifacts` manifest, or a VACUOUS run in which zero artifacts were compared). A capture NEVER
+exits non-zero merely because sources failed to COMPILE — compile failure is DATA.
+
+**Why the syntax half is a separate `node` subprocess, and why "simplifying" it re-breaks it:**
+`node --check` on a bare `.js` **ACCEPTS a top-level stranded `await`** (Node resolves it by
+module-syntax auto-detection and parses it as a module). **The compiler emits `<script src=…>` with NO
+`type="module"`** — a CLASSIC SCRIPT, where the same bytes are a fatal SyntaxError and the whole bundle
+is dead on arrival. That is the auto-await work's own dominant failure mode. **`node --check` is not
+used here and must not be reintroduced.** Compounding it: **bun's `vm.Script` does not reject a
+top-level `await` either**, so an in-process fix under Bun would have been a THIRD hollow gate.
+`corpus-check-goggles.js` parses each artifact under BOTH goggles via `vm.Script` /
+`vm.SourceTextModule` — source text and nothing else, unlike `node --check`, whose verdict is a
+function of (content, extension, nearest `package.json` `"type"`), an input living OUTSIDE the artifact.
+The EFFECTIVE goggle is derived from the emitted HTML's own `<script>` tag.
+
+**The anti-pattern it exists to kill had shipped THREE times, and it reads exactly like success:** a
+truncated enumeration produces no error, well-formed output, and every downstream count, ratio and
+scoping decision inherits the truncation (`artifact-diff.mjs` compared 8 of 115 · `u1-corpus-emit.sh`
+measured 329 of 1818 and reported "708/708 byte-identical" · that same script's `node --check` half
+inherited the same population). `pa-base v2.13 §8` names it THE TRUNCATED PROBE. Every defense in the
+tool is marked `HARD REQ n` at its site so a future editor can see what they would be removing.
+
 ## Tags
-#scrml #map #test #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #reset-init-thunk-reassignment #each-nested-if-not-reactive
+#scrml #map #test #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive
 
 ## Links
 - [primary.map.md](./primary.map.md)
