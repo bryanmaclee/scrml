@@ -220,7 +220,13 @@ describe("end-to-end — first POST with the delivered token PASSES (no 403); fa
     const sessionRoute = routes.find((r) => r.path === "/_scrml/session");
     const composeRoute = routes.find((r) => r.method === "GET" && r.path !== "/_scrml/session" && !r.path.startsWith("/_scrml/"));
     const mutRoute = routes.find((r) => r.path.includes("addItem"));
-    const statusOf = (r) => (r instanceof Response ? r.status : null);
+    // A route handler SHALL return a `Response` (S325). This helper used to
+    // answer `null` for a bare value instead of failing — see the note in
+    // auth-csrf-synchronizer-token.test.js.
+    const statusOf = (r) => {
+      expect(r).toBeInstanceOf(Response);
+      return r.status;
+    };
 
     // D1 runtime — projection returns the session identity + token.
     const sResp = await sessionRoute.handler(new Request("http://localhost/_scrml/session", { headers: { Cookie: cookie } }));
@@ -255,8 +261,11 @@ describe("end-to-end — first POST with the delivered token PASSES (no 403); fa
     // D3 integration — a first POST carrying the delivered token PASSES (no 403).
     const postWith = (headers) => new Request(`http://localhost${mutRoute.path}`, { method: "POST", headers, body: JSON.stringify({ name: "delivered" }) });
     const rPass = await mutRoute.handler(postWith({ "Content-Type": "application/json", Cookie: cookie, "X-CSRF-Token": meta[1] }));
-    expect(statusOf(rPass)).not.toBe(403);
-    expect(rPass).toBe("ok");
+    // S325: was `expect(rPass).toBe("ok")` — the bare-return defect asserted as
+    // correct. The pass is a 200 JSON `Response` whose parsed body is "ok".
+    expect(statusOf(rPass)).toBe(200);
+    expect(rPass.headers.get("Content-Type")).toBe("application/json");
+    expect(await rPass.json()).toBe("ok");
 
     // Adversarial — a forged token still 403s (server-authoritative synchronizer).
     const rForged = await mutRoute.handler(postWith({ "Content-Type": "application/json", Cookie: cookie, "X-CSRF-Token": "forged" }));

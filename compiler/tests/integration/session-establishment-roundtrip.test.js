@@ -32,6 +32,16 @@ import { Database } from "bun:sqlite";
 
 import { compileScrml } from "../../src/api.js";
 
+// S325 (g-authed-server-fn-route-returns-bare-value-not-response): a route
+// handler SHALL return a `Response`. Every read below used to be written
+// `r instanceof Response ? await r.json() : r` — a tolerance that let a
+// bare-value handler pass its own round-trip test. `jsonOf` now ASSERTS the
+// shape first, so a regression to a bare return fails at the read site.
+const jsonOf = async (r) => {
+  expect(r).toBeInstanceOf(Response);
+  return await r.json();
+};
+
 // A DB-free login app — the login fn verifies a hardcoded cred (no `?{}`, so no
 // db seed / Bun.SQL handle to lock). `session.set` alone server-escalates it.
 const APP = `<program>
@@ -152,7 +162,7 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
       expect(fixSid).not.toBe(PLANTED); // rotated, never reflected
       // the planted sid resolves anon (no record was ever written under it)
       const rPlanted = await post(whoR, { ...authed, Cookie: `scrml_csrf=${csrf}; __Host-scrml_sid=${PLANTED}` }, {});
-      const planted = rPlanted instanceof Response ? await rPlanted.json() : rPlanted;
+      const planted = await jsonOf(rPlanted);
       expect(planted.isAuth).toBe(false);
       expect(planted.userId).toBe(null);
 
@@ -185,7 +195,7 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
       // proving the Secure/__Host- cookie works locally). ---
       const withSid = { ...authed, Cookie: `scrml_csrf=${csrf}; __Host-scrml_sid=${sid}` };
       const rWho = await post(whoR, withSid, {});
-      const who = rWho instanceof Response ? await rWho.json() : rWho;
+      const who = await jsonOf(rWho);
       expect(who.isAuth).toBe(true);
       expect(who.userId).toBe("u-42");
       expect(who.role).toBe("admin");
@@ -194,19 +204,19 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
       // (which a sibling subdomain CAN set) must NOT authenticate — secure mode
       // reads the __Host- name ONLY.
       const rPlainName = await post(whoR, { ...authed, Cookie: `scrml_csrf=${csrf}; scrml_sid=${sid}` }, {});
-      const plainName = rPlainName instanceof Response ? await rPlainName.json() : rPlainName;
+      const plainName = await jsonOf(rPlainName);
       expect(plainName.isAuth).toBe(false);
       expect(plainName.userId).toBe(null);
 
       // --- isAuth BYPASS (S239 FIX 2): a BOGUS sid with no record → anon ---
       const rBogus = await post(whoR, { ...authed, Cookie: `scrml_csrf=${csrf}; __Host-scrml_sid=totally-bogus-nonexistent` }, {});
-      const bogus = rBogus instanceof Response ? await rBogus.json() : rBogus;
+      const bogus = await jsonOf(rBogus);
       expect(bogus.isAuth).toBe(false);
       expect(bogus.userId).toBe(null);
 
       // --- whoami WITHOUT the cookie → anon ---
       const rAnon = await post(whoR, authed, {});
-      const anon = rAnon instanceof Response ? await rAnon.json() : rAnon;
+      const anon = await jsonOf(rAnon);
       expect(anon.isAuth).toBe(false);
       expect(anon.userId).toBe(null);
 
@@ -227,7 +237,7 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
       expect(clear).toBeTruthy();
       expect(clear.raw).toContain("Expires=Thu, 01 Jan 1970");
       const rAfter = await post(whoR, withSid, {});
-      const after = rAfter instanceof Response ? await rAfter.json() : rAfter;
+      const after = await jsonOf(rAfter);
       expect(after.isAuth).toBe(false);
       expect(after.userId).toBe(null);
     } finally {
@@ -258,7 +268,6 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
       const base = { "Content-Type": "application/json", Cookie: `scrml_csrf=${csrf}`, "X-CSRF-Token": csrf };
       // B4a (S266): secure mode → the session cookie is __Host-scrml_sid.
       const withSid = (sid) => ({ ...base, Cookie: `scrml_csrf=${csrf}; __Host-scrml_sid=${sid}` });
-      const jsonOf = async (r) => (r instanceof Response ? await r.json() : r);
 
       // login as admin (role=admin)
       const sidAdmin = cookieVal(await post(loginR, base, { email: "admin@x.com", password: "secret" }), "scrml_sid").value;
@@ -326,7 +335,6 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
         route.handler(new Request(`http://localhost${route.path}`, {
           method: "POST", headers, body: JSON.stringify(body ?? {}),
         }));
-      const jsonOf = async (r) => (r instanceof Response ? await r.json() : r);
 
       // CSRF handshake + a REAL attacker login → a genuine authed sid + record.
       const r0 = await post(loginR, { "Content-Type": "application/json" }, {});
@@ -391,7 +399,6 @@ describe("§20.5 session establishment — full HTTP round-trip", () => {
         route.handler(new Request(`http://localhost${route.path}`, {
           method: "POST", headers, body: JSON.stringify(body ?? {}),
         }));
-      const jsonOf = async (r) => (r instanceof Response ? await r.json() : r);
 
       const r0 = await post(loginR, { "Content-Type": "application/json" }, {});
       const csrf = cookieVal(r0, "scrml_csrf").value;

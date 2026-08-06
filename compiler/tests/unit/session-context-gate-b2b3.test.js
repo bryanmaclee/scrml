@@ -167,7 +167,13 @@ describe("B2 — emit + EXECUTE: the index + optional lowered reads RUN (not jus
         for (const c of all) { const m = c.match(new RegExp(`${name}=([^;]*)`)); if (m) return m[1]; }
         return null;
       };
-      const jsonOf = async (r) => (r instanceof Response ? await r.json() : r);
+      // S325 (g-authed-server-fn-route-returns-bare-value-not-response): a route
+      // handler SHALL return a `Response`. This read used to tolerate a bare
+      // value, which is how the bare-return class survived its own round-trips.
+      const jsonOf = async (r) => {
+        expect(r).toBeInstanceOf(Response);
+        return await r.json();
+      };
 
       const r0 = await post(loginR, { "Content-Type": "application/json" }, {});
       const csrf = cookieVal(r0, "scrml_csrf");

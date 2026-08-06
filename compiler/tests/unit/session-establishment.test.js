@@ -347,3 +347,113 @@ describe("§20.5 session — S239-2 destroy-clear + identity-vs-preference commi
     expect(prefPath).not.toContain("_scrml_session_store.delete");
   });
 });
+
+// ---------------------------------------------------------------------------
+// S325 Unit 2 — `session.get(key)` is an OWN-PROPERTY read.
+//
+// Before the fix the accessor was `this._rec[key] ?? null`, an ordinary property
+// read that resolved up `Object.prototype`. MEASURED on the emitted helper:
+// `.get("__proto__")` returned `Object.prototype` and `.get("constructor")` /
+// `.get("toString")` / `.get("hasOwnProperty")` / `.get("valueOf")` /
+// `.get("isPrototypeOf")` each returned a FUNCTION. `key` is request-reachable
+// (`session.get(k)`, and the dynamic-key `session[k]` form which the
+// `_scrml_session_bind` Proxy routes to this same method), and a function value
+// flowing into a `?{ … ${session.get(k)} … }` bind is an HTTP 500 SQL TypeError.
+//
+// These tests EXECUTE the emitted helper rather than grepping it (S265 lesson:
+// "marker present" is not "feature works").
+// ---------------------------------------------------------------------------
+describe("§20.5 session.get — own-property read (S325 Unit 2)", () => {
+  // Evaluate the emitted `_scrml_session_begin` + `_scrml_session_bind` against
+  // a fixed record, with the cookie/store reads stubbed out.
+  async function sessionAccessorFor(record) {
+    const { serverJs } = compile(LOGIN);
+    const begin = serverJs.match(/function _scrml_session_begin\(req\) \{[\s\S]*?\n\}/)[0]
+      .replace("const cookieHeader = req.headers.get('Cookie') || '';", "const cookieHeader = '';")
+      .replace("const sid = _scrml_read_session_id(cookieHeader);", "const sid = 'sid-fixed';")
+      .replace(
+        "const rec = sid ? (_scrml_session_store.get(sid) || null) : null;",
+        `const rec = ${JSON.stringify(record)};`,
+      );
+    const bind = serverJs.match(/function _scrml_session_bind\(_s\) \{[\s\S]*?\n\}/)[0];
+    const dir = mkdtempSync(join(tmpdir(), "session-get-ownprop-"));
+    const modPath = join(dir, "harness.mjs");
+    writeFileSync(
+      modPath,
+      `${begin}\n${bind}\n` +
+        `const _sess = _scrml_session_begin({ headers: { get: () => '' } });\n` +
+        `export const sess = _sess;\n` +
+        `export const proxied = _scrml_session_bind(_sess);\n`,
+    );
+    try {
+      return await import(`file://${modPath}?v=${Date.now()}-${Math.random()}`);
+    } finally {
+      try { rmSync(dir, { recursive: true }); } catch { /* best effort */ }
+    }
+  }
+
+  const PROTO_KEYS = [
+    "__proto__", "constructor", "toString", "hasOwnProperty", "valueOf", "isPrototypeOf",
+    "propertyIsEnumerable", "toLocaleString",
+  ];
+
+  test("the emitted accessor is an own-property read", () => {
+    const { serverJs } = compile(LOGIN);
+    expect(serverJs).toContain(
+      "get(key) { return Object.hasOwn(this._rec, key) ? (this._rec[key] ?? null) : null; },",
+    );
+    // `Object.hasOwn`, NOT `this._rec.hasOwnProperty(key)` — a session record is
+    // built from `session.set` writes, so `_rec` can carry an OWN key named
+    // `hasOwnProperty` that would shadow the method and break the guard on the
+    // one record that attacks it.
+    expect(serverJs).not.toContain("this._rec.hasOwnProperty(");
+  });
+
+  test("a prototype-chain key reads `null`, not the Object.prototype member", async () => {
+    const { sess } = await sessionAccessorFor({ userId: "u-1", pref: "dark" });
+    for (const k of PROTO_KEYS) {
+      expect(sess.get(k)).toBe(null);
+    }
+  });
+
+  test("the same holds through the `_scrml_session_bind` Proxy (the `session[k]` form)", async () => {
+    const { proxied } = await sessionAccessorFor({ userId: "u-1", pref: "dark" });
+    for (const k of PROTO_KEYS) {
+      expect(proxied[k]).toBe(null);
+    }
+  });
+
+  test("a real own key is UNCHANGED — no narrowing of documented behaviour", async () => {
+    const { sess, proxied } = await sessionAccessorFor({ userId: "u-1", pref: "dark", count: 0, flag: false, blank: "" });
+    expect(sess.get("pref")).toBe("dark");
+    expect(proxied.pref).toBe("dark");
+    // A falsy-but-DEFINED own value is a value, not absence: `??` only replaces
+    // null/undefined, and the own-property guard must not change that.
+    expect(sess.get("count")).toBe(0);
+    expect(sess.get("flag")).toBe(false);
+    expect(sess.get("blank")).toBe("");
+    // An absent key is still `null`.
+    expect(sess.get("nope")).toBe(null);
+  });
+
+  test("a record carrying an own key named `hasOwnProperty` cannot defeat the guard", async () => {
+    const { sess } = await sessionAccessorFor({ userId: "u-1", hasOwnProperty: "attacker-string" });
+    // the own key reads back as its own value…
+    expect(sess.get("hasOwnProperty")).toBe("attacker-string");
+    // …and the guard still refuses every other prototype member.
+    expect(sess.get("toString")).toBe(null);
+    expect(sess.get("__proto__")).toBe(null);
+    expect(sess.get("constructor")).toBe(null);
+  });
+
+  test("the reserved-key READ is deliberately NOT closed here (open ruling)", async () => {
+    // `csrfToken` is an OWN property of the record, so Unit 2's prototype guard
+    // does not — and must not silently — change it. Closing the read side is
+    // `g-session-get-reserved-key-read-disclosure` (HIGH, open, routed to
+    // bryan): a reserved-key READ policy is a language-surface ruling. This test
+    // PINS the current behaviour so that ruling lands as a deliberate change
+    // with a failing test, not as a silent drift.
+    const { sess } = await sessionAccessorFor({ userId: "u-1", csrfToken: "TOKEN" });
+    expect(sess.get("csrfToken")).toBe("TOKEN");
+  });
+});

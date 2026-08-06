@@ -91,7 +91,19 @@ describe("B5 runtime guard — a dynamic session.set(csrfToken) cannot pin the t
       route.handler(new Request(`http://localhost${route.path}`, {
         method: "POST", headers, body: JSON.stringify(body ?? {}),
       }));
-    const statusOf = (r) => (r instanceof Response ? r.status : null);
+    // A route handler SHALL return a `Response` (S325). This helper used to
+    // answer `null` for a bare value instead of failing — see the note in
+    // auth-csrf-synchronizer-token.test.js.
+    const statusOf = (r) => {
+      expect(r).toBeInstanceOf(Response);
+      return r.status;
+    };
+    // S325: the `r instanceof Response ? await r.json() : r` reads below used to
+    // TOLERATE a bare-value handler return. They now require the Response.
+    const jsonOf = async (r) => {
+      expect(r).toBeInstanceOf(Response);
+      return await r.json();
+    };
 
     // Attacker attempts to PIN csrfToken to a value they know, using the valid
     // real token to pass the gate. The runtime guard must no-op the write.
@@ -100,7 +112,8 @@ describe("B5 runtime guard — a dynamic session.set(csrfToken) cannot pin the t
       { k: "csrfToken", v: "attacker-known-token" },
     );
     // the mutation itself is admitted (valid session + valid token) and returns.
-    expect(rPin instanceof Response ? await rPin.json() : rPin).toBe("pinned");
+    expect(statusOf(rPin)).toBe(200);
+    expect(await jsonOf(rPin)).toBe("pinned");
 
     // THE GUARD: the stored token is UNCHANGED (the pin was refused).
     expect(store.get(SID).csrfToken).toBe(REAL);
@@ -118,7 +131,8 @@ describe("B5 runtime guard — a dynamic session.set(csrfToken) cannot pin the t
       { "Content-Type": "application/json", Cookie: `__Host-scrml_sid=${SID}`, "X-CSRF-Token": REAL },
       { k: "x", v: "y" },
     );
-    expect(rReal instanceof Response ? await rReal.json() : rReal).toBe("pinned");
+    expect(statusOf(rReal)).toBe(200);
+    expect(await jsonOf(rReal)).toBe("pinned");
   });
 });
 
@@ -176,16 +190,23 @@ describe("B4a opt-out — a session-secure=\"false\" app authenticates over http
     expect(sidCookie.raw).not.toContain("Secure");
     const sid = sidCookie.value;
 
+    // S325: a route handler SHALL return a `Response`; these reads used to
+    // tolerate a bare value.
+    const jsonOf = async (r) => {
+      expect(r).toBeInstanceOf(Response);
+      return await r.json();
+    };
+
     // the plain cookie authenticates on the follow-up.
     const rWho = await post(whoR, { ...authed, Cookie: `scrml_csrf=${csrf}; scrml_sid=${sid}` }, {});
-    const who = rWho instanceof Response ? await rWho.json() : rWho;
+    const who = await jsonOf(rWho);
     expect(who.isAuth).toBe(true);
     expect(who.userId).toBe("u-9");
 
     // opt-out mode reads the plain name ONLY — a `__Host-scrml_sid` cookie is
     // irrelevant here (never set, never read) → anon.
     const rHost = await post(whoR, { ...authed, Cookie: `scrml_csrf=${csrf}; __Host-scrml_sid=${sid}` }, {});
-    const host = rHost instanceof Response ? await rHost.json() : rHost;
+    const host = await jsonOf(rHost);
     expect(host.isAuth).toBe(false);
   });
 });
@@ -245,7 +266,9 @@ describe("B4a fixation — secure mode reads ONLY __Host-scrml_sid (cookie-tossi
     // SESSION cookie name varies between the two probes below.
     const whoWith = async (sessionCookie) => {
       const r = await post(whoR, { "Content-Type": "application/json", Cookie: `scrml_csrf=${csrf}; ${sessionCookie}`, "X-CSRF-Token": csrf }, {});
-      return r instanceof Response ? await r.json() : r;
+      // S325: a route handler SHALL return a `Response` — was a tolerant read.
+      expect(r).toBeInstanceOf(Response);
+      return await r.json();
     };
 
     // THE FIXATION DEFENSE: a plain scrml_sid=<real authed sid> (subdomain-tossable)
