@@ -489,6 +489,52 @@ function astSqlQueryUsesCurrentUser(node: unknown, seen?: WeakSet<object>, depth
   return false;
 }
 
+/**
+ * §20.5 (gh357) — shared text-level detector for a `session.<name>` / `session[<expr>]`
+ * reference that survives into EMITTED text (a `?{}` SQL interpolation carries its query
+ * as a STRING, so the AST `member`/`index` walk in `astSessionMemberMatch` never sees it).
+ *
+ * The left-guard `[^\w$.]` is load-bearing: it prevents `_scrml_session_store`,
+ * `sessionId`, `_scrml_read_session_id`, and the `_scrml_req._scrml_sess` runtime
+ * identifiers (all `\w`/`.`-prefixed) from matching — only a BARE `session` followed by
+ * `.` or `[` counts. `\s*` tolerates `session .foo` / `session [k]` spacing. No `g` flag
+ * (kept stateless for repeated `.test()` in emitter loops).
+ */
+const _SESSION_BARE_TEXT_RE = /(^|[^\w$.])session\s*[.[]/;
+
+/**
+ * §20.5 (gh357) — does ANY `?{}` in the file AST carry a query/body STRING that references
+ * the bare `session` builtin? A `?{ … where id = ${session.userId} }` is invisible to the
+ * AST member/index walk (`astSessionMemberMatch`) because the interpolation is text, not an
+ * expression node — so a session infra gate keyed only on that walk would NEVER emit the
+ * store/middleware/prologue binding and #357 would stay open. Direct sibling of
+ * `astSqlQueryUsesCurrentUser` (:469-490), added for the same class of miss. Permissive by
+ * design: a false POSITIVE only emits unused session infra; a false NEGATIVE emits a
+ * dangling binding (or leaves #357 open).
+ */
+function astSqlQueryUsesSession(node: unknown, seen?: WeakSet<object>, depth = 0): boolean {
+  if (!node || typeof node !== "object" || depth > 64) return false;
+  const _seen = seen ?? new WeakSet<object>();
+  if (_seen.has(node as object)) return false;
+  _seen.add(node as object);
+  if (Array.isArray(node)) {
+    for (const child of node) if (astSqlQueryUsesSession(child, _seen, depth + 1)) return true;
+    return false;
+  }
+  const n = node as Record<string, unknown>;
+  if (n.kind === "sql") {
+    for (const prop of ["query", "body"] as const) {
+      const q = n[prop];
+      if (typeof q === "string" && _SESSION_BARE_TEXT_RE.test(q)) return true;
+    }
+  }
+  for (const key of Object.keys(n)) {
+    if (key === "span") continue;
+    if (astSqlQueryUsesSession(n[key], _seen, depth + 1)) return true;
+  }
+  return false;
+}
+
 function astSessionMemberMatch(node: unknown, props: string[] | null): boolean {
   if (!node || typeof node !== "object") return false;
   if (Array.isArray(node)) {
@@ -2000,7 +2046,13 @@ export function generateServerJs(
   // middleware + write helpers MUST be present even when the page carries no
   // `auth=` (a login page mints a session before any guard exists). This forces
   // `_needsSessionInfra` exactly as an `@currentUser` server-authority query does.
-  const _anySessionBuiltin = astUsesSessionBuiltin(fileAST);
+  // gh357 — OR in the TEXT-level detector: a `session` reference that lives ONLY
+  // inside a `?{}` SQL interpolation is carried as a string, structurally invisible
+  // to `astUsesSessionBuiltin`'s member/index walk. Without this, an interpolation-
+  // only `session` use emits ZERO session infra (no store, no cookie wrap, no
+  // prologue binding) and the bare `session.userId` survives as a free var → HTTP
+  // 500 ReferenceError on every authenticated call. Mirrors `astSqlQueryUsesCurrentUser`.
+  const _anySessionBuiltin = astUsesSessionBuiltin(fileAST) || astSqlQueryUsesSession(fileAST);
   // §20.5 (i29e, S239 FIX 8) — only an app that actually ESTABLISHES a session
   // (`session.set` / `session.destroy`) gets the RULED-durable on-disk store; a
   // read-only-auth / `@currentUser` / serverLoad app that never writes keeps the
@@ -2512,6 +2564,48 @@ export function generateServerJs(
       lines.push("    }");
       lines.push("    return _resp;");
       lines.push("  };");
+      lines.push("}");
+      lines.push("");
+
+      // §20.5 (gh357) — the handler-prologue `session` binding factory. A bare
+      // `session.<name>` / `session[<expr>]` that survives into EMITTED text (a
+      // `?{}` SQL interpolation is carried as a string, never reaching the AST
+      // lowering in emit-expr) needs an in-scope `session` to resolve against, or
+      // it is a free variable → HTTP 500 ReferenceError. The binding MUST be a
+      // Proxy, NOT `const session = _scrml_req._scrml_sess`:
+      //
+      //   `_scrml_req._scrml_sess` is an accessor object (emit-server session
+      //   context): getters `userId`/`role`/`isAuth`, methods `get`/`set`/`destroy`,
+      //   and RAW own-properties `sid`/`_rec`/`_changes`/… where `_rec` holds the
+      //   full stored record INCLUDING the §40.2 `csrfToken`. A raw bind turns the
+      //   dynamic-key form `session[k]` into a RAW property read at the wrong level:
+      //   `session["sid"]` would disclose the live session id and `session["_rec"]`
+      //   the whole record + CSRF token at HTTP 200 — a confidentiality break, the
+      //   exact defeat of the §40.2 synchronizer-token defense the compiler owns.
+      //   And `session[customKey]` would read `undefined` (raw own-prop miss)
+      //   instead of the record value the AST lowering routes through `.get()`.
+      //
+      // The Proxy preserves BOTH accessor shapes so the bare binding AGREES with
+      // the AST lowering (which is KEPT — three security gates match the literal
+      // `_scrml_req._scrml_sess.` and retiring it for a bare bind blinds them):
+      //   - `session.userId|role|isAuth`      → the getter (reads `_rec` via `this`)
+      //   - `session.set|get|destroy(…)`      → the bound method
+      //   - every OTHER key (`.customKey` / `[expr]`) → `.get(key)` → `_rec[key] ?? null`
+      // `Reflect.get(t, k, t)` (receiver = the TARGET) is load-bearing: the getters
+      // read `this._rec`; a Proxy receiver would re-enter the trap on `_rec`
+      // (→ `t.get("_rec")` → null → TypeError). Symbol keys pass through untouched.
+      // `set` returns false so an assignment THROUGH the binding is a loud
+      // strict-mode TypeError, never a silent shadow write to the session object.
+      lines.push("function _scrml_session_bind(_s) {");
+      lines.push("  return new Proxy(_s, {");
+      lines.push("    get(t, k) {");
+      lines.push("      if (typeof k === 'symbol') return Reflect.get(t, k, t);");
+      lines.push("      if (k === 'userId' || k === 'role' || k === 'isAuth') return Reflect.get(t, k, t);");
+      lines.push("      if (k === 'set' || k === 'get' || k === 'destroy') return Reflect.get(t, k, t).bind(t);");
+      lines.push("      return t.get(k);");
+      lines.push("    },");
+      lines.push("    set() { return false; },");
+      lines.push("  });");
       lines.push("}");
       lines.push("");
     }
@@ -3959,6 +4053,35 @@ export function generateServerJs(
       }
     }
 
+    // §20.5 (gh357) — bind `session` for THIS handler if its body carries a
+    // TEXT-level `session.`/`session[` reference the AST lowering never reached.
+    // A `?{ … ${session.userId} }` SQL interpolation is carried as a raw string
+    // (params captured verbatim, then rewritten only for `@name` sigils), so
+    // `session` in it is sigil-less AND invisible to the emit-expr member/index
+    // lowering — it survives as a bare, UNBOUND identifier → HTTP 500
+    // ReferenceError on every authenticated call (GH #357). Unlike `route`
+    // (a plain value bound unconditionally at :route.query), `session` binds only
+    // when actually referenced AND only under the cookie wrap that defines
+    // `_scrml_req._scrml_sess`, so this is a conditional SPLICE mirroring the
+    // `@currentUser` binding just above — same insertion point (handler-scope
+    // entry, after the `route` binding), so it is visible inside the nested
+    // `_scrml_result` IIFE the baseline-CSRF path emits. The binding is a Proxy
+    // (`_scrml_session_bind`) that preserves BOTH accessor shapes (`.name` getter
+    // and `[expr]` → `.get()`), so it AGREES with the KEPT AST lowering rather
+    // than flattening `session[k]` into a raw property read (the confidentiality
+    // break — see `_scrml_session_bind`). `_webAppShape`-gated: a non-route text
+    // ref (SSE / headless) gets no binding and is caught build-blocking by the
+    // E-SESSION-CONTEXT scan below (which now also matches the bare form).
+    {
+      const _sessBody = lines.slice(_cuInsertIdx);
+      const _sessBodyRefsBare = _sessBody.some((l) => _SESSION_BARE_TEXT_RE.test(l));
+      const _sessAlreadyBound = _sessBody.some((l) =>
+        l.includes("const session = _scrml_session_bind("));
+      if (_webAppShape && _sessBodyRefsBare && !_sessAlreadyBound) {
+        lines.splice(_cuInsertIdx, 0, `  const session = _scrml_session_bind(_scrml_req._scrml_sess);`);
+      }
+    }
+
     // Ext 1 M1.5: route export uses the per-batch name + path. For the
     // single-handler case `_curRouteName`/`_curPath` are the route's own name
     // + path; for a multi-batch route each batch exports under
@@ -3971,8 +4094,16 @@ export function generateServerJs(
     // and emits no session infra, so the wrapper does not exist there. Placed
     // OUTERMOST (around any `_scrml_mw_wrap`) so the cookie survives on the final
     // Response and the session context is established before middleware runs.
+    // gh357 — the wrap must ALSO fire on a TEXT-level bare `session.`/`session[`
+    // ref (a `?{}` interpolation), not only the AST-lowered `_scrml_req._scrml_sess.`
+    // form. Without this, an interpolation-ONLY handler emits no cookie wrap, so
+    // `_scrml_req._scrml_sess` is never assigned and the spliced Proxy binding
+    // reads `undefined` — the fix would silently no-op. The spliced binding line
+    // itself does not match the regex (`const session =` / `_scrml_session_bind`
+    // are guarded out), so this does not self-trigger.
     const _sessHandlerRefsSession =
-      lines.slice(_sessHandlerStartIdx).some((l) => l.includes("_scrml_req._scrml_sess."));
+      lines.slice(_sessHandlerStartIdx).some((l) =>
+        l.includes("_scrml_req._scrml_sess.") || _SESSION_BARE_TEXT_RE.test(l));
     const _sessHandlerUsesSession = _webAppShape && _sessHandlerRefsSession;
     let _sessRegHandler = (_scrml_hasMW || _scrml_handleNode != null)
       ? `_scrml_mw_wrap(${handlerName})`
@@ -5654,7 +5785,19 @@ export function generateServerJs(
       // Match the ACCESS form `_scrml_req._scrml_sess.<member>` (a session USE);
       // the `_scrml_session_cookie_wrap` helper's own ASSIGNMENT
       // (`_scrml_req._scrml_sess = …`, no trailing dot) is not a use and is skipped.
-      if (!lines[_i].includes("_scrml_req._scrml_sess.")) continue;
+      // gh357 — ALSO match the TEXT-level bare `session.`/`session[` form (a `?{}`
+      // SQL interpolation the AST lowering never touched). Inside a cookie-wrapped
+      // web-app route handler this is bound (the range is in `_allowedSessionRanges`
+      // and skipped just below); OUTSIDE one — an SSE `server function*`, an
+      // `<endpoint>` arm, an unwrapped headless route — there is no cookie context
+      // to bind it, so it stays a free variable. Firing E-SESSION-CONTEXT here
+      // build-BLOCKS that (fail-safe: over-block never ships a hole) instead of
+      // shipping the silent 500 the AST-only scan missed — closing the residual
+      // dpa-021 §6.1 hole so B "kills the class by construction" everywhere.
+      if (
+        !lines[_i].includes("_scrml_req._scrml_sess.") &&
+        !_SESSION_BARE_TEXT_RE.test(lines[_i])
+      ) continue;
       if (_inAllowed(_i)) continue;
       _sessionCtxFired = true; // file-level: one error is enough to block the build
       errors.push(new CGError(
