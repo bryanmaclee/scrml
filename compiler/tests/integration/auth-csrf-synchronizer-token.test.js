@@ -206,7 +206,16 @@ describe("round-trip — auth-path CSRF actually validates end-to-end", () => {
     const cookie = `__Host-scrml_sid=${SID}`;
     const reqWith = (headers) =>
       new Request(base, { method: "POST", headers, body: JSON.stringify({ name: "alpha" }) });
-    const statusOf = (r) => (r instanceof Response ? r.status : null);
+    // A route handler SHALL return a `Response` (S325,
+    // g-authed-server-fn-route-returns-bare-value-not-response). This helper
+    // used to tolerate a bare value by answering `null` — which is exactly how a
+    // whole class of bare-return handlers passed their own round-trip tests. It
+    // now ASSERTS the shape, so a regression fails here rather than degrading to
+    // a `null` status nobody compares against.
+    const statusOf = (r) => {
+      expect(r).toBeInstanceOf(Response);
+      return r.status;
+    };
 
     // First mutation, no token → 403 + Set-Cookie plants the session token.
     const r1 = await route.handler(reqWith({ "Content-Type": "application/json", Cookie: cookie }));
@@ -217,12 +226,19 @@ describe("round-trip — auth-path CSRF actually validates end-to-end", () => {
     expect(planted).toBeTruthy();
     expect(planted).toBe(sessionToken);
 
-    // Retry with the matching token → gate passes → body runs → returns "ok".
+    // Retry with the matching token → gate passes → body runs → 200 JSON "ok".
+    // S325: this used to assert `r2 instanceof Response === false` and
+    // `r2 === "ok"` — i.e. it encoded the bare-return defect as the CORRECT
+    // behaviour. A bare value reaching Bun answers
+    // `200 text/plain "Expected a Response object, …"`, so the gate was green
+    // while the route was broken end-to-end.
     const r2 = await route.handler(
       reqWith({ "Content-Type": "application/json", Cookie: cookie, "X-CSRF-Token": sessionToken }),
     );
-    expect(r2 instanceof Response).toBe(false);
-    expect(r2).toBe("ok");
+    expect(r2).toBeInstanceOf(Response);
+    expect(r2.status).toBe(200);
+    expect(r2.headers.get("Content-Type")).toBe("application/json");
+    expect(await r2.json()).toBe("ok");
 
     // Wrong token → 403.
     const r3 = await route.handler(

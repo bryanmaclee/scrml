@@ -2565,7 +2565,32 @@ export function generateServerJs(
       // (`session.set(userKey, v)`), which the compile-time literal check misses.
       // `userId`/`role` stay writable — they ARE the login primitive.
       lines.push("    set(key, value) { if (key === \"csrfToken\") return; this._rec[key] = value; this._changes[key] = value; this._dirty = true; this._destroy = false; },");
-      lines.push("    get(key) { return this._rec[key] ?? null; },");
+      // §20.5 `session.get(key)` is an OWN-PROPERTY read of the session record.
+      //
+      // S325 (Unit 2): this was `this._rec[key] ?? null`, an ordinary property
+      // read — so it resolved up `Object.prototype` for any key the record does
+      // not carry. MEASURED on the emitted helper: `.get("__proto__")` returned
+      // `Object.prototype`, and `.get("constructor")` / `.get("toString")` /
+      // `.get("hasOwnProperty")` / `.get("valueOf")` / `.get("isPrototypeOf")`
+      // each returned a FUNCTION. `_rec` is `{ ...rec }` — a plain object — so
+      // the whole `Object.prototype` surface was reachable. This is not cosmetic:
+      // `key` can be request-controlled (`session.get(k)` / the dynamic-key
+      // `session[k]` form, which the `_scrml_session_bind` Proxy routes here),
+      // and a function value flowing into a `?{ … ${session.get(k)} … }` bind is
+      // an HTTP 500 SQL TypeError reachable from a request parameter.
+      //
+      // `Object.hasOwn` (not `this._rec.hasOwnProperty(key)`) is load-bearing:
+      // a session record is built from `session.set` writes, so `_rec` can carry
+      // an OWN key literally named `hasOwnProperty`, which would shadow the
+      // method and break the guard on the one record that attacks it.
+      //
+      // Scope: this closes the PROTOTYPE-CHAIN read only. A read of a real own
+      // key of `_rec` is unchanged — including the compiler-owned §40.2
+      // `csrfToken`, which is an own property and still readable here. That is
+      // `g-session-get-reserved-key-read-disclosure` (HIGH, open, routed to
+      // bryan): a reserved-key READ policy is a language-surface ruling, and is
+      // deliberately NOT decided here.
+      lines.push("    get(key) { return Object.hasOwn(this._rec, key) ? (this._rec[key] ?? null) : null; },");
       // S239-2 FIX A — a REAL in-request clear: wipe the working record AND the
       // pending changes so a subsequent `set()` builds a CLEAN session inheriting
       // none of the prior principal's fields. `_reset` stays sticky.
@@ -4021,18 +4046,49 @@ export function generateServerJs(
         lines.push(`  try {`);
       }
 
-      // A9 Ext 5: when dedup is active, wrap body in an inner async IIFE so we
-      // can capture the return value and store it under the idempotency key
-      // before sending the response.
-      // §14.8.9: ALSO wrap when protect is active (and Ext5 isn't already
-      // wrapping) so the body's client-facing return is captured into
-      // `_scrml_result` for the egress redact below. This is the COMMON
-      // protect-bearing read path (protect= auto-injects auth → non-CSRF; a
-      // simple read fn is non-CPS/non-Ext5).
-      const _wrapResultNonCsrf = _ext5DedupNonCsrf || _protectActive || _tenantActive;
-      if (_wrapResultNonCsrf) {
-        lines.push(`  const _scrml_result = await (async () => {`);
-      }
+      // Capture the body's value into `_scrml_result` via an inner async IIFE,
+      // so the handler can envelope it as a `Response` below.
+      //
+      // g-authed-server-fn-route-returns-bare-value-not-response (S325): this
+      // wrap used to be CONDITIONAL (`_ext5DedupNonCsrf || _protectActive ||
+      // _tenantActive`), and without it the adopter's `return` became the
+      // HANDLER's `return` verbatim — a bare JS value handed straight to the
+      // host. Both hosts the compiler ships dispatch with
+      // `return route.handler(req)` (`dev.js`, the built `_server.js`).
+      //
+      // What Bun actually does with that, MEASURED over a real socket on Bun
+      // 1.3.14 — and the two halves are different, which is the whole reason
+      // this leaked so quietly:
+      //   WIRE  — `200 text/plain;charset=utf-8` with the CONSTANT body
+      //           "Welcome to Bun! To get started, return a Response object."
+      //           for EVERY non-Response return (string, number, object,
+      //           undefined, null alike). The adopter's value never reaches the
+      //           client at all; it is dropped, not transmitted.
+      //   STDERR— `error: Expected a Response object, but received '<value>'`,
+      //           and ONLY for `undefined` / `null`. A bare `"ok"` / `42` /
+      //           `{…}` return logs NOTHING.
+      // So: the auth gate passed, the CSRF gate passed, the body ran, the value
+      // was correct — and the client got a fixed English sentence while the
+      // server was, for the common shapes, completely silent about it.
+      //
+      // The emitted client stub has always done `await _scrml_resp.json()`
+      // (emit-functions.ts), which throws on that text/plain body — so the wire
+      // contract the client expects is the one emitted here.
+      //
+      // **Route handlers SHALL return a `Response`** — unconditionally, on every
+      // path, in every combination of `auth=` / `protect=` / tenant / `csrf=` /
+      // idempotency. The `useBaselineCsrf` branch above already did; this branch
+      // now mirrors its envelope (status 200, `Content-Type: application/json`,
+      // `JSON.stringify` body) MINUS the baseline double-submit `Set-Cookie`,
+      // which is that branch's own `_scrml_csrf_token` and does not exist here.
+      //
+      // Load-bearing side effect: `_scrml_session_cookie_wrap` appends its
+      // `Set-Cookie: <sid>` onto the handler's return value and skips when that
+      // value has no `.headers`. A bare return therefore also dropped the §20.5
+      // session-establishment cookie silently — the store record was written and
+      // the browser never got the sid.
+      const _bodyIndentNonCsrf = "    ";
+      lines.push(`  const _scrml_result = await (async () => {`);
 
       if (cpsSplit) {
         for (const idx of cpsSplit.serverStmtIndices) {
@@ -4045,7 +4101,7 @@ export function generateServerJs(
               if (stmt.sqlNode && stmt.sqlNode.kind === "sql") {
                 const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", channelOwnedCells: _channelOwnedCellsNonCsrf, serverFnNames: _serverFnPeerNames, serverFnPeerAliasNames: _peerAliasesFor(fnNode), serverFnPeerDispatchObjs: _peerDispatchObjsFor(fnNode), syncPeerCalls: _syncPeerCalls })) ?? "";
                 const sqlExpr = sqlStmt.replace(/;\s*$/, "");
-                lines.push(`    const _scrml_cps_return = ${sqlExpr};`);
+                lines.push(`${_bodyIndentNonCsrf}const _scrml_cps_return = ${sqlExpr};`);
                 continue;
               }
               // M-7C-D-12 Track 3: scrml absence sentinel is JS `null` per §42.5/§42.8.
@@ -4053,13 +4109,13 @@ export function generateServerJs(
               // the JS `undefined` keyword into compiled output, which is forbidden in scrml-
               // semantics output (OQ-5(a) ratified S90 → use "null" instead).
               const initExpr = emitExprField(stmt.initExpr, stmt.init ?? "null", { mode: "server", serverFnNames: _serverFnPeerNames, serverFnPeerAliasNames: _peerAliasesFor(fnNode), serverFnPeerDispatchObjs: _peerDispatchObjsFor(fnNode), syncPeerCalls: _syncPeerCalls });
-              lines.push(`    const _scrml_cps_return = ${initExpr};`);
+              lines.push(`${_bodyIndentNonCsrf}const _scrml_cps_return = ${initExpr};`);
               continue;
             }
             const code = serverRewriteEmitted(emitLogicNode(stmt, _serverFnOptsNonCsrf));
             if (code) {
               for (const line of code.split("\n")) {
-                lines.push(`    ${line}`);
+                lines.push(`${_bodyIndentNonCsrf}${line}`);
               }
             }
           }
@@ -4068,14 +4124,14 @@ export function generateServerJs(
           const lastServerIdx = cpsSplit.serverStmtIndices[cpsSplit.serverStmtIndices.length - 1];
           const lastStmt = body[lastServerIdx];
           if (lastStmt && lastStmt.kind === "state-decl" && lastStmt.name === cpsSplit.returnVarName) {
-            lines.push(`    return _scrml_cps_return;`);
+            lines.push(`${_bodyIndentNonCsrf}return _scrml_cps_return;`);
           } else if (lastStmt && (lastStmt.kind === "let-decl" || lastStmt.kind === "const-decl")) {
-            lines.push(`    return ${lastStmt.name};`);
+            lines.push(`${_bodyIndentNonCsrf}return ${lastStmt.name};`);
           } else if (lastStmt && lastStmt.kind === "bare-expr") {
             const emitted = serverRewriteEmitted(emitLogicNode(lastStmt, _serverFnOptsNonCsrf));
             if (emitted) {
               const returnExpr = emitted.replace(/;$/, "");
-              lines.push(`    return ${returnExpr};`);
+              lines.push(`${_bodyIndentNonCsrf}return ${returnExpr};`);
             }
           }
         }
@@ -4084,7 +4140,10 @@ export function generateServerJs(
           const code = serverRewriteEmitted(emitLogicNode(stmt, _serverFnOptsNonCsrf));
           if (code) {
             for (const line of code.split("\n")) {
-              lines.push(`  ${line}`);
+              // Indented for the capture IIFE the handler now always opens (see
+              // `_bodyIndentNonCsrf` above) — the body's `return` is the IIFE's
+              // return, and the handler enveloped it as a `Response`.
+              lines.push(`${_bodyIndentNonCsrf}${line}`);
             }
           }
         }
@@ -4093,17 +4152,41 @@ export function generateServerJs(
       // Drain the crossing-shadow guard's narrow sink into the live error stream.
       for (const e of _foreignCrossingErrorsNonCsrf) errors.push(e);
 
-      // §14.8.9 — protect-only raw path (protect active, no Ext5): close the
-      // capture IIFE and return the REDACTED value. This handler returns a raw
-      // value (the pre-floor behavior); the redact strips protected-origin
-      // columns by descriptor before the value crosses to the client.
-      if ((_protectActive || _tenantActive) && !_ext5DedupNonCsrf) {
-        lines.push(`  })();`);
-        lines.push(`  return ${_egressRedact("_scrml_result")};`);
-      }
-
-      // A9 Ext 5: close the inner IIFE, store the result, return as Response.
-      if (_ext5DedupNonCsrf) {
+      // Close the capture IIFE and envelope `_scrml_result` as the handler's
+      // `Response`. ONE exit for every non-baseline-CSRF shape — protect-active,
+      // tenant-active, Ext-5 idempotent and the plain authed route all land here.
+      //
+      // Before S325 this was two conditional arms and an implicit third: the
+      // protect/tenant arm closed the IIFE and returned the redacted RAW value,
+      // the Ext-5 arm returned a real `Response`, and every other shape returned
+      // nothing at all here — the adopter's own `return` had already become the
+      // handler's. Splitting the exit is what let the bare-return class hide:
+      // the ONE arm that was exercised by a test asserted a `Response`, and the
+      // two that were not asserted a value.
+      lines.push(`  })();`);
+      // A body that already produced a `Response` OWNS the response — pass it
+      // through untouched instead of enveloping it.
+      //
+      // Without this the envelope below does
+      // `new Response(JSON.stringify(<a Response>), { status: 200 })`.
+      // `JSON.stringify` of a `Response` is `"{}"` (no enumerable own props), so
+      // an adopter's deliberate `403`/`404`/redirect would be re-emitted as a
+      // 200 with an empty-object body — a DENY silently becoming a SUCCESS.
+      // MEASURED with the guard removed: the 403 came back 200.
+      // That is a fail-OPEN shape, which is the one kind this whole change
+      // exists to remove, so it is guarded even though no corpus source reaches
+      // it today (a plain body naming `Response` build-blocks on E-SCOPE-001).
+      // §14.8.9/§14.8.10 already model a manual-`Response` / `handle()` body as
+      // a live server-fn egress kind, so the shape is anticipated, not
+      // hypothetical.
+      //
+      // Placed BEFORE the redact deliberately: a `Response` is an opaque stream
+      // handle, not a row set — `_scrml_protect_redact` cannot inspect or strip
+      // it, so routing one through the redact would buy nothing and only risk
+      // mangling the handle. A body that hand-builds a `Response` is taking
+      // ownership of its own egress.
+      lines.push(`  if (_scrml_result instanceof Response) return _scrml_result;`);
+      {
         // M-7C-D-12 Track 2 (§57 Wire Format): same `T | not` envelope-wrap
         // rule as the CSRF path above — apply only when the return type
         // declares absence as a variant. The encoder helper is injected
@@ -4112,18 +4195,26 @@ export function generateServerJs(
         // precedent at line ~1296.
         const _retAnnotNonCsrf = (fnNode as { returnTypeAnnotation?: string }).returnTypeAnnotation;
         const _wireWrapNonCsrf = returnTypeAllowsAbsence(_retAnnotNonCsrf);
-        // §14.8.9 — redact protected-origin columns at the egress sink (see the
-        // CSRF-path note above for why this is client-facing-only).
+        // §14.8.9 / §14.8.10 — redact protected-origin columns and out-of-tenant
+        // rows at the egress sink, BEFORE serialization (see the CSRF-path note
+        // above for why this is client-facing-only). Serializing first and
+        // redacting after would be a confidentiality regression: these are
+        // floors, and the value that reaches `JSON.stringify` must already be
+        // the redacted one. `_egressRedact` is the identity when neither
+        // `_protectActive` nor `_tenantActive`, so a plain app is unaffected.
         const _resultBaseNonCsrf = _egressRedact("_scrml_result");
         const _resultExprNonCsrf = _wireWrapNonCsrf
           ? `_scrml_wire_encode(${_resultBaseNonCsrf})`
           : `${_resultBaseNonCsrf} ?? null`;
-        lines.push(`  })();`);
-        lines.push(`  // A9 Ext 5: store success response under idempotency key`);
+        if (_ext5DedupNonCsrf) {
+          lines.push(`  // A9 Ext 5: store success response under idempotency key`);
+        }
         lines.push(`  const _scrml_resp_body = JSON.stringify(${_resultExprNonCsrf});`);
-        lines.push(`  if (_scrml_idem_key) {`);
-        lines.push(`    await _scrml_idempotency_store(_scrml_idem_key, _scrml_resp_body, 200);`);
-        lines.push(`  }`);
+        if (_ext5DedupNonCsrf) {
+          lines.push(`  if (_scrml_idem_key) {`);
+          lines.push(`    await _scrml_idempotency_store(_scrml_idem_key, _scrml_resp_body, 200);`);
+          lines.push(`  }`);
+        }
         lines.push(`  return new Response(_scrml_resp_body, {`);
         lines.push(`    status: 200,`);
         lines.push(`    headers: { "Content-Type": "application/json" },`);
