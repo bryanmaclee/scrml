@@ -4465,6 +4465,122 @@ function _awaitMatchArmServerCalls(rhs: string, opts: EmitLogicOpts): string {
 }
 
 /**
+ * §18.5 block-arm value lowering — split a block-body's inner text into its
+ * top-level statement segments. String-literal-aware (a `;`/newline inside a
+ * `"…"` / `'…'` / `` `…` `` span is NOT a separator) and depth-aware (a `;`
+ * inside `()`/`[]`/`{}` is not a top-level separator). Mirrors the splitter in
+ * emit-control-flow.ts:rewriteBlockBody so leading-statement handling stays
+ * byte-consistent with the established block-body emitter.
+ */
+function _splitBlockStatements(content: string): string[] {
+  const stmts: string[] = [];
+  let current = "";
+  let depth = 0;
+  let strQuote: string | null = null;
+  for (let i = 0; i < content.length; i++) {
+    const ch = content[i];
+    if (strQuote !== null) {
+      if (ch === "\\") { current += ch; if (i + 1 < content.length) { current += content[i + 1]; i++; } continue; }
+      if (ch === strQuote) strQuote = null;
+      current += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") { strQuote = ch; current += ch; continue; }
+    if (ch === "{" || ch === "(" || ch === "[") depth++;
+    else if (ch === "}" || ch === ")" || ch === "]") depth--;
+    else if ((ch === ";" || ch === "\n") && depth === 0) {
+      const s = current.trim();
+      if (s) stmts.push(s);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  const last = current.trim();
+  if (last) stmts.push(last);
+  return stmts;
+}
+
+/**
+ * §18.5 block-arm value lowering — classify a match-arm result STRING as a
+ * block-body (`{ statement* expression? }`) that must lower its tail expression
+ * to the enclosing result var, vs an expression (object literal, or any bare
+ * value) that stays emitted as today.
+ *
+ * The disambiguation is STRUCTURAL (constraint: prefer the parser's AST node
+ * kind over string-sniffing braces): a `{ … }` result is an OBJECT LITERAL (an
+ * expression VALUE — e.g. `1 :> { x: 1 }`) exactly when the scrml expression
+ * parser resolves it to an `object` node. When the same `{ … }` fails to parse
+ * as an object (`{ 42 }`, `{ const a = 5; a + 1 }`, `{ @x = 1 }` → `escape-hatch`)
+ * it is a §18.5 statement block. Anything not brace-wrapped is a bare value and
+ * is never treated as a block — so bare-value arms stay byte-identical.
+ */
+function _matchArmResultIsBlockBody(result: string): boolean {
+  const t = result.trim();
+  if (!(t.startsWith("{") && t.endsWith("}"))) return false;
+  let node: any = null;
+  try { node = parseExprToNode(t, "<match-arm-block>", 0); } catch { node = null; }
+  // An object literal is a VALUE expression, not a block: keep it verbatim.
+  if (node && node.kind === "object") return false;
+  return true;
+}
+
+/**
+ * §18.5 — is a block's trailing segment a value EXPRESSION (its result) rather
+ * than a statement (a decl/assignment/`lift`/`return`, or empty → §18.5 void)?
+ * Value-tail blocks assign the tail to the result var; statement-only blocks
+ * leave the result var untouched (void/undefined).
+ */
+function _blockTailIsValueExpr(tail: string): boolean {
+  const t = tail.trim();
+  if (!t) return false;
+  // Statement / declaration heads never produce a bindable arm value.
+  if (/^(const|let|var|return|if|for|while|do|switch|lift|throw|fail|on\b)/.test(t)) return false;
+  // Assignment statements (`@x = …`, `x = …`, compound `+=` …) are void per §18.5.
+  if (/^@?[A-Za-z_$][\w$.\[\]]*\s*(?:=(?!=)|\+=|-=|\*=|\/=|%=|\|\|=|&&=|\?\?=)/.test(t)) return false;
+  let node: any = null;
+  try { node = parseExprToNode(t, "<match-arm-tail>", 0); } catch { node = null; }
+  if (!node) return false;
+  // `escape-hatch` is the parser's bucket for text it cannot resolve to a clean
+  // expression (assignments, decls, unparseable). Treat only clean expression
+  // nodes as the block's value.
+  return node.kind !== "escape-hatch";
+}
+
+/**
+ * §18.5 block-arm value lowering (raw-string arm path). Given a block-body arm
+ * result STRING already confirmed a block via `_matchArmResultIsBlockBody`,
+ * emit its leading statements followed by an assignment of its tail expression
+ * to `tildeVar` (the enclosing result var). A block with no trailing expression
+ * (all statements, or empty) leaves `tildeVar` untouched → §18.5 void.
+ * Indented two spaces to match the surrounding arm-body emission.
+ */
+function _emitBlockArmValueFromString(result: string, tildeVar: string, opts: EmitLogicOpts): string {
+  const inner = result.trim().slice(1, -1).trim();
+  const lines: string[] = [];
+  if (!inner) return `  // §18.5 empty block arm — result is void`;
+  const segments = _splitBlockStatements(inner);
+  const tail = segments.length > 0 ? segments[segments.length - 1] : "";
+  const tailIsValue = _blockTailIsValueExpr(tail);
+  const leading = tailIsValue ? segments.slice(0, -1) : segments;
+  // Each leading segment is emitted through the established block-body statement
+  // emitter one at a time (segments are already top-level-`;`-split, so each is
+  // a single statement — no re-join/re-split fragility around `;` inside string
+  // literals). rewriteBlockBody handles `const`/`let` decls, reactive `@x =`
+  // writes, and bare calls uniformly.
+  for (const seg of leading) {
+    const segCode = rewriteBlockBody(seg, null, null, "client").trim();
+    if (segCode) lines.push(`  ${segCode.replace(/;+\s*$/, "")};`);
+  }
+  if (tailIsValue) {
+    const rhs = _awaitMatchArmServerCalls(emitExprField(null, tail, _makeExprCtx(opts)), opts);
+    lines.push(`  ${tildeVar} = ${rhs};`);
+  }
+  // else: no trailing expression → §18.5 void; leave tildeVar as its null seed.
+  return lines.join("\n");
+}
+
+/**
  * Emit a match-as-expression declaration. Pre-declares a tilde variable,
  * emits the match arms as if/else-if blocks with lift assigning to that
  * variable, then assigns the result to the declared name.
@@ -4550,7 +4666,26 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
     // Structured body: emit each statement via emitLogicNode (handles lift via tildeContext)
     if (arm.structuredBody) {
       const bodyCode: string[] = [];
-      for (const stmt of arm.structuredBody) {
+      const _body = arm.structuredBody as any[];
+      const _tailIdx = _body.length - 1;
+      for (let _i = 0; _i < _body.length; _i++) {
+        const stmt = _body[_i];
+        // §18.5 block-arm value: the block's result is its LAST expression. A
+        // bare tail expression (`{ … "green" }`) must ASSIGN to the active
+        // result var — the shared bare-expr handler (under an active
+        // tildeContext) instead minted a FRESH `let _scrml_tilde_N = …`, so the
+        // outer result var stayed null (silent-wrong). `lift`-form value arms
+        // (`{ lift x }`) already assign to the result var via tildeContext and
+        // are left untouched; only the bare-tail-expr case is redirected. A
+        // non-value tail (assignment/decl → §18.5 void) also falls through.
+        const _exprText = stmt && stmt.kind === "bare-expr"
+          ? (stmt.expr ?? (stmt.exprNode ? (() => { try { return emitStringFromTree(stmt.exprNode); } catch { return ""; } })() : ""))
+          : "";
+        if (_i === _tailIdx && stmt && stmt.kind === "bare-expr" && !stmt._onMountEffect && _blockTailIsValueExpr(_exprText)) {
+          const rhs = _awaitMatchArmServerCalls(emitExprField(null, _exprText, _makeExprCtx(opts)), opts);
+          bodyCode.push(`  ${tildeVar} = ${rhs};`);
+          continue;
+        }
         const code = emitLogicNode(stmt, bodyOpts);
         if (code) {
           for (const line of code.split("\n")) bodyCode.push(`  ${line}`);
@@ -4585,6 +4720,15 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
     // pre-fix path emitted `tildeVar = fail "V"(args)` -> E-CODEGEN-INVALID-LOGIC.
     const armResultLine = (a: MatchArm): string => {
       if (a.failExpr) return `  ${emitFailExpr(a.failExpr as FailExprLike, opts)}`;
+      // §18.5 block-arm value: a `{ statement* expression? }` body in value
+      // position must execute its leading statements and lift its TAIL
+      // EXPRESSION to the result var — NOT be emitted verbatim (which produced
+      // `${tildeVar} = { 42 };` → E-CODEGEN-INVALID-LOGIC). Object-literal arm
+      // results (`{ x: 1 }`) are a VALUE, not a block, and stay on the path
+      // below byte-identically (see `_matchArmResultIsBlockBody`).
+      if (_matchArmResultIsBlockBody(a.result)) {
+        return _emitBlockArmValueFromString(a.result, tildeVar, opts);
+      }
       // g-match-arm-server-call-no-autoawait (§13.2 / §19.9.3) — a server call in
       // this value-form match arm re-emits from a raw expression string, a path the
       // #87 statement-level auto-await never reached, so it shipped a BARE unawaited

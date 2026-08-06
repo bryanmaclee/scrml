@@ -1,0 +1,12 @@
+type Tier:enum = { Low, High }
+fn tint(t: Tier) -> string {
+    const r = match t {
+        .Low :> { const base = "co"; base + "ol" }
+        .High :> { "warm" }
+    }
+    return r
+}
+<page><main>
+<p id="variant-block-stmt">${ tint(Tier.Low) }</p>
+<p id="variant-block-single">${ tint(Tier.High) }</p>
+</main></page>

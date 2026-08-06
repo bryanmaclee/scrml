@@ -1,0 +1,13 @@
+fn grade(k: int) -> string {
+    const r = match k {
+        1 :> { const base = "gr"; base + "een" }
+        2 :> { "red" }
+        _ :> "gray"
+    }
+    return r
+}
+<page><main>
+<p id="lit-block-stmt">${ grade(1) }</p>
+<p id="lit-block-single">${ grade(2) }</p>
+<p id="bare-arm">${ grade(9) }</p>
+</main></page>

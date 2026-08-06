@@ -1,0 +1,16 @@
+{
+  "id": "match-block-value-decl-block-arm-raw",
+  "description": "§18.5 block-body arm in a match VALUE-decl position (raw literal-arm path). `const r = match k { 1 :> { const base = \"gr\"; base + \"een\" } 2 :> { \"red\" } _ :> \"gray\" }`. A `{ statement* expression? }` arm must execute its leading statements and lift its TAIL EXPRESSION to the result var. Pre-fix this emitted `_scrml_tilde_N = { const base ... }` / `= { \"red\" }` -> E-CODEGEN-INVALID-LOGIC (no artifact).",
+  "language-version": "1.0",
+  "spec": "§18.5",
+  "rationale": "§18.5: an arm body SHALL be either a single expression or a `{ }` block whose result is its last expression. The block's leading statements run first, then its tail expression becomes the arm value bound to the enclosing result var — exactly as a bare-value arm binds its expression. Bare-value arms (the `_` gray arm) are unaffected.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "domAnchored": [
+      { "selector": "#lit-block-stmt", "text": "green" },
+      { "selector": "#lit-block-single", "text": "red" },
+      { "selector": "#bare-arm", "text": "gray" }
+    ]
+  }
+}
