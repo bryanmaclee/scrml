@@ -490,6 +490,51 @@ function astSqlQueryUsesCurrentUser(node: unknown, seen?: WeakSet<object>, depth
 }
 
 /**
+ * §20.5 / §52.15.1 — does ANY node in this subtree READ the `@currentUser` ambient?
+ *
+ * Superset of `astSqlQueryUsesCurrentUser` (:469): that sibling catches only the
+ * `?{ … ${@currentUser.id} … }` SQL-string shape; THIS also catches a DIRECT
+ * expression read — `return { id: @currentUser.id }` — which the parser lowers to an
+ * `IdentExpr { kind: "ident", name: "@currentUser" }` (expression-parser: `@`-sigil
+ * idents keep the leading `@` in `name`). A direct read is invisible to the SQL-string
+ * test, so a plain server `function` (RPC OR `function*` SSE) that reads `@currentUser`
+ * with NO `auth=`, NO serverLoad, and NO `?{}` computed `_needsSessionInfra` = false →
+ * the `_scrml_current_user` resolver is never emitted, yet the handler-scope splice
+ * still binds `const _scrml_currentUser = _scrml_current_user(_scrml_req)` → the
+ * binding calls an unemitted resolver → ReferenceError → HTTP 500 (SPEC §52.15.1: the
+ * ambient is "resolved server-side from the session middleware", so the read MUST have
+ * the resolver present). Same class as the SQL miss, one lowering over.
+ *
+ * Permissive by design (mirrors its SQL sibling): a false POSITIVE only emits unused
+ * session infra; a false NEGATIVE re-opens the dangling-resolver 500.
+ */
+function astReadsCurrentUserAmbient(node: unknown, seen?: WeakSet<object>, depth = 0): boolean {
+  if (!node || typeof node !== "object" || depth > 64) return false;
+  const _seen = seen ?? new WeakSet<object>();
+  if (_seen.has(node as object)) return false;
+  _seen.add(node as object);
+  if (Array.isArray(node)) {
+    for (const child of node) if (astReadsCurrentUserAmbient(child, _seen, depth + 1)) return true;
+    return false;
+  }
+  const n = node as Record<string, unknown>;
+  // Direct expression read — the `@currentUser` reactive-ref ident.
+  if (n.kind === "ident" && n.name === "@currentUser") return true;
+  // SQL-string read — the `?{ … @currentUser … }` shape (subsumes the sibling).
+  if (n.kind === "sql") {
+    for (const prop of ["query", "body"] as const) {
+      const q = n[prop];
+      if (typeof q === "string" && q.includes("@currentUser")) return true;
+    }
+  }
+  for (const key of Object.keys(n)) {
+    if (key === "span") continue;
+    if (astReadsCurrentUserAmbient(n[key], _seen, depth + 1)) return true;
+  }
+  return false;
+}
+
+/**
  * §20.5 (gh357) — shared text-level detector for a `session.<name>` / `session[<expr>]`
  * reference that survives into EMITTED text (a `?{}` SQL interpolation carries its query
  * as a STRING, so the AST `member`/`index` walk in `astSessionMemberMatch` never sees it).
@@ -1938,6 +1983,20 @@ export function generateServerJs(
     channelTopicMap.set(chName, topicExpr);
   }
 
+  // g-channel-auth-only-authcheck-dangling (S322) — does ANY `<channel>` carry an
+  // `auth=` attribute? This is the program-level mirror of the per-channel
+  // `hasChannelAuth = attrMap.has("auth")` (emit-channel.ts:290) that gates the WS-
+  // upgrade `_scrml_auth_check(req)` REFERENCE (`(hasAuth || hasChannelAuth) &&
+  // webAppShape`, emit-channel.ts:852). The `_scrml_auth_check` DEFINITION + the
+  // `_scrml_session_middleware` it calls must be present under the SAME condition,
+  // or a `<channel auth=>` with no `<program auth>` dangles the reference (500 at WS
+  // upgrade). Consumed by `_needsSessionInfra` (middleware) and the auth-check
+  // else-if block (definition) below.
+  const _hasChannelAuth = channelNodes.some((ch: any) => {
+    const _attrs: any[] = ch.attrs ?? ch.attributes ?? [];
+    return _attrs.some((a: any) => a && a.name === "auth");
+  });
+
   // C18 (§38.6): emit `broadcast(data)` / `disconnect()` injection lines for
   // a channel-owned server function. Returns indented JS lines that define
   // both as locals so the user's body can call them directly.
@@ -2074,12 +2133,20 @@ export function generateServerJs(
   const _anySessionWrite = (typeof _programAnySessionWrite === "boolean")
     ? _programAnySessionWrite
     : astUsesSessionWrite(fileAST);
-  // §20.5 / §52 Fork-3 — a plain server `function` whose `?{}` reads
-  // `@currentUser` needs the resolver exactly as a Pattern-C cell load does. This
-  // was the missing third shape: without it the handler binds `_scrml_currentUser`
-  // to an unemitted `_scrml_current_user`. (adopter report, S4.)
-  const _anyFnCurrentUserQuery = _currentUserAmbient && fnNodes.some((f) => astSqlQueryUsesCurrentUser(f));
-  const _needsSessionInfra = !!authMiddlewareEntry || _anyServerLoadGates || _anyCurrentUserQuery || _anyFnCurrentUserQuery || _anySessionBuiltin;
+  // §20.5 / §52 Fork-3 — a plain server `function` (RPC or `function*` SSE) that
+  // reads `@currentUser` needs the resolver exactly as a Pattern-C cell load does.
+  // Without it the handler binds `_scrml_currentUser` to an unemitted
+  // `_scrml_current_user`. (adopter report, S4 — first found for the `?{}` SQL shape.)
+  // g-currentuser-plain-handler-dangling (S322): the SQL-only detector
+  // (`astSqlQueryUsesCurrentUser`) missed a DIRECT read — `return { id: @currentUser.id }`
+  // with no `?{}` — leaving the resolver unemitted for a no-auth/no-serverLoad app.
+  // `astReadsCurrentUserAmbient` is the superset that also catches the ident read.
+  const _anyFnCurrentUserQuery = _currentUserAmbient && fnNodes.some((f) => astReadsCurrentUserAmbient(f));
+  // g-channel-auth-only-authcheck-dangling (S322) — a `<channel auth=>` WS-upgrade
+  // guard calls `_scrml_auth_check(req)`, which calls `_scrml_session_middleware(req)`.
+  // Without `_hasChannelAuth` here a channel-auth-only program (no `<program auth>`)
+  // emitted neither the middleware NOR (below) the auth-check def → nested dangle.
+  const _needsSessionInfra = !!authMiddlewareEntry || _anyServerLoadGates || _anyCurrentUserQuery || _anyFnCurrentUserQuery || _anySessionBuiltin || (_hasChannelAuth && _webAppShape);
 
   // §20.5.1 (S266, i29e B4a) — secure-cookie mode. DEFAULT TRUE → the session
   // cookie is named `__Host-scrml_sid` and is ALWAYS emitted `Secure`. The
@@ -2711,6 +2778,34 @@ export function generateServerJs(
     lines.push("  },");
     lines.push("};");
     lines.push("");
+  } else if (_hasChannelAuth && _webAppShape) {
+    // g-channel-auth-only-authcheck-dangling (S322) — a program with a
+    // `<channel auth=>` but NO `<program auth>` still references
+    // `_scrml_auth_check(req)` at the WS upgrade (emit-channel.ts:852,
+    // `hasChannelAuth` branch), yet the block above (gated on `authMiddlewareEntry`)
+    // never defined it → dangling `_scrml_auth_check` ReferenceError at upgrade.
+    // Emit ONLY the auth-check function here (NOT the CSRF helpers / session-destroy
+    // / @session-projection routes — those are `<program auth>`-specific and stay
+    // gated on `authMiddlewareEntry` above, so a channel-auth-only program's route
+    // surface is unchanged). `_scrml_session_middleware` is present because
+    // `_hasChannelAuth` now forces `_needsSessionInfra`. The `else` guarantees this
+    // never doubles the def when `authMiddlewareEntry` IS present. Byte-identical for
+    // every existing program: the block above is untouched, and a no-channel-auth
+    // program never enters this arm. `loginRedirect` uses the RI default `/login`
+    // (compute-program-config.ts:119) since no auth middleware supplies one — a WS
+    // upgrade for an unauthenticated client short-circuits with that 302.
+    lines.push("// --- Auth check middleware (channel-auth WS upgrade) ---");
+    lines.push(`function _scrml_auth_check(req) {`);
+    lines.push(`  const session = _scrml_session_middleware(req);`);
+    lines.push(`  if (!session.isAuth) {`);
+    lines.push(`    return new Response(null, {`);
+    lines.push(`      status: 302,`);
+    lines.push(`      headers: { Location: ${JSON.stringify("/login")} },`);
+    lines.push(`    });`);
+    lines.push(`  }`);
+    lines.push(`  return null;`);
+    lines.push(`}`);
+    lines.push("");
   }
 
   // Baseline CSRF protection
@@ -3237,6 +3332,18 @@ export function generateServerJs(
       lines.push(`    lastEventId: _scrml_req.headers.get('Last-Event-ID') ?? null,`);
       lines.push(`  };`);
 
+      // g-currentuser-plain-handler-dangling (S322) — insertion point for THIS SSE
+      // handler's `@currentUser` binding, at handler scope (before the nested
+      // `_scrml_gen` closure that reads it). The generator body below lowers a
+      // `@currentUser.id` read to `_scrml_currentUser` (emit-expr.ts server path),
+      // but — unlike the non-SSE route handler, which splices the binding after its
+      // body (see `_cuBodyRefsCurrentUser` below) — the SSE path never bound it, so
+      // the free `_scrml_currentUser` dangled → ReferenceError inside the stream. The
+      // binding is spliced back in here once we can see the body referenced it. Same
+      // construction as the serverLoad/SSR and route-handler paths (byte-identical:
+      // `_scrml_current_user(_scrml_req)`), so no second identity derivation.
+      const _sseCuInsertIdx = lines.length;
+
       // GITI-025 (giti inbound 2026-05-30): bind each `server function*`
       // parameter from `route.query`. The client EventSource stub
       // (emit-functions.ts SSE branch) encodes call args into the URL query
@@ -3294,6 +3401,24 @@ export function generateServerJs(
           for (const line of code.split("\n")) {
             lines.push(`          ${line}`);
           }
+        }
+      }
+
+      // g-currentuser-plain-handler-dangling (S322) — bind `@currentUser` for THIS
+      // SSE handler if the generator body referenced it. Mirrors the non-SSE route
+      // handler's `_cuBodyRefsCurrentUser` splice (checks EMITTED text, since
+      // `@currentUser` reaches here through several lowerings). Gated on
+      // `_currentUserAmbient` (a user `<currentUser>` cell shadows the ambient and is
+      // never rebound) and on the absence of an existing binding (no duplicate
+      // `const`). `_scrml_current_user` is present because a body read of
+      // `@currentUser` forces `_needsSessionInfra` via `astReadsCurrentUserAmbient`.
+      {
+        const _sseCuBody = lines.slice(_sseCuInsertIdx);
+        const _sseRefsCurrentUser = _sseCuBody.some((l) => l.includes("_scrml_currentUser"));
+        const _sseAlreadyBound = _sseCuBody.some((l) =>
+          l.includes("const _scrml_currentUser = _scrml_current_user("));
+        if (_currentUserAmbient && _sseRefsCurrentUser && !_sseAlreadyBound) {
+          lines.splice(_sseCuInsertIdx, 0, `  const _scrml_currentUser = _scrml_current_user(_scrml_req);`);
         }
       }
 
