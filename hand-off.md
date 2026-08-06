@@ -127,10 +127,14 @@ in place until its own population reaches zero.
   **Refresh is OWED by whoever lands the bare-return arc** (it moves `emit-server.ts`).
 - **`state.ts --check` passes**; the `@generated` §0 rollup was regenerated after every gap edit and the
   arithmetic verified by hand each time (HIGH 23→24→25, MED 115/116→117→119→120).
-- **Worktrees RETAINED (nothing landed, nothing may be pruned):** `agent-a2589c3ed53f52d81`
-  (bare-return, `1dc7fd78`, UNLANDED — **destroying this loses a reviewed arc**) ·
-  `agent-a991f86dc83d4aebf` (Limb 2 measurement instrumentation, env-gated, throwaway but keeps the
-  count reproducible) · `agent-a8ce52b8212bb7fe1` (pre-existing).
+- **Worktrees: 8 under `.claude/worktrees/`, NONE pruned — deliberately.** Two are this session's and
+  both must survive: **`agent-a2589c3ed53f52d81`** (bare-return, `1dc7fd78`, UNLANDED — **destroying
+  this loses a fully reviewed, fix-rounded arc**) and `agent-a991f86dc83d4aebf` (Limb 2 measurement
+  instrumentation, env-gated throwaway, but it is what makes the 871/1413 count reproducible).
+  The other six (`a1a9a797`, `a5461872`, `a5834663`, `a79d3eca`, `a8b2da40`, `a8ce52b8`) are
+  **pre-existing from prior sessions** and were carried, not created, here — the S307/S310/S313
+  retain-decision still governs them. **A stale-worktree sweep has been owed since S268 and is owed
+  still**; it is a real cleanup task, not a wrap step I skipped.
 
 ## Tags
 #session-325-bryan #the-session-high-was-not-the-bug #authed-routes-were-dead #suite-asserted-the-defect
