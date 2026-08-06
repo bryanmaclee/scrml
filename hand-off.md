@@ -1,4 +1,28 @@
 <!-- ============================================================= -->
+<!-- S324 WRAP (peter/P-Tech1) — prepended 2026-08-06.              -->
+<!-- S323 (peter) + all prior UNCHANGED below.                      -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 324 (peter · P-Tech1 Windows) — WRAP
+
+**Date:** 2026-08-06. Continuation after the S323 wrap (Peter: *"lets get emit-server"* + *"do what you can without me"* AFK autonomy + *"after this lands we'll /wrap"*). **1 PR merged (#440), compiler source.** main `766c9c9a` → `71197936`, coherence 0/0. Detail in delta-log **[1184]–[1187]**.
+
+## 🎯 WHAT LANDED — MED-lane arc #1 (the recommended-lead cluster, now DONE)
+**#440 (`71197936`) — the two `emit-server.ts` handler dangling-ref bugs** (`g-currentuser-plain-handler-dangling` + `g-channel-auth-only-authcheck-dangling`, both marked resolved). Same class as #357: a ref emitted with its binding/def gated narrower than the ref → 500 at request time. Fixes: `astReadsCurrentUserAmbient` superset + §36 SSE splice (conformance-restoration, §52.15.1); OR `(_hasChannelAuth && _webAppShape)` into `_needsSessionInfra` + an `else if` arm. **PA pass held it to the #357 standard** — conformance 1443/0 fix-vs-prefix (fresh process), store-invariant probed (read-only `@currentUser` keeps the Map, not the durable store — no over-emission), executed 500→200. Gap-1 conformance-restoration review recorded in the PR for bryan.
+
+## 🎯 NEXT FOCUS — continue the MED compute-lane (async-disjoint from bryan)
+Cluster A is done. The S323 triage shortlist alternates remain, still ranked & ready (all compute + async-FAR):
+- **`emit-each`/`emit-lift` list-render text-lowering cluster** — `g-each-nested-markup-interp-stringifies` (renders `[object HTMLSpanElement]`), `g-tier0-reactive-lift-mixed-text-interp-literal` (ships raw `${…}` as page text), `g-each-root-count-coupled-to-emitted-text-formatting`.
+- **`g-block-body-value-position-mislowers`** (L1896, `emit-logic.ts`) — `{expr}` in a match block-arm / if-value emits invalid JS or a dead var → always `null`. Consolidates two gaps mis-filed as async bugs (they're structural, so ours). ⚠ verify intended-valid (inert) before dispatch.
+- Quick wins: `g-show-false-flashes-pre-hydration` (⚠ verify §17.2 conformance-restoration), `g-tool-over-imports-all-lib-exports`, `g-mpa-composed-page-duplicate-runtime-script`. (Full list + flags in the S323 block below.)
+
+## ⚑ LESSON ([1186]) — gap-entry loci are HYPOTHESES
+Both #440 gap entries were outdated on the fix locus (gap 1: the binding was already spliced in the route handler — the live facets were the resolver detection gate + the SSE splice; gap 2 understated the `_scrml_session_middleware` dep). **Verify a gap's stated locus against current HEAD before scoping** — the agent re-diagnosed correctly, but a thin brief that trusted the entry would have mis-scoped.
+
+## CARRY-FORWARD (unchanged, NOT mine): onmount-c owes bryan's review · bryan LIVE on async (`docs/changes/async-predicate-unification/SCOPING.md`) — stay clear.
+
+<!-- ============================================================= -->
 <!-- S323 WRAP (peter/P-Tech1) — prepended 2026-08-05.              -->
 <!-- S322 (peter+bryan) + all prior UNCHANGED below.                -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->
