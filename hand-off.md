@@ -1,4 +1,50 @@
 <!-- ============================================================= -->
+<!-- S323 WRAP (peter/P-Tech1) — prepended 2026-08-05.              -->
+<!-- S322 (peter+bryan) + all prior UNCHANGED below.                -->
+<!-- (Numbers collide across machines — disambiguate by NAME.)      -->
+<!-- ============================================================= -->
+
+# scrml — Session 323 (peter · P-Tech1 Windows) — WRAP
+
+**Date:** 2026-08-05. `/boot` Profile A FULL. **Concurrent with S322-bryan (LIVE on the async/Option-C path).**
+**2 PRs merged (#435 #437), one bearing compiler source.** main `d8044cf2` → `3c047151` (bryan's #436 between), coherence 0/0 both repos. Full detail in delta-log **[1177]–[1183]** — this block carries only what needs the next PA's judgement.
+
+## 🎯 WHAT LANDED
+- **#435 (`cc5fcb9f`) — GH #357 fixed** (adopter `dc`; lane RULED to Peter S322-bryan, language act discharged S316/dpa-021 S319). `session.*` in a `?{}` SQL interpolation was a bare unbound identifier → 500. Direction B: text-level detection + a **Proxy** prologue binding (`_scrml_session_bind`, preserves `.get()` index form, agrees with the KEPT AST lowering). 500→200. **The pass caught + trimmed a §20.5 regression the build introduced** (an over-broad E-SESSION-CONTEXT scan matching the compiler's own emitted comments/guards — see [1178]).
+- **#437 (`3c047151`) — review floor drained 5→0.** Carve-out rate 73% (flagged).
+
+## ⚑ ROUTED TO BRYAN — 2 language-surface findings (both filed in known-gaps.md + his inbox)
+- **`g-session-get-reserved-key-read-disclosure` (HIGH)** — `session[k]`, k=`"csrfToken"` discloses the live §40.2 token via `.get()` at 200 (reproduced by execution). Pre-existing in the AST `session[expr]` path; #357 extends it to the interpolation position. Read-side reserved-key guard is `semantics-changed` → his call. **Pinned as an executable KNOWN-GAP regression test in `gh357-session-sql-interpolation.test.js` (flip to `null` when the guard lands).**
+- **`g-session-context-scan-bare-form-sound` (MED)** — the §6.1 non-route residual needs a lowering-site record, not a text scan.
+
+## 🎯 NEXT FOCUS (Peter's ask, S323) — the ~110 open MED gaps in HIS COMPUTE lane, DISJOINT from bryan
+Peter: *"focus on these 110 in my lane and not be close to interfering with Bryan as we have been the last few sessions."* Constraints for the pick: **(1) COMPUTE lane** — the fix is `inert` (make a broken emit/runtime work; NO change to what compiles / is refused / a program MEANS; a `newly-rejecting`/`semantics-changed` fix is bryan's — the #357 lesson); **(2) DISJOINT from bryan's LIVE async surface** — avoid `emit-client.ts` await path, §13.2/§19.6, the reset/init-Promise family (`g-implicit-cell-double-write-clobbers-reset-init` is async-adjacent), esm-chunks (module system / `type=module` / stdlib resolver), onmount-c. Prefer region/timer/match-diagnostic/hydrate/SSR/CSS subsystems.
+
+**MED-TRIAGE SHORTLIST (satellite, S323).** Of ~108 real MED gaps: **~29 pass both constraints** (~22 genuine emit/runtime bugs); ~38 excluded language-surface, ~20 bryan-proximity, ~9 parked, ~7 ambiguous. Ranked picks (all COMPUTE + async-FAR):
+
+**★ RECOMMENDED LEAD — Cluster A · `emit-server.ts` handler dangling-ref** (tightest, highest-confidence, and I already hold deep emit-server.ts context from #357 — same bug CLASS: a ref emitted but its binding gated narrower → runtime 500):
+- `g-currentuser-plain-handler-dangling` (L5294) — `@currentUser` in a plain RPC/SSE handler references a binding defined only under a narrower gate → ReferenceError/500.
+- `g-channel-auth-only-authcheck-dangling` (L5297) — `<channel auth=>`-only references `_scrml_auth_check` defined only under `authMiddlewareEntry` → crash at WS-upgrade.
+- One arc aligns both def/ref gates. Compute (emits a binding a valid program already needs; no diagnostic/semantic delta). Scope S-M, exact loci + repros.
+
+**Alternates:**
+- **Cluster B · list-render interp/text lowering** (`emit-each.ts`/`emit-lift.js`): `g-each-nested-markup-interp-stringifies` (L1495, renders `[object HTMLSpanElement]`), `g-tier0-reactive-lift-mixed-text-interp-literal` (L1752, ships raw `${…}` as page text), `g-each-root-count-coupled-to-emitted-text-formatting` (L1673, latent). Shared literal/interp text-run split. M-L.
+- **#1 standalone · `g-block-body-value-position-mislowers`** (L1896, `emit-logic.ts`) — `{expr}` in a value position (match block-arm / if-as-value) emits invalid JS or a dead var → always `null`. **Consolidates two gaps mis-filed as await bugs** (they're structural mislowers, NOT async — so they're ours, not bryan's). M. ⚠ verify the forms are intended-valid (inert, not newly-accepting) before dispatch.
+- Quick wins (S): `g-show-false-flashes-pre-hydration` (L6656, FOUC — ⚠ near the structural-if/show family, verify §17.2 conformance-restoration), `g-tool-over-imports-all-lib-exports` (L5285), `g-mpa-composed-page-duplicate-runtime-script` (L5519, one 404/page), `g-uptoroot-vs-distrel-anchor-mismatch` (L5036, escaped `href`/`src`).
+
+**Verify-before-dispatch flags** (close compute-vs-language calls): `g-static-markup-no-hydrate-in-if-conditional-spa-drillin` (L622) + `g-e-eq-001-message-names-types` (L1304) — prose assigns BOTH to bryan's lane despite reading compute; confirm ownership. `g-native-parser-drops-last-export` (L6996) — carries the cloud-only within-node parity gate (scope-risk). **Two ledger-noise markers** (`g-db-migrate-check-constraint-oneof-pattern` L1115, `g-gap-counts-silently-drops-unrecognised-status` L5864) are stale `open` markers on resolved entries — the double-count bug; worth a 2-min status flip.
+
+## CARRY-FORWARD (unchanged, NOT mine)
+- **onmount-c** (`feat/onmount-c-build`, retained worktree) — owes **bryan's** language-surface review (newly-accepting). Do not land.
+- **bryan LIVE on async** — Limbs 1/2 scoped: `docs/changes/async-predicate-unification/SCOPING.md`. Option C RETIRED (#436). Stay clear of that surface.
+
+## ⚑ BOOT CORRECTION FOR NEXT SESSION (do not repeat my miss)
+The **live delta-log is `scrml/handOffs/delta-log.md`** ([1176]+). The `scrml-support/handOffs/delta-log.md` copy stuck at **[892]** is a stale DUPLICATE — boot tailed it and wrongly flagged continuity broken. Read the scrml-repo file. (Filed [1182].)
+
+## PROCESS LESSON ([1180]) — agent-collision
+A dispatched worktree build-agent stayed ALIVE in the background (left a gated-suite run → auto-resumed) and edited the same file concurrently with the PA; PA edits "vanished" + a bun transpile-cache artifact masked it. **After dispatching a worktree agent, do NOT hand-edit its files until it is confirmed stopped (`TaskStop`).**
+
+<!-- ============================================================= -->
 <!-- S322 WRAP (peter/P-Tech1) — prepended 2026-08-05.              -->
 <!-- S319 (bryan) + S321/S320 (peter) + all prior UNCHANGED below.  -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->

@@ -2,6 +2,13 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S323 — 2026-08-05 (peter · P-Tech1 Windows) — GH #357 (session in a `?{}` SQL interpolation) fixed, trimmed after the pass caught a §20.5 regression, + review floor drained to 0
+
+**2 PRs merged (#435 #437).** Concurrent with S322-bryan (live on the async / Option-C path); interleaved cleanly via strict-rebase serialization (bryan's #436 landed mid-session). main `cc5fcb9f` → `3c047151`, coherence 0/0.
+
+- **#435 (`cc5fcb9f`) — GH #357 fixed (adopter `dc`).** `session.*` inside a `?{}` SQL interpolation shipped into `.server.js` as a bare, unbound identifier → `ReferenceError` → HTTP 500 on every authenticated call. Ruled Direction B (S316 + dpa-021 S319): a **Proxy** `session` binding in the server handler prologue — text-level detection forces the infra on for the interpolation-only case, and the Proxy preserves the `.get()` index form so the bare identifier resolves while **agreeing** with the kept AST lowering (a raw bind would have leaked `sid`/`_rec`). Reported case (`${session.userId}`) 500 → 200. The PA adversarial pass (fix-vs-prefix) caught and **trimmed** a §20.5 conformance regression the build had introduced — an over-broad `E-SESSION-CONTEXT` scan that string-matched the compiler's own emitted comments and generated guards. Two language-surface findings routed to bryan: the **csrfToken read-disclosure** (HIGH — `session[k]` reads the §40.2 token via `.get()`) and the §6.1 sound-scan reimpl (MED). Issue closed with the SHA.
+- **#437 (`3c047151`) — review floor drained 5 → 0.** #435 recorded `finding`; #431–#434 (bryan's S322 continuity/dpa/stance) recorded `carve-out` after a verified docs-only footprint. Carve-out rate 73% flagged as a possible carve-out-lane question for the floor's design.
+
 ## S322 — 2026-08-05 (bryan · ASUS-Vivobook) — the wide-corpus gate built, found hollow by its own review, fixed, and used to land U1
 
 **4 PRs merged (#424 #428 #429 #430).** Concurrent with S322-peter all session (both boards read "none live"; disjoint after a claim exchange). main `77ec0f16`, coherence 0/0.
