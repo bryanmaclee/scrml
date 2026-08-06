@@ -5785,19 +5785,18 @@ export function generateServerJs(
       // Match the ACCESS form `_scrml_req._scrml_sess.<member>` (a session USE);
       // the `_scrml_session_cookie_wrap` helper's own ASSIGNMENT
       // (`_scrml_req._scrml_sess = …`, no trailing dot) is not a use and is skipped.
-      // gh357 — ALSO match the TEXT-level bare `session.`/`session[` form (a `?{}`
-      // SQL interpolation the AST lowering never touched). Inside a cookie-wrapped
-      // web-app route handler this is bound (the range is in `_allowedSessionRanges`
-      // and skipped just below); OUTSIDE one — an SSE `server function*`, an
-      // `<endpoint>` arm, an unwrapped headless route — there is no cookie context
-      // to bind it, so it stays a free variable. Firing E-SESSION-CONTEXT here
-      // build-BLOCKS that (fail-safe: over-block never ships a hole) instead of
-      // shipping the silent 500 the AST-only scan missed — closing the residual
-      // dpa-021 §6.1 hole so B "kills the class by construction" everywhere.
-      if (
-        !lines[_i].includes("_scrml_req._scrml_sess.") &&
-        !_SESSION_BARE_TEXT_RE.test(lines[_i])
-      ) continue;
+      // gh357 — this scan is DELIBERATELY left matching only the AST-lowered form.
+      // Widening it to the text-level bare `session.`/`session[` form (to build-block
+      // the dpa-021 §6.1 non-route residual — an SSE `server function*` / `<endpoint>`
+      // arm carrying a bare `session` in a `?{}` interpolation) was tried and REVERTED:
+      // it converts a PRE-EXISTING order/concurrency-sensitive emission flake in the
+      // test harness (a bare `session` occasionally emitted for a legit wrapped handler
+      // under bun's concurrent runner) into an E-SESSION-CONTEXT build error, i.e. it
+      // AMPLIFIES flakiness onto legit apps. That residual is explicitly a separate
+      // follow-up (dpa-021 §6.1/§10 — "deserves its own fixture"); the RULED route-
+      // handler fix (detection + Proxy prologue binding + cookie-wrap on the bare form)
+      // stands without it. See docs/changes/gh357-session-sql-interpolation/progress.md.
+      if (!lines[_i].includes("_scrml_req._scrml_sess.")) continue;
       if (_inAllowed(_i)) continue;
       _sessionCtxFired = true; // file-level: one error is enough to block the build
       errors.push(new CGError(
