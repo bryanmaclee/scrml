@@ -36,6 +36,8 @@ Item format + drain protocol: `scrml-support/dpa-scrml.md` + the design DD
 | dpa-019 | **COMPLETE (ADVISORY) dPA 2026-08-04** — 6-voice live poll + judge. **D 40.5 · C 40.0 · B 34.0 · A 31.0 — the origin ruling's Pole A finished LAST.** Reco = **two-mechanism split by LAYER**: D (per-compile, ≈1 module) for apply-back; C (opt-in anchor, ≈1.25–1.5) only if the Fork-2 primitive is built; **A NOT recommended**; B in reserve. **★ Resolved by FALSIFYING the premise: the value-only apply-back DOES NOT EXIST** (floStyle "apply" is a CSSOM patch; the only real source rewriter, flogence `groundedit.ts`, is STRUCTURAL). **★ 2 "PA-VERIFIED" grounding facts are WRONG — `srcmap-provenance.ts` EXISTS (186 LOC); `BaseNode.id` is minted mid-pipeline across 2 files.** **★ Fork 2 resolves to C, not A.** → `scrml-support/docs/debates/ask7-sid-identity-A-vs-B-vs-C-vs-D-2026-08-04.md` | **RATIFIED S319** (bryan: *"ratify all three"*) — **two-mechanism split by LAYER adopted; Pole A REJECTED; sidecar is PER-COMPILE.** Insight landed `[S319/dpa-019]`. **Consequence: the staged `ask7-style-provenance-spec` brief was written on Pole A and MUST be re-authored before dispatch.** |
 | dpa-020 | **COMPLETE (ADVISORY) dPA 2026-08-04** — emit sites READ + probes COMPILED. **(c) PARTIAL, but the partition is 2 not 7 and the unit is the CALLEE CLASS, not the position.** Heterogeneity hypothesis **EMPIRICALLY FALSIFIED** (5 of 7 hosts are already `async`). Root cause = **one missing `mode==="client" && serverFnNames` branch in `emitCall`**, because a post-emit regex rename hides the callee → **five post-hoc injectors**. **#391 and #394 did the SAME repair twice.** **Register carries 10 opens, not 7; 4 loci corrected.** **★ DO NOT DISPATCH the `markup-autoawait-all-emitters` brief as written — it targets Group B only and its mandated pattern will NOT fix the server-fn case.** BUILD in 3 units (U1 ~2-3d closes 5/7). → `scrml-support/docs/deep-dives/autoawait-choke-point-vs-heterogeneous-2026-08-04.md`. **⚑ S320-peter: RUN INDEPENDENTLY A SECOND TIME** (per-clone trap — this artifact was uncommitted at S320 boot; my re-run = `…/auto-await-choke-point-dpa-020-2026-08-04.md`, verdict converges: BUILD/partition/AST-based/same gaps, diverges on locus). **S320 also BUILT a CORE (PR #405, post-hoc unified injector) — verified + gate-GREEN but HELD** for bryan's emitCall-root-fix-vs-post-hoc architecture call (his lane). | **RATIFIED S319** (bryan: *"ratify all three"*) — **(c) PARTIAL adopted; unit = CALLEE CLASS; no irreducible heterogeneity.** Insight landed `[S319/dpa-020]`. **Consequence 1: the staged `markup-autoawait-all-emitters` brief SHALL NOT be dispatched as written** (banner applied). **Consequence 2 — OPEN FORK FOR BRYAN: PR #405 is dpa-020's U3 (merge the injectors, AST-based) — NOT U1 (the missing `emitCall` branch). Ratifying the verdict SHARPENS that call, it does not settle it.** |
 | dpa-021 | **COMPLETE (ADVISORY) dPA 2026-08-04** — verified **BY EXECUTION**. **B survives: direction intact, stated form does not.** One *raw* binding CANNOT serve both forms; one *Proxy* can; **B needs FOUR parts, not one.** **★ The hazard is a CONFIDENTIALITY BREAK, not merely `semantics-changed`** — proven: a request-controlled key yields the live session id and the full record incl. `csrfToken`, at HTTP 200, no diagnostic. **★ BLOCKER absent from the brief: detection never fires for the interpolation-only case → the fix would emit NOTHING and #357 would stay open.** **★ KEEP the AST lowering — 3 security gates match its literal string.** **⚠ Routed separately: `@session` is unlowered → a client-supplied body field read as identity, in a GREEN conformance case.** → `scrml-support/docs/deep-dives/gh357-session-binding-accessor-shape-2026-08-04.md` | **RATIFIED S319** (bryan: *"ratify all three"*) — **B survives, four parts not one; Proxy binding; KEEP the AST lowering.** Insight landed `[S319/dpa-021]`. **Consequence: the staged `gh357-session-sql-interpolation` brief is missing the detection blocker and MUST be revised** (banner applied). Routed HIGH filed: `g-session-ambient-unlowered-trust-boundary-inversion` (PA-verified by emission). |
+| dpa-022 | **BANKED S322 — UNRUN.** markup is a STATE KIND that renders, not a VALUE TYPE state can hold. bryan's framing is the PREMISE (stated-intent-beats-corpus), not one of two options; L1/§1.4/PRIMER are the artifacts to reconcile. Axiom-level, R2 min. | S322 block · "bank it" |
+| dpa-023 | **BANKED S322 — UNRUN.** the async boundary as a `(not to T)` lifecycle + discrimination-as-transition — subsume or complement the auto-await machinery, and where a non-coloring suspension marker fits. Axiom-level, R2 min. ⚠ interacts with the LIVE unbuilt option-C absorb ruling. | S322 block · "bank it" |
 | dpa-017 | **RATIFIED S230 2026-06-28** (user "go with your recos") — HYBRID: **B (origin-keyed structural redaction at the compiler-emitted egress sink) = load-bearing FLOOR** · A (same provenance map, static-prove) = demoted DX LAYER, **DEFERRED** · field-level **`reveal("col")`** = sole declassification · dynamic-SQL strip-all+lint · raw/FFI egress fail-closed. PA-verified the stale-cite flag, then authored **SPEC §14.8.9** (Nominal/spec-ahead) + fixed §14.8.7's stale `E-ROUTE-003` cite + minted **E-PROTECT-004 + I-PROTECT-STRIP-001** (§34, land-with-impl) + landed the insight + SPEC-INDEX regen. **Residual = the FLOOR BUILD** → `docs/changes/g-sql-row-protect-leak-2026-06-28/RULING.md` (sPA-slot-able; OQ-1 descriptor-lifetime first). | **RATIFIED** (build pending) |
 
 **⚠ DRAIN-PATH RULE (S319).** The dPA drains **THIS file**. A deliberation banked anywhere else does not exist to it. Witnessed S316→S319: seven conclusions were rung-assigned into `scrml-support/docs/deep-dives/S316-DELIBERATION-QUEUE.md` and the hand-off recorded *"the dPA is RUNNING on Q1/Q2/Q3"* — it was not and never had been; the dPA drained the dpa-018 Pole-D conditional (which IS in this file) instead, and the three deliberations sat unrun across two sessions while every build that depended on them stayed held. **Same shape as the review-floor and `gh issue list` misses: an obligation named in one place, a probe reading another.** Bank deliberations HERE; a separate rung-assignment doc is a companion, never the carrier.
@@ -825,3 +827,118 @@ A yes/no on the one-binding question with the lowering sketched, OR a named alte
 
 ### Report-back
 §3 — one-liner + artifact path + a `(dpa:)` breadcrumb. Do NOT ratify. Artifact → `scrml-support/docs/deep-dives/`. Routes to scrml PA.
+
+---
+
+## [dpa-022] deep-dive — markup is a STATE KIND that renders, not a VALUE TYPE that state can hold. What follows?
+
+`status: banked` · **BANKED S322-bryan (2026-08-05)**
+**Rung:** R2 minimum — axiom-level (it changes what markup fundamentally IS). One at a time; the FLOOR forbids resolving this inside a batch.
+**Provenance:** `ruling:user-voice-scrml.md S322` — bryan, verbatim:
+
+> *"markup in scrml, is just a pre-defined subset of 'state' that happens to have 'display' properties. But the point of the state system is to manage state start to finish and back."*
+
+He adds that he has tried to land this **since the scrml8 era** (before this session count began) and that it has never landed on agents.
+
+### ⚑ READ THIS BEFORE FRAMING THE QUESTION
+
+**This is NOT "which of two readings is right."** Per the standing rule (`[[feedback_stated_intent_vs_corpus_migration]]`), user-voice normative intent verbatim beats the corpus, and a corpus contradiction is a **migration backlog, not an open question**. bryan's framing is the PREMISE. The open question is **what follows from it** and **what in the current design has to change.**
+
+**Why it never landed is structural, not a comprehension failure.** The written canon teaches the opposite on page one: Pillar 1 / lock **L1** say *"markup is a first-class **VALUE** type — markup elements may sit anywhere expressions sit"*; SPEC **§1.4**'s five declarative doors (Component · bindable cell · derived cell · enum `renders` · iteration) are five answers to a **plumbing** question — *how does markup get somewhere it can be rendered.* Any agent reading the PRIMER absorbs markup-as-value before it reads anything else. **The DD should treat L1/§1.4/PRIMER §2 as the artifacts to be reconciled, not as authority.**
+
+You MAY conclude that parts of the current design survive for reasons the value-framing obscured — that is a real finding, not a failure. What you may NOT do is re-open whether markup is state.
+
+### PA-VERIFIED grounding (S322 — by execution; do not re-derive, DO re-verify before building on any of it)
+
+**1. The compiler states the value-framing in its own diagnostic.** `<thing> = <span>hi</>` is REJECTED:
+
+> `E-CELL-RENDER-SPEC-NOT-BINDABLE`: *"Shape 2 requires bindable markup (input, textarea, select), **because the cell holds the element's VALUE**."*
+
+The model is *"a markup cell is a cell bound to some element's value."* It asks what value a `<span>` holds, finds none, refuses. Under the state reading the question is malformed — the cell's state IS the span; there is no element whose value is held.
+
+**2. Measured against "start to finish and back":**
+
+| | markup today | probe |
+|---|---|---|
+| start | YES — `const <badge> = <span/>` | compiles |
+| **finish** | **NO — markup state cannot be written** | `<thing> = <span>hi</>` → `E-CELL-RENDER-SPEC-NOT-BINDABLE` |
+| and back | `reset()` compiles on a markup cell — **but it also compiles on ANY derived cell**, so it is unvalidated and proves nothing markup-specific | `reset(@dbl)` on a plain derived cell also compiles |
+
+Markup gets a START and nothing else. It is plumbed, not managed.
+
+**3. Unverified anomaly, flagged not claimed:** `reset(@badge)` on a markup cell emitted `_scrml_reset(_scrml_cs_key(n)…` — possibly resetting the WRONG cell. Not chased. Probe before relying on any reset behaviour.
+
+### The three concrete forks
+
+1. **The writable-markup-cell rejection.** S279 ruled a writable markup cell "a redundant sixth door." Redundant *as a door* is coherent if markup is a routed value. Is it coherent if markup is state? If markup is state, a writable markup cell is not a door at all — it is just a cell, and rejecting it rejects the ability to manage markup state to *finish*.
+2. **The five declarative doors (§1.4).** Are these five *state entry points* (in which case the framing is fine and only the words are wrong), or five *plumbing routes* that exist because markup was modelled as a value needing transport? Answer with the mechanism, not the prose.
+3. **Lifecycle and `reset()` on markup.** If markup is state, what does `(A to B)` mean for it, what does `reset()` mean, what is `default=`? §14.12 already permits a lifecycle annotation on a markup-typed position (`<badge>: (not to markup) = not` compiles) — but nothing appears to *use* it. Is that reach real or accidental?
+
+### The through-line (why this is banked beside dpa-023)
+
+Two axes independently got value-shaped treatment when both are state-shaped: an **async result** is `(not to T)` — state with a lifecycle — and we built ~9,276 injected awaits across ~13,500 synthetic hosts to route it; **markup** is state with display properties, and we built five doors to route it. **One habit, twice.** The DD should say whether that reading holds, because if it does it upgrades Pillar 5b from a heuristic to a **diagnostic**: *when you are building plumbing — injectors, doors, per-position special cases — you are probably plumbing a value that should have been state.*
+
+### What-counts-as-an-answer
+
+A statement of what markup-as-state **entails**, with worked adopter code, on each of the three forks — plus an explicit list of which current normative artifacts (L1 · §1.4 · §6.2 Shapes 1-3 · `E-CELL-RENDER-SPEC-NOT-BINDABLE` · PRIMER §2/§4) are re-wordings and which are **behaviour changes**. Behaviour changes must be classified per `pa-base` §8 (inert / newly-rejecting / newly-accepting / semantics-changed) and any newly-accepting one flagged as a one-way door. Do NOT ratify.
+
+### Report-back
+§3 — one-liner + artifact path + a `(dpa:)` breadcrumb. Artifact → `scrml-support/docs/deep-dives/`. Routes to scrml PA.
+
+---
+
+## [dpa-023] deep-dive — the async boundary as a STATE lifecycle: does `(not to T)` + discrimination-as-transition subsume the auto-await machinery, and where does a suspension MARKER fit?
+
+`status: banked` · **BANKED S322-bryan (2026-08-05)**
+**Rung:** R2 minimum — axiom-level (it changes what a scrml function IS). Sibling of dpa-022; run SEPARATELY, not batched.
+**Provenance:** `ruling:user-voice-scrml.md S322` — bryan endorsed the read (*"you nailed it"*), and named the load-bearing half as the **discrimination-as-transition** reading, not the keyword.
+
+### Scope-lock
+
+bryan's diagnosis of `async`/`await`, verbatim and precise — three distinct complaints:
+
+> *"async/await breaks your code retroactively, so it not only comes with the mental overhead of async coding, it also forces you to fix backword, plus you are permanently forced to explicitely color down that whole logical branch."*
+
+**The PA's framing, which he endorsed:** `async`/`await` fuses two unrelated facts — **"time passes here"** (statement-level, local) and **"this function is async"** (signature-level contract every caller must satisfy). **All the virality and all the retroactive breakage come from the second.** scrml's current answer discards BOTH, which does not remove the leak — it makes it silent:
+
+```scrml
+function refresh() {
+    @rows  = loadUsers()      // suspension happens here — INVISIBLE
+    @count = @rows.length     // reads the OLD @rows. compiles clean. no diagnostic.
+}
+```
+
+**The half bryan is actually pointing at** is that an in-flight value is already expressible in scrml's own vocabulary — `(not to T)` (§14.12), where **discrimination IS the transition** (§14.12.6 presence-progression: `given`, `if (x is not)`, `match` all auto-mark), and `E-TYPE-001` already fires on a pre-transition read. That is *exactly* the stale-read bug, caught by machinery that shipped at S130.
+
+```scrml
+<rows>: (not to User[]) = loadUsers()
+given @rows :> { @count = @rows.length }    // discrimination IS the transition
+```
+
+### The question
+
+**Does the §14.12 lifecycle + discrimination model subsume the auto-await machinery** — or is it a complement, and if so what is the seam? Sub-questions:
+
+1. Does it cover the positions the injectors cover (statement, receiver-tail, argument, `given`/`match` bodies, markup interpolation), or does it only cover the *binding* position?
+2. Is a **suspension marker** (`wait`-shaped: marks "time passes here", does NOT color the function, never breaks a caller) still wanted on top — and is it a *surface* over the lifecycle or an independent mechanism? Note the language already has a ladder idiom for compiler-suggested sharper forms (`I-MATCH-PROMOTABLE`, `W-EACH-PROMOTABLE`), so a diagnostic that *suggests* the marker is precedented.
+3. What happens to the §13.2 position-invariance mandate under this reading — does it survive, narrow, or get replaced?
+
+### PA-VERIFIED grounding (S322 — measured, do not re-derive)
+
+- **13,504 IIFEs** in the emitted corpus (4,129 of 4,339 bundles). **ZERO in 1,878 `.scrml` sources.** Purely a lowering artifact, from 12 codegen emitters.
+- **96% of them are SYNC** (13,006 sync vs 496 async), while the compiler must inject **9,276 `await`s** — each legal only inside an async host.
+- **1,350 event-handler hosts, ALL sync** (`function(event)`, zero async). A server fn called from `onclick=` lands there; the current gate provably cannot fire in any of them.
+- **142 bare client server-fn call sites** persist in cleanly-compiling sources after the U1 landing (delta 0). The harness now emits this number, so any future change has a before/after.
+- **The structural root (dpa-020, carried):** three disagreeing "is this name async in client mode?" predicates. F2 fixed two; the drain stays blind.
+- **The seam that is currently arbitrated by a string matcher:** `emit-client.ts`'s GITI-001 absorb decides whether `.catch(_scrml_error_boundary_log)` is attached — i.e. **§19.6 error containment is enforced by a regex over emitted text.**
+
+### ⚑ Interaction with a LIVE ruling — do not contradict it silently
+
+bryan RULED **option C** at S322 for the absorb sequencing fork: *await the IIFE **and** keep its `.catch`* (§13.2 vs §19.6). **NOT YET BUILT.** If this DD concludes the lifecycle model changes what C should be, say so explicitly and route it back as a re-ruling — do not quietly reinterpret it. Open sub-question bryan did NOT rule: whether the boundary swallowing the error should also suppress the continuation, or let the handler proceed on a stale cell.
+
+### What-counts-as-an-answer
+
+A verdict on subsume-vs-complement with worked adopter code for **each** of the positions in (1), plus a direct answer on the marker in (2) including what its diagnostic would say and when it fires. Must state how any proposal avoids re-introducing (a) retroactive breakage and (b) branch coloring — those are the two properties the whole design exists to avoid. Do NOT ratify.
+
+### Report-back
+§3 — one-liner + artifact path + a `(dpa:)` breadcrumb. Artifact → `scrml-support/docs/deep-dives/`. Routes to scrml PA.
