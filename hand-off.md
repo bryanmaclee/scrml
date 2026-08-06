@@ -1,4 +1,109 @@
 <!-- ============================================================= -->
+<!-- S322 WRAP (bryan/ASUS-Vivobook) — prepended 2026-08-06.        -->
+<!-- CONCURRENT with S322/S323/S324-peter throughout; main moved    -->
+<!-- under me four times. Disambiguate sessions by NAME.            -->
+<!-- Mechanical stream = delta-log [1163]-[1176] + [1188]-[1193].   -->
+<!-- ============================================================= -->
+
+# scrml — Session 322 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-08-05/06. `/boot` Profile A FULL. **11 PRs merged** (#424 #428 #429 #430 #431 #432 #433 #434 #436 #438 #442).
+main `0d9d843d`, coherence **0/0** both repos. Review floor **0 OWED**. Adopter issues **0**.
+
+## 🔴 THE NEXT PA'S FIRST MOVE — read the freeze pause before reasoning from any dated artifact
+
+**The freeze campaign is PAUSED (not abandoned).** It is in `.pa-base/profile` STAGE (rewritten so the
+pause LEADS) and `master-list.md` §0 (top banner). **Every dated entry below those banners was written
+under a freeze motivation.** The operating question is no longer *"does this widen the surface?"* with a
+default no — it is *"is this the best expression of the intent?"*, **and a widening can be right.**
+
+The argument, so it is not re-derived: **the tier-1 campaign is a CONFORMANCE instrument, not a DESIGN
+instrument.** Its denominator is coverage of what already exists. 100% proves the impl matches the spec
+and says nothing about whether the spec is the language we want. The auto-await axis is the proof —
+spec'd, implemented AND conformance-covered, yet under-designed.
+
+**The re-examination test, and it is checkable:** an under-designed axis shows as **a normative SHALL
+delivered by RETROFIT rather than BY CONSTRUCTION.**
+
+## 🎯 THE ARCS
+
+**1 — the wide-corpus harness (#428), and it shipped hollow in the one layer the decision rested on.**
+Built to kill a class that had shipped three times (`artifact-diff.mjs` 8-of-115 · `u1-corpus-emit.sh`
+329-of-1818 · its `node --check` half inheriting that population). Two adversarial lenses found **nine
+defects in the new gate**. The headline, PA-re-verified: `node --check` on a `.js` accepts a **TOP-LEVEL
+stranded `await`** while the compiler emits `<script src=…>` with no `type="module"` — and **bun's
+`vm.Script` does not reject it either**, so the obvious in-process fix would have been a THIRD hollow
+gate. Corpus 329 → 1878.
+
+**2 — U1 landed (#429), explicitly NOT claiming its bug class.** Rebased onto current main and
+re-measured: 2 content diffs of 7254, both on sources that fail to compile on every revision; syntax
+delta 0 under all three goggles. **142 bare client server-fn call sites remain, delta 0.** An
+independent reviewer refuted the authoring agent's "no compiling exemplar" conclusion by finding four
+unambiguous instances the fix does not reach.
+
+**3 — Limb 1 landed (#442) after THREE rounds and TWO do-not-lands.** See MISSES — the lesson is the
+deliverable.
+
+**4 — the freeze pause + two rulings**, one of which was **retired in the same session it was made**.
+
+## 🧭 FINDINGS THAT OUTLAST
+
+1. **A mechanism that REMOVES coverage must be measured on the axis where coverage was REMOVED.** A
+   zero artifact/diagnostic differential bounds emission on TODAY'S corpus; it says nothing about a
+   fail-close removed for code not yet written. Only a population count on the narrowed surface does.
+   **This is a fourth gate-design failure mode and `pa-base` §8 does not carry it yet — owed.**
+2. **The gate was ARM-granular; the hazard is SITE-granular.** Agreeing on which BRANCH runs says
+   nothing about whether it awaits a given SITE. Generalises past this bug.
+3. **`isolation:"worktree"` cuts from MAIN, not the checked-out branch.** `pa-base` §5's
+   brief-before-dispatch rule is right; its mechanism was not understood until now. Land the brief on
+   main first or the agent cannot see it.
+4. **bryan rules on compiled code, not on a described fork.** Building the probe set proved my own
+   framing wrong twice — `.map` is TRANSFORMED not rejected; the falsifier was the reset path, not the
+   markup lift.
+5. **A dPA verdict is ADVISORY and its MECHANISM claims need verify-before-claim.** Half of dpa-023's
+   "ship first" was false: §19.6 containment is NOT decided by a string rewrite (that stage has zero
+   regex ops) — the `combinedRegex` is the PRECEDING stage's fn-name mangler. **The correction made the
+   finding bigger:** that mangler runs after every emitter, which is why the emitter cannot see it is
+   emitting a server call.
+
+## ⚠️ OWN MISSES — recorded, not smoothed
+
+- **A truncated probe of my own, reported to the operator as a defect in the tool** — one hour before
+  dispatching an agent to eliminate truncated probes. I claimed the gap counts were irreconcilable and
+  the rollup uncomputable. Both false: `state.ts --check` completes in ~4min and PASSES; my 120s
+  timeout was too short and my `status=open` grep was naive (`GAP_STATUS_OPEN` counts five statuses).
+  Retracted to the operator AND to the sibling session, who had been handed it as a work item.
+- **My "one habit, twice" through-line was REFUTED** on the markup half by dpa-022 — the mismodelling
+  was in the CANON, not the mechanism.
+- **My central grounding claim for dpa-023 was measured FALSE** — the stale read is NOT caught by S130
+  machinery; the canonical form I banked compiles clean and the `given` guards nothing.
+- **CWD slipped into scrml-support three times.** Caught each time by asserting root, but three is a
+  pattern, not an accident.
+- **I nearly clobbered Peter's work** — a wholesale `git checkout <sha> -- docs/known-gaps.md` would
+  have deleted his #426 banner. Caught by diffing before staging; re-applied additively.
+
+## 🧷 STATE / OPEN
+
+- **Gaps HIGH 23 · MED 115 · LOW 49 · Nominal 7.** Gate GREEN. 0 open PRs. Review floor **0 OWED**
+  (carve-out rate 75% — still the wrong denominator; the code-bearing-only refinement is STILL unbuilt
+  and this session is a third data point for it).
+- **⛔ Owed by bryan:** nothing blocking. Both dPA artifacts are ADVISORY and await ratification.
+- **The queue, in order:** the `pending` rung (dpa-023, 5/5 panel convergence) → `_scrml_reset` awaits
+  its thunk (the HIGH; decide WITH option C's reasoning — `reset()` is a discrete user act where
+  blocking is defensible in a way a page's parallel loads are not) → Limb 2 (retire the whole-buffer
+  mangler). **Note dpa-022's markup reconciliation is inert prose-only and independently shippable.**
+- **Option C is RETIRED**, superseded before it was built. Do not resurrect without reading why.
+- **Worktrees 24 → 20.** The three landed this session removed; `u1-frozen` reclaimed. The remaining 6
+  `agent-*` + 9 `spa/ss*` are pre-existing and carry unmerged commits — retained per S307/S310/S313.
+
+## Tags
+#session-322-bryan #freeze-campaign-paused #harness-shipped-hollow #node-check-blind-to-top-level-await
+#bun-vm-script-also-blind #arm-granular-vs-site-granular #coverage-removal-needs-its-own-axis
+#option-c-retired-before-built #markup-is-a-state-kind #dpa-022 #dpa-023 #limb1-landed
+
+---
+
+<!-- ============================================================= -->
 <!-- S324 WRAP (peter/P-Tech1) — prepended 2026-08-06.              -->
 <!-- S323 (peter) + all prior UNCHANGED below.                      -->
 <!-- (Numbers collide across machines — disambiguate by NAME.)      -->
