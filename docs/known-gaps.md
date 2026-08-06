@@ -477,11 +477,11 @@ nesting is not a common shape — but it is the exact shape a match-heavy adopte
 loss is invisible.
 
 ### g-session-not-rewritten-inside-sql-interpolation — `session.*` inside a `?{}` SQL template interpolation is not rewritten; bare `session` reaches the server emit and the route 500s on every call — `NEW S313-bryan (adopter dc/DanceCard, GH #357); HIGH; open (build-integrity + silent at compile; PA-REPRODUCED on 16783d6d)`
-<!-- @gap id=g-session-not-rewritten-inside-sql-interpolation sev=HIGH status=open locus=compiler/src/codegen/rewrite.ts:387,2831 prov=spec:§20.5.15427 -->
+<!-- @gap id=g-session-not-rewritten-inside-sql-interpolation sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts:astSqlQueryUsesSession+_scrml_session_bind+session-prologue-splice(root:interpolation-captured-as-raw-text-at-rewrite.ts:387) prov=spec:§20.5.15427 -->
 
 Adopter **dc / DanceCard** (a third adopter alongside aM and RediLedger), filed against `a4a4d55f`. **PA-REPRODUCED on `16783d6d`** — not taken on report.
 
-`session.*` lowers to `_scrml_req._scrml_sess.*` in ordinary expression position, but the rewrite does not reach the expression children of a `?{}` SQL template's interpolations. The bare identifier survives into `.server.js`, which binds no such name, so the handler closes over a free variable → `ReferenceError: session is not defined` → **HTTP 500 on every call**. Reproduced with both positions in the SAME function, one line apart:
+`session.*` lowers to `_scrml_req._scrml_sess.*` in ordinary expression position (an AST member/index node in `emit-expr`). But a `?{}` interpolation is captured as **raw TEXT** (`rewrite.ts:387`, `params.push(interp.expr)`) — there are **no expression children at that layer to walk** (the original `locus=rewrite.ts:436 rewriteSqlRefs "walks expression nodes but not the interpolation children"` was WRONG on this point). So the sigil-less `session` in the interpolation is invisible to BOTH the AST lowering AND the AST-keyed session-infra gate. The bare identifier survives into `.server.js`, which binds no such name, so the handler closes over a free variable → `ReferenceError: session is not defined` → **HTTP 500 on every call**. The FIX is therefore a handler-scope prologue binding in `emit-server.ts` (Direction B), not a rewrite-child walk: a text-level detector (`astSqlQueryUsesSession`) forces the session infra on, and a Proxy binding (`_scrml_session_bind`) spliced into the prologue makes the bare identifier resolve while preserving both accessor shapes. Reproduced with both positions in the SAME function, one line apart:
 
 ```
 168:    if (!_scrml_req._scrml_sess.isAuth) {                                    ✅ rewritten
