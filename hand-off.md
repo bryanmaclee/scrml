@@ -1,4 +1,149 @@
 <!-- ============================================================= -->
+<!-- S325 WRAP (bryan/ASUS-Vivobook) — prepended 2026-08-06.        -->
+<!-- CONCURRENT with S325-peter (he booted mid-session, SUCCESSOR   -->
+<!-- mode, disjoint; his #445 landed under me).                     -->
+<!-- Mechanical stream = delta-log [1194]-[1217].                   -->
+<!-- ============================================================= -->
+
+# scrml — Session 325 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-08-06. `/boot` Profile A FULL. **1 PR merged (#444).** main `cff2af5e` → Peter's `13edcfbf`.
+**Gaps HIGH 25 · MED 120 · LOW 49 · Nominal 7.** Review floor **0 OWED**. Adopter issues **0**.
+
+## 🔴 READ FIRST — two things, in this order
+
+**1. The freeze campaign is still PAUSED.** Nothing this session changed that. `.pa-base/profile` STAGE
+and `master-list.md` §0 lead with it. The operating question remains *"is this the best expression of
+the intent?"*, and a widening can be right.
+
+**2. ⛔ TWO COMPLETED, REVIEWED LANDINGS ARE BLOCKED ON A GITHUB ACTIONS OUTAGE — not on judgment, not
+on a decision.** Do not re-do this work. Do not re-review it. Land it.
+
+## ⛔ THE BLOCK, and the evidence it is upstream
+
+No CI run exists **repo-wide** since `31124674312` (Peter's last run predates it). The API returned
+**TLS handshake timeouts**. My first run had all three jobs **CANCELLED at a uniform 15m02s**. FOUR
+trigger attempts produced nothing: force-push · close/reopen · a new commit · a brand-new PR (#449).
+`enforce_admins=true`, so **`--admin` is not available** and `gate` is the sole required check.
+
+I did not self-authorize a gate bypass: bryan authorized the MERGE, which is a different authorization
+than bypassing a blocking gate (pa-base §1). **If the outage has cleared, the whole backlog is two
+merges and one dispatch.**
+
+### PICK UP HERE — exact sequence
+
+1. **PR #449** (branch `fix/s325-mangler-defects`, head `0ad24821`). Supersedes **#446** (closed — it
+   never received a run). Docs-only. **bryan AUTHORIZED this merge in-session.** Needs only a `gate` run.
+2. **Bare-return arc — branch `worktree-agent-a2589c3ed53f52d81` @ `1dc7fd78`. UNLANDED.**
+   File-delta onto a feature branch → PR → gate → merge. **DO NOT re-review from scratch.** It went
+   through the full S239 gate at the frozen `2a7c4e9f` (two adversarial lenses), then one fix round;
+   the fix-round delta (`2a7c4e9f..1dc7fd78`) was PA-reviewed directly. The reviewers' structural
+   findings (four must-not-move paths unmoved · confidentiality floors intact · CPS composes · falsy
+   returns clean) survive that delta because it does not touch those regions.
+   **Record on landing:** a hand-built `Response` now bypasses the RUNTIME redaction floor by design —
+   the guard sits BEFORE the redact because a `Response` is an opaque handle the redact cannot inspect;
+   it relies on §14.8.9's compile-time `detectProtectedRawEgress`. Currently unreachable (`E-SCOPE-001`).
+3. **mangler-three-defects arc** — its brief is committed **on the #449 branch**, so a worktree cut from
+   main cannot see it. **Unblocks the moment #449 merges. Do not dispatch before that.**
+
+## 🎯 THE ARCS
+
+**1 — The session HIGH was not the bug.** Peter routed `g-session-get-reserved-key-read-disclosure`
+(HIGH). Measured end-to-end: its two most serious claims **do not reproduce** (`sid`/`_rec` → `null`;
+the sid is the store KEY per §20.5.1 and Peter's own gh357 Proxy closes it), and its rationale is
+**false** — the §40.2 token is already published same-origin through three compiler-owned channels, so
+a read-side denylist is theater *and* newly-rejecting on a surface §20.5 explicitly sanctions.
+**Re-characterized HIGH→MED with the reasoning recorded so overruling is cheap.** The real residual is
+better than the filed one: an unfiltered read of every adopter session key by attacker-chosen key, plus
+an unguarded prototype chain (`constructor` via `?{}` → HTTP 500).
+
+**2 — That probe found a whole class of dead routes.** `g-authed-server-fn-route-returns-bare-value-not-response`
+(HIGH, NEW). An `auth=`/`protect=`-active server-fn handler returns a bare value; both shipped hosts pass
+it to Bun → `200 text/plain`. **59 of 66 handlers in the flagship example are in the class.** Built,
+S239-gated, fix-rounded — counts went corpus **122 bare → 1**, `examples/` 61 → 0, **trucking 59 → 0**.
+
+**3 — Limb 2 is ordering-blocked, and only the count could show that.** 871 live sites · 0 repaired by
+any other pass · **145 executed load-time ReferenceErrors** on deletion · 0 syntax delta under both
+goggles. The blocker is not size: the encoded name is a monotonic per-compile counter in one object
+`CompileContext` does not carry, and the body-render dispatchers run **before the names exist**.
+**Do NOT dispatch "retire the mangler" as one arc** — decomposition in
+`docs/changes/limb2-mangler-retirement/SCOPING.md`, ordered by reachability, each step keeping the pass
+in place until its own population reaches zero.
+
+**4 — Four defects filed off that count**, one HIGH and live (`--embed-runtime` ships a corrupted runtime).
+
+## 🧭 FINDINGS THAT OUTLAST
+
+1. **"Byte-identical" is only evidence if the corpus exercises the arm you changed.** A reviewer found
+   the build agent's Ext-5 evidence VACUOUS — every corpus Ext-5 handler sits on the untouched branch —
+   then built the missing case itself. The conclusion held; the evidence for it did not.
+2. **Textual non-movement is not behavioural non-movement.** "Zero serverLoad/endpoint/SSE changed" was
+   true textually, but `get()` lives in a SHARED helper, so their behaviour changed with zero diff. The
+   same blind spot hid the template-literal corruption — a change in string VALUES, which an attribution
+   that counts artifacts and functions structurally cannot see.
+3. **A gap-entry locus is a hypothesis, and so is a DD's mechanism claim.** The session HIGH's stated
+   line numbers were already stale at HEAD; dpa-023's §19.6 mechanism claim was measured FALSE last
+   session; dpa-022 routed a HIGH that nobody filed. Verify all three kinds before consuming them.
+4. **A probe can return a well-formed answer to a question you did not ask** — this time on a TIME
+   boundary (attempt 1's logs read as attempt 2's) rather than a path. Assert `.run_attempt`.
+5. **The mangler's lookahead is a documented API of the emit contract** (nine free-riders, one
+   load-bearing), and there is a NEGATIVE dependency too — the module-registry footer is safe only
+   *because* property keys sit outside it. Narrowing that regex is not free in either direction.
+
+## ⚠️ OWN MISSES — recorded, not smoothed
+
+- **I wrote a durable ledger conclusion on a measurement I had not taken.** Asserted a CI rerun "also
+  failed" → concluded "cloud-environment-deterministic; do not re-run to clear it". Both false, and the
+  second was actively harmful advice. Corrected before it reached main; the mechanism + fix are in
+  `G-SERVE-TOOL-R26-CI-BOOT-RACE`.
+- **I got the CORS escalation wrong** — reasoned from the middleware wrapper's unconditional header
+  application without checking which routes reach the wrapper. Refuted by measurement; recorded in the
+  ledger so it is not re-derived.
+- **I narrowed the wrap on a self-estimated context budget I cannot actually measure.** bryan:
+  *"your ctx read is wrong… lots of ctx for a good fat wrap."* This is the INVISIBLE form of the trade
+  `pa-profile-bryan`'s wall-time-beats-token-frugality authorization forbids. **Stop reporting context
+  estimates as if they were measurements, and stop letting them size the work.**
+- CWD slipped into scrml-support twice; the branch slipped to `main` after a failed `gh pr merge` ran
+  `git checkout main` — caught by a file-changed-since-read error, not by discipline.
+
+## 🧷 STATE / OPEN
+
+- **⛔ Owed by bryan (unchanged, none newly blocking):** `g-session-context-scan-bare-form-sound`
+  (Peter's routed #2, newly-rejecting) · the **`pending` rung** (dpa-023, advisory) · **`_scrml_reset`
+  awaits its thunk** (HIGH; decide WITH option C's reasoning) · and the merge word is already given
+  for #449.
+- **Decided by PA under the FORK RULE (interrupt-if-wrong):** route handlers **SHALL return a
+  `Response`** — all four structural rows agree, and S278 puts emitted-JS shape in compiler-spec, not
+  language-spec. The fix CORRECTS the 19/20 test assertions rather than preserving them.
+- **Three dispatch stalls** on the 600s watchdog, all after the work committed. Resume from the branch
+  tip; never re-dispatch.
+- **Gate at wrap:** `bun test compiler/tests/{unit,conformance}` → **18823 pass · 50 skip · 0 fail**
+  (1018 files, 75427 expects). Cloud `gate` NOT runnable — see the outage block above. The two agent
+  branches each ran their own full suites: bare-return `29731 pass / 50 fail` with a **zero-new failure
+  NAME SET** vs its base; Limb 2's instrumentation proved a no-op (corpus differential: NO DIFFERENCES
+  over 1878 sources).
+- **Maps: UNCHANGED, deliberately.** No compiler source landed to main this session — both source arcs
+  are on unlanded agent branches — so `.claude/maps/` is still accurate for main at stamp `a3a34d80`.
+  **Refresh is OWED by whoever lands the bare-return arc** (it moves `emit-server.ts`).
+- **`state.ts --check` passes**; the `@generated` §0 rollup was regenerated after every gap edit and the
+  arithmetic verified by hand each time (HIGH 23→24→25, MED 115/116→117→119→120).
+- **Worktrees: 8 under `.claude/worktrees/`, NONE pruned — deliberately.** Two are this session's and
+  both must survive: **`agent-a2589c3ed53f52d81`** (bare-return, `1dc7fd78`, UNLANDED — **destroying
+  this loses a fully reviewed, fix-rounded arc**) and `agent-a991f86dc83d4aebf` (Limb 2 measurement
+  instrumentation, env-gated throwaway, but it is what makes the 871/1413 count reproducible).
+  The other six (`a1a9a797`, `a5461872`, `a5834663`, `a79d3eca`, `a8b2da40`, `a8ce52b8`) are
+  **pre-existing from prior sessions** and were carried, not created, here — the S307/S310/S313
+  retain-decision still governs them. **A stale-worktree sweep has been owed since S268 and is owed
+  still**; it is a real cleanup task, not a wrap step I skipped.
+
+## Tags
+#session-325-bryan #the-session-high-was-not-the-bug #authed-routes-were-dead #suite-asserted-the-defect
+#limb2-ordering-blocked #871-sites #cors-hypothesis-refuted #byte-identical-needs-corpus-coverage
+#textual-vs-behavioural-movement #actions-outage-blocked-two-landings #assert-run-attempt
+
+---
+
+<!-- ============================================================= -->
 <!-- S322 WRAP (bryan/ASUS-Vivobook) — prepended 2026-08-06.        -->
 <!-- CONCURRENT with S322/S323/S324-peter throughout; main moved    -->
 <!-- under me four times. Disambiguate sessions by NAME.            -->

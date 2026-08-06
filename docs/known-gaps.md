@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 24 |
-| MED | 117 |
+| HIGH | 25 |
+| MED | 120 |
 | LOW | 49 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -587,6 +587,10 @@ that to a raw property read (a `semantics-changed` silent regression). Brief:
 - **Unfiltered read of every adopter-written session key by attacker-chosen key.** A seeded `apiKey` came back as `sk-live-PROBE-SECRET-9f3c`, verbatim. `.get()` is one line — `return this._rec[key] ?? null` — with no allowlist, denylist, or `hasOwnProperty`. This is the read analogue of mass-assignment; it needs no reserved key to bite. §20.5 sanctions `session.get(k)` but plainly never contemplated `k` being request-controlled.
 - **Prototype-chain read is unguarded.** `.get("__proto__")` → `Object.prototype`; `.get("constructor")` / `.get("toString")` → functions. Through the `?{}` path `constructor` is an **HTTP 500** (SQL bind TypeError) — an unhandled-input crash reachable from a request-controlled key.
 
+**⚑ REACHABILITY CHANGED — S325-bryan, found by the adversarial pass on the bare-return arc. Re-score this when that arc lands.** At the time of the MED re-score below, the `auth=` shape of this leak reached **no wire at all**: a bare handler return produced a constant Bun welcome page and the value went only to **stderr** (MEASURED on Bun 1.3.14 — the value is never echoed on the wire). [[g-authed-server-fn-route-returns-bare-value-not-response]] fixes that by design, and in doing so takes this leak **from log-only to wire-live**: MEASURED at that arc's ref, `server function peek(k) { return { v: session.get(k) } }` under `auth="required"` returns `{"v":"<live csrf token>"}` at **200 application/json**, key taken from the request body.
+
+**Bounded, and measured:** the §40.2 token for that same session is ALREADY delivered to the client on the 403 as `scrml_csrf=<same value>; Path=/; SameSite=Strict` with **no `HttpOnly`** — so this is not a new capability for that session's own token. What changes is (a) the token gains a response-body egress channel, and (b) **every own key of `_rec` becomes readable through a request-controlled `k` over HTTP**, where before it was inert. The severity call below still stands on the attacker model; the REACHABILITY premise it partly rested on does not survive that landing.
+
 **Why HIGH → MED.** The realistic attacker is (1) same-origin XSS or (2) an adopter echoing a request-controlled key to an untrusted caller — literally what the reproducer does. Not remotely exploitable: server-fn routes are always `POST` (so the §40.2 GET exemption never applies), always CSRF-gated (measured: 403 without a token), and `Access-Control-Allow-Credentials` is **never emitted anywhere** in the compiler (`grep -c` → 0), so a credentialed cross-origin read is browser-blocked and an uncredentialed one carries no session. Footgun-class, not remote disclosure. **Severity is a ledger call and bryan can overrule it; the reasoning is recorded here so overruling is cheap.**
 
 **The ruling bryan owes is now sharper, and it is NOT "read-null vs error on csrfToken".** It is: *should a request-controlled key reach a session read at all?* Candidates — (i) leave it (adopter responsibility; matches §20.5 as written); (ii) a lint on request-derived keys reaching `session.get`/`session[…]` (fails open); (iii) `hasOwnProperty` + prototype guard only, no key policy — fixes the 500 and `__proto__` with **no language-surface change**, so arguably a plain bug fix needing no ruling; (iv) a reserved-key denylist (theater for the token, defense-in-depth for the echo case). **(iii) is separable and should not wait on the ruling.**
@@ -595,6 +599,58 @@ that to a raw property read (a `semantics-changed` silent regression). Brief:
 <!-- @gap id=g-session-context-scan-bare-form-sound sev=MED status=open locus=compiler/src/codegen/emit-server.ts:5799(E-SESSION-CONTEXT scan) prov=dpa-021:§6.1 route=bryan -->
 
 dpa-021 §6.1 asks the E-SESSION-CONTEXT scan to also build-block a bare `session` used in a `?{}` interpolation OUTSIDE a web-app route handler (SSE `server function*` / `<endpoint>` / headless), so Direction B "kills the class by construction" everywhere. The gh357 attempt widened the scan to string-match a bare `session.`/`session[` in the assembled `lines` — but that **deterministically** matches the compiler's OWN emitted comments (`// --- session.destroy() handler ---`) and generated auth guards (`if (!session.isAuth)`), build-blocking a clean §20.5 app (regressed CONF-SESSION-STORE-PROGRAM-UNIFY, green on main). **Reverted** (commit on this branch). A sound implementation keys on recorded lowering/emission SITES (as `_allowedSessionRanges` already does for the AST form), not a text scan of assembled output. The residual it targets is a PRE-EXISTING silent runtime free-var (unchanged from main); this is completeness, not a regression fix. Newly-rejecting → bryan's language-surface call on whether to build-block at all vs leave it a runtime concern.
+
+### g-server-fn-body-reindent-corrupts-multiline-template-literals — the server-fn body re-indent walks INSIDE multi-line template literals, changing their runtime string value — `NEW S325-bryan (adversarial blast-radius review of the bare-return arc; EXECUTED); MED; open`
+<!-- @gap id=g-server-fn-body-reindent-corrupts-multiline-template-literals sev=MED status=open locus=compiler/src/codegen/emit-server.ts(server-fn body line emitter — the per-line indent prefix) prov=rationale:found-by-the-S239-adversarial-pass-on-the-bare-return-arc -->
+
+The server-fn body emitter prefixes every emitted line with an indent (`lines.push(\`${indent}${line}\`)`). When a **template literal spans lines, those characters are string CONTENT, not layout** — so the re-indent changes the literal's cooked value.
+
+**MEASURED corpus-wide:** 65 literals across 43 handlers in 18 artifacts have a different cooked value between base `cff2af5e` and the bare-return ref `2a7c4e9f`. **MEASURED by execution** (same handler, same input, non-SQL multi-line literal): base returns a **77-byte** string, the ref returns **87 bytes** — leading whitespace injected into every continuation line.
+
+**⚑ PRE-EXISTING AND AMPLIFIED, NOT INTRODUCED.** The emitter has always re-indented template literals — base already corrupted the same fixture (a source line at column 0 emitted with 2 leading spaces). The bare-return arc's 2→4 space change on the non-baseline-CSRF path **doubles** it. Do not attribute this to that landing; it made an existing defect larger and easier to see.
+
+**Benign TODAY, and that is corpus-accidental:** all 65 corpus instances are SQL, where leading whitespace is insignificant. The exposure is any server-fn on that path with a multi-line template literal used as **DATA** — an email body, generated CSV/markdown/YAML, a fixed-width report, a **PEM blob**, an LLM prompt. Silent: no diagnostic, no syntax error, and an artifact differential that compares *artifacts* rather than *cooked string values* cannot see it (the arc's own attribution counted artifacts and functions and missed it entirely).
+
+**Fix direction:** make the body emitter indentation-aware for template literals — indent the first line, emit continuation lines verbatim. **Land it WITH a conformance case pinning a non-SQL multi-line literal's cooked value through compilation**, because the whole class is invisible to every gate we currently run.
+
+### g-embed-runtime-ships-mangled-runtime-identifiers — `--embed-runtime` ships a CORRUPTED runtime when a user fn name collides with a runtime identifier — `NEW S325-bryan (Limb 2 population count; EXECUTED); HIGH; open`
+<!-- @gap id=g-embed-runtime-ships-mangled-runtime-identifiers sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts:2923(post-fn-name-mangle)+compiler/src/codegen/index.ts:2128(runtime slice)+compiler/src/commands/compile.js:172(--embed-runtime) prov=rationale:measured-during-the-limb2-population-count -->
+
+The whole-buffer `post-fn-name-mangle` pass rewrites the assembled client buffer, and **138 of its rewrites (99 sources, 107 cleanly-compiling) land INSIDE the runtime text spliced at `runtimeInsertIndex`.** Colliding user fn names measured: `log` ×74 · `fn` ×33 · `label` ×19 · `tick` ×8 · `handle` ×2 · `computed` ×2.
+
+In the DEFAULT mode this is inert — `codegen/index.ts:2128` slices everything up to `// --- end scrml reactive runtime ---` off the front and the shared runtime is emitted separately (verified byte-identical with and without the pass). Under the supported **`--embed-runtime`** flag (`commands/compile.js:172`) the corrupted text SHIPS:
+
+```js
+function _scrml_replay(name, _scrml_log_1, endIdx) {   // parameter renamed
+  const n = (endIdx != null) ? endIdx : log.length;    // body NOT renamed
+```
+
+The parameter matched the lookahead (`log` followed by `,`); `log.length` did not (`.` is outside the `[(;,}\]\n)]` set). **This is Bug D's exact class, still open, reachable from a supported flag, triggered by a user fn named `log`.** Silent — no diagnostic, and no syntax error, so `node --check` passes it.
+
+**Reproduce (MEASURED, S325):** `bun compiler/src/cli.js compile samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-do-while-064.scrml -o <out> --embed-runtime`
+
+**Fix direction is NOT "patch the regex again"** — that is the fifth patch on a text heuristic (Bug D · Bug I · Bug Z · g-spread · PGO P3.A). The structural options are to mangle BEFORE the runtime is spliced, or to fence the runtime slot out of the rewrite the way `rewriteCodeSegments` already fences string literals. Related: [[g-mangler-empty-name-whole-buffer-insertion]], [[g-mangler-scope-blind-shorthand-key-rename]], and the Limb-2 scoping record below.
+
+### g-mangler-empty-name-whole-buffer-insertion — an EMPTY key in `fnNameMap` turns the alternation regex into a whole-buffer inserter — `NEW S325-bryan (Limb 2 population count); MED; open (currently masked by an upstream failure)`
+<!-- @gap id=g-mangler-empty-name-whole-buffer-insertion sev=MED status=open locus=compiler/src/codegen/emit-client.ts:2947(combinedRegex alternation) prov=rationale:measured-during-the-limb2-population-count -->
+
+`stdlib/cron/index.scrml` places `"" → _scrml_v_1` into `fnNameMap`. The alternation then reads `\b(…|)\b`, which matches **zero-width** at every word boundary satisfying the lookahead — injecting the name **781 times into one file** (MEASURED; it is the single largest rewrite bucket in the whole corpus count).
+
+Currently **masked**: that source already fails `E-CODEGEN-INVALID-LOGIC` from an upstream anonymous-fn defect, and the error text is itself the symptom (`...rml_v_1_scrml_v_1() { } 15 * * * * "`). **Any nameless fn that reaches `fnNameMap` re-arms it.** The guard is a non-empty-key check at map construction (`emit-functions.ts:604`), not a regex change.
+
+### g-mangler-scope-blind-shorthand-key-rename — the rewrite is scope-blind and its lookahead set is partial, so object-shorthand KEYS get renamed → silent `undefined` — `NEW S325-bryan (Limb 2 population count); MED; open`
+<!-- @gap id=g-mangler-scope-blind-shorthand-key-rename sev=MED status=open locus=compiler/src/codegen/emit-client.ts:2947(combinedRegex — no scope analysis, partial lookahead set) prov=rationale:measured-during-the-limb2-population-count -->
+
+The pass has no scope awareness: it rewrites a name wherever the regex matches, including PARAMETER declarations that shadow a top-level fn, and it rewrites only those references whose next character is in the partial lookahead set — so a shadowed binding is renamed inconsistently. `stdlib/data/validate.scrml` (top-level `fn min`/`fn max` + `function minLength(min, message)`) shows the shadow half.
+
+The **written-artifact** half is worse because it is silent (MEASURED in `stdlib/http/index.scrml`):
+
+```
+base:    const inner = wrapped || {_scrml_get_2, _scrml_post_3, _scrml_put_4, _scrml_del_5, _scrml_patch_6}
+deleted: const inner = wrapped || {get, post, put, del, patch}
+```
+
+Object-shorthand **KEY** names change, so `inner.get(...)` resolves to `undefined` — no syntax error, no diagnostic. Both sources currently fail compile upstream for unrelated reasons so neither is observable in a green build, but **the mechanism is not corpus-accidental**: any emitted object shorthand whose key matches a declared fn name hits it.
 
 ### g-authed-server-fn-route-returns-bare-value-not-response — a server-fn route handler in an auth- or protect-active unit returns a BARE VALUE, not a `Response`; both shipped hosts pass it straight to Bun, which rejects it — `NEW S325-bryan (found while measuring g-session-get-reserved-key-read-disclosure); HIGH; open`
 <!-- @gap id=g-authed-server-fn-route-returns-bare-value-not-response sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts:3488(useBaselineCsrf)+4085-4092(no-wrapper return)+4102(_egressRedact raw return) prov=rationale:measured-end-to-end-while-scoping-the-session-read-gap -->

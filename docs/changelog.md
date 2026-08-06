@@ -5869,6 +5869,72 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-06 — S325 (bryan): the session HIGH was not the bug, a whole class of dead authed routes, and Limb 2 measured as ordering-blocked
+
+One PR merged (**#444**); two completed, adversarially-reviewed landings left **blocked on a GitHub
+Actions outage**, not on judgment. Concurrent with S325-peter throughout (his #445 landed mid-session;
+#449 rebased around it with the `@generated` rollup regenerated rather than hand-merged).
+
+- **#444 (`cff2af5e`) — ledger currency + the session-read HIGH measured.** The `dpa-queue` CURRENT
+  STATUS table — the file the S319 drain-path rule names authoritative — carried **two stale layers**:
+  dpa-022/023 read `BANKED — UNRUN` 24h after both ran, and the "Genuinely-open" paragraph still listed
+  dpa-019/020/021 as awaiting ratification when they were ratified S319. Also filed
+  `g-unknown-type-atom-capitalization-proxy` (HIGH) — routed by dpa-022's verdict and **never filed**;
+  PA-verified by execution (`(not to zzyzx)` compiles clean, `(not to Zzyzx)` correctly errors, so
+  §14.1.2's "fires at ALL leak loci" holds only for PascalCase). Review floor drained 1 → 0.
+
+- **`g-session-get-reserved-key-read-disclosure` re-characterized HIGH → MED.** Peter's reproducer is
+  sound; the rationale attached to it is not. Measured end-to-end: `session["sid"]` and `session["_rec"]`
+  **do not reproduce** (the sid is the store KEY per §20.5.1, and the gh357 Proxy closes it
+  deliberately), and the "defeats the §40.2 CSRF defense" framing is **false** — the token is already
+  published same-origin through three compiler-owned channels (an unauthenticated, un-CSRF-gated
+  `GET /_scrml/session`; the `<meta name="csrf-token">`; a non-`HttpOnly` `scrml_csrf` cookie on the 403).
+  The real residual is broader and better: an unfiltered read of every adopter session key by
+  attacker-chosen key, plus an unguarded prototype chain (`constructor` via `?{}` → HTTP 500).
+  A hypothesised cross-origin escalation (`cors="*"` → ACAO on the projection) was **refuted by
+  measurement** — the reserved `/_scrml/*` routes are registered bare, not middleware-wrapped.
+
+- **NEW HIGH `g-authed-server-fn-route-returns-bare-value-not-response` — found by that probe.** A
+  server-fn handler in an `auth=`- or `protect=`-active unit returns a bare value, and both shipped
+  hosts pass it to Bun → `200 text/plain "Welcome to Bun!"`. **59 of 66 handlers in
+  `examples/23-trucking-dispatch`** are in the class, driven by `protect=`, which auto-injects the auth
+  middleware. **The suite asserted the defect as correct** — `auth-csrf-synchronizer-token.test.js:222`
+  literally asserts `expect(r2 instanceof Response).toBe(false)`, across 19 tolerate-or-assert-bare
+  sites in 5 files, while conformance never invokes a route handler at all. Third occurrence of the
+  "emitted ≠ runs" class. Built and fix-rounded at **`1dc7fd78`** (unlanded): corpus **122 bare → 1**,
+  `examples/` 61 → 0, trucking **59 → 0**. It also closed a previously-unknown second-order defect —
+  `_scrml_session_cookie_wrap` appends `Set-Cookie` only when the result has `.headers`, so a bare
+  return **silently dropped the §20.5 session cookie**: login succeeded server-side and the user stayed
+  anonymous.
+
+- **Limb 2 measured before being built, and the count changed the arc.** `871` emitted call sites in 234
+  cleanly-compiling sources would carry an unmangled name if the whole-buffer fn-name mangler were
+  deleted — **0** repaired by any other pass, **145 executed load-time ReferenceErrors**, and **0 syntax
+  delta under both goggles** (the class is invisible to `node --check`/`vm.Script`). The blocker is
+  **ordering, not plumbing**: the encoded name is a monotonic per-compile counter held in one object
+  `CompileContext` does not carry, and the body-render dispatchers run *before* those names exist.
+  **Conclusion: do not dispatch "retire the mangler" as one arc** — decomposition recorded in
+  `docs/changes/limb2-mangler-retirement/SCOPING.md`. Two of the pass's five accumulated patches were
+  measured to defend **empty populations**; recorded, deliberately not removed.
+
+- **Four defects filed off that count:** `--embed-runtime` **ships a corrupted runtime** (HIGH, executed
+  — 138 rewrites land in the runtime slot, inert by default but shipped under a supported flag) · an
+  empty `fnNameMap` key turns the alternation into a zero-width whole-buffer inserter (MED) ·
+  scope-blind object-shorthand **KEY** rename → silent `undefined` (MED) · the server-fn body re-indent
+  **corrupts multi-line template literals** (MED — 65 literals across 43 handlers, executed at 77 vs 87
+  bytes; pre-existing and amplified, benign today only because every corpus instance is SQL).
+
+- **The S239 adversarial gate returned four findings past a green 22k-test suite**, including a
+  **fail-open** shape (an adopter `Response` re-enveloped as a 200 `{}` — a deny becoming a success),
+  the reachability change above, and a committed comment stating a measured-false fact about Bun's wire
+  behaviour. One reviewer also caught the build agent's Ext-5 evidence being **vacuous** — the corpus
+  never covered the arm the change restructured — and built the missing case itself.
+
+**Blocked at close:** #449 (docs, merge-authorized) and the bare-return arc (`1dc7fd78`, reviewed) both
+await a `gate` run. No CI run exists repo-wide since `31124674312`; `enforce_admins=true` so there is no
+admin bypass, and a gate bypass is a different authorization than the merge that was given.
+
+
 ### 2026-08-05 — S319 (bryan): three deliberations ratified, a contract re-alignment, and a codegen fix the gate said was clean
 
 Eight PRs merged and **zero compiler source shipped** — the correct outcome, because every adversarial
