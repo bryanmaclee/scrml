@@ -1,16 +1,19 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-08-05T00:00:00Z  commit: 15e5e070
-# NOTE (S321 INCREMENTAL pass): over `b929b9c9` -> `15e5e070` (S320-tail + S319 + S321, ~19 commits).
-# **CORRECTION to the prior pass's framing: PR #405 (CPS auto-await consolidation) is NO LONGER HELD —
-# it LANDED at `649d6fce` (#405) and was reviewed clean at `bbd77bec` (#413).** Every "#405 HELD /
-# unmerged" statement this map carried is now stale and is corrected below (see "The `<machine>`
-# keyword" section's neighbor, the auto-await sections, and Business Invariants). TWO new sections
-# this pass: `W-IF-IN-EACH` (§17.1, #416) and the reset-init-thunk reassignment skip (§6.8, #417).
-# Also folded in, having landed in the S320 tail after the PRIOR pass's cutoff: `g-runtime-script-tag-
-# not-depth-prefixed` (#408) and `g-bare-variant-mask-leaks-into-string-literals` (#410) — both
-# already had domain-relevant detail captured in dependencies.map.md/error.map.md at the prior pass;
-# nothing further owed here. History stays in `docs/changelog.md` + `handOffs/delta-log.md`.
+# updated: 2026-08-06T06:17:17-06:00  commit: a3a34d80
+# **SOURCE WALK IS AT `0d9d843d`; the stamp is `a3a34d80`, the true HEAD.** `a3a34d80` (the
+# S322-bryan wrap continuity commit) landed WHILE this pass ran and is DOCS-ONLY — verified
+# `git diff --name-only 0d9d843d..a3a34d80` = {docs/changelog.md, docs/pr-reviews.md, hand-off.md,
+# handOffs/delta-log.md}, ZERO diff under compiler/ scripts/ stdlib/ package.json .github/. Every
+# source claim below therefore holds at the stamp.
+# NOTE (S322/S324 INCREMENTAL pass): over `15e5e070` -> `a3a34d80` (23 commits, TWO session-windows
+# across two clones — S322-bryan on the ASUS + S322/S323/S324-peter on Windows).
+# **`compiler/SPEC.md` has ZERO diff this window** — no normative text moved, so nothing in this map's
+# spec-index half changes. What changed is IMPLEMENTATION of already-normative sections, and three
+# sections below are rewritten to say what actually ships now: **§13.2** (the client server-fn
+# call-site await, #429; the ONE async-name provider, #442), **§20.5** (the `session` prologue Proxy
+# binding, #435 / GH #357), and **§52.15.1** (the `@currentUser` ambient's resolver-emission gate,
+# #440). History stays in `docs/changelog.md` + `handOffs/delta-log.md`.
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
 
 ## Core Concepts (by SPEC section)
@@ -31,7 +34,7 @@ scrml is a single-file full-stack language + compiler (not a web app with a runt
 **Realtime — §38.13 `<channel watches=table>`** — a change-feed-over-external-DB-writes primitive, distinct from the general §38 WebSocket `<channel>`. Front-end recognition + `RowChange` synthesis (`channel-watches.ts`) + Postgres trigger DDL install + the bundled-`pg` LISTEN bridge + client `__change` frame dispatch are all landed. `<onchange>` is the client-side handler element.
 **Auth / BaaS** — `scrml:auth` stdlib module: magic-link / email-verify / password-reset flows + HS256 JWT + JWKS RS256 verification + `generatePassword`. §20.5 session-establishment (`session.set`/`.destroy`/`.userId`/`.role`/`.get`/`.isAuth`) is the write half of the session model; `session.set("tenantId", t)` is also the §14.8.10 tenant-key establishment point AND the identity source the §14.8.11 DB-authoritative A1 wrapper's `_scrml_active_tenant`/`_scrml_active_caps` resolvers read. See auth.map.md.
 **Server/client boundary** — inferred, not annotated: a function that REFERENCES a binding imported from a server-only stdlib module (or performs DB/crypto/host access) escalates to server-only (§12.2 Triggers 1+3 — **Trigger 3 was RULED at S280 and only BUILT at S299; any doc dated between those describing it as live was wrong**); referencing `session` also escalates (§20.5). Note the precise subject: **an import is FILE-scoped and cannot itself escalate anything** — the unit of escalation is the FUNCTION that uses the binding. `E-CG-001` is the fail-closed backstop that blocks any protected DB column from reaching the emitted client bundle (acorn-exact scan, §14.8.9). **§12.2 Trigger 6 clarified S288 (#195/#200, Peter):** a first-class function reference (not a call) keeps a function reachable, and reachability descends into nested closure bodies — closes a `W-DEAD-FUNCTION` false-positive class; no placement change. See error.map.md.
-**Colorless async — §13.1/§13.2, ratified S258, Seam-A LANDED.** scrml source has no `async`/`await` keywords; the compiler infers async-ness by tracing calls to Promise-returning host primitives. See dependencies.map.md for the landed unit breakdown.
+**Colorless async — §13.1/§13.2, ratified S258, Seam-A LANDED.** scrml source has no `async`/`await` keywords; the compiler infers async-ness by tracing calls to Promise-returning host primitives. **As of #442 there is exactly ONE provider answering "is this name async in client mode" — `codegen/async-combinators.ts`'s `isAsyncCalleeName(name, AsyncNameFacts)`. Decision sites 3 -> 1.** The rule is mode-FREE (not-shadowed, then stdlib-Promise-export OR server-boundary-fn OR transitively-async-local-peer; there is no fourth); mode selection lives in exactly one caller, `emit-expr.ts:asyncNameFactsOf`. See the new §13.2 section below and dependencies.map.md for the unit breakdown. **The family is NOT closed** — 142 bare client server-fn call sites remain in cleanly-compiling sources.
 **Writer-ownership Axiom ① — §5.5.3/§5.5.4 (#81).** A physical DOM surface has AT MOST ONE wholesale reactive writer; a contending second writer fires `E-ATTR-WRITER-CONFLICT` naming both sites.
 **Typed API surfaces** — `<api>` (§60, typed EXTERNAL API consumption) vs `<endpoint>` (§61, typed INBOUND endpoint — the serve-side mirror).
 **Linear types** — `lin` (§35) + the `~` pipeline-accumulator keyword (§32) for exactly-once-consumed values.
@@ -654,6 +657,125 @@ pre-run); and it is **gated by `running=`** and fires **once per ARMING, not onc
 `running` false→true transition resumes the interval without re-firing the immediate tick — the
 alternative turns a boolean write into a fetch trigger, a side effect at a distance).
 
+## §20.5 / §52.15.1 — the DANGLING-REFERENCE class, and why the `session` prologue bind is a Proxy (NEW #435 + #440)
+
+**Name the class, because three separate bugs this window were instances of it:** *a runtime reference
+is emitted with its BINDING or DEFINITION gated more narrowly than the reference itself.* The file
+compiles clean, there is no diagnostic, and the program throws `ReferenceError` -> **HTTP 500 at request
+time**. Every detector in this family is therefore **PERMISSIVE BY DESIGN: a false POSITIVE only emits
+unused session infra; a false NEGATIVE re-opens a 500.**
+
+**Instance 1 — `session` inside a `?{}` SQL interpolation (GH #357, #435).** A `?{}` body is carried as
+a raw STRING; its `${…}` params are captured verbatim and rewritten only for `@name` sigils. So a
+`session` reference inside one is sigil-less AND invisible to the emit-expr member/index lowering, and
+it survived into `.server.js` as a bare unbound identifier. Fixed by a TEXT-level detector that forces
+the session infra on plus a conditional handler-prologue splice.
+
+**And the binding SHALL be the `_scrml_session_bind` Proxy, never `const session =
+_scrml_req._scrml_sess`.** That object is an accessor: getters `userId`/`role`/`isAuth`, methods
+`get`/`set`/`destroy`, **and raw own-properties `sid`/`_rec`/`_changes` — where `_rec` holds the full
+stored record INCLUDING the §40.2 `csrfToken`.** A raw bind would turn the dynamic-key form `session[k]`
+into a raw property read at the wrong level: `session["sid"]` discloses the live session id and
+`session["_rec"]` the whole record plus the CSRF token, **at HTTP 200** — the exact defeat of the
+synchronizer-token defense the compiler owns. It would also make `session[customKey]` read `undefined`
+instead of the record value. The Proxy preserves BOTH accessor shapes so the bare binding AGREES with
+the AST lowering, which is **KEPT** (three security gates match the literal `_scrml_req._scrml_sess.`
+and retiring it for a bare bind blinds them). Two implementation facts that are load-bearing rather than
+stylistic: `Reflect.get(t, k, t)` uses the TARGET as receiver (the getters read `this._rec`; a Proxy
+receiver re-enters the trap and yields a TypeError), and `set()` returns false so an assignment through
+the binding is a loud strict-mode TypeError rather than a silent shadow write.
+
+**RESIDUAL, HIGH, open, ROUTED-TO-BRYAN:** `g-session-get-reserved-key-read-disclosure` — a
+request-controlled `session[k]` still reads compiler-owned internals through `.get()`. The §20.5
+reserved-key guard covers the WRITE side (`session.set("csrfToken", …)`); the READ side is an unruled
+language-surface question.
+
+**Instance 2 — `@currentUser` read by a plain or SSE handler (#440).** §52.15.1 says the ambient is
+"resolved server-side from the session middleware", so a read REQUIRES the resolver to be present. The
+`_needsSessionInfra` detector matched only the `?{ … @currentUser … }` SQL shape, so a DIRECT expression
+read (`return { id: @currentUser.id }`, which the parser lowers to `IdentExpr{name:"@currentUser"}`) in
+an app with no `auth=`, no serverLoad and no `?{}` left `_scrml_current_user` unemitted while the
+handler-scope splice still bound it. `astReadsCurrentUserAmbient` is the superset that catches both. The
+§36 SSE `function*` path additionally never spliced the binding at all — now spliced at handler scope,
+before the nested generator closure, using the byte-identical existing construction.
+
+**Instance 3 — a `<channel auth=>` with no `<program auth>` (#440).** The WS-upgrade guard references
+`_scrml_auth_check(req)`, which calls `_scrml_session_middleware(req)`, but both definitions were gated
+on `authMiddlewareEntry` — so a channel-auth-only program dangled the reference and 500'd at upgrade.
+`_hasChannelAuth` now forces `_needsSessionInfra`, and an `else if` arm emits **only** the auth-check
+function — never the CSRF helpers, session-destroy, or the `@session`-projection routes, which stay
+`<program auth>`-specific. A channel-auth-only program's route surface is unchanged.
+
+**The store invariant was PROBED, not assumed:** widening `_needsSessionInfra` does NOT over-emit — a
+read-only `@currentUser` program gets the in-memory Map + middleware + resolver and **not** the durable
+on-disk store (§20.5 i29e; only an app that actually `session.set`/`.destroy`s gets the durable store).
+
+**Standing lesson (delta-log [1186]): a gap entry's stated fix-locus is a HYPOTHESIS.** Both #440 gap
+entries were outdated on the locus — one named a binding site a prior fix had already covered, the
+other understated the dependency — and had to be re-diagnosed against HEAD before scoping.
+
+## §13.2 — the client server-fn call-site await, and the ONE async-name provider (NEW #429 + #442)
+
+**Read this before adding any await-injection, any async predicate, or any fourth consumer of "is this
+name async".**
+
+**§13.2 is POSITION-INVARIANT: `await` belongs at EVERY server-call site.** Until #429 the client side
+enforced that with a statement-level post-pass, which by construction only ever reached STATEMENT
+position — so a receiver-tail (`loadRows().length`) or a nested argument (`pick(loadRows())`) silently
+handed back a pending Promise. #429 moves the decision to the emitter's own choke point: `emitCall`
+gains a fourth await branch (`isClientServerFnCall`), sibling to the server-peer, client-peer and
+stdlib-async branches. **Awaiting at the choke point every position already flows through replaces
+retrofitting it downstream per position — which is what manufactured one silent gap per position.**
+
+**The safety argument, because it is the part a future editor will be tempted to loosen.** A stranded
+`await` in a non-async host is a WHOLE-BUNDLE SyntaxError, not a local defect. The branch fires only
+inside a host the compiler has already coloured `async` (`ctx.clientAsyncBody === true`), and that flag
+is **not an independent judgement** — it is threaded from the same `_fnIsAsync` that writes the `async`
+keyword, which is `computeAsyncFnNames`'s `callsServerFn` seeding off `collectCalleeIdents`. So the
+structural walk that SEES the callee is the same one that colours the host: walk sees it -> host async
+AND branch may fire; walk misses it -> host sync AND branch cannot fire. **The gate can only ever
+SUPPRESS an await (degrading to the pre-existing silent bug), never STRAND one.**
+
+**Two rules this landing established that outlive it:**
+1. **Filter a `routeMap` walk on the OWNING FILE.** `runRI` builds ONE `routeMap` across the whole
+   resolved import graph and `FunctionRoute` carries no `filePath` field — the file lives ONLY in the
+   map KEY (`<filePath>::<start>`). An unfiltered walk imported another file's server-fn names into this
+   file's client emission; a purely local SYNC `save` then gained a spurious `await` and a FALSE
+   `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`, with renaming the local fn as the only user workaround.
+   `declaredNames` cannot cover it — a TOP-LEVEL client fn name is never in that set.
+2. **Decide off the EMITTED OUTPUT, not a re-derived predicate.** `emitMatchExpr` now writes a
+   placeholder IIFE header and overwrites it at the close with `await (async function() {` iff the
+   emitted arm bodies contain an `await` in code position. Same discipline as #391. Fail-safe direction
+   is explicit: a false POSITIVE is valid JS; a false NEGATIVE is a broken bundle.
+
+**ONE PROVIDER, THREE CONSUMERS (#442, Limb 1 / dpa-023). Decision sites 3 -> 1.** Three consumers
+asked "is this name async in client mode" and one answered differently for a client server fn:
+`combinatorIsAsyncName` said yes (four hand-written disjuncts), `isClientServerFnCall` said yes (its own
+`serverFnNames` test), and the fail-closed drain's local closure said **NO** — because
+`computeAsyncFnNames` treats `serverFnNames` as a **seed TRIGGER** (it colours the CALLER and never
+admits the CALLEE to its result set). So `loadRows` was async to the emitter and sync to the drain **in
+the same compilation**. The consequence was a MISSING diagnostic rather than a wrong emission: a client
+server-fn call stranded in a raw escape-hatch, a template `.raw` body, or a fn-SIGNATURE parameter
+default is structurally unreachable to `emit-expr`'s own `syncPeerCalls` sink. The fix is a
+SUBTRACTION — the rule now lives once, in `async-combinators.ts`, and the drain is handed the
+`serverFnNames` fact it never had.
+
+**`isClientServerFnCall` shares only the provider's server-fn MEMBERSHIP component, and that is
+deliberate.** It asks an IDENTITY question ("is this call a client->server RPC?"), not an asyncness
+one. `emitCall` dispatches the three async surfaces to three DIFFERENT branches in order; widening this
+predicate to the full provider would capture a stdlib-async callee here and route it away from its own
+branch and its own fail-closed sink.
+
+**HONEST STATUS — this section describes a shape, not a closed bug class.** #429 landed **explicitly
+not claiming its bug class**: 142 bare client server-fn call sites remain in cleanly-compiling corpus
+sources, base->head delta ZERO, measured two independent ways. The unreached shapes use different
+emitter paths (CPS / failable-fn wrapper, module top-level init, markup-interpolation lift). See
+`g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources` (HIGH, open). Its sibling
+`g-reset-writes-pending-promise-when-init-thunk-calls-a-server-fn` (HIGH, open) is on the RUNTIME reset
+path — `runtime-template.js:1168` re-invokes the init thunk without awaiting, so a cell can be correct
+at mount and wrong after `reset()`. The absorb-sequencing ruling that governs the fix (option **C**:
+await the IIFE AND keep its `.catch`, §13.2 vs §19.6) is **RULED but NOT BUILT**.
+
 ## A cross-module ASYNC import consumed in a markup interpolation is now awaited (#391)
 
 `g-crossmodule-async-in-markup-position-not-awaited`: a cross-file import classified `async`
@@ -922,7 +1044,7 @@ Diagnostic emission — every pipeline stage emits `{code, message, severity, sp
 A returned function-expression closure (`return function name(){…}`, GITI-038) — owns its own body's scope/type/async analysis independent of its enclosing factory (`ReturnStmtNode.fnExprNode`, see schema.map.md).
 
 ## Tags
-#scrml #map #domain #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth #route-region #§6.7.2.1 #§20.8.8 #pole-c #third-lifecycle-owner #route-leave #route-enter #commit-gate #keep-alive #outlet-resident #region-cleanups #module-init #rehydrator-boundary #machine-retired #e-deprecated-001 #§63.7 #projection-codemod #engine-audit #§51.11 #§51.13 #property-tests #enum-only #§19.4.4.1 #e-error-011 #renders-clause #e-error-005 #corpus-first-migration #provenance-field #§34.0 #named-codes-land-with-impl #§6.7.1a #bare-expression-category #sugar-equivalence #mount-body-expr-node #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #crossmodule-async-markup #s239-catch #pr-405-landed #cps-choke-point-landed #w-if-in-each #each-nested-if-not-reactive #reset-init-thunk-reassignment #collect-structural-decl-names #§6.8 #g-implicit-cell-double-write-clobbers-reset-init
+#scrml #map #domain #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth #route-region #§6.7.2.1 #§20.8.8 #pole-c #third-lifecycle-owner #route-leave #route-enter #commit-gate #keep-alive #outlet-resident #region-cleanups #module-init #rehydrator-boundary #machine-retired #e-deprecated-001 #§63.7 #projection-codemod #engine-audit #§51.11 #§51.13 #property-tests #enum-only #§19.4.4.1 #e-error-011 #renders-clause #e-error-005 #corpus-first-migration #provenance-field #§34.0 #named-codes-land-with-impl #§6.7.1a #bare-expression-category #sugar-equivalence #mount-body-expr-node #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #crossmodule-async-markup #s239-catch #pr-405-landed #cps-choke-point-landed #w-if-in-each #each-nested-if-not-reactive #reset-init-thunk-reassignment #§13.2-call-site-await #async-name-provider #decision-sites-3-to-1 #one-provider-three-consumers #u1 #dpa-020 #dpa-023 #can-suppress-never-strand #owning-file-filter #decide-off-emitted-output #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #dangling-ref-class #session-proxy-bind #gh357 #csrf-token-disclosure #§20.5 #§52.15.1 #currentuser-resolver-gate #channel-auth-only #permissive-by-design #collect-structural-decl-names #§6.8 #g-implicit-cell-double-write-clobbers-reset-init
 
 ## Links
 - [primary.map.md](./primary.map.md)
