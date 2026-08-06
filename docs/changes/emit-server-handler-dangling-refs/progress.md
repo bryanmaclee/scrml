@@ -56,3 +56,24 @@ binding/definition). Fixing both closes all four variants.
   auth upgrade attempted (no crash).
 - DONE-PROBE `emit-server-handler-dangling-refs.test.js`: 6 pass / 0 fail.
 - FACTS regen: docs/FACTS.md facts-table regenerated (compiler LOC changed); state.ts no-op.
+
+## Full gated subset delta (bun test compiler/tests/{unit,integration,conformance})
+- **conformance: 1443 pass / 0 fail** / 30 skip. Clean.
+- **unit: 17366 pass / 0 fail** / 17 skip. Clean. ("error: boom" is an intentional in-test throw.)
+- **integration: pass; the 6 fails in the first (lighter) run are ALL Windows baseline / pre-existing:**
+  - `self-host smoke` ×3 — documented Windows baseline (Linux-green).
+  - `B5 runtime guard — dynamic session.set(csrfToken)` (csrf B5) — documented baseline.
+  - `session-secure-b4b5` afterAll EBUSY temp-dir cleanup — documented baseline.
+  - `auth-csrf-synchronizer-token` afterAll EBUSY — PROVEN pre-existing: main's
+    (766c9c9a) emit-server.ts gives the IDENTICAL 6 pass / 1 fail. The transient
+    "round-trip fail" seen under co-run was only the stale fixed-path temp dir being
+    lock-held; after `rm -rf _tmp_auth_csrf_sync` it passes clean (fix-vs-prefix identical).
+  - A heavier co-run added timeout flakes (`validate-emit-gate` + several unnamed ~6s
+    heavy-parity suites). `validate-emit-gate` passes **3/0 in isolation** with an
+    adequate timeout — critically its **E-CODEGEN-INVALID-LOGIC gate is GREEN**, proving
+    my new emissions (SSE `_scrml_currentUser` binding, channel-auth `_scrml_auth_check`)
+    are valid JS with zero acorn-detected invalid logic.
+- **Targeted regression check (isolated): 46 pass / 0 fail** across server-load-authority,
+  session-establishment-roundtrip, gh357-session-sql-interpolation, g-markup-session-read-
+  undeclared, and the DONE-PROBE — the suites nearest the touched code paths.
+- No conformance fail, no unit fail, no NEW integration fail. Nothing is my regression.
