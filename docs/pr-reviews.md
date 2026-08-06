@@ -263,6 +263,11 @@ HIGH resolved), LOW 47+1=48 (his filed residual), MED 109 unchanged — matching
 The rebase also folded in a `master-list.md` `@generated:recent-sessions` regen, because `state.ts
 --check` was FAILING on main (S316's own wrap step 6d missed it).
 
+<!-- @review pr=435 verdict=finding by=S323-peter date=2026-08-05 probe=fix-vs-prefix-conformance+executed-handler note=caught-E-SESSION-CONTEXT-scan-widening-regression-CONF-SESSION-STORE-PROGRAM-UNIFY-trimmed-pre-merge+2-findings-routed-bryan-csrf-read-disclosure-and-sound-scan -->
+<!-- @review pr=434 verdict=carve-out by=S323-peter date=2026-08-05 probe=docs-only-continuity -->
+<!-- @review pr=433 verdict=carve-out by=S323-peter date=2026-08-05 probe=docs-only-continuity -->
+<!-- @review pr=432 verdict=carve-out by=S323-peter date=2026-08-05 probe=docs-only-continuity -->
+<!-- @review pr=431 verdict=carve-out by=S323-peter date=2026-08-05 probe=docs-only-continuity -->
 <!-- @review pr=395 verdict=carve-out by=S316-bryan date=2026-08-04 probe=docs-only-continuity -->
 <!-- @review pr=394 verdict=clean by=S316-bryan date=2026-08-04 probe=await-precedence-overharvest-syntax -->
 <!-- @review pr=393 verdict=carve-out by=S316-bryan date=2026-08-04 probe=inbox-delivery-only -->
