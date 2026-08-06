@@ -1482,7 +1482,16 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // default (`function f(x = safeCallAsync(...))` / `function f(x = middle())`)
     // fails closed. It lives in `fn.params` (spliced as raw text by paramSignature),
     // NOT `fn.body`, so the body walk alone never reaches it — the pre-S239-fix leak.
-    for (const site of collectNonAwaitableAsyncCalls(fn.body, _calleeMap, _exportRegistry, _clientAsyncFnNames, fn.params, fn.span)) {
+    // Limb 1 (dpa-023) — `_serverFnNames` is threaded so the drain asks the SAME
+    // async question emit-expr asks. Without it the drain's answer for a client
+    // server fn was NO (`computeAsyncFnNames` seeds the caller, never the callee),
+    // while `isClientServerFnCall` answered YES three lines of call stack away.
+    // The gap that opened is the one emit-expr's own `_clientSyncPeerCalls` sink
+    // structurally cannot reach: a raw escape-hatch body, a template `.raw` body,
+    // and a fn-SIGNATURE parameter default (spliced as raw text by
+    // `paramSignature`, so it is in neither `fn.body` nor any structural node).
+    // Overlapping sites dedup below on `${code}@${span.start}`.
+    for (const site of collectNonAwaitableAsyncCalls(fn.body, _calleeMap, _exportRegistry, _clientAsyncFnNames, fn.params, fn.span, _serverFnNames)) {
       _pushClientLeak(asyncStdlibSyncCallbackError(site.name, site.span, filePath));
     }
     for (const a of collectAliasedAsyncCalls(fn.body, _calleeMap, _exportRegistry, _clientAsyncFnNames)) {

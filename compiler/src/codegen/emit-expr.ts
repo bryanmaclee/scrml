@@ -57,7 +57,8 @@ import { emitMarkupValueExpr } from "./emit-lift.js";
 // Phase-2 colorless-async — the async-callback collection-method combinator
 // transform (DD colorless-async-boundaries §2 position 1, FORK 1). Dependency-
 // neutral, so no import cycle.
-import { ASYNC_COMBINATOR_METHODS, KNOWN_DISCARD_HOF, callbackReachesAsync } from "./async-combinators.ts";
+import { ASYNC_COMBINATOR_METHODS, KNOWN_DISCARD_HOF, callbackReachesAsync, isAsyncCalleeName, isServerBoundaryCallee } from "./async-combinators.ts";
+import type { AsyncNameFacts } from "./async-combinators.ts";
 
 // ---------------------------------------------------------------------------
 // §20.6 (F4=A) — production strip toggle for the log() builtin.
@@ -458,12 +459,18 @@ export interface EmitExprContext {
    * U1 (dpa-020) — this set is now ALSO populated in `mode === "client"`, where
    * it names the file's SERVER-boundary fns so `emitCall` can `await` the RPC at
    * its call site (`isClientServerFnCall`). The two modes read the same set for
-   * two different lowerings — server: an in-process peer callable; client: a
-   * fetch stub the post-emit rename installs — so EVERY consumer must state
-   * which mode it means. The existing ones all do (`isAwaitedPeerCall`,
-   * `isDispatchPeerCall`, `combinatorIsAsyncName` and the `emitCall` peer branch
-   * each guard `mode === "server"` explicitly); a NEW consumer that reads this
-   * field without a mode guard will silently change client output.
+   * two different LOWERINGS — server: an in-process peer callable; client: a
+   * fetch stub the post-emit rename installs.
+   *
+   * Limb 1 (dpa-023) — that split is a lowering split, NOT an asyncness split. A
+   * consumer deciding WHICH CODE TO EMIT must still state its mode (`isAwaitedPeerCall`,
+   * `isDispatchPeerCall` and the `emitCall` peer branch each guard `mode === "server"`;
+   * `isClientServerFnCall` guards `mode === "client"`). A consumer merely asking
+   * "is this name async" must NOT: a server fn is async in both modes, and
+   * `isAsyncCalleeName`/`isServerBoundaryCallee` read this field mode-free on
+   * purpose. Getting that backwards in either direction is a real defect — the
+   * mode-guarded pair inside the old `combinatorIsAsyncName` is what let the
+   * client server-fn case go missing until U1's F2 patched one of the two halves.
    */
   serverFnNames?: Set<string> | null;
   /**
@@ -1619,35 +1626,45 @@ export function isStdlibAsyncCallee(name: string, ctx: EmitExprContext): boolean
 }
 
 /**
- * Phase-2 colorless-async — is the bare callee `name` async in THIS context? True
- * for a Promise-returning stdlib import (`isStdlibAsyncCallee`), a SERVER-mode
- * sibling server-fn peer (`serverFnNames`), or a CLIENT-mode transitively-async
- * local peer (`clientAsyncFnNames`) — the exact three async surfaces the
- * expression auto-await already awaits. A name shadowed by an enclosing local is
- * NOT async (it is the local, not the async fn). Fed to `callbackReachesAsync` so
- * the combinator lowering only fires on a genuinely-async callback.
+ * Limb 1 (dpa-023) — project an `EmitExprContext` onto the `AsyncNameFacts` the one
+ * async-name provider consumes.
+ *
+ * MODE SELECTION LIVES HERE, and only here. The provider's rule is mode-free; what
+ * is mode-dependent is which SETS exist:
+ *   - `clientAsyncFnNames` is the transitively-async LOCAL peer set, and it is a
+ *     client-emission concept. In server mode the local peer set IS `serverFnNames`
+ *     (emit-tool.ts:426/636 literally pass `serverFnNames: asyncFnNames`), so a
+ *     second term there would be redundant, and reading a stray client set in a
+ *     server ctx would be a silent widening.
+ *   - `serverFnNames` is read in BOTH modes — see `isServerBoundaryCallee`.
+ * `isStdlibAsync` is a closure rather than the `(calleeMap, exportRegistry)` pair
+ * because `isStdlibAsyncCallee` carries a module-level classifier fallback that the
+ * drain paths do not install.
+ */
+function asyncNameFactsOf(ctx: EmitExprContext): AsyncNameFacts {
+  return {
+    declaredNames: ctx.declaredNames ?? null,
+    asyncFnNames: ctx.mode === "client" ? (ctx.clientAsyncFnNames ?? null) : null,
+    serverFnNames: ctx.serverFnNames ?? null,
+    isStdlibAsync: (nm) => isStdlibAsyncCallee(nm, ctx),
+  };
+}
+
+/**
+ * Phase-2 colorless-async — is the bare callee `name` async in THIS context?
+ *
+ * Limb 1 (dpa-023) — this used to hand-write the rule as four disjuncts, one of
+ * which (the U1 F2 client server-fn line) had to be added later precisely because
+ * the hand-written form is easy to get incomplete. The rule now lives once, in
+ * `isAsyncCalleeName`; this is the projection from `ctx` and nothing else. The
+ * old server/client `serverFnNames` pair collapses to the provider's single
+ * mode-free term — `mode` is a closed two-member union, so that union is exact.
+ *
+ * Fed to `callbackReachesAsync` so the combinator lowering only fires on a
+ * genuinely-async callback.
  */
 function combinatorIsAsyncName(name: string, ctx: EmitExprContext): boolean {
-  if (ctx.declaredNames != null && ctx.declaredNames.has(name)) return false;
-  if (isStdlibAsyncCallee(name, ctx)) return true;
-  if (ctx.mode === "server" && ctx.serverFnNames != null && ctx.serverFnNames.has(name)) return true;
-  if (ctx.mode === "client" && ctx.clientAsyncFnNames != null && ctx.clientAsyncFnNames.has(name)) return true;
-  // U1 FIX ROUND (F2/F3) — the CLIENT server-fn surface. A client→server RPC is
-  // async exactly as a transitively-async client peer is, so the two lines above
-  // were asymmetric: `setTimeout(() => peer(), 100)` compiled and lowered, while
-  // the identical shape with a SERVER fn hard-errored
-  // `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` — a diagnostic whose own message text
-  // disclaims that shape ("Fire-and-forget scheduler callbacks … are handled
-  // automatically; this error is only for positions whose value is actually
-  // consumed"). The `KNOWN_DISCARD_HOF` carve-out and the async-combinator
-  // lowering could not see the callee as async, so neither carve-out fired.
-  //
-  // Measured against BASE this is NOT a widening: it makes shapes that U1 had
-  // started REJECTING compile again, and routes `.map(x => serverFn(x))` into the
-  // `await _scrml_mapAsync(…)` lowering that already exists for client peers.
-  // Scoped to this disjunct only.
-  if (ctx.mode === "client" && ctx.serverFnNames != null && ctx.serverFnNames.has(name)) return true;
-  return false;
+  return isAsyncCalleeName(name, asyncNameFactsOf(ctx));
 }
 
 /**
@@ -1730,8 +1747,19 @@ function isAwaitedClientAsyncCall(node: ExprNode, ctx: EmitExprContext): boolean
  *
  * Not gated on `clientAsyncFnNames`: server fns are deliberately excluded from
  * that set (`computeAsyncFnNames` uses `serverFnNames` as a seed TRIGGER and does
- * not add it to the result), and widening it would widen `combinatorIsAsyncName`
- * — a shared predicate this change must not touch.
+ * not add it to the result).
+ *
+ * ── Limb 1 (dpa-023) — WHY THIS IS NOT ROUTED THROUGH `isAsyncCalleeName` ───────
+ * This predicate asks an IDENTITY question ("is this call a client→server RPC?"),
+ * not an ASYNCNESS one. The two are not interchangeable: `emitCall` dispatches the
+ * three async surfaces to three DIFFERENT branches, in order — client async peer
+ * (:~3206), then THIS one, then the stdlib-async callee (:~3298). Widening this
+ * predicate to the full async provider would capture a stdlib async callee here
+ * and route it away from its own branch and its own fail-closed sink. So it shares
+ * the provider's shadow-aware SERVER-FN MEMBERSHIP component
+ * (`isServerBoundaryCallee`) — the fact — and keeps its own mode/position gates.
+ * That is what makes "the emitter says async" and "the drain says async" one
+ * decision instead of two look-alike ones.
  */
 function isClientServerFnCall(node: ExprNode, ctx: EmitExprContext): boolean {
   if (node.kind !== "call") return false;
@@ -1743,10 +1771,10 @@ function isClientServerFnCall(node: ExprNode, ctx: EmitExprContext): boolean {
   if (call.callee.kind !== "ident" || typeof (call.callee as { name?: unknown }).name !== "string") {
     return false;
   }
-  const name = (call.callee as { name: string }).name;
-  if (ctx.serverFnNames == null || !ctx.serverFnNames.has(name)) return false;
-  // A local of the same name shadows the server fn — it is the local, not an RPC.
-  return !(ctx.declaredNames != null && ctx.declaredNames.has(name));
+  // Shared with the async provider: server-fn membership + the `declaredNames`
+  // shadow rule (a local of the same name IS the local, not an RPC) are decided in
+  // ONE place, so this call site and the fail-closed drain cannot drift on them.
+  return isServerBoundaryCallee((call.callee as { name: string }).name, asyncNameFactsOf(ctx));
 }
 
 /**

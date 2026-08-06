@@ -31,10 +31,30 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 23 |
-| MED | 116 |
+| MED | 115 |
 | LOW | 49 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-drain-textscan-overfires-on-awaited-nested-arm-site — the fail-closed async drain's raw-TEXT scan is POSITION-BLIND, so it reports a leak against a nested `!{}` arm site that `emitArmBody`'s re-parse genuinely awaits — a FALSE POSITIVE on correct code — `NEW S322-bryan (Limb 1; the diagnostic is wrong, the emission is verified correct); MED; open`
+<!-- @gap id=g-drain-textscan-overfires-on-awaited-nested-arm-site sev=MED status=open locus=compiler/src/codegen/emit-library-shared.ts prov=rationale:the-drain-records-async-names-from-arm-handler-TEXT-and-cannot-distinguish-an-awaitable-site-from-a-non-awaitable-one -->
+
+**This is a false positive that is being LEFT FIRING on purpose.** `collectNonAwaitableAsyncCalls` records every async name it finds in a `!{}` arm handler's raw text. The scan is **position-blind** — it cannot tell an awaitable site from a non-awaitable one. On the CLIENT caller, `emitArmBody`'s re-parse path (`_emitNestedGuardedArmBody`) genuinely awaits the nested arm's server call, so the report is wrong. **The emission is verified CORRECT** (`async function _scrml_run_N` + `await _scrml_fetch_b_N`); only the diagnostic is spurious.
+
+**Why it is not suppressed — two attempts, both silently deleted real fail-closes.** The obvious mitigation is to skip the arm's `handlerExpr` key. Measured consequences of doing so:
+
+| attempt | what it skipped | what it cost |
+|---|---|---|
+| 1 — all block handlers | every block `!{}` arm | **55 arms in 17 files** blinded, incl. `stdlib/auth/jwt.scrml` (10 arms); lost the structural lambda walk too |
+| 2 — gated on the re-parse predicate | still the whole `handlerExpr` subtree | still lost fail-closes on the LIBRARY caller, where the re-parse does **not** await at all |
+
+**The structural reason neither works:** the gate is **ARM-granular** and the hazard is **SITE-granular**. Agreeing on which *branch* `emitArmBody` takes says nothing about whether that branch awaits a given *site*. The worst confirmed case was a library-mode nested `!{}` at an **awaitable** position emitting `safeCallAsync(...)` bare, so `__scrml_error` was read off a Promise and **the nested error arm could never run** while a sync fn returned a Promise — base refused it, the suppressed build shipped it.
+
+**Corpus impact of leaving it firing: 0 of 1878 sources.** In-repo: exactly **2** test fixtures, both R25-Bug-49 §5 guards for the same shape, whose incidental blanket `errors.toHaveLength(0)` was narrowed to exclude this one code — every subject assertion untouched, any OTHER new diagnostic still fails them.
+
+**The guard is self-retiring.** `compiler/tests/unit/async-name-provider.test.js` §5 asserts the diagnostic IS present **and** that the emission it fires against IS correct. **Fix the root and that test fails and tells you to delete it.**
+
+**Fix direction (proposed, not built, not a ruling):** run the drain against the **re-parsed AST** on the re-parse path rather than against handler text — then awaitable positions are real positions and no suppression is needed at all. Ranked above suppressing the single awaited site, because that would still require per-caller knowledge of whether the re-parse awaits, and would add a fourth special case to a subsystem whose whole problem is special cases.
 
 ### g-reset-writes-pending-promise-when-init-thunk-calls-a-server-fn — `reset(@cell)` on a cell whose init expression calls a server fn stores an unawaited Promise into the cell — compile exit 0, silent wrong value — `NEW S322-bryan (PA-reproduced on a shipped example); HIGH; open`
 <!-- @gap id=g-reset-writes-pending-promise-when-init-thunk-calls-a-server-fn sev=HIGH status=open locus=compiler/src/runtime-template.js:1168 prov=rationale:the-reset-path-re-invokes-the-init-thunk-but-unlike-the-declaration-path-it-never-awaits-the-result -->
