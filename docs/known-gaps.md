@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 23 |
+| HIGH | 24 |
 | MED | 116 |
 | LOW | 49 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -577,6 +577,25 @@ that to a raw property read (a `semantics-changed` silent regression). Brief:
 <!-- @gap id=g-session-context-scan-bare-form-sound sev=MED status=open locus=compiler/src/codegen/emit-server.ts:5799(E-SESSION-CONTEXT scan) prov=dpa-021:§6.1 route=bryan -->
 
 dpa-021 §6.1 asks the E-SESSION-CONTEXT scan to also build-block a bare `session` used in a `?{}` interpolation OUTSIDE a web-app route handler (SSE `server function*` / `<endpoint>` / headless), so Direction B "kills the class by construction" everywhere. The gh357 attempt widened the scan to string-match a bare `session.`/`session[` in the assembled `lines` — but that **deterministically** matches the compiler's OWN emitted comments (`// --- session.destroy() handler ---`) and generated auth guards (`if (!session.isAuth)`), build-blocking a clean §20.5 app (regressed CONF-SESSION-STORE-PROGRAM-UNIFY, green on main). **Reverted** (commit on this branch). A sound implementation keys on recorded lowering/emission SITES (as `_allowedSessionRanges` already does for the AST form), not a text scan of assembled output. The residual it targets is a PRE-EXISTING silent runtime free-var (unchanged from main); this is completeness, not a regression fix. Newly-rejecting → bryan's language-surface call on whether to build-block at all vs leave it a runtime concern.
+
+### g-unknown-type-atom-capitalization-proxy — `E-TYPE-UNKNOWN-NAME` gates on CAPITALIZATION, so any lowercase undefined type name silently resolves to `asIs` — `NEW S325-bryan (routed by dpa-022, PA-verified by execution on 74d60fb0); HIGH; open`
+<!-- @gap id=g-unknown-type-atom-capitalization-proxy sev=HIGH status=open locus=compiler/src/type-system.ts:isUnrecognizedTypeNameAtom(~:5195, PascalCase gate) prov=dd:markup-as-state-kind-not-value-type-2026-08-05 -->
+
+`isUnrecognizedTypeNameAtom` gates the §14.1.2 unknown-type check on a **capitalization proxy** rather than the enumerated builtin set. SPEC §14.1.2 + the S176 landing claim BROAD coverage — *"fires at ALL leak loci"* — but the predicate's PascalCase gate means the check is skipped entirely for any lowercase atom, so an undefined lowercase type name falls through to `asIs`/`tUnknown` with **zero diagnostics**: the type gate is switched off on that binding and nothing says so.
+
+**PA-verified by execution (S325, HEAD `74d60fb0`), not inherited from the DD:**
+
+| probe | result |
+|---|---|
+| `<x>: (not to zzyzx) = not` | **compiles clean, exit 0** — garbage type accepted |
+| `<x>: (not to Zzyzx) = not` | fires `E-TYPE-UNKNOWN-NAME` correctly |
+| `<x>: (not to markup) = not` | **compiles clean** — `markup` is absent from `BUILTIN_TYPES` |
+
+**Why HIGH despite being diagnostics-only (zero codegen delta):** it is a claimed surface that does not hold — the same class as the tier-1 "diagnostic cannot fire" holes, and it **manufactures phantom language features**. `(not to markup)` compiling is what produced dpa-022's own Fork-3 premise; the DD had to retract it. A hole that invents evidence for design deliberation is worse than one that merely under-fires.
+
+**Fix order is load-bearing (per dpa-022):** replace the capitalization proxy with the enumerated set FIRST, THEN reserve `markup` in `BUILTIN_TYPES` — reversing it makes `markup` legal-by-accident before the gate can reject the rest.
+
+**⚑ Newly-rejecting — blast radius is MEASURABLE and UNMEASURED.** Every lowercase type atom in the corpus currently compiles; some are legitimate builtins, an unknown number are latent typos this would newly reject. **Measure the corpus count before scoping** (pa-base §8: assumed-zero is not measured-zero). Do not dispatch a fix that has not published that number.
 
 ### g-263-direct-cross-file-const-import-not-emitted-client — an exported `const` imported DIRECTLY by another unit never reaches the client bundle or the export table — `NEW S313-bryan (adopter, GH #358); MED; open (a known-but-unfiled #263 residual, now adopter-witnessed)`
 <!-- @gap id=g-263-direct-cross-file-const-import-not-emitted-client sev=MED status=open locus=compiler/src/codegen/emit-client.ts -->

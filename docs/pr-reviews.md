@@ -367,3 +367,17 @@ The rebase also folded in a `master-list.md` `@generated:recent-sessions` regen,
   as enumerating the functions a class of defect can inhabit.* The PR's own test carries a sync
   negative control (good practice) but only exercises the one position it fixed. Filed:
   [[g-markup-autoawait-misses-attr-and-each-body]].
+
+<!-- @review pr=443 verdict=carve-out by=S325-bryan date=2026-08-06 probe=file-set-enumerated-via-gh-pr-view-14-files-all-docs-or-maps-zero-code-paths -->
+
+- **#443** — **CARVE-OUT (docs-only).** Enumerated the file set rather than trusting the title:
+  `.claude/maps/*` (9), `docs/changelog.md`, `docs/known-gaps.md`, `docs/pr-reviews.md`, `hand-off.md`,
+  `handOffs/delta-log.md` — 14 files, zero code paths. Qualifies under the S239 carve-out clause
+  (*pure spec-text / docs-only / config rebumps with no code path*).
+
+  **Note on the denominator, third data point.** This carve-out is CORRECT and it still pushes the
+  rate up (29/40 → 30/41, 73%). `review-debt.ts` warns at a high rate over ALL merged PRs, which
+  cannot distinguish a docs-heavy stretch from a floor being evaded — the S319 note flagged this and
+  recommended computing the rate over **code-bearing PRs only** (any diff touching `compiler/`,
+  `stdlib/`, `conformance/cases/`, `scripts/`). That refinement is STILL unbuilt. Until it is, read
+  the ⚠ as UNPROVEN — neither healthy nor evaded.
