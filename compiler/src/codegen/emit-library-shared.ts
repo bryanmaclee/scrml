@@ -22,7 +22,8 @@ import { CGError } from "./errors.ts";
 // Phase-2 colorless-async — the clean-family combinator detector, shared with the
 // emit-expr lowering site so the fail-closed drain and the lowering agree on which
 // callbacks are transformed (and therefore must NOT fail closed).
-import { isAsyncCombinatorCall, isKnownDiscardHofCall, callbackReachesAsync } from "./async-combinators.ts";
+import { isAsyncCombinatorCall, isKnownDiscardHofCall, callbackReachesAsync, isAsyncCalleeName } from "./async-combinators.ts";
+import type { AsyncNameFacts } from "./async-combinators.ts";
 
 /** A loosely-typed AST node. */
 type ASTNode = Record<string, unknown>;
@@ -465,13 +466,41 @@ export function collectAliasedAsyncCalls(
  * An AWAITABLE-position async call (a top-level statement / decl init / control-flow
  * condition, NOT inside a lambda) is handled by the emit's auto-await and is NOT
  * returned. This is the SAME structural traversal shape as `computeAsyncFnNames`'s
- * coloring, so coloring and this drain cannot drift (the S239 root cause).
+ * coloring, so coloring and this drain cannot drift on TRAVERSAL (the S239 root
+ * cause).
+ *
+ * CORRECTION (Limb 1, dpa-023) — matching traversal was never sufficient, and this
+ * comment used to imply it was. The two also have to agree on the PREDICATE, and on
+ * the client path they did not: `computeAsyncFnNames` uses `serverFnNames` only as a
+ * seed trigger, so a client server fn was async to the emitter and sync here. Both
+ * now call `isAsyncCalleeName` (`async-combinators.ts`), and this function takes
+ * `serverFnNames` so it can be given the fact it was missing.
  *
  * @param params  the enclosing fn's `fnNode.params` — each `{defaultValue?: string}`
  *                entry's raw default text is scanned (case 3). Omit for a bare-body
  *                scan (back-compatible).
  * @param fnSpan  a fallback span for a param-default site (param entries carry no
  *                span of their own; points the diagnostic at the fn declaration).
+ * @param serverFnNames
+ *                Limb 1 (dpa-023) — the SERVER-BOUNDARY fn names in scope. THE FACT
+ *                THIS DRAIN NEVER HAD. `asyncFnNames` comes from
+ *                `computeAsyncFnNames`, which treats `serverFnNames` as a seed
+ *                TRIGGER (`callsServerFn` colours the CALLER) and never admits the
+ *                callee to its result set — so on the CLIENT path this scan asked
+ *                "is `loadRows` async?" and got NO while, in the same compilation,
+ *                `emit-expr` was answering YES and emitting `await loadRows()`.
+ *                The consequence was a MISSING diagnostic, not a wrong emission:
+ *                a client server-fn call stranded in a raw escape-hatch, a template
+ *                `.raw` body or a fn-SIGNATURE parameter default is unreachable to
+ *                `emit-expr`'s own `syncPeerCalls` sink, so nothing caught it.
+ *                Omit → THIS PARAMETER contributes nothing (the library / tool /
+ *                server-value callers, where server placement is not a concept and
+ *                the peer set is already `asyncFnNames`). Note the scope of that
+ *                claim: it is about the PARAMETER, not about the function. The
+ *                `handlerExpr` skip in `walk` applies on every caller regardless of
+ *                this argument, so "omit it and nothing changes for me" is true of
+ *                the async-name facts and NOT of `collectNonAwaitableAsyncCalls` as
+ *                a whole.
  */
 export function collectNonAwaitableAsyncCalls(
   fnBody: unknown,
@@ -480,18 +509,26 @@ export function collectNonAwaitableAsyncCalls(
   asyncFnNames: Set<string>,
   params?: unknown,
   fnSpan?: unknown,
+  serverFnNames?: ReadonlySet<string> | null,
 ): Array<{ name: string; span: unknown }> {
   const out: Array<{ name: string; span: unknown }> = [];
   const seen = new Set<string>();
   const hasStdlibClassifier = !!(calleeMap && exportRegistry && exportRegistry.size > 0);
-  const isAsyncName = (name: string): boolean => {
-    if (asyncFnNames.has(name)) return true;
-    if (hasStdlibClassifier) {
-      const src = calleeMap!.get(name);
-      if (src && isPromiseReturningStdlibFn(name, src, exportRegistry!)) return true;
-    }
-    return false;
+  // Limb 1 (dpa-023) — the bespoke local closure this used to carry is GONE; the
+  // rule now lives once in `isAsyncCalleeName`. `declaredNames` stays absent: this
+  // scan walks a whole fn body with no scope tracker, which is the same (slightly
+  // over-eager) shadowing posture it has always had.
+  const facts: AsyncNameFacts = {
+    asyncFnNames,
+    serverFnNames: serverFnNames ?? null,
+    isStdlibAsync: hasStdlibClassifier
+      ? (name: string): boolean => {
+          const src = calleeMap!.get(name);
+          return !!src && isPromiseReturningStdlibFn(name, src, exportRegistry!);
+        }
+      : null,
   };
+  const isAsyncName = (name: string): boolean => isAsyncCalleeName(name, facts);
   const record = (name: string, span: unknown): void => {
     const sp = (span ?? {}) as { start?: number };
     const key = `${name}@${sp.start ?? -1}`;

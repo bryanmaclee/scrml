@@ -30,6 +30,104 @@
 /** A loosely-typed AST node. */
 type ASTNode = Record<string, unknown>;
 
+// ---------------------------------------------------------------------------
+// THE ONE ASYNC-NAME PROVIDER (Limb 1, dpa-023 · S322)
+// ---------------------------------------------------------------------------
+
+/**
+ * The facts a caller supplies to `isAsyncCalleeName` / `isServerBoundaryCallee`.
+ *
+ * Every field is a SET the caller already holds; the provider adds no lookups of
+ * its own. Which sets exist is mode-dependent (a client emission has
+ * `clientAsyncFnNames`, a server emission has its sibling-peer set), so mode
+ * selection is the CALLER's job — see `emit-expr.ts:asyncNameFactsOf`. The RULE
+ * applied to those facts is mode-free, which is the whole point: before this
+ * existed, three consumers each re-implemented the rule and one of them
+ * (`collectNonAwaitableAsyncCalls`'s local closure) was missing a disjunct.
+ */
+export interface AsyncNameFacts {
+  /**
+   * Names bound by an enclosing local. A shadowed name is NEVER async — it is the
+   * local, not the async fn. Absent → no shadowing information (the drain paths,
+   * which walk a whole fn body and have no scope tracker).
+   */
+  declaredNames?: ReadonlySet<string> | null;
+  /**
+   * The transitively-async LOCAL peer set for this emission — `computeAsyncFnNames`'s
+   * result. Client emission: `clientAsyncFnNames`. Library/tool/server-value
+   * emission: `asyncFnNames`.
+   */
+  asyncFnNames?: ReadonlySet<string> | null;
+  /**
+   * SERVER-BOUNDARY fn names. Read in BOTH modes deliberately (see
+   * `isServerBoundaryCallee`).
+   */
+  serverFnNames?: ReadonlySet<string> | null;
+  /**
+   * Resolves a bare callee to "a Promise-returning stdlib/vendor export". A hook
+   * rather than a `(calleeMap, exportRegistry)` pair because emit-expr's resolver
+   * (`isStdlibAsyncCallee`) falls back to a module-level classifier the drain paths
+   * do not install — the RULE is unified here; the stdlib RESOLVER stays where it
+   * already is. Absent → no stdlib classifier in scope (test harness / no imports).
+   */
+  isStdlibAsync?: ((name: string) => boolean) | null;
+}
+
+/**
+ * Is the bare callee `name` a SERVER-BOUNDARY function here, and unshadowed?
+ *
+ * Deliberately MODE-FREE. `serverFnNames` names the same fns in both emissions;
+ * only the LOWERING differs — server mode calls an in-process peer callable,
+ * client mode calls a fetch stub the post-emit rename installs. Both are async,
+ * and both must be awaited, so for the purpose of "is this name async" the two
+ * modes need no distinction. (A consumer that needs the lowering distinction —
+ * `isClientServerFnCall` — still applies its own `mode === "client"` guard on top;
+ * it asks an IDENTITY question, not an asyncness one.)
+ */
+export function isServerBoundaryCallee(name: string, facts: AsyncNameFacts): boolean {
+  if (facts.declaredNames != null && facts.declaredNames.has(name)) return false;
+  return facts.serverFnNames != null && facts.serverFnNames.has(name);
+}
+
+/**
+ * **Is the bare callee `name` async in this emission?** The single source of truth.
+ *
+ * ── WHY THIS EXISTS (dpa-023 Limb 1) ────────────────────────────────────────────
+ * Three consumers asked this question and one answered differently for a CLIENT
+ * SERVER FN:
+ *
+ *   `emit-expr.ts combinatorIsAsyncName`  → yes (four hand-written disjuncts)
+ *   `emit-expr.ts isClientServerFnCall`   → yes (its own `serverFnNames` test)
+ *   `emit-library-shared.ts` drain-local  → **NO**
+ *
+ * The drain's closure derived its answer from `computeAsyncFnNames`, which treats
+ * `serverFnNames` as a SEED TRIGGER — `callsServerFn(callees)` colours the CALLER
+ * async and never admits the CALLEE to the result set. So `loadRows` was async to
+ * the emitter and sync to the fail-closed drain, in the same compilation. The
+ * consequence was not a wrong emission but a MISSING one: the drain could not see
+ * a client server-fn call stranded in a raw escape-hatch, a template `.raw` body,
+ * or a fn-signature parameter default, so those leaked with zero diagnostics.
+ *
+ * The fix is a subtraction: the rule lives here once, and the drain is handed the
+ * `serverFnNames` fact it never had.
+ *
+ * ── THE RULE ────────────────────────────────────────────────────────────────────
+ * A name is async iff, and it is checked in this order:
+ *   0. it is NOT shadowed by an enclosing local — a shadowed name is the local;
+ *   1. it resolves to a Promise-returning stdlib/vendor export, OR
+ *   2. it is a server-boundary fn (both modes — `isServerBoundaryCallee`), OR
+ *   3. it is in the transitively-async local peer set.
+ *
+ * These are exactly the three async surfaces the expression auto-await already
+ * awaits. There is no fourth.
+ */
+export function isAsyncCalleeName(name: string, facts: AsyncNameFacts): boolean {
+  if (facts.declaredNames != null && facts.declaredNames.has(name)) return false;
+  if (facts.isStdlibAsync != null && facts.isStdlibAsync(name)) return true;
+  if (isServerBoundaryCallee(name, facts)) return true;
+  return facts.asyncFnNames != null && facts.asyncFnNames.has(name);
+}
+
 /**
  * The CLEAN FAMILY — collection methods whose async-callback form lowers to a
  * sequential-`for-await` combinator (order + early-exit preserved). `.sort` is
@@ -113,12 +211,18 @@ export function isKnownDiscardHofCall(
  *   - a bare IDENT `coll.some(isValid)`: the referenced fn is itself the callback,
  *     so it is async iff `isAsyncName(name)`.
  *
- * The `isAsyncName` predicate is INJECTED by the caller so the two consumers stay
- * on their own async source-of-truth without this module importing either:
- *   - emit-expr.ts feeds `isStdlibAsyncCallee` ∪ serverFnNames ∪ clientAsyncFnNames,
- *   - emit-library-shared.ts feeds `asyncFnNames` ∪ `isPromiseReturningStdlibFn`.
- * Both resolve the flagship stdlib-async callee identically, so the lowering site
- * and the fail-closed drain agree on which callbacks are async.
+ * The `isAsyncName` predicate is still a PARAMETER (this module stays free of
+ * codegen imports), but every caller now supplies the SAME implementation —
+ * `isAsyncCalleeName` above, applied to that caller's `AsyncNameFacts`.
+ *
+ * CORRECTION (Limb 1, dpa-023): this comment previously claimed the two injectors
+ * "agree on which callbacks are async". They did not. emit-expr fed
+ * `isStdlibAsyncCallee ∪ serverFnNames ∪ clientAsyncFnNames`; emit-library-shared
+ * fed `asyncFnNames ∪ isPromiseReturningStdlibFn` — with NO server-fn term at all,
+ * because `computeAsyncFnNames` never admits a server fn to its result set. They
+ * agreed on the stdlib callee only, which is the case the sentence was written
+ * about. Both now route through the one provider, so the claim is true by
+ * construction rather than by coincidence.
  */
 export function callbackReachesAsync(
   cbNode: unknown,
