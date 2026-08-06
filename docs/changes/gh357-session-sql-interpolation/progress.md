@@ -51,3 +51,30 @@ Branch: fix/gh357-session-sql-interpolation (off main @ d8044cf2)
   session-prologue-splice(root:raw-text-at-rewrite.ts:387). Fixed the "expression children" prose (there are none —
   interpolations are strings). §20.5:15427 quoted in the fix commit body (newly-accepting-toward-the-contract).
 - FACTS.md regenerated (commit for LOC change).
+
+## S323-peter — PA adversarial pass + trimmed landing (2026-08-05)
+
+**REGRESSION caught (fix-vs-prefix), not in the agent's report.** Full conformance on the
+branch failed `CONF-SESSION-STORE-PROGRAM-UNIFY` (§20.5) — green on main, so a real regression.
+Root cause (PA-reproduced single-threaded, DETERMINISTIC — not the "concurrency flake" the first
+revert comment claimed): the Part-4b E-SESSION-CONTEXT scan widening string-matched a bare
+`session.`/`session[` in the assembled `lines`, which also matches the compiler's OWN emitted
+`// --- session.destroy() handler ---` comment and generated `if (!session.isAuth)` auth guard,
+build-blocking a clean app.
+
+**Trimmed fix = the ruled route-handler fix only** (detection + Proxy prologue binding +
+cookie-wrap on the bare form). The Part-4b scan widening is REVERTED. Verified: probe ERROR
+COUNT 0 · full conformance 1443 pass / 0 fail · DONE-PROBE 5 pass / 0 fail. Root-cause comment
+at the scan site corrected to the deterministic reason.
+
+**Two findings ROUTED-TO-BRYAN (language-surface, filed in docs/known-gaps.md):**
+1. `g-session-get-reserved-key-read-disclosure` (HIGH) — `session[k]`, k="csrfToken" discloses the
+   §40.2 token via `.get()` at HTTP 200 (PA-reproduced: `{"status":200,"leaked":"CSRFSECRET"}`).
+   Pre-existing in the AST `session[expr]` path; gh357 extends it to the interpolation position.
+   Read-side reserved-key guard (mirror the B5/S266 write guard) is a `semantics-changed` call.
+   Encoded as an executable KNOWN-GAP regression-detector test (flip to `null` when the guard lands).
+2. `g-session-context-scan-bare-form-sound` (MED) — the §6.1 non-route residual build-block needs a
+   lowering-site record, not a text scan; the residual is a pre-existing silent free-var (not a regression).
+
+**Lane:** RULED to Peter S322-bryan (language act discharged S316/S319); built + landed trimmed by S323-peter.
+Integration/unit deferred to the cloud gate (authority; Windows-local baseline noise). On merge: close #357 with SHA.

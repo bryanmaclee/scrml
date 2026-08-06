@@ -204,4 +204,32 @@ describe("GH #357 — session inside a ?{} SQL interpolation", () => {
       try { rmSync(dir, { recursive: true }); } catch { /* best effort */ }
     }
   });
+
+  // ⚠ KNOWN GAP — g-session-get-reserved-key-read-disclosure (ROUTED-TO-BRYAN).
+  // This test DOCUMENTS CURRENT (leaky) behavior, it does not endorse it: a
+  // request-controlled `session[k]` with k="csrfToken" reads the live §40.2
+  // synchronizer token via `.get()` (csrfToken is minted INTO `_rec` at
+  // emit-server.ts:2378). There is a WRITE guard (B5/S266) but no READ guard, and
+  // the Proxy faithfully mirrors the pre-existing AST `session[expr]`→`.get()` path.
+  // WHEN bryan's read-side reserved-key guard lands: flip the expect to `toBe(null)`
+  // and delete this notice. Kept as an executable regression-detector until then.
+  test("KNOWN GAP: session[csrfToken] currently DISCLOSES the token (pending bryan's read guard)", async () => {
+    if (typeof globalThis.document !== "undefined") return;
+    const { dir, outDir, dbPath, errors } = compileApp(IDX_APP);
+    try {
+      expect(errors).toEqual([]);
+      seedUsers(dbPath);
+      globalThis.__scrml_session_store = new Map([[SID, {
+        userId: 1, role: "user", csrfToken: "CSRFSECRET",
+      }]]);
+      const { routes } = await importServer(outDir);
+      const route = routes.find((r) => r.path.includes("peek"));
+      const res = await route.handler(authedReq(route, { k: "csrfToken" }));
+      expect(res.status).toBe(200);
+      // CURRENT behavior — the token leaks. Flip to `toBe(null)` when the read guard lands.
+      expect((await res.json()).leaked).toBe("CSRFSECRET");
+    } finally {
+      try { rmSync(dir, { recursive: true }); } catch { /* best effort */ }
+    }
+  });
 });

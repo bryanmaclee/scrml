@@ -5788,14 +5788,19 @@ export function generateServerJs(
       // gh357 — this scan is DELIBERATELY left matching only the AST-lowered form.
       // Widening it to the text-level bare `session.`/`session[` form (to build-block
       // the dpa-021 §6.1 non-route residual — an SSE `server function*` / `<endpoint>`
-      // arm carrying a bare `session` in a `?{}` interpolation) was tried and REVERTED:
-      // it converts a PRE-EXISTING order/concurrency-sensitive emission flake in the
-      // test harness (a bare `session` occasionally emitted for a legit wrapped handler
-      // under bun's concurrent runner) into an E-SESSION-CONTEXT build error, i.e. it
-      // AMPLIFIES flakiness onto legit apps. That residual is explicitly a separate
-      // follow-up (dpa-021 §6.1/§10 — "deserves its own fixture"); the RULED route-
-      // handler fix (detection + Proxy prologue binding + cookie-wrap on the bare form)
-      // stands without it. See docs/changes/gh357-session-sql-interpolation/progress.md.
+      // arm carrying a bare `session` in a `?{}` interpolation) was tried and REVERTED.
+      // The reason is DETERMINISTIC, not a flake: string-scanning the emitted `lines`
+      // for a bare `session.`/`session[` also matches the compiler's OWN output — an
+      // emitted COMMENT (`// --- session.destroy() handler ---`) and a generated auth
+      // guard (`if (!session.isAuth)`) — both emitted for a legit cookie-wrapped app.
+      // That build-blocked a clean §20.5 app (regression: CONF-SESSION-STORE-PROGRAM-
+      // UNIFY, green on main, PA-reproduced single-threaded). A sound fix must key on
+      // recorded lowering SITES, not a text scan of assembled output — deferred to
+      // gap g-session-context-scan-bare-form-sound. The residual it would have caught
+      // (bare `session` in a `?{}` OUTSIDE a web-app handler) is a PRE-EXISTING silent
+      // runtime free-var, unchanged from main — NOT a gh357 regression. The RULED
+      // route-handler fix (detection + Proxy prologue binding + cookie-wrap on the bare
+      // form) stands without it. See docs/changes/gh357-session-sql-interpolation/progress.md.
       if (!lines[_i].includes("_scrml_req._scrml_sess.")) continue;
       if (_inAllowed(_i)) continue;
       _sessionCtxFired = true; // file-level: one error is enough to block the build
