@@ -1859,6 +1859,21 @@ Reported by scrml-site (same inbox message), hit on **our own** `reference/keywo
 
 ### g-tier0-reactive-lift-mixed-text-interp-literal — a Tier-0 `${for/lift}` over a REACTIVE collection emits a MIXED literal-plus-`${…}` text run as a LITERAL string; the adopter sees `${r.label}` rendered as visible page text
 <!-- @gap id=g-tier0-reactive-lift-mixed-text-interp-literal sev=MED status=open -->
+
+**⚑ RE-CHARACTERIZED S325-peter (2026-08-06) — the S281 model below is INVERTED and its detection signature is OBSOLETE. Verified by execution on HEAD `cff2af5e`; the S281 forensics are RETAINED below for history only.**
+
+**The reported cases are RESOLVED.** Every row the S281 table (below) called BROKEN now renders CORRECTLY on HEAD — `lit${item}` (left-glue), `$${item}` (the currency idiom), `${item} x${item}`. A template-literal lowering landed after S281 (`emitSetContent`, `emit-lift.js:1307`): the mixed run is now emitted as a JS **template literal** `` `lit${item}` `` that interpolates at runtime, NOT the S281 signature `createTextNode("…${…")` (a double-quoted LITERAL string). That signature no longer exists in this path — **the S281 blast-radius sweep (grepping `createTextNode("…${…")`) would return ZERO today**, because the emit is now a backtick template, not a double-quoted literal.
+
+**The discriminant was WRONG.** S281 said adjacency on the LEFT of `${` breaks (`lit${x}`). It does not. The residual is the **MIRROR**: a literal glued to the **RIGHT** of a `${…}` **close** (`${x}px`, `${x}:`, `${x}%`) gets a **spurious separating space** injected → `${item}px` renders as `"item px"`, `a${item}b${item}c` renders as `"aa ba c"`. Silent, adopter-visible, natural shapes (units `${n}px`, punctuation `${n}:`, `Total${n}`).
+
+**Scope is NARROWER than filed — the TERSE `/`-terminated lift form ONLY.** The explicit-close form (`lift <li>${item}px</li>`) emits CORRECTLY: the interp and the trailing literal parse as SEPARATE structured children → `tn.textContent = String((item)??"")` **+** a separate `appendChild(document.createTextNode("px"))`, no space. Only the terse single-run form (`lift <li>${item}px/`) collects the whole body as one expression string and corrupts it. **A natural workaround exists: use the explicit close.** (Also corrected: S281's "REACTIVITY is required" was a left-glue-only observation — a NON-reactive terse right-glue `for (n of ["x","y"]) lift <li>${n}tail/` ALSO corrupts to `` createTextNode(`${n} tail`) ``.)
+
+**Root (source-verified, NOT the "whitespace-token scanner" guess below).** The terse body is reserialized by `collectExpr` → `joinWithNewlines` (`ast-builder.js:4225-4240`, GITI-039). An interpolation part is pushed with a **`null` span** (`pushPartSpan`, `:4258`, because `angleDepth === 0` at push time), so it MISSES the source-adjacency escape at `:4231` (`prevSpan.end === curSpan.start`) and falls through to the **default `" "` separator** at `:4236`. The resulting string `"${item} px"` is then faithfully split by `parseLiftContentParts` (`emit-lift.js:878`), space and all. By the time text reaches `emit-lift`, `${x}px` and `${x} px` are byte-identical — but the SPANS are still present at the `ast-builder` locus, so a fix IS reachable there.
+
+**Why it is DEFERRED, not fixed here (S325).** The `null`-span→space fallthrough is **deliberate**: GITI-039's own doc-comment (`:4218-4223`) warns *"pure-expression rejoin stays BYTE-IDENTICAL — downstream string-rewrite passes depend on the current spacing (`expression-parser.ts:3003`)."* The joiner is the uniform reserialization default across ~40+ sites and ~59 downstream compensation sites (`emit-lift.js` alone re-parses the spacing in `parseLiftContentParts`/`parseAttrs`/`splitTagSegments`/`hasNestedTag`). Giving interp parts a real span (so the `:4231` adjacency test fires only at the `}`→literal boundary) is the likely fix, but it is a **delicate change to a shared, downstream-depended-on reserializer** — it needs a measured arc gated by the full corpus **byte-identity** gate, not a point edit. Given the narrow scope (terse form only) + trivial workaround (explicit close), the cost/benefit did not clear the blast-radius bar for an AFK/merge-on-green pass. **Fix direction for whoever takes it:** thread the interp part's real span into `partSpans` at `ast-builder.js:4258` and let `:4231` suppress the separator when source-adjacent; measure `compile` byte-identity across the corpus + the ~59 compensation sites before landing. — `RE-CHARACTERIZED S325-peter (terse-lift-form right-glue space injection; reported cases resolved); MED; open`
+
+<details><summary>S281 original entry (INVERTED model + OBSOLETE signature — retained for history)</summary>
+
 Found while verifying #141 (S281), on a side observation — **a distinct defect on a different axis, NOT part of the #141 truncation fix.**
 
 ⚠️ **CHARACTERIZATION CORRECTED (same session, before any fix was scoped).** This gap was first filed as "a text run that MIXES literal text with `${…}` breaks." **That was wrong** — a follow-up boundary probe (prompted by bryan asking what `$$` meant) showed mixed runs are usually FINE. The real trigger is **ADJACENCY**:
@@ -1915,6 +1930,8 @@ A shopper sees `Widget- $${item.price}` where the price should be. The file is a
 So: **1.3% incidence (1/78), live on real corpus code but not in an adopter app.** Severity stays **MED** — silent and adopter-visible when hit, natural shape (`Total: ${n}`, `$${price}`), but rare in practice because most lift bodies use pure-`${}` runs.
 
 **Deliberately NOT folded into the #141 dispatch** (different axis, tight brief, mid-flight). Fix direction: the reactive create-item lift path needs the same literal/interpolation text-run SPLIT that both the static lift path and `emit-each.ts` already perform. Reproducers preserved in the S281 scratchpad; regenerate from the three snippets above. — `NEW S281 (found verifying #141); MED; open`
+
+</details>
 
 ---
 
