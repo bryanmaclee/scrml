@@ -2,6 +2,12 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S324 — 2026-08-06 (peter · P-Tech1 Windows) — emit-server.ts handler dangling-ref cluster fixed (MED-lane arc #1)
+
+**1 PR merged (#440).** Continuation after the S323 wrap (Peter's "get emit-server" + AFK autonomy). Concurrent with bryan (async/Option-C) on a disjoint surface. main `766c9c9a` → `71197936`, coherence 0/0.
+
+- **#440 (`71197936`) — two `emit-server.ts` handler dangling-ref bugs**, same class as #357: a runtime reference emitted with its binding/definition gated more narrowly than the reference → compiles clean, throws `ReferenceError` → HTTP 500 at request time. (1) `@currentUser` read in a plain/SSE handler now emits its resolver binding (detection widened to a direct ident read via `astReadsCurrentUserAmbient` + the §36 SSE splice added) — conformance-restoration (§52.15.1 sanctions server-side `@currentUser`). (2) `<channel auth=>`-only programs now emit `_scrml_auth_check` + session middleware matching the reference gate — no WS-upgrade crash. PA adversarial pass: conformance **1443/0 fix-vs-prefix** (the `_needsSessionInfra` widening came through clean, unlike the #357 vector), store-invariant probed (a read-only `@currentUser` program keeps the in-memory Map, NOT the durable on-disk store), executed handlers 500 → 200. Both gaps marked resolved.
+
 ## S323 — 2026-08-05 (peter · P-Tech1 Windows) — GH #357 (session in a `?{}` SQL interpolation) fixed, trimmed after the pass caught a §20.5 regression, + review floor drained to 0
 
 **2 PRs merged (#435 #437).** Concurrent with S322-bryan (live on the async / Option-C path); interleaved cleanly via strict-rebase serialization (bryan's #436 landed mid-session). main `cc5fcb9f` → `3c047151`, coherence 0/0.

@@ -35,6 +35,10 @@ predate the rule and are out of scope by construction rather than by exemption.
 
 ## Log
 
+<!-- @review pr=440 verdict=clean by=S324-peter date=2026-08-06 probe=execution-500-to-200-both-bugs+conformance-1443-0-fix-vs-prefix-fresh-process+store-invariant-probe-readonly-currentUser-stays-Map-not-durable+no-double-binding+zero-diagnostic-minted note=needsSessionInfra-widening-came-through-clean-unlike-the-357-vector-gap1-conformance-restoration-52.15.1 -->
+<!-- @review pr=439 verdict=carve-out by=S324-peter date=2026-08-06 probe=docs-only-own-S323-wrap-handoff+changelog+deltalog-no-code-path -->
+<!-- @review pr=438 verdict=carve-out by=S324-peter date=2026-08-06 probe=file-list-diff-docs-only-brief-archival-no-code-path -->
+<!-- @review pr=437 verdict=carve-out by=S324-peter date=2026-08-06 probe=docs-only-own-S323-review-floor-drain-single-file-pr-reviews -->
 <!-- @review pr=435 verdict=finding by=S323-peter date=2026-08-05 probe=fix-vs-prefix-conformance+executed-handler note=caught-E-SESSION-CONTEXT-scan-widening-regression-CONF-SESSION-STORE-PROGRAM-UNIFY-trimmed-pre-merge+2-findings-routed-bryan-csrf-read-disclosure-and-sound-scan -->
 <!-- @review pr=434 verdict=carve-out by=S323-peter date=2026-08-05 probe=docs-only-continuity -->
 <!-- @review pr=433 verdict=carve-out by=S323-peter date=2026-08-05 probe=docs-only-continuity -->
