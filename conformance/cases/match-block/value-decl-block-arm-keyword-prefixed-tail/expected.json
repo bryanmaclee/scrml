@@ -1,0 +1,22 @@
+{
+  "id": "match-block-value-decl-block-arm-keyword-prefixed-tail",
+  "description": "§18.5 block-arm value lowering when the block's TAIL EXPRESSION is an identifier merely PREFIXED by a statement keyword (`formatted` starts with `for`, `doc` with `do`, `letter` with `let`, `constant` with `const`, `online` with `on`). The statement-head classifier that decides whether a block's last segment is the arm's result carried its word boundary INSIDE the keyword alternation, so it fenced only `on` and every other keyword matched as a bare prefix. Such a tail was misclassified as a statement, was never lifted to the enclosing result var, and the arm silently produced `null`. Both consumers of the classifier are pinned here: the structured/variant-arm path and the raw/literal-arm path.",
+  "language-version": "1.0",
+  "spec": "§18.5",
+  "rationale": "§18.5: \"A block arm is `{ statement* expression? }`. The block's result is its **last expression**.\" and \"A block arm body's result type SHALL be the type of its last expression.\" An identifier that merely begins with the letters of a keyword is an EXPRESSION, not a statement, so it is the block's result. `tintVariant(.Low)` -> \"amber\" (tail `formatted + \"ber\"`), `tintVariant(.High)` -> \"indigo\" (tail `doc + \"digo\"`), `tintLiteral(1)` -> \"violet\" (tail `letter + \"olet\"`), `tintLiteral(2)` -> \"teal\" (tail `constant + \"al\"`), `tintLiteral(9)` -> \"gray\" (bare non-block arm, unaffected). `tintOnPrefixed(1)` -> \"scarlet\" pins the ONE keyword that already carried a boundary as UNCHANGED. `statementTail(1)` -> \"\" pins the other direction of §18.5: a block whose last segment is an assignment STATEMENT has no trailing expression, so the arm produces void and the interpolation renders empty. Pre-fix the four keyword-prefixed anchors all rendered empty (silent-wrong, no diagnostic); `base`/`b`-named tails passed, which is why the defect shipped. `tintDollar(1)` -> \"magenta\" and `tintDollar(2)` -> \"cyan\" pin the `$` CONTINUATION: scrml identifiers admit `$` (`isIdentPart = /[A-Za-z0-9_$]/`) but JS `\\b` is defined against `\\w` = [A-Za-z0-9_], which excludes `$` — so a `\\b`-based fence still reads `do$thing` and `on$c` as keyword-then-boundary and reproduces the defect, including for `on`. The fence is therefore matched to the language's own identifier charset, not to `\\w`. Measured at authoring time: zero corpus identifiers of the form <keyword>$..., though `$`-bearing identifiers (`item$`, `acc_$`, `_$1`) are in live corpus use — so this pins a reachable class with no current instance, closed at the root rather than at twelve positions.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "domAnchored": [
+      { "selector": "#kw-variant-for", "text": "amber" },
+      { "selector": "#kw-variant-do", "text": "indigo" },
+      { "selector": "#kw-literal-let", "text": "violet" },
+      { "selector": "#kw-literal-const", "text": "teal" },
+      { "selector": "#kw-literal-bare", "text": "gray" },
+      { "selector": "#kw-on-prefixed", "text": "scarlet" },
+      { "selector": "#kw-dollar-do", "text": "magenta" },
+      { "selector": "#kw-dollar-on", "text": "cyan" },
+      { "selector": "#kw-statement-tail", "text": "" }
+    ]
+  }
+}

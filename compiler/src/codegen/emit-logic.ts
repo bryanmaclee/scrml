@@ -4535,7 +4535,26 @@ function _blockTailIsValueExpr(tail: string): boolean {
   const t = tail.trim();
   if (!t) return false;
   // Statement / declaration heads never produce a bindable arm value.
-  if (/^(const|let|var|return|if|for|while|do|switch|lift|throw|fail|on\b)/.test(t)) return false;
+  //
+  // The fence is OUTSIDE the alternation ON PURPOSE, and it is the whole point of
+  // this line. With it INSIDE (`…|fail|on\b`) it guarded only `on`, so every OTHER
+  // keyword matched as a bare PREFIX: a tail named `formatted` matched `for`,
+  // `doc`/`document`/`domNode` matched `do`, `letter` matched `let`, `constant`
+  // matched `const`, `returnValue` matched `return`, `iface` matched `if`,
+  // `lifted` matched `lift`, `failCount` matched `fail`, `varName` matched `var`.
+  // Each was misclassified as a STATEMENT head, so the arm's tail was never
+  // lifted and the enclosing result var was never assigned — the arm silently
+  // produced `null`, with no diagnostic.
+  //
+  // ⚑ The fence is `(?![A-Za-z0-9_$])` and NOT `\b`, because `\b` is defined
+  // against `\w` = `[A-Za-z0-9_]` — which EXCLUDES `$`. scrml identifiers include
+  // `$` (`compiler/src/tokenizer.ts:1343`, `isIdentPart = /[A-Za-z0-9_$]/`), so a
+  // `\b` fence still reads `do$thing` / `const$x` / `on$c` as keyword-then-boundary
+  // and silently reproduces the very defect this line exists to remove — including
+  // for `on`, the one keyword that always carried a fence. Matching the fence to
+  // the language's OWN identifier charset closes the class at the root instead of
+  // at twelve positions. `on foo` still matches; `onClick` still does not.
+  if (/^(const|let|var|return|if|for|while|do|switch|lift|throw|fail|on)(?![A-Za-z0-9_$])/.test(t)) return false;
   // Assignment statements (`@x = …`, `x = …`, compound `+=` …) are void per §18.5.
   if (/^@?[A-Za-z_$][\w$.\[\]]*\s*(?:=(?!=)|\+=|-=|\*=|\/=|%=|\|\|=|&&=|\?\?=)/.test(t)) return false;
   let node: any = null;

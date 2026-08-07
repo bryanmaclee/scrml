@@ -1,0 +1,71 @@
+type Tier:enum = { Low, High }
+
+// Structured (variant-arm) path — the block tail is an identifier merely
+// PREFIXED by a statement keyword. `formatted` starts with `for`, `doc` starts
+// with `do`. Neither is a statement; both are the block's result expression.
+fn tintVariant(t: Tier) -> string {
+    const r = match t {
+        .Low  :> { const formatted = "am"; formatted + "ber" }
+        .High :> { const doc = "in"; doc + "digo" }
+    }
+    return r
+}
+
+// Raw (literal-arm) path — same predicate, different consumer.
+fn tintLiteral(k: int) -> string {
+    const r = match k {
+        1 :> { const letter = "vi"; letter + "olet" }
+        2 :> { const constant = "te"; constant + "al" }
+        _ :> "gray"
+    }
+    return r
+}
+
+// The `on` guard is the one keyword that already carried a word boundary, and it
+// must keep behaving exactly as before: `online` is an identifier, not a
+// statement head, so it lifts to the arm result.
+fn tintOnPrefixed(k: int) -> string {
+    const r = match k {
+        1 :> { const online = "sca"; online + "rlet" }
+        _ :> "gray"
+    }
+    return r
+}
+
+// The `$` continuation. scrml identifiers admit `$` (`isIdentPart = /[A-Za-z0-9_$]/`,
+// tokenizer.ts:1343) but JS `\b` is defined against `\w` = [A-Za-z0-9_], which does
+// NOT include `$`. A `\b`-based fence therefore still reads `do$thing` and `on$c` as
+// keyword-then-boundary and silently yields `null` — the same defect, un-fixed, and
+// un-fixed for `on` too, the one keyword that always carried a fence. Pinned here so
+// the fence stays matched to the LANGUAGE's identifier charset rather than to `\w`.
+fn tintDollar(k: int) -> string {
+    const r = match k {
+        1 :> { const do$thing = "ma"; do$thing + "genta" }
+        2 :> { const on$c = "cy"; on$c + "an" }
+        _ :> "gray"
+    }
+    return r
+}
+
+// Non-regression: a genuine statement tail is still NOT a value. `@`-free local
+// reassignment as the last segment leaves the arm void per §18.5, so the result
+// falls through to the seed and renders empty.
+fn statementTail(k: int) -> string {
+    const r = match k {
+        1 :> { let acc = "x"; acc = "y" }
+        _ :> "gray"
+    }
+    return r
+}
+
+<page><main>
+<p id="kw-variant-for">${ tintVariant(Tier.Low) }</p>
+<p id="kw-variant-do">${ tintVariant(Tier.High) }</p>
+<p id="kw-literal-let">${ tintLiteral(1) }</p>
+<p id="kw-literal-const">${ tintLiteral(2) }</p>
+<p id="kw-literal-bare">${ tintLiteral(9) }</p>
+<p id="kw-on-prefixed">${ tintOnPrefixed(1) }</p>
+<p id="kw-dollar-do">${ tintDollar(1) }</p>
+<p id="kw-dollar-on">${ tintDollar(2) }</p>
+<p id="kw-statement-tail">${ statementTail(1) }</p>
+</main></page>
