@@ -1,0 +1,27 @@
+${
+    <rows> = [{ id: 1, name: "alpha" }, { id: 2, name: "beta" }]
+}
+fn label(n: string) {
+    if n == "" { return <i class="none">none</i> }
+    return n
+}
+<form id="short">
+    <each in=@rows key=@.id as a>
+        <textarea class="ta-short" : label(a.name)>
+    </each>
+</form>
+<form id="long">
+    <each in=@rows key=@.id as b>
+        <textarea class="ta-long">${label(b.name)}</textarea>
+    </each>
+</form>
+<form id="short-plain">
+    <each in=@rows key=@.id as c>
+        <textarea class="ta-short-plain" : c.name>
+    </each>
+</form>
+<form id="long-plain">
+    <each in=@rows key=@.id as d>
+        <textarea class="ta-long-plain">${d.name}</textarea>
+    </each>
+</form>

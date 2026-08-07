@@ -1,0 +1,21 @@
+{
+  "id": "each-shorthand-option-label-preserved",
+  "description": "S328 counter-gate. An <option> per-item body — BOTH `:`-shorthand and bare-body — calling a same-file MIXED-return fn must render the LABEL the adopter wrote, on BOTH branches: the string branch renders \"alpha\", the markup branch renders \"none\". This case exists because the first attempt at the S328 restricted-parent fix widened the mount refusal past RCDATA to <option> and lowered it to `.textContent = String(expr)`, which replaced every markup-branch label with \"[object HTMLElement]\" — a silent, adopter-visible regression with zero diagnostic.",
+  "language-version": "1.0",
+  "spec": "§4.14",
+  "rationale": "An <option>'s content model is Text, so a `<span data-scrml-mv>` child is invalid HTML — but the DOM API accepts it and the label still reads through: MEASURED in real Chromium, base emission renders \"alpha\"/\"none\" correctly. <option> therefore NEVER had the data-loss defect that <textarea> had (where the element's value IS its child text content, so an element child makes `.value` read \"\"). Refusing the mount for <option> traded a silent-wrong SHAPE for a silent-wrong LABEL, which is strictly worse — the label is what the user reads. So the S328 refusal is scoped to RCDATA only and <option> stays on the mounting path, byte-identical to base. This case pins the LABEL, which is the property that actually regressed; the invalid-shape half is a separate pre-existing defect (S297) and is deliberately NOT asserted here. The `text:` assertions DO discriminate under happy-dom even though its `String(element)` returns outerHTML rather than \"[object HTMLElement]\" — MEASURED: the broken lowering yields the literal text `<i class=\"none\">none</i>`, which is not \"none\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC", "E-CODEGEN-INVALID-JS"],
+    "input": [],
+    "state": { "rows": [{ "id": 1, "name": "alpha" }, { "id": 2, "name": "" }] },
+    "domAnchored": [
+      { "selector": "option.opt-short", "count": 2 },
+      { "selector": "option.opt-long", "count": 2 },
+      { "selector": "#s-short option:first-child", "text": "alpha" },
+      { "selector": "#s-short option:last-child", "text": "none" },
+      { "selector": "#s-long option:first-child", "text": "alpha" },
+      { "selector": "#s-long option:last-child", "text": "none" }
+    ]
+  }
+}

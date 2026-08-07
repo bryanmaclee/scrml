@@ -1,0 +1,25 @@
+{
+  "id": "each-shorthand-longhand-parity-rcdata",
+  "description": "S328 merge-blocker — the §4.14 byte-identity contract stated as a runtime case, for the ONE content model where the two branches could disagree. The same body is written FOUR ways inside an RCDATA parent (<textarea>): `:`-shorthand and bare-body, each with a mixed-return fn CALL and with a plain member expression. All four must agree on DOM SHAPE — no element child in any of them. This is the case that fails if a future change fixes one branch's RCDATA handling and not the other's.",
+  "language-version": "1.0",
+  "spec": "§4.14",
+  "rationale": "SPEC §4.14 line 1021: 'a `:`-shorthand body IS the element's single-expression body, byte-identical to the bare-body form `<tag>${expr}</tag>`'; §17.7.6 lines 12176-12177 carry it into <each> scope with no <each>-specific extension. Both emit-each branches read ONE local (`_isRcdataBody`) so they cannot drift. NOTE, deliberately narrow: this pins the two `<each>` per-item branches and NOTHING ELSE. Three other answers to 'may this body receive an element child?' exist and are not routed through that local — `eachRcdataValueExpr`'s null-bail falls through to the mounting recursion inside the same file, `emit-html.ts` runs its own `isRcdataElement` check for the top-level path, and the Tier-0 `lift` path answers separately again. An earlier revision of this case asserted a whole-document `[data-scrml-mv]` count of 0; that was overstated and is gone — <option> mounts legitimately (see each-shorthand-option-label-preserved).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC", "E-CODEGEN-INVALID-JS"],
+    "input": [],
+    "state": { "rows": [{ "id": 1, "name": "alpha" }, { "id": 2, "name": "beta" }] },
+    "domAnchored": [
+      { "selector": "textarea.ta-short", "count": 2 },
+      { "selector": "textarea.ta-long", "count": 2 },
+      { "selector": "textarea.ta-short-plain", "count": 2 },
+      { "selector": "textarea.ta-long-plain", "count": 2 },
+      { "selector": "textarea *", "count": 0 },
+      { "selector": "textarea [data-scrml-mv]", "count": 0 },
+      { "selector": "#short textarea:first-child", "value": "alpha" },
+      { "selector": "#long textarea:first-child", "value": "alpha" },
+      { "selector": "#short-plain textarea:first-child", "value": "alpha" },
+      { "selector": "#long-plain textarea:first-child", "value": "alpha" }
+    ]
+  }
+}
