@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 25 |
-| MED | 120 |
+| HIGH | 24 |
+| MED | 121 |
 | LOW | 49 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -587,6 +587,17 @@ that to a raw property read (a `semantics-changed` silent regression). Brief:
 - **Unfiltered read of every adopter-written session key by attacker-chosen key.** A seeded `apiKey` came back as `sk-live-PROBE-SECRET-9f3c`, verbatim. `.get()` is one line — `return this._rec[key] ?? null` — with no allowlist, denylist, or `hasOwnProperty`. This is the read analogue of mass-assignment; it needs no reserved key to bite. §20.5 sanctions `session.get(k)` but plainly never contemplated `k` being request-controlled.
 - **Prototype-chain read is unguarded.** `.get("__proto__")` → `Object.prototype`; `.get("constructor")` / `.get("toString")` → functions. Through the `?{}` path `constructor` is an **HTTP 500** (SQL bind TypeError) — an unhandled-input crash reachable from a request-controlled key.
 
+**✅ S326-bryan — THE BANNER BELOW IS DISCHARGED. The arc landed (#452, main `ec0142aa`) and the
+re-score it asked for is: SEVERITY STAYS MED, deliberately.** The banner's own last sentence is what
+decides it — *"the severity call below still stands on the attacker model; the REACHABILITY premise it
+partly rested on does not survive that landing."* Reachability is now wire-live as predicted, and the
+attacker model is **unchanged**: still same-origin XSS or an adopter echoing a request-controlled key,
+still POST-only, still CSRF-gated, still no `Access-Control-Allow-Credentials` emitted anywhere. A
+reachability change makes an entry more REAL; it does not by itself make it more SEVERE, and inflating
+the tier because a fix removed a masking defect would be scoring the fix, not the finding. **The three
+sub-findings below are now all wire-reachable and none of them is new.** Still `route=bryan` — the
+read-side guard is a `semantics-changed` language call, and that is the open question, not the number.
+
 **⚑ REACHABILITY CHANGED — S325-bryan, found by the adversarial pass on the bare-return arc. Re-score this when that arc lands.** At the time of the MED re-score below, the `auth=` shape of this leak reached **no wire at all**: a bare handler return produced a constant Bun welcome page and the value went only to **stderr** (MEASURED on Bun 1.3.14 — the value is never echoed on the wire). [[g-authed-server-fn-route-returns-bare-value-not-response]] fixes that by design, and in doing so takes this leak **from log-only to wire-live**: MEASURED at that arc's ref, `server function peek(k) { return { v: session.get(k) } }` under `auth="required"` returns `{"v":"<live csrf token>"}` at **200 application/json**, key taken from the request body.
 
 **Bounded, and measured:** the §40.2 token for that same session is ALREADY delivered to the client on the 403 as `scrml_csrf=<same value>; Path=/; SameSite=Strict` with **no `HttpOnly`** — so this is not a new capability for that session's own token. What changes is (a) the token gains a response-body egress channel, and (b) **every own key of `_rec` becomes readable through a request-controlled `k` over HTTP**, where before it was inert. The severity call below still stands on the attacker model; the REACHABILITY premise it partly rested on does not survive that landing.
@@ -652,8 +663,35 @@ deleted: const inner = wrapped || {get, post, put, del, patch}
 
 Object-shorthand **KEY** names change, so `inner.get(...)` resolves to `undefined` — no syntax error, no diagnostic. Both sources currently fail compile upstream for unrelated reasons so neither is observable in a green build, but **the mechanism is not corpus-accidental**: any emitted object shorthand whose key matches a declared fn name hits it.
 
-### g-authed-server-fn-route-returns-bare-value-not-response — a server-fn route handler in an auth- or protect-active unit returns a BARE VALUE, not a `Response`; both shipped hosts pass it straight to Bun, which rejects it — `NEW S325-bryan (found while measuring g-session-get-reserved-key-read-disclosure); HIGH; open`
-<!-- @gap id=g-authed-server-fn-route-returns-bare-value-not-response sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts:3488(useBaselineCsrf)+4085-4092(no-wrapper return)+4102(_egressRedact raw return) prov=rationale:measured-end-to-end-while-scoping-the-session-read-gap -->
+### g-authed-server-fn-route-returns-bare-value-not-response — a server-fn route handler in an auth- or protect-active unit returns a BARE VALUE, not a `Response`; both shipped hosts pass it straight to Bun, which rejects it — `NEW S325-bryan (found while measuring g-session-get-reserved-key-read-disclosure); HIGH; RESOLVED S326-bryan (#452 ec0142aa)`
+<!-- @gap id=g-authed-server-fn-route-returns-bare-value-not-response sev=HIGH status=resolved locus=compiler/src/codegen/emit-server.ts:3488(useBaselineCsrf)+4085-4092(no-wrapper return)+4102(_egressRedact raw return) prov=rationale:measured-end-to-end-while-scoping-the-session-read-gap -->
+
+**✅ RESOLVED S326-bryan — PR #452, main `ec0142aa`.** Route handlers now emit a `Response` on every
+path. **PA-verified by its OWN R26 on the merged main, not on the agent's word or the suite's:**
+recompiled `examples/23-trucking-dispatch` clean (36 files) → **25 emitted `.server.js`, 241
+`return new Response`, 84 `instanceof Response` passthrough guards, and ZERO occurrences of the
+`Expected a Response` symptom.** Counts corpus-wide: **122 bare → 1**, `examples/` **61 → 0**,
+trucking **59 → 0**.
+
+⚠️ **The first R26 probe UNDER-COUNTED and the correction is worth carrying:** a `*.server.js` glob
+matched only the two TOP-LEVEL emitted files and reported 11/6, which read as "the fix barely
+applied". The other 23 `.server.js` are in per-route subdirectories. **A well-formed glob that
+silently measures a fraction of the population is the §8 truncated-probe shape** — the recursive
+count is the real one. Enumerate with `find`, not a shell glob, whenever the emit tree is nested.
+
+**Residual, carried forward deliberately:** a hand-built `Response` bypasses the RUNTIME redaction
+floor by design — the passthrough guard sits BEFORE `_scrml_protect_redact` because a `Response` is
+an opaque stream handle the redact cannot inspect, so a body that builds one owns its own egress. It
+relies on §14.8.9's compile-time `detectProtectedRawEgress` instead. Currently **unreachable** (a
+plain body naming `Response` build-blocks on `E-SCOPE-001`). The guard exists anyway because without
+it the envelope does `new Response(JSON.stringify(<a Response>))` → `"{}"`, turning an adopter's
+deliberate 403 into a 200 — fail-OPEN, measured.
+
+**Two things this landing changes elsewhere, do not miss them:** (1) it takes
+[[g-session-get-reserved-key-read-disclosure]] from **log-only to WIRE-LIVE** — that entry's
+REACHABILITY-CHANGED banner said to re-score when this arc landed, and **it has now landed**; (2) the
+20 tolerate-or-assert-bare test sites across 6 files were **CORRECTED, not preserved** — the oracle
+shared the implementation's blind spot (S276 shape).
 
 A `server function` route handler emits a real `Response` **iff** `useBaselineCsrf` (`:3488` — `!authMiddlewareEntry && isStateMutating && _webAppShape`) or the A9-Ext-5 idempotency flag is set. Otherwise the adopter's `return` becomes the handler's `return` verbatim (`:4085-4092`), or is wrapped only by `_egressRedact` (`:4102`, whose own comment says *"This handler returns a raw value (the pre-floor behavior)"*). Both hosts the compiler ships dispatch with `return route.handler(req)` — `dev.js:598` and the built `_server.js:57` — so a bare value goes straight to Bun, which answers `200 text/plain "Welcome to Bun! To get started, return a Response object."`
 
@@ -1343,6 +1381,46 @@ Adopter-A's native-iOS client (reused, re-pointed at the scrml backend for the l
 > carries an inline `@gap` token in its final cell. This basis reproduced the canonical S170 hand-count
 > HIGH 0 · MED 9 · LOW 18 · Nominal 9 exactly (the S170 baseline) — the LIVE count is the generated table
 > above, which moves as gaps are filed/closed (S174 filed 4 → MED 11 · LOW 20).
+
+---
+
+## §S326 — gaps filed S326 (2026-08-06, bryan; surfaced while landing the inherited S325 arcs)
+
+### g-specifier-resolution-test-hook-timeout-knife-edge — an integration test's `beforeAll` spawns a full flagship-app compile against bun's DEFAULT 5s hook timeout; the margin is ~1.1s and it goes red under ordinary machine load, blocking commits for reasons no change caused — `NEW S326-bryan; MED; open`
+<!-- @gap id=g-specifier-resolution-test-hook-timeout-knife-edge sev=MED status=open locus=compiler/tests/integration/corpus-emitted-specifier-resolution.test.js:121-131(beforeAll) prov=rationale:blocked-a-clean-commit-twice-then-measured-base-vs-head-and-found-no-regression -->
+
+`beforeAll` (`:121-131`) spawns `bun <CLI> compile examples/23-trucking-dispatch` — the 36-file,
+66-handler flagship — and bun's default hook timeout is **5s**. There is no explicit timeout argument.
+
+**MEASURED on this machine, both sides:**
+
+| tree | compile wall time | test result |
+|---|---|---|
+| clean `main`, machine idle | **3.92s** | 3 pass / 0 fail |
+| head (bare-return fix), machine idle | **3.51s** | 3 pass / 0 fail |
+| head, load avg **15.66** (a sibling worktree agent running its own suite) | — | **FAIL — "a beforeEach/afterEach hook timed out"** |
+
+So the margin is **~1.1s on ~4s of work, and the fix made the compile FASTER, not slower**. This is
+not a regression in anything; it is a gate that goes **red for reasons no change caused** — pa-base §8's
+**non-deterministic-input** entry, exactly: *"a gate that cries wolf gets bypassed, and a bypassed gate
+gets deleted."*
+
+**Why it is worth a MED and not a shrug.** It cost real time and it cost it in the most expensive
+possible way — it blocked a **pre-commit** on a change that was correct, and the failure message
+(`(fail) (unnamed)`, hook timed out) names neither the test nor a cause, so the honest first read is
+"my change broke something." The correct diagnosis needed a stash, a base-vs-head compile timing, and
+two isolated re-runs. It will recur on any loaded dev machine and on any slow cloud runner, and the
+**parallel-by-default dispatch posture guarantees the machine IS loaded** — a PA running an agent and
+a commit concurrently is the normal case here, not the exception.
+
+**Fix direction (cheap, and prefer the first):** give the hook an explicit generous timeout —
+`beforeAll(fn, 60_000)` — since the hook's job is a whole-app compile and 5s was never a considered
+budget, just the default. Do NOT "fix" it by shrinking what the hook compiles: the test's own §1
+guard-the-guard (`expect(specs.length).toBeGreaterThan(20)`) and §2 (`> 100`) exist precisely because a
+smaller corpus would prove less. The bite proof (§3) is well built and must stay.
+
+**Do not confuse this with a slow test.** ~4s for a full app compile is fine. The defect is the
+undeclared 5s ceiling sitting under it.
 
 ---
 
