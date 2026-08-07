@@ -9,7 +9,7 @@ import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, type RequestBodyCell } from "./reactive-deps.ts";
 import { CGError } from "./errors.ts";
 import { escapeRegex } from "./utils.ts";
-import { rewriteCodeSegments } from "./code-segments.ts";
+import { rewriteCodeSegments, findObjectShorthandRegions } from "./code-segments.ts";
 import { scanClientEgress } from "./egress-field-scan.ts";
 import { emitFunctions } from "./emit-functions.ts";
 import { getNodes, isServerOnlyNode } from "./collect.ts";
@@ -1960,6 +1960,40 @@ function emitThemeSwitchReflection(nodes: any[]): string[] {
   return out;
 }
 
+/**
+ * Join the emitted client `lines` into one buffer while treating the assembled
+ * runtime as an EXCLUDED REGION for `rewrite`.
+ *
+ * `lines[runtimeSlotIndex]` is the PGO P3.B placeholder that the assembled
+ * runtime is spliced into. Every whole-buffer text pass in this file used to
+ * see the runtime as ordinary buffer content, which is how a user function
+ * named `log`/`fn`/`label`/`tick` reached the runtime's own identifiers
+ * (`g-embed-runtime-ships-mangled-runtime-identifiers`). `rewrite` is applied
+ * to the client body BEFORE and AFTER the slot and never to `runtimeSource`,
+ * so the fenced region is not part of the rewrite input at all — no lookaround
+ * has to recognise it, and no pattern can reach into it.
+ *
+ * With `rewrite` as the identity function this is byte-for-byte
+ * `lines.join("\n")` with the runtime already in its slot, which is what the
+ * pre-fence code produced.
+ */
+export function joinAroundRuntimeSlot(
+  lines: string[],
+  runtimeSlotIndex: number,
+  runtimeSource: string,
+  rewrite: (segment: string) => string,
+): string {
+  const parts: string[] = [];
+  if (runtimeSlotIndex > 0) {
+    parts.push(rewrite(lines.slice(0, runtimeSlotIndex).join("\n")));
+  }
+  parts.push(runtimeSource);
+  if (runtimeSlotIndex + 1 < lines.length) {
+    parts.push(rewrite(lines.slice(runtimeSlotIndex + 1).join("\n")));
+  }
+  return parts.join("\n");
+}
+
 export function generateClientJs(ctx: CompileContext): string {
   const { fileAST, protectedFields, errors, encodingCtx, workerNames } = ctx;
   const authMiddlewareEntry = ctx.authMiddleware;
@@ -2917,10 +2951,9 @@ export function generateClientJs(ctx: CompileContext): string {
   // have run and tagged their AST-shape-derived chunks; the chunk set is now
   // final.
   const runtimeSource = clientStage(ctx, "assemble-runtime", () => assembleRuntime(ctx.usedRuntimeChunks));
-  lines[runtimeInsertIndex] = runtimeSource;
-  let clientCode = clientStage(ctx, "lines-join", () => lines.join("\n"));
+  let clientCode: string;
   if (fnNameMap && fnNameMap.size > 0) {
-    clientStage(ctx, "post-fn-name-mangle", () => {
+    clientCode = clientStage(ctx, "post-fn-name-mangle", () => {
       // PGO P3.A: collapse the per-name regex loop into a single alternation
       // pass. The original loop ran one regex over the entire client buffer
       // for each user function — O(names * bufferSize) on a buffer that
@@ -2958,12 +2991,111 @@ export function generateClientJs(ctx: CompileContext): string {
       // string literals, regex literals, and comments pass through verbatim.
       // Real call sites in CODE position still mangle (the regex itself is
       // preserved bit-for-bit — only its INPUT is now the code-only view).
-      clientCode = rewriteCodeSegments(clientCode, (codeSeg) =>
+      const rewriteNames = (codeSeg: string): string =>
         codeSeg.replace(
           combinedRegex,
           (_match, name: string) => fnNameMap.get(name) ?? _match,
-        ),
-      );
+        );
+
+      // g-mangler-scope-blind-shorthand-key-rename (S325) — the SECOND fenced
+      // region. `{get, post, put, del, patch}` is not a run of ordinary
+      // references: each identifier is simultaneously a PROPERTY NAME and a
+      // value reference, and the alternation renamed both halves at once —
+      //
+      //   before: const inner = wrapped || {_scrml_get_2, _scrml_post_3, …}
+      //
+      // so `inner.get(...)` was `undefined`, with no syntax error and no
+      // diagnostic. A pure fence would only trade that silent wrong for a
+      // ReferenceError on a now-free `get`, so an OBJECT LITERAL is EXPANDED
+      // instead — `get` becomes `get: _scrml_get_2`, which keeps the object's
+      // public shape AND resolves to the real function.
+      //
+      // ⚠ ONLY the object-literal case is acted on, and that LIMIT is
+      // deliberate. `classifyBraceGroup` can also recognise a destructuring
+      // `binding-pattern`, and an earlier revision of this fix emitted those
+      // verbatim. The S239 adversarial review showed that to be a HALF-REPAIR:
+      // fencing the pattern while the pass still rewrites the uses those
+      // bindings SHADOW in the same scope leaves the bindings dead and the calls
+      // resolving to the module-level function —
+      //
+      //     const src = { get: (x) => "src-get" + x }
+      //     const { get } = src            // fenced → `get` binds src.get
+      //     return get(1)                  // still mangled → _scrml_get_3(1)
+      //
+      // which turns a LOUD TypeError (the unfenced emission destructures a
+      // property that does not exist) into a SILENT wrong answer — the exact
+      // failure class the object-literal half exists to remove. Repairing a
+      // binding pattern honestly needs a scope model, which belongs to the
+      // mangler-RETIREMENT arc this work sits under, not here. So a binding
+      // pattern keeps today's behaviour verbatim, exactly like an undecidable
+      // group: narrowing on a half-model is how a coverage hole gets opened.
+      //
+      // MEASURED before building: 10 sites, in exactly ONE corpus source
+      // (`stdlib/http/index.scrml`, which does not compile), out of 1551 named
+      // rewrites over 1878 sources. With only the object-literal branch acting,
+      // the number of sites this pass STOPS REWRITING is ZERO — every site it
+      // touches is still rewritten, just as the property VALUE not the KEY.
+      const rewriteCodeSegment = (codeSeg: string): string => {
+        const regions = findObjectShorthandRegions(codeSeg);
+        if (regions.length === 0) return rewriteNames(codeSeg);
+        const out: string[] = [];
+        let cursor = 0;
+        for (const region of regions) {
+          if (region.kind !== "object-literal") continue; // see the LIMIT above
+          // ECMA-262 B.3.1 (__proto__ Property Names in Object Initializers):
+          // ONLY the `PropertyName : AssignmentExpression` form with the name
+          // `__proto__` sets [[Prototype]]; the SHORTHAND form creates an
+          // ordinary own property. So expanding `{ __proto__ }` to
+          // `{ __proto__: X }` is NOT semantics-preserving — the own key
+          // disappears and the object starts inheriting from X (measured: own
+          // keys 2 -> 1 and `typeof o.call` "undefined" -> "function").
+          //
+          // The whole REGION is skipped rather than just the one name, because
+          // leaving a BARE `__proto__` shorthand next to expanded siblings would
+          // strand it as a free reference — and that is ENGINE-DEPENDENT
+          // (measured: node silently binds the global object's prototype, bun
+          // throws a TypeError). Skipping the region reproduces the pre-fix
+          // emission exactly, which is the only option that adds no new shape.
+          if (region.names.includes("__proto__")) continue;
+          // Only a group that actually holds a name this pass would rewrite is
+          // worth touching; anything else is left to the ordinary path so this
+          // cannot change emission for code it has no business touching.
+          if (!region.names.some((n) => fnNameMap.has(n))) continue;
+          out.push(rewriteNames(codeSeg.slice(cursor, region.start)));
+          const group = codeSeg.slice(region.start, region.end);
+          out.push(
+            group.replace(
+              /[A-Za-z_$][A-Za-z0-9_$]*/g,
+              (name) => {
+                const encoded = fnNameMap.get(name);
+                return encoded === undefined ? name : `${name}: ${encoded}`;
+              },
+            ),
+          );
+          cursor = region.end;
+        }
+        out.push(rewriteNames(codeSeg.slice(cursor)));
+        return out.join("");
+      };
+
+      const mangle = (segment: string): string =>
+        rewriteCodeSegments(segment, rewriteCodeSegment);
+      // g-embed-runtime-ships-mangled-runtime-identifiers (S325) — the runtime
+      // slot is COMPILER-OWNED text and a user fn name must never reach it.
+      // The mangle is a whole-buffer text pass, so before this fence a user
+      // `fn log()` rewrote the runtime's own `_scrml_replay(name, log, endIdx)`
+      // PARAMETER (followed by `,`, so inside the lookahead set) while its
+      // body's `log.length` reads (followed by `.`, outside it) stayed put —
+      // a runtime function silently rewired to a free variable. Inert in the
+      // DEFAULT pipeline, which slices the runtime back off in codegen/index.ts
+      // and ships it as its own file; under `--embed-runtime` the corrupted
+      // text SHIPS.
+      //
+      // The fix is REGION EXCLUSION, not another lookaround: splice the runtime
+      // in only AFTER the rewrite, so the fenced region is never part of the
+      // rewrite input at all. Everything downstream of this stage still sees
+      // the identical assembled buffer it saw before.
+      return joinAroundRuntimeSlot(lines, runtimeInsertIndex, runtimeSource, mangle);
     });
 
     // GITI-001 (giti inbound 2026-04-20): `@data = serverFn(args)` emits
@@ -3456,6 +3588,12 @@ export function generateClientJs(ctx: CompileContext): string {
       );
     }
     });
+  } else {
+    // No user fn names to mangle — join with the runtime spliced into its slot,
+    // which is exactly what `lines.join("\n")` produced before the fence.
+    clientCode = clientStage(ctx, "lines-join", () =>
+      joinAroundRuntimeSlot(lines, runtimeInsertIndex, runtimeSource, (s) => s),
+    );
   }
 
   // GITI-003 (giti inbound 2026-04-20): prune imports that are only used by
