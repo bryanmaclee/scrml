@@ -54,6 +54,177 @@ export function regexAllowedAfter(codeBefore: string): boolean {
   return false;
 }
 
+// ---------------------------------------------------------------------------
+// Object-shorthand regions (S325, g-mangler-scope-blind-shorthand-key-rename)
+//
+// The second region class this module knows about. The first (above) is
+// LEXICAL — a string / regex / comment is opaque because of what it IS. This
+// one is STRUCTURAL — `{a, b, c}` is a region because of what its identifiers
+// MEAN: in an object literal they are PROPERTY NAMES as well as value
+// references, and in a destructuring pattern they are property names as well as
+// BINDINGS. A text pass that renames one of them renames both halves at once,
+// which is never what any caller wants.
+//
+// Concretely, `emit-client.ts`'s whole-buffer fn-name mangle turned
+//
+//     const inner = wrapped || {get, post, put, del, patch}
+// into
+//     const inner = wrapped || {_scrml_get_2, _scrml_post_3, …}
+//
+// so `inner.get(...)` became `undefined` — no syntax error, no diagnostic.
+// ---------------------------------------------------------------------------
+
+/**
+ * What a `{ident, ident, …}` group IS, decided from the tokens around it.
+ *
+ *   object-literal   an object literal in EXPRESSION position. Each member is a
+ *                    shorthand property: the KEY must survive verbatim, the
+ *                    VALUE is an ordinary reference and may be rewritten (which
+ *                    means the caller must EXPAND `n` to `n: <rewritten>`).
+ *   binding-pattern  a destructuring pattern. Both halves are off limits: the
+ *                    key names the property being READ, the binding is a NEW
+ *                    local. Emit verbatim.
+ *   unknown          not decided. The caller SHALL leave its existing behaviour
+ *                    unchanged for this region — narrowing on a guess is how a
+ *                    coverage hole gets opened (pa-base §8).
+ */
+export type BraceGroupKind = "object-literal" | "binding-pattern" | "unknown";
+
+export interface ObjectShorthandRegion {
+  /** Index of the opening `{` within the code segment. */
+  start: number;
+  /** Index one past the closing `}`. */
+  end: number;
+  kind: BraceGroupKind;
+  /** The bare identifiers between the braces, in source order. */
+  names: string[];
+}
+
+/**
+ * A `{` group whose ENTIRE content is a comma-separated list of bare
+ * identifiers. Anything else — a `key: value` pair, a nested brace, a call, a
+ * spread — fails to match, which is what keeps the cross-file module-registry
+ * footer (`_scrml_modules[k] = { pub: emitted, … }`, emit-client.ts) outside
+ * this region class: its members are `key: value`, not shorthand.
+ */
+const SHORTHAND_GROUP_RE =
+  /\{\s*[A-Za-z_$][A-Za-z0-9_$]*(?:\s*,\s*[A-Za-z_$][A-Za-z0-9_$]*)*\s*,?\s*\}/g;
+
+/**
+ * Words that are never a shorthand property name, so a `{…}` containing one is
+ * a BLOCK, not an object. `{ return }` / `{ break }` are the realistic emitted
+ * shapes; the rest are here so the set reads as a rule rather than a patch.
+ */
+const NOT_A_PROPERTY_NAME = new Set([
+  "return", "break", "continue", "throw", "yield", "await", "delete", "typeof",
+  "void", "new", "in", "of", "instanceof", "this", "true", "false", "null",
+  "if", "else", "for", "while", "do", "switch", "case", "default", "try",
+  "catch", "finally", "function", "class", "const", "let", "var", "export",
+  "import", "debugger", "with",
+]);
+
+/**
+ * Characters that, immediately to the left of a `{`, put it in EXPRESSION
+ * position — i.e. make it an object literal rather than a block.
+ *
+ * Deliberately minimal, in the same spirit as `REGEX_PERMISSIVE_KEYWORDS`
+ * above: a false negative only leaves today's behaviour in place, while a false
+ * positive would fence (or expand) something that is not an object at all.
+ * `:` is NOT in the set — a `label: { … }` and a `case x: { … }` are blocks, and
+ * a `key: {a, b}` property value has no measured incidence.
+ * `>` is NOT in the set either, because the `>` of `=> {` opens a function BODY.
+ */
+const BRACE_OPENS_OBJECT_AFTER = new Set([",", "[", "=", "|", "&", "?"]);
+
+function identifierEndingAt(code: string, i: number): { token: string; before: number } | null {
+  if (i < 0 || !/[A-Za-z0-9_$]/.test(code[i])) return null;
+  let j = i;
+  while (j >= 0 && /[A-Za-z0-9_$]/.test(code[j])) j--;
+  return { token: code.slice(j + 1, i + 1), before: j };
+}
+
+function skipSpaceLeft(code: string, i: number): number {
+  while (i >= 0 && /\s/.test(code[i])) i--;
+  return i;
+}
+
+function skipSpaceRight(code: string, i: number): number {
+  while (i < code.length && /\s/.test(code[i])) i++;
+  return i;
+}
+
+/** Decide what a `{ident, …}` group at [open, closeExclusive) is. */
+export function classifyBraceGroup(
+  code: string,
+  open: number,
+  closeExclusive: number,
+): BraceGroupKind {
+  // ---- right of `}` -------------------------------------------------------
+  const r = skipSpaceRight(code, closeExclusive);
+  // `{a} = x` — assignment-destructuring TARGET (`==` is a comparison against
+  // an object literal, `=>` is an arrow whose params were parenthesised).
+  if (code[r] === "=" && code[r + 1] !== "=" && code[r + 1] !== ">") return "binding-pattern";
+  // `({a}) => …` — arrow FORMAL PARAMETER.
+  if (code[r] === ")") {
+    const k = skipSpaceRight(code, r + 1);
+    if (code[k] === "=" && code[k + 1] === ">") return "binding-pattern";
+  }
+
+  // ---- left of `{` --------------------------------------------------------
+  const i = skipSpaceLeft(code, open - 1);
+  if (i < 0) return "unknown";
+  const ch = code[i];
+
+  if (ch === "(") {
+    // `(` is genuinely ambiguous: `f({a, b})` is a call argument (an object
+    // literal) and `function f({a, b})` is a formal parameter (a pattern). Only
+    // the `function`-headed form is decided; everything else reads as a call.
+    const j = skipSpaceLeft(code, i - 1);
+    const head = identifierEndingAt(code, j);
+    if (head) {
+      if (head.token === "function") return "binding-pattern";
+      // `function NAME(` — step over NAME and look once more.
+      const outer = identifierEndingAt(code, skipSpaceLeft(code, head.before));
+      if (outer && outer.token === "function") return "binding-pattern";
+    }
+    return "object-literal";
+  }
+
+  if (BRACE_OPENS_OBJECT_AFTER.has(ch)) return "object-literal";
+
+  const token = identifierEndingAt(code, i);
+  if (token) {
+    if (token.token === "return") return "object-literal";
+    if (token.token === "const" || token.token === "let" || token.token === "var") {
+      return "binding-pattern";
+    }
+  }
+
+  return "unknown";
+}
+
+/**
+ * Find every object-shorthand group in ONE code segment (a segment as produced
+ * by `rewriteCodeSegments` — i.e. already free of strings, regex literals and
+ * comments), classified by `classifyBraceGroup`.
+ *
+ * Returned regions are non-overlapping and in source order.
+ */
+export function findObjectShorthandRegions(code: string): ObjectShorthandRegion[] {
+  const out: ObjectShorthandRegion[] = [];
+  if (!code || code.indexOf("{") === -1) return out;
+  SHORTHAND_GROUP_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = SHORTHAND_GROUP_RE.exec(code)) !== null) {
+    const start = m.index;
+    const end = start + m[0].length;
+    const names = m[0].slice(1, -1).split(",").map((s) => s.trim()).filter(Boolean);
+    if (names.some((n) => NOT_A_PROPERTY_NAME.has(n))) continue; // a block, not an object
+    out.push({ start, end, kind: classifyBraceGroup(code, start, end), names });
+  }
+  return out;
+}
+
 /**
  * Split `expr` into code regions and opaque non-code regions (string / regex
  * literal / line-comment / block-comment). `transform` is applied ONLY to code

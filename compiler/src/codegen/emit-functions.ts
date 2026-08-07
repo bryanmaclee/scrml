@@ -603,6 +603,81 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // Built here and returned to avoid scanning emitted lines later.
   const fnNameMap = new Map<string, string>();
 
+  /**
+   * The ONLY way an entry enters `fnNameMap`.
+   *
+   * The map's contract is `SOURCE-VISIBLE function name -> generated var name`,
+   * and its principal consumer is the whole-buffer `post-fn-name-mangle` pass in
+   * emit-client.ts, which builds ONE regex alternation out of every key:
+   *
+   *     \b(nameA|nameB|…)\b(?=\s*[(;,}\]\n)]|$)
+   *
+   * An EMPTY key contributes an EMPTY alternative, and an empty alternative
+   * matches ZERO-WIDTH at every word boundary in the buffer that satisfies the
+   * lookahead — turning the rewrite into a whole-buffer INSERTER.
+   * `g-mangler-empty-name-whole-buffer-insertion`: measured at S325 and
+   * re-measured on this base, `stdlib/cron/index.scrml` produced **781
+   * injections into one file — 33.5% of every mangle rewrite in the whole
+   * 1878-source corpus**, from a single map entry.
+   *
+   * ⚠ AND THE MANGLE IS NOT THE ONLY VICTIM. An earlier revision of this comment
+   * argued that an empty entry is merely DEAD ("no consumer could look it up").
+   * The S239 adversarial review disproved that, and the true reason is worse:
+   * `emit-event-wiring.ts`'s `buildServerFnNames` iterates map ENTRIES and puts
+   * the raw KEY into `serverFnNames`, which `exprUsesServerFn` then compiles as
+   *
+   *     new RegExp(`(?<![.\\w$])${name}\\s*\\(`)
+   *
+   * With `name === ""` that is a WILDCARD. Verified verbatim: it matches
+   * `"@a + (b * 2)"` and `"foo (1)"` — any `(` not preceded by `.` or a word
+   * character. Every reactive-display expression in the file would then be
+   * treated as containing a server call and wrapped in a spurious async-await.
+   * (That path needs the nameless fn to be a SERVER fn, since
+   * `buildServerFnNames` admits a key only when its GENERATED name matches
+   * `^_scrml_(fetch|cps)_`; the fetch-stub and CPS-wrapper registration sites
+   * below both produce exactly those shapes.) Two further passes in
+   * emit-client.ts iterate map VALUES and never key-look-up either.
+   *
+   * So: an empty key is not a dead entry. It is a WILDCARD that silently matches
+   * arbitrary expressions in at least one consumer.
+   *
+   * A nameless function is ALWAYS AN UPSTREAM BUG, not a shape to tolerate:
+   * §48 / §13 admit no anonymous top-level `fn`/`function` declaration, so no
+   * source can legally produce one; the S239 `_isNameless` note below says the
+   * same from the other side ("not cleanly producible — it fails
+   * E-CODEGEN-INVALID-LOGIC"); and a corpus census over 1878 sources found the
+   * empty key in exactly ONE source, which does not compile.
+   *
+   * The test is IDENTIFIER SHAPE, not non-emptiness, so this closes the CLASS
+   * rather than the one witnessed instance. A non-empty non-identifier key is
+   * the same hazard: `" "` still yields an alternation branch that matches
+   * between any two word characters. It also catches the `?? "anon"` fallback
+   * the four call sites use for a null/undefined name — `anon` IS a valid
+   * identifier, so it passes, and that is the honest boundary of this guard:
+   * see the residual note in
+   * `docs/changes/mangler-three-defects/progress.md`.
+   *
+   * So this guard is a DATA-VALIDITY guard on the map's own contract, not a
+   * decision to tolerate the upstream defect: the malformed emission still
+   * fails, and it now fails pointing at the actual malformation instead of at
+   * injection #1 of 781. What this guard deliberately does NOT do is raise its
+   * own diagnostic — every §34 fire site for the one code that fits
+   * (`E-CODEGEN-INVALID-LOGIC`) is `validate-emit.ts`, whose contract is
+   * "the emitted artifact does not parse, here is the byte offset"; a
+   * declaration-site fire would need a NEW §34 row, which is a SPEC amendment.
+   * That half is surfaced to the PA rather than smuggled in here.
+   *
+   * The drop is not silent in the sense that matters (invariant 27, "a
+   * silent-drop guard must itself be testable"): it is directly asserted by
+   * `compiler/tests/unit/mangler-region-fencing.test.js` §3.
+   */
+  const JS_IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+  const registerFnName = (sourceName: string, generatedName: string): boolean => {
+    if (typeof sourceName !== "string" || !JS_IDENTIFIER.test(sourceName)) return false;
+    fnNameMap.set(sourceName, generatedName);
+    return true;
+  };
+
   // Map from original function name → generated fetch stub var name.
   // Used by CPS wrapper generation.
   const serverFnStubs = new Map<string, string>();
@@ -644,7 +719,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     if (route.isSSE) {
       const sseStubName = genVar(`sse_${name}`);
       serverFnStubs.set(name, sseStubName);
-      fnNameMap.set(name, sseStubName);
+      registerFnName(name, sseStubName);
 
       // GITI-025 (giti inbound 2026-05-30) — client half. The SSE stub used to
       // hard-wire its signature to `(_scrml_onMessage, _scrml_onEvent)` and open
@@ -810,7 +885,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       // Map original name → fetch stub as the default rewrite target.
       // If this function also has a CPS split, Step 2 will override this
       // with the CPS wrapper name (which is the correct call target).
-      fnNameMap.set(name, stubName);
+      registerFnName(name, stubName);
     }
 
     lines.push(`async function ${stubName}(${paramNames.join(", ")}) {`);
@@ -974,7 +1049,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     const wrapperName = genVar(`cps_${name}`);
     // Map original name → CPS wrapper so event wiring and post-process regex
     // rewrite bare call sites (e.g. onclick=login() → _scrml_cps_login_X()).
-    fnNameMap.set(name, wrapperName);
+    registerFnName(name, wrapperName);
     lines.push(`async function ${wrapperName}(${paramNames.join(", ")}) {`);
 
     // ----------------------------------------------------------------------
@@ -1308,7 +1383,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     const asyncPrefix = _fnIsAsync ? "async " : "";
 
     const generatedName = genVar(name);
-    fnNameMap.set(name, generatedName);
+    registerFnName(name, generatedName);
 
     // bug-16 (S178): preserve the generator star for a non-SSE `function*` in a
     // `${ }` logic block. Mirrors the emit-library.ts:428 `generatorStar` pattern.
