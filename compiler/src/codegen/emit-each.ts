@@ -1120,11 +1120,43 @@ function renderTemplateChildToJs(
       // `:`-shorthand body — single-expression body becomes textContent.
       // Rewrite `@.` to iterVar so `<li : @.name>` → `item.name`.
       const exprRewritten = rewriteContextualSigil(shorthandExpr, iterVarName);
-      // Cast result to string for textContent assignment. Bug 64 (S159) —
-      // live-keyed under a reconcile ctx so same-key reconcile reflects new data.
-      for (const _l of maybeWrapEachPerItemEffect(
-        [`${indent}${elVar}.textContent = String(${exprRewritten});`], iterVarName, indent,
-      )) lines.push(_l);
+      // g-each-nested-markup-interp-stringifies residual-1 — a shorthand body
+      // that is a CALL to a same-file markup-returning fn (`<li : badge(it)>`)
+      // must MOUNT the returned DOM node, at parity with the longhand
+      // `<li>${badge(it)}</li>` path (S297). Without this the node stringifies to
+      // `[object HTMLSpanElement]` (Pillar 1 §1.4/§7.4, silent wrong render). The
+      // discriminant is the SAME `interpMayYieldNode` "callee returns markup"
+      // test the longhand site uses: a string-returning shorthand
+      // (`<li : plain(it)>`) stays the byte-identical `textContent = String()`
+      // text path (never over-wraps → no restricted-parent regression). Markup
+      // LITERALS/ternaries in shorthand position are a DIFFERENT disposition
+      // (E-CODEGEN-INVALID-LOGIC, out of scope). Guarded by a non-empty
+      // `_eachMarkupFnNames` so a file with no markup-returning fns is untouched
+      // (byte-identical, no parse) — the same collector the longhand path reads.
+      let shMarkupCapable = false;
+      if (_eachMarkupFnNames && _eachMarkupFnNames.size > 0) {
+        try {
+          const { parseExprToNode } = require("../expression-parser.ts") as {
+            parseExprToNode: (r: string, f: string, o: number) => any;
+          };
+          shMarkupCapable = interpMayYieldNode(
+            parseExprToNode(shorthandExpr, "", 0), _eachMarkupFnNames,
+          );
+        } catch { shMarkupCapable = false; }
+      }
+      if (shMarkupCapable) {
+        // Mount via the shared mount-or-text wrapper (a stable
+        // `<span data-scrml-mv>` child of the shorthand element, re-mounted in
+        // the per-item effect). Pass the RAW expr — emitEachInterpExprToJs
+        // applies its own lowerEachExpr (a superset of rewriteContextualSigil).
+        emitEachInterpExprToJs(shorthandExpr, iterVarName, elVar, lines, indent, true);
+      } else {
+        // Cast result to string for textContent assignment. Bug 64 (S159) —
+        // live-keyed under a reconcile ctx so same-key reconcile reflects new data.
+        for (const _l of maybeWrapEachPerItemEffect(
+          [`${indent}${elVar}.textContent = String(${exprRewritten});`], iterVarName, indent,
+        )) lines.push(_l);
+      }
     } else if (_rcdataValueExpr !== null) {
       // eachRcdataValueExpr already yields a string (each interp term is
       // String()-wrapped; static runs are JSON string literals), so no outer cast.
