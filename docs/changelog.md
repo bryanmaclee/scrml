@@ -5908,6 +5908,66 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-07 — S328 (bryan): the review floor's first real return — three of three code PRs carried confirmed defects
+
+Four PRs merged (**#463 #464 #465 #466**); `main` `18fc0571` → `6f176c0d`, coherence 0/0. Conformance
+**865/865**. Gaps HIGH 23 · MED 125 · LOW 55. Review floor **9 owed → 0**. Thread-board 3 open, **0 ERROR**.
+
+The session opened on *"should we graphify this repo?"* — which turned out to be a **banked** question,
+not a new one. S299 ruled *"run the trial on the next brief"*; S301 deferred it as *"`uv` absent."* Those
+two sessions were **the same machine one day apart** and contradict each other, and today matches S299:
+`uv` lives only in `~/.local/bin`, so a non-profile shell reports NOT FOUND, and no python3.11 exists on
+this disk at all. **A 29-session deferral resting on a probe error.** The trial then ran and returned
+**DECLINE** — 2 ANSWER / 3 MISS, with two of the three misses producing confidently-formatted garbage
+rather than "I don't know". Its by-product outlived its verdict: `api.js:2409`'s
+`const _runCG = selfHostModules?.runCG ?? runCG` **orphans the whole Stage-8 codegen subtree from
+`compileScrml`** for any static call-graph tool — and that idiom is our self-hosting indirection.
+
+Draining the S316 review floor produced the session's real result. **Three of three code-bearing PRs,
+all merged unreviewed, all past green suites, carried CONFIRMED defects:** #447 had put its word
+boundary INSIDE the keyword alternation so `formatted` matched `for` — a **loud→silent regression** where
+a match block-arm silently yields `null`; #456 injected a mount `<span>` into a `<textarea>`, whose value
+is its child TEXT content, so `textarea.value === ""` and adopter text vanished; #450 shipped five
+findings including a **false SPEC citation** (the two lines it cited are the section header and a blank
+line). Thirteen findings, ten confirmed.
+
+**Five separate instances of a test oracle sharing its implementation's blind spot.** #447's own new
+conformance cases used identifiers that dodge its own bug. #456's browser test ran on happy-dom, whose
+`.value` falls back to `textContent`. #450's duplicate-`style` defect is invisible because happy-dom
+merges duplicate attributes where Chromium drops one. #456's `0/7260` differential was honestly clean
+over a corpus that never exercises the shape. When a fix and its test are authored together, the test
+inherits the fix's model of the bug.
+
+- **#463 `074852ce` — §18.5 keyword fence.** Salvaged from a twice-crashed dispatch whose work was
+  complete and uncommitted. **Its own adversarial pass found a hole in it and proved the commit message
+  false**: `\b` is defined against `\w`, which excludes `$`, while scrml's `isIdentPart` includes it, so
+  `do$thing` / `on$c` still yielded `null` — including for `on`, the one keyword always claimed fenced.
+  Re-fenced on the language's own charset. Migration measured: 76 corpus block arms, zero affected.
+- **#464 `0536a90f` — the `show=` SSR-hide REVERTED** (operator-ruled). The repair is near-vacuous **by
+  construction**: for a hide to be syntactically provable the cell must never be written, but a cell
+  never written is never revealed — so "provably false at first paint" and "will actually be revealed"
+  are nearly disjoint sets. Measured benefit zero (9 `show=` sites; the gate fires on one, and that one
+  is inert inside an `if=` template). The dispatched agent **recommended reverting its own completed
+  patch, with evidence.** Four conformance cases preserved as guards — **two of which FAILED post-revert**
+  and had to be rewritten to assert absence, then bite-proven.
+- **#465 `0d1d94c6` — review floor recorded, and a question open since S319 ANSWERED.** The carve-out
+  alarm's all-PR denominator cannot separate a docs-heavy stretch from evasion. Measured: **code-bearing
+  1/28 = 4%**, docs-only 45/48 = 94% — a docs-VOLUME artifact, not evasion. The single code-bearing
+  carve-out is **#397, `scripts/review-debt.ts` itself**: the floor's own instrument was the one thing
+  exempted from the floor. Also fixed the `marketing-claim-gate` DONE-PROBE, ERROR for ~27 sessions
+  because it re-runs a 31s gate inside a 10s budget when the thread only asks whether the gate is BUILT.
+- **#466 `6f176c0d` — the `<textarea>` data loss.** The S239 pass returned **DO-NOT-LAND by checking the
+  authoring agent's own defence, which split**: *"extends a shipped ruling"* is true for `<textarea>` and
+  **false for `<option>`**, whose longhand never stringified — so the first cut traded a correct label
+  for `[object HTMLElement]`. Re-scoped to RCDATA only; `<option>` restored and verified byte-identical.
+
+**Nine gaps filed**, including the empty-arm `{}`-vs-void question routed to bryan with 11 corpus sites
+measured. Six agent deaths, all API-infrastructure, none a task failure — every one resumed rather than
+re-dispatched, two with complete uncommitted work salvaged. Three probe defects were the PA's own,
+inside the work built to catch that class; the worktree-disposition probe was **wrong twice in opposite
+directions** (all-PRUNE, then all-RETAIN) before a per-file content compare gave the true answer, and
+only the dry-run discipline kept nine worktrees alive.
+
 ### 2026-08-06 — S325 (bryan): the session HIGH was not the bug, a whole class of dead authed routes, and Limb 2 measured as ordering-blocked
 
 One PR merged (**#444**); two completed, adversarially-reviewed landings left **blocked on a GitHub

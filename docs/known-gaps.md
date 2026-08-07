@@ -31,8 +31,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 23 |
-| MED | 122 |
-| LOW | 49 |
+| MED | 125 |
+| LOW | 55 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -7528,3 +7528,58 @@ SSR hide without a ruling turns them red.
 **Also recorded, independent of `show=`:** a flat-declaration `#{}` block plus an author `style=` on the
 same element emits **two `style` attributes** — invalid HTML, second one dropped by conformant parsers.
 Pre-existing and unrelated to `show=`; surfaced while measuring D1.
+
+### g-match-block-arm-value-lift-covers-one-of-five-paths — #447's block-arm tail lift reaches only the `emitMatchExprDecl` path; four other value positions still drop the tail — `NEW S328-bryan (review-floor S239 pass on #447); MED; open`
+<!-- @gap id=g-match-block-arm-value-lift-covers-one-of-five-paths sev=MED status=open locus=compiler/src/codegen/emit-control-flow.ts:2315+:2264(emitMatchExpr, the untouched sibling)+compiler/src/codegen/emit-logic.ts:4595(the §18.19 multi-scrutinee delegation) prov=spec:§18.5 -->
+
+`emitMatchExpr` lowers a block arm to `{ …rewriteBlockBody(inner)… }` inside a value-returning IIFE and never `return`s the tail. #463 fixed only `emitMatchExprDecl`. **Four value-position paths bypass it, all silently → `undefined`:** a `return match k { … }` (emit-logic.ts:2736); a **derived cell** `const <label> = match @level { … }` (emit-event-wiring.ts:1193) — **PA-reproduced, both arms emit with no `return`**; a markup interpolation `${ match @level { … } }` (emit-expr.ts:665); and **multi-scrutinee** `const r = match (m,e) { … }`, which is the *same* `const r = match … { block }` surface #463 fixed, in the *same function*, routed around by the §18.19 delegation at emit-logic.ts:4595.
+
+**Non-regression** (byte-identical pre-#447), so this is a MISS not a break — but #447's stated goal holds on **1 of 5** paths. The repo's flagship shape `conformance/cases/match-block/value-form-derived` pins only the bare-value arm.
+
+### g-match-block-empty-arm-yields-object-not-void — `{ }` parses as an empty OBJECT literal, so an empty block arm produces a truthy `{}` where §18.5 says void — `NEW S328-bryan; MED; open; ROUTED-TO-BRYAN (11 corpus sites = a migration, not a fix)`
+<!-- @gap id=g-match-block-empty-arm-yields-object-not-void sev=MED status=open locus=compiler/src/codegen/emit-logic.ts:4518(the guard)+:4561(the unreachable void handler) prov=spec:§18.5 -->
+
+§18.5: *"If the block has no final expression … the arm produces `void`."* `{ }` parses as `kind:"object"`, so the value-expr predicate returns false and the verbatim path emits `_scrml_tilde_N = { };`. `const r = match k { 1 :> { } _ :> "gray" }` with k=1 yields `r === {}` — a **defined, truthy** value, so an adopter's absence check never fires (`{}` is not `not`; §42.1.1).
+
+**The author wrote the void handling and blocked it:** emit-logic.ts:4561 `if (!inner) return "// §18.5 empty block arm — result is void"` is **unreachable**, fenced off by the guard at :4518.
+
+⛔ **ROUTED TO BRYAN — this is a RULING, not a fix.** A dispatched agent **measured 11 empty-arm sites in the corpus** before it crashed. Changing `{}` → void with 11 live sites is a measured migration with a direction-of-change decision attached, not a bug fix a PA takes on its own authority. The count is real; the file list needs re-deriving (the agent died before reporting it).
+
+### g-match-block-member-assign-tail-lifts-as-chained-assignment — a member/index-assignment tail is lifted as a value, so the arm yields the assigned value instead of void — `NEW S328-bryan; LOW; open; PRE-EXISTING and general`
+<!-- @gap id=g-match-block-member-assign-tail-lifts-as-chained-assignment sev=LOW status=open locus=compiler/src/codegen/emit-logic.ts:4552(the assignment regex) prov=spec:§18.5 -->
+
+The assignment-statement guard's character class `[\w$.\[\]]*` contains no `\s`, but the arm text reaches the predicate **space-normalized** by `emitStringFromTree` (`letters . n = 2`), so the class cannot span the gaps. `1 :> { let letters = {n:1}; letters.n = 2 }` emits `_scrml_tilde_3 = letters . n = 2` → the arm yields `2` where §18.5 says void.
+
+**Pre-existing and general, NOT introduced by #463** — `myrec.n = 2`, `xs[0] = 9`, `myrec.n += 2` already lift on main, identical emit both sides. #463 removed an *accidental mask* over the keyword-prefixed subset, which makes behaviour **coherent** (today `myrec.n` and `letters.n` disagree for no reason). One-character-class fix: `[\w$.\[\]]*` → `[\w$.\[\]\s]*`.
+
+### g-match-block-arm-decl-path-hardcodes-client-boundary — the block-arm decl lowering passes `mode="client"` and `engineCtx=null` where its sibling threads both — `NEW S328-bryan; LOW; open; PLAUSIBLE not reproduced`
+<!-- @gap id=g-match-block-arm-decl-path-hardcodes-client-boundary sev=LOW status=open locus=compiler/src/codegen/emit-logic.ts:4572 prov=analogy:the-sibling-at-emit-control-flow.ts:2315-threads-engineCtx-and-_matchMode -->
+
+`rewriteBlockBody(seg, null, null, "client")` hardcodes the boundary; the sibling at emit-control-flow.ts:2315 passes `engineCtx` and `_matchMode` (`"server"` when `opts.boundary === "server"`). A block arm's leading statements in a **server-boundary** match decl would lower `@cell` reads to client `_scrml_reactive_get(...)` rather than `_scrml_body["cell"]`, and `@engineCell = .X` writes would bypass `emitEngineWriteGuard`. **The source asymmetry is objective; the runtime consequence is NOT reproduced** — a compiling reproducer needs a `?{}` batch on the CPS-split path, since server-fn free-client-cell reads are separately rejected by E-REACTIVE-003.
+
+### g-each-element-child-decided-by-four-disagreeing-predicates — four independent answers to "may this body receive an element child?", and they do not agree — `NEW S328-bryan (S239 pass on #456); MED; open`
+<!-- @gap id=g-each-element-child-decided-by-four-disagreeing-predicates sev=MED status=open locus=compiler/src/codegen/emit-each.ts(eachBodyLowering)+emit-each.ts:1186-1193(eachRcdataValueExpr null-bail)+compiler/src/codegen/emit-html.ts:1835(isRcdataElement)+the-Tier-0-lift-path prov=insight:the-repo-has-an-active-bug-family-from-near-duplicate-predicates-that-disagree -->
+
+(1) `eachBodyLowering` — the shared local #466 added. (2) **In the same file**, `eachRcdataValueExpr` returns null on a child shape it cannot concatenate, and that null falls through to the flow recursion which **mounts** — so `<textarea>${it.name}<b>x</b></textarea>` still gets an element child, i.e. the very `textarea.value === ""` data loss #466 exists to kill. Pre-existing, unchanged, **executed**. (3) `emit-html.ts:1835` gates the top-level path on `isRcdataElement(tag)`, so `<option>`/`<title>` are ungated there — and post-#466 `<option>${expr}</option>` lowers **differently inside vs outside `<each>`**. (4) The Tier-0 `lift` path answers again, consulting no content-model predicate at all.
+
+Same family as the three disagreeing async classifiers and the two server-only-module predicates 2,638 lines apart. #466's in-file comment **deliberately names all four** rather than claiming one decision — read it before touching this.
+
+### g-each-title-rcdata-ordering-trap — registering `<title>` as an element would silently flip it to a `.value` expando — `NEW S328-bryan; LOW; open; latent`
+<!-- @gap id=g-each-title-rcdata-ordering-trap sev=LOW status=open locus=compiler/src/codegen/emit-each.ts(eachBodyLowering-ordering)+compiler/src/html-elements.js:272-279(the standing invitation) prov=rationale:two-places-classify-title-and-nothing-makes-them-agree -->
+
+`eachBodyLowering` checks `isRcdataElement(tagName)` **before** the TEXT_ONLY set. `<title>` is conceptually in both (HTML classes it escapable-raw-text) and `html-elements.js:272-279` carries a standing invitation to register it: *"a cheap follow-up if a `<title>` element form is added."* Take that follow-up and `eachBodyLowering("title")` flips to `"value"` → `titleEl.value = …` → an **expando on HTMLTitleElement**, title never updates, silent. A TEXT_ONLY-first ordering or an assert closes it.
+
+### g-each-textarea-value-lowering-leaves-defaultvalue-empty — `.value` instead of `.textContent` means `form.reset()` and bfcache blank the field — `NEW S328-bryan; LOW; open`
+<!-- @gap id=g-each-textarea-value-lowering-leaves-defaultvalue-empty sev=LOW status=open locus=compiler/src/codegen/emit-each.ts(the RCDATA value lowering) prov=spec:§4.14:1021(shorthand-bare-body-parity-required-the-move) -->
+
+#466 moved shorthand `<textarea>` from `.textContent` to `.value` for **every** shape, including markup-free ones — contract-correct (it matches longhand, which §4.14:1021 demands) and corpus-measured zero. But `.value` leaves `defaultValue === ""`: a `<form>.reset()` or bfcache restore now blanks the field where it previously restored the text, and `outerHTML` serializes as `<textarea></textarea>`. Blast radius wider than the "mixed-return fn" framing implies.
+
+### g-each-textarea-bindvalue-content-conflict-is-silent — the each path emits two `.value`-surface writers where the top-level path diagnoses it — `NEW S328-bryan; LOW; open`
+<!-- @gap id=g-each-textarea-bindvalue-content-conflict-is-silent sev=LOW status=open locus=compiler/src/codegen/emit-each.ts:1250 prov=analogy:the-top-level-path-fires-W-RCDATA-BIND-VALUE-CONTENT-CONFLICT-for-the-same-shape -->
+
+`<textarea bind:value=@draft : label(it)>` emits both `_scrml_bind_elem_textarea_1.value = get("draft")` and a `.textContent` write, with **no diagnostic**. The top-level path fires `W-RCDATA-BIND-VALUE-CONTENT-CONFLICT` for exactly this shape; the `<each>` path is silent. Better than pre-#466 (which mounted a span), so not a blocker.
+
+### g-flat-css-block-plus-author-style-emits-two-style-attributes — a DQ-7 flat `#{}` and an author `style=` on the same element produce duplicate attributes — `NEW S328-bryan; LOW; open; PRE-EXISTING, independent of show=`
+<!-- @gap id=g-flat-css-block-plus-author-style-emits-two-style-attributes sev=LOW status=open locus=compiler/src/codegen/emit-html.ts:2959-2960(the DQ-7 flat-declaration style push) prov=rationale:surfaced-while-measuring-450s-D1-and-is-independent-of-it -->
+
+A flat-declaration `#{}` block pushes an inline `style="…"` that is **not** an `attrs` entry, so an author `style=` on the same element yields two `style` attributes. Invalid HTML; a conformant parser (verified: real Chromium) **drops the second**, while happy-dom **merges** them — so the repo's browser harness cannot see this class. Surfaced while measuring #450's D1; independent of `show=` and survives its revert.
