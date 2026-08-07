@@ -497,3 +497,62 @@ The rebase also folded in a `master-list.md` `@generated:recent-sessions` regen,
 
 <!-- Peter's #447 #448 #450 #451 #456 #457 remain OWED and are HIS to record (S325 lane precedent:
      a session records its own merges). Surfaced in the S326 hand-off rather than absorbed silently. -->
+
+<!-- ── S329-peter review-floor pass (2026-08-07): my six owed PRs. #459/#460/#461 left to bryan
+     (his own merges; #460 is a language-surface SPEC change). One FINDING (HIGH), found + fixed same session. ── -->
+
+<!-- @review pr=447 verdict=finding by=S329-peter date=2026-08-07 probe=block-arm-tail-keyword-prefix-misclassification-in-_blockTailIsValueExpr-both-raw-and-structured-paths note=keyword-prefixed-identifier-tail-silently-dropped-to-null-then-fixed-same-pr -->
+
+- **#447** — **FINDING (HIGH; found AND fixed same session S329).** Compiler source (`emit-logic.ts`
+  +145, §18.5 match block-arm value lift). Retro S239 pass via an adversarial reviewer, then
+  **PA-reproduced before recording** (not relayed). `_blockTailIsValueExpr`'s statement-head guard
+  word-boundaried only `on`, so any arm tail that is an identifier/call merely STARTING with a keyword's
+  letters (`forecast`→`for`, `returnCode`→`return`, `variance`→`var`, …) was misclassified as a statement,
+  emitted as a bare `forecast;`, and the enclosing result var stayed at its `null` init — silent wrong
+  value, compile exit 0. A **loud→silent regression** (pre-#447 the same position loud-errored). Fixed same
+  PR by word-boundarying the whole keyword group; pinned both halves by
+  `conformance/cases/match-block/value-decl-block-arm-keyword-prefix-tail` (codes + runtime DOM). Filed +
+  resolved born-closed: `g-match-block-arm-keyword-prefix-tail-silently-dropped`. Language-surface: the FIX
+  is INERT (restores the already-intended §18.5 binding; accepts/rejects nothing new). Two adjacent uncovered
+  tails (nested-`match`, `if`-as-value) would be newly-accepting if lowered → bryan's fork, not touched here.
+
+<!-- @review pr=448 verdict=carve-out by=S329-peter date=2026-08-07 probe=single-file-docs-known-gaps-only-no-code-path -->
+
+- **#448** — **CARVE-OUT.** `docs/known-gaps.md` only (MED-lane triage sweep: 3 stale gaps closed + lane
+  corrections). No executable change, no code path.
+
+<!-- @review pr=450 verdict=clean by=S329-peter date=2026-08-07 probe=ssr-show-false-display-none-reveal-after-hydration-robustness-style-merge-clobber-and-initial-bool-determinability-scope -->
+
+- **#450** — **CLEAN.** Compiler source (`emit-html.ts` +122, §17.2 SSR-hide statically-false `show=`).
+  Full S239 adversarial pass. The critical check — does the SSR-hidden element reliably become VISIBLE after
+  hydration (a permanent hide would be worse than the FOUC it fixes) — **PASSES robustly**: every injected
+  `display:none` is co-emitted adjacent to a `data-scrml-bind-show` placeholder, and the untouched controller
+  unconditionally reveals at hydration, clearing only the `display` property (a merged `color:red` survives).
+  Verified across 7 adversarial inputs (author-style merge, case/whitespace, dotted/reactive/interpolated →
+  left indeterminate, statically-false-non-literal → conservatively not hidden). LOW: `buildInitialBoolMap`
+  scans only a logic node's direct body, so a reassignment nested in control flow still SSR-hides — worst case
+  a self-healing hidden→visible flicker, never a permanent hide. Language-surface: semantics-changed (observable
+  first-paint HTML), narrowly scoped §17.2 conformance restoration; client.js byte-identical; conformance unchanged.
+
+<!-- @review pr=451 verdict=carve-out by=S329-peter date=2026-08-07 probe=three-files-changelog-hand-off-delta-log-continuity-only-no-code-path -->
+
+- **#451** — **CARVE-OUT.** `docs/changelog.md` + `hand-off.md` + `handOffs/delta-log.md` (S325-peter wrap).
+  Pure continuity; no code path.
+
+<!-- @review pr=456 verdict=clean by=S329-peter date=2026-08-07 probe=shorthand-each-markup-fn-mount-symmetry-across-ternary-arms-sigil-nested-each-string-guard-restricted-parent-and-collector-gap-parity -->
+
+- **#456** — **CLEAN.** Compiler source (`emit-each.ts` +37/-5, `:`-shorthand each body mounts a
+  markup-returning fn call; g-each-nested residual-1). Full S239 adversarial pass across a matrix of compiled
+  inputs. The fix is **SYMMETRIC** and complete for the reported class and adjacent positions: bare markup fn,
+  **ternary arms** (`cond ? badge(a) : badge(b)` — covered; NOT the sibling collector gap's blind spot), `@.`
+  contextual sigil, and nested each all mount; a string-returning `plain(it)` in a markup-fn file stays the
+  byte-identical text path (**no over-eager mount**); markup-literal arms loud-error as the claimed out-of-scope.
+  Two LOW parity notes (restricted-parent over-wrap on `<option>`, a latent dual-parse divergence I could not
+  trigger) — both pre-existing parity with the longhand path, not regressions this fix introduces. Language-surface:
+  semantics-changed (the form already compiled; runtime went from silent `[object HTMLSpanElement]` to correct
+  mount), bounded by an empty-markup-fn-set byte-identity and a runtime `instanceof Node` guard.
+
+<!-- @review pr=457 verdict=carve-out by=S329-peter date=2026-08-07 probe=three-files-changelog-hand-off-delta-log-continuity-only-no-code-path -->
+
+- **#457** — **CARVE-OUT.** `docs/changelog.md` + `hand-off.md` + `handOffs/delta-log.md` (S327-peter wrap).
+  Pure continuity; no code path.

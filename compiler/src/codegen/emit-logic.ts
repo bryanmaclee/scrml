@@ -4534,8 +4534,14 @@ function _matchArmResultIsBlockBody(result: string): boolean {
 function _blockTailIsValueExpr(tail: string): boolean {
   const t = tail.trim();
   if (!t) return false;
-  // Statement / declaration heads never produce a bindable arm value.
-  if (/^(const|let|var|return|if|for|while|do|switch|lift|throw|fail|on\b)/.test(t)) return false;
+  // Statement / declaration heads never produce a bindable arm value. The `\b`
+  // binds the WHOLE keyword group, not just `on` — without it every alternative
+  // matches as a bare prefix, so a tail identifier/call that merely STARTS with
+  // a keyword (`forecast` → `for`, `variance` → `var`, `returnCode` → `return`)
+  // is misclassified as a statement and its value silently dropped to the result
+  // var's `null` init. Keywords are non-identifiers, so `<kw>\b` matches a real
+  // statement head (`return `, `if(`, `const x`) and never a longer identifier.
+  if (/^(?:const|let|var|return|if|for|while|do|switch|lift|throw|fail|on)\b/.test(t)) return false;
   // Assignment statements (`@x = …`, `x = …`, compound `+=` …) are void per §18.5.
   if (/^@?[A-Za-z_$][\w$.\[\]]*\s*(?:=(?!=)|\+=|-=|\*=|\/=|%=|\|\|=|&&=|\?\?=)/.test(t)) return false;
   let node: any = null;

@@ -1,0 +1,16 @@
+{
+  "id": "match-block-value-decl-block-arm-keyword-prefix-tail",
+  "description": "§18.5 block-body arm whose TAIL EXPRESSION is an identifier that merely STARTS with a statement keyword (`forecast` → `for`, `returnCode` → `return`). The tail must lift to the result var like any other value tail. Regression guard: the statement-head guard's keyword group must be word-boundaried (`<kw>\\b`) — pre-fix it matched keywords as bare prefixes, so `forecast` was misclassified as a statement and emitted as a bare `forecast;`, leaving the result var at its `null` init (silent wrong value: `label(1)` returned null, not \"sunny\").",
+  "language-version": "1.0",
+  "spec": "§18.5",
+  "rationale": "§18.5: a `{ }` arm body runs its leading statements then binds its tail EXPRESSION as the arm value. Keywords are non-identifiers, so an identifier that shares a keyword's leading letters is an ordinary expression and its value must bind — the tail classifier distinguishes a statement head (`return x`) from an identifier (`returnCode`) by word boundary, not by prefix. Bare-value arms (`_` → \"none\") are unaffected.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "domAnchored": [
+      { "selector": "#kw-for", "text": "sunny" },
+      { "selector": "#kw-return", "text": "ok" },
+      { "selector": "#kw-bare", "text": "none" }
+    ]
+  }
+}

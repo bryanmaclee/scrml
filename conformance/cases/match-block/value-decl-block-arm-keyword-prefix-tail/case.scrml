@@ -1,0 +1,13 @@
+fn label(k: int) -> string {
+    const r = match k {
+        1 :> { const forecast = "sunny"; forecast }
+        2 :> { const returnCode = "ok"; returnCode }
+        _ :> "none"
+    }
+    return r
+}
+<page><main>
+<p id="kw-for">${ label(1) }</p>
+<p id="kw-return">${ label(2) }</p>
+<p id="kw-bare">${ label(9) }</p>
+</main></page>

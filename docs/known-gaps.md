@@ -79,6 +79,33 @@ executed on the platform it described.
 
 **Fix direction (proposed, not built, not a ruling):** run the drain against the **re-parsed AST** on the re-parse path rather than against handler text — then awaitable positions are real positions and no suppression is needed at all. Ranked above suppressing the single awaited site, because that would still require per-caller knowledge of whether the re-parse awaits, and would add a fourth special case to a subsystem whose whole problem is special cases.
 
+### g-match-block-arm-keyword-prefix-tail-silently-dropped — a §18.5 block-arm whose TAIL is an identifier starting with a keyword's letters (`forecast`→`for`, `returnCode`→`return`) was misclassified as a statement and dropped to `null` — silent wrong value — `NEW+RESOLVED S329-peter (review-floor retro of #447; PA-reproduced then fixed same PR); HIGH; resolved`
+<!-- @gap id=g-match-block-arm-keyword-prefix-tail-silently-dropped sev=HIGH status=resolved locus=compiler/src/codegen/emit-logic.ts:4538 prov=review-floor:S329-retro-review-of-447-then-fixed-same-pr -->
+> **✅ FOUND + FIXED S329-peter (review-floor retro pass on #447).** The S313 review floor, run on the
+> merged #447 (match block-arm value-position lift), surfaced this via an adversarial reviewer and it was
+> **reproduced by the PA before recording** (not relayed). `_blockTailIsValueExpr`'s statement-head guard
+> word-boundaried only `on`: `/^(const|let|var|return|if|for|while|do|switch|lift|throw|fail|on\b)/`. Every
+> other alternative matched as a bare PREFIX, so any arm tail that is an identifier/call merely STARTING
+> with those letters — `forecast`, `variance`, `letters`, `constant`, `doThing`, `returnCode`, `iffy`,
+> `failCount`, … — was classified as a statement, emitted as a bare `forecast;`, and the enclosing result
+> var stayed at its `null` init. Compile exit 0, zero diagnostics: `label(1)` returned `null`, not the value.
+>
+> **Why HIGH, and why a regression.** Silent-wrong-output class, and the direction is loud→silent: pre-#447
+> a block arm in value position loud-errored (`E-CODEGEN-INVALID-LOGIC`); #447's intended widening admitted
+> it as a WRONG value for the keyword-prefix pocket. Gated only on how an author spells an identifier.
+>
+> **Fix (pure compute, no language-surface move):** word-boundary the whole keyword group —
+> `/^(?:const|let|var|return|if|for|while|do|switch|lift|throw|fail|on)\b/`. Keywords are non-identifiers,
+> so `<kw>\b` matches a real statement head (`return `, `if(`, `const x`) and never a longer identifier.
+> Restores the already-intended §18.5 binding; accepts/rejects nothing new (inert to the language surface).
+> **Bite-pinned both halves** by `conformance/cases/match-block/value-decl-block-arm-keyword-prefix-tail`
+> (codes: no `E-CODEGEN-INVALID-LOGIC`; runtime DOM: `#kw-for`→"sunny", `#kw-return`→"ok", `#kw-bare`→"none").
+> Verified: `forecast` tail now emits `_scrml_tilde = forecast;`; `return x` head still stays a statement.
+>
+> **NOT closed by this fix (separate, and NOT compute):** a nested-`match` tail and an `if`-as-value tail
+> in the same block-arm position still loud-error — those were uncovered pre-#447 too (not regressions), and
+> LOWERING them would be **newly-accepting** → a language-surface fork for bryan, filed separately, not here.
+
 ### g-reset-writes-pending-promise-when-init-thunk-calls-a-server-fn — `reset(@cell)` on a cell whose init expression calls a server fn stores an unawaited Promise into the cell — compile exit 0, silent wrong value — `NEW S322-bryan (PA-reproduced on a shipped example); HIGH; open`
 <!-- @gap id=g-reset-writes-pending-promise-when-init-thunk-calls-a-server-fn sev=HIGH status=open locus=compiler/src/runtime-template.js:1168 prov=rationale:the-reset-path-re-invokes-the-init-thunk-but-unlike-the-declaration-path-it-never-awaits-the-result -->
 
