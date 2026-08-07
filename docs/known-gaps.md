@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 23 |
-| MED | 120 |
+| MED | 121 |
 | LOW | 49 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -1404,6 +1404,49 @@ Adopter-A's native-iOS client (reused, re-pointed at the scrml backend for the l
 ---
 
 ## §S326 — gaps filed S326 (2026-08-06, bryan; surfaced while landing the inherited S325 arcs)
+
+### g-post-commit-hook-is-permanently-red-and-cries-wolf-in-three-ways — the local post-commit hook runs the tier the cloud gate deliberately EXCLUDES, asserts a fail COUNT against a documented-red baseline, and fires on `compiler/SPEC.md` — so it reports a regression on a docs-only commit and goes silent for ~9 minutes doing it — `NEW S326-bryan; MED; open`
+<!-- @gap id=g-post-commit-hook-is-permanently-red-and-cries-wolf-in-three-ways sev=MED status=open locus=searched:.git/hooks/post-commit:3,8,15,17-21 — NOT source-controlled (per-machine Config B; the repo copy under scripts/git-hooks has no post-commit) prov=rationale:it-reported-a-regression-on-a-SPEC-only-commit-and-its-silent-full-suite-rerun-killed-five-agent-runs-in-one-session -->
+
+**Three defects, each read from the hook's source rather than inferred from behaviour:**
+
+1. **Its own comment contradicts its code.** Line 3 says *"Only triggers on compiler changes
+   (`compiler/src/` or `compiler/tests/`)"*. Line 8 is `grep -q "^compiler/"`. So **`compiler/SPEC.md`,
+   `SPEC-INDEX.md` and `PIPELINE.md` all fire it** — a pure SPEC-text edit runs the full compiler suite.
+   Witnessed this session on the §12.5.3 amendment.
+2. **It runs `bun test compiler/tests/` — the WHOLE tree** (line 15), which is precisely the set S253
+   established the cloud gate must NOT contain: browser, self-host (needs an un-rebuildable gitignored
+   dist), and the M6.x within-node parity backlog. That tier is **documented-red**.
+3. **It asserts a fail COUNT, not the failure NAME SET** (lines 17-21): any non-zero `N fail` prints
+   `⚠ TEST REGRESSION DETECTED`. The baseline is **48-49**. So the hook is **red by construction,
+   forever, on every commit that touches anything under `compiler/`.**
+
+**This is `pa-base` §8's cry-wolf shape in its purest form** — *"a gate that cries wolf gets bypassed,
+and a bypassed gate gets deleted."* It is non-blocking, so the correct response is to ignore it; being
+correctly ignored is what would make a REAL regression invisible. Note the irony against S313, which
+promoted the browser tier into the blocking gate **precisely by** making it assertable as a NAME SET
+(`scripts/browser-baseline.ts --check`) because *"an exit code cannot express 'the same failures as
+before'"*. **The instrument that solves this already exists and this hook does not use it.**
+
+**And it is the operational cause of the dispatch stalls.** The harness watches an agent's OUTPUT
+STREAM, not its process. pre-commit runs the fast subset (~2-4 min), then this hook re-runs the ENTIRE
+suite (~4-5 min) with no output in between — so a single foreground `git commit` is **~9 minutes of
+silence** and trips the 600s watchdog. **Five agent runs died this way in one session** across three
+agents before the dev-agent diagnosed it. Backgrounding the commit and polling `git log -1` eliminated
+them completely.
+
+**Fix direction (any one closes the cry-wolf; the first two are one line each):**
+- narrow the trigger to `^compiler/(src|tests)/`, matching its own stated intent;
+- replace the count assertion with `bun scripts/browser-baseline.ts --check` semantics — assert the
+  NAME SET, which is a condition a gate CAN carry (S313's ruling, already built);
+- or scope the run to the pre-commit subset, since the cloud `gate` is the authoritative full run
+  (S253) and re-running it locally buys nothing but wall time.
+
+⚠ **Per-machine, so it is invisible to the repo.** `core.hooksPath` is Config B here (`.git/hooks`) and
+the source-controlled `scripts/git-hooks` carries no `post-commit` at all. **Filed anyway** because the
+hook's behaviour is what agent briefs must compensate for, and because
+`g-commit-gate-absent-on-bryan-xps-8950` already establishes that per-machine gate state belongs in this
+ledger. Whoever fixes it should also state, in the hook, that the cloud `gate` is the authoritative run.
 
 ### g-response-contract-shall-has-no-spec-home — `emit-server.ts` states a normative "route handlers SHALL return a `Response`" that `compiler/SPEC.md` does not contain; the landing cited §12.5 and §12.5 does not say it — `NEW S326-bryan (wrap-6c maps non-compliance); MED; open; ROUTED-TO-BRYAN (language-surface: a normative SHALL needs a SPEC home)`
 <!-- @gap id=g-response-contract-shall-has-no-spec-home sev=MED status=resolved locus=compiler/src/codegen/emit-server.ts:4054-4080(the SHALL, in a source comment)+compiler/SPEC.md§12.5(does NOT contain it) prov=rationale:the-rule-was-PA-ruled-under-the-fork-rule-and-landed-but-never-reached-the-normative-source route=bryan -->
