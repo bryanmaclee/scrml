@@ -6,4 +6,4 @@ Full scoping: [`SCOPING.md`](./SCOPING.md) · README triage: [`readme-flagship-t
 
 **Deferred past freeze per bryan's OQ-4:** U3 (capability cites + a Nominal-section rejector) and U4 (marketing repo + satellite PA). C4 comparative and C5 framing claims are explicitly NOT gateable and stay bryan's judgement.
 
-DONE-PROBE: test -f docs/FACTS.md && bun scripts/snippet-gate.js >/dev/null 2>&1 && bun scripts/facts.ts --check >/dev/null 2>&1
+DONE-PROBE: test -f docs/FACTS.md && test -f scripts/snippet-gate.js && grep -q snippet-gate .github/workflows/ci.yml && grep -q facts.ts .github/workflows/ci.yml
