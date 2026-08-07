@@ -1,0 +1,15 @@
+{
+  "id": "match-block-value-decl-block-arm-variant",
+  "description": "§18.5 block-body arm in a match VALUE-decl position (structured variant-arm path, the SILENT cousin). `const r = match t { .Low :> { const base = \"co\"; base + \"ol\" } .High :> { \"warm\" } }`. A variant block arm's tail expression must ASSIGN to the result var; pre-fix the shared bare-expr handler minted a FRESH `let _scrml_tilde_N = ...` under the active tildeContext, so the result var stayed null (silent-wrong — no error code, just a null value).",
+  "language-version": "1.0",
+  "spec": "§18.5",
+  "rationale": "§18.5 block-arm value semantics apply to variant (structured-body) arms the same as literal arms: leading statements run, the tail expression is the arm value bound to the enclosing result var. Low -> \"cool\" (leading `const base` runs + tail `base + \"ol\"`), High -> \"warm\" (single-expression block). Pre-fix both returned null and rendered empty.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "domAnchored": [
+      { "selector": "#variant-block-stmt", "text": "cool" },
+      { "selector": "#variant-block-single", "text": "warm" }
+    ]
+  }
+}
