@@ -1,6 +1,13 @@
 # infra.map.md
 # project: scrml
 # updated: 2026-08-06T23:38:11-06:00  commit: 97576f35
+# ⚠ **STAMP CORRECTION (S328, no re-walk): `97576f35` IS NOT AND WAS NEVER `HEAD`.** It is the tip
+# of `origin/wrap/s326-bryan` (PR #459); main carries only its SQUASH, `b7f89952`, and
+# `git merge-base --is-ancestor 97576f35 HEAD` returns **FALSE**. Read this map's stamp as
+# **`b7f89952`**. **This map was deliberately NOT re-walked at S328** — its surface has zero diff
+# over `97576f35..35d4d32e`, verified per-map below — so its CONTENT is unchanged and honest.
+# True HEAD at the S328 pass: **`35d4d32e`**. See primary.map.md invariant 48.
+# Zero-diff evidence: `git diff 97576f35..35d4d32e -- .github/` is EMPTY.
 # NOTE (S326 pass): INCREMENTAL over `e80b692e` -> `97576f35`. Held at `e80b692e` across four windows
 # because the infra surface had zero diff; re-walked now for exactly ONE change — **`ci.yml` gained a
 # `workflow_dispatch` trigger (#454)**, which is the first RECOVERY LEVER this repo has had for a

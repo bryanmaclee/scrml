@@ -1,23 +1,34 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-08-06T23:38:11-06:00  commit: 97576f35
-# **SOURCE WALK IS AT `cf1849b2`; the stamp is `97576f35`, the true HEAD.** The two later commits
-# (`70ad2e6c`, `97576f35`) are DOCS-ONLY — `git diff --name-only cf1849b2..97576f35` touches only
-# docs/ + hand-off.md + handOffs/ + master-list.md, ZERO diff under compiler/ scripts/ stdlib/
-# package.json .github/. Every source claim below holds at the stamp.
-# NOTE (S325/S326 INCREMENTAL pass): over `a3a34d80` -> `97576f35` (17 commits, TWO clones again —
-# S325/S326-bryan on the ASUS + S325/S327-peter on Windows).
-# External deps RE-VERIFIED unchanged (`git diff a3a34d80..HEAD -- package.json` is EMPTY — no add,
+# updated: 2026-08-07T15:38:47-06:00  commit: 35d4d32e
+# **SOURCE WALK IS AT `6f176c0d`; the stamp is `35d4d32e`, the true HEAD.** `35d4d32e` (#467,
+# the S328-bryan wrap continuity) landed DURING this pass and is **DOCS-ONLY** — verified
+# `git diff --name-only 6f176c0d..35d4d32e -- compiler/ scripts/ conformance/ .github/ stdlib/
+# package.json` is EMPTY. Every source claim below holds at the stamp. **Unlike the PRIOR
+# stamp, this one IS on main** — `git merge-base --is-ancestor 35d4d32e HEAD` passes
+# (invariant 48).
+# **THE PRIOR STAMP `97576f35` WAS NOT ON MAIN** — it is the tip of `origin/wrap/s326-bryan` (#459),
+# squash-merged as `b7f89952`; `git merge-base --is-ancestor 97576f35 6f176c0d` is FALSE. Read prior
+# claims as "at `b7f89952`". SIX PRs landed since, not four: **#460** (SPEC §12.5 response contract),
+# **#461** (docs), then **#463 / #464 / #465 / #466**.
+# NOTE (S328 INCREMENTAL pass): over `97576f35` -> `6f176c0d`.
+# External deps RE-VERIFIED unchanged (`git diff 97576f35..HEAD -- package.json` is EMPTY — no add,
 # no bump, no removal; version stays v0.7.1).
+# **TWO ROWS BELOW WERE FALSIFIED BY THIS WINDOW AND ARE REWRITTEN IN PLACE, NOT APPENDED TO:**
+# the #450 `show=`-false SSR-hide row (the landing was **REVERTED IN FULL** by #464 — `emit-html.ts`
+# is byte-identical to `71623be3`), and the #456 each-shorthand mount row (**narrowed** by #466: the
+# mount is now refused inside RCDATA). If you are reading a copy of this map that still asserts an
+# SSR `display:none` injection, it is stale.
 # **THE ONE ENTRY A FUTURE READER MOST NEEDS FROM THIS WINDOW: a whole-buffer text pass over emitted
 # JS is now fenced by REGION, and there are TWO region classes — one LEXICAL, one STRUCTURAL (#458).**
 # See the new "MANGLER REGION FENCING" row. The lesson generalises past the mangler: **when a text
 # pass is wrong about WHERE it may act, the fix is to change the pass's INPUT, not to add a sixth
 # lookaround to its pattern.** `joinAroundRuntimeSlot` does exactly that — it splices the runtime in
 # AFTER the rewrite, so the fenced region is never part of the rewrite input at all.
-# Also this window: the §12.5 ONE-EXIT `Response` contract (#452) — read that row before touching any
-# route-handler exit — and three peter-clone emit landings (#447 block-arm value position, #450
-# show=-false SSR hide, #456 each-shorthand markup-fn mount). Everything else carries its prior walk.
+# Also this window: **the §12.5 `Response` contract (#452) FINALLY HAS A NORMATIVE HOME** — #460 wrote
+# it into `SPEC.md:7353` as a SHALL, closing the prior stamp's S326-N1. It carries **no diagnostic
+# code** (enforced by construction), so nothing in error.map.md moved. Everything else carries its
+# prior walk.
 
 ## MANIFEST SHAPE — one manifest, allowlisted
 
@@ -115,9 +126,9 @@ parsing, cell-accessor-rename), so this widens the internal consumer set, not th
 | CSS emission / conflict check | codegen/emit-css.ts, codegen/emit-theme-reset.ts / codegen/css-conflict-check.ts | §65 Wave-1; E-STYLE-CONFLICT / W-STYLE-CONFLICT-POSSIBLE |
 | Reactive-attr writer-ownership (#81) | codegen/emit-html.ts (`analyzeWriterConflict`) | `E-ATTR-WRITER-CONFLICT`, or a `LogicBinding` with `isReactiveValueAttr`/`valueAttrName`/`valueAttrKey` |
 | Session establishment | compute-program-config.ts, route-inference.ts, codegen/emit-server.ts, codegen/emit-expr.ts | §20.5 `session.*` server builtin — see auth.map.md |
-| **§18.5 match BLOCK-ARM in VALUE position (NEW #447, peter clone)** | **codegen/emit-logic.ts** — `_splitBlockStatements` (brace/paren/bracket- and literal-aware; NOT a naive `;` split) + `_matchArmResultIsBlockBody` + `_blockTailIsValueExpr` + `_emitBlockArmValueFromString(result, tildeVar, opts)` | the value-form match lowering: leading statements emit as statements, the TAIL expression is lifted to the tilde result var. Pinned by the two NEW conformance cases `value-decl-block-arm-raw` / `value-decl-block-arm-variant` (conformance corpus 855 -> 857). |
-| **§17.2 `show=`-false SSR hide (NEW #450, peter clone)** | **codegen/emit-html.ts** — `buildInitialBoolMap(fileAST)`, a whole-file walk resolving each cell to a statically-determinable initial boolean, **carrying an `indeterminate` set so a REASSIGNED cell resolves to nothing** | inline `display:none` on a `show=@cell`-false or `show=(false)` element, ending the pre-hydration FOUC. **Fail-INERT in every unclear direction:** a TRUE initial emits NOTHING (byte-inert), a `show=@dotted.path` is not statically determinable and gets nothing, only a STATIC literal `style=` is merged into, an author `style=` already setting `display` WINS with no duplicate, and a reactive/interpolated `style=` is never touched. The client hydration controller is unchanged — reveal still works. |
-| **`<each>` `:`-shorthand markup-fn mount (NEW #456, peter clone)** | **codegen/emit-each.ts** — re-parses the shorthand child expr through `expression-parser.ts`'s `parseExprToNode` (a LAZY `require` at the use site, deliberately not a module-top import) and routes it through `maybeWrapEachPerItemEffect` | a `:`-shorthand each body whose child is a markup-RETURNING fn call now MOUNTS per row instead of being stringified into the row text (`g-each-nested-residual-1`). |
+| **§18.5 match BLOCK-ARM in VALUE position (NEW #447, peter clone)** | **codegen/emit-logic.ts** — `_splitBlockStatements` (brace/paren/bracket- and literal-aware; NOT a naive `;` split) + `_matchArmResultIsBlockBody` + `_blockTailIsValueExpr` + `_emitBlockArmValueFromString(result, tildeVar, opts)` | the value-form match lowering: leading statements emit as statements, the TAIL expression is lifted to the tilde result var. Pinned by the two NEW conformance cases `value-decl-block-arm-raw` / `value-decl-block-arm-variant` (conformance corpus 855 -> 857). **CORRECTED #463 (S328): `_blockTailIsValueExpr` shipped with its `\b` INSIDE the alternation, so it fenced only `on` and every other keyword matched as a bare PREFIX** — `formatted` matched `for`, `doc` matched `do`, `letter`/`constant`/`returnValue`/`iface`/`lifted`/`failCount`/`varName` likewise. Each was read as a STATEMENT head, the tail was never lifted, **and the arm silently yielded `null` with no diagnostic.** The fence moved OUTSIDE and became **`(?![A-Za-z0-9_$])`, NOT `\b`** — `\b` is defined against `\w`, which excludes `$`, while scrml identifiers admit it (`tokenizer.ts:1343`), so a `\b` fence still mis-reads `do$thing`/`on$c` and reproduces the class **even for `on`**. **The generalisable rule: match a keyword fence to the LANGUAGE's identifier charset, not to `\w`.** +1 conformance case `match-block/value-decl-block-arm-keyword-prefixed-tail`, which pins BOTH consumers of the classifier (structured/variant-arm and raw/literal-arm). |
+| **§17.2 `show=`-false SSR hide — ~~#450~~ REVERTED IN FULL by #464 (`0536a90f`, operator-ruled)** | **codegen/emit-html.ts is BYTE-IDENTICAL to `71623be3`** (verified: `git diff 71623be3 6f176c0d -- compiler/src/codegen/emit-html.ts` is EMPTY). `buildInitialBoolMap`, the `initialBoolMap` local and the `_showInjectFreshStyle` / `_showMergeIntoStyle` emit-site flags **do not exist in this tree** — grep confirms zero hits. | **`show=` injects NO inline `display:none` at SSR time. §17.2 first paint is owned entirely by the client hydration controller.** Replaced by a regression guard pointing the OTHER way: `control-flow/ctrl-017..ctrl-020` each assert `count: 0` for `[style*="display:none"]`. **Why the revert, from `ctrl-017`'s rationale — this is the reusable lesson, not a one-off:** a `<match>` arm body is lowered by the SAME `generateHtml`, so an emit-time hide is baked into the string literal `dispatch` assigns to `_mount.innerHTML`; the re-mounted element carries no controller (`wire_<Arm>` does not re-bind a visibility toggle, `_scrml_nav_rewire` is never re-run on a variant swap), so the baked hide could NEVER be cleared. **§17.2 says "toggle"; a toggle needs a toggler.** The direction is now fail-OPEN — a missed hide is a brief flash, a wrong hide is permanently invisible content. The unit test `show-false-ssr-hidden-no-fouc.test.js` was deleted with the code. |
+| **`<each>` `:`-shorthand markup-fn mount (#456) — NARROWED by #466 (S328)** | **codegen/emit-each.ts** — re-parses the shorthand child expr through `expression-parser.ts`'s `parseExprToNode` (a LAZY `require` at the use site, deliberately not a module-top import) and routes it through `maybeWrapEachPerItemEffect`. **NEW: one shared module-local `const _isRcdataBody = isRcdataElement(tagName)` (:1169)** read by BOTH per-item body branches — the shorthand branch (`shMarkupCapable && !_isRcdataBody` :1244, the `.value` write :1250) and the bare-body `_rcdataValueExpr` gate (:1183) — so the two cannot drift apart under §4.14 byte-identity. | a `:`-shorthand each body whose child is a markup-RETURNING fn call MOUNTS per row (`g-each-nested-residual-1`) **except inside RCDATA (`<textarea>`), where the mount is refused and the expression is written to `.value`.** **#456's own rationale block carried a FALSE premise and #466 left it in place verbatim rather than silently rewriting it:** it claimed a string-returning shorthand "never over-wraps -> no restricted-parent regression", but `shMarkupCapable` is a **MAY-analysis** — `fnBodyReturnsMarkup` admits a fn if ANY return is markup, so a mixed-return callee is markup-capable even on the calls handing back a plain string. `interpMayYieldNode` cannot tell the two apart, so that premise was never something the discriminant could deliver. **The name to grep is `_isRcdataBody`; `eachBodyLowering` / `TEXT_ONLY_CONTENT_ELEMENT_NAMES` / `EachBodyLowering` were the first attempt (`2c89086c`), rejected by the S239 gate and DELETED.** +3 conformance cases under `conformance/cases/each/`. |
 | Content-hash asset naming | api.js pre-pass (`fnv1aHash`, gated on `contentHashAssets`) | build.js's `generateServerEntry` |
 | Validate emit | codegen/validate-emit.ts | final artifact sanity |
 | Meta-eval | meta-eval.ts | `^{}` meta-block execution |

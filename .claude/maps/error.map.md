@@ -1,15 +1,31 @@
 # error.map.md
 # project: scrml
-# updated: 2026-08-06T23:38:11-06:00  commit: 97576f35
-# **SOURCE WALK IS AT `cf1849b2`; the stamp is `97576f35`, the true HEAD.** The two later commits are
-# DOCS-ONLY (zero diff under compiler/ scripts/ stdlib/ package.json .github/).
-# NOTE (S325/S326 INCREMENTAL pass): over `a3a34d80` -> `97576f35`. **ZERO new diagnostic codes and
-# zero retired ones — re-derived, not assumed:** `git diff a3a34d80..HEAD -- compiler/src` contains no
-# added or removed `"E-*"`/`"W-*"`/`"I-*"` string literal, and `compiler/SPEC.md` has zero diff, so the
-# §34 catalog stays at **806 rows**. `bun scripts/s34-census.ts` re-executed at this HEAD returns
-# `806 rows (§34 19030..19907, derived) · 1886 source files · 857 conformance cases` with buckets
+# updated: 2026-08-07T15:38:47-06:00  commit: 35d4d32e
+# **SOURCE WALK IS AT `6f176c0d`; the stamp is `35d4d32e`, the true HEAD.** `35d4d32e` (#467,
+# the S328-bryan wrap continuity) landed DURING this pass and is **DOCS-ONLY** — verified
+# `git diff --name-only 6f176c0d..35d4d32e -- compiler/ scripts/ conformance/ .github/ stdlib/
+# package.json` is EMPTY. Every source claim below holds at the stamp. **Unlike the PRIOR
+# stamp, this one IS on main** — `git merge-base --is-ancestor 35d4d32e HEAD` passes
+# (invariant 48).
+# **THE PRIOR STAMP `97576f35` WAS NOT ON MAIN** — tip of `origin/wrap/s326-bryan` (#459),
+# squash-merged as `b7f89952`. SIX PRs landed since, not four (#460 SPEC, #461 docs, then #463-#466).
+# NOTE (S328 INCREMENTAL pass): over `97576f35` -> `6f176c0d`. **ZERO new diagnostic codes and zero
+# retired ones — re-derived, not assumed:** `git diff 97576f35..HEAD -- compiler/src` contains no
+# added or removed `"E-*"`/`"W-*"`/`"I-*"` string literal, so the §34 catalog stays at **806 rows**.
+# `bun scripts/s34-census.ts` re-executed at this HEAD returns
+# `806 rows (§34 19038..19915, derived) · 1881 source files · 865 conformance cases` with buckets
 # `STRUCK 34 · PINNED 339 · IMPL-SITES 321 · DECLARED-AHEAD 14 · RUNTIME-SURFACED 3 · FALSE-CLAIM 95`
-# — **byte-identical to the prior stamp's buckets.**
+# — **byte-identical to the prior stamp's buckets.** The §34 line RANGE moved +8 only because #460
+# inserted a bullet ABOVE it in `SPEC.md`; derive the range from headings, never from a baked number.
+# **⚠ THE ONE SPEC CHANGE THIS WINDOW IS A `SHALL` WITH NO CODE, AND THAT IS BY DESIGN.** #460 wrote
+# §12.5's "a generated route handler SHALL produce a COMPLETE HTTP RESPONSE" into `SPEC.md:7353`.
+# It carries **no diagnostic code — it is enforced BY CONSTRUCTION** — so nothing entered §34 and the
+# FALSE-CLAIM bucket did not grow. **If you are hunting for an `E-` code to assert a route-handler
+# response against, there isn't one: assert on the wire.** This CLOSES the prior stamp's S326-N1.
+# **A SECOND NEGATIVE, from the #464 revert:** #450's `show=`-false SSR-hide never carried a
+# diagnostic either, so its removal took nothing out of §34 — the census is byte-identical across a
+# revert of ~122 lines of `emit-html.ts`. **A census that cannot see a whole feature land AND unland
+# is a reminder that the catalog measures DIAGNOSTICS, not behaviour.**
 # **THE ONE THING THIS WINDOW ADDS TO THIS MAP IS A NEGATIVE, and it is deliberate, not an omission:**
 # #458's `registerFnName` guard SILENTLY DROPS a malformed `fnNameMap` key and raises NO diagnostic —
 # because every §34 fire site for the one code that fits (`E-CODEGEN-INVALID-LOGIC`) is
@@ -133,7 +149,8 @@ part of the catalog and are included.
 | `d0763cff..fe14c9b2` | 800 -> 801 | +1 `E-IF-IN-DISPATCHED-ARM` (S301) |
 | **`fe14c9b2..e80b692e` (THIS pass)** | **801 -> 804** | **+3, zero removed:** `E-FOR-UNPARENTHESIZED-HEAD` (§17.4a — `ast-builder.js:8535` / `:12927`, rejects a braceless `for … of` head INCLUDING a destructuring one); `E-SERVER-FN-IN-SYNC-CALLBACK` (**pre-existing FIRE, newly CATALOGUED** at S305 — `emit-server.ts:2860`); `E-ENGINE-AUDIT-UNSUPPORTED-BODY` (added AND retired inside the same window — the §51.11 make-it-loud placeholder, struck by the port). **The +3 count is NOT the interesting number this window — see the two rows below it.** |
 | **`e80b692e..b929b9c9` (THIS pass)** | **804 -> 805** | **+1, zero removed:** `E-FN-EQUALS-BODY` (§48.2 — `ast-builder.js:3755` `rejectFnEqualsBody`, four decl-body call sites + the export re-parse; rejects the `fn/function … = <expr>` shorthand, sibling of `E-FN-ARROW-BODY`). Tombstone count unchanged. |
-| **`b929b9c9..15e5e070` (THIS pass)** | **805 -> 806** | **+1, zero removed:** `W-IF-IN-EACH` (§17.1 — `emit-each.ts`'s `renderTemplateChildToJs`, the deferred nested-per-row-`if=` branch; warns when a NESTED, non-item-root, per-row `if=` inside `<each>` references the iteration item — the condition is a create-time-only append gate, not reactive on a same-key reconcile). GH adopter #409. |
+| **`97576f35..6f176c0d` (THIS pass, S328)** | **806 -> 806** | **ZERO in, ZERO out — and the zero is load-bearing twice over.** (1) #460 added a normative §12.5 `SHALL` with **no code** (enforced by construction). (2) #464 REVERTED #450's `show=`-false SSR-hide, which also had no code — so ~122 lines of `emit-html.ts` left the tree without moving a single census number. #463 (`_blockTailIsValueExpr` keyword fence) and #466 (RCDATA per-item body) are both silent-wrong-output fixes with no diagnostic. **#466 explicitly DEFERS one: "a markup-returning call has no valid rendering in an RCDATA content model" needs a NEW §34 row and its own ruling — it was surfaced, not smuggled in.** |
+| **`b929b9c9..15e5e070` (prior pass)** | **805 -> 806** | **+1, zero removed:** `W-IF-IN-EACH` (§17.1 — `emit-each.ts`'s `renderTemplateChildToJs`, the deferred nested-per-row-`if=` branch; warns when a NESTED, non-item-root, per-row `if=` inside `<each>` references the iteration item — the condition is a create-time-only append gate, not reactive on a same-key reconcile). GH adopter #409. |
 | **`fe14c9b2..e80b692e` — TOMBSTONES** | **18 -> 34 struck** | **+16 newly struck**, which the code TOTAL does not show (the count methodology deliberately strips `~~`): six phantom `E-ENGINE-*` (003/006/007/008/009/011/012 — seven rows, one of which was already struck), four `E-COMPONENT-*` (002-005), `E-PROTECT-002`, `W-PROTECT-001`, `E-TYPE-042`, `W-DEPRECATED-001`, `E-ENGINE-AUDIT-UNSUPPORTED-BODY`. **A struck row still counts in the 804 — read the tombstone bucket, not the total, to answer "what got withdrawn".** |
 | **`fe14c9b2..e80b692e` — CITATIONS** | **103 -> 5** `file:line` citations inside §34 | Q3 ruling: **strip the stale `:line`, keep the file path.** A baked line number in a maintained artifact rots silently and nothing fails — the same defect class as the 3,140-line stale SPEC-INDEX (S290) and the ~9x-wrong LOC figure (S280), which is why `docs/FACTS.md` exists. |
 
