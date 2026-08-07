@@ -26,6 +26,23 @@ it is whether a **`github-actions` check-suite exists on the head SHA**. The `re
 `gh workflow run CI --ref <branch>` — but **only for branches that already carry the trigger**
 (cut/rebased after `b21e0c84`); older refs return HTTP 422. Prospective, not retroactive.
 
+## ⚑ POST-WRAP ADDENDUM (bryan authorized two more items after the wrap closed)
+
+**#460 — the §12.5.3 response contract landed**, closing the seventh owed item. **Owed by bryan is back
+to SIX**; item 0 in the list below is DONE. The bullet was deliberately written at a different altitude
+than the source comment it came from — `Response` is a Bun host object and S278 puts emitted-JS shape in
+compiler-spec, so the SPEC obliges the *observable* contract (a complete HTTP response carrying the
+serialized value) and not the object. **The wire is pinnable by a conformance case; the object is not.**
+
+**NEW MED `g-post-commit-hook-is-permanently-red-and-cries-wolf-in-three-ways`** — and it is the one
+finding here with immediate operational consequence for the NEXT session, because it explains the
+dispatch stalls. The local post-commit hook fires on any `^compiler/` path (its own comment claims
+`src`/`tests` only), runs the whole `compiler/tests/` tree that the cloud gate deliberately excludes as
+documented-red, and asserts a fail COUNT against a 48-49 baseline — so it is red by construction and
+reported a "regression" on a docs-only SPEC commit. **It is also ~9 minutes of silence per commit, which
+killed five agent runs across three agents this session** via the 600s stream watchdog. Until it is
+fixed: **background every commit and poll `git log -1`**, and put that line in every codegen brief.
+
 ## 🎯 THE ARCS
 
 **1 — the bare-return HIGH (#452).** Inherited fully reviewed; landed without re-review per S325's
@@ -92,7 +109,7 @@ documentation, which is the part worth carrying: I shipped a comment telling the
 **Answered:** the stranded-PR fork → **(c) then (a)**. (c) landed as #454; (a) went moot.
 
 **⛔ Still owed by bryan — SEVEN, in the order I would take them:**
-0. **`g-response-contract-shall-has-no-spec-home`** (NEW, wrap-6c) — #452 landed a normative
+0. ~~**`g-response-contract-shall-has-no-spec-home`**~~ — ✅ **DONE, landed #460 (`603ec12f`)**. Kept visible for the reasoning: #452 landed a normative
    *"Route handlers SHALL return a `Response`"* that **SPEC.md does not contain**; my commit cited §12.5
    and §12.5 does not say it. No diagnostic code enforces it, so a source comment is the only place the
    rule exists — a second implementation reading the SPEC would not know, and conformance cannot pin it.
