@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 24 |
-| MED | 119 |
+| MED | 120 |
 | LOW | 49 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -1386,6 +1386,46 @@ Adopter-A's native-iOS client (reused, re-pointed at the scrml backend for the l
 ---
 
 ## §S326 — gaps filed S326 (2026-08-06, bryan; surfaced while landing the inherited S325 arcs)
+
+### g-wrap-6b-worktree-sweep-probes-branch-merged-which-file-delta-landings-never-satisfy — the stale-worktree sweep has been owed since S268 because its natural probe answers the wrong question: we land by copying file CONTENT, so an agent branch is never an ancestor of main and `--merged` reports "nothing prunable" forever — `NEW S326-bryan; MED; open`
+<!-- @gap id=g-wrap-6b-worktree-sweep-probes-branch-merged-which-file-delta-landings-never-satisfy sev=MED status=open locus=searched:scripts/,compiler/scripts/ — no script implements wrap 6b; the step is manual prose in ../scrml-support/pa-scrml-overlay.md {{wrap_step_fills}} 6b prov=rationale:the-sweep-owed-since-S268-is-a-probe-mismatch-not-a-backlog -->
+
+**The mismatch.** Wrap step 6b says to land-then-remove worktrees whose work integrated this session.
+The obvious probe is `git branch --merged origin/main`. That is correct under a merge-based landing
+model and **structurally wrong under ours**: `{{landing_command_fills}}` lands an agent's work by
+reviewing its delta, `git checkout <agent-branch> -- <files>` onto a PA feature branch, and
+squash-merging THAT. The agent branch is never an ancestor of main, so `--merged` excludes it **by
+construction, forever, no matter how completely its work landed.**
+
+**MEASURED at S326, 9 worktrees present:**
+
+| probe | verdict |
+|---|---|
+| `git branch --merged origin/main` | **0 of 9** prunable |
+| per-file blob compare vs main | **2 of 9** prunable (`a2589c3ed53f52d81` 8/8 identical — landed as #452 an hour earlier; `a8b2da40217abb667` 4/4) |
+
+The bare-return worktree is the proof: its content landed in `ec0142aa`, PA-verified by R26, and
+`--merged` still said no. **This is `pa-base` §10's obligation-vs-probe mismatch — the contract's
+most-repeated failure — sitting inside a mandatory wrap step.** The sweep does not read as skipped; it
+reads as "correctly found nothing", which is why it has survived since S268 while the count grew.
+
+**The correct predicate.** For each source file the branch touched since `merge-base(origin/main, br)`,
+compare `git rev-parse <br>:<file>` against `git rev-parse origin/main:<file>`. All identical ⇒ the
+content landed ⇒ prunable. Any differ ⇒ retain. Docs/scoping-only branches are a third outcome and
+should be reported as such rather than folded into either.
+
+**⚑ AND THE PROBE ITSELF HAS A TRAP, caught only by luck.** The first cut passed the file list as an
+unquoted `-- $files` pathspec. **zsh does not word-split unquoted expansions**, so the newline-joined
+list became ONE pathspec matching nothing, every branch measured zero files, and the probe reported
+**all 9 LANDED** — the most reassuring answer available. It was caught only because the branch of a
+**live, still-running agent** was in that list and obviously could not have landed. Had the sweep run
+between dispatches, it would have said "prune everything" with a straight face. Use a `while IFS= read`
+loop, not an unquoted expansion, and **keep a known-UNLANDED branch in any test of this probe** — the
+bite proof is what distinguishes it from a probe that cannot fail (`pa-base` §8).
+
+**Fix direction:** a `scripts/worktree-disposition.ts` printing `LANDED / UNLANDED / NO-SOURCE` per
+worktree with its file counts, invoked at wrap 6b so the disposition is evidence rather than judgement,
+and so the S268 backlog drains once instead of being re-deferred each session.
 
 ### g-specifier-resolution-test-hook-timeout-knife-edge — an integration test's `beforeAll` spawns a full flagship-app compile against bun's DEFAULT 5s hook timeout; the margin is ~1.1s and it goes red under ordinary machine load, blocking commits for reasons no change caused — `NEW S326-bryan; MED; open`
 <!-- @gap id=g-specifier-resolution-test-hook-timeout-knife-edge sev=MED status=open locus=compiler/tests/integration/corpus-emitted-specifier-resolution.test.js:121-131(beforeAll) prov=rationale:blocked-a-clean-commit-twice-then-measured-base-vs-head-and-found-no-regression -->
