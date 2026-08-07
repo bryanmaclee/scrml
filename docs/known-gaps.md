@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 23 |
-| MED | 121 |
+| MED | 122 |
 | LOW | 49 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -7479,3 +7479,52 @@ recurs — directly load-bearing for the conformance-driven self-host gate, sinc
 traced** — I measured the outcome, not the path. NB this file was edited in the same session by the
 `if=`-structural landing; the divergence is **pre-existing** (confirmed by running the test at that
 landing's parent `6ed4180c` — same single failure), so do not attribute it there.
+
+---
+
+## §S328 — gaps filed S328 (2026-08-07, bryan; surfaced by the S316 review-floor drain)
+
+### g-show-attr-has-no-ssr-first-paint-contract — `show=`-false content is fully visible until hydration, and SPEC says nothing about first paint either way — `NEW S328-bryan (post-revert of #450); MED; open; adopter-reported via Peter (aM)`
+<!-- @gap id=g-show-attr-has-no-ssr-first-paint-contract sev=MED status=open locus=compiler/src/codegen/emit-html.ts:3070-3086(the show= emit site)+compiler/SPEC.md§17.2:11388-11400(silent on the timing axis) prov=ruling:user-voice-scrml.md S328 ("revert") -->
+
+**The symptom is real and adopter-reported.** A `show=`-false element is SSR'd fully visible and only
+hides once the client bundle runs, so the content flashes on every load. Peter fixed this for adopter
+**aM** in #450; that fix was **REVERTED at S328** and this entry is what survives it, so the finding is
+not lost with the patch.
+
+**Why the fix was reverted rather than repaired** (do not re-derive; four independent reasons):
+
+1. **The obvious repair is near-vacuous BY CONSTRUCTION.** For a hide to be *syntactically* provable the
+   cell must never be written — but a cell that is never written is **never revealed**, so there is no
+   flash to fix. The set "provably false at first paint" and the set "will actually be revealed, so the
+   flash matters" are nearly disjoint. A conservative fail-open gate therefore refuses exactly the cases
+   where the FOUC matters. **Measured: 9 `show=` sites repo-wide; a fail-open gate fires on ONE, and
+   that element sits inside an `if=` `<template>` — inert at first paint. Benefit on this corpus: zero.**
+2. **There is no contract obligation.** §17.2 (SPEC.md:11388-11400) is **silent on the timing axis** —
+   verified by reading it in full plus §17.1/§17.1.2/§17.1.2.3/§52.8, and by a whole-SPEC grep for
+   `FOUC|first paint|pre-hydration|flash of unstyled` which returns **zero `show=` hits**. #450's commit
+   cited `SPEC.md:11388-11389`; those two lines are **the section header and a blank line**.
+3. **SPEC precedent runs the other way.** §65.6 (:36895) calls an SSR no-flash prestamp *"a follow-on
+   refinement — the client-side binding is the normative mechanism."* §52.15 (:32286) has SSR
+   *"CONSERVATIVELY FALL BACK … never ships wrong/partial markup."*
+4. **#450 as landed was net-negative**, and none of it was visible to a green suite: a silent **no-op**
+   where a flat-`#{}` root already carried a `style` (real Chromium DROPS the duplicate attribute;
+   happy-dom MERGES them and hid it); a **wrong-hide** from module-init writes (content that rendered
+   pre-fix became invisible with JS disabled or a slow bundle); a **fail-open→fail-closed reversal**
+   inside `<engine>`/`<match>` making `<div show=@expanded>` dead UI after any state re-entry; and a
+   **spelling divergence** where `show=@vis` hid but `show=(@vis)` did not — the paren form being the
+   spelling the corpus itself uses.
+
+**The real fix needs module-init reachability analysis** (does any module-init-reachable path write this
+cell?), where a single false negative is **invisible content**, not a flash. That is a design arc with a
+fail-closed hazard, not a patch — and it should carry a SPEC amendment giving `show=` an explicit
+first-paint contract, since today there is none to conform to.
+
+**Preserved from the reverted work:** four conformance cases now pin the POST-REVERT contract as
+regression guards — `ctrl-017` (no hide on the variant-render path), `ctrl-018` (module-init write),
+`ctrl-019` (both spellings), `ctrl-020` (flat-`#{}` root, no injected style). Bite-proven. Re-landing an
+SSR hide without a ruling turns them red.
+
+**Also recorded, independent of `show=`:** a flat-declaration `#{}` block plus an author `style=` on the
+same element emits **two `style` attributes** — invalid HTML, second one dropped by conformant parsers.
+Pre-existing and unrelated to `show=`; surfaced while measuring D1.

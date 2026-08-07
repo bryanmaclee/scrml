@@ -1,0 +1,29 @@
+{
+  "id": "ctrl-019-show-ssr-hide-spelling-parity-pos",
+  "description": "§17.2 / §5.2 — REGRESSION GUARD (post-revert of #450, S328). `show=@vis` and `show=(@vis)` are the SAME predicate and SHALL receive the SAME SSR treatment. #450 hid only the bare spelling, so the two diverged; that whole SSR-hide mechanism was REVERTED at S328 after its benefit measured zero on the corpus and its SPEC citation proved false (§17.2 is silent on the timing axis). The contract this now pins is the post-revert one: `show=` does NOT affect first-paint markup, for EITHER spelling. Both elements must render, and neither may carry an injected `display:none`. Re-landing an SSR-hide without a ruling turns this red.",
+  "language-version": "1.0",
+  "spec": "§17.2",
+  "source-test": "compiler/src/codegen/emit-html.ts",
+  "rationale": "§5.2 / §17.1 (SPEC.md:11011) admit BOTH spellings for a condition attribute: 'A *bare unquoted* `if=` condition is atomic-only ... An operator condition ... SHALL be parenthesized (`if=(@n >= 3)`) or quoted. ... The same atomic-only-when-bare rule applies to `show=` (§17.2)'. The parenthesized form is not a different construct, so it cannot carry different emission semantics. Both spellings now resolve to the same cell name and route through the SAME conservative gate — the unification does not widen the hiding, it removes a spelling-dependent divergence.\n\n`vis` here has exactly one literal-`false` structural declaration and ZERO writes anywhere in the file, so it is provably false at first paint: this is the one shape where an SSR hide is correct. Note honestly that this is also a narrow shape — a `show=` cell that is never written is content hidden forever — which is why the S328 measurement of the real corpus found the gate fires on essentially nothing.\n\nORACLE: emitted BYTES. `firstPaint` asserts substring containment on the composed first-paint STRING before any DOM parse.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "Alice"
+        }
+      ]
+    },
+    "firstPaint": {
+      "contains": [
+        "id=\"bare\"",
+        "id=\"paren\""
+      ],
+      "notContains": [
+        "display:none"
+      ]
+    }
+  }
+}

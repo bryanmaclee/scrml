@@ -1,0 +1,25 @@
+{
+  "id": "ctrl-017-show-ssr-hide-variant-render-no-hide-pos",
+  "description": "§17.2 — a `show=` inside a `<match>` arm body SHALL NOT have `display:none` baked into the arm-render string. Arm bodies are lowered by the SAME `generateHtml` as file-level markup, so a `show=`-hide injected at emit time becomes part of the string literal that `dispatch` assigns to `_mount.innerHTML`. The re-mounted element carries no controller (`wire_<Arm>` does not re-bind a visibility toggle and `_scrml_nav_rewire` is never re-run on a variant swap), so a baked `display:none` can NEVER be cleared — the element is permanently invisible. This case drives Idle -> Ready -> Idle and asserts the re-rendered arm element is not carrying a baked hide.",
+  "language-version": "1.0",
+  "spec": "§17.2",
+  "source-test": "compiler/src/codegen/emit-html.ts",
+  "rationale": "§17.2 (SPEC.md:11396-11397) mandates the hidden END-STATE — 'the element EXISTS in the DOM regardless of `expr`' and 'when `expr` evaluates to false, the element is hidden. The compiler generates a CSS `display: none` toggle.' SPEC is SILENT on the timing axis (pre- vs post-hydration), so an SSR-time hide is permissible but unmandated. It is NOT permissible where it cannot be undone: §17.2's 'toggle' is a toggle, and an emit-time `display:none` on the variant-render path has no toggler. The governing S328 invariant is that a hide is emitted ONLY where it is provably correct at first paint, and every uncertainty fails OPEN — a missed hide is a brief flash, a wrong hide is invisible content. This path cannot even deliver the first-paint benefit: the `<match>` mount is EMPTY in the SSR html, so nothing is painted from it before hydration.\n\nHONEST SCOPE NOTE for a future reader: the `_scrml_nav_rewire` variant-render REWIRE hole is PRE-EXISTING and deliberately NOT fixed here (tracked separately). Its consequence is that a re-mounted arm element loses its reactive display binding. Before this fix that hole failed CLOSED (element baked `display:none`, permanently invisible); it now fails OPEN (element visible, binding stale). This case pins the DIRECTION, not ideal visibility. When the rewire hole is closed, the re-mounted element will legitimately carry a controller-set `display:none` again and THIS ASSERTION MUST BE REVISITED — a failure here after a rewire fix is expected, not a regression.\n\nORACLE: happy-dom, via the runtime (b) half. This assertion is about a `style` attribute the emitter either did or did not write into an arm-render string; it is not the duplicate-attribute question on which happy-dom and Chromium disagree, so happy-dom is a sound oracle here.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "input": [
+      { "click": "#to-ready" },
+      { "wait": "settle" },
+      { "click": "#to-idle" },
+      { "wait": "settle" }
+    ],
+    "domAnchored": [
+      { "selector": "p[data-arm=\"idle\"]", "count": 1 },
+      { "selector": "p[data-arm=\"idle\"]", "text": "idle panel" },
+      { "selector": "p[data-arm=\"idle\"][style*=\"display:none\"]", "count": 0 },
+      { "selector": "p[data-arm=\"idle\"][style*=\"display: none\"]", "count": 0 }
+    ]
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "id": "ctrl-018-show-ssr-hide-module-init-write-fail-open-pos",
+  "description": "§17.2 — a `show=` cell that a MODULE-INIT write flips TRUE before `_scrml_boot` SHALL NOT be SSR-hidden. `<ready>: bool = false` + `function init() { @ready = true }` + a top-level `init()` leaves the cell TRUE by the time any controller evaluates it, so an emit-time `display:none` in the first-paint HTML is a WRONG hide: with JS disabled, a failed chunk fetch, or a slow bundle the element is invisible indefinitely, when it should be visible. Asserts the composed §52.8 first paint carries the element and carries NO inline display:none.",
+  "language-version": "1.0",
+  "spec": "§17.2",
+  "source-test": "compiler/src/codegen/emit-html.ts",
+  "rationale": "§17.2 (SPEC.md:11396-11397) mandates the hidden END-STATE, and is SILENT on the timing axis — nothing in §17.2, §17.1/§17.1.2/§17.1.2.3 or §52.8 says the hide must be present at FIRST PAINT. An SSR hide is therefore permissible but unmandated, and it is only correct where it is PROVABLE. The governing S328 invariant: SSR-emit `display:none` ONLY when it is provably correct at first paint; every uncertainty FAILS OPEN. The asymmetry is the whole argument — a missed hide is a brief FOUC, a wrong hide is invisible content. SPEC's nearest precedent runs the same direction: §52.15 has the SSR each-renderer CONSERVATIVELY FALL BACK on any shape it does not fully cover so that it 'never ships wrong/partial markup'.\n\nThe determinability analysis is deliberately SYNTACTIC rather than a module-init reachability dataflow: a cell qualifies only when it has exactly one literal-`false` structural declaration AND zero writes anywhere in the file. A write reachable at module init is a write in the file, so this shape is excluded with no call-graph reasoning — over-approximating toward NOT hiding.\n\nORACLE: emitted BYTES. `firstPaint` asserts substring containment on the composed first-paint STRING, before any DOM parse, so this case is immune to the happy-dom-vs-Chromium parser divergence.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "serverDb": {
+      "users": [{ "id": 1, "name": "Alice" }]
+    },
+    "firstPaint": {
+      "contains": ["id=\"panel\"", "window.__scrml_ssr_state="],
+      "notContains": ["display:none", "display: none"]
+    }
+  }
+}

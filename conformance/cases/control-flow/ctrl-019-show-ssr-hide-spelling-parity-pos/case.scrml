@@ -1,0 +1,14 @@
+<program db="sqlite:./app.db">
+${
+  < Account authority="server" table="users">
+    id: number
+    name: string
+  </>
+  <Account> @accounts
+
+  <vis>: bool = false
+}
+<p id="bare" show=@vis>bare spelling</p>
+<p id="paren" show=(@vis)>parenthesized spelling</p>
+<ul><each in=@accounts key=@.id as a><li class="row">${a.name}</li></each></ul>
+</program>

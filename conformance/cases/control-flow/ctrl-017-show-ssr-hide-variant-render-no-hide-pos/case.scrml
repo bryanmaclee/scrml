@@ -1,0 +1,24 @@
+<div>
+    ${
+        type Phase:enum = { Idle, Ready }
+        <phase>: Phase = .Idle
+        <expanded>: bool = false
+
+        function goReady() {
+            @phase = .Ready
+        }
+        function goIdle() {
+            @phase = .Idle
+        }
+    }
+    <button id="to-ready" onclick=goReady()>ready</button>
+    <button id="to-idle" onclick=goIdle()>idle</button>
+    <match for=Phase on=@phase>
+        <Idle>
+            <p data-arm="idle" show=@expanded>idle panel</p>
+        </>
+        <Ready>
+            <p data-arm="ready">ready panel</p>
+        </>
+    </match>
+</div>
