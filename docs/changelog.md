@@ -2,6 +2,18 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S327 — 2026-08-07 (peter · P-Tech1) — the outage cleared; drain the stranded backlog, then a shorthand-mount parity fix
+
+**5 PRs merged.** main `0ec183d8` → `2031b2bf`, coherence 0/0, gate GREEN. 0 adopter issues. Mechanical stream: delta-log [1227]–[1234].
+
+The S325 GitHub Actions outage had cleared and S326-bryan had already landed the bare-return backlog, so the session drained the four S325-peter PRs the outage had stranded, then took the next MED-lane fix.
+
+- **The 4 stranded PRs landed** (rebase-on-green, sequential): **#447** match block-arm §18.5 (`33eda05f`) · **#448** MED-lane triage-sweep (`71623be3`) · **#450** `show=`-false SSR FOUC §17.2 (`b6d77ec9`) · **#451** the S325-peter continuity wrap (`efaf0850`, delta-log renumbered +24 to follow bryan's stream). The two code PRs were R26 re-verified on their post-rebase baselines.
+- **#456 — `g-each-nested-markup-interp-stringifies` residual-1** (`2031b2bf`). A `:`-shorthand each body calling a same-file markup-returning fn (`<li : badge(it)>`) rendered `[object HTMLSpanElement]`; the shorthand emit site never ran the S297 "callee returns markup" discriminant the longhand `${badge(it)}` path uses. Fix routes the shorthand through the same `<span data-scrml-mv>` mount-or-text wrapper, gated behind a non-empty markup-fn set so files with no markup fn are byte-identical. Verified by executed-DOM test, conformance 857/857, a wide-corpus emit differential (0/7260 byte-identical), and two adversarial review lenses. Scoped strictly to compute — markup literals/ternaries in shorthand stay `E-CODEGEN`, a grammar decision left to bryan.
+- **Filed** `g-markup-returning-fn-collector-misses-ternary-arm-literal` (MED) — the adversarial pass found the S297 collector misses a markup literal in a fn's ternary/match-arm return, affecting longhand and shorthand each interps identically. The next MED-lane pickup (closes both paths at once).
+
+**Process note:** a parked auto-merge from S325-peter fired #447 against a "hold the merges" instruction the moment its gate went green; the arm was disarmed on the rest. Rule recorded: disarm parked auto-merge on the whole batch before re-gating any held PR.
+
 ## S325 — 2026-08-06 (peter · P-Tech1) — the MED shortlist was lying; verify-the-class before every dispatch
 
 **1 PR merged (#445, docs); 3 PRs verified + queued on auto-merge, parked on a repo-wide CI outage** (#447 #448 #450). Successor to S325-bryan (LIVE on Limb-2 mangler) — full session on the disjoint MED compute lane. main `13edcfbf`, coherence 0/0. Mechanical stream: delta-log [1218]–[1226].
