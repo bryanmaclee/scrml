@@ -37,6 +37,32 @@ on:
       - 'handOffs/**'
       - 'docs/**'
   pull_request:
+  # S326 — MANUAL RE-FIRE. Added because a dropped trigger had no recovery path.
+  #
+  # GitHub does not re-deliver a webhook it dropped. During the 2026-08-06 Actions
+  # outage ("webhook triggers remain throttled; many push/pull request events aren't
+  # triggering runs") FIVE PRs sat with ZERO checks and therefore could not merge,
+  # `gate` being the sole required check. S325 burned a whole session on it and tried
+  # force-push, close/reopen, a new commit and a brand-new PR — all four produced
+  # nothing, because every one of them is just another webhook into the same throttled
+  # pipe. This is the SECOND outage with no lever; the first cost a session's landings.
+  #
+  #   gh workflow run CI --ref <branch>
+  #
+  # ⚑ This WEAKENS NO GATE. It adds a way to START a run; it does not add a way to skip
+  # one. `gate` must still go green on the head SHA before a merge is allowed, and
+  # `enforce_admins=true` is untouched. The fork-rule row that matters is root-vs-position:
+  # nudging a PR treats the symptom, a manual trigger removes the class.
+  #
+  # ONE HONEST CAVEAT — a dispatched run's §34.0 row-provenance check is WEAKER. Step
+  # `s34-census --check-new --base` reads `github.event.pull_request.base.sha`, which does
+  # not exist on a manual run, so it falls back to `HEAD~1` (a fallback that already
+  # existed; this is not new behaviour). On a multi-commit branch that compares against the
+  # previous commit rather than the merge base, so rows added in EARLIER commits of the
+  # same branch are not seen as NEW. Every other step is event-independent and identical.
+  # Prefer a real push/PR event when one is available; reach for this when the platform
+  # has eaten the event.
+  workflow_dispatch: {}
 
 concurrency:
   group: ci-${{ github.ref }}
