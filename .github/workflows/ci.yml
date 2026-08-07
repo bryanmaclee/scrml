@@ -49,6 +49,15 @@ on:
   #
   #   gh workflow run CI --ref <branch>
   #
+  # ⚑ CONSTRAINT, MEASURED not assumed (S326 bite proof): the dispatch reads the workflow
+  # definition FROM THE TARGET REF, so `--ref <branch>` fails `HTTP 422: Workflow does not
+  # have 'workflow_dispatch' trigger` on any branch cut BEFORE this landed. Rebase the branch
+  # onto main first, or dispatch `--ref main`. Consequence worth stating plainly: this lever
+  # is prospective, not retroactive — it will not rescue a branch that predates it.
+  # Proven both ways: `--ref docs/s326-continuity` (pre-merge cut) → 422; `--ref main` → run
+  # 31140159467, **all three jobs green including `gate`**, which also confirms the census
+  # fallback below does not break a dispatched run.
+  #
   # ⚑ This WEAKENS NO GATE. It adds a way to START a run; it does not add a way to skip
   # one. `gate` must still go green on the head SHA before a merge is allowed, and
   # `enforce_admins=true` is untouched. The fork-rule row that matters is root-vs-position:
