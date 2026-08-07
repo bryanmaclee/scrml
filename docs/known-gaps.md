@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 24 |
-| MED | 120 |
+| HIGH | 23 |
+| MED | 119 |
 | LOW | 49 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -625,7 +625,9 @@ The server-fn body emitter prefixes every emitted line with an indent (`lines.pu
 **Fix direction:** make the body emitter indentation-aware for template literals — indent the first line, emit continuation lines verbatim. **Land it WITH a conformance case pinning a non-SQL multi-line literal's cooked value through compilation**, because the whole class is invisible to every gate we currently run.
 
 ### g-embed-runtime-ships-mangled-runtime-identifiers — `--embed-runtime` ships a CORRUPTED runtime when a user fn name collides with a runtime identifier — `NEW S325-bryan (Limb 2 population count; EXECUTED); HIGH; open`
-<!-- @gap id=g-embed-runtime-ships-mangled-runtime-identifiers sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts:2923(post-fn-name-mangle)+compiler/src/codegen/index.ts:2128(runtime slice)+compiler/src/commands/compile.js:172(--embed-runtime) prov=rationale:measured-during-the-limb2-population-count -->
+<!-- @gap id=g-embed-runtime-ships-mangled-runtime-identifiers sev=HIGH status=resolved locus=compiler/src/codegen/emit-client.ts:2923(post-fn-name-mangle)+compiler/src/codegen/index.ts:2128(runtime slice)+compiler/src/commands/compile.js:172(--embed-runtime) prov=rationale:measured-during-the-limb2-population-count -->
+
+**✅ RESOLVED S326-bryan — PR #458, main `cf1849b2`.** Fixed by REGION EXCLUSION (`joinAroundRuntimeSlot`), not a sixth lookaround. **PA-verified by its OWN R26 on the merged main, by EXECUTION not grep:** an `--embed-runtime` bundle from a `fn log()` program emits `function _scrml_replay(name, log, endIdx)` — the parameter is the runtime's own again, where base emitted `_scrml_log_1` beside an untouched `log.length`. 138 rewrites / 107 in emitting bundles / 9 distinct names → 0.
 
 The whole-buffer `post-fn-name-mangle` pass rewrites the assembled client buffer, and **138 of its rewrites (99 sources, 107 cleanly-compiling) land INSIDE the runtime text spliced at `runtimeInsertIndex`.** Colliding user fn names measured: `log` ×74 · `fn` ×33 · `label` ×19 · `tick` ×8 · `handle` ×2 · `computed` ×2.
 
@@ -643,7 +645,9 @@ The parameter matched the lookahead (`log` followed by `,`); `log.length` did no
 **Fix direction is NOT "patch the regex again"** — that is the fifth patch on a text heuristic (Bug D · Bug I · Bug Z · g-spread · PGO P3.A). The structural options are to mangle BEFORE the runtime is spliced, or to fence the runtime slot out of the rewrite the way `rewriteCodeSegments` already fences string literals. Related: [[g-mangler-empty-name-whole-buffer-insertion]], [[g-mangler-scope-blind-shorthand-key-rename]], and the Limb-2 scoping record below.
 
 ### g-mangler-empty-name-whole-buffer-insertion — an EMPTY key in `fnNameMap` turns the alternation regex into a whole-buffer inserter — `NEW S325-bryan (Limb 2 population count); MED; open (currently masked by an upstream failure)`
-<!-- @gap id=g-mangler-empty-name-whole-buffer-insertion sev=MED status=open locus=compiler/src/codegen/emit-client.ts:2947(combinedRegex alternation) prov=rationale:measured-during-the-limb2-population-count -->
+<!-- @gap id=g-mangler-empty-name-whole-buffer-insertion sev=MED status=resolved locus=compiler/src/codegen/emit-client.ts:2947(combinedRegex alternation) prov=rationale:measured-during-the-limb2-population-count -->
+
+**✅ RESOLVED S326-bryan — PR #458, main `cf1849b2`.** Guarded at map construction, and the guard was tightened during the S239 round from a non-emptiness test to an identifier-shape test so it closes the CLASS rather than the witnessed instance. PA-verified on merged main: `stdlib/cron` now carries only the legitimate `_scrml_v_1`, not the doubled `_scrml_v_1_scrml_v_1` injection signature. **The original rationale was FALSE and is corrected in-source** — an empty key is not a dead entry, it is a WILDCARD: `buildServerFnNames` iterates KEYS and `exprUsesServerFn` compiles each as a regex (verified: `"@a + (b * 2)"` → true).
 
 `stdlib/cron/index.scrml` places `"" → _scrml_v_1` into `fnNameMap`. The alternation then reads `\b(…|)\b`, which matches **zero-width** at every word boundary satisfying the lookahead — injecting the name **781 times into one file** (MEASURED; it is the single largest rewrite bucket in the whole corpus count).
 
@@ -651,6 +655,8 @@ Currently **masked**: that source already fails `E-CODEGEN-INVALID-LOGIC` from a
 
 ### g-mangler-scope-blind-shorthand-key-rename — the rewrite is scope-blind and its lookahead set is partial, so object-shorthand KEYS get renamed → silent `undefined` — `NEW S325-bryan (Limb 2 population count); MED; open`
 <!-- @gap id=g-mangler-scope-blind-shorthand-key-rename sev=MED status=open locus=compiler/src/codegen/emit-client.ts:2947(combinedRegex — no scope analysis, partial lookahead set) prov=rationale:measured-during-the-limb2-population-count -->
+
+**◐ PARTIALLY RESOLVED S326-bryan — PR #458, main `cf1849b2`. THE CLASS IS NOT CLOSED; status stays `open` deliberately.** The object-literal case is fixed by EXPANSION (`{get}` → `{get: _scrml_get_3}`), PA-verified on merged main. **Still broken, pinned by the suite at §2f rather than only in prose:** nested `{api: {get, post}}` · spread · mixed `{get, post, n: 1}` · the ternary **ALTERNATE** — and that asymmetry is the sharp part, the same expression compiles correctly on the consequent branch and incorrectly on the alternate. Plus interpolation-leading groups and `?? "anon"`. **The binding-pattern half was attempted and REMOVED during the S239 round:** fencing the pattern while the pass still rewrote the uses those bindings SHADOW turned a loud `TypeError` into a silent wrong answer — the exact class this entry describes. An honest repair needs a scope model and belongs to the mangler-retirement arc.
 
 The pass has no scope awareness: it rewrites a name wherever the regex matches, including PARAMETER declarations that shadow a top-level fn, and it rewrites only those references whose next character is in the partial lookahead set — so a shadowed binding is renamed inconsistently. `stdlib/data/validate.scrml` (top-level `fn min`/`fn max` + `function minLength(min, message)`) shows the shadow half.
 
