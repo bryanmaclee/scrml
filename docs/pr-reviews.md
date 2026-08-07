@@ -33,7 +33,49 @@ predate the rule and are out of scope by construction rather than by exemption.
 
 ---
 
+
+## S328 measurement — the carve-out-rate alarm is ANSWERED (it was UNPROVEN since S319)
+
+`scripts/review-debt.ts` prints its carve-out rate over **ALL** merged PRs and warns at a high rate.
+`pa-scrml-overlay` has flagged that figure **UNPROVEN — neither healthy nor evaded** since S319,
+because the all-PR denominator cannot distinguish a docs-heavy stretch from a floor being evaded, and
+recommended (but did not build) computing the rate over **code-bearing PRs only**. Measured at S328:
+
+| population (PR >= 385, verdict recorded) | PRs | carve-outs | rate |
+|---|---|---|---|
+| **code-bearing** (diff touches `compiler/` · `stdlib/` · `scripts/` · `conformance/cases/`) | **28** | **1** | **4%** |
+| docs-only | 48 | 45 | 94% |
+
+**Verdict: the high all-PR rate is a DOCS-VOLUME artifact, not evasion.** The health signal is ~0%.
+
+**The single code-bearing carve-out is #397 — and it is `scripts/review-debt.ts` itself.** The floor's
+own measuring instrument shipped inside a wrap-continuity PR and was carved out as
+`own-wrap-continuity-docs-only`. It was separately bite-proven both ways at S316, so this is not a
+missed review in substance — but it is worth naming that **the one thing exempted from the floor was
+the tool that measures the floor.**
+
+**Read the all-PR figure as a VOLUME statistic, not a health signal.** If the code-bearing rate ever
+leaves single digits, that is the number to act on.
+
+*Two probe defects were made and corrected while producing this table, both the same class this repo
+keeps hitting: `verdict=(\w+)` truncated `carve-out` to `carve` (hyphen is not `\w`), reporting ZERO
+carve-outs in both buckets — caught only because it contradicted `review-debt`'s own 24/40; and a
+`head -14` on a 13-file PR listing hid the very file that made #397 code-bearing. A well-formed answer
+to a question nobody asked, twice, inside the measurement built to check for exactly that.*
+
 ## Log
+
+<!-- @review pr=464 verdict=clean by=S328-bryan date=2026-08-07 probe=own-revert-verified-EXACT-git-diff-71623be3-origin-main-emit-html-ts-EMPTY-both-surviving-display-none-hits-are-pre-existing-COMMENTS-present-at-450s-parent+four-preserved-guards-RE-RAN-post-revert-and-ctrl-019-and-ctrl-020-FAILED-because-they-asserted-positive-display-none-so-they-were-rewritten-to-assert-absence-with-a-positive-render-anchor-and-BITE-PROVEN-corrupt-notContains-red-restore-green+conformance-862-862 note=verified-the-guards-transferred-instead-of-assuming-half-of-them-did-not -->
+<!-- @review pr=463 verdict=clean by=S328-bryan date=2026-08-07 probe=own-fix-adversarial-pass-probed-the-FULL-reclassified-set-all-13-keywords+on-non-regression+real-do-while-if-for-while-switch-statement-tails+keyword-prefixed-calls+case-sensitivity+digit-underscore-and-dollar-continuations+nested-and-multi-statement-blocks+object-literal-and-empty-arms-corpus-emit-differential-0-content-diffs-1008-sources-3881-artifacts-conformance-858-858-migration-MEASURED-76-block-arms-zero-affected note=the-pass-found-a-REAL-hole-in-my-own-fix-b-is-defined-against-w-which-excludes-dollar-while-scrml-isIdentPart-includes-it-so-do-dollar-thing-still-yielded-null-fixed-at-the-root-pre-land-and-pinned -->
+<!-- @review pr=461 verdict=carve-out by=S328-bryan date=2026-08-07 probe=file-set-enumerated-known-gaps+handoff+deltalog-docs-only-no-code-path-the-post-commit-hook-finding -->
+<!-- @review pr=460 verdict=finding by=S328-bryan date=2026-08-07 probe=SPEC-text-NOT-a-plain-carve-out-because-it-lands-a-normative-SHALL-12.5.3-read-the-diff-in-full-the-observable-wire-framing-is-CORRECT-and-refuses-to-write-Bun-Response-into-the-LANGUAGE-spec-per-S278-and-the-Rule-4b-provenance-honestly-records-the-undeliberated-band note=lands-a-normative-SHALL-with-ZERO-conformance-cases-against-the-projects-own-merge-blocker-rule-AND-against-the-PRs-own-argument-that-the-wire-framing-exists-precisely-so-a-case-can-pin-it -->
+<!-- @review pr=459 verdict=carve-out by=S328-bryan date=2026-08-07 probe=file-set-enumerated-eleven-claude-maps-files-only-wrap-6c-maps-refresh-no-code-path -->
+<!-- @review pr=457 verdict=carve-out by=S328-bryan date=2026-08-07 probe=file-set-enumerated-changelog+handoff+deltalog-only-S327-peter-wrap-continuity-no-code-path -->
+<!-- @review pr=456 verdict=finding by=S328-bryan date=2026-08-07 probe=S239-pass-plus-PA-reproduction-compiled-and-inspected-emitted-JS-confirmed-scrml-el-2-appendChild-scrml-each-mv-3-puts-a-mount-span-INSIDE-a-textarea-whose-value-is-its-child-TEXT-content-so-textarea-value-is-empty-string-and-adopter-text-vanishes-happy-dom-masked-it-because-its-value-getter-falls-back-to-textContent note=g-each-shorthand-restricted-parent-silent-data-loss-plus-undeclared-newly-accepting-lowering-change-plus-a-SPEC-contradicted-rationale-now-durable-in-three-places-fix-in-flight -->
+<!-- @review pr=451 verdict=carve-out by=S328-bryan date=2026-08-07 probe=file-set-enumerated-changelog+handoff+deltalog-only-S325-peter-wrap-continuity-no-code-path -->
+<!-- @review pr=450 verdict=finding by=S328-bryan date=2026-08-07 probe=S239-pass-differential-harness-reverted-only-emit-html-ts-to-b6d77ec-parent-compiled-14-reproducers-through-BOTH-compilers-executed-in-happy-dom-AND-real-Chromium-with-javaScriptEnabled-false-for-the-pre-hydration-paint-confidentiality-checked-FIRST-and-CLEAN-payload-unchanged-md5-of-style-stripped-html-identical note=FIVE-findings-silent-no-op-duplicate-style-attribute-plus-wrong-hide-from-module-init-writes-plus-fail-open-to-fail-closed-dead-UI-inside-engine-match-plus-spelling-divergence-plus-a-FALSE-SPEC-citation-11388-11389-are-the-section-header-and-a-blank-line-REVERTED-by-operator-ruling-in-464 -->
+<!-- @review pr=448 verdict=carve-out by=S328-bryan date=2026-08-07 probe=file-set-enumerated-known-gaps-only-MED-lane-triage-sweep-no-code-path -->
+<!-- @review pr=447 verdict=finding by=S328-bryan date=2026-08-07 probe=S239-pass-plus-PA-reproduction-compiled-two-arms-differing-ONLY-by-identifier-name-good-shade-returns-alpha-bad-formatted-returns-null-plus-independently-reproduced-the-derived-cell-path-where-BOTH-arms-emit-with-no-return note=FOUR-findings-the-keyword-boundary-was-INSIDE-the-alternation-fencing-only-on-so-formatted-matched-for-a-loud-to-silent-REGRESSION-fixed-in-463-plus-the-fix-covers-only-1-of-5-value-position-paths-plus-empty-arm-yields-object-not-void-with-the-authors-own-void-handler-unreachable -->
 
 <!-- @review pr=442 verdict=finding by=S322-bryan date=2026-08-06 probe=THREE-adversarial-rounds-TWO-do-not-lands-round1-the-mitigation-blinded-the-drain-to-EVERY-block-error-arm-55-arms-in-17-files-incl-stdlib-auth-jwt-newly-accepting-and-undeclared-round2-rescoped-still-wrong-because-the-gate-is-ARM-granular-while-the-hazard-is-SITE-granular-worst-case-a-library-nested-arm-at-an-AWAITABLE-position-emitted-safeCallAsync-bare-so-the-error-arm-could-never-run-round3-measured-the-false-positive-population-FIRST-at-0-of-1878-and-REMOVED-the-mitigation-entirely-final-1878-sources-7254-artifacts-0-content-diffs-syntax-delta-0-under-all-three-goggles-bare-sites-142-to-142 note=limb1-unification-cleared-in-round-1-and-never-moved-what-failed-twice-was-a-mitigation-for-a-false-positive-the-change-itself-created -->
 <!-- @review pr=441 verdict=carve-out by=S322-bryan date=2026-08-06 probe=docs-only-changelog-pr-reviews-handoff-deltalog-no-code-path-peters-S324-wrap-continuity -->
