@@ -1,0 +1,28 @@
+{
+  "id": "ctrl-020-show-ssr-hide-no-duplicate-style-pos",
+  "description": "§17.2 — REGRESSION GUARD (post-revert of #450, S328). A component-expansion root carrying a DQ-7 flat-declaration `#{}` block already emits an inline `style=\"…\"` that is NOT an `attrs` entry, so #450's freshness check missed it and emitted a SECOND `style` attribute — invalid HTML, and real Chromium DROPS the second one, making the fix a silent no-op (happy-dom merges them and hid this). The mechanism was REVERTED at S328. This now pins the post-revert contract: the flat-`#{}` root renders with its OWN single style attribute and no injected hide.",
+  "language-version": "1.0",
+  "spec": "§17.2",
+  "source-test": "compiler/src/codegen/emit-html.ts",
+  "rationale": "§17.2 (SPEC.md:11396-11397) mandates a `display: none` toggle for the false end-state; it says nothing about first-paint timing, so the SSR hide is permissible but unmandated and must never make the emitted document worse. An element with two `style` attributes is not well-formed HTML, and the engine-dependent resolution is precisely the kind of unprovable first-paint outcome the governing S328 invariant forbids: SSR-emit `display:none` ONLY when it is provably correct at first paint; every uncertainty FAILS OPEN.\n\nThere is now exactly ONE merge point deciding WHERE the hide goes (a fresh attribute, the flat-`#{}` style, or the author `style=`), and it is exclusive — when an element has TWO independent style sources the mode is 'off' and nothing is hidden, because no single attribute can be proven to win.\n\nORACLE: emitted BYTES, deliberately. `firstPaint` asserts substring containment on the composed first-paint STRING before any DOM parse. A DOM-level assertion would be answered by happy-dom, which merges duplicate `style` attributes and therefore reports the pre-fix defect as working — the single most important reason this case is written against bytes.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "Alice"
+        }
+      ]
+    },
+    "firstPaint": {
+      "contains": [
+        "data-scrml=\"Card\""
+      ],
+      "notContains": [
+        "display:none"
+      ]
+    }
+  }
+}

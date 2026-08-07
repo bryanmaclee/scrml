@@ -1109,68 +1109,6 @@ function treeHasAuthorMain(root: any): boolean {
 }
 
 /**
- * g-show-false-flashes-pre-hydration (§17.2) — build a map of top-level reactive
- * cell name -> its SSR-determinable INITIAL boolean value, for cells declared
- * exactly once as a plain `bool` state-decl with a boolean-LITERAL initializer.
- *
- * SPEC §17.2 mandates the `show=`-hidden end-state UNCONDITIONALLY (SPEC.md:11388):
- * the element EXISTS in the DOM; when `expr` is false it is hidden via a
- * `display:none` toggle. The `show=` emit sites consult this map so that when the
- * predicate's INITIAL value is a determinable `false`, they ALSO emit an inline
- * `display:none` — making the first SSR paint match the end-state the controller
- * would settle on, instead of painting visible then collapsing (FOUC).
- *
- * Determinability is deliberately CONSERVATIVE (a wrong hide is worse than a
- * missed one): only a `structuralForm` PLAIN state-decl whose `initExpr` is a
- * boolean literal qualifies. Any cell that appears more than once (a re-declare
- * or a top-level `@name =` reassignment — which could flip the module-init value)
- * is dropped to indeterminate and left entirely to the runtime controller.
- * Mirrors the AST-walk shape of `buildReactiveTypeMap` (emit-bindings.ts).
- */
-function buildInitialBoolMap(fileAST: any): Map<string, boolean> {
-  const result = new Map<string, boolean>();
-  const indeterminate = new Set<string>();
-  const topNodes: any[] = fileAST?.nodes ?? (fileAST?.ast ? fileAST.ast.nodes : []) ?? [];
-  const visit = (nodes: any[]): void => {
-    for (const node of nodes) {
-      if (!node || typeof node !== "object") continue;
-      if (node.kind === "logic" && Array.isArray(node.body)) {
-        for (const stmt of node.body) {
-          if (!stmt || stmt.kind !== "state-decl" || !stmt.name) continue;
-          const nm: string = stmt.name;
-          if (indeterminate.has(nm)) continue;
-          if (result.has(nm)) {
-            // Second appearance of a cell we thought determinable — a redeclare or
-            // reassignment could change the module-init value. Give up on it.
-            result.delete(nm);
-            indeterminate.add(nm);
-            continue;
-          }
-          const ie: any = stmt.initExpr;
-          const isPlainBoolLit =
-            stmt.structuralForm === true &&
-            stmt.shape === "plain" &&
-            ie && ie.kind === "lit" && ie.litType === "bool" &&
-            typeof ie.value === "boolean";
-          if (isPlainBoolLit) {
-            result.set(nm, ie.value as boolean);
-          } else {
-            // A non-determinable declaration/reassignment of this name.
-            indeterminate.add(nm);
-          }
-        }
-      }
-      if (Array.isArray(node.children)) visit(node.children);
-      // Recurse non-logic containers (markup children handled above; engine/match
-      // arm bodies). A logic node's `body` is its statement list, already walked.
-      if (node.kind !== "logic" && Array.isArray(node.body)) visit(node.body);
-    }
-  };
-  visit(topNodes);
-  return result;
-}
-
-/**
  * Generate HTML from markup AST nodes.
  * Also populates the BindingRegistry for client JS wiring.
  */
@@ -1366,12 +1304,6 @@ export function generateHtml(
   // Walk the AST top-level (mirrors emit-bindings.ts §53.7.2 path) — works whether
   // or not SYM populated _scope, so test fixtures without scope still get attrs.
   const reactiveTypeMap: Map<string, string> = fileAST ? buildReactiveTypeMap(fileAST) : new Map();
-
-  // g-show-false-flashes-pre-hydration (§17.2) — cell name -> SSR-determinable
-  // initial boolean value, consulted at the `show=@var` emit site to decide
-  // whether to SSR-hide (inline `display:none`) so the first paint matches the
-  // §17.2 hidden end-state instead of flashing visible before hydration.
-  const initialBoolMap: Map<string, boolean> = fileAST ? buildInitialBoolMap(fileAST) : new Map();
 
   // errorBoundary (SPEC §19.6) — per-file variant -> renders-markup map, built
   // once. Keyed by enum type name; each entry maps variant name -> raw renders
@@ -3051,47 +2983,6 @@ export function generateHtml(
         }
       }
 
-      // g-show-false-flashes-pre-hydration (§17.2) — decide, ONCE per element,
-      // whether a `show=` predicate's INITIAL value is SSR-determinable false and,
-      // if so, HOW to inject `display:none` so the first SSR paint matches the
-      // §17.2 hidden end-state (no FOUC). Byte-inert for every element without a
-      // determinably-false `show=` (both flags stay false → no emission change).
-      let _showInjectFreshStyle = false; // no author style → append ` style="display:none"`
-      let _showMergeIntoStyle = false;   // static author style= → merge `;display:none` in
-      {
-        const _showAttr = attrs.find((a: any) => a && a.name === "show");
-        const sv: any = _showAttr && _showAttr.value;
-        let hideForShow = false;
-        if (sv) {
-          if (sv.kind === "variable-ref" && typeof sv.name === "string" && sv.name.startsWith("@")) {
-            // `show=@cell` — determinable only for a simple (non-dotted) cell whose
-            // top-level initial value is a boolean-literal false.
-            const showVar = sv.name.replace(/^@/, "");
-            if (!showVar.includes(".") && initialBoolMap.get(showVar) === false) hideForShow = true;
-          } else if (sv.kind === "expr") {
-            // `show=(false)` / `show=${false}` — syntactic: the exprNode is a false bool literal.
-            const en: any = sv.exprNode;
-            if (en && en.kind === "lit" && en.litType === "bool" && en.value === false) hideForShow = true;
-          }
-        }
-        if (hideForShow) {
-          const _styleAttr = attrs.find((a: any) => a && a.name === "style");
-          if (!_styleAttr) {
-            _showInjectFreshStyle = true;
-          } else {
-            const stv: any = _styleAttr.value;
-            const isStaticLit =
-              stv && stv.kind === "string-literal" && !hasTemplateInterpolation(stv.value);
-            const alreadyHasDisplay = isStaticLit && /(?:^|;)\s*display\s*:/i.test(String(stv.value));
-            // Constraint: merge only into a static author style that does not already
-            // set `display`. A reactive/interpolated style, or one that already sets
-            // `display`, is left untouched (prefer the author style; never clobber)
-            // and the runtime controller owns first-paint for that element.
-            if (isStaticLit && !alreadyHasDisplay) _showMergeIntoStyle = true;
-          }
-        }
-      }
-
       for (const attr of attrs) {
         if (!attr) continue;
         const name: string = attr.name;
@@ -3221,11 +3112,6 @@ export function generateHtml(
                 directiveIsFormValue,
               });
             }
-          } else if (name === "style" && _showMergeIntoStyle) {
-            // g-show-false-flashes-pre-hydration (§17.2) — MERGE `display:none` into
-            // the author's static inline style (do NOT clobber). Precompute already
-            // guaranteed this style is a static literal that does not set `display`.
-            parts.push(` ${name}="${escapeHtmlAttr(String(val.value) + ";display:none")}"`);
           } else {
             parts.push(` ${name}="${escapeHtmlAttr(val.value)}"`);
           }
@@ -3241,10 +3127,6 @@ export function generateHtml(
             const placeholderId = genVar(`attr_${name}`);
             const dataAttr = name === "show" ? "data-scrml-bind-show" : "data-scrml-bind-if";
             parts.push(` ${dataAttr}="${placeholderId}"`);
-            // g-show-false-flashes-pre-hydration (§17.2) — SSR-hide when the show
-            // predicate's initial value is a determinable false and the element has
-            // no author style to merge into. (Merge case handled at the style= emit.)
-            if (name === "show" && _showInjectFreshStyle) parts.push(` style="display:none"`);
             if (registry) {
               const ifVarName = varName.replace(/^@/, "");
               const ifBaseVar = ifVarName.split(".")[0];
@@ -3317,10 +3199,6 @@ export function generateHtml(
             const placeholderId = genVar(`attr_${name}`);
             const dataAttr = name === "show" ? "data-scrml-bind-show" : "data-scrml-bind-if";
             parts.push(` ${dataAttr}="${placeholderId}"`);
-            // g-show-false-flashes-pre-hydration (§17.2) — SSR-hide a `show=(false)`
-            // (or other statically-false expr) element with no author style. (Merge
-            // into an existing static style= is handled at the style= emit below.)
-            if (name === "show" && _showInjectFreshStyle) parts.push(` style="display:none"`);
             if (registry) {
               registry.addLogicBinding({
                 placeholderId,
