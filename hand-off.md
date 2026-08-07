@@ -1,4 +1,164 @@
 <!-- ============================================================= -->
+<!-- S328 WRAP (bryan/ASUS-Vivobook) — prepended 2026-08-07.        -->
+<!-- SOLO throughout (S326-bryan + S327-peter both wrapped).        -->
+<!-- Mechanical stream = delta-log [1257]-[1271].                   -->
+<!-- ============================================================= -->
+
+# scrml — Session 328 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-08-07. `/boot` Profile A FULL. **4 PRs merged** (#463 #464 #465 #466).
+main `18fc0571` → **`6f176c0d`**, coherence 0/0 both repos.
+**Gaps HIGH 23 · MED 125 · LOW 55 · Nominal 7.** Conformance **865/865**. Review floor **0 OWED**.
+Thread-board **33 tracked · 3 open · 30 done · 0 ERROR**. Adopter issues 0. Inbox empty.
+
+## 🔴 READ FIRST
+
+**1. The freeze campaign is still PAUSED.** Nothing this session changed that.
+
+**2. There is no inherited backlog and no rescue owed.** All four PRs are merged, all worktree work
+is either landed or explicitly retained below, and every finding is FILED (9 new gap entries).
+
+**3. ⛔ The one thing that is genuinely yours: `g-match-block-empty-arm-yields-object-not-void`.**
+An agent MEASURED **11 corpus sites** before crashing. Changing `{}` → void is a migration with a
+direction-of-change decision attached, not a fix a PA takes. The count is real; **the file list needs
+re-deriving** — the agent died before reporting it. This is item 7 of SEVEN owed (list at the bottom).
+
+## 🎯 THE ARCS
+
+**0 — "should we graphify this repo?" was a BANKED question, not a new one.** A corpus sweep found
+S299 ruled *"run the trial on the next brief"* and S301 recorded **"DEFERRED — `uv` absent."** S299 and
+S301 are **the same machine one day apart** and contradict each other. Today matches S299. Cause
+reproduced: `uv` lives only in `~/.local/bin`, so a non-profile shell reports NOT FOUND, and **no
+python3.11 exists on this disk at all**. A **29-session deferral on a probe error.**
+**Trial verdict: DECLINE** (2 ANSWER / 3 MISS; 2 of 3 misses returned confident garbage). Its
+by-product is worth more than the verdict: `api.js:2409` `const _runCG = selfHostModules?.runCG ?? runCG`
+**orphans the entire Stage-8 codegen subtree from `compileScrml` for any static call-graph tool** — and
+that idiom is our self-hosting indirection. Full record: delta `[1258]`/`[1259]`.
+
+**1 — the review floor drained, and it paid for itself immediately.** 9 owed → 0. **3 of 3
+code-bearing PRs carried CONFIRMED defects**, all merged unreviewed, all past green suites: #447 a
+loud→silent regression, #456 silent data loss, #450 five findings including a **false SPEC citation**.
+13 findings, 10 confirmed. Every one is now either fixed, reverted, or filed.
+
+**2 — #463, the §18.5 keyword fence.** Salvaged from a twice-crashed dispatch whose work was complete
+and uncommitted. **Its own adversarial pass found a hole in it and proved my commit message false** — I
+claimed `on` was "fully fenced"; `\b` is defined against `\w`, which excludes `$`, while scrml's
+`isIdentPart` includes it. Re-fenced on the language's OWN charset. Root, not twelve positions.
+
+**3 — #464, the `show=` revert (bryan RULED).** **My earlier recommendation of patch-forward was
+wrong.** The argument that moved it: for a hide to be *syntactically* provable the cell must never be
+written — but a cell never written is **never revealed**, so the safe gate refuses exactly the cases
+where the flash matters. Measured benefit: **zero** (9 `show=` sites, gate fires on 1, that one inert).
+The dispatched agent **recommended reverting its own completed patch, with evidence.** Finding
+preserved as `g-show-attr-has-no-ssr-first-paint-contract`.
+
+**4 — #466, the `<textarea>` data loss.** The S239 pass returned **DO-NOT-LAND by checking the agent's
+own defence, which split**: *"extends a shipped ruling (6nz-F4)"* is TRUE for `<textarea>` and FALSE
+for `<option>`, whose longhand never stringified. The first cut traded a correct label for
+`[object HTMLElement]`. Re-scoped to RCDATA only; `<option>` restored and verified byte-identical.
+
+**5 — #465, and a question ANSWERED that had been open since S319.** The carve-out alarm's denominator
+could not distinguish a docs-heavy stretch from evasion. Measured: **code-bearing 1/28 = 4%**,
+docs-only 45/48 = 94%. **The alarm is a docs-VOLUME artifact.** Read the all-PR figure as a volume
+statistic; if the code-bearing rate ever leaves single digits, THAT is the number to act on. The single
+code-bearing carve-out is **#397 — `scripts/review-debt.ts` itself**, the floor's own instrument.
+
+## 🧭 FINDINGS THAT OUTLAST
+
+1. **FIVE instances of a test oracle sharing its implementation's blind spot, in one session.** #447's
+   own new conformance cases used `base`/`b` identifiers that **dodge its own bug**. #456's browser test
+   ran on happy-dom, whose `.value` falls back to `textContent`. #450's duplicate-`style` defect is
+   invisible because happy-dom **merges** duplicate attributes where Chromium **drops** one. #456's
+   `0/7260` differential was a coverage artifact. And #466's first cut was checked against an oracle
+   where `String(el)` returns `outerHTML`. **When a fix and its test are authored together, the test
+   inherits the fix's model of the bug.** An independent oracle is not optional.
+2. **THREE stale probes found, and THREE more created by me.** Found: graphify's PATH artifact (29
+   sessions), `marketing-claim-gate`'s 31s-in-a-10s-budget (27 sessions), and `git branch --merged`
+   (S326's, still owed). Created: a `\w+` that truncated `carve-out` to `carve`; a `head -14` on a
+   13-file listing; an un-gated `echo "pushed"` after a FAILED push. **The class is not rare and it is
+   not other people's — it is the default failure mode of any probe written in a hurry.**
+3. **⚑ THE WORKTREE PROBE, TWICE WRONG, IS THE SHARPEST ONE.** First cut lost PATH in a `while read`
+   subshell — every command not-found — and printed **`PRUNE` for all nine worktrees**. Second cut used
+   `git diff origin/main...<branch>`, a three-dot diff against the MERGE-BASE, which reports a branch's
+   own changes even when the content landed by file-delta — so it printed **`RETAIN` for all nine.**
+   Only a per-file **content compare** (`git show branch:f` vs `git show main:f`) gives the true answer:
+   2 prunable, 7 not. **Two plausible probes, two opposite wrong answers, both well-formed.** The
+   dry-run discipline is the only reason nine worktrees still exist.
+4. **A revert can preserve MORE than it removes.** #464 discarded #450's patch but kept four
+   conformance cases as guards — and **two of them FAILED post-revert** because they asserted positive
+   `display:none`. Rewritten to assert absence with a positive anchor, then bite-proven. **Verify that
+   preserved tests transfer; do not assume it.**
+5. **Sustained API instability, six agent deaths, none a task failure.** Every one resumed, never
+   re-dispatched; two had complete uncommitted work salvaged. The watchdog stall taught the sharper
+   lesson: my brief warned about `git commit` only, but `bun install` and `bun run test` are equally
+   silent and equally fatal. **Background EVERY long command.**
+
+## ⚠️ OWN MISSES — recorded, not smoothed
+
+- **I recommended patch-forward on #450 and was wrong.** The structural argument that killed it was
+  available before I dispatched; I did not see it until an agent built the thing and measured its yield
+  at zero. The build produced the argument, so it was not wasted — the recommendation was.
+- **Three probe defects of my own** (above), all inside work built to catch that class.
+- **I claimed `on` was "fully fenced" in a commit message. It was false as written.** Its own
+  adversarial pass caught it; I amended before landing.
+- **I said the four preserved conformance guards would transfer. Half did not.**
+- **I told bryan I would file the #447/#456 follow-ups, then nearly wrapped without doing it** — caught
+  by grepping the ledger for my own promises rather than trusting memory. 8 entries filed at wrap.
+- **A near-miss lost update:** the #456 file-delta staged `docs/pr-reviews.md` at **−42 lines**,
+  silently reverting the review-floor record I had just landed. Caught by pa-base §7 (*a file the brief
+  did NOT name is likely a stale view*), not by any gate — both versions are well-formed.
+
+## 🧷 STATE / OPEN
+
+**⛔ Owed by bryan — SEVEN, in the order I would take them** (items 1-6 unchanged from S326):
+1. `_scrml_reset` awaits its thunk (HIGH) — decide WITH option C's reasoning.
+2. `g-session-context-scan-bare-form-sound` (Peter's routed #2, newly-rejecting).
+3. `g-session-get-reserved-key-read-disclosure` — own-key read policy only; MED.
+4. `g-match-nofor-block-form-skips-exhaustiveness` — inherited from S288.
+5. **dpa-023's `pending` rung** — axiom-level, advisory, unratified.
+6. **dpa-022's routed fork** — whole-cell read-set extension; axiom-level.
+7. **NEW — `g-match-block-empty-arm-yields-object-not-void`** — 11 corpus sites measured; a MIGRATION,
+   not a fix. Re-derive the file list first.
+
+Items 5-6 go one-at-a-time by the no-batch-axioms floor and deserve a warm session.
+
+**Next execution pickup (no ruling needed):** `g-match-block-arm-value-lift-covers-one-of-five-paths`
+(MED) — #463 fixed 1 of 5 value-position paths; the derived-cell path is PA-reproduced and the
+multi-scrutinee case is the *same surface* routed around by the §18.19 delegation. Cleanest next fix.
+
+**Worktrees: 7 retained, all pre-existing or deliberately kept.** Two pruned (content landed, zero
+divergence). **`agent-ab561bbe20ad4ced7` is retained ON PURPOSE** — it holds #450's complete, green,
+fail-open patch that bryan ruled against. Recoverable if the FOUC question reopens; delete only if the
+gap is closed by another route.
+
+**PA-side, not blocking:** the S326 `git branch --merged` worktree-sweep gap now has a WORKING
+replacement predicate (per-file content compare) proven in this session — worth folding into
+`scripts/worktree-disposition.ts` when that gets built. And the overlay's `{{verify_fills}}` note
+should be updated: the carve-out alarm is no longer UNPROVEN.
+
+## 🔀 CONCURRENCY — S329-peter collided with this session, and the collision is informative
+
+Peter booted mid-session and **chose the review floor**, which is NOT lane-partitioned — it is a shared
+obligation over the common merged-PR history. Result: 3 collisions, duplicated work, and his **#462
+CLOSED as superseded** by my #463. His own board records the lesson and a memory
+(`review-floor-is-shared-surface-collides-with-live-bryan`): adopter bugs and verified MED gaps are
+disjoint from a live bryan; the review floor is not.
+
+**⚑ The part worth keeping is not the collision — it is that TWO INDEPENDENT REVIEW PASSES OVER THE
+SAME PRs REACHED DIFFERENT VERDICTS.** Peter's pass returned **`clean` on #450 and `clean` on #456**.
+Mine returned **five findings on #450** (incl. a false SPEC citation, a silent no-op, a wrong-hide, and
+fail-open→fail-closed dead UI) and **four on #456** (incl. the silent data loss that #466 fixes). His
+board states it plainly: *"bryan's parallel #465 discharged the whole review floor AND found defects my
+pass missed on #450/#456."*
+
+**A `clean` verdict is a claim about the DEPTH of the pass, not about the PR.** Both passes ran; one
+executed reproducers in real Chromium with JS disabled and diffed emitted artifacts against a reverted
+compiler, the other did not. The floor's marker vocabulary cannot express that difference — `clean` from
+a shallow pass and `clean` from a deep one are the same token, and the ledger's `probe=` field is the
+only place the difference lives. **When reading the ledger, read `probe=`, not `verdict=`.** Worth
+considering whether the floor needs a depth signal; not proposing one unasked.
+
+<!-- ============================================================= -->
 <!-- S326 WRAP (bryan/ASUS-Vivobook) — prepended 2026-08-07.        -->
 <!-- CONCURRENT with S325-peter AND S327-peter throughout; main     -->
 <!-- moved under me five times. Disambiguate sessions by NAME.      -->
