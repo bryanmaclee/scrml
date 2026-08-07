@@ -91,10 +91,16 @@ documentation, which is the part worth carrying: I shipped a comment telling the
 
 **Answered:** the stranded-PR fork → **(c) then (a)**. (c) landed as #454; (a) went moot.
 
-**⛔ Still owed by bryan, in the order I would take them:**
+**⛔ Still owed by bryan — SEVEN, in the order I would take them:**
+0. **`g-response-contract-shall-has-no-spec-home`** (NEW, wrap-6c) — #452 landed a normative
+   *"Route handlers SHALL return a `Response`"* that **SPEC.md does not contain**; my commit cited §12.5
+   and §12.5 does not say it. No diagnostic code enforces it, so a source comment is the only place the
+   rule exists — a second implementation reading the SPEC would not know, and conformance cannot pin it.
+   ~4 lines (a §12.5.3 bullet + `provenance:`) converts the session's best-verified work into canon.
+   **Listed first because it is the cheapest and the most perishable.**
 1. **`_scrml_reset` awaits its thunk** (HIGH `g-reset-writes-pending-promise-when-init-thunk-calls-a-server-fn`) — decide WITH option C's reasoning.
 2. **`g-session-context-scan-bare-form-sound`** (Peter's routed #2, newly-rejecting).
-3. **`g-session-get-reserved-key-read-disclosure`** — the read-side `.get()` guard, `semantics-changed`. Severity re-affirmed MED this session; the GUARD is the open question, not the number.
+3. **`g-session-get-reserved-key-read-disclosure`** — **the ruling is NARROWER than it was.** #452 also hardened the accessor with `Object.hasOwn`, so the prototype-chain half is CLOSED (found at wrap-6c; it had executed unmarked). What remains is the **own-key read policy only** — may `.get(k)` with a request-controlled `k` return arbitrary adopter-written session keys. Severity MED on an unchanged attacker model.
 4. **`g-match-nofor-block-form-skips-exhaustiveness`** — inherited from S288.
 5. **dpa-023's `pending` rung** — axiom-level, advisory, unratified.
 6. **dpa-022's routed fork** — whole-cell read-set extension; fail-open→fail-closed, newly-rejecting, needs 3 carve-outs. Axiom-level.
