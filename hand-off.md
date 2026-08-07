@@ -1,4 +1,116 @@
 <!-- ============================================================= -->
+<!-- S326 WRAP (bryan/ASUS-Vivobook) — prepended 2026-08-07.        -->
+<!-- CONCURRENT with S325-peter AND S327-peter throughout; main     -->
+<!-- moved under me five times. Disambiguate sessions by NAME.      -->
+<!-- Mechanical stream = delta-log [1235]-[1248] (NOT [1218]+ —     -->
+<!-- see the numbering-collision note below).                       -->
+<!-- ============================================================= -->
+
+# scrml — Session 326 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-08-06/07. `/boot` Profile A FULL. **6 PRs merged** (#449 #452 #453 #454 #455 #458).
+main `13edcfbf` → **`cf1849b2`**, coherence 0/0 both repos.
+**Gaps HIGH 23 · MED 119 · LOW 49 · Nominal 7.** Review floor **0 OWED**. Adopter issues **0**.
+
+## 🔴 READ FIRST
+
+**1. The freeze campaign is still PAUSED.** Nothing this session changed that.
+
+**2. Everything S325 left blocked is LANDED.** Both inherited arcs (#449 docs, #452 bare-return) and
+the mangler arc (#458) are on main. **There is no inherited backlog.** Start from the open-questions
+block below, not from a rescue.
+
+**3. If CI looks dead again, read `[1219]` before doing anything.** The probe is NOT `gh run list` —
+it is whether a **`github-actions` check-suite exists on the head SHA**. The `render`/`github-pages`/
+`claude` suites are `queued` on every commit ever and mean nothing. And we now have a lever:
+`gh workflow run CI --ref <branch>` — but **only for branches that already carry the trigger**
+(cut/rebased after `b21e0c84`); older refs return HTTP 422. Prospective, not retroactive.
+
+## 🎯 THE ARCS
+
+**1 — the bare-return HIGH (#452).** Inherited fully reviewed; landed without re-review per S325's
+instruction, after confirming NIL base-drift and re-reading the fix-round delta. Flipped to RESOLVED on
+my **own** R26. Residual recorded on the entry: a hand-built `Response` bypasses the RUNTIME redaction
+floor by design and relies on §14.8.9's compile-time check; currently unreachable via `E-SCOPE-001`.
+
+**2 — the mangler arc (#458), and the S239 gate is the story.** Three defects fixed by REGION
+exclusion rather than a sixth lookaround. The dev-agent self-reported green; **two independent
+adversarial lenses converged on the same regression** — the binding-pattern fence was a HALF-REPAIR,
+restoring the *binding* while the pass still rewrote the uses it SHADOWS, converting a loud `TypeError`
+into a **silent wrong answer**. A second lens found `{__proto__}` expansion silently mutating
+`[[Prototype]]`. Both fixed by REMOVAL, which is the right direction under every fork-rule row.
+**The defect class is NOT closed and the entry stays `open`** — nested/spread/mixed/ternary-ALTERNATE
+shorthand remain, pinned in the suite at §2f. The asymmetry is the sharp part: the same expression
+compiles correctly on a ternary's consequent and incorrectly on its alternate.
+
+**3 — the outage, and the lever (#454).** See `[1219]`/`[1239]`. The bite proof corrected my own
+documentation, which is the part worth carrying: I shipped a comment telling the next PA to run
+`gh workflow run CI --ref <branch>`, then proved by testing that it 422s on any pre-existing branch.
+**An untested lever is a hypothesis; testing it is what made the doc true.**
+
+## 🧭 FINDINGS THAT OUTLAST
+
+1. **THREE probes in one session returned well-formed answers to questions nobody asked.** An R26 glob
+   that matched 2 of 25 emitted files and read as "the fix barely applied". A worktree probe whose
+   unquoted `-- $files` pathspec **zsh does not word-split**, so it measured nothing and reported all
+   nine worktrees LANDED — caught only because a live agent's branch was in the list. A delta-log
+   renumber that bumped in-prose REFERENCES along with labels, manufacturing a false continuity claim.
+   **The shape is always the same: the probe succeeds, the output is well-formed, and the answer is to
+   a different question.** Prefer `find` over globs on nested trees, `while IFS= read` over unquoted
+   expansion, and line-leading anchors over bare patterns.
+2. **`git branch --merged` is structurally wrong under a file-delta landing model** — and that is why
+   the stale-worktree sweep has been owed since S268. We copy CONTENT; the branch is never an ancestor;
+   the probe says "nothing prunable" forever and reads as "correctly found nothing". Filed MED with the
+   correct predicate. **Whenever a wrap step has been owed for many sessions, suspect its probe before
+   its backlog.**
+3. **The 600s dispatch stalls are not load.** The harness watches the OUTPUT STREAM; this repo's
+   post-commit hook re-runs the whole suite after pre-commit already did, so a foreground commit goes
+   silent ~9 minutes. Background the commit, poll `git log -1`. **Put this in every codegen brief** —
+   five stalls across three agents before it was understood, and the dev-agent diagnosed it, not me.
+4. **Two adversarial lenses converging independently is the strongest signal this gate produces.** It
+   is also what justified overruling the dev-agent's "measured population ZERO" — a corpus census is
+   not a structural argument, and both reviewers constructed the shape trivially.
+5. **Agents corrected the PA four times, all by measurement**: the `" "` alternation example I relayed
+   is wrong (contradictory lookaround); the interior-comment residual is not reachable from source; the
+   `__proto__` fix must skip the whole REGION because a stranded bare `__proto__` is engine-dependent;
+   and `progress.md` existed where the brief said, not where I looked.
+
+## ⚠️ OWN MISSES — recorded, not smoothed
+
+- **I diagnosed the stalls as my own concurrent load and said so to bryan. Wrong** — it was the
+  post-commit double-run. A plausible cause sitting next to the real one.
+- **Three probe errors, all mine** (above). The worktree one is the worst: run between dispatches it
+  would have said "prune everything" with a straight face.
+- **I recommended nudging Peter's four stranded PRs. Unnecessary** — they merged themselves once the
+  backlog drained onto his armed auto-merge. The permission classifier that blocked me was protective.
+  **Waiting was the cheaper correct move and I did not propose it.**
+- I renumbered the delta-log with a bare pattern and corrupted a reference; caught by re-reading, not
+  by a gate.
+
+## 🧷 STATE / OPEN — all seven surfaced to bryan one at a time; ONE was answered
+
+**Answered:** the stranded-PR fork → **(c) then (a)**. (c) landed as #454; (a) went moot.
+
+**⛔ Still owed by bryan — SEVEN, in the order I would take them:**
+0. **`g-response-contract-shall-has-no-spec-home`** (NEW, wrap-6c) — #452 landed a normative
+   *"Route handlers SHALL return a `Response`"* that **SPEC.md does not contain**; my commit cited §12.5
+   and §12.5 does not say it. No diagnostic code enforces it, so a source comment is the only place the
+   rule exists — a second implementation reading the SPEC would not know, and conformance cannot pin it.
+   ~4 lines (a §12.5.3 bullet + `provenance:`) converts the session's best-verified work into canon.
+   **Listed first because it is the cheapest and the most perishable.**
+1. **`_scrml_reset` awaits its thunk** (HIGH `g-reset-writes-pending-promise-when-init-thunk-calls-a-server-fn`) — decide WITH option C's reasoning.
+2. **`g-session-context-scan-bare-form-sound`** (Peter's routed #2, newly-rejecting).
+3. **`g-session-get-reserved-key-read-disclosure`** — **the ruling is NARROWER than it was.** #452 also hardened the accessor with `Object.hasOwn`, so the prototype-chain half is CLOSED (found at wrap-6c; it had executed unmarked). What remains is the **own-key read policy only** — may `.get(k)` with a request-controlled `k` return arbitrary adopter-written session keys. Severity MED on an unchanged attacker model.
+4. **`g-match-nofor-block-form-skips-exhaustiveness`** — inherited from S288.
+5. **dpa-023's `pending` rung** — axiom-level, advisory, unratified.
+6. **dpa-022's routed fork** — whole-cell read-set extension; fail-open→fail-closed, newly-rejecting, needs 3 carve-outs. Axiom-level.
+
+Items 5–6 go one-at-a-time by the no-batch-axioms floor regardless, and deserve a warm session.
+
+**PA-side, not blocking:** a delta-log uniqueness/monotonicity probe (recommended FILE, not build) and
+`scripts/worktree-disposition.ts` per the new MED.
+
+<!-- ============================================================= -->
 <!-- S327 WRAP (peter/P-Tech1 Windows) — prepended 2026-08-07.      -->
 <!-- Solo (S326-bryan idle/wrapped). Mechanical = delta-log         -->
 <!-- [1227]-[1234]. main 2031b2bf.                                  -->

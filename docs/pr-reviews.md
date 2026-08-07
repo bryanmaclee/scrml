@@ -426,3 +426,74 @@ The rebase also folded in a `master-list.md` `@generated:recent-sessions` regen,
   detection signature (`createTextNode("…${…")`) really is obsolete on this path. Deferral is justified
   on blast radius; the fix direction it hands forward (thread the interp part's real span at
   `ast-builder.js:4258` so the `:4231` adjacency test fires) is actionable.
+
+<!-- @review pr=449 verdict=carve-out by=S326-bryan date=2026-08-07 probe=file-set-enumerated-6-files-all-docs-zero-code-paths -->
+
+- **#449** — **CARVE-OUT (docs-only).** Enumerated rather than trusted by title: `docs/changelog.md`,
+  `docs/changes/limb2-mangler-retirement/SCOPING.md`, `docs/changes/mangler-three-defects/BRIEF.md`,
+  `docs/known-gaps.md`, `docs/pr-reviews.md`, `hand-off.md`, `handOffs/delta-log.md` — zero code paths.
+  Inherited from S325 fully authored; merged under bryan's in-session authorization.
+
+<!-- @review pr=452 verdict=clean by=S326-bryan date=2026-08-07 probe=inherited-S239-two-lenses-at-frozen-2a7c4e9f-plus-PA-fix-round-review-plus-own-R26-on-merged-main -->
+
+- **#452** — **CLEAN.** Compiler source (`emit-server.ts` + 7 test files). **Reviewed, not waved
+  through, but deliberately NOT re-reviewed from scratch:** it went through the full S239 gate at S325
+  against the frozen `2a7c4e9f` with two independent adversarial lenses (four findings, all fixed),
+  then one fix round at `1dc7fd78`. This session I (a) confirmed NIL base-drift — main touched neither
+  `emit-server.ts` nor the six test files since the agent's base `cff2af5e`, so the wholesale pull was
+  the correct mechanic; (b) re-read the fix-round delta directly and confirmed it does not touch the
+  regions the structural findings covered; (c) ran my **own** R26 on the merged main before flipping
+  the gap — 25 emitted `.server.js`, 241 `return new Response`, 84 passthrough guards, zero
+  `Expected a Response`. Residual recorded on the gap entry (hand-built `Response` bypasses the runtime
+  redaction floor by design; currently unreachable via `E-SCOPE-001`).
+
+<!-- @review pr=453 verdict=carve-out by=S326-bryan date=2026-08-07 probe=single-file-docs-known-gaps-only-zero-code-paths -->
+
+- **#453** — **CARVE-OUT (docs-only).** `docs/known-gaps.md` only. Ledger currency: one gap flipped to
+  resolved on the PA's own R26, one reachability banner discharged with a deliberate NO-CHANGE
+  re-score, one new MED filed. No code path.
+
+<!-- @review pr=454 verdict=clean by=S326-bryan date=2026-08-07 probe=bite-proven-both-directions-422-on-stale-ref-and-green-dispatched-run-31140159467 -->
+
+- **#454** — **CLEAN, and bite-proven both directions.** `.github/workflows/ci.yml` only — a gate-config
+  change, which is exactly the class that must not be waved through on "it's just YAML". Verified it
+  **weakens no gate**: it adds a way to START a run, not to skip one; `gate` remains the sole required
+  check and `enforce_admins=true` is untouched. Proved the lever fires (`--ref main` → run
+  `31140159467`, **all three jobs green including `gate`**, which also confirms the `s34-census`
+  `HEAD~1` fallback survives a dispatched run) AND proved its limit (`--ref` a branch cut before the
+  merge → **HTTP 422**, because the dispatch reads the workflow from the target ref). **The proof
+  corrected the documentation shipped with it** — the comment as first written would have sent the next
+  PA into that 422; amended in #455 with the measured constraint.
+
+<!-- @review pr=455 verdict=carve-out by=S326-bryan date=2026-08-07 probe=two-files-delta-log-plus-ci-yml-comment-only-no-executable-change -->
+
+- **#455** — **CARVE-OUT.** `handOffs/delta-log.md` + a comment-only amendment to
+  `.github/workflows/ci.yml` (no executable change — the `on:` block is untouched; only the explanatory
+  comment gained the measured ref-constraint). No code path.
+
+<!-- @review pr=458 verdict=finding by=S326-bryan date=2026-08-07 probe=two-independent-adversarial-lenses-on-frozen-5cfc342e-converged-on-one-regression-plus-fix-round-plus-own-R26 -->
+
+- **#458** — **FINDING (two regressions caught pre-land, both fixed).** Compiler source
+  (`emit-client.ts`, `code-segments.ts`, `emit-functions.ts` + a new 674-line unit suite). Full S239
+  pass: two INDEPENDENT adversarial lenses on the frozen `5cfc342e`, dispatched with disjoint remits
+  (correctness/lost-coverage and blast-radius/downstream-contracts).
+
+  **They converged independently on the same primary regression** — the `binding-pattern` fence was a
+  HALF-REPAIR: it restored the *binding* to its source name while the pass still rewrote the uses those
+  bindings SHADOW, so the bindings went dead and calls resolved to the module-level function. Executed:
+  base threw a loud `TypeError`, the fenced version silently returned the **wrong value** — the exact
+  failure class the change exists to remove. A second lens independently found `{__proto__}` → 
+  `{__proto__: X}` silently mutating `[[Prototype]]` (ECMA-262 B.3.1; own keys 2→1). **Both fixed by
+  REMOVAL** in a fix round routed back to the same agent, then PA-reviewed directly rather than
+  re-dispatching two lenses for a subtraction.
+
+  The dev-agent's defence of the binding-pattern branch was *"measured population ZERO"* — **a corpus
+  census, not a structural argument**, and both reviewers constructed the shape trivially. Recording
+  that because it is the reusable lesson.
+
+  Verified after: coverage-removal reconciles exactly (rewrites 2332 → 1413, `919 = 781 + 138`, and the
+  pass now stops rewriting ZERO sites), corpus differential exactly two explained diffs, and my **own**
+  R26 on merged main by execution. **The defect class is NOT closed** and the entry stays `open`.
+
+<!-- Peter's #447 #448 #450 #451 #456 #457 remain OWED and are HIS to record (S325 lane precedent:
+     a session records its own merges). Surfaced in the S326 hand-off rather than absorbed silently. -->

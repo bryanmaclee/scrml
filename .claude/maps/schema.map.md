@@ -1,9 +1,12 @@
 # schema.map.md
 # project: scrml
 # updated: 2026-07-31T03:18:23Z  commit: fe14c9b2
-# NOTE (S302 pass): ONE addition — the `ifRaw`/`ifCond` fields on the three structural node kinds,
-# and the fact that TWO of those three kinds have NO interface in `ast.ts` at all. Everything else
-# carries its `115e8b1b` walk.
+# NOTE (S326 pass): **the AST half is DELIBERATELY still at `fe14c9b2` and that is an honest stamp, not
+# neglect** — `git diff fe14c9b2..97576f35 -- compiler/src/types` is EMPTY, six windows running. ONE
+# additive entry appended this pass, attributed at its own site: the NEW codegen-internal
+# `ObjectShorthandRegion` / `BraceGroupKind` shapes (#458, at `97576f35`). Prior S302 addition (the
+# `ifRaw`/`ifCond` fields on the three structural node kinds) and everything before it carry their own
+# earlier walks. An honest older stamp beats a false "verified at HEAD".
 
 The compiler's "schema" is its own AST, not an application data model. Root catalog:
 `compiler/src/types/ast.ts` (2104 lines, 114 exported interfaces/types, ~91 distinct `kind` discriminants — unchanged since fbb4d9fd/df2ac831; this window's schema-differ.js changes below added NO ast.ts shape, same as the S287 DB-authoritative tier before it). Read that file directly for the exhaustive list; this map groups it and calls out the load-bearing shapes.
@@ -12,7 +15,26 @@ The compiler's "schema" is its own AST, not an application data model. Root cata
 existing node kinds, or through codegen-internal / schema-differ-internal shapes that are NOT
 `ast.ts` types (the §38.6.2 constraint-drift record, the D-5 module-const candidate filter's reliance
 on `ConstDeclNode`/`LetDeclNode.initExpr`, `LogicBinding.directiveIsFormValue`, and the S302
-`ifRaw`/`ifCond` pair below).
+`ifRaw`/`ifCond` pair below), and now the #458 region shapes immediately below.
+
+## Codegen-internal region shapes — NOT `ast.ts` types (NEW #458, at `97576f35`)
+
+`compiler/src/codegen/code-segments.ts` exports two shapes that describe a region of EMITTED JS TEXT,
+not a source AST node. They are here so a `grep interface` in `compiler/src/` does not come back
+puzzled, and flagged as non-AST so nobody threads them through the node pipeline.
+
+- **`BraceGroupKind = "object-literal" | "binding-pattern" | "unknown"`** (:91) — the verdict of
+  `classifyBraceGroup(code, open, closeExclusive)`. **`"unknown"` is a first-class value with a
+  contract, not a null case: the caller SHALL leave its existing behaviour unchanged for that region.**
+- **`interface ObjectShorthandRegion`** (:93) — `{ start: number; end: number; kind: BraceGroupKind;
+  names: string[] }`. `start` indexes the opening `{` **within the code segment** (NOT the whole
+  buffer — offsets are segment-relative, which matters because the producer runs inside
+  `rewriteCodeSegments`); `end` is one past the closing `}`; `names` are the bare identifiers between
+  the braces in source order. Returned regions are non-overlapping and in source order.
+
+Sole producer: `findObjectShorthandRegions(code)` (:213). Sole consumer: `emit-client.ts`'s
+`rewriteCodeSegment` (:3038). See domain.map.md / dependencies.map.md for why only the
+`object-literal` kind is acted on.
 
 ## §17.1.2 — `ifRaw` / `ifCond` on the three structural node kinds (S302)
 
@@ -280,7 +302,7 @@ No `SessionDeclNode` exists — `session` is a reserved server-scope BUILTIN ide
 FunctionType [type-system.ts:423], MapType [:318] (with `.set?: boolean` for §59.12 value-native Set), PredicatedType [:468] (with `subsetVariants`), the `<fn-return>` over-approximation sentinel (`FN_RETURN_TYPE_NAME`, :754). NO `AnyType`/`null` member exists — `any` and `null` are not scrml types (§14.1.1 / null-does-not-exist axiom).
 
 ## Tags
-#scrml #map #schema #ast #types #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column #auto-immutable #is-effectively-immutable #e-schema-010 #lowering-functions #sql-literal-lowering #tenant-context-union #resolved-gaps #e-schema-011 #column-constraint-drift #references-hint #same-default-text #d5 #init-expr #logic-binding #directive-is-form-value #i225 #each-reconcile-ctx #if-cond #if-raw #structural-if #§17.1.2 #absent-not-null #parity-canary #field-set-comparison #untyped-structural-nodes #each-block #match-block #attr-value-identity
+#scrml #map #schema #ast #types #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column #auto-immutable #is-effectively-immutable #e-schema-010 #lowering-functions #sql-literal-lowering #tenant-context-union #resolved-gaps #e-schema-011 #column-constraint-drift #references-hint #same-default-text #d5 #init-expr #logic-binding #directive-is-form-value #i225 #each-reconcile-ctx #if-cond #if-raw #structural-if #§17.1.2 #absent-not-null #parity-canary #field-set-comparison #untyped-structural-nodes #each-block #match-block #attr-value-identity #object-shorthand-region #brace-group-kind #codegen-internal-shape #not-an-ast-node #segment-relative-offsets #unknown-is-a-contract
 
 ## Links
 - [primary.map.md](./primary.map.md)
