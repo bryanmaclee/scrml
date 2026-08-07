@@ -1,4 +1,62 @@
 <!-- ============================================================= -->
+<!-- S327 WRAP (peter/P-Tech1 Windows) — prepended 2026-08-07.      -->
+<!-- Solo (S326-bryan idle/wrapped). Mechanical = delta-log         -->
+<!-- [1227]-[1234]. main 2031b2bf.                                  -->
+<!-- ============================================================= -->
+
+# scrml — Session 327 (peter · P-Tech1 Windows) — WRAP
+
+**Date:** 2026-08-07. `/boot` Profile A FULL. **5 PRs merged.** main `0ec183d8` → **`2031b2bf`**.
+**Gaps HIGH 24 · MED 119 · LOW 49 · Nominal 7.** Review floor **0**. Adopter issues **0**. Coherence 0/0 both repos, gate GREEN.
+
+## What this session was
+
+Two arcs. **(A)** The S325 GitHub Actions outage had cleared and S326-bryan had already landed the
+bare-return backlog — so my job was to **land the 4 s325-peter PRs the outage had stranded**, then
+**(B)** take the next MED-lane fix, `g-each-nested` residual-1.
+
+### Arc A — the 4 stranded PRs (all mine, opened during the outage, `gate` never ran)
+All landed, sequentially, rebase-on-green: **#447** match block-arm §18.5 `33eda05f` · **#448**
+triage-sweep `71623be3` · **#450** show-false FOUC §17.2 `b6d77ec9` · **#451** S325-peter wrap
+`efaf0850`. R26 re-verified the 2 code PRs post-rebase. #451's delta-log number collision resolved by
+renumbering my `[1194]-[1202]` **+24 → `[1218]-[1226]`** after bryan's `[1194]-[1217]`.
+
+> **⚠ PROCESS — a parked auto-merge breached a "hold".** Peter said "hold the merges"; **#447
+> auto-merged itself** the instant its gate went green, on an arm I set in S325-peter (AFK "merge on
+> green") that survived the outage + force-push. I disarmed the arm on the other three. **Rule now in
+> memory + on the board: disarm parked auto-merge on the whole batch BEFORE re-gating any held PR.**
+> [[feedback-disarm-parked-automerge-before-regating-held-prs]]
+
+### Arc B — g-each-nested residual-1 (#456 `2031b2bf`)
+A `:`-shorthand each body calling a same-file markup fn (`<li : badge(it)>`) rendered
+`[object HTMLSpanElement]` — the shorthand emit site (`emit-each.ts` ~1119) never ran the
+`interpMayYieldNode` discriminant the longhand `${badge(it)}` path got in S297. **Fix = parity
+routing through the shared mount-or-text wrapper, gated behind a non-empty `_eachMarkupFnNames` so any
+file with no markup fn is byte-identical.** Verified to the hilt: executed-DOM test 3/3, conformance
+857/857, **wide-corpus emit differential 0/7260 byte-identical**, **two adversarial lenses cleared**.
+Class-scoped strictly to compute — markup literals/ternaries in shorthand stay `E-CODEGEN` (accepting
+them = newly-accepting a form = bryan's grammar lane).
+
+## Open threads / next-PA judgment
+
+1. **NEXT MED-lane pickup (ranked, all verified-real):** the NEW gap
+   **`g-markup-returning-fn-collector-misses-ternary-arm-literal`** (MED) — the adversarial pass found
+   the S297 collector `exprYieldsMarkupValue` misses a markup literal in a **ternary/match arm of a fn
+   return** (`kind "markup"` vs `"markup-value"`), stringifying such fns' calls in **both** longhand
+   AND shorthand each interps (parity-verified, pre-existing). Widening the arm-value kind test closes
+   the miss in BOTH each paths at once — the cleanest next fix. Also fix the now-inaccurate comment at
+   `emit-each.ts:172-175`. Then residual-2/3 (cross-file/transitive markup fns) → `g-uptoroot-anchor` →
+   `g-each-root-count` (inert).
+2. **`g-each-nested` stays OPEN** — residual-1 resolved, residuals 2 (cross-file imported) / 3
+   (transitive) remain PETER-lane; residual 4 (markup-typed struct field) is bryan's (newly-accepting).
+3. **bryan's PR #455 (`docs/s326 continuity`) is OPEN** — his lane, left untouched.
+4. **A wide-corpus differential gotcha** (delta [1233]): capture both sides from roots at the SAME
+   relative depth, else path-embedded diagnostics read as false "text-only diagnostic changes" (60 of
+   them this session; real content delta was 0).
+
+<!-- Prior wrap (S325-bryan) preserved below. -->
+
+<!-- ============================================================= -->
 <!-- S325 WRAP (bryan/ASUS-Vivobook) — prepended 2026-08-06.        -->
 <!-- CONCURRENT with S325-peter (he booted mid-session, SUCCESSOR   -->
 <!-- mode, disjoint; his #445 landed under me).                     -->
