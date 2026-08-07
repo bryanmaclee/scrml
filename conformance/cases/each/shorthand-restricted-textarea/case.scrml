@@ -1,0 +1,12 @@
+${
+    <rows> = [{ id: 1, name: "alpha" }, { id: 2, name: "beta" }]
+}
+fn label(n: string) {
+    if n == "" { return <i class="none">none</i> }
+    return n
+}
+<form id="f">
+    <each in=@rows key=@.id as it>
+        <textarea class="note" : label(it.name)>
+    </each>
+</form>

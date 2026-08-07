@@ -1,0 +1,20 @@
+{
+  "id": "each-shorthand-restricted-textarea",
+  "description": "S328 merge-blocker. A `:`-shorthand per-item body (§4.14) whose expression CALLS a same-file MIXED-return fn (markup on one path, a plain string on the other) inside an RCDATA parent (<textarea>). The markup-capable analysis is a MAY-analysis, so the call is treated as markup-yielding even when it returns a string — but a <textarea>'s value IS its child TEXT content, so mounting a `<span data-scrml-mv>` there makes `textarea.value` read \"\" and the adopter's string is gone. Pins: ZERO element children inside the textarea.",
+  "language-version": "1.0",
+  "spec": "§4.14",
+  "rationale": "SPEC §4.14 line 1021: 'a `:`-shorthand body IS the element's single-expression body, byte-identical to the bare-body form `<tag>${expr}</tag>`' — carried into <each> scope verbatim by §17.7.6 ('No `<each>`-specific extension to the `§4.14` grammar is introduced'). The bare-body form already lowers an RCDATA body to `.value`; the shorthand form must do the same. Pre-fix (S327/#456) the shorthand branch had no content-model guard and appended a `<span data-scrml-mv>` INSIDE the <textarea>. ASSERTION NOTE, load-bearing: this harness runs on happy-dom, and happy-dom is NOT a valid oracle for either half of this defect — MEASURED, its `textarea.value` getter falls back to `textContent` and returns \"alpha\" for BOTH the buggy span-mount and the correct `.value` write. A `value:` assertion CANNOT discriminate this. The gate is therefore the DOM-SHAPE counts: `textarea *` and `textarea [data-scrml-mv]` are 0 only when no element child was injected. The `value:` row is corroboration for a conformant-DOM impl, not the gate. RCDATA is the ONLY content model this refusal covers — see each-shorthand-option-label-preserved for why widening it to <option> was measured to be a regression.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC", "E-CODEGEN-INVALID-JS"],
+    "input": [],
+    "state": { "rows": [{ "id": 1, "name": "alpha" }, { "id": 2, "name": "beta" }] },
+    "domAnchored": [
+      { "selector": "textarea.note", "count": 2 },
+      { "selector": "textarea *", "count": 0 },
+      { "selector": "textarea [data-scrml-mv]", "count": 0 },
+      { "selector": "textarea span", "count": 0 },
+      { "selector": "#f textarea:first-child", "value": "alpha" }
+    ]
+  }
+}

@@ -98,6 +98,66 @@ export interface EachEngineCtx {
 // ---------------------------------------------------------------------------
 const RAW_CONTENT_ELEMENT_NAMES = new Set(["pre", "code"]);
 
+// ---------------------------------------------------------------------------
+// s328 — RCDATA (`<textarea>`) is the one content model where an each per-item
+// element's body must NOT receive a mounted element child.
+//
+// SPEC §4.14 line 1021 is the governing sentence:
+//
+//   "a `:`-shorthand body IS the element's single-expression body, byte-identical
+//    to the bare-body form `<tag>${expr}</tag>`"
+//
+// and §17.7.6 lines 12176-12177 carry that rule verbatim into `<each>` body
+// scope ("No `<each>`-specific extension to the §4.14 grammar is introduced").
+// The `:`-shorthand branch and the bare-body branch below therefore read ONE
+// local (`_isRcdataBody`) rather than each asking `isRcdataElement` separately.
+//
+// WHY RCDATA AND NOTHING ELSE — this scope was narrowed after being measured too
+// wide, and the measurement is the argument:
+//
+//   `<textarea>` LOSES DATA. HTML defines its value as its child TEXT content, so
+//   with an element child `textarea.value` is "" in a conformant browser and the
+//   adopter's string is gone. MEASURED in real Chromium, not inferred.
+//
+//   `<option>` DOES NOT. Its content model is Text and a `<span>` child is
+//   invalid HTML, but the DOM API accepts it and the label still reads through:
+//   base emission `<option>${badge(it)}</option>` renders the label "alpha" in
+//   real Chromium. Lowering it to `.textContent = String(expr)` "fixed" the shape
+//   and BROKE the label — `String(<an element>)` is "[object HTMLElement]", so
+//   the user saw that instead of their text, with zero diagnostic. That trades a
+//   silent-wrong SHAPE for a silent-wrong LABEL, which is worse: the label is what
+//   the user reads. `<option>` (and `<title>`, same reasoning) are therefore left
+//   on the mounting path exactly as they were.
+//
+// The residual this leaves is real and deliberate: a markup-ONLY-returning call
+// in a `<textarea>` still stringifies to "[object HTMLElement]" via `.value`.
+// That is the pre-existing bare-body behaviour (base and head are byte-identical
+// there — verified), so this change extends nothing; the right answer is a §34
+// diagnostic ("a markup-returning call has no valid rendering in an RCDATA
+// content model"), which needs its own row and its own ruling.
+//
+// ⚠ WHAT THIS LOCAL DOES **NOT** ESTABLISH. It is shared by the two branches
+// named above and by nothing else. Three other answers to "may this body receive
+// an element child?" exist and are NOT routed through it:
+//
+//   1. IN THIS FILE — `eachRcdataValueExpr` returns null on a child shape it
+//      cannot concatenate, and that null falls through to the flow recursion,
+//      which mounts. So `<textarea>${it.name}<b>x</b></textarea>` still gets an
+//      element child. A surviving second gate, pre-existing, not closed here.
+//   2. `emit-html.ts` — the top-level (non-`<each>`) path runs its own
+//      `isRcdataElement(tag)` check for the same carve-out, and it is also where
+//      `W-RCDATA-BIND-VALUE-CONTENT-CONFLICT` fires; the `<each>` path is silent.
+//   3. The Tier-0 `lift` path answers separately again.
+//
+// Do not read the shared local as "the compiler now has one content-model
+// decision" — it does not, and an overstated invariant here would mislead the
+// next reader more than no comment would.
+//
+// `<style>` / `<script>` never reach this emission path at all (measured: a
+// per-item `<style>`/`<script>` child emits no `createElement`, and `<style>` is
+// ghost-linted toward `#{}` per §9), so no lowering is defined for them.
+// ---------------------------------------------------------------------------
+
 // GITI-032 — recursively detect a `markup-value` leaf anywhere in a parsed
 // ExprNode tree (markup-as-value in expression position, Pillar 1 §1.4/§7.4).
 // Used to defer the per-item interpolation case the each path does not yet lower
@@ -1101,14 +1161,26 @@ function renderTemplateChildToJs(
       renderTemplateAttrToJs(attr, iterVarName, _iterIdxName, elVar, lines, indent, engineCtx, child);
     }
 
+    // s328 — read ONCE here, consumed by the `:`-shorthand branch AND the
+    // bare-body branch below, so those two cannot drift apart. Read the block
+    // comment on `isRcdataElement` above for why the scope is RCDATA and nothing
+    // else, and for the three OTHER answers to this question that this local
+    // does NOT gate.
+    const _isRcdataBody = isRcdataElement(tagName);
+
     // 6nz-F4 edge 5 — RCDATA (<textarea>) reactive body in an each per-item
     // template. Inside RCDATA a child text node IS the element's value, so the
     // per-item factory must set `elVar.value` from the concatenated body rather
     // than appending child text nodes (which would not track `.value` reliably).
     // Suppressed when a `bind:value` binding is present (that wins). Wrapped in
     // the per-item effect so it re-resolves on reconcile.
+    //
+    // `!isShorthand`: a shorthand body carries its expression in `shorthandExpr`,
+    // not in `children`, so this children-driven derivation has nothing to read.
+    // The shorthand branch below consumes the SAME `_isRcdataBody` and does its
+    // own single-expression lowering.
     const _rcdataValueExpr =
-      isRcdataElement(tagName) &&
+      _isRcdataBody &&
       !isShorthand &&
       !eachHasBindValue(attrs) &&
       Array.isArray((child as any).children) &&
@@ -1117,8 +1189,9 @@ function renderTemplateChildToJs(
         : null;
 
     if (isShorthand && shorthandExpr !== null) {
-      // `:`-shorthand body — single-expression body becomes textContent.
-      // Rewrite `@.` to iterVar so `<li : @.name>` → `item.name`.
+      // `:`-shorthand body — the single expression becomes the element's body:
+      // mounted for flow content, `.value` for RCDATA (s328), `.textContent`
+      // otherwise. Rewrite `@.` to iterVar so `<li : @.name>` → `item.name`.
       const exprRewritten = rewriteContextualSigil(shorthandExpr, iterVarName);
       // g-each-nested-markup-interp-stringifies residual-1 — a shorthand body
       // that is a CALL to a same-file markup-returning fn (`<li : badge(it)>`)
@@ -1144,12 +1217,45 @@ function renderTemplateChildToJs(
           );
         } catch { shMarkupCapable = false; }
       }
-      if (shMarkupCapable) {
+      // s328 — the mount is refused inside RCDATA, and ONLY inside RCDATA.
+      // `shMarkupCapable` is a MAY-analysis: `fnBodyReturnsMarkup` admits a
+      // function into `_eachMarkupFnNames` if ANY of its returns is markup, so a
+      // MIXED-return `fn label(n) { if n == "" { return <i>none</i> } return n }`
+      // is "markup-capable" even on the calls that hand back a plain string.
+      // Pre-fix, `<textarea : label(it.name)>` therefore appended a
+      // `<span data-scrml-mv>` INSIDE the textarea, and a textarea's value is its
+      // child TEXT content — so `textarea.value` was "" and the adopter's string
+      // was gone. MEASURED in real Chromium.
+      //
+      // Widening the analysis to a MUST is a separate, larger design question.
+      // Widening the REFUSAL past RCDATA was tried and reverted: see the block
+      // comment on `isRcdataElement` above — `<option>` does not lose data, and
+      // routing it to `.textContent = String(expr)` replaced a correct label with
+      // "[object HTMLElement]".
+      //
+      // ⚠ The #456 rationale block directly above says a string-returning
+      // shorthand "never over-wraps → no restricted-parent regression". That
+      // premise is FALSE and is the whole defect: `interpMayYieldNode` cannot
+      // tell a string-returning CALL from a markup-returning one when the callee
+      // returns both, so "string-returning shorthands stay on the text path" was
+      // never something the discriminant could deliver. It is left in place
+      // verbatim rather than silently rewritten — that block carries other
+      // review findings still awaiting an operator ruling.
+      if (shMarkupCapable && !_isRcdataBody) {
         // Mount via the shared mount-or-text wrapper (a stable
         // `<span data-scrml-mv>` child of the shorthand element, re-mounted in
         // the per-item effect). Pass the RAW expr — emitEachInterpExprToJs
         // applies its own lowerEachExpr (a superset of rewriteContextualSigil).
         emitEachInterpExprToJs(shorthandExpr, iterVarName, elVar, lines, indent, true);
+      } else if (_isRcdataBody && !eachHasBindValue(attrs)) {
+        // RCDATA (`<textarea>`) — the body IS the element's value. This is the
+        // counterpart of the `_rcdataValueExpr` `.value` write the bare-body form
+        // takes (SPEC §4.14 line 1021 byte-identity); pre-s328 the shorthand wrote
+        // `.textContent`, which sets only the DEFAULT value and so stops tracking
+        // once the control is dirty.
+        for (const _l of maybeWrapEachPerItemEffect(
+          [`${indent}${elVar}.value = String(${exprRewritten});`], iterVarName, indent,
+        )) lines.push(_l);
       } else {
         // Cast result to string for textContent assignment. Bug 64 (S159) —
         // live-keyed under a reconcile ctx so same-key reconcile reflects new data.

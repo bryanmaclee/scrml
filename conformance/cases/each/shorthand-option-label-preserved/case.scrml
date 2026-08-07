@@ -1,0 +1,17 @@
+${
+    <rows> = [{ id: 1, name: "alpha" }, { id: 2, name: "" }]
+}
+fn label(n: string) {
+    if n == "" { return <i class="none">none</i> }
+    return n
+}
+<select id="s-short">
+    <each in=@rows key=@.id as it>
+        <option class="opt-short" : label(it.name)>
+    </each>
+</select>
+<select id="s-long">
+    <each in=@rows key=@.id as it2>
+        <option class="opt-long">${label(it2.name)}</option>
+    </each>
+</select>
