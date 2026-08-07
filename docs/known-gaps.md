@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 23 |
-| MED | 121 |
+| MED | 120 |
 | LOW | 49 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -1406,7 +1406,28 @@ Adopter-A's native-iOS client (reused, re-pointed at the scrml backend for the l
 ## §S326 — gaps filed S326 (2026-08-06, bryan; surfaced while landing the inherited S325 arcs)
 
 ### g-response-contract-shall-has-no-spec-home — `emit-server.ts` states a normative "route handlers SHALL return a `Response`" that `compiler/SPEC.md` does not contain; the landing cited §12.5 and §12.5 does not say it — `NEW S326-bryan (wrap-6c maps non-compliance); MED; open; ROUTED-TO-BRYAN (language-surface: a normative SHALL needs a SPEC home)`
-<!-- @gap id=g-response-contract-shall-has-no-spec-home sev=MED status=open locus=compiler/src/codegen/emit-server.ts:4054-4080(the SHALL, in a source comment)+compiler/SPEC.md§12.5(does NOT contain it) prov=rationale:the-rule-was-PA-ruled-under-the-fork-rule-and-landed-but-never-reached-the-normative-source route=bryan -->
+<!-- @gap id=g-response-contract-shall-has-no-spec-home sev=MED status=resolved locus=compiler/src/codegen/emit-server.ts:4054-4080(the SHALL, in a source comment)+compiler/SPEC.md§12.5(does NOT contain it) prov=rationale:the-rule-was-PA-ruled-under-the-fork-rule-and-landed-but-never-reached-the-normative-source route=bryan -->
+
+**✅ RESOLVED S326-bryan — the rule now has a normative home in `compiler/SPEC.md` §12.5.3.** bryan
+authorized the fix directly (*"do the 452 fix"*). §12.5 was read IN FULL before amending, per Rule 4.
+
+**Written at a deliberately different altitude than the source comment, and that is the substantive
+part.** The comment says *"route handlers SHALL return a `Response`"*. `Response` is a **Bun host
+object**, and S278 puts emitted-JS shape in compiler-spec — an implementation's freedom — so mandating
+it in the LANGUAGE spec would over-constrain impl#2 and any future host. The bullet therefore obliges
+the **observable** contract: the generated handler SHALL produce a COMPLETE HTTP RESPONSE carrying the
+serialized value on every path, and handing the host a bare value is non-conformant. impl#1 satisfies
+that with a `Response`; another host satisfies it its own way. **The wire is what a conformance case can
+pin — the object is not.**
+
+Carries a Rule-4b `provenance:` block that records the uncomfortable half honestly: the DIRECTION was
+PA-decided under the FORK RULE at S325, not ratified by any debate or DD, so it sits in the
+undeliberated band and a reviewer should read it as an implementation contract promoted to normative
+text. `SPEC-INDEX.md` totals regenerated (37,066 → 37,074).
+
+**Still true and worth keeping visible:** the rule has **no diagnostic code** — it is enforced by
+construction. That is why it could live in one implementation's source for a full landing without any
+gate noticing.
 
 **My own mis-citation, recorded rather than smoothed.** #452's commit subject is `fix(§12.5 emit-server)`
 and the source comment states **"Route handlers SHALL return a `Response`"** as normative. Verified at
