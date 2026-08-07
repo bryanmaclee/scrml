@@ -142,6 +142,40 @@ in place until its own population reaches zero.
 #textual-vs-behavioural-movement #actions-outage-blocked-two-landings #assert-run-attempt
 
 ---
+<!-- S325 WRAP (peter/P-Tech1) — prepended 2026-08-06.              -->
+<!-- CONCURRENT with S325-bryan (LIVE on Limb-2 mangler). Numbers   -->
+<!-- collide across machines — disambiguate by NAME.                -->
+<!-- Mechanical stream = delta-log [1218]-[1226].                   -->
+<!-- ============================================================= -->
+
+# scrml — Session 325 (peter · P-Tech1 Windows) — WRAP
+
+**Date:** 2026-08-06. `/boot` Profile A FULL, **SUCCESSOR to S325-bryan (LIVE on emit-server / Limb-2 mangler; disjoint from my MED compute lane).** Peter's ask: work Cluster B in the MED compute lane; AFK "merge on green". **1 PR merged (#445, docs); 3 PRs verified + QUEUED (auto-merge), PARKED on a CI outage.** Full mechanical stream: delta-log **[1194]–[1202]**.
+
+## 🔴 FIRST MOVE NEXT BOOT — verify the 3 parked PRs merged, then re-run the review floor
+The CI gate (GitHub Actions) was OUT repo-wide for most of this session (two windows; [1201]). **#447, #448, #450 are all verified, PR'd, and armed on auto-merge — they land on their own when Actions recovers.** At next boot: `gh pr view 447/448/450 --json state,mergedAt` — if MERGED, re-sync main (coherence 0/0) and drain the review floor for them; if still BLOCKED with no run, the queue is still stuck (nudge with an empty commit — but see [1201]: the `pull_request` trigger dropped several events during recovery, so don't over-nudge). Adopter issues + review floor were NOT re-checked at wrap (gate down); check at boot.
+
+## 🎯 WHAT LANDED / QUEUED (all in the MED compute lane, disjoint from bryan)
+- **#445 MERGED (main 13edcfbf)** — two Cluster B gaps re-characterized (verify-the-class caught both mis-filed): `g-tier0-reactive-lift-mixed-text-interp-literal` (reported RESOLVED; residual inverted→terse-`/`-lift right-glue, deferred/GITI-039) + `g-block-body-value-position-mislowers` SPLIT ((a) match block-arm ours §18.5 @ `emit-logic.ts:4596`; (b) if-value null §17.6-conformant → W-LIFT-001 to bryan). [1195]
+- **#447 QUEUED — (a) match block-arm value fix** (`emit-logic.ts` §18.5). PA adversarial CLEAN: conformance 857/857, match 394/0, object-literal + bare arms BYTE-IDENTICAL, exotics fail-CLOSED. [1197]
+- **#448 QUEUED — triage-sweep corrections (docs).** 3 gaps CLOSED (mpa-dup STALE; db-migrate + gap-counts stale-`open` twins) + lane corrections recorded. [1198]
+- **#450 QUEUED — `g-show-false-flashes-pre-hydration` SSR FOUC fix** (`emit-html.ts` §17.2). PA adversarial CLEAN: conformance 855/855, unit 11/0, false-positive-hide guarded, `show=true`/no-show BYTE-IDENTICAL, reveal works. [1200]
+
+## 🎯 NEXT — the triage-verified, ranked MED backlog (all repro-confirmed ours)
+1. **`g-each-nested-markup-interp-stringifies` residual-1** (`:`-shorthand body `<li : badge(it)>`, `emit-each.ts:1119` — a separate emit site with no markup detection) — **cleanest next**, small compute fix.
+2. `g-uptoroot-vs-distrel-anchor-mismatch` (`index.ts:2902`, path-prefix bug).
+3. `g-each-root-count-coupled-to-emitted-text-formatting` — **INERT** hardening (`_structuralRoots` already computes the AST count; one `if` from the cross-check).
+4. `g-native-parser-drops-last-export` — REPRODUCES (live=5/native=4), ours, **⚠ trips the cloud-only within-node parity gate + canary pin — invisible to local hooks; must land with the canary flipped + within-node allowlist regen** (cf. [[ast-node-field-change-needs-within-node-parity]]).
+- **Murkier (ours but not clean):** `g-tool-over-imports-all-lib-exports` REPRODUCES but MIS-LOCATED (over-population is UPSTREAM of `buildImportHeader`; fires on value/const imports). nested-markup residuals 2-3 (cross-file/transitive — need exportRegistry/fixpoint). `g-static-markup-no-hydrate-in-if` (lane-corrected to us, but browser-only repro — confirm live before build).
+
+## ⚑ ROUTED TO BRYAN (language-surface, not our lane)
+- **W-LIFT-001** — mint/emit for no-lift if-as-expression arm bodies (§17.6.2 SHALL-lift; `g-block-body-value-position` half (b)).
+- **`g-each-nested-markup` residual-4** — mounting a bare markup-typed struct-field interp = newly-accepting a first-class markup-typed-field value form.
+
+## ⚠ OPEN / CARRY
+- **CI outage** — if still down at next boot, the 3 PRs can't merge; surface to Peter/bryan (owner-level Actions setting — quota/disabled). Nothing I can do from a collaborator seat.
+- **Retained worktrees:** `agent-a0742fe48…` (#447) + `agent-a4e6b5f256…` (#450) — work PUSHED but not merged (parked). **Do NOT reclaim until the PRs merge** (per step 6b; and the [1180] don't-hand-edit-live-worktree rule — agents stopped, safe, but the branches back the open PRs).
+- **Review floor:** #445 merged this session (owed a review record); #447/#448/#450 owe on merge. NOT recorded at wrap (bryan CLAIMS `docs/pr-reviews.md` for his #444; avoid contending — record at next boot or coordinate).
 
 <!-- ============================================================= -->
 <!-- S322 WRAP (bryan/ASUS-Vivobook) — prepended 2026-08-06.        -->
