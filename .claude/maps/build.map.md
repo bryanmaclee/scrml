@@ -1,7 +1,15 @@
 # build.map.md
 # project: scrml
 # updated: 2026-08-06T23:38:11-06:00  commit: 97576f35
-# **SOURCE WALK IS AT `cf1849b2`; the stamp is `97576f35`, the true HEAD.** The two later commits are
+# ⚠ **STAMP CORRECTION (S328, no re-walk): `97576f35` IS NOT AND WAS NEVER `HEAD`.** It is the tip
+# of `origin/wrap/s326-bryan` (PR #459); main carries only its SQUASH, `b7f89952`, and
+# `git merge-base --is-ancestor 97576f35 HEAD` returns **FALSE**. Read this map's stamp as
+# **`b7f89952`**. **This map was deliberately NOT re-walked at S328** — its surface has zero diff
+# over `97576f35..35d4d32e`, verified per-map below — so its CONTENT is unchanged and honest.
+# True HEAD at the S328 pass: **`35d4d32e`**. See primary.map.md invariant 48.
+# Zero-diff evidence: `git diff 97576f35..35d4d32e -- .github/ scripts/ package.json bunfig.toml`
+# is EMPTY. Every step, trigger, hook and packaging claim below holds unchanged.
+# **SOURCE WALK IS AT `cf1849b2`.** The two later commits are
 # DOCS-ONLY (zero diff under compiler/ scripts/ stdlib/ package.json .github/).
 # NOTE (S325/S326 INCREMENTAL pass): over `a3a34d80` -> `97576f35`. **Packaging, CLI, Docker, git-hooks
 # and every gate STEP are byte-unchanged** (`git diff a3a34d80..HEAD -- package.json scripts/` is

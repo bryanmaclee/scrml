@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 23 |
-| MED | 125 |
+| MED | 126 |
 | LOW | 55 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -7558,16 +7558,20 @@ The assignment-statement guard's character class `[\w$.\[\]]*` contains no `\s`,
 `rewriteBlockBody(seg, null, null, "client")` hardcodes the boundary; the sibling at emit-control-flow.ts:2315 passes `engineCtx` and `_matchMode` (`"server"` when `opts.boundary === "server"`). A block arm's leading statements in a **server-boundary** match decl would lower `@cell` reads to client `_scrml_reactive_get(...)` rather than `_scrml_body["cell"]`, and `@engineCell = .X` writes would bypass `emitEngineWriteGuard`. **The source asymmetry is objective; the runtime consequence is NOT reproduced** — a compiling reproducer needs a `?{}` batch on the CPS-split path, since server-fn free-client-cell reads are separately rejected by E-REACTIVE-003.
 
 ### g-each-element-child-decided-by-four-disagreeing-predicates — four independent answers to "may this body receive an element child?", and they do not agree — `NEW S328-bryan (S239 pass on #456); MED; open`
-<!-- @gap id=g-each-element-child-decided-by-four-disagreeing-predicates sev=MED status=open locus=compiler/src/codegen/emit-each.ts(eachBodyLowering)+emit-each.ts:1186-1193(eachRcdataValueExpr null-bail)+compiler/src/codegen/emit-html.ts:1835(isRcdataElement)+the-Tier-0-lift-path prov=insight:the-repo-has-an-active-bug-family-from-near-duplicate-predicates-that-disagree -->
+<!-- @gap id=g-each-element-child-decided-by-four-disagreeing-predicates sev=MED status=open locus=compiler/src/codegen/emit-each.ts:1169(_isRcdataBody)+emit-each.ts:1186-1193(eachRcdataValueExpr null-bail)+compiler/src/codegen/emit-html.ts:1835(isRcdataElement)+the-Tier-0-lift-path prov=insight:the-repo-has-an-active-bug-family-from-near-duplicate-predicates-that-disagree -->
 
-(1) `eachBodyLowering` — the shared local #466 added. (2) **In the same file**, `eachRcdataValueExpr` returns null on a child shape it cannot concatenate, and that null falls through to the flow recursion which **mounts** — so `<textarea>${it.name}<b>x</b></textarea>` still gets an element child, i.e. the very `textarea.value === ""` data loss #466 exists to kill. Pre-existing, unchanged, **executed**. (3) `emit-html.ts:1835` gates the top-level path on `isRcdataElement(tag)`, so `<option>`/`<title>` are ungated there — and post-#466 `<option>${expr}</option>` lowers **differently inside vs outside `<each>`**. (4) The Tier-0 `lift` path answers again, consulting no content-model predicate at all.
+(1) **`_isRcdataBody`** (`emit-each.ts:1169`) — the shared local #466 added, consumed at `:1183` (bare-body gate), `:1244` (`shMarkupCapable && !_isRcdataBody`) and `:1250` (the `.value` write). ⚑ **NOT `eachBodyLowering`** — that was the FIRST cut, rejected DO-NOT-LAND by the S239 gate and deleted along with `TEXT_ONLY_CONTENT_ELEMENT_NAMES` and the three-way `EachBodyLowering` type; `grep -rn eachBodyLowering compiler/` returns ZERO. This entry named the dead symbol until the S328 maps pass caught it. (2) **In the same file**, `eachRcdataValueExpr` returns null on a child shape it cannot concatenate, and that null falls through to the flow recursion which **mounts** — so `<textarea>${it.name}<b>x</b></textarea>` still gets an element child, i.e. the very `textarea.value === ""` data loss #466 exists to kill. Pre-existing, unchanged, **executed**. (3) `emit-html.ts:1835` gates the top-level path on `isRcdataElement(tag)`, so `<option>`/`<title>` are ungated there — and post-#466 `<option>${expr}</option>` lowers **differently inside vs outside `<each>`**. (4) The Tier-0 `lift` path answers again, consulting no content-model predicate at all.
 
-Same family as the three disagreeing async classifiers and the two server-only-module predicates 2,638 lines apart. #466's in-file comment **deliberately names all four** rather than claiming one decision — read it before touching this.
+Same family as the three disagreeing async classifiers and the two server-only-module predicates 2,638 lines apart. #466's in-file comment (at `emit-each.ts:113`) **deliberately names all four** rather than claiming one decision — read it before touching this.
 
 ### g-each-title-rcdata-ordering-trap — registering `<title>` as an element would silently flip it to a `.value` expando — `NEW S328-bryan; LOW; open; latent`
-<!-- @gap id=g-each-title-rcdata-ordering-trap sev=LOW status=open locus=compiler/src/codegen/emit-each.ts(eachBodyLowering-ordering)+compiler/src/html-elements.js:272-279(the standing invitation) prov=rationale:two-places-classify-title-and-nothing-makes-them-agree -->
+<!-- @gap id=g-each-title-rcdata-ordering-trap sev=LOW status=open locus=compiler/src/html-elements.js:279(the standing invitation)+compiler/src/codegen/emit-each.ts:1169(_isRcdataBody)+:1250(the .value write) prov=rationale:registering-title-as-rcdata-would-silently-route-it-to-a-value-expando -->
 
-`eachBodyLowering` checks `isRcdataElement(tagName)` **before** the TEXT_ONLY set. `<title>` is conceptually in both (HTML classes it escapable-raw-text) and `html-elements.js:272-279` carries a standing invitation to register it: *"a cheap follow-up if a `<title>` element form is added."* Take that follow-up and `eachBodyLowering("title")` flips to `"value"` → `titleEl.value = …` → an **expando on HTMLTitleElement**, title never updates, silent. A TEXT_ONLY-first ordering or an assert closes it.
+**⚑ CORRECTED at wrap — the original filing described an ORDERING that does not exist.** It said `eachBodyLowering` checks `isRcdataElement` *before* a TEXT_ONLY set. Both are phantoms from #466's FIRST cut, which the S239 gate rejected DO-NOT-LAND; `eachBodyLowering` and `TEXT_ONLY_CONTENT_ELEMENT_NAMES` were deleted with it. The landed shape is a single local, `_isRcdataBody = isRcdataElement(tagName)` (`emit-each.ts:1169`) — there is no second set and no ordering.
+
+**The latent trap is real, just differently shaped.** `html-elements.js:279` carries a standing invitation: *"`<title>` is the other HTML RCDATA element; it is not registered as an element here … a cheap follow-up if a `<title>` element form is added."* Take that follow-up with an `rcdata: true` row and `_isRcdataBody` becomes TRUE for `<title>`, routing it to the `.value` write at `:1250` → **an expando on `HTMLTitleElement`** (which has no `.value`), so the title never updates, silently. The correct lowering for `<title>` is `.textContent`.
+
+Whoever registers `<title>` must add the `.value`-vs-`.textContent` discrimination in the same landing. An assert at the `.value` write (`domInterface` must be `HTMLTextAreaElement`) closes it cheaply and fails LOUD rather than silently.
 
 ### g-each-textarea-value-lowering-leaves-defaultvalue-empty — `.value` instead of `.textContent` means `form.reset()` and bfcache blank the field — `NEW S328-bryan; LOW; open`
 <!-- @gap id=g-each-textarea-value-lowering-leaves-defaultvalue-empty sev=LOW status=open locus=compiler/src/codegen/emit-each.ts(the RCDATA value lowering) prov=spec:§4.14:1021(shorthand-bare-body-parity-required-the-move) -->
@@ -7583,3 +7587,26 @@ Same family as the three disagreeing async classifiers and the two server-only-m
 <!-- @gap id=g-flat-css-block-plus-author-style-emits-two-style-attributes sev=LOW status=open locus=compiler/src/codegen/emit-html.ts:2959-2960(the DQ-7 flat-declaration style push) prov=rationale:surfaced-while-measuring-450s-D1-and-is-independent-of-it -->
 
 A flat-declaration `#{}` block pushes an inline `style="…"` that is **not** an `attrs` entry, so an author `style=` on the same element yields two `style` attributes. Invalid HTML; a conformant parser (verified: real Chromium) **drops the second**, while happy-dom **merges** them — so the repo's browser harness cannot see this class. Surfaced while measuring #450's D1; independent of `show=` and survives its revert.
+
+### g-maps-staleness-probe-has-no-ancestry-check — the only machine guard on map currency counts commits against a watermark that may not be on the branch at all — `NEW S328-bryan (found by the wrap-6c maps pass, correcting the PA's own brief); MED; open`
+<!-- @gap id=g-maps-staleness-probe-has-no-ancestry-check sev=MED status=open locus=scripts/state.ts:458-470(mapsStaleness) prov=rationale:a-count-against-a-non-ancestor-watermark-is-a-well-formed-number-answering-a-different-question -->
+
+`mapsStaleness()` runs `git rev-list --count <watermark>..HEAD` and reports the result as "commits since
+the maps were built". **It never checks that `<watermark>` is an ancestor of HEAD.** Under this repo's
+squash-merge PR flow a maps stamp is routinely a *branch tip* that never lands: the branch's own commits
+are squashed into one, and the tip SHA becomes unreachable from `main`.
+
+**Measured, and it bit this session.** The maps stamp read `97576f35` — the tip of `origin/wrap/s326-bryan`
+(PR #459). `git merge-base --is-ancestor 97576f35 origin/main` → **FALSE**; `main` carries only the squash
+`b7f89952`. The count returned **8**, silently including three commits the branch never contained, and
+excluding nothing. **The PA's own boot report reasoned from it** — "HEAD is docs-only ahead → maps CURRENT
+for dispatch" — and the true answer was that **SIX PRs had landed since the mapped state, not four**, one
+of them (#460) a normative `SPEC.md` change. The dispatch brief inherited the error.
+
+**This is the repo's canonical failure shape** (pa-base §10 / the truncated-probe family): the probe
+succeeds, the output is well-formed, and it answers a different question than the one asked. It is the
+ONLY machine guard on map currency and it is WARN-only.
+
+**Two-line fix:** `git merge-base --is-ancestor <watermark> HEAD` first; on false, report
+`OFF-BRANCH — watermark not an ancestor` rather than a count. ⚠ **Fix the warning BEFORE gating it** — a
+gated wrong number is worse than an ignored one (§8 cry-wolf).

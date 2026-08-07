@@ -2,6 +2,12 @@
 # project: scrml
 # updated: 2026-07-31T03:18:23Z  commit: fe14c9b2
 # NOTE (S326 pass): **the AST half is DELIBERATELY still at `fe14c9b2` and that is an honest stamp, not
+# ⚠ **STAMP CORRECTION (S328, no re-walk): `97576f35` is a PR-BRANCH TIP** (`origin/wrap/s326-bryan`,
+# #459), squash-merged as `b7f89952`; it is NOT an ancestor of HEAD. Read it as `b7f89952`. True HEAD
+# at the S328 pass: **`35d4d32e`**. **The AST half stays at `fe14c9b2` and is now SEVEN windows honest**
+# — `git diff fe14c9b2..35d4d32e -- compiler/src/types` is EMPTY. #466 (the `<each>` RCDATA body
+# decision) added a `const` LOCAL, not a declared shape, so nothing is owed here. See primary.map.md
+# invariant 48.
 # neglect** — `git diff fe14c9b2..97576f35 -- compiler/src/types` is EMPTY, six windows running. ONE
 # additive entry appended this pass, attributed at its own site: the NEW codegen-internal
 # `ObjectShorthandRegion` / `BraceGroupKind` shapes (#458, at `97576f35`). Prior S302 addition (the

@@ -1,23 +1,25 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-08-06T23:38:11-06:00  commit: 97576f35
-# **SOURCE WALK IS AT `cf1849b2`; the stamp is `97576f35`, the true HEAD.** The two later commits
-# (`70ad2e6c`, `97576f35`) are DOCS-ONLY — `git diff --name-only cf1849b2..97576f35` touches only
-# docs/ + hand-off.md + handOffs/ + master-list.md, ZERO diff under compiler/ scripts/ stdlib/
-# package.json .github/. Every source claim below holds at the stamp.
-# NOTE (S325/S326 INCREMENTAL pass): over `a3a34d80` -> `97576f35` (17 commits, TWO clones —
-# S325/S326-bryan on the ASUS + S325/S327-peter on Windows).
-# **`compiler/SPEC.md` has ZERO diff this window** — no normative text moved. What changed is
-# IMPLEMENTATION of already-normative sections. TWO NEW sections below: **§12.5** (the route-handler
-# `Response` contract, #452) and **the mangler REGION-FENCE** (#458, a compiler-architecture concept
-# rather than a language one — it is here because the RULE it establishes is general). §20.5 gains an
-# own-property-read correction that arrived as a side-landing of #452.
-# **⚠ THE ZERO SPEC DIFF IS THIS WINDOW'S FINDING, NOT ITS REASSURANCE.** #452 introduces a normative
-# "route handlers SHALL return a `Response`" — in a source comment and a commit subject, filed under
-# §12.5 — and **§12.5 does not contain it.** §12.5 governs return VALUES and their serialization;
-# §12.5.2 PRESUPPOSES a JSON response without ever obliging the handler to produce one. A SHALL that
-# lives only in a code comment is exactly the canon-claims/SPEC-silent direction pa.md Rule 4 exists
-# to catch. See non-compliance.report.md S326-N1.
+# updated: 2026-08-07T15:38:47-06:00  commit: 35d4d32e
+# **SOURCE WALK IS AT `6f176c0d`; the stamp is `35d4d32e`, the true HEAD.** `35d4d32e` (#467,
+# the S328-bryan wrap continuity) landed DURING this pass and is **DOCS-ONLY** — verified
+# `git diff --name-only 6f176c0d..35d4d32e -- compiler/ scripts/ conformance/ .github/ stdlib/
+# package.json` is EMPTY. Every source claim below holds at the stamp. **Unlike the PRIOR
+# stamp, this one IS on main** — `git merge-base --is-ancestor 35d4d32e HEAD` passes
+# (invariant 48).
+# **THE PRIOR STAMP `97576f35` WAS NOT ON MAIN** — tip of `origin/wrap/s326-bryan` (#459),
+# squash-merged as `b7f89952`; `git merge-base --is-ancestor 97576f35 6f176c0d` is FALSE. SIX PRs have
+# landed since, not the four in the refresh brief: **#460** (SPEC §12.5) and **#461** (docs) sit
+# between the old stamp and **#463 / #464 / #465 / #466**.
+# NOTE (S328 INCREMENTAL pass): over `97576f35` -> `6f176c0d`.
+# **`compiler/SPEC.md` gained EXACTLY ONE bullet: §12.5's route-handler response contract (#460).**
+# It **CLOSES S326-N1** — the finding the prior stamp raised. The §12.5 section below is rewritten
+# accordingly: the SHALL is no longer derived-not-stated.
+# **TWO SECTIONS BELOW ARE FALSIFIED-AND-CORRECTED, not appended to.** (1) Any prior text describing a
+# `show=`-false SSR `display:none` injection is GONE — **#464 reverted #450 in full**; `emit-html.ts`
+# is byte-identical to `71623be3`. (2) A NEW section, "RESTRICTED CONTENT MODELS", records the FOUR
+# non-agreeing answers this compiler gives to "may this element body receive an element child?" — do
+# not read #466 as having unified them. **It did not, and the code comment says so explicitly.**
 # History stays in `docs/changelog.md` + `handOffs/delta-log.md`.
 
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
@@ -795,18 +797,32 @@ path — `runtime-template.js:1168` re-invokes the init thunk without awaiting, 
 at mount and wrong after `reset()`. The absorb-sequencing ruling that governs the fix (option **C**:
 await the IIFE AND keep its `.catch`, §13.2 vs §19.6) is **RULED but NOT BUILT**.
 
-## §12.5 — a route handler SHALL return a `Response`, on EVERY path (NEW #452)
+## §12.5 — a route handler SHALL return a `Response`, on EVERY path (#452 code, #460 SPEC — S326-N1 CLOSED)
 
-**⚠ NORMATIVE STATUS FIRST, because it matters more than the mechanism.** The sentence
-"**Route handlers SHALL return a `Response`** — unconditionally, on every path, in every combination
-of `auth=` / `protect=` / tenant / `csrf=` / idempotency" exists in `emit-server.ts` as a source
-comment and in `ec0142aa`'s subject as "fix(§12.5 emit-server)". **§12.5 does not say it.** §12.5 is
-"Server Function Return Values" — allowed return types, the `T | not` wire envelope, the client-receipt
-contract. §12.5.2 says *"the compiler-generated fetch wrapper deserializes the JSON response"*, which
-PRESUPPOSES a JSON response but never obliges the handler to produce one, and §12.5.3's normative
-bullets are all about type serializability. So the obligation is real, it is now enforced in code, and
-it is **derived, not stated**. Read it as implementation of §12.5.2's presupposition until someone
-lands the §12.5.3 bullet. non-compliance.report.md S326-N1.
+**⚠ NORMATIVE STATUS FIRST — and it CHANGED at #460 (`603ec12f`, S328 window).** The prior stamp of
+this map recorded the obligation as *derived, not stated*: the SHALL lived only in an `emit-server.ts`
+comment and `ec0142aa`'s commit subject, and §12.5 did not contain it. **`SPEC.md:7353` now does.** The
+bullet reads "**A generated route handler SHALL produce a COMPLETE HTTP RESPONSE, not a bare value**",
+binding on every path including every combination of `auth=` / `protect=` / tenant-context / `csrf=` /
+`<endpoint>` (§61) / SSE (§37). Handing the host a bare value is **NON-CONFORMANT**.
+
+**Three things about that bullet a reader must carry, because each one is easy to over-read:**
+
+1. **It is an obligation on the emitted ARTIFACT's observable behaviour, deliberately NOT on its JS
+   shape.** Per the S278 precedent — emitted-JS shape is compiler-spec, an implementation's freedom,
+   not language-spec — the bullet mandates no host object. impl#1 targets Bun and satisfies it by
+   returning a `Response`; an implementation on a host with a different dispatch convention satisfies
+   it that host's way. **What is normative is that the wire carries the serialized value**, which is
+   the half a conformance case can pin and the half §12.5.2 already presupposed.
+2. **It carries NO diagnostic code.** It is enforced BY CONSTRUCTION, not by a §34 row — so the
+   catalog did not move (806 rows, re-derived at this HEAD) and there is nothing for error.map.md to
+   gain. **Do not go looking for an `E-` code to assert against; assert on the wire.**
+3. **Its own provenance note records, honestly, that no debate or DD ratified the direction.** The PA
+   decided all four structural rows (limit-not-widen · fails-closed · reversible/newly-rejecting ·
+   root-not-position) under the FORK RULE at S325 and the operator authorized writing it in at S326.
+   **Read it as an implementation contract promoted to normative text, not as a deliberated language
+   decision.** The finding it closes is stated in the SPEC itself: *"A normative sentence that lives
+   only in one implementation's source is not part of the contract."*
 
 **The defect this closed, and why it survived so long.** The non-baseline-CSRF handler wrapped its body
 in a value-capturing IIFE only when `_ext5DedupNonCsrf || _protectActive || _tenantActive`. Without
@@ -982,6 +998,132 @@ reconcile-core interaction the original per-row-`if=` arc deliberately avoided).
 **Resolution advice the diagnostic itself gives:** drive per-row visibility with a reactive `class`
 toggle instead (`class=(cond ? "" : "hide")` with a `.hide { display: none }` rule), or lift the `if=`
 to the row's sole item root where it IS reactive today.
+
+## RESTRICTED CONTENT MODELS — FOUR answers, and they do NOT agree (§4.14 / §17.7.6, #466, S328)
+
+**⚠ READ THIS BEFORE TOUCHING ANY RCDATA / restricted-parent emission.** The question "may this
+element body receive an element child?" is answered in **four independent places in this compiler**,
+and they disagree. #466 shared ONE local between two of them. It did **not** unify the four, and
+`emit-each.ts`'s own block comment says so in as many words: *"Do not read the shared local as 'the
+compiler now has one content-model decision' — it does not, and an overstated invariant here would
+mislead the next reader more than no comment would."*
+
+| # | site | what it decides | what it leaves open |
+|---|---|---|---|
+| 1 | **`emit-each.ts:1169` — `const _isRcdataBody = isRcdataElement(tagName)`** | the `<each>` per-item body, BOTH branches: the `:`-shorthand mount refusal (`shMarkupCapable && !_isRcdataBody`, :1244) + the `.value` write (:1250), and the bare-body `_rcdataValueExpr` gate (:1183) | everything below |
+| 2 | **`emit-each.ts:888` — `eachRcdataValueExpr` returns `null`** on a child shape it cannot concatenate | nothing — the `null` **falls through to the flow recursion, which MOUNTS.** So `<textarea>${it.name}<b>x</b></textarea>` STILL gets an element child | a surviving SECOND gate, pre-existing, **deliberately not closed by #466** |
+| 3 | **`emit-html.ts:1835` — `isRcdataElement(tag)`** on the top-level (non-`<each>`) path | `analyzeRcdataContent(children)` + the `data-scrml-rcdata` placeholder instead of a `<span data-scrml-logic>`; **and it is the ONLY site that fires `W-RCDATA-BIND-VALUE-CONTENT-CONFLICT`** | **the `<each>` path is SILENT for the same conflict** — `<textarea bind:value= : expr>` emits two `.value`-surface writers with no warning |
+| 4 | **the Tier-0 `lift` path** | answers separately again — `emit-lift.js` contains **ZERO** `rcdata` references (grep-verified across `compiler/src/codegen/`; the only hits are `binding-registry.ts`, `emit-event-wiring.ts`, `emit-html.ts`, `emit-each.ts`) | it never asks the question at all |
+
+**Why the scope is RCDATA and NOTHING ELSE — this was measured, then narrowed, and the narrowing is
+the load-bearing part.** The first attempt (`2c89086c`) introduced `eachBodyLowering(tagName)` with a
+three-way `EachBodyLowering` type covering `<option>`/`<title>` as well. **It was rejected
+`DO-NOT-LAND` by the S239 adversarial gate and deleted.** The measurement that killed it:
+
+- **`<textarea>` LOSES DATA.** HTML defines its value as its child TEXT content, so with an element
+  child `textarea.value` is `""` and the adopter's string is gone. Measured in real Chromium.
+- **`<option>` does NOT.** A `<span>` child is invalid HTML but the DOM accepts it and the label still
+  reads through — base emission renders `"alpha"` in real Chromium. Lowering it to
+  `.textContent = String(expr)` fixed the SHAPE and **broke the LABEL** to `"[object HTMLElement]"`,
+  with zero diagnostic. **That trades a silent-wrong shape for a silent-wrong label, which is worse —
+  the label is what the user reads.** `<option>` and `<title>` are therefore left on the mounting path.
+- `<style>`/`<script>` never reach this emission path at all (measured: zero `createElement`), so no
+  lowering is defined for them.
+
+**The MAY-vs-MUST analysis gap that caused the defect.** `shMarkupCapable` derives from
+`fnBodyReturnsMarkup`, which admits a function into `_eachMarkupFnNames` if **ANY** of its returns is
+markup. A mixed-return `fn label(n) { if n == "" { return <i>none</i> } return n }` is therefore
+"markup-capable" even on the calls that hand back a plain string. #456's own rationale block asserted
+that a string-returning shorthand "never over-wraps → no restricted-parent regression"; **that premise
+is FALSE and is the whole defect** — `interpMayYieldNode` cannot distinguish the two when the callee
+returns both. #466 left that block in place VERBATIM rather than silently rewriting it, because it
+carries other review findings still awaiting an operator ruling. Widening the analysis to a MUST is a
+separate, larger design question.
+
+**Residuals stated plainly (all deliberate, none regressions):**
+- A markup-ONLY-returning call in a `<textarea>` still stringifies to `"[object HTMLElement]"` via
+  `.value`. That is the pre-existing bare-body behaviour — base and head are byte-identical there —
+  so #466 extends nothing. The right answer is a NEW §34 diagnostic ("a markup-returning call has no
+  valid rendering in an RCDATA content model"), which needs its own row and its own ruling.
+- `<textarea>` shorthand moving `.textContent` → `.value` leaves `defaultValue === ""`, so
+  `form.reset()` and a bfcache restore blank the field. The bare-body form has always had this; #466
+  extends it to shorthand **as the price of §4.14 parity**.
+- **`<title>` ORDERING TRAP — check this site if you touch `html-elements.js`.** Lines ~272-279 carry
+  a standing invitation to register `<title>` with `rcdata: true`. If anyone accepts it,
+  `isRcdataElement("title")` flips true and `<title>` silently starts lowering to `.value` — an
+  expando on `HTMLTitleElement`, so **the title would never update.**
+
+**The governing normative text** is SPEC §4.14 line 1021 — *"a `:`-shorthand body IS the element's
+single-expression body, byte-identical to the bare-body form `<tag>${expr}</tag>`"* — carried verbatim
+into `<each>` body scope by §17.7.6 (lines 12176-12177: *"No `<each>`-specific extension to the §4.14
+grammar is introduced"*). **Byte-identity is the invariant; the shared local exists to keep the two
+branches from drifting out of it.** Pinned by three conformance cases under `conformance/cases/each/`:
+`shorthand-restricted-textarea` (the merge-blocker), `shorthand-longhand-parity-rcdata` (the same body
+written FOUR ways — shorthand/bare × mixed-return-call/member-expr — all asserting `textarea *` count
+0), and `shorthand-option-label-preserved` (**the counter-gate**: it exists specifically to fail if
+anyone re-widens the refusal past RCDATA). Plus `browser/g-each-shorthand-rcdata-parent.browser.test.js`.
+
+## §17.2 `show=` — the SSR-hide was REVERTED, and the reason generalises (#464, S328, operator-ruled)
+
+**There is NO SSR `display:none` injection for `show=` in this compiler.** #450 added one; **#464
+backed it out in full** — `emit-html.ts` is byte-identical to `71623be3` (verified:
+`git diff 71623be3 6f176c0d -- compiler/src/codegen/emit-html.ts` is EMPTY). `buildInitialBoolMap`,
+`initialBoolMap`, `_showInjectFreshStyle` and `_showMergeIntoStyle` **do not exist**. §17.2 first paint
+is owned entirely by the client hydration controller.
+
+**The reason it had to go, and it is a reusable rule, not a one-off.** A `<match>` arm body is lowered
+by the SAME `generateHtml` as file-level markup, so an emit-time hide becomes part of the string
+literal `dispatch` assigns to `_mount.innerHTML`. The re-mounted element carries no controller —
+`wire_<Arm>` does not re-bind a visibility toggle and `_scrml_nav_rewire` is never re-run on a variant
+swap — so **a baked `display:none` can NEVER be cleared.** §17.2 mandates a *toggle*; **a toggle needs
+a toggler.** SPEC is SILENT on the pre- vs post-hydration timing axis, so an SSR-time hide is
+*permissible but unmandated* — and it is **not** permissible where it cannot be undone.
+
+**The governing direction is now fail-OPEN: a missed hide is a brief flash; a wrong hide is
+permanently invisible content.** Four conformance cases pin the post-revert contract as regression
+guards — `control-flow/ctrl-017` (variant-render, no baked hide), `ctrl-018` (module-init write,
+fail-open), `ctrl-019` (spelling parity), `ctrl-020` (no duplicate `style`) — each asserting `count: 0`
+for both `[style*="display:none"]` and `[style*="display: none"]`.
+
+**⚠ A DEPENDENCY A FUTURE READER MUST KNOW:** `ctrl-017`'s rationale states that the
+`_scrml_nav_rewire` variant-render REWIRE hole is **pre-existing and deliberately NOT fixed here**
+(tracked separately). Before the revert that hole failed CLOSED (element baked hidden, permanently
+invisible); it now fails OPEN (element visible, binding stale). **`ctrl-017` pins the DIRECTION, not
+ideal visibility — when the rewire hole is closed, the re-mounted element will legitimately carry a
+controller-set `display:none` again and THAT ASSERTION MUST BE REVISITED. A failure there after a
+rewire fix is expected, not a regression.**
+
+## §18.5 — a block-arm tail merely PREFIXED by a keyword is a VALUE (#463, S328)
+
+**The defect.** `emit-logic.ts`'s `_blockTailIsValueExpr` (:4535) decides whether a `match` block-arm's
+last segment is the arm's RESULT (lift it to the tilde result var) or a STATEMENT (emit and produce
+nothing). It shipped as
+`/^(const|let|var|return|if|for|while|do|switch|lift|throw|fail|on\b)/` — **the word boundary was
+INSIDE the alternation, so it fenced only `on`.** Every other keyword matched as a bare PREFIX: a tail
+named `formatted` matched `for`; `doc`/`document`/`domNode` matched `do`; `letter` matched `let`;
+`constant`, `returnValue`, `iface`, `lifted`, `failCount`, `varName` likewise. Each was misclassified
+as a statement head, the tail was never lifted, **and the arm silently produced `null` with no
+diagnostic.** It shipped because the corpus tests used `base`/`b`-shaped tail names.
+
+**The fix, and why the obvious fix would have been wrong.** The fence moved OUTSIDE the alternation
+and became **`(?![A-Za-z0-9_$])` — deliberately NOT `\b`.** JS `\b` is defined against `\w` =
+`[A-Za-z0-9_]`, which **excludes `$`**; scrml identifiers admit `$` (`compiler/src/tokenizer.ts:1343`,
+`isIdentPart = /[A-Za-z0-9_$]/`). A `\b` fence therefore still reads `do$thing` / `const$x` / `on$c`
+as keyword-then-boundary and **silently reproduces the very class the line exists to remove —
+including for `on`, the one keyword that always carried a fence.** Matching the fence to the
+language's OWN identifier charset closes the class at the root instead of at twelve positions.
+`on foo` still matches; `onClick` still does not.
+
+**The generalisable rule: a keyword fence in a scrml-facing regex must be matched to scrml's
+identifier charset, not to `\w`.** Grep for `\b` in any classifier that reads scrml source text.
+
+Measured at authoring time: **zero** corpus identifiers of the form `<keyword>$…`, though `$`-bearing
+identifiers (`item$`, `acc_$`, `_$1`) ARE in live corpus use — so the `$` half pins a reachable class
+with no current instance. Pinned by `unit/match-block-arm-keyword-prefixed-tail.test.js` (190L) and
+conformance `match-block/value-decl-block-arm-keyword-prefixed-tail`, which asserts **both** consumers
+of the classifier (the structured/variant-arm path and the raw/literal-arm path), both `$`-continuation
+anchors, the `on`-prefixed no-change anchor, **and the opposite direction** — a block whose last
+segment IS an assignment statement still produces void.
 
 ## Reset init-thunk no longer clobbers on a structural-cell reassignment (§6.8, NEW #417, HIGH)
 
