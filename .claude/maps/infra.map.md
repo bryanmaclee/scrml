@@ -1,9 +1,12 @@
 # infra.map.md
 # project: scrml
-# updated: 2026-08-02T18:40:00Z  commit: e80b692e
-# NOTE (S313 pass): INCREMENTAL over `fe14c9b2` -> `e80b692e`. Re-walked because **all three
-# workflows changed and the two Anthropic-billed legs were KILLED (#351)** — the prior stamp's
-# analysis of a red `cloud-maps` is now moot, not merely stale.
+# updated: 2026-08-06T23:38:11-06:00  commit: 97576f35
+# NOTE (S326 pass): INCREMENTAL over `e80b692e` -> `97576f35`. Held at `e80b692e` across four windows
+# because the infra surface had zero diff; re-walked now for exactly ONE change — **`ci.yml` gained a
+# `workflow_dispatch` trigger (#454)**, which is the first RECOVERY LEVER this repo has had for a
+# dropped-webhook outage. The S313 findings below (both Anthropic-billed legs KILLED at #351,
+# `advisory-review` manual-only, `cloud-maps` Stage 2 DELETED) are re-verified UNCHANGED at this HEAD.
+# Everything else in this map still carries its `e80b692e` walk and nothing in it moved.
 
 scrml itself ships NO Docker/Terraform/k8s/serverless infra — this map covers only what exists: the GitHub Actions CI surface and the docs-website hosting signal. **Re-verified at `e80b692e` (S313).** The material change since the prior stamp: `cloud-maps.yml`'s AI stage is GONE and `advisory-review.yml` is manual-fire only — see below.
 
@@ -20,7 +23,7 @@ None. No Dockerfile / docker-compose.yml anywhere in the repo.
 ## CI/CD
 Provider: GitHub Actions.
 Workflows — **THREE, all on `main`, and ALL THREE CHANGED this window**:
-- `.github/workflows/ci.yml` — 3 jobs: `gate` blocking (**12 steps**, +2: the browser failure-NAME-SET gate and the SPEC §34.0 row-provenance gate; checkout now `fetch-depth: 0` because the latter needs merge-base), `tracking` + `windows` non-blocking. `tracking`'s permanently-red raw browser run was replaced by the same NAME-SET check — which also **un-skipped the step behind it**, verified `skipped` on run `30742472551` and therefore never once executed.
+- `.github/workflows/ci.yml` — 3 jobs: `gate` blocking (**12 steps, unchanged this window**: the browser failure-NAME-SET gate and the SPEC §34.0 row-provenance gate; checkout `fetch-depth: 0` because the latter needs merge-base), `tracking` + `windows` non-blocking. **NEW this window (#454): a third TRIGGER, `workflow_dispatch: {}`** — `gh workflow run CI --ref <branch>`. It is now the ONLY recovery path when GitHub drops a webhook (it never re-delivers one; an outage left five PRs with zero checks and unmergeable, and force-push / close-reopen / new-commit / new-PR are all just another webhook into the same throttled pipe). **TWO measured constraints:** the dispatch reads the workflow definition FROM THE TARGET REF, so it returns `HTTP 422` on any branch cut before #454 — **prospective, not retroactive**, rebase or use `--ref main`; and a dispatched run's §34.0 provenance check falls back from `pull_request.base.sha` to `HEAD~1`, so rows added in earlier commits of the same branch are not seen as NEW. **It weakens no gate** — `gate` must still go green on the head SHA, `enforce_admins=true` untouched. `tracking`'s permanently-red raw browser run was replaced by the same NAME-SET check — which also **un-skipped the step behind it**, verified `skipped` on run `30742472551` and therefore never once executed.
 - `.github/workflows/advisory-review.yml` — 1 job: `ai-review`. **DISABLED — `workflow_dispatch` only**, with a required `pr` input. The `pull_request:` trigger is gone.
 - `.github/workflows/cloud-maps.yml` — 1 job: `regen`, still scheduled daily 09:17 UTC + `workflow_dispatch`. **Stage 2 (the project-mapper agent) was DELETED**; Stages 1 / 1b / 3 (deterministic, free) remain. `id-token: write` was dropped with it.
 
@@ -48,7 +51,7 @@ the App-token approach was replaced by the fine-grained `MAPS_PAT` at `b5ec120b`
 Do not go looking for an App install.
 
 ## Tags
-#scrml #map #infra #ci #github-actions #docs-deploy #no-docker #cloud-maps #maps-pat #anthropic-api-key #scheduled-workflow #branch-protection #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #advisory-review-disabled #no-scheduled-map-refresh #browser-baseline #failure-name-set #§34.0 #fetch-depth-0 #skipped-step-behind-red-step
+#scrml #map #infra #ci #github-actions #docs-deploy #no-docker #cloud-maps #maps-pat #anthropic-api-key #scheduled-workflow #branch-protection #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #advisory-review-disabled #no-scheduled-map-refresh #browser-baseline #failure-name-set #§34.0 #fetch-depth-0 #skipped-step-behind-red-step #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #recovery-lever
 
 ## Links
 - [primary.map.md](./primary.map.md)

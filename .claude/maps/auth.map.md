@@ -1,18 +1,16 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-08-06T06:17:17-06:00  commit: a3a34d80
-# **SOURCE WALK IS AT `0d9d843d`; the stamp is `a3a34d80`, the true HEAD.** `a3a34d80` (the
-# S322-bryan wrap continuity commit) landed WHILE this pass ran and is DOCS-ONLY — verified
-# `git diff --name-only 0d9d843d..a3a34d80` = {docs/changelog.md, docs/pr-reviews.md, hand-off.md,
-# handOffs/delta-log.md}, ZERO diff under compiler/ scripts/ stdlib/ package.json .github/. Every
-# source claim below therefore holds at the stamp.
-# NOTE (S322/S324 INCREMENTAL pass): this map had been DELIBERATELY held at `df2ac831` across five
-# windows because its surface had zero diff. **That is no longer true — the §20.5 session surface
-# CHANGED this window and the map is re-walked.** Three landings: the `session` handler-prologue
-# **Proxy** binding (#435, GH #357), the `@currentUser` ambient's resolver-emission gate widened to a
-# direct ident read + an SSE splice (#440), and a `<channel auth=>`-only program now emitting
-# `_scrml_auth_check` + session middleware (#440). **TWO auth-surface gaps are OPEN and ROUTED TO
-# BRYAN — read the "Session read-side" block below before touching the session accessor.**
+# updated: 2026-08-06T23:38:11-06:00  commit: 97576f35
+# **SOURCE WALK IS AT `cf1849b2`; the stamp is `97576f35`, the true HEAD.** The two later commits are
+# DOCS-ONLY (verified: zero diff under compiler/ scripts/ stdlib/ package.json .github/).
+# NOTE (S325/S326 INCREMENTAL pass): re-walked because the §20.5 session surface CHANGED AGAIN, and
+# this time as a SIDE-LANDING of a different arc. **#452 (the route-handler `Response` contract) also
+# hardened the session accessor's read path to an OWN-PROPERTY read** — `get(key)` is now
+# `Object.hasOwn(this._rec, key) ? (this._rec[key] ?? null) : null` (`emit-server.ts:2593`). That
+# closes the PROTOTYPE-CHAIN half of `g-session-get-reserved-key-read-disclosure` and leaves the
+# own-key READ POLICY open. **Read the "Session read-side" block below before touching the accessor —
+# it changed, and the ledger entry has NOT caught up (non-compliance.report.md S326-N2).**
+# The same landing takes that gap from log-only to WIRE-LIVE. Everything else carries its prior walk.
 
 scrml has THREE distinct auth-adjacent surfaces: (1) the compiler's own `<program auth=...>` declarative config that the codegen wires into emitted apps, (2) the `scrml:auth` / `scrml:oauth` stdlib modules an author imports for flow logic, and (3) the §20.5 `session` server builtin (NEW this window — the write half of the session model, landed in two passes). This map covers all three, plus the §14.8.9 protect-floor that backstops them, plus the §64.9 headless-target auth carve-out.
 
@@ -80,7 +78,7 @@ blinds them):
 |---|---|
 | `session.userId` / `.role` / `.isAuth` | the getter (reads `_rec` via `this`) |
 | `session.set` / `.get` / `.destroy` | the bound method |
-| every OTHER key — `.customKey`, `[expr]` | `.get(key)` -> `_rec[key] ?? null` |
+| every OTHER key — `.customKey`, `[expr]` | `.get(key)` -> **`Object.hasOwn(_rec, key) ? (_rec[key] ?? null) : null`** — OWN-PROPERTY only since #452 (see below) |
 
 Two implementation facts that are load-bearing, not stylistic: **`Reflect.get(t, k, t)` uses the TARGET
 as receiver** (the getters read `this._rec`; a Proxy receiver re-enters the trap on `_rec` -> `t.get("_rec")`
@@ -89,11 +87,45 @@ strict-mode TypeError rather than a silent shadow write to the session object. S
 
 ### Session read-side — TWO OPEN gaps, both ROUTED TO BRYAN. Read before touching the accessor.
 
-- **`g-session-get-reserved-key-read-disclosure` (HIGH, open).** The §20.5 reserved-key guard covers the
-  **WRITE** side only (`session.set("csrfToken", …)` -> `E-SESSION-RESERVED-KEY`; a dynamic-key runtime
-  write is a no-op). A request-controlled **READ** — `session[k]` — still reaches compiler-owned session
-  internals including `csrfToken` through `.get()` at HTTP 200. PA-reproduced by execution. This is
-  read-side language-surface semantics, not a fix-forward.
+- **`g-session-get-reserved-key-read-disclosure` (MED — re-scored from HIGH S325; still open, still
+  ROUTED-TO-BRYAN). ⚠ THIS ENTRY MOVED TWICE THIS WINDOW AND THE LEDGER RECORDS ONLY ONE OF THE MOVES.**
+  - **What is now CLOSED (silently, as a side-landing of #452):** the PROTOTYPE-CHAIN read. `get(key)`
+    is `Object.hasOwn(this._rec, key) ? (this._rec[key] ?? null) : null` at `emit-server.ts:2593`.
+    Pre-fix and MEASURED on the emitted helper: `.get("__proto__")` returned `Object.prototype`, and
+    `.get("constructor")` / `.get("toString")` / `.get("hasOwnProperty")` / `.get("valueOf")` /
+    `.get("isPrototypeOf")` each returned a FUNCTION — `_rec` is `{ ...rec }`, a plain object, so the
+    whole `Object.prototype` surface was reachable from a request-controlled key. A function value
+    flowing into a `?{ … ${session.get(k)} … }` bind was an **HTTP 500 SQL TypeError reachable from a
+    request parameter**; that is closed too. **`Object.hasOwn` and NOT `this._rec.hasOwnProperty(key)`
+    is load-bearing:** `_rec` is built from `session.set` writes, so it can carry an own key literally
+    named `hasOwnProperty`, which would shadow the method on the one record that attacks it. This is
+    the entry's own remediation candidate **(iii)** — *"`hasOwnProperty` + prototype guard only, no key
+    policy … arguably a plain bug fix needing no ruling"*, annotated *"(iii) is separable and should not
+    wait on the ruling"*. It did not wait. **The ledger entry does not say so** — its `locus=` still
+    reads `:2568(accessor .get — \`return this._rec[key] ?? null\`, no allowlist/denylist/hasOwnProperty)`
+    and its prose still asserts *"`.get()` is one line — `return this._rec[key] ?? null` — with no
+    allowlist, denylist, or `hasOwnProperty`"*. **Both are false at this HEAD.** See
+    non-compliance.report.md S326-N2.
+  - **What is still OPEN, and it is the part that needs a ruling:** the OWN-KEY read policy. Every own
+    key of `_rec` is still readable by an attacker-chosen key — including the compiler-owned §40.2
+    `csrfToken`, and including any adopter-written secret (`apiKey` came back verbatim as
+    `sk-live-PROBE-SECRET-9f3c`). The §20.5 reserved-key guard is **WRITE-side only**
+    (`session.set("csrfToken", …)` -> `E-SESSION-RESERVED-KEY`; a dynamic-key runtime write is a no-op).
+    The question bryan owes is *should a request-controlled key reach a session read at all* — not
+    "read-null vs error on csrfToken". The `csrfToken`-denylist framing is **security theater for the
+    same-origin threat model and the map should not repeat it**: the compiler already publishes that
+    token same-origin through three measured channels (`GET /_scrml/session`, un-auth'd and un-CSRF'd;
+    the `<meta name="csrf-token">` SSR tag; a non-`HttpOnly` `scrml_csrf` cookie on the 403 retry). A
+    synchronizer token MUST be same-origin readable — that IS the mechanism.
+  - **REACHABILITY CHANGED this window and the direction is worse, not better.** Before #452 the
+    `auth=` shape of this leak reached **no wire at all** — a bare handler return produced Bun's
+    constant welcome page and the value went only to stderr. #452 fixes that by design and thereby takes
+    this leak **from log-only to WIRE-LIVE**: MEASURED, `server function peek(k) { return { v:
+    session.get(k) } }` under `auth="required"` returns `{"v":"<live csrf token>"}` at 200
+    `application/json`, key taken from the request body. **Severity stayed MED deliberately** — a
+    reachability change makes an entry more REAL, not more SEVERE, and the attacker model is unchanged
+    (same-origin XSS or an adopter echoing a request-controlled key; POST-only; CSRF-gated;
+    `Access-Control-Allow-Credentials` is never emitted anywhere in the compiler).
 - **`g-session-context-scan-bare-form-sound` (MED, open).** `E-SESSION-CONTEXT`'s scan was widened to
   match the new bare form during #435, **regressed §20.5 conformance** (it string-matched the compiler's
   own emitted comments and generated guards), and was **TRIMMED before landing** — caught by the PA
@@ -171,7 +203,7 @@ Expiry: `sessionExpiry` on `<program>` for the session cookie `Max-Age` + durabl
 Magic-link/verify/reset tokens: TTL-bound (caller-supplied, embedded in the stored record as an authoritative `expiresAt`), single-use, namespace-scoped.
 
 ## Tags
-#scrml #map #auth #baas #jwt #jwks #oauth #csrf #magic-link #password-reset #e-cg-001 #protect-floor #stdlib-auth #server-shape #tool-serve #jwt-auth-bypass #session-establishment #session-secure #host-cookie #e-scope-012 #e-session-context #e-session-value #e-session-reserved-key #gh357 #session-proxy-bind #scrml-session-bind #reflect-get-target-receiver #sql-interpolation-session #csrf-token-disclosure #session-read-side #dangling-ref-class #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #scrml-auth-check #permissive-by-design #store-invariant-probed #§52.15.1 #§20.5
+#scrml #map #auth #baas #jwt #jwks #oauth #csrf #magic-link #password-reset #e-cg-001 #protect-floor #stdlib-auth #server-shape #tool-serve #jwt-auth-bypass #session-establishment #session-secure #host-cookie #e-scope-012 #e-session-context #e-session-value #e-session-reserved-key #gh357 #session-proxy-bind #scrml-session-bind #reflect-get-target-receiver #sql-interpolation-session #csrf-token-disclosure #session-read-side #dangling-ref-class #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #scrml-auth-check #permissive-by-design #store-invariant-probed #§52.15.1 #§20.5 #object-hasown #own-property-read #prototype-chain-read-closed #hasownproperty-shadow #read-side-policy-open #wire-live #response-contract #security-theater-vs-defense #ledger-locus-stale
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -1,19 +1,14 @@
 # test.map.md
 # project: scrml
-# updated: 2026-08-06T06:17:17-06:00  commit: a3a34d80
-# **SOURCE WALK IS AT `0d9d843d`; the stamp is `a3a34d80`, the true HEAD.** `a3a34d80` (the
-# S322-bryan wrap continuity commit) landed WHILE this pass ran and is DOCS-ONLY — verified
-# `git diff --name-only 0d9d843d..a3a34d80` = {docs/changelog.md, docs/pr-reviews.md, hand-off.md,
-# handOffs/delta-log.md}, ZERO diff under compiler/ scripts/ stdlib/ package.json .github/. Every
-# source claim below therefore holds at the stamp.
-# NOTE (S322/S324 INCREMENTAL pass): over `15e5e070` -> `a3a34d80` (23 commits, TWO session-windows
-# across two clones). Counts re-derived by `git ls-files`; agrees with `docs/FACTS.md` (1,323).
-# **No `bun test` gate-topology change this window — but a NEW PRE-LAND GATE exists that is NOT a
-# `bun test` tier at all:** `scripts/corpus-emit-differential.ts` + `corpus-check-goggles.js` (#428),
-# the standing wide-corpus emit-differential + dual-goggle syntax gate for ANY codegen change. It is
-# not in `ci.yml`, not in `bun test`, not in a hook — it is run BY HAND, base-vs-head, before landing.
-# See the new section below and build.map.md. Per-window test inventories stay DELETED;
-# `git log --diff-filter=A --name-only 15e5e070..HEAD -- compiler/tests conformance` answers that faster.
+# updated: 2026-08-06T23:38:11-06:00  commit: 97576f35
+# **SOURCE WALK IS AT `cf1849b2`; the stamp is `97576f35`, the true HEAD.** The two later commits are
+# DOCS-ONLY (zero diff under compiler/ scripts/ stdlib/ package.json .github/).
+# NOTE (S325/S326 INCREMENTAL pass): over `a3a34d80` -> `97576f35`. **+4 test files, and the two
+# biggest are the two worth reading before writing a test in this repo** —
+# `unit/mangler-region-fencing.test.js` (674L) and `integration/authed-server-fn-response-http.test.js`
+# (764L). Both EXECUTE rather than grep emitted text, both pin their own residual, and the second one
+# carries the window's sharpest testing lesson: **20 pre-existing test sites across 6 files ASSERTED
+# THE BUG** and were CORRECTED, not preserved. Counts re-derived by `git ls-files` + `docs/FACTS.md`.
 
 ## Test Framework
 Runner: `bun:test` (Bun's built-in test runner, no separate package dep)
@@ -25,19 +20,19 @@ Browser DOM: happy-dom / @happy-dom/global-registrator (compiler/tests/browser/)
 Browser tier ASSERTION: `bun scripts/browser-baseline.ts --check` (**not** `bun test compiler/tests/browser`)
 E2E: Playwright (`@playwright/test`), separate config at e2e/playwright.config.ts, NOT part of `bun test`
 
-## Test Categories (compiler/tests/, **1323** `*.test.js` total)
+## Test Categories (compiler/tests/, **1327** `*.test.js` total)
 
-Fresh recursive `git ls-files` recount at `a3a34d80`, all 9 categories individually re-verified;
-agrees with `docs/FACTS.md` (`test files | 1,323`), **which is the citable authority — do not
-hardcode a competing number.** Net **+4** this pass (unit +1, integration +2, browser +1;
+Fresh recursive `git ls-files` recount at `97576f35`, all 9 categories individually re-verified;
+agrees with `docs/FACTS.md` (`test files | 1,327`), **which is the citable authority — do not
+hardcode a competing number.** Net **+4** this pass (unit +2, integration +1, browser +1;
 conformance / lsp / commands / self-host / e2e-render-map / top-level all unchanged).
 
 | Category | Glob | Count | **Which gate runs it** |
 |---|---|---|---|
-| Unit | `compiler/tests/unit/**/*.test.js` | **872** | `gate` (blocking) + pre-commit + pre-push |
-| Integration | `compiler/tests/integration/**/*.test.js` | **191** | `tracking` (non-blocking) + pre-commit + pre-push |
-| Conformance | `compiler/tests/conformance/**/*.test.js` | 131 (unchanged) | `gate` (blocking) + pre-commit + pre-push |
-| Browser | `compiler/tests/browser/**/*.test.js` | **90** | `gate` (BLOCKING) + `tracking` — via the NAME-SET check |
+| Unit | `compiler/tests/unit/**/*.test.js` | **874** | `gate` (blocking) + pre-commit + pre-push |
+| Integration | `compiler/tests/integration/**/*.test.js` | **192** | `tracking` (non-blocking) + pre-commit + pre-push |
+| Conformance | `compiler/tests/conformance/**/*.test.js` | 131 (unchanged for TWO windows) | `gate` (blocking) + pre-commit + pre-push |
+| Browser | `compiler/tests/browser/**/*.test.js` | **91** | `gate` (BLOCKING) + `tracking` — via the NAME-SET check |
 | LSP | `compiler/tests/lsp/**/*.test.js` | 11 | `tracking` only (non-blocking) |
 | Commands | `compiler/tests/commands/**/*.test.js` | 8 | `tracking` only (non-blocking) |
 | Self-host | `compiler/tests/self-host/**/*.test.js` | 4 | `tracking` only (non-blocking) |
@@ -46,25 +41,34 @@ conformance / lsp / commands / self-host / e2e-render-map / top-level all unchan
 
 **New this pass — 4 files, and each one is worth knowing WHY it exists:**
 
-| File | Tier | What it pins |
-|---|---|---|
-| `unit/async-name-provider.test.js` | unit | #442 Limb 1 — the ONE async-name provider. **Its §5 is a SELF-RETIRING GUARD**: it asserts the `g-drain-textscan-overfires-on-awaited-nested-arm-site` false-positive diagnostic IS present **AND** that the emission it fires against IS correct. Fix the root and this test FAILS and tells you to delete it. |
-| `browser/browser-u1-client-server-fn-await.test.js` | browser | #429 U1 — the client server-fn call-site `await`, asserted at RUNTIME in the browser tier rather than by grepping emitted text (the S265 execute-don't-grep rule). |
-| `integration/gh357-session-sql-interpolation.test.js` | integration | #435 — `session.*` inside a `?{}` SQL interpolation resolves (500 -> 200), and the Proxy binding preserves BOTH accessor shapes (`.name` getter and `[expr]` -> `.get()`). |
-| `integration/emit-server-handler-dangling-refs.test.js` | integration | #440 — the `@currentUser` resolver gate (plain + SSE handlers) and the `<channel auth=>`-only `_scrml_auth_check`; includes the store-invariant probe (a read-only `@currentUser` program gets the in-memory Map, NOT the durable on-disk store). |
+| File | Tier | Lines | What it pins |
+|---|---|---|---|
+| `unit/mangler-region-fencing.test.js` | unit | **674** | #458 — all three mangler defects, in FIVE labelled sections, and it is the model to copy. **§1 EXECUTES the shipped `--embed-runtime` bundle** (`_scrml_replay` is invoked; pre-fence it was a `ReferenceError` on `log`) rather than grepping for a marker — the S265 execute-don't-grep rule applied to a codegen fix. **§2a tests the CLASSIFIER directly**, including that a `binding-pattern` is RECOGNISED and deliberately NOT acted on. **§2c is a NEGATIVE DEPENDENCY test** — the cross-file module-registry footer must stay `{publicName: emittedName}` and the importer's destructure verbatim. **§2f is a RESIDUAL MAP**: the shapes the fix does NOT reach (nested groups, spread, mixed `{get, post, n: 1}`, the ternary ALTERNATE) are pinned as failing-by-design in the SUITE, not merely described in prose — so the residual cannot silently drift. §2e pins the `__proto__` B.3.1 shape-preservation refusal. §3 asserts the `registerFnName` drop directly, satisfying invariant 27. |
+| `integration/authed-server-fn-response-http.test.js` | integration | **764** | #452 — every server-fn route handler terminates in a `Response`, asserted **over real HTTP against a real server**, not against emitted text. Six describe blocks: `auth="required"` (including a VOID no-`return` body), `protect=` without an explicit `auth=` (**and it proves the predicate is WIDER than `auth=`** — the app has no source-level `auth=` yet still carries an auth gate), both gates together, a **no-auth CONTROL asserting the `useBaselineCsrf` path is UNCHANGED** including its double-submit `Set-Cookie`, session establishment (the sid cookie survives the envelope — the silent-drop this fix also closed), and the body-built-`Response` passthrough. That last block is exemplary: it pins the upstream `E-SCOPE-001` build-block **and** asserts the guard is emitted AHEAD of the envelope **and** EXECUTES to prove a body's 403 is not re-emitted as 200. It also pins ORDER — "the protect= egress redact runs BEFORE serialization, never after". |
+| `unit/show-false-ssr-hidden-no-fouc.test.js` | unit | 197 | #450 §17.2 — 11 sections covering both directions: `display:none` IS emitted for an initial-false `show=`, and the element is **BYTE-INERT** for initial-true. §5-§7 pin the `style=` merge policy (merge into a static literal; author `display` wins; a reactive/interpolated style is never clobbered), §8-§9 pin the fail-inert cases (dotted path, reassigned/indeterminate cell), §11 pins that the client hydration controller still reveals. |
+| `browser/g-each-shorthand-markup-fn-mount.browser.test.js` | browser | 152 | #456 — a `:`-shorthand `<each>` body whose child is a markup-returning fn call MOUNTS per row, asserted in the browser tier at runtime. |
+
+**⚠ THE TESTING LESSON OF THIS WINDOW, and it is a repeat of the S276 shape — read it before you
+"preserve" an existing assertion.** #452's landing corrected **20 tolerate-or-assert-bare test sites
+across 6 files** (`integration/auth-csrf-synchronizer-token.test.js`,
+`integration/csrf-canonical-delivery.test.js`, `integration/session-establishment-roundtrip.test.js`,
+`integration/session-secure-b4b5-roundtrip.test.js`, `unit/session-context-gate-b2b3.test.js`,
+`unit/session-establishment.test.js`). Those sites were not neutral — **they encoded the defect as
+expected behaviour, because the oracle shared the implementation's blind spot.** A green suite over
+them was evidence of nothing. When a fix requires editing existing assertions, that is a signal to
+check whether the assertions were ever right, not a signal to minimise the diff.
 
 **`compiler/tests/browser/FAILURE-BASELINE.json` is unchanged, and that is a CLAIM, not an omission** —
 the browser tier gained a test and it passes, so the failure NAME SET did not move.
 
-Two existing files were MODIFIED rather than added, and the modification is itself a fact worth
-carrying: `unit/error-handler-const-bind-r25-bug-49.test.js` and
-`integration/nested-error-handler-no-invalid-js.test.js` had an incidental blanket
+Carried from the prior pass, still true: `unit/error-handler-const-bind-r25-bug-49.test.js` and
+`integration/nested-error-handler-no-invalid-js.test.js` have an incidental blanket
 `errors.toHaveLength(0)` **NARROWED to exclude exactly one code** — the known-false-positive
 `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` firing described in error.map.md. Every subject assertion is
 untouched, and any OTHER new diagnostic still fails them.
 
-The top-level `conformance/` corpus did **not** move this window — still **855** cases
-(`docs/FACTS.md` is the authority).
+The top-level `conformance/` corpus moved **+2** this window — **857** cases, the two NEW
+`value-decl-block-arm-{raw,variant}` pins from #447 (`docs/FACTS.md` is the authority).
 
 ## THE BROWSER TIER IS NOW GATED — and the mechanism generalizes
 
@@ -330,7 +334,7 @@ inherited the same population). `pa-base v2.13 §8` names it THE TRUNCATED PROBE
 tool is marked `HARD REQ n` at its site so a future editor can see what they would be removing.
 
 ## Tags
-#scrml #map #test #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive
+#scrml #map #test #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr #byte-inert #each-shorthand-markup-fn-mount #857-conformance
 
 ## Links
 - [primary.map.md](./primary.map.md)

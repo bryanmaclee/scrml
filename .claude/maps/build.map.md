@@ -1,21 +1,14 @@
 # build.map.md
 # project: scrml
-# updated: 2026-08-06T06:17:17-06:00  commit: a3a34d80
-# **SOURCE WALK IS AT `0d9d843d`; the stamp is `a3a34d80`, the true HEAD.** `a3a34d80` (the
-# S322-bryan wrap continuity commit) landed WHILE this pass ran and is DOCS-ONLY — verified
-# `git diff --name-only 0d9d843d..a3a34d80` = {docs/changelog.md, docs/pr-reviews.md, hand-off.md,
-# handOffs/delta-log.md}, ZERO diff under compiler/ scripts/ stdlib/ package.json .github/. Every
-# source claim below therefore holds at the stamp.
-# NOTE (S322/S324 INCREMENTAL pass): over `15e5e070` -> `a3a34d80` (23 commits, TWO session-windows
-# across two clones). **This map was DELIBERATELY older than the rest of the set at the last two
-# stamps; it is re-walked now because a NEW TOOL landed that a codegen task must know about.**
-# `git diff 15e5e070..HEAD -- .github/ package.json Dockerfile docker-compose.yml Makefile` is
-# **EMPTY** — zero CI, packaging, npm-script, CLI-flag or Docker change this window. The ONE addition
-# is `scripts/corpus-emit-differential.ts` + `scripts/corpus-check-goggles.js` (#428): the standing
-# **pre-land gate for any codegen change**, and like `review-debt.ts` it is **NOT wired into `ci.yml`**.
-# Everything else carries its prior walk. **The single line a reader most needs still holds:
-# `cloud-maps` NO LONGER REFRESHES THE MAPS ON A SCHEDULE — the window this pass reconciles ran 23
-# commits and two session-windows with no refresh, exactly as the last one did.**
+# updated: 2026-08-06T23:38:11-06:00  commit: 97576f35
+# **SOURCE WALK IS AT `cf1849b2`; the stamp is `97576f35`, the true HEAD.** The two later commits are
+# DOCS-ONLY (zero diff under compiler/ scripts/ stdlib/ package.json .github/).
+# NOTE (S325/S326 INCREMENTAL pass): over `a3a34d80` -> `97576f35`. **Packaging, CLI, Docker, git-hooks
+# and every gate STEP are byte-unchanged** (`git diff a3a34d80..HEAD -- package.json scripts/` is
+# EMPTY). **ONE change, and it is a TRIGGER, not a step: `ci.yml` gained `workflow_dispatch: {}` (#454)**
+# — a manual re-fire lever added after a platform outage left five PRs unmergeable with no recovery
+# path. Read the CI section for its TWO measured constraints before reaching for it; the first one
+# (it is PROSPECTIVE, not retroactive) is the kind of thing you discover at the worst moment.
 
 ## Development Commands (root package.json scripts)
 compile — `bun run compiler/src/cli.js compile`
@@ -304,11 +297,46 @@ extension: `<base>.client.js` → `<base>.client.<hash>.js`, `<base>.css` → `<
 Implementation: `compiler/src/api.js` (`contentHashAssets` option), `compiler/src/commands/build.js`
 (`generateServerEntry`), `compiler/src/commands/dev.js` (`devCacheHeaders`).
 
-## CI/CD Pipeline  [.github/workflows/ci.yml] — CHANGED THIS WINDOW
+## CI/CD Pipeline  [.github/workflows/ci.yml] — ONE NEW TRIGGER THIS WINDOW, ZERO step changes
 Three jobs, "gate-layering" model (types → pre-commit fast subset → CI-here → PA judgment):
 
 **gate** — BLOCKING (the merge-gate), **12 steps** (+2 this window). checkout **(`fetch-depth: 0`, NEW)** → setup-bun → `bun install --frozen-lockfile` → `bun run pretest` → `bun test compiler/tests/unit compiler/tests/conformance` → `bun test compiler/tests/*.test.js` (the S302 root-level step) → gauntlet quick check (compile `benchmarks/todomvc/app.scrml`, `node --check` the emitted client.js) → **`bun scripts/browser-baseline.ts --check` (NEW, S313 — bryan RULED promote)** → `bun scripts/snippet-gate.js` → `bun scripts/facts.ts --check` → `bun run scripts/regen-spec-index.ts --check` → **`bun scripts/s34-census.ts --check-new --base ${{ github.event.pull_request.base.sha || 'HEAD~1' }}` (NEW, the SPEC §34.0 row-provenance gate)**.
-Triggers: push (paths-ignore: **.md, handOffs/**, docs/**) and pull_request. `concurrency: group ci-${{ref}}, cancel-in-progress: true`.
+Triggers: push (paths-ignore: `**.md`, `handOffs/**`, `docs/**`), pull_request, **and `workflow_dispatch: {}` (NEW #454)**. `concurrency: group ci-${{ref}}, cancel-in-progress: true`. **Gate step COUNT is unchanged at 12 — #454 added a way to START a run, not a step and not a way to skip one.**
+
+### `workflow_dispatch` — the manual re-fire lever (NEW #454). Read the two constraints BEFORE you need it.
+
+**Why it exists.** GitHub does not re-deliver a webhook it dropped. During the 2026-08-06 Actions
+outage ("webhook triggers remain throttled; many push/pull request events aren't triggering runs")
+**FIVE PRs sat with ZERO checks and therefore could not merge**, `gate` being the sole required check.
+S325 burned a whole session on it and tried force-push, close/reopen, a new commit, and a brand-new PR
+— **all four produced nothing, because every one of them is just another webhook into the same
+throttled pipe.** This was the SECOND outage with no lever; the first cost a session's landings.
+
+```
+gh workflow run CI --ref <branch>
+```
+
+**⚑ CONSTRAINT 1, MEASURED not assumed — the lever is PROSPECTIVE, not retroactive.** The dispatch
+reads the workflow definition **FROM THE TARGET REF**, so `--ref <branch>` fails
+`HTTP 422: Workflow does not have 'workflow_dispatch' trigger` on any branch cut BEFORE #454 landed.
+**Rebase the branch onto main first, or dispatch `--ref main`.** Stated plainly because it is exactly
+the wrong thing to learn during an outage: *this will not rescue a branch that predates it.* Proven
+both ways — `--ref docs/s326-continuity` (a pre-merge cut) → 422; `--ref main` → run 31140159467,
+**all three jobs green including `gate`**.
+
+**⚑ CONSTRAINT 2 — a dispatched run's §34.0 row-provenance check is WEAKER, and this is the honest
+caveat, not a footnote.** The step `s34-census --check-new --base` reads
+`github.event.pull_request.base.sha`, which does not exist on a manual run, so it falls back to
+`HEAD~1` — **a fallback that already existed; this is not new behaviour.** On a multi-commit branch
+that compares against the previous commit rather than the merge base, so **rows added in EARLIER
+commits of the same branch are not seen as NEW.** Every other step is event-independent and identical.
+**Prefer a real push/PR event when one is available; reach for this when the platform has eaten the
+event.**
+
+**⚑ IT WEAKENS NO GATE.** It adds a way to START a run; it does not add a way to skip one. `gate` must
+still go green on the head SHA before a merge is allowed, and `enforce_admins=true` is untouched. The
+fork-rule row that matters is root-vs-position: **nudging a PR treats the symptom; a manual trigger
+removes the class.**
 
 Two placement facts that are deliberate, not incidental:
 - **`fetch-depth: 0` exists FOR the §34.0 gate** — it diffs against the PR base SHA, and a shallow clone has no common ancestry, so merge-base fails and the gate cannot resolve what is NEW.
@@ -316,7 +344,7 @@ Two placement facts that are deliberate, not incidental:
 
 **tracking** — NON-BLOCKING (`continue-on-error: true`). integration + lsp + commands tests (incl. `commands/db-migrate.test.js`) → **`bun scripts/browser-baseline.ts --check` (REPLACES the raw `bun test compiler/tests/browser`)** → the parser-conformance-within-node M6.x backlog. **The replacement fixed a second-order bug worth knowing: a FAILED step HALTS the job, and the browser step was permanently red, so `Within-node parser-parity + canary` — the step after it — reports `skipped` on run 30742472551 and had therefore NEVER RUN.** That is the S302 class (13 of 14 root-level files run by no workflow) recurring one job over: the tier was useless in both directions at once *and* it was silently eating the steps behind it.
 
-**windows** — NON-BLOCKING (`continue-on-error: true`), `runs-on: windows-latest`. unit + conformance only. **NEW this pass:** the `Install deps` step now sets `PUPPETEER_SKIP_DOWNLOAD: "true"` before `bun install --frozen-lockfile` — this job never touches the browser tier, so the puppeteer postinstall download was pure cost AND a flake source (PR #382 witnessed an `ECONNRESET` failing `Install deps` before a single test ran, on IDENTICAL content that passed on a sibling run). **`gate` still downloads it — the browser NAME-SET assertion needs a real browser.**
+**windows** — NON-BLOCKING (`continue-on-error: true`), `runs-on: windows-latest`. unit + conformance only. **Carried from the prior window (unchanged this pass):** the `Install deps` step now sets `PUPPETEER_SKIP_DOWNLOAD: "true"` before `bun install --frozen-lockfile` — this job never touches the browser tier, so the puppeteer postinstall download was pure cost AND a flake source (PR #382 witnessed an `ECONNRESET` failing `Install deps` before a single test ran, on IDENTICAL content that passed on a sibling run). **`gate` still downloads it — the browser NAME-SET assertion needs a real browser.**
 
 Rationale banner in the workflow (S253): `gate` is the guaranteed-green-from-source core only — no self-host/within-node backlog noise. The live-PG DB-authoritative integration tests remain `tracking`-tier and skip-graceful.
 
@@ -483,7 +511,7 @@ pre-push — **SCOPE AND TRIGGER BOTH CHANGED THIS WINDOW.**
 None. No Dockerfile / docker-compose in this repo — see infra.map.md.
 
 ## Tags
-#scrml #map #build #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist #gate-topology #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #failure-name-sets #cry-wolf #new-ref-push-skip #set-e-trap #pre-push-scope #b7dda491 #browser-baseline #failure-name-set #bidirectional-baseline #s34-census #§34.0 #row-provenance #fetch-depth-0 #diff-scoped-gate #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #no-scheduled-map-refresh #advisory-review-disabled #skipped-step-behind-red-step #gap-attribute-bag #locus-attr #partial-impl #proven-gate #import-meta-main #review-debt-script #pr-reviews-md #puppeteer-skip-download #windows-ci-flake #boot-step-0.6 #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #script-vs-module-goggle #node-check-blind-to-tla #bun-vm-script-blind #classic-script-no-type-module #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #453-exclusions-printed #exit-code-2-invalid-comparison #compile-failure-is-data #u1-corpus-emit-retired #import-meta-classic-script
+#scrml #map #build #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist #gate-topology #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #failure-name-sets #cry-wolf #new-ref-push-skip #set-e-trap #pre-push-scope #b7dda491 #browser-baseline #failure-name-set #bidirectional-baseline #s34-census #§34.0 #row-provenance #fetch-depth-0 #diff-scoped-gate #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #no-scheduled-map-refresh #advisory-review-disabled #skipped-step-behind-red-step #gap-attribute-bag #locus-attr #partial-impl #proven-gate #import-meta-main #review-debt-script #pr-reviews-md #puppeteer-skip-download #windows-ci-flake #boot-step-0.6 #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #script-vs-module-goggle #node-check-blind-to-tla #bun-vm-script-blind #classic-script-no-type-module #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #453-exclusions-printed #exit-code-2-invalid-comparison #compile-failure-is-data #u1-corpus-emit-retired #import-meta-classic-script #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #s34-census-base-fallback #weakens-no-gate #root-vs-position
 
 ## Links
 - [primary.map.md](./primary.map.md)

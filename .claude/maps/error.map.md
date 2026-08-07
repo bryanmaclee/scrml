@@ -1,25 +1,28 @@
 # error.map.md
 # project: scrml
-# updated: 2026-08-06T06:17:17-06:00  commit: a3a34d80
-# **SOURCE WALK IS AT `0d9d843d`; the stamp is `a3a34d80`, the true HEAD.** `a3a34d80` (the
-# S322-bryan wrap continuity commit) landed WHILE this pass ran and is DOCS-ONLY — verified
-# `git diff --name-only 0d9d843d..a3a34d80` = {docs/changelog.md, docs/pr-reviews.md, hand-off.md,
-# handOffs/delta-log.md}, ZERO diff under compiler/ scripts/ stdlib/ package.json .github/. Every
-# source claim below therefore holds at the stamp.
-# NOTE (S322/S324 INCREMENTAL pass): over `15e5e070` -> `a3a34d80` (23 commits, TWO session-windows
-# across two clones — S322-bryan on the ASUS + S322/S323/S324-peter on Windows).
-# **CATALOG UNCHANGED at 806 rows — `compiler/SPEC.md` has ZERO diff this window** (every landing is
-# emit-time or tooling), so no code was added, retired or renumbered.
-# **CORRECTION TO A CARRIED CLAIM, re-executed this pass rather than copied forward: `bun
-# scripts/s34-census.ts` RUNS on THIS (Linux) clone.** Verified at this HEAD — it prints
-# `806 rows (§34 19030..19907, derived) · 1876 source files · 855 conformance cases` and the full
-# bucket split (STRUCK 34 · PINNED 339 · IMPL-SITES 321 · DECLARED-AHEAD 14 · RUNTIME-SURFACED 3 ·
-# FALSE-CLAIM 95, dispositions BUILD-ARC 62 / HOME-NO-SHALL 25 / ORPHAN-INDEX 0 / NOMINAL-HOME 8).
-# **The `ENOENT` is a WINDOWS-ONLY defect** (`new URL(import.meta.url).pathname` vs
-# `fileURLToPath`, scripts/s34-census.ts:49) — the prior maps' unqualified "STILL BROKEN" reads as
-# tool-wide and is wrong. Use the oracle first on Linux/macOS; fall to the manual table-column
-# methodology only on Windows. Per-window landing narratives stay DELETED (`docs/changelog.md` owns
-# history).
+# updated: 2026-08-06T23:38:11-06:00  commit: 97576f35
+# **SOURCE WALK IS AT `cf1849b2`; the stamp is `97576f35`, the true HEAD.** The two later commits are
+# DOCS-ONLY (zero diff under compiler/ scripts/ stdlib/ package.json .github/).
+# NOTE (S325/S326 INCREMENTAL pass): over `a3a34d80` -> `97576f35`. **ZERO new diagnostic codes and
+# zero retired ones — re-derived, not assumed:** `git diff a3a34d80..HEAD -- compiler/src` contains no
+# added or removed `"E-*"`/`"W-*"`/`"I-*"` string literal, and `compiler/SPEC.md` has zero diff, so the
+# §34 catalog stays at **806 rows**. `bun scripts/s34-census.ts` re-executed at this HEAD returns
+# `806 rows (§34 19030..19907, derived) · 1886 source files · 857 conformance cases` with buckets
+# `STRUCK 34 · PINNED 339 · IMPL-SITES 321 · DECLARED-AHEAD 14 · RUNTIME-SURFACED 3 · FALSE-CLAIM 95`
+# — **byte-identical to the prior stamp's buckets.**
+# **THE ONE THING THIS WINDOW ADDS TO THIS MAP IS A NEGATIVE, and it is deliberate, not an omission:**
+# #458's `registerFnName` guard SILENTLY DROPS a malformed `fnNameMap` key and raises NO diagnostic —
+# because every §34 fire site for the one code that fits (`E-CODEGEN-INVALID-LOGIC`) is
+# `validate-emit.ts`, whose contract is "the emitted artifact does not parse, here is the byte offset".
+# A declaration-site fire would need a NEW §34 row, i.e. a SPEC amendment, and that half was surfaced
+# to the PA rather than smuggled into a fix. **The drop is testable** (invariant 27) —
+# `compiler/tests/unit/mangler-region-fencing.test.js` §3 asserts it directly. See "Standing
+# catalog-vs-impl facts".
+# **Also worth knowing before you go looking for a code that does not exist:** #452's route-handler
+# `Response` contract is enforced by EMISSION SHAPE, not by a diagnostic — there is no
+# `E-*-BARE-RETURN`. The pre-existing `E-SCOPE-001` is what currently build-blocks a plain body naming
+# `Response`, which is why the passthrough guard is unreachable from the corpus today. And #452's
+# "SHALL" has no §34 or §12.5 home at all — non-compliance.report.md S326-N1.
 
 ## HOW TO LOOK UP A DIAGNOSTIC CODE (read this first)
 
@@ -444,7 +447,7 @@ compiling stdlib source emitting a browser-DOA bundle, invisible to every prior 
 once (wrong goggle AND `stdlib/` outside the corpus roots). See build.map.md for how to run it.
 
 ## Tags
-#scrml #map #error #diagnostics #routing #semdiff #css65 #diagnostic-partition #result-warnings #lint-diagnostics #tab-span-lift #outlet #tenant-floor #ssr-auth-scoped #sql-lex #sql-table-refs #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued #dbauth #e-dbauth-sqlite #e-dbauth-no-tenant-column #w-dbauth-marker-nearmiss #w-schema-destructive-drop #db-migrate #rls #secdef #e-cg-018 #w-each-bind-item-field-deferred #e-schema-010 #e-schema-011 #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #w-nav-chunk-load-failed #navigate-wave1c #e-match-invalid-arm #e-if-in-dispatched-arm #structural-if #§17.1.2 #three-call-sites #revert-by-symbol #e-channel-inside-page #cataloged-but-unwired #listen-quoting #changelog-dereferenced #ghost-pattern #w-dead-function #e-pa-002 #protect-analyzer #tailwind #w-tailwind-unrecognized-class #e-tailwind-001 #outline-family #w-server-import-unemitted #dist-space #d4 #on-mount #gh237 #gh234 #messages-chunk #w-auth-001-split #w-auth-middleware-auto-injected #code-split #trigger-3 #escalation-server-only #route-inference #prefix-coverage-audit #error-generated-index #not-a-diagnostic #w-lift-tier0 #ifrow-apply #§34.0 #row-provenance #s34-census #census-buckets #false-claim #declared-ahead #runtime-surfaced #struck-tombstone #line-citation-strip #e-deprecated-001 #machine-retired #w-deprecated-001-retired #e-lifecycle-001 #e-lifecycle-002 #e-lifecycle-004 #cleanup-diagnostics #e-for-unparenthesized-head #e-server-fn-in-sync-callback #e-mw-006-dead #e-error-011 #w-route-request-duplicates-server-load #named-codes-land-with-impl #w-lint-uncatalogued-eight #generated-index-unmaintained #e-fn-equals-body #fn-decl-parse-sites #subparse-span-rebase #within-node-gate-windows-fix #s34-census-broken #fileURLToPath-vs-pathname #pr-405-landed #w-if-in-each #s34-census-works-on-linux #windows-only-enoent #async-name-provider #drain-widening #position-blind-textscan #self-retiring-guard #arm-granular-vs-site-granular #cross-file-server-fn-collision #e-session-context-trimmed #session-read-disclosure #e-cg-001-writes-anyway #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #import-meta-classic-script #each-nested-if-not-reactive #cps-choke-point-landed
+#scrml #map #error #diagnostics #routing #semdiff #css65 #diagnostic-partition #result-warnings #lint-diagnostics #tab-span-lift #outlet #tenant-floor #ssr-auth-scoped #sql-lex #sql-table-refs #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued #dbauth #e-dbauth-sqlite #e-dbauth-no-tenant-column #w-dbauth-marker-nearmiss #w-schema-destructive-drop #db-migrate #rls #secdef #e-cg-018 #w-each-bind-item-field-deferred #e-schema-010 #e-schema-011 #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #w-nav-chunk-load-failed #navigate-wave1c #e-match-invalid-arm #e-if-in-dispatched-arm #structural-if #§17.1.2 #three-call-sites #revert-by-symbol #e-channel-inside-page #cataloged-but-unwired #listen-quoting #changelog-dereferenced #ghost-pattern #w-dead-function #e-pa-002 #protect-analyzer #tailwind #w-tailwind-unrecognized-class #e-tailwind-001 #outline-family #w-server-import-unemitted #dist-space #d4 #on-mount #gh237 #gh234 #messages-chunk #w-auth-001-split #w-auth-middleware-auto-injected #code-split #trigger-3 #escalation-server-only #route-inference #prefix-coverage-audit #error-generated-index #not-a-diagnostic #w-lift-tier0 #ifrow-apply #§34.0 #row-provenance #s34-census #census-buckets #false-claim #declared-ahead #runtime-surfaced #struck-tombstone #line-citation-strip #e-deprecated-001 #machine-retired #w-deprecated-001-retired #e-lifecycle-001 #e-lifecycle-002 #e-lifecycle-004 #cleanup-diagnostics #e-for-unparenthesized-head #e-server-fn-in-sync-callback #e-mw-006-dead #e-error-011 #w-route-request-duplicates-server-load #named-codes-land-with-impl #w-lint-uncatalogued-eight #generated-index-unmaintained #e-fn-equals-body #fn-decl-parse-sites #subparse-span-rebase #within-node-gate-windows-fix #s34-census-broken #fileURLToPath-vs-pathname #pr-405-landed #w-if-in-each #s34-census-works-on-linux #windows-only-enoent #async-name-provider #drain-widening #position-blind-textscan #self-retiring-guard #arm-granular-vs-site-granular #cross-file-server-fn-collision #e-session-context-trimmed #session-read-disclosure #e-cg-001-writes-anyway #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #import-meta-classic-script #each-nested-if-not-reactive #cps-choke-point-landed #zero-new-codes #806-unchanged #silent-drop-testable #no-diagnostic-by-design #register-fn-name #e-codegen-invalid-logic #validate-emit-contract #e-scope-001 #response-contract-has-no-code #spec-silent-shall
 
 ## Links
 - [primary.map.md](./primary.map.md)

@@ -1,19 +1,25 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-08-06T06:17:17-06:00  commit: a3a34d80
-# **SOURCE WALK IS AT `0d9d843d`; the stamp is `a3a34d80`, the true HEAD.** `a3a34d80` (the
-# S322-bryan wrap continuity commit) landed WHILE this pass ran and is DOCS-ONLY — verified
-# `git diff --name-only 0d9d843d..a3a34d80` = {docs/changelog.md, docs/pr-reviews.md, hand-off.md,
-# handOffs/delta-log.md}, ZERO diff under compiler/ scripts/ stdlib/ package.json .github/. Every
-# source claim below therefore holds at the stamp.
-# NOTE (S322/S324 INCREMENTAL pass): over `15e5e070` -> `a3a34d80` (23 commits, TWO session-windows
-# across two clones — S322-bryan on the ASUS + S322/S323/S324-peter on Windows).
-# **`compiler/SPEC.md` has ZERO diff this window** — no normative text moved, so nothing in this map's
-# spec-index half changes. What changed is IMPLEMENTATION of already-normative sections, and three
-# sections below are rewritten to say what actually ships now: **§13.2** (the client server-fn
-# call-site await, #429; the ONE async-name provider, #442), **§20.5** (the `session` prologue Proxy
-# binding, #435 / GH #357), and **§52.15.1** (the `@currentUser` ambient's resolver-emission gate,
-# #440). History stays in `docs/changelog.md` + `handOffs/delta-log.md`.
+# updated: 2026-08-06T23:38:11-06:00  commit: 97576f35
+# **SOURCE WALK IS AT `cf1849b2`; the stamp is `97576f35`, the true HEAD.** The two later commits
+# (`70ad2e6c`, `97576f35`) are DOCS-ONLY — `git diff --name-only cf1849b2..97576f35` touches only
+# docs/ + hand-off.md + handOffs/ + master-list.md, ZERO diff under compiler/ scripts/ stdlib/
+# package.json .github/. Every source claim below holds at the stamp.
+# NOTE (S325/S326 INCREMENTAL pass): over `a3a34d80` -> `97576f35` (17 commits, TWO clones —
+# S325/S326-bryan on the ASUS + S325/S327-peter on Windows).
+# **`compiler/SPEC.md` has ZERO diff this window** — no normative text moved. What changed is
+# IMPLEMENTATION of already-normative sections. TWO NEW sections below: **§12.5** (the route-handler
+# `Response` contract, #452) and **the mangler REGION-FENCE** (#458, a compiler-architecture concept
+# rather than a language one — it is here because the RULE it establishes is general). §20.5 gains an
+# own-property-read correction that arrived as a side-landing of #452.
+# **⚠ THE ZERO SPEC DIFF IS THIS WINDOW'S FINDING, NOT ITS REASSURANCE.** #452 introduces a normative
+# "route handlers SHALL return a `Response`" — in a source comment and a commit subject, filed under
+# §12.5 — and **§12.5 does not contain it.** §12.5 governs return VALUES and their serialization;
+# §12.5.2 PRESUPPOSES a JSON response without ever obliging the handler to produce one. A SHALL that
+# lives only in a code comment is exactly the canon-claims/SPEC-silent direction pa.md Rule 4 exists
+# to catch. See non-compliance.report.md S326-N1.
+# History stays in `docs/changelog.md` + `handOffs/delta-log.md`.
+
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
 
 ## Core Concepts (by SPEC section)
@@ -714,6 +720,19 @@ on-disk store (§20.5 i29e; only an app that actually `session.set`/`.destroy`s 
 entries were outdated on the locus — one named a binding site a prior fix had already covered, the
 other understated the dependency — and had to be re-diagnosed against HEAD before scoping.
 
+**CORRECTION THIS WINDOW (#452, a side-landing of the `Response` arc): `session.get(key)` is now an
+OWN-PROPERTY read.** `Object.hasOwn(this._rec, key) ? (this._rec[key] ?? null) : null`
+(`emit-server.ts:2593`). Pre-fix it was an ordinary property read, so it resolved up
+`Object.prototype` for any key the record does not carry — measured on the emitted helper,
+`.get("__proto__")` returned `Object.prototype` and `.get("constructor"/"toString"/"valueOf"/…)` each
+returned a FUNCTION, with a function value reaching a `?{}` bind as an **HTTP 500 from a
+request-controlled key**. `Object.hasOwn` rather than `this._rec.hasOwnProperty(key)` is load-bearing:
+`_rec` is built from `session.set` writes and can carry an own key literally named `hasOwnProperty`.
+**Scope: prototype-chain reads ONLY.** An own key still reads, including the compiler-owned §40.2
+`csrfToken` — `g-session-get-reserved-key-read-disclosure` (MED, open, routed to bryan) covers the
+remaining read-POLICY question, and this same window's `Response` landing took it from log-only to
+wire-live. See auth.map.md.
+
 ## §13.2 — the client server-fn call-site await, and the ONE async-name provider (NEW #429 + #442)
 
 **Read this before adding any await-injection, any async predicate, or any fourth consumer of "is this
@@ -775,6 +794,152 @@ emitter paths (CPS / failable-fn wrapper, module top-level init, markup-interpol
 path — `runtime-template.js:1168` re-invokes the init thunk without awaiting, so a cell can be correct
 at mount and wrong after `reset()`. The absorb-sequencing ruling that governs the fix (option **C**:
 await the IIFE AND keep its `.catch`, §13.2 vs §19.6) is **RULED but NOT BUILT**.
+
+## §12.5 — a route handler SHALL return a `Response`, on EVERY path (NEW #452)
+
+**⚠ NORMATIVE STATUS FIRST, because it matters more than the mechanism.** The sentence
+"**Route handlers SHALL return a `Response`** — unconditionally, on every path, in every combination
+of `auth=` / `protect=` / tenant / `csrf=` / idempotency" exists in `emit-server.ts` as a source
+comment and in `ec0142aa`'s subject as "fix(§12.5 emit-server)". **§12.5 does not say it.** §12.5 is
+"Server Function Return Values" — allowed return types, the `T | not` wire envelope, the client-receipt
+contract. §12.5.2 says *"the compiler-generated fetch wrapper deserializes the JSON response"*, which
+PRESUPPOSES a JSON response but never obliges the handler to produce one, and §12.5.3's normative
+bullets are all about type serializability. So the obligation is real, it is now enforced in code, and
+it is **derived, not stated**. Read it as implementation of §12.5.2's presupposition until someone
+lands the §12.5.3 bullet. non-compliance.report.md S326-N1.
+
+**The defect this closed, and why it survived so long.** The non-baseline-CSRF handler wrapped its body
+in a value-capturing IIFE only when `_ext5DedupNonCsrf || _protectActive || _tenantActive`. Without
+that wrap, **the adopter's `return` became the HANDLER's `return`** — a bare JS value handed straight
+to `Bun.serve`, since both shipped hosts dispatch `return route.handler(req)` (`dev.js`, the built
+`_server.js`). MEASURED over a real socket on Bun 1.3.14, **and the two halves diverge, which is the
+whole reason it leaked quietly**:
+
+| channel | what actually happened |
+|---|---|
+| WIRE | `200 text/plain;charset=utf-8` with the CONSTANT body `"Welcome to Bun! To get started, return a Response object."` — for EVERY non-`Response` return: string, number, object, `undefined`, `null` alike. **The adopter's value never reaches the client at all. It is dropped, not transmitted.** |
+| STDERR | `error: Expected a Response object, but received '<value>'` — **and ONLY for `undefined` / `null`.** A bare `"ok"` / `42` / `{…}` logged NOTHING. |
+
+So: the auth gate passed, the CSRF gate passed, the body ran, the value was correct — and the client
+got a fixed English sentence while the server was, for the common shapes, completely silent about it.
+The emitted client stub has always done `await _scrml_resp.json()` (emit-functions.ts), which throws on
+that `text/plain` body, so the wire contract the client expects is the one now emitted.
+
+**Why it hid: the exit was SPLIT THREE WAYS and only one third was tested.** The Ext-5 arm returned a
+real `Response`; the protect/tenant arm returned a redacted RAW value; every other shape — including
+the plain authed route — returned nothing here at all. **The ONE arm a test exercised asserted a
+`Response`, and the two that were not asserted a value.** There is now ONE exit. This is the same
+shape as the S276 lesson recorded against this landing: **20 tolerate-or-assert-bare test sites across
+6 files were CORRECTED, not preserved — the oracle shared the implementation's blind spot.**
+
+**TWO ORDERING RULES at that exit. Both are argued in-source and both are fail-direction asymmetric.**
+
+1. **`if (_scrml_result instanceof Response) return _scrml_result;` sits BEFORE the redact.** A body
+   that already produced a `Response` OWNS the response. Without the guard the envelope does
+   `new Response(JSON.stringify(<a Response>), { status: 200 })`, and `JSON.stringify` of a `Response`
+   is `"{}"` (no enumerable own properties) — so an adopter's deliberate `403`/`404`/redirect is
+   re-emitted as a **200 with an empty-object body**. MEASURED with the guard removed: the 403 came
+   back 200. **A DENY silently becoming a SUCCESS is the fail-OPEN shape this whole change exists to
+   remove**, which is why it is guarded even though **no corpus source reaches it today** (a plain body
+   naming `Response` build-blocks on `E-SCOPE-001`). §14.8.9/§14.8.10 already model a manual-`Response`
+   / `handle()` body as a live server-fn egress kind, so the shape is anticipated, not hypothetical.
+   Placement before the redact is also correct on its own terms: a `Response` is an opaque stream
+   handle, not a row set — `_scrml_protect_redact` cannot inspect or strip it.
+2. **`_egressRedact` runs BEFORE `JSON.stringify`.** §14.8.9/§14.8.10 are FLOORS; serializing first and
+   redacting after would be a confidentiality regression. `_egressRedact` is the identity when neither
+   floor is active, so a plain app is byte-unaffected.
+
+**Load-bearing side effect nobody had connected to this defect.** `_scrml_session_cookie_wrap` appends
+its `Set-Cookie: <sid>` onto the handler's return value and **skips when that value has no `.headers`**.
+A bare return therefore also dropped the §20.5 session-establishment cookie silently — the store record
+was written and the browser never got the sid.
+
+**RESIDUAL, carried deliberately:** a hand-built `Response` bypasses the RUNTIME redaction floor by
+design (the passthrough sits before the redact), relying on §14.8.9's compile-time
+`detectProtectedRawEgress` instead.
+
+**DOWNSTREAM — do not miss it.** This landing takes `g-session-get-reserved-key-read-disclosure` from
+log-only to **WIRE-LIVE**. Fixing a fail-open defect made a separate open leak reachable. See
+auth.map.md.
+
+## Fencing a whole-buffer text pass: change its INPUT, not its PATTERN — TWO region classes (NEW #458)
+
+**This is a compiler-architecture rule, not a language rule, and it is in this map because it
+generalises past the mangler that occasioned it.** `emit-client.ts`'s `post-fn-name-mangle` is a
+whole-buffer regex pass that rewrites user fn names to their generated forms. Every prior defect in it
+(**Bug D · Bug I · Bug Z · g-spread · PGO P3.A**) was answered by editing the PATTERN — another
+lookaround, another character class. #458 is the first structural answer, and it fixed three defects
+at once.
+
+**THE RULE: when a text pass acts in the wrong PLACE, change what it is given, not what it matches.**
+A pattern patch has to be right about every context it will ever meet. A region fence only has to be
+right about a boundary.
+
+**Region class 1 — LEXICAL (pre-existing).** `code-segments.ts`'s `rewriteCodeSegments(expr, transform)`
+splits a buffer into code vs opaque (string / regex literal / line- and block-comment) and applies
+`transform` only to code. A template literal is a hybrid: its static spans are opaque, its `${…}`
+interpolations are CODE and ARE descended into.
+
+**Region class 2 — STRUCTURAL (NEW).** `findObjectShorthandRegions(code)` returns
+`ObjectShorthandRegion[] {start, end, kind, names}`, each classified by `classifyBraceGroup` into
+`BraceGroupKind = "object-literal" | "binding-pattern" | "unknown"`. **The two classes COMPOSE rather
+than merge** — the structural finder runs INSIDE each lexical code segment, so a `{get, post}` that
+occurs inside a string literal is never seen at all.
+
+**The runtime slot is fenced by ORDERING, which is the purest form of the rule.**
+`joinAroundRuntimeSlot(lines, runtimeSlotIndex, runtimeSource, rewrite)` applies `rewrite` to the client
+body BEFORE and AFTER the slot and never to `runtimeSource` — **the runtime is not part of the rewrite
+input at all**, so no lookaround has to recognise it and no pattern can reach into it. The bug: a user
+`fn log()` rewrote the runtime's own `_scrml_replay(name, log, endIdx)` PARAMETER (followed by `,`,
+inside the lookahead set) while the body's `log.length` reads (followed by `.`, outside it) stayed put
+— **a runtime function silently rewired to a free variable.** Inert in the DEFAULT pipeline, which
+slices the runtime back off; under `--embed-runtime` the corrupted text SHIPS. Byte-safety is provable
+rather than asserted: with `rewrite` as the identity, the helper is exactly `lines.join("\n")` with the
+runtime in its slot, which is what the pre-fence code produced.
+
+**A FENCE ALONE WOULD HAVE BEEN A HALF-FIX, and the reasoning is the transferable part.** For the
+object-shorthand defect (`{get, post}` — each identifier is simultaneously a property NAME and a value
+reference, and the alternation renamed both halves at once, so `inner.get(...)` became `undefined` with
+no syntax error and no diagnostic), simply fencing the region would trade a silent wrong answer for a
+`ReferenceError` on a now-free `get`. So an object literal is **EXPANDED** instead — `get` becomes
+`get: _scrml_get_2` — which keeps the object's public shape AND resolves to the real function.
+**Net sites this pass stops rewriting: ZERO.**
+
+**THE LIMITS ARE THE DESIGN. Each is a documented refusal, not a gap.**
+- **Only `object-literal` is acted on.** `binding-pattern` is RECOGNISED and deliberately NOT acted on.
+  An earlier revision emitted those verbatim; the S239 adversarial review showed that to be a
+  HALF-REPAIR — fencing the pattern while the pass still rewrites the uses those bindings SHADOW leaves
+  the bindings dead and the calls resolving to the module-level function, **turning a LOUD `TypeError`
+  into a SILENT wrong answer**, the exact failure class the object-literal half exists to remove.
+  Repairing a binding pattern honestly needs a scope model, which belongs to the mangler-RETIREMENT arc.
+- **`unknown` obliges the caller to change NOTHING.** Narrowing on a guess is how a coverage hole opens.
+- **`classifyBraceGroup`'s left-context set excludes `:` and `>` on purpose** — `label: {…}` and
+  `case x: {…}` are BLOCKS, and the `>` of `=> {` opens a function BODY. `(` is genuinely ambiguous
+  (`f({a,b})` is a call argument, `function f({a,b})` is a formal parameter) so only the
+  `function`-headed form is decided; everything else reads as a call.
+- **A region containing `__proto__` is skipped WHOLE.** ECMA-262 B.3.1: only the
+  `PropertyName : AssignmentExpression` form with the name `__proto__` sets `[[Prototype]]`; the
+  SHORTHAND form creates an ordinary own property. Expanding it is therefore NOT semantics-preserving
+  (measured: own keys 2 -> 1, `typeof o.call` "undefined" -> "function"). The whole region is skipped
+  rather than the one name because a BARE `__proto__` left beside expanded siblings is stranded as a
+  free reference, and that is **ENGINE-DEPENDENT** — measured: node silently binds the global object's
+  prototype, bun throws a `TypeError`.
+
+**Third leg, same PR — a DATA-VALIDITY guard, not a behaviour change.** All four `fnNameMap.set` sites
+now route through `registerFnName` (`emit-functions.ts:675`), which refuses any key failing
+`/^[A-Za-z_$][A-Za-z0-9_$]*$/`. An EMPTY key made the consumer's alternation `\b(…|)\b`, which matches
+**zero-width at every word boundary satisfying the lookahead** — 781 injections into one file. **The
+test is IDENTIFIER SHAPE, not non-emptiness, so it closes the CLASS rather than the witnessed
+instance**: `" "` is the same hazard. It deliberately raises no diagnostic — every §34 fire site for
+the one code that fits (`E-CODEGEN-INVALID-LOGIC`) is `validate-emit.ts`, whose contract is "the emitted
+artifact does not parse, here is the byte offset", so a declaration-site fire needs a NEW §34 row, and
+that half was surfaced to the PA rather than smuggled in. The drop is testable (invariant 27) —
+`mangler-region-fencing.test.js` §3 asserts it.
+
+**Still open, and pinned by the suite at §2f rather than only in prose:** nested `{api: {get, post}}`,
+spread, mixed `{get, post, n: 1}`, and the ternary **ALTERNATE** — *the same expression compiles
+correctly on the consequent branch and incorrectly on the alternate*. `g-mangler-scope-blind-shorthand-key-rename`
+stays `status=open` deliberately.
 
 ## A cross-module ASYNC import consumed in a markup interpolation is now awaited (#391)
 
@@ -1044,7 +1209,7 @@ Diagnostic emission — every pipeline stage emits `{code, message, severity, sp
 A returned function-expression closure (`return function name(){…}`, GITI-038) — owns its own body's scope/type/async analysis independent of its enclosing factory (`ReturnStmtNode.fnExprNode`, see schema.map.md).
 
 ## Tags
-#scrml #map #domain #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth #route-region #§6.7.2.1 #§20.8.8 #pole-c #third-lifecycle-owner #route-leave #route-enter #commit-gate #keep-alive #outlet-resident #region-cleanups #module-init #rehydrator-boundary #machine-retired #e-deprecated-001 #§63.7 #projection-codemod #engine-audit #§51.11 #§51.13 #property-tests #enum-only #§19.4.4.1 #e-error-011 #renders-clause #e-error-005 #corpus-first-migration #provenance-field #§34.0 #named-codes-land-with-impl #§6.7.1a #bare-expression-category #sugar-equivalence #mount-body-expr-node #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #crossmodule-async-markup #s239-catch #pr-405-landed #cps-choke-point-landed #w-if-in-each #each-nested-if-not-reactive #reset-init-thunk-reassignment #§13.2-call-site-await #async-name-provider #decision-sites-3-to-1 #one-provider-three-consumers #u1 #dpa-020 #dpa-023 #can-suppress-never-strand #owning-file-filter #decide-off-emitted-output #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #dangling-ref-class #session-proxy-bind #gh357 #csrf-token-disclosure #§20.5 #§52.15.1 #currentuser-resolver-gate #channel-auth-only #permissive-by-design #collect-structural-decl-names #§6.8 #g-implicit-cell-double-write-clobbers-reset-init
+#scrml #map #domain #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth #route-region #§6.7.2.1 #§20.8.8 #pole-c #third-lifecycle-owner #route-leave #route-enter #commit-gate #keep-alive #outlet-resident #region-cleanups #module-init #rehydrator-boundary #machine-retired #e-deprecated-001 #§63.7 #projection-codemod #engine-audit #§51.11 #§51.13 #property-tests #enum-only #§19.4.4.1 #e-error-011 #renders-clause #e-error-005 #corpus-first-migration #provenance-field #§34.0 #named-codes-land-with-impl #§6.7.1a #bare-expression-category #sugar-equivalence #mount-body-expr-node #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #crossmodule-async-markup #s239-catch #pr-405-landed #cps-choke-point-landed #w-if-in-each #each-nested-if-not-reactive #reset-init-thunk-reassignment #§13.2-call-site-await #async-name-provider #decision-sites-3-to-1 #one-provider-three-consumers #u1 #dpa-020 #dpa-023 #can-suppress-never-strand #owning-file-filter #decide-off-emitted-output #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #dangling-ref-class #session-proxy-bind #gh357 #csrf-token-disclosure #§20.5 #§52.15.1 #currentuser-resolver-gate #channel-auth-only #permissive-by-design #collect-structural-decl-names #§6.8 #g-implicit-cell-double-write-clobbers-reset-init #§12.5 #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #bun-welcome-page #stderr-only-for-undefined #session-cookie-wrap #spec-silent-shall #derived-not-stated #region-fence #two-region-classes #lexical-vs-structural #change-the-input-not-the-pattern #join-around-runtime-slot #classify-brace-group #object-shorthand-expansion #binding-pattern-half-repair #proto-shorthand-b31 #engine-dependent #register-fn-name #identifier-shape-guard #zero-width-alternation #object-hasown #prototype-chain-read-closed
 
 ## Links
 - [primary.map.md](./primary.map.md)
