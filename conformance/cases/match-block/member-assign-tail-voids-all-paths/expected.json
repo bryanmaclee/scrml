@@ -1,0 +1,19 @@
+{
+  "id": "match-block-member-assign-tail-voids-all-paths",
+  "description": "§18.5 — a block arm whose TAIL is a member/index-assignment statement (`{ …; o.n = 2 }`) yields VOID, and this decision is IDENTICAL across all three block-arm tail lowering positions: the raw-string path (literal-arm `1 :> { }` via emit-logic.ts _blockTailIsValueExpr), the structuredBody IIFE path (`.Variant :> { }` return position via emit-control-flow.ts emitMatchExpr), and the structuredBody tilde path (`.Variant :> { }` derived cell via emit-logic.ts emitMatchExprToTilde). Pre-fix the two _blockTailIsValueExpr-fed positions LIFTED the space-normalized `o . n = 2` as a chained assignment (raw-void and derived-void rendered \"2\") while the IIFE path VOIDED it (struct-void empty) — a source-identical arm with three-way-divergent meaning. This case is the differential: on base raw-void=\"2\", derived-void=\"2\", struct-void=\"\"; post-fix all three are empty (void), while the value-tail controls (member READ `o.n`) all lift to \"9\".",
+  "language-version": "1.0",
+  "spec": "§18.5",
+  "rationale": "§18.5: a block arm `{ statement* expression? }` yields its LAST expression; a block whose tail is a decl/assignment/lift/fail statement (or is empty) yields void. A member/index-assignment (`o.n = 2`, `xs[0] = 9`) is a statement, so its arm is void — the assigned value SHALL NOT become the arm result. The rule is ONE classifier (_blockTailIsValueExpr), so every lowering position makes the same call: the void arm renders nothing; a value tail (member READ `o.n`) lifts unchanged.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "domAnchored": [
+      { "selector": "#raw-void", "text": "" },
+      { "selector": "#raw-value", "text": "9" },
+      { "selector": "#struct-void", "text": "" },
+      { "selector": "#struct-value", "text": "9" },
+      { "selector": "#derived-void", "text": "" },
+      { "selector": "#derived-value", "text": "9" }
+    ]
+  }
+}

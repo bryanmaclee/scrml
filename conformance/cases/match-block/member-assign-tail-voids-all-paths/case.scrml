@@ -1,0 +1,59 @@
+${
+    type K:enum = { A, B }
+    <k>: K = .A
+
+    // RAW-STRING path (literal-arm block `1 :> { … }`, via emit-logic.ts
+    // _blockTailIsValueExpr). A member-assign tail `o.n = 2` is a §18.5
+    // statement, so the arm yields VOID (result var untouched); the `_` arm
+    // yields 5. Pre-fix this path LIFTED the space-normalized `o . n = 2` as a
+    // chained assignment (the arm wrongly yielded 2).
+    fn declRaw(kk: int) -> int {
+        const r = match kk {
+            1 :> { const o = { n: 1 }; o.n = 2 }
+            _ :> 5
+        }
+        return r
+    }
+    // Same path, VALUE tail (control) — lifts `o.n` (member READ) → 9.
+    fn declRawValue(kk: int) -> int {
+        const r = match kk {
+            1 :> { const o = { n: 9 }; o.n }
+            _ :> 5
+        }
+        return r
+    }
+
+    // structuredBody IIFE path (emit-control-flow.ts emitMatchExpr) — a
+    // `.Variant :> { … }` arm in a return position. Member-assign tail → VOID.
+    fn retStruct(kk: K) -> int {
+        return match kk {
+            .A :> { const o = { n: 1 }; o.n = 2 }
+            _  :> 5
+        }
+    }
+    fn retStructValue(kk: K) -> int {
+        return match kk {
+            .A :> { const o = { n: 9 }; o.n }
+            _  :> 5
+        }
+    }
+
+    // structuredBody tilde path (emit-logic.ts emitMatchExprToTilde) — a
+    // `.Variant :> { … }` arm in a derived cell. Member-assign tail → VOID.
+    const <labelVoid> = match @k {
+        .A :> { const o = { n: 1 }; o.n = 2 }
+        _  :> 5
+    }
+    const <labelValue> = match @k {
+        .A :> { const o = { n: 9 }; o.n }
+        _  :> 5
+    }
+}
+<page><main>
+<p id="raw-void">${ declRaw(1) }</p>
+<p id="raw-value">${ declRawValue(1) }</p>
+<p id="struct-void">${ retStruct(.A) }</p>
+<p id="struct-value">${ retStructValue(.A) }</p>
+<p id="derived-void">${ @labelVoid }</p>
+<p id="derived-value">${ @labelValue }</p>
+</main></page>
