@@ -1,0 +1,50 @@
+${
+    <n>: int = 1
+
+    // Derived-cell if-value block branch (§6.6 + §17.6 + §18.5): the tail
+    // expression is the value. Pre-fix this position had NO expression-lowering
+    // (the if RHS was captured as a raw escape-hatch, reaching emit verbatim) →
+    // E-CODEGEN-INVALID-LOGIC.
+    const <label> = if (@n == 1) { const c = "one"; c } else { const c = "two"; c }
+
+    // Decl-position if-value block branch (§17.6.3). Pre-fix each branch's bare
+    // tail was emitted to a DEAD inner tilde, so the decl read back its null
+    // seed — always null, silently.
+    fn ret(k: int) -> int {
+        const x = if (k == 1) { const a = 42; a } else { const b = 7; b }
+        return x
+    }
+
+    // Explicit `lift` arms must keep working (value-lift mode routes lift → tilde).
+    fn lft(k: int) -> string {
+        const r = if (k == 1) { lift "L1" } else { lift "L2" }
+        return r
+    }
+
+    // else-if chain: a `lift` arm, a block bare-tail else-if arm, and a
+    // single-expression else arm — all three lower to the same result var.
+    fn chain(k: int) -> string {
+        const r = if (k == 1) { lift "one" } else if (k == 2) { const m = "two"; m } else { "other" }
+        return r
+    }
+
+    // Void tail: a branch whose block ends in a declaration (no trailing value
+    // expression) is §18.5 void → the arm contributes `not` (null → empty text).
+    // The other branch has a value tail, so it renders normally.
+    fn voidarm(k: int) -> int {
+        const r = if (k == 1) { const q = 1 } else { const b = 9; b }
+        return r
+    }
+}
+<page><main>
+<p id="derived">${@label}</p>
+<p id="ret1">${ ret(1) }</p>
+<p id="ret2">${ ret(2) }</p>
+<p id="lft1">${ lft(1) }</p>
+<p id="lft2">${ lft(2) }</p>
+<p id="chain1">${ chain(1) }</p>
+<p id="chain2">${ chain(2) }</p>
+<p id="chain3">${ chain(9) }</p>
+<p id="void-tail">${ voidarm(1) }</p>
+<p id="void-value">${ voidarm(2) }</p>
+</main></page>

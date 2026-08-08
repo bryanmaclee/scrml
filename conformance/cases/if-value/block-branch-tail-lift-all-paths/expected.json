@@ -1,0 +1,23 @@
+{
+  "id": "if-value-block-branch-tail-lift-all-paths",
+  "description": "§17.6 + §18.5 if-as-value block-branch tail lift across the value positions: a derived-cell RHS (const <label> = if …), a decl/return position (const x = if …), explicit `lift` arms, an else-if chain mixing a lift arm + a block bare-tail arm + a single-expression else, and a §18.5 void tail (a branch ending in a declaration). Pre-fix the decl position lowered each branch's bare tail to a DEAD inner tilde (so the decl was always null, silently), and the derived position had no expression-position lowering at all (the if RHS was a raw escape-hatch) so it tripped E-CODEGEN-INVALID-LOGIC. This pins the residual if-value half of g-block-body-value-position-mislowers (the match half landed in #469/#470); both halves share the ONE §18.5 tail classifier _blockTailIsValueExpr.",
+  "language-version": "1.0",
+  "spec": "§17.6",
+  "rationale": "§17.6 / §18.5: an if-as-value arm body's result is its TAIL expression (the same block-value rule match block arms use). A block arm runs its leading statements then yields its tail expression as the branch value; a branch whose block ends in a declaration/assignment (no trailing value expression) is void → contributes `not` (null → empty text). An explicit `lift` still designates the result (§17.6.2). The taken branch's value binds the enclosing result: derived <label> -> one, ret(1) -> 42, ret(2) -> 7, lft(1) -> L1, lft(2) -> L2, chain(1) -> one, chain(2) -> two, chain(9) -> other, voidarm(1) -> empty (void tail), voidarm(2) -> 9.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "domAnchored": [
+      { "selector": "#derived", "text": "one" },
+      { "selector": "#ret1", "text": "42" },
+      { "selector": "#ret2", "text": "7" },
+      { "selector": "#lft1", "text": "L1" },
+      { "selector": "#lft2", "text": "L2" },
+      { "selector": "#chain1", "text": "one" },
+      { "selector": "#chain2", "text": "two" },
+      { "selector": "#chain3", "text": "other" },
+      { "selector": "#void-tail", "text": "" },
+      { "selector": "#void-value", "text": "9" }
+    ]
+  }
+}
