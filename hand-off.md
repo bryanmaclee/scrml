@@ -1,4 +1,32 @@
 <!-- ============================================================= -->
+<!-- S332 WRAP (peter/Windows) — prepended 2026-08-08.              -->
+<!-- SUCCESSOR to a LIVE S331-bryan throughout (disjoint work).     -->
+<!-- Mechanical stream = delta-log [1272]-[1278].                   -->
+<!-- ============================================================= -->
+
+# scrml — Session 332 (peter · Windows) — WRAP
+
+**Date:** 2026-08-08. `/boot` Profile A FULL. **SUCCESSOR to a LIVE S331-bryan (ASUS) throughout** — all work strictly disjoint; shared-surface bookkeeping deferred (below). **2 PRs merged** (#473 #474). main `b4fb2f1f` → **`7c8e92ff`**, coherence 0/0. Conformance **868/868**. Cloud gate GREEN on both (Windows CI incl.).
+
+## 🔴 READ FIRST
+1. **S331-bryan was still LIVE at this wrap.** I stayed in successor mode: only disjoint surfaces touched (compiler/src codegen, scripts, my own board file, continuity docs). **Deferred until bryan wraps** (S329 disjoint-lane rule): the 2 gap-status closes for #473/#474 in `docs/known-gaps.md` (his live footprint), the **review-floor entries for #473/#474** (`docs/pr-reviews.md`, shared surface — now **7 OWED**), and the #2 structural-refactor follow-up gap. None are lost — they're enumerated in delta `[1278]`.
+2. **⛔ g-263 cross-file-const seed is ROUTED to bryan, HELD — his substrate/§14.8 lane.** Do NOT re-take it as compute. Three S239 rounds each found more of the same #358 under-emit class; the seed is a drift-prone parallel copy of `dependency-graph.ts`'s traversal. Verified CORE preserved as prior art on branch **`fix/g263-cross-file-const-attr-value-seed` @ `b9d68190`** (pushed, NOT merged). Routing note: `scrml-support/handOffs/incoming/2026-08-08-from-peter-to-bryan-cross-file-const-seed-convergence.md`. The stdlib `import.meta` gap (`g-stdlib-module-resolver-emits-import-meta`) is the **same substrate** — folded into that routing (delta `[1275]`).
+3. **hand-off.md ROTATION still owed** (bryan flagged S331 — 375 KB, exceeds the 256 KB single-read cap). I deferred it: rotating a shared continuity file while a sibling is live risks a collision with his pending wrap. Do it in a coordinated/solo session.
+
+## 🎯 WHAT LANDED
+- **#473** (`0beddacc`) — `scripts/s34-census.ts` Windows path: `new URL(import.meta.url).pathname` → `fileURLToPath`. Windows-only-broken (ENOENT), three maps passes mis-reported it. Reproduce-first proven on this clone. `g-s34-census-windows-only-url-pathname` (MED).
+- **#474** (`7c8e92ff`) — server-fn body emitter blind-indented 8 sites → corrupted multi-line template-literal COOKED values (email/CSV/PEM/prompt; benign in-corpus = all SQL). Fixed with `indentServerFnBodyLines` (string/template/comment lexer). Differential 45/7299 all correct; cooked-value integration test; S239 closed the comment hole, documented a rare regex residual + scoped the structural follow-up. `g-server-fn-body-reindent-corrupts-multiline-template-literals` (MED).
+
+## 🧭 METHOD NOTE THAT OUTLASTS
+**The re-lexer lesson, recurred twice (g-263 + #2):** a hand-rolled walker that must mirror another component's full traversal — or re-lex already-emitted output — is drift-prone; successive adversarial rounds keep finding the same class. Converge on the shared substrate, or (when the partial is genuinely bounded, like #2) document the residual + scope the structural follow-up honestly. Memory: `feedback-repeated-review-same-class-means-converge-not-enumerate`.
+
+## 🧷 STATE / NEXT
+- **Worktrees:** main + `scrml-pinned` (pre-existing, leave) + retained `agent-ad7fea65…` @ `5fc00afa` (S330 held if-value build — still waiting on bryan's ruling; do NOT prune). No sweep owed.
+- **Maps:** #473 is a script one-liner; #474 adds an in-file helper (`indentServerFnBodyLines`) in already-mapped `emit-server.ts`. No new files/modules → file/task-shape maps need no dispatch. Symbol-level refresh optional.
+- **Next pickup (Peter, "grab the next one"):** keep whittling MED — but PRE-FILTER for the g-263/#263 export-const/reachability substrate (bryan's lane) and auto-await §13.2 (bryan's lane). Clean disjoint compute candidates remain; re-survey `docs/known-gaps.md` MED with the lane test.
+- **Waiting on bryan:** the if-value fork ruling (S330) + the g-263 convergence approach (S332).
+
+<!-- ============================================================= -->
 <!-- S330 WRAP (peter/Windows) — prepended 2026-08-07.              -->
 <!-- SOLO throughout (S328-bryan + S329-peter both wrapped).        -->
 <!-- Mechanical stream = delta-log [893]-[896] (see ANOMALY below). -->
