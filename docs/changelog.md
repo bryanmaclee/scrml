@@ -2,6 +2,16 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S330 — 2026-08-07 (peter · Windows) — the match block-arm §18.5 tail surface, made whole and unified
+
+**2 PRs merged.** main `eeb70cde` → `73df79ed`, coherence 0/0, gate GREEN. 0 adopter issues. **3 gaps closed** (2 MED + 1 LOW). Gaps HIGH 23 · MED 125 · LOW 54 · Nominal 7. Conformance 868/868. Mechanical stream: delta-log [893]–[896].
+
+Whittling the MED list: took the S328-flagged `g-match-block-arm-value-lift` residual and drove it, plus its unify follow-up, to a consistent §18.5 tail surface across every match lowering position. A third fix (if-value) was built but caught as a **language fork** and held.
+
+- **#469 — §18.5 block-arm value-lift, all value positions** (`e8db05a7`). #463 had lifted the block-arm tail only for the plain-local-decl path; four other value positions (return-`match`, multi-scrutinee decl, derived cell, markup-interp) all funnel through `emitMatchExpr`'s value-returning IIFE and silently dropped the tail → `undefined`. Fixed at the shared root (`emitIifeBlockArmBody`); the raw-string path routes through the shared `planBlockArmLift` classifier; auto-await preserved on server-call tails. Verified: variant matrix, full-corpus emit-differential (2 real samples changed — `admin-panel`'s ResetPassword server-call tail + `debate-async` labels, both latent bugs), conformance 867/867 (+2 domAnchored cases), and **real-browser** (Chromium) reactive recompute. Resolves `g-match-block-arm-value-lift-covers-one-of-five-paths` (MED).
+- **#470 — unify the tail classifier + member-assign fix** (`73df79ed`). Post-#469 there were two §18.5 tail classifiers (the shared `planBlockArmLift` + the structuredBody branch's ad-hoc node predicate) that diverged on a member-assignment tail. Deleted the ad-hoc predicate — both paths now delegate to the one `_blockTailIsValueExpr`; and added `\s` to the assignment-guard char class so the raw path voids member/index-assign tails (the space-normalized `o . n = 2` LOW bug). Full-corpus differential **0 of 7296 artifacts changed**; conformance 868/868 (+ a 3-position differential case). Resolves `g-match-block-iife-tail-classifier-diverges-from-shared-plan` (MED) + `g-match-block-member-assign-tail-lifts-as-chained-assignment` (LOW).
+- **Held, not landed — if-value block-tail (a language fork, routed to bryan).** The if-value residual of `g-block-body-value-position-mislowers` was built but caught: SPEC §17.6.2 makes if-as-expression **lift-based** (not §18.5 tail-based), and the derived form `const <label> = if …` isn't in the §17.6.1 grammar — so adopting tail-lift + sanctioning the derived position are language-surface decisions. Built + held before PR (worktree retained @ `5fc00afa`); routed to bryan's inbox. Explicit-`lift` branches already work.
+
 ## S327 — 2026-08-07 (peter · P-Tech1) — the outage cleared; drain the stranded backlog, then a shorthand-mount parity fix
 
 **5 PRs merged.** main `0ec183d8` → `2031b2bf`, coherence 0/0, gate GREEN. 0 adopter issues. Mechanical stream: delta-log [1227]–[1234].
