@@ -1,0 +1,19 @@
+{
+  "id": "match-block-value-form-block-arm-all-paths",
+  "description": "§18.5 block-body arm value lift across the value-position paths that route through emit-control-flow.ts:emitMatchExpr's value-returning IIFE (return-position, multi-scrutinee decl, derived cell), plus the plain local-decl control. A `{ statement* expression? }` arm runs its leading statements then yields its TAIL EXPRESSION as the arm value. Pre-fix these IIFE paths dropped the tail and yielded undefined; only the plain-decl path (via _emitBlockArmValueFromString, #463) worked. (The 4th path — a match expression written DIRECTLY inside a markup `${ }` interpolation — lifts its tail identically in the emitted IIFE, but its DOM RENDERING is a SEPARATE pre-existing gap: the interp-of-match IIFE is emitted as a bare unterminated statement, so it is not asserted here — see the value-form-derived case note.)",
+  "language-version": "1.0",
+  "spec": "§18.5",
+  "rationale": "§18.5: an arm body is either a single expression or a `{ }` block whose result is its LAST expression. The block's leading statements execute first; its tail expression becomes the arm value — identically whether the match sits in a derived cell (@label -> green), a markup interpolation (#markup -> green), a return statement (ret(1) -> one), a multi-scrutinee decl (pair(1,2) -> xy), or a plain local decl (grade(1) -> green). Bare-value arms (ret(9) -> other, pair(3,4) -> z) are unaffected.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "domAnchored": [
+      { "selector": "#derived", "text": "green" },
+      { "selector": "#ret", "text": "one" },
+      { "selector": "#ret-bare", "text": "other" },
+      { "selector": "#multi", "text": "xy" },
+      { "selector": "#multi-bare", "text": "z" },
+      { "selector": "#decl", "text": "green" }
+    ]
+  }
+}

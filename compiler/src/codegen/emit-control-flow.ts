@@ -1,6 +1,6 @@
 import { genVar } from "./var-counter.ts";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
-import { emitLogicNode, emitLogicBody } from "./emit-logic.js";
+import { emitLogicNode, emitLogicBody, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody } from "./emit-logic.js";
 import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
@@ -2025,12 +2025,12 @@ function emitMultiScrutineeMatch(
       }
       const condition = conds.length > 0 ? conds.join(" && ") : "true";
       const prelude = preludes.join("");
-      const bodyEmit = emitMultiArmBody(resultStr, prelude, matchCtx);
+      const bodyEmit = emitMultiArmBody(resultStr, prelude, matchCtx, opts);
       const prefix = conditionIndex === 0 ? "if" : "else if";
       lines.push(`  ${prefix} (${condition}) ${bodyEmit}`);
       conditionIndex++;
     } else if (isWholeWildcard) {
-      const bodyEmit = emitMultiArmBody(resultStr, "", matchCtx);
+      const bodyEmit = emitMultiArmBody(resultStr, "", matchCtx, opts);
       lines.push(`  else ${bodyEmit}`);
     } else {
       // Soundness guard (g-match-lowering-arm-drop F3): a body child that is
@@ -2065,13 +2065,70 @@ function emitMultiScrutineeMatch(
   return lines.join("\n");
 }
 
+/**
+ * §18.5 block-arm value lift for the value-returning IIFE match paths
+ * (single-scrutinee `emitMatchExpr` arm bodies + multi-scrutinee
+ * `emitMultiArmBody`). A block arm is `{ statement* expression? }`: run the
+ * leading statements, then `return` the tail EXPRESSION so the IIFE evaluates
+ * to the arm's value. A block with no trailing value expression (all
+ * statements, a decl/assignment/`lift`/`fail` tail, or empty) emits its
+ * statements and falls through → the IIFE returns `undefined` = §18.5 `void`.
+ *
+ * The tail-vs-statement decision is NOT re-derived here — it is delegated to the
+ * shared `planBlockArmLift` (emit-logic.ts), the single §18.5 classifier, so
+ * this IIFE path and the local-decl path
+ * (emit-logic.ts:_emitBlockArmValueFromString) cannot drift into disagreeing
+ * near-duplicate predicates. The VOID / EMPTY emission is byte-identical to the
+ * prior `rewriteBlockBody(inner, …)` behaviour (object-literal + empty-`{}` arms
+ * unchanged); only a genuine value tail is newly lifted. Auto-await (§13.2) is
+ * applied to a server-call tail via the shared `_awaitMatchArmServerCalls`,
+ * mirroring the decl path; the IIFE-header async scan (below) then makes the
+ * enclosing IIFE async when any `await` is present.
+ *
+ * `result` is the arm's raw result string INCLUDING the surrounding `{ }`.
+ */
+function emitIifeBlockArmBody(
+  result: string,
+  prelude: string,
+  engineCtx: EngineRewriteCtx | null,
+  matchMode: "client" | "server",
+  matchCtx: EmitExprContext,
+  opts: any,
+): string {
+  const inner = result.trim().slice(1, -1).trim();
+  if (!inner) return prelude ? `{ ${prelude.trimEnd()} }` : `{}`;
+  // Object-literal arm (`1 :> { x: 1 }`) — a VALUE, not a statement block. The
+  // decl path (emit-logic.ts:emitMatchExprDecl) uses the same parser-based
+  // `_matchArmResultIsBlockBody` gate to keep object literals off the block
+  // lowering; mirror it here so object-literal arms stay BYTE-IDENTICAL to the
+  // pre-fix `rewriteBlockBody(inner)` emission (the non-regression fence). Only a
+  // genuine `{ statement* expression? }` block reaches the tail-lift below.
+  if (!_matchArmResultIsBlockBody(result)) {
+    return `{ ${prelude}${rewriteBlockBody(inner, null, engineCtx, matchMode)} }`;
+  }
+  const plan = planBlockArmLift(inner);
+  if (plan.tail === null) {
+    // No trailing value expression → §18.5 void. Emit the block verbatim
+    // (byte-identical to the pre-fix path); the IIFE falls off its end and
+    // returns `undefined`.
+    return `{ ${prelude}${rewriteBlockBody(inner, null, engineCtx, matchMode)} }`;
+  }
+  const leadCode = plan.leading
+    .map((seg) => rewriteBlockBody(seg, null, engineCtx, matchMode).trim().replace(/;+\s*$/, ""))
+    .filter(Boolean)
+    .map((s) => `${s};`)
+    .join(" ");
+  const rhs = _awaitMatchArmServerCalls(emitExprField(null, plan.tail, matchCtx), opts ?? {});
+  return `{ ${prelude}${leadCode ? `${leadCode} ` : ""}return ${rhs}; }`;
+}
+
 /** §18.19 — emit one multi-scrutinee arm body (`{ <prelude> return <expr>; }`). */
-function emitMultiArmBody(resultStr: string, prelude: string, ctx: EmitExprContext): string {
+function emitMultiArmBody(resultStr: string, prelude: string, ctx: EmitExprContext, opts?: any): string {
   const trimmed = resultStr.trim();
   const isBlockBody = trimmed.startsWith("{") && trimmed.endsWith("}");
   if (isBlockBody) {
-    const inner = trimmed.slice(1, -1).trim();
-    return inner ? `{ ${prelude}${rewriteBlockBody(inner, null, null, ctx.mode)} }` : (prelude ? `{ ${prelude.trimEnd()} }` : `{}`);
+    // §18.5 — lift the block's tail expression (was silently dropped pre-fix).
+    return emitIifeBlockArmBody(trimmed, prelude, null, ctx.mode, ctx, opts);
   }
   return `{ ${prelude}return ${emitExprField(null, trimmed, ctx)}; }`;
 }
@@ -2262,7 +2319,29 @@ export function emitMatchExpr(node: any, opts?: any): string {
     // engine timer/history bookkeeping.
     if (arm.structuredBody) {
       const bodyLines = emitLogicBody(arm.structuredBody, opts).filter(Boolean);
-      const structuredInner = bodyLines.join("; ");
+      // §18.5 — a block arm is `{ statement* expression? }` whose result is its
+      // TAIL expression. In the AST-node (structuredBody) path the tail is
+      // liftable iff the LAST node is a value-expression `bare-expr` — i.e. NOT
+      // an assignment (`@x = …` / `x = …`), a decl, a `lift`, or a control-flow
+      // statement, and not a lone `~` orphan (which emits nothing). A value tail
+      // is `return`ed so the IIFE evaluates to it; any other tail leaves the
+      // IIFE falling through → `undefined` = §18.5 void (byte-identical to the
+      // pre-fix `bodyLines.join("; ")` emission). Auto-await (§13.2) via the
+      // shared `_awaitMatchArmServerCalls`, mirroring the raw-string path.
+      const _lastNode: any = arm.structuredBody.length > 0
+        ? arm.structuredBody[arm.structuredBody.length - 1] : null;
+      const _tailIsValue = bodyLines.length > 0
+        && !!_lastNode && _lastNode.kind === "bare-expr"
+        && !!_lastNode.exprNode && _lastNode.exprNode.kind !== "assign"
+        && !(_lastNode.exprNode.kind === "ident" && _lastNode.exprNode.name === "~");
+      let structuredInner: string;
+      if (_tailIsValue) {
+        const _tailExpr = bodyLines[bodyLines.length - 1].trim().replace(/;+\s*$/, "");
+        const _tailRhs = _awaitMatchArmServerCalls(_tailExpr, opts ?? {});
+        structuredInner = [...bodyLines.slice(0, -1), `return ${_tailRhs};`].join(" ");
+      } else {
+        structuredInner = bodyLines.join("; ");
+      }
       const structuredEmit = structuredInner
         ? `{ ${bindingPrelude}${structuredInner} }`
         : (bindingPrelude ? `{ ${bindingPrelude.trimEnd()} }` : `{}`);
@@ -2310,10 +2389,7 @@ export function emitMatchExpr(node: any, opts?: any): string {
     const emitResult = failArmEmit
       ? failArmEmit
       : isBlockBody
-      ? (() => {
-          const inner = arm.result.trim().slice(1, -1).trim();
-          return inner ? `{ ${bindingPrelude}${rewriteBlockBody(inner, null, engineCtx, _matchMode)} }` : (bindingPrelude ? `{ ${bindingPrelude.trimEnd()} }` : `{}`);
-        })()
+      ? emitIifeBlockArmBody(arm.result, bindingPrelude, engineCtx, _matchMode, _matchCtx, opts)
       : inlineEngineWrite
         ? `{ ${bindingPrelude}${inlineEngineWrite.guardLines.join("\n")} }`
         : (bindingPrelude

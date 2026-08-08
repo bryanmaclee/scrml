@@ -1,0 +1,45 @@
+${
+    type Level:enum = { Low, Mid, High }
+    <level>: Level = .Low
+
+    // Derived-cell block arm (§6.6 + §18.5) — the tail expression is the value.
+    const <label> = match @level {
+        .Low  :> { const c = "green"; c }
+        .High :> { const c = "red"; c }
+        _     :> "gray"
+    }
+
+    // Return-position block arm (§18.5 via the value-returning IIFE).
+    fn ret(k: int) -> string {
+        return match k {
+            1 :> { const c = "one"; c }
+            _ :> "other"
+        }
+    }
+
+    // Multi-scrutinee decl block arm (§18.19 + §18.5).
+    fn pair(a: int, b: int) -> string {
+        const r = match (a, b) {
+            (1, 2) :> { const c = "xy"; c }
+            _ :> "z"
+        }
+        return r
+    }
+
+    // Plain local-decl block arm (the #463 control path — must stay working).
+    fn grade(k: int) -> string {
+        const r = match k {
+            1 :> { const base = "gr"; base + "een" }
+            _ :> "gray"
+        }
+        return r
+    }
+}
+<page><main>
+<p id="derived">${@label}</p>
+<p id="ret">${ ret(1) }</p>
+<p id="ret-bare">${ ret(9) }</p>
+<p id="multi">${ pair(1, 2) }</p>
+<p id="multi-bare">${ pair(3, 4) }</p>
+<p id="decl">${ grade(1) }</p>
+</main></page>

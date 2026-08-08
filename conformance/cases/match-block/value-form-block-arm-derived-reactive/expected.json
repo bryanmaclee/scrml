@@ -1,0 +1,16 @@
+{
+  "id": "match-block-value-form-block-arm-derived-reactive",
+  "description": "§18.5 block-body arm in a derived cell (§6.6) recomputes on upstream change. Raising @level Low -> High recomputes @label from the .Low block arm ({ const c = \"green\"; c }) to the .High block arm ({ const c = \"red\"; c }) — the block arm's TAIL expression is the derived value, and the derived cell recomputes when its scrutinee @level changes.",
+  "language-version": "1.0",
+  "spec": "§18.5",
+  "rationale": "§18.5 block-arm tail lift composes with §6.6 derived reactivity and markup-interpolation reactivity: the arm value is the block's tail expression, and the derived / interpolation recomputes when its scrutinee (@level) changes. High -> label \"red\", markup \"gray\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "input": [{ "click": "#raise" }],
+    "state": { "level": "High" },
+    "domAnchored": [
+      { "selector": "#derived", "text": "Level: red" }
+    ]
+  }
+}
