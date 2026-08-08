@@ -45,8 +45,12 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const ROOT = join(dirname(new URL(import.meta.url).pathname), "..");
+// `new URL(import.meta.url).pathname` yields a `/C:/…` form on Windows that does not
+// open (the leading slash makes an invalid `\C:\…` after dirname/join); `fileURLToPath`
+// resolves correctly on every platform. Mirrors scripts/facts.ts.
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SPEC = join(ROOT, "compiler/SPEC.md");
 const rawArgv = process.argv.slice(2);
 const argv = new Set(rawArgv);
