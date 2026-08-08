@@ -1,6 +1,6 @@
 import { genVar } from "./var-counter.ts";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
-import { emitLogicNode, emitLogicBody, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody } from "./emit-logic.js";
+import { emitLogicNode, emitLogicBody, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr } from "./emit-logic.js";
 import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
@@ -2320,20 +2320,38 @@ export function emitMatchExpr(node: any, opts?: any): string {
     if (arm.structuredBody) {
       const bodyLines = emitLogicBody(arm.structuredBody, opts).filter(Boolean);
       // §18.5 — a block arm is `{ statement* expression? }` whose result is its
-      // TAIL expression. In the AST-node (structuredBody) path the tail is
-      // liftable iff the LAST node is a value-expression `bare-expr` — i.e. NOT
-      // an assignment (`@x = …` / `x = …`), a decl, a `lift`, or a control-flow
-      // statement, and not a lone `~` orphan (which emits nothing). A value tail
-      // is `return`ed so the IIFE evaluates to it; any other tail leaves the
-      // IIFE falling through → `undefined` = §18.5 void (byte-identical to the
-      // pre-fix `bodyLines.join("; ")` emission). Auto-await (§13.2) via the
-      // shared `_awaitMatchArmServerCalls`, mirroring the raw-string path.
+      // TAIL expression. This AST-node (structuredBody) path and the raw-string
+      // path (emit-logic.ts `planBlockArmLift`) MUST make the same §18.5 tail
+      // decision, so the value-vs-void call is DELEGATED to the ONE shared rule,
+      // `_blockTailIsValueExpr` — there is no second, independent value/void
+      // predicate (the repo's standing disagreeing-near-duplicate-predicate
+      // hazard; a member/index-assignment tail formerly LIFTED in the raw path
+      // and voided here). The node-kind gate here does only what a STRING cannot:
+      // admit exactly a value-capable `bare-expr` tail (every other node kind —
+      // decl / return / control-flow / `lift` / `fail` / an assignment-STATEMENT
+      // node — can never be a value tail → §18.5 void) and screen the lone `~`
+      // orphan (which emits nothing). For that `bare-expr`, the tail's `exprNode`
+      // is stringified via `emitStringFromTree` and handed to the shared rule, so
+      // its escape-hatch check and its (space-normalized) assignment-expr check
+      // are the SAME rule both paths run. A value tail is `return`ed so the IIFE
+      // evaluates to it; any other tail leaves the IIFE falling through →
+      // `undefined` = §18.5 void. Auto-await (§13.2) via the shared
+      // `_awaitMatchArmServerCalls`, mirroring the raw-string path.
       const _lastNode: any = arm.structuredBody.length > 0
         ? arm.structuredBody[arm.structuredBody.length - 1] : null;
-      const _tailIsValue = bodyLines.length > 0
+      const _tailIsBareExpr = bodyLines.length > 0
         && !!_lastNode && _lastNode.kind === "bare-expr"
-        && !!_lastNode.exprNode && _lastNode.exprNode.kind !== "assign"
+        && !!_lastNode.exprNode
         && !(_lastNode.exprNode.kind === "ident" && _lastNode.exprNode.name === "~");
+      // Derive the tail's source string the SAME way the sibling structuredBody
+      // path (emit-logic.ts `emitMatchExprToTilde`, ~:4735) does — prefer the
+      // node's retained `expr` text, else round-trip its `exprNode` through
+      // `emitStringFromTree` — so both feed byte-identical input to the one
+      // shared classifier.
+      const _tailStr = _tailIsBareExpr
+        ? (_lastNode.expr ?? (() => { try { return emitStringFromTree(_lastNode.exprNode); } catch { return ""; } })())
+        : "";
+      const _tailIsValue = _tailIsBareExpr && _blockTailIsValueExpr(_tailStr);
       let structuredInner: string;
       if (_tailIsValue) {
         const _tailExpr = bodyLines[bodyLines.length - 1].trim().replace(/;+\s*$/, "");

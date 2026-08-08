@@ -4531,7 +4531,7 @@ export function _matchArmResultIsBlockBody(result: string): boolean {
  * Value-tail blocks assign the tail to the result var; statement-only blocks
  * leave the result var untouched (void/undefined).
  */
-function _blockTailIsValueExpr(tail: string): boolean {
+export function _blockTailIsValueExpr(tail: string): boolean {
   const t = tail.trim();
   if (!t) return false;
   // Statement / declaration heads never produce a bindable arm value.
@@ -4556,7 +4556,19 @@ function _blockTailIsValueExpr(tail: string): boolean {
   // at twelve positions. `on foo` still matches; `onClick` still does not.
   if (/^(const|let|var|return|if|for|while|do|switch|lift|throw|fail|on)(?![A-Za-z0-9_$])/.test(t)) return false;
   // Assignment statements (`@x = …`, `x = …`, compound `+=` …) are void per §18.5.
-  if (/^@?[A-Za-z_$][\w$.\[\]]*\s*(?:=(?!=)|\+=|-=|\*=|\/=|%=|\|\|=|&&=|\?\?=)/.test(t)) return false;
+  //
+  // ⚑ The assignment-TARGET class carries `\s` (`[\w$.\[\]\s]*`, NOT `[\w$.\[\]]*`)
+  // because the tail reaches this predicate SPACE-NORMALIZED — a member/index
+  // assignment arrives as `o . n = 2` / `xs [0] = 9`, not `o.n = 2` / `xs[0] = 9`
+  // (both the raw-string path's `parseExprToNode` round-trip and the structuredBody
+  // path's `emitStringFromTree` reintroduce spacing around `.`/`[`). Without `\s`
+  // the class cannot span the gaps, so a member/index-assignment tail was NOT
+  // recognized as an assignment and was wrongly LIFTED as a value (`~ = o.n = 2`,
+  // yielding the assigned value) instead of §18.5-voided. `\s` is inert against a
+  // genuine value tail: an operator that is not a `.`/`[`/`]`/ident/ws char
+  // (`+`, `?`, `(`, `==`, `>=`, …) terminates the class before the alternation,
+  // so `a + b`, `f() == g()`, `a.b ? x : y` never reach the assignment branch.
+  if (/^@?[A-Za-z_$][\w$.\[\]\s]*\s*(?:=(?!=)|\+=|-=|\*=|\/=|%=|\|\|=|&&=|\?\?=)/.test(t)) return false;
   let node: any = null;
   try { node = parseExprToNode(t, "<match-arm-tail>", 0); } catch { node = null; }
   if (!node) return false;
