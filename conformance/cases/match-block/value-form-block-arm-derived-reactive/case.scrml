@@ -1,0 +1,11 @@
+${
+    type Level:enum = { Low, Mid, High }
+    <level>: Level = .Low
+    const <label> = match @level {
+        .Low  :> { const c = "green"; c }
+        .High :> { const c = "red"; c }
+        _     :> "gray"
+    }
+}
+<button id="raise" onclick=${@level = Level.High}>Raise</>
+<p id="derived">Level: ${@label}</p>

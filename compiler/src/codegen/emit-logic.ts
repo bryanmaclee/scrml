@@ -4446,7 +4446,7 @@ function emitForExprDecl(name: string, forExpr: any, keyword: "let" | "const", o
  * statement-level injector's legality model. Server fn names derive from the
  * threaded route classifier; absent it (test harness / no imports) this is a no-op.
  */
-function _awaitMatchArmServerCalls(rhs: string, opts: EmitLogicOpts): string {
+export function _awaitMatchArmServerCalls(rhs: string, opts: EmitLogicOpts): string {
   const routeMap = (opts as any).asyncRouteMap;
   if (!routeMap || !routeMap.functions) return rhs;
   const awaitLegal = (opts as any).clientAsyncBody === true || opts.boundary === "server";
@@ -4515,7 +4515,7 @@ function _splitBlockStatements(content: string): string[] {
  * it is a §18.5 statement block. Anything not brace-wrapped is a bare value and
  * is never treated as a block — so bare-value arms stay byte-identical.
  */
-function _matchArmResultIsBlockBody(result: string): boolean {
+export function _matchArmResultIsBlockBody(result: string): boolean {
   const t = result.trim();
   if (!(t.startsWith("{") && t.endsWith("}"))) return false;
   let node: any = null;
@@ -4567,6 +4567,32 @@ function _blockTailIsValueExpr(tail: string): boolean {
 }
 
 /**
+ * §18.5 block-arm value lowering — the SHARED classification plan for a block
+ * body's inner text. This is the ONE place the tail-vs-statement decision is
+ * made; every value-position match-lowering path (the local-decl path here in
+ * emit-logic.ts, and the value-returning IIFE paths in emit-control-flow.ts)
+ * routes through it so they cannot drift into disagreeing near-duplicate
+ * classifiers (the repo's standing hazard — three async classifiers, two
+ * server-only-module predicates). It splits the inner into top-level statement
+ * segments and classifies the final segment: when the tail is a value
+ * EXPRESSION (§18.5 result), `tail` is that segment and `leading` is everything
+ * before it; when the block is all statements / ends in a decl/assignment/
+ * `lift`/`fail` / is empty, `tail` is `null` (the arm produces §18.5 `void`).
+ * Callers own the EMISSION shape (assign-to-tilde vs `return`, client vs
+ * engine/server ctx) — only the classification is shared.
+ */
+export function planBlockArmLift(inner: string): { leading: string[]; tail: string | null } {
+  const t = inner.trim();
+  if (!t) return { leading: [], tail: null };
+  const segments = _splitBlockStatements(t);
+  const tail = segments.length > 0 ? segments[segments.length - 1] : "";
+  if (_blockTailIsValueExpr(tail)) {
+    return { leading: segments.slice(0, -1), tail };
+  }
+  return { leading: segments, tail: null };
+}
+
+/**
  * §18.5 block-arm value lowering (raw-string arm path). Given a block-body arm
  * result STRING already confirmed a block via `_matchArmResultIsBlockBody`,
  * emit its leading statements followed by an assignment of its tail expression
@@ -4578,21 +4604,18 @@ function _emitBlockArmValueFromString(result: string, tildeVar: string, opts: Em
   const inner = result.trim().slice(1, -1).trim();
   const lines: string[] = [];
   if (!inner) return `  // §18.5 empty block arm — result is void`;
-  const segments = _splitBlockStatements(inner);
-  const tail = segments.length > 0 ? segments[segments.length - 1] : "";
-  const tailIsValue = _blockTailIsValueExpr(tail);
-  const leading = tailIsValue ? segments.slice(0, -1) : segments;
+  const plan = planBlockArmLift(inner);
   // Each leading segment is emitted through the established block-body statement
   // emitter one at a time (segments are already top-level-`;`-split, so each is
   // a single statement — no re-join/re-split fragility around `;` inside string
   // literals). rewriteBlockBody handles `const`/`let` decls, reactive `@x =`
   // writes, and bare calls uniformly.
-  for (const seg of leading) {
+  for (const seg of plan.leading) {
     const segCode = rewriteBlockBody(seg, null, null, "client").trim();
     if (segCode) lines.push(`  ${segCode.replace(/;+\s*$/, "")};`);
   }
-  if (tailIsValue) {
-    const rhs = _awaitMatchArmServerCalls(emitExprField(null, tail, _makeExprCtx(opts)), opts);
+  if (plan.tail !== null) {
+    const rhs = _awaitMatchArmServerCalls(emitExprField(null, plan.tail, _makeExprCtx(opts)), opts);
     lines.push(`  ${tildeVar} = ${rhs};`);
   }
   // else: no trailing expression → §18.5 void; leave tildeVar as its null seed.
