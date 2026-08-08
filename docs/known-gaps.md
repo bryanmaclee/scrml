@@ -31,8 +31,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 23 |
-| MED | 126 |
-| LOW | 55 |
+| MED | 125 |
+| LOW | 54 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -2330,6 +2330,19 @@ Also noted (separate, pre-existing, affects the WORKING plain-fn path too): the 
 
 ### g-block-body-value-position-mislowers — a BLOCK-body (`{ expr }`) used as a VALUE position mis-lowers: a match block-body value arm (`match k { 1 :> { 42 } _ :> 0 }`) and an `if`-as-value with block branches (`const x = if k==1 { a } else { b }`, decl or markup) either emit invalid JS (E-CODEGEN-INVALID-LOGIC) or assign the value to a dead inner tilde var so the result is always `null`. The structured-body path in `emitMatchExprDecl` (and the if-value decl path) emit the block's statements without lifting the tail expression to the enclosing tilde/result var. Supersedes the mis-filed `g-match-block-arm-server-call-no-autoawait` (which is THIS bug, not an await bug). LOUD (invalid JS) in the match-arm case, SILENT (`null`) in the if-decl case. — `NEW S319-peter (found reproducing the S318 auto-await siblings); MED; open (locus emit-logic.ts:emitMatchExprDecl structured-body arm ~4472 + the if-value decl lowering)`
 <!-- @gap id=g-block-body-value-position-mislowers sev=MED status=open -->
+
+**S330-peter update — MATCH half RESOLVED; if-value half is a LANGUAGE FORK, routed to bryan.** The
+match block-arm value-lift is fully fixed (#469 all IIFE value-positions + #470 classifier unified —
+see `g-match-block-arm-value-lift-covers-one-of-five-paths` RESOLVED). The **if-value** residual turned
+out NOT to be compute-lane: SPEC §17.6.2 makes if-as-expression **lift-based** ("an arm SHOULD contain
+a `lift` … result from the `lift` or `not`"), NOT §18.5 tail-based; and §17.6.1's if-binding grammar is
+a **plain identifier**, so the derived form `const <label> = if …` (which hard-errors today for ALL arm
+shapes) is not grammatical. Fixing it = (a) adopt §18.5 tail-lift into if-as-expression (a semantics
+choice) + (b) sanction the derived position (newly-accepting). Both are bryan's language-surface lane.
+Explicit-`lift` branches already work (the ruled form). **BUILT + HELD before PR** — worktree
+`agent-ad7fea65da10675c1` @ `5fc00afa` retained on purpose (recoverable if bryan rules adopt-tail-lift);
+routed to bryan's inbox (`2026-08-07-2256-…-if-value-block-tail-language-fork.md`). Do NOT land without
+his ruling.
 
 ### g-hash87-member-read-await-misparen — the #87 statement-level auto-await injector emits `const r = await getFlag().ok` for a server call with a member read — `await` binds the `.ok` read (`await (f().ok)`), not the call, so `.ok` reads off the Promise → `undefined`. Same mis-parenthesization #394 fixed for value-form match arms (`(await f()).ok`), but on the PLAIN fn-body statement path. Pre-existing on main, affects the "working" baseline. Fix = parenthesize the awaited call before the member read at the #87 injection site. — `NEW S319-peter (surfaced reproducing g-given-block's baseline); MED; open (locus the #87 injectServerCallAwaits path, scheduling.ts)`
 <!-- @gap id=g-hash87-member-read-await-misparen sev=MED status=resolved -->

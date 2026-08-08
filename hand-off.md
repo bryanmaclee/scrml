@@ -1,4 +1,34 @@
 <!-- ============================================================= -->
+<!-- S330 WRAP (peter/Windows) — prepended 2026-08-07.              -->
+<!-- SOLO throughout (S328-bryan + S329-peter both wrapped).        -->
+<!-- Mechanical stream = delta-log [893]-[896] (see ANOMALY below). -->
+<!-- ============================================================= -->
+
+# scrml — Session 330 (peter · Windows) — WRAP
+
+**Date:** 2026-08-07. `/boot` Profile A FULL. **2 PRs merged** (#469 #470). main `eeb70cde` → **`73df79ed`**, coherence 0/0 both repos.
+**Gaps HIGH 23 · MED 125 · LOW 54 · Nominal 7.** Conformance **868/868**. CI gate GREEN at HEAD. 0 adopter issues · inbox empty.
+
+## 🔴 READ FIRST
+1. **The freeze campaign is still PAUSED** (S322). Unchanged.
+2. **⛔ ONE thing HELD for bryan — the if-value block-tail LANGUAGE FORK.** The if-value residual of `g-block-body-value-position-mislowers` was BUILT then caught as bryan's lane (not compute): SPEC **§17.6.2** makes if-as-expression **lift-based** ("an arm SHOULD contain a `lift`"; result from lift-or-`not`), NOT §18.5 tail-based; and **§17.6.1**'s if-binding grammar is a **plain identifier**, so derived `const <label> = if …` (hard-errors today for all shapes) isn't grammatical. Landing = (a) adopt §18.5 tail-lift into if-as-expression + (b) sanction the derived position (newly-accepting). **Routed to bryan's inbox** (`handOffs/incoming/2026-08-07-2256-from-peter-to-bryan-if-value-block-tail-language-fork.md`). **The complete green build is preserved on worktree `agent-ad7fea65da10675c1` @ `5fc00afa`** (branch `worktree-agent-ad7fea65da10675c1`, base `73df79ed`) — **RETAINED ON PURPOSE, do NOT prune at wrap.** If bryan rules adopt-tail-lift + sanction-derived, the build lands as-is; if lift-only, it's discarded and the fix becomes a diagnostic. Explicit-`lift` if-branches already work (the ruled form).
+3. **⚑ ANOMALY — delta-log integrity.** `handOffs/delta-log.md` on origin ends at **[892]/S297**; the S326/S328 hand-offs + master-list cite delta-log **[1235]-[1271]**, which **do not exist in the file** (grep for any `[1xxx]` token = empty). Either bryan's ASUS delta-log writes never reached origin (scrml-support is direct-push, cross-machine) or a rotation dropped them. My S330 entries continue from the file's true max → **[893]-[896]**. **bryan to reconcile** (his stream may be locally-unpushed on ASUS).
+
+## 🎯 WHAT LANDED — the match block-arm §18.5 tail surface, made whole
+- **#469** (`e8db05a7`) — block-arm tail lift for ALL value positions routing through `emitMatchExpr`'s IIFE (return-`match` · multi-scrutinee · derived cell · markup-interp); #463 had done only the plain-local-decl path. Shared root `emitIifeBlockArmBody`; raw-string path via shared `planBlockArmLift`; auto-await preserved. → `g-match-block-arm-value-lift-covers-one-of-five-paths` RESOLVED.
+- **#470** (`73df79ed`) — UNIFY: deleted the structuredBody ad-hoc tail classifier → both paths route through the one `_blockTailIsValueExpr`; + member-assign LOW fix (`\s` in the assignment-guard regex). → `g-match-block-iife-tail-classifier-diverges-from-shared-plan` (MED) + `g-match-block-member-assign-tail-lifts-as-chained-assignment` (LOW) RESOLVED.
+- Verification bar (both): variant matrix vs pre-fix oracle · full-corpus emit-differential (#469: 2 real samples changed, both correct; #470: **0/7296** changed) · conformance 868/868 · #469 real-browser Chromium reactive recompute. Independent oracle each time — not the agent's self-report.
+
+## 🧭 METHOD NOTE THAT OUTLASTS
+The if-value fork was dispatched by me AS compute-lane and caught only on the deep SPEC read — confirming if-as-value is *a* value form (§17.6, true) is NOT the lane check; the lane check is **what the MECHANISM sentence says** (§17.6.2 lift-based vs §18.5 tail-based). A gap filed as compute can resolve to a language decision. Read the governing mechanism, not the surface. (user-voice-pjoliver11 S330; [[feedback-stay-in-adopter-lane-not-grammar-decisions]] + [[feedback-gap-report-fix-direction-can-be-wrong]].)
+
+## 🧷 STATE / NEXT
+- **Worktrees:** main + `scrml-pinned` (pre-existing, app-pinned — not this session, leave it) + **retained `agent-ad7fea65…` @ `5fc00afa`** (the held if-value build). No sweep owed.
+- **Maps:** structurally CURRENT — S330 changes are in-file codegen helpers (`planBlockArmLift`, `emitIifeBlockArmBody`, unified `_blockTailIsValueExpr`) in already-mapped files (`emit-logic.ts`, `emit-control-flow.ts`); no new files/modules, so the file/task-shape-level `.claude/maps/` needs no dispatch. Symbol-level refresh optional.
+- **Next pickup (no ruling needed):** keep whittling the MED list (~115 open, compute-lane codegen). Peter's mode: re-orient between items (adopter issues · inbox · PRs · board) before selecting. AVOID the auto-await family (`g-*-server-call-no-autoawait`) — it leans into bryan's §13.2 async-boundary lane.
+- **Waiting on bryan:** the if-value fork ruling (return-leg → his reply lands in our inbox).
+
+<!-- ============================================================= -->
 <!-- S328 WRAP (bryan/ASUS-Vivobook) — prepended 2026-08-07.        -->
 <!-- SOLO throughout (S326-bryan + S327-peter both wrapped).        -->
 <!-- Mechanical stream = delta-log [1257]-[1271].                   -->
