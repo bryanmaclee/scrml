@@ -21,7 +21,7 @@ import { exportIsUserComponent } from "../component-expander.ts";
 import { emitEventWiring } from "./emit-event-wiring.ts";
 import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile, emitEngineInitialArmsForFile, emitEngineCellHydrationInitsForFile, emitEngineServerSourceHydrationsForFile, emitEngineOpenerEffectsForFile, emitEngineBodyRenderForFile, emitDerivedEngineBodyRenderForFile } from "./emit-engine.ts";
 import { setVariantFieldsForFile } from "./emit-control-flow.ts";
-import { setVariantFieldsForRewriter } from "./rewrite.js";
+import { setVariantFieldsForRewriter, forEachTemplateInterpolation } from "./rewrite.js";
 import { EncodingContext, emitDecodeTable, emitRuntimeReflect } from "./type-encoding.ts";
 // §65.6 (css-wave1 round-4) — the runtime theme-switch reflection. `collectThemeContext`
 // finds every `<theme for=@cell>`; `themeVariantAttr` yields the `data-scrml-theme-<cell>`
@@ -426,6 +426,47 @@ export function collectClientReferencedIdentsForAST(
     "defaultExpr", "subjectExpr", "valueExpr", "targetExpr", "returnExpr",
   ];
 
+  // RAW (unparsed source) expr fields on scrml STRUCTURAL openers — `<each in=/of=/key=>`,
+  // `<engine in=/key=/on=>`, and the `default=` fallback. These are NOT ExprNodes, not
+  // `attrs`, and not `ifCond`, so the ExprNode/attr walks never reach them; codegen still
+  // wires them into the client render (e.g. `const _items = <inExprRaw>;`), so a
+  // directly-imported const read ONLY as a structural iteration/key/count/default source
+  // is a live #358 miss. Parse + collect each via `collectFromRawBody`. (`bodyRaw` is
+  // deliberately excluded — the body is walked as child nodes; the openers are not.)
+  const RAW_EXPR_FIELDS = ["inExprRaw", "ofExprRaw", "keyExprRaw", "onExprRaw", "defaultExprRaw"];
+
+  // #358 residual — a markup attribute's ExprNode(s) live UNDER a tagged
+  // `attr.value` object, NOT directly on the attr (see dependency-graph.ts
+  // `creditFromAttrValue` for the authoritative shapes): an `onclick={…}` / `if=(…)`
+  // is `{kind:"expr", exprNode}`, a call-ref `onclick=fn(CONST)` is
+  // `{kind:"call-ref", argExprNodes:[…]}`, and a template attribute
+  // `title="…${CONST}…"` is `{kind:"string-literal", value}` whose `${}` interiors
+  // are raw source codegen wires into a client `setAttribute` effect. So a
+  // directly-imported const read ONLY inside such an attribute value was invisible
+  // to the pre-fix seed → dropped from the dep's `.client.js` + `_scrml_modules`
+  // footer → the emitted client handler referenced a FREE variable (ReferenceError
+  // when the event fires). Walk all three shapes through the same deep collector.
+  // The `${}` scan is the SHARED `forEachTemplateInterpolation` — escape-aware, so an
+  // ESCAPED `\${SECRET}` (literal text, NOT wired by codegen) is NOT collected and a
+  // server-only const cannot be pulled to the client through it (§14.8). Only ever
+  // called under `deep` (the cross-file seed); an event handler is always CLIENT code
+  // and the server-node prunes ran above, so this can never widen to a server binding.
+  const collectFromAttrValue = (av: any): void => {
+    if (!av || typeof av !== "object") return;
+    for (const f of EXPR_NODE_FIELDS) collectFromExprNode(av[f]);
+    if (Array.isArray(av.argExprNodes)) {
+      for (const en of av.argExprNodes) collectFromExprNode(en);
+    }
+    // A call-ref (`onclick=FN(args)`) carries the CALLEE identifier in `av.name`
+    // (not in argExprNodes), so a directly-imported fn/const read ONLY as the
+    // callee would otherwise be missed. `variable-ref`'s `@`-prefixed name is
+    // dropped by `addName`, so this only ever collects a real non-`@` callee.
+    if (typeof av.name === "string") addName(av.name);
+    if (av.kind === "string-literal" && typeof av.value === "string" && av.value.includes("${")) {
+      forEachTemplateInterpolation(av.value, (interior) => collectFromRawBody(interior));
+    }
+  };
+
   const visit = (node: any): void => {
     if (!node || typeof node !== "object") return;
 
@@ -480,11 +521,33 @@ export function collectClientReferencedIdentsForAST(
       collectFromRawBody(node.expr);
     }
 
-    // Markup attribute values (onclick=/if=/bind:/props) carry ExprNodes too.
+    // Markup attribute values (onclick=/if=/bind:/props) — the pre-existing `attr[f]`
+    // walk is a no-op at this AST level (the ExprNode lives under `attr.value`); the
+    // #358 residual is closed by `collectFromAttrValue` (see its doc). Kept + gated on
+    // `deep` so the seed alone gains it; the non-deep #263 caller is unchanged.
     if (Array.isArray(node.attrs)) {
       for (const attr of node.attrs) {
         if (!attr || typeof attr !== "object") continue;
         for (const f of EXPR_NODE_FIELDS) collectFromExprNode(attr[f]);
+        // Gated on `deep`: reaches the cross-file reachability seed only — the
+        // non-deep #263 confidentiality-prune caller keeps its exact prior behaviour
+        // (it never walked attr values, since `attr[f]` is always absent at this
+        // level), so the change's blast radius is the seed alone.
+        if (deep) collectFromAttrValue((attr as any).value);
+      }
+    }
+    // The structural `if=` render gate on a scrml-defined structural element
+    // (`<each>` / `<match>` / `<engine>`) has NO `attrs` array — the predicate lives
+    // on `node.ifCond` (ast-builder `captureStructuralIfAttr`), an attr-value-shaped
+    // object the loop above never reaches. dependency-graph.ts routes it through the
+    // SAME reader-credit handler for exactly this reason; mirror that so a const read
+    // ONLY in a structural render gate is seeded too (else: ReferenceError when the
+    // gate evaluates on the client).
+    if (deep && node.ifCond) collectFromAttrValue(node.ifCond);
+    // The structural openers' raw-string iteration/key/count/default exprs.
+    if (deep) {
+      for (const rf of RAW_EXPR_FIELDS) {
+        if (typeof node[rf] === "string") collectFromRawBody(node[rf]);
       }
     }
 

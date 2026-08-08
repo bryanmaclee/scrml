@@ -363,3 +363,341 @@ for (const { label, entry } of SHADOW_VECTORS) {
     });
   });
 }
+
+// ---------------------------------------------------------------------------
+// ATTRIBUTE-VALUE DIMENSION (S332-peter) — the residual filed as
+// g-263-direct-cross-file-const-import-not-emitted-client. The tests above pin a
+// const read in an `on mount` body; this pins a const read ONLY inside a markup
+// ATTRIBUTE. A markup attribute's ExprNode(s) live UNDER `attr.value` (a tagged
+// `{kind,…}` object) — an `onclick={…}`/`if=` is `{value:{kind:"expr",exprNode}}`,
+// a call-ref `onclick=fn(CONST)` is `{value:{kind:"call-ref",argExprNodes}}`, and a
+// template attribute `title="…${CONST}…"` is `{value:{kind:"string-literal",value}}`
+// whose `${}` interiors are raw source wired into a client `setAttribute` effect.
+// The crossFileClientReads seed walked `attr[f]` (always absent at that level), so a
+// directly-imported const read ONLY in one of those attribute contexts was invisible
+// to the seed → absent from the dep's `.client.js` + `_scrml_modules` footer → the
+// emitted client handler referenced a FREE variable → ReferenceError when the event
+// fired. Fix: emit-client.ts collectClientReferencedIdentsForAST walks the
+// ExprNode-bearing fields of `attr.value` (+ parses template `${}` interiors) through
+// the SAME deep collector, so the scope-blindness/leak guard is preserved.
+// ---------------------------------------------------------------------------
+const ATTR_MODULE = `export const H_DIRECT = "handler-direct"
+export const C_ARG = "callref-arg"
+export const T_TPL = "template-tpl"
+`;
+// H_DIRECT read ONLY in an event-handler expr; C_ARG ONLY as a call-ref arg; T_TPL
+// ONLY inside a template-attribute `${}` — none via a mount body / cell init (those
+// paths already worked). The reactive `@n` button keeps the subtree hydrated.
+const ATTR_ENTRY = `<program>
+import { H_DIRECT, C_ARG, T_TPL } from './models.scrml'
+${OPEN} @a = ""
+   @b = ""
+   @n = 0 ${CLOSE}
+function setB(v) { @b = v }
+<div title="tpl ${OPEN}T_TPL${CLOSE}">
+  <button onclick={ @a = H_DIRECT }>h</button>
+  <button onclick=setB(C_ARG)>c</button>
+  <button onclick={ @n = @n + 1 }>${OPEN}@n${CLOSE}</button>
+  <p>${OPEN}@a${CLOSE} ${OPEN}@b${CLOSE}</p>
+</div>
+</program>
+`;
+
+describe("CONF-CG-358 — attribute-value dimension: a const read ONLY in a handler / call-ref / template attr reaches the client", () => {
+  const NAME = "cg358-attrdim";
+  let dir;
+  beforeEach(() => {
+    dir = setupDir(NAME);
+    writeFileSync(join(dir, "models.scrml"), ATTR_MODULE);
+    writeFileSync(join(dir, "index.scrml"), ATTR_ENTRY);
+  });
+  afterEach(() => teardownDir(NAME));
+
+  test("codes-half: all three consts are DECLARED + REGISTERED in models.client.js; index destructures each", () => {
+    const c = compileEntry(join(dir, "index.scrml"));
+    expect(c.errors).toEqual([]);
+    const m = c.out("models.scrml");
+    const idx = c.out("index.scrml");
+    expect(m).not.toBeNull();
+    for (const name of ["H_DIRECT", "C_ARG", "T_TPL"]) {
+      // Pre-fix: the seed never saw the attribute read, so the const was neither
+      // declared nor registered (the footer was `{}` for these three).
+      expect(m.clientJs).toMatch(new RegExp(`^\\s*const ${name} = `, "m"));
+      expect(m.clientJs).toMatch(
+        new RegExp(`_scrml_modules\\["models\\.client\\.js"\\] = \\{[^}]*${name}: ${name}[^}]*\\}`),
+      );
+      expect(idx.clientJs).toMatch(
+        new RegExp(`const \\{[^}]*\\b${name}\\b[^}]*\\} = _scrml_modules\\["models\\.client\\.js"\\]`),
+      );
+    }
+    // Classic-script parse guard (a raw import/export would throw here).
+    expect(() => new vm.Script(m.clientJs)).not.toThrow();
+    expect(() => new vm.Script(idx.clientJs)).not.toThrow();
+  });
+
+  test("runtime-half: the shipped models.client.js registry exposes all three values (pre-fix the footer was `{}`)", () => {
+    const c = compileEntry(join(dir, "index.scrml"));
+    expect(c.errors).toEqual([]);
+    const reg = evalModelsRegistry(c.out("models.scrml").clientJs);
+    expect(reg).toBeDefined();
+    expect(reg.H_DIRECT).toBe("handler-direct");
+    expect(reg.C_ARG).toBe("callref-arg");
+    expect(reg.T_TPL).toBe("template-tpl");
+  });
+});
+
+// NO-LEAK on a handler lambda-param shadow — the confidentiality guard must survive
+// the attribute-value walk: a server-only export read only in a `server fn`, whose
+// name is reused as a lambda PARAM inside an unrelated client handler, must NOT be
+// cross-marked (the deep collector records the lambda param into `boundOut`, so the
+// shadow read cannot pull the server value client). This is the handler-context
+// analogue of the each-var / alias shadow vectors above.
+const ATTR_SHADOW_MODULE = `export const SECRET = ["LEAK", "CANARY", "358H"].join("-")
+export const SHOWN = "shown-client-value"
+`;
+const ATTR_SHADOW_ENTRY = `<program>
+import { SECRET, SHOWN } from './models.scrml'
+${OPEN} @a = "" ${CLOSE}
+server fn stash() -> string {
+    return SECRET
+}
+on mount {
+    @a = SHOWN
+}
+<button onclick={ @a = [1].map(SECRET => SECRET).join("") }>x</button>
+<div><p>${OPEN}@a${CLOSE}</p></div>
+</program>
+`;
+
+describe("CONF-CG-358 — NO-LEAK on a handler lambda-param shadow (the attribute-value walk keeps the guard)", () => {
+  const NAME = "cg358-attr-shadow";
+  let dir;
+  beforeEach(() => {
+    dir = setupDir(NAME);
+    writeFileSync(join(dir, "models.scrml"), ATTR_SHADOW_MODULE);
+    writeFileSync(join(dir, "index.scrml"), ATTR_SHADOW_ENTRY);
+  });
+  afterEach(() => teardownDir(NAME));
+
+  test("codes-half: the server-only value + its export-table entry are ABSENT from every .client.js; SHOWN present", () => {
+    const c = compileEntry(join(dir, "index.scrml"));
+    expect(c.errors).toEqual([]);
+    const m = c.out("models.scrml");
+    const idx = c.out("index.scrml");
+    expect(m).not.toBeNull();
+    const canary = /LEAK-CANARY-358H|\["LEAK"/;
+    // The value must NEVER reach any client bundle (the leak this pins).
+    expect(m.clientJs).not.toMatch(canary);
+    expect(idx.clientJs).not.toMatch(canary);
+    // No `const SECRET = …` decl and no `SECRET:` export-table entry.
+    expect(m.clientJs).not.toMatch(/\bconst SECRET\b/);
+    expect(m.clientJs).not.toMatch(/\bSECRET:/);
+    // The client-read sibling IS registered.
+    expect(m.clientJs).toMatch(/_scrml_modules\["models\.client\.js"\] = \{[^}]*SHOWN: SHOWN[^}]*\}/);
+    // The value IS present server-side (it is legitimately a server value).
+    expect(m.serverJs ?? "").toMatch(/LEAK-CANARY-358H|\["LEAK"/);
+    expect(() => new vm.Script(m.clientJs)).not.toThrow();
+  });
+
+  test("runtime-half: registry exposes SHOWN but NOT SECRET", () => {
+    const c = compileEntry(join(dir, "index.scrml"));
+    expect(c.errors).toEqual([]);
+    const reg = evalModelsRegistry(c.out("models.scrml").clientJs);
+    expect(reg).toBeDefined();
+    expect(reg.SHOWN).toBe("shown-client-value");
+    expect("SECRET" in reg).toBe(false);
+    expect(reg.SECRET).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// STRUCTURAL-`if=` DIMENSION (S332-peter) — the second half of the attribute
+// residual, surfaced by the S239 adversarial pass. The render-gate `if=` on a
+// scrml STRUCTURAL element (`<each>` / `<match>` / `<engine>`) has NO `attrs`
+// array — the predicate lives on `node.ifCond` (ast-builder captureStructuralIfAttr),
+// which the node.attrs walk never reaches. So a const read ONLY in that gate stayed
+// unseeded → dep omits it → the emitted client render effect references a free
+// variable → ReferenceError when the gate evaluates. Seed from `node.ifCond` too.
+// ---------------------------------------------------------------------------
+describe("CONF-CG-358 — structural `if=` gate: a const read ONLY in an <each if=(CONST)> render gate reaches the client", () => {
+  const NAME = "cg358-structif";
+  let dir;
+  beforeEach(() => {
+    dir = setupDir(NAME);
+    writeFileSync(join(dir, "models.scrml"), `export const GATE = true\n`);
+    writeFileSync(join(dir, "index.scrml"), `<program>
+import { GATE } from './models.scrml'
+${OPEN} @rows = [1, 2] ${CLOSE}
+<ul><each in=@rows as r if=(GATE)><li>${OPEN}r${CLOSE}</li></each></ul>
+</program>
+`);
+  });
+  afterEach(() => teardownDir(NAME));
+
+  test("codes-half: GATE is DECLARED + REGISTERED in models.client.js and destructured by index", () => {
+    const c = compileEntry(join(dir, "index.scrml"));
+    expect(c.errors).toEqual([]);
+    const m = c.out("models.scrml");
+    const idx = c.out("index.scrml");
+    expect(m).not.toBeNull();
+    expect(m.clientJs).toMatch(/^\s*const GATE = true;/m);
+    expect(m.clientJs).toMatch(/_scrml_modules\["models\.client\.js"\] = \{[^}]*GATE: GATE[^}]*\}/);
+    expect(idx.clientJs).toMatch(/const \{[^}]*\bGATE\b[^}]*\} = _scrml_modules\["models\.client\.js"\]/);
+    // The gate predicate reads GATE on the client (the site that ReferenceError'd pre-fix).
+    expect(idx.clientJs).toMatch(/\bGATE\b/);
+    expect(() => new vm.Script(idx.clientJs)).not.toThrow();
+  });
+
+  test("runtime-half: the shipped models.client.js registry exposes GATE", () => {
+    const c = compileEntry(join(dir, "index.scrml"));
+    expect(c.errors).toEqual([]);
+    const reg = evalModelsRegistry(c.out("models.scrml").clientJs);
+    expect(reg).toBeDefined();
+    expect(reg.GATE).toBe(true);
+  });
+});
+
+// NO-LEAK on an ESCAPED template interpolation — the confidentiality guard the S239
+// pass caught: the `${}` seed scan must honor the SAME backslash-escape codegen wiring
+// does. An ESCAPED `\${SECRET}` is literal attribute text, NEVER wired into a client
+// setAttribute effect (rewriteTemplateAttrValue treats `\$` as literal), so a
+// server-only SECRET referenced only there must stay off the client. The first cut's
+// escape-blind scan extracted SECRET and SHIPPED its value — a §14.8 leak. The shared
+// forEachTemplateInterpolation is escape-aware, so this pins the fix.
+describe("CONF-CG-358 — NO-LEAK on an escaped `\\${…}` template interpolation (the shared scanner is escape-aware)", () => {
+  const NAME = "cg358-escaped-noleak";
+  let dir;
+  beforeEach(() => {
+    dir = setupDir(NAME);
+    writeFileSync(join(dir, "models.scrml"), `export const SECRET = ["LEAK", "CANARY", "358E"].join("-")
+export const SHOWN = "shown-client-value"
+`);
+    // `title="x \${SECRET}"` — the `\\` in this template literal is ONE backslash in
+    // the .scrml source, so the source reads `x \${SECRET}`: an ESCAPED interpolation.
+    writeFileSync(join(dir, "index.scrml"), `<program>
+import { SECRET, SHOWN } from './models.scrml'
+${OPEN} @a = "" ${CLOSE}
+server fn stash() -> string {
+    return SECRET
+}
+on mount {
+    @a = SHOWN
+}
+<div title="x \\${OPEN}SECRET${CLOSE}"><p>${OPEN}@a${CLOSE}</p></div>
+</program>
+`);
+  });
+  afterEach(() => teardownDir(NAME));
+
+  test("codes-half: the escaped SECRET is ABSENT from every .client.js; SHOWN present", () => {
+    const c = compileEntry(join(dir, "index.scrml"));
+    expect(c.errors).toEqual([]);
+    const m = c.out("models.scrml");
+    const idx = c.out("index.scrml");
+    expect(m).not.toBeNull();
+    const canary = /LEAK-CANARY-358E|\["LEAK"/;
+    // The value must NEVER reach any client bundle (the leak this pins).
+    expect(m.clientJs).not.toMatch(canary);
+    expect(idx.clientJs).not.toMatch(canary);
+    expect(m.clientJs).not.toMatch(/\bconst SECRET\b/);
+    expect(m.clientJs).not.toMatch(/\bSECRET:/);
+    // The mount-read sibling IS registered (the escape guard does not over-suppress).
+    expect(m.clientJs).toMatch(/_scrml_modules\["models\.client\.js"\] = \{[^}]*SHOWN: SHOWN[^}]*\}/);
+    // The value IS present server-side.
+    expect(m.serverJs ?? "").toMatch(canary);
+    expect(() => new vm.Script(m.clientJs)).not.toThrow();
+  });
+
+  test("runtime-half: registry exposes SHOWN but NOT the escaped SECRET", () => {
+    const c = compileEntry(join(dir, "index.scrml"));
+    expect(c.errors).toEqual([]);
+    const reg = evalModelsRegistry(c.out("models.scrml").clientJs);
+    expect(reg).toBeDefined();
+    expect(reg.SHOWN).toBe("shown-client-value");
+    expect("SECRET" in reg).toBe(false);
+    expect(reg.SECRET).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CALL-REF CALLEE + STRUCTURAL RAW-OPENER DIMENSIONS (S332-peter) — the final two
+// facets of the #358 attribute class, surfaced by a second S239 adversarial pass.
+// A call-ref `onclick=FN()` keeps the CALLEE in `attr.value.name` (not argExprNodes),
+// and a structural opener (`<each in=/of=/key=>`, `<engine in=/key=/on=>`) keeps its
+// iteration/key source as a RAW STRING (`inExprRaw`/`ofExprRaw`/`keyExprRaw`/…), not an
+// ExprNode / attr / ifCond. A const read ONLY through one of those still ReferenceError'd
+// on the client. Seed `av.name` + the raw-opener expr fields.
+// ---------------------------------------------------------------------------
+describe("CONF-CG-358 — call-ref callee: a fn read ONLY as `onclick=FN()` reaches the client", () => {
+  const NAME = "cg358-callee";
+  let dir;
+  beforeEach(() => {
+    dir = setupDir(NAME);
+    writeFileSync(join(dir, "models.scrml"), `export const CB = () => "cb-value"\n`);
+    writeFileSync(join(dir, "index.scrml"), `<program>
+import { CB } from './models.scrml'
+${OPEN} @n = 0 ${CLOSE}
+<div><button onclick=CB()>go</button><p>${OPEN}@n${CLOSE}</p></div>
+</program>
+`);
+  });
+  afterEach(() => teardownDir(NAME));
+
+  test("codes-half: CB is DECLARED + REGISTERED in models.client.js and destructured by index", () => {
+    const c = compileEntry(join(dir, "index.scrml"));
+    expect(c.errors).toEqual([]);
+    const m = c.out("models.scrml");
+    const idx = c.out("index.scrml");
+    expect(m).not.toBeNull();
+    expect(m.clientJs).toMatch(/^\s*const CB = /m);
+    expect(m.clientJs).toMatch(/_scrml_modules\["models\.client\.js"\] = \{[^}]*CB: CB[^}]*\}/);
+    expect(idx.clientJs).toMatch(/const \{[^}]*\bCB\b[^}]*\} = _scrml_modules\["models\.client\.js"\]/);
+    expect(() => new vm.Script(idx.clientJs)).not.toThrow();
+  });
+
+  test("runtime-half: the registry exposes CB as a function", () => {
+    const c = compileEntry(join(dir, "index.scrml"));
+    expect(c.errors).toEqual([]);
+    const reg = evalModelsRegistry(c.out("models.scrml").clientJs);
+    expect(reg).toBeDefined();
+    expect(typeof reg.CB).toBe("function");
+    expect(reg.CB()).toBe("cb-value");
+  });
+});
+
+describe("CONF-CG-358 — structural raw opener: a const read ONLY as `<each in=CONST>` reaches the client", () => {
+  const NAME = "cg358-rawopener";
+  let dir;
+  beforeEach(() => {
+    dir = setupDir(NAME);
+    writeFileSync(join(dir, "models.scrml"), `export const ROWS = [10, 20, 30]\n`);
+    writeFileSync(join(dir, "index.scrml"), `<program>
+import { ROWS } from './models.scrml'
+<ul><each in=ROWS as r><li>${OPEN}r${CLOSE}</li></each></ul>
+</program>
+`);
+  });
+  afterEach(() => teardownDir(NAME));
+
+  test("codes-half: ROWS is DECLARED + REGISTERED in models.client.js and destructured by index", () => {
+    const c = compileEntry(join(dir, "index.scrml"));
+    expect(c.errors).toEqual([]);
+    const m = c.out("models.scrml");
+    const idx = c.out("index.scrml");
+    expect(m).not.toBeNull();
+    expect(m.clientJs).toMatch(/^\s*const ROWS = \[10, 20, 30\];/m);
+    expect(m.clientJs).toMatch(/_scrml_modules\["models\.client\.js"\] = \{[^}]*ROWS: ROWS[^}]*\}/);
+    expect(idx.clientJs).toMatch(/const \{[^}]*\bROWS\b[^}]*\} = _scrml_modules\["models\.client\.js"\]/);
+    // The each render reads ROWS on the client (the site that ReferenceError'd pre-fix).
+    expect(idx.clientJs).toMatch(/\bROWS\b/);
+    expect(() => new vm.Script(idx.clientJs)).not.toThrow();
+  });
+
+  test("runtime-half: the registry exposes ROWS with its value", () => {
+    const c = compileEntry(join(dir, "index.scrml"));
+    expect(c.errors).toEqual([]);
+    const reg = evalModelsRegistry(c.out("models.scrml").clientJs);
+    expect(reg).toBeDefined();
+    expect(reg.ROWS).toEqual([10, 20, 30]);
+  });
+});
