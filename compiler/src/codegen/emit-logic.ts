@@ -2307,6 +2307,19 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // Pre-Step-11.5 this was a separate `case "reactive-derived-decl":`;
         // now it's gated inline on the shape discriminant.
         const derivedInit: string = node.init ?? "";
+        // §17.6 / §18.5 — if-as-value in a derived-cell RHS (`const <label> =
+        // if (@n==1) { … } else { … }`). Unlike `match` (lowered by the
+        // ast-builder to a `match-expr` node emit-expr.ts already handles), an
+        // if in RHS position is captured as a raw `escape-hatch` string with no
+        // expression-position lowering — it reached emitExprField verbatim and
+        // tripped E-CODEGEN-INVALID-LOGIC. Re-parse it to a structured if-stmt
+        // and lower via the value-returning IIFE (the same tail-lift lowering
+        // the decl path uses). `null` when the init is not an if → the ordinary
+        // expression path below is unchanged.
+        const _derivedIfNode = (node.initExpr && (node.initExpr as any).kind === "escape-hatch")
+          ? _reparseInitToIfNode(derivedInit)
+          : null;
+        const derivedIfValueRhs = _derivedIfNode ? emitIfExprValueIIFE(_derivedIfNode, opts) : null;
         // C2: when fnBodyRegistry is available, use transitive extraction
         // (closes SPEC §6.6.3 line 2470-2482 normative gap — deps tracked
         // through fn calls). Brings derived path to parity with markup-interp
@@ -2328,7 +2341,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         const hasReactiveDeps = reactiveDepsFound.size > 0;
 
         if (!hasReactiveDeps) {
-          const derivedRhs = emitExprField(node.initExpr, derivedInit, _makeExprCtx(opts));
+          const derivedRhs = derivedIfValueRhs ?? emitExprField(node.initExpr, derivedInit, _makeExprCtx(opts));
           // §6.6.11 — the compiler SHALL emit W-DERIVED-001 as a real
           // diagnostic, not merely an inline provenance comment. Push a
           // severity-"warning" CGError into `opts.errors`; api.js partitions
@@ -2354,7 +2367,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           return _appendSidecar(`/* W-DERIVED-001: const @${node.name} has no reactive dependencies — treating as const */ const ${node.name} = ${derivedRhs};`);
         }
 
-        const rewrittenBody = emitExprField(node.initExpr, derivedInit, { ..._makeExprCtx(opts), derivedNames });
+        const rewrittenBody = derivedIfValueRhs ?? emitExprField(node.initExpr, derivedInit, { ..._makeExprCtx(opts), derivedNames });
         const ctxDerived = opts.encodingCtx;
         const encodedDerivedDeclName = ctxDerived ? ctxDerived.encode(_qualifiedName) : _qualifiedName;
 
@@ -4267,34 +4280,74 @@ function countTopLevelLifts(body: any[]): number {
 }
 
 /**
- * Emit the alternate (else/else-if) chain of an if-as-expression inline,
- * handling else-if chains without extra braces per §17.6.8.
+ * §17.6 + §18.5 — emit ONE if-as-value branch body, lifting the branch block's
+ * TAIL expression to the enclosing result var `tildeVar` (the §18.5 block-value
+ * rule). This is the if-value analogue of the match block-arm structured-body
+ * path in `emitMatchExprDecl` (~:4738) and it reuses the SAME shared tail
+ * classifier `_blockTailIsValueExpr` — there is NO third value/void predicate
+ * (the repo's disagreeing-near-duplicate hazard; #470 unified match to one).
+ *
+ * A bare-expr tail whose text classifies as a value EXPRESSION assigns to
+ * `tildeVar` (the enclosing if-value result); every other statement — a
+ * decl/assignment/`lift`/`fail`/control-flow, or a bare-expr whose tail is
+ * void per §18.5 — flows through `emitLogicNode` unchanged. An explicit
+ * `lift x` therefore still routes to the tilde via `tildeContext`
+ * (value-lift mode, unchanged), and a purely statement / void branch leaves
+ * `tildeVar` at its `null` seed → the branch is §18.5 void.
+ *
+ * Pre-fix each branch's bare tail hit the shared bare-expr handler under an
+ * active tildeContext, which minted a FRESH `let _scrml_tilde_N = <tail>;` and
+ * rebound `tildeContext.var` — so the ENCLOSING result var was never assigned
+ * and the decl read back its `null` seed (silent-null). Returns lines already
+ * indented two spaces to match the surrounding branch-body emission.
  */
-function emitIfExprAltChain(alternate: any[], bodyOpts: EmitLogicOpts, lines: string[]): void {
-  if (alternate.length === 1 && alternate[0]?.kind === "if-stmt") {
+function emitIfExprBranchBodyLifted(body: any[], tildeVar: string, bodyOpts: EmitLogicOpts, opts: EmitLogicOpts): string[] {
+  const out: string[] = [];
+  const tailIdx = body.length - 1;
+  for (let i = 0; i < body.length; i++) {
+    const stmt = body[i];
+    // Mirror emitMatchExprDecl's structured-body tail handling byte-for-byte.
+    const exprText = stmt && stmt.kind === "bare-expr"
+      ? (stmt.expr ?? (stmt.exprNode ? (() => { try { return emitStringFromTree(stmt.exprNode); } catch { return ""; } })() : ""))
+      : "";
+    if (i === tailIdx && stmt && stmt.kind === "bare-expr" && !stmt._onMountEffect && _blockTailIsValueExpr(exprText)) {
+      const rhs = _awaitMatchArmServerCalls(emitExprField(null, exprText, _makeExprCtx(opts)), opts);
+      out.push(`  ${tildeVar} = ${rhs};`);
+      continue;
+    }
+    const code = emitLogicNode(stmt, bodyOpts);
+    if (code) {
+      for (const line of code.split("\n")) out.push(`  ${line}`);
+    }
+  }
+  return out;
+}
+
+/**
+ * Emit the alternate (else/else-if) chain of an if-as-expression inline,
+ * handling else-if chains without extra braces per §17.6.8. Each branch's
+ * TAIL expression is lifted to `tildeVar` via `emitIfExprBranchBodyLifted`.
+ */
+function emitIfExprAltChain(alternate: any[], tildeVar: string, bodyOpts: EmitLogicOpts, opts: EmitLogicOpts, lines: string[]): void {
+  if (alternate.length === 1 && (alternate[0]?.kind === "if-stmt" || alternate[0]?.kind === "if-expr")) {
     // else if — emit without extra braces (§17.6.8)
     const nestedIf = alternate[0];
     // The nested else-if condition must inherit the SAME opts as the body
     // (`bodyOpts`) so a `<#id>` request ref / `@m[k]` map read / engine read in
     // the condition lowers correctly — `_makeExprCtx({})` dropped them all.
-    const nestedCond = emitExprField(nestedIf.condExpr, (nestedIf.condition ?? "true").trim(), _makeExprCtx(bodyOpts));
-    const nestedConsequent: any[] = nestedIf.consequent ?? [];
+    const nestedCond = emitExprField(nestedIf.condExpr, (nestedIf.condition ?? nestedIf.test ?? "true").trim(), _makeExprCtx(bodyOpts));
+    const nestedConsequent: any[] = nestedIf.consequent ?? nestedIf.body ?? [];
     // E-LIFT-002: multiple lifts on same path in a value-lift arm
     if (countTopLevelLifts(nestedConsequent) > 1) {
       lines.push(`/* E-LIFT-002: multiple lift statements on same execution path in value-lift arm */`);
     }
     lines.push(`else if (${nestedCond}) {`);
-    for (const stmt of nestedConsequent) {
-      const code = emitLogicNode(stmt, bodyOpts);
-      if (code) {
-        for (const line of code.split("\n")) lines.push(`  ${line}`);
-      }
-    }
+    for (const line of emitIfExprBranchBodyLifted(nestedConsequent, tildeVar, bodyOpts, opts)) lines.push(line);
     lines.push(`}`);
     // Continue chaining for further else-if / else
     if (nestedIf.alternate) {
       const nextAlternate: any[] = Array.isArray(nestedIf.alternate) ? nestedIf.alternate : [nestedIf.alternate];
-      emitIfExprAltChain(nextAlternate, bodyOpts, lines);
+      emitIfExprAltChain(nextAlternate, tildeVar, bodyOpts, opts, lines);
     }
   } else {
     // plain else
@@ -4303,20 +4356,51 @@ function emitIfExprAltChain(alternate: any[], bodyOpts: EmitLogicOpts, lines: st
       lines.push(`/* E-LIFT-002: multiple lift statements on same execution path in value-lift arm */`);
     }
     lines.push(`else {`);
-    for (const stmt of alternate) {
-      const code = emitLogicNode(stmt, bodyOpts);
-      if (code) {
-        for (const line of code.split("\n")) lines.push(`  ${line}`);
-      }
-    }
+    for (const line of emitIfExprBranchBodyLifted(alternate, tildeVar, bodyOpts, opts)) lines.push(line);
     lines.push(`}`);
   }
 }
 
 /**
+ * §17.6 / §18.5 — emit an if-as-value node's if/else-if/else chain as a run of
+ * statements that assign the taken branch's value to `tildeVar`. The SHARED
+ * lowering behind both the decl-position emitter (`emitIfExprDecl`) and the
+ * value-returning IIFE emitter (`emitIfExprValueIIFE`, the derived-cell /
+ * markup path). Accepts both a parser `ifExpr` node (decl position: carries
+ * `condExpr`/`condition`, `consequent`, `alternate`) and a re-parsed `if-stmt`
+ * node (derived/markup position: carries `condition`/`test`, `consequent`/
+ * `body`, `alternate`). Callers own the `let ${tildeVar} = null;` seed and the
+ * consumer (`const name = ~` vs `return ~`).
+ */
+function emitIfChainToTilde(ifNode: any, tildeVar: string, opts: EmitLogicOpts): string[] {
+  const lines: string[] = [];
+  // Create a tilde context so a `lift`-form arm body assigns to tildeVar.
+  const tildeCtx = { var: tildeVar, mode: "single" as "single" | "array" };
+  const bodyOpts: EmitLogicOpts = { ...opts, tildeContext: tildeCtx };
+
+  const condition = emitExprField(ifNode.condExpr, (ifNode.condition ?? ifNode.test ?? "true").trim(), _makeExprCtx(opts));
+
+  // E-LIFT-002: multiple lifts on same linear path in a value-lift arm
+  const consequent: any[] = ifNode.consequent ?? ifNode.body ?? [];
+  if (countTopLevelLifts(consequent) > 1) {
+    lines.push(`/* E-LIFT-002: multiple lift statements on same execution path in value-lift arm */`);
+  }
+  lines.push(`if (${condition}) {`);
+  for (const line of emitIfExprBranchBodyLifted(consequent, tildeVar, bodyOpts, opts)) lines.push(line);
+  lines.push(`}`);
+
+  // Emit alternate body if present (§17.6.8 — else-if chain optimization)
+  if (ifNode.alternate) {
+    const alternate: any[] = Array.isArray(ifNode.alternate) ? ifNode.alternate : [ifNode.alternate];
+    emitIfExprAltChain(alternate, tildeVar, bodyOpts, opts, lines);
+  }
+  return lines;
+}
+
+/**
  * Emit an if-as-expression declaration. Pre-declares a tilde variable,
- * emits the if/else body with lift assigning to that variable, then
- * assigns the result to the declared name.
+ * emits the if/else body assigning the taken branch's value to that variable,
+ * then binds the declared name to it.
  *
  * §17.6.4: When no arm executes, result is `not` (compiled to null in JS per §42).
  * §17.6.8: Uses variable-assign-in-branches pattern with else-if chain support.
@@ -4326,35 +4410,7 @@ function emitIfExprDecl(name: string, ifExpr: any, keyword: "let" | "const", opt
   const lines: string[] = [];
   // §17.6.4: default is `not` (compiled to null in JS — §42: `not` => null)
   lines.push(`let ${tildeVar} = null;`);
-
-  // Create a tilde context so lift-expr inside the if body assigns to tildeVar
-  const tildeCtx = { var: tildeVar, mode: "single" as "single" | "array" };
-  const bodyOpts: EmitLogicOpts = { ...opts, tildeContext: tildeCtx };
-
-  // Emit the if condition
-  const condition = emitExprField(ifExpr.condExpr, (ifExpr.condition ?? "true").trim(), _makeExprCtx(opts));
-
-  // E-LIFT-002: multiple lifts on same linear path in a value-lift arm
-  const consequent: any[] = ifExpr.consequent ?? [];
-  if (countTopLevelLifts(consequent) > 1) {
-    lines.push(`/* E-LIFT-002: multiple lift statements on same execution path in value-lift arm */`);
-  }
-  lines.push(`if (${condition}) {`);
-
-  for (const stmt of consequent) {
-    const code = emitLogicNode(stmt, bodyOpts);
-    if (code) {
-      for (const line of code.split("\n")) lines.push(`  ${line}`);
-    }
-  }
-  lines.push(`}`);
-
-  // Emit alternate body if present (§17.6.8 — else-if chain optimization)
-  if (ifExpr.alternate) {
-    const alternate: any[] = Array.isArray(ifExpr.alternate) ? ifExpr.alternate : [ifExpr.alternate];
-    emitIfExprAltChain(alternate, bodyOpts, lines);
-  }
-
+  for (const line of emitIfChainToTilde(ifExpr, tildeVar, opts)) lines.push(line);
   lines.push(`${keyword} ${name} = ${tildeVar};`);
 
   // Propagate tilde var to parent context so `~` after this decl resolves correctly
@@ -4363,6 +4419,60 @@ function emitIfExprDecl(name: string, ifExpr: any, keyword: "let" | "const", opt
   }
 
   return lines.join("\n");
+}
+
+/**
+ * §17.6 / §18.5 — emit an if-as-value in EXPRESSION position (a derived cell
+ * `const <label> = if (…) { … }`, the markup/derived path) as a self-contained
+ * value-returning IIFE. The if-value analogue of `emit-control-flow.ts`'s
+ * `emitMatchExpr` value IIFE: unlike `match` (which the ast-builder lowers to a
+ * structured `match-expr` expression node that `emit-expr.ts` already handles),
+ * an if in RHS/derived position is captured as a raw `escape-hatch` string with
+ * no `if-expr` node, so there is no expression-position lowering — it reached
+ * emit verbatim and tripped `E-CODEGEN-INVALID-LOGIC`. This lowers it through
+ * the SAME `emitIfChainToTilde` the decl path uses (one classifier, one lowering).
+ */
+function emitIfExprValueIIFE(ifNode: any, opts: EmitLogicOpts): string {
+  const tildeVar = genVar("tilde");
+  const lines: string[] = [];
+  lines.push(`(function() {`);
+  lines.push(`  let ${tildeVar} = null;`);
+  for (const line of emitIfChainToTilde(ifNode, tildeVar, opts)) lines.push(`  ${line}`);
+  lines.push(`  return ${tildeVar};`);
+  lines.push(`})()`);
+  return lines.join("\n");
+}
+
+/**
+ * Re-parse a raw if-as-value RHS STRING (a derived-cell init captured as an
+ * `escape-hatch`) into a structured `if-stmt` node via the BS → TAB
+ * sub-pipeline — the same re-parse pattern `_emitNestedGuardedArmBody` uses.
+ * Returns the `if-stmt` node, or null when the init is not an if (caller then
+ * falls back to the ordinary expression path). String-based fast reject first
+ * so a non-if init never pays the re-parse.
+ */
+function _reparseInitToIfNode(init: string): any | null {
+  const t = (init ?? "").trim();
+  if (!/^if(?![A-Za-z0-9_$])/.test(t)) return null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const bs = require("../block-splitter.js") as { runBlockSplitter: (i: { filePath: string; source: string }) => any };
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const tab = require("../ast-builder.js") as { buildAST: (bsOut: any) => any };
+    const wrapped = "${\n" + t + "\n}";
+    const bsOut = bs.runBlockSplitter({ filePath: "__if_value_init__.scrml", source: wrapped });
+    const built = tab.buildAST(bsOut);
+    const nodes: any[] = built?.ast?.nodes ?? [];
+    for (const n of nodes) {
+      const body: any[] | undefined = Array.isArray(n?.body) ? n.body : (Array.isArray(n?.children) ? n.children : undefined);
+      if (!body) continue;
+      // A well-formed if-value RHS re-parses to a single top-level if-stmt.
+      if (body.length === 1 && body[0]?.kind === "if-stmt") return body[0];
+    }
+  } catch (_e) {
+    return null;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
