@@ -1,6 +1,6 @@
 import { genVar } from "./var-counter.ts";
 import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
-import { emitExprField } from "./emit-expr.ts";
+import { emitExprField, reparseRequestRefEscapeHatch } from "./emit-expr.ts";
 import type { ExprNode } from "../types/ast.ts";
 import { collectMarkupNodes } from "./collect.ts";
 import { getNodes } from "./collect.ts";
@@ -8,7 +8,7 @@ import { rewriteTemplateAttrValue, rewriteReactiveRefs } from "./rewrite.js";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
 import { parsePredicateAnnotation, predicateToJsExpr, deriveHtmlAttrs } from "./emit-predicates.ts";
-import { collectCompoundLeafTargets } from "./reactive-deps.ts";
+import { collectCompoundLeafTargets, collectRequestIds } from "./reactive-deps.ts";
 
 /** A loosely-typed AST node from the pipeline. */
 type ASTNode = Record<string, unknown>;
@@ -349,7 +349,7 @@ export interface LoweredDirective {
 
 export function lowerClassDirectiveCondition(
   attrValue: AttrValue,
-  ctx: { derivedNames?: Set<string>; synthCellKeys?: Set<string> },
+  ctx: { derivedNames?: Set<string>; synthCellKeys?: Set<string>; requestIds?: Set<string> },
 ): LoweredDirective | null {
   if (!attrValue) return null;
   if (attrValue.kind === "variable-ref") {
@@ -380,10 +380,17 @@ export function lowerClassDirectiveCondition(
         exprNode = null;
       }
     }
+    // g-request-is-some-in-value-bool-class-attr — a `class:x=<#r>.data is some`
+    // directive expr arrives as an ESCAPE-HATCH (the `!exprNode` guard above
+    // never fires because `val.exprNode` is set to the escape-hatch node); re-parse
+    // it and thread `requestIds` so the ref routes to `_scrml_request_<r>` instead
+    // of the mis-routing/mangling string fallback. Scoped to `<#`-bearing raws.
+    exprNode = reparseRequestRefEscapeHatch(exprNode, rawExpr, "<class-directive>") as ExprNode | null;
     const rewrittenExpr = emitExprField(exprNode, rawExpr, {
       mode: "client",
       derivedNames: ctx.derivedNames,
       synthCellKeys: ctx.synthCellKeys,
+      requestIds: ctx.requestIds,
     }) as string;
     return { jsExpr: rewrittenExpr, refs: exprRefs };
   }
@@ -713,6 +720,10 @@ export function emitBindings(ctx: CompileContext): string[] {
   // `_scrml_deep_set` on the derived parent. Computed once per file.
   const { leafKeys: compoundLeafKeys, parentNames: compoundParentNames } =
     collectCompoundLeafTargets(fileAST as Record<string, unknown>);
+  // g-request-is-some-in-value-bool-class-attr — request ids for this file, so a
+  // `class:x=<#r>.data is some` directive expr routes the ref to
+  // `_scrml_request_<r>` (mirrors emit-html's `requestIdsForBindings`).
+  const requestIds: Set<string> = fileAST ? collectRequestIds(fileAST) : new Set<string>();
 
   // -------------------------------------------------------------------------
   // Step 2.5: Generate ref= attribute wiring (DOM element references)
@@ -871,10 +882,16 @@ export function emitBindings(ctx: CompileContext): string[] {
               exprNode = null;
             }
           }
+          // g-request-is-some-in-value-bool-class-attr — re-parse a
+          // `class:x=<#r>.data is some` escape-hatch expr + thread `requestIds`
+          // so the ref routes to `_scrml_request_<r>` (§6.7.7) instead of the
+          // mis-routing/mangling string fallback. Scoped to `<#`-bearing raws.
+          exprNode = reparseRequestRefEscapeHatch(exprNode, rawExpr, "<class-directive>") as ExprNode | null;
           const rewrittenExpr = emitExprField(exprNode, rawExpr, {
             mode: "client",
             derivedNames: ctx.derivedNames,
             synthCellKeys: ctx.synthCellKeys,
+            requestIds,
           }) as string;
           lines.push(`// class:${cClassName}=${rawExpr}`);
           lines.push(`{`);

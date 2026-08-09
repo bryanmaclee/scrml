@@ -743,6 +743,47 @@ export function emitExpr(node: ExprNode, ctx: EmitExprContext): string {
 }
 
 /**
+ * g-request-is-some-in-value-bool-class-attr (S312 substrate) — an ATTRIBUTE
+ * value whose expression LEADS with a `<#id>` request/input-state ref reaches
+ * codegen as an ESCAPE-HATCH node: `ast-builder.shouldSkipExprParse` skips any
+ * `<`-leading expr (HTML-fragment guard), so the attribute parser never built a
+ * structured node. The escape-hatch → string fallback both mis-routes the ref
+ * (to the §36 `_scrml_input_state_registry`) AND mangles an `is some`/`is none`
+ * LHS (→ `.(data !== null && data !== undefined)`, i.e. E-CODEGEN-INVALID-LOGIC
+ * or a silently-dropped attribute). Re-parse the raw with the (now sigil-aware)
+ * parser to recover a real node so the callsite can lower via the SAME
+ * structured `emitExprField` path the `if=`/`${…}` interpolation uses — with
+ * `requestIds` threaded, routing `<#r>` to the reactive `_scrml_request_<r>`
+ * object (§6.7.7). This is the shared substrate for the S312 `if=`-attr fix and
+ * its value/bool/class-attr siblings, so the "re-parse escape-hatch `<#`" rule
+ * is defined exactly once.
+ *
+ * SCOPED to `<#`-bearing raws ONLY: every other escape-hatch attribute value
+ * keeps its existing string lowering byte-identical. Returns the node to emit
+ * with — the reparsed node when it recovered a structured (non-escape-hatch)
+ * form, else the input node unchanged (the string-fallback path is preserved).
+ */
+export function reparseRequestRefEscapeHatch(
+  node: ExprNode | null | undefined,
+  raw: string | undefined,
+  label: string,
+): ExprNode | null | undefined {
+  if (
+    (!node || (node as any).kind === "escape-hatch") &&
+    typeof raw === "string" &&
+    raw.includes("<#")
+  ) {
+    try {
+      const reparsed = parseExprToNode(raw, label, 0) as ExprNode | null;
+      if (reparsed && (reparsed as any).kind !== "escape-hatch") return reparsed;
+    } catch {
+      /* keep the original node → string fallback (unchanged) */
+    }
+  }
+  return node;
+}
+
+/**
  * Phase 4d Slice 4a: consolidated dual-path emitter.
  *
  * If exprNode is present, emits via emitExpr (the structured tree-walk path).

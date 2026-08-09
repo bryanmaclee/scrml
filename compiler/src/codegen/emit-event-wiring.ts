@@ -1,6 +1,6 @@
 import { rewriteReactiveRefs, rewriteExprArrowBody, rewriteServerExprArrowBody } from "./rewrite.js";
 import { rewriteBlockBody, emitMatchExpr, emitIfValueExpr, type EngineRewriteCtx } from "./emit-control-flow.ts";
-import { emitExprField } from "./emit-expr.ts";
+import { emitExprField, reparseRequestRefEscapeHatch } from "./emit-expr.ts";
 import { parseExprToNode } from "../expression-parser.ts";
 import {
   maybeLowerCancelTimerCallRef,
@@ -484,13 +484,11 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       // get a real node, then emit via the SAME structured path the `${...}` text-
       // interpolation uses. Scoped to `<#`-bearing exprs so every other escape-hatch
       // condition keeps its existing string lowering byte-identical.
-      let condNode = b.condExprNode as ExprNode | undefined;
-      if ((!condNode || (condNode as any).kind === "escape-hatch") && typeof b.condExpr === "string" && b.condExpr.includes("<#")) {
-        try {
-          const reparsed = parseExprToNode(b.condExpr, "<if-request-ref>", 0) as ExprNode | null;
-          if (reparsed && (reparsed as any).kind !== "escape-hatch") condNode = reparsed;
-        } catch { /* keep the original node → string fallback (unchanged) */ }
-      }
+      const condNode = reparseRequestRefEscapeHatch(
+        b.condExprNode as ExprNode | undefined,
+        b.condExpr,
+        "<if-request-ref>",
+      ) as ExprNode | undefined;
       // Bug 61 — thread synthCellKeys + derivedNames so `if=@form.isValid`
       // conditional-display reads route to the dotted synth cell. `requestIds` routes
       // a reparsed `<#r>` ref to the reactive `_scrml_request_<r>` object (§6.7.7).
@@ -1612,7 +1610,16 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           // (`undefined` → `!undefined` → `true` → button stuck disabled).
           // derivedNames threaded alongside for parity (a derived cell read in
           // the same condition resolves via _scrml_derived_get).
-          const compiled = emitExprField(binding.condExprNode, binding.condExpr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys });
+          //
+          // g-request-is-some-in-value-bool-class-attr — `disabled=<#r>.data is
+          // some` (a `<request>`-ref member as a Boolean-attr predicate) arrives
+          // with `condExprNode` an ESCAPE-HATCH (shouldSkipExprParse skips the
+          // `<#`-leading expr), so re-parse it (via the shared substrate) and
+          // thread `requestIds` so the ref routes to `_scrml_request_<r>` instead
+          // of mis-routing to the §36 input-state registry + mangling the `is`
+          // LHS. Mirrors the S312 `if=`-attr fix; scoped to `<#`-bearing raws.
+          const condNode = reparseRequestRefEscapeHatch(binding.condExprNode, binding.condExpr, "<bool-attr-request-ref>");
+          const compiled = emitExprField(condNode, binding.condExpr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys, requestIds });
           const conditionCode = `(${compiled})`;
           const toggle = `if (${conditionCode}) { el.setAttribute(${JSON.stringify(attrName)}, ""); } else { el.removeAttribute(${JSON.stringify(attrName)}); }`;
           // Rebindable (findings #1/#2): re-binds the boolean-attr toggle scoped to
@@ -1662,7 +1669,16 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           // synthCellKeys/derivedNames threaded exactly as the bool path does, so
           // `class=(@form.isValid ? "ok" : "bad")` routes dotted reads to the
           // synth cell rather than member-accessing the compound value.
-          const compiled = emitExprField(binding.exprNode, binding.expr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys });
+          //
+          // g-request-is-some-in-value-bool-class-attr — `class=<#r>.data is some
+          // ? …` / `value=<#r>.data is some` (a `<request>`-ref member as a VALUE-
+          // attr expression) arrives with `exprNode` an ESCAPE-HATCH; re-parse it
+          // (shared substrate) and thread `requestIds` so the ref routes to
+          // `_scrml_request_<r>` (§6.7.7) instead of mis-routing to the §36 input-
+          // state registry + mangling the `is` LHS. Mirrors the S312 `if=`-attr
+          // fix; scoped to `<#`-bearing raws so other value attrs are unchanged.
+          const valNode = reparseRequestRefEscapeHatch(binding.exprNode, binding.expr, "<value-attr-request-ref>");
+          const compiled = emitExprField(valNode, binding.expr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys, requestIds });
           const apply = emitValueAttrApply(
             compiled,
             attrName,
