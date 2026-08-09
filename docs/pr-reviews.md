@@ -717,3 +717,4 @@ surface, safe to take only because he is not live** ([[review-floor-is-shared-su
 <!-- @review pr=483 verdict=carve-out by=S335-peter date=2026-08-09 probe=handoffs-dpa-queue-md-deliberation-bank-no-code-path -->
 <!-- @review pr=487 verdict=carve-out by=S335-peter date=2026-08-09 probe=changelog-handoff-deltalog-continuity-wrap-no-code-path -->
 <!-- @review pr=489 verdict=carve-out by=S335-peter date=2026-08-09 probe=self-the-review-floor-drain-PR-docs-pr-reviews-and-known-gaps-md-detection-only-no-code-path -->
+<!-- @review pr=490 verdict=carve-out by=S335-peter date=2026-08-09 probe=self-the-ledger-hygiene-PR-docs-known-gaps-and-pr-reviews-md-ledger-flips-and-filings-no-code-path -->
