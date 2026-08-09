@@ -551,3 +551,119 @@ Both PRs were reviewed by the mandatory PA-side S239 pass BEFORE merge (workflow
 
 <!-- @review pr=476 verdict=finding by=S333-peter date=2026-08-09 probe=three-adversarial-workflow-rounds-drain-everywhere-completeness-caught-silent-partial-fix-twice-8-sites-then-1-value-only-residual-all-fixed-pre-merge -->
 <!-- @review pr=477 verdict=finding by=S333-peter date=2026-08-09 probe=three-adversarial-workflow-rounds-caught-nodetypes-memo-id-collision-plus-bogus-spanfile-plus-depth2-mislocation-all-fixed-and-pinned-pre-merge -->
+
+## S331-bryan — floor drained: 9 OWED → 0
+
+Eight recorded here; **#474 is recorded separately** below after its own adversarial pass.
+
+**Denominator note (the S319 question, re-measured).** Five of the nine were pure
+continuity/maps landings with **no code path to review by construction** — verified against their
+actual file lists, not assumed, because S328 found `#397` mis-carved the other way. Code-bearing in
+this batch: **#469 #470 #473 #474** — four of nine. The all-PR carve-out rate remains a docs-VOLUME
+statistic; the code-bearing rate is the health signal, and it is 0% carved.
+
+### #469 + #470 — FINDING (two HIGH-severity defects, both silent)
+
+Reviewed by emission across every value position, base vs fix, plus an adversarial sweep of adjacent
+shapes. **The pass produced PR #479.** Both PRs are correct for what they enumerated — the five value
+*positions* — and both left two orthogonal axes unenumerated:
+
+- **Tail shape.** `_splitBlockStatements` split only on `;` and newline at depth 0, so a tail
+  FOLLOWING a block-bodied statement (`for (…) { a = 1 } a`) was swallowed into a segment headed by
+  `for`, classified a statement, and never lifted → the value-returning IIFE fell off its end →
+  `undefined`, which is not a scrml value (§42.1.1). **Separator dependence, not position
+  dependence** — the tail lifts the moment a `;` precedes it.
+- **Nested-statement fidelity.** `_emitForStmtWithTilde`'s fallbacks dropped the options argument
+  entirely, so a nested bare `a = 1` emitted as a shadowing `const a = 1` (silent wrong value) and
+  `a = a + 1` as `const a = a + 1` — a runtime TDZ `ReferenceError` that `node --check` accepts.
+
+**The discriminator is arm FORM, not value POSITION** (variant arms parse to `structuredBody` and are
+immune; literal/wildcard arms hit the raw-string segmenter) — so the defect broke **five of five**
+positions, and my own first filing said two of four because my reproducer's arm forms were confounded.
+Corrected in the ledger and routed to Peter.
+
+**Why neither PR's gates could see it, and this is the reusable half:** #470's full-corpus differential
+read `0 of 7296` — *honestly*, and on the wrong axis. No corpus file places a block-bodied statement
+inside a match block arm without a trailing separator, so the inputs that would trip either defect do
+not exist yet. Both conformance cases added by #469/#470 use straight-line arm bodies, so the suite was
+equally blind. **A gap closed by enumerating one dimension reads as closed on all of them.**
+
+### #473 — CLEAN (and it closed the class, not a position)
+
+`new URL(import.meta.url).pathname` yields a `/C:/…` form on Windows that fails after `dirname`/`join`;
+`fileURLToPath` is the correct API on every platform. Probed three ways rather than read: the cited
+precedent is real (`scripts/facts.ts:31` uses exactly that form), and a repo-wide grep for the broken
+form returns **zero remaining sites** — the only hit is the explanatory comment inside the fixed file.
+So this is a class closure, not a per-position patch. No behaviour change on POSIX.
+
+### #467 #468 #472 #475 #478 — CARVE-OUT (verified, not assumed)
+
+File lists checked individually: continuity/changelog/hand-off/delta-log/master-list/known-gaps and the
+`.claude/maps/` refresh. **Zero paths under `compiler/`, `stdlib/`, `conformance/cases/` or `scripts/`.**
+No runtime surface, so the S239 blast-radius question has no subject. `#468`'s maps refresh is a
+generated navigation artifact; its correctness gate is the watermark advance, which the wrap step
+already performs.
+
+<!-- @review pr=467 verdict=carve-out by=S331-bryan date=2026-08-09 probe=file-list-verified-continuity-changelog-handoff-deltalog-masterlist-knowngaps-zero-code-paths -->
+<!-- @review pr=468 verdict=carve-out by=S331-bryan date=2026-08-09 probe=file-list-verified-claude-maps-refresh-plus-knowngaps-generated-nav-artifact-zero-code-paths -->
+<!-- @review pr=469 verdict=finding by=S331-bryan date=2026-08-09 probe=emission-across-all-value-positions-base-vs-fix-found-tail-swallowed-after-block-stmt-yields-undefined-arm-form-not-position-is-the-axis-produced-pr-479 -->
+<!-- @review pr=470 verdict=finding by=S331-bryan date=2026-08-09 probe=emission-plus-adversarial-adjacent-shapes-found-nested-bare-assignment-emits-shadowing-const-silent-wrong-value-and-tdz-refcheck-passes-produced-pr-479 -->
+<!-- @review pr=472 verdict=carve-out by=S331-bryan date=2026-08-09 probe=file-list-verified-continuity-changelog-handoff-masterlist-knowngaps-zero-code-paths -->
+<!-- @review pr=473 verdict=clean by=S331-bryan date=2026-08-09 probe=fileurltopath-correct-api-precedent-facts-ts-31-verified-real-and-repo-wide-grep-for-broken-form-returns-zero-remaining-sites-class-closed -->
+<!-- @review pr=475 verdict=carve-out by=S331-bryan date=2026-08-09 probe=file-list-verified-changelog-handoff-deltalog-zero-code-paths -->
+<!-- @review pr=478 verdict=carve-out by=S331-bryan date=2026-08-09 probe=file-list-verified-continuity-changelog-handoff-deltalog-rotation-prreviews-knowngaps-zero-code-paths -->
+
+## S331-bryan — #474 (the last owed item)
+
+**Verdict: FINDING.** Dispatched as an independent adversarial pass rather than reviewed by eye, because
+`emit-server.ts` is a **text pass over generated output** — the repo's standing bug family. Every claim
+below was PA-verified before being recorded; two were corrected.
+
+The fix is **correct on its named case and not a regression** — every defect found reproduces
+byte-identically on the parent `0beddacc`. What it is, is **incomplete**: it made ONE emitter
+template-literal-aware and left three siblings in the same class corrupting multi-line template content
+with zero diagnostics (`emit-library-shared.ts:692` · `emit-tool.ts:466`, verified by EXECUTING the
+emitted tool bundle · `emitTryStmt`, which corrupts on both boundaries and is the first nesting
+construct an author reaches for). `emitIfStmt` is only *accidentally* safe, which is why an `if` probe
+reads clean.
+
+Its shipped `KNOWN LIMITATION` comment also understates the residual — the real desync trigger is any
+regex containing an odd count of `'`/`"`/`` ` ``, unbalanced braces, or `//`, not just a backtick — and
+the "0 instances in corpus" measurement that justified shipping it **used a predicate that does not
+describe the bug** (`stdlib/compiler/meta-checker.scrml:230` does carry a backtick-bearing regex).
+
+**PA-verified corrections to the reviewer's own report** — recorded because taking an agent at face
+value is the failure mode this floor exists to catch:
+- **F4 confirmed exactly:** the comment's *"filed as a follow-up"* claim was false —
+  `grep -rn "g-server-fn-reindent"` returned **zero** hits until this session filed it.
+- **F6 severity corrected DOWN.** The reviewer called the template-swallow a *silent* build-breaker. It
+  is not silent — the compile exits non-zero with `E-STATE-UNDECLARED`. It is **misattributed**, which is
+  a different and lesser defect. It also did not reproduce on my first two constructions; only on the
+  §40.8 bare-`<program>`-body form. Filed MED with the open question that would make it HIGH, rather
+  than at the reported severity.
+
+Filed: `g-server-fn-reindent-fix-covers-8-of-25-sites-in-its-own-class` (HIGH) ·
+`g-server-fn-reindent-lexer-desync-understated-and-measured-with-the-wrong-predicate` (HIGH) ·
+`g-template-interp-regex-swallows-following-source` (MED).
+
+**The reusable half:** the originating gap was scoped `locus=compiler/src/codegen/emit-server.ts`, and
+the fix stopped at that file. A per-position locus on a compiler-wide class **anchors the search** —
+pa-base §5, and the second instance of it this session.
+
+<!-- @review pr=474 verdict=finding by=S331-bryan date=2026-08-09 probe=independent-adversarial-dispatch-parent-vs-head-differential-on-17-probes-plus-executed-tool-bundle-found-3-sibling-emitters-uncovered-plus-lexer-desync-far-wider-than-shipped-comment-plus-false-followup-filing-claim-pa-verified-and-two-findings-corrected -->
+
+## S331-bryan — my own two merges (the floor binds them too)
+
+- **#479** (`emit-logic §18.5`) — **CLEAN, and the pass is the reason it exists.** The mandatory S239
+  gate ran on the agent's diff BEFORE landing: both defects re-probed by emission on base vs fix; the
+  fallback re-dispatch probed for infinite recursion (terminates, and now emits `a = 1` rather than
+  `const a = 1`); and an adversarial sweep of every adjacent shape the new depth-0 `}` boundary could
+  tear — `if/else`, `do…while`, arrow-function initializer, object literal, chained tail (`d + 1`), two
+  sequential `while` loops — none torn. Conformance 876/876 and the new unit file 23/23 were re-run by
+  me, not taken from the agent's report. One residual found and disclosed rather than hidden
+  (`g-match-block-arm-do-while-tail-not-lifted`, LOW). The differential's `0 of 7328` was recorded WITH
+  its coverage caveat: it proves inertness on the corpus and carries zero evidence the fix works.
+- **#480** (review-floor drain) — **CARVE-OUT.** Single file, `docs/pr-reviews.md`. No code path.
+
+<!-- @review pr=479 verdict=clean by=S331-bryan date=2026-08-09 probe=mandatory-s239-pre-land-emission-base-vs-fix-plus-recursion-probe-plus-adversarial-sweep-ifelse-dowhile-arrow-objlit-chainedtail-two-whiles-none-torn-conformance-876-and-unit-23-rerun-independently-one-residual-disclosed -->
+<!-- @review pr=480 verdict=carve-out by=S331-bryan date=2026-08-09 probe=single-file-docs-pr-reviews-md-no-code-path -->

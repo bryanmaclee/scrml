@@ -7561,6 +7561,148 @@ SSR hide without a ruling turns them red.
 same element emits **two `style` attributes** — invalid HTML, second one dropped by conformant parsers.
 Pre-existing and unrelated to `show=`; surfaced while measuring D1.
 
+### g-match-block-arm-tail-and-nested-assignment-are-separator-dependent — a §18.5 block-arm tail that follows a block-bodied statement with no `;`/newline is swallowed (arm → `undefined`), and a nested bare assignment lowers as a shadowing `const` — `NEW S331-bryan (Q2 probe); HIGH; RESOLVED S331-bryan (fix/s331-block-arm-route-unification)`
+<!-- @gap id=g-match-block-arm-tail-and-nested-assignment-are-separator-dependent sev=HIGH status=resolved locus=compiler/src/codegen/emit-logic.ts:4592(_splitBlockStatements, the depth-0 `}` boundary)+compiler/src/codegen/emit-logic.ts:4196(_emitForStmtWithTilde, the opts-dropping fallbacks)+compiler/src/codegen/emit-logic.ts:4844(emitMatchExprDecl, per-arm declaredNames) prov=spec:§18.5 -->
+
+**RESOLVED S331-bryan.** ⚑ **This entry was FILED UNDER A WRONG DIAGNOSIS AND A WRONG NAME** (`…three-divergent-lowering-routes`). Both are corrected here rather than quietly amended, because the wrong version is the more instructive one.
+
+**What I filed:** three divergent emission routes, each correct where the others are wrong; fix = unify the routes. **What it actually was:** two unrelated single-point defects, neither caused by route multiplicity. The dispatched agent argued against the prescribed shape with measurement and was right.
+
+- **Defect A — separator dependence, not position dependence.** `_splitBlockStatements` split only on `;` and newline at depth 0, so `for (…) { a = 1 } a` stayed **one segment headed by `for`**, was correctly classified a statement, and never lifted; the value-returning IIFE fell off its end → `undefined` (§42.1.1: not a scrml value). **The tail lifts the moment a `;` or newline precedes it** — which is exactly why no corpus file ever tripped it. Fixed by making a block-bodied statement's closing `}` a segment boundary, gated three ways (segment headed by a block-statement keyword · next token is not a continuation keyword `else`/`while`/`catch`/`finally` · next char begins a statement, by whitelist not blacklist).
+- **Defect B — a dropped options argument.** `_emitForStmtWithTilde`'s two fallbacks called `emitForStmt(node)` with `opts` **omitted entirely**, losing `declaredNames`, `boundary`, `serverFnNames`, `asyncRouteMap` and the engine bindings. `declaredNames` was merely the loss that was *visible*: with an absent set the `const-decl`/`tilde-decl` reassignment guard could not see the enclosing `let a`, so a nested bare `a = 1` emitted as a shadowing `const a = 1` (silent wrong value) and `a = a + 1` as `const a = a + 1` (**runtime TDZ `ReferenceError` that `node --check` accepts**). Fixed by re-dispatching through `emitLogicNode` with the tilde context cleared.
+- **Defect C — cross-arm `declaredNames` leak** (surfaced during the fix, folded in): all arms emitted against one shared set, so arm 1's names leaked into arm 2 and turned a sibling's fresh declaration into an assignment to an unbound name — a silent global in a classic script. Fixed with a per-arm set seeded from the enclosing scope.
+
+**⚑ The axis is arm FORM, not value POSITION — my original table was wrong.** Variant arms (`.Idle :>`) parse to `structuredBody` and are immune; literal/wildcard arms (`1 :>`, `_ :>`) hit the raw-string segmenter. My reproducer used variant arms for the return/markup-interp positions and a literal-arm shape for the derived position, so the confound was in the probe and read out as position-dependence. **Verified on base `05787a42`: with literal arms, `return a` occurs zero times — Defect A broke five of five positions, not two of four.** Pinning only the named positions would have missed the axis entirely.
+
+**Verification (PA-independent, not the agent's self-report):** conformance **876/876**; the new unit file 23/23; both defects re-probed by emission on base vs fix; the fallback re-dispatch probed for infinite recursion (terminates, emits correctly); and an adversarial sweep of adjacent shapes — `if/else`, `do…while`, arrow-function initializer, object literal, chained tail (`d + 1`), two sequential `while` loops — none torn, all correct. Full-corpus differential **0 of 7328**, which establishes the change is *inert on the existing corpus* and carries **zero evidence the fixes work**, because the corpus contains no arm with a block-bodied statement lacking a trailing separator. That is precisely how #470 shipped both defects past a clean `0 of 7296`.
+
+**Residual, pinned not fixed:** `do { … } while (c)` with no separator before the tail still voids the arm — no depth-0 `}` terminates a do-while, and `while` after `}` is textually ambiguous with a following loop. Fails toward the pre-existing void, never toward a wrong value. A separator is a verified workaround. See `g-match-block-arm-do-while-tail-not-lifted` below. A parenthesized tail (`{ if (c) { } (a + b) }`) is excluded from the boundary whitelist for the same fail-closed reason.
+
+**Original diagnosis, preserved because the correction is the lesson:**
+
+**PA-REPRODUCED S331 by emission at `b4fb2f1f`; loci are PA-located-verify (derived from emitted output
+across four value positions, not traced through the code).** #470 unified the §18.5 tail *classifier*
+(`_blockTailIsValueExpr`) but not the *emission route*. Three routes remain, and the same source
+compiles to different meanings depending on which value position it sits in:
+
+| position | route | nested assignment | tail after a block stmt |
+|---|---|---|---|
+| `return match …` | raw-string | ✅ `a = 1` | ✅ `return a` |
+| `${ match … }` markup-interp | raw-string | ✅ `a = 1` | ✅ `return a` |
+| `const <d> = match …` derived | derived | ✅ `a = 1` | ❌ `a;` → **`undefined`** |
+| `const r = match …` local decl | tilde / statement-emitter | ❌ **`const a = 1`** | ✅ `_tilde = a` |
+
+**Defect A — derived position drops a tail that follows a block-bodied statement.** Arm body
+`{ let a = 0; for (const i of @items) { a = 1 } a }` emits `a;` with no `return`; the value-returning
+IIFE falls off the end and the cell holds `undefined`, which **does not exist in scrml** (§42.1.1, S89
+ABSOLUTE). Straight-line bodies (`{ const t = 1; t }`, `{ let a = 0; a = a + 1; a }`) lift correctly, so
+the trigger is specifically *a block-bodied statement before the tail*.
+
+**Defect B — the local-decl/tilde route rewrites a bare assignment inside a nested block into a `const`
+declaration.** Source `for (const i of @items) { a = 1 }` emits `for (…) { const a = 1; }` — a new
+block-scoped binding shadowing the outer `a`, so the loop no longer mutates it and the lifted tail reads
+the pre-loop value. **Two outcomes, both bad:**
+- `{ … for (…) { a = 1 } a }` → **silent wrong value** (tail reads `0`, not `1`).
+- `{ … for (…) { a = a + 1 } a }` → emits `const a = a + 1` → **runtime TDZ `ReferenceError`**, and
+  `node --check` on the bundle **PASSES** (the "emitted ≠ runs" trap: S265 theme-switch, S268
+  value-attr, S278 U3).
+
+Scoped to match block arms: the identical statements in a plain `function` body emit correctly
+(`a = 1;`), so this is the structuredBody route's per-statement `emitLogicNode` path, not general logic
+codegen. Consistent with the PRIMER §13.7 B16 note that scrml surfaces `name = expr` as a decl-shaped
+node with no separate assignment-statement kind — the raw-string routes preserve source text and dodge
+it; the statement-emitter route does not.
+
+**Severity HIGH** on Defect B (`semantics-changed` per pa-base §8 — the class the gates are weakest
+against — in the most common of the four positions), carrying Defect A with it since the root fix is
+shared. Not escalated above HIGH per the S319 four-tier ruling; the lever is sequencing, and it is
+sequenced now.
+
+**Why the gates missed both, and this is the durable half.** #470's full-corpus emit-differential read
+**0 of 7296 artifacts changed** — honestly, and on the wrong axis: no corpus file places a block-bodied
+statement inside a match block arm, so the inputs that would trip either defect do not exist yet
+(pa-base §8, the coverage-removal/blind-spot member). Both conformance cases added by #469/#470 use
+straight-line arm bodies. `g-match-block-arm-value-lift-covers-one-of-five-paths` is correctly RESOLVED
+for the five *positions*; *tail shape* and *nested-statement fidelity* are two further orthogonal axes
+nobody enumerated. **Root fix = one emission route, completing what #470 started on the predicate.**
+**Blocks the derived-position half of the if-value fork (Q2)** — see user-voice S331.
+
+### g-server-fn-reindent-fix-covers-8-of-25-sites-in-its-own-class — #474 made ONE emitter template-literal-aware; three sibling emitters in the same class still corrupt multi-line template content, all reachable with zero diagnostics — `NEW S331-bryan (adversarial review of #474); HIGH`
+<!-- @gap id=g-server-fn-reindent-fix-covers-8-of-25-sites-in-its-own-class sev=HIGH status=open locus=compiler/src/codegen/emit-library-shared.ts:692(emitLibraryFnMember)+compiler/src/codegen/emit-tool.ts:466+compiler/src/codegen/emit-control-flow.ts:1073(emitTryStmt)+compiler/src/codegen/emit-logic.ts:3410 prov=spec:§48 -->
+
+**Found by the S239 pass on #474. NOT a regression** — every shape below reproduces byte-identically on the parent `0beddacc`, so this is an incomplete fix, not damage. #474 routed **8 sites, all inside `emit-server.ts`**; the identical blind split-and-indent pattern remains at sibling emitters. Three are reachable today, each verified end-to-end with **0 errors and 0 warnings**:
+
+- **`emit-library-shared.ts:692`** — a library/model `.scrml`; an exported `function` with a multi-line template gets every continuation line indented.
+- **`emit-tool.ts:466`** — §64 `<program kind="tool">`. Verified **by executing the emitted bundle**, not by grep: the injected whitespace ships to the terminal.
+- **`emitTryStmt`** (`emit-control-flow.ts:1073` / `emit-logic.ts:3410`) — `!{ } catch`, which is the *first* nesting construct an author reaches for, and it corrupts on **both** the server and client boundary.
+
+`emitIfStmt` (`emit-control-flow.ts:501`) is only **accidentally** safe — it pushes the whole multi-line string with one prefix instead of splitting. That accident is why an `if` probe reads clean and it is not a guarantee.
+
+**Two secondary defects in the same landing, recorded here rather than split out:**
+- **The test oracle shares the fix's model of the bug.** `g-server-fn-reindent-template-literal.test.js` has two cases, both a top-level statement in a bare `server fn`; it **passes unchanged with every defect above live**. Case 2's name claims it covers a nested `${\`…\`}` interpolation, but it only asserts the trivially-correct inner literal and never the outer one that carries the interpolation — and both extraction regexes are `` /const (inner|body) = (`[^`]*`)/ ``, structurally unable to match a template containing a nested backtick, i.e. exactly the shape the test claims to cover.
+- **A false provenance claim.** The source comment states the complete fix is *"filed as a follow-up."* **PA-verified: `grep -rn "g-server-fn-reindent" --include='*.md' --include='*.json'` returns ZERO hits.** No filing existed anywhere until this entry. The residual was documented only inside the comment describing it.
+
+**The locus is what caused the half-fix.** The originating gap was scoped `locus=compiler/src/codegen/emit-server.ts`, so the fix stopped at that file — a per-position locus on a compiler-wide class. Recorded as an instance of pa-base §5's warning that a searched locus anchors the search.
+
+**Fix direction:** hoist `indentServerFnBodyLines` into a shared codegen util and route the residual sites — or, better and as the PR's own comment recommends, tag template-raw vs layout **at emit time** instead of re-lexing generated text.
+
+### g-server-fn-reindent-lexer-desync-understated-and-measured-with-the-wrong-predicate — the shipped KNOWN-LIMITATION comment names a trigger far narrower than the real one, and its zero-instance corpus measurement used a predicate that does not describe the bug — `NEW S331-bryan (adversarial review of #474); HIGH`
+<!-- @gap id=g-server-fn-reindent-lexer-desync-understated-and-measured-with-the-wrong-predicate sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts(indentServerFnBodyLines, the regex-vs-division lexer state) prov=spec:§48 -->
+
+**Found by the S239 pass on #474.** The shipped comment describes the blind spot as *"a REGEX LITERAL containing a backtick"*, *"NOT reachable in the corpus (0 instances)"*, requiring *"pairing a backtick-bearing regex with a multi-line template literal."* **All three claims are wrong or too narrow.**
+
+The real desync trigger is any regex literal containing an **odd count of `'`, `"` or `` ` ``**, an **unbalanced `{`/`}`**, or a **`//` sequence** (which self-opens a phantom line comment). Reproduced on a mundane sanitizer — `name.replace(/['"]/g, "")` beside a multi-line template inside an `if` block: the lone `'` opens a phantom string state that never closes, the template's backtick is swallowed, and **the pass silently degenerates to the exact pre-fix blind indent** (HEAD output byte-identical to the parent). No diagnostic; `node --check` clean.
+
+**And the corpus measurement that justified shipping the limitation used the wrong predicate.** `stdlib/compiler/meta-checker.scrml:230` **does** carry a backtick-bearing regex (`` .replace(/`[^`]*`/g, "") ``). It self-heals because its two backticks balance — but the "0 instances" figure was taken against a predicate that does not describe the defect, so the zero was never evidence of safety. Same class as pa-base §8's *a fix built before the problem is measured is a fix whose value is unmeasured*.
+
+**Bounded, and the bound is worth recording:** the desync is per-emitted-chunk — lexer state resets between statements, so a regex in statement N cannot poison statement N+1. The regex and the template must land in the same chunk (same statement, or the same nested block emitted as one string). That narrows it to one `if` block away, not to zero.
+
+**Fix direction:** the `/`-is-regex-vs-division ambiguity needs expression-position tracking to resolve properly; the cheaper and sound fix is the structural one above — never re-lex generated text.
+
+### g-template-interp-regex-swallows-following-source — a `${}` interpolation containing a regex with a quote makes the tokenizer run past the template's end and splice raw scrml into the emitted JS — `NEW S331-bryan (adversarial review of #474, out of its scope); MED`
+<!-- @gap id=g-template-interp-regex-swallows-following-source sev=MED status=open locus=searched:emit-server.ts,emit-logic.ts,indentServerFnBodyLines — no locus found; the defect precedes codegen (a codegen indent pass cannot emit `<msg> = ""`), so it is parse/tokenize-stage prov=rationale:surfaced-adjacent-to-the-474-lexer-desync-but-reproduces-independently -->
+
+**PA-REPRODUCED S331 on the reviewer's exact source; PRE-EXISTING (reproduces byte-identically on `0beddacc`) and unrelated to #474's change.** A `server fn` whose body returns a template with an interpolated regex containing a quote —
+
+```
+<program>
+  server fn mail(name: string) -> string {
+    return `Hi ${ name.replace(/['"]/g, "") }!`
+  }
+  <msg> = ""
+  ...
+</program>
+```
+
+— emits a `.server.js` that **fails `node --check`** with the following source spliced raw into the template (verified: `<msg> = ""` appears at line 40 of the emitted artifact).
+
+**⚑ Severity corrected DOWN from the reviewer's report, which called it a silent build-breaker.** It is **not silent**: the compile exits non-zero with `E-STATE-UNDECLARED`, because the swallowed text contained the `<msg>` declaration that a later `@msg` read needs. So the failure is loud — but **misattributed**: the diagnostic blames the `@msg` read when the cause is the tokenizer swallow, which is `[[feedback_dont_soft_classify_bugs]]`'s sibling (a diagnostic that does not name its root cause is itself a diagnostic bug).
+
+**Open question, named rather than asserted:** whether a variant exists where nothing downstream references the swallowed text, in which case the swallow WOULD be silent. Not probed. That determines whether MED is right or whether this is a HIGH.
+
+**Trigger boundary (measured):** requires the §40.8 bare-`<program>`-body form. The same `server fn` wrapped in an explicit `${…}` logic block compiles clean with no leak — PA-verified twice, both orderings of the sibling declaration.
+
+### g-match-block-arm-do-while-tail-not-lifted — a §18.5 block-arm tail following a separator-less `do…while` is still swallowed; the arm voids — `NEW S331-bryan (adversarial pass on the separator fix); LOW`
+<!-- @gap id=g-match-block-arm-do-while-tail-not-lifted sev=LOW status=open locus=compiler/src/codegen/emit-logic.ts:4530(_BRACE_CONTINUATION_RE, the `while` member) prov=spec:§18.5 -->
+
+**Disclosed residual of the S331 separator fix, PA-verified by emission.** The depth-0 `}` boundary
+cannot fire for a `do { … } while (c)`: the `}` is followed by `while`, which the continuation guard
+must treat as *part of the same statement* — otherwise `do`/`while` would be torn into two invalid
+halves. But `} while` is textually ambiguous between a do-while's tail and a following `while` loop, so
+the guard is deliberately conservative. Consequence: `{ let b = 0; do { b = b + 1 } while (b < 3) b }`
+swallows the tail and the arm yields §18.5 void.
+
+**Fails toward the pre-existing behaviour (void), never toward a wrong value** — strictly better than
+the Defect-A class it descends from, and unchanged from before the fix, so it is a residual and not a
+regression. **Workaround verified:** a `;` or newline before the tail lifts it correctly
+(`do { … } while (b < 3)` ⏎ `b` emits `_scrml_tilde_N = b`). Pinned in
+`compiler/tests/unit/match-block-arm-tail-after-block-statement.test.js`.
+
+Same fail-closed reasoning excludes a parenthesized tail (`{ if (c) { } (a + b) }`) from the boundary
+whitelist: admitting `(` would risk splitting `{ … })`, so an expression that merely continues off the
+brace can never be torn. Both are conscious trades, recorded so a later reader sees a decision rather
+than an oversight.
+
 ### g-match-block-arm-value-lift-covers-one-of-five-paths — #447's block-arm tail lift reaches only the `emitMatchExprDecl` path; four other value positions still drop the tail — `NEW S328-bryan (review-floor S239 pass on #447); MED; RESOLVED S330-peter (feat/s330-match-block-arm-value-lift)`
 <!-- @gap id=g-match-block-arm-value-lift-covers-one-of-five-paths sev=MED status=resolved locus=compiler/src/codegen/emit-control-flow.ts:2315+:2264(emitMatchExpr, the untouched sibling)+compiler/src/codegen/emit-logic.ts:4595(the §18.19 multi-scrutinee delegation) prov=spec:§18.5 -->
 
