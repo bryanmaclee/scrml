@@ -551,3 +551,64 @@ Both PRs were reviewed by the mandatory PA-side S239 pass BEFORE merge (workflow
 
 <!-- @review pr=476 verdict=finding by=S333-peter date=2026-08-09 probe=three-adversarial-workflow-rounds-drain-everywhere-completeness-caught-silent-partial-fix-twice-8-sites-then-1-value-only-residual-all-fixed-pre-merge -->
 <!-- @review pr=477 verdict=finding by=S333-peter date=2026-08-09 probe=three-adversarial-workflow-rounds-caught-nodetypes-memo-id-collision-plus-bogus-spanfile-plus-depth2-mislocation-all-fixed-and-pinned-pre-merge -->
+
+## S331-bryan — floor drained: 9 OWED → 0
+
+Eight recorded here; **#474 is recorded separately** below after its own adversarial pass.
+
+**Denominator note (the S319 question, re-measured).** Five of the nine were pure
+continuity/maps landings with **no code path to review by construction** — verified against their
+actual file lists, not assumed, because S328 found `#397` mis-carved the other way. Code-bearing in
+this batch: **#469 #470 #473 #474** — four of nine. The all-PR carve-out rate remains a docs-VOLUME
+statistic; the code-bearing rate is the health signal, and it is 0% carved.
+
+### #469 + #470 — FINDING (two HIGH-severity defects, both silent)
+
+Reviewed by emission across every value position, base vs fix, plus an adversarial sweep of adjacent
+shapes. **The pass produced PR #479.** Both PRs are correct for what they enumerated — the five value
+*positions* — and both left two orthogonal axes unenumerated:
+
+- **Tail shape.** `_splitBlockStatements` split only on `;` and newline at depth 0, so a tail
+  FOLLOWING a block-bodied statement (`for (…) { a = 1 } a`) was swallowed into a segment headed by
+  `for`, classified a statement, and never lifted → the value-returning IIFE fell off its end →
+  `undefined`, which is not a scrml value (§42.1.1). **Separator dependence, not position
+  dependence** — the tail lifts the moment a `;` precedes it.
+- **Nested-statement fidelity.** `_emitForStmtWithTilde`'s fallbacks dropped the options argument
+  entirely, so a nested bare `a = 1` emitted as a shadowing `const a = 1` (silent wrong value) and
+  `a = a + 1` as `const a = a + 1` — a runtime TDZ `ReferenceError` that `node --check` accepts.
+
+**The discriminator is arm FORM, not value POSITION** (variant arms parse to `structuredBody` and are
+immune; literal/wildcard arms hit the raw-string segmenter) — so the defect broke **five of five**
+positions, and my own first filing said two of four because my reproducer's arm forms were confounded.
+Corrected in the ledger and routed to Peter.
+
+**Why neither PR's gates could see it, and this is the reusable half:** #470's full-corpus differential
+read `0 of 7296` — *honestly*, and on the wrong axis. No corpus file places a block-bodied statement
+inside a match block arm without a trailing separator, so the inputs that would trip either defect do
+not exist yet. Both conformance cases added by #469/#470 use straight-line arm bodies, so the suite was
+equally blind. **A gap closed by enumerating one dimension reads as closed on all of them.**
+
+### #473 — CLEAN (and it closed the class, not a position)
+
+`new URL(import.meta.url).pathname` yields a `/C:/…` form on Windows that fails after `dirname`/`join`;
+`fileURLToPath` is the correct API on every platform. Probed three ways rather than read: the cited
+precedent is real (`scripts/facts.ts:31` uses exactly that form), and a repo-wide grep for the broken
+form returns **zero remaining sites** — the only hit is the explanatory comment inside the fixed file.
+So this is a class closure, not a per-position patch. No behaviour change on POSIX.
+
+### #467 #468 #472 #475 #478 — CARVE-OUT (verified, not assumed)
+
+File lists checked individually: continuity/changelog/hand-off/delta-log/master-list/known-gaps and the
+`.claude/maps/` refresh. **Zero paths under `compiler/`, `stdlib/`, `conformance/cases/` or `scripts/`.**
+No runtime surface, so the S239 blast-radius question has no subject. `#468`'s maps refresh is a
+generated navigation artifact; its correctness gate is the watermark advance, which the wrap step
+already performs.
+
+<!-- @review pr=467 verdict=carve-out by=S331-bryan date=2026-08-09 probe=file-list-verified-continuity-changelog-handoff-deltalog-masterlist-knowngaps-zero-code-paths -->
+<!-- @review pr=468 verdict=carve-out by=S331-bryan date=2026-08-09 probe=file-list-verified-claude-maps-refresh-plus-knowngaps-generated-nav-artifact-zero-code-paths -->
+<!-- @review pr=469 verdict=finding by=S331-bryan date=2026-08-09 probe=emission-across-all-value-positions-base-vs-fix-found-tail-swallowed-after-block-stmt-yields-undefined-arm-form-not-position-is-the-axis-produced-pr-479 -->
+<!-- @review pr=470 verdict=finding by=S331-bryan date=2026-08-09 probe=emission-plus-adversarial-adjacent-shapes-found-nested-bare-assignment-emits-shadowing-const-silent-wrong-value-and-tdz-refcheck-passes-produced-pr-479 -->
+<!-- @review pr=472 verdict=carve-out by=S331-bryan date=2026-08-09 probe=file-list-verified-continuity-changelog-handoff-masterlist-knowngaps-zero-code-paths -->
+<!-- @review pr=473 verdict=clean by=S331-bryan date=2026-08-09 probe=fileurltopath-correct-api-precedent-facts-ts-31-verified-real-and-repo-wide-grep-for-broken-form-returns-zero-remaining-sites-class-closed -->
+<!-- @review pr=475 verdict=carve-out by=S331-bryan date=2026-08-09 probe=file-list-verified-changelog-handoff-deltalog-zero-code-paths -->
+<!-- @review pr=478 verdict=carve-out by=S331-bryan date=2026-08-09 probe=file-list-verified-continuity-changelog-handoff-deltalog-rotation-prreviews-knowngaps-zero-code-paths -->
