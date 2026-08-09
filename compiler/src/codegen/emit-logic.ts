@@ -3289,8 +3289,29 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
 
         // §44.3: .prepare() is removed.
         if (method === "prepare") {
-          // Emit a runtime-throwing IIFE so the JS still parses; CG-level
-          // E-SQL-006 emission is handled in rewriteSqlRefs (inline path).
+          // Push the mandated COMPILE diagnostic (E-SQL-006 — SPEC §34 / §44.3,
+          // "emitted at compiler/src/codegen") into the dedicated narrow
+          // `preparedStmtErrors` sink, an EXACT mirror of the `foreignCrossingErrors`
+          // precedent in `case "foreign"` above. The structured server-fn emit path
+          // (emit-server / emit-library / emit-tool) deliberately does NOT wire the
+          // broad `opts.errors` sink (threading it would surface OTHER arms'
+          // previously-swallowed errors, e.g. E-CG-003), so the caller drains this
+          // narrow sink into the live error stream AFTER the body emits. The prior
+          // comment here claimed rewriteSqlRefs (the TEXT/regex path) owned this
+          // emission — but a real top-level server `function` body lowers through
+          // THIS structured path, so with no sink the SHALL-mandated compile
+          // diagnostic never reached the developer (clean exit 0, runtime-only IIFE).
+          const sink = (opts as any).preparedStmtErrors as CGError[] | undefined;
+          if (sink) {
+            sink.push(new CGError(
+              "E-SQL-006",
+              `E-SQL-006: \`.prepare()\` is removed in Bun.SQL — use bare \`?{...}\` or \`.all()\`/\`.get()\`/\`.run()\` (§44.3). Bun.SQL caches prepared statements internally.`,
+              (node as any).span ?? { start: 0, end: 0 },
+            ));
+          }
+          // STILL emit the runtime-throwing IIFE (defense-in-depth — PINNED by
+          // sql-params / sql-write-ops §5): the JS parses and any runtime execution
+          // surfaces the issue immediately even when a caller drained no sink.
           return `(()=>{throw new Error(${JSON.stringify("E-SQL-006: .prepare() is removed in Bun.SQL (§44.3) — use .all()/.get()/.run() or bare ?{}")})})();`;
         }
 

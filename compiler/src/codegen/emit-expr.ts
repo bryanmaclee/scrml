@@ -757,7 +757,7 @@ export function emitExpr(node: ExprNode, ctx: EmitExprContext): string {
  */
 export function emitExprField(exprNode: ExprNode | null | undefined, fallbackStr: string, ctx: EmitExprContext): string {
   if (exprNode) return emitExpr(exprNode, ctx);
-  if (ctx.mode === "server") return rewriteServerExpr(fallbackStr);
+  if (ctx.mode === "server") return rewriteServerExpr(fallbackStr, undefined, ctx.errors);
   // g-synth-read-in-statement-bodied-on-mount-not-collapsed (S299, #262 residual)
   // — collapse §55 synth-surface reads in the RAW-STRING statement fallback to the
   // SAME dotted synth cell the AST path (emitMember) emits, BEFORE the generic
@@ -3725,7 +3725,7 @@ function emitMatchExpr(node: MatchExpr, ctx: EmitExprContext): string {
     const subject = emitExpr(node.subject, ctx);
     const arms = node.rawArms.join(" ");
     const reconstructed = `match ${subject} { ${arms} }`;
-    return rewriteServerExpr(reconstructed, ctx.dbVar);
+    return rewriteServerExpr(reconstructed, ctx.dbVar, ctx.errors);
   }
 
   // The structured emitter uses `emitExprField(headerExpr, header, _matchCtx)`
@@ -3825,8 +3825,8 @@ function emitEscapeHatch(node: EscapeHatchExpr, ctx: EmitExprContext): string {
     node.nativeKind === "FunctionExpression";
   if (ctx.mode === "server") {
     return isArrowOrFn
-      ? rewriteServerExprArrowBody(node.raw, ctx.dbVar)
-      : rewriteServerExpr(node.raw, ctx.dbVar);
+      ? rewriteServerExprArrowBody(node.raw, ctx.dbVar, ctx.errors)
+      : rewriteServerExpr(node.raw, ctx.dbVar, ctx.errors);
   }
   // g-synth-read-in-statement-bodied-on-mount-not-collapsed (S299, #262 residual)
   // — the ACTUAL locus. A STATEMENT-bodied `on mount { if (@f.isValid) {…} }`

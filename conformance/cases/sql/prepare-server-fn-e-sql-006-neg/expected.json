@@ -1,0 +1,11 @@
+{
+  "id": "sql-prepare-server-fn-e-sql-006",
+  "description": "§44.3 — a `.prepare()` on a `?{}` SQL result inside a top-level server `function` (route-inferred handler, called from markup) SHALL be compile error E-SQL-006. This pins the STRUCTURED AST lowering path (emit-logic `case \"sql\"`), distinct from the TEXT/regex path (rewriteSqlRefs): a real server-function body lowers through the structured emitter, so its `.prepare()` diagnostic must escape the swallowed server-fn body via the dedicated narrow `preparedStmtErrors` sink drained by every server-fn-body emit caller. Before the fix this compiled clean (exit 0) and emitted only a runtime-throwing IIFE.",
+  "language-version": "1.0",
+  "spec": "§44.3",
+  "source-test": "compiler/src/codegen/emit-logic.ts (E-SQL-006 push site: `case \"sql\"` method===\"prepare\")",
+  "rationale": "SPEC §34 catalogues E-SQL-006 as an Error emitted at compiler/src/codegen, and §44.3 mandates `.prepare()` on a `?{}` result be a compile error. The structured emitter pushes E-SQL-006 into `preparedStmtErrors` and still emits the runtime IIFE (defense-in-depth); the caller drains the sink into the live error stream after the body emits.",
+  "expect": {
+    "codes": ["E-SQL-006"]
+  }
+}

@@ -1,0 +1,14 @@
+<program db="sqlite:./app.db">
+  <db src="sqlite:./app.db" tables="msgs">
+    ${ ?{`CREATE TABLE IF NOT EXISTS msgs (id INTEGER PRIMARY KEY, body TEXT)`}.run() }
+    <channel name="chat" onserver:message=handleMessage(msg)>
+      <log> = []
+      ${
+        function handleMessage(msg) {
+          @log = ?{`SELECT body FROM msgs`}.prepare()
+        }
+      }
+    </channel>
+    <ul>${ for (let l of @log) { lift <li>${l}</li> } }</ul>
+  </db>
+</program>

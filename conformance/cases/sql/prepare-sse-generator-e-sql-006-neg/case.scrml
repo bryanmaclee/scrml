@@ -1,0 +1,13 @@
+<program db="sqlite:./app.db">
+<db src="sqlite:./app.db" tables="ticks">
+  ${
+    ?{`CREATE TABLE IF NOT EXISTS ticks (id INTEGER PRIMARY KEY, n INTEGER)`}.run()
+    server function* tick() {
+        yield ?{`SELECT n FROM ticks`}.prepare()
+    }
+    <status> = 0
+    @status = tick()
+  }
+  <p id="n">n: ${@status}</p>
+</db>
+</program>

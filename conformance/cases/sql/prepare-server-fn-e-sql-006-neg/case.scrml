@@ -1,0 +1,9 @@
+${
+    <items> = []
+    function loadUsers() {
+        return ?{`SELECT username FROM users`}.prepare()
+    }
+}
+<program db="./app.db">
+    <button id="load" onclick=@items = loadUsers()>Load</>
+</program>

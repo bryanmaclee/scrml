@@ -2728,7 +2728,14 @@ export function compileScrml(options = {}) {
         if (target.serverJs) continue; // already has server content — fine.
         const targetAst = astByAbsSource.get(targetAbs);
         if (!targetAst) continue; // no AST for the target (shouldn't happen).
-        const valueOnly = generateValueOnlyServerJs(targetAst);
+        // E-SQL-006 (§44.3, g-esql006) — the value-only emit can surface a compile
+        // diagnostic (a `.prepare()` on a `?{}` in an EXPORTED async fn body that the
+        // module-value-export path emits). Thread a local sink through and fold it
+        // into the compile's error stream via collectErrors (same conversion the main
+        // CG errors take), so the diagnostic is not silently discarded on this pass.
+        const valueOnlyErrors = [];
+        const valueOnly = generateValueOnlyServerJs(targetAst, valueOnlyErrors);
+        if (valueOnlyErrors.length > 0) collectErrors("CG", valueOnlyErrors, targetAbs);
         emittedFor.add(targetAbs);
         if (!valueOnly) continue; // no server-importable value export → leave dangling (warning fires).
         // Attach the minimal value-only .server.js to the target output so the

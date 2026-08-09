@@ -1,0 +1,11 @@
+{
+  "id": "sql-prepare-ws-onserver-e-sql-006",
+  "description": "§44.3 — a `.prepare()` on a `?{}` result inside a channel `onserver:*` WebSocket handler body SHALL be compile error E-SQL-006. Pins the emit-server WS handler body-emit path (`_wsFnOpts`), a distinct opts object from the HTTP route handlers; before the fix it wired no `.prepare()` sink, silently dropping the diagnostic on the WS `onserver:*` sub-path while the runtime IIFE still emitted in `function handleMessage(...)`.",
+  "language-version": "1.0",
+  "spec": "§44.3",
+  "source-test": "compiler/src/codegen/emit-server.ts (_wsFnOpts; shared _sqlPrepareErrors sink)",
+  "rationale": "The channel `onserver:*` handler is emitted as a plain callable server function; its body lowers through emitLogicNode with `_wsFnOpts`, which now threads the function-scoped `_sqlPrepareErrors` sink (drained deduped at the tail), so a `.prepare()` in a realtime handler surfaces E-SQL-006.",
+  "expect": {
+    "codes": ["E-SQL-006"]
+  }
+}

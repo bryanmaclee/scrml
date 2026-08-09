@@ -1,0 +1,15 @@
+<program db="sqlite:./app.db">
+<db src="sqlite:./app.db" tables="users">
+  ${
+    ?{`CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT)`}.run()
+    <items> = []
+    <flag> = false
+    function load() {
+        @flag = true
+        @items = ?{`SELECT username FROM users`}.prepare()
+    }
+  }
+  <button id="load" onclick=load()>Load</button>
+  <ul><each in=@items key=@.id><li : @.username></each></ul>
+</db>
+</program>

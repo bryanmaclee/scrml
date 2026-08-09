@@ -1,0 +1,11 @@
+{
+  "id": "sql-prepare-cps-return-e-sql-006",
+  "description": "§44.3 — a `.prepare()` whose result is the CPS-RETURN continuation of a server handler (`@cell = ?{...}.prepare()` assigned to the returnVar of a CPS-split route) SHALL be compile error E-SQL-006. This pins the emit-server CPS-return sub-branch (`stmt.sqlNode` → emitLogicNode), a distinct opts object from the main handler-body loop; before the fix that inline opts omitted the `.prepare()` sink, so the diagnostic was silently dropped on this sub-path (a silent partial fix) while the runtime IIFE `const _scrml_cps_return = (()=>{throw ...})()` still emitted.",
+  "language-version": "1.0",
+  "spec": "§44.3",
+  "source-test": "compiler/src/codegen/emit-server.ts (CPS-return sqlNode emit; shared _sqlPrepareErrors sink)",
+  "rationale": "The CPS-return sub-branch lowers the continuation `?{...}` via emitLogicNode with its own opts; it now threads the function-scoped `_sqlPrepareErrors` sink (drained deduped at the tail), so emit-logic case \"sql\" (method===prepare) surfaces E-SQL-006 here too.",
+  "expect": {
+    "codes": ["E-SQL-006"]
+  }
+}

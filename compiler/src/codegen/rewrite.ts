@@ -2777,8 +2777,8 @@ export function rewriteExprArrowBody(expr: string, errors?: any[]): string {
 }
 
 /** Server-side variant of rewriteExprArrowBody. */
-export function rewriteServerExprArrowBody(expr: string, dbVar?: string): string {
-  return runPasses(expr, serverPasses, { dbVar, skipPresenceGuard: true });
+export function rewriteServerExprArrowBody(expr: string, dbVar?: string, errors?: any[]): string {
+  return runPasses(expr, serverPasses, { dbVar, errors, skipPresenceGuard: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -2891,8 +2891,8 @@ export function rewriteServerReactiveRefs(expr: string): string {
  * - rewriteServerReactiveRefs runs BEFORE rewriteSqlRefs (opposite of client ordering)
  * - dbVar is threaded via context for the SQL pass
  */
-export function rewriteServerExpr(expr: string, dbVar: string = "_scrml_sql"): string {
-  return runPasses(expr, serverPasses, { dbVar });
+export function rewriteServerExpr(expr: string, dbVar: string = "_scrml_sql", errors?: any[]): string {
+  return runPasses(expr, serverPasses, { dbVar, errors });
 }
 
 /**
