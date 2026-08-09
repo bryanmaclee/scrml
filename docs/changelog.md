@@ -2,7 +2,15 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
-## S333 — 2026-08-09 (peter · Windows) — MED whittle: two diagnostic-completeness landings, six S239-caught bugs
+## S334 — 2026-08-09 (peter · Windows) — a build-integrity codegen fix, a ledger-integrity tooling fix, and a 66-gap census
+
+**2 PRs merged** (#484 #485); main `05787a42` → `ef23a4d0`, coherence 0/0, cloud gate GREEN incl. Windows. Conformance **877/877**. Also pushed bryan's held if-value build to origin (unblocking his §17.6 ruling) and routed a reset-semantics gap to him.
+
+- **#484** — a `<#request>.data is some` presence check inside a value/boolean/class attribute (`disabled=`, `value=`, `class=`) now routes to the request object instead of emitting malformed JS that aborted the build (or silently dropped the attribute). The fix mirrors the landed `if=`/`show=` pattern (S312) across every attribute-value lowering site via a shared helper, scoped so registered requests route while typo'd/input-state refs stay safe. Three adversarial review rounds caught a drop→runtime-crash and a regression of the existing `if=` input-state behaviour before it was correct. Two same-class siblings (looped-element attrs, mixed-text template attrs) filed as follow-ons.
+- **#485** — three silent-integrity holes in the gap-ledger tooling (`scripts/state.ts`): duplicate `@gap` markers with one id no longer double-count (and a conflicting-status pair now fails loud); the maps-staleness probe guards its commit count with an ancestry check; and a new detector surfaces headings whose status has drifted from their marker (it immediately found 13 real drifts, reported WARN-only). It also fixed a live parser fragility — a marker whose text contained a literal `<msg> = ""` was truncating the parser, which had been throwing on main *and* undercounting the headline ledger table; the corrected counts are HIGH 25 / MED 125 / LOW 55.
+- **Census:** 66 open MED gaps were repro-gated against the current build — ~a quarter are already-fixed dead weight, and the genuinely groupable "one-fix-many" clusters were mapped (with the biggest adopter-value one identified against the real assetManagement app: SSR prerender of `<each>` lists).
+
+
 
 **2 PRs merged** (#476 #477); main `79fdfd07` → `41a6ea8b`, coherence 0/0, cloud gate GREEN on both (Windows CI included). Conformance **874/874** (+6 new pins). Each fix went through **three adversarial S239 rounds** that caught real correctness bugs the implementation agents' green self-reports missed — validating adversarial-review-before-landing six times over. The two landed gaps were found under a shortlist that also held two language rulings (mis-filed as compute) and two already-fixed stale-opens; a repro+SPEC gate filtered all four before dispatch.
 

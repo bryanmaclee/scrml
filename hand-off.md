@@ -1,35 +1,41 @@
 <!-- ============================================================= -->
-<!-- hand-off.md ROTATED at S333 (peter/Windows) 2026-08-09.        -->
-<!-- Prior accumulated hand-off (S277–S332, 389 KB, over the        -->
-<!-- 256 KB single-read cap) archived → handOffs/hand-off-s332.md.  -->
-<!-- This is a FRESH hand-off; older wraps live in handOffs/.       -->
+<!-- hand-off.md — live session state. Prior wraps: handOffs/hand-off-s332.md -->
+<!-- (S277–S332) + handOffs/hand-off-s276.md etc. Mechanical stream: delta-log. -->
 <!-- ============================================================= -->
 
-# scrml — Session 333 (peter · Windows) — WRAP
+# scrml — Session 334 (peter · Windows) — WRAP
 
-**Date:** 2026-08-09. `/boot` Profile A FULL. **2 MEDs landed** (#476 #477). main `79fdfd07` → **`41a6ea8b`**, coherence 0/0 both repos. Conformance **874/874**. Both cloud gates GREEN incl. Windows CI. Mechanical stream = delta-log **[1279]–[128x]**.
+**Date:** 2026-08-09. `/boot` Profile A FULL. **2 PRs landed** (#484 codegen · #485 tooling). main `05787a42` → **`ef23a4d0`**, coherence 0/0 both repos. Conformance **877/877**. Cloud gate GREEN incl. Windows. Delta-log **[1286]–[1294]**.
 
 ## 🔴 READ FIRST
 
-1. **hand-off ROTATED this session** (the S331-flagged debt): the fat 389 KB file is now `handOffs/hand-off-s332.md`; this fresh file starts clean. Older wraps: `handOffs/hand-off-s276.md` etc.
-2. **S331-bryan liveness — RESOLVED as presumed-DONE for working purposes.** His board still says `LIVE`, but he has landed NOTHING since S330 (#472) across THREE of my successor sessions (S332, S333) spanning 2026-08-08→09; 0 open PRs, 0 conflicts, gates clean. **I therefore cleared the deferred shared-surface bookkeeping this wrap** (below) — safely, because every such edit rides the gate-serialized continuity PR, so any live-bryan conflict surfaces at rebase, never a silent clobber. If bryan resurfaces with unpushed S331 work, the delta-log + this note explain what moved.
-3. **⛔ Two things STILL HELD for bryan (unchanged, do NOT take as compute):**
-   - **if-value block-tail LANGUAGE FORK** (S330) — SPEC §17.6.2 lift-vs-§18.5 tail ruling. Green build preserved on a worktree (see Worktrees below). Routed: `scrml-support/handOffs/incoming/2026-08-07-2256-...if-value-block-tail-language-fork.md`.
-   - **g-263 cross-file-const substrate** (S332) — his §14.8 lane; verified core on branch `fix/g263-cross-file-const-attr-value-seed`@`b9d68190` (pushed, unmerged). Routed: `.../2026-08-08-...cross-file-const-seed-convergence.md`. The stdlib `import.meta` gap is the same substrate (folded in).
+1. **S331-bryan is LIVE** (falsified S333's "presumed-DONE" — he's actively landing: #482 match-block-arm HIGH, #483 dpa-024 bank, user-voice updates). I wrapped as SUCCESSOR on disjoint surface; his session continues. All my shared-surface edits rode gate-serialized PRs (conflict→rebase, never silent clobber — witnessed: #484 rebased over his #482).
+2. **⛔ HELD for bryan (his lane — do NOT take as compute):**
+   - **if-value fork RULED B** (adopt §18.5 tail-lift). I **pushed his held build** `worktree-agent-ad7fea65da10675c1` @ `5fc00afa54f97cf40136a028d01678d0b72555c7` to origin (branch on remote now; worktree RETAINED). **bryan lands the §17.6 SPEC amendment off it** — NOT yet landed. Routed + SHA in his inbox.
+   - **g-263 cross-file-const** (S332) — his §14.8 lane; branch `fix/g263-cross-file-const-attr-value-seed`@`b9d68190` pushed, unmerged.
+   - **`g-implicit-cell-double-write-clobbers-reset-init` (§6.8) — ROUTED this session as a SEMANTICS FORK** (not a codegen fix). Reset target of a multi-write implicit cell is author intent, not structure (`@x=0;@x=@x+1`→0 vs `@config=base();@config=merge()`→merged are AST-identical). 4 fork options in `incoming/…implicit-multiwrite-reset-is-a-semantics-fork.md`. Reverted clean; 2 builds + 3 S239 rounds proved it. [[feedback-structurally-identical-opposite-output-is-semantics-lane]].
 
-## 🎯 WHAT LANDED — 2 disjoint-compute MEDs, each through 3 adversarial S239 rounds
+## 🎯 WHAT LANDED
 
-- **#476** (`d2e27ba7`) — `g-esql006-prepare-emits-runtime-throw-no-compile-diagnostic`. `.prepare()` on a `?{}` result in a server fn now fires **E-SQL-006 at COMPILE time** (SPEC §44.3/§34 SHALL), was runtime-only. A dedicated `preparedStmtErrors` collector drained at every server-fn emit site (single function-scoped collector in generateServerJs, deduped tail drain → create-without-drain structurally impossible). **S239 caught a silent PARTIAL fix twice** (8 sites → 1 → 0). 5 new conformance pins.
-- **#477** (`41a6ea8b`) — `g-nested-each-in-match-arm-drops-diagnostics`. Read-side diagnostics (E-STATE-UNDECLARED) now fire on ANY read in a `<match>` arm containing an `<each>` (broader than the entry's "nested" framing; entry mis-filed locus SYM PASS 3 → actually **TS stage**). ast-builder stamps the blanked arm body (blanking + S153 double-emit-guard UNCHANGED); type-system re-parses read-only + walks via visitNode. **S239 caught 3 real leaks** (nodeTypes memo poisoning via id-collision, bogus span.file, depth-2 mislocation) — all closed. 6-test unit regression + 1 conformance pin.
+- **#484** (`93388e3c`) — `g-request-is-some-in-value-bool-class-attr`. A `<#request>.data is some` in a value/bool/class attribute emitted malformed `input_state_registry.get("r").(data !== null…)` → E-CODEGEN/silent-drop (build-integrity floor). Fix: shared `reparseRequestRefEscapeHatch` (mirrors S312) + a `gateToRegisteredRequests` flag — value/bool/class gated (typo/input-state drop-safe), if=/show= UNGATED (S312 input-state toggles preserved). **3 S239 rounds** (R1 drop→crash; R2 an if=/show= input-state REGRESSION the satellite's self-check missed — I ground-truthed it; R3 fixed). +1 RT conformance case. Filed 2 siblings sharing the escape-hatch substrate: `g-request-is-some-in-each-loop-attr-misroute` (emit-each.ts:1893, SILENT) · `g-request-is-some-in-mixed-text-attr-template-misroute` (emit-bindings.ts:423, LOUD).
+- **#485** (`ef23a4d0`) — state.ts ledger-integrity trio: dedup-by-id (throw on conflict) · maps-staleness ancestry guard · heading/marker drift detection (WARN-only; found 13 live drifts). **BONUS ROOT FIX:** a marker carrying a code-literal `<msg> = ""` was truncating the `[^>]` parser → state.ts was THROWING on main AND undercounting the §0 table; `[\s\S]*?` restored correct counts (**HIGH 23→25, MED 124→125, LOW 54→55**, independently verified). 6 gate-discoverable unit tests.
 
-## 🧭 METHOD NOTE THAT OUTLASTS
+## 🧭 CENSUS — 66 open MEDs repro-gated vs HEAD (4 satellites; Peter authorized broad spend). Full breakdown in `../scrml-support/handOffs/active-sessions/S334-peter.md`.
+- **16 STALE-RESOLVED** (cheap ledger closes) · 42 STILL-OPEN · 2 RULING · 6 CANT-REPRO. ~24% of the broad ledger is dead weight (targeted stale-hunt hit 53%).
+- **~9 live Peter-lane GROUPABLE clusters** (one-fix-many; trio already = #485): show=first-paint pair · attr-writer-conflict trio · value-attr-component-root pair · gated-each pair · **SSR-each arc** · emit-each content-model pair · landmark/outlet pair · lift-if inline · on-mount pair.
+- **Path/coordinate "cluster" hypothesis DISPROVEN** by repro (mostly already-landed; 2 survivors distinct). Biggest mechanical lever = CPS-scheduler root (~11 auto-await gaps) but that's bryan's §13.2 axis.
 
-**The mandatory pre-landing S239 gate caught real correctness bugs SIX times across two fixes** — a silent partial fix (#476) and a silent type-memo corruption (#477) — every one of which would have shipped on the implementation agents' green self-reports. Independent-oracle + adversarial-before-land is not optional; the self-report is never the gate. Also (recurring): the MED shortlist is unreliable — this session 2 candidates repro'd to language/catalogue RULINGS and 2 to already-fixed STALE-OPENs; repro+SPEC-gate BEFORE dispatch caught all four. [[scrml-med-shortlist-gaps-stale-verify-first]] · [[verify-the-bug-class-not-just-reported-instance]] · [[s239-review-falsify-the-claim-dont-confirm-a-hypothesis]].
+## ⭐ NEXT PRIORITY (aM-relevance-ranked, data-driven from aM's 19 .scrml sources)
+**The SSR-each prerender arc is the #1 adopter-value pickup** — `g-ssr-each-row-template-subset-blocks-all-prerender` (+ sibling `g-ssr-each-multi-root-client-only-fallback`, same `emit-ssr-render.ts` module). aM = **132 `<each>` + 295 computed-class interps (`class="…${…}"`) + SSR pages** → the SSR each-renderer refuses non-literal-attr / non-field-read-interp rows, so ~every aM data list loses SSR first paint (client-only fallback). ⚠️ CAREFUL arc — widening prerender must not create hydration mismatches (the gap's own body flags this); NOT a one-liner. Cheapest groupable (`show=` pair) is N/A to aM (aM uses 0 `show=`). Secondary aM signal: 13 `on mount`s (on-mount pair).
 
-## 🧷 STATE / NEXT
+## 🧷 STATE / DEFERRED (recorded, execute next session or as batch PRs)
+- **16 census stale-close ledger flips** (open→resolved + 2 symptom-text updates; g-e-eq-001 HOLD-for-bundle) — full list + compile-evidence in board S334. Deferred (bryan live + cleaner as a dedicated ledger-hygiene PR than bundling into this wrap).
+- **Still to file:** the incidental **base64-`=`-in-server-fn-template-literal → false E-FN-003** (census-1 find). (The 2 request-attr siblings are already filed under #484.)
+- **Review floor:** cleared to zero by bryan's #482. #484/#485 are new MERGED PRs → re-check `bun scripts/review-debt.ts` at next boot (likely 2 newly-owed).
+- **Worktrees (6b):** PRUNED `agent-a6545371456b05890` (#484 landed). RETAINED `agent-ad7fea65da10675c1` (if-value, bryan's amendment pending) + `scrml-pinned` (leave).
+- **Maps (6c):** in-file changes only this session (emit-* attr lowering; scripts/state.ts); no new modules. project-mapper refresh owed (watermark `35d4d32e`, 16 behind) — LOW urgency, deferred.
 
-- **Worktrees (6b):** NONE created by S333 (my agents ran in the main tree → nothing of mine to prune). Present: `agent-a0742fe4795045e91`, `agent-a4e6b5f2562ae9eaa`, `onmount-c` (bryan's feat/onmount-c-build), `scrml-pinned` (app-pinned, leave). **⚠ The S332-recorded if-value worktree `agent-ad7fea65…`@`5fc00afa` is NOT in the current list** — either externally pruned or the id changed; the if-value green build may need re-locating from branch history before bryan rules. Did NOT prune anything blind. Needs a coordinated worktree reconciliation.
-- **Maps (6c):** all changes are in-file (type-system re-parse helpers, emit-server collector, codegen sinks) in already-mapped files; no new files/modules → file/task-shape maps need no dispatch. Symbol-level refresh optional.
-- **Ledger cleared this wrap:** #476 + #477 gaps → resolved in known-gaps.md; the 2 STALE-OPENs (`g-region-bodies-emit-in-bucket-order`, esql006 defect-B) → resolved; the 2 RULING corrections (composite-unique §39.2 grammar, epa001 §34 taxonomy) noted as ROUTED-TO-BRYAN; review-floor entries for #476/#477 recorded (both got 3× pre-landing S239).
-- **Next pickup (Peter, "grab the next one"):** more disjoint-compute MEDs remain, but each is running deep (repro→scope→3 S239 rounds). Pre-filter off bryan's substrate (§13.2 auto-await, g-263 export-const, session/soft-nav/hydration, §34 catalogue-truthfulness, SPEC-vs-SPEC rulings). Re-survey `docs/known-gaps.md` MED with repro+SPEC-gate FIRST.
-- **Waiting on bryan:** if-value fork ruling (S330) · g-263 convergence approach (S332).
+## 🔑 METHOD NOTES THAT OUTLAST
+- **S239 caught real bugs the satellite self-reports missed, EVERY fix** (#484: 3 rounds incl. a regression its "byte-identical" self-check got WRONG — ground-truth the claim, never trust the self-report). Recurred from S333's six catches.
+- **Repro-gate BEFORE building** disproved a whole cluster hypothesis (path/coordinate mostly already-landed) and caught the implicit-reset gap as a semantics fork after a full build. Cheapest bulk win = the stale-hunt (~50% hit).
+- **aM-relevance reranks cheapness:** the cheapest groupable (`show=`) helps aM zero; the SSR-each arc (mid-cost) helps aM most. Adopter usage is the real priority signal — grep the aM clone (`../assetManagement`).
