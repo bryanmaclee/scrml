@@ -1,0 +1,20 @@
+{
+  "id": "match-block-block-arm-nested-assignment-fidelity",
+  "description": "§18.5 NESTED-STATEMENT-FIDELITY axis — a keywordless bare assignment written inside a NESTED block of a value-position match arm must lower as an ASSIGNMENT to the enclosing binding, never as a fresh declaration. scrml's parser surfaces `a = 1` in a body position as a decl-shaped node, and the emitter's decl-vs-assignment decision keys on the enclosing scope's declared-name set; where that set failed to reach the nested statement, `for (…) { a = 1 }` emitted `for (…) { const a = 1 }` — a SHADOWING binding, so the loop no longer wrote the outer `a` and the lifted tail read the pre-loop value. The self-referencing spelling `a = a + 1` emitted `const a = a + 1`, a TDZ ReferenceError at RUNTIME that `node --check` accepts as valid syntax — which is why this case asserts VALUES and not emitted text.",
+  "language-version": "1.0",
+  "spec": "§18.5",
+  "rationale": "§18.5 arm bodies compose with §13 statement semantics: an assignment inside a nested block writes the binding already in scope. Two spellings are pinned because they fail differently and only one of them is loud. The bare form `{ let a = 0; for (…) { a = 1 } a }` is SILENT when broken — it yields the pre-loop 0 instead of 1, a wrong value with no diagnostic. The self-referencing form `{ let a = 10; for (…) { a = a + 1 } a }` is FATAL when broken — a shadowing `const a = a + 1` reads `a` in its own temporal dead zone and throws. Both must hold in every value position: derived cell (1, 12), return statement (21), multi-scrutinee decl (§18.19, 30), `fn` local decl (42), and `function` local decl (50, 62). The self-referencing totals are accumulations over two iterations, so a fix that merely stopped shadowing but dropped the write would still be caught.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "domAnchored": [
+      { "selector": "#derived-assign", "text": "1" },
+      { "selector": "#derived-self-ref", "text": "12" },
+      { "selector": "#ret-self-ref", "text": "21" },
+      { "selector": "#multi-assign", "text": "30" },
+      { "selector": "#local-self-ref", "text": "42" },
+      { "selector": "#fn-local-assign", "text": "50" },
+      { "selector": "#fn-local-self-ref", "text": "62" }
+    ]
+  }
+}

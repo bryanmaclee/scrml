@@ -1,0 +1,73 @@
+${
+    type Level:enum = { Low, High }
+    <level>: Level = .Low
+
+    // Derived cell (raw-string IIFE path) — tail after a `for` block statement.
+    const <afterFor> = match @level {
+        .Low :> { let a = 0; for (const i of [1, 2]) { a = 1 } a }
+        _    :> 9
+    }
+
+    // Derived cell — tail after an `if` block statement.
+    const <afterIf> = match @level {
+        .Low :> { let b = 0; if (1 < 2) { b = 2 } b }
+        _    :> 9
+    }
+
+    // Derived cell — straight-line tail (control: must keep working).
+    const <straight> = match @level {
+        .Low :> { const c = 3; c }
+        _    :> 9
+    }
+
+    // Derived cell — block statement with NO trailing expression stays §18.5 void.
+    const <voidArm> = match @level {
+        .Low :> { let v = 0; for (const i of [1, 2]) { v = 8 } }
+        _    :> 9
+    }
+
+    // Return position (value-returning IIFE) — tail after `for`.
+    fn retAfterFor(k: int) -> int {
+        return match k {
+            1 :> { let a = 0; for (const i of [1, 2]) { a = 4 } a }
+            _ :> 9
+        }
+    }
+
+    // Multi-scrutinee decl (§18.19) — tail after `if`.
+    fn multiAfterIf(x: int, y: int) -> int {
+        const r = match (x, y) {
+            (1, 2) :> { let a = 0; if (x < y) { a = 5 } a }
+            _ :> 9
+        }
+        return r
+    }
+
+    // Plain local decl inside `fn` — tail after `for`.
+    fn localAfterFor(k: int) -> int {
+        const r = match k {
+            1 :> { let a = 0; for (const i of [1, 2]) { a = 6 } a }
+            _ :> 9
+        }
+        return r
+    }
+
+    // Plain local decl inside `function` — the structured-body local-decl route.
+    function fnLocalAfterFor(k: int) -> int {
+        const r = match k {
+            1 :> { let a = 0; for (const i of [1, 2]) { a = 7 } a }
+            _ :> 9
+        }
+        return r
+    }
+}
+<page><main>
+<p id="after-for">${@afterFor}</p>
+<p id="after-if">${@afterIf}</p>
+<p id="straight">${@straight}</p>
+<p id="void-arm">${@voidArm}</p>
+<p id="ret-after-for">${ retAfterFor(1) }</p>
+<p id="multi-after-if">${ multiAfterIf(1, 2) }</p>
+<p id="local-after-for">${ localAfterFor(1) }</p>
+<p id="fn-local-after-for">${ fnLocalAfterFor(1) }</p>
+</main></page>

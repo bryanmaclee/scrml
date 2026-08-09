@@ -4193,14 +4193,36 @@ function _emitForStmtWithTilde(node: any, opts: EmitLogicOpts): string {
     varName = (typeof node.variable === "string" && node.variable) || node.name || "item";
   }
 
+  // Both fallbacks below re-enter `emitLogicNode` with the tilde context CLEARED
+  // rather than calling `emitForStmt` directly. Two reasons, and the first one
+  // shipped a silent-wrong-value bug:
+  //
+  //   1. `emitForStmt(node)` was called with the options argument DROPPED. Every
+  //      field `opts` carries — `declaredNames`, `boundary`, `serverFnNames`,
+  //      `asyncRouteMap`, the engine bindings — was lost at this hop. The visible
+  //      symptom was `declaredNames`: with an absent set, `emitLogicBody` inside
+  //      `emitForStmt` opened a FRESH empty one, so the `const-decl`/`tilde-decl`
+  //      reassignment guard could not see the enclosing `let a`, and a nested bare
+  //      assignment `a = 1` emitted as a shadowing `const a = 1` (and the
+  //      self-referencing `a = a + 1` as a TDZ `const a = a + 1`).
+  //   2. Re-dispatching means the fallback runs the SAME canonical for-stmt
+  //      dispatch as the non-tilde path (the `case "for-stmt"` opts assembly),
+  //      instead of a hand-copied argument list here that can drift out of step
+  //      with it — this file already carries that hazard elsewhere.
+  //
+  // `tildeContext: undefined` is what makes the re-dispatch terminate: the
+  // `case "for-stmt"` guard routes back into THIS function only when a tilde
+  // context is present.
+  const _fallbackToPlainForStmt = () => emitLogicNode(node, { ...opts, tildeContext: undefined });
+
   if (typeof iterable === "string") {
-    // C-style for loop: fall back to plain emitForStmt (tilde not applicable)
+    // C-style for loop: fall back to the plain for-stmt path (tilde not applicable)
     const cStyleMatch = iterable.match(/^\(\s*(.*?)\s*;\s*(.*?)\s*;\s*(.*?)\s*\)$/s);
-    if (cStyleMatch) return emitForStmt(node);
+    if (cStyleMatch) return _fallbackToPlainForStmt();
 
     // Reactive @varName iterable: fall back (reactive loops use DOM reconciliation)
     const reactiveMatch = iterable.trim().match(/^@([A-Za-z_$][A-Za-z0-9_$]*)$/);
-    if (reactiveMatch) return emitForStmt(node);
+    if (reactiveMatch) return _fallbackToPlainForStmt();
 
     // For-of: parse out varName and iterable from "( [let|const|var] VAR of EXPR )"
     const forOfMatch = iterable.match(/^\(\s*(?:(?:let|const|var)\s+)?(\w+)\s+of\s+(.*)\s*\)$/s);
@@ -4486,12 +4508,74 @@ export function _awaitMatchArmServerCalls(rhs: string, opts: EmitLogicOpts): str
 }
 
 /**
+ * A block-bodied STATEMENT head, for the depth-0 `}` segment boundary below.
+ *
+ * ⚑ The fence is `(?![A-Za-z0-9_$])` and it is OUTSIDE the alternation, for the
+ * two reasons invariant 46 / #463 records against `_blockTailIsValueExpr`: `\b`
+ * is defined against `\w`, which EXCLUDES `$` while scrml identifiers include it
+ * (`tokenizer.ts:1343`), and a fence written inside the alternation guards only
+ * its last member. Without both, `formatted`/`doc`/`iface`/`matcher` would read
+ * as block-statement heads here exactly as they once did there.
+ */
+const _BLOCK_STMT_HEAD_RE = /^(for|while|do|if|switch|try|match|given|each)(?![A-Za-z0-9_$])/;
+
+/**
+ * A keyword that CONTINUES the statement whose block just closed, so the `}`
+ * before it is not a statement boundary: `} else …`, `do { … } while (c)`,
+ * `} catch …`, `} finally …`. Splitting at these would tear a single statement
+ * into two invalid halves — the failure mode this guard exists to prevent.
+ */
+const _BRACE_CONTINUATION_RE = /^(else|while|catch|finally)(?![A-Za-z0-9_$])/;
+
+/**
+ * Does the depth-0 `}` just appended to `segment` terminate a block-bodied
+ * statement, such that what follows in `content` at `nextIdx` starts a NEW
+ * statement? Deliberately CONSERVATIVE — it must be right about every context it
+ * will ever meet, so all three conditions have to hold:
+ *
+ *   1. the segment so far is headed by a block-statement keyword. This is what
+ *      keeps an object literal / arrow-function initializer (`const o = { … }`,
+ *      `const f = () => { … }`) off this path: those segments are headed by
+ *      `const`/`let`, and a genuine `;`/newline already separates them.
+ *   2. the text after the brace does not begin with a continuation keyword.
+ *   3. the text after the brace begins a STATEMENT — an identifier / `@` cell /
+ *      `{` / literal. A whitelist, not a blacklist, so an expression that merely
+ *      continues off the brace (`{ … }.a`, `{ … }[0]`, `{ … })`, `{ … } + 1`)
+ *      can never be split: every one of those next-chars is simply absent from
+ *      the admitted set.
+ *
+ * A `}` followed by `;`/newline/end returns false — the existing separators
+ * already handle those, and returning true would push an empty segment.
+ */
+function _closesBlockStatement(segment: string, content: string, nextIdx: number): boolean {
+  if (!_BLOCK_STMT_HEAD_RE.test(segment.trim())) return false;
+  let j = nextIdx;
+  while (j < content.length && /\s/.test(content[j]!)) j++;
+  if (j >= content.length) return false;
+  const rest = content.slice(j);
+  if (_BRACE_CONTINUATION_RE.test(rest)) return false;
+  return /^[A-Za-z_$@{"'`0-9]/.test(rest);
+}
+
+/**
  * §18.5 block-arm value lowering — split a block-body's inner text into its
  * top-level statement segments. String-literal-aware (a `;`/newline inside a
  * `"…"` / `'…'` / `` `…` `` span is NOT a separator) and depth-aware (a `;`
  * inside `()`/`[]`/`{}` is not a top-level separator). Mirrors the splitter in
  * emit-control-flow.ts:rewriteBlockBody so leading-statement handling stays
  * byte-consistent with the established block-body emitter.
+ *
+ * ⚑ A `;` and a newline are NOT the only statement boundaries: the `}` that
+ * closes a block-bodied statement is one too, and neither JS nor scrml requires
+ * a separator after it. Before this was handled, `{ let a = 0; for (…) { a = 1 } a }`
+ * split into TWO segments — `let a = 0` and `for (…) { a = 1 } a` — so the §18.5
+ * tail `a` was swallowed into a segment headed by `for`, `_blockTailIsValueExpr`
+ * (correctly) called that a statement, and the arm was classified VOID. In an
+ * IIFE value position the emitted function then fell off its end and the arm
+ * evaluated to `undefined`, which does not exist in scrml (§42.1.1). The tail
+ * lifted correctly the moment a `;` or newline preceded it, which is exactly why
+ * the corpus never tripped it and why the defect reads as position-dependent
+ * when it is really separator-dependent.
  */
 function _splitBlockStatements(content: string): string[] {
   const stmts: string[] = [];
@@ -4508,7 +4592,21 @@ function _splitBlockStatements(content: string): string[] {
     }
     if (ch === '"' || ch === "'" || ch === "`") { strQuote = ch; current += ch; continue; }
     if (ch === "{" || ch === "(" || ch === "[") depth++;
-    else if (ch === "}" || ch === ")" || ch === "]") depth--;
+    else if (ch === "}" || ch === ")" || ch === "]") {
+      depth--;
+      // A block-bodied statement's closing `}` is a statement boundary in its own
+      // right — no `;` or newline is required after it. See _closesBlockStatement
+      // for why this is gated three ways rather than splitting on every depth-0 `}`.
+      if (ch === "}" && depth === 0) {
+        current += ch;
+        if (_closesBlockStatement(current, content, i + 1)) {
+          const s = current.trim();
+          if (s) stmts.push(s);
+          current = "";
+        }
+        continue;
+      }
+    }
     else if ((ch === ";" || ch === "\n") && depth === 0) {
       const s = current.trim();
       if (s) stmts.push(s);
@@ -4743,6 +4841,31 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       const bodyCode: string[] = [];
       const _body = arm.structuredBody as any[];
       const _tailIdx = _body.length - 1;
+      // §18.5 — the arm's block body is a SCOPE, and the statements in it must be
+      // emitted against a shared, accumulating declared-name set. The sibling
+      // structuredBody path (emit-control-flow.ts:2321) gets this for free because
+      // it emits through `emitLogicBody`, which opens
+      // `opts.declaredNames ?? new Set()` and threads that ONE set through every
+      // statement. THIS path hand-rolls the loop, so before this it ran with
+      // whatever `opts.declaredNames` happened to be — `undefined` at top level.
+      //
+      // That made a real guard dead rather than merely losing bookkeeping: scrml's
+      // parser surfaces a keywordless `a = 1` as a DECL-shaped node (`tilde-decl`),
+      // and the reassignment guard at the `const-decl`/`tilde-decl` case keys
+      // exactly on `opts.declaredNames?.has(node.name)`. With an absent set the
+      // guard could never fire, so a nested bare assignment inside this arm emitted
+      // as a fresh `const` — `for (…) { a = 1 }` became `for (…) { const a = 1; }`,
+      // a SHADOWING binding, so the loop no longer wrote the outer `a` and the
+      // lifted tail read the pre-loop value. The self-referencing form `a = a + 1`
+      // emitted `const a = a + 1`, a TDZ `ReferenceError` at runtime that
+      // `node --check` accepts as valid syntax.
+      //
+      // The set is seeded from the enclosing scope (so an outer `let a` is visible)
+      // and is PER-ARM (so a name declared in one arm does not leak into a sibling
+      // arm, which would turn that sibling's fresh declaration into an assignment
+      // to an unbound name).
+      const armDeclaredNames = new Set<string>(opts.declaredNames ?? []);
+      const armOpts: EmitLogicOpts = { ...bodyOpts, declaredNames: armDeclaredNames };
       for (let _i = 0; _i < _body.length; _i++) {
         const stmt = _body[_i];
         // §18.5 block-arm value: the block's result is its LAST expression. A
@@ -4761,7 +4884,7 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
           bodyCode.push(`  ${tildeVar} = ${rhs};`);
           continue;
         }
-        const code = emitLogicNode(stmt, bodyOpts);
+        const code = emitLogicNode(stmt, armOpts);
         if (code) {
           for (const line of code.split("\n")) bodyCode.push(`  ${line}`);
         }
