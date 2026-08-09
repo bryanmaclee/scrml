@@ -541,3 +541,13 @@ The rebase also folded in a `master-list.md` `@generated:recent-sessions` regen,
 
 <!-- Peter's #447 #448 #450 #451 #456 #457 remain OWED and are HIS to record (S325 lane precedent:
      a session records its own merges). Surfaced in the S326 hand-off rather than absorbed silently. -->
+
+## S333-peter — #476 + #477 (both reviewed PRE-landing, 3× adversarial S239 each)
+
+Both PRs were reviewed by the mandatory PA-side S239 pass BEFORE merge (workflow-backed `/code-review high`, three rounds each), and every round's findings were fixed before landing — the reviews are the reason the fixes are complete rather than silent partials.
+
+- **#476** (E-SQL-006 compile diagnostic): S239 caught a **silent partial fix twice** — round 1 missed 8 server-fn emit sub-paths (CPS-return, SSE, WS, Pattern-C, endpoint, value-only, middleware) that dropped the diagnostic; round 2 left the value-only-server-JS path (create-pass-without-drain) whose "unreachable" verdict the review falsified; round 3 closed it. All CONFIRMED findings fixed pre-merge.
+- **#477** (each-in-match read-side diagnostics): S239 caught three re-parse leaks — a `nodeTypes` memo id-collision (silent type-memo corruption), a bogus synthetic `span.file`, and a depth-2 line mislocation. All fixed + pinned pre-merge.
+
+<!-- @review pr=476 verdict=finding by=S333-peter date=2026-08-09 probe=three-adversarial-workflow-rounds-drain-everywhere-completeness-caught-silent-partial-fix-twice-8-sites-then-1-value-only-residual-all-fixed-pre-merge -->
+<!-- @review pr=477 verdict=finding by=S333-peter date=2026-08-09 probe=three-adversarial-workflow-rounds-caught-nodetypes-memo-id-collision-plus-bogus-spanfile-plus-depth2-mislocation-all-fixed-and-pinned-pre-merge -->
