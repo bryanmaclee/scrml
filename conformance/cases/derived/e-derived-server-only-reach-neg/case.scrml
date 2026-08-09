@@ -1,0 +1,16 @@
+<program>
+
+${ import { sortBy } from 'scrml:data' }
+
+<rows> = [{ k: 2 }, { k: 1 }]
+
+// LEGAL: `scrml:data` is deliberately NOT in ESCALATION_SERVER_ONLY_MODULES —
+// pure transforms with a real client implementation in the runtime bundle. It is
+// the largest single class of correct client-side stdlib use in the corpus, so
+// this is the over-fire guard for §6.6.19: refusing a derived RHS must key on
+// the escalation set, never on "is a stdlib import".
+const <sorted> = sortBy(@rows, "k")
+
+<div id="out">${@sorted.length}</div>
+
+</program>

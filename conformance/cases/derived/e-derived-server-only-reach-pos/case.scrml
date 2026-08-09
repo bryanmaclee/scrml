@@ -1,0 +1,24 @@
+<program>
+
+${ import { hashPassword } from 'scrml:auth' }
+
+<pw> = "secret"
+
+// REFUSED (§6.6.19): the RHS of this DERIVED cell reaches `hashPassword`, a
+// member of `scrml:auth` — a §12.2 Trigger 3 escalation-server-only module.
+//
+// Trigger 3 escalates the FUNCTION that reaches such a binding, but §12.4 makes
+// route inference per-function and a derived cell is not a function, so the
+// reach is invisible to it: before S331 this compiled at exit 0 with no
+// `.server.js` and shipped a real `Bun.password.hash` argon2id implementation
+// into the browser bundle.
+//
+// The compiler REFUSES rather than escalating — a derived cell is a synchronous
+// lazy-pull recompute (§6.6.3), so a server round trip is not expressible in the
+// derived position. Fix: move the call into a `function` and write the result to
+// a plain reactive cell (see the `-fn-path` sibling case).
+const <hashed> = hashPassword(@pw)
+
+<div id="out">${@hashed}</div>
+
+</program>

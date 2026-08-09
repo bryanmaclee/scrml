@@ -1,0 +1,24 @@
+<program>
+
+${ import { hashPassword } from 'scrml:auth' }
+
+<pw> = "secret"
+<hashed> = ""
+
+// The §12.2 Trigger 3 FUNCTION path — unchanged by §6.6.19, and pinned here as
+// the non-regression gate for it. This function reaches the same `scrml:auth`
+// member as the `-pos` sibling case, but from a position that HAS a placement to
+// change, so it server-escalates: the compiler emits a route handler plus a
+// client fetch stub, and neither `hashPassword` nor its `Bun.password.hash`
+// implementation reaches the client bundle.
+//
+// This is also the resolution E-DERIVED-SERVER-ONLY-REACH's message names: move
+// the call into a `function`, write the result to a plain reactive cell.
+${ function computeHash(pw) {
+    return hashPassword(pw)
+} }
+
+<button id="go" onclick={ @hashed = computeHash(@pw) }>Hash</button>
+<div id="out">${@hashed}</div>
+
+</program>

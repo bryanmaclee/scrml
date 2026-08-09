@@ -131,6 +131,7 @@ Total lines: 37,074 | Total sections: 65 + appendices
 - north star + Tier ladder → §1.5 (145+)
 - in-compound derived values → §6.6.16 (~2960+)
 - markup-typed derived cells → §6.6.17 (~2997+)
+- server-only stdlib reach in a derived RHS (E-DERIVED-SERVER-ONLY-REACH) → §6.6.19 (~3691+) + §12.2 Trigger 3
 - reactive arrays → §6.5 (~1945+)
 - reactive array mutation → §6.5 (~1945+)
 - derived values → §6.6 + §6.6.16-17 (~2363+)
