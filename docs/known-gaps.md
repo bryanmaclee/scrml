@@ -7547,6 +7547,56 @@ SSR hide without a ruling turns them red.
 same element emits **two `style` attributes** — invalid HTML, second one dropped by conformant parsers.
 Pre-existing and unrelated to `show=`; surfaced while measuring D1.
 
+### g-match-block-arm-body-has-three-divergent-lowering-routes — the §18.5 block-arm body is lowered by THREE different routes; each is correct where the others are wrong — `NEW S331-bryan (Q2 probe, pre-review-floor); HIGH`
+<!-- @gap id=g-match-block-arm-body-has-three-divergent-lowering-routes sev=HIGH status=open locus=compiler/src/codegen/emit-logic.ts:4721-4747(structuredBody/tilde route, statement-emitter)+compiler/src/codegen/emit-control-flow.ts(emitIifeBlockArmBody, raw-string route)+compiler/src/codegen/emit-event-wiring.ts:1193(derived-cell route) prov=spec:§18.5 -->
+
+**PA-REPRODUCED S331 by emission at `b4fb2f1f`; loci are PA-located-verify (derived from emitted output
+across four value positions, not traced through the code).** #470 unified the §18.5 tail *classifier*
+(`_blockTailIsValueExpr`) but not the *emission route*. Three routes remain, and the same source
+compiles to different meanings depending on which value position it sits in:
+
+| position | route | nested assignment | tail after a block stmt |
+|---|---|---|---|
+| `return match …` | raw-string | ✅ `a = 1` | ✅ `return a` |
+| `${ match … }` markup-interp | raw-string | ✅ `a = 1` | ✅ `return a` |
+| `const <d> = match …` derived | derived | ✅ `a = 1` | ❌ `a;` → **`undefined`** |
+| `const r = match …` local decl | tilde / statement-emitter | ❌ **`const a = 1`** | ✅ `_tilde = a` |
+
+**Defect A — derived position drops a tail that follows a block-bodied statement.** Arm body
+`{ let a = 0; for (const i of @items) { a = 1 } a }` emits `a;` with no `return`; the value-returning
+IIFE falls off the end and the cell holds `undefined`, which **does not exist in scrml** (§42.1.1, S89
+ABSOLUTE). Straight-line bodies (`{ const t = 1; t }`, `{ let a = 0; a = a + 1; a }`) lift correctly, so
+the trigger is specifically *a block-bodied statement before the tail*.
+
+**Defect B — the local-decl/tilde route rewrites a bare assignment inside a nested block into a `const`
+declaration.** Source `for (const i of @items) { a = 1 }` emits `for (…) { const a = 1; }` — a new
+block-scoped binding shadowing the outer `a`, so the loop no longer mutates it and the lifted tail reads
+the pre-loop value. **Two outcomes, both bad:**
+- `{ … for (…) { a = 1 } a }` → **silent wrong value** (tail reads `0`, not `1`).
+- `{ … for (…) { a = a + 1 } a }` → emits `const a = a + 1` → **runtime TDZ `ReferenceError`**, and
+  `node --check` on the bundle **PASSES** (the "emitted ≠ runs" trap: S265 theme-switch, S268
+  value-attr, S278 U3).
+
+Scoped to match block arms: the identical statements in a plain `function` body emit correctly
+(`a = 1;`), so this is the structuredBody route's per-statement `emitLogicNode` path, not general logic
+codegen. Consistent with the PRIMER §13.7 B16 note that scrml surfaces `name = expr` as a decl-shaped
+node with no separate assignment-statement kind — the raw-string routes preserve source text and dodge
+it; the statement-emitter route does not.
+
+**Severity HIGH** on Defect B (`semantics-changed` per pa-base §8 — the class the gates are weakest
+against — in the most common of the four positions), carrying Defect A with it since the root fix is
+shared. Not escalated above HIGH per the S319 four-tier ruling; the lever is sequencing, and it is
+sequenced now.
+
+**Why the gates missed both, and this is the durable half.** #470's full-corpus emit-differential read
+**0 of 7296 artifacts changed** — honestly, and on the wrong axis: no corpus file places a block-bodied
+statement inside a match block arm, so the inputs that would trip either defect do not exist yet
+(pa-base §8, the coverage-removal/blind-spot member). Both conformance cases added by #469/#470 use
+straight-line arm bodies. `g-match-block-arm-value-lift-covers-one-of-five-paths` is correctly RESOLVED
+for the five *positions*; *tail shape* and *nested-statement fidelity* are two further orthogonal axes
+nobody enumerated. **Root fix = one emission route, completing what #470 started on the predicate.**
+**Blocks the derived-position half of the if-value fork (Q2)** — see user-voice S331.
+
 ### g-match-block-arm-value-lift-covers-one-of-five-paths — #447's block-arm tail lift reaches only the `emitMatchExprDecl` path; four other value positions still drop the tail — `NEW S328-bryan (review-floor S239 pass on #447); MED; RESOLVED S330-peter (feat/s330-match-block-arm-value-lift)`
 <!-- @gap id=g-match-block-arm-value-lift-covers-one-of-five-paths sev=MED status=resolved locus=compiler/src/codegen/emit-control-flow.ts:2315+:2264(emitMatchExpr, the untouched sibling)+compiler/src/codegen/emit-logic.ts:4595(the §18.19 multi-scrutinee delegation) prov=spec:§18.5 -->
 
