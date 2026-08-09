@@ -667,3 +667,52 @@ pa-base §5, and the second instance of it this session.
 
 <!-- @review pr=479 verdict=clean by=S331-bryan date=2026-08-09 probe=mandatory-s239-pre-land-emission-base-vs-fix-plus-recursion-probe-plus-adversarial-sweep-ifelse-dowhile-arrow-objlit-chainedtail-two-whiles-none-torn-conformance-876-and-unit-23-rerun-independently-one-residual-disclosed -->
 <!-- @review pr=480 verdict=carve-out by=S331-bryan date=2026-08-09 probe=single-file-docs-pr-reviews-md-no-code-path -->
+
+## S335-peter — the floor's next return: a HIGH confidentiality leak in freshly-merged code
+
+Seven PRs owed (#481–#487; #488 is bryan's OPEN wrap, not yet in scope). Four code-bearing got an
+independent adversarial pass (satellite fan-out, then I ground-truthed the one HIGH myself on committed
+HEAD `ddb924b3`); three are docs/bank/continuity carve-outs. **bryan is WRAPPED — the floor is a shared
+surface, safe to take only because he is not live** ([[review-floor-is-shared-surface-collides-with-live-bryan]]).
+
+- **#486** (bryan, `route-inference §12.2`) — **FINDING, HIGH, CONFIRMED FIRSTHAND.** The fix closes the
+  derived-cell-RHS server-only-reach leak at top level and in plain `${…}` child blocks, but **misses a
+  derived cell nested in a `for`-loop `lift` body** — exit 0, no `.server.js`, and `Bun.password`
+  (argon2id) + the secret ship to the browser. I reproduced it on HEAD (control: the identical top-level
+  cell correctly fires `E-DERIVED-SERVER-ONLY-REACH`). This is the standing *verify-the-CLASS-not-the-
+  instance* lesson — the fix's own evasion tests probe RHS *shape*, never a nesting-*position* variant. It
+  is a new position in the already-tracked `g-cell-initialiser-and-markup-interp-server-only-reach-do-not-
+  escalate` family (locus `route-inference.ts:1086`, `pending-bryan-escalate-vs-refuse`). **Bryan's lane:
+  reviewed + filed + routed (`incoming/…486-high-leak-for-loop-lift-body.md`); NOT fixed by me** — the
+  family shares one substrate and its escalate-vs-refuse ruling is his and unresolved. Gap filed
+  `g-derived-server-only-reach-misses-for-loop-lift-body` (HIGH). Two lower same-review finds relayed to
+  bryan (satellite-reported, NOT independently confirmed): escape-hatch rawscan over-fires as a hard
+  refusal on the derived path (LOW/latent); the conformance cases gate the diagnostic CODE, not the
+  emitted-bundle leak facts (why the HIGH slipped a green suite).
+- **#481** (bryan, `scripts/review-debt.ts`) — **FINDING, LOW/latent.** The floor's own instrument: its
+  code-bearing classifier whitelists `compiler|stdlib|scripts|conformance/cases` but not `lsp/`,
+  `editors/`, `dashboard/`, `e2e/`, or the conformance *harness* — a PR landing solely in those trees is
+  silently carve-out-invisible. Core arithmetic reconciled EXACT against an independent reimplementation
+  (98 in-scope, 91 recorded, owed set byte-identical); the headline `limit 40→150` fix provably enumerates
+  the full population. Does not bite today (no in-scope PR touches those dirs alone). Gap deferred to the
+  ledger-hygiene pass.
+- **#484** (peter) — **CLEAN.** Independent re-review (14 executed-emit probes across the gated
+  value/bool/class regime + ungated if=/show=, both filed siblings, and over-gating cases); the S312
+  input-state path verified non-regressing; siblings correctly still-broken. Unit 8/8, conformance case 1/1.
+- **#485** (peter) — **CLEAN.** Parser-fix boundary holds both ways (11-case probe: adjacent/multi-line/
+  angle-in-body/arrow-in-body markers; unclosed still fails LOUD via the count cross-check); dedup throws
+  only on real conflicts; drift is genuinely WARN-only (cannot flip the gate). `bun scripts/state.ts`
+  exit 0 → HIGH 26 · MED 126 · LOW 56, no throw. One dormant out-of-scope note (the malformed cross-check
+  hard-codes `id=` first) → deferred to the ledger-hygiene pass. Test 6/6.
+- **#482** (bryan, `#474` findings + floor-to-zero) — **CARVE-OUT.** `docs/known-gaps.md` +
+  `docs/pr-reviews.md`; no code path.
+- **#483** (bryan, `bank(dpa-024)`) — **CARVE-OUT.** `handOffs/dpa-queue.md`; deliberation bank, no code.
+- **#487** (peter, `continuity(S334)` wrap) — **CARVE-OUT.** `changelog`/`hand-off`/`delta-log`; continuity, no code.
+
+<!-- @review pr=486 verdict=finding by=S335-peter date=2026-08-09 probe=independent-satellite-adversarial-then-PA-groundtruthed-on-committed-HEAD-ddb924b3-real-emit-for-loop-lift-body-derived-cell-ships-Bun.password-argon2id-plus-secret-to-client-no-server-js-control-top-level-fires-E-DERIVED-SERVER-ONLY-REACH-new-position-in-pending-bryan-family-routed-not-fixed -->
+<!-- @review pr=481 verdict=finding by=S335-peter date=2026-08-09 probe=full-read-plus-ran-and-hand-reconciled-counts-exact-against-independent-reimpl-98-in-scope-91-recorded-owed-set-byte-identical-limit-40to150-enumerates-full-population-LOW-latent-codebearing-whitelist-misses-lsp-editors-dashboard-e2e-conformance-harness-not-biting-today -->
+<!-- @review pr=484 verdict=clean by=S335-peter date=2026-08-09 probe=independent-14-executed-emit-probes-gated-value-bool-class-plus-ungated-if-show-plus-both-filed-siblings-plus-over-gating-s312-input-state-nonregressing-unit-8of8-conformance-1of1 -->
+<!-- @review pr=485 verdict=clean by=S335-peter date=2026-08-09 probe=independent-11-case-parser-boundary-probe-both-ways-adjacent-multiline-angle-arrow-unclosed-fails-loud-dedup-throws-on-real-conflict-drift-warn-only-ran-state-ts-exit0-HIGH26-MED126-LOW56-test-6of6-one-dormant-out-of-scope-note-deferred -->
+<!-- @review pr=482 verdict=carve-out by=S335-peter date=2026-08-09 probe=docs-known-gaps-and-pr-reviews-md-no-code-path -->
+<!-- @review pr=483 verdict=carve-out by=S335-peter date=2026-08-09 probe=handoffs-dpa-queue-md-deliberation-bank-no-code-path -->
+<!-- @review pr=487 verdict=carve-out by=S335-peter date=2026-08-09 probe=changelog-handoff-deltalog-continuity-wrap-no-code-path -->

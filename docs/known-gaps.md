@@ -7641,6 +7641,23 @@ nobody enumerated. **Root fix = one emission route, completing what #470 started
 
 **⛔ NEEDS A RULING — escalate or refuse, and the derived rationale does NOT transfer.** A derived cell is a synchronous pull (§6.6.3) and therefore *cannot* be escalated — escalating would make every recompute a network round trip. A **one-shot mutable-cell initialiser** has no such constraint and arguably *should* escalate. Refusing all three uniformly is the fail-closed default; escalating the initialiser is the more powerful answer and a one-way door. Bryan's lane (language-surface, §12.2 jurisdiction).
 
+### g-derived-server-only-reach-misses-for-loop-lift-body — a derived cell nested in a `for`-loop `lift` body evades the #486 check entirely and ships the server-only impl + secret to the browser; the exact target class in a nesting-position variant the fix misses — `NEW S335-peter (review-floor pass on #486, PA-confirmed on committed HEAD); HIGH`
+<!-- @gap id=g-derived-server-only-reach-misses-for-loop-lift-body sev=HIGH status=open locus=compiler/src/route-inference.ts:3650(collectDerivedCellDecls descends node.body/node.children only; a for-loop stores its body under an expr wrapper never descended, so the lift-body derived cell is never visited and Step 3b never runs) prov=ruling:pending-bryan-escalate-vs-refuse(same family as g-cell-initialiser-and-markup-interp-server-only-reach-do-not-escalate) -->
+
+**PA-CONFIRMED by execution on committed HEAD `ddb924b3`** (not the reviewer's word alone). Repro:
+`<div>${ for (let it of @items) { lift <div>${ const <h> = hashPassword(@pw) }<span>${@h}</span></div> } }</div>`
+with `import { hashPassword } from 'scrml:auth'` → **exit 0, no `.server.js`**, `dist/case.client.js` binds
+`const { hashPassword } = _scrml_stdlib.auth;` and `dist/_scrml/auth.js` ships `Bun.password.hash(argon2id)`
+into the browser. **Control:** the identical cell at top level correctly FAILS `E-DERIVED-SERVER-ONLY-REACH`.
+The `for`-loop `lift` body is a common corpus pattern (kanban etc.) → real adopter exposure.
+
+**⛔ Bryan's lane — routed, NOT fixed by Peter.** This is a new POSITION in the family whose escalate-vs-refuse
+ruling is pending bryan (`g-cell-initialiser-and-markup-interp-server-only-reach-do-not-escalate`, same
+`route-inference.ts:1086` substrate). For a *derived* (const) cell the answer is already settled (refuse, per
+§6.6.19 / #486) — this looks like pure coverage — but the fix touches the shared RI walk that his ruling on the
+sibling positions will restructure, so building it in isolation would fragment the family. Routed with the
+confirmed repro + root cause: `incoming/2026-08-09-from-peter-to-bryan-486-high-leak-for-loop-lift-body.md`.
+
 ### g-corpus-emit-differential-path-derived-chunk-id-false-diffs — the differential's own docstring claims no absolute-path leak; the chunk-scope ID is path-DERIVED, so two checkouts report ~1009 false differences — `NEW S331-bryan (agent-found during the derived fix); MED`
 <!-- @gap id=g-corpus-emit-differential-path-derived-chunk-id-false-diffs sev=MED status=open locus=scripts/corpus-emit-differential.ts(the no-normalization claim in its docstring)+the chunk-scope id derivation prov=rationale:instrument-defect-found-while-using-the-instrument -->
 
