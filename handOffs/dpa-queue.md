@@ -38,6 +38,7 @@ Item format + drain protocol: `scrml-support/dpa-scrml.md` + the design DD
 | dpa-021 | **COMPLETE (ADVISORY) dPA 2026-08-04** — verified **BY EXECUTION**. **B survives: direction intact, stated form does not.** One *raw* binding CANNOT serve both forms; one *Proxy* can; **B needs FOUR parts, not one.** **★ The hazard is a CONFIDENTIALITY BREAK, not merely `semantics-changed`** — proven: a request-controlled key yields the live session id and the full record incl. `csrfToken`, at HTTP 200, no diagnostic. **★ BLOCKER absent from the brief: detection never fires for the interpolation-only case → the fix would emit NOTHING and #357 would stay open.** **★ KEEP the AST lowering — 3 security gates match its literal string.** **⚠ Routed separately: `@session` is unlowered → a client-supplied body field read as identity, in a GREEN conformance case.** → `scrml-support/docs/deep-dives/gh357-session-binding-accessor-shape-2026-08-04.md` | **RATIFIED S319** (bryan: *"ratify all three"*) — **B survives, four parts not one; Proxy binding; KEEP the AST lowering.** Insight landed `[S319/dpa-021]`. **Consequence: the staged `gh357-session-sql-interpolation` brief is missing the detection blocker and MUST be revised** (banner applied). Routed HIGH filed: `g-session-ambient-unlowered-trust-boundary-inversion` (PA-verified by emission). |
 | dpa-022 | **COMPLETE (ADVISORY) dPA 2026-08-05 — awaiting PA/bryan ratification.** ⚑ *This row read "BANKED — UNRUN" until S325 corrected it; the DD had run 24h earlier.* 5-pole live poll; all S322 grounding re-verified BY EXECUTION. **The premise never failed to land — it landed in the COMPILER and in name resolution and never propagated to §1.4/L1/PRIMER, so the reframe is a RECONCILIATION (inert, prose-only), NOT an amendment.** Writable markup cell: rejection SURVIVES (4/5 poles: a writable markup cell holds a *rendered instance* with an ownership/disposal boundary, not state). ONE real mechanism gap: the lifecycle read detector is a dot-requiring regex, a no-op on markup 100% of the time. **Do NOT ratify the shared through-line on this DD's evidence** (the mismodelling was in the CANON, not the mechanism). → `scrml-support/docs/deep-dives/markup-as-state-kind-not-value-type-2026-08-05.md` | S322 block · "bank it" |
 | dpa-023 | **COMPLETE (ADVISORY) dPA 2026-08-05 — awaiting PA/bryan ratification.** ⚑ *This row read "BANKED — UNRUN" until S325 corrected it; the DD had run 24h earlier and its re-ruling request had ALREADY been acted on (option C retired S322).* 5-pole live poll, verified by execution (7 fixtures + 3 emitted programs RUN). **COMPLEMENT, not subsume — the frame is RIGHT and the implementation is missing its middle state.** A `(not to T)` cell has THREE states (`not → pending → T`); the compiler models TWO and the assignment illegally jumps 1→3. Mechanism: `classifyWriteAgainstSpec` is a SOURCE-TEXT comparison that never consults the type, with no third state to return (`type-system.ts:25865`, duplicated `:26799`) — **the whole bug is two lines.** ⚠ Its re-ruling request RETIRED option C (S322). **The `pending` rung is the live open item** (5/5 convergence; conditions: the marker is sugar, drop the "does not color the function" pitch as measured-false, and the rule must be `E-` not `I-`). ⚠ PA-verified FALSE: the DD's §19.6-containment-by-string-rewrite mechanism claim. → `scrml-support/docs/deep-dives/async-boundary-as-state-lifecycle-2026-08-05.md` | S322 block · "bank it" |
+| dpa-024 | **BANKED — UNRUN** (S331, 2026-08-09). Compiler-architecture DD: *how would the perfect compiler for THIS language be built?* Five sub-questions; **Q4 (Road-B's charter — parity vs the better architecture) is the one with a clock and should be answered even if nothing else is.** Language design explicitly OUT of scope (dpa-022/023 hold those). ⚠ **Carries a PA hypothesis that was TESTED AND REFUTED in the same session** — recorded in the item so the DD does not re-derive it; a narrowed version and a measured rival hypothesis are banked in its place, along with a severe caveat that any convergence must be funded through deletion. Population classification (195/195 open markers) + the 5-day detection confound are in the grounding. | bryan S331 · *"bank the deep-dive, classify the gap ledger"* |
 | dpa-017 | **RATIFIED S230 2026-06-28** (user "go with your recos") — HYBRID: **B (origin-keyed structural redaction at the compiler-emitted egress sink) = load-bearing FLOOR** · A (same provenance map, static-prove) = demoted DX LAYER, **DEFERRED** · field-level **`reveal("col")`** = sole declassification · dynamic-SQL strip-all+lint · raw/FFI egress fail-closed. PA-verified the stale-cite flag, then authored **SPEC §14.8.9** (Nominal/spec-ahead) + fixed §14.8.7's stale `E-ROUTE-003` cite + minted **E-PROTECT-004 + I-PROTECT-STRIP-001** (§34, land-with-impl) + landed the insight + SPEC-INDEX regen. **Residual = the FLOOR BUILD** → `docs/changes/g-sql-row-protect-leak-2026-06-28/RULING.md` (sPA-slot-able; OQ-1 descriptor-lifetime first). | **RATIFIED** (build pending) |
 
 **⚠ DRAIN-PATH RULE (S319).** The dPA drains **THIS file**. A deliberation banked anywhere else does not exist to it. Witnessed S316→S319: seven conclusions were rung-assigned into `scrml-support/docs/deep-dives/S316-DELIBERATION-QUEUE.md` and the hand-off recorded *"the dPA is RUNNING on Q1/Q2/Q3"* — it was not and never had been; the dPA drained the dpa-018 Pole-D conditional (which IS in this file) instead, and the three deliberations sat unrun across two sessions while every build that depended on them stayed held. **Same shape as the review-floor and `gh issue list` misses: an obligation named in one place, a probe reading another.** Bank deliberations HERE; a separate rung-assignment doc is a companion, never the carrier.
@@ -989,3 +990,79 @@ A verdict on subsume-vs-complement with worked adopter code for **each** of the 
 
 ### Report-back
 §3 — one-liner + artifact path + a `(dpa:)` breadcrumb. Artifact → `scrml-support/docs/deep-dives/`. Routes to scrml PA.
+
+---
+
+## dpa-024 — How would the perfect compiler for THIS language be built? (compiler architecture; charter-with-a-clock)
+
+```
+id:        dpa-024
+status:    banked
+rung:      R2 minimum; escalate to R3 if two or more architectures survive investigation
+requested: bryan, S331 (2026-08-09) — "bank the deep-dive, classify the gap ledger"
+routes-to: scrml PA
+```
+
+### The question, in bryan's framing
+
+> *"I am beginning to believe that we are (and have been for some time) experiencing the limits of early decisions, of architecture originally built for a smaller scope … we are in a (seemingly) never ending loop of bug find, bug fix, bug find … it's worth pausing and thinking about our druthers. How would the perfect compiler for THIS LANGUAGE be built?"*
+
+Operationalized: **given the language as it now stands, and given an executable 876-case conformance contract, what architecture would a compiler for it be built on — and what does impl#1's divergence from that actually cost?**
+
+### Why this is answerable NOW and was not before
+
+1. **The language is far more settled than the compiler.** V1 is scrml-LANGUAGE 1.0; compilers are implementations.
+2. **The conformance suite IS the contract** (§62.2) — 876 executable cases. A re-architecture that must satisfy 876 cases is a refactor with a fixed oracle, not a rewrite. Every previous flirtation with "rewrite" renegotiated the language and the compiler at once; that objection has expired and nobody has noticed.
+3. **The freeze campaign is PAUSED** precisely because a conformance instrument cannot answer a design question (S322). This is the design question that pause was for.
+
+### The five sub-questions
+
+1. **Grounding.** What are impl#1's load-bearing architectural decisions? For each: deliberate or accreted · documented anywhere or not · prototype-inherent or permanent.
+2. **Counterfactual.** For *this* language specifically — whole-stack single file, INFERRED server/client split (§12), a reactive dependency graph, `?{}`, `<channel>`, the §65 CSS model, the Tier 0/1/2 ladder, markup-as-value — what would a from-scratch architecture choose? Not "an ideal compiler" in the abstract.
+3. **Delta + cost.** Where do (1) and (2) diverge, and what has each divergence *measurably* cost — in filed gaps, in deferred features, in recurring bug families? The grounding below is the starting evidence, not the conclusion.
+4. **⏰ THE DECISION WITH A CLOCK — Road-B's charter.** `compiler/self-host-v2` is a LIVE second implementation currently chartered as a **parity target** (impl#2 reproducing impl#1). The conformance suite means impl#2 owes only the *observable contract*, not impl#1's internals. **If the better architecture is knowable, parity reproduces the debt deliberately.** This gets more expensive every session Road-B advances. **Answer this even if the DD answers nothing else.**
+5. **The honest null.** Under what evidence is the correct answer "impl#1's architecture is fine, keep patching"? Name the condition in ADVANCE so the DD can actually return it. A DD that cannot return "no change" is a rubber stamp.
+
+### ⚑ SCOPE — what is NOT in this DD
+
+**The language design itself is OUT.** This is about the compiler that implements it. dpa-022 (markup as a state kind) and dpa-023 (the async boundary as a `(not to T)` lifecycle) hold the live language-axiom questions and both await ratification — do not reopen them here.
+
+**Not a rewrite plan.** The deliverable is a CHARACTERIZATION plus the Q4 charter answer. bryan rules; the DD does not.
+
+### GROUNDING — measured this session, with the overclaim already stripped
+
+⚠ **A PA hypothesis was tested and REFUTED here. It is recorded so the DD does not re-derive it.**
+
+**The refuted version** (PA, S331, from six defects in one session): *"the compiler's recurring defect generator is that it discards structured information and reconstructs it from raw text; the seam is `bodyRaw`/`rulesRaw`/`armsRaw`/`derivedExprText`/`component-def.raw`."*
+
+**Why it failed — three independent falsifiers, all PA-verified:**
+- **Seam density anti-correlates with defect density.** `engine-statechild-parser.ts` is the most raw-text-dense module in the repo (its whole job is re-scanning `rulesRaw`, ~95 seam ops/KLOC) and carries **2** ledger mentions. `emit-each.ts` is seam-LIGHT and carries **63**; `emit-logic.ts` **61**. The defect-dense files are seam-light.
+- **Population classification, all 195 open markers read individually:** strict raw-text **22 (11%)** · post-hoc re-derivation **8** · duplicate-derivation **26** · **neither limb 139 (71%)**.
+- **The detection confound is real and FIVE DAYS OLD.** `docs/pr-reviews.md` landed **2026-08-04**; `scripts/corpus-emit-differential.ts` **2026-08-05** (PA-verified by `git log --diff-filter=A`). The differential's entire observable is emitted TEXT — it structurally cannot find a defect that does not manifest in emitted text. Class-A gaps are 2.7× over-represented inside that 5-day window. **Six defects found by brand-new text-differential instruments is not evidence of an architectural property.**
+
+**What SURVIVES, narrowed — bank this, not the above:**
+> Post-emit **whole-buffer text passes** are a real, severity-enriched family — two named passes, not the `*Raw` AST seams: the server-fn body re-indenter (`emit-server.ts:122-207`, 9 call sites) and the client fn-name mangler (`emit-client.ts:2956`). Both re-derive from emitted JS what their emitters already held. **Both are documented IN-SOURCE as stopgaps with a prescribed structural exit.** 11% of open gaps but **6 of 20 open compiler HIGHs**.
+
+**Sharper than "prototype debt" — the seam is STILL BEING MINTED.** PA-verified by `git log -S`: `rulesRaw` 2026-04-10 (first commit) but `ifExprRaw` **2026-05-09**, `inlineMatchBody` **2026-05-11**, `derivedExprText` **2026-06-13** — two months in, after SPEC, conformance and adopters existed. Not merely inherited; it remains the path of least resistance. **That is the more actionable claim.**
+
+**The better-fitting rival hypothesis, measured (NOT yet adversarially tested — the DD should test it):**
+> The codebase has **no single canonical representation of a program**, and every subsystem invents its own. Measured in `compiler/src`: **409** `walk*`/`visit*`/`traverse*` definitions across 15+ subsystems each independently traversing one FileAST · **two live front ends** (`buildAST` vs `nativeParseFile`) that disagree on `<each>` and are routed between by a pre-check on raw text · **29 module-level mutable slots + 26 exported cross-module state mutators** in codegen, with `_currentUserAmbientActive` existing TWICE with two setters. Raw-text seams are one symptom of five.
+
+**Corroboration from an independent session** (weakens novelty, strengthens the finding): `handOffs/hand-off-s332.md:21`, a different machine — *"a hand-rolled walker that must mirror another component's full traversal — or re-lex already-emitted output — is drift-prone; successive adversarial rounds keep finding the same class. Converge on the shared substrate."*
+
+**The ledger already names other recurring generators the DD must weigh against the above:** corpus blindness (*"the S301 pattern, 5th instance"*, 5 counted) · the oracle-inherits-the-implementation's-assumption shape (2) · `g-split-key-pair-class` (a key assembled at the write site and re-assembled at the read site, 4 instances, *"not yet swept"*) · `g-each-element-child-decided-by-four-disagreeing-predicates`. **The last two are the general "discards information it already had" shape with ZERO raw text involved** — evidence the general claim is right and the specific locus was wrong.
+
+### ⚑ A SEVERE CAVEAT ON ANY CONVERGENCE PROPOSAL — protect this
+
+`native-walker/engine-statechild-walker.ts` already replaces the `rulesRaw` text re-scanner with a structured walk — and it is **STALLED AT b.2 with BOTH implementations live**, the legacy one surviving *"as a fallback"*, the new one required to mirror the old one's exact quirks (`null`-vs-empty-string, leading-dot stripping, `rawOffset` semantics). **A half-finished seam convergence converts one copy into two — strictly worse than never starting.** Any convergence this DD proposes must be **funded through deletion**, with the deletion in the same arc, or it must not be proposed.
+
+### What-counts-as-an-answer
+
+A direct answer to **Q4** (Road-B's charter) with its cost stated both ways — change it now vs let it ride. Plus, for Q1–Q3, an enumeration of impl#1's load-bearing decisions with each marked deliberate/accreted and documented/undocumented, and a counterfactual architecture argued from **scrml's actual demands**, not from general compiler taste. Q5's null condition must be stated explicitly whether or not it is met.
+
+**Anti-goals, stated so the DD can be judged against them:** do NOT open a general `*Raw` convergence program — the data does not support it. Do NOT propose a rewrite. Do NOT re-derive the refuted hypothesis above. Do NOT ratify.
+
+**Three items already actionable WITHOUT this DD** (named loci, each with an in-source prescribed exit) — the DD should say whether they are the right first moves, not re-discover them: (1) emit-time tagging of template-raw vs layout per `emit-server.ts:114-120`, which closes 2 open HIGHs plus the 3 siblings filed S331; (2) the mangler-retirement arc scoped at `emit-client.ts:3038`; (3) drive `engine-statechild-walker` b.3→b.6 **to deletion**.
+
+### Report-back
+§3 — one-liner + artifact path + a `(dpa:)` breadcrumb. Artifact → `scrml-support/docs/deep-dives/`. Routes to scrml PA. **RUN-not-RATIFY.**
