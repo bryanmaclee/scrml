@@ -12573,6 +12573,61 @@ function annotateNodes(
                 }
               }
             }
+            // g-nested-each-in-match-arm-drops-diagnostics (S316) — an
+            // each-bearing bare-body arm was BLANKED (children:[]) by
+            // ast-builder to avoid the S153 `collectEachBlocks` double-emit,
+            // which drops the read-side walk for EVERY read inside such an arm
+            // (the nested-`<each>` read AND a direct read that merely shares the
+            // arm with an `<each>`). ast-builder stamped the raw arm body + its
+            // absolute file coordinates on the wrapper; re-parse it LOCALLY
+            // (throwaway ids from `buildAST`'s own internal counter; the nodes
+            // are discarded after this walk and never attached to `fileAST`, so
+            // `collectEachBlocks`/codegen are wholly unaffected) and walk it here
+            // — under the arm scope already pushed above, so payload bindings
+            // apply — so E-STATE-UNDECLARED (and every other read-side ident
+            // diagnostic) fires with correct source spans.
+            const _reBodyRaw = (wrapper as { _reparseEachArmBodyRaw?: unknown })._reparseEachArmBodyRaw;
+            if (
+              (!Array.isArray(armChildren) || armChildren.length === 0) &&
+              typeof _reBodyRaw === "string" &&
+              _reBodyRaw.trim().length > 0
+            ) {
+              const _reFileStart = (wrapper as { _reparseEachArmFileStart?: unknown })._reparseEachArmFileStart;
+              const _reBaseLine = (wrapper as { _reparseEachArmBaseLine?: unknown })._reparseEachArmBaseLine;
+              const _reBaseCol = (wrapper as { _reparseEachArmBaseCol?: unknown })._reparseEachArmBaseCol;
+              let _reNodes: unknown[] = [];
+              try {
+                const { splitBlocks, buildAST } = _loadLetReparseHandles();
+                // [0] pass the REAL filePath (no "#match-arm-each" suffix) so
+                // re-parsed diagnostics report the genuine source file — a
+                // suffixed path breaks build.js/dev.js editor jump-to-location.
+                const _bs = splitBlocks(filePath, _reBodyRaw);
+                const _tab = buildAST(_bs);
+                _reNodes = (_tab.ast?.nodes ?? []) as unknown[];
+              } catch {
+                _reNodes = [];
+              }
+              if (
+                _reNodes.length > 0 &&
+                typeof _reFileStart === "number" && _reFileStart >= 0 &&
+                typeof _reBaseLine === "number" &&
+                typeof _reBaseCol === "number"
+              ) {
+                // [4] claim a disjoint id range for this re-parse's throwaway
+                // nodes (so their `nodeTypes` memo keys — `String(node.id)` —
+                // cannot clobber real nodes' cached resolved types); [2] the same
+                // walk rebases any nested each-arm stamp to file-absolute so a
+                // depth-2 read locates correctly.
+                _rebaseReparsedSubtree(
+                  _reNodes, _reFileStart, _reBaseLine, _reBaseCol, _reBodyRaw, _nextReparseIdBase(),
+                );
+              }
+              for (const _rn of _reNodes) {
+                if (_rn && typeof _rn === "object" && (_rn as ASTNodeLike).kind) {
+                  visitNode(_rn as ASTNodeLike);
+                }
+              }
+            }
             scopeChain.pop();
           }
         }
@@ -19522,6 +19577,121 @@ let _letReparseHandles: {
   splitBlocks: (filePath: string, source: string) => unknown;
   buildAST: (bs: unknown) => { ast?: { nodes?: unknown[] }; errors?: unknown[] };
 } | null = null;
+// g-nested-each-in-match-arm-drops-diagnostics (S316) — throwaway-id allocator
+// for the local each-in-match-arm re-parse. `buildAST` resets its OWN counter to
+// 0 per call, so re-parsed nodes get ids 0,1,2… that COLLIDE with real top-level
+// node ids. Because the arm re-walk runs AFTER the top-level decls, the throwaway
+// nodes would be the LAST writers into the shared `nodeTypes` memo (keyed by
+// `nodeKey` = `String(node.id)`) → they clobber real nodes' cached resolved types
+// (and can make `if (!nodeTypes.has(key)) visitNode(typeDecl)` skip a real
+// typeDecl). `_rebaseReparsedSubtree` re-indexes every re-parsed node's `id` into
+// a DISJOINT high range so its memo keys can never collide. Each re-parse claims a
+// fresh, stride-separated base (nesting/siblings all disjoint). The base is far
+// above any realistic real-node id and each stride reserves 1<<20 ids of room.
+const _REPARSE_ID_BASE = 0x40000000; // 1_073_741_824 — disjoint from real ids
+const _REPARSE_ID_STRIDE = 0x100000; //     1_048_576 — per-re-parse id room
+let _reparseIdCursor = _REPARSE_ID_BASE;
+function _nextReparseIdBase(): number {
+  const base = _reparseIdCursor;
+  _reparseIdCursor += _REPARSE_ID_STRIDE;
+  return base;
+}
+
+/**
+ * g-nested-each-in-match-arm-drops-diagnostics (S316) — prepare a LOCALLY
+ * re-parsed each-in-match-arm subtree for the read-side walk. Deep-walks EVERY
+ * object (children AND ExprNode fields like `valueExpr` where the mislocating
+ * `@name` IdentExpr lives), guarding shared refs via `seen`, and does three
+ * things per node:
+ *
+ * TODO(consolidate with ast-builder `_rebaseSubparseSpans`): the newline-counting
+ * `lineColFor` here triplicates ast-builder's `_rebaseSubparseSpans.lineColFor`
+ * plus the inline base-line/col computation in `buildMatchArmBodyChildren`. Left
+ * un-unified deliberately: this variant additionally re-indexes ids [4] and
+ * rebases nested stamps [2] (TS-re-parse-only concerns with no ast-builder
+ * analogue), and sharing would cross the .js/.ts module boundary — widening blast
+ * radius for a cosmetic win. Unify only if a third caller appears.
+ *
+ *   [span] rebase body-local → FILE coords. `buildAST` measures spans from byte 0
+ *     of its input (the arm body raw), so `span.start/end` are body-local and
+ *     `line/col` body-local (line 1-based). Add `fileStart` (the file byte-offset
+ *     of the body's byte 0) to start/end and RE-DERIVE line/col from the explicit
+ *     `baseLine`/`baseCol` (resolved by ast-builder where `block.raw` is
+ *     available; the TS pass has no `block.raw`). Mirrors ast-builder's
+ *     `_rebaseSubparseSpans.lineColFor`.
+ *   [4 / id] re-index the throwaway `id` into a disjoint high range (`idBase`) so
+ *     its `nodeTypes` memo key cannot clobber a real node's cached type. The
+ *     structural walk is unaffected — `visitNode` walks children by REFERENCE,
+ *     not id; only the memo key changes.
+ *   [2 / depth-2] a NESTED each-bearing wrapper stamped DURING this re-parse's
+ *     `buildAST` carries BODY-LOCAL `_reparseEachArm*` coords (its
+ *     `_armsRawFileStart` was measured within THIS re-parse). Rebase those stamp
+ *     fields to file-absolute too, so the recursive consumer re-parse of the
+ *     inner body sees real source coordinates (otherwise a depth-2 read
+ *     mislocates — a local offset added to an already-local base).
+ */
+function _rebaseReparsedSubtree(
+  nodes: unknown[],
+  fileStart: number,
+  baseLine: number,
+  baseCol: number,
+  raw: string,
+  idBase: number,
+): void {
+  const seen = new Set<unknown>();
+  function lineColFor(localStart: number): { line: number; col: number } {
+    if (localStart < 0 || localStart > raw.length) return { line: baseLine, col: baseCol };
+    let nl = 0;
+    let lastNl = -1;
+    for (let i = 0; i < localStart; i++) {
+      if (raw.charCodeAt(i) === 10 /* \n */) { nl++; lastNl = i; }
+    }
+    if (nl === 0) return { line: baseLine, col: baseCol + localStart };
+    return { line: baseLine + nl, col: localStart - lastNl };
+  }
+  function visit(n: unknown): void {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const el of n) visit(el); return; }
+    const rec = n as Record<string, unknown>;
+    // [4] re-index throwaway id into the disjoint range (memo-key isolation).
+    if (typeof rec.id === "number") rec.id = rec.id + idBase;
+    // [span] body-local → file-absolute.
+    const sp = rec.span as { start?: unknown; end?: unknown } | undefined;
+    if (sp && typeof sp.start === "number" && typeof sp.end === "number") {
+      const lc = lineColFor(sp.start);
+      rec.span = { ...sp, start: sp.start + fileStart, end: sp.end + fileStart, line: lc.line, col: lc.col };
+    }
+    // [2] depth-2 — a nested each-bearing wrapper's stamp is body-local within
+    // THIS re-parse; convert it to file-absolute so the recursive consumer
+    // re-parse of the inner body locates correctly. ast-builder's body-local
+    // `_reparseEachArmFileStart` can point a hair off the body (at the arm opener)
+    // under nested re-parse, which crosses a line boundary and mislocates by a
+    // line — so anchor on the inner body TEXT itself: its verbatim position in the
+    // outer raw is self-consistent with the `baseLine`/`baseCol` the recursive
+    // consumer will use (both derive from this same `raw`). Fall back to the
+    // stamped offset if the text can't be located uniquely.
+    if (typeof rec._reparseEachArmFileStart === "number") {
+      const _innerRaw = rec._reparseEachArmBodyRaw;
+      let _localStart = rec._reparseEachArmFileStart;
+      if (typeof _innerRaw === "string" && _innerRaw.length > 0) {
+        const _found = raw.indexOf(_innerRaw);
+        if (_found >= 0) _localStart = _found;
+      }
+      const lc = lineColFor(_localStart);
+      rec._reparseEachArmFileStart = _localStart + fileStart;
+      rec._reparseEachArmBaseLine = lc.line;
+      rec._reparseEachArmBaseCol = lc.col;
+    }
+    for (const k of Object.keys(rec)) {
+      if (k === "span") continue;
+      const v = rec[k];
+      if (v && typeof v === "object") visit(v);
+    }
+  }
+  for (const n of nodes) visit(n);
+}
+
 function _loadLetReparseHandles(): NonNullable<typeof _letReparseHandles> {
   if (_letReparseHandles) return _letReparseHandles;
   // eslint-disable-next-line @typescript-eslint/no-var-requires

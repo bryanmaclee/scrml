@@ -15757,6 +15757,71 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
               !arm.bodyRaw.trim() ||
               /<\s*each\b/.test(arm.bodyRaw)
             ) {
+              // g-nested-each-in-match-arm-drops-diagnostics (S316) — the
+              // type-system read-side walk (E-STATE-UNDECLARED and every other
+              // per-ident diagnostic) reaches an arm body ONLY through the
+              // walkable `armBodyChildren` wrapper's `children`. Each-bearing
+              // bare-body arms are BLANKED here (children:[]) to avoid the S153
+              // `collectEachBlocks(fileAST)` double-emit — but that blanking
+              // ALSO drops the read-side walk for EVERY read inside such an arm
+              // (the nested-`<each>` read AND any direct read that merely shares
+              // the arm with an `<each>` sibling). Codegen `buildMatchArms` still
+              // renders the each; only the TS read-walk goes blind.
+              //
+              // Fix (blanking UNCHANGED — children stays []): additionally stamp
+              // the raw arm body + its absolute FILE coordinates on the wrapper
+              // so the type-system can re-parse the body LOCALLY (throwaway ids,
+              // never attached to `fileAST` → `collectEachBlocks`/codegen see
+              // ZERO change) and run the read-side walk with correct source
+              // spans. These `_reparseEachArm*` fields live under
+              // `armBodyChildren`, which the within-node parity classifier strips
+              // wholesale (STRIP_KEYS) → parity-invisible, no classifier change.
+              // Only stamped for the each-bearing bare-body case; self-closing /
+              // `:`-shorthand / empty arms carry no re-parseable body.
+              const _isEachBearingBareBody =
+                arm.bodyForm === "bare-body" &&
+                arm.bodyRaw &&
+                arm.bodyRaw.trim() &&
+                /<\s*each\b/.test(arm.bodyRaw);
+              let _reparseStamp = null;
+              if (
+                _isEachBearingBareBody &&
+                _armsRawFileStart >= 0 &&
+                typeof arm.bodyContentStart === "number"
+              ) {
+                const _bodyFileStart = _armsRawFileStart + arm.bodyContentStart;
+                // line/col of the arm body's byte 0, measured against block.raw
+                // (whose span.line/col ARE reliable) — mirrors the lineColFor in
+                // _rebaseSubparseSpans. The TS consumer has no block.raw, so the
+                // base line/col must be resolved HERE where it is available.
+                let _baseLine =
+                  block && block.span && typeof block.span.line === "number" ? block.span.line : 1;
+                let _baseCol =
+                  block && block.span && typeof block.span.col === "number" ? block.span.col : 1;
+                const _rawStr = block && typeof block.raw === "string" ? block.raw : "";
+                const _anchorStart =
+                  block && block.span && typeof block.span.start === "number"
+                    ? block.span.start
+                    : -1;
+                if (_anchorStart >= 0) {
+                  const _local = _bodyFileStart - _anchorStart;
+                  if (_local >= 0 && _local <= _rawStr.length) {
+                    let _nl = 0;
+                    let _lastNl = -1;
+                    for (let _i = 0; _i < _local; _i++) {
+                      if (_rawStr.charCodeAt(_i) === 10) { _nl++; _lastNl = _i; }
+                    }
+                    if (_nl === 0) { _baseCol = _baseCol + _local; }
+                    else { _baseLine = _baseLine + _nl; _baseCol = _local - _lastNl; }
+                  }
+                }
+                _reparseStamp = {
+                  _reparseEachArmBodyRaw: arm.bodyRaw,
+                  _reparseEachArmFileStart: _bodyFileStart,
+                  _reparseEachArmBaseLine: _baseLine,
+                  _reparseEachArmBaseCol: _baseCol,
+                };
+              }
               wrappers.push({
                 id: ++counter.next,
                 kind: "markup",
@@ -15765,6 +15830,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
                 children: [],
                 span,
                 _matchArmBodyForm: arm.bodyForm,
+                ...(_reparseStamp || {}),
               });
               continue;
             }
