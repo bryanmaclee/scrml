@@ -1,0 +1,13 @@
+{
+  "id": "e-state-undeclared-nested-each-in-match-arm-pos",
+  "description": "An undeclared `@cell` read inside an `<each>` that is nested INSIDE a `<match>` arm fires E-STATE-UNDECLARED (§6.1.1 + §6.2), exactly as it does at top level / in a bare `<each>` / in a `<match>` arm directly. Regression pin for g-nested-each-in-match-arm-drops-diagnostics (S316): each-bearing bare-body arms are blanked (`children:[]`) by ast-builder to avoid the S153 collectEachBlocks double-emit, which silently DROPPED the read-side walk for every read inside such an arm; the type-system now re-parses the stamped arm body locally (throwaway ids, never attached to fileAST) so the read-side walk fires with correct source spans. Incidental W-PROGRAM-SPA-INFERRED / W-EACH-KEY-001 are ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/g-nested-each-in-match-arm-diagnostics.test.js",
+  "spec": "§6.1.1",
+  "rationale": "§6.1.1 + §6.2 — reactive state cells SHALL be declared structurally (`<x> = init`) before they are read with the canonical `@x` form; the undeclared-cell read-side diagnostic must fire in every read locus, including an `<each>` body nested inside a `<match>` arm. Nesting is not an exemption — a dropped diagnostic there fails toward silently accepting bad source.",
+  "expect": {
+    "codes": ["E-STATE-UNDECLARED"],
+    "notCodes": [],
+    "severity": { "E-STATE-UNDECLARED": "error" }
+  }
+}

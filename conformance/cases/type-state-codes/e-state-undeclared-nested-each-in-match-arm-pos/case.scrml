@@ -1,0 +1,15 @@
+${
+  type Phase:enum = { A, B }
+  <items> = [1, 2]
+  <phase>: Phase = Phase.A
+}
+<program>
+  <match for=Phase on=@phase>
+    <A>
+      <each in=@items>
+        <p>${@undeclaredInNestedEach}</p>
+      </each>
+    </>
+    <B> <div>b</div> </>
+  </match>
+</program>
