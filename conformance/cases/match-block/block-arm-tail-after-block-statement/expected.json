@@ -1,0 +1,21 @@
+{
+  "id": "match-block-block-arm-tail-after-block-statement",
+  "description": "§18.5 TAIL-SHAPE axis — a block arm's tail expression is lifted as the arm's value when it FOLLOWS a block-bodied statement (`for`, `if`) with no `;` or newline between the closing brace and the tail, in every value position. The straight-line tail is carried as the control, and a block-bodied statement with NO trailing expression is carried as the void counter-gate. This axis was unenumerated before: #469/#470 unified the tail CLASSIFIER but both of their cases used straight-line arm bodies, so the raw-string routes' segmenter — which split only on `;` and newline at depth 0 — swallowed the tail into a segment headed by `for`/`if`, classified it a statement, and the value-returning IIFE fell off its end.",
+  "language-version": "1.0",
+  "spec": "§18.5",
+  "rationale": "§18.5: an arm body is `{ statement* expression? }` and its result is its LAST expression. Neither §18.5 nor JS requires a separator after a block-bodied statement, so `{ let a = 0; for (…) { a = 1 } a }` has TWO leading statements and the tail `a` — the same decomposition as the `;`-separated spelling. The arm must therefore yield 1 (after-for), 2 (after-if) and 3 (straight-line control) identically whether it sits in a derived cell (the raw-string IIFE path), a return statement, a multi-scrutinee decl (§18.19), a `fn` local decl, or a `function` local decl. The void counter-gate is the other direction and is equally normative: a block whose last segment is NOT a value expression yields §18.5 void, so `{ let v = 0; for (…) { v = 8 } }` renders EMPTY — the fix must not lift a tail that is not there. `undefined` is not a scrml value (§42.1.1), so an arm that falls off its end is always wrong.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"],
+    "domAnchored": [
+      { "selector": "#after-for", "text": "1" },
+      { "selector": "#after-if", "text": "2" },
+      { "selector": "#straight", "text": "3" },
+      { "selector": "#void-arm", "text": "" },
+      { "selector": "#ret-after-for", "text": "4" },
+      { "selector": "#multi-after-if", "text": "5" },
+      { "selector": "#local-after-for", "text": "6" },
+      { "selector": "#fn-local-after-for", "text": "7" }
+    ]
+  }
+}

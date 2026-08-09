@@ -7547,8 +7547,24 @@ SSR hide without a ruling turns them red.
 same element emits **two `style` attributes** — invalid HTML, second one dropped by conformant parsers.
 Pre-existing and unrelated to `show=`; surfaced while measuring D1.
 
-### g-match-block-arm-body-has-three-divergent-lowering-routes — the §18.5 block-arm body is lowered by THREE different routes; each is correct where the others are wrong — `NEW S331-bryan (Q2 probe, pre-review-floor); HIGH`
-<!-- @gap id=g-match-block-arm-body-has-three-divergent-lowering-routes sev=HIGH status=open locus=compiler/src/codegen/emit-logic.ts:4721-4747(structuredBody/tilde route, statement-emitter)+compiler/src/codegen/emit-control-flow.ts(emitIifeBlockArmBody, raw-string route)+compiler/src/codegen/emit-event-wiring.ts:1193(derived-cell route) prov=spec:§18.5 -->
+### g-match-block-arm-tail-and-nested-assignment-are-separator-dependent — a §18.5 block-arm tail that follows a block-bodied statement with no `;`/newline is swallowed (arm → `undefined`), and a nested bare assignment lowers as a shadowing `const` — `NEW S331-bryan (Q2 probe); HIGH; RESOLVED S331-bryan (fix/s331-block-arm-route-unification)`
+<!-- @gap id=g-match-block-arm-tail-and-nested-assignment-are-separator-dependent sev=HIGH status=resolved locus=compiler/src/codegen/emit-logic.ts:4592(_splitBlockStatements, the depth-0 `}` boundary)+compiler/src/codegen/emit-logic.ts:4196(_emitForStmtWithTilde, the opts-dropping fallbacks)+compiler/src/codegen/emit-logic.ts:4844(emitMatchExprDecl, per-arm declaredNames) prov=spec:§18.5 -->
+
+**RESOLVED S331-bryan.** ⚑ **This entry was FILED UNDER A WRONG DIAGNOSIS AND A WRONG NAME** (`…three-divergent-lowering-routes`). Both are corrected here rather than quietly amended, because the wrong version is the more instructive one.
+
+**What I filed:** three divergent emission routes, each correct where the others are wrong; fix = unify the routes. **What it actually was:** two unrelated single-point defects, neither caused by route multiplicity. The dispatched agent argued against the prescribed shape with measurement and was right.
+
+- **Defect A — separator dependence, not position dependence.** `_splitBlockStatements` split only on `;` and newline at depth 0, so `for (…) { a = 1 } a` stayed **one segment headed by `for`**, was correctly classified a statement, and never lifted; the value-returning IIFE fell off its end → `undefined` (§42.1.1: not a scrml value). **The tail lifts the moment a `;` or newline precedes it** — which is exactly why no corpus file ever tripped it. Fixed by making a block-bodied statement's closing `}` a segment boundary, gated three ways (segment headed by a block-statement keyword · next token is not a continuation keyword `else`/`while`/`catch`/`finally` · next char begins a statement, by whitelist not blacklist).
+- **Defect B — a dropped options argument.** `_emitForStmtWithTilde`'s two fallbacks called `emitForStmt(node)` with `opts` **omitted entirely**, losing `declaredNames`, `boundary`, `serverFnNames`, `asyncRouteMap` and the engine bindings. `declaredNames` was merely the loss that was *visible*: with an absent set the `const-decl`/`tilde-decl` reassignment guard could not see the enclosing `let a`, so a nested bare `a = 1` emitted as a shadowing `const a = 1` (silent wrong value) and `a = a + 1` as `const a = a + 1` (**runtime TDZ `ReferenceError` that `node --check` accepts**). Fixed by re-dispatching through `emitLogicNode` with the tilde context cleared.
+- **Defect C — cross-arm `declaredNames` leak** (surfaced during the fix, folded in): all arms emitted against one shared set, so arm 1's names leaked into arm 2 and turned a sibling's fresh declaration into an assignment to an unbound name — a silent global in a classic script. Fixed with a per-arm set seeded from the enclosing scope.
+
+**⚑ The axis is arm FORM, not value POSITION — my original table was wrong.** Variant arms (`.Idle :>`) parse to `structuredBody` and are immune; literal/wildcard arms (`1 :>`, `_ :>`) hit the raw-string segmenter. My reproducer used variant arms for the return/markup-interp positions and a literal-arm shape for the derived position, so the confound was in the probe and read out as position-dependence. **Verified on base `05787a42`: with literal arms, `return a` occurs zero times — Defect A broke five of five positions, not two of four.** Pinning only the named positions would have missed the axis entirely.
+
+**Verification (PA-independent, not the agent's self-report):** conformance **876/876**; the new unit file 23/23; both defects re-probed by emission on base vs fix; the fallback re-dispatch probed for infinite recursion (terminates, emits correctly); and an adversarial sweep of adjacent shapes — `if/else`, `do…while`, arrow-function initializer, object literal, chained tail (`d + 1`), two sequential `while` loops — none torn, all correct. Full-corpus differential **0 of 7328**, which establishes the change is *inert on the existing corpus* and carries **zero evidence the fixes work**, because the corpus contains no arm with a block-bodied statement lacking a trailing separator. That is precisely how #470 shipped both defects past a clean `0 of 7296`.
+
+**Residual, pinned not fixed:** `do { … } while (c)` with no separator before the tail still voids the arm — no depth-0 `}` terminates a do-while, and `while` after `}` is textually ambiguous with a following loop. Fails toward the pre-existing void, never toward a wrong value. A separator is a verified workaround. See `g-match-block-arm-do-while-tail-not-lifted` below. A parenthesized tail (`{ if (c) { } (a + b) }`) is excluded from the boundary whitelist for the same fail-closed reason.
+
+**Original diagnosis, preserved because the correction is the lesson:**
 
 **PA-REPRODUCED S331 by emission at `b4fb2f1f`; loci are PA-located-verify (derived from emitted output
 across four value positions, not traced through the code).** #470 unified the §18.5 tail *classifier*
@@ -7596,6 +7612,27 @@ straight-line arm bodies. `g-match-block-arm-value-lift-covers-one-of-five-paths
 for the five *positions*; *tail shape* and *nested-statement fidelity* are two further orthogonal axes
 nobody enumerated. **Root fix = one emission route, completing what #470 started on the predicate.**
 **Blocks the derived-position half of the if-value fork (Q2)** — see user-voice S331.
+
+### g-match-block-arm-do-while-tail-not-lifted — a §18.5 block-arm tail following a separator-less `do…while` is still swallowed; the arm voids — `NEW S331-bryan (adversarial pass on the separator fix); LOW`
+<!-- @gap id=g-match-block-arm-do-while-tail-not-lifted sev=LOW status=open locus=compiler/src/codegen/emit-logic.ts:4530(_BRACE_CONTINUATION_RE, the `while` member) prov=spec:§18.5 -->
+
+**Disclosed residual of the S331 separator fix, PA-verified by emission.** The depth-0 `}` boundary
+cannot fire for a `do { … } while (c)`: the `}` is followed by `while`, which the continuation guard
+must treat as *part of the same statement* — otherwise `do`/`while` would be torn into two invalid
+halves. But `} while` is textually ambiguous between a do-while's tail and a following `while` loop, so
+the guard is deliberately conservative. Consequence: `{ let b = 0; do { b = b + 1 } while (b < 3) b }`
+swallows the tail and the arm yields §18.5 void.
+
+**Fails toward the pre-existing behaviour (void), never toward a wrong value** — strictly better than
+the Defect-A class it descends from, and unchanged from before the fix, so it is a residual and not a
+regression. **Workaround verified:** a `;` or newline before the tail lifts it correctly
+(`do { … } while (b < 3)` ⏎ `b` emits `_scrml_tilde_N = b`). Pinned in
+`compiler/tests/unit/match-block-arm-tail-after-block-statement.test.js`.
+
+Same fail-closed reasoning excludes a parenthesized tail (`{ if (c) { } (a + b) }`) from the boundary
+whitelist: admitting `(` would risk splitting `{ … })`, so an expression that merely continues off the
+brace can never be torn. Both are conscious trades, recorded so a later reader sees a decision rather
+than an oversight.
 
 ### g-match-block-arm-value-lift-covers-one-of-five-paths — #447's block-arm tail lift reaches only the `emitMatchExprDecl` path; four other value positions still drop the tail — `NEW S328-bryan (review-floor S239 pass on #447); MED; RESOLVED S330-peter (feat/s330-match-block-arm-value-lift)`
 <!-- @gap id=g-match-block-arm-value-lift-covers-one-of-five-paths sev=MED status=resolved locus=compiler/src/codegen/emit-control-flow.ts:2315+:2264(emitMatchExpr, the untouched sibling)+compiler/src/codegen/emit-logic.ts:4595(the §18.19 multi-scrutinee delegation) prov=spec:§18.5 -->
