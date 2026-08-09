@@ -7613,6 +7613,61 @@ for the five *positions*; *tail shape* and *nested-statement fidelity* are two f
 nobody enumerated. **Root fix = one emission route, completing what #470 started on the predicate.**
 **Blocks the derived-position half of the if-value fork (Q2)** — see user-voice S331.
 
+### g-server-fn-reindent-fix-covers-8-of-25-sites-in-its-own-class — #474 made ONE emitter template-literal-aware; three sibling emitters in the same class still corrupt multi-line template content, all reachable with zero diagnostics — `NEW S331-bryan (adversarial review of #474); HIGH`
+<!-- @gap id=g-server-fn-reindent-fix-covers-8-of-25-sites-in-its-own-class sev=HIGH status=open locus=compiler/src/codegen/emit-library-shared.ts:692(emitLibraryFnMember)+compiler/src/codegen/emit-tool.ts:466+compiler/src/codegen/emit-control-flow.ts:1073(emitTryStmt)+compiler/src/codegen/emit-logic.ts:3410 prov=spec:§48 -->
+
+**Found by the S239 pass on #474. NOT a regression** — every shape below reproduces byte-identically on the parent `0beddacc`, so this is an incomplete fix, not damage. #474 routed **8 sites, all inside `emit-server.ts`**; the identical blind split-and-indent pattern remains at sibling emitters. Three are reachable today, each verified end-to-end with **0 errors and 0 warnings**:
+
+- **`emit-library-shared.ts:692`** — a library/model `.scrml`; an exported `function` with a multi-line template gets every continuation line indented.
+- **`emit-tool.ts:466`** — §64 `<program kind="tool">`. Verified **by executing the emitted bundle**, not by grep: the injected whitespace ships to the terminal.
+- **`emitTryStmt`** (`emit-control-flow.ts:1073` / `emit-logic.ts:3410`) — `!{ } catch`, which is the *first* nesting construct an author reaches for, and it corrupts on **both** the server and client boundary.
+
+`emitIfStmt` (`emit-control-flow.ts:501`) is only **accidentally** safe — it pushes the whole multi-line string with one prefix instead of splitting. That accident is why an `if` probe reads clean and it is not a guarantee.
+
+**Two secondary defects in the same landing, recorded here rather than split out:**
+- **The test oracle shares the fix's model of the bug.** `g-server-fn-reindent-template-literal.test.js` has two cases, both a top-level statement in a bare `server fn`; it **passes unchanged with every defect above live**. Case 2's name claims it covers a nested `${\`…\`}` interpolation, but it only asserts the trivially-correct inner literal and never the outer one that carries the interpolation — and both extraction regexes are `` /const (inner|body) = (`[^`]*`)/ ``, structurally unable to match a template containing a nested backtick, i.e. exactly the shape the test claims to cover.
+- **A false provenance claim.** The source comment states the complete fix is *"filed as a follow-up."* **PA-verified: `grep -rn "g-server-fn-reindent" --include='*.md' --include='*.json'` returns ZERO hits.** No filing existed anywhere until this entry. The residual was documented only inside the comment describing it.
+
+**The locus is what caused the half-fix.** The originating gap was scoped `locus=compiler/src/codegen/emit-server.ts`, so the fix stopped at that file — a per-position locus on a compiler-wide class. Recorded as an instance of pa-base §5's warning that a searched locus anchors the search.
+
+**Fix direction:** hoist `indentServerFnBodyLines` into a shared codegen util and route the residual sites — or, better and as the PR's own comment recommends, tag template-raw vs layout **at emit time** instead of re-lexing generated text.
+
+### g-server-fn-reindent-lexer-desync-understated-and-measured-with-the-wrong-predicate — the shipped KNOWN-LIMITATION comment names a trigger far narrower than the real one, and its zero-instance corpus measurement used a predicate that does not describe the bug — `NEW S331-bryan (adversarial review of #474); HIGH`
+<!-- @gap id=g-server-fn-reindent-lexer-desync-understated-and-measured-with-the-wrong-predicate sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts(indentServerFnBodyLines, the regex-vs-division lexer state) prov=spec:§48 -->
+
+**Found by the S239 pass on #474.** The shipped comment describes the blind spot as *"a REGEX LITERAL containing a backtick"*, *"NOT reachable in the corpus (0 instances)"*, requiring *"pairing a backtick-bearing regex with a multi-line template literal."* **All three claims are wrong or too narrow.**
+
+The real desync trigger is any regex literal containing an **odd count of `'`, `"` or `` ` ``**, an **unbalanced `{`/`}`**, or a **`//` sequence** (which self-opens a phantom line comment). Reproduced on a mundane sanitizer — `name.replace(/['"]/g, "")` beside a multi-line template inside an `if` block: the lone `'` opens a phantom string state that never closes, the template's backtick is swallowed, and **the pass silently degenerates to the exact pre-fix blind indent** (HEAD output byte-identical to the parent). No diagnostic; `node --check` clean.
+
+**And the corpus measurement that justified shipping the limitation used the wrong predicate.** `stdlib/compiler/meta-checker.scrml:230` **does** carry a backtick-bearing regex (`` .replace(/`[^`]*`/g, "") ``). It self-heals because its two backticks balance — but the "0 instances" figure was taken against a predicate that does not describe the defect, so the zero was never evidence of safety. Same class as pa-base §8's *a fix built before the problem is measured is a fix whose value is unmeasured*.
+
+**Bounded, and the bound is worth recording:** the desync is per-emitted-chunk — lexer state resets between statements, so a regex in statement N cannot poison statement N+1. The regex and the template must land in the same chunk (same statement, or the same nested block emitted as one string). That narrows it to one `if` block away, not to zero.
+
+**Fix direction:** the `/`-is-regex-vs-division ambiguity needs expression-position tracking to resolve properly; the cheaper and sound fix is the structural one above — never re-lex generated text.
+
+### g-template-interp-regex-swallows-following-source — a `${}` interpolation containing a regex with a quote makes the tokenizer run past the template's end and splice raw scrml into the emitted JS — `NEW S331-bryan (adversarial review of #474, out of its scope); MED`
+<!-- @gap id=g-template-interp-regex-swallows-following-source sev=MED status=open locus=searched:emit-server.ts,emit-logic.ts,indentServerFnBodyLines — no locus found; the defect precedes codegen (a codegen indent pass cannot emit `<msg> = ""`), so it is parse/tokenize-stage prov=rationale:surfaced-adjacent-to-the-474-lexer-desync-but-reproduces-independently -->
+
+**PA-REPRODUCED S331 on the reviewer's exact source; PRE-EXISTING (reproduces byte-identically on `0beddacc`) and unrelated to #474's change.** A `server fn` whose body returns a template with an interpolated regex containing a quote —
+
+```
+<program>
+  server fn mail(name: string) -> string {
+    return `Hi ${ name.replace(/['"]/g, "") }!`
+  }
+  <msg> = ""
+  ...
+</program>
+```
+
+— emits a `.server.js` that **fails `node --check`** with the following source spliced raw into the template (verified: `<msg> = ""` appears at line 40 of the emitted artifact).
+
+**⚑ Severity corrected DOWN from the reviewer's report, which called it a silent build-breaker.** It is **not silent**: the compile exits non-zero with `E-STATE-UNDECLARED`, because the swallowed text contained the `<msg>` declaration that a later `@msg` read needs. So the failure is loud — but **misattributed**: the diagnostic blames the `@msg` read when the cause is the tokenizer swallow, which is `[[feedback_dont_soft_classify_bugs]]`'s sibling (a diagnostic that does not name its root cause is itself a diagnostic bug).
+
+**Open question, named rather than asserted:** whether a variant exists where nothing downstream references the swallowed text, in which case the swallow WOULD be silent. Not probed. That determines whether MED is right or whether this is a HIGH.
+
+**Trigger boundary (measured):** requires the §40.8 bare-`<program>`-body form. The same `server fn` wrapped in an explicit `${…}` logic block compiles clean with no leak — PA-verified twice, both orderings of the sibling declaration.
+
 ### g-match-block-arm-do-while-tail-not-lifted — a §18.5 block-arm tail following a separator-less `do…while` is still swallowed; the arm voids — `NEW S331-bryan (adversarial pass on the separator fix); LOW`
 <!-- @gap id=g-match-block-arm-do-while-tail-not-lifted sev=LOW status=open locus=compiler/src/codegen/emit-logic.ts:4530(_BRACE_CONTINUATION_RE, the `while` member) prov=spec:§18.5 -->
 

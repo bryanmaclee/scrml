@@ -612,3 +612,58 @@ already performs.
 <!-- @review pr=473 verdict=clean by=S331-bryan date=2026-08-09 probe=fileurltopath-correct-api-precedent-facts-ts-31-verified-real-and-repo-wide-grep-for-broken-form-returns-zero-remaining-sites-class-closed -->
 <!-- @review pr=475 verdict=carve-out by=S331-bryan date=2026-08-09 probe=file-list-verified-changelog-handoff-deltalog-zero-code-paths -->
 <!-- @review pr=478 verdict=carve-out by=S331-bryan date=2026-08-09 probe=file-list-verified-continuity-changelog-handoff-deltalog-rotation-prreviews-knowngaps-zero-code-paths -->
+
+## S331-bryan — #474 (the last owed item)
+
+**Verdict: FINDING.** Dispatched as an independent adversarial pass rather than reviewed by eye, because
+`emit-server.ts` is a **text pass over generated output** — the repo's standing bug family. Every claim
+below was PA-verified before being recorded; two were corrected.
+
+The fix is **correct on its named case and not a regression** — every defect found reproduces
+byte-identically on the parent `0beddacc`. What it is, is **incomplete**: it made ONE emitter
+template-literal-aware and left three siblings in the same class corrupting multi-line template content
+with zero diagnostics (`emit-library-shared.ts:692` · `emit-tool.ts:466`, verified by EXECUTING the
+emitted tool bundle · `emitTryStmt`, which corrupts on both boundaries and is the first nesting
+construct an author reaches for). `emitIfStmt` is only *accidentally* safe, which is why an `if` probe
+reads clean.
+
+Its shipped `KNOWN LIMITATION` comment also understates the residual — the real desync trigger is any
+regex containing an odd count of `'`/`"`/`` ` ``, unbalanced braces, or `//`, not just a backtick — and
+the "0 instances in corpus" measurement that justified shipping it **used a predicate that does not
+describe the bug** (`stdlib/compiler/meta-checker.scrml:230` does carry a backtick-bearing regex).
+
+**PA-verified corrections to the reviewer's own report** — recorded because taking an agent at face
+value is the failure mode this floor exists to catch:
+- **F4 confirmed exactly:** the comment's *"filed as a follow-up"* claim was false —
+  `grep -rn "g-server-fn-reindent"` returned **zero** hits until this session filed it.
+- **F6 severity corrected DOWN.** The reviewer called the template-swallow a *silent* build-breaker. It
+  is not silent — the compile exits non-zero with `E-STATE-UNDECLARED`. It is **misattributed**, which is
+  a different and lesser defect. It also did not reproduce on my first two constructions; only on the
+  §40.8 bare-`<program>`-body form. Filed MED with the open question that would make it HIGH, rather
+  than at the reported severity.
+
+Filed: `g-server-fn-reindent-fix-covers-8-of-25-sites-in-its-own-class` (HIGH) ·
+`g-server-fn-reindent-lexer-desync-understated-and-measured-with-the-wrong-predicate` (HIGH) ·
+`g-template-interp-regex-swallows-following-source` (MED).
+
+**The reusable half:** the originating gap was scoped `locus=compiler/src/codegen/emit-server.ts`, and
+the fix stopped at that file. A per-position locus on a compiler-wide class **anchors the search** —
+pa-base §5, and the second instance of it this session.
+
+<!-- @review pr=474 verdict=finding by=S331-bryan date=2026-08-09 probe=independent-adversarial-dispatch-parent-vs-head-differential-on-17-probes-plus-executed-tool-bundle-found-3-sibling-emitters-uncovered-plus-lexer-desync-far-wider-than-shipped-comment-plus-false-followup-filing-claim-pa-verified-and-two-findings-corrected -->
+
+## S331-bryan — my own two merges (the floor binds them too)
+
+- **#479** (`emit-logic §18.5`) — **CLEAN, and the pass is the reason it exists.** The mandatory S239
+  gate ran on the agent's diff BEFORE landing: both defects re-probed by emission on base vs fix; the
+  fallback re-dispatch probed for infinite recursion (terminates, and now emits `a = 1` rather than
+  `const a = 1`); and an adversarial sweep of every adjacent shape the new depth-0 `}` boundary could
+  tear — `if/else`, `do…while`, arrow-function initializer, object literal, chained tail (`d + 1`), two
+  sequential `while` loops — none torn. Conformance 876/876 and the new unit file 23/23 were re-run by
+  me, not taken from the agent's report. One residual found and disclosed rather than hidden
+  (`g-match-block-arm-do-while-tail-not-lifted`, LOW). The differential's `0 of 7328` was recorded WITH
+  its coverage caveat: it proves inertness on the corpus and carries zero evidence the fix works.
+- **#480** (review-floor drain) — **CARVE-OUT.** Single file, `docs/pr-reviews.md`. No code path.
+
+<!-- @review pr=479 verdict=clean by=S331-bryan date=2026-08-09 probe=mandatory-s239-pre-land-emission-base-vs-fix-plus-recursion-probe-plus-adversarial-sweep-ifelse-dowhile-arrow-objlit-chainedtail-two-whiles-none-torn-conformance-876-and-unit-23-rerun-independently-one-residual-disclosed -->
+<!-- @review pr=480 verdict=carve-out by=S331-bryan date=2026-08-09 probe=single-file-docs-pr-reviews-md-no-code-path -->
