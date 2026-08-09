@@ -2,6 +2,13 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S335 — 2026-08-09 (peter · Windows) — the review floor drained (a HIGH leak surfaced), and a re-verified ledger-hygiene pass
+
+**2 PRs merged** (#489 #490); main `ddb924b3` → `458452a2`, coherence 0/0, cloud gate GREEN incl. Windows. **Docs/ledger only — no compiler code touched.** Review floor **7 owed → 0**. Gaps HIGH 27 · MED **126→122** · LOW **56→58** · Nom 7. Hand-off rotated (S334 → `handOffs/hand-off-s334.md`; the live file had grown past the boot read cap).
+
+- **#489 — review-floor drain.** The 7 PRs owed under the S313/S316 review floor (#481–#487) were reviewed (4 code-bearing via an independent adversarial fan-out; the one HIGH ground-truthed by hand). **The floor's return: a HIGH confidentiality leak in freshly-merged #486** — a derived cell nested in a `for`-loop `lift` body evades the §12.2 server-only-reach check and ships the argon2id password implementation plus its secret into the browser bundle (top-level and plain-block positions were covered; this nesting position was not). Confirmed by compiling the repro on committed HEAD (the identical top-level cell correctly errors). Filed as a new position in bryan's pending `escalate-vs-refuse` family and **routed to him** — reviewed and recorded, not fixed, since the family shares one substrate and its ruling is his.
+- **#490 — ledger-hygiene.** Each stale-close candidate from the S334 census was **re-reproduced against the current build** (not trusted from the census, which over-reported): 6 MED gaps confirmed fixed and flipped to resolved, 3 kept open with corrected triage, 4 new gaps filed. The re-verify caught the census being wrong about one gap (it had been checked against the wrong element shape). A self-inflicted parser fragility — a new gap whose `locus` prose contained a literal `id=`, which the whitespace attribute-split misread — was caught before push and reworded.
+
 ## S334 — 2026-08-09 (peter · Windows) — a build-integrity codegen fix, a ledger-integrity tooling fix, and a 66-gap census
 
 **2 PRs merged** (#484 #485); main `05787a42` → `ef23a4d0`, coherence 0/0, cloud gate GREEN incl. Windows. Conformance **877/877**. Also pushed bryan's held if-value build to origin (unblocking his §17.6 ruling) and routed a reset-semantics gap to him.
