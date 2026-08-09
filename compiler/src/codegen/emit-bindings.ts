@@ -385,7 +385,7 @@ export function lowerClassDirectiveCondition(
     // never fires because `val.exprNode` is set to the escape-hatch node); re-parse
     // it and thread `requestIds` so the ref routes to `_scrml_request_<r>` instead
     // of the mis-routing/mangling string fallback. Scoped to `<#`-bearing raws.
-    exprNode = reparseRequestRefEscapeHatch(exprNode, rawExpr, "<class-directive>", ctx.requestIds) as ExprNode | null;
+    exprNode = reparseRequestRefEscapeHatch(exprNode, rawExpr, "<class-directive>", ctx.requestIds, /* gateToRegisteredRequests */ true) as ExprNode | null;
     const rewrittenExpr = emitExprField(exprNode, rawExpr, {
       mode: "client",
       derivedNames: ctx.derivedNames,
@@ -420,7 +420,8 @@ export function lowerClassDirectiveCondition(
  * `jsExpr` is the JS template-literal string; `refs` are the reactive cell
  * names it interpolates (sans `@`); empty refs → set once at mount.
  *
- * KNOWN RESIDUAL of g-request-is-some-in-value-bool-class-attr — a `<#request>`
+ * KNOWN GAP g-request-is-some-in-mixed-text-attr-template-misroute (a sibling of
+ * g-request-is-some-in-value-bool-class-attr, docs/known-gaps.md) — a `<#request>`
  * ref inside a MIXED-TEXT attribute template (`title="state: ${<#userReq>.data
  * is some}"`) is NOT routed to `_scrml_request_<id>` here: unlike the single-
  * expression attribute callsites (value / bool / class), which recover a real

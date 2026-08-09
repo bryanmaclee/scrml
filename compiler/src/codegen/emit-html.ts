@@ -6,7 +6,7 @@ import { escapeHtmlAttr, VOID_ELEMENTS, HTML_BOOLEAN_ATTRS } from "./utils.ts";
 import { nsId } from "./chunk-namespace.ts";
 import { isUserComponentMarkup } from "../component-expander.ts";
 import { validateEmittedArtifact } from "./validate-emit.ts";
-import { emitExprField, reparseRequestRefEscapeHatch } from "./emit-expr.ts";
+import { emitExprField, reparseRequestRefEscapeHatch, rawReferencesRegisteredRequest } from "./emit-expr.ts";
 import { extractReactiveDeps, collectReactiveVarNames, extractReactiveDepsTransitive, buildFunctionBodyRegistry, collectRequestIds } from "./reactive-deps.ts";
 import { hasTemplateInterpolation } from "./rewrite.js";
 import { isRcdataElement, isHtmlElement } from "../html-elements.js";
@@ -332,7 +332,7 @@ function valueAttrIsLowerable(
   // emitter (emit-event-wiring.ts) can now lower it faithfully. Re-parse + thread
   // `requestIds` here so the probe validates the SAME structured lowering the
   // emitter produces (`_scrml_request_<r>.data`), keeping the two in agreement.
-  const _loweredNode = reparseRequestRefEscapeHatch(val.exprNode, val.raw, "<value-attr-lowerable-probe>", requestIds);
+  const _loweredNode = reparseRequestRefEscapeHatch(val.exprNode, val.raw, "<value-attr-lowerable-probe>", requestIds, /* gateToRegisteredRequests */ true);
   const lowered = emitExprField(_loweredNode, val.raw, { mode: "client", requestIds });
   // Validate the EXACT statement shape the wiring emitters produce, with the
   // very parser + options the S141 emitted-JS gate uses, so this check and that
@@ -1269,14 +1269,10 @@ export function generateHtml(
   const requestIdsForBindings: Set<string> = fileAST ? collectRequestIds(fileAST) : new Set<string>();
   const exprHasRequestRef = (expr: string): boolean => {
     if (!expr || requestIdsForBindings.size === 0) return false;
-    // Form 1: the literal `<#id>` sigil (survives raw in some paths).
-    if (expr.includes("<#")) {
-      const re = /<#([A-Za-z_$][A-Za-z0-9_$]*)>/g;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(expr)) !== null) {
-        if (requestIdsForBindings.has(m[1])) return true;
-      }
-    }
+    // Form 1: the literal `<#id>` sigil (survives raw in some paths). Shares the
+    // exported `rawReferencesRegisteredRequest` scan with the escape-hatch reparse
+    // gate (emit-expr.ts) so the `<#id>`-sigil request scan lives in ONE place.
+    if (rawReferencesRegisteredRequest(expr, requestIdsForBindings)) return true;
     // Form 2: the already-lowered bare `_scrml_input_<id>_` form produced by the
     // TAB stage (`preprocessWorkerAndStateRefs`) for a `${<#id>...}` interpolation
     // BEFORE codegen runs. The trailing-`_` anchor (NON-identifier-char after it)

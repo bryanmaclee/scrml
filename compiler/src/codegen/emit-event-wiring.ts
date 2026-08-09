@@ -484,11 +484,19 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       // get a real node, then emit via the SAME structured path the `${...}` text-
       // interpolation uses. Scoped to `<#`-bearing exprs so every other escape-hatch
       // condition keeps its existing string lowering byte-identical.
+      // S312 `if=`/`show=` toggle regime — reparse ANY `<#`-leading escape-hatch
+      // (request OR §36 input-state), UNGATED. An input-state `if=<#field>.value
+      // is some` toggle MUST reparse or the string fallback mangles its `is some`
+      // LHS → E-CODEGEN-INVALID-LOGIC; `requestIds` (below) still routes a
+      // registered id to `_scrml_request_<id>` and an input-state id to the
+      // registry. Gating this to registered-only broke input-state toggles (S239
+      // round-3 regression), so pass `false`.
       const condNode = reparseRequestRefEscapeHatch(
         b.condExprNode as ExprNode | undefined,
         b.condExpr,
         "<if-request-ref>",
         requestIds,
+        /* gateToRegisteredRequests */ false,
       ) as ExprNode | undefined;
       // Bug 61 — thread synthCellKeys + derivedNames so `if=@form.isValid`
       // conditional-display reads route to the dotted synth cell. `requestIds` routes
@@ -1619,7 +1627,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           // thread `requestIds` so the ref routes to `_scrml_request_<r>` instead
           // of mis-routing to the §36 input-state registry + mangling the `is`
           // LHS. Mirrors the S312 `if=`-attr fix; scoped to `<#`-bearing raws.
-          const condNode = reparseRequestRefEscapeHatch(binding.condExprNode, binding.condExpr, "<bool-attr-request-ref>", requestIds);
+          const condNode = reparseRequestRefEscapeHatch(binding.condExprNode, binding.condExpr, "<bool-attr-request-ref>", requestIds, /* gateToRegisteredRequests */ true);
           const compiled = emitExprField(condNode, binding.condExpr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys, requestIds });
           const conditionCode = `(${compiled})`;
           const toggle = `if (${conditionCode}) { el.setAttribute(${JSON.stringify(attrName)}, ""); } else { el.removeAttribute(${JSON.stringify(attrName)}); }`;
@@ -1678,7 +1686,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           // `_scrml_request_<r>` (§6.7.7) instead of mis-routing to the §36 input-
           // state registry + mangling the `is` LHS. Mirrors the S312 `if=`-attr
           // fix; scoped to `<#`-bearing raws so other value attrs are unchanged.
-          const valNode = reparseRequestRefEscapeHatch(binding.exprNode, binding.expr, "<value-attr-request-ref>", requestIds);
+          const valNode = reparseRequestRefEscapeHatch(binding.exprNode, binding.expr, "<value-attr-request-ref>", requestIds, /* gateToRegisteredRequests */ true);
           const compiled = emitExprField(valNode, binding.expr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys, requestIds });
           const apply = emitValueAttrApply(
             compiled,

@@ -1890,6 +1890,16 @@ function buildEachExprHandlerBody(preLowered: string, iterVarName: string): stri
  * via `rewriteIterValueExpr`. The render fn re-runs on collection change
  * (`_scrml_effect_static`), so per-item class:/interpolation re-evaluate.
  */
+// KNOWN GAP g-request-is-some-in-each-loop-attr-misroute (docs/known-gaps.md) —
+// a `<#request>` is-some inside a PER-ITEM `<each>`/`<for>` body attribute (e.g.
+// `<li class=${<#req>.data is some ? …}>`) still mis-routes here: the per-item
+// lowering (lowerEachExpr / rewriteIterValueExpr / emitExprField below) does not
+// thread `requestIds`, so `<#req>` routes to the §36 `_scrml_input_state_registry`
+// (which a `<request>` never populates → `undefined.data` → runtime crash) rather
+// than `_scrml_request_<id>`. A SILENT MISCOMPILE (compiles clean). A sibling of
+// g-request-is-some-in-value-bool-class-attr sharing the escape-hatch substrate;
+// NOT fixed in that arc (the real convergent fix is the shouldSkipExprParse
+// substrate S312 deliberately did not touch). See the gap entry.
 function renderTemplateAttrToJs(
   attr: any,
   iterVarName: string,

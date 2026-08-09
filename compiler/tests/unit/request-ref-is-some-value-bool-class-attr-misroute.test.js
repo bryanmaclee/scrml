@@ -170,4 +170,31 @@ describe("g-request-is-some-in-value-bool-class-attr — reparse gated on regist
     // Input-state refs live in the §36 registry — the gate must NOT hijack them.
     expect(client).not.toContain("_scrml_request_field");
   });
+
+  test("REGRESSION (S239 round-3): input-state `if=<#field>.value is some` toggle stays UNGATED (S312) — compiles clean", () => {
+    // The `if=`/`show=` regime must reparse ANY `<#`-leading escape-hatch (request
+    // OR input-state), UNGATED — exactly what S312 shipped. Gating it to registered
+    // requests (a round-2 over-reach) aborted an input-state `is some` toggle with
+    // E-CODEGEN-INVALID-LOGIC (the string fallback mangles the `is some` LHS). This
+    // pins the input-state toggle back to clean-compile with the `is some` LHS
+    // preserved over the §36 registry read.
+    const src = `<program>
+\${ <name>: string = "" }
+<div>
+  <input type="text" bind:value=@name id="field"/>
+  <p if=\${<#field>.value is some}>has</p>
+  <p show=\${<#field>.value is not}>empty</p>
+</div>
+</program>
+`;
+    const result = compileSource(src);
+    const invalidLogic = (result.errors ?? []).filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC");
+    expect(invalidLogic).toEqual([]); // the round-3 regression would make this fail
+    const client = firstClientJs(result);
+    expect(client).toBeTruthy();
+    // The is-some presence check is preserved over the §36 registry read (S312).
+    expect(client).toContain('_scrml_input_state_registry.get("field").value');
+    // An input-state ref is NOT a request object.
+    expect(client).not.toContain("_scrml_request_field");
+  });
 });

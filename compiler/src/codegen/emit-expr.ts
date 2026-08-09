@@ -758,35 +758,46 @@ export function emitExpr(node: ExprNode, ctx: EmitExprContext): string {
  * its value/bool/class-attr siblings, so the "re-parse escape-hatch `<#`" rule
  * is defined exactly once.
  *
- * GATED on a REGISTERED request id — NOT on bare `<#` presence. A `<#id>` sigil
- * also names a §36 INPUT-STATE ref (e.g. `<#formField>.value`), and a typo names
- * NOTHING. For either, the reparse would emit `_scrml_input_state_registry.get(
- * "id")…` — for a real input-state ref that is the EXACT pre-fix string-fallback
- * lowering (so reparsing risks a byte-drift), and for a typo it is `undefined.x`
- * → a runtime TypeError inside the reactive effect (strictly WORSE than the pre-
- * fix value-attr-probe DROP). So we reparse ONLY when the raw references an id
- * this file actually registered as a `<request>`; for every other `<#id>` we
- * return the ORIGINAL node so the pre-fix path is preserved byte-identically
- * (the value-attr probe still drops it; other callsites keep the string
- * fallback). `requestIds` undefined ⇒ no registered requests ⇒ never reparse.
+ * TWO gating regimes, selected by `gateToRegisteredRequests`:
+ *
+ *  • FALSE — the S312 `if=`/`show=` toggle regime (computeDisplayToggleCondition).
+ *    Reparse ANY `<#`-leading escape-hatch, request OR §36 input-state ref. This
+ *    is exactly what S312 shipped: an input-state `if=<#field>.value is some`
+ *    toggle MUST reparse so the `is some` LHS is preserved (the string fallback
+ *    mangles it → `.(value !== null…)` → E-CODEGEN-INVALID-LOGIC). `requestIds`
+ *    (threaded to `emitExprField`) still routes a REGISTERED id to
+ *    `_scrml_request_<id>` and an input-state id to the registry — correct for
+ *    both. Gating this regime to registered-only is a build-breaking regression.
+ *
+ *  • TRUE — the NEW value/bool/class attribute regime (the lowerability probe,
+ *    the reactive bool/value emitters, the class: directive). Reparse ONLY when
+ *    the raw references an id this file registered as a `<request>`. A non-request
+ *    `<#id>` (input-state ref or typo) here is left on its PRE-FIX path: pre-fix
+ *    an input-state value/bool/class attr was string-fallback-lowered (plain
+ *    member) or DROPPED (mangled predicate), never reparsed — so gating causes NO
+ *    regression, and it prevents a typo'd request id from lowering to
+ *    `_scrml_input_state_registry.get("typo").data` → `undefined.data` → a runtime
+ *    TypeError (strictly worse than the pre-fix drop).
  *
  * Returns the node to emit with — the reparsed node when it recovered a
- * structured (non-escape-hatch) form for a registered request, else the input
- * node unchanged.
+ * structured (non-escape-hatch) form under the active regime, else the input
+ * node unchanged (the string-fallback / drop path is preserved byte-identically).
  */
 export function reparseRequestRefEscapeHatch(
   node: ExprNode | null | undefined,
   raw: string | undefined,
   label: string,
   requestIds: Set<string> | undefined,
+  gateToRegisteredRequests: boolean,
 ): ExprNode | null | undefined {
   if (
     (!node || (node as any).kind === "escape-hatch") &&
     typeof raw === "string" &&
     raw.includes("<#") &&
-    requestIds !== undefined &&
-    requestIds.size > 0 &&
-    rawReferencesRegisteredRequest(raw, requestIds)
+    (!gateToRegisteredRequests ||
+      (requestIds !== undefined &&
+        requestIds.size > 0 &&
+        rawReferencesRegisteredRequest(raw, requestIds)))
   ) {
     try {
       const reparsed = parseExprToNode(raw, label, 0) as ExprNode | null;
@@ -799,11 +810,13 @@ export function reparseRequestRefEscapeHatch(
 }
 
 /**
- * True when the raw expression contains at least one `<#id>` sigil whose `id` is
- * a REGISTERED `<request>` in this file. Used to gate the escape-hatch reparse so
- * a non-request `<#id>` (input-state ref or typo) is left on its pre-fix path.
+ * True when the raw expression contains at least one literal `<#id>` sigil whose
+ * `id` is a REGISTERED `<request>` in this file. Gates the escape-hatch reparse
+ * so a non-request `<#id>` (input-state ref or typo) is left on its pre-fix path.
+ * Also reused by emit-html's `exprHasRequestRef` (Form-1) so the `<#id>`-sigil
+ * request scan lives in ONE place.
  */
-function rawReferencesRegisteredRequest(raw: string, requestIds: Set<string>): boolean {
+export function rawReferencesRegisteredRequest(raw: string, requestIds: Set<string>): boolean {
   const re = /<#([A-Za-z_$][A-Za-z0-9_$]*)>/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(raw)) !== null) {
