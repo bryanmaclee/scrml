@@ -1,0 +1,18 @@
+${
+    type User:struct = { id: number, name: string }
+    <userData> : User | not = not
+    function loadUser() : User | not {
+        rows = ?{`SELECT id, name FROM users LIMIT 1`}
+        return rows[0]
+    }
+}
+<page>
+    <request id="userReq">
+        ${ @userData = loadUser() }
+    </>
+    <button id="btn" disabled=${<#userReq>.data is some}>go</>
+    <div id="box" class=${<#userReq>.data is some ? "ready" : "wait"}>box</>
+    <input id="fld" type="text" value=${<#userReq>.data is some} />
+    <div id="cd" class:on=${<#userReq>.data is some}>cd</>
+    <span id="nm">${@userData?.name}</span>
+</page>

@@ -6,7 +6,7 @@ import { escapeHtmlAttr, VOID_ELEMENTS, HTML_BOOLEAN_ATTRS } from "./utils.ts";
 import { nsId } from "./chunk-namespace.ts";
 import { isUserComponentMarkup } from "../component-expander.ts";
 import { validateEmittedArtifact } from "./validate-emit.ts";
-import { emitExprField } from "./emit-expr.ts";
+import { emitExprField, reparseRequestRefEscapeHatch, rawReferencesRegisteredRequest } from "./emit-expr.ts";
 import { extractReactiveDeps, collectReactiveVarNames, extractReactiveDepsTransitive, buildFunctionBodyRegistry, collectRequestIds } from "./reactive-deps.ts";
 import { hasTemplateInterpolation } from "./rewrite.js";
 import { isRcdataElement, isHtmlElement } from "../html-elements.js";
@@ -309,6 +309,7 @@ function valueAttrIsLowerable(
   attr: any,
   node: any,
   errors: any[] | null | undefined,
+  requestIds?: Set<string>,
 ): boolean {
   // --- (2) the expression must lower to VALID JavaScript -------------------
   // `emitExprField` emits a template literal verbatim (the expression parser
@@ -323,7 +324,16 @@ function valueAttrIsLowerable(
   // parser the S141 emitted-JS gate uses, so the two cannot disagree. Rewriting
   // `@` inside template literals belongs in `emitExprField`/`rewriteExpr` and
   // would change every lowering path in the compiler — a separate arc.
-  const lowered = emitExprField(val.exprNode, val.raw, { mode: "client" });
+  // g-request-is-some-in-value-bool-class-attr — a `<#r>.data is some` VALUE-attr
+  // expression (`class=`, `value=`, …) arrives with `val.exprNode` an ESCAPE-HATCH
+  // (shouldSkipExprParse skips the `<#`-leading expr). Un-fixed, the escape-hatch →
+  // string fallback mangles the `is` LHS into INVALID JS, so this lowerability gate
+  // wrongly DROPS the attribute (W-CG-VALUE-ATTR-UNLOWERABLE) even though the wiring
+  // emitter (emit-event-wiring.ts) can now lower it faithfully. Re-parse + thread
+  // `requestIds` here so the probe validates the SAME structured lowering the
+  // emitter produces (`_scrml_request_<r>.data`), keeping the two in agreement.
+  const _loweredNode = reparseRequestRefEscapeHatch(val.exprNode, val.raw, "<value-attr-lowerable-probe>", requestIds, /* gateToRegisteredRequests */ true);
+  const lowered = emitExprField(_loweredNode, val.raw, { mode: "client", requestIds });
   // Validate the EXACT statement shape the wiring emitters produce, with the
   // very parser + options the S141 emitted-JS gate uses, so this check and that
   // gate can never disagree. (Note: `isSingleJsExpression` is NOT usable here —
@@ -1259,14 +1269,10 @@ export function generateHtml(
   const requestIdsForBindings: Set<string> = fileAST ? collectRequestIds(fileAST) : new Set<string>();
   const exprHasRequestRef = (expr: string): boolean => {
     if (!expr || requestIdsForBindings.size === 0) return false;
-    // Form 1: the literal `<#id>` sigil (survives raw in some paths).
-    if (expr.includes("<#")) {
-      const re = /<#([A-Za-z_$][A-Za-z0-9_$]*)>/g;
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(expr)) !== null) {
-        if (requestIdsForBindings.has(m[1])) return true;
-      }
-    }
+    // Form 1: the literal `<#id>` sigil (survives raw in some paths). Shares the
+    // exported `rawReferencesRegisteredRequest` scan with the escape-hatch reparse
+    // gate (emit-expr.ts) so the `<#id>`-sigil request scan lives in ONE place.
+    if (rawReferencesRegisteredRequest(expr, requestIdsForBindings)) return true;
     // Form 2: the already-lowered bare `_scrml_input_<id>_` form produced by the
     // TAB stage (`preprocessWorkerAndStateRefs`) for a `${<#id>...}` interpolation
     // BEFORE codegen runs. The trailing-`_` anchor (NON-identifier-char after it)
@@ -3050,6 +3056,9 @@ export function generateHtml(
             const lowered = lowerClassDirectiveCondition(val as any, {
               derivedNames: liveCtx.derivedNames,
               synthCellKeys: liveCtx.synthCellKeys,
+              // g-request-is-some-in-value-bool-class-attr — route a
+              // `class:x=<#r>.data is some` directive ref to `_scrml_request_<r>`.
+              requestIds: requestIdsForBindings,
             });
             if (lowered) {
               registry.addLogicBinding({
@@ -3244,7 +3253,7 @@ export function generateHtml(
             isDeclaredPropAttr(node, name) ||
             isUserComponentMarkup(node) ||
             HTML_BOOLEAN_ATTRS.has(name) ||
-            !valueAttrIsLowerable(val, name, attrs, tag, attr, node, errors)
+            !valueAttrIsLowerable(val, name, attrs, tag, attr, node, errors, requestIdsForBindings)
           ) {
             // i81 — NOT a lowerable value attribute. Emit NOTHING, preserving
             // the exact pre-i81 behavior (silent drop). EVERY clause here was

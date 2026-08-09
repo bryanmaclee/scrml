@@ -743,6 +743,89 @@ export function emitExpr(node: ExprNode, ctx: EmitExprContext): string {
 }
 
 /**
+ * g-request-is-some-in-value-bool-class-attr (S312 substrate) — an ATTRIBUTE
+ * value whose expression LEADS with a `<#id>` request/input-state ref reaches
+ * codegen as an ESCAPE-HATCH node: `ast-builder.shouldSkipExprParse` skips any
+ * `<`-leading expr (HTML-fragment guard), so the attribute parser never built a
+ * structured node. The escape-hatch → string fallback both mis-routes the ref
+ * (to the §36 `_scrml_input_state_registry`) AND mangles an `is some`/`is none`
+ * LHS (→ `.(data !== null && data !== undefined)`, i.e. E-CODEGEN-INVALID-LOGIC
+ * or a silently-dropped attribute). Re-parse the raw with the (now sigil-aware)
+ * parser to recover a real node so the callsite can lower via the SAME
+ * structured `emitExprField` path the `if=`/`${…}` interpolation uses — with
+ * `requestIds` threaded, routing `<#r>` to the reactive `_scrml_request_<r>`
+ * object (§6.7.7). This is the shared substrate for the S312 `if=`-attr fix and
+ * its value/bool/class-attr siblings, so the "re-parse escape-hatch `<#`" rule
+ * is defined exactly once.
+ *
+ * TWO gating regimes, selected by `gateToRegisteredRequests`:
+ *
+ *  • FALSE — the S312 `if=`/`show=` toggle regime (computeDisplayToggleCondition).
+ *    Reparse ANY `<#`-leading escape-hatch, request OR §36 input-state ref. This
+ *    is exactly what S312 shipped: an input-state `if=<#field>.value is some`
+ *    toggle MUST reparse so the `is some` LHS is preserved (the string fallback
+ *    mangles it → `.(value !== null…)` → E-CODEGEN-INVALID-LOGIC). `requestIds`
+ *    (threaded to `emitExprField`) still routes a REGISTERED id to
+ *    `_scrml_request_<id>` and an input-state id to the registry — correct for
+ *    both. Gating this regime to registered-only is a build-breaking regression.
+ *
+ *  • TRUE — the NEW value/bool/class attribute regime (the lowerability probe,
+ *    the reactive bool/value emitters, the class: directive). Reparse ONLY when
+ *    the raw references an id this file registered as a `<request>`. A non-request
+ *    `<#id>` (input-state ref or typo) here is left on its PRE-FIX path: pre-fix
+ *    an input-state value/bool/class attr was string-fallback-lowered (plain
+ *    member) or DROPPED (mangled predicate), never reparsed — so gating causes NO
+ *    regression, and it prevents a typo'd request id from lowering to
+ *    `_scrml_input_state_registry.get("typo").data` → `undefined.data` → a runtime
+ *    TypeError (strictly worse than the pre-fix drop).
+ *
+ * Returns the node to emit with — the reparsed node when it recovered a
+ * structured (non-escape-hatch) form under the active regime, else the input
+ * node unchanged (the string-fallback / drop path is preserved byte-identically).
+ */
+export function reparseRequestRefEscapeHatch(
+  node: ExprNode | null | undefined,
+  raw: string | undefined,
+  label: string,
+  requestIds: Set<string> | undefined,
+  gateToRegisteredRequests: boolean,
+): ExprNode | null | undefined {
+  if (
+    (!node || (node as any).kind === "escape-hatch") &&
+    typeof raw === "string" &&
+    raw.includes("<#") &&
+    (!gateToRegisteredRequests ||
+      (requestIds !== undefined &&
+        requestIds.size > 0 &&
+        rawReferencesRegisteredRequest(raw, requestIds)))
+  ) {
+    try {
+      const reparsed = parseExprToNode(raw, label, 0) as ExprNode | null;
+      if (reparsed && (reparsed as any).kind !== "escape-hatch") return reparsed;
+    } catch {
+      /* keep the original node → string fallback (unchanged) */
+    }
+  }
+  return node;
+}
+
+/**
+ * True when the raw expression contains at least one literal `<#id>` sigil whose
+ * `id` is a REGISTERED `<request>` in this file. Gates the escape-hatch reparse
+ * so a non-request `<#id>` (input-state ref or typo) is left on its pre-fix path.
+ * Also reused by emit-html's `exprHasRequestRef` (Form-1) so the `<#id>`-sigil
+ * request scan lives in ONE place.
+ */
+export function rawReferencesRegisteredRequest(raw: string, requestIds: Set<string>): boolean {
+  const re = /<#([A-Za-z_$][A-Za-z0-9_$]*)>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    if (requestIds.has(m[1])) return true;
+  }
+  return false;
+}
+
+/**
  * Phase 4d Slice 4a: consolidated dual-path emitter.
  *
  * If exprNode is present, emits via emitExpr (the structured tree-walk path).

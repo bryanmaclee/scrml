@@ -1,6 +1,6 @@
 import { genVar } from "./var-counter.ts";
 import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
-import { emitExprField } from "./emit-expr.ts";
+import { emitExprField, reparseRequestRefEscapeHatch } from "./emit-expr.ts";
 import type { ExprNode } from "../types/ast.ts";
 import { collectMarkupNodes } from "./collect.ts";
 import { getNodes } from "./collect.ts";
@@ -8,7 +8,7 @@ import { rewriteTemplateAttrValue, rewriteReactiveRefs } from "./rewrite.js";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
 import { parsePredicateAnnotation, predicateToJsExpr, deriveHtmlAttrs } from "./emit-predicates.ts";
-import { collectCompoundLeafTargets } from "./reactive-deps.ts";
+import { collectCompoundLeafTargets, collectRequestIds } from "./reactive-deps.ts";
 
 /** A loosely-typed AST node from the pipeline. */
 type ASTNode = Record<string, unknown>;
@@ -349,7 +349,7 @@ export interface LoweredDirective {
 
 export function lowerClassDirectiveCondition(
   attrValue: AttrValue,
-  ctx: { derivedNames?: Set<string>; synthCellKeys?: Set<string> },
+  ctx: { derivedNames?: Set<string>; synthCellKeys?: Set<string>; requestIds?: Set<string> },
 ): LoweredDirective | null {
   if (!attrValue) return null;
   if (attrValue.kind === "variable-ref") {
@@ -380,10 +380,17 @@ export function lowerClassDirectiveCondition(
         exprNode = null;
       }
     }
+    // g-request-is-some-in-value-bool-class-attr — a `class:x=<#r>.data is some`
+    // directive expr arrives as an ESCAPE-HATCH (the `!exprNode` guard above
+    // never fires because `val.exprNode` is set to the escape-hatch node); re-parse
+    // it and thread `requestIds` so the ref routes to `_scrml_request_<r>` instead
+    // of the mis-routing/mangling string fallback. Scoped to `<#`-bearing raws.
+    exprNode = reparseRequestRefEscapeHatch(exprNode, rawExpr, "<class-directive>", ctx.requestIds, /* gateToRegisteredRequests */ true) as ExprNode | null;
     const rewrittenExpr = emitExprField(exprNode, rawExpr, {
       mode: "client",
       derivedNames: ctx.derivedNames,
       synthCellKeys: ctx.synthCellKeys,
+      requestIds: ctx.requestIds,
     }) as string;
     return { jsExpr: rewrittenExpr, refs: exprRefs };
   }
@@ -412,6 +419,24 @@ export function lowerClassDirectiveCondition(
  *
  * `jsExpr` is the JS template-literal string; `refs` are the reactive cell
  * names it interpolates (sans `@`); empty refs → set once at mount.
+ *
+ * KNOWN GAP g-request-is-some-in-mixed-text-attr-template-misroute (a sibling of
+ * g-request-is-some-in-value-bool-class-attr, docs/known-gaps.md) — a `<#request>`
+ * ref inside a MIXED-TEXT attribute template (`title="state: ${<#userReq>.data
+ * is some}"`) is NOT routed to `_scrml_request_<id>` here: unlike the single-
+ * expression attribute callsites (value / bool / class), which recover a real
+ * ExprNode via `reparseRequestRefEscapeHatch(requestIds)` and emit through the
+ * structured `emitExprField` path, this lowering delegates to the RAW-STRING
+ * `rewriteTemplateAttrValue`, which never builds an ExprNode and leaves the
+ * `<#…>.data is some` interpolation RAW → E-CODEGEN-INVALID-LOGIC. This FAILS
+ * LOUD (compile error, NO client bundle written — never a silently-shipped stale
+ * client), so it is a build-blocker the adopter sees immediately, not a
+ * miscompile. Fixing it means routing each `${…}` interpolation through the
+ * expression parser inside the broadly-shared `rewriteTemplateAttrValue` (used by
+ * every `style=`/`title=`/… template attribute) — a rework larger and riskier
+ * than the surgical per-callsite reparse, so it is deferred to a follow-on rather
+ * than widened blindly here. Workaround: use the single-expression form
+ * `title=${<#userReq>.data is some ? "…" : "…"}` (already routed).
  */
 export function lowerAttrTemplateValue(rawValue: string): LoweredDirective {
   const { jsExpr, reactiveVars } = rewriteTemplateAttrValue(rawValue) as {
@@ -713,6 +738,17 @@ export function emitBindings(ctx: CompileContext): string[] {
   // `_scrml_deep_set` on the derived parent. Computed once per file.
   const { leafKeys: compoundLeafKeys, parentNames: compoundParentNames } =
     collectCompoundLeafTargets(fileAST as Record<string, unknown>);
+  // g-request-is-some-in-value-bool-class-attr — request ids for this file, so a
+  // `class:x=<#r>.data is some` directive expr routes the ref to
+  // `_scrml_request_<r>` (mirrors emit-html's `requestIdsForBindings`).
+  // FOLLOW-ON (efficiency): `collectRequestIds(fileAST)` is a per-file AST walk
+  // already recomputed independently across emit-bindings / emit-html / emit-
+  // event-wiring / emit-match / emit-reactive-wiring (this is the established
+  // per-module convention). Memoizing it once on `CompileContext` would remove
+  // the redundancy but requires migrating every one of those callsites + the
+  // context constructor — a broader refactor than this fix, deferred rather than
+  // destabilize the fix for a micro-optimization over a single cheap file walk.
+  const requestIds: Set<string> = fileAST ? collectRequestIds(fileAST) : new Set<string>();
 
   // -------------------------------------------------------------------------
   // Step 2.5: Generate ref= attribute wiring (DOM element references)
@@ -861,21 +897,21 @@ export function emitBindings(ctx: CompileContext): string[] {
           // string tag and `==`/`!=` to `_scrml_structural_eq(...)`, matching
           // the `if=` markup path (emit-event-wiring.ts:804). Parse failures
           // fall back to the prior raw-string rewrite (regression-preserving).
+          //
+          // Delegate the expr lowering to the shared `lowerClassDirectiveCondition`
+          // (the SAME helper the match-arm class: path uses) so the parse →
+          // reparseRequestRefEscapeHatch(requestIds) → emitExprField sequence —
+          // including the g-request-is-some-in-value-bool-class-attr routing of a
+          // `class:x=<#req>.data is some` ref to `_scrml_request_<req>` — lives in
+          // ONE place and the two paths cannot drift.
           const rawExpr = (bAttr.value.raw ?? "") as string;
-          const exprRefs = (bAttr.value.refs ?? []) as string[];
-          let exprNode = (bAttr.value.exprNode ?? null) as ExprNode | null;
-          if (!exprNode && rawExpr) {
-            try {
-              exprNode = parseExprToNode(rawExpr, "<class-directive>", 0) as ExprNode | null;
-            } catch {
-              exprNode = null;
-            }
-          }
-          const rewrittenExpr = emitExprField(exprNode, rawExpr, {
-            mode: "client",
+          const _loweredDir = lowerClassDirectiveCondition(bAttr.value as AttrValue, {
             derivedNames: ctx.derivedNames,
             synthCellKeys: ctx.synthCellKeys,
-          }) as string;
+            requestIds,
+          });
+          const rewrittenExpr = (_loweredDir ? _loweredDir.jsExpr : "") as string;
+          const exprRefs = (_loweredDir ? _loweredDir.refs : []) as string[];
           lines.push(`// class:${cClassName}=${rawExpr}`);
           lines.push(`{`);
           lines.push(`  const ${cElemId} = (root || document).querySelector('${classSelector}');`);
