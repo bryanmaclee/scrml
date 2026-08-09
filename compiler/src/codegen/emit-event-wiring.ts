@@ -488,6 +488,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         b.condExprNode as ExprNode | undefined,
         b.condExpr,
         "<if-request-ref>",
+        requestIds,
       ) as ExprNode | undefined;
       // Bug 61 — thread synthCellKeys + derivedNames so `if=@form.isValid`
       // conditional-display reads route to the dotted synth cell. `requestIds` routes
@@ -1618,7 +1619,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           // thread `requestIds` so the ref routes to `_scrml_request_<r>` instead
           // of mis-routing to the §36 input-state registry + mangling the `is`
           // LHS. Mirrors the S312 `if=`-attr fix; scoped to `<#`-bearing raws.
-          const condNode = reparseRequestRefEscapeHatch(binding.condExprNode, binding.condExpr, "<bool-attr-request-ref>");
+          const condNode = reparseRequestRefEscapeHatch(binding.condExprNode, binding.condExpr, "<bool-attr-request-ref>", requestIds);
           const compiled = emitExprField(condNode, binding.condExpr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys, requestIds });
           const conditionCode = `(${compiled})`;
           const toggle = `if (${conditionCode}) { el.setAttribute(${JSON.stringify(attrName)}, ""); } else { el.removeAttribute(${JSON.stringify(attrName)}); }`;
@@ -1677,7 +1678,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           // `_scrml_request_<r>` (§6.7.7) instead of mis-routing to the §36 input-
           // state registry + mangling the `is` LHS. Mirrors the S312 `if=`-attr
           // fix; scoped to `<#`-bearing raws so other value attrs are unchanged.
-          const valNode = reparseRequestRefEscapeHatch(binding.exprNode, binding.expr, "<value-attr-request-ref>");
+          const valNode = reparseRequestRefEscapeHatch(binding.exprNode, binding.expr, "<value-attr-request-ref>", requestIds);
           const compiled = emitExprField(valNode, binding.expr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys, requestIds });
           const apply = emitValueAttrApply(
             compiled,

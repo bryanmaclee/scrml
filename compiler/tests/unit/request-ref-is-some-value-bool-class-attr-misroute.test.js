@@ -123,3 +123,51 @@ describe("g-request-is-some-in-value-bool-class-attr — is-some on value/bool/c
     expect(client).not.toContain('_scrml_input_state_registry.get("profile")');
   });
 });
+
+// ---------------------------------------------------------------------------
+// §GATE — the reparse is gated on a REGISTERED request id, NOT bare `<#`.
+// A non-request `<#id>` (input-state ref or typo) must NOT be reparsed onto the
+// structured path: for a typo that would emit `_scrml_input_state_registry.get(
+// "typo").data` -> `undefined.data` -> a runtime TypeError in the reactive effect
+// (strictly worse than the pre-fix value-attr-probe DROP); for a real input-state
+// ref it must stay byte-on its pre-fix string-fallback lowering. This is the
+// S239-round-2 critical-regression guard.
+// ---------------------------------------------------------------------------
+
+describe("g-request-is-some-in-value-bool-class-attr — reparse gated on registered request id", () => {
+  test("MISTYPED request id in a VALUE attr is DROPPED, never emitting a crashing registry read", () => {
+    // `<#profileTYPO>` names no registered request -> the value-attr lowerability
+    // probe keeps the escape-hatch (no reparse) -> mangled -> DROPPED (pre-fix
+    // behavior), NOT `_scrml_input_state_registry.get("profileTYPO").data` which
+    // would be `undefined.data` at runtime.
+    const result = compileSource(withBody(`<div class=\${<#profileTYPO>.data is some ? "a" : "b"}>x</div>`));
+    const invalidLogic = (result.errors ?? []).filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC");
+    expect(invalidLogic).toEqual([]); // value attr drops rather than aborting
+    const client = firstClientJs(result);
+    expect(client).toBeTruthy();
+    // No crashing registry read for the unregistered id, and no phantom request obj.
+    expect(client).not.toContain('_scrml_input_state_registry.get("profileTYPO")');
+    expect(client).not.toContain("_scrml_request_profileTYPO");
+  });
+
+  test("a real INPUT-STATE ref `<#field>.value` in a VALUE attr routes to the §36 registry, NOT reparsed to a request obj", () => {
+    // `<#field>` is an input-state ref (a text input), not a <request>. The gate
+    // returns the original escape-hatch node so it keeps its pre-fix string
+    // fallback -> the §36 registry, never `_scrml_request_field`.
+    const src = `<program>
+\${ <name>: string = "" }
+<div>
+  <input type="text" bind:value=@name id="field"/>
+  <span title=\${<#field>.value}>t</span>
+</div>
+</program>
+`;
+    const result = compileSource(src);
+    const invalidLogic = (result.errors ?? []).filter((e) => e.code === "E-CODEGEN-INVALID-LOGIC");
+    expect(invalidLogic).toEqual([]);
+    const client = firstClientJs(result);
+    expect(client).toBeTruthy();
+    // Input-state refs live in the §36 registry — the gate must NOT hijack them.
+    expect(client).not.toContain("_scrml_request_field");
+  });
+});

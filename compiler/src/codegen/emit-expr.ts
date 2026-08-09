@@ -758,20 +758,35 @@ export function emitExpr(node: ExprNode, ctx: EmitExprContext): string {
  * its value/bool/class-attr siblings, so the "re-parse escape-hatch `<#`" rule
  * is defined exactly once.
  *
- * SCOPED to `<#`-bearing raws ONLY: every other escape-hatch attribute value
- * keeps its existing string lowering byte-identical. Returns the node to emit
- * with — the reparsed node when it recovered a structured (non-escape-hatch)
- * form, else the input node unchanged (the string-fallback path is preserved).
+ * GATED on a REGISTERED request id — NOT on bare `<#` presence. A `<#id>` sigil
+ * also names a §36 INPUT-STATE ref (e.g. `<#formField>.value`), and a typo names
+ * NOTHING. For either, the reparse would emit `_scrml_input_state_registry.get(
+ * "id")…` — for a real input-state ref that is the EXACT pre-fix string-fallback
+ * lowering (so reparsing risks a byte-drift), and for a typo it is `undefined.x`
+ * → a runtime TypeError inside the reactive effect (strictly WORSE than the pre-
+ * fix value-attr-probe DROP). So we reparse ONLY when the raw references an id
+ * this file actually registered as a `<request>`; for every other `<#id>` we
+ * return the ORIGINAL node so the pre-fix path is preserved byte-identically
+ * (the value-attr probe still drops it; other callsites keep the string
+ * fallback). `requestIds` undefined ⇒ no registered requests ⇒ never reparse.
+ *
+ * Returns the node to emit with — the reparsed node when it recovered a
+ * structured (non-escape-hatch) form for a registered request, else the input
+ * node unchanged.
  */
 export function reparseRequestRefEscapeHatch(
   node: ExprNode | null | undefined,
   raw: string | undefined,
   label: string,
+  requestIds: Set<string> | undefined,
 ): ExprNode | null | undefined {
   if (
     (!node || (node as any).kind === "escape-hatch") &&
     typeof raw === "string" &&
-    raw.includes("<#")
+    raw.includes("<#") &&
+    requestIds !== undefined &&
+    requestIds.size > 0 &&
+    rawReferencesRegisteredRequest(raw, requestIds)
   ) {
     try {
       const reparsed = parseExprToNode(raw, label, 0) as ExprNode | null;
@@ -781,6 +796,20 @@ export function reparseRequestRefEscapeHatch(
     }
   }
   return node;
+}
+
+/**
+ * True when the raw expression contains at least one `<#id>` sigil whose `id` is
+ * a REGISTERED `<request>` in this file. Used to gate the escape-hatch reparse so
+ * a non-request `<#id>` (input-state ref or typo) is left on its pre-fix path.
+ */
+function rawReferencesRegisteredRequest(raw: string, requestIds: Set<string>): boolean {
+  const re = /<#([A-Za-z_$][A-Za-z0-9_$]*)>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    if (requestIds.has(m[1])) return true;
+  }
+  return false;
 }
 
 /**

@@ -332,7 +332,7 @@ function valueAttrIsLowerable(
   // emitter (emit-event-wiring.ts) can now lower it faithfully. Re-parse + thread
   // `requestIds` here so the probe validates the SAME structured lowering the
   // emitter produces (`_scrml_request_<r>.data`), keeping the two in agreement.
-  const _loweredNode = reparseRequestRefEscapeHatch(val.exprNode, val.raw, "<value-attr-lowerable-probe>");
+  const _loweredNode = reparseRequestRefEscapeHatch(val.exprNode, val.raw, "<value-attr-lowerable-probe>", requestIds);
   const lowered = emitExprField(_loweredNode, val.raw, { mode: "client", requestIds });
   // Validate the EXACT statement shape the wiring emitters produce, with the
   // very parser + options the S141 emitted-JS gate uses, so this check and that
