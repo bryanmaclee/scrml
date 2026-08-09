@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 23 |
-| MED | 125 |
+| MED | 122 |
 | LOW | 54 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -436,8 +436,9 @@ DD §0.3 then enumerates the entire `<program>` attribute surface **as it stood 
 
 **⚑ DESIGN FORK, and it is why this is split from the reset fix.** Strict conformance means a `<poll interval=10000>` waits a full 10s before its FIRST fetch — §6.7.6's own worked example is `<poll id="serverTime" interval=10000>`, a clock that would show nothing for ten seconds. The current buggy load-time run is accidentally providing the behaviour most polling UIs want. So: **(a)** remove it — strict §6.7.6, poll waits one interval; **(b)** remove it and AMEND §6.7.6 to specify an immediate first tick for `<poll>` (leaving `<timer>` strict); **(c)** remove it for `<timer>` only and rule `<poll>` separately. **This is the S313 "a bug fix is not automatically inert" shape — the leak can be fixed by making the form work or by rejecting it, and choosing is a language decision.** Route to bryan before building.
 
-### g-region-bodies-emit-in-bucket-order-not-declaration-order — §20.8.8 step 3 requires region bodies to run in DECLARATION order; emission is by BUCKET, so the violation is live at initial load with no navigation — `NEW S314-bryan (surfaced scoping Edge 2); MED; open`
-<!-- @gap id=g-region-bodies-emit-in-bucket-order-not-declaration-order sev=MED status=open locus=compiler/src/codegen/emit-reactive-wiring.ts:849 prov=spec:§20.8.8 -->
+### g-region-bodies-emit-in-bucket-order-not-declaration-order — §20.8.8 step 3 requires region bodies to run in DECLARATION order; emission is by BUCKET, so the violation is live at initial load with no navigation — `NEW S314-bryan (surfaced scoping Edge 2); MED; resolved S333`
+<!-- @gap id=g-region-bodies-emit-in-bucket-order-not-declaration-order sev=MED status=resolved locus=compiler/src/codegen/emit-reactive-wiring.ts:849 prov=spec:§20.8.8 -->
+**RESOLVED — verified stale-open at S333-peter.** Reproduces NO MORE on HEAD: a request→timer→request fixture emits in DECLARATION order (client.js), and the conformance test `conf-REGION-BODY-DECLARATION-ORDER.test.js` passes 4/4 with an explicit fail-before baseline at `60cd90e3`. Fixed at some prior landing; the entry was a stale-open (the ledger-drift class its own neighbours warn about). Closed on a triage repro, no code change this session.
 §20.8.8 step 3: *"Bodies associated with the region run in **declaration order**."* §20.8.8(6): *"The first rendering of route content into the `<outlet>` on document load **IS a `route-enter`**. Region-associated bodies therefore run **exactly once** on initial load."* Together those bind ordering on a path that ships today — **no navigation required for the violation to be live.**
 
 **Proven by compilation, not reading.** Source order `<request first>` → `<timer>` → `<request third>` emits as: timer at `order.client.js:28`, both requests at `:34+`. The body declared SECOND runs before both bodies declared around it.
@@ -495,8 +496,9 @@ incomplete — enumerating shapes inside a function is not the same as enumerati
 of defect can inhabit.* Whoever takes this should enumerate **every** markup lowering that emits a call
 expression, not just the two named above. Sibling: [[g-inferred-async-call-value-position-no-autoawait]].
 
-### g-nested-each-in-match-arm-drops-diagnostics — an `<each>` nested inside a `<match>` arm silently drops diagnostics that fire in either construct alone — `NEW S316-bryan (S239 review of #389); MED; open`
-<!-- @gap id=g-nested-each-in-match-arm-drops-diagnostics sev=MED status=open locus=searched:compiler/src/ast-builder.js-subparse,armBodyChildren,bodyChildren prov=corpus:probed-five-contexts-S316 -->
+### g-nested-each-in-match-arm-drops-diagnostics — an `<each>` nested inside a `<match>` arm silently drops diagnostics that fire in either construct alone — `NEW S316-bryan (S239 review of #389); MED; resolved S333 (#477)`
+<!-- @gap id=g-nested-each-in-match-arm-drops-diagnostics sev=MED status=resolved locus=compiler/src/type-system.ts:match-block-reparse+ast-builder.js:buildMatchArmBodyChildren-stamp prov=corpus:probed-five-contexts-S316 -->
+**RESOLVED S333-peter — PR #477, main `41a6ea8b`.** Two entry corrections from the fix: (1) the locus was NOT SYM PASS 3 — it is the **TS stage** (`type-system.ts` `case "match-block"` walks arms via `armBodyChildren[].children`, empty for each-bearing arms); (2) the hole is **broader than "nested each"** — a DIRECT read merely sharing an arm with an `<each>` sibling was ALSO dropped (the ast-builder blank keys on the whole arm body containing `<each>`). Fix: ast-builder stamps the raw arm body + file coords on the blanked wrapper (blanking + S153 double-emit guard UNCHANGED); the type-system re-parses that body READ-ONLY (throwaway ids reindexed into a disjoint 0x40000000+ range so the shared `nodeTypes` memo can't be clobbered) and walks via the existing `visitNode`. 6-test unit regression + conformance pin `e-state-undeclared-nested-each-in-match-arm-pos`; single-emit + within-node parity verified. Three S239 rounds (nodeTypes id-collision, bogus span.file, depth-2 mislocation) hardened it.
 
 **PRE-EXISTING — verified NOT a #389 regression** (reproduces identically on `5aeb656a`, which predates
 it). Surfaced by the S239 pass on #389 while probing span rebasing across five contexts. An
@@ -920,7 +922,7 @@ A §52 server-authority cell (`<x server> = <value>`) has its initializer emitte
 
 The #263 client-reachability gate collects references via `forEachIdentInExprNode`, which does not descend into `() => …` lambda bodies, so a module `export const` referenced ONLY inside a lambda in a client fn is not seen and stays undeclared client-side (ReferenceError, not a leak). Fix: descend into lambda/arrow bodies in the reachability walk. <!-- @gap id=g-263-lambda-body-only-export-const-not-emitted-client sev=LOW status=open -->
 
-### G-ESQL006-PREPARE-EMITS-RUNTIME-THROW-NO-COMPILE-DIAGNOSTIC — `.prepare()` is refused in the ARTIFACT but never reported to the developer — `NEW S292; MED; open`
+### G-ESQL006-PREPARE-EMITS-RUNTIME-THROW-NO-COMPILE-DIAGNOSTIC — `.prepare()` is refused in the ARTIFACT but never reported to the developer — `NEW S292; MED; resolved S333 (#476)`
 Found verifying the scrml.dev `orm-trap` article by execution. `?{`SELECT username FROM users`}.prepare()`
 **compiles clean — exit 0, zero errors** — and the emitted `.server.js` carries
 `(()=>{throw new Error("E-SQL-006: .prepare() is removed in Bun.SQL (§44.3) …")})()`. So the refusal is real
@@ -931,7 +933,8 @@ absent. **Mechanism unpinned; do not scope the fix from this entry without re-de
 Second defect, same locus: the branch regex `/\?\{`([^`]*)`\}\.(\w+)\(\)/` matches only the BACKTICK body,
 so bare-brace `?{ … }.prepare()` never reaches it at all — verified, compiles clean with no throw emitted
 either. That is the #209 shape exactly ("the detector keyed on one side of the test; the other side fell
-through"), recurring in a sibling emitter. <!-- @gap id=g-esql006-prepare-emits-runtime-throw-no-compile-diagnostic sev=MED status=open -->
+through"), recurring in a sibling emitter. <!-- @gap id=g-esql006-prepare-emits-runtime-throw-no-compile-diagnostic sev=MED status=resolved -->
+**RESOLVED S333-peter — PR #476, main `d2e27ba7`.** Defect A (runtime-throw, no compile diagnostic) fixed: `.prepare()` now raises E-SQL-006 at compile time on EVERY server-fn emit path via a dedicated `preparedStmtErrors` narrow sink — a single function-scoped `_sqlPrepareErrors` in `generateServerJs` threaded into all server-body/sqlNode sites (CSRF+non-CSRF handlers + CPS-return, SSE, WS onserver, §39.3 handle(), §52.6.5 Pattern-C ±SSR-seed, in-process peer) + emit-library/emit-tool/value-only(api.js) sinks, drained once deduped. Defect B (bare-brace `?{ }.prepare()` regex-miss) was already STALE — the bare-brace body is normalized to backtick before the rewrite, so both forms emit identically. 5 conformance pins (server-fn, CPS-return, SSE, WS, Pattern-C). Three S239 rounds closed a silent partial fix (8 uncovered sub-paths → 1 residual value-only → 0).
 
 ### G-EPA001-NEVER-FIRES-MISSING-DB-REPORTS-EPA002 — the compiler emits an error code §34 assigns to a different condition — `NEW S292; MED; open`
 `E-PA-001` has **zero fire sites** in `compiler/src/` (only docstring mentions at `protect-analyzer.ts:36`,
@@ -944,6 +947,7 @@ amendment: route the missing-file case to `E-PA-001`. Surfaced because the `orm-
 `E-PA-001` correctly-per-SPEC and the compiler contradicted it; the ARTICLE was left as-is deliberately
 (Rule 4 — writing `E-PA-002` into public prose would enshrine the defect as the contract).
 <!-- @gap id=g-epa001-never-fires-missing-db-reports-epa002 sev=MED status=open -->
+**⚑ RE-CHARACTERIZED S333-peter — NOT a compute fix; ROUTED-TO-BRYAN (a §34 catalogue ruling).** The S292 entry's "route the missing-file case to E-PA-001, conformance restoration not amendment" is STALE — it predates the shadow-DB recovery mechanism. On HEAD, E-PA-002 is a deliberately-DESIGNED, conformance-PINNED §14.8.7 taxonomy (cases `protect/e-pa-002-pos`+`neg`, unit `e-pa-002-db-migrate-remedy`, e2e baseline all pin it) for the missing-file + failed-`?{}`-shadow-recovery case; E-PA-001 has ZERO fire sites (the `g-s34-catalogued-codes-cannot-fire` family). §34's rows (E-PA-001 "src= file does not exist" / E-PA-002 "invalid protect= syntax") are the STALE side — the conformance authors already flagged the mismatch in-prose. Fix = reconcile §34's E-PA rows against the §14.8.7 recovery taxonomy the code implements — a catalogue-truthfulness RULING (bryan's freeze-blocking lane), not a Peter code swap. Repro+SPEC-gated at S333.
 
 ### G-SQL-DYNAMIC-IDENTIFIER-NO-FORM-NO-DIAGNOSTIC — a dynamic table/column name compiles clean and fails 100% at runtime, with no expressible alternative — `NEW S292; MED; open`
 `?{`SELECT * FROM ${tbl}`}` **compiles clean, zero diagnostics** — then fails every time it runs, because
@@ -1144,6 +1148,7 @@ The **clean** path in the same file correctly emits its subtree inside `<templat
 
 ### g-schema-composite-unique-emits-nothing — a table-level composite `unique(a, b)` in `<schema>` is silently skipped; the constraint the adopter declared does not exist in their database — `NEW S297 (adopter-flagged; carried as prose under a resolved parent since S288); MED; schema/db-migrate`
 <!-- @gap id=g-schema-composite-unique-emits-nothing sev=MED status=open -->
+**⚑ GOVERNING-SENTENCE GATE RUN S333-peter — NOT a compute fix; ROUTED-TO-BRYAN (a language-grammar ruling).** §39.2's grammar is `table-declaration ::= table-name '{' column-declaration* '}'` and `column-declaration ::= column-name ':' column-type column-constraint*` — a table body is `column-declaration*` ONLY; there is NO table-level constraint production, and `unique` is a `column-constraint` (`name: type unique`, §38.5.3 "on the column"). So a bare `unique(a, b)` line is NOT grammatical, and emitting it would be **newly-ACCEPTING beyond the contract** (the one-way door, pa-base §8) — a language-design decision (add the grammar + emit, OR reject loudly with a new diagnostic), not the completeness fix the entry's "same fix locus as parent" implies. The parent's own direction claim is stale. Repro confirmed (parseColumns skips any non-`name:type` line); SPEC-gated at S333.
 A table-level composite uniqueness constraint — `unique(a, b)` on its own line inside a `<schema>` table body — **emits nothing**. `parseColumns` reads only `name: type` lines, so a bare `unique(a, b)` line is skipped entirely and no `UNIQUE` constraint reaches the DDL. **Single-column `unique` works**, which is what makes this quiet: the feature appears to function.
 
 **Why this is filed now and not earlier — the point of the entry.** This defect has been *described accurately* since S288, as a "sibling defect in the same report" paragraph inside [[g-schema-references-dot-form-emits-no-foreign-key]] — an entry that went **RESOLVED at S290**. So the prose survived, attached to a closed parent, with **no `@gap id=` of its own**: it appeared in no count, matched no status query, and was never a work item. **Adopter-flagged S297**, in their words: *"a gap with no id is the kind that gets forgotten."* They are hand-applying the constraints behind assertions, so nothing of theirs is broken — this is a report about our ledger as much as about the compiler.

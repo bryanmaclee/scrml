@@ -2,6 +2,14 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S333 — 2026-08-09 (peter · Windows) — MED whittle: two diagnostic-completeness landings, six S239-caught bugs
+
+**2 PRs merged** (#476 #477); main `79fdfd07` → `41a6ea8b`, coherence 0/0, cloud gate GREEN on both (Windows CI included). Conformance **874/874** (+6 new pins). Each fix went through **three adversarial S239 rounds** that caught real correctness bugs the implementation agents' green self-reports missed — validating adversarial-review-before-landing six times over. The two landed gaps were found under a shortlist that also held two language rulings (mis-filed as compute) and two already-fixed stale-opens; a repro+SPEC gate filtered all four before dispatch.
+
+- **#476** — `.prepare()` on a `?{}` SQL result inside a server function now raises **E-SQL-006 at compile time** (SPEC §44.3/§34 mandate it "SHALL be compile error"), instead of only throwing at runtime. A dedicated `preparedStmtErrors` collector is drained at every server-fn emit site (a single function-scoped collector, deduped tail drain), making a silent partial fix structurally impossible — the S239 pass caught two rounds of uncovered sub-paths (CPS-return, SSE, WS, Pattern-C, value-only) before it was complete.
+- **#477** — read-side diagnostics (E-STATE-UNDECLARED and every read-side ident code) now fire on any `@`-read inside a `<match>` arm that contains an `<each>` — previously silently dropped (the compiler failed *toward accepting bad source*). The type-system re-parses the ast-builder-blanked arm body read-only; the S239 pass caught a nodeTypes-memo id-collision (silent type corruption), a bogus `span.file`, and a depth-2 line mislocation.
+- Housekeeping: the 389 KB `hand-off.md` was rotated (→ `handOffs/hand-off-s332.md`); the deferred shared-surface bookkeeping (gap closes, review-floor entries, two ruling routings) was cleared.
+
 ## S332 — 2026-08-08 (peter · Windows) — MED whittle: two clean adopter-lane landings + a substrate routing
 
 **2 PRs merged** (#473 #474); main `7c8e92ff`, coherence 0/0, cloud gate GREEN on both (Windows CI included). Successor to a LIVE S331-bryan throughout → strictly disjoint work; shared-surface bookkeeping (gap-closes, review floor) deferred until he wraps. Conformance 868/868.
