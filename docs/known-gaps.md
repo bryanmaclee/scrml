@@ -7627,6 +7627,56 @@ for the five *positions*; *tail shape* and *nested-statement fidelity* are two f
 nobody enumerated. **Root fix = one emission route, completing what #470 started on the predicate.**
 **Blocks the derived-position half of the if-value fork (Q2)** — see user-voice S331.
 
+### g-derived-cell-rhs-server-only-reach-does-not-escalate — a server-only stdlib call inside a derived-cell RHS escalates NOTHING; no `.server.js` is emitted, the call is bound client-side, and the real implementation is bundled into the shipped client runtime — with zero diagnostics — `NEW S331-bryan (measuring the derived-if body contract); HIGH`
+<!-- @gap id=g-derived-cell-rhs-server-only-reach-does-not-escalate sev=HIGH status=open locus=compiler/src/route-inference.ts:656(ESCALATION_SERVER_ONLY_MODULES + the per-function escalation walk that never visits a derived-cell RHS) prov=spec:§12.2-Trigger-3-S299-amendment -->
+
+**PA-REPRODUCED S331 by compilation + bundle differential at `05787a42`.** A derived cell whose RHS
+reaches a server-only stdlib member compiles **clean, with zero diagnostics**:
+
+```scrml
+${ import { hashPassword } from 'scrml:auth' }
+
+const <derivedServerCall> = match @phase {
+    .Idle :> { const h = hashPassword(@pw); h }
+    .Busy :> "busy"
+}
+```
+
+Measured consequences:
+- **No `.server.js` is emitted at all** — nothing escalated.
+- The client bundle binds it: `const { hashPassword } = _scrml_stdlib.auth;` and calls it inside the
+  derived recompute closure.
+- **The real implementation ships.** `_scrml/auth.js:48` is
+  `Bun.password.hash(password, { algorithm: "argon2id" })`, its own header marked `[server-only]`.
+  Bundle differential on the shipped runtime: a program that does NOT import `scrml:auth` → **0**
+  occurrences of `Bun.password`; this one → **4**.
+
+**Attribution is measured, not inferred: this is DERIVED-SPECIFIC.** The identical import and call
+inside a plain `function` **does** escalate — `.server.js` emitted, `hashPassword` absent from the
+client bundle entirely. **Root cause:** §12.2 escalation is defined per-FUNCTION
+(*"Route inference SHALL be per-function"*), and a derived-cell RHS is not a function, so the walk that
+Trigger 3 drives never visits it.
+
+**Governing sentence — this is TOWARD the contract, not a widening.** §12.2's Trigger-3 S299 amendment
+(SPEC line ~7229) describes this exact symptom normatively as the defect it was written to close:
+*"A `<program>` calling `hashPassword` from `scrml:auth` therefore emitted no `.server.js` at all and
+shipped both the caller's secret and a real `Bun.password.hash` argon2id implementation into the browser
+bundle, with zero diagnostics."* S299/#268 closed it for the per-function path and left the derived-RHS
+path open. §12.2 also states the disposition for an ambiguous case: *"when a module resists
+classification, prefer the server: over-inclusion costs a round trip, under-inclusion ships a secret to
+a browser."*
+
+**Direction-of-change: newly-rejecting, and the migration is MEASURED at ZERO.** 14 corpus files import
+a module in `ESCALATION_SERVER_ONLY_MODULES`; **none of them also declares a derived cell**. Measured,
+not assumed — assumed-zero is not measured-zero.
+
+**Not claimed, because not observed:** whether the derived recompute throws in a real browser (`Bun` is
+undefined there). The escalation failure and the runtime bundling are measured; the runtime symptom is
+not. Do not record it as verified without executing it.
+
+**Related but distinct:** `g-trigger-3-server-only-import-does-not-escalate` (S299, RESOLVED for the
+function path). This is the same class in a position the per-function walk structurally cannot reach.
+
 ### g-server-fn-reindent-fix-covers-8-of-25-sites-in-its-own-class — #474 made ONE emitter template-literal-aware; three sibling emitters in the same class still corrupt multi-line template content, all reachable with zero diagnostics — `NEW S331-bryan (adversarial review of #474); HIGH`
 <!-- @gap id=g-server-fn-reindent-fix-covers-8-of-25-sites-in-its-own-class sev=HIGH status=open locus=compiler/src/codegen/emit-library-shared.ts:692(emitLibraryFnMember)+compiler/src/codegen/emit-tool.ts:466+compiler/src/codegen/emit-control-flow.ts:1073(emitTryStmt)+compiler/src/codegen/emit-logic.ts:3410 prov=spec:§48 -->
 
