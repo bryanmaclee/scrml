@@ -127,7 +127,13 @@ function gapMarkersFrom(text: string) {
   // That is the same silent-drop class the unknown-status guard below was added
   // for (S299, 14 markers incl. two open HIGHs); it was hardened against an
   // unrecognised STATUS but not against an unparsed MARKER. Both guards now exist.
-  const markerRe = /<!--\s*@gap\s+([^>]*?)\s*-->/g;
+  //
+  // S334 — the attribute bag is matched with `[\s\S]*?` (not `[^>]*?`) so a marker whose
+  // prov=/locus= value contains a literal `>` (e.g. a code-literal `<msg> = ""` or a
+  // `->` arrow) is not TRUNCATED at the internal `>` and silently dropped from the count.
+  // Witnessed: a real marker with `<msg> = ""` in its locus prose broke the count on main.
+  // Non-greedy still stops at the first `-->`, so a well-formed marker is unaffected.
+  const markerRe = /<!--\s*@gap\s+([\s\S]*?)\s*-->/g;
   const tokens: { id: string; sev: string; status: string }[] = [];
   const malformed: string[] = [];
   let m: RegExpExecArray | null;
@@ -170,13 +176,73 @@ function gapMarkersFrom(text: string) {
   return tokens;
 }
 
-function gapCountsFromTokens(tokens: { id: string; sev: string; status: string }[]) {
-  const openBy = (sev: string) => tokens.filter((t) => t.sev === sev && GAP_STATUS_OPEN.has(t.status)).length;
+export function gapCountsFromTokens(tokens: { id: string; sev: string; status: string }[]) {
+  // g-gap-markers-duplicate-id-conflicting-status-double-counted — the counts are
+  // per-ENTRY, but an entry may (malformedly) carry TWO `@gap` markers sharing one id,
+  // which marker-granular counting DOUBLE-COUNTS. Dedup to one token per id before
+  // counting. A same-id pair with DIFFERING sev/status is a genuine integrity error
+  // (which is the entry's real state?) — throw loud, mirroring this file's other
+  // silent-omission guards (a same-id pair that fully agrees is collapsed silently).
+  const byId = new Map<string, { id: string; sev: string; status: string }>();
+  const conflicts: string[] = [];
+  for (const t of tokens) {
+    const prev = byId.get(t.id);
+    if (prev) {
+      if (prev.status !== t.status || prev.sev !== t.sev) {
+        conflicts.push(`    ${t.id}: sev=${prev.sev}/${t.sev} status=${prev.status}/${t.status}`);
+      }
+      continue; // dedup: first marker wins for counting
+    }
+    byId.set(t.id, t);
+  }
+  if (conflicts.length > 0) {
+    throw new Error(
+      `state.ts: ${conflicts.length} gap id(s) carry DUPLICATE @gap markers with CONFLICTING sev/status —\n` +
+      `${conflicts.join("\n")}\n` +
+      `  One entry, one marker: the count cannot resolve which is the entry's real state. Reconcile the duplicates.`,
+    );
+  }
+  const uniq = [...byId.values()];
+  const openBy = (sev: string) => uniq.filter((t) => t.sev === sev && GAP_STATUS_OPEN.has(t.status)).length;
   const high = openBy("HIGH");
   const med = openBy("MED");
   const low = openBy("LOW");
-  const nominal = tokens.filter((t) => t.sev === "NOMINAL" && t.status === "nominal").length;
-  return { tokens, high, med, low, nominal };
+  const nominal = uniq.filter((t) => t.sev === "NOMINAL" && t.status === "nominal").length;
+  return { tokens: uniq, high, med, low, nominal };
+}
+
+// g-known-gaps-heading-and-marker-status-can-disagree-silently — `state.ts` derives
+// counts from the `@gap` MARKER, but each entry ALSO carries a human `### ` heading whose
+// trailing `…; <SEV>; <status>` backtick span can drift from the marker (a fix flips the
+// marker to resolved but leaves the heading reading "open", or vice versa) with nothing to
+// surface it. This DETECTS the drift (heading structured-tail status vs the following
+// marker's status); it is reported WARN-only (never gates — pre-existing drift exists and a
+// hard gate would block CI + this is doc hygiene, not a currency guarantee). Only headings
+// with a parseable structured status tail are checked, so free-text/prose headings never
+// false-fire. open/deferred/nominal collapse to "open-ish"; only open-ish-vs-resolved counts.
+export function headingMarkerDrift(srcText?: string): { line: number; id: string; heading: string; marker: string }[] {
+  const text = srcText ?? readFileSync(`${ROOT}/docs/known-gaps.md`, "utf8");
+  const lines = text.split("\n");
+  const drift: { line: number; id: string; heading: string; marker: string }[] = [];
+  const norm = (s: string) => (s === "resolved" ? "resolved" : "open-ish");
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^### /.test(lines[i])) continue;
+    const tail = lines[i].match(/;\s*(open|resolved|deferred|nominal)\s*`\s*$/i);
+    if (!tail) continue;
+    const hStatus = tail[1].toLowerCase();
+    let mStatus: string | null = null;
+    for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
+      const mm = lines[j].match(/<!--\s*@gap\s+[^>]*status=(\w+)/);
+      if (mm) { mStatus = mm[1].toLowerCase(); break; }
+      if (/^### /.test(lines[j])) break;
+    }
+    if (!mStatus) continue;
+    if (norm(hStatus) !== norm(mStatus)) {
+      const idm = lines[i].match(/^###\s+(\S+)/);
+      drift.push({ line: i + 1, id: idm ? idm[1] : "?", heading: hStatus, marker: mStatus });
+    }
+  }
+  return drift;
 }
 
 // ── Generated-section registry (Fork 3B/4) ──────────────────────────────────
@@ -348,6 +414,14 @@ function runCheck(): number {
   // Maps-staleness: WARN-only this unit (do NOT gate). See policy note above.
   console.log(`  ${maps.note}  [WARN-only — not gated; project-mapper seam]`);
   console.log(`  ${digestStaleness().note}  [WARN-only — not gated; PA-start freshness guard]`);
+  // Heading/marker drift: WARN-only (pre-existing drift + doc hygiene, not currency). See headingMarkerDrift.
+  const drift = headingMarkerDrift();
+  if (drift.length === 0) {
+    console.log(`  known-gaps heading/marker status: 0 drift  [WARN-only — not gated]`);
+  } else {
+    console.log(`  known-gaps heading/marker status: ${drift.length} DRIFT (heading tail ≠ marker status)  [WARN-only — not gated]`);
+    for (const d of drift) console.log(`      L${d.line} ${d.id}: heading=${d.heading} marker=${d.marker}`);
+  }
   console.log("");
   if (failed) {
     const names = [...stale, ...missing].join(", ");
@@ -463,6 +537,15 @@ function mapsStaleness() {
   const head = sh("git", ["rev-parse", "--short", "HEAD"]).stdout.trim();
   if (!watermark) return { watermark: null, head, note: "maps: watermark not parseable" };
   if (watermark === head) return { watermark, head, note: "maps: current" };
+  // g-maps-staleness-probe-has-no-ancestry-check — `rev-list --count A..HEAD` counts
+  // commits reachable from HEAD but NOT from A; if the watermark A is not an ancestor of
+  // HEAD (maps watermarked on a since-rebased/diverged commit), that number is meaningless
+  // (typically inflated). Guard with `merge-base --is-ancestor` and report divergence
+  // instead of a bogus "behind" count.
+  const isAnc = sh("git", ["merge-base", "--is-ancestor", watermark, "HEAD"]);
+  if (!isAnc.ok) {
+    return { watermark, head, note: `maps: watermark ${watermark} is NOT an ancestor of HEAD ${head} (diverged/rebased) — behind-count unavailable` };
+  }
   // count commits between watermark and HEAD (how far behind the maps are)
   const rng = sh("git", ["rev-list", "--count", `${watermark}..HEAD`]);
   const behind = rng.ok ? rng.stdout.trim() : "?";
