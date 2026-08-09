@@ -1,0 +1,13 @@
+{
+  "id": "derived-e-derived-server-only-reach-pos",
+  "description": "§6.6.19 — a `const <name>` derived cell whose RHS reaches a binding imported from a §12.2 Trigger 3 escalation-server-only stdlib module (`hashPassword` from `scrml:auth`) is REFUSED with E-DERIVED-SERVER-ONLY-REACH, not escalated. Guards the S331 leak where this shape compiled at exit 0 with no `.server.js` and shipped a real `Bun.password.hash` argon2id implementation into the browser bundle.",
+  "language-version": "1.0",
+  "spec": "§6.6.19",
+  "source-test": "compiler/tests/unit/route-inference-derived-server-only-reach.test.js",
+  "rationale": "§6.6.19: escalation is not an available answer for a derived cell — §6.6.3 fixes the evaluation strategy as synchronous lazy pull with dirty flags, so making the recompute a server round trip is not expressible. §12.2 Trigger 3 escalates the FUNCTION that reaches such a binding, and §12.4's per-function scope is exactly why the derived position was missed. The compiler therefore refuses. E-ROUTE-005 does NOT fire: that code is the unplaceable single-FUNCTION shape and additionally requires a client-only DOM global, neither of which is present here.",
+  "expect": {
+    "codes": ["E-DERIVED-SERVER-ONLY-REACH"],
+    "notCodes": ["E-ROUTE-005", "E-ROUTE-002"],
+    "severity": { "E-DERIVED-SERVER-ONLY-REACH": "error" }
+  }
+}
