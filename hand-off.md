@@ -1,4 +1,67 @@
 <!-- ============================================================= -->
+<!-- S331 WRAP (bryan/ASUS-Vivobook) — prepended 2026-08-09.        -->
+<!-- CONCURRENT with S332/S333/S334-peter; main moved under me      -->
+<!-- FIVE times. Disambiguate sessions by NAME, not number.         -->
+<!-- Mechanical stream = delta-log [1286]-[1300].                   -->
+<!-- ============================================================= -->
+
+# scrml — Session 331 (bryan · ASUS-Vivobook) — WRAP
+
+**Date:** 2026-08-08/09. `/boot` Profile A FULL. **6 PRs merged** (#479 #480 #481 #482 #483 #486) + the scrml-support delta-log retirement. Review floor **0 OWED**. Gaps **HIGH 26 · MED 126 · LOW 56**. Mechanical state → delta-log `[1286]`–`[1300]`.
+
+## 🔴 READ FIRST
+
+**1. The freeze campaign is still PAUSED** (S322). Unchanged.
+
+**2. ⚑ MERGE AUTHORITY IS NO LONGER A PER-SESSION GATE.** bryan, S331 verbatim: *"if it is clean, all green, adversarial passed. then merge, always. At this point my merge auth is an arbitrary gate. unless the thing is still in question."* Recorded as a third STANDING authorization in `pa-profile-bryan.md`. **The carve-out is the operative half** — unadjudicated findings, an unresolved fork, a pending ruling, or a DO-NOT-LAND awaiting re-review all still hold. **The remaining gate is the QUESTION, not the PERMISSION.** Do not re-ask on clean-green-passed work; that is the behaviour this replaced.
+
+**3. ⚑ bryan OPENED THE COMPILER-ARCHITECTURE QUESTION and it is banked as dpa-024, live on main.** Not a rewrite decision — a characterization plus one charter question. **The distinction he drew is load-bearing and must not be blurred: the limit is NOT in the language** (*"not the language in my head, that was always basically like this"*) — it is in architecture built under an earlier, smaller understanding of it. Language design is explicitly OUT of dpa-024's scope.
+
+**4. There is no inherited backlog and no rescue owed.** Everything landed or explicitly retained below.
+
+## 🎯 THE ARCS
+
+**1 — #479, the §18.5 block-arm.** Two unrelated single-point defects, both silent, both past a green suite and a clean differential. (a) `_splitBlockStatements` split only on `;`/newline at depth 0, so a tail FOLLOWING a block statement was swallowed → the IIFE fell off its end → `undefined`. **Separator dependence, not position dependence** — the tail lifts the moment a `;` precedes it, which is exactly why the corpus never tripped it. (b) `_emitForStmtWithTilde`'s fallbacks dropped the OPTIONS ARGUMENT; `declaredNames` was merely the visible loss, so a nested `a = 1` emitted a shadowing `const a = 1` (silent wrong value) and `a = a + 1` a TDZ that `node --check` ACCEPTS.
+
+**2 — #480/#482, the review floor drained 9 → 0.** First time at zero with every code-bearing PR given a real pass rather than a bare `clean`. #473 was CLEAN *and closed the class* (repo-wide grep for the broken form → zero remaining sites). #474's pass was DISPATCHED not eyeballed, because `emit-server.ts` is a text pass over generated output — 3 gaps, 2 HIGH, zero regressions.
+
+**3 — #481, the code-bearing carve-out rate.** S328 recommended it and left it unbuilt. Building it found something bigger: **the scan was silently truncated and had been for the probe's whole life** — `--limit` defaulted to 40, the in-scope population is **90**. Root-fixed by auto-widening until the scan provably clears the epoch.
+
+**4 — #486, the derived-cell RHS server-only reach.** A derived cell reaching `scrml:auth` compiled clean, emitted no `.server.js`, and pulled the real argon2 implementation into the shipped runtime (bundle differential 0 vs 4). **Closes ONE of four non-function positions.**
+
+## 🧭 FINDINGS THAT OUTLAST
+
+1. **★★ MY ARCHITECTURAL HYPOTHESIS WAS REFUTED BY AN AGENT I DISPATCHED TO REFUTE IT — and the refutation is why dpa-024 is worth running.** Claim: raw-text seams are the recurring defect generator. Falsified three ways, all PA-verified: **seam density ANTI-correlates with defect density** (the most seam-dense module in the repo carries 2 ledger mentions; the noisiest is seam-light with 63) · **71% of the 195 open markers are neither limb** · **the detection confound is real and FIVE DAYS OLD** (the instruments that found all six observe only emitted text). **One of my six I had not even observed — I inherited its framing from a routed message and counted it as independent evidence.**
+2. **★ Three separate agents corrected me on something load-bearing, every time because the brief carried a verify instruction.** The §18.5 axis was arm-FORM not value-POSITION (my reproducer was confounded — variant arms parse to `structuredBody` and are immune) · my escalation locus was narrower than the real cause (`collectFileFunctions` yields `function-decl` only, so **every** non-function position misses) · my migration measurement used a grep where execution was available and got 14 instead of 59. **The safeguard held, not my accuracy** — third consecutive session recording that sentence.
+3. **★ A security diagnostic whose fastest workaround reopens the hole is worse on that axis than no diagnostic.** #486's error fires on `const <h> = …`; **delete one keyword** and the leak returns silently. An adopter makes the smallest edit that stops the red text. Fixed by refusing the workaround IN the message, interpolating the adopter's own cell name.
+4. **★ An instrument I cited as evidence in three PRs documents a guarantee it does not provide.** `corpus-emit-differential.ts` claims no absolute-path leak so it compares byte-exact with no normalization — but the chunk-scope ID is path-DERIVED. ~1009 false diffs across two checkouts. **The claim is the defect.**
+5. **A gap closed by enumerating one dimension reads as closed on all of them.** #469/#470 enumerated the five value POSITIONS correctly and left tail-SHAPE and nested-statement-FIDELITY open. The generator of both was separator dependence, which no positional enumeration surfaces.
+
+## ⚠️ OWN MISSES — recorded, not smoothed
+
+- **I filed a four-position table that was wrong**, and shipped it to Peter before verifying. Corrected by message.
+- **I scoped #479 as "unify three routes." The agent argued against it with measurement and was right** — neither defect was caused by route multiplicity.
+- **Two of my three named loci were wrong** in that brief.
+- **Four tooling defects of my own**, all caught by reading output, none by a gate: a cry-wolf truncation guard · an unquoted `--include=*.ts` eaten by zsh that reported a false ZERO · a commit message whose embedded `"` closed the `-m` argument so git read the rest as pathspecs and **silently did not commit** while the wrapper reported success · a percentage threshold too permissive to fire.
+- **I half-dismissed the detection-artifact explanation** when I first raised it. It was the strongest counter-argument and it was five days old.
+
+## 🧷 STATE / OPEN
+
+**⛔ OWED BY BRYAN — 14, and the two axiom-level ones deserve a warm session:**
+1. **dpa-024's Q4 — Road-B's charter** (the one with a clock; every session Road-B advances on parity costs more)
+2. **`g-cell-initialiser-and-markup-interp-server-only-reach-do-not-escalate`** — escalate or refuse? The derived rationale does NOT transfer (a derived cell is a synchronous pull and *cannot* escalate; a one-shot initialiser has no such constraint)
+3. **SPEC §6.6.19's message-SHALL** — ratify or veto; ONE hunk, precedent is §12.4's `E-ROUTE-005`
+4. **The derived-position body contract** (Q2) — the measurement reframed it from ergonomics to confidentiality
+5. **Peter's §6.8 fork** — `g-implicit-cell-double-write-clobbers-reset-init`: two structurally identical sources want opposite reset targets; the discriminator is INTENT, not form
+6. **`g-263`** cross-file-const seed convergence (Peter, held, prior art pushed)
+7. `_scrml_reset` awaits its thunk (HIGH) · 8. `g-session-context-scan-bare-form-sound` · 9. `g-session-get-reserved-key-read-disclosure` · 10. `g-match-nofor-block-form-skips-exhaustiveness` · 11. `g-match-block-empty-arm-yields-object-not-void` (11 sites measured; a MIGRATION)
+12. **dpa-023's `pending` rung** · 13. **dpa-022's routed fork** — both axiom-level, one-at-a-time by the no-batch floor
+14. **The if-value B ruling's BUILD** — Peter pushed `worktree-agent-ad7fea65da10675c1` @ `5fc00afa`; it is bryan's to land as the §17.6 amendment with `provenance: ruling:user-voice-scrml.md S331`. **Rebase it over #479 first** — that branch is at base `b4fb2f1f` and #479 touched the same §18.5 tail-lift routes.
+
+**Base-amendment candidate:** a brief committed on a FEATURE BRANCH is not in the worktree — the worktree is cut from the repo's HEAD, not the current branch. pa-base v2.11 §5's operative requirement is *commit it to the ref the worktree will be cut from*. Cost: the agent had to `git checkout <branch> -- <file>` to read its own brief.
+
+**Concurrency note:** three Peter sessions ran inside mine and **S333 registered as "successor to presumed-stopped S331-bryan"** — I was blocked on a dispatch, not dead. Corrected on the board. Also: **#485 landed between my gate going green and my merge command** — "green gate" is not "still mergeable" under PR-cadence concurrency, and that gap bit twice today.
+<!-- ============================================================= -->
 <!-- hand-off.md ROTATED at S333 (peter/Windows) 2026-08-09.        -->
 <!-- Prior accumulated hand-off (S277–S332, 389 KB, over the        -->
 <!-- 256 KB single-read cap) archived → handOffs/hand-off-s332.md.  -->
