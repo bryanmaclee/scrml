@@ -3428,15 +3428,43 @@ function collectServerOnlyBindingModules(
   }
   if (live.size === 0) return found;
 
+  for (const mod of scanForServerOnlyBindingRefs(body, live).values()) found.add(mod);
+  return found;
+}
+
+/**
+ * The shared reference-scanner behind BOTH escalation-server-only reach checks —
+ * the per-function one (`collectServerOnlyBindingModules`, §12.2 Trigger 3) and
+ * the derived-cell-RHS one (`collectDerivedRhsServerOnlyRefs`, §6.6.20).
+ *
+ * Extracted at S331 with NO behavioural change to the function path: the caller
+ * still computes its own shadow set and still reduces the result to a module set.
+ * The two callers differ ONLY in what they hand in as `root` and in how they
+ * derive `live` — the walk itself is one rule on one confidentiality boundary and
+ * must not be allowed to drift into two.
+ *
+ * Returns the matched LOCAL BINDING NAMES mapped to their module, not just the
+ * modules: the derived-cell diagnostic is required to name the offending member
+ * (§34 `E-DERIVED-SERVER-ONLY-REACH`), and reconstructing it from a module name
+ * afterwards is not possible once the walk has thrown the name away.
+ */
+function scanForServerOnlyBindingRefs(
+  root: unknown,
+  live: Map<string, string>,
+): Map<string, string> {
+  const found = new Map<string, string>();
+  if (live.size === 0) return found;
+
   // Word-boundary scan for a raw text run (escape-hatch bodies — a block-body
-  // closure's calls live only in `.raw`). May match inside a string literal in
-  // that raw text; that is an over-fire, never a leak, and is the correct
-  // direction to err on this boundary.
+  // closure's calls live only in `.raw`, and an `if`-expression in a derived RHS
+  // parses to an `escape-hatch` too). May match inside a string literal in that
+  // raw text; that is an over-fire, never a leak, and is the correct direction to
+  // err on this boundary.
   const scanRaw = (raw: string): void => {
     for (const [local, mod] of live) {
-      if (found.has(mod)) continue;
+      if (found.has(local)) continue;
       const re = new RegExp(`\\b${local.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
-      if (re.test(raw)) found.add(mod);
+      if (re.test(raw)) found.set(local, mod);
     }
   };
 
@@ -3459,7 +3487,7 @@ function collectServerOnlyBindingModules(
 
     if (kind === "ident" && typeof n.name === "string") {
       const mod = live.get(n.name);
-      if (mod !== undefined) found.add(mod);
+      if (mod !== undefined) found.set(n.name, mod);
       return;
     }
 
@@ -3474,8 +3502,172 @@ function collectServerOnlyBindingModules(
     }
   };
 
-  walk(body);
+  walk(root);
   return found;
+}
+
+/**
+ * Keys of a `state-decl` node that are NOT part of the cell's RHS — its identity,
+ * its declared type, and its shape flags. Everything else on the node is an
+ * RHS-bearing position and is scanned.
+ *
+ * `init` is excluded DELIBERATELY: it is the RHS's raw SOURCE TEXT, and every
+ * structured shape carries the same content in a scannable node — a parseable RHS
+ * as `initExpr`, an unparseable one (e.g. an `if`-expression) as an
+ * `escape-hatch` whose `.raw` IS scanned, a `match` RHS as `matchExpr`. Scanning
+ * `init` as well would add nothing but a false-positive channel: it would match
+ * the binding's name inside an ordinary string literal in the RHS. The
+ * `noStructuredRhs` fallback below is the fail-closed backstop for the case where
+ * no structured node exists at all.
+ */
+const STATE_DECL_NON_RHS_KEYS = new Set<string>([
+  "id",
+  "kind",
+  "name",
+  "init",
+  "shape",
+  "isConst",
+  "isServer",
+  "isShared",
+  "structuralForm",
+  "pinned",
+  "typeAnnotation",
+  "span",
+  "_scope",
+  "_record",
+]);
+
+/** The RHS-bearing values of a `state-decl` node (see STATE_DECL_NON_RHS_KEYS). */
+function stateDeclRhsRoots(declNode: Record<string, unknown>): unknown[] {
+  const roots: unknown[] = [];
+  for (const key of Object.keys(declNode)) {
+    if (STATE_DECL_NON_RHS_KEYS.has(key)) continue;
+    const v = declNode[key];
+    if (v !== null && v !== undefined) roots.push(v);
+  }
+  return roots;
+}
+
+/**
+ * Names bound INSIDE a derived cell's RHS, which therefore cannot refer to a
+ * file-scoped import.
+ *
+ * Scope discipline mirrors `collectLocalNames` (the function-level shadow set)
+ * exactly: a name bound inside a nested `lambda` or `function-decl` has its OWN
+ * scope and does NOT shadow the import for the rest of the RHS, so the walk stops
+ * at those boundaries. Erring narrow here is the fail-closed direction — a
+ * too-WIDE shadow set produces a MISS (a leak), a too-narrow one produces an
+ * over-fire (a rejection the author can see and fix).
+ */
+function collectDerivedRhsLocalNames(declNode: Record<string, unknown>): Set<string> {
+  const names = new Set<string>();
+  const seen = new Set<unknown>();
+
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    if (seen.has(node)) return;
+    seen.add(node);
+
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child);
+      return;
+    }
+
+    const n = node as Record<string, unknown>;
+    const kind = typeof n.kind === "string" ? (n.kind as string) : null;
+
+    // Own scope — do not collect (or descend past) a nested binder.
+    if (kind === "lambda" || kind === "function-decl") return;
+
+    if (
+      (kind === "const-decl" || kind === "let-decl" || kind === "tilde-decl" || kind === "lin-decl") &&
+      typeof n.name === "string"
+    ) {
+      names.add(n.name);
+    }
+
+    for (const key of Object.keys(n)) {
+      if (key === "span" || key === "_scope" || key === "_record") continue;
+      walk(n[key]);
+    }
+  };
+
+  for (const root of stateDeclRhsRoots(declNode)) walk(root);
+  return names;
+}
+
+/**
+ * §6.6.19 / §12.2 Trigger 3 — the DERIVED-CELL half of the escalation-server-only
+ * reach check. Returns the matched local binding names mapped to their module.
+ *
+ * WHY THIS IS A SEPARATE ENTRY POINT AND NOT PART OF THE FUNCTION WALK. §12.4 is
+ * explicit that "Route inference SHALL be per-function", and `collectFileFunctions`
+ * honours it literally: it collects `function-decl` nodes only. A derived cell is a
+ * `state-decl` (`shape: "derived"`), so the Step-3 per-function loop that drives
+ * Trigger 3 never visits its RHS — measured at S331, where a derived cell calling
+ * `hashPassword` from `scrml:auth` compiled at exit 0 with NO `.server.js`, the
+ * binding resolved client-side in the recompute closure, and a real
+ * `Bun.password.hash` argon2id implementation in the shipped browser runtime. The
+ * per-FUNCTION rule is not widened to fix it (that would change placement for
+ * shapes that are correct today); the derived position gets its own visit, and
+ * the visit REFUSES rather than escalates — see §6.6.19 for why escalation is not
+ * the available answer here.
+ */
+function collectDerivedRhsServerOnlyRefs(
+  declNode: Record<string, unknown>,
+  bindings: Map<string, string>,
+): Map<string, string> {
+  if (bindings.size === 0) return new Map();
+
+  const shadowed = collectDerivedRhsLocalNames(declNode);
+  const live = new Map<string, string>();
+  for (const [local, mod] of bindings) {
+    if (!shadowed.has(local)) live.set(local, mod);
+  }
+  if (live.size === 0) return new Map();
+
+  const roots = stateDeclRhsRoots(declNode);
+
+  // Fail-closed backstop: a derived cell with RHS source text but NO structured
+  // RHS node at all would otherwise be invisible to the walk. Scan its raw text.
+  if (roots.length === 0 && typeof declNode.init === "string" && declNode.init.length > 0) {
+    return scanForServerOnlyBindingRefs(
+      { kind: "escape-hatch", raw: declNode.init },
+      live,
+    );
+  }
+
+  return scanForServerOnlyBindingRefs(roots, live);
+}
+
+/**
+ * Every `const <name>` DERIVED cell declared in a file (§6.6 shape 3), at any
+ * depth — top-level logic, markup children, component bodies.
+ *
+ * `shape === "derived"` is the ast-builder's own marker for the `const <NAME> = expr`
+ * form (§6.6.2), and is what `collectClientReactiveCells` already keys on.
+ */
+function collectDerivedCellDecls(fileAST: FileAST): Array<Record<string, unknown>> {
+  const nodes: any[] = fileAST.nodes ?? ((fileAST as any).ast ? (fileAST as any).ast.nodes : []) ?? [];
+  const out: Array<Record<string, unknown>> = [];
+  const seen = new Set<unknown>();
+
+  const visit = (list: any[]): void => {
+    if (!Array.isArray(list)) return;
+    for (const node of list) {
+      if (!node || typeof node !== "object") continue;
+      if (seen.has(node)) continue;
+      seen.add(node);
+      if (node.kind === "state-decl" && node.shape === "derived") {
+        out.push(node as Record<string, unknown>);
+      }
+      if (Array.isArray(node.body)) visit(node.body);
+      if (Array.isArray(node.children)) visit(node.children);
+    }
+  };
+
+  visit(nodes);
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -4230,6 +4422,75 @@ export function runRI(input: RIInput): RIOutput {
         closureCaptures,
         clientPin,
       });
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Step 3b (S331): §6.6.19 E-DERIVED-SERVER-ONLY-REACH — a `const <name>`
+  // derived cell whose RHS reaches a binding imported from an ESCALATION
+  // server-only stdlib module.
+  //
+  // This is the position Trigger 3's per-function walk structurally cannot
+  // reach. Step 3 above iterates `collectFileFunctions`, which — honouring
+  // §12.4's "Route inference SHALL be per-function" literally — yields
+  // `function-decl` nodes only. A derived cell is a `state-decl`, so its RHS
+  // was never visited and the leak the S299 Trigger-3 amendment was written to
+  // close stayed open in this one shape (measured S331: no `.server.js` at all,
+  // `const { hashPassword } = _scrml_stdlib.auth` in the client bundle, and a
+  // real `Bun.password.hash` argon2id implementation shipped to the browser).
+  //
+  // IT REFUSES; IT DOES NOT ESCALATE. A derived cell is a SYNCHRONOUS reactive
+  // recompute (§6.6 — pulled on read via the dirty flag). Escalating its RHS
+  // would make that recompute a server round trip, i.e. asynchronous, which the
+  // derived model has no way to express — so "place it on the server" is not an
+  // available answer, and inventing one here would pre-empt a language question
+  // (may the derived position host server work AT ALL?) that is not this fix's
+  // to answer. Refusing is also the reversible direction: newly-rejecting can be
+  // relaxed later, whereas accepting-and-escalating is a one-way door.
+  // ------------------------------------------------------------------
+  for (const fileAST of files) {
+    const filePath = fileAST.filePath;
+    const _bindings = perFileEscalationServerOnlyBindings.get(filePath);
+    if (!_bindings || _bindings.size === 0) continue;
+
+    // §64 / §12.2 Trigger 3 — a `kind="tool"` program has NO client boundary, so
+    // a server-only module there is not a leak and refusing would reject valid
+    // code. Same carve-out the `print()`/`println()` signal already takes.
+    if (isToolProgram(fileAST)) continue;
+
+    for (const declNode of collectDerivedCellDecls(fileAST)) {
+      const refs = collectDerivedRhsServerOnlyRefs(declNode, _bindings);
+      if (refs.size === 0) continue;
+
+      const cellName = typeof declNode.name === "string" ? declNode.name : "<anonymous>";
+      // Stable ordering: the message is asserted by conformance, and AST walk
+      // order is an implementation detail the corpus should not be pinned to.
+      const reached = [...refs.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+      const reachedList = reached
+        .map(([local, mod]) => `\`${local}\` (from \`${mod}\`)`)
+        .join(", ");
+      const firstModule = reached[0][1];
+
+      const eDerived = new RIError(
+        "E-DERIVED-SERVER-ONLY-REACH",
+        `E-DERIVED-SERVER-ONLY-REACH: The RHS of derived cell \`const <${cellName}>\` reaches ` +
+        `${reachedList} — a server-only stdlib module (§12.2 Trigger 3). A derived cell is a ` +
+        `SYNCHRONOUS reactive recompute (§6.6): it is pulled on read, on the client, so the ` +
+        `compiler cannot escalate it to the server the way it escalates a function — that would ` +
+        `turn every recompute into a network round trip. Leaving it un-escalated would ship ` +
+        `\`${firstModule}\` and its implementation into the browser bundle, along with whatever ` +
+        `secret is passed to it, so the compiler refuses instead. Fix: move the call into a ` +
+        `\`function\` — a function DOES escalate on this trigger (§12.2) — and write its result ` +
+        `to a plain reactive cell that the markup reads. Do NOT just delete \`const\`: a plain ` +
+        `cell initialiser (\`<${cellName}> = …\`) reaches the same module from the same ` +
+        `client-side position, is NOT yet diagnosed, and compiles clean while shipping the ` +
+        `implementation to the browser — the shortest edit that silences this error is the one ` +
+        `that restores the leak. See §6.6.19, §12.2.`,
+        (declNode.span as Span) ?? ({ start: 0, end: 0 } as Span),
+      );
+      eDerived.severity = "error";
+      eDerived.filePath = filePath;
+      errors.push(eDerived);
     }
   }
 

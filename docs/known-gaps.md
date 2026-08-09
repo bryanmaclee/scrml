@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 25 |
-| MED | 125 |
-| LOW | 55 |
+| HIGH | 26 |
+| MED | 126 |
+| LOW | 56 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -7626,6 +7626,81 @@ straight-line arm bodies. `g-match-block-arm-value-lift-covers-one-of-five-paths
 for the five *positions*; *tail shape* and *nested-statement fidelity* are two further orthogonal axes
 nobody enumerated. **Root fix = one emission route, completing what #470 started on the predicate.**
 **Blocks the derived-position half of the if-value fork (Q2)** — see user-voice S331.
+
+### g-derived-cell-rhs-server-only-reach-does-not-escalate — a server-only stdlib call inside a derived-cell RHS escalates NOTHING; no `.server.js` is emitted, the call is bound client-side, and the real implementation is bundled into the shipped client runtime — with zero diagnostics — `NEW S331-bryan (measuring the derived-if body contract); HIGH`
+<!-- @gap id=g-derived-cell-rhs-server-only-reach-does-not-escalate sev=HIGH status=resolved locus=compiler/src/route-inference.ts:1086(collectFileFunctions yields function-decl ONLY; RI Step 3b now visits the derived-cell RHS) prov=spec:§12.2-Trigger-3-S299-amendment -->
+
+**RESOLVED S331-bryan** — `E-DERIVED-SERVER-ONLY-REACH` minted, SPEC §6.6.19 normative home, 3 conformance cases, 17 unit tests. **The PA locus was REFINED, and the refinement made the class bigger:** the walk is driven from `collectFileFunctions` (`:1086`), which yields **`function-decl` nodes only** — so the miss is not derived-specific, it is **every non-function position**. Measured, same import, same member: a `function` escalates; a derived cell, a **mutable-cell initialiser**, and a **markup interpolation** all ship `Bun.password` ×4 into the client runtime. This fix closes ONE of four. Residual → `g-cell-initialiser-and-markup-interp-server-only-reach-do-not-escalate` below. Migration re-measured by the agent over **59** files (the PA's grep found 14 and was wrong): 1 fire, its own reproducer.
+
+### g-cell-initialiser-and-markup-interp-server-only-reach-do-not-escalate — the sibling non-function positions still ship server-only code silently, and the new diagnostic's shortest workaround steers adopters straight into one — `NEW S331-bryan (adversarial pass on the derived fix); HIGH`
+<!-- @gap id=g-cell-initialiser-and-markup-interp-server-only-reach-do-not-escalate sev=HIGH status=open locus=compiler/src/route-inference.ts:1086(collectFileFunctions yields function-decl only; RI Step 3b visits the derived RHS but not the mutable-cell initialiser or the markup-interp position) prov=ruling:pending-bryan-escalate-vs-refuse -->
+
+**PA-VERIFIED by execution.** `const <h> = hashPassword(@pw)` now errors. **Delete one keyword** — `<h> = hashPassword(@pw)` — and it is **silent, exit 0, 4 occurrences of `Bun.password` in the shipped runtime.** Markup interpolation `${hashPassword(@pw)}` behaves identically.
+
+**⚑ The perverse path is the reason this is HIGH, not MED.** An adopter who hits the new error does the smallest edit that stops the red text, and that edit is deleting `const` — which silently restores the exact leak while feeling like a fix. A security diagnostic whose fastest workaround reopens the vulnerability manufactures traffic into the hole. **Mitigated, not closed:** the message now refuses that workaround by name (SPEC §6.6.19 makes it a SHALL, and a unit test pins the clause with a docstring requiring rewrite-not-removal when the siblings are diagnosed). Mitigation is a signpost, not a gate.
+
+**⛔ NEEDS A RULING — escalate or refuse, and the derived rationale does NOT transfer.** A derived cell is a synchronous pull (§6.6.3) and therefore *cannot* be escalated — escalating would make every recompute a network round trip. A **one-shot mutable-cell initialiser** has no such constraint and arguably *should* escalate. Refusing all three uniformly is the fail-closed default; escalating the initialiser is the more powerful answer and a one-way door. Bryan's lane (language-surface, §12.2 jurisdiction).
+
+### g-corpus-emit-differential-path-derived-chunk-id-false-diffs — the differential's own docstring claims no absolute-path leak; the chunk-scope ID is path-DERIVED, so two checkouts report ~1009 false differences — `NEW S331-bryan (agent-found during the derived fix); MED`
+<!-- @gap id=g-corpus-emit-differential-path-derived-chunk-id-false-diffs sev=MED status=open locus=scripts/corpus-emit-differential.ts(the no-normalization claim in its docstring)+the chunk-scope id derivation prov=rationale:instrument-defect-found-while-using-the-instrument -->
+
+The differential states: *"The emitted ARTIFACTS were separately verified to contain no absolute-path leak, so artifacts are compared byte-exact with no normalization at all."* **That claim is false.** The chunk-scope ID is *derived* from the compiler root's absolute path — `// --- chunk cell scope (01klyi21) ---` vs `(000h8maz)` — so a substring check for the path passes while the bytes still depend on it. A run across two checkouts reported **1009 of 7334** artifacts differing, every one at an identical byte count.
+
+**This is the trust-destroying direction of failure**, and it lands on an instrument this session cited as evidence in three PRs. Worked around by capturing both sides from one path; the fix is to normalize the chunk-scope ID or drop the no-normalization claim. **The claim is the defect** — an instrument that documents a guarantee it does not provide is worse than one that documents nothing.
+
+### g-cli-emits-artifacts-on-failed-compile — the CLI writes output artifacts even when the compile exits non-zero — `NEW S331-bryan (agent-found); LOW`
+<!-- @gap id=g-cli-emits-artifacts-on-failed-compile sev=LOW status=open locus=searched:compiler/bin/scrml.js,commands/compile.js — no locus traced; behaviour observed, not located prov=rationale:observed-while-verifying-a-fail-closed-diagnostic -->
+
+A hard error exits 1 but the output directory is still populated. Pre-existing and general — shared with `E-ROUTE-005` (`conformance/cases/server-fn/e-route-005-pos` exits 1 and writes its artifacts too), so not introduced by any S331 work.
+
+**Why it matters beyond tidiness:** it breaks the intuition that a fail-closed diagnostic means no bytes on disk. During the S331 verification the `-pos` case's output dir contained the leaked runtime *after* the fix, which reads as "the fix didn't work" until you know this behaviour. **A reviewer measuring a confidentiality fix by inspecting the output directory will reach the wrong conclusion.**
+
+**PA-REPRODUCED S331 by compilation + bundle differential at `05787a42`.** A derived cell whose RHS
+reaches a server-only stdlib member compiles **clean, with zero diagnostics**:
+
+```scrml
+${ import { hashPassword } from 'scrml:auth' }
+
+const <derivedServerCall> = match @phase {
+    .Idle :> { const h = hashPassword(@pw); h }
+    .Busy :> "busy"
+}
+```
+
+Measured consequences:
+- **No `.server.js` is emitted at all** — nothing escalated.
+- The client bundle binds it: `const { hashPassword } = _scrml_stdlib.auth;` and calls it inside the
+  derived recompute closure.
+- **The real implementation ships.** `_scrml/auth.js:48` is
+  `Bun.password.hash(password, { algorithm: "argon2id" })`, its own header marked `[server-only]`.
+  Bundle differential on the shipped runtime: a program that does NOT import `scrml:auth` → **0**
+  occurrences of `Bun.password`; this one → **4**.
+
+**Attribution is measured, not inferred: this is DERIVED-SPECIFIC.** The identical import and call
+inside a plain `function` **does** escalate — `.server.js` emitted, `hashPassword` absent from the
+client bundle entirely. **Root cause:** §12.2 escalation is defined per-FUNCTION
+(*"Route inference SHALL be per-function"*), and a derived-cell RHS is not a function, so the walk that
+Trigger 3 drives never visits it.
+
+**Governing sentence — this is TOWARD the contract, not a widening.** §12.2's Trigger-3 S299 amendment
+(SPEC line ~7229) describes this exact symptom normatively as the defect it was written to close:
+*"A `<program>` calling `hashPassword` from `scrml:auth` therefore emitted no `.server.js` at all and
+shipped both the caller's secret and a real `Bun.password.hash` argon2id implementation into the browser
+bundle, with zero diagnostics."* S299/#268 closed it for the per-function path and left the derived-RHS
+path open. §12.2 also states the disposition for an ambiguous case: *"when a module resists
+classification, prefer the server: over-inclusion costs a round trip, under-inclusion ships a secret to
+a browser."*
+
+**Direction-of-change: newly-rejecting, and the migration is MEASURED at ZERO.** 14 corpus files import
+a module in `ESCALATION_SERVER_ONLY_MODULES`; **none of them also declares a derived cell**. Measured,
+not assumed — assumed-zero is not measured-zero.
+
+**Not claimed, because not observed:** whether the derived recompute throws in a real browser (`Bun` is
+undefined there). The escalation failure and the runtime bundling are measured; the runtime symptom is
+not. Do not record it as verified without executing it.
+
+**Related but distinct:** `g-trigger-3-server-only-import-does-not-escalate` (S299, RESOLVED for the
+function path). This is the same class in a position the per-function walk structurally cannot reach.
 
 ### g-server-fn-reindent-fix-covers-8-of-25-sites-in-its-own-class — #474 made ONE emitter template-literal-aware; three sibling emitters in the same class still corrupt multi-line template content, all reachable with zero diagnostics — `NEW S331-bryan (adversarial review of #474); HIGH`
 <!-- @gap id=g-server-fn-reindent-fix-covers-8-of-25-sites-in-its-own-class sev=HIGH status=open locus=compiler/src/codegen/emit-library-shared.ts:692(emitLibraryFnMember)+compiler/src/codegen/emit-tool.ts:466+compiler/src/codegen/emit-control-flow.ts:1073(emitTryStmt)+compiler/src/codegen/emit-logic.ts:3410 prov=spec:§48 -->

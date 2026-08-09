@@ -1,0 +1,12 @@
+{
+  "id": "derived-e-derived-server-only-reach-neg",
+  "description": "§6.6.19 over-fire guard — a derived cell whose RHS reaches a CLIENT-SAFE stdlib member (`sortBy` from `scrml:data`) still compiles. E-DERIVED-SERVER-ONLY-REACH keys on the §12.2 Trigger 3 ESCALATION set, never on 'is a stdlib import'.",
+  "language-version": "1.0",
+  "spec": "§6.6.19",
+  "source-test": "compiler/tests/unit/route-inference-derived-server-only-reach.test.js",
+  "rationale": "§12.2 Trigger 3 is explicit that `scrml:data` is NOT escalation-server-only (pure transforms + compile-time type-as-argument primitives, with a real client implementation shipped in the runtime), and that reusing the async set for placement was measured at S299 to wrongly relocate 72 corpus import sites of correct client code. The derived-position refusal inherits that set and therefore inherits the same guard: a client-safe member in a derived RHS is legal.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-DERIVED-SERVER-ONLY-REACH"]
+  }
+}

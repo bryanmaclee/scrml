@@ -1,0 +1,16 @@
+<program>
+
+type Phase:enum = { Idle, Busy }
+<phase>: Phase = .Idle
+<pw> = "secret"
+
+${ import { hashPassword } from 'scrml:auth' }
+
+const <derivedServerCall> = match @phase {
+    .Idle :> { const h = hashPassword(@pw); h }
+    .Busy :> "busy"
+}
+
+<div>${@derivedServerCall}</div>
+
+</program>

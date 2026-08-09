@@ -1,0 +1,12 @@
+{
+  "id": "derived-e-derived-server-only-reach-fn-path",
+  "description": "§12.2 Trigger 3 non-regression pin for §6.6.19 — the same `scrml:auth` member reached from a plain `function` still SERVER-ESCALATES and compiles clean. The derived-position refusal must not disturb the function path S299 closed, and this is the shape the E-DERIVED-SERVER-ONLY-REACH message tells the author to move to.",
+  "language-version": "1.0",
+  "spec": "§12.2",
+  "source-test": "compiler/tests/unit/route-inference-derived-server-only-reach.test.js",
+  "rationale": "§12.2 Trigger 3: 'calling a binding imported from any of them escalates the function that calls it'. A function HAS a placement to change, so escalation is available and is the right answer — unlike the derived position (§6.6.19), where a synchronous lazy-pull recompute (§6.6.3) cannot become a round trip. Measured S331: this shape emits `.server.js`, and `hashPassword` appears 0 times in the client bundle and `Bun.password` 0 times in the shipped runtime, against 4 for the un-escalated derived shape.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-DERIVED-SERVER-ONLY-REACH", "E-ROUTE-005"]
+  }
+}

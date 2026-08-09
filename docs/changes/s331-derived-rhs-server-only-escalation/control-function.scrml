@@ -1,0 +1,14 @@
+<program>
+
+<pw> = "secret"
+<out> = ""
+
+${ import { hashPassword } from 'scrml:auth' }
+
+${ function computeServerCall(pw) {
+    return hashPassword(pw)
+} }
+
+<div onclick={ @out = computeServerCall(@pw) }>${@out}</div>
+
+</program>
