@@ -1,0 +1,11 @@
+{
+  "id": "sql-prepare-sse-generator-e-sql-006",
+  "description": "§44.3 — a `.prepare()` on a `?{}` result inside an SSE `server function*` generator body SHALL be compile error E-SQL-006. Pins the emit-server SSE body-emit path (`_serverFnOptsSSE`), which builds its own opts object separate from the CSRF/non-CSRF route handlers; before the fix it wired no `.prepare()` sink, silently dropping the diagnostic on the streaming-handler sub-path.",
+  "language-version": "1.0",
+  "spec": "§44.3",
+  "source-test": "compiler/src/codegen/emit-server.ts (_serverFnOptsSSE; shared _sqlPrepareErrors sink)",
+  "rationale": "The SSE generator body lowers through emitLogicNode with `_serverFnOptsSSE`, which now threads the function-scoped `_sqlPrepareErrors` sink (drained deduped at the tail), so a `.prepare()` in a streaming handler surfaces E-SQL-006.",
+  "expect": {
+    "codes": ["E-SQL-006"]
+  }
+}

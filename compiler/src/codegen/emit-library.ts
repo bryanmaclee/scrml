@@ -321,6 +321,11 @@ function pruneServerFnsAndLowerGuarded(
   // emits a redeclaring IIFE, surfacing later as the misleading
   // E-CODEGEN-INVALID-LOGIC "compiler defect". Mirrors emit-server's wiring.
   const foreignCrossingErrors: CGError[] = [];
+  // NB: no `.prepare()` (E-SQL-006) sink is threaded here — this loop lowers ONLY
+  // FOREIGN nodes (`collectForeignNodes` → emit-logic `case "foreign"`), which can
+  // never dispatch to `case "sql"`, so it cannot produce an E-SQL-006. The live
+  // `.prepare()` sinks are on the fn-body-emit paths (emit-library fn members,
+  // emit-server, emit-tool), not this foreign-splice loop.
   for (const f of foreignNodes) {
     const sp = f.span as Span | undefined;
     if (!sp || typeof sp.start !== "number" || typeof sp.end !== "number") continue;
@@ -470,6 +475,9 @@ function emitAsyncLibraryFns(
   const syncCallSink: Array<{ name: string; span: unknown }> = [];
   const prevClassifier = setServerAsyncClassifier({ calleeMap, exportRegistry, syncCallSink });
   const foreignCrossingErrors: unknown[] = [];
+  // E-SQL-006 (§44.3) — dedicated narrow .prepare() sink (mirror of
+  // `foreignCrossingErrors`), drained into `errors` after lowering.
+  const preparedStmtErrors: unknown[] = [];
   const removals: Array<{ start: number; end: number }> = [];
   const outLines: string[] = [];
   try {
@@ -487,6 +495,7 @@ function emitAsyncLibraryFns(
           isExported: fn.fromExport === true,
           asyncFnNames,
           foreignCrossingErrors,
+          preparedStmtErrors,
           // GITI-038 — a nested-async-closure holder that is NOT itself async: emit
           // its body server-side (nested await legal) but keep its OWN signature sync.
           nonAsyncReemit:
@@ -499,6 +508,8 @@ function emitAsyncLibraryFns(
   }
   // E-FOREIGN-006 crossing-shadow diagnostics from lowering an async fn body.
   for (const e of foreignCrossingErrors) if (e) errors.push(e as CGError);
+  // E-SQL-006 .prepare() diagnostics from lowering an async fn body.
+  for (const e of preparedStmtErrors) if (e) errors.push(e as CGError);
   return { removals, lines: outLines };
 }
 

@@ -1,0 +1,11 @@
+{
+  "id": "sql-prepare-pattern-c-cell-e-sql-006",
+  "description": "§44.3 — a `.prepare()` on a `?{}` result in a §52.6.5 Pattern-C server-cell declaration (`<var server> = ?{...}.prepare()`) SHALL be compile error E-SQL-006. Pins the emit-server Pattern-C cell-load emit path (direct `emitLogicNode(sqlNode, ...)` for the /__serverLoad route and its SSR seed), a direct sqlNode lowering with its own inline opts; before the fix it wired no `.prepare()` sink, silently dropping the diagnostic on the server-cell hydration sub-path.",
+  "language-version": "1.0",
+  "spec": "§44.3",
+  "source-test": "compiler/src/codegen/emit-server.ts (Pattern-C serverLoad + SSR-seed sqlNode emit; shared _sqlPrepareErrors sink)",
+  "rationale": "A `<var server> = ?{...}` inline cell lowers its query directly through emitLogicNode case \"sql\"; both the /__serverLoad route emit and the SSR-seed emit now thread the function-scoped `_sqlPrepareErrors` sink (drained deduped at the tail, so the shared decl reports once), surfacing E-SQL-006 on a `.prepare()`.",
+  "expect": {
+    "codes": ["E-SQL-006"]
+  }
+}

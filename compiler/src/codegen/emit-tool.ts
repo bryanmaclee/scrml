@@ -420,12 +420,16 @@ export function generateToolJs(
   const asyncFnNames = computeAsyncFnNames(fns, sourceText, asyncImportedNames);
   // Foreign crossing-shadow errors (E-FOREIGN-006) surface via this sink.
   const foreignCrossingErrors: unknown[] = [];
+  // E-SQL-006 (§44.3) — `.prepare()` on a `?{}` result in a tool fn body surfaces
+  // via this dedicated narrow sink (mirror of `foreignCrossingErrors`).
+  const preparedStmtErrors: unknown[] = [];
 
   const emitOpts = {
     boundary: "server" as const,
     serverFnNames: asyncFnNames,
     syncPeerCalls: [] as Array<{ name: string; span: unknown }>,
     foreignCrossingErrors,
+    preparedStmtErrors,
     declaredNames: new Set<string>(),
   };
 
@@ -527,6 +531,10 @@ export function generateToolJs(
   // collected (the emit-logic `case "foreign"` writes them to this sink).
   if (errors && foreignCrossingErrors.length > 0) {
     for (const e of foreignCrossingErrors) errors.push(e);
+  }
+  // Surface any E-SQL-006 `.prepare()` diagnostics the SQL lowering collected.
+  if (errors && preparedStmtErrors.length > 0) {
+    for (const e of preparedStmtErrors) errors.push(e);
   }
 
   // §8.1.1 / §44.7 E-SQL-004 — a `kind="tool"` PROGRAM with a `?{}` SQL block that
@@ -631,11 +639,14 @@ function generateServeHarnessToolJs(
   const fns = stmts.filter(isFunctionDecl);
   const asyncFnNames = computeAsyncFnNames(fns, sourceText, asyncImportedNames);
   const foreignCrossingErrors: unknown[] = [];
+  // E-SQL-006 (§44.3) — dedicated narrow .prepare() sink (mirror of foreignCrossingErrors).
+  const preparedStmtErrors: unknown[] = [];
   const emitOpts = {
     boundary: "server" as const,
     serverFnNames: asyncFnNames,
     syncPeerCalls: [] as Array<{ name: string; span: unknown }>,
     foreignCrossingErrors,
+    preparedStmtErrors,
     declaredNames: new Set<string>(),
   };
   const routeMap = deps.routeMap as { functions?: Map<string, { boundary?: string }> } | undefined;
@@ -717,6 +728,8 @@ function generateServeHarnessToolJs(
 
   // 4. Surface any E-FOREIGN-006 crossing-shadow diagnostics from the extra-fn emit.
   if (errors && foreignCrossingErrors.length > 0) for (const e of foreignCrossingErrors) errors.push(e);
+  // 4b. Surface any E-SQL-006 `.prepare()` diagnostics from the extra-fn emit.
+  if (errors && preparedStmtErrors.length > 0) for (const e of preparedStmtErrors) errors.push(e);
 
   // 5. Assemble: banner + headless module + extra helper header + extra fns +
   //    the serve-harness. The headless module leads with its own ES imports (they
@@ -894,6 +907,8 @@ export function generateToolLibraryJs(
   // lib must await it too (mirrors generateToolJs's Flag-C seed).
   const asyncFnNames = computeAsyncFnNames(fns, sourceText, asyncImportedNames);
   const foreignCrossingErrors: unknown[] = [];
+  // E-SQL-006 (§44.3) — dedicated narrow .prepare() sink (mirror of foreignCrossingErrors).
+  const preparedStmtErrors: unknown[] = [];
 
   // Exported type names (`export type X:enum`) — used to `export` the emitted
   // enum backing objects so a consumer's `import { X }` resolves.
@@ -954,6 +969,7 @@ export function generateToolLibraryJs(
         isExported: stmt.fromExport === true,
         asyncFnNames,
         foreignCrossingErrors,
+        preparedStmtErrors,
       }));
       bodyLines.push("");
       continue;
@@ -1040,6 +1056,10 @@ export function generateToolLibraryJs(
   // collected (§23.2.4a) into the live error stream.
   if (errors && foreignCrossingErrors.length > 0) {
     for (const e of foreignCrossingErrors) errors.push(e);
+  }
+  // Drain any E-SQL-006 `.prepare()` diagnostics the SQL lowering collected.
+  if (errors && preparedStmtErrors.length > 0) {
+    for (const e of preparedStmtErrors) errors.push(e);
   }
 
   const body = bodyLines.join("\n");

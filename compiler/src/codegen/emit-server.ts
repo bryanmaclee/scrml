@@ -1084,6 +1084,10 @@ function emitModuleValueExportLines(
   // pre-consolidation server path dropped them silently). Drained into `errors`
   // after the loop.
   const foreignCrossingErrors: unknown[] = [];
+  // E-SQL-006 (§44.3) — a `.prepare()` on a `?{}` SQL result inside an async ss1
+  // fn body surfaces via this dedicated narrow sink (mirror of
+  // `foreignCrossingErrors`). Drained into `errors` after the loop.
+  const preparedStmtErrors: unknown[] = [];
 
   for (const logic of logicBlocks) {
     for (const stmt of (logic.body ?? [])) {
@@ -1164,7 +1168,7 @@ function emitModuleValueExportLines(
         // Shared per-fn emitter (emit-library-shared) — same async-coloring +
         // boundary rule as the tool-dep `generateToolLibraryJs`, incl. the
         // foreign-crossing sink (S239 parity fix).
-        fnBlocks.push(emitLibraryFnMember(fnNode, { isExported: true, asyncFnNames, foreignCrossingErrors }));
+        fnBlocks.push(emitLibraryFnMember(fnNode, { isExported: true, asyncFnNames, foreignCrossingErrors, preparedStmtErrors }));
         continue;
       }
 
@@ -1182,6 +1186,23 @@ function emitModuleValueExportLines(
   // present — a purely ss1-exported foreign fn (no route handler) still surfaces.
   if (errors && foreignCrossingErrors.length > 0) {
     for (const e of foreignCrossingErrors) {
+      const ec = e as CGError;
+      const es = ec.span as { start?: number; end?: number };
+      const dup = errors.some((x) => {
+        const xs = x.span as { start?: number; end?: number };
+        return x.code === ec.code && x.message === ec.message
+          && (xs?.start ?? -1) === (es?.start ?? -1)
+          && (xs?.end ?? -1) === (es?.end ?? -1);
+      });
+      if (!dup) errors.push(ec);
+    }
+  }
+  // Drain E-SQL-006 (.prepare()) diagnostics collected while lowering the async
+  // ss1 fn bodies — DEDUPED against errors already reported on the route-handler
+  // path (a fn emitted on BOTH paths would otherwise report the same prepare
+  // twice), mirroring the foreign-crossing drain above.
+  if (errors && preparedStmtErrors.length > 0) {
+    for (const e of preparedStmtErrors) {
       const ec = e as CGError;
       const es = ec.span as { start?: number; end?: number };
       const dup = errors.some((x) => {
@@ -1477,7 +1498,7 @@ function emitEndpointServerHelperLines(
  * The var-counter is snapshotted + restored so mangled `_scrml_*_<N>` suffixes
  * in OTHER files don't shift (mirrors the route-handler call site).
  */
-export function generateValueOnlyServerJs(fileAST: any): string {
+export function generateValueOnlyServerJs(fileAST: any, errors?: CGError[]): string {
   const filePath: string = fileAST.filePath;
 
   // Build the minimal file header (mirrors generateServerJs's first lines so
@@ -1491,7 +1512,15 @@ export function generateValueOnlyServerJs(fileAST: any): string {
   // Collect the value-export lines (consts + pure fns) via the shared collector.
   // The var-counter is snapshotted/restored so no other file's mangling shifts.
   const _veSnapshot = getVarCounter();
-  const veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"));
+  // E-SQL-006 (§44.3, g-esql006) — thread `errors` so emitModuleValueExportLines'
+  // `.prepare()` sink is actually DRAINED here. An EXPORTED async `?{}`-using fn is
+  // NOT skipped by the module-value-export server-only guard (that guard only skips
+  // NON-async server-only bodies; a `?{}` fn is async-colored), so a `.prepare()` in
+  // such an exported fn pushes E-SQL-006 into the sink. Before this arg was threaded
+  // the drain was guarded `if (errors && …)` with `errors` undefined on this path,
+  // silently discarding the diagnostic when a module reached this value-only pass
+  // (a sibling server bundle dangling-imports its `.server.js`).
+  const veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"), errors);
   setVarCounter(_veSnapshot);
   if (veLines.length === 0) return ""; // nothing server-importable → emit nothing.
   for (const l of veLines) lines.push(l);
@@ -1692,6 +1721,19 @@ export function generateServerJs(
   // emitted and raise E-ASYNC-STDLIB-IN-SYNC-CALLBACK (mirrors the peer-server-fn
   // `_syncPeerCalls` → E-SERVER-FN-IN-SYNC-CALLBACK fail-closed path).
   const _syncStdlibAsyncCalls: Array<{ name: string; span: unknown }> = [];
+  // E-SQL-006 (§44.3, g-esql006) — ONE function-scoped narrow sink for a
+  // `.prepare()` on a `?{}` result, threaded into EVERY server-body / direct-
+  // sqlNode `emitLogicNode` opts below (route handlers CSRF + non-CSRF, their
+  // CPS-return sub-branch, SSE generator bodies, in-process peer callables, WS
+  // `onserver:*` handlers, §52.6.5 Pattern-C cell-load routes + their SSR seed).
+  // emit-logic `case "sql"` (method==="prepare") pushes here via
+  // `(opts as any).preparedStmtErrors`; the broad `opts.errors` sink is NOT wired
+  // on the server-fn path (it would surface OTHER swallowed errors), so this
+  // narrow collector is drained — DEDUPED — into the live `errors` stream ONCE at
+  // the function's tail (with drainSessionValueUseErrors). A single collector +
+  // single drain makes a create-without-drain (silent partial fix) impossible and
+  // auto-dedupes a fn emitted on BOTH the route and in-process-peer paths.
+  const _sqlPrepareErrors: CGError[] = [];
   // Install the file-scoped stdlib async classifier so emit-expr's SERVER-mode
   // auto-await reaches EVERY structured-emit boundary (if/while/for/match
   // conditions, SQL `?{}` interpolation, nested lambdas) — not just the direct
@@ -3071,7 +3113,11 @@ export function generateServerJs(
       }
 
       for (const stmt of handleBody) {
-        const code = emitLogicNode(stmt, { boundary: "server" });
+        // E-SQL-006 (§44.3) — the §39.3 `handle()` escape-hatch body runs server-
+        // side and may hold a `?{...}.prepare()`; thread the shared sink (drained
+        // deduped at the tail). The resolve-index PRE-SCAN loop above stays sink-
+        // less on purpose (it is throwaway + partial, so it must not push).
+        const code = emitLogicNode(stmt, { boundary: "server", preparedStmtErrors: _sqlPrepareErrors });
         if (code) {
           for (const line of code.split('\n')) lines.push('      ' + line);
         }
@@ -3487,6 +3533,8 @@ export function generateServerJs(
         serverFnNames: _serverFnPeerNames,
         serverFnPeerAliasNames: _peerAliasesFor(fnNode), serverFnPeerDispatchObjs: _peerDispatchObjsFor(fnNode),
         syncPeerCalls: _syncPeerCalls,
+        // E-SQL-006 (§44.3) — shared function-scoped .prepare() sink (drained at tail).
+        preparedStmtErrors: _sqlPrepareErrors,
         // Issue #26: auto-await Promise-returning stdlib import calls.
         asyncCalleeMap: _asyncCalleeMap,
         asyncExportRegistry: _asyncExportRegistry,
@@ -3903,6 +3951,8 @@ export function generateServerJs(
         serverFnPeerAliasNames: _peerAliasesFor(fnNode), serverFnPeerDispatchObjs: _peerDispatchObjsFor(fnNode),
         syncPeerCalls: _syncPeerCalls,
         foreignCrossingErrors: _foreignCrossingErrors,
+        // E-SQL-006 (§44.3) — shared function-scoped .prepare() sink (drained at tail).
+        preparedStmtErrors: _sqlPrepareErrors,
         // Issue #26: auto-await Promise-returning stdlib import calls.
         asyncCalleeMap: _asyncCalleeMap,
         asyncExportRegistry: _asyncExportRegistry,
@@ -3925,7 +3975,7 @@ export function generateServerJs(
               // would otherwise produce `/_* sql-ref:N *_/` from the SQL-placeholder
               // ExprNode that safeParseExprToNode preprocesses `?{}` into.
               if (stmt.sqlNode && stmt.sqlNode.kind === "sql") {
-                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", channelOwnedCells: _channelOwnedCells, serverFnNames: _serverFnPeerNames, serverFnPeerAliasNames: _peerAliasesFor(fnNode), serverFnPeerDispatchObjs: _peerDispatchObjsFor(fnNode), syncPeerCalls: _syncPeerCalls })) ?? "";
+                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", channelOwnedCells: _channelOwnedCells, serverFnNames: _serverFnPeerNames, serverFnPeerAliasNames: _peerAliasesFor(fnNode), serverFnPeerDispatchObjs: _peerDispatchObjsFor(fnNode), syncPeerCalls: _syncPeerCalls, preparedStmtErrors: _sqlPrepareErrors })) ?? "";
                 const sqlExpr = sqlStmt.replace(/;\s*$/, "");
                 lines.push(`    const _scrml_cps_return = ${sqlExpr};`);
                 continue;
@@ -3973,6 +4023,8 @@ export function generateServerJs(
       }
 
       // Drain the crossing-shadow guard's narrow sink into the live error stream.
+      // (The .prepare() E-SQL-006 sink `_sqlPrepareErrors` is function-scoped and
+      // drained once at the tail — see its declaration.)
       for (const e of _foreignCrossingErrors) errors.push(e);
 
       lines.push(`  })();`);
@@ -4082,6 +4134,8 @@ export function generateServerJs(
         serverFnPeerAliasNames: _peerAliasesFor(fnNode), serverFnPeerDispatchObjs: _peerDispatchObjsFor(fnNode),
         syncPeerCalls: _syncPeerCalls,
         foreignCrossingErrors: _foreignCrossingErrorsNonCsrf,
+        // E-SQL-006 (§44.3) — shared function-scoped .prepare() sink (drained at tail).
+        preparedStmtErrors: _sqlPrepareErrors,
         // Issue #26: auto-await Promise-returning stdlib import calls.
         asyncCalleeMap: _asyncCalleeMap,
         asyncExportRegistry: _asyncExportRegistry,
@@ -4171,7 +4225,7 @@ export function generateServerJs(
               // the useBaselineCsrf=true CPS site above. Route SQL-init reactive
               // decls through emit-logic case "sql" via the structured sqlNode.
               if (stmt.sqlNode && stmt.sqlNode.kind === "sql") {
-                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", channelOwnedCells: _channelOwnedCellsNonCsrf, serverFnNames: _serverFnPeerNames, serverFnPeerAliasNames: _peerAliasesFor(fnNode), serverFnPeerDispatchObjs: _peerDispatchObjsFor(fnNode), syncPeerCalls: _syncPeerCalls })) ?? "";
+                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", channelOwnedCells: _channelOwnedCellsNonCsrf, serverFnNames: _serverFnPeerNames, serverFnPeerAliasNames: _peerAliasesFor(fnNode), serverFnPeerDispatchObjs: _peerDispatchObjsFor(fnNode), syncPeerCalls: _syncPeerCalls, preparedStmtErrors: _sqlPrepareErrors })) ?? "";
                 const sqlExpr = sqlStmt.replace(/;\s*$/, "");
                 lines.push(`${_bodyIndentNonCsrf}const _scrml_cps_return = ${sqlExpr};`);
                 continue;
@@ -4222,6 +4276,8 @@ export function generateServerJs(
       }
 
       // Drain the crossing-shadow guard's narrow sink into the live error stream.
+      // (The .prepare() E-SQL-006 sink `_sqlPrepareErrors` is function-scoped and
+      // drained once at the tail — see its declaration.)
       for (const e of _foreignCrossingErrorsNonCsrf) errors.push(e);
 
       // Close the capture IIFE and envelope `_scrml_result` as the handler's
@@ -4694,6 +4750,10 @@ export function generateServerJs(
         serverFnNames: _serverFnPeerNames,
         serverFnPeerAliasNames: _peerAliasesFor(_peerInfo.fnNode), serverFnPeerDispatchObjs: _peerDispatchObjsFor(_peerInfo.fnNode),
         syncPeerCalls: _syncPeerCalls,
+        // E-SQL-006 (§44.3) — shared function-scoped .prepare() sink. The tail drain
+        // DEDUPES, so a fn emitted on BOTH the route handler and this in-process
+        // peer callable reports E-SQL-006 exactly once.
+        preparedStmtErrors: _sqlPrepareErrors,
         // Issue #26: auto-await Promise-returning stdlib import calls.
         asyncCalleeMap: _asyncCalleeMap,
         asyncExportRegistry: _asyncExportRegistry,
@@ -4931,7 +4991,10 @@ export function generateServerJs(
     // Lower the cell's `?{}` to its server-side form (e.g.
     // `(await _scrml_sql`SELECT …`)[0] ?? null;` for `.get()`).
     const sqlExpr = (serverRewriteEmitted(
-      emitLogicNode(sqlNode, { boundary: "server" }),
+      // E-SQL-006 (§44.3) — a `<var server> = ?{...}.prepare()` cell decl lowers
+      // through case "sql" here; thread the shared sink so it is not silently
+      // dropped (drained deduped at the function tail).
+      emitLogicNode(sqlNode, { boundary: "server", preparedStmtErrors: _sqlPrepareErrors }),
     ) ?? "").replace(/;\s*$/, "");
     // §52 (S233) Fork-3 — the lowered query references the @currentUser ambient
     // (`_scrml_currentUser`) iff it carries a `${@currentUser.…}` row-scope filter.
@@ -5147,7 +5210,7 @@ export function generateServerJs(
       for (const decl of _ssrSeedPatternC) {
         const _vn = decl.name as string;
         const _sqlNode = (decl as any).sqlNode;
-        const _sqlExpr = (serverRewriteEmitted(emitLogicNode(_sqlNode, { boundary: "server" })) ?? "").replace(/;\s*$/, "");
+        const _sqlExpr = (serverRewriteEmitted(emitLogicNode(_sqlNode, { boundary: "server", preparedStmtErrors: _sqlPrepareErrors })) ?? "").replace(/;\s*$/, "");
         if (_protectActive || _tenantActive) {
           lines.push(`  { const _scrml_result = ${_sqlExpr};`);
           lines.push(`    _scrml_ssr_state[${JSON.stringify(_vn)}] = ${_egressRedact("_scrml_result")}; }`);
@@ -5258,6 +5321,8 @@ export function generateServerJs(
         serverFnNames: _serverFnPeerNames,
         serverFnPeerAliasNames: _peerAliasesFor(fnNode), serverFnPeerDispatchObjs: _peerDispatchObjsFor(fnNode),
         syncPeerCalls: _syncPeerCalls,
+        // E-SQL-006 (§44.3) — shared function-scoped .prepare() sink (drained at tail).
+        preparedStmtErrors: _sqlPrepareErrors,
         // Issue #26: auto-await Promise-returning stdlib import calls.
         asyncCalleeMap: _asyncCalleeMap,
         asyncExportRegistry: _asyncExportRegistry,
@@ -6122,6 +6187,31 @@ export function generateServerJs(
       { file: filePath, start: (_span.start as number) ?? 0, end: (_span.end as number) ?? 0, line: (_span.line as number) ?? 1, col: (_span.col as number) ?? 1 },
       "error",
     ));
+  }
+
+  // E-SQL-006 (§44.3, g-esql006) — drain the ONE function-scoped `.prepare()` sink
+  // collected across EVERY server-body / direct-sqlNode emit site above (CSRF +
+  // non-CSRF handlers and their CPS-return sub-branch, SSE generators, in-process
+  // peer callables, WS `onserver:*` handlers, §39.3 `handle()` bodies, §52.6.5
+  // Pattern-C cell-load routes + their SSR seed). DEDUPED by span (code + message
+  // are fixed constants for E-SQL-006, so SPAN is the only discriminator) so a fn
+  // emitted on multiple paths (route + in-process peer, or a Pattern-C cell seeded
+  // on both the /__serverLoad route and the SSR seed) reports once — that pair
+  // carries the SAME real source span. A span-less entry ({0,0}: a synthesized
+  // `?{}` node that carried no source span, emit-logic:`node.span ?? {start:0,end:0}`)
+  // is NEVER deduped against another {0,0} — two genuinely-distinct span-less
+  // `.prepare()` calls would otherwise collapse to a single reported error. Only a
+  // real (non-{0,0}) span participates in the collapse.
+  for (const _pe of _sqlPrepareErrors) {
+    const _pes = _pe.span as { start?: number; end?: number };
+    const _spanLess = ((_pes?.start ?? 0) === 0) && ((_pes?.end ?? 0) === 0);
+    const dup = !_spanLess && errors.some((x) => {
+      const xs = x.span as { start?: number; end?: number };
+      return x.code === _pe.code && x.message === _pe.message
+        && (xs?.start ?? -1) === (_pes?.start ?? -1)
+        && (xs?.end ?? -1) === (_pes?.end ?? -1);
+    });
+    if (!dup) errors.push(_pe);
   }
 
   return finalEmitted;
