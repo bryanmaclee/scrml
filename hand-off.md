@@ -1,6 +1,9 @@
 <!-- ============================================================= -->
 <!-- hand-off.md — live session state. ROTATED at S336: prior wraps -->
 <!-- handOffs/hand-off-s335.md (S335) + handOffs/hand-off-s334.md (S334) -->
+<!-- + handOffs/hand-off-s331.md (S331-bryan — landed LATE at S337 via PR #488, -->
+<!--   which sat open across S332-S336; it was never on main to be rotated) -->
+
 <!-- + hand-off-s332.md (S277–S332) etc. Mechanical stream: handOffs/delta-log.md. -->
 <!-- ============================================================= -->
 
