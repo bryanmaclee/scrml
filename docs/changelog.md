@@ -2,6 +2,15 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S336 — 2026-08-09 (peter · Windows) — the wrap→boot seam closed with an executable gate (the S335 short-boot remedy)
+
+**1 PR merged** (#492) + this wrap; main `458452a2` → `ec639bc4` → wrap. Coherence 0/0 both repos, cloud gate GREEN incl. Windows. Gaps regen'd to true counts **HIGH 27 · MED 122 · LOW 58** (the headline table on main was stale at 26/126/56 vs the actual `@gap` markers — corrected by `state.ts --write`, not mine, folded into this wrap). Review floor: 2 owed → 0 (#491 carve-out · #492 finding).
+
+The S335 short-boot (skipped both user-voice ledgers + the per-user profile; led orientation with a fresh option-menu instead of the agreed left-off pickup) got its Peter-confirmed **executable** remedy — a memory *navigates*, it does not *gate*, so it "leaves room for misdirection." Built in Peter's lane (tooling, zero language surface); the shared-contract half is routed to bryan.
+
+- **#492 — `scripts/boot.ts`, the boot read-set gate.** A read-only command `/boot` runs at step 0: fetches both repos; **verifies every Profile-A read-set source exists + is current** (missing/stale = LOUD; both voice ledgers + the per-user profile are in the set by construction — the exact S335 miss); **delegates** the mandatory probes to their authoritative sources (`review-debt.ts`, `threads.ts`, `gh` issues/pr/run) rather than reimplementing them; **extracts + prints the `## ⏭ NEXT-SESSION PICKUP` block first**; and a drift-guard asserts each manifest item is still named in its mandating contract. Modes: default digest · `--json` · `--check` (exit 1 iff a read MISSING or PICKUP absent) · `--no-probes`. An independent adversarial (S239) pass found 3, all ground-truthed + fixed — including a gate-defeating unanchored `indexOf` that false-passed on a code-span mention of the heading (re-verified closed in a sandbox).
+- **Wiring (Peter's `/boot` + `/wrap`).** A conditional step-0 was added to `/boot` (run the helper if the project ships one; no-op otherwise) and `/wrap` step 1 now *requires* the hand-off to open with the exact `## ⏭ NEXT-SESSION PICKUP` heading — the write-side that pairs with the gate's read-side. Applied to Peter's installed commands (immediate) + the tracked flogenceP fork source; the canonical amendment (`.pa-base/profile`, `pa-base.md`, upstream flobase) is routed to bryan.
+
 ## S335 — 2026-08-09 (peter · Windows) — the review floor drained (a HIGH leak surfaced), and a re-verified ledger-hygiene pass
 
 **2 PRs merged** (#489 #490); main `ddb924b3` → `458452a2`, coherence 0/0, cloud gate GREEN incl. Windows. **Docs/ledger only — no compiler code touched.** Review floor **7 owed → 0**. Gaps HIGH 27 · MED **126→122** · LOW **56→58** · Nom 7. Hand-off rotated (S334 → `handOffs/hand-off-s334.md`; the live file had grown past the boot read cap).
