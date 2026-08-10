@@ -108,7 +108,7 @@ function syncRepo(name: string, path: string): RepoSync {
 // `mandate` = which contract artifact obliges the read (drift-guard corpus).
 // `needle`  = a stable substring proving that mandate is still declared there.
 type Mandate = "profile" | "pa-profile";
-interface ReadItem { id: string; label: string; repo: "scrml" | "support"; rel: string; mandate: Mandate; needle: string; }
+interface ReadItem { id: string; label: string; repo: "scrml" | "support"; rel: string; mandate: Mandate; needle: string; pending?: boolean; }
 
 /**
  * Resolve the per-user voice ledger by READING the pa-profile's `{{user_voice_ledger}}`
@@ -130,21 +130,38 @@ interface ReadItem { id: string; label: string; repo: "scrml" | "support"; rel: 
  * (the script's own stated design principle) and fall back to the convention only when the
  * pa-profile names nothing.
  */
-function resolveVoiceLedger(who: string, paProfileText: string): string {
+interface Ledger { path: string; pending: boolean; derived: boolean; }
+function resolveVoiceLedger(who: string, paProfileText: string): Ledger {
   // Anchor to the HEADING line. `{{user_voice_ledger}}` also appears in the file's preamble
   // blurb ("fills the per-USER slots (`{{user_voice_ledger}}`)"), and an unanchored match lands
   // there — a section with no ledger path in it, silently falling through to the convention.
   // Same unanchored-match class as the PICKUP `indexOf` bug this script's own S239 pass caught.
-  const sec = paProfileText.match(/^#{1,6}\s.*\{\{user_voice_ledger\}\}.*\n([\s\S]*?)(?=\n#{1,6}\s|\n?$)/m);
-  const hay = sec ? sec[1] : paProfileText;
-  // First backticked `user-voice-*.md` in the mandating section is the live ledger; a later
-  // one is typically the PLANNED rename, which is exactly what must NOT be required yet.
+  //
+  // Terminate on the next heading or TRUE end-of-input. NOT `\n?$`: under /m, `$` matches
+  // end-of-LINE, so the lazy quantifier stopped at the first newline and captured a single
+  // line. That truncation resolved bryan correctly only BY ACCIDENT — his live ledger sits on
+  // line 1 and the "Planned rename → `user-voice-bryan.md`" name on line 2 was cut off. A
+  // profile that wrapped the other way would have silently produced the wrong file.
+  const sec = paProfileText.match(/^#{1,6}\s.*\{\{user_voice_ledger\}\}.*\n([\s\S]*?)(?=\n#{1,6}\s|(?![\s\S]))/m);
+  const hay = sec ? sec[1] : "";
+  // The FIRST backticked `user-voice-*.md` in the section is the declared ledger; later names
+  // are the planned rename or a cross-reference to another operator's ledger. Correct for all
+  // three shipped profiles (bryan · pjoliver11 · ryan) — verified, not assumed.
   const m = hay.match(/`(user-voice-[A-Za-z0-9._-]+\.md)`/);
-  return m ? m[1] : `user-voice-${who}.md`;
+  if (!m) return { path: `user-voice-${who}.md`, pending: false, derived: false };
+  // The contract may declare a ledger that does not exist YET. `pa-profile-ryan.md` says
+  // "`user-voice-ryan.md` (**to be created** …)". Demanding it turns the gate red on a
+  // correct boot — the same §8 cry-wolf shape this whole fix exists to remove, just moved to
+  // a different operator. Carry the contract's own pending marker so the gate can WARN.
+  const pending = /to be created|not yet (created|exist)|does not (yet )?exist|until it exists/i.test(hay);
+  return { path: m[1], pending, derived: true };
 }
 
-function readSet(who: string, paProfileText = ""): ReadItem[] {
+// paProfileText is REQUIRED: defaulting it to "" silently reinstates the filename guess for
+// any future caller that omits it, with no error. Make the omission a compile error instead.
+function readSet(who: string, paProfileText: string): ReadItem[] {
   const ledger = resolveVoiceLedger(who, paProfileText);
+  const sharedWithBryan = ledger.path === "user-voice-scrml.md";
   return [
     { id: "1a", label: "pa-base (universal doctrine)",          repo: "support", rel: "pa-base.md",                  mandate: "profile",    needle: "pa-base.md" },
     { id: "1b", label: "pa-scrml-overlay (project delta)",      repo: "support", rel: "pa-scrml-overlay.md",         mandate: "profile",    needle: "pa-scrml-overlay.md" },
@@ -156,7 +173,14 @@ function readSet(who: string, paProfileText = ""): ReadItem[] {
     // 6b — the per-user voice ledger S335 short-booted. Mandated by the pa-profile ({{user_voice_ledger}}
     // says "read its tail … in addition to bryan's"), NOT the profile read-set line — so its drift corpus
     // is the pa-profile. Item 7 (reading the pa-profile itself) IS named by profile read-set line 7.
-    { id: "6b", label: `${ledger.replace(/\.md$/, "")} (your own ledger)`, repo: "support", rel: ledger,            mandate: "pa-profile", needle: "user-voice-" },
+    // `pending` = the pa-profile itself declares this ledger not-yet-created (ryan today). Such a
+    // read is absent BY CONTRACT, so its absence is a WARNING, never a FAIL.
+    // `sharedWithBryan` = this operator's ledger IS 6a (bryan today, until the deferred
+    // user-voice-bryan.md rename lands). Label it, so a ✓ here is not read as independent
+    // evidence that a SECOND ledger was read — 6b's whole point is "in addition to bryan's".
+    { id: "6b", label: sharedWithBryan ? `${ledger.path.replace(/\.md$/, "")} (your own ledger — SAME FILE as 6a)`
+                                       : `${ledger.path.replace(/\.md$/, "")} (your own ledger)`,
+      repo: "support", rel: ledger.path, mandate: "pa-profile", needle: "user-voice-", pending: ledger.pending },
     { id: "7",  label: `pa-profile-${who} (personal layer)`,    repo: "support", rel: `pa-profile-${who}.md`,        mandate: "profile",    needle: "pa-profile-" },
   ];
 }
@@ -263,7 +287,11 @@ const board = boardLiveness();
 const probes = NO_PROBES ? [] : allProbes();
 
 // failure classes for --check: a missing read, or an absent PICKUP block.
-const missingReads = reads.filter((r) => !r.exists);
+// A read the pa-profile itself declares not-yet-created (`pending`) is absent BY CONTRACT.
+// Failing on it is the §8 cry-wolf shape — red on a correct boot, for a file the contract says
+// should not exist yet. Surface it as a warning; only an UNEXPLAINED absence fails the gate.
+const missingReads = reads.filter((r) => !r.exists && !r.pending);
+const pendingReads = reads.filter((r) => !r.exists && r.pending);
 const pickupAbsent = pickup === null;
 const FAIL = missingReads.length > 0 || pickupAbsent;
 
@@ -320,7 +348,7 @@ if (behindRepos.length) line(`  → pull --rebase before reading: reads may be s
 H("PROFILE-A READ-SET");
 for (const r of reads) {
   const glyph = !r.exists ? "✗" : r.behindPath > 0 ? "⚠" : !r.named ? "⚠" : "✓";
-  const tail = !r.exists ? "MISSING" : r.behindPath > 0 ? `stale (${r.behindPath} unpulled)` : !r.named ? "DRIFT (not named in contract)" : "";
+  const tail = (!r.exists && r.pending) ? "pending (contract says not yet created)" : !r.exists ? "MISSING" : r.behindPath > 0 ? `stale (${r.behindPath} unpulled)` : !r.named ? "DRIFT (not named in contract)" : "";
   line(`  ${glyph} ${r.id.padEnd(3)} ${r.label.padEnd(38)} ${tail}`);
 }
 if (driftReads.length) line(`  → DRIFT: the manifest names a read its contract no longer declares — reconcile scripts/boot.ts with .pa-base/profile.`);
@@ -349,6 +377,7 @@ if (board.length === 0) {
 H("BOOT-GATE");
 if (FAIL) {
   if (missingReads.length) line(`  ✗ FAIL — ${missingReads.length} read-set file(s) MISSING: ${missingReads.map((r) => r.id).join(", ")}`);
+  if (pendingReads.length) line(`  ⚠ pending (not a failure — contract declares not-yet-created): ${pendingReads.map((r) => r.id).join(", ")}`);
   if (pickupAbsent) line(`  ✗ FAIL — PICKUP block absent from hand-off.md`);
   line(`  A skipped read is the S335 short-boot. Resolve before orienting.`);
 } else {
