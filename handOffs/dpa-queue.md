@@ -39,6 +39,7 @@ Item format + drain protocol: `scrml-support/dpa-scrml.md` + the design DD
 | dpa-022 | **COMPLETE (ADVISORY) dPA 2026-08-05 — awaiting PA/bryan ratification.** ⚑ *This row read "BANKED — UNRUN" until S325 corrected it; the DD had run 24h earlier.* 5-pole live poll; all S322 grounding re-verified BY EXECUTION. **The premise never failed to land — it landed in the COMPILER and in name resolution and never propagated to §1.4/L1/PRIMER, so the reframe is a RECONCILIATION (inert, prose-only), NOT an amendment.** Writable markup cell: rejection SURVIVES (4/5 poles: a writable markup cell holds a *rendered instance* with an ownership/disposal boundary, not state). ONE real mechanism gap: the lifecycle read detector is a dot-requiring regex, a no-op on markup 100% of the time. **Do NOT ratify the shared through-line on this DD's evidence** (the mismodelling was in the CANON, not the mechanism). → `scrml-support/docs/deep-dives/markup-as-state-kind-not-value-type-2026-08-05.md` | S322 block · "bank it" |
 | dpa-023 | **COMPLETE (ADVISORY) dPA 2026-08-05 — awaiting PA/bryan ratification.** ⚑ *This row read "BANKED — UNRUN" until S325 corrected it; the DD had run 24h earlier and its re-ruling request had ALREADY been acted on (option C retired S322).* 5-pole live poll, verified by execution (7 fixtures + 3 emitted programs RUN). **COMPLEMENT, not subsume — the frame is RIGHT and the implementation is missing its middle state.** A `(not to T)` cell has THREE states (`not → pending → T`); the compiler models TWO and the assignment illegally jumps 1→3. Mechanism: `classifyWriteAgainstSpec` is a SOURCE-TEXT comparison that never consults the type, with no third state to return (`type-system.ts:25865`, duplicated `:26799`) — **the whole bug is two lines.** ⚠ Its re-ruling request RETIRED option C (S322). **The `pending` rung is the live open item** (5/5 convergence; conditions: the marker is sugar, drop the "does not color the function" pitch as measured-false, and the rule must be `E-` not `I-`). ⚠ PA-verified FALSE: the DD's §19.6-containment-by-string-rewrite mechanism claim. → `scrml-support/docs/deep-dives/async-boundary-as-state-lifecycle-2026-08-05.md` | S322 block · "bank it" |
 | dpa-024 | **COMPLETE (ADVISORY) dPA 2026-08-10 — Q4 ACTED ON, rest awaiting bryan.** ⚑ *Sat BANKED-UNRUN from S331 to S337 because the PA filed its Q4 under "OWED BY BRYAN" — a question only the DD could answer — while bryan waited on the agreed "say when it's ready" signal. No boot probe reads this file; that is the real reason it was invisible.* **Q4's banked premise was FACTUALLY WRONG and the DD caught it:** self-host-v2 is NOT chartered as a parity target — parity framing was DROPPED S222 (`compiler-reimagining-derisk-2026-06-26/RULING.md:11`, PA-verified verbatim), replaced by D3 conformance-as-oracle S230, and firewalled. **Do not change the charter.** **The real risk is one layer down:** `self-host-v2/progress.md` carries **53** `byte-identical`/`impl#1` mentions as success conditions — the sanctioned tier-2 scaffold became the de-facto definition of done, and nothing said when it stops. Activates the day the parser wave opens (lexer 337/337 done; parser NOT started), because impl#1's `FileAST` carries the **127 in-place decoration fields** skeleton-RULING:13 forbids. **RULED + LANDED S337** (bryan: *"go, take the tier-2 retirement rule"*) → `docs/changes/tier-2-scaffold-retirement-2026-08-10/RULING.md`: 3 clauses (scaffold never an exit criterion · AST-parity FORBIDDEN as an oracle from the parser wave · divergence = freedom exercised not debt owed) + **conformance fork 2 RESOLVED** to the mixed-pipeline bootstrap (FORK RULE rows 1-4 unanimous). No code, no charter change, no rework. **Rival hypothesis SURVIVES, restated:** a canonical AST EXISTS (`types/ast.ts`, day one) but is NOT load-bearing — 16 modules shadow it as `Record<string,unknown>`, which is what lets 127 `_`-prefixed decoration fields typecheck; 24% of open gaps but **39-42% of open HIGHs** (~1.7x severity enrichment); passes the detection-window falsifier (spans S297-S331, static + grep-visible). Subsumes the S331 refuted hypothesis's surviving claim. **Q5 null: MET for impl#1** (off the V1 critical path, terminal, ~76% of gaps outside the class → keep patching; no impl#1 re-architecture proposed), **NOT met for impl#2**. **⚑ THE CORRECTIVE, against the intuition that opened the question:** the never-ending bug loop is mostly NOT architectural — conformance pins ~18 of ~60 surfaces, so ~42 are unpinned and each pass finds genuinely NEW defects. **The loop ends when the CONTRACT is complete, not when the architecture changes.** **R3 NOT recommended** (zero rival architectures survived; only one was ever on the table and it is ratified). → `scrml-support/docs/deep-dives/compiler-architecture-for-this-language-dpa-024-2026-08-10.md` | bryan S331 *"bank the deep-dive"* → **S337 FIRED + Q4 RULED**; §§1-3/Q5 advisory, awaiting ratify/reject |
+| dpa-025 | **BANKED — UNRUN** (S337, 2026-08-10). **Population-first: what PRIMITIVE is missing whose absence GENERATES these bugs?** bryan's own reframe, verbatim: *"if all the DDs we do basically say 'stay the course', then perhaps we need to look at the language and all of its bugs as a whole and ask. Are we missing a/some primitives or stdlib tools or whatever that would kill large swaths of these bugs?"* **The inverse of every DD so far** — dpa-024 was compiler ARCHITECTURE with language design ruled OUT; dpa-022/023 are single axioms. This one treats the OPEN-GAP LEDGER as the evidence base. **Two candidates already validated this session, both found by looking at the bug rather than the mechanism** (see the item body). ⚠ Method constraint: population-FIRST, not mechanism-first — the S331 raw-text hypothesis started from a suspected mechanism and was refuted (seam density ANTI-correlates with defect density); dpa-024's rival started from the population and survived. | bryan S337 · *"add that to dpa-025 so i can run it"* |
 | dpa-017 | **RATIFIED S230 2026-06-28** (user "go with your recos") — HYBRID: **B (origin-keyed structural redaction at the compiler-emitted egress sink) = load-bearing FLOOR** · A (same provenance map, static-prove) = demoted DX LAYER, **DEFERRED** · field-level **`reveal("col")`** = sole declassification · dynamic-SQL strip-all+lint · raw/FFI egress fail-closed. PA-verified the stale-cite flag, then authored **SPEC §14.8.9** (Nominal/spec-ahead) + fixed §14.8.7's stale `E-ROUTE-003` cite + minted **E-PROTECT-004 + I-PROTECT-STRIP-001** (§34, land-with-impl) + landed the insight + SPEC-INDEX regen. **Residual = the FLOOR BUILD** → `docs/changes/g-sql-row-protect-leak-2026-06-28/RULING.md` (sPA-slot-able; OQ-1 descriptor-lifetime first). | **RATIFIED** (build pending) |
 
 **⚠ DRAIN-PATH RULE (S319).** The dPA drains **THIS file**. A deliberation banked anywhere else does not exist to it. Witnessed S316→S319: seven conclusions were rung-assigned into `scrml-support/docs/deep-dives/S316-DELIBERATION-QUEUE.md` and the hand-off recorded *"the dPA is RUNNING on Q1/Q2/Q3"* — it was not and never had been; the dPA drained the dpa-018 Pole-D conditional (which IS in this file) instead, and the three deliberations sat unrun across two sessions while every build that depended on them stayed held. **Same shape as the review-floor and `gh issue list` misses: an obligation named in one place, a probe reading another.** Bank deliberations HERE; a separate rung-assignment doc is a companion, never the carrier.
@@ -992,6 +993,88 @@ A verdict on subsume-vs-complement with worked adopter code for **each** of the 
 §3 — one-liner + artifact path + a `(dpa:)` breadcrumb. Artifact → `scrml-support/docs/deep-dives/`. Routes to scrml PA.
 
 ---
+
+
+## dpa-025 — Are we missing a PRIMITIVE whose absence generates these bugs? (population-first)
+
+```
+id:        dpa-025
+status:    banked
+rung:      R2 minimum; escalate to R3 if two or more candidate primitives survive and compete
+requested: bryan, S337 (2026-08-10) — "add that to dpa-025 so i can run it"
+routes-to: scrml PA
+```
+
+### The question, in bryan's framing
+
+> *"if all the DDs we do basically say 'stay the course', then perhaps we need to look at the language
+> and all of its bugs as a whole and ask. Are we missing a/some primitives or stdlib tools or whatever
+> that would kill large swaths of these bugs?"*
+
+Operationalized: **treat the open-gap ledger as the evidence base. For each cluster, ask what would have
+had to EXIST for these not to be defects at all.** Not "where is the bug" — "what absence made the bug
+expressible."
+
+### Why now, and why it is not a repeat
+
+Every DD so far has returned stay-the-course, and each was scoped so it *had* to: **dpa-024** was
+compiler ARCHITECTURE with language design explicitly OUT of scope; **dpa-022/023** are single-axiom
+questions. None asks the population-level LANGUAGE question. dpa-024's own corrective sharpens it —
+*the bug loop is mostly NOT architectural; conformance pins ~18 of ~60 surfaces* — which says the loop is
+about **contract completeness**, and leaves open whether parts of the contract are missing a primitive.
+
+### ⚑ METHOD CONSTRAINT — population-FIRST, and this is load-bearing
+
+The S331 hypothesis started from a suspected MECHANISM (raw-text seams) and went looking for supporting
+defects. It was **refuted**: seam density ANTI-correlates with defect density; 139 of 195 open markers
+were neither limb; and the instruments were 5 days old and could only see emitted text. dpa-024's rival
+hypothesis started from the POPULATION and survived the same falsifier. **Start from the ledger. Do not
+start from a favourite mechanism.** Every candidate must survive an explicit refutation attempt.
+
+### TWO CANDIDATES ALREADY VALIDATED THIS SESSION (evidence, not speculation)
+
+**1. `tare` — CONFIRMED, built, landed S337 (#501).** The `reset()`-on-a-multi-write-implicit-cell bug
+resisted TWO structural fixes because two structurally identical programs want opposite answers — the
+discriminator was INTENT, not form. The missing thing was **a surface, and the runtime slot already
+existed** (`_scrml_default_fns`, resolved before init, never clobbered by writes); implicit cells simply
+had no way to reach it. **This is the shape the DD is hunting: a bug that is unfixable structurally
+because a primitive is missing, and trivial once it exists.** Worth mining for what made it findable.
+
+**2. Semicolons / ASI — UNRUN, and the evidence is already collected.** SPEC §34 defines
+`E-STMT-MISSING-SEMICOLON` as *"Expected `;` **or a newline** to end the statement"* — scrml is ASI-shaped.
+PA-measured against the parser-conformance corpus:
+- **`E-STMT-MISSING-SEMICOLON`: 3,103 occurrences** — the 2nd-largest diagnostic family (behind
+  `E-EXPR-UNEXPECTED` 3,459). 531 files clean / 481 with errors.
+- Fired from **both** `native-parser/parse-stmt.js` **and** `src/ast-builder.js` — not a native-only artifact.
+- **17 corpus files** hit *"statement boundary not detected — trailing content would be silently dropped."*
+- ⚠ **That drop is a bare `console.warn` at `expression-parser.ts:3007` — NOT a diagnostic.** It never
+  enters `result.errors`/`result.warnings`, so no gate, no test and no CI check can see it. **Code is
+  silently discarded and the only trace is stdout noise.** Same shape as the emission gate: the check
+  exists and does not bite.
+The question is NOT "would semicolons help lexing" — it is **what is newline-as-terminator costing**, and
+that is now measured rather than speculative. Note the answer may be a RULE change, not a primitive; the
+DD should say which, and cost the migration (2,300+ files, newly-rejecting).
+
+### What counts as an answer
+
+Per candidate: the gap CLUSTER it would kill (with counts from `docs/known-gaps.md`), what has to exist,
+whether it is a PRIMITIVE / a stdlib tool / a RULE, the direction-of-change, and a MEASURED migration.
+Plus an explicit refutation attempt per candidate — *why might this cluster not be caused by that
+absence?* A candidate that cannot be argued against has not been tested.
+
+**Anti-goals:** do NOT re-derive the S331 refuted hypothesis. Do NOT propose a rewrite. Do NOT re-open
+dpa-022/023 (live axioms) or dpa-024's charter (ruled S337). **Do NOT ratify** — RUN-not-RATIFY.
+
+### The honest null
+
+Under what evidence is "no primitive is missing; the ledger is ordinary implementation debt plus
+incomplete conformance coverage" the correct answer? **Name it in advance** so the DD can return it.
+dpa-024's ~18-of-60-surfaces finding is the strongest prior FOR that null — weigh it explicitly.
+
+### Report-back
+§3 — one-liner + artifact path + a `(dpa:)` breadcrumb. Artifact → `scrml-support/docs/deep-dives/`.
+Routes to scrml PA. **RUN-not-RATIFY.**
+
 
 ## dpa-024 — How would the perfect compiler for THIS language be built? (compiler architecture; charter-with-a-clock)
 
