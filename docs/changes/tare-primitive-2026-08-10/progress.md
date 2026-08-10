@@ -176,3 +176,137 @@ returns **0**. At head the only hits are the seven new conformance cases.
 conformance run went 888 pass / 1 fail, then back to 889 / 0 on revert. The case is not a no-op.
 
 **Full suite at the landing commit:** 28,778 tests across 1,234 files, 0 failures.
+
+---
+
+# FIX ROUND (S337) — 3 adversarial findings
+
+All three reproduced by execution before any code was touched. Two are confirmed as stated; one
+finding's REPRODUCER was wrong (the finding itself was right); one finding turned out to be a
+pre-existing family-wide property rather than a tare defect, proven against the BASE compiler.
+
+## Finding 1 — HIGH — false `E-TYPE-001` on `tare(@cell.field)` — FIXED
+
+**Before:** `tare(@user.token)` on a lifecycle-annotated struct field → 2× `E-TYPE-001`; the
+byte-identical program with `reset(@user.token)` → clean.
+**After:** clean, and equal to the reset program.
+
+**The suggested fix would have been wrong, and both halves are now pinned by tests.** Adding
+`tare-expr` to reset's `bare-expr` interception does two damaging things:
+
+1. it REVERTS §6.8.3 per-access lifecycle state. §6.8.3 reverts "based on the resulting written
+   value" — a reset writes the cell, a tare writes only `_scrml_default_fns`. Reverting swaps a
+   false positive for a false negative.
+2. it `continue`s past `extractAccesses`, silently swallowing a genuine pre-transition read in the
+   two-argument form's second slot (`tare(@n, @user.token)`). `reset` has no second argument, so its
+   whole-call span is safe; tare's is not.
+
+Installing the naive variant makes the two design tests go red — measured, not asserted. So the
+suppression is TARGET-ONLY (`tare(@target`, no closing paren) and performs no revert.
+
+**Site enumeration, by execution not grep.** A reset-vs-tare diagnostic-parity probe over 7
+lifecycle/compound shapes: 1 divergence before, 0 after. Checked and NOT affected —
+- **Tracker 1** (Shape-1 cell-value lifecycle, bare and dotted): clean both ways. Its
+  `FIELD_ACCESS_RE` needs a dot, and its `RESET_CALL_RE` drives a revert a tare must not have.
+- **`usage-analyzer.ts` `usage.reset`**: computed and never read — no consumer anywhere in the tree.
+- **`compute-pgo-flags.ts` / `emit-client.ts` reset probe**: correct as-is. `tare` has its own runtime
+  chunk and its own post-emit gate, so it must NOT light the reset one. `emit-client.ts` is contended
+  and was not touched.
+
+## Finding 2 — the serious one — FIXED as `E-TARE-BEFORE-DECL` (new §34 code)
+
+**I agree with the finding and disagree with its reproducer.** The stated reproducer uses a
+STRUCTURAL `<x> = 0`, and that program is already correct today:
+
+```
+tare(@x)          f2_structural_forward, BEFORE the fix:
+<x> = 0             after module-init : @x = 1
+@x = @x + 1         after reset(@x)   : @x = 0    <- CORRECT, no increment
+```
+
+because #417's reassignment guard stops the second write registering an init thunk, so reset resolves
+through the INIT path. The tare no-ops, but nothing observable goes wrong. The real reproducer needs
+an IMPLICIT cell, where BOTH writes register thunks:
+
+```
+tare(@x)          f2_implicit_forward, BEFORE the fix:
+@x = 0              after module-init : @x = 1
+@x = @x + 1         after reset(@x)   : @x = 2    <- INCREMENTS. zero diagnostics.
+```
+
+**Ruling taken: REJECT, not warn.** `tare`'s entire contract is that source position is the
+discriminator; a call positioned where it provably cannot promote anything is a mistake, not a style
+choice. Rejecting is also the reversible direction on brand-new surface — relaxing an error later
+(e.g. if a "pending tare" semantic is ever ruled) is easy; un-accepting a silent wrong answer is not.
+I deliberately did NOT invent a pending-tare runtime semantic, which would be a design change needing
+its own ruling.
+
+**Two implementation traps hit and fixed, both found by measuring:**
+
+- **Coordinate space.** The first draft compared the tare ExprNode's span to the decl's span. An
+  ExprNode span is BLOCK-LOCAL (`start: 0, line: 1` for the first statement of a `${ … }` block)
+  while a state-decl span is FILE-ABSOLUTE — two origins, so the check silently never fired. It now
+  uses the enclosing STATEMENT node's span (invariant 19: pick one coordinate space).
+- **Last-wins scope records.** The second draft compared against `StateCellRecord.declNode`, which for
+  an IMPLICIT cell points at the LAST write — so it REJECTED the flagship worked case
+  (`@x = 0; tare(@x); @x = @x + 1`). It now uses a lazily-built `cellName -> EARLIEST state-decl
+  offset` map. Lazy because a file with no `tare` must not pay for the walk across the ~1900-source
+  corpus.
+
+**False-positive sweep — 4 must-fire, 8 must-not-fire, 0 problems.** Must-not-fire includes: the
+correctly-ordered worked case, a tare inside a function body above the decl, a tare inside a LAMBDA
+above the decl (the family walker gained a `skipDeferredBodies` option for exactly this), the two-arg
+form, and `reset` above a decl (the rule is tare-only).
+
+**The runtime comment's false rationale is corrected.** It claimed the only route to the no-op was a
+cell that does not exist, "a COMPILE error, E-STATE-UNDECLARED". That was false and it is the part
+worth flagging: it told the next reader there was nothing to look for. The corrected comment names
+the two honest remaining routes (a deferred tare firing before anything wrote the cell; an
+object-literal compound with no per-field thunks).
+
+## Finding 3 — LOW — documented in §6.8.4, NOT diagnosed — with the reason
+
+**It is not a tare defect. It is pre-existing and family-wide, proven against the BASE compiler**
+(which has no `tare` at all):
+
+```
+base compiler, f3_objlit_resetonly — NO tare anywhere in the source:
+    <form> = { a: 1, b: 2 };  scramble -> {"a":1,"b":99};  reset(@form.b) -> {"a":1,"b":99}
+base compiler, f3_structural_resetonly:
+    <form><a/><b/>;           scramble -> {"a":1,"b":99};  reset(@form.b) -> {"a":1,"b":2}
+```
+
+An object-literal compound registers ONE reset target (`form`), so `@form.b` is not a target for
+EITHER keyword. `tare` inherits it exactly and adds nothing.
+
+**Why documented rather than diagnosed.** Diagnosing it for `tare` only would leave two members of one
+family disagreeing about the same target — strictly worse than the shared limit. Diagnosing it for the
+whole family is a newly-REJECTING change to shipped `reset` surface and needs its own ruling; it is
+surfaced to PA instead. §6.8.4 now carries it as a named known limit with the reason and the fix (use
+the structural child form). The test asserts the durable property — that tare and reset AGREE on this
+target — which keeps holding after a future family-wide fix, whereas pinning today's no-op would have
+to be deleted by it.
+
+## Fix-round verification
+
+- unit `tare-emit-and-diagnostics.test.js`: 17 → **27 tests**, all green.
+- browser: `browser-tare-reset-baseline.test.js` (4) + NEW `browser-tare-forward-position.test.js` (2)
+  — the latter EXECUTES both sides: the refused bundle really does yield 2, the corrected one yields 0.
+- conformance: **+1 case** (`reactive/tare-before-decl-pos`), 890 pass / 0 fail.
+- §34 census: 809 → **810** rows; PINNED 343 → **344**; IMPL-SITES 320 and FALSE-CLAIM 95 unchanged.
+- `default=` byte-identity vs base: client.js, html AND runtime bundle still byte-identical
+  (59,828 bytes both sides).
+- corpus delta vs base — **unchanged from the pre-fix-round result**: 0 newly failing / 0 newly
+  passing, **0 diagnostic CODE changes**, 0 artifact set delta, 1014 artifact content diffs of which
+  **1014 are token-only and 0 are real emission differences**, syntax delta 0/0/0, bare server-fn
+  sites 145 → 145. Source-set delta 8 = exactly the tare conformance cases. The 1 "text-only
+  diagnostic change" is the same pre-existing chunk-token-in-a-dispatcher-name artifact as before.
+
+### Before/after per finding
+
+| finding | before | after |
+|---|---|---|
+| 1 false E-TYPE-001 | 2 unit tests RED (`…not a READ`, `…PARITY`) | green; parity probe 1 divergence → 0 |
+| 1 design (naive fix) | 2 unit tests RED on the naive variant (`…does NOT revert`, `…SECOND argument`) | green on the real fix |
+| 2 forward-position tare | executed: `reset(@x)` → **2** (increment), 0 diagnostics | `E-TARE-BEFORE-DECL`; corrected program executes → **0** |
+| 3 object-literal compound | tare and reset both silent no-ops | unchanged by design; parity asserted, limit documented in §6.8.4 |

@@ -1243,11 +1243,33 @@ function _scrml_reset(name) {
 //      registered child (name + "." prefix), mirroring _scrml_reset's compound
 //      walk so tare(@compound) and reset(@compound) agree on what "the whole
 //      compound" means.
-//   3. Nothing to promote -> NO-OP, deliberately. Assigning the absent slot
-//      would put a non-function into _scrml_default_fns, and the no-op leaves
-//      §6.8.1's init fallback intact — i.e. exactly what the program would do
-//      without the tare. The genuinely broken shape (the cell does not exist)
-//      is a COMPILE error, E-STATE-UNDECLARED.
+//   3. Nothing to promote -> NO-OP. Assigning the absent slot would put a
+//      non-function into _scrml_default_fns, which _scrml_reset's compound walk
+//      would then see as a phantom child key; the no-op instead leaves §6.8.1's
+//      init fallback intact.
+//
+//      CORRECTED (S337 fix-round): an earlier version of this comment claimed
+//      the only route here was a cell that does not exist, "a COMPILE error,
+//      E-STATE-UNDECLARED". THAT WAS FALSE, and the false rationale is the part
+//      worth calling out — it told the next reader there was nothing to look
+//      for. State declarations HOIST but codegen emits module-init in SOURCE
+//      ORDER, so a tare written above its target's first write reached case 3
+//      silently and left reset() re-running the LAST write — re-creating the
+//      exact increment-instead-of-restore defect §6.8.4 exists to dissolve,
+//      with zero diagnostics.
+//
+//      That shape is now REJECTED at compile time (E-TARE-BEFORE-DECL, §34;
+//      symbol-table.ts checkTareOrderingAgainstDecl), so it can no longer reach
+//      here. Case 3 IS still reachable, and these are the honest routes:
+//        - a DEFERRED tare (inside a function / handler / lambda) firing before
+//          anything has written the cell — e.g. the cell is only ever written by
+//          another handler that has not run yet. Nothing to promote is the
+//          truth there, and no-op is the right answer.
+//        - a compound target whose fields register no PER-FIELD init thunks,
+//          which is the object-literal compound form (<form> = { a: 1 }). That
+//          is a whole-family limit, not a tare one — reset(@form.a) is the same
+//          silent no-op at base, pre-dating §6.8.4 — and it is documented as a
+//          known limit in §6.8.4 rather than papered over here.
 function _scrml_tare(name) {
   if (typeof _scrml_init_fns[name] === "function") {
     _scrml_default_fns[name] = _scrml_init_fns[name];

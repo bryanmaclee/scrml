@@ -4336,6 +4336,18 @@ export function forEachCallInExprNode(node: ExprNode, cb: (call: CallExpr) => vo
 }
 
 /**
+ * Options for the §6.8 reset-family walk.
+ *
+ * `skipDeferredBodies` — do not descend into a lambda body. Set ONLY by the
+ * §6.8.4 tare-before-declaration check, which reasons about module-init SOURCE
+ * ORDER and must therefore ignore code that runs later. Every other consumer
+ * takes the default full walk.
+ */
+export interface ResetFamilyWalkOpts {
+  skipDeferredBodies?: boolean;
+}
+
+/**
  * Walk an ExprNode tree and invoke `cb` once per §6.8 RESET-FAMILY node —
  * `ResetExpr` (§6.8.2) and `TareExpr` (§6.8.4).
  *
@@ -4350,9 +4362,10 @@ export function forEachCallInExprNode(node: ExprNode, cb: (call: CallExpr) => vo
 function forEachResetFamilyExprInExprNode(
   node: ExprNode,
   cb: (familyNode: ResetExpr | TareExpr) => void,
+  opts?: ResetFamilyWalkOpts,
 ): void {
   if (!node) return;
-  const recur = forEachResetFamilyExprInExprNode;
+  const recur = (n: ExprNode, c: typeof cb) => forEachResetFamilyExprInExprNode(n, c, opts);
   switch (node.kind) {
     case "reset-expr": {
       const n = node as ResetExpr;
@@ -4396,10 +4409,14 @@ function forEachResetFamilyExprInExprNode(
       return;
     }
     case "lambda": {
-      // Walk default values (outer scope). Body is a fresh scope, but a
-      // malformed reset()/tare() inside a lambda body should still be surfaced
-      // — unlike free-identifier capture, parse-time syntax errors don't
-      // respect scope boundaries.
+      // A lambda BODY is DEFERRED code: it runs when the lambda is called, not
+      // where it is written. A caller reasoning about module-init SOURCE ORDER
+      // (the §6.8.4 tare-before-declaration check) must not look inside one, or
+      // it will reject a perfectly legal `() => tare(@x)` written above the
+      // declaration. Every other caller wants the full walk — a malformed
+      // reset()/tare() inside a lambda body is still a parse-time error, and
+      // those do not respect scope boundaries.
+      if (opts?.skipDeferredBodies) return;
       const n = node as LambdaExpr;
       for (const p of n.params) {
         if (p.defaultValue) recur(p.defaultValue, cb);
@@ -4443,10 +4460,14 @@ export function forEachResetExprInExprNode(node: ExprNode, cb: (resetNode: Reset
  * Consumers: the ast-builder's parse-diagnostic surfacing (`E-TARE-NO-ARG`)
  * and SYM's B22 target validation (`E-TARE-INVALID-TARGET` / `E-DERIVED-WRITE`).
  */
-export function forEachTareExprInExprNode(node: ExprNode, cb: (tareNode: TareExpr) => void): void {
+export function forEachTareExprInExprNode(
+  node: ExprNode,
+  cb: (tareNode: TareExpr) => void,
+  opts?: ResetFamilyWalkOpts,
+): void {
   forEachResetFamilyExprInExprNode(node, (n) => {
     if (n.kind === "tare-expr") cb(n);
-  });
+  }, opts);
 }
 
 /**

@@ -257,6 +257,170 @@ const <doubled> = @x * 2
     expect(messages.join("\n")).toContain("`function reset() {...}` shadows the reserved `reset` keyword (§6.8)");
   });
 
+  test("tare on a lifecycle-annotated struct FIELD is not a READ — no false E-TYPE-001", () => {
+    // §6.8.3's struct-field tracker intercepts a structured `reset-expr` and
+    // suppresses its target text so the target is not counted as a read. A tare
+    // needs the same suppression for the same reason: `tare(@user.token)` names
+    // the cell whose reset-DEFAULT is being set; it reads nothing. Before the
+    // fix this fired E-TYPE-001 twice while the byte-identical `reset` program
+    // compiled clean.
+    const { codes } = compile(`<program>
+\${
+    type User:struct = { name: string, token: (not to string) }
+    <user>: User = { name: "a", token: not }
+    tare(@user.token)
+}
+</program>`);
+    expect(codes).not.toContain("E-TYPE-001");
+  });
+
+  test("reset/tare DIAGNOSTIC PARITY on a lifecycle field target", () => {
+    // The durable form of the assertion above: whatever the lifecycle tracker
+    // decides about this target shape, the two family members must decide it
+    // together. This keeps holding if §6.8.3's rules change.
+    const src = (kw) => `<program>
+\${
+    type User:struct = { name: string, token: (not to string) }
+    <user>: User = { name: "a", token: not }
+    ${kw}(@user.token)
+}
+</program>`;
+    expect(compile(src("tare")).codes.filter((c) => c === "E-TYPE-001"))
+      .toEqual(compile(src("reset")).codes.filter((c) => c === "E-TYPE-001"));
+  });
+
+  test("tare does NOT revert §6.8.3 per-access lifecycle state — reset does", () => {
+    // The discriminating pair, and the reason the fix is NOT simply "route tare
+    // through reset's arm". §6.8.3 reverts transition state "based on the
+    // resulting WRITTEN VALUE". A reset writes the cell, so the field goes back
+    // to `pre` and the following read fires. A tare writes only the default
+    // slot — the cell's value, and therefore its transition state, is untouched.
+    const src = (kw) => `<program>
+\${
+    type User:struct = { name: string, token: (not to string) }
+    <user>: User = { name: "a", token: not }
+    @user.token = "t"
+    ${kw}(@user)
+    @n = @user.token
+}
+</program>`;
+    expect(compile(src("tare")).errorCodes).not.toContain("E-TYPE-001");
+    expect(compile(src("reset")).errorCodes).toContain("E-TYPE-001");
+  });
+
+  test("a tare's SECOND argument is still analysed — the suppression is target-only", () => {
+    // The span covers `tare(@target` and stops there, so a genuine
+    // pre-transition read in the explicit-default expression still fires. A
+    // whole-call span (which is what `reset` uses, safely, having no second
+    // argument) would have silently swallowed it.
+    const { errorCodes } = compile(`<program>
+\${
+    type User:struct = { name: string, token: (not to string) }
+    <user>: User = { name: "a", token: not }
+    @n = 1
+    tare(@n, @user.token)
+}
+</program>`);
+    expect(errorCodes).toContain("E-TYPE-001");
+  });
+
+  test("a MODULE-INIT tare above the cell's first write fires E-TARE-BEFORE-DECL", () => {
+    // The defect this closes: declarations hoist, but module-init EMITS IN
+    // SOURCE ORDER, so the promotion ran before any thunk existed, no-opped
+    // silently, and reset() fell back to the last write — the exact
+    // increment-instead-of-restore behaviour §6.8.4 exists to dissolve,
+    // re-created by the feature meant to fix it.
+    const { codes } = compile(`<program>
+\${
+    tare(@x)
+    @x = 0
+    @x = @x + 1
+}
+</program>`);
+    expect(codes).toContain("E-TARE-BEFORE-DECL");
+  });
+
+  test("E-TARE-BEFORE-DECL also fires for a structural decl and a compound", () => {
+    const structural = compile(`<program>
+\${
+    tare(@x)
+    <x> = 0
+}
+</program>`);
+    expect(structural.codes).toContain("E-TARE-BEFORE-DECL");
+    const compound = compile(`<program>
+\${
+    tare(@form.a)
+    <form>
+      <a> = 1
+    </>
+}
+</program>`);
+    expect(compound.codes).toContain("E-TARE-BEFORE-DECL");
+  });
+
+  test("E-TARE-BEFORE-DECL does NOT fire on the correctly-ordered worked case", () => {
+    // The flagship shape. An earlier draft of the check compared against the
+    // resolved scope record, which for an IMPLICIT cell is LAST-WINS — it
+    // pointed at `@x = @x + 1` and rejected this. A false positive here would
+    // reject the canonical program the feature was built for.
+    const { codes } = compile(`<program>
+\${
+    @x = 0
+    tare(@x)
+    @x = @x + 1
+}
+</program>`);
+    expect(codes).not.toContain("E-TARE-BEFORE-DECL");
+  });
+
+  test("E-TARE-BEFORE-DECL does NOT fire on DEFERRED code written above the decl", () => {
+    // A function / handler / lambda body runs after module-init, so a tare
+    // there is legal wherever it is written. Each of these is a separate
+    // traversal path: the walker's function-decl arm, and the reset-family
+    // walker's `skipDeferredBodies` lambda arm.
+    const inFn = compile(`<program>
+\${
+    function f() { tare(@x) }
+    <x> = 0
+}
+</program>`);
+    expect(inFn.codes).not.toContain("E-TARE-BEFORE-DECL");
+    const inLambda = compile(`<program>
+\${
+    <go> = () => tare(@x)
+    <x> = 0
+}
+</program>`);
+    expect(inLambda.codes).not.toContain("E-TARE-BEFORE-DECL");
+  });
+
+  test("the ordering rule is tare-only — `reset` above a declaration is untouched", () => {
+    const { codes } = compile(`<program>
+\${
+    function f() { reset(@x) }
+    <x> = 0
+}
+</program>`);
+    expect(codes).not.toContain("E-TARE-BEFORE-DECL");
+  });
+
+  test("object-literal compound: tare and reset AGREE (both address no per-field target)", () => {
+    // §6.8.4 known limit. `<form> = { a: 1 }` registers ONE reset target,
+    // `form` — so `@form.a` is not a target for EITHER keyword. That is a
+    // whole-family property that pre-dates §6.8.4 (verified against the base
+    // compiler), not something tare introduced. What must hold is that the two
+    // keywords agree; this assertion survives a future family-wide fix, whereas
+    // pinning the current no-op would have to be deleted by it.
+    const src = (kw) => `<program>
+\${
+    <form> = { a: 1, b: 2 }
+    ${kw}(@form.b)
+}
+</program>`;
+    expect(compile(src("tare")).errorCodes).toEqual(compile(src("reset")).errorCodes);
+  });
+
   test("an ordinary method call `obj.tare(x)` is NOT lifted and NOT diagnosed", () => {
     const { errorCodes, clientJs } = compile(`<program>
 \${

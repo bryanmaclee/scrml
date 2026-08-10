@@ -24990,6 +24990,38 @@ function checkLifecycleFieldAccess(
   }
 
   /**
+   * §6.8.4 — the `tare(...)` companion to `handleResetTextMatches`, and the two
+   * differ in the one way that matters.
+   *
+   * `tare(@u.token)` is NOT a read of `u.token` — the target names the cell
+   * whose reset-DEFAULT is being set. Without suppression the target text
+   * reaches `extractAccesses` as an ordinary `binding.field` reference and
+   * fires a FALSE `E-TYPE-001` on a lifecycle-annotated field, while the
+   * byte-identical program written with `reset` compiles clean.
+   *
+   * **It is also NOT a write to the cell, which is why this does NOT call
+   * `applyResetToCellField`.** §6.8.3 reverts a cell's per-access transition
+   * state "based on the resulting written value" — a reset writes the cell, so
+   * its lifecycle state moves. A tare writes only `_scrml_default_fns`; the
+   * cell's value is untouched, so its transition state must be untouched too.
+   * Reverting here would be a second, opposite bug in the same place.
+   *
+   * The span covers ONLY the `tare(@target` prefix, deliberately NOT the whole
+   * call: the two-argument form `tare(@n, @u.token)` carries a real expression
+   * in the second slot, and reads there are genuine reads that must still be
+   * seen. (`reset` has no second argument, so its whole-call span is fine.)
+   */
+  function collectTareTargetSpans(bareText: string): Array<{ start: number; end: number }> {
+    const spans: Array<{ start: number; end: number }> = [];
+    const TARE_TARGET_RE = /\btare\s*\(\s*@[A-Za-z_$][A-Za-z0-9_$]*(?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*/g;
+    let m: RegExpExecArray | null;
+    while ((m = TARE_TARGET_RE.exec(bareText)) !== null) {
+      spans.push({ start: m.index, end: m.index + m[0].length });
+    }
+    return spans;
+  }
+
+  /**
    * Apply the reset-revert semantic to a (cell, fieldPath) target. The reset
    * value for a struct field without `default=` is the field's init expression
    * value (per §6.8.2); since `initialFieldStates` is pre-computed via
@@ -25104,6 +25136,17 @@ function checkLifecycleFieldAccess(
         const bareText = statementText(stmt);
         if (bareText && /\breset\s*\(/.test(bareText)) {
           resetSpans = handleResetTextMatches(bareText);
+        }
+        // §6.8.4 — suppress the `tare(@cell.field)` TARGET as a phantom read.
+        // Deliberately NOT a `continue` and NOT a state revert: unlike reset,
+        // a tare writes no value to the cell (see `collectTareTargetSpans`), and
+        // the two-argument form's second slot holds a real expression whose
+        // reads must still reach `extractAccesses` below. Runs for BOTH the
+        // structured `tare-expr` node and any raw-text path, because the span
+        // is computed from the same statement text `extractAccesses` reads —
+        // so the structured and fallback routes cannot disagree here.
+        if (bareText && /\btare\s*\(/.test(bareText)) {
+          resetSpans = resetSpans.concat(collectTareTargetSpans(bareText));
         }
       }
 

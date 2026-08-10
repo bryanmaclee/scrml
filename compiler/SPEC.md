@@ -5687,11 +5687,35 @@ handler). Target shapes are the three §6.8.2 accepts: `tare(@cell)`, `tare(@com
 - The value a `tare` establishes SHALL take precedence over the cell's init expression at reset, per
   §6.8.2's default-before-init resolution. A later `tare` on the same cell REPLACES the earlier one;
   a `reset(@cell)` does NOT consume it.
-- `tare(@cell)` where the cell has NO init expression yet — a tare that runs before the cell's first
-  write — SHALL be a NO-OP. There is nothing to promote, and the no-op leaves §6.8.1's "re-evaluate
-  the init expression" fallback intact, which is exactly what the program would do without the tare.
-  (The genuinely broken shape — a target that is not a declared cell at all — is
-  `E-STATE-UNDECLARED`, not this case.)
+- A `tare(@cell)` in MODULE-INIT position that appears BEFORE the cell's first write in the same file
+  is **E-TARE-BEFORE-DECL** (compile error; see §34). State declarations hoist (§6.9), but module-init
+  RUNS IN SOURCE ORDER, so at that point the cell has no init expression and the call cannot do
+  anything; leaving it silent would make `reset()` fall back to the LAST write's expression — the
+  increment-instead-of-restore behaviour this section exists to prevent. The rule is scoped to
+  module-init position: a `tare` inside a function, event handler or lambda body runs later and is
+  legal wherever it is written.
+- `tare(@cell)` where the cell has NO init expression AT THE MOMENT THE STATEMENT RUNS, in a position
+  the rule above does not reach — a deferred `tare` firing before anything has written the cell — SHALL
+  be a NO-OP. There is nothing to promote, and the no-op leaves §6.8.1's "re-evaluate the init
+  expression" fallback intact, which is exactly what the program would do without the tare. (A target
+  that is not a declared cell at all is `E-STATE-UNDECLARED`, not this case.)
+
+**Known limit — an OBJECT-LITERAL compound has no per-field reset targets.** A compound declared with
+structural children registers a reset target per field, so `tare(@form.a)` and `reset(@form.a)` both
+address `form.a`:
+
+```scrml
+<form>
+  <a> = 1
+</>
+```
+
+A compound declared as a single object literal — `<form> = { a: 1 }` — registers ONE target, `form`.
+`tare(@form.a)` and `reset(@form.a)` therefore both address a target that does not exist, and both are
+silent no-ops. This is a property of the whole §6.8 family, not of `tare`: `reset(@form.a)` on an
+object-literal compound behaved this way before §6.8.4 existed. The two keywords AGREE, which is the
+invariant that matters here; making either of them diagnose it is a change to the family and is
+tracked separately. Use the structural child form when a field needs its own reset target.
 - `tare` on a `const` derived declaration is **E-DERIVED-WRITE**. `tare` writes the same slot
   `default=` writes, so the §6.8.1 prohibition applies unchanged: assigning to a derived cell is
   always a write error.
@@ -5758,8 +5782,10 @@ ends with the tare's value: both write one slot, and the last write wins. A cell
   three target shapes it shares
 - §6.2 — the declaration shapes; the IMPLICIT `@x = init` form is the one with no attribute site
 - §6.3.5 — compound composition (multi-level nav targets)
-- §34 — E-TARE-NO-ARG, E-TARE-INVALID-TARGET, E-DERIVED-WRITE, E-RESERVED-IDENTIFIER,
-  E-STATE-UNDECLARED
+- §6.9 — Hoisting; declarations hoist but module-init runs in source order, which is why
+  `E-TARE-BEFORE-DECL` exists
+- §34 — E-TARE-NO-ARG, E-TARE-INVALID-TARGET, E-TARE-BEFORE-DECL, E-DERIVED-WRITE,
+  E-RESERVED-IDENTIFIER, E-STATE-UNDECLARED
 
 ---
 
@@ -19611,6 +19637,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-RESET-NO-ARG | §6.8 | `reset()` called with no argument. The `reset` keyword requires an explicit cell argument: `reset(@cell)` or `reset(@compound.field)`. | Error |
 | E-RESET-INVALID-TARGET | §6.8.2 | The `reset` keyword target must be one of the three canonical shapes: `reset(@cell)` (top-level cell), `reset(@compound)` (whole compound), or `reset(@compound.field)` (single-level compound nav). Multi-level compound paths (`reset(@a.b.c)`) are also legal when each segment resolves through the compound-scope chain (§6.3.5 recursive composition). Other expression shapes (literals, function-call results, binary / ternary / unary expressions, bare identifiers without `@`, member chains rooted at non-`@` identifiers) are rejected. (Catalog addition S69 — A1b B22.) | Error |
 | E-TARE-NO-ARG | §6.8.4 | `tare()` called with no argument, with more than two arguments, or with a spread argument. The `tare` keyword takes `tare(@cell)` (promote the cell's current init expression into its reset default) or `tare(@cell, <expr>)` (set that default explicitly). Attached at parse time by `compiler/src/expression-parser.ts` when the `tare(...)` call is lifted into a `tare-expr` node, and surfaced by the ast-builder wrapper — the `E-RESET-NO-ARG` sibling shape. (Catalog addition S337 — §6.8.4 amendment.) | Error |
+| E-TARE-BEFORE-DECL | §6.8.4 | A `tare(@cell)` in MODULE-INIT position appears BEFORE the cell's first write in the same file. State declarations hoist (§6.9) but module-init RUNS IN SOURCE ORDER, so at that point the cell has no init expression to promote: the call would be a silent no-op and `reset(@cell)` would fall back to the LAST write's expression — the increment-instead-of-restore behaviour §6.8.4 exists to prevent, re-created by the feature meant to fix it. Rejected rather than warned because `tare`'s entire contract is that SOURCE POSITION is the discriminator, and because rejecting is the reversible direction on brand-new surface (relaxing an error later is easy; un-accepting a silent wrong answer is not). Deliberately scoped to module-init position: a `tare` inside a function / event-handler / lambda body runs later and is legal wherever written, and an unresolved target is `E-STATE-UNDECLARED` instead. Fix: move the call below the write you want as the baseline. Emitted at `compiler/src/symbol-table.ts` `checkTareOrderingAgainstDecl` (PASS 14 / B22). (Catalog addition S337 fix-round.) | Error |
 | E-TARE-INVALID-TARGET | §6.8.4 | The `tare` keyword target must be one of the three canonical cell shapes `reset` accepts: `tare(@cell)` (top-level cell), `tare(@compound)` (whole compound), or `tare(@compound.field)` (compound nav, multi-level legal when each segment resolves through the compound-scope chain, §6.3.5). Other expression shapes (literals, function-call results, binary / ternary / unary expressions, bare identifiers without `@`, member chains rooted at non-`@` identifiers, optional-chain access) are rejected. A DISTINCT code from `E-RESET-INVALID-TARGET` rather than a reuse: the two keywords are separate surfaces, and a diagnostic that printed "reset" at a `tare` call site would name a keyword the author did not write. Emitted at `compiler/src/symbol-table.ts` `validateTareExpr` (PASS 14 / B22), which also fires `E-DERIVED-WRITE` when the resolved target is a `const` derived cell. (Catalog addition S337 — §6.8.4 amendment.) | Error |
 | W-LIFECYCLE-CANDIDATE | §1.5 | A `<program>` body, component body, or file scope has more than 2 reactive boolean cells gating the same UI region. Consider promoting to a `<match>` block (Tier 1) or `<engine>` (Tier 2) for structural exhaustiveness. | Warning |
 | W-MATCH-RULE-INERT | §18.0.2 | `rule=` declared on a state-child inside a `<match>` block. Rules are legal-but-inert in match (read-only on the matched-on value); promote to `<engine>` (Tier 2) to activate enforcement. | Warning |
