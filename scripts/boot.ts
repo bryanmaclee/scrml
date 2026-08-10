@@ -108,7 +108,7 @@ function syncRepo(name: string, path: string): RepoSync {
 // `mandate` = which contract artifact obliges the read (drift-guard corpus).
 // `needle`  = a stable substring proving that mandate is still declared there.
 type Mandate = "profile" | "pa-profile";
-interface ReadItem { id: string; label: string; repo: "scrml" | "support"; rel: string; mandate: Mandate; needle: string; pending?: boolean; }
+interface ReadItem { id: string; label: string; repo: "scrml" | "support"; rel: string; mandate: Mandate; needle: string; pending?: boolean; underived?: boolean; }
 
 /**
  * Resolve the per-user voice ledger by READING the pa-profile's `{{user_voice_ledger}}`
@@ -131,34 +131,51 @@ interface ReadItem { id: string; label: string; repo: "scrml" | "support"; rel: 
  * pa-profile names nothing.
  */
 interface Ledger { path: string; pending: boolean; derived: boolean; }
+
+/**
+ * Resolve the per-user voice ledger.
+ *
+ * AUTHORITY is the pa-profile's MACHINE-READABLE marker:
+ *     <!-- @ledger path=user-voice-scrml.md status=live|pending -->
+ * The prose stays normative for humans; this function reads the FIELD.
+ *
+ * WHY A FIELD AND NOT THE PROSE (S337). The first two cuts of this resolver mined the
+ * `{{user_voice_ledger}}` prose for both the path and the not-yet-created state. Two adversarial
+ * rounds produced ELEVEN findings and every round found another prose shape that broke it:
+ *   - `$` under /m ended the section capture at end-of-LINE, so it captured one line and
+ *     resolved bryan correctly only by accident (his planned-rename name was on line 2);
+ *   - a `###` sub-heading inside the section captured an empty body -> silent fallback to the
+ *     very filename guess the function exists to eliminate;
+ *   - "first backticked name wins" breaks if a section leads with a CROSS-REFERENCE to another
+ *     operator's ledger (pjoliver11's section already names bryan's);
+ *   - worst, the pending scan tested the WHOLE section while the path was one name in it, so a
+ *     "did not yet exist" clause about a DIFFERENT file could mark the real ledger pending and
+ *     make the gate FAIL-OPEN — a green "full read-set present" over an absent mandated read.
+ * That is the enumerate-forever shape. A declared field is the converge shape, and it is the
+ * pattern this contract already converged on three times (the governing-sentence gate, `locus=`,
+ * `prov=`). Prose-scan is retained ONLY as a fallback, and a fallback now WARNS (`derived:false`)
+ * instead of passing silently — an unobservable fallback was itself one of the findings.
+ */
 function resolveVoiceLedger(who: string, paProfileText: string): Ledger {
-  // Anchor to the HEADING line. `{{user_voice_ledger}}` also appears in the file's preamble
-  // blurb ("fills the per-USER slots (`{{user_voice_ledger}}`)"), and an unanchored match lands
-  // there — a section with no ledger path in it, silently falling through to the convention.
-  // Same unanchored-match class as the PICKUP `indexOf` bug this script's own S239 pass caught.
-  //
-  // Terminate on the next heading or TRUE end-of-input. NOT `\n?$`: under /m, `$` matches
-  // end-of-LINE, so the lazy quantifier stopped at the first newline and captured a single
-  // line. That truncation resolved bryan correctly only BY ACCIDENT — his live ledger sits on
-  // line 1 and the "Planned rename → `user-voice-bryan.md`" name on line 2 was cut off. A
-  // profile that wrapped the other way would have silently produced the wrong file.
+  const mk = paProfileText.match(/<!--\s*@ledger\s+([^>]*?)-->/);
+  if (mk) {
+    const attrs = mk[1];
+    const path = attrs.match(/\bpath=([^\s]+)/)?.[1];
+    const status = (attrs.match(/\bstatus=([^\s]+)/)?.[1] ?? "live").toLowerCase();
+    if (path) return { path, pending: status === "pending", derived: true };
+  }
+  // ── fallback: no marker on this profile. Derive from prose, and SAY SO (derived:false).
   const sec = paProfileText.match(/^#{1,6}\s.*\{\{user_voice_ledger\}\}.*\n([\s\S]*?)(?=\n#{1,6}\s|(?![\s\S]))/m);
   const hay = sec ? sec[1] : "";
-  // The FIRST backticked `user-voice-*.md` in the section is the declared ledger; later names
-  // are the planned rename or a cross-reference to another operator's ledger. Correct for all
-  // three shipped profiles (bryan · pjoliver11 · ryan) — verified, not assumed.
-  const m = hay.match(/`(user-voice-[A-Za-z0-9._-]+\.md)`/);
-  if (!m) return { path: `user-voice-${who}.md`, pending: false, derived: false };
-  // The contract may declare a ledger that does not exist YET. `pa-profile-ryan.md` says
-  // "`user-voice-ryan.md` (**to be created** …)". Demanding it turns the gate red on a
-  // correct boot — the same §8 cry-wolf shape this whole fix exists to remove, just moved to
-  // a different operator. Carry the contract's own pending marker so the gate can WARN.
-  const pending = /to be created|not yet (created|exist)|does not (yet )?exist|until it exists/i.test(hay);
-  return { path: m[1], pending, derived: true };
+  // Anchor on the OPERATOR's own name first; fall back to positional order. This is immune to a
+  // section that leads with a cross-reference to someone else's ledger.
+  const own = hay.match(new RegExp("`(user-voice-" + who.replace(/[^A-Za-z0-9_-]/g, "") + "\\.md)`"));
+  const first = hay.match(/`(user-voice-[A-Za-z0-9._-]+\.md)`/);
+  const hit = own ?? first;
+  if (!hit) return { path: `user-voice-${who}.md`, pending: false, derived: false };
+  return { path: hit[1], pending: false, derived: false };
 }
 
-// paProfileText is REQUIRED: defaulting it to "" silently reinstates the filename guess for
-// any future caller that omits it, with no error. Make the omission a compile error instead.
 function readSet(who: string, paProfileText: string): ReadItem[] {
   const ledger = resolveVoiceLedger(who, paProfileText);
   const sharedWithBryan = ledger.path === "user-voice-scrml.md";
@@ -180,7 +197,7 @@ function readSet(who: string, paProfileText: string): ReadItem[] {
     // evidence that a SECOND ledger was read — 6b's whole point is "in addition to bryan's".
     { id: "6b", label: sharedWithBryan ? `${ledger.path.replace(/\.md$/, "")} (your own ledger — SAME FILE as 6a)`
                                        : `${ledger.path.replace(/\.md$/, "")} (your own ledger)`,
-      repo: "support", rel: ledger.path, mandate: "pa-profile", needle: "user-voice-", pending: ledger.pending },
+      repo: "support", rel: ledger.path, mandate: "pa-profile", needle: "user-voice-", pending: ledger.pending, underived: !ledger.derived },
     { id: "7",  label: `pa-profile-${who} (personal layer)`,    repo: "support", rel: `pa-profile-${who}.md`,        mandate: "profile",    needle: "pa-profile-" },
   ];
 }
@@ -306,9 +323,11 @@ if (JSON_MODE) {
   console.log(JSON.stringify({
     who, gate: FAIL ? "FAIL" : "PASS",
     sync, pickupPresent: !pickupAbsent, pickup,
-    readset: reads.map(({ id, label, rel, exists, behindPath, named }) => ({ id, label, rel, exists, behindPath, named })),
+    // pending/underived MUST ship: without them a consumer's `readset.every(r => r.exists)`
+    // disagrees with `gate`, since a pending read is absent-by-contract yet the gate passes.
+    readset: reads.map(({ id, label, rel, exists, behindPath, named, pending, underived }) => ({ id, label, rel, exists, pending: !!pending, underived: !!underived, behindPath, named })),
     board, probes: probes.map(({ id, ok, err }) => ({ id, ok, err })),
-    warnings: { staleReads: staleReads.map((r) => r.id), driftReads: driftReads.map((r) => r.id), behindRepos: behindRepos.map((r) => r.name), deadProbes: deadProbes.map((p) => p.id) },
+    warnings: { staleReads: staleReads.map((r) => r.id), driftReads: driftReads.map((r) => r.id), behindRepos: behindRepos.map((r) => r.name), deadProbes: deadProbes.map((p) => p.id), pendingReads: pendingReads.map((r) => r.id), underivedLedger: reads.filter((r) => r.underived).map((r) => r.id) },
   }, null, 2));
   process.exit(CHECK_MODE && FAIL ? 1 : 0);
 }
@@ -347,7 +366,7 @@ if (behindRepos.length) line(`  → pull --rebase before reading: reads may be s
 // 3. read-set
 H("PROFILE-A READ-SET");
 for (const r of reads) {
-  const glyph = !r.exists ? "✗" : r.behindPath > 0 ? "⚠" : !r.named ? "⚠" : "✓";
+  const glyph = (!r.exists && r.pending) ? "⚠" : !r.exists ? "✗" : r.behindPath > 0 ? "⚠" : !r.named ? "⚠" : "✓";
   const tail = (!r.exists && r.pending) ? "pending (contract says not yet created)" : !r.exists ? "MISSING" : r.behindPath > 0 ? `stale (${r.behindPath} unpulled)` : !r.named ? "DRIFT (not named in contract)" : "";
   line(`  ${glyph} ${r.id.padEnd(3)} ${r.label.padEnd(38)} ${tail}`);
 }
@@ -380,11 +399,19 @@ if (FAIL) {
   if (pendingReads.length) line(`  ⚠ pending (not a failure — contract declares not-yet-created): ${pendingReads.map((r) => r.id).join(", ")}`);
   if (pickupAbsent) line(`  ✗ FAIL — PICKUP block absent from hand-off.md`);
   line(`  A skipped read is the S335 short-boot. Resolve before orienting.`);
+} else if (pendingReads.length) {
+  // Do NOT claim "full read-set present" — a read IS absent; the contract just says so on purpose.
+  line(`  ✓ PASS — PICKUP present; every read present except ${pendingReads.length} declared pending.`);
 } else {
   line(`  ✓ PASS — full read-set present, PICKUP present.`);
 }
-const warnN = staleReads.length + driftReads.length + behindRepos.length + deadProbes.length;
-if (warnN) line(`  ${warnN} warning(s): ${[staleReads.length && `${staleReads.length} stale`, driftReads.length && `${driftReads.length} drift`, behindRepos.length && `${behindRepos.length} behind`, deadProbes.length && `${deadProbes.length} probe-unavailable`].filter(Boolean).join(" · ")}`);
+// Outside the FAIL branch: for the only real case (a pending ledger with nothing else wrong)
+// FAIL is false, so a warning nested under it could never print.
+if (pendingReads.length) line(`  ⚠ pending (absent BY CONTRACT — warn, never fail): ${pendingReads.map((r) => r.id).join(", ")}`);
+const underived = reads.filter((r) => r.underived);
+if (underived.length) line(`  ⚠ ledger path GUESSED (no @ledger marker in the pa-profile): ${underived.map((r) => r.id).join(", ")}`);
+const warnN = staleReads.length + driftReads.length + behindRepos.length + deadProbes.length + pendingReads.length + reads.filter((r) => r.underived).length;
+if (warnN) line(`  ${warnN} warning(s): ${[staleReads.length && `${staleReads.length} stale`, driftReads.length && `${driftReads.length} drift`, behindRepos.length && `${behindRepos.length} behind`, deadProbes.length && `${deadProbes.length} probe-unavailable`, pendingReads.length && `${pendingReads.length} pending`, reads.filter((r) => r.underived).length && `${reads.filter((r) => r.underived).length} guessed-path`].filter(Boolean).join(" · ")}`);
 line();
 
 if (CHECK_MODE && FAIL) process.exit(1);
