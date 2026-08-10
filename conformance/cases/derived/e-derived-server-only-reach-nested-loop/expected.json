@@ -1,0 +1,13 @@
+{
+  "id": "derived-e-derived-server-only-reach-nested-loop",
+  "description": "§6.6.19 POSITION axis — a `const <name>` derived cell whose RHS reaches `hashPassword` from `scrml:auth` is REFUSED wherever it sits, here inside a `for`-loop `lift` body. The `-pos` sibling pins the same cell at top level; this one pins that the SHALL is not qualified by position. Guards the S337 leak, where this exact file compiled at exit 0 with zero `.server.js`, `const { hashPassword } = _scrml_stdlib.auth;` in the client bundle, and `Bun.password.hash(password, { algorithm: \"argon2id\" })` in the shipped browser runtime.",
+  "language-version": "1.0",
+  "spec": "§6.6.19",
+  "source-test": "compiler/tests/unit/route-inference-derived-server-only-reach.test.js",
+  "rationale": "§6.6.19's normative sentence binds every `const <name>` derived cell whose RHS reaches a §12.2 Trigger 3 ESCALATION_SERVER_ONLY_MODULES binding, and its only carve-out is a §64 `kind=\"tool\"` program — there is no positional qualifier in the section, so a cell the implementation could not reach was a conformance hole and not a language boundary. The refusal rationale is unchanged by nesting: a derived cell is a synchronous lazy-pull recompute (§6.6.3), so escalation is not an available answer at ANY depth. The fix made the collector walk structurally rather than descend a hardcoded `body`/`children` pair; five further positions were measured leaking on the old walk (`while`-loop `lift` body, `<each>` row body, `<engine>` state-child body, loop-inside-conditional, and the same shapes in a tool program) and are pinned in the unit test's §9 POSITION axis. W-EACH-PROMOTABLE fires here because the Tier-0 `for`/`lift` form is the shape under test and must stay as written — promoting it to `<each>` would change the position being pinned.",
+  "expect": {
+    "codes": ["E-DERIVED-SERVER-ONLY-REACH"],
+    "notCodes": ["E-ROUTE-005", "E-ROUTE-002"],
+    "severity": { "E-DERIVED-SERVER-ONLY-REACH": "error" }
+  }
+}
