@@ -35,7 +35,7 @@
  *     `.pa-base/profile` Profile-A block. Because a hand manifest can drift from the
  *     contract, each item carries a `needle` proving its mandate, and driftCheck
  *     asserts that needle is still present in the mandating artifact (the profile,
- *     or — for the per-user reads S335 added — the pa-profile). So the manifest
+ *     or — for the per-user voice ledger S335 added — the pa-profile). So the manifest
  *     cannot silently outlive a read the contract renamed or dropped. RESIDUAL
  *     (v1, honest): the REVERSE direction — the contract adding a read the manifest
  *     lacks — is NOT auto-detected, because the profile prose also NAMES reads it
@@ -59,7 +59,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "child_process";
 
-const ROOT = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
+const ROOT = fileURLToPath(new URL("..", import.meta.url)).replace(/[\\/]$/, ""); // strip trailing sep on BOTH OSes (Windows returns a trailing backslash)
 const SUPPORT = `${ROOT}/../scrml-support`;
 const PROFILE = `${ROOT}/.pa-base/profile`;
 const HANDOFF = `${ROOT}/hand-off.md`;
@@ -118,7 +118,9 @@ function readSet(who: string): ReadItem[] {
     { id: "4",  label: "master-list §0 (phase dashboard)",      repo: "scrml",   rel: "master-list.md",              mandate: "profile",    needle: "master-list.md" },
     { id: "5",  label: "hand-off (live session state)",         repo: "scrml",   rel: "hand-off.md",                 mandate: "profile",    needle: "hand-off.md" },
     { id: "6a", label: "user-voice-scrml (bryan — binds all)",  repo: "support", rel: "user-voice-scrml.md",         mandate: "profile",    needle: "user-voice-scrml.md" },
-    // 6b/7 — the per-user reads S335 short-booted. Mandated by the pa-profile, not the profile read-set line.
+    // 6b — the per-user voice ledger S335 short-booted. Mandated by the pa-profile ({{user_voice_ledger}}
+    // says "read its tail … in addition to bryan's"), NOT the profile read-set line — so its drift corpus
+    // is the pa-profile. Item 7 (reading the pa-profile itself) IS named by profile read-set line 7.
     { id: "6b", label: `user-voice-${who} (your own ledger)`,   repo: "support", rel: `user-voice-${who}.md`,        mandate: "pa-profile", needle: "user-voice-" },
     { id: "7",  label: `pa-profile-${who} (personal layer)`,    repo: "support", rel: `pa-profile-${who}.md`,        mandate: "profile",    needle: "pa-profile-" },
   ];
@@ -179,13 +181,15 @@ function boardLiveness(): Sibling[] {
 
 // ── PICKUP block extraction ────────────────────────────────────────────────────
 function extractPickup(handoffText: string): string | null {
-  // Exact standardized heading first; tolerate a variant that still says "NEXT-SESSION PICKUP".
-  let start = handoffText.indexOf("## ⏭ NEXT-SESSION PICKUP");
-  if (start < 0) {
-    const m = handoffText.match(/^##[^\n]*NEXT-SESSION PICKUP[^\n]*$/m);
-    if (!m || m.index === undefined) return null;
-    start = m.index;
-  }
+  // Anchor to LINE-START (/m). An unanchored indexOf would match the literal string inside a
+  // backtick/code-span MENTION — and the wrap template itself contains one ("a standardized
+  // `## ⏭ NEXT-SESSION PICKUP` block") — so on a hand-off that LACKS the real heading it would
+  // FALSE-PASS the gate (pickupAbsent=false), the exact short-boot this exists to catch.
+  // Exact canonical heading first; else any H2 (not H3 — the (?!#) guard) line that still says it.
+  const m = handoffText.match(/^## ⏭ NEXT-SESSION PICKUP/m)
+         ?? handoffText.match(/^##(?!#)[^\n]*NEXT-SESSION PICKUP/m);
+  if (!m || m.index === undefined) return null;
+  const start = m.index;
   const nlAfterHeading = handoffText.indexOf("\n", start);
   const heading = nlAfterHeading < 0 ? handoffText.slice(start) : handoffText.slice(start, nlAfterHeading);
   const body = nlAfterHeading < 0 ? "" : handoffText.slice(nlAfterHeading + 1);
