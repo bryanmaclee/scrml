@@ -1,0 +1,13 @@
+{
+  "id": "reactive-tare-deferred-position-pos",
+  "description": "§6.8.4 — a BARE `tare(@x)` inside a function body is E-TARE-DEFERRED-POSITION. The bare form promotes the cell's MODULE-INIT init expression; a write performed in deferred code registers none (`_emitInitThunkSidecar` returns null inside a function body by design), so the call pins the wrong value or nothing at all. The two-argument form is exempt and is the prescribed fix.",
+  "language-version": "1.0",
+  "spec": "§6.8.4",
+  "source-test": "compiler/tests/unit/tare-emit-and-diagnostics.test.js",
+  "rationale": "Measured before the rule, by executing the emitted bundle: with the cell at 11 after a handler-side write, a handler-side `tare(@x)` then `reset(@x)` yielded 12 — it re-ran the module-init `() => current + 1` instead of pinning 11. For a cell written ONLY in deferred code, reset yielded the module-init value rather than the tared one. Both compiled with zero diagnostics. Refusing is the same fail-closed direction as E-TARE-BEFORE-DECL and is reversible; the migration was measured at ZERO across 2368 tracked .scrml files. Runtime-capture (`tare a scale at the current reading`) is deliberately inexpressible rather than silently wrong — it is banked as its own question rather than smuggled in by widening `tare` by position. Ruling: bryan, S337, 'a, and bank c as its own question'.",
+  "expect": {
+    "codes": ["E-TARE-DEFERRED-POSITION"],
+    "notCodes": ["E-TARE-BEFORE-DECL", "E-TARE-INVALID-TARGET"],
+    "severity": { "E-TARE-DEFERRED-POSITION": "error" }
+  }
+}

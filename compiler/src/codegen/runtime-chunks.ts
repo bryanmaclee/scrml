@@ -15,13 +15,34 @@
  * (Added by detectRuntimeChunks() in emit-client.ts.)
  *
  * Chunk → runtime functions:
- *   core          _scrml_state, _scrml_subscribers, _scrml_reactive_get/set/subscribe/propagate_dirty
+ *   core          _scrml_state, _scrml_subscribers, _scrml_reactive_get/set/subscribe/propagate_dirty,
+ *                 AND the §6.8 reset REGISTRIES + their setters —
+ *                 `_scrml_default_fns`/`_scrml_default_set` and
+ *                 `_scrml_init_fns`/`_scrml_init_set`. They are declared BEFORE
+ *                 the first chunk marker, deliberately: file-init emits
+ *                 `_scrml_init_set(...)` / `_scrml_default_set(...)` on pages
+ *                 that never call `reset` at all, so those names must ALWAYS
+ *                 resolve. (Each declaration site says so in
+ *                 runtime-template.js; verified by offset — the consts sit at
+ *                 ~663/677, the first marker at ~1115.)
  *   wire          _scrml_wire_decode (§57 dual-decoder, v0.3.x SPA tree-shake Phase B 3.2).
  *                 Only referenced by emitted server-fn fetch stubs
  *                 (`emit-functions.ts` + `atom-emitter.ts`). Tree-shaken when
  *                 the compile unit has no `function-decl` with `isServer:true`
  *                 AND no `use foreign:` use-decl.
- *   reset         _scrml_default_set/_fns, _scrml_init_set/_fns, _scrml_reset (§6.8)
+ *   reset         `_scrml_reset` ONLY (§6.8.2).
+ *                 ⚠ CORRECTED (S337 fix-round-3): this line used to claim the
+ *                 registries and setters lived HERE. They do not, and the error
+ *                 was load-bearing — the whole argument for `tare` being
+ *                 independent of `reset` rests on the registries being in
+ *                 'core'. An editor "honouring" the old line would have moved
+ *                 them into this chunk and shipped a ReferenceError-on-boot
+ *                 bundle for every page that sets a cell without calling reset.
+ *   tare          `_scrml_tare` (§6.8.4). Its OWN chunk, not part of 'reset':
+ *                 it touches only the 'core' registries above, so it has no
+ *                 dependency on the reset runtime, and reset-WITHOUT-tare is
+ *                 the common shape. Activated by the POST-EMIT `_scrml_tare(`
+ *                 scan in emit-client.ts.
  *   validators    14 universal-core fire functions, VALIDATOR_RUNTIME map,
  *                 _scrml_validator_fire (§55.1, C7) — inlined verbatim from
  *                 compiler/src/runtime-validators.js

@@ -19,6 +19,7 @@ import { compileScrml } from "../../src/api.js";
 import { resolve } from "path";
 import { writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from "fs";
 import { foldChunkAccessors } from "../helpers/chunk-scope.js";
+import { RUNTIME_CHUNKS } from "../../src/codegen/runtime-chunks.ts";
 
 const tmpRoot = resolve("/tmp", "scrml-tare-emit");
 
@@ -39,9 +40,14 @@ function compile(source, baseName = "tare_case") {
     ? foldChunkAccessors(readFileSync(clientPath, "utf8"))
     : "";
   const diags = [...(result.errors ?? []), ...(result.warnings ?? [])];
+  const spanOf = (code) => {
+    const d = diags.find((x) => x.code === code);
+    return d && d.span ? { line: d.span.line, col: d.span.col } : null;
+  };
   if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   return {
     clientJs,
+    spanOf,
     codes: diags.map((d) => d.code),
     messages: diags.map((d) => d.message ?? ""),
     errorCodes: (result.errors ?? [])
@@ -505,6 +511,183 @@ const <doubled> = @x * 2
 }
 </program>`);
     expect(errorCodes).not.toContain("E-TARE-BEFORE-DECL");
+  });
+
+  // -- (a) the position ruling: bare form is MODULE-INIT ONLY ---------------
+
+  test("(a) bare tare in a FUNCTION body fires E-TARE-DEFERRED-POSITION", () => {
+    // `_emitInitThunkSidecar` deliberately registers NO init thunk for a write
+    // inside a function body, and `_scrml_tare` promotes `_scrml_init_fns` — so
+    // a bare tare there pins whatever module-init left behind. Measured: a
+    // handler-side tare with the cell at 11 makes reset yield 12; a cell written
+    // only in deferred code makes it yield the module-init value. Both were
+    // silent before this rule.
+    const { codes } = compile(`<program>
+\${
+    @x = 0
+    @x = @x + 1
+    function calibrate() { tare(@x) }
+}
+</program>`);
+    expect(codes).toContain("E-TARE-DEFERRED-POSITION");
+  });
+
+  test("(a) bare tare in a LAMBDA and in a `when` body both fire", () => {
+    // Two different traversal paths: the lambda case is caught by the
+    // reset-family walker's `inDeferredExpr` flag; the `when` case only became
+    // reachable at all once the walk started reading `bodyExpr` (finding 4).
+    const inLambda = compile(`<program>
+\${
+    @x = 0
+    <go> = () => tare(@x)
+}
+</program>`);
+    expect(inLambda.codes).toContain("E-TARE-DEFERRED-POSITION");
+    const inWhen = compile(`<program>
+\${
+    <a> = 1
+    @x = 0
+    when @a changes { tare(@x) }
+}
+</program>`);
+    expect(inWhen.codes).toContain("E-TARE-DEFERRED-POSITION");
+  });
+
+  test("(a) bare tare at MODULE-INIT still passes — the flagship case is untouched", () => {
+    const { errorCodes } = compile(`<program>
+\${
+    @x = 0
+    tare(@x)
+    @x = @x + 1
+}
+</program>`);
+    expect(errorCodes).toEqual([]);
+  });
+
+  test("(a) the TWO-ARGUMENT form stays legal in deferred positions", () => {
+    // It sets the default slot directly and never reads `_scrml_init_fns`, so
+    // deferral cannot break it — this is the escape hatch the diagnostic names.
+    for (const body of [
+      `@x = 0
+    function calibrate() { tare(@x, 0) }`,
+      `@x = 0
+    <go> = () => tare(@x, 0)`,
+      `<a> = 1
+    @x = 0
+    when @a changes { tare(@x, 0) }`,
+    ]) {
+      expect(compile(`<program>\n\${\n    ${body}\n}\n</program>`).errorCodes)
+        .not.toContain("E-TARE-DEFERRED-POSITION");
+    }
+  });
+
+  test("(a) `reset` in a function body is UNAFFECTED — the rule is tare-only", () => {
+    const { errorCodes } = compile(`<program>
+\${
+    @x = 0
+    function f() { reset(@x) }
+}
+</program>`);
+    expect(errorCodes).toEqual([]);
+  });
+
+  test("finding 2: the SIBLING lifecycle tracker no longer phantom-reads a tare target", () => {
+    // `checkLifecycleBindingAccess` (Shape-1 cell-value) built its suppression
+    // spans from RESET_CALL_RE only, so `tare(@user.name)` fired E-TYPE-001
+    // while the byte-identical `reset(@user.name)` compiled clean — round-2
+    // finding 1 repeated on the sibling surface.
+    const src = (stmt) => `<program>
+\${
+  type User:struct = { name: string, token: string }
+  <user>: (not to User) = not
+  ${stmt}
+  @n = 1
+}
+</program>`;
+    // The control proves the tracker is actually live in this shape.
+    expect(compile(src("@n2 = @user.name")).errorCodes).toContain("E-TYPE-001");
+    expect(compile(src("tare(@user.name)")).errorCodes).not.toContain("E-TYPE-001");
+    expect(compile(src("tare(@user.name)")).errorCodes)
+      .toEqual(compile(src("reset(@user.name)")).errorCodes);
+  });
+
+  test("finding 5: a METHOD named `reset` no longer suppresses reads in the SIBLING tracker", () => {
+    // The second copy of RESET_CALL_RE still used `\\b`. Its twin was fixed in
+    // round 2 and this one was not — the drift a matched pair invites.
+    const { errorCodes } = compile(`<program>
+\${
+  type User:struct = { name: string, token: string }
+  <user>: (not to User) = not
+  @scale = mk()
+  function mk() { return { reset: id } }
+  function id(v) { return v }
+  @scale.reset(@user.name)
+}
+</program>`);
+    expect(errorCodes).toContain("E-TYPE-001");
+  });
+
+  test("finding 4: a tare inside a `when` body is VALIDATED at all", () => {
+    // `when-effect` carries its body on `bodyExpr`, which is not in
+    // B3_EXPR_FIELDS — so nothing inside a `when` body was ever checked.
+    // `tare(42)` there compiled with zero diagnostics and fell through to
+    // codegen's defensive `undefined` marker.
+    const { codes } = compile(`<program>
+\${
+    <a> = 1
+    when @a changes { tare(42) }
+}
+</program>`);
+    expect(codes).toContain("E-TARE-INVALID-TARGET");
+  });
+
+  test("finding 3: tare diagnostics report at the STATEMENT line, not line 1", () => {
+    // An ExprNode span is block-local, so these reported 1:1 regardless of where
+    // the call actually was. The conformance cases assert codes, not positions,
+    // which is why it landed.
+    const invalid = compile(`<program>
+\${
+    <a> = 1
+
+
+
+
+    tare(42)
+}
+</program>`);
+    expect(invalid.codes).toContain("E-TARE-INVALID-TARGET");
+    expect(invalid.spanOf("E-TARE-INVALID-TARGET").line).toBeGreaterThan(1);
+
+    const derived = compile(`<program>
+\${
+    <x> = 1
+    const <doubled> = @x * 2
+
+
+
+
+    tare(@doubled)
+}
+</program>`);
+    expect(derived.codes).toContain("E-DERIVED-WRITE");
+    expect(derived.spanOf("E-DERIVED-WRITE").line).toBeGreaterThan(1);
+  });
+
+  test("finding 6: the reset REGISTRIES live in 'core', not in the 'reset' chunk", () => {
+    // The chunk catalog asserted the opposite, and the error was load-bearing:
+    // the whole argument for `tare` being independent of `reset` rests on the
+    // registries being always-present. An editor honouring the old line would
+    // have moved them and shipped a ReferenceError-on-boot for every page that
+    // sets a cell without ever calling reset. Asserted against the built chunks
+    // rather than against the prose, so the prose cannot drift again silently.
+    expect(RUNTIME_CHUNKS.core).toContain("function _scrml_init_set");
+    expect(RUNTIME_CHUNKS.core).toContain("function _scrml_default_set");
+    expect(RUNTIME_CHUNKS.reset).not.toContain("function _scrml_init_set");
+    expect(RUNTIME_CHUNKS.reset).not.toContain("function _scrml_default_set");
+    // …and the two consumers really are in their own chunks.
+    expect(RUNTIME_CHUNKS.reset).toContain("function _scrml_reset");
+    expect(RUNTIME_CHUNKS.tare).toContain("function _scrml_tare");
+    expect(RUNTIME_CHUNKS.reset).not.toContain("function _scrml_tare");
   });
 
   test("object-literal compound: tare and reset AGREE (both address no per-field target)", () => {

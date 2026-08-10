@@ -26025,7 +26025,26 @@ function checkLifecycleBindingAccess(
   // The pattern intentionally allows whitespace inside the dotted path so
   // synthetic AST text from the parser (which may insert whitespace around
   // `.` tokens) still matches.
-  const RESET_CALL_RE = /\breset\s*\(\s*@([A-Za-z_$][A-Za-z0-9_$]*)((?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*)\s*\)/g;
+  // `(?<![.\w$])` NOT `\b` — a `\b` boundary MATCHES AFTER A DOT, so an ordinary
+  // METHOD call `@scale.reset(@u.name)` was read as the `reset` KEYWORD here:
+  // it applied a bogus reset-value state transition to the cell AND suppressed
+  // `u.name` as a phantom read, dropping a legitimate diagnostic. This is the
+  // SECOND copy of the pattern; its twin in `checkLifecycleFieldAccess` was
+  // fixed in fix-round-2 and this one was left, which is exactly the drift that
+  // makes a matched pair dangerous — a reader who checks one assumes both.
+  const RESET_CALL_RE = /(?<![.\w$])reset\s*\(\s*@([A-Za-z_$][A-Za-z0-9_$]*)((?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*)\s*\)/g;
+
+  // §6.8.4 — the `tare(...)` TARGET, whose text must be suppressed the same way
+  // a reset target's is (a tare target names the cell whose reset-DEFAULT is
+  // being set; it reads nothing). Two differences from RESET_CALL_RE, both
+  // load-bearing and both the same as in the struct-field tracker:
+  //   - NO state transition is applied. §6.8.3 reverts per-access state "based
+  //     on the resulting written value"; a tare writes no value to the cell, so
+  //     its transition state must not move.
+  //   - the span covers `tare(@target` ONLY, not the whole call, because the
+  //     two-argument form's second slot holds a real expression whose reads are
+  //     genuine and must still be seen.
+  const TARE_TARGET_RE = /(?<![.\w$])tare\s*\(\s*@[A-Za-z_$][A-Za-z0-9_$]*(?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*/g;
 
   // Detect `<bindingName>.<fieldName>` field access. Bind-scoped — only tracked
   // bindings count.
@@ -26202,6 +26221,17 @@ function checkLifecycleBindingAccess(
       // If `resetValueStates` is undefined OR the cell isn't tracked OR
       // the classification is null: leave state unchanged. The reset span
       // is still recorded so Pass 3 suppresses the phantom read match.
+    }
+
+    // §6.8.4 (fix-round-3 finding 2) — Pass 0b: the tare sibling. Round 2 gave
+    // the struct-field tracker this suppression and MISSED this one, so
+    // `tare(@u.name)` phantom-read here while the byte-identical `reset(@u.name)`
+    // compiled clean — the same defect, on the sibling surface. Spans only: no
+    // state transition, for the reason given at TARE_TARGET_RE.
+    TARE_TARGET_RE.lastIndex = 0;
+    let tt: RegExpExecArray | null;
+    while ((tt = TARE_TARGET_RE.exec(text)) !== null) {
+      resetSpans.push({ start: tt.index, end: tt.index + tt[0].length });
     }
 
     // Pass 1: discover transition() calls — advance state.

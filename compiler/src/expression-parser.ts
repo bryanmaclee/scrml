@@ -4341,7 +4341,10 @@ export function forEachCallInExprNode(node: ExprNode, cb: (call: CallExpr) => vo
  * `skipDeferredBodies` — do not descend into a lambda body. Set ONLY by the
  * §6.8.4 tare-before-declaration check, which reasons about module-init SOURCE
  * ORDER and must therefore ignore code that runs later. Every other consumer
- * takes the default full walk.
+ * takes the default full walk and is told, per visited node, whether the walk
+ * reached it through a lambda (`inDeferredExpr`) — which §6.8.4's
+ * deferred-position rule needs, since a bare tare inside a lambda does not run
+ * at module-init even though the lambda is written there.
  */
 export interface ResetFamilyWalkOpts {
   skipDeferredBodies?: boolean;
@@ -4361,21 +4364,23 @@ export interface ResetFamilyWalkOpts {
  */
 function forEachResetFamilyExprInExprNode(
   node: ExprNode,
-  cb: (familyNode: ResetExpr | TareExpr) => void,
+  cb: (familyNode: ResetExpr | TareExpr, inDeferredExpr: boolean) => void,
   opts?: ResetFamilyWalkOpts,
+  inDeferredExpr: boolean = false,
 ): void {
   if (!node) return;
-  const recur = (n: ExprNode, c: typeof cb) => forEachResetFamilyExprInExprNode(n, c, opts);
+  const recur = (n: ExprNode, c: typeof cb, deferred: boolean = inDeferredExpr) =>
+    forEachResetFamilyExprInExprNode(n, c, opts, deferred);
   switch (node.kind) {
     case "reset-expr": {
       const n = node as ResetExpr;
-      cb(n);
+      cb(n, inDeferredExpr);
       recur(n.target, cb);
       return;
     }
     case "tare-expr": {
       const n = node as TareExpr;
-      cb(n);
+      cb(n, inDeferredExpr);
       recur(n.target, cb);
       if (n.defaultExpr) recur(n.defaultExpr, cb);
       return;
@@ -4418,10 +4423,14 @@ function forEachResetFamilyExprInExprNode(
       // those do not respect scope boundaries.
       if (opts?.skipDeferredBodies) return;
       const n = node as LambdaExpr;
+      // A param DEFAULT evaluates at call time too, but it is not the lambda's
+      // body; both are deferred relative to where the lambda is written, so the
+      // flag is set for each — §6.8.4's position rule needs to know a bare tare
+      // here does not run at module-init.
       for (const p of n.params) {
-        if (p.defaultValue) recur(p.defaultValue, cb);
+        if (p.defaultValue) recur(p.defaultValue, cb, true);
       }
-      if (n.body.kind === "expr") recur(n.body.value, cb);
+      if (n.body.kind === "expr") recur(n.body.value, cb, true);
       // Block bodies are EscapeHatchExpr in Phase 1; cannot recurse structurally.
       return;
     }
@@ -4462,11 +4471,11 @@ export function forEachResetExprInExprNode(node: ExprNode, cb: (resetNode: Reset
  */
 export function forEachTareExprInExprNode(
   node: ExprNode,
-  cb: (tareNode: TareExpr) => void,
+  cb: (tareNode: TareExpr, inDeferredExpr: boolean) => void,
   opts?: ResetFamilyWalkOpts,
 ): void {
-  forEachResetFamilyExprInExprNode(node, (n) => {
-    if (n.kind === "tare-expr") cb(n);
+  forEachResetFamilyExprInExprNode(node, (n, inDeferredExpr) => {
+    if (n.kind === "tare-expr") cb(n, inDeferredExpr);
   }, opts);
 }
 

@@ -426,3 +426,102 @@ anyway. The fix removes a latent exemption rather than an observed one.
   changes**, 0 artifact set delta, 1014 artifact content diffs of which **1014 token-only, 0 real**,
   syntax 0/0/0, bare server-fn sites 145 → 145. Source-set delta 9 = exactly the tare conformance
   cases.
+
+---
+
+# FIX ROUND 3 (S337) — the (a) ruling + 5 findings
+
+## (a) RULING — bare `tare` is MODULE-INIT POSITION ONLY. New code `E-TARE-DEFERRED-POSITION`.
+
+**Premise verified by execution before building anything.** `_emitInitThunkSidecar` returns `null`
+inside a function body by design, so a deferred write registers NO init thunk; `_scrml_tare` promotes
+`_scrml_init_fns[name]`, which is therefore still whatever module-init left. Both failure modes are
+real and both were silent:
+
+```
+A. cell also written at module-init (@x = 0; @x = @x + 1), handler bumps to 11, tare there
+     init thunks in the bundle: () => 0   and   () => current + 1     (both module-init)
+     after calibrate @x = 11   ->   after reset @x = 12      author expected 11
+B. cell written ONLY in a handler (@x = 41), tare there
+     init thunks in the bundle: () => 0                       (module-init only)
+     after calibrate @x = 41   ->   after reset @x = 0        author expected 41
+```
+
+**A DISTINCT code, not a reuse of `E-TARE-BEFORE-DECL`.** That code means "you put it before the
+declaration" and its advice is "move it below the write"; this one means "the bare form cannot see
+deferred writes at all" and its fix is different — `tare(@cell, <expr>)`, or move to module-init.
+Reusing one code for two unrelated mistakes prints advice that does not apply, the same hazard this
+file already avoids for `E-TARE-INVALID-TARGET` vs `E-RESET-INVALID-TARGET`.
+
+**Two-argument form exempt at every position**, as ruled — it never reads `_scrml_init_fns`.
+
+**Position sweep: 4 must-fire, 6 must-not-fire, 0 problems.** Must-fire: function body, lambda,
+`when` body, nested function. Must-not-fire: module-init (flagship), module-init inside a top-level
+`if`, two-arg in function/lambda/`when`, and `reset` in a function body (rule is tare-only).
+
+**MIGRATION MEASURED: ZERO.** 2368 tracked `.scrml`; 9 contain `tare(`, all of them the conformance
+cases added days ago, and every bare call in them is at module-init. The full conformance suite is
+green (892 pass), so nothing existing trips the new rule.
+
+**SPEC §6.8.4 corrected.** It previously blessed the broken position by name ("a function body, an
+event handler") as valid statement positions. It now scopes the bare form to module-init and gives
+the MECHANISM as the reason (deferred writes establish no init expression, deliberately), so the next
+reader gets the why. §34 row added; the banked runtime-capture question is recorded as deliberately
+inexpressible rather than silently wrong.
+
+## Findings 2-6
+
+| # | before | after |
+|---|---|---|
+| 2 | `tare(@user.name)` fires E-TYPE-001 in the SIBLING tracker; `reset(@user.name)` clean | equal, both clean; control read still fires |
+| 3 | `tare(42)` at line 40 reports **1:1** | reports the statement line |
+| 4 | `when @a changes { tare(42) }` → **no diagnostic at all** | `E-TARE-INVALID-TARGET` |
+| 5 | `@scale.reset(@u.name)` SILENT in the sibling tracker | FIRES |
+| 6 | catalog says the registries live in `reset` | corrected to `core`, asserted against the BUILT chunks |
+
+**Finding 2 enumeration — BOTH trackers, as asked.** `checkLifecycleFieldAccess` (struct-field) was
+fixed in round 1; `checkLifecycleBindingAccess` (Shape-1 cell-value) is fixed here. Each has exactly
+one `RESET_CALL_RE` and now exactly one `TARE_TARGET_RE` beside it, both with the `(?<![.\w$])`
+lookbehind, both span-only for tare (no state transition — §6.8.3 reverts "based on the resulting
+written value", and a tare writes none). There is no third tracker: `grep` for `RESET_CALL_RE` returns
+these two and nothing else.
+
+**Finding 4 — the round-2 comment was wrong and is corrected, not just the code.** Round 2 claimed
+fixing the kind names would protect `cleanup { tare(@x) }`. It would not: neither `when-effect` nor
+`cleanup-registration` has a `children`/`body` ARRAY, so the flag could never propagate to them, and
+their bodies live on `bodyExpr`/`callbackExpr` — fields nothing in the walk read. Those fields are now
+read explicitly with `deferred` passed as a literal `true`, and the comment says so.
+
+**Finding 4 × (a) interaction, as asked:** they agree rather than double-fire. `checkTareDeferredPosition`
+returns early when the target does not resolve, so a malformed `tare(42)` in a `when` body reports only
+its shape error.
+
+## NEW — a defect neither review round caught, pre-existing and family-wide
+
+`cleanup { … }` and `on click ${ … }` bodies are RAW STRINGS: no structured ExprNode is built, so no
+AST-based rule can reach them — and codegen lowers the keyword call as an ordinary call:
+
+```
+cleanup { tare(@x) }   ->   tare(_scrml_cs_reactive_get("x"));      // nonexistent fn, VALUE not key
+cleanup { reset(@x) }  ->   reset(_scrml_cs_reactive_get("x"));     // identical, AND identical at BASE
+```
+
+A dangling reference — `ReferenceError` when the cleanup fires — compiling clean. **Verified
+pre-existing at BASE for `reset`, so `tare` inherits rather than introduces it.** This is why (a)
+cannot fire in those two positions; I did NOT add a raw-text regex hack to fake coverage, and the
+sweep records them as out-of-reach rather than pretending. Surfaced for routing.
+
+## Fix-round-3 verification
+
+- unit tare tests 32 → **42**; browser tare tests 8 (unchanged, still green).
+  **Bite: 6 of the new tests fail on the pre-fix tree** ((a) ×2, findings 2/3/4/5); finding 6's test
+  bites on the fact itself by asserting the BUILT chunk contents rather than the prose.
+- conformance **+1** (`reactive/tare-deferred-position-pos`) → **892 pass / 0 fail**.
+- §34: 810 → **811** rows; PINNED 344 → **345**; IMPL-SITES 320 and FALSE-CLAIM 95 unchanged.
+- round-1/2 probes re-verified: reset-vs-tare parity **0 divergences / 7**; before-decl sweep
+  **0 problems**.
+- `default=` byte-identity vs base: client.js, html AND runtime bundle identical (59,828 bytes).
+- **corpus delta vs base — still zero**: 0 newly failing / 0 newly passing, **0 diagnostic CODE
+  changes**, 0 artifact set delta, 1014 artifact content diffs of which **1014 token-only, 0 real**,
+  syntax 0/0/0, bare server-fn sites 145 → 145. Source-set delta 10 = exactly the tare conformance
+  cases.

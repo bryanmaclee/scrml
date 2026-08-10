@@ -5667,9 +5667,17 @@ tare(@cell)              // promote the cell's CURRENT init expression into its 
 tare(@cell, <expr>)      // set the default explicitly — the statement twin of default=<expr>
 ```
 
-Both forms are STATEMENT position, in logic context (a `${ … }` block, a function body, an event
-handler). Target shapes are the three §6.8.2 accepts: `tare(@cell)`, `tare(@compound)`, and
-`tare(@compound.field)` (multi-level nav legal, §6.3.5).
+Both forms are STATEMENT position, in logic context. Target shapes are the three §6.8.2 accepts:
+`tare(@cell)`, `tare(@compound)`, and `tare(@compound.field)` (multi-level nav legal, §6.3.5).
+
+**The two forms differ in WHERE they may appear, and the reason is mechanical rather than stylistic.**
+The bare form promotes the cell's INIT EXPRESSION, and a cell's init expression is established at
+module-init: a write performed in deferred code (a function, event handler, `when` or `cleanup` body,
+or a lambda) deliberately does NOT establish one — re-registering from a reassignment would overwrite
+the declaration-site baseline, which is precisely the §6.8 defect that rule exists to prevent. So a
+bare `tare` in deferred code has nothing of the author's to promote: it pins whatever module-init left
+behind, or nothing. **The bare form is therefore MODULE-INIT POSITION ONLY.** The two-argument form
+names its baseline outright, never consults the init expression, and is legal anywhere.
 
 **Normative statements:**
 
@@ -5697,8 +5705,18 @@ handler). Target shapes are the three §6.8.2 accepts: `tare(@cell)`, `tare(@com
     sets the default slot DIRECTLY and never consults the cell's init expression, so there is nothing
     for source order to get wrong; `reset` resolves default-before-init (§6.8.2) to the named
     expression regardless of where the `tare` sits.
-  - A `tare` inside a function, event-handler or lambda body runs after module-init and is legal
-    wherever it is written.
+  - A `tare` inside deferred code is governed by the position rule below, not by this one.
+- A **bare** `tare(@cell)` outside MODULE-INIT position — in a function body, an event handler, a
+  `when` or `cleanup` body, or a lambda — is **E-TARE-DEFERRED-POSITION** (compile error; see §34).
+  The bare form promotes the cell's module-init init expression, and deferred writes register none,
+  so the call pins the wrong value or nothing at all. The fix is either `tare(@cell, <expr>)`, which
+  names the baseline and is legal anywhere, or moving the bare call to module-init position. **The
+  two-argument form is NOT subject to this rule.**
+  > Runtime-capture — "set the baseline to whatever the value is RIGHT NOW, at this moment in a
+  > handler" — is deliberately NOT expressible by either form. It is a distinct feature with distinct
+  > semantics (a snapshot, not a thunk) and is banked for its own deliberation rather than smuggled in
+  > by widening `tare` by position. Until then the language refuses the shape instead of silently
+  > getting it wrong.
 - `tare(@cell)` where the cell has NO init expression AT THE MOMENT THE STATEMENT RUNS, in a position
   the rule above does not reach — a deferred `tare` firing before anything has written the cell — SHALL
   be a NO-OP. There is nothing to promote, and the no-op leaves §6.8.1's "re-evaluate the init
@@ -5789,8 +5807,8 @@ ends with the tare's value: both write one slot, and the last write wins. A cell
 - §6.3.5 — compound composition (multi-level nav targets)
 - §6.9 — Hoisting; declarations hoist but module-init runs in source order, which is why
   `E-TARE-BEFORE-DECL` exists
-- §34 — E-TARE-NO-ARG, E-TARE-INVALID-TARGET, E-TARE-BEFORE-DECL, E-DERIVED-WRITE,
-  E-RESERVED-IDENTIFIER, E-STATE-UNDECLARED
+- §34 — E-TARE-NO-ARG, E-TARE-INVALID-TARGET, E-TARE-BEFORE-DECL, E-TARE-DEFERRED-POSITION,
+  E-DERIVED-WRITE, E-RESERVED-IDENTIFIER, E-STATE-UNDECLARED
 
 ---
 
@@ -19643,6 +19661,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-RESET-INVALID-TARGET | §6.8.2 | The `reset` keyword target must be one of the three canonical shapes: `reset(@cell)` (top-level cell), `reset(@compound)` (whole compound), or `reset(@compound.field)` (single-level compound nav). Multi-level compound paths (`reset(@a.b.c)`) are also legal when each segment resolves through the compound-scope chain (§6.3.5 recursive composition). Other expression shapes (literals, function-call results, binary / ternary / unary expressions, bare identifiers without `@`, member chains rooted at non-`@` identifiers) are rejected. (Catalog addition S69 — A1b B22.) | Error |
 | E-TARE-NO-ARG | §6.8.4 | `tare()` called with no argument, with more than two arguments, or with a spread argument. The `tare` keyword takes `tare(@cell)` (promote the cell's current init expression into its reset default) or `tare(@cell, <expr>)` (set that default explicitly). Attached at parse time by `compiler/src/expression-parser.ts` when the `tare(...)` call is lifted into a `tare-expr` node, and surfaced by the ast-builder wrapper — the `E-RESET-NO-ARG` sibling shape. (Catalog addition S337 — §6.8.4 amendment.) | Error |
 | E-TARE-BEFORE-DECL | §6.8.4 | A **bare** `tare(@cell)` in MODULE-INIT position appears BEFORE the cell's first write in the same file. State declarations hoist (§6.9) but module-init RUNS IN SOURCE ORDER, so at that point the cell has no init expression to promote: the call would be a silent no-op and `reset(@cell)` would fall back to the LAST write's expression — the increment-instead-of-restore behaviour §6.8.4 exists to prevent, re-created by the feature meant to fix it. Rejected rather than warned because `tare`'s entire contract is that SOURCE POSITION is the discriminator, and because rejecting is the reversible direction on brand-new surface (relaxing an error later is easy; un-accepting a silent wrong answer is not). Deliberately scoped. The TWO-ARGUMENT form `tare(@cell, <expr>)` is EXEMPT at any position — it sets the default slot directly, never consults the init expression, and therefore cannot be made a no-op by position (firing on it rejected a valid program; S337 fix-round-2). A `tare` inside a function / event-handler / lambda body runs later and is legal wherever written, and an unresolved target is `E-STATE-UNDECLARED` instead. Fix: move the call below the write you want as the baseline. Emitted at `compiler/src/symbol-table.ts` `checkTareOrderingAgainstDecl` (PASS 14 / B22). (Catalog addition S337 fix-round.) | Error |
+| E-TARE-DEFERRED-POSITION | §6.8.4 | A **bare** `tare(@cell)` appears outside MODULE-INIT position — in a function body, an event handler, a `when` or `cleanup` body, or a lambda. The bare form promotes the cell's init expression, and a cell's init expression is established only at module-init: `_emitInitThunkSidecar` deliberately registers nothing for a write inside a function body (re-registering from a reassignment would overwrite the declaration-site baseline, §6.8). So the call pins whatever module-init left behind, or nothing — measured: a handler-side tare after the cell reaches 11 yields **12** on reset, and a cell written only in deferred code yields its module-init value. Both compiled with zero diagnostics before this rule. The TWO-ARGUMENT form `tare(@cell, <expr>)` is NOT subject to this rule at any position — it sets the default slot directly and never reads the init registry. A DISTINCT code from `E-TARE-BEFORE-DECL`, which means "you put it before the declaration" and whose advice ("move it below the write") does not apply here. Fix: use `tare(@cell, <expr>)`, or move the bare call to module-init. Emitted at `compiler/src/symbol-table.ts` `checkTareDeferredPosition` (PASS 14 / B22). (Catalog addition S337 fix-round-3; ruling: bryan, "a, and bank c as its own question".) | Error |
 | E-TARE-INVALID-TARGET | §6.8.4 | The `tare` keyword target must be one of the three canonical cell shapes `reset` accepts: `tare(@cell)` (top-level cell), `tare(@compound)` (whole compound), or `tare(@compound.field)` (compound nav, multi-level legal when each segment resolves through the compound-scope chain, §6.3.5). Other expression shapes (literals, function-call results, binary / ternary / unary expressions, bare identifiers without `@`, member chains rooted at non-`@` identifiers, optional-chain access) are rejected. A DISTINCT code from `E-RESET-INVALID-TARGET` rather than a reuse: the two keywords are separate surfaces, and a diagnostic that printed "reset" at a `tare` call site would name a keyword the author did not write. Emitted at `compiler/src/symbol-table.ts` `validateTareExpr` (PASS 14 / B22), which also fires `E-DERIVED-WRITE` when the resolved target is a `const` derived cell. (Catalog addition S337 — §6.8.4 amendment.) | Error |
 | W-LIFECYCLE-CANDIDATE | §1.5 | A `<program>` body, component body, or file scope has more than 2 reactive boolean cells gating the same UI region. Consider promoting to a `<match>` block (Tier 1) or `<engine>` (Tier 2) for structural exhaustiveness. | Warning |
 | W-MATCH-RULE-INERT | §18.0.2 | `rule=` declared on a state-child inside a `<match>` block. Rules are legal-but-inert in match (read-only on the matched-on value); promote to `<engine>` (Tier 2) to activate enforcement. | Warning |
