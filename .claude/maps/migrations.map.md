@@ -1,6 +1,11 @@
 # migrations.map.md
 # project: scrml
 # updated: 2026-07-28T17:00:00Z  commit: 115e8b1b
+# ⚑ CURRENCY RE-VERIFIED AT `616688ea` (S331 pass), NOT RE-WALKED. No DB/migration surface moved in
+# EIGHT windows: `schema-differ.js`, `commands/db-migrate.js`, `codegen/db-authoritative.ts` and
+# `sql-table-refs.js` are all zero-diff over `35d4d32e..616688ea`. The one SQL-adjacent change this
+# window is `E-SQL-006` (§44.3, `.prepare()`) moving to COMPILE time — a diagnostic-timing change in
+# `emit-server.ts`, not a migration one. See error.map.md.
 
 The conditional check (a real DB-migration-apply tool exists) fires because `scrml db-migrate`
 (§14.8.11.1) exists — `scrml migrate` (pre-existing) is a scrml-SOURCE syntax codemod, NOT a DB

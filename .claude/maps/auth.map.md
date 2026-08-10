@@ -1,27 +1,33 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-08-06T23:38:11-06:00  commit: 97576f35
-# ⚠ **STAMP CORRECTION (S328, no re-walk): `97576f35` IS NOT AND WAS NEVER `HEAD`.** It is the tip
-# of `origin/wrap/s326-bryan` (PR #459); main carries only its SQUASH, `b7f89952`, and
-# `git merge-base --is-ancestor 97576f35 HEAD` returns **FALSE**. Read this map's stamp as
-# **`b7f89952`**. **This map was deliberately NOT re-walked at S328** — its surface has zero diff
-# over `97576f35..35d4d32e`, verified per-map below — so its CONTENT is unchanged and honest.
-# True HEAD at the S328 pass: **`35d4d32e`**. See primary.map.md invariant 48.
-# Zero-diff evidence: `git diff 97576f35..35d4d32e -- compiler/src/codegen/emit-server.ts
-# compiler/src/compute-program-config.ts compiler/src/route-inference.ts` is EMPTY. **One thing
-# DID change OFF this map's surface and is worth one line: #460 gave §12.5's route-handler
-# `Response` contract a normative SPEC home (`SPEC.md:7353`), closing the S326-N1 finding this
-# map's session-surface section referenced as missing.**
-# **SOURCE WALK IS AT `cf1849b2`.** The two later commits are
-# DOCS-ONLY (verified: zero diff under compiler/ scripts/ stdlib/ package.json .github/).
-# NOTE (S325/S326 INCREMENTAL pass): re-walked because the §20.5 session surface CHANGED AGAIN, and
-# this time as a SIDE-LANDING of a different arc. **#452 (the route-handler `Response` contract) also
-# hardened the session accessor's read path to an OWN-PROPERTY read** — `get(key)` is now
-# `Object.hasOwn(this._rec, key) ? (this._rec[key] ?? null) : null` (`emit-server.ts:2593`). That
-# closes the PROTOTYPE-CHAIN half of `g-session-get-reserved-key-read-disclosure` and leaves the
-# own-key READ POLICY open. **Read the "Session read-side" block below before touching the accessor —
-# it changed, and the ledger entry has NOT caught up (non-compliance.report.md S326-N2).**
-# The same landing takes that gap from log-only to WIRE-LIVE. Everything else carries its prior walk.
+# updated: 2026-08-09T15:20:00-06:00  commit: 616688ea
+# **PARTIALLY RE-WALKED over `35d4d32e` -> `616688ea`.** Ancestry CHECKED (invariant 48). The §20.5
+# session surface, `compute-program-config.ts`, and the `scrml:auth`/`scrml:oauth` stdlib modules are
+# **ZERO-DIFF this window** (`stdlib/` has no diff at all), so every session/JWT/OAuth/CSRF claim
+# below is carried and re-verified, not re-derived.
+#
+# **ONE CONFIDENTIALITY SURFACE DID MOVE, AND IT IS A NEW COMPILE-TIME REFUSAL: `E-DERIVED-SERVER-ONLY-REACH`
+# (§6.6.19, #486).** A `const <name>` DERIVED cell whose RHS reaches a binding imported from
+# `scrml:auth` / `scrml:crypto` / `scrml:oauth` (or any other `ESCALATION_SERVER_ONLY_MODULES`
+# member) is now REFUSED at compile time. **Before it, that exact shape compiled at exit 0 with NO
+# `.server.js`, `const { hashPassword } = _scrml_stdlib.auth;` in the client bundle, and a real
+# `Bun.password.hash` argon2id implementation in the shipped browser runtime** — measured S331, and
+# it is the same symptom the S299 Trigger-3 amendment was written to close.
+#
+# **THE SCOPE SENTENCE MATTERS MORE THAN THE FIX. §12.2 escalation is defined PER-FUNCTION and covers
+# NO OTHER POSITION.** §12.4's "route inference SHALL be per-function" is honoured literally by
+# `collectFileFunctions`, which yields `function-decl` nodes only. §6.6.19 closes ONE non-function
+# position. **Two remain OPEN and undiagnosed on this same confidentiality boundary:** a plain
+# mutable-cell initialiser (`<hashed> = hashPassword(@pw)`) and a markup interpolation
+# (`${ hashPassword(@pw) }`). Both reach the same module from the same client position. **The
+# diagnostic's own text warns that deleting the `const` — the shortest edit that silences it — is
+# exactly the edit that restores the leak.** Do not read this landing as closing the class.
+#
+# Carried and still true: #452's `Object.hasOwn` hardening of the session accessor (`emit-server.ts`)
+# closed the PROTOTYPE-CHAIN half of `g-session-get-reserved-key-read-disclosure` and left the own-key
+# READ POLICY open (ROUTED TO BRYAN); #460 gave §12.5's route-handler `Response` contract a normative
+# SPEC home. **Read the "Session read-side" block before touching the accessor — the ledger entry has
+# still not caught up (non-compliance.report.md).**
 
 scrml has THREE distinct auth-adjacent surfaces: (1) the compiler's own `<program auth=...>` declarative config that the codegen wires into emitted apps, (2) the `scrml:auth` / `scrml:oauth` stdlib modules an author imports for flow logic, and (3) the §20.5 `session` server builtin (NEW this window — the write half of the session model, landed in two passes). This map covers all three, plus the §14.8.9 protect-floor that backstops them, plus the §64.9 headless-target auth carve-out.
 
@@ -197,6 +203,55 @@ A `<program kind="tool" serve=PORT>` (§64.9, the listener-owning headless serve
 ## scrml:oauth stdlib module (stdlib/oauth/, compiler/runtime/stdlib/oauth/)
 Providers: discord, github, google, microsoft (each a thin provider-specific wrapper) + pkce.scrml (PKCE code-verifier/challenge generation, shared by all 4). Unchanged this window; distinct from the §20.5 session-establishment primitive (OAuth verifies identity, session.set persists it).
 
+## Server-only-stdlib client leak — the placement backstop, and the ONE position it now refuses (§12.2 Trigger 3 / §6.6.19)
+
+**This is a CONFIDENTIALITY boundary, not a performance one, and the whole design follows from which
+direction is safe to be wrong in.** `ESCALATION_SERVER_ONLY_MODULES` (`route-inference.ts:656`) is
+the placement set — **NOT** `SERVER_ONLY_SCRML_MODULES` (`:579`), which feeds async classification
+where over-inclusion is free. Members and the limb each satisfies:
+
+`scrml:auth` (a: `Bun.password` argon2id) · `scrml:crypto` (a: `Bun.CryptoHasher`, `Bun.password`) ·
+`scrml:cron` (a) · `scrml:fs` (a: `node:fs`) · `scrml:process` (a) · `scrml:redis` (a: the **BARE**
+`bun` specifier, no colon — a `bun:`-only scan misses it) · `scrml:store` (a: `bun:sqlite`) ·
+`scrml:path` (a) · `scrml:mcp` (a, host surface in the `.js` shim) · **`scrml:oauth` (b:
+CREDENTIAL HANDLING — zero host reach, but it puts `client_secret` in the token-exchange body three
+times and its own header reads "SERVER-SIDE ONLY")**.
+
+**Limb (b) exists because a host-reach-only criterion was FALSIFIED in review inside the same
+session.** `scrml:oauth` was cleared as client-safe on the reasoning that PKCE lets the flow run in a
+browser — true of the public-client half of a module that ships both halves. A clean compile shipped
+a real client secret into the browser bundle. **The criterion was the defect, not the list.** The
+normative criterion sits ABOVE the list in SPEC on purpose: a hand-maintained derived list rots
+silently and nothing fails when it does. **Re-evaluate the criterion rather than editing the list
+from memory, and when a module resists classification, prefer the server** — over-inclusion costs a
+round trip, under-inclusion ships a secret to a browser.
+
+**When the trigger FIRES it emits NO diagnostic, and that is by design.** A function silently moving
+to the server is the SUCCESS path. "My function vanished from the client bundle and there are zero
+errors and zero warnings" is the expected shape, not a bug report.
+
+**The position it CANNOT reach, and what happens there now.** §12.4 makes route inference
+per-function, so a non-function position is not reached by the trigger at all:
+
+| Position | At `616688ea` |
+|---|---|
+| `function` body | escalates (Trigger 3), silently, no diagnostic |
+| `const <name> = …` **derived cell** RHS | **REFUSED — `E-DERIVED-SERVER-ONLY-REACH` (§6.6.19, #486).** Not escalated: a derived recompute is synchronous lazy-pull (§6.6.3) and cannot become a round trip |
+| `<name> = …` **mutable-cell initialiser** | **OPEN — leaks, no diagnostic** |
+| **markup interpolation** | **OPEN — leaks, no diagnostic** |
+
+Reach is **REFERENCE, not call**, at ANY depth — inside a lambda, a nested `function` decl, or
+escape-hatch raw text. Matching only top-level CALLS was proven evadable four ways, each shipping the
+module and its secrets to the browser at exit 0: `["PEPPER"].map(p => hashPassword(p))`, a nested
+`function` decl, a bare callback reference, and `let f = hashPassword; f(x)`. **On a confidentiality
+boundary, over-firing costs a relocation and under-firing costs a leak.** Accepted residuals, named
+rather than hidden: a binding shadowed ONLY inside a nested lambda still fires, and a word-boundary
+scan of escape-hatch raw text can match inside a string literal in that text — both over-fires.
+
+**`kind="tool"` programs (§64) are carved out of the §6.6.19 refusal** — no client boundary, no leak
+— mirroring the carve-out Trigger 3 already takes for `print()`/`println()`.
+
+
 ## Protected-field egress backstop (§14.8.9, NOT stdlib — compiler-enforced)
 `<db src=... protect="col1,col2">` (or `authority=` collections) marks columns that must never reach the client bundle. Enforced by `compiler/src/protect-analyzer.ts` (PAError) at analysis time and `compiler/src/codegen/egress-field-scan.ts` (E-CG-001) as an acorn-EXACT, fail-closed backstop at emit time.
 
@@ -214,7 +269,7 @@ Expiry: `sessionExpiry` on `<program>` for the session cookie `Max-Age` + durabl
 Magic-link/verify/reset tokens: TTL-bound (caller-supplied, embedded in the stored record as an authoritative `expiresAt`), single-use, namespace-scoped.
 
 ## Tags
-#scrml #map #auth #baas #jwt #jwks #oauth #csrf #magic-link #password-reset #e-cg-001 #protect-floor #stdlib-auth #server-shape #tool-serve #jwt-auth-bypass #session-establishment #session-secure #host-cookie #e-scope-012 #e-session-context #e-session-value #e-session-reserved-key #gh357 #session-proxy-bind #scrml-session-bind #reflect-get-target-receiver #sql-interpolation-session #csrf-token-disclosure #session-read-side #dangling-ref-class #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #scrml-auth-check #permissive-by-design #store-invariant-probed #§52.15.1 #§20.5 #object-hasown #own-property-read #prototype-chain-read-closed #hasownproperty-shadow #read-side-policy-open #wire-live #response-contract #security-theater-vs-defense #ledger-locus-stale
+#scrml #map #auth #baas #jwt #jwks #oauth #csrf #magic-link #password-reset #e-cg-001 #protect-floor #stdlib-auth #server-shape #tool-serve #jwt-auth-bypass #session-establishment #session-secure #host-cookie #e-scope-012 #e-session-context #e-session-value #e-session-reserved-key #gh357 #session-proxy-bind #scrml-session-bind #reflect-get-target-receiver #sql-interpolation-session #csrf-token-disclosure #session-read-side #dangling-ref-class #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #scrml-auth-check #permissive-by-design #store-invariant-probed #§52.15.1 #§20.5 #object-hasown #own-property-read #prototype-chain-read-closed #hasownproperty-shadow #read-side-policy-open #wire-live #response-contract #security-theater-vs-defense #ledger-locus-stale #§6.6.19 #e-derived-server-only-reach #escalation-server-only-modules #two-limb-criterion #credential-handling-limb #oauth-client-secret #criterion-not-the-list #per-function-scope-only #two-positions-still-open #mutable-cell-initialiser-open #markup-interpolation-open #reference-not-call #four-evasions #over-fire-not-leak #kind-tool-carve-out #no-diagnostic-when-it-fires
 
 ## Links
 - [primary.map.md](./primary.map.md)

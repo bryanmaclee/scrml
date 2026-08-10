@@ -1,6 +1,10 @@
 # config.map.md
 # project: scrml
 # updated: 2026-08-02T18:40:00Z  commit: e80b692e
+# ⚑ CURRENCY RE-VERIFIED AT `616688ea` (S331 pass), NOT RE-WALKED. **Zero env-surface diff:** the
+# whole `git diff 35d4d32e..616688ea -- compiler/src/ scripts/ lsp/` contains **no added or removed**
+# `process.env` / `Bun.env` reference, and `.github/` + `package.json` are zero-diff, so the CI
+# secret surface is unchanged. Every key name below still holds.
 # NOTE (S313 pass): INCREMENTAL over `fe14c9b2` -> `e80b692e`. Re-walked for ONE reason — the CI
 # secret surface changed materially (both Anthropic-billed legs were killed at #351), and the prior
 # stamp's `ANTHROPIC_API_KEY` row asserted the opposite of what is true now. The compiler-side env-var

@@ -1,25 +1,33 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-08-07T15:38:47-06:00  commit: 35d4d32e
-# **SOURCE WALK IS AT `6f176c0d`; the stamp is `35d4d32e`, the true HEAD.** `35d4d32e` (#467,
-# the S328-bryan wrap continuity) landed DURING this pass and is **DOCS-ONLY** — verified
-# `git diff --name-only 6f176c0d..35d4d32e -- compiler/ scripts/ conformance/ .github/ stdlib/
-# package.json` is EMPTY. Every source claim below holds at the stamp. **Unlike the PRIOR
-# stamp, this one IS on main** — `git merge-base --is-ancestor 35d4d32e HEAD` passes
-# (invariant 48).
-# **THE PRIOR STAMP `97576f35` WAS NOT ON MAIN** — tip of `origin/wrap/s326-bryan` (#459),
-# squash-merged as `b7f89952`; `git merge-base --is-ancestor 97576f35 6f176c0d` is FALSE. SIX PRs have
-# landed since, not the four in the refresh brief: **#460** (SPEC §12.5) and **#461** (docs) sit
-# between the old stamp and **#463 / #464 / #465 / #466**.
-# NOTE (S328 INCREMENTAL pass): over `97576f35` -> `6f176c0d`.
-# **`compiler/SPEC.md` gained EXACTLY ONE bullet: §12.5's route-handler response contract (#460).**
-# It **CLOSES S326-N1** — the finding the prior stamp raised. The §12.5 section below is rewritten
-# accordingly: the SHALL is no longer derived-not-stated.
-# **TWO SECTIONS BELOW ARE FALSIFIED-AND-CORRECTED, not appended to.** (1) Any prior text describing a
-# `show=`-false SSR `display:none` injection is GONE — **#464 reverted #450 in full**; `emit-html.ts`
-# is byte-identical to `71623be3`. (2) A NEW section, "RESTRICTED CONTENT MODELS", records the FOUR
-# non-agreeing answers this compiler gives to "may this element body receive an element child?" — do
-# not read #466 as having unified them. **It did not, and the code comment says so explicitly.**
+# updated: 2026-08-09T15:20:00-06:00  commit: 616688ea
+# **INCREMENTAL over `35d4d32e` -> `616688ea` (19 commits, TWO operators).** Ancestry CHECKED
+# (invariant 48): `git merge-base --is-ancestor 35d4d32e HEAD` passes, so the delta arithmetic below
+# is bounded and honest. **`616688ea` is one commit AHEAD of `origin/main` (`8863d457`)** — the
+# S331-bryan wrap continuity, DOCS-ONLY (`git diff --name-only 8863d457..616688ea -- compiler/
+# scripts/ conformance/ stdlib/ .github/ package.json` is EMPTY), so every source claim holds at
+# both.
+#
+# **TWO CORRECTIONS TO THE PRIOR GENERATION OF THIS FILE ARE THE MOST IMPORTANT THING IN THIS
+# HEADER. Both were confirmed empirically at S331 and both had already misled a dispatch.**
+#
+# **(1) §18.5 — `planBlockArmLift` IS THE SINGLE LEAF *PREDICATE*, NOT THE SINGLE *SEGMENTER*, AND
+# THERE ARE FOUR EMISSION ROUTES, NOT ONE.** Reading it as "the one classifier every path routes
+# through" sent an agent to two wrong loci in a single session. The §18.5 section below now carries
+# the four-route table. Only the TWO raw-STRING routes call `planBlockArmLift`; the two structured-
+# AST routes call `_blockTailIsValueExpr` directly, because the AST already supplies the statement
+# boundaries a string has to be segmented for.
+#
+# **(2) §12.2 ESCALATION IS DEFINED PER-FUNCTION AND COVERS NO OTHER POSITION.** §12.4 says "Route
+# inference SHALL be per-function" and `collectFileFunctions` honours it literally — it yields
+# `function-decl` nodes only. Every NON-function position (derived cell, mutable-cell initialiser,
+# markup interpolation) is OUTSIDE Trigger 3 and always was. The derived-cell RHS half is now closed
+# by **`E-DERIVED-SERVER-ONLY-REACH` (§6.6.19, NEW #486)**, which REFUSES rather than escalating; the
+# other two positions are still open. **Do not write or read "Trigger 3 covers <position>".**
+#
+# New/rewritten this window: **§6.6.19** (a new subsection below the §12.2 one), the §12.2 Trigger 3
+# section (per-function scope block appended), the §18.5 section (four-route table + the
+# separator-dependence class), and a new §44.3 note on E-SQL-006 moving to compile time.
 # History stays in `docs/changelog.md` + `handOffs/delta-log.md`.
 
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
@@ -294,8 +302,8 @@ to correct mid-flight.
 
 | Set | Feeds | Direction that is SAFE to be wrong |
 |---|---|---|
-| `SERVER_ONLY_SCRML_MODULES` (`route-inference.ts:578`) | the async fail-closed backstop (`api.js` STDLIB-EXPORT-SEED) | **OVER-inclusion.** Defaulting an unresolvable re-export to async costs nothing. |
-| `ESCALATION_SERVER_ONLY_MODULES` (`route-inference.ts:655`) | **PLACEMENT** | **NEITHER, symmetrically-badly.** Under-include -> a server-only module ships to the browser (silent leak). Over-include -> correct CLIENT code is relocated to the server (a correctness/latency cost). |
+| `SERVER_ONLY_SCRML_MODULES` (`route-inference.ts:579`) | the async fail-closed backstop (`api.js` STDLIB-EXPORT-SEED) | **OVER-inclusion.** Defaulting an unresolvable re-export to async costs nothing. |
+| `ESCALATION_SERVER_ONLY_MODULES` (`route-inference.ts:656`) | **PLACEMENT** | **NEITHER, symmetrically-badly.** Under-include -> a server-only module ships to the browser (silent leak). Over-include -> correct CLIENT code is relocated to the server (a correctness/latency cost). |
 
 Reusing the async set for placement was MEASURED at S299 to escalate **72** corpus import sites that
 are correct client code today; `scrml:data` alone (`sortBy`/`schemaFor`/`tableFor`) is 72 of the 116
@@ -338,6 +346,79 @@ stays small.
 **Accepted residual, named rather than hidden:** a binding shadowed ONLY inside a nested lambda
 still fires (an over-fire, never a leak), and a word-boundary scan of escape-hatch raw text can match
 inside a string literal in that text (same direction).
+
+**⚠ SCOPE — THE TRIGGER IS DEFINED PER-FUNCTION, AND EVERY NON-FUNCTION POSITION IS OUTSIDE IT
+(NEW S331, SPEC.md:7312).** This is the correction that matters most in this section and it is
+stated normatively in SPEC now, not just here. §12.4 says *"Route inference SHALL be per-function"*,
+and `collectFileFunctions` honours it LITERALLY — it yields `function-decl` nodes only. A function
+is the only unit that HAS a placement to change, so:
+
+> **A server-only reach in a position that is not a function body does not escalate. It is not
+> reached by this trigger at all.** Not "escalates differently", not "escalates later" — *not
+> reached*.
+
+The positions this leaves uncovered, and their status at this HEAD:
+
+| Non-function position | Reaches a server-only module? | Status at `616688ea` |
+|---|---|---|
+| `const <name> = …` **derived cell** RHS | yes — invisible to Trigger 3 | **CLOSED by refusal — `E-DERIVED-SERVER-ONLY-REACH` (§6.6.19, #486)** |
+| `<name> = …` **mutable-cell initialiser** | yes — same client position | **OPEN. NOT diagnosed.** The error text for §6.6.19 says so out loud (see below) |
+| **markup interpolation** (`${ hashPassword(@pw) }`) | yes | **OPEN. NOT diagnosed.** |
+
+The derived-cell case reproduced Trigger 3's OWN founding symptom exactly — measured S331: exit 0,
+**no `.server.js` emitted at all**, `const { hashPassword } = _scrml_stdlib.auth;` in the client
+bundle, and a real `Bun.password.hash` argon2id implementation in the shipped runtime (4 occurrences
+vs 0 for a program not importing `scrml:auth`). SPEC's own instruction to a future reader:
+*"A reader adding a new non-function position to the language should treat §6.6.19 as the pattern to
+follow, not this trigger."*
+
+## §6.6.19 — `E-DERIVED-SERVER-ONLY-REACH`: the derived RHS REFUSES, it does not escalate (NEW #486, S331)
+
+**Where it lives.** SPEC `§6.6.19` (`SPEC.md:3694`), §34 catalog row at `SPEC.md:3304` + the long
+row at `SPEC.md:19483`, and a §12.2 Trigger-3 scope block at `SPEC.md:7312`. Emitted from
+`route-inference.ts` **Step 3b** (`:4429`), a NEW pass that runs after the per-function Step 3 loop.
+
+**Why REFUSE and not escalate — the reasoning generalises past this code.** A derived cell is a
+**synchronous lazy-pull recompute (§6.6.3)**: it is pulled on read, on the client, via a dirty flag.
+Escalating its RHS would make every recompute a network round trip — a shape the derived model has
+no way to express. So "place it on the server" is not an available answer, and inventing one would
+pre-empt a language question (*may the derived position host server work at all?*) that this fix has
+no mandate to answer. **Refusing is also the reversible direction**: newly-rejecting can be relaxed
+later; accepting-and-escalating is a one-way door.
+
+**Reach is REFERENCE, not call — identical to Trigger 3's own rule.** `[@x].map(hashPassword)` hands
+the server-only implementation to a client call site as surely as calling it does. The walk descends
+lambda bodies, `match`-arm block bodies, and escape-hatch raw text at any depth.
+
+**ONE scanner backs both halves and it must stay one.** `scanForServerOnlyBindingRefs(root, live)`
+(`route-inference.ts:3451`) is shared by the per-function `collectServerOnlyBindingModules` (`:3397`)
+and the derived-cell `collectDerivedRhsServerOnlyRefs` (`:3616`). It was EXTRACTED at S331 with no
+behavioural change to the function path. **It returns local binding NAMES mapped to modules, not
+just modules** — the derived diagnostic is required to name the offending member, and a name thrown
+away cannot be reconstructed from a module afterwards. Two callers, two shadow-set derivations, one
+walk on one confidentiality boundary.
+
+**The error message deliberately warns against the shortest edit that silences it**, and this is the
+transferable part: dropping the `const` turns the derived cell into a plain cell initialiser, which
+*reaches the same module from the same client position, is NOT yet diagnosed, and compiles clean
+while shipping the implementation to the browser*. A diagnostic whose obvious workaround restores
+the leak has to say so in its own text. The prescribed fix is: **move the call into a `function`
+(which DOES escalate, §12.2) and write its result to a plain reactive cell the markup reads.**
+
+**Carve-out: `kind="tool"` programs (§64).** No client boundary → no leak → refusing would reject
+valid code. `isToolProgram(fileAST)` short-circuits the whole Step-3b file loop (`:4459`). This
+mirrors the carve-out §12.2 Trigger 3 already takes for the §20.7 `print()`/`println()` signal.
+
+**Shadowing and string literals.** A name bound inside the RHS shadows the import and does not fire
+(`collectDerivedRhsLocalNames`, `:3562`, which stops at a nested `lambda`/`function-decl` binder). A
+`lit` node returns immediately from the walk — a string literal is not a reference (§12.4). The
+raw-text fallback for an unstructured RHS is a deliberate over-fire, never a leak.
+
+**Migration measured at ZERO.** 59 repo files import an escalation server-only module; none reaches
+one from a derived RHS. Pinned by `conformance/cases/derived/e-derived-server-only-reach-{pos,neg,fn-path}`
+(the `-fn-path` case is the prescribed fix compiling clean) and
+`unit/route-inference-derived-server-only-reach.test.js` (379L).
+
 
 ## Node identity is a CODEGEN CONTRACT, not a debugging convenience (NEW section, S299)
 
@@ -815,7 +896,7 @@ binding on every path including every combination of `auth=` / `protect=` / tena
    it that host's way. **What is normative is that the wire carries the serialized value**, which is
    the half a conformance case can pin and the half §12.5.2 already presupposed.
 2. **It carries NO diagnostic code.** It is enforced BY CONSTRUCTION, not by a §34 row — so the
-   catalog did not move (806 rows, re-derived at this HEAD) and there is nothing for error.map.md to
+   catalog did not move at #460 (806 rows then; **807 at `616688ea`** — `E-DERIVED-SERVER-ONLY-REACH` is the +1) and there is nothing for error.map.md to
    gain. **Do not go looking for an `E-` code to assert against; assert on the wire.**
 3. **Its own provenance note records, honestly, that no debate or DD ratified the direction.** The PA
    decided all four structural rows (limit-not-widen · fails-closed · reversible/newly-rejecting ·
@@ -1093,9 +1174,95 @@ ideal visibility — when the rewire hole is closed, the re-mounted element will
 controller-set `display:none` again and THAT ASSERTION MUST BE REVISITED. A failure there after a
 rewire fix is expected, not a regression.**
 
-## §18.5 — a block-arm tail merely PREFIXED by a keyword is a VALUE (#463, S328)
+## §18.5 BLOCK-ARM VALUE LOWERING — FOUR EMISSION ROUTES, ONE LEAF PREDICATE (#469/#470/#479, S330-S331)
 
-**The defect.** `emit-logic.ts`'s `_blockTailIsValueExpr` (:4535) decides whether a `match` block-arm's
+**⚠ READ THIS TABLE BEFORE SCOPING ANY §18.5 WORK. The prior generation of this map implied
+`planBlockArmLift` was "the single classifier every path routes through". That overstates it, and
+the overstatement sent a dispatch to two wrong loci in one session (S331).** `planBlockArmLift` is
+the shared **segmenter + plan** for the two RAW-STRING routes. The single shared LEAF PREDICATE — the
+thing that actually answers value-vs-void — is **`_blockTailIsValueExpr`**, and all four routes call
+it, two of them directly.
+
+| # | Route | Where | Segmentation | Value/void decision | Emission shape |
+|---|---|---|---|---|---|
+| **A** | local-decl, **structured AST** arm (`const x = match … { . V => { … } }`) | `emit-logic.ts:emitMatchExprDecl` (:4763), structuredBody branch (~:4840) | none needed — AST nodes ARE the statements | **`_blockTailIsValueExpr`** on the last `bare-expr` node's text (:4882) | assign tail to the tilde result var |
+| **B** | local-decl, **raw-string** arm | `emit-logic.ts:_emitBlockArmValueFromString` (:4734), gated by `_matchArmResultIsBlockBody` (:4637) | **`planBlockArmLift`** (:4715) → `_splitBlockStatements` (:4580) | `planBlockArmLift`'s call to `_blockTailIsValueExpr` | assign tail to the tilde result var |
+| **C** | value-returning **IIFE**, **structured AST** arm | `emit-control-flow.ts:emitMatchExpr` (~:2320) | none needed — AST nodes | **`_blockTailIsValueExpr`** directly (:2354) | `return <tail>;` inside the IIFE |
+| **D** | value-returning **IIFE**, **raw-string** arm (incl. §18.19 multi-scrutinee via `emitMultiArmBody`) | `emit-control-flow.ts:emitIifeBlockArmBody` (:2090) | **`planBlockArmLift`** | via `planBlockArmLift` | `return <tail>;` inside the IIFE |
+
+**The consequences for a dispatch brief, stated plainly:**
+- **`planBlockArmLift` has exactly TWO call sites** (`emit-logic.ts:4738`, `emit-control-flow.ts:2109`).
+  A grep for it will NOT find routes A and C. Grep `_blockTailIsValueExpr` to enumerate all four.
+- A defect in **segmentation** (`_splitBlockStatements`) can only reach B and D. A defect in the
+  **predicate** reaches all four. Scope from which layer moved.
+- Routes A and C do not segment because they do not have to — that is a design property, not an
+  omission. A string has to be re-derived into statements; an AST body already is a statement list.
+- `_matchArmResultIsBlockBody` (:4637) is the **object-literal fence** for the string routes only:
+  a `{ … }` that the expression parser resolves to an `object` node is a VALUE (`1 :> { x: 1 }`) and
+  stays byte-identical to the pre-#447 emission. Only a genuine `{ statement* expression? }` block
+  reaches the tail lift. Routes A and C never see a string, so they never need it.
+
+### §18.5(b) — a block-arm tail is SEPARATOR-DEPENDENT, and the `}` that closes a block statement IS a boundary (#479, S331)
+
+**The defect.** `_splitBlockStatements` treated only `;` and newline as top-level statement
+separators. Neither JS nor scrml requires a separator after the `}` that closes a block-bodied
+statement, so `{ let a = 0; for (…) { a = 1 } a }` split into **two** segments — `let a = 0` and
+`for (…) { a = 1 } a`. The §18.5 tail `a` was swallowed into a segment headed by `for`,
+`_blockTailIsValueExpr` (correctly) called that a statement, and the arm classified **VOID**. In an
+IIFE value position the emitted function then fell off its end and the arm evaluated to `undefined`
+— **which does not exist in scrml (§42.1.1)**.
+
+**The transferable read: the defect is SEPARATOR-dependent, not position-dependent.** The tail lifted
+correctly the moment a `;` or newline preceded it. That is exactly why the corpus never tripped it
+(corpus authors write the separator) and exactly why the symptom reads like a position bug when it
+is not. **A classifier that reads source text is only as good as its model of that text's
+separators.**
+
+**The fix is gated THREE ways, and the gating is the interesting part** — `_closesBlockStatement`
+(`emit-logic.ts:4550`) returns true only when all three hold:
+1. the segment so far is headed by a block-statement keyword — `_BLOCK_STMT_HEAD_RE` (:4520),
+   `/^(for|while|do|if|switch|try|match|given|each)(?![A-Za-z0-9_$])/`. **This is what keeps
+   `const o = { … }` / `const f = () => { … }` off the path**: those segments are headed by
+   `const`/`let` and already carry a genuine separator.
+2. the text after the brace does not begin with a **continuation** keyword — `_BRACE_CONTINUATION_RE`
+   (:4528), `/^(else|while|catch|finally)(?![A-Za-z0-9_$])/`. Splitting at `} else` / `} while (c)` /
+   `} catch` would tear one statement into two invalid halves.
+3. the text after the brace begins a **statement** — `/^[A-Za-z_$@{"'`0-9]/`, a **WHITELIST, not a
+   blacklist**. An expression that merely continues off the brace (`{ … }.a`, `{ … }[0]`, `{ … })`,
+   `{ … } + 1`) can never be split, because every one of those next-chars is simply absent from the
+   admitted set. **Prefer a whitelist wherever "everything else" is the dangerous side.**
+
+Both new regexes carry the **`(?![A-Za-z0-9_$])` fence OUTSIDE the alternation** — invariant 46,
+applied at authoring time rather than after a second incident.
+
+### §18.5(c) — a nested assignment inside a block arm lost its `opts`, and a match-expr arm needs a PER-ARM `declaredNames` (#479, S331)
+
+**`_emitForStmtWithTilde` (`emit-logic.ts:4186`) dropped the options argument on its fallback path.**
+Both fallbacks (C-style `for` head, reactive `@var` iterable) called `emitForStmt(node)` with `opts`
+**omitted** — losing `declaredNames`, `boundary`, `serverFnNames`, `asyncRouteMap` and the engine
+bindings in one hop. The visible symptom was `declaredNames`: with an absent set, `emitLogicBody`
+opened a FRESH empty one, the `const-decl`/`tilde-decl` reassignment guard could not see the
+enclosing `let a`, and a nested bare assignment `a = 1` emitted as a **shadowing `const a = 1`**
+(and the self-referencing `a = a + 1` as a **TDZ `const a = a + 1`**).
+
+**The fix re-dispatches through `emitLogicNode` with `tildeContext: undefined`** rather than calling
+`emitForStmt` directly. Two gains, and the second is the durable one: (1) `opts` survives; (2) the
+fallback runs the SAME canonical `case "for-stmt"` opts assembly as the non-tilde path, instead of a
+hand-copied argument list that can drift out of step with it. `tildeContext: undefined` is what makes
+the recursion terminate — the `case "for-stmt"` guard routes back into `_emitForStmtWithTilde` only
+when a tilde context is present. **Prefer re-dispatch over a hand-copied argument list; this file
+already carries that hazard elsewhere.**
+
+**`emitMatchExprDecl` now builds a PER-ARM `declaredNames` set** (`emit-logic.ts:4867` —
+`new Set(opts.declaredNames ?? [])`, then `{ ...bodyOpts, declaredNames: armDeclaredNames }`).
+Threading ONE set through every arm let a name declared in arm 1 suppress the decl in arm 2, even
+though the arms are mutually exclusive branches that never both run. The structuredBody path in
+`emit-control-flow.ts` gets this for free because it re-enters `emitLogicBody` per arm.
+
+
+### §18.5(a) — a block-arm tail merely PREFIXED by a keyword is a VALUE (#463, S328)
+
+**The defect.** `emit-logic.ts`'s `_blockTailIsValueExpr` (**:4653** at `616688ea`; the line moved with #479) decides whether a `match` block-arm's
 last segment is the arm's RESULT (lift it to the tilde result var) or a STATEMENT (emit and produce
 nothing). It shipped as
 `/^(const|let|var|return|if|for|while|do|switch|lift|throw|fail|on\b)/` — **the word boundary was
@@ -1283,6 +1450,74 @@ to `E-CODEGEN-INVALID-LOGIC` rather than `E-FN-EQUALS-BODY` — a different pars
 `g-fn-anon-expr-equals-body-emits-invalid-js` (LOW, open).
 
 
+## §44.3 `E-SQL-006` now fires at COMPILE time on EVERY server-fn emit path (#476, S333-peter)
+
+**What changed.** A `.prepare()` on a `?{}` SQL result used to reach the emitted artifact and throw
+at RUNTIME on the async server paths — a green compile that died in production. It is now a
+compile-time diagnostic on every server-fn emit path.
+
+**The mechanism is worth copying, because the bug was a SINK-WIRING bug, not a detection bug.**
+`emit-logic.ts`'s `case "sql"` (`method === "prepare"`) already pushed the error — into
+`(opts as any).preparedStmtErrors`. The **broad `opts.errors` sink is deliberately NOT wired** on
+these paths. So the fix is ONE function-scoped narrow sink, `_sqlPrepareErrors`, threaded into EVERY
+server-body / direct-emit call and **drained at the tail** (`emit-server.ts`), including the §39.3
+`handle()` escape-hatch body. The library path (`emitModuleValueExportLines`) had to have `errors`
+threaded before its sink was drained at all — an EXPORTED async `?{}`-using fn emits there, so
+before the thread it pushed into a sink nobody read. **Deduped at the drain**, because a fn emitted
+on BOTH paths would otherwise report the same `prepare` twice.
+Pinned by five NEG conformance cases (`sql/prepare-{server-fn,cps-return,pattern-c-cell,sse-generator,ws-onserver}-e-sql-006-neg`).
+
+## `<#request>.data is some` in a value / Boolean / class attribute (#484, S332-S333-peter) — and the TWO siblings still open
+
+**The class.** `ast-builder.shouldSkipExprParse` skips a `<#`-leading expression, so a `<#request>`
+ref arrives at codegen as an **escape-hatch raw string**. Whichever lowering receives it then has to
+re-derive the ref, and the ones that did not thread `requestIds` mis-routed it to the **§36
+input-state registry** (`_scrml_input_state_registry`) — which a `<request>` never populates.
+
+**Fixed shape:** `value=` / Boolean-attr (`disabled=`) / `class=` / `class:x=` / `if=` / `show=`.
+The shared substrate is `reparseRequestRefEscapeHatch(exprNode, raw, ctx, requestIds, gate)` in
+`emit-expr.ts`, consumed by `emit-bindings.ts` and `emit-event-wiring.ts`; `collectRequestIds(fileAST)`
+supplies the id set. Note the **gate parameter differs by call site on purpose** —
+`gateToRegisteredRequests: false` for `if=`/`show=` (an input-state `<#field>.value is some` toggle
+MUST reparse or the string fallback mangles its `is some` LHS), `true` for the value/bool/class
+sites.
+
+**TWO SIBLINGS ARE STILL OPEN, and they fail in OPPOSITE directions — do not treat the class as
+closed:**
+
+| Sibling | Position | Failure mode |
+|---|---|---|
+| `g-request-is-some-in-each-loop-attr-misroute` (MED, open) | per-item `<each>`/`<for>` body attribute | **SILENT MISCOMPILE.** `renderTemplateAttrToJs` (`emit-each.ts:1893`) → `lowerEachExpr`/`rewriteIterValueExpr` never thread `requestIds` → `_scrml_input_state_registry.get(id)` is `undefined` → runtime `TypeError` inside the per-item effect. **Compiles clean.** |
+| `g-request-is-some-in-mixed-text-attr-template-misroute` (MED, open) | mixed-text attr template (`title="state: ${<#r>.data is some}"`) | **FAILS LOUD.** `lowerAttrTemplateValue` (`emit-bindings.ts:423`) → the raw-string `rewriteTemplateAttrValue` never builds an ExprNode → the interpolation is left RAW → `E-CODEGEN-INVALID-LOGIC`, no client bundle written. |
+
+**The convergent fix is the `shouldSkipExprParse` substrate, which S312 deliberately did NOT touch
+after a global attempt regressed.** The landed fix is per-callsite reparse on purpose. A brief that
+says "route request refs correctly" without naming the callsite is under-specified.
+
+## Read-side diagnostics inside an `<each>` in a `<match>` arm (#477, §6.1.1, S333-peter)
+
+An each-bearing bare-body `<match>` arm was **BLANKED** (`children: []`) by the ast-builder to avoid
+the S153 `collectEachBlocks` double-emit. That blanking dropped the read-side walk for **every** read
+in such an arm — the nested-`<each>` read AND a direct read that merely shares the arm with an
+`<each>`. `E-STATE-UNDECLARED` and every other read-side ident diagnostic went silent.
+
+**The fix re-parses the arm body LOCALLY in `type-system.ts`** off a raw body + absolute file
+coordinates the ast-builder now stamps on the wrapper (`_reparseEachArmBodyRaw` /
+`_reparseEachArmFileStart` / `_reparseEachArmBaseLine` / `_reparseEachArmBaseCol`). Three properties
+make it safe and each is a reusable rule:
+- **The re-parsed nodes are throwaway** — discarded after the walk, never attached to `fileAST`, so
+  `collectEachBlocks`/codegen are wholly unaffected.
+- **A disjoint id range is claimed** (`_nextReparseIdBase()`), because `buildAST` resets its OWN
+  counter to 0 per call and the throwaway ids would otherwise **clobber the `nodeTypes` memo keys**
+  (`String(node.id)`) of real nodes.
+- **The REAL `filePath` is passed** (no `#match-arm-each` suffix), because a suffixed path breaks
+  `build.js`/`dev.js` editor jump-to-location.
+
+Spans are rebased to file-absolute, and the rebase recurses so a depth-2 read still locates
+correctly. Pinned by `unit/g-nested-each-in-match-arm-diagnostics.test.js` (232L) +
+`conformance/cases/type-state-codes/e-state-undeclared-nested-each-in-match-arm-pos`.
+
+
 ## Business Invariants (language axioms, not app rules)
 - **`if=` on a scrml-defined structural element is admitted on exactly THREE (`<engine>`/`<match>`/`<each>`) and SHALL NOT be generalized to the registry (§17.1.2).**
 - **`if=` gates RENDER, never LIFECYCLE (§17.1.2.1)** — a gated `<engine>`'s cell, `rule=`, `effect=` and timers stay live; only the rendering is withheld. The alternative reading is state-destroying and breaks the §51.0.A singleton invariant.
@@ -1351,7 +1586,7 @@ Diagnostic emission — every pipeline stage emits `{code, message, severity, sp
 A returned function-expression closure (`return function name(){…}`, GITI-038) — owns its own body's scope/type/async analysis independent of its enclosing factory (`ReturnStmtNode.fnExprNode`, see schema.map.md).
 
 ## Tags
-#scrml #map #domain #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth #route-region #§6.7.2.1 #§20.8.8 #pole-c #third-lifecycle-owner #route-leave #route-enter #commit-gate #keep-alive #outlet-resident #region-cleanups #module-init #rehydrator-boundary #machine-retired #e-deprecated-001 #§63.7 #projection-codemod #engine-audit #§51.11 #§51.13 #property-tests #enum-only #§19.4.4.1 #e-error-011 #renders-clause #e-error-005 #corpus-first-migration #provenance-field #§34.0 #named-codes-land-with-impl #§6.7.1a #bare-expression-category #sugar-equivalence #mount-body-expr-node #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #crossmodule-async-markup #s239-catch #pr-405-landed #cps-choke-point-landed #w-if-in-each #each-nested-if-not-reactive #reset-init-thunk-reassignment #§13.2-call-site-await #async-name-provider #decision-sites-3-to-1 #one-provider-three-consumers #u1 #dpa-020 #dpa-023 #can-suppress-never-strand #owning-file-filter #decide-off-emitted-output #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #dangling-ref-class #session-proxy-bind #gh357 #csrf-token-disclosure #§20.5 #§52.15.1 #currentuser-resolver-gate #channel-auth-only #permissive-by-design #collect-structural-decl-names #§6.8 #g-implicit-cell-double-write-clobbers-reset-init #§12.5 #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #bun-welcome-page #stderr-only-for-undefined #session-cookie-wrap #spec-silent-shall #derived-not-stated #region-fence #two-region-classes #lexical-vs-structural #change-the-input-not-the-pattern #join-around-runtime-slot #classify-brace-group #object-shorthand-expansion #binding-pattern-half-repair #proto-shorthand-b31 #engine-dependent #register-fn-name #identifier-shape-guard #zero-width-alternation #object-hasown #prototype-chain-read-closed
+#scrml #map #domain #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth #route-region #§6.7.2.1 #§20.8.8 #pole-c #third-lifecycle-owner #route-leave #route-enter #commit-gate #keep-alive #outlet-resident #region-cleanups #module-init #rehydrator-boundary #machine-retired #e-deprecated-001 #§63.7 #projection-codemod #engine-audit #§51.11 #§51.13 #property-tests #enum-only #§19.4.4.1 #e-error-011 #renders-clause #e-error-005 #corpus-first-migration #provenance-field #§34.0 #named-codes-land-with-impl #§6.7.1a #bare-expression-category #sugar-equivalence #mount-body-expr-node #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #crossmodule-async-markup #s239-catch #pr-405-landed #cps-choke-point-landed #w-if-in-each #each-nested-if-not-reactive #reset-init-thunk-reassignment #§13.2-call-site-await #async-name-provider #decision-sites-3-to-1 #one-provider-three-consumers #u1 #dpa-020 #dpa-023 #can-suppress-never-strand #owning-file-filter #decide-off-emitted-output #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #dangling-ref-class #session-proxy-bind #gh357 #csrf-token-disclosure #§20.5 #§52.15.1 #currentuser-resolver-gate #channel-auth-only #permissive-by-design #collect-structural-decl-names #§6.8 #g-implicit-cell-double-write-clobbers-reset-init #§12.5 #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #bun-welcome-page #stderr-only-for-undefined #session-cookie-wrap #spec-silent-shall #derived-not-stated #region-fence #two-region-classes #lexical-vs-structural #change-the-input-not-the-pattern #join-around-runtime-slot #classify-brace-group #object-shorthand-expansion #binding-pattern-half-repair #proto-shorthand-b31 #engine-dependent #register-fn-name #identifier-shape-guard #zero-width-alternation #object-hasown #prototype-chain-read-closed #§6.6.19 #e-derived-server-only-reach #refuse-not-escalate #per-function-scope #§12.4 #non-function-positions #derived-rhs #scan-for-server-only-binding-refs #one-scanner-two-callers #kind-tool-carve-out #shortest-edit-restores-the-leak #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #separator-dependent #closes-block-statement #whitelist-not-blacklist #brace-continuation #per-arm-declarednames #re-dispatch-not-hand-copied-opts #emit-for-stmt-with-tilde #e-sql-006-compile-time #narrow-sink-wiring #request-ref-escape-hatch #reparse-request-ref #two-siblings-open #silent-vs-loud #each-arm-reparse #throwaway-id-range #nodetypes-memo-clobber #real-filepath-not-suffixed
 
 ## Links
 - [primary.map.md](./primary.map.md)

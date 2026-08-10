@@ -1,22 +1,29 @@
 # build.map.md
 # project: scrml
-# updated: 2026-08-06T23:38:11-06:00  commit: 97576f35
-# ⚠ **STAMP CORRECTION (S328, no re-walk): `97576f35` IS NOT AND WAS NEVER `HEAD`.** It is the tip
-# of `origin/wrap/s326-bryan` (PR #459); main carries only its SQUASH, `b7f89952`, and
-# `git merge-base --is-ancestor 97576f35 HEAD` returns **FALSE**. Read this map's stamp as
-# **`b7f89952`**. **This map was deliberately NOT re-walked at S328** — its surface has zero diff
-# over `97576f35..35d4d32e`, verified per-map below — so its CONTENT is unchanged and honest.
-# True HEAD at the S328 pass: **`35d4d32e`**. See primary.map.md invariant 48.
-# Zero-diff evidence: `git diff 97576f35..35d4d32e -- .github/ scripts/ package.json bunfig.toml`
-# is EMPTY. Every step, trigger, hook and packaging claim below holds unchanged.
-# **SOURCE WALK IS AT `cf1849b2`.** The two later commits are
-# DOCS-ONLY (zero diff under compiler/ scripts/ stdlib/ package.json .github/).
-# NOTE (S325/S326 INCREMENTAL pass): over `a3a34d80` -> `97576f35`. **Packaging, CLI, Docker, git-hooks
-# and every gate STEP are byte-unchanged** (`git diff a3a34d80..HEAD -- package.json scripts/` is
-# EMPTY). **ONE change, and it is a TRIGGER, not a step: `ci.yml` gained `workflow_dispatch: {}` (#454)**
-# — a manual re-fire lever added after a platform outage left five PRs unmergeable with no recovery
-# path. Read the CI section for its TWO measured constraints before reaching for it; the first one
-# (it is PROSPECTIVE, not retroactive) is the kind of thing you discover at the worst moment.
+# updated: 2026-08-09T15:20:00-06:00  commit: 616688ea
+# **PARTIALLY RE-WALKED over `35d4d32e` -> `616688ea`.** Ancestry CHECKED (invariant 48).
+# **`.github/`, `package.json`, `bunfig.toml`, `Dockerfile` and every git hook are ZERO-DIFF this
+# window** — verified `git diff --name-only 35d4d32e..HEAD -- .github/ package.json` is EMPTY. Every
+# CI step, trigger, packaging, CLI and hook claim below is UNCHANGED and re-verified, not re-derived.
+#
+# **WHAT DID MOVE IS `scripts/`, AND ALL THREE CHANGES ARE PROBE-INTEGRITY FIXES — which is itself
+# the load-bearing fact.** `scripts/` is now explicitly inside the review floor's **code-bearing**
+# population, on the reasoning that a probe defect is exactly the class the floor exists to catch
+# (S328 found three in one session). A script that measures the repo is not exempt from being
+# measured.
+#   · `scripts/review-debt.ts` (+119, #481) — a CODE-BEARING carve-out rate + an auto-widening scan.
+#     See the rewritten "PR review-floor tracker" section.
+#   · `scripts/state.ts` (+93, #485) — three ledger-integrity fixes (marker truncation, duplicate-id
+#     double-count, heading-vs-marker drift detection). See the rewritten "Gap-status vocabulary"
+#     section.
+#   · `scripts/s34-census.ts` (+6, #473) — `fileURLToPath` instead of `new URL(...).pathname`,
+#     closing the **Windows-only `ENOENT`** this map set carried as an open defect for four windows.
+#     **The four-window-old "s34-census is broken" note is now RETIRED, not softened.**
+#
+# **None of the three is a CI gate.** They are PA-side instruments. The gate topology below is
+# unchanged: `gate` stays at 12 steps, `advisory-review` stays DISABLED, `cloud-maps` Stage 2 stays
+# DELETED (no scheduled map refresh — a map stamp is exactly as old as the last wrap), and the
+# wide-corpus emit-differential (#428) remains the standing BY-HAND pre-land gate for codegen.
 
 ## Development Commands (root package.json scripts)
 compile — `bun run compiler/src/cli.js compile`
@@ -185,7 +192,7 @@ written rots silently.
   self-host have no name-set assertion (`g-lsp-commands-selfhost-tiers-have-no-failure-name-set-assertion`,
   LOW). **Deliberately NOT in pre-push:** local environments vary far more than CI, and it was
   exactly a local environment difference that made the first recorded baseline wrong.
-- **`scripts/s34-census.ts` — NEW (S310). GATE (`--check-new`), and the §34 oracle otherwise.**
+- **`scripts/s34-census.ts` — NEW (S310). GATE (`--check-new`), and the §34 oracle otherwise. ⚑ ITS WINDOWS-ONLY `ENOENT` IS FIXED AT #473 (S332-peter) — `fileURLToPath(import.meta.url)`, not `new URL(import.meta.url).pathname`. The four-window-old "this tool is broken" note is RETIRED; it runs on every platform now. Re-executed at `616688ea`: `807 rows (§34 19113..19991, derived) · 1887 source files · 880 conformance cases`.**
   `bun scripts/s34-census.ts [--full] [--json]` classifies every catalogued diagnostic into
   STRUCK / PINNED / IMPL-SITES / DECLARED-AHEAD / RUNTIME-SURFACED / FALSE-CLAIM;
   `--check-new --base <ref>` enforces **SPEC §34.0** against a DIFF, never the legacy corpus.
@@ -205,6 +212,50 @@ drains merged-but-unreviewed PRs against `docs/pr-reviews.md`, and is wired into
 — it is bookkeeping for the PA operating loop, **not a CI step**, and does not appear in `ci.yml`.
 First drain (S316) found a real incomplete fix (#391). Standing measurement, per S319: the review
 floor's execution rate over a 3-session window is itself the thing being tracked.
+
+**REWRITTEN AT #481 (S331), and the rewrite is a lesson in what a health metric actually measures.**
+
+**TWO carve-out rates now print, and ONLY THE SECOND IS A HEALTH SIGNAL.** The all-PR rate cannot
+distinguish a docs-heavy stretch from a floor being evaded: a wrap / continuity / gap-filing PR has
+**no code path to review BY CONSTRUCTION**, so its carve-out is the CORRECT classification, not an
+escape. Measured S328: all-PR **57%** while every code-bearing PR in scope had received a full pass;
+code-bearing was **1/28 = 4%**, and the single exception was `scripts/review-debt.ts` itself.
+Re-measured S331: all-PR 50%, code-bearing **0/4**. So the all-PR figure prints as a **volume
+statistic with no alarm**, and the alarm rides the code-bearing rate where the target is ~0%.
+
+**The code-bearing population is a directory WHITELIST, not a doc-extension blacklist:**
+`/^(compiler|stdlib|scripts)\/|^conformance\/cases\//`. The direction is deliberate — **a new docs
+directory should default to "not code"; a new source directory must be added here consciously.**
+`docs/` is excluded even though it holds `docs/changes/**` briefs (a brief has no runtime surface);
+**`scripts/` is INCLUDED because a probe defect is exactly the class this floor exists to catch.**
+A PR whose file list `gh` did not return is reported as a THIRD bucket — **not folded into either
+rate.** An absent file list is not evidence of docs-only.
+
+**The threshold is a COUNT (>= 2), not a percentage, and the reason is measured.** The target is ~0%,
+and a percentage floor scales tolerance with population — at 36 in scope a 20% trigger silently
+permits SEVEN carved code-bearing PRs. **Proven by bite test at S331: five injected carve-outs
+reached 17% and did NOT fire.** Two is the trigger because exactly one standing exception is
+expected and legitimate (`#397`, the script itself, which has no code path a review could probe);
+two is a pattern. **The carved list prints unconditionally regardless of the threshold**, so nothing
+hides below it.
+
+**The truncation guard, and why the naive version was DELETED rather than tuned.** `gh pr list
+--limit N` returns at most N rows, so a full list may have been cut and a cut enumeration reads
+exactly like a complete one (the §8 truncated-probe class). But **the completeness test is NOT "was
+the list full"** — a full list is only a problem if the cut could have removed an IN-SCOPE PR. Once
+the scan has seen a single PR numbered BELOW the floor epoch, the in-scope population is provably
+complete no matter how many rows came back. Written the naive way (`merged.length >= limit`) the
+guard fired at `--limit 300` while the in-scope count had been stable since `--limit 100` — **a
+guard red for reasons no change caused, which is the cry-wolf shape §8 says gets bypassed and then
+deleted.** Caught by proving the bite.
+
+**Detection alone was judged insufficient — it AUTO-WIDENS.** `limit` defaults to **150** (from 40)
+and quadruples up to a `WIDEN_CEILING` of 1000 until the scan provably clears the epoch, printing
+`(scan auto-widened X -> Y …)` when it does. **Root fix, not a louder warning.** And the widening
+happens BEFORE anything is counted: computing `bound` first and widening after would leave every
+figure derived from the pre-widen list while the widen message claimed otherwise — *the exact defect
+this guard exists to prevent, one level up*.
+
 
 ## Wide-corpus emit-differential + dual-goggle syntax gate — `scripts/corpus-emit-differential.ts` + `scripts/corpus-check-goggles.js` (NEW #428) — **NOT a CI gate; the STANDING PRE-LAND GATE for codegen**
 
@@ -452,7 +503,7 @@ PAT (not `GITHUB_TOKEN`) is required because a PR opened by `GITHUB_TOKEN` does 
 `gate` would never fire and auto-merge would wait forever. Fine-grained PATs expire (≤1 yr) —
 `MAPS_PAT` must be renewed or the bot goes dark.
 
-## Gap-status vocabulary — `scripts/state.ts` now THROWS on an unknown status (CHANGED S299)
+## Gap-status vocabulary + LEDGER INTEGRITY — `scripts/state.ts` (CHANGED S299; THREE more integrity fixes #485, S334)
 
 `scripts/state.ts` parses `<!-- @gap id=… sev=… status=… -->` markers out of `docs/known-gaps.md`
 to generate the §0 counts rollup. It runs in `cloud-maps` **Stage 1** and via `bun scripts/state.ts
@@ -502,6 +553,41 @@ because the distinction is real to a human reading the entry. Only the COUNTING 
 decided in the script. (Design rationale: a closed list that silently drops what it does not
 recognise fails the `pa-base` §8 gate test — a gate whose blind spot is invisible is not a gate.)
 
+
+**#485 (S334) added THREE ledger-integrity fixes, and each one is a distinct silent-omission class.
+Together they are the argument for treating a probe as code-bearing.**
+
+**(1) The marker parser TRUNCATED on an internal `>`.** The `@gap` attribute bag was matched with
+`[^>]*?`, so a marker whose `prov=`/`locus=` value contains a literal `>` — a code literal like
+`<msg> = ""`, or a `->` arrow — was cut at the internal `>` and **silently dropped from the count**.
+Witnessed on a real marker on main. It is now `[\s\S]*?`; non-greedy still stops at the first `-->`,
+so a well-formed marker is unaffected. **A character class that excludes a delimiter is a truncation
+bug waiting for prose that contains it.**
+
+**(2) Duplicate `@gap` ids DOUBLE-COUNTED.** The counts are per-ENTRY, but an entry may carry two
+`@gap` markers sharing one id, and marker-granular counting counted both. `gapCountsFromTokens` now
+dedupes to one token per id (first wins). **A same-id pair that fully AGREES collapses silently; a
+pair with DIFFERING sev/status THROWS LOUD** — the count cannot resolve which is the entry's real
+state, so guessing would be worse than failing. Same posture as this file's other silent-omission
+guards.
+
+**(3) Heading-vs-marker status drift is now DETECTED — and it is WARN-only ON PURPOSE.** Each entry
+carries both a machine `@gap` marker and a human `### ` heading whose trailing `…; <SEV>; <status>`
+span can drift from it (a fix flips the marker to `resolved` and leaves the heading reading `open`,
+or the reverse). `state.ts` derives counts from the MARKER, so the CI gate passes while **the line a
+human greps is wrong.** `headingMarkerDrift()` reports the disagreement; `open`/`deferred`/`nominal`
+collapse to "open-ish" and only open-ish-vs-`resolved` counts, and only headings with a parseable
+structured status tail are checked, so free-text headings never false-fire. **It never gates**:
+pre-existing drift exists, a hard gate would block CI, and this is doc hygiene rather than a
+currency guarantee. **At `616688ea` it reports 13 DRIFT** — up from the 10 the prior map generation
+recorded as a Key Fact. See non-compliance.report.md.
+
+**Also WARN-only in the same `--check` output, and worth knowing at boot:** `maps: N commits behind
+HEAD (watermark <stamp>, HEAD <head>)`. **It reads the watermark off LINE 3 of `primary.map.md` and
+does `git rev-list --count <watermark>..HEAD` with NO ancestry check** (invariant 48) — against an
+off-main stamp it prints a number that means nothing and prints it as a staleness figure. Nothing
+fails either way. At the start of this pass it read **19 commits behind**.
+
 ## Git Hooks (source-controlled, `.git/hooks/pre-commit` + `pre-push`; install via `scripts/git-hooks/install.sh`)
 pre-commit — runs `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance **compiler/tests/*.test.js** --bail` (~2min; the last path is NEW this window — see "Gate topology" above; still excludes browser/e2e/self-host/lsp/commands); warns (non-blocking) on direct commits to `main`.
 pre-push — **SCOPE AND TRIGGER BOTH CHANGED THIS WINDOW.**
@@ -519,7 +605,7 @@ pre-push — **SCOPE AND TRIGGER BOTH CHANGED THIS WINDOW.**
 None. No Dockerfile / docker-compose in this repo — see infra.map.md.
 
 ## Tags
-#scrml #map #build #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist #gate-topology #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #failure-name-sets #cry-wolf #new-ref-push-skip #set-e-trap #pre-push-scope #b7dda491 #browser-baseline #failure-name-set #bidirectional-baseline #s34-census #§34.0 #row-provenance #fetch-depth-0 #diff-scoped-gate #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #no-scheduled-map-refresh #advisory-review-disabled #skipped-step-behind-red-step #gap-attribute-bag #locus-attr #partial-impl #proven-gate #import-meta-main #review-debt-script #pr-reviews-md #puppeteer-skip-download #windows-ci-flake #boot-step-0.6 #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #script-vs-module-goggle #node-check-blind-to-tla #bun-vm-script-blind #classic-script-no-type-module #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #453-exclusions-printed #exit-code-2-invalid-comparison #compile-failure-is-data #u1-corpus-emit-retired #import-meta-classic-script #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #s34-census-base-fallback #weakens-no-gate #root-vs-position
+#scrml #map #build #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist #gate-topology #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #failure-name-sets #cry-wolf #new-ref-push-skip #set-e-trap #pre-push-scope #b7dda491 #browser-baseline #failure-name-set #bidirectional-baseline #s34-census #§34.0 #row-provenance #fetch-depth-0 #diff-scoped-gate #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #no-scheduled-map-refresh #advisory-review-disabled #skipped-step-behind-red-step #gap-attribute-bag #locus-attr #partial-impl #proven-gate #import-meta-main #review-debt-script #pr-reviews-md #puppeteer-skip-download #windows-ci-flake #boot-step-0.6 #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #script-vs-module-goggle #node-check-blind-to-tla #bun-vm-script-blind #classic-script-no-type-module #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #453-exclusions-printed #exit-code-2-invalid-comparison #compile-failure-is-data #u1-corpus-emit-retired #import-meta-classic-script #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #s34-census-base-fallback #weakens-no-gate #root-vs-position #review-debt-code-bearing #two-rates-one-signal #volume-statistic-not-alarm #directory-whitelist-not-blacklist #scripts-is-code-bearing #count-threshold-not-percentage #bite-test #widen-before-you-count #auto-widen #widen-ceiling #epoch-clearing-not-list-full #cry-wolf-guard-deleted-not-tuned #state-ts-ledger-integrity #marker-truncation-internal-gt #duplicate-gap-id-double-count #throw-on-conflicting-status #heading-marker-drift-13 #warn-only-not-gated #maps-watermark-no-ancestry-check #s34-census-windows-fix-landed #fileurltopath
 
 ## Links
 - [primary.map.md](./primary.map.md)

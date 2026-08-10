@@ -1,6 +1,9 @@
 # infra.map.md
 # project: scrml
 # updated: 2026-08-06T23:38:11-06:00  commit: 97576f35
+# ⚑ CURRENCY RE-VERIFIED AT `616688ea` (S331 pass), NOT RE-WALKED. `git diff --name-only
+# 35d4d32e..616688ea -- .github/` is **EMPTY** — zero workflow, trigger, step or secret diff.
+# `advisory-review` stays DISABLED; `cloud-maps` Stage 2 stays DELETED (no scheduled map refresh).
 # ⚠ **STAMP CORRECTION (S328, no re-walk): `97576f35` IS NOT AND WAS NEVER `HEAD`.** It is the tip
 # of `origin/wrap/s326-bryan` (PR #459); main carries only its SQUASH, `b7f89952`, and
 # `git merge-base --is-ancestor 97576f35 HEAD` returns **FALSE**. Read this map's stamp as
