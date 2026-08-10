@@ -1,21 +1,27 @@
 # test.map.md
 # project: scrml
-# updated: 2026-08-07T15:38:47-06:00  commit: 35d4d32e
-# **SOURCE WALK IS AT `6f176c0d`; the stamp is `35d4d32e`, the true HEAD.** `35d4d32e` (#467,
-# the S328-bryan wrap continuity) landed DURING this pass and is **DOCS-ONLY** — verified
-# `git diff --name-only 6f176c0d..35d4d32e -- compiler/ scripts/ conformance/ .github/ stdlib/
-# package.json` is EMPTY. Every source claim below holds at the stamp. **Unlike the PRIOR
-# stamp, this one IS on main** — `git merge-base --is-ancestor 35d4d32e HEAD` passes
-# (invariant 48).
-# **THE PRIOR STAMP `97576f35` WAS NOT ON MAIN** — tip of `origin/wrap/s326-bryan` (#459),
-# squash-merged as `b7f89952`. SIX PRs landed since, not four (#460 SPEC, #461 docs, then #463-#466).
-# NOTE (S328 INCREMENTAL pass): over `97576f35` -> `6f176c0d`. **Net +1 test file, and the NET HIDES
-# THE INTERESTING PART: one unit test was DELETED.** `unit/show-false-ssr-hidden-no-fouc.test.js`
-# (197L) went away WITH its code when #464 reverted #450 — **a test whose subject is reverted is
-# deleted, not skipped and not left asserting a contract the compiler no longer has.** What replaced
-# it points the OTHER way: four conformance cases (`control-flow/ctrl-017..ctrl-020`) that assert the
-# hide is ABSENT. Conformance corpus **857 -> 865** (+8). Counts re-derived by `git ls-files` +
-# `docs/FACTS.md` + a `bun scripts/s34-census.ts` re-run at this HEAD.
+# updated: 2026-08-09T15:20:00-06:00  commit: 616688ea
+# **INCREMENTAL over `35d4d32e` -> `616688ea` (19 commits, TWO operators).** Ancestry CHECKED
+# (invariant 48). `616688ea` is one DOCS-ONLY commit ahead of `origin/main` (`8863d457`).
+# **+6 test files, ZERO deleted — 1,328 -> 1,334.** Conformance corpus **865 -> 880 (+15)**.
+# Both re-derived by `git ls-files`, cross-checked against `docs/FACTS.md` and a
+# `bun scripts/s34-census.ts` re-run at this HEAD (`880 conformance cases`, three sources agreeing).
+#
+# **THE TESTING LESSON OF THIS WINDOW IS THE `-neg` CASE, and it is worth more than the counts.**
+# Of the 15 new conformance cases, **SEVEN are negative** — five `sql/prepare-*-e-sql-006-neg`
+# (a `.prepare()` on each server-fn emit path that must NOT reach the artifact), plus
+# `derived/e-derived-server-only-reach-neg` and `-fn-path`. A `-neg` case for a NEWLY-REJECTING
+# diagnostic is not decoration: it is the only thing that pins the boundary of the rejection, and
+# for `E-DERIVED-SERVER-ONLY-REACH` the `-fn-path` case is **the diagnostic's own prescribed fix,
+# asserted to compile clean.** A newly-rejecting code without a case proving the escape hatch works
+# has shipped a dead end.
+#
+# **AND THE COUNTER-LESSON, also this window: a conformance case can MENTION a code in its rationale
+# prose and assert nothing.** `expected.json`'s `codes` / `notCodes` are the assertion; the
+# `rationale` field is not. The three `derived/` cases each carry BOTH — `codes:
+# ["E-DERIVED-SERVER-ONLY-REACH"]` AND `notCodes: ["E-ROUTE-005","E-ROUTE-002"]`, the latter
+# discriminating this code from the two it is most likely to be confused with. **Read the
+# `expected.json` before recording a code as covered.**
 
 ## Test Framework
 Runner: `bun:test` (Bun's built-in test runner, no separate package dep)
@@ -27,27 +33,39 @@ Browser DOM: happy-dom / @happy-dom/global-registrator (compiler/tests/browser/)
 Browser tier ASSERTION: `bun scripts/browser-baseline.ts --check` (**not** `bun test compiler/tests/browser`)
 E2E: Playwright (`@playwright/test`), separate config at e2e/playwright.config.ts, NOT part of `bun test`
 
-## Test Categories (compiler/tests/, **1328** `*.test.js` total)
+## Test Categories (compiler/tests/, **1334** `*.test.js` total)
 
-Fresh recursive `git ls-files` recount at `6f176c0d`, all 9 categories individually re-verified;
-agrees with `docs/FACTS.md` (`test files | 1,328`), **which is the citable authority — do not
-hardcode a competing number.** Net **+1** this pass, decomposing as **unit +1/-1** and **browser +1**
-(conformance / integration / lsp / commands / self-host / e2e-render-map / top-level all unchanged).
-**Unit is flat only by coincidence** — read the churn row below before concluding nothing moved.
+Fresh recursive `git ls-files` recount at `616688ea`, all 9 categories individually re-verified;
+agrees with `docs/FACTS.md` (`test files | 1,334`), **which is the citable authority — do not
+hardcode a competing number.** Net **+6** this pass, decomposing as **unit +5** and **integration +1**
+(conformance / browser / lsp / commands / self-host / e2e-render-map / top-level all unchanged).
+**ZERO deletions this window** — unlike the prior one, where a test was deleted with its reverted
+subject. The category sum re-checks: 879+193+131+92+11+8+4+2 = 1320, +14 top-level = **1334**.
 
 | Category | Glob | Count | **Which gate runs it** |
 |---|---|---|---|
-| Unit | `compiler/tests/unit/**/*.test.js` | **874** (+1/-1) | `gate` (blocking) + pre-commit + pre-push |
-| Integration | `compiler/tests/integration/**/*.test.js` | 192 | `tracking` (non-blocking) + pre-commit + pre-push |
-| Conformance | `compiler/tests/conformance/**/*.test.js` | 131 (unchanged for THREE windows) | `gate` (blocking) + pre-commit + pre-push |
-| Browser | `compiler/tests/browser/**/*.test.js` | **92** | `gate` (BLOCKING) + `tracking` — via the NAME-SET check |
+| Unit | `compiler/tests/unit/**/*.test.js` | **879** (+5) | `gate` (blocking) + pre-commit + pre-push |
+| Integration | `compiler/tests/integration/**/*.test.js` | **193** (+1) | `tracking` (non-blocking) + pre-commit + pre-push |
+| Conformance | `compiler/tests/conformance/**/*.test.js` | 131 (unchanged for FOUR windows) | `gate` (blocking) + pre-commit + pre-push |
+| Browser | `compiler/tests/browser/**/*.test.js` | 92 (unchanged) | `gate` (BLOCKING) + `tracking` — via the NAME-SET check |
 | LSP | `compiler/tests/lsp/**/*.test.js` | 11 | `tracking` only (non-blocking) |
 | Commands | `compiler/tests/commands/**/*.test.js` | 8 | `tracking` only (non-blocking) |
 | Self-host | `compiler/tests/self-host/**/*.test.js` | 4 | `tracking` only (non-blocking) |
 | e2e-render-map | `compiler/tests/e2e-render-map/` | 2 | `tracking` only (non-blocking) |
 | Parser-conformance + native-* | top-level `compiler/tests/*.test.js` | 14 | `gate` (blocking) + pre-commit (since S302) |
 
-**Changed this pass — 2 added, 1 DELETED:**
+**Changed this pass — 6 added, ZERO deleted:**
+
+| File | Tier | Lines | What it pins |
+|---|---|---|---|
+| `unit/route-inference-derived-server-only-reach.test.js` | unit | **379** | **#486 §6.6.19** — `E-DERIVED-SERVER-ONLY-REACH`. The largest of the six and the one to read as a model for a **newly-rejecting** code: it pins the positive fire, the shadowing negative (a local binding of the same name does NOT fire), the string-literal negative (a name inside a `"…"` is not a reference, §12.4), the `kind="tool"` carve-out, the bare-REFERENCE form (`[@x].map(hashPassword)`, not just a call), depth (lambda body / nested fn / escape-hatch raw text), and **the prescribed fix compiling clean**. |
+| `unit/match-block-arm-tail-after-block-statement.test.js` | unit | **318** | **#479 §18.5** — a block-arm tail after a `}`-terminated block statement is a VALUE. `{ let a = 0; for (…) { a = 1 } a }` used to split into TWO segments and classify VOID, so the arm evaluated to `undefined` — **a value that does not exist in scrml (§42.1.1)**, with no diagnostic. **It also pins the three gates that keep the new `}` boundary from over-firing**: an object-literal / arrow initializer (`const o = { … }`) is NOT split; `} else` / `} while` / `} catch` / `} finally` are NOT split; and a brace-continuation expression (`{ … }.a`, `{ … }[0]`, `{ … } + 1`) is NOT split. |
+| `unit/g-nested-each-in-match-arm-diagnostics.test.js` | unit | **232** | **#477 §6.1.1** — read-side diagnostics fire inside an `<each>` in a `<match>` arm. The arm body was BLANKED by the ast-builder (S153 double-emit avoidance), silencing `E-STATE-UNDECLARED` for the nested read **and** for a direct read merely sharing the arm. Pins the span rebase to file-absolute coordinates at depth 2. |
+| `unit/request-ref-is-some-value-bool-class-attr-misroute.test.js` | unit | **200** | **#484** — `<#request>.data is some` in `value=` / a Boolean attr / `class=` / `class:x=` routes to `_scrml_request_<id>`, not the §36 input-state registry. |
+| `integration/g-server-fn-reindent-template-literal.test.js` | integration | **102** | **#474 §48** — the server-fn body reindent is template-literal-aware. A blind `code.split("\n").map(l => indent + l)` corrupted the COOKED VALUE of a multi-line template literal (the added indent becomes data, not layout). |
+| `unit/state-gap-integrity.test.js` | unit | **92** | **#485** — `scripts/state.ts`'s own ledger integrity: the `@gap` attribute bag matches `[\s\S]*?` so a marker whose `prov=`/`locus=` contains a literal `>` is not TRUNCATED and silently dropped from the count; duplicate `@gap` ids are deduped for counting and **THROW LOUD on conflicting sev/status**; and heading-vs-marker status drift is DETECTED (WARN-only). **A probe's own defects are in scope for the review floor — this is the test that says so.** |
+
+**Prior pass — 2 added, 1 DELETED:**
 
 | File | Tier | Lines | What it pins |
 |---|---|---|---|
@@ -83,9 +101,25 @@ Carried from the prior pass, still true: `unit/error-handler-const-bind-r25-bug-
 `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` firing described in error.map.md. Every subject assertion is
 untouched, and any OTHER new diagnostic still fails them.
 
-The top-level `conformance/` corpus moved **+8** this window — **865** cases (`docs/FACTS.md` is the
+The top-level `conformance/` corpus moved **+15** this window — **880** cases (`docs/FACTS.md` is the
 authority; independently re-derived here as `git ls-files 'conformance/cases/**/case.scrml' | wc -l`
-= 865, and the `s34-census.ts` re-run agrees). **The eight are not eight of a kind — read the split:**
+= 880, and the `s34-census.ts` re-run agrees). **54 category directories, unchanged — `derived/` is
+NOT new** (it dates to the S231 D3 suite, `e86a76d0`; only three cases were added into it).
+**The fifteen split as SEVEN negative, five positive-fire, three fidelity:**
+
+| case | count | what it is |
+|---|---|---|
+| `sql/prepare-{server-fn,cps-return,pattern-c-cell,sse-generator,ws-onserver}-e-sql-006-neg` | 5 | **the #476 emit-path matrix, all NEGATIVE.** One per server-fn emit path, each asserting the `.prepare()` does NOT reach the artifact. **The matrix IS the fix**: the bug was a sink drained on one path and not the others, so a single case would have proved nothing. |
+| `derived/e-derived-server-only-reach-pos` | 1 | **the #486 positive fire** — `codes: ["E-DERIVED-SERVER-ONLY-REACH"]` **plus `notCodes: ["E-ROUTE-005","E-ROUTE-002"]`**, discriminating it from the two codes a reader would most likely confuse it with (E-ROUTE-005 is the unplaceable single-FUNCTION shape and additionally needs a client-only DOM global). |
+| `derived/e-derived-server-only-reach-neg` | 1 | the boundary — a derived RHS that does NOT reach an escalation server-only binding stays clean. |
+| `derived/e-derived-server-only-reach-fn-path` | 1 | **the diagnostic's OWN prescribed fix, asserted to compile clean.** Move the call into a `function`, write the result to a plain cell. **A newly-rejecting code without a case proving its escape hatch works has shipped a dead end.** |
+| `match-block/block-arm-tail-after-block-statement` | 1 | #479 — the `}`-as-separator fix (see the unit test row above). |
+| `match-block/block-arm-nested-assignment-fidelity` | 1 | #479 — a nested assignment inside a block arm keeps its `opts`; no shadowing `const`, no TDZ self-reference. |
+| `match-block/value-form-block-arm-all-paths` · `value-form-block-arm-derived-reactive` · `member-assign-tail-voids-all-paths` | 3 | **#469/#470 — the ALL-PATHS trio, and the reason the §18.5 four-route table exists.** `member-assign-tail-voids-all-paths` is the one to read: a member/index-assignment tail formerly LIFTED on the raw path and VOIDED on the structured path — **two routes disagreeing about the same source** — and the case asserts all paths now agree on void. |
+| `lifecycle/request-data-is-some-value-bool-class-attr-rt` | 1 | #484, an **`-rt` case, so it EXECUTES** — the mis-route was a runtime `TypeError`, not a compile error, so a compile-only case could not have caught it. |
+| `type-state-codes/e-state-undeclared-nested-each-in-match-arm-pos` | 1 | #477 — `E-STATE-UNDECLARED` fires inside an `<each>` in a `<match>` arm. |
+
+**Prior window's eight, retained — the split that made the "not eight of a kind" point:**
 
 | case | count | what it is |
 |---|---|---|
@@ -276,7 +310,7 @@ allowlist. **Adding a FIELD to a structural AST node grows this if the native mi
 samples/compilation-tests/ — 12 fixture dirs compiled by `scripts/compile-test-samples.sh`
 (`bun run pretest`) before the suite; dist/ is gitignored. **These go STALE** — a browser-test triage
 starts by recompiling them, before comparing anything.
-conformance/cases/ + conformance/adapters/ — the D3 corpus (**865 cases** at `35d4d32e`; re-derived, `docs/FACTS.md` is the authority) + per-impl adapters.
+conformance/cases/ + conformance/adapters/ — the D3 corpus (**880 cases** at `616688ea`, 54 category dirs; re-derived, `docs/FACTS.md` is the authority) + per-impl adapters.
 docs/tutorial-snippets/ + docs/readme-snippets/ + docs/website/ — the public snippet corpus; REAL
 programs under a compile gate.
 
@@ -364,7 +398,7 @@ inherited the same population). `pa-base v2.13 §8` names it THE TRUNCATED PROBE
 tool is marked `HARD REQ n` at its site so a future editor can see what they would be removing.
 
 ## Tags
-#scrml #map #test #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr-REVERTED #ctrl-017-020-revert-guard #counter-gate-case #test-deleted-with-reverted-code #keyword-prefixed-tail #rcdata-restricted-parent #865-conformance
+#scrml #map #test #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr-REVERTED #ctrl-017-020-revert-guard #counter-gate-case #test-deleted-with-reverted-code #keyword-prefixed-tail #rcdata-restricted-parent #880-conformance #1334-tests #neg-case-is-the-assertion #escape-hatch-case #prescribed-fix-compiles-clean #emit-path-matrix #e-sql-006-neg-matrix #all-paths-trio #member-assign-tail-voids #two-routes-disagreeing #§18.5-four-routes #expected-json-is-the-assertion #rationale-prose-is-not #derived-dir-not-new #probe-defects-in-scope #state-gap-integrity
 
 ## Links
 - [primary.map.md](./primary.map.md)

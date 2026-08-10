@@ -1,6 +1,13 @@
 # schema.map.md
 # project: scrml
 # updated: 2026-07-31T03:18:23Z  commit: fe14c9b2
+# ⚑ CURRENCY RE-VERIFIED AT `616688ea` (S331 pass), NOT RE-WALKED — and the stamp stays honestly older.
+# `git diff --name-only 35d4d32e..616688ea -- compiler/src/types` is **EMPTY** (EIGHT windows now).
+# The window's 19 changed source files added **no declared type**: `E-DERIVED-SERVER-ONLY-REACH`'s
+# machinery is module-local functions + two `Map<string,string>` returns in `route-inference.ts`,
+# and the §18.5 work is module-local `RegExp`s + a `{ leading: string[]; tail: string | null }`
+# return shape on `planBlockArmLift` (`emit-logic.ts:4715`) — a codegen-internal plan object, not
+# a `FileAST` or `ast.ts` type. See domain.map.md / dependencies.map.md, not this file.
 # NOTE (S326 pass): **the AST half is DELIBERATELY still at `fe14c9b2` and that is an honest stamp, not
 # ⚠ **STAMP CORRECTION (S328, no re-walk): `97576f35` is a PR-BRANCH TIP** (`origin/wrap/s326-bryan`,
 # #459), squash-merged as `b7f89952`; it is NOT an ancestor of HEAD. Read it as `b7f89952`. True HEAD
