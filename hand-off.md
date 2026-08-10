@@ -37,7 +37,7 @@ The S335 short-boot remedy, Peter-confirmed as this session's first pickup. Both
 
 ## 🧷 STATE / DEFERRED
 
-- **flogenceP branch** `feat/boot-command-project-helper-wiring` (boot + wrap wiring, 2 commits) — pushed to pjoliver11/flogenceP, **not merged in the fork** (Peter's).
+- **flogenceP wiring** — MERGED to pjoliver11/flogenceP `main` (`96f7ade`, S336 post-wrap; branch deleted, coherence 0/0). The durable boot/wrap source is on the fork's main line now. ⚠ Peter's INSTALLED `~/.claude/commands/{boot,wrap}.md` were hand-edited to match (operative) — a flobase reinstall regenerates them from flogenceP main (which now carries the wiring), so no regression risk. Canonical shared-contract amendment still ROUTED-not-ratified (bryan's).
 - **Maps (6c):** one new script (`scripts/boot.ts`); no compiler-code modules changed. project-mapper refresh still owed from S334/S335 (watermark behind) — LOW urgency, deferred.
 - **Worktrees (6b):** created none this session (Agent-tool satellites). Retained (not mine): `agent-a0742fe4795045e91`, `agent-a4e6b5f2562ae9eaa`, `onmount-c` (feat/onmount-c-build), `scrml-pinned` (leave).
 - **Base64→false-E-FN-003 gap** (`g-server-fn-template-literal-base64-eq-false-e-fn-003`, MED) — still marked re-verify-owed (carried from S334 census; not re-reproduced).
