@@ -107,7 +107,7 @@ export interface CompileContext {
    * module's EXPORT names that are READ in the CLIENT code of some OTHER file in
    * the compile unit that imports them directly (`import { X } from './M.scrml'`
    * + a client read of `X`). Computed ONCE by `runCG` via
-   * `collectClientReferencedIdentsForAST` (the same confidentiality-safe prune the
+   * `collectClientReadIdents` (the same confidentiality-safe prune the
    * per-file #263 gate uses — a server-only import never enters the set), so both
    * the EXPORTER (make `X` client-reachable → emit + register it) and the IMPORTER
    * (keep `X` in the `_scrml_modules` destructure even when NR mis-tags the

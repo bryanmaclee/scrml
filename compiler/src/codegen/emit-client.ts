@@ -13,6 +13,10 @@ import { rewriteCodeSegments, findObjectShorthandRegions } from "./code-segments
 import { scanClientEgress } from "./egress-field-scan.ts";
 import { emitFunctions } from "./emit-functions.ts";
 import { getNodes, isServerOnlyNode } from "./collect.ts";
+// #263/#358 — the confidentiality-safe client-read identifier collector. It reads
+// the SHARED position table (`../expr-positions.ts`) that `dependency-graph.ts`
+// also reads; the hand-rolled parallel walker this file used to carry is deleted.
+import { collectClientReadIdents } from "./client-read-seed.ts";
 import { emitLogicNode } from "./emit-logic.ts";
 import { emitBindings } from "./emit-bindings.ts";
 import { emitReactiveWiring, fileHasOutlet } from "./emit-reactive-wiring.ts";
@@ -244,18 +248,23 @@ function buildModuleRegistryFooter(
 // LEAKED into `.client.js`. Over-emitting into the SERVER bundle is harmless
 // dead code; over-emitting into the CLIENT bundle crosses the trust boundary.
 //
-// THE FIX (this pass) — an AST-PRECISE reachability gate. An `export
-// const`/`export let` is client-reachable IFF a CLIENT-EMITTED USER node
-// references the identifier as a REAL identifier node. `collectClientReferencedIdents`
-// builds that reference set from the ASTs of exactly the code that crosses to
-// the client — client fn bodies + client-side top-level reactive wiring (cell
-// inits, `on mount` effects, markup interpolations) — via
-// `forEachIdentInExprNode`. Because it walks real IdentExpr nodes, a param name
-// in a generated fetch stub, a string literal, or a comment can NEVER match by
-// construction. Server-fn bodies (they lower to stubs) and `isServerOnlyNode`
-// statements (SQL/env/server-meta) are PRUNED, mirroring the emitter's own
-// client/server split — so a server-only const's identifier, which appears only
-// inside those pruned subtrees, never enters the set.
+// THE FIX — an AST-PRECISE reachability gate. An `export const`/`export let` is
+// client-reachable IFF a CLIENT-EMITTED USER node references the identifier as a
+// REAL identifier node. `collectClientReadIdents` (`./client-read-seed.ts`) builds
+// that reference set by walking the positions declared in the ONE shared table
+// (`../expr-positions.ts`) and parsing every raw-source position rather than
+// regexing it. Because only real ident nodes are collected, a param name in a
+// generated fetch stub, a string literal, or a comment can NEVER match by
+// construction. Server-fn bodies (they lower to stubs), `<x server>` cells and
+// `isServerOnlyNode` statements (SQL/env/server-meta) are PRUNED, mirroring the
+// emitter's own client/server split — so a server-only const's identifier, which
+// appears only inside those pruned subtrees, never enters the set.
+//
+// THE POSITION TABLE IS SHARED ON PURPOSE. The collector used to carry its own
+// hand-rolled copy of the markup/engine/match traversal `dependency-graph.ts`
+// already performed. Two walkers over the same `any`-typed AST drift with nothing
+// to catch it, and this one's missing-position set GREW across three review
+// rounds. That copy is deleted; both passes now read `../expr-positions.ts`.
 //
 // FAIL-CLOSED throughout: any shape whose client-reachability cannot be computed
 // precisely (unparseable initializer, type annotation, multi-declarator,
@@ -263,245 +272,6 @@ function buildModuleRegistryFooter(
 // ident, const cycle) is SKIPPED — leaving the original ReferenceError. A
 // correctness bug (under-emission) is strictly less bad than a confidentiality
 // leak; under-emission is the safe direction here.
-
-/**
- * Is this `function-decl` node a SERVER-boundary fn (its body lowers to a client
- * fetch STUB, so its identifier references do NOT cross to the client)?
- *
- * Uses BOTH available signals and ORs them (fail-closed toward "server" — a fn
- * we wrongly treat as server merely under-emits a const it closes over):
- *   - the AST `isServer` flag (set by the fn-boundary classifier), and
- *   - the routeMap boundary (the emitter's own source of truth for what lowers
- *     to a stub — covers CPS-split / channel-handler shapes too).
- */
-function _fnNodeIsServerBoundary(node: any, filePath: string, routeMap: any): boolean {
-  if (node?.isServer === true) return true;
-  const start = node?.span?.start;
-  if (typeof start === "number" && routeMap?.functions?.get) {
-    const route = routeMap.functions.get(`${filePath}::${start}`);
-    if (route && route.boundary === "server") return true;
-  }
-  return false;
-}
-
-/**
- * Collect the set of identifier NAMES referenced by CLIENT-EMITTED USER code in
- * this file — the confidentiality-safe reachability seed for GH #263.
- *
- * Walks the file AST and, for every node, collects identifiers from its
- * ExprNode-valued fields via `forEachIdentInExprNode` (which visits ONLY real
- * IdentExpr nodes — never string-literal contents, comments, or member-property
- * keys). Two subtrees are PRUNED so server-confidential values can never enter
- * the set:
- *   - SERVER-boundary `function-decl` bodies (they lower to fetch stubs), and
- *   - `isServerOnlyNode` statements (`?{}` SQL, env reads, server-context meta).
- * `export-decl` candidate nodes are also skipped here — a candidate's own
- * initializer references are resolved separately by the transitive closure, and
- * seeding from them would let a NON-reachable const drag a server-only ident in.
- *
- * NOTE (fail-closed gap): `forEachIdentInExprNode` does not descend into lambda
- * bodies, so an export const referenced ONLY inside a `() => …` lambda in a
- * client fn body is not seen here and will under-emit (ReferenceError, not a
- * leak). Acceptable per the mandate's fail-closed direction.
- */
-function collectClientReferencedIdents(ctx: CompileContext): Set<string> {
-  const fileAST = ctx.fileAST as any;
-  const filePath: string = fileAST?.filePath ?? ctx.filePath ?? "";
-  return collectClientReferencedIdentsForAST(fileAST, filePath, ctx.routeMap);
-}
-
-/**
- * #358 — the AST-level core of `collectClientReferencedIdents`, decoupled from
- * `CompileContext` so `runCG` can compute the CLIENT-referenced identifier set
- * for EVERY file in the compile unit up front (the cross-file reachability seed
- * for a directly-imported export const). Confidentiality contract is identical
- * to the ctx wrapper: server-boundary fn bodies + `isServerOnlyNode` statements
- * are pruned, so a server-only value's identifier never enters the returned set.
- *
- * `opts.deep` (cross-file seed ONLY — never the same-file #263 gate, which stays
- * byte-identical) additionally:
- *   - descends into `() => …` lambda bodies (`forEachIdentInExprNode` treats a
- *     lambda as a scope boundary and stops — the documented fail-closed gap), and
- *   - parses a `_onMountEffect` bare-expr's RAW multi-statement body string (which
- *     carries NO `exprNode` because `mountBodyExprNode` returns undefined for a
- *     >1-statement body) into per-statement ExprNodes.
- * Both are needed because the IMPORTER commonly reads a directly-imported const
- * inside `on mount { … }`. The extra reach stays within CLIENT code (the prunes
- * run first), so it cannot pull a server-only identifier across.
- *
- * `opts.boundOut` (deep cross-file seed ONLY) is populated with every client-side
- * BINDING name (each loop vars, lambda params, local `let`/`const`/`fn` decls +
- * params). The precompute requires an import read to be UNSHADOWED by any such
- * binding before cross-marking it — closing the scope-blindness leak (a
- * server-only export whose NAME collides with a client loop var / param must NOT
- * be pulled to the client). See the guard comment at the binding-collection site.
- */
-export function collectClientReferencedIdentsForAST(
-  fileAST: any,
-  filePath: string,
-  routeMap: any,
-  opts?: { deep?: boolean; boundOut?: Set<string> },
-): Set<string> {
-  const refs = new Set<string>();
-  const deep = opts?.deep === true;
-  const boundOut = opts?.boundOut ?? null;
-
-  const addName = (n: unknown): void => {
-    if (typeof n === "string" && n && !n.startsWith("@")) refs.add(n);
-  };
-
-  // #358 — collect every client-side binding name reachable through a binding
-  // target field (a bare string loop-var / decl name, a `{name}` param, an array
-  // of such, or a nested destructure pattern). Over-collection is SAFE here: an
-  // extra name in `boundOut` only ever suppresses a cross-mark (under-emit), which
-  // is the tolerated direction; the leak direction is the one we must never take.
-  const collectBindingsInto = (x: any, out: Set<string>): void => {
-    if (x == null) return;
-    if (typeof x === "string") { if (x && !x.startsWith("@")) out.add(x); return; }
-    if (Array.isArray(x)) { for (const el of x) collectBindingsInto(el, out); return; }
-    if (typeof x === "object") {
-      collectBindingsInto(x.name, out);
-      for (const k of ["elements", "properties", "props", "value", "values",
-                       "argument", "left", "fields", "entries", "items", "params"]) {
-        if (x[k] != null && typeof x[k] === "object") collectBindingsInto(x[k], out);
-      }
-    }
-  };
-
-  const collectFromExprNode = (expr: any): void => {
-    if (!expr || typeof expr !== "object" || typeof expr.kind !== "string") return;
-    try {
-      forEachIdentInExprNode(expr, (id: any) => addName(id?.name));
-    } catch { /* defensive — a malformed ExprNode never widens the client set */ }
-    // #358 (deep) — `forEachIdentInExprNode` stops at lambda scope boundaries, so
-    // a const read INSIDE a client-side `() => …` is invisible to it. A generic
-    // structural descent over the ExprNode graph picks up every real `ident` node
-    // (member `.property` is a plain string, so no property-name false positives),
-    // including those inside lambda bodies. Local/param references it also gathers
-    // are harmless — they simply never match an export-const candidate name.
-    if (deep) collectIdentNamesDeep(expr);
-  };
-
-  const collectIdentNamesDeep = (n: any): void => {
-    if (!n || typeof n !== "object") return;
-    if (Array.isArray(n)) { for (const x of n) collectIdentNamesDeep(x); return; }
-    if (n.kind === "ident") addName(n.name);
-    // #358 — a lambda inside client code introduces param bindings; record them so
-    // a `() => useX` / `x => …` param named like an import shadows (and thus does
-    // NOT cross-mark) that import (the scope-blindness guard, in the ExprNode path).
-    if (n.kind === "lambda" && boundOut) collectBindingsInto(n.params, boundOut);
-    for (const k of Object.keys(n)) {
-      if (k === "span" || k === "kind" || k === "name") continue;
-      const v = n[k];
-      if (v && typeof v === "object") collectIdentNamesDeep(v);
-    }
-  };
-
-  // #358 (deep) — parse a raw `on mount {…}` / `on dismount {…}` body string into
-  // its per-statement ExprNodes and collect. Iteratively consumes statements the
-  // way `mountBodyExprNode` detects them (parse → advance past the parsed span),
-  // so a multi-statement body (which carries no `exprNode`) is fully walked. Any
-  // parse failure just stops — fail-closed (under-emit), never a leak.
-  const collectFromRawBody = (raw: unknown): void => {
-    if (typeof raw !== "string" || !raw.trim()) return;
-    let rest = raw;
-    let guard = 0;
-    while (rest.trim() && guard++ < 256) {
-      let node: any = null;
-      try { node = parseExprToNode(rest, filePath, 0); } catch { return; }
-      if (!node || !node.span || typeof node.span.end !== "number" || node.span.end <= 0) {
-        // Single-expression body or unparseable remainder — collect what we have.
-        if (node) { collectFromExprNode(node); }
-        return;
-      }
-      collectFromExprNode(node);
-      rest = rest.slice(node.span.end);
-    }
-  };
-
-  // ExprNode-valued fields that carry USER identifier references across the
-  // codegen AST (mirrors the field lists in reactive-deps.ts / dependency-graph.ts).
-  const EXPR_NODE_FIELDS = [
-    "exprNode", "initExpr", "condExpr", "testExpr", "headerExpr", "iterExpr",
-    "defaultExpr", "subjectExpr", "valueExpr", "targetExpr", "returnExpr",
-  ];
-
-  const visit = (node: any): void => {
-    if (!node || typeof node !== "object") return;
-
-    if (node.kind === "function-decl") {
-      // Server fn → its body lowers to a stub; its refs do NOT cross. Prune.
-      if (_fnNodeIsServerBoundary(node, filePath, routeMap)) return;
-      // Client fn → walk its body (nested server fns are pruned on recursion).
-      if (Array.isArray(node.body)) for (const s of node.body) visit(s);
-      return;
-    }
-    // A candidate export const/let: skip (transitive closure owns its init).
-    if (node.kind === "export-decl") return;
-    // §52 server-authority cell (`<x server> = …`, a `state-decl` with
-    // `isServer === true`): its initializer is resolved SERVER-side (the client
-    // only receives a hydration seed, never the init expression), so refs in it
-    // do NOT cross to the client bundle. Prune — mirror of the server-fn prune.
-    // (isServerOnlyNode MISSES this: it classifies SQL/`?{}`/env/meta inits, not
-    // a server-authority cell with a plain-value init. Confirmed via AST dump:
-    // `<cfg server> = SECRET` → {kind:"state-decl", isServer:true, initExpr:…}.
-    // A CLIENT cell (`isServer` falsy) DOES ship its init and is NOT pruned.)
-    if (node.kind === "state-decl" && node.isServer === true) return;
-    // Server-only statement (SQL / env / server-context meta): prune subtree.
-    if (isServerOnlyNode(node)) return;
-
-    // #358 (deep, boundOut) — SCOPE-BLINDNESS GUARD. `refs` is a flat bag of every
-    // identifier NAME in the importer's client code; it cannot tell a read of the
-    // IMPORT binding `X` apart from a read of a shadowing client-side binding named
-    // `X` (an `<each ... as X>` loop var, a lambda param, a local). Marking a
-    // server-only export cross-reachable off such a shadow would EMIT its value to
-    // the client = a §14.8 confidentiality LEAK (strictly worse than the #263
-    // under-emit this pass fixes). So we ALSO collect every client-side BINDING
-    // name; the precompute then requires `refs.has(local) && !bound.has(local)` —
-    // if the importer binds that name anywhere in client code, we conservatively
-    // do NOT cross-mark it (fail toward under-emit; a leak is never acceptable,
-    // an under-emit is). The prunes above run first, so a SERVER-side binding is
-    // never collected (it cannot shadow a client import read anyway).
-    if (boundOut) {
-      if (node.kind === "each-block") { collectBindingsInto(node.asName, boundOut); collectBindingsInto(node.asNames, boundOut); }
-      else if (node.kind === "for-stmt") { collectBindingsInto(node.variable, boundOut); }
-      else if (node.kind === "let-decl" || node.kind === "const-decl" ||
-               node.kind === "tilde-decl" || node.kind === "lin-decl") { collectBindingsInto(node.name, boundOut); }
-      else if (node.kind === "function-decl") { collectBindingsInto(node.name, boundOut); collectBindingsInto(node.params, boundOut); }
-    }
-
-    for (const f of EXPR_NODE_FIELDS) collectFromExprNode(node[f]);
-
-    // #358 (deep) — a multi-statement `on mount`/`on dismount` effect keeps only a
-    // raw `expr` STRING (no usable `exprNode`); parse + collect it so a const the
-    // importer reads inside `on mount { … }` is seen.
-    if (deep && node.kind === "bare-expr" && node._onMountEffect === true &&
-        !node.exprNode && typeof node.expr === "string") {
-      collectFromRawBody(node.expr);
-    }
-
-    // Markup attribute values (onclick=/if=/bind:/props) carry ExprNodes too.
-    if (Array.isArray(node.attrs)) {
-      for (const attr of node.attrs) {
-        if (!attr || typeof attr !== "object") continue;
-        for (const f of EXPR_NODE_FIELDS) collectFromExprNode(attr[f]);
-      }
-    }
-
-    // Recurse into every array-valued child (body / children / consequent / …).
-    for (const key of Object.keys(node)) {
-      const val = node[key];
-      if (Array.isArray(val)) {
-        for (const child of val) {
-          if (child && typeof child === "object" && typeof child.kind === "string") visit(child);
-        }
-      }
-    }
-  };
-
-  for (const node of getNodes(fileAST)) visit(node);
-  return refs;
-}
 
 /**
  * Collect the NAMES that are REASSIGNED at module (logic) top level — a
@@ -573,7 +343,7 @@ function stripExportDeclInit(raw: unknown, kind: string, name: string): string |
 /**
  * GH #263 — emit module-level `export const`/`export let` VALUE bindings into
  * the CLIENT bundle when — and ONLY when — the confidentiality-safe AST
- * reachability gate (`collectClientReferencedIdents`) proves a client-emitted
+ * reachability gate (`collectClientReadIdents`) proves a client-emitted
  * USER node closes over the identifier. See the block comment above for the
  * full rationale and the §14.8 leak this replaces.
  *
@@ -634,6 +404,25 @@ function emitReferencedModuleExportConstLines(
               // Server-only init (SQL / env) — reuse the D-5 predicate on a
               // synthesized const-decl so `export const rows = ?{…}` is skipped.
               if (valid && isServerOnlyNode({ kind: "const-decl", init })) valid = false;
+              // A BUILD-SIDE const SHALL NOT be client-emitted. `import.meta` is a
+              // module-only meta-property: the compiler ships this bundle as a
+              // CLASSIC script (`<script src=…>` with no `type="module"`), where
+              // the same bytes are a fatal SyntaxError — the whole file is then
+              // dead on arrival, not just the const. And its VALUE is a build-host
+              // path, which has no meaning in a browser even if it did load.
+              //
+              // MEASURED, because the two runtimes disagree and one of them hides
+              // it: `export const R = import.meta.url` read client-side reached
+              // `models.client.js`; bun's `vm.Script` PARSED that bundle happily,
+              // node's `vm.Script` rejected it ("Cannot use 'import.meta' outside
+              // a module"), and EXECUTING it failed under BOTH. A parse check
+              // under bun alone reports this clean.
+              //
+              // Fail-closed like every sibling filter here: the const stays
+              // undeclared (an under-emit the adopter can see) rather than
+              // shipping a bundle that cannot load at all. The tokenizer may space
+              // the property access, so the fence tolerates whitespace.
+              if (valid && /\bimport\s*\.\s*meta\b/.test(initTrim)) valid = false;
               if (valid) {
                 try { initExpr = parseExprToNode(init, filePath, (stmt.span?.start as number) ?? 0); }
                 catch { valid = false; }
@@ -679,7 +468,8 @@ function emitReferencedModuleExportConstLines(
   // The confidentiality-safe reachability seed: identifiers referenced by
   // CLIENT-EMITTED USER code (client fn bodies + client top-level reactive
   // wiring). A server-only const's name is never in here (see the function doc).
-  const clientRefs = collectClientReferencedIdents(ctx);
+  const clientRefs = collectClientReadIdents(
+    fileAST, filePath, ctx.routeMap);
 
   // #358 — CROSS-FILE reachability seed. The same value const may be read NOT by
   // a fn in THIS module, but by another compilation unit that imports it directly
@@ -689,7 +479,7 @@ function emitReferencedModuleExportConstLines(
   // `.client.js` nor its `_scrml_modules` footer, and the importer read a free
   // variable → ReferenceError. `runCG` precomputes, per module, the set of its
   // export names that some OTHER file READS in its CLIENT code (via the identical
-  // `collectClientReferencedIdentsForAST` prune — a server-only import never
+  // `collectClientReadIdents` prune — a server-only import never
   // enters the set), and threads it as `crossFileClientReads`. Union it into the
   // seed so a directly-imported+client-read const is client-reachable, WITHOUT
   // widening to server-only consts (under-emit direction preserved, §14.8).

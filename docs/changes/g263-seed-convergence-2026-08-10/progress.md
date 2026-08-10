@@ -1,0 +1,100 @@
+# progress — g263 seed convergence (append-only)
+
+Startup `pwd`: `/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a72905887573ded02`
+Base: `2cc0e4fc` (branch `worktree-agent-a72905887573ded02`).
+The BRIEF landed on `fix/g263-seed-convergence` @ `036680e9` AFTER this worktree was cut, so it is
+not in the worktree tree; read verbatim via `git show 036680e9:docs/changes/g263-seed-convergence-2026-08-10/BRIEF.md`.
+
+## Step 0 — BASELINE, measured (not inherited)
+
+Probe: two-file fixture. `models.scrml` exports `NEEDED`; `index.scrml` imports it and reads it
+**only** in the position under test. PASS = `models.client.js` declares `const NEEDED = …` AND the
+`_scrml_modules` footer carries `NEEDED: NEEDED` AND the importer destructures it.
+
+Every one of the six positions ALSO emits a real client reference to `NEEDED` in `index.client.js`
+(verified by dumping the bundle), so each miss is a live `ReferenceError`, not a theoretical one:
+
+| # | position | probe | at base `2cc0e4fc` | client ref emitted |
+|---|---|---|---|---|
+| 1 | member/namespace call-ref base | `onclick=NEEDED.go(1)` | FAIL | `function(event){ NEEDED.go(1); }` |
+| 2 | unparseable call-ref args | `onclick=handle(NEEDED, , 2)` | FAIL | `function(event){ handle(NEEDED); }` |
+| 3 | `<match>` block arm body | `<match for=Phase on=@phase>` arm attr | FAIL | `function(event){ NEEDED(); }` |
+| 4 | engine transition guard | `<onTransition to=.Playing if=(NEEDED == 1)>` | FAIL | `if (NEEDED === 1) {` |
+| 5 | engine state-child body | `<Title rule=.Playing : @hits = NEEDED>` (`:`-shorthand) | FAIL | `_scrml_cs_reactive_set("hits", NEEDED)` |
+| 6 | engine `derived=` projection | `derived=(NEEDED == 1 ? .X : .Y)` | FAIL | `const __scrml_derived_v = ((NEEDED === 1 ? "X" : "Y"));` |
+
+### Shape corrections to the BRIEF's stated repro shapes (measured)
+
+- **Position 2** — "if any one arg fails to parse, `argExprNodes=undefined` for the WHOLE call" is
+  true but the trigger is narrower than the brief implies. `safeParseExprToNodeGlobal` returns
+  `undefined` ONLY for an empty/whitespace arg; a genuinely unparseable arg returns a
+  `{kind:"escape-hatch"}` node, which keeps `argExprNodes` defined. Measured:
+  `handle(NEEDED, , 2)` and `handle(NEEDED, ,)` → `argExprNodes === undefined`;
+  `handle(NEEDED, "a,b")` / `handle(NEEDED, [1,)` → present, with escape-hatch members.
+- **Position 5** — the BARE-BODY state-child form (`<Title rule=.Playing><onTransition …>${…}</></>`)
+  is ALREADY reachable at base: the engine's `bodyChildren` carries a walkable markup subtree and the
+  old walker's array recursion found it. The genuinely unreachable shape is the **`:`-shorthand**
+  body (`<Title rule=.Playing : @hits = NEEDED>`), which exists ONLY as `rulesRaw` /
+  `_record.engineMeta.stateChildren[].bodyRaw`. Probe amended accordingly.
+- **Position 4** — the guard IS present on the `bodyChildren` `<onTransition>` node as
+  `attr.value.exprNode` (`{kind:"expr", raw:"(NEEDED == 1)", exprNode:{…}}`), so it is reachable via
+  the attribute-value route, not only via `_record…onTransitionElements[].ifExprRaw`.
+- **Position 3** — the arm body IS walkable at `matchBlock.armBodyChildren`; the miss is the
+  attribute-value route (`call-ref` under `attr.value`), not the raw `armsRaw` text.
+
+Probe scripts (scratch, not committed):
+`$SCRATCH/g263/probe.mjs`, `$SCRATCH/g263/ast.mjs`, `$SCRATCH/g263/argprobe.mjs`.
+
+## Step 1 — `526796cd` — Peter's `${}`-scan extraction, reviewed and taken
+
+`forEachTemplateInterpolation` (`codegen/rewrite.ts`) is now the single escape-aware `${}` scan;
+`rewriteTemplateAttrValue` consumes it. Verified byte-equivalent to the pre-extraction
+implementation over a 21-case battery + 20,000 randomized fuzz strings drawn from
+`$ { } \ ` @ a b space \n 1 .` — identical `jsExpr` AND identical `reactiveVars` in every case.
+
+## Step 2 — `8e9beb97` — the walker DELETED, the table born
+
+- NEW `compiler/src/expr-positions.ts` — the position table + `EXPR_NODE_FIELDS`.
+- NEW `compiler/src/codegen/client-read-seed.ts` — `collectClientReadIdents`.
+- `collectClientReferencedIdentsForAST` deleted from `emit-client.ts` (-238 lines).
+- All six positions FAIL→PASS. All six §14.8 leak vectors clean.
+- Perf: a per-file memo keyed on AST identity collapses `runCG`'s cross-file precompute and the
+  per-file export-const gate into ONE walk. `examples/23-trucking-dispatch`, 3 runs each:
+  base 4.579/4.708/4.542s, head 4.598/4.795/4.669s.
+
+## Step 3 — `dace93db` — dependency-graph consumes the same table
+
+`creditFromAttrValue` + five hand-inlined blocks → one `creditFromPositions`. Net -372 lines.
+`EXPR_NODE_FIELDS` shared (was 6 fields in DG, 11 in the walker).
+
+**Corpus emit-differential, by hand, base `036680e9` vs head — VERDICT: NO DIFFERENCES.**
+1904 sources · 7375 artifacts · 0 diagnostic changes · 0 artifact content diffs · 0 syntax delta
+under either goggle · 0 load-context changes · bare server-fn sites 145/145.
+
+## Step 4 — `fed3ae70` — tests + the build-side-const fix
+
+`conf-CG-263-seed-position-convergence.test.js` (39) + `expr-positions-shared-table.test.js` (16).
+Measured at base `2cc0e4fc`: **14 fail / 25 pass**; at head **39 pass / 0 fail**.
+
+`import.meta` in an export-const initializer is now a fail-closed skip. Measured on the emitted
+`models.client.js`: bun `vm.Script` PARSE **OK**, node `vm.Script` PARSE **SyntaxError**, EXECUTION
+**fails under both**. A parse check under bun alone reports it clean.
+
+## Findings to FILE (docs/known-gaps.md is PA-owned — not edited here)
+
+1. **`g-263` re-characterisation.** Stated locus `emitReferencedModuleExportConstLines` is WRONG;
+   the locus was the `crossFileClientReads` seed, and the CLASS is wider than one emitter — it was
+   a position-enumeration drift between two untyped walkers. Now closed at the substrate.
+2. **`g-stdlib-module-resolver-emits-import-meta-into-a-classic-script-bundle` — locus WRONG and
+   symptom UNDER-stated.** It is NOT the #263/#358 machinery: `STDLIB_ROOT` is a plain (non-export)
+   top-level `const`, emitted by `emitReactiveWiring`'s top-level logic walk. Symptom evidence:
+   bun `vm.Script` parse OK / node `vm.Script` parse FAILS / EXECUTION fails under both; the HTML
+   loads it as `<script src="module-resolver.client.js">` with no `type="module"`. Two further
+   defects in the same emission, neither in the gap text: the initializer is DOUBLED
+   (`new URL(resolve ( dirname ( new URL ( import . meta . url ) …`), and the `const` is emitted
+   AFTER the `_scrml_meta_effect` call that reads it (TDZ) while `resolve`/`dirname` are bound only
+   INSIDE that effect's async body — so the reference is dangling regardless of `import.meta`.
+   Fixing it needs a build-side classification rule, which is a design question, not a patch.
+3. **Call-ref argument ELISION is emitted verbatim.** `onclick=handle(NEEDED, , 2)` emits
+   `handle(NEEDED, , 2)` into the client bundle — invisible to `new vm.Script` under bun, invalid
+   JS in a browser. Separate from g-263; surfaced by its position-2 fixture.

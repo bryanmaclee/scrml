@@ -55,7 +55,27 @@ import { forEachIdentInValidators, forEachQualifiedCellRefInValidators } from ".
 // Shared with the codegen wiring paths (emit-html.ts -> lowerAttrTemplateValue),
 // so the DG's reader accounting cannot drift from what actually gets wired.
 // Imported for reader-credit only; nothing here emits code.
-import { hasTemplateInterpolation, rewriteTemplateAttrValue } from "./codegen/rewrite.ts";
+import { rewriteTemplateAttrValue } from "./codegen/rewrite.ts";
+// THE single table of WHERE user expression source lives on an AST node. This
+// pass and `codegen/client-read-seed.ts` (the #263/#358 client-read collector)
+// both read it, so the position sets cannot drift apart again — they did, in both
+// directions, and the drift was invisible because both walkers are untyped.
+import {
+  forEachExprPosition, EXPR_NODE_FIELDS, type ExprPositionKind,
+} from "./expr-positions.ts";
+
+/**
+ * This pass reads EVERY position kind. It is the `@`-sigil consumer: a raw-text
+ * position is scanned for `@ident`, which deliberately over-credits (it matches
+ * inside string literals too) because for E-DG-002 accounting an over-credit
+ * silences a warning while an under-credit fires a wrong one. The confidentiality
+ * consumer in `codegen/client-read-seed.ts` supports a strict SUBSET for exactly
+ * the opposite reason — see the absences documented there.
+ */
+const DG_POSITION_KINDS: ReadonlySet<ExprPositionKind> = new Set<ExprPositionKind>([
+  "expr-node", "expr-source", "block-source", "template-text",
+  "literal-text", "cell-name", "cell-name-list", "callee-name",
+]);
 
 // ---------------------------------------------------------------------------
 // DG-internal types (not in the shared AST, specific to Stage 7 output)
@@ -358,10 +378,10 @@ function _exprNodeHasAtIdent(exprNode: unknown): boolean {
 
 function collectReactiveRefsFromExprNode(node: Record<string, unknown>): string[] {
   const refs: string[] = [];
-  const exprNodeFields = [
-    node.exprNode, node.initExpr, node.condExpr,
-    node.valueExpr, node.iterExpr, node.headerExpr,
-  ];
+  // The field list is SHARED (`expr-positions.ts`). It used to be six fields
+  // here and eleven in the client-read walker; nothing type-checked one against
+  // the other, so neither side knew it was missing five.
+  const exprNodeFields = EXPR_NODE_FIELDS.map((f) => node[f]);
   for (const field of exprNodeFields) {
     if (!field || typeof field !== "object" || !(field as { kind?: string }).kind) continue;
     forEachIdentInExprNode(field as ExprNode, (ident) => {
@@ -415,12 +435,11 @@ function collectLambdaBodyReactiveRefs(node: ExprNode, out: string[]): void {
       collectLambdaBodyReactiveRefs(body.value, out);
     } else if (body && body.kind === "block" && Array.isArray(body.stmts)) {
       // Block-body lambda — walk each statement's parallel ExprNode fields
-      // (mirrors collectReactiveRefsFromExprNode's field set), descending into
-      // any nested lambdas.
+      // (the SHARED `EXPR_NODE_FIELDS` list), descending into any nested lambdas.
       for (const stmt of body.stmts) {
         if (!stmt || typeof stmt !== "object") continue;
         const s = stmt as Record<string, unknown>;
-        for (const field of [s.exprNode, s.initExpr, s.condExpr, s.valueExpr, s.iterExpr, s.headerExpr]) {
+        for (const field of EXPR_NODE_FIELDS.map((f) => s[f])) {
           if (!field || typeof field !== "object" || !(field as { kind?: string }).kind) continue;
           forEachIdentInExprNode(field as ExprNode, (ident) => {
             if (ident.name.startsWith("@")) out.push(ident.name.slice(1));
@@ -2538,204 +2557,89 @@ export function runDG(input: DGInput): DGOutput {
       : _baseEmitMarkupReadEdge;
 
     /**
-     * Credit every reactive read an ATTRIBUTE VALUE performs, and emit the
-     * corresponding markup-read edge.
+     * Credit every reactive read this node performs, and emit the corresponding
+     * markup-read edges — from the SHARED position table (`expr-positions.ts`).
      *
-     * EXTRACTED in the §17.1.2 fix round so the markup attribute loop and the
-     * structural `if=` render gate share ONE implementation. `<engine>` /
-     * `<match>` / `<each>` carry no `attrs` array — the block splitter
-     * raw-captures them and the AST builder rebuilds each from named opener
-     * regexes — so their `if=` predicate lives on the node as `ifCond` and never
-     * reached this loop. Crediting it with a private `/@(ident)/` scan over the raw
-     * condition text diverged from the markup path in BOTH directions: the scan
-     * reads inside string literals (over-credit), and it misses the transitive
-     * reads of an `if=fn()` call-ref that `fnTransitiveReads` supplies
-     * (under-credit). One `if=` lowering deserves one crediting rule.
+     * WHAT THIS REPLACED, AND WHY IT MATTERS. This used to be `creditFromAttrValue`
+     * plus five hand-inlined blocks in `sweepNodeForAtRefs` (each-block openers +
+     * bodyRaw, match-block `onExprRaw`/`armsRaw`, engine state-children,
+     * `<onTransition>` bodies, `<onTimeout>`/`<onIdle>` computed durations). The
+     * client-read collector in `codegen/client-read-seed.ts` carried its OWN copy
+     * of the same enumeration, and the two drifted in BOTH directions with nothing
+     * to catch it: this pass scanned six positions that one missed, and that one
+     * walked five ExprNode fields this pass never looked at. Both now read one
+     * table, so a position added there is credited here and seeded there.
      *
-     * @param attr — an AttrNode-shaped `{ name, value, span }`. The structural
-     *   caller synthesizes one; the markup caller passes the parsed node.
-     * @param node — the owning AST node, used for the span fallback.
+     * The EXTRACTION POINT is unchanged from the §17.1.2 round: the markup
+     * attribute loop and the structural `if=` render gate go through ONE rule.
+     * Crediting `if=` with a private `/@(ident)/` scan over raw condition text
+     * diverged in both directions — the scan reads inside string literals
+     * (over-credit) and misses the transitive reads of an `if=fn()` call-ref that
+     * `fnTransitiveReads` supplies (under-credit). One `if=` lowering deserves one
+     * crediting rule.
      */
-    function creditFromAttrValue(attr: unknown, node: ASTNode): void {
-      if (!attr || typeof attr !== "object") return;
-      const attrVal = (attr as Record<string, unknown>).value;
-      if (typeof attrVal === "string") {
-        const atRefs = attrVal.match(/@([A-Za-z_$][A-Za-z0-9_$]*)/g);
-        if (atRefs) {
-          for (const ref of atRefs) {
-            creditReader(ref.slice(1));
+    function creditFromPositions(node: ASTNode): void {
+      forEachExprPosition(node, DG_POSITION_KINDS, (p) => {
+        const span = (p.span ?? node.span) as Span | undefined;
+        /** Credit one cell, and emit its render edge when the position is one. */
+        const take = (cellName: string): void => {
+          if (!cellName) return; // `@.` contextual sigil — a dot with no ident
+          creditReader(cellName);
+          if (p.render && markupContextEmitEdges && span) emitMarkupReadEdge(span, cellName);
+        };
+        switch (p.kind) {
+          case "expr-node": {
+            // ExprNode-first: robust against nested member access, unary/binary
+            // operators, conditionals. `forEachIdentInExprNode` stops at a lambda
+            // scope boundary (correct for `lin` capture tracking, wrong for
+            // reader-credit — a `@var` read inside a `.filter(x => … @t …)`
+            // callback IS a real consumption), so the lambda descent follows.
+            const found: string[] = [];
+            forEachIdentInExprNode(p.value as ExprNode, (ident) => {
+              if (ident.name.startsWith("@")) found.push(ident.name.slice(1));
+            });
+            collectLambdaBodyReactiveRefs(p.value as ExprNode, found);
+            for (const name of found) take(name);
+            break;
+          }
+          case "expr-source":
+          case "block-source":
+          case "literal-text": {
+            // RAW source text. This pass has always read it with the `@`-sigil
+            // scan: deliberately over-crediting (it also matches inside string
+            // literals), because for E-DG-002 accounting an over-credit silences
+            // a warning while an under-credit fires a wrong one.
+            const found = (p.value as string).match(/@([A-Za-z_$][A-Za-z0-9_$]*)/g);
+            if (found) for (const ref of found) take(ref.slice(1));
+            break;
+          }
+          case "template-text": {
+            // Parity BY CONSTRUCTION: `rewriteTemplateAttrValue` is the SAME
+            // function the codegen wiring paths use, so `reactiveVars` is by
+            // definition the exact set of cells the emitted effect subscribes to.
+            // Bounded deliberately to the `${…}` interiors — a bare `@x` in
+            // literal attribute text (`title="mail @theme now"`) is NOT wired by
+            // codegen, so E-DG-002 there is CORRECT and must keep firing.
+            const { reactiveVars } = rewriteTemplateAttrValue(p.value as string);
+            for (const cellName of reactiveVars) take(cellName);
+            break;
+          }
+          case "cell-name":
+            take(p.value as string);
+            break;
+          case "cell-name-list":
+            for (const r of p.value as unknown[]) if (typeof r === "string") take(r);
+            break;
+          case "callee-name": {
+            // `<button onclick=updateAll()>` credits every reactive cell
+            // `updateAll` (transitively) reads — same as the `extractCallees`
+            // path above. No render edge: the read happens inside the callee.
+            const transitiveReads = fnTransitiveReads.get(p.value as string);
+            if (transitiveReads) for (const varName of transitiveReads) creditReader(varName);
+            break;
           }
         }
-      } else if (attrVal && typeof attrVal === "object") {
-        const valObj = attrVal as Record<string, unknown>;
-        // E-DG-002 false-positive class (SB3) — template-literal
-        // attribute values (`g-dg-class-attr-interp-not-consumed`).
-        //
-        // A quoted attribute value carrying `${...}` interpolations
-        // arrives as `{ kind: "string-literal", value: "box ${@theme}" }`
-        // — an OBJECT whose payload is `value`. Pre-fix it matched NONE
-        // of the branches below (`name` is a variable-ref field, `refs`
-        // an expr-attr field, `raw` the expr fallback, and the kind is
-        // not "call-ref") and none above (`typeof attrVal === "string"`
-        // is false), so the read was never credited AT ALL — not
-        // credited-then-lost. A cell read only there false-fired
-        // E-DG-002 even though SPEC §5.5.3 makes the read normative:
-        // "Reactive variables referenced as `${@varName}` inside the
-        // template literal SHALL each subscribe to changes." Codegen
-        // agrees — it emits `_scrml_effect(() => el.setAttribute(name,
-        // `…${_scrml_reactive_get("theme")}…`))` — which is precisely
-        // the "reader edge in a render context" whose absence the §34
-        // E-DG-002 row defines as the trigger.
-        //
-        // NOT `class`-specific. The miss is in the value SHAPE, not the
-        // attribute name, and codegen wires `class` / `style` / `title` /
-        // `data-*` / `aria-*` identically, so the credit is
-        // attribute-name-agnostic too.
-        //
-        // Parity by construction: `rewriteTemplateAttrValue` is the SAME
-        // function the two codegen wiring paths use (emit-html.ts ->
-        // lowerAttrTemplateValue -> here, plus the <match>-arm path), so
-        // `reactiveVars` is by definition the exact set of cells the
-        // emitted effect subscribes to. Reusing it — rather than adding
-        // a second markup-attr `${}` scanner — means the DG cannot drift
-        // out of agreement with what actually gets wired.
-        //
-        // Bounded deliberately: the scan looks ONLY inside `${...}`
-        // segments (that is what `rewriteTemplateAttrValue` does). A bare
-        // `@x` in literal attribute text (`title="mail @theme now"`) is
-        // NOT wired by codegen, so E-DG-002 there is CORRECT and must
-        // keep firing — an over-wide whole-string scan would silence a
-        // real unused-cell warning.
-        //
-        // Scope note: this credits readers for E-DG-002 accounting only.
-        // It deliberately does NOT emit a MarkupReadDGNode (as the
-        // sibling attribute branches below do), so no other DG consumer
-        // — notably the reachability substrate — sees a change from this
-        // fix. Same scope-discipline as SB1 (collectLambdaBodyReactiveRefs).
-        if (
-          valObj.kind === "string-literal" &&
-          typeof valObj.value === "string" &&
-          hasTemplateInterpolation(valObj.value)
-        ) {
-          const { reactiveVars } = rewriteTemplateAttrValue(valObj.value);
-          for (const cellName of reactiveVars) {
-            creditReader(cellName);
-          }
-        }
-        // e.g. bind:value={ kind: "variable-ref", name: "@country" }
-        // Also handles attr=@x simple variable-ref attribute.
-        // A-1.3 Shapes 2 + 3: variable-ref attr + bind:value=@x.
-        const varRefName = valObj.name;
-        if (typeof varRefName === "string" && varRefName.startsWith("@")) {
-          const vrName = varRefName.slice(1);
-          creditReader(vrName);
-          // Emit markup-read node + reads edge for this variable-ref attribute site.
-          if (markupContextEmitEdges) {
-            const attrSpan = (attr as Record<string, unknown>).span as Span | undefined;
-            emitMarkupReadEdge(attrSpan ?? node.span, vrName);
-          }
-        }
-        // Expression-valued attributes (e.g. `if=(@a && @b == false)`)
-        // are stored as `{ kind: "expr", raw, refs, exprNode }`. The AST
-        // builder already collects reactive refs into `refs`; fall back
-        // to scanning `raw` for the compound case if `refs` is missing.
-        // A-1.3 Shape 4 — if=@x / if=(expr) condition attribute.
-        // valObj.refs is pre-populated by the AST builder; valObj.raw is the
-        // fallback. Emit one markup-read node per reactive var in the expr.
-        if (Array.isArray(valObj.refs)) {
-          for (const ref of valObj.refs) {
-            if (typeof ref === "string") {
-              creditReader(ref);
-              if (markupContextEmitEdges) {
-                const attrSpan = (attr as Record<string, unknown>).span as Span | undefined;
-                emitMarkupReadEdge(attrSpan ?? node.span, ref);
-              }
-            }
-          }
-        } else if (typeof valObj.raw === "string") {
-          const rawRefs = (valObj.raw as string).match(/@([A-Za-z_$][A-Za-z0-9_$]*)/g);
-          if (rawRefs) {
-            for (const r of rawRefs) {
-              const rName = r.slice(1);
-              creditReader(rName);
-              if (markupContextEmitEdges) {
-                const attrSpan = (attr as Record<string, unknown>).span as Span | undefined;
-                emitMarkupReadEdge(attrSpan ?? node.span, rName);
-              }
-            }
-          }
-        }
-        // Bug 4.5 / S87 — call-ref attribute values
-        // (`<button onclick=fn(@var)>`) are stored as
-        //   `{ kind: "call-ref", name: "fn", args: ["@var", ...],
-        //      argExprNodes?: [ExprNode, ...] }`
-        // (see ast-builder.js parseAttributes ATTR_CALL branch, line 1239).
-        // Pre-fix: only the `variable-ref` / `expr` / raw-string branches
-        // above were considered, so `@var` inside a call-ref arg never
-        // reached `creditReader`. If `@var` had no other reader, E-DG-002
-        // false-fired on it. (W-DEAD-FUNCTION on the called function is
-        // already correctly handled by route-inference.ts:2087-2100, which
-        // walks call-ref `name` + `args` + `argExprNodes` for the markup-
-        // referenced-names set.)
-        //
-        // Symmetric to Bug 4 (commit cee4469) which extended the
-        // route-inference walkMarkupContext walker to recurse into
-        // string-typed nested expression fields. This is the SIBLING
-        // fix on the dependency-graph "has-readers" walker.
-        if (valObj.kind === "call-ref") {
-          // ExprNode-first walk for `@var` references (preferred —
-          // robust against nested member-access like `@compound.field`,
-          // unary/binary operators, conditional expressions, etc.).
-          // A-1.4 Shape 1 — call-ref attr @var args emit markup-read edges.
-          // `onclick=fn(@x)` — @x is read at the event-wiring call site.
-          // Emit one markup-read node + reads edge per @var found in the args.
-          const callRefAttrSpan = (attr as Record<string, unknown>).span as Span | undefined;
-          if (Array.isArray(valObj.argExprNodes)) {
-            for (const en of valObj.argExprNodes) {
-              if (en && typeof en === "object" && (en as { kind?: string }).kind) {
-                forEachIdentInExprNode(en as ExprNode, (ident) => {
-                  if (ident.name.startsWith("@")) {
-                    const crVarName = ident.name.slice(1);
-                    creditReader(crVarName);
-                    if (markupContextEmitEdges) emitMarkupReadEdge(callRefAttrSpan ?? node.span, crVarName);
-                  }
-                });
-              }
-            }
-          }
-          // String-fallback for raw arg text — covers @var refs whose
-          // ExprNode parse failed (e.g. parse errors elsewhere) and
-          // duplicates the ExprNode walk for the simple-ident case
-          // (creditReader is idempotent on the per-var Set).
-          if (Array.isArray(valObj.args)) {
-            for (const arg of valObj.args) {
-              if (typeof arg === "string") {
-                const argRefs = arg.match(/@([A-Za-z_$][A-Za-z0-9_$]*)/g);
-                if (argRefs) {
-                  for (const r of argRefs) {
-                    const crVarName2 = r.slice(1);
-                    creditReader(crVarName2);
-                    if (markupContextEmitEdges) emitMarkupReadEdge(callRefAttrSpan ?? node.span, crVarName2);
-                  }
-                }
-              }
-            }
-          }
-          // Credit transitive reactive reads from the called function
-          // body — `<button onclick=updateAll()>` should credit any
-          // reactive cell that `updateAll` (transitively) reads, same
-          // as the `extractCallees` path at line 1795-1803 above. The
-          // call-ref's `name` field is the bare callee identifier.
-          if (typeof valObj.name === "string" && valObj.name.length > 0) {
-            const transitiveReads = fnTransitiveReads.get(valObj.name);
-            if (transitiveReads) {
-              for (const varName of transitiveReads) {
-                creditReader(varName);
-              }
-            }
-          }
-        }
-      }
+      });
     }
 
     function sweepNodeForAtRefs(node: ASTNode): void {
@@ -2913,29 +2817,17 @@ export function runDG(input: DGInput): DGOutput {
             }
           }
         }
-        const attrs = (node as Record<string, unknown>).attrs;
-        if (Array.isArray(attrs)) {
-          for (const attr of attrs) creditFromAttrValue(attr, node);
-        }
       }
-      // §17.1.2 — the `if=` RENDER GATE on a scrml-defined structural element
-      // (`<engine>` / `<match>` / `<each>`). Those three have no `attrs` array, so
-      // the markup loop above reaches nothing on them; the predicate lives on the
-      // node as `ifCond` (ast-builder `captureStructuralIfAttr`). Routed through
-      // the SAME handler a markup `if=` takes — see its doc comment for why a
-      // private scan is not equivalent.
-      {
-        const structuralIf = (node as Record<string, unknown>).ifCond;
-        if (structuralIf && typeof structuralIf === "object") {
-          creditFromAttrValue(
-            // No attr-name span: `ifCond.span` is the precise anchor and the
-            // handler falls back to `node.span`, matching how the sibling
-            // structural opener credits (inExprRaw/keyExprRaw/onExprRaw) anchor.
-            { name: "if", value: structuralIf },
-            node,
-          );
-        }
-      }
+      // EVERY remaining position on this node — markup attribute values, the
+      // structural `if=` render gate (§17.1.2), the `<each>` / `<match>` raw
+      // openers and bodies, and the `<engine>` internals hanging off
+      // `_record.engineMeta` — is enumerated by the SHARED position table and
+      // credited here. Five hand-inlined blocks used to live at this spot, each
+      // with its own copy of the `@`-sigil scan and its own edge emission; the
+      // client-read collector had a parallel copy of the same enumeration and the
+      // two drifted. See `creditFromPositions`.
+      creditFromPositions(node);
+
       // §51.0.D — an `<engine>` block's declaration position IS its rendered
       // output position; the block renders its variant arms based on the
       // engine's auto-declared cell (§51.0.C). The engine block is therefore
@@ -2943,230 +2835,27 @@ export function runDG(input: DGInput): DGOutput {
       // whose cell is never explicitly referenced anywhere else
       // (e.g. `${@driverStatus}`, `@driverStatus.advance(...)`) false-fires
       // E-DG-002 — even though the cell IS consumed by the engine's own body
-      // render (cf. Bug 3 — derived-engine projected vars; analogous case for
-      // the bare engine-cell consumption pattern). Per `dependency-graph.ts`
-      // engine-cell registration at line 1147-1154, the cell is registered as
-      // a generic `reactive` DG node from `engineMeta.varName`; the engine's
-      // structural read is invisible to the rest of the markup-sweep machinery.
-      // S130 HU-1 iteration Landing 1 — each-block credits the @-cells
-      // referenced in its in= / of= / key= opener attributes AND in its
-      // bodyRaw fallback. Without this, an each-block over @contacts
-      // (`<each in=@contacts>...</each>`) false-fires E-DG-002 on
-      // @contacts because the structural read sits in an opener attr
-      // that the generic markup-walk doesn't see (the body itself uses
-      // the `as name` binding, not the cell sigil — and the `<each>`
-      // node was BS-captured raw, so the opener attrs were never tokenized
-      // by the normal attribute pipeline).
-      if ((node as Record<string, unknown>).kind === "each-block") {
-        const eachAny = node as Record<string, unknown>;
-        // Scan opener-attr raw values for @cellName refs.
-        // §17.1.2 NOTE — `ifRaw` is deliberately NOT in this list. The `if=`
-        // render gate is credited through `creditFromAttrValue` above, from the
-        // PARSED `ifCond`, so it gets exactly the markup path's treatment. A raw
-        // scan here would additionally read inside string literals.
-        for (const key of ["inExprRaw", "ofExprRaw", "keyExprRaw"]) {
-          const raw = eachAny[key];
-          if (typeof raw === "string" && raw.length > 0) {
-            const atRefs = raw.match(/@([A-Za-z_$][A-Za-z0-9_$]*)/g);
-            if (atRefs) {
-              for (const ref of atRefs) {
-                const cellName = ref.slice(1);
-                // Skip `@.` contextual sigil (single dot, no ident).
-                if (!cellName) continue;
-                creditReader(cellName);
-                if (markupContextEmitEdges && node.span) {
-                  emitMarkupReadEdge(node.span, cellName);
-                }
-              }
-            }
-          }
-        }
-        // bodyRaw fallback — scan for direct @cell refs (the `as name`
-        // override doesn't generate @-refs, but free `@cell` refs inside
-        // the per-item template body do).
-        const bodyRaw = eachAny.bodyRaw;
-        if (typeof bodyRaw === "string" && bodyRaw.length > 0) {
-          const atRefs = bodyRaw.match(/@([A-Za-z_$][A-Za-z0-9_$]*)/g);
-          if (atRefs) {
-            for (const ref of atRefs) {
-              const cellName = ref.slice(1);
-              if (!cellName) continue;
-              creditReader(cellName);
-              if (markupContextEmitEdges && node.span) {
-                emitMarkupReadEdge(node.span, cellName);
-              }
-            }
-          }
-        }
-        // Body walking continues via the generic markup-walk on
-        // bodyChildren / templateChildren (handled by the outer recursion).
-      }
-
-      // E-DG-002 false-positive class (SB2) — block-form `<match on=@cell>`.
-      // The markup match-block node is captured raw by the block-splitter
-      // (NOT in the §4.15 markup-element table — see ast-builder.js line 173),
-      // so it carries its match subject as a raw string on `onExprRaw`
-      // (e.g. `@phase`, `@wrapper.phase`) rather than a walkable ExprNode.
-      // The generic ExprNode markup-sweep above therefore never sees the
-      // subject, and E-DG-002 false-fires on a cell consumed ONLY by a
-      // block-form match dispatch. Structurally identical to the each-block
-      // opener-attr credit above (inExprRaw/ofExprRaw/keyExprRaw): scan
-      // `onExprRaw` for the subject cell, with `armsRaw` as the raw fallback
-      // for @cell reads inside the arm bodies (the arms are raw-captured into
-      // `bodyChildren` text, mirroring each-block's bodyRaw fallback).
-      if ((node as Record<string, unknown>).kind === "match-block") {
-        const matchAny = node as Record<string, unknown>;
-        // §17.1.2 NOTE — `ifRaw` is deliberately absent here too; the gate is
-        // credited from the parsed `ifCond` via `creditFromAttrValue`.
-        for (const key of ["onExprRaw", "armsRaw"]) {
-          const raw = matchAny[key];
-          if (typeof raw === "string" && raw.length > 0) {
-            const atRefs = raw.match(/@([A-Za-z_$][A-Za-z0-9_$]*)/g);
-            if (atRefs) {
-              for (const ref of atRefs) {
-                const cellName = ref.slice(1);
-                // Skip `@.` contextual sigil (single dot, no ident).
-                if (!cellName) continue;
-                creditReader(cellName);
-                if (markupContextEmitEdges && node.span) {
-                  emitMarkupReadEdge(node.span, cellName);
-                }
-              }
-            }
-          }
-        }
-        // Arm body markup continues via the generic markup-walk on
-        // bodyChildren (handled by the outer recursion).
-      }
-
+      // render. The cell is registered as a generic `reactive` DG node from
+      // `engineMeta.varName`; the engine's structural read is invisible to the
+      // rest of the markup-sweep machinery.
+      //
+      // NOT a position in the shared table, deliberately: this is not a place
+      // where SOURCE TEXT lives, it is a SENTINEL credit for a read the engine
+      // performs by existing. The table answers "where is user expression
+      // source?", and answering a different question in it would make it mean
+      // two things.
       if (node.kind === "engine-decl") {
         const eAny = node as Record<string, unknown>;
         const record = eAny._record as Record<string, unknown> | undefined;
         const engineMeta = record?.engineMeta as Record<string, unknown> | undefined;
         const varName = engineMeta?.varName;
         if (typeof varName === "string" && varName.length > 0) {
-          // A-1.3 additive: sentinel credit preserved for E-DG-002.
           creditReader(varName);
-          // A-1.5 Shape 3 — engine-cell self-read. The engine block structurally
-          // reads its own cell (it renders variant arms based on the cell value).
-          // Lift that structural read to a real markup-read edge so A-2's closure
-          // analysis sees the engine as a consumer of its own cell.
+          // A-1.5 Shape 3 — lift the structural self-read to a real markup-read
+          // edge so the closure analysis sees the engine as a consumer of its
+          // own cell.
           if (markupContextEmitEdges && node.span) {
             emitMarkupReadEdge(node.span, varName);
-          }
-        }
-        // §51.0.E (S198 — Approach F A-leg) — `initial=@cell` runtime-cell
-        // hydration READS the referenced cell at engine-construction. Credit it
-        // as a reader so E-DG-002 ("declared but never consumed") does not
-        // false-fire on a persisted-status cell whose only consumer is the
-        // engine's hydration. Mirrors the engine self-read credit above.
-        const initialCell = engineMeta?.initialCell;
-        if (typeof initialCell === "string" && initialCell.length > 0) {
-          creditReader(initialCell);
-          if (markupContextEmitEdges && node.span) {
-            emitMarkupReadEdge(node.span, initialCell);
-          }
-        }
-        // §52 (S199 — the E-leg) — `server=@source` server-authoritative
-        // hydration SUBSCRIBES to (reads) the source cell reactively. Credit the
-        // ROOT cell of the dotted source path as a reader so E-DG-002 ("declared
-        // but never consumed") does not false-fire on a server-owned source whose
-        // only consumer is the engine's reactive hydration. Mirrors the A-leg
-        // `initial=@cell` credit above; the root segment is the subscribed cell
-        // (`@driver.current_status` -> `driver`).
-        const serverSource = engineMeta?.serverSource;
-        if (typeof serverSource === "string" && serverSource.length > 0) {
-          const serverSourceRoot = serverSource.split(".")[0];
-          if (serverSourceRoot && serverSourceRoot.length > 0) {
-            creditReader(serverSourceRoot);
-            if (markupContextEmitEdges && node.span) {
-              emitMarkupReadEdge(node.span, serverSourceRoot);
-            }
-          }
-        }
-        // §17.1.2 NOTE — the engine opener's `if=` render gate is credited above,
-        // from the PARSED `ifCond`, through the shared `creditFromAttrValue`. It
-        // is deliberately not read from `engineMeta`: `ifCond` lives on the AST
-        // node so the JS substrate emitters cannot reach it at all, which is what
-        // enforces §17.1.2.1's render-vs-lifecycle split structurally.
-        // A-1.5 Shape 1 — engine state-child body raw text.
-        // The engine body lives in engineMeta.stateChildren[i].bodyRaw (raw
-        // text, not walkable AST — see engine-statechild-parser.ts, primer §13.7 B14).
-        // Regex-scan each state-child's bodyRaw for @var refs and emit
-        // markup-read edges for each reactive var found.
-        const stateChildren = engineMeta?.stateChildren;
-        if (Array.isArray(stateChildren)) {
-          for (const sc of stateChildren as Array<Record<string, unknown>>) {
-            const bodyRaw = sc.bodyRaw;
-            if (typeof bodyRaw === "string" && bodyRaw.length > 0) {
-              const atRefs = bodyRaw.match(/@([A-Za-z_$][A-Za-z0-9_$]*)/g);
-              if (atRefs) {
-                for (const ref of atRefs) {
-                  const scVarName = ref.slice(1);
-                  creditReader(scVarName);
-                  if (markupContextEmitEdges && node.span) {
-                    emitMarkupReadEdge(node.span, scVarName);
-                  }
-                }
-              }
-            }
-            // A-1.5 Shape 2 — <onTransition> body. Each <onTransition> element
-            // in the state-child may carry a bodyRaw with @var reads (e.g., a
-            // logic-context effect statement that reads a reactive cell).
-            const onTransitionElements = sc.onTransitionElements;
-            if (Array.isArray(onTransitionElements)) {
-              for (const ot of onTransitionElements as Array<Record<string, unknown>>) {
-                const otBodyRaw = ot.bodyRaw;
-                if (typeof otBodyRaw === "string" && otBodyRaw.length > 0) {
-                  const otRefs = otBodyRaw.match(/@([A-Za-z_$][A-Za-z0-9_$]*)/g);
-                  if (otRefs) {
-                    for (const ref of otRefs) {
-                      const otVarName = ref.slice(1);
-                      creditReader(otVarName);
-                      if (markupContextEmitEdges && node.span) {
-                        emitMarkupReadEdge(node.span, otVarName);
-                      }
-                    }
-                  }
-                }
-              }
-            }
-            // A-1.5 Shape 2b — <onTimeout> computed after= form. The after= value
-            // may be a computed expression ${expr}<unit> (§51.12.3.1). Extract
-            // any @var refs from the expression portion.
-            const onTimeoutElements = sc.onTimeoutElements;
-            if (Array.isArray(onTimeoutElements)) {
-              for (const oto of onTimeoutElements as Array<Record<string, unknown>>) {
-                const afterVal = oto.after;
-                if (typeof afterVal === "string" && (afterVal as string).startsWith("${" )) {
-                  const afterRefs = (afterVal as string).match(/@([A-Za-z_$][A-Za-z0-9_$]*)/g);
-                  if (afterRefs) {
-                    for (const ref of afterRefs) {
-                      const afterVarName = ref.slice(1);
-                      creditReader(afterVarName);
-                      if (markupContextEmitEdges && node.span) {
-                        emitMarkupReadEdge(node.span, afterVarName);
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-        // A-1.5 Shape 2c — <onIdle> computed after= form. The engine-wide
-        // idle watchdog after= may also use the computed ${expr}<unit> form.
-        const idleWatchdog = engineMeta?.idleWatchdog as Record<string, unknown> | null | undefined;
-        if (idleWatchdog && typeof idleWatchdog.after === "string" && (idleWatchdog.after as string).startsWith("${" )) {
-          const idleRefs = (idleWatchdog.after as string).match(/@([A-Za-z_$][A-Za-z0-9_$]*)/g);
-          if (idleRefs) {
-            for (const ref of idleRefs) {
-              const idleVarName = ref.slice(1);
-              creditReader(idleVarName);
-              if (markupContextEmitEdges && node.span) {
-                emitMarkupReadEdge(node.span, idleVarName);
-              }
-            }
           }
         }
       }

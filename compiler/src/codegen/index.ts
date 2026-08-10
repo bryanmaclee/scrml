@@ -59,7 +59,8 @@ import { generateCss } from "./emit-css.ts";
 import { generateServerJs, astUsesSessionWrite } from "./emit-server.ts";
 import { setBatchLoopHoists, setBatchInListCap } from "./emit-control-flow.ts";
 import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-machines.ts";
-import { generateClientJs, collectClientReferencedIdentsForAST } from "./emit-client.js";
+import { generateClientJs } from "./emit-client.js";
+import { collectClientReadIdents } from "./client-read-seed.ts";
 import { generateLibraryJs } from "./emit-library.ts";
 import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
@@ -1213,8 +1214,6 @@ export function runCG(input: CgInput): CgOutput {
       if (!fp) continue;
       const entry = importGraphInput.get(fp);
       if (!entry || !Array.isArray(entry.imports) || entry.imports.length === 0) continue;
-      // `deep:true` — descend lambda bodies + parse raw `on mount` bodies so a
-      // directly-imported const the importer reads there is seen (see the helper).
       // `boundOut` captures every client-side binding name (each loop vars, lambda
       // params, locals) so a read that is actually a SHADOW of the imported name —
       // not a read of the import binding — cannot cross-mark it. Without this,
@@ -1223,8 +1222,8 @@ export function runCG(input: CgInput): CgOutput {
       // asymmetry is deliberate: excluding a genuinely-imported name that is ALSO
       // locally re-bound is a tolerable UNDER-emit; a leak is never tolerable.
       const clientBound = new Set<string>();
-      const clientRefs = collectClientReferencedIdentsForAST(
-        fileAST, fp, safeRouteMap, { deep: true, boundOut: clientBound });
+      const clientRefs = collectClientReadIdents(
+        fileAST, fp, safeRouteMap, { boundOut: clientBound });
       if (clientRefs.size === 0) continue;
       for (const imp of entry.imports) {
         const absSource = (imp as any).absSource as string | undefined;

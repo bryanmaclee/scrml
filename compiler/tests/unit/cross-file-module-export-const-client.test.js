@@ -15,7 +15,7 @@
  * FIX (emit-client.ts `emitReferencedModuleExportConstLines`) — emit a
  * module-level `export const`/`export let` VALUE binding into the client bundle
  * when — and ONLY when — a §14.8-confidentiality-safe AST reachability gate
- * (`collectClientReferencedIdents`) proves a CLIENT-EMITTED USER node references
+ * (`collectClientReadIdents`, `codegen/client-read-seed.ts`) proves a CLIENT-EMITTED USER node references
  * the identifier as a REAL identifier node. Because the gate walks real
  * IdentExpr nodes in client fn bodies / client top-level reactive wiring (never
  * a text scan over the assembled bundle), a server-only const's identifier —
@@ -268,7 +268,7 @@ describe("GH #263 §6 — §52 server-authority cell init must NOT leak a server
   // S239 re-review residual leak: a `<x server> = <server-only const>` cell
   // (`state-decl` with `isServer === true`) put the const's VALUE into
   // `.client.js`. Its initializer is resolved SERVER-side (the client receives
-  // only a hydration seed), so `collectClientReferencedIdents` must PRUNE the
+  // only a hydration seed), so `collectClientReadIdents` must PRUNE the
   // server-authority state-decl exactly as it prunes a server fn body.
   const NAME = "servercell";
   let dir;

@@ -2918,16 +2918,38 @@ export function hasTemplateInterpolation(value: string): boolean {
 }
 
 /**
- * Rewrite a string attribute value containing `${...}` interpolations into
- * a JS template literal expression.
+ * Iterate each `${…}` interpolation in a template-attribute value, invoking `cb`
+ * with the interior expression source and its `[start, end)` span (`end` is just
+ * past the closing `}`). Honors the SAME escape + brace-nesting rules the codegen
+ * wiring uses: a preceding backslash escapes the `$` (so `\${…}` is literal text,
+ * NOT an interpolation), and `{`/`}` nest.
+ *
+ * This is the SINGLE source of truth for the `${}` scan. `rewriteTemplateAttrValue`
+ * (codegen wiring), the dependency-graph reader-credit (via that function), and the
+ * `templateText` position kind in `expr-positions.ts` all consume it, so the escape /
+ * nesting rules cannot drift between what codegen WIRES and what a reachability pass
+ * BELIEVES is wired.
+ *
+ * §14.8 — the escape branch is the load-bearing one for confidentiality. Before the
+ * scan was centralised here, a reachability consumer with its own naive `${` search
+ * pulled an ESCAPED `\${SECRET}` — literal text codegen never wires — into a
+ * `.client.js`. A consumer that believes MORE is wired than actually is leaks; one
+ * that believes less merely under-emits.
+ *
+ * (The brace scan is string-BLIND — a `}` inside a string literal in the interior
+ * ends the interpolation early. Both codegen and every consumer share that
+ * limitation identically, so they never disagree.)
  */
-export function rewriteTemplateAttrValue(value: string): TemplateAttrResult {
-  const reactiveVars = new Set<string>();
-
-  let result = "`";
+export function forEachTemplateInterpolation(
+  value: string,
+  cb: (interiorExpr: string, start: number, end: number) => void,
+): void {
+  if (typeof value !== "string") return;
   let i = 0;
-
   while (i < value.length) {
+    // A backslash escapes the next char — consume both, so an escaped `\${` can
+    // never open an interpolation (matches the codegen builder's `\\` branch).
+    if (value[i] === '\\' && i + 1 < value.length) { i += 2; continue; }
     if (value[i] === '$' && value[i + 1] === '{') {
       let depth = 1;
       let j = i + 2;
@@ -2936,27 +2958,47 @@ export function rewriteTemplateAttrValue(value: string): TemplateAttrResult {
         else if (value[j] === '}') depth--;
         if (depth > 0) j++;
       }
-      const interiorExpr = value.slice(i + 2, j);
-
-      const rewrittenExpr = interiorExpr.replace(/@([A-Za-z_$][A-Za-z0-9_$]*)/g, (_, name: string) => {
-        reactiveVars.add(name);
-        return `_scrml_reactive_get("${name}")`;
-      });
-
-      result += `\${${rewrittenExpr}}`;
+      cb(value.slice(i + 2, j), i, j + 1);
       i = j + 1;
-    } else if (value[i] === '`') {
-      result += '\\`';
-      i++;
-    } else if (value[i] === '\\' && i + 1 < value.length) {
-      result += value[i] + value[i + 1];
-      i += 2;
     } else {
-      result += value[i];
       i++;
     }
   }
+}
 
+/** Escape a LITERAL text segment for embedding in the emitted `` `…` `` template
+ *  literal — backticks become `` \` ``; an existing backslash-escape passes through
+ *  verbatim (mirrors the codegen builder's per-char literal handling). */
+function escapeTemplateLiteralText(seg: string): string {
+  let out = "";
+  for (let i = 0; i < seg.length; i++) {
+    if (seg[i] === '`') { out += '\\`'; }
+    else if (seg[i] === '\\' && i + 1 < seg.length) { out += seg[i] + seg[i + 1]; i++; }
+    else { out += seg[i]; }
+  }
+  return out;
+}
+
+/**
+ * Rewrite a string attribute value containing `${...}` interpolations into
+ * a JS template literal expression. Uses the shared `forEachTemplateInterpolation`
+ * scanner so the `${}`/escape/nesting rules live in exactly one place.
+ */
+export function rewriteTemplateAttrValue(value: string): TemplateAttrResult {
+  const reactiveVars = new Set<string>();
+
+  let result = "`";
+  let last = 0;
+  forEachTemplateInterpolation(value, (interiorExpr, start, end) => {
+    result += escapeTemplateLiteralText(value.slice(last, start));
+    const rewrittenExpr = interiorExpr.replace(/@([A-Za-z_$][A-Za-z0-9_$]*)/g, (_, name: string) => {
+      reactiveVars.add(name);
+      return `_scrml_reactive_get("${name}")`;
+    });
+    result += `\${${rewrittenExpr}}`;
+    last = end;
+  });
+  result += escapeTemplateLiteralText(value.slice(last));
   result += "`";
 
   return { jsExpr: result, reactiveVars };
