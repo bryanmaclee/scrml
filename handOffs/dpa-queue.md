@@ -40,6 +40,7 @@ Item format + drain protocol: `scrml-support/dpa-scrml.md` + the design DD
 | dpa-023 | **COMPLETE (ADVISORY) dPA 2026-08-05 — awaiting PA/bryan ratification.** ⚑ *This row read "BANKED — UNRUN" until S325 corrected it; the DD had run 24h earlier and its re-ruling request had ALREADY been acted on (option C retired S322).* 5-pole live poll, verified by execution (7 fixtures + 3 emitted programs RUN). **COMPLEMENT, not subsume — the frame is RIGHT and the implementation is missing its middle state.** A `(not to T)` cell has THREE states (`not → pending → T`); the compiler models TWO and the assignment illegally jumps 1→3. Mechanism: `classifyWriteAgainstSpec` is a SOURCE-TEXT comparison that never consults the type, with no third state to return (`type-system.ts:25865`, duplicated `:26799`) — **the whole bug is two lines.** ⚠ Its re-ruling request RETIRED option C (S322). **The `pending` rung is the live open item** (5/5 convergence; conditions: the marker is sugar, drop the "does not color the function" pitch as measured-false, and the rule must be `E-` not `I-`). ⚠ PA-verified FALSE: the DD's §19.6-containment-by-string-rewrite mechanism claim. → `scrml-support/docs/deep-dives/async-boundary-as-state-lifecycle-2026-08-05.md` | S322 block · "bank it" |
 | dpa-024 | **COMPLETE (ADVISORY) dPA 2026-08-10 — Q4 ACTED ON, rest awaiting bryan.** ⚑ *Sat BANKED-UNRUN from S331 to S337 because the PA filed its Q4 under "OWED BY BRYAN" — a question only the DD could answer — while bryan waited on the agreed "say when it's ready" signal. No boot probe reads this file; that is the real reason it was invisible.* **Q4's banked premise was FACTUALLY WRONG and the DD caught it:** self-host-v2 is NOT chartered as a parity target — parity framing was DROPPED S222 (`compiler-reimagining-derisk-2026-06-26/RULING.md:11`, PA-verified verbatim), replaced by D3 conformance-as-oracle S230, and firewalled. **Do not change the charter.** **The real risk is one layer down:** `self-host-v2/progress.md` carries **53** `byte-identical`/`impl#1` mentions as success conditions — the sanctioned tier-2 scaffold became the de-facto definition of done, and nothing said when it stops. Activates the day the parser wave opens (lexer 337/337 done; parser NOT started), because impl#1's `FileAST` carries the **127 in-place decoration fields** skeleton-RULING:13 forbids. **RULED + LANDED S337** (bryan: *"go, take the tier-2 retirement rule"*) → `docs/changes/tier-2-scaffold-retirement-2026-08-10/RULING.md`: 3 clauses (scaffold never an exit criterion · AST-parity FORBIDDEN as an oracle from the parser wave · divergence = freedom exercised not debt owed) + **conformance fork 2 RESOLVED** to the mixed-pipeline bootstrap (FORK RULE rows 1-4 unanimous). No code, no charter change, no rework. **Rival hypothesis SURVIVES, restated:** a canonical AST EXISTS (`types/ast.ts`, day one) but is NOT load-bearing — 16 modules shadow it as `Record<string,unknown>`, which is what lets 127 `_`-prefixed decoration fields typecheck; 24% of open gaps but **39-42% of open HIGHs** (~1.7x severity enrichment); passes the detection-window falsifier (spans S297-S331, static + grep-visible). Subsumes the S331 refuted hypothesis's surviving claim. **Q5 null: MET for impl#1** (off the V1 critical path, terminal, ~76% of gaps outside the class → keep patching; no impl#1 re-architecture proposed), **NOT met for impl#2**. **⚑ THE CORRECTIVE, against the intuition that opened the question:** the never-ending bug loop is mostly NOT architectural — conformance pins ~18 of ~60 surfaces, so ~42 are unpinned and each pass finds genuinely NEW defects. **The loop ends when the CONTRACT is complete, not when the architecture changes.** **R3 NOT recommended** (zero rival architectures survived; only one was ever on the table and it is ratified). → `scrml-support/docs/deep-dives/compiler-architecture-for-this-language-dpa-024-2026-08-10.md` | bryan S331 *"bank the deep-dive"* → **S337 FIRED + Q4 RULED**; §§1-3/Q5 advisory, awaiting ratify/reject |
 | dpa-025 | **COMPLETE (ADVISORY) dPA 2026-08-10 — awaiting bryan.** ⚑ **VERDICT: the answer is an OPTIONAL FIELD, not a missing primitive.** `emitExpr` is ALREADY one choke point; `EmitExprContext` = **33 fields / 32 OPTIONAL / 68 construction sites / 32 degenerate `{mode:"client"}` populating zero** — so a feature works only where someone remembered to thread it. That is the mechanism behind the field-list/parallel-walker class S337 hit four times: not an ABSENT capability, an OPTIONAL one. **★★ Live hazard found en route: `emit-logic.ts:1628` DEFAULTS A MISSING SERVER BOUNDARY TO CLIENT EMIT**, warned only under `SCRML_DEBUG` so silent by default — while `PIPELINE.md` 0.5.1 makes "client JS MUST NOT contain server-context constructs" an explicit CG output invariant (`E-CG-006`) and the source ships `SCRML_STRICT_BOUNDARY=1` **off**. Third fail-open-by-default in this area. **★ The ledger cannot measure itself and it corrupted this DD's own numbers** — 50 of 209 heading-extracted "open" rows are marked resolved in the body; 48 `status=open` entries are absent from a heading extraction entirely (the open gap `g-known-gaps-heading-and-marker-status-can-disagree-silently`). Gap counts quoted anywhere are SOFT until that is fixed. **A dPA pole proposed a retroactive §34 emitter gate that §34.0 had ALREADY declined** verbatim — caught as re-litigation. → `scrml-support/docs/deep-dives/population-first-missing-primitive-2026-08-10.md` | bryan S337 fired · **RUN-not-RATIFY, awaiting ratify/reject** |
+| dpa-026 | **BANKED — UNRUN** (S337, 2026-08-10). **Is `tare` one keyword doing TWO jobs — thunk at module-init, CAPTURE at runtime — or an argument for two?** bryan: *"a, and bank c as its own question."* **The motivating metaphor is the case that does not work.** You tare a scale at RUNTIME, in a handler, after a reading — and thunk semantics structurally cannot express that (PA-verified: a deferred write registers no init thunk, so the bare form promotes module-init's; and `tare(@x, @x)` re-reads at reset time, giving the current value not the calibrated one). Thunk serves CONFIG; it cannot serve CALIBRATION. ⚠ The S337 "thunk, keep the family coherent" ruling was made BEFORE this was known — this reopens it on NEW INFORMATION, not by re-litigation. | bryan S337 · *"bank c as its own question"* |
 | dpa-017 | **RATIFIED S230 2026-06-28** (user "go with your recos") — HYBRID: **B (origin-keyed structural redaction at the compiler-emitted egress sink) = load-bearing FLOOR** · A (same provenance map, static-prove) = demoted DX LAYER, **DEFERRED** · field-level **`reveal("col")`** = sole declassification · dynamic-SQL strip-all+lint · raw/FFI egress fail-closed. PA-verified the stale-cite flag, then authored **SPEC §14.8.9** (Nominal/spec-ahead) + fixed §14.8.7's stale `E-ROUTE-003` cite + minted **E-PROTECT-004 + I-PROTECT-STRIP-001** (§34, land-with-impl) + landed the insight + SPEC-INDEX regen. **Residual = the FLOOR BUILD** → `docs/changes/g-sql-row-protect-leak-2026-06-28/RULING.md` (sPA-slot-able; OQ-1 descriptor-lifetime first). | **RATIFIED** (build pending) |
 
 **⚠ DRAIN-PATH RULE (S319).** The dPA drains **THIS file**. A deliberation banked anywhere else does not exist to it. Witnessed S316→S319: seven conclusions were rung-assigned into `scrml-support/docs/deep-dives/S316-DELIBERATION-QUEUE.md` and the hand-off recorded *"the dPA is RUNNING on Q1/Q2/Q3"* — it was not and never had been; the dPA drained the dpa-018 Pole-D conditional (which IS in this file) instead, and the three deliberations sat unrun across two sessions while every build that depended on them stayed held. **Same shape as the review-floor and `gh issue list` misses: an obligation named in one place, a probe reading another.** Bank deliberations HERE; a separate rung-assignment doc is a companion, never the carrier.
@@ -993,6 +994,68 @@ A verdict on subsume-vs-complement with worked adopter code for **each** of the 
 §3 — one-liner + artifact path + a `(dpa:)` breadcrumb. Artifact → `scrml-support/docs/deep-dives/`. Routes to scrml PA.
 
 ---
+
+
+
+## dpa-026 — Is `tare` one keyword doing two jobs? (thunk vs capture, by position)
+
+```
+id:        dpa-026
+status:    banked
+rung:      R2 minimum
+requested: bryan, S337 (2026-08-10) — "a, and bank c as its own question"
+routes-to: scrml PA
+```
+
+### The question
+
+`tare(@cell)` stores a THUNK evaluated at reset time (S337 ruling — coherent with `default=`, §6.8.1).
+At module-init that is right. **In a deferred position it cannot express the motivating case at all.**
+
+### What is already established — do NOT re-derive
+
+- **Mechanism, PA-verified.** `_emitInitThunkSidecar` returns `null` inside function bodies
+  **deliberately** (*"reassignments must not overwrite the declaration-site init-thunk"*), so a write in
+  a function body / event handler registers NO init thunk. `_scrml_tare` promotes
+  `_scrml_init_fns[name]` — still module-init's. Result: silent wrong baseline, or a permanent no-op if
+  the cell is only ever written deferred.
+- **Ruled S337 (a):** the bare form is RESTRICTED to module-init position; §6.8.4 corrected to stop
+  blessing function bodies. So the language is honest today — the calibration case is simply
+  inexpressible, not silently wrong.
+- **The two-arg form does NOT rescue it.** `tare(@reading, @reading)` stores a thunk that re-reads at
+  reset time → the current value, not the calibrated one. Making it work requires duplicating the
+  calibration expression, which is the redundancy the primitive existed to remove.
+
+### The question proper
+
+**Is the runtime-capture case a real adopter need, and if so what serves it?**
+1. **Nothing** — the honest null. `default=`/`tare` are declaration-time baselines by design; runtime
+   re-baselining is a different concern the language should not grow a primitive for. Name the evidence
+   under which this is right.
+2. **A second form** — e.g. a capture verb distinct from `tare`, snapshot semantics, explicitly NOT in
+   the `default=` family. Two keywords, two honest jobs. ⚠ Weigh against the near-synonym objection the
+   language has used to reject additions before.
+3. **`tare` widens by position** — thunk at module-init, capture when deferred. One keyword, two
+   semantics keyed by where it appears. ⚠ Position-dependent semantics is the shape §6.8.4's own
+   `E-TARE-BEFORE-DECL` exists because of; weigh carefully.
+4. Something else.
+
+### Evidence the DD owes
+- **Is the calibration/re-baseline shape real in the corpus or the adopter clones?** Grep for the
+  pattern (a cell written in a handler that a later `reset()` is expected to return to). If the count is
+  zero, option 1 gets much stronger. ⚠ Remember the corpus-is-artifact kernel: zero occurrences may mean
+  the form was never expressible, which is exactly the case here — so weigh adopter INTENT, not just counts.
+- **What do sibling languages do** for runtime re-baselining of a resettable value?
+- **Does `reset` have the same two-jobs problem?** It resolves default-then-init; ask whether the
+  deferred-write case is coherent for it either.
+
+### Anti-goals
+Do NOT re-litigate the S337 thunk ruling on the config case — it was correct for what was known and is
+still correct there. Do NOT propose removing `tare`. **Do NOT ratify** — RUN-not-RATIFY.
+
+### Report-back
+§3 — one-liner + artifact path + a `(dpa:)` breadcrumb. Artifact → `scrml-support/docs/deep-dives/`.
+Routes to scrml PA.
 
 
 ## dpa-025 — Are we missing a PRIMITIVE whose absence generates these bugs? (population-first)
