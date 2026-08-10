@@ -4,6 +4,32 @@ Home: `compiler/self-host-v2/` (fresh dedicated area — NOT native-parser, NOT 
 Design authority: `scrml-support/docs/deep-dives/compiler-reimagining-lexer-slice-2026-06-26.md`
 (Approach B: pure `fn lex(src) -> Token[]` folding `step(st) -> LexState` over `match (mode, event)`).
 
+> ## ⚑ HOW TO READ THE `impl#1` MENTIONS BELOW — the tier-2 scaffold retirement rule (S337)
+>
+> This file contains **53** mentions of `byte-identical` / `impl#1`, several phrased as success
+> conditions (*"an impl#1 asymmetry matched"*, *"stays byte-identical to impl#1"*). **Under D3
+> (RATIFIED S230, bryan: _"just codes, runtime only. ratify"_) that is NOT the contract.** Two
+> implementations must agree on **which diagnostic CODES fire** and **the RUNTIME effect** — full
+> stop. Message text, emitted-JS shape and **AST** are explicit implementation **freedoms**.
+>
+> **The three binding clauses** (`docs/changes/tier-2-scaffold-retirement-2026-08-10/RULING.md`,
+> authority `(dpa:dpa-024)`):
+>
+> 1. **A tier-2/tier-3 scaffold may NEVER be a wave's exit criterion.** A wave exits on tier-1
+>    (codes + runtime effect), or — where tier-1 cannot yet run — on an explicit written statement of
+>    what tier-1 *would* assert, recorded here before the wave closes.
+> 2. **From the parser wave on, AST-shape parity against impl#1 is FORBIDDEN as an oracle** — not
+>    merely optional. Permitted grading instrument: the **mixed-pipeline bootstrap** (impl#2 parser +
+>    impl#1 analyze/emit, run against real conformance cases). This resolved *conformance fork 2*.
+> 3. **An accepted impl#1 divergence is a FREEDOM EXERCISED, not a DEBT OWED.** Record it as a
+>    decision with its reason. **Only a tier-1 disagreement (codes or runtime effect) is a defect.**
+>    Entries below that file a divergence as "to close" predate this rule — read them under clause 3.
+>
+> **The slice-1 lexer work stands as-is.** Token-diffing a flat token stream was a legitimate
+> scaffold under clause 1 and the 337/337 green is real. What changes is the *parser* wave, where
+> impl#1's `FileAST` carries the 127 in-place decoration fields the skeleton RULING §2 forbids — so
+> parity there would force impl#2 to reproduce exactly the data model it is ruled out of using.
+
 ## Slice-1 scope (built here)
 - Shared substrate: TokenKind (payload enum) · QuoteKind/BracketKind · Span/Token/Cursor/Scan structs ·
   makeCursor/peekCode/advance/isEof · char-class fns · regexAllowedAfter.

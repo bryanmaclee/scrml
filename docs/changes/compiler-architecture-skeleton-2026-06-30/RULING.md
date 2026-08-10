@@ -27,6 +27,14 @@ Loop-until-green (SWE-bench shape: red case = `FAIL_TO_PASS` work-item · green-
 - **Core-IR fork** — thin desugared Core (~7 constructs, codegen = small fold) vs emit-from-typed-surface (TS's ~50-emit-module shape). DEFERRED to a dedicated de-risk slice at the codegen wave (lexer-slice precedent). Only affects the lower+emit phase (the last wave); ratifying the rest does not depend on it.
 
 ## Carried-forward open forks (for the build waves — NOT V1-gating)
+
+> **⚑ CONFORMANCE FORK 2 — RESOLVED S337 (2026-08-10).** The mixed-pipeline bootstrap
+> (impl#2 parser + impl#1 analyze/emit against real conformance cases) is RULED, and within-node
+> AST-shape parity against impl#1 is **FORBIDDEN as an oracle** from the parser wave on — impl#1's
+> `FileAST` carries 127 in-place decoration fields, i.e. exactly the model §2 above forbids, so
+> grading impl#2 by parity would force it to reproduce what the ratified data model rules out.
+> Authority: `docs/changes/tier-2-scaffold-retirement-2026-08-10/RULING.md` (dpa:dpa-024).
+> The remaining forks in this section are untouched.
 From the dives, to resolve at the relevant wave: IR annotation key (NodeId minting — pipeline B'); the `_mut` HAMT leaf-path-vs-transient soundness corner (FBIP fork 1); FBIP pass-placement (standalone fold consuming DG edges — proposed) + the rung-3 measurement gate (real coverage number on the self-host corpus — the RULING's deferral gate); the mixed-pipeline bootstrap (impl#2-lexer + impl#1-rest for early-wave end-to-end conformance — conformance fork 2); the completeness-gate metric (mutation-testing the suite); fleet-parallelism vs shared-compiler-source collision (the S211 discipline = the throughput ceiling).
 
 ## Out of scope (unchanged from S222)
