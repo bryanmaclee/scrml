@@ -1,0 +1,13 @@
+{
+  "id": "reactive-tare-no-arg-pos",
+  "description": "§6.8.4 — `tare()` with no argument is E-TARE-NO-ARG (compile error, §34). The `tare` keyword takes `tare(@cell)` or `tare(@cell, <expr>)`; a bare call names no cell and therefore no default slot to write.",
+  "language-version": "1.0",
+  "spec": "§6.8.4",
+  "source-test": "compiler/tests/unit/tare-emit-and-diagnostics.test.js",
+  "rationale": "§6.8.4 requires an explicit cell argument, mirroring §6.8.2's E-RESET-NO-ARG. The diagnostic is attached at parse time by the expression-parser when the `tare(...)` call is lifted into a `tare-expr` node, and surfaced by the ast-builder wrapper — the same surfacing route the reset sibling uses. E-RESET-NO-ARG must NOT fire: the codes are per-keyword so a message never names a keyword the author did not write.",
+  "expect": {
+    "codes": ["E-TARE-NO-ARG"],
+    "notCodes": ["E-RESET-NO-ARG"],
+    "severity": { "E-TARE-NO-ARG": "error" }
+  }
+}

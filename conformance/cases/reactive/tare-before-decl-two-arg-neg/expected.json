@@ -1,0 +1,15 @@
+{
+  "id": "reactive-tare-before-decl-two-arg-neg",
+  "description": "§6.8.4 — E-TARE-BEFORE-DECL over-fire guard. The rule is BARE-FORM ONLY: `tare(@x, 0)` sets the reset default DIRECTLY and never consults the cell's init expression, so it works from any position — including above the cell's first write, which is exactly the position that is an error for the bare form. The sibling positive case (tare-before-decl-pos) is byte-identical apart from the second argument.",
+  "language-version": "1.0",
+  "spec": "§6.8.4",
+  "source-test": "compiler/tests/unit/tare-emit-and-diagnostics.test.js",
+  "rationale": "The rule's whole justification is 'at this point the cell has no init expression yet, so the call would do nothing'. That is a statement about the BARE form. The two-argument form lowers to `_scrml_default_set(key, () => expr)` — self-contained, never reading `_scrml_init_fns` — and §6.8.2 resolves default BEFORE init, so reset yields the named expression regardless of source position. Firing here rejected a valid program (S337 fix-round-2 finding 1, a regression the ordering check introduced); it landed green because neither the browser test nor the positive conformance case exercised the two-argument branch. A rule that discriminates between two forms needs a case per branch, which is what this pair is.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TARE-BEFORE-DECL", "E-TARE-INVALID-TARGET", "E-TARE-NO-ARG"],
+    "input": [{ "click": "#rs" }],
+    "state": { "x": 0 },
+    "domAnchored": [{ "selector": "#t", "text": "T: 0" }]
+  }
+}

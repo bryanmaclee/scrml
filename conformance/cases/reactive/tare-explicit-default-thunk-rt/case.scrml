@@ -1,0 +1,12 @@
+${
+    <factor> = 10
+    @n = 1
+    tare(@n, @factor * 2)
+    @n = 999
+
+    function bumpFactor() { @factor = 50 }
+    function doReset() { reset(@n) }
+}
+<button id="bp" onclick=bumpFactor()>bump</>
+<button id="rs" onclick=doReset()>reset</>
+<p id="t">T: ${@n}</>

@@ -24975,7 +24975,13 @@ function checkLifecycleFieldAccess(
    */
   function handleResetTextMatches(bareText: string): Array<{ start: number; end: number }> {
     const spans: Array<{ start: number; end: number }> = [];
-    const RESET_CALL_RE = /\breset\s*\(\s*@([A-Za-z_$][A-Za-z0-9_$]*)((?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*)\s*\)/g;
+    // `(?<![.\w$])` NOT `\b`: a `\b` boundary MATCHES AFTER A DOT, so
+    // `@scale.reset(@u.token)` — an ordinary METHOD call on a cell, which the
+    // parser correctly does NOT lift into the keyword node — was treated here as
+    // the `reset` KEYWORD. That both applied a bogus lifecycle revert and
+    // suppressed `@u.token` as a phantom read, dropping a legitimate
+    // E-TYPE-001. The lookbehind pins the keyword to a real statement position.
+    const RESET_CALL_RE = /(?<![.\w$])reset\s*\(\s*@([A-Za-z_$][A-Za-z0-9_$]*)((?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*)\s*\)/g;
     let m: RegExpExecArray | null;
     while ((m = RESET_CALL_RE.exec(bareText)) !== null) {
       const cell = m[1];
@@ -24984,6 +24990,43 @@ function checkLifecycleFieldAccess(
         ? pathPart.split(".").map(s => s.trim()).filter(Boolean)
         : [];
       applyResetToCellField(cell, fieldPath);
+      spans.push({ start: m.index, end: m.index + m[0].length });
+    }
+    return spans;
+  }
+
+  /**
+   * §6.8.4 — the `tare(...)` companion to `handleResetTextMatches`, and the two
+   * differ in the one way that matters.
+   *
+   * `tare(@u.token)` is NOT a read of `u.token` — the target names the cell
+   * whose reset-DEFAULT is being set. Without suppression the target text
+   * reaches `extractAccesses` as an ordinary `binding.field` reference and
+   * fires a FALSE `E-TYPE-001` on a lifecycle-annotated field, while the
+   * byte-identical program written with `reset` compiles clean.
+   *
+   * **It is also NOT a write to the cell, which is why this does NOT call
+   * `applyResetToCellField`.** §6.8.3 reverts a cell's per-access transition
+   * state "based on the resulting written value" — a reset writes the cell, so
+   * its lifecycle state moves. A tare writes only `_scrml_default_fns`; the
+   * cell's value is untouched, so its transition state must be untouched too.
+   * Reverting here would be a second, opposite bug in the same place.
+   *
+   * The span covers ONLY the `tare(@target` prefix, deliberately NOT the whole
+   * call: the two-argument form `tare(@n, @u.token)` carries a real expression
+   * in the second slot, and reads there are genuine reads that must still be
+   * seen. (`reset` has no second argument, so its whole-call span is fine.)
+   */
+  function collectTareTargetSpans(bareText: string): Array<{ start: number; end: number }> {
+    const spans: Array<{ start: number; end: number }> = [];
+    // Same `(?<![.\w$])` discipline as RESET_CALL_RE above, and here it is not
+    // an inherited hazard but one this suppression introduced: the unit test
+    // asserting `obj.tare(x)` is an ordinary method call was true of the PARSER
+    // and false of this pass, so a method named `tare` silently swallowed its
+    // argument's reads.
+    const TARE_TARGET_RE = /(?<![.\w$])tare\s*\(\s*@[A-Za-z_$][A-Za-z0-9_$]*(?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*/g;
+    let m: RegExpExecArray | null;
+    while ((m = TARE_TARGET_RE.exec(bareText)) !== null) {
       spans.push({ start: m.index, end: m.index + m[0].length });
     }
     return spans;
@@ -25102,8 +25145,19 @@ function checkLifecycleFieldAccess(
         // (e.g., escape-hatch raw text). Whitespace-tolerant; matches V5-strict
         // canonical shapes.
         const bareText = statementText(stmt);
-        if (bareText && /\breset\s*\(/.test(bareText)) {
+        if (bareText && /(?<![.\w$])reset\s*\(/.test(bareText)) {
           resetSpans = handleResetTextMatches(bareText);
+        }
+        // §6.8.4 — suppress the `tare(@cell.field)` TARGET as a phantom read.
+        // Deliberately NOT a `continue` and NOT a state revert: unlike reset,
+        // a tare writes no value to the cell (see `collectTareTargetSpans`), and
+        // the two-argument form's second slot holds a real expression whose
+        // reads must still reach `extractAccesses` below. Runs for BOTH the
+        // structured `tare-expr` node and any raw-text path, because the span
+        // is computed from the same statement text `extractAccesses` reads —
+        // so the structured and fallback routes cannot disagree here.
+        if (bareText && /(?<![.\w$])tare\s*\(/.test(bareText)) {
+          resetSpans = resetSpans.concat(collectTareTargetSpans(bareText));
         }
       }
 
@@ -25971,7 +26025,26 @@ function checkLifecycleBindingAccess(
   // The pattern intentionally allows whitespace inside the dotted path so
   // synthetic AST text from the parser (which may insert whitespace around
   // `.` tokens) still matches.
-  const RESET_CALL_RE = /\breset\s*\(\s*@([A-Za-z_$][A-Za-z0-9_$]*)((?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*)\s*\)/g;
+  // `(?<![.\w$])` NOT `\b` — a `\b` boundary MATCHES AFTER A DOT, so an ordinary
+  // METHOD call `@scale.reset(@u.name)` was read as the `reset` KEYWORD here:
+  // it applied a bogus reset-value state transition to the cell AND suppressed
+  // `u.name` as a phantom read, dropping a legitimate diagnostic. This is the
+  // SECOND copy of the pattern; its twin in `checkLifecycleFieldAccess` was
+  // fixed in fix-round-2 and this one was left, which is exactly the drift that
+  // makes a matched pair dangerous — a reader who checks one assumes both.
+  const RESET_CALL_RE = /(?<![.\w$])reset\s*\(\s*@([A-Za-z_$][A-Za-z0-9_$]*)((?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*)\s*\)/g;
+
+  // §6.8.4 — the `tare(...)` TARGET, whose text must be suppressed the same way
+  // a reset target's is (a tare target names the cell whose reset-DEFAULT is
+  // being set; it reads nothing). Two differences from RESET_CALL_RE, both
+  // load-bearing and both the same as in the struct-field tracker:
+  //   - NO state transition is applied. §6.8.3 reverts per-access state "based
+  //     on the resulting written value"; a tare writes no value to the cell, so
+  //     its transition state must not move.
+  //   - the span covers `tare(@target` ONLY, not the whole call, because the
+  //     two-argument form's second slot holds a real expression whose reads are
+  //     genuine and must still be seen.
+  const TARE_TARGET_RE = /(?<![.\w$])tare\s*\(\s*@[A-Za-z_$][A-Za-z0-9_$]*(?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*/g;
 
   // Detect `<bindingName>.<fieldName>` field access. Bind-scoped — only tracked
   // bindings count.
@@ -26148,6 +26221,17 @@ function checkLifecycleBindingAccess(
       // If `resetValueStates` is undefined OR the cell isn't tracked OR
       // the classification is null: leave state unchanged. The reset span
       // is still recorded so Pass 3 suppresses the phantom read match.
+    }
+
+    // §6.8.4 (fix-round-3 finding 2) — Pass 0b: the tare sibling. Round 2 gave
+    // the struct-field tracker this suppression and MISSED this one, so
+    // `tare(@u.name)` phantom-read here while the byte-identical `reset(@u.name)`
+    // compiled clean — the same defect, on the sibling surface. Spans only: no
+    // state transition, for the reason given at TARE_TARGET_RE.
+    TARE_TARGET_RE.lastIndex = 0;
+    let tt: RegExpExecArray | null;
+    while ((tt = TARE_TARGET_RE.exec(text)) !== null) {
+      resetSpans.push({ start: tt.index, end: tt.index + tt[0].length });
     }
 
     // Pass 1: discover transition() calls — advance state.

@@ -1,0 +1,13 @@
+{
+  "id": "reactive-tare-before-decl-pos",
+  "description": "§6.8.4 — a MODULE-INIT `tare(@x)` written ABOVE the cell's first write is E-TARE-BEFORE-DECL. State declarations hoist (§6.9) but module-init RUNS IN SOURCE ORDER, so the promotion executes with no init expression registered: it does nothing, and `reset(@x)` falls back to re-running the LAST write — INCREMENTING. Pins the rejection so the silent shape cannot come back.",
+  "language-version": "1.0",
+  "spec": "§6.8.4",
+  "source-test": "compiler/tests/browser/browser-tare-forward-position.test.js",
+  "rationale": "This is the defect §6.8.4 exists to dissolve, re-created by the feature meant to fix it — measured by execution: the emitted bundle for this exact source yields @x = 2 after reset, with zero diagnostics before the rule. `tare` is the one keyword whose entire contract is that SOURCE POSITION is the discriminator, so a call positioned where it provably cannot promote anything is a mistake, not a style choice. Rejecting is also the reversible direction on brand-new surface: relaxing an error later (e.g. if a 'pending tare' semantic is ever ruled) is easy, while un-accepting a silent wrong answer is not. Deliberately scoped to module-init position — a tare inside a function / handler / lambda body runs later and is legal wherever written (reactive-tare-first-write-baseline-rt and the browser test cover those).",
+  "expect": {
+    "codes": ["E-TARE-BEFORE-DECL"],
+    "notCodes": ["E-TARE-INVALID-TARGET", "E-STATE-UNDECLARED"],
+    "severity": { "E-TARE-BEFORE-DECL": "error" }
+  }
+}

@@ -1,0 +1,9 @@
+${
+    @x = 0
+    @x = @x + 1
+    function calibrate() {
+        tare(@x)
+    }
+}
+<button id="cal" onclick=calibrate()>calibrate</>
+<p id="t">T: ${@x}</>

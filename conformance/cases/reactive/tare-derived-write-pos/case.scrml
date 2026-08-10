@@ -1,0 +1,6 @@
+${
+    <x> = 1
+    const <doubled> = @x * 2
+    tare(@doubled)
+}
+<p id="d">${@doubled}</>

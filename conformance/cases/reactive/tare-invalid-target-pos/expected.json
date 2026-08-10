@@ -1,0 +1,13 @@
+{
+  "id": "reactive-tare-invalid-target-pos",
+  "description": "§6.8.4 — `tare(42)` names a literal, not a cell, and is E-TARE-INVALID-TARGET (compile error, §34). `tare` accepts only the three canonical cell shapes `reset` accepts: `tare(@cell)`, `tare(@compound)`, `tare(@compound.field)`.",
+  "language-version": "1.0",
+  "spec": "§6.8.4",
+  "source-test": "compiler/tests/unit/tare-emit-and-diagnostics.test.js",
+  "rationale": "§6.8.4 shares §6.8.2's target grammar because both keywords address the same cell registries, but the CODE is deliberately distinct from E-RESET-INVALID-TARGET. A single code carrying two unrelated meanings is a standing hazard in this catalog, and reusing the reset code would print the word 'reset' at a `tare` call site — naming a keyword the author did not write. Emitted by `validateTareExpr` in SYM PASS 14 (B22), the same pass that shape-checks reset targets.",
+  "expect": {
+    "codes": ["E-TARE-INVALID-TARGET"],
+    "notCodes": ["E-RESET-INVALID-TARGET"],
+    "severity": { "E-TARE-INVALID-TARGET": "error" }
+  }
+}

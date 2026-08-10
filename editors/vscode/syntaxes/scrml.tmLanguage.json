@@ -727,7 +727,7 @@
 
     "logic-keywords": {
       "name": "keyword.control.scrml",
-      "match": "\\b(let|const|lin|var|if|else|else-if|for|while|of|in|do|return|break|continue|throw|try|catch|finally|switch|case|default|new|delete|typeof|instanceof|void|async|await|yield|import|export|from|as|is|class|extends|super|this|navigate|using|with|function|fn|pure|server|match|lift|type|enum|struct|engine|machine|errors|onTransition|onTimeout|onIdle|onchange|channel|schema|program|render|snippet|component|theme|defaults|watches|authority|not|req|fail|pinned|reset|derived|history|given|partial|when|transaction|test-bind)\\b"
+      "match": "\\b(let|const|lin|var|if|else|else-if|for|while|of|in|do|return|break|continue|throw|try|catch|finally|switch|case|default|new|delete|typeof|instanceof|void|async|await|yield|import|export|from|as|is|class|extends|super|this|navigate|using|with|function|fn|pure|server|match|lift|type|enum|struct|engine|machine|errors|onTransition|onTimeout|onIdle|onchange|channel|schema|program|render|snippet|component|theme|defaults|watches|authority|not|req|fail|pinned|reset|tare|derived|history|given|partial|when|transaction|test-bind)\\b"
     },
 
     "top-level-keywords": {

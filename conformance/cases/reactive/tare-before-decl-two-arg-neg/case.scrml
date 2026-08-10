@@ -1,0 +1,10 @@
+${
+    tare(@x, 0)
+    @x = 0
+    @x = @x + 1
+    function doReset() {
+        reset(@x)
+    }
+}
+<button id="rs" onclick=doReset()>reset</>
+<p id="t">T: ${@x}</>

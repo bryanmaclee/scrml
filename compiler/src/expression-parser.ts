@@ -31,7 +31,7 @@ import type {
   MemberExpr, IndexExpr, CallExpr, NewExpr,
   LambdaExpr, LambdaParam,
   CastExpr, MatchExpr, MapLitExpr, MapEntry, SqlRefExpr, InputStateRefExpr, EscapeHatchExpr,
-  ResetExpr,
+  ResetExpr, TareExpr,
 } from "./types/ast.ts";
 
 // ---------------------------------------------------------------------------
@@ -2689,6 +2689,66 @@ export function esTreeToExprNode(
           const target = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
           return { kind: "reset-expr", span, target } satisfies ResetExpr;
         }
+
+        // §6.8.4 — `tare(@cell)` / `tare(@cell, <expr>)` is a language keyword
+        // expression, the statement-position member of the §6.8 default family.
+        // Same lift discipline as `reset` above: only a BARE Identifier callee
+        // is lifted, so an ordinary method call `obj.tare(x)` is untouched.
+        // Target-shape validation is deferred to SYM (B22); only arity /
+        // spread shape is diagnosed here, and the diagnostic rides on the node
+        // for the ast-builder wrapper to surface as a TABError.
+        if (calleeName === "tare") {
+          const hasSpread = rawArgs.some(a => a.type === "SpreadElement");
+          if (rawArgs.length === 0) {
+            // Zero-arg form: synthesize a canonical absence target (§42) so the
+            // node keeps a valid shape; the diagnostic stops codegen anyway.
+            const absentTarget: LitExpr = {
+              kind: "lit", span,
+              raw: "not", value: null,
+              litType: "not",
+            };
+            return {
+              kind: "tare-expr", span,
+              target: absentTarget,
+              diagnostic: {
+                code: "E-TARE-NO-ARG",
+                message:
+                  "E-TARE-NO-ARG: `tare()` called with no argument. The `tare` keyword "
+                  + "requires an explicit cell argument: `tare(@cell)` (promote the "
+                  + "cell's current init thunk) or `tare(@cell, <expr>)` (set the reset "
+                  + "default explicitly) (§6.8.4).",
+              },
+            } satisfies TareExpr;
+          }
+          if (rawArgs.length > 2 || hasSpread) {
+            // Too many args / spread: keep the first non-spread argument as the
+            // target so B22 can still shape-check it, and report the arity.
+            const firstArg = rawArgs.find(a => a.type !== "SpreadElement") as ESNode | undefined;
+            const overTarget: ExprNode = firstArg
+              ? esTreeToExprNode(firstArg, filePath, baseOffset, rawSource)
+              : { kind: "lit", span, raw: "not", value: null, litType: "not" } satisfies LitExpr;
+            const detail = hasSpread
+              ? "spread arguments are not permitted"
+              : `expected one or two arguments, got ${rawArgs.length}`;
+            return {
+              kind: "tare-expr", span,
+              target: overTarget,
+              diagnostic: {
+                code: "E-TARE-NO-ARG",
+                message:
+                  `E-TARE-NO-ARG: \`tare(...)\` ${detail}. The \`tare\` keyword takes `
+                  + `\`tare(@cell)\` or \`tare(@cell, <expr>)\` (§6.8.4).`,
+              },
+            } satisfies TareExpr;
+          }
+          // Happy path: one argument (bare promote) or two (explicit default).
+          const tareTarget = esTreeToExprNode(rawArgs[0] as ESNode, filePath, baseOffset, rawSource);
+          if (rawArgs.length === 2) {
+            const defaultExpr = esTreeToExprNode(rawArgs[1] as ESNode, filePath, baseOffset, rawSource);
+            return { kind: "tare-expr", span, target: tareTarget, defaultExpr } satisfies TareExpr;
+          }
+          return { kind: "tare-expr", span, target: tareTarget } satisfies TareExpr;
+        }
       }
 
       // Normal call
@@ -3314,6 +3374,14 @@ export function emitStringFromTree(node: ExprNode): string {
       return `reset(${emitStringFromTree(node.target)})`;
     }
 
+    case "tare-expr": {
+      // §6.8.4 — round-trip emit as `tare(<target>)` / `tare(<target>, <expr>)`.
+      // Same diagnostic-stability rule as `reset-expr` above.
+      return node.defaultExpr
+        ? `tare(${emitStringFromTree(node.target)}, ${emitStringFromTree(node.defaultExpr)})`
+        : `tare(${emitStringFromTree(node.target)})`;
+    }
+
     case "map-lit": {
       // §59.3 — round-trip emit as `[:]` (empty) or `[k: v, …]` (map literal).
       if (node.entries.length === 0) return "[:]";
@@ -3551,6 +3619,18 @@ export function deepEqualExprNode(a: ExprNode, b: ExprNode): boolean {
       // annotation — treated as equal regardless of presence so that round-
       // tripped (re-parsed-from-emit) trees compare equal to the original.
       return deepEqualExprNode(a.target, bNode.target);
+    }
+
+    case "tare-expr": {
+      const bNode = b as typeof a;
+      // §6.8.4 — structural on target AND the optional explicit default. The
+      // one-arg and two-arg forms are NOT equal (they mean different things);
+      // the diagnostic field is ignored, as for `reset-expr`.
+      if (!!a.defaultExpr !== !!bNode.defaultExpr) return false;
+      if (!deepEqualExprNode(a.target, bNode.target)) return false;
+      return a.defaultExpr && bNode.defaultExpr
+        ? deepEqualExprNode(a.defaultExpr, bNode.defaultExpr)
+        : true;
     }
 
     case "map-lit": {
@@ -4071,6 +4151,16 @@ export function forEachIdentInExprNode(
       return;
     }
 
+    case "tare-expr": {
+      const n = node as TareExpr;
+      // §6.8.4 — same reasoning as `reset-expr`: the target's `@cell` must be
+      // visible to identifier-based analyses. This is also what gives
+      // `tare(@undeclared)` its `E-STATE-UNDECLARED` for free.
+      forEachIdentInExprNode(n.target, callback);
+      if (n.defaultExpr) forEachIdentInExprNode(n.defaultExpr, callback);
+      return;
+    }
+
     case "map-lit": {
       // §59.3 — recurse into every entry key + value so identifier-based
       // analyses (dep-graph, reactive deps) see @cell reads in either position.
@@ -4166,6 +4256,14 @@ export function exprNodeContainsCall(node: ExprNode, calleeName?: string): boole
       // Recurse into target so a call appearing inside the target counts.
       return exprNodeContainsCall((node as ResetExpr).target, calleeName);
     }
+    case "tare-expr": {
+      // Same reasoning as `reset-expr`: a lifted keyword expression is not a
+      // call. Recurse into both operand slots so a genuine call nested in the
+      // target or in the explicit default expression still counts.
+      const n = node as TareExpr;
+      return exprNodeContainsCall(n.target, calleeName)
+        || (!!n.defaultExpr && exprNodeContainsCall(n.defaultExpr, calleeName));
+    }
     case "map-lit": return (node as MapLitExpr).entries.some(e =>
       exprNodeContainsCall(e.key, calleeName) || exprNodeContainsCall(e.value, calleeName));
     default: { const _never: never = node; return false; }
@@ -4227,6 +4325,124 @@ export function forEachCallInExprNode(node: ExprNode, cb: (call: CallExpr) => vo
     case "cast": forEachCallInExprNode((node as CastExpr).expression, cb); return;
     case "match-expr": forEachCallInExprNode((node as MatchExpr).subject, cb); return;
     case "reset-expr": forEachCallInExprNode((node as ResetExpr).target, cb); return;
+    case "tare-expr": {
+      const n = node as TareExpr;
+      forEachCallInExprNode(n.target, cb);
+      if (n.defaultExpr) forEachCallInExprNode(n.defaultExpr, cb);
+      return;
+    }
+    default: { const _never: never = node; return; }
+  }
+}
+
+/**
+ * Options for the §6.8 reset-family walk.
+ *
+ * `skipDeferredBodies` — do not descend into a lambda body. Set ONLY by the
+ * §6.8.4 tare-before-declaration check, which reasons about module-init SOURCE
+ * ORDER and must therefore ignore code that runs later. Every other consumer
+ * takes the default full walk and is told, per visited node, whether the walk
+ * reached it through a lambda (`inDeferredExpr`) — which §6.8.4's
+ * deferred-position rule needs, since a bare tare inside a lambda does not run
+ * at module-init even though the lambda is written there.
+ */
+export interface ResetFamilyWalkOpts {
+  skipDeferredBodies?: boolean;
+}
+
+/**
+ * Walk an ExprNode tree and invoke `cb` once per §6.8 RESET-FAMILY node —
+ * `ResetExpr` (§6.8.2) and `TareExpr` (§6.8.4).
+ *
+ * ONE traversal, two typed façades (`forEachResetExprInExprNode` /
+ * `forEachTareExprInExprNode`). The two keyword expressions have the same
+ * shape and the same consumers (ast-builder parse-diagnostic surfacing, SYM
+ * B22 target validation), so giving `tare` its own copy of this 60-line walker
+ * would create a second place that answers the same traversal question and can
+ * drift from the first — the failure shape primary.map.md invariant 49 records
+ * for §18.5. Both façades filter this one walk instead.
+ */
+function forEachResetFamilyExprInExprNode(
+  node: ExprNode,
+  cb: (familyNode: ResetExpr | TareExpr, inDeferredExpr: boolean) => void,
+  opts?: ResetFamilyWalkOpts,
+  inDeferredExpr: boolean = false,
+): void {
+  if (!node) return;
+  const recur = (n: ExprNode, c: typeof cb, deferred: boolean = inDeferredExpr) =>
+    forEachResetFamilyExprInExprNode(n, c, opts, deferred);
+  switch (node.kind) {
+    case "reset-expr": {
+      const n = node as ResetExpr;
+      cb(n, inDeferredExpr);
+      recur(n.target, cb);
+      return;
+    }
+    case "tare-expr": {
+      const n = node as TareExpr;
+      cb(n, inDeferredExpr);
+      recur(n.target, cb);
+      if (n.defaultExpr) recur(n.defaultExpr, cb);
+      return;
+    }
+    case "ident": case "lit": case "sql-ref": case "input-state-ref": case "escape-hatch": return;
+    case "array": { for (const el of (node as ArrayExpr).elements) recur(el as ExprNode, cb); return; }
+    case "object": {
+      for (const p of (node as ObjectExpr).props) {
+        if (p.kind === "prop") { if (typeof p.key !== "string") recur(p.key as ExprNode, cb); recur(p.value, cb); }
+        else if (p.kind === "spread") recur(p.argument, cb);
+      }
+      return;
+    }
+    case "spread": recur((node as SpreadExpr).argument, cb); return;
+    case "unary": recur((node as UnaryExpr).argument, cb); return;
+    case "binary": { const n = node as BinaryExpr; recur(n.left, cb); recur(n.right, cb); return; }
+    case "assign": { const n = node as AssignExpr; recur(n.target, cb); recur(n.value, cb); return; }
+    case "ternary": { const n = node as TernaryExpr; recur(n.condition, cb); recur(n.consequent, cb); recur(n.alternate, cb); return; }
+    case "member": recur((node as MemberExpr).object, cb); return;
+    case "index": { const n = node as IndexExpr; recur(n.object, cb); recur(n.index, cb); return; }
+    case "call": {
+      const n = node as CallExpr;
+      recur(n.callee, cb);
+      for (const a of n.args) recur(a as ExprNode, cb);
+      return;
+    }
+    case "new": {
+      const n = node as NewExpr;
+      recur(n.callee, cb);
+      for (const a of n.args) recur(a as ExprNode, cb);
+      return;
+    }
+    case "lambda": {
+      // A lambda BODY is DEFERRED code: it runs when the lambda is called, not
+      // where it is written. A caller reasoning about module-init SOURCE ORDER
+      // (the §6.8.4 tare-before-declaration check) must not look inside one, or
+      // it will reject a perfectly legal `() => tare(@x)` written above the
+      // declaration. Every other caller wants the full walk — a malformed
+      // reset()/tare() inside a lambda body is still a parse-time error, and
+      // those do not respect scope boundaries.
+      if (opts?.skipDeferredBodies) return;
+      const n = node as LambdaExpr;
+      // A param DEFAULT evaluates at call time too, but it is not the lambda's
+      // body; both are deferred relative to where the lambda is written, so the
+      // flag is set for each — §6.8.4's position rule needs to know a bare tare
+      // here does not run at module-init.
+      for (const p of n.params) {
+        if (p.defaultValue) recur(p.defaultValue, cb, true);
+      }
+      if (n.body.kind === "expr") recur(n.body.value, cb, true);
+      // Block bodies are EscapeHatchExpr in Phase 1; cannot recurse structurally.
+      return;
+    }
+    case "cast": recur((node as CastExpr).expression, cb); return;
+    case "match-expr": recur((node as MatchExpr).subject, cb); return;
+    case "map-lit": {
+      for (const e of (node as MapLitExpr).entries) {
+        recur(e.key, cb);
+        recur(e.value, cb);
+      }
+      return;
+    }
     default: { const _never: never = node; return; }
   }
 }
@@ -4241,66 +4457,26 @@ export function forEachCallInExprNode(node: ExprNode, cb: (call: CallExpr) => vo
  * expression — e.g. `if (cond) reset()`).
  */
 export function forEachResetExprInExprNode(node: ExprNode, cb: (resetNode: ResetExpr) => void): void {
-  if (!node) return;
-  switch (node.kind) {
-    case "reset-expr": {
-      const n = node as ResetExpr;
-      cb(n);
-      forEachResetExprInExprNode(n.target, cb);
-      return;
-    }
-    case "ident": case "lit": case "sql-ref": case "input-state-ref": case "escape-hatch": return;
-    case "array": { for (const el of (node as ArrayExpr).elements) forEachResetExprInExprNode(el as ExprNode, cb); return; }
-    case "object": {
-      for (const p of (node as ObjectExpr).props) {
-        if (p.kind === "prop") { if (typeof p.key !== "string") forEachResetExprInExprNode(p.key as ExprNode, cb); forEachResetExprInExprNode(p.value, cb); }
-        else if (p.kind === "spread") forEachResetExprInExprNode(p.argument, cb);
-      }
-      return;
-    }
-    case "spread": forEachResetExprInExprNode((node as SpreadExpr).argument, cb); return;
-    case "unary": forEachResetExprInExprNode((node as UnaryExpr).argument, cb); return;
-    case "binary": { const n = node as BinaryExpr; forEachResetExprInExprNode(n.left, cb); forEachResetExprInExprNode(n.right, cb); return; }
-    case "assign": { const n = node as AssignExpr; forEachResetExprInExprNode(n.target, cb); forEachResetExprInExprNode(n.value, cb); return; }
-    case "ternary": { const n = node as TernaryExpr; forEachResetExprInExprNode(n.condition, cb); forEachResetExprInExprNode(n.consequent, cb); forEachResetExprInExprNode(n.alternate, cb); return; }
-    case "member": forEachResetExprInExprNode((node as MemberExpr).object, cb); return;
-    case "index": { const n = node as IndexExpr; forEachResetExprInExprNode(n.object, cb); forEachResetExprInExprNode(n.index, cb); return; }
-    case "call": {
-      const n = node as CallExpr;
-      forEachResetExprInExprNode(n.callee, cb);
-      for (const a of n.args) forEachResetExprInExprNode(a as ExprNode, cb);
-      return;
-    }
-    case "new": {
-      const n = node as NewExpr;
-      forEachResetExprInExprNode(n.callee, cb);
-      for (const a of n.args) forEachResetExprInExprNode(a as ExprNode, cb);
-      return;
-    }
-    case "lambda": {
-      // Walk default values (outer scope). Body is a fresh scope, but a
-      // malformed reset() inside a lambda body should still be surfaced —
-      // unlike free-identifier capture, parse-time syntax errors don't
-      // respect scope boundaries.
-      const n = node as LambdaExpr;
-      for (const p of n.params) {
-        if (p.defaultValue) forEachResetExprInExprNode(p.defaultValue, cb);
-      }
-      if (n.body.kind === "expr") forEachResetExprInExprNode(n.body.value, cb);
-      // Block bodies are EscapeHatchExpr in Phase 1; cannot recurse structurally.
-      return;
-    }
-    case "cast": forEachResetExprInExprNode((node as CastExpr).expression, cb); return;
-    case "match-expr": forEachResetExprInExprNode((node as MatchExpr).subject, cb); return;
-    case "map-lit": {
-      for (const e of (node as MapLitExpr).entries) {
-        forEachResetExprInExprNode(e.key, cb);
-        forEachResetExprInExprNode(e.value, cb);
-      }
-      return;
-    }
-    default: { const _never: never = node; return; }
-  }
+  forEachResetFamilyExprInExprNode(node, (n) => {
+    if (n.kind === "reset-expr") cb(n);
+  });
+}
+
+/**
+ * Walk an ExprNode tree and invoke `cb` once per `TareExpr` encountered.
+ *
+ * §6.8.4 — sibling of `forEachResetExprInExprNode`, sharing its traversal.
+ * Consumers: the ast-builder's parse-diagnostic surfacing (`E-TARE-NO-ARG`)
+ * and SYM's B22 target validation (`E-TARE-INVALID-TARGET` / `E-DERIVED-WRITE`).
+ */
+export function forEachTareExprInExprNode(
+  node: ExprNode,
+  cb: (tareNode: TareExpr, inDeferredExpr: boolean) => void,
+  opts?: ResetFamilyWalkOpts,
+): void {
+  forEachResetFamilyExprInExprNode(node, (n, inDeferredExpr) => {
+    if (n.kind === "tare-expr") cb(n, inDeferredExpr);
+  }, opts);
 }
 
 /**
@@ -4362,6 +4538,12 @@ export function forEachMapLitExprInExprNode(node: ExprNode, cb: (mapNode: MapLit
     case "cast": forEachMapLitExprInExprNode((node as CastExpr).expression, cb); return;
     case "match-expr": forEachMapLitExprInExprNode((node as MatchExpr).subject, cb); return;
     case "reset-expr": forEachMapLitExprInExprNode((node as ResetExpr).target, cb); return;
+    case "tare-expr": {
+      const n = node as TareExpr;
+      forEachMapLitExprInExprNode(n.target, cb);
+      if (n.defaultExpr) forEachMapLitExprInExprNode(n.defaultExpr, cb);
+      return;
+    }
     default: { const _never: never = node; return; }
   }
 }
@@ -4417,6 +4599,11 @@ export function exprNodeContainsAssignment(node: ExprNode): boolean {
     case "cast": return exprNodeContainsAssignment((node as CastExpr).expression);
     case "match-expr": return exprNodeContainsAssignment((node as MatchExpr).subject);
     case "reset-expr": return exprNodeContainsAssignment((node as ResetExpr).target);
+    case "tare-expr": {
+      const n = node as TareExpr;
+      return exprNodeContainsAssignment(n.target)
+        || (!!n.defaultExpr && exprNodeContainsAssignment(n.defaultExpr));
+    }
     case "map-lit": return (node as MapLitExpr).entries.some(e =>
       exprNodeContainsAssignment(e.key) || exprNodeContainsAssignment(e.value));
     default: { const _never: never = node; return false; }
@@ -4465,6 +4652,11 @@ export function exprNodeContainsMemberAccess(node: ExprNode, props: string[]): b
     case "cast": return exprNodeContainsMemberAccess((node as CastExpr).expression, props);
     case "match-expr": return exprNodeContainsMemberAccess((node as MatchExpr).subject, props);
     case "reset-expr": return exprNodeContainsMemberAccess((node as ResetExpr).target, props);
+    case "tare-expr": {
+      const n = node as TareExpr;
+      return exprNodeContainsMemberAccess(n.target, props)
+        || (!!n.defaultExpr && exprNodeContainsMemberAccess(n.defaultExpr, props));
+    }
     case "map-lit": return (node as MapLitExpr).entries.some(e =>
       exprNodeContainsMemberAccess(e.key, props) || exprNodeContainsMemberAccess(e.value, props));
     default: { const _never: never = node; return false; }

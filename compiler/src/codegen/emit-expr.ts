@@ -700,38 +700,51 @@ export function emitExpr(node: ExprNode, ctx: EmitExprContext): string {
       // Defensive fallback for unexpected shapes: emit a comment marker.
       // B22 should have rejected them, but defensive code keeps codegen
       // crash-free if a malformed AST sneaks through.
-      const target = node.target;
-      if (target.kind === "ident") {
-        const name = target.name;
-        if (typeof name === "string" && name.startsWith("@")) {
-          const bare = name.slice(1);
-          return `_scrml_reset(${JSON.stringify(bare)})`;
-        }
-        // Non-`@` IdentExpr: B22 should have rejected. Fall through to marker.
-      } else if (target.kind === "member") {
-        // Walk the MemberExpr chain to a dotted-string path. Root must be
-        // an `@`-prefixed IdentExpr (B22 enforced shape).
-        const path: string[] = [];
-        let cursor: ExprNode = target;
-        let valid = true;
-        while (cursor.kind === "member") {
-          const m = cursor as MemberExpr;
-          if (typeof m.property !== "string") { valid = false; break; }
-          path.unshift(m.property);
-          cursor = m.object;
-        }
-        if (valid && cursor.kind === "ident") {
-          const rootName = (cursor as IdentExpr).name;
-          if (typeof rootName === "string" && rootName.startsWith("@")) {
-            const fullPath = [rootName.slice(1), ...path].join(".");
-            return `_scrml_reset(${JSON.stringify(fullPath)})`;
-          }
-        }
-        // Non-canonical member chain: B22 should have rejected. Fall through.
+      const storageKey = resetFamilyStorageKey(node.target);
+      if (storageKey !== null) {
+        return `_scrml_reset(${JSON.stringify(storageKey)})`;
       }
       // Defensive marker for unrecognized target shapes. Keeps emitted JS
       // syntactically valid as an expression-statement comment-prefixed call.
       return `/* C5: unexpected reset target shape; B22 should have rejected */ undefined`;
+    }
+    case "tare-expr": {
+      // §6.8.4 — `tare(@cell)` / `tare(@cell, <expr>)`, the statement-position
+      // member of the §6.8 default family. Both forms write the SAME runtime
+      // slot `default=` writes (`_scrml_default_fns`), which `_scrml_reset`
+      // consults BEFORE the init thunk (§6.8.2). That slot is written only by
+      // author intent — no cell write ever clobbers it — which is exactly why
+      // an implicitly-declared cell written more than once needs a way to
+      // reach it.
+      //
+      // Bare form → `_scrml_tare(key)`: a pure RUNTIME promotion of whatever
+      // init thunk is registered AT THE MOMENT THE STATEMENT RUNS. The
+      // compiler deliberately does NOT work out which write is the baseline —
+      // the author placed the call, and source position does the
+      // discriminating. Two structurally identical programs want opposite
+      // answers (a counter wants the first write, a config merge wants the
+      // last), so no static rule can serve both.
+      //
+      // Two-argument form → `_scrml_default_set(key, () => <expr>)`: byte-for-
+      // byte the lowering the `default=` attribute already uses. A THUNK, not
+      // a snapshot — §6.8.1: "the attribute stores the expression, not a
+      // snapshot" — so the expression is evaluated AT RESET TIME.
+      const tareKey = resetFamilyStorageKey(node.target);
+      if (tareKey === null) {
+        // B22 should have rejected via E-TARE-INVALID-TARGET. Defensive marker.
+        return `/* §6.8.4: unexpected tare target shape; B22 should have rejected */ undefined`;
+      }
+      if (node.defaultExpr) {
+        const body = emitExpr(node.defaultExpr, ctx);
+        // GITI-014 — `() => {a: 1}` mis-parses as a block statement; the
+        // paren-wrap is the same guard `_emitInitThunkSidecar` applies.
+        const wrapped =
+          arrowBodyNeedsParens(node.defaultExpr) || arrowBodyStringNeedsParens(body)
+            ? `(${body})`
+            : body;
+        return `_scrml_default_set(${JSON.stringify(tareKey)}, () => ${wrapped})`;
+      }
+      return `_scrml_tare(${JSON.stringify(tareKey)})`;
     }
     default: {
       // Exhaustiveness guard — if a new kind is added and not handled,
@@ -3644,6 +3657,47 @@ function emitNew(node: NewExpr, ctx: EmitExprContext): string {
  */
 export function arrowBodyNeedsParens(value: ExprNode): boolean {
   return value.kind === "object";
+}
+
+/**
+ * §6.8 — the storage KEY for a reset-family target (`reset(...)` §6.8.2 and
+ * `tare(...)` §6.8.4). Both keyword expressions accept the same three target
+ * shapes and both address the same registries, so they resolve the key through
+ * ONE function rather than two copies that can drift.
+ *
+ *   - `@cell`                → `"cell"`               (top-level cell, or a
+ *                                                      compound parent — the
+ *                                                      runtime detects that by
+ *                                                      absence of a thunk)
+ *   - `@compound.field`      → `"compound.field"`     (multi-level OK, §6.3.5)
+ *
+ * Returns `null` for any other shape. Both callers treat `null` as "SYM's B22
+ * target validation should already have rejected this" and emit a defensive
+ * marker rather than malformed JS.
+ */
+function resetFamilyStorageKey(target: ExprNode): string | null {
+  if (target.kind === "ident") {
+    const name = (target as IdentExpr).name;
+    if (typeof name === "string" && name.startsWith("@")) return name.slice(1);
+    return null;
+  }
+  if (target.kind === "member") {
+    // Walk the MemberExpr chain to a dotted-string path. Root must be an
+    // `@`-prefixed IdentExpr (the shape B22 enforces).
+    const path: string[] = [];
+    let cursor: ExprNode = target;
+    while (cursor.kind === "member") {
+      const m = cursor as MemberExpr;
+      if (typeof m.property !== "string") return null;
+      path.unshift(m.property);
+      cursor = m.object;
+    }
+    if (cursor.kind !== "ident") return null;
+    const rootName = (cursor as IdentExpr).name;
+    if (typeof rootName !== "string" || !rootName.startsWith("@")) return null;
+    return [rootName.slice(1), ...path].join(".");
+  }
+  return null;
 }
 
 /**

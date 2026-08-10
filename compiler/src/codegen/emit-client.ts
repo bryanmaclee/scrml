@@ -1239,6 +1239,10 @@ function detectRuntimeChunks(fileAST: any, ctx: CompileContext): void {
       if (needEquality && !foundEquality && kind === "binary" && (e.op === "==" || e.op === "!=")) {
         foundEquality = true;
       } else if (needReset && !foundReset && kind === "reset-expr") {
+        // §6.8.4's `tare-expr` deliberately does NOT light this gate: `tare`
+        // has its OWN runtime chunk and is activated by the POST-EMIT
+        // `_scrml_tare(` scan below. Lighting 'reset' here would ship the whole
+        // reset runtime to a tare-only page that never calls reset.
         foundReset = true;
       }
       // Structural-skip: if this node is a structural AST kind, the outer
@@ -2847,6 +2851,14 @@ export function generateClientJs(ctx: CompileContext): string {
   const POST_EMIT_HELPER_CHUNK_GATES: Array<[string, string]> = [
     ["_scrml_structural_eq(", "equality"],
     ["_scrml_reset(", "reset"],
+    // §6.8.4 — `tare(@cell)` lowers to `_scrml_tare(`, which lives in its OWN
+    // chunk (it depends only on the 'core' registries, and reset-without-tare is
+    // the common shape, so folding it into 'reset' would tax every
+    // reset-calling page). This emitted-text gate is the ONLY activator, which
+    // is deliberate: it reads ground truth rather than an AST shape, so the
+    // definition can never end up gated more narrowly than the reference (the
+    // DANGLING-REFERENCE class, primary.map invariant 42).
+    ["_scrml_tare(", "tare"],
     ["_scrml_message_for", "messages"],
     // §17.1 if= mount/unmount. `_scrml_find_if_marker(` is the ONE token every
     // emitted conditional controller carries — standalone `if=` AND `if-chain`,

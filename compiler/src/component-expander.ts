@@ -77,6 +77,7 @@ import type {
   MatchExpr,
   EscapeHatchExpr,
   ResetExpr,
+  TareExpr,
   LogicStatement,
   LetDeclNode,
   ConstDeclNode,
@@ -1753,6 +1754,20 @@ function substitutePropsInExprNode(
       // §6.8.2 — substitute prop-name references inside the reset target.
       // Diagnostic field is preserved verbatim (parse-time annotation).
       return { ...n, target: substitutePropsInExprNode(n.target, propExprMap, shadowed) } satisfies ResetExpr;
+    }
+    case "tare-expr": {
+      const n = node as TareExpr;
+      // §6.8.4 — substitute in BOTH operand slots: the cell target and the
+      // two-argument form's explicit default expression (which is ordinary
+      // expression text and can name a prop). Diagnostic field preserved.
+      const substituted: TareExpr = {
+        ...n,
+        target: substitutePropsInExprNode(n.target, propExprMap, shadowed),
+      };
+      if (n.defaultExpr) {
+        substituted.defaultExpr = substitutePropsInExprNode(n.defaultExpr, propExprMap, shadowed);
+      }
+      return substituted;
     }
     default: {
       // TypeScript exhaustiveness check.

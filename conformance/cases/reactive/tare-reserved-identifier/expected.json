@@ -1,0 +1,13 @@
+{
+  "id": "reactive-tare-reserved-identifier",
+  "description": "§6.8.4 — `tare` is a RESERVED IDENTIFIER, exactly as `reset` is (§6.8.2). Declaring a local `function tare() {...}` shadows the builtin and fires E-RESERVED-IDENTIFIER (compile error, §34). Sibling of reactive-reset-reserved-identifier; pins the enforcement at all four ast-builder function/fn declaration-parse sites.",
+  "language-version": "1.0",
+  "spec": "§6.8.4",
+  "source-test": "compiler/tests/unit/tare-emit-and-diagnostics.test.js",
+  "rationale": "Reserving the name is what lets the expression-parser lift `tare(...)` into a distinct AST node without ambiguity, and what stops a local declaration from silently shadowing the keyword at some call sites but not others. Adoption cost was measured before landing: `git grep -nw tare` over every tracked `.scrml` returned ZERO, so the reservation breaks no existing source. The `function` form is used here (a `fn` form would additionally fire E-FN-003 for the reactive write), mirroring the reset case exactly.",
+  "expect": {
+    "codes": ["E-RESERVED-IDENTIFIER"],
+    "notCodes": ["E-FN-003"],
+    "severity": { "E-RESERVED-IDENTIFIER": "error" }
+  }
+}

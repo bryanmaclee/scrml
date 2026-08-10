@@ -111,6 +111,7 @@ import type {
   ImportSpecifier,
   ExprNode,
   ResetExpr,
+  TareExpr,
   MemberExpr,
 } from "./types/ast.ts";
 import {
@@ -118,6 +119,7 @@ import {
   forEachCallInExprNode,
   emitStringFromTree,
   forEachResetExprInExprNode,
+  forEachTareExprInExprNode,
   parseExprToNode,
 } from "./expression-parser.ts";
 import {
@@ -3470,6 +3472,11 @@ function collectDerivedUpstreamDeps(declNode: any): string[] {
  *   - `form === "default"`  — a `default=` attribute on a `const <name>`
  *     derived declaration (SPEC §6.8.1 — `default=`/`reset()` on a derived
  *     cell is a write and is forbidden for the same reason).
+ *   - `form === "tare"`     — a `tare(@derived)` / `tare(@derived, <expr>)`
+ *     call (SPEC §6.8.4). `tare` writes the SAME reset-default slot `default=`
+ *     writes, so it is a write for the same reason; the code is reused
+ *     deliberately, because the rule is about the CELL rather than about which
+ *     keyword reached it.
  *
  * `declNode` is the DERIVED cell's declaration node (source of the upstream
  * dependency list for the fix-advice).
@@ -3478,7 +3485,7 @@ function fireDerivedWrite(
   errors: SYMDiagnostic[],
   cellName: string,
   declNode: any,
-  form: "reassign" | "default",
+  form: "reassign" | "default" | "tare",
   span: Span,
 ): void {
   const ref = "@" + cellName;
@@ -3486,7 +3493,13 @@ function fireDerivedWrite(
   const depHint = deps.length > 0
     ? `modify one of its upstream dependencies (${deps.join(", ")})`
     : `modify one of its upstream dependencies`;
-  const lead = form === "default"
+  const lead = form === "tare"
+    ? `E-DERIVED-WRITE: \`tare(${ref})\` on derived reactive value \`${ref}\`. `
+      + `A \`const <name>\` derived cell is immutable; \`tare\` sets the cell's `
+      + `reset default — the same write \`default=\` performs — and is forbidden `
+      + `for the same reason as direct assignment (SPEC §6.8.4 + §6.8.1 + §6.6.8 `
+      + `+ §34). `
+    : form === "default"
     ? `E-DERIVED-WRITE: \`default=\` on derived reactive value \`${ref}\`. `
       + `A \`const <name>\` derived cell is immutable; \`default=\` (and `
       + `\`reset(${ref})\`) is a write to the derived value and is forbidden `
@@ -9231,6 +9244,41 @@ function validateResetExprTarget(
 }
 
 /**
+ * §6.8 — map an internal target-shape reason tag to a short human-readable
+ * hint. Shared by `E-RESET-INVALID-TARGET` (§6.8.2) and
+ * `E-TARE-INVALID-TARGET` (§6.8.4): both keywords accept the SAME three cell
+ * target shapes, so the vocabulary that describes a rejected shape is one
+ * table, not two that can drift apart.
+ */
+function describeInvalidCellTargetShape(reason: string): string {
+  switch (reason) {
+    case "bare-non-at-ident": return "bare identifier without `@` prefix";
+    case "optional-chain": return "optional-chain (`?.`) member access";
+    case "non-static-property": return "non-static property access";
+    case "non-ident-root": return "member chain not rooted at an identifier";
+    case "non-at-root": return "member chain rooted at a non-`@` identifier";
+    case "lit": return "literal";
+    case "call": return "function-call result";
+    case "new": return "constructor-call result";
+    case "binary": return "binary expression";
+    case "unary": return "unary expression";
+    case "ternary": return "ternary expression";
+    case "assign": return "assignment expression";
+    case "array": return "array literal";
+    case "object": return "object literal";
+    case "lambda": return "lambda";
+    case "cast": return "cast expression";
+    case "index": return "computed-index access";
+    case "match-expr": return "match expression";
+    case "spread": return "spread";
+    case "reset-expr": return "nested `reset(...)` call";
+    case "tare-expr": return "nested `tare(...)` call";
+    case "escape-hatch": return "unparsed expression form";
+    default: return `expression of kind \`${reason}\``;
+  }
+}
+
+/**
  * Fire `E-RESET-INVALID-TARGET` per §6.8.2 + §34. Triggered when the target
  * of a `reset(...)` keyword call is not one of the three canonical shapes.
  * Message identifies the offending shape and recommends canonical forms.
@@ -9258,33 +9306,7 @@ function fireResetInvalidTarget(
     // Defensive: emitStringFromTree may not handle every kind. Fall through
     // to the kind-only label.
   }
-  // Map internal reason tags to short human-readable hints.
-  const hint = (() => {
-    switch (reason) {
-      case "bare-non-at-ident": return "bare identifier without `@` prefix";
-      case "optional-chain": return "optional-chain (`?.`) member access";
-      case "non-static-property": return "non-static property access";
-      case "non-ident-root": return "member chain not rooted at an identifier";
-      case "non-at-root": return "member chain rooted at a non-`@` identifier";
-      case "lit": return "literal";
-      case "call": return "function-call result";
-      case "new": return "constructor-call result";
-      case "binary": return "binary expression";
-      case "unary": return "unary expression";
-      case "ternary": return "ternary expression";
-      case "assign": return "assignment expression";
-      case "array": return "array literal";
-      case "object": return "object literal";
-      case "lambda": return "lambda";
-      case "cast": return "cast expression";
-      case "index": return "computed-index access";
-      case "match-expr": return "match expression";
-      case "spread": return "spread";
-      case "reset-expr": return "nested `reset(...)` call";
-      case "escape-hatch": return "unparsed expression form";
-      default: return `expression of kind \`${reason}\``;
-    }
-  })();
+  const hint = describeInvalidCellTargetShape(reason);
   errors.push({
     code: "E-RESET-INVALID-TARGET",
     message:
@@ -9297,6 +9319,455 @@ function fireResetInvalidTarget(
     span,
     severity: "error",
   });
+}
+
+/**
+ * §6.8.4 — validate a single `tare-expr` node.
+ *
+ * Two checks, in this order:
+ *
+ *   1. **Target shape** — the same three canonical shapes `reset(...)` accepts
+ *      (`@cell` / `@compound` / `@compound.field`, multi-level nav OK per
+ *      §6.3.5). Anything else fires `E-TARE-INVALID-TARGET`. The code is NOT
+ *      `E-RESET-INVALID-TARGET`: a code carrying two unrelated meanings is a
+ *      known hazard in this catalog, and the reset message names the wrong
+ *      keyword at a tare call site.
+ *
+ *   2. **Derived-cell prohibition** — `tare` writes the reset-default slot, so
+ *      it is a WRITE in exactly the sense §6.8.1 means when it says `default=`
+ *      on a `const` derived declaration is `E-DERIVED-WRITE`. Reuse that code:
+ *      the rule is about the CELL, not about which keyword reached it.
+ *
+ * **Pass-through cases (no fire), mirroring `validateResetExprTarget`:**
+ *   - `node.diagnostic` is set → parse-time `E-TARE-NO-ARG` already surfaced.
+ *   - The target is `@`-shaped but does not RESOLVE → a name-resolution
+ *     concern, not a shape concern. The read-side check already fires
+ *     `E-STATE-UNDECLARED` for it (verified by compilation), so firing here
+ *     too would double-report one mistake.
+ */
+function validateTareExpr(
+  tareNode: TareExpr,
+  stmtSpan: Span | undefined,
+  currentScope: Scope,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  // Skip already-diagnosed nodes (parse-time E-TARE-NO-ARG).
+  if (tareNode.diagnostic) return;
+
+  const target = tareNode.target;
+  if (!target || typeof target !== "object") return;
+
+  // ---- 1. Target shape ----
+  let resolved: StateCellRecord | null = null;
+  if (target.kind === "ident") {
+    const ident = target as IdentExpr;
+    if (typeof ident.name !== "string" || !ident.name.startsWith("@")) {
+      fireTareInvalidTarget(tareNode, stmtSpan, target, errors, filePath, "bare-non-at-ident");
+      return;
+    }
+    resolved = lookupStateCell(currentScope, ident.name.slice(1));
+  } else if (target.kind === "member") {
+    const path: string[] = [];
+    let cursor: ExprNode = target;
+    while (cursor.kind === "member") {
+      const m = cursor as MemberExpr;
+      if (m.optional) {
+        fireTareInvalidTarget(tareNode, stmtSpan, target, errors, filePath, "optional-chain");
+        return;
+      }
+      if (typeof m.property !== "string") {
+        fireTareInvalidTarget(tareNode, stmtSpan, target, errors, filePath, "non-static-property");
+        return;
+      }
+      path.unshift(m.property);
+      cursor = m.object;
+    }
+    if (cursor.kind !== "ident") {
+      fireTareInvalidTarget(tareNode, stmtSpan, target, errors, filePath, "non-ident-root");
+      return;
+    }
+    const rootIdent = cursor as IdentExpr;
+    if (typeof rootIdent.name !== "string" || !rootIdent.name.startsWith("@")) {
+      fireTareInvalidTarget(tareNode, stmtSpan, target, errors, filePath, "non-at-root");
+      return;
+    }
+    resolved = lookupQualifiedStateCell(currentScope, [rootIdent.name.slice(1), ...path]);
+  } else {
+    fireTareInvalidTarget(tareNode, stmtSpan, target, errors, filePath, target.kind);
+    return;
+  }
+
+  // ---- 2. Derived-cell prohibition (§6.8.1 + §6.6.8) ----
+  if (resolved && resolved.isConst === true && resolved.shape === "derived") {
+    fireDerivedWrite(
+      errors, resolved.qualifiedPath, resolved.declNode, "tare",
+      tareFireSpan(tareNode, stmtSpan, filePath),
+    );
+  }
+}
+
+/**
+ * §6.8.4 — resolve a tare target to its `StateCellRecord`, WITHOUT diagnosing.
+ *
+ * The shape-checking sibling (`validateTareExpr`) fires on a malformed target;
+ * this one is for the ordering check, which runs on already-shaped targets and
+ * must stay silent about everything else.
+ */
+function resolveTareTargetCell(
+  target: ExprNode,
+  currentScope: Scope,
+): { record: StateCellRecord; rootName: string } | null {
+  if (!target || typeof target !== "object") return null;
+  if (target.kind === "ident") {
+    const name = (target as IdentExpr).name;
+    if (typeof name !== "string" || !name.startsWith("@")) return null;
+    const rootName = name.slice(1);
+    const record = lookupStateCell(currentScope, rootName);
+    return record ? { record, rootName } : null;
+  }
+  if (target.kind === "member") {
+    const path: string[] = [];
+    let cursor: ExprNode = target;
+    while (cursor.kind === "member") {
+      const m = cursor as MemberExpr;
+      if (m.optional || typeof m.property !== "string") return null;
+      path.unshift(m.property);
+      cursor = m.object;
+    }
+    if (cursor.kind !== "ident") return null;
+    const raw = (cursor as IdentExpr).name;
+    if (typeof raw !== "string" || !raw.startsWith("@")) return null;
+    const rootName = raw.slice(1);
+    const record = lookupQualifiedStateCell(currentScope, [rootName, ...path]);
+    return record ? { record, rootName } : null;
+  }
+  return null;
+}
+
+/**
+ * §6.8.4 — `cellName -> EARLIEST state-decl span offset` over a whole file.
+ *
+ * The ordering check cannot use the resolved `StateCellRecord.declNode`,
+ * because for an IMPLICITLY declared cell the scope map is LAST-WINS: after
+ * `@x = 0` … `@x = @x + 1`, the record points at the SECOND write. Comparing
+ * against that rejected the flagship worked case — measured, and it is exactly
+ * the shape §6.8.4 is for. What the check actually needs is "is there any write
+ * to this cell ABOVE the tare", so it needs the EARLIEST one.
+ *
+ * Deliberately permissive: it counts EVERY `state-decl` with that name,
+ * including ones inside function bodies that register no module-init thunk.
+ * That can only make the check fire LESS, never more — and a false positive
+ * here would reject legal code, which is worse than the no-op being diagnosed.
+ */
+interface EarliestDeclLookup {
+  /** Built on FIRST USE only — a file with no `tare` never pays for the walk. */
+  get(): Map<string, number>;
+}
+
+/** A lazy `EarliestDeclLookup` over one file's node list. */
+function makeEarliestDeclLookup(nodes: ASTNode[] | undefined): EarliestDeclLookup {
+  let memo: Map<string, number> | null = null;
+  return {
+    get() {
+      if (memo === null) memo = collectEarliestStateDeclSpans(nodes);
+      return memo;
+    },
+  };
+}
+
+function collectEarliestStateDeclSpans(nodes: ASTNode[] | undefined): Map<string, number> {
+  const earliest = new Map<string, number>();
+  const seen = new WeakSet<object>();
+  function walk(list: ASTNode[] | undefined): void {
+    if (!Array.isArray(list)) return;
+    for (const n of list) {
+      if (!n || typeof n !== "object") continue;
+      if (seen.has(n)) continue;
+      seen.add(n);
+      const anyN = n as any;
+      if (anyN.kind === "state-decl" && typeof anyN.name === "string") {
+        const start = anyN.span && typeof anyN.span.start === "number" ? anyN.span.start : -1;
+        if (start >= 0) {
+          const prev = earliest.get(anyN.name);
+          if (prev === undefined || start < prev) earliest.set(anyN.name, start);
+        }
+      }
+      walk(anyN.children);
+      walk(anyN.body);
+      walk(anyN.consequent);
+      walk(anyN.alternate);
+      walk(anyN.bodyChildren);
+      if (Array.isArray(anyN.arms)) for (const arm of anyN.arms) walk(arm?.body);
+    }
+  }
+  walk(nodes);
+  return earliest;
+}
+
+/**
+ * §6.8.4 — fire `E-TARE-DEFERRED-POSITION` for a BARE `tare(@cell)` written
+ * anywhere other than module-init position.
+ *
+ * **Why the bare form cannot work in deferred code, which is the whole reason
+ * this exists.** `_scrml_tare` promotes `_scrml_init_fns[name]`, and that map is
+ * populated ONLY by module-init: `_emitInitThunkSidecar` returns `null` inside a
+ * function body BY DESIGN ("reassignments must not overwrite the
+ * declaration-site init-thunk"). So a write that happens in a handler registers
+ * NO thunk, and a bare tare in that handler promotes whatever module-init left
+ * behind — not the value the author is looking at. Measured, both ways it fails:
+ *
+ *   - cell also written at module-init: `@x = 0; @x = @x + 1`, handler bumps to
+ *     11, `tare(@x)` there, `reset(@x)` yields **12** — it re-ran the
+ *     module-init `() => current + 1` instead of pinning 11.
+ *   - cell only ever written deferred: `tare(@x)` at 41, `reset(@x)` yields
+ *     **0** — a permanent no-op relative to intent.
+ *
+ * Both compiled with ZERO diagnostics before this rule. Refusing is the same
+ * fail-closed direction as `E-TARE-BEFORE-DECL`, and reversible: `tare` is days
+ * old, so the migration is measured at zero.
+ *
+ * **A DISTINCT code from `E-TARE-BEFORE-DECL`, deliberately.** That code means
+ * "you put it before the declaration" and its advice is "move it below the
+ * write". This one means "the bare form cannot see deferred writes at all", and
+ * the fix is different — use `tare(@cell, <expr>)`, or move the call to
+ * module-init. Reusing one code for two unrelated mistakes would print advice
+ * that does not apply, which is the hazard this file already avoids for
+ * `E-TARE-INVALID-TARGET` vs `E-RESET-INVALID-TARGET`.
+ *
+ * **Two-argument form is EXEMPT at any position** — `_scrml_default_set(key,
+ * () => expr)` never reads `_scrml_init_fns`, so deferral cannot break it. This
+ * is the same exemption `E-TARE-BEFORE-DECL` carries, for the same reason.
+ *
+ * Skips an unresolvable target so a malformed `tare(42)` in a handler reports
+ * only its shape error rather than two diagnostics for one mistake.
+ */
+function checkTareDeferredPosition(
+  tareNode: TareExpr,
+  stmtSpan: Span | undefined,
+  currentScope: Scope,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  if (tareNode.diagnostic) return;
+  if (tareNode.defaultExpr) return;          // explicit form: position-independent
+  const resolved = resolveTareTargetCell(tareNode.target, currentScope);
+  if (!resolved) return;                     // shape / resolution errors own this node
+
+  const ref = "@" + resolved.record.qualifiedPath;
+  errors.push({
+    code: "E-TARE-DEFERRED-POSITION",
+    message:
+      `E-TARE-DEFERRED-POSITION: bare \`tare(${ref})\` appears in DEFERRED code (a function, `
+      + `event-handler, \`when\` or \`cleanup\` body, or a lambda). The bare form promotes the `
+      + `cell's MODULE-INIT init expression, and a write performed in deferred code registers no `
+      + `init expression at all — so this would pin the wrong value, or nothing. `
+      + `Fix: name the baseline explicitly with \`tare(${ref}, <expr>)\`, which sets the reset `
+      + `default directly and is legal anywhere; or move the bare \`tare(${ref})\` to module-init `
+      + `position, after the write you want as the baseline. `
+      + `(SPEC §6.8.4 + §34.)`,
+    span: tareFireSpan(tareNode, stmtSpan, filePath) as unknown as SYMDiagnostic["span"],
+    severity: "error",
+  });
+}
+
+/**
+ * §6.8.4 — fire `E-TARE-BEFORE-DECL` when a MODULE-INIT tare precedes its
+ * target cell's declaration in the same file.
+ *
+ * **Why this is a hard error and not a lint.** `tare` is the one keyword whose
+ * entire contract is that SOURCE POSITION is the discriminator: the bare form
+ * promotes whatever init thunk is registered AT THE MOMENT THE STATEMENT RUNS.
+ * Module-init emits in source order, so a tare written above its target's
+ * declaration runs before any thunk exists — there is provably nothing to
+ * promote, the call is a no-op, and `reset()` silently falls back to the LAST
+ * write's expression. That is exactly the increment-instead-of-restore defect
+ * §6.8.4 exists to dissolve, re-created by the feature meant to fix it, with
+ * zero diagnostics. A statement that provably cannot do anything is a mistake,
+ * not a style choice.
+ *
+ * Rejecting is also the REVERSIBLE direction. `tare` is new surface with no
+ * adopters, so an error costs no migration; and if a future ruling wants a
+ * "pending tare" semantic (a forward tare meaning "the FIRST write is the
+ * baseline"), relaxing an error into accepted behaviour is easy, whereas
+ * accepting a silent wrong answer now is the one-way door.
+ *
+ * **Scope — deliberately narrow, because a false POSITIVE rejects legal code:**
+ *   - **BARE FORM ONLY.** The whole justification above is "there is no init
+ *     expression yet to promote", and that is a statement about the bare form.
+ *     `tare(@cell, <expr>)` lowers to `_scrml_default_set(key, () => expr)`,
+ *     which is SELF-CONTAINED — it never reads `_scrml_init_fns`, so it works
+ *     perfectly above the declaration and `reset` resolves default-before-init
+ *     (§6.8.2) to exactly the right value. Firing here rejected a valid program
+ *     (S337 fix-round-2 finding 1, a regression this check introduced).
+ *     Returning early also keeps the MESSAGE honest by construction: every call
+ *     that reaches the diagnostic really is a one-argument `tare(@cell)`, so
+ *     rendering it that way cannot name a call the author did not write.
+ *   - only for a tare NOT inside a function/handler body (the caller passes
+ *     that in) and NOT inside a lambda body (the walk is run with
+ *     `skipDeferredBodies`). Deferred code runs after module-init, so a tare
+ *     there is legal wherever it is written.
+ *   - only when the target RESOLVES; an unresolved name is already
+ *     `E-STATE-UNDECLARED`.
+ *   - only when both spans are in the SAME file with real offsets. A
+ *     cross-file or span-less decl fails OPEN.
+ */
+function checkTareOrderingAgainstDecl(
+  tareNode: TareExpr,
+  stmtSpan: Span | undefined,
+  currentScope: Scope,
+  earliestDeclStarts: EarliestDeclLookup,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  if (tareNode.diagnostic) return;
+  // BARE FORM ONLY — see the Scope note above. The explicit-default form sets
+  // the slot directly and needs no init thunk to exist, so position cannot make
+  // it a no-op.
+  if (tareNode.defaultExpr) return;
+  const resolved = resolveTareTargetCell(tareNode.target, currentScope);
+  if (!resolved) return;
+
+  // COORDINATE SPACE, and it is the whole reason this takes the enclosing
+  // STATEMENT's span rather than the tare ExprNode's own. An ExprNode span is
+  // BLOCK-LOCAL: the `tare(@x)` at the top of a `${ … }` block reports
+  // `start: 0, line: 1` no matter where the block sits in the file, while a
+  // state-decl's span is FILE-ABSOLUTE. Comparing the two directly compares
+  // numbers from two different origins and silently never fires — measured.
+  // Both AST-node spans are file-absolute, so the comparison is meaningful and
+  // the reported location points at the real line (invariant 19: pick ONE
+  // coordinate space and stay in it).
+  const earliestStart = earliestDeclStarts.get().get(resolved.rootName);
+  if (!stmtSpan || earliestStart === undefined) return;
+  // Fail OPEN on a synthetic / span-less node. The ABSENCE of an offset is the
+  // sentinel — `undefined`, not the number 0. Offset 0 is a perfectly valid
+  // file position (a statement at the very first byte), and treating it as
+  // "missing" would silently exempt whatever lands there.
+  if (typeof stmtSpan.start !== "number") return;
+
+  if (earliestStart <= stmtSpan.start) return; // a write comes first — fine.
+
+  const ref = "@" + resolved.record.qualifiedPath;
+  errors.push({
+    code: "E-TARE-BEFORE-DECL",
+    message:
+      `E-TARE-BEFORE-DECL: \`tare(${ref})\` appears BEFORE \`${ref}\` is declared in this file. `
+      + `\`tare\` promotes the cell's init expression AS IT STANDS WHEN THE STATEMENT RUNS, and `
+      + `module-init runs in source order — at this point the cell has no init expression yet, so `
+      + `the call would do nothing and \`reset(${ref})\` would fall back to the LAST write's `
+      + `expression (the increment-instead-of-restore behaviour §6.8.4 exists to prevent). `
+      + `Fix: move the \`tare(${ref})\` call BELOW the write you want as the baseline. `
+      + `(SPEC §6.8.4 + §34.)`,
+    span: (stmtSpan as unknown as SYMDiagnostic["span"]),
+    severity: "error",
+  });
+}
+
+/**
+ * Fire `E-TARE-INVALID-TARGET` per §6.8.4 + §34 — the `tare(...)` sibling of
+ * `fireResetInvalidTarget`.
+ */
+/**
+ * §6.8.4 — the span a tare diagnostic should REPORT AT.
+ *
+ * Prefer the enclosing STATEMENT node's span. A tare ExprNode's own span is
+ * BLOCK-LOCAL — the first statement of a `${ … }` block reports `line: 1,
+ * col: 1` no matter where the block sits — so reporting it sends the author to
+ * the top of the file. `checkTareOrderingAgainstDecl` already documented this
+ * hazard and took the statement span for exactly this reason; these two fire
+ * sites passed the ExprNode span straight through, and the conformance cases
+ * asserted CODES rather than positions, which is why it went unnoticed.
+ *
+ * Falls back to the ExprNode span (better than nothing) and then to a synthetic
+ * file span, so a caller without statement context still reports something.
+ */
+function tareFireSpan(
+  tareNode: TareExpr,
+  stmtSpan: Span | undefined,
+  filePath: string,
+): Span {
+  if (stmtSpan && typeof stmtSpan.start === "number") return stmtSpan;
+  if (tareNode.span && typeof tareNode.span === "object") return tareNode.span as unknown as Span;
+  return { file: filePath, start: 0, end: 0, line: 1, col: 1 } as unknown as Span;
+}
+
+function fireTareInvalidTarget(
+  tareNode: TareExpr,
+  stmtSpan: Span | undefined,
+  target: ExprNode,
+  errors: SYMDiagnostic[],
+  filePath: string,
+  reason: string,
+): void {
+  const span = tareFireSpan(tareNode, stmtSpan, filePath) as unknown as SYMDiagnostic["span"];
+  let rendered = "<expr>";
+  try {
+    const r = emitStringFromTree(target as any);
+    if (typeof r === "string" && r.length > 0 && r.length < 80) {
+      rendered = r;
+    } else if (typeof r === "string" && r.length >= 80) {
+      rendered = r.slice(0, 77) + "...";
+    }
+  } catch {
+    // Defensive: emitStringFromTree may not handle every kind.
+  }
+  const hint = describeInvalidCellTargetShape(reason);
+  errors.push({
+    code: "E-TARE-INVALID-TARGET",
+    message:
+      `E-TARE-INVALID-TARGET: \`tare(${rendered})\` — target is a ${hint}, `
+      + `which is not a valid tare target. The \`tare\` keyword accepts only `
+      + `\`tare(@cell)\` (top-level cell), \`tare(@compound)\` (whole compound), `
+      + `or \`tare(@compound.field)\` (compound nav, including multi-level paths `
+      + `that resolve through the compound-scope chain). `
+      + `(SPEC §6.8.4 + §34.)`,
+    span,
+    severity: "error",
+  });
+}
+
+/**
+ * §6.8 — run every reset-family validation over ONE ExprNode-bearing field.
+ *
+ * Extracted so the three call sites (the `B3_EXPR_FIELDS` sweep, the c-style
+ * `for` parts, and the `when`/`cleanup` body fields) cannot drift apart — one of
+ * them already had, carrying only two of the four checks.
+ *
+ * `stmtSpan` is the ENCLOSING AST NODE's span, which is what every tare
+ * diagnostic reports at: an ExprNode span is block-local and would point at
+ * line 1 (see `tareFireSpan`).
+ */
+function validateResetFamilyInExprField(
+  field: ExprNode,
+  stmtSpan: Span | undefined,
+  currentScope: Scope,
+  insideDeferred: boolean,
+  earliestDeclStarts: EarliestDeclLookup,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  forEachResetExprInExprNode(field, (resetNode) => {
+    validateResetExprTarget(resetNode, currentScope, errors, filePath);
+  });
+  forEachTareExprInExprNode(field, (tareNode, inDeferredExpr) => {
+    validateTareExpr(tareNode, stmtSpan, currentScope, errors, filePath);
+    // §6.8.4 position rule. `inDeferredExpr` covers a lambda the walk descended
+    // through; `insideDeferred` covers a function / handler / when / cleanup
+    // body the NODE walk descended through. Either makes this deferred code.
+    if (insideDeferred || inDeferredExpr) {
+      checkTareDeferredPosition(tareNode, stmtSpan, currentScope, errors, filePath);
+    }
+  });
+  // §6.8.4 ordering check — MODULE-INIT position only, and a separate walk
+  // because it needs a DIFFERENT traversal: `skipDeferredBodies` keeps it out of
+  // lambda bodies, whose code runs later and is legal above the declaration.
+  if (!insideDeferred) {
+    forEachTareExprInExprNode(field, (tareNode) => {
+      checkTareOrderingAgainstDecl(
+        tareNode, stmtSpan, currentScope, earliestDeclStarts, errors, filePath,
+      );
+    }, { skipDeferredBodies: true });
+  }
 }
 
 /**
@@ -9313,6 +9784,19 @@ function walkValidateResetTargets(
   visited: WeakSet<object>,
   errors: SYMDiagnostic[],
   filePath: string,
+  /**
+   * §6.8.4 — true once the walk has descended into a function/handler body.
+   * Such code runs AFTER module-init, so the tare-before-declaration ordering
+   * check (which reasons about module-init source order) must not apply there.
+   * Reset validation ignores this flag entirely.
+   */
+  insideDeferred: boolean = false,
+  /**
+   * §6.8.4 — `cellName -> earliest state-decl offset`, built LAZILY once per
+   * file. A file with no `tare` never triggers the walk, so the ordering check
+   * costs nothing across the ~1900-source corpus that does not use the keyword.
+   */
+  earliestDeclStarts: EarliestDeclLookup = makeEarliestDeclLookup(undefined),
 ): void {
   if (!nodes) return;
   for (const n of nodes) {
@@ -9323,13 +9807,31 @@ function walkValidateResetTargets(
     const kind = anyN.kind as string;
 
     // Walk every ExprNode payload this node carries; for each, find any
-    // reset-expr nodes nested inside and validate them.
+    // reset-family node (`reset-expr` §6.8.2 / `tare-expr` §6.8.4) nested
+    // inside and validate it.
     for (const f of B3_EXPR_FIELDS) {
       const v = anyN[f];
       if (v && typeof v === "object") {
-        forEachResetExprInExprNode(v as ExprNode, (resetNode) => {
-          validateResetExprTarget(resetNode, currentScope, errors, filePath);
-        });
+        validateResetFamilyInExprField(
+          v as ExprNode, (anyN as { span?: Span }).span, currentScope,
+          insideDeferred, earliestDeclStarts, errors, filePath,
+        );
+      }
+    }
+    // §6.8.4 (fix-round-3 finding 4) — `when-effect` and `cleanup-registration`
+    // carry their body on `bodyExpr` / `callbackExpr`, NEITHER of which is in
+    // `B3_EXPR_FIELDS`. So no tare inside a `when`/`cleanup` body was validated
+    // at all: `when @a changes { tare(42) }` compiled with no diagnostic and
+    // fell through to codegen's defensive `undefined` marker. Reach them
+    // explicitly, and mark them DEFERRED — their bodies run later, which is
+    // exactly what the bare form cannot survive.
+    for (const f of ["bodyExpr", "callbackExpr"]) {
+      const v = anyN[f];
+      if (v && typeof v === "object") {
+        validateResetFamilyInExprField(
+          v as ExprNode, (anyN as { span?: Span }).span, currentScope,
+          true, earliestDeclStarts, errors, filePath,
+        );
       }
     }
     // c-style for: { initExpr, condExpr, updateExpr }.
@@ -9337,9 +9839,10 @@ function walkValidateResetTargets(
       for (const f of ["initExpr", "condExpr", "updateExpr"]) {
         const v = anyN.cStyleParts[f];
         if (v && typeof v === "object") {
-          forEachResetExprInExprNode(v as ExprNode, (resetNode) => {
-            validateResetExprTarget(resetNode, currentScope, errors, filePath);
-          });
+          validateResetFamilyInExprField(
+            v as ExprNode, (anyN as { span?: Span }).span, currentScope,
+            insideDeferred, earliestDeclStarts, errors, filePath,
+          );
         }
       }
     }
@@ -9348,34 +9851,47 @@ function walkValidateResetTargets(
     if (kind === "state-decl") {
       const stateScope = (anyN as ReactiveDeclNode & ScopeAnnotated)._scope;
       if (stateScope && Array.isArray(anyN.children)) {
-        walkValidateResetTargets(anyN.children, stateScope, visited, errors, filePath);
+        walkValidateResetTargets(anyN.children, stateScope, visited, errors, filePath, insideDeferred, earliestDeclStarts);
       }
       continue;
     }
     if (kind === "function-decl") {
       const fnScope = (anyN as ScopeAnnotated)._scope ?? currentScope;
-      walkValidateResetTargets(anyN.body, fnScope, visited, errors, filePath);
+      // A function BODY is deferred — it runs when called, not where written.
+      walkValidateResetTargets(anyN.body, fnScope, visited, errors, filePath, true, earliestDeclStarts);
       continue;
     }
 
     // Generic recursion (mirrors PASS 3 / PASS 6 / PASS 13).
-    if (Array.isArray(anyN.children)) walkValidateResetTargets(anyN.children, currentScope, visited, errors, filePath);
-    if (Array.isArray(anyN.body)) walkValidateResetTargets(anyN.body, currentScope, visited, errors, filePath);
-    if (Array.isArray(anyN.consequent)) walkValidateResetTargets(anyN.consequent, currentScope, visited, errors, filePath);
-    if (Array.isArray(anyN.alternate)) walkValidateResetTargets(anyN.alternate, currentScope, visited, errors, filePath);
+    // §6.8.4 — a body that runs LATER is deferred exactly as a function body is.
+    //
+    // CORRECTED TWICE, and the second correction is the honest one. Round 2
+    // replaced three fictional kind names (`event-handler`, `markup-handler`,
+    // `register-cleanup` — none of which this AST produces) with the two real
+    // ones, and claimed that fixed `cleanup { tare(@x) }`. IT DID NOT: neither
+    // `when-effect` nor `cleanup-registration` has a `children`/`body` ARRAY, so
+    // this flag could never propagate to them through the recursion below, and
+    // their bodies live on `bodyExpr`/`callbackExpr` — fields nothing here read.
+    // Those bodies are now reached explicitly ABOVE, with `deferred` passed as a
+    // literal `true`; this flag covers the array-bodied containers only.
+    const _deferredHere = insideDeferred;
+    if (Array.isArray(anyN.children)) walkValidateResetTargets(anyN.children, currentScope, visited, errors, filePath, _deferredHere, earliestDeclStarts);
+    if (Array.isArray(anyN.body)) walkValidateResetTargets(anyN.body, currentScope, visited, errors, filePath, _deferredHere, earliestDeclStarts);
+    if (Array.isArray(anyN.consequent)) walkValidateResetTargets(anyN.consequent, currentScope, visited, errors, filePath, _deferredHere, earliestDeclStarts);
+    if (Array.isArray(anyN.alternate)) walkValidateResetTargets(anyN.alternate, currentScope, visited, errors, filePath, _deferredHere, earliestDeclStarts);
     if (Array.isArray(anyN.arms)) {
       for (const arm of anyN.arms) {
-        if (arm && Array.isArray(arm.body)) walkValidateResetTargets(arm.body, currentScope, visited, errors, filePath);
+        if (arm && Array.isArray(arm.body)) walkValidateResetTargets(arm.body, currentScope, visited, errors, filePath, _deferredHere, earliestDeclStarts);
       }
     }
     // Phase A10 (S78) — descend into engine-decl.bodyChildren so reset(@x)
     // calls inside an engine state-child body fire E-RESET-INVALID-TARGET
     // when @x is not a valid reset target. Body inherits surrounding scope.
     if (kind === "engine-decl" && Array.isArray(anyN.bodyChildren)) {
-      walkValidateResetTargets(anyN.bodyChildren, currentScope, visited, errors, filePath);
+      walkValidateResetTargets(anyN.bodyChildren, currentScope, visited, errors, filePath, _deferredHere, earliestDeclStarts);
     }
     if (kind === "lift-expr" && anyN.expr && anyN.expr.kind === "markup" && anyN.expr.node) {
-      walkValidateResetTargets([anyN.expr.node], currentScope, visited, errors, filePath);
+      walkValidateResetTargets([anyN.expr.node], currentScope, visited, errors, filePath, _deferredHere, earliestDeclStarts);
     }
   }
 }
@@ -12749,8 +13265,14 @@ export function runSYM(input: SYMInput): SYMResult {
   // targets and re-resolves MemberExpr chains via `lookupQualifiedStateCell`
   // (B12-extended descent through any cell with a `_scope`). Closes A1a
   // Step 9's deferred validation (per ast.ts:1670-1674 docstring).
+  // §6.8.4 also runs here: `tare` target-shape (E-TARE-INVALID-TARGET), the
+  // derived-cell prohibition (E-DERIVED-WRITE) and the module-init ordering
+  // check (E-TARE-BEFORE-DECL). The ordering check needs each cell's EARLIEST
+  // declaration offset, which is built once for the whole file rather than
+  // re-derived per tare (and which the last-wins scope record cannot supply).
   const visitedB22 = new WeakSet<object>();
-  walkValidateResetTargets(ast.nodes, fileScope, visitedB22, errors, filePath);
+  const earliestDeclStarts = makeEarliestDeclLookup(ast.nodes);
+  walkValidateResetTargets(ast.nodes, fileScope, visitedB22, errors, filePath, false, earliestDeclStarts);
 
   // PASS 15 (B19): Channel placement + `@shared` modifier rejection.
   // Two sub-walks per SPEC §38.1, §38.4, §34:

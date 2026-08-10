@@ -493,6 +493,7 @@ const CELL_SCOPE_ACCESSORS = [
   "_scrml_init_set",
   "_scrml_default_set",
   "_scrml_reset",
+  "_scrml_tare",
   "_scrml_derived_declare",
   "_scrml_derived_get",
   "_scrml_derived_subscribe",
