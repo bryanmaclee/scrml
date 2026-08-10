@@ -98,3 +98,117 @@ Measured at base `2cc0e4fc`: **14 fail / 25 pass**; at head **39 pass / 0 fail**
 3. **Call-ref argument ELISION is emitted verbatim.** `onclick=handle(NEEDED, , 2)` emits
    `handle(NEEDED, , 2)` into the client bundle — invisible to `new vm.Script` under bun, invalid
    JS in a browser. Separate from g-263; surfaced by its position-2 fixture.
+
+---
+
+# FIX ROUND (adversarial review) — `9bdd6eed`
+
+Five findings. Two are real defects in this arc, one is a real defect in this arc PLUS two
+pre-existing leaks on `main` that the same fix closes, one is a real widening, one is a real
+sharp edge, one is a real cost. All five addressed; two of the reviewer's characterisations
+needed correcting, both with measurement.
+
+## The root, restated
+
+The reviewer's framing is right and is worth keeping: two callers, two reaches, two shadow
+policies, neither re-derived after the merge. But the deeper problem is that **shadow policy
+lived in the CALLERS at all**, expressed as a flat bag of bound names. A flat bag cannot say
+*where* a name is bound, and the two defects below are the two directions of that one gap.
+The fix is a real SCOPE STACK inside the collector; `ClientReadOptions`/`boundOut` are deleted,
+and `codegen/index.ts` no longer subtracts anything. There is now no policy for a call site to
+get wrong because there is nothing for a call site to do.
+
+## Finding 1 — CRITICAL, confirmed, and WIDER than filed
+
+Reproduced exactly. **Correction: only ONE of the three same-file shadow vectors was introduced
+by this arc.** Measured with a same-file probe (no imports, so the cross-file guard never runs):
+
+| same-file vector | `main` 2cc0e4fc | pre-fix b821e7c0 | now |
+|---|---|---|---|
+| lambda param shadow (`@rows.map(SECRET => …)`) | no leak | **LEAK** | no leak |
+| `<each … as SECRET>` loop-var shadow | **LEAK** | **LEAK** | no leak |
+| client `function compute(SECRET)` param shadow | **LEAK** | **LEAK** | no leak |
+| local `let SECRET` shadow | no leak | no leak | no leak |
+| no shadow, read only in a pruned `server fn` | no leak | no leak | no leak |
+| positive control — genuinely client-read const | emitted | emitted | emitted |
+
+**The same-file gate has never had a shadow guard of any kind.** On `main` the two non-lambda
+vectors already ship the secret; the arc's unconditional deep walk added the lambda one. So this
+arc made a pre-existing §14.8 scope-blindness leak one vector worse, and the scope stack closes
+all three.
+
+The reviewer's diagnosis of WHY it was invisible is exactly right and is the transferable part:
+**all six `LEAK_VECTORS` put the secret in a separate `models.scrml`, so every one travelled the
+cross-file path. A test suite that exercises one of a helper's two callers reads exactly like one
+that exercises both.** §4 of the conformance file now covers the same-file caller.
+
+## Finding 2 — HIGH, confirmed. Was the dead code dead by design?
+
+**By ACCIDENT** (a `return` sat above it), and its INTENT was half right.
+
+- The half that was right: function params genuinely must not be read as module-scope reads.
+  `function compute(SECRET) { return SECRET }` beside a server-only `export const SECRET` leaks
+  without them — that is finding 1's third row, and it leaks on `main` today.
+- The half that was wrong: binding them into a FLAT, file-wide set is a different claim. A
+  param binds inside its own body and nowhere else.
+
+Both halves are now expressed exactly: params bind INSIDE the body; the fn NAME binds in the
+ENCLOSING scope (a top-level `function greet` really is a module binding, and if an import shares
+that name the local wins, so the import genuinely is not read).
+
+Measured: `function greet(NEEDED)` + `on mount { @a = NEEDED }` → `main` decl=true, pre-fix
+decl=**false** with `index.client.js` reading a free variable, now decl=true and the read
+RESOLVES when the two bundles are executed deps-first in one scope.
+
+## Finding 3 — MEDIUM, confirmed. Scoped, not justified.
+
+`state` and `state-constructor-def` do carry `attrs` (`compiler/src/types/ast.ts:270,286`).
+Attribute positions now carry `render: node.kind === "markup"`, which restores the
+pre-convergence edge topology exactly — the identifier consumer still SEES the position, only
+`render` differs, so nothing is lost on the seed side. The structural `if=` gate keeps
+`render: true` on its non-markup owners because it governs whether they render.
+
+## Finding 4 — LOW, confirmed. Both stated cases reproduced.
+
+`${@a} && ${@b}` → `@a} && ${@b`; `'a' == 'b'` → `a' == 'b`. Now brace-balanced (the `${`'s own
+match must be the last character) and delimiter-checked (the quote must not recur unescaped
+inside). When in doubt it returns the string UNSTRIPPED — the outer form then parses, or fails
+honestly.
+
+## Finding 5 — LOW, bounded and measured.
+
+Markup text no longer goes through the statement parser: an `<each>` body, `<match>` arms and an
+engine `rulesRaw` are markup and never parse as an expression, so the loop burned a
+`parseExprToNode` to learn that on every compiled file. The `${…}` interior scan — where the code
+actually is — runs either way. `examples/23-trucking-dispatch`, 3 runs each:
+`main` 4.468/4.467/4.433 vs head 4.673/4.548/4.565 → **+3.1%**.
+**RESIDUAL, acknowledged not closed:** a raw body is still scanned for `${…}` while the recursion
+independently walks the same children. Closing it needs the raw and the rebuilt-children
+representations reconciled, which is a bigger change than the 3% justifies today.
+
+## Verification
+
+- Two test files, 74 tests, three source states:
+  `main` 53 pass / **21 fail** · pre-fix `b821e7c0` 64 pass / **10 fail** · now **74 pass / 0 fail**.
+- Full suite (unit + integration + conformance + top-level): **28741 pass / 86 skip / 1 todo / 0 fail**.
+- Corpus emit-differential, base `036680e9` vs head: **NO DIFFERENCES** — 1904 sources, 7375
+  artifacts, 0 diagnostic changes, 0 content diffs. Both leaks closed here have zero corpus
+  incidence, which is why nothing moved.
+- `grep -rn collectClientReferencedIdents` → **zero**.
+- `expr-positions.ts` EXPORTED contract UNCHANGED (`ExprPosition`, `ExprPositionKind`,
+  `forEachExprPosition`, `EXPR_NODE_FIELDS`). The `renderBase` parameter added this round is on a
+  module-private helper. Relevant to the sibling arc converging the validation walk onto it.
+
+## DISPUTED — the browser-failure figures
+
+The brief reports 49 failures on this branch vs 51 on `main`, i.e. this branch fixing 2.
+**I measure 48 on BOTH sides, and the failure SETS are byte-identical by name** (compared as
+sorted name lists, per the "gate on the failure NAME SET, not the count" rule — a count
+comparison cannot tell a fix from a swap). Method: `bun run pretest` re-run on each side before
+the browser suite, with only `compiler/src` swapped, so each side reads fixtures compiled by its
+own compiler.
+
+There is also an independent argument that a 2-test browser improvement is impossible here: the
+corpus emit-differential reports **0 artifact content diffs across 7375 artifacts**. If no emitted
+byte changed anywhere, no browser behaviour can change. The most likely explanation for 49/51 is
+stale `samples/compilation-tests/dist/` fixtures on one of the two sides.

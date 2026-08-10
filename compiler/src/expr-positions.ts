@@ -184,17 +184,31 @@ export function forEachExprPosition(
   // the LIST is what closes that half of the drift — it was 6 fields on one side
   // and 11 on the other — while leaving each traversal where it belongs.
 
-  // ---- 1. Markup attribute values. ---------------------------------------
+  // ---- 1. Attribute values. ----------------------------------------------
+  // `attrs` is NOT markup-only: `state` (`<card name=…>`) and
+  // `state-constructor-def` carry one too, and an identifier consumer must see
+  // those — a `${CONST}` in a typed-state default is a real client read.
+  //
+  // But `render` IS markup-only, and the distinction is load-bearing. `render`
+  // means "the compiler wires this into RENDERED output", which is what makes the
+  // dependency graph mint a markup-read node anchored at the position's span. A
+  // state DECLARATION is not a render site; anchoring a markup-read there would
+  // put a node into a graph other passes consume (closure analysis,
+  // `resolveSourceRenderNodeId`) at a span that does not mean what the node's kind
+  // says it means. The pre-convergence dependency graph reached `attrs` only from
+  // inside its `node.kind === "markup"` branch, and this keeps that topology
+  // exactly while still letting the seed read the value.
   if (Array.isArray(n.attrs)) {
+    const attrRender = n.kind === "markup";
     for (const attr of n.attrs as unknown[]) {
       if (!attr || typeof attr !== "object") continue;
       const a = attr as Rec;
       // A few AST shapes hang the ExprNode directly on the attr rather than on
       // `attr.value`; cheap to cover and it costs nothing when absent.
       for (const f of EXPR_NODE_FIELDS) {
-        if (isExprNode(a[f])) emit("expr-node", a[f], `attr.${f}`, spanOf(a) ?? nodeSpan, true);
+        if (isExprNode(a[f])) emit("expr-node", a[f], `attr.${f}`, spanOf(a) ?? nodeSpan, attrRender);
       }
-      forEachAttrValuePosition(a.value, "attr.value", spanOf(a) ?? nodeSpan, supports, cb);
+      forEachAttrValuePosition(a.value, "attr.value", spanOf(a) ?? nodeSpan, attrRender, supports, cb);
     }
   }
 
@@ -207,8 +221,12 @@ export function forEachExprPosition(
   // synthesizes an attr with no span of its own, so this position has always
   // anchored at the node, and a dependency-graph node id is derived from that
   // span.
+  // `render` is unconditionally TRUE here even though the owning node is never
+  // `markup`: the `if=` gate governs whether the structural element RENDERS, and
+  // the pre-convergence dependency graph credited it — with edges — from outside
+  // its markup branch for exactly that reason.
   if (n.ifCond && typeof n.ifCond === "object") {
-    forEachAttrValuePosition(n.ifCond, "ifCond", nodeSpan, supports, cb);
+    forEachAttrValuePosition(n.ifCond, "ifCond", nodeSpan, true, supports, cb);
   }
 
   // ---- 3. Structural opener raw expressions. ------------------------------
@@ -248,6 +266,8 @@ function forEachAttrValuePosition(
   attrVal: unknown,
   originBase: string,
   span: Span | null,
+  /** Whether reads here are RENDER-context reads — see the call sites. */
+  renderBase: boolean,
   supports: ReadonlySet<ExprPositionKind>,
   cb: (position: ExprPosition) => void,
 ): void {
@@ -302,7 +322,7 @@ function forEachAttrValuePosition(
     }
     // Last resort when the parse produced nothing: the raw identifier text.
     alternates.push({ kind: "expr-source", value: v.name, origin: `${originBase}.name(raw)` });
-    emitGroup(alternates, true);
+    emitGroup(alternates, renderBase);
   }
 
   // `if=(@a && @b)` — `{kind:"expr", raw, refs, exprNode}`. `refs` is the AST
@@ -319,7 +339,7 @@ function forEachAttrValuePosition(
     if (nonEmptyString(v.raw)) {
       alternates.push({ kind: "expr-source", value: v.raw, origin: `${originBase}.raw` });
     }
-    if (alternates.length > 0) emitGroup(alternates, true);
+    if (alternates.length > 0) emitGroup(alternates, renderBase);
   }
 
   // `onclick=fn(@var, CONST)` — `{kind:"call-ref", name, args, argExprNodes?}`.
@@ -339,12 +359,12 @@ function forEachAttrValuePosition(
     // both is safe — every consumer here is idempotent on a set.
     if (Array.isArray(v.argExprNodes)) {
       for (const en of v.argExprNodes as unknown[]) {
-        if (isExprNode(en)) emit("expr-node", en, `${originBase}.argExprNodes[]`, true);
+        if (isExprNode(en)) emit("expr-node", en, `${originBase}.argExprNodes[]`, renderBase);
       }
     }
     if (Array.isArray(v.args)) {
       for (const arg of v.args as unknown[]) {
-        if (nonEmptyString(arg)) emit("expr-source", arg, `${originBase}.args[]`, true);
+        if (nonEmptyString(arg)) emit("expr-source", arg, `${originBase}.args[]`, renderBase);
       }
     }
   }
@@ -452,14 +472,42 @@ function forEachEnginePosition(
 /**
  * `<onTransition if=…>` is captured VERBATIM by the state-child parser, so the
  * value may still be wrapped in `${…}` (logic-context form) or in quotes. Strip
- * exactly those wrappers so the result is a parseable expression; parentheses
- * are left alone (they parse fine).
+ * exactly those wrappers so the result is a parseable expression; parentheses are
+ * left alone (they parse fine).
+ *
+ * A wrapper is stripped ONLY when the opening delimiter's own match is the LAST
+ * character. Checking "starts with X and ends with Y" is not the same test, and
+ * the difference is not academic — two adjacent wrappers look exactly like one:
+ *
+ *     if=${@a} && ${@b}      "starts ${ / ends }"    -> `@a} && ${@b`
+ *     if='a' == 'b'          "starts ' / ends '"     -> `a' == 'b`
+ *
+ * Either mangling makes the guard unparseable, so the identifier consumer drops
+ * every read in it (a silent fail-closed under-emit) and the `@`-sigil consumer
+ * regex-scans corrupted text. Returning the string UNSTRIPPED is strictly better:
+ * the outer form still parses, or fails honestly.
  */
 function unwrapGuardRaw(raw: string): string {
   let s = raw.trim();
-  if (s.startsWith("${") && s.endsWith("}")) s = s.slice(2, -1).trim();
-  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
-    s = s.slice(1, -1).trim();
+  // `${…}` — strip only if the brace opened at index 1 is closed at the very end.
+  if (s.startsWith("${") && s.endsWith("}")) {
+    let depth = 1;
+    let i = 2;
+    for (; i < s.length && depth > 0; i++) {
+      if (s[i] === "{") depth++;
+      else if (s[i] === "}") depth--;
+    }
+    if (depth === 0 && i === s.length) s = s.slice(2, -1).trim();
+  }
+  // Quotes — strip only if the delimiter does not recur, unescaped, inside.
+  const q = s[0];
+  if ((q === '"' || q === "'") && s.length >= 2 && s.endsWith(q)) {
+    let interiorHasDelim = false;
+    for (let i = 1; i < s.length - 1; i++) {
+      if (s[i] === "\\") { i++; continue; }
+      if (s[i] === q) { interiorHasDelim = true; break; }
+    }
+    if (!interiorHasDelim) s = s.slice(1, -1).trim();
   }
   return s;
 }

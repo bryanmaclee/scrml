@@ -262,3 +262,93 @@ describe("expr-positions §4 — literal attribute text is not code", () => {
     expect(ps[0].render).toBe(false);
   });
 });
+
+describe("expr-positions §5 — `render` is a property of the POSITION, not of having attrs", () => {
+  // `render` means "the compiler wires this into RENDERED output", which is what
+  // makes the dependency graph mint a markup-read node ANCHORED AT THE POSITION'S
+  // SPAN. Getting it wrong does not change a diagnostic today; it puts a node of
+  // the wrong kind, at a declaration span, into a graph that closure analysis and
+  // `resolveSourceRenderNodeId` both consume.
+  const attrValue = { kind: "expr", raw: "@x", refs: ["x"] };
+
+  test("a markup element's attribute IS a render position", () => {
+    const ps = positions({ kind: "markup", tag: "p", attrs: [{ name: "if", value: attrValue }] }, ALL);
+    expect(ps.map((p) => p.render)).toEqual([true]);
+  });
+
+  test("a `state` instantiation's attribute is NOT — `attrs` is not markup-only", () => {
+    // `<card name=...>` carries an `attrs` array of the same shape. The
+    // pre-convergence dependency graph reached `attrs` only from inside its
+    // `node.kind === "markup"` branch, so it never credited these; this keeps that
+    // edge topology exactly.
+    const ps = positions({ kind: "state", stateType: "card", attrs: [{ name: "label", value: attrValue }] }, ALL);
+    expect(ps.map((p) => p.render)).toEqual([false]);
+  });
+
+  test("a `state-constructor-def`'s attribute is NOT either", () => {
+    const ps = positions({ kind: "state-constructor-def", stateType: "card", attrs: [{ name: "label", value: attrValue }] }, ALL);
+    expect(ps.map((p) => p.render)).toEqual([false]);
+  });
+
+  test("but the identifier consumer still SEES it — the position is enumerated, only `render` differs", () => {
+    const node = {
+      kind: "state",
+      stateType: "card",
+      attrs: [{ name: "label", value: { kind: "expr", raw: "LIMIT + 1", exprNode: { kind: "ident", name: "LIMIT" } } }],
+    };
+    const ps = positions(node, IDENT_ONLY);
+    expect(ps).toHaveLength(1);
+    expect(ps[0].origin).toBe("attr.value.exprNode");
+  });
+
+  test("the structural `if=` gate stays a render position on a NON-markup node", () => {
+    // `<each>` / `<match>` / `<engine>` are not `kind: "markup"`, but `if=` governs
+    // whether they RENDER — and the pre-convergence graph credited it, with edges,
+    // from outside its markup branch for exactly that reason.
+    const ps = positions({ kind: "each-block", ifCond: { kind: "expr", raw: "@ready", refs: ["ready"] } }, ALL);
+    expect(ps.map((p) => p.render)).toEqual([true]);
+  });
+});
+
+describe("expr-positions §6 — an engine guard's wrapper is stripped only when it IS the wrapper", () => {
+  // `<onTransition if=...>` is captured VERBATIM, so the value may still carry a
+  // `${...}` or quote wrapper. "Starts with X and ends with Y" is NOT the same
+  // test as "the opening delimiter's match is the last character", and two
+  // ADJACENT wrappers look exactly like one. Strip the wrong pair and the guard
+  // becomes unparseable: the identifier consumer silently drops every read in it,
+  // and the `@`-sigil consumer regex-scans corrupted text.
+  const guard = (ifExprRaw) => {
+    const ps = positions({
+      kind: "engine-decl",
+      _record: { engineMeta: { stateChildren: [{ tag: "T", onTransitionElements: [{ ifExprRaw }] }] } },
+    }, ALL);
+    const p = ps.find((x) => x.origin.endsWith("ifExprRaw"));
+    return p ? p.value : undefined;
+  };
+
+  test("a genuine `${...}` wrapper is stripped", () => {
+    expect(guard("${(GUARD == 1)}")).toBe("(GUARD == 1)");
+  });
+
+  test("a genuine quote wrapper is stripped", () => {
+    expect(guard("'GUARD == 1'")).toBe("GUARD == 1");
+  });
+
+  test("TWO ADJACENT `${}` interpolations are left intact, not merged into one", () => {
+    // Naive strip -> `@a} && ${@b`, which parses as nothing.
+    expect(guard("${@a} && ${@b}")).toBe("${@a} && ${@b}");
+  });
+
+  test("TWO ADJACENT quoted strings are left intact", () => {
+    // Naive strip -> `a' == 'b`.
+    expect(guard("'a' == 'b'")).toBe("'a' == 'b'");
+  });
+
+  test("an escaped delimiter inside a genuine quote wrapper does not block the strip", () => {
+    expect(guard("'a\\'b'")).toBe("a\\'b");
+  });
+
+  test("a `${}` that closes early is left intact", () => {
+    expect(guard("${a}{b}")).toBe("${a}{b}");
+  });
+});

@@ -36,6 +36,21 @@
  *    reaches the client does not merely carry a useless build-host path; it makes
  *    the WHOLE FILE fail to load. Pinned as a fail-closed skip.
  *
+ * §4 SAME-FILE §14.8 NO-LEAK — the SAME invariant as §2, on the OTHER call site.
+ *    §2's six vectors all put the secret in a separate `models.scrml`, so every
+ *    one of them travels the cross-file path. The per-file #263 gate is a second
+ *    caller of the same collector, and for as long as shadow policy lived in the
+ *    CALLERS the two could disagree — which they did, in the leaking direction.
+ *    Two of these vectors leak on `main` and one more leaked on the first cut of
+ *    this arc. **When a helper has two callers, a test that exercises one of them
+ *    is measuring half the surface, and reads exactly like a test that measures
+ *    all of it.**
+ *
+ * §5 A MODULE-SCOPE READ SURVIVES AN UNRELATED SHADOW — the other direction of
+ *    the same question, and the one an over-eager shadow guard breaks. A client
+ *    `function greet(NEEDED)` binds `NEEDED` inside its own body and nowhere else;
+ *    it must not suppress a genuine `on mount { @a = NEEDED }` read of the import.
+ *
  * Firing sites: codegen/client-read-seed.ts (`collectClientReadIdents`) ·
  * compiler/src/expr-positions.ts (`forEachExprPosition`) ·
  * codegen/emit-client.ts (`emitReferencedModuleExportConstLines`) ·
@@ -504,5 +519,209 @@ on mount {
       vm.runInContext(c.out("models.scrml").clientJs, ctx, { filename: "models.client.js" });
       vm.runInContext(c.out("index.scrml").clientJs, ctx, { filename: "index.client.js" });
     }).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §4 — SAME-FILE §14.8: the OTHER caller of the same collector.
+//
+// Every §2 vector puts the secret in a separate `models.scrml`, so every one of
+// them travels the CROSS-FILE path. The per-file #263 gate
+// (`emitReferencedModuleExportConstLines`) is a second caller, and while shadow
+// policy lived in the CALLERS the two could — and did — disagree. Two of the
+// vectors below leak on `main`; a third leaked on the first cut of this arc.
+// ---------------------------------------------------------------------------
+
+const SF_SECRET = `export const SECRET = ["LEAK", "CANARY", "SAMEFILE"].join("-")`;
+
+const SAMEFILE_VECTORS = [
+  {
+    // Leaked on the FIRST CUT of this arc (not on main): the collector gained an
+    // unconditional deep walk that reaches lambda bodies, with no scope check.
+    label: "a lambda PARAM shadowing the export name",
+    dir: "cg263-same-lambda-param",
+    entry: `<program>
+${SF_SECRET}
+${OPEN} @a = ""
+   @rows = [1, 2] ${CLOSE}
+server fn stash() -> string { return SECRET }
+fn compute() { return @rows.map(SECRET => SECRET + 1) }
+on mount { @a = "hello" }
+<button onclick=compute()>go</button>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    // LEAKS ON MAIN. The `${SECRET}` read inside the each body is reachable with
+    // no deep walk at all, and the same-file gate has never had a shadow guard.
+    label: "an <each ... as SECRET> loop var shadowing the export name",
+    dir: "cg263-same-each-var",
+    entry: `<program>
+${SF_SECRET}
+${OPEN} @a = ""
+   @rows = ["x", "y"] ${CLOSE}
+server fn stash() -> string { return SECRET }
+on mount { @a = "hello" }
+<ul><each in=@rows as SECRET><li>${OPEN}SECRET${CLOSE}</li></each></ul>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    // LEAKS ON MAIN, same reason.
+    label: "a client `function` PARAM shadowing the export name",
+    dir: "cg263-same-fn-param",
+    entry: `<program>
+${SF_SECRET}
+${OPEN} @a = "" ${CLOSE}
+server fn stash() -> string { return SECRET }
+function compute(SECRET) { return SECRET }
+on mount { @a = "hello" }
+<button onclick=compute(1)>go</button>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    label: "a local `let` inside a client fn shadowing the export name",
+    dir: "cg263-same-local-let",
+    entry: `<program>
+${SF_SECRET}
+${OPEN} @a = "" ${CLOSE}
+server fn stash() -> string { return SECRET }
+fn compute() {
+    let SECRET = 1
+    return SECRET
+}
+on mount { @a = "hello" }
+<button onclick=compute()>go</button>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    // The floor: no shadow anywhere, read only inside a pruned `server fn`.
+    label: "no shadow at all — read only inside a pruned server fn",
+    dir: "cg263-same-no-shadow",
+    entry: `<program>
+${SF_SECRET}
+${OPEN} @a = "" ${CLOSE}
+server fn stash() -> string { return SECRET }
+on mount { @a = "hello" }
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+];
+
+for (const vec of SAMEFILE_VECTORS) {
+  describe(`CONF-CG-263 §4 — SAME-FILE §14.8 NO-LEAK: ${vec.label}`, () => {
+    let dir;
+    beforeEach(() => {
+      dir = setupDir(vec.dir);
+      writeFileSync(join(dir, "index.scrml"), vec.entry);
+    });
+    afterEach(() => teardownDir(vec.dir));
+
+    test("the server-only value never reaches the client bundle", () => {
+      const c = compileEntry(join(dir, "index.scrml"));
+      expect(c.errors).toEqual([]);
+      const clients = c.allClient();
+      expect(clients.length).toBeGreaterThan(0);
+      for (const [fp, js] of clients) {
+        expect({ file: fp, leaked: /LEAK-CANARY-SAMEFILE|\["LEAK"/.test(js) })
+          .toEqual({ file: fp, leaked: false });
+        expect({ file: fp, decl: /\bconst SECRET\b/.test(js) })
+          .toEqual({ file: fp, decl: false });
+      }
+      // The value IS legitimately present server-side.
+      expect(c.out("index.scrml").serverJs ?? "").toMatch(/LEAK-CANARY-SAMEFILE|\["LEAK"/);
+    });
+  });
+}
+
+describe("CONF-CG-263 §4 — the same-file gate is not simply OFF (positive control)", () => {
+  const NAME = "cg263-same-positive";
+  let dir;
+  beforeEach(() => {
+    dir = setupDir(NAME);
+    // A genuinely client-read same-file export const MUST still be emitted — every
+    // no-leak vector above would pass trivially if the gate emitted nothing.
+    writeFileSync(join(dir, "index.scrml"), `<program>
+export const SHOWN = "shown-client-value"
+${OPEN} @a = "" ${CLOSE}
+on mount { @a = SHOWN }
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`);
+  });
+  afterEach(() => teardownDir(NAME));
+
+  test("a genuinely client-read same-file export const IS emitted", () => {
+    const c = compileEntry(join(dir, "index.scrml"));
+    expect(c.errors).toEqual([]);
+    expect(c.out("index.scrml").clientJs).toMatch(/^\s*const SHOWN = "shown-client-value";/m);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §5 — a MODULE-SCOPE read survives an unrelated shadow elsewhere in the file.
+//
+// The opposite failure of §4, and the one an over-eager shadow guard causes. A
+// flat bag of bound names cannot tell these two apart; a scope stack can.
+// ---------------------------------------------------------------------------
+
+describe("CONF-CG-263 §5 — a client `function` param does NOT suppress a real module-scope read", () => {
+  const NAME = "cg263-param-vs-real-read";
+  let dir;
+  beforeEach(() => {
+    dir = setupDir(NAME);
+    writeFileSync(join(dir, "models.scrml"), MODULE);
+    // `NEEDED` is bound as a param of `greet` — inside `greet` ONLY. The
+    // `on mount` read is a genuine module-scope read of the import.
+    writeFileSync(join(dir, "index.scrml"), `<program>
+import { NEEDED } from './models.scrml'
+${OPEN} @a = "" ${CLOSE}
+function greet(NEEDED) { return NEEDED }
+on mount { @a = NEEDED }
+<button onclick=greet(1)>go</button>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`);
+  });
+  afterEach(() => teardownDir(NAME));
+
+  test("models.client.js still declares and registers the const", () => {
+    const c = compileEntry(join(dir, "index.scrml"));
+    expect(c.errors).toEqual([]);
+    const m = c.out("models.scrml");
+    expect(m.clientJs).toMatch(/^\s*const NEEDED = "needle-value-263";/m);
+    expect(m.clientJs).toMatch(/_scrml_modules\["models\.client\.js"\] = \{[^}]*NEEDED: NEEDED[^}]*\}/);
+  });
+
+  test("the importer's read RESOLVES at runtime — no free variable", () => {
+    const c = compileEntry(join(dir, "index.scrml"));
+    const sets = [];
+    const ctx = vm.createContext({
+      _scrml_modules: {},
+      _scrml_reactive_set: (k, v) => { sets.push([String(k), v]); },
+      _scrml_reactive_get: () => undefined,
+      _scrml_cs_reactive_set: (k, v) => { sets.push([String(k), v]); return v; },
+      _scrml_init_set: () => {}, _scrml_effect: () => ({}),
+      _scrml_render_value: () => {}, _scrml_region_track: () => {},
+      _scrml_register_rehydrator: () => {},
+    });
+    // Pre-fix this threw `ReferenceError: NEEDED is not defined` — the const was
+    // dropped from `models.client.js` while `index.client.js` still read it.
+    expect(() => {
+      vm.runInContext(c.out("models.scrml").clientJs, ctx, { filename: "models.client.js" });
+      vm.runInContext(c.out("index.scrml").clientJs, ctx, { filename: "index.client.js" });
+    }).not.toThrow();
+    const last = (suffix) => {
+      for (let i = sets.length - 1; i >= 0; i--) if (sets[i][0].split("$").pop() === suffix) return sets[i][1];
+      return undefined;
+    };
+    expect(last("a")).toBe("needle-value-263");
   });
 });

@@ -92,24 +92,6 @@ function fnNodeIsServerBoundary(node: any, filePath: string, routeMap: any): boo
   return false;
 }
 
-export interface ClientReadOptions {
-  /**
-   * When provided, receives every CLIENT-side BINDING name reachable in this file
-   * (each-loop vars, lambda params, local `let`/`const`/`fn` decls and their
-   * params).
-   *
-   * THE SCOPE-BLINDNESS GUARD. The returned identifier set is a flat bag of NAMES;
-   * it cannot tell a read of an IMPORT binding `X` apart from a read of a
-   * client-side binding named `X` that shadows it. Cross-marking a server-only
-   * export off such a shadow would emit its value to the client — a §14.8 leak,
-   * strictly worse than the under-emit this whole mechanism fixes. The cross-file
-   * caller therefore requires `refs.has(local) && !bound.has(local)` before
-   * cross-marking. Over-collection here is SAFE by construction: an extra name in
-   * `boundOut` only ever SUPPRESSES a cross-mark.
-   */
-  boundOut?: Set<string>;
-}
-
 /**
  * Per-file memo. BOTH consumers ask the same question about the same file in one
  * compile — `runCG`'s cross-file precompute walks every importing file, and the
@@ -119,10 +101,55 @@ export interface ClientReadOptions {
  * stale entry; the `routeMap` is recorded and checked because server-boundary
  * classification is an input to the answer.
  */
-const _memo = new WeakMap<object, { routeMap: unknown; refs: Set<string>; bound: Set<string> }>();
+const _memo = new WeakMap<object, { routeMap: unknown; refs: Set<string> }>();
 
 /**
- * Collect the identifier names CLIENT-emitted user code in this file references.
+ * Collect the names of MODULE-SCOPE bindings that CLIENT-emitted user code in
+ * this file reads.
+ *
+ * ═══ MODULE-SCOPE IS THE WHOLE POINT, AND IT IS WHY THIS IS SCOPE-AWARE ═══
+ *
+ * Every caller asks the same question — "does client code read the module-level
+ * binding `X`?" — and a name that is BOUND by an enclosing client scope is not a
+ * read of `X`, it is a read of the shadow. Getting that wrong costs in both
+ * directions, and both costs are real and were MEASURED:
+ *
+ *   LEAK (§14.8, critical). `fn compute() { return @rows.map(SECRET => SECRET + 1) }`
+ *   alongside a server-only `export const SECRET`. The lambda param has nothing
+ *   to do with the export, but a scope-blind collector records `SECRET` as read
+ *   and the exporter ships the value to the browser.
+ *
+ *   UNDER-EMIT (#263/#358, high). `function greet(NEEDED) { … }` alongside
+ *   `on mount { @a = NEEDED }` where `NEEDED` is a directly-imported const. The
+ *   `on mount` read is a genuine module-scope read; suppressing it because some
+ *   unrelated function happens to bind that name drops the const from the
+ *   dependency's `.client.js` and the browser throws `ReferenceError` at exit 0.
+ *
+ * A FLAT BAG OF BOUND NAMES CANNOT SEPARATE THOSE TWO, and the previous design
+ * tried: it collected bindings into a set and asked callers to subtract it. That
+ * is an over-approximation whose error is always "suppress", i.e. always the
+ * under-emit this arc exists to eliminate — and it was applied at ONE of the two
+ * call sites, so the other leaked. A scope STACK answers both correctly, costs a
+ * push and a pop per scope, and removes the caller-side policy entirely: there is
+ * now nothing for a call site to get wrong, because there is nothing for it to do.
+ *
+ * ═══ §14.8 — THE OTHER THREE DISCIPLINES ═══
+ *
+ * 1. PRUNE FIRST. A server-boundary `function-decl` body lowers to a client fetch
+ *    STUB that never names what it closes over; a `<x server>` state-decl resolves
+ *    its initializer server-side; an `isServerOnlyNode` statement (`?{}` SQL, env
+ *    reads, server-context meta) is server-resident. All three subtrees are pruned
+ *    before any collection.
+ * 2. PARSE, NEVER REGEX. Every raw-source position is PARSED and walked as real
+ *    ident nodes. A bare-identifier regex over source text reads inside string
+ *    literals and comments — the string-blind leak the #263 AST-precise gate
+ *    replaced, and why `literal-text` is not in this consumer's `SUPPORTS` set.
+ *    `template-text` goes through the escape-aware `forEachTemplateInterpolation`:
+ *    an ESCAPED `\${SECRET}` is literal text codegen never wires.
+ * 3. FAIL CLOSED on shape, but NOT on scope. An unparseable initializer is
+ *    skipped. Scope is different: a name whose binding structure cannot be read is
+ *    treated as BOUND (suppress), because there the safe direction is the leak-free
+ *    one.
  *
  * @param fileAST  the file AST (post symbol-table, so `_record` is populated).
  * @param filePath the file's path, for span-anchored re-parses and the routeMap key.
@@ -132,69 +159,97 @@ export function collectClientReadIdents(
   fileAST: any,
   filePath: string,
   routeMap: any,
-  opts?: ClientReadOptions,
 ): Set<string> {
   if (fileAST && typeof fileAST === "object") {
     const hit = _memo.get(fileAST);
-    if (hit && hit.routeMap === routeMap) {
-      if (opts?.boundOut) for (const b of hit.bound) opts.boundOut.add(b);
-      return hit.refs;
-    }
+    if (hit && hit.routeMap === routeMap) return hit.refs;
   }
   const refs = new Set<string>();
-  // Bindings are ALWAYS collected (not only when the caller asked), so the memo
-  // can serve a later caller that does ask. Collection is cheap and the set is
-  // never consulted unless a caller passes `boundOut`.
-  const bound = new Set<string>();
-  const boundOut = bound;
 
-  const addName = (n: unknown): void => {
-    if (typeof n === "string" && n && !n.startsWith("@")) refs.add(n);
+  // ---- The scope stack. ----------------------------------------------------
+  // One frame per client scope that BINDS names: a `function`/`fn` body (its
+  // params), a lambda body (its params), an `<each>` body (its `as` names), a
+  // `for` body (its loop variable). Locals (`let`/`const`/`~`/`lin`) are added to
+  // the frame they appear in.
+  const scopes: Array<Set<string>> = [];
+  const isShadowed = (n: string): boolean => {
+    for (let i = scopes.length - 1; i >= 0; i--) if (scopes[i].has(n)) return true;
+    return false;
+  };
+  /** Bind `names` into the CURRENT frame (module scope has no frame — see below). */
+  const bindHere = (names: Iterable<string>): void => {
+    const frame = scopes[scopes.length - 1];
+    if (!frame) return; // module scope: a top-level local IS the module binding
+    for (const n of names) frame.add(n);
   };
 
-  // Collect every client-side binding name reachable through a binding-target
-  // field (a bare string loop-var / decl name, a `{name}` param, an array of
-  // such, or a nested destructure pattern).
-  const collectBindingsInto = (x: any, out: Set<string>): void => {
-    if (x == null) return;
-    if (typeof x === "string") { if (x && !x.startsWith("@")) out.add(x); return; }
-    if (Array.isArray(x)) { for (const el of x) collectBindingsInto(el, out); return; }
+  const addName = (n: unknown): void => {
+    if (typeof n !== "string" || !n || n.startsWith("@")) return;
+    if (isShadowed(n)) return; // a read of the shadow, not of the module binding
+    refs.add(n);
+  };
+
+  /**
+   * Every binding name reachable through a binding-target field: a bare string
+   * loop-var / decl name, a `{name}` param, an array of such, or a nested
+   * destructure pattern. Over-collection here is the LEAK-SAFE direction (an
+   * extra bound name only ever suppresses a read), which is why the pattern walk
+   * is generous rather than exact.
+   */
+  const bindingNamesOf = (x: any, out: Set<string>): Set<string> => {
+    if (x == null) return out;
+    if (typeof x === "string") { if (x && !x.startsWith("@")) out.add(x); return out; }
+    if (Array.isArray(x)) { for (const el of x) bindingNamesOf(el, out); return out; }
     if (typeof x === "object") {
-      collectBindingsInto(x.name, out);
+      bindingNamesOf(x.name, out);
       for (const k of ["elements", "properties", "props", "value", "values",
                        "argument", "left", "fields", "entries", "items", "params"]) {
-        if (x[k] != null && typeof x[k] === "object") collectBindingsInto(x[k], out);
+        if (x[k] != null && typeof x[k] === "object") bindingNamesOf(x[k], out);
       }
     }
+    return out;
+  };
+
+  /** Run `body` with one extra scope frame holding `names`. */
+  const inScope = (names: Set<string>, body: () => void): void => {
+    scopes.push(names);
+    try { body(); } finally { scopes.pop(); }
   };
 
   /**
    * Structural descent over an ExprNode graph collecting every real `ident` node.
    * `forEachIdentInExprNode` stops at a lambda scope boundary (that boundary is
    * correct for `lin` capture tracking and wrong for us — a const read inside a
-   * client-side `() => …` IS a client read), so this walk supplements it.
+   * client-side `() => …` IS a client read), so this walk supplements it and
+   * pushes the lambda's own scope while descending its body.
    *
    * A member expression's `.property` is a plain STRING, not an ident node, so
-   * property names can never be collected here. Locals and params it also gathers
-   * are harmless: they simply never match an export-const candidate name.
+   * property names can never be collected here.
    */
   const collectIdentNamesDeep = (n: any): void => {
     if (!n || typeof n !== "object") return;
     if (Array.isArray(n)) { for (const x of n) collectIdentNamesDeep(x); return; }
     if (n.kind === "ident") addName(n.name);
-    // A lambda in client code introduces param bindings; record them so a
-    // `x => …` param named like an import SHADOWS (and so does not cross-mark) it.
-    if (n.kind === "lambda" && boundOut) collectBindingsInto(n.params, boundOut);
-    for (const k of Object.keys(n)) {
-      if (k === "span" || k === "kind" || k === "name") continue;
-      const v = n[k];
-      if (v && typeof v === "object") collectIdentNamesDeep(v);
-    }
+    const descend = (): void => {
+      for (const k of Object.keys(n)) {
+        if (k === "span" || k === "kind" || k === "name") continue;
+        const v = n[k];
+        if (v && typeof v === "object") collectIdentNamesDeep(v);
+      }
+    };
+    // A lambda binds its params for the whole of its own subtree — including its
+    // default-value expressions, which is the leak-safe over-approximation.
+    if (n.kind === "lambda") inScope(bindingNamesOf(n.params, new Set<string>()), descend);
+    else descend();
   };
 
   const collectFromExprNode = (expr: any): void => {
     if (!expr || typeof expr !== "object" || typeof expr.kind !== "string") return;
     try {
+      // Guarded by the SAME scope stack: `forEachIdentInExprNode` stops AT a
+      // lambda boundary, so anything it reports is outside one — but a read
+      // inside an enclosing `function`/`each`/`for` scope still has to be
+      // filtered, and `addName` is where that happens.
       forEachIdentInExprNode(expr, (id: any) => addName(id?.name));
     } catch { /* defensive — a malformed ExprNode never widens the client set */ }
     collectIdentNamesDeep(expr);
@@ -211,27 +266,30 @@ export function collectClientReadIdents(
   /**
    * Collect from source that may hold SEVERAL statements and/or markup.
    *
-   * Two passes, both parse-based:
-   *   (a) consume statements the way `mountBodyExprNode` detects them — parse,
-   *       then advance past the parsed span — so a multi-statement body is fully
-   *       walked. Any parse failure just stops (fail-closed).
-   *   (b) scan `${…}` interiors with the ESCAPE-AWARE shared scanner and parse
-   *       each. Markup body text does not parse as an expression, but its
-   *       interpolation interiors are exactly the code codegen wires.
+   * MARKUP TEXT IS NOT RUN THROUGH THE STATEMENT PARSER. An `<each>` body,
+   * `<match>` arms and an engine `rulesRaw` are markup, and markup does not parse
+   * as an expression — the statement loop would burn a `parseExprToNode` per call
+   * to learn that, on every compiled file. What IS code in markup is the `${…}`
+   * interiors, and those are scanned either way. The statement loop is for the
+   * non-markup raw bodies that motivated this kind in the first place (an engine
+   * state-child `:`-shorthand body such as `@hits = NEEDED`).
    */
   const collectFromBlockSource = (raw: unknown): void => {
     if (typeof raw !== "string" || !raw.trim()) return;
-    let rest = raw;
-    let guard = 0;
-    while (rest.trim() && guard++ < 256) {
-      let node: any = null;
-      try { node = parseExprToNode(rest, filePath, 0); } catch { break; }
-      if (!node || !node.span || typeof node.span.end !== "number" || node.span.end <= 0) {
-        if (node) collectFromExprNode(node);
-        break;
+    const looksLikeMarkup = /^\s*</.test(raw);
+    if (!looksLikeMarkup) {
+      let rest = raw;
+      let guard = 0;
+      while (rest.trim() && guard++ < 256) {
+        let node: any = null;
+        try { node = parseExprToNode(rest, filePath, 0); } catch { break; }
+        if (!node || !node.span || typeof node.span.end !== "number" || node.span.end <= 0) {
+          if (node) collectFromExprNode(node);
+          break;
+        }
+        collectFromExprNode(node);
+        rest = rest.slice(node.span.end);
       }
-      collectFromExprNode(node);
-      rest = rest.slice(node.span.end);
     }
     if (raw.includes("${")) {
       forEachTemplateInterpolation(raw, (interior) => { collectFromExprSource(interior); });
@@ -256,40 +314,8 @@ export function collectClientReadIdents(
     if (base) addName(base);
   };
 
-  const visit = (node: any): void => {
-    if (!node || typeof node !== "object") return;
-
-    // ---- PRUNES (see §14.8 part 1 in the file header). ---------------------
-    if (node.kind === "function-decl") {
-      // Server fn → its body lowers to a stub; its refs do NOT cross. Prune.
-      if (fnNodeIsServerBoundary(node, filePath, routeMap)) return;
-      if (boundOut) { collectBindingsInto(node.name, boundOut); collectBindingsInto(node.params, boundOut); }
-      // Client fn → walk its body (nested server fns are pruned on recursion).
-      if (Array.isArray(node.body)) for (const s of node.body) visit(s);
-      return;
-    }
-    // A candidate export const/let: skip. A candidate's own initializer
-    // references are resolved separately by the transitive closure; seeding from
-    // them would let a NON-reachable const drag a server-only ident in.
-    if (node.kind === "export-decl") return;
-    // §52 server-authority cell (`<x server> = …`): its initializer is resolved
-    // SERVER-side (the client receives a hydration seed, never the init
-    // expression), so refs in it do NOT cross. `isServerOnlyNode` does NOT catch
-    // this — it classifies SQL/`?{}`/env/meta inits, not a server-authority cell
-    // with a plain-value init. A CLIENT cell (`isServer` falsy) DOES ship its
-    // init and is NOT pruned.
-    if (node.kind === "state-decl" && node.isServer === true) return;
-    // Server-only statement (SQL / env / server-context meta): prune subtree.
-    if (isServerOnlyNode(node)) return;
-
-    // ---- Client-side BINDING names (the scope-blindness guard). ------------
-    if (boundOut) {
-      if (node.kind === "each-block") { collectBindingsInto(node.asName, boundOut); collectBindingsInto(node.asNames, boundOut); }
-      else if (node.kind === "for-stmt") { collectBindingsInto(node.variable, boundOut); }
-      else if (node.kind === "let-decl" || node.kind === "const-decl" ||
-               node.kind === "tilde-decl" || node.kind === "lin-decl") { collectBindingsInto(node.name, boundOut); }
-    }
-
+  /** The positions + child recursion for one node, under whatever scope is live. */
+  const visitBody = (node: any): void => {
     // ---- The node's own ExprNode fields, from the SHARED field list. -------
     for (const f of EXPR_NODE_FIELDS) collectFromExprNode(node[f]);
 
@@ -318,8 +344,65 @@ export function collectClientReadIdents(
     }
   };
 
+  const visit = (node: any): void => {
+    if (!node || typeof node !== "object") return;
+
+    // ---- PRUNES (see §14.8 discipline 1 in the doc above). -----------------
+    if (node.kind === "function-decl") {
+      // Server fn → its body lowers to a stub; its refs do NOT cross. Prune.
+      if (fnNodeIsServerBoundary(node, filePath, routeMap)) return;
+      // The fn's NAME binds in the ENCLOSING scope — a top-level `function greet`
+      // IS a module binding, and if an import shares that name the local wins, so
+      // the import is genuinely not read. The PARAMS bind only inside the body.
+      bindHere(bindingNamesOf(node.name, new Set<string>()));
+      inScope(bindingNamesOf(node.params, new Set<string>()), () => {
+        if (Array.isArray(node.body)) for (const s of node.body) visit(s);
+      });
+      return;
+    }
+    // A candidate export const/let: skip. A candidate's own initializer
+    // references are resolved separately by the transitive closure; seeding from
+    // them would let a NON-reachable const drag a server-only ident in.
+    if (node.kind === "export-decl") return;
+    // §52 server-authority cell (`<x server> = …`): its initializer is resolved
+    // SERVER-side (the client receives a hydration seed, never the init
+    // expression), so refs in it do NOT cross. `isServerOnlyNode` does NOT catch
+    // this — it classifies SQL/`?{}`/env/meta inits, not a server-authority cell
+    // with a plain-value init. A CLIENT cell (`isServer` falsy) DOES ship its
+    // init and is NOT pruned.
+    if (node.kind === "state-decl" && node.isServer === true) return;
+    // Server-only statement (SQL / env / server-context meta): prune subtree.
+    if (isServerOnlyNode(node)) return;
+
+    // ---- Scope-INTRODUCING nodes. ------------------------------------------
+    // `<each … as X>` binds X for its body; the body includes the raw `bodyRaw`
+    // position, which is why the frame wraps the whole node visit and not just
+    // the child recursion.
+    if (node.kind === "each-block") {
+      const names = bindingNamesOf(node.asName, new Set<string>());
+      bindingNamesOf(node.asNames, names);
+      inScope(names, () => visitBody(node));
+      return;
+    }
+    if (node.kind === "for-stmt" || node.kind === "for-expr") {
+      inScope(bindingNamesOf(node.variable, new Set<string>()), () => visitBody(node));
+      return;
+    }
+
+    // ---- Locals bind in the frame they appear in. --------------------------
+    // Added BEFORE this node's own positions are read, so a local's initializer
+    // that mentions its own name resolves to the local. Order within a block is
+    // deliberately ignored (a read textually above the declaration is also
+    // treated as shadowed) — that is the leak-safe direction.
+    if (node.kind === "let-decl" || node.kind === "const-decl" ||
+        node.kind === "tilde-decl" || node.kind === "lin-decl") {
+      bindHere(bindingNamesOf(node.name, new Set<string>()));
+    }
+
+    visitBody(node);
+  };
+
   for (const node of getNodes(fileAST)) visit(node);
-  if (fileAST && typeof fileAST === "object") _memo.set(fileAST, { routeMap, refs, bound });
-  if (opts?.boundOut) for (const b of bound) opts.boundOut.add(b);
+  if (fileAST && typeof fileAST === "object") _memo.set(fileAST, { routeMap, refs });
   return refs;
 }

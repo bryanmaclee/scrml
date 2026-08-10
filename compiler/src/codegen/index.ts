@@ -1214,16 +1214,13 @@ export function runCG(input: CgInput): CgOutput {
       if (!fp) continue;
       const entry = importGraphInput.get(fp);
       if (!entry || !Array.isArray(entry.imports) || entry.imports.length === 0) continue;
-      // `boundOut` captures every client-side binding name (each loop vars, lambda
-      // params, locals) so a read that is actually a SHADOW of the imported name —
-      // not a read of the import binding — cannot cross-mark it. Without this,
-      // `refs` is scope-blind and a server-only export whose NAME collides with a
-      // client `<each as X>` / lambda param / local would LEAK to the client. The
-      // asymmetry is deliberate: excluding a genuinely-imported name that is ALSO
-      // locally re-bound is a tolerable UNDER-emit; a leak is never tolerable.
-      const clientBound = new Set<string>();
-      const clientRefs = collectClientReadIdents(
-        fileAST, fp, safeRouteMap, { boundOut: clientBound });
+      // The returned set is already SCOPE-CORRECT: `collectClientReadIdents`
+      // carries a scope stack and reports only reads of MODULE-SCOPE bindings, so
+      // a `<each … as X>` loop var, a lambda param or a local named like an
+      // import is not in it. There is deliberately no shadow subtraction to do
+      // here — this call site used to own half of that policy while the per-file
+      // #263 gate owned none of it, and the asymmetry was a §14.8 leak.
+      const clientRefs = collectClientReadIdents(fileAST, fp, safeRouteMap);
       if (clientRefs.size === 0) continue;
       for (const imp of entry.imports) {
         const absSource = (imp as any).absSource as string | undefined;
@@ -1236,11 +1233,8 @@ export function runCG(input: CgInput): CgOutput {
             : ((imp as any).names ?? []).map((n: string) => ({ imported: n, local: n }));
         for (const s of specs) {
           // The importer reads the LOCAL name in its client code; the dependency
-          // registers under the EXPORTED (imported) name. Require the read to be
-          // UNSHADOWED by any client-side binding of the local name (else it is a
-          // loop-var / param / local of the same name, not a read of the import).
-          if (s && typeof s.local === "string" &&
-              clientRefs.has(s.local) && !clientBound.has(s.local)) {
+          // registers under the EXPORTED (imported) name.
+          if (s && typeof s.local === "string" && clientRefs.has(s.local)) {
             let set = crossFileClientReads.get(absSource);
             if (!set) { set = new Set<string>(); crossFileClientReads.set(absSource, set); }
             set.add(s.imported);
