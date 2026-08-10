@@ -561,6 +561,9 @@ export function bodyReferencesCompilerNamespace(body: LogicNode[]): boolean {
       case "cast": return exprHasCompilerMember(node.expression);
       case "match-expr": return exprHasCompilerMember(node.subject);
       case "reset-expr": return exprHasCompilerMember(node.target);
+      // §6.8.4 — both operand slots of `tare(@cell)` / `tare(@cell, <expr>)`.
+      case "tare-expr": return exprHasCompilerMember(node.target)
+        || (!!node.defaultExpr && exprHasCompilerMember(node.defaultExpr));
       case "lambda": return false;
       default: return false;
     }

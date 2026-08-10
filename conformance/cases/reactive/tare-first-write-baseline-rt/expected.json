@@ -1,0 +1,15 @@
+{
+  "id": "reactive-tare-first-write-baseline-rt",
+  "description": "§6.8.4 (RT) — an IMPLICITLY declared cell (`@x = 0`, no `<x>` declaration) written TWICE at module-init, with `tare(@x)` between the writes. `tare` promotes the init expression live at that point into the cell's reset default, so reset(@x) restores 0 rather than re-running the second write's `current + 1`. This is the FIRST-write intent; the last-write intent has its own case (tare-last-write-baseline-rt) over structurally identical source.",
+  "language-version": "1.0",
+  "spec": "§6.8.4",
+  "source-test": "compiler/tests/browser/browser-tare-reset-baseline.test.js",
+  "rationale": "§6.8.4: `default=` is an ATTRIBUTE and needs a declaration site, which an implicitly declared cell has none of, so before this amendment such a cell could not say what it returns to — the last write's init thunk always won and reset INCREMENTED. `tare` gives the cell the same reach into the default slot from a statement, and §6.8.2's default-before-init precedence does the rest. The compiler deliberately performs NO static analysis of which write is the baseline; source position is the discriminator.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TARE-NO-ARG", "E-TARE-INVALID-TARGET", "E-STATE-UNDECLARED"],
+    "input": [{ "click": "#rs" }],
+    "state": { "x": 0 },
+    "domAnchored": [{ "selector": "#t", "text": "T: 0" }]
+  }
+}

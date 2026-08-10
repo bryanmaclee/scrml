@@ -1,0 +1,14 @@
+{
+  "id": "reactive-tare-last-write-baseline-rt",
+  "description": "§6.8.4 (RT) — the SAME source shape as tare-first-write-baseline-rt (an implicitly declared cell written twice at module-init) with the OPPOSITE intent: the merged LAST write is the baseline, so `tare(@config)` sits after both writes and reset restores the merged value. The pair exists to pin that no structural rule decides this — the author's placement of the tare does.",
+  "language-version": "1.0",
+  "spec": "§6.8.4",
+  "source-test": "compiler/tests/browser/browser-tare-reset-baseline.test.js",
+  "rationale": "§6.8.4: a counter's baseline is its first write and a configuration's baseline is its last, and the two programs are structurally indistinguishable. Any compile-time last-write (or first-write) analysis is therefore wrong for one of them by construction — which is why the bare form lowers to a RUNTIME promotion of whatever init thunk is registered when the statement runs.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TARE-NO-ARG", "E-TARE-INVALID-TARGET", "E-STATE-UNDECLARED"],
+    "input": [{ "click": "#sc" }, { "click": "#rs" }],
+    "domAnchored": [{ "selector": "#t", "text": "T: dark" }]
+  }
+}

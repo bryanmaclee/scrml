@@ -257,7 +257,15 @@ describe("runtime size", () => {
     expect(minimal.length).toBeLessThan(SCRML_RUNTIME.length * 0.30);
   });
 
-  test("RUNTIME_CHUNK_ORDER has 31 chunks", () => {
+  test("RUNTIME_CHUNK_ORDER has 32 chunks", () => {
+    // 32 chunks post-§6.8.4 (S337 tare): 'tare' chunk added for _scrml_tare, the
+    // bare `tare(@cell)` runtime promotion. Deliberately NOT folded into 'reset':
+    // it touches only the 'core' registries (_scrml_init_fns / _scrml_default_fns)
+    // so it has no dependency on the reset runtime, and reset-WITHOUT-tare is the
+    // common shape by a wide margin — sharing the chunk would have taxed every
+    // reset-calling page with a helper it never references. Activated by the
+    // POST-EMIT `_scrml_tare(` scan alone (emit-client.ts).
+    //
     // 31 chunks post-§17.1 if= Phase 2 (S301): 'ifmount' SPLIT OUT of the
     // always-included 'scope' chunk. It holds _scrml_create_scope /
     // _scrml_find_if_marker / _scrml_mount_template / _scrml_unmount_scope /
@@ -317,6 +325,6 @@ describe("runtime size", () => {
     //   18 chunks post-C13: 'engine' chunk for §51.0.F + §51.0.G engine
     //   state-machine runtime hooks.
     //   17 chunks post-C10: 'messages' chunk for §55.10.
-    expect(RUNTIME_CHUNK_ORDER.length).toBe(31);
+    expect(RUNTIME_CHUNK_ORDER.length).toBe(32);
   });
 });

@@ -520,6 +520,23 @@ const _STDLIB_HOST_CHUNK   = _loadStdlibChunk("host");
  *     Infinite loop guard: MAX_RUNS = 100. Scope cleanup registered with _scrml_register_cleanup.
  */
 
+/*
+ * ⚠ EVERYTHING BELOW IS INSIDE ONE TEMPLATE LITERAL — INCLUDING THE COMMENTS.
+ *
+ * Two characters are therefore forbidden anywhere in this string, comments and
+ * all: a BACKTICK (it terminates the literal) and a DOLLAR-BRACE (it opens an
+ * interpolation). Both are ordinary punctuation in a normal source comment, so
+ * the habit of quoting an identifier in backticks — which the rest of this
+ * codebase does everywhere — produces a hard parse error here and takes the
+ * WHOLE COMPILER down with it: every CLI entry point imports this module, so
+ * the failure surfaces as unrelated breakage (S337 saw it land as a live-
+ * Postgres integration test reporting a missing table, because db-migrate could
+ * not start). Quote identifiers bare in this region.
+ *
+ * The interpolations that ARE intended are the few explicit
+ * DOLLAR-BRACE-name-CLOSE slots below (the validator catalog and the stdlib
+ * shims); do not add more casually.
+ */
 export const SCRML_RUNTIME = `// --- scrml reactive runtime ---
 const _scrml_state = {};
 const _scrml_subscribers = {};
@@ -1186,6 +1203,62 @@ function _scrml_reset(name) {
     _scrml_reset(k);
   }
   // No children + no thunk -> silent no-op (defensive).
+}
+
+// ---------------------------------------------------------------------------
+// §6.8.4 tare runtime (chunk: 'tare')
+// ---------------------------------------------------------------------------
+//
+// Its OWN chunk, not part of 'reset', deliberately. _scrml_tare reads and
+// writes _scrml_init_fns / _scrml_default_fns, both of which live in 'core',
+// so it has no dependency on the reset chunk at all — and reset WITHOUT tare is
+// the overwhelmingly common shape. Folding it into 'reset' would ship this
+// helper to every page that merely calls reset(). Activated by the POST-EMIT
+// _scrml_tare( scan in emit-client.ts, which reads emitted text rather than an
+// AST shape.
+//
+// _scrml_tare(name) — SPEC §6.8.4, the bare tare(@cell) form.
+//
+// Promotes the cell's CURRENT init thunk into the default slot. After this
+// runs, _scrml_reset(name) resolves through _scrml_default_fns (which wins per
+// §6.8.2) and therefore restores the value produced by the init thunk that was
+// live AT TARE TIME — even though later writes to the cell go on replacing
+// _scrml_init_fns[name].
+//
+// Why a runtime promotion and not a compile-time decision: an implicitly
+// declared cell written more than once has no single structural rule that can
+// pick the baseline. A counter (write 0, then write current + 1) wants the
+// FIRST write; a config merge (write base, then write base-merged-with-
+// overrides) wants the LAST. The two programs are structurally identical — the
+// discriminator is author INTENT, so the author places the tare() call and
+// source position does the discriminating.
+//
+// This stores the THUNK, not a snapshot: the promoted function is re-evaluated
+// at every reset, exactly as default= is per §6.8.1 ("the attribute stores the
+// expression, not a snapshot").
+//
+// Three cases:
+//   1. Direct init thunk registered -> promote it (the common case).
+//   2. No direct thunk, but the name is a compound PARENT -> promote every
+//      registered child (name + "." prefix), mirroring _scrml_reset's compound
+//      walk so tare(@compound) and reset(@compound) agree on what "the whole
+//      compound" means.
+//   3. Nothing to promote -> NO-OP, deliberately. Assigning the absent slot
+//      would put a non-function into _scrml_default_fns, and the no-op leaves
+//      §6.8.1's init fallback intact — i.e. exactly what the program would do
+//      without the tare. The genuinely broken shape (the cell does not exist)
+//      is a COMPILE error, E-STATE-UNDECLARED.
+function _scrml_tare(name) {
+  if (typeof _scrml_init_fns[name] === "function") {
+    _scrml_default_fns[name] = _scrml_init_fns[name];
+    return;
+  }
+  const prefix = name + ".";
+  for (const k of Object.keys(_scrml_init_fns)) {
+    if (k.indexOf(prefix) === 0 && typeof _scrml_init_fns[k] === "function") {
+      _scrml_default_fns[k] = _scrml_init_fns[k];
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

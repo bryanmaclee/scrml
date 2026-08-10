@@ -1,0 +1,15 @@
+{
+  "id": "reactive-tare-explicit-default-thunk-rt",
+  "description": "§6.8.4 (RT) — the two-argument form `tare(@n, @factor * 2)` stores a THUNK, not a snapshot. `@factor` is bumped from 10 to 50 AFTER the tare; reset(@n) must then yield 100, not the 20 a decl-time snapshot would have frozen.",
+  "language-version": "1.0",
+  "spec": "§6.8.4",
+  "source-test": "compiler/tests/browser/browser-tare-reset-baseline.test.js",
+  "rationale": "§6.8.1 is normative for the attribute form: 'The `default=` expression SHALL be evaluated AT RESET TIME, not at declaration time. The attribute stores the expression, not a snapshot.' §6.8.4 inherits that rule verbatim so the family has ONE evaluation-timing answer — two near-synonyms with divergent timing is the shape this language has rejected before. The lowering is byte-identical to the attribute's: `_scrml_default_set(key, () => <expr>)`.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TARE-NO-ARG", "E-TARE-INVALID-TARGET"],
+    "input": [{ "click": "#bp" }, { "click": "#rs" }],
+    "state": { "n": 100 },
+    "domAnchored": [{ "selector": "#t", "text": "T: 100" }]
+  }
+}

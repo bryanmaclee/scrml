@@ -2057,6 +2057,50 @@ export interface ResetExpr {
 }
 
 /**
+ * `tare(@cell)` / `tare(@cell, <expr>)` — SPEC §6.8.4.
+ *
+ * The STATEMENT-POSITION member of the §6.8 default family. `default=` is an
+ * ATTRIBUTE and therefore needs a declaration site (`<name default=…> = init`),
+ * which an IMPLICITLY-declared cell (`@x = 0`, no `<x>` declaration) does not
+ * have. `tare` gives that cell the same reach into the reset-default slot from
+ * a statement, at a source position the author chooses.
+ *
+ * Two forms:
+ *   - `tare(@cell)`          — promote the cell's CURRENT init thunk into the
+ *                              default slot (`_scrml_tare(key)` at runtime).
+ *   - `tare(@cell, <expr>)`  — set the default thunk explicitly; the statement
+ *                              twin of `default=<expr>`
+ *                              (`_scrml_default_set(key, () => <expr>)`).
+ *
+ * Both store a THUNK evaluated AT RESET TIME, never a snapshot — identical to
+ * `default=` per §6.8.1 ("the attribute stores the expression, not a snapshot").
+ *
+ * Parser-level invariants (mirroring `ResetExpr`):
+ *   - One or two arguments. Zero-arg, three-plus-arg and spread forms surface
+ *     `E-TARE-NO-ARG` (§34) via the optional `diagnostic` field.
+ *   - The target MAY be any ExprNode at parse time. Target-shape validation
+ *     (`@cell` / `@compound.field` / `@compound`) happens in SYM (B22), which
+ *     fires `E-TARE-INVALID-TARGET`.
+ */
+export interface TareExpr {
+  kind: "tare-expr";
+  span: ExprSpan;
+  /** The cell-ref expression argument. May be any ExprNode at parse time. */
+  target: ExprNode;
+  /**
+   * The explicit default expression of the two-argument form
+   * (`tare(@cell, <expr>)`). Absent for the bare promote form.
+   */
+  defaultExpr?: ExprNode;
+  /**
+   * Parse-time diagnostic for malformed tare forms (zero-arg, 3+-arg, spread).
+   * Surfaced by the ast-builder wrapper as a TABError (`E-TARE-NO-ARG`, §34).
+   * Absent on well-formed calls.
+   */
+  diagnostic?: { code: string; message: string };
+}
+
+/**
  * markup-value-in-expression-2026-06-17 (a)+(b) — markup-as-first-class-value
  * (Pillar 1, SPEC §1.4 / §7.4) appearing in EXPRESSION position: a ternary
  * consequent/alternate, or any sub-expression. The ast-builder
@@ -2101,4 +2145,5 @@ export type ExprNode =
   | InputStateRefExpr
   | EscapeHatchExpr
   | MarkupValueExpr
-  | ResetExpr;
+  | ResetExpr
+  | TareExpr;

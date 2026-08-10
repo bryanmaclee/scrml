@@ -657,6 +657,13 @@ function collectLambdaBodyReads(
     case "reset-expr":
       collectLambdaBodyReads((n.argument ?? n.expression ?? n.target) as ExprNode, sink, bound);
       return;
+    case "tare-expr":
+      // §6.8.4 — two operand slots, so it cannot share the single-slot arm
+      // above: the explicit-default form carries real expression text that can
+      // read cells a lambda body must see.
+      collectLambdaBodyReads(n.target as ExprNode, sink, bound);
+      if (n.defaultExpr) collectLambdaBodyReads(n.defaultExpr as ExprNode, sink, bound);
+      return;
     case "binary":
       collectLambdaBodyReads(n.left as ExprNode, sink, bound);
       collectLambdaBodyReads(n.right as ExprNode, sink, bound);

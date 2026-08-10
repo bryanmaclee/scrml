@@ -82,7 +82,13 @@ export const KEYWORDS = new Set([
   // Adopters now use `debounce`/`throttle` as ordinary identifiers; calls
   // resolve through the stdlib import. Without the KEYWORD reservation,
   // names like `let debounce = ...` no longer fire E-RESERVED-IDENTIFIER.
-  "cleanup", "upload", "reset",
+  // `tare` — §6.8.4 statement-position reset baseline: `tare(@cell)` promotes
+  // the cell's current init thunk into the reset-default slot; `tare(@cell,
+  // <expr>)` sets that slot explicitly. Reserved at lex time for the same two
+  // reasons `reset` is: the expression-parser lifts it into a `tare-expr` AST
+  // node, and the parser emits E-RESERVED-IDENTIFIER when a declaration
+  // shadows it.
+  "cleanup", "upload", "reset", "tare",
   // scrml env access modifier
   "env", "public",
   // scrml reactive effects (§6.7.4)

@@ -5529,7 +5529,7 @@ when @connected changes {
 
 ---
 
-### 6.8 The `default=` Attribute and `reset(@cell)` Keyword
+### 6.8 The `default=` Attribute, the `reset(@cell)` Keyword, and the `tare(@cell)` Keyword
 
 #### 6.8.1 The `default=` Attribute
 
@@ -5554,7 +5554,8 @@ When `default=` is present, calling `reset(@cell)` evaluates the `default=` expr
 - `default=` is an attribute-value-bearing form (`default=<expr>`); the attribute REQUIRES a value. The canonical scrml form for "reset to absence" is `default=not` (§42 Optional bare-sentinel form). The tokens `null` and `undefined` are NOT valid values for `default=` — they are rejected via `E-SYNTAX-042` and surfaced informationally via `W-ABSENCE-IN-SCRML-SOURCE` (§34).
 - The `default=` expression SHALL be evaluated AT RESET TIME, not at declaration time. The attribute stores the expression, not a snapshot.
 - If `default=` is absent, `reset(@cell)` SHALL re-evaluate the init expression at reset time and write the result to the cell.
-- `default=` on a `const` derived declaration is **E-DERIVED-WRITE** (assigning to a derived cell is always a write error; reset on derived cells is also an error for the same reason).
+- `default=` on a `const` derived declaration is **E-DERIVED-WRITE** (assigning to a derived cell is always a write error; reset on derived cells is also an error for the same reason). The same prohibition covers `tare(@derived)` (§6.8.4), which writes the same slot.
+- `default=` requires a DECLARATION SITE (`<name default=… > = init`). A cell declared implicitly — `@x = 0`, with no `<x>` declaration — has none; the statement-position `tare(@cell)` (§6.8.4) is how such a cell sets the same default.
 
 #### 6.8.2 The `reset(@cell)` Keyword
 
@@ -5589,6 +5590,7 @@ reset(@compound)          // reset all fields of a compound cell
 **Cross-references:**
 - §6.2 — Three RHS shapes (which cells support `default=`)
 - §6.3 — Compound state (compound reset semantics; §6.3.5 grounds multi-level)
+- §6.8.4 — `tare(@cell)`, the statement-position way to set the default this section resolves first
 - §6.13 — Reactivity attributes (`debounced=` / `throttled=`); reset cancels pending timed writes.
 - §14.12 — Lifecycle annotation; reset reverts per-access transition state per §6.8.3.
 - §34 — E-RESERVED-IDENTIFIER, E-RESET-NO-ARG, E-RESET-INVALID-TARGET
@@ -5640,6 +5642,124 @@ reset(@state)                        // writes default (.Active); post-type → 
 - §14.12.10 — Normative statements (this section's reciprocal cross-ref bullet)
 - §6.8.2 — Reset semantics this section extends
 - `~/.claude/design-insights.md` — S134 const-deep-freeze ratification block
+
+#### 6.8.4 The `tare(@cell)` Keyword — statement-position reset baseline
+
+**Added 2026-08-10 (S337).** An AMENDMENT, not a bug fix: a form that did not compile now compiles.
+
+> **Provenance:** ruling:user-voice-scrml.md S337 — bryan, verbatim: "tare stores a thunk, keep the family coherent. go build it."
+
+**Why the rule this extends exists.** §6.8.1 gives a cell a `default=` attribute so `reset(@cell)`
+can restore a value the author names, rather than re-running whatever the init expression happens to
+be. The two live in SEPARATE places on purpose: the init expression describes how the cell STARTS,
+the default describes what it RETURNS TO, and those are not always the same sentence. §6.8.2 makes
+the precedence explicit — default first, init second.
+
+`default=` is an ATTRIBUTE, so it requires a declaration site: `<name default=… > = init`. A cell
+declared IMPLICITLY — `@x = 0` with no `<x>` declaration anywhere — has no such site, and therefore
+no way to say what it returns to. `tare` is that cell's reach into the same slot, from a statement.
+It is the statement-position member of an existing family, not a new idea.
+
+**Forms:**
+
+```scrml
+tare(@cell)              // promote the cell's CURRENT init expression into its default
+tare(@cell, <expr>)      // set the default explicitly — the statement twin of default=<expr>
+```
+
+Both forms are STATEMENT position, in logic context (a `${ … }` block, a function body, an event
+handler). Target shapes are the three §6.8.2 accepts: `tare(@cell)`, `tare(@compound)`, and
+`tare(@compound.field)` (multi-level nav legal, §6.3.5).
+
+**Normative statements:**
+
+- `tare` SHALL store a THUNK, evaluated AT RESET TIME — never a value snapshot. This is the §6.8.1
+  rule verbatim ("The `default=` expression SHALL be evaluated AT RESET TIME, not at declaration
+  time. The attribute stores the expression, not a snapshot"), and `tare` matches it so the family
+  has ONE evaluation-timing rule rather than two near-synonyms that differ.
+- `tare(@cell)` SHALL promote the cell's init expression AS IT STANDS AT THE POINT THE STATEMENT
+  RUNS, and SHALL NOT be resolved by any compile-time analysis of which write is "the" baseline.
+  **Source position is the discriminator** (see the worked example below for why no structural rule
+  can be).
+- `tare(@cell, <expr>)` SHALL set the cell's default to `<expr>`, with the identical semantics
+  `default=<expr>` has — including `default=not` (§42) as the canonical absence form, and including
+  the `null` / `undefined` rejection §6.8.1 states.
+- The value a `tare` establishes SHALL take precedence over the cell's init expression at reset, per
+  §6.8.2's default-before-init resolution. A later `tare` on the same cell REPLACES the earlier one;
+  a `reset(@cell)` does NOT consume it.
+- `tare(@cell)` where the cell has NO init expression yet — a tare that runs before the cell's first
+  write — SHALL be a NO-OP. There is nothing to promote, and the no-op leaves §6.8.1's "re-evaluate
+  the init expression" fallback intact, which is exactly what the program would do without the tare.
+  (The genuinely broken shape — a target that is not a declared cell at all — is
+  `E-STATE-UNDECLARED`, not this case.)
+- `tare` on a `const` derived declaration is **E-DERIVED-WRITE**. `tare` writes the same slot
+  `default=` writes, so the §6.8.1 prohibition applies unchanged: assigning to a derived cell is
+  always a write error.
+- `tare` is a RESERVED IDENTIFIER — declaring `function tare() { … }` or `fn tare { … }` is
+  **E-RESERVED-IDENTIFIER** (compile error; see §34), exactly as for `reset` (§6.8.2).
+- `tare()` with no argument, or with more than two arguments, or with a spread argument, is
+  **E-TARE-NO-ARG** (compile error; see §34).
+- A target that is not one of the three canonical shapes is **E-TARE-INVALID-TARGET** (compile error;
+  see §34). This is a distinct code from `E-RESET-INVALID-TARGET`: the two keywords are separate
+  surfaces and a diagnostic SHALL name the keyword the author actually wrote.
+- A MEMBER call — `obj.tare(x)` — is an ordinary method call and is NOT this keyword.
+
+**Worked example — why the discriminator is INTENT, and cannot be form.**
+
+These two programs are structurally identical (an implicitly declared cell written twice at the top
+level of a logic block) and want OPPOSITE answers from `reset`:
+
+```scrml
+${
+    @x = 0
+    tare(@x)                                    // reset(@x) -> 0
+    @x = @x + 1
+}
+```
+
+A counter's baseline is the FIRST write; the second write is the running value.
+
+```scrml
+${
+    @config = base()
+    @config = merge(base(), overrides())
+    tare(@config)                               // reset(@config) -> the merged value
+}
+```
+
+A configuration's baseline is the LAST write; the first is an intermediate. No rule over the SHAPE of
+the source can serve both — first-write and last-write are each wrong for one of them. The author
+supplies the missing information by choosing where the `tare()` statement goes, and the statement
+does exactly what it says at exactly that point.
+
+**Worked example — the two-argument form.**
+
+```scrml
+<factor> = 10
+${
+    @n = 1
+    tare(@n, @factor * 2)
+    @n = 999
+}
+```
+
+`reset(@n)` evaluates `@factor * 2` AT RESET TIME: it yields 20 while `@factor` is 10, and 100 after
+`@factor` becomes 50. A snapshot would keep yielding 20 — which is why §6.8.1's thunk rule is the one
+`tare` inherits.
+
+**Interaction with `default=`.** A cell that carries BOTH a `default=` attribute and a later `tare`
+ends with the tare's value: both write one slot, and the last write wins. A cell that carries
+`default=` and no tare is unaffected by this section — the structural path is unchanged.
+
+**Cross-references:**
+- §6.8.1 — `default=`, the attribute this section gives a statement-position twin (and the source of
+  the thunk-not-snapshot rule)
+- §6.8.2 — `reset(@cell)`, including the default-before-init precedence `tare` depends on and the
+  three target shapes it shares
+- §6.2 — the declaration shapes; the IMPLICIT `@x = init` form is the one with no attribute site
+- §6.3.5 — compound composition (multi-level nav targets)
+- §34 — E-TARE-NO-ARG, E-TARE-INVALID-TARGET, E-DERIVED-WRITE, E-RESERVED-IDENTIFIER,
+  E-STATE-UNDECLARED
 
 ---
 
@@ -19478,7 +19598,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-STATE-UNDECLARED | §6.1.1, §6.1.2, §6.1.3 | S123 V-kill — bare `@name = expr` write inside a `fn`/`function`/user-written `${...}` body without a structural `<name>` declaration in scope. The canonical form `@name = expr` is a WRITE to a pre-declared cell, not a declaration; the auto-synth path (silent phantom-cell creation from bare writes) was retired at S123 per the auto-state-cell-synthesis deep-dive (`scrml-support/docs/deep-dives/auto-state-cell-synthesis-investigation-2026-05-23.md`). Exempts default-logic body-top auto-lift at `<program>`/`<page>`/`<channel>` (§40.8) and meta `^{...}` bodies (BUG-META-6 dependency) — both deferred to follow-up units. Fix: add `<name> = <init>` declaration before the write, or remove the `@` prefix if a local identifier was intended. **Read-side fire WIRED S192 at TS (post-CE relocation).** A bare `@name` read that resolves to NEITHER a reactive cell, NOR an `<each>`/`<tableFor>` loop local, NOR an import binding is also `E-STATE-UNDECLARED` — the silent-bug class that produced the 7 flagship `@currentCustomerEvents`/`@currentDriverEvents` typos at S192. The fire lives at the type-system stage (`compiler/src/type-system.ts`, the logic-expr ident walker), which runs POST-CE and rebuilds a complete `@name` resolution table over the expanded AST. This is the relocation the SYM-stage prototype's failure pointed to: SYM is the WRONG LAYER (it over-fires on `@`-names materialised POST-SYM — `<each>`/`<tableFor>` `@row` loop locals absent from the SYM AST; engine boot-`effect=` cells; cross-FILE channel cells inlined by CE §38.12). TS resolves ALL of these directly: the cross-file channel cell flows through CE inlining into TS's scopeChain (the SYM-stage Class-B channel-body scan is RETIRED — TS reaches the inlined channel decl directly); the engine `<machine name=UI>` lowercased read `${@ui}` resolves via the §51.0.C-canonicalised machineRegistry pre-bind; and the engine boot-`effect=` implicit cell (`@tasks = …` written in the raw-text opener effect, §51.0.H Form 3) resolves via a dedicated openerEffect-write pre-bind. A component-def `${@Name}` read (PascalCase `const Name = <markup>`, instantiated via `<Name/>`) CORRECTLY fires — symmetric with the existing bare-path `E-SCOPE-001`. The §51.0.C engine var-name canonicalisation LANDED S192 (register/read/codegen agree on the one canonical var name); S192 stage-1 closed the same-file registration gaps (legacy `const @name`→`const <name>` + deprecation-lint; `ref=@name` bindings registered; state-block bare-writes migrated). | Error |
 | E-WRITE-NOT-IN-LOGIC-CONTEXT | §40.8, §6.1.1, §6.2 | S123 Unit CC — companion to V-kill (catalog row above). Bare `@name = expr` write at the IMMEDIATE body-top of `<program>` / `<page>` / `<channel>` (the §40.8 default-logic-mode surface). Default-logic mode auto-lifts DECLARATIONS only (structural `<name> = expr`, structural derived `const <name> = expr`, `function`/`fn`, `type`, `let`/`const` locals, `import`); the bare V5-strict WRITE form `@name = expr` is NOT a declaration — writes ARE logic; logic goes in `${...}`. Per the S122 user-voice Option-2 ratification, this shape is normatively rejected. Fix: either (a) wrap in explicit logic block `${ @name = ... }`, or (b) convert to a structural declaration `<name> = ...`. **Discrimination:** Unit CC fires at the IMMEDIATE body-top only; bare writes nested inside a function body (`function f() { @x = 5 }`) or inside an explicit user-written `${...}` block at body-top are governed by V-kill (E-STATE-UNDECLARED above). `<db>` / `<state>` STATE-block bodies are NOT default-logic-mode loci and are NOT affected by THIS (hard) code — a bare `@x = init` directly in a state-block body surfaces the INFO-level `W-STATE-BLOCK-BARE-WRITE-DECL` (catalog row below) instead. **Per-file exemption:** `compiler/src/unit-cc-exemption-list.json` provides path-based suppression for the pre-S123 corpus; each adopter source file removes its own entry as migration completes (sunset is per-file, manual — file deletion does not auto-sunset because the files are adopter source, not scheduled deletion targets like V-kill's `compiler/native-parser/*.scrml` exemption). Companion to `E-STATE-UNDECLARED`; emitted at `compiler/src/symbol-table.ts` PASS 3 (`walkResolveAtNames`) state-decl arm on `_isUnitCCWrite`-tagged nodes. | Error |
 | W-STATE-BLOCK-BARE-WRITE-DECL | §38.4, §6, §40.8 | A bare `@name = init` line directly in a `<db>` / `<state>` STATE-block MARKUP body (not inside a `${...}` logic block, not inside a function). A state-block body is markup context (SPEC §4); per §38.4 ("bare names are LOCALS only") + §6 V5-strict, a bare `@name = init` is NOT a declaration — `@name` is a READ/WRITE of a pre-declared cell. In the markup body it is silently DROPPED (inert text — neither registered nor emitted), so the cell never resolves at SYM. The canonical state-block declaration is the STRUCTURAL form inside a `${...}` logic block: `${ <name> = init }` (see `examples/03-contact-book.scrml` / `08-chat.scrml`). The INFO lint steers there; `bun scrml migrate` does not yet auto-fix (the rewrite re-homes the decl into a `${}` block — an AST relocation, not a text swap). The state-block companion to `E-WRITE-NOT-IN-LOGIC-CONTEXT` (Unit CC, the row above — which deliberately EXCLUDES state-block bodies because a hard error there is a bigger call). The end-of-window timing promotes this to a reserved `E-STATE-BLOCK-BARE-WRITE-DECL`. **Fires:** emitted by TAB (`compiler/src/ast-builder.js` `scanStateBlockBareWriteDecls`, called from `liftBareDeclarations`) — covers BOTH the canonical no-space opener `<db>` / `<state>` / `<schema>` (BS-classified `type=markup`, scanned via `_STATE_BLOCK_BARE_WRITE_NAMES` on the markup path) AND the deprecated whitespace opener `< db>` (BS-classified `type=state`, scanned on the state path). (Added 2026-06-13, sym-cell-registration-completeness; canonical-opener coverage added 2026-06-13 fixup.) | Info |
-| E-DERIVED-WRITE | §6.6, §6.6.8 | Reassignment to a `const`-derived reactive cell. Derived cells are read-only; assignment is not permitted. Example: `const <displayName> = @name.toUpperCase(); @displayName = "x"`. Sibling: in-place mutation is `E-DERIVED-VALUE-MUTATE` (§6.6.18). (Renamed from `E-REACTIVE-002` in S59 lock L21.) | Error |
+| E-DERIVED-WRITE | §6.6, §6.6.8, §6.8.1, §6.8.4 | Reassignment to a `const`-derived reactive cell. Derived cells are read-only; assignment is not permitted. Example: `const <displayName> = @name.toUpperCase(); @displayName = "x"`. THREE forms fire it, because all three are writes to the same immutable value: (a) a reassignment `@derived = x` (§6.6.8); (b) a `default=` attribute on a `const` derived declaration (§6.8.1); (c) a `tare(@derived)` / `tare(@derived, <expr>)` call (§6.8.4, S337) — `tare` sets the reset default, which is the same write `default=` performs. Sibling: in-place mutation is `E-DERIVED-VALUE-MUTATE` (§6.6.18). (Renamed from `E-REACTIVE-002` in S59 lock L21.) | Error |
 | E-DERIVED-VALUE-MUTATE | §6.6.18 | In-place value-mutation of a `const`-derived reactive cell — array mutating methods on a derived array (`@filtered.push(x)`), property assignment / compound-assignment / `delete` on a derived object (`@formCopy.full = "x"`), or the same on an in-compound derived sub-cell. Derived cells are value-immutable from the developer's perspective; mutating one would be silently clobbered when the upstream dependencies next fire. Mutate the upstream cell instead. (S59 lock L21.) | Error |
 | E-DERIVED-SERVER-ONLY-REACH | §6.6.19, §12.2 | The RHS of a `const <name>` derived cell REACHES — by a call or by a bare reference, at any depth, including inside a lambda body, a `match`-arm block body, or an RHS that does not structurally parse — a local binding imported from a module in the §12.2 Trigger 3 `ESCALATION_SERVER_ONLY_MODULES` set (or a submodule of one). §12.2 Trigger 3 escalates the FUNCTION that reaches such a binding, but §12.4 makes route inference per-function and a derived cell is not a function, so the reach was invisible and the module shipped to the browser: measured S331, the reproducer compiled at exit 0 with NO `.server.js`, `const { hashPassword } = _scrml_stdlib.auth;` in the client bundle, and a real `Bun.password.hash` argon2id implementation in the shipped runtime (4 occurrences vs 0 for a program not importing `scrml:auth`) — the exact symptom the Trigger-3 S299 amendment describes. The compiler REFUSES rather than escalating: a derived cell is a synchronous lazy-pull recompute (§6.6.3), so escalation would make each recompute a server round trip, which the derived model cannot express. Resolution: move the call into a `function` (which DOES escalate, §12.2) and write its result to a plain reactive cell. A name bound inside the RHS shadows the import and does not fire; a name inside a string literal is not a reference (§12.4). Carve-out: NOT emitted in a `kind="tool"` program (§64 — no client boundary), mirroring the §20.7 `print()`/`println()` carve-out. Direction-of-change: newly-rejecting, migration measured at ZERO (59 repo files import an escalation server-only module; none reaches one from a derived RHS). **Provenance:** `spec:§12.2 Trigger-3 S299 amendment`. (Catalog addition S331; emitted at `compiler/src/route-inference.ts` Step 3b.) | Error |
 | E-STATE-PINNED-FORWARD-REF | §6.10 | Read of a `pinned` state declaration before its declaration site in source order. `pinned` opts the declaration out of hoisting; forward reads are therefore unsafe. | Error |
@@ -19486,10 +19606,12 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-CELL-RENDER-SPEC-NOT-BINDABLE | §6.2 | Shape 2 declaration (`<name req> = <markup>`) where the RHS markup element is not bindable (e.g., `<div>`, `<span>`). Shape 2 requires a bindable form element. Use `const <name>` (Shape 3) for display-only markup cells. | Error |
 | E-DECL-RHS-INTERP-WRAPPED | §6.2 | A derived/state-cell declaration RHS is wrapped in a `${ }` logic block — `const <bad> = ${ @x }` (Shape 3) / `<bad> = ${ @x }` (Shape 1) / `const <bad>: T = ${ @x }` (typed). The canonical RHS is a BARE expression (§6.2 — the three RHS shapes are all bare expressions); the `${ }` wrapper is non-canonical at decl-RHS position (there is ONE canonical form — `limit-the-primitive`, §14.1.1). Resolution: remove the wrapper — write `const <bad> = @x`. Pre-fix the wrapped RHS collapsed to a bare `$` identifier → a misleading `E-SCOPE-001: Undeclared identifier `$`` cascade; this code fires INSTEAD and recovers by unwrapping (no spurious E-SCOPE-001). Fires for derived (`const <x>`), plain (`<x> =`), and typed (`<x>: T =`) structural decls in logic-block / default-logic position. (Catalog addition S190 cluster-c dog-food; emitted at `compiler/src/ast-builder.js` `tryParseStructuralDecl`.) | Error |
 | E-DECL-NEEDS-INITIALIZER | §6.2 | A `const`-derived cell with a type annotation and no RHS — `const <doubled>: int` or `const <items>: string[]` — has no expression to derive from. Shape 4's no-RHS canonical-empty default (§6.2 — `int`→0, `string`→"", `T[]`→[]) applies to PLAIN reactive cells ONLY; a derived (`const`) cell REQUIRES an initializer expression (§6.2 closing parenthetical, SPEC.md `A `const`-derived cell still requires an expression`). Resolution: `const <doubled>: int = @x * 2`, or drop `const` for a plain Shape-4 cell. The rule is UNCONDITIONAL over the annotation type — BOTH scalar and array const-derived forms fire (S260 ruling: the prior impl array-form exemption was removed). NOT retired (supersedes the older "RETIRED" note in the E-REFINEMENT-NO-DEFAULT row). Emitted at `compiler/src/ast-builder.js`. (S260 — uncatalogued-code backfill from the §34-vs-impl audit + the const-array ruling.) | Error |
-| E-RESERVED-IDENTIFIER | §6.8 | Local identifier shadows a reserved language keyword. Specific case: `function reset() {...}` or `fn reset {...}` shadows the `reset` keyword. | Error |
+| E-RESERVED-IDENTIFIER | §6.8 | Local identifier shadows a reserved language keyword. Specific cases: `function reset() {...}` / `fn reset {...}` shadows the `reset` keyword (§6.8.2); `function tare() {...}` / `fn tare {...}` shadows the `tare` keyword (§6.8.4, S337 — `tare` joins `reset` in the reserved set; adoption migration measured ZERO across every tracked `.scrml`). Emitted at `compiler/src/ast-builder.js` `reservedResetFamilyError`, from all four function/fn declaration-parse sites. | Error |
 | E-SYNTHESIZED-WRITE | §6.11 | Assignment to an auto-synthesized property (e.g., `@signup.isValid = false`). Synthesized validity surface properties are read-only. See §55 for full validity surface specification. | Error |
 | E-RESET-NO-ARG | §6.8 | `reset()` called with no argument. The `reset` keyword requires an explicit cell argument: `reset(@cell)` or `reset(@compound.field)`. | Error |
 | E-RESET-INVALID-TARGET | §6.8.2 | The `reset` keyword target must be one of the three canonical shapes: `reset(@cell)` (top-level cell), `reset(@compound)` (whole compound), or `reset(@compound.field)` (single-level compound nav). Multi-level compound paths (`reset(@a.b.c)`) are also legal when each segment resolves through the compound-scope chain (§6.3.5 recursive composition). Other expression shapes (literals, function-call results, binary / ternary / unary expressions, bare identifiers without `@`, member chains rooted at non-`@` identifiers) are rejected. (Catalog addition S69 — A1b B22.) | Error |
+| E-TARE-NO-ARG | §6.8.4 | `tare()` called with no argument, with more than two arguments, or with a spread argument. The `tare` keyword takes `tare(@cell)` (promote the cell's current init expression into its reset default) or `tare(@cell, <expr>)` (set that default explicitly). Attached at parse time by `compiler/src/expression-parser.ts` when the `tare(...)` call is lifted into a `tare-expr` node, and surfaced by the ast-builder wrapper — the `E-RESET-NO-ARG` sibling shape. (Catalog addition S337 — §6.8.4 amendment.) | Error |
+| E-TARE-INVALID-TARGET | §6.8.4 | The `tare` keyword target must be one of the three canonical cell shapes `reset` accepts: `tare(@cell)` (top-level cell), `tare(@compound)` (whole compound), or `tare(@compound.field)` (compound nav, multi-level legal when each segment resolves through the compound-scope chain, §6.3.5). Other expression shapes (literals, function-call results, binary / ternary / unary expressions, bare identifiers without `@`, member chains rooted at non-`@` identifiers, optional-chain access) are rejected. A DISTINCT code from `E-RESET-INVALID-TARGET` rather than a reuse: the two keywords are separate surfaces, and a diagnostic that printed "reset" at a `tare` call site would name a keyword the author did not write. Emitted at `compiler/src/symbol-table.ts` `validateTareExpr` (PASS 14 / B22), which also fires `E-DERIVED-WRITE` when the resolved target is a `const` derived cell. (Catalog addition S337 — §6.8.4 amendment.) | Error |
 | W-LIFECYCLE-CANDIDATE | §1.5 | A `<program>` body, component body, or file scope has more than 2 reactive boolean cells gating the same UI region. Consider promoting to a `<match>` block (Tier 1) or `<engine>` (Tier 2) for structural exhaustiveness. | Warning |
 | W-MATCH-RULE-INERT | §18.0.2 | `rule=` declared on a state-child inside a `<match>` block. Rules are legal-but-inert in match (read-only on the matched-on value); promote to `<engine>` (Tier 2) to activate enforcement. | Warning |
 | E-MATCH-EFFECT-FORBIDDEN | §18.0.2 | `effect=` attribute used on a state-child inside a `<match>` block. Effects presuppose transitions; transitions don't occur in match. Use `<engine>` (Tier 2). | Error |

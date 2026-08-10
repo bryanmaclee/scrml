@@ -111,6 +111,7 @@ import type {
   ImportSpecifier,
   ExprNode,
   ResetExpr,
+  TareExpr,
   MemberExpr,
 } from "./types/ast.ts";
 import {
@@ -118,6 +119,7 @@ import {
   forEachCallInExprNode,
   emitStringFromTree,
   forEachResetExprInExprNode,
+  forEachTareExprInExprNode,
   parseExprToNode,
 } from "./expression-parser.ts";
 import {
@@ -3470,6 +3472,11 @@ function collectDerivedUpstreamDeps(declNode: any): string[] {
  *   - `form === "default"`  — a `default=` attribute on a `const <name>`
  *     derived declaration (SPEC §6.8.1 — `default=`/`reset()` on a derived
  *     cell is a write and is forbidden for the same reason).
+ *   - `form === "tare"`     — a `tare(@derived)` / `tare(@derived, <expr>)`
+ *     call (SPEC §6.8.4). `tare` writes the SAME reset-default slot `default=`
+ *     writes, so it is a write for the same reason; the code is reused
+ *     deliberately, because the rule is about the CELL rather than about which
+ *     keyword reached it.
  *
  * `declNode` is the DERIVED cell's declaration node (source of the upstream
  * dependency list for the fix-advice).
@@ -3478,7 +3485,7 @@ function fireDerivedWrite(
   errors: SYMDiagnostic[],
   cellName: string,
   declNode: any,
-  form: "reassign" | "default",
+  form: "reassign" | "default" | "tare",
   span: Span,
 ): void {
   const ref = "@" + cellName;
@@ -3486,7 +3493,13 @@ function fireDerivedWrite(
   const depHint = deps.length > 0
     ? `modify one of its upstream dependencies (${deps.join(", ")})`
     : `modify one of its upstream dependencies`;
-  const lead = form === "default"
+  const lead = form === "tare"
+    ? `E-DERIVED-WRITE: \`tare(${ref})\` on derived reactive value \`${ref}\`. `
+      + `A \`const <name>\` derived cell is immutable; \`tare\` sets the cell's `
+      + `reset default — the same write \`default=\` performs — and is forbidden `
+      + `for the same reason as direct assignment (SPEC §6.8.4 + §6.8.1 + §6.6.8 `
+      + `+ §34). `
+    : form === "default"
     ? `E-DERIVED-WRITE: \`default=\` on derived reactive value \`${ref}\`. `
       + `A \`const <name>\` derived cell is immutable; \`default=\` (and `
       + `\`reset(${ref})\`) is a write to the derived value and is forbidden `
@@ -9231,6 +9244,41 @@ function validateResetExprTarget(
 }
 
 /**
+ * §6.8 — map an internal target-shape reason tag to a short human-readable
+ * hint. Shared by `E-RESET-INVALID-TARGET` (§6.8.2) and
+ * `E-TARE-INVALID-TARGET` (§6.8.4): both keywords accept the SAME three cell
+ * target shapes, so the vocabulary that describes a rejected shape is one
+ * table, not two that can drift apart.
+ */
+function describeInvalidCellTargetShape(reason: string): string {
+  switch (reason) {
+    case "bare-non-at-ident": return "bare identifier without `@` prefix";
+    case "optional-chain": return "optional-chain (`?.`) member access";
+    case "non-static-property": return "non-static property access";
+    case "non-ident-root": return "member chain not rooted at an identifier";
+    case "non-at-root": return "member chain rooted at a non-`@` identifier";
+    case "lit": return "literal";
+    case "call": return "function-call result";
+    case "new": return "constructor-call result";
+    case "binary": return "binary expression";
+    case "unary": return "unary expression";
+    case "ternary": return "ternary expression";
+    case "assign": return "assignment expression";
+    case "array": return "array literal";
+    case "object": return "object literal";
+    case "lambda": return "lambda";
+    case "cast": return "cast expression";
+    case "index": return "computed-index access";
+    case "match-expr": return "match expression";
+    case "spread": return "spread";
+    case "reset-expr": return "nested `reset(...)` call";
+    case "tare-expr": return "nested `tare(...)` call";
+    case "escape-hatch": return "unparsed expression form";
+    default: return `expression of kind \`${reason}\``;
+  }
+}
+
+/**
  * Fire `E-RESET-INVALID-TARGET` per §6.8.2 + §34. Triggered when the target
  * of a `reset(...)` keyword call is not one of the three canonical shapes.
  * Message identifies the offending shape and recommends canonical forms.
@@ -9258,33 +9306,7 @@ function fireResetInvalidTarget(
     // Defensive: emitStringFromTree may not handle every kind. Fall through
     // to the kind-only label.
   }
-  // Map internal reason tags to short human-readable hints.
-  const hint = (() => {
-    switch (reason) {
-      case "bare-non-at-ident": return "bare identifier without `@` prefix";
-      case "optional-chain": return "optional-chain (`?.`) member access";
-      case "non-static-property": return "non-static property access";
-      case "non-ident-root": return "member chain not rooted at an identifier";
-      case "non-at-root": return "member chain rooted at a non-`@` identifier";
-      case "lit": return "literal";
-      case "call": return "function-call result";
-      case "new": return "constructor-call result";
-      case "binary": return "binary expression";
-      case "unary": return "unary expression";
-      case "ternary": return "ternary expression";
-      case "assign": return "assignment expression";
-      case "array": return "array literal";
-      case "object": return "object literal";
-      case "lambda": return "lambda";
-      case "cast": return "cast expression";
-      case "index": return "computed-index access";
-      case "match-expr": return "match expression";
-      case "spread": return "spread";
-      case "reset-expr": return "nested `reset(...)` call";
-      case "escape-hatch": return "unparsed expression form";
-      default: return `expression of kind \`${reason}\``;
-    }
-  })();
+  const hint = describeInvalidCellTargetShape(reason);
   errors.push({
     code: "E-RESET-INVALID-TARGET",
     message:
@@ -9294,6 +9316,133 @@ function fireResetInvalidTarget(
       `or \`reset(@compound.field)\` (compound nav, including multi-level paths ` +
       `that resolve through the compound-scope chain). ` +
       `(SPEC §6.8.2 + §34.)`,
+    span,
+    severity: "error",
+  });
+}
+
+/**
+ * §6.8.4 — validate a single `tare-expr` node.
+ *
+ * Two checks, in this order:
+ *
+ *   1. **Target shape** — the same three canonical shapes `reset(...)` accepts
+ *      (`@cell` / `@compound` / `@compound.field`, multi-level nav OK per
+ *      §6.3.5). Anything else fires `E-TARE-INVALID-TARGET`. The code is NOT
+ *      `E-RESET-INVALID-TARGET`: a code carrying two unrelated meanings is a
+ *      known hazard in this catalog, and the reset message names the wrong
+ *      keyword at a tare call site.
+ *
+ *   2. **Derived-cell prohibition** — `tare` writes the reset-default slot, so
+ *      it is a WRITE in exactly the sense §6.8.1 means when it says `default=`
+ *      on a `const` derived declaration is `E-DERIVED-WRITE`. Reuse that code:
+ *      the rule is about the CELL, not about which keyword reached it.
+ *
+ * **Pass-through cases (no fire), mirroring `validateResetExprTarget`:**
+ *   - `node.diagnostic` is set → parse-time `E-TARE-NO-ARG` already surfaced.
+ *   - The target is `@`-shaped but does not RESOLVE → a name-resolution
+ *     concern, not a shape concern. The read-side check already fires
+ *     `E-STATE-UNDECLARED` for it (verified by compilation), so firing here
+ *     too would double-report one mistake.
+ */
+function validateTareExpr(
+  tareNode: TareExpr,
+  currentScope: Scope,
+  errors: SYMDiagnostic[],
+  filePath: string,
+): void {
+  // Skip already-diagnosed nodes (parse-time E-TARE-NO-ARG).
+  if (tareNode.diagnostic) return;
+
+  const target = tareNode.target;
+  if (!target || typeof target !== "object") return;
+
+  // ---- 1. Target shape ----
+  let resolved: StateCellRecord | null = null;
+  if (target.kind === "ident") {
+    const ident = target as IdentExpr;
+    if (typeof ident.name !== "string" || !ident.name.startsWith("@")) {
+      fireTareInvalidTarget(tareNode, target, errors, filePath, "bare-non-at-ident");
+      return;
+    }
+    resolved = lookupStateCell(currentScope, ident.name.slice(1));
+  } else if (target.kind === "member") {
+    const path: string[] = [];
+    let cursor: ExprNode = target;
+    while (cursor.kind === "member") {
+      const m = cursor as MemberExpr;
+      if (m.optional) {
+        fireTareInvalidTarget(tareNode, target, errors, filePath, "optional-chain");
+        return;
+      }
+      if (typeof m.property !== "string") {
+        fireTareInvalidTarget(tareNode, target, errors, filePath, "non-static-property");
+        return;
+      }
+      path.unshift(m.property);
+      cursor = m.object;
+    }
+    if (cursor.kind !== "ident") {
+      fireTareInvalidTarget(tareNode, target, errors, filePath, "non-ident-root");
+      return;
+    }
+    const rootIdent = cursor as IdentExpr;
+    if (typeof rootIdent.name !== "string" || !rootIdent.name.startsWith("@")) {
+      fireTareInvalidTarget(tareNode, target, errors, filePath, "non-at-root");
+      return;
+    }
+    resolved = lookupQualifiedStateCell(currentScope, [rootIdent.name.slice(1), ...path]);
+  } else {
+    fireTareInvalidTarget(tareNode, target, errors, filePath, target.kind);
+    return;
+  }
+
+  // ---- 2. Derived-cell prohibition (§6.8.1 + §6.6.8) ----
+  if (resolved && resolved.isConst === true && resolved.shape === "derived") {
+    fireDerivedWrite(
+      errors, resolved.qualifiedPath, resolved.declNode, "tare",
+      (tareNode.span && typeof tareNode.span === "object")
+        ? (tareNode.span as unknown as Span)
+        : { file: filePath, start: 0, end: 0, line: 1, col: 1 } as unknown as Span,
+    );
+  }
+}
+
+/**
+ * Fire `E-TARE-INVALID-TARGET` per §6.8.4 + §34 — the `tare(...)` sibling of
+ * `fireResetInvalidTarget`.
+ */
+function fireTareInvalidTarget(
+  tareNode: TareExpr,
+  target: ExprNode,
+  errors: SYMDiagnostic[],
+  filePath: string,
+  reason: string,
+): void {
+  const span: SYMDiagnostic["span"] = (tareNode.span && typeof tareNode.span === "object")
+    ? (tareNode.span as unknown as SYMDiagnostic["span"])
+    : { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+  let rendered = "<expr>";
+  try {
+    const r = emitStringFromTree(target as any);
+    if (typeof r === "string" && r.length > 0 && r.length < 80) {
+      rendered = r;
+    } else if (typeof r === "string" && r.length >= 80) {
+      rendered = r.slice(0, 77) + "...";
+    }
+  } catch {
+    // Defensive: emitStringFromTree may not handle every kind.
+  }
+  const hint = describeInvalidCellTargetShape(reason);
+  errors.push({
+    code: "E-TARE-INVALID-TARGET",
+    message:
+      `E-TARE-INVALID-TARGET: \`tare(${rendered})\` — target is a ${hint}, `
+      + `which is not a valid tare target. The \`tare\` keyword accepts only `
+      + `\`tare(@cell)\` (top-level cell), \`tare(@compound)\` (whole compound), `
+      + `or \`tare(@compound.field)\` (compound nav, including multi-level paths `
+      + `that resolve through the compound-scope chain). `
+      + `(SPEC §6.8.4 + §34.)`,
     span,
     severity: "error",
   });
@@ -9323,12 +9472,16 @@ function walkValidateResetTargets(
     const kind = anyN.kind as string;
 
     // Walk every ExprNode payload this node carries; for each, find any
-    // reset-expr nodes nested inside and validate them.
+    // reset-family node (`reset-expr` §6.8.2 / `tare-expr` §6.8.4) nested
+    // inside and validate it.
     for (const f of B3_EXPR_FIELDS) {
       const v = anyN[f];
       if (v && typeof v === "object") {
         forEachResetExprInExprNode(v as ExprNode, (resetNode) => {
           validateResetExprTarget(resetNode, currentScope, errors, filePath);
+        });
+        forEachTareExprInExprNode(v as ExprNode, (tareNode) => {
+          validateTareExpr(tareNode, currentScope, errors, filePath);
         });
       }
     }
@@ -9339,6 +9492,9 @@ function walkValidateResetTargets(
         if (v && typeof v === "object") {
           forEachResetExprInExprNode(v as ExprNode, (resetNode) => {
             validateResetExprTarget(resetNode, currentScope, errors, filePath);
+          });
+          forEachTareExprInExprNode(v as ExprNode, (tareNode) => {
+            validateTareExpr(tareNode, currentScope, errors, filePath);
           });
         }
       }

@@ -1,0 +1,13 @@
+{
+  "id": "reactive-tare-derived-write-pos",
+  "description": "§6.8.4 — `tare(@doubled)` on a `const`-derived cell is E-DERIVED-WRITE. `tare` sets the cell's reset default, which is the same write `default=` performs, so §6.8.1's derived prohibition applies unchanged. The code is REUSED rather than a new one: the rule is about the CELL, not about which keyword reached it.",
+  "language-version": "1.0",
+  "spec": "§6.8.4",
+  "source-test": "compiler/tests/unit/tare-emit-and-diagnostics.test.js",
+  "rationale": "§6.8.1: '`default=` on a `const` derived declaration is E-DERIVED-WRITE (assigning to a derived cell is always a write error).' A derived cell's value is a function of its upstream dependencies; giving it a separate reset default would make the two disagree. E-DERIVED-WRITE now has three fire forms — reassignment (§6.6.8), `default=` (§6.8.1), and `tare` (§6.8.4) — because all three write the same immutable value.",
+  "expect": {
+    "codes": ["E-DERIVED-WRITE"],
+    "notCodes": ["E-TARE-INVALID-TARGET"],
+    "severity": { "E-DERIVED-WRITE": "error" }
+  }
+}

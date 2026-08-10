@@ -121,6 +121,7 @@ export const RUNTIME_CHUNK_ORDER = [
   'core',
   'wire',
   'reset',
+  'tare',
   'validators',
   'derived',
   'lift',
@@ -198,6 +199,12 @@ const CHUNK_MARKERS: Record<NonCoreChunkName, string> = {
   // contains a server `function-decl` OR a `use foreign:` use-decl.
   wire:           "§57 Wire Format dual-decoder (chunk: 'wire')",
   reset:          "§6.8 reset+default runtime (chunk: 'reset')",
+  // §6.8.4 `tare(@cell)` — SEPARATE from 'reset' on purpose. `_scrml_tare` only
+  // touches `_scrml_init_fns` / `_scrml_default_fns`, which live in 'core', so
+  // it has no dependency on the reset chunk; and `reset` without `tare` is the
+  // common shape by a wide margin. Folding the two would make every
+  // reset-calling page pay for a helper it never references.
+  tare:           "§6.8.4 tare runtime (chunk: 'tare')",
   validators:     "§55.1 Validator predicate runtime catalog (chunk: 'validators')",
   derived:        '§6.6 Derived reactive runtime',
   scope:          '§6.7.3 Scope-aware cleanup registry',

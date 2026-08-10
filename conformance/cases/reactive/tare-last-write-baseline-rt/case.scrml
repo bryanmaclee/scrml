@@ -1,0 +1,14 @@
+${
+    @config = base()
+    @config = merge(base(), overrides())
+    tare(@config)
+
+    function base() { return { theme: "light", size: 1 } }
+    function overrides() { return { theme: "dark" } }
+    function merge(a, b) { return { theme: b.theme, size: a.size } }
+    function scramble() { @config = { theme: "scrambled", size: 99 } }
+    function doReset() { reset(@config) }
+}
+<button id="sc" onclick=scramble()>scramble</>
+<button id="rs" onclick=doReset()>reset</>
+<p id="t">T: ${@config.theme}</>

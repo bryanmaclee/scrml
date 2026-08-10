@@ -44,7 +44,7 @@ import {
   tokenizePassthrough as _defaultTokenizePassthrough,
 } from "./tokenizer.ts";
 
-import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode } from "./expression-parser.ts";
+import { parseExprToNode, forEachResetExprInExprNode, forEachTareExprInExprNode, forEachMapLitExprInExprNode } from "./expression-parser.ts";
 import { parseThemeBody } from "./theme-body-parser.ts";
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { isUniversalCorePredicate } from "./validator-catalog.js";
@@ -289,6 +289,39 @@ export const STRUCTURAL_ELEMENT_PLACEMENT = {
 // (the corpus proto-theme cells migrate, §65.14), not a component/type.
 export const RESERVED_CSS_ELEMENT_IDENTIFIERS = new Set(["theme", "defaults"]);
 
+// §6.8 — the reset-family KEYWORDS a function/fn declaration may not shadow.
+// `reset` (§6.8.2) and `tare` (§6.8.4) are both lexed as KEYWORD (tokenizer.ts
+// KEYWORDS) precisely so a declaration site can recognise the shadowing and
+// fire E-RESERVED-IDENTIFIER. The advice text differs per keyword, so the map
+// holds the per-name §-ref and rename suggestion rather than one generic blob.
+const RESET_FAMILY_RESERVED_NAMES = new Map([
+  ["reset", { section: "§6.8", rename: "clearCount", use: "reset(@cell)" }],
+  ["tare",  { section: "§6.8.4", rename: "setBaseline", use: "tare(@cell)" }],
+]);
+
+/**
+ * Build the E-RESERVED-IDENTIFIER for a `function <kw>() {…}` / `fn <kw> {…}`
+ * declaration that shadows a §6.8 reset-family keyword.
+ *
+ * `declForm` is the rendered declaration shape used in the message
+ * (`function tare() {...}` or `fn tare {...}`) — the four decl-parse sites are
+ * duplicated in this file (the same four-site topology E-FN-EQUALS-BODY has),
+ * so the MESSAGE is built here once instead of four times.
+ *
+ * Returns `null` when the name is not a reset-family keyword.
+ */
+function reservedResetFamilyError(name, declForm, span) {
+  const info = RESET_FAMILY_RESERVED_NAMES.get(name);
+  if (!info) return null;
+  return new TABError(
+    "E-RESERVED-IDENTIFIER",
+    `E-RESERVED-IDENTIFIER: \`${declForm}\` shadows the reserved \`${name}\` keyword `
+    + `(${info.section}). Rename the function (e.g., \`${info.rename}\`) or use `
+    + `\`${info.use}\` instead.`,
+    span,
+  );
+}
+
 // §51.0.M / §51.0.R — the engine-child-only, SELF-CLOSING structural elements.
 // These are grammatical ONLY inside an `<engine>` body (where the block-splitter
 // routes the whole body through the raw-text engine-decl recurse, whose buildBlock
@@ -422,6 +455,16 @@ export function safeParseExprToNodeGlobal(expr, filePath, startOffset, errors) {
             resetNode.diagnostic.code || "E-RESET-NO-ARG",
             resetNode.diagnostic.message,
             resetNode.span,
+          ));
+        }
+      });
+      // §6.8.4 — the `tare(...)` sibling of the block above (E-TARE-NO-ARG).
+      forEachTareExprInExprNode(node, (tareNode) => {
+        if (tareNode.diagnostic) {
+          errors.push(new TABError(
+            tareNode.diagnostic.code || "E-TARE-NO-ARG",
+            tareNode.diagnostic.message,
+            tareNode.span,
           ));
         }
       });
@@ -3858,6 +3901,16 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             ));
           }
         });
+        // §6.8.4 — the `tare(...)` sibling of the block above (E-TARE-NO-ARG).
+        forEachTareExprInExprNode(node, (tareNode) => {
+          if (tareNode.diagnostic) {
+            errors.push(new TABError(
+              tareNode.diagnostic.code || "E-TARE-NO-ARG",
+              tareNode.diagnostic.message,
+              tareNode.span,
+            ));
+          }
+        });
         // §59.3 (Units 4+5) — surface map-literal parse-time diagnostics
         // (E-MAP-LITERAL-MALFORMED fatal; W-MAP-* info → result.warnings).
         forEachMapLitExprInExprNode(node, (mapNode) => {
@@ -5863,7 +5916,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     "export", "return", "if", "else", "for", "while", "match", "given",
     "partial", "do", "switch", "class", "public", "env", "when", "broadcast",
     "navigate", "use", "using", "transaction", "fail", "cleanup", "upload",
-    "reset", "disconnect",
+    "reset", "tare", "disconnect",
   ]);
 
   function collectTypeAnnotation() {
@@ -9211,13 +9264,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         nameTok = peek();
         name = consume().text;
       }
-      // §6.8: `reset` is a reserved identifier — declaring `function reset() {}` shadows the keyword.
-      if (nameTok && nameTok.kind === "KEYWORD" && name === "reset") {
-        errors.push(new TABError(
-          "E-RESERVED-IDENTIFIER",
-          `E-RESERVED-IDENTIFIER: \`function reset() {...}\` shadows the reserved \`reset\` keyword (§6.8). Rename the function (e.g., \`clearCount\`) or use \`reset(@cell)\` instead.`,
-          tokenSpan(nameTok, filePath),
-        ));
+      // §6.8: `reset` (§6.8.2) and `tare` (§6.8.4) are reserved identifiers —
+      // declaring `function reset() {}` / `function tare() {}` shadows the keyword.
+      if (nameTok && nameTok.kind === "KEYWORD") {
+        const _reservedErr = reservedResetFamilyError(
+          name, `function ${name}() {...}`, tokenSpan(nameTok, filePath),
+        );
+        if (_reservedErr) errors.push(_reservedErr);
       }
       const params = parseParamList();
       let canFail = false;
@@ -9469,13 +9522,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         nameTok = peek();
         name = consume().text;
       }
-      // §6.8: `reset` is a reserved identifier — declaring `fn reset {...}` shadows the keyword.
-      if (nameTok && nameTok.kind === "KEYWORD" && name === "reset") {
-        errors.push(new TABError(
-          "E-RESERVED-IDENTIFIER",
-          `E-RESERVED-IDENTIFIER: \`fn reset {...}\` shadows the reserved \`reset\` keyword (§6.8). Rename the function (e.g., \`clearCount\`) or use \`reset(@cell)\` instead.`,
-          tokenSpan(nameTok, filePath),
-        ));
+      // §6.8: `reset` (§6.8.2) and `tare` (§6.8.4) are reserved identifiers —
+      // declaring `fn reset {...}` / `fn tare {...}` shadows the keyword.
+      if (nameTok && nameTok.kind === "KEYWORD") {
+        const _reservedErr = reservedResetFamilyError(
+          name, `fn ${name} {...}`, tokenSpan(nameTok, filePath),
+        );
+        if (_reservedErr) errors.push(_reservedErr);
       }
 
       // fn may optionally have a param list. parseParamList handles default
@@ -12446,13 +12499,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         nameTok = peek();
         name = consume().text;
       }
-      // §6.8: `reset` is a reserved identifier — declaring `function reset() {}` shadows the keyword.
-      if (nameTok && nameTok.kind === "KEYWORD" && name === "reset") {
-        errors.push(new TABError(
-          "E-RESERVED-IDENTIFIER",
-          `E-RESERVED-IDENTIFIER: \`function reset() {...}\` shadows the reserved \`reset\` keyword (§6.8). Rename the function (e.g., \`clearCount\`) or use \`reset(@cell)\` instead.`,
-          tokenSpan(nameTok, filePath),
-        ));
+      // §6.8: `reset` (§6.8.2) and `tare` (§6.8.4) are reserved identifiers —
+      // declaring `function reset() {}` / `function tare() {}` shadows the keyword.
+      if (nameTok && nameTok.kind === "KEYWORD") {
+        const _reservedErr = reservedResetFamilyError(
+          name, `function ${name}() {...}`, tokenSpan(nameTok, filePath),
+        );
+        if (_reservedErr) errors.push(_reservedErr);
       }
 
       const params = parseParamList();
@@ -12778,13 +12831,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         nameTok = peek();
         name = consume().text;
       }
-      // §6.8: `reset` is a reserved identifier — declaring `fn reset {...}` shadows the keyword.
-      if (nameTok && nameTok.kind === "KEYWORD" && name === "reset") {
-        errors.push(new TABError(
-          "E-RESERVED-IDENTIFIER",
-          `E-RESERVED-IDENTIFIER: \`fn reset {...}\` shadows the reserved \`reset\` keyword (§6.8). Rename the function (e.g., \`clearCount\`) or use \`reset(@cell)\` instead.`,
-          tokenSpan(nameTok, filePath),
-        ));
+      // §6.8: `reset` (§6.8.2) and `tare` (§6.8.4) are reserved identifiers —
+      // declaring `fn reset {...}` / `fn tare {...}` shadows the keyword.
+      if (nameTok && nameTok.kind === "KEYWORD") {
+        const _reservedErr = reservedResetFamilyError(
+          name, `fn ${name} {...}`, tokenSpan(nameTok, filePath),
+        );
+        if (_reservedErr) errors.push(_reservedErr);
       }
 
       // fn can optionally have a param list
