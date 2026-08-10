@@ -284,6 +284,11 @@ function allProbes(): Probe[] {
   return [
     runProbe("review-debt", "Review floor (owed reviews)", "bun", ["scripts/review-debt.ts"]),
     runProbe("threads", "Thread-board (open threads)", "bun", ["scripts/threads.ts", "--open"]),
+    // S337: the deliberation queue had NO probe. dpa-024 sat BANKED-UNRUN for 6 sessions and was
+    // surfaced by bryan, not by the boot ("i never saw the results of the perfect compiler dpa"),
+    // and dpa-022/023 read UNRUN for a day AFTER running. pa-base §10: a channel the probe does
+    // not read does not exist to the PA.
+    runProbe("dpa", "Deliberation queue (unrun / unratified)", "bun", ["scripts/dpa-debt.ts"]),
     runProbe("issues", "Adopter issues (open)", "gh", ["issue", "list", "--repo", "bryanmaclee/scrml", "--state", "open"], 45_000),
     runProbe("prs", "Open PRs", "gh", ["pr", "list"], 45_000),
     runProbe("runs", "CI runs (main, last 3)", "gh", ["run", "list", "--branch", "main", "--limit", "3"], 45_000),
