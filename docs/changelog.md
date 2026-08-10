@@ -5960,6 +5960,35 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-09 — S331 (bryan): seven gaps filed, five HIGH, zero regressions — and an architectural hypothesis refuted by design
+
+Six PRs merged (#479 #480 #481 #482 #483 #486) plus the retirement of a parallel delta-log stream in
+scrml-support. The review floor reached **0 OWED** for the first time with every code-bearing PR given a
+real adversarial pass rather than a bare `clean`. Not one of the seven gaps filed was a regression —
+every one was an incomplete fix or a pre-existing hole that a green suite and a clean full-corpus
+differential could not see.
+
+- **#479 — §18.5 block-arm tail is separator-dependent.** `_splitBlockStatements` split only on `;`/newline
+  at depth 0, so a tail following a block-bodied statement was swallowed and the value-returning IIFE fell
+  off its end, yielding `undefined`. Second defect in the same file: `_emitForStmtWithTilde`'s fallbacks
+  dropped the options argument entirely, so a nested bare assignment emitted as a shadowing `const`
+  (silent wrong value) and its self-referencing form as a TDZ `ReferenceError` that `node --check` accepts.
+- **#480 + #482 — review floor 9 → 0.** #473 was clean *and closed its class*. #474's pass was dispatched
+  rather than eyeballed and returned 3 gaps (2 HIGH), zero regressions.
+- **#481 — code-bearing carve-out rate.** Building the rate S328 recommended surfaced that the probe's scan
+  had been silently truncated for its whole life: `--limit` defaulted to 40 against an in-scope population
+  of 90. Root-fixed by auto-widening until the scan provably clears the floor epoch.
+- **#483 — dpa-024 banked**, the compiler-architecture deep-dive.
+- **#486 — a server-only stdlib reach in a derived-cell RHS** escalated nothing and pulled the real argon2
+  implementation into the shipped client runtime. Closes one of four non-function positions.
+
+**The durable finding is a refutation.** An architectural hypothesis formed from six defects was tested by
+an agent dispatched to falsify it, and largely failed: seam density anti-correlates with defect density,
+71% of open gaps are unrelated to it, and the instruments that found all six are five days old and observe
+only emitted text. What survives is narrower and sharper — the seam is still being *minted*, not merely
+inherited.
+
+
 ### 2026-08-07 — S328 (bryan): the review floor's first real return — three of three code PRs carried confirmed defects
 
 Four PRs merged (**#463 #464 #465 #466**); `main` `18fc0571` → `6f176c0d`, coherence 0/0. Conformance
