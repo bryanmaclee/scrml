@@ -1,0 +1,322 @@
+#!/usr/bin/env bun
+/**
+ * scripts/boot.ts — the boot read-set gate + PICKUP-led digest.
+ *
+ * WHY THIS EXISTS (S335 → S336, Peter). The wrap→boot seam had no executable
+ * floor. S335 short-booted — skipped BOTH user-voice ledgers + the per-user
+ * profile — and led orientation with a fresh option-menu instead of the agreed
+ * left-off pickup. Peter caught it, verbatim: "we need the workflow from session
+ * to session to be as seamless as possible. Leaving room for misdirection is not
+ * okay." A memory NAVIGATES (reminds); it does not GATE — so it "leaves room for
+ * misdirection." The remedy is an executable check the boot always runs.
+ *
+ * WHAT IT DOES. One command the /boot skill runs. It:
+ *   1. FETCHES both repos (read-only; never pulls/mutates) and reports behind/ahead/dirty.
+ *   2. VERIFIES every Profile-A read-set source EXISTS + is CURRENT (a missing or
+ *      unpulled-stale read is LOUD) — the anti-short-boot floor. Both user-voice
+ *      ledgers + the per-user profile are in the set BY CONSTRUCTION (the S335 miss).
+ *   3. RUNS the mandatory probes by DELEGATING to the authoritative scripts
+ *      (review-debt.ts · threads.ts) and gh (issues · pr · run) — never a
+ *      reimplementation, so a probe can't drift from its source of truth.
+ *   4. EXTRACTS + PRINTS the `## ⏭ NEXT-SESSION PICKUP` block from hand-off.md as
+ *      the FIRST thing in the digest — orientation leads with the handshake, not a menu.
+ *
+ * DESIGN CONSTRAINTS (pa-base §8 gate-design + the S313/S322 boundary):
+ *   - ADDITIVE / SCOPED. This is a NEW file. It does NOT touch bryan's boot
+ *     contract (.pa-base/profile · /boot · pa-base.md). It is wired into Peter's
+ *     /boot only; the shared-contract amendment is ROUTED to bryan.
+ *   - DETECTION, NOT CONTROL, BY DEFAULT. The default run never fails a boot on a
+ *     network/auth hiccup — it REPORTS. `--check` is the strict human/CI gate: exit
+ *     1 iff a read-set file is MISSING or the PICKUP block is ABSENT (the two
+ *     failure classes the seam produces). A repo merely BEHIND origin is a warning,
+ *     not a failure (timing, not a defect) — the /boot skill still owns pull.
+ *   - READ-ONLY. Fetch yes; pull/commit/push never. This can be run any time.
+ *   - DERIVE-DON'T-DECLARE, GUARDED. The read-set manifest MIRRORS the
+ *     `.pa-base/profile` Profile-A block. Because a hand manifest can drift from the
+ *     contract, each item carries a `needle` proving its mandate, and driftCheck
+ *     asserts that needle is still present in the mandating artifact (the profile,
+ *     or — for the per-user reads S335 added — the pa-profile). So the manifest
+ *     cannot silently outlive a read the contract renamed or dropped. RESIDUAL
+ *     (v1, honest): the REVERSE direction — the contract adding a read the manifest
+ *     lacks — is NOT auto-detected, because the profile prose also NAMES reads it
+ *     tells you to SKIP (SPEC.md "too big to full-read"), so a token scan is
+ *     cry-wolf (§8). The manifest is reviewed against the profile at each amendment.
+ *   - WINDOWS-FIRST. Peter runs this on Windows. ROOT via fileURLToPath (never
+ *     new URL().pathname — the S262/#473 Windows break); sub-processes via spawnSync
+ *     with explicit arg arrays, no shell.
+ *
+ * MODES:
+ *   bun scripts/boot.ts             DIGEST — the PICKUP-led boot report (default).
+ *   bun scripts/boot.ts --json      JSON   — machine-readable {sync, readset, pickup, probes, board}.
+ *   bun scripts/boot.ts --check     CHECK  — exit 1 iff a read-set file MISSING or PICKUP absent.
+ *   bun scripts/boot.ts --no-probes        — skip the gh/sub-script probes (fast, offline). Still fetches.
+ *
+ * House style mirrors scripts/state.ts + scripts/threads.ts (plain bun-run TS,
+ * dependency-free node/Bun built-ins, spawnSync, ROOT via import.meta.url).
+ */
+
+import { existsSync, readFileSync, readdirSync, statSync } from "fs";
+import { fileURLToPath } from "node:url";
+import { spawnSync } from "child_process";
+
+const ROOT = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
+const SUPPORT = `${ROOT}/../scrml-support`;
+const PROFILE = `${ROOT}/.pa-base/profile`;
+const HANDOFF = `${ROOT}/hand-off.md`;
+
+const args = new Set(process.argv.slice(2));
+const JSON_MODE = args.has("--json");
+const CHECK_MODE = args.has("--check");
+const NO_PROBES = args.has("--no-probes");
+
+// ── process helper ────────────────────────────────────────────────────────────
+interface Run { ok: boolean; out: string; err: string; }
+function run(cmd: string, argv: string[], cwd = ROOT, timeout = 60_000): Run {
+  const r = spawnSync(cmd, argv, { cwd, encoding: "utf8", maxBuffer: 32 * 1024 * 1024, timeout });
+  const out = (r.stdout || "").trim();
+  if (r.error) {
+    const code = (r.error as NodeJS.ErrnoException).code;
+    return { ok: false, out, err: code === "ETIMEDOUT" ? `timeout(${timeout}ms)` : (r.error as Error).message };
+  }
+  if (r.status !== 0) return { ok: false, out, err: (r.stderr || "").trim() || `exit ${r.status}` };
+  return { ok: true, out, err: "" };
+}
+
+// ── identity ──────────────────────────────────────────────────────────────────
+// git config user.name -> lowercase -> first token. bryan maclee -> bryan ; pjoliver11 -> pjoliver11.
+function resolveWho(): string {
+  const r = run("git", ["config", "user.name"]);
+  const name = (r.ok ? r.out : "bryan").toLowerCase().trim();
+  return name.split(/\s+/)[0] || "bryan";
+}
+
+// ── repo sync (fetch + behind/ahead/dirty) ─────────────────────────────────────
+interface RepoSync { name: string; present: boolean; fetched: boolean; behind: number; ahead: number; dirty: number; note: string; }
+function syncRepo(name: string, path: string): RepoSync {
+  if (!existsSync(path)) return { name, present: false, fetched: false, behind: 0, ahead: 0, dirty: 0, note: "repo path not found" };
+  const fetch = NO_PROBES ? { ok: true, out: "", err: "" } : run("git", ["fetch", "origin"], path, 45_000);
+  const counts = run("git", ["rev-list", "--left-right", "--count", "origin/main...HEAD"], path);
+  let behind = 0, ahead = 0;
+  if (counts.ok) { const [b, a] = counts.out.split(/\s+/).map(Number); behind = b || 0; ahead = a || 0; }
+  const porcelain = run("git", ["status", "--porcelain"], path);
+  const dirty = porcelain.ok ? porcelain.out.split("\n").filter(Boolean).length : 0;
+  const note = !fetch.ok ? `fetch failed: ${fetch.err}` : (!counts.ok ? `no origin/main (${counts.err})` : "");
+  return { name, present: true, fetched: fetch.ok, behind, ahead, dirty, note };
+}
+
+// ── the Profile-A read-set manifest (MIRRORS .pa-base/profile) ─────────────────
+// `mandate` = which contract artifact obliges the read (drift-guard corpus).
+// `needle`  = a stable substring proving that mandate is still declared there.
+type Mandate = "profile" | "pa-profile";
+interface ReadItem { id: string; label: string; repo: "scrml" | "support"; rel: string; mandate: Mandate; needle: string; }
+function readSet(who: string): ReadItem[] {
+  return [
+    { id: "1a", label: "pa-base (universal doctrine)",          repo: "support", rel: "pa-base.md",                  mandate: "profile",    needle: "pa-base.md" },
+    { id: "1b", label: "pa-scrml-overlay (project delta)",      repo: "support", rel: "pa-scrml-overlay.md",         mandate: "profile",    needle: "pa-scrml-overlay.md" },
+    { id: "2",  label: "PA-SCRML-PRIMER (language snapshot)",   repo: "scrml",   rel: "docs/PA-SCRML-PRIMER.md",     mandate: "profile",    needle: "PA-SCRML-PRIMER.md" },
+    { id: "3",  label: "SPEC-INDEX (spec navigation map)",      repo: "scrml",   rel: "compiler/SPEC-INDEX.md",      mandate: "profile",    needle: "SPEC-INDEX.md" },
+    { id: "4",  label: "master-list §0 (phase dashboard)",      repo: "scrml",   rel: "master-list.md",              mandate: "profile",    needle: "master-list.md" },
+    { id: "5",  label: "hand-off (live session state)",         repo: "scrml",   rel: "hand-off.md",                 mandate: "profile",    needle: "hand-off.md" },
+    { id: "6a", label: "user-voice-scrml (bryan — binds all)",  repo: "support", rel: "user-voice-scrml.md",         mandate: "profile",    needle: "user-voice-scrml.md" },
+    // 6b/7 — the per-user reads S335 short-booted. Mandated by the pa-profile, not the profile read-set line.
+    { id: "6b", label: `user-voice-${who} (your own ledger)`,   repo: "support", rel: `user-voice-${who}.md`,        mandate: "pa-profile", needle: "user-voice-" },
+    { id: "7",  label: `pa-profile-${who} (personal layer)`,    repo: "support", rel: `pa-profile-${who}.md`,        mandate: "profile",    needle: "pa-profile-" },
+  ];
+}
+
+interface ReadStatus extends ReadItem { abs: string; exists: boolean; behindPath: number; named: boolean; }
+function checkRead(it: ReadItem, profileText: string, paProfileText: string): ReadStatus {
+  const base = it.repo === "scrml" ? ROOT : SUPPORT;
+  const abs = `${base}/${it.rel}`;
+  const exists = existsSync(abs);
+  // per-file staleness: # origin commits touching this path not yet in HEAD (needs the prior fetch).
+  let behindPath = 0;
+  if (exists) {
+    const r = run("git", ["rev-list", "--count", "HEAD..origin/main", "--", it.rel], base);
+    if (r.ok) behindPath = Number(r.out) || 0;
+  }
+  // drift-guard: the mandating artifact must still NAME this read.
+  const corpus = it.mandate === "profile" ? profileText : paProfileText;
+  const named = corpus.includes(it.needle);
+  return { ...it, abs, exists, behindPath, named };
+}
+
+// ── active-sessions board liveness (potential live siblings) ───────────────────
+// The board dir is APPEND-ONLY history — most files are wrapped sessions that were
+// never flipped to `status: WRAPPED`, so a status-only filter surfaces months of
+// dead files (the §8 cry-wolf shape). A concurrent sibling is by nature RECENT, so
+// bound the scan by mtime: only non-wrapped files touched within the window are
+// candidates. Actual liveness is still reconciled against the delta-log (a recent
+// header can be a wrapped session that never flipped — the S331-bryan case).
+const BOARD_WINDOW_MS = 3 * 24 * 60 * 60 * 1000; // 72h
+interface Sibling { file: string; who: string; status: string; ageH: number; }
+function boardLiveness(): Sibling[] {
+  const dir = `${SUPPORT}/handOffs/active-sessions`;
+  if (!existsSync(dir)) return [];
+  const now = Date.now();
+  const files = readdirSync(dir).filter((f) => /^S\d+(-[a-z0-9]+)?\.md$/i.test(f));
+  const out: Sibling[] = [];
+  for (const f of files) {
+    const abs = `${dir}/${f}`;
+    let mtime = 0;
+    try { mtime = statSync(abs).mtimeMs; } catch { continue; }
+    if (now - mtime > BOARD_WINDOW_MS) continue; // ancient → wrapped-by-construction
+    let status = "?";
+    try {
+      const text = readFileSync(abs, "utf8");
+      const m = text.match(/^status:\s*(\S+)/mi);
+      if (m) status = m[1].toUpperCase();
+      else if (/\bWRAPPED\b/i.test(text.slice(0, 400))) status = "WRAPPED";
+      else if (/\bLIVE\b/i.test(text.slice(0, 400))) status = "LIVE";
+    } catch { /* unreadable → status ? */ }
+    if (status !== "WRAPPED") { // only recent + non-wrapped are candidate live siblings
+      const who = (f.match(/-([a-z0-9]+)\.md$/i)?.[1]) ?? "?";
+      out.push({ file: f, who, status, ageH: Math.round((now - mtime) / 3_600_000) });
+    }
+  }
+  return out.sort((a, b) => a.ageH - b.ageH);
+}
+
+// ── PICKUP block extraction ────────────────────────────────────────────────────
+function extractPickup(handoffText: string): string | null {
+  // Exact standardized heading first; tolerate a variant that still says "NEXT-SESSION PICKUP".
+  let start = handoffText.indexOf("## ⏭ NEXT-SESSION PICKUP");
+  if (start < 0) {
+    const m = handoffText.match(/^##[^\n]*NEXT-SESSION PICKUP[^\n]*$/m);
+    if (!m || m.index === undefined) return null;
+    start = m.index;
+  }
+  const nlAfterHeading = handoffText.indexOf("\n", start);
+  const heading = nlAfterHeading < 0 ? handoffText.slice(start) : handoffText.slice(start, nlAfterHeading);
+  const body = nlAfterHeading < 0 ? "" : handoffText.slice(nlAfterHeading + 1);
+  const nextH2 = body.search(/^##\s/m); // stop at the next H2
+  const section = nextH2 < 0 ? body : body.slice(0, nextH2);
+  return `${heading}\n${section}`.trim();
+}
+
+// ── mandatory probes (delegated to the authoritative sources) ──────────────────
+interface Probe { id: string; label: string; ok: boolean; out: string; err: string; }
+function runProbe(id: string, label: string, cmd: string, argv: string[], timeout = 120_000): Probe {
+  const r = run(cmd, argv, ROOT, timeout);
+  return { id, label, ok: r.ok, out: r.out, err: r.err };
+}
+function allProbes(): Probe[] {
+  return [
+    runProbe("review-debt", "Review floor (owed reviews)", "bun", ["scripts/review-debt.ts"]),
+    runProbe("threads", "Thread-board (open threads)", "bun", ["scripts/threads.ts", "--open"]),
+    runProbe("issues", "Adopter issues (open)", "gh", ["issue", "list", "--repo", "bryanmaclee/scrml", "--state", "open"], 45_000),
+    runProbe("prs", "Open PRs", "gh", ["pr", "list"], 45_000),
+    runProbe("runs", "CI runs (main, last 3)", "gh", ["run", "list", "--branch", "main", "--limit", "3"], 45_000),
+  ];
+}
+
+// ── assemble ───────────────────────────────────────────────────────────────────
+const who = resolveWho();
+const profileText = existsSync(PROFILE) ? readFileSync(PROFILE, "utf8") : "";
+const paProfilePath = `${SUPPORT}/pa-profile-${who}.md`;
+const paProfileText = existsSync(paProfilePath) ? readFileSync(paProfilePath, "utf8") : "";
+const handoffText = existsSync(HANDOFF) ? readFileSync(HANDOFF, "utf8") : "";
+
+const sync = [syncRepo("scrml", ROOT), syncRepo("scrml-support", SUPPORT)];
+const reads = readSet(who).map((it) => checkRead(it, profileText, paProfileText));
+const pickup = extractPickup(handoffText);
+const board = boardLiveness();
+const probes = NO_PROBES ? [] : allProbes();
+
+// failure classes for --check: a missing read, or an absent PICKUP block.
+const missingReads = reads.filter((r) => !r.exists);
+const pickupAbsent = pickup === null;
+const FAIL = missingReads.length > 0 || pickupAbsent;
+
+// warnings (never fail the boot): behind repos, per-file staleness, manifest drift, unavailable probes.
+const staleReads = reads.filter((r) => r.exists && r.behindPath > 0);
+const driftReads = reads.filter((r) => !r.named);
+const behindRepos = sync.filter((s) => s.present && s.behind > 0);
+const deadProbes = probes.filter((p) => !p.ok);
+
+// ── JSON mode ──────────────────────────────────────────────────────────────────
+if (JSON_MODE) {
+  console.log(JSON.stringify({
+    who, gate: FAIL ? "FAIL" : "PASS",
+    sync, pickupPresent: !pickupAbsent, pickup,
+    readset: reads.map(({ id, label, rel, exists, behindPath, named }) => ({ id, label, rel, exists, behindPath, named })),
+    board, probes: probes.map(({ id, ok, err }) => ({ id, ok, err })),
+    warnings: { staleReads: staleReads.map((r) => r.id), driftReads: driftReads.map((r) => r.id), behindRepos: behindRepos.map((r) => r.name), deadProbes: deadProbes.map((p) => p.id) },
+  }, null, 2));
+  process.exit(CHECK_MODE && FAIL ? 1 : 0);
+}
+
+// ── digest output ──────────────────────────────────────────────────────────────
+const line = (s = "") => console.log(s);
+const H = (s: string) => { line(); line(s); line("─".repeat(Math.min(s.length, 72))); };
+
+// 1. THE PICKUP — first, always. This is the whole point: orientation leads with the handshake.
+line();
+if (pickup) {
+  line(pickup);
+} else {
+  line("## ⏭ NEXT-SESSION PICKUP");
+  line("");
+  line("  ✗ ABSENT — hand-off.md has no `## ⏭ NEXT-SESSION PICKUP` block.");
+  line("    The wrap did not write the standardized handshake. Do NOT improvise a menu:");
+  line("    reconstruct the left-off state from hand-off.md + the delta-log tail before orienting.");
+}
+
+// 2. sync
+H("SYNC");
+for (const s of sync) {
+  if (!s.present) { line(`  ✗ ${s.name.padEnd(14)} MISSING (${s.note})`); continue; }
+  const flags = [
+    s.behind > 0 ? `behind ${s.behind}` : "",
+    s.ahead > 0 ? `ahead ${s.ahead}` : "",
+    s.dirty > 0 ? `${s.dirty} dirty` : "",
+    s.note,
+  ].filter(Boolean).join(" · ");
+  const glyph = s.behind > 0 || s.note ? "⚠" : "✓";
+  line(`  ${glyph} ${s.name.padEnd(14)} ${flags || "in sync (0/0, clean)"}`);
+}
+if (behindRepos.length) line(`  → pull --rebase before reading: reads may be stale (the /boot skill owns the pull).`);
+
+// 3. read-set
+H("PROFILE-A READ-SET");
+for (const r of reads) {
+  const glyph = !r.exists ? "✗" : r.behindPath > 0 ? "⚠" : !r.named ? "⚠" : "✓";
+  const tail = !r.exists ? "MISSING" : r.behindPath > 0 ? `stale (${r.behindPath} unpulled)` : !r.named ? "DRIFT (not named in contract)" : "";
+  line(`  ${glyph} ${r.id.padEnd(3)} ${r.label.padEnd(38)} ${tail}`);
+}
+if (driftReads.length) line(`  → DRIFT: the manifest names a read its contract no longer declares — reconcile scripts/boot.ts with .pa-base/profile.`);
+
+// 4. probes
+if (!NO_PROBES) {
+  H("PROBES");
+  for (const p of probes) {
+    if (!p.ok) { line(`  ⚠ ${p.label} — UNAVAILABLE (${p.err}). NOT verified this session; say so in the report.`); continue; }
+    line(`  ▸ ${p.label}`);
+    for (const l of p.out.split("\n")) line(`      ${l}`);
+  }
+}
+
+// 5. board liveness
+H("BOARD — recent non-wrapped sessions (72h)");
+if (board.length === 0) {
+  line("  ✓ no recent non-wrapped session files — SOLO.");
+} else {
+  for (const b of board) line(`  • ${b.file.padEnd(20)} status=${b.status.padEnd(7)} ${b.ageH}h ago  (${b.who})`);
+  line("  ⚠ A board header can be STALE (a wrapped session that never flipped status). Cross-check the");
+  line("    delta-log tail before treating a sibling as LIVE — header LIVE ≠ actually landing.");
+}
+
+// 6. gate verdict
+H("BOOT-GATE");
+if (FAIL) {
+  if (missingReads.length) line(`  ✗ FAIL — ${missingReads.length} read-set file(s) MISSING: ${missingReads.map((r) => r.id).join(", ")}`);
+  if (pickupAbsent) line(`  ✗ FAIL — PICKUP block absent from hand-off.md`);
+  line(`  A skipped read is the S335 short-boot. Resolve before orienting.`);
+} else {
+  line(`  ✓ PASS — full read-set present, PICKUP present.`);
+}
+const warnN = staleReads.length + driftReads.length + behindRepos.length + deadProbes.length;
+if (warnN) line(`  ${warnN} warning(s): ${[staleReads.length && `${staleReads.length} stale`, driftReads.length && `${driftReads.length} drift`, behindRepos.length && `${behindRepos.length} behind`, deadProbes.length && `${deadProbes.length} probe-unavailable`].filter(Boolean).join(" · ")}`);
+line();
+
+if (CHECK_MODE && FAIL) process.exit(1);
