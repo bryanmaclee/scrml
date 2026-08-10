@@ -405,6 +405,108 @@ const <doubled> = @x * 2
     expect(codes).not.toContain("E-TARE-BEFORE-DECL");
   });
 
+  test("E-TARE-BEFORE-DECL is BARE-FORM ONLY — the two-arg form is exempt at any position", () => {
+    // The rule's whole justification is "there is no init expression yet to
+    // promote", which is a statement about the BARE form. `tare(@x, 0)` lowers
+    // to `_scrml_default_set("x", () => 0)` — self-contained, never reads
+    // `_scrml_init_fns` — so position cannot make it a no-op. Firing on it
+    // rejected a valid program, and it landed green because neither the browser
+    // test nor the conformance case exercised the two-argument branch.
+    const bare = compile(`<program>
+\${
+    tare(@x)
+    @x = 0
+    @x = @x + 1
+}
+</program>`);
+    expect(bare.codes).toContain("E-TARE-BEFORE-DECL");
+
+    const explicit = compile(`<program>
+\${
+    tare(@x, 0)
+    @x = 0
+    @x = @x + 1
+}
+</program>`);
+    expect(explicit.errorCodes).toEqual([]);
+    // …and it really does set the slot, from that position.
+    expect(explicit.clientJs).toContain(`_scrml_default_set("x", () => 0)`);
+  });
+
+  test("E-TARE-BEFORE-DECL: two-arg exemption holds for structural, compound and cross-cell defaults", () => {
+    const shapes = [
+      `\${
+    tare(@x, 0)
+    <x> = 0
+}`,
+      `\${
+    tare(@form.a, 9)
+    <form>
+      <a> = 1
+    </>
+}`,
+      `\${
+    <f> = 10
+    tare(@n, @f * 2)
+    @n = 1
+}`,
+    ];
+    for (const body of shapes) {
+      expect(compile(`<program>\n${body}\n</program>`).errorCodes).not.toContain("E-TARE-BEFORE-DECL");
+    }
+  });
+
+  test("a METHOD named `tare` does not suppress its argument's lifecycle reads", () => {
+    // The read-suppression regex used `\\b`, which matches AFTER a dot — so
+    // `@scale.tare(@user.token)` was treated as the KEYWORD by the type-system
+    // while the parser correctly treated it as a method call, and a legitimate
+    // E-TYPE-001 vanished. Two passes disagreeing about what a token means.
+    const { errorCodes } = compile(`<program>
+\${
+    type User:struct = { name: string, token: (not to string) }
+    <user>: User = { name: "a", token: not }
+    @scale = makeScale()
+    function makeScale() { return { tare: id, reset: id } }
+    function id(v) { return v }
+    @scale.tare(@user.token)
+}
+</program>`);
+    expect(errorCodes).toContain("E-TYPE-001");
+  });
+
+  test("a METHOD named `reset` does not suppress its argument's lifecycle reads either", () => {
+    // The same hazard, INHERITED rather than introduced — `\\breset` has always
+    // matched after a dot. Verified silent at the base compiler; fixed here
+    // because the tare fix put the identical pattern one line away, and leaving
+    // one of a matched pair wrong is how they drift.
+    const { errorCodes } = compile(`<program>
+\${
+    type User:struct = { name: string, token: (not to string) }
+    <user>: User = { name: "a", token: not }
+    @scale = makeScale()
+    function makeScale() { return { tare: id, reset: id } }
+    function id(v) { return v }
+    @scale.reset(@user.token)
+}
+</program>`);
+    expect(errorCodes).toContain("E-TYPE-001");
+  });
+
+  test("a `cleanup` body is a DEFERRED body — a tare there above the decl is legal", () => {
+    // The deferred-kind guard listed three kinds this AST never produces
+    // (`event-handler`, `markup-handler`, `register-cleanup`); the real names
+    // are `when-effect` and `cleanup-registration`. It was harmless only
+    // because the walk does not reach those bodies today — this pins the intent
+    // so extending the walk's reach cannot silently start false-firing.
+    const { errorCodes } = compile(`<program>
+\${
+    cleanup { tare(@x) }
+    <x> = 0
+}
+</program>`);
+    expect(errorCodes).not.toContain("E-TARE-BEFORE-DECL");
+  });
+
   test("object-literal compound: tare and reset AGREE (both address no per-field target)", () => {
     // §6.8.4 known limit. `<form> = { a: 1 }` registers ONE reset target,
     // `form` — so `@form.a` is not a target for EITHER keyword. That is a

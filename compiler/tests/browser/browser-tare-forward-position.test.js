@@ -96,6 +96,38 @@ const CORRECTED = `<program>
 <p id="t">T: \${@x}</p>
 </program>`;
 
+/**
+ * The SAME forward position, but the TWO-ARGUMENT form — which the rule must
+ * NOT reject, because `_scrml_default_set(key, () => 0)` is self-contained and
+ * never consults `_scrml_init_fns`. This branch existing untested is exactly
+ * why the over-fire landed green.
+ */
+const FORWARD_TWO_ARG = `<program>
+\${
+    tare(@x, 0)
+    @x = 0
+    @x = @x + 1
+    function doReset() { reset(@x) }
+}
+<button id="rs" onclick=doReset()>reset</button>
+<p id="t">T: \${@x}</p>
+</program>`;
+
+/** Two-arg form whose default READS another cell — proves the thunk still defers. */
+const FORWARD_TWO_ARG_CROSS_CELL = `<program>
+<f> = 10
+\${
+    tare(@n, @f * 2)
+    @n = 1
+    @n = @n + 500
+    function bump() { @f = 50 }
+    function doReset() { reset(@n) }
+}
+<button id="bp" onclick=bump()>bump</button>
+<button id="rs" onclick=doReset()>reset</button>
+<p id="t">T: \${@n}</p>
+</program>`;
+
 describe("§6.8.4 forward-position tare — E-TARE-BEFORE-DECL (happy-dom)", () => {
   beforeEach(async () => {
     try { await GlobalRegistrator.unregister(); } catch (_) { /* not registered */ }
@@ -149,6 +181,42 @@ describe("§6.8.4 forward-position tare — E-TARE-BEFORE-DECL (happy-dom)", () 
       // produced 2 here with no diagnostic at all.
       expect(app.get("x")).toBe(0);
       expect(app.text("t")).toBe("T: 0");
+    } finally {
+      if (existsSync(compiled.tmpDir)) rmSync(compiled.tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test("the TWO-ARGUMENT form in the SAME forward position is ACCEPTED and works", () => {
+    // The over-fire this pair now guards: the rule is bare-form only, because
+    // `_scrml_default_set(key, () => 0)` needs no init thunk to exist. Rejecting
+    // this cost the author a program that runs correctly — asserted by running
+    // it, not by reading the lowering.
+    const compiled = compileToOutputs(FORWARD_TWO_ARG, "forward_two_arg");
+    try {
+      expect(compiled.errorCodes).toEqual([]);
+      const app = mount(compiled);
+      expect(app.threw).toBeNull();
+      expect(app.get("x")).toBe(1);
+      app.click("rs");
+      expect(app.get("x")).toBe(0);
+      expect(app.text("t")).toBe("T: 0");
+    } finally {
+      if (existsSync(compiled.tmpDir)) rmSync(compiled.tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test("a forward two-arg default that READS another cell still defers to reset time", () => {
+    const compiled = compileToOutputs(FORWARD_TWO_ARG_CROSS_CELL, "forward_two_arg_cross");
+    try {
+      expect(compiled.errorCodes).toEqual([]);
+      const app = mount(compiled);
+      expect(app.threw).toBeNull();
+      expect(app.get("n")).toBe(501);
+      app.click("rs");
+      expect(app.get("n")).toBe(20);          // @f is 10 at reset time
+      app.click("bp");
+      app.click("rs");
+      expect(app.get("n")).toBe(100);         // …and 50 at the next one
     } finally {
       if (existsSync(compiled.tmpDir)) rmSync(compiled.tmpDir, { recursive: true, force: true });
     }

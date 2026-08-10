@@ -9528,6 +9528,16 @@ function collectEarliestStateDeclSpans(nodes: ASTNode[] | undefined): Map<string
  * accepting a silent wrong answer now is the one-way door.
  *
  * **Scope — deliberately narrow, because a false POSITIVE rejects legal code:**
+ *   - **BARE FORM ONLY.** The whole justification above is "there is no init
+ *     expression yet to promote", and that is a statement about the bare form.
+ *     `tare(@cell, <expr>)` lowers to `_scrml_default_set(key, () => expr)`,
+ *     which is SELF-CONTAINED — it never reads `_scrml_init_fns`, so it works
+ *     perfectly above the declaration and `reset` resolves default-before-init
+ *     (§6.8.2) to exactly the right value. Firing here rejected a valid program
+ *     (S337 fix-round-2 finding 1, a regression this check introduced).
+ *     Returning early also keeps the MESSAGE honest by construction: every call
+ *     that reaches the diagnostic really is a one-argument `tare(@cell)`, so
+ *     rendering it that way cannot name a call the author did not write.
  *   - only for a tare NOT inside a function/handler body (the caller passes
  *     that in) and NOT inside a lambda body (the walk is run with
  *     `skipDeferredBodies`). Deferred code runs after module-init, so a tare
@@ -9546,6 +9556,10 @@ function checkTareOrderingAgainstDecl(
   filePath: string,
 ): void {
   if (tareNode.diagnostic) return;
+  // BARE FORM ONLY — see the Scope note above. The explicit-default form sets
+  // the slot directly and needs no init thunk to exist, so position cannot make
+  // it a no-op.
+  if (tareNode.defaultExpr) return;
   const resolved = resolveTareTargetCell(tareNode.target, currentScope);
   if (!resolved) return;
 
@@ -9560,9 +9574,11 @@ function checkTareOrderingAgainstDecl(
   // coordinate space and stay in it).
   const earliestStart = earliestDeclStarts.get().get(resolved.rootName);
   if (!stmtSpan || earliestStart === undefined) return;
+  // Fail OPEN on a synthetic / span-less node. The ABSENCE of an offset is the
+  // sentinel — `undefined`, not the number 0. Offset 0 is a perfectly valid
+  // file position (a statement at the very first byte), and treating it as
+  // "missing" would silently exempt whatever lands there.
   if (typeof stmtSpan.start !== "number") return;
-  // Fail OPEN on a synthetic / span-less node (offset 0 is the sentinel).
-  if (stmtSpan.start <= 0 || earliestStart <= 0) return;
 
   if (earliestStart <= stmtSpan.start) return; // a write comes first — fine.
 
@@ -9715,11 +9731,19 @@ function walkValidateResetTargets(
     }
 
     // Generic recursion (mirrors PASS 3 / PASS 6 / PASS 13).
-    // §6.8.4 — an EVENT-HANDLER body (`on click ${...}`, `onclick=`) is deferred
-    // exactly as a function body is; treat any handler-ish container the same.
+    // §6.8.4 — a body that runs LATER is deferred exactly as a function body is,
+    // so the module-init ordering check must not apply inside one.
+    //
+    // These names are checked against `types/ast.ts`, not guessed. An earlier
+    // draft listed `"event-handler"`, `"markup-handler"` and `"register-cleanup"`;
+    // NONE of the three is a kind this AST produces (the cleanup node is
+    // `"cleanup-registration"`), and the guard was harmless only by accident —
+    // this walk does not reach handler bodies today. The moment its reach is
+    // extended, a `cleanup { tare(@x) }` above a declaration would have started
+    // false-firing. Fictional kind names in a guard are dead code that reads as
+    // coverage.
     const _deferredHere = insideDeferred
-      || kind === "event-handler" || kind === "markup-handler"
-      || kind === "when-effect" || kind === "register-cleanup";
+      || kind === "when-effect" || kind === "cleanup-registration";
     if (Array.isArray(anyN.children)) walkValidateResetTargets(anyN.children, currentScope, visited, errors, filePath, _deferredHere, earliestDeclStarts);
     if (Array.isArray(anyN.body)) walkValidateResetTargets(anyN.body, currentScope, visited, errors, filePath, _deferredHere, earliestDeclStarts);
     if (Array.isArray(anyN.consequent)) walkValidateResetTargets(anyN.consequent, currentScope, visited, errors, filePath, _deferredHere, earliestDeclStarts);

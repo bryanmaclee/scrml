@@ -24975,7 +24975,13 @@ function checkLifecycleFieldAccess(
    */
   function handleResetTextMatches(bareText: string): Array<{ start: number; end: number }> {
     const spans: Array<{ start: number; end: number }> = [];
-    const RESET_CALL_RE = /\breset\s*\(\s*@([A-Za-z_$][A-Za-z0-9_$]*)((?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*)\s*\)/g;
+    // `(?<![.\w$])` NOT `\b`: a `\b` boundary MATCHES AFTER A DOT, so
+    // `@scale.reset(@u.token)` — an ordinary METHOD call on a cell, which the
+    // parser correctly does NOT lift into the keyword node — was treated here as
+    // the `reset` KEYWORD. That both applied a bogus lifecycle revert and
+    // suppressed `@u.token` as a phantom read, dropping a legitimate
+    // E-TYPE-001. The lookbehind pins the keyword to a real statement position.
+    const RESET_CALL_RE = /(?<![.\w$])reset\s*\(\s*@([A-Za-z_$][A-Za-z0-9_$]*)((?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*)\s*\)/g;
     let m: RegExpExecArray | null;
     while ((m = RESET_CALL_RE.exec(bareText)) !== null) {
       const cell = m[1];
@@ -25013,7 +25019,12 @@ function checkLifecycleFieldAccess(
    */
   function collectTareTargetSpans(bareText: string): Array<{ start: number; end: number }> {
     const spans: Array<{ start: number; end: number }> = [];
-    const TARE_TARGET_RE = /\btare\s*\(\s*@[A-Za-z_$][A-Za-z0-9_$]*(?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*/g;
+    // Same `(?<![.\w$])` discipline as RESET_CALL_RE above, and here it is not
+    // an inherited hazard but one this suppression introduced: the unit test
+    // asserting `obj.tare(x)` is an ordinary method call was true of the PARSER
+    // and false of this pass, so a method named `tare` silently swallowed its
+    // argument's reads.
+    const TARE_TARGET_RE = /(?<![.\w$])tare\s*\(\s*@[A-Za-z_$][A-Za-z0-9_$]*(?:\s*\.\s*[A-Za-z_$][A-Za-z0-9_$]*)*/g;
     let m: RegExpExecArray | null;
     while ((m = TARE_TARGET_RE.exec(bareText)) !== null) {
       spans.push({ start: m.index, end: m.index + m[0].length });
@@ -25134,7 +25145,7 @@ function checkLifecycleFieldAccess(
         // (e.g., escape-hatch raw text). Whitespace-tolerant; matches V5-strict
         // canonical shapes.
         const bareText = statementText(stmt);
-        if (bareText && /\breset\s*\(/.test(bareText)) {
+        if (bareText && /(?<![.\w$])reset\s*\(/.test(bareText)) {
           resetSpans = handleResetTextMatches(bareText);
         }
         // §6.8.4 — suppress the `tare(@cell.field)` TARGET as a phantom read.
@@ -25145,7 +25156,7 @@ function checkLifecycleFieldAccess(
         // structured `tare-expr` node and any raw-text path, because the span
         // is computed from the same statement text `extractAccesses` reads —
         // so the structured and fallback routes cannot disagree here.
-        if (bareText && /\btare\s*\(/.test(bareText)) {
+        if (bareText && /(?<![.\w$])tare\s*\(/.test(bareText)) {
           resetSpans = resetSpans.concat(collectTareTargetSpans(bareText));
         }
       }

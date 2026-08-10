@@ -310,3 +310,119 @@ to be deleted by it.
 | 1 design (naive fix) | 2 unit tests RED on the naive variant (`…does NOT revert`, `…SECOND argument`) | green on the real fix |
 | 2 forward-position tare | executed: `reset(@x)` → **2** (increment), 0 diagnostics | `E-TARE-BEFORE-DECL`; corrected program executes → **0** |
 | 3 object-literal compound | tare and reset both silent no-ops | unchanged by design; parity asserted, limit documented in §6.8.4 |
+
+---
+
+# FIX ROUND 2 (S337) — 5 findings
+
+All five reproduced by execution before any code was touched. **Finding 1 is a regression the round-1
+ordering check introduced** — it rejected a valid program. Findings 2 and 4-half are pre-existing and
+characterised against the BASE compiler rather than assumed.
+
+## Finding 1 — MAJOR — `E-TARE-BEFORE-DECL` false-positived on the two-argument form — FIXED
+
+**Before:** `tare(@x, 0)` above the cell's first write → `E-TARE-BEFORE-DECL`.
+**After:** accepted, and EXECUTED to prove it was always a working program:
+
+```
+two-arg tare ABOVE the first write   errors: []   module-init @x = 1   after reset @x = 0
+two-arg tare BELOW the writes        errors: []   module-init @x = 1   after reset @x = 0
+two-arg cross-cell default, above    errors: []   module-init @n = 501 after reset @n = 20
+```
+
+The rule's justification is *"there is no init expression yet to promote"* — a statement about the
+BARE form only. `tare(@cell, <expr>)` lowers to `_scrml_default_set(key, () => expr)`, which never
+reads `_scrml_init_fns`, so position cannot make it a no-op; §6.8.2 resolves default-before-init to
+the named expression from anywhere. Fix is `if (tareNode.defaultExpr) return;` at the top of
+`checkTareOrderingAgainstDecl`.
+
+**The two secondary defects dissolve rather than needing separate fixes.** Returning early means every
+call that reaches the diagnostic really IS a one-argument `tare(@cell)` — so rendering it that way can
+no longer name a call the author did not write, and the "move the call below the write" advice is
+correct for every case that now reaches it. The comment says so, so a future editor who relaxes the
+guard knows the message rendering becomes their problem.
+
+**Why it landed green, and what changed about coverage:** neither the browser test nor
+`tare-before-decl-pos` exercised the two-argument branch. A rule that discriminates between two forms
+now has a case per branch — `tare-before-decl-two-arg-neg` (conformance, runtime-asserted), two unit
+tests, and two browser tests including a cross-cell default that proves the thunk still defers.
+
+SPEC and the §34 row both said "A `tare(@cell)`" — the impl was wider than its own spec. Both now say
+**bare** explicitly and state the exemption with its reason.
+
+## Finding 2 — MEDIUM — native parser has no `tare` mirror — CONFIRMED, not fixed (correctly)
+
+**My round-1 read is confirmed by measurement.** Under `--parser=scrml-native`, an implicit-cell
+program with NO `tare` anywhere already fails:
+
+```
+HEAD, native, ${ @x = 0  @x = @x + 1  function doReset() { reset(@x) } }  ->  5x E-STATE-UNDECLARED
+BASE, native, the same source                                            ->  5x E-STATE-UNDECLARED
+```
+
+The native path cannot compile the implicit `@x = init` declaration form at all, with or without
+`tare`, and did so identically before §6.8.4 existed. So the missing tare mirror is **drift on an
+already-stale shadow, not a regression** — the shadow cannot run the programs `tare` is for.
+Not built here, as instructed (it needs M5-swap context).
+
+## Finding 3 — LOW — three of four "deferred body" kinds do not exist — FIXED
+
+`"event-handler"` and `"markup-handler"` appear NOWHERE in the compiler except the line I wrote;
+`ast-builder.js` emits `kind: "cleanup-registration"`, not `"register-cleanup"`. Only `"when-effect"`
+was real. Corrected to `when-effect` + `cleanup-registration`, with a comment recording that fictional
+kind names in a guard are dead code that reads as coverage.
+
+**Honest note on its test:** the added `cleanup { tare(@x) }` case passes BEFORE and AFTER, because
+the guard is unreachable today — which is exactly what the finding says. It is a forward regression
+guard, not a bite. The evidence for the finding is the grep, and it is recorded above. The source does
+compile cleanly (verified), so the test is not vacuous in the other direction.
+
+## Finding 4 — LOW — `\b` matched after a dot, so a METHOD call was read as the keyword — FIXED (both)
+
+```
+                                       BASE      HEAD before   HEAD after
+@scale.weigh(@user.token)  (control)   FIRES     FIRES         FIRES
+@scale.tare(@user.token)               FIRES     SILENT        FIRES
+@scale.reset(@user.token)              SILENT    SILENT        FIRES
+```
+
+The split matters: the **`tare` half is a regression I introduced** (it fires at base only because
+`tare` was an ordinary name there), and the **`reset` half is inherited** — `\breset` has always
+matched after a dot. Both fixed with `(?<![.\w$])`, including the two cheap pre-filter gates so they
+cannot drift from the regexes they gate. This also closes the contradiction the reviewer named: the
+unit test asserting `obj.tare(x)` is an ordinary method call was true of the PARSER and false of the
+type-system.
+
+**Surfaced, not fixed:** `type-system.ts`'s OTHER `RESET_CALL_RE` (Tracker 1, the Shape-1 cell-value
+lifecycle walker) carries the identical `\breset` hazard, where the consequence is a bogus lifecycle
+REVERT rather than a dropped read. Out of the named scope and it changes shipped `reset` behaviour on
+a second surface — for PA to route.
+
+## Finding 5 — COSMETIC — offset-0 conflated with "no offset" — FIXED
+
+`stmtSpan.start <= 0 || earliestStart <= 0` now `typeof stmtSpan.start !== "number"`; absence is the
+sentinel, not the number 0.
+
+**No before/after test, and I am not going to fake one.** The behaviour differs only for a statement
+at file offset exactly 0, and that is not constructible today — measured across four shapes: a file
+whose first byte is the `${` block puts the statement at ~6; a file whose first byte is the statement
+text produces no logic statement at all (markup context, zero diagnostics either way); `<program>` at
+byte 0 likewise. `earliestStart === 0` can only mean the declaration is first, which never fires
+anyway. The fix removes a latent exemption rather than an observed one.
+
+## Fix-round-2 verification
+
+- unit `tare-emit-and-diagnostics.test.js`: 27 → **32 tests**; browser tare files: 6 → **8 tests**.
+  **Bite: 6 of the 7 new tests FAIL on the pre-fix tree**, the 7th being finding 3's forward guard
+  (unreachable today, as the finding states).
+- conformance: **+1 case** (`reactive/tare-before-decl-two-arg-neg`, runtime-asserted) → 891 pass / 0 fail.
+- round-1 properties re-verified unchanged: reset-vs-tare parity probe **0 divergences / 7**; the
+  tare-does-not-revert and second-argument-still-analysed pair still hold; false-positive sweep now
+  **4 must-fire / 12 must-not-fire / 0 problems** (the four new must-not-fire rows are the two-arg
+  shapes).
+- §34: **810 rows unchanged** (no new codes this round), PINNED 344, IMPL-SITES 320, FALSE-CLAIM 95.
+- `default=` byte-identity vs base: client.js, html AND runtime bundle identical (59,828 bytes).
+- **corpus delta vs base — still zero**: 0 newly failing / 0 newly passing, **0 diagnostic CODE
+  changes**, 0 artifact set delta, 1014 artifact content diffs of which **1014 token-only, 0 real**,
+  syntax 0/0/0, bare server-fn sites 145 → 145. Source-set delta 9 = exactly the tare conformance
+  cases.
