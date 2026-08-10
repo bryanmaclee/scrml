@@ -109,7 +109,42 @@ function syncRepo(name: string, path: string): RepoSync {
 // `needle`  = a stable substring proving that mandate is still declared there.
 type Mandate = "profile" | "pa-profile";
 interface ReadItem { id: string; label: string; repo: "scrml" | "support"; rel: string; mandate: Mandate; needle: string; }
-function readSet(who: string): ReadItem[] {
+
+/**
+ * Resolve the per-user voice ledger by READING the pa-profile's `{{user_voice_ledger}}`
+ * section, rather than assuming the filename is `user-voice-<who>.md`.
+ *
+ * WHY (S337-bryan). The convention-guess is correct for `pjoliver11` and WRONG for `bryan`,
+ * whose ledger is `user-voice-scrml.md` — i.e. read 6a. `pa-profile-bryan.md` says so in the
+ * very section that mandates the read: "`user-voice-scrml.md` (bryan's verbatim ledger …).
+ * **Planned rename → `user-voice-bryan.md`** … (deferred …)". So the gate demanded a file the
+ * contract explicitly says does not exist yet, and FAILED every one of bryan's boots while
+ * every read had in fact been done.
+ *
+ * The drift-guard did not catch it because its needle (`"user-voice-"`) matched that same
+ * deferral sentence — it proved the MANDATE was still declared without proving the FILE was
+ * the one named. A needle can only witness a mandate; it cannot witness a path.
+ *
+ * A gate that is red on a correct boot is the §8 cry-wolf shape: it trains the operator to
+ * skip the one check whose whole value is being believed. Derive the path from the contract
+ * (the script's own stated design principle) and fall back to the convention only when the
+ * pa-profile names nothing.
+ */
+function resolveVoiceLedger(who: string, paProfileText: string): string {
+  // Anchor to the HEADING line. `{{user_voice_ledger}}` also appears in the file's preamble
+  // blurb ("fills the per-USER slots (`{{user_voice_ledger}}`)"), and an unanchored match lands
+  // there — a section with no ledger path in it, silently falling through to the convention.
+  // Same unanchored-match class as the PICKUP `indexOf` bug this script's own S239 pass caught.
+  const sec = paProfileText.match(/^#{1,6}\s.*\{\{user_voice_ledger\}\}.*\n([\s\S]*?)(?=\n#{1,6}\s|\n?$)/m);
+  const hay = sec ? sec[1] : paProfileText;
+  // First backticked `user-voice-*.md` in the mandating section is the live ledger; a later
+  // one is typically the PLANNED rename, which is exactly what must NOT be required yet.
+  const m = hay.match(/`(user-voice-[A-Za-z0-9._-]+\.md)`/);
+  return m ? m[1] : `user-voice-${who}.md`;
+}
+
+function readSet(who: string, paProfileText = ""): ReadItem[] {
+  const ledger = resolveVoiceLedger(who, paProfileText);
   return [
     { id: "1a", label: "pa-base (universal doctrine)",          repo: "support", rel: "pa-base.md",                  mandate: "profile",    needle: "pa-base.md" },
     { id: "1b", label: "pa-scrml-overlay (project delta)",      repo: "support", rel: "pa-scrml-overlay.md",         mandate: "profile",    needle: "pa-scrml-overlay.md" },
@@ -121,7 +156,7 @@ function readSet(who: string): ReadItem[] {
     // 6b — the per-user voice ledger S335 short-booted. Mandated by the pa-profile ({{user_voice_ledger}}
     // says "read its tail … in addition to bryan's"), NOT the profile read-set line — so its drift corpus
     // is the pa-profile. Item 7 (reading the pa-profile itself) IS named by profile read-set line 7.
-    { id: "6b", label: `user-voice-${who} (your own ledger)`,   repo: "support", rel: `user-voice-${who}.md`,        mandate: "pa-profile", needle: "user-voice-" },
+    { id: "6b", label: `${ledger.replace(/\.md$/, "")} (your own ledger)`, repo: "support", rel: ledger,            mandate: "pa-profile", needle: "user-voice-" },
     { id: "7",  label: `pa-profile-${who} (personal layer)`,    repo: "support", rel: `pa-profile-${who}.md`,        mandate: "profile",    needle: "pa-profile-" },
   ];
 }
@@ -222,7 +257,7 @@ const paProfileText = existsSync(paProfilePath) ? readFileSync(paProfilePath, "u
 const handoffText = existsSync(HANDOFF) ? readFileSync(HANDOFF, "utf8") : "";
 
 const sync = [syncRepo("scrml", ROOT), syncRepo("scrml-support", SUPPORT)];
-const reads = readSet(who).map((it) => checkRead(it, profileText, paProfileText));
+const reads = readSet(who, paProfileText).map((it) => checkRead(it, profileText, paProfileText));
 const pickup = extractPickup(handoffText);
 const board = boardLiveness();
 const probes = NO_PROBES ? [] : allProbes();
