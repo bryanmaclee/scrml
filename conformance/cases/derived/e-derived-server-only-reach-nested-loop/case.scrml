@@ -1,0 +1,29 @@
+<program>
+
+${ import { hashPassword } from 'scrml:auth' }
+
+<pw> = "secret"
+<items> = [1, 2]
+
+// REFUSED (§6.6.19) — and the POSITION is the whole point of this case.
+//
+// This is the `-pos` sibling's cell moved into a `for`-loop `lift` body. §6.6.19's
+// SHALL binds every `const <name>` derived cell and is NOT qualified by position,
+// but until S337 the compiler only ever inspected cells its collector could reach,
+// and that collector descended exactly `node.body` and `node.children`. A `for`-loop
+// parks its `lift` body under an `expr` wrapper, so this cell sits at
+// `…expr.node.children[0].body[0]` and was never visited.
+//
+// Measured on the shipped compiler before the fix, THIS FILE compiled at exit 0 with
+// warnings only: zero `.server.js`, `const { hashPassword } = _scrml_stdlib.auth;` in
+// the client bundle, `Bun.password.hash(password, { algorithm: "argon2id" })` shipped
+// into the browser runtime, and `_scrml_cs_reactive_set("pw", "secret")` inlining the
+// caller's secret. The identical cell at top level (the `-pos` case) refused
+// correctly the whole time — the check worked; the position was uncovered.
+//
+// The emitted-ARTIFACT half of this contract is gated by
+// compiler/tests/conformance/conf-DERIVED-SERVER-ONLY-REACH-artifacts.test.js. This
+// case gates the code; that test gates the leak the code exists to prevent.
+<div>${ for (let it of @items) { lift <div>${ const <h> = hashPassword(@pw) }<span>${@h}</span></div> } }</div>
+
+</program>

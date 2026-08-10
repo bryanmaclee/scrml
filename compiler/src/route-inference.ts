@@ -3641,28 +3641,125 @@ function collectDerivedRhsServerOnlyRefs(
 }
 
 /**
- * Every `const <name>` DERIVED cell declared in a file (§6.6 shape 3), at any
- * depth — top-level logic, markup children, component bodies.
+ * Keys the derived-cell walk must NOT descend. These carry no AST node and are
+ * either non-AST baggage (`span`, `loc`), a non-plain container the walk cannot
+ * read anyway (`spans` is a `Map`), a back-reference that would make the walk
+ * revisit the tree (`parent`), or scope/symbol side-tables the sibling
+ * `collectDerivedRhsLocalNames` walk already skips (`_scope`, `_record`).
+ *
+ * This is deliberately a DENY-list and deliberately SHORT. The walk's job is a
+ * confidentiality check, so the safe error direction is descending one field too
+ * many (worst case: a spurious refusal, which is loud and reversible), never one
+ * too few (worst case: a server-only implementation ships to the browser and
+ * nothing says so). Measured over the repo corpus: widening the deny-list with
+ * `imports`/`exports`/`components`/`typeDecls` changes the collected count by 0,
+ * so nothing here is load-bearing for the result — only for the work done.
+ */
+/**
+ * Keys the derived-cell walk does NOT descend: `span` (large, node-free baggage) and the codebase's
+ * `_`-prefixed side-table convention (`_scope`, `_record`), which every sibling generic walk already
+ * uses (`protect-analyzer.ts:437`, `tag-canonicalizer.ts:167`, `indirect-callee-resolver.ts:160`).
+ *
+ * S337 REVIEW: this was a six-entry hardcoded list including `parent`, `loc` and `spans`. None of the
+ * three exists as a node field at RI time (`parent` appears only as a function PARAMETER and only in
+ * post-RI codegen; `loc:` appears nowhere), and their stated justifications were already covered —
+ * `seen` gives termination and single-visit, and `Object.keys(new Map())` is `[]`. So they bought
+ * nothing and were pure FAIL-OPEN SURFACE: the day any node kind adopts `parent` for a child-bearing
+ * field, a derived cell under it is silently missed, which is precisely the defect class this walk
+ * exists to close — and the §10 test would have pinned the miss as correct.
+ *
+ * MEASURED before trimming (git-tracked corpus, 1200 files): shipped list 68 cells · without
+ * parent/loc/spans 68 · `span`+`spans` only 68 · NO deny-list at all 68. Identical. Nothing here is
+ * load-bearing for the RESULT, only for the work done — so the list is now the smallest one that is
+ * actually justified. The safe error direction for a confidentiality check is descending one field
+ * too many (a loud, reversible spurious refusal), never one too few (a silent leak).
+ */
+function skipDerivedWalkKey(key: string): boolean {
+  return key === "span" || key.startsWith("_");
+}
+
+/**
+ * Every `const <name>` DERIVED cell declared in a file (§6.6 shape 3), wherever it
+ * sits in the tree.
  *
  * `shape === "derived"` is the ast-builder's own marker for the `const <NAME> = expr`
  * form (§6.6.2), and is what `collectClientReactiveCells` already keys on.
+ *
+ * THE WALK IS STRUCTURAL, NOT FIELD-LISTED, AND THAT IS THE POINT. Until S337 this
+ * function descended exactly two properties — `node.body` and `node.children` — while
+ * its doc comment claimed it found derived cells "at any depth". The claim was false
+ * and the gap was a live confidentiality leak: a `for`-loop stores its `lift` body
+ * under an `expr` wrapper, so a derived cell in that position sits at
+ * `…expr.node.children[0].body[0]`, was never visited, was never checked, and the
+ * compiler emitted ZERO `.server.js` while shipping
+ * `Bun.password.hash(pw, { algorithm: "argon2id" })` and the caller's secret into the
+ * browser bundle (reproduced at S337 by compilation + artifact inspection). §6.6.19's
+ * SHALL is not qualified by position, so every position it could not reach was a
+ * conformance hole.
+ *
+ * Six positions were measured leaking on the field-listed walk: a `for`-loop `lift`
+ * body, a `while`-loop `lift` body, an `<each>` row body, an `<engine>` state-child
+ * body, a loop nested inside a conditional, and the same shapes inside a
+ * `kind="tool"` program (where the §64 carve-out is what must hold instead).
+ *
+ * DO NOT "FIX" A FUTURE MISS BY ADDING A FIELD NAME HERE. Adding `expr` to a list of
+ * two would have closed the reported shape and left the class open at the next
+ * unenumerated property — and this is the compiler's SECOND instance of that class
+ * (see the hand-rolled seed walker in `emit-client.ts` drifting against
+ * `dependency-graph.ts`'s full sweep). Every array- and object-valued property is
+ * descended by default; exclusions live in `skipDerivedWalkKey` and are
+ * justified there.
+ *
+ * TERMINATION. `seen` is an identity set over EVERY visited object, not just over
+ * nodes reached through an array, so a shared subtree is walked once and a cycle
+ * cannot hang the walk. (No cycle and no non-plain container exists in the parsed
+ * corpus today — 1363 files probed — but the walk must not depend on that staying
+ * true.) The same identity set is what keeps a node reachable by two paths from
+ * producing two diagnostics.
+ *
+ * The §64 `kind="tool"` carve-out is NOT applied here. It is a whole-file predicate
+ * (`isToolProgram`, read off the top-level `<program>`), applied by the Step 3b caller
+ * before this walk runs, and it is therefore depth-independent by construction.
+ *
+ * EXPORTED FOR TESTS. The termination and identity properties above are properties of
+ * THIS walk and have to be asserted against it directly. Driving them through `runRI`
+ * conflates them with every other walk in the stage — and demonstrably so: a synthetic
+ * cyclic AST blows the stack inside `collectFileLevelBindingRoots` (:2600, a walk with
+ * no `seen` set at all) long before it reaches this one.
  */
-function collectDerivedCellDecls(fileAST: FileAST): Array<Record<string, unknown>> {
+export function collectDerivedCellDecls(fileAST: FileAST): Array<Record<string, unknown>> {
   const nodes: any[] = fileAST.nodes ?? ((fileAST as any).ast ? (fileAST as any).ast.nodes : []) ?? [];
   const out: Array<Record<string, unknown>> = [];
   const seen = new Set<unknown>();
 
-  const visit = (list: any[]): void => {
-    if (!Array.isArray(list)) return;
-    for (const node of list) {
-      if (!node || typeof node !== "object") continue;
-      if (seen.has(node)) continue;
-      seen.add(node);
-      if (node.kind === "state-decl" && node.shape === "derived") {
-        out.push(node as Record<string, unknown>);
-      }
-      if (Array.isArray(node.body)) visit(node.body);
-      if (Array.isArray(node.children)) visit(node.children);
+  // Depth cap mirrors the sibling generic walk (`protect-analyzer.ts` extractCreateTableStatements,
+  // capped for the same reason). The old walk's depth was bounded by markup/statement nesting; this
+  // one also descends ESTree expression trees, which nest one level per term — a machine-generated
+  // RHS with a few thousand `+` terms would otherwise blow the stack, i.e. crash the compiler with
+  // no diagnostic inside a security check (S337 review). 512 is far above the measured max (37).
+  const MAX_DEPTH = 512;
+  const visit = (value: unknown, depth = 0): void => {
+    if (depth > MAX_DEPTH) return;
+    if (!value || typeof value !== "object") return;
+    if (seen.has(value)) return;
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, depth + 1);
+      return;
+    }
+
+    const node = value as Record<string, unknown>;
+    if (node.kind === "state-decl" && node.shape === "derived") {
+      out.push(node);
+    }
+
+    // NOTE: `Object.keys` yields property-INSERTION order from the AST builder, which is not
+    // guaranteed to be source order. Step 3b pushes diagnostics in walk order and does not sort by
+    // span, so do not rely on these coming out in source order (S337 review).
+    for (const key of Object.keys(node)) {
+      if (skipDerivedWalkKey(key)) continue;
+      visit(node[key], depth + 1);
     }
   };
 
