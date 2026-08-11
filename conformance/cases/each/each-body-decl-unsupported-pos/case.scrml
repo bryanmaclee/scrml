@@ -1,0 +1,4 @@
+${
+    <rows> = [{ id: 1, name: "Ada" }, { id: 2, name: "Alan" }]
+}
+<ul id="people"><each in=@rows key=@.id>${ let nm = @.name }<li class="person">${nm}</li></each></ul>
