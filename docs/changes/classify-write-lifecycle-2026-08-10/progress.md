@@ -680,3 +680,41 @@ are the gitignored-`dist` gap (`TodoMVC §0` / `§1`, `benchmarks/todomvc/dist`)
 that dist is present reports `51 − 2 = 49`. That is an environment artifact of MY worktree, not a
 property of the branch. Name sets are byte-identical between refs, **0 new and 0 fixed**. **49 is
 not carried forward.**
+
+## R3.9 Round-3 verification
+
+1. **Reproducers on both refs** — §R3.1/R3.4/R3.5, every case compiled through `compileScrml()`.
+2. **Bite proofs — SEVEN mutations now, all bite** (`scratchpad/cwfix-r2/biteproof-r3.sh`).
+   Baseline 30 pass / 0 fail; file restored byte-identical afterwards.
+
+   | mutation | tests killed |
+   |---|---|
+   | A drop sigil | the un-sigiled test, alone |
+   | B relax `kind==="presence"` | the variant-RHS test, alone |
+   | C text bare-ref regex | 3 paren tests + un-sigiled |
+   | D text absence (write) | both paren-revert tests |
+   | E remove refinement | 8, incl. the r3 leak-through |
+   | **F text absence (init)** | **exactly the 3 declaration tests** |
+   | **G text absence (reset)** | **exactly the reset-init test — and NOT the `default=` guard, which is what proves that guard is a guard, not a claimed fix** |
+
+3. **Corpus diagnostics** — 2,359 tracked sources, **0 delta vs `origin/main`**.
+   Same low-power caveat as §R2.5: the population is 0, so green was structurally guaranteed.
+4. **Emit differential vs `origin/main`** — **VERDICT: NO DIFFERENCES**, 1904 sources /
+   **7375 artifacts**, 0 content diffs, 0 diagnostic changes, exit **0**.
+5. **Full `bun run test`** — 29,951 pass / **49** fail / 216 skip (the 51 baseline less this
+   worktree's 2 dist-gap tests, §R3.8). Failure **name set byte-identical to round 2**:
+   **0 new, 0 fixed.** Pass count +6, exactly the round-3 tests.
+6. **FACTS** regenerated **after** the last `compiler/src` commit (`e69cd962`):
+   240,447 → **240,514** lines, 187 files. `facts.ts --check` → **PASS**.
+
+### Loci status after round 3
+
+| locus | absence-literal test | declared-type consult |
+|---|---|---|
+| `classifyWriteAgainstSpec` (write) | **structural** ✅ | **structural** ✅ |
+| `isInitOfPostType` (declaration) | **structural** ✅ | withheld — flow-dependent, `= @v` residual open |
+| `classifyResetValueAgainstSpec` (reset/`default=`) | **structural** ✅ | withheld — same reason |
+
+All three loci now agree on what absence is. The two withholdings that remain are the
+**flow-dependent** consult only, and each docstring now says which of the two consults it is
+withholding and why — the conflation that shipped this round's bug.
