@@ -327,7 +327,7 @@ export function distRelativeServerSpecifier(
 // referenced in the emitted server body. Soundness > minimality: a false
 // "used" keeps a harmless import; a false "unused" would drop a needed one,
 // so the check errs toward keeping (any standalone occurrence counts).
-function localServerImportNameUsed(body: string, name: string): boolean {
+export function localServerImportNameUsed(body: string, name: string): boolean {
   if (!name) return false;
   // \b is unreliable for `$`-prefixed names but scrml import locals are plain
   // identifiers; guard the boundaries manually to avoid matching `name` inside

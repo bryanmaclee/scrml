@@ -98,6 +98,20 @@ export interface EachEngineCtx {
 // ---------------------------------------------------------------------------
 const RAW_CONTENT_ELEMENT_NAMES = new Set(["pre", "code"]);
 
+// §17.7.3 — an `<each>` body is scoped to the `@.` sigil + optional `as` alias, NOT
+// author-declared locals. These declaration kinds BIND A RUNTIME LOCAL that a later
+// `${name}` reference would dangle on: the each-body factory silently drops the decl,
+// so the reference throws at render (the whole list renders empty, no diagnostic).
+// Fail closed on ALL of them, at ANY body position (bryan #508 review F2+F3, S340-peter).
+// EXCLUDED by construction: `type-decl` (compile-time-only — no runtime binding to
+// dangle) and `tilde-decl`/`~` (already fails loud via E-CODEGEN-INVALID-LOGIC).
+const EACH_BODY_UNSUPPORTED_DECL_KINDS = new Set([
+  "let-decl", "const-decl", "function-decl", "lin-decl",
+]);
+const EACH_BODY_DECL_KEYWORD: Record<string, string> = {
+  "let-decl": "let", "const-decl": "const", "function-decl": "function", "lin-decl": "lin",
+};
+
 // ---------------------------------------------------------------------------
 // s328 — RCDATA (`<textarea>`) is the one content model where an each per-item
 // element's body must NOT receive a mounted element child.
@@ -1381,8 +1395,19 @@ function renderTemplateChildToJs(
       // the binding into the factory closure) is a separate §17.7.3 ruling. Until
       // then, fail CLOSED — reject the decl loudly rather than ship a broken,
       // silently-empty render.
-      if (stmt.kind === "let-decl" || stmt.kind === "const-decl" || stmt.kind === "function-decl") {
-        const _kw = stmt.kind === "function-decl" ? "function" : stmt.kind === "const-decl" ? "const" : "let";
+      //
+      // S340-peter (bryan #508 review F2+F3, by construction): scan EVERY body
+      // position, not just `body[0]` — a decl in a non-first statement
+      // (`${ @.id  let nm = @.name }`) slipped through and re-produced the exact
+      // silent miscompile one statement over. And key on the full name-binding
+      // decl SET (adds `lin-decl`), not the old three-name allowlist. EXCLUDED:
+      // `type-decl` (compile-time-only — no runtime local to dangle) and
+      // `tilde-decl`/`~` (already fails loud via E-CODEGEN-INVALID-LOGIC).
+      const declStmt = body.find(
+        (s: any) => s && EACH_BODY_UNSUPPORTED_DECL_KINDS.has(s.kind as string),
+      );
+      if (declStmt) {
+        const _kw = EACH_BODY_DECL_KEYWORD[declStmt.kind as string] ?? "let";
         _eachBindSupportCtx?.errors?.push(new CGError(
           "E-EACH-BODY-DECL-UNSUPPORTED",
           `E-EACH-BODY-DECL-UNSUPPORTED: a \`${_kw}\` declaration inside an \`<each>\` body is not ` +
@@ -1390,7 +1415,7 @@ function renderTemplateChildToJs(
           `render (the list renders empty). Read item fields directly in the row template ` +
           `(\`\${@.field}\`, or \`\${x.field}\` with \`as x\`), or compute the value OUTSIDE the \`<each>\` ` +
           `and reference it there. (§17.7.3 — the each-body scope is the \`@.\` sigil + \`as\` alias, not author locals.)`,
-          (child as any).span ?? (stmt as any).span ?? { start: 0, end: 0 },
+          (child as any).span ?? (declStmt as any).span ?? (stmt as any).span ?? { start: 0, end: 0 },
           "error",
         ));
         return;
