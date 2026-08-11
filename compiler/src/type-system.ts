@@ -25876,6 +25876,44 @@ function writeTextIsAbsenceLiteral(trimmedText: string): boolean {
 }
 
 /**
+ * The variant-progression "does this source text name this variant?" test, in ONE
+ * place.
+ *
+ * S338 item C — an INERT extraction. This construction appeared SIX times in this
+ * file, twice each in `classifyWriteAgainstSpec`, `classifyResetValueAgainstSpec`
+ * and `isInitOfPostType` (post-variant and pre-variant per site), and every copy
+ * decided a lifecycle transition by matching a variant name against RAW SOURCE
+ * TEXT. The three clusters used three different spellings of the same escape —
+ * a local `escapeRe`, a local `esc`, and an inline `.replace(…)` — which were
+ * verified BYTE-IDENTICAL in character class and replacement before unifying;
+ * had they differed, that difference would itself have been a behavioural
+ * finding, not a tidy-up.
+ *
+ * ⚠ **THIS HELPER IS FAITHFUL, NOT CORRECT — DO NOT READ THE EXTRACTION AS A
+ * FIX.** The pattern is deliberately preserved byte-for-byte, including its two
+ * known defects (S338 finding F3, HIGH, pre-existing):
+ *
+ *   1. it is **unanchored** — `(?:^|\.)` matches at any `.` in the text, so
+ *      `".Published"` inside a STRING LITERAL clears the guard just as a real
+ *      `Article.Published` does;
+ *   2. it reads **source text**, so it cannot tell an expression from a comment
+ *      or a string, the same class this round removed from the presence branch.
+ *
+ * The semantic fix is to consult the parsed `initExpr` here too — exactly what
+ * `bareCellReferenceOf` / `writeExprIsAbsenceLiteral` now do on the presence side
+ * — and it is a SEPARATE ARC with its own measured migration, because a leak can
+ * be closed by making a form work OR by rejecting it and those are different
+ * changes. This extraction exists so that fix is **one edit instead of six**.
+ *
+ * @param sourceText the TRIMMED RHS source text (not a parsed node — see above)
+ * @param variantName the bare variant name, e.g. `Published`
+ */
+function variantNameMatchesSourceText(sourceText: string, variantName: string): boolean {
+  const escaped = variantName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|\\.)\\s*${escaped}\\b`).test(sourceText);
+}
+
+/**
  * The presence-progression absence literal test, answered STRUCTURALLY.
  *
  * S338 — the parsed-expression counterpart of `writeTextIsAbsenceLiteral`. A
@@ -26233,14 +26271,8 @@ function checkLifecycleBindingAccess(
     // Variant-progression. Match `.<VariantName>` or `<EnumName>.<VariantName>`.
     const postName = spec.postVariantName;
     const preName = spec.preVariantName;
-    if (postName) {
-      const postRe = new RegExp(`(?:^|\\.)\\s*${escapeRe(postName)}\\b`);
-      if (postRe.test(t)) return "post";
-    }
-    if (preName) {
-      const preRe = new RegExp(`(?:^|\\.)\\s*${escapeRe(preName)}\\b`);
-      if (preRe.test(t)) return "pre";
-    }
+    if (postName && variantNameMatchesSourceText(t, postName)) return "post";
+    if (preName && variantNameMatchesSourceText(t, preName)) return "pre";
     return null;
   }
 
@@ -27185,19 +27217,12 @@ function classifyResetValueAgainstSpec(
     return writeTextIsAbsenceLiteral(t) ? "pre" : "post";
   }
   // Variant-progression. Match `.<VariantName>` or `<EnumName>.<VariantName>`.
-  function esc(s: string): string {
-    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  }
+  // S338 item C — shared with the other two variant classifiers; the local `esc`
+  // this used to carry was byte-identical to the other two escapes and is gone.
   const postName = spec.postVariantName;
   const preName = spec.preVariantName;
-  if (postName) {
-    const postRe = new RegExp(`(?:^|\\.)\\s*${esc(postName)}\\b`);
-    if (postRe.test(t)) return "post";
-  }
-  if (preName) {
-    const preRe = new RegExp(`(?:^|\\.)\\s*${esc(preName)}\\b`);
-    if (preRe.test(t)) return "pre";
-  }
+  if (postName && variantNameMatchesSourceText(t, postName)) return "post";
+  if (preName && variantNameMatchesSourceText(t, preName)) return "pre";
   return null;
 }
 
@@ -27253,14 +27278,8 @@ function isInitOfPostType(
   // Variant-progression. Match `.<VariantName>` or `<EnumName>.<VariantName>`.
   const postName = spec.postVariantName;
   const preName = spec.preVariantName;
-  if (postName) {
-    const postRe = new RegExp(`(?:^|\\.)\\s*${postName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
-    if (postRe.test(t)) return true;
-  }
-  if (preName) {
-    const preRe = new RegExp(`(?:^|\\.)\\s*${preName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
-    if (preRe.test(t)) return false;
-  }
+  if (postName && variantNameMatchesSourceText(t, postName)) return true;
+  if (preName && variantNameMatchesSourceText(t, preName)) return false;
   return false;
 }
 
