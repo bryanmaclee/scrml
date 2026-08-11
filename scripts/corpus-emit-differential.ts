@@ -50,6 +50,8 @@
  *       [--allow-reuse-manifest]                 # opt in to comparing artifacts/syntax only
  *       [--no-reverify]                          # do NOT serially re-verify the delta (HARD REQ 9)
  *       [--reverify-limit 300]                   # 0 = no cap; the re-verification is all-or-nothing
+ *       [--allow-dirty-corpus]                   # opt in to a side whose enumerated corpus has
+ *                                                # untracked/modified sources (HARD REQ 11)
  *
  * SYNTAX GOGGLES — read `scripts/corpus-check-goggles.js` before changing anything here.
  *   `node --check` is NOT used and must not be reintroduced. It PASSES a top-level `await` in a
@@ -64,9 +66,15 @@
  *            compile failure is DATA (HARD REQ 5).
  *   diff:    0 = no differences at all. 1 = differences found. 2 = NOT A VALID COMPARISON —
  *            different roots, an enumeration disagreement, the same revision on both sides,
- *            differing check contexts, a DIVERGENT CHUNK-NAMESPACE ANCHOR (HARD REQ 8), a
- *            reuse-artifacts manifest, or a VACUOUS run in which zero artifacts were compared or
- *            zero checkable artifacts were checked.
+ *            differing check contexts, a DIVERGENT CHUNK-NAMESPACE ANCHOR (HARD REQ 8), an
+ *            UNTRACKED OR DIRTY ENUMERATED CORPUS (HARD REQ 11), a reuse-artifacts manifest, or a
+ *            VACUOUS run in which zero artifacts were compared or zero checkable artifacts were
+ *            checked.
+ *
+ *            NOTE what is deliberately NOT here: a source-SET delta on its own. It is a
+ *            DIFFERENCE (exit 1), not an invalid comparison, because a tracked corpus addition
+ *            produces exactly the same shape as an accidental stray and tracked additions are
+ *            routine. HARD REQ 11 draws that line with git instead of guessing at it.
  *
  *            There are exactly THREE outcomes and no fourth. A run that had to discard harness
  *            flakes (HARD REQ 9) is still 0 or 1 — the flakes are excluded from the finding total
@@ -80,7 +88,7 @@ import { join, relative, dirname, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 /**
  * Default corpus roots.
@@ -265,16 +273,46 @@ interface NamespaceAnchor {
    */
   prefixes: Array<{ prefix: string; sources: number }>;
   /**
-   * sha256 over `<corpus-relative path>\0<prefix>` for every enumerated source, sorted. THIS is the
-   * comparable: equal digests mean both sides hash the same string for the same source, so no
-   * artifact-content difference between them can be an artefact of tree location.
+   * The prefix for EVERY enumerated source, by corpus-relative path. THIS is the comparable, and it
+   * is a per-source MAP rather than a whole-corpus digest for a reason that a bite proof caught:
+   *
+   *   a digest over the whole source list changes when the source SET changes, so a legitimate
+   *   corpus addition (this repo added 15 conformance cases in one window) would have been declared
+   *   an ANCHOR MISMATCH — a false refusal, on the most ordinary event there is.
+   *
+   * `diff` compares this map over the COMMON sources only, which is exactly the population whose
+   * artifacts are compared. A source present on one side alone has no counterpart to disagree with.
    */
-  prefixDigest: string;
+  prefixBySource: Record<string, string>;
+}
+
+/**
+ * HARD REQ 11 — is the ENUMERATED CORPUS reproducible?
+ *
+ * Roots resolve RELATIVE TO `--compiler-root`, so the corpus a capture measures is whatever happens
+ * to be on disk under those roots at that instant — not what the recorded `revision` contains. The
+ * two are the same thing only if the checkout is clean.
+ *
+ * MEASURED INCIDENT: a run passed the SHARED main checkout as `--compiler-root` while a concurrent
+ * process dropped two untracked conformance case directories into it. The two sides enumerated
+ * different corpora and the report named a source-set delta belonging to neither revision.
+ *
+ * A co-located concurrent writer is not hypothetical on this machine, so this is measured per side
+ * and recorded, and `diff` refuses on it.
+ */
+interface CorpusCleanliness {
   /**
-   * sha256 over `<corpus-relative path>\0<namespace token>`, sorted. Reported, never used to refuse
-   * — a token digest can move because the HASH changed, which is a finding, not an incomparability.
+   * FALSE when `--compiler-root` is not the top level of its own git checkout — a `git archive`
+   * extraction, or a subdirectory of some larger repo. Reproducibility cannot be measured then, and
+   * saying so is the honest answer; it is NOT reported as clean.
    */
-  tokenDigest: string;
+  isOwnGitCheckout: boolean;
+  /** How it was measured, or the exact reason it could not be. */
+  method: string;
+  /** Enumerated sources that git does not track (includes ignored ones — equally non-reproducible). */
+  untracked: string[];
+  /** Enumerated sources that are tracked but differ from HEAD. */
+  modified: string[];
 }
 
 interface Manifest {
@@ -286,6 +324,8 @@ interface Manifest {
   roots: string[];
   /** HARD REQ 8 — see `NamespaceAnchor`. */
   namespaceAnchor: NamespaceAnchor;
+  /** HARD REQ 11 — see `CorpusCleanliness`. */
+  corpusCleanliness: CorpusCleanliness;
   /**
    * TRUE when this manifest was produced by `--reuse-artifacts`, i.e. the compile stage did NOT
    * run and the compile outcomes in it are NOT measurements. `diff` refuses to draw compile
@@ -360,7 +400,7 @@ const VALUE_FLAGS: Record<string, string[]> = {
 };
 const BOOL_FLAGS: Record<string, string[]> = {
   capture: ["reuse-artifacts", "no-syntax-check"],
-  diff: ["allow-same-revision", "allow-reuse-manifest", "no-reverify"],
+  diff: ["allow-same-revision", "allow-reuse-manifest", "no-reverify", "allow-dirty-corpus"],
 };
 
 /**
@@ -683,8 +723,7 @@ async function resolveNamespaceAnchor(compilerRoot: string, sources: string[]): 
     method: why,
     roots: [],
     prefixes: [],
-    prefixDigest: "",
-    tokenDigest: "",
+    prefixBySource: {},
   });
 
   if (!existsSync(modPath)) return unavailable(`<unavailable: ${toPosix(relative(compilerRoot, modPath))} does not exist in this checkout>`);
@@ -702,22 +741,19 @@ async function resolveNamespaceAnchor(compilerRoot: string, sources: string[]): 
 
   const rootCounts = new Map<string, number>();
   const prefixCounts = new Map<string, number>();
-  const prefixLines: string[] = [];
-  const tokenLines: string[] = [];
+  const prefixBySource: Record<string, string> = {};
 
   for (const rel of sources) {
     const abs = join(compilerRoot, rel);
     const root: string | null = mod.resolveProjectRoot(dirname(abs)) ?? null;
     const projectRel: string = mod.projectRelativeSourcePath(abs, root);
-    const token: string = mod.chunkNamespaceToken(abs, root);
     // `projectRel` is `<prefix><rel>` in every shape where the source lives under the corpus root,
     // which is every shape this tool enumerates. The non-suffix case is recorded verbatim rather
     // than papered over — an unexplained shape must be visible, not normalized away.
     const prefix = projectRel.endsWith(rel) ? projectRel.slice(0, projectRel.length - rel.length) : `<NOT-A-SUFFIX:${projectRel}>`;
     rootCounts.set(root ?? "", (rootCounts.get(root ?? "") ?? 0) + 1);
     prefixCounts.set(prefix, (prefixCounts.get(prefix) ?? 0) + 1);
-    prefixLines.push(`${rel}\0${prefix}`);
-    tokenLines.push(`${rel}\0${token}`);
+    prefixBySource[rel] = prefix;
   }
 
   const roots = [...rootCounts.entries()].sort().map(([root, count]) => {
@@ -730,14 +766,26 @@ async function resolveNamespaceAnchor(compilerRoot: string, sources: string[]): 
 
   return {
     resolverAvailable: true,
-    method: `${toPosix(relative(compilerRoot, modPath))} :: resolveProjectRoot(dirname(source)) + projectRelativeSourcePath + chunkNamespaceToken, from the compiler under test`,
+    method: `${toPosix(relative(compilerRoot, modPath))} :: resolveProjectRoot(dirname(source)) + projectRelativeSourcePath, from the compiler under test`,
     roots,
     prefixes,
-    // `sources` arrives sorted (capture sorts it before this is called); hashing in that order is
-    // what makes the digest a stable comparable rather than a walk-order artefact.
-    prefixDigest: createHash("sha256").update(prefixLines.join("\n")).digest("hex"),
-    tokenDigest: createHash("sha256").update(tokenLines.join("\n")).digest("hex"),
+    prefixBySource,
   };
+}
+
+/**
+ * Do the two sides hash the SAME string for the same source? Restricted to `common`, because that
+ * is exactly the population whose artifacts are compared.
+ *
+ * Returns the sources that disagree. Empty means no artifact-content difference between these two
+ * captures can be an artefact of where the trees live.
+ */
+function anchorMismatches(a: NamespaceAnchor, b: NamespaceAnchor, common: string[]): string[] {
+  const out: string[] = [];
+  for (const p of common) {
+    if ((a.prefixBySource[p] ?? "") !== (b.prefixBySource[p] ?? "")) out.push(p);
+  }
+  return out;
 }
 
 /**
@@ -747,6 +795,73 @@ async function resolveNamespaceAnchor(compilerRoot: string, sources: string[]): 
  * the one direction that is safe: the root is still correct, the reported marker reads `null`.
  */
 const PROJECT_ROOT_MARKER_NAMES = ["scrml.toml", ".git"] as const;
+
+/**
+ * HARD REQ 11 — measure whether every ENUMERATED source is tracked and clean in its own checkout.
+ *
+ * ONE `git status` call over the selected roots, not 1900 per-file calls. `-uall` is required or
+ * git collapses a directory of untracked files into a single directory entry and the count is
+ * wrong; `--ignored=matching` is required because an IGNORED `.scrml` under a root is enumerated by
+ * the walk (which does not consult gitignore) and is exactly as non-reproducible as an untracked
+ * one.
+ *
+ * The `--show-toplevel` check is not ceremony: git walks UP, so running it inside a `git archive`
+ * extraction answers about whatever repository happens to enclose the extraction directory. That
+ * answer is not wrong-looking, it is just about a different tree — the same trap that lets
+ * `gitRevision` report an enclosing repo's HEAD for an extracted tree.
+ */
+async function measureCorpusCleanliness(compilerRoot: string, roots: string[], enumerated: string[]): Promise<CorpusCleanliness> {
+  const run = async (args: string[]): Promise<{ out: string; code: number }> => {
+    const proc = Bun.spawn(["git", ...args], { cwd: compilerRoot, stdout: "pipe", stderr: "pipe" });
+    const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    return { out: out.trim(), code };
+  };
+
+  const top = await run(["rev-parse", "--show-toplevel"]);
+  if (top.code !== 0) {
+    return { isOwnGitCheckout: false, method: `<git rev-parse --show-toplevel failed in ${compilerRoot}>`, untracked: [], modified: [] };
+  }
+  if (resolve(top.out) !== resolve(compilerRoot)) {
+    return {
+      isOwnGitCheckout: false,
+      method: `<not its own checkout — the nearest git toplevel is ${top.out}, and git ANSWERS ABOUT THAT TREE>`,
+      untracked: [],
+      modified: [],
+    };
+  }
+
+  const st = await run(["status", "--porcelain", "-uall", "--ignored=matching", "--", ...roots]);
+  if (st.code !== 0) {
+    return { isOwnGitCheckout: false, method: `<git status failed in ${compilerRoot}>`, untracked: [], modified: [] };
+  }
+  const enumeratedSet = new Set(enumerated);
+  const untracked: string[] = [];
+  const modified: string[] = [];
+  for (const line of st.out.split("\n")) {
+    if (!line.trim()) continue;
+    // Porcelain v1: two status chars, a space, then the path (rename shows "old -> new").
+    const code = line.slice(0, 2);
+    const path = toPosix(line.slice(3).replace(/^"|"$/g, "").split(" -> ").pop()!);
+    // Only sources this capture actually ENUMERATED matter. An untracked `.md` beside the corpus
+    // changes nothing about what was measured, and flagging it would be the cry-wolf shape.
+    if (!enumeratedSet.has(path)) continue;
+    if (code === "??" || code === "!!") untracked.push(path);
+    else modified.push(path);
+  }
+  return {
+    isOwnGitCheckout: true,
+    method: `git status --porcelain -uall --ignored=matching -- ${roots.join(" ")} (in ${compilerRoot}), intersected with the ${enumerated.length} enumerated sources`,
+    untracked: untracked.sort(),
+    modified: modified.sort(),
+  };
+}
+
+/** One-line human rendering of corpus cleanliness, for capture logs and diff findings. */
+function describeCleanliness(c: CorpusCleanliness): string {
+  if (!c.isOwnGitCheckout) return `NOT VERIFIABLE — ${c.method}`;
+  if (c.untracked.length === 0 && c.modified.length === 0) return `CLEAN — every enumerated source is tracked and matches HEAD`;
+  return `DIRTY — ${c.untracked.length} untracked, ${c.modified.length} modified enumerated source(s)`;
+}
 
 /** One-line human rendering of an anchor, for capture logs and diff findings. */
 function describeAnchor(a: NamespaceAnchor): string {
@@ -926,6 +1041,22 @@ async function capture(opts: CaptureOptions): Promise<number> {
           `                      Remedy: \`mkdir ${compilerRoot}/.git\` and re-capture this side.`,
       );
     }
+  }
+
+  // HARD REQ 11 — is the corpus this capture just enumerated reproducible?
+  const corpusCleanliness = await measureCorpusCleanliness(compilerRoot, roots, allSources);
+  console.log(`      corpus repro  : ${describeCleanliness(corpusCleanliness)}`);
+  if (corpusCleanliness.untracked.length > 0 || corpusCleanliness.modified.length > 0) {
+    console.log(
+      `                      *** THIS CAPTURE'S CORPUS IS NOT THE REVISION IT RECORDS. ***\n` +
+        `                      Roots resolve relative to --compiler-root, so these files were MEASURED:\n` +
+        corpusCleanliness.untracked.map((p) => `                        ?? ${p}`).join("\n") +
+        (corpusCleanliness.untracked.length && corpusCleanliness.modified.length ? "\n" : "") +
+        corpusCleanliness.modified.map((p) => `                        M  ${p}`).join("\n") +
+        `\n                      \`diff\` REFUSES a manifest in this state (--allow-dirty-corpus overrides).\n` +
+        `                      Capture from a checkout nothing else writes to — a co-located concurrent\n` +
+        `                      writer has already caused one invalid comparison on this machine.`,
+    );
   }
 
   // Slug collision check. Output dirs are derived from source paths; if two sources mapped to one
@@ -1236,6 +1367,7 @@ async function capture(opts: CaptureOptions): Promise<number> {
     revision,
     roots,
     namespaceAnchor,
+    corpusCleanliness,
     reuseArtifacts: opts.reuseArtifacts,
     checkContext: {
       method: opts.syntaxCheck
@@ -1668,6 +1800,7 @@ async function diff(
   allowReuseManifest: boolean,
   reverifyEnabled: boolean,
   reverifyLimit: number,
+  allowDirtyCorpus: boolean,
 ): Promise<number> {
   const base = loadManifest(basePath);
   const head = loadManifest(headPath);
@@ -1702,34 +1835,10 @@ async function diff(
     incomparable = true;
   }
 
-  // HARD REQ 8 — the chunk-namespace ANCHOR. See the `NamespaceAnchor` docstring.
-  //
-  // This joins the same-revision and unknown-revision guards above because it answers the same
-  // question they do: is this a valid comparison at all? It is NOT a difference-counter — a
-  // divergent anchor does not make ONE finding, it makes every artifact-content finding on the run
-  // meaningless, which is precisely what exit 2 exists to say.
   const bAnchor = base.namespaceAnchor;
   const hAnchor = head.namespaceAnchor;
-  if (bAnchor.resolverAvailable && hAnchor.resolverAvailable) {
-    if (bAnchor.prefixDigest !== hAnchor.prefixDigest) {
-      console.error(
-        `FINDING [INCOMPARABLE] the two sides resolved DIFFERENT chunk-namespace ANCHORS, so they hash\n` +
-          `  DIFFERENT strings for the SAME source. Every namespace token differs, so every artifact\n` +
-          `  differs, and EVERY artifact-content difference reported below is an artefact of WHERE THE\n` +
-          `  TREES LIVE — not of the compiler.\n` +
-          `    base: ${describeAnchor(bAnchor)}\n` +
-          `    head: ${describeAnchor(hAnchor)}\n` +
-          `  \`nsId\` hashes the source path RELATIVE TO THE PROJECT ROOT, which the compiler finds by\n` +
-          `  walking up for \`scrml.toml\` then \`.git\` (compiler/src/codegen/chunk-namespace.ts). A tree\n` +
-          `  extracted with \`git archive\` carries neither, so the compiler anchors on the ABSOLUTE path\n` +
-          `  and every token embeds the extraction directory.\n` +
-          `  REMEDY: give the side whose prefix is non-empty a project-root marker — \`mkdir <that\n` +
-          `  checkout>/.git\` (or add \`scrml.toml\`) — and re-capture it. A measured pair went from 1014\n` +
-          `  content differences to 0 of 7375 on exactly that one-line change.`,
-      );
-      incomparable = true;
-    }
-  } else {
+  const anchorComparable = bAnchor.resolverAvailable && hAnchor.resolverAvailable;
+  if (!anchorComparable) {
     // Deliberately NOT a refusal. A side that predates chunk-namespacing has no tokens at all, so
     // its artifacts cannot be poisoned by tree location — and refusing would block the legitimate
     // before/after comparison of the arc that introduced them. But an UNVERIFIED anchor must never
@@ -1741,6 +1850,52 @@ async function diff(
         `      Artifact-content differences below are NOT verified free of a namespace-anchor artefact.\n` +
         `      Expected when one side predates chunk-namespacing; a defect if both sides are modern.`,
     );
+  }
+
+  // HARD REQ 11 — the enumerated corpus must be REPRODUCIBLE, or the population under comparison is
+  // not the revision it claims to be.
+  //
+  // MEASURED INCIDENT: a run passed the SHARED main checkout as `--compiler-root` while a
+  // concurrent writer had dropped two untracked conformance case directories into it. Roots resolve
+  // RELATIVE TO `--compiler-root`, so the two sides enumerated different corpora and the report
+  // named a 4-source set delta that had nothing to do with either revision.
+  //
+  // ⚠ WHY THIS IS NOT "a source-SET delta means INCOMPARABLE", which is the obvious fix and is
+  // WRONG. A tracked corpus addition and an untracked stray produce the IDENTICAL set-delta shape,
+  // and tracked corpus additions are routine here — 15 conformance cases landed in a single window.
+  // Refusing on the delta would fire on the most ordinary event in this repository, which is the
+  // cry-wolf shape that gets a guard bypassed and then deleted. The distinction the delta cannot
+  // draw, git draws exactly: is every enumerated source TRACKED and CLEAN in its own checkout?
+  // A tracked addition stays an ordinary FINDING (exit 1). An untracked or dirty corpus is a
+  // REFUSAL (exit 2), because that population is not reproducible by anyone, including the reader.
+  for (const [side, m] of [["base", base], ["head", head]] as const) {
+    const c = m.corpusCleanliness;
+    if (!c.isOwnGitCheckout) {
+      console.log(
+        `NOTE: the ${side} compiler root is NOT its own git checkout (${c.method}), so its corpus could\n` +
+          `      not be verified reproducible. A \`git archive\` extraction has this shape — and so does a\n` +
+          `      tree whose namespace anchor is wrong, which the HARD REQ 8 guard above checks directly.`,
+      );
+      continue;
+    }
+    if (c.untracked.length === 0 && c.modified.length === 0) continue;
+    if (allowDirtyCorpus) {
+      console.log(`NOTE: ${side}'s enumerated corpus has ${c.untracked.length} untracked + ${c.modified.length} modified source(s); --allow-dirty-corpus was passed.`);
+      continue;
+    }
+    console.error(
+      `FINDING [INCOMPARABLE] the ${side} side's ENUMERATED CORPUS is not reproducible: ` +
+        `${c.untracked.length} untracked and ${c.modified.length} modified \`${SOURCE_EXT}\` source(s)\n` +
+        `  are inside the roots it measured. That population is not the revision it claims to be, and\n` +
+        `  a source-SET delta computed against it says nothing about either revision.\n` +
+        (c.untracked.length ? `    UNTRACKED (full list, no cap):\n${c.untracked.map((p) => `      ?? ${p}`).join("\n")}\n` : ``) +
+        (c.modified.length ? `    MODIFIED (full list, no cap):\n${c.modified.map((p) => `      M  ${p}`).join("\n")}\n` : ``) +
+        `  This is what a CO-LOCATED CONCURRENT WRITER looks like — the measured incident used the\n` +
+        `  SHARED main checkout as --compiler-root while another process wrote conformance cases into\n` +
+        `  it. REMEDY: capture from a dedicated checkout or worktree that nothing else writes to, or\n` +
+        `  commit/stash the listed files. --allow-dirty-corpus overrides this if you know why.`,
+    );
+    incomparable = true;
   }
 
   // The syntax verdict is only meaningful if both sides were measured under the same rules.
@@ -1791,6 +1946,37 @@ async function diff(
   } else {
     console.log(`   source SET delta: none — the two sides enumerated the SAME ${base.enumeration.total} sources`);
   }
+  const baseBy = new Map(base.sources.map((s) => [s.path, s]));
+  const headBy = new Map(head.sources.map((s) => [s.path, s]));
+  const common = basePaths.filter((p) => headBy.has(p)).sort();
+
+  // HARD REQ 8 — the chunk-namespace ANCHOR, checked over COMMON sources.
+  //
+  // It sits here rather than beside the revision guards because it must be evaluated over `common`:
+  // an anchor question about a source that exists on one side alone has no answer, and folding such
+  // a source into the comparison is what made an earlier whole-corpus digest refuse a legitimate
+  // corpus addition. It is still a validity question, not a difference-counter — a divergent anchor
+  // does not make ONE finding, it makes every artifact-content finding meaningless, which is exactly
+  // what exit 2 exists to say.
+  const anchorBad = anchorComparable ? anchorMismatches(bAnchor, hAnchor, common) : [];
+  if (anchorBad.length > 0) {
+    console.error(
+      `FINDING [INCOMPARABLE] the two sides resolved DIFFERENT chunk-namespace ANCHORS for ${anchorBad.length} of\n` +
+        `  ${common.length} common sources, so they hash DIFFERENT strings for the SAME source. Every namespace\n` +
+        `  token differs, so every artifact differs, and EVERY artifact-content difference reported below\n` +
+        `  is an artefact of WHERE THE TREES LIVE — not of the compiler.\n` +
+        `    base: ${describeAnchor(bAnchor)}\n` +
+        `    head: ${describeAnchor(hAnchor)}\n` +
+        `  \`nsId\` hashes the source path RELATIVE TO THE PROJECT ROOT, which the compiler finds by\n` +
+        `  walking up for \`scrml.toml\` then \`.git\` (compiler/src/codegen/chunk-namespace.ts). A tree\n` +
+        `  extracted with \`git archive\` carries neither, so the compiler anchors on the ABSOLUTE path\n` +
+        `  and every token embeds the extraction directory.\n` +
+        `  REMEDY: give the side whose prefix is non-empty a project-root marker — \`mkdir <that\n` +
+        `  checkout>/.git\` (or add \`scrml.toml\`) — and re-capture it. A measured pair went from 1014\n` +
+        `  content differences to 0 of 7375 on exactly that one-line change.`,
+    );
+    incomparable = true;
+  }
   // Printed on EVERY run, matching or not. A guard whose output only appears when it fires is a
   // guard a reader cannot tell from an absent one.
   console.log(
@@ -1798,17 +1984,18 @@ async function diff(
       `     base ${describeAnchor(bAnchor)}\n` +
       `     head ${describeAnchor(hAnchor)}\n` +
       `     ${
-        !bAnchor.resolverAvailable || !hAnchor.resolverAvailable
+        !anchorComparable
           ? "NOT COMPARED — unmeasured on at least one side (see the NOTE above)"
-          : bAnchor.prefixDigest === hAnchor.prefixDigest
-            ? "MATCH — both sides hash the same string for the same source, so no artifact difference below is a location artefact"
-            : "MISMATCH — see the INCOMPARABLE finding above"
+          : anchorBad.length === 0
+            ? `MATCH over all ${common.length} common sources — no artifact difference below is a location artefact`
+            : `MISMATCH on ${anchorBad.length} of ${common.length} common sources — see the INCOMPARABLE finding above`
       }`,
   );
-
-  const baseBy = new Map(base.sources.map((s) => [s.path, s]));
-  const headBy = new Map(head.sources.map((s) => [s.path, s]));
-  const common = basePaths.filter((p) => headBy.has(p)).sort();
+  console.log(
+    `   corpus reproducibility:\n` +
+      `     base ${describeCleanliness(base.corpusCleanliness)}\n` +
+      `     head ${describeCleanliness(head.corpusCleanliness)}`,
+  );
 
   // ---- per-source difference COMPUTATION, before any of it is reported ------------------------
   //
@@ -2131,12 +2318,14 @@ async function diff(
   console.log(
     `  sources enumerated        base ${base.enumeration.total}   head ${head.enumeration.total}\n` +
       `  chunk-namespace anchor    ${
-        !bAnchor.resolverAvailable || !hAnchor.resolverAvailable
+        !anchorComparable
           ? "NOT COMPARED (unmeasured on at least one side)"
-          : bAnchor.prefixDigest === hAnchor.prefixDigest
+          : anchorBad.length === 0
             ? "MATCH"
-            : "MISMATCH — the artifact-content rows below are MEANINGLESS"
+            : `MISMATCH on ${anchorBad.length} common source(s) — the artifact-content rows below are MEANINGLESS`
       }\n` +
+      `  corpus reproducibility    base ${describeCleanliness(base.corpusCleanliness)}\n` +
+      `                            head ${describeCleanliness(head.corpusCleanliness)}\n` +
       `  delta re-verification     ${
         reverify.ran
           ? `RAN over ${reverify.implicated.length} source(s) — ${reverify.reproduced.length} reproduced, ${reverify.flaked.length} FLAKE(S) discarded, ${reverify.errored.length} errored`
@@ -2163,8 +2352,9 @@ async function diff(
         {
           base: { label: base.label, revision: base.revision, totals: base.totals, enumeration: base.enumeration, namespaceAnchor: bAnchor },
           head: { label: head.label, revision: head.revision, totals: head.totals, enumeration: head.enumeration, namespaceAnchor: hAnchor },
-          namespaceAnchorComparable: bAnchor.resolverAvailable && hAnchor.resolverAvailable,
-          namespaceAnchorMatches: bAnchor.resolverAvailable && hAnchor.resolverAvailable && bAnchor.prefixDigest === hAnchor.prefixDigest,
+          namespaceAnchorComparable: anchorComparable,
+          namespaceAnchorMismatchedSources: anchorBad,
+          corpusCleanliness: { base: base.corpusCleanliness, head: head.corpusCleanliness },
           sourceSetDelta: srcDelta,
           compileFailureDelta: { newlyFailing, newlyPassing },
           diagnosticCodeChanges: diagChanged,
@@ -2254,6 +2444,7 @@ if (mode === "capture") {
       bools.has("allow-reuse-manifest"),
       !bools.has("no-reverify"),
       flags["reverify-limit"] !== undefined ? Number(flags["reverify-limit"]) : DEFAULT_REVERIFY_LIMIT,
+      bools.has("allow-dirty-corpus"),
     ),
   );
 }
