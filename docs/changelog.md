@@ -5960,6 +5960,35 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### 2026-08-10 — S337 (bryan): eight PRs, four instances of one class, and a leak that lives on main
+
+Eight PRs merged (#495 #496 #497 #498 #499 #500 #502). Review floor drained to **0 owed** with three
+real findings. Two stranded S331 artifacts recovered — the maps regen and the continuity, the latter
+carrying a delta-log **sequence-ID collision** (two operators numbered an append-only stream from
+different clones) and a hand-off that would have overwritten Peter's live one.
+
+**The session's real finding is a repeated class, not any single fix.** A hand-maintained field list or
+parallel walker that cannot see positions outside it, hit FOUR times: `collectDerivedCellDecls` (#486,
+six leaking positions), the g-263 client-read seed, `B3_EXPR_FIELDS` (the tare validation walk), and
+`collectFileLevelBindingRoots`. Each surfaced from a *different* review round finding a *different*
+missed position. The tell is a bug family with one member per position.
+
+**And convergence carries a contract hazard that cost two rounds of leaks.** Merging two walkers
+assumed they should be identical when they had deliberate policy differences; merging onto one table
+assumed two consumers ask the same question when they do not — the seed wants CLIENT-EXECUTED
+positions, the dependency graph wants ALL source positions. Ruled: the table gains a wired/not-wired
+classification and the seed fails CLOSED.
+
+**⚠ `main` ships server-only consts to browsers today.** The same-file client-read gate has never had a
+shadow guard: `<each … as SECRET>` or `function f(SECRET)` beside a server-only `export const SECRET`
+leaks it. Zero corpus incidence, fixed only on an unmerged branch.
+
+Landed: **§6.6.19 checks a derived cell in ANY position** (#500) · **the tier-2 scaffold retirement rule
++ conformance fork 2 resolved** (#499) · **`scripts/dpa-debt.ts`**, the probe whose absence hid dpa-024
+for six sessions · **the boot gate's `@ledger` marker** (#498), replacing a prose scan that produced
+eleven findings across two rounds. Rulings banked: `E-PA-002` split, dpa-022 reconciliation, dpa-023
+direction, the tare position restriction, and dpa-025/dpa-026 banked and fireable.
+
 ### 2026-08-09 — S331 (bryan): seven gaps filed, five HIGH, zero regressions — and an architectural hypothesis refuted by design
 
 Six PRs merged (#479 #480 #481 #482 #483 #486) plus the retirement of a parallel delta-log stream in

@@ -1,46 +1,123 @@
 <!-- ============================================================= -->
-<!-- hand-off.md — live session state. ROTATED at S336: prior wraps -->
-<!-- handOffs/hand-off-s335.md (S335) + handOffs/hand-off-s334.md (S334) -->
-<!-- + handOffs/hand-off-s331.md (S331-bryan — landed LATE at S337 via PR #488, -->
-<!--   which sat open across S332-S336; it was never on main to be rotated) -->
-
-<!-- + hand-off-s332.md (S277–S332) etc. Mechanical stream: handOffs/delta-log.md. -->
+<!-- hand-off.md — live session state. ROTATED at S337: prior wraps -->
+<!-- handOffs/hand-off-s336.md (S336) + handOffs/hand-off-s335.md (S335) -->
+<!-- + handOffs/hand-off-s331.md (S331-bryan, landed late at S337 via #496). -->
+<!-- Mechanical stream: handOffs/delta-log.md. -->
 <!-- ============================================================= -->
 
-# scrml — Session 336 (peter · Windows) — WRAP
+# scrml — Session 337 (bryan · ASUS-Vivobook) — WRAP
 
-**Date:** 2026-08-09. `/boot` Profile A. **1 PR merged** (#492 `scripts/boot.ts`) + this wrap. main `458452a2` → **`ec639bc4`** → wrap. Coherence 0/0 both repos. Cloud gate GREEN incl. Windows. **Review floor: 0 owed** (#491 carve-out · #492 finding). Gaps **HIGH 27 · MED 122 · LOW 58 · Nom 7** (headline table regen'd from stale 26/126/56). Delta-log **[1301]–[1305]**. SOLO (bryan wrapped; his #488 open, his to merge).
+**Date:** 2026-08-10. `/boot` Profile A. **8 PRs merged** (#495 #496 #497 #498 #499 #500 #502 + this wrap).
+main `191b4a36` → `34d211ab` → wrap. Cloud gate GREEN. **Review floor 0 owed** (5 drained, 3 findings).
+SOLO. scrml-support pushed separately (direct-push).
 
 ## ⏭ NEXT-SESSION PICKUP (read this FIRST — the left-off handshake)
 
-**FIRST, prove the boot-remedy fired** — this session BUILT it, so your boot is the first dogfood: `/boot` step 0 should have run `bun scripts/boot.ts` and led orientation with THIS block. If it didn't (you're reading a menu, or you ran the reads by hand), the wiring in `~/.claude/commands/boot.md` didn't take — say so; it's the exact seam we closed. (`scripts/boot.ts` is landed on main; the step-0 wiring is in the installed `/boot`.)
+**THREE ARCS ARE IN FLIGHT AND CHAINED. The head of the chain blocks the other two.**
 
-**THEN the standing next adopter-value work — the SSR-each prerender arc** (was S335's Option 2, deferred to build the boot-remedy; now #1). Gap `g-ssr-each-row-template-subset-blocks-all-prerender` + sibling `g-ssr-each-multi-root-client-only-fallback`, module `compiler/src/emit-ssr-render.ts`. aM = 132 `<each>` + 295 computed-class interps → ~every data list loses SSR first paint (client-only fallback). ⚠️ **STEP ONE = read the governing SPEC sentence + repro BEFORE building:** widening what the SSR renderer prerenders is potentially *newly-accepting* (a language-surface question → maybe bryan's lane, per [[feedback-stay-in-adopter-lane-not-grammar-decisions]]) and carries hydration-mismatch risk (the gap body flags it). NOT a one-liner. If it resolves newly-accepting → route/hold for bryan; if inert widening → build in-lane.
+```
+g-263 (fix round 2 running) ──▶ converge symbol-table's validation walk ──▶ tare (#501) merges
+```
 
-## 🎯 WHAT LANDED (S336) — the wrap→boot seam closed by an executable gate
+1. **g-263 — branch `fix/g263-seed-convergence-land`, NO PR YET, fix round 2 IN FLIGHT.**
+   bryan ruled **(b): give `expr-positions.ts` a WIRED/NOT-WIRED classification.** The seed asks
+   *"which identifiers does CLIENT-EXECUTED code reference?"*; the table answers *"where does
+   expression SOURCE appear?"* — different questions, and **all three §14.8 leaks so far live in that
+   gap.** Also ruled: the seed **fails CLOSED** on unknown wiring (a missing emit is a loud
+   `ReferenceError`; a spurious emit is a silent secret). Agent `a72905887573ded02` is building it.
+   **On report: file-delta → adversarial pass → PR. It introduced a NEW leak in each of its two prior
+   rounds — do NOT merge on a green suite alone.**
+2. **THEN converge `symbol-table.ts`'s `walkValidateResetTargets` onto `expr-positions.ts`** — bryan
+   ruled this **(a)**, and it is why g-263 must land first (the table lives there). `B3_EXPR_FIELDS` is
+   a hardcoded 11-name list that cannot see markup event-handler expressions, so **all four §6.8.4 tare
+   checks silently skip them** — proven: `onclick=${ tare(@x) }` compiles clean, then `reset` re-runs
+   the module-init thunk. NOT dispatched yet.
+3. **THEN `tare` (#501)** — six review rounds, green, held ONLY on (2). Merging before the walk
+   converges leaves §6.8.4's own sentence about event handlers false.
 
-The S335 short-boot remedy, Peter-confirmed as this session's first pickup. Both halves now interlock: `/wrap` **writes** the exact `## ⏭ NEXT-SESSION PICKUP` heading → `scripts/boot.ts` **extracts** it and leads orientation → the seam a memory couldn't gate is now gated.
+**Everything else is optional.** For a clean start instead, the two Q8 dispatches (below) are
+self-contained and touch none of the chain.
 
-- **#492 (`ec639bc4`) — `scripts/boot.ts`.** Read-only boot gate: fetch both repos; VERIFY every Profile-A read-set source exists+current (missing/stale LOUD; both voice ledgers + per-user profile in the set BY CONSTRUCTION); DELEGATE the mandatory probes to their authoritative sources (review-debt/threads/gh); EXTRACT+PRINT the PICKUP block first; drift-guard each item vs its mandating contract. Modes: digest·`--json`·`--check`·`--no-probes`. **S239 caught a gate-defeating unanchored-`indexOf` false-pass** (matched the heading in a code-span mention — the wrap template has one) + 2 minor; all fixed + re-verified in a sandbox. [1302][1303].
-- **Wiring (piece 1+2).** Conditional step-0 in `/boot` (run helper if present, lead with PICKUP, FAIL=hard-stop; no-op otherwise) + `/wrap` step-1 now REQUIRES the exact PICKUP heading. Applied to Peter's INSTALLED `~/.claude/commands/{boot,wrap}.md` (operative now) + flogenceP fork source (branch `feat/boot-command-project-helper-wiring`, pushed to pjoliver11/flogenceP — **Peter to merge in his fork**). [1304].
-- **Fold-in:** `state.ts --write` regen of the pre-existing gap-counts drift (26/126/56 → true 27/122/58; NOT mine — state+facts --check both PASS now).
+## 🎯 WHAT LANDED (S337)
 
-## ⛔ HELD / ROUTED — do NOT take as compute (carried + new)
+- **#500 — the #486 HIGH confidentiality leak, closed.** SIX positions were leaking, not the one
+  reported. The walk is structural now, not a field list. Migration measured ZERO over 2,358 files.
+- **#499 — the tier-2 scaffold retirement rule + conformance fork 2 RESOLVED** (mixed-pipeline
+  bootstrap; FORK RULE rows 1–4 unanimous, escalation declined explicitly). **+ `scripts/dpa-debt.ts`** —
+  the probe whose absence hid dpa-024 for six sessions.
+- **#498 — the boot-gate read-6b false failure**, converged to a machine-readable `@ledger` marker on
+  all three pa-profiles (scrml-support `3f2cc8c`); the prose scan is deleted.
+- **#495 / #496** — the S331 maps regen and S331 continuity, both stranded since 2026-08-09. #488 closed
+  and superseded (a delta-log sequence-ID collision + a hand-off that would have overwritten Peter's).
+- **#497 / #502** — review floor, and dpa-025 banked.
 
-- **NEW — canonical boot-remedy amendment → bryan** (`incoming/2026-08-09-from-peter-to-bryan-boot-helper-canonical-amendment.md`): `.pa-base/profile` + `pa-base.md` + upstream flobase `commands/boot.md` + the shared `/wrap` PICKUP block. His to ratify; nothing blocked on him (Peter's installed boot already has it).
-- **#486 HIGH leak** (for-loop lift body evades §12.2) — routed S335; his escalate-vs-refuse family (pending ruling).
-- **if-value fork RULED B** → §17.6 amendment off `worktree-agent-ad7fea65da10675c1`@`5fc00afa` (his to land). **g-263 cross-file-const** (`b9d68190`) + **§6.8 implicit-multiwrite-reset semantics fork** — routed, await his ruling.
-- **14 owed-by-bryan** (his S331 hand-off) incl. dpa-022/023/024. **His wrap PR #488 still OPEN** — his to merge; do not touch.
+## ⛔ HELD / ROUTED — do NOT take as compute
 
-## 🔑 METHOD NOTES THAT OUTLAST (S336)
+- **Q8 dispatch 1 — the derived-cell server-placement carve-out.** MEASURED live: the false positive
+  fires on INFERENCE-escalated functions (Trigger 1 `?{}`, Trigger 3 server-only reach) with **zero
+  deprecation warnings**, and `.server.js` IS emitted in all four cases. Not a deprecated-only artifact.
+  bryan ruled (b) measure-then-decide; the measurement says **fix it**. Not dispatched.
+- **Q8 dispatch 2 — `server fn` fires `W-DEPRECATED-SERVER-MODIFIER`** though the PRIMER says it is
+  EXEMPT and that `server` is LOAD-BEARING there. The lint tests the BODY and never asks whether the
+  decl is `fn` or `function`. **May be a PRIMER-vs-SPEC ruling, not a fix** — read §12.2 Trigger 4 first.
+- **`E-PA-002` split — RULED (c), S337.** Genuine `protect=` syntax errors stay fatal; the
+  missing-DB-file condition gets its own NON-fatal code. Halves the emission-gate migration (59 → 32).
+  Queued behind the SPEC/§34 contention. NOT dispatched.
+- **The emission gate — Rule 4 Outcome 2**, so it is bryan's ruling, not a fix. ⚠ **One piece is
+  actionable WITHOUT any ruling:** `bundleStdlibForRun` runs ~270 lines BEFORE `emitGateFailed` exists,
+  so even the WORKING §2.2.1 parse gate leaves `_scrml/auth.js` with `Bun.password.hash(argon2id)` on
+  disk. A live shortfall against an existing SPEC sentence.
+- **dpa-022 reconciliation — RULED (a).** §1.4 half queues behind the SPEC contention; the PRIMER + L1
+  halves are unblocked. The PRIMER is a mandatory full-read at every boot, so it gets care not a sweep.
+- **dpa-023 `pending` rung** — direction RATIFIED, build DEFERRED to its own arc (ruled (b)).
 
-- **The gate had a gate-defeating bug, and S239 caught it** — an unanchored match that false-passed on a code-span mention of its own heading. Ground-truthed, fixed, re-bit in a sandbox. Even a correctness-tooling PR gets the independent adversarial pass; a green self-report is not proof. [[s239-review-falsify-the-claim-dont-confirm-a-hypothesis]].
-- **A memory navigates, an executable gate gates** — the whole point of this session. The remedy is a script `/boot` runs, not a note the PA might skip. [[feedback-lead-boot-orientation-with-leftoff-handshake]] → now BUILT [[scrml-boot-remedy-executable-gate-built]].
-- **Installed command drift is real** — `~/.claude/commands/boot.md` was 7-step-stale vs the 8-step flogenceP source, AND untracked. The fork source is the durable home (Peter's ruling); route canonical to bryan so a reinstall can't silently regress it.
+## 🔑 METHOD NOTES THAT OUTLAST (S337)
+
+- **⚑ THE SESSION'S REAL FINDING — the same class hit FOUR times and I only named it on the third.**
+  A hand-maintained field list or parallel walker that cannot see positions outside it:
+  `collectDerivedCellDecls` (#486), the g-263 seed, `B3_EXPR_FIELDS` (tare), `collectFileLevelBindingRoots`.
+  Each was found by a *different* review round finding a *different* missed position. **The tell is a bug
+  family with one member per position. When round N finds an N+1th position, stop fixing positions.**
+- **⚑ AND CONVERGENCE HAS A CONTRACT PROBLEM I GOT WRONG TWICE.** g-263: I assumed two walkers should be
+  identical when they had deliberate policy differences → a leak AND an under-emit. Then: I assumed one
+  table could serve two consumers whose QUESTIONS differ → two more leaks. **Converging is right;
+  "these two do the same thing" is a claim to MEASURE, never to assume.**
+- **`main` LEAKS server-only consts to browsers TODAY.** The same-file client-read gate has never had a
+  shadow guard of ANY kind: `<each … as SECRET>` and `function f(SECRET)` both ship a server-only
+  `export const` when a client binding merely shares the name. Zero corpus incidence. Currently fixed
+  ONLY on the g-263 branch — **file it independently of that arc.**
+- **A suite that exercises one of a helper's TWO callers reads exactly like one that exercises both.**
+  All six g-263 leak vectors used a separate file, so every one travelled the cross-file path; the
+  same-file caller was untested, which is why the hole survived three rounds.
+- **Unanchored matching — THREE instances in one session:** #492's PICKUP `indexOf`, my own
+  ledger-section regex, and `dpa-debt`'s classifier flagging rows that *narrate* "BANKED — UNRUN".
+  Every one caught by RUNNING it, never by reading it.
+- **Compare NAME SETS, not counts.** I relayed "49 vs 51 browser failures, branch fixes 2"; the agent
+  measured **48 both sides, sets byte-identical by name**, and noted 0 artifact content diffs across
+  7,375 artifacts makes a behaviour change impossible. A count cannot distinguish a fix from a swap.
+- **A wrong in-source rationale is worse than none** — it stops the next reader looking. Two found and
+  corrected this session (the boot gate's, and `_scrml_tare`'s no-op comment).
+- **Agents were right against me repeatedly** — 4 of my 6 g-263 repro shapes, my `import.meta` premise,
+  my browser counts, my finding-1 suggested fix (which would have introduced two new bugs), and my
+  request for a non-constructible test. **My premises hold up when they came from a compile, not a read.**
 
 ## 🧷 STATE / DEFERRED
 
-- **flogenceP wiring** — MERGED to pjoliver11/flogenceP `main` (`96f7ade`, S336 post-wrap; branch deleted, coherence 0/0). The durable boot/wrap source is on the fork's main line now. ⚠ Peter's INSTALLED `~/.claude/commands/{boot,wrap}.md` were hand-edited to match (operative) — a flobase reinstall regenerates them from flogenceP main (which now carries the wiring), so no regression risk. Canonical shared-contract amendment still ROUTED-not-ratified (bryan's).
-- **Maps (6c):** one new script (`scripts/boot.ts`); no compiler-code modules changed. project-mapper refresh still owed from S334/S335 (watermark behind) — LOW urgency, deferred.
-- **Worktrees (6b):** created none this session (Agent-tool satellites). Retained (not mine): `agent-a0742fe4795045e91`, `agent-a4e6b5f2562ae9eaa`, `onmount-c` (feat/onmount-c-build), `scrml-pinned` (leave).
-- **Base64→false-E-FN-003 gap** (`g-server-fn-template-literal-base64-eq-false-e-fn-003`, MED) — still marked re-verify-owed (carried from S334 census; not re-reproduced).
+- **Maps (6c): DELIBERATELY DEFERRED.** Three code arcs are unmerged; a refresh now goes stale on their
+  landing. Watermark is at #495's regen. Refresh after the chain lands.
+- **⚠ NOT LANDED AND EASY TO LOSE:** `worktree-agent-a90924554f6a7f288` @ `5bf7ec50` — the
+  `classifyWriteAgainstSpec` fix (dpa-023's rung-independent half). COMPLETE, migration measured ZERO
+  over 2,359 files. It corrected my brief three ways: the loci were **+170** off, the claimed
+  "duplicate" is a different function, and there is a **third** sibling dpa-023 never named — and it
+  refused to over-unify them, with good reasoning. **File-delta it early.**
+- **Worktrees (6b):** four retained — `a0565f339b2799993` (tare), `a72905887573ded02` (g-263, LIVE),
+  `adde4ceabc51763db` (#500, landed), `a90924554f6a7f288` (classify-write, unlanded, above).
+- **dpa-025 + dpa-026 BANKED and FIREABLE** (`bun scripts/dpa-debt.ts` → 2 UNRUN). dpa-025 = the
+  missing-primitive population-first DD (bryan's reframe). dpa-026 = is `tare` one keyword doing two
+  jobs, thunk vs capture by position.
+- **Still open from the tare rounds:** native-parser has no `tare` mirror; `reset(@derivedConst)`
+  compiles clean despite §6.8.1/§6.8.2; a read inside a tare's 2nd arg is reported twice;
+  object-literal compounds have no per-field reset target for EITHER keyword; **raw-body
+  (`cleanup`/handler) keyword calls emit dangling references — family-wide, pre-existing, `reset` too.**
+- **~48 browser tests may be red on `main`**, excluded from the pre-commit gate. Measured by an agent,
+  NOT by me. **Verify before treating as fact** — if true, a whole tier has been failing quietly.
