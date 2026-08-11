@@ -26,3 +26,39 @@ Append-only. Timestamped. This file + the branch are the entire crash-recovery s
   bounds this dispatch: the hop defect is in the derived position only, and I must not accidentally
   "fix" the two open positions as a side effect (separate rulings).
 - Map stamp `616688ea`; HEAD is past it. Claims treated as hypotheses, verified against source below.
+
+## BASELINE — reproducers compiled on this branch (compiler/src byte-identical to `main` at this point)
+
+Sources in `…/scratchpad/dtr-fix/repro/`. Command: `bun compiler/bin/scrml.js compile <f> -o <dir>`.
+
+| # | shape | exit | diagnostics | `.server.js`? | verdict |
+|---|---|---|---|---|---|
+| r1-direct | `const <h> = hashPassword(@pw)` | **1** | `E-DERIVED-SERVER-ONLY-REACH` | no | #500 working — MUST NOT REGRESS |
+| r2-hop | `function doHash(p){return hashPassword(p)}` + `const <h> = doHash(@pw)` | **0** | none | **yes** | **DEFECT** |
+| r3-sql-hop | `function countRows(){const r = ?{…}; return r.length}` + `const <c> = countRows()` | **0** | `W-DERIVED-001` only | **yes** | **DEFECT** |
+| r4-multihop | `levelA`→`levelB`→`levelC`→`hashPassword` | **0** | none | **yes** | **DEFECT (3 hops)** |
+| r5-cycle | `ping`↔`pong`, `pong` reaches `hashPassword` | **0** | none | **yes** | **DEFECT (through a cycle)** |
+| r6-negative | pure-client `shout` | 0 | `I-FN-PROMOTABLE` | no | must STAY clean |
+| r7-pure-cycle | pure-client `alpha`↔`beta` cycle | 0 | none | no | must STAY clean |
+
+Emitted evidence (base):
+
+- r2: `_scrml_cs_derived_declare("h", () => _scrml_fetch_doHash_3(_scrml_cs_reactive_get("pw")))`
+  where `_scrml_fetch_doHash_3` is declared `async`. The derived cell's value IS the Promise.
+- r4: `_scrml_levelA_5` and `_scrml_levelB_4` are BOTH emitted `async` (codegen's
+  `scheduling.ts` transitive async coloring DID colour them) → same Promise-valued derived cell.
+  **This is the load-bearing asymmetry: CODEGEN colours async transitively, ROUTE INFERENCE
+  refuses only directly.** The two stages disagree about the same source.
+- r3: a different lowering — `W-DERIVED-001` (no reactive deps) →
+  `const c = _scrml_fetch_countRows_3();` — a plain `const` holding a Promise, no
+  `derived_declare` at all. Same failure class, second emission route. Good: it proves the check
+  must key on the AST decl, not on the emission shape.
+
+### Incidental finding (OUT OF SCOPE — reported, not fixed)
+
+My first r5 draft used `given k <= 0 { return hashPassword(p) }` inside a function body. It emitted
+`if (k !== null && k !== undefined) {\n}` — **the block body, including the `return`, was dropped
+entirely**, and `hashPassword` vanished from every artifact at exit 0. That may simply be me
+misusing `given` (a presence check, not a general conditional) — but a misuse that silently
+DELETES a `return` statement is still a silent statement-drop. Not chased; flagged here so it is
+not lost. Reproducer text is in this progress entry, not on disk (r5 was rewritten).
