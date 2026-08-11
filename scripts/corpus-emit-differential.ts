@@ -158,6 +158,25 @@ interface SourceRecord {
   compile: {
     exitCode: number;
     ok: boolean;
+    /**
+     * HARD REQ 10 — the signal that terminated the compiler, or `null` for an ordinary exit.
+     *
+     * `Bun.spawn`'s `exited` promise resolves to 128+N for a signal death — a SIGKILLed compile
+     * resolves to 137 — so WITHOUT this field a compiler the OS killed is recorded as
+     * `exitCode: 137, ok: false, stdout: "", stderr: ""` and is INDISTINGUISHABLE from a source
+     * that legitimately failed to compile. `proc.signalCode` carries the distinction and was
+     * previously discarded. Measured, not assumed: `Bun.spawn(["bash","-c","kill -KILL $$"])`
+     * resolves `exited` to 137 with `exitCode: null` and `signalCode: "SIGKILL"`.
+     *
+     * This is the fingerprint of DEFECT 2's witnessed symptom triple. A SIGKILLed compile produces,
+     * in one event, a NEWLY-FAILING source (exit != 0) AND a diagnostic CHANGE (real diagnostics
+     * become the empty string) AND REMOVED artifacts (the process died before writing them) — which
+     * is exactly the "8 newly-failing, 8 diagnostic changes, 27 removed artifacts" that was reported
+     * and did not reproduce.
+     */
+    signal: string | null;
+    /** TRUE when an externally-killed compile was re-run SERIALLY and that re-run is what is recorded. */
+    retriedAfterSignal?: boolean;
     /** Normalized (absolute paths and wall-clock timings folded out) so two checkouts at two
      *  different filesystem paths produce comparable text. Stored IN FULL — a digest would make a
      *  changed diagnostic visible but unreadable, and this tool exists to make things readable. */
@@ -294,6 +313,13 @@ interface Manifest {
     compileAttempted: number;
     compileOk: number;
     compileFailed: number;
+    /**
+     * HARD REQ 10 — compiles the ENVIRONMENT killed during the concurrent pass and that were re-run
+     * serially. Non-zero means this machine could not sustain `--concurrency`; the outcomes are the
+     * retries', which are measurements, but the number is a standing signal that the pool is at the
+     * edge of what the host can do.
+     */
+    compileSignalRetries: number;
     artifactsEmitted: number;
     artifactsCheckable: number;
     syntaxChecked: number;
@@ -780,6 +806,8 @@ async function capture(opts: CaptureOptions): Promise<number> {
   const oracleAll: string[] = [];
   const skippedLinks: string[] = [];
   let selfCheckFailed = false;
+  /** HARD REQ 10 — compiles the environment killed and that were re-run serially. */
+  let signalRetries = 0;
 
   for (const root of roots) {
     const absRoot = resolve(compilerRoot, root);
@@ -938,7 +966,7 @@ async function capture(opts: CaptureOptions): Promise<number> {
         // reported 71 of 71. A fabricated success is worse than a declared unknown, so this is
         // now uniformly `ok: false` with a sentinel exit code, and the manifest-level
         // `reuseArtifacts` flag is what `diff` keys off.
-        compile: { exitCode: -1, ok: false, stdout: "<reuse-artifacts: compile NOT re-measured>", stderr: "<reuse-artifacts: compile NOT re-measured>", diagnosticCodes: [] },
+        compile: { exitCode: -1, ok: false, signal: null, stdout: "<reuse-artifacts: compile NOT re-measured>", stderr: "<reuse-artifacts: compile NOT re-measured>", diagnosticCodes: [] },
         artifacts: [],
       });
     }
@@ -955,6 +983,67 @@ async function capture(opts: CaptureOptions): Promise<number> {
         console.log(`      compiled ${done} of ${allSources.length}`);
       }
     });
+
+    // ---- HARD REQ 10: a signal death is NOT a compile failure ------------------------------
+    //
+    // See `EXTERNAL_KILL_SIGNALS`. An externally-killed compile is re-run SERIALLY here, AFTER the
+    // pool has drained, because that is when the pressure that killed it is gone — retrying inside
+    // the pool would retry into the same contention. This is the root-cause fix for the one
+    // mechanism DEFECT 2 could be pinned to; the diff-time re-verification (HARD REQ 9) remains the
+    // backstop for the mechanisms it could not be.
+    const crashed = allSources.filter((s) => {
+      const sig = records.get(s)!.compile.signal;
+      return sig !== null && !EXTERNAL_KILL_SIGNALS.has(sig);
+    });
+    if (crashed.length > 0) {
+      // A crash is a FINDING, never retried away. Named here so a reader never has to infer a
+      // compiler crash from a 139 in an exit-code column.
+      console.error(`      *** ${crashed.length} compile(s) died on a CRASH signal — the COMPILER crashed. Recorded as failures, NOT retried: ***`);
+      for (const s of crashed) console.error(`        ${records.get(s)!.compile.signal}  ${s}`);
+    }
+    const externallyKilled = allSources.filter((s) => {
+      const sig = records.get(s)!.compile.signal;
+      return sig !== null && EXTERNAL_KILL_SIGNALS.has(sig);
+    });
+    if (externallyKilled.length > 0) {
+      console.error(
+        `      *** ${externallyKilled.length} compile(s) were KILLED BY THE ENVIRONMENT, not by the compiler. ***\n` +
+          `      A killed compile produces exit 128+N with EMPTY streams and NO artifacts, which reads\n` +
+          `      exactly like a newly-failing source with changed diagnostics and removed artifacts.\n` +
+          `      Re-running them SERIALLY, now that the pool has drained. Usual cause: memory pressure\n` +
+          `      from --concurrency ${opts.concurrency} (measured single-compile peak RSS ~120MB).`,
+      );
+      for (const s of externallyKilled) console.error(`        ${records.get(s)!.compile.signal}  ${s}`);
+      for (const s of externallyKilled) {
+        const rec = await compileOne(s, opts.compilerRoot, opts.work);
+        rec.compile.retriedAfterSignal = true;
+        records.set(s, rec);
+      }
+      const stillKilled = externallyKilled.filter((s) => {
+        const sig = records.get(s)!.compile.signal;
+        return sig !== null && EXTERNAL_KILL_SIGNALS.has(sig);
+      });
+      signalRetries = externallyKilled.length;
+      if (stillKilled.length > 0) {
+        // No manifest. A capture that could not MEASURE a source has no honest value to record for
+        // it, and every other option writes a number that is not a measurement.
+        console.error(
+          `SELF-CHECK FAILED: ${stillKilled.length} compile(s) were killed by the environment AGAIN on a\n` +
+            `      SERIAL re-run, so their outcome is UNMEASURED. This machine cannot currently run this\n` +
+            `      capture. Free memory (or lower --concurrency) and re-run; do NOT compare a manifest\n` +
+            `      whose compile outcomes include unmeasured sources.`,
+        );
+        for (const s of stillKilled) console.error(`        ${records.get(s)!.compile.signal}  ${s}`);
+        selfCheckFailed = true;
+      } else {
+        console.log(`      all ${externallyKilled.length} recovered on the serial re-run — recorded from the RETRY, flagged retriedAfterSignal`);
+      }
+    }
+  }
+
+  if (selfCheckFailed) {
+    console.error(`\nCAPTURE ABORTED: a compile-stage self-check failed. No manifest written.`);
+    return 1;
   }
 
   let compileOk = 0;
@@ -971,7 +1060,9 @@ async function capture(opts: CaptureOptions): Promise<number> {
       `      attempted     : ${allSources.length} of ${allSources.length} enumerated\n` +
         `      compiled OK   : ${compileOk} of ${allSources.length} attempted\n` +
         `      compile FAILED: ${compileFailed} of ${allSources.length} attempted  ` +
-        `(HARD REQ 5 — failures are DATA; the signal is the failure SET changing, never the count being nonzero)`,
+        `(HARD REQ 5 — failures are DATA; the signal is the failure SET changing, never the count being nonzero)\n` +
+        `      env-killed    : ${signalRetries} of ${allSources.length} attempted were killed by the ENVIRONMENT and re-run SERIALLY` +
+        `${signalRetries === 0 ? " (HARD REQ 10 — none; the pool held)" : " (HARD REQ 10 — the pool is at this host's limit; consider a lower --concurrency)"}`,
     );
   }
 
@@ -1164,6 +1255,7 @@ async function capture(opts: CaptureOptions): Promise<number> {
       compileAttempted: opts.reuseArtifacts ? 0 : allSources.length,
       compileOk,
       compileFailed,
+      compileSignalRetries: signalRetries,
       artifactsEmitted,
       artifactsCheckable,
       syntaxChecked,
@@ -1276,10 +1368,40 @@ async function compileOne(src: string, compilerRoot: string, work: string): Prom
   return {
     path: src,
     role: classifyRole(src),
-    compile: { exitCode, ok: exitCode === 0, stdout: nOut, stderr: nErr, diagnosticCodes: extractDiagnosticCodes(nOut + "\n" + nErr) },
+    compile: {
+      exitCode,
+      ok: exitCode === 0,
+      // HARD REQ 10 — `proc.signalCode` is the ONLY thing that separates "the compiler rejected
+      // this source" from "the operating system killed the compiler". `exited` cannot: it reports
+      // 128+N for a signal, which is a perfectly ordinary-looking non-zero exit code.
+      signal: proc.signalCode ?? null,
+      stdout: nOut,
+      stderr: nErr,
+      diagnosticCodes: extractDiagnosticCodes(nOut + "\n" + nErr),
+    },
     artifacts: [],
   };
 }
+
+/**
+ * HARD REQ 10 — signals that mean the ENVIRONMENT terminated the compiler rather than the compiler
+ * crashing.
+ *
+ * The split is load-bearing in BOTH directions and neither half is discretionary:
+ *
+ *   - An EXTERNAL kill (the OOM killer's SIGKILL is the one that has actually been seen) produced no
+ *     verdict about the source at all. Recording it as a compile FAILURE fabricates a measurement,
+ *     which is the same sin `--reuse-artifacts` is guarded against — "a fabricated success is worse
+ *     than a declared unknown", and a fabricated FAILURE is worse still, because it reads as a
+ *     regression in the change under test.
+ *   - A CRASH signal (SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE) is the compiler failing, which is a
+ *     genuine outcome and a serious finding. It stays a recorded compile failure and must NOT be
+ *     retried away.
+ *
+ * Anything not listed here is treated as a crash, which is the safe direction: an unknown signal
+ * keeps its finding rather than being silently retried out of the report.
+ */
+const EXTERNAL_KILL_SIGNALS = new Set(["SIGKILL", "SIGTERM", "SIGINT", "SIGHUP", "SIGQUIT", "SIGXCPU", "SIGXFSZ"]);
 
 /**
  * Run BOTH parser goggles over a batch of artifacts, in a separate NODE process.
@@ -1777,6 +1899,12 @@ async function diff(
   console.log(
     `   base: ok ${base.totals.compileOk} of ${base.totals.compileAttempted} attempted, failed ${base.totals.compileFailed}\n` +
       `   head: ok ${head.totals.compileOk} of ${head.totals.compileAttempted} attempted, failed ${head.totals.compileFailed}`,
+  );
+  // HARD REQ 10 — informational, never a finding. A retry produced a real measurement; the count is
+  // reported because it is the standing indicator of how close the capture host ran to its limit.
+  console.log(
+    `   env-killed compiles re-run SERIALLY at capture: base ${base.totals.compileSignalRetries}, head ${head.totals.compileSignalRetries}` +
+      `${base.totals.compileSignalRetries + head.totals.compileSignalRetries === 0 ? "  (none — neither pool was pressured)" : "  (recovered; the outcomes below are the retries')"}`,
   );
   console.log(`   compile-failure SET delta: ${newlyFailing.length} newly FAILING, ${newlyPassing.length} newly PASSING (full lists, no cap):`);
   for (const p of newlyFailing) console.log(`     ! NEWLY FAILING in head: ${p}  (base exit ${baseBy.get(p)!.compile.exitCode} -> head exit ${headBy.get(p)!.compile.exitCode})`);
