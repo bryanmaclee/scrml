@@ -1,0 +1,30 @@
+<program>
+
+${ import { hashPassword } from 'scrml:auth' }
+
+<pw> = "secret"
+
+// §6.6.19 TRANSITIVE limb (S338). `doHash` is the resolution the DIRECT limb's own
+// message names — move the call into a `function`, which DOES escalate under §12.2
+// Trigger 3 — and it is correct as far as it goes: `hashPassword` and its
+// `Bun.password.hash` implementation stay server-side, and `doHash` becomes a route
+// handler plus a client fetch stub. Nothing leaks.
+//
+// What breaks is the READ. The stub is `async`, and §6.6.4 invokes a derived
+// recompute with no `await`, so `@hashed` would hold the pending Promise and the
+// markup would render it. Measured on `main` before S338, at exit 0 with an empty
+// diagnostic set:
+//
+//   _scrml_cs_derived_declare("hashed", () => _scrml_fetch_doHash_3(…));
+//
+// The direct limb missed this because it keys on the §12.2 Trigger 3 IMPORT map,
+// and `doHash` is a local function, not an import.
+${ function doHash(p) {
+    return hashPassword(p)
+} }
+
+const <hashed> = doHash(@pw)
+
+<div id="out">${@hashed}</div>
+
+</program>

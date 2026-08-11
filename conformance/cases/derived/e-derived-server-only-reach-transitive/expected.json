@@ -1,0 +1,13 @@
+{
+  "id": "derived-e-derived-server-only-reach-transitive",
+  "description": "§6.6.19 TRANSITIVE limb — a `const <name>` derived cell whose RHS reaches server work ONE HOP AWAY, through a local `function` that §12.2 Trigger 3 escalates, is REFUSED under the same E-DERIVED-SERVER-ONLY-REACH. Guards the S338 defect where the direct limb refused `const <h> = hashPassword(@pw)` and compiled the identical reach through `doHash` at exit 0 with zero diagnostics, emitting `_scrml_cs_derived_declare(\"hashed\", () => _scrml_fetch_doHash_3(…))` against an `async` stub.",
+  "language-version": "1.0",
+  "spec": "§6.6.19",
+  "source-test": "compiler/tests/unit/route-inference-derived-server-only-reach.test.js",
+  "rationale": "The direct limb keyed on §12.2 Trigger 3's import-binding map, and `doHash` is a local function, not an import — so the reach was invisible to it. §12.4's placement is direct-only ('calling a server function is NOT a trigger'), so only the function that TOUCHES the server-only work lands in the placement result, while codegen colours the caller chain async on its way up: the two stages disagreed about the same source. Confidentiality is INTACT here — `hashPassword` stays server-side — so this is a CORRECTNESS refusal: §6.6.3 fixes the derived evaluation strategy as synchronous lazy pull and §6.6.4 invokes the recompute with no `await`, making the pending Promise the cell's value. E-ROUTE-005 does NOT fire (that is the unplaceable single-FUNCTION shape and additionally needs a client-only DOM global); E-ROUTE-002 does NOT fire (no client-pinned function is involved). The sibling `-fn-path` case pins that the SAME `doHash` shape read from an event handler instead of a derived cell still compiles clean — the refusal is about the READ POSITION, not about the function.",
+  "expect": {
+    "codes": ["E-DERIVED-SERVER-ONLY-REACH"],
+    "notCodes": ["E-ROUTE-005", "E-ROUTE-002"],
+    "severity": { "E-DERIVED-SERVER-ONLY-REACH": "error" }
+  }
+}
