@@ -122,6 +122,20 @@ vs the real 6) and missed `:27037`. Second-order instance, same session.
   failure COUNT from this suite is not a measurement. Name-set diffs only.** This explains every baseline
   disagreement this session; three of us separately blamed environment drift.
 - **A differential reading only `result.errors` is blind to `E-DG-002`**, which lives in `result.warnings`.
+- **⚠ THE CLOUD `gate` ITSELF DEGRADES UNDER PARALLEL LOAD — witnessed on this very wrap PR.** A
+  **docs-only** PR (6 files, ZERO under `compiler/`/`conformance/`/`stdlib/`) failed the gate **TWICE
+  CONCURRENTLY** on a single test — `each-multi-root §5 — Tier-0 multi-lift EXECUTES` — while `main`
+  was green on the same tree content and the test passed **20/20 locally on the exact branch**. Both
+  runs were racing S340-peter's #512 run: three full suites on shared runners. **Re-run with no change:
+  both green.** Flake confirmed by execution, not by argument.
+  **The pattern, and it is the fourth instrument this session:** phantom compile failures at
+  concurrency 10 · 1014 phantom content diffs from a project-root divergence · `bun run test` giving
+  53/49/51 on ONE tree · and now the cloud gate. **The common factor is not any single tool — this
+  repo's verification surface degrades under concurrent load, and in every instance the person who hit
+  it first assumed their own change was at fault (twice, that was me).** The cost is not the lost time;
+  it is that it trains "must be flake" as the first explanation — which is the exact reflex that let a
+  red `tracking` job hide a 38-failure regression at S302. **Always: re-run and watch it flip. Never:
+  assert flake from the shape of the failure.**
 
 ## 🪞 METHOD — what outlasts the session
 
