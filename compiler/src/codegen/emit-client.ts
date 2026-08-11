@@ -384,13 +384,44 @@ function stripExportDeclInit(raw: unknown, kind: string, name: string): string |
  * with no diagnostic. That is the FATAL direction, and the first cut of this fix
  * closed the false positive by opening it.
  *
- * So the opaque node is opened, and it is opened BY PARSING IT, not by regexing
- * it. An escape hatch's `raw` is the source of an ESTree node acorn already
- * parsed once and the scrml mapper could not represent — so acorn can parse it
- * again and answer the same structural question. The round-4 false positive came
- * from testing the WHOLE INITIALIZER's text, which is why THAT is still never
- * done: only an opaque node's own `raw` is ever re-parsed, and only when the node
- * is not already a MetaProperty.
+ * So the opaque node is opened, and it is opened BY PARSING IT. An escape hatch's
+ * `raw` is the source of an ESTree node acorn already parsed once and the scrml
+ * mapper could not represent — so acorn can parse it again and answer the same
+ * structural question.
+ *
+ * ═══ AND WHEN THE PARSE FAILS, THE ANSWER IS LEXICAL — STILL NOT TEXTUAL ═══
+ *
+ * A block-bodied callback may hold SCRML, not JS: `is not`, `not`, `~`, `::`,
+ * a bare variant `.Idle`, `@cell`, `<#req>`, `?{…}`. Acorn rejects all of those,
+ * and the first cut of this fence answered a failed parse with
+ * `/\bimport\s*\.\s*meta\b/` over the raw — which re-opened the round-4 defect
+ * one level down. The minimal pair, both read cross-file:
+ *
+ *     () => { return "a" is not "zzz" }           declared
+ *     () => { return "a" is not "import.meta" }   NOT declared
+ *
+ * The only difference is those characters INSIDE A STRING LITERAL. A regex
+ * cannot see a string literal. A LEXER can: acorn's tokenizer emits a string as
+ * ONE token, so `"import.meta"` is never the token triple `import` `.` `meta`,
+ * and a real meta-property always is. That is a proof, not a heuristic, and it
+ * holds on every shape above — the parse answers the JS ones, the lexer answers
+ * the scrml ones, and they agree wherever both can speak.
+ *
+ * ═══ WHAT THIS DOES NOT CLAIM ═══
+ *
+ * The whole INITIALIZER's text is never tested — that is where the round-4 false
+ * positive came from and it is genuinely never done. Neither is the node's own
+ * raw: it is parsed, or lexed, or the question is left UNANSWERED, and an
+ * unanswered question fails CLOSED (the const is skipped). Fail-closed is an
+ * under-emit, which is the sanctioned direction — a `ReferenceError` an adopter
+ * sees, against a bundle that cannot load at all.
+ *
+ * The fence is also NOT complete in the other direction, and that is pre-existing
+ * rather than introduced here: a nested / getter / method / async escape hatch
+ * (`() => () => {…}`, `{ get u() {…} }`, `{ m() {…} }`, `[1].map(() => () => {…})`)
+ * does not carry its interior on `raw` at all, so a real `import.meta` inside one
+ * still escapes and the bundle still dies. That is an EMITTER gap in what the
+ * escape hatch records, not a gap in this test.
  */
 
 /** Every ESTree node in `root`, looking for a `MetaProperty`. */
@@ -412,23 +443,49 @@ function estreeHasMetaProperty(root: unknown): boolean {
 }
 
 /**
- * Re-parse ONE opaque escape-hatch's own source and ask structurally.
- *
- * `sourceType: "module"` because `import.meta` is a syntax error under `script`
- * — the very property being detected. Parenthesized first so a bare
- * `function () {…}` / `x => {…}` is read as an EXPRESSION.
- *
- * A parse failure falls back to the text test ON THIS NODE'S RAW ONLY. That is
- * the fail-closed direction on purpose: an under-emit is a `ReferenceError` the
- * adopter can see, a shipped `import.meta` is a bundle that cannot load at all.
+ * The scrml SIGIL characters a JS lexer rejects outright. Mapped to `_` only to
+ * make the raw LEXABLE; neither character can occur inside `import`, `.` or
+ * `meta`, so the substitution cannot create or destroy the token triple below.
  */
-function escapeHatchRawReadsImportMeta(raw: string): boolean {
+const SCRML_SIGILS = /[@#]/g;
+
+/**
+ * Does this opaque escape hatch's own source read `import.meta`?
+ *
+ * Three answers, in descending strength, and the caller is told which by the
+ * `unknown` flag rather than being handed a guess:
+ *
+ *   PARSE  acorn maps it to an ESTree — ask for a `MetaProperty` node.
+ *          `sourceType: "module"` because `import.meta` is a syntax error under
+ *          `script`, which is the very property being detected. Parenthesized
+ *          first so a bare `function () {…}` / `x => {…}` reads as an EXPRESSION.
+ *   LEX    the parse failed because the body holds SCRML rather than JS. Tokenize
+ *          instead and look for the token triple `import` `.` `meta`. A string
+ *          literal is ONE token, so `"import.meta"` can never match it — which is
+ *          the entire difference between this and the regex it replaces.
+ *   NEITHER the raw does not even lex. The question is UNANSWERED; say so.
+ */
+function escapeHatchRawReadsImportMeta(raw: string): { meta: boolean; unknown: boolean } {
   for (const src of [`(${raw})`, raw]) {
     try {
-      return estreeHasMetaProperty(acorn.parse(src, { ecmaVersion: "latest", sourceType: "module" }));
+      const tree = acorn.parse(src, { ecmaVersion: "latest", sourceType: "module" });
+      return { meta: estreeHasMetaProperty(tree), unknown: false };
     } catch { /* try the next framing */ }
   }
-  return /\bimport\s*\.\s*meta\b/.test(raw);
+  for (const base of [raw, raw.replace(SCRML_SIGILS, "_")]) {
+    for (const src of [`(${base})`, base]) {
+      try {
+        const toks = [...acorn.tokenizer(src, { ecmaVersion: "latest", sourceType: "module" })];
+        for (let i = 0; i + 2 < toks.length; i++) {
+          if (toks[i].value === "import" && toks[i + 1].type.label === "." && toks[i + 2].value === "meta") {
+            return { meta: true, unknown: false };
+          }
+        }
+        return { meta: false, unknown: false };
+      } catch { /* try the next framing */ }
+    }
+  }
+  return { meta: false, unknown: true };
 }
 
 function exprNodeReadsImportMeta(node: unknown): boolean {
@@ -438,7 +495,14 @@ function exprNodeReadsImportMeta(node: unknown): boolean {
   if (n.kind === "escape-hatch") {
     if (n.nativeKind === "MetaProperty") return true;
     // An opaque node: its `raw` is real source the mapper could not represent.
-    if (typeof n.raw === "string" && n.raw.trim() && escapeHatchRawReadsImportMeta(n.raw)) return true;
+    if (typeof n.raw === "string" && n.raw.trim()) {
+      const verdict = escapeHatchRawReadsImportMeta(n.raw);
+      // UNANSWERED fails CLOSED — treated as "reads import.meta" so the const is
+      // skipped. Under-emitting is a `ReferenceError` an adopter can see and
+      // report; shipping `import.meta` into a classic script is a bundle that
+      // cannot load at all, and the two are not the same size.
+      if (verdict.unknown || verdict.meta) return true;
+    }
   }
   for (const key of Object.keys(n)) {
     // `raw` is skipped in the GENERIC descent — on a mapped node it is a

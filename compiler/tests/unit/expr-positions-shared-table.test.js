@@ -30,6 +30,8 @@ import {
   forEachExprPosition,
   EXPR_NODE_FIELDS,
 } from "../../src/expr-positions.ts";
+import { buildAST } from "../../src/ast-builder.js";
+import { splitBlocks } from "../../src/block-splitter.js";
 
 const REPO_SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src");
 
@@ -644,14 +646,17 @@ describe("expr-positions §7 — every position declares whether it is a CLIENT 
 //     -> NEEDED declared nowhere, no diagnostic.   FIXED, pinned by
 //        `conf-CG-263 §1 match-arm-inline result`.
 //
-// THE DISCRIMINATOR IS STATEMENT VS EXPRESSION, and it is written here because
-// the first cut of this comment got it wrong and cost a review round. A `match`
-// STATEMENT builds real `match-arm-inline` nodes that carry `resultExpr` —
-// wherever it appears, logic block or client `fn` body alike. A match
-// EXPRESSION (`@a = match @phase { … }`) builds NONE, in any position: the whole
-// thing parses to `{kind:"match-expr", rawArms:["…"]}`, a RAW STRING inside an
-// ExprNode that no field-list entry can reach and no ExprNode walker can see.
-// That half is still open —
+// THE DISCRIMINATOR IS FORM **AND** POSITION, and §9 below ASSERTS it rather
+// than asserting it in prose — because two successive attempts to write this
+// comment each stated one half and each was wrong, and a wrong in-source
+// rationale is worse than none.
+//
+// `match-arm-inline` (the carrier of `resultExpr`) is built only where the match
+// is in STATEMENT form AND sits in a body `parseLogicBody` parses. Everywhere
+// else the arms survive as a RAW STRING — inside
+// `{kind:"match-expr", rawArms:["…"]}` or swallowed whole into a raw body string
+// — which no field-list entry can reach and no ExprNode walker can see. That
+// half is still open:
 // `g-263-match-expr-rawarms-is-an-unparsed-string-inside-an-exprnode`.
 //
 // So the gate ENUMERATES THE AST instead of restating a list, in both
@@ -764,5 +769,103 @@ describe("expr-positions §8 — EXPR_NODE_FIELDS is gated against the AST, both
       expect({ field: f, present: EXPR_NODE_FIELDS.includes(f) })
         .toEqual({ field: f, present: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §9 — WHERE `match-arm-inline` IS ACTUALLY BUILT, ASSERTED RATHER THAN ASSERTED
+//      IN PROSE.
+//
+// `resultExpr` rides on `match-arm-inline`, so "what does listing it cover?" is
+// a question about WHERE that node kind exists. It has now been answered wrongly
+// twice in comments — once too narrowly, once ("wherever it appears") too widely
+// — in the file whose own thesis is that the shape is part of the claim. So the
+// table is executed.
+//
+// Note the argument order: `splitBlocks(filePath, source)`. Reversed, it returns
+// a single `text` node and EVERY assertion below passes vacuously — which is
+// exactly how one of the wrong claims got made, so the guard-the-guard check on
+// `kinds.size` is load-bearing, not decoration.
+// ---------------------------------------------------------------------------
+
+const M_OPEN = "${";
+const M_CLOSE = "}";
+const MATCH_STMT = `match @phase {
+        .Idle :> @a = "n"
+        .Ready :> @a = "r"
+    }`;
+const MATCH_EXPR = `@a = match @phase { .Idle :> "n", .Ready :> "r" }`;
+const DECLS = `type Phase:enum = { Idle, Ready }
+   <phase>: Phase = .Idle
+   @a = ""`;
+
+/** Every node `kind` in the AST built from `src`, counted. */
+function astKindCounts(src) {
+  const built = buildAST(splitBlocks("test.scrml", src));
+  const counts = new Map();
+  const seen = new Set();
+  (function walk(n, depth) {
+    if (!n || typeof n !== "object" || seen.has(n) || depth > 40) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const x of n) walk(x, depth + 1); return; }
+    if (typeof n.kind === "string") counts.set(n.kind, (counts.get(n.kind) ?? 0) + 1);
+    for (const [k, v] of Object.entries(n)) {
+      if (k !== "span" && v && typeof v === "object") walk(v, depth + 1);
+    }
+  })(built.ast ?? built, 0);
+  return counts;
+}
+
+const MATCH_POSITIONS = [
+  // form + position -> does it build `match-arm-inline`?
+  { id: "STATEMENT @ logic top level", arms: true,
+    src: `<program>\n${M_OPEN}\n   ${DECLS}\n   ${MATCH_STMT}\n${M_CLOSE}\n<p>${M_OPEN}@a${M_CLOSE}</p>\n</program>\n` },
+  { id: "STATEMENT @ function body", arms: true,
+    src: `<program>\n${M_OPEN} ${DECLS} ${M_CLOSE}\nfunction pick() {\n    ${MATCH_STMT}\n}\n<button onclick=pick()>go</button>\n<p>${M_OPEN}@a${M_CLOSE}</p>\n</program>\n` },
+  { id: "STATEMENT @ fn body", arms: true,
+    src: `<program>\n${M_OPEN} ${DECLS} ${M_CLOSE}\nfn pick() {\n    ${MATCH_STMT}\n}\n<button onclick=pick()>go</button>\n<p>${M_OPEN}@a${M_CLOSE}</p>\n</program>\n` },
+  // The SAME statement, moved into a body that is NOT parsed by `parseLogicBody`.
+  { id: "STATEMENT @ on mount body", arms: false,
+    src: `<program>\n${M_OPEN} ${DECLS} ${M_CLOSE}\non mount {\n    ${MATCH_STMT}\n}\n<p>${M_OPEN}@a${M_CLOSE}</p>\n</program>\n` },
+  { id: "STATEMENT @ when-changes body", arms: false,
+    src: `<program>\n${M_OPEN}\n   ${DECLS}\n   <v> = 1\n   when @v changes {\n       ${MATCH_STMT}\n   }\n${M_CLOSE}\n<p>${M_OPEN}@a${M_CLOSE}</p>\n</program>\n` },
+  { id: "STATEMENT @ MULTI-statement on mount", arms: false,
+    src: `<program>\n${M_OPEN} ${DECLS}\n   @b = "" ${M_CLOSE}\non mount {\n    @b = "x"\n    ${MATCH_STMT}\n}\n<p>${M_OPEN}@a${M_CLOSE}</p>\n</program>\n` },
+  // EXPRESSION form builds none, in every position.
+  { id: "EXPRESSION @ logic top level", arms: false,
+    src: `<program>\n${M_OPEN}\n   ${DECLS}\n   ${MATCH_EXPR}\n${M_CLOSE}\n<p>${M_OPEN}@a${M_CLOSE}</p>\n</program>\n` },
+  { id: "EXPRESSION @ function body", arms: false,
+    src: `<program>\n${M_OPEN} ${DECLS} ${M_CLOSE}\nfunction pick() {\n    ${MATCH_EXPR}\n}\n<button onclick=pick()>go</button>\n<p>${M_OPEN}@a${M_CLOSE}</p>\n</program>\n` },
+  { id: "EXPRESSION @ on mount body", arms: false,
+    src: `<program>\n${M_OPEN} ${DECLS} ${M_CLOSE}\non mount { ${MATCH_EXPR} }\n<p>${M_OPEN}@a${M_CLOSE}</p>\n</program>\n` },
+];
+
+describe("expr-positions §9 — `match-arm-inline` is built by FORM **and** POSITION", () => {
+  for (const vec of MATCH_POSITIONS) {
+    test(`${vec.id} -> ${vec.arms ? "builds" : "builds NO"} match-arm-inline`, () => {
+      const counts = astKindCounts(vec.src);
+      // Guard the guard: a mis-called `splitBlocks` returns one `text` node and
+      // every "builds none" row below would pass on nothing at all.
+      expect({ id: vec.id, sane: counts.size > 4 }).toEqual({ id: vec.id, sane: true });
+      expect({ id: vec.id, builds: (counts.get("match-arm-inline") ?? 0) > 0 })
+        .toEqual({ id: vec.id, builds: vec.arms });
+    });
+  }
+
+  test("the POSITIVE rows are the ones the conformance case uses, and they really carry `resultExpr`", () => {
+    // Without this the §9 table could be true and `resultExpr` still irrelevant.
+    const built = buildAST(splitBlocks("test.scrml", MATCH_POSITIONS[0].src));
+    let withResultExpr = 0;
+    const seen = new Set();
+    (function walk(n, d) {
+      if (!n || typeof n !== "object" || seen.has(n) || d > 40) return;
+      seen.add(n);
+      if (Array.isArray(n)) { for (const x of n) walk(x, d + 1); return; }
+      if (n.kind === "match-arm-inline" && n.resultExpr && typeof n.resultExpr.kind === "string") withResultExpr++;
+      for (const [k, v] of Object.entries(n)) {
+        if (k !== "span" && v && typeof v === "object") walk(v, d + 1);
+      }
+    })(built.ast ?? built, 0);
+    expect(withResultExpr).toBeGreaterThan(0);
   });
 });

@@ -304,14 +304,15 @@ ${OPEN} type Game:enum = { Title, Playing }
     // own copy of the same list already did. Surfaced by the §8 dual-direction
     // gate, not by anyone reading the list.
     //
-    // THE DISCRIMINATOR IS STATEMENT VS EXPRESSION, and it is not the shape the
-    // round-5 brief named. A match STATEMENT builds real `match-arm-inline`
-    // nodes carrying `resultExpr`, wherever it appears — logic block or client
-    // `fn` body alike. A match EXPRESSION (`@a = match @phase { .Idle :> NEEDED }`)
-    // builds none, in ANY position: it parses to
-    // `{kind:"match-expr", rawArms:[".Idle :> NEEDED, …"]}`, a RAW STRING inside
-    // an ExprNode that no consumer parses. That is a separate, still-open gap
-    // and it is filed; this case pins the half `resultExpr` closes.
+    // THE DISCRIMINATOR IS FORM **AND** POSITION — see
+    // `expr-positions-shared-table.test.js` §9, which asserts the full table.
+    // `match-arm-inline` is built only for a match in STATEMENT form sitting in
+    // a body `parseLogicBody` parses (logic top level, `function`, `fn`). The
+    // SAME statement inside `on mount { … }` or `when @v changes { … }` builds
+    // ZERO arm nodes, and inside a multi-statement `on mount` builds no match
+    // node at all — the arms survive as a raw string that no consumer parses.
+    // This fixture therefore uses the LOGIC-TOP-LEVEL statement form on purpose;
+    // the raw-string half is a separate, still-open, filed gap.
     label: "match-arm-inline result — a `match` statement's `:>` arm body",
     dir: "cg263-match-arm-inline-result",
     clientRef: 'reactive_set("a", NEEDED)',
@@ -698,33 +699,66 @@ on mount {
 //                   a fatal SyntaxError — every binding on the page dead, exit 0,
 //                   no diagnostic.
 //
-// So this matrix asserts the DECLARATION decision AND executes the shipped
-// bundles under node's parser (bun's accepts `import.meta` in a classic script,
-// which is exactly how a shipped-DOA bundle reads clean under `bun test`).
+//   FALSE POSITIVE, REBUILT ONE LEVEL DOWN  answering a FAILED parse of the
+//                   opaque node with a regex over that node's raw. A block body
+//                   may hold SCRML, not JS (`is not`, `not`, `~`, `::`, `.Idle`,
+//                   `@cell`), which acorn rejects — and then the regex decides,
+//                   so `"a" is not "import.meta"` was dropped while
+//                   `"a" is not "zzz"` was kept. Same defect, same cause: a
+//                   regex cannot see a string literal.
+//
+// The fence now answers PARSE -> LEX -> UNANSWERED (fail closed). The lexical
+// step is the one that matters here: acorn's tokenizer emits a string as ONE
+// token, so `"import.meta"` is never the token triple `import` `.` `meta`.
+//
+// EACH ROW CARRIES ITS OWN `exec` FLAG, and the rows that do not execute are
+// honest about why. A block-bodied callback containing scrml operators emits JS
+// the compiler cannot lower (`return "a" is not "zzz"` is not JS), so the shipped
+// bundle is a SyntaxError for a reason that has NOTHING to do with this fence —
+// MEASURED identically on `origin/main`, including the control row that mentions
+// `import.meta` nowhere. Asserting execution there would be asserting the
+// emitter. What this matrix owns is the DECLARATION decision.
 // ---------------------------------------------------------------------------
 
 const IMPORT_META_MATRIX = [
   // MUST SHIP — the characters appear, the meta-property does not.
-  { id: "plain-string", ship: true, init: '"read import.meta later"' },
-  { id: "url-string", ship: true, init: '"https://x/import.meta"' },
-  { id: "template-string", ship: true, init: "`t import.meta`" },
-  { id: "join-array", ship: true, init: '["a", "import.meta"].join("-")' },
-  { id: "spaced-literal", ship: true, init: '"import . meta"' },
+  { id: "plain-string", ship: true, exec: true, init: '"read import.meta later"' },
+  { id: "url-string", ship: true, exec: true, init: '"https://x/import.meta"' },
+  { id: "template-string", ship: true, exec: true, init: "`t import.meta`" },
+  { id: "join-array", ship: true, exec: true, init: '["a", "import.meta"].join("-")' },
+  { id: "spaced-literal", ship: true, exec: true, init: '"import . meta"' },
   // The one a raw-TEXT fallback on the opaque node would get wrong: a block-bodied
   // arrow whose interior mentions the characters inside a STRING.
-  { id: "block-arrow-string", ship: true, init: '() => { return "read import.meta later" }' },
+  { id: "block-arrow-string", ship: true, exec: true, init: '() => { return "read import.meta later" }' },
+
+  // ── THE MINIMAL PAIR. Both MUST ship; the only difference between them is
+  // those characters inside a string literal, and a fence that splits them is
+  // the round-4 defect. `exec: false` — see the header.
+  { id: "scrml-op-control", ship: true, exec: false, init: '() => { return "a" is not "zzz" }' },
+  { id: "scrml-op-meta-in-string", ship: true, exec: false, init: '() => { return "a" is not "import.meta" }' },
+  { id: "scrml-not-meta-in-string", ship: true, exec: false, init: '() => { return not "import.meta" }' },
+  { id: "scrml-is-meta-in-string", ship: true, exec: false, init: '() => { return "a" is "import.meta" }' },
+  { id: "scrml-tilde-meta-in-string", ship: true, exec: false, init: '() => { let x = 1 ~ 2; return "import.meta" }' },
 
   // MUST SKIP — a real meta-property, however it is spelled or wrapped.
-  { id: "meta-property", ship: false, init: "import.meta.url" },
-  { id: "nested-in-call", ship: false, init: "String(import.meta.url)" },
-  { id: "bare", ship: false, init: "import.meta" },
-  { id: "expr-arrow", ship: false, init: "() => import.meta.url" },
+  { id: "meta-property", ship: false, exec: true, init: "import.meta.url" },
+  { id: "nested-in-call", ship: false, exec: true, init: "String(import.meta.url)" },
+  { id: "bare", ship: false, exec: true, init: "import.meta" },
+  { id: "expr-arrow", ship: false, exec: true, init: "() => import.meta.url" },
   // THE FOUR THE STRUCTURAL WALK MISSED. Each is an escape hatch whose interior
   // lives in `raw`; each shipped a classic-script-fatal bundle.
-  { id: "block-arrow", ship: false, init: "() => { return import.meta.url }" },
-  { id: "fn-expression", ship: false, init: "function () { return import.meta.url }" },
-  { id: "nested-block-arrow", ship: false, init: "[1,2].map(x => { return import.meta.url })" },
-  { id: "spaced-block-arrow", ship: false, init: "() => { return import . meta . url }" },
+  { id: "block-arrow", ship: false, exec: true, init: "() => { return import.meta.url }" },
+  { id: "fn-expression", ship: false, exec: true, init: "function () { return import.meta.url }" },
+  { id: "nested-block-arrow", ship: false, exec: true, init: "[1,2].map(x => { return import.meta.url })" },
+  { id: "spaced-block-arrow", ship: false, exec: true, init: "() => { return import . meta . url }" },
+  // The row that needs BOTH halves of the fence: acorn's PARSER rejects it (scrml
+  // operators) and the LEXER still has to catch the real meta-property.
+  { id: "scrml-op-real-meta", ship: false, exec: true, init: '() => { return import.meta.url is not "" }' },
+  // THE THIRD ANSWER: neither parseable NOR lexable (a malformed numeric literal),
+  // so the question is UNANSWERED and the const is SKIPPED. There is no
+  // `import.meta` anywhere in it — the row exists to prove the fail-closed branch
+  // is real and reachable rather than a comment about a branch nothing enters.
+  { id: "unlexable-fails-closed", ship: false, exec: true, init: "() => { return 0x }" },
 ];
 
 for (const vec of IMPORT_META_MATRIX) {
@@ -759,7 +793,8 @@ on mount {
       expect(declaresBindingAs(m.clientJs, "SHOWN", '"shown-client-value"')).toBe(true);
     });
 
-    test("the shipped bundles EXECUTE as classic scripts", () => {
+    const execTest = vec.exec ? test : test.skip;
+    execTest("the shipped bundles EXECUTE as classic scripts", () => {
       const c = compileEntry(join(TMP_ROOT, dirName, "index.scrml"));
       const ctx = vm.createContext({
         _scrml_modules: {},
@@ -776,6 +811,34 @@ on mount {
         vm.runInContext(c.out("index.scrml").clientJs, ctx, { filename: "index.client.js" });
       }).not.toThrow();
     });
+
+    // The SKIPPED rows are skipped for a measured reason, not a hopeful one, and
+    // this asserts the reason still holds: the bundle is broken by the EMITTER
+    // (scrml operators emitted verbatim into JS), identically on `origin/main`,
+    // and NOT by the fence. If someone fixes that lowering, this goes red and
+    // says "flip `exec` to true" instead of leaving a permanent skip behind.
+    if (!vec.exec) {
+      test("…and the reason it does not execute is the EMITTER, not this fence", () => {
+        const c = compileEntry(join(TMP_ROOT, dirName, "index.scrml"));
+        const ctx = vm.createContext({
+          _scrml_modules: {},
+          _scrml_reactive_set: () => {}, _scrml_reactive_get: () => undefined,
+          _scrml_cs_reactive_set: () => {}, _scrml_init_set: () => {},
+          _scrml_effect: () => ({}), _scrml_render_value: () => {},
+          _scrml_region_track: () => {}, _scrml_register_rehydrator: () => {},
+        });
+        let err = null;
+        try { vm.runInContext(c.out("models.scrml").clientJs, ctx, { filename: "models.client.js" }); }
+        catch (e) { err = e; }
+        // A SyntaxError from un-lowered scrml. Matched on the FENCE-FAILURE
+        // SIGNATURE, not on the characters `import.meta` — the engine echoes the
+        // offending source line, and these fixtures legitimately contain that
+        // text inside a string literal, which is the whole point of the row.
+        const fenceFailure = !!err && /import\.meta is only valid|Cannot use 'import\.meta'/.test(err.message);
+        expect({ id: vec.id, kind: err && err.constructor.name, fenceFailure })
+          .toEqual({ id: vec.id, kind: "SyntaxError", fenceFailure: false });
+      });
+    }
   });
 }
 

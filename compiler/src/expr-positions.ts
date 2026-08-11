@@ -228,15 +228,27 @@ type Rec = Record<string, unknown>;
  *     `route-inference.ts`'s own copy of this list already had it, so the table
  *     built to end list-drift disagreed with a fourth copy still in the tree.
  *
- *     THE DISCRIMINATOR IS STATEMENT VS EXPRESSION, and getting it wrong cost a
- *     round. A match STATEMENT builds real `match-arm-inline` NODES carrying a
- *     parsed `resultExpr`, wherever it appears — logic block or client `fn` body
- *     alike — and that is what this entry fixes. A match EXPRESSION
- *     (`@a = match @phase { .Idle :> NEEDED }`) builds NONE, in any position:
- *     it parses to `{kind:"match-expr", rawArms:[".Idle :> NEEDED, …"]}` — a RAW
- *     STRING inside an ExprNode, which no field-list entry can reach and no
- *     ExprNode walker can see. Still open, filed as
+ *     THE DISCRIMINATOR IS FORM **AND** POSITION — BOTH HALVES — and each of the
+ *     two previous attempts to write it down stated one half and was wrong. A
+ *     `match-arm-inline` node (the carrier of `resultExpr`) is built only where
+ *     the match is in STATEMENT form AND sits in a body `parseLogicBody` parses:
+ *     logic top level, a `function` body, or an `fn` body. MEASURED, by AST dump:
+ *
+ *       match STATEMENT @ logic top level / `function` / `fn`  2 arm nodes
+ *       the SAME statement @ `on mount { … }`                  0 — `match-expr`
+ *                                                                  with `rawArms`
+ *       the SAME statement @ `when @v changes { … }`           0 — same
+ *       the SAME statement @ MULTI-statement `on mount`        0 — no match node
+ *                                                                  at all
+ *       match EXPRESSION, ANY position                         0
+ *
+ *     Everywhere the count is 0 the arms survive as a RAW STRING — either inside
+ *     `{kind:"match-expr", rawArms:[…]}` or swallowed whole into a raw body
+ *     string — which no field-list entry can reach and no ExprNode walker can
+ *     see. Still open, filed as
  *     `g-263-match-expr-rawarms-is-an-unparsed-string-inside-an-exprnode`.
+ *     The table above is asserted by `expr-positions-shared-table.test.js` §9,
+ *     so the next person to restate this gets told rather than believed.
  *
  * A test that asserts "these 7 are present and these 4 historical phantoms are
  * absent" passes with three BRAND-NEW phantoms added. Only enumerating the AST
