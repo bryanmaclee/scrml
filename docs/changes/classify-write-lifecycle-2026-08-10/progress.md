@@ -536,3 +536,147 @@ purpose: `live compiler source` 240,323 → **240,447** lines, 187 files (unchan
 `bun scripts/facts.ts --check` → **PASS**. No gate was bypassed at any point in this round; the one
 `--no-verify` commit I started the session with was immediately reset and remade under the hook
 (which skips the suite for docs-only staged changes anyway).
+
+---
+---
+
+# ROUND 3 (S338) — DO-NOT-LAND: the leak was closed at 1 of 3 loci
+
+The S239 pass was right and the finding is worse than "a missed sibling": **the surviving locus
+disabled round 2's own fix.** 2026-08-11T08:26-06:00.
+
+## R3.1 The blocker, reproduced before any edit
+
+```scrml
+<u>: (not to User) = (not)
+<p>${@u.name}</p>
+```
+`errors=[]`. The cell IS `not` — the emit is `_scrml_cs_reactive_set("u", null)` — and the read
+compiled clean. **Bit-for-bit the defect this arc is named for, at the DECLARATION locus.**
+
+And it laundered the marquee fix:
+
+```scrml
+<v>: (not to User) = (not)
+<u>: (not to User) = not
+${ @u = @v }
+${ @u.name }
+```
+`[]` on BOTH refs. `isInitOfPostType` seeded `v` **post** off the text test, so `bindings.get("v")`
+reported post and `classifyWriteAgainstSpec`'s declared-type refinement never fired. **Spelling the
+RHS cell's initialiser `= (not)` was a COMPLETE ESCAPE from round 2.**
+
+## R3.2 The mechanism — measured, and it explains an asymmetry the brief did not predict
+
+For `= (not)` the parser produces `init = "( not )"` but `initExpr.raw = "not"`
+(`scratchpad/cwfix-r2/probe-default.mjs`). The two extraction paths therefore diverge:
+
+| extractor | reads | holed? |
+|---|---|---|
+| `readNodeInitText` | `n.init` — raw SOURCE TEXT, preferred first | **YES** |
+| `readDefaultExprText` | `defaultExpr.raw` — the parsed node | **no** |
+
+**So `default=(not)` was ALREADY correct before round 3 and `= (not)` was not** — same value, two
+extraction paths, one holed. Measured: `default=(not)` and `default=((not))` both fired on the
+pre-round-3 HEAD; only the no-`default=` case (reset re-evaluates the initialiser, §6.8.1) was
+broken. I have pinned `default=(not)` as an explicit **regression guard** rather than claiming it as
+a fix, and the bite proofs confirm the distinction (mutation G kills the init case and leaves the
+`default=` guard green).
+
+## R3.3 Why the old rationale was wrong — the transferable part
+
+Both map-build docstrings justified withholding the consult with *"runs at MAP-BUILD time … no
+scope, no statement order, no per-binding transition state."*
+
+That is the correct reason to withhold the **flow-dependent declared-type** consult, and **it still
+stands** — the `= @v` residual remains open and filed. It is **not** a reason to withhold the
+**flow-free absence-literal** test, which needs only the node. **The record did not distinguish the
+two consults, so one true sentence justified two withholdings and the second one was a bug.** Both
+docstrings now separate them explicitly.
+
+`writeTextIsAbsenceLiteral` is now marked **⚠ DEPRECATED** at its definition. The branch had been
+shipping two helpers — one documented at length as the fix for the other — with the broken one still
+wired to two live call sites and nothing at either site saying so. I gave the variant branch a loud
+warning in round 2 and gave this nothing. It is now unreachable as a DECIDER, surviving only in the
+`initExpr ? structural : text` fallback arm taken when the parser produced no node.
+
+## R3.4 Scope item 4 — the over-refusal class, and a CORRECTION to the round-3 brief
+
+Measured on both refs (`scratchpad/cwfix-r2/repro-r3-overrefuse.mjs`), RHS cell poisoned by a
+fn-body write:
+
+| position | `origin/main` | HEAD | verdict |
+|---|---|---|---|
+| write inside an `if` block | `E-TYPE-001` | `E-TYPE-001` | **PRE-EXISTING — the brief calls this NEW; it is not** |
+| write inside an `each` body | `E-TYPE-001` | `E-TYPE-001` | **PRE-EXISTING — likewise** |
+| poisoned cell read in **markup** | `[]` | `E-TYPE-001` | **NEW** ✓ |
+| `<p if={@u is some}>` | `[]` | `E-TYPE-001` | **NEW** ✓ |
+| `<p show={@u is some}>` | `[]` | `E-TYPE-001` | **NEW** ✓ |
+| `given @u :> { … }` | `[]` | `[]` | escape hatch holds |
+
+**Correction:** the `if`-block and `each`-body positions fire on `origin/main` too. They are
+pre-existing over-refusals caused by the walker never seeing those writes at all (so `@u` stays
+`pre` on both refs) — **not** by round 2's consult. Only the three MARKUP positions are new. I am
+reporting this rather than adopting the brief's "all NEW".
+
+## R3.5 The markup-guard gap is WIDER than the brief describes — it is not an E-TYPE-001 gap
+
+Isolated with no poisoning at all, just a genuinely-absent cell read under each guard
+(`scratchpad/cwfix-r2/repro-r3-markupguard.mjs`). **Identical on BOTH refs:**
+
+| case | result (both refs) |
+|---|---|
+| unguarded lifecycle read | `E-TYPE-001` |
+| **`<p if={@u is some}>`** | **`E-TYPE-001` — guard does not clear it** |
+| **`<p show={@u is some}>`** | **`E-TYPE-001` — guard does not clear it** |
+| `given @u :> { … }` | CLEAN |
+| **plain-optional `User?` under `if={@u is some}`** | **`E-TYPE-046` — guard does not clear it either** |
+| plain-optional `User?` unguarded | `E-TYPE-046` (identical to the guarded row) |
+
+**So the §42.4 markup guard is unimplemented as a narrowing construct for BOTH codes, not just for
+E-TYPE-001.** `SPEC.md:24450` names *"the `if=` / `show=` markup guard (§42.4)"* as one of the
+canonical presence-discriminations, and `:24452` states E-TYPE-001 and E-TYPE-046 *"both demand the
+same handling."* The implementation honours neither for markup guards — and the guarded and
+unguarded plain-optional rows are byte-identical, which is the sharpest form of "this guard does
+nothing."
+
+**Pre-existing on both refs. This round is what makes it REACHABLE** for a lifecycle cell (the
+markup positions above went `[]` → fires), which is why it is named here rather than left for
+someone to trip over. **Not fixed — it is a §42.4 narrowing implementation, not a classifier fix.**
+
+## R3.6 Scope item 6 — still-open FAILS-OPEN shapes, measured, deliberately NOT fixed
+
+All three compile **CLEAN** at HEAD and on `origin/main` (`scratchpad/cwfix-r2/repro-r3.mjs`),
+and all three leave the cell genuinely `not`:
+
+| shape | result |
+|---|---|
+| `@u = not ?? not` | CLEAN |
+| `@u = @flag ? not : not` | CLEAN |
+| `@u = giveNot()` where `function giveNot() { return not }` | CLEAN |
+
+**And the brief is right that my stated rationale does not cover the third.** Round 2's note says a
+call RHS is left alone because *"the callee's declared return type IS the post-type"* — `giveNot()`
+**declares no return type at all**, so that sentence is not an argument about it. The honest
+statement is the one the brief supplies: **the absence-literal closure is ONE NODE KIND wide, not
+semantic.** `writeExprIsAbsenceLiteral` answers "is this node a `not` literal", and a nullish
+coalesce, a ternary and a call are three different node kinds that all *evaluate* to `not`. Closing
+them needs constant-folding / a return-type inference pass, which is a different instrument.
+Pre-existing, **not fixed this round**, named here so the limit is stated rather than implied.
+
+## R3.7 Confirmed in my favour by the review — recorded so it is not re-litigated
+
+- **Item C is genuinely INERT**, verified by a stricter isolation than mine.
+- **The escape helpers are byte-identical AND the escape is unreachable by construction** — variant
+  names are `[A-Z][A-Za-z0-9_]*`, so no character the class escapes can appear in one.
+- **The structural paren claim held against every defeat attempt**, including `(((not)))`, comments,
+  the legacy `->` glyph, and a type alias.
+- **Both round-1 hollow bite-proofs are genuinely closed** (M3b and M4 now bite).
+
+## R3.8 Baseline correction ACCEPTED — 51, not 49
+
+The review is right and I was wrong to carry 49. **51 is the true baseline**; exactly two of the 51
+are the gitignored-`dist` gap (`TodoMVC §0` / `§1`, `benchmarks/todomvc/dist`), so a worktree where
+that dist is present reports `51 − 2 = 49`. That is an environment artifact of MY worktree, not a
+property of the branch. Name sets are byte-identical between refs, **0 new and 0 fixed**. **49 is
+not carried forward.**
