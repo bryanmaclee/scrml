@@ -252,9 +252,151 @@ gate it wants unit tests over the pure functions (`anchorMismatches`, `sourceDif
 - **Determinism control survives:** two independent clean captures of the same revision diff to
   `NO DIFFERENCES`, exit 0.
 
+---
+
+# ROUND 2 — S239 returned DO-NOT-LAND, and it was right
+
+## F1 — MY OWN FIX WAS THE WORST DEFECT IN THE FILE
+
+**HARD REQ 9 converted 66 measured real differences into "harness flakes" and turned exit 1 into
+exit 0 — by default, in the canonical arrangement this change is being promoted into.**
+
+```
+capture base  ->  git checkout <head> in the SAME tree  ->  capture head  ->  diff
+```
+
+leaves `base.compilerRoot === head.compilerRoot`, so `reverifyDelta` re-compiled BOTH sides with
+ONE compiler. Nothing can differ, so everything was discarded. **Measured against my own previous
+commit `356d3bbe`:**
+
+```
+REPRODUCED : 0 of 51
+HARNESS FLAKES (did NOT reproduce; EXCLUDED from the findings total): 51
+VERDICT: 1 DIFFERENCE(S) ... [51 HARNESS FLAKE(S) DISCARDED]
+```
+
+66 real content differences across 51 sources, gone. With equal source sets it reads
+`NO DIFFERENCES` / exit 0.
+
+**Say it plainly: on `origin/main` a shared or stale compiler root is harmless, because there is no
+re-verification. My fix made it fatal, on by default.** Every prior failure mode in this instrument
+produced a suspicious NUMBER a reader might question. This one produced a **clean bill of health.**
+It is the only one that turns RED into GREEN.
+
+**And my swallow-risk bite proof passed for a reason worth keeping:** I tested it in a TWO-WORKTREE
+arrangement, where the roots differ and re-verification genuinely re-measures. The bite lives in the
+ONE-CHECKOUT arrangement. The test was right about the mechanism and wrong about the deployment —
+oracle blindness, on the instrument built to fix instrument blindness. **That is the second time in
+this arc a fix of mine was caught by a bite proof rather than by reasoning, and both times the bite
+proof was aimed slightly wrong.**
+
+### Fix — three preconditions, the third is the actual guarantee
+
+1. identical compiler roots -> decline (one tree cannot hold two revisions)
+2. root no longer at its captured revision (`gitRevision` vs `m.revision`) -> decline
+3. **CANARY** — re-compile an AGREED-ON source per side and require it to reproduce that side's own
+   manifest. Only this sees an **uncommitted** mutation after capture, which leaves both the
+   revision and the root-distinctness intact. That is the reviewer's second reproducer.
+
+**The canary must use a CONTROL, never an implicated source.** My first cut used `implicated[0]`,
+which is exactly backwards — a genuine phantom IS a source whose manifest disagrees with a
+re-compile, so the canary would have disarmed re-verification precisely when it was about to be
+useful. Caught by re-running the anti-swallow proof, not by reading.
+
+### Departure from the reviewed recommendation: DECLINE, not REFUSE
+
+The review asked for exit 2. I decline re-verification instead and report the differences as
+measured (exit 1). **Reason: the two manifests are self-contained valid measurements, and the
+single-checkout workflow produces a legitimate pair. Refusing it would refuse a VALID COMPARISON —
+the same defect class as the whole-corpus prefix digest that refused legitimate corpus additions
+earlier in this same arc (A1-FP).** Declining returns the run to exactly main's behaviour with the
+banner stating the delta went unchecked, so there is no false green and no workflow is broken. The
+block is marked in-source as the one place to change if the project prefers hard refusal.
+
+### Bite proof
+
+| | Result |
+|---|---|
+| pre-fix, single checkout | `1 DIFFERENCE(S)`, **51 of 51 real findings discarded as flakes** |
+| post-fix, single checkout | `67 DIFFERENCE(S)`, `[DELTA NOT RE-VERIFIED — 51 unchecked]`, **all 66 content diffs intact**, exit 1 |
+| post-fix, two intact roots (control) | `RAN over 51 — 51 reproduced, 0 flakes` — re-verification still works |
+| post-fix, one root mutated UNCOMMITTED | canary fires, names `examples/02-counter.scrml` and `artifact CONTENT: 02-counter.client.js`, all 67 differences preserved |
+| post-fix, anti-swallow re-proof (two roots + injected phantom) | `51 of 52 reproduced, 1 FLAKE` — flake detection survives the new gate |
+
+## F2 — `.trim()` corrupted porcelain; the most common dirty shape was the one that escaped
+
+Worktree-modified entries are `" M path"` with a **leading space**. Trimming the whole buffer ate it
+on the FIRST line only, which then parsed as code `"M "` / path `"xamples/01-hello.scrml"`, missed
+the intersection, and was dropped. Untracked (`??`), ignored (`!!`) and staged (`M `/`A `) have no
+leading space — **which is exactly why my bite proof, built on an untracked file, passed over it.**
+
+Measured, 2 modified + 1 untracked: **pre-fix `1 untracked, 1 modified`; post-fix `1 untracked, 2
+modified`.** The alphabetically-first modified source was lost every time.
+
+## F3-F9
+
+- **F3** (anchor models one INPUT, compiler uses the whole compile UNIT) — my ⚠ was real and
+  understated, and the docstring asserted fidelity the compiler does not have. **Claim corrected
+  in-source** with the falsifying case and the exact conditions to re-check. Latent: needs a nested
+  marker AND a cross-directory import; neither exists under the default roots.
+- **F4** — the signal retry re-compiled into the killed process's output dir, so partial output
+  survived. **I removed a "removed artifacts" phantom and installed an "artifact ADDED" phantom on
+  the same event.** `compileOne` now always starts from an empty dir.
+- **F5** — env-kill asymmetry now prints a stderr warning naming why a resource regression hides
+  behind a successful retry. Still not a finding: host-dependent, and counting it would make the
+  verdict depend on machine load.
+- **F6** — `?? ""` turned an ABSENT anchor measurement into a verified MATCH, contradicting
+  `resolverAvailable`'s own rule. Absence is now a mismatch.
+- **F7** — `--ignored=traditional` replaces `matching` (44 vs 3 lines over the default roots; 0
+  ignored `.scrml` today, so this is prophylactic).
+- **F8** — flag NAMES were strict while VALUES were not; `--reverify-limit abc` -> NaN silently
+  removed the all-or-nothing cap. Integer validation on all three numeric flags.
+- **F9** — `loadContextChanged` was printed as a finding and never counted, **on this branch AND on
+  main**; now counted and flake-filtered. `fxSourceDelta` stays uncounted deliberately: it derives
+  from artifact text, so a moved split already appears as a content difference.
+- **F10** — the fields added at `47e75cce` are covered by the later 3->4 bump; no v3 manifest was
+  ever published. Round 2 adds no manifest fields, so no further bump.
+
+## ROUND 2 REGRESSION SWEEP (all previously-proven bites re-run at the final commit)
+
+| check | want | got |
+|---|---|---|
+| self-diff determinism control | 0 | **0** |
+| A1 anchor mismatch | 2 | **2** |
+| A1 anchor fixed (`mkdir .git`) | 0 | **0** |
+| D3 dirty corpus | 2 | **2** |
+| D3 tracked corpus addition (no false fire) | 1, zero INCOMPARABLE | **1, zero** |
+| A2 anti-swallow (two roots + phantom) | flake discarded, real kept | **51 reproduced, 1 flake** |
+
+## GAP TEXT — ROUND 2 ADDITIONS
+
+**`g-emit-differential-anchor-models-input-not-unit`** — MED, open, LATENT.
+`resolveNamespaceAnchor` walks from `dirname(entrySource)`; the compiler walks from
+`computeOutputBaseDir(cgSourcePaths)` — the common ancestor of every file in the compile UNIT. One
+input is not one unit: an import pulls a second file in, and a probe importing `../lib/m.scrml` made
+the compiler anchor on the common ancestor (`fnv1a("pages/case.scrml")`) while the model anchored on
+the entry dir (`fnv1a("case.scrml")`). Cannot fire until a corpus root contains BOTH a nested
+`scrml.toml`/`.git` AND a cross-directory `.scrml` import; then it disarms HARD REQ 8 silently by
+comparing two prefixes equal to each other and wrong about the compiler. Remediation: resolve each
+source's compile unit, or have the harness ask the compiler for the token directly.
+
+**`g-emit-differential-no-reverify-in-single-checkout`** — LOW, open, BY DESIGN.
+HARD REQ 9.1 declines re-verification whenever both sides share a compiler root, which is the
+canonical single-checkout workflow — so the phantom filter is unavailable exactly where the workflow
+is most convenient. Remediation: materialise each revision into a temp tree (`git archive` + a
+project-root marker, since DEFECT 1 bites an extracted tree) and re-verify against those.
+
+**`g-emit-differential-env-kill-asymmetry-uncounted`** — LOW, open, BY DESIGN. See F5.
+
 ## WHAT WAS NOT DONE
 
 - `docs/known-gaps.md` untouched (contended). Gap text above.
 - DEFECT 2 not fully root-caused; not reproducible on this host. Stated as partial in-source.
 - `revision` provenance annotated, not corrected.
-- No unit tests added for this script (out of dispatch scope; filed as gap above).
+- No unit tests added for this script (out of dispatch scope; filed as gap above). **Round 2 raises
+  this from a nice-to-have to the main outstanding risk: F1 was introduced BY a fix, survived a
+  bite proof aimed at the right mechanism in the wrong deployment, and was caught only by an
+  adversarial read. Five of the six defects this arc found in the re-verification path were found
+  by executing it in an arrangement nobody had tried, not by reasoning about it.**
+- F3's anchor is corrected in DOCUMENTATION only; the model still differs from the compiler in a
+  case the corpus cannot currently reach.
