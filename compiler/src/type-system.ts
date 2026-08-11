@@ -25852,24 +25852,43 @@ function inferEnumFromVariantLifecycleAnnotation(
 }
 
 /**
- * The presence-progression absence literal test, in ONE place.
+ * ⚠ **DEPRECATED, AND WRONG BY CONSTRUCTION. DO NOT WIRE THIS TO A NEW CALL SITE.
+ * Use `writeExprIsAbsenceLiteral(node.initExpr)` — fifty lines below — instead.**
  *
- * A `(not to T)` lifecycle's PRE-type is `not` (§14.12.6.1). A written value
- * whose source text is the canonical absence literal `not` (§42) is the pre-type
- * by inspection — no type resolution is needed and none is available for the
- * literal.
+ * The presence-progression absence literal test **by SOURCE TEXT**. A `(not to T)`
+ * lifecycle's PRE-type is `not` (§14.12.6.1), and this asks whether the written
+ * text is exactly that literal.
  *
- * Extracted S337: this exact comparison was written out THREE times — the
- * re-assignment classifier (`classifyWriteAgainstSpec`), the reset-value
- * classifier (`classifyResetValueAgainstSpec`), and the declaration-initialiser
- * classifier (`isInitOfPostType`) — which is the drift shape this file keeps
- * hitting. The three callers still answer DIFFERENT questions with DIFFERENT
- * information (see each one's doc comment); only the leaf literal test is shared.
+ * **WHY IT IS WRONG:** the absence literal has more than one spelling. `(not)` and
+ * `((not))` are the SAME expression as `not` — grouping parens produce no node —
+ * but their source text is `( not )` and `( ( not ) )`, so this returns false for
+ * both. Every caller that used it therefore classified a §6.8 revert-to-absent as a
+ * TRANSITION, which **fails OPEN**: the cell is `not`, the compiler believes it is
+ * `T`, and the following member read compiles CLEAN and reads a `not` at runtime.
+ * Measured at all three loci — the write (S338 round 2), the DECLARATION
+ * initialiser and the `default=`/reset value (both S338 round 3).
  *
- * NOTE what this deliberately does NOT decide: it answers only "is the written
- * value the absence literal?", never "is the written value `T`-shaped?". The
- * latter is a TYPE question and the caller that has type information must answer
- * it itself — see `classifyWriteAgainstSpec`.
+ * **S338 ROUND 3 — IT IS NOW UNREACHABLE AS A DECIDER AND THAT IS DELIBERATE.** It
+ * survives at exactly one kind of position: the fallback arm of
+ * `initExpr ? writeExprIsAbsenceLiteral(initExpr) : writeTextIsAbsenceLiteral(t)`,
+ * taken only when the expression parser produced NO node (`safeParseExprToNode`
+ * returns null on a parse failure). In that state there is no tree to ask, and
+ * answering from text is strictly better than answering "not absent"; a malformed
+ * RHS will be reported by the parser's own diagnostic regardless. **It never
+ * decides a classification when a node exists.**
+ *
+ * The prior generation of this comment introduced it as *"the presence-progression
+ * absence literal test, in ONE place"* with no warning at all, while its structural
+ * replacement fifty lines below explained at length why the text test is unsound —
+ * so the branch shipped two helpers, one documented as the fix for the other, with
+ * the broken one still wired to two live call sites and nothing at either site
+ * saying so. **A wrong in-source rationale is worse than none: it stops the next
+ * reader looking.** This block is that warning.
+ *
+ * NOTE what this deliberately does NOT decide, unchanged: it answers only "is the
+ * written value the absence literal?", never "is the written value `T`-shaped?".
+ * The latter is a TYPE question and the caller that has type information must
+ * answer it itself — see `classifyWriteAgainstSpec`.
  */
 function writeTextIsAbsenceLiteral(trimmedText: string): boolean {
   return trimmedText === "not";
@@ -26991,8 +27010,13 @@ function buildCellValueLifecycleMap(
             //   init anything else → post (write-equivalent at construction).
             // For variant-progression `(.A to .B)`: init `.A` / `Foo.A` → pre;
             //   init `.B` / `Foo.B` → post.
+            // S338 round 3 — thread the PARSED nodes, not just their text. The
+            // node was always in hand here: `readNodeInitText` reads
+            // `n.initExpr.raw` off it. Answering from the flattened text is what
+            // made `<u>: (not to User) = (not)` seed the cell POST.
             const initText = readNodeInitText(n);
-            const initIsPostType = isInitOfPostType(initText, spec);
+            const initExpr = (n as ASTNodeLike).initExpr;
+            const initIsPostType = isInitOfPostType(initText, initExpr, spec);
 
             // Q6-narrow (S134) — §6.8.3: compute the reset-value classification.
             // §6.8.1 semantics: if `default=<expr>` is present, the reset writes
@@ -27001,8 +27025,14 @@ function buildCellValueLifecycleMap(
             // is static for type-system purposes, so we classify at map-build
             // time and the walker consults the result on every reset call.
             const defaultText = readDefaultExprText(n);
-            const resetValueText = defaultText.length > 0 ? defaultText : initText;
-            const resetState = classifyResetValueAgainstSpec(resetValueText, spec);
+            const hasDefault = defaultText.length > 0;
+            const resetValueText = hasDefault ? defaultText : initText;
+            // §6.8.1 — the reset writes `default=`'s value when present, else it
+            // re-evaluates the initialiser. Pick the node matching whichever text
+            // was chosen, so the two can never disagree about which expression is
+            // being classified.
+            const resetValueExpr = hasDefault ? (n as ASTNodeLike).defaultExpr : initExpr;
+            const resetState = classifyResetValueAgainstSpec(resetValueText, resetValueExpr, spec);
 
             map.set(cellName, { ...spec, initIsPostType, resetState });
           }
@@ -27191,30 +27221,41 @@ function readDefaultExprText(node: ASTNodeLike): string {
  *   - value matches pre-variant name → "pre"
  *   - otherwise: null (unclassifiable; let the walker leave state alone)
  *
- * Shares only the leaf absence-literal test with `classifyWriteAgainstSpec`
- * inside `checkLifecycleBindingAccess` (via `writeTextIsAbsenceLiteral`); kept at
- * module scope so buildCellValueLifecycleMap can call it without closure
+ * Kept at module scope so buildCellValueLifecycleMap can call it without closure
  * dependency.
  *
- * **S337 — why this does NOT get `classifyWriteAgainstSpec`'s declared-type
- * consult.** The two look like duplicates and are not. This one runs at
- * MAP-BUILD time, once per cell, over a `default=` attribute expression — before
- * any walk, with no scope, no statement order and no per-binding transition
- * state. `classifyWriteAgainstSpec`'s refinement asks whether a bare-reference
- * RHS has been discriminated AT THE WRITE POINT, which is a flow fact this
- * function provably cannot have. Answering it statically here would assert
- * something stronger than the information available. The residual — a reset
- * whose `default=` expression names another `(not to T)` cell — is unclosed and
- * filed, not silently approximated.
+ * **S337/S338 — TWO consults; only the flow-dependent one is rightly withheld.
+ * Same correction as `isInitOfPostType`, same cause.**
+ *
+ * WITHHELD, correctly: `classifyWriteAgainstSpec`'s **declared-type** refinement
+ * asks whether a bare-reference value has been discriminated AT THE WRITE POINT.
+ * This function runs at MAP-BUILD time, once per cell, over a `default=` attribute
+ * expression — before any walk, with no scope, no statement order and no
+ * per-binding transition state — so it provably cannot answer that, and asserting
+ * it here would claim more than the information supports. The residual (a reset
+ * whose `default=` names another `(not to T)` cell) stays open and filed.
+ *
+ * **NOT withheld any more: the absence-literal test.** "Is this value the literal
+ * `not`?" is flow-FREE — it needs only the node. Answering it from SOURCE TEXT
+ * meant `default=(not)` classified `post`, so a `reset()` back to absence left the
+ * cell believed-present. Round 3 answers it structurally from the parsed node.
+ *
+ * @param valueExpr the PARSED value node — `node.defaultExpr` when a `default=`
+ *   attribute is present, else `node.initExpr` (§6.8.1: reset re-evaluates the
+ *   initialiser when there is no `default=`). Both were already in hand at the call
+ *   site; `readDefaultExprText` reads `defaultExpr.raw` off the very same node.
  */
 function classifyResetValueAgainstSpec(
   valueText: string,
+  valueExpr: unknown,
   spec: FnReturnLifecycleSpec,
 ): "pre" | "post" | null {
   const t = valueText.trim();
   if (!t) return null;
   if (spec.kind === "presence") {
-    return writeTextIsAbsenceLiteral(t) ? "pre" : "post";
+    // Structural when a node exists; text only as the no-node fallback.
+    const isAbsent = valueExpr ? writeExprIsAbsenceLiteral(valueExpr) : writeTextIsAbsenceLiteral(t);
+    return isAbsent ? "pre" : "post";
   }
   // Variant-progression. Match `.<VariantName>` or `<EnumName>.<VariantName>`.
   // S338 item C — shared with the other two variant classifiers; the local `esc`
@@ -27258,22 +27299,48 @@ function readNodeInitText(node: ASTNodeLike): string {
  *
  * Returns `true` when the heuristic classifies the init as post-type.
  *
- * **S337 — the third sibling of the same text comparison, and it does NOT get
- * the declared-type consult either.** Like `classifyResetValueAgainstSpec` this
- * runs at MAP-BUILD time, from `buildCellValueLifecycleMap`'s single source-order
- * pass, so a cell whose initialiser names another `(not to T)` cell
- * (`<u>: (not to User) = @v`) cannot be decided here without depending on
- * declaration order. Only the leaf absence-literal test is shared. Residual
- * filed, not approximated.
+ * **S337/S338 — TWO consults, and only ONE of them is rightly withheld here. The
+ * prior generation of this comment did not distinguish them, and the conflation
+ * shipped a bug.**
+ *
+ * This function runs at MAP-BUILD time, from `buildCellValueLifecycleMap`'s single
+ * source-order pass — no scope, no statement order, no per-binding transition
+ * state. That is a sound reason to withhold the **flow-dependent** consult: whether
+ * a bare-reference initialiser (`<u>: (not to User) = @v`) names a cell that has
+ * been discriminated is a FLOW fact this function cannot have, and deciding it here
+ * would make the answer depend on declaration order. **That withholding stands, and
+ * the `= @v` residual is still open and still filed.**
+ *
+ * It is **NOT** a reason to withhold the **flow-free** absence-literal test. "Is
+ * this initialiser the literal `not`?" needs no scope, no order and no state — only
+ * the node. Withholding it anyway was the S338-round-2 defect: because
+ * `writeTextIsAbsenceLiteral` compares SOURCE TEXT, a declaration spelled
+ * `<u>: (not to User) = (not)` seeded the cell **post**, so
+ *
+ *     <u>: (not to User) = (not)
+ *     <p>${@u.name}</p>              // compiled CLEAN, read a `not`
+ *
+ * — bit-for-bit the defect this whole arc is named for, at the DECLARATION locus.
+ * Worse, it laundered the round-2 fix: `bindings.get("v")` reported post, so
+ * `classifyWriteAgainstSpec`'s declared-type refinement never fired and
+ * `<v>: (not to User) = (not)` + `@u = @v` was a COMPLETE ESCAPE from it. Round 3
+ * takes `initExpr` and answers structurally, which closes both.
+ *
+ * @param initExpr the PARSED initialiser. `buildCellValueLifecycleMap` already
+ *   reaches into `n.initExpr` (via `readNodeInitText`), so the node was in hand at
+ *   the call site the whole time.
  */
 function isInitOfPostType(
   initText: string,
+  initExpr: unknown,
   spec: FnReturnLifecycleSpec,
 ): boolean {
   const t = initText.trim();
   if (!t) return false;
   if (spec.kind === "presence") {
-    return !writeTextIsAbsenceLiteral(t);
+    // Structural when a node exists; the text test survives only as the
+    // no-node fallback (see `writeTextIsAbsenceLiteral`'s ⚠).
+    return !(initExpr ? writeExprIsAbsenceLiteral(initExpr) : writeTextIsAbsenceLiteral(t));
   }
   // Variant-progression. Match `.<VariantName>` or `<EnumName>.<VariantName>`.
   const postName = spec.postVariantName;

@@ -605,12 +605,19 @@ function loadIt() {
       .toBeGreaterThanOrEqual(1);
   });
 
-  test("the escape hatch works: guarding the READ with `given` compiles clean", () => {
+  test("the escape hatch works: guarding the READ with `given :>` compiles clean", () => {
     // This is the control that makes the pin above tolerable. It is not a
     // workaround invented for this defect — it is the §14.12.6.1 presence-guard,
     // the construct the language already requires for reading a `(not to T)`
     // cell. The adopter who hits F2 pays one edit, in the position the spec
-    // already governs.
+    // already governs (SPEC.md:9315 names `given c :>` explicitly).
+    //
+    // S338 round 3 — the separator is `:>`, NOT `=>`. This test previously used
+    // the DEPRECATED arrow glyph, which parses and emits identically but fires
+    // W-GIVEN-ARROW-LEGACY (§42.2.3). The one test advertising the escape hatch
+    // was pinning the deprecated spelling of it; the assertion below now also
+    // proves the canonical form is warning-free, so a future re-deprecation
+    // cannot quietly re-introduce the legacy glyph here.
     const src = `${USER_TYPE}
 <v>: (not to User) = not
 <u>: (not to User) = not
@@ -624,8 +631,122 @@ function loadIt() {
     @u = @v
 }
 \${
-    given @u => { @u.name }
+    given @u :> { @u.name }
 }`;
-    expect(typeErrors(compileSource("s338-f2-escape-hatch", src)).length).toBe(0);
+    const result = compileSource("s338-f2-escape-hatch", src);
+    expect(typeErrors(result).length).toBe(0);
+    expect(
+      [...result.errors, ...result.warnings]
+        .filter((d) => d.code === "W-GIVEN-ARROW-LEGACY").length,
+    ).toBe(0);
+  });
+});
+
+// ===========================================================================
+// S338 round 3 — THE DECLARATION LOCUS. Round 2 closed the absence-literal test
+// at the WRITE and left it textual at the two MAP-BUILD loci, so the same defect
+// survived at the declaration — and disabled round 2's own fix.
+// ===========================================================================
+
+describe("S338 r3 — the absence literal is structural at the DECLARATION too", () => {
+  test("a declaration initialised `(not)` is ABSENT, and reading it fires", () => {
+    // THE BLOCKER, bit-for-bit the defect this whole arc is named for. The cell
+    // IS `not` — the emit is `_scrml_cs_reactive_set("u", null)` — but
+    // `isInitOfPostType` compared the SOURCE TEXT `( not )` to `"not"`, missed,
+    // and seeded the cell `post`. The markup read then compiled CLEAN.
+    const src = `${USER_TYPE}
+<u>: (not to User) = (not)
+<p>\${@u.name}</p>`;
+    expect(typeErrors(compileSource("s338r3-decl-paren-not", src)).length)
+      .toBeGreaterThanOrEqual(1);
+  });
+
+  test("a declaration initialised `((not))` is ABSENT too", () => {
+    const src = `${USER_TYPE}
+<u>: (not to User) = ((not))
+<p>\${@u.name}</p>`;
+    expect(typeErrors(compileSource("s338r3-decl-dbl-paren-not", src)).length)
+      .toBeGreaterThanOrEqual(1);
+  });
+
+  test("`= (not)` on the RHS cell does NOT launder the declared-type consult", () => {
+    // The leak-through, and the reason this was a DO-NOT-LAND rather than a
+    // cosmetic gap: seeding `v` as post meant `bindings.get("v")` reported post,
+    // so `classifyWriteAgainstSpec`'s round-2 refinement never fired. Spelling
+    // the RHS cell's initialiser `= (not)` was a COMPLETE ESCAPE from the
+    // marquee fix — measured `[]` on BOTH refs before this round.
+    const src = `${USER_TYPE}
+<v>: (not to User) = (not)
+<u>: (not to User) = not
+
+\${
+    @u = @v
+}
+\${
+    @u.name
+}`;
+    expect(typeErrors(compileSource("s338r3-leakthrough", src)).length)
+      .toBeGreaterThanOrEqual(1);
+  });
+
+  test("a reset re-evaluating a `(not)` initialiser reverts to ABSENT", () => {
+    // The reset path with NO `default=` re-evaluates the initialiser (§6.8.1),
+    // and took its text from `n.init` — the parenthesised spelling — so the
+    // revert classified `post` and the post-reset read compiled clean.
+    //
+    // Note the asymmetry this pins: `default=(not)` was ALREADY correct before
+    // round 3, because `readDefaultExprText` reads `defaultExpr.raw` (which the
+    // parser normalises to `not`), whereas `readNodeInitText` prefers the raw
+    // `n.init` SOURCE TEXT. Same value, two extraction paths, one holed.
+    const src = `${USER_TYPE}
+<u>: (not to User) = (not)
+
+\${
+    @u = < User name="a" age=1 >
+}
+\${
+    reset(@u)
+}
+\${
+    @u.name
+}`;
+    expect(typeErrors(compileSource("s338r3-reset-init-paren", src)).length)
+      .toBeGreaterThanOrEqual(1);
+  });
+
+  test("`default=(not)` reverts to ABSENT (pinned — it already worked)", () => {
+    // Pinned as a REGRESSION GUARD, not as a fix. This passed before round 3
+    // for a reason that is easy to break: the `default=` extraction happens to
+    // read the parsed node's `.raw`. If anyone "simplifies" that to read source
+    // text the way the init path did, this goes silently green-to-broken.
+    const src = `${USER_TYPE}
+<u default=(not)>: (not to User) = not
+
+\${
+    @u = < User name="a" age=1 >
+}
+\${
+    reset(@u)
+}
+\${
+    @u.name
+}`;
+    expect(typeErrors(compileSource("s338r3-default-paren", src)).length)
+      .toBeGreaterThanOrEqual(1);
+  });
+
+  test("a genuinely post-typed declaration still seeds POST (no over-refusal)", () => {
+    // The counter-gate. The structural test must not make every declaration
+    // look absent — a real struct-literal initialiser still transitions.
+    const src = `${USER_TYPE}
+<u>: (not to User) = not
+
+\${
+    @u = < User name="a" age=1 >
+}
+\${
+    @u.name
+}`;
+    expect(typeErrors(compileSource("s338r3-post-init-unchanged", src)).length).toBe(0);
   });
 });
