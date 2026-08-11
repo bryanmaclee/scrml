@@ -472,6 +472,38 @@ on mount {
 `,
   },
   {
+    // THE CROSS-FILE MIRROR OF §4's `cg263-same-local-let`, and the mirror is
+    // what makes it bite. The same-file gate has a SECOND, accidental guard:
+    // `emitReferencedModuleExportConstLines`'s `isDeclared(emittedLines)` scan is
+    // `^\s*`-anchored, so the INDENTED `let SECRET = 1;` emitted inside
+    // `compute()` suppresses the module-level emission — the scope stack's
+    // local-decl branch never gets to matter there. Measured: deleting that
+    // branch entirely leaves the same-file vector GREEN.
+    //
+    // The cross-file precompute consults no `emittedLines`, so here the scope
+    // stack is the only thing standing between a `let` shadow and a server-only
+    // value in a browser.
+    label: "a local `let` inside a client fn shadowing the import name",
+    dir: "cg263-leak-local-let",
+    entry: `<program>
+import { SECRET, SHOWN } from './models.scrml'
+${OPEN} @a = "" ${CLOSE}
+server fn stash() -> string {
+    return SECRET
+}
+fn compute() {
+    let SECRET = 1
+    return SECRET
+}
+on mount {
+    @a = SHOWN
+}
+<button onclick=compute()>go</button>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
     label: "a client lambda PARAM shadowing the import name",
     dir: "cg263-leak-lambda-param",
     entry: `<program>

@@ -107,6 +107,52 @@ describe("expr-positions §1 — alternate groups resolve per consumer, exactly 
     // The identifier consumer still sees it, as source it can parse.
     expect(kindsOf(positions(node, IDENT_ONLY))).toEqual(["expr-source"]);
   });
+
+  test("an EMPTY alternate does not consume the group's slot", () => {
+    // `refs` is the FIRST alternate of the expression group and four lift-path
+    // producers hardcode `refs: []` (`ast-builder.js:5642/5728/5781/5821`). A
+    // supported-but-empty `cell-name-list` used to WIN over the real parsed
+    // `exprNode` sitting right behind it, and the `@`-sigil consumer was handed
+    // nothing — the dependency graph credited zero readers there.
+    //
+    // A PREFERENCE ORDER between representations of the same source only means
+    // anything among representations that EXIST.
+    const node = {
+      kind: "markup",
+      attrs: [{
+        name: "if",
+        value: { kind: "expr", raw: "(@a && LIMIT)", refs: [], exprNode: { kind: "ident", name: "@a" } },
+      }],
+    };
+    const ps = positions(node, ALL);
+    expect(ps.map((p) => [p.kind, p.origin])).toEqual([["expr-node", "attr.value.exprNode"]]);
+    // With a NON-empty refs list the preference order still holds.
+    const withRefs = structuredClone(node);
+    withRefs.attrs[0].value.refs = ["a"];
+    expect(positions(withRefs, ALL).map((p) => p.kind)).toEqual(["cell-name-list"]);
+    // And with neither, it falls all the way to the raw text.
+    const rawOnly = structuredClone(node);
+    delete rawOnly.attrs[0].value.exprNode;
+    expect(positions(rawOnly, ALL).map((p) => [p.kind, p.value]))
+      .toEqual([["expr-source", "(@a && LIMIT)"]]);
+  });
+
+  test("a `variable-ref` never matches the EXPRESSION group as well", () => {
+    // One value object matching two alternate groups is one source at two
+    // positions with CONTRADICTING `clientBinding` — the bare-value answer from
+    // the name group, `"binding"` from the expression group. The guard is on the
+    // GROUP, not on one alternate, so a fourth alternate cannot reopen it.
+    const node = {
+      kind: "markup",
+      attrs: [{
+        name: "class",
+        value: { kind: "variable-ref", name: "SECRET", raw: "SECRET", refs: ["x"] },
+      }],
+    };
+    const ps = positions(node, ALL);
+    expect(ps.map((p) => [p.origin, p.clientBinding]))
+      .toEqual([["attr.value.name(raw)", "not-binding"]]);
+  });
 });
 
 describe("expr-positions §2 — the positions the retired walker was missing", () => {
@@ -195,6 +241,43 @@ describe("expr-positions §2 — the positions the retired walker was missing", 
       _record: { engineMeta: { stateChildren: [] } },
     }, ALL);
     expect(originsOf(withoutParse)).toEqual(["engine.rulesRaw"]);
+  });
+
+  test("§51.0.E `initial=` and §52 `server=` hydration reads are cell-name positions", () => {
+    // Both live on `_record.engineMeta` — an OBJECT — and both were DELETABLE
+    // against the whole repo suite with zero new failures, which is the same
+    // shape of hole the phantom fields were. Pinned here, at the level where the
+    // enumeration happens.
+    const ps = positions({
+      kind: "engine-decl",
+      _record: { engineMeta: { initialCell: "phase", serverSource: "driver.current_status" } },
+    }, ALL);
+    expect(ps.map((p) => [p.origin, p.kind, p.value])).toEqual([
+      ["engine.initialCell", "cell-name", "phase"],
+      // The ROOT segment of a dotted source path is the subscribed cell.
+      ["engine.serverSource", "cell-name", "driver"],
+    ]);
+    // A cell name is never a binding — see §7.
+    expect(ps.every((p) => p.clientBinding === "not-binding")).toBe(true);
+    // And the identifier consumer, which does not support `cell-name`, gets
+    // NOTHING from either — a cell is addressed by string key.
+    expect(positions({
+      kind: "engine-decl",
+      _record: { engineMeta: { initialCell: "phase", serverSource: "driver.x" } },
+    }, IDENT_ONLY)).toEqual([]);
+  });
+
+  test("§51.0.J `derived=match` arm bodies are a MARKUP-source position", () => {
+    // `inlineMatchBody` is a projection body, not statements: its arm targets are
+    // VARIANTS and the only code in it is a `${…}` interior. Also deletable
+    // against the whole suite before this test existed.
+    const ps = positions({
+      kind: "engine-decl",
+      inlineMatchBody: " .Title :> .X, .Playing :> .Y ",
+      _record: { engineMeta: {} },
+    }, ALL);
+    expect(ps.map((p) => [p.origin, p.kind, p.clientBinding]))
+      .toEqual([["engine.inlineMatchBody", "markup-source", "binding"]]);
   });
 
   test("`derived=` offers the parsed node and the raw text as alternates", () => {
