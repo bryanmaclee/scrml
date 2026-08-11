@@ -31,10 +31,33 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 27 |
-| MED | 123 |
+| MED | 124 |
 | LOW | 58 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-263-match-expr-rawarms-is-an-unparsed-string-inside-an-exprnode — a `match` EXPRESSION's arm bodies survive the expression parse as a RAW STRING (`match-expr.rawArms`), so a const read only in one is invisible to every ExprNode walker — browser `ReferenceError` at exit 0 — `NEW S338-bryan (the g-263 round-5 brief's own B1 reproducer measured THIS, not the resultExpr gap it was attributed to; PA-VERIFIED on the branch AND on main); MED; open`
+<!-- @gap id=g-263-match-expr-rawarms-is-an-unparsed-string-inside-an-exprnode sev=MED status=open locus=compiler/src/expression-parser.ts prov=rationale:parseExprToNode-lowers-match-phase-Idle-NEEDED-to-kind-match-expr-subject-ident-rawArms-array-of-raw-strings-so-the-arm-bodies-never-become-ident-nodes-and-forEachIdentInExprNode-plus-the-seeds-deep-descent-both-see-only-a-string -->
+
+`parseExprToNode("@a = match @phase { .Idle :> NEEDED, .Ready :> \"ready\" }")` produces
+
+```
+{kind:"assign", target:{kind:"ident",name:"@a"},
+ value:{kind:"match-expr", subject:{kind:"ident",name:"@phase"},
+        rawArms:[".Idle :> NEEDED, .Ready :> \"ready\""]}}
+```
+
+The arm bodies are a **raw string INSIDE an ExprNode**. Every ExprNode walker in the tree — `forEachIdentInExprNode`, the #263 seed's `collectIdentNamesDeep`, the dependency graph's descent — walks node structure, so none of them sees `NEEDED` at all. This is the RAW-SOURCE-inside-a-parse shape, one layer deeper than the raw-source POSITIONS `expr-positions.ts` enumerates: the position table hands the consumer an `expr-node`, and the consumer is right to trust it.
+
+MEASURED S338 on the g-263 branch AND on `main` (pre-existing, NOT a regression). Three shapes, all exit 0, zero diagnostics, all emitting `if (_scrml_match_2 === "Idle") return NEEDED;` against a `models.client.js` that declares nothing:
+
+```
+on mount { @a = match @phase { .Idle :> NEEDED, .Ready :> "r" } }        expression form
+on mount { match @phase { .Idle :> @a = NEEDED, … } }                    collapses to the same
+on mount { match @phase { .Idle { @a = NEEDED } … } }                    same
+```
+
+**NOT the same gap as the `resultExpr` field-list miss, and the distinction cost a round to find.** A `match` in a LOGIC BLOCK or a client `fn` body builds real `match-arm-inline` NODES, each carrying a parsed `resultExpr` — that half was a genuine `EXPR_NODE_FIELDS` omission and is FIXED (S338, pinned by `conf-CG-263 §1 match-arm-inline result`). An `on mount` body is ONE `bare-expr` whose whole body is a single parsed expression, so no arm node is ever built and no field-list entry can reach it. The fix here is in the EXPRESSION PARSER (lower `rawArms` to real arm nodes), not in the position table.
 
 ### g-263-lift-body-invisible-to-the-client-read-seed-node-traversal — the #263 client-read seed descends only ARRAY-valued child fields, so every read inside a `lift` body is invisible to it — a directly-imported const read there is a browser `ReferenceError` at exit 0 — `NEW S338-bryan (surfaced by the g-263 round-5 adversarial pass; PA-VERIFIED by compiling three shapes on the branch AND on main); MED; open`
 <!-- @gap id=g-263-lift-body-invisible-to-the-client-read-seed-node-traversal sev=MED status=open locus=compiler/src/codegen/client-read-seed.ts:377 prov=rationale:the-seeds-visit-recursion-iterates-Object-keys-and-descends-only-Array-isArray-values-while-a-lift-exprs-expr-field-is-a-LiftTarget-union-object-so-the-lifted-subtree-is-never-visited-and-the-shared-position-table-cannot-help-because-it-shares-WHICH-FIELDS-not-WHICH-NODES -->

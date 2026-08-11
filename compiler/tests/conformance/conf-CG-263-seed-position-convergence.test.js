@@ -299,6 +299,36 @@ ${OPEN} type Game:enum = { Title, Playing }
 `,
   },
   {
+    // `resultExpr` — a REAL AST field (`types/ast.ts:1150`, six construction
+    // sites) that the shared list did not carry, while `route-inference.ts`'s
+    // own copy of the same list already did. Surfaced by the §8 dual-direction
+    // gate, not by anyone reading the list.
+    //
+    // SHAPE MATTERS HERE and it is not the shape the round-5 brief named. A
+    // `match` in a LOGIC BLOCK (or a client `fn` body) builds real
+    // `match-arm-inline` nodes, each carrying `resultExpr`. The EXPRESSION form
+    // — `on mount { @a = match @phase { .Idle :> NEEDED } }` — does not: the
+    // whole `on mount` body is ONE `bare-expr` whose parsed `exprNode` is a
+    // `match-expr` carrying `rawArms: [".Idle :> NEEDED, …"]`, a RAW STRING
+    // array inside an ExprNode that no consumer parses. That is a separate,
+    // still-open gap and it is filed; this case pins the half `resultExpr` closes.
+    label: "match-arm-inline result — a `match` statement's `:>` arm body",
+    dir: "cg263-match-arm-inline-result",
+    clientRef: 'reactive_set("a", NEEDED)',
+    entry: `<program>
+import { NEEDED } from './models.scrml'
+${OPEN} type Phase:enum = { Idle, Ready }
+   <phase>: Phase = .Idle
+   @a = ""
+   match @phase {
+       .Idle :> @a = NEEDED
+       .Ready :> @a = "ready"
+   } ${CLOSE}
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
     // `derivedExprNode` is a parsed ExprNode whose FIELD NAME is not in the
     // ExprNode-field list — the drift was a spelling, not a shape.
     label: "engine derived= projection — the §51.0.J expression form",

@@ -221,12 +221,22 @@ type Rec = Record<string, unknown>;
  *     six construction sites, and whose absence was a LIVE cross-file
  *     `ReferenceError` at exit 0 with no diagnostic:
  *
- *         on mount { @a = match @phase { .Idle :> NEEDED, .Ready :> "ready" } }
- *         -> index.client.js:  if (_scrml_match_2 === "Idle") return NEEDED;
- *         -> NEEDED declared nowhere.
+ *         ${ match @phase { .Idle :> @a = NEEDED, .Ready :> @a = "r" } }
+ *         -> index.client.js:  _scrml_cs_reactive_set("a", NEEDED)
+ *         -> NEEDED declared nowhere.  FIXED by listing the field.
  *
  *     `route-inference.ts`'s own copy of this list already had it, so the table
  *     built to end list-drift disagreed with a fourth copy still in the tree.
+ *
+ *     THE SHAPE IS PART OF THE CLAIM, and getting it wrong cost a round. A
+ *     `match` in a LOGIC BLOCK or a client `fn` body builds real
+ *     `match-arm-inline` NODES that carry a parsed `resultExpr` — that is what
+ *     this entry fixes. `on mount { @a = match @phase { .Idle :> NEEDED } }`
+ *     does NOT: the whole body is one `bare-expr` whose parsed `exprNode` is a
+ *     `match-expr` carrying `rawArms: [".Idle :> NEEDED, …"]` — a RAW STRING
+ *     inside an ExprNode, which no field-list entry can reach and no ExprNode
+ *     walker can see. Still open, filed as
+ *     `g-263-match-expr-rawarms-is-an-unparsed-string-inside-an-exprnode`.
  *
  * A test that asserts "these 7 are present and these 4 historical phantoms are
  * absent" passes with three BRAND-NEW phantoms added. Only enumerating the AST
