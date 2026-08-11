@@ -195,6 +195,20 @@ export function collectFunctions(fileAST: FileAST): Node[] {
 // ---------------------------------------------------------------------------
 
 /**
+ * Markup tags whose `${}` body is a DEFERRED lifecycle payload emitted by its own
+ * Step-5 emitter (emit-reactive-wiring.ts) — the interval tick callback for
+ * `<timer>`/`<poll>` (§6.7.5/§6.7.6) or the `setTimeout` callback for `<timeout>`
+ * (§6.7.8). collectTopLevelLogicStatements must NOT descend into these: doing so
+ * would ALSO collect the body as a top-level statement and emit a spurious run at
+ * module init, before the tick/timeout ever fires. Deliberately EXCLUDED:
+ * `<request>` (its descent IS the designed canonical-form fetch, emitted once) and
+ * `<channel>` (its top-level `${}` is single-run init logic the channel emitter does
+ * not re-emit, so the descent is its only, correct emission). The distinguishing
+ * predicate is "body is a deferred payload with its own Step-5 emitter" (S340-peter).
+ */
+const DEFERRED_LIFECYCLE_BODY_TAGS: ReadonlySet<string> = new Set(["timer", "poll", "timeout"]);
+
+/**
  * Collect all logic block bodies (bare-expr, let-decl, etc.) that are NOT
  * inside a function declaration — these are top-level imperative statements.
  *
@@ -246,7 +260,18 @@ export function collectTopLevelLogicStatements(fileAST: FileAST): Node[] {
           result.push(child);
         }
       }
-      if (Array.isArray(node.children)) visit(node.children);
+      // A `<timer>`/`<poll>`/`<timeout>` body (`${}`) is a DEFERRED payload emitted by
+      // its own Step-5 lifecycle emitter (emit-reactive-wiring.ts) — the tick callback
+      // (§6.7.5/§6.7.6) or the setTimeout callback (§6.7.8). Descending here would ALSO
+      // collect that body as a top-level statement, leaking a load-time run before the
+      // tick/timeout ever fires (g-timer-poll-body-runs-once-at-module-init +
+      // g-timeout-body-runs-once-at-module-init). Excluded from the set: `<request>`
+      // (its descent IS the designed canonical-form fetch, emitted once) and `<channel>`
+      // (its top-level `${}` is single-run init logic — the channel emitter does NOT
+      // re-emit it, so the descent is its ONLY, correct emission; S340-peter dPA).
+      if (Array.isArray(node.children) && !DEFERRED_LIFECYCLE_BODY_TAGS.has(node.tag)) {
+        visit(node.children);
+      }
     }
   }
   visit(nodes);

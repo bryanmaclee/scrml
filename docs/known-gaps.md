@@ -31,8 +31,8 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 26 |
-| MED | 122 |
-| LOW | 58 |
+| MED | 121 |
+| LOW | 59 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -435,8 +435,15 @@ DD §0.3 then enumerates the entire `<program>` attribute surface **as it stood 
 
 **Blocks U1b** (`docs/changes/route-region-teardown/SCOPING-EDGE2.md`): those statements sit at a source position INSIDE the timer node's own span, so a positional merge has no defined position for them. Fix band **S**, but `semantics-changed` with a genuinely NON-zero corpus diff — unlike U1a, this one moves real output. Fix this BEFORE U1b.
 
-### g-timer-poll-body-runs-once-at-module-init — a `<timer>`/`<poll>` body executes once at load, before any tick; §6.7.5/§6.7.6 say it executes ON each tick — `NEW S314-bryan (split from the reset gap); MED; open (carries a DESIGN FORK for `<poll>`)`
-<!-- @gap id=g-timer-poll-body-runs-once-at-module-init sev=MED status=open locus=compiler/src/codegen/collect.ts:205 prov=ruling:user-voice-S314 -->
+### g-timer-poll-body-runs-once-at-module-init — a `<timer>`/`<poll>` body executes once at load, before any tick; §6.7.5/§6.7.6 say it executes ON each tick — `NEW S314-bryan (split from the reset gap); MED; resolved S340-peter`
+<!-- @gap id=g-timer-poll-body-runs-once-at-module-init sev=MED status=resolved locus=compiler/src/codegen/collect.ts:205 prov=ruling:user-voice-S314 -->
+> **RESOLVED S340-peter (`fix/timer-poll-module-init-run`).** Both halves of the S314 (b) ruling landed
+> together: (1) `collectTopLevelLogicStatements` no longer descends into a tick-tag node (converged into
+> `DEFERRED_LIFECYCLE_BODY_TAGS = {timer, poll, timeout}`) → no module-init run; (2) §6.7.6 immediate first
+> tick for `<poll>` emitted via a new `immediate` param on `_scrml_timer_start` (same tick path, gated by
+> `running=`, once per arming). Verified on HEAD + class-probed; two adversarial reviewers clean; sibling
+> `<timeout>` folded in (see g-timeout-body-runs-once-at-module-init). Pin:
+> `compiler/tests/integration/timer-poll-module-init.test.js`.
 > **✅ FORK RULED S314 — bryan: (b).** Remove the module-init run, AND amend §6.7.6 to specify an **immediate first tick for `<poll>`**, leaving `<timer>` strict (first execution one interval after arming). **The SPEC half is LANDED**; the impl is the remaining work.
 >
 > **The two land TOGETHER or not at all.** Removing the defect without the amendment is a visible regression for every `<poll>` — §6.7.6's own worked example (`<poll id="serverTime" interval=10000>`) would render nothing for ten seconds. The defect was accidentally supplying first-tick-ish behaviour the spec was silent on; that is the S313 "a bug fix is not automatically inert" shape.
@@ -451,6 +458,38 @@ DD §0.3 then enumerates the entire `<program>` attribute surface **as it stood 
 **Corpus: 13 tick-tag declarations WITH a `${}` body across 7 files** (only 1 file has `<poll>`). Unlike the reset defect this one IS behaviourally observable — those 7 lose a load-time execution.
 
 **⚑ DESIGN FORK, and it is why this is split from the reset fix.** Strict conformance means a `<poll interval=10000>` waits a full 10s before its FIRST fetch — §6.7.6's own worked example is `<poll id="serverTime" interval=10000>`, a clock that would show nothing for ten seconds. The current buggy load-time run is accidentally providing the behaviour most polling UIs want. So: **(a)** remove it — strict §6.7.6, poll waits one interval; **(b)** remove it and AMEND §6.7.6 to specify an immediate first tick for `<poll>` (leaving `<timer>` strict); **(c)** remove it for `<timer>` only and rule `<poll>` separately. **This is the S313 "a bug fix is not automatically inert" shape — the leak can be fixed by making the form work or by rejecting it, and choosing is a language decision.** Route to bryan before building.
+
+### g-timeout-body-runs-once-at-module-init — a `<timeout>` `${}` body is double-emitted (module-init + the setTimeout callback), so it fires instantly at load, violating §6.7.8 "executes exactly once, after `delay`" — `NEW S340-peter (class-probe sibling of g-timer-poll-…); MED; resolved S340-peter`
+<!-- @gap id=g-timeout-body-runs-once-at-module-init sev=MED status=resolved locus=compiler/src/codegen/collect.ts:255 prov=spec:§6.7.8 -->
+> **RESOLVED S340-peter (`fix/timer-poll-module-init-run`).** Same `collect.ts`-descent leak class as
+> `<timer>`/`<poll>` — surfaced by the S340 class-probe and independently corroborated by an adversarial
+> reviewer + the dPA deep-dive. §6.7.8 Semantics: *"After `delay` milliseconds, the timeout fires: its body
+> (the `${}` logic block) executes exactly once"* + *"SHALL NOT fire more than once"* — the module-init copy
+> ran at 0 ms, a clear double-fire. Fixed by converging the guard to `DEFERRED_LIFECYCLE_BODY_TAGS = {timer,
+> poll, timeout}` (the single-shot `setTimeout` callback is emitted by the dedicated Step-5d emitter and is
+> untouched; no immediate-tick question — timeout is single-shot). Pin:
+> `compiler/tests/integration/timer-poll-module-init.test.js`.
+
+### g-emarkup001-false-positive-timeout — `<timeout>` false-fires E-MARKUP-001 ("not a known element") in every position; `timeout` was missing from the name-resolver non-element exclusion set — `NEW S340-peter (dPA deep-dive, E-MARKUP-001 wrinkle); MED; resolved S340-peter`
+<!-- @gap id=g-emarkup001-false-positive-timeout sev=MED status=resolved locus=compiler/src/name-resolver.ts:150 prov=code:SCRML_NON_ELEMENT_TAGS_EXTRA -->
+> **RESOLVED S340-peter (`fix/timer-poll-module-init-run`).** `SCRML_NON_ELEMENT_TAGS_EXTRA` listed the
+> lifecycle keywords `machine, timer, poll, db, request, errorboundary` but omitted `timeout`, so
+> all-lowercase `<timeout>` (not a known HTML element) false-fired E-MARKUP-001 everywhere (same drift class
+> as the S264 `<defaults>` omission). Codegen still proceeded past the NR-stage error, so it did not block
+> the module-init leak repro — but it blocked any clean end-to-end `<timeout>` compile. Fixed by adding
+> `"timeout"` to the exclusion list. Pinned by the "compiles without a false E-MARKUP-001" case in the pin above.
+
+### g-channel-body-toplevel-logic-exec-timing-silent — the SPEC gives no normative execution-time for a channel-body top-level `${}` logic block; it runs once at module-init (file-scope-consistent, no double-run) — `NEW S340-peter (dPA deep-dive; class-probe over-match); LOW; open`
+<!-- @gap id=g-channel-body-toplevel-logic-exec-timing-silent sev=LOW status=open locus=compiler/src/codegen/emit-channel.ts prov=spec:§38.2 -->
+> **NOT a defect — clarification only; do NOT add `<channel>` to the descent guard.** The S340 class-probe
+> flagged a channel body's `${}` running at module-init, but the dPA deep-dive established it is single-run
+> (the channel emitter does not re-emit it in `onopen`/`onmessage`), unlike the timer/poll/timeout
+> double-fire. §38.2 admits *"`${ }` logic blocks … and any other constructs legal at file-scope"* in a
+> channel body, and at file-scope a top-level `${}` runs at module-init — so a single init run is the
+> file-scope-consistent reading. The SPEC states no execution-time SHALL for it (contrast §6.7.8's explicit
+> "exactly once, after delay"), so the *exact* timing is technically silent; nothing sanctions it as a
+> defect. Adding `channel` to `DEFERRED_LIFECYCLE_BODY_TAGS` would DELETE its only, correct emission → a
+> regression. **@route:bryan** if the exact timing is ever to be pinned (semantics clarification, optional).
 
 ### g-region-bodies-emit-in-bucket-order-not-declaration-order — §20.8.8 step 3 requires region bodies to run in DECLARATION order; emission is by BUCKET, so the violation is live at initial load with no navigation — `NEW S314-bryan (surfaced scoping Edge 2); MED; resolved S333`
 <!-- @gap id=g-region-bodies-emit-in-bucket-order-not-declaration-order sev=MED status=resolved locus=compiler/src/codegen/emit-reactive-wiring.ts:849 prov=spec:§20.8.8 -->

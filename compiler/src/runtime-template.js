@@ -1668,7 +1668,7 @@ const _scrml_timer_registry = new Map();
  * @param {number} intervalMs — tick interval in milliseconds (must be > 0)
  * @param {function} bodyFn — function to call on each tick
  */
-function _scrml_timer_start(scopeId, timerId, intervalMs, bodyFn) {
+function _scrml_timer_start(scopeId, timerId, intervalMs, bodyFn, immediate) {
   if (!_scrml_timer_registry.has(scopeId)) {
     _scrml_timer_registry.set(scopeId, new Map());
   }
@@ -1701,6 +1701,10 @@ function _scrml_timer_start(scopeId, timerId, intervalMs, bodyFn) {
   const handle = setInterval(tick, intervalMs);
 
   scopeTimers.set(timerId, { handle, intervalMs, bodyFn, paused: false, tickInFlight: false });
+
+  // 6.7.6 — poll fires an immediate first tick on arming, through the same tick()
+  // path (queuing + error handling); timer passes no immediate. Never re-fired on resume.
+  if (immediate) tick();
 }
 
 /**
