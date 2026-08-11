@@ -503,3 +503,45 @@ adopter exposure to F2 or F4, because the corpus contains no adopter code.** Sta
 limit on the instrument, not as a pass. (My figures run above the review's 75/38/18 — mine include
 the two new cases and a broader trigger-token set; the predicate is spelled out inline so the
 number is reproducible rather than quoted.)
+
+## ROUND 2 VERIFICATION — everything re-measured after the edge set widened
+
+The F1 fix widened the hop edge set from calls-only to references-at-any-depth, so **every
+migration and artifact measurement from round 1 was invalidated and re-run.** Nothing was carried
+forward.
+
+### Migration, re-measured (all 2362 git-tracked `.scrml` sources, base vs head)
+
+```
+5 files emit E-DERIVED-SERVER-ONLY-REACH at head:
+  conformance/cases/derived/e-derived-server-only-reach-lambda-hop/case.scrml    <- NEW, mine
+  conformance/cases/derived/e-derived-server-only-reach-nested-loop/case.scrml      pre-existing, DIRECT limb
+  conformance/cases/derived/e-derived-server-only-reach-pos/case.scrml             pre-existing, DIRECT limb
+  conformance/cases/derived/e-derived-server-only-reach-transitive/case.scrml    <- NEW, mine
+  docs/changes/s331-derived-rhs-server-only-escalation/reproducer.scrml             pre-existing, DIRECT limb
+```
+
+**Still ZERO adopter-facing files newly refused, even with the wider edge set.** The 3 pre-existing
+hits are unchanged direct-limb cases; the 2 additions are this dispatch's own reproducers.
+
+### Corpus emit differential, re-run (same corpus both sides, only `route-inference.ts` swapped)
+
+```
+sources enumerated        base 1907   head 1907     source set delta 0
+compile-failure delta     2 newly failing / 0 newly passing
+diagnostic changes        2 code / 0 text-only
+artifact set delta        0 added / 0 removed
+artifact content diffs    0 of 7401 compared
+syntax delta (effective)  0 new / 0 fixed / 0 message-changed
+syntax delta (script)     0 / (module) 0        load-context changes 0
+VERDICT: 4 DIFFERENCE(S) over 1907 common sources and 7401 compared artifacts
+```
+
+Both newly-failing sources are the two conformance cases this dispatch added. **7401 of 7401
+artifacts byte-identical** — the widening changed no emission, as expected: the edge set feeds only
+the diagnostic, never placement.
+
+### Suite
+
+Full pre-commit gate at final HEAD: **28705 pass / 0 fail / 86 skip.** The gate ran green on every
+landed round-2 commit. No `--no-verify` in round 2.
