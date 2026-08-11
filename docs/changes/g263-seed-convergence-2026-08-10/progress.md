@@ -653,3 +653,26 @@ Executing the round-6 note would have silently dropped rounds 1–4's changes to
 `compiler/tests/unit/cross-file-module-export-const-client.test.js`, `BRIEF-round5.md` and
 `FACTS.md`. **Land from `34d211ab..HEAD`, and cherry-pick — never checkout — the two contended
 docs.** The full 16-file list is `git diff --name-only 34d211ab..HEAD`.
+
+## R7 verification (final)
+
+- **Corpus emit differential, REAL merge-base `34d211ab` vs HEAD** — the whole branch's delta, not
+  just rounds 5-7: 1904 sources · 7375 artifacts · **0 content diffs** · 0 compile-failure delta ·
+  0 syntax delta (both goggles) · 0 artifact-set delta · 0 load-context change · bare-server-fn
+  delta 0. Diagnostics: 1 code + 2 text-only, all the same `E-DG-002` false-positive removal from
+  round 5's `bodyExpr` entry. **Rounds 6 and 7 contribute ZERO corpus movement — which is a limit
+  on the evidence, not a pass: the corpus is silent on the `when-message` prune and on the
+  `import.meta` fence in BOTH directions.**
+- **Full suite** 30218 pass / 221 skip / 1 todo / 50 fail. NAME SET vs merge-base, both trees with
+  a real project root and the gitignored build dirs symlinked — 50 vs 50, and BOTH deltas resolved:
+  - NEW `(fail) (unnamed) [5000.17ms]` in `integration/corpus-emitted-specifier-resolution.test.js`
+    — a **5000 ms TIMEOUT**, passes standalone in 4.06 s. Third load flake of this dispatch (the
+    others: `esm-script-tag-module-format` composed-MPA, and one unit-suite `--bail` that cleared on
+    re-run). Not an assertion failure.
+  - GONE `Bug 3a §3 — bundled <db>-using examples emit valid declarations`
+    (`integration/sql-server-fn-runtime.test.js`) — genuinely PASSES on head, standalone. A real
+    improvement from rounds 1-4, not from 5-7.
+  **Zero real new failures.**
+- **R7 bites** — F2: reinstating the round-6 regex 8 · deleting the lexical step 2 · removing the
+  fail-closed 2 · removing the whole escape-hatch branch 10. F6/§9: flipping the on-mount row to the
+  round-6 claim 1 · mis-calling `splitBlocks(source, filePath)` 9.
