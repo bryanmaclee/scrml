@@ -471,6 +471,23 @@ function req(flags: Record<string, string>, name: string): string {
   return v;
 }
 
+/**
+ * Numeric flag VALUES get the same strictness the flag NAMES already get.
+ *
+ * The name parser is strict precisely so a flag cannot disarm silently — and then every numeric
+ * value went through a bare `Number(...)`, so `--reverify-limit abc` became `NaN`, `NaN > 0` is
+ * false, and the all-or-nothing cap SILENTLY VANISHED. A typo in a value disarms a guard exactly as
+ * effectively as a typo in a name.
+ */
+function num(raw: string | undefined, name: string, fallback: number, min: number): number {
+  if (raw === undefined) return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < min) {
+    die(`--${name} must be an integer >= ${min} (got "${raw}")`);
+  }
+  return n;
+}
+
 // ---------------------------------------------------------------------------------------------
 // enumeration
 // ---------------------------------------------------------------------------------------------
@@ -706,10 +723,24 @@ function countServerFnCallSites(text: string): { total: number; awaited: number;
  * See the `NamespaceAnchor` docstring for why this exists and what is compared. Notes on fidelity,
  * because "close enough" is how a guard reports the wrong answer:
  *
- *   - The compiler starts its walk at `computeOutputBaseDir(cgSourcePaths)` (`api.js:2407`), which
- *     for a ONE-FILE compile is exactly `dirname(resolve(sourcePath))` (`api.js:200`). `compileOne`
- *     spawns one process per source, so a one-file compile is the only shape this tool ever
- *     produces, and `dirname(abs)` is the faithful start path — not an approximation of one.
+ *   - ⚠ THE START PATH HERE IS AN APPROXIMATION, AND THE EARLIER VERSION OF THIS COMMENT CLAIMED IT
+ *     WAS NOT. The compiler walks from `computeOutputBaseDir(cgSourcePaths)` (`api.js:2407`) — the
+ *     common ancestor of EVERY FILE IN THE COMPILE UNIT. `compileOne` passes one file on the command
+ *     line, but one INPUT is not one UNIT: a `.scrml` that imports another pulls the import into the
+ *     unit, and a probe importing `../lib/m.scrml` emitted `lib/m.client.js` beside `case.html`, so
+ *     the compiler anchored on the common ancestor while this function anchored on the entry file's
+ *     own directory. Falsified end to end: compiler `fnv1a("pages/case.scrml")`, this model
+ *     `fnv1a("case.scrml")`.
+ *
+ *     LATENT, NOT LIVE, and the conditions are recorded so the next reader can re-check rather than
+ *     re-derive: it can only diverge where a corpus root contains BOTH a nested `scrml.toml`/`.git`
+ *     AND a cross-directory `.scrml` import. Neither exists under the default roots today, and all
+ *     enumerated tokens matched the compiler's when measured. ONE benchmark `scrml.toml` plus one
+ *     cross-directory import disarms this guard silently — the guard would compare two prefixes that
+ *     are equal to each other and wrong about the compiler.
+ *
+ *     Fixing it properly means modelling the import graph per source, which is the resolver's job,
+ *     not this file's. Tracked as `g-emit-differential-anchor-models-input-not-unit`.
  *   - `resolveProjectRoot` returns only the directory, not which marker stopped it. The marker is
  *     re-derived by asking the filesystem about the RESOLVED root, which is also exactly what the
  *     remedy acts on (`mkdir <root>/.git`).
@@ -783,7 +814,13 @@ async function resolveNamespaceAnchor(compilerRoot: string, sources: string[]): 
 function anchorMismatches(a: NamespaceAnchor, b: NamespaceAnchor, common: string[]): string[] {
   const out: string[] = [];
   for (const p of common) {
-    if ((a.prefixBySource[p] ?? "") !== (b.prefixBySource[p] ?? "")) out.push(p);
+    // An ABSENT entry is an ABSENT MEASUREMENT, never an implicit `""`. Defaulting a missing prefix
+    // to the healthy value would have let a source with no anchor record report as a verified MATCH,
+    // which contradicts the rule `resolverAvailable` exists to state: unmeasured must never read as
+    // measured. Both sides must have recorded a prefix, and the two must agree.
+    const av = Object.prototype.hasOwnProperty.call(a.prefixBySource, p) ? a.prefixBySource[p] : undefined;
+    const bv = Object.prototype.hasOwnProperty.call(b.prefixBySource, p) ? b.prefixBySource[p] : undefined;
+    if (av === undefined || bv === undefined || av !== bv) out.push(p);
   }
   return out;
 }
@@ -811,10 +848,19 @@ const PROJECT_ROOT_MARKER_NAMES = ["scrml.toml", ".git"] as const;
  * `gitRevision` report an enclosing repo's HEAD for an extracted tree.
  */
 async function measureCorpusCleanliness(compilerRoot: string, roots: string[], enumerated: string[]): Promise<CorpusCleanliness> {
-  const run = async (args: string[]): Promise<{ out: string; code: number }> => {
+  // ⚠ `.trim()` IS A BUG HERE AND WAS ONE. Porcelain v1 status codes are TWO COLUMNS, and a
+  // WORKTREE-modified entry is `" M path"` — a LEADING SPACE. Trimming the whole buffer ate that
+  // space on the FIRST line only, so it parsed as code `"M "` / path `"enchmarks/..."`, missed the
+  // enumerated-set intersection, and was silently dropped. Untracked (`??`), ignored (`!!`) and
+  // STAGED (`M `, `A `) entries have no leading space, which is exactly why the bite proof — which
+  // used an untracked file — passed over it. A single edited conformance case is the most common
+  // dirty-corpus shape there is, and it was the one shape that got through.
+  //
+  // Only the trailing newline may be removed, and only from the status buffer.
+  const run = async (args: string[], keepLeadingSpace = false): Promise<{ out: string; code: number }> => {
     const proc = Bun.spawn(["git", ...args], { cwd: compilerRoot, stdout: "pipe", stderr: "pipe" });
     const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    return { out: out.trim(), code };
+    return { out: keepLeadingSpace ? out.replace(/\n$/, "") : out.trim(), code };
   };
 
   const top = await run(["rev-parse", "--show-toplevel"]);
@@ -830,7 +876,11 @@ async function measureCorpusCleanliness(compilerRoot: string, roots: string[], e
     };
   }
 
-  const st = await run(["status", "--porcelain", "-uall", "--ignored=matching", "--", ...roots]);
+  // `--ignored=traditional`, not `matching`: `matching` reports an ignored DIRECTORY as one entry and
+  // never names the `.scrml` files inside it, but the walk does not consult gitignore, so those files
+  // ARE enumerated and ARE non-reproducible. `traditional` names them individually. The pathspec
+  // bounds the cost to the selected roots.
+  const st = await run(["status", "--porcelain", "-uall", "--ignored=traditional", "--", ...roots], true);
   if (st.code !== 0) {
     return { isOwnGitCheckout: false, method: `<git status failed in ${compilerRoot}>`, untracked: [], modified: [] };
   }
@@ -1483,6 +1533,12 @@ function walkAny(root: string, dir: string, out: string[], links: string[]): voi
  */
 async function compileOne(src: string, compilerRoot: string, work: string): Promise<SourceRecord> {
   const outDir = join(work, sourceSlug(src));
+  // HARD REQ 10 corollary — the output dir must START EMPTY, always. The signal-retry re-compiles
+  // into the dir the KILLED process was writing to, so without this the killed run's PARTIAL output
+  // survives into the retry's artifact set: the fix for a "removed artifacts" phantom would have
+  // installed an "artifact ADDED" phantom on the same event. Measured. In the ordinary pool this is
+  // a no-op (the work tree is removed wholesale at capture start and every source has its own slug).
+  rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
   const proc = Bun.spawn(["bun", join(compilerRoot, "compiler/src/cli.js"), "compile", src, "-o", outDir], {
     cwd: compilerRoot,
@@ -1650,6 +1706,11 @@ interface ReverifyReport {
   errored: Array<{ path: string; message: string }>;
 }
 
+/** A manifest record's artifacts in the same shape `hashOutputDir` returns, for direct comparison. */
+function manifestArtifactShas(rec: SourceRecord): Map<string, string> {
+  return new Map(rec.artifacts.map((a) => [a.key, a.sha256]));
+}
+
 /** Hash one output directory the same way capture's stage 3 does, keyed identically. */
 function hashOutputDir(outDir: string): { arts: Map<string, string>; error?: string } {
   const arts = new Map<string, string>();
@@ -1701,6 +1762,8 @@ async function reverifyDelta(
   base: Manifest,
   head: Manifest,
   implicated: Array<{ path: string; classes: string[] }>,
+  /** Common sources with NO difference — the only valid canaries. See HARD REQ 9.1. */
+  controls: string[],
   limit: number,
   enabled: boolean,
 ): Promise<ReverifyReport> {
@@ -1719,6 +1782,102 @@ async function reverifyDelta(
           `      Re-verification re-COMPILES, so it only runs where both captures were taken. The ${implicated.length}\n` +
           `      difference-bearing source(s) below are reported UNVERIFIED.`,
       );
+    }
+  }
+
+  // ---- HARD REQ 9.1 — re-verification may only run when it can actually RE-MEASURE -----------
+  //
+  // ⚠ THIS IS THE MOST DANGEROUS GUARD IN THE FILE AND IT EXISTS BECAUSE ITS ABSENCE TURNED RED
+  // INTO GREEN. Every other failure mode this tool has had produced a suspicious NUMBER that a
+  // reader might question. This one produced a CLEAN BILL OF HEALTH.
+  //
+  // Re-verification re-COMPILES from `compilerRoot`. It is therefore only a re-measurement if each
+  // root still holds the compiler that side was captured with. In the canonical SINGLE-CHECKOUT
+  // arrangement —
+  //
+  //     capture base  ->  git checkout <head> in the SAME tree  ->  capture head  ->  diff
+  //
+  // — `base.compilerRoot === head.compilerRoot`, so BOTH sides re-compile with HEAD's compiler,
+  // nothing can possibly differ, every real finding is discarded as a "flake", and the banner makes
+  // the affirmative false claim `NO DIFFERENCES`. Measured: 66 real content differences and exit 1
+  // became 0 differences and exit 0.
+  //
+  // WHY THIS SKIPS RATHER THAN REFUSING, which was the reviewed recommendation. The two MANIFESTS
+  // are self-contained, valid measurements; the single-checkout workflow produces a legitimate pair.
+  // Refusing it (exit 2) would refuse a VALID COMPARISON — the same defect class as the whole-corpus
+  // prefix digest that refused legitimate corpus additions earlier in this arc. Declining to
+  // re-verify returns the run to exactly `origin/main`'s behaviour (differences reported as
+  // measured, exit 1) with the banner saying the delta went unchecked, so there is no false green
+  // and no workflow is broken. If the project prefers hard refusal, this block is where it goes.
+  if (resolve(base.compilerRoot) === resolve(head.compilerRoot)) {
+    return empty(
+      false,
+      `IMPOSSIBLE HERE — both manifests name the SAME compiler root (${base.compilerRoot}).\n` +
+        `      A single tree cannot hold two revisions at once, so re-compiling "both sides" would run\n` +
+        `      ONE compiler twice, nothing would differ, and every real difference would be discarded as a\n` +
+        `      flake. The ${implicated.length} difference-bearing source(s) below are reported UNVERIFIED, exactly as\n` +
+        `      measured. To re-verify, capture the two sides from two separate checkouts or worktrees.`,
+    );
+  }
+  // A root that has MOVED since capture is the same hazard wearing a different hat.
+  for (const [side, m] of [["base", base], ["head", head]] as const) {
+    const now = await gitRevision(m.compilerRoot);
+    if (now !== m.revision) {
+      return empty(
+        false,
+        `IMPOSSIBLE HERE — the ${side} compiler root no longer holds the revision it was captured at\n` +
+          `      (${m.compilerRoot} is at ${now.slice(0, 12)}, the manifest records ${m.revision.slice(0, 12)}).\n` +
+          `      Re-compiling there would measure a DIFFERENT compiler. The ${implicated.length} difference-bearing\n` +
+          `      source(s) below are reported UNVERIFIED, exactly as measured.`,
+      );
+    }
+  }
+  // The two checks above are cheap and name their failure precisely, but neither can see an
+  // UNCOMMITTED mutation of a checkout after capture — the revision is unchanged and the roots are
+  // still distinct, yet the compiler is not the one that was measured. So the actual guarantee is
+  // empirical: re-compile one implicated source per side and require it to reproduce THAT SIDE'S OWN
+  // recorded outcome. A root that cannot reproduce its own manifest cannot be used to judge anyone's
+  // findings.
+  //
+  // ⚠ THE CANARY MUST BE A SOURCE THAT AGREED, NEVER AN IMPLICATED ONE. A first cut used
+  // `implicated[0]`, which is precisely backwards: a genuine phantom IS a source whose manifest
+  // disagrees with a re-compile, so the canary would have fired on exactly the events it exists to
+  // let us catch, and re-verification would have disarmed itself whenever it was about to be
+  // useful. A source both sides agreed on is the one that must reproduce.
+  {
+    const canarySrc = controls[0];
+    if (canarySrc === undefined) {
+      return empty(
+        false,
+        `IMPOSSIBLE HERE — every common source carries a difference, so there is no agreed-on source to\n` +
+          `      validate the two compiler roots against. Without that control a re-compilation cannot be\n` +
+          `      distinguished from a drifted checkout. The ${implicated.length} difference-bearing source(s) below are\n` +
+          `      reported UNVERIFIED, exactly as measured.`,
+      );
+    }
+    const dir = mkdtempSync(join(tmpdir(), "corpus-reverify-canary-"));
+    try {
+      for (const [side, m] of [["base", base], ["head", head]] as const) {
+        const recorded = m.sources.find((s) => s.path === canarySrc);
+        if (!recorded) continue;
+        const work = join(dir, side);
+        const rerun = await compileOne(canarySrc, m.compilerRoot, work);
+        const arts = hashOutputDir(join(work, sourceSlug(canarySrc)));
+        const drift = sourceDifferences(recorded, manifestArtifactShas(recorded), rerun, arts.arts);
+        if (drift.length > 0) {
+          return empty(
+            false,
+            `IMPOSSIBLE HERE — the ${side} compiler root does not reproduce its OWN manifest. Re-compiling\n` +
+              `      ${canarySrc} there disagrees with what that capture recorded:\n` +
+              drift.map((d) => `        ${d}`).join("\n") + `\n` +
+              `      The root has changed since capture (an uncommitted edit leaves the revision intact), so a\n` +
+              `      re-compilation cannot judge anything. The ${implicated.length} difference-bearing source(s) below are\n` +
+              `      reported UNVERIFIED, exactly as measured.`,
+          );
+        }
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   }
   if (limit > 0 && implicated.length > limit) {
@@ -2068,7 +2227,12 @@ async function diff(
   for (const d of contentDiffs) implicate(d.source, "artifact CONTENT difference");
   const implicated = [...implicatedMap.entries()].sort((x, y) => (x[0] < y[0] ? -1 : 1)).map(([path, classes]) => ({ path, classes }));
 
-  const reverify = await reverifyDelta(base, head, implicated, reverifyLimit, reverifyEnabled);
+  // Controls: common sources with no difference at all, and with artifacts on both sides so the
+  // comparison has something to say. Ordered as `common` is, so the choice is deterministic.
+  const controls = common.filter(
+    (p) => !implicatedMap.has(p) && baseBy.get(p)!.artifacts.length > 0 && headBy.get(p)!.artifacts.length > 0,
+  );
+  const reverify = await reverifyDelta(base, head, implicated, controls, reverifyLimit, reverifyEnabled);
   const flakedSources = new Set(reverify.flaked.map((f) => f.path));
   if (flakedSources.size > 0) {
     newlyFailing = newlyFailing.filter((p) => !flakedSources.has(p));
@@ -2087,12 +2251,28 @@ async function diff(
     `   base: ok ${base.totals.compileOk} of ${base.totals.compileAttempted} attempted, failed ${base.totals.compileFailed}\n` +
       `   head: ok ${head.totals.compileOk} of ${head.totals.compileAttempted} attempted, failed ${head.totals.compileFailed}`,
   );
-  // HARD REQ 10 — informational, never a finding. A retry produced a real measurement; the count is
-  // reported because it is the standing indicator of how close the capture host ran to its limit.
+  // HARD REQ 10 — never counted as an emit difference, because a successful retry IS a real
+  // measurement and the source genuinely compiles. But an ASYMMETRY is a signal about the change
+  // under test and it must not be skimmable.
+  const bKills = base.totals.compileSignalRetries;
+  const hKills = head.totals.compileSignalRetries;
   console.log(
-    `   env-killed compiles re-run SERIALLY at capture: base ${base.totals.compileSignalRetries}, head ${head.totals.compileSignalRetries}` +
-      `${base.totals.compileSignalRetries + head.totals.compileSignalRetries === 0 ? "  (none — neither pool was pressured)" : "  (recovered; the outcomes below are the retries')"}`,
+    `   env-killed compiles re-run SERIALLY at capture: base ${bKills}, head ${hKills}` +
+      `${bKills + hKills === 0 ? "  (none — neither pool was pressured)" : "  (recovered; the outcomes above are the retries')"}`,
   );
+  if (bKills !== hKills) {
+    // Deliberately on stderr and deliberately NOT a finding: it is host-dependent, so counting it
+    // would make the verdict depend on what else the machine was doing. But one side needing the
+    // environment to back off while the other did not is exactly how a RESOURCE regression in the
+    // change under test presents — and the retry hides it by succeeding.
+    console.error(
+      `   *** ENV-KILL ASYMMETRY: base ${bKills}, head ${hKills}. One side needed the OS to kill compiles and the\n` +
+        `   other did not. The retries SUCCEEDED, so this contributes NO finding and the emit comparison above\n` +
+        `   stands — but a change that makes the compiler substantially hungrier presents exactly this way and\n` +
+        `   is invisible in the difference counts. Re-run both sides at a lower --concurrency to tell a\n` +
+        `   resource regression apart from an unlucky host. (g-emit-differential-env-kill-asymmetry-uncounted)`,
+    );
+  }
   console.log(`   compile-failure SET delta: ${newlyFailing.length} newly FAILING, ${newlyPassing.length} newly PASSING (full lists, no cap):`);
   for (const p of newlyFailing) console.log(`     ! NEWLY FAILING in head: ${p}  (base exit ${baseBy.get(p)!.compile.exitCode} -> head exit ${headBy.get(p)!.compile.exitCode})`);
   for (const p of newlyPassing) console.log(`     ~ NEWLY PASSING in head: ${p}  (base exit ${baseBy.get(p)!.compile.exitCode} -> head exit ${headBy.get(p)!.compile.exitCode})`);
@@ -2228,6 +2408,9 @@ async function diff(
   // goggles has changed how it is loaded, which is a behaviour change even at identical bytes.
   const loadContextChanged: string[] = [];
   for (const p of common) {
+    // Flaked sources are excluded here for the same reason their artifacts are: the compile that
+    // produced them did not happen properly, so nothing derived from it is evidence.
+    if (flakedSources.has(p)) continue;
     const bMap = new Map(baseBy.get(p)!.artifacts.map((a) => [a.key, a]));
     for (const ha of headBy.get(p)!.artifacts) {
       const ba = bMap.get(ha.key);
@@ -2273,13 +2456,22 @@ async function diff(
   const headChecks = effective.headMap;
 
   // ---- verdict --------------------------------------------------------------------------------
+  // `loadContextChanged` was PRINTED as a finding and never COUNTED as one — on this branch and on
+  // `origin/main` both. An artifact that moves between script and module goggles has changed how it
+  // is LOADED, which this file's own comment calls a behaviour change even at identical bytes; a run
+  // whose only difference was that could report NO DIFFERENCES and exit 0.
+  //
+  // `fxSourceDelta` is deliberately still NOT counted, and that is not the same oversight: the
+  // awaited/bare split is derived from artifact TEXT, so a source whose split moved necessarily has
+  // an artifact content difference already in the total. Counting it would double-count one change.
   const findings =
     srcDelta.onlyA.length + srcDelta.onlyB.length +
     newlyFailing.length + newlyPassing.length +
     diagChanged.length + streamChanged.length +
     artifactAdded.length + artifactRemoved.length +
     contentDiffs.length +
-    checkDelta.onlyA.length + checkDelta.onlyB.length + messageChanged.length;
+    checkDelta.onlyA.length + checkDelta.onlyB.length + messageChanged.length +
+    loadContextChanged.length;
 
   // The banner NEVER says "NO DIFFERENCES" on a run that was not a valid comparison.
   //
@@ -2427,8 +2619,8 @@ if (mode === "capture") {
     work: resolve(req(flags, "work")),
     manifestPath: resolve(req(flags, "manifest")),
     roots: (flags["roots"] ?? DEFAULT_ROOTS.join(",")).split(",").map((r) => r.trim()).filter(Boolean),
-    concurrency: Number(flags["concurrency"] ?? 10),
-    expectTotal: flags["expect-total"] !== undefined ? Number(flags["expect-total"]) : undefined,
+    concurrency: num(flags["concurrency"], "concurrency", 10, 1),
+    expectTotal: flags["expect-total"] !== undefined ? num(flags["expect-total"], "expect-total", 0, 0) : undefined,
     reuseArtifacts: bools.has("reuse-artifacts"),
     syntaxCheck: !bools.has("no-syntax-check"),
   });
@@ -2443,7 +2635,7 @@ if (mode === "capture") {
       bools.has("allow-same-revision"),
       bools.has("allow-reuse-manifest"),
       !bools.has("no-reverify"),
-      flags["reverify-limit"] !== undefined ? Number(flags["reverify-limit"]) : DEFAULT_REVERIFY_LIMIT,
+      num(flags["reverify-limit"], "reverify-limit", DEFAULT_REVERIFY_LIMIT, 0),
       bools.has("allow-dirty-corpus"),
     ),
   );
