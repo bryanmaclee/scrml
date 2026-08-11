@@ -4614,73 +4614,19 @@ export function runRI(input: RIInput): RIOutput {
   }
 
   // ------------------------------------------------------------------
-  // Step 3b (S331): §6.6.19 E-DERIVED-SERVER-ONLY-REACH — a `const <name>`
-  // derived cell whose RHS reaches a binding imported from an ESCALATION
-  // server-only stdlib module.
+  // §6.6.19 E-DERIVED-SERVER-ONLY-REACH used to be emitted HERE, as "Step 3b".
+  // It moved to **Step 5c-ter** (below, after the placement fixpoints settle) at
+  // S338, because half the rule cannot be decided at this point in the stage:
+  // the transitive limb consumes `resolvedServerFnIds`, which does not exist
+  // until Step 5 and is still being mutated by Steps 5b and 5c. Emitting the
+  // direct limb here and the transitive limb there would be two sites for one
+  // rule — the drift shape `scanForServerOnlyBindingRefs`' own docstring says
+  // "must not be allowed to drift into two" — so the whole check moved.
   //
-  // This is the position Trigger 3's per-function walk structurally cannot
-  // reach. Step 3 above iterates `collectFileFunctions`, which — honouring
-  // §12.4's "Route inference SHALL be per-function" literally — yields
-  // `function-decl` nodes only. A derived cell is a `state-decl`, so its RHS
-  // was never visited and the leak the S299 Trigger-3 amendment was written to
-  // close stayed open in this one shape (measured S331: no `.server.js` at all,
-  // `const { hashPassword } = _scrml_stdlib.auth` in the client bundle, and a
-  // real `Bun.password.hash` argon2id implementation shipped to the browser).
-  //
-  // IT REFUSES; IT DOES NOT ESCALATE. A derived cell is a SYNCHRONOUS reactive
-  // recompute (§6.6 — pulled on read via the dirty flag). Escalating its RHS
-  // would make that recompute a server round trip, i.e. asynchronous, which the
-  // derived model has no way to express — so "place it on the server" is not an
-  // available answer, and inventing one here would pre-empt a language question
-  // (may the derived position host server work AT ALL?) that is not this fix's
-  // to answer. Refusing is also the reversible direction: newly-rejecting can be
-  // relaxed later, whereas accepting-and-escalating is a one-way door.
+  // The §34 catalog row and SPEC §6.6.19 both name the emission site; both were
+  // updated to say Step 5c-ter in the same commit. If you are here from a doc
+  // that still says "Step 3b", that doc is stale.
   // ------------------------------------------------------------------
-  for (const fileAST of files) {
-    const filePath = fileAST.filePath;
-    const _bindings = perFileEscalationServerOnlyBindings.get(filePath);
-    if (!_bindings || _bindings.size === 0) continue;
-
-    // §64 / §12.2 Trigger 3 — a `kind="tool"` program has NO client boundary, so
-    // a server-only module there is not a leak and refusing would reject valid
-    // code. Same carve-out the `print()`/`println()` signal already takes.
-    if (isToolProgram(fileAST)) continue;
-
-    for (const declNode of collectDerivedCellDecls(fileAST)) {
-      const refs = collectDerivedRhsServerOnlyRefs(declNode, _bindings);
-      if (refs.size === 0) continue;
-
-      const cellName = typeof declNode.name === "string" ? declNode.name : "<anonymous>";
-      // Stable ordering: the message is asserted by conformance, and AST walk
-      // order is an implementation detail the corpus should not be pinned to.
-      const reached = [...refs.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-      const reachedList = reached
-        .map(([local, mod]) => `\`${local}\` (from \`${mod}\`)`)
-        .join(", ");
-      const firstModule = reached[0][1];
-
-      const eDerived = new RIError(
-        "E-DERIVED-SERVER-ONLY-REACH",
-        `E-DERIVED-SERVER-ONLY-REACH: The RHS of derived cell \`const <${cellName}>\` reaches ` +
-        `${reachedList} — a server-only stdlib module (§12.2 Trigger 3). A derived cell is a ` +
-        `SYNCHRONOUS reactive recompute (§6.6): it is pulled on read, on the client, so the ` +
-        `compiler cannot escalate it to the server the way it escalates a function — that would ` +
-        `turn every recompute into a network round trip. Leaving it un-escalated would ship ` +
-        `\`${firstModule}\` and its implementation into the browser bundle, along with whatever ` +
-        `secret is passed to it, so the compiler refuses instead. Fix: move the call into a ` +
-        `\`function\` — a function DOES escalate on this trigger (§12.2) — and write its result ` +
-        `to a plain reactive cell that the markup reads. Do NOT just delete \`const\`: a plain ` +
-        `cell initialiser (\`<${cellName}> = …\`) reaches the same module from the same ` +
-        `client-side position, is NOT yet diagnosed, and compiles clean while shipping the ` +
-        `implementation to the browser — the shortest edit that silences this error is the one ` +
-        `that restores the leak. See §6.6.19, §12.2.`,
-        (declNode.span as Span) ?? ({ start: 0, end: 0 } as Span),
-      );
-      eDerived.severity = "error";
-      eDerived.filePath = filePath;
-      errors.push(eDerived);
-    }
-  }
 
   // ------------------------------------------------------------------
   // Step 4: Direct-only escalation — no transitive callee inheritance.
@@ -5400,6 +5346,228 @@ export function runRI(input: RIInput): RIOutput {
           }
         }
       }
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Step 5c-ter: §6.6.19 E-DERIVED-SERVER-ONLY-REACH — a `const <name>` derived
+  // cell whose RHS reaches server work, DIRECTLY or THROUGH LOCAL FUNCTION HOPS.
+  //
+  // WAS "Step 3b" until S338, and ran before Step 4. It sits here now because
+  // the transitive limb reads `resolvedServerFnIds`, which Steps 5 / 5b / 5c
+  // are still mutating up to the line above. §34 and SPEC §6.6.19 name this
+  // site by number; keep all three in step.
+  //
+  // ── TWO LIMBS, ONE RULE, TWO DIFFERENT FAILURES ──────────────────────────
+  //
+  // (a) DIRECT — the RHS names a binding imported from an ESCALATION server-only
+  //     stdlib module. Nothing escalates, so the module and its implementation
+  //     ship to the BROWSER. A CONFIDENTIALITY failure. (S331, #486.)
+  //
+  // (b) TRANSITIVE (S338) — the RHS calls a local function that route inference
+  //     HAS placed on the server. Confidentiality is intact: the secret stays
+  //     server-side and the call lowers to a fetch stub. But the stub is
+  //     `async`, and `_scrml_derived_get` (`dist/scrml-runtime.js`) invokes the
+  //     recompute thunk with NO `await` — §6.6.4 — so **the Promise itself
+  //     becomes the cell's value and is rendered**. A CORRECTNESS failure, at
+  //     exit 0, with nothing on stderr.
+  //
+  // Measured on `main` at S338, four shapes, all exit 0:
+  //   `doHash` (1 hop) · a `?{}` helper (1 hop, and a SECOND emission route —
+  //   `W-DERIVED-001` lowers it to a bare `const c = _scrml_fetch_…()`) ·
+  //   `levelA->levelB->levelC` (3 hops) · a `ping`/`pong` mutual-recursion cycle.
+  //
+  // The limbs share the refusal and its reasoning; they DO NOT share the fix,
+  // and the message must not pretend otherwise. The direct limb says "move the
+  // call into a `function`". For the transitive limb the author has ALREADY
+  // done that — repeating it names no root cause, which is its own kind of
+  // diagnostic bug. The transitive message therefore names the HOP CHAIN and
+  // tells the author to stop reading the value from a derived cell.
+  //
+  // ── THIS REFUSAL IS PROVISIONAL AND REVERSIBLE. SAY SO. ──────────────────
+  //
+  // Refusing answers "what should the compiler do TODAY, given a shape that
+  // silently miscompiles"; it does NOT answer "may a derived cell hold a value
+  // that is not ready yet?" That question is dpa-023, whose `pending`
+  // type-state DIRECTION was ratified at S337 with the BUILD deferred — and
+  // this defect is its first witnessed case. When `pending` lands, a derived
+  // cell will have a way to express "computing", the premise "the derived model
+  // has no way to express asynchrony" stops holding, and **the correct
+  // disposition of this check is to be relaxed or deleted, not defended.**
+  // Nothing here should be read as settling that question. Refusing is chosen
+  // precisely because it is the walk-back-able direction: newly-rejecting can be
+  // relaxed once the answer exists, whereas accepting-and-escalating would
+  // answer it by construction and is a one-way door (§12.2's own disposition
+  // for ambiguity on this boundary: prefer the safe side).
+  //
+  // ── OVER-REFUSAL DISCIPLINE ──────────────────────────────────────────────
+  //
+  // Callee resolution is SAME-FILE ONLY (`computeServerReachingFns`), and a
+  // name that resolves same-file to BOTH a server-reaching and a non-reaching
+  // declaration does NOT fire. Both rules are Step 5c-bis's, adopted verbatim
+  // because this is a hard error too. A derived cell calling a purely-client
+  // local function — including one in a client-only call CYCLE — compiles clean.
+  // ------------------------------------------------------------------
+  const serverReach = computeServerReachingFns(
+    analysisMap,
+    fnNameToNodeIds,
+    resolvedServerFnIds,
+  );
+
+  /**
+   * Why the function at the END of a hop chain is on the server, phrased for an
+   * author.
+   *
+   * `describeServerTrigger` is reused for the real triggers, but it cannot be
+   * used alone: Steps 5b/5c record their PROPAGATED placements as synthetic
+   * `server-only-resource` reasons carrying an internal token in `resourceType`
+   * (`caller-context-propagation`, `closure-capture:<name>`), which it would
+   * render as "the server-only resource `caller-context-propagation`". Those two
+   * are named plainly here instead — they are also the cases where the author
+   * wrote nothing server-ish at all and most needs to be told why.
+   */
+  const describeReachTerminus = (fnId: string): string => {
+    const reasons = escalationResults.get(fnId)?.deduped ?? [];
+    const propagated = reasons.find(
+      (r) =>
+        r.kind === "server-only-resource" &&
+        (r.resourceType === "caller-context-propagation" ||
+          r.resourceType.startsWith("closure-capture:")),
+    );
+    // A real trigger always wins the description — it is the actionable one.
+    const real = reasons.filter((r) => r !== propagated);
+    if (real.length > 0) return `it reaches ${describeServerTrigger(real)} (§12.2)`;
+    if (propagated && propagated.kind === "server-only-resource") {
+      return propagated.resourceType === "caller-context-propagation"
+        ? "every function that calls it is server-side, so §12.2 caller-context " +
+          "propagation placed it there — it has no server-only work of its own"
+        : "it closes over the server-side symbol " +
+          `\`${propagated.resourceType.slice("closure-capture:".length)}\` (§12.2)`;
+    }
+    return "it reaches a server-only resource (§12.2)";
+  };
+
+  for (const fileAST of files) {
+    const filePath = fileAST.filePath;
+    const _bindings = perFileEscalationServerOnlyBindings.get(filePath);
+
+    // §64 / §12.2 Trigger 3 — a `kind="tool"` program has NO client boundary, so
+    // a server-only module there is not a leak and refusing would reject valid
+    // code. Same carve-out the `print()`/`println()` signal already takes.
+    // Whole-file and depth-independent by construction; it gates BOTH limbs.
+    if (isToolProgram(fileAST)) continue;
+
+    // The transitive limb's lookup table for THIS file: local function NAME ->
+    // the server-reaching declaration it resolves to. A name with any same-file
+    // declaration that is NOT server-reaching is omitted (the 5c-bis ambiguity
+    // rule — on doubt, do not fire).
+    const serverReachingNamesHere = new Map<string, string>();
+    for (const [name, ids] of fnNameToNodeIds) {
+      const sameFile = ids.filter((id) => analysisMap.get(id)?.filePath === filePath);
+      if (sameFile.length === 0) continue;
+      if (!sameFile.every((id) => serverReach.reaching.has(id))) continue;
+      serverReachingNamesHere.set(name, sameFile[0]);
+    }
+
+    if ((!_bindings || _bindings.size === 0) && serverReachingNamesHere.size === 0) continue;
+
+    for (const declNode of collectDerivedCellDecls(fileAST)) {
+      const cellName = typeof declNode.name === "string" ? declNode.name : "<anonymous>";
+      const span = (declNode.span as Span) ?? ({ start: 0, end: 0 } as Span);
+
+      // ── Limb (a): DIRECT reach to an escalation-server-only import ─────────
+      const refs = _bindings && _bindings.size > 0
+        ? collectDerivedRhsServerOnlyRefs(declNode, _bindings)
+        : new Map<string, string>();
+
+      if (refs.size > 0) {
+        // Stable ordering: the message is asserted by conformance, and AST walk
+        // order is an implementation detail the corpus should not be pinned to.
+        const reached = [...refs.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+        const reachedList = reached
+          .map(([local, mod]) => `\`${local}\` (from \`${mod}\`)`)
+          .join(", ");
+        const firstModule = reached[0][1];
+
+        const eDerived = new RIError(
+          "E-DERIVED-SERVER-ONLY-REACH",
+          `E-DERIVED-SERVER-ONLY-REACH: The RHS of derived cell \`const <${cellName}>\` reaches ` +
+          `${reachedList} — a server-only stdlib module (§12.2 Trigger 3). A derived cell is a ` +
+          `SYNCHRONOUS reactive recompute (§6.6): it is pulled on read, on the client, so the ` +
+          `compiler cannot escalate it to the server the way it escalates a function — that would ` +
+          `turn every recompute into a network round trip. Leaving it un-escalated would ship ` +
+          `\`${firstModule}\` and its implementation into the browser bundle, along with whatever ` +
+          `secret is passed to it, so the compiler refuses instead. Fix: move the call into a ` +
+          `\`function\` — a function DOES escalate on this trigger (§12.2) — and write its result ` +
+          `to a plain reactive cell that the markup reads. Do NOT just delete \`const\`: a plain ` +
+          `cell initialiser (\`<${cellName}> = …\`) reaches the same module from the same ` +
+          `client-side position, is NOT yet diagnosed, and compiles clean while shipping the ` +
+          `implementation to the browser — the shortest edit that silences this error is the one ` +
+          `that restores the leak. See §6.6.19, §12.2.`,
+          span,
+        );
+        eDerived.severity = "error";
+        eDerived.filePath = filePath;
+        errors.push(eDerived);
+        // One diagnostic per cell. The direct limb is the more serious finding
+        // (a leak, not a wrong render) and it names the same cell, so the
+        // transitive limb would only add noise to the same edit.
+        continue;
+      }
+
+      // ── Limb (b): TRANSITIVE reach through local function hops ─────────────
+      //
+      // The SAME reference scanner the direct limb uses, handed a different name
+      // set. Reusing it is what keeps "what counts as a reach" — depth, lambda
+      // bodies, unparsed raw RHS text, string-literals-are-not-references, the
+      // RHS-local shadow set — one rule instead of two that drift.
+      if (serverReachingNamesHere.size === 0) continue;
+      const hopRefs = collectDerivedRhsServerOnlyRefs(declNode, serverReachingNamesHere);
+      if (hopRefs.size === 0) continue;
+
+      const hops = [...hopRefs.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+      const [hopName, hopId] = hops[0];
+
+      // Rebuild the chain to the boundary from the closure's `via` edges.
+      // Bounded by `reaching.size` because `via` is acyclic by construction
+      // (each entry was written exactly once, at first discovery).
+      const chain: string[] = [hopName];
+      let cursor = hopId;
+      const guard = serverReach.reaching.size + 1;
+      for (let i = 0; i < guard; i++) {
+        const next = serverReach.via.get(cursor);
+        if (next === undefined) break;
+        chain.push(analysisMap.get(next)?.fnNode.name ?? "<anonymous>");
+        cursor = next;
+      }
+      const chainStr = [`const <${cellName}>`, ...chain].join(" -> ");
+      const terminusName = analysisMap.get(cursor)?.fnNode.name ?? hopName;
+      const alsoReached = hops.slice(1).map(([n]) => `\`${n}\``).join(", ");
+
+      const eHop = new RIError(
+        "E-DERIVED-SERVER-ONLY-REACH",
+        `E-DERIVED-SERVER-ONLY-REACH: The RHS of derived cell \`const <${cellName}>\` calls ` +
+        `\`${hopName}\`, which reaches server-side work: ${chainStr} — and \`${terminusName}\` ` +
+        `is on the server because ${describeReachTerminus(cursor)}. ` +
+        (alsoReached ? `The RHS also reaches ${alsoReached}. ` : "") +
+        `A call from the client to a server-placed function lowers to a \`fetch\`, so it is ` +
+        `ASYNCHRONOUS — but a derived cell is a SYNCHRONOUS reactive recompute (§6.6.3: lazy ` +
+        `pull with dirty flags), and the runtime invokes the recompute with no \`await\` ` +
+        `(§6.6.4). The cell's value would therefore be the pending Promise itself, and that ` +
+        `Promise is what every reader of \`@${cellName}\` — a markup interpolation, another ` +
+        `derived cell, a dependency-graph edge — would render. The compiler refuses rather than ` +
+        `emitting that. This is a CORRECTNESS refusal, not a confidentiality one: ` +
+        `\`${terminusName}\` and its work stay on the server either way. Fix: do not read this ` +
+        `value through a derived cell. Call \`${hopName}\` ` +
+        `from an event handler or a lifecycle block and assign its result to a plain reactive ` +
+        `cell (\`<${cellName}> = …\`), which the compiler DOES await, and let the markup read ` +
+        `that cell. If \`${terminusName}\` was not meant to be server-side at all, check why ` +
+        `§12.2 placed it there — the chain above is the whole reason. See §6.6.19, §12.2, §12.4.`,
+        span,
+      );
+      eHop.severity = "error";
+      eHop.filePath = filePath;
+      errors.push(eHop);
     }
   }
 
