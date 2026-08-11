@@ -3825,14 +3825,73 @@ function computeServerReachingFns(
   fnNameToNodeIds: Map<string, string[]>,
   resolvedServerFnIds: Set<string>,
 ): ServerReachFacts {
-  // Same-file-resolved CALLER relation: calleeId -> the ids that call it.
+  // Same-file-resolved CALLER relation: calleeId -> the ids that reach it.
+  //
+  // NOT BUILT FROM `record.callees`, AND THAT COST ONE ROUND OF REVIEW TO LEARN.
+  // The first cut of this closure did use it, and was wrong at N=1: the callee
+  // walker `returns at case "lambda" and never descends`, so
+  //
+  //   function wrap(x) { return [x].map(v => doHash(v))[0] }
+  //
+  // has an EMPTY `callees` and vanished from this relation, while codegen emitted
+  // `async function _scrml_wrap_4` and bound it straight into
+  // `_scrml_cs_derived_declare("h", () => _scrml_wrap_4(…))` — byte-for-byte the
+  // one-hop shape §11a pins as refused, at exit 0 with an empty diagnostic set.
+  // Only the inner call's POSITION differed. That is the same evasion the S299
+  // adversarial review proved against a `callees`-and-calls-only reach check, and
+  // it is why `scanForServerOnlyBindingRefs` exists at all — so the edge set is
+  // built with THAT scanner, not with a second notion of "reaches".
+  //
+  // REFERENCE, NOT CALL — matching the scanner's contract and §6.6.19's own reach
+  // rule. This adds no over-fire in practice: a function that REFERENCES a
+  // server-placed fn without calling it is already promoted server-side by Step
+  // 5b capture taint, so it is already a SEED of this closure. Measured at S338 —
+  // `let f = doHash`, `let api = { run: doHash }` and `let g = (p) => doHash(p)`
+  // were all ALREADY refused before this change, via 5b, and the reviewer's claim
+  // that all four shapes were missed held for exactly one of them.
+  //
+  // Shadow discipline is `collectServerOnlyBindingModules`' (params normalized for
+  // the `string[]`-typed-but-actually-objects shape, plus body-level locals), for
+  // the same reason: a local named like a file-scoped function is not that
+  // function.
   const callersOf = new Map<string, Set<string>>();
+  const fnNamesByFile = new Map<string, Set<string>>();
+  for (const [, rec] of analysisMap) {
+    const nm = rec.fnNode.name;
+    if (typeof nm !== "string" || nm.length === 0) continue;
+    if (!fnNamesByFile.has(rec.filePath)) fnNamesByFile.set(rec.filePath, new Set());
+    fnNamesByFile.get(rec.filePath)!.add(nm);
+  }
+
   for (const [callerId, callerRecord] of analysisMap) {
-    for (const calleeName of callerRecord.callees) {
-      const globalIds = fnNameToNodeIds.get(calleeName);
+    const candidates = fnNamesByFile.get(callerRecord.filePath);
+    if (!candidates || candidates.size === 0) continue;
+    const body: LogicStatement[] = Array.isArray(callerRecord.fnNode.body)
+      ? callerRecord.fnNode.body
+      : [];
+
+    const shadowed = new Set<string>();
+    for (const p of (callerRecord.fnNode.params ?? []) as unknown[]) {
+      if (typeof p === "string") shadowed.add(p);
+      else if (p && typeof p === "object" && typeof (p as any).name === "string") {
+        shadowed.add((p as any).name);
+      }
+    }
+    for (const n of collectLocalNames(body)) shadowed.add(n);
+
+    const live = new Map<string, string>();
+    for (const name of candidates) {
+      if (name === callerRecord.fnNode.name) continue; // self-recursion adds no reach
+      if (shadowed.has(name)) continue;
+      live.set(name, name);
+    }
+    if (live.size === 0) continue;
+
+    for (const reachedName of scanForServerOnlyBindingRefs(body, live).keys()) {
+      const globalIds = fnNameToNodeIds.get(reachedName);
       if (!globalIds || globalIds.length === 0) continue;
       for (const calleeId of globalIds) {
-        if (calleeId === callerId) continue; // self-recursion adds no reach
+        if (calleeId === callerId) continue;
         if (analysisMap.get(calleeId)?.filePath !== callerRecord.filePath) continue;
         if (!callersOf.has(calleeId)) callersOf.set(calleeId, new Set());
         callersOf.get(calleeId)!.add(callerId);
@@ -5461,6 +5520,35 @@ export function runRI(input: RIInput): RIOutput {
     // the server-reaching declaration it resolves to. A name with any same-file
     // declaration that is NOT server-reaching is omitted (the 5c-bis ambiguity
     // rule — on doubt, do not fire).
+    //
+    // !! KNOWN OVER-FIRE, ROUTED FOR A RULING, NOT SETTLED HERE (S338 review F4).
+    //
+    //   function total(p) { return hashPassword(p) }      // server-reaching
+    //   const <doubled> = @nums.map(total => total * 2)   // FIRES — and should not
+    //
+    // `collectDerivedRhsLocalNames` stops at a nested `lambda`, so a lambda
+    // PARAMETER never enters the RHS shadow set and collides with the function
+    // name here. The direct limb has the identical behaviour and §7 pins it as
+    // intended, on the stated ground that "a too-WIDE shadow set produces a MISS
+    // (a leak), a too-narrow one produces an over-fire (a rejection the author can
+    // see and fix)".
+    //
+    // THAT GROUND DOES NOT TRANSFER TO THIS LIMB, and saying so is the point of
+    // this comment. This limb is a CORRECTNESS refusal, not a confidentiality one
+    // — a miss renders a Promise, it does not ship a secret — so the fail-closed
+    // asymmetry that licenses over-fire on the direct limb is absent, while the
+    // name set grew from ~4 imported stdlib members to EVERY server-reaching
+    // function name in the file. Same rule, an order of magnitude more surface,
+    // and a weaker justification.
+    //
+    // The fix is proper lexical scoping in `scanForServerOnlyBindingRefs` (a
+    // lambda's params shadow WITHIN that lambda's body), which would also make
+    // §6.6.19's "a name bound inside the RHS shadows the import and SHALL NOT
+    // fire" TRUE — it is false today in both limbs. That change makes the DIRECT
+    // limb newly-ACCEPTING on a confidentiality rule and overturns a deliberate
+    // S331 choice, so it is a ruling, not a cleanup, and it is not taken here.
+    // Until it is taken, the message says "reaches", never "calls" — asserting a
+    // call that is not in the source would be a false statement in a diagnostic.
     const serverReachingNamesHere = new Map<string, string>();
     for (const [name, ids] of fnNameToNodeIds) {
       const sameFile = ids.filter((id) => analysisMap.get(id)?.filePath === filePath);
@@ -5546,7 +5634,12 @@ export function runRI(input: RIInput): RIOutput {
 
       const eHop = new RIError(
         "E-DERIVED-SERVER-ONLY-REACH",
-        `E-DERIVED-SERVER-ONLY-REACH: The RHS of derived cell \`const <${cellName}>\` calls ` +
+        // "REACHES", never "calls". The scanner matches a REFERENCE at any depth
+        // (§6.6.19's own reach rule), so the matched name need not be a callee at
+        // all — a lambda PARAMETER of the same name matches, and asserting a call
+        // that is not in the source is a false statement in a diagnostic. See the
+        // over-fire note on `serverReachingNamesHere` below.
+        `E-DERIVED-SERVER-ONLY-REACH: The RHS of derived cell \`const <${cellName}>\` reaches ` +
         `\`${hopName}\`, which reaches server-side work: ${chainStr} — and \`${terminusName}\` ` +
         `is on the server because ${describeReachTerminus(cursor)}. ` +
         (alsoReached ? `The RHS also reaches ${alsoReached}. ` : "") +

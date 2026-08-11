@@ -925,6 +925,34 @@ const <computed> = countRows()
     expect(errorsWithCode(runRIOn(source).out, CODE).length).toBe(1);
   });
 
+  /**
+   * THE S338 REVIEW'S F1 — the closure's own one-hop miss, and the reason the
+   * hop edge set is not built from `record.callees`.
+   *
+   * That walker "returns at `case \"lambda\"` and never descends", so `wrap` had
+   * an EMPTY callee list and fell out of the caller relation entirely. Measured
+   * at the first-cut HEAD: exit 0, empty diagnostic set, and the emitted client
+   * carried `async function _scrml_wrap_4(x) { return (await _scrml_mapAsync([x],
+   * async (v) => await _scrml_fetch_doHash_3(v)))[0]; }` bound straight into
+   * `_scrml_cs_derived_declare("h", () => _scrml_wrap_4(…))` — byte-for-byte the
+   * "ONE hop" shape above, differing only in the inner call's POSITION.
+   *
+   * This is the exact evasion the S299 adversarial review proved against a
+   * calls-only reach check, reintroduced one level up. If someone "simplifies"
+   * the edge set back to `callees`, this is the test that goes red.
+   */
+  test("F1 REGRESSION PIN — a hop whose inner call sits inside a LAMBDA fires", () => {
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+function wrap(x) { return [x].map(v => doHash(v))[0] }`,
+      "wrap(@pw)",
+    ));
+    const hits = errorsWithCode(out, CODE);
+    expect(hits.length).toBe(1);
+    // and the chain must traverse the hop it could not previously see
+    expect(hits[0].message).toContain("const <computed> -> wrap -> doHash");
+  });
+
   test("a hop reached from a LAMBDA inside the RHS fires (reach is any depth)", () => {
     const { out } = runRIOn(programWithFns(
       "function doHash(p) { return hashPassword(p) }",
@@ -1150,11 +1178,14 @@ describe(`${CODE} §11f — the transitive limb INHERITS the direct limb's scope
 
 describe(`${CODE} §11e — the DIRECT limb is unchanged by the transitive one`, () => {
   test("a direct reach still emits exactly ONE diagnostic, not two", () => {
-    // The RHS names `hashPassword` directly AND the file has a server-reaching
-    // hop fn in scope. Two limbs must not both fire on one cell.
+    // THE RHS MUST NAME BOTH, or this test cannot fail (S338 review F6). The
+    // first cut used an RHS of just `hashPassword(@pw)`: the transitive limb
+    // never matched `doHash` at all, so the `continue` that de-duplicates the
+    // two limbs could be DELETED and this still passed — it pinned nothing.
+    // Naming both makes it bite: 1 here, 2 with the `continue` removed.
     const { out } = runRIOn(programWithFns(
       "function doHash(p) { return hashPassword(p) }",
-      "hashPassword(@pw)",
+      "hashPassword(@pw) + doHash(@pw)",
     ));
     expect(errorsWithCode(out, CODE).length).toBe(1);
   });
@@ -1170,6 +1201,122 @@ describe(`${CODE} §11e — the DIRECT limb is unchanged by the transitive one`,
   });
 
   test("§64 `kind=\"tool\"` still carves out BOTH limbs", () => {
+    const source = `<program kind="tool">
+\${ import { hashPassword } from 'scrml:auth' }
+
+\${ function doHash(p) { return hashPassword(p) }
+function main(argv) { println(doHash("x")) } }
+
+const <computed> = doHash("seed")
+
+</program>`;
+    expect(errorsWithCode(runRIOn(source).out, CODE).length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §11g — the two SPEC `SHALL` guards that had ZERO coverage (S338 review F5).
+//
+// Both of these sentences were normative and both mutants survived the whole
+// suite: deleting the same-file filter in `callersOf`, and flipping the
+// ambiguity guard's `every` to `some`, each left the tree fully green. A `SHALL`
+// with no test is a comment.
+// ---------------------------------------------------------------------------
+
+describe(`${CODE} §11g — same-file resolution and the ambiguity guard`, () => {
+  /** Two files in one RI run: a derived cell in A, a same-named server fn in B. */
+  function runRIOnTwoFiles(srcA, srcB) {
+    const a = parseFileAST(srcA, "/test/a.scrml");
+    const b = parseFileAST(srcB, "/test/b.scrml");
+    return runRI({ files: [a, b], protectAnalysis: { views: new Map() } });
+  }
+
+  /**
+   * MUTANT B6 — change `serverReachingNamesHere`'s
+   * `ids.filter((id) => analysisMap.get(id)?.filePath === filePath)` to `ids`
+   * and this goes red. Verified by applying that exact edit: 74 pass -> 1 fail.
+   *
+   * `fnNameToNodeIds` is name-keyed and GLOBAL across files. File A's derived RHS
+   * names `shout` with NO same-file declaration of it — an import, or simply
+   * undefined — while file B has an unrelated server-reaching `shout`. Firing on
+   * A would reject correct code on a coincidence of naming, which is precisely
+   * what Step 5c-bis refused to do for E-ROUTE-002 (§12.4). This is also the
+   * positive statement of the DOCUMENTED cross-file residual: we knowingly do not
+   * catch a genuine cross-file reach, because catching it means firing on this.
+   *
+   * A HAS NO LOCAL `shout` ON PURPOSE. The obvious fixture — a pure-client
+   * `shout` in A alongside the server `shout` in B — CANNOT kill this mutant: the
+   * AMBIGUITY guard below catches it first (A's own `shout` is not reaching, so
+   * `every()` fails and nothing fires either way). Two guards, two fixtures; a
+   * fixture that trips both proves neither.
+   */
+  test("a coincidental same-name server fn in ANOTHER file does NOT fire", () => {
+    const out = runRIOnTwoFiles(
+      `<program>
+<name> = "ada"
+const <loud> = shout(@name)
+<div>\${@loud}</div>
+</program>`,
+      `<program>
+\${ import { hashPassword } from 'scrml:auth' }
+<pw> = "secret"
+<o> = ""
+\${ function shout(s) { return hashPassword(s) } }
+<button onclick={ @o = shout(@pw) }>go</button>
+<div>\${@o}</div>
+</program>`,
+    );
+    const hits = (out.errors ?? []).filter(
+      (e) => e && e.code === CODE && e.filePath === "/test/a.scrml",
+    );
+    expect(hits.length).toBe(0);
+  });
+
+  /**
+   * MUTANT B7 — flip `sameFile.every(...)` to `sameFile.some(...)` in
+   * `serverReachingNamesHere` and this goes red.
+   *
+   * One file, one NAME, two same-file declarations: a top-level `pick` that is
+   * CLIENT-PINNED, and a nested `pick` inside a server-escalated function. The
+   * call in the derived RHS unambiguously binds to the top-level one, so firing
+   * would be an over-refusal. §12.4's rule: fire only when EVERY same-file
+   * candidate is server-reaching.
+   *
+   * THE PIN IS LOad-BEARING AND THE FIRST DRAFT OF THIS TEST DID NOT HAVE IT.
+   * With a plain `function pick(s) { return s.trim() }`, Step 5c's caller-context
+   * fixpoint PROMOTES the top-level `pick` server-side — `inverseCallerMap` is
+   * name-keyed, so `outer`'s call to its own NESTED `pick` registers a
+   * server caller against BOTH declarations. Both then become server-reaching,
+   * `every()` is satisfied honestly, and the diagnostic is CORRECT rather than an
+   * ambiguity-guard failure. `document.title` puts the top-level `pick` in
+   * `clientPinnedFnIds`, which 5c skips, so the ambiguity survives to be tested.
+   * (That name-keyed promotion is a pre-existing §12.2 imprecision, not this
+   * rule's — recorded here because it silently defeats the obvious fixture.)
+   */
+  test("an AMBIGUOUS same-file name (one reaching, one not) does NOT fire", () => {
+    const source = `<program>
+\${ import { hashPassword } from 'scrml:auth' }
+<pw> = "secret"
+<o> = ""
+
+\${ function pick(s) { document.title = s; return s }
+
+function outer(p) {
+    function pick(q) { return hashPassword(q) }
+    return pick(p)
+} }
+
+const <computed> = pick(@pw)
+
+<button onclick={ @o = outer(@pw) }>go</button>
+<div>\${@computed}\${@o}</div>
+</program>`;
+    expect(errorsWithCode(runRIOn(source).out, CODE).length).toBe(0);
+  });
+});
+
+describe(`${CODE} §11h — §64 tool carve-out`, () => {
+  test("`kind=\"tool\"` carves out BOTH limbs", () => {
     const source = `<program kind="tool">
 \${ import { hashPassword } from 'scrml:auth' }
 
