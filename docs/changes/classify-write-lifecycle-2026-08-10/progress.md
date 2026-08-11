@@ -202,3 +202,98 @@ CONTRADICTS a round-1 claim it says so explicitly and names the section (see §R
   `e566d0bd` IS an ancestor of `b1154b81` (the FACTS regen sits on top) — both coordinates are
   consistent.
 - Comparison ref for every measurement below: `origin/main` @ `23ea2e5c`.
+- **This session lost its first analysis pass to an API stall** (2026-08-11 ~06:00). Nothing was
+  corrupt; the F4 gate commit `6788044f` survived and the scratchpad probes survived. §R2.2 is the
+  re-established measurement. Process correction applied: measurements are banked to this file
+  BEFORE any source edit.
+
+## R2.2 The A3 escape-hatch measurement — banked FIRST (2026-08-11T06:22-06:00)
+
+> This section exists because the pre-stall pass reported *"the `given` wrapper is NOT an escape
+> hatch for A3"* and died before writing it down. **Re-established, and the completed measurement
+> CORRECTS that claim.** Recorded here in full because the correction matters more than the
+> original.
+
+### R2.2.1 What A3 is
+
+`BRIEF-round2.md §A3` (reviewer finding F2). The round-1 fix newly REJECTS a program in which the
+RHS cell is genuinely present at the write point, because the walker never sees the write that made
+it present:
+
+```scrml
+type User:struct = { name: string, age: number }
+<v>: (not to User) = not
+<u>: (not to User) = not
+function loadIt() { @v = < User name: "a", age: 1 > }
+${ loadIt()
+   @u = @v }
+${ @u.name }
+```
+
+Measured (`scratchpad/cwfix-r2/repro.mjs`, both refs, whole-file diagnostic multiset):
+
+| ref | result |
+|---|---|
+| `origin/main` @ `23ea2e5c` | `[]` |
+| this branch @ `b1154b81` | `["E-TYPE-001"]` on `@u`, line 11 |
+
+So it is a **newly-rejecting FALSE POSITIVE**, confirmed exactly as the brief states.
+
+### R2.2.2 Is it ESCAPABLE? — **YES. One edit, and it is the canonical one.**
+
+The load-bearing question, because a newly-rejecting change WITH a workaround costs an adopter an
+edit, while one WITHOUT costs them the feature. Each row is the A3 shape plus ONE candidate edit
+(`scratchpad/cwfix-r2/repro-workaround.mjs`, at this branch's HEAD):
+
+| # | adopter edit | result | verdict |
+|---|---|---|---|
+| W0 | *(unmodified A3 shape)* | `E-TYPE-001@12` | the false positive |
+| W1 | `given @v :> { @u = @v }` — guard the **WRITE** | `E-TYPE-001@12` | **does NOT help** |
+| **W2** | **`given @u :> { @u.name }` — guard the **READ**** | **CLEAN** | ✅ **the escape hatch** |
+| W3 | copy via a local (`let w = @v` ; `@u = w`) | CLEAN | works, but incidental (see below) |
+| W4 | drop the annotation on the destination | `E-CTX-003` | not viable (unrelated decl error) |
+| W5 | parenthesise the RHS (`@u = (@v)`) | CLEAN | **the F1 bug itself — my fix REMOVES this** |
+
+**W2 is the answer and it is not a workaround — it is the construct §14.12.6.1 already prescribes
+for reading a presence-lifecycle cell.** The adopter who hits A3 is pushed toward the canonical
+shape, not into a corner. Cost: one edit, in the position the language already governs.
+
+### R2.2.3 The correction to my own pre-stall claim
+
+*"The `given` wrapper is not an escape hatch"* was **true of the WRITE position (W1) and false as a
+general statement.** Guarding the READ (W2) works. The pre-stall claim was incomplete in the
+direction that would have over-escalated the finding, and I am recording it rather than quietly
+replacing it.
+
+### R2.2.4 What W1's failure actually is — PRE-EXISTING, not round-1's doing
+
+W1 fails **identically on `origin/main`** (`scratchpad/cwfix-r2/repro-escape.mjs`, cases E1/E5 →
+`["E-TYPE-001"]` on BOTH refs). A write nested inside a `given` body — or a fn body — never reaches
+`classifyWriteAgainstSpec` at all, because `walk()` skips `function-decl` (`type-system.ts:26382`)
+and a given-body write is classified in a cloned inner state that is discarded. That is round-1
+progress §10.3's known gap, measured again here on both refs. **Round 1 created the A3 false
+positive; it did NOT create the missing write-position guard.** Both halves have to be stated or the
+finding reads as twice as bad as it is.
+
+### R2.2.5 Recommendation on A3 — SHIP, pinned as known-imperfect
+
+Given W2 exists, the brief's disposition holds and I am not arguing against it:
+- direction-of-change is newly-rejecting **with** a canonical one-edit escape;
+- it fails LOUD (a diagnostic naming the binding and its annotation), whereas the defect the fix
+  closes fails SILENT (a member read of a value the compiler's own model knows is absent);
+- corpus incidence 0 (§R2.6 — and that zero is low-power, not safety).
+
+I therefore do **not** recommend descoping A3 or narrowing the guard further. The narrowing I
+considered and rejected — "refuse to refine when the file contains any write to the RHS cell the
+walker cannot see" — trades this false POSITIVE for a false NEGATIVE (a fn that is never called
+would then silence the real bug), and choosing between them needs the call-flow fact that the
+deferred arc is about. It would be a text-free but still evidence-free shortcut.
+
+### R2.2.6 Incidental finding, NOT actioned — a multi-statement top-level copy already rejects
+
+`scratchpad/cwfix-r2/repro-narrow.mjs` case N1: a top-level `@v = <User …>` followed in the SAME
+`${…}` block by `@u = @v`, then `@u.name`, fires `E-TYPE-001` on `@u` — **on BOTH refs**
+(`origin/main` and this branch). The single-statement control C1 (write then read the same cell) is
+CLEAN on both. So a *walker-visible* write does register for the cell it targets, but the
+second-statement copy in a multi-statement block does not clear the destination. Pre-existing,
+unrelated to this brief's three items, and NOT chased here. Filed for PA in §R2.7.
