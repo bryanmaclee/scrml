@@ -5159,7 +5159,7 @@ export function generateServerJs(
       for (const _inst of _ssrSeedTier1) _ssrSeededVarNames.add(_inst.name as string);
       for (const _decl of _ssrSeedPatternC) _ssrSeededVarNames.add(_decl.name as string);
       for (const _decl of _ssrSeedCallable) _ssrSeededVarNames.add(_decl.name as string);
-      const _ssrRenderers = buildSsrEachRenderers(fileAST, _ssrSeededVarNames);
+      const _ssrRenderers = buildSsrEachRenderers(fileAST, _ssrSeededVarNames, errors, filePath);
       if (_ssrRenderers.length > 0) {
         for (const _hl of SSR_RENDER_HELPER.split("\n")) lines.push(_hl);
         for (const _r of _ssrRenderers) {

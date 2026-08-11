@@ -39,6 +39,7 @@
 
 import { escapeHtmlAttr, VOID_ELEMENTS } from "./utils.ts";
 import { getNodes } from "./collect.ts";
+import { CGError } from "./errors.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { isUserComponentMarkup } from "../component-expander.ts";
 import { nsId } from "./chunk-namespace.ts";
@@ -331,25 +332,34 @@ function resolveKeyReadExpr(node: any): string {
 }
 
 /**
- * Build the server-side render function for ONE each-block, or return null when
- * the template is outside the supported subset (the each then falls back to the
- * pre-existing client-only render — empty mount, no regression).
+ * Build the server-side render function for ONE each-block, or a `{ fallback }`
+ * descriptor naming WHY the template is outside the supported subset (the each
+ * then falls back to the pre-existing client-only render — empty mount, no
+ * regression). The reason string feeds the `I-SSR-EACH-CLIENT-RENDERED` info-lint
+ * so the otherwise-silent fallback is loud to the adopter.
  */
-function buildOneRenderer(node: any, varName: string): SsrEachRenderer | null {
+function buildOneRenderer(node: any, varName: string): SsrEachRenderer | { fallback: string } {
   // Only a bare `@<seededVar>` in= iteration (no map/set/derived surface).
-  if (node.iterShape !== "in") return null;
+  if (node.iterShape !== "in") return { fallback: "the iteration shape is not `in=`" };
   // Isolate the single ROOT markup element (skip whitespace-only formatting text).
   const template: any[] = Array.isArray(node.templateChildren) ? node.templateChildren : [];
   const roots = template.filter(
     (c) => c && (c.kind !== "text" || String(c.value ?? c.text ?? "").trim()),
   );
-  if (roots.length !== 1 || roots[0].kind !== "markup") return null;
+  if (roots.length !== 1) {
+    return {
+      fallback: `the per-item template has ${roots.length} root elements (multi-root); the SSR renderer supports a single markup root`,
+    };
+  }
+  if (roots[0].kind !== "markup") {
+    return { fallback: `the per-item template root is a \`${roots[0].kind}\`, not a markup element` };
+  }
 
   try {
     const iterVarName = typeof node.asName === "string" && node.asName ? node.asName : null;
     const keyReadExpr = resolveKeyReadExpr(node);
     const rowParts = nodeToParts(roots[0], iterVarName, true, keyReadExpr);
-    if (rowParts.length === 0) return null;
+    if (rowParts.length === 0) return { fallback: "the row template produced no server-renderable content" };
 
     const mountId = nsId(node.id);
     const fnName = `_scrml_ssr_render_each_${mountId}`;
@@ -368,7 +378,9 @@ function buildOneRenderer(node: any, varName: string): SsrEachRenderer | null {
     ];
     return { id: node.id, mountId, varName, fnName, fnLines };
   } catch (e) {
-    if (e instanceof SsrUnsupported) return null;
+    if (e instanceof SsrUnsupported) {
+      return { fallback: e.message || "the row template is outside the SSR-renderable subset" };
+    }
     throw e;
   }
 }
@@ -382,6 +394,8 @@ function buildOneRenderer(node: any, varName: string): SsrEachRenderer | null {
 export function buildSsrEachRenderers(
   fileAST: any,
   seededVarNames: Set<string>,
+  errors?: CGError[],
+  filePath?: string,
 ): SsrEachRenderer[] {
   if (!seededVarNames || seededVarNames.size === 0) return [];
   const out: SsrEachRenderer[] = [];
@@ -400,10 +414,32 @@ export function buildSsrEachRenderers(
         const inRaw = String(node.inExprRaw ?? "").trim();
         const m = /^@([A-Za-z_$][A-Za-z0-9_$]*)$/.exec(inRaw);
         if (m && seededVarNames.has(m[1])) {
-          const renderer = buildOneRenderer(node, m[1]);
-          if (renderer) {
-            out.push(renderer);
-            seenIds.add(node.id);
+          // A prerender CANDIDATE: a top-level `<each in=@cell>` over a seeded
+          // server-authority cell. It either server-renders, or falls back to
+          // client-only render — and that fallback was SILENT before this lint.
+          seenIds.add(node.id);
+          const r = buildOneRenderer(node, m[1]);
+          if ("fallback" in r) {
+            // §52.8: the each ships EMPTY in the first-paint HTML and populates
+            // after hydration (no crawler/slow-connection first paint, no DOM
+            // adoption). Info-level, never fatal — this SURFACES existing
+            // conservative behaviour; it does not change what compiles. The
+            // accept/decline WIDENING of this subset is the tracked follow-on
+            // g-ssr-each-row-template-subset-blocks-all-prerender (ruling-gated).
+            if (errors) {
+              errors.push(
+                new CGError(
+                  "I-SSR-EACH-CLIENT-RENDERED",
+                  `I-SSR-EACH-CLIENT-RENDERED: <each in=@${m[1]}> renders client-only for first paint — ${r.fallback}. ` +
+                    `The list ships empty in the server HTML and populates after hydration (no first paint for crawlers or slow connections, no DOM adoption). ` +
+                    `Bring the row template into the §52.8 SSR-renderable subset, or accept the client-only first paint.`,
+                  (node.span ?? { file: filePath ?? "", start: 0, end: 0 }) as any,
+                  "info",
+                ),
+              );
+            }
+          } else {
+            out.push(r);
           }
         }
       }
