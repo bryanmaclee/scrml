@@ -32,7 +32,7 @@ import { bodyHasForeignOrSql, computeAsyncFnNames, emitLibraryFnMember, collectN
 import { buildCalleeImportMap } from "./scheduling.ts";
 import { emitLogicNode } from "./emit-logic.js";
 import { emitEnumVariantObjects } from "./emit-client.js";
-import { collectDbScopes, SERVER_STRUCTURAL_EQ_HELPER, generateHeadlessServerJs } from "./emit-server.ts";
+import { collectDbScopes, SERVER_STRUCTURAL_EQ_HELPER, generateHeadlessServerJs, localServerImportNameUsed } from "./emit-server.ts";
 import { getToolServeConfig, isLibraryShapedFile } from "../tool-program.ts";
 import type { ToolServeConfig } from "../tool-program.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
@@ -296,13 +296,13 @@ function isValidJsIdentifier(name: string): boolean {
  * The scrml `pinned` binding-modifier (§21.8.1) is a scrml-scope identity
  * contract, not an ES concept — it is dropped from the emitted `import`.
  */
-/** Word-boundary source-token liveness — is `name` referenced anywhere in `src`?
- * Conservative (matches the S207 import-prune granularity): a hit inside a string
- * / comment over-keeps (safe); the goal is to never DROP a referenced name. */
-function identReferencedInSrc(name: string, src: string): boolean {
-  if (!name) return false;
-  return new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(src);
-}
+// Source-token liveness — is `name` referenced anywhere in `src`? The tool's local-
+// `.scrml` import tree-shake reuses the SERVER prune's predicate `localServerImportNameUsed`
+// (emit-server.ts) rather than a second copy. The prior local `identReferencedInSrc` used
+// `\b`, which CANNOT match a boundary before a leading `$` (both sides non-word), so a
+// `$`-prefixed import local was judged dead and the whole import dropped → a dangling ref
+// → runtime ReferenceError (g-tool-import-prune-drops-dollar-prefixed-local, S340-peter fixing
+// a #508 HIGH; Rule 7 — one predicate, manual boundary guard, not a drifting `\b` copy).
 
 function buildImportHeader(fileAST: ASTNode): string {
   const imports = ((fileAST.imports as unknown)
@@ -346,7 +346,7 @@ function buildImportHeader(fileAST: ASTNode): string {
     // the S207 prune uses). Non-`.scrml` (stdlib / vendor / bare) imports are left
     // alone. Fail-safe: no body source → keep every specifier (no regression).
     if (source.endsWith(".scrml") && bodyRefSrc) {
-      specs = specs.filter((sp) => identReferencedInSrc(sp.local || sp.imported, bodyRefSrc));
+      specs = specs.filter((sp) => localServerImportNameUsed(bodyRefSrc, sp.local || sp.imported));
       if (specs.length === 0) continue; // every bound name is dead → drop the whole (dead) import
     }
     const named = specs

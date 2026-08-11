@@ -1,5 +1,9 @@
 // Phase 6: ?{} inside for loop — Tier 2 hoist candidate (§8.10)
-// Should compile clean; the batch planner may rewrite.
+// NOTE (S340-peter): this does NOT compile clean — the `let posts = ?{…}` inside the
+// `<each>` body is an author-declared local, which §17.7.3 does not scope into the each
+// body, so it hard-errors E-EACH-BODY-DECL-UNSUPPORTED (correctly — it was a latent silent
+// miscompile: `posts` would dangle at render). Rejected since #508 (S339); header corrected
+// S340. To hoist the per-row query, compute it outside the `<each>` or read fields directly.
 
 < db src="./test.db" tables="users, posts">
 ${
