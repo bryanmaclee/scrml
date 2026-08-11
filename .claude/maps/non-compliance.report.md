@@ -1,216 +1,167 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-08-09T15:20:00-06:00  commit: 616688ea
-# **INCREMENTAL over `35d4d32e` -> `616688ea` (19 commits, TWO operators — bryan S331, peter
-# S332/S333/S334).** Ancestry CHECKED FIRST (invariant 48): `git merge-base --is-ancestor 35d4d32e
-# HEAD` passes, so the delta is bounded. `616688ea` is one DOCS-ONLY commit ahead of `origin/main`
-# (`8863d457`).
-# scan mode: INCREMENTAL, TARGETED at the surface this window's diff could have falsified.
+# generated: 2026-08-11T14:53:28-06:00  commit: 4f034e13
+# generated-at: 4f034e13 (informational — not the currency anchor)
+# **INCREMENTAL over `8863d457` -> `4f034e13` (24 commits, TWO operators — bryan S331/S337/S338,
+# peter S334/S335/S336/S339/S340).** Ancestry CHECKED FIRST (invariant 48):
+# `git merge-base --is-ancestor 8863d457 4f034e13` passes, so the delta is bounded.
+# **The watermark is `origin/main`'s tip** — the prior stamp `616688ea` was a branch tip.
+# scan mode: INCREMENTAL, TARGETED at the surface this window's diff could have falsified, PLUS a
+# full re-verification of every carried finding (not a carry-forward — each was re-run at this HEAD).
 
 ## Summary — this pass
 
-**BOTH HAZARDS THE REFRESH BRIEF ASKED ME TO CHECK WERE REAL. Neither was a false alarm, and both
-are now corrected in-map.** That is the headline, because it means the failure mode is live and
-reproducible, not a one-off:
+**THE HEADLINE FINDING OF THE PRIOR PASS IS NOW A FIXED RULE, NOT A FINDING — and the reason it took
+four passes to fix is itself the most transferable thing in this report.**
 
-1. **The §18.5 "single classifier" overstatement is REAL, and its ORIGIN is a live doc, not the
-   maps.** `docs/known-gaps.md` calls `planBlockArmLift` *"the single §18.5 classifier"* (`:7784`)
-   and *"the single §18.5 tail classifier"* (`:7791`). The maps inherited the phrase; a dispatch
-   brief inherited it from the maps; an agent went to two wrong loci. **At HEAD it is the
-   segmenter+plan for TWO of FOUR emission routes and has exactly two call sites.** The single
-   shared leaf PREDICATE is `_blockTailIsValueExpr`, which all four routes touch. Finding **N1**.
-2. **"§12.2 escalation covers a position" is REAL as a class, and SPEC itself now forbids the
-   reading** (`SPEC.md:7312`, added this window). But **SPEC contradicts itself one section later**:
-   §12.6's library-mode clause (`SPEC.md:7444`) numbers the triggers differently AND names the WRONG
-   MODULE SET for placement — `SERVER_ONLY_SCRML_MODULES` instead of
-   `ESCALATION_SERVER_ONLY_MODULES`. That is the exact conflation the S299 amendment exists to
-   prevent, inside a normative clause. Finding **N2**.
+The off-main map stamp was first reported at S326, restated at S328 (in infra.map.md's own header, in
+bold), and restated again at S331. **It recurred every single time.** This pass fixed it at the
+source: primary.map.md now carries a MAP-STAMP RULE block, and invariant 48 is amended.
 
-**The most actionable finding for the next dispatch, though, is neither of those. It is N3: THREE
-`docs/known-gaps.md` entries carry `status=open` while their fixes LANDED IN THIS WINDOW** and are
-recorded in `docs/changelog.md` and `handOffs/delta-log.md`. `scripts/state.ts` derives the
-CI-visible rollup from those markers, so the OPEN population over-reports by at least three, and an
-agent scoping from the ledger would re-fix landed work — the S248 "three no-op dispatches" class,
-recurring.
+**The diagnosis: invariant 48 specified the INBOUND check and the failure is on the OUTBOUND side.**
+"Verify the stamp is an ancestor" tells you to check the stamp you are READING. The S331 author did
+exactly that (`git merge-base --is-ancestor 35d4d32e HEAD` — recorded in its header, and it passed),
+then **named the correct outbound SHA in the very next sentence** (*"`616688ea` is ONE COMMIT AHEAD
+of `origin/main` (`8863d457`)"*), and stamped the branch tip anyway. **A rule that names the command
+but not the MOMENT does not bind.**
 
-| | count |
-|---|---|
-| Tracked `*.md` in scope (outside `archive/`, `handOffs/`, `node_modules/`, `dist/`, `.claude/`) | 268 excluding `docs/changes/**`; ~1,400 including it |
-| NEW findings this pass | 5 |
-| Carried findings RE-VERIFIED still open | 6 |
-| Carried findings **RESOLVED** this pass | 2 (S320-N1, S326-N3-partial) |
-| Carried findings WIDENED (same defect, larger measurement) | 1 (the heading/marker drift: 10 → 13 by the NEW machine detector) |
-| Uncertain — needs human review | 2 (both carried, unchanged) |
+**And it was worse than the prior passes measured, because they only ever audited `primary.map.md`.**
+Auditing all FIVE distinct stamps live in the set on arrival:
 
-**What this report is NOT claiming.** It did not re-walk `docs/website/`, `docs/articles/`, the
-`docs/changes/**` archive beyond this window's additions, or the `samples/` / `examples/` READMEs.
-Those carry their prior-pass verdicts. This scan was TARGETED at the surface the window's diff could
-have falsified: the 19 changed source files, the §18.5 / §12.2 / §6.6.19 / §44.3 doc surface, the
-§34 catalog, the gap ledger, and the map set's own claims.
+| stamp | maps | ancestor of `origin/main`? | orphaned since |
+|---|---|---|---|
+| `616688ea` | primary, structure, dependencies, build, error, test, auth, domain, non-compliance | **NO** — tip of `wrap/s331`, squashed as `2391d483` | S331 |
+| `fe14c9b2` | schema | **NO** — tip of `wrap/s302` | **S302 — roughly TEN sessions** |
+| `97576f35` | infra | **NO** — tip of `wrap/s326-bryan` | S326 |
+| `e80b692e` | config | yes | — |
+| `115e8b1b` | migrations | yes | — |
 
----
+**`schema.map.md` is the instructive one and it is a NEW finding this pass.** The S331 currency pass
+looked directly at that stamp and wrote *"the stamp stays honestly older"*. **It was right about AGE
+and never asked about ANCESTRY.** Every "zero diff since `fe14c9b2`" command that header carried was,
+strictly, unbounded — the conclusion survived, but by luck rather than by the check.
+
+**The consequence was not cosmetic and it was SILENT.** `scripts/state.ts:545` guards its
+behind-count with `merge-base --is-ancestor` and correctly REFUSES to print a number it cannot
+compute (`:547`). But nothing escalates that refusal — so the pre-dispatch maps-currency check that
+`pa-scrml-overlay.md {{maps_fills}}` mandates before EVERY dev dispatch **returned nothing, silently,
+for three of the last six map generations.** A mandatory step was unanswerable and no gate noticed.
+**Verified fixed at this pass: the probe now prints `maps: N commits behind HEAD`.**
+
+**Beyond that, this pass found ONE new live source-code defect on `main` (N6), ONE published-figure
+methodology bug (N7), and ONE new instance of the baked-`:line`-rot class (N8).** All five carried
+findings were re-run at this HEAD and all five still hold.
 
 ## NEW this pass
 
-### N1. `docs/known-gaps.md` calls `planBlockArmLift` "the single §18.5 classifier" — it is the segmenter for TWO of FOUR routes, and the phrase has already propagated into a dispatch and cost a session
+### N6. A STALE, ORPHANED DOC COMMENT IS LIVE ON `main` — `route-inference.ts:3643-3657` contradicts the block directly below it, on the same function
 
-**Reason:** content-heuristic + grep-mismatch. Verified against source at `616688ea`.
-**Severity:** HIGH as a process defect. This is a doc phrase that measurably mis-routed an agent.
-**Locations:** `docs/known-gaps.md:7784` (inside the RESOLVED body of
-`g-match-block-arm-value-lift-covers-one-of-five-paths`) and `:7791` (inside
-`g-match-block-iife-tail-classifier-diverges-from-shared-plan`). Sibling phrasings in the archived
-briefs: `docs/changes/s330-match-block-arm-value-lift-all-paths/BRIEF.md:11` ("the single §18.5
-split+classify plan"), `.../progress.md:30` ("the ONE classifier-driven plan"),
-`docs/changes/s331-block-arm-route-unification/BRIEF.md:137` ("the ONE classifier").
+**This is a source-code finding, not a docs one, and it sits inside a confidentiality check.**
 
-**What is actually true at HEAD, each line re-derived:**
+`compiler/src/route-inference.ts` carries **TWO consecutive `/** … */` blocks** immediately above
+`skipDerivedWalkKey` (`:3677`). The FIRST (`:3643-3657`) describes a **SIX-entry deny-list**:
 
-- `planBlockArmLift` — `compiler/src/codegen/emit-logic.ts:4715`. **Exactly TWO call sites:**
-  `emit-logic.ts:4738` and `emit-control-flow.ts:2109`. Both are RAW-STRING routes.
-- `_blockTailIsValueExpr` — `emit-logic.ts:4653`. **FOUR consumers**, two of them direct:
-  `emit-logic.ts:4720` (inside `planBlockArmLift`), `emit-logic.ts:4882` (the local-decl
-  structured-AST arm), `emit-control-flow.ts:2354` (the IIFE structured-AST arm), plus the two
-  string routes transitively.
-- The two structured-AST routes do not segment **because an AST arm body already IS a statement
-  list.** That is a design property, not an omission — but it means `planBlockArmLift` cannot be
-  "the one place the decision is made" in the sense a reader takes from the phrase.
+> *"either non-AST baggage (`span`, `loc`), a non-plain container the walk cannot read anyway (`spans`
+> is a `Map`), a back-reference that would make the walk revisit the tree (`parent`), or scope/symbol
+> side-tables … (`_scope`, `_record`)"*
 
-**Why the phrase is seductive and therefore dangerous.** The code comment above `planBlockArmLift`
-says *"This is the ONE place the tail-vs-statement decision is made; every value-position
-match-lowering path … routes through it"* (`emit-logic.ts:4702-4705`). **That comment is itself
-imprecise at HEAD** — `emit-control-flow.ts:2324-2326`'s own comment corrects it, saying the
-structured path delegates to `_blockTailIsValueExpr` because *"there is no second, independent
-value/void predicate."* **Two comments in two files describing the same seam at two different levels
-of abstraction, and the doc quoted the wrong one.**
+The SECOND — the current one — **explicitly records that the S337 review DELETED `parent`, `loc` and
+`spans`**, because none exists as a node field at RI time and each was "pure FAIL-OPEN SURFACE".
 
-**Suggested disposition:** update to match current — a one-line correction in each of the two
-`docs/known-gaps.md` bodies. The precise wording that survives scrutiny: *"`_blockTailIsValueExpr` is
-the single §18.5 tail PREDICATE (all four routes); `planBlockArmLift` is the shared
-segmenter+plan for the two raw-string routes."* The archived `docs/changes/**` briefs are historical
-records and should be left alone. **Also worth one line in `emit-logic.ts:4702`'s comment**, but that
-is a code edit and out of this agent's scope.
+**The shipped predicate is the two-clause one:** `key === "span" || key.startsWith("_")`.
 
----
+**Why this is worth a finding rather than a nit.** The stale block is the FIRST thing a reader hits,
+it is confident and specific, and **it argues for keeping exactly the entries the review removed.**
+A future maintainer restoring `parent` to that list would silently re-open the fail-open surface the
+S337 review closed — and would believe they were following the file's own guidance. The two blocks
+are not merely redundant; **they disagree about a security-relevant decision.**
 
-### N2. `SPEC.md` §12.6 numbers the §12.2 escalation triggers differently from §12.2 itself AND names the WRONG server-only module set for placement
+**Disposition: delete the first block (`:3643-3657`).** Compiler-source edit — **NOT performed by
+this dispatch** (scope-barred from `compiler/src/`). Routed to the PA.
 
-**Reason:** spec-internal contradiction on a confidentiality boundary. Verified by reading both.
-**Severity:** MEDIUM-HIGH. It is normative text pointing a reader at the set the S299 amendment
-exists to keep OFF the placement decision.
-**Location:** `compiler/SPEC.md:7444` vs `compiler/SPEC.md:7290-7297` (the §12.2 numbered list).
+### N7. `s34-census.ts`'s published `source files` figure is ENVIRONMENT-DEPENDENT — the prior map set's `1887` does not reproduce at any commit
 
-`SPEC.md:7444` (§12.6, library mode) reads:
+`filesScanned` (`scripts/s34-census.ts:184`) increments over a **FILESYSTEM walk** of ten roots
+(`compiler/src`, `native-parser`, `runtime`, `compiler/scripts`, `self-host`, `self-host-v2`, `lsp`,
+`scripts`, `stdlib`, `compiler/tests`). It therefore counts whatever **gitignored build output** the
+checkout happens to hold. In a fresh worktree, tracked and on-disk agree exactly (**1,858 = 1,858**);
+in a built checkout they do not, which is where `1887` came from.
 
-> *"…its escalation reasons (§12.2) are ALL server-only-resource reasons (**Trigger 1**, a server-only
-> resource / server-only stdlib import per the **`SERVER_ONLY_SCRML_MODULES`** set; or **Trigger 3**,
-> a `?{}` SQL context)…"*
+**Three map files published it as a repo fact** (primary, structure, error) and one of them used it
+in a delta comparison. **All three are corrected this pass**, and each now carries the tracked figure
+(1,850 → 1,858, +8 = 3 new `scripts/` probes + 5 new test files) with the caveat.
 
-**Both parentheticals disagree with §12.2's own numbered list**, where Trigger 1 is *"accesses a
-resource not accessible from the client"* and **Trigger 3 is the server-only stdlib import trigger,
-whose set is `ESCALATION_SERVER_ONLY_MODULES`** — named explicitly in §12.2 and enumerated there.
-`?{}` SQL is not numbered as Trigger 3 anywhere in §12.2.
+**The generalisable rule, now written into primary.map.md: a count that walks the filesystem is not a
+repo fact. Publish the index-derived number, or state which environment produced it.** Note this is
+NOT a defect in `s34-census.ts` — the figure is a scan-scope diagnostic for the tool's own operator
+and is fine in that role. **The defect is quoting it as a repo measurement.**
 
-**Why this is more than a numbering nit.** §12.2's own S299 amendment note spends four paragraphs
-establishing that the two sets are **deliberately distinct** and that reusing the async set
-(`SERVER_ONLY_SCRML_MODULES`) for placement was **measured to over-escalate 72 corpus import
-sites**. §12.6 then cites that exact set for a placement-adjacent decision. A reader implementing
-§12.6 from its own text would consult the wrong set. The implementation is correct
-(`isBodyOnlyEscalation` gates on the reason KIND, not on a module set), so **this is a spec-text
-defect with no current code consequence — which is precisely why nothing will catch it.**
+**Sibling instance found while verifying the same class, and it runs the other way:** `docs/FACTS.md`
+counts `test files` as **`*.test.js` only**, excluding the 15 `*.test.ts` files under the same tree.
+So `git ls-files` on `*.test.*` returns **1,361** where FACTS says **1,339**. **Neither is wrong;
+they count different populations.** test.map.md now says so explicitly, because a future pass that
+"corrects" one to the other would be introducing an error.
 
-**Suggested disposition:** update to match current. Renumber the parentheticals to §12.2's list and
-replace `SERVER_ONLY_SCRML_MODULES` with `ESCALATION_SERVER_ONLY_MODULES` in the §12.6 clause. **This
-is a SPEC edit and therefore an operator/PA decision, not a fix-forward** — flagging only.
+**Disposition: no code change owed. The map corrections are landed. Optionally, `facts.ts` could
+label the census figure or drop it — the PA's call.**
 
----
+### N8. `scripts/source-text-regex-census.ts` PRINTS a baked `file:line` — the exact rot class this repo stripped from §34 at S305
 
-### N3. THREE `docs/known-gaps.md` entries say `status=open` while their fixes LANDED THIS WINDOW — the rollup over-reports and an agent scoping from the ledger will re-do landed work
-
-**Reason:** grep-mismatch — the entries describe code that no longer exists.
-**Severity:** HIGH for dispatch planning. This is the S248 "three no-op dispatches" class recurring.
-**Verified:** each fix located in source at `616688ea` AND cross-referenced to `docs/changelog.md`
-and `handOffs/delta-log.md`.
-
-| Gap id | Marker | Actually landed | Evidence at HEAD |
-|---|---|---|---|
-| `g-s34-census-windows-only-url-pathname-breaks-the-one-command-catalog-probe` (`:54`) | `sev=MED status=open locus=scripts/s34-census.ts:49` | **#473 `0beddacc`** (S332-peter) | `scripts/s34-census.ts:48` `import { fileURLToPath } from "node:url"`, `:53` `const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..")`. **The entry's own locus `:49` now points at the COMMENT explaining the fix.** `docs/changelog.md:19` records it. |
-| `g-server-fn-body-reindent-corrupts-multiline-template-literals` (`:643`) | `sev=MED status=open` | **#474 `7c8e92ff`** (S332-peter) | `emit-server.ts` now carries a mini string/template lexer; `compiler/tests/integration/g-server-fn-reindent-template-literal.test.js` (102L) pins it. `docs/changelog.md:20` records it. **Caveat: a documented residual remains** (a REGEX LITERAL containing a backtick paired with a multi-line template; **corpus-unreachable, 0 instances**) — so the honest marker is `narrowed`, not `resolved`. But `open` with no narrowing note is wrong either way. |
-| `g-request-is-some-in-value-bool-class-attr` (`:2588`) | `sev=MED status=open locus=compiler/src/codegen/emit-bindings.ts:383,874` | **#484 `93388e3c`** (S333-peter) | `reparseRequestRefEscapeHatch` + `collectRequestIds` are threaded at both callsites; `unit/request-ref-is-some-value-bool-class-attr-misroute.test.js` (200L) + conformance `lifecycle/request-data-is-some-value-bool-class-attr-rt` pin it. **Two SIBLINGS were filed as NEW open gaps in the same window** (`-in-each-loop-attr-misroute`, `-in-mixed-text-attr-template-misroute`), which is likely how the parent's own status was missed. |
-
-**The transferable point, and it is the reason this is HIGH and not bookkeeping.** `scripts/state.ts`
-derives the `@generated:gap-counts` rollup — and its CI `--check` gate — from **the marker**. The
-gate passes. The counts are internally consistent. **They are just wrong about the world**, and
-nothing in the repo compares a gap's locus against HEAD. Two of the three were fixed by a DIFFERENT
-operator than the one who filed them, which is the structural reason: the fixing clone had no
-prompt to close the other clone's ledger entry.
-
-**Suggested disposition:** update to match current — flip `#473`'s and `#484`'s markers to
-`resolved`, and `#474`'s to `narrowed` with its residual named. **A durable fix exists and is
-cheap:** `state.ts` already grew a `headingMarkerDrift()` detector this window; a sibling check that
-greps each `open` entry's `locus=` file for the exact code the entry quotes would have caught all
-three. See N5.
-
----
-
-### N4. `docs/known-gaps.md` heading-vs-marker status drift is now MACHINE-MEASURED at **13** — and the machine that measures it is WARN-only by design
-
-**Reason:** the doc disagrees with itself; now instrumented.
-**Severity:** MEDIUM. **Status change: this finding is no longer an estimate.** The prior pass
-counted 10 by hand and a later pass said 19. `scripts/state.ts --check` at `616688ea` reports
-**13 DRIFT**, and that figure is now reproducible on demand — #485 shipped the detector.
-
-The thirteen, verbatim from `bun scripts/state.ts --check`:
+The script's runtime output includes:
 
 ```
-L1338 G-DBAUTH-DOCS-NO-DO-NOT-MARK-USERS-EXAMPLE: heading=resolved marker=open
-L3035 g-tailwind-lint-false-fires-on-scoped-class: heading=open marker=resolved
-L3047 g-control-flow-in-markup-lift-body-evades-diagnostic: heading=open marker=resolved
-L3057 g-safecall-bang-handler-not-lowered-in-library-mode: heading=open marker=resolved
-L3062 g-bindvalue-wiring-dropped-in-match-arm: heading=open marker=resolved
-L3074 g-expr-event-handler-dead-in-each: heading=open marker=resolved
-L3077 g-onmount-async-call-renders-slot: heading=open marker=resolved
-L3084 g-enum-toenum-not-lowered-server-side: heading=open marker=resolved
-L5112 g-sse-route-object-typer-scope: heading=open marker=resolved
-L5123 g-each-peritem-markup-value-ternary: heading=open marker=resolved
-L5126 g-nested-interp-in-markup-value-literal: heading=open marker=resolved
-L5129 g-nested-each-outer-key-reuse-inner-frozen: heading=open marker=resolved
-L5137 g-foreign-inline-crossing-shadow: heading=open marker=resolved
+see `postRe.test(t)` — the site of the confirmed defect at type-system.ts:26048.
 ```
 
-**Note the direction, because it is not uniform.** Twelve read `heading=open marker=resolved` — the
-grep-visible line over-reports open work. **One (`L1338`) runs the OTHER way**: the heading says
-resolved while the marker says open, so a human skimming headings would believe a DB-authoritative
-docs gap was closed when the counted state is open. **A drift detector that only checked one
-direction would have missed it** — the same bidirectional-hole-detection principle the audits
-mandate.
+(`scripts/source-text-regex-census.ts:136`, and the same citation in its header at `:38`.)
 
-**Suggested disposition:** update to match current, thirteen one-line edits. **Do NOT gate it** —
-the WARN-only choice is correct and deliberate (pre-existing drift exists, a hard gate blocks CI,
-and this is doc hygiene not a currency guarantee).
+**It is CORRECT at this HEAD — verified: `type-system.ts:26048` is
+`const postRe = new RegExp(...)`.** That is precisely what makes it a hazard rather than a bug today.
+**A baked `:line` in a maintained artifact rots silently and nothing fails** — this repo already
+ruled on that class (S305 stripped 103 `file:line` citations from §34 down to 5, keeping file paths
+and dropping line numbers) and structure.map.md carries two line-number corrections from the same
+cause. **A number printed to an operator by a running tool is worse than one in a doc, because it
+carries the authority of having just been computed.**
 
----
+**Disposition: replace with `type-system.ts` + the symbol (`postRe`), matching the S305 ruling.**
+`scripts/` edit — **NOT performed by this dispatch** (scope-barred). Routed to the PA.
 
-### N5. `route-inference.ts:3438` cites SPEC **§6.6.20**; the section is **§6.6.19**
+**Note the honest half, which is not a finding and should not be read as one:** the same script
+declares its own blind spot in its header — it keys on argument identifier NAMES, so it cannot see
+`postRe.test(t)`, and its author records that a probe built to detect pattern-matching-instead-of-
+resolving-structure inherited exactly that blind spot, and names the structural successor. **That is
+a model self-report and this pass has no criticism of it.**
 
-**Reason:** grep-mismatch — a code comment cross-references a SPEC section that does not exist.
-**Severity:** LOW, but it is in the file carrying this window's flagship landing and it is one word.
-**Detail:** `compiler/src/route-inference.ts:3438` —
+### N9. `docs/known-gaps.md` still calls `planBlockArmLift` "the single §18.5 classifier" — the S331 finding is UNRESOLVED and the phrase is still propagating
 
-```
- * the derived-cell-RHS one (`collectDerivedRhsServerOnlyRefs`, §6.6.20).
-```
+Re-verified at this HEAD: `docs/known-gaps.md:7925` ("the single §18.5 classifier") and `:7932`
+("the single §18.5 tail classifier"). **This was filed as S331-N1, the maps were corrected, and the
+SOURCE of the phrase was not.** The maps now contradict the ledger on a point that has already cost
+one session (an agent sent to two wrong loci).
 
-Every other reference in the same file and in the conformance cases says **§6.6.19**
-(`route-inference.ts:3600`, `:4429`, `SPEC.md:3694`, `SPEC.md:3304`, `SPEC.md:19483`,
-`SPEC.md:7312`, `SPEC-INDEX.md:134`, and all three `conformance/cases/derived/…/expected.json`).
-`grep -n "6\.6\.20" compiler/SPEC.md` returns **nothing** — the section does not exist.
-
-**Suggested disposition:** update to match current (one character). Flagged rather than fixed —
-this agent does not edit source.
-
----
-
+⚠ **This dispatch is SCOPE-BARRED from `docs/known-gaps.md`** (S340-peter may be live on it), so it
+is reported, not fixed. **Nothing has changed about the finding except that it is now a window
+older** — and `emit-logic.*`/`emit-control-flow.*` are zero-diff this window, so the correction
+"segmenter for TWO of FOUR routes; the leaf predicate is `_blockTailIsValueExpr`" is verified still
+accurate.
 ## RESOLVED this pass
+
+### S326-N-series / S328 / S331 — THE OFF-MAIN MAP STAMP: **CLOSED, at the source**
+
+Reported three times across four passes and recurring every time. Closed by (a) the MAP-STAMP RULE
+block at the top of primary.map.md, which specifies the OUTBOUND check and the three-command
+procedure, (b) the amendment to invariant 48 separating inbound from outbound, and (c) restamping all
+thirteen files, including the two whose orphaned stamps predated the prior pass entirely
+(`fe14c9b2`, S302; `97576f35`, S326). **Verified by exit-0 on
+`git merge-base --is-ancestor <stamp> origin/main` for every map, and by `bun scripts/state.ts` now
+printing a real behind-count where it previously printed `behind-count unavailable`.**
+
+**The convention that CAUSED the recurrence is also retired, and naming it matters:** prior passes
+deliberately froze line 3 at the last walk's SHA to signal "this map was not re-walked". The
+INTENTION was right — an honest older stamp beats a false "verified at HEAD". **The mechanism was
+wrong: line 3 is a CURRENCY ANCHOR consumed by a tool, not a provenance note read by a human.**
+Provenance now lives on a separate "content as of X" line, and every map's own header still carries
+the zero-diff command justifying not re-walking it.
 
 ### S320-N1 — **CLOSED.** `scripts/s34-census.ts` is no longer broken on any platform
 
@@ -239,37 +190,108 @@ pass" to "printed by a probe" has changed category**, even with the same instanc
 
 ## Carried findings — RE-VERIFIED at this HEAD
 
+**Every finding below was RE-RUN at `4f034e13`, not carried forward on faith. Each states the command
+that re-verified it.**
+
+### S331-N2 (carried, UNCHANGED). `SPEC.md` §12.6 contradicts §12.2 — it names the WRONG server-only module set for placement
+
+Re-verified: `SPEC.md:7444` still reads *"Trigger 1, a server-only resource / server-only stdlib
+import per the `SERVER_ONLY_SCRML_MODULES` set; or Trigger 3, a `?{}` SQL context"*.
+
+**Two defects in one clause, and the second is the serious one.** (a) It numbers the §12.2 triggers
+differently from §12.2 itself — §12.2's Trigger 3 IS the server-only import; §12.6 calls that Trigger
+1 and gives Trigger 3 to `?{}` SQL. (b) **It names `SERVER_ONLY_SCRML_MODULES` for a PLACEMENT
+decision.** That set feeds ASYNC classification, where over-inclusion is safe;
+`ESCALATION_SERVER_ONLY_MODULES` is the placement set, where neither direction is safe. **Conflating
+them is the exact defect the S299 amendment exists to prevent, and here it sits inside a normative
+clause** — two sections after `SPEC.md:7312` where §12.2 states the correct scope rule. **A reader
+who reaches §12.6 first gets the wrong module set from a SHALL.**
+
+**Still open. SPEC edit — scope-barred from this dispatch.** Routed to the PA.
+
+### S331-N5 (carried, UNCHANGED). `route-inference.ts:3438` cites SPEC **§6.6.20**; the section is **§6.6.19**
+
+Re-verified verbatim at this HEAD: `* the derived-cell-RHS one (\`collectDerivedRhsServerOnlyRefs\`, §6.6.20).`
+
+A one-character miscitation in the doc comment of the very function the section governs. **Note this
+survived a window in which the surrounding function was substantially rewritten (#500, +125 lines) —
+the rewrite touched the code and not the citation**, which is the ordinary way a citation rots.
+Compiler-source edit — scope-barred. Routed to the PA.
+
+### S331-N3 / S331-N4 (carried, NOT RE-MEASURED — deliberately). `docs/known-gaps.md` status drift
+
+The prior pass found THREE entries reading `status=open` whose fixes had landed, and a
+machine-measured **13** entries whose `### ` heading status disagrees with their `@gap` marker.
+
+⚠ **THIS PASS DID NOT RE-MEASURE EITHER, AND THAT IS A DELIBERATE SCOPE DECISION RATHER THAN AN
+OMISSION.** The dispatch brief bars this worktree from `docs/known-gaps.md` because S340-peter may be
+live on that file, and **re-measuring a contended ledger from a stale worktree would produce a number
+that is wrong the moment it is written.** `bun scripts/state.ts --check` prints the drift count
+(#485) and is the live authority. **Do not carry 3 or 13 forward from this report as current.**
+
+The standing rule the findings produced is unchanged and does not need a re-measure to hold:
+**`state.ts` parses the MARKER, so the rollup and its CI gate are correct and blind to the
+disagreement — and the heading is the line a grep returns.**
+
 ### C3. SPEC §52.15.5 still describes the retired `<div data-scrml-each-mount>`
 **Still open.** `grep -c "data-scrml-each-mount" compiler/SPEC.md` = **1**. Unchanged this window.
 
-### C4. NINE live `W-LINT-*` codes have no §34 row — **re-measured, and the count is NINE, not eight**
-**Still open, and WIDENED by measurement.** Each of `W-LINT-016` … `W-LINT-024` returns **0** rows
-from `grep -c "| W-LINT-0NN " compiler/SPEC.md` while each appears in `compiler/src/`. The prior two
-passes recorded this as "EIGHT"; the re-derivation at this HEAD says **nine** (`016`–`024`
-inclusive). **The correction matters more than the delta**: a carried count that nobody re-derives
-is exactly the rot class this report exists to name, and this report was the one carrying it.
+### C4. NINE live `W-LINT-*` codes have no §34 row — **re-derived at this HEAD, and NINE is confirmed**
+**Still open, count CONFIRMED at nine.** `W-LINT-016` … `W-LINT-024`, each with a real
+`code: "W-LINT-0NN"` push site in `compiler/src/lint-ghost-patterns.js` and **0** rows in §34.
+
+⚠ **A METHODOLOGY NOTE, because this pass's FIRST cut of this measurement was WRONG in the exact way
+the map set warns about.** A naive `comm`-diff of "all `W-LINT-*` tokens in `compiler/src/`" against
+"all `W-LINT-*` §34 rows" returns **ELEVEN**, not nine. The two extras are not codes:
+`W-LINT-NNN` is a JSDoc PLACEHOLDER (`lint-ghost-patterns.js:62`, `:696`), and `W-LINT-009` appears
+only inside a COMMENT — `// (No separate entry for W-LINT-009 — W-LINT-004 subsumes it.)`
+(`:868`). **A grep hit is not a fire site.** Nine is the figure that survives reading each hit, and
+it is the same nine the prior pass recorded — so this is a confirmation, not a widening.
 
 ### C5. `compiler/SPEC-INDEX.md` — the generated half is current, the AUTHORED half is not
-**Still open.** The generated totals + section row-ranges regenerated this window (+133 lines,
-CI-gated by `scripts/regen-spec-index.ts --check`, and §6.6.19's insertion forced every range below
-it to move). **Only the totals and ranges are gated.** The authored per-section prose is ungated and
-was not touched.
+**Still open.** The generated totals + section row-ranges regenerated this window (**33 row-range
+lines rewritten, net zero lines** — CI-gated by `scripts/regen-spec-index.ts --check`; the two new
+§34 rows shifted every range below them). **Only the totals and ranges are gated.** The authored
+per-section prose is ungated, was not touched, and continues to rot.
 
 ### C6. `docs/tutorial.md` hardcodes `v0.7.0` at four sites while `package.json` is `0.7.1`
 **Still open, count unchanged at 4.** Re-verified: `grep -c "v0\.7\.0" docs/tutorial.md` = 4;
 `package.json` `"version": "0.7.1"`.
 
 ### C7. `compiler/native-parser/` — zero diff, none owed
-**Still true.** `git diff --name-only 35d4d32e..616688ea -- compiler/native-parser/` is **EMPTY**.
+**Still true.** `git diff --name-only 8863d457..4f034e13 -- compiler/native-parser/` is **EMPTY**.
 The standing `.scrml`-mirror feature-staleness gap is unchanged and nothing this window widened it.
 
-### C8. The four `*.generated.md` indexes are unmaintainable — and this window is the fifth demonstration
-**Still open, and the gap widened again.** `.claude/maps/test.generated.md`,
-`structure.generated.md`, `dependencies.generated.md` and `error.generated.md` are all stamped
-**2026-06-25** and have not moved in six windows. `test.generated.md` claims 1042 `.test.js`; the
-truth at this HEAD is **1,334** — it now under-reports by **292** (was 286).
-**Suggested disposition: delete them.** They are strictly dominated by the hand-walked maps beside
-them and their only function now is to give a grep a wrong answer.
+⚠ **But note WHY nothing is owed, because the reason is thinner than it looks.** Every codegen change
+this window landed in `compiler/src/codegen/`, and the native parser mirrors the PARSER, not the
+emitters. **`name-resolver.ts` DID move (`<timeout>` added to `SCRML_NON_ELEMENT_TAGS_EXTRA`) and it
+is a resolution-stage file** — verified no `native-parser/` counterpart exists for that list, so no
+mirror obligation attaches. A future lifecycle-tag addition that touches the tokenizer or the block
+splitter WOULD attach one.
+
+### C8. The four `*.generated.md` indexes — **RECLASSIFIED THIS PASS. The finding was real and its CATEGORY was wrong for five windows.**
+
+**They are NOT tracked files, and they never have been.** `git ls-files .claude/` returns exactly 16
+paths — the 13 maps, `agents/project-mapper.md`, `settings.json`, `statusline.mjs` — and
+`git log --all --diff-filter=AD -- '.claude/maps/*.generated.md'` is **EMPTY**. `.claude/` is
+gitignored with `.claude/maps/` force-tracked, so those four files exist only as **untracked,
+per-clone local artifacts** in whichever checkout generated them. They are absent from this worktree
+entirely.
+
+**Why the reclassification matters more than the original finding.** For five windows this report
+listed them under repo non-compliance with the disposition "delete them", implying a commit. **There
+is nothing to commit.** The correct disposition is a per-clone `rm` — and, one level up, the real
+finding is that **a stale generator's output living beside the hand-walked maps, invisible to git, is
+a class no repo-level gate can ever see.** A future pass that greps the repo for them will find
+nothing and may conclude the finding was resolved.
+
+**This pass could not re-measure their contents** (they are not in this worktree), so the carried
+"`test.generated.md` claims 1042" figure is **unverified at this HEAD and should not be requoted.**
+What IS verifiable: the true count is **1,339**.
+
+**Suggested disposition: `rm` them in each clone that has them, and — the part that actually closes
+the class — either retire the generator or have it write inside a tracked path so a gate can reach
+its output.** Routed to the PA; nothing here is a repo edit.
 
 ### S313-N5. `scripts/git-hooks/pre-push` — comment still stale
 **Still open.** Unchanged this window (`scripts/git-hooks/` has zero diff).
@@ -284,7 +306,10 @@ them and their only function now is to give a grep a wrong answer.
 
 Recorded here rather than fixed silently, because the corrections ARE findings.
 
-| Map claim (prior generation) | Truth at `616688ea` |
+> **The table below is the PRIOR pass's correction ledger, retained because each rule it produced is
+> still the rule.** This pass's own corrections are the four rows appended at the bottom.
+
+| Map claim (prior generation) | Truth at `4f034e13` |
 |---|---|
 | §18.5: `planBlockArmLift` reads as the single classifier every path routes through | **FOUR emission routes; `planBlockArmLift` has TWO call sites and is the segmenter+plan for the raw-string pair. `_blockTailIsValueExpr` is the single leaf predicate.** Four-route table added to domain.map.md; invariant 49 added; dependencies.map.md's §18.5 row rewritten in place |
 | §12.2 Trigger 3 described without a scope statement | **Escalation is per-FUNCTION and reaches no other position (`SPEC.md:7312`, normative this window). Two non-function positions still LEAK with no diagnostic.** Scope table added to domain.map.md; invariant 50 added; auth.map.md gains the coverage table |
@@ -294,26 +319,43 @@ Recorded here rather than fixed silently, because the corrections ARE findings.
 | §34 catalog **806**, "unchanged" | **807** — first movement in five windows (`E-DERIVED-SERVER-ONLY-REACH`) |
 | `s34-census.ts` "broken on Windows, use the manual fallback" | **FIXED (#473). Runs everywhere. The manual method is a cross-check, not a fallback** |
 | counts across four maps: 238,974 lines / 1,328 tests / 37,074 SPEC / 865 conformance | **240,107 / 1,334 / 37,150 / 880**, each independently re-derived and cross-checked three ways |
-| `test.generated.md`: 1042 `.test.js` | **1,334** (under-reports by 292) |
+| `test.generated.md`: 1042 `.test.js` | **1,339** (under-reports by **297**) |
+| **THIS PASS —** map stamps `616688ea` / `fe14c9b2` / `97576f35` presented as currency anchors | **all three are ORPHANED BRANCH TIPS.** Restamped to `4f034e13`; provenance moved to a "content as of X" line. **`fe14c9b2` had been orphaned since S302 and no prior pass caught it, because every prior audit checked `primary.map.md` only.** |
+| **THIS PASS —** `1887 source files` published in three maps as a repo measurement | **environment-dependent; does not reproduce at any commit.** Tracked figure 1,850 → 1,858. See N7. |
+| **THIS PASS —** §6.6.19 described as closing the derived-cell position (S331 framing) | **TRUE-BUT-INCOMPLETE, and the incompleteness was a live leak.** The refusal shipped at #486; its collector reached two hardcoded fields, and **SIX positions still leaked a real `Bun.password.hash` into the browser bundle at exit 0** until #500. auth.map.md's position table and domain.map.md's §6.6.19 section are corrected. |
+| **THIS PASS —** `<timer>`/`<poll>` first-tick asymmetry written in the present tense since S314 | **that was the SPEC amendment; the CODE landed at #510, this window.** Until then `_scrml_timer_start` had four parameters and no immediate-tick path, and the described behaviour was produced *accidentally* by the `collect.ts` descent defect. **A map section describing ratified intent in the present tense is indistinguishable from one describing shipped behaviour** — domain.map.md now splits the two explicitly. |
 | known-gaps heading/marker drift "10" then "19" | **13**, machine-measured and reproducible |
 
 ---
 
 ## Aspirational / archival content — this window's new docs, all correctly located
 
-**No new finding.** The six `docs/changes/**` artifacts added this window
-(`s330-match-block-arm-value-lift-all-paths`, `s330-unify-match-tail-classifier`,
-`s331-block-arm-route-unification`, `s331-derived-rhs-server-only-escalation` incl. its
-`reproducer.scrml` / `control-function.scrml`) are **dispatch briefs and progress logs, archived at
-dispatch time per the standing convention.** They are historical records of a decision process, not
-claims about current behaviour, and they live in the directory that says so. **Correctly located —
-not flagged.**
+**No new finding.** Every `.md` added this window is correctly located. The full added set is TEN
+files and it partitions cleanly:
 
-One nuance worth stating so a future pass does not re-flag it: `s331-derived-rhs-server-only-escalation/`
-contains **two live `.scrml` files** (`reproducer.scrml` — the leak, and `control-function.scrml` —
-the function-path control). These are executable evidence for a measured claim, not sample code. They
-are outside the compile gate and should stay that way; if they ever enter it, `reproducer.scrml` will
-correctly fail with `E-DERIVED-SERVER-ONLY-REACH`, which is the point of it.
+| Added | Kind | Verdict |
+|---|---|---|
+| `docs/changes/derived-server-only-reach-nested-positions-2026-08-10/BRIEF.md` + `progress.md` | dispatch brief + progress log, archived at dispatch time per the standing convention | correctly located |
+| `docs/changes/tier-2-scaffold-retirement-2026-08-10/RULING.md` | a RULING — the durable output of a decision | correctly located |
+| `handOffs/hand-off-s331.md`, `-s334.md`, `-s335.md`, `-s336.md`, `-s337-bryan.md`, `-s339-peter.md` | rotated session hand-offs | correctly located, and OUT OF SCOPE for these maps by the standing exclusion |
+| `handOffs/incoming/2026-08-11-S338-bryan-to-S340-peter-508-review-findings.md` | a cross-clone inbox message | correctly located |
+
+**No `docs/deep-dives/`, `docs/adrs/`, `docs/debates/`, `docs/gauntlets/` or `docs/research/`
+directory exists in this repo** — verified this pass. The location heuristic that would route such
+content to `scrml-support` has nothing to fire on, which is the correct steady state.
+
+**Filename-heuristic note, so a future pass does not false-flag them:** two of the added paths carry
+a `YYYY-MM-DD` date string (`…-2026-08-10/`) and one carries `-plan`-adjacent vocabulary in its body.
+**Both are inside `docs/changes/<id>/`, where a date IS the id convention**, and a `BRIEF.md` is
+*supposed* to describe work that had not happened yet at the time it was written. **The name and
+content heuristics must not fire inside `docs/changes/` — that directory's whole contract is
+"historical record of a decision process".**
+
+One nuance carried from the prior pass, still true: `docs/changes/**` may contain **live `.scrml`
+files** used as executable evidence for a measured claim (the S331 `reproducer.scrml` /
+`control-function.scrml` pair). These are evidence, not sample code. **They are outside the compile
+gate and should stay there** — if they ever enter it, `reproducer.scrml` will correctly fail with
+`E-DERIVED-SERVER-ONLY-REACH`, which is the point of it.
 
 ---
 
@@ -329,34 +371,61 @@ window** — none was touched by the diff.
 
 ### `docs/website/`
 **Reason uncertain:** a published surface with its own currency contract, not re-walked here.
-**What to check:** whether the website's feature claims track the §34 catalog's movement this window
-(806 → 807) and the two still-open server-only-leak positions. **A public page asserting that the
-compiler prevents server-only code from reaching the browser would now be over-claiming** — the
-guarantee holds for functions and for derived cells, and does NOT hold for a mutable-cell initialiser
-or a markup interpolation.
+**What to check:** whether the website's feature claims track the §34 catalog's movement (**now
+807 → 809**) and the two still-open server-only-leak positions. **A public page asserting that the
+compiler prevents server-only code from reaching the browser would be over-claiming** — the guarantee
+holds for functions and for derived cells (**and, only since #500 this window, for derived cells at
+any depth**), and does NOT hold for a mutable-cell initialiser or a markup interpolation.
+
+⚠ **RAISED IN URGENCY THIS PASS, on evidence rather than repetition.** Until #500 the derived-cell
+guarantee itself did not hold in six measured positions, at exit 0, shipping a real
+`Bun.password.hash` to the browser. **Any public claim written between #486 and #500 was not merely
+imprecise — it was false for those positions**, and nobody checked, because the website is outside
+every gate this repo runs. The question is no longer "does the marketing overstate the guarantee" but
+"**what is the review path for a public confidentiality claim, and why is there none?**"
 
 ---
 
 ## Map currency at this stamp
 
-| Map | Stamp | Re-walked? | Evidence |
-|---|---|---|---|
-| primary · structure · dependencies · domain · test · error | `616688ea` | **yes** | 19 source files moved |
-| auth | `616688ea` | **yes** | §6.6.19 is a confidentiality landing on this map's surface |
-| build | `616688ea` | **partially** | `.github/` + `package.json` zero-diff; `scripts/` re-walked |
-| non-compliance | `616688ea` | **yes** | this file |
-| schema | `fe14c9b2` (AST) | no — **currency verified** | `git diff --name-only 35d4d32e..616688ea -- compiler/src/types` is EMPTY (8 windows) |
-| config | `e80b692e` | no — **currency verified** | no added/removed `process.env`/`Bun.env` in the whole diff; `.github/` zero-diff |
-| infra | `97576f35` (== `b7f89952`) | no — **currency verified** | `git diff --name-only 35d4d32e..616688ea -- .github/` is EMPTY |
-| migrations | `115e8b1b` | no — **currency verified** | `schema-differ.js` / `db-migrate.js` / `db-authoritative.ts` / `sql-table-refs.js` all zero-diff |
+**EVERY stamp below is an ancestor of `origin/main`, verified per-map — `git merge-base --is-ancestor
+<stamp> origin/main` exits 0 for all thirteen.** That sentence could not have been written about any
+prior generation of this map set.
 
-**The watermark advanced `35d4d32e` → `616688ea`.** `scripts/state.ts --check` read **19 commits
-behind** at the start of this pass; it will read 0 after the commit lands. ⚠ That instrument still
-performs **no ancestry check** (invariant 48) and is WARN-only — it would print a meaningless number
-against an off-main watermark and never say so.
+| Map | Stamp | Content as of | Re-walked? | Evidence |
+|---|---|---|---|---|
+| primary · structure · dependencies · domain · test · error | `4f034e13` | `4f034e13` | **yes** | 28 source-bearing files moved |
+| build | `4f034e13` | `4f034e13` | **partially** | `.github/` + `package.json` zero-diff; `scripts/` gained three files and was re-walked |
+| non-compliance | `4f034e13` | `4f034e13` | **yes** | this file |
+| auth | `4f034e13` | `616688ea` | no — **currency verified, ONE row corrected** | `stdlib/` zero-diff; `emit-server.ts` moved by exactly one line (the §52.8 lint call at `:5162`), not an auth path. The §6.6.19 position-coverage table was corrected in place because #500 changed its reach |
+| schema | `4f034e13` | `fe14c9b2` | no — **currency verified** | `git diff --name-only 8863d457..4f034e13 -- compiler/src/types` is EMPTY (nine windows) |
+| config | `4f034e13` | `e80b692e` | no — **currency verified** | zero added/removed `process.env`/`Bun.env` lines in the whole window diff; the three NEW `scripts/` files checked individually and read no env var |
+| infra | `4f034e13` | `97576f35` (== `b7f89952`) | no — **currency verified** | `git diff --name-only 8863d457..4f034e13 -- .github/` is EMPTY |
+| migrations | `4f034e13` | `115e8b1b` | no — **currency verified** | `schema-differ.js` / `db-migrate.js` / `db-authoritative.ts` / `sql-table-refs.js` all zero-diff |
+
+**The watermark advanced `8863d457` → `4f034e13`** — 24 commits. **Note the arithmetic: the PRIOR
+map's PRINTED stamp was `616688ea`, and it is not the commit this window was measured from.**
+`8863d457` is `616688ea`'s merge-base with `main` and is the SHA at which the incoming maps were
+actually accurate. **A stamp that is not an ancestor does not merely mislead — it cannot be used as
+an interval endpoint at all**, which is why this pass had to derive its own starting point.
+
+⚠ **The instrument's behaviour is now correctly understood, and the earlier characterisation of it in
+this report was wrong.** Prior passes wrote that `scripts/state.ts` "performs no ancestry check". **It
+does** — `:545` guards with `merge-base --is-ancestor <watermark> HEAD` and `:547` returns
+`watermark X is NOT an ancestor of HEAD Y (diverged/rebased) — behind-count unavailable`. **The
+problem was never a missing check; it was that the check's negative result terminates silently.** It
+is WARN-only, nothing consumes the refusal, and `{{maps_fills}}` — which mandates a currency read
+before every dev dispatch — simply got nothing back. **Verified working at this pass: with an
+ancestor watermark it prints `maps: N commits behind HEAD`.**
+
+**The residual, stated plainly:** the guard compares against `HEAD`, not `origin/main`. The rule
+written into primary.map.md is STRICTER (ancestor of `origin/main`), which implies HEAD-ancestry for
+any HEAD on or descended from main — so a compliant stamp always satisfies the instrument. **A stamp
+that satisfies the instrument does not always satisfy the rule**, and that gap is what let three
+generations pass their own check.
 
 ## Tags
-#non-compliance #project-mapper #cleanup #scrml #§18.5-four-routes #single-classifier-overstatement
+#non-compliance #project-mapper #cleanup #scrml #§18.5-four-routes #single-classifier-overstatement #map-stamp-rule #outbound-stamp-check #inbound-vs-outbound #squash-merge-orphans-a-branch-tip #three-of-five-stamps-orphaned #fe14c9b2-orphaned-ten-sessions #silent-instrument #behind-count-unavailable #mandatory-step-unanswerable #stale-orphaned-doc-comment #route-inference-3643 #fail-open-surface-restored-by-a-doc #filesscanned-is-environment-dependent #a-filesystem-walk-is-not-a-repo-fact #baked-line-number-in-tool-output #s305-citation-ruling #generated-md-never-tracked #untracked-artifact-no-gate-can-see #grep-hit-is-not-a-fire-site #w-lint-nnn-placeholder #w-lint-009-is-a-comment #spec-ahead-vs-shipped #ratified-is-not-implemented #six-leaking-positions #scope-barred-from-known-gaps
 #plan-block-arm-lift-two-callsites #leaf-predicate-not-segmenter #§12.2-per-function-scope
 #§12.6-wrong-module-set #spec-internal-contradiction #escalation-vs-async-set #gap-ledger-stale-open
 #three-gaps-open-but-landed #s248-no-op-dispatch-class #cross-operator-ledger-blindness

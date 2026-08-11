@@ -1,27 +1,42 @@
 # test.map.md
 # project: scrml
-# updated: 2026-08-09T15:20:00-06:00  commit: 616688ea
-# **INCREMENTAL over `35d4d32e` -> `616688ea` (19 commits, TWO operators).** Ancestry CHECKED
-# (invariant 48). `616688ea` is one DOCS-ONLY commit ahead of `origin/main` (`8863d457`).
-# **+6 test files, ZERO deleted — 1,328 -> 1,334.** Conformance corpus **865 -> 880 (+15)**.
-# Both re-derived by `git ls-files`, cross-checked against `docs/FACTS.md` and a
-# `bun scripts/s34-census.ts` re-run at this HEAD (`880 conformance cases`, three sources agreeing).
+# updated: 2026-08-11T14:53:28-06:00  commit: 4f034e13
+# generated-at: 4f034e13 (informational — not the currency anchor)
+# **INCREMENTAL over `8863d457` -> `4f034e13` (24 commits, TWO operators).** Ancestry CHECKED
+# (invariant 48). **The watermark is `origin/main`'s tip** — the prior stamp `616688ea` was a branch
+# tip (MAP-STAMP RULE, primary.map.md).
+# **+5 test files, ZERO deleted — 1,334 -> 1,339.** Conformance corpus **880 -> 883 (+3)**.
 #
-# **THE TESTING LESSON OF THIS WINDOW IS THE `-neg` CASE, and it is worth more than the counts.**
-# Of the 15 new conformance cases, **SEVEN are negative** — five `sql/prepare-*-e-sql-006-neg`
-# (a `.prepare()` on each server-fn emit path that must NOT reach the artifact), plus
-# `derived/e-derived-server-only-reach-neg` and `-fn-path`. A `-neg` case for a NEWLY-REJECTING
-# diagnostic is not decoration: it is the only thing that pins the boundary of the rejection, and
-# for `E-DERIVED-SERVER-ONLY-REACH` the `-fn-path` case is **the diagnostic's own prescribed fix,
-# asserted to compile clean.** A newly-rejecting code without a case proving the escape hatch works
-# has shipped a dead end.
+# ⚠ **A COUNTING CAVEAT THAT WILL OTHERWISE READ AS DRIFT.** `docs/FACTS.md`'s `test files` counts
+# **`*.test.js` under `compiler/tests` only** — it EXCLUDES the 15 `*.test.ts` files in the same tree.
+# So `git ls-files | grep -cE '\.(test|spec)\.(js|ts|mjs)$'` returns **1,361** at this HEAD and that
+# is NOT a contradiction of 1,339; the two count different populations. **This map uses the FACTS
+# definition throughout so the numbers compose. State which derivation produced a count.**
 #
-# **AND THE COUNTER-LESSON, also this window: a conformance case can MENTION a code in its rationale
-# prose and assert nothing.** `expected.json`'s `codes` / `notCodes` are the assertion; the
-# `rationale` field is not. The three `derived/` cases each carry BOTH — `codes:
-# ["E-DERIVED-SERVER-ONLY-REACH"]` AND `notCodes: ["E-ROUTE-005","E-ROUTE-002"]`, the latter
-# discriminating this code from the two it is most likely to be confused with. **Read the
-# `expected.json` before recording a code as covered.**
+# **THE TESTING LESSON OF THIS WINDOW IS THE POSITION AXIS, and it is a different shape from the
+# last one's `-neg` lesson.** `unit/route-inference-derived-server-only-reach.test.js` grew
+# **+459 lines in place (379 -> 836)** and every one of them exists because the bug was that a walk
+# MISSED POSITIONS. The file now carries a §9 POSITION axis asserting the refusal separately in each
+# of six shapes — `for`-lift body, `while`-lift body, `<each>` row body, `<engine>` state-child body,
+# loop-inside-conditional, and each shape inside a `kind="tool"` program. **A single "it works nested"
+# case would have passed against the broken walk for five of the six.** When the defect is
+# "enumeration missed a member", the test has to enumerate the members.
+#
+# **AND THE SECOND-ORDER LESSON THE SAME FILE TEACHES: it drove the fix to EXPORT its collector.**
+# The walk's termination and single-visit properties are properties of THAT walk and had to be
+# asserted against it directly — driving them through `runRI` conflates them with every other walk in
+# the stage, **demonstrably so: a synthetic cyclic AST blows the stack inside
+# `collectFileLevelBindingRoots` (`route-inference.ts:2600`, a walk with NO `seen` set at all) long
+# before it reaches the one under test.** A test that cannot isolate its subject is testing the stage,
+# not the subject.
+#
+# **CARRIED AND STILL THE RULE: `expected.json`'s `codes` / `notCodes` are the assertion; the
+# `rationale` prose is not.** Both new codes this window were verified PINNED by READING their
+# `expected.json`, not by grepping for the code string:
+# `each/each-body-decl-unsupported-pos` asserts `codes: ["E-EACH-BODY-DECL-UNSUPPORTED"]` plus a
+# `severity` map, and `ssr/i-ssr-each-client-rendered-subset-pos` asserts
+# `codes: ["I-SSR-EACH-CLIENT-RENDERED"]` **with `notCodePrefixes: ["E-"]`** — the latter is what
+# makes it a real assertion that an INFO lint does not also break the compile.
 
 ## Test Framework
 Runner: `bun:test` (Bun's built-in test runner, no separate package dep)
@@ -33,20 +48,25 @@ Browser DOM: happy-dom / @happy-dom/global-registrator (compiler/tests/browser/)
 Browser tier ASSERTION: `bun scripts/browser-baseline.ts --check` (**not** `bun test compiler/tests/browser`)
 E2E: Playwright (`@playwright/test`), separate config at e2e/playwright.config.ts, NOT part of `bun test`
 
-## Test Categories (compiler/tests/, **1334** `*.test.js` total)
+## Test Categories (compiler/tests/, **1339** `*.test.js` total)
 
-Fresh recursive `git ls-files` recount at `616688ea`, all 9 categories individually re-verified;
-agrees with `docs/FACTS.md` (`test files | 1,334`), **which is the citable authority — do not
-hardcode a competing number.** Net **+6** this pass, decomposing as **unit +5** and **integration +1**
-(conformance / browser / lsp / commands / self-host / e2e-render-map / top-level all unchanged).
-**ZERO deletions this window** — unlike the prior one, where a test was deleted with its reverted
-subject. The category sum re-checks: 879+193+131+92+11+8+4+2 = 1320, +14 top-level = **1334**.
+Fresh recursive recount at `4f034e13`, all 9 categories individually re-verified; agrees with
+`docs/FACTS.md` (`test files | 1,339`), **which is the citable authority — do not hardcode a
+competing number.** Net **+5** this pass, decomposing as **unit +2**, **integration +2**,
+**conformance +1** (browser / lsp / commands / self-host / e2e-render-map / top-level all unchanged).
+**ZERO deletions, second window running.** The category sum re-checks:
+881+195+132+92+11+8+4+2 = 1325, +14 top-level = **1339**.
+
+**Note the conformance-TIER row moved for the first time in five windows** (131 -> 132). That row
+counts `compiler/tests/conformance/*.test.js` — the artifact-level harnesses — and is a DIFFERENT
+number from the 883 conformance CASES under `conformance/cases/`. Both moved this window and they
+moved for different reasons; **do not reconcile them.**
 
 | Category | Glob | Count | **Which gate runs it** |
 |---|---|---|---|
-| Unit | `compiler/tests/unit/**/*.test.js` | **879** (+5) | `gate` (blocking) + pre-commit + pre-push |
-| Integration | `compiler/tests/integration/**/*.test.js` | **193** (+1) | `tracking` (non-blocking) + pre-commit + pre-push |
-| Conformance | `compiler/tests/conformance/**/*.test.js` | 131 (unchanged for FOUR windows) | `gate` (blocking) + pre-commit + pre-push |
+| Unit | `compiler/tests/unit/**/*.test.js` | **881** (+2) | `gate` (blocking) + pre-commit + pre-push |
+| Integration | `compiler/tests/integration/**/*.test.js` | **195** (+2) | `tracking` (non-blocking) + pre-commit + pre-push |
+| Conformance | `compiler/tests/conformance/**/*.test.js` | **132** (+1 — **first move in five windows**) | `gate` (blocking) + pre-commit + pre-push |
 | Browser | `compiler/tests/browser/**/*.test.js` | 92 (unchanged) | `gate` (BLOCKING) + `tracking` — via the NAME-SET check |
 | LSP | `compiler/tests/lsp/**/*.test.js` | 11 | `tracking` only (non-blocking) |
 | Commands | `compiler/tests/commands/**/*.test.js` | 8 | `tracking` only (non-blocking) |
@@ -54,7 +74,18 @@ subject. The category sum re-checks: 879+193+131+92+11+8+4+2 = 1320, +14 top-lev
 | e2e-render-map | `compiler/tests/e2e-render-map/` | 2 | `tracking` only (non-blocking) |
 | Parser-conformance + native-* | top-level `compiler/tests/*.test.js` | 14 | `gate` (blocking) + pre-commit (since S302) |
 
-**Changed this pass — 6 added, ZERO deleted:**
+**Changed this pass — 5 added + 1 grown substantially in place, ZERO deleted:**
+
+| File | Tier | Lines | What it pins |
+|---|---|---|---|
+| `unit/route-inference-derived-server-only-reach.test.js` | unit | **836** (**+459 in place**, was 379) | **#500 §6.6.19 — the POSITION AXIS, and it is the model to copy when a defect is "an enumeration missed a member".** The added §9 asserts the refusal SEPARATELY in each of six shapes (`for`-lift body · `while`-lift body · `<each>` row body · `<engine>` state-child body · loop-inside-conditional · each of those inside a `kind="tool"` program, where the §64 carve-out must hold INSTEAD). **A single "it works when nested" case would have passed against the broken walk for five of the six.** It also asserts the walk's own properties directly — termination on a shared subtree, single-visit on a node reachable by two paths — **which is why the fix had to EXPORT `collectDerivedCellDecls`**: routing those assertions through `runRI` hits `collectFileLevelBindingRoots` (`:2600`, no `seen` set) and blows the stack first. |
+| `unit/request-ref-is-some-each-attr-misroute.test.js` | unit | **111** | **#511 §6.7.7** — a `<#request>.data is some` predicate in a PER-ITEM `<each>` body attribute routes to `_scrml_request_<id>`, not the §36 input-state registry. **The pre-fix failure was a SILENT MISCOMPILE** — clean compile, then `undefined.data` → runtime TypeError — so the assertion has to be on the EMITTED TEXT, not on a diagnostic. Pins the gate too: a non-request `<#id>` stays byte-identical. |
+| `unit/request-ref-is-some-for-lift-attr-misroute.test.js` | unit | **115** | **#512 §6.7.7** — the same predicate in a Tier-0 `${for…lift}` ATTRIBUTE. **A separate file for what looks like the same bug, and correctly so: the failure mode is the OPPOSITE.** This path failed LOUD (`E-CODEGEN-INVALID-LOGIC`, no bundle written) because the escape-hatch node took the string fallback and mangled the `is some` LHS. Same class, two mechanisms, two files. |
+| `integration/timer-poll-module-init.test.js` | integration | **125** | **#510 §6.7.5/§6.7.6/§6.7.8** — a `<timer>`/`<poll>`/`<timeout>` body does NOT run at module init, and `<poll>` DOES fire an immediate first tick. **There is no diagnostic to assert here** — the correct behaviour is an ABSENCE of an emission — so this pins emitted-artifact shape. It must also assert the two EXCLUSIONS (`<request>` and `<channel>` bodies still emit), because the fix is a deny-set and a deny-set's danger is over-inclusion. |
+| `integration/g-tool-over-imports-all-lib-exports.test.js` | integration | **70** | **S339 §64** — a headless `kind="tool"` importing a local `.scrml` lib emits only the specifiers its body references. Pins a CROSS-STAGE interaction (the component-expander's helper-bind augmentation vs the tool emitter) that no type binds. |
+| `conformance/conf-DERIVED-SERVER-ONLY-REACH-artifacts.test.js` | conformance | **275** | **#500 §6.6.19** — the ARTIFACT-level assertion behind the position axis: for each leaking shape, that no `.server.js` is emitted and no server-only symbol reaches the client bundle. **This is the tier that would have caught the original S337 leak**; the unit tier alone asserts the diagnostic, not the artifact. |
+
+**Prior pass — 6 added, ZERO deleted:**
 
 | File | Tier | Lines | What it pins |
 |---|---|---|---|
@@ -310,7 +341,7 @@ allowlist. **Adding a FIELD to a structural AST node grows this if the native mi
 samples/compilation-tests/ — 12 fixture dirs compiled by `scripts/compile-test-samples.sh`
 (`bun run pretest`) before the suite; dist/ is gitignored. **These go STALE** — a browser-test triage
 starts by recompiling them, before comparing anything.
-conformance/cases/ + conformance/adapters/ — the D3 corpus (**880 cases** at `616688ea`, 54 category dirs; re-derived, `docs/FACTS.md` is the authority) + per-impl adapters.
+conformance/cases/ + conformance/adapters/ — the D3 corpus (**883 cases** at `4f034e13`; re-derived by `find conformance/cases -name expected.json | wc -l`, which is exactly `facts.ts`'s own definition, and `docs/FACTS.md` is the authority) + per-impl adapters. **+3 this window: `each/each-body-decl-unsupported-pos`, `ssr/i-ssr-each-client-rendered-subset-pos`, `derived/e-derived-server-only-reach-nested-loop`.**
 docs/tutorial-snippets/ + docs/readme-snippets/ + docs/website/ — the public snippet corpus; REAL
 programs under a compile gate.
 
@@ -398,7 +429,7 @@ inherited the same population). `pa-base v2.13 §8` names it THE TRUNCATED PROBE
 tool is marked `HARD REQ n` at its site so a future editor can see what they would be removing.
 
 ## Tags
-#scrml #map #test #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr-REVERTED #ctrl-017-020-revert-guard #counter-gate-case #test-deleted-with-reverted-code #keyword-prefixed-tail #rcdata-restricted-parent #880-conformance #1334-tests #neg-case-is-the-assertion #escape-hatch-case #prescribed-fix-compiles-clean #emit-path-matrix #e-sql-006-neg-matrix #all-paths-trio #member-assign-tail-voids #two-routes-disagreeing #§18.5-four-routes #expected-json-is-the-assertion #rationale-prose-is-not #derived-dir-not-new #probe-defects-in-scope #state-gap-integrity
+#scrml #map #test #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr-REVERTED #ctrl-017-020-revert-guard #counter-gate-case #test-deleted-with-reverted-code #keyword-prefixed-tail #rcdata-restricted-parent #880-conformance #1334-tests #neg-case-is-the-assertion #escape-hatch-case #prescribed-fix-compiles-clean #emit-path-matrix #e-sql-006-neg-matrix #all-paths-trio #member-assign-tail-voids #two-routes-disagreeing #§18.5-four-routes #expected-json-is-the-assertion #rationale-prose-is-not #derived-dir-not-new #probe-defects-in-scope #state-gap-integrity #1339-tests #883-conformance #position-axis #enumeration-missed-a-member #export-for-testability #cannot-isolate-the-subject #collect-file-level-binding-roots-no-seen-set #same-class-opposite-failure-modes #silent-miscompile-vs-fail-loud #assert-emitted-text-not-a-diagnostic #absence-of-emission-has-no-code #deny-set-danger-is-over-inclusion #artifact-tier-catches-the-leak #facts-counts-only-test-js #1361-is-not-a-contradiction #conformance-tier-vs-conformance-cases #read-the-expected-json #notcodeprefixes
 
 ## Links
 - [primary.map.md](./primary.map.md)

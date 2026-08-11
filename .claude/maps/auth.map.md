@@ -1,27 +1,41 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-08-09T15:20:00-06:00  commit: 616688ea
-# **PARTIALLY RE-WALKED over `35d4d32e` -> `616688ea`.** Ancestry CHECKED (invariant 48). The §20.5
-# session surface, `compute-program-config.ts`, and the `scrml:auth`/`scrml:oauth` stdlib modules are
-# **ZERO-DIFF this window** (`stdlib/` has no diff at all), so every session/JWT/OAuth/CSRF claim
-# below is carried and re-verified, not re-derived.
+# updated: 2026-08-11T14:53:28-06:00  commit: 4f034e13
+# generated-at: 4f034e13 (informational — not the currency anchor)
+# ⚑ **WATERMARK CORRECTED THIS PASS.** Line 3 now carries `4f034e13`, an ancestor of `origin/main`,
+# per the MAP-STAMP RULE at the top of primary.map.md. The prior stamp `616688ea` was the tip of
+# `wrap/s331`, squash-merged onto main as `2391d483` — never an ancestor, so nothing it bounded was
+# actually bounded.
 #
-# **ONE CONFIDENTIALITY SURFACE DID MOVE, AND IT IS A NEW COMPILE-TIME REFUSAL: `E-DERIVED-SERVER-ONLY-REACH`
-# (§6.6.19, #486).** A `const <name>` DERIVED cell whose RHS reaches a binding imported from
-# `scrml:auth` / `scrml:crypto` / `scrml:oauth` (or any other `ESCALATION_SERVER_ONLY_MODULES`
-# member) is now REFUSED at compile time. **Before it, that exact shape compiled at exit 0 with NO
-# `.server.js`, `const { hashPassword } = _scrml_stdlib.auth;` in the client bundle, and a real
-# `Bun.password.hash` argon2id implementation in the shipped browser runtime** — measured S331, and
-# it is the same symptom the S299 Trigger-3 amendment was written to close.
+# ⚑ **CONTENT AS OF `616688ea` — CURRENCY VERIFIED AT `4f034e13`, NOT RE-WALKED.** The §20.5 session
+# surface, `compute-program-config.ts`, `emit-server.ts`'s session prologue and the
+# `scrml:auth`/`scrml:oauth` stdlib modules are **ZERO-DIFF this window** (`stdlib/` has no diff at
+# all; `emit-server.ts` moved by exactly ONE line and it is the §52.8 SSR-lint call signature at
+# `:5162`, not an auth path). Every session/JWT/OAuth/CSRF claim below is carried and re-verified.
 #
-# **THE SCOPE SENTENCE MATTERS MORE THAN THE FIX. §12.2 escalation is defined PER-FUNCTION and covers
-# NO OTHER POSITION.** §12.4's "route inference SHALL be per-function" is honoured literally by
-# `collectFileFunctions`, which yields `function-decl` nodes only. §6.6.19 closes ONE non-function
-# position. **Two remain OPEN and undiagnosed on this same confidentiality boundary:** a plain
-# mutable-cell initialiser (`<hashed> = hashPassword(@pw)`) and a markup interpolation
-# (`${ hashPassword(@pw) }`). Both reach the same module from the same client position. **The
-# diagnostic's own text warns that deleting the `const` — the shortest edit that silences it — is
-# exactly the edit that restores the leak.** Do not read this landing as closing the class.
+# **ONE ROW MOVED, AND IT IS THE POSITION-COVERAGE ROW — corrected in place below.**
+# `E-DERIVED-SERVER-ONLY-REACH` (§6.6.19) now fires on a derived cell in **ANY** position (#500), not
+# only a top-level one. Before #500 the collector descended exactly `node.body` and `node.children`,
+# so **SIX positions were measured still leaking** a real `Bun.password.hash(pw, { algorithm:
+# "argon2id" })` into the browser bundle at exit 0 with zero `.server.js`: a `for`-loop `lift` body, a
+# `while`-loop `lift` body, an `<each>` row body, an `<engine>` state-child body, a loop nested inside
+# a conditional, and the same shapes inside a `kind="tool"` program. **The confidentiality guarantee
+# this map described as landed at S331 was, for those six positions, not in effect.**
+#
+# **THE SCOPE SENTENCE STILL MATTERS MORE THAN THE FIX, and it is UNCHANGED. §12.2 escalation is
+# defined PER-FUNCTION and covers NO OTHER POSITION** (`SPEC.md:7312`, normative). §6.6.19 closes ONE
+# non-function position — now at every depth. **Two remain OPEN and undiagnosed on this same
+# confidentiality boundary:** a plain mutable-cell initialiser (`<hashed> = hashPassword(@pw)`) and a
+# markup interpolation (`${ hashPassword(@pw) }`). Both reach the same module from the same client
+# position. **The diagnostic's own text warns that deleting the `const` — the shortest edit that
+# silences it — is exactly the edit that restores the leak.** Do not read this landing as closing the
+# class.
+#
+# **AND THE FIX'S SHAPE IS ITSELF AN AUTH RULE (primary.map.md invariant 52).** The walk is now
+# STRUCTURAL — every array- and object-valued property descended by default, exclusions in a
+# two-clause deny-list (`skipDerivedWalkKey`). **For a confidentiality check the safe error direction
+# is descending one field TOO MANY** (worst case a loud, reversible spurious refusal) **never one too
+# few** (worst case a silent leak). If a position is ever missed again, **do not add a field name.**
 #
 # Carried and still true: #452's `Object.hasOwn` hardening of the session accessor (`emit-server.ts`)
 # closed the PROTOTYPE-CHAIN half of `g-session-get-reserved-key-read-disclosure` and left the own-key
@@ -233,12 +247,41 @@ errors and zero warnings" is the expected shape, not a bug report.
 **The position it CANNOT reach, and what happens there now.** §12.4 makes route inference
 per-function, so a non-function position is not reached by the trigger at all:
 
-| Position | At `616688ea` |
+| Position | At `4f034e13` | Changed since `616688ea`? |
+|---|---|---|
+| `function` body | escalates (Trigger 3), silently, no diagnostic | no |
+| `const <name> = …` **derived cell** RHS, **AT ANY DEPTH** | **REFUSED — `E-DERIVED-SERVER-ONLY-REACH` (§6.6.19, #486 + #500).** Not escalated: a derived recompute is synchronous lazy-pull (§6.6.3) and cannot become a round trip | **YES — #500. See the six positions below.** |
+| `<name> = …` **mutable-cell initialiser** | **OPEN — leaks, no diagnostic** | no |
+| **markup interpolation** | **OPEN — leaks, no diagnostic** | no |
+
+⚠ **THE DERIVED-CELL ROW WAS TRUE-BUT-INCOMPLETE AT `616688ea`, AND THE INCOMPLETENESS WAS A LIVE
+LEAK.** #486 shipped the refusal; the collector behind it (`collectDerivedCellDecls`,
+`route-inference.ts:3730`) descended exactly `node.body` and `node.children` while its own doc comment
+claimed it found derived cells *"at any depth"*. **Six positions were measured still leaking**, each
+at exit 0 with ZERO `.server.js` and a real `Bun.password.hash(pw, { algorithm: "argon2id" })` in the
+shipped browser runtime:
+
+| Leaking position (pre-#500) | Why the field-listed walk missed it |
 |---|---|
-| `function` body | escalates (Trigger 3), silently, no diagnostic |
-| `const <name> = …` **derived cell** RHS | **REFUSED — `E-DERIVED-SERVER-ONLY-REACH` (§6.6.19, #486).** Not escalated: a derived recompute is synchronous lazy-pull (§6.6.3) and cannot become a round trip |
-| `<name> = …` **mutable-cell initialiser** | **OPEN — leaks, no diagnostic** |
-| **markup interpolation** | **OPEN — leaks, no diagnostic** |
+| `for`-loop `lift` body | the body sits under an `expr` wrapper — `…expr.node.children[0].body[0]` |
+| `while`-loop `lift` body | same wrapper shape |
+| `<each>` row body | per-item template children are not `node.body`/`node.children` at that level |
+| `<engine>` state-child body | state children hang off an engine-specific property |
+| loop nested inside a conditional | the conditional's arm is reached only through the same wrapper |
+| any of the above inside a `kind="tool"` program | the §64 carve-out is what must hold there instead — it is a WHOLE-FILE predicate applied by the caller, so it is depth-independent by construction |
+
+**The fix inverted the walk's default** rather than adding `expr` to the list: every array- and
+object-valued property is descended, and exclusions live in a two-clause deny-list
+(`skipDerivedWalkKey`, `:3677` — `span`, plus `_`-prefixed side tables). **Adding `expr` to a list of
+two would have closed the reported shape and left the class open at the next unenumerated property.**
+Measured: the deny-list is not load-bearing for the RESULT (68 cells collected with the shipped list,
+68 without `parent`/`loc`/`spans`, 68 with no deny-list at all) — only for the work done. Termination
+is an identity `seen` set plus a 512 depth cap, because the walk now descends ESTree expression trees
+that nest one level per term. **`collectDerivedCellDecls` is EXPORTED for tests** precisely so the
+termination and single-visit properties can be asserted against it directly; driving them through
+`runRI` conflates them with every other walk in the stage (a synthetic cyclic AST blows the stack
+inside `collectFileLevelBindingRoots`, `:2600`, which has no `seen` set at all — a separate,
+unfixed fragility worth knowing about before you write such a test).
 
 Reach is **REFERENCE, not call**, at ANY depth — inside a lambda, a nested `function` decl, or
 escape-hatch raw text. Matching only top-level CALLS was proven evadable four ways, each shipping the
@@ -249,7 +292,10 @@ rather than hidden: a binding shadowed ONLY inside a nested lambda still fires, 
 scan of escape-hatch raw text can match inside a string literal in that text — both over-fires.
 
 **`kind="tool"` programs (§64) are carved out of the §6.6.19 refusal** — no client boundary, no leak
-— mirroring the carve-out Trigger 3 already takes for `print()`/`println()`.
+— mirroring the carve-out Trigger 3 already takes for `print()`/`println()`. **The carve-out is
+applied by the Step 3b CALLER (`isToolProgram`, read off the top-level `<program>`) BEFORE the walk
+runs, not inside it**, which is what makes it depth-independent and is why the structural-walk change
+did not have to re-derive it.
 
 
 ## Protected-field egress backstop (§14.8.9, NOT stdlib — compiler-enforced)
@@ -269,7 +315,7 @@ Expiry: `sessionExpiry` on `<program>` for the session cookie `Max-Age` + durabl
 Magic-link/verify/reset tokens: TTL-bound (caller-supplied, embedded in the stored record as an authoritative `expiresAt`), single-use, namespace-scoped.
 
 ## Tags
-#scrml #map #auth #baas #jwt #jwks #oauth #csrf #magic-link #password-reset #e-cg-001 #protect-floor #stdlib-auth #server-shape #tool-serve #jwt-auth-bypass #session-establishment #session-secure #host-cookie #e-scope-012 #e-session-context #e-session-value #e-session-reserved-key #gh357 #session-proxy-bind #scrml-session-bind #reflect-get-target-receiver #sql-interpolation-session #csrf-token-disclosure #session-read-side #dangling-ref-class #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #scrml-auth-check #permissive-by-design #store-invariant-probed #§52.15.1 #§20.5 #object-hasown #own-property-read #prototype-chain-read-closed #hasownproperty-shadow #read-side-policy-open #wire-live #response-contract #security-theater-vs-defense #ledger-locus-stale #§6.6.19 #e-derived-server-only-reach #escalation-server-only-modules #two-limb-criterion #credential-handling-limb #oauth-client-secret #criterion-not-the-list #per-function-scope-only #two-positions-still-open #mutable-cell-initialiser-open #markup-interpolation-open #reference-not-call #four-evasions #over-fire-not-leak #kind-tool-carve-out #no-diagnostic-when-it-fires
+#scrml #map #auth #baas #jwt #jwks #oauth #csrf #magic-link #password-reset #e-cg-001 #protect-floor #stdlib-auth #server-shape #tool-serve #jwt-auth-bypass #session-establishment #session-secure #host-cookie #e-scope-012 #e-session-context #e-session-value #e-session-reserved-key #gh357 #session-proxy-bind #scrml-session-bind #reflect-get-target-receiver #sql-interpolation-session #csrf-token-disclosure #session-read-side #dangling-ref-class #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #scrml-auth-check #permissive-by-design #store-invariant-probed #§52.15.1 #§20.5 #object-hasown #own-property-read #prototype-chain-read-closed #hasownproperty-shadow #read-side-policy-open #wire-live #response-contract #security-theater-vs-defense #ledger-locus-stale #§6.6.19 #e-derived-server-only-reach #escalation-server-only-modules #two-limb-criterion #credential-handling-limb #oauth-client-secret #criterion-not-the-list #per-function-scope-only #two-positions-still-open #mutable-cell-initialiser-open #markup-interpolation-open #reference-not-call #four-evasions #over-fire-not-leak #kind-tool-carve-out #no-diagnostic-when-it-fires #any-position #structural-walk-not-field-listed #collect-derived-cell-decls #skip-derived-walk-key #six-leaking-positions #for-lift-body #while-lift-body #each-row-body #engine-state-child #expr-wrapper #deny-list-not-load-bearing #depth-cap-512 #identity-seen-set #exported-for-tests #collect-file-level-binding-roots-has-no-seen-set #descend-one-field-too-many #do-not-add-the-field-name #carve-out-applied-by-the-caller
 
 ## Links
 - [primary.map.md](./primary.map.md)

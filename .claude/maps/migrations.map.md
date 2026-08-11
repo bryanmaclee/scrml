@@ -1,11 +1,21 @@
 # migrations.map.md
 # project: scrml
-# updated: 2026-07-28T17:00:00Z  commit: 115e8b1b
-# ⚑ CURRENCY RE-VERIFIED AT `616688ea` (S331 pass), NOT RE-WALKED. No DB/migration surface moved in
-# EIGHT windows: `schema-differ.js`, `commands/db-migrate.js`, `codegen/db-authoritative.ts` and
-# `sql-table-refs.js` are all zero-diff over `35d4d32e..616688ea`. The one SQL-adjacent change this
-# window is `E-SQL-006` (§44.3, `.prepare()`) moving to COMPILE time — a diagnostic-timing change in
-# `emit-server.ts`, not a migration one. See error.map.md.
+# updated: 2026-08-11T14:53:28-06:00  commit: 4f034e13
+# generated-at: 4f034e13 (informational — not the currency anchor)
+# ⚑ **WATERMARK CORRECTED THIS PASS.** Line 3 now carries `4f034e13`, an ancestor of `origin/main`,
+# per the MAP-STAMP RULE at the top of primary.map.md. The stamp is the CURRENCY ANCHOR
+# `scripts/state.ts` parses; **"content as of X" below carries the provenance.** The prior convention
+# — freeze line 3 at the last walk's SHA to signal "not re-walked" — broke the instrument while
+# communicating nothing this header does not already say.
+#
+# ⚑ **CONTENT AS OF `115e8b1b` — CURRENCY RE-VERIFIED AT `4f034e13`, NOT RE-WALKED. NINE windows with
+# no DB/migration surface movement.** `115e8b1b` was one of only two stamps in this map set that was
+# ALREADY an ancestor of `origin/main` on arrival.
+#
+# Zero-diff evidence, re-run at this HEAD: `schema-differ.js`, `commands/db-migrate.js`,
+# `codegen/db-authoritative.ts` and `sql-table-refs.js` are all zero-diff over `8863d457..4f034e13`.
+# **This window has no SQL-adjacent change at all** — the prior window's one (`E-SQL-006` §44.3 moving
+# to COMPILE time) is landed and carried; nothing new touches the DB path. See error.map.md.
 
 The conditional check (a real DB-migration-apply tool exists) fires because `scrml db-migrate`
 (§14.8.11.1) exists — `scrml migrate` (pre-existing) is a scrml-SOURCE syntax codemod, NOT a DB

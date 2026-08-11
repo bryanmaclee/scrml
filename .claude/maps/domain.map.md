@@ -1,33 +1,38 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-08-09T15:20:00-06:00  commit: 616688ea
-# **INCREMENTAL over `35d4d32e` -> `616688ea` (19 commits, TWO operators).** Ancestry CHECKED
-# (invariant 48): `git merge-base --is-ancestor 35d4d32e HEAD` passes, so the delta arithmetic below
-# is bounded and honest. **`616688ea` is one commit AHEAD of `origin/main` (`8863d457`)** — the
-# S331-bryan wrap continuity, DOCS-ONLY (`git diff --name-only 8863d457..616688ea -- compiler/
-# scripts/ conformance/ stdlib/ .github/ package.json` is EMPTY), so every source claim holds at
-# both.
+# updated: 2026-08-11T14:53:28-06:00  commit: 4f034e13
+# generated-at: 4f034e13 (informational — not the currency anchor)
+# **INCREMENTAL over `8863d457` -> `4f034e13` (24 commits, TWO operators).** Ancestry CHECKED
+# (invariant 48): `git merge-base --is-ancestor 8863d457 4f034e13` passes, so the delta arithmetic
+# below is bounded. **The watermark is `origin/main`'s tip** — the prior stamp `616688ea` was the tip
+# of `wrap/s331` and bounded nothing (MAP-STAMP RULE, primary.map.md).
 #
-# **TWO CORRECTIONS TO THE PRIOR GENERATION OF THIS FILE ARE THE MOST IMPORTANT THING IN THIS
-# HEADER. Both were confirmed empirically at S331 and both had already misled a dispatch.**
+# **THE MOST IMPORTANT THING IN THIS HEADER IS A CORRECTION TO A SECTION THAT READ AS DONE AND WAS
+# NOT.** The `<timer>`/`<poll>` first-tick section below has said *"a `<poll>`'s first execution fires
+# IMMEDIATELY on arming"* since S314, and stated the two sub-rules (same tick path; once per ARMING,
+# not per resume) as settled. **That was the SPEC amendment. The CODE landed this window, at #510.**
+# Until then `_scrml_timer_start` had four parameters and no immediate-tick path at all — the
+# behaviour the section described was produced *accidentally*, by the very `collect.ts` descent defect
+# the same section names, and that defect ALSO ran a `<timer>` body at module init where no first tick
+# was wanted. **A map section that describes ratified intent in the present tense is indistinguishable
+# from one describing shipped behaviour.** The section is rewritten below to separate the two.
 #
-# **(1) §18.5 — `planBlockArmLift` IS THE SINGLE LEAF *PREDICATE*, NOT THE SINGLE *SEGMENTER*, AND
-# THERE ARE FOUR EMISSION ROUTES, NOT ONE.** Reading it as "the one classifier every path routes
-# through" sent an agent to two wrong loci in a single session. The §18.5 section below now carries
-# the four-route table. Only the TWO raw-STRING routes call `planBlockArmLift`; the two structured-
-# AST routes call `_blockTailIsValueExpr` directly, because the AST already supplies the statement
-# boundaries a string has to be segmented for.
+# **CARRIED AND RE-VERIFIED, NOT RE-DERIVED (both files are ZERO-DIFF this window):**
+# **(1) §18.5 — `planBlockArmLift` is the shared segmenter for TWO of FOUR routes, not "the one
+# classifier every path routes through".** The four-route table below stands unchanged.
+# **(2) §12.2 escalation is defined PER-FUNCTION and covers no other position.** Still true, still
+# normative at `SPEC.md:7312`. **What CHANGED is the reach of the one non-function position that is
+# closed:** `E-DERIVED-SERVER-ONLY-REACH` (§6.6.19) now fires on a derived cell at ANY depth (#500) —
+# before this window its collector descended two hardcoded fields and **six positions still leaked.**
+# The mutable-cell initialiser and the markup interpolation remain OPEN. **Do not write or read
+# "Trigger 3 covers <position>".**
 #
-# **(2) §12.2 ESCALATION IS DEFINED PER-FUNCTION AND COVERS NO OTHER POSITION.** §12.4 says "Route
-# inference SHALL be per-function" and `collectFileFunctions` honours it literally — it yields
-# `function-decl` nodes only. Every NON-function position (derived cell, mutable-cell initialiser,
-# markup interpolation) is OUTSIDE Trigger 3 and always was. The derived-cell RHS half is now closed
-# by **`E-DERIVED-SERVER-ONLY-REACH` (§6.6.19, NEW #486)**, which REFUSES rather than escalating; the
-# other two positions are still open. **Do not write or read "Trigger 3 covers <position>".**
-#
-# New/rewritten this window: **§6.6.19** (a new subsection below the §12.2 one), the §12.2 Trigger 3
-# section (per-function scope block appended), the §18.5 section (four-route table + the
-# separator-dependence class), and a new §44.3 note on E-SQL-006 moving to compile time.
+# New/rewritten this window: **§6.6.19** (the structural walk, the six leaking positions, and why
+# "add the field name" is the wrong fix), **§6.7.5/§6.7.6/§6.7.8** (rewritten — spec-ahead vs shipped,
+# plus the `DEFERRED_LIFECYCLE_BODY_TAGS` deny-set and its two deliberate exclusions), **§6.7.7**
+# (the request-ref attribute class, now closed on the two per-item paths by TWO DIFFERENT mechanisms),
+# **§17.7.3** (a NEW section — the each-body scope), and **§52.8** (a NEW section — the SSR-each
+# fallback, now loud).
 # History stays in `docs/changelog.md` + `handOffs/delta-log.md`.
 
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
@@ -359,9 +364,9 @@ is the only unit that HAS a placement to change, so:
 
 The positions this leaves uncovered, and their status at this HEAD:
 
-| Non-function position | Reaches a server-only module? | Status at `616688ea` |
+| Non-function position | Reaches a server-only module? | Status at `4f034e13` |
 |---|---|---|
-| `const <name> = …` **derived cell** RHS | yes — invisible to Trigger 3 | **CLOSED by refusal — `E-DERIVED-SERVER-ONLY-REACH` (§6.6.19, #486)** |
+| `const <name> = …` **derived cell** RHS, **AT ANY DEPTH** | yes — invisible to Trigger 3 | **CLOSED by refusal — `E-DERIVED-SERVER-ONLY-REACH` (§6.6.19, #486 shipped the refusal, #500 shipped its REACH; SIX positions still leaked in between)** |
 | `<name> = …` **mutable-cell initialiser** | yes — same client position | **OPEN. NOT diagnosed.** The error text for §6.6.19 says so out loud (see below) |
 | **markup interpolation** (`${ hashPassword(@pw) }`) | yes | **OPEN. NOT diagnosed.** |
 
@@ -372,11 +377,24 @@ vs 0 for a program not importing `scrml:auth`). SPEC's own instruction to a futu
 *"A reader adding a new non-function position to the language should treat §6.6.19 as the pattern to
 follow, not this trigger."*
 
-## §6.6.19 — `E-DERIVED-SERVER-ONLY-REACH`: the derived RHS REFUSES, it does not escalate (NEW #486, S331)
+## §6.6.19 — `E-DERIVED-SERVER-ONLY-REACH`: the derived RHS REFUSES, it does not escalate — AT ANY DEPTH (#486 S331, REACH FIXED #500 S337)
 
-**Where it lives.** SPEC `§6.6.19` (`SPEC.md:3694`), §34 catalog row at `SPEC.md:3304` + the long
-row at `SPEC.md:19483`, and a §12.2 Trigger-3 scope block at `SPEC.md:7312`. Emitted from
-`route-inference.ts` **Step 3b** (`:4429`), a NEW pass that runs after the per-function Step 3 loop.
+**Where it lives.** SPEC `§6.6.19`, §34 catalog row + the long row, and a §12.2 Trigger-3 scope block
+at `SPEC.md:7312`. Emitted from `route-inference.ts` **Step 3b** (`:4526`, push at `:4572`), a pass
+that runs after the per-function Step 3 loop.
+
+> ⚠ **READ THIS BEFORE ANYTHING ELSE IN THIS SECTION. #486 SHIPPED THE REFUSAL; #500 SHIPPED ITS
+> REACH, AND BETWEEN THEM THE GUARANTEE THIS SECTION DESCRIBED WAS NOT IN EFFECT FOR SIX POSITIONS.**
+> `collectDerivedCellDecls` descended exactly `node.body` and `node.children` while its own doc
+> comment claimed it found derived cells *"at any depth"*. **Measured leaking at S337 — exit 0, ZERO
+> `.server.js` emitted, `const { hashPassword } = _scrml_stdlib.auth;` in the client bundle, and a
+> real `Bun.password.hash(pw, { algorithm: "argon2id" })` in the shipped browser runtime:** a
+> `for`-loop `lift` body, a `while`-loop `lift` body, an `<each>` row body, an `<engine>` state-child
+> body, a loop nested inside a conditional, and each of those inside a `kind="tool"` program (where
+> the §64 carve-out is what must hold instead). A `for`-loop stores its `lift` body under an `expr`
+> wrapper, so the cell sits at `…expr.node.children[0].body[0]` and was never visited.
+> **§6.6.19's SHALL is not qualified by position, so every position the implementation could not
+> reach was a conformance hole — not a language boundary.**
 
 **Why REFUSE and not escalate — the reasoning generalises past this code.** A derived cell is a
 **synchronous lazy-pull recompute (§6.6.3)**: it is pulled on read, on the client, via a dirty flag.
@@ -415,9 +433,59 @@ mirrors the carve-out §12.2 Trigger 3 already takes for the §20.7 `print()`/`p
 raw-text fallback for an unstructured RHS is a deliberate over-fire, never a leak.
 
 **Migration measured at ZERO.** 59 repo files import an escalation server-only module; none reaches
-one from a derived RHS. Pinned by `conformance/cases/derived/e-derived-server-only-reach-{pos,neg,fn-path}`
-(the `-fn-path` case is the prescribed fix compiling clean) and
-`unit/route-inference-derived-server-only-reach.test.js` (379L).
+one from a derived RHS. Pinned by
+`conformance/cases/derived/e-derived-server-only-reach-{pos,neg,fn-path,nested-loop}` (the `-fn-path`
+case is the prescribed fix compiling clean; **`-nested-loop` is new this window and pins the POSITION
+axis**, and its own rationale records that `W-EACH-PROMOTABLE` fires there deliberately — promoting
+the Tier-0 `for`/`lift` to `<each>` would change the position being pinned), plus
+`unit/route-inference-derived-server-only-reach.test.js` (**836L, +459 this window**) and
+`conformance/conf-DERIVED-SERVER-ONLY-REACH-artifacts.test.js` (275L, NEW — the artifact tier, which
+is the one that would have caught the original leak).
+
+### THE COLLECTOR IS NOW STRUCTURAL, AND "ADD THE MISSING FIELD" IS THE DEFECT CLASS, NOT THE FIX
+
+`collectDerivedCellDecls` (`:3730`, **now EXPORTED**) descends **every array- and object-valued
+property by default.** Exclusions are a DENY-list, `skipDerivedWalkKey` (`:3677`), and it is two
+clauses: `key === "span" || key.startsWith("_")` — `span` is large node-free baggage, and `_`-prefix
+is the codebase's side-table convention that every sibling generic walk already skips
+(`protect-analyzer.ts:437`, `tag-canonicalizer.ts:167`, `indirect-callee-resolver.ts:160`).
+
+**Adding `expr` to a list of two would have closed the reported shape and left the class open at the
+next unenumerated property. This is the compiler's SECOND instance of the field-listed-walk class** —
+see `emit-client.ts`'s hand-rolled seed walker drifting against `dependency-graph.ts`'s full sweep.
+**DO NOT FIX A FUTURE MISS BY ADDING A FIELD NAME HERE.**
+
+**The deny-list was MEASURED not load-bearing for the RESULT, only for the work done.** Over the
+git-tracked corpus: shipped list **68** cells · without `parent`/`loc`/`spans` **68** · `span`+`spans`
+only **68** · **no deny-list at all 68.** Identical. So the list is now the smallest one that is
+actually justified rather than the safest-looking one. An S337 review deleted `parent`, `loc` and
+`spans` because none exists as a node field at RI time and each was **pure fail-open surface**: the
+day a node kind adopts `parent` for a child-bearing field, a derived cell under it is silently
+missed — precisely the defect class this walk exists to close.
+
+**THE DIRECTION RULE, and it is the sentence to carry off this section: for a confidentiality check
+the safe error is descending one field TOO MANY** (worst case a spurious refusal — loud, reversible)
+**never one too few** (worst case a silent leak).
+
+**Termination and cost.** An identity `seen` set over EVERY visited object — not just nodes reached
+through an array — so a shared subtree is walked once and a cycle cannot hang the walk; the same set
+is what stops a node reachable by two paths producing two diagnostics. `MAX_DEPTH = 512` because the
+walk now descends ESTree expression trees, which nest one level per term: a machine-generated RHS
+with a few thousand `+` terms would otherwise blow the stack — **i.e. crash the compiler with no
+diagnostic, inside a security check.** Measured corpus max depth: 37.
+
+**The §64 carve-out is applied by the CALLER, not inside the walk** (`isToolProgram`, read off the
+top-level `<program>`, applied by Step 3b before the walk runs) — **which is what makes it
+depth-independent by construction** and why the structural change did not have to re-derive it.
+
+⚠ **Two properties to know before writing a test here.** (1) `Object.keys` yields property-INSERTION
+order from the AST builder, which is not guaranteed to be source order, and **Step 3b pushes
+diagnostics in walk order without sorting by span** — do not assert source ordering. (2) The export
+exists because the termination and single-visit properties are properties of THIS walk and must be
+asserted against it directly; **driving them through `runRI` conflates them with every other walk in
+the stage, demonstrably so — a synthetic cyclic AST blows the stack inside
+`collectFileLevelBindingRoots` (`:2600`, a walk with NO `seen` set at all) long before it reaches
+this one.** That sibling fragility is real and unfixed.
 
 
 ## Node identity is a CODEGEN CONTRACT, not a debugging convenience (NEW section, S299)
@@ -728,23 +796,151 @@ with no table read-set and no trigger), so an adopter who applies (b) alone stil
 firing on every route-enter per §6.7.2.1 — now over a cached server load — and the two halves can
 disagree. Both codes remain NAMED / spec-ahead — no emitter yet; the §34 row lands with the impl.
 
-## `<timer>` / `<poll>` — the first-tick asymmetry is now normative (§6.7.5/§6.7.6, S314)
+## `<timer>` / `<poll>` / `<timeout>` — SPEC-AHEAD SINCE S314, SHIPPED AT #510 (§6.7.5/§6.7.6/§6.7.8)
 
-A `<timer>`'s first execution is **one interval AFTER arming** — it does not fire immediately. A
-`<poll>`'s first execution **fires IMMEDIATELY on arming** — the deliberate divergence, because a
-`<poll>` exists to keep a value fresh (the §6.7.6 worked example, `<poll interval=10000>` fetching
-`@serverTime`, would otherwise render nothing for a full 10s) while a `<timer>` makes no such promise.
-Both amendments state behavior the SPEC was previously SILENT on, and the silence was masked by a
-`collect.ts:205` defect that accidentally emitted the poll body at module-init (an accidental
-first-tick-ish run) — removing the defect without the amendment would have been a visible regression
-for every `<poll>` in the field. The S313 "a bug fix is not automatically inert" shape, restated: the
-fix and the amendment landed together.
+**READ THE SPLIT FIRST, because the prior generation of this section did not have one and therefore
+read as done.** §6.7.5/§6.7.6's first-tick asymmetry was RATIFIED at S314 and this map has described
+it in the present tense ever since. **The implementation landed at #510, in this window.** Everything
+below is now shipped; nothing below is aspirational.
 
-Two sub-rules worth carrying: the immediate poll tick runs through the SAME tick path as every later
-tick (inherits async queuing, error handling, `<#id>.tickCount` accounting — not a special-cased
-pre-run); and it is **gated by `running=`** and fires **once per ARMING, not once per resume** (a
-`running` false→true transition resumes the interval without re-firing the immediate tick — the
-alternative turns a boolean write into a fetch trigger, a side effect at a distance).
+**The normative behaviour.** A `<timer>`'s first execution is **one interval AFTER arming** — it does
+not fire immediately. A `<poll>`'s first execution **fires IMMEDIATELY on arming** — the deliberate
+divergence, because a `<poll>` exists to keep a value fresh (the §6.7.6 worked example,
+`<poll interval=10000>` fetching `@serverTime`, would otherwise render nothing for a full 10s) while
+a `<timer>` makes no such promise.
+
+**How it is implemented, and the locus is SPLIT — both halves matter.**
+`_scrml_timer_start(scopeId, timerId, intervalMs, bodyFn, immediate)` gained a **fifth parameter**
+(`runtime-template.js`); when truthy it calls `tick()` once directly after `setInterval` arms.
+**The GATE is at the emit site and the FIRE is at the arm site:** `emit-reactive-wiring.ts`'s
+`emitLifecycleNode` appends `, true` for an always-running `<poll>`, `, _scrml_reactive_get("<var>")`
+for a reactive `running=@cell`, and **NOTHING at all** for a `<timer>` or a static `running=false`
+poll. So a paused poll cannot smuggle in a tick, and a `<timer>`'s emission is byte-identical to
+pre-fix.
+
+**The two sub-rules, now enforced rather than described.** (a) The immediate tick runs through the
+**SAME `tick()` path** as every later tick, so it inherits async queuing, error handling and
+`<#id>.tickCount` accounting — it is not a special-cased pre-run. (b) It fires **once per ARMING, not
+once per resume**: it lives in `_scrml_timer_start` and `_scrml_timer_resume` is untouched, so a
+`running` false→true transition resumes the interval without re-firing. **The alternative would turn
+a boolean write into a fetch trigger — a side effect at a distance.**
+
+### The defect that was MASKING the missing feature, and why removing it needed the amendment
+
+`collect.ts`'s `collectTopLevelLogicStatements` descended a `<timer>`/`<poll>`/`<timeout>` node's
+children, which **collected the tick body a SECOND time as a top-level statement** — so the body ran
+once at module init, before the timer ever fired. For a `<poll>` that accident LOOKED like the
+immediate first tick §6.7.6 mandates; **for a `<timer>` it was a straight defect**, an unwanted run
+at load. Removing the descent without shipping the real immediate tick would have been a visible
+regression for every `<poll>` in the field. **The S313 "a bug fix is not automatically inert" shape,
+restated: the fix and the feature had to land together, and at #510 they did.**
+
+### `DEFERRED_LIFECYCLE_BODY_TAGS` — and the EXCLUSIONS are the load-bearing part
+
+The fix is a deny-set in `collect.ts`: `{ timer, poll, timeout }`. `collectTopLevelLogicStatements`
+does not descend a node whose `tag` is a member.
+
+**The predicate is "this tag's `${}` body is a DEFERRED payload with its own Step-5 emitter", NOT "this
+tag is a lifecycle tag".** Two lifecycle-adjacent tags are deliberately EXCLUDED from the set, and
+adding either would DELETE a required emission:
+
+| Tag | In the deny-set? | Why |
+|---|---|---|
+| `<timer>` · `<poll>` | **yes** | body is the interval tick callback, emitted by `emit-reactive-wiring.ts` (§6.7.5/§6.7.6) |
+| `<timeout>` | **yes** | body is the `setTimeout` callback, emitted by `emit-reactive-wiring.ts` (§6.7.8) |
+| `<request>` | **NO — deliberately** | its descent **IS** the designed canonical-form fetch, emitted once. Excluding it here would remove the fetch. |
+| `<channel>` | **NO — deliberately** | its top-level `${}` is single-run INIT logic that the channel emitter does **not** re-emit, so the descent is its ONLY, correct emission. |
+
+**Do not generalise this set by tag category.** The gaps it closes are
+`g-timer-poll-body-runs-once-at-module-init` and `g-timeout-body-runs-once-at-module-init`.
+
+### §6.7.8 `<timeout>` also had a FALSE-FIRE, fixed in the same PR
+
+`name-resolver.ts`'s `SCRML_NON_ELEMENT_TAGS_EXTRA` lifecycle-keyword list omitted `"timeout"`, so
+`<timeout>` — all-lowercase and not a known HTML element — **false-fired `E-MARKUP-001` in every
+position.** One word. ⚠ **The hazard it exposes is structural and still live:** that list is
+HAND-MAINTAINED, and the block immediately below it states that the sibling E-MARKUP-001 structural
+exclusion is DERIVED, not hand-copied. **Two lists in one file; only one of them self-maintains, and
+nothing asserts they agree.** A new lifecycle tag must be added to the hand list consciously.
+
+## §6.7.7 — a `<#request>` ref in an ATTRIBUTE: the class is now closed on the two per-item paths (#484 → #511 → #512)
+
+**The failure being fixed.** A `<#id>` reference must lower to the reactive `_scrml_request_<id>`
+object. Mis-routing it to the §36 `_scrml_input_state_registry` yields `undefined.data` — **a runtime
+TypeError from a bundle that compiled clean, with no diagnostic.**
+
+**THREE PRs, and the reason it took three is the transferable part: each path reaches codegen as a
+DIFFERENT NODE SHAPE, so one mechanism could not cover them.**
+
+| Path | PR | Mechanism | Why not the other mechanism |
+|---|---|---|---|
+| top-level `value=` / Boolean attr / `class=` / `class:x=` / `if=` / `show=` | #484 | `reparseRequestRefEscapeHatch` + `collectRequestIds` at the top-level attr emitters | — |
+| per-item `<each>` body attr | #511 | a module-level `_eachRequestIds` stash (built by `collectRequestIds` in `emitEachBodyRenderForFile`, cleared in the same `finally` as `_eachBindSupportCtx`), threaded into `emitExprField` via `lowerEachExpr` | the node here IS parsed; it only lacked the id set |
+| Tier-0 `${for…lift}` attr | #512 | `reparseLiftAttrRequestRef` → `reparseRequestRefEscapeHatch`, applied at the three lift attr-value emit sites BEFORE `emitExprField` | **there is no structured node to thread into.** `ast-builder.shouldSkipExprParse` skips any `<`-leading expr (its HTML-fragment guard), so the attr arrives as an ESCAPE-HATCH node; handing that to `emitExprField` takes the string fallback, which BOTH mis-routes the ref AND mangles an `is some` LHS into `.get("profile").(data !== null && …)` → `E-CODEGEN-INVALID-LOGIC` |
+
+**EVERY ONE OF THE THREE IS GATED TO REGISTERED `<request>` IDS** (`gateToRegisteredRequests = true`),
+so a non-request `<#id>` — an input-state ref, or a typo — stays on its pre-fix path and emits
+byte-identically. **That gate is why a class spanning three emitters could be closed incrementally
+without a corpus-wide diff, and it is the move to copy: make the new path opt-in on a POSITIVE
+membership test, never on the absence of one.**
+
+⚠ **THE TWO HALVES OF THIS CLASS FAILED IN OPPOSITE DIRECTIONS, WHICH IS WHY "IS IT CLOSED?" CANNOT
+BE ANSWERED BY GREPPING FOR ONE CODE.** The `<each>` half was a **SILENT MISCOMPILE** (clean compile,
+TypeError at runtime); the `${for…lift}` half **FAILED LOUD** (`E-CODEGEN-INVALID-LOGIC`, no bundle
+written). A mixed-text attr template remains in the loud category — verify against
+`docs/known-gaps.md` before scoping.
+
+## §17.7.3 — the `<each>` body scope is `@.` + an optional `as` alias, NOT author locals (`E-EACH-BODY-DECL-UNSUPPORTED`, NEW)
+
+**The scope rule.** Inside an `<each>` body, the readable surface is the `@.` contextual sigil and, if
+declared, the `as` alias. **Author-declared locals are not part of it.**
+
+**What used to happen, and it is the worst failure shape in the language: a silent-broken bundle.**
+A `${ let nm = @.name }` in an each body produced a statement with no `exprNode` and no `raw`, so
+codegen fell through to `inner = ""` and skipped it. **But a later `${nm}` still lowered to a bare
+`String(nm)`** — a dangling reference that throws inside the per-item render factory and takes the
+**WHOLE list** with it. Exit 0. No diagnostic. An empty list and a green compile.
+
+**The ruling (bryan, S339) is FAIL-CLOSED: reject the form loudly rather than ship a broken render.**
+`emit-each.ts:1387` fires once per offending decl and returns.
+
+**The row is careful about what it does NOT decide, and that care is the point.** Rejecting this form
+is not a ruling that author locals in an each body are forbidden. **Supporting them — replay the
+binding into the per-item factory closure, exactly as the `for`-lift path already does — is a separate
+§17.7.3 language-surface ruling.** The diagnostic rejects until such a ruling lands; it does not
+foreclose it. **Does NOT fire:** a bare field read (`${@.field}`, or `${x.field}` with `as x`), a
+declaration OUTSIDE the `<each>` (the ordinary lift), or any non-declaration `${expr}`.
+
+## §52.8 — the SSR `<each>` prerender FALLBACK is now LOUD (`I-SSR-EACH-CLIENT-RENDERED`, NEW)
+
+**Nothing about what compiles changed. What changed is that a decline stopped being silent.**
+
+A top-level `<each in=@cell>` over an SSR-seeded server-authority cell is a prerender CANDIDATE. If
+its per-item template is outside the §52.8 renderable subset, the each falls back to client-only
+first paint: **the list ships EMPTY in the server HTML and populates after hydration — no first paint
+for crawlers or slow connections, and no DOM adoption.** That fallback is correct and conservative
+(it never emits wrong markup) and it has always existed. **`buildOneRenderer` used to signal it by
+returning a bare `null`, so the adopter got nothing at all.**
+
+It now returns `{ fallback: <reason> }` and `buildSsrEachRenderers` — given `errors` and `filePath`
+by `emit-server.ts:5162` — turns that reason into an **Info** lint. The reasons it can name: the
+iteration shape is not `in=`; the row template has N root elements (multi-root); the root is not a
+markup element; the row produced no server-renderable content; or an `SsrUnsupported` message from
+`nodeToParts` (a non-field-read interpolation — call / ternary / method / `@cell` read — a non-literal
+attribute value, an `if=`/`show=`/directive/reactive attribute, or a nested
+`<each>`/`<match>`/component row).
+
+**Info-level and never fatal, on purpose: it SURFACES pre-existing behaviour.** A lint that fires on
+code that already compiled must not be able to break a build. **Does NOT fire** on a client-local
+cell (never an SSR candidate), a nested each (emitted inline, no mount), or an each already inside
+the subset.
+
+⚠ **Do not confuse it with its prefix-sibling.** `I-SSR-AUTH-SCOPED-CLIENT-HYDRATED` (§52.15) is a
+**CONFIDENTIALITY** auto-omission — the compiler declines to seed a cell because seeding it would
+leak. This one is a **PERFORMANCE** decline. Same `I-SSR-` prefix, same "falls back to client
+hydration" shape, entirely different reason and entirely different remedy. **Widening the renderable
+subset is the ruling-gated `g-ssr-each-row-template-subset-blocks-all-prerender` /
+`g-ssr-each-multi-root-client-only-fallback` — it is a decision, not a backlog item.**
 
 ## §20.5 / §52.15.1 — the DANGLING-REFERENCE class, and why the `session` prologue bind is a Proxy (NEW #435 + #440)
 
@@ -1467,32 +1663,40 @@ before the thread it pushed into a sink nobody read. **Deduped at the drain**, b
 on BOTH paths would otherwise report the same `prepare` twice.
 Pinned by five NEG conformance cases (`sql/prepare-{server-fn,cps-return,pattern-c-cell,sse-generator,ws-onserver}-e-sql-006-neg`).
 
-## `<#request>.data is some` in a value / Boolean / class attribute (#484, S332-S333-peter) — and the TWO siblings still open
+## `<#request>.data is some` — the ESCAPE-HATCH substrate, and the per-callsite gate (#484 · #511 · #512)
 
-**The class.** `ast-builder.shouldSkipExprParse` skips a `<#`-leading expression, so a `<#request>`
-ref arrives at codegen as an **escape-hatch raw string**. Whichever lowering receives it then has to
-re-derive the ref, and the ones that did not thread `requestIds` mis-routed it to the **§36
-input-state registry** (`_scrml_input_state_registry`) — which a `<request>` never populates.
+> **The CLOSURE STATE of this class now lives in the §6.7.7 section above** — two of the three
+> siblings this section used to list as open were closed by #511 and #512. **This section keeps the
+> SUBSTRATE detail**, which is what you need if you are adding a fourth call site.
 
-**Fixed shape:** `value=` / Boolean-attr (`disabled=`) / `class=` / `class:x=` / `if=` / `show=`.
-The shared substrate is `reparseRequestRefEscapeHatch(exprNode, raw, ctx, requestIds, gate)` in
-`emit-expr.ts`, consumed by `emit-bindings.ts` and `emit-event-wiring.ts`; `collectRequestIds(fileAST)`
-supplies the id set. Note the **gate parameter differs by call site on purpose** —
-`gateToRegisteredRequests: false` for `if=`/`show=` (an input-state `<#field>.value is some` toggle
-MUST reparse or the string fallback mangles its `is some` LHS), `true` for the value/bool/class
-sites.
+**The class.** `ast-builder.shouldSkipExprParse` skips a `<#`-leading expression (its HTML-fragment
+guard), so a `<#request>` ref arrives at codegen as an **escape-hatch raw string**. Whichever
+lowering receives it then has to re-derive the ref, and the ones that did not thread `requestIds`
+mis-routed it to the **§36 input-state registry** (`_scrml_input_state_registry`) — which a
+`<request>` never populates → `undefined.data` → runtime TypeError.
 
-**TWO SIBLINGS ARE STILL OPEN, and they fail in OPPOSITE directions — do not treat the class as
-closed:**
+**The shared substrate is `reparseRequestRefEscapeHatch(exprNode, raw, ctx, requestIds, gate)` in
+`emit-expr.ts`**, with `collectRequestIds(fileAST)` (in `reactive-deps.ts`) supplying the id set.
+Consumers: `emit-bindings.ts`, `emit-event-wiring.ts`, `emit-html.ts` (#484) and now
+`emit-lift.js` via `reparseLiftAttrRequestRef` (#512). The `<each>` path (#511) does NOT use the
+reparse — its node IS parsed and it only lacked the id set, so it threads `requestIds` through
+`lowerEachExpr` from a module-level `_eachRequestIds` stash instead.
 
-| Sibling | Position | Failure mode |
-|---|---|---|
-| `g-request-is-some-in-each-loop-attr-misroute` (MED, open) | per-item `<each>`/`<for>` body attribute | **SILENT MISCOMPILE.** `renderTemplateAttrToJs` (`emit-each.ts:1893`) → `lowerEachExpr`/`rewriteIterValueExpr` never thread `requestIds` → `_scrml_input_state_registry.get(id)` is `undefined` → runtime `TypeError` inside the per-item effect. **Compiles clean.** |
-| `g-request-is-some-in-mixed-text-attr-template-misroute` (MED, open) | mixed-text attr template (`title="state: ${<#r>.data is some}"`) | **FAILS LOUD.** `lowerAttrTemplateValue` (`emit-bindings.ts:423`) → the raw-string `rewriteTemplateAttrValue` never builds an ExprNode → the interpolation is left RAW → `E-CODEGEN-INVALID-LOGIC`, no client bundle written. |
+⚠ **THE `gate` PARAMETER DIFFERS BY CALL SITE ON PURPOSE, AND GETTING IT WRONG BREAKS A DIFFERENT
+FEATURE.** `gateToRegisteredRequests: false` for `if=`/`show=` — an input-state `<#field>.value is
+some` toggle MUST reparse there, or the string fallback mangles its `is some` LHS. `true` everywhere
+else (value / bool / class / each-attr / lift-attr), so a non-request `<#id>` stays byte-identical to
+its pre-fix emission. **Read the gate at the site you are copying from before you copy it.**
+
+**Still open, and it fails in the LOUD direction:** `g-request-is-some-in-mixed-text-attr-template-misroute`
+(mixed-text attr template, e.g. `title="state: ${<#r>.data is some}"`) → `E-CODEGEN-INVALID-LOGIC`,
+no bundle written. **Verify against `docs/known-gaps.md` before scoping — this map does not own that
+ledger's status.**
 
 **The convergent fix is the `shouldSkipExprParse` substrate, which S312 deliberately did NOT touch
-after a global attempt regressed.** The landed fix is per-callsite reparse on purpose. A brief that
-says "route request refs correctly" without naming the callsite is under-specified.
+after a global attempt regressed.** Every landed fix is per-callsite on purpose. **A brief that says
+"route request refs correctly" without naming the callsite is under-specified — three PRs proved it,
+and two of them needed different mechanisms.**
 
 ## Read-side diagnostics inside an `<each>` in a `<match>` arm (#477, §6.1.1, S333-peter)
 
@@ -1586,7 +1790,7 @@ Diagnostic emission — every pipeline stage emits `{code, message, severity, sp
 A returned function-expression closure (`return function name(){…}`, GITI-038) — owns its own body's scope/type/async analysis independent of its enclosing factory (`ReturnStmtNode.fnExprNode`, see schema.map.md).
 
 ## Tags
-#scrml #map #domain #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth #route-region #§6.7.2.1 #§20.8.8 #pole-c #third-lifecycle-owner #route-leave #route-enter #commit-gate #keep-alive #outlet-resident #region-cleanups #module-init #rehydrator-boundary #machine-retired #e-deprecated-001 #§63.7 #projection-codemod #engine-audit #§51.11 #§51.13 #property-tests #enum-only #§19.4.4.1 #e-error-011 #renders-clause #e-error-005 #corpus-first-migration #provenance-field #§34.0 #named-codes-land-with-impl #§6.7.1a #bare-expression-category #sugar-equivalence #mount-body-expr-node #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #crossmodule-async-markup #s239-catch #pr-405-landed #cps-choke-point-landed #w-if-in-each #each-nested-if-not-reactive #reset-init-thunk-reassignment #§13.2-call-site-await #async-name-provider #decision-sites-3-to-1 #one-provider-three-consumers #u1 #dpa-020 #dpa-023 #can-suppress-never-strand #owning-file-filter #decide-off-emitted-output #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #dangling-ref-class #session-proxy-bind #gh357 #csrf-token-disclosure #§20.5 #§52.15.1 #currentuser-resolver-gate #channel-auth-only #permissive-by-design #collect-structural-decl-names #§6.8 #g-implicit-cell-double-write-clobbers-reset-init #§12.5 #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #bun-welcome-page #stderr-only-for-undefined #session-cookie-wrap #spec-silent-shall #derived-not-stated #region-fence #two-region-classes #lexical-vs-structural #change-the-input-not-the-pattern #join-around-runtime-slot #classify-brace-group #object-shorthand-expansion #binding-pattern-half-repair #proto-shorthand-b31 #engine-dependent #register-fn-name #identifier-shape-guard #zero-width-alternation #object-hasown #prototype-chain-read-closed #§6.6.19 #e-derived-server-only-reach #refuse-not-escalate #per-function-scope #§12.4 #non-function-positions #derived-rhs #scan-for-server-only-binding-refs #one-scanner-two-callers #kind-tool-carve-out #shortest-edit-restores-the-leak #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #separator-dependent #closes-block-statement #whitelist-not-blacklist #brace-continuation #per-arm-declarednames #re-dispatch-not-hand-copied-opts #emit-for-stmt-with-tilde #e-sql-006-compile-time #narrow-sink-wiring #request-ref-escape-hatch #reparse-request-ref #two-siblings-open #silent-vs-loud #each-arm-reparse #throwaway-id-range #nodetypes-memo-clobber #real-filepath-not-suffixed
+#scrml #map #domain #trigger-3 #escalation-server-only #two-set-distinction #confidentiality-boundary #node-identity #node-id-freshness #component-expander #language-primitives #css65 #theme #realtime #channel-watches #auth #baas #reactivity #engine #not-absence #e-style-conflict #outlet #soft-nav #server-shape #tool-serve #link-boost #css-wave1 #theme-token #content-hash #colorless-async #giti-037 #giti-038 #writer-ownership #session-establishment #position-invariant-await #one-landmark #shell-composition #e-outlet-and-main #tenant-floor #ssr-auto-make-safe #sql-lex #confidentiality-axes #landmark-tag #component-expansion #total-walk #nested-program-isolation #e-script-001 #decl-scoped-diagnostics #dbauth #db-authoritative #rls #secdef #immutable-column #privilege-separation #db-migrate #trust-boundary-reversal #half-rls-honesty-bar #auto-immutable #is-effectively-immutable #session-principal-wiring #e-match-invalid-arm #ghost-pattern #w-dead-function #resolved-gaps #tenant-context-union #dist-space #source-space #coordinate-space #d4 #pages-prefix-strip #forward-index #w-server-import-unemitted #oracle-blind-spot #runtime-chunks #detect-runtime-chunks #post-emit-chunk-gates #chunk-dependencies #gh234 #navigate-wave1c #cross-chunk-nav #w-nav-chunk-load-failed #chunk-loading-depth-counter #boot-dispatch #last-nav-wins #structural-if #§17.1.2 #render-not-lifecycle #fenced-widening #each-row-template-fails-open #fail-open-vs-fail-closed #e-if-in-dispatched-arm #one-if-lowering #emit-if-mount-gate #emit-gated-structural #is-gateable-if-value #if-cond #live-span-unmount #scrml-if-range #remount-each-fence #mount-contract-widening #w-attr-001-false-on-auth #route-region #§6.7.2.1 #§20.8.8 #pole-c #third-lifecycle-owner #route-leave #route-enter #commit-gate #keep-alive #outlet-resident #region-cleanups #module-init #rehydrator-boundary #machine-retired #e-deprecated-001 #§63.7 #projection-codemod #engine-audit #§51.11 #§51.13 #property-tests #enum-only #§19.4.4.1 #e-error-011 #renders-clause #e-error-005 #corpus-first-migration #provenance-field #§34.0 #named-codes-land-with-impl #§6.7.1a #bare-expression-category #sugar-equivalence #mount-body-expr-node #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #crossmodule-async-markup #s239-catch #pr-405-landed #cps-choke-point-landed #w-if-in-each #each-nested-if-not-reactive #reset-init-thunk-reassignment #§13.2-call-site-await #async-name-provider #decision-sites-3-to-1 #one-provider-three-consumers #u1 #dpa-020 #dpa-023 #can-suppress-never-strand #owning-file-filter #decide-off-emitted-output #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #dangling-ref-class #session-proxy-bind #gh357 #csrf-token-disclosure #§20.5 #§52.15.1 #currentuser-resolver-gate #channel-auth-only #permissive-by-design #collect-structural-decl-names #§6.8 #g-implicit-cell-double-write-clobbers-reset-init #§12.5 #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #bun-welcome-page #stderr-only-for-undefined #session-cookie-wrap #spec-silent-shall #derived-not-stated #region-fence #two-region-classes #lexical-vs-structural #change-the-input-not-the-pattern #join-around-runtime-slot #classify-brace-group #object-shorthand-expansion #binding-pattern-half-repair #proto-shorthand-b31 #engine-dependent #register-fn-name #identifier-shape-guard #zero-width-alternation #object-hasown #prototype-chain-read-closed #§6.6.19 #e-derived-server-only-reach #refuse-not-escalate #per-function-scope #§12.4 #non-function-positions #derived-rhs #scan-for-server-only-binding-refs #one-scanner-two-callers #kind-tool-carve-out #shortest-edit-restores-the-leak #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #separator-dependent #closes-block-statement #whitelist-not-blacklist #brace-continuation #per-arm-declarednames #re-dispatch-not-hand-copied-opts #emit-for-stmt-with-tilde #e-sql-006-compile-time #narrow-sink-wiring #request-ref-escape-hatch #reparse-request-ref #two-siblings-open #silent-vs-loud #each-arm-reparse #throwaway-id-range #nodetypes-memo-clobber #real-filepath-not-suffixed #spec-ahead-vs-shipped #ratified-is-not-implemented #§6.7.5 #§6.7.6 #§6.7.8 #deferred-lifecycle-body-tags #request-and-channel-excluded-deliberately #predicate-is-own-step5-emitter #poll-immediate-first-tick #split-locus-gate-and-fire #never-refired-on-resume #timeout-false-fire #hand-maintained-vs-derived-list #§6.7.7 #request-ref-attr-class-closed #three-prs-three-node-shapes #escape-hatch-node #should-skip-expr-parse #gated-to-registered-ids #positive-membership-test #silent-miscompile-vs-fail-loud #§17.7.3 #each-body-scope #e-each-body-decl-unsupported #fail-closed-not-silent-drop #rejects-a-form-not-the-feature #§52.8 #i-ssr-each-client-rendered #fallback-descriptor-not-null #surfaces-not-changes #performance-decline-not-confidentiality #do-not-confuse-with-i-ssr-auth-scoped #structural-walk-not-field-listed #skip-derived-walk-key #deny-list-not-load-bearing #descend-one-field-too-many #second-instance-of-the-class #do-not-add-the-field-name #depth-cap-512 #identity-seen-set #carve-out-applied-by-the-caller #object-keys-is-insertion-order #exported-for-testability #six-leaking-positions
 
 ## Links
 - [primary.map.md](./primary.map.md)
