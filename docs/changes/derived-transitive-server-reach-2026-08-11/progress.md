@@ -302,6 +302,18 @@ Pre-commit gate (`unit + integration + conformance + compiler/tests/*.test.js --
 
 `g-5c-caller-context-promotes-a-derived-read-helper-to-the-server`  ·  **HIGH**  ·  open
 
+> **S338 REVIEW ESCALATED THIS TO A BLOCKING FINDING (F2), HELD FOR bryan — do not close it here.**
+> The review's framing is sharper than mine and supersedes it: my Step 5c-ter turns a pure
+> `function money(n) { return "$" + n }` into a **hard build failure** whenever it is shared between
+> one server route and a derived read, because Step 5c counts function-to-function edges only and
+> **neither a derived read nor an event-handler read is a caller edge**. Base was a silent HTTP
+> round trip; head is a build error. **The prescribed workaround makes string concatenation a
+> network round trip.** The guard already exists in this file — `#284 FIX B`'s
+> `markupReferencedNames`, whose own comment says a client-markup-referenced helper *"must NOT be
+> relocated server-side… that turns a synchronous render into a blanking async fetch"* — and it is
+> wired only to `indirectServerCount`, never to the direct-caller path. **This is a diagnostic
+> masking a placement bug.** Routed, not decided.
+
 Step 5c's caller-context fixpoint (`route-inference.ts`) promotes a function whose only *function*
 callers are server-classified. A **derived-cell RHS reference is not a caller edge**, so a helper
 shared between a server function and a derived cell is relocated to the server, and the derived cell
@@ -339,9 +351,155 @@ an error and still writes a bundle containing `async _scrml_fetch_doHash_N` wire
 page that renders `[object Promise]`. Pinned as an inverting expectation in
 `conf-DERIVED-SERVER-ONLY-REACH-artifacts.test.js` §5.
 
+### Gap 4 — a server-placed `function` whose name collides with a lambda param renames the PARAMETER
+
+`g-lambda-param-renamed-to-fetch-stub-when-a-server-fn-shares-its-name`  ·  **HIGH**  ·  open
+
+Found as bycatch by the S338 review while probing the §6.6.19 over-fire; **not chased, filed.**
+
+```scrml
+function total(p) { return hashPassword(p) }   // server-placed
+const <doubled> = @nums.map(total => total * 2)
+```
+
+Codegen's fn-name mangler renames the lambda **parameter** `total` to the fetch-stub name while
+leaving the body's reference to it, producing an undeclared identifier and a runtime
+`ReferenceError` — at exit 0. This is a *codegen* defect, independent of §6.6.19.
+
+**It is currently MASKED**, and that is the part worth recording: the §6.6.19 lambda-parameter
+over-fire (F4 above) refuses this exact program before it can be emitted. **If the lexical-scoping
+ruling lands and the over-fire is removed, this miscompile is unmasked.** The two must be sequenced
+— fix the mangler first, or land both together. Do not close F4's over-fire without checking this.
+
+### Gap 5 — §6.6.19's lambda-parameter over-fire (the F4 ruling)
+
+`g-derived-server-only-reach-lambda-param-overfire`  ·  **MED**  ·  open, needs a ruling
+
+`const <doubled> = @nums.map(total => total * 2)` is refused whenever the same file declares a
+server-reaching `function total`. The RHS neither calls nor reaches it — a lambda parameter binds
+the name. `collectDerivedRhsLocalNames` stops at a nested lambda, so the parameter never enters
+the RHS shadow set.
+
+The direct limb has behaved this way since S331 and §7 pins it, on the ground that *a too-WIDE
+shadow set is a MISS (a leak) and a too-narrow one is a fixable over-fire*. **That ground does not
+transfer to the transitive limb**: it is a CORRECTNESS refusal, so a miss renders a Promise rather
+than shipping a secret, and the name set grew from ~4 imported members to every server-reaching
+function name in the file.
+
+The fix is proper lexical scoping in `scanForServerOnlyBindingRefs` (a lambda's params shadow
+within that lambda's body). It would also make §6.6.19's shadowing sentence TRUE — it is false in
+both limbs today. **But it makes the DIRECT limb newly-ACCEPTING on a confidentiality boundary and
+reverses a deliberate S331 choice, so it is a ruling.** Sequencing constraint: see Gap 4 — this
+over-fire currently masks a live codegen miscompile.
+
+Shipped mitigation in the meantime: the message says the RHS *reaches* the name, never that it
+*calls* it, so it no longer asserts something absent from the source.
+
 ### Gap 3 (LOW, unverified — I may simply have misused the construct)
 
 `given <cond> { <body> }` inside a function body emitted `if (k !== null && k !== undefined) { }`
 with **the entire block body, including a `return`, dropped**, at exit 0. Source was
 `given k <= 0 { return hashPassword(p) }`. `given` is a presence check, so this is probably misuse —
 but a misuse that silently deletes a `return` is still a silent statement-drop and deserves a look.
+
+---
+
+# ROUND 2 — the S239 pass returned DO-NOT-LAND. What I got wrong.
+
+## F1 — my headline claim was false at N=1, and I built the very defect I designed against
+
+Round 1's design note says the closure "derives no new placement fact" and reuses "the ALREADY-BUILT
+per-record `callees` edge set". **That reuse was the bug.** `route-inference.ts`'s own docstring
+records that the callee walker *"returns at `case "lambda"` and never descends"*, and that the S299
+adversarial review proved a calls-only reach check evadable. I read that docstring, cited its
+conclusion in my own comments, closed the evasion inside the derived-RHS scanner — and then handed
+the hop closure the exact walker it condemns.
+
+Reproduced at my round-1 HEAD, exit 0, empty diagnostic set:
+
+```scrml
+function doHash(p) { return hashPassword(p) }
+function wrap(x) { return [x].map(v => doHash(v))[0] }
+const <h> = wrap(@pw)
+```
+```js
+async function _scrml_wrap_4(x) { return (await _scrml_mapAsync([x], async (v) => await _scrml_fetch_doHash_3(v)))[0]; }
+_scrml_cs_derived_declare("h", () => _scrml_wrap_4(_scrml_cs_reactive_get("pw")));
+```
+
+Byte-for-byte the shape §11a pins as REFUSED. Only the inner call's position differs.
+
+**The lesson is sharper than "I missed a case."** I chose between two edge sets and picked the one
+that was already built, because "reuse, don't re-derive" was the constraint I was optimising. But
+`callees` and `scanForServerOnlyBindingRefs` are *two different answers to "what does this reach"*,
+and reusing the wrong one is not reuse — it is the parallel-walker drift in a new costume. The
+correct reading of "don't build a second walker" was **"make the hop graph and the reach check the
+same walker"**, which is what the fix does.
+
+**Fix:** the edge set is now built with `scanForServerOnlyBindingRefs` over each function body,
+with `collectServerOnlyBindingModules`' params+locals shadow discipline. One notion of "reaches".
+
+### Correction to the review, verified — 3 of the 4 claimed misses were already closed
+
+The review listed three further same-file one-hop misses. **I reproduced all three at the reviewed
+HEAD and all three already REFUSED:**
+
+| shape | at reviewed HEAD | why |
+|---|---|---|
+| `[x].map(v => doHash(v))` | **exit 0 — MISS** | the real defect |
+| `let f = doHash` | exit 1, refused | Step 5b capture taint promotes `wrap` → already a closure SEED |
+| `let api = { run: doHash }` | exit 1, refused | same |
+| `let g = (p) => doHash(p)` | exit 1, refused (`E-ASYNC-STDLIB-IN-SYNC-CALLBACK`) | a different code catches it |
+
+This matters beyond bookkeeping: it is *why* the reference-based edge set costs almost no over-fire.
+A function that references a server fn without calling it is **already server-placed by 5b**, so it
+was already a seed — the widening adds edges that were largely redundant with placement.
+
+## F3/F4/F5/F6 — accepted in full
+
+- **F3** — two false normative sentences, both fixed. The shadowing bullet (*"a name bound inside
+  the RHS shadows … SHALL NOT fire"*) is false: a lambda parameter is bound inside the RHS and
+  fires. I did not author it, but I **extended its reach from ~4 imported stdlib names to every
+  server-reaching function name in the file**, which is what made an inherited inaccuracy my
+  problem. Corrected in §6.6.19 and the §34 detailed row, with the lexical-scoping fix marked OPEN.
+- **F4** — the message asserted a call that is not in the source. Now "reaches", never "calls".
+  The over-fire itself is Gap 5, routed. The review's argument is correct and I had not made it:
+  the fail-closed asymmetry licensing over-fire on a *confidentiality* limb does not exist on a
+  *correctness* one.
+- **F5/F6** — three `SHALL` guards had zero bite and one test was vacuous. Each is now killed by
+  exactly one test, **verified by applying the mutant, not by reasoning**:
+
+  | mutant | test that goes RED |
+  |---|---|
+  | `serverReachingNamesHere` same-file filter → `ids` | §11g cross-file |
+  | ambiguity guard `every` → `some` | §11g ambiguous |
+  | limb-dedup `continue` removed | §11e |
+  | edge set reverted to `record.callees` | §11a F1 pin |
+
+  **Two fixture traps found while building these, both recorded in the tests**, because each
+  silently defeats the obvious version:
+  1. The cross-file fixture must have **no** same-file declaration of the name. With one, the
+     *ambiguity* guard catches it first and neither guard is proven. A fixture that trips two
+     guards proves neither.
+  2. The ambiguity fixture's client-side declaration must be **client-PINNED**. With a plain
+     helper, Step 5c's name-keyed `inverseCallerMap` registers `outer`'s call to its own *nested*
+     `pick` against **both** declarations, promotes the top-level one server-side, and the
+     diagnostic becomes honestly correct — the test passes for the wrong reason.
+
+  Also worth recording: the review's B6 named the same-file filter in `callersOf`. **I applied that
+  mutant and the suite stayed green** — because my rewrite builds `live` per-file from
+  `fnNamesByFile`, making that filter a redundant second fence. The load-bearing guard is the one in
+  `serverReachingNamesHere`; that is the one now pinned. A guard no test can kill is not coverage,
+  and I would rather say so than let the count read as four.
+
+## Weak-witness caveat — carried into SPEC in both places
+
+Migration-zero was reproduced twice and is real, but the corpus is a weak witness. Measured here:
+of 2359 sources, **77** contain a `const <…>` derived cell, **40** contain one alongside a
+`function`, **24** contain those plus any server-trigger token — and 2 of each are this rule's own
+new cases. So the pre-existing population that could exhibit the shape is ~22 files, every one a
+compiler-repo fixture. **Zero migration says the repo does not use the shape; it cannot size
+adopter exposure to F2 or F4, because the corpus contains no adopter code.** Stated in SPEC as a
+limit on the instrument, not as a pass. (My figures run above the review's 75/38/18 — mine include
+the two new cases and a broader trigger-token set; the predicate is spelled out inline so the
+number is reproducible rather than quoted.)
