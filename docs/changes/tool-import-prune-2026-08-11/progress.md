@@ -192,10 +192,131 @@ several non-decl statements in one interpolation).
   at index 1 even as a sole statement); restore → 15 pass.
 - restore the three-name allowlist → 6 fail (`lin`/`~`/`var` at both positions); restore → 15 pass.
 
-### Separate finding — artifacts are WRITTEN on a hard error (fail-open)
+### Separate finding A — artifacts are WRITTEN on a hard error (fail-open)
 
 Found while writing these tests. On the F2 shape the CLI prints `FAILED — 1 error` and exits **1**
 (correct), but `out/page.client.js` is still written **and still contains the dangling `String(nm)`**.
 A downstream step that trusts the presence of artifacts rather than the exit code would serve a
 broken bundle. Pre-existing, orthogonal to F1/F2/F3, NOT fixed here. The tests deliberately assert on
 the diagnostic only, so they do not silently encode the fail-open write as expected behavior.
+
+---
+
+## OUT-OF-SCOPE ITEMS — measured and filed, NOT fixed
+
+### F5 — CONFIRMED, not "unverified residual". An unreferenced import drops, and the lib never runs.
+
+The brief lists F5 as an unverified residual. It reproduces. Constructed case:
+
+```
+// sidelib.scrml
+${ export const REGISTRY = []
+   REGISTRY.push("module-init side effect ran")
+   export function readRegistry() { return REGISTRY.length } }
+
+// tool5.scrml
+<program kind="tool">
+${ import { REGISTRY } from "./sidelib.scrml" }
+export function main() { return 0 }
+</program>
+```
+
+`REGISTRY` is imported but never referenced → the prune drops the specifier → the whole import line
+goes → `out/tool5.js` contains **zero** `import` statements. ES module evaluation is import-driven, so
+`sidelib.js` — which IS emitted alongside — is never evaluated and its top-level statement never runs.
+Executed: `bun out/tool5.js` → exit 0, no side effect. Compile is clean.
+
+This is the §44.2 hazard the brief describes: a `?{}` / `<schema>` module whose top level carries
+`new SQL(...)` is emitted, never imported, and therefore never connects. Note the prune CANNOT be
+"fixed" by boundary-tightening — the name genuinely is unreferenced. It needs a side-effect-import
+concept (keep a bare `import "./lib.js";` when the dropped module has top-level effects). NOT fixed
+per the brief. **Filed.**
+
+### Finding B — NEW HIGH, same class as F1, found while building the F5 control
+
+The F5 control run surfaced an unrelated defect. `emit-library.ts` (the "Generated library module"
+emitter) does **no lowering and no runtime-helper inlining at all**:
+
+- `print()` (§20.7) in a `.scrml` library emits a bare `print(...)`. Compile is CLEAN (exit 0, zero
+  diagnostics); running it throws `ReferenceError: print is not defined`. True both at library top
+  level and inside an exported library function. `grep -n "_scrml_print\|SERVER_PRINT_HELPER\|
+  RUNTIME_HELPERS" compiler/src/codegen/emit-library.ts` returns NOTHING.
+- Worse, and silent: scrml's structural `==` is **not lowered** there either. Same source, two
+  emitters, two different meanings —
+
+  | emitter | `export function usesStructEq(a, b) { return a == b }` emits |
+  |---|---|
+  | tool (`emit-tool.ts`) | `return _scrml_structural_eq(a, b);` |
+  | library (`emit-library.ts`) | `return a == b` |
+
+  The library form is raw JS loose equality. That is a **silent wrong-answer**, not a crash — strictly
+  worse than F1, which at least fails loudly at runtime.
+
+The tool path fails CLOSED on this class (`buildRuntimeHelperHeader` fires `E-TOOL-005` for any
+`_scrml_*` helper it does not inline). The library path has no such gate. Not fixed — outside this
+brief, and sizing the lowering gap is its own dispatch. **Filed.**
+
+### F6 — CONFIRMED as briefed. Plain `<program>` consumer still over-imports.
+
+`#508`'s tree-shake is tool-scoped, so the browser-client path still carries the
+component-expander helper-bind augmentation. A plain `<program>` importing 2 of a lib's 4 exports:
+
+```
+const { routeScore, R2_THRESHOLD, ensureSchema, loadAll } = _scrml_modules["lib.client.js"];
+```
+
+`ensureSchema` / `loadAll` are neither imported by the author nor referenced. Unlike the tool path
+this is a destructure from a module registry rather than an ES import, so it does not hard-fail — but
+it binds dead names and pins the lib's whole export surface into the bundle. **Filed only**, per brief.
+
+### The 883 vs 884 conformance count — note only
+
+`bun scripts/facts.ts --write` on this tree derives **883** (`docs/FACTS.md`, "conformance cases"
+row). Recorded; no action taken.
+
+---
+
+## VERIFICATION
+
+- **F1 reproducer**: compiled + EXECUTED on base (green compile, `node --check` PASS, runtime
+  `ReferenceError`) and on this branch (import present, `bun out/tool3.js` exit 0).
+- **F2/F3 reproducers**: compiled on base (silent miscompile, `errors: []`, `String(nm)` with no
+  declaration) and on this branch (`E-EACH-BODY-DECL-UNSUPPORTED`). Full 7-form × 2-position matrix
+  in the table above.
+- **Migration count**: 0 files newly rejected. Measured both sides with the same comparator.
+- **Bite-proofing**: every new test corrupted → confirmed RED → restored → confirmed GREEN. F2 and F3
+  bitten INDEPENDENTLY of each other.
+- **Full suite, NAME SETS not counts** (`bun run test`), compared against a baseline worktree built at
+  the brief's base `46b252cc` (own `bun install` + `bun run pretest`):
+  - base: 51 failure names · this branch: 49 failure names
+  - **in MINE but not BASE: 0 — zero regressions**
+  - in BASE but not MINE: 2, both the known self-seeding `benchmarks/todomvc/dist` tests that a
+    previous run in this worktree had already satisfied by creating the gitignored dist. Exactly the
+    order-dependence the brief warns about; this is why the comparison is by name set.
+  - Ran the suite twice on this tree (before and after re-running `bun run pretest` to refresh the
+    `samples/compilation-tests/` fixtures, which go stale after a codegen change): **identical**
+    49-name sets both times.
+- **Stale artifact noticed:** `compiler/tests/browser/FAILURE-BASELINE.json` holds 48 names, but
+  `§4 per-route chunk EXECUTES as a module … NEGATIVE control` fails on the BASE too and is absent
+  from that file. It passes in isolation (9/9) and fails only under the full-suite ordering. So the
+  committed browser baseline is one name stale. Not mine, not touched. **Filed.**
+- `docs/known-gaps.md` NOT touched (off limits, contended). All gap text is in this file.
+- `docs/FACTS.md` regenerated after the last content commit, per the brief.
+
+## ARGUING WITH THE BRIEF
+
+Asked to push back where warranted. Three places:
+
+1. **F1's preferred fix (symbol table) is not available as described.** The brief says the structural
+   route is "demonstrably in hand" because `E-SCOPE-001` does not fire on `$rs`. That proves the
+   binding RESOLVED, which is a different query from whether it is USED. `SYMResult` and
+   `Scope.importBindings` carry no reference set, use-count, or `referenced` flag. Detailed evidence
+   above. Took the brief's own fallback (2) — plus an input correction it did not ask for, which is
+   the part that actually addresses the Rule 7 complaint the brief raises.
+2. **F1's lane question — I agree with the brief, for a reason it does not give.** The brief argues a
+   live HIGH outweighs the lane split. It also happens that the correct fix DELETES the duplicated
+   predicate rather than editing it, so there is no lasting change to the other operator's surface to
+   hand back: the code that drifted no longer exists. That makes the routing question mostly moot.
+3. **`var` at body[1] is missing from F2's description**, and the brief's claim that `var` and `~`
+   "fail loudly via E-CODEGEN-INVALID-LOGIC" holds only at position 0. Both are silent one statement
+   over. The by-construction fix covers them, but the brief's severity picture was one case short.
