@@ -309,3 +309,70 @@ this dispatch's scratch dir write to `os.tmpdir()`. Grepping the SHARED scratchp
 hits `scratchpad/dsor/` and `scratchpad/probe/` — two other dispatches' directories, not
 `scratchpad/g263/`. Flagging the attribution only because the scratchpad is shared across
 concurrent dispatches, so "which agent left this" is not answerable from the file alone.
+
+---
+
+# ROUND 5 (S338) — append-only
+
+Startup `pwd`: `/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a04bd31168a2ab141`
+Base: `8ad13b84` (the BRIEF-round5 commit itself). Branch `worktree-agent-a04bd31168a2ab141`.
+`bun install` + `bun run pretest` both clean at start.
+
+## R5 Step 0 — MEASURED baseline (branch `8ad13b84` vs `origin/main` `c5499773`)
+
+Wiredness matrix, cross-file (`models.scrml` exports `MARKC`, `index.scrml` reads it ONLY at the
+position under test). "binding ref" = `index.client.js` names `MARKC` as a JS identifier, EXCLUDING
+the `const { … } = _scrml_modules[…]` destructure (that line is emitted BECAUSE of the seed, so
+counting it is circular).
+
+| vector | emitted client reference | genuine JS binding? | branch declares const? |
+|---|---|---|---|
+| `if=MARKC` | `_scrml_cs_reactive_get("MARKC")` | NO (store key) | YES → **LEAK** |
+| `if=MARKC.field` | `(_scrml_cs_reactive_get("MARKC").field)` | NO | YES → **LEAK** |
+| `if=MARKC[0]` | `_scrml_cs_reactive_get("MARKC")` | NO | YES → **LEAK** |
+| `if=(MARKC)` | `if ((MARKC))` | YES | YES (correct) |
+| `if=MARKC()` | `if ((MARKC()))` | YES | YES (correct) |
+| `if=` on `<each>`/`<match>` | `_scrml_cs_reactive_get("MARKC")` | NO | YES → **LEAK** |
+| `onclick=MARKC` | `"_scrml_attr_onclick_1": MARKC,` | YES | YES (correct) |
+| `onclick=MARKC.go` | HTML `onclick="MARKC.go"` | NO | YES → **LEAK** |
+| `onclick=MARKC()` / `.go(1)` / `(MARKC)` | `function(event){ MARKC…; }` | YES | YES (correct) |
+| `on=` `on-tap=` `on_tap=` `on2=` + plain ident | `"_scrml_attr_on…_1": MARKC,` | YES | **NO → under-emit** |
+| `only=` `once=` `onward=` + plain ident | `"_scrml_attr_only_1": MARKC,` | YES | YES (correct) |
+| `class=` `show=` `value=` bare | static HTML attribute | NO | NO (correct) |
+
+Cell axis (`attr=@probecell`), for the A2 claim:
+`if=` `show=` `bind:value=` `class:on=` `disabled=` → client-executed code reads the CELL STORE
+(`_scrml_cs_reactive_get("probecell")` inside an `_scrml_effect`). `title=` `class=` `value=` →
+static HTML attribute. NONE of them produces a JS binding named `probecell`.
+
+## R5 corrections to the BRIEF (measured, not inferred)
+
+- **A3 example list is WRONG.** `only=` / `once=` / `onward=` are NOT an "unmeasured set force-
+  classified by `/^on[a-z]/`" — `"only".startsWith("on")` is TRUE, so codegen's own predicate wires
+  them too, and the emitted `"_scrml_attr_only_1": MARKC,` is a real binding read. The two
+  predicates AGREE there. The disagreement set is exactly the four A4 names.
+- **A4 locus list includes one non-site.** `emit-html.ts:675` is `attrIsWiringFree`, a purity test
+  feeding `isCleanIfNode` — NOT the attribute-value lowering decision. The lowering sites are
+  `:3153` (bare-ref handler) and `:3223` (expr-form handler); `:3422`'s `call-ref` else-branch is a
+  third, and it is NAME-INDEPENDENT (any attribute name with a `call-ref` value becomes an event
+  binding — that is why `class=X.go()` is wired).
+- **A1's second vector is narrower than stated.** `onclick=X` (plain bare identifier) IS a genuine
+  binding read — measured. Only the DOTTED bare form (`onclick=X.go`) falls to static HTML.
+- **A1 and A2 cannot both be satisfied by one tri-state field.** A1 requires `if=MARKC` to be
+  NOT-wired; A2 requires `show=@x` to be wired. Both positions emit client-executed code that
+  references the source AS A STORE KEY. The field was answering two questions at once. See the
+  ruling below.
+
+## R5 ruling — `wired` becomes `clientBinding`, two values, ONE question
+
+`wired: "client" | "static" | "unknown"` is replaced by
+`clientBinding: "binding" | "not-binding"`, answering exactly one question:
+
+> does CLIENT-EXECUTED code reference this position's source as a JS BINDING — a free identifier
+> the emitted bundle must DECLARE, or the browser throws `ReferenceError`?
+
+That collapses the whole bare-attribute name table to ONE predicate, imported from codegen
+(`isEventAttrName`), and `if=` needs no special case at all: it was in the old predicate only
+because the old question ("does the compiler emit client code?") answers YES for a store-key read.
+`"unknown"` is DELETED rather than made real — an undetermined position is not representable, so a
+new position cannot ship unmeasured (B3, the delete branch).
