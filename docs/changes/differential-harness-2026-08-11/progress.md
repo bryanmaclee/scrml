@@ -388,6 +388,127 @@ project-root marker, since DEFECT 1 bites an extracted tree) and re-verify again
 
 **`g-emit-differential-env-kill-asymmetry-uncounted`** — LOW, open, BY DESIGN. See F5.
 
+---
+
+# ROUND 3 — the default was wrong, not the guards
+
+## OPERATIONAL NOTE, READ THIS FIRST
+
+**`--no-reverify` removes every false green this arc found, and until round 3 it was the only safe
+way to gate on this file.** It is verified as such. If you want the phantom filter, you need round
+3's inversion; if you want a gate you can trust with the least machinery, pass `--no-reverify` and
+accept that a harness phantom reports as a finding.
+
+## WHAT ROUND 2 GOT WRONG
+
+Round 2 closed the three *arrangements* F1 was found in. It did not close F1. Four more independent
+routes reached **exit 0 over real recorded differences with every precondition intact and green**:
+
+```
+VERDICT: NO DIFFERENCES … [1 HARNESS FLAKE(S) DISCARDED]   EXIT=0
+roots distinct ✓   revisions match ✓   canary reproduced ✓
+```
+
+They were not four bugs in the guards. **They were one bug in the default**, which is exactly why
+three rounds of point-fixes did not converge.
+
+## THE INVERSION (`FLAKE_DEMOTION_RULE`)
+
+> **A difference that does not reproduce is an `errored`, NOT a flake. Discarding one requires an
+> AFFIRMATIVE POSITIVE SIGNAL.**
+
+Every defect in this arc rode the implication `did not reproduce ⇒ discard ⇒ exit 0`. A
+non-reproduction is the ABSENCE of evidence, and it is at least as consistent with *"the
+re-verification could not measure"* as with *"the capture was a phantom"* — the former being
+likelier, since re-verification runs later on a machine whose state has moved.
+
+Demotion now requires **naming the corrupt capture**: exactly one side's recorded outcome must be
+contradicted by re-compiling that side, while the other's is reproduced exactly. `flaked` carries
+`corruptSide`, because a demotion that cannot say which measurement was wrong is a guess. Everything
+else — both reproduce, neither reproduces, a killed re-compile, a determinism run, a dirty oracle —
+is `errored`, the finding **stands and is counted**.
+
+**The instrument may now fail in exactly one direction: false RED.** A flake reported as a finding
+costs a human five minutes. A finding discarded as a flake is a silent miscompile shipped under a
+clean bill of health.
+
+## G1-G9
+
+- **G1 — the canary is RETIRED, not replaced.** It sampled ONE source from `controls` — *"common
+  sources with no difference"* — a population selected for being **insensitive** to the two
+  compilers disagreeing. `implicated[0]` was backwards; `controls[0]` is anti-correlated with
+  detection power, which is not the same thing as correct, and I defended it with 40 lines
+  containing no power argument. The per-source affirmative rule re-compiles **both sides of every
+  implicated source** against its own recorded outcome: same check, full coverage, maximal relevance.
+- **G2 — an externally-killed re-compile is `errored`, never flaked.** Two SIGKILLed re-compiles are
+  byte-identical (`ok:false`, 137, empty, no artifacts), so the old rule read "0 differences" and
+  discarded the finding — **under exactly the memory pressure DEFECT 2 was pinned to.** The
+  re-verification's most likely failure mode was silently converting real findings into flakes.
+- **G3 — a manifest recording a dirty corpus is no longer an oracle.** Nothing read
+  `corpusCleanliness`, which the manifest already carried and which names the sources.
+  `--allow-dirty-corpus` permits the COMPARISON; it does not make a dirty tree an oracle.
+- **G4 — a determinism run never demotes.** Harness nondeterminism IS a "did not reproduce" event,
+  so the flake filter was subtracting precisely the signal a self-diff is commissioned to find.
+- **G5 — `git status -z`.** C-quoting turned `café.scrml` into `"benchmarks/caf\303\251.scrml"`; the
+  old unquoting left six literal characters, the path missed the intersection and was dropped, so
+  HARD REQ 11 did not fire on a genuinely non-reproducible corpus. Rename/copy records now consume
+  their origin field.
+- **G6 — the provenance string was FALSE.** It said `--ignored=matching` while the code ran
+  `--ignored=traditional`, and it persisted into every manifest and printed at capture — in the
+  instrument whose thesis is that provenance strings must be true. Now rendered from the argv that
+  actually runs. **Never hand-write a command you also execute.**
+- **G7 — `Number("") === 0`**, so `--reverify-limit ""` was accepted as the "no cap" sentinel: the
+  F8 defect class surviving inside the helper written to close it.
+- **G8 — `fxSourceDelta` and the headline `BARE delta` are flake-filtered.** A demoted flake drove
+  `BARE delta: -7` — the file's own auto-await trend metric reading a phantom's shadow.
+- **G9 — REVERTED; the reviewer is right.** `loadedAs` is derived by `deriveLoadContexts` from the
+  emitted HTML's bytes, so a load-context change implies an HTML content difference or an
+  artifact-set difference, both already counted. Counting it could only double-count, and it
+  contradicted the sibling rationale that leaves `fxSourceDelta` uncounted. Both are printed,
+  neither counted, one argument.
+
+## THE TEST SURFACE — asserted EXIT CODES, and its bite is proven
+
+`compiler/tests/integration/corpus-emit-differential-exit-codes.test.js` — **16 asserted exit codes
+across the refuse / decline / demote branches**, synthesised from ONE real capture over the smallest
+corpus root in the tree (`benchmarks/todomvc`, one source). **Runs in ~1.3s.**
+
+Not unit tests, and deliberately so: **every one of the nine defects was a question about which
+BRANCH a real manifest pair takes**, and the failure mode is exit 0, which nothing else in the tree
+would notice. Unit tests over the pure helpers would have caught none of them.
+
+**Its bite is measured, not asserted.** The F1 case, run against the pre-inversion script
+(`356d3bbe`), reproduces the false green exactly:
+
+```
+PRE-INVERSION (356d3bbe)   exit 0   VERDICT: NO DIFFERENCES ... [1 HARNESS FLAKE(S) DISCARDED]
+HEAD                       exit 1   VERDICT: 4 DIFFERENCE(S) ... [DELTA NOT RE-VERIFIED]
+```
+
+A rig for a gate whose failure mode is exit 0 has to be shown to produce a non-zero exit on a green
+predecessor. This one is.
+
+## ROUND 3 REGRESSION SWEEP (all prior bites, at the final commit)
+
+| check | want | got |
+|---|---|---|
+| self-diff determinism control | 0 | **0** |
+| A1 anchor mismatch | 2 | **2** |
+| A1 anchor fixed (`mkdir .git`) | 0 | **0** |
+| D3 dirty corpus | 2 | **2** |
+| D3 tracked corpus addition (no false fire) | 1 | **1** |
+| anti-swallow (two roots + phantom) | real kept, phantom demoted | **51 reproduced, 1 DEMOTED (names HEAD as corrupt), 0 not-cleared** |
+| exit-code rig | 16 pass | **16 pass, 0 fail, 1.3s** |
+
+## THE THING TO CARRY OUT OF THIS ARC
+
+Nine silent failure modes in one instrument, found across three adversarial rounds. **Three of them
+were introduced BY fixes for the previous two**, and each survived a hand-written bite proof that
+was aimed at the right mechanism in the wrong deployment. The pattern is not carelessness; it is
+that **a bite proof written by the same person who wrote the fix inherits that person's model of
+where the fix runs.** The exit-code rig is the structural answer, and the reason it is worth more
+than the nine individual fixes is that it does not depend on anyone's model being right.
+
 ## WHAT WAS NOT DONE
 
 - `docs/known-gaps.md` untouched (contended). Gap text above.
@@ -400,3 +521,11 @@ project-root marker, since DEFECT 1 bites an extracted tree) and re-verify again
   by executing it in an arrangement nobody had tried, not by reasoning about it.**
 - F3's anchor is corrected in DOCUMENTATION only; the model still differs from the compiler in a
   case the corpus cannot currently reach.
+- **Round 3:** the exit-code rig covers the refuse/decline branches and the two demote outcomes it
+  can reach without a second checkout. **The FLAKE-vs-ERRORED branches that need two genuinely
+  distinct compilers are covered only by the manual proofs recorded above**, not by the rig. Closing
+  that needs a fixture pair of two tiny checkouts; the rig is structured to take them.
+- **G2's killed-re-compile branch is verified by construction and by reading, not by an executed
+  SIGKILL during re-verification.** The capture-side equivalent WAS executed (`Bun.spawn` resolves
+  `exited` to 137 with `signalCode: "SIGKILL"`). Forcing a kill inside the re-verification window is
+  the one assertion in this arc I could not stage.
