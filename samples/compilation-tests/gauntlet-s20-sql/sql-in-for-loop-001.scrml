@@ -1,5 +1,18 @@
 // Phase 6: ?{} inside for loop — Tier 2 hoist candidate (§8.10)
-// Should compile clean; the batch planner may rewrite.
+//
+// EXPECTED-ERROR fixture (was: "Should compile clean; the batch planner may
+// rewrite"). That header stopped being true when PR #508 landed
+// E-EACH-BODY-DECL-UNSUPPORTED: the `let posts = ?{...}.all()` below sits inside
+// an `<each>` body interpolation, and §17.7.3 scopes the each body to the `@.`
+// sigil + an optional `as` alias, NOT author-declared locals. The rejection is
+// correct on the merits — the decl was being DROPPED, so the `${posts.length}`
+// on the row template dangled and the whole list rendered empty with no
+// diagnostic. The comment is corrected here rather than the shape being
+// rewritten, because rewriting it would delete the §8.10 probe: see the OPEN
+// TENSION note in docs/changes/tool-import-prune-2026-08-11/progress.md — a
+// per-row `?{}` (the Tier-2 hoist candidate this fixture exists to exercise)
+// needs a per-row local to bind its result, which §17.7.3 forbids. Resolving
+// that is a design ruling, not a sample edit.
 
 < db src="./test.db" tables="users, posts">
 ${

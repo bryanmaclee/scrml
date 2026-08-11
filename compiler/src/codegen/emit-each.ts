@@ -1367,34 +1367,50 @@ function renderTemplateChildToJs(
     // can read it at the emit call site below (where `stmt` is out of scope).
     let interpExprNode: any = null;
     const body: any[] = (child as any).body ?? [];
+    // g-each-body-let-alias-silently-dropped (fail-closed, S339-peter; widened
+    // S338) — a declaration inside an `<each>` body interpolation
+    // (`${ let nm = @.name }`) is NOT a supported each-body form: it has no
+    // `exprNode`/`raw`, so it falls through to `inner=""` and is silently skipped
+    // below — yet a later `${nm}` still lowers to a bare `String(nm)`, a dangling
+    // reference that throws inside the per-item render factory and renders the
+    // WHOLE list empty, with no diagnostic. SPEC §17.7.3 scopes the each body to
+    // the `@.` sigil + an optional `as` alias, NOT author-declared locals;
+    // SUPPORTING them (replay the binding into the factory closure) is a separate
+    // §17.7.3 ruling. Until then, fail CLOSED — reject the decl loudly rather than
+    // ship a broken, silently-empty render.
+    //
+    // S338, BY CONSTRUCTION, closing two holes in the original guard at once:
+    //
+    //   1. It read `body[0]` ONLY, so a declaration in any non-first statement
+    //      position of the same interpolation was never examined — and the N+1th
+    //      position here is literally `body[1]`. Now every statement is scanned.
+    //   2. It matched a three-name allowlist (`let|const|function`), so `lin-decl`
+    //      sailed straight through into the silent miscompile. Now the NODE is
+    //      asked what it is, via the AST's own `<x>-decl` kind convention, so
+    //      `lin`, `~`, `type` and every FUTURE declaration kind are covered
+    //      without a further patch. A hand-maintained list of kinds is the
+    //      retrofit; asking the node is the construction.
+    //
+    // Only the message's display keyword special-cases a kind (`tilde-decl` reads
+    // `~` in source); the fire/no-fire DECISION is entirely convention-driven.
+    for (const stmt of body) {
+      if (!stmt || typeof stmt.kind !== "string" || !stmt.kind.endsWith("-decl")) continue;
+      const _kw = stmt.kind === "tilde-decl" ? "~" : stmt.kind.replace(/-decl$/, "");
+      _eachBindSupportCtx?.errors?.push(new CGError(
+        "E-EACH-BODY-DECL-UNSUPPORTED",
+        `E-EACH-BODY-DECL-UNSUPPORTED: a \`${_kw}\` declaration inside an \`<each>\` body is not ` +
+        `supported — it is dropped, and any later \`\${name}\` reference to it dangles and throws at ` +
+        `render (the list renders empty). Read item fields directly in the row template ` +
+        `(\`\${@.field}\`, or \`\${x.field}\` with \`as x\`), or compute the value OUTSIDE the \`<each>\` ` +
+        `and reference it there. (§17.7.3 — the each-body scope is the \`@.\` sigil + \`as\` alias, not author locals.)`,
+        (child as any).span ?? (stmt as any).span ?? { start: 0, end: 0 },
+        "error",
+      ));
+      return;
+    }
     if (body.length > 0 && body[0]) {
       const stmt = body[0];
       interpExprNode = (stmt as any).exprNode ?? null;
-      // g-each-body-let-alias-silently-dropped (fail-closed, S339-peter) — a
-      // declaration inside an `<each>` body interpolation (`${ let nm = @.name }`)
-      // is NOT a supported each-body form: it has no `exprNode`/`raw`, so it fell
-      // through to `inner=""` and was silently skipped below — yet a later `${nm}`
-      // still lowered to a bare `String(nm)`, a dangling reference that throws
-      // inside the per-item render factory and renders the WHOLE list empty, with
-      // no diagnostic. SPEC §17.7.3 scopes the each body to the `@.` sigil + an
-      // optional `as` alias, NOT author-declared locals; SUPPORTING them (replay
-      // the binding into the factory closure) is a separate §17.7.3 ruling. Until
-      // then, fail CLOSED — reject the decl loudly rather than ship a broken,
-      // silently-empty render.
-      if (stmt.kind === "let-decl" || stmt.kind === "const-decl" || stmt.kind === "function-decl") {
-        const _kw = stmt.kind === "function-decl" ? "function" : stmt.kind === "const-decl" ? "const" : "let";
-        _eachBindSupportCtx?.errors?.push(new CGError(
-          "E-EACH-BODY-DECL-UNSUPPORTED",
-          `E-EACH-BODY-DECL-UNSUPPORTED: a \`${_kw}\` declaration inside an \`<each>\` body is not ` +
-          `supported — it is dropped, and any later \`\${name}\` reference to it dangles and throws at ` +
-          `render (the list renders empty). Read item fields directly in the row template ` +
-          `(\`\${@.field}\`, or \`\${x.field}\` with \`as x\`), or compute the value OUTSIDE the \`<each>\` ` +
-          `and reference it there. (§17.7.3 — the each-body scope is the \`@.\` sigil + \`as\` alias, not author locals.)`,
-          (child as any).span ?? (stmt as any).span ?? { start: 0, end: 0 },
-          "error",
-        ));
-        return;
-      }
       // bare-expr is the common shape; lift-expr / fail-expr / etc. exist
       // but are less common in iteration body context. For Landing 1
       // baseline, route bare-expr through; other shapes get a hint.

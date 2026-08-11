@@ -89,3 +89,113 @@ but which `\b` also passes (noted below, so nobody mistakes them for bite-proof)
 **Bite-proof, both directions:** swapped `localServerImportNameUsed`'s body back to `\b` → the two
 discriminating cases go RED (4 pass / 2 fail); restored → 6 pass. Restore verified byte-identical
 via `git diff`.
+
+## F2 + F3 — measured, then fixed by construction
+
+### Brief-locus correction (the brief is right; my first fixture was wrong)
+
+My first reproduction used `<rows>: string[]` with no `key=` and got `E-SCOPE-001`, i.e. it looked
+like F2 did NOT reproduce. That was a **fixture artifact**. On the brief's own shape — object rows
+plus `key=@.id` — F2 reproduces **exactly** as written: `E-codes: []`, and the emitted
+`page.client.js` contains `_scrml_each_tn_6.textContent = String(nm);` with no declaration of `nm`
+anywhere. Recording this because the wrong fixture would have justified a "cannot reproduce, brief
+locus wrong" report, and it would have been wrong. **All six loci in the brief are confirmed.**
+
+### Full BEFORE matrix (brief's fixture, decl at body[0] and body[1])
+
+| form | body[0] before | body[1] before |
+|---|---|---|
+| `let nm = @.name` | E-EACH-BODY-DECL-UNSUPPORTED | **SILENT MISCOMPILE** |
+| `const nm = @.name` | E-EACH-BODY-DECL-UNSUPPORTED | **SILENT MISCOMPILE** |
+| `lin nm = @.name` | **SILENT MISCOMPILE** (F3) | **SILENT MISCOMPILE** |
+| `~nm = @.name` | E-CODEGEN-INVALID-LOGIC | E-CODEGEN-INVALID-LOGIC |
+| `function nm() {…}` | E-EACH-BODY-DECL-UNSUPPORTED | **SILENT MISCOMPILE** |
+| `type Nm:enum {…}` | E-SCOPE-001 | E-SCOPE-001 |
+| `var nm = 1` | E-CODEGEN-INVALID-LOGIC | **SILENT MISCOMPILE** |
+
+**Beyond the brief:** `var nm = 1` at body[1] is a silent miscompile too. The brief says `var` "fails
+loudly via E-CODEGEN-INVALID-LOGIC" — true at body[0], **false at body[1]**. Instrumenting the emit
+site shows why: `var nm = 1` parses to `["bare-expr", "tilde-decl"]`, so its `tilde-decl` is at index
+1 even when the author wrote it as the interpolation's only statement. The `body[0]`-only read missed
+it. Same for `~nm = @.name`.
+
+AFTER: every cell above is `E-EACH-BODY-DECL-UNSUPPORTED`.
+
+### The predicate
+
+`typeof stmt.kind === "string" && stmt.kind.endsWith("-decl")`, looped over the whole `body`. The
+AST's own `<x>-decl` naming convention IS the node telling you it is a declaration, so `lin-decl`,
+`tilde-decl`, `type-decl` and every future kind are covered with no allowlist. Verified empirically
+(not from the SPEC or memory) that all seven forms above land on a `*-decl` kind at this site.
+
+Deliberately NOT unified with the five other hand-maintained decl-kind sets already in the tree
+(`indirect-callee-resolver.ts:98`, `emit-library-shared.ts:382`, `type-system.ts:4752`,
+`build-source-map.ts:71`, `ast-builder.js:19343` — all different from each other). That is the same
+drift class, but unifying them is out of this brief's scope. **Filed for PA.**
+
+### Migration measurement — REQUIRED by the brief, result: ZERO
+
+Own comparator (`corpus-scan.mjs`), not `scripts/corpus-emit-differential.ts`. All 56 committed
+`.scrml` files containing `<each>` across `examples/ samples/ benchmarks/ stdlib/
+compiler/tests/conformance/cases/ docs/` (of 1292 `.scrml` total), compiled with `E-` codes collected
+from BOTH `errors` and `warnings`. Ran it twice: once with the fix, once with `emit-each.ts` stashed
+to base.
+
+- fixed tree: fires on **1** file
+- base tree: fires on the **same 1** file
+- **newly rejected by this change: 0 files**
+
+The one hit is `samples/compilation-tests/gauntlet-s20-sql/sql-in-for-loop-001.scrml`, which is
+#508's pre-existing flip, not mine. No migration ruling needed; nothing to surface as a stop.
+
+### The falsified sample header — corrected, shape NOT rewritten
+
+`sql-in-for-loop-001.scrml` line 2 read `// Should compile clean; the batch planner may rewrite.`
+Corrected to an accurate expected-error header. I did **not** rewrite the sample's shape, because
+that would delete what the sample is for — and doing so would have buried the finding below.
+
+### OPEN TENSION for PA — §8.10 vs §17.7.3 (surfaced, not resolved)
+
+That sample exists to probe "a `?{}` inside iteration — Tier 2 hoist candidate (§8.10)". The canonical
+way to write a per-row query is to bind its result to a per-row local:
+
+```
+<each in=users as user>
+  ${ let posts = ?{`SELECT title FROM posts WHERE user_id = ${user.id}`}.all() }
+  <li>${user.name} — ${posts.length} posts</>
+</each>
+```
+
+§17.7.3 forbids the local; §8.10 wants the shape. Hoisting the query out of the `<each>` removes the
+per-row correlation that makes it a batch-planner candidate at all. So E-EACH-BODY-DECL-UNSUPPORTED
+does not just reject a bad habit — as things stand it makes the per-row-query shape **inexpressible**,
+and the §8.10 batch-planner probe has no canonical spelling. The guard's own message says "compute the
+value OUTSIDE the `<each>`", which is exactly what a correlated per-row query cannot do.
+
+This is a design ruling (support each-body locals by replaying the binding into the per-item factory,
+per the §17.7.3 note the guard's comment already anticipates — vs keep failing closed and give §8.10 a
+different canonical shape). **Not resolved here. Not migrated unilaterally.**
+
+### Tests
+
+`compiler/tests/integration/g-each-body-decl-any-position.test.js`, 15 cases — and it is the **first
+test anchor for `E-EACH-BODY-DECL-UNSUPPORTED` in the tree**. Before this, `grep -rl` across
+`compiler/tests` returned nothing; #508 shipped the diagnostic with no test, which is exactly why both
+holes rode along undetected.
+
+6 F2 (each form at body[1]) + 6 F3 (each form at body[0]) + 3 no-false-fire (`@.` read, `as` alias,
+several non-decl statements in one interpolation).
+
+**Bite-proof, each hole INDEPENDENTLY:**
+
+- restore `body[0]`-only (`body.slice(0, 1)`) → 8 fail (all 6 F2, plus `~`/`var` at body[0] — they sit
+  at index 1 even as a sole statement); restore → 15 pass.
+- restore the three-name allowlist → 6 fail (`lin`/`~`/`var` at both positions); restore → 15 pass.
+
+### Separate finding — artifacts are WRITTEN on a hard error (fail-open)
+
+Found while writing these tests. On the F2 shape the CLI prints `FAILED — 1 error` and exits **1**
+(correct), but `out/page.client.js` is still written **and still contains the dangling `String(nm)`**.
+A downstream step that trusts the presence of artifacts rather than the exit code would serve a
+broken bundle. Pre-existing, orthogonal to F1/F2/F3, NOT fixed here. The tests deliberately assert on
+the diagnostic only, so they do not silently encode the fail-open write as expected behavior.
