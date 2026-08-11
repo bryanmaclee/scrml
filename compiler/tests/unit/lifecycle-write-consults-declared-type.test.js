@@ -388,3 +388,244 @@ function boot() {
       .toBeGreaterThanOrEqual(1);
   });
 });
+
+// ===========================================================================
+// S338 — round 2. The round-1 consult was keyed off the RHS SOURCE TEXT
+// (`/^@?([A-Za-z_$][A-Za-z0-9_$]*)$/` against the trimmed init text), so it
+// fired only for one exact spelling. Round 2 keys it off the parsed `initExpr`
+// instead. Every test below FAILS against the round-1 implementation.
+// ===========================================================================
+
+describe("S338 — the consult reads the parsed RHS, not its spelling", () => {
+  // -- B3: the paren cases -------------------------------------------------
+  //
+  // `@v`, `(@v)` and `((@v))` are the SAME expression; the parser produces one
+  // `{ kind: "ident", name: "@v" }` node for all three because grouping parens
+  // yield no node of their own. The round-1 text regex is anchored (`^…$`), so
+  // any paren defeated it. Stripping one balanced layer was considered and
+  // REJECTED: `((@v))` needs two and the next shape needs three.
+
+  test("a parenthesised bare-cell RHS does NOT transition", () => {
+    const src = `${USER_TYPE}
+<v>: (not to User) = not
+<u>: (not to User) = not
+
+\${
+    @u = (@v)
+}
+\${
+    @u.name
+}`;
+    const fires = typeErrors(compileSource("s338-paren-rhs", src));
+    expect(fires.length).toBeGreaterThanOrEqual(1);
+    expect(fires[0].message).toMatch(/binding `u`/);
+  });
+
+  test("a DOUBLY parenthesised bare-cell RHS does NOT transition", () => {
+    // The case that rules out paren-stripping as a fix shape: any fixed number
+    // of stripped layers is defeated by one more paren.
+    const src = `${USER_TYPE}
+<v>: (not to User) = not
+<u>: (not to User) = not
+
+\${
+    @u = ((@v))
+}
+\${
+    @u.name
+}`;
+    expect(typeErrors(compileSource("s338-dbl-paren-rhs", src)).length)
+      .toBeGreaterThanOrEqual(1);
+  });
+
+  test("Shape 4 synthesized cells get the paren treatment too", () => {
+    // The Shape-4 implicit form runs the same classifier and had the identical
+    // hole; pinned separately because it reaches the code by another route.
+    const src = `${USER_TYPE}
+<v>: User
+<u>: User
+
+\${
+    @u = (@v)
+}
+\${
+    @u.name
+}`;
+    const fires = typeErrors(compileSource("s338-paren-shape4", src));
+    expect(fires.length).toBeGreaterThanOrEqual(1);
+    expect(fires[0].message).toMatch(/SYNTHESIZED/);
+  });
+
+  // -- the absence-literal half of the same hole ---------------------------
+  //
+  // Found while fixing the above, and it is the WORSE direction: the pre-round-2
+  // absence test was also textual (`trimmed === "not"`), so a §6.8 revert spelled
+  // `@u = (not)` missed it and classified as a TRANSITION. That fails OPEN — the
+  // following member read compiled CLEAN and read a `not` at runtime. Measured
+  // identically on `origin/main`, so PRE-EXISTING, and closed here for free by
+  // the same structural consult.
+
+  test("a parenthesised revert to `not` still REVERTS (fail-open hole closed)", () => {
+    const src = `${USER_TYPE}
+<u>: (not to User) = not
+
+\${
+    @u = < User name="a" age=1 >
+}
+\${
+    @u = (not)
+}
+\${
+    @u.name
+}`;
+    expect(typeErrors(compileSource("s338-paren-revert", src)).length)
+      .toBeGreaterThanOrEqual(1);
+  });
+
+  test("a doubly parenthesised revert to `not` still REVERTS", () => {
+    const src = `${USER_TYPE}
+<u>: (not to User) = not
+
+\${
+    @u = < User name="a" age=1 >
+}
+\${
+    @u = ((not))
+}
+\${
+    @u.name
+}`;
+    expect(typeErrors(compileSource("s338-dbl-paren-revert", src)).length)
+      .toBeGreaterThanOrEqual(1);
+  });
+
+  // -- B2: the sigil is REQUIRED ------------------------------------------
+
+  test("an UN-sigiled RHS is a local identifier and never consults the cell map", () => {
+    // V5-strict: a bare `v` is a LOCAL identifier and does NOT denote `@v`
+    // (PRIMER §3 — "Bare names in expressions are LOCAL identifiers only").
+    // Round 1's `@?` made the sigil optional, so a local name resolved against
+    // the CELL map and inherited an unrelated cell's lifecycle state — two
+    // namespaces conflated by one optional character.
+    //
+    // `v` is undeclared here, so E-SCOPE-001 is expected and correct. What must
+    // NOT appear is E-TYPE-001: that would be the cell map answering a question
+    // about a name that was never a cell. Measured on `origin/main`:
+    // ["E-SCOPE-001"]. Round 1: ["E-SCOPE-001","E-TYPE-001"].
+    const src = `${USER_TYPE}
+<v>: (not to User) = not
+<u>: (not to User) = not
+
+\${
+    @u = v
+}
+\${
+    @u.name
+}`;
+    const result = compileSource("s338-unsigiled-rhs", src);
+    expect(typeErrors(result).length).toBe(0);
+    expect(result.errors.filter((e) => e.code === "E-SCOPE-001").length)
+      .toBeGreaterThanOrEqual(1);
+  });
+
+  // -- B1: the `kind === "presence"` restriction is load-bearing ----------
+
+  test("a VARIANT-progression RHS does not trigger the presence consult", () => {
+    // The restriction had ZERO coverage in round 1 while being called
+    // load-bearing in both the doc comment and the landing record — relaxing
+    // `rhsSpec.kind === "presence"` to `if (rhsSpec)` left every test green.
+    //
+    // Why it must stay: only a PRESENCE lifecycle has `not` as its pre-type, so
+    // "not yet transitioned" and "still absent" are the same fact. A
+    // variant-progression cell holds a REAL value in its pre-state
+    // (`Article.Draft`), so its being "pre" proves nothing about whether the
+    // write establishes the destination's post-shape. Consulting it would
+    // reject a write the compiler has no evidence against.
+    const src = `type Article:enum = { Draft(body: string), Published(body: string, publishedAt: number) }
+${USER_TYPE}
+<phase>: (.Draft to .Published) = Article.Draft
+<u>: (not to User) = not
+
+\${
+    @u = @phase
+}
+\${
+    @u.name
+}`;
+    expect(typeErrors(compileSource("s338-variant-rhs-no-consult", src)).length).toBe(0);
+  });
+});
+
+// ===========================================================================
+// S338 — the KNOWN FALSE POSITIVE, pinned as known-imperfect.
+// Pinned rather than asserted-correct: this expectation is WRONG about the
+// program and RIGHT about the compiler, and it exists so the day the walker's
+// reach is fixed, this test fails and points at itself.
+// ===========================================================================
+
+describe("S338 — F2: a write the walker cannot see produces a FALSE POSITIVE", () => {
+  test("PINNED AS-IS, NOT AS-SPECIFIED: an out-of-reach write leaves the RHS `pre`", () => {
+    // `@v` IS genuinely a `User` when `@u = @v` runs — `loadIt()` is called on
+    // the line above. But `walk()` skips `function-decl` (type-system.ts), so
+    // the write inside the fn body never reaches the classifier, `@v` reads as
+    // `pre`, and the copy is classified `pre` too. `@u.name` then fires.
+    //
+    // Measured: `[]` on `origin/main` @ 23ea2e5c → `["E-TYPE-001"]` here. So
+    // this is a NEWLY-REJECTING false positive introduced by the declared-type
+    // consult, and the landing record says so plainly rather than claiming the
+    // false-positive surface is nil.
+    //
+    // It IS escapable, by the construct §14.12.6.1 already prescribes for
+    // reading a presence cell — guard the READ (see the control below). What
+    // does NOT help is guarding the WRITE, and that failure is PRE-EXISTING
+    // (identical on `origin/main`).
+    //
+    // Closing it properly needs the call-flow fact — did `loadIt()` actually run
+    // before the write? — which is the deferred arc. Narrowing the guard to
+    // "skip the refinement when any unreachable write to the RHS exists" would
+    // only trade this false POSITIVE for a false NEGATIVE.
+    //
+    // WHEN THE WALKER'S REACH IS FIXED, this expectation flips to `.toBe(0)`.
+    const src = `${USER_TYPE}
+<v>: (not to User) = not
+<u>: (not to User) = not
+
+function loadIt() {
+    @v = < User name="a" age=1 >
+}
+
+\${
+    loadIt()
+    @u = @v
+}
+\${
+    @u.name
+}`;
+    expect(typeErrors(compileSource("s338-f2-false-positive", src)).length)
+      .toBeGreaterThanOrEqual(1);
+  });
+
+  test("the escape hatch works: guarding the READ with `given` compiles clean", () => {
+    // This is the control that makes the pin above tolerable. It is not a
+    // workaround invented for this defect — it is the §14.12.6.1 presence-guard,
+    // the construct the language already requires for reading a `(not to T)`
+    // cell. The adopter who hits F2 pays one edit, in the position the spec
+    // already governs.
+    const src = `${USER_TYPE}
+<v>: (not to User) = not
+<u>: (not to User) = not
+
+function loadIt() {
+    @v = < User name="a" age=1 >
+}
+
+\${
+    loadIt()
+    @u = @v
+}
+\${
+    given @u => { @u.name }
+}`;
+    expect(typeErrors(compileSource("s338-f2-escape-hatch", src)).length).toBe(0);
+  });
+});

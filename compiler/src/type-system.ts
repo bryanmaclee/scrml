@@ -25876,21 +25876,76 @@ function writeTextIsAbsenceLiteral(trimmedText: string): boolean {
 }
 
 /**
- * S337 — the RHS-is-a-bare-binding-reference test.
+ * The presence-progression absence literal test, answered STRUCTURALLY.
  *
- * Returns the referenced binding NAME when the whole written expression is a
- * single identifier, with or without the V5-strict `@` cell sigil (`@v`, `v`),
- * and `null` for every other shape. Deliberately exact-match on the WHOLE
- * trimmed text: `@v . name`, `loadIt ( )`, `a + b` all return null, because for
- * those the compiler has no lifecycle-level type judgment to make and the
- * pre-existing classification stands unchanged.
+ * S338 — the parsed-expression counterpart of `writeTextIsAbsenceLiteral`. A
+ * `state-decl` carries `initExpr`, the parsed RHS (`safeParseExprToNode`,
+ * ast-builder.js), and the absence literal `not` (§42) parses to
+ * `{ kind: "lit", litType: "not" }`.
  *
- * (The parser normalises `@v.name` to `@v . name` and `loadIt()` to `loadIt ( )`
- * in state-decl init text, so neither can be mistaken for a bare reference.)
+ * **Why this replaced the text test at the write site.** `writeTextIsAbsenceLiteral`
+ * compares the trimmed RHS SOURCE TEXT to `"not"`, so `@u = (not)` — a §6.8
+ * revert-to-absent, spelled with parens — has the text `( not )`, misses the
+ * comparison, and classifies as a TRANSITION. Measured on `origin/main`
+ * @ `23ea2e5c` AND on this branch's base, so PRE-EXISTING and not round-1's
+ * doing: declare absent → write a `User` → `@u = (not)` → `@u.name` compiles
+ * CLEAN and reads a `not` at runtime. `((not))` likewise.
+ *
+ * That is the SAME defect class as the sibling `bareCellReferenceOf` hole, on
+ * the other branch of the same `if`, and it is the WORSE of the two — it fails
+ * OPEN (a silent wrong answer) where the sibling merely fails to fire. Both close
+ * with one structural consult, because the parser flattens grouping parens: `not`,
+ * `(not)` and `((not))` all produce the identical `lit` node. Paren-stripping the
+ * text would have needed a new layer for every new depth.
  */
-function bareBindingReferenceOf(trimmedText: string): string | null {
-  const m = /^@?([A-Za-z_$][A-Za-z0-9_$]*)$/.exec(trimmedText);
-  return m ? m[1] : null;
+function writeExprIsAbsenceLiteral(initExpr: unknown): boolean {
+  if (!initExpr || typeof initExpr !== "object") return false;
+  const expr = initExpr as ASTNodeLike;
+  return expr.kind === "lit" && expr.litType === "not";
+}
+
+/**
+ * S338 — the RHS-is-a-bare-CELL-reference test, answered STRUCTURALLY.
+ *
+ * Returns the referenced CELL name, sigil stripped, when the parsed written
+ * expression is exactly a `@`-sigiled identifier; `null` for every other shape.
+ *
+ * **This consults the parsed `ExprNode`, never the RHS source text — that is the
+ * whole point of the function.** S337's first attempt matched
+ * `/^@?([A-Za-z_$][A-Za-z0-9_$]*)$/` against the trimmed RHS text, which anchored
+ * the declared-type consult to one exact SPELLING: `@u = @v` fired and
+ * `@u = (@v)` did not. The rejected remedy was to strip one balanced paren layer
+ * before the regex — a milder strain of the same disease, since `((@v))` needs two
+ * and the next shape needs three. The parser has already done this correctly:
+ * `@v`, `(@v)` and `((@v))` all parse to the SAME node, `{ kind: "ident",
+ * name: "@v" }`, because grouping parens produce no node of their own (there is no
+ * `paren`/`group` expression kind in ast-builder.js). Asking the tree costs one
+ * property read and is depth-proof by construction.
+ *
+ * **The `@` sigil is REQUIRED, and that is a correctness rule, not a style one.**
+ * In V5-strict a bare `v` is a LOCAL identifier and does NOT denote the cell `@v`
+ * (PRIMER §3 — "Bare names in expressions are LOCAL identifiers only"). The old
+ * `@?` made the sigil optional, so a local name was resolved against the CELL map
+ * and could inherit an unrelated cell's lifecycle state — two namespaces conflated
+ * by one optional character. Measured with an undeclared local:
+ * `${ @u = v }` gave `["E-SCOPE-001"]` on `origin/main` and
+ * `["E-SCOPE-001","E-TYPE-001"]` on the round-1 branch; the second error was the
+ * cell map answering a question about a name that was never a cell.
+ *
+ * Non-identifier shapes return `null` STRUCTURALLY, not by failing a text match:
+ * `@v.name` is a `member` node, `loadIt()` is a `call` node, `a + b` is a `binary`
+ * node. For each of those the compiler has no lifecycle-level judgment to make
+ * here and the pre-S337 classification stands unchanged.
+ */
+function bareCellReferenceOf(initExpr: unknown): string | null {
+  if (!initExpr || typeof initExpr !== "object") return null;
+  const expr = initExpr as ASTNodeLike;
+  if (expr.kind !== "ident") return null;
+  const name = expr.name;
+  // V5-strict: only a `@`-sigiled identifier denotes a reactive cell.
+  if (typeof name !== "string" || !name.startsWith("@")) return null;
+  const cellName = name.slice(1);
+  return cellName.length > 0 ? cellName : null;
 }
 
 /**
@@ -26065,19 +26120,28 @@ function checkLifecycleBindingAccess(
    * "post"), or null if the write is unclassifiable (in which case the
    * walker leaves the existing state unchanged).
    *
-   * Presence-progression `(not to T)`:
-   *   - written text `not` → "pre" (revert / explicit absence)
-   *   - written value is a binding the DECLARED TYPE proves is not yet `T`
+   * Presence-progression `(not to T)` — answered from the PARSED RHS:
+   *   - written value is the absence literal `not` → "pre" (revert / §6.8)
+   *   - written value is a cell the DECLARED TYPE proves is not yet `T`
    *     → "pre" (see below)
    *   - anything else → "post" (transition)
    *
-   * Variant-progression `(.A to .B)`:
+   * Variant-progression `(.A to .B)` — still answered from the RHS TEXT:
    *   - init text matches post-variant (bare `.B` or qualified `Foo.B`) → "post"
    *   - init text matches pre-variant → "pre"
    *   - otherwise: null (unclassifiable; leave state alone)
    *
+   * ⚠ **The variant branch below is STILL RAW-TEXT MATCHING and is a KNOWN
+   * DEFECT (S338 finding F3, deliberately out of scope for this round).** Its
+   * `new RegExp('(?:^|\\.)\\s*<Post>\\b').test(rhsSourceText)` is unanchored over
+   * raw source, so a mere string literal `@phase = ".Published"` clears the guard.
+   * It needs the same `initExpr` treatment the presence branch just received, plus
+   * its own measured migration. **Do not read this function's S338 commit subject
+   * as covering it** — half this body still does exactly what that subject says was
+   * removed.
+   *
    * ---
-   * **S337 — consult the DECLARED TYPE, not only the source text.**
+   * **S337/S338 — consult the DECLARED TYPE, not the source text.**
    *
    * SPEC §14.12.3 is explicit about when the transition fires: *"For Shape 1
    * reactive cells, transition fires on `@cell = value` where the cell's initial
@@ -26110,20 +26174,50 @@ function checkLifecycleBindingAccess(
    *     (`not → pending → T`) is ratified-in-direction but DEFERRED to its own
    *     arc. No `pending` state is introduced here.
    *
-   * @param localStates the walker's live per-scope transition states, so a RHS
-   *   binding that HAS been discriminated at this point (`given @v => { @u = @v }`)
-   *   is still read as post-shape. Absent → every RHS binding reads as `pre`.
+   * **KNOWN FALSE POSITIVE, and it is pinned by test, not asserted away** (S338
+   * finding F2). When the RHS cell's only write lives somewhere this walker never
+   * reaches — a fn body, or a `given` body whose cloned state is discarded — the
+   * cell reads as `pre` here even though it is genuinely present at runtime, and
+   * this returns "pre" for a write that did establish the post-shape:
+   *
+   *     function loadIt() { @v = < User name: "a", age: 1 > }
+   *     ${ loadIt()
+   *        @u = @v }        // ← classified "pre"; @u.name then fires
+   *
+   * Measured `[]` on `origin/main` → `["E-TYPE-001"]` here. It is ESCAPABLE by the
+   * construct §14.12.6.1 already prescribes for reading a presence cell — guard the
+   * READ, `given @u :> { @u.name }` (measured CLEAN). Guarding the WRITE does NOT
+   * help, and that failure is PRE-EXISTING (identical on `origin/main`). Closing it
+   * properly needs the call-flow fact — whether `loadIt()` actually ran before the
+   * write — which is the deferred arc. Narrowing the guard instead ("skip the
+   * refinement whenever any unreachable write to the RHS exists") would only trade
+   * this false POSITIVE for a false NEGATIVE, so it is not an improvement.
+   *
+   * @param localStates the walker's live per-scope transition states, so a RHS cell
+   *   that HAS been discriminated at this point is read as post-shape. The lookup is
+   *   TOTAL for the names this function queries: it is only consulted after
+   *   `bindings.get(rhsName)` returned a spec, and the walker seeds `states` for
+   *   every key in `bindings` (nested scopes clone that map, preserving all keys).
+   *   S338 removed a `?? "pre"` default here that could therefore never execute.
    */
   function classifyWriteAgainstSpec(
     initText: string,
+    initExpr: unknown,
     spec: FnReturnLifecycleSpec,
-    localStates?: Map<string, "pre" | "post">,
+    localStates: Map<string, "pre" | "post">,
   ): "pre" | "post" | null {
     const t = initText.trim();
     if (!t) return null;
     if (spec.kind === "presence") {
-      if (writeTextIsAbsenceLiteral(t)) return "pre";
-      const rhsName = bareBindingReferenceOf(t);
+      // Structural first. The text test remains only as the fallback for a RHS
+      // the expression parser could not produce a node for (`safeParseExprToNode`
+      // returns null on a parse failure) — never as the thing that DECIDES a
+      // refinement, so a missing node degrades to the pre-S337 answer rather than
+      // to a wrong one.
+      if (initExpr ? writeExprIsAbsenceLiteral(initExpr) : writeTextIsAbsenceLiteral(t)) {
+        return "pre";
+      }
+      const rhsName = bareCellReferenceOf(initExpr);
       if (rhsName) {
         const rhsSpec = bindings.get(rhsName);
         // Only a PRESENCE-lifecycle RHS is decidable here: its pre-type is `not`,
@@ -26131,8 +26225,7 @@ function checkLifecycleBindingAccess(
         // variant-progression RHS, or a name this walker does not track at all,
         // carries no such proof — leave those on the pre-S337 answer.
         if (rhsSpec && rhsSpec.kind === "presence") {
-          const rhsState = localStates?.get(rhsName) ?? "pre";
-          if (rhsState !== "post") return "pre";
+          if (localStates.get(rhsName) !== "post") return "pre";
         }
       }
       return "post";
@@ -26404,6 +26497,11 @@ function checkLifecycleBindingAccess(
         // their states come from initialStates seeding.
         const isStructuralDecl = (stmt as ASTNodeLike).structuralForm === true;
         const stateDeclInitText = readNodeInitText(stmt);
+        // S338 — the PARSED RHS. `readNodeInitText` flattens the node back down to
+        // source text; the classifier needs the tree, because the text of a write
+        // is not a reliable witness of its shape (`(@v)`, `((@v))` and `(not)` all
+        // read differently as text and identically as expressions).
+        const stateDeclInitExpr = (stmt as ASTNodeLike).initExpr;
         // R28-6 (S143) — fix: scan the state-decl RHS for post-transition READ
         // accesses of OTHER tracked lifecycle bindings BEFORE applying this
         // cell's own write classification. A reactive assignment such as
@@ -26426,7 +26524,14 @@ function checkLifecycleBindingAccess(
             // S337 — `localStates` is threaded so the classifier can consult the
             // DECLARED TYPE of a bare-reference RHS *and* whether that RHS has
             // itself been discriminated at this point in the scope.
-            const newState = classifyWriteAgainstSpec(stateDeclInitText, spec, localStates);
+            // S338 — the parsed `initExpr` is threaded too, so that consult keys
+            // off the expression TREE instead of the RHS spelling.
+            const newState = classifyWriteAgainstSpec(
+              stateDeclInitText,
+              stateDeclInitExpr,
+              spec,
+              localStates,
+            );
             if (newState) localStates.set(cellName, newState);
           }
         }
