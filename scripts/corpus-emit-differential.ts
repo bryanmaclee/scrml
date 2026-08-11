@@ -62,8 +62,14 @@
  *            compile failure is DATA (HARD REQ 5).
  *   diff:    0 = no differences at all. 1 = differences found. 2 = NOT A VALID COMPARISON —
  *            different roots, an enumeration disagreement, the same revision on both sides,
- *            differing check contexts, a reuse-artifacts manifest, or a VACUOUS run in which
- *            zero artifacts were compared or zero checkable artifacts were checked.
+ *            differing check contexts, a DIVERGENT CHUNK-NAMESPACE ANCHOR (HARD REQ 8), a
+ *            reuse-artifacts manifest, or a VACUOUS run in which zero artifacts were compared or
+ *            zero checkable artifacts were checked.
+ *
+ *            There are exactly THREE outcomes and no fourth. A run that had to discard harness
+ *            flakes (HARD REQ 9) is still 0 or 1 — the flakes are excluded from the finding total
+ *            and named in the banner, because a flake is a statement about the HARNESS, not about
+ *            whether the two revisions differ.
  */
 
 import { createHash } from "node:crypto";
@@ -72,7 +78,7 @@ import { join, relative, dirname, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 /**
  * Default corpus roots.
@@ -181,6 +187,75 @@ interface CheckContext {
   work: string;
 }
 
+/**
+ * HARD REQ 8 — the two sides must have resolved the SAME chunk-namespace ANCHOR, or no
+ * artifact-content comparison between them means anything.
+ *
+ * `nsId` / `nsName` / `nsCellKey` (`compiler/src/codegen/chunk-namespace.ts`) namespace every
+ * runtime-global token a chunk emits with `fnv1aHash(projectRelativeSourcePath)`. The path is
+ * relative to the PROJECT ROOT, found by walking up for `scrml.toml` then `.git`
+ * (`resolveProjectRoot`, that file's `:108`). When the walk finds no marker the compiler anchors on
+ * the ABSOLUTE path instead — deliberately and correctly, because an absolute path is strictly more
+ * injective than a project-relative one (see that file's "no-project-root tier").
+ *
+ * The consequence for THIS tool is severe, and it was measured, not theorised. A reference tree
+ * extracted with `git archive` carries no `.git`, so every one of its namespace tokens embeds the
+ * extraction directory, every emitted artifact therefore differs, and the report is a well-formed
+ * list of PHANTOM content differences with nothing to tell the reader they are phantom. One capture
+ * pair reported 1014 of them; `mkdir .git` in the reference tree took the SAME comparison to 0 of
+ * 7375. Reproduced from first principles here: two trees holding byte-identical sources, differing
+ * only in whether a `.git` marker exists above them, emit `// --- chunk cell scope (01t8u5va) ---`
+ * and `(002qn9lf)` respectively.
+ *
+ * Two rules keep the check honest:
+ *
+ *   - It is resolved by the COMPILER UNDER TEST'S OWN resolver, dynamically imported from
+ *     `--compiler-root`. Never by re-implementing the walk here, and never by pattern-matching a
+ *     path string: a re-implementation would drift from the compiler and the drift would be
+ *     invisible, which is this file's whole failure class.
+ *   - What is COMPARED is the PREFIX each corpus-relative source path gains when re-expressed
+ *     project-relative — NOT the project root's absolute path. Two checkouts always live at two
+ *     different absolute paths; that is the normal case, not a defect. The prefix is exactly the
+ *     part of the hashed string that a tree's LOCATION can move, so comparing it refuses on
+ *     environment divergence and never on a compiler change. A revision that changed the hash
+ *     FUNCTION would leave the prefixes equal and show up as artifact differences, which is what it
+ *     is.
+ */
+interface NamespaceAnchor {
+  /**
+   * FALSE when the compiler under test does not expose the resolver at all — a revision from
+   * before chunk-namespacing landed, or one that moved the module. Recorded rather than inferred,
+   * because a guard that silently evaluates to "nothing to check" is a disarmed guard.
+   */
+  resolverAvailable: boolean;
+  /** How the anchor was obtained, or the exact reason it could not be. */
+  method: string;
+  /**
+   * Distinct resolved project roots across the enumerated corpus, with the marker that stopped the
+   * walk and how many sources resolved to each. `projectRoot: null` means the walk reached the
+   * filesystem root without finding a marker, so the compiler anchored on the ABSOLUTE path and
+   * every token is a function of WHERE THE TREE LIVES.
+   */
+  roots: Array<{ projectRoot: string | null; marker: string | null; sources: number }>;
+  /**
+   * The prefix a corpus-relative source path GAINS when re-expressed project-relative. `""` is the
+   * healthy shape: the corpus root is the project root, so the hashed string is the corpus-relative
+   * path verbatim and is reproducible in any checkout at any location.
+   */
+  prefixes: Array<{ prefix: string; sources: number }>;
+  /**
+   * sha256 over `<corpus-relative path>\0<prefix>` for every enumerated source, sorted. THIS is the
+   * comparable: equal digests mean both sides hash the same string for the same source, so no
+   * artifact-content difference between them can be an artefact of tree location.
+   */
+  prefixDigest: string;
+  /**
+   * sha256 over `<corpus-relative path>\0<namespace token>`, sorted. Reported, never used to refuse
+   * — a token digest can move because the HASH changed, which is a finding, not an incomparability.
+   */
+  tokenDigest: string;
+}
+
 interface Manifest {
   schemaVersion: number;
   label: string;
@@ -188,6 +263,8 @@ interface Manifest {
   compilerRoot: string;
   revision: string;
   roots: string[];
+  /** HARD REQ 8 — see `NamespaceAnchor`. */
+  namespaceAnchor: NamespaceAnchor;
   /**
    * TRUE when this manifest was produced by `--reuse-artifacts`, i.e. the compile stage did NOT
    * run and the compile outcomes in it are NOT measurements. `diff` refuses to draw compile
@@ -535,6 +612,104 @@ function countServerFnCallSites(text: string): { total: number; awaited: number;
   return { total, awaited, bare: total - awaited };
 }
 
+/**
+ * HARD REQ 8 — measure the chunk-namespace ANCHOR with the compiler-under-test's OWN resolver.
+ *
+ * See the `NamespaceAnchor` docstring for why this exists and what is compared. Notes on fidelity,
+ * because "close enough" is how a guard reports the wrong answer:
+ *
+ *   - The compiler starts its walk at `computeOutputBaseDir(cgSourcePaths)` (`api.js:2407`), which
+ *     for a ONE-FILE compile is exactly `dirname(resolve(sourcePath))` (`api.js:200`). `compileOne`
+ *     spawns one process per source, so a one-file compile is the only shape this tool ever
+ *     produces, and `dirname(abs)` is the faithful start path — not an approximation of one.
+ *   - `resolveProjectRoot` returns only the directory, not which marker stopped it. The marker is
+ *     re-derived by asking the filesystem about the RESOLVED root, which is also exactly what the
+ *     remedy acts on (`mkdir <root>/.git`).
+ *   - Verified end-to-end: for two probe trees this function reproduces `01t8u5va` / `002qn9lf`,
+ *     the tokens the compiler actually emitted into `// --- chunk cell scope (…) ---`.
+ */
+async function resolveNamespaceAnchor(compilerRoot: string, sources: string[]): Promise<NamespaceAnchor> {
+  const modPath = join(compilerRoot, "compiler/src/codegen/chunk-namespace.ts");
+  const unavailable = (why: string): NamespaceAnchor => ({
+    resolverAvailable: false,
+    method: why,
+    roots: [],
+    prefixes: [],
+    prefixDigest: "",
+    tokenDigest: "",
+  });
+
+  if (!existsSync(modPath)) return unavailable(`<unavailable: ${toPosix(relative(compilerRoot, modPath))} does not exist in this checkout>`);
+  let mod: any;
+  try {
+    mod = await import(modPath);
+  } catch (e: any) {
+    return unavailable(`<unavailable: importing ${toPosix(relative(compilerRoot, modPath))} threw — ${e?.message ?? e}>`);
+  }
+  for (const fn of ["resolveProjectRoot", "projectRelativeSourcePath", "chunkNamespaceToken"]) {
+    if (typeof mod[fn] !== "function") {
+      return unavailable(`<unavailable: ${toPosix(relative(compilerRoot, modPath))} exports no ${fn}()>`);
+    }
+  }
+
+  const rootCounts = new Map<string, number>();
+  const prefixCounts = new Map<string, number>();
+  const prefixLines: string[] = [];
+  const tokenLines: string[] = [];
+
+  for (const rel of sources) {
+    const abs = join(compilerRoot, rel);
+    const root: string | null = mod.resolveProjectRoot(dirname(abs)) ?? null;
+    const projectRel: string = mod.projectRelativeSourcePath(abs, root);
+    const token: string = mod.chunkNamespaceToken(abs, root);
+    // `projectRel` is `<prefix><rel>` in every shape where the source lives under the corpus root,
+    // which is every shape this tool enumerates. The non-suffix case is recorded verbatim rather
+    // than papered over — an unexplained shape must be visible, not normalized away.
+    const prefix = projectRel.endsWith(rel) ? projectRel.slice(0, projectRel.length - rel.length) : `<NOT-A-SUFFIX:${projectRel}>`;
+    rootCounts.set(root ?? "", (rootCounts.get(root ?? "") ?? 0) + 1);
+    prefixCounts.set(prefix, (prefixCounts.get(prefix) ?? 0) + 1);
+    prefixLines.push(`${rel}\0${prefix}`);
+    tokenLines.push(`${rel}\0${token}`);
+  }
+
+  const roots = [...rootCounts.entries()].sort().map(([root, count]) => {
+    const marker = root === ""
+      ? null
+      : (PROJECT_ROOT_MARKER_NAMES.find((m) => existsSync(join(root, m))) ?? null);
+    return { projectRoot: root === "" ? null : root, marker, sources: count };
+  });
+  const prefixes = [...prefixCounts.entries()].sort().map(([prefix, count]) => ({ prefix, sources: count }));
+
+  return {
+    resolverAvailable: true,
+    method: `${toPosix(relative(compilerRoot, modPath))} :: resolveProjectRoot(dirname(source)) + projectRelativeSourcePath + chunkNamespaceToken, from the compiler under test`,
+    roots,
+    prefixes,
+    // `sources` arrives sorted (capture sorts it before this is called); hashing in that order is
+    // what makes the digest a stable comparable rather than a walk-order artefact.
+    prefixDigest: createHash("sha256").update(prefixLines.join("\n")).digest("hex"),
+    tokenDigest: createHash("sha256").update(tokenLines.join("\n")).digest("hex"),
+  };
+}
+
+/**
+ * The markers `resolveProjectRoot` walks up for, in its own priority order. Duplicated here ONLY to
+ * name which one stopped the walk — the walk itself is never re-implemented (Rule 7: resolve it, do
+ * not pattern-match it). If `chunk-namespace.ts` ever gains a third marker this list goes stale in
+ * the one direction that is safe: the root is still correct, the reported marker reads `null`.
+ */
+const PROJECT_ROOT_MARKER_NAMES = ["scrml.toml", ".git"] as const;
+
+/** One-line human rendering of an anchor, for capture logs and diff findings. */
+function describeAnchor(a: NamespaceAnchor): string {
+  if (!a.resolverAvailable) return a.method;
+  const roots = a.roots
+    .map((r) => `${r.projectRoot ?? "<none — walk reached the filesystem root>"}${r.marker ? ` (marker ${r.marker})` : ""} x${r.sources}`)
+    .join(" | ");
+  const prefixes = a.prefixes.map((p) => `"${p.prefix}" x${p.sources}`).join(" | ");
+  return `root ${roots}   source-path prefix ${prefixes}`;
+}
+
 function artifactKey(relPath: string): string {
   const parts = relPath.split("/");
   const base = parts[parts.length - 1];
@@ -675,6 +850,33 @@ async function capture(opts: CaptureOptions): Promise<number> {
     `      corpus shape  : ${roleCounts.entry} entry + ${roleCounts["auxiliary-module"]} auxiliary-module` +
       ` = ${allSources.length} of ${allSources.length} (metadata only — nothing is filtered)`,
   );
+
+  // HARD REQ 8 — the chunk-namespace anchor. Measured here, at the earliest point it CAN be
+  // measured, because the alternative is finding out after both sides have been captured that
+  // neither comparison meant anything.
+  const namespaceAnchor = await resolveNamespaceAnchor(compilerRoot, allSources);
+  console.log(`      ns anchor     : ${describeAnchor(namespaceAnchor)}`);
+  if (!namespaceAnchor.resolverAvailable) {
+    console.log(
+      `                      *** THE CHUNK-NAMESPACE ANCHOR IS UNMEASURED ON THIS SIDE. ***\n` +
+        `                      \`diff\` cannot verify that this capture and its counterpart hashed the\n` +
+        `                      same source paths, so an artifact-content difference may be an artefact\n` +
+        `                      of WHERE THIS TREE LIVES rather than of the compiler. Expected for a\n` +
+        `                      revision predating chunk-namespacing; a defect for any modern one.`,
+    );
+  } else {
+    const nonEmpty = namespaceAnchor.prefixes.filter((p) => p.prefix !== "");
+    if (nonEmpty.length > 0) {
+      console.log(
+        `                      *** WARNING: ${nonEmpty.reduce((n, p) => n + p.sources, 0)} source(s) hash a path with a NON-EMPTY prefix. ***\n` +
+          `                      Every namespace token on this side embeds this tree's LOCATION, so it\n` +
+          `                      only compares against a counterpart whose prefix is byte-identical.\n` +
+          `                      Usual cause: this tree has no \`scrml.toml\` and no \`.git\` (a \`git\n` +
+          `                      archive\` extraction), so the compiler anchored on the absolute path.\n` +
+          `                      Remedy: \`mkdir ${compilerRoot}/.git\` and re-capture this side.`,
+      );
+    }
+  }
 
   // Slug collision check. Output dirs are derived from source paths; if two sources mapped to one
   // dir, one would silently overwrite the other's artifacts.
@@ -920,6 +1122,7 @@ async function capture(opts: CaptureOptions): Promise<number> {
     compilerRoot,
     revision,
     roots,
+    namespaceAnchor,
     reuseArtifacts: opts.reuseArtifacts,
     checkContext: {
       method: opts.syntaxCheck
@@ -1160,6 +1363,47 @@ function diff(basePath: string, headPath: string, jsonOut: string | undefined, a
     incomparable = true;
   }
 
+  // HARD REQ 8 — the chunk-namespace ANCHOR. See the `NamespaceAnchor` docstring.
+  //
+  // This joins the same-revision and unknown-revision guards above because it answers the same
+  // question they do: is this a valid comparison at all? It is NOT a difference-counter — a
+  // divergent anchor does not make ONE finding, it makes every artifact-content finding on the run
+  // meaningless, which is precisely what exit 2 exists to say.
+  const bAnchor = base.namespaceAnchor;
+  const hAnchor = head.namespaceAnchor;
+  if (bAnchor.resolverAvailable && hAnchor.resolverAvailable) {
+    if (bAnchor.prefixDigest !== hAnchor.prefixDigest) {
+      console.error(
+        `FINDING [INCOMPARABLE] the two sides resolved DIFFERENT chunk-namespace ANCHORS, so they hash\n` +
+          `  DIFFERENT strings for the SAME source. Every namespace token differs, so every artifact\n` +
+          `  differs, and EVERY artifact-content difference reported below is an artefact of WHERE THE\n` +
+          `  TREES LIVE — not of the compiler.\n` +
+          `    base: ${describeAnchor(bAnchor)}\n` +
+          `    head: ${describeAnchor(hAnchor)}\n` +
+          `  \`nsId\` hashes the source path RELATIVE TO THE PROJECT ROOT, which the compiler finds by\n` +
+          `  walking up for \`scrml.toml\` then \`.git\` (compiler/src/codegen/chunk-namespace.ts). A tree\n` +
+          `  extracted with \`git archive\` carries neither, so the compiler anchors on the ABSOLUTE path\n` +
+          `  and every token embeds the extraction directory.\n` +
+          `  REMEDY: give the side whose prefix is non-empty a project-root marker — \`mkdir <that\n` +
+          `  checkout>/.git\` (or add \`scrml.toml\`) — and re-capture it. A measured pair went from 1014\n` +
+          `  content differences to 0 of 7375 on exactly that one-line change.`,
+      );
+      incomparable = true;
+    }
+  } else {
+    // Deliberately NOT a refusal. A side that predates chunk-namespacing has no tokens at all, so
+    // its artifacts cannot be poisoned by tree location — and refusing would block the legitimate
+    // before/after comparison of the arc that introduced them. But an UNVERIFIED anchor must never
+    // read as a verified one, so it says so where the findings are.
+    console.log(
+      `NOTE: the chunk-namespace ANCHOR could not be compared — it is unmeasured on at least one side.\n` +
+        `      base: ${describeAnchor(bAnchor)}\n` +
+        `      head: ${describeAnchor(hAnchor)}\n` +
+        `      Artifact-content differences below are NOT verified free of a namespace-anchor artefact.\n` +
+        `      Expected when one side predates chunk-namespacing; a defect if both sides are modern.`,
+    );
+  }
+
   // The syntax verdict is only meaningful if both sides were measured under the same rules.
   if (base.checkContext.method !== head.checkContext.method || base.checkContext.nodeVersion !== head.checkContext.nodeVersion) {
     console.error(
@@ -1208,6 +1452,20 @@ function diff(basePath: string, headPath: string, jsonOut: string | undefined, a
   } else {
     console.log(`   source SET delta: none — the two sides enumerated the SAME ${base.enumeration.total} sources`);
   }
+  // Printed on EVERY run, matching or not. A guard whose output only appears when it fires is a
+  // guard a reader cannot tell from an absent one.
+  console.log(
+    `   chunk-namespace anchor:\n` +
+      `     base ${describeAnchor(bAnchor)}\n` +
+      `     head ${describeAnchor(hAnchor)}\n` +
+      `     ${
+        !bAnchor.resolverAvailable || !hAnchor.resolverAvailable
+          ? "NOT COMPARED — unmeasured on at least one side (see the NOTE above)"
+          : bAnchor.prefixDigest === hAnchor.prefixDigest
+            ? "MATCH — both sides hash the same string for the same source, so no artifact difference below is a location artefact"
+            : "MISMATCH — see the INCOMPARABLE finding above"
+      }`,
+  );
 
   const baseBy = new Map(base.sources.map((s) => [s.path, s]));
   const headBy = new Map(head.sources.map((s) => [s.path, s]));
@@ -1442,6 +1700,13 @@ function diff(basePath: string, headPath: string, jsonOut: string | undefined, a
   }
   console.log(
     `  sources enumerated        base ${base.enumeration.total}   head ${head.enumeration.total}\n` +
+      `  chunk-namespace anchor    ${
+        !bAnchor.resolverAvailable || !hAnchor.resolverAvailable
+          ? "NOT COMPARED (unmeasured on at least one side)"
+          : bAnchor.prefixDigest === hAnchor.prefixDigest
+            ? "MATCH"
+            : "MISMATCH — the artifact-content rows below are MEANINGLESS"
+      }\n` +
       `  source set delta          ${srcDelta.onlyA.length + srcDelta.onlyB.length}\n` +
       `  compile-failure delta     ${compileComparable ? `${newlyFailing.length} newly failing / ${newlyPassing.length} newly passing` : "NOT MEASURED (reuse-artifacts manifest)"}\n` +
       `  diagnostic changes        ${compileComparable ? `${diagChanged.length} code / ${streamChanged.length} text-only` : "NOT MEASURED (reuse-artifacts manifest)"}\n` +
@@ -1459,8 +1724,10 @@ function diff(basePath: string, headPath: string, jsonOut: string | undefined, a
       jsonOut,
       JSON.stringify(
         {
-          base: { label: base.label, revision: base.revision, totals: base.totals, enumeration: base.enumeration },
-          head: { label: head.label, revision: head.revision, totals: head.totals, enumeration: head.enumeration },
+          base: { label: base.label, revision: base.revision, totals: base.totals, enumeration: base.enumeration, namespaceAnchor: bAnchor },
+          head: { label: head.label, revision: head.revision, totals: head.totals, enumeration: head.enumeration, namespaceAnchor: hAnchor },
+          namespaceAnchorComparable: bAnchor.resolverAvailable && hAnchor.resolverAvailable,
+          namespaceAnchorMatches: bAnchor.resolverAvailable && hAnchor.resolverAvailable && bAnchor.prefixDigest === hAnchor.prefixDigest,
           sourceSetDelta: srcDelta,
           compileFailureDelta: { newlyFailing, newlyPassing },
           diagnosticCodeChanges: diagChanged,
