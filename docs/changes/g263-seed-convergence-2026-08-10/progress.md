@@ -445,3 +445,83 @@ new position cannot ship unmeasured (B3, the delete branch).
   `match-expr` carrying `rawArms: [raw string]` — a raw string INSIDE an ExprNode, one layer
   deeper than the raw-source POSITIONS the table enumerates. `resultExpr` genuinely fixes the
   LOGIC-BLOCK / client-`fn`-body shape (`match-arm-inline` nodes), which is now pinned.
+
+---
+
+# ROUND 6 (S338, after the S239 DO-NOT-LAND) — append-only
+
+Base for this round: `ad262baa` (round-5 tip). Same worktree.
+
+## R6 — what was fixed
+
+| item | status | evidence |
+|---|---|---|
+| F1 `bodyExpr` leaks a `when message` worker body | FIXED | node-kind PRUNE in `client-read-seed.ts`; measured before: `const FACTOR = ["LEAK","CANARY","WORKER"]…` in `models.client.js`, only line in `index.client.js` = the destructure |
+| F2 block-bodied arrow hides `import.meta` in `raw` | FIXED | 4 fatal-direction shapes; acorn re-parse of the OPAQUE node only |
+| F3 four fields with no behavioural coverage | FIXED | `§1b`; per-field bite now 2·1·1·1·1 (was 2·1·0·0·0) |
+| F4 `callbackExpr` partial no-op | PINNED as the DISCRIMINATOR + reported below | expression-arrow resolves, block-arrow does not |
+| F6 §8 rationale comment factually wrong | FIXED | corrected in 3 places, incl. the statement-vs-expression axis |
+
+### R6 measurement corrections to my own round-5 work
+
+- **A false measurement was caught and discarded.** `splitBlocks` takes
+  `(filePath, source)`. Two round-6 probes called it `(source, filePath)`, which returns a single
+  `text` node, and on that basis I briefly concluded `cleanup-registration` / `upload-call` are
+  "never built" and started writing a §9 gate around that claim. They ARE built — at LOGIC TOP
+  LEVEL. The §9 block was deleted before commit and every AST-shape claim re-measured. **Round 5's
+  `rawArms` conclusion is unaffected**: it was established by `parseExprToNode` and by compile-level
+  probes, not by that call.
+- **F2's prescribed fix was one shape too coarse.** A raw-TEXT fallback on the opaque node
+  re-opens the round-4 false positive one level down: `() => { return "read import.meta later" }`
+  is a block-bodied arrow whose interior mentions the characters INSIDE A STRING. Acorn-parsing
+  the node's own `raw` gets it right; it is a MUST-SHIP row in `§3b` and it passes.
+- **F3's framing.** `cleanup(…)`/`upload(…)` build their node kinds ONLY at logic top level.
+  Inside a `function` body or `on mount` the same text is an ordinary `bare-expr` whose `exprNode`
+  was already listed — a case written that way passes with the field deleted. Measured on four
+  framings before the fixture was settled.
+
+## R6 — REPORTED FOR PA FILING, NOT FIXED (`docs/known-gaps.md` is contended)
+
+1. **F5 — the shared predicate enshrines codegen's over-wide `startsWith("on")`.** `only=` /
+   `once=` / `onward=` are routed to event wiring by `emit-html.ts`, so the seed now DECLARES a
+   const used there. On `main` that shape is a loud under-emit; here it is a silent value-crossing.
+   The right fix is NARROWING `emit-html.ts` (there is no `only` DOM event), which moves emitted
+   output — a separate arc. The shared predicate is correct as "what codegen DOES"; it is codegen
+   that is wrong.
+2. **F7 — `if=X[0]` silently drops the index.** `<p if=MARKC[0]>` emits
+   `if (_scrml_cs_reactive_get("MARKC"))` — the subscript is gone. Pre-existing on both refs.
+3. **The block-bodied-function escape-hatch class, THREE live instances, one root cause.** A block
+   body is never mapped to an ExprNode; the interior survives as opaque source on
+   `{kind:"escape-hatch", nativeKind:"ArrowFunctionExpression"|"FunctionExpression", raw}`, and
+   every ExprNode walker in the tree sees nothing:
+   - `cleanup(() => { … NEEDED … })` — live cross-file `ReferenceError`, pinned as a discriminator
+     in `conf-CG-263 §1b`;
+   - the `import.meta` fence — FIXED here by acorn-re-parsing the opaque node, which is the shape
+     of the general fix;
+   - `g-263-match-expr-rawarms-…` (already filed) is the same class with a different carrier.
+   Worth ONE gap entry naming the class, with those three as instances.
+4. **A nested worker `<program name=…>` is walked by the client-read seed.** Beyond `when message`:
+   a plain logic statement inside the worker program (`@wk = FACTOR`) still crosses and buys
+   nothing — pre-existing (`exprNode`, an original list entry), not from the new fields. The
+   structural fix is pruning the worker subtree, and it is BLOCKED: a `function` declared inside a
+   worker program is measured to be emitted into `index.client.js` as well, so pruning would turn a
+   live reference into a `ReferenceError`. Emitter first, seed second, same commit.
+5. **`cleanup` / `upload` are invisible to the scope checker in non-top-level framings.** Inside a
+   `function` body / `ref=` handler / `on mount`, `cleanup(…)` and `upload(…)` raise
+   `E-SCOPE-001: Undeclared identifier`. Pre-existing; noticed while looking for a clean fixture.
+
+## R6 — baseline-count correction, carried
+
+The reviewer measured 49 suite failures where round 5 reported 52 for `origin/main`, in a worktree
+with `todomvc/dist` symlinked and a real `.git`. **Do not quote either count as a baseline.** The
+delta is absent gitignored build dirs, not behaviour. NAME-SET diffs only — both refs measured
+identically under each setup, so the set comparison is sound and the counts are not.
+
+## R6 — `docs/known-gaps.md` WARNING FOR LANDING
+
+Round 5 committed TWO entries to `docs/known-gaps.md` (`66dc805f`, `20e7480a`) before it was
+declared contended. **Do NOT wholesale `git checkout <branch> -- docs/known-gaps.md`** — that
+clobbers the PA's session version. Cherry-pick the two entry BLOCKS:
+`g-263-lift-body-invisible-to-the-client-read-seed-node-traversal` and
+`g-263-match-expr-rawarms-is-an-unparsed-string-inside-an-exprnode`. No round-6 commit touches
+that file.
