@@ -376,3 +376,72 @@ That collapses the whole bare-attribute name table to ONE predicate, imported fr
 because the old question ("does the compiler emit client code?") answers YES for a store-key read.
 `"unknown"` is DELETED rather than made real — an undetermined position is not representable, so a
 new position cannot ship unmeasured (B3, the delete branch).
+
+## R5 — WHAT LANDED
+
+| item | status | note |
+|---|---|---|
+| A1 `wired` leaks server-only consts | FIXED | measured on `if=X` / `if=X.f` / `if=X[0]` / `if=` on `<each>`/`<match>` / `onclick=X.go` |
+| A2 `wired` FALSE for `show=@x` etc. | DISSOLVED, not "fixed" | A1 and A2 are incompatible under one field; the field was asking two questions. See the ruling above. |
+| A3 `"unknown"` is a dead value | FIXED (deleted) | the type is two-valued; §7 asserts BOTH values are LIVE |
+| A4 predicate drifts from codegen's | FIXED | `on=` `on-tap=` `on_tap=` `on2=` were live under-emits; `only=`/`once=`/`onward=` were NOT (brief wrong) |
+| A5 `import.meta` regex over source text | FIXED | tested on the parsed `{kind:"escape-hatch", nativeKind:"MetaProperty"}` |
+| A6 missing `variable-ref` guard on `raw` | FIXED | guard moved to the GROUP, not one alternate |
+| A7 `emitGroup` prefers first SUPPORTED | FIXED | `isEmptyPositionValue` skip + unit test |
+| B1 dual-direction `EXPR_NODE_FIELDS` gate | LANDED | §8; added `resultExpr` `bodyExpr` `callbackExpr` `fileExpr` `urlExpr`; 6 exclusions each with a reason |
+| B2 call codegen's predicate | LANDED | new leaf `compiler/src/attr-lowering.ts`, 2 callers |
+| B3 make `"unknown"` real or delete | LANDED (delete branch) | |
+| B4 re-base tests on compiled sources | LANDED | §8 matrix × {same-file, cross-file} × {const, let} |
+
+### R5 measurements
+
+- **Corpus emit differential vs `origin/main`, project roots MATCHED**: 1904 sources · 7375
+  artifacts · **0 content diffs** · 0 syntax delta (both goggles) · 0 compile-failure delta ·
+  0 artifact-set delta · 0 load-context change · bare-server-fn delta 0.
+  **A first run reported 1014 content diffs and every one was a HARNESS artifact**: the
+  chunk-namespace id is `fnv1aHash(projectRootRelativeSourcePath)` and the reference tree was a
+  `git archive` extract with no `.git`, so the project root resolved differently. `mkdir .git`
+  in the reference tree took it to 0. **A capture whose two sides have different project roots
+  cannot compare emit content at all** — worth knowing before the next codegen dispatch.
+- **Diagnostic delta: 1 code + 2 text-only, all one class.** `phase2-when-self-write-085` /
+  `-083` / `-082` lose a FALSE-POSITIVE `E-DG-002`. Bisected to `bodyExpr`. Correct: an
+  `on mount { @x = 2 }` body ALREADY suppressed E-DG-002 on both refs while
+  `when @x changes { @x = 1 }` did not, for no principled reason.
+- **B1 migration measurement**: 0 corpus files change EMIT. The only corpus effect of all five
+  added fields is the 3 diagnostic changes above. Instrument power is low by construction (the
+  collector executes only where a file has export consts read client-side) — a floor, not a proof.
+- **R26 empirical**: `gauntlet-r25/dev-{1..4}.scrml` recompiled on both refs → artifacts
+  BYTE-IDENTICAL (`diff -r` exit 0), diagnostics identical once the two root paths are normalised.
+- **`e2e-render-map/generate-baseline.js --check`**: output identical to `main` modulo the timing
+  line. The baseline drift it reports is entirely pre-existing.
+- **Full suite**: 30161 pass / 216 skip / 1 todo / **49 fail**. Failure NAME SET vs `main` (52):
+  **0 NEW**, 3 gone — and those 3 are artifacts of the archived reference tree (no `.git` for
+  `resolveProjectRoot`, no compiled `benchmarks/todomvc/dist`), not fixes.
+
+### R5 bite proofs
+
+| corruption | result |
+|---|---|
+| add a phantom to `EXPR_NODE_FIELDS` | RED (1) |
+| remove `resultExpr` from the list | RED (2 unit, and 2 conformance) |
+| revert the shared predicate to `/^on[a-z]/` | RED (1) |
+| make a bare `if=` a binding again | RED (3 conformance) |
+| bare-value shape guard removed (leak direction) | RED (6) |
+| bare-value binding always FALSE (under-emit direction) | RED (14) |
+| empty-alternate skip removed | RED (1) |
+| local-decl binding branch deleted | RED (2) — needed the CROSS-FILE vector |
+| `engine.initialCell` / `serverSource` / `inlineMatchBody` deleted | RED (1 each) |
+| `markup-source` routed through the statement parser | RED (6) |
+| `collectFromMarkupSource` no-op'd | **GREEN — redundant, reported not faked** |
+| `collectFromCalleeName` no-op'd | **GREEN — redundant, reported not faked** |
+
+### R5 — TWO NEW GAPS FILED, both PA-verified on the branch AND on main
+
+- `g-263-lift-body-invisible-to-the-client-read-seed-node-traversal` (MED). The out-of-scope
+  node-traversal item, verified: three `lift`-body shapes are live cross-file `ReferenceError`s.
+  Both docblocks corrected to say the FIELD half is closed and the NODE half is not.
+- `g-263-match-expr-rawarms-is-an-unparsed-string-inside-an-exprnode` (MED). **The brief's own B1
+  reproducer measures THIS, not `resultExpr`.** `on mount { @a = match … }` parses to a
+  `match-expr` carrying `rawArms: [raw string]` — a raw string INSIDE an ExprNode, one layer
+  deeper than the raw-source POSITIONS the table enumerates. `resultExpr` genuinely fixes the
+  LOGIC-BLOCK / client-`fn`-body shape (`match-arm-inline` nodes), which is now pinned.
