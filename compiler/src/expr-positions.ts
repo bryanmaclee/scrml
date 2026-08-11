@@ -228,14 +228,14 @@ type Rec = Record<string, unknown>;
  *     `route-inference.ts`'s own copy of this list already had it, so the table
  *     built to end list-drift disagreed with a fourth copy still in the tree.
  *
- *     THE SHAPE IS PART OF THE CLAIM, and getting it wrong cost a round. A
- *     `match` in a LOGIC BLOCK or a client `fn` body builds real
- *     `match-arm-inline` NODES that carry a parsed `resultExpr` — that is what
- *     this entry fixes. `on mount { @a = match @phase { .Idle :> NEEDED } }`
- *     does NOT: the whole body is one `bare-expr` whose parsed `exprNode` is a
- *     `match-expr` carrying `rawArms: [".Idle :> NEEDED, …"]` — a RAW STRING
- *     inside an ExprNode, which no field-list entry can reach and no ExprNode
- *     walker can see. Still open, filed as
+ *     THE DISCRIMINATOR IS STATEMENT VS EXPRESSION, and getting it wrong cost a
+ *     round. A match STATEMENT builds real `match-arm-inline` NODES carrying a
+ *     parsed `resultExpr`, wherever it appears — logic block or client `fn` body
+ *     alike — and that is what this entry fixes. A match EXPRESSION
+ *     (`@a = match @phase { .Idle :> NEEDED }`) builds NONE, in any position:
+ *     it parses to `{kind:"match-expr", rawArms:[".Idle :> NEEDED, …"]}` — a RAW
+ *     STRING inside an ExprNode, which no field-list entry can reach and no
+ *     ExprNode walker can see. Still open, filed as
  *     `g-263-match-expr-rawarms-is-an-unparsed-string-inside-an-exprnode`.
  *
  * A test that asserts "these 7 are present and these 4 historical phantoms are
@@ -246,17 +246,43 @@ type Rec = Record<string, unknown>;
  * and hand it straight to an ExprNode walker, so an `ExprNode[]` field cannot
  * live here. The two that exist (`argExprNodes`, `scrutineeExprs`) are on the
  * gate's exclusion list with their reasons.
+ *
+ * ═══ A LIST ENTRY IS NOT COVERAGE, AND THIS LIST SAYS SO ═══
+ *
+ * Membership is silent about whether a field does anything. FOUR of the five
+ * entries the gate surfaced have ZERO occurrences across all 1904 corpus
+ * sources, so the wide emit-differential is silent on them too, and the gate's
+ * own list-membership assertion is silent by construction. Every entry below
+ * therefore names its node kind AND its behavioural case, and each of those
+ * cases FAILS when its field is removed from this list. That is the only
+ * evidence that means anything.
+ *
+ * TWO OF THESE FIELDS ARE PARTIALLY SWALLOWED, and the entry says which half.
+ * A BLOCK-bodied callback is not mapped to an ExprNode at all — the interior
+ * survives as opaque source on an escape hatch — so the field fires and the walk
+ * finds nothing. Same root cause as the `match-expr.rawArms` gap and as the
+ * `import.meta` fence's block-body hole.
  */
 export const EXPR_NODE_FIELDS: readonly string[] = [
   "exprNode", "initExpr", "condExpr", "valueExpr", "iterExpr", "headerExpr",
   "defaultExpr",
-  // `match-arm-inline` (`types/ast.ts:1150`, 6 sites in `ast-builder.js`).
+  // `match-arm-inline` (`types/ast.ts:1150`, 6 sites). STATEMENT-form `match`
+  // only — a match EXPRESSION builds no arm nodes at all.
+  // conf-CG-263 §1 `match-arm-inline result`.
   "resultExpr",
-  // `when-effect` / `when-message` single-expression bodies (`:1380`, `:1394`).
+  // `when-effect` (`:1380`) AND `when-message` (`:1394`) — TWO node kinds, TWO
+  // emit targets. The worker half is PRUNED by node kind in `client-read-seed.ts`;
+  // a field list cannot tell them apart and listing this leaked a worker-only
+  // const into a `.client.js`. conf-CG-263 §1b, both directions.
   "bodyExpr",
-  // `cleanup(() => …)` (`:1366`).
+  // `cleanup(() => …)` (`:1366`), LOGIC-TOP-LEVEL form — inside a `function` or
+  // `on mount` body the call is an ordinary `bare-expr`. PARTIAL: an
+  // expression-bodied callback resolves, a BLOCK-bodied one is swallowed by the
+  // escape hatch. conf-CG-263 §1b, both halves pinned.
   "callbackExpr",
-  // `upload(file, url)` (`:1403`, `:1407`).
+  // `upload(file, url)` (`:1403`, `:1407`), same logic-top-level rule. Two
+  // entries on one node, so each argument position gets its own case.
+  // conf-CG-263 §1b.
   "fileExpr", "urlExpr",
 ];
 

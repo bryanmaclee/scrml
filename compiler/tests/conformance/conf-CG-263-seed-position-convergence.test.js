@@ -304,14 +304,14 @@ ${OPEN} type Game:enum = { Title, Playing }
     // own copy of the same list already did. Surfaced by the §8 dual-direction
     // gate, not by anyone reading the list.
     //
-    // SHAPE MATTERS HERE and it is not the shape the round-5 brief named. A
-    // `match` in a LOGIC BLOCK (or a client `fn` body) builds real
-    // `match-arm-inline` nodes, each carrying `resultExpr`. The EXPRESSION form
-    // — `on mount { @a = match @phase { .Idle :> NEEDED } }` — does not: the
-    // whole `on mount` body is ONE `bare-expr` whose parsed `exprNode` is a
-    // `match-expr` carrying `rawArms: [".Idle :> NEEDED, …"]`, a RAW STRING
-    // array inside an ExprNode that no consumer parses. That is a separate,
-    // still-open gap and it is filed; this case pins the half `resultExpr` closes.
+    // THE DISCRIMINATOR IS STATEMENT VS EXPRESSION, and it is not the shape the
+    // round-5 brief named. A match STATEMENT builds real `match-arm-inline`
+    // nodes carrying `resultExpr`, wherever it appears — logic block or client
+    // `fn` body alike. A match EXPRESSION (`@a = match @phase { .Idle :> NEEDED }`)
+    // builds none, in ANY position: it parses to
+    // `{kind:"match-expr", rawArms:[".Idle :> NEEDED, …"]}`, a RAW STRING inside
+    // an ExprNode that no consumer parses. That is a separate, still-open gap
+    // and it is filed; this case pins the half `resultExpr` closes.
     label: "match-arm-inline result — a `match` statement's `:>` arm body",
     dir: "cg263-match-arm-inline-result",
     clientRef: 'reactive_set("a", NEEDED)',
@@ -1367,6 +1367,220 @@ for (const vec of WIRED_VECTORS) {
     });
   });
 }
+
+// ---------------------------------------------------------------------------
+// §1b — BEHAVIOURAL COVERAGE FOR THE FIELDS THE §8 GATE ADDED.
+//
+// The gate surfaced five `ExprNode` fields the shared list was missing, and a
+// census puts FOUR of them at ZERO occurrences across all 1904 corpus sources.
+// So "0 emit delta over 7375 artifacts" is silent on every one of them, and the
+// §8 list-membership assertion is silent too: deleting `callbackExpr` /
+// `bodyExpr` / `fileExpr` / `urlExpr` from the compiler changes no emitted output
+// any other test looks at. A list entry with no behavioural case is a claim, not
+// coverage.
+//
+// Each case below reads the import ONLY through the named field.
+// ---------------------------------------------------------------------------
+
+const FIELD_MODULE = `export const NEEDED = "needle-value-263"
+export const SHOWN = "shown-client-value"
+`;
+
+describe("CONF-CG-263 §1b — `bodyExpr` on a `when @x changes` effect IS a client read", () => {
+  const NAME = "cg263-field-when-effect";
+  beforeEach(() => {
+    const d = setupDir(NAME);
+    writeFileSync(join(d, "models.scrml"), FIELD_MODULE);
+    writeFileSync(join(d, "index.scrml"), `<program>
+import { NEEDED } from './models.scrml'
+${OPEN}
+    <value> = 1
+    @out = ""
+    when @value changes {
+        @out = NEEDED
+    }
+${CLOSE}
+<p>${OPEN}@out${CLOSE}</p>
+</program>
+`);
+  });
+  afterEach(() => teardownDir(NAME));
+
+  test("the effect body really references the binding (the case is not vacuous)", () => {
+    const c = compileEntry(join(TMP_ROOT, NAME, "index.scrml"));
+    expect(c.errors).toEqual([]);
+    expect(codeContains(c.out("index.scrml").clientJs, '_scrml_cs_reactive_set("out", NEEDED)')).toBe(true);
+  });
+
+  test("models.client.js DECLARES and REGISTERS it", () => {
+    const c = compileEntry(join(TMP_ROOT, NAME, "index.scrml"));
+    const m = c.out("models.scrml");
+    expect(declaresBindingAs(m.clientJs, "NEEDED", '"needle-value-263"')).toBe(true);
+    expect(registersExport(m.clientJs, "NEEDED")).toBe(true);
+  });
+});
+
+describe("CONF-CG-263 §1b — `bodyExpr` on a `when message` WORKER handler is NOT a client read", () => {
+  // ═══ THE SAME FIELD, THE OTHER NODE KIND, AND THE ANSWER INVERTS ═══
+  //
+  // `bodyExpr` is declared on TWO node kinds (`types/ast.ts:1380` and `:1394`).
+  // `when-effect` is client-emitted; `when-message` is a §4.12.4 worker handler
+  // whose body `generateWorkerJs` emits into a SEPARATE `<name>.worker.js`. A
+  // field list is keyed on the FIELD NAME and cannot tell them apart, so listing
+  // `bodyExpr` pulled a server-only const's VALUE into `models.client.js` while
+  // the ONLY line in `index.client.js` mentioning it was the destructure — it
+  // crossed to the browser and bought nothing, and the worker did not get it
+  // either. Closed by a NODE-KIND prune in `client-read-seed.ts`, alongside the
+  // server-fn / server-cell / server-statement prunes it belongs with.
+  const NAME = "cg263-field-when-message";
+  beforeEach(() => {
+    const d = setupDir(NAME);
+    writeFileSync(join(d, "models.scrml"), `export const FACTOR = ["LEAK", "CANARY", "WORKER"].join("-")
+export const SHOWN = "shown-client-value"
+`);
+    writeFileSync(join(d, "index.scrml"), `<program>
+import { FACTOR, SHOWN } from './models.scrml'
+
+<program name="doubler">
+    ${OPEN}
+        when message(data) {
+            send({ result: data.value * FACTOR })
+        }
+    ${CLOSE}
+</>
+
+${OPEN}
+    <value>  = 21
+    <result> = not
+    @a = ""
+    function runDoubler() {
+        <#doubler>.send({ value: @value })
+    }
+    when message from <#doubler> (data) {
+        @result = data.result
+    }
+${CLOSE}
+on mount { @a = SHOWN }
+<div>
+    <button onclick=runDoubler()>Double it</>
+    <p>${OPEN}@a${CLOSE}</p>
+</>
+</program>
+`);
+  });
+  afterEach(() => teardownDir(NAME));
+
+  test("§14.8 — the worker-only value reaches no .client.js", () => {
+    const c = compileEntry(join(TMP_ROOT, NAME, "index.scrml"));
+    expect(c.errors).toEqual([]);
+    const clients = c.allClient();
+    expect(clients.length).toBeGreaterThan(0);
+    for (const [fp, js] of clients) {
+      expect({ file: fp, leaked: /LEAK-CANARY-WORKER|\["LEAK"/.test(js) }).toEqual({ file: fp, leaked: false });
+      expect({ file: fp, decl: declaresTopLevelBinding(js, "FACTOR") }).toEqual({ file: fp, decl: false });
+      expect({ file: fp, registered: registersExport(js, "FACTOR") }).toEqual({ file: fp, registered: false });
+    }
+  });
+
+  test("the client-read SIBLING still reaches the client (no over-prune)", () => {
+    const c = compileEntry(join(TMP_ROOT, NAME, "index.scrml"));
+    expect(declaresBindingAs(c.out("models.scrml").clientJs, "SHOWN", '"shown-client-value"')).toBe(true);
+  });
+});
+
+describe("CONF-CG-263 §1b — `callbackExpr` on `cleanup(…)`, and the block-body boundary", () => {
+  // ═══ THE FRAMING IS PART OF THE CASE ═══
+  //
+  // `cleanup(…)` builds a `cleanup-registration` node — the carrier of
+  // `callbackExpr` — ONLY at LOGIC TOP LEVEL. Inside a `function` body or an
+  // `on mount` body the same text parses as an ordinary `bare-expr`, whose
+  // `exprNode` was already in the list, so a case written that way exercises a
+  // field it is not testing and passes with `callbackExpr` deleted. Measured on
+  // four framings before this fixture was settled.
+  const mk = (name, callback) => {
+    const d = setupDir(name);
+    writeFileSync(join(d, "models.scrml"), FIELD_MODULE);
+    writeFileSync(join(d, "index.scrml"), `<program>
+import { NEEDED, SHOWN } from './models.scrml'
+${OPEN}
+    @out = ""
+    cleanup(${callback})
+${CLOSE}
+on mount { @out = SHOWN }
+<p>${OPEN}@out${CLOSE}</p>
+</program>
+`);
+  };
+
+  afterEach(() => { teardownDir("cg263-field-cleanup-expr"); teardownDir("cg263-field-cleanup-block"); });
+
+  test("an EXPRESSION-bodied callback resolves: the const is declared", () => {
+    mk("cg263-field-cleanup-expr", "() => console.log(NEEDED)");
+    const c = compileEntry(join(TMP_ROOT, "cg263-field-cleanup-expr", "index.scrml"));
+    expect(c.errors).toEqual([]);
+    expect(codeContains(c.out("index.scrml").clientJs, "_scrml_register_cleanup(() => console.log(NEEDED))")).toBe(true);
+    expect(declaresBindingAs(c.out("models.scrml").clientJs, "NEEDED", '"needle-value-263"')).toBe(true);
+    expect(registersExport(c.out("models.scrml").clientJs, "NEEDED")).toBe(true);
+  });
+
+  test("a BLOCK-bodied callback does NOT — the field fires and the escape hatch swallows it", () => {
+    // MEASURED, and it is the SAME root cause as the `import.meta` fence and as
+    // `g-263-match-expr-rawarms-…`: a block body is not mapped to an ExprNode at
+    // all, so the interior survives as opaque source on
+    // `{kind:"escape-hatch", nativeKind:"ArrowFunctionExpression", raw:"…"}` and
+    // every ExprNode walker sees nothing. The emitted client code DOES reference
+    // the binding, so this is a live `ReferenceError` at exit 0.
+    //
+    // Pinned as the DISCRIMINATOR rather than as "declared: false", so the day the
+    // escape-hatch class is closed this case tells you which half moved.
+    mk("cg263-field-cleanup-block", "() => { console.log(NEEDED) }");
+    const c = compileEntry(join(TMP_ROOT, "cg263-field-cleanup-block", "index.scrml"));
+    expect(c.errors).toEqual([]);
+    const referencesIt = codeReferencesBinding(c.out("index.scrml").clientJs, "NEEDED");
+    const declared = declaresTopLevelBinding(c.out("models.scrml").clientJs, "NEEDED");
+    expect({ referencesIt, declared, known: "block-body escape hatch — open" })
+      .toEqual({ referencesIt: true, declared: false, known: "block-body escape hatch — open" });
+  });
+});
+
+describe("CONF-CG-263 §1b — `fileExpr` / `urlExpr` on `upload(file, url)` are client reads", () => {
+  // Same framing rule as `cleanup(…)`: the `upload-call` node is built at LOGIC
+  // TOP LEVEL only. Both argument positions get a case — they are two separate
+  // list entries on one node, and one covering the other is exactly the kind of
+  // accidental coverage this section exists to stop.
+  const mk = (name, call) => {
+    const d = setupDir(name);
+    writeFileSync(join(d, "models.scrml"), FIELD_MODULE);
+    writeFileSync(join(d, "index.scrml"), `<program>
+import { NEEDED, SHOWN } from './models.scrml'
+${OPEN}
+    @out = ""
+    @file = not
+    ${call}
+${CLOSE}
+on mount { @out = SHOWN }
+<p>${OPEN}@out${CLOSE}</p>
+</program>
+`);
+  };
+  afterEach(() => { teardownDir("cg263-field-upload-url"); teardownDir("cg263-field-upload-file"); });
+
+  test("`urlExpr` — the const in the URL position is declared", () => {
+    mk("cg263-field-upload-url", "upload(@file, NEEDED)");
+    const c = compileEntry(join(TMP_ROOT, "cg263-field-upload-url", "index.scrml"));
+    expect(c.errors).toEqual([]);
+    expect(codeContains(c.out("index.scrml").clientJs, "NEEDED)")).toBe(true);
+    expect(declaresBindingAs(c.out("models.scrml").clientJs, "NEEDED", '"needle-value-263"')).toBe(true);
+  });
+
+  test("`fileExpr` — the const in the FILE position is declared", () => {
+    mk("cg263-field-upload-file", 'upload(NEEDED, "/u")');
+    const c = compileEntry(join(TMP_ROOT, "cg263-field-upload-file", "index.scrml"));
+    expect(c.errors).toEqual([]);
+    expect(codeContains(c.out("index.scrml").clientJs, "_scrml_upload(NEEDED,")).toBe(true);
+    expect(declaresBindingAs(c.out("models.scrml").clientJs, "NEEDED", '"needle-value-263"')).toBe(true);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // §8 — ONE POSITION MATRIX, RUN ON BOTH PATHS AND BOTH EXPORT KINDS.

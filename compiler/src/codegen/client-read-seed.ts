@@ -411,6 +411,31 @@ export function collectClientReadIdents(
     // with a plain-value init. A CLIENT cell (`isServer` falsy) DOES ship its
     // init and is NOT pruned.
     if (node.kind === "state-decl" && node.isServer === true) return;
+    // §4.12.4 `when message(data) { … }` — a WORKER message handler. Its body is
+    // emitted by `generateWorkerJs` into a SEPARATE `<name>.worker.js`, never into
+    // this file's `.client.js`, so its identifier reads do NOT cross. Same rule as
+    // the three prunes above, stated in the same vocabulary: a subtree emitted to
+    // a DIFFERENT TARGET contributes no client reads.
+    //
+    // THIS IS A NODE-KIND PRUNE, NOT A PER-FIELD ONE, and it has to be. The
+    // shared `EXPR_NODE_FIELDS` list is keyed on FIELD NAME, and `bodyExpr` is
+    // declared on TWO node kinds with two different emit targets — `when-effect`
+    // (`when @x changes`, genuinely client-emitted) and `when-message`. A field
+    // list cannot tell them apart, so listing `bodyExpr` pulled a server-only
+    // const's VALUE into `models.client.js` while the only line in
+    // `index.client.js` mentioning it was the destructure itself: it crossed to
+    // the browser and bought nothing, and the worker did not get it either.
+    //
+    // SCOPED TO THE HANDLER, NOT TO THE WORKER `<program name=…>`, deliberately.
+    // Pruning the whole worker subtree is the shape this rule wants, and it is
+    // UNSAFE at this HEAD: a `function` declared inside a worker program is
+    // MEASURED to be emitted into `index.client.js` as well
+    // (`function _scrml_scale_3(n) { return n * FACTOR; }`), so pruning the
+    // subtree would turn a live client reference into a `ReferenceError`. The
+    // seed must mirror what the EMITTER does, and the emitter does not honour
+    // that boundary yet. Widening this prune belongs in the same commit that
+    // fixes the emitter, not before it.
+    if (node.kind === "when-message") return;
     // Server-only statement (SQL / env / server-context meta): prune subtree.
     if (isServerOnlyNode(node)) return;
 

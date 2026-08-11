@@ -639,14 +639,32 @@ describe("expr-positions §7 — every position declares whether it is a CLIENT 
 // and already included it, and its absence here was a live cross-file
 // `ReferenceError` at exit 0:
 //
-//     on mount { @a = match @phase { .Idle :> NEEDED, .Ready :> "ready" } }
-//     -> index.client.js:  if (_scrml_match_2 === "Idle") return NEEDED;
-//     -> NEEDED declared nowhere, no diagnostic.
+//     ${ match @phase { .Idle :> @a = NEEDED, .Ready :> @a = "r" } }
+//     -> index.client.js:  _scrml_cs_reactive_set("a", NEEDED)
+//     -> NEEDED declared nowhere, no diagnostic.   FIXED, pinned by
+//        `conf-CG-263 §1 match-arm-inline result`.
+//
+// THE DISCRIMINATOR IS STATEMENT VS EXPRESSION, and it is written here because
+// the first cut of this comment got it wrong and cost a review round. A `match`
+// STATEMENT builds real `match-arm-inline` nodes that carry `resultExpr` —
+// wherever it appears, logic block or client `fn` body alike. A match
+// EXPRESSION (`@a = match @phase { … }`) builds NONE, in any position: the whole
+// thing parses to `{kind:"match-expr", rawArms:["…"]}`, a RAW STRING inside an
+// ExprNode that no field-list entry can reach and no ExprNode walker can see.
+// That half is still open —
+// `g-263-match-expr-rawarms-is-an-unparsed-string-inside-an-exprnode`.
 //
 // So the gate ENUMERATES THE AST instead of restating a list, in both
 // directions: every `ExprNode`-typed declaration must be IN the list or on the
 // exclusion list below with a reason, and every list entry must be a real
 // declaration.
+//
+// AND A LIST ENTRY IS NOT COVERAGE. Membership here is silent about whether the
+// field does anything: four of the five entries this gate surfaced have ZERO
+// occurrences across 1904 corpus sources, so the emit-differential is silent on
+// them too. Every one now has a BEHAVIOURAL case in
+// `conf-CG-263 §1`/`§1b`, and each of those cases fails when its field is
+// removed from the list — which is the only evidence that means anything.
 // ---------------------------------------------------------------------------
 
 /**
