@@ -4,6 +4,7 @@ import { toPosix } from "../path-canonical.js";
 import { exprNodeContainsCall, parseExprToNode, forEachIdentInExprNode, splitTopLevelCommas } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
+import * as acorn from "acorn";
 import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies } from "./runtime-chunks.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, type RequestBodyCell } from "./reactive-deps.ts";
@@ -362,20 +363,87 @@ function stripExportDeclInit(raw: unknown, kind: string, name: string): string |
  * `[…].join()`, the spaced literal `"import . meta"`, and the type-annotated
  * form.
  *
- * The parser already answers this exactly: a real meta-property becomes
- * `{kind:"escape-hatch", nativeKind:"MetaProperty"}` and a string containing the
- * same characters becomes `{kind:"lit", litType:"string"}`. Nothing about the
- * spelling — spaced, nested, inside a call, inside a ternary — changes that.
+ * The parser answers this exactly for every shape it can STRUCTURE: a real
+ * meta-property becomes `{kind:"escape-hatch", nativeKind:"MetaProperty"}` and a
+ * string containing the same characters becomes `{kind:"lit", litType:"string"}`.
+ * Spaced, nested, inside a call, inside a ternary, inside an EXPRESSION-bodied
+ * arrow — none of those change it.
  *
- * NOTE the escape-hatch node's own `raw` carries the WHOLE expression source,
- * not just the meta-property, so it is not usable as a signal. `nativeKind` is.
+ * ═══ AND THERE IS A SIXTH SPELLING THE PARSER DOES NOT STRUCTURE ═══
+ *
+ * A BLOCK-BODIED function is not mapped to an ExprNode at all; the whole
+ * interior survives as opaque source on an escape hatch:
+ *
+ *     () => import.meta.url            lambda, body holds a real MetaProperty
+ *     () => { return import.meta.url } escape-hatch, ArrowFunctionExpression,
+ *                                      the interior lives in `raw`
+ *
+ * A structural walk that skips `raw` sees nothing in the second, and the const is
+ * DECLARED into a bundle the compiler ships as a CLASSIC script — where the same
+ * bytes are a fatal SyntaxError, so every binding on the page is dead, at exit 0
+ * with no diagnostic. That is the FATAL direction, and the first cut of this fix
+ * closed the false positive by opening it.
+ *
+ * So the opaque node is opened, and it is opened BY PARSING IT, not by regexing
+ * it. An escape hatch's `raw` is the source of an ESTree node acorn already
+ * parsed once and the scrml mapper could not represent — so acorn can parse it
+ * again and answer the same structural question. The round-4 false positive came
+ * from testing the WHOLE INITIALIZER's text, which is why THAT is still never
+ * done: only an opaque node's own `raw` is ever re-parsed, and only when the node
+ * is not already a MetaProperty.
  */
+
+/** Every ESTree node in `root`, looking for a `MetaProperty`. */
+function estreeHasMetaProperty(root: unknown): boolean {
+  if (!root || typeof root !== "object") return false;
+  if (Array.isArray(root)) return root.some(estreeHasMetaProperty);
+  const n = root as Record<string, unknown>;
+  // `new.target` is the only other MetaProperty in the grammar, and a module-level
+  // `export const X = new.target` is nonsense — skipping it costs nothing, and
+  // matching the scrml-level `nativeKind === "MetaProperty"` test exactly is worth
+  // more than the discrimination.
+  if (n.type === "MetaProperty") return true;
+  for (const key of Object.keys(n)) {
+    if (key === "start" || key === "end" || key === "loc" || key === "range") continue;
+    const v = n[key];
+    if (v && typeof v === "object" && estreeHasMetaProperty(v)) return true;
+  }
+  return false;
+}
+
+/**
+ * Re-parse ONE opaque escape-hatch's own source and ask structurally.
+ *
+ * `sourceType: "module"` because `import.meta` is a syntax error under `script`
+ * — the very property being detected. Parenthesized first so a bare
+ * `function () {…}` / `x => {…}` is read as an EXPRESSION.
+ *
+ * A parse failure falls back to the text test ON THIS NODE'S RAW ONLY. That is
+ * the fail-closed direction on purpose: an under-emit is a `ReferenceError` the
+ * adopter can see, a shipped `import.meta` is a bundle that cannot load at all.
+ */
+function escapeHatchRawReadsImportMeta(raw: string): boolean {
+  for (const src of [`(${raw})`, raw]) {
+    try {
+      return estreeHasMetaProperty(acorn.parse(src, { ecmaVersion: "latest", sourceType: "module" }));
+    } catch { /* try the next framing */ }
+  }
+  return /\bimport\s*\.\s*meta\b/.test(raw);
+}
+
 function exprNodeReadsImportMeta(node: unknown): boolean {
   if (!node || typeof node !== "object") return false;
   if (Array.isArray(node)) return node.some(exprNodeReadsImportMeta);
   const n = node as Record<string, unknown>;
-  if (n.kind === "escape-hatch" && n.nativeKind === "MetaProperty") return true;
+  if (n.kind === "escape-hatch") {
+    if (n.nativeKind === "MetaProperty") return true;
+    // An opaque node: its `raw` is real source the mapper could not represent.
+    if (typeof n.raw === "string" && n.raw.trim() && escapeHatchRawReadsImportMeta(n.raw)) return true;
+  }
   for (const key of Object.keys(n)) {
+    // `raw` is skipped in the GENERIC descent — on a mapped node it is a
+    // redundant echo of structure that is already walked, and testing it is the
+    // whole-initializer text test wearing a different hat.
     if (key === "span" || key === "raw") continue;
     const v = n[key];
     if (v && typeof v === "object" && exprNodeReadsImportMeta(v)) return true;

@@ -681,6 +681,105 @@ on mount {
 });
 
 // ---------------------------------------------------------------------------
+// §3b — EVERY SPELLING, BOTH DIRECTIONS, EXECUTED.
+//
+// The fence has been wrong twice, once in each direction, and the two failures
+// are not the same size:
+//
+//   FALSE POSITIVE  a regex over the initializer's SOURCE TEXT skipped
+//                   `export const H = "read import.meta later"`. The const is
+//                   dropped, and CROSS-FILE that does not even throw — the
+//                   importer destructures from an empty registry and silently
+//                   reads `undefined`.
+//   FALSE NEGATIVE  a structural walk that skips `raw` misses a BLOCK-BODIED
+//                   function, whose whole interior survives as opaque source on
+//                   an escape hatch. The const is DECLARED into a bundle the
+//                   compiler ships as a CLASSIC SCRIPT, where the same bytes are
+//                   a fatal SyntaxError — every binding on the page dead, exit 0,
+//                   no diagnostic.
+//
+// So this matrix asserts the DECLARATION decision AND executes the shipped
+// bundles under node's parser (bun's accepts `import.meta` in a classic script,
+// which is exactly how a shipped-DOA bundle reads clean under `bun test`).
+// ---------------------------------------------------------------------------
+
+const IMPORT_META_MATRIX = [
+  // MUST SHIP — the characters appear, the meta-property does not.
+  { id: "plain-string", ship: true, init: '"read import.meta later"' },
+  { id: "url-string", ship: true, init: '"https://x/import.meta"' },
+  { id: "template-string", ship: true, init: "`t import.meta`" },
+  { id: "join-array", ship: true, init: '["a", "import.meta"].join("-")' },
+  { id: "spaced-literal", ship: true, init: '"import . meta"' },
+  // The one a raw-TEXT fallback on the opaque node would get wrong: a block-bodied
+  // arrow whose interior mentions the characters inside a STRING.
+  { id: "block-arrow-string", ship: true, init: '() => { return "read import.meta later" }' },
+
+  // MUST SKIP — a real meta-property, however it is spelled or wrapped.
+  { id: "meta-property", ship: false, init: "import.meta.url" },
+  { id: "nested-in-call", ship: false, init: "String(import.meta.url)" },
+  { id: "bare", ship: false, init: "import.meta" },
+  { id: "expr-arrow", ship: false, init: "() => import.meta.url" },
+  // THE FOUR THE STRUCTURAL WALK MISSED. Each is an escape hatch whose interior
+  // lives in `raw`; each shipped a classic-script-fatal bundle.
+  { id: "block-arrow", ship: false, init: "() => { return import.meta.url }" },
+  { id: "fn-expression", ship: false, init: "function () { return import.meta.url }" },
+  { id: "nested-block-arrow", ship: false, init: "[1,2].map(x => { return import.meta.url })" },
+  { id: "spaced-block-arrow", ship: false, init: "() => { return import . meta . url }" },
+];
+
+for (const vec of IMPORT_META_MATRIX) {
+  const dirName = `cg263-im-${vec.id}`;
+  describe(`CONF-CG-263 §3b — \`import.meta\` fence: ${vec.id} MUST ${vec.ship ? "SHIP" : "SKIP"}`, () => {
+    beforeEach(() => {
+      const d = setupDir(dirName);
+      writeFileSync(join(d, "models.scrml"),
+        `export const HINT2 = ${vec.init}\nexport const SHOWN = "shown-client-value"\n`);
+      writeFileSync(join(d, "index.scrml"), `<program>
+import { HINT2, SHOWN } from './models.scrml'
+${OPEN} @a = ""
+   @b = "" ${CLOSE}
+on mount {
+    @a = HINT2
+    @b = SHOWN
+}
+<p>${OPEN}@a${CLOSE} ${OPEN}@b${CLOSE}</p>
+</program>
+`);
+    });
+    afterEach(() => teardownDir(dirName));
+
+    test(`the const is ${vec.ship ? "DECLARED" : "left undeclared"}`, () => {
+      const c = compileEntry(join(TMP_ROOT, dirName, "index.scrml"));
+      expect(c.errors).toEqual([]);
+      const m = c.out("models.scrml");
+      expect({ id: vec.id, declared: declaresTopLevelBinding(m.clientJs, "HINT2") })
+        .toEqual({ id: vec.id, declared: vec.ship });
+      // The narrowness control: the ordinary sibling must reach the client either
+      // way, or a fence that skips everything passes every SKIP row.
+      expect(declaresBindingAs(m.clientJs, "SHOWN", '"shown-client-value"')).toBe(true);
+    });
+
+    test("the shipped bundles EXECUTE as classic scripts", () => {
+      const c = compileEntry(join(TMP_ROOT, dirName, "index.scrml"));
+      const ctx = vm.createContext({
+        _scrml_modules: {},
+        _scrml_reactive_set: () => {}, _scrml_reactive_get: () => undefined,
+        _scrml_cs_reactive_set: () => {}, _scrml_init_set: () => {},
+        _scrml_effect: () => ({}), _scrml_render_value: () => {},
+        _scrml_region_track: () => {}, _scrml_register_rehydrator: () => {},
+      });
+      // node's parser, not bun's: bun ACCEPTS `import.meta` in a bare script, so a
+      // bundle that is dead on arrival in a browser reads clean under `bun test`
+      // unless it is actually EXECUTED.
+      expect(() => {
+        vm.runInContext(c.out("models.scrml").clientJs, ctx, { filename: "models.client.js" });
+        vm.runInContext(c.out("index.scrml").clientJs, ctx, { filename: "index.client.js" });
+      }).not.toThrow();
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
 // §4 — SAME-FILE §14.8: the OTHER caller of the same collector.
 //
 // Every §2 vector puts the secret in a separate `models.scrml`, so every one of
