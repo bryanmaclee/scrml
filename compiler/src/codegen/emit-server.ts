@@ -327,7 +327,14 @@ export function distRelativeServerSpecifier(
 // referenced in the emitted server body. Soundness > minimality: a false
 // "used" keeps a harmless import; a false "unused" would drop a needed one,
 // so the check errs toward keeping (any standalone occurrence counts).
-function localServerImportNameUsed(body: string, name: string): boolean {
+//
+// EXPORTED (S338) as the ONE local-import liveness predicate in codegen. The tool
+// emit's own import prune (emit-tool.ts:buildImportHeader) calls this rather than
+// carrying a second copy: the first copy drifted immediately — it used `\b`, which
+// cannot match before a leading `$`, so `import { routeScore as $rs }` was judged
+// dead, the whole import was dropped, and the emitted tool shipped a green compile
+// with a runtime `ReferenceError`. One predicate, one set of boundary rules.
+export function localServerImportNameUsed(body: string, name: string): boolean {
   if (!name) return false;
   // \b is unreliable for `$`-prefixed names but scrml import locals are plain
   // identifiers; guard the boundaries manually to avoid matching `name` inside

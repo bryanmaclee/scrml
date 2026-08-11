@@ -32,7 +32,7 @@ import { bodyHasForeignOrSql, computeAsyncFnNames, emitLibraryFnMember, collectN
 import { buildCalleeImportMap } from "./scheduling.ts";
 import { emitLogicNode } from "./emit-logic.js";
 import { emitEnumVariantObjects } from "./emit-client.js";
-import { collectDbScopes, SERVER_STRUCTURAL_EQ_HELPER, generateHeadlessServerJs } from "./emit-server.ts";
+import { collectDbScopes, SERVER_STRUCTURAL_EQ_HELPER, generateHeadlessServerJs, localServerImportNameUsed } from "./emit-server.ts";
 import { getToolServeConfig, isLibraryShapedFile } from "../tool-program.ts";
 import type { ToolServeConfig } from "../tool-program.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
@@ -296,22 +296,35 @@ function isValidJsIdentifier(name: string): boolean {
  * The scrml `pinned` binding-modifier (§21.8.1) is a scrml-scope identity
  * contract, not an ES concept — it is dropped from the emitted `import`.
  */
-/** Word-boundary source-token liveness — is `name` referenced anywhere in `src`?
- * Conservative (matches the S207 import-prune granularity): a hit inside a string
- * / comment over-keeps (safe); the goal is to never DROP a referenced name. */
-function identReferencedInSrc(name: string, src: string): boolean {
-  if (!name) return false;
-  return new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(src);
-}
-
-function buildImportHeader(fileAST: ASTNode): string {
+function buildImportHeader(fileAST: ASTNode, emittedBody: string): string {
   const imports = ((fileAST.imports as unknown)
     ?? ((fileAST.ast as ASTNode | undefined)?.imports as unknown)
     ?? []) as ASTNode[];
   if (!Array.isArray(imports) || imports.length === 0) return "";
-  // g-tool-over-imports-all-lib-exports (S339-peter) — the tool's non-import body
-  // source, for tree-shaking local `.scrml` imports to the names actually used.
+  // g-tool-over-imports-all-lib-exports (S339-peter) — the reachability roots for
+  // tree-shaking local `.scrml` imports down to the names actually used.
+  //
+  // TWO roots, unioned (S338):
+  //   1. `emittedBody` — the EMITTED MODULE minus these headers. This prune decides
+  //      the fate of an emitted ES IMPORT, so the emitted module is the
+  //      authoritative place to ask "is this local referenced?" — and it is the
+  //      same root emit-server's S207 prune scans. The original of this prune read
+  //      only the scrml SOURCE text: a question about emitted JS answered by
+  //      reading a different language on the other side of lowering.
+  //   2. `bodyRefSrc` — the scrml source of the non-import top-level statements,
+  //      exactly as emit-server unions `_serveImportReachabilityExtra`.
+  //
+  // Both roots are OVER-approximations of liveness, so their union is one too:
+  // adding root 1 can only ever KEEP more imports than the shipped source-only
+  // scan did, never drop one. Soundness > minimality — a false "used" keeps a
+  // harmless import; a false "unused" emits a runtime `ReferenceError`.
+  //
+  // The prune stays GATED on `bodyRefSrc` — i.e. on the file carrying real source
+  // text — exactly as shipped. A hand-built / source-less fileAST keeps every
+  // specifier. Widening that gate would be a behavior change in the UNSAFE
+  // direction (more dropping) and is deliberately not made here.
   const bodyRefSrc = collectServeImportReachabilitySrc(fileAST);
+  const scanBody = (emittedBody ? emittedBody + "\n" : "") + bodyRefSrc;
   const lines: string[] = [];
   for (const imp of imports) {
     if (!imp || imp.kind !== "import-decl") continue;
@@ -342,11 +355,12 @@ function buildImportHeader(fileAST: ASTNode): string {
     // inlines NO components, so that augmentation is inapplicable — yet the extra
     // specifiers are emitted verbatim (the tool target has no bundler tree-shake),
     // so the tool over-imports the whole lib. Tree-shake a local-lib import to the
-    // names the tool BODY references (the same conservative source-token liveness
-    // the S207 prune uses). Non-`.scrml` (stdlib / vendor / bare) imports are left
-    // alone. Fail-safe: no body source → keep every specifier (no regression).
+    // names the tool BODY references, using the SAME predicate as the S207 prune
+    // (`localServerImportNameUsed`, imported from emit-server) — not a second copy
+    // of it. Non-`.scrml` (stdlib / vendor / bare) imports are left alone.
+    // Fail-safe: no source-text root → keep every specifier (no regression).
     if (source.endsWith(".scrml") && bodyRefSrc) {
-      specs = specs.filter((sp) => identReferencedInSrc(sp.local || sp.imported, bodyRefSrc));
+      specs = specs.filter((sp) => localServerImportNameUsed(scanBody, sp.local || sp.imported));
       if (specs.length === 0) continue; // every bound name is dead → drop the whole (dead) import
     }
     const named = specs
@@ -586,7 +600,15 @@ export function generateToolJs(
 
   // Module headers (§21.3 imports · §44.2 Bun.SQL handle · inlined runtime
   // helpers) — shared with generateToolLibraryJs; must LEAD the module.
-  const header = assembleModuleHeaders(fileAST, filePath, body, errors);
+  //
+  // The import prune inside `assembleModuleHeaders` scans this module for import
+  // liveness, so hand it the WHOLE module-minus-headers — body AND the §64.3 main
+  // harness. The harness is compiler-generated and references only `main` /
+  // `_scrml_exit_code` today, so including it changes no decision now; it is
+  // passed so the scan root stays "everything the headers precede" by
+  // construction, rather than by a standing assumption about harness content.
+  const emittedModuleBody = body + "\n" + harness.join("\n");
+  const header = assembleModuleHeaders(fileAST, filePath, body, errors, emittedModuleBody);
   return header + body + "\n" + harness.join("\n") + "\n";
 }
 
@@ -861,10 +883,19 @@ function buildServeExtraHelperHeader(
  * (from the file's OWN `<db src>` / `<program db=>`), and the inlined runtime
  * helpers the body references — in module-LEADING order (ES imports hoist).
  */
-function assembleModuleHeaders(fileAST: ASTNode, filePath: string, body: string, errors?: unknown[]): string {
+function assembleModuleHeaders(
+  fileAST: ASTNode,
+  filePath: string,
+  body: string,
+  errors?: unknown[],
+  /** The whole emitted module MINUS these headers — `body` plus anything appended
+   *  after it (the §64.3 main harness). Defaults to `body` for the library path,
+   *  which appends nothing. Used ONLY as the import-prune liveness scan root. */
+  emittedModuleBody?: string,
+): string {
   const runtimeHeader = buildRuntimeHelperHeader(body, filePath, errors);
   const dbHeader = buildDbHandleHeader(fileAST, body);
-  const importHeader = buildImportHeader(fileAST);
+  const importHeader = buildImportHeader(fileAST, emittedModuleBody ?? body);
   return (
     (importHeader ? importHeader + "\n" : "") +
     (dbHeader ? dbHeader + "\n" : "") +
