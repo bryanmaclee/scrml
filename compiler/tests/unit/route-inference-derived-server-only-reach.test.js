@@ -834,3 +834,351 @@ describe(`${CODE} §10 — structural walk: termination, identity, skip-list`, (
     expect(out.map((n) => n.name)).toEqual(["h"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §11 — TRANSITIVE reach through local function hops (S338).
+//
+// §1-§10 pin the DIRECT limb: the derived RHS names the imported server-only
+// binding itself. That limb refused, and the identical reach ONE HOP AWAY through
+// a local function compiled at exit 0 with no diagnostic at all — because Step 4
+// is direct-only ("Calling a server function is NOT a trigger"), so
+// `resolvedServerFnIds` holds only the function that TOUCHES the server-only work,
+// while codegen colours the whole caller chain `async` on its way up.
+//
+// THE FAILURE IS NOT THE DIRECT LIMB'S FAILURE. Confidentiality is INTACT here:
+// the server-only implementation stays server-side and the call lowers to a fetch
+// stub. But `_scrml_derived_get` invokes the recompute thunk with no `await`
+// (§6.6.4), so the PROMISE becomes the cell's value and is what gets rendered.
+// Measured on `main` before this landed, all at exit 0 with an empty diagnostic set:
+//
+//   `_scrml_cs_derived_declare("h", () => _scrml_fetch_doHash_3(…))`   // 1 hop
+//   `_scrml_levelA_5` / `_scrml_levelB_4` both emitted `async`          // 3 hops
+//   a `ping`/`pong` mutual-recursion cycle
+//   `const c = _scrml_fetch_countRows_3();`                            // ?{} route,
+//       a SECOND emission shape — W-DERIVED-001 lowers it to a bare `const`, no
+//       `derived_declare` at all. Hence the check keys on the AST decl, never on
+//       the emission shape.
+//
+// EVERY TEST HERE THAT ASSERTS A REFUSAL HAS A BITE PROOF IN §11d: the same shape
+// with the server reach removed must compile clean. A refusal test that would pass
+// against a check that refuses everything proves nothing.
+// ---------------------------------------------------------------------------
+
+/** A `<program>` with local `fnSrc` declarations and a derived cell over `rhs`. */
+function programWithFns(fnSrc, rhs, imports = "import { hashPassword } from 'scrml:auth'") {
+  return `<program>
+\${ ${imports} }
+
+<pw> = "secret"
+
+\${ ${fnSrc} }
+
+const <computed> = ${rhs}
+
+<div>\${@computed}</div>
+
+</program>`;
+}
+
+describe(`${CODE} §11a — a hop through a local function fires`, () => {
+  test("ONE hop: the RHS calls a fn that reaches the server-only import", () => {
+    const { out } = runRIOn(programWithFns(
+      "function doHash(p) { return hashPassword(p) }",
+      "doHash(@pw)",
+    ));
+    const hits = errorsWithCode(out, CODE);
+    expect(hits.length).toBe(1);
+    expect(hits[0].severity).toBe("error");
+  });
+
+  test("THREE hops: levelA -> levelB -> levelC -> hashPassword", () => {
+    const { out } = runRIOn(programWithFns(
+      `function levelC(p) { return hashPassword(p) }
+function levelB(p) { return levelC(p) }
+function levelA(p) { return levelB(p) }`,
+      "levelA(@pw)",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+
+  test("a `?{}` SQL helper fires — the trigger need not be an import", () => {
+    // The DIRECT limb keys on the escalation-server-only IMPORT map, so this
+    // program has no import at all. It fires only if the transitive limb reads
+    // route inference's placement result rather than the import map.
+    const source = `<program db="./app.db">
+<schema>
+table users {
+  id: integer primary key
+}
+</schema>
+
+\${ function countRows() {
+    const rows = ?{ SELECT id FROM users }
+    return rows.length
+} }
+
+const <computed> = countRows()
+
+<div>\${@computed}</div>
+
+</program>`;
+    expect(errorsWithCode(runRIOn(source).out, CODE).length).toBe(1);
+  });
+
+  test("a hop reached from a LAMBDA inside the RHS fires (reach is any depth)", () => {
+    const { out } = runRIOn(programWithFns(
+      "function doHash(p) { return hashPassword(p) }",
+      "[@pw].map((s) => doHash(s))",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+
+  test("a BARE REFERENCE to the hop fn fires, not just a call (§6.6.19 reach rule)", () => {
+    const { out } = runRIOn(programWithFns(
+      "function doHash(p) { return hashPassword(p) }",
+      "[@pw].map(doHash)",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+});
+
+describe(`${CODE} §11b — transitivity terminates`, () => {
+  test("a mutual-recursion CYCLE reaching the server fires and does not hang", () => {
+    const { out } = runRIOn(programWithFns(
+      `function ping(p) { return pong(p) }
+function pong(p) { return ping(hashPassword(p)) }`,
+      "ping(@pw)",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+
+  test("a self-recursive fn reaching the server fires and does not hang", () => {
+    const { out } = runRIOn(programWithFns(
+      "function grind(p, k) { return grind(hashPassword(p), k) }",
+      "grind(@pw, 1)",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+});
+
+describe(`${CODE} §11c — the message names the HOP CHAIN, not just the endpoint`, () => {
+  const { out } = runRIOn(programWithFns(
+    `function levelC(p) { return hashPassword(p) }
+function levelB(p) { return levelC(p) }
+function levelA(p) { return levelB(p) }`,
+    "levelA(@pw)",
+  ));
+  const msg = errorsWithCode(out, CODE)[0]?.message ?? "";
+
+  test("the full chain appears, cell first", () => {
+    expect(msg).toContain("const <computed> -> levelA -> levelB -> levelC");
+  });
+
+  test("it names WHY the terminus is server-side", () => {
+    expect(msg).toContain("`levelC` is on the server because");
+    expect(msg).toContain("scrml:auth");
+  });
+
+  test("it does NOT repeat the direct limb's fix, which the author already applied", () => {
+    // "move the call into a `function`" is the DIRECT limb's resolution. Telling
+    // an author who has already done exactly that to do it again names no root
+    // cause -- a diagnostic that does not name root cause is a diagnostic bug.
+    expect(msg).not.toContain("move the call into a `function`");
+    expect(msg).toContain("do not read this value through a derived cell");
+  });
+
+  test("it is honest that this is a CORRECTNESS refusal, not a leak", () => {
+    expect(msg).toContain("CORRECTNESS refusal, not a confidentiality one");
+  });
+
+  test("no internal placement token reaches the author", () => {
+    // Steps 5b/5c record propagated placements as synthetic reasons carrying
+    // `caller-context-propagation` / `closure-capture:<name>` in `resourceType`,
+    // which `describeServerTrigger` would render verbatim into the message.
+    expect(msg).not.toContain("caller-context-propagation");
+    expect(msg).not.toContain("closure-capture:");
+  });
+
+  test("a caller-context-PROMOTED terminus is explained in English", () => {
+    // `label` has no server work of its own; Step 5c places it server-side
+    // because its only function-caller is server. Measured on `main`: this
+    // program emitted an HTTP round trip for `return "v:" + s`, at exit 0.
+    const source = `<program>
+\${ import { hashPassword } from 'scrml:auth' }
+
+<pw> = "secret"
+
+\${ function label(s) { return "v:" + s }
+function store(p) { return label(hashPassword(p)) } }
+
+const <computed> = label(@pw)
+
+<div onclick={ store(@pw) }>\${@computed}</div>
+
+</program>`;
+    const m = errorsWithCode(runRIOn(source).out, CODE)[0]?.message ?? "";
+    expect(m).toContain("every function that calls it is server-side");
+    expect(m).not.toContain("caller-context-propagation");
+  });
+});
+
+describe(`${CODE} §11d — BITE PROOFS: the same shapes with the reach removed`, () => {
+  // Each of these is the §11a/§11b fixture with ONLY the server reach taken out.
+  // If any of them fires, the check is refusing on the SHAPE (a derived cell that
+  // calls a local function) rather than on the REACH, and every refusal above is
+  // worthless as evidence.
+
+  test("ONE hop, purely-client fn: clean", () => {
+    const { out } = runRIOn(programWithFns(
+      "function shout(s) { return s.toUpperCase() }",
+      "shout(@pw)",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(0);
+  });
+
+  test("THREE hops, all purely-client: clean", () => {
+    const { out } = runRIOn(programWithFns(
+      `function levelC(p) { return p.trim() }
+function levelB(p) { return levelC(p) }
+function levelA(p) { return levelB(p) }`,
+      "levelA(@pw)",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(0);
+  });
+
+  test("a purely-client mutual-recursion CYCLE: clean, and terminates", () => {
+    const { out } = runRIOn(programWithFns(
+      `function alpha(s) { return beta(s) }
+function beta(s) { return alpha(s.trim()) }`,
+      "alpha(@pw)",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(0);
+  });
+
+  test("a lambda over a purely-client fn: clean", () => {
+    const { out } = runRIOn(programWithFns(
+      "function shout(s) { return s.toUpperCase() }",
+      "[@pw].map((s) => shout(s))",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(0);
+  });
+
+  test("a bare reference to a purely-client fn: clean", () => {
+    const { out } = runRIOn(programWithFns(
+      "function shout(s) { return s.toUpperCase() }",
+      "[@pw].map(shout)",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(0);
+  });
+
+  test("the server-reaching fn EXISTS but the derived RHS does not reach it: clean", () => {
+    // The strongest bite proof: the file has an escalated fn AND a derived cell.
+    // Only the absence of an edge between them keeps this clean.
+    const { out } = runRIOn(programWithFns(
+      `function doHash(p) { return hashPassword(p) }
+function shout(s) { return s.toUpperCase() }`,
+      "shout(@pw)",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(0);
+  });
+
+  test("an RHS-local `const` shadowing a server-reaching fn: clean", () => {
+    // The shadow rule is the direct limb's (`collectDerivedRhsLocalNames`),
+    // inherited wholesale by reusing its scanner rather than restated.
+    const source = `<program>
+\${
+    type Phase:enum = { Idle, Busy }
+    import { hashPassword } from 'scrml:auth'
+    <phase>: Phase = .Idle
+}
+<pw> = "secret"
+
+\${ function doHash(p) { return hashPassword(p) } }
+
+const <computed> = match @phase { .Idle :> { const doHash = (x) => x; doHash("local") } .Busy :> "busy" }
+
+<div>\${@computed}</div>
+</program>`;
+    expect(errorsWithCode(runRIOn(source).out, CODE).length).toBe(0);
+  });
+});
+
+describe(`${CODE} §11f — the transitive limb INHERITS the direct limb's scope rules`, () => {
+  // Not restated in the transitive limb — inherited, because both limbs call the
+  // same `collectDerivedRhsServerOnlyRefs` / `scanForServerOnlyBindingRefs` pair
+  // with different name sets. These pin the inheritance: if someone hand-rolls a
+  // second scanner for the transitive limb, these are what catch the drift.
+
+  test("a LAMBDA-PARAM shadow FIRES, exactly as it does for the direct limb (§7)", () => {
+    // Deliberate and documented: `collectDerivedRhsLocalNames` stops at a nested
+    // lambda, because a too-WIDE shadow set is a MISS and a too-narrow one is a
+    // loud, fixable over-fire. §7 pins this for the direct limb; it must hold
+    // identically here or the two limbs have drifted apart.
+    const { out } = runRIOn(programWithFns(
+      "function doHash(p) { return hashPassword(p) }",
+      "((doHash) => doHash(@pw))((s) => s)",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+
+  test("a name only inside a STRING LITERAL is not a reference: clean", () => {
+    const { out } = runRIOn(programWithFns(
+      "function doHash(p) { return hashPassword(p) }",
+      '"call doHash on the server"',
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(0);
+  });
+
+  test("a mutable cell initialiser is still NOT in scope (§5 scope pin holds)", () => {
+    // Deleting `const` must not silence the transitive limb any more than it
+    // silences the direct one -- but the position genuinely is undiagnosed, and
+    // this pins that it stayed that way rather than being widened by accident.
+    const source = `<program>
+\${ import { hashPassword } from 'scrml:auth' }
+
+<pw> = "secret"
+
+\${ function doHash(p) { return hashPassword(p) } }
+
+<computed> = doHash(@pw)
+
+<div>\${@computed}</div>
+</program>`;
+    expect(errorsWithCode(runRIOn(source).out, CODE).length).toBe(0);
+  });
+});
+
+describe(`${CODE} §11e — the DIRECT limb is unchanged by the transitive one`, () => {
+  test("a direct reach still emits exactly ONE diagnostic, not two", () => {
+    // The RHS names `hashPassword` directly AND the file has a server-reaching
+    // hop fn in scope. Two limbs must not both fire on one cell.
+    const { out } = runRIOn(programWithFns(
+      "function doHash(p) { return hashPassword(p) }",
+      "hashPassword(@pw)",
+    ));
+    expect(errorsWithCode(out, CODE).length).toBe(1);
+  });
+
+  test("and it is the DIRECT message — the leak wording, not the Promise wording", () => {
+    const { out } = runRIOn(programWithFns(
+      "function doHash(p) { return hashPassword(p) }",
+      "hashPassword(@pw)",
+    ));
+    const msg = errorsWithCode(out, CODE)[0].message;
+    expect(msg).toContain("move the call into a `function`");
+    expect(msg).toContain("Do NOT just delete `const`");
+  });
+
+  test("§64 `kind=\"tool\"` still carves out BOTH limbs", () => {
+    const source = `<program kind="tool">
+\${ import { hashPassword } from 'scrml:auth' }
+
+\${ function doHash(p) { return hashPassword(p) }
+function main(argv) { println(doHash("x")) } }
+
+const <computed> = doHash("seed")
+
+</program>`;
+    expect(errorsWithCode(runRIOn(source).out, CODE).length).toBe(0);
+  });
+});
