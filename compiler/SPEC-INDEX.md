@@ -7,7 +7,7 @@
 > **Full amendment history → [`scrml-support/archive/spec-index-changelog.md`](../../scrml-support/archive/spec-index-changelog.md)** (S58 → S273, newest-first). That narrative was carried INLINE in this preamble until **S290 (2026-07-27)**, where it measured **72,053 of this file's 158,373 characters — 45%** of a file that is a mandatory full-read at every Profile-A PA boot, none of it current truth. Dereffed per the scope principle (current-truth-only in `scrml`; stale → `scrml-support`). Line-number references inside it are as-of-their-own-landing and are NOT current.
 
 <!-- @generated:spec-index-totals START (do not edit — `bun run scripts/regen-spec-index.ts`) -->
-Total lines: 37,150 | Total sections: 65 + appendices
+Total lines: 37,152 | Total sections: 65 + appendices
 <!-- @generated:spec-index-totals END -->
 
 > **Note on §49 heading format:** SPEC.md §49 uses a single `#` (H1) at line 19410 (`# §49. ...`) instead of the `## N.` pattern every other section uses. The in-tree `bun run scripts/regen-spec-index.ts` regenerator handles this case explicitly via a `^# §<N>\.` regex branch; the legacy `bash scripts/update-spec-index.sh` print-only helper does NOT pick it up.
