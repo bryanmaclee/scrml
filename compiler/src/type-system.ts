@@ -25852,6 +25852,48 @@ function inferEnumFromVariantLifecycleAnnotation(
 }
 
 /**
+ * The presence-progression absence literal test, in ONE place.
+ *
+ * A `(not to T)` lifecycle's PRE-type is `not` (§14.12.6.1). A written value
+ * whose source text is the canonical absence literal `not` (§42) is the pre-type
+ * by inspection — no type resolution is needed and none is available for the
+ * literal.
+ *
+ * Extracted S337: this exact comparison was written out THREE times — the
+ * re-assignment classifier (`classifyWriteAgainstSpec`), the reset-value
+ * classifier (`classifyResetValueAgainstSpec`), and the declaration-initialiser
+ * classifier (`isInitOfPostType`) — which is the drift shape this file keeps
+ * hitting. The three callers still answer DIFFERENT questions with DIFFERENT
+ * information (see each one's doc comment); only the leaf literal test is shared.
+ *
+ * NOTE what this deliberately does NOT decide: it answers only "is the written
+ * value the absence literal?", never "is the written value `T`-shaped?". The
+ * latter is a TYPE question and the caller that has type information must answer
+ * it itself — see `classifyWriteAgainstSpec`.
+ */
+function writeTextIsAbsenceLiteral(trimmedText: string): boolean {
+  return trimmedText === "not";
+}
+
+/**
+ * S337 — the RHS-is-a-bare-binding-reference test.
+ *
+ * Returns the referenced binding NAME when the whole written expression is a
+ * single identifier, with or without the V5-strict `@` cell sigil (`@v`, `v`),
+ * and `null` for every other shape. Deliberately exact-match on the WHOLE
+ * trimmed text: `@v . name`, `loadIt ( )`, `a + b` all return null, because for
+ * those the compiler has no lifecycle-level type judgment to make and the
+ * pre-existing classification stands unchanged.
+ *
+ * (The parser normalises `@v.name` to `@v . name` and `loadIt()` to `loadIt ( )`
+ * in state-decl init text, so neither can be mistaken for a bare reference.)
+ */
+function bareBindingReferenceOf(trimmedText: string): string | null {
+  const m = /^@?([A-Za-z_$][A-Za-z0-9_$]*)$/.exec(trimmedText);
+  return m ? m[1] : null;
+}
+
+/**
  * Walk a statement body and fire lifecycle diagnostics on bindings whose RHS
  * is a call to a fn with a lifecycle-annotated return type.
  *
@@ -26024,22 +26066,76 @@ function checkLifecycleBindingAccess(
    * walker leaves the existing state unchanged).
    *
    * Presence-progression `(not to T)`:
-   *   - init text "not" → "pre" (revert / explicit absence)
-   *   - init text anything else → "post" (transition)
+   *   - written text `not` → "pre" (revert / explicit absence)
+   *   - written value is a binding the DECLARED TYPE proves is not yet `T`
+   *     → "pre" (see below)
+   *   - anything else → "post" (transition)
    *
    * Variant-progression `(.A to .B)`:
    *   - init text matches post-variant (bare `.B` or qualified `Foo.B`) → "post"
    *   - init text matches pre-variant → "pre"
    *   - otherwise: null (unclassifiable; leave state alone)
+   *
+   * ---
+   * **S337 — consult the DECLARED TYPE, not only the source text.**
+   *
+   * SPEC §14.12.3 is explicit about when the transition fires: *"For Shape 1
+   * reactive cells, transition fires on `@cell = value` where the cell's initial
+   * value is A-shaped and **the written value is B-shaped**"*, and §14.12.3's
+   * S160 paragraph repeats it as *"a `T`-shaped assignment"*. The pre-S337 rule
+   * was `t === "not" ? "pre" : "post"` — a comparison of the RHS's SOURCE TEXT
+   * against one literal, which never consulted a type at all. Any RHS whose text
+   * was not spelled `not` therefore fired the transition.
+   *
+   * That is unsound in the one case the compiler can already PROVE: when the
+   * written value is a bare reference to another lifecycle-tracked binding whose
+   * OWN declared type is a presence lifecycle `(not to X)`. Such a binding denotes
+   * `X` only where it has itself been discriminated (§14.12.6.1 — discrimination
+   * IS transition); everywhere else it still denotes `not`. Assigning it therefore
+   * cannot establish the post-shape, and the destination cell must stay `pre`.
+   *
+   * Measured pre-fix (both compiled clean, both then read a `not`):
+   *   `<v>: (not to User) = not` ; `@u = @v`  ; `@u.name`
+   *   `<u>: (not to User) = not` ; `@u = @u`  ; `@u.name`
+   *
+   * **Deliberately NOT decided here** — this stays a strict subset of "the written
+   * value is B-shaped", not a general assignment type check:
+   *   - A wrong-typed RHS (`@u = 42` on a `(not to User)` cell) still classifies
+   *     "post". scrml has no reactive-cell assignment type check at any locus
+   *     today, and E-TYPE-001 ("accessed before its lifecycle transition") would
+   *     misname that root cause. Separate gap, separate diagnostic.
+   *   - An IN-FLIGHT RHS (`@u = loadUser()` where the callee suspends) still
+   *     classifies "post". The callee's declared return type IS the post-type;
+   *     only the async rung makes the write premature, and that rung
+   *     (`not → pending → T`) is ratified-in-direction but DEFERRED to its own
+   *     arc. No `pending` state is introduced here.
+   *
+   * @param localStates the walker's live per-scope transition states, so a RHS
+   *   binding that HAS been discriminated at this point (`given @v => { @u = @v }`)
+   *   is still read as post-shape. Absent → every RHS binding reads as `pre`.
    */
   function classifyWriteAgainstSpec(
     initText: string,
     spec: FnReturnLifecycleSpec,
+    localStates?: Map<string, "pre" | "post">,
   ): "pre" | "post" | null {
     const t = initText.trim();
     if (!t) return null;
     if (spec.kind === "presence") {
-      return t === "not" ? "pre" : "post";
+      if (writeTextIsAbsenceLiteral(t)) return "pre";
+      const rhsName = bareBindingReferenceOf(t);
+      if (rhsName) {
+        const rhsSpec = bindings.get(rhsName);
+        // Only a PRESENCE-lifecycle RHS is decidable here: its pre-type is `not`,
+        // so "not yet transitioned" and "still absent" are the same fact. A
+        // variant-progression RHS, or a name this walker does not track at all,
+        // carries no such proof — leave those on the pre-S337 answer.
+        if (rhsSpec && rhsSpec.kind === "presence") {
+          const rhsState = localStates?.get(rhsName) ?? "pre";
+          if (rhsState !== "post") return "pre";
+        }
+      }
+      return "post";
     }
     // Variant-progression. Match `.<VariantName>` or `<EnumName>.<VariantName>`.
     const postName = spec.postVariantName;
@@ -26327,7 +26423,10 @@ function checkLifecycleBindingAccess(
         }
         if (spec && !isStructuralDecl) {
           if (stateDeclInitText) {
-            const newState = classifyWriteAgainstSpec(stateDeclInitText, spec);
+            // S337 — `localStates` is threaded so the classifier can consult the
+            // DECLARED TYPE of a bare-reference RHS *and* whether that RHS has
+            // itself been discriminated at this point in the scope.
+            const newState = classifyWriteAgainstSpec(stateDeclInitText, spec, localStates);
             if (newState) localStates.set(cellName, newState);
           }
         }
@@ -26955,9 +27054,21 @@ function readDefaultExprText(node: ASTNodeLike): string {
  *   - value matches pre-variant name → "pre"
  *   - otherwise: null (unclassifiable; let the walker leave state alone)
  *
- * Mirrors the `classifyWriteAgainstSpec` shape inside checkLifecycleBindingAccess
- * (line ~14385); kept at module scope so buildCellValueLifecycleMap can call
- * it without closure dependency.
+ * Shares only the leaf absence-literal test with `classifyWriteAgainstSpec`
+ * inside `checkLifecycleBindingAccess` (via `writeTextIsAbsenceLiteral`); kept at
+ * module scope so buildCellValueLifecycleMap can call it without closure
+ * dependency.
+ *
+ * **S337 — why this does NOT get `classifyWriteAgainstSpec`'s declared-type
+ * consult.** The two look like duplicates and are not. This one runs at
+ * MAP-BUILD time, once per cell, over a `default=` attribute expression — before
+ * any walk, with no scope, no statement order and no per-binding transition
+ * state. `classifyWriteAgainstSpec`'s refinement asks whether a bare-reference
+ * RHS has been discriminated AT THE WRITE POINT, which is a flow fact this
+ * function provably cannot have. Answering it statically here would assert
+ * something stronger than the information available. The residual — a reset
+ * whose `default=` expression names another `(not to T)` cell — is unclosed and
+ * filed, not silently approximated.
  */
 function classifyResetValueAgainstSpec(
   valueText: string,
@@ -26966,7 +27077,7 @@ function classifyResetValueAgainstSpec(
   const t = valueText.trim();
   if (!t) return null;
   if (spec.kind === "presence") {
-    return t === "not" ? "pre" : "post";
+    return writeTextIsAbsenceLiteral(t) ? "pre" : "post";
   }
   // Variant-progression. Match `.<VariantName>` or `<EnumName>.<VariantName>`.
   function esc(s: string): string {
@@ -27016,6 +27127,14 @@ function readNodeInitText(node: ASTNodeLike): string {
  *         init form will surface a type error upstream)
  *
  * Returns `true` when the heuristic classifies the init as post-type.
+ *
+ * **S337 — the third sibling of the same text comparison, and it does NOT get
+ * the declared-type consult either.** Like `classifyResetValueAgainstSpec` this
+ * runs at MAP-BUILD time, from `buildCellValueLifecycleMap`'s single source-order
+ * pass, so a cell whose initialiser names another `(not to T)` cell
+ * (`<u>: (not to User) = @v`) cannot be decided here without depending on
+ * declaration order. Only the leaf absence-literal test is shared. Residual
+ * filed, not approximated.
  */
 function isInitOfPostType(
   initText: string,
@@ -27024,7 +27143,7 @@ function isInitOfPostType(
   const t = initText.trim();
   if (!t) return false;
   if (spec.kind === "presence") {
-    return t !== "not";
+    return !writeTextIsAbsenceLiteral(t);
   }
   // Variant-progression. Match `.<VariantName>` or `<EnumName>.<VariantName>`.
   const postName = spec.postVariantName;
