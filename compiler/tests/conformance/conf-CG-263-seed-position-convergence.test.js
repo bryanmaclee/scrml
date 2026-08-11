@@ -101,6 +101,97 @@ function compileEntry(entry) {
 }
 
 // ---------------------------------------------------------------------------
+// ASSERTION HELPERS — anchored, line-scoped, and kind-agnostic.
+//
+// Every one of these replaces an assertion that could be satisfied by something
+// other than what it claimed to measure. That matters more here than usual: this
+// file's job is to prove a §14.8 leak is absent, and a defeatable no-leak
+// assertion reads exactly like a real one.
+//
+//   /const SHOWN = "shown-client-value";/        a COMMENT mentioning the line
+//                                                satisfies it (unanchored).
+//   /_scrml_modules\[…\] = \{[^}]*NEEDED: NEEDED/ `NEEDEDNEEDED: NEEDEDNEEDED`
+//                                                satisfies it (substring).
+//   /\bconst SECRET\b/                           misses an `export let` leak,
+//                                                which emits `let SECRET`.
+//   toContain(clientRef)                         matches inside a comment.
+// ---------------------------------------------------------------------------
+
+/**
+ * Does `js` declare `name` at MODULE TOP LEVEL — column zero, no indent?
+ *
+ * THAT IS WHERE THE #263 GATE EMITS, and the distinction is what makes this
+ * usable as a no-leak assertion. A legitimate client-scope SHADOW of the same
+ * name is always INDENTED — `<each … as SECRET>` emits
+ * `    let SECRET = _scrml_resolve_item(…)` inside the per-item renderer and
+ * `fn compute() { let SECRET = 1 }` emits `  let SECRET = 1;` inside the
+ * function — so an indent-tolerant check fails on correct output. (Measured:
+ * loosening it flagged both shadow vectors as leaks.)
+ *
+ * `const`/`let`/`var` all count: an `export let` candidate is emitted as
+ * `let SECRET = …`, so a `const`-only check cannot see that leak at all.
+ */
+function declaresTopLevelBinding(js, name) {
+  return new RegExp(`^(?:export\\s+)?(?:const|let|var)\\s+${name}\\s*=`, "m").test(js ?? "");
+}
+
+/** Does `js` declare `name` with EXACTLY this initializer text, on its own line? */
+function declaresBindingAs(js, name, initSource) {
+  const esc = initSource.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^[ \\t]*(?:const|let|var)\\s+${name}\\s*=\\s*${esc};`, "m").test(js ?? "");
+}
+
+/**
+ * Does the `_scrml_modules` footer really export `name`? Parsed by SPLITTING the
+ * object literal, so `NEEDEDNEEDED: NEEDEDNEEDED` cannot satisfy a query for
+ * `NEEDED`.
+ */
+function registersExport(js, name) {
+  const m = (js ?? "").match(/_scrml_modules\[[^\]]*\]\s*=\s*\{([^}]*)\}/);
+  if (!m) return false;
+  return m[1].split(",").map((s) => s.trim()).some((p) => p === `${name}: ${name}` || p === name);
+}
+
+/** Every line of `js` that is not blank and not a `//` comment. */
+function codeLines(js) {
+  return (js ?? "").split("\n").filter((l) => l.trim() && !l.trim().startsWith("//"));
+}
+
+/** Does NON-COMMENT code in `js` contain `needle`? */
+function codeContains(js, needle) {
+  return codeLines(js).some((l) => l.includes(needle));
+}
+
+/**
+ * A vm context that stubs the `_scrml_*` RUNTIME and nothing else.
+ *
+ * The stubs are derived FROM THE BUNDLES — every `_scrml_`-prefixed identifier
+ * they mention gets a no-op — so the harness never needs updating when codegen
+ * reaches for another runtime helper. Deliberately narrow: a USER binding is NOT
+ * stubbed, so a const the gate failed to emit still surfaces as the real
+ * `ReferenceError` an adopter would see.
+ */
+function runtimeStubs(sources) {
+  const ctx = { _scrml_modules: {} };
+  for (const src of sources) {
+    for (const m of (src ?? "").matchAll(/\b_scrml_[A-Za-z0-9_]+\b/g)) {
+      if (m[0] === "_scrml_modules" || m[0] in ctx) continue;
+      ctx[m[0]] = function () { return undefined; };
+    }
+  }
+  ctx._scrml_effect = () => ({});
+  ctx._scrml_reactive_get = () => undefined;
+  return ctx;
+}
+
+/** Is `name` named as an identifier by non-comment code, ignoring declarations? */
+function codeReferencesBinding(js, name) {
+  const re = new RegExp(`(?:^|[^\\w$."'])${name}(?![\\w$])`);
+  const declRe = new RegExp(`^[ \\t]*(?:export\\s+)?(?:const|let|var)\\s+${name}\\s*=`);
+  return codeLines(js).some((l) => !declRe.test(l) && re.test(l));
+}
+
+// ---------------------------------------------------------------------------
 // §1 — the six positions.
 // ---------------------------------------------------------------------------
 
@@ -246,7 +337,10 @@ for (const pos of POSITIONS) {
       expect(c.errors).toEqual([]);
       const idx = c.out("index.scrml");
       expect(idx).not.toBeNull();
-      expect(idx.clientJs).toContain(pos.clientRef);
+      // CODE lines only — a `toContain` over the whole bundle is satisfied by a
+      // comment, and every emitted binding carries a `// …` echo of its source.
+      expect({ ref: pos.clientRef, inCode: codeContains(idx.clientJs, pos.clientRef) })
+        .toEqual({ ref: pos.clientRef, inCode: true });
     });
 
     test("models.client.js DECLARES the const and REGISTERS it in the _scrml_modules footer", () => {
@@ -255,8 +349,10 @@ for (const pos of POSITIONS) {
       const m = c.out("models.scrml");
       expect(m).not.toBeNull();
       // Pre-convergence: neither of these matched — the const was dropped entirely.
-      expect(m.clientJs).toMatch(/^\s*const NEEDED = "needle-value-263";/m);
-      expect(m.clientJs).toMatch(/_scrml_modules\["models\.client\.js"\] = \{[^}]*NEEDED: NEEDED[^}]*\}/);
+      expect(declaresBindingAs(m.clientJs, "NEEDED", '"needle-value-263"')).toBe(true);
+      // Parsed out of the footer object, not substring-matched: the old regex was
+      // satisfied by `NEEDEDNEEDED: NEEDEDNEEDED`.
+      expect(registersExport(m.clientJs, "NEEDED")).toBe(true);
       // A raw import/export would throw here — the bundle ships as a CLASSIC script.
       expect(() => new vm.Script(m.clientJs)).not.toThrow();
     });
@@ -416,8 +512,8 @@ for (const vec of LEAK_VECTORS) {
       expect(clients.length).toBeGreaterThan(0);
       for (const [fp, js] of clients) {
         expect({ file: fp, leaked: /LEAK-CANARY-263|\["LEAK"/.test(js) }).toEqual({ file: fp, leaked: false });
-        expect({ file: fp, decl: /\bconst SECRET\b/.test(js) }).toEqual({ file: fp, decl: false });
-        expect({ file: fp, registered: /\bSECRET:/.test(js) }).toEqual({ file: fp, registered: false });
+        expect({ file: fp, decl: declaresTopLevelBinding(js, "SECRET") }).toEqual({ file: fp, decl: false });
+        expect({ file: fp, registered: registersExport(js, "SECRET") }).toEqual({ file: fp, registered: false });
       }
       // The value IS legitimately present server-side.
       expect(c.out("models.scrml").serverJs ?? "").toMatch(/LEAK-CANARY-263|\["LEAK"/);
@@ -426,7 +522,7 @@ for (const vec of LEAK_VECTORS) {
     test("the client-read SIBLING still reaches the client (no over-prune)", () => {
       const c = compileEntry(join(dir, "index.scrml"));
       const m = c.out("models.scrml");
-      expect(m.clientJs).toMatch(/^\s*const SHOWN = "shown-client-value";/m);
+      expect(declaresBindingAs(m.clientJs, "SHOWN", '"shown-client-value"')).toBe(true);
     });
 
     test("EXECUTING the shipped models.client.js exposes SHOWN and NOT SECRET", () => {
@@ -496,8 +592,8 @@ on mount {
   test("the fail-closed skip is NARROW — the ordinary sibling const still reaches the client", () => {
     const c = compileEntry(join(dir, "index.scrml"));
     const m = c.out("models.scrml");
-    expect(m.clientJs).toMatch(/^\s*const SHOWN = "shown-client-value";/m);
-    expect(m.clientJs).toMatch(/_scrml_modules\["models\.client\.js"\] = \{[^}]*SHOWN: SHOWN[^}]*\}/);
+    expect(declaresBindingAs(m.clientJs, "SHOWN", '"shown-client-value"')).toBe(true);
+    expect(registersExport(m.clientJs, "SHOWN")).toBe(true);
   });
 
   test("the shipped bundles EXECUTE as classic scripts, deps-first, in one shared scope", () => {
@@ -632,7 +728,7 @@ for (const vec of SAMEFILE_VECTORS) {
       for (const [fp, js] of clients) {
         expect({ file: fp, leaked: /LEAK-CANARY-SAMEFILE|\["LEAK"/.test(js) })
           .toEqual({ file: fp, leaked: false });
-        expect({ file: fp, decl: /\bconst SECRET\b/.test(js) })
+        expect({ file: fp, decl: declaresTopLevelBinding(js, "SECRET") })
           .toEqual({ file: fp, decl: false });
       }
       // The value IS legitimately present server-side.
@@ -661,7 +757,7 @@ on mount { @a = SHOWN }
   test("a genuinely client-read same-file export const IS emitted", () => {
     const c = compileEntry(join(dir, "index.scrml"));
     expect(c.errors).toEqual([]);
-    expect(c.out("index.scrml").clientJs).toMatch(/^\s*const SHOWN = "shown-client-value";/m);
+    expect(declaresBindingAs(c.out("index.scrml").clientJs, "SHOWN", '"shown-client-value"')).toBe(true);
   });
 });
 
@@ -696,8 +792,8 @@ on mount { @a = NEEDED }
     const c = compileEntry(join(dir, "index.scrml"));
     expect(c.errors).toEqual([]);
     const m = c.out("models.scrml");
-    expect(m.clientJs).toMatch(/^\s*const NEEDED = "needle-value-263";/m);
-    expect(m.clientJs).toMatch(/_scrml_modules\["models\.client\.js"\] = \{[^}]*NEEDED: NEEDED[^}]*\}/);
+    expect(declaresBindingAs(m.clientJs, "NEEDED", '"needle-value-263"')).toBe(true);
+    expect(registersExport(m.clientJs, "NEEDED")).toBe(true);
   });
 
   test("the importer's read RESOLVES at runtime — no free variable", () => {
@@ -944,7 +1040,7 @@ for (const vec of NOT_WIRED_VECTORS) {
       for (const [fp, js] of clients) {
         expect({ file: fp, leaked: /LEAK-CANARY-WIRED|\["LEAK"/.test(js) })
           .toEqual({ file: fp, leaked: false });
-        expect({ file: fp, decl: /\bconst SECRET\b/.test(js) })
+        expect({ file: fp, decl: declaresTopLevelBinding(js, "SECRET") })
           .toEqual({ file: fp, decl: false });
       }
       expect(c.out("index.scrml").serverJs ?? "").toMatch(/LEAK-CANARY-WIRED|\["LEAK"/);
@@ -1106,7 +1202,168 @@ for (const vec of WIRED_VECTORS) {
       const c = compileEntry(join(dir, "index.scrml"));
       expect(c.errors).toEqual([]);
       const js = c.allClient().map(([, s]) => s).join("\n");
-      expect(js).toMatch(/const SHOWN = "shown-client-value";/);
+      expect(declaresBindingAs(js, "SHOWN", '"shown-client-value"')).toBe(true);
     });
   });
+}
+
+// ---------------------------------------------------------------------------
+// §8 — ONE POSITION MATRIX, RUN ON BOTH PATHS AND BOTH EXPORT KINDS.
+//
+// §2/§4/§6/§7 each measure ONE cell of a three-axis product, and the cells they
+// leave out are where the bugs lived:
+//
+//   PATH        §2 is cross-file only; §4/§6/§7 are same-file only. Those are
+//               TWO CALLERS of one collector (`emitReferencedModuleExportConstLines`
+//               and `codegen/index.ts`'s `crossFileClientReads` precompute), and
+//               the recorded reason the shadow leak survived three review rounds
+//               is that every leak vector travelled the cross-file path while the
+//               same-file caller went untested.
+//   EXPORT KIND every vector used `export const`. An `export let` candidate is
+//               emitted as `let SECRET = …`, which a `/\bconst SECRET\b/`
+//               no-leak assertion cannot see AT ALL.
+//   DIRECTION   a leak check and an under-emit check are different questions and
+//               a gate that emits NOTHING passes every leak check there is.
+//
+// So the matrix below is declared ONCE and the product is generated. A vector
+// added here cannot be added to only one half.
+//
+// Every `binding` value is MEASURED against emitted output, and three of them
+// contradict what the pre-round table asserted:
+//   `if=MARK` / `if=MARK.f` / `<each … if=MARK>` lower through the §17.1 mount
+//   gate to `_scrml_cs_reactive_get("MARK")` — a STRING KEY into the cell store,
+//   not a binding — and `onclick=MARK.go` lowers to the static HTML attribute
+//   `onclick="MARK.go"`. All four were classified as wired and all four shipped
+//   the value to the browser.
+// ---------------------------------------------------------------------------
+
+const MARK_VALUE = '["MK", "CANARY", "263"].join("-")';
+const MARK_CANARY = /MK-CANARY-263|\["MK"/;
+
+const POSITION_MATRIX = [
+  // --- NOT a binding: the compiler names MARK nowhere as an identifier. ------
+  { id: "if-bare", binding: false, markup: `<p if=MARK>gated</p>` },
+  { id: "if-bare-dotted", binding: false, markup: `<p if=MARK.enabled>gated</p>` },
+  { id: "if-structural-each", binding: false, markup: `<each in=@rows as r if=MARK><li>row</li></each>` },
+  { id: "onclick-bare-dotted", binding: false, markup: `<button onclick=MARK.go>go</button>` },
+  { id: "class-bare", binding: false, markup: `<p class=MARK>hello</p>` },
+  { id: "quoted-no-interp", binding: false, markup: `<p title="MARK">hello</p>` },
+  { id: "escaped-interp", binding: false, markup: `<p title="lit ${BS}${OPEN}MARK${CLOSE} here">hello</p>` },
+  { id: "each-body-prose", binding: false, markup: `<each in=@rows as r>MARK items</each>` },
+  { id: "match-arm-prose", binding: false, markup: `<match for=Phase on=@phase>\n  <Idle>MARK pending</>\n  <Ready>done</>\n</match>` },
+  { id: "comment-only", binding: false, markup: `<p>plain</p>`, extraLogic: `// MARK must never be emitted client-side` },
+
+  // --- IS a binding: the emitted bundle must DECLARE MARK. ------------------
+  { id: "if-paren", binding: true, markup: `<p if=(MARK)>gated</p>` },
+  { id: "onclick-bare-ident", binding: true, markup: `<button onclick=MARK>go</button>` },
+  { id: "on-tap-bare-ident", binding: true, markup: `<button on-tap=MARK>go</button>` },
+  { id: "callref-dotted-base", binding: true, markup: `<button onclick=MARK.go(1)>go</button>` },
+  { id: "callref-plain-attr", binding: true, markup: `<p class=MARK.go()>hello</p>` },
+  { id: "attr-template", binding: true, markup: `<p title="v-${OPEN}MARK${CLOSE}">hello</p>` },
+  { id: "attr-paren", binding: true, markup: `<p title=(MARK)>hello</p>` },
+  { id: "each-body-interp", binding: true, markup: `<each in=@rows as r><p>${OPEN}MARK${CLOSE}</p></each>` },
+  { id: "engine-colon-shorthand", binding: true, markup: `<engine for=Game initial=.Title>\n    <Title rule=.Playing : @a = MARK>\n    <Playing rule=.Title/>\n</>` },
+  { id: "on-mount-read", binding: true, markup: `<p>plain</p>`, extraLogic: `on mount { @a = MARK }` },
+];
+
+/** Build the two files for one matrix cell. */
+function matrixSources(vec, path, exportKind) {
+  const decl = `export ${exportKind} MARK = ${MARK_VALUE}`;
+  const body = `${OPEN} type Phase:enum = { Idle, Ready }
+   type Game:enum = { Title, Playing }
+   <phase>: Phase = .Idle
+   @a = ""
+   @rows = [1, 2] ${CLOSE}
+server fn stash() -> string { return MARK }
+${vec.extraLogic ?? ""}
+${vec.markup}
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`;
+  if (path === "same-file") {
+    return { "index.scrml": `<program>\n${decl}\n${body}` };
+  }
+  return {
+    "models.scrml": `${decl}\nexport const SHOWN = "shown-client-value"\n`,
+    "index.scrml": `<program>\nimport { MARK, SHOWN } from './models.scrml'\n${body}`,
+  };
+}
+
+for (const vec of POSITION_MATRIX) {
+  for (const path of ["same-file", "cross-file"]) {
+    for (const exportKind of ["const", "let"]) {
+      const dirName = `cg263-m-${vec.id}-${path}-${exportKind}`;
+      const what = vec.binding ? "IS a client binding" : "is NOT a client binding";
+      describe(`CONF-CG-263 §8 — ${vec.id} ${what} [${path} / export ${exportKind}]`, () => {
+        beforeEach(() => {
+          const dir = setupDir(dirName);
+          for (const [name, src] of Object.entries(matrixSources(vec, path, exportKind))) {
+            writeFileSync(join(dir, name), src);
+          }
+        });
+        afterEach(() => teardownDir(dirName));
+
+        if (!vec.binding) {
+          test("§14.8 — the server-only VALUE reaches no .client.js, and no bundle declares it", () => {
+            const c = compileEntry(join(TMP_ROOT, dirName, "index.scrml"));
+            expect(c.errors).toEqual([]);
+            const clients = c.allClient();
+            // Guard the guard: a sweep that finds no bundles proves nothing.
+            expect(clients.length).toBeGreaterThan(0);
+            for (const [fp, js] of clients) {
+              expect({ file: fp, leaked: MARK_CANARY.test(js) }).toEqual({ file: fp, leaked: false });
+              // Top-level AND `let`-aware: an `export let` leak emits `let MARK = …`.
+              expect({ file: fp, decl: declaresTopLevelBinding(js, "MARK") })
+                .toEqual({ file: fp, decl: false });
+              expect({ file: fp, registered: registersExport(js, "MARK") })
+                .toEqual({ file: fp, registered: false });
+            }
+            // The value IS legitimately present server-side — otherwise this whole
+            // case would pass on a compiler that emitted nothing at all.
+            const owner = path === "same-file" ? "index.scrml" : "models.scrml";
+            expect(MARK_CANARY.test(c.out(owner).serverJs ?? "")).toBe(true);
+          });
+        } else {
+          test("the binding IS declared in the owning bundle and resolves at runtime", () => {
+            const c = compileEntry(join(TMP_ROOT, dirName, "index.scrml"));
+            expect(c.errors).toEqual([]);
+            const owner = path === "same-file" ? "index.scrml" : "models.scrml";
+            const ownerJs = c.out(owner)?.clientJs ?? "";
+            expect(declaresBindingAs(ownerJs, "MARK", MARK_VALUE)).toBe(true);
+            if (path === "cross-file") {
+              // Declared but unregistered is still a ReferenceError in the importer.
+              expect(registersExport(ownerJs, "MARK")).toBe(true);
+              expect(c.out("index.scrml").clientJs)
+                .toMatch(/const \{[^}]*\bMARK\b[^}]*\} = _scrml_modules\["models\.client\.js"\]/);
+            }
+          });
+
+          test("EXECUTING the shipped bundles never throws `MARK is not defined`", () => {
+            const c = compileEntry(join(TMP_ROOT, dirName, "index.scrml"));
+            const bundles = [];
+            // Dependency FIRST, ONE shared global scope, `document` left undefined
+            // so the boot IIFE early-returns — the faithful classic-script model.
+            if (path === "cross-file") bundles.push(["models.client.js", c.out("models.scrml").clientJs]);
+            bundles.push(["index.client.js", c.out("index.scrml").clientJs]);
+            const ctx = vm.createContext(runtimeStubs(bundles.map(([, js]) => js)));
+            let thrown = null;
+            try {
+              for (const [name, js] of bundles) vm.runInContext(js, ctx, { filename: name });
+            } catch (e) { thrown = e; }
+            // SCOPED ON PURPOSE. The stub context above fakes the `_scrml_*`
+            // runtime, so an unrelated TypeError out of a stub is the harness's
+            // fault, not the compiler's — asserting "does not throw" would make
+            // this case fail for reasons that have nothing to do with §14.8. What
+            // it must never do is fail to resolve the USER binding, which is the
+            // exact shape of the bug: an under-emit is a live
+            // `ReferenceError: MARK is not defined` at exit 0.
+            const isMarkRefError =
+              thrown instanceof ReferenceError && /\bMARK\b.*not defined/.test(thrown.message);
+            expect({ marker: dirName, markUnresolved: isMarkRefError, message: isMarkRefError ? thrown.message : "" })
+              .toEqual({ marker: dirName, markUnresolved: false, message: "" });
+          });
+        }
+      });
+    }
+  }
 }
