@@ -1,0 +1,30 @@
+<program>
+
+<name> = "ada"
+
+// §6.6.19 TRANSITIVE-limb over-fire guard (S338). A derived cell calling a local
+// function is the NORMAL shape — it is what `fn`/`function` extraction is for — and
+// the transitive limb must key on whether that function reaches a server PLACEMENT,
+// never on the presence of a call.
+//
+// `alpha`/`beta` are a mutual-recursion CYCLE on purpose: the closure that answers
+// "does this reach the server" walks the call graph, and a cycle with no server
+// placement in it must terminate and stay clean rather than either hanging or being
+// mistaken for a reach.
+${ function shout(s) {
+    return s.toUpperCase()
+}
+
+function alpha(s) {
+    return beta(s)
+}
+
+function beta(s) {
+    return alpha(s.trim())
+} }
+
+const <loud> = shout(@name)
+
+<div id="out">${@loud}</div>
+
+</program>

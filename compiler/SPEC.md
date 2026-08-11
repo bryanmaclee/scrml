@@ -3301,7 +3301,7 @@ const <x> = 5 + 3    // W-DERIVED-001: no reactive dependencies; this is equival
 | E-REACTIVE-004 | `flush()` called inside a derived expression | Error |
 | E-REACTIVE-005 | Circular dependency in the derived reactive graph | Error |
 | W-DERIVED-001 | `const <name> = expr` has no `@variable` references; value never re-evaluates | Warning |
-| E-DERIVED-SERVER-ONLY-REACH | The RHS of a `const <name>` derived cell reaches a binding imported from a §12.2 Trigger 3 server-only stdlib module. Refused, not escalated — a derived recompute is synchronous (§6.6.3) and cannot become a round trip. See §6.6.19. (S331; emitted at `compiler/src/route-inference.ts` Step 3b.) | Error |
+| E-DERIVED-SERVER-ONLY-REACH | The RHS of a `const <name>` derived cell reaches server work — DIRECTLY, as a binding imported from a §12.2 Trigger 3 server-only stdlib module, or TRANSITIVELY, through any number of local function calls to a function route inference places on the server. Refused, not escalated — a derived recompute is synchronous (§6.6.3) and cannot become a round trip. See §6.6.19. (S331; transitive limb S338; emitted at `compiler/src/route-inference.ts` Step 5c-ter.) | Error |
 
 ---
 
@@ -3693,11 +3693,24 @@ ${ function add(item) {
 
 #### 6.6.19 Server-Only Reach in a Derived RHS — E-DERIVED-SERVER-ONLY-REACH
 
-**Added 2026-08-09 (S331).**
+**Added 2026-08-09 (S331). Extended transitively 2026-08-11 (S338).**
 
 > **Provenance:** `spec:§12.2` — the Trigger-3 S299 amendment, verbatim: *"A `<program>` calling `hashPassword` from `scrml:auth` therefore emitted no `.server.js` at all and shipped both the caller's secret and a real `Bun.password.hash` argon2id implementation into the browser bundle, with zero diagnostics."* That amendment closed the symptom for the per-FUNCTION path. This subsection closes the identical symptom in the one position §12.4 structurally excludes from it. **Direction-of-change: newly-rejecting**, migration **measured** at zero (S331: 59 repo files import an `ESCALATION_SERVER_ONLY_MODULES` module; none reaches one from a derived RHS).
 
+> **Provenance (transitive limb):** `ruling:user-voice-scrml.md S338`. **Direction-of-change: newly-rejecting**, migration **measured** at zero — S338 compiled all **2359** git-tracked `.scrml` sources base-vs-head; the set of files emitting this code is **identical** on both sides (three files, all of them this rule's own reproducers and conformance cases).
+
 §12.2 Trigger 3 escalates a **function** that reaches a binding imported from a server-only stdlib module. §12.4 states that *"Route inference SHALL be per-function"*, and a `const <name>` derived cell is not a function — it has no placement decision of its own to escalate — so a server-only reach in its RHS is invisible to Trigger 3 and the module ships to the browser.
+
+**The rule has two limbs, and they fail differently.** Both are refused, under this one code, for the one reason stated below — but an author reading the diagnostic needs to know which they hit, because the *fix* is not the same.
+
+| | **Direct** (S331) | **Transitive** (S338) |
+|---|---|---|
+| Shape | the RHS names the server-only import | the RHS calls a local function that reaches server work |
+| What escalates | nothing | the callee (§12.2 Trigger 3, `?{}`, `protect=`, `session`, … — *any* trigger) |
+| Failure | **confidentiality** — the module and its implementation ship to the browser | **correctness** — the secret stays server-side, but the call is a `fetch`, and §6.6.4 invokes the recompute with no `await`, so the **pending Promise becomes the cell's value and is rendered** |
+| Fix | move the call into a `function` | stop reading the value through a derived cell |
+
+The transitive limb exists because §12.4's per-function placement is **direct-only**: calling a server function is deliberately not itself a trigger (the call lowers to a fetch stub), so a chain `a → b → c → hashPassword` places only `c` on the server. Codegen, meanwhile, colours `b` and `a` `async` all the way up. **The two stages therefore disagreed about the same source, and the S331 check was written against the wrong one of the two** — measured S338 on four shapes, every one at exit 0 with an empty diagnostic set: one hop, three hops, a mutual-recursion cycle, and a `?{}` helper (which additionally takes a *second* emission route — `W-DERIVED-001` lowers it to a bare `const c = _scrml_fetch_…()` with no derived declaration at all, which is why the check keys on the declaration and never on the emitted shape).
 
 **Escalation is not the available answer here.** A derived cell is a **synchronous** reactive recompute: §6.6.3 fixes the evaluation strategy as lazy pull with dirty flags, and a derived read is an expression evaluation at pull time, not an awaited call. Escalating its RHS would make every recompute a server round trip — asynchronous — which the derived model has no way to express, and which every consumer of a derived value (a markup interpolation, another derived cell, a dependency-graph edge) is entitled to assume it is not. The compiler therefore **refuses** rather than relocating.
 
@@ -3710,8 +3723,21 @@ ${ function add(item) {
 - A name appearing only inside a **string literal** is not a reference and SHALL NOT fire (the §12.4 string-literal rule, which is normative for route inference generally).
 - The error message SHALL identify (a) the derived cell by name, (b) the offending imported member by its **local** name, and (c) the module it was imported from. It SHALL state the resolution: move the call into a `function` — which DOES escalate under §12.2 Trigger 3 — and write its result to a plain reactive cell that the markup reads.
 - **The message SHALL ALSO refuse the single-keystroke workaround explicitly**, for as long as the adjacent non-function positions remain undiagnosed. Deleting `const` turns `const <h> = hashPassword(@pw)` into `<h> = hashPassword(@pw)` — a plain cell initialiser, which reaches the same module from the same client-side position, is not diagnosed, and compiles clean while shipping the implementation to the browser (measured: 4 occurrences of `Bun.password` in the shipped runtime, identical to the un-fixed derived form). **That is the shortest edit that makes this error stop, and it restores the leak.** A security diagnostic whose fastest workaround reopens the vulnerability is worse on that axis than no diagnostic, because it manufactures traffic into the hole — so refusing the workaround is part of the message's contract, not a wording preference. When the sibling positions are diagnosed, this clause SHALL be rewritten to name the sibling's own code rather than removed.
-- **Carve-out — `kind="tool"` programs.** A `kind="tool"` program (§64) has no client boundary, so a server-only module reached from a derived RHS there is not a leak and rejecting it would reject valid code. The compiler SHALL NOT emit this error in a `kind="tool"` program. This mirrors the carve-out §12.2 Trigger 3 already takes for the §20.7 `print()` / `println()` built-ins.
-- The check SHALL run in route inference, the stage that builds the §12.2 Trigger 3 import-binding map.
+- **Carve-out — `kind="tool"` programs.** A `kind="tool"` program (§64) has no client boundary, so a server-only module reached from a derived RHS there is not a leak and rejecting it would reject valid code. The compiler SHALL NOT emit this error in a `kind="tool"` program. This mirrors the carve-out §12.2 Trigger 3 already takes for the §20.7 `print()` / `println()` built-ins. The carve-out is a whole-file predicate and SHALL gate **both** limbs.
+- The check SHALL run in route inference — the stage that builds the §12.2 Trigger 3 import-binding map **and** settles function placement — and SHALL run **after** placement has settled, since the transitive limb reads the placement result.
+
+**Normative statements — the TRANSITIVE limb (S338):**
+
+- A `const <name>` derived cell whose RHS **reaches** — by a call or by a bare reference, at any depth, through **any number of local function calls** — a function that route inference places on the **server** SHALL be a compile error, **`E-DERIVED-SERVER-ONLY-REACH`**.
+- The limb SHALL key on route inference's own settled **placement result**, not on the §12.2 Trigger 3 import set. A helper placed on the server by *any* trigger — a `?{}` SQL block, a `protect=` field, `session`, the `server` keyword, an `onserver:` channel handler, or §12.2's caller-context propagation — puts the same `fetch` in the recompute path, so the rule cannot be narrower than placement itself.
+- Reach, depth, shadowing, and the string-literal rule SHALL be **the same rules as the direct limb**, applied to a different name set. They are one rule about one boundary and SHALL NOT be restated as two.
+- **Resolution of a called name SHALL be same-file**, and a name that resolves same-file to both a server-reaching and a non-reaching declaration SHALL NOT fire. This is §12.4's rule for E-ROUTE-002, adopted for the same reason: for a hard error, a coincidental same-name function in an unrelated file is not this call's target, and firing on it rejects correct code. **Documented residual, identical to E-ROUTE-002's:** a genuine cross-file reach whose callee has no same-file binding is not caught. Closing it needs a precise import-aware resolver; a V1 limitation, not a design position.
+- **Traversal SHALL terminate on a cycle.** Mutual and self recursion in the call graph are legal scrml; a stack overflow is not a diagnostic.
+- The message SHALL name **the hop chain**, from the derived cell through each intermediate function to the one that is placed on the server, and SHALL say **why** that last function is server-side. Naming only the endpoint tells an author what is wrong without telling them where to edit.
+- The message SHALL NOT give the direct limb's resolution. An author who reaches the transitive limb has *already* moved the call into a `function`; repeating that instruction names no root cause. It SHALL instead direct them to stop reading the value through a derived cell — call the function from an event handler or a lifecycle block, assign to a plain reactive cell (which the compiler does await), and read that cell from the markup.
+- The message SHALL state that this limb is a **correctness** refusal and not a confidentiality one. Conflating the two teaches an author to read a security incident into a wrong render, and — worse — teaches them to discount the direct limb, which *is* a leak.
+
+> **This limb is PROVISIONAL and REVERSIBLE, and is recorded as such deliberately.** It answers *"what should the compiler do today, given a shape that silently miscompiles"*; it does **not** answer *"may a derived cell hold a value that is not ready yet?"* That question is the `pending` type-state whose **direction** was ratified S337 with the **build deferred**, and this defect is its first witnessed case. When `pending` lands, the premise this limb rests on — that the derived model has no way to express asynchrony — stops holding, and **the correct disposition of this limb is to be relaxed or deleted, not defended.** Refusing was chosen precisely because it is the walk-back-able direction; accepting-and-escalating would have answered the language question by construction and is a one-way door.
 
 **Why refusing, and not escalating, is the correct direction.** Whether the derived position may host server work **at all** is an open language question. Refusing is reversible — it can be relaxed if that question is later answered "yes" — whereas accepting-and-escalating would answer it by construction and is a one-way door. §12.2 states the disposition for exactly this kind of ambiguity: *"when a module resists classification, prefer the server: over-inclusion costs a round trip, under-inclusion ships a secret to a browser."* Here neither placement is available, so the same preference resolves to a refusal rather than a silent client placement.
 
@@ -3738,7 +3764,37 @@ shipping the implementation to the browser — the shortest edit that silences t
 the one that restores the leak.
 ```
 
-**Worked example — valid (the resolution the message names):**
+**Worked example — invalid, the TRANSITIVE limb:**
+
+```scrml
+${ import { hashPassword } from 'scrml:auth' }
+
+<pw> = "secret"
+
+${ function doHash(p) {             // escalates server-side per §12.2 Trigger 3
+    return hashPassword(p)
+} }
+
+const <hashed> = doHash(@pw)        // Error E-DERIVED-SERVER-ONLY-REACH
+```
+
+Nothing leaks here — `hashPassword` stays on the server and `doHash` becomes a route handler plus a client fetch stub. But the stub is `async`, and the derived recompute is not awaited (§6.6.4), so `@hashed` would hold the pending Promise and the markup would render it.
+
+Expected compiler output:
+```
+Error E-DERIVED-SERVER-ONLY-REACH: The RHS of derived cell `const <hashed>` calls `doHash`,
+which reaches server-side work: const <hashed> -> doHash — and `doHash` is on the server
+because it reaches the server-only resource `scrml:auth` (§12.2). A call from the client to a
+server-placed function lowers to a `fetch`, so it is ASYNCHRONOUS — but a derived cell is a
+SYNCHRONOUS reactive recompute (§6.6.3: lazy pull with dirty flags), and the runtime invokes
+the recompute with no `await` (§6.6.4). … This is a CORRECTNESS refusal, not a confidentiality
+one: `doHash` and its work stay on the server either way. Fix: do not read this value through
+a derived cell. Call `doHash` from an event handler or a lifecycle block and assign its result
+to a plain reactive cell (`<hashed> = …`), which the compiler DOES await, and let the markup
+read that cell.
+```
+
+**Worked example — valid (the resolution both limbs converge on):**
 
 ```scrml
 ${ import { hashPassword } from 'scrml:auth' }
@@ -3754,10 +3810,27 @@ ${ function computeHash(pw) {       // escalates server-side per §12.2 Trigger 
 <div>${@hashed}</div>
 ```
 
+`@hashed` is a plain reactive cell, not a derived one. The compiler awaits the server call at the assignment, so the cell holds the resolved value and the markup renders it — a synchronous read of an asynchronously-produced value, which is the shape the derived position cannot express.
+
+**Worked example — valid, and NOT to be refused (the over-refusal guard):**
+
+```scrml
+<name> = "ada"
+
+${ function shout(s) { return s.toUpperCase() }
+function alpha(s) { return beta(s) }        // a client-only call CYCLE …
+function beta(s) { return alpha(s.trim()) } // … must not be mistaken for a reach
+}
+
+const <loud> = shout(@name)                 // legal — no server placement anywhere
+```
+
+A derived cell calling a local function is the *normal* shape. The rule keys on whether that function reaches a server **placement**, never on the presence of a call, and never on "is this a stdlib import" (§6.6.19's `-neg` conformance case pins the second of those against `scrml:data`).
+
 **Cross-references:**
-- §12.2 Trigger 3 — the escalation-server-only module set and its normative membership criterion; the rule this subsection extends into a position §12.4 excludes.
-- §12.4 — *"Route inference SHALL be per-function"* (the reason the derived RHS is not reached by Trigger 3), and the string-literal-is-not-a-reference rule.
-- §6.6.3 — lazy pull with dirty flags (the reason escalation is not available for a derived cell).
+- §12.2 Trigger 3 — the escalation-server-only module set and its normative membership criterion; the rule this subsection extends into a position §12.4 excludes. Also §12.2 caller-context propagation, which can place a function with no server work of its own on the server and thereby reach this rule.
+- §12.4 — *"Route inference SHALL be per-function"* (the reason the derived RHS is not reached by Trigger 3), the string-literal-is-not-a-reference rule, and E-ROUTE-002's same-file callee-resolution discipline, which the transitive limb adopts.
+- §6.6.3 — lazy pull with dirty flags; §6.6.4 — the un-awaited recompute invocation (together, the reason escalation is not available for a derived cell).
 - §64 — `kind="tool"` programs (the carve-out); §20.7 — the sibling carve-out Trigger 3 already takes.
 - §34 — E-DERIVED-SERVER-ONLY-REACH.
 
@@ -7310,6 +7383,8 @@ The compiler SHALL escalate a function to a server route if ANY of the following
 > The criterion is stated normatively **above** the list on purpose: a hand-maintained derived list rots silently and nothing fails when it does. Re-evaluate the criterion rather than editing the list from memory — and when a module resists classification, prefer the server: over-inclusion costs a round trip, under-inclusion ships a secret to a browser.
 
 > **Trigger 3 — scope is a FUNCTION, and that is load-bearing (S331).** This trigger escalates *the function that uses the binding*, because §12.4 makes route inference per-function and a function is the only unit that HAS a placement to change. A server-only reach in a position that is not a function body therefore does not escalate — it is not reached by this trigger at all. The `const <name>` **derived-cell RHS** is one such position, and left unaddressed it reproduced this trigger's own founding symptom exactly (measured S331: exit 0, no `.server.js`, and a real `Bun.password.hash` in the browser bundle). It is closed by **`E-DERIVED-SERVER-ONLY-REACH` (§6.6.19)**, which **refuses** rather than escalating — a derived recompute is synchronous (§6.6.3), so "place it on the server" is not an available answer for it. A reader adding a new non-function position to the language should treat §6.6.19 as the pattern to follow, not this trigger.
+>
+> **And a position-scoped rule written against THIS trigger's binding set will be one hop short (S338).** §6.6.19 was, and it missed the identical reach through a single local function call: this trigger fires on the callee, §12.4's placement is direct-only, so `a → b → c → hashPassword` places only `c` — while codegen colours `b` and `a` `async` all the way up. The derived cell then held a pending Promise, at exit 0, with nothing on stderr. **The generalisable rule: a check about "does this position reach the server" SHALL key on route inference's settled PLACEMENT result, not on this trigger's import-binding map.** The import map answers "which function escalates"; it does not answer "which call crosses the boundary", and the two other positions this note names as still-open (a mutable-cell initialiser, a markup interpolation) will need the placement answer too, not this one.
 
 Additional escalation triggers MAY be added in future versions of this specification.
 
@@ -19480,7 +19555,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | W-STATE-BLOCK-BARE-WRITE-DECL | §38.4, §6, §40.8 | A bare `@name = init` line directly in a `<db>` / `<state>` STATE-block MARKUP body (not inside a `${...}` logic block, not inside a function). A state-block body is markup context (SPEC §4); per §38.4 ("bare names are LOCALS only") + §6 V5-strict, a bare `@name = init` is NOT a declaration — `@name` is a READ/WRITE of a pre-declared cell. In the markup body it is silently DROPPED (inert text — neither registered nor emitted), so the cell never resolves at SYM. The canonical state-block declaration is the STRUCTURAL form inside a `${...}` logic block: `${ <name> = init }` (see `examples/03-contact-book.scrml` / `08-chat.scrml`). The INFO lint steers there; `bun scrml migrate` does not yet auto-fix (the rewrite re-homes the decl into a `${}` block — an AST relocation, not a text swap). The state-block companion to `E-WRITE-NOT-IN-LOGIC-CONTEXT` (Unit CC, the row above — which deliberately EXCLUDES state-block bodies because a hard error there is a bigger call). The end-of-window timing promotes this to a reserved `E-STATE-BLOCK-BARE-WRITE-DECL`. **Fires:** emitted by TAB (`compiler/src/ast-builder.js` `scanStateBlockBareWriteDecls`, called from `liftBareDeclarations`) — covers BOTH the canonical no-space opener `<db>` / `<state>` / `<schema>` (BS-classified `type=markup`, scanned via `_STATE_BLOCK_BARE_WRITE_NAMES` on the markup path) AND the deprecated whitespace opener `< db>` (BS-classified `type=state`, scanned on the state path). (Added 2026-06-13, sym-cell-registration-completeness; canonical-opener coverage added 2026-06-13 fixup.) | Info |
 | E-DERIVED-WRITE | §6.6, §6.6.8 | Reassignment to a `const`-derived reactive cell. Derived cells are read-only; assignment is not permitted. Example: `const <displayName> = @name.toUpperCase(); @displayName = "x"`. Sibling: in-place mutation is `E-DERIVED-VALUE-MUTATE` (§6.6.18). (Renamed from `E-REACTIVE-002` in S59 lock L21.) | Error |
 | E-DERIVED-VALUE-MUTATE | §6.6.18 | In-place value-mutation of a `const`-derived reactive cell — array mutating methods on a derived array (`@filtered.push(x)`), property assignment / compound-assignment / `delete` on a derived object (`@formCopy.full = "x"`), or the same on an in-compound derived sub-cell. Derived cells are value-immutable from the developer's perspective; mutating one would be silently clobbered when the upstream dependencies next fire. Mutate the upstream cell instead. (S59 lock L21.) | Error |
-| E-DERIVED-SERVER-ONLY-REACH | §6.6.19, §12.2 | The RHS of a `const <name>` derived cell REACHES — by a call or by a bare reference, at any depth, including inside a lambda body, a `match`-arm block body, or an RHS that does not structurally parse — a local binding imported from a module in the §12.2 Trigger 3 `ESCALATION_SERVER_ONLY_MODULES` set (or a submodule of one). §12.2 Trigger 3 escalates the FUNCTION that reaches such a binding, but §12.4 makes route inference per-function and a derived cell is not a function, so the reach was invisible and the module shipped to the browser: measured S331, the reproducer compiled at exit 0 with NO `.server.js`, `const { hashPassword } = _scrml_stdlib.auth;` in the client bundle, and a real `Bun.password.hash` argon2id implementation in the shipped runtime (4 occurrences vs 0 for a program not importing `scrml:auth`) — the exact symptom the Trigger-3 S299 amendment describes. The compiler REFUSES rather than escalating: a derived cell is a synchronous lazy-pull recompute (§6.6.3), so escalation would make each recompute a server round trip, which the derived model cannot express. Resolution: move the call into a `function` (which DOES escalate, §12.2) and write its result to a plain reactive cell. A name bound inside the RHS shadows the import and does not fire; a name inside a string literal is not a reference (§12.4). Carve-out: NOT emitted in a `kind="tool"` program (§64 — no client boundary), mirroring the §20.7 `print()`/`println()` carve-out. Direction-of-change: newly-rejecting, migration measured at ZERO (59 repo files import an escalation server-only module; none reaches one from a derived RHS). **Provenance:** `spec:§12.2 Trigger-3 S299 amendment`. (Catalog addition S331; emitted at `compiler/src/route-inference.ts` Step 3b.) | Error |
+| E-DERIVED-SERVER-ONLY-REACH | §6.6.19, §12.2 | The RHS of a `const <name>` derived cell REACHES — by a call or by a bare reference, at any depth, including inside a lambda body, a `match`-arm block body, or an RHS that does not structurally parse — a local binding imported from a module in the §12.2 Trigger 3 `ESCALATION_SERVER_ONLY_MODULES` set (or a submodule of one). §12.2 Trigger 3 escalates the FUNCTION that reaches such a binding, but §12.4 makes route inference per-function and a derived cell is not a function, so the reach was invisible and the module shipped to the browser: measured S331, the reproducer compiled at exit 0 with NO `.server.js`, `const { hashPassword } = _scrml_stdlib.auth;` in the client bundle, and a real `Bun.password.hash` argon2id implementation in the shipped runtime (4 occurrences vs 0 for a program not importing `scrml:auth`) — the exact symptom the Trigger-3 S299 amendment describes. The compiler REFUSES rather than escalating: a derived cell is a synchronous lazy-pull recompute (§6.6.3), so escalation would make each recompute a server round trip, which the derived model cannot express. Resolution: move the call into a `function` (which DOES escalate, §12.2) and write its result to a plain reactive cell. A name bound inside the RHS shadows the import and does not fire; a name inside a string literal is not a reference (§12.4). Carve-out: NOT emitted in a `kind="tool"` program (§64 — no client boundary), mirroring the §20.7 `print()`/`println()` carve-out. Direction-of-change: newly-rejecting, migration measured at ZERO (59 repo files import an escalation server-only module; none reaches one from a derived RHS). **Provenance:** `spec:§12.2 Trigger-3 S299 amendment`. **TRANSITIVE LIMB (S338):** the same code ALSO fires when the RHS reaches, through any number of local function calls, a function route inference PLACES on the server — by any trigger, not only a Trigger 3 import (a `?{}` block, `protect=`, `session`, the `server` keyword, an `onserver:` handler, or §12.2 caller-context propagation all qualify). §12.4's placement is direct-only — calling a server function is deliberately not itself a trigger — so `a -> b -> c -> hashPassword` places only `c`, while codegen colours `b` and `a` `async` all the way up; the two stages disagreed about the same source and the S331 check read the wrong one. Measured S338 on `main`, all at exit 0 with an empty diagnostic set: one hop, three hops, a mutual-recursion cycle, and a `?{}` helper on a SECOND emission route (`W-DERIVED-001` lowers it to a bare `const c = _scrml_fetch_…()`). Confidentiality is INTACT in this limb — the failure is that the un-awaited recompute (§6.6.4) makes the pending Promise the cell's value. Callee resolution is SAME-FILE with no fire on ambiguity (E-ROUTE-002's discipline, §12.4, same cross-file residual); traversal terminates on cycles. Direction-of-change: newly-rejecting, migration measured at ZERO — all 2359 git-tracked `.scrml` sources compiled base-vs-head, identical hit set both sides. **PROVISIONAL:** this limb is dpa-023's first witnessed case and SHALL be relaxed or deleted, not defended, once the `pending` type-state (direction ratified S337, build deferred) gives the derived position a way to express "not ready yet". **Provenance:** `ruling:user-voice-scrml.md S338`. (Catalog addition S331; transitive limb S338; emitted at `compiler/src/route-inference.ts` Step 5c-ter.) | Error |
 | E-STATE-PINNED-FORWARD-REF | §6.10 | Read of a `pinned` state declaration before its declaration site in source order. `pinned` opts the declaration out of hoisting; forward reads are therefore unsafe. | Error |
 | E-CELL-NO-RENDER-SPEC | §6.4 | `<varname/>` used as render-by-tag in markup, but the cell has no render-spec (Shape 1 plain cell or Shape 3 non-markup derived). Use `${@varname}` interpolation to display the value. | Error |
 | E-CELL-RENDER-SPEC-NOT-BINDABLE | §6.2 | Shape 2 declaration (`<name req> = <markup>`) where the RHS markup element is not bindable (e.g., `<div>`, `<span>`). Shape 2 requires a bindable form element. Use `const <name>` (Shape 3) for display-only markup cells. | Error |

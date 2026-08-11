@@ -1,0 +1,12 @@
+{
+  "id": "derived-e-derived-server-only-reach-transitive-neg",
+  "description": "§6.6.19 TRANSITIVE-limb over-fire guard — a derived cell calling a purely-client local function still compiles, and so does a purely-client mutual-recursion CYCLE in the same file. The transitive limb keys on route inference's settled server PLACEMENT, never on the presence of a call from a derived RHS.",
+  "language-version": "1.0",
+  "spec": "§6.6.19",
+  "source-test": "compiler/tests/unit/route-inference-derived-server-only-reach.test.js",
+  "rationale": "Over-refusal is the failure mode this shape invites: a derived cell calling a local helper is the ordinary result of extracting logic into a `function`, and refusing it would make §6.6.19 reject the single most common correct use of the derived position. The `alpha`/`beta` cycle is deliberate — the server-reach closure walks the call graph, so a cycle with no server placement in it must both TERMINATE (a stack overflow is not a diagnostic) and stay clean. This is the transitive limb's counterpart to the `-neg` case that pins the direct limb against `scrml:data`: both say the rule keys on the escalation/placement answer and on nothing that merely looks like it.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-DERIVED-SERVER-ONLY-REACH", "E-ROUTE-005", "E-ROUTE-002"]
+  }
+}

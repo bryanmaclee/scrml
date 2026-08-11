@@ -29,6 +29,12 @@
  *   §3 TOP-LEVEL CONTROL — the S331 shape still refuses (non-regression).
  *   §4 CLIENT-SAFE CONTROL — a `scrml:math` member in the SAME nested position still
  *      compiles clean, so §1 is not "any stdlib import in a loop is refused".
+ *   §5 TRANSITIVE LIMB (S338) — the reach ONE HOP AWAY, through a local `function`.
+ *      Asserts the artifact facts that make this limb a DIFFERENT failure from §1:
+ *      confidentiality is INTACT (a `.server.js` IS emitted, no `Bun.password` in
+ *      anything the HTML loads) and the defect is instead an `async` fetch stub
+ *      wired into a derived recompute that is never awaited. Plus the over-fire
+ *      control: a purely-client hop in the same shape compiles clean.
  *
  * The greps run over the REAL output directory (`write: true`), not over an in-memory
  * `clientJs` string, because the leak is not confined to `.client.js`: pre-fix, the
@@ -41,7 +47,9 @@
  * "referenced by the HTML the browser gets", which is the property that matters.
  *
  * Firing site: `compiler/src/route-inference.ts` — `collectDerivedCellDecls` (the
- * structural walk) + Step 3b.
+ * structural walk) + `computeServerReachingFns` (the placement closure) + Step 5c-ter.
+ * (The step was "3b" until S338; it moved because the transitive limb reads a
+ * placement result that Steps 5/5b/5c are still mutating at the old position.)
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
@@ -271,5 +279,109 @@ describe("CONF-DERIVED-SERVER-ONLY-REACH — §4 a client-safe member in the sam
   test("does NOT fire the code, and compiles clean", () => {
     expect(c.errorCodes).not.toContain(CODE);
     expect(c.errorCodes).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §5 — TRANSITIVE limb (S338): the same reach ONE HOP AWAY
+// ---------------------------------------------------------------------------
+
+// The hop. `doHash` is precisely the fix §2 prescribes for the direct limb — and it
+// IS correct as far as it goes: the escalation works, so nothing leaks. What §2 never
+// asked is what happens when the RESULT is read from a derived cell instead of a
+// plain one. Measured on `main` before S338, at exit 0 with an empty diagnostic set:
+//
+//   async function _scrml_fetch_doHash_3(p) { … await _scrml_fetch_with_csrf_retry(…) … }
+//   _scrml_cs_derived_declare("h", () => _scrml_fetch_doHash_3(_scrml_cs_reactive_get("pw")));
+//
+// `_scrml_derived_get` calls the thunk with no `await` (§6.6.4), so `@h` held the
+// Promise and the markup rendered it.
+const TRANSITIVE_LEAK = `<program>
+${OPEN} import { hashPassword } from 'scrml:auth' ${CLOSE}
+<pw> = "secret"
+${OPEN} function doHash(p) { return hashPassword(p) } ${CLOSE}
+const <h> = doHash(@pw)
+<div><span>${OPEN}@h${CLOSE}</span></div>
+</program>
+`;
+
+// The over-fire control: identical SHAPE — a derived cell reading a local function —
+// with the server reach taken out. This is the ordinary result of extracting logic
+// into a `function`, and it must stay compilable.
+const TRANSITIVE_CLIENT_SAFE = `<program>
+<name> = "ada"
+${OPEN} function shout(s) { return s.toUpperCase() } ${CLOSE}
+const <loud> = shout(@name)
+<div><span>${OPEN}@loud${CLOSE}</span></div>
+</program>
+`;
+
+describe("CONF-DERIVED-SERVER-ONLY-REACH — §5 a hop through a local function is refused", () => {
+  const NAME = "transitive-leak";
+  let c;
+  beforeEach(() => { c = compileToDisk(NAME, TRANSITIVE_LEAK); });
+  afterEach(() => teardown(NAME));
+
+  test("fires the code as an ERROR", () => {
+    expect(c.errorCodes).toContain(CODE);
+  });
+
+  /**
+   * THIS LIMB IS NOT §1's FAILURE, AND THE ARTIFACTS ARE HOW YOU TELL.
+   *
+   * §1's gap pin asserts a leaking bundle on disk: zero `.server.js`, `Bun.password`
+   * in a script the HTML loads. Here the OPPOSITE artifact facts hold — the
+   * escalation worked. Asserting them is what stops a future reader (or a future
+   * message edit) from collapsing the two limbs into "a security error", which would
+   * teach adopters to discount §1, the one that IS a leak.
+   */
+  test("confidentiality is INTACT — a `.server.js` is emitted and nothing leaks to the client", () => {
+    expect(c.serverJsFiles.length).toBeGreaterThan(0);
+    expect(c.clientLoaded.length).toBeGreaterThan(0);
+    expect(c.clientLoadedText).not.toContain("Bun.password");
+    expect(c.clientLoadedText).not.toContain("argon2id");
+  });
+
+  /**
+   * !! GAP PIN, NOT A SAFETY CLAIM — the §1 twin. !!
+   *
+   * The refusal is a DIAGNOSTIC, not an EMISSION GATE, in this limb too: the compile
+   * reports an error and STILL writes the bundle containing the exact defect — an
+   * `async` fetch stub wired straight into a derived recompute the runtime never
+   * awaits. A CI step that ignores the exit code ships a page that renders
+   * `[object Promise]`.
+   *
+   * WHEN THE EMISSION GATE LANDS, THIS EXPECTATION MUST INVERT, not be deleted.
+   */
+  test("GAP PIN — the failing compile still writes the Promise-valued derived cell", () => {
+    expect(c.errorCodes).toContain(CODE);
+    expect(c.clientLoadedText).toMatch(/async function _scrml_fetch_doHash_\d+/);
+    expect(c.clientLoadedText).toMatch(
+      /_scrml_cs_derived_declare\(\s*"h"\s*,\s*\(\)\s*=>\s*_scrml_fetch_doHash_\d+/,
+    );
+  });
+});
+
+describe("CONF-DERIVED-SERVER-ONLY-REACH — §5b a purely-client hop in the same shape compiles", () => {
+  const NAME = "transitive-client-safe";
+  let c;
+  beforeEach(() => { c = compileToDisk(NAME, TRANSITIVE_CLIENT_SAFE); });
+  afterEach(() => teardown(NAME));
+
+  /**
+   * The over-refusal gate for §5. A derived cell calling a local function is the
+   * NORMAL shape; §5 must key on the callee's server PLACEMENT and on nothing that
+   * merely looks like it. If this goes red, the transitive limb is refusing
+   * `function` extraction itself.
+   */
+  test("does NOT fire the code, and compiles clean", () => {
+    expect(c.errorCodes).not.toContain(CODE);
+    expect(c.errorCodes).toEqual([]);
+  });
+
+  test("and the emitted recompute is SYNCHRONOUS — no fetch in the derived thunk", () => {
+    expect(c.serverJsFiles.length).toBe(0);
+    expect(c.clientLoadedText).toMatch(/_scrml_cs_derived_declare\(\s*"loud"/);
+    expect(c.clientLoadedText).not.toContain("_scrml_fetch_shout");
   });
 });
