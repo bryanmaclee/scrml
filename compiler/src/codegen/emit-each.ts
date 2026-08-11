@@ -1706,6 +1706,30 @@ function rewriteIterScopeOnly(text: string, iterVarName: string): string {
  */
 function lowerEachExpr(text: string, iterVarName: string): string {
   const preRewritten = rewriteIterValueExpr(text, iterVarName);
+  // g-request-is-some-in-each-loop-attr-misroute — does the RAW reference an id
+  // this file registered as a `<request>`? Gated to registered-only (mirrors the
+  // `gateToRegisteredRequests=true` regime of the sibling value/bool/class-attr
+  // fix): a non-request `<#id>` (input-state ref / typo) is left on its pre-fix
+  // path, so EVERY non-request each-attr stays byte-identical. When present, we
+  // MUST take the structured `emitExprField` path (below) with `requestIds`
+  // threaded so `<#id>` routes to the reactive `_scrml_request_<id>` object
+  // (§6.7.7) — the text/predicate gate alone would either leak the `<#…>` raw
+  // (no predicate) or mis-route it to the §36 input-state registry (predicate,
+  // but requestIds absent → `undefined.data` → runtime TypeError).
+  const _requestIds = _eachRequestIds;
+  let _hasRegisteredRequest = false;
+  if (
+    _requestIds != null &&
+    _requestIds.size > 0 &&
+    typeof text === "string" &&
+    text.includes("<#")
+  ) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { rawReferencesRegisteredRequest } = require("./emit-expr.ts") as {
+      rawReferencesRegisteredRequest: (raw: string, ids: Set<string>) => boolean;
+    };
+    _hasRegisteredRequest = rawReferencesRegisteredRequest(text, _requestIds);
+  }
   // Route through the structured emitter when the text carries a §42 absence
   // predicate (`is some`/`is not`/`is given`/`not`) OR a bare `.Variant` enum
   // literal (leading-dot + uppercase, NOT preceded by an ident-char/`)`/`]`/`.`
@@ -1713,7 +1737,13 @@ function lowerEachExpr(text: string, iterVarName: string): string {
   // EXCLUDED) — g-each-body-bare-variant-arg (S201): emit-expr.ts:295 lowers
   // `.InProgress` → its frozen string `"InProgress"`; the text path does not,
   // so a bare-variant leaked raw into the each-render-fn → E-CODEGEN-INVALID-LOGIC.
-  if (!/\bis\s+(?:some|not|given)\b|(?:^|[^.\w@])not\s|(?:^|[^.\w$)\]])\.[A-Z]/.test(preRewritten)) return preRewritten;
+  // ...OR the raw references a registered `<#request>` (see above).
+  if (
+    !_hasRegisteredRequest &&
+    !/\bis\s+(?:some|not|given)\b|(?:^|[^.\w@])not\s|(?:^|[^.\w$)\]])\.[A-Z]/.test(preRewritten)
+  ) {
+    return preRewritten;
+  }
   try {
     const { parseExprToNode } = require("../expression-parser.ts") as {
       parseExprToNode: (raw: string, filePath: string, offset: number) => unknown;
@@ -1723,7 +1753,11 @@ function lowerEachExpr(text: string, iterVarName: string): string {
     const { emitExprField } = require("./emit-expr.ts") as {
       emitExprField: (n: unknown, fallback: string, ctx: Record<string, unknown>) => string;
     };
-    return emitExprField(node, preRewritten, { mode: "client" });
+    // Thread `requestIds` so a registered `<#id>` node routes to
+    // `_scrml_request_<id>`. No-op for non-request exprs (emitExpr consults
+    // `requestIds` ONLY on a request-ref node), so the predicate/bare-variant
+    // path stays byte-identical when the file has no registered request in `text`.
+    return emitExprField(node, preRewritten, { mode: "client", requestIds: _requestIds ?? undefined });
   } catch (_e) {
     return preRewritten;
   }
@@ -2549,6 +2583,18 @@ interface EachBindSupportCtx {
   errors: CGError[] | null;
 }
 let _eachBindSupportCtx: EachBindSupportCtx | null = null;
+
+// g-request-is-some-in-each-loop-attr-misroute — the file-scoped set of
+// registered `<request>` ids, stashed on the SAME module-level ctx pattern as
+// `_eachBindSupportCtx` (codegen is synchronous + single-threaded). Read by
+// `lowerEachExpr` so a per-item each-attr expression that references a
+// REGISTERED `<#id>` routes the ref to the reactive `_scrml_request_<id>`
+// object (§6.7.7) instead of mis-routing to the §36 `_scrml_input_state_registry`
+// (which a `<request>` never populates → `undefined.data` → runtime TypeError).
+// UNSET (null) on the Tier-0 `${for…lift}` path that reaches the template walk
+// without going through `emitEachBodyRenderForFile` → lowerEachExpr's gate is
+// skipped → byte-identical to pre-fix (no request routing there either).
+let _eachRequestIds: Set<string> | null = null;
 
 /**
  * i175 — transform the `emitBindDirectiveBody` read-back effect call so it
@@ -3574,6 +3620,15 @@ export function emitEachBodyRenderForFile(
     // than String()-ing the returned DOM node). Built ONCE from the SAME
     // fileAST; cleared in the finally below.
     _eachMarkupFnNames = collectMarkupReturningFnNames(_astForBinds);
+    // g-request-is-some-in-each-loop-attr-misroute — registered `<request>` ids
+    // for the per-item each-attr request-ref routing (see `_eachRequestIds`).
+    // Built ONCE from the SAME fileAST the top-level request-ref paths use
+    // (`collectRequestIds`); cleared in the finally below.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { collectRequestIds } = require("./reactive-deps.ts") as {
+      collectRequestIds: (fileAST: any) => Set<string>;
+    };
+    _eachRequestIds = collectRequestIds(_astForBinds);
   }
 
   try {
@@ -3696,6 +3751,9 @@ export function emitEachBodyRenderForFile(
     _eachBindSupportCtx = null;
     // #161 follow-on — drop the per-file markup-fn set for the same reason.
     _eachMarkupFnNames = null;
+    // g-request-is-some-in-each-loop-attr-misroute — drop the per-file request-id
+    // set so a later caller (or the Tier-0 lift path) never reads a stale file's.
+    _eachRequestIds = null;
   }
 
   return { renderFunctions, dispatchers };
