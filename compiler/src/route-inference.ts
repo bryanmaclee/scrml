@@ -3767,6 +3767,97 @@ export function collectDerivedCellDecls(fileAST: FileAST): Array<Record<string, 
   return out;
 }
 
+/**
+ * §6.6.19 (S338) — the SERVER-REACHING closure over route inference's OWN
+ * settled placement result.
+ *
+ * A function is server-REACHING when calling it from a client position crosses
+ * the client/server boundary: either it is itself server-placed, or it calls
+ * (transitively) something that is. `via` records, for each non-seed member, the
+ * callee through which it reaches — enough to reconstruct the hop chain a
+ * §6.6.19 diagnostic is required to name.
+ *
+ * WHY A CLOSURE AT ALL, AND WHY BACKWARD. Step 4 is direct-only by design
+ * ("Calling a server function is NOT a trigger" — the call lowers to a fetch
+ * stub), so `resolvedServerFnIds` holds ONLY the functions whose own body earns
+ * a placement. `levelA -> levelB -> levelC -> hashPassword` therefore puts just
+ * `levelC` in that set, while CODEGEN colours `levelB` and `levelA` async all
+ * the way up (`scheduling.ts`'s `serverFnNames`, whose own comment records "L3
+ * (transitive async coloring across client fn graphs) remains a separate
+ * follow-on"). **The two stages disagree about the same source, and §6.6.19 was
+ * written against the wrong one of the two.** Measured on `main` at S338: a
+ * three-hop chain compiled at exit 0 and emitted
+ * `_scrml_cs_derived_declare("h", () => _scrml_levelA_5(…))` with
+ * `_scrml_levelA_5` declared `async`.
+ *
+ * THIS DERIVES NO NEW PLACEMENT FACT. It consumes `resolvedServerFnIds` as the
+ * seed and the ALREADY-BUILT per-record `callees` edge set; it does not re-walk
+ * an AST, does not re-scan for triggers, and cannot disagree with the placement
+ * it reads. That is deliberate — this compiler has repeatedly grown a
+ * hand-maintained parallel walker that drifts against the real one (the
+ * `emit-client.ts` seed walker vs `dependency-graph.ts`, and §6.6.19's own
+ * field-listed `collectDerivedCellDecls` before S337). Running BACKWARD from the
+ * seed over the caller relation, rather than forward from each derived cell,
+ * is what makes it one closure for the whole file set instead of one traversal
+ * per derived cell.
+ *
+ * CALLEE RESOLUTION IS SAME-FILE ONLY, and that is the 5c-bis precedent, not a
+ * new policy. `fnNameToNodeIds` is name-keyed and GLOBAL, so a coincidental
+ * same-name function in an unrelated file would otherwise make this HARD ERROR
+ * fire on code that is correct. Step 5c-bis rejected exactly that for
+ * E-ROUTE-002 (:5218) and documented the resulting cross-file miss as a V1
+ * residual; §6.6.19 inherits both halves of that trade — no false refusal, and
+ * the same documented residual.
+ *
+ * TERMINATION. `reaching` is monotonic and every id is enqueued at most once, so
+ * a call cycle (`ping` -> `pong` -> `ping`) settles instead of recursing;
+ * measured against a real mutually-recursive reproducer, not argued.
+ */
+interface ServerReachFacts {
+  /** Every fnNodeId that is server-placed OR transitively calls one. */
+  reaching: Set<string>;
+  /** callerFnNodeId -> the callee fnNodeId it reaches server work through. */
+  via: Map<string, string>;
+}
+
+function computeServerReachingFns(
+  analysisMap: Map<string, AnalysisRecord>,
+  fnNameToNodeIds: Map<string, string[]>,
+  resolvedServerFnIds: Set<string>,
+): ServerReachFacts {
+  // Same-file-resolved CALLER relation: calleeId -> the ids that call it.
+  const callersOf = new Map<string, Set<string>>();
+  for (const [callerId, callerRecord] of analysisMap) {
+    for (const calleeName of callerRecord.callees) {
+      const globalIds = fnNameToNodeIds.get(calleeName);
+      if (!globalIds || globalIds.length === 0) continue;
+      for (const calleeId of globalIds) {
+        if (calleeId === callerId) continue; // self-recursion adds no reach
+        if (analysisMap.get(calleeId)?.filePath !== callerRecord.filePath) continue;
+        if (!callersOf.has(calleeId)) callersOf.set(calleeId, new Set());
+        callersOf.get(calleeId)!.add(callerId);
+      }
+    }
+  }
+
+  const reaching = new Set<string>(resolvedServerFnIds);
+  const via = new Map<string, string>();
+  // BFS, so `via` records the SHORTEST chain to the boundary — the one an author
+  // can act on. A depth-first walk would report an arbitrary long path.
+  const queue: string[] = [...resolvedServerFnIds];
+  while (queue.length > 0) {
+    const calleeId = queue.shift()!;
+    for (const callerId of callersOf.get(calleeId) ?? []) {
+      if (reaching.has(callerId)) continue;
+      reaching.add(callerId);
+      via.set(callerId, calleeId);
+      queue.push(callerId);
+    }
+  }
+
+  return { reaching, via };
+}
+
 // ---------------------------------------------------------------------------
 // Closure capture analysis
 // ---------------------------------------------------------------------------
