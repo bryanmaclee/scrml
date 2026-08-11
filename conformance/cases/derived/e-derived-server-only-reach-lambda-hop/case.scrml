@@ -1,0 +1,38 @@
+<program>
+
+${ import { hashPassword } from 'scrml:auth' }
+
+<pw> = "secret"
+
+// §6.6.19 transitive limb, THE POSITION THAT ESCAPED IT (S338 review F1).
+//
+// This is the `-transitive` sibling case with ONE thing changed: the inner call
+// sits inside a lambda instead of in `wrap`'s own statement list. Nothing else
+// differs — same import, same hop count, same derived read.
+//
+// The first implementation of the transitive limb built its hop graph from route
+// inference's callee list, and that walker returns at `case "lambda"` without
+// descending. So `wrap` had NO callees, fell out of the hop graph entirely, and
+// this compiled at exit 0 with an empty diagnostic set while emitting:
+//
+//   async function _scrml_wrap_4(x) {
+//     return (await _scrml_mapAsync([x], async (v) => await _scrml_fetch_doHash_3(v)))[0];
+//   }
+//   _scrml_cs_derived_declare("h", () => _scrml_wrap_4(_scrml_cs_reactive_get("pw")));
+//
+// That is the same evasion §12.2 Trigger 3's S299 amendment closed for the
+// function path, reintroduced one level up in the hop graph. The fix was to build
+// the hop graph with the SAME reference scanner the RHS check uses.
+${ function doHash(p) {
+    return hashPassword(p)
+}
+
+function wrap(x) {
+    return [x].map(v => doHash(v))[0]
+} }
+
+const <h> = wrap(@pw)
+
+<div id="out">${@h}</div>
+
+</program>
