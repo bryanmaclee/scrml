@@ -1350,10 +1350,23 @@ function emitLifecycleNode(node: any, errors: CGError[], filePath: string): stri
     bodyCode = bodyLines.join("\n  ");
   }
 
+  // §6.7.6 — a `<poll>` fires an immediate first tick on arming; a `<timer>` never does
+  // (§6.7.5). The immediate tick is gated by `running=`: a `<poll running=false>` has not
+  // armed, so it fires no immediate tick; a reactive `running=@cell` fires only if the cell
+  // is true at arming. `<timer>` and a static `running=false` poll pass no `immediate` arg.
+  let immediateArg = "";
+  if (tag === "poll") {
+    if (runningIsAlwaysTrue) {
+      immediateArg = ", true";
+    } else if (runningVarName) {
+      immediateArg = `, _scrml_reactive_get(${JSON.stringify(runningVarName)})`;
+    }
+  }
+
   lines.push(`// <${tag}${timerId ? ` id="${timerId}"` : ""}> interval=${intervalMs}ms`);
   lines.push(`_scrml_timer_start(${scopeVar}, ${timerVar}, ${intervalMs}, function() {`);
   lines.push(`  ${bodyCode}`);
-  lines.push(`});`);
+  lines.push(`}${immediateArg});`);
 
   if (!runningIsAlwaysTrue && !runningVarName) {
     lines.push(`_scrml_timer_pause(${scopeVar}, ${timerVar});`);

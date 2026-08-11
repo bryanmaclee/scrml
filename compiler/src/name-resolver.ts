@@ -147,7 +147,9 @@ const SCRML_NON_ELEMENT_TAGS_EXTRA: readonly string[] = [
   "outlet", "match", "each", "empty", "render", "column",
   "formfor", "tablefor", "if", "else", "else-if",
   // Lifecycle keywords (already resolve to scrml-lifecycle; defensive).
-  "machine", "timer", "poll", "db", "request", "errorboundary",
+  // `timeout` (§6.7.8) was omitted here, so `<timeout>` — all-lowercase, not a known
+  // HTML element — false-fired E-MARKUP-001 in every position (S340-peter).
+  "machine", "timer", "poll", "timeout", "db", "request", "errorboundary",
 ];
 
 // The E-MARKUP-001 gate's scrml-structural exclusion. DERIVED (not hand-copied)
