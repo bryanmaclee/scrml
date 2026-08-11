@@ -2,6 +2,35 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S339 — 2026-08-11 (peter · Windows) — a verified MED-sweep: two real adopter-lane bug fixes, an SSR surfacing lint, and three misclassifications caught before they became wrong fixes
+
+Four disjoint-lane arcs, consolidated on `wrap/s339-peter` (corpus gate 884/0). The through-line was
+discipline: every pick was reproduced on HEAD and checked against the normative SPEC before any code —
+which caught **three** ledger/attribution misclassifications that would each have produced a wrong fix.
+
+- **`E-EACH-BODY-DECL-UNSUPPORTED` (§17.7.3) — each-body declaration fail-closed.** A `let`/`const`
+  declaration inside an `<each>` body (`${ let nm = @.name }`) was silently dropped while a later
+  `${nm}` lowered to a dangling `String(nm)` → the whole list rendered empty at exit-0 with no
+  diagnostic. Now a loud compile error naming the fix. Resolves `g-each-body-let-alias-silently-dropped`;
+  the alias-SUPPORT half is routed as a §17.7.3 ruling.
+- **Tool import tree-shake (§64).** A `kind="tool"` importing a subset of a local `.scrml` library
+  emitted an import of the whole export set. Traced (past a wrong first attribution) to a value-const
+  misclassified as a component flipping the component-expander's helper-bind augmentation; fixed at the
+  tool layer (`emit-tool.ts` tree-shakes local imports to referenced names). Resolves
+  `g-tool-over-imports-all-lib-exports`; the deeper classifier root is re-filed + routed.
+- **`I-SSR-EACH-CLIENT-RENDERED` (§52.8) — SSR fallback made loud.** A server-authority `<each>` whose
+  row template is outside the SSR-renderable subset (multi-root, non-field-read interp, …) falls back to
+  client-only first paint; that loss was silent. Now an info-lint names it. Surfacing, not widening —
+  the widening itself is `newly-accepting` and routed.
+- **#282 ledger hygiene.** The session-store split was already fixed at #294 (stale `open` marker
+  corrected, verified + pinned); its `sessionExpiry` twin was re-filed correctly (it is live but
+  §20.5-sanctioned, not the bug the gap claimed).
+
+Two new §34 rows (census-PASS), three conformance/integration pins, three gaps resolved, three new
+open. Four rulings routed to bryan (SSR widening · sessionExpiry twin · value-const→component
+misclassification · each-alias support). Gate: conformance corpus 884/0; the W5b tool runtime subtests
+are a pre-existing Windows-local flake, proven neutral to the tool change (cloud gate is authority).
+
 ## S336 — 2026-08-09 (peter · Windows) — the wrap→boot seam closed with an executable gate (the S335 short-boot remedy)
 
 **1 PR merged** (#492) + this wrap; main `458452a2` → `ec639bc4` → wrap. Coherence 0/0 both repos, cloud gate GREEN incl. Windows. Gaps regen'd to true counts **HIGH 27 · MED 122 · LOW 58** (the headline table on main was stale at 26/126/56 vs the actual `@gap` markers — corrected by `state.ts --write`, not mine, folded into this wrap). Review floor: 2 owed → 0 (#491 carve-out · #492 finding).

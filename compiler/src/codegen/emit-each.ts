@@ -1370,6 +1370,31 @@ function renderTemplateChildToJs(
     if (body.length > 0 && body[0]) {
       const stmt = body[0];
       interpExprNode = (stmt as any).exprNode ?? null;
+      // g-each-body-let-alias-silently-dropped (fail-closed, S339-peter) — a
+      // declaration inside an `<each>` body interpolation (`${ let nm = @.name }`)
+      // is NOT a supported each-body form: it has no `exprNode`/`raw`, so it fell
+      // through to `inner=""` and was silently skipped below — yet a later `${nm}`
+      // still lowered to a bare `String(nm)`, a dangling reference that throws
+      // inside the per-item render factory and renders the WHOLE list empty, with
+      // no diagnostic. SPEC §17.7.3 scopes the each body to the `@.` sigil + an
+      // optional `as` alias, NOT author-declared locals; SUPPORTING them (replay
+      // the binding into the factory closure) is a separate §17.7.3 ruling. Until
+      // then, fail CLOSED — reject the decl loudly rather than ship a broken,
+      // silently-empty render.
+      if (stmt.kind === "let-decl" || stmt.kind === "const-decl" || stmt.kind === "function-decl") {
+        const _kw = stmt.kind === "function-decl" ? "function" : stmt.kind === "const-decl" ? "const" : "let";
+        _eachBindSupportCtx?.errors?.push(new CGError(
+          "E-EACH-BODY-DECL-UNSUPPORTED",
+          `E-EACH-BODY-DECL-UNSUPPORTED: a \`${_kw}\` declaration inside an \`<each>\` body is not ` +
+          `supported — it is dropped, and any later \`\${name}\` reference to it dangles and throws at ` +
+          `render (the list renders empty). Read item fields directly in the row template ` +
+          `(\`\${@.field}\`, or \`\${x.field}\` with \`as x\`), or compute the value OUTSIDE the \`<each>\` ` +
+          `and reference it there. (§17.7.3 — the each-body scope is the \`@.\` sigil + \`as\` alias, not author locals.)`,
+          (child as any).span ?? (stmt as any).span ?? { start: 0, end: 0 },
+          "error",
+        ));
+        return;
+      }
       // bare-expr is the common shape; lift-expr / fail-expr / etc. exist
       // but are less common in iteration body context. For Landing 1
       // baseline, route bare-expr through; other shapes get a hint.

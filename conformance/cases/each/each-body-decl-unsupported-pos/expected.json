@@ -1,0 +1,12 @@
+{
+  "id": "each-body-decl-unsupported-pos",
+  "description": "§17.7.3 — a `let` declaration inside an `<each>` body interpolation (`${ let nm = @.name }`) fires E-EACH-BODY-DECL-UNSUPPORTED (fail-closed, S339-peter). Pre-fix the decl was silently DROPPED while a later `${nm}` lowered to a dangling `String(nm)` → the whole list rendered empty at exit-0 with no diagnostic. The each-body scope is the `@.` sigil + optional `as` alias, not author-declared locals.",
+  "language-version": "1.0",
+  "spec": "§17.7.3",
+  "source-test": "compiler/src/codegen/emit-each.ts",
+  "rationale": "§17.7.3: the each-body scope is the `@.` contextual sigil plus an optional `as` alias; author-declared locals are not part of it. Silently dropping the decl while still emitting a reference to it is a miscompile (dangling ref → empty render, exit-0, no diagnostic). The compiler rejects the unsupported form loudly (fail-closed) rather than ship a silently-broken bundle; SUPPORTING author locals (replay the binding into the per-item factory) is a separate §17.7.3 language-surface ruling this row does not pre-decide.",
+  "expect": {
+    "codes": ["E-EACH-BODY-DECL-UNSUPPORTED"],
+    "severity": { "E-EACH-BODY-DECL-UNSUPPORTED": "error" }
+  }
+}
