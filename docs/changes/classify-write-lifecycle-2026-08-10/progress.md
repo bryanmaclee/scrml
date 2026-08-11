@@ -180,3 +180,25 @@ head and compared exactly. **Zero files change. No corpus migration is owed.**
 written value must be B-shaped, so this is a conformance fix, not a spec change. No new diagnostic
 code, so no §34 row. `compiler/src/codegen/emit-client.ts`, `dependency-graph.ts`,
 `docs/known-gaps.md`: not touched.
+
+---
+---
+
+# ROUND 2 (S338) — the adversarial pass returned DO-NOT-LAND
+
+Append-only continues below. Round 1 is everything above and is NOT edited in place; where round 2
+CONTRADICTS a round-1 claim it says so explicitly and names the section (see §R2.5).
+
+## R2.1 Startup
+
+- Startup `pwd`: `/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a001b2f1400ad6a0c`
+- `git rev-parse --show-toplevel` matches; tree clean; `bun install` → 217 packages;
+  `bun run pretest` → 13 samples compiled.
+- Scratchpad (unique to this agent, per the brief):
+  `…/b25a8ac0-1b30-4ff4-91f8-7347376e005a/scratchpad/cwfix-r2/`.
+- **The worktree was cut from `main` (`1ad65742`), NOT from the brief's base.** `git reset --hard
+  b1154b81` onto `fix/classify-write-land`'s tip before any work. `b1154b81` is NOT an ancestor of
+  `main` (main…base = 2 ↔ 3); PA lands by file-delta so no rebase is owed. The brief's stated base
+  `e566d0bd` IS an ancestor of `b1154b81` (the FACTS regen sits on top) — both coordinates are
+  consistent.
+- Comparison ref for every measurement below: `origin/main` @ `23ea2e5c`.
