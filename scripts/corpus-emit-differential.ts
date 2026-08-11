@@ -48,6 +48,8 @@
  *       [--json /scratch/diff.json]
  *       [--allow-same-revision]                  # opt in to a self-diff (proves determinism)
  *       [--allow-reuse-manifest]                 # opt in to comparing artifacts/syntax only
+ *       [--no-reverify]                          # do NOT serially re-verify the delta (HARD REQ 9)
+ *       [--reverify-limit 300]                   # 0 = no cap; the re-verification is all-or-nothing
  *
  * SYNTAX GOGGLES — read `scripts/corpus-check-goggles.js` before changing anything here.
  *   `node --check` is NOT used and must not be reintroduced. It PASSES a top-level `await` in a
@@ -328,12 +330,32 @@ interface Manifest {
  */
 const VALUE_FLAGS: Record<string, string[]> = {
   capture: ["compiler-root", "label", "work", "manifest", "roots", "concurrency", "expect-total"],
-  diff: ["base", "head", "json"],
+  diff: ["base", "head", "json", "reverify-limit"],
 };
 const BOOL_FLAGS: Record<string, string[]> = {
   capture: ["reuse-artifacts", "no-syntax-check"],
-  diff: ["allow-same-revision", "allow-reuse-manifest"],
+  diff: ["allow-same-revision", "allow-reuse-manifest", "no-reverify"],
 };
+
+/**
+ * HARD REQ 9 — how many sources the serial re-verification will re-compile before it declines.
+ *
+ * The cap exists because re-verification is SERIAL by construction (serialising is the whole
+ * point), so its cost is linear in the delta. It declines ALL-OR-NOTHING: a partial
+ * re-verification that reads like a complete one is exactly the truncated-probe shape in this
+ * file's header, and it would be worse here than nowhere, because the reader would believe the
+ * findings had been checked.
+ *
+ * 300 is chosen to cover the phantom class comfortably (the witnessed event was 8 sources) while
+ * declining a delta that is a real change by construction — a codegen change that legitimately
+ * moves 300+ sources does not need a phantom filter to be believed.
+ *
+ * ⚠ The residual, stated rather than papered over: a MASS phantom event — the harness failing
+ * hundreds of compiles at once — exceeds this cap and is reported UNVERIFIED. The banner says so,
+ * which is the honest floor, but it is not the same as being caught. `--reverify-limit 0` removes
+ * the cap.
+ */
+const DEFAULT_REVERIFY_LIMIT = 300;
 
 function parseArgs(argv: string[]): { mode: string; flags: Record<string, string>; bools: Set<string> } {
   const mode = argv[0] ?? "";
@@ -926,7 +948,7 @@ async function capture(opts: CaptureOptions): Promise<number> {
     console.log(`\n[2/5] COMPILE — ${allSources.length} sources, concurrency ${opts.concurrency}`);
     let done = 0;
     await pool(allSources, opts.concurrency, async (src) => {
-      const rec = await compileOne(src, opts);
+      const rec = await compileOne(src, opts.compilerRoot, opts.work);
       records.set(src, rec);
       done++;
       if (done % 200 === 0 || done === allSources.length) {
@@ -1228,11 +1250,18 @@ function walkAny(root: string, dir: string, out: string[], links: string[]): voi
   }
 }
 
-async function compileOne(src: string, opts: CaptureOptions): Promise<SourceRecord> {
-  const outDir = join(opts.work, sourceSlug(src));
+/**
+ * Compile ONE source with ONE compiler into ONE output dir.
+ *
+ * Takes `compilerRoot`/`work` directly rather than a whole `CaptureOptions` because the HARD REQ 9
+ * re-verification calls it with a DIFFERENT compiler root and a DIFFERENT work tree per side, and
+ * a shared parameter object would have invited a second, drifting copy of this function.
+ */
+async function compileOne(src: string, compilerRoot: string, work: string): Promise<SourceRecord> {
+  const outDir = join(work, sourceSlug(src));
   mkdirSync(outDir, { recursive: true });
-  const proc = Bun.spawn(["bun", join(opts.compilerRoot, "compiler/src/cli.js"), "compile", src, "-o", outDir], {
-    cwd: opts.compilerRoot,
+  const proc = Bun.spawn(["bun", join(compilerRoot, "compiler/src/cli.js"), "compile", src, "-o", outDir], {
+    cwd: compilerRoot,
     stdout: "pipe",
     stderr: "pipe",
     env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
@@ -1242,8 +1271,8 @@ async function compileOne(src: string, opts: CaptureOptions): Promise<SourceReco
     new Response(proc.stderr).text(),
     proc.exited,
   ]);
-  const nOut = normalizeStream(stdout, opts.compilerRoot, opts.work);
-  const nErr = normalizeStream(stderr, opts.compilerRoot, opts.work);
+  const nOut = normalizeStream(stdout, compilerRoot, work);
+  const nErr = normalizeStream(stderr, compilerRoot, work);
   return {
     path: src,
     role: classifyRole(src),
@@ -1310,6 +1339,186 @@ async function pool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>
 }
 
 // ---------------------------------------------------------------------------------------------
+// HARD REQ 9 — serial re-verification of the DELTA
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * DEFECT 2. At the default `--concurrency 10` a capture reported 8 newly-failing sources, 8
+ * diagnostic changes and 27 removed artifacts. Direct in-process compilation of those same sources
+ * under both compilers was IDENTICAL, and a re-capture matched the control exactly. The findings
+ * were manufactured by the harness, and the report gave the reader no hint.
+ *
+ * ROOT-CAUSE STATUS, stated honestly because a wrong in-source rationale is worse than none: NOT
+ * FOUND. Two full 1906-source captures at `--concurrency 10` on one revision were compared per
+ * source — compile outcome, exit code, both normalized streams, artifact SET and every artifact
+ * sha256 — and produced ZERO differences. `compileOne` spawns independent processes with per-source
+ * output directories; the compiler writes nothing to a shared cache or fixed-name temp path. The
+ * remaining candidates are all MACHINE-STATE, not program logic: memory pressure from concurrent
+ * work on the same host (measured single-compile peak RSS ~120MB, so ten at a time is ~1.2GB before
+ * anything else is running), and process/file-descriptor exhaustion. That means it cannot be closed
+ * by reading the code, and a mitigation that does not depend on knowing the cause is the correct
+ * shape — not a fallback from one.
+ *
+ * WHY THIS SHAPE. The measurement that matters is the failure SET CHANGING (HARD REQ 5) — ~680 of
+ * 1906 corpus sources legitimately fail to compile standalone and that is DATA. So only outcomes
+ * that DIFFER between the two captures can be phantom, and only those are re-compiled: the work is
+ * bounded by the DELTA, never by the population. Serialising the whole run instead would trade a
+ * five-minute gate for an hour-long one to check ~8 sources.
+ *
+ * WHY THE UNIT IS THE SOURCE, NOT THE FINDING. One phantom compile produces a compile-outcome
+ * finding AND a diagnostic finding AND an artifact-set finding AND content findings, all from the
+ * same spawned process. Re-verifying per finding would re-compile the same source four times and
+ * could reach four different conclusions about one event.
+ *
+ * ⚠ THE SWALLOW RISK IS THE THING TO WATCH, and it is why the flake test is asymmetric. A
+ * re-verification that quietly reclassified real findings as flakes would convert this instrument
+ * from one that lies loudly into one that lies quietly, which is strictly worse. So:
+ *
+ *     a source is a FLAKE only if its serial re-compilation shows NO DIFFERENCE AT ALL.
+ *
+ * Not "the same difference did not reproduce" — ANY difference, in any class, keeps every finding
+ * for that source. A genuinely nondeterministic source therefore reports as a finding whenever its
+ * re-run happens to diverge, and the re-verification can only ever discard a source that looked
+ * identical under both compilers when compiled alone. A re-compilation that ERRORS is likewise not
+ * a flake; it keeps its findings and is reported separately.
+ */
+interface ReverifyReport {
+  ran: boolean;
+  /** Why it ran, or the exact reason it did not. Printed either way. */
+  reason: string;
+  /** Sources implicated in at least one per-source difference, with the classes that implicated them. */
+  implicated: Array<{ path: string; classes: string[] }>;
+  /** Sources whose difference REPRODUCED under serial re-compilation, with what reproduced. */
+  reproduced: Array<{ path: string; differences: string[] }>;
+  /** Sources that showed NO difference at all on serial re-compilation — HARNESS FLAKES. */
+  flaked: Array<{ path: string; classes: string[] }>;
+  /** Sources whose re-compilation could not be performed. NOT flakes; their findings stand. */
+  errored: Array<{ path: string; message: string }>;
+}
+
+/** Hash one output directory the same way capture's stage 3 does, keyed identically. */
+function hashOutputDir(outDir: string): { arts: Map<string, string>; error?: string } {
+  const arts = new Map<string, string>();
+  if (!existsSync(outDir)) return { arts };
+  const files: string[] = [];
+  const links: string[] = [];
+  try {
+    walkAny(outDir, outDir, files, links);
+  } catch (e: any) {
+    return { arts, error: `unreadable output tree: ${e?.message ?? e}` };
+  }
+  for (const f of files.sort()) {
+    try {
+      arts.set(artifactKey(f), createHash("sha256").update(readFileSync(join(outDir, f))).digest("hex"));
+    } catch (e: any) {
+      return { arts, error: `unreadable artifact ${f}: ${e.code ?? e.message}` };
+    }
+  }
+  return { arts };
+}
+
+/**
+ * Every way one source can differ between two compilers. The union of the classes `diff` reports
+ * per source — deliberately, so that "no difference here" means the same thing in both places.
+ */
+function sourceDifferences(
+  b: SourceRecord,
+  bArts: Map<string, string>,
+  h: SourceRecord,
+  hArts: Map<string, string>,
+): string[] {
+  const d: string[] = [];
+  if (b.compile.ok !== h.compile.ok) d.push(`compile outcome: ${b.compile.ok ? "ok" : "FAILED"} -> ${h.compile.ok ? "ok" : "FAILED"}`);
+  else if (b.compile.exitCode !== h.compile.exitCode) d.push(`exit code: ${b.compile.exitCode} -> ${h.compile.exitCode}`);
+  const bc = b.compile.diagnosticCodes.join(",");
+  const hc = h.compile.diagnosticCodes.join(",");
+  if (bc !== hc) d.push(`diagnostic codes: ${bc || "(none)"} -> ${hc || "(none)"}`);
+  if (b.compile.stdout !== h.compile.stdout || b.compile.stderr !== h.compile.stderr) d.push(`diagnostic text (same codes)`);
+  for (const k of bArts.keys()) if (!hArts.has(k)) d.push(`artifact REMOVED: ${k}`);
+  for (const k of hArts.keys()) if (!bArts.has(k)) d.push(`artifact ADDED: ${k}`);
+  for (const [k, sha] of bArts) {
+    const o = hArts.get(k);
+    if (o && o !== sha) d.push(`artifact CONTENT: ${k}`);
+  }
+  return d;
+}
+
+async function reverifyDelta(
+  base: Manifest,
+  head: Manifest,
+  implicated: Array<{ path: string; classes: string[] }>,
+  limit: number,
+  enabled: boolean,
+): Promise<ReverifyReport> {
+  const empty = (ran: boolean, reason: string): ReverifyReport => ({ ran, reason, implicated, reproduced: [], flaked: [], errored: [] });
+
+  if (!enabled) return empty(false, `DECLINED — --no-reverify was passed. Every difference below is reported exactly as measured, unverified.`);
+  if (implicated.length === 0) {
+    return empty(false, `NOT NEEDED — no per-source difference was reported, so there is nothing a phantom could be hiding in.`);
+  }
+  for (const [side, m] of [["base", base], ["head", head]] as const) {
+    const cli = join(m.compilerRoot, "compiler/src/cli.js");
+    if (!existsSync(cli)) {
+      return empty(
+        false,
+        `IMPOSSIBLE HERE — the ${side} manifest's compiler root is not on this machine (${cli} does not exist).\n` +
+          `      Re-verification re-COMPILES, so it only runs where both captures were taken. The ${implicated.length}\n` +
+          `      difference-bearing source(s) below are reported UNVERIFIED.`,
+      );
+    }
+  }
+  if (limit > 0 && implicated.length > limit) {
+    return empty(
+      false,
+      `DECLINED — ${implicated.length} difference-bearing sources exceeds the serial re-verification limit of ${limit}.\n` +
+        `      It declines ALL-OR-NOTHING on purpose: a partial re-verification that reads like a complete one\n` +
+        `      is the truncated-probe shape this whole file exists to kill. A delta this wide is a real change\n` +
+        `      by construction. Pass --reverify-limit 0 to remove the cap, or a larger number to raise it.`,
+    );
+  }
+
+  const dir = mkdtempSync(join(tmpdir(), "corpus-reverify-"));
+  const baseWork = join(dir, "base");
+  const headWork = join(dir, "head");
+  const report: ReverifyReport = {
+    ran: true,
+    reason: `RAN — ${implicated.length} difference-bearing source(s), re-compiled SERIALLY (concurrency 1) on both compilers.`,
+    implicated,
+    reproduced: [],
+    flaked: [],
+    errored: [],
+  };
+  try {
+    for (const item of implicated) {
+      try {
+        // Serial by construction: base, then head, then the next source. Never a `pool`.
+        const bRec = await compileOne(item.path, base.compilerRoot, baseWork);
+        const bArts = hashOutputDir(join(baseWork, sourceSlug(item.path)));
+        const hRec = await compileOne(item.path, head.compilerRoot, headWork);
+        const hArts = hashOutputDir(join(headWork, sourceSlug(item.path)));
+        if (bArts.error || hArts.error) {
+          report.errored.push({ path: item.path, message: `${bArts.error ?? ""} ${hArts.error ?? ""}`.trim() });
+          continue;
+        }
+        const diffs = sourceDifferences(bRec, bArts.arts, hRec, hArts.arts);
+        if (diffs.length === 0) report.flaked.push({ path: item.path, classes: item.classes });
+        else report.reproduced.push({ path: item.path, differences: diffs });
+      } catch (e: any) {
+        // An error is NOT a flake. The finding stands.
+        report.errored.push({ path: item.path, message: String(e?.message ?? e) });
+      } finally {
+        // Reclaim as we go — a wide delta would otherwise hold a full second corpus on disk.
+        rmSync(join(baseWork, sourceSlug(item.path)), { recursive: true, force: true });
+        rmSync(join(headWork, sourceSlug(item.path)), { recursive: true, force: true });
+      }
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  return report;
+}
+
+// ---------------------------------------------------------------------------------------------
 // diff
 // ---------------------------------------------------------------------------------------------
 
@@ -1329,7 +1538,15 @@ function h1(s: string): void {
   console.log(`\n${"=".repeat(92)}\n${s}\n${"=".repeat(92)}`);
 }
 
-function diff(basePath: string, headPath: string, jsonOut: string | undefined, allowSameRevision: boolean, allowReuseManifest: boolean): number {
+async function diff(
+  basePath: string,
+  headPath: string,
+  jsonOut: string | undefined,
+  allowSameRevision: boolean,
+  allowReuseManifest: boolean,
+  reverifyEnabled: boolean,
+  reverifyLimit: number,
+): Promise<number> {
   const base = loadManifest(basePath);
   const head = loadManifest(headPath);
 
@@ -1471,26 +1688,20 @@ function diff(basePath: string, headPath: string, jsonOut: string | undefined, a
   const headBy = new Map(head.sources.map((s) => [s.path, s]));
   const common = basePaths.filter((p) => headBy.has(p)).sort();
 
-  // ---- compile outcome ----------------------------------------------------------------------
-  console.log(`\n-- COMPILE OUTCOME -------------------------------------------------------------------------`);
-  if (!compileComparable) console.log(`   NOT MEASURED — at least one side is a --reuse-artifacts manifest. Skipping compile comparison.`);
-  console.log(
-    `   base: ok ${base.totals.compileOk} of ${base.totals.compileAttempted} attempted, failed ${base.totals.compileFailed}\n` +
-      `   head: ok ${head.totals.compileOk} of ${head.totals.compileAttempted} attempted, failed ${head.totals.compileFailed}`,
-  );
+  // ---- per-source difference COMPUTATION, before any of it is reported ------------------------
+  //
+  // Computation is separated from reporting so HARD REQ 9's serial re-verification can run BETWEEN
+  // them. A phantom finding must never be PRINTED as a difference and then retracted three sections
+  // later; a reader who scans the ARTIFACTS block and stops has to see the truth there.
   const baseFailSet = base.sources.filter((s) => !s.compile.ok).map((s) => s.path);
   const headFailSet = head.sources.filter((s) => !s.compile.ok).map((s) => s.path);
   const failDelta = setDiff(baseFailSet, headFailSet);
-  const newlyPassing = failDelta.onlyA.filter((p) => headBy.has(p));
-  const newlyFailing = failDelta.onlyB.filter((p) => baseBy.has(p));
-  console.log(`   compile-failure SET delta: ${newlyFailing.length} newly FAILING, ${newlyPassing.length} newly PASSING (full lists, no cap):`);
-  for (const p of newlyFailing) console.log(`     ! NEWLY FAILING in head: ${p}  (base exit ${baseBy.get(p)!.compile.exitCode} -> head exit ${headBy.get(p)!.compile.exitCode})`);
-  for (const p of newlyPassing) console.log(`     ~ NEWLY PASSING in head: ${p}  (base exit ${baseBy.get(p)!.compile.exitCode} -> head exit ${headBy.get(p)!.compile.exitCode})`);
-  if (!newlyFailing.length && !newlyPassing.length) console.log(`     (empty — the failure SET is identical on both sides)`);
+  let newlyPassing = failDelta.onlyA.filter((p) => headBy.has(p));
+  let newlyFailing = failDelta.onlyB.filter((p) => baseBy.has(p));
 
   // Diagnostics can change while the pass/fail outcome holds. That is still a behaviour change.
-  const diagChanged: Array<{ path: string; baseCodes: string; headCodes: string }> = [];
-  const streamChanged: string[] = [];
+  let diagChanged: Array<{ path: string; baseCodes: string; headCodes: string }> = [];
+  let streamChanged: string[] = [];
   if (compileComparable) {
     for (const p of common) {
       const b = baseBy.get(p)!;
@@ -1501,31 +1712,22 @@ function diff(basePath: string, headPath: string, jsonOut: string | undefined, a
       else if (b.compile.stdout !== hh.compile.stdout || b.compile.stderr !== hh.compile.stderr) streamChanged.push(p);
     }
   }
-  console.log(`   diagnostic-CODE changes (outcome unchanged): ${diagChanged.length} of ${common.length} common sources (full list, no cap):`);
-  for (const d of diagChanged) console.log(`     * ${d.path}\n         base codes: ${d.baseCodes}\n         head codes: ${d.headCodes}`);
-  if (!diagChanged.length) console.log(`     (empty)`);
-  console.log(`   diagnostic-TEXT-only changes (same codes): ${streamChanged.length} of ${common.length} common sources (full list, no cap):`);
-  for (const p of streamChanged) console.log(`     * ${p}`);
-  if (!streamChanged.length) console.log(`     (empty)`);
-
-  // ---- artifacts ----------------------------------------------------------------------------
-  console.log(`\n-- ARTIFACTS -------------------------------------------------------------------------------`);
-  console.log(`   base emitted ${base.totals.artifactsEmitted} artifacts from ${base.sources.filter((s) => s.artifacts.length).length} of ${base.totals.enumerated} sources`);
-  console.log(`   head emitted ${head.totals.artifactsEmitted} artifacts from ${head.sources.filter((s) => s.artifacts.length).length} of ${head.totals.enumerated} sources`);
 
   let comparedArtifacts = 0;
   let identicalArtifacts = 0;
-  const artifactAdded: string[] = [];
-  const artifactRemoved: string[] = [];
-  const contentDiffs: Array<{ source: string; key: string; baseSha: string; headSha: string; baseBytes: number; headBytes: number }> = [];
+  // Kept as {source,key} rather than a pre-joined string: the SOURCE is the re-verification unit,
+  // so it has to survive as a field rather than be re-parsed out of a display string.
+  let artifactAdded: Array<{ source: string; key: string }> = [];
+  let artifactRemoved: Array<{ source: string; key: string }> = [];
+  let contentDiffs: Array<{ source: string; key: string; baseSha: string; headSha: string; baseBytes: number; headBytes: number }> = [];
 
   for (const p of common) {
     const b = baseBy.get(p)!;
     const hh = headBy.get(p)!;
     const bMap = new Map(b.artifacts.map((a) => [a.key, a]));
     const hMap = new Map(hh.artifacts.map((a) => [a.key, a]));
-    for (const [k] of bMap) if (!hMap.has(k)) artifactRemoved.push(`${p} :: ${k}`);
-    for (const [k] of hMap) if (!bMap.has(k)) artifactAdded.push(`${p} :: ${k}`);
+    for (const [k] of bMap) if (!hMap.has(k)) artifactRemoved.push({ source: p, key: k });
+    for (const [k] of hMap) if (!bMap.has(k)) artifactAdded.push({ source: p, key: k });
     for (const [k, ba] of bMap) {
       const ha = hMap.get(k);
       if (!ha) continue;
@@ -1535,12 +1737,69 @@ function diff(basePath: string, headPath: string, jsonOut: string | undefined, a
     }
   }
 
+  // ---- HARD REQ 9: serial re-verification of the DELTA ----------------------------------------
+  //
+  // The implicated set is every source carrying at least one PER-SOURCE difference. The source-SET
+  // delta is deliberately absent: a source present on only one side cannot be compiled on both, so
+  // there is nothing to re-verify. Syntax findings are absent as INPUTS for the same reason they
+  // are filtered as OUTPUTS — they are derived from a source's artifacts, so the source that
+  // emitted them is already implicated by the artifact difference itself.
+  const implicatedMap = new Map<string, string[]>();
+  const implicate = (p: string, cls: string) => {
+    const g = implicatedMap.get(p);
+    if (g) { if (!g.includes(cls)) g.push(cls); }
+    else implicatedMap.set(p, [cls]);
+  };
+  for (const p of newlyFailing) implicate(p, "newly FAILING");
+  for (const p of newlyPassing) implicate(p, "newly PASSING");
+  for (const d of diagChanged) implicate(d.path, "diagnostic CODE change");
+  for (const p of streamChanged) implicate(p, "diagnostic TEXT change");
+  for (const a of artifactRemoved) implicate(a.source, "artifact REMOVED");
+  for (const a of artifactAdded) implicate(a.source, "artifact ADDED");
+  for (const d of contentDiffs) implicate(d.source, "artifact CONTENT difference");
+  const implicated = [...implicatedMap.entries()].sort((x, y) => (x[0] < y[0] ? -1 : 1)).map(([path, classes]) => ({ path, classes }));
+
+  const reverify = await reverifyDelta(base, head, implicated, reverifyLimit, reverifyEnabled);
+  const flakedSources = new Set(reverify.flaked.map((f) => f.path));
+  if (flakedSources.size > 0) {
+    newlyFailing = newlyFailing.filter((p) => !flakedSources.has(p));
+    newlyPassing = newlyPassing.filter((p) => !flakedSources.has(p));
+    diagChanged = diagChanged.filter((d) => !flakedSources.has(d.path));
+    streamChanged = streamChanged.filter((p) => !flakedSources.has(p));
+    artifactAdded = artifactAdded.filter((a) => !flakedSources.has(a.source));
+    artifactRemoved = artifactRemoved.filter((a) => !flakedSources.has(a.source));
+    contentDiffs = contentDiffs.filter((d) => !flakedSources.has(d.source));
+  }
+
+  // ---- compile outcome ----------------------------------------------------------------------
+  console.log(`\n-- COMPILE OUTCOME -------------------------------------------------------------------------`);
+  if (!compileComparable) console.log(`   NOT MEASURED — at least one side is a --reuse-artifacts manifest. Skipping compile comparison.`);
+  console.log(
+    `   base: ok ${base.totals.compileOk} of ${base.totals.compileAttempted} attempted, failed ${base.totals.compileFailed}\n` +
+      `   head: ok ${head.totals.compileOk} of ${head.totals.compileAttempted} attempted, failed ${head.totals.compileFailed}`,
+  );
+  console.log(`   compile-failure SET delta: ${newlyFailing.length} newly FAILING, ${newlyPassing.length} newly PASSING (full lists, no cap):`);
+  for (const p of newlyFailing) console.log(`     ! NEWLY FAILING in head: ${p}  (base exit ${baseBy.get(p)!.compile.exitCode} -> head exit ${headBy.get(p)!.compile.exitCode})`);
+  for (const p of newlyPassing) console.log(`     ~ NEWLY PASSING in head: ${p}  (base exit ${baseBy.get(p)!.compile.exitCode} -> head exit ${headBy.get(p)!.compile.exitCode})`);
+  if (!newlyFailing.length && !newlyPassing.length) console.log(`     (empty — the failure SET is identical on both sides)`);
+  console.log(`   diagnostic-CODE changes (outcome unchanged): ${diagChanged.length} of ${common.length} common sources (full list, no cap):`);
+  for (const d of diagChanged) console.log(`     * ${d.path}\n         base codes: ${d.baseCodes}\n         head codes: ${d.headCodes}`);
+  if (!diagChanged.length) console.log(`     (empty)`);
+  console.log(`   diagnostic-TEXT-only changes (same codes): ${streamChanged.length} of ${common.length} common sources (full list, no cap):`);
+  for (const p of streamChanged) console.log(`     * ${p}`);
+  if (!streamChanged.length) console.log(`     (empty)`);
+  if (flakedSources.size > 0) console.log(`   (${flakedSources.size} source(s) excluded as HARNESS FLAKES — see the RE-VERIFICATION section)`);
+
+  // ---- artifacts ----------------------------------------------------------------------------
+  console.log(`\n-- ARTIFACTS -------------------------------------------------------------------------------`);
+  console.log(`   base emitted ${base.totals.artifactsEmitted} artifacts from ${base.sources.filter((s) => s.artifacts.length).length} of ${base.totals.enumerated} sources`);
+  console.log(`   head emitted ${head.totals.artifactsEmitted} artifacts from ${head.sources.filter((s) => s.artifacts.length).length} of ${head.totals.enumerated} sources`);
   console.log(`   artifacts COMPARED (present on both sides, keyed by source+name): ${comparedArtifacts}`);
   console.log(`     byte-identical : ${identicalArtifacts} of ${comparedArtifacts} compared`);
   console.log(`     DIFFERING      : ${contentDiffs.length} of ${comparedArtifacts} compared`);
   console.log(`   artifact SET delta: ${artifactRemoved.length} removed, ${artifactAdded.length} added (full lists, no cap):`);
-  for (const a of artifactRemoved) console.log(`     - REMOVED in head: ${a}`);
-  for (const a of artifactAdded) console.log(`     + ADDED   in head: ${a}`);
+  for (const a of artifactRemoved) console.log(`     - REMOVED in head: ${a.source} :: ${a.key}`);
+  for (const a of artifactAdded) console.log(`     + ADDED   in head: ${a.source} :: ${a.key}`);
   if (!artifactRemoved.length && !artifactAdded.length) console.log(`     (empty)`);
 
   if (contentDiffs.length) {
@@ -1564,6 +1823,30 @@ function diff(basePath: string, headPath: string, jsonOut: string | undefined, a
     // as a pass.
     console.error(`\nFINDING [VACUOUS] compared ZERO artifacts — this run verified NOTHING.`);
     incomparable = true;
+  }
+
+  // ---- HARD REQ 9: re-verification report ------------------------------------------------------
+  //
+  // Printed on EVERY run, including the runs where it did nothing. A section that appears only when
+  // it has something to say is a section a reader cannot distinguish from an absent one — which is
+  // how a disarmed guard stays invisible.
+  console.log(`\n-- RE-VERIFICATION OF THE DELTA (serial) ----------------------------------------------------`);
+  console.log(`   ${reverify.reason}`);
+  console.log(`   difference-bearing sources: ${reverify.implicated.length}   (the source SET delta is excluded — a one-sided source cannot be compiled on both)`);
+  if (reverify.ran) {
+    console.log(`   REPRODUCED : ${reverify.reproduced.length} of ${reverify.implicated.length} — real differences, reported above`);
+    console.log(`   HARNESS FLAKES (did NOT reproduce; EXCLUDED from the findings total): ${reverify.flaked.length} (full list, no cap):`);
+    for (const f of reverify.flaked) console.log(`     ~ FLAKE: ${f.path}\n         discarded finding(s): ${f.classes.join(", ")}`);
+    if (!reverify.flaked.length) console.log(`     (empty — every reported difference reproduced under serial re-compilation)`);
+    if (reverify.errored.length) {
+      console.error(`   RE-COMPILATION ERRORED (NOT flakes — their findings STAND): ${reverify.errored.length} (full list, no cap):`);
+      for (const e of reverify.errored) console.error(`     ! ${e.path}: ${e.message}`);
+    }
+  } else if (reverify.implicated.length > 0) {
+    console.error(`   *** ${reverify.implicated.length} DIFFERENCE-BEARING SOURCE(S) WERE NOT RE-VERIFIED. ***`);
+    console.error(`   The differences above are reported exactly as the two captures measured them. A harness`);
+    console.error(`   phantom — a compile that failed for a reason that is not the compiler — would read`);
+    console.error(`   identically. Re-run \`diff\` on a machine holding both compiler roots to check.`);
   }
 
   // ---- syntax, under explicit goggles ---------------------------------------------------------
@@ -1598,9 +1881,15 @@ function diff(basePath: string, headPath: string, jsonOut: string | undefined, a
   for (const which of ["effective", "script", "module"] as const) {
     const baseMap = collectSyntaxFailures(base, which);
     const headMap = collectSyntaxFailures(head, which);
+    // HARD REQ 9 — a syntax verdict is a property of an ARTIFACT, and a flaked source's artifacts
+    // are the output of a compile that did not happen properly. Its syntax delta is discarded on
+    // the same evidence as its artifact delta. The key is `<source path> :: <artifact key>`.
     const delta = setDiff([...baseMap.keys()], [...headMap.keys()]);
+    delta.onlyA = delta.onlyA.filter((k) => !flakedSources.has(k.split(" :: ")[0]));
+    delta.onlyB = delta.onlyB.filter((k) => !flakedSources.has(k.split(" :: ")[0]));
     const msgChanged: string[] = [];
     for (const [k, msg] of baseMap) {
+      if (flakedSources.has(k.split(" :: ")[0])) continue;
       const hm = headMap.get(k);
       if (hm !== undefined && hm !== msg) msgChanged.push(k);
     }
@@ -1687,10 +1976,23 @@ function diff(basePath: string, headPath: string, jsonOut: string | undefined, a
     : findings === 0
       ? "NO DIFFERENCES"
       : `${findings} DIFFERENCE(S)`;
+  // HARD REQ 9 annotations. NOT a fourth verdict — the three outcomes are unchanged and so is the
+  // exit code. These say what the number was arrived at THROUGH, because a run that had to discard
+  // flakes is not a clean run, and a run whose delta went unchecked is not a verified one.
+  const reverifyNote = reverify.flaked.length > 0
+    ? `   [${reverify.flaked.length} HARNESS FLAKE(S) DISCARDED — the harness, not the compiler]`
+    : reverify.ran
+      ? reverify.errored.length > 0
+        ? `   [delta re-verified serially; ${reverify.errored.length} source(s) could not be re-compiled and their findings STAND]`
+        : `   [delta re-verified serially: all ${reverify.reproduced.length} reproduced]`
+      : reverify.implicated.length > 0
+        ? `   [DELTA NOT RE-VERIFIED — ${reverify.implicated.length} difference-bearing source(s) unchecked]`
+        : ``;
   const banner =
     `VERDICT: ${verdictWord}` +
     `   over ${common.length} common sources of ${base.enumeration.total} base / ${head.enumeration.total} head enumerated` +
-    `   and ${comparedArtifacts} compared artifacts`;
+    `   and ${comparedArtifacts} compared artifacts` +
+    reverifyNote;
   if (incomparable) {
     // Same stream as the findings that made it incomparable.
     console.error(`\n${"=".repeat(92)}\n${banner}\n${"=".repeat(92)}`);
@@ -1706,6 +2008,13 @@ function diff(basePath: string, headPath: string, jsonOut: string | undefined, a
           : bAnchor.prefixDigest === hAnchor.prefixDigest
             ? "MATCH"
             : "MISMATCH — the artifact-content rows below are MEANINGLESS"
+      }\n` +
+      `  delta re-verification     ${
+        reverify.ran
+          ? `RAN over ${reverify.implicated.length} source(s) — ${reverify.reproduced.length} reproduced, ${reverify.flaked.length} FLAKE(S) discarded, ${reverify.errored.length} errored`
+          : reverify.implicated.length > 0
+            ? `DID NOT RUN — ${reverify.implicated.length} difference-bearing source(s) UNVERIFIED`
+            : `not needed — no per-source difference`
       }\n` +
       `  source set delta          ${srcDelta.onlyA.length + srcDelta.onlyB.length}\n` +
       `  compile-failure delta     ${compileComparable ? `${newlyFailing.length} newly failing / ${newlyPassing.length} newly passing` : "NOT MEASURED (reuse-artifacts manifest)"}\n` +
@@ -1732,8 +2041,12 @@ function diff(basePath: string, headPath: string, jsonOut: string | undefined, a
           compileFailureDelta: { newlyFailing, newlyPassing },
           diagnosticCodeChanges: diagChanged,
           diagnosticTextOnlyChanges: streamChanged,
-          artifactSetDelta: { added: artifactAdded, removed: artifactRemoved },
+          artifactSetDelta: {
+            added: artifactAdded.map((a) => `${a.source} :: ${a.key}`),
+            removed: artifactRemoved.map((a) => `${a.source} :: ${a.key}`),
+          },
           artifactContentDiffs: contentDiffs,
+          reverification: reverify,
           loadContextChanged,
           serverFnCallSites: { base: bFx, head: hFx, bareDelta, changedSources: fxSourceDelta },
           syntaxDelta: Object.fromEntries(
@@ -1805,12 +2118,14 @@ if (mode === "capture") {
 } else {
   // parseArgs already rejected any mode other than capture/diff.
   process.exit(
-    diff(
+    await diff(
       resolve(req(flags, "base")),
       resolve(req(flags, "head")),
       flags["json"] ? resolve(flags["json"]) : undefined,
       bools.has("allow-same-revision"),
       bools.has("allow-reuse-manifest"),
+      !bools.has("no-reverify"),
+      flags["reverify-limit"] !== undefined ? Number(flags["reverify-limit"]) : DEFAULT_REVERIFY_LIMIT,
     ),
   );
 }
