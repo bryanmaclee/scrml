@@ -169,6 +169,16 @@ head and compared exactly. **Zero files change. No corpus migration is owed.**
    fix's false-positive surface is nil today — but it means the §14.12.3 write mechanism is
    position-limited in a way SPEC does not say it is. **Severity: MED.**
 
+   > ⚠ **RETRACTED IN ROUND 2 (S338). The clause "it is why the fix's false-positive surface is nil
+   > today" is EMPIRICALLY FALSE and must not be read as a landing claim.** The surface is not nil:
+   > the round-1 fix newly rejects a program whose RHS cell is genuinely present, because the write
+   > that made it present is the very thing this entry says the walker cannot see. Measured `[]` on
+   > `origin/main` @ `23ea2e5c` → `["E-TYPE-001"]` on the branch. **The limitation is real and this
+   > entry describes it correctly; the CONCLUSION drawn from it was wrong.** Failing safe for a READ
+   > of `@v` does not make it safe once `@v`'s state propagates to a second cell — which is exactly
+   > what the fix made observable. Full measurement, the escape hatch, and the disposition are in
+   > §R2.2; the behaviour is pinned by test rather than asserted correct.
+
 4. **`classifyResetValueAgainstSpec` / `isInitOfPostType` residuals.** `<u>: (not to User) = @v` and
    a `default=` expression naming another `(not to T)` cell both still classify `post` by text.
    Closing them needs either a second map-build pass or a fixpoint over declaration order — a real
@@ -390,3 +400,71 @@ Baseline 24 pass / 0 fail. Each mutation applied in isolation, suite run, file r
 Restored → **24 pass / 0 fail**, tree clean. **No test stayed green under a corruption it claims to
 catch.** The brief's M3 (presence-restriction) and M5 (sigil) gaps are both closed; M6 needed no
 proof because the dead code it named is deleted rather than described.
+
+## R2.5 The "migration ZERO" framing — CORRECTED (round-1 §8 superseded on the SAFETY axis)
+
+Round-1 §8 reports a measured corpus delta of **zero** and is **factually reproduced**: per-file
+diagnostic multisets over all **2,359** tracked `.scrml` sources, `origin/main` @ `23ea2e5c` vs this
+branch @ `94288917` — **0 files changed** (`scratchpad/cwfix-r2/corpus-diag.mjs`, `DIAG-main.json`
+vs `DIAG-postC.json`, `diff` reports identical).
+
+**But that zero is VACUOUS as safety evidence, and round-1 §8 let it read as safety.** The
+population of the construct this code classifies is **zero**:
+
+- `git ls-files '*.scrml' | xargs grep -l '(not to \|(not -> '` returns **exactly one file**,
+  `docs/readme-snippets/tasks-app.scrml:42` — and I read it: `completed_at: (not to timestamp)` is a
+  **`type Task:struct` FIELD annotation**, not a Shape-1 reactive cell declaration. A struct field
+  never reaches `classifyWriteAgainstSpec`, which classifies `state-decl` WRITES. So the count of
+  live reactive-cell presence-lifecycle annotations in the tracked corpus is **0, not 1.**
+- (The brief's companion claim — Shape-4 implicit-not cells number 0 files — I did **not**
+  independently verify; it is harder to grep for and I am flagging that rather than inheriting it.)
+
+**A zero delta was therefore structurally guaranteed.** The measurement proves **no migration is
+owed**. It proves **nothing about correctness**. A fix built before the problem is measured is a fix
+whose value is unmeasured — and the four real defects in this round were all found by hand-built
+reproducers, not by the corpus, which is the same point from the other side.
+
+## R2.6 Item C — the variant-idiom extraction (commit `94288917`)
+
+Added mid-round by bryan. Six identical constructions of
+`` new RegExp(`(?:^|\\.)\\s*${ESC(name)}\\b`).test(text) `` → one module-scope helper,
+`variantNameMatchesSourceText`.
+
+**The dispatch said SEVEN sites; there are SIX.** The five coordinates it named (`:26048` `:26052`
+`:26978` `:26982` `:27033`) are `origin/main`'s line numbers and enumerate five of the six —
+`:27037` was missed. On this branch they sat at `:26237` `:26241` `:27194` `:27198` `:27257`
+`:27261`. Reported rather than silently reconciled.
+
+**The three escape helpers were checked BEFORE unifying, because a difference in escaping is a
+difference in what matches.** `escapeRe` (local), `esc` (local) and an inline `.replace(…)` are
+**byte-identical** — `/[.*+?^${}()|[\]\\]/g` → `"\\$&"` in all three. So unification is safe. `esc`
+is now unused and deleted; **`escapeRe` is KEPT** — four other call sites use it for unrelated
+patterns.
+
+**INERTNESS PROVEN, not asserted:** per-file diagnostic multisets over all 2,359 tracked sources,
+captured pre-C and post-C, **byte-identical, 0 files changed**. Lifecycle suite 24/24 unchanged.
+
+**And the helper is FAITHFUL, NOT CORRECT — its doc comment says so at the locus.** It preserves
+both known defects (F3): unanchored, so a string literal `".Published"` clears the guard; and
+source-text-reading, so it cannot tell an expression from a comment or a string. The semantic fix is
+a separate arc with its own migration. This extraction exists so that fix is **one edit instead of
+six**.
+
+## R2.7 SURFACED, not fixed — for PA to file (`docs/known-gaps.md` is OFF LIMITS this round)
+
+The brief forbids touching `docs/known-gaps.md` (a concurrent agent owns it), so every finding below
+is reported here for the PA's single filing pass. **F3–F7 are the reviewer's; N1–N3 are mine.**
+
+| id | finding | severity | status |
+|---|---|---|---|
+| **F3** | `variantNameMatchesSourceText` (was 6 inline sites) is unanchored over RAW TEXT — `@phase = ".Published"`, a string literal, clears the variant guard | HIGH | pre-existing; **named in commit `2a9380c4`'s body + a ⚠ at the locus**; C makes the fix one edit |
+| **F4/F5** | `TRANSITION_CALL_RE` / `FIELD_ACCESS_RE` — `log("transition(@u)")` launders the presence guard; `log("@u.name")` fires a false positive | — | pre-existing, same root cause, separate arc |
+| **F6** | `transition(@presenceCell)` silently clears the guard though §14.12.3 lists only a `T`-shaped assignment or presence-discrimination | — | pre-existing |
+| **F7** | the §14.12 function-parameter lifecycle position (position table says YES) is entirely unenforced on both refs | — | pre-existing, absent rather than mis-implemented |
+| **N1** | **the absence-literal test had the SAME paren hole, and it FAILS OPEN** — `@u = (not)` classified as a transition, so the following read compiled CLEAN and read a `not` at runtime | MED→ | **CLOSED this round** (see §R2.3.2); was pre-existing on `origin/main` |
+| **N2** | a **multi-statement** top-level block — `@v = <User…>` then `@u = @v` in ONE `${…}` — leaves `@u` at `pre`, so the read fires. Single-statement control is clean. Both refs | MED | pre-existing, **open**, not chased (§R2.2.6) |
+| **N3** | guarding a WRITE with `given` does not propagate the transition outward (`given @v :> { @u = @v }`), so the write-position §14.12.6.1 form is inert. Both refs | MED | pre-existing, **open**; it is why F2 has no write-side escape (§R2.2.4) |
+
+Round-1 §10's four entries (match-arm discrimination, no cell-assignment type check, walker reach,
+the two map-build residuals) still stand and are **not** superseded — except §10.3's "false-positive
+surface is nil" clause, retracted in place above.
