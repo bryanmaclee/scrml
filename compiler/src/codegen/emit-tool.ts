@@ -296,11 +296,22 @@ function isValidJsIdentifier(name: string): boolean {
  * The scrml `pinned` binding-modifier (§21.8.1) is a scrml-scope identity
  * contract, not an ES concept — it is dropped from the emitted `import`.
  */
+/** Word-boundary source-token liveness — is `name` referenced anywhere in `src`?
+ * Conservative (matches the S207 import-prune granularity): a hit inside a string
+ * / comment over-keeps (safe); the goal is to never DROP a referenced name. */
+function identReferencedInSrc(name: string, src: string): boolean {
+  if (!name) return false;
+  return new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(src);
+}
+
 function buildImportHeader(fileAST: ASTNode): string {
   const imports = ((fileAST.imports as unknown)
     ?? ((fileAST.ast as ASTNode | undefined)?.imports as unknown)
     ?? []) as ASTNode[];
   if (!Array.isArray(imports) || imports.length === 0) return "";
+  // g-tool-over-imports-all-lib-exports (S339-peter) — the tool's non-import body
+  // source, for tree-shaking local `.scrml` imports to the names actually used.
+  const bodyRefSrc = collectServeImportReachabilitySrc(fileAST);
   const lines: string[] = [];
   for (const imp of imports) {
     if (!imp || imp.kind !== "import-decl") continue;
@@ -322,8 +333,22 @@ function buildImportHeader(fileAST: ASTNode): string {
       lines.push(`import ${names.join(", ")} from ${JSON.stringify(jsSource)};`);
       continue;
     }
-    const specs = (imp.specifiers as Array<{ imported: string; local: string }> | undefined) ?? [];
+    let specs = (imp.specifiers as Array<{ imported: string; local: string }> | undefined) ?? [];
     if (specs.length === 0) continue;
+    // g-tool-over-imports-all-lib-exports (S339-peter) — a LOCAL `.scrml` import's
+    // specifier list may have been AUGMENTED by the component-expander helper-bind
+    // pass (`component-expander.ts:4069`) with the lib's OTHER non-component exports,
+    // to resolve an inlined component's helper calls. A headless `kind="tool"`
+    // inlines NO components, so that augmentation is inapplicable — yet the extra
+    // specifiers are emitted verbatim (the tool target has no bundler tree-shake),
+    // so the tool over-imports the whole lib. Tree-shake a local-lib import to the
+    // names the tool BODY references (the same conservative source-token liveness
+    // the S207 prune uses). Non-`.scrml` (stdlib / vendor / bare) imports are left
+    // alone. Fail-safe: no body source → keep every specifier (no regression).
+    if (source.endsWith(".scrml") && bodyRefSrc) {
+      specs = specs.filter((sp) => identReferencedInSrc(sp.local || sp.imported, bodyRefSrc));
+      if (specs.length === 0) continue; // every bound name is dead → drop the whole (dead) import
+    }
     const named = specs
       .map((sp) => {
         // A quoted-string export name (a kebab-cased channel export, e.g.
