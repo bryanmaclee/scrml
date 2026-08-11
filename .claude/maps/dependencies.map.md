@@ -1,27 +1,51 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-08-09T15:20:00-06:00  commit: 616688ea
-# **INCREMENTAL over `35d4d32e` -> `616688ea` (19 commits, TWO operators).** Ancestry CHECKED
-# (invariant 48). `616688ea` is one DOCS-ONLY commit ahead of `origin/main` (`8863d457`).
-# External deps RE-VERIFIED unchanged: `git diff --name-only 35d4d32e..HEAD -- package.json` is
-# EMPTY. No add, no bump, no removal; version stays **v0.7.1**. Same for `stdlib/`,
-# `compiler/runtime/`, `compiler/native-parser/`, `lsp/`, `editors/`, `.github/` — all zero-diff.
-# **Everything that moved this window is an INTERNAL graph edge, not an external dependency.**
+# updated: 2026-08-11T14:53:28-06:00  commit: 4f034e13
+# generated-at: 4f034e13 (informational — not the currency anchor)
+# **INCREMENTAL over `8863d457` -> `4f034e13` (24 commits, TWO operators).** Ancestry CHECKED
+# (invariant 48). **The watermark is `origin/main`'s tip** — the prior stamp `616688ea` was the tip of
+# `wrap/s331` and bounded nothing (MAP-STAMP RULE, primary.map.md).
+# External deps RE-VERIFIED unchanged: `git diff --name-only 8863d457..4f034e13 -- package.json` is
+# EMPTY. No add, no bump, no removal; version stays **v0.7.1** — NINE windows now. Same for
+# `stdlib/`, `compiler/runtime/`, `compiler/native-parser/`, `lsp/`, `editors/`, `.github/` — all
+# zero-diff. **Everything that moved this window is an INTERNAL graph edge, not an external
+# dependency, for the second window running.**
 #
-# **⚠ ONE ROW BELOW WAS OVERSTATED AND IS REWRITTEN IN PLACE — read the correction before you scope
-# §18.5 work.** The prior generation's §18.5 row implied `planBlockArmLift` was the one classifier
-# every path routes through. **It is the shared segmenter+plan for the TWO RAW-STRING routes and has
-# exactly TWO call sites.** The single shared LEAF PREDICATE is `_blockTailIsValueExpr`, and the two
-# STRUCTURED-AST routes call it directly without going near `planBlockArmLift`. **Four emission
-# routes, not one.** A brief built on the overstatement sent an agent to two wrong loci in a single
-# session (S331). The four-route table is in domain.map.md.
+# **THREE NEW INTERNAL EDGES THIS WINDOW, and each exists because a caller needed something it could
+# not previously reach:**
+#   1. **`codegen/emit-each.ts` -> `codegen/reactive-deps.ts`** (`collectRequestIds`) — #511, §6.7.7.
+#      The per-item `<each>` body attr needed the file's registered `<request>` id set, which only the
+#      top-level request-ref paths had. Stashed on a module-level `_eachRequestIds`, cleared in the
+#      same `finally` as the two sibling per-file stashes.
+#   2. **`codegen/emit-lift.js` -> `codegen/emit-expr.ts`** (`reparseRequestRefEscapeHatch`, a NEW
+#      named import alongside the existing `emitExprField`) — #512, §6.7.7. **A DIFFERENT edge for the
+#      same defect class, and the difference is the lesson:** the `${for…lift}` attr path has no
+#      structured node to thread `requestIds` INTO, because `ast-builder.shouldSkipExprParse` skips any
+#      `<`-leading expr, so it must REPARSE first. **Two paths, one bug class, two mechanisms.**
+#   3. **`codegen/emit-ssr-render.ts` -> `codegen/errors.ts`** (`CGError`) — S339, §52.8. A pure
+#      builder gained a diagnostic sink so a previously SILENT SSR fallback could become a lint;
+#      `emit-server.ts:5162` now passes `errors` and `filePath` down to it.
 #
-# **THE OTHER ENTRY A READER MOST NEEDS FROM THIS WINDOW: the §12.2 Trigger-3 graph gained a SECOND
-# entry point on purpose, and the two must not be merged (#486).** `route-inference.ts` Step 3b visits
-# the derived-cell RHS that the per-function Step-3 loop structurally cannot reach, and the shared
-# reference walk `scanForServerOnlyBindingRefs` was EXTRACTED so the two callers cannot drift into
-# two rules on one confidentiality boundary. **The two module SETS in that file remain deliberately
-# different and this window did not change either one.**
+# Also this window, and it is a graph edge in the other direction: **`codegen/emit-tool.ts` now
+# depends on the SHAPE of what `component-expander.ts:4069` did to an import's specifier list.** The
+# helper-bind pass AUGMENTS a local `.scrml` import with the lib's other non-component exports; a
+# headless `kind="tool"` inlines no components, so the augmentation is inapplicable and the tool
+# over-imported the whole lib. The fix tree-shakes at the tool emitter. **This is a cross-stage
+# coupling with no type or test binding the two ends — note it before changing either.**
+#
+# **⚠ THE §18.5 ROW REMAINS AS REWRITTEN AT S331 AND IS RE-VERIFIED, NOT RE-DERIVED:**
+# `emit-logic.*` and `emit-control-flow.*` are ZERO-DIFF this window. `planBlockArmLift` is the shared
+# segmenter+plan for the TWO RAW-STRING routes and has exactly TWO call sites; the single shared LEAF
+# PREDICATE is `_blockTailIsValueExpr`, which the two STRUCTURED-AST routes call directly. **Four
+# emission routes, not one.** The four-route table is in domain.map.md.
+#
+# **THE §12.2 TRIGGER-3 GRAPH: the second entry point (Step 3b) is unchanged in SHAPE and rewritten in
+# REACH (#500).** Step 3b still visits the derived-cell RHS the per-function Step-3 loop structurally
+# cannot reach, and still shares the extracted `scanForServerOnlyBindingRefs` with the per-function
+# caller so the two cannot drift into two rules on one confidentiality boundary. **What changed is the
+# COLLECTOR feeding it:** `collectDerivedCellDecls` went from a two-field walk to a structural one, so
+# Step 3b now receives derived cells at any depth. **The two module SETS in that file remain
+# deliberately different and this window did not change either one.**
 #
 # Carried, still true: the #450 `show=`-SSR row stays REVERTED (#464); the #456 each-shorthand mount
 # stays NARROWED to RCDATA (#466); the MANGLER REGION FENCING row (#458) and its generalisation —
@@ -184,13 +208,23 @@ bodies) and `emit-event-wiring.ts` (the boundary itself).
 | What | Emitted by | Where it LANDS in the chunk | Re-runs on a soft nav? |
 |---|---|---|---|
 | cell inits, `<match>`/`<each>` dispatchers, engine substrate + hydration + opener `effect=` | `emit-client.ts` `generateClientJs` `lines[]` | **module-init** (script eval) | **NO** |
-| `<timer>` / `<poll>` `_scrml_timer_start(...)` | `emit-reactive-wiring.ts:1250` (via `emitReactiveWiring`, called at `emit-client.ts:2355`) | **module-init** | **NO — starts once, ever** |
+| `<timer>` / `<poll>` `_scrml_timer_start(scope, id, ms, fn, immediate)` | `emit-reactive-wiring.ts` `emitLifecycleNode` (via `emitReactiveWiring`, called at `emit-client.ts:2355`) | **module-init** | **NO — starts once, ever** |
+| **the `<timer>`/`<poll>`/`<timeout>` BODY itself** | `emit-reactive-wiring.ts` (the tick / `setTimeout` callback) — **and, until #510, ALSO by `collect.ts`'s `collectTopLevelLogicStatements`, which descended the tag and emitted the body a SECOND time** | the callback; **pre-#510 also module-init** | **NO** — but pre-#510 it RAN ONCE AT LOAD before the timer ever fired (`g-timer-poll-body-runs-once-at-module-init`). Fixed by `DEFERRED_LIFECYCLE_BODY_TAGS`; `<request>`/`<channel>` deliberately excluded from that set because their descent IS their only correct emission |
 | `<keyboard>`/`<mouse>`/`<gamepad>`, `<request>`, `<timeout>`, `_bindProps` | `emit-reactive-wiring.ts` (`classifyMarkupNodes` :1081) | **module-init** | **NO** |
 | desugared `on mount { … }` | `emit-reactive-wiring.ts:536` (`_onMountEffect`) | **module-init**, inside a generated `(async () => {…})().catch(...)` when it calls a server fn | **NO** |
 | `ref=` / `bind:` / `class:` wiring (`_scrml_bind_rewire`) | `emit-client.ts:2464-2470` | **module-init**, as a re-invokable root-scoped fn | **NO — deliberately NOT registered as a rehydrator** (it would re-attach listeners to elements that still carry boot's) |
 | delegated `click`/`submit` document listeners | `emit-event-wiring.ts` (inline, inside `_scrml_boot`) | inside `_scrml_boot` | **N/A — they survive a swap on their own** |
 | **non-delegable handlers + reactive DISPLAY binding** | `emit-event-wiring.ts` accumulators `nonDelegatedRewire` (:1021) + `reactiveRewire` (:1032) | **`_scrml_nav_rewire(root)` at :2165**, inside `_scrml_boot` | **YES — this is the entire rehydrator** |
 | §20.8.3 link-boost | `emit-client.ts:2497-2503`, gated on `fileHasOutlet` | module scope, its own `DOMContentLoaded` handler registered AFTER the author's | N/A (delegated on `document`) |
+
+**NEW THIS WINDOW (#510, §6.7.6) — the immediate first tick has a SPLIT locus, and both halves
+matter.** The GATE is at the emit site (`emit-reactive-wiring.ts` decides whether to append `, true`,
+`, _scrml_reactive_get("<var>")`, or nothing, based on tag and `running=`); the FIRE is at the arm
+site (`runtime-template.js` `_scrml_timer_start`'s fifth `immediate` param calls `tick()` once, after
+`setInterval`). **It routes through the same `tick()` as every other tick, so it inherits the queuing
+and error handling rather than duplicating them** — and it is never re-fired on resume, because it
+lives in `_scrml_timer_start` and not in `_scrml_timer_resume`. `<timer>` passes no fifth argument at
+all (§6.7.5), so its emission is byte-identical to pre-fix.
 
 **The boundary is emission ORDER, not a structure.** `emit-event-wiring.ts:715-716` pushes
 `(function() {` + `function _scrml_boot() {`; `:2186-2193` closes them and emits the dispatch
@@ -438,7 +472,7 @@ own). **A hand-maintained derived list rots silently** — that is the `docs/FAC
 is why the two membership limbs are recorded next to the list in the source.
 
 ## Tags
-#scrml #map #dependencies #trigger-3 #escalation-server-only #two-set-distinction #escalation-reasons #is-body-only-escalation #stdlib-client-safety #node-id-freshness #module-graph #stdlib #chunk-namespace #cell-accessor-rename #detect-runtime-chunks #post-emit-chunk-gates #runtime-chunks #chunk-dependencies #fnv1a #semdiff #pipeline #bun #acorn #sql-lex #tenant-egress #tenant-floor #theme-reset #content-hash #colorless-async #async-combinators #on-mount #gh237 #scheduling #writer-ownership #bind-value #i225 #directive-is-form-value #batch-hoist #session-establishment #outlet #one-landmark #shell-composition #esm-chunks #module-format #each-fence #dist-space #source-space #d4 #d5 #forward-index #server-import-unemitted #dbauth #db-migrate #sql-table-refs #queried-table-grants #quoteIdent #sql-ident #navigate-wave1c #chunk-loading-depth-counter #tailwind-outline #e-schema-011 #npm-publishable #no-workspaces #structural-if #§17.1.2 #if-cond #if-raw #five-consumers #absent-not-null #parity-canary #credit-from-attr-value #e-dg-002-false-fire #visit-structural-if-attr #scope-push-order #indirect-callee-resolver #indirect-inverse-caller-map #inverse-caller-map-byte-identical #escalation-only #fix-a #fix-b #server-fn-peer-alias-names #export-const-client-gate #ident-expr-precise #pruned-subtrees #module-init #rehydrator-boundary #scrml-nav-rewire #scrml-boot #register-rehydrator #outlet-resident #region-cleanups #route-region #emit-reactive-wiring #no-route-splitter #inject-server-call-awaits-via-ast #acorn-scope-model #scheduling-rewrite #reactive-set-direct-value-lift #engine-audit #audit-registry #cell-scope-accessors #project-state-child-rules #dispatch-called-targets #template-dispatch-scan #ai-legs-killed #cost-decision #parenthesize-await-server-calls #match-arm-autoawait #crossmodule-async-markup #cross-file-client-reads #export-let-var-emission #serve-tool-reachability #dist-relative-local-specifier #distLocalPathOf #§64-import-rebase #pr-405-landed #cps-choke-point #s239-catch #inject-promise-await-retired #collect-await-sites #apply-await-sites #inject-fn-body-server-call-awaits #given-match-try-descend #collect-structural-decl-names #§6.8 #w-if-in-each #each-nested-if-not-reactive #async-name-provider #async-name-facts #is-async-callee-name #is-server-boundary-callee #decision-sites-3-to-1 #one-provider-three-consumers #seed-trigger-not-result-set #u1 #dpa-020 #dpa-023 #client-server-fn-await #is-client-server-fn-call #client-async-body #can-suppress-never-strand #owning-file-filter #routemap-key-carries-the-file #decide-off-emitted-output #match-iife-header #await-absorb #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #reset-init-thunk-promise #session-proxy-bind #gh357 #csrf-token-disclosure #dangling-ref-class #ast-reads-current-user-ambient #channel-auth-only #region-fence #two-region-classes #lexical-vs-structural #join-around-runtime-slot #change-the-input-not-the-pattern #classify-brace-group #object-shorthand-expansion #binding-pattern-limit #proto-shorthand-b31 #register-fn-name #zero-width-alternation #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #session-cookie-wrap #bun-welcome-page #block-arm-value-position #show-false-ssr #each-shorthand-markup-fn-mount #spec-silent-shall #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #two-callsites-of-four-routes #separator-dependent #closes-block-statement #step-3b #§6.6.19 #e-derived-server-only-reach #scan-for-server-only-binding-refs #one-walk-two-callers #names-not-just-modules #refuse-not-escalate #sets-unchanged-this-window #e-sql-006-sink-drain #prepared-stmt-errors #request-ref-reparse #collect-request-ids #gate-to-registered-requests
+#scrml #map #dependencies #trigger-3 #escalation-server-only #two-set-distinction #escalation-reasons #is-body-only-escalation #stdlib-client-safety #node-id-freshness #module-graph #stdlib #chunk-namespace #cell-accessor-rename #detect-runtime-chunks #post-emit-chunk-gates #runtime-chunks #chunk-dependencies #fnv1a #semdiff #pipeline #bun #acorn #sql-lex #tenant-egress #tenant-floor #theme-reset #content-hash #colorless-async #async-combinators #on-mount #gh237 #scheduling #writer-ownership #bind-value #i225 #directive-is-form-value #batch-hoist #session-establishment #outlet #one-landmark #shell-composition #esm-chunks #module-format #each-fence #dist-space #source-space #d4 #d5 #forward-index #server-import-unemitted #dbauth #db-migrate #sql-table-refs #queried-table-grants #quoteIdent #sql-ident #navigate-wave1c #chunk-loading-depth-counter #tailwind-outline #e-schema-011 #npm-publishable #no-workspaces #structural-if #§17.1.2 #if-cond #if-raw #five-consumers #absent-not-null #parity-canary #credit-from-attr-value #e-dg-002-false-fire #visit-structural-if-attr #scope-push-order #indirect-callee-resolver #indirect-inverse-caller-map #inverse-caller-map-byte-identical #escalation-only #fix-a #fix-b #server-fn-peer-alias-names #export-const-client-gate #ident-expr-precise #pruned-subtrees #module-init #rehydrator-boundary #scrml-nav-rewire #scrml-boot #register-rehydrator #outlet-resident #region-cleanups #route-region #emit-reactive-wiring #no-route-splitter #inject-server-call-awaits-via-ast #acorn-scope-model #scheduling-rewrite #reactive-set-direct-value-lift #engine-audit #audit-registry #cell-scope-accessors #project-state-child-rules #dispatch-called-targets #template-dispatch-scan #ai-legs-killed #cost-decision #parenthesize-await-server-calls #match-arm-autoawait #crossmodule-async-markup #cross-file-client-reads #export-let-var-emission #serve-tool-reachability #dist-relative-local-specifier #distLocalPathOf #§64-import-rebase #pr-405-landed #cps-choke-point #s239-catch #inject-promise-await-retired #collect-await-sites #apply-await-sites #inject-fn-body-server-call-awaits #given-match-try-descend #collect-structural-decl-names #§6.8 #w-if-in-each #each-nested-if-not-reactive #async-name-provider #async-name-facts #is-async-callee-name #is-server-boundary-callee #decision-sites-3-to-1 #one-provider-three-consumers #seed-trigger-not-result-set #u1 #dpa-020 #dpa-023 #client-server-fn-await #is-client-server-fn-call #client-async-body #can-suppress-never-strand #owning-file-filter #routemap-key-carries-the-file #decide-off-emitted-output #match-iife-header #await-absorb #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #reset-init-thunk-promise #session-proxy-bind #gh357 #csrf-token-disclosure #dangling-ref-class #ast-reads-current-user-ambient #channel-auth-only #region-fence #two-region-classes #lexical-vs-structural #join-around-runtime-slot #change-the-input-not-the-pattern #classify-brace-group #object-shorthand-expansion #binding-pattern-limit #proto-shorthand-b31 #register-fn-name #zero-width-alternation #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #session-cookie-wrap #bun-welcome-page #block-arm-value-position #show-false-ssr #each-shorthand-markup-fn-mount #spec-silent-shall #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #two-callsites-of-four-routes #separator-dependent #closes-block-statement #step-3b #§6.6.19 #e-derived-server-only-reach #scan-for-server-only-binding-refs #one-walk-two-callers #names-not-just-modules #refuse-not-escalate #sets-unchanged-this-window #e-sql-006-sink-drain #prepared-stmt-errors #request-ref-reparse #collect-request-ids #gate-to-registered-requests #three-new-internal-edges #collect-request-ids #reparse-request-ref-escape-hatch #cgerror-into-a-pure-builder #two-paths-one-class-two-mechanisms #should-skip-expr-parse #component-expander-augmentation-coupling #tool-import-tree-shake #deferred-lifecycle-body-tags #timer-start-fifth-param #split-locus-gate-and-fire #never-refired-on-resume #zero-external-dep-diff #nine-windows-no-version-move
 
 ## Links
 - [primary.map.md](./primary.map.md)

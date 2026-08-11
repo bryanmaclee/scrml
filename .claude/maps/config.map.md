@@ -1,14 +1,28 @@
 # config.map.md
 # project: scrml
-# updated: 2026-08-02T18:40:00Z  commit: e80b692e
-# ⚑ CURRENCY RE-VERIFIED AT `616688ea` (S331 pass), NOT RE-WALKED. **Zero env-surface diff:** the
-# whole `git diff 35d4d32e..616688ea -- compiler/src/ scripts/ lsp/` contains **no added or removed**
-# `process.env` / `Bun.env` reference, and `.github/` + `package.json` are zero-diff, so the CI
-# secret surface is unchanged. Every key name below still holds.
-# NOTE (S313 pass): INCREMENTAL over `fe14c9b2` -> `e80b692e`. Re-walked for ONE reason — the CI
-# secret surface changed materially (both Anthropic-billed legs were killed at #351), and the prior
-# stamp's `ANTHROPIC_API_KEY` row asserted the opposite of what is true now. The compiler-side env-var
-# set is UNCHANGED and was re-verified by re-enumerating `process.env.*` / `Bun.env.*` at this HEAD.
+# updated: 2026-08-11T14:53:28-06:00  commit: 4f034e13
+# generated-at: 4f034e13 (informational — not the currency anchor)
+# ⚑ **WATERMARK CORRECTED THIS PASS.** Line 3 now carries `4f034e13`, an ancestor of `origin/main`,
+# per the MAP-STAMP RULE at the top of primary.map.md. The stamp is the CURRENCY ANCHOR
+# `scripts/state.ts` parses; **"content as of X" below carries the provenance.** The prior convention
+# — freeze line 3 at the last walk's SHA to signal "not re-walked" — broke the instrument while
+# communicating nothing this header does not already say.
+#
+# ⚑ **CONTENT AS OF `e80b692e` — CURRENCY RE-VERIFIED AT `4f034e13`, NOT RE-WALKED.** `e80b692e` was
+# one of only two stamps in this map set that was ALREADY an ancestor of `origin/main` on arrival.
+#
+# **Zero env-surface diff, verified by DIFFING rather than by assuming:**
+# `git diff 8863d457..4f034e13 -- compiler/src/ scripts/ lsp/` contains **no added and no removed**
+# `process.env` / `Bun.env` line (grep count of `^[+-].*(process\.env|Bun\.env)` over the window diff
+# is **0**), and `.github/` + `package.json` are zero-diff, so the CI secret surface is unchanged.
+# Every key name below still holds.
+#
+# ⚠ **THE THREE NEW `scripts/` FILES THIS WINDOW WERE CHECKED INDIVIDUALLY, NOT COVERED BY THE
+# AGGREGATE.** `boot.ts`, `dpa-debt.ts` and `source-text-regex-census.ts` are 688 new lines in a
+# directory this map's enumeration covers, so "the diff has no env line" had to hold for the ADDED
+# files too, not merely net-out across the window. It does: none reads an environment variable — they
+# resolve repo paths and shell out to `git` / `gh` / sibling scripts. **`gh` reads its own auth from
+# its own config, not from an env key this map would list.**
 
 No `.env.example` or `.env.template` in the repo. No `.env*` files were read (per config-map policy, `.env*` files other than `.env.example`/`.env.template` are never read by this mapper).
 

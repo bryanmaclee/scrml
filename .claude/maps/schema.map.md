@@ -1,25 +1,35 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-07-31T03:18:23Z  commit: fe14c9b2
-# ⚑ CURRENCY RE-VERIFIED AT `616688ea` (S331 pass), NOT RE-WALKED — and the stamp stays honestly older.
-# `git diff --name-only 35d4d32e..616688ea -- compiler/src/types` is **EMPTY** (EIGHT windows now).
-# The window's 19 changed source files added **no declared type**: `E-DERIVED-SERVER-ONLY-REACH`'s
-# machinery is module-local functions + two `Map<string,string>` returns in `route-inference.ts`,
-# and the §18.5 work is module-local `RegExp`s + a `{ leading: string[]; tail: string | null }`
-# return shape on `planBlockArmLift` (`emit-logic.ts:4715`) — a codegen-internal plan object, not
-# a `FileAST` or `ast.ts` type. See domain.map.md / dependencies.map.md, not this file.
-# NOTE (S326 pass): **the AST half is DELIBERATELY still at `fe14c9b2` and that is an honest stamp, not
-# ⚠ **STAMP CORRECTION (S328, no re-walk): `97576f35` is a PR-BRANCH TIP** (`origin/wrap/s326-bryan`,
-# #459), squash-merged as `b7f89952`; it is NOT an ancestor of HEAD. Read it as `b7f89952`. True HEAD
-# at the S328 pass: **`35d4d32e`**. **The AST half stays at `fe14c9b2` and is now SEVEN windows honest**
-# — `git diff fe14c9b2..35d4d32e -- compiler/src/types` is EMPTY. #466 (the `<each>` RCDATA body
-# decision) added a `const` LOCAL, not a declared shape, so nothing is owed here. See primary.map.md
-# invariant 48.
-# neglect** — `git diff fe14c9b2..97576f35 -- compiler/src/types` is EMPTY, six windows running. ONE
-# additive entry appended this pass, attributed at its own site: the NEW codegen-internal
-# `ObjectShorthandRegion` / `BraceGroupKind` shapes (#458, at `97576f35`). Prior S302 addition (the
-# `ifRaw`/`ifCond` fields on the three structural node kinds) and everything before it carry their own
-# earlier walks. An honest older stamp beats a false "verified at HEAD".
+# updated: 2026-08-11T14:53:28-06:00  commit: 4f034e13
+# generated-at: 4f034e13 (informational — not the currency anchor)
+# ⚑ **WATERMARK CORRECTED THIS PASS.** Line 3 now carries `4f034e13`, an ancestor of `origin/main`,
+# per the MAP-STAMP RULE at the top of primary.map.md. The stamp is the CURRENCY ANCHOR
+# `scripts/state.ts` parses; **"content as of X" below carries the provenance.** The prior convention
+# — freeze line 3 at the last walk's SHA to signal "not re-walked" — broke the instrument while
+# communicating nothing this header does not already say.
+#
+# ⚑ **CONTENT AS OF `fe14c9b2` — CURRENCY RE-VERIFIED AT `4f034e13`, NOT RE-WALKED. NINE windows.**
+# `git diff --name-only 8863d457..4f034e13 -- compiler/src/types` is **EMPTY**.
+#
+# ⚠ **AND THE OLD STAMP WAS ITSELF OFF-MAIN — THIS MAP IS THE WORST INSTANCE IN THE SET.** `fe14c9b2`
+# is the tip of `wrap/s302`; `git merge-base --is-ancestor fe14c9b2 origin/main` returns FALSE. It sat
+# on line 3 for roughly TEN sessions. The S331 pass looked straight at it and concluded *"the stamp
+# stays honestly older"* — **right about AGE, and it never asked about ANCESTRY.** An honest older
+# stamp is still worthless if it bounds nothing: every "zero diff since `fe14c9b2`" command written
+# into this header was, strictly, unbounded. (The CONCLUSION survives — re-checked this pass from
+# `8863d457`, which IS on main — but it survived by luck, not by the check.)
+#
+# This window's 28 changed source files added **no declared type**. Specifically: §6.6.19's structural
+# walk is module-local functions returning `Array<Record<string, unknown>>` plus a `boolean` key
+# predicate (`route-inference.ts:3677`/`:3730`); the §52.8 SSR lint changed `buildOneRenderer`'s return
+# from `SsrEachRenderer | null` to `SsrEachRenderer | { fallback: string }` — **an INLINE union at the
+# function signature, not a named exported shape** (`emit-ssr-render.ts`); the §6.7 lifecycle work added
+# `DEFERRED_LIFECYCLE_BODY_TAGS: ReadonlySet<string>` (a module const in `collect.ts`) and a fifth
+# `immediate` PARAMETER on `_scrml_timer_start` (`runtime-template.js`, untyped JS). None is a `FileAST`
+# or `ast.ts` type. See domain.map.md / dependencies.map.md, not this file.
+#
+# Superseded header notes (S326/S328 stamp-correction prose for `97576f35`) are DELETED, not carried:
+# the rule they were groping toward is now stated once, normatively, at the top of primary.map.md.
 
 The compiler's "schema" is its own AST, not an application data model. Root catalog:
 `compiler/src/types/ast.ts` (2104 lines, 114 exported interfaces/types, ~91 distinct `kind` discriminants — unchanged since fbb4d9fd/df2ac831; this window's schema-differ.js changes below added NO ast.ts shape, same as the S287 DB-authoritative tier before it). Read that file directly for the exhaustive list; this map groups it and calls out the load-bearing shapes.

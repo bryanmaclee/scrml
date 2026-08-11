@@ -1,29 +1,44 @@
 # build.map.md
 # project: scrml
-# updated: 2026-08-09T15:20:00-06:00  commit: 616688ea
-# **PARTIALLY RE-WALKED over `35d4d32e` -> `616688ea`.** Ancestry CHECKED (invariant 48).
+# updated: 2026-08-11T14:53:28-06:00  commit: 4f034e13
+# generated-at: 4f034e13 (informational — not the currency anchor)
+# **PARTIALLY RE-WALKED over `8863d457` -> `4f034e13`.** Ancestry CHECKED (invariant 48).
+# **The watermark is `origin/main`'s tip** — the prior stamp `616688ea` was a branch tip that bounded
+# nothing (MAP-STAMP RULE, primary.map.md).
+#
 # **`.github/`, `package.json`, `bunfig.toml`, `Dockerfile` and every git hook are ZERO-DIFF this
-# window** — verified `git diff --name-only 35d4d32e..HEAD -- .github/ package.json` is EMPTY. Every
-# CI step, trigger, packaging, CLI and hook claim below is UNCHANGED and re-verified, not re-derived.
+# window, for a SECOND consecutive window** — verified `git diff --name-only 8863d457..4f034e13 --
+# .github/ package.json` is EMPTY. Every CI step, trigger, packaging, CLI and hook claim below is
+# UNCHANGED and re-verified, not re-derived.
 #
-# **WHAT DID MOVE IS `scripts/`, AND ALL THREE CHANGES ARE PROBE-INTEGRITY FIXES — which is itself
-# the load-bearing fact.** `scripts/` is now explicitly inside the review floor's **code-bearing**
-# population, on the reasoning that a probe defect is exactly the class the floor exists to catch
-# (S328 found three in one session). A script that measures the repo is not exempt from being
-# measured.
-#   · `scripts/review-debt.ts` (+119, #481) — a CODE-BEARING carve-out rate + an auto-widening scan.
-#     See the rewritten "PR review-floor tracker" section.
-#   · `scripts/state.ts` (+93, #485) — three ledger-integrity fixes (marker truncation, duplicate-id
-#     double-count, heading-vs-marker drift detection). See the rewritten "Gap-status vocabulary"
-#     section.
-#   · `scripts/s34-census.ts` (+6, #473) — `fileURLToPath` instead of `new URL(...).pathname`,
-#     closing the **Windows-only `ENOENT`** this map set carried as an open defect for four windows.
-#     **The four-window-old "s34-census is broken" note is now RETIRED, not softened.**
+# **WHAT MOVED IS `scripts/`, AND THIS TIME IT GAINED THREE WHOLE FILES (688 lines) — none of which
+# is a gate.** Last window `scripts/` moved by three probe-INTEGRITY fixes; this window it moved by
+# three NEW PROBES. The standing fact holds and is now load-bearing twice: `scripts/` is explicitly
+# inside the review floor's **code-bearing** population, because a probe defect is exactly the class
+# the floor exists to catch. **A script that measures the repo is not exempt from being measured.**
 #
-# **None of the three is a CI gate.** They are PA-side instruments. The gate topology below is
-# unchanged: `gate` stays at 12 steps, `advisory-review` stays DISABLED, `cloud-maps` Stage 2 stays
-# DELETED (no scheduled map refresh — a map stamp is exactly as old as the last wrap), and the
-# wide-corpus emit-differential (#428) remains the standing BY-HAND pre-land gate for codegen.
+#   · **`scripts/boot.ts` (NEW, 422L, #492 → #493 → #498)** — the executable boot read-set gate +
+#     PICKUP-led digest. **Written because a memory NAVIGATES and does not GATE.** S335 short-booted,
+#     skipping both user-voice ledgers and the per-user profile, and led orientation with a fresh
+#     option-menu instead of the agreed pickup. See its own section below.
+#   · **`scripts/dpa-debt.ts` (NEW, 121L, #507)** — the deliberation-queue probe. **Written because
+#     `handOffs/dpa-queue.md` was the one file the dPA drains and NO boot probe read it**; `dpa-024`
+#     sat `BANKED — UNRUN` for six sessions as a result. See its own section below.
+#   · **`scripts/source-text-regex-census.ts` (NEW, 145L, #513)** — the probe for the S338 post-AST
+#     source-text rule. See its own section below.
+#
+# **NONE OF THE THREE IS A CI GATE, AND EACH SAYS SO IN ITS OWN HEADER — that is a repeated design
+# decision, not an omission.** The stated reason is `pa-base` §8's cry-wolf shape: a red-over-backlog
+# gate gets bypassed and then deleted, so a probe that reports beats a gate that is ignored. Two of
+# the three go further and name the DEFAULT as detection: `boot.ts`'s bare run never fails a boot on a
+# network hiccup, and `--check` exits 1 on exactly TWO classes (a MISSING read-set file, an ABSENT
+# PICKUP block) — **a repo merely BEHIND origin is a warning, because that is timing, not a defect.**
+#
+# The gate topology below is unchanged: `gate` stays at 12 steps, `advisory-review` stays DISABLED,
+# `cloud-maps` Stage 2 stays DELETED (**no scheduled map refresh — a map stamp is exactly as old as
+# the last wrap, and this window proved the second half of that sentence: it can also be off-main and
+# bound nothing**), and the wide-corpus emit-differential (#428) remains the standing BY-HAND pre-land
+# gate for codegen.
 
 ## Development Commands (root package.json scripts)
 compile — `bun run compiler/src/cli.js compile`
@@ -200,6 +215,109 @@ written rots silently.
   because a baked line number in a maintained artifact rots silently and nothing fails (the 3,140-line
   stale SPEC-INDEX and the ~9x-wrong LOC figure are the two precedents, and are why `docs/FACTS.md`
   exists). See error.map.md for the buckets and the traps it defeats.
+
+## `scripts/boot.ts` — the executable boot read-set gate (NEW #492/#493/#498) — NOT a CI gate
+
+**Why it exists, in one sentence: a memory NAVIGATES and does not GATE, so it "leaves room for
+misdirection."** S335 short-booted — skipped BOTH user-voice ledgers and the per-user profile — and
+led orientation with a fresh option-menu instead of the agreed left-off pickup. The remedy is an
+executable check the boot always runs, not a stronger reminder.
+
+**Four things it does, and the third is the design decision worth copying:**
+
+1. **FETCHES both repos READ-ONLY** and reports behind/ahead/dirty. Fetch yes; pull, commit and push
+   never — so it is safe to run at any time.
+2. **VERIFIES every Profile-A read-set source EXISTS and is CURRENT.** Both user-voice ledgers and
+   the per-user profile are in the set **BY CONSTRUCTION** (that is the S335 miss encoded).
+3. **DELEGATES the mandatory probes to their authoritative scripts** — `review-debt.ts`, `threads.ts`,
+   and `gh` for issues/PRs/runs — **never a reimplementation, so a probe cannot drift from its source
+   of truth.** This is the same rule `dpa-debt.ts` states from the other direction, and it is the
+   generalisable one: **a second implementation of a probe is a second thing that can be wrong.**
+4. **EXTRACTS and PRINTS the `## ⏭ NEXT-SESSION PICKUP` block from `hand-off.md` FIRST** — orientation
+   leads with the handshake, not a menu.
+
+**Modes.** `bun scripts/boot.ts` = digest (default) · `--json` = machine-readable · `--check` = the
+strict gate · `--no-probes` = skip the `gh`/sub-script calls (fast, offline; still fetches).
+
+**DETECTION, NOT CONTROL, BY DEFAULT — and the failure classes are enumerated, not implied.**
+`--check` exits 1 **iff** a read-set file is MISSING or the PICKUP block is ABSENT. **A repo merely
+BEHIND origin is a WARNING, not a failure** — that is timing, not a defect, and the `/boot` skill
+still owns pull.
+
+**DERIVE-DON'T-DECLARE, GUARDED — with an honest residual it states about itself.** The read-set
+manifest MIRRORS the `.pa-base/profile` Profile-A block. Because a hand manifest can drift from the
+contract, **each item carries a `needle` proving its mandate, and `driftCheck` asserts that needle is
+still present in the mandating artifact** — so the manifest cannot silently outlive a read the
+contract renamed or dropped. **The REVERSE direction is NOT auto-detected** (the contract adding a
+read the manifest lacks), and the script says why rather than hiding it: the profile prose also NAMES
+reads it tells you to SKIP, so a token scan would be cry-wolf (§8). The manifest is reviewed against
+the profile at each amendment.
+
+**WINDOWS-FIRST, and it names the precedent.** `ROOT` via `fileURLToPath`, **never**
+`new URL().pathname` — that is the S262/#473 Windows break this map set tracked for four windows.
+Sub-processes via `spawnSync` with explicit arg arrays, no shell.
+
+**SCOPE — additive.** It does NOT touch bryan's boot contract (`.pa-base/profile` · `/boot` ·
+`pa-base.md`); it is wired into peter's `/boot` only, and the shared-contract amendment was ROUTED.
+
+## `scripts/dpa-debt.ts` — the deliberation-queue probe (NEW #507) — NEVER a gate, never in CI
+
+**The rule it discharges is `pa-base` §10's most-repeated failure: an obligation recorded in one
+artifact while every probe reads another.** `handOffs/dpa-queue.md` is the ONE file the dPA drains,
+and until this landed **no boot probe read it** — the boot gate probed review-debt, the thread board,
+gh issues/PRs and CI, every inbound channel except the deliberation queue. **Measured cost:**
+`dpa-024` sat `BANKED — UNRUN` from S331 to S337 (six sessions), filed under "OWED BY BRYAN" when it
+was the question only the DD could answer, so it sat in a list where it could never move; bryan
+surfaced it himself. Separately, `dpa-022`/`dpa-023` read `BANKED — UNRUN` for a full day AFTER they
+had run. **The rule: a channel the probe does not read does not exist to the PA.**
+
+**BIDIRECTIONAL, deliberately, and this is the part to copy.** The queue states in its own words that
+the PA-maintained status TABLE supersedes the per-item `status:` lines, so the probe reads the table.
+**It ALSO parses the per-item lines and reports any DISAGREEMENT** — because the dpa-022/023 miss was
+a STALE TABLE, and **a probe that trusts its authoritative surface unconditionally cannot see that
+surface go wrong.**
+
+⚠ **ITS CLASSIFIER IS ANCHORED ON THE LEADING TOKEN, AND THE COMMENT EXPLAINING WHY NAMES THE THIRD
+INSTANCE OF A REPEATING BUG.** A `contains` test reports dpa-022/023 as UNRUN, because those cells
+NARRATE the string (*"this row read \"BANKED — UNRUN\" until S325 corrected it"*) — **a false
+positive on the very rows whose staleness motivated the probe.** Same unanchored-match class as the
+boot gate's PICKUP `indexOf` bug (#492) and the S337 ledger-section regex. It also reads ratification
+from **column 3, not column 2**, because the dPA never flips a row to `ratified` (RUN-not-RATIFY) —
+reading col 2 alone reports dpa-019/020/021 as owed when they were ratified at S319.
+
+## `scripts/source-text-regex-census.ts` — the post-AST source-text rule's probe (NEW #513) — deliberately NOT a CI gate
+
+**THE RULE (bryan, S338):** *a regex applied to SOURCE TEXT in a POST-AST stage requires a one-line
+justification, or the structural route.* **Binds NEW-OR-TOUCHED code only.** Detection is a RATIO,
+not an inspection.
+
+**Why the rule exists: five adversarial reviews across two unrelated branches in ONE session found
+the same substitution every time** — a text-level shortcut standing in for a structural one, where
+the parsed tree was already in hand. Five instances, five authors, no coordination: a `wired`
+classification table validated by COUNTING TEXT OCCURRENCES (circularly — the delta it measured
+included the declaration that existed only because the table had already said "wired");
+`bareAttrValueIsWired` restating codegen's `name.startsWith("on")` as `/^on[a-z]/`, which then
+drifted on `on=` / `on-tap=` / `on_tap=`; an `import.meta` fence regexing source text TWO LINES
+BEFORE the `parseExprToNode` call that would have answered it structurally; `bareBindingReferenceOf`
+anchored on trimmed RHS source text, so `(@v)` defeated a guard `@v` tripped; a lifecycle variant
+branch matching `.Published` inside a STRING LITERAL. **None was caught by a 22,385-test suite or a
+7,375-artifact differential — and that is a property of the class, not a gap in the gates: a regex
+over source text is indistinguishable from a correct check until someone writes a string literal.**
+
+**WHAT IS AND IS NOT A DEFECT — the partition IS the instrument.** A regex over source text in the
+tokenizer, block-splitter, ast-builder, expression-parser or native-parser is **CORRECT** — turning
+text into structure is their job. The defect class is a stage that **already holds the parsed tree**
+asking the text instead. `PRE_AST_MARKERS` encodes the exempt set. **The raw count of regexes (11,196
+literals at the time of writing) is worthless and the script says so — never quote it.**
+
+⚠ **IT REPORTS A FLOOR, NOT A COUNT, AND YOU MUST SAY SO WHEREVER YOU QUOTE IT.** It keys on argument
+identifier NAMES, so it cannot see `postRe.test(t)` — **which is exactly where the confirmed
+pre-existing defect at `type-system.ts:26048` lives.** The opaque-argument population (`t`, `s`, `v`,
+`x`, …) is reported SEPARATELY and is unclassifiable by this instrument. **The script records this
+about itself in its own header:** its author built a name-pattern-matching probe to detect the
+practice of pattern-matching instead of resolving structure, and it inherited the same blind spot.
+**The honest upgrade path is named too** — a structural successor would walk the TypeScript AST and
+resolve each regex argument to its declared type and origin rather than guessing from its name.
 
 ## PR review-floor tracker — `scripts/review-debt.ts` (NEW, S316) — NOT a CI gate
 
@@ -605,7 +723,7 @@ pre-push — **SCOPE AND TRIGGER BOTH CHANGED THIS WINDOW.**
 None. No Dockerfile / docker-compose in this repo — see infra.map.md.
 
 ## Tags
-#scrml #map #build #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist #gate-topology #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #failure-name-sets #cry-wolf #new-ref-push-skip #set-e-trap #pre-push-scope #b7dda491 #browser-baseline #failure-name-set #bidirectional-baseline #s34-census #§34.0 #row-provenance #fetch-depth-0 #diff-scoped-gate #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #no-scheduled-map-refresh #advisory-review-disabled #skipped-step-behind-red-step #gap-attribute-bag #locus-attr #partial-impl #proven-gate #import-meta-main #review-debt-script #pr-reviews-md #puppeteer-skip-download #windows-ci-flake #boot-step-0.6 #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #script-vs-module-goggle #node-check-blind-to-tla #bun-vm-script-blind #classic-script-no-type-module #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #453-exclusions-printed #exit-code-2-invalid-comparison #compile-failure-is-data #u1-corpus-emit-retired #import-meta-classic-script #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #s34-census-base-fallback #weakens-no-gate #root-vs-position #review-debt-code-bearing #two-rates-one-signal #volume-statistic-not-alarm #directory-whitelist-not-blacklist #scripts-is-code-bearing #count-threshold-not-percentage #bite-test #widen-before-you-count #auto-widen #widen-ceiling #epoch-clearing-not-list-full #cry-wolf-guard-deleted-not-tuned #state-ts-ledger-integrity #marker-truncation-internal-gt #duplicate-gap-id-double-count #throw-on-conflicting-status #heading-marker-drift-13 #warn-only-not-gated #maps-watermark-no-ancestry-check #s34-census-windows-fix-landed #fileurltopath
+#scrml #map #build #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist #gate-topology #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #failure-name-sets #cry-wolf #new-ref-push-skip #set-e-trap #pre-push-scope #b7dda491 #browser-baseline #failure-name-set #bidirectional-baseline #s34-census #§34.0 #row-provenance #fetch-depth-0 #diff-scoped-gate #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #no-scheduled-map-refresh #advisory-review-disabled #skipped-step-behind-red-step #gap-attribute-bag #locus-attr #partial-impl #proven-gate #import-meta-main #review-debt-script #pr-reviews-md #puppeteer-skip-download #windows-ci-flake #boot-step-0.6 #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #script-vs-module-goggle #node-check-blind-to-tla #bun-vm-script-blind #classic-script-no-type-module #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #453-exclusions-printed #exit-code-2-invalid-comparison #compile-failure-is-data #u1-corpus-emit-retired #import-meta-classic-script #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #s34-census-base-fallback #weakens-no-gate #root-vs-position #review-debt-code-bearing #two-rates-one-signal #volume-statistic-not-alarm #directory-whitelist-not-blacklist #scripts-is-code-bearing #count-threshold-not-percentage #bite-test #widen-before-you-count #auto-widen #widen-ceiling #epoch-clearing-not-list-full #cry-wolf-guard-deleted-not-tuned #state-ts-ledger-integrity #marker-truncation-internal-gt #duplicate-gap-id-double-count #throw-on-conflicting-status #heading-marker-drift-13 #warn-only-not-gated #maps-watermark-no-ancestry-check #s34-census-windows-fix-landed #fileurltopath #boot-read-set-gate #a-memory-navigates-it-does-not-gate #pickup-led-digest #delegate-dont-reimplement #detection-not-control #two-failure-classes-enumerated #behind-is-timing-not-a-defect #derive-dont-declare-guarded #needle-driftcheck #honest-residual-reverse-direction #windows-first #fileurltopath-not-url-pathname #dpa-debt-probe #a-channel-the-probe-does-not-read-does-not-exist #bidirectional-probe #stale-table #anchored-not-contains #third-instance-of-unanchored-match #ratification-lives-in-column-3 #run-not-ratify #source-text-regex-census #post-ast-source-text-rule #five-authors-one-substitution #invisible-to-differentials #pre-ast-is-exempt #ratio-not-inspection #reports-a-floor-not-a-count #never-quote-the-raw-regex-count #probe-inherited-its-own-blind-spot #structural-successor-named #new-or-touched-only #not-a-ci-gate #cry-wolf-shape #zero-github-diff #second-window-running
 
 ## Links
 - [primary.map.md](./primary.map.md)

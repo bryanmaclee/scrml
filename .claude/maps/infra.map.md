@@ -1,22 +1,28 @@
 # infra.map.md
 # project: scrml
-# updated: 2026-08-06T23:38:11-06:00  commit: 97576f35
-# ⚑ CURRENCY RE-VERIFIED AT `616688ea` (S331 pass), NOT RE-WALKED. `git diff --name-only
-# 35d4d32e..616688ea -- .github/` is **EMPTY** — zero workflow, trigger, step or secret diff.
-# `advisory-review` stays DISABLED; `cloud-maps` Stage 2 stays DELETED (no scheduled map refresh).
-# ⚠ **STAMP CORRECTION (S328, no re-walk): `97576f35` IS NOT AND WAS NEVER `HEAD`.** It is the tip
-# of `origin/wrap/s326-bryan` (PR #459); main carries only its SQUASH, `b7f89952`, and
-# `git merge-base --is-ancestor 97576f35 HEAD` returns **FALSE**. Read this map's stamp as
-# **`b7f89952`**. **This map was deliberately NOT re-walked at S328** — its surface has zero diff
-# over `97576f35..35d4d32e`, verified per-map below — so its CONTENT is unchanged and honest.
-# True HEAD at the S328 pass: **`35d4d32e`**. See primary.map.md invariant 48.
-# Zero-diff evidence: `git diff 97576f35..35d4d32e -- .github/` is EMPTY.
-# NOTE (S326 pass): INCREMENTAL over `e80b692e` -> `97576f35`. Held at `e80b692e` across four windows
-# because the infra surface had zero diff; re-walked now for exactly ONE change — **`ci.yml` gained a
-# `workflow_dispatch` trigger (#454)**, which is the first RECOVERY LEVER this repo has had for a
-# dropped-webhook outage. The S313 findings below (both Anthropic-billed legs KILLED at #351,
-# `advisory-review` manual-only, `cloud-maps` Stage 2 DELETED) are re-verified UNCHANGED at this HEAD.
-# Everything else in this map still carries its `e80b692e` walk and nothing in it moved.
+# updated: 2026-08-11T14:53:28-06:00  commit: 4f034e13
+# generated-at: 4f034e13 (informational — not the currency anchor)
+# ⚑ **WATERMARK CORRECTED THIS PASS.** Line 3 now carries `4f034e13`, an ancestor of `origin/main`,
+# per the MAP-STAMP RULE at the top of primary.map.md. The stamp is the CURRENCY ANCHOR
+# `scripts/state.ts` parses; **"content as of X" below carries the provenance.** The prior convention
+# — freeze line 3 at the last walk's SHA to signal "not re-walked" — broke the instrument while
+# communicating nothing this header does not already say.
+#
+# ⚑ **CONTENT AS OF `97576f35` (== main's squash `b7f89952`) — CURRENCY RE-VERIFIED AT `4f034e13`,
+# NOT RE-WALKED.** `git diff --name-only 8863d457..4f034e13 -- .github/` is **EMPTY** — zero workflow,
+# trigger, step or secret diff, for a second consecutive window. `advisory-review` stays DISABLED;
+# `cloud-maps` Stage 2 stays DELETED (no scheduled map refresh).
+#
+# ⚠ **THIS MAP IS THE PROOF THAT DESCRIBING A DEFECT IS NOT FIXING IT.** Since S328 this header has
+# carried, correctly and in bold, that `97576f35` is a PR-branch tip (`origin/wrap/s326-bryan`, #459),
+# that main carries only its squash `b7f89952`, and that `git merge-base --is-ancestor 97576f35 HEAD`
+# returns FALSE. **It then left `97576f35` on line 3 for three more passes.** A map that documents its
+# own broken watermark and does not replace it has told the reader something and told the TOOL nothing
+# — and the tool is what `{maps_fills}` consults before every dev dispatch. Corrected here.
+#
+# Carried and re-verified: `ci.yml`'s `workflow_dispatch` trigger (#454) — the repo's only recovery
+# lever for a dropped-webhook outage — and the S313 findings (both Anthropic-billed legs KILLED at
+# #351, `advisory-review` manual-only, `cloud-maps` Stage 2 DELETED).
 
 scrml itself ships NO Docker/Terraform/k8s/serverless infra — this map covers only what exists: the GitHub Actions CI surface and the docs-website hosting signal. **Re-verified at `e80b692e` (S313).** The material change since the prior stamp: `cloud-maps.yml`'s AI stage is GONE and `advisory-review.yml` is manual-fire only — see below.
 
