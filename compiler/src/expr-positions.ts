@@ -50,6 +50,7 @@
  */
 
 import type { Span } from "./types/ast.ts";
+import { bareAttrValueIsClientBinding } from "./attr-lowering.ts";
 
 /**
  * How the `value` of an `ExprPosition` must be read.
@@ -100,38 +101,58 @@ export type ExprPositionKind =
   | "callee-name";
 
 /**
- * Does the compiler emit CLIENT-EXECUTED code for this position?
+ * Does CLIENT-EXECUTED code reference this position's source as a JS BINDING —
+ * a free identifier the emitted bundle must DECLARE, or the browser throws
+ * `ReferenceError`?
  *
- * ═══ THE TWO CONSUMERS ASK DIFFERENT QUESTIONS. THIS FIELD IS THE DIFFERENCE. ═══
+ * ═══ ONE QUESTION. THE FIELD USED TO ASK TWO, AND THAT IS WHAT LEAKED. ═══
  *
  * `dependency-graph.ts` asks **"where does user expression SOURCE appear?"**, so
- * it wants every position regardless of wiring: a `@cell` named in prose that the
- * compiler renders as text is still a consumption for E-DG-002 accounting.
+ * it wants every position regardless of lowering: a `@cell` named in prose that
+ * the compiler renders as text is still a consumption for E-DG-002 accounting.
+ * It reads this field ZERO times.
  *
- * `codegen/client-read-seed.ts` asks **"which identifiers does CLIENT-EXECUTED
- * code reference?"**, because its answer decides whether a value is copied into a
- * `.client.js`. Those questions have different answers, and every gap between
- * them was a §14.8 leak: prose that looks like code, an attribute that lowers to
- * a static HTML string, a name that is merely shadowed. Three leaks across two
- * review rounds, all the same mistake at different sites.
+ * `codegen/client-read-seed.ts` asks **"which identifiers must this bundle
+ * DECLARE?"**, because its answer decides whether a value is copied into a
+ * `.client.js`. This field is that answer, and it is the ONLY consumer.
  *
- * ═══ AND THE FAILURE DIRECTIONS ARE NOT SYMMETRIC ═══
+ * The predecessor of this field was called `wired` and asked "does the compiler
+ * emit client-executed code for this position?". That is a DIFFERENT question
+ * and it has a different answer on real shapes, which is exactly how a
+ * server-only `export const` reached a browser:
+ *
+ *     <p if=ARGON2_PEPPER>gated</p>
+ *
+ * emits client-executed code — `if (_scrml_cs_reactive_get("ARGON2_PEPPER"))` —
+ * so the old question said "wired", and the seed copied the const's VALUE into
+ * `models.client.js`. But that reference is a STRING KEY into the reactive cell
+ * store. The emitted bundle names `ARGON2_PEPPER` nowhere as an identifier, so
+ * the declaration resolves nothing and is pure leak. `show=@x`,
+ * `bind:value=@x`, `class:on=@x` and `disabled=@x` are the same shape pointed
+ * the other way: they DO emit client-executed code (inside an `_scrml_effect`),
+ * and they reference the cell by key, never as a binding.
+ *
+ * So: cell-store reads and static HTML attribute strings are BOTH `"not-binding"`
+ * — not because they are the same lowering, but because they give the same
+ * answer to the one question this field asks. A consumer that needs "is this
+ * lowered to static output" is asking something this field does not answer and
+ * must not pretend to; add a second, separately-MEASURED field for it.
+ *
+ * ═══ THE FAILURE DIRECTIONS ARE NOT SYMMETRIC, SO THERE IS NO THIRD VALUE ═══
  *
  * Over-emitting silently ships a secret to a browser. Under-emitting throws a
- * loud `ReferenceError` the adopter can see and report. So `"unknown"` is NOT
- * consumed by the confidentiality gate — a position whose wiring cannot be
- * determined fails CLOSED.
+ * loud `ReferenceError` the adopter can see and report. The predecessor type had
+ * a third value, `"unknown"`, whose docblock argued at length that an
+ * undetermined position fails CLOSED — and NOTHING EVER EMITTED IT. Every
+ * unmeasured position was forced to the leak direction instead. A two-valued
+ * type cannot carry that fiction: an undetermined position is not representable,
+ * so a new position cannot ship unmeasured. `"not-binding"` IS the fail-closed
+ * value, and it is a real one.
  *
- *  - `"client"`  the compiler emits client-executed code referencing this
- *                position's source, under the extraction its `kind` prescribes.
- *  - `"static"`  the compiler lowers this position to static output (SSR text or
- *                an HTML attribute string). No client-executed code references it.
- *  - `"unknown"` undetermined. Treated as NOT wired by any consumer that cares.
- *
- * Every `"client"` classification below is MEASURED against emitted output, not
- * inferred — see the table above `bareAttrValueIsWired`.
+ * Every `"binding"` classification below is MEASURED against emitted output, not
+ * inferred.
  */
-export type WiredClass = "client" | "static" | "unknown";
+export type ClientBindingClass = "binding" | "not-binding";
 
 /** One position on one AST node. */
 export interface ExprPosition {
@@ -152,34 +173,62 @@ export interface ExprPosition {
    *  markup-read edge for it. FALSE for positions that are credited for
    *  reader-accounting only. */
   render: boolean;
-  /** Whether the compiler emits CLIENT-EXECUTED code for this position. See
-   *  `WiredClass` — this is the field a confidentiality consumer gates on, and
-   *  `"unknown"` means NOT wired. */
-  wired: WiredClass;
+  /** Whether client-executed code names this position's source as a JS BINDING
+   *  the emitted bundle must declare. See `ClientBindingClass` — this is the
+   *  field the §14.8 confidentiality consumer gates on, and it answers exactly
+   *  that one question. */
+  clientBinding: ClientBindingClass;
 }
 
 type Rec = Record<string, unknown>;
 
 /**
- * ExprNode-valued fields that carry USER identifier references, in one place.
+ * Every SINGLE-VALUED `ExprNode` field an AST node can carry, in one place.
  *
- * VERIFIED AGAINST THE AST, not carried. The retired client-read walker's list
- * also contained `testExpr`, `subjectExpr`, `targetExpr` and `returnExpr`; a
- * census of `compiler/src/types/ast.ts` declarations and `ast-builder.js`
- * construction sites finds **zero of each** — the only matches anywhere in
- * `compiler/src` are same-named LOCALS in `emit-expr` / `emit-server` /
- * `emit-reactive-wiring` and a local function in `meta-checker`. They were
- * phantoms, and a phantom is worse in this file than anywhere else: two passes
- * are told to trust it as the single source of truth, so overstated coverage
- * reads exactly like real coverage.
+ * ═══ THE LIST IS GATED IN BOTH DIRECTIONS, AND ONE DIRECTION IS NOT ENOUGH ═══
  *
- * Net of the census, the shared list is the dependency graph's historical six
- * plus `defaultExpr` (3 type declarations / 9 construction sites — genuinely
- * real, and genuinely missing from that side).
+ * `compiler/tests/unit/expr-positions-shared-table.test.js` §8 enumerates every
+ * `X: ExprNode` declaration in `compiler/src/types/ast.ts` and requires each to
+ * be either IN this list or on an EXCLUSION list carrying a reason. That gate is
+ * the reason this list can be trusted, and it exists because the one-directional
+ * version of it could not catch either real failure:
+ *
+ *   - the list once carried FOUR PHANTOMS (`testExpr`, `subjectExpr`,
+ *     `targetExpr`, `returnExpr`) — zero declarations, zero construction sites.
+ *     A phantom is worse here than anywhere else: two passes are told to trust
+ *     this as the single source of truth, so overstated coverage reads exactly
+ *     like real coverage.
+ *   - and it MISSED `resultExpr`, which is declared at `types/ast.ts:1150` with
+ *     six construction sites, and whose absence was a LIVE cross-file
+ *     `ReferenceError` at exit 0 with no diagnostic:
+ *
+ *         on mount { @a = match @phase { .Idle :> NEEDED, .Ready :> "ready" } }
+ *         -> index.client.js:  if (_scrml_match_2 === "Idle") return NEEDED;
+ *         -> NEEDED declared nowhere.
+ *
+ *     `route-inference.ts`'s own copy of this list already had it, so the table
+ *     built to end list-drift disagreed with a fourth copy still in the tree.
+ *
+ * A test that asserts "these 7 are present and these 4 historical phantoms are
+ * absent" passes with three BRAND-NEW phantoms added. Only enumerating the AST
+ * closes it.
+ *
+ * SINGLE-VALUED is a contract, not an accident: both consumers read `node[f]`
+ * and hand it straight to an ExprNode walker, so an `ExprNode[]` field cannot
+ * live here. The two that exist (`argExprNodes`, `scrutineeExprs`) are on the
+ * gate's exclusion list with their reasons.
  */
 export const EXPR_NODE_FIELDS: readonly string[] = [
   "exprNode", "initExpr", "condExpr", "valueExpr", "iterExpr", "headerExpr",
   "defaultExpr",
+  // `match-arm-inline` (`types/ast.ts:1150`, 6 sites in `ast-builder.js`).
+  "resultExpr",
+  // `when-effect` / `when-message` single-expression bodies (`:1380`, `:1394`).
+  "bodyExpr",
+  // `cleanup(() => …)` (`:1366`).
+  "callbackExpr",
+  // `upload(file, url)` (`:1403`, `:1407`).
+  "fileExpr", "urlExpr",
 ];
 
 /**
@@ -202,39 +251,69 @@ const STRUCTURAL_RAW_EXPR_FIELDS: readonly string[] = [
 
 /**
  * MEASURED: for a BARE (unquoted, non-parenthesized) attribute value — the
- * `variable-ref` shape — does the compiler wire a client reference, or lower it
- * to a static HTML attribute string?
+ * `variable-ref` shape — does the emitted client bundle name the source as a JS
+ * BINDING?
  *
- * Method: compile `<tag ATTR=MARKCONST>` where `MARKCONST` is a client-read
- * export const, compile the same file WITHOUT that element, and diff the count of
- * `MARKCONST` occurrences in the emitted client bundle. A positive delta is a
- * wired reference; zero, with the name appearing in the emitted HTML instead, is
- * static text.
+ * ═══ THE DECISION IS NOT RESTATED HERE. IT IS IMPORTED. ═══
  *
- *     WIRED   if=  ·  onclick=  oninput=  onsubmit=  onchange=  onkeydown=
- *             onmouseover=   (every `on…` handler tested)
- *     STATIC  class=  id=  title=  style=  data-*=  aria-*=  src=  href=
- *             role=  name=  show=  key=  disabled=  checked=  readonly=
- *             value=  placeholder=  hidden=
+ * `bareAttrValueIsClientBinding` is `emit-html.ts`'s OWN route guard, shared
+ * (`./attr-lowering.ts`), so the two cannot disagree. They did: this file
+ * carried `/^on[a-z]/` against codegen's `name.startsWith("on")`, and the four
+ * names in the gap — `on=`, `on-tap=`, `on_tap=`, `on<digit>=` — every one
+ * MEASURED as an under-emit. An arc that replaced two drifting walkers with one
+ * table had introduced a new drifting predicate inside it.
  *
- * `bind:*=` and `class:*=` reject a bare non-cell value upstream
- * (`E-ATTR-010` / `E-ATTR-013`), so they cannot reach this predicate with one;
- * they are deliberately NOT listed as wired, because the fail-closed direction
- * for an unmeasured name is "not wired".
+ * The answer depends on the VALUE SHAPE as well as the attribute name, which is
+ * the other thing the old name-only predicate got wrong. Within `if=` alone:
  *
- * The OTHER value shapes need no name test — all three are wired on every
- * attribute name tested, including plain `class=` / `title=` / `data-x=`:
- * a `call-ref` (`title=X.go()`), a parenthesized `expr` (`title=(X)`), and a
- * `${…}`-bearing quoted string (`title="v-${X}"`).
+ *     if=(X)   if=X()          BINDING      `if ((X))` / `if ((X()))`
+ *     if=X     if=X.f  if=X[0] NOT-BINDING  `_scrml_cs_reactive_get("X")`
+ *
+ * The three NON-bare shapes need no test at all — a `call-ref` (`title=X.go()`),
+ * a parenthesized `expr` (`title=(X)`) and a `${…}`-bearing quoted string
+ * (`title="v-${X}"`) are each MEASURED to emit a real binding reference on every
+ * attribute name tested, `class=` / `title=` / `data-x=` / `<textarea>`
+ * included.
  */
-function bareAttrValueIsWired(attrName: unknown): boolean {
-  if (typeof attrName !== "string" || !attrName) return false;
-  const n = attrName.toLowerCase();
-  return n === "if" || /^on[a-z]/.test(n);
+function bareAttrValueBinding(attrName: unknown, bareValue: unknown): ClientBindingClass {
+  return bareAttrValueIsClientBinding(attrName, bareValue) ? "binding" : "not-binding";
 }
 
 function isExprNode(v: unknown): boolean {
   return !!v && typeof v === "object" && typeof (v as Rec).kind === "string";
+}
+
+/**
+ * A REACTIVE-CELL NAME IS NEVER A JS BINDING. Enforced here rather than trusted
+ * at ~25 emit sites.
+ *
+ * `cell-name` and `cell-name-list` carry cell names, and a cell is addressed in
+ * emitted client code by STRING KEY (`_scrml_cs_reactive_get("hits")`) — there is
+ * no `hits` identifier in the bundle to declare, on any lowering, ever. That is a
+ * property of the KIND, so it is decided from the kind, once, and an emit site
+ * that passes the wrong class for one of these two kinds cannot produce a wrong
+ * position.
+ *
+ * It also makes the alternate groups safe: the `@`-variable-ref group hands the
+ * `@`-sigil consumer a `cell-name` and the identifier consumer a parsed
+ * `expr-node` off the SAME source, and those two alternates must not carry the
+ * same answer to a question only one of them is about.
+ */
+function bindingFor(kind: ExprPositionKind, declared: ClientBindingClass): ClientBindingClass {
+  if (kind === "cell-name" || kind === "cell-name-list") return "not-binding";
+  return declared;
+}
+
+/**
+ * Does this alternate carry nothing at all? An empty `refs` array and an empty
+ * string are not representations of the source — they are the ABSENCE of one, and
+ * an absent alternate must not consume the group's single slot.
+ */
+function isEmptyPositionValue(v: unknown): boolean {
+  if (v == null) return true;
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === "string") return v.length === 0;
+  return false;
 }
 
 function nonEmptyString(v: unknown): v is string {
@@ -265,20 +344,34 @@ export function forEachExprPosition(
 
   const emit = (
     kind: ExprPositionKind, value: unknown, origin: string,
-    span: Span | null, render: boolean, wired: WiredClass,
+    span: Span | null, render: boolean, clientBinding: ClientBindingClass,
   ): void => {
     if (!supports.has(kind)) return;
-    cb({ kind, value, origin, span, render, wired });
+    cb({ kind, value, origin, span, render, clientBinding: bindingFor(kind, clientBinding) });
   };
 
-  /** Emit the FIRST alternate whose kind the consumer supports. */
+  /**
+   * Emit the first alternate that the consumer supports AND that actually
+   * CARRIES something.
+   *
+   * "Carries something" is not decoration. `refs` is the first alternate of the
+   * expression group and four lift-path producers in `ast-builder.js` hardcode
+   * `refs: []`, so a supported-but-empty `cell-name-list` used to win over a real
+   * parsed `exprNode` sitting right behind it and the consumer got NOTHING. A
+   * PREFERENCE order between representations of the same source only means
+   * anything among representations that exist.
+   */
   const emitGroup = (
     alternates: ReadonlyArray<{ kind: ExprPositionKind; value: unknown; origin: string }>,
-    span: Span | null, render: boolean, wired: WiredClass,
+    span: Span | null, render: boolean, clientBinding: ClientBindingClass,
   ): void => {
     for (const alt of alternates) {
       if (!supports.has(alt.kind)) continue;
-      cb({ kind: alt.kind, value: alt.value, origin: alt.origin, span, render, wired });
+      if (isEmptyPositionValue(alt.value)) continue;
+      cb({
+        kind: alt.kind, value: alt.value, origin: alt.origin, span, render,
+        clientBinding: bindingFor(alt.kind, clientBinding),
+      });
       return;
     }
   };
@@ -309,13 +402,19 @@ export function forEachExprPosition(
     for (const attr of n.attrs as unknown[]) {
       if (!attr || typeof attr !== "object") continue;
       const a = attr as Rec;
-      // A few AST shapes hang the ExprNode directly on the attr rather than on
-      // `attr.value`; cheap to cover and it costs nothing when absent.
-      const wiredBare: WiredClass = bareAttrValueIsWired(a.name) ? "client" : "static";
+      // DEFENSIVE, and currently UNREACHED: an ExprNode hung directly on the attr
+      // object rather than on `attr.value`. Every attr producer in the tree builds
+      // `{name, value, span}` (`ast-builder.js:3087/3100/3384/3388/5442/5445`) and
+      // `native-parser/tag-frame.js` carries no `exprNode` at all, so this loop
+      // fires nowhere today. It is kept because it costs nothing when absent — and
+      // labelled UNREACHED because an unlabelled defensive branch in the file two
+      // passes trust as the single source of truth reads exactly like coverage.
+      // A parsed ExprNode is the expression shape, which is a binding position on
+      // every attribute name (measured).
       for (const f of EXPR_NODE_FIELDS) {
-        if (isExprNode(a[f])) emit("expr-node", a[f], `attr.${f}`, spanOf(a) ?? nodeSpan, attrRender, wiredBare);
+        if (isExprNode(a[f])) emit("expr-node", a[f], `attr.${f}`, spanOf(a) ?? nodeSpan, attrRender, "binding");
       }
-      forEachAttrValuePosition(a.value, "attr.value", spanOf(a) ?? nodeSpan, attrRender, wiredBare, supports, cb);
+      forEachAttrValuePosition(a.value, "attr.value", spanOf(a) ?? nodeSpan, attrRender, a.name, supports, cb);
     }
   }
 
@@ -333,16 +432,19 @@ export function forEachExprPosition(
   // the pre-convergence dependency graph credited it — with edges — from outside
   // its markup branch for exactly that reason.
   if (n.ifCond && typeof n.ifCond === "object") {
-    // The gate's attribute name IS `if`, which the measured table says wires a
-    // bare value — so a bare `if=CONST` on a structural element is wired too.
-    forEachAttrValuePosition(n.ifCond, "ifCond", nodeSpan, true, "client", supports, cb);
+    // The gate's attribute name IS `if`, and passing it rather than a
+    // pre-computed class is what keeps this identical to the markup `if=`: the
+    // structural `<each … if=X>` and the markup `<p if=X>` lower through the
+    // SAME §17.1 mount gate to the SAME `_scrml_cs_reactive_get("X")`, so they
+    // must classify the same way, and now they cannot do otherwise.
+    forEachAttrValuePosition(n.ifCond, "ifCond", nodeSpan, true, "if", supports, cb);
   }
 
   // ---- 3. Structural opener raw expressions. ------------------------------
   for (const f of STRUCTURAL_RAW_EXPR_FIELDS) {
     // MEASURED: `<each in=…>` lowers to `const _items = <inExprRaw>` in the
     // client bundle; the key/count/subject openers likewise.
-    if (nonEmptyString(n[f])) emit("expr-source", n[f], f, nodeSpan, true, "client");
+    if (nonEmptyString(n[f])) emit("expr-source", n[f], f, nodeSpan, true, "binding");
   }
 
   // ---- 4. Raw BODY text of the raw-captured structural elements. ----------
@@ -350,10 +452,10 @@ export function forEachExprPosition(
   // in addition to (partially) walkable children. The raw capture is the ONLY
   // representation for shapes the child rebuild does not reach.
   if (n.kind === "each-block" && nonEmptyString(n.bodyRaw)) {
-    emit("markup-source", n.bodyRaw, "each.bodyRaw", nodeSpan, true, "client");
+    emit("markup-source", n.bodyRaw, "each.bodyRaw", nodeSpan, true, "binding");
   }
   if (n.kind === "match-block" && nonEmptyString(n.armsRaw)) {
-    emit("markup-source", n.armsRaw, "match.armsRaw", nodeSpan, true, "client");
+    emit("markup-source", n.armsRaw, "match.armsRaw", nodeSpan, true, "binding");
   }
 
   // ---- 5. `<engine>` internals. ------------------------------------------
@@ -364,7 +466,7 @@ export function forEachExprPosition(
   // node carries NO usable `exprNode` — only the raw `expr` string.
   if (n.kind === "bare-expr" && n._onMountEffect === true &&
       !isExprNode(n.exprNode) && nonEmptyString(n.expr)) {
-    emit("statement-source", n.expr, "onMount.expr", nodeSpan, false, "client");
+    emit("statement-source", n.expr, "onMount.expr", nodeSpan, false, "binding");
   }
 }
 
@@ -379,26 +481,36 @@ function forEachAttrValuePosition(
   span: Span | null,
   /** Whether reads here are RENDER-context reads — see the call sites. */
   renderBase: boolean,
-  /** How a BARE (unquoted, non-parenthesized) value on THIS attribute is
-   *  lowered — the only shape whose wiring depends on the attribute NAME.
-   *  See `bareAttrValueIsWired` for the measured table. */
-  bareWired: WiredClass,
+  /** The OWNING ATTRIBUTE'S NAME — not a pre-computed classification.
+   *
+   *  The bare `variable-ref` shape is the one whose lowering depends on the
+   *  attribute name AND on the value, and only this function has the value. A
+   *  caller that pre-computed the class from the name alone could not tell
+   *  `onclick=go` (a binding) from `onclick=go.now` (a static HTML attribute),
+   *  and did not. */
+  attrName: unknown,
   supports: ReadonlySet<ExprPositionKind>,
   cb: (position: ExprPosition) => void,
 ): void {
   const emit = (
-    kind: ExprPositionKind, value: unknown, origin: string, render: boolean, wired: WiredClass,
+    kind: ExprPositionKind, value: unknown, origin: string, render: boolean,
+    clientBinding: ClientBindingClass,
   ): void => {
     if (!supports.has(kind)) return;
-    cb({ kind, value, origin, span, render, wired });
+    cb({ kind, value, origin, span, render, clientBinding: bindingFor(kind, clientBinding) });
   };
+  /** See the sibling in `forEachExprPosition` — empty alternates are skipped. */
   const emitGroup = (
     alternates: ReadonlyArray<{ kind: ExprPositionKind; value: unknown; origin: string }>,
-    render: boolean, wired: WiredClass,
+    render: boolean, clientBinding: ClientBindingClass,
   ): void => {
     for (const alt of alternates) {
       if (!supports.has(alt.kind)) continue;
-      cb({ kind: alt.kind, value: alt.value, origin: alt.origin, span, render, wired });
+      if (isEmptyPositionValue(alt.value)) continue;
+      cb({
+        kind: alt.kind, value: alt.value, origin: alt.origin, span, render,
+        clientBinding: bindingFor(alt.kind, clientBinding),
+      });
       return;
     }
   };
@@ -406,29 +518,33 @@ function forEachAttrValuePosition(
   // A bare unquoted attribute value arrives as a plain string. It is literal
   // text — only a `@`-sigil consumer has anything to find in it.
   if (typeof attrVal === "string") {
-    if (attrVal.length > 0) emit("literal-text", attrVal, `${originBase}(text)`, false, "static");
+    if (attrVal.length > 0) emit("literal-text", attrVal, `${originBase}(text)`, false, "not-binding");
     return;
   }
   if (!attrVal || typeof attrVal !== "object") return;
   const v = attrVal as Rec;
 
   // `title="box ${@theme}"` — `{kind:"string-literal", value}`. The `${}`
-  // interiors are the code; the rest is literal text. MEASURED wired on every
+  // interiors are the code; the rest is literal text. MEASURED a binding on every
   // attribute name tested, `class`/`data-*`/`aria-*`/`src`/`style` included: the
-  // compiler lowers it to a `setAttribute` effect.
+  // compiler lowers it to `el.setAttribute("title", \`v-${X}\`)`, in which `X` is
+  // a real identifier the bundle must declare.
   if (v.kind === "string-literal" && nonEmptyString(v.value) && v.value.includes("${")) {
-    emit("template-text", v.value, `${originBase}.template`, false, "client");
+    emit("template-text", v.value, `${originBase}.template`, false, "binding");
   }
 
   // `attr=@x` / `bind:value=@x` / `attr=someName` — `{kind:"variable-ref", name,
   // exprNode}`. A `@`-sigil consumer wants the cell NAME; an identifier consumer
   // wants the parsed node (which is where a non-`@` binding read lives).
   //
-  // THIS IS THE SHAPE WHOSE WIRING DEPENDS ON THE ATTRIBUTE NAME, and getting
-  // that wrong shipped a secret: `<p class=SECRET>hello</p>` lowers to the static
-  // HTML string `class="SECRET"` with no client wiring at all, yet the value was
+  // THIS IS THE SHAPE WHOSE LOWERING DEPENDS ON THE ATTRIBUTE NAME **AND** ON THE
+  // VALUE, and getting either half wrong shipped a secret. `<p class=SECRET>`
+  // lowers to the static HTML string `class="SECRET"` with no client wiring at
+  // all; `<p if=SECRET>` lowers to `_scrml_cs_reactive_get("SECRET")`, a string
+  // key. Neither names `SECRET` as an identifier, yet in both the value was
   // copied into the client bundle where the declaration was the ONLY line
-  // mentioning it. `bareWired` carries the measured answer.
+  // mentioning it. `bareAttrValueBinding` carries the measured answer and takes
+  // both inputs.
   //
   // NOT gated on `kind !== "call-ref"`: a call-ref's `name` can itself be an
   // `@`-path (`onclick=@src.advance(.B)`), and that has always been a cell read.
@@ -445,34 +561,49 @@ function forEachAttrValuePosition(
     }
     // Last resort when the parse produced nothing: the raw identifier text.
     alternates.push({ kind: "expr-source", value: v.name, origin: `${originBase}.name(raw)` });
-    // A call-ref reaching here is the `@`-path form; a call-ref is wired on EVERY
-    // attribute name (measured), so it does not take the bare-value classification.
-    emitGroup(alternates, renderBase, v.kind === "call-ref" ? "client" : bareWired);
+    // A call-ref is a CALL, not a bare value: measured to emit a real binding
+    // reference on every attribute name (`class=X.go()` → `function(event){
+    // X.go(); }`), so it does not take the bare-value classification.
+    emitGroup(
+      alternates, renderBase,
+      v.kind === "call-ref" ? "binding" : bareAttrValueBinding(attrName, v.name),
+    );
   }
 
   // `if=(@a && @b)` — `{kind:"expr", raw, refs, exprNode}`. `refs` is the AST
   // builder's pre-extracted `@cell` list; `exprNode` is the parse; `raw` is the
   // last-resort text. These are ALTERNATES — taking more than one double-counts.
   //
-  // MEASURED wired on every attribute name tested, `title=(X)` / `class=(X)` /
-  // `data-x=(X)` included: the parenthesized form is an EXPRESSION attribute and
-  // the compiler emits an effect for it regardless of the attribute's name.
-  {
+  // MEASURED a binding on every attribute name tested, `title=(X)` / `class=(X)` /
+  // `data-x=(X)` / `<textarea title=(X)>` included: the parenthesized form is an
+  // EXPRESSION attribute and the compiler emits an effect for it regardless of
+  // the attribute's name.
+  //
+  // THE `variable-ref` GUARD IS ON THE GROUP, NOT ON ONE ALTERNATE. It used to
+  // sit on the `exprNode` alternate alone, so a `variable-ref` value carrying a
+  // `raw` (or a `refs`) matched BOTH groups — one source, two positions, with
+  // CONTRADICTING `clientBinding` (the bare-value answer from the group above,
+  // `"binding"` from this one). No producer builds that shape today
+  // (`ast-builder.js:2919/3372/5720`, `native-parser/tag-frame.js:1445`), but
+  // `native-walker/attrvalue-exprnode-walker.ts` asserts in its own docblock that
+  // it exists, and a per-alternate guard is one new alternate away from the same
+  // bug. The group is the EXPRESSION shape's; a `variable-ref` is not it.
+  if (v.kind !== "variable-ref") {
     const alternates: Array<{ kind: ExprPositionKind; value: unknown; origin: string }> = [];
     if (Array.isArray(v.refs)) {
       alternates.push({ kind: "cell-name-list", value: v.refs, origin: `${originBase}.refs` });
     }
-    if (isExprNode(v.exprNode) && v.kind !== "variable-ref") {
+    if (isExprNode(v.exprNode)) {
       alternates.push({ kind: "expr-node", value: v.exprNode, origin: `${originBase}.exprNode` });
     }
     if (nonEmptyString(v.raw)) {
       alternates.push({ kind: "expr-source", value: v.raw, origin: `${originBase}.raw` });
     }
-    if (alternates.length > 0) emitGroup(alternates, renderBase, "client");
+    if (alternates.length > 0) emitGroup(alternates, renderBase, "binding");
   }
 
   // `onclick=fn(@var, CONST)` — `{kind:"call-ref", name, args, argExprNodes?}`.
-  // MEASURED wired on every attribute name tested, `title=X.go()` /
+  // MEASURED a binding on every attribute name tested, `title=X.go()` /
   // `class=X.go()` / `data-x=X.go()` included.
   if (v.kind === "call-ref") {
     // The CALLEE. `utils.handleClick` names ONE binding (`utils`) plus property
@@ -481,7 +612,7 @@ function forEachAttrValuePosition(
     // transitive reactive reads, the client seed marks the base binding — so it
     // is one position with one kind and two readings.
     if (nonEmptyString(v.name)) {
-      emit("callee-name", v.name, `${originBase}.callee`, false, "client");
+      emit("callee-name", v.name, `${originBase}.callee`, false, "binding");
     }
     // The ARGUMENTS. `argExprNodes` and the raw `args` strings are NOT
     // alternates: `argExprNodes` is `undefined` for the WHOLE call as soon as
@@ -490,12 +621,12 @@ function forEachAttrValuePosition(
     // both is safe — every consumer here is idempotent on a set.
     if (Array.isArray(v.argExprNodes)) {
       for (const en of v.argExprNodes as unknown[]) {
-        if (isExprNode(en)) emit("expr-node", en, `${originBase}.argExprNodes[]`, renderBase, "client");
+        if (isExprNode(en)) emit("expr-node", en, `${originBase}.argExprNodes[]`, renderBase, "binding");
       }
     }
     if (Array.isArray(v.args)) {
       for (const arg of v.args as unknown[]) {
-        if (nonEmptyString(arg)) emit("expr-source", arg, `${originBase}.args[]`, renderBase, "client");
+        if (nonEmptyString(arg)) emit("expr-source", arg, `${originBase}.args[]`, renderBase, "binding");
       }
     }
   }
@@ -513,10 +644,13 @@ function forEachEnginePosition(
   n: Rec,
   nodeSpan: Span | null,
   supports: ReadonlySet<ExprPositionKind>,
-  emit: (kind: ExprPositionKind, value: unknown, origin: string, span: Span | null, render: boolean, wired: WiredClass) => void,
+  emit: (
+    kind: ExprPositionKind, value: unknown, origin: string, span: Span | null,
+    render: boolean, clientBinding: ClientBindingClass,
+  ) => void,
   emitGroup: (
     alternates: ReadonlyArray<{ kind: ExprPositionKind; value: unknown; origin: string }>,
-    span: Span | null, render: boolean, wired: WiredClass,
+    span: Span | null, render: boolean, clientBinding: ClientBindingClass,
   ) => void,
 ): void {
   // §51.0.J `derived=` — the modern EXPRESSION form. `derivedExprNode` is a
@@ -533,13 +667,13 @@ function forEachEnginePosition(
     }
     // MEASURED: `derived=(X == 1 ? .A : .B)` lowers to
     // `const __scrml_derived_v = ((X === 1 ? "A" : "B"));` in the client bundle.
-    if (alternates.length > 0) emitGroup(alternates, nodeSpan, true, "client");
+    if (alternates.length > 0) emitGroup(alternates, nodeSpan, true, "binding");
   }
   // §51.0.J `derived=match @src { … }` — the arm bodies. A projection body, not
   // statements: its arm targets are VARIANTS, and the only code in it would be a
   // `${…}` interior.
   if (nonEmptyString(n.inlineMatchBody)) {
-    emit("markup-source", n.inlineMatchBody, "engine.inlineMatchBody", nodeSpan, true, "client");
+    emit("markup-source", n.inlineMatchBody, "engine.inlineMatchBody", nodeSpan, true, "binding");
   }
 
   const record = n._record as Rec | undefined;
@@ -547,13 +681,13 @@ function forEachEnginePosition(
 
   // §51.0.E `initial=@cell` and §52 `server=@source` hydration reads.
   if (nonEmptyString(meta?.initialCell)) {
-    emit("cell-name", meta!.initialCell, "engine.initialCell", nodeSpan, true, "client");
+    emit("cell-name", meta!.initialCell, "engine.initialCell", nodeSpan, true, "binding");
   }
   if (nonEmptyString(meta?.serverSource)) {
     // The ROOT segment of a dotted source path is the subscribed cell
     // (`@driver.current_status` → `driver`).
     const root = (meta!.serverSource as string).split(".")[0];
-    if (root) emit("cell-name", root, "engine.serverSource", nodeSpan, true, "client");
+    if (root) emit("cell-name", root, "engine.serverSource", nodeSpan, true, "binding");
   }
 
   const stateChildren = meta?.stateChildren;
@@ -569,7 +703,7 @@ function forEachEnginePosition(
       if (nonEmptyString(sc.bodyRaw)) {
         emit(
           sc.isColonShorthand === true ? "statement-source" : "markup-source",
-          sc.bodyRaw, "engine.stateChild.bodyRaw", nodeSpan, true, "client",
+          sc.bodyRaw, "engine.stateChild.bodyRaw", nodeSpan, true, "binding",
         );
       }
       if (Array.isArray(sc.onTransitionElements)) {
@@ -579,7 +713,7 @@ function forEachEnginePosition(
           if (nonEmptyString(ot.bodyRaw)) {
             emit(
               ot.isColonShorthand === true ? "statement-source" : "markup-source",
-              ot.bodyRaw, "engine.stateChild.onTransition.bodyRaw", nodeSpan, true, "client",
+              ot.bodyRaw, "engine.stateChild.onTransition.bodyRaw", nodeSpan, true, "binding",
             );
           }
           // §51.0.H `<onTransition if=expr>` — the transition GUARD. Captured
@@ -587,7 +721,7 @@ function forEachEnginePosition(
           if (nonEmptyString(ot.ifExprRaw)) {
             // MEASURED: the guard lowers to `if (X === 1) { … }` in the client
             // engine substrate.
-            emit("expr-source", unwrapGuardRaw(ot.ifExprRaw), "engine.stateChild.onTransition.ifExprRaw", nodeSpan, true, "client");
+            emit("expr-source", unwrapGuardRaw(ot.ifExprRaw), "engine.stateChild.onTransition.ifExprRaw", nodeSpan, true, "binding");
           }
         }
       }
@@ -597,7 +731,7 @@ function forEachEnginePosition(
           if (!otoRaw || typeof otoRaw !== "object") continue;
           const after = (otoRaw as Rec).after;
           if (nonEmptyString(after)) {
-            emit("template-text", after, "engine.stateChild.onTimeout.after", nodeSpan, true, "client");
+            emit("template-text", after, "engine.stateChild.onTimeout.after", nodeSpan, true, "binding");
           }
         }
       }
@@ -607,13 +741,13 @@ function forEachEnginePosition(
     // both would double-visit every state-child body. When the symbol-table
     // parse has not run (or produced nothing), the raw body is the only source
     // there is.
-    emit("markup-source", n.rulesRaw, "engine.rulesRaw", nodeSpan, true, "client");
+    emit("markup-source", n.rulesRaw, "engine.rulesRaw", nodeSpan, true, "binding");
   }
 
   // §51.0.R `<onIdle after=${expr}unit>` — the engine-wide watchdog.
   const idle = meta?.idleWatchdog as Rec | null | undefined;
   if (idle && nonEmptyString(idle.after)) {
-    emit("template-text", idle.after, "engine.idleWatchdog.after", nodeSpan, true, "client");
+    emit("template-text", idle.after, "engine.idleWatchdog.after", nodeSpan, true, "binding");
   }
 }
 

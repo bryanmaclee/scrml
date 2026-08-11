@@ -23,10 +23,15 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 import {
   forEachExprPosition,
   EXPR_NODE_FIELDS,
 } from "../../src/expr-positions.ts";
+
+const REPO_SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src");
 
 /** Every kind — what `dependency-graph.ts` supports. */
 const ALL = new Set([
@@ -245,6 +250,8 @@ describe("expr-positions §3 — the shared ExprNode field list", () => {
     // This is the file two passes are told to trust as the single source of
     // truth, so overstated coverage is worse here than anywhere else: it reads
     // exactly like real coverage and there is nothing to contradict it.
+    //
+    // HISTORICAL NAMES ONLY — §8 is the gate that catches a NEW one.
     for (const phantom of ["testExpr", "subjectExpr", "targetExpr", "returnExpr"]) {
       expect({ phantom, present: EXPR_NODE_FIELDS.includes(phantom) })
         .toEqual({ phantom, present: false });
@@ -369,44 +376,122 @@ describe("expr-positions §6 — an engine guard's wrapper is stripped only when
   });
 });
 
-describe("expr-positions §7 — every position declares whether it is WIRED", () => {
+describe("expr-positions §7 — every position declares whether it is a CLIENT BINDING", () => {
   // The table answers "where does user expression SOURCE appear?". The
-  // confidentiality consumer asks "which identifiers does CLIENT-EXECUTED code
-  // reference?". `wired` is the difference between those two questions, and every
-  // gap between them was a §14.8 leak.
-  const wiredOf = (ps) => ps.map((p) => [p.origin, p.wired]);
+  // confidentiality consumer asks "which identifiers must the emitted bundle
+  // DECLARE?". `clientBinding` is the difference between those two questions, and
+  // every gap between them was a §14.8 leak.
+  //
+  // THE FIELD ANSWERS ONE QUESTION, and its predecessor (`wired`) answered two.
+  // `<p if=X>` DOES emit client-executed code — `_scrml_cs_reactive_get("X")` —
+  // so "is it wired?" said yes and the seed shipped the const's value to the
+  // browser. But that is a STRING KEY, not a binding: the bundle names `X`
+  // nowhere as an identifier, so the declaration resolved nothing. The tests
+  // below are the measured answer to the binding question, `if=` included.
+  const bindingOf = (ps) => ps.map((p) => [p.origin, p.clientBinding]);
 
-  test("a BARE attribute value is `static` on a plain attribute and `client` on a wired one", () => {
-    // MEASURED: `<p class=X>` lowers to the static HTML string `class="X"` with
-    // no client wiring at all — yet the value was being copied into the client
-    // bundle, where the declaration was the ONLY line mentioning it.
+  test("a BARE attribute value is a binding ONLY on the bare-ref event route", () => {
+    // MEASURED end-to-end (see the conformance file): the ONLY bare-value
+    // lowering that names the source as an identifier is `emit-html.ts`'s
+    // bare-ref event handler, which emits `"_scrml_attr_onclick_1": SECRET,`.
     const bare = (name) => positions(
       { kind: "markup", attrs: [{ name, value: { kind: "variable-ref", name: "SECRET", exprNode: { kind: "ident", name: "SECRET" } } }] },
       IDENT_ONLY,
     )[0];
-    for (const staticAttr of ["class", "id", "title", "style", "data-x", "aria-label", "src", "href", "show", "key", "value", "disabled"]) {
-      expect({ attr: staticAttr, wired: bare(staticAttr).wired }).toEqual({ attr: staticAttr, wired: "static" });
+    const notBinding = [
+      // static HTML attribute strings
+      "class", "id", "title", "style", "data-x", "aria-label", "src", "href",
+      "show", "key", "value", "disabled",
+      // `if=` lowers through the §17.1 mount gate to a reactive-STORE read
+      "if",
+    ];
+    for (const attr of notBinding) {
+      expect({ attr, clientBinding: bare(attr).clientBinding })
+        .toEqual({ attr, clientBinding: "not-binding" });
     }
-    for (const wiredAttr of ["if", "onclick", "oninput", "onsubmit", "onchange", "onkeydown", "onmouseover"]) {
-      expect({ attr: wiredAttr, wired: bare(wiredAttr).wired }).toEqual({ attr: wiredAttr, wired: "client" });
+    for (const attr of ["onclick", "oninput", "onsubmit", "onchange", "onkeydown", "onmouseover"]) {
+      expect({ attr, clientBinding: bare(attr).clientBinding })
+        .toEqual({ attr, clientBinding: "binding" });
     }
   });
 
-  test("a call-ref, a parenthesized expr and a `${}` template are wired on ANY attribute", () => {
-    // MEASURED on `class=` / `title=` / `data-x=` as well as on `onclick=`: all
-    // three shapes emit a client reference regardless of the attribute's name.
+  test("the event-name predicate is codegen's OWN, so the four drift names agree", () => {
+    // `expr-positions` carried `/^on[a-z]/`; codegen used `name.startsWith("on")`.
+    // The gap is exactly these four, and each one MEASURED as an under-emit — a
+    // live `ReferenceError` at exit 0. Both sides now call the same function
+    // (`attr-lowering.ts`), so the gap cannot reopen.
+    const bare = (name) => positions(
+      { kind: "markup", attrs: [{ name, value: { kind: "variable-ref", name: "HANDLER" } }] },
+      IDENT_ONLY,
+    )[0];
+    for (const attr of ["on", "on-tap", "on_tap", "on2"]) {
+      expect({ attr, clientBinding: bare(attr).clientBinding })
+        .toEqual({ attr, clientBinding: "binding" });
+    }
+    // And the names the OLD regex and codegen already agreed on stay agreed —
+    // codegen routes ANY `on…` name to event wiring, `only=` included.
+    for (const attr of ["only", "once", "onward"]) {
+      expect({ attr, clientBinding: bare(attr).clientBinding })
+        .toEqual({ attr, clientBinding: "binding" });
+    }
+  });
+
+  test("a bare value that is not a plain identifier is NOT a binding, even on an event attr", () => {
+    // MEASURED: `<button onclick=X.go>` lowers to the static HTML attribute
+    // `onclick="X.go"`. Zero client JS references the binding, and the const
+    // shipped anyway — the same leak as `if=`, on the other axis.
+    const bare = (value) => positions(
+      { kind: "markup", attrs: [{ name: "onclick", value: { kind: "variable-ref", name: value } }] },
+      IDENT_ONLY,
+    )[0];
+    expect(bare("X.go").clientBinding).toBe("not-binding");
+    expect(bare("X[0]").clientBinding).toBe("not-binding");
+    expect(bare("@cell").clientBinding).toBe("not-binding");
+    expect(bare("X").clientBinding).toBe("binding");
+  });
+
+  test("a call-ref, a parenthesized expr and a `${}` template are bindings on ANY attribute", () => {
+    // MEASURED on `class=` / `title=` / `data-x=` / `<textarea>` as well as on
+    // `onclick=`: all three shapes emit a real identifier reference regardless of
+    // the attribute's name.
     const attr = (value) => positions({ kind: "markup", attrs: [{ name: "class", value }] }, IDENT_ONLY);
-    expect(wiredOf(attr({ kind: "call-ref", name: "X.go", args: [] })))
-      .toEqual([["attr.value.name(raw)", "client"], ["attr.value.callee", "client"]]);
-    expect(wiredOf(attr({ kind: "expr", raw: "(X)", exprNode: { kind: "ident", name: "X" } })))
-      .toEqual([["attr.value.exprNode", "client"]]);
-    expect(wiredOf(attr({ kind: "string-literal", value: "c-${X}" })))
-      .toEqual([["attr.value.template", "client"]]);
+    expect(bindingOf(attr({ kind: "call-ref", name: "X.go", args: [] })))
+      .toEqual([["attr.value.name(raw)", "binding"], ["attr.value.callee", "binding"]]);
+    expect(bindingOf(attr({ kind: "expr", raw: "(X)", exprNode: { kind: "ident", name: "X" } })))
+      .toEqual([["attr.value.exprNode", "binding"]]);
+    expect(bindingOf(attr({ kind: "string-literal", value: "c-${X}" })))
+      .toEqual([["attr.value.template", "binding"]]);
   });
 
-  test("literal attribute text is `static`", () => {
+  test("a CELL NAME is never a binding, whatever the emit site declares", () => {
+    // A cell is addressed by STRING KEY in emitted client code
+    // (`_scrml_cs_reactive_get("hits")`), so there is no identifier to declare on
+    // any lowering, ever. That is a property of the KIND, decided once in the
+    // enumerator, so an emit site cannot get it wrong for these two kinds.
+    //
+    // These three shapes DO emit client-executed code — `el.style.display = …`,
+    // `addEventListener("input", …)`, `classList.toggle(…)`, each inside an
+    // `_scrml_effect` — and none of them emits a binding.
+    for (const name of ["show", "bind:value", "class:on", "disabled", "if"]) {
+      const ps = positions(
+        { kind: "markup", attrs: [{ name, value: { kind: "variable-ref", name: "@probecell" } }] },
+        ALL,
+      );
+      expect({ name, got: ps.map((p) => [p.kind, p.clientBinding]) })
+        .toEqual({ name, got: [["cell-name", "not-binding"]] });
+    }
+    // Same for a pre-extracted `refs` list on an expression attribute, which the
+    // group's own declared class would otherwise mark a binding.
+    const refsPs = positions(
+      { kind: "markup", attrs: [{ name: "if", value: { kind: "expr", raw: "(@a && @b)", refs: ["a", "b"] } }] },
+      ALL,
+    );
+    expect(refsPs.map((p) => [p.kind, p.clientBinding])).toEqual([["cell-name-list", "not-binding"]]);
+  });
+
+  test("literal attribute text is not a binding", () => {
     const ps = positions({ kind: "markup", attrs: [{ name: "title", value: "mail @theme now" }] }, ALL);
-    expect(wiredOf(ps)).toEqual([["attr.value(text)", "static"]]);
+    expect(bindingOf(ps)).toEqual([["attr.value(text)", "not-binding"]]);
   });
 
   test("a rendered BODY is markup-source; only its `${}` interiors are code", () => {
@@ -437,8 +522,146 @@ describe("expr-positions §7 — every position declares whether it is WIRED", (
     expect(ot(false, "SECRET text").kind).toBe("markup-source");
   });
 
-  test("an `on mount` raw body is statement-source and wired", () => {
+  test("an `on mount` raw body is statement-source and a binding position", () => {
     const ps = positions({ kind: "bare-expr", _onMountEffect: true, expr: "@a = 1\n@b = 2" }, ALL);
-    expect(ps.map((p) => [p.kind, p.wired])).toEqual([["statement-source", "client"]]);
+    expect(ps.map((p) => [p.kind, p.clientBinding])).toEqual([["statement-source", "binding"]]);
+  });
+
+  test("BOTH values of the type are LIVE — neither is a claim the code never makes", () => {
+    // The predecessor type had a third value, `"unknown"`, with a docblock arguing
+    // at length that an undetermined position fails CLOSED — and ZERO emit sites.
+    // Every unmeasured position was forced the other way, into the leak direction.
+    // A value nothing emits is a safety claim the code does not honour, so this
+    // asserts each value is actually produced.
+    const seen = new Set();
+    const sample = [
+      { kind: "markup", attrs: [{ name: "title", value: "plain text" }] },
+      { kind: "markup", attrs: [{ name: "onclick", value: { kind: "variable-ref", name: "go" } }] },
+      { kind: "markup", attrs: [{ name: "if", value: { kind: "variable-ref", name: "GATE" } }] },
+      { kind: "each-block", inExprRaw: "@rows", bodyRaw: "x ${@r}" },
+    ];
+    for (const node of sample) for (const p of positions(node, ALL)) seen.add(p.clientBinding);
+    expect([...seen].sort()).toEqual(["binding", "not-binding"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §8 — THE DUAL-DIRECTION GATE ON `EXPR_NODE_FIELDS`.
+//
+// §3 is ONE-DIRECTIONAL: it asserts seven names are present and four HISTORICAL
+// phantom names are absent. Three brand-new phantoms pass it, and a real field
+// missing from the list passes it too — which is exactly what happened.
+// `resultExpr` is declared at `types/ast.ts:1150` with six construction sites in
+// `ast-builder.js`, `route-inference.ts` carried its own copy of the same list
+// and already included it, and its absence here was a live cross-file
+// `ReferenceError` at exit 0:
+//
+//     on mount { @a = match @phase { .Idle :> NEEDED, .Ready :> "ready" } }
+//     -> index.client.js:  if (_scrml_match_2 === "Idle") return NEEDED;
+//     -> NEEDED declared nowhere, no diagnostic.
+//
+// So the gate ENUMERATES THE AST instead of restating a list, in both
+// directions: every `ExprNode`-typed declaration must be IN the list or on the
+// exclusion list below with a reason, and every list entry must be a real
+// declaration.
+// ---------------------------------------------------------------------------
+
+/**
+ * Every `X: ExprNode` / `X: ExprNode[]` field declared on an AST NODE, read out
+ * of `types/ast.ts`.
+ *
+ * SCOPED TO THE REGION BEFORE THE `ExprNode` UNION. Everything after that
+ * banner is ExprNode-INTERNAL structure (`left`, `right`, `callee`, `object`, …)
+ * which no consumer reaches by iterating fields on an AST node — those are
+ * walked by `forEachIdentInExprNode` / the collector's deep descent. Including
+ * them would make the gate demand entries that would break both consumers.
+ */
+function declaredExprNodeFields() {
+  const src = readFileSync(join(REPO_SRC, "types", "ast.ts"), "utf8");
+  const banner = "// ExprNode — Structured Expression AST";
+  const cut = src.indexOf(banner);
+  expect({ banner, found: cut >= 0 }).toEqual({ banner, found: true });
+  const single = new Map();
+  const list = new Map();
+  src.slice(0, cut).split("\n").forEach((line, i) => {
+    const re = /(?:^|[{;])\s*(?:readonly\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*\??\s*:\s*ExprNode(\[\])?\s*(?:\|\s*null\s*)?(?=[;,}\s])/g;
+    let m;
+    while ((m = re.exec(line)) !== null) {
+      const bag = m[2] ? list : single;
+      if (!bag.has(m[1])) bag.set(m[1], []);
+      bag.get(m[1]).push(i + 1);
+    }
+  });
+  return { single, list };
+}
+
+/**
+ * A declared `ExprNode` field DELIBERATELY not in `EXPR_NODE_FIELDS`, each with
+ * the reason. Adding a name here is a decision someone has to write down; that
+ * is the whole point of the list existing.
+ */
+const EXPR_NODE_FIELD_EXCLUSIONS = {
+  index:
+    "nested inside `path: (string | { index?: ExprNode; raw?: string })[]` — not a " +
+    "direct field of any node, so `node[f]` never reaches it.",
+  updateExpr:
+    "nested inside `cStyleParts?: { initExpr; condExpr; updateExpr }` — same reason. " +
+    "(`initExpr`/`condExpr` are in the list from their OWN top-level declarations.)",
+  value:
+    "`RelationalPredicateNode.value`, reached through `ValidatorEntry.args`, never as " +
+    "a node field. The NAME is the hazard: `isExprNode` accepts any `{kind: string}`, " +
+    "so listing it would make both consumers walk every attr/prop `value` object as " +
+    "though it were an expression.",
+  handlerExpr:
+    "`ErrorArm` carries no `kind`, so neither consumer's kind-gated child recursion " +
+    "reaches the arm object at all — listing the field would change nothing. Tracked " +
+    "as the node-traversal half of the drift in `docs/known-gaps.md`.",
+  argExprNodes:
+    "`ExprNode[]`. Enumerated explicitly by the shared table at the call-ref site " +
+    "(`attr.value.argExprNodes[]`), which is where the per-element walk belongs.",
+  scrutineeExprs:
+    "`ExprNode[]`; the list is single-valued by contract (`collectFromExprNode(node[f])`). " +
+    "MEASURED not a live under-emit: a cross-file const in a multi-scrutinee " +
+    "`match a, b { … }` header already reaches the client bundle through another position.",
+};
+
+describe("expr-positions §8 — EXPR_NODE_FIELDS is gated against the AST, both ways", () => {
+  test("every ExprNode-typed AST field is IN the list or excluded WITH a reason", () => {
+    const { single, list } = declaredExprNodeFields();
+    // Guard the guard: a scan that finds nothing proves nothing.
+    expect(single.size).toBeGreaterThan(10);
+    const unaccounted = [];
+    for (const [name, lines] of [...single, ...list]) {
+      if (EXPR_NODE_FIELDS.includes(name)) continue;
+      const reason = EXPR_NODE_FIELD_EXCLUSIONS[name];
+      if (typeof reason === "string" && reason.length > 20) continue;
+      unaccounted.push(`${name} (types/ast.ts:${lines.join(",")})`);
+    }
+    expect(unaccounted).toEqual([]);
+  });
+
+  test("every list entry is a REAL declaration — no new phantom can be added", () => {
+    const { single } = declaredExprNodeFields();
+    const phantoms = EXPR_NODE_FIELDS.filter((f) => !single.has(f));
+    expect(phantoms).toEqual([]);
+  });
+
+  test("an exclusion cannot be a bare name — it must carry a reason", () => {
+    for (const [name, reason] of Object.entries(EXPR_NODE_FIELD_EXCLUSIONS)) {
+      expect({ name, hasReason: typeof reason === "string" && reason.length > 20 })
+        .toEqual({ name, hasReason: true });
+      // And an exclusion for a field that is ALSO in the list is a contradiction.
+      expect({ name, alsoListed: EXPR_NODE_FIELDS.includes(name) })
+        .toEqual({ name, alsoListed: false });
+    }
+  });
+
+  test("the fields the gate ADDED are the ones the AST declares", () => {
+    // Pinned by name so a silent removal is attributable here rather than three
+    // stages downstream as a `ReferenceError` in someone's browser.
+    for (const f of ["resultExpr", "bodyExpr", "callbackExpr", "fileExpr", "urlExpr"]) {
+      expect({ field: f, present: EXPR_NODE_FIELDS.includes(f) })
+        .toEqual({ field: f, present: true });
+    }
   });
 });

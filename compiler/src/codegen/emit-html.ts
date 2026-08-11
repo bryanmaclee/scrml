@@ -11,6 +11,7 @@ import { extractReactiveDeps, collectReactiveVarNames, extractReactiveDepsTransi
 import { hasTemplateInterpolation } from "./rewrite.js";
 import { isRcdataElement, isHtmlElement } from "../html-elements.js";
 import { isAuthorMainTag } from "../landmark-tag.ts";
+import { isEventAttrName, bareAttrValueIsClientBinding } from "../attr-lowering.ts";
 import { CGError } from "./errors.ts";
 import * as acorn from "acorn";
 import type { BindingRegistry } from "./binding-registry.ts";
@@ -672,7 +673,7 @@ function attrIsWiringFree(attr: any, allowName: string | null = null): boolean {
   if (name === allowName) return true;
   if (name === "if" || name === "show" || name === "else" || name === "else-if") return false;
   if (name === "protect" || name === "auth" || name === "slot") return false;
-  if (name.startsWith("on")) return false;
+  if (isEventAttrName(name)) return false;
   if (name.startsWith("bind:")) return false;
   if (name.startsWith("class:")) return false;
   if (name.startsWith("transition:") || name.startsWith("in:") || name.startsWith("out:")) return false;
@@ -3150,7 +3151,7 @@ export function generateHtml(
                 ...(transitionExit ? { transitionExit } : {}),
               });
             }
-          } else if (name.startsWith("on") && !varName.startsWith("@") && /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(varName)) {
+          } else if (bareAttrValueIsClientBinding(name, varName)) {
             // §5.2.2 row 5 (bare-ref form) — `onclick=handler` (no parens, no
             // `${...}`). The attr-value parser produces a `variable-ref` for a
             // bare identifier; the SOURCE name (e.g. `bump`) is the declared
@@ -3162,6 +3163,13 @@ export function generateHtml(
             // wire that reference DIRECTLY (no `function(event){ fn(); }` wrap —
             // that is the OTHER, call-ref `fn()` form). Mirrors the call-ref
             // routing below; the wired listener receives the DOM event as its arg.
+            //
+            // THE GUARD IS SHARED, NOT RESTATED (`../attr-lowering.ts`). This is
+            // the ONLY bare-value route that emits the source name as a JS
+            // BINDING, so it is also the §14.8 confidentiality gate's whole
+            // answer for bare attribute values — and `expr-positions.ts` reads
+            // the same function. A second copy is what let `on-tap=handler` wire
+            // here while the seed left `handler` undeclared.
             const placeholderId = genVar(`attr_${name}`);
             parts.push(` data-scrml-bind-${name}="${placeholderId}"`);
             if (registry) {
@@ -3220,7 +3228,7 @@ export function generateHtml(
                 ...(transitionExit ? { transitionExit } : {}),
               });
             }
-          } else if (name.startsWith("on")) {
+          } else if (isEventAttrName(name)) {
             // Event attribute with ${...} expression value, e.g. onclick=${() => fn(arg)}
             const placeholderId = genVar(`attr_${name}`);
             parts.push(` data-scrml-bind-${name}="${placeholderId}"`);

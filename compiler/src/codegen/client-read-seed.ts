@@ -338,19 +338,20 @@ export function collectClientReadIdents(
 
     // ---- Every other position, from the ONE shared table. ------------------
     forEachExprPosition(node, SUPPORTS, (p) => {
-      // ═══ THE WIRED GATE — the ruling this file exists under ═══
+      // ═══ THE CLIENT-BINDING GATE — the ruling this file exists under ═══
       //
       // The shared table answers "where does user expression SOURCE appear?".
-      // THIS consumer asks "which identifiers does CLIENT-EXECUTED code
-      // reference?". Those are different questions, and every gap between them
-      // has been a §14.8 leak: prose the compiler renders as text, an attribute
-      // it lowers to a static HTML string, a name that is merely shadowed.
+      // THIS consumer asks "which identifiers must the emitted bundle DECLARE?".
+      // Those are different questions, and every gap between them has been a
+      // §14.8 leak: prose the compiler renders as text, an attribute it lowers to
+      // a static HTML string, an `if=` predicate it lowers to a STRING KEY into
+      // the reactive store, a name that is merely shadowed.
       //
-      // `"unknown"` is NOT consumed. Over-emitting silently ships a secret;
-      // under-emitting throws a loud `ReferenceError` an adopter can see and
-      // report. That asymmetry decides the default, so a position whose wiring
-      // cannot be determined fails CLOSED.
-      if (p.wired !== "client") return;
+      // Over-emitting silently ships a secret; under-emitting throws a loud
+      // `ReferenceError` an adopter can see and report. That asymmetry is why the
+      // table's type has no "undetermined" value to fall through: a position must
+      // declare a measured answer, and `"not-binding"` is the fail-closed one.
+      if (p.clientBinding !== "binding") return;
       switch (p.kind) {
         case "expr-node":        collectFromExprNode(p.value); break;
         case "expr-source":      collectFromExprSource(p.value); break;

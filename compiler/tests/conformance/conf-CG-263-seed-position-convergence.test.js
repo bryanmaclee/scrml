@@ -857,6 +857,74 @@ on mount { @a = "hello" }
 </program>
 `,
   },
+  {
+    // MEASURED, and this row used to sit in §7 asserting the OPPOSITE. `if=` on a
+    // BARE value lowers through the §17.1 mount gate as a reactive-CELL read:
+    // `if (_scrml_cs_reactive_get("SECRET"))`. That is a STRING KEY into the cell
+    // store — the emitted bundle names `SECRET` nowhere as an identifier — so the
+    // declaration the seed emitted resolved nothing and was pure leak. `if=(X)`
+    // and `if=X()` ARE genuine binding reads and stay in §7.
+    label: "a BARE value on `if=` — a cell-store read, not a binding",
+    dir: "cg263-nw-bare-if",
+    entry: `<program>
+${WIRED_SECRET}
+${OPEN} @a = "" ${CLOSE}
+server fn stash() -> string { return SECRET }
+on mount { @a = "hello" }
+<p if=SECRET>hello</p>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    label: "a BARE dotted value on `if=`",
+    dir: "cg263-nw-bare-if-dotted",
+    entry: `<program>
+${WIRED_SECRET}
+${OPEN} @a = "" ${CLOSE}
+server fn stash() -> string { return SECRET }
+on mount { @a = "hello" }
+<p if=SECRET.enabled>hello</p>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    // The same gate on a STRUCTURAL element (§17.1.2). `<each>`/`<match>`/
+    // `<engine>` carry `if=` as `ifCond`, not in an `attrs` array, and they route
+    // through the identical mount gate — so they must classify identically, and
+    // the table now passes the attribute NAME rather than a pre-computed class so
+    // that they cannot diverge.
+    label: "a BARE value on a STRUCTURAL `if=` (`<each … if=SECRET>`)",
+    dir: "cg263-nw-bare-if-structural",
+    entry: `<program>
+${WIRED_SECRET}
+${OPEN} @a = ""
+   @rows = [1, 2] ${CLOSE}
+server fn stash() -> string { return SECRET }
+on mount { @a = "hello" }
+<each in=@rows as r if=SECRET><li>row</li></each>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    // MEASURED: `onclick=X.go` fails codegen's bare-ref identifier test and falls
+    // to the general static branch — the emitted HTML is `onclick="SECRET.go"`
+    // and zero client JS references the binding. The old name-only predicate said
+    // "wired" for every `on…` attribute regardless of the VALUE's shape.
+    label: "a bare DOTTED value on an event attribute (`onclick=SECRET.go`)",
+    dir: "cg263-nw-bare-onclick-dotted",
+    entry: `<program>
+${WIRED_SECRET}
+${OPEN} @a = "" ${CLOSE}
+server fn stash() -> string { return SECRET }
+on mount { @a = "hello" }
+<button onclick=SECRET.go>go</button>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
 ];
 
 for (const vec of NOT_WIRED_VECTORS) {
@@ -953,13 +1021,15 @@ on mount { @a = "hello" }
 `,
   },
   {
-    label: "a BARE value on `if=` (the one bare-attr family that IS wired)",
-    dir: "cg263-w-bare-if",
+    // The bare `if=SHOWN` form is NOT here — it is a §6 NOT-WIRED row, measured.
+    // These two ARE binding reads: `if ((SHOWN))` and `if ((SHOWN()))`.
+    label: "a PARENTHESIZED value on `if=`",
+    dir: "cg263-w-paren-if",
     entry: `<program>
 export const SHOWN = "shown-client-value"
 ${OPEN} @a = "" ${CLOSE}
 on mount { @a = "hello" }
-<p if=SHOWN>hello</p>
+<p if=(SHOWN)>hello</p>
 <p>${OPEN}@a${CLOSE}</p>
 </program>
 `,
@@ -972,6 +1042,35 @@ export const SHOWN = "shown-client-value"
 ${OPEN} @a = "" ${CLOSE}
 on mount { @a = "hello" }
 <button onclick=SHOWN>go</button>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    // THE FOUR NAMES THE TWO PREDICATES DISAGREED ON. `expr-positions` said
+    // `/^on[a-z]/`, codegen said `name.startsWith("on")`; codegen wired
+    // `"_scrml_attr_on_tap_1": SHOWN,` into the handler table while the seed left
+    // `SHOWN` undeclared — a live `ReferenceError` at exit 0. One shared
+    // predicate now, so the gap cannot reopen.
+    label: "a bare event handler on `on-tap=` (predicate-drift name)",
+    dir: "cg263-w-bare-on-tap",
+    entry: `<program>
+export const SHOWN = "shown-client-value"
+${OPEN} @a = "" ${CLOSE}
+on mount { @a = "hello" }
+<button on-tap=SHOWN>go</button>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    label: "a bare event handler on `on2=` (predicate-drift name)",
+    dir: "cg263-w-bare-on2",
+    entry: `<program>
+export const SHOWN = "shown-client-value"
+${OPEN} @a = "" ${CLOSE}
+on mount { @a = "hello" }
+<button on2=SHOWN>go</button>
 <p>${OPEN}@a${CLOSE}</p>
 </program>
 `,

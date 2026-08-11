@@ -341,6 +341,49 @@ function stripExportDeclInit(raw: unknown, kind: string, name: string): string |
 }
 
 /**
+ * Does this PARSED initializer really read the `import.meta` meta-property?
+ *
+ * ═══ PARSE, NEVER REGEX — AND THIS ONE REGEXED ═══
+ *
+ * The fence used to be `/\bimport\s*\.\s*meta\b/` run over the initializer's
+ * SOURCE TEXT, two lines before the parse that builds the node it could have
+ * asked. Source text does not know what is code:
+ *
+ *     export const HINT = "read import.meta later"
+ *
+ * is a plain string. The regex matched it, the const was skipped, and the
+ * importer's `_scrml_cs_reactive_set("a", HINT)` was left reading a free
+ * variable — the whole client bundle dead on a `ReferenceError`, at exit 0 with
+ * zero diagnostics. CROSS-FILE it fails SILENTLY: the dependency emits
+ * `_scrml_modules["models.client.js"] = { };` while the importer still
+ * destructures from it, which falsifies this pass's own "under-emitting throws a
+ * loud error the adopter can see" argument. Six non-`import.meta` shapes flipped
+ * declared→undeclared: a plain string, a URL string, a template string, a
+ * `[…].join()`, the spaced literal `"import . meta"`, and the type-annotated
+ * form.
+ *
+ * The parser already answers this exactly: a real meta-property becomes
+ * `{kind:"escape-hatch", nativeKind:"MetaProperty"}` and a string containing the
+ * same characters becomes `{kind:"lit", litType:"string"}`. Nothing about the
+ * spelling — spaced, nested, inside a call, inside a ternary — changes that.
+ *
+ * NOTE the escape-hatch node's own `raw` carries the WHOLE expression source,
+ * not just the meta-property, so it is not usable as a signal. `nativeKind` is.
+ */
+function exprNodeReadsImportMeta(node: unknown): boolean {
+  if (!node || typeof node !== "object") return false;
+  if (Array.isArray(node)) return node.some(exprNodeReadsImportMeta);
+  const n = node as Record<string, unknown>;
+  if (n.kind === "escape-hatch" && n.nativeKind === "MetaProperty") return true;
+  for (const key of Object.keys(n)) {
+    if (key === "span" || key === "raw") continue;
+    const v = n[key];
+    if (v && typeof v === "object" && exprNodeReadsImportMeta(v)) return true;
+  }
+  return false;
+}
+
+/**
  * GH #263 — emit module-level `export const`/`export let` VALUE bindings into
  * the CLIENT bundle when — and ONLY when — the confidentiality-safe AST
  * reachability gate (`collectClientReadIdents`) proves a client-emitted
@@ -404,6 +447,11 @@ function emitReferencedModuleExportConstLines(
               // Server-only init (SQL / env) — reuse the D-5 predicate on a
               // synthesized const-decl so `export const rows = ?{…}` is skipped.
               if (valid && isServerOnlyNode({ kind: "const-decl", init })) valid = false;
+              if (valid) {
+                try { initExpr = parseExprToNode(init, filePath, (stmt.span?.start as number) ?? 0); }
+                catch { valid = false; }
+                if (!initExpr) valid = false;
+              }
               // A BUILD-SIDE const SHALL NOT be client-emitted. `import.meta` is a
               // module-only meta-property: the compiler ships this bundle as a
               // CLASSIC script (`<script src=…>` with no `type="module"`), where
@@ -420,14 +468,10 @@ function emitReferencedModuleExportConstLines(
               //
               // Fail-closed like every sibling filter here: the const stays
               // undeclared (an under-emit the adopter can see) rather than
-              // shipping a bundle that cannot load at all. The tokenizer may space
-              // the property access, so the fence tolerates whitespace.
-              if (valid && /\bimport\s*\.\s*meta\b/.test(initTrim)) valid = false;
-              if (valid) {
-                try { initExpr = parseExprToNode(init, filePath, (stmt.span?.start as number) ?? 0); }
-                catch { valid = false; }
-                if (!initExpr) valid = false;
-              }
+              // shipping a bundle that cannot load at all. Tested on the PARSED
+              // node, AFTER the parse above and never on the source text — see
+              // `exprNodeReadsImportMeta` for the six shapes a text fence broke.
+              if (valid && exprNodeReadsImportMeta(initExpr)) valid = false;
               if (valid && initExpr) {
                 forEachIdentInExprNode(initExpr, (id: any) => {
                   const n: string = typeof id?.name === "string" ? id.name : "";
