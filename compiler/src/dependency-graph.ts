@@ -73,8 +73,8 @@ import {
  * the opposite reason — see the absences documented there.
  */
 const DG_POSITION_KINDS: ReadonlySet<ExprPositionKind> = new Set<ExprPositionKind>([
-  "expr-node", "expr-source", "block-source", "template-text",
-  "literal-text", "cell-name", "cell-name-list", "callee-name",
+  "expr-node", "expr-source", "statement-source", "markup-source",
+  "template-text", "literal-text", "cell-name", "cell-name-list", "callee-name",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -2580,6 +2580,22 @@ export function runDG(input: DGInput): DGOutput {
      */
     function creditFromPositions(node: ASTNode): void {
       forEachExprPosition(node, DG_POSITION_KINDS, (p) => {
+        // PARITY GATE, and the only position this pass declines. `state` and
+        // `state-constructor-def` also carry an `attrs` array, and the
+        // pre-convergence code reached `attrs` only from inside its
+        // `node.kind === "markup"` branch. Crediting them here would widen
+        // E-DG-002's false-NEGATIVE surface — a reader credit is what SUPPRESSES
+        // the warning — inside a change whose stated goal is parity. The
+        // identifier consumer still receives these positions; it asks a different
+        // question and needs them.
+        //
+        // The test is the OWNING NODE's kind, NOT the position's `render` flag.
+        // Those are different properties and conflating them cost four tests: a
+        // `class="${@theme}"` template interpolation is `render: false` BY DESIGN
+        // (it credits a reader without minting a markup-read node — see the
+        // `template-text` case below) while still being a markup attribute that
+        // must be credited.
+        if (p.origin.startsWith("attr.") && node.kind !== "markup") return;
         const span = (p.span ?? node.span) as Span | undefined;
         /** Credit one cell, and emit its render edge when the position is one. */
         const take = (cellName: string): void => {
@@ -2603,7 +2619,8 @@ export function runDG(input: DGInput): DGOutput {
             break;
           }
           case "expr-source":
-          case "block-source":
+          case "statement-source":
+          case "markup-source":
           case "literal-text": {
             // RAW source text. This pass has always read it with the `@`-sigil
             // scan: deliberately over-crediting (it also matches inside string

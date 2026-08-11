@@ -69,7 +69,8 @@ import { getNodes, isServerOnlyNode } from "./collect.ts";
  *   - `cell-name-list`  same, for a pre-extracted `refs` array.
  */
 const SUPPORTS: ReadonlySet<ExprPositionKind> = new Set<ExprPositionKind>([
-  "expr-node", "expr-source", "block-source", "template-text", "callee-name",
+  "expr-node", "expr-source", "statement-source", "markup-source",
+  "template-text", "callee-name",
 ]);
 
 /**
@@ -264,36 +265,52 @@ export function collectClientReadIdents(
   };
 
   /**
-   * Collect from source that may hold SEVERAL statements and/or markup.
-   *
-   * MARKUP TEXT IS NOT RUN THROUGH THE STATEMENT PARSER. An `<each>` body,
-   * `<match>` arms and an engine `rulesRaw` are markup, and markup does not parse
-   * as an expression — the statement loop would burn a `parseExprToNode` per call
-   * to learn that, on every compiled file. What IS code in markup is the `${…}`
-   * interiors, and those are scanned either way. The statement loop is for the
-   * non-markup raw bodies that motivated this kind in the first place (an engine
-   * state-child `:`-shorthand body such as `@hits = NEEDED`).
+   * Client-executed STATEMENTS given as raw source — an `on mount` body, an
+   * engine `:`-shorthand state-child or `<onTransition>` body. Consume statements
+   * the way `mountBodyExprNode` detects them: parse, then advance past the parsed
+   * span. Any parse failure just stops (fail-closed).
    */
-  const collectFromBlockSource = (raw: unknown): void => {
+  const collectFromStatementSource = (raw: unknown): void => {
     if (typeof raw !== "string" || !raw.trim()) return;
-    const looksLikeMarkup = /^\s*</.test(raw);
-    if (!looksLikeMarkup) {
-      let rest = raw;
-      let guard = 0;
-      while (rest.trim() && guard++ < 256) {
-        let node: any = null;
-        try { node = parseExprToNode(rest, filePath, 0); } catch { break; }
-        if (!node || !node.span || typeof node.span.end !== "number" || node.span.end <= 0) {
-          if (node) collectFromExprNode(node);
-          break;
-        }
-        collectFromExprNode(node);
-        rest = rest.slice(node.span.end);
+    let rest = raw;
+    let guard = 0;
+    while (rest.trim() && guard++ < 256) {
+      let node: any = null;
+      try { node = parseExprToNode(rest, filePath, 0); } catch { break; }
+      if (!node || !node.span || typeof node.span.end !== "number" || node.span.end <= 0) {
+        if (node) collectFromExprNode(node);
+        break;
       }
+      collectFromExprNode(node);
+      rest = rest.slice(node.span.end);
     }
+    // A statement body may still carry `${…}` (the `<onTransition>${…}</>` form).
     if (raw.includes("${")) {
       forEachTemplateInterpolation(raw, (interior) => { collectFromExprSource(interior); });
     }
+  };
+
+  /**
+   * A RENDERED BODY given as raw source — an `<each>` per-item template,
+   * `<match>` arms, a bare-body engine state-child, an engine `rulesRaw`.
+   *
+   * ONLY THE `${…}` INTERIORS ARE READ, and that is the whole point. The rest is
+   * prose the compiler emits as a text node, and running prose through the
+   * expression parser turns rendered words into "client reads":
+   *
+   *     <each in=@rows as r>SECRET items</each>
+   *
+   * shipped `const SECRET = "…"` into the client bundle beside the
+   * `createTextNode("SECRET items")` that proves the body is pure literal. This
+   * file's own rule is PARSE, NEVER REGEX, because a regex reads inside string
+   * literals; parsing prose is the same string-blindness pointed the other way,
+   * and it fails toward the leak. The fix is not a better heuristic — the shared
+   * table now DECLARES which raw bodies are statements and which are markup, from
+   * the AST that already knows.
+   */
+  const collectFromMarkupSource = (raw: unknown): void => {
+    if (typeof raw !== "string" || !raw.includes("${")) return;
+    forEachTemplateInterpolation(raw, (interior) => { collectFromExprSource(interior); });
   };
 
   /** `${…}`-bearing attribute text. The ESCAPE-AWARE scan is the §14.8 half. */
@@ -321,12 +338,26 @@ export function collectClientReadIdents(
 
     // ---- Every other position, from the ONE shared table. ------------------
     forEachExprPosition(node, SUPPORTS, (p) => {
+      // ═══ THE WIRED GATE — the ruling this file exists under ═══
+      //
+      // The shared table answers "where does user expression SOURCE appear?".
+      // THIS consumer asks "which identifiers does CLIENT-EXECUTED code
+      // reference?". Those are different questions, and every gap between them
+      // has been a §14.8 leak: prose the compiler renders as text, an attribute
+      // it lowers to a static HTML string, a name that is merely shadowed.
+      //
+      // `"unknown"` is NOT consumed. Over-emitting silently ships a secret;
+      // under-emitting throws a loud `ReferenceError` an adopter can see and
+      // report. That asymmetry decides the default, so a position whose wiring
+      // cannot be determined fails CLOSED.
+      if (p.wired !== "client") return;
       switch (p.kind) {
-        case "expr-node":     collectFromExprNode(p.value); break;
-        case "expr-source":   collectFromExprSource(p.value); break;
-        case "block-source":  collectFromBlockSource(p.value); break;
-        case "template-text": collectFromTemplateText(p.value); break;
-        case "callee-name":   collectFromCalleeName(p.value); break;
+        case "expr-node":        collectFromExprNode(p.value); break;
+        case "expr-source":      collectFromExprSource(p.value); break;
+        case "statement-source": collectFromStatementSource(p.value); break;
+        case "markup-source":    collectFromMarkupSource(p.value); break;
+        case "template-text":    collectFromTemplateText(p.value); break;
+        case "callee-name":      collectFromCalleeName(p.value); break;
         // `literal-text` / `cell-name` / `cell-name-list` are not in SUPPORTS
         // and can never arrive here.
         default: break;

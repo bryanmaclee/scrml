@@ -725,3 +725,289 @@ on mount { @a = NEEDED }
     expect(last("a")).toBe("needle-value-263");
   });
 });
+
+// ---------------------------------------------------------------------------
+// §6 — WIRED vs NOT-WIRED, end to end.
+//
+// The shared table answers "where does user expression SOURCE appear?". THIS
+// gate asks "which identifiers does CLIENT-EXECUTED code reference?". Three
+// §14.8 leaks across three review rounds all lived in the gap between those two
+// questions: prose the compiler renders as text, an attribute it lowers to a
+// static HTML string, and a name that is merely shadowed.
+//
+// Every NEG row below is a position where the identifier appears in SOURCE but
+// codegen emits no client-executed reference to it. Every row is paired with a
+// POS control in §7 proving the genuinely-wired form of the same position still
+// emits — because a gate that emits nothing passes every no-leak test there is.
+// ---------------------------------------------------------------------------
+
+const WIRED_SECRET = `export const SECRET = ["LEAK", "CANARY", "WIRED"].join("-")`;
+
+const NOT_WIRED_VECTORS = [
+  {
+    // The compiler emits `createTextNode("SECRET items")` — pure literal. The
+    // pre-fix heuristic (`/^\s*</` on the raw body) sent anything not STARTING
+    // with `<` to the expression parser, so rendered words became client reads.
+    // Wrapping the same prose in `<p>` made the leak vanish, which is the
+    // signature of a heuristic rather than a rule.
+    label: "literal prose in an <each> body",
+    dir: "cg263-nw-each-prose",
+    entry: `<program>
+${WIRED_SECRET}
+${OPEN} @a = ""
+   @rows = [1, 2] ${CLOSE}
+server fn stash() -> string { return SECRET }
+on mount { @a = "hello" }
+<each in=@rows as r>SECRET items</each>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    label: "literal prose in an <each> body, wrapped in an element",
+    dir: "cg263-nw-each-prose-wrapped",
+    entry: `<program>
+${WIRED_SECRET}
+${OPEN} @a = ""
+   @rows = [1, 2] ${CLOSE}
+server fn stash() -> string { return SECRET }
+on mount { @a = "hello" }
+<each in=@rows as r><p>SECRET items</p></each>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    label: "literal prose in a <match> arm",
+    dir: "cg263-nw-match-prose",
+    entry: `<program>
+${WIRED_SECRET}
+${OPEN} type Phase:enum = { Idle, Ready }
+   <phase>: Phase = .Idle
+   @a = "" ${CLOSE}
+server fn stash() -> string { return SECRET }
+on mount { @a = "hello" }
+<match for=Phase on=@phase>
+  <Idle>SECRET pending</>
+  <Ready>done</>
+</match>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    // A BARE-BODY state child is a rendered body; only a `:`-shorthand one is
+    // client-executed statements. The AST records which (`isColonShorthand`), so
+    // the table declares it instead of guessing from the text.
+    label: "literal prose in an engine state-child body",
+    dir: "cg263-nw-engine-prose",
+    entry: `<program>
+${WIRED_SECRET}
+${OPEN} type Game:enum = { Title, Playing }
+   @a = "" ${CLOSE}
+server fn stash() -> string { return SECRET }
+on mount { @a = "hello" }
+<engine for=Game initial=.Title>
+    <Title rule=.Playing>SECRET screen</>
+    <Playing rule=.Title/>
+</>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    // MEASURED: the emitted HTML is `class="SECRET"` and the client bundle has
+    // ZERO wiring for it — yet the const declaration was being emitted, and that
+    // declaration was the only line in the bundle mentioning the name at all.
+    label: "a bare unquoted `class=` attribute",
+    dir: "cg263-nw-bare-class",
+    entry: `<program>
+${WIRED_SECRET}
+${OPEN} @a = "" ${CLOSE}
+server fn stash() -> string { return SECRET }
+on mount { @a = "hello" }
+<p class=SECRET>hello</p>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    label: "a bare unquoted `data-x=` attribute",
+    dir: "cg263-nw-bare-data",
+    entry: `<program>
+${WIRED_SECRET}
+${OPEN} @a = "" ${CLOSE}
+server fn stash() -> string { return SECRET }
+on mount { @a = "hello" }
+<p data-x=SECRET>hello</p>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    label: "a QUOTED attribute with no interpolation",
+    dir: "cg263-nw-quoted",
+    entry: `<program>
+${WIRED_SECRET}
+${OPEN} @a = "" ${CLOSE}
+server fn stash() -> string { return SECRET }
+on mount { @a = "hello" }
+<p title="SECRET">hello</p>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+];
+
+for (const vec of NOT_WIRED_VECTORS) {
+  describe(`CONF-CG-263 §6 — NOT WIRED, so NOT emitted: ${vec.label}`, () => {
+    let dir;
+    beforeEach(() => {
+      dir = setupDir(vec.dir);
+      writeFileSync(join(dir, "index.scrml"), vec.entry);
+    });
+    afterEach(() => teardownDir(vec.dir));
+
+    test("the server-only value never reaches the client bundle", () => {
+      const c = compileEntry(join(dir, "index.scrml"));
+      expect(c.errors).toEqual([]);
+      const clients = c.allClient();
+      expect(clients.length).toBeGreaterThan(0);
+      for (const [fp, js] of clients) {
+        expect({ file: fp, leaked: /LEAK-CANARY-WIRED|\["LEAK"/.test(js) })
+          .toEqual({ file: fp, leaked: false });
+        expect({ file: fp, decl: /\bconst SECRET\b/.test(js) })
+          .toEqual({ file: fp, decl: false });
+      }
+      expect(c.out("index.scrml").serverJs ?? "").toMatch(/LEAK-CANARY-WIRED|\["LEAK"/);
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// §7 — the WIRED half of the same matrix.
+//
+// Without these, every §6 row would pass on a gate that emits nothing at all.
+// ---------------------------------------------------------------------------
+
+const WIRED_VECTORS = [
+  {
+    label: "a `${}` interpolation in an <each> body",
+    dir: "cg263-w-each-interp",
+    entry: `<program>
+export const SHOWN = "shown-client-value"
+${OPEN} @a = ""
+   @rows = [1, 2] ${CLOSE}
+on mount { @a = "hello" }
+<each in=@rows as r><p>${OPEN}SHOWN${CLOSE}</p></each>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    label: "a `${}` interpolation in a QUOTED attribute",
+    dir: "cg263-w-attr-interp",
+    entry: `<program>
+export const SHOWN = "shown-client-value"
+${OPEN} @a = "" ${CLOSE}
+on mount { @a = "hello" }
+<p title="v-${OPEN}SHOWN${CLOSE}">hello</p>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    label: "a call-ref in an event handler",
+    dir: "cg263-w-callref",
+    entry: `<program>
+export const SHOWN = "shown-client-value"
+${OPEN} @a = "" ${CLOSE}
+on mount { @a = "hello" }
+<button onclick=SHOWN.go(1)>go</button>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    label: "a call-ref on a PLAIN attribute (wired regardless of name)",
+    dir: "cg263-w-callref-plain",
+    entry: `<program>
+export const SHOWN = "shown-client-value"
+${OPEN} @a = "" ${CLOSE}
+on mount { @a = "hello" }
+<p class=SHOWN.go()>hello</p>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    label: "a parenthesized expr on a PLAIN attribute",
+    dir: "cg263-w-expr-plain",
+    entry: `<program>
+export const SHOWN = "shown-client-value"
+${OPEN} @a = "" ${CLOSE}
+on mount { @a = "hello" }
+<p title=(SHOWN)>hello</p>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    label: "a BARE value on `if=` (the one bare-attr family that IS wired)",
+    dir: "cg263-w-bare-if",
+    entry: `<program>
+export const SHOWN = "shown-client-value"
+${OPEN} @a = "" ${CLOSE}
+on mount { @a = "hello" }
+<p if=SHOWN>hello</p>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    label: "a BARE value on an event handler",
+    dir: "cg263-w-bare-onclick",
+    entry: `<program>
+export const SHOWN = "shown-client-value"
+${OPEN} @a = "" ${CLOSE}
+on mount { @a = "hello" }
+<button onclick=SHOWN>go</button>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+  {
+    label: "an engine state-child `:`-shorthand body (client-executed statements)",
+    dir: "cg263-w-engine-colon",
+    entry: `<program>
+export const SHOWN = "shown-client-value"
+${OPEN} type Game:enum = { Title, Playing }
+   @a = "" ${CLOSE}
+on mount { @a = "hello" }
+<engine for=Game initial=.Title>
+    <Title rule=.Playing : @a = SHOWN>
+    <Playing rule=.Title/>
+</>
+<p>${OPEN}@a${CLOSE}</p>
+</program>
+`,
+  },
+];
+
+for (const vec of WIRED_VECTORS) {
+  describe(`CONF-CG-263 §7 — WIRED, so still emitted: ${vec.label}`, () => {
+    let dir;
+    beforeEach(() => {
+      dir = setupDir(vec.dir);
+      writeFileSync(join(dir, "index.scrml"), vec.entry);
+    });
+    afterEach(() => teardownDir(vec.dir));
+
+    test("the client-read const IS declared in the client bundle", () => {
+      const c = compileEntry(join(dir, "index.scrml"));
+      expect(c.errors).toEqual([]);
+      const js = c.allClient().map(([, s]) => s).join("\n");
+      expect(js).toMatch(/const SHOWN = "shown-client-value";/);
+    });
+  });
+}

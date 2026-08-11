@@ -212,3 +212,100 @@ There is also an independent argument that a 2-test browser improvement is impos
 corpus emit-differential reports **0 artifact content diffs across 7375 artifacts**. If no emitted
 byte changed anywhere, no browser behaviour can change. The most likely explanation for 49/51 is
 stale `samples/compilation-tests/dist/` fixtures on one of the two sides.
+
+---
+
+# FIX ROUND 2 — the wired/not-wired ruling — `f64eb848`
+
+## The diagnosis, kept because it is the durable part
+
+**The seed asks "which identifiers does CLIENT-EXECUTED code reference?" The table
+answered "where does user expression SOURCE appear?"** Three leaks across three rounds all lived
+in the gap: prose that looks like code, an attribute that lowers to static text, a name that is
+merely shadowed. And the seed failed **OPEN** into that gap every time — over-emitting ships a
+secret silently, under-emitting throws a loud `ReferenceError`. Ruling (b) built.
+
+## THE CONTRACT CHANGE to `compiler/src/expr-positions.ts`
+
+Stated plainly for the sibling arc converging `symbol-table.ts`'s validation walk onto this table:
+
+1. **`ExprPosition` GAINS a required field** `wired: WiredClass`, where
+   `WiredClass = "client" | "static" | "unknown"` (newly exported type).
+2. **`ExprPositionKind` REPLACES `block-source`** with `statement-source` + `markup-source`.
+   A flag could not carry this — the two need different EXTRACTION, not just different consumption.
+3. **`EXPR_NODE_FIELDS` SHRINKS** from 11 entries to 7.
+
+Unchanged: `forEachExprPosition`'s signature, `origin`, `span`, `render`, alternate-group semantics.
+
+## Leak A — prose parsed as code. Reviewer named 2 vectors; there were 4.
+
+| vector | `main` | pre-fix `9bdd6eed` | now |
+|---|---|---|---|
+| `<each in=@rows as r>SECRET items</each>` | no leak | **LEAK** | no leak |
+| the same body wrapped in `<p>` | no leak | no leak | no leak |
+| `<match>` arm prose | no leak | no leak | no leak |
+| **`<Title rule=.Playing>SECRET screen</>`** (engine state-child, NOT filed) | no leak | **LEAK** | no leak |
+| **bare `data-x=SECRET`** (NOT filed) | no leak | **LEAK** | no leak |
+| bare `class=SECRET` | no leak | **LEAK** | no leak |
+| quoted `title="SECRET"` | no leak | no leak | no leak |
+
+Fixed at the ROOT, not with a better heuristic: **the AST already knows** which raw bodies are
+statements (`isColonShorthand` on a state-child / `<onTransition>` entry; the field's own identity
+everywhere else), so the table DECLARES it and the downstream guess is deleted. A markup body's
+only code is its `${…}` interiors, and that is now all the seed reads from one.
+
+## Leak B — the attribute classification is MEASURED
+
+Method: compile `<tag ATTR=X>` where X is a client-read export const, compile the same file
+WITHOUT that element, diff the count of X in the emitted client bundle.
+
+| value shape | wired? |
+|---|---|
+| BARE (unquoted) | **client** on `if=` and every `on…=` tested; **static** on class id title style data-* aria-* src href role name show key disabled checked readonly value placeholder hidden |
+| `call-ref` (`X.go()`) | **client** on EVERY attribute name tested, `class=` / `data-x=` included |
+| parenthesized `expr` (`(X)`) | **client** on every name |
+| quoted with `${…}` | **client** on every name |
+| quoted, no `${}` | **static** |
+
+`bind:*` / `class:*` reject a bare non-cell value upstream (`E-ATTR-010` / `E-ATTR-013`) so they
+cannot reach the predicate with one; deliberately NOT listed as wired, because for an unmeasured
+name the fail-closed answer is "not wired".
+
+## C — phantom fields, WORSE than filed
+
+A census (`types/ast.ts` declarations + `ast-builder.js` construction sites) finds **zero** of
+`subjectExpr`, `targetExpr`, `returnExpr` **and zero of `testExpr`** — the brief credited
+`testExpr` as genuinely new and it is not. Its only appearances in `compiler/src` are a local
+function in `meta-checker` and **a THIRD hand-rolled ExprNode field list at
+`reactive-deps.ts:1776`** (worth filing: same drift class, third copy). `defaultExprRaw` exists
+only on ast-builder's internal `scan` object. All five removed; `defaultExpr` (3 declarations /
+9 sites) is the one real addition the union ever had. A regression test asserts the phantoms are
+ABSENT.
+
+## D — the DG widening is gated, and the FIRST GATE WAS WRONG
+
+An attribute position is credited only when the **owning node is markup** — exactly where the
+pre-convergence code reached `attrs` from.
+
+Recording how the first cut failed, because it is the same class of mistake as everything else
+this round: it tested the position's `render` flag instead of the node's kind, and **those are
+different properties**. `class="${@theme}"` is `render: false` BY DESIGN (it credits a reader
+without minting a markup-read node) while still being a markup attribute that must be credited.
+Four E-DG-002 tests caught it.
+
+## Verification
+
+- Two test files, 96 tests: pre-fix `9bdd6eed` 82 pass / **14 fail** · now **96 pass / 0 fail**.
+- Full suite: **28763 pass / 86 skip / 1 todo / 0 fail**.
+- Corpus emit-differential, base `036680e9` vs head: **NO DIFFERENCES** — 1904 sources, 7375
+  artifacts, 0 diagnostic changes, 0 content diffs. All four leaks have zero corpus incidence.
+- `grep -rn collectClientReferencedIdents` → zero.
+
+## `compiler/tests/unit/_tmp_fire-logic/` — not this dispatch
+
+No commit on this branch ever added a path matching `_tmp_fire-logic`
+(`git log --all --diff-filter=A -- "**/_tmp_fire-logic/*"` is empty), and all six probe scripts in
+this dispatch's scratch dir write to `os.tmpdir()`. Grepping the SHARED scratchpad for that path
+hits `scratchpad/dsor/` and `scratchpad/probe/` — two other dispatches' directories, not
+`scratchpad/g263/`. Flagging the attribution only because the scratchpad is shared across
+concurrent dispatches, so "which agent left this" is not answerable from the file alone.

@@ -30,12 +30,12 @@ import {
 
 /** Every kind — what `dependency-graph.ts` supports. */
 const ALL = new Set([
-  "expr-node", "expr-source", "block-source", "template-text",
+  "expr-node", "expr-source", "statement-source", "markup-source", "template-text",
   "literal-text", "cell-name", "cell-name-list", "callee-name",
 ]);
 /** The confidentiality consumer's strict subset — see client-read-seed.ts. */
 const IDENT_ONLY = new Set([
-  "expr-node", "expr-source", "block-source", "template-text", "callee-name",
+  "expr-node", "expr-source", "statement-source", "markup-source", "template-text", "callee-name",
 ]);
 
 function positions(node, supports) {
@@ -137,7 +137,7 @@ describe("expr-positions §2 — the positions the retired walker was missing", 
     expect(argSources).toEqual(["NEEDED", "2"]);
   });
 
-  test("`<match>` armsRaw and `<each>` bodyRaw are block-source positions", () => {
+  test("`<match>` armsRaw and `<each>` bodyRaw are MARKUP-source positions", () => {
     expect(originsOf(positions({ kind: "match-block", onExprRaw: "@phase", armsRaw: "<Idle>x</>" }, ALL)))
       .toEqual(["onExprRaw", "match.armsRaw"]);
     expect(originsOf(positions({ kind: "each-block", inExprRaw: "@rows", bodyRaw: "<li>${@x}</li>" }, ALL)))
@@ -224,14 +224,30 @@ describe("expr-positions §2 — the positions the retired walker was missing", 
 });
 
 describe("expr-positions §3 — the shared ExprNode field list", () => {
-  test("carries the UNION of what the two passes used to look at, independently", () => {
-    // The dependency graph had six; the client-read walker had eleven. Nothing
-    // type-checked one against the other, so neither knew it was short.
+  test("carries the dependency graph's six, plus the one real field it was missing", () => {
+    // The dependency graph had six. The client-read walker claimed eleven, and
+    // five of those were the union's whole justification.
     for (const f of ["exprNode", "initExpr", "condExpr", "valueExpr", "iterExpr", "headerExpr"]) {
       expect(EXPR_NODE_FIELDS).toContain(f);
     }
-    for (const f of ["testExpr", "defaultExpr", "subjectExpr", "targetExpr", "returnExpr"]) {
-      expect(EXPR_NODE_FIELDS).toContain(f);
+    // `defaultExpr` is the only one of the five that exists: 3 declarations in
+    // `types/ast.ts`, 9 construction sites in `ast-builder.js`.
+    expect(EXPR_NODE_FIELDS).toContain("defaultExpr");
+  });
+
+  test("contains NO PHANTOM fields — every entry is a real AST node field", () => {
+    // `testExpr` / `subjectExpr` / `targetExpr` / `returnExpr` were carried over
+    // from the retired walker and NONE of them is an AST node field: a census of
+    // `types/ast.ts` declarations and `ast-builder.js` construction sites finds
+    // zero of each, and the only matches anywhere in `compiler/src` are
+    // same-named LOCALS in emit code plus a local function in `meta-checker`.
+    //
+    // This is the file two passes are told to trust as the single source of
+    // truth, so overstated coverage is worse here than anywhere else: it reads
+    // exactly like real coverage and there is nothing to contradict it.
+    for (const phantom of ["testExpr", "subjectExpr", "targetExpr", "returnExpr"]) {
+      expect({ phantom, present: EXPR_NODE_FIELDS.includes(phantom) })
+        .toEqual({ phantom, present: false });
     }
   });
 
@@ -350,5 +366,79 @@ describe("expr-positions §6 — an engine guard's wrapper is stripped only when
 
   test("a `${}` that closes early is left intact", () => {
     expect(guard("${a}{b}")).toBe("${a}{b}");
+  });
+});
+
+describe("expr-positions §7 — every position declares whether it is WIRED", () => {
+  // The table answers "where does user expression SOURCE appear?". The
+  // confidentiality consumer asks "which identifiers does CLIENT-EXECUTED code
+  // reference?". `wired` is the difference between those two questions, and every
+  // gap between them was a §14.8 leak.
+  const wiredOf = (ps) => ps.map((p) => [p.origin, p.wired]);
+
+  test("a BARE attribute value is `static` on a plain attribute and `client` on a wired one", () => {
+    // MEASURED: `<p class=X>` lowers to the static HTML string `class="X"` with
+    // no client wiring at all — yet the value was being copied into the client
+    // bundle, where the declaration was the ONLY line mentioning it.
+    const bare = (name) => positions(
+      { kind: "markup", attrs: [{ name, value: { kind: "variable-ref", name: "SECRET", exprNode: { kind: "ident", name: "SECRET" } } }] },
+      IDENT_ONLY,
+    )[0];
+    for (const staticAttr of ["class", "id", "title", "style", "data-x", "aria-label", "src", "href", "show", "key", "value", "disabled"]) {
+      expect({ attr: staticAttr, wired: bare(staticAttr).wired }).toEqual({ attr: staticAttr, wired: "static" });
+    }
+    for (const wiredAttr of ["if", "onclick", "oninput", "onsubmit", "onchange", "onkeydown", "onmouseover"]) {
+      expect({ attr: wiredAttr, wired: bare(wiredAttr).wired }).toEqual({ attr: wiredAttr, wired: "client" });
+    }
+  });
+
+  test("a call-ref, a parenthesized expr and a `${}` template are wired on ANY attribute", () => {
+    // MEASURED on `class=` / `title=` / `data-x=` as well as on `onclick=`: all
+    // three shapes emit a client reference regardless of the attribute's name.
+    const attr = (value) => positions({ kind: "markup", attrs: [{ name: "class", value }] }, IDENT_ONLY);
+    expect(wiredOf(attr({ kind: "call-ref", name: "X.go", args: [] })))
+      .toEqual([["attr.value.name(raw)", "client"], ["attr.value.callee", "client"]]);
+    expect(wiredOf(attr({ kind: "expr", raw: "(X)", exprNode: { kind: "ident", name: "X" } })))
+      .toEqual([["attr.value.exprNode", "client"]]);
+    expect(wiredOf(attr({ kind: "string-literal", value: "c-${X}" })))
+      .toEqual([["attr.value.template", "client"]]);
+  });
+
+  test("literal attribute text is `static`", () => {
+    const ps = positions({ kind: "markup", attrs: [{ name: "title", value: "mail @theme now" }] }, ALL);
+    expect(wiredOf(ps)).toEqual([["attr.value(text)", "static"]]);
+  });
+
+  test("a rendered BODY is markup-source; only its `${}` interiors are code", () => {
+    // `<each in=@rows as r>SECRET items</each>` — the body is prose the compiler
+    // emits as a text node. Sending it to the expression parser turned rendered
+    // WORDS into client "reads" and shipped a server-only const.
+    const ps = positions({ kind: "each-block", bodyRaw: "SECRET items" }, ALL);
+    expect(ps.map((p) => [p.kind, p.origin])).toEqual([["markup-source", "each.bodyRaw"]]);
+  });
+
+  test("an engine state-child is classified from the AST, not from the text", () => {
+    // `isColonShorthand` already records which form the body took. Guessing from
+    // the text (`/^\s*</`) called a bare-body prose child "statements" — and
+    // wrapping the same prose in `<p>` made the leak disappear, which is the
+    // signature of a heuristic rather than a rule.
+    const mk = (isColonShorthand, bodyRaw) => positions({
+      kind: "engine-decl",
+      _record: { engineMeta: { stateChildren: [{ tag: "T", isColonShorthand, bodyRaw }] } },
+    }, ALL)[0];
+    expect(mk(true, "@hits = SECRET").kind).toBe("statement-source");
+    expect(mk(false, "SECRET screen").kind).toBe("markup-source");
+    // The `<onTransition>` body carries its own flag and is classified the same way.
+    const ot = (isColonShorthand, bodyRaw) => positions({
+      kind: "engine-decl",
+      _record: { engineMeta: { stateChildren: [{ tag: "T", onTransitionElements: [{ isColonShorthand, bodyRaw }] }] } },
+    }, ALL)[0];
+    expect(ot(true, "@n = SECRET").kind).toBe("statement-source");
+    expect(ot(false, "SECRET text").kind).toBe("markup-source");
+  });
+
+  test("an `on mount` raw body is statement-source and wired", () => {
+    const ps = positions({ kind: "bare-expr", _onMountEffect: true, expr: "@a = 1\n@b = 2" }, ALL);
+    expect(ps.map((p) => [p.kind, p.wired])).toEqual([["statement-source", "client"]]);
   });
 });

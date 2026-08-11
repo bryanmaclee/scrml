@@ -40,7 +40,7 @@
  * single shared declaration.
  *
  * §14.8 DISCIPLINE FOR A CONFIDENTIALITY CONSUMER. The raw kinds
- * (`expr-source` / `block-source`) are SOURCE TEXT. A consumer collecting plain
+ * (`expr-source` / `statement-source` / `markup-source`) are SOURCE TEXT. A consumer collecting plain
  * identifiers MUST parse them and walk real ident nodes — a bare identifier regex
  * over raw text reads inside string literals and comments, which is precisely the
  * string-blind leak the #263 AST-precise gate replaced. `template-text` MUST be
@@ -54,34 +54,84 @@ import type { Span } from "./types/ast.ts";
 /**
  * How the `value` of an `ExprPosition` must be read.
  *
- *  - `expr-node`      a parsed ExprNode — walk it (`forEachIdentInExprNode`).
- *  - `expr-source`    raw source of ONE scrml expression — parse it, then walk.
- *  - `block-source`   raw source that may hold several statements and/or markup
- *                     (an `<each>` body, `<match>` arms, an engine state-child
- *                     body). Parse iteratively; a parse failure is a fail-closed
- *                     stop, never a regex fallback for an identifier consumer.
- *  - `template-text`  attribute text carrying `${…}` interpolations — scan with
- *                     the escape-aware `forEachTemplateInterpolation`.
- *  - `literal-text`   attribute text with NO code in it. Only a `@`-sigil
- *                     consumer has anything to find here; an identifier consumer
- *                     MUST ignore it.
- *  - `cell-name`      a single reactive-cell name, ALWAYS without the `@` sigil
- *                     and emitted only where the source really names a cell — so
- *                     no consumer has to re-derive "is this a cell?".
- *  - `cell-name-list` an array of reactive-cell names (a pre-extracted `refs`).
- *  - `callee-name`    a call-ref callee, possibly dotted (`utils.handleClick`).
- *                     The BASE segment is a real binding read; the tail segments
- *                     are property names and are never bindings.
+ *  - `expr-node`         a parsed ExprNode — walk it (`forEachIdentInExprNode`).
+ *  - `expr-source`       raw source of ONE scrml expression — parse it, then walk.
+ *  - `statement-source`  raw source that IS client-executed STATEMENTS (an
+ *                        `on mount` body, an engine `:`-shorthand state-child
+ *                        body). Parse iteratively; a parse failure is a
+ *                        fail-closed stop, never a regex fallback.
+ *  - `markup-source`     raw source of a RENDERED BODY — literal text with
+ *                        `${…}` interpolations in it (an `<each>` body,
+ *                        `<match>` arms, a bare-body engine state-child). The
+ *                        ONLY code in it is the `${…}` interiors; the rest is
+ *                        prose the compiler emits as a text node. An identifier
+ *                        consumer MUST read the interiors and nothing else.
+ *  - `template-text`     attribute text carrying `${…}` interpolations — scan
+ *                        with the escape-aware `forEachTemplateInterpolation`.
+ *  - `literal-text`      attribute text with NO code in it. Only a `@`-sigil
+ *                        consumer has anything to find here; an identifier
+ *                        consumer MUST ignore it.
+ *  - `cell-name`         a single reactive-cell name, ALWAYS without the `@`
+ *                        sigil and emitted only where the source really names a
+ *                        cell — so no consumer has to re-derive "is this a cell?".
+ *  - `cell-name-list`    an array of reactive-cell names (a pre-extracted `refs`).
+ *  - `callee-name`       a call-ref callee, possibly dotted (`utils.handleClick`).
+ *                        The BASE segment is a real binding read; the tail
+ *                        segments are property names and are never bindings.
+ *
+ * `statement-source` and `markup-source` were ONE kind (`block-source`) and a
+ * regex — `/^\s*</` — guessed which was which. `<each in=@rows as r>SECRET
+ * items</each>` does not start with `<`, so rendered PROSE went to the expression
+ * parser and its words became client "reads": a §14.8 leak, and wrapping the same
+ * body in `<p>` made it disappear. The AST already knows the answer
+ * (`isColonShorthand` on a state-child entry; the field's own identity everywhere
+ * else), so the classification is DECLARED at the position site instead of
+ * re-derived from the text downstream.
  */
 export type ExprPositionKind =
   | "expr-node"
   | "expr-source"
-  | "block-source"
+  | "statement-source"
+  | "markup-source"
   | "template-text"
   | "literal-text"
   | "cell-name"
   | "cell-name-list"
   | "callee-name";
+
+/**
+ * Does the compiler emit CLIENT-EXECUTED code for this position?
+ *
+ * ═══ THE TWO CONSUMERS ASK DIFFERENT QUESTIONS. THIS FIELD IS THE DIFFERENCE. ═══
+ *
+ * `dependency-graph.ts` asks **"where does user expression SOURCE appear?"**, so
+ * it wants every position regardless of wiring: a `@cell` named in prose that the
+ * compiler renders as text is still a consumption for E-DG-002 accounting.
+ *
+ * `codegen/client-read-seed.ts` asks **"which identifiers does CLIENT-EXECUTED
+ * code reference?"**, because its answer decides whether a value is copied into a
+ * `.client.js`. Those questions have different answers, and every gap between
+ * them was a §14.8 leak: prose that looks like code, an attribute that lowers to
+ * a static HTML string, a name that is merely shadowed. Three leaks across two
+ * review rounds, all the same mistake at different sites.
+ *
+ * ═══ AND THE FAILURE DIRECTIONS ARE NOT SYMMETRIC ═══
+ *
+ * Over-emitting silently ships a secret to a browser. Under-emitting throws a
+ * loud `ReferenceError` the adopter can see and report. So `"unknown"` is NOT
+ * consumed by the confidentiality gate — a position whose wiring cannot be
+ * determined fails CLOSED.
+ *
+ *  - `"client"`  the compiler emits client-executed code referencing this
+ *                position's source, under the extraction its `kind` prescribes.
+ *  - `"static"`  the compiler lowers this position to static output (SSR text or
+ *                an HTML attribute string). No client-executed code references it.
+ *  - `"unknown"` undetermined. Treated as NOT wired by any consumer that cares.
+ *
+ * Every `"client"` classification below is MEASURED against emitted output, not
+ * inferred — see the table above `bareAttrValueIsWired`.
+ */
+export type WiredClass = "client" | "static" | "unknown";
 
 /** One position on one AST node. */
 export interface ExprPosition {
@@ -92,8 +142,8 @@ export interface ExprPosition {
   /** Stable label naming the field this came from, e.g. `"attr.value.exprNode"`,
    *  `"each.inExprRaw"`, `"engine.stateChild.onTransition.ifExprRaw"`. Consumers
    *  MUST NOT branch on it to decide WHETHER to read a position (that is what
-   *  `kind` + `supports` are for); it exists for diagnostics and for policy that
-   *  is genuinely positional. */
+   *  `kind` + `supports` + `wired` are for); it exists for diagnostics and for
+   *  policy that is genuinely positional. */
   origin: string;
   /** The most precise span available for this position, or `null`. */
   span: Span | null;
@@ -102,30 +152,86 @@ export interface ExprPosition {
    *  markup-read edge for it. FALSE for positions that are credited for
    *  reader-accounting only. */
   render: boolean;
+  /** Whether the compiler emits CLIENT-EXECUTED code for this position. See
+   *  `WiredClass` — this is the field a confidentiality consumer gates on, and
+   *  `"unknown"` means NOT wired. */
+  wired: WiredClass;
 }
 
 type Rec = Record<string, unknown>;
 
-/** ExprNode-valued fields that carry USER identifier references, in one place.
- *  Union of the two consumers' historical lists: `dependency-graph.ts` had
- *  `exprNode/initExpr/condExpr/valueExpr/iterExpr/headerExpr`, the client-read
- *  walker additionally had `testExpr/defaultExpr/subjectExpr/targetExpr/returnExpr`.
- *  The drift ran in BOTH directions; the union is the convergence. */
+/**
+ * ExprNode-valued fields that carry USER identifier references, in one place.
+ *
+ * VERIFIED AGAINST THE AST, not carried. The retired client-read walker's list
+ * also contained `testExpr`, `subjectExpr`, `targetExpr` and `returnExpr`; a
+ * census of `compiler/src/types/ast.ts` declarations and `ast-builder.js`
+ * construction sites finds **zero of each** — the only matches anywhere in
+ * `compiler/src` are same-named LOCALS in `emit-expr` / `emit-server` /
+ * `emit-reactive-wiring` and a local function in `meta-checker`. They were
+ * phantoms, and a phantom is worse in this file than anywhere else: two passes
+ * are told to trust it as the single source of truth, so overstated coverage
+ * reads exactly like real coverage.
+ *
+ * Net of the census, the shared list is the dependency graph's historical six
+ * plus `defaultExpr` (3 type declarations / 9 construction sites — genuinely
+ * real, and genuinely missing from that side).
+ */
 export const EXPR_NODE_FIELDS: readonly string[] = [
   "exprNode", "initExpr", "condExpr", "valueExpr", "iterExpr", "headerExpr",
-  "testExpr", "defaultExpr", "subjectExpr", "targetExpr", "returnExpr",
+  "defaultExpr",
 ];
 
-/** Raw single-expression opener fields on the scrml STRUCTURAL elements.
- *  `<each>`/`<engine>`/`<match>` carry no `attrs` array — the block splitter
- *  raw-captures them and the AST builder rebuilds each opener from named
- *  regexes — so these never reach the attribute route. `ifRaw` is deliberately
- *  ABSENT: the `if=` render gate is enumerated from the PARSED `ifCond`, which
- *  is what gives it exactly the markup path's treatment (a raw scan would also
- *  read inside string literals). */
+/**
+ * Raw single-expression opener fields on the scrml STRUCTURAL elements.
+ * `<each>`/`<engine>`/`<match>` carry no `attrs` array — the block splitter
+ * raw-captures them and the AST builder rebuilds each opener from named regexes
+ * — so these never reach the attribute route.
+ *
+ * `ifRaw` is deliberately ABSENT: the `if=` render gate is enumerated from the
+ * PARSED `ifCond`, which is what gives it exactly the markup path's treatment (a
+ * raw scan would also read inside string literals).
+ *
+ * `defaultExprRaw` is also absent, and was a phantom for the same reason as the
+ * fields above: it exists only on `ast-builder.js`'s internal `scan` object, and
+ * the NODE carries the parsed `defaultExpr` instead.
+ */
 const STRUCTURAL_RAW_EXPR_FIELDS: readonly string[] = [
-  "inExprRaw", "ofExprRaw", "keyExprRaw", "onExprRaw", "defaultExprRaw",
+  "inExprRaw", "ofExprRaw", "keyExprRaw", "onExprRaw",
 ];
+
+/**
+ * MEASURED: for a BARE (unquoted, non-parenthesized) attribute value — the
+ * `variable-ref` shape — does the compiler wire a client reference, or lower it
+ * to a static HTML attribute string?
+ *
+ * Method: compile `<tag ATTR=MARKCONST>` where `MARKCONST` is a client-read
+ * export const, compile the same file WITHOUT that element, and diff the count of
+ * `MARKCONST` occurrences in the emitted client bundle. A positive delta is a
+ * wired reference; zero, with the name appearing in the emitted HTML instead, is
+ * static text.
+ *
+ *     WIRED   if=  ·  onclick=  oninput=  onsubmit=  onchange=  onkeydown=
+ *             onmouseover=   (every `on…` handler tested)
+ *     STATIC  class=  id=  title=  style=  data-*=  aria-*=  src=  href=
+ *             role=  name=  show=  key=  disabled=  checked=  readonly=
+ *             value=  placeholder=  hidden=
+ *
+ * `bind:*=` and `class:*=` reject a bare non-cell value upstream
+ * (`E-ATTR-010` / `E-ATTR-013`), so they cannot reach this predicate with one;
+ * they are deliberately NOT listed as wired, because the fail-closed direction
+ * for an unmeasured name is "not wired".
+ *
+ * The OTHER value shapes need no name test — all three are wired on every
+ * attribute name tested, including plain `class=` / `title=` / `data-x=`:
+ * a `call-ref` (`title=X.go()`), a parenthesized `expr` (`title=(X)`), and a
+ * `${…}`-bearing quoted string (`title="v-${X}"`).
+ */
+function bareAttrValueIsWired(attrName: unknown): boolean {
+  if (typeof attrName !== "string" || !attrName) return false;
+  const n = attrName.toLowerCase();
+  return n === "if" || /^on[a-z]/.test(n);
+}
 
 function isExprNode(v: unknown): boolean {
   return !!v && typeof v === "object" && typeof (v as Rec).kind === "string";
@@ -159,20 +265,20 @@ export function forEachExprPosition(
 
   const emit = (
     kind: ExprPositionKind, value: unknown, origin: string,
-    span: Span | null, render: boolean,
+    span: Span | null, render: boolean, wired: WiredClass,
   ): void => {
     if (!supports.has(kind)) return;
-    cb({ kind, value, origin, span, render });
+    cb({ kind, value, origin, span, render, wired });
   };
 
   /** Emit the FIRST alternate whose kind the consumer supports. */
   const emitGroup = (
     alternates: ReadonlyArray<{ kind: ExprPositionKind; value: unknown; origin: string }>,
-    span: Span | null, render: boolean,
+    span: Span | null, render: boolean, wired: WiredClass,
   ): void => {
     for (const alt of alternates) {
       if (!supports.has(alt.kind)) continue;
-      cb({ kind: alt.kind, value: alt.value, origin: alt.origin, span, render });
+      cb({ kind: alt.kind, value: alt.value, origin: alt.origin, span, render, wired });
       return;
     }
   };
@@ -205,10 +311,11 @@ export function forEachExprPosition(
       const a = attr as Rec;
       // A few AST shapes hang the ExprNode directly on the attr rather than on
       // `attr.value`; cheap to cover and it costs nothing when absent.
+      const wiredBare: WiredClass = bareAttrValueIsWired(a.name) ? "client" : "static";
       for (const f of EXPR_NODE_FIELDS) {
-        if (isExprNode(a[f])) emit("expr-node", a[f], `attr.${f}`, spanOf(a) ?? nodeSpan, attrRender);
+        if (isExprNode(a[f])) emit("expr-node", a[f], `attr.${f}`, spanOf(a) ?? nodeSpan, attrRender, wiredBare);
       }
-      forEachAttrValuePosition(a.value, "attr.value", spanOf(a) ?? nodeSpan, attrRender, supports, cb);
+      forEachAttrValuePosition(a.value, "attr.value", spanOf(a) ?? nodeSpan, attrRender, wiredBare, supports, cb);
     }
   }
 
@@ -226,12 +333,16 @@ export function forEachExprPosition(
   // the pre-convergence dependency graph credited it — with edges — from outside
   // its markup branch for exactly that reason.
   if (n.ifCond && typeof n.ifCond === "object") {
-    forEachAttrValuePosition(n.ifCond, "ifCond", nodeSpan, true, supports, cb);
+    // The gate's attribute name IS `if`, which the measured table says wires a
+    // bare value — so a bare `if=CONST` on a structural element is wired too.
+    forEachAttrValuePosition(n.ifCond, "ifCond", nodeSpan, true, "client", supports, cb);
   }
 
   // ---- 3. Structural opener raw expressions. ------------------------------
   for (const f of STRUCTURAL_RAW_EXPR_FIELDS) {
-    if (nonEmptyString(n[f])) emit("expr-source", n[f], f, nodeSpan, true);
+    // MEASURED: `<each in=…>` lowers to `const _items = <inExprRaw>` in the
+    // client bundle; the key/count/subject openers likewise.
+    if (nonEmptyString(n[f])) emit("expr-source", n[f], f, nodeSpan, true, "client");
   }
 
   // ---- 4. Raw BODY text of the raw-captured structural elements. ----------
@@ -239,10 +350,10 @@ export function forEachExprPosition(
   // in addition to (partially) walkable children. The raw capture is the ONLY
   // representation for shapes the child rebuild does not reach.
   if (n.kind === "each-block" && nonEmptyString(n.bodyRaw)) {
-    emit("block-source", n.bodyRaw, "each.bodyRaw", nodeSpan, true);
+    emit("markup-source", n.bodyRaw, "each.bodyRaw", nodeSpan, true, "client");
   }
   if (n.kind === "match-block" && nonEmptyString(n.armsRaw)) {
-    emit("block-source", n.armsRaw, "match.armsRaw", nodeSpan, true);
+    emit("markup-source", n.armsRaw, "match.armsRaw", nodeSpan, true, "client");
   }
 
   // ---- 5. `<engine>` internals. ------------------------------------------
@@ -253,7 +364,7 @@ export function forEachExprPosition(
   // node carries NO usable `exprNode` — only the raw `expr` string.
   if (n.kind === "bare-expr" && n._onMountEffect === true &&
       !isExprNode(n.exprNode) && nonEmptyString(n.expr)) {
-    emit("block-source", n.expr, "onMount.expr", nodeSpan, false);
+    emit("statement-source", n.expr, "onMount.expr", nodeSpan, false, "client");
   }
 }
 
@@ -268,22 +379,26 @@ function forEachAttrValuePosition(
   span: Span | null,
   /** Whether reads here are RENDER-context reads — see the call sites. */
   renderBase: boolean,
+  /** How a BARE (unquoted, non-parenthesized) value on THIS attribute is
+   *  lowered — the only shape whose wiring depends on the attribute NAME.
+   *  See `bareAttrValueIsWired` for the measured table. */
+  bareWired: WiredClass,
   supports: ReadonlySet<ExprPositionKind>,
   cb: (position: ExprPosition) => void,
 ): void {
   const emit = (
-    kind: ExprPositionKind, value: unknown, origin: string, render: boolean,
+    kind: ExprPositionKind, value: unknown, origin: string, render: boolean, wired: WiredClass,
   ): void => {
     if (!supports.has(kind)) return;
-    cb({ kind, value, origin, span, render });
+    cb({ kind, value, origin, span, render, wired });
   };
   const emitGroup = (
     alternates: ReadonlyArray<{ kind: ExprPositionKind; value: unknown; origin: string }>,
-    render: boolean,
+    render: boolean, wired: WiredClass,
   ): void => {
     for (const alt of alternates) {
       if (!supports.has(alt.kind)) continue;
-      cb({ kind: alt.kind, value: alt.value, origin: alt.origin, span, render });
+      cb({ kind: alt.kind, value: alt.value, origin: alt.origin, span, render, wired });
       return;
     }
   };
@@ -291,21 +406,29 @@ function forEachAttrValuePosition(
   // A bare unquoted attribute value arrives as a plain string. It is literal
   // text — only a `@`-sigil consumer has anything to find in it.
   if (typeof attrVal === "string") {
-    if (attrVal.length > 0) emit("literal-text", attrVal, `${originBase}(text)`, false);
+    if (attrVal.length > 0) emit("literal-text", attrVal, `${originBase}(text)`, false, "static");
     return;
   }
   if (!attrVal || typeof attrVal !== "object") return;
   const v = attrVal as Rec;
 
   // `title="box ${@theme}"` — `{kind:"string-literal", value}`. The `${}`
-  // interiors are the code; the rest is literal text.
+  // interiors are the code; the rest is literal text. MEASURED wired on every
+  // attribute name tested, `class`/`data-*`/`aria-*`/`src`/`style` included: the
+  // compiler lowers it to a `setAttribute` effect.
   if (v.kind === "string-literal" && nonEmptyString(v.value) && v.value.includes("${")) {
-    emit("template-text", v.value, `${originBase}.template`, false);
+    emit("template-text", v.value, `${originBase}.template`, false, "client");
   }
 
   // `attr=@x` / `bind:value=@x` / `attr=someName` — `{kind:"variable-ref", name,
   // exprNode}`. A `@`-sigil consumer wants the cell NAME; an identifier consumer
   // wants the parsed node (which is where a non-`@` binding read lives).
+  //
+  // THIS IS THE SHAPE WHOSE WIRING DEPENDS ON THE ATTRIBUTE NAME, and getting
+  // that wrong shipped a secret: `<p class=SECRET>hello</p>` lowers to the static
+  // HTML string `class="SECRET"` with no client wiring at all, yet the value was
+  // copied into the client bundle where the declaration was the ONLY line
+  // mentioning it. `bareWired` carries the measured answer.
   //
   // NOT gated on `kind !== "call-ref"`: a call-ref's `name` can itself be an
   // `@`-path (`onclick=@src.advance(.B)`), and that has always been a cell read.
@@ -322,12 +445,18 @@ function forEachAttrValuePosition(
     }
     // Last resort when the parse produced nothing: the raw identifier text.
     alternates.push({ kind: "expr-source", value: v.name, origin: `${originBase}.name(raw)` });
-    emitGroup(alternates, renderBase);
+    // A call-ref reaching here is the `@`-path form; a call-ref is wired on EVERY
+    // attribute name (measured), so it does not take the bare-value classification.
+    emitGroup(alternates, renderBase, v.kind === "call-ref" ? "client" : bareWired);
   }
 
   // `if=(@a && @b)` — `{kind:"expr", raw, refs, exprNode}`. `refs` is the AST
   // builder's pre-extracted `@cell` list; `exprNode` is the parse; `raw` is the
   // last-resort text. These are ALTERNATES — taking more than one double-counts.
+  //
+  // MEASURED wired on every attribute name tested, `title=(X)` / `class=(X)` /
+  // `data-x=(X)` included: the parenthesized form is an EXPRESSION attribute and
+  // the compiler emits an effect for it regardless of the attribute's name.
   {
     const alternates: Array<{ kind: ExprPositionKind; value: unknown; origin: string }> = [];
     if (Array.isArray(v.refs)) {
@@ -339,10 +468,12 @@ function forEachAttrValuePosition(
     if (nonEmptyString(v.raw)) {
       alternates.push({ kind: "expr-source", value: v.raw, origin: `${originBase}.raw` });
     }
-    if (alternates.length > 0) emitGroup(alternates, renderBase);
+    if (alternates.length > 0) emitGroup(alternates, renderBase, "client");
   }
 
   // `onclick=fn(@var, CONST)` — `{kind:"call-ref", name, args, argExprNodes?}`.
+  // MEASURED wired on every attribute name tested, `title=X.go()` /
+  // `class=X.go()` / `data-x=X.go()` included.
   if (v.kind === "call-ref") {
     // The CALLEE. `utils.handleClick` names ONE binding (`utils`) plus property
     // names; `handleClick` names one binding. Both consumers need the callee,
@@ -350,7 +481,7 @@ function forEachAttrValuePosition(
     // transitive reactive reads, the client seed marks the base binding — so it
     // is one position with one kind and two readings.
     if (nonEmptyString(v.name)) {
-      emit("callee-name", v.name, `${originBase}.callee`, false);
+      emit("callee-name", v.name, `${originBase}.callee`, false, "client");
     }
     // The ARGUMENTS. `argExprNodes` and the raw `args` strings are NOT
     // alternates: `argExprNodes` is `undefined` for the WHOLE call as soon as
@@ -359,12 +490,12 @@ function forEachAttrValuePosition(
     // both is safe — every consumer here is idempotent on a set.
     if (Array.isArray(v.argExprNodes)) {
       for (const en of v.argExprNodes as unknown[]) {
-        if (isExprNode(en)) emit("expr-node", en, `${originBase}.argExprNodes[]`, renderBase);
+        if (isExprNode(en)) emit("expr-node", en, `${originBase}.argExprNodes[]`, renderBase, "client");
       }
     }
     if (Array.isArray(v.args)) {
       for (const arg of v.args as unknown[]) {
-        if (nonEmptyString(arg)) emit("expr-source", arg, `${originBase}.args[]`, renderBase);
+        if (nonEmptyString(arg)) emit("expr-source", arg, `${originBase}.args[]`, renderBase, "client");
       }
     }
   }
@@ -382,10 +513,10 @@ function forEachEnginePosition(
   n: Rec,
   nodeSpan: Span | null,
   supports: ReadonlySet<ExprPositionKind>,
-  emit: (kind: ExprPositionKind, value: unknown, origin: string, span: Span | null, render: boolean) => void,
+  emit: (kind: ExprPositionKind, value: unknown, origin: string, span: Span | null, render: boolean, wired: WiredClass) => void,
   emitGroup: (
     alternates: ReadonlyArray<{ kind: ExprPositionKind; value: unknown; origin: string }>,
-    span: Span | null, render: boolean,
+    span: Span | null, render: boolean, wired: WiredClass,
   ) => void,
 ): void {
   // §51.0.J `derived=` — the modern EXPRESSION form. `derivedExprNode` is a
@@ -400,11 +531,15 @@ function forEachEnginePosition(
     if (nonEmptyString(n.derivedExprText)) {
       alternates.push({ kind: "expr-source", value: n.derivedExprText, origin: "engine.derivedExprText" });
     }
-    if (alternates.length > 0) emitGroup(alternates, nodeSpan, true);
+    // MEASURED: `derived=(X == 1 ? .A : .B)` lowers to
+    // `const __scrml_derived_v = ((X === 1 ? "A" : "B"));` in the client bundle.
+    if (alternates.length > 0) emitGroup(alternates, nodeSpan, true, "client");
   }
-  // §51.0.J `derived=match @src { … }` — the arm bodies, raw.
+  // §51.0.J `derived=match @src { … }` — the arm bodies. A projection body, not
+  // statements: its arm targets are VARIANTS, and the only code in it would be a
+  // `${…}` interior.
   if (nonEmptyString(n.inlineMatchBody)) {
-    emit("block-source", n.inlineMatchBody, "engine.inlineMatchBody", nodeSpan, true);
+    emit("markup-source", n.inlineMatchBody, "engine.inlineMatchBody", nodeSpan, true, "client");
   }
 
   const record = n._record as Rec | undefined;
@@ -412,13 +547,13 @@ function forEachEnginePosition(
 
   // §51.0.E `initial=@cell` and §52 `server=@source` hydration reads.
   if (nonEmptyString(meta?.initialCell)) {
-    emit("cell-name", meta!.initialCell, "engine.initialCell", nodeSpan, true);
+    emit("cell-name", meta!.initialCell, "engine.initialCell", nodeSpan, true, "client");
   }
   if (nonEmptyString(meta?.serverSource)) {
     // The ROOT segment of a dotted source path is the subscribed cell
     // (`@driver.current_status` → `driver`).
     const root = (meta!.serverSource as string).split(".")[0];
-    if (root) emit("cell-name", root, "engine.serverSource", nodeSpan, true);
+    if (root) emit("cell-name", root, "engine.serverSource", nodeSpan, true, "client");
   }
 
   const stateChildren = meta?.stateChildren;
@@ -426,20 +561,33 @@ function forEachEnginePosition(
     for (const scRaw of stateChildren as unknown[]) {
       if (!scRaw || typeof scRaw !== "object") continue;
       const sc = scRaw as Rec;
+      // A state-child body is EITHER `:`-shorthand (client-executed statements)
+      // OR a bare body (a rendered markup body whose only code is its `${…}`
+      // interiors). The parser already recorded which, so this is DECLARED from
+      // the AST rather than guessed from the text — the guess is what turned
+      // `<Title rule=.Playing>SECRET screen</>` into a client "read" of SECRET.
       if (nonEmptyString(sc.bodyRaw)) {
-        emit("block-source", sc.bodyRaw, "engine.stateChild.bodyRaw", nodeSpan, true);
+        emit(
+          sc.isColonShorthand === true ? "statement-source" : "markup-source",
+          sc.bodyRaw, "engine.stateChild.bodyRaw", nodeSpan, true, "client",
+        );
       }
       if (Array.isArray(sc.onTransitionElements)) {
         for (const otRaw of sc.onTransitionElements as unknown[]) {
           if (!otRaw || typeof otRaw !== "object") continue;
           const ot = otRaw as Rec;
           if (nonEmptyString(ot.bodyRaw)) {
-            emit("block-source", ot.bodyRaw, "engine.stateChild.onTransition.bodyRaw", nodeSpan, true);
+            emit(
+              ot.isColonShorthand === true ? "statement-source" : "markup-source",
+              ot.bodyRaw, "engine.stateChild.onTransition.bodyRaw", nodeSpan, true, "client",
+            );
           }
           // §51.0.H `<onTransition if=expr>` — the transition GUARD. Captured
           // verbatim (it may carry surrounding parens or a `${…}` wrapper).
           if (nonEmptyString(ot.ifExprRaw)) {
-            emit("expr-source", unwrapGuardRaw(ot.ifExprRaw), "engine.stateChild.onTransition.ifExprRaw", nodeSpan, true);
+            // MEASURED: the guard lowers to `if (X === 1) { … }` in the client
+            // engine substrate.
+            emit("expr-source", unwrapGuardRaw(ot.ifExprRaw), "engine.stateChild.onTransition.ifExprRaw", nodeSpan, true, "client");
           }
         }
       }
@@ -449,7 +597,7 @@ function forEachEnginePosition(
           if (!otoRaw || typeof otoRaw !== "object") continue;
           const after = (otoRaw as Rec).after;
           if (nonEmptyString(after)) {
-            emit("template-text", after, "engine.stateChild.onTimeout.after", nodeSpan, true);
+            emit("template-text", after, "engine.stateChild.onTimeout.after", nodeSpan, true, "client");
           }
         }
       }
@@ -459,13 +607,13 @@ function forEachEnginePosition(
     // both would double-visit every state-child body. When the symbol-table
     // parse has not run (or produced nothing), the raw body is the only source
     // there is.
-    emit("block-source", n.rulesRaw, "engine.rulesRaw", nodeSpan, true);
+    emit("markup-source", n.rulesRaw, "engine.rulesRaw", nodeSpan, true, "client");
   }
 
   // §51.0.R `<onIdle after=${expr}unit>` — the engine-wide watchdog.
   const idle = meta?.idleWatchdog as Rec | null | undefined;
   if (idle && nonEmptyString(idle.after)) {
-    emit("template-text", idle.after, "engine.idleWatchdog.after", nodeSpan, true);
+    emit("template-text", idle.after, "engine.idleWatchdog.after", nodeSpan, true, "client");
   }
 }
 
