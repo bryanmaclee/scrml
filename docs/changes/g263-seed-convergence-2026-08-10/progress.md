@@ -525,3 +525,37 @@ clobbers the PA's session version. Cherry-pick the two entry BLOCKS:
 `g-263-lift-body-invisible-to-the-client-read-seed-node-traversal` and
 `g-263-match-expr-rawarms-is-an-unparsed-string-inside-an-exprnode`. No round-6 commit touches
 that file.
+
+## R6 verification (final)
+
+- **Corpus emit differential, branch BASE `8ad13b84` vs HEAD** — the comparison that isolates THIS
+  branch's delta: 1904 sources · 7375 artifacts · **0 content diffs** · 0 compile-failure delta ·
+  0 syntax delta (both goggles) · 0 artifact-set delta · bare-server-fn delta 0. Round 6 adds ZERO
+  corpus delta on top of round 5; the only diagnostic movement is still the 3 E-DG-002
+  false-positive removals from round 5's `bodyExpr` entry.
+- **Full suite** 30197 pass / 216 skip / 1 todo / 49 fail. Failure NAME SET vs base, both measured
+  in trees with a real project root AND the gitignored build dirs symlinked:
+  **49 = 49, ZERO new, ZERO gone.**
+- **R26 empirical**, `gauntlet-r25/dev-{1..4}.scrml` base vs head: artifacts BYTE-IDENTICAL
+  (`diff -r` exit 0), diagnostics identical path-normalised.
+- **F2 matrix** 14 rows × {declaration, EXECUTE as classic script} — all pass; dropping the
+  escape-hatch branch turns exactly the four regressed shapes RED (8 assertions).
+- **Per-field bite** (conformance failures when the entry is deleted): resultExpr 2 · bodyExpr 1 ·
+  callbackExpr 1 · fileExpr 1 · urlExpr 1 · the `when-message` prune 1.
+
+## R6 — `origin/main` MOVED MID-DISPATCH. READ BEFORE LANDING.
+
+`origin/main` advanced `c5499773` -> **`1bfa8544`** during this dispatch (S339-peter, PRs
+#503 #506 #508). A main-vs-head corpus capture therefore reports main's NEWER content as
+"differences" — e.g. `sql-in-for-loop-001.scrml` shows as "newly PASSING" because
+`E-EACH-BODY-DECL-UNSUPPORTED` was ADDED to `emit-each.ts` on main after this branch was cut, and
+`git diff origin/main..HEAD` shows that code being REMOVED. That is S67 staleness, not a
+regression: **verified by compiling the file at three points on this branch** (round-5 tip,
+round-6 tip, and with `expr-positions.ts` rolled back) — it never fired here, and the diagnostic
+does not exist in this branch's `emit-each.ts` at all.
+
+**File-set intersection between main's new work and mine is EXACTLY ONE FILE: `docs/known-gaps.md`.**
+Main changed `emit-each.ts`, `emit-server.ts`, `emit-ssr-render.ts`, `emit-tool.ts`, SPEC, FACTS
+and hand-off docs — all disjoint from my eight code/test files, so a file-delta of those eight is
+safe. `docs/known-gaps.md` is contended on BOTH sides now (main moved it too): cherry-pick the two
+entry blocks, never checkout the file.
