@@ -23,6 +23,14 @@
  * `../expr-positions.ts`, which the dependency graph consumes as well; a position
  * added there is seen by both, permanently.
  *
+ * THE TABLE SHARES WHICH FIELDS, NOT WHICH NODES. Recursion is still this file's
+ * (see `visit`), and it descends only ARRAY-valued children — while
+ * `dependency-graph.ts` carries an explicit OBJECT descent for `lift-expr`, whose
+ * `.expr` is a `LiftTarget` union rather than an array. A `lift` body is
+ * therefore invisible HERE no matter how well the table describes it, and that
+ * is three live cross-file `ReferenceError`s on this ref and on `main` alike:
+ * `g-263-lift-body-invisible-to-the-client-read-seed-node-traversal`.
+ *
  * ═══ §14.8 — THE INVARIANT THIS FILE EXISTS TO NOT BREAK ═══
  *
  * A SERVER-ONLY value SHALL NEVER be pulled into a client bundle. Everything

@@ -21,6 +21,25 @@
  * That is the converge-not-enumerate signal, and this file is the convergence:
  * ONE table, two consumers. A position added here is seen by both, permanently.
  *
+ * ═══ WHAT THIS TABLE DOES **NOT** CONVERGE, AND SAYING SO IS THE POINT ═══
+ *
+ * It shares WHICH FIELDS, not WHICH NODES. Recursion into child nodes stays with
+ * each consumer (see below), and the two consumers still descend DIFFERENTLY:
+ * `client-read-seed.ts` descends only ARRAY-valued fields, while
+ * `dependency-graph.ts` carries an explicit OBJECT descent for `lift-expr` —
+ * whose `.expr` is a `LiftTarget` union, not an array.
+ *
+ * So a node this table describes perfectly is still invisible if no consumer
+ * walks to it. MEASURED, on this ref AND on `main` — three cross-file shapes,
+ * each a live browser `ReferenceError` at exit 0 with no diagnostic:
+ *
+ *     ${ lift <span>${NEEDED}</span> }        ${ lift NEEDED }
+ *     ${ lift <span title=NEEDED.go()>x</span> }
+ *
+ * Tracked as `g-263-lift-body-invisible-to-the-client-read-seed-node-traversal`
+ * in `docs/known-gaps.md`. Do not read the drift as fully closed: the FIELD half
+ * is closed and gated (`EXPR_NODE_FIELDS` §8), the NODE half is not.
+ *
  * WHAT A CONSUMER MUST IMPLEMENT
  * ------------------------------
  * `forEachExprPosition(node, supports, cb)` enumerates the positions of ONE node.

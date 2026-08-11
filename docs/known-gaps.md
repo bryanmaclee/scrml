@@ -31,10 +31,25 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 27 |
-| MED | 122 |
+| MED | 123 |
 | LOW | 58 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
+
+### g-263-lift-body-invisible-to-the-client-read-seed-node-traversal — the #263 client-read seed descends only ARRAY-valued child fields, so every read inside a `lift` body is invisible to it — a directly-imported const read there is a browser `ReferenceError` at exit 0 — `NEW S338-bryan (surfaced by the g-263 round-5 adversarial pass; PA-VERIFIED by compiling three shapes on the branch AND on main); MED; open`
+<!-- @gap id=g-263-lift-body-invisible-to-the-client-read-seed-node-traversal sev=MED status=open locus=compiler/src/codegen/client-read-seed.ts:377 prov=rationale:the-seeds-visit-recursion-iterates-Object-keys-and-descends-only-Array-isArray-values-while-a-lift-exprs-expr-field-is-a-LiftTarget-union-object-so-the-lifted-subtree-is-never-visited-and-the-shared-position-table-cannot-help-because-it-shares-WHICH-FIELDS-not-WHICH-NODES -->
+
+`codegen/client-read-seed.ts`'s `visit` recursion descends children by iterating `Object.keys(node)` and recursing **only into `Array.isArray(val)`** values. A `lift-expr` node's `.expr` is a `LiftTarget` union — `{ kind: "markup"; node: ASTNode }` or `{ kind: "expr"; expr: string; exprNode? }` — an **object**, not an array. So the lifted subtree is never visited, and no amount of position coverage in `compiler/src/expr-positions.ts` reaches it: **that table shares WHICH FIELDS a node carries, not WHICH NODES a consumer walks to.** `dependency-graph.ts` does not have this hole — it carries an explicit object descent for `lift-expr` at `:2912`, which is precisely the asymmetry the convergence did not close.
+
+MEASURED S338, on the g-263 branch AND on `main` (pre-existing, NOT a regression) — three cross-file shapes, each compiling clean at exit 0 with zero diagnostics, each emitting a reference to a const that no `.client.js` declares:
+
+```
+${ lift <span>${NEEDED}</span> }              importer references NEEDED · models.client.js does not declare it
+${ lift NEEDED }                              same
+${ lift <span title=NEEDED.go()>x</span> }    same
+```
+
+Deliberately NOT fixed in the round-5 arc: the fix is a node-TRAVERSAL unification (either teaching the seed the same object descent the dependency graph has, or hoisting recursion into the shared table so both consumers walk one topology), and unifying traversal is a strictly larger change than unifying the field list — it moves what each consumer PRUNES, and the seed's prunes are the §14.8 confidentiality boundary (`fnNodeIsServerBoundary`, `state-decl isServer`, `isServerOnlyNode`). Widening the walk without re-deriving those prunes is the leak direction. The docblocks in both files now say the drift is closed on the FIELD half only.
 
 ### g-request-is-some-in-each-loop-attr-misroute — a `<#request>` is-some inside a per-item `<each>`/`<for>` body attribute mis-routes to the §36 input-state registry (SILENT MISCOMPILE → runtime crash) — `NEW S333-peter (S239 round-3 review; sibling of g-request-is-some-in-value-bool-class-attr surfaced while narrowing that fix); MED; open`
 <!-- @gap id=g-request-is-some-in-each-loop-attr-misroute sev=MED status=open locus=compiler/src/codegen/emit-each.ts:1893 prov=rationale:the-per-item-renderTemplateAttrToJs-lowering-lowerEachExpr-rewriteIterValueExpr-does-not-thread-requestIds-so-a-request-ref-in-an-each-body-attribute-routes-to-_scrml_input_state_registry-which-a-request-never-populates -->
