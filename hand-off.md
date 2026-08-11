@@ -122,15 +122,25 @@ vs the real 6) and missed `:27037`. Second-order instance, same session.
   failure COUNT from this suite is not a measurement. Name-set diffs only.** This explains every baseline
   disagreement this session; three of us separately blamed environment drift.
 - **A differential reading only `result.errors` is blind to `E-DG-002`**, which lives in `result.warnings`.
-- **⚠ THE CLOUD `gate` ITSELF DEGRADES UNDER PARALLEL LOAD — witnessed on this very wrap PR.** A
-  **docs-only** PR (6 files, ZERO under `compiler/`/`conformance/`/`stdlib/`) failed the gate **TWICE
-  CONCURRENTLY** on a single test — `each-multi-root §5 — Tier-0 multi-lift EXECUTES` — while `main`
-  was green on the same tree content and the test passed **20/20 locally on the exact branch**. Both
-  runs were racing S340-peter's #512 run: three full suites on shared runners. **Re-run with no change:
-  both green.** Flake confirmed by execution, not by argument.
-  **The pattern, and it is the fourth instrument this session:** phantom compile failures at
+- **⚠ BOTH CLOUD CHECKS — `gate` AND `tracking` — DEGRADE UNDER PARALLEL LOAD. Witnessed on this very
+  wrap PR, separately.** A **docs-only** PR (7 files, ZERO under `compiler/`/`conformance/`/`stdlib/`)
+  failed the gate **TWICE CONCURRENTLY** on a single test — `each-multi-root §5 — Tier-0 multi-lift
+  EXECUTES` — while `main` was green on the same tree content and the test passed **20/20 locally on
+  the exact branch**. Both runs were racing S340-peter's #512 run: three full suites on shared runners.
+  **Re-run with no change: both green.**
+  **Then `tracking` went red on the SAME PR** — 7 failures, all in
+  `compiler/tests/integration/serve-target-tool-r26.test.js` (the booted-server harness). Same three
+  checks: `main`'s tracking GREEN on both recent runs · the file **10/10 locally on the exact branch** ·
+  zero code paths in the diff. **Re-run: green.** ⚠ **`tracking` IS NOT A REQUIRED CHECK** — branch
+  protection requires only `gate`, so GitHub offered the merge with it red. **That is precisely the S302
+  shape: a 38-failure native-parity regression passed pre-commit AND the only required check, surfacing
+  solely as a red `tracking` that "routinely and correctly read as the documented baseline."** The
+  serve-r26 file has its own history — #134 rebuilt it around `Server.fetch` with no socket because it
+  was blocking commits (bryan: *fix it, don't `--no-verify`*); it still boots a server, so it stays
+  timing-sensitive under contention.
+  **The pattern, and it is now FIVE instrument-events this session:** phantom compile failures at
   concurrency 10 · 1014 phantom content diffs from a project-root divergence · `bun run test` giving
-  53/49/51 on ONE tree · and now the cloud gate. **The common factor is not any single tool — this
+  53/49/51 on ONE tree · and now BOTH cloud checks, independently. **The common factor is not any single tool — this
   repo's verification surface degrades under concurrent load, and in every instance the person who hit
   it first assumed their own change was at fault (twice, that was me).** The cost is not the lost time;
   it is that it trains "must be flake" as the first explanation — which is the exact reflex that let a
